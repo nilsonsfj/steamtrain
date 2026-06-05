@@ -8,6 +8,10 @@ export interface AgentRunOptions {
   cwd?: string;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Extra env vars merged over `process.env` for this run (per-step targets). */
+  env?: Record<string, string>;
+  /** Extra CLI flags appended to the agent's own args, before the prompt. */
+  extraArgs?: string[];
 }
 
 /**
@@ -43,6 +47,7 @@ export async function* runAgentProcess(params: AgentProcessParams): AsyncGenerat
     binary,
     args,
     cwd: opts.cwd,
+    env: opts.env,
     timeoutMs: opts.timeoutMs,
     signal: opts.signal,
   };

@@ -35,7 +35,10 @@ You'll see a steam-train banner, then a preflight **doctor** panel checking that
  Enter dispatch · Tab switch task · Esc cancel · Ctrl+C quit
 ```
 
-**Keys:** `Enter` dispatch · `Tab` cycle task type · `Esc` cancel a running task · `Ctrl+C` quit.
+**Keys:** `Enter` dispatch · `Tab` cycle mode · `Esc` cancel a running task · `Ctrl+C` quit.
+
+`Tab` cycles four modes: `plan`, `implement`, `review`, and **`workflow`** — the
+last launches multi-agent workflows (see [Workflows](#workflows)).
 
 ### Build a standalone binary
 
@@ -64,7 +67,9 @@ src/
 ├─ config/        Task-type → { agent, model } map (+ steamtrain.json overrides)
 ├─ doctor/        Preflight: resolve binary, run --version, classify readiness
 ├─ orchestrator/  Routes a task type to the right adapter+model; gates on health
-└─ tui/           Ink components (banner, status bar, event stream, selector, input)
+├─ workflow/      Declarative multi-agent workflows: spec + zod schema, a bounded-
+│                 parallel engine, and bundled specs (the layer above orchestrator)
+└─ tui/           Ink components (banner, status bar, streams, workflow view, input)
 ```
 
 ### The normalization layer
@@ -119,7 +124,9 @@ subset with a `steamtrain.json` in the working directory:
     "review":    { "agent": "claude",   "model": "claude-opus-4-8" }
   },
   "binaries": { "opencode": "/opt/homebrew/bin/opencode" }, // optional path overrides
-  "timeoutMs": 300000                                       // per-task kill timeout
+  "timeoutMs": 300000,                                      // per-task (and per-step) kill timeout
+  "maxConcurrency": 3                                       // parallel steps per workflow phase (≤ 16)
+  // "workflows": { … }                                     // see “Workflows” below
 }
 ```
 
@@ -131,6 +138,76 @@ subset with a `steamtrain.json` in the working directory:
 
 A missing/invalid `steamtrain.json` falls back to built-in defaults (with a
 warning in the stream); only the keys you specify are overridden.
+
+---
+
+## Workflows
+
+A **workflow** fans work out across many agent runs instead of one — steamtrain's
+declarative take on Claude Code's *dynamic workflows*. A workflow is a sequence of
+**phases** that run in order; the **steps** inside a phase run in **parallel**, and
+each step picks its own **agent, model, and target** (working directory + optional
+env/flags). Earlier steps' outputs can flow into later prompts, giving you a
+fan-out → cross-check → synthesize run in one shot.
+
+Press **Tab** to the `workflow` mode, pick one with `↑/↓`, type the input, and
+**Enter** to launch. The phase → step tree streams live; `↑/↓` drills into a
+step's output. `Esc` cancels a run (and, once stopped, backs out to the picker).
+Re-running **resumes** — completed steps replay from an in-session cache instead
+of running again.
+
+### Bundled workflows
+
+| name         | what it does                                                                                                                         |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `multi-plan` | Drafts a plan from two independent angles (claude + opencode), has an opus reviewer critique both, then synthesizes the strongest merged plan. |
+| `bug-hunt`   | Sweeps a scope for logic / error-handling / security bugs in parallel across three models, cross-checks to drop false positives, then reports the verified findings. |
+
+### Defining your own
+
+Add a `workflows` map (keyed by launch name) to `steamtrain.json`. Your workflows
+merge over the bundled ones; a same-named entry overrides a bundled one.
+
+```jsonc
+{
+  "maxConcurrency": 3,                 // parallel steps per phase (≤ 16, default 3)
+  "workflows": {
+    "audit": {
+      "description": "Audit each service for missing auth checks.",
+      "phases": [
+        {
+          "id": "scan",
+          "title": "Scan services in parallel",
+          "steps": [
+            { "id": "api", "agent": "claude",   "model": "claude-sonnet-4-6",
+              "cwd": "../api", "prompt": "Audit {{input}} in this repo" },
+            { "id": "web", "agent": "opencode", "model": "openai/gpt-5.4-mini",
+              "cwd": "../web", "prompt": "Audit {{input}} in this repo" }
+          ]
+        },
+        {
+          "id": "report",
+          "title": "Combine findings",
+          "steps": [
+            { "id": "report", "agent": "claude", "model": "claude-opus-4-8",
+              "dependsOn": ["api", "web"],
+              "prompt": "Merge these findings:\n{{steps.api.output}}\n{{steps.web.output}}" }
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+- **Step fields:** `id` (unique), `agent` (`claude` | `opencode`), `model`, `prompt`,
+  plus optional `cwd` (the **target** dir — relative paths resolve against the
+  launch cwd), `env` (extra vars), `extraArgs` (extra CLI flags), and `dependsOn`
+  (step ids in *earlier* phases whose outputs the prompt uses).
+- **Prompt templates:** `{{input}}` / `{{args}}` expand to what you typed;
+  `{{steps.<id>.output}}` expands to an earlier step's result.
+- **Limits:** ≤ 16 parallel steps per phase and 1000 steps per run. Every step is a
+  full agent run, so costs add up — scope the input small to gauge spend first.
 
 ---
 
@@ -173,6 +250,11 @@ The two highest-risk areas are covered first:
 - **`tests/claude-adapter.test.ts`** / **`tests/opencode-adapter.test.ts`** —
   the raw→normalized mapping for each CLI, using real sample event lines
   (including the actual `claude` stream-json and the actual `opencode` error event).
+- **`tests/workflow-*.test.ts`** — the workflow layer: the bounded-concurrency
+  pool + channel, prompt templating, spec/dependency validation, the reducer that
+  builds the live tree, and the engine end-to-end (phase ordering, parallel
+  fan-out, cross-phase templating, failures, abort, and in-session resume — all
+  against an injected fake adapter, no real CLIs).
 
 ---
 

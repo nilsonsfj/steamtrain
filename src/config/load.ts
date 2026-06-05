@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { WorkflowSpec } from "../workflow/types";
 import { DEFAULT_CONFIG } from "./defaults";
 import { type ConfigFile, type SteamtrainConfig, type TaskType, configFileSchema } from "./types";
 
@@ -44,7 +45,7 @@ export function loadConfig(cwd: string = process.cwd()): LoadedConfig {
 }
 
 export function mergeConfig(base: SteamtrainConfig, override: ConfigFile): SteamtrainConfig {
-  return {
+  const merged: SteamtrainConfig = {
     tasks: {
       plan: override.tasks?.plan ?? base.tasks.plan,
       implement: override.tasks?.implement ?? base.tasks.implement,
@@ -52,7 +53,25 @@ export function mergeConfig(base: SteamtrainConfig, override: ConfigFile): Steam
     },
     binaries: { ...base.binaries, ...override.binaries },
     timeoutMs: override.timeoutMs ?? base.timeoutMs,
+    maxConcurrency: override.maxConcurrency ?? base.maxConcurrency,
   };
+
+  const workflows = mergeWorkflows(base.workflows, override.workflows);
+  if (workflows) merged.workflows = workflows;
+  return merged;
+}
+
+/** Merge user workflows over base, injecting each map key as the spec `name`. */
+function mergeWorkflows(
+  base: Record<string, WorkflowSpec> | undefined,
+  override: ConfigFile["workflows"],
+): Record<string, WorkflowSpec> | undefined {
+  if (!override) return base;
+  const out: Record<string, WorkflowSpec> = { ...base };
+  for (const [name, spec] of Object.entries(override)) {
+    out[name] = { ...spec, name };
+  }
+  return out;
 }
 
 /** Resolve a task type to its `{ agent, model }`. */

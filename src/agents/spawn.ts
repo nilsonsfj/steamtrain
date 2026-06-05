@@ -8,6 +8,8 @@ export interface ProcessRunOptions {
   binary: string;
   args: string[];
   cwd?: string;
+  /** Extra env vars merged over `process.env`. */
+  env?: Record<string, string>;
   /** Kill the process if it runs longer than this (ms). 0/undefined = no limit. */
   timeoutMs?: number;
   /** External cancellation. Aborting kills the process. */
@@ -61,7 +63,7 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
   try {
     child = spawn(opts.binary, opts.args, {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env },
+      env: { ...process.env, ...opts.env },
       cwd: opts.cwd,
     });
   } catch (err) {

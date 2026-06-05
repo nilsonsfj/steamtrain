@@ -18,4 +18,6 @@ export const DEFAULT_CONFIG: SteamtrainConfig = {
     review: { agent: "claude", model: "claude-opus-4-8" },
   },
   timeoutMs: 300_000,
+  // Heavy CLI subprocesses, so default modest; configurable up to MAX_CONCURRENCY.
+  maxConcurrency: 3,
 };

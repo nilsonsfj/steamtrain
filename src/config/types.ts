@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { AgentId } from "../types/events";
+import { MAX_CONCURRENCY, type WorkflowSpec, workflowSpecSchema } from "../workflow/types";
 
 /** The kinds of work the orchestrator can route. */
 export const TASK_TYPES = ["plan", "implement", "review"] as const;
@@ -17,8 +18,12 @@ export interface SteamtrainConfig {
   tasks: TaskConfigMap;
   /** Optional per-agent binary path/name overrides. */
   binaries?: Partial<Record<AgentId, string>>;
-  /** Per-task wall-clock timeout in ms. */
+  /** Per-task (and per-step) wall-clock timeout in ms. */
   timeoutMs?: number;
+  /** User-defined workflows, keyed by launch name. Merged over the bundled ones. */
+  workflows?: Record<string, WorkflowSpec>;
+  /** Max steps run in parallel within a workflow phase (clamped to MAX_CONCURRENCY). */
+  maxConcurrency?: number;
 }
 
 const agentId = z.enum(["claude", "opencode"]);
@@ -40,6 +45,8 @@ export const configFileSchema = z
       .partial()
       .optional(),
     timeoutMs: z.number().positive().optional(),
+    workflows: z.record(workflowSpecSchema).optional(),
+    maxConcurrency: z.number().int().positive().max(MAX_CONCURRENCY).optional(),
   })
   .strict();
 

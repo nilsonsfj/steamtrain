@@ -1,15 +1,20 @@
 import { Box, Text, useApp, useInput } from "ink";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { type SteamtrainConfig, TASK_TYPES, type TaskType } from "../config";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import type { SteamtrainConfig } from "../config";
 import { type DoctorResult, runDoctor } from "../doctor";
 import { Orchestrator } from "../orchestrator";
+import type { StepResult } from "../workflow";
 import { EventStream } from "./EventStream";
 import { PromptInput } from "./PromptInput";
 import { StatusBar } from "./StatusBar";
 import { TaskSelector } from "./TaskSelector";
+import { WorkflowPicker } from "./WorkflowPicker";
+import { WorkflowView } from "./WorkflowView";
 import { Banner } from "./banner";
+import { type Mode, nextMode } from "./modes";
 import { initialTranscript, transcriptReducer } from "./transcript";
 import { useTerminalSize } from "./useTerminalSize";
+import { initialWorkflowState, workflowReducer } from "./workflow-state";
 
 interface AppProps {
   config: SteamtrainConfig;
@@ -26,14 +31,27 @@ export function App({ config, configSource, configWarning }: AppProps) {
 
   const [phase, setPhase] = useState<Phase>("banner");
   const [doctor, setDoctor] = useState<DoctorResult[] | null>(null);
-  const [taskType, setTaskType] = useState<TaskType>("plan");
+  const [mode, setMode] = useState<Mode>("plan");
   const [value, setValue] = useState("");
   const [running, setRunning] = useState(false);
   const [transcript, dispatch] = useReducer(transcriptReducer, initialTranscript);
 
+  // Workflow mode state.
+  const [wf, wfDispatch] = useReducer(workflowReducer, initialWorkflowState);
+  const [workflowIndex, setWorkflowIndex] = useState(0);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [wfNotice, setWfNotice] = useState<string | null>(null);
+  const activeWorkflowRef = useRef<string | undefined>(undefined);
+  const workflowCacheRef = useRef<Map<string, StepResult>>(new Map());
+
   const orchestratorRef = useRef<Orchestrator | null>(null);
   if (!orchestratorRef.current) orchestratorRef.current = new Orchestrator(config, []);
   const orchestrator = orchestratorRef.current;
+
+  const workflowEntries = useMemo(
+    () => Object.entries(orchestrator.listWorkflows()).map(([name, spec]) => ({ name, spec })),
+    [orchestrator],
+  );
 
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
@@ -72,19 +90,72 @@ export function App({ config, configSource, configWarning }: AppProps) {
     };
   }, [config, orchestrator]);
 
+  const totalWfSteps = wf.phases.reduce((n, p) => n + p.steps.length, 0);
+
+  const runWorkflow = useCallback(
+    (name: string, input: string) => {
+      const check = orchestrator.canDispatchWorkflow(name);
+      if (!check.ok) {
+        setWfNotice(`cannot run '${name}': ${check.reason}`);
+        return;
+      }
+      setWfNotice(null);
+      activeWorkflowRef.current = name;
+      setRunning(true);
+      const ac = new AbortController();
+      abortRef.current = ac;
+
+      void (async () => {
+        try {
+          for await (const event of orchestrator.runWorkflow(
+            name,
+            input,
+            ac.signal,
+            workflowCacheRef.current,
+          )) {
+            if (!mountedRef.current) return;
+            wfDispatch({ type: "event", event });
+          }
+        } catch (err) {
+          if (mountedRef.current) setWfNotice(`run failed: ${message(err)}`);
+        } finally {
+          if (mountedRef.current) setRunning(false);
+          abortRef.current = null;
+        }
+      })();
+    },
+    [orchestrator],
+  );
+
   const handleSubmit = useCallback(
     (raw: string) => {
       const prompt = raw.trim();
       if (running || prompt.length === 0) return;
-      setValue("");
 
-      const tc = config.tasks[taskType];
-      const check = orchestrator.canDispatch(taskType);
+      if (mode === "workflow") {
+        // Resume the active run if one exists; otherwise start the picked one fresh.
+        if (wf.started && activeWorkflowRef.current) {
+          runWorkflow(activeWorkflowRef.current, prompt);
+          return;
+        }
+        const entry = workflowEntries[workflowIndex];
+        if (!entry) return;
+        workflowCacheRef.current = new Map();
+        wfDispatch({ type: "reset" });
+        setStepIndex(0);
+        runWorkflow(entry.name, prompt);
+        return;
+      }
+
+      // Task mode — `mode` is a TaskType here.
+      setValue("");
+      const tc = config.tasks[mode];
+      const check = orchestrator.canDispatch(mode);
       if (!check.ok) {
         dispatch({
           type: "notice",
           level: "error",
-          text: `cannot dispatch '${taskType}': ${check.reason}`,
+          text: `cannot dispatch '${mode}': ${check.reason}`,
         });
         return;
       }
@@ -92,7 +163,7 @@ export function App({ config, configSource, configWarning }: AppProps) {
       dispatch({
         type: "notice",
         level: "info",
-        text: `dispatch '${taskType}' → ${tc.agent} / ${tc.model}`,
+        text: `dispatch '${mode}' → ${tc.agent} / ${tc.model}`,
       });
       setRunning(true);
       const ac = new AbortController();
@@ -100,7 +171,7 @@ export function App({ config, configSource, configWarning }: AppProps) {
 
       void (async () => {
         try {
-          for await (const event of orchestrator.run(taskType, prompt, ac.signal)) {
+          for await (const event of orchestrator.run(mode, prompt, ac.signal)) {
             if (!mountedRef.current) return;
             dispatch({ type: "event", event });
           }
@@ -114,7 +185,7 @@ export function App({ config, configSource, configWarning }: AppProps) {
         }
       })();
     },
-    [config, orchestrator, running, taskType],
+    [config, orchestrator, running, mode, wf.started, workflowEntries, workflowIndex, runWorkflow],
   );
 
   useInput((input, key) => {
@@ -123,12 +194,35 @@ export function App({ config, configSource, configWarning }: AppProps) {
       exit();
       return;
     }
-    if (key.escape && running) {
-      abortRef.current?.abort();
+    if (key.escape) {
+      if (running) {
+        abortRef.current?.abort();
+        return;
+      }
+      // Not running: in workflow mode, back out of a finished run to the picker.
+      if (mode === "workflow" && wf.started) {
+        wfDispatch({ type: "reset" });
+        setStepIndex(0);
+        activeWorkflowRef.current = undefined;
+        workflowCacheRef.current = new Map();
+        setWfNotice(null);
+      }
       return;
     }
     if (key.tab && !running) {
-      setTaskType((prev) => nextTaskType(prev));
+      setMode((prev) => nextMode(prev));
+      return;
+    }
+    if (mode === "workflow") {
+      if (key.upArrow) {
+        if (wf.started) setStepIndex((i) => Math.max(0, i - 1));
+        else setWorkflowIndex((i) => Math.max(0, i - 1));
+        return;
+      }
+      if (key.downArrow) {
+        if (wf.started) setStepIndex((i) => Math.min(Math.max(0, totalWfSteps - 1), i + 1));
+        else setWorkflowIndex((i) => Math.min(workflowEntries.length - 1, i + 1));
+      }
     }
   });
 
@@ -141,19 +235,45 @@ export function App({ config, configSource, configWarning }: AppProps) {
     );
   }
 
-  const tc = config.tasks[taskType];
+  const isWorkflow = mode === "workflow";
   const streamHeight = Math.max(6, rows - 9);
 
   return (
     <Box flexDirection="column" width={columns}>
       <StatusBar doctor={doctor} configSource={configSource} running={running} />
-      <EventStream
-        items={transcript.items}
-        height={streamHeight}
-        width={columns}
-        taskLabel={`${taskType} · ${tc.agent}/${tc.model}`}
+      {isWorkflow ? (
+        wf.started ? (
+          <WorkflowView
+            state={wf}
+            height={streamHeight}
+            width={columns}
+            selectedIndex={stepIndex}
+          />
+        ) : (
+          <WorkflowPicker
+            workflows={workflowEntries}
+            selectedIndex={workflowIndex}
+            height={streamHeight}
+          />
+        )
+      ) : (
+        <EventStream
+          items={transcript.items}
+          height={streamHeight}
+          width={columns}
+          taskLabel={taskLabel(config, mode)}
+        />
+      )}
+      <TaskSelector
+        config={config}
+        active={mode}
+        workflowName={isWorkflow ? workflowEntries[workflowIndex]?.name : undefined}
       />
-      <TaskSelector config={config} active={taskType} />
+      {wfNotice && isWorkflow ? (
+        <Box paddingX={1}>
+          <Text color="red">{wfNotice}</Text>
+        </Box>
+      ) : null}
       <PromptInput
         value={value}
         onChange={setValue}
@@ -162,15 +282,26 @@ export function App({ config, configSource, configWarning }: AppProps) {
         running={running}
       />
       <Box paddingX={1}>
-        <Text color="gray">Enter dispatch · Tab switch task · Esc cancel · Ctrl+C quit</Text>
+        <Text color="gray">{hint(mode, wf.started, running)}</Text>
       </Box>
     </Box>
   );
 }
 
-function nextTaskType(current: TaskType): TaskType {
-  const idx = TASK_TYPES.indexOf(current);
-  return TASK_TYPES[(idx + 1) % TASK_TYPES.length] ?? current;
+function taskLabel(config: SteamtrainConfig, mode: Mode): string {
+  if (mode === "workflow") return "workflow";
+  const tc = config.tasks[mode];
+  return `${mode} · ${tc.agent}/${tc.model}`;
+}
+
+function hint(mode: Mode, wfStarted: boolean, running: boolean): string {
+  if (running) return "Esc cancel · Ctrl+C quit";
+  if (mode === "workflow") {
+    return wfStarted
+      ? "↑/↓ step · Enter resume · Esc back · Tab switch mode · Ctrl+C quit"
+      : "↑/↓ pick · Enter run · Tab switch mode · Ctrl+C quit";
+  }
+  return "Enter dispatch · Tab switch mode · Esc cancel · Ctrl+C quit";
 }
 
 function message(err: unknown): string {

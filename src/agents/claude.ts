@@ -187,6 +187,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       "--include-partial-messages",
       "--model",
       opts.model,
+      ...(opts.extraArgs ?? []),
       opts.prompt,
     ];
     return runAgentProcess({

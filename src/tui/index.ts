@@ -5,6 +5,9 @@ export { EventRow } from "./EventRow";
 export { StatusBar } from "./StatusBar";
 export { TaskSelector } from "./TaskSelector";
 export { PromptInput } from "./PromptInput";
+export { WorkflowPicker } from "./WorkflowPicker";
+export { WorkflowView } from "./WorkflowView";
+export { type Mode, MODES, isTaskType, nextMode } from "./modes";
 export {
   type DisplayItem,
   type TranscriptState,
@@ -12,3 +15,13 @@ export {
   transcriptReducer,
   initialTranscript,
 } from "./transcript";
+export {
+  type WorkflowState,
+  type WorkflowStateAction,
+  type StepState,
+  type PhaseState,
+  type StepStatus,
+  workflowReducer,
+  initialWorkflowState,
+  flattenSteps,
+} from "./workflow-state";

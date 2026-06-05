@@ -163,7 +163,15 @@ export class OpenCodeAdapter implements AgentAdapter {
 
   run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
     // NOTE: `--format json` (NOT `--command`, which suppresses JSON output).
-    const args = ["run", "--format", "json", "--model", opts.model, opts.prompt];
+    const args = [
+      "run",
+      "--format",
+      "json",
+      "--model",
+      opts.model,
+      ...(opts.extraArgs ?? []),
+      opts.prompt,
+    ];
     return runAgentProcess({
       id: this.id,
       binary: this.binary,
