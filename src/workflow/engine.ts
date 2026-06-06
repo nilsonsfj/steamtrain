@@ -117,6 +117,27 @@ export async function* runWorkflow(
         ts: Date.now(),
       });
 
+      const failedDependency = findFailedDependency(step, results);
+      if (failedDependency) {
+        const skipped = skippedStepResult(step.id, failedDependency);
+        outputs.set(step.id, skipped.output);
+        results.set(step.id, skipped);
+        allResults.push(skipped);
+        phaseOk = false;
+        if (step.kind === "gate" && (step.onFalse === "fail" || step.onFalse === "stop")) {
+          stopAfterPhase = true;
+        }
+        channel.push({
+          kind: "step_done",
+          phaseId: phase.id,
+          stepId: step.id,
+          result: skipped,
+          cached: false,
+          ts: Date.now(),
+        });
+        return;
+      }
+
       // Cache hit → replay without spawning (resume).
       const cached = cache.get(step.id);
       if (cached) {
@@ -281,9 +302,23 @@ async function executeStep(
   if (kind === "distributor") {
     if (step.kind === "distributor" && step.items?.length) {
       const started = Date.now();
-      const items = step.items.map((item) =>
-        renderPrompt(item, { input: ctx.input, outputs: ctx.outputs, results: ctx.results }),
-      );
+      const items = step.items
+        .map((item) =>
+          renderPrompt(item, { input: ctx.input, outputs: ctx.outputs, results: ctx.results }),
+        )
+        .map((item) => item.trim())
+        .filter(Boolean);
+      if (items.length === 0) {
+        return {
+          result: {
+            stepId: step.id,
+            ok: false,
+            output: "distributor produced no items",
+            error: "distributor produced no items",
+            durationMs: Date.now() - started,
+          },
+        };
+      }
       return {
         result: {
           stepId: step.id,
@@ -340,7 +375,7 @@ async function executeStep(
         durationMs: Date.now() - started,
       },
       gate: { passed: evaluation.passed, target, onFalse },
-      stop: !evaluation.passed && onFalse === "stop",
+      stop: !evaluation.passed && (onFalse === "stop" || onFalse === "fail"),
     };
   }
 
@@ -548,6 +583,27 @@ function splitItemsFromOutput(output: string | undefined): string[] {
         .map((line) => line.trim())
         .filter(Boolean)
     : [];
+}
+
+function findFailedDependency(
+  step: WorkflowStep,
+  results: Map<string, StepResult>,
+): string | undefined {
+  for (const dep of step.dependsOn ?? []) {
+    const result = results.get(dep);
+    if (result && !result.ok) return dep;
+  }
+  return undefined;
+}
+
+function skippedStepResult(stepId: string, dependencyId: string): StepResult {
+  return {
+    stepId,
+    ok: false,
+    output: `skipped: dependency '${dependencyId}' failed`,
+    error: `dependency '${dependencyId}' failed`,
+    durationMs: 0,
+  };
 }
 
 function consolidateOutputs(

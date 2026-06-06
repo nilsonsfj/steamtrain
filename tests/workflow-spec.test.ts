@@ -256,6 +256,21 @@ describe("validateWorkflow dependency rules", () => {
     expect(res.error).toMatch(/not in an earlier phase/);
   });
 
+  it("rejects gate conditions with ok but no step", () => {
+    const spec: WorkflowSpec = {
+      name: "bad-gate",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "gate", kind: "gate", condition: { ok: true } }],
+        },
+      ],
+    };
+    expect(workflowSpecSchema.safeParse(spec).success).toBe(false);
+    expect(validateWorkflow(spec).ok).toBe(false);
+  });
+
   it("rejects forEach references that are malformed, unknown, or same-phase", () => {
     const malformed: WorkflowSpec = {
       name: "malformed",

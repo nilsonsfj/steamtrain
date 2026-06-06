@@ -248,6 +248,12 @@ const gateConditionSchema = z
         message: "gate condition requires ok, contains, matches, or equals",
       });
     }
+    if (condition.ok !== undefined && !condition.step) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "gate condition ok requires condition.step",
+      });
+    }
   });
 
 const workflowGateStepSchema = z.object({

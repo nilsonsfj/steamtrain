@@ -218,8 +218,10 @@ Gate condition fields are combined with logical AND:
 | value | meaning |
 | --- | --- |
 | `continue` | Default. Mark the gate blocked but keep the workflow successful. |
-| `fail` | Mark the gate, phase, and workflow failed. |
-| `stop` | Stop scheduling later phases after the current phase completes. |
+| `fail` | Mark the gate, phase, and workflow failed, then stop scheduling later phases. |
+| `stop` | Stop scheduling later phases after the current phase completes while keeping the workflow successful. |
+
+Steps with `dependsOn` are skipped when any referenced earlier step failed.
 
 ## Templates
 

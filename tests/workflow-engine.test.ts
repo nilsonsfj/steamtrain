@@ -494,7 +494,7 @@ describe("runWorkflow", () => {
     const workDone = events.find((e) => e.kind === "step_done" && e.stepId === "work");
     expect(workDone && workDone.kind === "step_done" && workDone.result.ok).toBe(false);
     expect(workDone && workDone.kind === "step_done" && workDone.result.error).toMatch(
-      /source 'split' failed/,
+      /dependency 'split' failed/,
     );
   });
 
@@ -546,6 +546,115 @@ describe("runWorkflow", () => {
     expect(workDone && workDone.kind === "step_done" && workDone.result.error).toMatch(
       /exceed max workflow steps/,
     );
+  });
+
+  it("stops later phases when a gate fails with onFalse fail", async () => {
+    const spec: WorkflowSpec = {
+      name: "fail-stop",
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [{ id: "split", kind: "distributor", items: ["nope"] }],
+        },
+        {
+          id: "gate",
+          title: "Gate",
+          steps: [
+            {
+              id: "gate",
+              kind: "gate",
+              dependsOn: ["split"],
+              condition: { step: "split", contains: "yes" },
+              onFalse: "fail",
+            },
+          ],
+        },
+        {
+          id: "later",
+          title: "Later",
+          steps: [{ id: "later", agent: "claude", model: "ml", prompt: "should not run" }],
+        },
+      ],
+    };
+    const { deps, state } = makeDeps(echo);
+    const events = await collect(spec, "x", deps);
+
+    expect(state.runs).toHaveLength(0);
+    expect(events.some((e) => e.kind === "phase_start" && e.phaseId === "later")).toBe(false);
+    expect(events.at(-1)).toMatchObject({ kind: "workflow_done", ok: false });
+  });
+
+  it("skips steps whose dependsOn references a failed earlier step", async () => {
+    const failing: Script = (opts, id) =>
+      opts.model === "bad"
+        ? [{ kind: "error", agent: id, ts: 0, message: "boom" }]
+        : echo(opts, id);
+    const spec: WorkflowSpec = {
+      name: "skip-deps",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "a", agent: "claude", model: "bad", prompt: "x" }],
+        },
+        {
+          id: "p2",
+          title: "P2",
+          steps: [
+            {
+              id: "b",
+              kind: "consolidator",
+              dependsOn: ["a"],
+              prompt: "{{steps.a.output}}",
+            },
+          ],
+        },
+      ],
+    };
+    const { deps, state } = makeDeps(failing);
+    const events = await collect(spec, "x", deps);
+
+    expect(state.runs).toHaveLength(1);
+    const skipped = events.find((e) => e.kind === "step_done" && e.stepId === "b");
+    expect(skipped && skipped.kind === "step_done" && skipped.result.ok).toBe(false);
+    expect(skipped && skipped.kind === "step_done" && skipped.result.error).toMatch(
+      /dependency 'a' failed/,
+    );
+  });
+
+  it("drops empty static distributor items before fan-out", async () => {
+    const spec: WorkflowSpec = {
+      name: "trim-items",
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [{ id: "targets", kind: "distributor", items: ["api", "  ", "web"] }],
+        },
+        {
+          id: "work",
+          title: "Work",
+          steps: [
+            {
+              id: "work",
+              kind: "processor",
+              agent: "claude",
+              model: "m",
+              dependsOn: ["targets"],
+              forEach: "steps.targets.items",
+              prompt: "{{item}}",
+            },
+          ],
+        },
+      ],
+    };
+    const { deps, state } = makeDeps(echo);
+    const events = await collect(spec, "task", deps);
+
+    const split = events.find((e) => e.kind === "step_done" && e.stepId === "targets");
+    expect(split && split.kind === "step_done" && split.result.items).toEqual(["api", "web"]);
+    expect(state.runs.map((r) => r.opts.prompt)).toEqual(["api", "web"]);
   });
 
   it("stops after a blocking gate with onFalse stop", async () => {
