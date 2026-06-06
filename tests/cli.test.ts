@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -52,5 +52,41 @@ describe("runCli", () => {
 
     expect(code).toBe(1);
     expect(c.stderr).toContain("unknown workflow 'missing'");
+  });
+
+  it("returns non-zero when a headless workflow run fails", async () => {
+    const c = capture();
+    writeFileSync(
+      join(c.io.cwd, "steamtrain.json"),
+      JSON.stringify({
+        binaries: {
+          claude: "/definitely/missing/claude",
+          opencode: "/definitely/missing/opencode",
+        },
+        workflows: {
+          "fail-gate": {
+            phases: [
+              {
+                id: "gate",
+                title: "Gate",
+                steps: [
+                  {
+                    id: "gate",
+                    kind: "gate",
+                    condition: { contains: "pass" },
+                    onFalse: "fail",
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    const code = await runCli(["workflow", "run", "fail-gate", "--input", "nope"], c.io);
+
+    expect(code).toBe(1);
+    expect(c.stdout).toContain("workflow failed");
   });
 });

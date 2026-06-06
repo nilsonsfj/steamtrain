@@ -146,6 +146,10 @@ Downstream steps reference the aggregate parent result:
 - `{{steps.review-each.items}}` is the original item list.
 - `{{steps.review-each.ok}}` is `true` only when every child run succeeds.
 
+`forEach` sources must be successful distributor steps from earlier phases. If
+the distributor is agent-backed, its final output is split on non-empty lines to
+form `items`.
+
 ### Distributor
 
 Turns one input into multiple item payloads. Use `items` for static/template
@@ -242,8 +246,10 @@ Unknown placeholders are left unchanged.
 - Step ids must be unique across the workflow.
 - `dependsOn` and gate `condition.step` may reference earlier phases only.
 - `forEach` must use `steps.<id>.items` or `<id>.items`, and the source step
-  must be in an earlier phase.
-- A workflow may contain at most 1000 static steps.
+  must be a distributor in an earlier phase.
+- A workflow may contain at most 1000 total static + generated steps. Static
+  distributor item counts are checked at validation time; agent-generated item
+  counts are checked at runtime before child runs are scheduled.
 - `maxConcurrency` is capped at 16.
 - Distributor steps require `items` or `agent` + `model` + `prompt`.
 - Consolidator steps require `dependsOn`.
