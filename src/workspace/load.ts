@@ -52,8 +52,21 @@ export function loadWorkspaceConfig(home: string = homedir()): LoadedWorkspaceCo
     };
   }
 
+  const duplicateWarning = duplicateWorkspaceIdWarning(result.data.workspaces);
   const config = mergeWorkspaceConfig(DEFAULT_WORKSPACE_CONFIG, result.data);
-  return { config, source: path };
+  return { config, source: path, warning: duplicateWarning };
+}
+
+function duplicateWorkspaceIdWarning(entries: WorkspaceEntry[] | undefined): string | undefined {
+  if (!entries || entries.length === 0) return undefined;
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const entry of entries) {
+    if (seen.has(entry.id)) duplicates.add(entry.id);
+    seen.add(entry.id);
+  }
+  if (duplicates.size === 0) return undefined;
+  return `duplicate workspace ids in ${WORKSPACE_CONFIG_FILENAME}: ${[...duplicates].join(", ")} (last wins)`;
 }
 
 /** Merge user workspace entries by `id` onto defaults (override in place, append new ids). */

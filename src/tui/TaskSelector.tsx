@@ -1,20 +1,19 @@
 import { Box, Text } from "ink";
-import type { WorkspaceConfig, WorkspaceEntry } from "../workspace";
-import { workspaceById, workspaceLabel } from "../workspace";
-import { type Mode, buildModes, isWorkspaceMode } from "./modes";
+import type { WorkspaceEntry } from "../workspace";
+import { workspaceLabel } from "../workspace";
+import { type Mode, isWorkspaceMode } from "./modes";
 import { AGENT_COLOR } from "./theme";
 
 interface TaskSelectorProps {
-  workspaces: WorkspaceConfig;
+  modes: readonly Mode[];
+  workspaceMap: Map<string, WorkspaceEntry>;
   active: Mode;
   /** Name of the currently selected workflow (shown when in workflow mode). */
   workflowName?: string;
 }
 
 /** Mode bar: workflow plus user-configured workspace presets. */
-export function TaskSelector({ workspaces, active, workflowName }: TaskSelectorProps) {
-  const modes = buildModes(workspaces);
-  const workspaceMap = workspaceById(workspaces);
+export function TaskSelector({ modes, workspaceMap, active, workflowName }: TaskSelectorProps) {
   const current: WorkspaceEntry | undefined = isWorkspaceMode(active)
     ? workspaceMap.get(active)
     : undefined;
@@ -25,7 +24,8 @@ export function TaskSelector({ workspaces, active, workflowName }: TaskSelectorP
         <Text color="gray">mode </Text>
         {modes.map((mode) => {
           const isActive = mode === active;
-          const label = mode === "workflow" ? "workflow" : workspaceLabel(workspaceMap.get(mode)!);
+          const entry = workspaceMap.get(mode);
+          const label = mode === "workflow" ? "workflow" : entry ? workspaceLabel(entry) : mode;
           return (
             <Box key={mode} marginRight={1}>
               <Text

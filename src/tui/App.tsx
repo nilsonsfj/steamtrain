@@ -339,7 +339,8 @@ export function App({
         />
       )}
       <TaskSelector
-        workspaces={workspaces}
+        modes={modes}
+        workspaceMap={workspaceMap}
         active={mode}
         workflowName={isWorkflow ? workflowEntries[workflowIndex]?.name : undefined}
       />

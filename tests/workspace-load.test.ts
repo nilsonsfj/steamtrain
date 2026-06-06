@@ -47,6 +47,25 @@ describe("loadWorkspaceConfig", () => {
     expect(loaded.source).toBe(workspaceConfigPath(home));
   });
 
+  it("warns when duplicate workspace ids appear in the user file", () => {
+    const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
+    const dir = join(home, ".steamtrain");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, WORKSPACE_CONFIG_FILENAME),
+      JSON.stringify({
+        workspaces: [
+          { id: "plan", agent: "claude", model: "haiku" },
+          { id: "plan", agent: "claude", model: "claude-opus-4-8" },
+        ],
+      }),
+    );
+
+    const loaded = loadWorkspaceConfig(home);
+    expect(loaded.warning).toMatch(/duplicate workspace ids/);
+    expect(loaded.config.workspaces.find((w) => w.id === "plan")?.model).toBe("claude-opus-4-8");
+  });
+
   it("falls back to defaults with a warning on invalid json", () => {
     const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
     const dir = join(home, ".steamtrain");
