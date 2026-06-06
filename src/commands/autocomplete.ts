@@ -53,7 +53,7 @@ export function autocompleteSlashCommand(
 
   if (command.length === 0) {
     const names = commands.map((c) => c.name);
-    return { value: `/${names[0] ?? ""} `, suggestions: names };
+    return { value: raw, suggestions: names };
   }
 
   const def = commands.find((c) => c.name === command);

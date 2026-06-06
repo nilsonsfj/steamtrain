@@ -5,6 +5,10 @@ import { OPENCODE_MODELS } from "./opencode";
 /** All agent ids steamtrain can dispatch to. */
 export const AGENT_IDS: readonly AgentId[] = ["claude", "opencode"];
 
+export function isAgentId(value: string): value is AgentId {
+  return (AGENT_IDS as readonly string[]).includes(value);
+}
+
 /** Hardcoded model list for an agent provider. */
 export function modelsForAgent(agent: AgentId): readonly string[] {
   switch (agent) {
