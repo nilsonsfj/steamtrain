@@ -23,7 +23,7 @@ import {
   workflowCacheKey,
 } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
-import { workspaceById, workspaceLabel } from "../workspace";
+import { saveWorkspaceConfig, workspaceById, workspaceLabel } from "../workspace";
 import { CommandSuggestionMenu, suggestionMenuHeight } from "./CommandSuggestionMenu";
 import { EventStream } from "./EventStream";
 import { PromptInput } from "./PromptInput";
@@ -71,6 +71,7 @@ export function App({
   const [doctor, setDoctor] = useState<DoctorResult[] | null>(null);
   const [mode, setMode] = useState<Mode>("workflow");
   const [runtimeWorkspaces, setRuntimeWorkspaces] = useState<WorkspaceConfig>(workspaces);
+  const [activeWorkspaceSource, setActiveWorkspaceSource] = useState(workspaceSource);
   const [value, setValue] = useState("");
   const [commandSuggestions, setCommandSuggestions] = useState<readonly string[]>([]);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
@@ -89,14 +90,21 @@ export function App({
   const activeWorkflowInputRef = useRef<string | undefined>(undefined);
   const workflowCacheRef = useRef<Map<string, StepResult>>(new Map());
   const cacheStoreRef = useRef(createWorkflowCacheStore(join(process.cwd(), WORKFLOW_CACHE_DIR)));
+  const runtimeWorkspacesRef = useRef(runtimeWorkspaces);
+  runtimeWorkspacesRef.current = runtimeWorkspaces;
 
   const modes = useMemo(() => buildModes(runtimeWorkspaces), [runtimeWorkspaces]);
   const workspaceMap = useMemo(() => workspaceById(runtimeWorkspaces), [runtimeWorkspaces]);
 
   const updateWorkspace = useCallback((id: WorkspaceId, patch: Partial<WorkspaceEntry>) => {
-    setRuntimeWorkspaces((prev) => ({
-      workspaces: prev.workspaces.map((w) => (w.id === id ? { ...w, ...patch } : w)),
-    }));
+    const next: WorkspaceConfig = {
+      workspaces: runtimeWorkspacesRef.current.workspaces.map((w) =>
+        w.id === id ? { ...w, ...patch } : w,
+      ),
+    };
+    const source = saveWorkspaceConfig(next);
+    setActiveWorkspaceSource(source);
+    setRuntimeWorkspaces(next);
   }, []);
 
   const slashCtx = useMemo<SlashCommandContext>(
@@ -524,7 +532,7 @@ export function App({
       <StatusBar
         doctor={doctor}
         configSource={configSource}
-        workspaceSource={workspaceSource}
+        workspaceSource={activeWorkspaceSource}
         running={running}
       />
       {isWorkflow ? (

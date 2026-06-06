@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_WORKSPACE_CONFIG } from "./defaults";
@@ -117,4 +117,45 @@ export function mergeWorkspaceEntries(
   }
 
   return order.map((id) => byId.get(id)!);
+}
+
+const BUILTIN_WORKSPACE_SOURCE = "built-in workspace defaults";
+
+function workspaceEntryEquals(a: WorkspaceEntry, b: WorkspaceEntry): boolean {
+  return a.agent === b.agent && a.model === b.model && a.label === b.label;
+}
+
+/** Entries that differ from built-in defaults or are not part of the defaults. */
+export function workspacesToPersist(config: WorkspaceConfig): WorkspaceEntry[] {
+  const defaultById = new Map(DEFAULT_WORKSPACE_CONFIG.workspaces.map((w) => [w.id, w]));
+  return config.workspaces.filter((entry) => {
+    const def = defaultById.get(entry.id);
+    if (!def) return true;
+    return !workspaceEntryEquals(entry, def);
+  });
+}
+
+/**
+ * Persist workspace overrides to `~/.steamtrain/workspace.json`.
+ * Returns the config source label (path or built-in fallback note).
+ */
+export function saveWorkspaceConfig(
+  config: WorkspaceConfig,
+  home: string = homedir(),
+): string {
+  const path = workspaceConfigPath(home);
+  const workspaces = workspacesToPersist(config);
+
+  if (workspaces.length === 0) {
+    if (existsSync(path)) unlinkSync(path);
+    return BUILTIN_WORKSPACE_SOURCE;
+  }
+
+  const dir = join(home, WORKSPACE_CONFIG_DIR);
+  mkdirSync(dir, { recursive: true });
+  const payload: WorkspaceFile = { workspaces };
+  const temp = `${path}.${process.pid}.tmp`;
+  writeFileSync(temp, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  renameSync(temp, path);
+  return path;
 }

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -6,6 +6,8 @@ import {
   WORKSPACE_CONFIG_FILENAME,
   loadWorkspaceConfig,
   mergeWorkspaceEntries,
+  saveWorkspaceConfig,
+  workspacesToPersist,
   workspaceConfigPath,
 } from "../src/workspace";
 import { DEFAULT_WORKSPACE_CONFIG } from "../src/workspace/defaults";
@@ -110,5 +112,68 @@ describe("mergeWorkspaceEntries", () => {
     ]);
     expect(merged.map((w) => w.id)).toEqual(["plan", "implement", "review", "scratch"]);
     expect(merged.find((w) => w.id === "review")?.model).toBe("claude-opus-4-8-thinking");
+  });
+});
+
+describe("workspacesToPersist", () => {
+  it("returns only entries that differ from built-in defaults", () => {
+    const persisted = workspacesToPersist({
+      workspaces: [
+        { id: "plan", agent: "opencode", model: "openai/gpt-5.4-mini" },
+        { id: "implement", agent: "opencode", model: "openai/gpt-5.4-mini" },
+        { id: "review", agent: "claude", model: "claude-opus-4-8" },
+      ],
+    });
+    expect(persisted).toEqual([
+      { id: "plan", agent: "opencode", model: "openai/gpt-5.4-mini" },
+    ]);
+  });
+});
+
+describe("saveWorkspaceConfig", () => {
+  it("writes overrides to ~/.steamtrain/workspace.json", () => {
+    const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
+    const source = saveWorkspaceConfig(
+      {
+        workspaces: [
+          { id: "plan", agent: "opencode", model: "openai/gpt-5.4-mini" },
+          { id: "implement", agent: "opencode", model: "openai/gpt-5.4-mini" },
+          { id: "review", agent: "claude", model: "claude-opus-4-8" },
+        ],
+      },
+      home,
+    );
+
+    const path = workspaceConfigPath(home);
+    expect(source).toBe(path);
+    expect(existsSync(path)).toBe(true);
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+      workspaces: [{ id: "plan", agent: "opencode", model: "openai/gpt-5.4-mini" }],
+    });
+
+    const loaded = loadWorkspaceConfig(home);
+    expect(loaded.config.workspaces.find((w) => w.id === "plan")).toMatchObject({
+      agent: "opencode",
+      model: "openai/gpt-5.4-mini",
+    });
+    expect(loaded.source).toBe(path);
+  });
+
+  it("removes the file when config matches built-in defaults", () => {
+    const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
+    saveWorkspaceConfig(
+      {
+        workspaces: [
+          { id: "plan", agent: "opencode", model: "openai/gpt-5.4-mini" },
+          { id: "implement", agent: "opencode", model: "openai/gpt-5.4-mini" },
+          { id: "review", agent: "claude", model: "claude-opus-4-8" },
+        ],
+      },
+      home,
+    );
+
+    const source = saveWorkspaceConfig(DEFAULT_WORKSPACE_CONFIG, home);
+    expect(source).toBe("built-in workspace defaults");
+    expect(existsSync(workspaceConfigPath(home))).toBe(false);
   });
 });

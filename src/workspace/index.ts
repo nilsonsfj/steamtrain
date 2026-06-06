@@ -19,5 +19,7 @@ export {
   loadWorkspaceConfig,
   mergeWorkspaceConfig,
   mergeWorkspaceEntries,
+  saveWorkspaceConfig,
+  workspacesToPersist,
   workspaceConfigPath,
 } from "./load";
