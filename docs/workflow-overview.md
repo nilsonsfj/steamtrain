@@ -547,9 +547,13 @@ Behavior:
 - dynamic child steps cache individually (`review-each[0]`, etc.)
 - parent dynamic steps cache their aggregate + `childResults`
 - a different prompt uses a different on-disk cache file automatically
+- editing the workflow JSON (or upgrading steamtrain with changed bundled workflows)
+  invalidates the cache via a `specHash` check — stale files are ignored
 - re-running with the same prompt resumes only incomplete work
+- parallel runs of the same workflow + input + cwd are not supported (last writer wins)
 - CLI: `steamtrain workflow run … --fresh` ignores and deletes the on-disk cache
 - CLI: `steamtrain workflow cache clear` removes cached runs (all, or one workflow + input)
+- TUI: use `steamtrain workflow run … --fresh` or `workflow cache clear` for a clean run
 
 ---
 
@@ -658,6 +662,7 @@ agent run. Dynamic fan-out multiplies cost linearly with item count.
 | expecting `onFalse: fail` to still run report phase | later phases stop | intended behavior |
 | huge agent-backed distributor output | runtime step-cap failure | keep splits small; validate with realistic input |
 | reusing prompt but expecting fresh run | cache replays successful steps | `steamtrain workflow run … --fresh` or `workflow cache clear` |
+| edited workflow JSON / upgraded steamtrain | old cache ignored (`specHash` mismatch) | automatic; or `workflow cache clear` |
 | referencing child id in templates | unsupported | use parent aggregate `steps.<parent>.output` |
 
 ---

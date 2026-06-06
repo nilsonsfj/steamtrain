@@ -57,7 +57,7 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
     case "validate":
       return validateWorkflows(orchestrator.listWorkflows(), rest[0], out, err);
     case "cache":
-      return runCacheCommand(rest, cwd, out, err);
+      return runCacheCommand(rest, cwd, io, orchestrator, out, err);
     case "run":
       return runWorkflowCommand(orchestrator, config, rest, io, out, err);
     default:
@@ -112,6 +112,8 @@ function validateWorkflows(
 async function runCacheCommand(
   args: string[],
   cwd: string,
+  io: CliIO,
+  orchestrator: Orchestrator,
   out: (text: string) => void,
   err: (text: string) => void,
 ): Promise<number> {
@@ -134,14 +136,20 @@ async function runCacheCommand(
     return 0;
   }
 
+  const spec = orchestrator.listWorkflows()[options.workflow];
+  if (!spec) {
+    err(`unknown workflow '${options.workflow}'\n`);
+    return 1;
+  }
+
   const input =
-    options.input ?? (options.stdin ? await readAll(process.stdin as Readable) : undefined);
+    options.input ?? (options.stdin ? await readAll(io.stdin ?? process.stdin) : undefined);
   if (!input?.trim()) {
     err("workflow cache clear <name> requires --input <text> or --stdin\n");
     return 1;
   }
 
-  const key = workflowCacheKey(options.workflow, input.trim(), cwd);
+  const key = workflowCacheKey(options.workflow, input.trim(), cwd, spec);
   await store.clear(key);
   out(`cleared cache for workflow '${options.workflow}'\n`);
   return 0;
@@ -183,8 +191,14 @@ async function runWorkflowCommand(
     return 1;
   }
 
+  const spec = orchestrator.listWorkflows()[name];
+  if (!spec) {
+    err(`unknown workflow '${name}'\n`);
+    return 1;
+  }
+
   const store = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
-  const key = workflowCacheKey(name, input.trim(), cwd);
+  const key = workflowCacheKey(name, input.trim(), cwd, spec);
   const cache = new Map<string, StepResult>();
   if (options.fresh) {
     await store.clear(key);
@@ -194,7 +208,7 @@ async function runWorkflowCommand(
   }
 
   let ok = false;
-  for await (const event of orchestrator.runWorkflow(name, input.trim(), undefined, cache)) {
+  for await (const event of orchestrator.runWorkflow(name, input.trim(), undefined, cache, cwd)) {
     if (options.json) out(`${JSON.stringify(event)}\n`);
     else printHumanEvent(event, out);
     if (event.kind === "step_done") {
@@ -250,8 +264,6 @@ function parseRunOptions(args: string[]): RunOptions | null {
       options.json = true;
     } else if (arg === "--fresh") {
       options.fresh = true;
-    } else if (arg === "--resume") {
-      options.fresh = false;
     } else {
       return null;
     }
@@ -322,8 +334,9 @@ Usage:
   steamtrain workflow run <name> --stdin [--json] [--fresh]
   steamtrain workflow cache clear [<workflow> --input <text> | --stdin]
 
-Workflow runs resume from ${WORKFLOW_CACHE_DIR} by default. Pass --fresh to ignore
-and delete the on-disk cache for that workflow + input + cwd.
+Workflow runs resume from ${WORKFLOW_CACHE_DIR} by default (keyed by workflow spec,
+input, and cwd). Pass --fresh to ignore and delete the on-disk cache for that run.
+Parallel runs of the same workflow + input are not supported.
 
 Running steamtrain with no command opens the workflow-first TUI.
 `;

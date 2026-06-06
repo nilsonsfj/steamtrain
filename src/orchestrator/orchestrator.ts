@@ -115,6 +115,7 @@ export class Orchestrator {
     input: string,
     signal?: AbortSignal,
     cache?: Map<string, StepResult>,
+    cwd: string = process.cwd(),
   ): AsyncIterable<WorkflowEvent> {
     const spec = this.listWorkflows()[name];
     if (!spec) throw new Error(`unknown workflow '${name}'`);
@@ -127,7 +128,7 @@ export class Orchestrator {
         binaries: this.config.binaries,
         timeoutMs: this.config.timeoutMs,
         maxConcurrency: this.config.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY,
-        cwd: process.cwd(),
+        cwd,
       },
       signal,
     );

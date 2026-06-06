@@ -657,6 +657,47 @@ describe("runWorkflow", () => {
     expect(state.runs.map((r) => r.opts.prompt)).toEqual(["api", "web"]);
   });
 
+  it("still stops after a cached gate with onFalse stop on resume", async () => {
+    const spec: WorkflowSpec = {
+      name: "stop-resume",
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [{ id: "split", kind: "distributor", items: ["nope"] }],
+        },
+        {
+          id: "gate",
+          title: "Gate",
+          steps: [
+            {
+              id: "gate",
+              kind: "gate",
+              dependsOn: ["split"],
+              condition: { step: "split", contains: "yes" },
+              onFalse: "stop",
+            },
+          ],
+        },
+        {
+          id: "later",
+          title: "Later",
+          steps: [{ id: "later", agent: "claude", model: "ml", prompt: "should not run" }],
+        },
+      ],
+    };
+    const { deps, state } = makeDeps(echo);
+    const cache = new Map<string, StepResult>();
+    await collect(spec, "x", deps, { cache });
+
+    const resumed = await collect(spec, "x", deps, { cache });
+    expect(state.runs).toHaveLength(0);
+    expect(resumed.some((e) => e.kind === "phase_start" && e.phaseId === "later")).toBe(false);
+    expect(resumed.some((e) => e.kind === "step_done" && e.stepId === "gate" && e.cached)).toBe(
+      true,
+    );
+  });
+
   it("stops after a blocking gate with onFalse stop", async () => {
     const spec: WorkflowSpec = {
       name: "stop",

@@ -1,4 +1,5 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,6 +8,8 @@ import type { AgentEvent, AgentId } from "../src/types/events";
 import {
   WORKFLOW_CACHE_VERSION,
   createWorkflowCacheStore,
+  hashWorkflowCacheInput,
+  hashWorkflowSpec,
   loadWorkflowCache,
   persistWorkflowStepDone,
   saveWorkflowCache,
@@ -14,7 +17,7 @@ import {
   workflowCacheKey,
 } from "../src/workflow/cache-store";
 import { runWorkflow } from "../src/workflow/engine";
-import type { StepResult } from "../src/workflow/types";
+import type { StepResult, WorkflowSpec } from "../src/workflow/types";
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "steamtrain-cache-"));
@@ -24,10 +27,37 @@ function sampleResult(stepId: string, output = "ok"): StepResult {
   return { stepId, ok: true, output, durationMs: 12 };
 }
 
+const twoStepSpec: WorkflowSpec = {
+  name: "two-step",
+  phases: [
+    {
+      id: "p1",
+      title: "One",
+      steps: [{ id: "first", agent: "claude", model: "m", prompt: "first" }],
+    },
+    {
+      id: "p2",
+      title: "Two",
+      steps: [
+        {
+          id: "second",
+          agent: "claude",
+          model: "m",
+          prompt: "second",
+          dependsOn: ["first"],
+        },
+      ],
+    },
+  ],
+};
+
 describe("workflow cache store", () => {
   it("round-trips step results to disk", async () => {
     const root = tempDir();
-    const key = workflowCacheKey("multi-plan", "design cache", root);
+    const key = workflowCacheKey("multi-plan", "design cache", root, {
+      name: "multi-plan",
+      phases: [],
+    });
     const cache = new Map<string, StepResult>([
       ["draft-a", sampleResult("draft-a", "plan a")],
       ["draft-b", sampleResult("draft-b", "plan b")],
@@ -40,13 +70,16 @@ describe("workflow cache store", () => {
     expect(readFileSync(join(root, workflowCacheFileName(key)), "utf8")).toContain(
       `"version": ${WORKFLOW_CACHE_VERSION}`,
     );
+    expect(readFileSync(join(root, workflowCacheFileName(key)), "utf8")).toContain(key.specHash);
   });
 
   it("isolates caches by workflow, input, and cwd", async () => {
     const root = tempDir();
-    const keyA = workflowCacheKey("wf-a", "same text", root);
-    const keyB = workflowCacheKey("wf-b", "same text", root);
-    const keyC = workflowCacheKey("wf-a", "other text", root);
+    const specA = { name: "wf-a", phases: [] };
+    const specB = { name: "wf-b", phases: [] };
+    const keyA = workflowCacheKey("wf-a", "same text", root, specA);
+    const keyB = workflowCacheKey("wf-b", "same text", root, specB);
+    const keyC = workflowCacheKey("wf-a", "other text", root, specA);
 
     await saveWorkflowCache(root, keyA, new Map([["s1", sampleResult("s1", "a")]]));
     await saveWorkflowCache(root, keyB, new Map([["s1", sampleResult("s1", "b")]]));
@@ -60,20 +93,80 @@ describe("workflow cache store", () => {
 
   it("rejects stale files when metadata does not match the key", async () => {
     const root = tempDir();
-    const key = workflowCacheKey("wf", "input", root);
+    const spec = { name: "wf", phases: [] };
+    const key = workflowCacheKey("wf", "input", root, spec);
     await saveWorkflowCache(root, key, new Map([["s1", sampleResult("s1")]]));
 
-    const mismatched = workflowCacheKey("other", "input", root);
+    const mismatched = workflowCacheKey("other", "input", root, spec);
     expect(await loadWorkflowCache(root, mismatched)).toEqual(new Map());
   });
 
-  it("clears one cache entry or all entries", async () => {
+  it("rejects cache when the workflow spec changes", async () => {
+    const root = tempDir();
+    const specV1: WorkflowSpec = {
+      name: "wf",
+      phases: [
+        { id: "p1", title: "P1", steps: [{ id: "a", agent: "claude", model: "m", prompt: "v1" }] },
+      ],
+    };
+    const specV2: WorkflowSpec = {
+      name: "wf",
+      phases: [
+        { id: "p1", title: "P1", steps: [{ id: "a", agent: "claude", model: "m", prompt: "v2" }] },
+      ],
+    };
+    const keyV1 = workflowCacheKey("wf", "input", root, specV1);
+    await saveWorkflowCache(root, keyV1, new Map([["a", sampleResult("a")]]));
+
+    const keyV2 = workflowCacheKey("wf", "input", root, specV2);
+    expect(hashWorkflowSpec(specV1)).not.toBe(hashWorkflowSpec(specV2));
+    expect(await loadWorkflowCache(root, keyV2)).toEqual(new Map());
+  });
+
+  it("returns an empty map for corrupt cache files", async () => {
+    const root = tempDir();
+    const key = workflowCacheKey("wf", "input", root, { name: "wf", phases: [] });
+    await mkdir(root, { recursive: true });
+    await writeFile(join(root, workflowCacheFileName(key)), "{ not valid json", "utf8");
+
+    expect(await loadWorkflowCache(root, key)).toEqual(new Map());
+  });
+
+  it("drops step entries with invalid shape", async () => {
+    const root = tempDir();
+    const key = workflowCacheKey("wf", "input", root, { name: "wf", phases: [] });
+    await mkdir(root, { recursive: true });
+    writeFileSync(
+      join(root, workflowCacheFileName(key)),
+      JSON.stringify({
+        version: WORKFLOW_CACHE_VERSION,
+        workflow: "wf",
+        cwd: root,
+        inputHash: hashWorkflowCacheInput("input"),
+        specHash: key.specHash,
+        updatedAt: 1,
+        steps: {
+          good: sampleResult("good"),
+          bad: { ok: "yes" },
+        },
+      }),
+      "utf8",
+    );
+
+    const loaded = await loadWorkflowCache(root, key);
+    expect([...loaded.keys()]).toEqual(["good"]);
+  });
+
+  it("clears one cache entry or all entries including temp files", async () => {
     const root = tempDir();
     const store = createWorkflowCacheStore(root);
-    const keyA = workflowCacheKey("a", "one", root);
-    const keyB = workflowCacheKey("b", "two", root);
+    const specA = { name: "a", phases: [] };
+    const specB = { name: "b", phases: [] };
+    const keyA = workflowCacheKey("a", "one", root, specA);
+    const keyB = workflowCacheKey("b", "two", root, specB);
     await store.save(keyA, new Map([["s1", sampleResult("s1")]]));
     await store.save(keyB, new Map([["s2", sampleResult("s2")]]));
+    writeFileSync(join(root, `${workflowCacheFileName(keyA)}.999.tmp`), "orphan", "utf8");
 
     await store.clear(keyA);
     expect(await store.load(keyA)).toEqual(new Map());
@@ -81,12 +174,13 @@ describe("workflow cache store", () => {
 
     await store.clearAll();
     expect(await store.load(keyB)).toEqual(new Map());
+    expect(existsSync(join(root, `${workflowCacheFileName(keyA)}.999.tmp`))).toBe(false);
   });
 
   it("persists only successful, non-cached step completions", async () => {
     const root = tempDir();
     const store = createWorkflowCacheStore(root);
-    const key = workflowCacheKey("wf", "input", root);
+    const key = workflowCacheKey("wf", "input", root, { name: "wf", phases: [] });
     const cache = new Map<string, StepResult>();
 
     await persistWorkflowStepDone(store, key, cache, "ok-step", sampleResult("ok-step"), false);
@@ -116,7 +210,7 @@ describe("workflow cache resume", () => {
   it("replays persisted steps on a later run", async () => {
     const root = tempDir();
     const store = createWorkflowCacheStore(root);
-    const key = workflowCacheKey("two-step", "resume me", root);
+    const key = workflowCacheKey("two-step", "resume me", root, twoStepSpec);
     const runs: string[] = [];
 
     const createAdapter = (id: AgentId): AgentAdapter => ({
@@ -136,33 +230,9 @@ describe("workflow cache resume", () => {
       },
     });
 
-    const spec = {
-      name: "two-step",
-      phases: [
-        {
-          id: "p1",
-          title: "One",
-          steps: [{ id: "first", agent: "claude" as const, model: "m", prompt: "first" }],
-        },
-        {
-          id: "p2",
-          title: "Two",
-          steps: [
-            {
-              id: "second",
-              agent: "claude" as const,
-              model: "m",
-              prompt: "second",
-              dependsOn: ["first"],
-            },
-          ],
-        },
-      ],
-    };
-
     const cache = new Map<string, StepResult>();
     for await (const event of runWorkflow(
-      spec,
+      twoStepSpec,
       { input: key.input, cache },
       { createAdapter, maxConcurrency: 2, cwd: root },
     )) {
@@ -177,7 +247,7 @@ describe("workflow cache resume", () => {
     const replayRuns: string[] = [];
     let cachedSteps = 0;
     for await (const event of runWorkflow(
-      spec,
+      twoStepSpec,
       { input: key.input, cache: resumed },
       {
         createAdapter: (id) => ({
@@ -207,3 +277,12 @@ describe("workflow cache resume", () => {
     expect(cachedSteps).toBe(2);
   });
 });
+
+function existsSync(path: string): boolean {
+  try {
+    readFileSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
