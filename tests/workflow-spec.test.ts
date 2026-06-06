@@ -146,9 +146,7 @@ describe("workflowSpecSchema", () => {
     expect(
       workflowSpecSchema.safeParse({
         name: "bad",
-        phases: [
-          { id: "p", title: "P", steps: [{ id: "gate", kind: "gate", condition: {} }] },
-        ],
+        phases: [{ id: "p", title: "P", steps: [{ id: "gate", kind: "gate", condition: {} }] }],
       }).success,
     ).toBe(false);
   });

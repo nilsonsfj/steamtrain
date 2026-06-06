@@ -192,8 +192,7 @@ const workflowConsolidatorStepSchema = z
     ...optionalAgentRunShape,
   })
   .superRefine((step, ctx) => {
-    const agentFields = [step.agent, step.model, step.prompt].filter(Boolean).length;
-    if (agentFields !== 0 && agentFields !== 3) {
+    if ((step.agent || step.model) && !(step.agent && step.model && step.prompt)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "agent-backed consolidator requires agent, model, and prompt together",
