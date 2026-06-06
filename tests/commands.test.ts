@@ -91,7 +91,7 @@ describe("executeSlashCommand", () => {
     expect(result.handled).toBe(true);
     expect(updateWorkspace).toHaveBeenCalledWith("plan", {
       agent: "opencode",
-      model: "openai/gpt-5.4-mini",
+      model: "opencode/gpt-5.4-mini",
     });
   });
 
@@ -121,11 +121,11 @@ describe("executeSlashCommand", () => {
   it("sets opencode model ids containing slashes", () => {
     const updateWorkspace = vi.fn();
     const result = executeSlashCommand(
-      "/model openai/gpt-5.4-mini",
+      "/model opencode/gpt-5.4-mini",
       makeCtx({ mode: "implement", updateWorkspace }),
     );
     expect(result.handled).toBe(true);
-    expect(updateWorkspace).toHaveBeenCalledWith("implement", { model: "openai/gpt-5.4-mini" });
+    expect(updateWorkspace).toHaveBeenCalledWith("implement", { model: "opencode/gpt-5.4-mini" });
   });
 
   it("keeps model when re-selecting the same agent", () => {
@@ -157,7 +157,8 @@ describe("autocompleteSlashCommand", () => {
 
   it("completes model for current agent", () => {
     const result = autocompleteSlashCommand("/model claude-op", listSlashCommands(), makeCtx());
-    expect(result?.value).toContain("claude-opus-4-8");
+    expect(result?.value).toBe("/model claude-opus-4-");
+    expect(result?.suggestions).toContain("claude-opus-4-8");
   });
 
   it("lists all commands for bare slash without jumping to the first", () => {

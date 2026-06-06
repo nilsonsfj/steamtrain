@@ -16,10 +16,36 @@ const AGENT: AgentId = "claude";
 
 /** Known Claude Code model ids (used by `/model` and autocomplete). */
 export const CLAUDE_MODELS = [
+  // Current (https://platform.claude.com/docs/en/about-claude/models/overview)
   "claude-sonnet-4-6",
   "claude-opus-4-8",
   "claude-haiku-4-5",
+  "claude-haiku-4-5-20251001",
+  // Aliases (https://code.claude.com/docs/en/model-config)
+  "sonnet",
+  "opus",
   "haiku",
+  "best",
+  "opusplan",
+  // 1M context
+  "sonnet[1m]",
+  "opus[1m]",
+  "claude-sonnet-4-6[1m]",
+  "claude-opus-4-8[1m]",
+  "claude-opus-4-7[1m]",
+  // Legacy
+  "claude-opus-4-7",
+  "claude-opus-4-6",
+  "claude-sonnet-4-5",
+  "claude-sonnet-4-5-20250929",
+  "claude-opus-4-5",
+  "claude-opus-4-5-20251101",
+  "claude-opus-4-1",
+  "claude-opus-4-1-20250805",
+  "claude-sonnet-4-0",
+  "claude-sonnet-4-20250514",
+  "claude-opus-4-0",
+  "claude-opus-4-20250514",
 ] as const;
 
 /**
