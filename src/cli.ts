@@ -16,8 +16,35 @@ import {
 } from "./workflow";
 import { loadWorkspaceConfig } from "./workspace";
 
+export interface GlobalCliOptions {
+  args: string[];
+  workspacePath?: string;
+  error?: string;
+}
+
+/** Strip global flags (e.g. `-w`) before dispatching subcommands or the TUI. */
+export function parseGlobalArgs(args: string[]): GlobalCliOptions {
+  const rest: string[] = [];
+  let workspacePath: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "-w" || arg === "--workspace") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("-")) {
+        return { args: [], error: `${arg} requires a path argument` };
+      }
+      workspacePath = value;
+      i += 1;
+      continue;
+    }
+    rest.push(arg);
+  }
+  return { args: rest, workspacePath };
+}
+
 export interface CliIO {
   cwd?: string;
+  workspacePath?: string;
   stdin?: Readable;
   stdout?: (text: string) => void;
   stderr?: (text: string) => void;
@@ -48,7 +75,10 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
   const cwd = io.cwd ?? process.cwd();
   const { config, source, warning } = loadConfig(cwd);
   if (warning) err(`${warning}\n`);
-  const { config: workspaces, warning: workspaceWarning } = loadWorkspaceConfig();
+  const { config: workspaces, warning: workspaceWarning } = loadWorkspaceConfig({
+    cwd,
+    customPath: io.workspacePath,
+  });
   if (workspaceWarning) err(`${workspaceWarning}\n`);
   const orchestrator = new Orchestrator(config, workspaces, []);
 
@@ -342,6 +372,9 @@ input + cwd; contents validated with specHash). Pass --fresh to ignore and delet
 the on-disk cache for that run. Parallel runs of the same workflow + input are not supported.
 
 Running steamtrain with no command opens the workflow-first TUI.
+
+Global options (TUI and workflow commands):
+  -w, --workspace <path>   Load workspace presets from a custom workspace.json
 `;
 }
 

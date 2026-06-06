@@ -3,21 +3,34 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  PROJECT_WORKSPACE_FILENAME,
   WORKSPACE_CONFIG_FILENAME,
   loadWorkspaceConfig,
   mergeWorkspaceEntries,
+  projectWorkspaceConfigPath,
+  resolveWorkspaceScope,
   saveWorkspaceConfig,
-  workspacesToPersist,
   workspaceConfigPath,
+  workspaceScopeLabel,
 } from "../src/workspace";
 import { DEFAULT_WORKSPACE_CONFIG } from "../src/workspace/defaults";
 
+function userScope(home: string) {
+  return { kind: "user" as const, path: workspaceConfigPath(home) };
+}
+
 describe("loadWorkspaceConfig", () => {
-  it("returns built-in defaults when the file is missing", () => {
+  it("materializes the user workspace file on first run", () => {
     const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
-    const loaded = loadWorkspaceConfig(home);
+    const path = workspaceConfigPath(home);
+    expect(existsSync(path)).toBe(false);
+
+    const loaded = loadWorkspaceConfig({ home, cwd: home });
     expect(loaded.config).toEqual(DEFAULT_WORKSPACE_CONFIG);
-    expect(loaded.source).toBe("built-in workspace defaults");
+    expect(loaded.scope).toEqual(userScope(home));
+    expect(workspaceScopeLabel(loaded.scope)).toBe("user");
+    expect(existsSync(path)).toBe(true);
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(DEFAULT_WORKSPACE_CONFIG);
     expect(loaded.warning).toBeUndefined();
   });
 
@@ -35,7 +48,7 @@ describe("loadWorkspaceConfig", () => {
       }),
     );
 
-    const loaded = loadWorkspaceConfig(home);
+    const loaded = loadWorkspaceConfig({ home, cwd: home });
     expect(loaded.config.workspaces.map((w) => w.id)).toEqual([
       "plan",
       "implement",
@@ -46,7 +59,61 @@ describe("loadWorkspaceConfig", () => {
       agent: "claude",
       model: "haiku",
     });
-    expect(loaded.source).toBe(workspaceConfigPath(home));
+    expect(loaded.scope.kind).toBe("user");
+  });
+
+  it("prefers project scope when ./workspace.json exists", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "steamtrain-cwd-"));
+    const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
+    mkdirSync(join(home, ".steamtrain"), { recursive: true });
+    writeFileSync(
+      join(home, ".steamtrain", WORKSPACE_CONFIG_FILENAME),
+      JSON.stringify(DEFAULT_WORKSPACE_CONFIG),
+    );
+    writeFileSync(
+      join(cwd, PROJECT_WORKSPACE_FILENAME),
+      JSON.stringify({
+        workspaces: [{ id: "plan", agent: "opencode", model: "openai/gpt-5.4-mini" }],
+      }),
+    );
+
+    const loaded = loadWorkspaceConfig({ home, cwd });
+    expect(loaded.scope).toEqual({
+      kind: "project",
+      path: projectWorkspaceConfigPath(cwd),
+    });
+    expect(loaded.config.workspaces.find((w) => w.id === "plan")).toMatchObject({
+      agent: "opencode",
+      model: "openai/gpt-5.4-mini",
+    });
+  });
+
+  it("materializes and loads a custom workspace file when customPath is set", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "steamtrain-cwd-"));
+    const custom = join(cwd, "team.json");
+    expect(existsSync(custom)).toBe(false);
+
+    const loaded = loadWorkspaceConfig({ cwd, customPath: custom });
+    expect(loaded.scope).toEqual({ kind: "custom", path: custom });
+    expect(workspaceScopeLabel(loaded.scope)).toBe(custom);
+    expect(loaded.config).toEqual(DEFAULT_WORKSPACE_CONFIG);
+    expect(existsSync(custom)).toBe(true);
+  });
+
+  it("loads overrides from an existing custom workspace file", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "steamtrain-cwd-"));
+    const custom = join(cwd, "team.json");
+    writeFileSync(
+      custom,
+      JSON.stringify({
+        workspaces: [{ id: "review", agent: "opencode", model: "openai/gpt-5.4-mini" }],
+      }),
+    );
+
+    const loaded = loadWorkspaceConfig({ cwd, customPath: custom });
+    expect(loaded.config.workspaces.find((w) => w.id === "review")).toMatchObject({
+      agent: "opencode",
+    });
   });
 
   it("warns when duplicate workspace ids appear in the user file", () => {
@@ -63,7 +130,7 @@ describe("loadWorkspaceConfig", () => {
       }),
     );
 
-    const loaded = loadWorkspaceConfig(home);
+    const loaded = loadWorkspaceConfig({ home, cwd: home });
     expect(loaded.warning).toMatch(/duplicate workspace ids/);
     expect(loaded.config.workspaces.find((w) => w.id === "plan")?.model).toBe("claude-opus-4-8");
   });
@@ -82,7 +149,7 @@ describe("loadWorkspaceConfig", () => {
       }),
     );
 
-    const loaded = loadWorkspaceConfig(home);
+    const loaded = loadWorkspaceConfig({ home, cwd: home });
     expect(loaded.warning).toMatch(/reserved workspace id/);
     expect(loaded.config.workspaces.map((w) => w.id)).toEqual([
       "plan",
@@ -92,15 +159,26 @@ describe("loadWorkspaceConfig", () => {
     ]);
   });
 
-  it("falls back to defaults with a warning on invalid json", () => {
+  it("falls back to seed defaults with a warning on invalid json", () => {
     const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
     const dir = join(home, ".steamtrain");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, WORKSPACE_CONFIG_FILENAME), "{ not json");
 
-    const loaded = loadWorkspaceConfig(home);
+    const loaded = loadWorkspaceConfig({ home, cwd: home });
     expect(loaded.config).toEqual(DEFAULT_WORKSPACE_CONFIG);
     expect(loaded.warning).toMatch(/could not parse/);
+  });
+});
+
+describe("resolveWorkspaceScope", () => {
+  it("returns custom scope when customPath is provided", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "steamtrain-cwd-"));
+    const custom = join(cwd, "alt.json");
+    expect(resolveWorkspaceScope({ cwd, customPath: custom })).toEqual({
+      kind: "custom",
+      path: custom,
+    });
   });
 });
 
@@ -115,65 +193,53 @@ describe("mergeWorkspaceEntries", () => {
   });
 });
 
-describe("workspacesToPersist", () => {
-  it("returns only entries that differ from built-in defaults", () => {
-    const persisted = workspacesToPersist({
+describe("saveWorkspaceConfig", () => {
+  it("writes the full workspace list to the user file", () => {
+    const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
+    const scope = userScope(home);
+    const config = {
       workspaces: [
         { id: "plan", agent: "opencode", model: "openai/gpt-5.4-mini" },
         { id: "implement", agent: "opencode", model: "openai/gpt-5.4-mini" },
         { id: "review", agent: "claude", model: "claude-opus-4-8" },
       ],
-    });
-    expect(persisted).toEqual([
-      { id: "plan", agent: "opencode", model: "openai/gpt-5.4-mini" },
-    ]);
-  });
-});
-
-describe("saveWorkspaceConfig", () => {
-  it("writes overrides to ~/.steamtrain/workspace.json", () => {
-    const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
-    const source = saveWorkspaceConfig(
-      {
-        workspaces: [
-          { id: "plan", agent: "opencode", model: "openai/gpt-5.4-mini" },
-          { id: "implement", agent: "opencode", model: "openai/gpt-5.4-mini" },
-          { id: "review", agent: "claude", model: "claude-opus-4-8" },
-        ],
-      },
-      home,
-    );
+    };
+    const label = saveWorkspaceConfig(config, scope);
 
     const path = workspaceConfigPath(home);
-    expect(source).toBe(path);
-    expect(existsSync(path)).toBe(true);
-    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
-      workspaces: [{ id: "plan", agent: "opencode", model: "openai/gpt-5.4-mini" }],
-    });
+    expect(label).toBe("user");
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(config);
 
-    const loaded = loadWorkspaceConfig(home);
-    expect(loaded.config.workspaces.find((w) => w.id === "plan")).toMatchObject({
-      agent: "opencode",
-      model: "openai/gpt-5.4-mini",
-    });
-    expect(loaded.source).toBe(path);
+    const loaded = loadWorkspaceConfig({ home, cwd: home });
+    expect(loaded.config).toEqual(config);
   });
 
-  it("removes the file when config matches built-in defaults", () => {
-    const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
-    saveWorkspaceConfig(
-      {
-        workspaces: [
-          { id: "plan", agent: "opencode", model: "openai/gpt-5.4-mini" },
-          { id: "implement", agent: "opencode", model: "openai/gpt-5.4-mini" },
-          { id: "review", agent: "claude", model: "claude-opus-4-8" },
-        ],
-      },
-      home,
-    );
+  it("writes the full workspace list to the project workspace file", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "steamtrain-cwd-"));
+    const scope = { kind: "project" as const, path: projectWorkspaceConfigPath(cwd) };
+    const config = {
+      workspaces: [
+        { id: "plan", agent: "opencode", model: "openai/gpt-5.4-mini" },
+        { id: "implement", agent: "opencode", model: "openai/gpt-5.4-mini" },
+        { id: "review", agent: "claude", model: "claude-opus-4-8" },
+      ],
+    };
+    const label = saveWorkspaceConfig(config, scope);
 
-    const source = saveWorkspaceConfig(DEFAULT_WORKSPACE_CONFIG, home);
-    expect(source).toBe("built-in workspace defaults");
-    expect(existsSync(workspaceConfigPath(home))).toBe(false);
+    expect(label).toBe("project");
+    expect(JSON.parse(readFileSync(scope.path, "utf8"))).toEqual(config);
+  });
+
+  it("keeps the user file when saving seed defaults", () => {
+    const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
+    const scope = userScope(home);
+    loadWorkspaceConfig({ home, cwd: home });
+
+    const label = saveWorkspaceConfig(DEFAULT_WORKSPACE_CONFIG, scope);
+    expect(label).toBe("user");
+    expect(existsSync(workspaceConfigPath(home))).toBe(true);
+    expect(JSON.parse(readFileSync(workspaceConfigPath(home), "utf8"))).toEqual(
+      DEFAULT_WORKSPACE_CONFIG,
+    );
   });
 });

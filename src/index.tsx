@@ -1,8 +1,8 @@
 import { render } from "ink";
-import { runCli } from "./cli";
+import { parseGlobalArgs, runCli } from "./cli";
 import { loadConfig } from "./config";
 import { App } from "./tui/App";
-import { loadWorkspaceConfig } from "./workspace";
+import { loadWorkspaceConfig, workspaceScopeLabel } from "./workspace";
 
 /**
  * steamtrain entry point.
@@ -11,29 +11,34 @@ import { loadWorkspaceConfig } from "./workspace";
  *   steamtrain            # after `npm run build` + global install
  *
  * With no args, loads project config (defaults + optional steamtrain.json) and
- * workspace presets (~/.steamtrain/workspace.json), then renders the TUI.
- * Workflow subcommands run headlessly for scripts/CI.
+ * workspace presets (~/.steamtrain/workspace.json or ./workspace.json), then
+ * renders the TUI. Workflow subcommands run headlessly for scripts/CI.
  */
 async function main(): Promise<void> {
-  const args = process.argv.slice(2);
+  const { args, workspacePath, error } = parseGlobalArgs(process.argv.slice(2));
+  if (error) {
+    process.stderr.write(`${error}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
   if (args.length > 0) {
-    process.exitCode = await runCli(args);
+    process.exitCode = await runCli(args, { workspacePath });
     return;
   }
 
   const { config, source, warning } = loadConfig();
-  const {
-    config: workspaces,
-    source: workspaceSource,
-    warning: workspaceWarning,
-  } = loadWorkspaceConfig();
+  const { config: workspaces, scope, warning: workspaceWarning } = loadWorkspaceConfig({
+    customPath: workspacePath,
+  });
   const app = render(
     <App
       config={config}
       configSource={source}
       configWarning={warning}
       workspaces={workspaces}
-      workspaceSource={workspaceSource}
+      workspaceScope={scope}
+      workspaceLabel={workspaceScopeLabel(scope)}
       workspaceWarning={workspaceWarning}
     />,
   );

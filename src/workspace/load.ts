@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { DEFAULT_WORKSPACE_CONFIG } from "./defaults";
 import {
   type WorkspaceConfig,
@@ -12,13 +12,34 @@ import {
 
 export const WORKSPACE_CONFIG_DIR = ".steamtrain";
 export const WORKSPACE_CONFIG_FILENAME = "workspace.json";
+/** Project-level workspace presets: `./workspace.json` in the working directory. */
+export const PROJECT_WORKSPACE_FILENAME = "workspace.json";
+
+export type WorkspaceScopeKind = "user" | "project" | "custom";
+
+export interface WorkspaceScope {
+  kind: WorkspaceScopeKind;
+  /** Absolute path used for load/save. */
+  path: string;
+}
+
+export interface WorkspaceLoadOptions {
+  home?: string;
+  cwd?: string;
+  /** When set, load/save only this file. */
+  customPath?: string;
+}
 
 export interface LoadedWorkspaceConfig {
   config: WorkspaceConfig;
-  /** Absolute path the config came from, or a human note about the fallback. */
-  source: string;
-  /** Non-fatal problem encountered while loading (kept defaults). */
+  scope: WorkspaceScope;
+  /** Non-fatal problem encountered while loading. */
   warning?: string;
+}
+
+/** Status-bar label: `user`, `project`, or the absolute custom file path. */
+export function workspaceScopeLabel(scope: WorkspaceScope): string {
+  return scope.kind === "custom" ? scope.path : scope.kind;
 }
 
 /** Default path: `~/.steamtrain/workspace.json`. */
@@ -26,39 +47,112 @@ export function workspaceConfigPath(home: string = homedir()): string {
   return join(home, WORKSPACE_CONFIG_DIR, WORKSPACE_CONFIG_FILENAME);
 }
 
-/** Load defaults, then merge `~/.steamtrain/workspace.json` when present. */
-export function loadWorkspaceConfig(home: string = homedir()): LoadedWorkspaceConfig {
-  const path = workspaceConfigPath(home);
-  if (!existsSync(path)) {
-    return { config: DEFAULT_WORKSPACE_CONFIG, source: "built-in workspace defaults" };
+export function projectWorkspaceConfigPath(cwd: string = process.cwd()): string {
+  return join(cwd, PROJECT_WORKSPACE_FILENAME);
+}
+
+/** Resolve which workspace file is in scope for load/save. */
+export function resolveWorkspaceScope(options: WorkspaceLoadOptions = {}): WorkspaceScope {
+  const home = options.home ?? homedir();
+  const cwd = options.cwd ?? process.cwd();
+  if (options.customPath) {
+    return { kind: "custom", path: resolve(options.customPath) };
+  }
+  const projectPath = projectWorkspaceConfigPath(cwd);
+  if (existsSync(projectPath)) {
+    return { kind: "project", path: projectPath };
+  }
+  return { kind: "user", path: workspaceConfigPath(home) };
+}
+
+/** Load workspace presets from user/project/custom files (materializing the user file on first run). */
+export function loadWorkspaceConfig(
+  options: WorkspaceLoadOptions | string = {},
+): LoadedWorkspaceConfig {
+  const opts: WorkspaceLoadOptions =
+    typeof options === "string" ? { home: options } : options;
+  const home = opts.home ?? homedir();
+  const cwd = opts.cwd ?? process.cwd();
+
+  if (opts.customPath) {
+    const path = resolve(opts.customPath);
+    const scope: WorkspaceScope = { kind: "custom", path };
+    materializeWorkspaceFile(path);
+    return loadWorkspaceFile(path, scope);
   }
 
+  const userPath = workspaceConfigPath(home);
+  materializeWorkspaceFile(userPath);
+
+  let config: WorkspaceConfig;
+  let warning: string | undefined;
+  const userLoaded = loadWorkspaceFile(userPath, { kind: "user", path: userPath });
+  config = userLoaded.config;
+  warning = userLoaded.warning;
+  let scope = userLoaded.scope;
+
+  const projectPath = projectWorkspaceConfigPath(cwd);
+  if (existsSync(projectPath)) {
+    const projectLoaded = loadWorkspaceFile(
+      projectPath,
+      { kind: "project", path: projectPath },
+      config,
+    );
+    config = projectLoaded.config;
+    warning = joinWarnings(warning, projectLoaded.warning);
+    scope = projectLoaded.scope;
+  }
+
+  return { config, scope, warning };
+}
+
+/** Write the seed workspace list when no file exists yet. */
+function materializeWorkspaceFile(path: string): void {
+  if (existsSync(path)) return;
+  writeWorkspaceFile(path, DEFAULT_WORKSPACE_CONFIG.workspaces);
+}
+
+function writeWorkspaceFile(path: string, workspaces: WorkspaceEntry[]): void {
+  mkdirSync(join(path, ".."), { recursive: true });
+  const payload: WorkspaceFile = { workspaces };
+  const temp = `${path}.${process.pid}.tmp`;
+  writeFileSync(temp, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  renameSync(temp, path);
+}
+
+function loadWorkspaceFile(
+  path: string,
+  scope: WorkspaceScope,
+  base: WorkspaceConfig = DEFAULT_WORKSPACE_CONFIG,
+): LoadedWorkspaceConfig {
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(path, "utf8"));
   } catch (err) {
     return {
-      config: DEFAULT_WORKSPACE_CONFIG,
-      source: "built-in workspace defaults",
-      warning: `could not parse ${WORKSPACE_CONFIG_FILENAME}: ${err instanceof Error ? err.message : String(err)}`,
+      config: base,
+      scope,
+      warning: `could not parse ${path}: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 
   const result = workspaceFileSchema.safeParse(parsed);
   if (!result.success) {
     return {
-      config: DEFAULT_WORKSPACE_CONFIG,
-      source: "built-in workspace defaults",
-      warning: `invalid ${WORKSPACE_CONFIG_FILENAME}: ${result.error.issues[0]?.message ?? "schema error"}`,
+      config: base,
+      scope,
+      warning: `invalid ${path}: ${result.error.issues[0]?.message ?? "schema error"}`,
     };
   }
 
   const { workspaces, warning: reservedWarning } = dropReservedWorkspaceIds(result.data.workspaces);
-  const duplicateWarning = duplicateWorkspaceIdWarning(workspaces);
-  const config = mergeWorkspaceConfig(DEFAULT_WORKSPACE_CONFIG, { workspaces });
+  const duplicateWarning = duplicateWorkspaceIdWarning(workspaces, path);
+  const config = workspaces?.length
+    ? { workspaces: mergeWorkspaceEntries(base.workspaces, workspaces) }
+    : base;
   return {
     config,
-    source: path,
+    scope,
     warning: joinWarnings(reservedWarning, duplicateWarning),
   };
 }
@@ -81,7 +175,10 @@ function joinWarnings(...parts: Array<string | undefined>): string | undefined {
   return text || undefined;
 }
 
-function duplicateWorkspaceIdWarning(entries: WorkspaceEntry[] | undefined): string | undefined {
+function duplicateWorkspaceIdWarning(
+  entries: WorkspaceEntry[] | undefined,
+  filePath: string,
+): string | undefined {
   if (!entries || entries.length === 0) return undefined;
   const seen = new Set<string>();
   const duplicates = new Set<string>();
@@ -90,10 +187,10 @@ function duplicateWorkspaceIdWarning(entries: WorkspaceEntry[] | undefined): str
     seen.add(entry.id);
   }
   if (duplicates.size === 0) return undefined;
-  return `duplicate workspace ids in ${WORKSPACE_CONFIG_FILENAME}: ${[...duplicates].join(", ")} (last wins)`;
+  return `duplicate workspace ids in ${filePath}: ${[...duplicates].join(", ")} (last wins)`;
 }
 
-/** Merge user workspace entries by `id` onto defaults (override in place, append new ids). */
+/** Merge workspace entries by `id` (override in place, append new ids). */
 export function mergeWorkspaceConfig(
   base: WorkspaceConfig,
   override: WorkspaceFile,
@@ -119,43 +216,11 @@ export function mergeWorkspaceEntries(
   return order.map((id) => byId.get(id)!);
 }
 
-const BUILTIN_WORKSPACE_SOURCE = "built-in workspace defaults";
-
-function workspaceEntryEquals(a: WorkspaceEntry, b: WorkspaceEntry): boolean {
-  return a.agent === b.agent && a.model === b.model && a.label === b.label;
-}
-
-/** Entries that differ from built-in defaults or are not part of the defaults. */
-export function workspacesToPersist(config: WorkspaceConfig): WorkspaceEntry[] {
-  const defaultById = new Map(DEFAULT_WORKSPACE_CONFIG.workspaces.map((w) => [w.id, w]));
-  return config.workspaces.filter((entry) => {
-    const def = defaultById.get(entry.id);
-    if (!def) return true;
-    return !workspaceEntryEquals(entry, def);
-  });
-}
-
 /**
- * Persist workspace overrides to `~/.steamtrain/workspace.json`.
- * Returns the config source label (path or built-in fallback note).
+ * Persist the full workspace list to the file for the active scope.
+ * Returns the status-bar label (`user`, `project`, or custom path).
  */
-export function saveWorkspaceConfig(
-  config: WorkspaceConfig,
-  home: string = homedir(),
-): string {
-  const path = workspaceConfigPath(home);
-  const workspaces = workspacesToPersist(config);
-
-  if (workspaces.length === 0) {
-    if (existsSync(path)) unlinkSync(path);
-    return BUILTIN_WORKSPACE_SOURCE;
-  }
-
-  const dir = join(home, WORKSPACE_CONFIG_DIR);
-  mkdirSync(dir, { recursive: true });
-  const payload: WorkspaceFile = { workspaces };
-  const temp = `${path}.${process.pid}.tmp`;
-  writeFileSync(temp, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  renameSync(temp, path);
-  return path;
+export function saveWorkspaceConfig(config: WorkspaceConfig, scope: WorkspaceScope): string {
+  writeWorkspaceFile(scope.path, config.workspaces);
+  return workspaceScopeLabel(scope);
 }

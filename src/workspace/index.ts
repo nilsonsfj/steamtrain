@@ -15,11 +15,17 @@ export { DEFAULT_WORKSPACE_CONFIG } from "./defaults";
 export {
   WORKSPACE_CONFIG_DIR,
   WORKSPACE_CONFIG_FILENAME,
+  PROJECT_WORKSPACE_FILENAME,
   type LoadedWorkspaceConfig,
+  type WorkspaceLoadOptions,
+  type WorkspaceScope,
+  type WorkspaceScopeKind,
   loadWorkspaceConfig,
   mergeWorkspaceConfig,
   mergeWorkspaceEntries,
+  projectWorkspaceConfigPath,
+  resolveWorkspaceScope,
   saveWorkspaceConfig,
-  workspacesToPersist,
   workspaceConfigPath,
+  workspaceScopeLabel,
 } from "./load";

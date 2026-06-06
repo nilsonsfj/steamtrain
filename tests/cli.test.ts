@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { runCli } from "../src/cli";
+import { parseGlobalArgs, runCli } from "../src/cli";
 import { BUNDLED_WORKFLOWS } from "../src/workflow/bundled";
 import {
   WORKFLOW_CACHE_DIR,
@@ -32,6 +32,26 @@ function capture() {
     },
   };
 }
+
+describe("parseGlobalArgs", () => {
+  it("extracts -w/--workspace before subcommands", () => {
+    expect(parseGlobalArgs(["-w", "./ws.json", "workflow", "list"])).toEqual({
+      args: ["workflow", "list"],
+      workspacePath: "./ws.json",
+    });
+    expect(parseGlobalArgs(["workflow", "list", "--workspace", "/tmp/ws.json"])).toEqual({
+      args: ["workflow", "list"],
+      workspacePath: "/tmp/ws.json",
+    });
+  });
+
+  it("reports a missing workspace path", () => {
+    expect(parseGlobalArgs(["-w"])).toEqual({
+      args: [],
+      error: "-w requires a path argument",
+    });
+  });
+});
 
 describe("runCli", () => {
   it("lists workflows as the primary CLI surface", async () => {

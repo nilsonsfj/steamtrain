@@ -22,7 +22,7 @@ import {
   persistWorkflowStepDone,
   workflowCacheKey,
 } from "../workflow";
-import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
+import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId, WorkspaceScope } from "../workspace";
 import { saveWorkspaceConfig, workspaceById, workspaceLabel } from "../workspace";
 import { CommandSuggestionMenu, suggestionMenuHeight } from "./CommandSuggestionMenu";
 import { EventStream } from "./EventStream";
@@ -49,7 +49,8 @@ interface AppProps {
   configSource: string;
   configWarning?: string;
   workspaces: WorkspaceConfig;
-  workspaceSource: string;
+  workspaceScope: WorkspaceScope;
+  workspaceLabel: string;
   workspaceWarning?: string;
 }
 
@@ -61,7 +62,8 @@ export function App({
   configSource,
   configWarning,
   workspaces,
-  workspaceSource,
+  workspaceScope,
+  workspaceLabel,
   workspaceWarning,
 }: AppProps) {
   const { exit } = useApp();
@@ -71,7 +73,7 @@ export function App({
   const [doctor, setDoctor] = useState<DoctorResult[] | null>(null);
   const [mode, setMode] = useState<Mode>("workflow");
   const [runtimeWorkspaces, setRuntimeWorkspaces] = useState<WorkspaceConfig>(workspaces);
-  const [activeWorkspaceSource, setActiveWorkspaceSource] = useState(workspaceSource);
+  const [activeWorkspaceLabel, setActiveWorkspaceLabel] = useState(workspaceLabel);
   const [value, setValue] = useState("");
   const [commandSuggestions, setCommandSuggestions] = useState<readonly string[]>([]);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
@@ -102,10 +104,10 @@ export function App({
         w.id === id ? { ...w, ...patch } : w,
       ),
     };
-    const source = saveWorkspaceConfig(next);
-    setActiveWorkspaceSource(source);
+    const label = saveWorkspaceConfig(next, workspaceScope);
+    setActiveWorkspaceLabel(label);
     setRuntimeWorkspaces(next);
-  }, []);
+  }, [workspaceScope]);
 
   const slashCtx = useMemo<SlashCommandContext>(
     () => ({
@@ -532,7 +534,7 @@ export function App({
       <StatusBar
         doctor={doctor}
         configSource={configSource}
-        workspaceSource={activeWorkspaceSource}
+        workspaceLabel={activeWorkspaceLabel}
         running={running}
       />
       {isWorkflow ? (

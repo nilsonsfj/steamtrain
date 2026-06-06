@@ -26,7 +26,7 @@ describe("TUI components", () => {
       <StatusBar
         doctor={doctor}
         configSource="built-in defaults"
-        workspaceSource="built-in workspace defaults"
+        workspaceLabel="user"
         running={false}
       />,
     );

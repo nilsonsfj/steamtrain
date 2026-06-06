@@ -1,7 +1,7 @@
 import type { WorkspaceConfig } from "./types";
 
 /**
- * Built-in workspace presets for a clean config slate.
+ * Seed workspace presets written to ~/.steamtrain/workspace.json on first run.
  *
  * - `plan`      → Claude Code (strong reasoning for breaking work down)
  * - `implement` → OpenCode (fast, cheap edits via a non-Anthropic provider)
