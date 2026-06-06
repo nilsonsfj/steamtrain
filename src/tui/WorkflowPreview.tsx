@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import { Box, Text } from "ink";
 import { truncate } from "../agents/util";
 import type { DispatchCheck } from "../orchestrator";
@@ -167,21 +168,22 @@ function SpecStepDetail({ entry, width }: { entry: FlatSpecStep; width: number }
   const { step, phase } = entry;
   const kind = workflowStepKind(step);
   const lines = specDetailLines(step);
+  const prompt = promptForStep(step);
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1}>
       <Text color="cyan">
         {step.id} · {kind} · phase {phase.title}
       </Text>
-      {lines.map((line) => (
-        <Text key={line} color="gray" wrap="truncate-end">
+      {lines.map((line, i) => (
+        <Text key={i} color="gray" wrap="truncate-end">
           {line}
         </Text>
       ))}
-      {promptForStep(step) ? (
+      {prompt ? (
         <Box width={width} flexDirection="column">
           <Text color="gray">prompt:</Text>
-          <Text wrap="wrap">{truncate(promptForStep(step)!, 900)}</Text>
+          <Text wrap="wrap">{truncate(prompt, 900)}</Text>
         </Box>
       ) : null}
     </Box>
@@ -266,9 +268,4 @@ function blockSummary(spec: WorkflowSpec): string {
     }
   }
   return [...counts.entries()].map(([kind, count]) => `${kind}:${count}`).join(" · ");
-}
-
-function basename(p: string): string {
-  const parts = p.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] ?? p;
 }
