@@ -5,10 +5,11 @@ import { STATUS_STYLE } from "./theme";
 interface StatusBarProps {
   doctor: DoctorResult[] | null;
   configSource: string;
+  workspaceSource: string;
   running: boolean;
 }
 
-export function StatusBar({ doctor, configSource, running }: StatusBarProps) {
+export function StatusBar({ doctor, configSource, workspaceSource, running }: StatusBarProps) {
   return (
     <Box borderStyle="round" borderColor="gray" paddingX={1} justifyContent="space-between">
       <Box>
@@ -30,6 +31,7 @@ export function StatusBar({ doctor, configSource, running }: StatusBarProps) {
         {running ? <Text color="yellow">● working</Text> : <Text color="gray">idle</Text>}
         <Text color="gray">
           {"  "}cfg: {shorten(configSource)}
+          {"  "}ws: {shorten(workspaceSource)}
         </Text>
       </Box>
     </Box>

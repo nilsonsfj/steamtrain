@@ -23,7 +23,12 @@ describe("TUI components", () => {
       },
     ];
     const { lastFrame } = render(
-      <StatusBar doctor={doctor} configSource="built-in defaults" running={false} />,
+      <StatusBar
+        doctor={doctor}
+        configSource="built-in defaults"
+        workspaceSource="built-in workspace defaults"
+        running={false}
+      />,
     );
     const frame = lastFrame() ?? "";
     expect(frame).toContain("claude");

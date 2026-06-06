@@ -1,24 +1,31 @@
 import { Box, Text } from "ink";
-import type { SteamtrainConfig } from "../config";
-import { MODES, type Mode, isTaskType } from "./modes";
+import type { WorkspaceEntry } from "../workspace";
+import { workspaceLabel } from "../workspace";
+import { type Mode, isWorkspaceMode } from "./modes";
 import { AGENT_COLOR } from "./theme";
 
 interface TaskSelectorProps {
-  config: SteamtrainConfig;
+  modes: readonly Mode[];
+  workspaceMap: Map<string, WorkspaceEntry>;
   active: Mode;
   /** Name of the currently selected workflow (shown when in workflow mode). */
   workflowName?: string;
 }
 
-/** Chips for plan/implement/review/workflow; the active one shows its target. */
-export function TaskSelector({ config, active, workflowName }: TaskSelectorProps) {
-  const current = isTaskType(active) ? config.tasks[active] : undefined;
+/** Mode bar: workflow plus user-configured workspace presets. */
+export function TaskSelector({ modes, workspaceMap, active, workflowName }: TaskSelectorProps) {
+  const current: WorkspaceEntry | undefined = isWorkspaceMode(active)
+    ? workspaceMap.get(active)
+    : undefined;
+
   return (
     <Box paddingX={1} flexDirection="row" justifyContent="space-between">
       <Box>
         <Text color="gray">mode </Text>
-        {MODES.map((mode) => {
+        {modes.map((mode) => {
           const isActive = mode === active;
+          const entry = workspaceMap.get(mode);
+          const label = mode === "workflow" ? "workflow" : entry ? workspaceLabel(entry) : mode;
           return (
             <Box key={mode} marginRight={1}>
               <Text
@@ -27,7 +34,7 @@ export function TaskSelector({ config, active, workflowName }: TaskSelectorProps
                 bold={isActive}
               >
                 {" "}
-                {mode}{" "}
+                {label}{" "}
               </Text>
             </Box>
           );

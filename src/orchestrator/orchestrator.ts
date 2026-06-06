@@ -1,5 +1,5 @@
 import { type AgentAdapter, createAdapter } from "../agents";
-import type { SteamtrainConfig, TaskConfig, TaskType } from "../config";
+import type { SteamtrainConfig } from "../config";
 import type { DoctorResult } from "../doctor";
 import type { AgentEvent, AgentId } from "../types/events";
 import {
@@ -11,12 +11,14 @@ import {
   runWorkflow,
   validateWorkflow,
 } from "../workflow";
+import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
+import { workspaceById } from "../workspace";
 
 const DEFAULT_MAX_CONCURRENCY = 3;
 
-export interface ResolvedTask {
-  type: TaskType;
-  taskConfig: TaskConfig;
+export interface ResolvedWorkspace {
+  id: WorkspaceId;
+  entry: WorkspaceEntry;
   adapter: AgentAdapter;
   health?: DoctorResult;
 }
@@ -27,48 +29,57 @@ export interface DispatchCheck {
 }
 
 /**
- * Routes a task type to the right adapter + model, gates dispatch on doctor
+ * Routes workspace dispatches to the right adapter + model, gates on doctor
  * health, and streams normalized events for a run.
  */
 export class Orchestrator {
+  private readonly workspaceMap: Map<WorkspaceId, WorkspaceEntry>;
+
   constructor(
     private readonly config: SteamtrainConfig,
+    workspaces: WorkspaceConfig,
     private doctor: DoctorResult[],
-  ) {}
+  ) {
+    this.workspaceMap = workspaceById(workspaces);
+  }
 
   setDoctor(results: DoctorResult[]): void {
     this.doctor = results;
   }
 
-  resolve(type: TaskType): ResolvedTask {
-    const taskConfig = this.config.tasks[type];
-    const adapter = createAdapter(taskConfig.agent, this.config.binaries?.[taskConfig.agent]);
-    const health = this.doctor.find((d) => d.agent === taskConfig.agent);
-    return { type, taskConfig, adapter, health };
+  resolve(id: WorkspaceId): ResolvedWorkspace {
+    const entry = this.workspaceMap.get(id);
+    if (!entry) throw new Error(`unknown workspace '${id}'`);
+    const adapter = createAdapter(entry.agent, this.config.binaries?.[entry.agent]);
+    const health = this.doctor.find((d) => d.agent === entry.agent);
+    return { id, entry, adapter, health };
   }
 
-  /** Whether a task may be dispatched given current agent health. */
-  canDispatch(type: TaskType): DispatchCheck {
-    const { taskConfig, health } = this.resolve(type);
+  /** Whether a workspace may be dispatched given current agent health. */
+  canDispatch(id: WorkspaceId): DispatchCheck {
+    const entry = this.workspaceMap.get(id);
+    if (!entry) return { ok: false, reason: `unknown workspace '${id}'` };
+
+    const health = this.doctor.find((d) => d.agent === entry.agent);
     if (!health) {
-      return { ok: false, reason: `${taskConfig.agent}: health unknown (doctor has not run yet)` };
+      return { ok: false, reason: `${entry.agent}: health unknown (doctor has not run yet)` };
     }
     if (health.status !== "ok") {
       const detail = health.detail ?? health.message;
       return {
         ok: false,
-        reason: `${taskConfig.agent} is ${health.status} — ${detail}`,
+        reason: `${entry.agent} is ${health.status} — ${detail}`,
       };
     }
     return { ok: true };
   }
 
-  /** Stream normalized events for a task run. */
-  run(type: TaskType, prompt: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
-    const { adapter, taskConfig } = this.resolve(type);
+  /** Stream normalized events for a workspace dispatch. */
+  run(id: WorkspaceId, prompt: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
+    const { adapter, entry } = this.resolve(id);
     return adapter.run({
       prompt,
-      model: taskConfig.model,
+      model: entry.model,
       cwd: process.cwd(),
       timeoutMs: this.config.timeoutMs,
       signal,
