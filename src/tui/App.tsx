@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { Box, Text, useApp, useInput } from "ink";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { formatAgentTarget } from "../agents";
+import { refreshOpencodeVariantCache } from "../agents/models";
 import {
   applySlashSuggestion,
   autocompleteSlashCommand,
@@ -161,6 +162,11 @@ export function App({
       .then((results) => {
         if (!active) return;
         setDoctor(results);
+        const opencode = results.find((d) => d.agent === "opencode");
+        if (opencode?.status === "ok") {
+          const binary = config.binaries?.opencode ?? opencode.binaryPath ?? "opencode";
+          void refreshOpencodeVariantCache(binary);
+        }
       })
       .catch((err) => {
         if (!active) return;

@@ -1,4 +1,4 @@
-import { effortsForAgent } from "../../agents";
+import { effortsForModel, supportsEffort } from "../../agents";
 import { isWorkspaceMode } from "../../tui/modes";
 import type { SlashCommand } from "../types";
 
@@ -24,16 +24,28 @@ export const effortCommand: SlashCommand = {
       };
     }
 
-    const efforts = effortsForAgent(entry.agent);
+    const efforts = effortsForModel(entry.agent, entry.model);
     if (args.length === 0) {
       const current = entry.effort ?? "default";
+      if (!supportsEffort(entry.agent, entry.model)) {
+        return {
+          handled: true,
+          clearInput: true,
+          notices: [
+            {
+              level: "info",
+              text: `${entry.model} does not support effort levels (current: ${current})`,
+            },
+          ],
+        };
+      }
       return {
         handled: true,
         clearInput: true,
         notices: [
           {
             level: "info",
-            text: `effort for ${entry.agent}: ${efforts.join(", ")} (current: ${current})`,
+            text: `effort for ${entry.model}: ${efforts.join(", ")} (current: ${current})`,
           },
         ],
       };
@@ -45,7 +57,20 @@ export const effortCommand: SlashCommand = {
       return {
         handled: true,
         clearInput: true,
-        notices: [{ level: "info", text: `effort cleared for '${ctx.mode}' (agent default)` }],
+        notices: [{ level: "info", text: `effort cleared for '${ctx.mode}' (model default)` }],
+      };
+    }
+
+    if (!supportsEffort(entry.agent, entry.model)) {
+      return {
+        handled: true,
+        clearInput: true,
+        notices: [
+          {
+            level: "error",
+            text: `${entry.model} does not support effort levels`,
+          },
+        ],
       };
     }
 
@@ -56,7 +81,7 @@ export const effortCommand: SlashCommand = {
         notices: [
           {
             level: "error",
-            text: `unknown effort '${next}' for ${entry.agent}; try: ${efforts.join(", ")} or clear`,
+            text: `unknown effort '${next}' for ${entry.model}; try: ${efforts.join(", ")} or clear`,
           },
         ],
       };
@@ -74,6 +99,8 @@ export const effortCommand: SlashCommand = {
     const entry = ctx.workspaceMap.get(ctx.mode);
     if (!entry) return [];
     if (args.length > 1) return [];
-    return [...effortsForAgent(entry.agent), "clear"];
+    const efforts = effortsForModel(entry.agent, entry.model);
+    if (efforts.length === 0) return ["clear"];
+    return [...efforts, "clear"];
   },
 };

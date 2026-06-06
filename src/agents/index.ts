@@ -6,7 +6,13 @@ import { OpenCodeAdapter } from "./opencode";
 export type { AgentAdapter, AgentRunOptions } from "./adapter";
 export { runAgentProcess } from "./adapter";
 export { ClaudeCodeAdapter, CLAUDE_MODELS, createClaudeMapper } from "./claude";
-export { AGENT_IDS, defaultModelForAgent, effortsForAgent, formatAgentTarget, isAgentId, modelsForAgent } from "./models";
+export { AGENT_IDS, defaultModelForAgent, effortForModelChange, effortsForModel, formatAgentTarget, isAgentId, modelsForAgent, refreshOpencodeVariantCache, supportsEffort } from "./models";
+export {
+  clearOpencodeVariantCacheForTests,
+  parseOpencodeModelsVerbose,
+  setOpencodeVariantCacheForTests,
+} from "./opencode-variants";
+export { fallbackOpencodeEfforts } from "./opencode-efforts-fallback";
 export { OpenCodeAdapter, OPENCODE_MODELS, createOpenCodeMapper } from "./opencode";
 export { LineBuffer } from "./line-buffer";
 export { runProcessLines } from "./spawn";

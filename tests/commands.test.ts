@@ -187,6 +187,42 @@ describe("executeSlashCommand", () => {
     expect(result.handled).toBe(true);
     expect(result.notices?.[0]?.level).toBe("error");
   });
+
+  it("rejects xhigh for sonnet 4.6", () => {
+    const updateWorkspace = vi.fn();
+    const result = executeSlashCommand(
+      "/effort xhigh",
+      makeCtx({
+        updateWorkspace,
+        workspaceMap: workspaceById({
+          workspaces: [{ id: "plan", agent: "claude", model: "claude-sonnet-4-6" }],
+        }),
+      }),
+    );
+    expect(result.handled).toBe(true);
+    expect(result.notices?.[0]?.level).toBe("error");
+    expect(updateWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("clears effort when switching to a model without effort support", () => {
+    const updateWorkspace = vi.fn();
+    const result = executeSlashCommand(
+      "/model claude-haiku-4-5",
+      makeCtx({
+        updateWorkspace,
+        workspaceMap: workspaceById({
+          workspaces: [
+            { id: "plan", agent: "claude", model: "claude-opus-4-8", effort: "max" },
+          ],
+        }),
+      }),
+    );
+    expect(result.handled).toBe(true);
+    expect(updateWorkspace).toHaveBeenCalledWith("plan", {
+      model: "claude-haiku-4-5",
+      effort: undefined,
+    });
+  });
 });
 
 describe("autocompleteSlashCommand", () => {

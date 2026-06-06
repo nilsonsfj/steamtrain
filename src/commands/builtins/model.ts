@@ -1,4 +1,4 @@
-import { modelsForAgent } from "../../agents";
+import { effortForModelChange, modelsForAgent } from "../../agents";
 import { isWorkspaceMode } from "../../tui/modes";
 import type { SlashCommand } from "../types";
 
@@ -52,7 +52,10 @@ export const modelCommand: SlashCommand = {
       };
     }
 
-    ctx.updateWorkspace(ctx.mode, { model: next });
+    ctx.updateWorkspace(ctx.mode, {
+      model: next,
+      effort: effortForModelChange(entry.agent, next, entry.effort),
+    });
     return {
       handled: true,
       clearInput: true,
