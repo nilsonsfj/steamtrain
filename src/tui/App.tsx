@@ -18,6 +18,7 @@ import { PromptInput } from "./PromptInput";
 import { StatusBar } from "./StatusBar";
 import { TaskSelector } from "./TaskSelector";
 import { WorkflowPicker } from "./WorkflowPicker";
+import { WorkflowPreview, flattenSpecSteps } from "./WorkflowPreview";
 import { WorkflowView } from "./WorkflowView";
 import { Banner } from "./banner";
 import { type Mode, buildModes, nextMode } from "./modes";
@@ -59,6 +60,7 @@ export function App({
   const [wf, wfDispatch] = useReducer(workflowReducer, initialWorkflowState);
   const [workflowIndex, setWorkflowIndex] = useState(0);
   const [stepIndex, setStepIndex] = useState(0);
+  const [wfPreview, setWfPreview] = useState<{ name: string; input: string } | null>(null);
   const [wfNotice, setWfNotice] = useState<string | null>(null);
   const activeWorkflowRef = useRef<string | undefined>(undefined);
   const activeWorkflowInputRef = useRef<string | undefined>(undefined);
@@ -118,6 +120,8 @@ export function App({
   }, [config]);
 
   const totalWfSteps = wf.phases.reduce((n, p) => n + p.steps.length, 0);
+  const previewSpec = wfPreview ? orchestrator.listWorkflows()[wfPreview.name] : undefined;
+  const previewStepCount = previewSpec ? flattenSpecSteps(previewSpec).length : 0;
 
   const runWorkflow = useCallback(
     (name: string, input: string, opts?: { reuseMemoryCache?: boolean }) => {
@@ -190,11 +194,19 @@ export function App({
           runWorkflow(activeWorkflowRef.current, prompt, { reuseMemoryCache: true });
           return;
         }
+        // Preview screen: Enter dispatches the workflow.
+        if (wfPreview) {
+          wfDispatch({ type: "reset" });
+          setStepIndex(0);
+          const name = wfPreview.name;
+          setWfPreview(null);
+          runWorkflow(name, prompt);
+          return;
+        }
         const entry = workflowEntries[workflowIndex];
         if (!entry) return;
-        wfDispatch({ type: "reset" });
         setStepIndex(0);
-        runWorkflow(entry.name, prompt);
+        setWfPreview({ name: entry.name, input: prompt });
         return;
       }
 
@@ -251,6 +263,7 @@ export function App({
       wf.started,
       workflowEntries,
       workflowIndex,
+      wfPreview,
       runWorkflow,
       workspaceMap,
     ],
@@ -267,30 +280,41 @@ export function App({
         abortRef.current?.abort();
         return;
       }
-      // Not running: in workflow mode, back out of a finished run to the picker.
-      if (mode === "workflow" && wf.started) {
-        wfDispatch({ type: "reset" });
-        setStepIndex(0);
-        activeWorkflowRef.current = undefined;
-        activeWorkflowInputRef.current = undefined;
-        workflowCacheRef.current = new Map();
-        setWfNotice(null);
+      // Not running: preview → picker, or finished run → picker.
+      if (mode === "workflow") {
+        if (wfPreview) {
+          setWfPreview(null);
+          setStepIndex(0);
+          return;
+        }
+        if (wf.started) {
+          wfDispatch({ type: "reset" });
+          setStepIndex(0);
+          activeWorkflowRef.current = undefined;
+          activeWorkflowInputRef.current = undefined;
+          workflowCacheRef.current = new Map();
+          setWfNotice(null);
+        }
       }
       return;
     }
     if (key.tab && !running) {
+      setWfPreview(null);
       setMode((prev) => nextMode(prev, modes));
       return;
     }
     if (mode === "workflow") {
       if (key.upArrow) {
         if (wf.started) setStepIndex((i) => Math.max(0, i - 1));
+        else if (wfPreview) setStepIndex((i) => Math.max(0, i - 1));
         else setWorkflowIndex((i) => Math.max(0, i - 1));
         return;
       }
       if (key.downArrow) {
         if (wf.started) setStepIndex((i) => Math.min(Math.max(0, totalWfSteps - 1), i + 1));
-        else setWorkflowIndex((i) => Math.min(workflowEntries.length - 1, i + 1));
+        else if (wfPreview) {
+          setStepIndex((i) => Math.min(Math.max(0, previewStepCount - 1), i + 1));
+        } else setWorkflowIndex((i) => Math.min(workflowEntries.length - 1, i + 1));
       }
     }
   });
@@ -322,6 +346,15 @@ export function App({
             height={streamHeight}
             width={columns}
             selectedIndex={stepIndex}
+          />
+        ) : wfPreview && previewSpec ? (
+          <WorkflowPreview
+            spec={previewSpec}
+            input={value.trim() || wfPreview.input}
+            width={columns}
+            height={streamHeight}
+            selectedIndex={stepIndex}
+            dispatchCheck={orchestrator.canDispatchWorkflow(wfPreview.name)}
           />
         ) : (
           <WorkflowPicker
@@ -357,7 +390,7 @@ export function App({
         running={running}
       />
       <Box paddingX={1}>
-        <Text color="gray">{hint(mode, wf.started, running)}</Text>
+        <Text color="gray">{hint(mode, wf.started, !!wfPreview, running)}</Text>
       </Box>
     </Box>
   );
@@ -370,12 +403,16 @@ function workspaceStreamLabel(mode: Mode, workspaceMap: Map<string, WorkspaceEnt
   return `${workspaceLabel(entry)} · ${entry.agent}/${entry.model}`;
 }
 
-function hint(mode: Mode, wfStarted: boolean, running: boolean): string {
+function hint(mode: Mode, wfStarted: boolean, wfPreviewing: boolean, running: boolean): string {
   if (running) return "Esc cancel · Ctrl+C quit";
   if (mode === "workflow") {
-    return wfStarted
-      ? "↑/↓ step · Enter resume · Esc back · Tab switch mode · Ctrl+C quit"
-      : "↑/↓ pick · Enter run (resumes from disk) · Tab switch mode · Ctrl+C quit";
+    if (wfStarted) {
+      return "↑/↓ step · Enter resume · Esc back · Tab switch mode · Ctrl+C quit";
+    }
+    if (wfPreviewing) {
+      return "↑/↓ step · Enter run · Esc back · Tab switch mode · Ctrl+C quit";
+    }
+    return "↑/↓ pick · Enter preview · Tab switch mode · Ctrl+C quit";
   }
   return "Enter dispatch · Tab switch mode · Esc cancel · Ctrl+C quit";
 }
