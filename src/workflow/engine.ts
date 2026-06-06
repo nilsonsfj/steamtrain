@@ -70,7 +70,7 @@ export async function* runWorkflow(
 
   const limit = Math.min(Math.max(1, deps.maxConcurrency), MAX_CONCURRENCY);
   const totalSteps = spec.phases.reduce((n, p) => n + p.steps.length, 0);
-  let generatedSteps = 0;
+  let generatedSteps = countCachedDynamicSteps(cache);
   const reserveDynamicSteps = (count: number): boolean => {
     if (generatedSteps + count > MAX_STEPS - totalSteps) return false;
     generatedSteps += count;
@@ -675,4 +675,13 @@ function evaluateGate(
 
   if (condition.not) passed = !passed;
   return { passed, message: message ?? (passed ? undefined : "gate condition did not pass") };
+}
+
+/** Count dynamic child step ids already present in a resumed cache. */
+function countCachedDynamicSteps(cache: Map<string, StepResult>): number {
+  let n = 0;
+  for (const stepId of cache.keys()) {
+    if (/\[\d+\]$/.test(stepId)) n += 1;
+  }
+  return n;
 }

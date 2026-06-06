@@ -657,6 +657,76 @@ describe("runWorkflow", () => {
     expect(state.runs.map((r) => r.opts.prompt)).toEqual(["api", "web"]);
   });
 
+  it("still enforces MAX_STEPS after resuming cached forEach parents", async () => {
+    const runtimeItems = Array.from({ length: 600 }, (_, i) => `a${i}`).join("\n");
+    const staticItems = Array.from({ length: 500 }, (_, i) => `b${i}`);
+    const splitScript: Script = (opts, id) =>
+      opts.model === "splitter"
+        ? [{ kind: "result", agent: id, ts: 0, isError: false, text: runtimeItems }]
+        : echo(opts, id);
+    const spec: WorkflowSpec = {
+      name: "cap-resume",
+      phases: [
+        {
+          id: "p1",
+          title: "S1",
+          steps: [
+            {
+              id: "split1",
+              kind: "distributor",
+              agent: "claude",
+              model: "splitter",
+              prompt: "split",
+            },
+          ],
+        },
+        {
+          id: "p2",
+          title: "W1",
+          steps: [
+            {
+              id: "work1",
+              agent: "claude",
+              model: "m",
+              dependsOn: ["split1"],
+              forEach: "steps.split1.items",
+              prompt: "{{item}}",
+            },
+          ],
+        },
+        {
+          id: "p3",
+          title: "S2",
+          steps: [{ id: "split2", kind: "distributor", items: staticItems }],
+        },
+        {
+          id: "p4",
+          title: "W2",
+          steps: [
+            {
+              id: "work2",
+              agent: "claude",
+              model: "m",
+              dependsOn: ["work1", "split2"],
+              forEach: "steps.split2.items",
+              prompt: "{{item}}",
+            },
+          ],
+        },
+      ],
+    };
+    const { deps } = makeDeps(splitScript);
+    const cache = new Map<string, StepResult>();
+    const first = await collect(spec, "x", deps, { cache });
+    const work2First = first.find((e) => e.kind === "step_done" && e.stepId === "work2");
+    expect(work2First && work2First.kind === "step_done" && work2First.result.ok).toBe(false);
+
+    const resumed = await collect(spec, "x", deps, { cache });
+    const work2Resume = resumed.find((e) => e.kind === "step_done" && e.stepId === "work2");
+    expect(work2Resume && work2Resume.kind === "step_done" && work2Resume.result.ok).toBe(false);
+    expect(work2Resume && work2Resume.kind === "step_done" && work2Resume.cached).toBe(false);
+  });
+
   it("still stops after a cached gate with onFalse stop on resume", async () => {
     const spec: WorkflowSpec = {
       name: "stop-resume",

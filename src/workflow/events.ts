@@ -54,7 +54,7 @@ export interface StepDoneEvent {
   phaseId: string;
   stepId: string;
   result: StepResult;
-  /** True when the result came from the in-session cache (resume), not a run. */
+  /** True when replayed from memory/disk cache (resume), not a fresh agent run. */
   cached: boolean;
   ts: number;
 }

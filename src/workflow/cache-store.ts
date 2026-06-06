@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { StepResult, WorkflowSpec } from "./types";
+import type { GateStep, StepResult, WorkflowSpec } from "./types";
 
 export const WORKFLOW_CACHE_DIR = ".steamtrain/cache";
 export const WORKFLOW_CACHE_VERSION = 2;
@@ -109,10 +109,16 @@ export async function saveWorkflowCache(
 }
 
 export async function clearWorkflowCache(rootDir: string, key: WorkflowCacheKey): Promise<void> {
-  const base = join(rootDir, workflowCacheFileName(key));
+  const fileName = workflowCacheFileName(key);
+  const filePath = join(rootDir, fileName);
   try {
-    await rm(base, { force: true });
-    await rm(`${base}.${process.pid}.tmp`, { force: true });
+    await rm(filePath, { force: true });
+    const entries = await readdir(rootDir);
+    await Promise.all(
+      entries
+        .filter((name) => name.startsWith(fileName) && name.endsWith(".tmp"))
+        .map((name) => rm(join(rootDir, name), { force: true })),
+    );
   } catch (err) {
     if (!isEnoent(err)) throw err;
   }
@@ -170,14 +176,56 @@ function validateStepResult(stepId: string, value: unknown): StepResult | undefi
   const r = value as Partial<StepResult>;
   if (typeof r.ok !== "boolean" || typeof r.output !== "string") return undefined;
   if (typeof r.durationMs !== "number") return undefined;
-  return { ...r, stepId: r.stepId ?? stepId, ok: r.ok, output: r.output, durationMs: r.durationMs };
+
+  let gate: StepResult["gate"];
+  if (r.gate !== undefined) {
+    if (!r.gate || typeof r.gate !== "object") return undefined;
+    if (typeof r.gate.passed !== "boolean") return undefined;
+    if (
+      r.gate.onFalse !== undefined &&
+      r.gate.onFalse !== "continue" &&
+      r.gate.onFalse !== "fail" &&
+      r.gate.onFalse !== "stop"
+    ) {
+      return undefined;
+    }
+    gate = { passed: r.gate.passed, onFalse: r.gate.onFalse as GateStep["onFalse"] };
+  }
+
+  let childResults: StepResult[] | undefined;
+  if (r.childResults !== undefined) {
+    if (!Array.isArray(r.childResults)) return undefined;
+    childResults = [];
+    for (let i = 0; i < r.childResults.length; i++) {
+      const child = r.childResults[i];
+      const childId =
+        child && typeof child === "object" && "stepId" in child && typeof child.stepId === "string"
+          ? child.stepId
+          : `${stepId}[${i}]`;
+      const valid = validateStepResult(childId, child);
+      if (!valid) return undefined;
+      childResults.push(valid);
+    }
+  }
+
+  return {
+    ...r,
+    stepId: r.stepId ?? stepId,
+    ok: r.ok,
+    output: r.output,
+    durationMs: r.durationMs,
+    gate,
+    childResults,
+  };
 }
 
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(",")}]`;
   const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj).sort();
+  const keys = Object.keys(obj)
+    .filter((k) => obj[k] !== undefined)
+    .sort();
   return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(",")}}`;
 }
 

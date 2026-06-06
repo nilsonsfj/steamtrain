@@ -334,9 +334,9 @@ Usage:
   steamtrain workflow run <name> --stdin [--json] [--fresh]
   steamtrain workflow cache clear [<workflow> --input <text> | --stdin]
 
-Workflow runs resume from ${WORKFLOW_CACHE_DIR} by default (keyed by workflow spec,
-input, and cwd). Pass --fresh to ignore and delete the on-disk cache for that run.
-Parallel runs of the same workflow + input are not supported.
+Workflow runs resume from ${WORKFLOW_CACHE_DIR} by default (file name from workflow +
+input + cwd; contents validated with specHash). Pass --fresh to ignore and delete
+the on-disk cache for that run. Parallel runs of the same workflow + input are not supported.
 
 Running steamtrain with no command opens the workflow-first TUI.
 `;

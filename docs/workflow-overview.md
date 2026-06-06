@@ -549,7 +549,9 @@ Behavior:
 - a different prompt uses a different on-disk cache file automatically
 - editing the workflow JSON (or upgrading steamtrain with changed bundled workflows)
   invalidates the cache via a `specHash` check — stale files are ignored
-- re-running with the same prompt resumes only incomplete work
+- re-running with the same prompt replays all cached successful steps and runs the rest
+- each successful `step_done` writes the full in-memory cache to disk (partial phase
+  snapshots are normal and resume correctly)
 - parallel runs of the same workflow + input + cwd are not supported (last writer wins)
 - CLI: `steamtrain workflow run … --fresh` ignores and deletes the on-disk cache
 - CLI: `steamtrain workflow cache clear` removes cached runs (all, or one workflow + input)
