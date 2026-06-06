@@ -23,3 +23,35 @@ export function modelsForAgent(agent: AgentId): readonly string[] {
 export function defaultModelForAgent(agent: AgentId): string {
   return modelsForAgent(agent)[0] ?? agent;
 }
+
+const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+
+const OPENCODE_EFFORTS = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
+/** Known effort / variant levels for an agent (used by `/effort` and autocomplete). */
+export function effortsForAgent(agent: AgentId): readonly string[] {
+  switch (agent) {
+    case "claude":
+      return CLAUDE_EFFORTS;
+    case "opencode":
+      return OPENCODE_EFFORTS;
+  }
+}
+
+/** Compact label for agent + model (+ optional effort). */
+export function formatAgentTarget(target: {
+  agent: AgentId;
+  model: string;
+  effort?: string;
+}): string {
+  const base = `${target.agent}/${target.model}`;
+  return target.effort ? `${base} · ${target.effort}` : base;
+}

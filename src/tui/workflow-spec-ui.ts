@@ -108,6 +108,9 @@ export function specDetailLines(step: WorkflowStep): string[] {
   if ("extraArgs" in step && step.extraArgs?.length) {
     lines.push(`extraArgs: ${step.extraArgs.join(" ")}`);
   }
+  if ("effort" in step && step.effort) {
+    lines.push(`effort: ${step.effort}`);
+  }
   if (step.kind === "distributor") {
     if (step.separator) lines.push(`separator: ${JSON.stringify(step.separator)}`);
     if (step.items?.length) {

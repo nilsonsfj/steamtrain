@@ -221,7 +221,7 @@ describe("runWorkflow", () => {
     expect(bRun?.opts.prompt).toBe("CACHED");
   });
 
-  it("passes per-step cwd, env and extraArgs to the adapter", async () => {
+  it("passes per-step cwd, env, effort and extraArgs to the adapter", async () => {
     const spec: WorkflowSpec = {
       name: "targets",
       phases: [
@@ -236,6 +236,7 @@ describe("runWorkflow", () => {
               prompt: "x",
               cwd: "sub/dir",
               env: { FOO: "bar" },
+              effort: "high",
               extraArgs: ["--add-dir", "."],
             },
           ],
@@ -248,6 +249,7 @@ describe("runWorkflow", () => {
     const rec = state.runs[0];
     expect(rec?.opts.cwd).toBe(resolvePath("/base", "sub/dir"));
     expect(rec?.opts.env).toEqual({ FOO: "bar" });
+    expect(rec?.opts.effort).toBe("high");
     expect(rec?.opts.extraArgs).toEqual(["--add-dir", "."]);
   });
 

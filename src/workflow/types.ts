@@ -42,6 +42,8 @@ export interface AgentRunFields {
   env?: Record<string, string>;
   /** Extra CLI flags appended to the agent's own args (advanced targets). */
   extraArgs?: string[];
+  /** Reasoning effort / variant (claude: `--effort`, opencode: `--variant`). */
+  effort?: string;
 }
 
 export interface WorkerStep extends WorkflowStepBase, AgentRunFields {
@@ -69,6 +71,7 @@ export interface DistributorStep extends WorkflowStepBase {
   cwd?: string;
   env?: Record<string, string>;
   extraArgs?: string[];
+  effort?: string;
 }
 
 export interface ConsolidatorStep extends WorkflowStepBase {
@@ -83,6 +86,7 @@ export interface ConsolidatorStep extends WorkflowStepBase {
   cwd?: string;
   env?: Record<string, string>;
   extraArgs?: string[];
+  effort?: string;
   separator?: string;
 }
 
@@ -170,6 +174,7 @@ const agentRunShape = {
   cwd: z.string().min(1).optional(),
   env: z.record(z.string()).optional(),
   extraArgs: z.array(z.string()).optional(),
+  effort: z.string().min(1).optional(),
 };
 
 const optionalAgentRunShape = {
@@ -179,6 +184,7 @@ const optionalAgentRunShape = {
   cwd: z.string().min(1).optional(),
   env: z.record(z.string()).optional(),
   extraArgs: z.array(z.string()).optional(),
+  effort: z.string().min(1).optional(),
 };
 
 const workflowWorkerStepSchema = z.object({

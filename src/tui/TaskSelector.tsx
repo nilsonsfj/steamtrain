@@ -4,6 +4,10 @@ import { workspaceLabel } from "../workspace";
 import { type Mode, isWorkspaceMode } from "./modes";
 import { AGENT_COLOR } from "./theme";
 
+function modelLabel(entry: WorkspaceEntry): string {
+  return entry.effort ? `${entry.model} · ${entry.effort}` : entry.model;
+}
+
 interface TaskSelectorProps {
   modes: readonly Mode[];
   workspaceMap: Map<string, WorkspaceEntry>;
@@ -48,7 +52,7 @@ export function TaskSelector({ modes, workspaceMap, active, workflowName }: Task
             <Text color={AGENT_COLOR[current.agent] ?? "white"} bold>
               {current.agent}
             </Text>
-            <Text color="gray"> · {current.model}</Text>
+            <Text color="gray"> · {modelLabel(current)}</Text>
           </>
         ) : (
           <>

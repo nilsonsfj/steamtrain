@@ -77,6 +77,7 @@ export class Orchestrator {
     return adapter.run({
       prompt,
       model: entry.model,
+      effort: entry.effort,
       cwd: process.cwd(),
       timeoutMs: this.config.timeoutMs,
       signal,

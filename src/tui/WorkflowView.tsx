@@ -2,6 +2,7 @@ import { basename } from "node:path";
 import { Box, Text } from "ink";
 import { useMemo } from "react";
 import { truncate } from "../agents/util";
+import { formatAgentTarget } from "../agents";
 import { AGENT_COLOR } from "./theme";
 import { BLOCK_LABEL, phaseStepOffsets } from "./workflow-spec-ui";
 import {
@@ -117,7 +118,9 @@ function StepRow({
   const target = step.cwd ? ` @${basename(step.cwd)}` : "";
   const right = stepMeta(step);
   const runner =
-    step.agent && step.model ? `${step.agent}/${step.model}` : BLOCK_LABEL[step.blockKind];
+    step.agent && step.model
+      ? formatAgentTarget({ agent: step.agent, model: step.model, effort: step.effort })
+      : BLOCK_LABEL[step.blockKind];
   const indent = step.parentStepId ? 3 : 1;
   const item = step.item ? ` item ${step.item.index}: ${truncate(step.item.value, 32)}` : "";
   return (

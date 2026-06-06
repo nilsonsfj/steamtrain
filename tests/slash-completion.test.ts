@@ -21,6 +21,7 @@ describe("slash-completion helpers", () => {
 
   it("detects when workflow navigation should be suppressed", () => {
     expect(shouldSuppressWorkflowNavigation(menu, "/model ")).toBe(true);
+    expect(shouldSuppressWorkflowNavigation(menu, "/effort ")).toBe(true);
     expect(shouldSuppressWorkflowNavigation([], "/model ")).toBe(false);
   });
 });

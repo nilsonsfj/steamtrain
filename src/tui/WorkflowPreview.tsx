@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 import { useMemo } from "react";
 import { truncate } from "../agents/util";
+import { formatAgentTarget } from "../agents";
 import type { DispatchCheck } from "../orchestrator";
 import { type WorkflowSpec, isAgentBackedStep, workflowStepKind } from "../workflow";
 import { AGENT_COLOR } from "./theme";
@@ -131,7 +132,9 @@ function SpecStepRow({
 }) {
   const kind = workflowStepKind(step);
   const agentColor = isAgentBackedStep(step) ? (AGENT_COLOR[step.agent] ?? "white") : "gray";
-  const runner = isAgentBackedStep(step) ? `${step.agent}/${step.model}` : BLOCK_LABEL[kind];
+  const runner = isAgentBackedStep(step)
+    ? formatAgentTarget({ agent: step.agent, model: step.model, effort: step.effort })
+    : BLOCK_LABEL[kind];
   const meta = specStepRowMeta(step);
   return (
     <Box paddingLeft={1}>

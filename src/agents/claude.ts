@@ -221,6 +221,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       "--include-partial-messages",
       "--model",
       opts.model,
+      ...(opts.effort ? ["--effort", opts.effort] : []),
       ...(opts.extraArgs ?? []),
       opts.prompt,
     ];

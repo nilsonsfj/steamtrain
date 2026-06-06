@@ -136,7 +136,7 @@ describe("executeSlashCommand", () => {
         mode: "plan",
         updateWorkspace,
         workspaceMap: workspaceById({
-          workspaces: [{ id: "plan", agent: "claude", model: "claude-opus-4-8" }],
+          workspaces: [{ id: "plan", agent: "claude", model: "claude-opus-4-8", effort: "max" }],
         }),
       }),
     );
@@ -144,7 +144,48 @@ describe("executeSlashCommand", () => {
     expect(updateWorkspace).toHaveBeenCalledWith("plan", {
       agent: "claude",
       model: "claude-opus-4-8",
+      effort: "max",
     });
+  });
+
+  it("clears effort when switching agents", () => {
+    const updateWorkspace = vi.fn();
+    const result = executeSlashCommand(
+      "/agent opencode",
+      makeCtx({
+        mode: "plan",
+        updateWorkspace,
+        workspaceMap: workspaceById({
+          workspaces: [{ id: "plan", agent: "claude", model: "claude-opus-4-8", effort: "max" }],
+        }),
+      }),
+    );
+    expect(result.handled).toBe(true);
+    expect(updateWorkspace).toHaveBeenCalledWith("plan", {
+      agent: "opencode",
+      model: "opencode/gpt-5.4-mini",
+      effort: undefined,
+    });
+  });
+
+  it("sets claude effort", () => {
+    const updateWorkspace = vi.fn();
+    const result = executeSlashCommand("/effort high", makeCtx({ updateWorkspace }));
+    expect(result.handled).toBe(true);
+    expect(updateWorkspace).toHaveBeenCalledWith("plan", { effort: "high" });
+  });
+
+  it("clears effort", () => {
+    const updateWorkspace = vi.fn();
+    const result = executeSlashCommand("/effort clear", makeCtx({ updateWorkspace }));
+    expect(result.handled).toBe(true);
+    expect(updateWorkspace).toHaveBeenCalledWith("plan", { effort: undefined });
+  });
+
+  it("rejects unknown effort for current agent", () => {
+    const result = executeSlashCommand("/effort definitely-invalid", makeCtx());
+    expect(result.handled).toBe(true);
+    expect(result.notices?.[0]?.level).toBe("error");
   });
 });
 

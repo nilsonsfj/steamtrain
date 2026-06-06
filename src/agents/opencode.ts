@@ -239,6 +239,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       "json",
       "--model",
       opts.model,
+      ...(opts.effort ? ["--variant", opts.effort] : []),
       ...(opts.extraArgs ?? []),
       opts.prompt,
     ];

@@ -1,11 +1,18 @@
 import { agentCommand } from "./builtins/agent";
+import { effortCommand } from "./builtins/effort";
 import { exitCommand } from "./builtins/exit";
 import { modelCommand } from "./builtins/model";
 import { versionCommand } from "./builtins/version";
 import { parseSlashInput, slashCommandArgs } from "./parse";
 import type { SlashCommand, SlashCommandContext, SlashCommandResult } from "./types";
 
-const BUILTIN_COMMANDS: SlashCommand[] = [exitCommand, versionCommand, modelCommand, agentCommand];
+const BUILTIN_COMMANDS: SlashCommand[] = [
+  exitCommand,
+  versionCommand,
+  modelCommand,
+  effortCommand,
+  agentCommand,
+];
 
 /** Mutable registry — append custom commands at runtime to extend the TUI. */
 const registry: SlashCommand[] = [...BUILTIN_COMMANDS];

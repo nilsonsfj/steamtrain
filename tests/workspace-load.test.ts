@@ -185,11 +185,12 @@ describe("resolveWorkspaceScope", () => {
 describe("mergeWorkspaceEntries", () => {
   it("preserves base order and appends new ids", () => {
     const merged = mergeWorkspaceEntries(DEFAULT_WORKSPACE_CONFIG.workspaces, [
-      { id: "review", agent: "claude", model: "claude-opus-4-8-thinking" },
+      { id: "review", agent: "claude", model: "claude-opus-4-8-thinking", effort: "max" },
       { id: "scratch", agent: "opencode", model: "openai/gpt-5.4-mini" },
     ]);
     expect(merged.map((w) => w.id)).toEqual(["plan", "implement", "review", "scratch"]);
     expect(merged.find((w) => w.id === "review")?.model).toBe("claude-opus-4-8-thinking");
+    expect(merged.find((w) => w.id === "review")?.effort).toBe("max");
   });
 });
 

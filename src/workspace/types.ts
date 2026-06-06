@@ -16,6 +16,8 @@ export const workspaceEntrySchema = z.object({
   label: z.string().min(1).optional(),
   agent: agentId,
   model: z.string().min(1),
+  /** Reasoning effort / variant passed to the agent CLI when set. */
+  effort: z.string().min(1).optional(),
 });
 
 export type WorkspaceEntry = z.infer<typeof workspaceEntrySchema>;

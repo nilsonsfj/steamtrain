@@ -52,14 +52,16 @@ export const agentCommand: SlashCommand = {
     }
 
     const model = entry.agent === next ? entry.model : defaultModelForAgent(next);
-    ctx.updateWorkspace(ctx.mode, { agent: next, model });
+    const effort = entry.agent === next ? entry.effort : undefined;
+    ctx.updateWorkspace(ctx.mode, { agent: next, model, effort });
+    const effortNote = effort ? ` · ${effort}` : "";
     return {
       handled: true,
       clearInput: true,
       notices: [
         {
           level: "info",
-          text: `agent set to ${next} (model: ${model}) for '${ctx.mode}'`,
+          text: `agent set to ${next} (model: ${model}${effortNote}) for '${ctx.mode}'`,
         },
       ],
     };

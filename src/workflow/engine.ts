@@ -113,6 +113,7 @@ export async function* runWorkflow(
         blockKind: workflowStepKind(step),
         agent: agentBacked?.agent,
         model: agentBacked?.model,
+        effort: agentBacked?.effort,
         cwd: "cwd" in step ? step.cwd : undefined,
         ts: Date.now(),
       });
@@ -432,6 +433,7 @@ async function executeAgentStep(
     for await (const event of adapter.run({
       prompt,
       model: step.model,
+      effort: step.effort,
       cwd: stepCwd,
       env: step.env,
       extraArgs: step.extraArgs,
@@ -538,6 +540,7 @@ async function executeForEachStep(
         blockKind: workflowStepKind(step),
         agent: step.agent,
         model: step.model,
+        effort: step.effort,
         cwd: step.cwd,
         parentStepId: step.id,
         item,

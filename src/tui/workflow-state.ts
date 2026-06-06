@@ -20,6 +20,7 @@ export interface StepState {
   blockKind: WorkflowStepKind;
   agent?: AgentId;
   model?: string;
+  effort?: string;
   cwd?: string;
   parentStepId?: string;
   item?: WorkflowItem;
@@ -150,6 +151,7 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
                     blockKind: e.blockKind ?? "worker",
                     agent: e.agent,
                     model: e.model,
+                    effort: e.effort,
                     cwd: e.cwd,
                     parentStepId: e.parentStepId,
                     item: e.item,

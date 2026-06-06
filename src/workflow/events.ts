@@ -32,6 +32,7 @@ export interface StepStartEvent {
   blockKind?: WorkflowStepKind;
   agent?: AgentId;
   model?: string;
+  effort?: string;
   cwd?: string;
   /** Parent dynamic `forEach` step, when this is a generated child run. */
   parentStepId?: string;

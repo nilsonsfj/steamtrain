@@ -5,6 +5,8 @@ import { firstLine } from "./util";
 export interface AgentRunOptions {
   prompt: string;
   model: string;
+  /** Reasoning effort / variant (claude: `--effort`, opencode: `--variant`). */
+  effort?: string;
   cwd?: string;
   timeoutMs?: number;
   signal?: AbortSignal;

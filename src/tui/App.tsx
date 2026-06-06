@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import { Box, Text, useApp, useInput } from "ink";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { formatAgentTarget } from "../agents";
 import {
-  type SlashCommandContext,
   applySlashSuggestion,
   autocompleteSlashCommand,
   executeSlashCommand,
@@ -401,7 +401,7 @@ export function App({
       dispatch({
         type: "notice",
         level: "info",
-        text: `dispatch '${formatEntryLabel(entry)}' → ${entry.agent} / ${entry.model}`,
+        text: `dispatch '${formatEntryLabel(entry)}' → ${formatAgentTarget(entry)}`,
       });
       setRunning(true);
       const ac = new AbortController();
@@ -616,7 +616,7 @@ function workspaceStreamLabel(mode: Mode, workspaceMap: Map<string, WorkspaceEnt
   if (mode === "workflow") return "workflow";
   const entry = workspaceMap.get(mode);
   if (!entry) return mode;
-  return `${workspaceLabel(entry)} · ${entry.agent}/${entry.model}`;
+  return `${formatEntryLabel(entry)} · ${formatAgentTarget(entry)}`;
 }
 
 function hint(
