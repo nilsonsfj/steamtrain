@@ -29,7 +29,7 @@ export function PromptInput({
         onTab();
       }
     },
-    { isActive: focus && !!onTab && (!running || slashInput) },
+    { isActive: focus && !!onTab && slashInput },
   );
 
   return (

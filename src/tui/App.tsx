@@ -385,7 +385,7 @@ export function App({
       }
       return;
     }
-    if (key.tab && key.ctrl && !running) {
+    if (key.tab && !key.shift && !running && !isSlashCommandInput(value)) {
       setWfPreview(null);
       setWfLaunching(false);
       setMode((prev) => nextMode(prev, modes));
@@ -506,14 +506,14 @@ function hint(
   if (running) return "Esc cancel · /exit quit · Ctrl+C quit";
   if (mode === "workflow") {
     if (wfStarted || wfLaunching) {
-      return "↑/↓ step · Enter resume · Esc back · Ctrl+Tab switch mode · /commands · Ctrl+C quit";
+      return "↑/↓ step · Enter resume · Esc back · Tab switch mode · /commands · Ctrl+C quit";
     }
     if (wfPreviewing) {
-      return "↑/↓ step · Enter run · Esc back · Ctrl+Tab switch mode · /commands · Ctrl+C quit";
+      return "↑/↓ step · Enter run · Esc back · Tab switch mode · /commands · Ctrl+C quit";
     }
-    return "↑/↓ pick · Enter preview · Ctrl+Tab switch mode · /commands · Ctrl+C quit";
+    return "↑/↓ pick · Enter preview · Tab switch mode · /commands · Ctrl+C quit";
   }
-  return "Enter dispatch · Ctrl+Tab switch mode · /commands (Tab complete) · Ctrl+C quit";
+  return "Enter dispatch · Tab switch mode · /commands (Tab complete) · Ctrl+C quit";
 }
 
 function message(err: unknown): string {
