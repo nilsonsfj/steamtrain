@@ -124,7 +124,8 @@ function StepRow({
   const agentColor = step.agent ? (AGENT_COLOR[step.agent] ?? "white") : "gray";
   const target = step.cwd ? ` @${basename(step.cwd)}` : "";
   const right = stepMeta(step);
-  const runner = step.agent && step.model ? `${step.agent}/${step.model}` : BLOCK_GLYPH[step.blockKind];
+  const runner =
+    step.agent && step.model ? `${step.agent}/${step.model}` : BLOCK_GLYPH[step.blockKind];
   return (
     <Box paddingLeft={1}>
       <Text color={selected ? "cyan" : "gray"}>{selected ? "▶ " : "  "}</Text>

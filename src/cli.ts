@@ -120,8 +120,7 @@ async function runWorkflowCommand(
   }
 
   const input =
-    options.input ??
-    (options.stdin ? await readAll(io.stdin ?? process.stdin) : undefined);
+    options.input ?? (options.stdin ? await readAll(io.stdin ?? process.stdin) : undefined);
   if (!input?.trim()) {
     err("workflow run requires --input <text> or --stdin\n");
     return 1;
@@ -165,7 +164,9 @@ function parseRunOptions(args: string[]): RunOptions | null {
 function printHumanEvent(event: WorkflowEvent, out: (text: string) => void): void {
   switch (event.kind) {
     case "workflow_start":
-      out(`workflow ${event.name} started (${event.phaseCount} phases, ${event.stepCount} steps)\n`);
+      out(
+        `workflow ${event.name} started (${event.phaseCount} phases, ${event.stepCount} steps)\n`,
+      );
       return;
     case "phase_start":
       out(`\nphase ${event.index + 1}: ${event.title}\n`);
@@ -184,7 +185,9 @@ function printHumanEvent(event: WorkflowEvent, out: (text: string) => void): voi
       );
       return;
     case "step_done":
-      out(`  ${event.result.ok ? "done" : "fail"} ${event.stepId}${event.cached ? " (cached)" : ""}\n`);
+      out(
+        `  ${event.result.ok ? "done" : "fail"} ${event.stepId}${event.cached ? " (cached)" : ""}\n`,
+      );
       return;
     case "phase_done":
       out(`phase ${event.phaseId} ${event.ok ? "ok" : "failed"}\n`);
@@ -235,4 +238,3 @@ function readAll(stream: Readable): Promise<string> {
     stream.on("error", reject);
   });
 }
-

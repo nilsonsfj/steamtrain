@@ -95,14 +95,15 @@ export async function* runWorkflow(
     let stopAfterPhase = false;
 
     const runStep = async (step: WorkflowStep): Promise<void> => {
+      const agentBacked = isAgentBackedStep(step) ? step : undefined;
       channel.push({
         kind: "step_start",
         phaseId: phase.id,
         stepId: step.id,
         blockKind: workflowStepKind(step),
-        agent: step.agent,
-        model: step.model,
-        cwd: step.cwd,
+        agent: agentBacked?.agent,
+        model: agentBacked?.model,
+        cwd: "cwd" in step ? step.cwd : undefined,
         ts: Date.now(),
       });
 
@@ -360,10 +361,12 @@ async function executeAgentStep(
   };
 }
 
-function consolidateOutputs(ids: string[], outputs: Map<string, string>, separator?: string): string {
-  return ids
-    .map((id) => `--- ${id} ---\n${outputs.get(id) ?? ""}`)
-    .join(separator ?? "\n\n");
+function consolidateOutputs(
+  ids: string[],
+  outputs: Map<string, string>,
+  separator?: string,
+): string {
+  return ids.map((id) => `--- ${id} ---\n${outputs.get(id) ?? ""}`).join(separator ?? "\n\n");
 }
 
 function evaluateGate(
@@ -371,7 +374,9 @@ function evaluateGate(
   ctx: ExecuteContext,
 ): { passed: boolean; message?: string } {
   const subject = condition.step ? ctx.results.get(condition.step) : undefined;
-  const text = condition.step ? (subject?.output ?? ctx.outputs.get(condition.step) ?? "") : ctx.input;
+  const text = condition.step
+    ? (subject?.output ?? ctx.outputs.get(condition.step) ?? "")
+    : ctx.input;
   let passed = true;
   let message: string | undefined;
 
