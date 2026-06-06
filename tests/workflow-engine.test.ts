@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentAdapter, AgentRunOptions } from "../src/agents";
 import type { AgentEvent, AgentId } from "../src/types/events";
 import {
+  MAX_STEPS,
   type StepResult,
   type WorkflowDeps,
   type WorkflowEvent,
@@ -387,6 +388,164 @@ describe("runWorkflow", () => {
       "review-each[2]",
     );
     expect(events.at(-1)).toMatchObject({ kind: "workflow_done", ok: true });
+  });
+
+  it("parses agent-backed distributor output into fan-out items", async () => {
+    const script: Script = (opts, id) =>
+      opts.model === "splitter"
+        ? [
+            {
+              kind: "result",
+              agent: id,
+              ts: 0,
+              isError: false,
+              text: "api\nweb\n\ndocs",
+            },
+          ]
+        : echo(opts, id);
+    const spec: WorkflowSpec = {
+      name: "agent-split",
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [
+            {
+              id: "split",
+              kind: "distributor",
+              agent: "claude",
+              model: "splitter",
+              prompt: "split {{input}}",
+            },
+          ],
+        },
+        {
+          id: "work",
+          title: "Work",
+          steps: [
+            {
+              id: "work",
+              kind: "processor",
+              agent: "claude",
+              model: "m",
+              dependsOn: ["split"],
+              forEach: "steps.split.items",
+              prompt: "{{item}}",
+            },
+          ],
+        },
+      ],
+    };
+    const { deps, state } = makeDeps(script);
+    const events = await collect(spec, "task", deps);
+
+    const splitDone = events.find((e) => e.kind === "step_done" && e.stepId === "split");
+    expect(splitDone && splitDone.kind === "step_done" && splitDone.result.items).toEqual([
+      "api",
+      "web",
+      "docs",
+    ]);
+    expect(state.runs.map((r) => r.opts.prompt)).toEqual(["split task", "api", "web", "docs"]);
+  });
+
+  it("does not fan out when the distributor source failed", async () => {
+    const failingSplit: Script = (opts, id) =>
+      opts.model === "splitter"
+        ? [{ kind: "error", agent: id, ts: 0, message: "split failed" }]
+        : echo(opts, id);
+    const spec: WorkflowSpec = {
+      name: "failed-split",
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [
+            {
+              id: "split",
+              kind: "distributor",
+              agent: "claude",
+              model: "splitter",
+              prompt: "split",
+            },
+          ],
+        },
+        {
+          id: "work",
+          title: "Work",
+          steps: [
+            {
+              id: "work",
+              kind: "processor",
+              agent: "claude",
+              model: "m",
+              dependsOn: ["split"],
+              forEach: "steps.split.items",
+              prompt: "{{item}}",
+            },
+          ],
+        },
+      ],
+    };
+    const { deps, state } = makeDeps(failingSplit);
+    const events = await collect(spec, "task", deps);
+
+    expect(state.runs).toHaveLength(1);
+    expect(events.some((e) => e.kind === "step_start" && e.stepId === "work[0]")).toBe(false);
+    const workDone = events.find((e) => e.kind === "step_done" && e.stepId === "work");
+    expect(workDone && workDone.kind === "step_done" && workDone.result.ok).toBe(false);
+    expect(workDone && workDone.kind === "step_done" && workDone.result.error).toMatch(
+      /source 'split' failed/,
+    );
+  });
+
+  it("enforces the dynamic step cap for agent-generated distributor items", async () => {
+    const manyItems = Array.from({ length: MAX_STEPS }, (_, i) => `item-${i}`).join("\n");
+    const script: Script = (opts, id) =>
+      opts.model === "splitter"
+        ? [{ kind: "result", agent: id, ts: 0, isError: false, text: manyItems }]
+        : echo(opts, id);
+    const spec: WorkflowSpec = {
+      name: "runtime-cap",
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [
+            {
+              id: "split",
+              kind: "distributor",
+              agent: "claude",
+              model: "splitter",
+              prompt: "split",
+            },
+          ],
+        },
+        {
+          id: "work",
+          title: "Work",
+          steps: [
+            {
+              id: "work",
+              kind: "processor",
+              agent: "claude",
+              model: "m",
+              dependsOn: ["split"],
+              forEach: "steps.split.items",
+              prompt: "{{item}}",
+            },
+          ],
+        },
+      ],
+    };
+    const { deps, state } = makeDeps(script);
+    const events = await collect(spec, "task", deps);
+
+    expect(state.runs).toHaveLength(1);
+    const workDone = events.find((e) => e.kind === "step_done" && e.stepId === "work");
+    expect(workDone && workDone.kind === "step_done" && workDone.result.ok).toBe(false);
+    expect(workDone && workDone.kind === "step_done" && workDone.result.error).toMatch(
+      /exceed max workflow steps/,
+    );
   });
 
   it("stops after a blocking gate with onFalse stop", async () => {

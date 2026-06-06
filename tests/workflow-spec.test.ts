@@ -84,6 +84,44 @@ describe("workflowSpecSchema", () => {
     expect(res.error).toMatch(/max/);
   });
 
+  it("rejects static dynamic fan-out above the step cap", () => {
+    const spec: WorkflowSpec = {
+      name: "huge-dynamic",
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [
+            {
+              id: "split",
+              kind: "distributor",
+              items: Array.from({ length: MAX_STEPS }, (_, i) => `item-${i}`),
+            },
+          ],
+        },
+        {
+          id: "work",
+          title: "Work",
+          steps: [
+            {
+              id: "work",
+              kind: "processor",
+              agent: "claude",
+              model: "m",
+              prompt: "{{item}}",
+              dependsOn: ["split"],
+              forEach: "steps.split.items",
+            },
+          ],
+        },
+      ],
+    };
+
+    const res = validateWorkflow(spec);
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/expand to/);
+  });
+
   it("accepts explicit workflow building blocks", () => {
     const spec: WorkflowSpec = {
       name: "blocks",
@@ -282,5 +320,32 @@ describe("validateWorkflow dependency rules", () => {
       ],
     };
     expect(validateWorkflow(samePhase).error).toMatch(/not in an earlier phase/);
+
+    const workerSource: WorkflowSpec = {
+      name: "worker-source",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "source", agent: "claude", model: "m", prompt: "x" }],
+        },
+        {
+          id: "p2",
+          title: "P2",
+          steps: [
+            {
+              id: "work",
+              kind: "processor",
+              agent: "claude",
+              model: "m",
+              prompt: "{{item}}",
+              dependsOn: ["source"],
+              forEach: "steps.source.items",
+            },
+          ],
+        },
+      ],
+    };
+    expect(validateWorkflow(workerSource).error).toMatch(/must be a distributor/);
   });
 });

@@ -134,11 +134,13 @@ async function runWorkflowCommand(
     return 1;
   }
 
+  let ok = false;
   for await (const event of orchestrator.runWorkflow(name, input.trim())) {
     if (options.json) out(`${JSON.stringify(event)}\n`);
     else printHumanEvent(event, out);
+    if (event.kind === "workflow_done") ok = event.ok;
   }
-  return 0;
+  return ok ? 0 : 1;
 }
 
 function parseRunOptions(args: string[]): RunOptions | null {

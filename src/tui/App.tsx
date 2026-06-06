@@ -42,6 +42,7 @@ export function App({ config, configSource, configWarning }: AppProps) {
   const [stepIndex, setStepIndex] = useState(0);
   const [wfNotice, setWfNotice] = useState<string | null>(null);
   const activeWorkflowRef = useRef<string | undefined>(undefined);
+  const activeWorkflowInputRef = useRef<string | undefined>(undefined);
   const workflowCacheRef = useRef<Map<string, StepResult>>(new Map());
 
   const orchestratorRef = useRef<Orchestrator | null>(null);
@@ -101,6 +102,7 @@ export function App({ config, configSource, configWarning }: AppProps) {
       }
       setWfNotice(null);
       activeWorkflowRef.current = name;
+      activeWorkflowInputRef.current = input;
       setRunning(true);
       const ac = new AbortController();
       abortRef.current = ac;
@@ -135,6 +137,11 @@ export function App({ config, configSource, configWarning }: AppProps) {
       if (mode === "workflow") {
         // Resume the active run if one exists; otherwise start the picked one fresh.
         if (wf.started && activeWorkflowRef.current) {
+          if (activeWorkflowInputRef.current !== prompt) {
+            workflowCacheRef.current = new Map();
+            wfDispatch({ type: "reset" });
+            setStepIndex(0);
+          }
           runWorkflow(activeWorkflowRef.current, prompt);
           return;
         }
@@ -204,6 +211,7 @@ export function App({ config, configSource, configWarning }: AppProps) {
         wfDispatch({ type: "reset" });
         setStepIndex(0);
         activeWorkflowRef.current = undefined;
+        activeWorkflowInputRef.current = undefined;
         workflowCacheRef.current = new Map();
         setWfNotice(null);
       }

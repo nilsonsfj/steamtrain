@@ -339,11 +339,16 @@ export function validateWorkflow(spec: WorkflowSpec): ValidationResult {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "invalid workflow" };
   }
 
+  const stepsById = new Map<string, WorkflowStep>();
   const allIds = new Set<string>();
   for (const phase of spec.phases) {
-    for (const step of phase.steps) allIds.add(step.id);
+    for (const step of phase.steps) {
+      allIds.add(step.id);
+      stepsById.set(step.id, step);
+    }
   }
 
+  let maxPossibleSteps = spec.phases.reduce((n, p) => n + p.steps.length, 0);
   const earlierIds = new Set<string>();
   for (const phase of spec.phases) {
     for (const step of phase.steps) {
@@ -373,6 +378,7 @@ export function validateWorkflow(spec: WorkflowSpec): ValidationResult {
             error: `step '${step.id}' has invalid forEach '${step.forEach}' (expected steps.<id>.items)`,
           };
         }
+        const sourceStep = stepsById.get(sourceStepId);
         if (!earlierIds.has(sourceStepId)) {
           return {
             ok: false,
@@ -381,11 +387,25 @@ export function validateWorkflow(spec: WorkflowSpec): ValidationResult {
               : `step '${step.id}' forEach references unknown step '${sourceStepId}'`,
           };
         }
+        if (sourceStep?.kind !== "distributor") {
+          return {
+            ok: false,
+            error: `step '${step.id}' forEach source '${sourceStepId}' must be a distributor step`,
+          };
+        }
+        maxPossibleSteps += sourceStep.items?.length ?? 0;
       }
     }
     // Promote this phase's ids only after the whole phase is checked, so two
     // steps in the same phase can't depend on each other.
     for (const step of phase.steps) earlierIds.add(step.id);
+  }
+
+  if (maxPossibleSteps > MAX_STEPS) {
+    return {
+      ok: false,
+      error: `workflow can expand to ${maxPossibleSteps} steps (max ${MAX_STEPS})`,
+    };
   }
 
   return { ok: true };

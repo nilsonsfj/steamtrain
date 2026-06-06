@@ -8,6 +8,7 @@ import {
   type AgentBackedWorkflowStep,
   type GateCondition,
   MAX_CONCURRENCY,
+  MAX_STEPS,
   type StepResult,
   type WorkerStep,
   type WorkflowItem,
@@ -69,6 +70,12 @@ export async function* runWorkflow(
 
   const limit = Math.min(Math.max(1, deps.maxConcurrency), MAX_CONCURRENCY);
   const totalSteps = spec.phases.reduce((n, p) => n + p.steps.length, 0);
+  let generatedSteps = 0;
+  const reserveDynamicSteps = (count: number): boolean => {
+    if (generatedSteps + count > MAX_STEPS - totalSteps) return false;
+    generatedSteps += count;
+    return true;
+  };
   yield {
     kind: "workflow_start",
     name: spec.name,
@@ -160,6 +167,7 @@ export async function* runWorkflow(
           outputs,
           results,
           cache,
+          reserveDynamicSteps,
           deps,
           signal,
         },
@@ -239,6 +247,7 @@ interface ExecuteContext {
   outputs: Map<string, string>;
   results: Map<string, StepResult>;
   cache: Map<string, StepResult>;
+  reserveDynamicSteps: (count: number) => boolean;
   deps: WorkflowDeps;
   signal?: AbortSignal;
 }
@@ -286,7 +295,13 @@ async function executeStep(
       };
     }
     if (isAgentBackedStep(step)) {
-      return { result: await executeAgentStep(step, ctx, hooks, step.id) };
+      const result = await executeAgentStep(step, ctx, hooks, step.id);
+      return {
+        result: {
+          ...result,
+          items: result.ok ? splitItemsFromOutput(result.output) : undefined,
+        },
+      };
     }
   }
 
@@ -419,7 +434,6 @@ async function executeForEachStep(
   const started = Date.now();
   const sourceStepId = parseForEachSource(step.forEach ?? "");
   const source = sourceStepId ? ctx.results.get(sourceStepId) : undefined;
-  const values = source?.items ?? splitItemsFromOutput(source?.output);
 
   if (!sourceStepId || !source) {
     return {
@@ -428,6 +442,30 @@ async function executeForEachStep(
         ok: false,
         output: `forEach source '${step.forEach}' is unavailable`,
         error: `forEach source '${step.forEach}' is unavailable`,
+        durationMs: Date.now() - started,
+      },
+    };
+  }
+  if (!source.ok) {
+    return {
+      result: {
+        stepId: step.id,
+        ok: false,
+        output: `forEach source '${sourceStepId}' failed`,
+        error: `forEach source '${sourceStepId}' failed`,
+        durationMs: Date.now() - started,
+      },
+    };
+  }
+
+  const values = source.items ?? splitItemsFromOutput(source.output);
+  if (!ctx.reserveDynamicSteps(values.length)) {
+    return {
+      result: {
+        stepId: step.id,
+        ok: false,
+        output: `forEach would expand '${step.id}' by ${values.length} child steps beyond the workflow step budget`,
+        error: `forEach would exceed max workflow steps (${MAX_STEPS})`,
         durationMs: Date.now() - started,
       },
     };
