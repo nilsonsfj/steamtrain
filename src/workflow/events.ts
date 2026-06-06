@@ -1,5 +1,5 @@
 import type { AgentEvent, AgentId } from "../types/events";
-import type { StepResult } from "./types";
+import type { GateStep, StepResult, WorkflowStepKind } from "./types";
 
 /**
  * The workflow-level event stream the TUI consumes. It wraps the per-step
@@ -29,8 +29,9 @@ export interface StepStartEvent {
   kind: "step_start";
   phaseId: string;
   stepId: string;
-  agent: AgentId;
-  model: string;
+  blockKind?: WorkflowStepKind;
+  agent?: AgentId;
+  model?: string;
   cwd?: string;
   ts: number;
 }
@@ -54,6 +55,16 @@ export interface StepDoneEvent {
   ts: number;
 }
 
+export interface GateEvaluatedEvent {
+  kind: "gate_evaluated";
+  phaseId: string;
+  stepId: string;
+  passed: boolean;
+  target?: string;
+  onFalse?: GateStep["onFalse"];
+  ts: number;
+}
+
 export interface PhaseDoneEvent {
   kind: "phase_done";
   phaseId: string;
@@ -73,6 +84,7 @@ export type WorkflowEvent =
   | PhaseStartEvent
   | StepStartEvent
   | StepStreamEvent
+  | GateEvaluatedEvent
   | StepDoneEvent
   | PhaseDoneEvent
   | WorkflowDoneEvent;

@@ -25,6 +25,19 @@ describe("renderPrompt", () => {
     expect(renderPrompt("[{{steps.unknown.output}}]", ctx("x"))).toBe("[]");
   });
 
+  it("substitutes structured step fields", () => {
+    const out = renderPrompt("{{steps.split.items}} {{steps.gate.ok}} {{steps.gate.target}}", {
+      input: "x",
+      outputs: new Map([["split", "a\nb"]]),
+      results: new Map([
+        ["split", { ok: true, items: ["a", "b"] }],
+        ["gate", { ok: true, target: "ready" }],
+      ]),
+    });
+
+    expect(out).toBe("a\nb true ready");
+  });
+
   it("leaves unknown placeholders and stray braces untouched", () => {
     expect(renderPrompt("keep {{unknown}} and { single }", ctx("x"))).toBe(
       "keep {{unknown}} and { single }",

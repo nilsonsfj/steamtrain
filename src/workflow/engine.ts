@@ -1,15 +1,19 @@
 import { resolve as resolvePath } from "node:path";
 import type { AgentAdapter } from "../agents";
-import type { AgentId } from "../types/events";
+import type { AgentEvent, AgentId } from "../types/events";
 import type { WorkflowEvent } from "./events";
 import { createChannel, runPool } from "./pool";
 import { renderPrompt } from "./template";
 import {
+  type AgentBackedWorkflowStep,
+  type GateCondition,
   MAX_CONCURRENCY,
   type StepResult,
   type WorkflowSpec,
   type WorkflowStep,
+  isAgentBackedStep,
   validateWorkflow,
+  workflowStepKind,
 } from "./types";
 
 /**
@@ -54,7 +58,11 @@ export async function* runWorkflow(
 
   const cache = ctx.cache ?? new Map<string, StepResult>();
   const outputs = new Map<string, string>();
-  for (const [id, res] of cache) outputs.set(id, res.output);
+  const results = new Map<string, StepResult>();
+  for (const [id, res] of cache) {
+    outputs.set(id, res.output);
+    results.set(id, res);
+  }
 
   const limit = Math.min(Math.max(1, deps.maxConcurrency), MAX_CONCURRENCY);
   const totalSteps = spec.phases.reduce((n, p) => n + p.steps.length, 0);
@@ -84,12 +92,14 @@ export async function* runWorkflow(
 
     const channel = createChannel<WorkflowEvent>();
     let phaseOk = true;
+    let stopAfterPhase = false;
 
     const runStep = async (step: WorkflowStep): Promise<void> => {
       channel.push({
         kind: "step_start",
         phaseId: phase.id,
         stepId: step.id,
+        blockKind: workflowStepKind(step),
         agent: step.agent,
         model: step.model,
         cwd: step.cwd,
@@ -100,6 +110,7 @@ export async function* runWorkflow(
       const cached = cache.get(step.id);
       if (cached) {
         outputs.set(step.id, cached.output);
+        results.set(step.id, cached);
         allResults.push(cached);
         if (!cached.ok) phaseOk = false;
         channel.push({
@@ -113,27 +124,16 @@ export async function* runWorkflow(
         return;
       }
 
-      const adapter = deps.createAdapter(step.agent, deps.binaries?.[step.agent]);
-      const prompt = renderPrompt(step.prompt, { input: ctx.input, outputs });
-      const stepCwd = step.cwd ? resolvePath(deps.cwd, step.cwd) : deps.cwd;
-      const started = Date.now();
-
-      let finalText = "";
-      let streamedText = "";
-      let costUsd: number | undefined;
-      let errored = false;
-      let errorMessage: string | undefined;
-
-      try {
-        for await (const event of adapter.run({
-          prompt,
-          model: step.model,
-          cwd: stepCwd,
-          env: step.env,
-          extraArgs: step.extraArgs,
-          timeoutMs: deps.timeoutMs,
+      const execution = await executeStep(
+        step,
+        {
+          input: ctx.input,
+          outputs,
+          results,
+          deps,
           signal,
-        })) {
+        },
+        (event) => {
           channel.push({
             kind: "step_event",
             phaseId: phase.id,
@@ -141,45 +141,28 @@ export async function* runWorkflow(
             event,
             ts: Date.now(),
           });
-          if (event.kind === "text_delta") {
-            if (!event.thinking) streamedText += event.text;
-          } else if (event.kind === "result") {
-            if (event.text) finalText = event.text;
-            if (typeof event.costUsd === "number") costUsd = event.costUsd;
-            if (event.isError) {
-              errored = true;
-              errorMessage ??= event.text;
-            }
-          } else if (event.kind === "error") {
-            errored = true;
-            errorMessage ??= event.message;
-          }
-        }
-      } catch (err) {
-        errored = true;
-        errorMessage ??= err instanceof Error ? err.message : String(err);
+        },
+      );
+
+      if (execution.gate) {
+        channel.push({
+          kind: "gate_evaluated",
+          phaseId: phase.id,
+          stepId: step.id,
+          passed: execution.gate.passed,
+          target: execution.gate.target,
+          onFalse: execution.gate.onFalse,
+          ts: Date.now(),
+        });
       }
 
-      // A cancelled step is never cached, so resume re-runs it.
-      const cancelled = Boolean(signal?.aborted);
-      const ok = !errored && !cancelled;
-      const output = ok
-        ? finalText || streamedText
-        : errorMessage || finalText || streamedText || (cancelled ? "cancelled" : "");
-
-      const result: StepResult = {
-        stepId: step.id,
-        ok,
-        output,
-        error: ok ? undefined : (errorMessage ?? (cancelled ? "cancelled" : "failed")),
-        durationMs: Date.now() - started,
-        costUsd,
-      };
-
+      const { result } = execution;
       outputs.set(step.id, result.output);
-      if (ok) cache.set(step.id, result);
+      results.set(step.id, result);
+      if (result.ok) cache.set(step.id, result);
       allResults.push(result);
-      if (!ok) phaseOk = false;
+      if (!result.ok) phaseOk = false;
+      if (execution.stop) stopAfterPhase = true;
 
       channel.push({
         kind: "step_done",
@@ -201,7 +184,7 @@ export async function* runWorkflow(
     if (!phaseOk) workflowOk = false;
     yield { kind: "phase_done", phaseId: phase.id, ok: phaseOk, ts: Date.now() };
 
-    if (signal?.aborted) break;
+    if (signal?.aborted || stopAfterPhase) break;
   }
 
   yield {
@@ -210,4 +193,221 @@ export async function* runWorkflow(
     results: allResults,
     ts: Date.now(),
   };
+}
+
+interface ExecuteContext {
+  input: string;
+  outputs: Map<string, string>;
+  results: Map<string, StepResult>;
+  deps: WorkflowDeps;
+  signal?: AbortSignal;
+}
+
+interface ExecutionOutcome {
+  result: StepResult;
+  gate?: { passed: boolean; target?: string; onFalse?: "continue" | "fail" | "stop" };
+  stop?: boolean;
+}
+
+type StepEventSink = (event: AgentEvent) => void;
+
+async function executeStep(
+  step: WorkflowStep,
+  ctx: ExecuteContext,
+  pushAgentEvent: StepEventSink,
+): Promise<ExecutionOutcome> {
+  const kind = workflowStepKind(step);
+
+  if (kind === "worker" || kind === "processor") {
+    return { result: await executeAgentStep(step as AgentBackedWorkflowStep, ctx, pushAgentEvent) };
+  }
+
+  if (kind === "distributor") {
+    if (step.kind === "distributor" && step.items?.length) {
+      const started = Date.now();
+      const items = step.items.map((item) =>
+        renderPrompt(item, { input: ctx.input, outputs: ctx.outputs, results: ctx.results }),
+      );
+      return {
+        result: {
+          stepId: step.id,
+          ok: true,
+          output: items.join(step.separator ?? "\n"),
+          items,
+          durationMs: Date.now() - started,
+        },
+      };
+    }
+    if (isAgentBackedStep(step)) {
+      return { result: await executeAgentStep(step, ctx, pushAgentEvent) };
+    }
+  }
+
+  if (kind === "consolidator" && step.kind === "consolidator") {
+    if (isAgentBackedStep(step)) {
+      return { result: await executeAgentStep(step, ctx, pushAgentEvent) };
+    }
+    const started = Date.now();
+    const output = step.prompt
+      ? renderPrompt(step.prompt, { input: ctx.input, outputs: ctx.outputs, results: ctx.results })
+      : consolidateOutputs(step.dependsOn ?? [], ctx.outputs, step.separator);
+    return {
+      result: {
+        stepId: step.id,
+        ok: true,
+        output,
+        durationMs: Date.now() - started,
+      },
+    };
+  }
+
+  if (kind === "gate" && step.kind === "gate") {
+    const started = Date.now();
+    const evaluation = evaluateGate(step.condition, ctx);
+    const onFalse = step.onFalse ?? "continue";
+    const ok = evaluation.passed || onFalse !== "fail";
+    const target = step.target ?? (evaluation.passed ? "passed" : "blocked");
+    return {
+      result: {
+        stepId: step.id,
+        ok,
+        output: target,
+        target,
+        gate: { passed: evaluation.passed, onFalse },
+        error: ok ? undefined : evaluation.message,
+        durationMs: Date.now() - started,
+      },
+      gate: { passed: evaluation.passed, target, onFalse },
+      stop: !evaluation.passed && onFalse === "stop",
+    };
+  }
+
+  return {
+    result: {
+      stepId: step.id,
+      ok: false,
+      output: `unsupported workflow step kind '${kind}'`,
+      error: `unsupported workflow step kind '${kind}'`,
+      durationMs: 0,
+    },
+  };
+}
+
+async function executeAgentStep(
+  step: AgentBackedWorkflowStep,
+  ctx: ExecuteContext,
+  pushAgentEvent: StepEventSink,
+): Promise<StepResult> {
+  const adapter = ctx.deps.createAdapter(step.agent, ctx.deps.binaries?.[step.agent]);
+  const prompt = renderPrompt(step.prompt, {
+    input: ctx.input,
+    outputs: ctx.outputs,
+    results: ctx.results,
+  });
+  const stepCwd = step.cwd ? resolvePath(ctx.deps.cwd, step.cwd) : ctx.deps.cwd;
+  const started = Date.now();
+
+  let finalText = "";
+  let streamedText = "";
+  let costUsd: number | undefined;
+  let errored = false;
+  let errorMessage: string | undefined;
+
+  try {
+    for await (const event of adapter.run({
+      prompt,
+      model: step.model,
+      cwd: stepCwd,
+      env: step.env,
+      extraArgs: step.extraArgs,
+      timeoutMs: ctx.deps.timeoutMs,
+      signal: ctx.signal,
+    })) {
+      pushAgentEvent(event);
+      if (event.kind === "text_delta") {
+        if (!event.thinking) streamedText += event.text;
+      } else if (event.kind === "result") {
+        if (event.text) finalText = event.text;
+        if (typeof event.costUsd === "number") costUsd = event.costUsd;
+        if (event.isError) {
+          errored = true;
+          errorMessage ??= event.text;
+        }
+      } else if (event.kind === "error") {
+        errored = true;
+        errorMessage ??= event.message;
+      }
+    }
+  } catch (err) {
+    errored = true;
+    errorMessage ??= err instanceof Error ? err.message : String(err);
+  }
+
+  // A cancelled step is never cached, so resume re-runs it.
+  const cancelled = Boolean(ctx.signal?.aborted);
+  const ok = !errored && !cancelled;
+  const output = ok
+    ? finalText || streamedText
+    : errorMessage || finalText || streamedText || (cancelled ? "cancelled" : "");
+
+  return {
+    stepId: step.id,
+    ok,
+    output,
+    error: ok ? undefined : (errorMessage ?? (cancelled ? "cancelled" : "failed")),
+    durationMs: Date.now() - started,
+    costUsd,
+  };
+}
+
+function consolidateOutputs(ids: string[], outputs: Map<string, string>, separator?: string): string {
+  return ids
+    .map((id) => `--- ${id} ---\n${outputs.get(id) ?? ""}`)
+    .join(separator ?? "\n\n");
+}
+
+function evaluateGate(
+  condition: GateCondition,
+  ctx: ExecuteContext,
+): { passed: boolean; message?: string } {
+  const subject = condition.step ? ctx.results.get(condition.step) : undefined;
+  const text = condition.step ? (subject?.output ?? ctx.outputs.get(condition.step) ?? "") : ctx.input;
+  let passed = true;
+  let message: string | undefined;
+
+  if (condition.ok !== undefined) {
+    passed = passed && Boolean(subject && subject.ok === condition.ok);
+  }
+  if (condition.contains !== undefined) {
+    const needle = renderPrompt(condition.contains, {
+      input: ctx.input,
+      outputs: ctx.outputs,
+      results: ctx.results,
+    });
+    passed = passed && text.includes(needle);
+  }
+  if (condition.equals !== undefined) {
+    const expected = renderPrompt(condition.equals, {
+      input: ctx.input,
+      outputs: ctx.outputs,
+      results: ctx.results,
+    });
+    passed = passed && text === expected;
+  }
+  if (condition.matches !== undefined) {
+    try {
+      const pattern = renderPrompt(condition.matches, {
+        input: ctx.input,
+        outputs: ctx.outputs,
+        results: ctx.results,
+      });
+      passed = passed && new RegExp(pattern).test(text);
+    } catch (err) {
+      passed = false;
+      message = `invalid gate regex: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  if (condition.not) passed = !passed;
+  return { passed, message: message ?? (passed ? undefined : "gate condition did not pass") };
 }

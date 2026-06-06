@@ -1,7 +1,8 @@
 # steamtrain 🚂
 
-A terminal orchestrator that runs coding agents — **Claude Code** and **OpenCode** —
-as managed subprocesses and renders their activity live in a rich [Ink](https://github.com/vadimdemedes/ink) TUI.
+A workflow-first terminal orchestrator that runs coding agents — **Claude Code**
+and **OpenCode** — as managed subprocesses and renders their activity live in a
+rich [Ink](https://github.com/vadimdemedes/ink) TUI.
 
 steamtrain spawns the real `claude` and `opencode` CLIs (no stubs), parses their
 streaming JSON through a shared normalization layer, and shows a unified,
@@ -20,25 +21,35 @@ bun src/index.tsx
 ```
 
 You'll see a steam-train banner, then a preflight **doctor** panel checking that
-`claude` and `opencode` are installed and runnable, then the live UI:
+`claude` and `opencode` are installed and runnable, then the workflow picker:
 
 ```
 ┌ steamtrain  ● claude ready   ● opencode ready ───────── idle  cfg: steamtrain.json ┐
-┌ event stream ─────────────────────────────── plan · claude/claude-sonnet-4-6 ─────┐
-│  ▸ session 4a6e… · claude-haiku-4-5 · 30 tools                                     │
-│  hi                                                                                │
-│  ■ result  1.5s  · $0.0247                                                         │
+┌ workflows ───────────────────────────────────────── ↑/↓ select · Enter run ───────┐
+│▶ multi-plan  4 phases · 5 steps                                                    │
+│  distributor:1 · worker:2 · consolidator:2                                         │
+│  Draft a plan from independent angles, stress-test it, then synthesize...          │
 └────────────────────────────────────────────────────────────────────────────────────┘
- task  plan  implement  review  (Tab to switch)        → claude · claude-sonnet-4-6
+ mode  workflow  plan  implement  review  (Tab to switch)        → workflow: multi-plan
 ┌ ❯ describe the task, then Enter to dispatch ─────────────────────────────────────┐
 └──────────────────────────────────────────────────────────────────────────────────┘
- Enter dispatch · Tab switch task · Esc cancel · Ctrl+C quit
+ ↑/↓ pick · Enter run · Tab switch mode · Ctrl+C quit
 ```
 
-**Keys:** `Enter` dispatch · `Tab` cycle mode · `Esc` cancel a running task · `Ctrl+C` quit.
+**Keys:** `Enter` run · `↑/↓` pick workflow or inspect steps · `Tab` cycle mode ·
+`Esc` cancel/back · `Ctrl+C` quit.
 
-`Tab` cycles four modes: `plan`, `implement`, `review`, and **`workflow`** — the
-last launches multi-agent workflows (see [Workflows](#workflows)).
+`steamtrain` opens on **workflow** mode. `Tab` cycles to one-shot `plan`,
+`implement`, and `review` task modes.
+
+### Workflow CLI
+
+```bash
+steamtrain workflow list
+steamtrain workflow validate [name]
+steamtrain workflow run multi-plan --input "design the cache migration"
+steamtrain workflow run bug-hunt --stdin --json
+```
 
 ### Build a standalone binary
 
@@ -110,11 +121,11 @@ once on start and `tool_result` once on completion (deduped by call id).
 
 ---
 
-## Configuration: task type → model
+## Configuration: workflows and task defaults
 
-steamtrain routes three task types — `plan`, `implement`, `review` — to a
-specific agent + model. Defaults live in `src/config/defaults.ts`; override any
-subset with a `steamtrain.json` in the working directory:
+steamtrain is centered on workflows, but still ships one-shot task defaults for
+`plan`, `implement`, and `review`. Defaults live in `src/config/defaults.ts`;
+override any subset with a `steamtrain.json` in the working directory:
 
 ```jsonc
 {
@@ -143,25 +154,25 @@ warning in the stream); only the keys you specify are overridden.
 
 ## Workflows
 
-A **workflow** fans work out across many agent runs instead of one — steamtrain's
-declarative take on Claude Code's *dynamic workflows*. A workflow is a sequence of
-**phases** that run in order; the **steps** inside a phase run in **parallel**, and
-each step picks its own **agent, model, and target** (working directory + optional
-env/flags). Earlier steps' outputs can flow into later prompts, giving you a
-fan-out → cross-check → synthesize run in one shot.
+A **workflow** is steamtrain's central unit: a declarative sequence of **phases**
+made from standard building blocks. Phases run in order; the **steps** inside a
+phase run in **parallel**. Earlier step outputs can flow into later prompts,
+giving you fan-out -> process -> gate -> consolidate runs in one shot.
 
-Press **Tab** to the `workflow` mode, pick one with `↑/↓`, type the input, and
-**Enter** to launch. The phase → step tree streams live; `↑/↓` drills into a
+The TUI starts in workflow mode. Pick one with `↑/↓`, type the input, and
+**Enter** to launch. The phase -> step tree streams live; `↑/↓` drills into a
 step's output. `Esc` cancels a run (and, once stopped, backs out to the picker).
-Re-running **resumes** — completed steps replay from an in-session cache instead
+Re-running **resumes**: completed steps replay from an in-session cache instead
 of running again.
+
+The full language reference is in [`docs/workflow-spec.md`](docs/workflow-spec.md).
 
 ### Bundled workflows
 
 | name         | what it does                                                                                                                         |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `multi-plan` | Drafts a plan from two independent angles (claude + opencode), has an opus reviewer critique both, then synthesizes the strongest merged plan. |
-| `bug-hunt`   | Sweeps a scope for logic / error-handling / security bugs in parallel across three models, cross-checks to drop false positives, then reports the verified findings. |
+| `multi-plan` | Distributes planning lenses, drafts from two independent angles (claude + opencode), critiques both, then synthesizes the strongest merged plan. |
+| `bug-hunt`   | Sweeps a scope for logic / error-handling / security bugs in parallel across three models, cross-checks to drop false positives, gates verified findings, then reports them. |
 
 ### Defining your own
 
@@ -176,21 +187,37 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
       "description": "Audit each service for missing auth checks.",
       "phases": [
         {
+          "id": "split",
+          "title": "Split audit targets",
+          "steps": [
+            { "id": "targets", "kind": "distributor",
+              "items": ["api: {{input}}", "web: {{input}}"] }
+          ]
+        },
+        {
           "id": "scan",
           "title": "Scan services in parallel",
           "steps": [
-            { "id": "api", "agent": "claude",   "model": "claude-sonnet-4-6",
-              "cwd": "../api", "prompt": "Audit {{input}} in this repo" },
-            { "id": "web", "agent": "opencode", "model": "openai/gpt-5.4-mini",
-              "cwd": "../web", "prompt": "Audit {{input}} in this repo" }
+            { "id": "api", "kind": "worker", "agent": "claude", "model": "claude-sonnet-4-6",
+              "cwd": "../api", "dependsOn": ["targets"], "prompt": "Audit API target:\n{{steps.targets.items}}" },
+            { "id": "web", "kind": "worker", "agent": "opencode", "model": "openai/gpt-5.4-mini",
+              "cwd": "../web", "dependsOn": ["targets"], "prompt": "Audit web target:\n{{steps.targets.items}}" }
+          ]
+        },
+        {
+          "id": "gate",
+          "title": "Only report successful scans",
+          "steps": [
+            { "id": "scans-ready", "kind": "gate", "dependsOn": ["api", "web"],
+              "condition": { "step": "api", "ok": true }, "target": "ready", "onFalse": "fail" }
           ]
         },
         {
           "id": "report",
           "title": "Combine findings",
           "steps": [
-            { "id": "report", "agent": "claude", "model": "claude-opus-4-8",
-              "dependsOn": ["api", "web"],
+            { "id": "report", "kind": "consolidator", "agent": "claude", "model": "claude-opus-4-8",
+              "dependsOn": ["api", "web", "scans-ready"],
               "prompt": "Merge these findings:\n{{steps.api.output}}\n{{steps.web.output}}" }
           ]
         }
@@ -200,14 +227,18 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
 }
 ```
 
-- **Step fields:** `id` (unique), `agent` (`claude` | `opencode`), `model`, `prompt`,
-  plus optional `cwd` (the **target** dir — relative paths resolve against the
-  launch cwd), `env` (extra vars), `extraArgs` (extra CLI flags), and `dependsOn`
-  (step ids in *earlier* phases whose outputs the prompt uses).
+- **Step kinds:** `worker` / `processor`, `distributor`, `consolidator`, and
+  `gate`. Existing steps without `kind` are workers.
+- **Agent-backed fields:** `agent` (`claude` | `opencode`), `model`, `prompt`,
+  plus optional `cwd` (the **target** dir; relative paths resolve against the
+  launch cwd), `env` (extra vars), and `extraArgs` (extra CLI flags).
+- **Dependencies:** `dependsOn` may reference only steps in *earlier* phases.
 - **Prompt templates:** `{{input}}` / `{{args}}` expand to what you typed;
-  `{{steps.<id>.output}}` expands to an earlier step's result.
+  `{{steps.<id>.output}}`, `{{steps.<id>.items}}`, `{{steps.<id>.ok}}`,
+  `{{steps.<id>.error}}`, and `{{steps.<id>.target}}` expose earlier results.
 - **Limits:** ≤ 16 parallel steps per phase and 1000 steps per run. Every step is a
-  full agent run, so costs add up — scope the input small to gauge spend first.
+  full agent run only when it is agent-backed, so costs add up for worker and
+  agent-backed distributor/consolidator blocks.
 
 ---
 

@@ -31,7 +31,7 @@ export function App({ config, configSource, configWarning }: AppProps) {
 
   const [phase, setPhase] = useState<Phase>("banner");
   const [doctor, setDoctor] = useState<DoctorResult[] | null>(null);
-  const [mode, setMode] = useState<Mode>("plan");
+  const [mode, setMode] = useState<Mode>("workflow");
   const [value, setValue] = useState("");
   const [running, setRunning] = useState(false);
   const [transcript, dispatch] = useReducer(transcriptReducer, initialTranscript);

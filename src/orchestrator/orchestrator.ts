@@ -7,6 +7,7 @@ import {
   type StepResult,
   type WorkflowEvent,
   type WorkflowSpec,
+  isAgentBackedStep,
   runWorkflow,
   validateWorkflow,
 } from "../workflow";
@@ -137,7 +138,9 @@ export class Orchestrator {
 function workflowAgents(spec: WorkflowSpec): AgentId[] {
   const set = new Set<AgentId>();
   for (const phase of spec.phases) {
-    for (const step of phase.steps) set.add(step.agent);
+    for (const step of phase.steps) {
+      if (isAgentBackedStep(step)) set.add(step.agent);
+    }
   }
   return [...set];
 }

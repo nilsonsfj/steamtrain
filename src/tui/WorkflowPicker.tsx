@@ -1,5 +1,5 @@
 import { Box, Text } from "ink";
-import type { WorkflowSpec } from "../workflow";
+import { type WorkflowSpec, workflowStepKind } from "../workflow";
 
 interface WorkflowPickerProps {
   workflows: { name: string; spec: WorkflowSpec }[];
@@ -25,6 +25,7 @@ export function WorkflowPicker({ workflows, selectedIndex, height }: WorkflowPic
             const active = i === selectedIndex;
             const phaseCount = spec.phases.length;
             const stepCount = spec.phases.reduce((n, p) => n + p.steps.length, 0);
+            const blocks = blockSummary(spec);
             return (
               <Box key={name} flexDirection="column" marginTop={i === 0 ? 0 : 1}>
                 <Box>
@@ -37,6 +38,9 @@ export function WorkflowPicker({ workflows, selectedIndex, height }: WorkflowPic
                     {phaseCount} phase{phaseCount === 1 ? "" : "s"} · {stepCount} step
                     {stepCount === 1 ? "" : "s"}
                   </Text>
+                </Box>
+                <Box paddingLeft={2}>
+                  <Text color="magenta">{blocks}</Text>
                 </Box>
                 {spec.description ? (
                   <Box paddingLeft={2}>
@@ -52,4 +56,15 @@ export function WorkflowPicker({ workflows, selectedIndex, height }: WorkflowPic
       </Box>
     </Box>
   );
+}
+
+function blockSummary(spec: WorkflowSpec): string {
+  const counts = new Map<string, number>();
+  for (const phase of spec.phases) {
+    for (const step of phase.steps) {
+      const kind = workflowStepKind(step);
+      counts.set(kind, (counts.get(kind) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()].map(([kind, count]) => `${kind}:${count}`).join(" · ");
 }

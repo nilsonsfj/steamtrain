@@ -1,4 +1,5 @@
 import { render } from "ink";
+import { runCli } from "./cli";
 import { loadConfig } from "./config";
 import { App } from "./tui/App";
 
@@ -8,13 +9,19 @@ import { App } from "./tui/App";
  *   bun src/index.tsx     # dev (TSX, no build step)
  *   steamtrain            # after `npm run build` + global install
  *
- * Loads config (defaults + optional steamtrain.json), then renders the TUI.
- * The doctor preflight and dispatch happen inside the app.
+ * With no args, loads config (defaults + optional steamtrain.json), then renders
+ * the workflow-first TUI. Workflow subcommands run headlessly for scripts/CI.
  */
-function main(): void {
+async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+  if (args.length > 0) {
+    process.exitCode = await runCli(args);
+    return;
+  }
+
   const { config, source, warning } = loadConfig();
   const app = render(<App config={config} configSource={source} configWarning={warning} />);
   void app.waitUntilExit();
 }
 
-main();
+void main();

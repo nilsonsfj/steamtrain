@@ -23,6 +23,14 @@ const STEP_GLYPH: Record<StepState["status"], { symbol: string; color: string }>
   error: { symbol: "✗", color: "red" },
 };
 
+const BLOCK_GLYPH: Record<StepState["blockKind"], string> = {
+  distributor: "fan-out",
+  worker: "worker",
+  processor: "process",
+  consolidator: "merge",
+  gate: "gate",
+};
+
 /**
  * The live phase → step tree. Phases stack vertically; the selected step's
  * accumulated output is shown in a detail panel below (↑/↓ to drill in).
@@ -113,22 +121,21 @@ function StepRow({
   selected: boolean;
 }) {
   const g = STEP_GLYPH[step.status];
-  const agentColor = AGENT_COLOR[step.agent] ?? "white";
+  const agentColor = step.agent ? (AGENT_COLOR[step.agent] ?? "white") : "gray";
   const target = step.cwd ? ` @${basename(step.cwd)}` : "";
   const right = stepMeta(step);
+  const runner = step.agent && step.model ? `${step.agent}/${step.model}` : BLOCK_GLYPH[step.blockKind];
   return (
     <Box paddingLeft={1}>
       <Text color={selected ? "cyan" : "gray"}>{selected ? "▶ " : "  "}</Text>
       <Text color={g.color}>{g.symbol} </Text>
+      <Text color="magenta">{BLOCK_GLYPH[step.blockKind]} </Text>
       <Text color="white" bold={selected}>
         {step.stepId}
       </Text>
       <Text color="gray">{"  "}</Text>
-      <Text color={agentColor}>{step.agent}</Text>
-      <Text color="gray">
-        /{step.model}
-        {target}
-      </Text>
+      <Text color={agentColor}>{runner}</Text>
+      <Text color="gray">{target}</Text>
       {right ? <Text color="gray">{truncate(`  ${right}`, Math.max(8, width - 40))}</Text> : null}
     </Box>
   );
@@ -140,7 +147,7 @@ function Detail({ step, width }: { step: StepState; width: number }) {
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1}>
       <Text color="cyan">
-        {step.stepId} · {step.status}
+        {step.stepId} · {step.blockKind} · {step.status}
         {step.cached ? " (cached)" : ""}
       </Text>
       <Box width={width}>
@@ -153,6 +160,10 @@ function Detail({ step, width }: { step: StepState; width: number }) {
 }
 
 function stepMeta(step: StepState): string {
+  if (step.gate) {
+    const state = step.gate.passed ? "passed" : "blocked";
+    return step.gate.target ? `${state} → ${step.gate.target}` : state;
+  }
   if (step.result) {
     const bits = [
       step.cached ? "cached" : `${(step.result.durationMs / 1000).toFixed(1)}s`,

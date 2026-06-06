@@ -61,6 +61,7 @@ describe("workflowReducer", () => {
     const flat = flattenSteps(state);
     expect(flat).toHaveLength(1);
     const step = flat[0]?.step;
+    expect(step?.blockKind).toBe("worker");
     expect(step?.status).toBe("done");
     expect(step?.text).toBe("hello"); // thinking delta excluded
     expect(step?.result).toEqual(resultA);
@@ -94,6 +95,38 @@ describe("workflowReducer", () => {
     expect(step?.activity).toBe("⚙ Bash");
     expect(step?.status).toBe("error");
     expect(state.ok).toBe(false);
+  });
+
+  it("tracks pure workflow block kinds and gate evaluations", () => {
+    const result: StepResult = {
+      stepId: "gate",
+      ok: true,
+      output: "ready",
+      target: "ready",
+      gate: { passed: true, onFalse: "continue" },
+      durationMs: 1,
+    };
+    const state = reduceAll([
+      { kind: "workflow_start", name: "w", phaseCount: 1, stepCount: 1, ts: 0 },
+      { kind: "phase_start", phaseId: "p1", title: "P1", index: 0, stepCount: 1, ts: 0 },
+      { kind: "step_start", phaseId: "p1", stepId: "gate", blockKind: "gate", ts: 0 },
+      {
+        kind: "gate_evaluated",
+        phaseId: "p1",
+        stepId: "gate",
+        passed: true,
+        target: "ready",
+        onFalse: "continue",
+        ts: 0,
+      },
+      { kind: "step_done", phaseId: "p1", stepId: "gate", result, cached: false, ts: 0 },
+    ]);
+
+    const step = flattenSteps(state)[0]?.step;
+    expect(step?.blockKind).toBe("gate");
+    expect(step?.agent).toBeUndefined();
+    expect(step?.gate).toEqual({ passed: true, target: "ready", onFalse: "continue" });
+    expect(step?.activity).toBe("gate passed → ready");
   });
 
   it("resets to the initial state", () => {
