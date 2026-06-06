@@ -37,3 +37,18 @@ export { runWorkflow, type WorkflowDeps, type WorkflowRunContext } from "./engin
 export { BUNDLED_WORKFLOWS } from "./bundled";
 export { renderPrompt, type TemplateContext } from "./template";
 export { runPool, createChannel, type Channel } from "./pool";
+export {
+  WORKFLOW_CACHE_DIR,
+  WORKFLOW_CACHE_VERSION,
+  createWorkflowCacheStore,
+  workflowCacheKey,
+  workflowCacheFileName,
+  hashWorkflowCacheInput,
+  loadWorkflowCache,
+  saveWorkflowCache,
+  clearWorkflowCache,
+  clearAllWorkflowCaches,
+  persistWorkflowStepDone,
+  type WorkflowCacheKey,
+  type WorkflowCacheStore,
+} from "./cache-store";

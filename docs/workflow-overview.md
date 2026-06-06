@@ -520,7 +520,10 @@ Unknown placeholders are left unchanged.
 
 ## Resume and cache behavior
 
-steamtrain keeps an in-session cache of successful step results.
+steamtrain caches successful step results in memory and on disk under
+`.steamtrain/cache/` (keyed by workflow name, input, and launch cwd). Successful
+steps replay without spawning an agent on a later run in the same session **or**
+after restarting steamtrain.
 
 ```mermaid
 stateDiagram-v2
@@ -528,21 +531,25 @@ stateDiagram-v2
   FreshRun --> Running: Enter / workflow run
   Running --> Cached: step succeeds
   Running --> NotCached: step fails or is cancelled
-  Cached --> Resume: re-run same workflow + same input
+  Cached --> Resume: re-run same workflow + same input + cwd
   Resume --> ReplayCached: cached steps skip agent spawn
   FreshRun --> NewInput: prompt changes
-  NewInput --> CacheCleared
+  NewInput --> OtherCacheFile
+  FreshRun --> FreshFlag: --fresh
+  FreshFlag --> CacheCleared
 ```
 
 Behavior:
 
-- successful steps are cached under their step id
+- successful steps are cached under their step id (memory + disk)
 - cancelled steps are **not** cached
 - failed steps are **not** cached
 - dynamic child steps cache individually (`review-each[0]`, etc.)
 - parent dynamic steps cache their aggregate + `childResults`
-- TUI clears cache when the prompt changes
+- a different prompt uses a different on-disk cache file automatically
 - re-running with the same prompt resumes only incomplete work
+- CLI: `steamtrain workflow run … --fresh` ignores and deletes the on-disk cache
+- CLI: `steamtrain workflow cache clear` removes cached runs (all, or one workflow + input)
 
 ---
 
@@ -584,6 +591,9 @@ steamtrain workflow list
 steamtrain workflow validate [name]
 steamtrain workflow run <name> --input "task text"
 steamtrain workflow run <name> --stdin --json
+steamtrain workflow run <name> --input "task text" --fresh
+steamtrain workflow cache clear
+steamtrain workflow cache clear <name> --input "task text"
 ```
 
 Exit codes:
@@ -647,7 +657,7 @@ agent run. Dynamic fan-out multiplies cost linearly with item count.
 | `forEach` without distributor source | validation fails | use `kind: "distributor"` upstream |
 | expecting `onFalse: fail` to still run report phase | later phases stop | intended behavior |
 | huge agent-backed distributor output | runtime step-cap failure | keep splits small; validate with realistic input |
-| reusing prompt but expecting fresh run | cache replays successful steps | change prompt or Esc back to picker |
+| reusing prompt but expecting fresh run | cache replays successful steps | `steamtrain workflow run … --fresh` or `workflow cache clear` |
 | referencing child id in templates | unsupported | use parent aggregate `steps.<parent>.output` |
 
 ---

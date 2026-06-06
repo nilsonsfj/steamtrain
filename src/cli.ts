@@ -1,11 +1,17 @@
+import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { type SteamtrainConfig, loadConfig } from "./config";
 import { runDoctor } from "./doctor";
 import { Orchestrator } from "./orchestrator";
 import {
+  type StepResult,
+  WORKFLOW_CACHE_DIR,
   type WorkflowEvent,
   type WorkflowSpec,
+  createWorkflowCacheStore,
+  persistWorkflowStepDone,
   validateWorkflow,
+  workflowCacheKey,
   workflowStepKind,
 } from "./workflow";
 
@@ -20,6 +26,7 @@ interface RunOptions {
   input?: string;
   stdin: boolean;
   json: boolean;
+  fresh: boolean;
 }
 
 export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
@@ -37,7 +44,8 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
     return 1;
   }
 
-  const { config, source, warning } = loadConfig(io.cwd ?? process.cwd());
+  const cwd = io.cwd ?? process.cwd();
+  const { config, source, warning } = loadConfig(cwd);
   if (warning) err(`${warning}\n`);
   const orchestrator = new Orchestrator(config, []);
 
@@ -48,6 +56,8 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
       return 0;
     case "validate":
       return validateWorkflows(orchestrator.listWorkflows(), rest[0], out, err);
+    case "cache":
+      return runCacheCommand(rest, cwd, out, err);
     case "run":
       return runWorkflowCommand(orchestrator, config, rest, io, out, err);
     default:
@@ -99,6 +109,44 @@ function validateWorkflows(
   return ok ? 0 : 1;
 }
 
+async function runCacheCommand(
+  args: string[],
+  cwd: string,
+  out: (text: string) => void,
+  err: (text: string) => void,
+): Promise<number> {
+  const sub = args[0];
+  if (sub !== "clear") {
+    err(`unknown workflow cache command '${sub ?? ""}'\n\n${helpText()}`);
+    return 1;
+  }
+
+  const store = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
+  const options = parseCacheClearOptions(args.slice(1));
+  if (!options) {
+    err("usage: steamtrain workflow cache clear [--input <text> | --stdin] [<workflow>]\n");
+    return 1;
+  }
+
+  if (!options.workflow) {
+    await store.clearAll();
+    out(`cleared all workflow caches in ${store.rootDir}\n`);
+    return 0;
+  }
+
+  const input =
+    options.input ?? (options.stdin ? await readAll(process.stdin as Readable) : undefined);
+  if (!input?.trim()) {
+    err("workflow cache clear <name> requires --input <text> or --stdin\n");
+    return 1;
+  }
+
+  const key = workflowCacheKey(options.workflow, input.trim(), cwd);
+  await store.clear(key);
+  out(`cleared cache for workflow '${options.workflow}'\n`);
+  return 0;
+}
+
 async function runWorkflowCommand(
   orchestrator: Orchestrator,
   config: SteamtrainConfig,
@@ -115,7 +163,7 @@ async function runWorkflowCommand(
 
   const options = parseRunOptions(args.slice(1));
   if (!options) {
-    err("usage: steamtrain workflow run <name> --input <text> [--json]\n");
+    err("usage: steamtrain workflow run <name> --input <text> [--json] [--fresh]\n");
     return 1;
   }
 
@@ -126,6 +174,7 @@ async function runWorkflowCommand(
     return 1;
   }
 
+  const cwd = io.cwd ?? process.cwd();
   const doctor = await runDoctor(config);
   orchestrator.setDoctor(doctor);
   const check = orchestrator.canDispatchWorkflow(name);
@@ -134,17 +183,60 @@ async function runWorkflowCommand(
     return 1;
   }
 
+  const store = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
+  const key = workflowCacheKey(name, input.trim(), cwd);
+  const cache = new Map<string, StepResult>();
+  if (options.fresh) {
+    await store.clear(key);
+  } else {
+    const loaded = await store.load(key);
+    for (const [stepId, result] of loaded) cache.set(stepId, result);
+  }
+
   let ok = false;
-  for await (const event of orchestrator.runWorkflow(name, input.trim())) {
+  for await (const event of orchestrator.runWorkflow(name, input.trim(), undefined, cache)) {
     if (options.json) out(`${JSON.stringify(event)}\n`);
     else printHumanEvent(event, out);
+    if (event.kind === "step_done") {
+      await persistWorkflowStepDone(store, key, cache, event.stepId, event.result, event.cached);
+    }
     if (event.kind === "workflow_done") ok = event.ok;
   }
   return ok ? 0 : 1;
 }
 
+interface CacheClearOptions {
+  workflow?: string;
+  input?: string;
+  stdin: boolean;
+}
+
+function parseCacheClearOptions(args: string[]): CacheClearOptions | null {
+  const options: CacheClearOptions = { stdin: false };
+  const positional: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!arg) return null;
+    if (arg === "--input" || arg === "-i") {
+      const value = args[i + 1];
+      if (!value) return null;
+      options.input = value;
+      i += 1;
+    } else if (arg === "--stdin") {
+      options.stdin = true;
+    } else if (arg.startsWith("-")) {
+      return null;
+    } else {
+      positional.push(arg);
+    }
+  }
+  if (positional.length > 1) return null;
+  options.workflow = positional[0];
+  return options;
+}
+
 function parseRunOptions(args: string[]): RunOptions | null {
-  const options: RunOptions = { stdin: false, json: false };
+  const options: RunOptions = { stdin: false, json: false, fresh: false };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--input" || arg === "-i") {
@@ -156,6 +248,10 @@ function parseRunOptions(args: string[]): RunOptions | null {
       options.stdin = true;
     } else if (arg === "--json") {
       options.json = true;
+    } else if (arg === "--fresh") {
+      options.fresh = true;
+    } else if (arg === "--resume") {
+      options.fresh = false;
     } else {
       return null;
     }
@@ -222,8 +318,12 @@ function helpText(): string {
 Usage:
   steamtrain workflow list
   steamtrain workflow validate [name]
-  steamtrain workflow run <name> --input <text> [--json]
-  steamtrain workflow run <name> --stdin [--json]
+  steamtrain workflow run <name> --input <text> [--json] [--fresh]
+  steamtrain workflow run <name> --stdin [--json] [--fresh]
+  steamtrain workflow cache clear [<workflow> --input <text> | --stdin]
+
+Workflow runs resume from ${WORKFLOW_CACHE_DIR} by default. Pass --fresh to ignore
+and delete the on-disk cache for that workflow + input + cwd.
 
 Running steamtrain with no command opens the workflow-first TUI.
 `;

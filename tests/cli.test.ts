@@ -1,8 +1,14 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runCli } from "../src/cli";
+import {
+  WORKFLOW_CACHE_DIR,
+  saveWorkflowCache,
+  workflowCacheFileName,
+  workflowCacheKey,
+} from "../src/workflow/cache-store";
 
 function capture() {
   let stdout = "";
@@ -88,5 +94,34 @@ describe("runCli", () => {
 
     expect(code).toBe(1);
     expect(c.stdout).toContain("workflow failed");
+  });
+
+  it("clears all workflow caches", async () => {
+    const c = capture();
+    const cacheDir = join(c.io.cwd, WORKFLOW_CACHE_DIR);
+    const key = workflowCacheKey("multi-plan", "cached", c.io.cwd);
+    await saveWorkflowCache(cacheDir, key, new Map());
+
+    const code = await runCli(["workflow", "cache", "clear"], c.io);
+
+    expect(code).toBe(0);
+    expect(c.stdout).toContain("cleared all workflow caches");
+    expect(existsSync(join(cacheDir, workflowCacheFileName(key)))).toBe(false);
+  });
+
+  it("clears a single workflow cache entry", async () => {
+    const c = capture();
+    const cacheDir = join(c.io.cwd, WORKFLOW_CACHE_DIR);
+    const key = workflowCacheKey("multi-plan", "one", c.io.cwd);
+    const other = workflowCacheKey("bug-hunt", "two", c.io.cwd);
+    await saveWorkflowCache(cacheDir, key, new Map());
+    await saveWorkflowCache(cacheDir, other, new Map());
+
+    const code = await runCli(["workflow", "cache", "clear", "multi-plan", "--input", "one"], c.io);
+
+    expect(code).toBe(0);
+    expect(c.stdout).toContain("cleared cache for workflow 'multi-plan'");
+    expect(existsSync(join(cacheDir, workflowCacheFileName(key)))).toBe(false);
+    expect(existsSync(join(cacheDir, workflowCacheFileName(other)))).toBe(true);
   });
 });
