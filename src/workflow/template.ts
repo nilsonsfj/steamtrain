@@ -5,9 +5,12 @@
  *   {{steps.<id>.items}}    → distributor items joined by newlines
  *   {{steps.<id>.ok}}       → "true" / "false"
  *   {{steps.<id>.error}}    → error text, if any
+ *   {{item}} / {{item.value}} → current fan-out item, inside `forEach`
  * Unknown placeholders (and stray braces) are left untouched, so prompts that
  * legitimately contain `{{` survive.
  */
+
+import type { WorkflowItem } from "./types";
 
 export interface TemplateContext {
   input: string;
@@ -15,6 +18,8 @@ export interface TemplateContext {
   outputs: Map<string, string>;
   /** Full step results, when templates need status or structured payloads. */
   results?: Map<string, { ok: boolean; error?: string; items?: string[]; target?: string }>;
+  /** Current dynamic fan-out item for `forEach` worker/processor runs. */
+  item?: WorkflowItem;
 }
 
 const PLACEHOLDER = /\{\{\s*([^{}]+?)\s*\}\}/g;
@@ -24,6 +29,9 @@ export function renderPrompt(template: string, ctx: TemplateContext): string {
   return template.replace(PLACEHOLDER, (match, exprRaw: string) => {
     const expr = exprRaw.trim();
     if (expr === "input" || expr === "args") return ctx.input;
+    if (expr === "item" || expr === "item.value") return ctx.item?.value ?? "";
+    if (expr === "item.index") return ctx.item ? String(ctx.item.index) : "";
+    if (expr === "item.sourceStepId") return ctx.item?.sourceStepId ?? "";
     const step = STEP_FIELD.exec(expr);
     if (step) {
       const id = step[1] as string;

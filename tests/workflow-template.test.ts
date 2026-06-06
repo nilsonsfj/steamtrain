@@ -38,6 +38,16 @@ describe("renderPrompt", () => {
     expect(out).toBe("a\nb true ready");
   });
 
+  it("substitutes dynamic fan-out item fields", () => {
+    const out = renderPrompt("{{item.index}} {{item}} {{item.sourceStepId}}", {
+      input: "x",
+      outputs: new Map(),
+      item: { sourceStepId: "split", index: 2, value: "docs" },
+    });
+
+    expect(out).toBe("2 docs split");
+  });
+
   it("leaves unknown placeholders and stray braces untouched", () => {
     expect(renderPrompt("keep {{unknown}} and { single }", ctx("x"))).toBe(
       "keep {{unknown}} and { single }",

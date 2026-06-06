@@ -156,8 +156,9 @@ warning in the stream); only the keys you specify are overridden.
 
 A **workflow** is steamtrain's central unit: a declarative sequence of **phases**
 made from standard building blocks. Phases run in order; the **steps** inside a
-phase run in **parallel**. Earlier step outputs can flow into later prompts,
-giving you fan-out -> process -> gate -> consolidate runs in one shot.
+phase run in **parallel**. Distributors can produce many work items, processors
+can dynamically fan out to one generated agent run per item, and later steps can
+gate or consolidate the aggregate output.
 
 The TUI starts in workflow mode. Pick one with `↑/↓`, type the input, and
 **Enter** to launch. The phase -> step tree streams live; `↑/↓` drills into a
@@ -173,6 +174,7 @@ The full language reference is in [`docs/workflow-spec.md`](docs/workflow-spec.m
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `multi-plan` | Distributes planning lenses, drafts from two independent angles (claude + opencode), critiques both, then synthesizes the strongest merged plan. |
 | `bug-hunt`   | Sweeps a scope for logic / error-handling / security bugs in parallel across three models, cross-checks to drop false positives, gates verified findings, then reports them. |
+| `target-sweep` | Distributes a request into target areas, dynamically creates one processor run per item, then consolidates the generated outputs. |
 
 ### Defining your own
 
@@ -196,20 +198,19 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
         },
         {
           "id": "scan",
-          "title": "Scan services in parallel",
+          "title": "Scan each target",
           "steps": [
-            { "id": "api", "kind": "worker", "agent": "claude", "model": "claude-sonnet-4-6",
-              "cwd": "../api", "dependsOn": ["targets"], "prompt": "Audit API target:\n{{steps.targets.items}}" },
-            { "id": "web", "kind": "worker", "agent": "opencode", "model": "openai/gpt-5.4-mini",
-              "cwd": "../web", "dependsOn": ["targets"], "prompt": "Audit web target:\n{{steps.targets.items}}" }
+            { "id": "audit-each", "kind": "processor", "agent": "claude", "model": "claude-sonnet-4-6",
+              "dependsOn": ["targets"], "forEach": "steps.targets.items",
+              "prompt": "Audit target {{item.index}}:\n{{item}}" }
           ]
         },
         {
           "id": "gate",
           "title": "Only report successful scans",
           "steps": [
-            { "id": "scans-ready", "kind": "gate", "dependsOn": ["api", "web"],
-              "condition": { "step": "api", "ok": true }, "target": "ready", "onFalse": "fail" }
+            { "id": "scans-ready", "kind": "gate", "dependsOn": ["audit-each"],
+              "condition": { "step": "audit-each", "ok": true }, "target": "ready", "onFalse": "fail" }
           ]
         },
         {
@@ -217,8 +218,8 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
           "title": "Combine findings",
           "steps": [
             { "id": "report", "kind": "consolidator", "agent": "claude", "model": "claude-opus-4-8",
-              "dependsOn": ["api", "web", "scans-ready"],
-              "prompt": "Merge these findings:\n{{steps.api.output}}\n{{steps.web.output}}" }
+              "dependsOn": ["audit-each", "scans-ready"],
+              "prompt": "Merge these findings:\n{{steps.audit-each.output}}" }
           ]
         }
       ]
@@ -232,6 +233,9 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
 - **Agent-backed fields:** `agent` (`claude` | `opencode`), `model`, `prompt`,
   plus optional `cwd` (the **target** dir; relative paths resolve against the
   launch cwd), `env` (extra vars), and `extraArgs` (extra CLI flags).
+- **Dynamic fan-out:** add `forEach: "steps.<id>.items"` to a worker/processor
+  to create one generated child agent run per distributor item. Use `{{item}}`,
+  `{{item.index}}`, and `{{item.sourceStepId}}` in that prompt.
 - **Dependencies:** `dependsOn` may reference only steps in *earlier* phases.
 - **Prompt templates:** `{{input}}` / `{{args}}` expand to what you typed;
   `{{steps.<id>.output}}`, `{{steps.<id>.items}}`, `{{steps.<id>.ok}}`,

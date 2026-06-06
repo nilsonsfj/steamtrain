@@ -1,5 +1,11 @@
 import type { AgentEvent, AgentId } from "../types/events";
-import type { GateStep, StepResult, WorkflowEvent, WorkflowStepKind } from "../workflow";
+import type {
+  GateStep,
+  StepResult,
+  WorkflowEvent,
+  WorkflowItem,
+  WorkflowStepKind,
+} from "../workflow";
 
 /**
  * The render model for a workflow run: a phase → step tree built by folding the
@@ -15,6 +21,8 @@ export interface StepState {
   agent?: AgentId;
   model?: string;
   cwd?: string;
+  parentStepId?: string;
+  item?: WorkflowItem;
   status: StepStatus;
   /** Accumulated non-thinking text, for the tail / drill-in panel. */
   text: string;
@@ -134,6 +142,7 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
           p.phaseId === e.phaseId
             ? {
                 ...p,
+                stepCount: e.parentStepId ? Math.max(p.stepCount, p.steps.length + 1) : p.stepCount,
                 steps: [
                   ...p.steps,
                   {
@@ -142,6 +151,8 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
                     agent: e.agent,
                     model: e.model,
                     cwd: e.cwd,
+                    parentStepId: e.parentStepId,
+                    item: e.item,
                     status: "running",
                     text: "",
                     cached: false,

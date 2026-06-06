@@ -21,6 +21,15 @@ export interface WorkflowStepBase {
   dependsOn?: string[];
 }
 
+export interface WorkflowItem {
+  /** The distributor step that produced this item. */
+  sourceStepId: string;
+  /** Zero-based position within the distributor output. */
+  index: number;
+  /** Item payload supplied to one generated worker/processor run. */
+  value: string;
+}
+
 export interface AgentRunFields {
   agent: AgentId;
   /** Model string in the agent's own format (claude: `claude-…`, opencode: `provider/model`). */
@@ -37,6 +46,11 @@ export interface AgentRunFields {
 
 export interface WorkerStep extends WorkflowStepBase, AgentRunFields {
   kind?: "worker" | "processor";
+  /**
+   * Dynamically fan this worker/processor out over prior distributor items.
+   * Syntax: `steps.<id>.items` (or `<id>.items`).
+   */
+  forEach?: string;
 }
 
 export interface DistributorStep extends WorkflowStepBase {
@@ -120,6 +134,12 @@ export interface StepResult {
   output: string;
   /** Distributed item payloads, when a distributor produced structured items. */
   items?: string[];
+  /** The work item assigned to this generated child result, if any. */
+  item?: WorkflowItem;
+  /** Parent dynamic step id for generated child results. */
+  parentStepId?: string;
+  /** Generated child results for a dynamic fan-out parent. */
+  childResults?: StepResult[];
   /** Gate target/state label, when a gate evaluated. */
   target?: string;
   gate?: {
@@ -164,6 +184,7 @@ const optionalAgentRunShape = {
 const workflowWorkerStepSchema = z.object({
   ...baseStepShape,
   kind: z.enum(["worker", "processor"]).optional(),
+  forEach: z.string().min(1).optional(),
   ...agentRunShape,
 });
 
@@ -295,6 +316,13 @@ export function workflowStepKind(step: WorkflowStep): WorkflowStepKind {
 
 export type AgentBackedWorkflowStep = WorkflowStep & AgentRunFields;
 
+export function parseForEachSource(source: string): string | undefined {
+  const explicit = /^steps\.(.+)\.items$/.exec(source);
+  if (explicit) return explicit[1];
+  const shorthand = /^(.+)\.items$/.exec(source);
+  return shorthand?.[1];
+}
+
 export function isAgentBackedStep(step: WorkflowStep): step is AgentBackedWorkflowStep {
   return "agent" in step && typeof step.agent === "string";
 }
@@ -336,6 +364,23 @@ export function validateWorkflow(spec: WorkflowSpec): ValidationResult {
             ? `gate '${step.id}' condition references '${step.condition.step}', which is not in an earlier phase`
             : `gate '${step.id}' condition references unknown step '${step.condition.step}'`,
         };
+      }
+      if ((step.kind === "worker" || step.kind === "processor" || !step.kind) && step.forEach) {
+        const sourceStepId = parseForEachSource(step.forEach);
+        if (!sourceStepId) {
+          return {
+            ok: false,
+            error: `step '${step.id}' has invalid forEach '${step.forEach}' (expected steps.<id>.items)`,
+          };
+        }
+        if (!earlierIds.has(sourceStepId)) {
+          return {
+            ok: false,
+            error: allIds.has(sourceStepId)
+              ? `step '${step.id}' forEach references '${sourceStepId}', which is not in an earlier phase`
+              : `step '${step.id}' forEach references unknown step '${sourceStepId}'`,
+          };
+        }
       }
     }
     // Promote this phase's ids only after the whole phase is checked, so two

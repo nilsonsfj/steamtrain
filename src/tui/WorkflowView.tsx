@@ -126,8 +126,10 @@ function StepRow({
   const right = stepMeta(step);
   const runner =
     step.agent && step.model ? `${step.agent}/${step.model}` : BLOCK_GLYPH[step.blockKind];
+  const indent = step.parentStepId ? 3 : 1;
+  const item = step.item ? ` item ${step.item.index}: ${truncate(step.item.value, 32)}` : "";
   return (
-    <Box paddingLeft={1}>
+    <Box paddingLeft={indent}>
       <Text color={selected ? "cyan" : "gray"}>{selected ? "▶ " : "  "}</Text>
       <Text color={g.color}>{g.symbol} </Text>
       <Text color="magenta">{BLOCK_GLYPH[step.blockKind]} </Text>
@@ -136,7 +138,10 @@ function StepRow({
       </Text>
       <Text color="gray">{"  "}</Text>
       <Text color={agentColor}>{runner}</Text>
-      <Text color="gray">{target}</Text>
+      <Text color="gray">
+        {target}
+        {item}
+      </Text>
       {right ? <Text color="gray">{truncate(`  ${right}`, Math.max(8, width - 40))}</Text> : null}
     </Box>
   );
@@ -151,6 +156,11 @@ function Detail({ step, width }: { step: StepState; width: number }) {
         {step.stepId} · {step.blockKind} · {step.status}
         {step.cached ? " (cached)" : ""}
       </Text>
+      {step.item ? (
+        <Text color="gray">
+          item {step.item.index} from {step.item.sourceStepId}: {step.item.value}
+        </Text>
+      ) : null}
       <Box width={width}>
         <Text color={step.status === "error" ? "red" : undefined} wrap="wrap">
           {preview}

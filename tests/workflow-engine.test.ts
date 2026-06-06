@@ -312,6 +312,83 @@ describe("runWorkflow", () => {
     expect(events.at(-1)).toMatchObject({ kind: "workflow_done", ok: true });
   });
 
+  it("dynamically fans a processor out over distributor items", async () => {
+    const spec: WorkflowSpec = {
+      name: "dynamic",
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [{ id: "targets", kind: "distributor", items: ["api", "web", "docs"] }],
+        },
+        {
+          id: "process",
+          title: "Process",
+          steps: [
+            {
+              id: "review-each",
+              kind: "processor",
+              agent: "claude",
+              model: "m",
+              dependsOn: ["targets"],
+              forEach: "steps.targets.items",
+              prompt: "review {{item.index}} {{item}} for {{input}}",
+            },
+          ],
+        },
+        {
+          id: "report",
+          title: "Report",
+          steps: [
+            {
+              id: "report",
+              kind: "consolidator",
+              dependsOn: ["review-each"],
+              prompt: "{{steps.review-each.output}}",
+            },
+          ],
+        },
+      ],
+    };
+    const { deps, state } = makeDeps(echo, { maxConcurrency: 2, delayMs: 10 });
+    const events = await collect(spec, "task", deps);
+
+    expect(state.runs).toHaveLength(3);
+    expect(state.peak).toBe(2);
+    expect(state.runs.map((r) => r.opts.prompt)).toEqual([
+      "review 0 api for task",
+      "review 1 web for task",
+      "review 2 docs for task",
+    ]);
+
+    const childStarts = events.filter(
+      (e) => e.kind === "step_start" && e.parentStepId === "review-each",
+    );
+    expect(childStarts.map((e) => (e.kind === "step_start" ? e.stepId : ""))).toEqual([
+      "review-each[0]",
+      "review-each[1]",
+      "review-each[2]",
+    ]);
+    expect(childStarts[0]).toMatchObject({
+      kind: "step_start",
+      item: { sourceStepId: "targets", index: 0, value: "api" },
+    });
+
+    const parentDone = events.find((e) => e.kind === "step_done" && e.stepId === "review-each");
+    expect(
+      parentDone && parentDone.kind === "step_done" && parentDone.result.childResults,
+    ).toHaveLength(3);
+    expect(parentDone && parentDone.kind === "step_done" && parentDone.result.output).toContain(
+      "--- review-each[0] (api) ---",
+    );
+
+    const reportDone = events.find((e) => e.kind === "step_done" && e.stepId === "report");
+    expect(reportDone && reportDone.kind === "step_done" && reportDone.result.output).toContain(
+      "review-each[2]",
+    );
+    expect(events.at(-1)).toMatchObject({ kind: "workflow_done", ok: true });
+  });
+
   it("stops after a blocking gate with onFalse stop", async () => {
     const spec: WorkflowSpec = {
       name: "stop",

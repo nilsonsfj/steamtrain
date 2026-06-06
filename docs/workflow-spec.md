@@ -30,12 +30,13 @@ Workflow definitions live under the `workflows` map in `steamtrain.json`.
           "title": "Process work",
           "steps": [
             {
-              "id": "review-api",
+              "id": "review-each",
               "kind": "worker",
               "agent": "claude",
               "model": "claude-sonnet-4-6",
               "dependsOn": ["areas"],
-              "prompt": "Review the API area:\n{{steps.areas.items}}"
+              "forEach": "steps.areas.items",
+              "prompt": "Review this area:\n{{item}}"
             }
           ]
         },
@@ -46,8 +47,8 @@ Workflow definitions live under the `workflows` map in `steamtrain.json`.
             {
               "id": "has-output",
               "kind": "gate",
-              "dependsOn": ["review-api"],
-              "condition": { "step": "review-api", "ok": true },
+              "dependsOn": ["review-each"],
+              "condition": { "step": "review-each", "ok": true },
               "target": "ready"
             }
           ]
@@ -59,7 +60,7 @@ Workflow definitions live under the `workflows` map in `steamtrain.json`.
             {
               "id": "report",
               "kind": "consolidator",
-              "dependsOn": ["review-api", "has-output"]
+              "dependsOn": ["review-each", "has-output"]
             }
           ]
         }
@@ -114,6 +115,36 @@ Optional fields: `cwd`, `env`, `extraArgs`.
   "prompt": "Review {{input}}"
 }
 ```
+
+Add `forEach` to dynamically fan a worker/processor out over distributor items.
+The engine creates one generated child step per item, assigns one agent run to
+each child, and stores an aggregate parent result under the declared step id.
+
+```jsonc
+{
+  "id": "review-each",
+  "kind": "processor",
+  "agent": "claude",
+  "model": "claude-sonnet-4-6",
+  "dependsOn": ["areas"],
+  "forEach": "steps.areas.items",
+  "prompt": "Review item {{item.index}}:\n{{item}}"
+}
+```
+
+If `areas` produced `["api", "web"]`, the runtime step tree includes:
+
+```text
+review-each
+  review-each[0] -> api
+  review-each[1] -> web
+```
+
+Downstream steps reference the aggregate parent result:
+
+- `{{steps.review-each.output}}` joins every child output with item headers.
+- `{{steps.review-each.items}}` is the original item list.
+- `{{steps.review-each.ok}}` is `true` only when every child run succeeds.
 
 ### Distributor
 
@@ -198,6 +229,9 @@ Prompt templates and several block fields support:
 | `{{steps.<id>.ok}}` | `true` or `false`. |
 | `{{steps.<id>.error}}` | Prior step error text, if any. |
 | `{{steps.<id>.target}}` | Prior gate target/state, if any. |
+| `{{item}}`, `{{item.value}}` | Current dynamic fan-out item inside a `forEach` worker/processor. |
+| `{{item.index}}` | Zero-based index of the current fan-out item. |
+| `{{item.sourceStepId}}` | Distributor step id that produced the current item. |
 
 Unknown placeholders are left unchanged.
 
@@ -207,6 +241,8 @@ Unknown placeholders are left unchanged.
 - A phase must contain at least one step.
 - Step ids must be unique across the workflow.
 - `dependsOn` and gate `condition.step` may reference earlier phases only.
+- `forEach` must use `steps.<id>.items` or `<id>.items`, and the source step
+  must be in an earlier phase.
 - A workflow may contain at most 1000 static steps.
 - `maxConcurrency` is capped at 16.
 - Distributor steps require `items` or `agent` + `model` + `prompt`.
