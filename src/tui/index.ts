@@ -6,6 +6,7 @@ export { StatusBar } from "./StatusBar";
 export { TaskSelector } from "./TaskSelector";
 export { PromptInput } from "./PromptInput";
 export { WorkflowPicker } from "./WorkflowPicker";
+export { WorkflowPreview, flattenSpecSteps } from "./WorkflowPreview";
 export { WorkflowView } from "./WorkflowView";
 export { type Mode, buildModes, isWorkspaceMode, nextMode } from "./modes";
 export {
