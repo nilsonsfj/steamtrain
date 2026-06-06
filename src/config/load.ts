@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type WorkflowSpec, validateWorkflow } from "../workflow/types";
 import { DEFAULT_CONFIG } from "./defaults";
-import { type ConfigFile, type SteamtrainConfig, type TaskType, configFileSchema } from "./types";
+import { type ConfigFile, type SteamtrainConfig, configFileSchema } from "./types";
 
 export const CONFIG_FILENAME = "steamtrain.json";
 
@@ -54,11 +54,6 @@ export function mergeConfig(
   override: ConfigFile,
 ): { config: SteamtrainConfig; warnings: string[] } {
   const merged: SteamtrainConfig = {
-    tasks: {
-      plan: override.tasks?.plan ?? base.tasks.plan,
-      implement: override.tasks?.implement ?? base.tasks.implement,
-      review: override.tasks?.review ?? base.tasks.review,
-    },
     binaries: { ...base.binaries, ...override.binaries },
     timeoutMs: override.timeoutMs ?? base.timeoutMs,
     maxConcurrency: override.maxConcurrency ?? base.maxConcurrency,
@@ -87,9 +82,4 @@ function mergeWorkflows(
     out[name] = full;
   }
   return { workflows: out, warnings };
-}
-
-/** Resolve a task type to its `{ agent, model }`. */
-export function resolveTaskConfig(config: SteamtrainConfig, type: TaskType) {
-  return config.tasks[type];
 }

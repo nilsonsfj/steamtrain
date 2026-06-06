@@ -11,6 +11,8 @@ import {
   persistWorkflowStepDone,
   workflowCacheKey,
 } from "../workflow";
+import type { WorkspaceConfig, WorkspaceEntry } from "../workspace";
+import { workspaceById, workspaceLabel } from "../workspace";
 import { EventStream } from "./EventStream";
 import { PromptInput } from "./PromptInput";
 import { StatusBar } from "./StatusBar";
@@ -18,7 +20,7 @@ import { TaskSelector } from "./TaskSelector";
 import { WorkflowPicker } from "./WorkflowPicker";
 import { WorkflowView } from "./WorkflowView";
 import { Banner } from "./banner";
-import { type Mode, nextMode } from "./modes";
+import { type Mode, buildModes, nextMode } from "./modes";
 import { initialTranscript, transcriptReducer } from "./transcript";
 import { useTerminalSize } from "./useTerminalSize";
 import { initialWorkflowState, workflowReducer } from "./workflow-state";
@@ -27,12 +29,22 @@ interface AppProps {
   config: SteamtrainConfig;
   configSource: string;
   configWarning?: string;
+  workspaces: WorkspaceConfig;
+  workspaceSource: string;
+  workspaceWarning?: string;
 }
 
 type Phase = "banner" | "main";
 const BANNER_MS = 1100;
 
-export function App({ config, configSource, configWarning }: AppProps) {
+export function App({
+  config,
+  configSource,
+  configWarning,
+  workspaces,
+  workspaceSource,
+  workspaceWarning,
+}: AppProps) {
   const { exit } = useApp();
   const { columns, rows } = useTerminalSize();
 
@@ -53,9 +65,13 @@ export function App({ config, configSource, configWarning }: AppProps) {
   const workflowCacheRef = useRef<Map<string, StepResult>>(new Map());
   const cacheStoreRef = useRef(createWorkflowCacheStore(join(process.cwd(), WORKFLOW_CACHE_DIR)));
 
-  const orchestratorRef = useRef<Orchestrator | null>(null);
-  if (!orchestratorRef.current) orchestratorRef.current = new Orchestrator(config, []);
-  const orchestrator = orchestratorRef.current;
+  const modes = useMemo(() => buildModes(workspaces), [workspaces]);
+  const workspaceMap = useMemo(() => workspaceById(workspaces), [workspaces]);
+
+  const orchestrator = useMemo(
+    () => new Orchestrator(config, workspaces, doctor ?? []),
+    [config, workspaces, doctor],
+  );
 
   const workflowEntries = useMemo(
     () => Object.entries(orchestrator.listWorkflows()).map(([name, spec]) => ({ name, spec })),
@@ -70,10 +86,13 @@ export function App({ config, configSource, configWarning }: AppProps) {
     };
   }, []);
 
-  // Surface a config-load warning (kept defaults) once.
+  // Surface config-load warnings (kept defaults) once.
   useEffect(() => {
     if (configWarning) dispatch({ type: "notice", level: "warn", text: configWarning });
   }, [configWarning]);
+  useEffect(() => {
+    if (workspaceWarning) dispatch({ type: "notice", level: "warn", text: workspaceWarning });
+  }, [workspaceWarning]);
 
   // Show the banner briefly, then hand over to the main UI.
   useEffect(() => {
@@ -87,7 +106,6 @@ export function App({ config, configSource, configWarning }: AppProps) {
     runDoctor(config)
       .then((results) => {
         if (!active) return;
-        orchestrator.setDoctor(results);
         setDoctor(results);
       })
       .catch((err) => {
@@ -97,7 +115,7 @@ export function App({ config, configSource, configWarning }: AppProps) {
     return () => {
       active = false;
     };
-  }, [config, orchestrator]);
+  }, [config]);
 
   const totalWfSteps = wf.phases.reduce((n, p) => n + p.steps.length, 0);
 
@@ -180,15 +198,23 @@ export function App({ config, configSource, configWarning }: AppProps) {
         return;
       }
 
-      // Task mode — `mode` is a TaskType here.
+      // Workspace mode — `mode` is a workspace id here.
       setValue("");
-      const tc = config.tasks[mode];
+      const entry = workspaceMap.get(mode);
+      if (!entry) {
+        dispatch({
+          type: "notice",
+          level: "error",
+          text: `unknown workspace '${mode}'`,
+        });
+        return;
+      }
       const check = orchestrator.canDispatch(mode);
       if (!check.ok) {
         dispatch({
           type: "notice",
           level: "error",
-          text: `cannot dispatch '${mode}': ${check.reason}`,
+          text: `cannot dispatch '${workspaceLabel(entry)}': ${check.reason}`,
         });
         return;
       }
@@ -196,7 +222,7 @@ export function App({ config, configSource, configWarning }: AppProps) {
       dispatch({
         type: "notice",
         level: "info",
-        text: `dispatch '${mode}' → ${tc.agent} / ${tc.model}`,
+        text: `dispatch '${workspaceLabel(entry)}' → ${entry.agent} / ${entry.model}`,
       });
       setRunning(true);
       const ac = new AbortController();
@@ -218,7 +244,16 @@ export function App({ config, configSource, configWarning }: AppProps) {
         }
       })();
     },
-    [config, orchestrator, running, mode, wf.started, workflowEntries, workflowIndex, runWorkflow],
+    [
+      orchestrator,
+      running,
+      mode,
+      wf.started,
+      workflowEntries,
+      workflowIndex,
+      runWorkflow,
+      workspaceMap,
+    ],
   );
 
   useInput((input, key) => {
@@ -244,7 +279,7 @@ export function App({ config, configSource, configWarning }: AppProps) {
       return;
     }
     if (key.tab && !running) {
-      setMode((prev) => nextMode(prev));
+      setMode((prev) => nextMode(prev, modes));
       return;
     }
     if (mode === "workflow") {
@@ -274,7 +309,12 @@ export function App({ config, configSource, configWarning }: AppProps) {
 
   return (
     <Box flexDirection="column" width={columns}>
-      <StatusBar doctor={doctor} configSource={configSource} running={running} />
+      <StatusBar
+        doctor={doctor}
+        configSource={configSource}
+        workspaceSource={workspaceSource}
+        running={running}
+      />
       {isWorkflow ? (
         wf.started ? (
           <WorkflowView
@@ -295,11 +335,11 @@ export function App({ config, configSource, configWarning }: AppProps) {
           items={transcript.items}
           height={streamHeight}
           width={columns}
-          taskLabel={taskLabel(config, mode)}
+          taskLabel={workspaceStreamLabel(mode, workspaceMap)}
         />
       )}
       <TaskSelector
-        config={config}
+        workspaces={workspaces}
         active={mode}
         workflowName={isWorkflow ? workflowEntries[workflowIndex]?.name : undefined}
       />
@@ -322,10 +362,11 @@ export function App({ config, configSource, configWarning }: AppProps) {
   );
 }
 
-function taskLabel(config: SteamtrainConfig, mode: Mode): string {
+function workspaceStreamLabel(mode: Mode, workspaceMap: Map<string, WorkspaceEntry>): string {
   if (mode === "workflow") return "workflow";
-  const tc = config.tasks[mode];
-  return `${mode} · ${tc.agent}/${tc.model}`;
+  const entry = workspaceMap.get(mode);
+  if (!entry) return mode;
+  return `${workspaceLabel(entry)} · ${entry.agent}/${entry.model}`;
 }
 
 function hint(mode: Mode, wfStarted: boolean, running: boolean): string {

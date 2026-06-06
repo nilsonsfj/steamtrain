@@ -1,15 +1,18 @@
-import { TASK_TYPES, type TaskType } from "../config";
+import type { WorkspaceConfig } from "../workspace";
+import { workspaceIds } from "../workspace";
 
-/** Selector positions: workflows first, with one-shot task modes as secondary tools. */
-export type Mode = TaskType | "workflow";
+/** `workflow` or a workspace id from `~/.steamtrain/workspace.json`. */
+export type Mode = "workflow" | (string & {});
 
-export const MODES: readonly Mode[] = ["workflow", ...TASK_TYPES];
+export function buildModes(workspaces: WorkspaceConfig): readonly Mode[] {
+  return ["workflow", ...workspaceIds(workspaces)];
+}
 
-export function isTaskType(mode: Mode): mode is TaskType {
+export function isWorkspaceMode(mode: Mode): mode is string {
   return mode !== "workflow";
 }
 
-export function nextMode(current: Mode): Mode {
-  const idx = MODES.indexOf(current);
-  return MODES[(idx + 1) % MODES.length] ?? current;
+export function nextMode(current: Mode, modes: readonly Mode[]): Mode {
+  const idx = modes.indexOf(current);
+  return modes[(idx + 1) % modes.length] ?? current;
 }

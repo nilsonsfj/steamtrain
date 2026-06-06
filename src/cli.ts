@@ -14,6 +14,7 @@ import {
   workflowCacheKey,
   workflowStepKind,
 } from "./workflow";
+import { loadWorkspaceConfig } from "./workspace";
 
 export interface CliIO {
   cwd?: string;
@@ -47,7 +48,8 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
   const cwd = io.cwd ?? process.cwd();
   const { config, source, warning } = loadConfig(cwd);
   if (warning) err(`${warning}\n`);
-  const orchestrator = new Orchestrator(config, []);
+  const { config: workspaces } = loadWorkspaceConfig();
+  const orchestrator = new Orchestrator(config, workspaces, []);
 
   switch (command ?? "list") {
     case "list":

@@ -7,7 +7,7 @@ export { TaskSelector } from "./TaskSelector";
 export { PromptInput } from "./PromptInput";
 export { WorkflowPicker } from "./WorkflowPicker";
 export { WorkflowView } from "./WorkflowView";
-export { type Mode, MODES, isTaskType, nextMode } from "./modes";
+export { type Mode, buildModes, isWorkspaceMode, nextMode } from "./modes";
 export {
   type DisplayItem,
   type TranscriptState,

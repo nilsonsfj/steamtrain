@@ -1,5 +1,5 @@
 export {
   Orchestrator,
-  type ResolvedTask,
+  type ResolvedWorkspace,
   type DispatchCheck,
 } from "./orchestrator";
