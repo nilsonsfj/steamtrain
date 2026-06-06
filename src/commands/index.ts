@@ -1,4 +1,8 @@
-export { autocompleteSlashCommand, type AutocompleteResult } from "./autocomplete";
+export {
+  applySlashSuggestion,
+  autocompleteSlashCommand,
+  type AutocompleteResult,
+} from "./autocomplete";
 export { isSlashCommandInput, parseSlashInput, slashCommandArgs } from "./parse";
 export {
   executeSlashCommand,

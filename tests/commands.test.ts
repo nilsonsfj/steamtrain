@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { autocompleteSlashCommand } from "../src/commands/autocomplete";
+import { applySlashSuggestion, autocompleteSlashCommand } from "../src/commands/autocomplete";
 import { parseSlashInput, slashCommandArgs } from "../src/commands/parse";
 import {
   executeSlashCommand,
@@ -174,6 +174,77 @@ describe("autocompleteSlashCommand", () => {
     );
     expect(result?.suggestions).toEqual([]);
     expect(result?.value).toBe("/agent ");
+  });
+});
+
+describe("applySlashSuggestion", () => {
+  it("applies a command name from prefix", () => {
+    const next = applySlashSuggestion("/ver", "version", listSlashCommands(), makeCtx());
+    expect(next).toBe("/version ");
+  });
+
+  it("applies a command name from bare slash", () => {
+    const next = applySlashSuggestion("/", "exit", listSlashCommands(), makeCtx());
+    expect(next).toBe("/exit ");
+  });
+
+  it("applies a model argument", () => {
+    const next = applySlashSuggestion(
+      "/model claude-op",
+      "claude-opus-4-8",
+      listSlashCommands(),
+      makeCtx(),
+    );
+    expect(next).toBe("/model claude-opus-4-8 ");
+  });
+
+  it("returns raw input when command has no complete hook", () => {
+    const next = applySlashSuggestion(
+      "/version partial",
+      "partial",
+      listSlashCommands(),
+      makeCtx(),
+    );
+    expect(next).toBe("/version partial");
+  });
+});
+
+describe("autocompleteSlashCommand edge cases", () => {
+  it("returns empty suggestions for unknown command prefix", () => {
+    const result = autocompleteSlashCommand("/zzz", listSlashCommands(), makeCtx());
+    expect(result?.value).toBe("/zzz");
+    expect(result?.suggestions).toEqual([]);
+  });
+
+  it("keeps value but lists candidates when arg prefix matches nothing", () => {
+    const result = autocompleteSlashCommand("/model zzz", listSlashCommands(), makeCtx());
+    expect(result?.value).toBe("/model zzz");
+    expect(result?.suggestions?.length).toBeGreaterThan(0);
+  });
+
+  it("lists multiple command matches without forcing a single completion", () => {
+    const commands = [
+      ...listSlashCommands(),
+      {
+        name: "verbose",
+        description: "verbose cmd",
+        execute: () => ({ handled: true }),
+      },
+    ];
+    const result = autocompleteSlashCommand("/ver", commands, makeCtx());
+    expect(result?.value).toBe("/ver");
+    expect(result?.suggestions).toContain("version");
+    expect(result?.suggestions).toContain("verbose");
+  });
+
+  it("completes a partial command name even with a trailing space", () => {
+    const result = autocompleteSlashCommand("/ver ", listSlashCommands(), makeCtx());
+    expect(result?.value).toBe("/version ");
+    expect(result?.suggestions).toContain("version");
+  });
+
+  it("returns null for registered commands without complete hooks", () => {
+    expect(autocompleteSlashCommand("/exit ", listSlashCommands(), makeCtx())).toBeNull();
   });
 });
 

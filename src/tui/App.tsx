@@ -3,11 +3,13 @@ import { Box, Text, useApp, useInput } from "ink";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   type SlashCommandContext,
+  applySlashSuggestion,
   autocompleteSlashCommand,
   executeSlashCommand,
   isRegisteredSlashCommand,
   isSlashCommandInput,
   listSlashCommands,
+  parseSlashInput,
 } from "../commands";
 import type { SteamtrainConfig } from "../config";
 import { type DoctorResult, runDoctor } from "../doctor";
@@ -22,6 +24,7 @@ import {
 } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 import { workspaceById, workspaceLabel } from "../workspace";
+import { CommandSuggestionMenu, suggestionMenuHeight } from "./CommandSuggestionMenu";
 import { EventStream } from "./EventStream";
 import { PromptInput } from "./PromptInput";
 import { StatusBar } from "./StatusBar";
@@ -31,6 +34,11 @@ import { WorkflowPreview } from "./WorkflowPreview";
 import { WorkflowView } from "./WorkflowView";
 import { Banner } from "./banner";
 import { type Mode, buildModes, nextMode } from "./modes";
+import {
+  shouldApplySuggestionOnSubmit,
+  shouldDismissSuggestionMenu,
+  shouldSuppressWorkflowNavigation,
+} from "./slash-completion";
 import { initialTranscript, transcriptReducer } from "./transcript";
 import { useTerminalSize } from "./useTerminalSize";
 import { flattenSpecSteps } from "./workflow-spec-ui";
@@ -65,6 +73,8 @@ export function App({
   const [runtimeWorkspaces, setRuntimeWorkspaces] = useState<WorkspaceConfig>(workspaces);
   const [value, setValue] = useState("");
   const [commandSuggestions, setCommandSuggestions] = useState<readonly string[]>([]);
+  const [suggestionIndex, setSuggestionIndex] = useState(0);
+  const [cursorResetKey, setCursorResetKey] = useState(0);
   const [running, setRunning] = useState(false);
   const [transcript, dispatch] = useReducer(transcriptReducer, initialTranscript);
 
@@ -219,21 +229,87 @@ export function App({
     [orchestrator],
   );
 
+  const bumpCursorToEnd = useCallback(() => {
+    setCursorResetKey((k) => k + 1);
+  }, []);
+
   const handleValueChange = useCallback((next: string) => {
     setValue(next);
     setCommandSuggestions([]);
+    setSuggestionIndex(0);
   }, []);
 
   const handleTab = useCallback(() => {
     if (!isSlashCommandInput(value)) return;
-    const result = autocompleteSlashCommand(value, listSlashCommands(), slashCtx);
-    if (!result) return;
-    setValue(result.value);
+    const commands = listSlashCommands();
+
+    if (commandSuggestions.length > 1) {
+      const pick = commandSuggestions[suggestionIndex];
+      if (!pick) return;
+      const nextValue = applySlashSuggestion(value, pick, commands, slashCtx);
+      if (nextValue !== value) {
+        setValue(nextValue);
+        bumpCursorToEnd();
+      }
+      const result = autocompleteSlashCommand(nextValue, commands, slashCtx);
+      if (!result) {
+        setCommandSuggestions([]);
+        setSuggestionIndex(0);
+        return;
+      }
+      setCommandSuggestions(result.suggestions);
+      setSuggestionIndex(0);
+      return;
+    }
+
+    const result = autocompleteSlashCommand(value, commands, slashCtx);
+    if (!result) {
+      setCommandSuggestions([]);
+      setSuggestionIndex(0);
+      return;
+    }
+    if (result.value !== value) {
+      setValue(result.value);
+      bumpCursorToEnd();
+    }
     setCommandSuggestions(result.suggestions);
-  }, [value, slashCtx]);
+    setSuggestionIndex(0);
+  }, [value, slashCtx, commandSuggestions, suggestionIndex, bumpCursorToEnd]);
+
+  const handleSuggestionNavigate = useCallback(
+    (direction: "up" | "down") => {
+      if (commandSuggestions.length <= 1) return;
+      setSuggestionIndex((i) => {
+        if (direction === "down") {
+          return Math.min(commandSuggestions.length - 1, i + 1);
+        }
+        return Math.max(0, i - 1);
+      });
+    },
+    [commandSuggestions.length],
+  );
+
+  const suggestionMenuOpen = commandSuggestions.length > 1 && isSlashCommandInput(value);
+
+  const suggestionDescriptions = useMemo(() => {
+    if (!suggestionMenuOpen) return undefined;
+    const parsed = parseSlashInput(value);
+    if (!parsed) return undefined;
+    const body = value.trimStart().slice(1);
+    const hasArgumentTokens = body.includes(" ");
+    if (hasArgumentTokens && parsed.command.length > 0) return undefined;
+    const map = new Map<string, string>();
+    for (const c of listSlashCommands()) {
+      map.set(c.name, c.description);
+    }
+    return map;
+  }, [value, suggestionMenuOpen]);
 
   const handleSubmit = useCallback(
     (raw: string) => {
+      setCommandSuggestions([]);
+      setSuggestionIndex(0);
+
       const prompt = raw.trim();
 
       if (isRegisteredSlashCommand(prompt)) {
@@ -354,6 +430,17 @@ export function App({
     ],
   );
 
+  const handlePromptSubmit = useCallback(
+    (raw: string) => {
+      if (shouldApplySuggestionOnSubmit(commandSuggestions, raw)) {
+        handleTab();
+        return;
+      }
+      handleSubmit(raw);
+    },
+    [commandSuggestions, handleTab, handleSubmit],
+  );
+
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
       abortRef.current?.abort();
@@ -361,6 +448,11 @@ export function App({
       return;
     }
     if (key.escape) {
+      if (shouldDismissSuggestionMenu(commandSuggestions, value)) {
+        setCommandSuggestions([]);
+        setSuggestionIndex(0);
+        return;
+      }
       if (running) {
         abortRef.current?.abort();
         return;
@@ -391,7 +483,8 @@ export function App({
       setMode((prev) => nextMode(prev, modes));
       return;
     }
-    if (mode === "workflow") {
+    const menuOpen = shouldSuppressWorkflowNavigation(commandSuggestions, value);
+    if (mode === "workflow" && !menuOpen) {
       if (key.upArrow) {
         if (wf.started || wfLaunching) setStepIndex((i) => Math.max(0, i - 1));
         else if (wfPreview) setStepIndex((i) => Math.max(0, i - 1));
@@ -421,6 +514,10 @@ export function App({
   const isWorkflow = mode === "workflow";
   const streamHeight = Math.max(6, rows - 9);
   const showWorkflowView = wf.started || wfLaunching;
+
+  const menuOverlayRows = suggestionMenuOpen
+    ? suggestionMenuHeight(commandSuggestions.length, suggestionIndex)
+    : 0;
 
   return (
     <Box flexDirection="column" width={columns}>
@@ -473,17 +570,33 @@ export function App({
           <Text color="red">{wfNotice}</Text>
         </Box>
       ) : null}
-      <PromptInput
-        value={value}
-        onChange={handleValueChange}
-        onSubmit={handleSubmit}
-        onTab={handleTab}
-        focus
-        running={running}
-        suggestions={commandSuggestions}
-      />
-      <Box paddingX={1}>
-        <Text color="gray">{hint(mode, wf.started, wfLaunching, !!wfPreview, running)}</Text>
+      <Box flexDirection="column">
+        {suggestionMenuOpen ? (
+          <Box marginTop={-menuOverlayRows}>
+            <CommandSuggestionMenu
+              suggestions={commandSuggestions}
+              selectedIndex={suggestionIndex}
+              width={columns}
+              descriptions={suggestionDescriptions}
+            />
+          </Box>
+        ) : null}
+        <PromptInput
+          value={value}
+          onChange={handleValueChange}
+          onSubmit={handlePromptSubmit}
+          onTab={handleTab}
+          onSuggestionNavigate={handleSuggestionNavigate}
+          focus
+          running={running}
+          suggestions={commandSuggestions}
+          cursorResetKey={cursorResetKey}
+        />
+        <Box paddingX={1}>
+          <Text color="gray">
+            {hint(mode, wf.started, wfLaunching, !!wfPreview, running, suggestionMenuOpen)}
+          </Text>
+        </Box>
       </Box>
     </Box>
   );
@@ -502,18 +615,20 @@ function hint(
   wfLaunching: boolean,
   wfPreviewing: boolean,
   running: boolean,
+  suggestionMenuOpen: boolean,
 ): string {
+  const completeHint = suggestionMenuOpen ? " · ↑/↓ complete · Tab/Enter pick · Esc cancel" : "";
   if (running) return "Esc cancel · /exit quit · Ctrl+C quit";
   if (mode === "workflow") {
     if (wfStarted || wfLaunching) {
-      return "↑/↓ step · Enter resume · Esc back · Tab switch mode · /commands · Ctrl+C quit";
+      return `↑/↓ step · Enter resume · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
     }
     if (wfPreviewing) {
-      return "↑/↓ step · Enter run · Esc back · Tab switch mode · /commands · Ctrl+C quit";
+      return `↑/↓ step · Enter run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
     }
-    return "↑/↓ pick · Enter preview · Tab switch mode · /commands · Ctrl+C quit";
+    return `↑/↓ pick · Enter preview · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
   }
-  return "Enter dispatch · Tab switch mode · /commands (Tab complete) · Ctrl+C quit";
+  return `Enter dispatch · Tab switch mode · /commands (Tab complete) · Ctrl+C quit${completeHint}`;
 }
 
 function message(err: unknown): string {
