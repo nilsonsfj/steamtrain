@@ -7,6 +7,9 @@ sequentially. Steps inside a phase run concurrently, bounded by
 
 Workflow definitions live under the `workflows` map in `steamtrain.json`.
 
+**Read first:** [`workflow-overview.md`](workflow-overview.md) for diagrams and
+execution behavior. **Examples:** [`workflow-examples.md`](workflow-examples.md).
+
 ```jsonc
 {
   "maxConcurrency": 3,
@@ -269,3 +272,9 @@ steamtrain workflow run <name> --stdin --json
 ```
 
 Running `steamtrain` with no arguments opens the workflow-first TUI.
+
+## See also
+
+- [`workflow-overview.md`](workflow-overview.md) — diagrams, dynamic fan-out, gates, resume/cache, pitfalls
+- [`workflow-examples.md`](workflow-examples.md) — bundled workflow walkthroughs and authoring patterns
+- [`README.md`](README.md) — documentation index
