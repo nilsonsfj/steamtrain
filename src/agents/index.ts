@@ -14,6 +14,7 @@ export {
   effortForModelChange,
   effortsForModel,
   formatAgentTarget,
+  formatModelDisplay,
   isAgentId,
   modelIdsForAgent,
   modelNameForAgent,

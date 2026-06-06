@@ -30,3 +30,6 @@ export const AGENT_COLOR: Record<string, string> = {
   claude: "magenta",
   opencode: "blue",
 };
+
+/** Active workspace tab name in the event stream header. */
+export const TAB_LABEL_COLOR = "#FFFFE0";

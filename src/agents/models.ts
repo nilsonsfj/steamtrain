@@ -104,17 +104,24 @@ export function effortForModelChange(
   return effortsForModel(agent, nextModel).includes(currentEffort) ? currentEffort : undefined;
 }
 
+/** Human-readable model label, optionally with effort (no agent prefix). */
+export function formatModelDisplay(target: {
+  agent: AgentId;
+  model: string;
+  effort?: string;
+}): string {
+  const modelLabel = modelNameForAgent(target.agent, target.model);
+  const base = modelLabel === target.model ? target.model : `${modelLabel} (${target.model})`;
+  return target.effort ? `${base} · ${target.effort}` : base;
+}
+
 /** Compact label for agent + model (+ optional effort). */
 export function formatAgentTarget(target: {
   agent: AgentId;
   model: string;
   effort?: string;
 }): string {
-  const modelLabel = modelNameForAgent(target.agent, target.model);
-  const modelPart =
-    modelLabel === target.model ? target.model : `${modelLabel} (${target.model})`;
-  const base = `${target.agent}/${modelPart}`;
-  return target.effort ? `${base} · ${target.effort}` : base;
+  return `${target.agent}/${formatModelDisplay(target)}`;
 }
 
 export { formatModelOption, refreshOpencodeVariantCache };

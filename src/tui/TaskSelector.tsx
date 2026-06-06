@@ -1,15 +1,9 @@
 import { Box, Text } from "ink";
-import { modelNameForAgent } from "../agents";
+import { formatModelDisplay } from "../agents";
 import type { WorkspaceEntry } from "../workspace";
 import { workspaceLabel } from "../workspace";
 import { type Mode, isWorkspaceMode } from "./modes";
 import { AGENT_COLOR } from "./theme";
-
-function modelLabel(entry: WorkspaceEntry): string {
-  const name = modelNameForAgent(entry.agent, entry.model);
-  const base = name === entry.model ? entry.model : `${name} (${entry.model})`;
-  return entry.effort ? `${base} · ${entry.effort}` : base;
-}
 
 interface TaskSelectorProps {
   modes: readonly Mode[];
@@ -55,7 +49,7 @@ export function TaskSelector({ modes, workspaceMap, active, workflowName }: Task
             <Text color={AGENT_COLOR[current.agent] ?? "white"} bold>
               {current.agent}
             </Text>
-            <Text color="gray"> · {modelLabel(current)}</Text>
+            <Text color="gray"> · {formatModelDisplay(current)}</Text>
           </>
         ) : (
           <>

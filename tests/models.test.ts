@@ -3,6 +3,7 @@ import {
   effortForModelChange,
   effortsForModel,
   formatAgentTarget,
+  formatModelDisplay,
   modelNameForAgent,
   modelsForAgent,
   supportsEffort,
@@ -42,6 +43,15 @@ describe("model names", () => {
     expect(
       formatAgentTarget({ agent: "claude", model: "claude-sonnet-4-6", effort: "high" }),
     ).toBe("claude/Claude Sonnet 4.6 (claude-sonnet-4-6) · high");
+  });
+
+  it("formats model display without agent prefix", () => {
+    expect(
+      formatModelDisplay({
+        agent: "opencode",
+        model: "opencode/deepseek-v4-flash",
+      }),
+    ).toBe("DeepSeek V4 Flash (opencode/deepseek-v4-flash)");
   });
 });
 

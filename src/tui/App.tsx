@@ -572,7 +572,8 @@ export function App({
           items={transcript.items}
           height={streamHeight}
           width={columns}
-          taskLabel={workspaceStreamLabel(mode, workspaceMap)}
+          mode={mode}
+          workspaceMap={workspaceMap}
         />
       )}
       <TaskSelector
@@ -616,13 +617,6 @@ export function App({
       </Box>
     </Box>
   );
-}
-
-function workspaceStreamLabel(mode: Mode, workspaceMap: Map<string, WorkspaceEntry>): string {
-  if (mode === "workflow") return "workflow";
-  const entry = workspaceMap.get(mode);
-  if (!entry) return mode;
-  return `${formatEntryLabel(entry)} · ${formatAgentTarget(entry)}`;
 }
 
 function hint(
