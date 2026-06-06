@@ -1,23 +1,23 @@
-import { basename } from "node:path";
 import { Box, Text } from "ink";
+import { useMemo } from "react";
 import { truncate } from "../agents/util";
 import type { DispatchCheck } from "../orchestrator";
-import {
-  type GateCondition,
-  type WorkflowPhase,
-  type WorkflowSpec,
-  type WorkflowStep,
-  isAgentBackedStep,
-  workflowStepKind,
-} from "../workflow";
+import { type WorkflowSpec, isAgentBackedStep, workflowStepKind } from "../workflow";
 import { AGENT_COLOR } from "./theme";
+import {
+  BLOCK_LABEL,
+  type FlatSpecStep,
+  blockSummary,
+  distinctAgents,
+  flattenSpecSteps,
+  phaseStepOffsets,
+  promptForStep,
+  specDetailLines,
+  specStepRowMeta,
+} from "./workflow-spec-ui";
 
-export interface FlatSpecStep {
-  phase: WorkflowPhase;
-  phaseIndex: number;
-  step: WorkflowStep;
-  stepIndex: number;
-}
+export type { FlatSpecStep };
+export { flattenSpecSteps };
 
 interface WorkflowPreviewProps {
   spec: WorkflowSpec;
@@ -26,25 +26,6 @@ interface WorkflowPreviewProps {
   height: number;
   selectedIndex: number;
   dispatchCheck: DispatchCheck;
-}
-
-const BLOCK_LABEL: Record<ReturnType<typeof workflowStepKind>, string> = {
-  distributor: "fan-out",
-  worker: "worker",
-  processor: "process",
-  consolidator: "merge",
-  gate: "gate",
-};
-
-/** Flatten a workflow spec into a navigable step list (for ↑/↓ drill-in). */
-export function flattenSpecSteps(spec: WorkflowSpec): FlatSpecStep[] {
-  const flat: FlatSpecStep[] = [];
-  spec.phases.forEach((phase, phaseIndex) => {
-    phase.steps.forEach((step, stepIndex) => {
-      flat.push({ phase, phaseIndex, step, stepIndex });
-    });
-  });
-  return flat;
 }
 
 /**
@@ -60,14 +41,15 @@ export function WorkflowPreview({
   dispatchCheck,
 }: WorkflowPreviewProps) {
   const innerWidth = Math.max(20, width - 4);
-  const flat = flattenSpecSteps(spec);
-  const selected = flat[Math.min(selectedIndex, Math.max(0, flat.length - 1))];
+  const flat = useMemo(() => flattenSpecSteps(spec), [spec]);
+  const phaseOffsets = useMemo(() => phaseStepOffsets(spec.phases), [spec]);
+  const clampedIndex = Math.min(selectedIndex, Math.max(0, flat.length - 1));
+  const selected = flat[clampedIndex];
   const phaseCount = spec.phases.length;
   const stepCount = flat.length;
-  const agents = distinctAgents(spec);
-  const blocks = blockSummary(spec);
-
-  let flatIdx = -1;
+  const agents = useMemo(() => distinctAgents(spec), [spec]);
+  const blocks = useMemo(() => blockSummary(spec), [spec]);
+  const inputLabel = input.length > 0 ? truncate(input, Math.max(24, innerWidth - 10)) : "(none)";
 
   return (
     <Box
@@ -92,7 +74,7 @@ export function WorkflowPreview({
 
       <Box flexDirection="column" marginBottom={1}>
         <Text color="white">
-          input: <Text color="cyan">{truncate(input, Math.max(24, innerWidth - 10))}</Text>
+          input: <Text color={input.length > 0 ? "cyan" : "gray"}>{inputLabel}</Text>
         </Text>
         <Text color="gray">
           {phaseCount} phase{phaseCount === 1 ? "" : "s"} · {stepCount} step
@@ -106,30 +88,31 @@ export function WorkflowPreview({
       </Box>
 
       <Box flexDirection="column" flexGrow={1}>
-        {spec.phases.map((phase) => (
-          <Box key={phase.id} flexDirection="column">
-            <Box>
-              <Text color="cyan" bold>
-                ─ {phase.title}
-              </Text>
-              <Text color="gray">
-                {"  "}
-                {phase.id} · {phase.steps.length} step{phase.steps.length === 1 ? "" : "s"}
-              </Text>
-            </Box>
-            {phase.steps.map((step) => {
-              flatIdx += 1;
-              return (
+        {spec.phases.length === 0 ? (
+          <Text color="gray">No phases defined.</Text>
+        ) : (
+          spec.phases.map((phase, phaseIndex) => (
+            <Box key={phase.id} flexDirection="column">
+              <Box>
+                <Text color="cyan" bold>
+                  ─ {phase.title}
+                </Text>
+                <Text color="gray">
+                  {"  "}
+                  {phase.id} · {phase.steps.length} step{phase.steps.length === 1 ? "" : "s"}
+                </Text>
+              </Box>
+              {phase.steps.map((step, stepIndex) => (
                 <SpecStepRow
                   key={step.id}
                   step={step}
-                  selected={flatIdx === selectedIndex}
+                  selected={(phaseOffsets[phaseIndex] ?? 0) + stepIndex === clampedIndex}
                   width={innerWidth}
                 />
-              );
-            })}
-          </Box>
-        ))}
+              ))}
+            </Box>
+          ))
+        )}
       </Box>
 
       {selected ? <SpecStepDetail entry={selected} width={innerWidth} /> : null}
@@ -142,14 +125,14 @@ function SpecStepRow({
   selected,
   width,
 }: {
-  step: WorkflowStep;
+  step: FlatSpecStep["step"];
   selected: boolean;
   width: number;
 }) {
   const kind = workflowStepKind(step);
   const agentColor = isAgentBackedStep(step) ? (AGENT_COLOR[step.agent] ?? "white") : "gray";
   const runner = isAgentBackedStep(step) ? `${step.agent}/${step.model}` : BLOCK_LABEL[kind];
-  const meta = stepRowMeta(step);
+  const meta = specStepRowMeta(step);
   return (
     <Box paddingLeft={1}>
       <Text color={selected ? "cyan" : "gray"}>{selected ? "▶ " : "  "}</Text>
@@ -175,8 +158,8 @@ function SpecStepDetail({ entry, width }: { entry: FlatSpecStep; width: number }
       <Text color="cyan">
         {step.id} · {kind} · phase {phase.title}
       </Text>
-      {lines.map((line, i) => (
-        <Text key={`${i}:${line}`} color="gray" wrap="truncate-end">
+      {lines.map((line) => (
+        <Text key={line} color="gray" wrap="truncate-end">
           {line}
         </Text>
       ))}
@@ -188,89 +171,4 @@ function SpecStepDetail({ entry, width }: { entry: FlatSpecStep; width: number }
       ) : null}
     </Box>
   );
-}
-
-function stepRowMeta(step: WorkflowStep): string {
-  const bits: string[] = [];
-  if (step.dependsOn?.length) bits.push(`deps: ${step.dependsOn.join(", ")}`);
-  if ("forEach" in step && step.forEach) bits.push(`forEach: ${step.forEach}`);
-  if ("cwd" in step && step.cwd) bits.push(`cwd: ${basename(step.cwd)}`);
-  if (step.kind === "distributor" && step.items?.length) bits.push(`${step.items.length} items`);
-  if (step.kind === "gate") bits.push(formatGateCondition(step.condition));
-  return bits.join(" · ");
-}
-
-function specDetailLines(step: WorkflowStep): string[] {
-  const lines: string[] = [];
-  if (step.dependsOn?.length) lines.push(`dependsOn: ${step.dependsOn.join(", ")}`);
-  if ("forEach" in step && step.forEach) lines.push(`forEach: ${step.forEach}`);
-  if ("cwd" in step && step.cwd) lines.push(`cwd: ${step.cwd}`);
-  if ("env" in step && step.env && Object.keys(step.env).length > 0) {
-    lines.push(
-      `env: ${Object.entries(step.env)
-        .map(([k, v]) => `${k}=${v}`)
-        .join(", ")}`,
-    );
-  }
-  if ("extraArgs" in step && step.extraArgs?.length) {
-    lines.push(`extraArgs: ${step.extraArgs.join(" ")}`);
-  }
-  if (step.kind === "distributor") {
-    if (step.separator) lines.push(`separator: ${JSON.stringify(step.separator)}`);
-    if (step.items?.length) {
-      lines.push(`items (${step.items.length}):`);
-      for (const [i, item] of step.items.entries()) {
-        lines.push(`  [${i}] ${truncate(item, 120)}`);
-      }
-    }
-  }
-  if (step.kind === "consolidator" && step.separator) {
-    lines.push(`separator: ${JSON.stringify(step.separator)}`);
-  }
-  if (step.kind === "gate") {
-    lines.push(`condition: ${formatGateCondition(step.condition)}`);
-    if (step.target) lines.push(`target: ${step.target}`);
-    if (step.onFalse) lines.push(`onFalse: ${step.onFalse}`);
-  }
-  return lines;
-}
-
-function promptForStep(step: WorkflowStep): string | undefined {
-  if ("prompt" in step && typeof step.prompt === "string" && step.prompt.length > 0) {
-    return step.prompt;
-  }
-  return undefined;
-}
-
-function formatGateCondition(condition: GateCondition): string {
-  const parts: string[] = [];
-  if (condition.step) parts.push(`step=${condition.step}`);
-  if (condition.ok !== undefined) parts.push(`ok=${condition.ok}`);
-  if (condition.contains !== undefined)
-    parts.push(`contains=${JSON.stringify(condition.contains)}`);
-  if (condition.matches !== undefined) parts.push(`matches=${condition.matches}`);
-  if (condition.equals !== undefined) parts.push(`equals=${JSON.stringify(condition.equals)}`);
-  if (condition.not) parts.push("not");
-  return parts.join(" ");
-}
-
-function distinctAgents(spec: WorkflowSpec): string[] {
-  const set = new Set<string>();
-  for (const phase of spec.phases) {
-    for (const step of phase.steps) {
-      if (isAgentBackedStep(step)) set.add(step.agent);
-    }
-  }
-  return [...set];
-}
-
-function blockSummary(spec: WorkflowSpec): string {
-  const counts = new Map<string, number>();
-  for (const phase of spec.phases) {
-    for (const step of phase.steps) {
-      const kind = workflowStepKind(step);
-      counts.set(kind, (counts.get(kind) ?? 0) + 1);
-    }
-  }
-  return [...counts.entries()].map(([kind, count]) => `${kind}:${count}`).join(" · ");
 }

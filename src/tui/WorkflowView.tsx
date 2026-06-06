@@ -1,6 +1,9 @@
+import { basename } from "node:path";
 import { Box, Text } from "ink";
+import { useMemo } from "react";
 import { truncate } from "../agents/util";
 import { AGENT_COLOR } from "./theme";
+import { BLOCK_LABEL, phaseStepOffsets } from "./workflow-spec-ui";
 import {
   type PhaseState,
   type StepState,
@@ -23,30 +26,22 @@ const STEP_GLYPH: Record<StepState["status"], { symbol: string; color: string }>
   error: { symbol: "✗", color: "red" },
 };
 
-const BLOCK_GLYPH: Record<StepState["blockKind"], string> = {
-  distributor: "fan-out",
-  worker: "worker",
-  processor: "process",
-  consolidator: "merge",
-  gate: "gate",
-};
-
 /**
  * The live phase → step tree. Phases stack vertically; the selected step's
  * accumulated output is shown in a detail panel below (↑/↓ to drill in).
  */
 export function WorkflowView({ state, width, height, selectedIndex }: WorkflowViewProps) {
   const innerWidth = Math.max(20, width - 4);
-  const flat = flattenSteps(state);
-  const selected = flat[Math.min(selectedIndex, Math.max(0, flat.length - 1))]?.step;
+  const flat = useMemo(() => flattenSteps(state), [state]);
+  const phaseOffsets = useMemo(() => phaseStepOffsets(state.phases), [state.phases]);
+  const clampedIndex = Math.min(selectedIndex, Math.max(0, flat.length - 1));
+  const selected = flat[clampedIndex]?.step;
 
   const cost = sumCost(state);
   const elapsed = state.startedAt ? (Date.now() - state.startedAt) / 1000 : 0;
   const doneSteps = flat.filter(
     (f) => f.step.status === "done" || f.step.status === "error",
   ).length;
-
-  let flatIdx = -1;
 
   return (
     <Box
@@ -71,20 +66,17 @@ export function WorkflowView({ state, width, height, selectedIndex }: WorkflowVi
         {state.phases.length === 0 ? (
           <Text color="gray">starting workflow…</Text>
         ) : (
-          state.phases.map((phase) => (
+          state.phases.map((phase, phaseIndex) => (
             <Box key={phase.phaseId} flexDirection="column">
               <PhaseHeader phase={phase} />
-              {phase.steps.map((step) => {
-                flatIdx += 1;
-                return (
-                  <StepRow
-                    key={step.stepId}
-                    step={step}
-                    width={innerWidth}
-                    selected={flatIdx === selectedIndex}
-                  />
-                );
-              })}
+              {phase.steps.map((step, stepIndex) => (
+                <StepRow
+                  key={step.stepId}
+                  step={step}
+                  width={innerWidth}
+                  selected={(phaseOffsets[phaseIndex] ?? 0) + stepIndex === clampedIndex}
+                />
+              ))}
             </Box>
           ))
         )}
@@ -125,14 +117,14 @@ function StepRow({
   const target = step.cwd ? ` @${basename(step.cwd)}` : "";
   const right = stepMeta(step);
   const runner =
-    step.agent && step.model ? `${step.agent}/${step.model}` : BLOCK_GLYPH[step.blockKind];
+    step.agent && step.model ? `${step.agent}/${step.model}` : BLOCK_LABEL[step.blockKind];
   const indent = step.parentStepId ? 3 : 1;
   const item = step.item ? ` item ${step.item.index}: ${truncate(step.item.value, 32)}` : "";
   return (
     <Box paddingLeft={indent}>
       <Text color={selected ? "cyan" : "gray"}>{selected ? "▶ " : "  "}</Text>
       <Text color={g.color}>{g.symbol} </Text>
-      <Text color="magenta">{BLOCK_GLYPH[step.blockKind]} </Text>
+      <Text color="magenta">{BLOCK_LABEL[step.blockKind]} </Text>
       <Text color="white" bold={selected}>
         {step.stepId}
       </Text>
@@ -172,8 +164,8 @@ function Detail({ step, width }: { step: StepState; width: number }) {
 
 function stepMeta(step: StepState): string {
   if (step.gate) {
-    const state = step.gate.passed ? "passed" : "blocked";
-    return step.gate.target ? `${state} → ${step.gate.target}` : state;
+    const gateState = step.gate.passed ? "passed" : "blocked";
+    return step.gate.target ? `${gateState} → ${step.gate.target}` : gateState;
   }
   if (step.result) {
     const bits = [
@@ -197,11 +189,6 @@ function statusWord(step: StepState): string {
     case "error":
       return "error";
   }
-}
-
-function basename(p: string): string {
-  const parts = p.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] ?? p;
 }
 
 function sumCost(state: WorkflowState): number {

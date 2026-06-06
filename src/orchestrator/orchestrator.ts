@@ -23,10 +23,7 @@ export interface ResolvedWorkspace {
   health?: DoctorResult;
 }
 
-export interface DispatchCheck {
-  ok: boolean;
-  reason?: string;
-}
+export type DispatchCheck = { ok: true } | { ok: false; reason: string };
 
 /**
  * Routes workspace dispatches to the right adapter + model, gates on doctor
