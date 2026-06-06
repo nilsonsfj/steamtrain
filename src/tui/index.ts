@@ -6,7 +6,18 @@ export { StatusBar } from "./StatusBar";
 export { TaskSelector } from "./TaskSelector";
 export { PromptInput } from "./PromptInput";
 export { WorkflowPicker } from "./WorkflowPicker";
-export { WorkflowPreview, flattenSpecSteps } from "./WorkflowPreview";
+export { WorkflowPreview } from "./WorkflowPreview";
+export {
+  type FlatSpecStep,
+  BLOCK_LABEL,
+  blockSummary,
+  distinctAgents,
+  flattenSpecSteps,
+  formatGateCondition,
+  phaseStepOffsets,
+  specDetailLines,
+  specStepRowMeta,
+} from "./workflow-spec-ui";
 export { WorkflowView } from "./WorkflowView";
 export { type Mode, buildModes, isWorkspaceMode, nextMode } from "./modes";
 export {

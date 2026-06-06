@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
-import { type WorkflowSpec, workflowStepKind } from "../workflow";
+import type { WorkflowSpec } from "../workflow";
+import { blockSummary } from "./workflow-spec-ui";
 
 interface WorkflowPickerProps {
   workflows: { name: string; spec: WorkflowSpec }[];
@@ -15,7 +16,7 @@ export function WorkflowPicker({ workflows, selectedIndex, height }: WorkflowPic
         <Text color="cyan" bold>
           workflows
         </Text>
-        <Text color="gray">↑/↓ select · Enter preview · type input below</Text>
+        <Text color="gray">↑/↓ select · Enter preview · input optional below</Text>
       </Box>
       <Box flexDirection="column" flexGrow={1}>
         {workflows.length === 0 ? (
@@ -56,15 +57,4 @@ export function WorkflowPicker({ workflows, selectedIndex, height }: WorkflowPic
       </Box>
     </Box>
   );
-}
-
-function blockSummary(spec: WorkflowSpec): string {
-  const counts = new Map<string, number>();
-  for (const phase of spec.phases) {
-    for (const step of phase.steps) {
-      const kind = workflowStepKind(step);
-      counts.set(kind, (counts.get(kind) ?? 0) + 1);
-    }
-  }
-  return [...counts.entries()].map(([kind, count]) => `${kind}:${count}`).join(" · ");
 }

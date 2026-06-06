@@ -18,12 +18,13 @@ import { PromptInput } from "./PromptInput";
 import { StatusBar } from "./StatusBar";
 import { TaskSelector } from "./TaskSelector";
 import { WorkflowPicker } from "./WorkflowPicker";
-import { WorkflowPreview, flattenSpecSteps } from "./WorkflowPreview";
+import { WorkflowPreview } from "./WorkflowPreview";
 import { WorkflowView } from "./WorkflowView";
 import { Banner } from "./banner";
 import { type Mode, buildModes, nextMode } from "./modes";
 import { initialTranscript, transcriptReducer } from "./transcript";
 import { useTerminalSize } from "./useTerminalSize";
+import { flattenSpecSteps } from "./workflow-spec-ui";
 import { initialWorkflowState, workflowReducer } from "./workflow-state";
 
 interface AppProps {
@@ -61,6 +62,7 @@ export function App({
   const [workflowIndex, setWorkflowIndex] = useState(0);
   const [stepIndex, setStepIndex] = useState(0);
   const [wfPreview, setWfPreview] = useState<{ name: string; input: string } | null>(null);
+  const [wfLaunching, setWfLaunching] = useState(false);
   const [wfNotice, setWfNotice] = useState<string | null>(null);
   const activeWorkflowRef = useRef<string | undefined>(undefined);
   const activeWorkflowInputRef = useRef<string | undefined>(undefined);
@@ -121,14 +123,19 @@ export function App({
 
   const totalWfSteps = wf.phases.reduce((n, p) => n + p.steps.length, 0);
   const previewSpec = wfPreview ? orchestrator.listWorkflows()[wfPreview.name] : undefined;
-  const previewStepCount = previewSpec ? flattenSpecSteps(previewSpec).length : 0;
+  const previewFlatSteps = useMemo(
+    () => (previewSpec ? flattenSpecSteps(previewSpec) : []),
+    [previewSpec],
+  );
+  const previewStepCount = previewFlatSteps.length;
+  const previewDispatchCheck = wfPreview ? orchestrator.canDispatchWorkflow(wfPreview.name) : null;
 
   const runWorkflow = useCallback(
-    (name: string, input: string, opts?: { reuseMemoryCache?: boolean }) => {
+    (name: string, input: string, opts?: { reuseMemoryCache?: boolean }): boolean => {
       const check = orchestrator.canDispatchWorkflow(name);
       if (!check.ok) {
         setWfNotice(`cannot run '${name}': ${check.reason}`);
-        return;
+        return false;
       }
       setWfNotice(null);
       activeWorkflowRef.current = name;
@@ -142,6 +149,7 @@ export function App({
         if (!spec) {
           setWfNotice(`unknown workflow '${name}'`);
           setRunning(false);
+          setWfLaunching(false);
           return;
         }
         const store = cacheStoreRef.current;
@@ -169,10 +177,14 @@ export function App({
         } catch (err) {
           if (mountedRef.current) setWfNotice(`run failed: ${message(err)}`);
         } finally {
-          if (mountedRef.current) setRunning(false);
-          abortRef.current = null;
+          if (mountedRef.current) {
+            setRunning(false);
+            setWfLaunching(false);
+            abortRef.current = null;
+          }
         }
       })();
+      return true;
     },
     [orchestrator],
   );
@@ -180,14 +192,16 @@ export function App({
   const handleSubmit = useCallback(
     (raw: string) => {
       const prompt = raw.trim();
-      if (running || prompt.length === 0) return;
+      if (running) return;
 
       if (mode === "workflow") {
         // Resume the active run if one exists; otherwise start the picked one fresh.
         if (wf.started && activeWorkflowRef.current) {
+          if (prompt.length === 0) return;
           if (activeWorkflowInputRef.current !== prompt) {
             wfDispatch({ type: "reset" });
             setStepIndex(0);
+            setWfLaunching(true);
             runWorkflow(activeWorkflowRef.current, prompt);
             return;
           }
@@ -196,21 +210,31 @@ export function App({
         }
         // Preview screen: Enter dispatches the workflow.
         if (wfPreview) {
+          if (prompt.length === 0) {
+            setWfNotice("type input in the prompt before running");
+            return;
+          }
+          setWfLaunching(true);
           wfDispatch({ type: "reset" });
           setStepIndex(0);
-          const name = wfPreview.name;
+          const { name, input } = wfPreview;
           setWfPreview(null);
-          runWorkflow(name, prompt);
+          if (!runWorkflow(name, prompt)) {
+            setWfLaunching(false);
+            setWfPreview({ name, input: prompt });
+          }
           return;
         }
         const entry = workflowEntries[workflowIndex];
         if (!entry) return;
+        setWfNotice(null);
         setStepIndex(0);
         setWfPreview({ name: entry.name, input: prompt });
         return;
       }
 
       // Workspace mode — `mode` is a workspace id here.
+      if (prompt.length === 0) return;
       setValue("");
       const entry = workspaceMap.get(mode);
       if (!entry) {
@@ -251,8 +275,10 @@ export function App({
             dispatch({ type: "notice", level: "error", text: `run failed: ${message(err)}` });
           }
         } finally {
-          if (mountedRef.current) setRunning(false);
-          abortRef.current = null;
+          if (mountedRef.current) {
+            setRunning(false);
+            abortRef.current = null;
+          }
         }
       })();
     },
@@ -285,11 +311,13 @@ export function App({
         if (wfPreview) {
           setWfPreview(null);
           setStepIndex(0);
+          setWfNotice(null);
           return;
         }
-        if (wf.started) {
+        if (wf.started || wfLaunching) {
           wfDispatch({ type: "reset" });
           setStepIndex(0);
+          setWfLaunching(false);
           activeWorkflowRef.current = undefined;
           activeWorkflowInputRef.current = undefined;
           workflowCacheRef.current = new Map();
@@ -300,19 +328,21 @@ export function App({
     }
     if (key.tab && !running) {
       setWfPreview(null);
+      setWfLaunching(false);
       setMode((prev) => nextMode(prev, modes));
       return;
     }
     if (mode === "workflow") {
       if (key.upArrow) {
-        if (wf.started) setStepIndex((i) => Math.max(0, i - 1));
+        if (wf.started || wfLaunching) setStepIndex((i) => Math.max(0, i - 1));
         else if (wfPreview) setStepIndex((i) => Math.max(0, i - 1));
         else setWorkflowIndex((i) => Math.max(0, i - 1));
         return;
       }
       if (key.downArrow) {
-        if (wf.started) setStepIndex((i) => Math.min(Math.max(0, totalWfSteps - 1), i + 1));
-        else if (wfPreview) {
+        if (wf.started || wfLaunching) {
+          setStepIndex((i) => Math.min(Math.max(0, totalWfSteps - 1), i + 1));
+        } else if (wfPreview) {
           setStepIndex((i) => Math.min(Math.max(0, previewStepCount - 1), i + 1));
         } else setWorkflowIndex((i) => Math.min(workflowEntries.length - 1, i + 1));
         return;
@@ -331,6 +361,7 @@ export function App({
 
   const isWorkflow = mode === "workflow";
   const streamHeight = Math.max(6, rows - 9);
+  const showWorkflowView = wf.started || wfLaunching;
 
   return (
     <Box flexDirection="column" width={columns}>
@@ -341,21 +372,21 @@ export function App({
         running={running}
       />
       {isWorkflow ? (
-        wf.started ? (
+        showWorkflowView ? (
           <WorkflowView
             state={wf}
             height={streamHeight}
             width={columns}
             selectedIndex={stepIndex}
           />
-        ) : wfPreview && previewSpec ? (
+        ) : wfPreview && previewSpec && previewDispatchCheck ? (
           <WorkflowPreview
             spec={previewSpec}
             input={value.trim() || wfPreview.input}
             width={columns}
             height={streamHeight}
             selectedIndex={stepIndex}
-            dispatchCheck={orchestrator.canDispatchWorkflow(wfPreview.name)}
+            dispatchCheck={previewDispatchCheck}
           />
         ) : (
           <WorkflowPicker
@@ -391,7 +422,7 @@ export function App({
         running={running}
       />
       <Box paddingX={1}>
-        <Text color="gray">{hint(mode, wf.started, !!wfPreview, running)}</Text>
+        <Text color="gray">{hint(mode, wf.started, wfLaunching, !!wfPreview, running)}</Text>
       </Box>
     </Box>
   );
@@ -404,16 +435,22 @@ function workspaceStreamLabel(mode: Mode, workspaceMap: Map<string, WorkspaceEnt
   return `${workspaceLabel(entry)} · ${entry.agent}/${entry.model}`;
 }
 
-function hint(mode: Mode, wfStarted: boolean, wfPreviewing: boolean, running: boolean): string {
+function hint(
+  mode: Mode,
+  wfStarted: boolean,
+  wfLaunching: boolean,
+  wfPreviewing: boolean,
+  running: boolean,
+): string {
   if (running) return "Esc cancel · Ctrl+C quit";
   if (mode === "workflow") {
-    if (wfStarted) {
+    if (wfStarted || wfLaunching) {
       return "↑/↓ step · Enter resume · Esc back · Tab switch mode · Ctrl+C quit";
     }
     if (wfPreviewing) {
       return "↑/↓ step · Enter run · Esc back · Tab switch mode · Ctrl+C quit";
     }
-    return "↑/↓ pick · Enter preview · Tab switch mode · Ctrl+C quit";
+    return "↑/↓ pick · Enter preview (input optional) · Tab switch mode · Ctrl+C quit";
   }
   return "Enter dispatch · Tab switch mode · Esc cancel · Ctrl+C quit";
 }

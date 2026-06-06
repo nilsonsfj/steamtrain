@@ -1,6 +1,7 @@
 import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
-import { WorkflowPreview, flattenSpecSteps } from "../src/tui/WorkflowPreview";
+import { WorkflowPreview } from "../src/tui/WorkflowPreview";
+import { flattenSpecSteps } from "../src/tui/workflow-spec-ui";
 import { BUNDLED_WORKFLOWS } from "../src/workflow";
 
 describe("WorkflowPreview", () => {
@@ -47,5 +48,22 @@ describe("WorkflowPreview", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("blocked:");
     expect(frame).toContain("binary_missing");
+  });
+
+  it("shows empty input placeholder and clamps selected index", () => {
+    const spec = BUNDLED_WORKFLOWS["multi-plan"]!;
+    const { lastFrame } = render(
+      <WorkflowPreview
+        spec={spec}
+        input=""
+        width={120}
+        height={40}
+        selectedIndex={999}
+        dispatchCheck={{ ok: true }}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("(none)");
+    expect(frame).toContain("▶ merge synthesize");
   });
 });
