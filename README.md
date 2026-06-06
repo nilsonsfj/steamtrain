@@ -49,6 +49,8 @@ steamtrain workflow list
 steamtrain workflow validate [name]
 steamtrain workflow run multi-plan --input "design the cache migration"
 steamtrain workflow run bug-hunt --stdin --json
+steamtrain workflow run multi-plan --input "design the cache migration" --fresh
+steamtrain workflow cache clear
 ```
 
 ### Build a standalone binary
@@ -79,7 +81,8 @@ src/
 ├─ doctor/        Preflight: resolve binary, run --version, classify readiness
 ├─ orchestrator/  Routes a task type to the right adapter+model; gates on health
 ├─ workflow/      Declarative multi-agent workflows: spec + zod schema, a bounded-
-│                 parallel engine, and bundled specs (the layer above orchestrator)
+│                 parallel engine, on-disk step cache (`.steamtrain/cache/`), and
+│                 bundled specs (the layer above orchestrator)
 ├─ docs/          Workflow guides: overview, examples, language spec
 └─ tui/           Ink components (banner, status bar, streams, workflow view, input)
 ```
@@ -164,8 +167,9 @@ gate or consolidate the aggregate output.
 The TUI starts in workflow mode. Pick one with `↑/↓`, type the input, and
 **Enter** to launch. The phase -> step tree streams live; `↑/↓` drills into a
 step's output. `Esc` cancels a run (and, once stopped, backs out to the picker).
-Re-running **resumes**: completed steps replay from an in-session cache instead
-of running again.
+Re-running **resumes**: completed steps replay from `.steamtrain/cache/` (and an
+in-session cache) instead of running again. Use `steamtrain workflow run … --fresh`
+to ignore the on-disk cache, or `steamtrain workflow cache clear` to delete it.
 
 Workflow documentation:
 

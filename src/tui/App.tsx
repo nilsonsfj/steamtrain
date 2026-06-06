@@ -1,9 +1,16 @@
+import { join } from "node:path";
 import { Box, Text, useApp, useInput } from "ink";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { SteamtrainConfig } from "../config";
 import { type DoctorResult, runDoctor } from "../doctor";
 import { Orchestrator } from "../orchestrator";
-import type { StepResult } from "../workflow";
+import {
+  type StepResult,
+  WORKFLOW_CACHE_DIR,
+  createWorkflowCacheStore,
+  persistWorkflowStepDone,
+  workflowCacheKey,
+} from "../workflow";
 import { EventStream } from "./EventStream";
 import { PromptInput } from "./PromptInput";
 import { StatusBar } from "./StatusBar";
@@ -44,6 +51,7 @@ export function App({ config, configSource, configWarning }: AppProps) {
   const activeWorkflowRef = useRef<string | undefined>(undefined);
   const activeWorkflowInputRef = useRef<string | undefined>(undefined);
   const workflowCacheRef = useRef<Map<string, StepResult>>(new Map());
+  const cacheStoreRef = useRef(createWorkflowCacheStore(join(process.cwd(), WORKFLOW_CACHE_DIR)));
 
   const orchestratorRef = useRef<Orchestrator | null>(null);
   if (!orchestratorRef.current) orchestratorRef.current = new Orchestrator(config, []);
@@ -94,7 +102,7 @@ export function App({ config, configSource, configWarning }: AppProps) {
   const totalWfSteps = wf.phases.reduce((n, p) => n + p.steps.length, 0);
 
   const runWorkflow = useCallback(
-    (name: string, input: string) => {
+    (name: string, input: string, opts?: { reuseMemoryCache?: boolean }) => {
       const check = orchestrator.canDispatchWorkflow(name);
       if (!check.ok) {
         setWfNotice(`cannot run '${name}': ${check.reason}`);
@@ -108,15 +116,26 @@ export function App({ config, configSource, configWarning }: AppProps) {
       abortRef.current = ac;
 
       void (async () => {
+        const store = cacheStoreRef.current;
+        const key = workflowCacheKey(name, input, process.cwd());
         try {
-          for await (const event of orchestrator.runWorkflow(
-            name,
-            input,
-            ac.signal,
-            workflowCacheRef.current,
-          )) {
+          if (!opts?.reuseMemoryCache) {
+            workflowCacheRef.current = await store.load(key);
+          }
+          const cache = workflowCacheRef.current;
+          for await (const event of orchestrator.runWorkflow(name, input, ac.signal, cache)) {
             if (!mountedRef.current) return;
             wfDispatch({ type: "event", event });
+            if (event.kind === "step_done") {
+              await persistWorkflowStepDone(
+                store,
+                key,
+                cache,
+                event.stepId,
+                event.result,
+                event.cached,
+              );
+            }
           }
         } catch (err) {
           if (mountedRef.current) setWfNotice(`run failed: ${message(err)}`);
@@ -138,16 +157,16 @@ export function App({ config, configSource, configWarning }: AppProps) {
         // Resume the active run if one exists; otherwise start the picked one fresh.
         if (wf.started && activeWorkflowRef.current) {
           if (activeWorkflowInputRef.current !== prompt) {
-            workflowCacheRef.current = new Map();
             wfDispatch({ type: "reset" });
             setStepIndex(0);
+            runWorkflow(activeWorkflowRef.current, prompt);
+            return;
           }
-          runWorkflow(activeWorkflowRef.current, prompt);
+          runWorkflow(activeWorkflowRef.current, prompt, { reuseMemoryCache: true });
           return;
         }
         const entry = workflowEntries[workflowIndex];
         if (!entry) return;
-        workflowCacheRef.current = new Map();
         wfDispatch({ type: "reset" });
         setStepIndex(0);
         runWorkflow(entry.name, prompt);
