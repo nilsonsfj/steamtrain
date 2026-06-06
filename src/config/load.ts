@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { WorkflowSpec } from "../workflow/types";
+import { type WorkflowSpec, validateWorkflow } from "../workflow/types";
 import { DEFAULT_CONFIG } from "./defaults";
 import { type ConfigFile, type SteamtrainConfig, type TaskType, configFileSchema } from "./types";
 
@@ -41,10 +41,18 @@ export function loadConfig(cwd: string = process.cwd()): LoadedConfig {
     };
   }
 
-  return { config: mergeConfig(DEFAULT_CONFIG, result.data), source: path };
+  const { config, warnings } = mergeConfig(DEFAULT_CONFIG, result.data);
+  return {
+    config,
+    source: path,
+    warning: warnings.length > 0 ? warnings.join("; ") : undefined,
+  };
 }
 
-export function mergeConfig(base: SteamtrainConfig, override: ConfigFile): SteamtrainConfig {
+export function mergeConfig(
+  base: SteamtrainConfig,
+  override: ConfigFile,
+): { config: SteamtrainConfig; warnings: string[] } {
   const merged: SteamtrainConfig = {
     tasks: {
       plan: override.tasks?.plan ?? base.tasks.plan,
@@ -56,22 +64,29 @@ export function mergeConfig(base: SteamtrainConfig, override: ConfigFile): Steam
     maxConcurrency: override.maxConcurrency ?? base.maxConcurrency,
   };
 
-  const workflows = mergeWorkflows(base.workflows, override.workflows);
+  const { workflows, warnings } = mergeWorkflows(base.workflows, override.workflows);
   if (workflows) merged.workflows = workflows;
-  return merged;
+  return { config: merged, warnings };
 }
 
 /** Merge user workflows over base, injecting each map key as the spec `name`. */
 function mergeWorkflows(
   base: Record<string, WorkflowSpec> | undefined,
   override: ConfigFile["workflows"],
-): Record<string, WorkflowSpec> | undefined {
-  if (!override) return base;
+): { workflows?: Record<string, WorkflowSpec>; warnings: string[] } {
+  if (!override) return { workflows: base, warnings: [] };
   const out: Record<string, WorkflowSpec> = { ...base };
+  const warnings: string[] = [];
   for (const [name, spec] of Object.entries(override)) {
-    out[name] = { ...spec, name };
+    const full = { ...spec, name };
+    const valid = validateWorkflow(full);
+    if (!valid.ok) {
+      warnings.push(`workflow '${name}' ignored: ${valid.error}`);
+      continue;
+    }
+    out[name] = full;
   }
-  return out;
+  return { workflows: out, warnings };
 }
 
 /** Resolve a task type to its `{ agent, model }`. */
