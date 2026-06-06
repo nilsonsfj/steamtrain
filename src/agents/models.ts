@@ -1,6 +1,7 @@
 import type { AgentId } from "../types/events";
+import { formatModelOption, type AgentModel } from "./agent-model";
 import { CLAUDE_MODELS } from "./claude";
-import { getOpencodeEfforts, refreshOpencodeVariantCache } from "./opencode-variants";
+import { getOpencodeModelName, getOpencodeEfforts, refreshOpencodeVariantCache } from "./opencode-variants";
 import { OPENCODE_MODELS } from "./opencode";
 
 /** All agent ids steamtrain can dispatch to. */
@@ -10,19 +11,39 @@ export function isAgentId(value: string): value is AgentId {
   return (AGENT_IDS as readonly string[]).includes(value);
 }
 
-/** Hardcoded model list for an agent provider. */
-export function modelsForAgent(agent: AgentId): readonly string[] {
+function opencodeModelsWithLiveNames(): readonly AgentModel[] {
+  return OPENCODE_MODELS.map((model) => ({
+    id: model.id,
+    name: getOpencodeModelName(model.id) ?? model.name,
+  }));
+}
+
+/** Model catalog for an agent provider (id + human-readable name). */
+export function modelsForAgent(agent: AgentId): readonly AgentModel[] {
   switch (agent) {
     case "claude":
       return CLAUDE_MODELS;
     case "opencode":
-      return OPENCODE_MODELS;
+      return opencodeModelsWithLiveNames();
   }
+}
+
+/** Model ids for an agent (used by autocomplete and validation). */
+export function modelIdsForAgent(agent: AgentId): readonly string[] {
+  return modelsForAgent(agent).map((model) => model.id);
+}
+
+/** Human-readable name for a model id, falling back to the id itself. */
+export function modelNameForAgent(agent: AgentId, modelId: string): string {
+  const fromCatalog = modelsForAgent(agent).find((model) => model.id === modelId);
+  if (fromCatalog) return fromCatalog.name;
+  if (agent === "opencode") return getOpencodeModelName(modelId) ?? modelId;
+  return modelId;
 }
 
 /** Default model when switching to an agent without an explicit model. */
 export function defaultModelForAgent(agent: AgentId): string {
-  return modelsForAgent(agent)[0] ?? agent;
+  return modelIdsForAgent(agent)[0] ?? agent;
 }
 
 const CLAUDE_OPUS_48_47_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -89,8 +110,12 @@ export function formatAgentTarget(target: {
   model: string;
   effort?: string;
 }): string {
-  const base = `${target.agent}/${target.model}`;
+  const modelLabel = modelNameForAgent(target.agent, target.model);
+  const modelPart =
+    modelLabel === target.model ? target.model : `${modelLabel} (${target.model})`;
+  const base = `${target.agent}/${modelPart}`;
   return target.effort ? `${base} · ${target.effort}` : base;
 }
 
-export { refreshOpencodeVariantCache };
+export { formatModelOption, refreshOpencodeVariantCache };
+export type { AgentModel };

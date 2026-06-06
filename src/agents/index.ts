@@ -5,8 +5,22 @@ import { OpenCodeAdapter } from "./opencode";
 
 export type { AgentAdapter, AgentRunOptions } from "./adapter";
 export { runAgentProcess } from "./adapter";
+export type { AgentModel } from "./agent-model";
+export { formatModelOption } from "./agent-model";
 export { ClaudeCodeAdapter, CLAUDE_MODELS, createClaudeMapper } from "./claude";
-export { AGENT_IDS, defaultModelForAgent, effortForModelChange, effortsForModel, formatAgentTarget, isAgentId, modelsForAgent, refreshOpencodeVariantCache, supportsEffort } from "./models";
+export {
+  AGENT_IDS,
+  defaultModelForAgent,
+  effortForModelChange,
+  effortsForModel,
+  formatAgentTarget,
+  isAgentId,
+  modelIdsForAgent,
+  modelNameForAgent,
+  modelsForAgent,
+  refreshOpencodeVariantCache,
+  supportsEffort,
+} from "./models";
 export {
   clearOpencodeVariantCacheForTests,
   parseOpencodeModelsVerbose,

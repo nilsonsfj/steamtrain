@@ -2,8 +2,48 @@ import { describe, expect, it } from "vitest";
 import {
   effortForModelChange,
   effortsForModel,
+  formatAgentTarget,
+  modelNameForAgent,
+  modelsForAgent,
   supportsEffort,
 } from "../src/agents/models";
+import {
+  clearOpencodeVariantCacheForTests,
+  setOpencodeVariantCacheForTests,
+} from "../src/agents/opencode-variants";
+
+describe("model names", () => {
+  it("returns hardcoded Claude display names", () => {
+    expect(modelNameForAgent("claude", "claude-sonnet-4-6")).toBe("Claude Sonnet 4.6");
+    expect(modelNameForAgent("claude", "sonnet")).toBe("Sonnet (latest)");
+  });
+
+  it("returns static OpenCode display names when cache is empty", () => {
+    clearOpencodeVariantCacheForTests();
+    expect(modelNameForAgent("opencode", "opencode/gpt-5.4-mini")).toBe("GPT 5.4 Mini");
+  });
+
+  it("prefers live OpenCode names from the variant cache", () => {
+    setOpencodeVariantCacheForTests(
+      new Map([
+        ["opencode-go/glm-5", { name: "GLM-5 (live)", efforts: [] }],
+      ]),
+    );
+    expect(modelNameForAgent("opencode", "opencode-go/glm-5")).toBe("GLM-5 (live)");
+    clearOpencodeVariantCacheForTests();
+  });
+
+  it("exposes id and name on catalog entries", () => {
+    const claude = modelsForAgent("claude")[0];
+    expect(claude).toEqual({ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" });
+  });
+
+  it("includes display names in formatAgentTarget", () => {
+    expect(
+      formatAgentTarget({ agent: "claude", model: "claude-sonnet-4-6", effort: "high" }),
+    ).toBe("claude/Claude Sonnet 4.6 (claude-sonnet-4-6) · high");
+  });
+});
 
 describe("effortsForModel claude", () => {
   it("returns opus 4.8 levels for claude-opus-4-8", () => {

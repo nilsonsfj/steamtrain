@@ -1,11 +1,14 @@
 import { Box, Text } from "ink";
+import { modelNameForAgent } from "../agents";
 import type { WorkspaceEntry } from "../workspace";
 import { workspaceLabel } from "../workspace";
 import { type Mode, isWorkspaceMode } from "./modes";
 import { AGENT_COLOR } from "./theme";
 
 function modelLabel(entry: WorkspaceEntry): string {
-  return entry.effort ? `${entry.model} · ${entry.effort}` : entry.model;
+  const name = modelNameForAgent(entry.agent, entry.model);
+  const base = name === entry.model ? entry.model : `${name} (${entry.model})`;
+  return entry.effort ? `${base} · ${entry.effort}` : base;
 }
 
 interface TaskSelectorProps {

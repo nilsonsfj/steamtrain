@@ -64,6 +64,8 @@ describe("WorkflowPreview", () => {
     );
     const frame = lastFrame() ?? "";
     expect(frame).toContain("(none)");
-    expect(frame).toContain("▶ merge synthesize");
+    expect(frame).toContain("▶ merge");
+    expect(frame).toContain("synthesize");
+    expect(frame).toContain("Claude Sonnet 4.6");
   });
 });

@@ -1,4 +1,4 @@
-import { effortForModelChange, modelsForAgent } from "../../agents";
+import { effortForModelChange, formatModelOption, modelIdsForAgent, modelNameForAgent, modelsForAgent } from "../../agents";
 import { isWorkspaceMode } from "../../tui/modes";
 import type { SlashCommand } from "../types";
 
@@ -25,28 +25,32 @@ export const modelCommand: SlashCommand = {
     }
 
     const models = modelsForAgent(entry.agent);
+    const modelIds = modelIdsForAgent(entry.agent);
     if (args.length === 0) {
+      const currentName = modelNameForAgent(entry.agent, entry.model);
+      const currentLabel =
+        currentName === entry.model ? entry.model : `${currentName} (${entry.model})`;
       return {
         handled: true,
         clearInput: true,
         notices: [
           {
             level: "info",
-            text: `models for ${entry.agent}: ${models.join(", ")} (current: ${entry.model})`,
+            text: `models for ${entry.agent}: ${models.map(formatModelOption).join(", ")} (current: ${currentLabel})`,
           },
         ],
       };
     }
 
     const next = args[0]!;
-    if (!models.includes(next)) {
+    if (!modelIds.includes(next)) {
       return {
         handled: true,
         clearInput: true,
         notices: [
           {
             level: "error",
-            text: `unknown model '${next}' for ${entry.agent}; try: ${models.join(", ")}`,
+            text: `unknown model '${next}' for ${entry.agent}; try: ${modelIds.join(", ")}`,
           },
         ],
       };
@@ -56,10 +60,12 @@ export const modelCommand: SlashCommand = {
       model: next,
       effort: effortForModelChange(entry.agent, next, entry.effort),
     });
+    const nextName = modelNameForAgent(entry.agent, next);
+    const nextLabel = nextName === next ? next : `${nextName} (${next})`;
     return {
       handled: true,
       clearInput: true,
-      notices: [{ level: "info", text: `model set to ${next} for '${ctx.mode}'` }],
+      notices: [{ level: "info", text: `model set to ${nextLabel} for '${ctx.mode}'` }],
     };
   },
   complete(args, ctx) {
@@ -67,6 +73,6 @@ export const modelCommand: SlashCommand = {
     const entry = ctx.workspaceMap.get(ctx.mode);
     if (!entry) return [];
     if (args.length > 1) return [];
-    return modelsForAgent(entry.agent);
+    return modelIdsForAgent(entry.agent);
   },
 };

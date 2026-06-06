@@ -41,18 +41,26 @@ describe("effortsForModel opencode cache", () => {
 
   it("uses live variant cache when the model is present", () => {
     setOpencodeVariantCacheForTests(
-      new Map([["opencode-go/deepseek-v4-pro", ["low", "max"]]]),
+      new Map([
+        ["opencode-go/deepseek-v4-pro", { name: "DeepSeek V4 Pro", efforts: ["low", "max"] }],
+      ]),
     );
     expect(effortsForModel("opencode", "opencode-go/deepseek-v4-pro")).toEqual(["low", "max"]);
   });
 
   it("returns empty when the cache explicitly lists no variants", () => {
-    setOpencodeVariantCacheForTests(new Map([["opencode-go/glm-5", []]]));
+    setOpencodeVariantCacheForTests(
+      new Map([["opencode-go/glm-5", { name: "GLM-5", efforts: [] }]]),
+    );
     expect(effortsForModel("opencode", "opencode-go/glm-5")).toEqual([]);
   });
 
   it("falls back to heuristics when the model is absent from cache", () => {
-    setOpencodeVariantCacheForTests(new Map([["opencode-go/deepseek-v4-pro", ["low", "max"]]]));
+    setOpencodeVariantCacheForTests(
+      new Map([
+        ["opencode-go/deepseek-v4-pro", { name: "DeepSeek V4 Pro", efforts: ["low", "max"] }],
+      ]),
+    );
     expect(effortsForModel("opencode", "opencode-go/kimi-k2.6")).toEqual([
       "low",
       "medium",

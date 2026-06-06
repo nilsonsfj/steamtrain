@@ -4,8 +4,13 @@ import { fallbackOpencodeEfforts } from "./opencode-efforts-fallback";
 const CACHE_TTL_MS = 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 20_000;
 
+export interface OpencodeModelInfo {
+  name: string;
+  efforts: readonly string[];
+}
+
 interface VariantCache {
-  variants: Map<string, readonly string[]>;
+  models: Map<string, OpencodeModelInfo>;
   fetchedAt: number;
   binary: string;
 }
@@ -14,11 +19,11 @@ let cache: VariantCache | null = null;
 let refreshPromise: Promise<boolean> | null = null;
 
 /**
- * Parse `opencode models --verbose` output into provider/model → variant keys.
- * Each block is a model id line followed by a JSON object with a `variants` map.
+ * Parse `opencode models --verbose` output into provider/model metadata.
+ * Each block is a model id line followed by a JSON object with `name` and `variants`.
  */
-export function parseOpencodeModelsVerbose(output: string): Map<string, readonly string[]> {
-  const result = new Map<string, readonly string[]>();
+export function parseOpencodeModelsVerbose(output: string): Map<string, OpencodeModelInfo> {
+  const result = new Map<string, OpencodeModelInfo>();
   const lines = output.split("\n");
 
   for (let i = 0; i < lines.length; i++) {
@@ -42,8 +47,14 @@ export function parseOpencodeModelsVerbose(output: string): Map<string, readonly
     }
 
     try {
-      const data = JSON.parse(jsonLines.join("\n")) as { variants?: Record<string, unknown> };
-      result.set(modelId, Object.keys(data.variants ?? {}).sort());
+      const data = JSON.parse(jsonLines.join("\n")) as {
+        name?: string;
+        variants?: Record<string, unknown>;
+      };
+      result.set(modelId, {
+        name: data.name ?? modelId,
+        efforts: Object.keys(data.variants ?? {}).sort(),
+      });
     } catch {
       // Skip malformed blocks.
     }
@@ -93,7 +104,7 @@ function cacheIsFresh(): boolean {
   return cache !== null && Date.now() - cache.fetchedAt < CACHE_TTL_MS;
 }
 
-/** Load variant keys from the local OpenCode install. Returns false when unavailable. */
+/** Load model metadata from the local OpenCode install. Returns false when unavailable. */
 export async function refreshOpencodeVariantCache(binary = "opencode"): Promise<boolean> {
   if (refreshPromise) return refreshPromise;
 
@@ -101,7 +112,7 @@ export async function refreshOpencodeVariantCache(binary = "opencode"): Promise<
     try {
       const output = await fetchOpencodeModelsVerbose(binary);
       cache = {
-        variants: parseOpencodeModelsVerbose(output),
+        models: parseOpencodeModelsVerbose(output),
         fetchedAt: Date.now(),
         binary,
       };
@@ -116,11 +127,20 @@ export async function refreshOpencodeVariantCache(binary = "opencode"): Promise<
   return refreshPromise;
 }
 
+function getCachedModel(model: string): OpencodeModelInfo | undefined {
+  if (!cacheIsFresh()) return undefined;
+  return cache!.models.get(model);
+}
+
+/** Human-readable name for an OpenCode model from the live cache, if known. */
+export function getOpencodeModelName(model: string): string | undefined {
+  return getCachedModel(model)?.name;
+}
+
 /** Effort levels for an OpenCode model: live cache first, static heuristics as fallback. */
 export function getOpencodeEfforts(model: string): readonly string[] {
-  if (cacheIsFresh() && cache!.variants.has(model)) {
-    return cache!.variants.get(model)!;
-  }
+  const cached = getCachedModel(model);
+  if (cached) return cached.efforts;
   return fallbackOpencodeEfforts(model);
 }
 
@@ -129,11 +149,11 @@ export function hasOpencodeVariantCache(): boolean {
   return cacheIsFresh();
 }
 
-/** @internal Test helper — inject a variant cache without spawning OpenCode. */
+/** @internal Test helper — inject a model cache without spawning OpenCode. */
 export function setOpencodeVariantCacheForTests(
-  variants: Map<string, readonly string[]>,
+  models: Map<string, OpencodeModelInfo>,
 ): void {
-  cache = { variants, fetchedAt: Date.now(), binary: "opencode" };
+  cache = { models, fetchedAt: Date.now(), binary: "opencode" };
 }
 
 /** @internal Test helper — clear the in-memory variant cache. */
