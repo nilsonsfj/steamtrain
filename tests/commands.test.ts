@@ -5,6 +5,7 @@ import {
   executeSlashCommand,
   isRegisteredSlashCommand,
   listSlashCommands,
+  registerSlashCommand,
 } from "../src/commands/registry";
 import type { SlashCommandContext } from "../src/commands/types";
 import { workspaceById } from "../src/workspace";
@@ -105,6 +106,46 @@ describe("executeSlashCommand", () => {
     expect(isRegisteredSlashCommand("/home/user/project")).toBe(false);
     expect(executeSlashCommand("/home/user/project", makeCtx())).toEqual({ handled: false });
   });
+
+  it("rejects partial command names on enter", () => {
+    expect(isRegisteredSlashCommand("/ver")).toBe(false);
+    expect(executeSlashCommand("/ver", makeCtx())).toEqual({ handled: false });
+  });
+
+  it("accepts registered commands with surrounding whitespace", () => {
+    expect(isRegisteredSlashCommand("  /version  ")).toBe(true);
+    const result = executeSlashCommand("  /version  ", makeCtx());
+    expect(result).toMatchObject({ handled: true, clearInput: true });
+  });
+
+  it("sets opencode model ids containing slashes", () => {
+    const updateWorkspace = vi.fn();
+    const result = executeSlashCommand(
+      "/model openai/gpt-5.4-mini",
+      makeCtx({ mode: "implement", updateWorkspace }),
+    );
+    expect(result.handled).toBe(true);
+    expect(updateWorkspace).toHaveBeenCalledWith("implement", { model: "openai/gpt-5.4-mini" });
+  });
+
+  it("keeps model when re-selecting the same agent", () => {
+    const updateWorkspace = vi.fn();
+    const result = executeSlashCommand(
+      "/agent claude",
+      makeCtx({
+        mode: "plan",
+        updateWorkspace,
+        workspaceMap: workspaceById({
+          workspaces: [{ id: "plan", agent: "claude", model: "claude-opus-4-8" }],
+        }),
+      }),
+    );
+    expect(result.handled).toBe(true);
+    expect(updateWorkspace).toHaveBeenCalledWith("plan", {
+      agent: "claude",
+      model: "claude-opus-4-8",
+    });
+  });
 });
 
 describe("autocompleteSlashCommand", () => {
@@ -123,5 +164,32 @@ describe("autocompleteSlashCommand", () => {
     const result = autocompleteSlashCommand("/", listSlashCommands(), makeCtx());
     expect(result?.value).toBe("/");
     expect(result?.suggestions).toEqual(listSlashCommands().map((c) => c.name));
+  });
+
+  it("does not suggest agents in workflow mode", () => {
+    const result = autocompleteSlashCommand(
+      "/agent ",
+      listSlashCommands(),
+      makeCtx({ mode: "workflow" }),
+    );
+    expect(result?.suggestions).toEqual([]);
+    expect(result?.value).toBe("/agent ");
+  });
+});
+
+describe("registerSlashCommand", () => {
+  it("overrides an existing command", () => {
+    const original = listSlashCommands().find((c) => c.name === "version");
+    expect(original).toBeDefined();
+    registerSlashCommand({
+      name: "version",
+      description: "test override",
+      execute: () => ({ handled: true, notices: [{ level: "info", text: "override" }] }),
+    });
+    expect(executeSlashCommand("/version", makeCtx())).toMatchObject({
+      handled: true,
+      notices: [{ level: "info", text: "override" }],
+    });
+    registerSlashCommand(original!);
   });
 });

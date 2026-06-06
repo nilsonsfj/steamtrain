@@ -66,6 +66,7 @@ export const agentCommand: SlashCommand = {
   },
   complete(args, ctx) {
     if (!isWorkspaceMode(ctx.mode)) return [];
+    if (!ctx.workspaceMap.get(ctx.mode)) return [];
     if (args.length > 1) return [];
     return AGENT_IDS;
   },
