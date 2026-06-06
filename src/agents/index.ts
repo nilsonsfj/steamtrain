@@ -5,8 +5,9 @@ import { OpenCodeAdapter } from "./opencode";
 
 export type { AgentAdapter, AgentRunOptions } from "./adapter";
 export { runAgentProcess } from "./adapter";
-export { ClaudeCodeAdapter, createClaudeMapper } from "./claude";
-export { OpenCodeAdapter, createOpenCodeMapper } from "./opencode";
+export { ClaudeCodeAdapter, CLAUDE_MODELS, createClaudeMapper } from "./claude";
+export { AGENT_IDS, defaultModelForAgent, modelsForAgent } from "./models";
+export { OpenCodeAdapter, OPENCODE_MODELS, createOpenCodeMapper } from "./opencode";
 export { LineBuffer } from "./line-buffer";
 export { runProcessLines } from "./spawn";
 
