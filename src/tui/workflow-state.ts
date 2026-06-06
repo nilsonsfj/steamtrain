@@ -1,5 +1,5 @@
 import type { AgentEvent, AgentId } from "../types/events";
-import type { StepResult, WorkflowEvent } from "../workflow";
+import type { GateStep, StepResult, WorkflowEvent, WorkflowStepKind } from "../workflow";
 
 /**
  * The render model for a workflow run: a phase → step tree built by folding the
@@ -11,8 +11,9 @@ export type StepStatus = "pending" | "running" | "done" | "error";
 
 export interface StepState {
   stepId: string;
-  agent: AgentId;
-  model: string;
+  blockKind: WorkflowStepKind;
+  agent?: AgentId;
+  model?: string;
   cwd?: string;
   status: StepStatus;
   /** Accumulated non-thinking text, for the tail / drill-in panel. */
@@ -20,6 +21,7 @@ export interface StepState {
   /** Latest tool line, e.g. "⚙ Bash" or "✓ Read". */
   activity?: string;
   result?: StepResult;
+  gate?: { passed: boolean; target?: string; onFalse?: GateStep["onFalse"] };
   cached: boolean;
 }
 
@@ -136,6 +138,7 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
                   ...p.steps,
                   {
                     stepId: e.stepId,
+                    blockKind: e.blockKind ?? "worker",
                     agent: e.agent,
                     model: e.model,
                     cwd: e.cwd,
@@ -150,6 +153,12 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
       };
     case "step_event":
       return updateStep(state, e.phaseId, e.stepId, (s) => applyAgentEvent(s, e.event));
+    case "gate_evaluated":
+      return updateStep(state, e.phaseId, e.stepId, (s) => ({
+        ...s,
+        gate: { passed: e.passed, target: e.target, onFalse: e.onFalse },
+        activity: e.passed ? `gate passed${e.target ? ` → ${e.target}` : ""}` : "gate blocked",
+      }));
     case "step_done":
       return updateStep(state, e.phaseId, e.stepId, (s) => ({
         ...s,

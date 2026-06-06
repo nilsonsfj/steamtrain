@@ -4,14 +4,24 @@ import type { AgentId } from "../types/events";
 /**
  * The declarative workflow model. A `WorkflowSpec` is a sequence of phases;
  * phases run one after another, and the steps inside a phase run in parallel
- * (bounded by `maxConcurrency`). Each step is one agent run — and steamtrain's
- * twist over a single dynamic workflow is that every step picks its own
- * agent, model, and target (cwd + optional env/flags).
+ * (bounded by `maxConcurrency`). Steps are explicit workflow building blocks:
+ * distributors fan one input into many items, workers/processors do 1:1 work,
+ * consolidators fan results back in, and gates route/filter based on conditions.
+ *
+ * Existing specs without a `kind` field remain valid; those steps are treated as
+ * `worker` blocks.
  */
 
-export interface WorkflowStep {
+export type WorkflowStepKind = "worker" | "processor" | "distributor" | "consolidator" | "gate";
+
+export interface WorkflowStepBase {
   /** Unique across the whole workflow; referenced by `dependsOn` and templates. */
   id: string;
+  /** Step ids (in earlier phases) whose outputs this step references. */
+  dependsOn?: string[];
+}
+
+export interface AgentRunFields {
   agent: AgentId;
   /** Model string in the agent's own format (claude: `claude-…`, opencode: `provider/model`). */
   model: string;
@@ -23,9 +33,70 @@ export interface WorkflowStep {
   env?: Record<string, string>;
   /** Extra CLI flags appended to the agent's own args (advanced targets). */
   extraArgs?: string[];
-  /** Step ids (in earlier phases) whose outputs this step's prompt references. */
-  dependsOn?: string[];
 }
+
+export interface WorkerStep extends WorkflowStepBase, AgentRunFields {
+  kind?: "worker" | "processor";
+}
+
+export interface DistributorStep extends WorkflowStepBase {
+  kind: "distributor";
+  /** Static items to distribute. Each item is templated before execution. */
+  items?: string[];
+  /** Separator used for the rendered text output (defaults to newline). */
+  separator?: string;
+  /**
+   * Optional agent-backed splitter. When provided, the agent output becomes the
+   * distributed payload; when `items` is also present, static items win.
+   */
+  agent?: AgentId;
+  model?: string;
+  prompt?: string;
+  cwd?: string;
+  env?: Record<string, string>;
+  extraArgs?: string[];
+}
+
+export interface ConsolidatorStep extends WorkflowStepBase {
+  kind: "consolidator";
+  /**
+   * Optional agent-backed merge. Without an agent, the consolidator emits the
+   * rendered prompt or a sectioned merge of its dependencies.
+   */
+  agent?: AgentId;
+  model?: string;
+  prompt?: string;
+  cwd?: string;
+  env?: Record<string, string>;
+  extraArgs?: string[];
+  separator?: string;
+}
+
+export interface GateCondition {
+  /** Step whose result is inspected; omitted means inspect the workflow input. */
+  step?: string;
+  /** Match the referenced step's ok/error state. */
+  ok?: boolean;
+  /** Text condition against the referenced output (or input). */
+  contains?: string;
+  /** Regular expression condition against the referenced output (or input). */
+  matches?: string;
+  /** Exact text condition against the referenced output (or input). */
+  equals?: string;
+  /** Invert the final condition result. */
+  not?: boolean;
+}
+
+export interface GateStep extends WorkflowStepBase {
+  kind: "gate";
+  condition: GateCondition;
+  /** Optional state/label emitted when the gate evaluates. */
+  target?: string;
+  /** What to do when the condition is false (default: continue). */
+  onFalse?: "continue" | "fail" | "stop";
+}
+
+export type WorkflowStep = WorkerStep | DistributorStep | ConsolidatorStep | GateStep;
 
 export interface WorkflowPhase {
   id: string;
@@ -47,6 +118,14 @@ export interface StepResult {
   ok: boolean;
   /** Final text (a failed step's output is its error message, for templating). */
   output: string;
+  /** Distributed item payloads, when a distributor produced structured items. */
+  items?: string[];
+  /** Gate target/state label, when a gate evaluated. */
+  target?: string;
+  gate?: {
+    passed: boolean;
+    onFalse: GateStep["onFalse"];
+  };
   error?: string;
   durationMs: number;
   costUsd?: number;
@@ -59,16 +138,112 @@ export const MAX_CONCURRENCY = 16;
 
 const agentId = z.enum(["claude", "opencode"]);
 
-const workflowStepSchema = z.object({
+const baseStepShape = {
   id: z.string().min(1),
+  dependsOn: z.array(z.string().min(1)).optional(),
+};
+
+const agentRunShape = {
   agent: agentId,
   model: z.string().min(1),
   prompt: z.string().min(1),
   cwd: z.string().min(1).optional(),
   env: z.record(z.string()).optional(),
   extraArgs: z.array(z.string()).optional(),
-  dependsOn: z.array(z.string().min(1)).optional(),
+};
+
+const optionalAgentRunShape = {
+  agent: agentId.optional(),
+  model: z.string().min(1).optional(),
+  prompt: z.string().min(1).optional(),
+  cwd: z.string().min(1).optional(),
+  env: z.record(z.string()).optional(),
+  extraArgs: z.array(z.string()).optional(),
+};
+
+const workflowWorkerStepSchema = z.object({
+  ...baseStepShape,
+  kind: z.enum(["worker", "processor"]).optional(),
+  ...agentRunShape,
 });
+
+const workflowDistributorStepSchema = z
+  .object({
+    ...baseStepShape,
+    kind: z.literal("distributor"),
+    items: z.array(z.string()).min(1).optional(),
+    separator: z.string().optional(),
+    ...optionalAgentRunShape,
+  })
+  .superRefine((step, ctx) => {
+    if (step.items) return;
+    if (step.agent && step.model && step.prompt) return;
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "distributor step requires either non-empty items or agent/model/prompt",
+    });
+  });
+
+const workflowConsolidatorStepSchema = z
+  .object({
+    ...baseStepShape,
+    kind: z.literal("consolidator"),
+    separator: z.string().optional(),
+    ...optionalAgentRunShape,
+  })
+  .superRefine((step, ctx) => {
+    const agentFields = [step.agent, step.model, step.prompt].filter(Boolean).length;
+    if (agentFields !== 0 && agentFields !== 3) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "agent-backed consolidator requires agent, model, and prompt together",
+      });
+    }
+    if (!step.dependsOn?.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "consolidator step requires dependsOn",
+      });
+    }
+  });
+
+const gateConditionSchema = z
+  .object({
+    step: z.string().min(1).optional(),
+    ok: z.boolean().optional(),
+    contains: z.string().optional(),
+    matches: z.string().optional(),
+    equals: z.string().optional(),
+    not: z.boolean().optional(),
+  })
+  .superRefine((condition, ctx) => {
+    if (
+      condition.ok === undefined &&
+      condition.contains === undefined &&
+      condition.matches === undefined &&
+      condition.equals === undefined
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "gate condition requires ok, contains, matches, or equals",
+      });
+    }
+  });
+
+const workflowGateStepSchema = z.object({
+  ...baseStepShape,
+  kind: z.literal("gate"),
+  condition: gateConditionSchema,
+  target: z.string().min(1).optional(),
+  onFalse: z.enum(["continue", "fail", "stop"]).optional(),
+});
+
+const workflowStepSchema = z.union([
+  workflowWorkerStepSchema,
+  workflowDistributorStepSchema,
+  workflowConsolidatorStepSchema,
+  workflowGateStepSchema,
+]);
 
 const workflowPhaseSchema = z.object({
   id: z.string().min(1),
@@ -115,6 +290,16 @@ export interface ValidationResult {
   error?: string;
 }
 
+export function workflowStepKind(step: WorkflowStep): WorkflowStepKind {
+  return step.kind ?? "worker";
+}
+
+export type AgentBackedWorkflowStep = WorkflowStep & AgentRunFields;
+
+export function isAgentBackedStep(step: WorkflowStep): step is AgentBackedWorkflowStep {
+  return "agent" in step && typeof step.agent === "string";
+}
+
 /**
  * Full validation: the zod shape plus the structural rule that a `dependsOn`
  * may only reference a step in an EARLIER phase. Phases run sequentially while
@@ -144,6 +329,14 @@ export function validateWorkflow(spec: WorkflowSpec): ValidationResult {
               : `step '${step.id}' dependsOn unknown step '${dep}'`,
           };
         }
+      }
+      if (step.kind === "gate" && step.condition.step && !earlierIds.has(step.condition.step)) {
+        return {
+          ok: false,
+          error: allIds.has(step.condition.step)
+            ? `gate '${step.id}' condition references '${step.condition.step}', which is not in an earlier phase`
+            : `gate '${step.id}' condition references unknown step '${step.condition.step}'`,
+        };
       }
     }
     // Promote this phase's ids only after the whole phase is checked, so two

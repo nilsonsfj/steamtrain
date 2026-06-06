@@ -4,6 +4,7 @@ import {
   type WorkflowSpec,
   validateWorkflow,
   workflowSpecSchema,
+  workflowStepKind,
 } from "../src/workflow";
 
 const validSpec: WorkflowSpec = {
@@ -82,6 +83,75 @@ describe("workflowSpecSchema", () => {
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/max/);
   });
+
+  it("accepts explicit workflow building blocks", () => {
+    const spec: WorkflowSpec = {
+      name: "blocks",
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [{ id: "split", kind: "distributor", items: ["a", "b"] }],
+        },
+        {
+          id: "work",
+          title: "Work",
+          steps: [
+            {
+              id: "work",
+              kind: "processor",
+              agent: "claude",
+              model: "m",
+              prompt: "{{steps.split.items}}",
+              dependsOn: ["split"],
+            },
+          ],
+        },
+        {
+          id: "merge",
+          title: "Merge",
+          steps: [
+            { id: "merge", kind: "consolidator", dependsOn: ["work"] },
+            {
+              id: "gate",
+              kind: "gate",
+              dependsOn: ["work"],
+              condition: { step: "work", ok: true },
+              target: "ready",
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(workflowSpecSchema.safeParse(spec).success).toBe(true);
+    expect(validateWorkflow(spec)).toEqual({ ok: true });
+    const firstStep = spec.phases[0]?.steps[0];
+    expect(firstStep && workflowStepKind(firstStep)).toBe("distributor");
+  });
+
+  it("rejects malformed building blocks", () => {
+    expect(
+      workflowSpecSchema.safeParse({
+        name: "bad",
+        phases: [{ id: "p", title: "P", steps: [{ id: "split", kind: "distributor" }] }],
+      }).success,
+    ).toBe(false);
+    expect(
+      workflowSpecSchema.safeParse({
+        name: "bad",
+        phases: [{ id: "p", title: "P", steps: [{ id: "merge", kind: "consolidator" }] }],
+      }).success,
+    ).toBe(false);
+    expect(
+      workflowSpecSchema.safeParse({
+        name: "bad",
+        phases: [
+          { id: "p", title: "P", steps: [{ id: "gate", kind: "gate", condition: {} }] },
+        ],
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe("validateWorkflow dependency rules", () => {
@@ -128,5 +198,24 @@ describe("validateWorkflow dependency rules", () => {
 
   it("accepts a dependsOn on a step in an earlier phase", () => {
     expect(validateWorkflow(validSpec)).toEqual({ ok: true });
+  });
+
+  it("rejects a gate condition referencing a same-phase step", () => {
+    const spec: WorkflowSpec = {
+      name: "same-gate",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            { id: "a", agent: "claude", model: "m", prompt: "x" },
+            { id: "gate", kind: "gate", condition: { step: "a", ok: true } },
+          ],
+        },
+      ],
+    };
+    const res = validateWorkflow(spec);
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/not in an earlier phase/);
   });
 });

@@ -250,6 +250,108 @@ describe("runWorkflow", () => {
     expect(rec?.opts.extraArgs).toEqual(["--add-dir", "."]);
   });
 
+  it("executes distributor, consolidator, and gate blocks", async () => {
+    const spec: WorkflowSpec = {
+      name: "blocks",
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [{ id: "split", kind: "distributor", items: ["{{input}}:a", "{{input}}:b"] }],
+        },
+        {
+          id: "merge",
+          title: "Merge",
+          steps: [
+            {
+              id: "merge",
+              kind: "consolidator",
+              dependsOn: ["split"],
+              prompt: "items:\n{{steps.split.items}}",
+            },
+          ],
+        },
+        {
+          id: "gate",
+          title: "Gate",
+          steps: [
+            {
+              id: "ready",
+              kind: "gate",
+              dependsOn: ["merge"],
+              condition: { step: "merge", contains: "task:a" },
+              target: "ready",
+            },
+          ],
+        },
+        {
+          id: "work",
+          title: "Work",
+          steps: [
+            {
+              id: "work",
+              kind: "worker",
+              agent: "claude",
+              model: "mw",
+              dependsOn: ["ready"],
+              prompt: "{{steps.ready.target}} {{steps.merge.output}}",
+            },
+          ],
+        },
+      ],
+    };
+    const { deps, state } = makeDeps(echo);
+    const events = await collect(spec, "task", deps);
+
+    const split = events.find((e) => e.kind === "step_done" && e.stepId === "split");
+    expect(split && split.kind === "step_done" && split.result.items).toEqual(["task:a", "task:b"]);
+    const gate = events.find((e) => e.kind === "gate_evaluated");
+    expect(gate).toMatchObject({ kind: "gate_evaluated", stepId: "ready", passed: true });
+    expect(state.runs).toHaveLength(1);
+    expect(state.runs[0]?.opts.prompt).toBe("ready items:\ntask:a\ntask:b");
+    expect(events.at(-1)).toMatchObject({ kind: "workflow_done", ok: true });
+  });
+
+  it("stops after a blocking gate with onFalse stop", async () => {
+    const spec: WorkflowSpec = {
+      name: "stop",
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [{ id: "split", kind: "distributor", items: ["nope"] }],
+        },
+        {
+          id: "gate",
+          title: "Gate",
+          steps: [
+            {
+              id: "gate",
+              kind: "gate",
+              dependsOn: ["split"],
+              condition: { step: "split", contains: "yes" },
+              onFalse: "stop",
+            },
+          ],
+        },
+        {
+          id: "later",
+          title: "Later",
+          steps: [{ id: "later", agent: "claude", model: "ml", prompt: "should not run" }],
+        },
+      ],
+    };
+    const { deps, state } = makeDeps(echo);
+    const events = await collect(spec, "x", deps);
+
+    expect(events).toContainEqual(
+      expect.objectContaining({ kind: "gate_evaluated", stepId: "gate", passed: false }),
+    );
+    expect(state.runs).toHaveLength(0);
+    expect(events.some((e) => e.kind === "phase_start" && e.phaseId === "later")).toBe(false);
+    expect(events.at(-1)).toMatchObject({ kind: "workflow_done", ok: true });
+  });
+
   it("aborts mid-run without hanging and does not start later phases", async () => {
     const { deps } = makeDeps(echo, { maxConcurrency: 2, delayMs: 30 });
     const ac = new AbortController();

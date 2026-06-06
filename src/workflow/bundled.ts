@@ -22,22 +22,40 @@ const multiPlan: WorkflowSpec = {
     "Draft a plan from independent angles, stress-test it, then synthesize the strongest version.",
   phases: [
     {
+      id: "scope",
+      title: "Distribute planning lenses",
+      steps: [
+        {
+          id: "planning-lenses",
+          kind: "distributor",
+          items: [
+            "correctness lens: validate invariants, edge cases, and existing patterns for {{input}}",
+            "pragmatic lens: minimize risk and surface assumptions for {{input}}",
+          ],
+        },
+      ],
+    },
+    {
       id: "draft",
       title: "Draft plans from independent angles",
       steps: [
         {
           id: "draft-correctness",
+          kind: "worker",
           agent: "claude",
           model: "claude-sonnet-4-6",
+          dependsOn: ["planning-lenses"],
           prompt:
-            "Draft a concise, step-by-step implementation plan for the task below. Optimize for correctness, simplicity, and reuse of existing patterns. List concrete files/steps.\n\nTask: {{input}}",
+            "Draft a concise, step-by-step implementation plan for the task below. Optimize for correctness, simplicity, and reuse of existing patterns. List concrete files/steps.\n\nPlanning lenses:\n{{steps.planning-lenses.items}}\n\nTask: {{input}}",
         },
         {
           id: "draft-pragmatic",
+          kind: "worker",
           agent: "opencode",
           model: "openai/gpt-5.4-mini",
+          dependsOn: ["planning-lenses"],
           prompt:
-            "Draft a concise, step-by-step implementation plan for the task below. Optimize for speed of delivery and pragmatism; call out the riskiest assumptions.\n\nTask: {{input}}",
+            "Draft a concise, step-by-step implementation plan for the task below. Optimize for speed of delivery and pragmatism; call out the riskiest assumptions.\n\nPlanning lenses:\n{{steps.planning-lenses.items}}\n\nTask: {{input}}",
         },
       ],
     },
@@ -47,6 +65,7 @@ const multiPlan: WorkflowSpec = {
       steps: [
         {
           id: "critique",
+          kind: "consolidator",
           agent: "claude",
           model: "claude-opus-4-8",
           dependsOn: ["draft-correctness", "draft-pragmatic"],
@@ -61,6 +80,7 @@ const multiPlan: WorkflowSpec = {
       steps: [
         {
           id: "synthesize",
+          kind: "consolidator",
           agent: "claude",
           model: "claude-sonnet-4-6",
           dependsOn: ["draft-correctness", "draft-pragmatic", "critique"],
@@ -83,6 +103,7 @@ const bugHunt: WorkflowSpec = {
       steps: [
         {
           id: "scan-logic",
+          kind: "worker",
           agent: "claude",
           model: "claude-sonnet-4-6",
           prompt:
@@ -90,6 +111,7 @@ const bugHunt: WorkflowSpec = {
         },
         {
           id: "scan-errors",
+          kind: "worker",
           agent: "opencode",
           model: "openai/gpt-5.4-mini",
           prompt:
@@ -97,6 +119,7 @@ const bugHunt: WorkflowSpec = {
         },
         {
           id: "scan-security",
+          kind: "worker",
           agent: "claude",
           model: "claude-haiku-4-5-20251001",
           prompt:
@@ -110,6 +133,7 @@ const bugHunt: WorkflowSpec = {
       steps: [
         {
           id: "cross-check",
+          kind: "consolidator",
           agent: "claude",
           model: "claude-opus-4-8",
           dependsOn: ["scan-logic", "scan-errors", "scan-security"],
@@ -119,14 +143,29 @@ const bugHunt: WorkflowSpec = {
       ],
     },
     {
+      id: "gate",
+      title: "Gate verified findings",
+      steps: [
+        {
+          id: "findings-ready",
+          kind: "gate",
+          dependsOn: ["cross-check"],
+          condition: { step: "cross-check", ok: true },
+          target: "verified-findings",
+          onFalse: "fail",
+        },
+      ],
+    },
+    {
       id: "report",
       title: "Prioritized report",
       steps: [
         {
           id: "report",
+          kind: "consolidator",
           agent: "claude",
           model: "claude-sonnet-4-6",
-          dependsOn: ["cross-check"],
+          dependsOn: ["cross-check", "findings-ready"],
           prompt:
             "Turn the verified findings below into a prioritized report (highest-severity first). For each: a one-line summary, file:line, severity, and the recommended fix. Output only the report.\n\n{{steps.cross-check.output}}",
         },

@@ -1,9 +1,9 @@
 import { TASK_TYPES, type TaskType } from "../config";
 
-/** Selector positions: the three task types plus the workflow launcher. */
+/** Selector positions: workflows first, with one-shot task modes as secondary tools. */
 export type Mode = TaskType | "workflow";
 
-export const MODES: readonly Mode[] = [...TASK_TYPES, "workflow"];
+export const MODES: readonly Mode[] = ["workflow", ...TASK_TYPES];
 
 export function isTaskType(mode: Mode): mode is TaskType {
   return mode !== "workflow";
