@@ -23,7 +23,7 @@ import {
   workflowCacheKey,
 } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId, WorkspaceScope } from "../workspace";
-import { saveWorkspaceConfig, workspaceById, workspaceLabel } from "../workspace";
+import { saveWorkspaceConfig, workspaceById, workspaceLabel as formatEntryLabel } from "../workspace";
 import { CommandSuggestionMenu, suggestionMenuHeight } from "./CommandSuggestionMenu";
 import { EventStream } from "./EventStream";
 import { PromptInput } from "./PromptInput";
@@ -393,7 +393,7 @@ export function App({
         dispatch({
           type: "notice",
           level: "error",
-          text: `cannot dispatch '${workspaceLabel(entry)}': ${check.reason}`,
+          text: `cannot dispatch '${formatEntryLabel(entry)}': ${check.reason}`,
         });
         return;
       }
@@ -401,7 +401,7 @@ export function App({
       dispatch({
         type: "notice",
         level: "info",
-        text: `dispatch '${workspaceLabel(entry)}' → ${entry.agent} / ${entry.model}`,
+        text: `dispatch '${formatEntryLabel(entry)}' → ${entry.agent} / ${entry.model}`,
       });
       setRunning(true);
       const ac = new AbortController();
