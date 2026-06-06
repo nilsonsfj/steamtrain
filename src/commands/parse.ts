@@ -25,6 +25,12 @@ export function parseSlashInput(raw: string): ParsedSlashInput | null {
   };
 }
 
+/** Full argument list for command execution (includes the token being typed). */
+export function slashCommandArgs(parsed: ParsedSlashInput): string[] {
+  if (parsed.activeArg.length > 0) return [...parsed.args, parsed.activeArg];
+  return parsed.args;
+}
+
 function stripQuotes(token: string): string {
   if (
     (token.startsWith('"') && token.endsWith('"')) ||
@@ -36,5 +42,5 @@ function stripQuotes(token: string): string {
 }
 
 export function isSlashCommandInput(value: string): boolean {
-  return value.startsWith("/");
+  return value.trimStart().startsWith("/");
 }

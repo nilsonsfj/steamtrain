@@ -2,6 +2,7 @@ import { agentCommand } from "./builtins/agent";
 import { exitCommand } from "./builtins/exit";
 import { modelCommand } from "./builtins/model";
 import { versionCommand } from "./builtins/version";
+import { parseSlashInput, slashCommandArgs } from "./parse";
 import type { SlashCommand, SlashCommandContext, SlashCommandResult } from "./types";
 
 const BUILTIN_COMMANDS: SlashCommand[] = [exitCommand, versionCommand, modelCommand, agentCommand];
@@ -20,12 +21,24 @@ export function registerSlashCommand(command: SlashCommand): void {
   else registry.push(command);
 }
 
+/** True when Enter should run slash-command handling (not a normal prompt). */
+export function isRegisteredSlashCommand(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("/")) return false;
+  const parsed = parseSlashInput(trimmed);
+  if (!parsed) return false;
+  if (parsed.command.length === 0) return true;
+  return registry.some((c) => c.name === parsed.command);
+}
+
 export function executeSlashCommand(raw: string, ctx: SlashCommandContext): SlashCommandResult {
   const trimmed = raw.trim();
   if (!trimmed.startsWith("/")) return { handled: false };
 
-  const body = trimmed.slice(1).trim();
-  if (!body) {
+  const parsed = parseSlashInput(trimmed);
+  if (!parsed) return { handled: false };
+
+  if (parsed.command.length === 0) {
     return {
       handled: true,
       clearInput: true,
@@ -38,15 +51,8 @@ export function executeSlashCommand(raw: string, ctx: SlashCommandContext): Slas
     };
   }
 
-  const [name, ...args] = body.split(/\s+/);
-  const def = registry.find((c) => c.name === name);
-  if (!def) {
-    return {
-      handled: true,
-      clearInput: true,
-      notices: [{ level: "error", text: `unknown command '/${name}'` }],
-    };
-  }
+  const def = registry.find((c) => c.name === parsed.command);
+  if (!def) return { handled: false };
 
-  return def.execute(args, ctx);
+  return def.execute(slashCommandArgs(parsed), ctx);
 }

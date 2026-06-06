@@ -1,6 +1,5 @@
-import { AGENT_IDS, defaultModelForAgent } from "../../agents";
+import { AGENT_IDS, defaultModelForAgent, isAgentId } from "../../agents";
 import { isWorkspaceMode } from "../../tui/modes";
-import type { AgentId } from "../../types/events";
 import type { SlashCommand } from "../types";
 
 export const agentCommand: SlashCommand = {
@@ -38,8 +37,8 @@ export const agentCommand: SlashCommand = {
       };
     }
 
-    const next = args[0] as AgentId;
-    if (!AGENT_IDS.includes(next)) {
+    const next = args[0]!;
+    if (!isAgentId(next)) {
       return {
         handled: true,
         clearInput: true,
@@ -65,7 +64,8 @@ export const agentCommand: SlashCommand = {
       ],
     };
   },
-  complete(args) {
+  complete(args, ctx) {
+    if (!isWorkspaceMode(ctx.mode)) return [];
     if (args.length > 1) return [];
     return AGENT_IDS;
   },

@@ -5,6 +5,7 @@ import {
   type SlashCommandContext,
   autocompleteSlashCommand,
   executeSlashCommand,
+  isRegisteredSlashCommand,
   isSlashCommandInput,
   listSlashCommands,
 } from "../commands";
@@ -234,9 +235,8 @@ export function App({
   const handleSubmit = useCallback(
     (raw: string) => {
       const prompt = raw.trim();
-      if (running) return;
 
-      if (isSlashCommandInput(prompt)) {
+      if (isRegisteredSlashCommand(prompt)) {
         const result = executeSlashCommand(prompt, slashCtx);
         if (result.handled) {
           if (result.clearInput) setValue("");
@@ -248,6 +248,8 @@ export function App({
           return;
         }
       }
+
+      if (running) return;
 
       if (mode === "workflow") {
         // Resume the active run if one exists; otherwise start the picked one fresh.
