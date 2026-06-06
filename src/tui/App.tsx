@@ -315,6 +315,7 @@ export function App({
         else if (wfPreview) {
           setStepIndex((i) => Math.min(Math.max(0, previewStepCount - 1), i + 1));
         } else setWorkflowIndex((i) => Math.min(workflowEntries.length - 1, i + 1));
+        return;
       }
     }
   });

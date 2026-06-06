@@ -176,7 +176,7 @@ function SpecStepDetail({ entry, width }: { entry: FlatSpecStep; width: number }
         {step.id} · {kind} · phase {phase.title}
       </Text>
       {lines.map((line, i) => (
-        <Text key={i} color="gray" wrap="truncate-end">
+        <Text key={`${i}:${line}`} color="gray" wrap="truncate-end">
           {line}
         </Text>
       ))}
@@ -206,7 +206,11 @@ function specDetailLines(step: WorkflowStep): string[] {
   if ("forEach" in step && step.forEach) lines.push(`forEach: ${step.forEach}`);
   if ("cwd" in step && step.cwd) lines.push(`cwd: ${step.cwd}`);
   if ("env" in step && step.env && Object.keys(step.env).length > 0) {
-    lines.push(`env: ${Object.entries(step.env).map(([k, v]) => `${k}=${v}`).join(", ")}`);
+    lines.push(
+      `env: ${Object.entries(step.env)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(", ")}`,
+    );
   }
   if ("extraArgs" in step && step.extraArgs?.length) {
     lines.push(`extraArgs: ${step.extraArgs.join(" ")}`);
@@ -242,7 +246,8 @@ function formatGateCondition(condition: GateCondition): string {
   const parts: string[] = [];
   if (condition.step) parts.push(`step=${condition.step}`);
   if (condition.ok !== undefined) parts.push(`ok=${condition.ok}`);
-  if (condition.contains !== undefined) parts.push(`contains=${JSON.stringify(condition.contains)}`);
+  if (condition.contains !== undefined)
+    parts.push(`contains=${JSON.stringify(condition.contains)}`);
   if (condition.matches !== undefined) parts.push(`matches=${condition.matches}`);
   if (condition.equals !== undefined) parts.push(`equals=${JSON.stringify(condition.equals)}`);
   if (condition.not) parts.push("not");

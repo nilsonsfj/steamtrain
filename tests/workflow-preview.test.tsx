@@ -1,11 +1,11 @@
 import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
+import { WorkflowPreview, flattenSpecSteps } from "../src/tui/WorkflowPreview";
 import { BUNDLED_WORKFLOWS } from "../src/workflow";
-import { flattenSpecSteps, WorkflowPreview } from "../src/tui/WorkflowPreview";
 
 describe("WorkflowPreview", () => {
   it("flattens spec phases and steps in order", () => {
-    const spec = BUNDLED_WORKFLOWS["multi-plan"];
+    const spec = BUNDLED_WORKFLOWS["multi-plan"]!;
     const flat = flattenSpecSteps(spec);
     expect(flat.length).toBeGreaterThan(0);
     expect(flat[0]?.step.id).toBe("planning-lenses");
@@ -13,7 +13,7 @@ describe("WorkflowPreview", () => {
   });
 
   it("renders workflow metadata and step detail", () => {
-    const spec = BUNDLED_WORKFLOWS["multi-plan"];
+    const spec = BUNDLED_WORKFLOWS["multi-plan"]!;
     const { lastFrame } = render(
       <WorkflowPreview
         spec={spec}
@@ -33,7 +33,7 @@ describe("WorkflowPreview", () => {
   });
 
   it("shows dispatch blockers", () => {
-    const spec = BUNDLED_WORKFLOWS["bug-hunt"];
+    const spec = BUNDLED_WORKFLOWS["bug-hunt"]!;
     const { lastFrame } = render(
       <WorkflowPreview
         spec={spec}
