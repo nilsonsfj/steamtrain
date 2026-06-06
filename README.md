@@ -80,6 +80,7 @@ src/
 ├─ orchestrator/  Routes a task type to the right adapter+model; gates on health
 ├─ workflow/      Declarative multi-agent workflows: spec + zod schema, a bounded-
 │                 parallel engine, and bundled specs (the layer above orchestrator)
+├─ docs/          Workflow guides: overview, examples, language spec
 └─ tui/           Ink components (banner, status bar, streams, workflow view, input)
 ```
 
@@ -166,7 +167,11 @@ step's output. `Esc` cancels a run (and, once stopped, backs out to the picker).
 Re-running **resumes**: completed steps replay from an in-session cache instead
 of running again.
 
-The full language reference is in [`docs/workflow-spec.md`](docs/workflow-spec.md).
+Workflow documentation:
+
+- [`docs/workflow-overview.md`](docs/workflow-overview.md) — mental model, diagrams, execution behavior
+- [`docs/workflow-examples.md`](docs/workflow-examples.md) — patterns and bundled workflow walkthroughs
+- [`docs/workflow-spec.md`](docs/workflow-spec.md) — language reference
 
 ### Bundled workflows
 
