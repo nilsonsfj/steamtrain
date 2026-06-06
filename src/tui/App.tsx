@@ -478,7 +478,7 @@ export function App({
         onChange={handleValueChange}
         onSubmit={handleSubmit}
         onTab={handleTab}
-        focus={!running}
+        focus
         running={running}
         suggestions={commandSuggestions}
       />
@@ -503,7 +503,7 @@ function hint(
   wfPreviewing: boolean,
   running: boolean,
 ): string {
-  if (running) return "Esc cancel · Ctrl+C quit";
+  if (running) return "Esc cancel · /exit quit · Ctrl+C quit";
   if (mode === "workflow") {
     if (wfStarted || wfLaunching) {
       return "↑/↓ step · Enter resume · Esc back · Ctrl+Tab switch mode · /commands · Ctrl+C quit";

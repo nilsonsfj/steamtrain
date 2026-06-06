@@ -11,7 +11,7 @@ interface PromptInputProps {
   suggestions?: readonly string[];
 }
 
-/** Bottom prompt box. Disabled (and hinted) while a task is running. */
+/** Bottom prompt box. Slash commands stay available while a task is running. */
 export function PromptInput({
   value,
   onChange,
@@ -21,13 +21,15 @@ export function PromptInput({
   running,
   suggestions,
 }: PromptInputProps) {
+  const slashInput = value.trimStart().startsWith("/");
+
   useInput(
     (_input, key) => {
       if (key.tab && !key.shift && onTab) {
         onTab();
       }
     },
-    { isActive: focus && !running && !!onTab },
+    { isActive: focus && !!onTab && (!running || slashInput) },
   );
 
   return (
@@ -36,17 +38,17 @@ export function PromptInput({
         <Text color={running ? "yellow" : "cyan"} bold>
           {running ? "… " : "❯ "}
         </Text>
-        {running ? (
-          <Text color="gray">working — Esc to cancel</Text>
-        ) : (
-          <TextInput
-            value={value}
-            onChange={onChange}
-            onSubmit={onSubmit}
-            focus={focus}
-            placeholder="describe the task, or /command (Tab to complete)"
-          />
-        )}
+        <TextInput
+          value={value}
+          onChange={onChange}
+          onSubmit={onSubmit}
+          focus={focus}
+          placeholder={
+            running
+              ? "/exit to quit · Esc to cancel"
+              : "describe the task, or /command (Tab to complete)"
+          }
+        />
       </Box>
       {suggestions && suggestions.length > 0 ? (
         <Box paddingX={1}>
