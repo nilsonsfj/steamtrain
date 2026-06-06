@@ -1,8 +1,9 @@
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runCli } from "../src/cli";
+import { BUNDLED_WORKFLOWS } from "../src/workflow/bundled";
 import {
   WORKFLOW_CACHE_DIR,
   saveWorkflowCache,
@@ -99,7 +100,12 @@ describe("runCli", () => {
   it("clears all workflow caches", async () => {
     const c = capture();
     const cacheDir = join(c.io.cwd, WORKFLOW_CACHE_DIR);
-    const key = workflowCacheKey("multi-plan", "cached", c.io.cwd);
+    const key = workflowCacheKey(
+      "multi-plan",
+      "cached",
+      c.io.cwd,
+      BUNDLED_WORKFLOWS["multi-plan"]!,
+    );
     await saveWorkflowCache(cacheDir, key, new Map());
 
     const code = await runCli(["workflow", "cache", "clear"], c.io);
@@ -112,8 +118,8 @@ describe("runCli", () => {
   it("clears a single workflow cache entry", async () => {
     const c = capture();
     const cacheDir = join(c.io.cwd, WORKFLOW_CACHE_DIR);
-    const key = workflowCacheKey("multi-plan", "one", c.io.cwd);
-    const other = workflowCacheKey("bug-hunt", "two", c.io.cwd);
+    const key = workflowCacheKey("multi-plan", "one", c.io.cwd, BUNDLED_WORKFLOWS["multi-plan"]!);
+    const other = workflowCacheKey("bug-hunt", "two", c.io.cwd, BUNDLED_WORKFLOWS["bug-hunt"]!);
     await saveWorkflowCache(cacheDir, key, new Map());
     await saveWorkflowCache(cacheDir, other, new Map());
 
@@ -123,5 +129,99 @@ describe("runCli", () => {
     expect(c.stdout).toContain("cleared cache for workflow 'multi-plan'");
     expect(existsSync(join(cacheDir, workflowCacheFileName(key)))).toBe(false);
     expect(existsSync(join(cacheDir, workflowCacheFileName(other)))).toBe(true);
+  });
+
+  it("resumes a headless workflow run from disk cache", async () => {
+    const c = capture();
+    const agentless = {
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [{ id: "split", kind: "distributor", items: ["alpha"] }],
+        },
+        {
+          id: "gate",
+          title: "Gate",
+          steps: [
+            {
+              id: "gate",
+              kind: "gate",
+              dependsOn: ["split"],
+              condition: { step: "split", contains: "alpha" },
+            },
+          ],
+        },
+        {
+          id: "tail",
+          title: "Tail",
+          steps: [{ id: "tail", kind: "distributor", items: ["beta"] }],
+        },
+      ],
+    };
+    writeFileSync(
+      join(c.io.cwd, "steamtrain.json"),
+      JSON.stringify({ workflows: { agentless: agentless } }),
+    );
+
+    const first = await runCli(["workflow", "run", "agentless", "--input", "task"], c.io);
+    expect(first).toBe(0);
+    const afterFirst = c.stdout.length;
+
+    const resumed = await runCli(["workflow", "run", "agentless", "--input", "task"], c.io);
+    expect(resumed).toBe(0);
+    expect(c.stdout.slice(afterFirst)).toContain("(cached)");
+  });
+
+  it("runs fresh after --fresh deletes the on-disk cache", async () => {
+    const c = capture();
+    const agentless = {
+      phases: [
+        {
+          id: "only",
+          title: "Only",
+          steps: [{ id: "split", kind: "distributor", items: ["one"] }],
+        },
+      ],
+    };
+    writeFileSync(
+      join(c.io.cwd, "steamtrain.json"),
+      JSON.stringify({ workflows: { agentless: agentless } }),
+    );
+
+    await runCli(["workflow", "run", "agentless", "--input", "task"], c.io);
+    const cacheDir = join(c.io.cwd, WORKFLOW_CACHE_DIR);
+    const key = workflowCacheKey("agentless", "task", c.io.cwd, agentless as never);
+    expect(existsSync(join(cacheDir, workflowCacheFileName(key)))).toBe(true);
+
+    const afterFirst = c.stdout.length;
+    const code = await runCli(["workflow", "run", "agentless", "--input", "task", "--fresh"], c.io);
+    expect(code).toBe(0);
+    expect(c.stdout.slice(afterFirst)).not.toContain("(cached)");
+  });
+
+  it("tolerates corrupt on-disk cache files", async () => {
+    const c = capture();
+    const agentless = {
+      phases: [
+        {
+          id: "only",
+          title: "Only",
+          steps: [{ id: "split", kind: "distributor", items: ["one"] }],
+        },
+      ],
+    };
+    writeFileSync(
+      join(c.io.cwd, "steamtrain.json"),
+      JSON.stringify({ workflows: { agentless: agentless } }),
+    );
+    const cacheDir = join(c.io.cwd, WORKFLOW_CACHE_DIR);
+    const key = workflowCacheKey("agentless", "task", c.io.cwd, agentless as never);
+    mkdirSync(cacheDir, { recursive: true });
+    writeFileSync(join(cacheDir, workflowCacheFileName(key)), "{ corrupt", "utf8");
+
+    const code = await runCli(["workflow", "run", "agentless", "--input", "task"], c.io);
+    expect(code).toBe(0);
+    expect(c.stdout).not.toContain("(cached)");
   });
 });

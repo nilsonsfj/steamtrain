@@ -168,8 +168,10 @@ The TUI starts in workflow mode. Pick one with `↑/↓`, type the input, and
 **Enter** to launch. The phase -> step tree streams live; `↑/↓` drills into a
 step's output. `Esc` cancels a run (and, once stopped, backs out to the picker).
 Re-running **resumes**: completed steps replay from `.steamtrain/cache/` (and an
-in-session cache) instead of running again. Use `steamtrain workflow run … --fresh`
-to ignore the on-disk cache, or `steamtrain workflow cache clear` to delete it.
+in-session cache) instead of running again. The cache is keyed by workflow spec,
+input, and cwd — editing a workflow invalidates stale entries automatically.
+Use `steamtrain workflow run … --fresh` to ignore the on-disk cache, or
+`steamtrain workflow cache clear` to delete it.
 
 Workflow documentation:
 

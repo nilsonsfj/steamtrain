@@ -170,6 +170,21 @@ export async function* runWorkflow(
         results.set(step.id, cached);
         allResults.push(cached);
         if (!cached.ok) phaseOk = false;
+        if (cached.gate) {
+          channel.push({
+            kind: "gate_evaluated",
+            phaseId: phase.id,
+            stepId: step.id,
+            passed: cached.gate.passed,
+            target: cached.target,
+            onFalse: cached.gate.onFalse,
+            ts: Date.now(),
+          });
+          if (!cached.gate.passed) {
+            const onFalse = cached.gate.onFalse;
+            if (onFalse === "fail" || onFalse === "stop") stopAfterPhase = true;
+          }
+        }
         channel.push({
           kind: "step_done",
           phaseId: phase.id,

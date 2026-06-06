@@ -44,6 +44,7 @@ export {
   workflowCacheKey,
   workflowCacheFileName,
   hashWorkflowCacheInput,
+  hashWorkflowSpec,
   loadWorkflowCache,
   saveWorkflowCache,
   clearWorkflowCache,

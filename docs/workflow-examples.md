@@ -415,7 +415,7 @@ steamtrain workflow run my-workflow --input "small test" --json
 1. start a workflow
 2. cancel with `Esc` mid-run
 3. re-run with the **same** input → cached steps replay
-4. change the input → cache clears, fresh run
+4. change the input → a different cache file is used (old file remains on disk)
 
 ---
 

@@ -116,14 +116,21 @@ export function App({ config, configSource, configWarning }: AppProps) {
       abortRef.current = ac;
 
       void (async () => {
+        const spec = orchestrator.listWorkflows()[name];
+        if (!spec) {
+          setWfNotice(`unknown workflow '${name}'`);
+          setRunning(false);
+          return;
+        }
         const store = cacheStoreRef.current;
-        const key = workflowCacheKey(name, input, process.cwd());
+        const cwd = process.cwd();
+        const key = workflowCacheKey(name, input, cwd, spec);
         try {
           if (!opts?.reuseMemoryCache) {
             workflowCacheRef.current = await store.load(key);
           }
           const cache = workflowCacheRef.current;
-          for await (const event of orchestrator.runWorkflow(name, input, ac.signal, cache)) {
+          for await (const event of orchestrator.runWorkflow(name, input, ac.signal, cache, cwd)) {
             if (!mountedRef.current) return;
             wfDispatch({ type: "event", event });
             if (event.kind === "step_done") {
@@ -326,7 +333,7 @@ function hint(mode: Mode, wfStarted: boolean, running: boolean): string {
   if (mode === "workflow") {
     return wfStarted
       ? "↑/↓ step · Enter resume · Esc back · Tab switch mode · Ctrl+C quit"
-      : "↑/↓ pick · Enter run · Tab switch mode · Ctrl+C quit";
+      : "↑/↓ pick · Enter run (resumes from disk) · Tab switch mode · Ctrl+C quit";
   }
   return "Enter dispatch · Tab switch mode · Esc cancel · Ctrl+C quit";
 }
