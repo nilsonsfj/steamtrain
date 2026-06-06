@@ -3,11 +3,13 @@ export {
   type WorkspaceEntry,
   type WorkspaceFile,
   type WorkspaceId,
+  RESERVED_WORKSPACE_ID,
   workspaceById,
   workspaceEntrySchema,
   workspaceFileSchema,
   workspaceIds,
   workspaceLabel,
+  isReservedWorkspaceId,
 } from "./types";
 export { DEFAULT_WORKSPACE_CONFIG } from "./defaults";
 export {

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type WorkflowSpec, validateWorkflow } from "../workflow/types";
+import { WORKSPACE_CONFIG_FILENAME } from "../workspace";
 import { DEFAULT_CONFIG } from "./defaults";
 import { type ConfigFile, type SteamtrainConfig, configFileSchema } from "./types";
 
@@ -32,12 +33,16 @@ export function loadConfig(cwd: string = process.cwd()): LoadedConfig {
     };
   }
 
+  const legacyTasks = legacyTasksWarning(parsed);
   const result = configFileSchema.safeParse(parsed);
   if (!result.success) {
     return {
       config: DEFAULT_CONFIG,
       source: "built-in defaults",
-      warning: `invalid ${CONFIG_FILENAME}: ${result.error.issues[0]?.message ?? "schema error"}`,
+      warning: joinWarnings(
+        legacyTasks,
+        `invalid ${CONFIG_FILENAME}: ${result.error.issues[0]?.message ?? "schema error"}`,
+      ),
     };
   }
 
@@ -45,8 +50,19 @@ export function loadConfig(cwd: string = process.cwd()): LoadedConfig {
   return {
     config,
     source: path,
-    warning: warnings.length > 0 ? warnings.join("; ") : undefined,
+    warning: joinWarnings(legacyTasks, warnings.length > 0 ? warnings.join("; ") : undefined),
   };
+}
+
+function legacyTasksWarning(parsed: unknown): string | undefined {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  if (!("tasks" in parsed)) return undefined;
+  return `'tasks' in ${CONFIG_FILENAME} is no longer supported; move workspace presets to ~/.steamtrain/${WORKSPACE_CONFIG_FILENAME}`;
+}
+
+function joinWarnings(...parts: Array<string | undefined>): string | undefined {
+  const text = parts.filter(Boolean).join("; ");
+  return text || undefined;
 }
 
 export function mergeConfig(

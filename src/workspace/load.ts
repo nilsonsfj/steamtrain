@@ -6,6 +6,7 @@ import {
   type WorkspaceConfig,
   type WorkspaceEntry,
   type WorkspaceFile,
+  isReservedWorkspaceId,
   workspaceFileSchema,
 } from "./types";
 
@@ -52,9 +53,32 @@ export function loadWorkspaceConfig(home: string = homedir()): LoadedWorkspaceCo
     };
   }
 
-  const duplicateWarning = duplicateWorkspaceIdWarning(result.data.workspaces);
-  const config = mergeWorkspaceConfig(DEFAULT_WORKSPACE_CONFIG, result.data);
-  return { config, source: path, warning: duplicateWarning };
+  const { workspaces, warning: reservedWarning } = dropReservedWorkspaceIds(result.data.workspaces);
+  const duplicateWarning = duplicateWorkspaceIdWarning(workspaces);
+  const config = mergeWorkspaceConfig(DEFAULT_WORKSPACE_CONFIG, { workspaces });
+  return {
+    config,
+    source: path,
+    warning: joinWarnings(reservedWarning, duplicateWarning),
+  };
+}
+
+function dropReservedWorkspaceIds(entries: WorkspaceEntry[] | undefined): {
+  workspaces?: WorkspaceEntry[];
+  warning?: string;
+} {
+  if (!entries || entries.length === 0) return {};
+  const reserved = entries.filter((entry) => isReservedWorkspaceId(entry.id));
+  if (reserved.length === 0) return { workspaces: entries };
+  return {
+    workspaces: entries.filter((entry) => !isReservedWorkspaceId(entry.id)),
+    warning: `reserved workspace id(s) ignored: ${reserved.map((entry) => entry.id).join(", ")}`,
+  };
+}
+
+function joinWarnings(...parts: Array<string | undefined>): string | undefined {
+  const text = parts.filter(Boolean).join("; ");
+  return text || undefined;
 }
 
 function duplicateWorkspaceIdWarning(entries: WorkspaceEntry[] | undefined): string | undefined {

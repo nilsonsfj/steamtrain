@@ -3,6 +3,13 @@ import type { AgentId } from "../types/events";
 
 const agentId = z.enum(["claude", "opencode"]);
 
+/** Reserved for the built-in workflow mode; cannot be used as a workspace id. */
+export const RESERVED_WORKSPACE_ID = "workflow";
+
+export function isReservedWorkspaceId(id: string): boolean {
+  return id === RESERVED_WORKSPACE_ID;
+}
+
 export const workspaceEntrySchema = z.object({
   id: z.string().min(1),
   /** Display label in the mode bar; defaults to `id`. */

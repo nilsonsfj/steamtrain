@@ -66,6 +66,30 @@ describe("loadWorkspaceConfig", () => {
     expect(loaded.config.workspaces.find((w) => w.id === "plan")?.model).toBe("claude-opus-4-8");
   });
 
+  it("ignores reserved workflow workspace id with a warning", () => {
+    const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
+    const dir = join(home, ".steamtrain");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, WORKSPACE_CONFIG_FILENAME),
+      JSON.stringify({
+        workspaces: [
+          { id: "workflow", agent: "claude", model: "haiku" },
+          { id: "scratch", agent: "opencode", model: "openai/gpt-5.4-mini" },
+        ],
+      }),
+    );
+
+    const loaded = loadWorkspaceConfig(home);
+    expect(loaded.warning).toMatch(/reserved workspace id/);
+    expect(loaded.config.workspaces.map((w) => w.id)).toEqual([
+      "plan",
+      "implement",
+      "review",
+      "scratch",
+    ]);
+  });
+
   it("falls back to defaults with a warning on invalid json", () => {
     const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
     const dir = join(home, ".steamtrain");

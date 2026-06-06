@@ -1,11 +1,11 @@
 import type { WorkspaceConfig } from "../workspace";
-import { workspaceIds } from "../workspace";
+import { isReservedWorkspaceId, workspaceIds } from "../workspace";
 
 /** `workflow` or a workspace id from `~/.steamtrain/workspace.json`. */
 export type Mode = "workflow" | (string & {});
 
 export function buildModes(workspaces: WorkspaceConfig): readonly Mode[] {
-  return ["workflow", ...workspaceIds(workspaces)];
+  return ["workflow", ...workspaceIds(workspaces).filter((id) => !isReservedWorkspaceId(id))];
 }
 
 export function isWorkspaceMode(mode: Mode): mode is string {

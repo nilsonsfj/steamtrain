@@ -40,4 +40,21 @@ describe("loadConfig", () => {
     expect(loaded.config.workflows?.good).toBeDefined();
     expect(loaded.config.workflows?.bad).toBeUndefined();
   });
+
+  it("warns when legacy tasks key is present", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "steamtrain-config-"));
+    writeFileSync(
+      join(cwd, CONFIG_FILENAME),
+      JSON.stringify({
+        tasks: {
+          plan: { agent: "claude", model: "claude-sonnet-4-6" },
+        },
+      }),
+    );
+
+    const loaded = loadConfig(cwd);
+    expect(loaded.warning).toMatch(/'tasks' in steamtrain\.json is no longer supported/);
+    expect(loaded.warning).toMatch(/~\/\.steamtrain\/workspace\.json/);
+    expect(loaded.source).toBe("built-in defaults");
+  });
 });

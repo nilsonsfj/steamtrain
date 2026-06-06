@@ -39,8 +39,8 @@ You'll see a steam-train banner, then a preflight **doctor** panel checking that
 **Keys:** `Enter` run · `↑/↓` pick workflow or inspect steps · `Tab` cycle mode ·
 `Esc` cancel/back · `Ctrl+C` quit.
 
-`steamtrain` opens on **workflow** mode. `Tab` cycles to one-shot `plan`,
-`implement`, and `review` task modes.
+`steamtrain` opens on **workflow** mode. `Tab` cycles through your configured
+workspace presets (defaults: `plan`, `implement`, `review`).
 
 ### Workflow CLI
 
@@ -77,9 +77,10 @@ src/
 │  ├─ adapter.ts       AgentAdapter interface + shared process→events driver
 │  ├─ claude.ts        ClaudeCodeAdapter + createClaudeMapper
 │  └─ opencode.ts      OpenCodeAdapter + createOpenCodeMapper
-├─ config/        Task-type → { agent, model } map (+ steamtrain.json overrides)
+├─ config/        Project config: workflows, binaries, timeouts (steamtrain.json)
+├─ workspace/     User workspace presets: { id, agent, model } (~/.steamtrain/workspace.json)
 ├─ doctor/        Preflight: resolve binary, run --version, classify readiness
-├─ orchestrator/  Routes a task type to the right adapter+model; gates on health
+├─ orchestrator/  Routes workspace ids and workflows to adapters; gates on health
 ├─ workflow/      Declarative multi-agent workflows: spec + zod schema, a bounded-
 │                 parallel engine, on-disk step cache (`.steamtrain/cache/`), and
 │                 bundled specs (the layer above orchestrator)
@@ -125,21 +126,52 @@ once on start and `tool_result` once on completion (deduped by call id).
 
 ---
 
-## Configuration: workflows and task defaults
+## Configuration
 
-steamtrain is centered on workflows, but still ships one-shot task defaults for
-`plan`, `implement`, and `review`. Defaults live in `src/config/defaults.ts`;
-override any subset with a `steamtrain.json` in the working directory:
+steamtrain splits configuration across two files:
+
+| File | Scope | Contents |
+| ---- | ----- | -------- |
+| `~/.steamtrain/workspace.json` | user (global) | One-shot **workspace presets** — Tab modes like `plan`, `implement`, `review` |
+| `./steamtrain.json` | project (cwd) | Workflows, binary paths, timeouts, concurrency |
+
+### Workspace presets (`~/.steamtrain/workspace.json`)
+
+Built-in defaults live in `src/workspace/defaults.ts` (`plan`, `implement`,
+`review`). Override or extend them in your home directory:
 
 ```jsonc
 {
-  "tasks": {
-    "plan":      { "agent": "claude",   "model": "claude-sonnet-4-6" },
-    "implement": { "agent": "opencode", "model": "openai/gpt-5.4-mini" },
-    "review":    { "agent": "claude",   "model": "claude-opus-4-8" }
-  },
+  "workspaces": [
+    { "id": "plan",      "agent": "claude",   "model": "claude-sonnet-4-6" },
+    { "id": "implement", "agent": "opencode", "model": "openai/gpt-5.4-mini" },
+    { "id": "review",    "agent": "claude",   "model": "claude-opus-4-8" },
+    { "id": "debug",     "label": "Debug", "agent": "opencode", "model": "openai/gpt-5.4-mini" }
+  ]
+}
+```
+
+- **`id`** — stable key used for dispatch; shown in the mode bar unless `label` is set.
+- **`label`** — optional display name in the mode bar.
+- **`agent`** / **`model`** — same formats as workflow steps (see below).
+- The id `workflow` is reserved for the built-in workflow mode.
+
+Entries merge by `id` onto the built-in defaults (override in place, append new
+ids). A missing or invalid file falls back to built-in workspace defaults with a
+warning in the stream.
+
+> **Migration:** older `steamtrain.json` files used a `"tasks"` key for these
+> presets. That key is no longer supported — move them to
+> `~/.steamtrain/workspace.json`. steamtrain warns if `"tasks"` is still present.
+
+### Project config (`steamtrain.json`)
+
+Override any subset in the working directory:
+
+```jsonc
+{
   "binaries": { "opencode": "/opt/homebrew/bin/opencode" }, // optional path overrides
-  "timeoutMs": 300000,                                      // per-task (and per-step) kill timeout
+  "timeoutMs": 300000,                                      // per-run kill timeout (workspaces + workflow steps)
   "maxConcurrency": 3                                       // parallel steps per workflow phase (≤ 16)
   // "workflows": { … }                                     // see “Workflows” below
 }
