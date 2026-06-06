@@ -9,9 +9,12 @@ import {
   type GateCondition,
   MAX_CONCURRENCY,
   type StepResult,
+  type WorkerStep,
+  type WorkflowItem,
   type WorkflowSpec,
   type WorkflowStep,
   isAgentBackedStep,
+  parseForEachSource,
   validateWorkflow,
   workflowStepKind,
 } from "./types";
@@ -110,6 +113,31 @@ export async function* runWorkflow(
       // Cache hit → replay without spawning (resume).
       const cached = cache.get(step.id);
       if (cached) {
+        for (const child of cached.childResults ?? []) {
+          outputs.set(child.stepId, child.output);
+          results.set(child.stepId, child);
+          allResults.push(child);
+          channel.push({
+            kind: "step_start",
+            phaseId: phase.id,
+            stepId: child.stepId,
+            blockKind: workflowStepKind(step),
+            agent: agentBacked?.agent,
+            model: agentBacked?.model,
+            cwd: "cwd" in step ? step.cwd : undefined,
+            parentStepId: step.id,
+            item: child.item,
+            ts: Date.now(),
+          });
+          channel.push({
+            kind: "step_done",
+            phaseId: phase.id,
+            stepId: child.stepId,
+            result: child,
+            cached: true,
+            ts: Date.now(),
+          });
+        }
         outputs.set(step.id, cached.output);
         results.set(step.id, cached);
         allResults.push(cached);
@@ -131,17 +159,22 @@ export async function* runWorkflow(
           input: ctx.input,
           outputs,
           results,
+          cache,
           deps,
           signal,
         },
-        (event) => {
-          channel.push({
-            kind: "step_event",
-            phaseId: phase.id,
-            stepId: step.id,
-            event,
-            ts: Date.now(),
-          });
+        {
+          pushAgentEvent: (stepId, event) => {
+            channel.push({
+              kind: "step_event",
+              phaseId: phase.id,
+              stepId,
+              event,
+              ts: Date.now(),
+            });
+          },
+          pushWorkflowEvent: (event) => channel.push(event),
+          phaseId: phase.id,
         },
       );
 
@@ -158,6 +191,11 @@ export async function* runWorkflow(
       }
 
       const { result } = execution;
+      for (const child of execution.childResults ?? []) {
+        outputs.set(child.stepId, child.output);
+        results.set(child.stepId, child);
+        allResults.push(child);
+      }
       outputs.set(step.id, result.output);
       results.set(step.id, result);
       if (result.ok) cache.set(step.id, result);
@@ -200,27 +238,35 @@ interface ExecuteContext {
   input: string;
   outputs: Map<string, string>;
   results: Map<string, StepResult>;
+  cache: Map<string, StepResult>;
   deps: WorkflowDeps;
   signal?: AbortSignal;
 }
 
 interface ExecutionOutcome {
   result: StepResult;
+  childResults?: StepResult[];
   gate?: { passed: boolean; target?: string; onFalse?: "continue" | "fail" | "stop" };
   stop?: boolean;
 }
 
-type StepEventSink = (event: AgentEvent) => void;
+interface ExecuteHooks {
+  phaseId: string;
+  pushAgentEvent: (stepId: string, event: AgentEvent) => void;
+  pushWorkflowEvent: (event: WorkflowEvent) => void;
+}
 
 async function executeStep(
   step: WorkflowStep,
   ctx: ExecuteContext,
-  pushAgentEvent: StepEventSink,
+  hooks: ExecuteHooks,
 ): Promise<ExecutionOutcome> {
   const kind = workflowStepKind(step);
 
   if (kind === "worker" || kind === "processor") {
-    return { result: await executeAgentStep(step as AgentBackedWorkflowStep, ctx, pushAgentEvent) };
+    const worker = step as WorkerStep & AgentBackedWorkflowStep;
+    if (worker.forEach) return executeForEachStep(worker, ctx, hooks);
+    return { result: await executeAgentStep(worker, ctx, hooks, step.id) };
   }
 
   if (kind === "distributor") {
@@ -240,13 +286,13 @@ async function executeStep(
       };
     }
     if (isAgentBackedStep(step)) {
-      return { result: await executeAgentStep(step, ctx, pushAgentEvent) };
+      return { result: await executeAgentStep(step, ctx, hooks, step.id) };
     }
   }
 
   if (kind === "consolidator" && step.kind === "consolidator") {
     if (isAgentBackedStep(step)) {
-      return { result: await executeAgentStep(step, ctx, pushAgentEvent) };
+      return { result: await executeAgentStep(step, ctx, hooks, step.id) };
     }
     const started = Date.now();
     const output = step.prompt
@@ -297,13 +343,16 @@ async function executeStep(
 async function executeAgentStep(
   step: AgentBackedWorkflowStep,
   ctx: ExecuteContext,
-  pushAgentEvent: StepEventSink,
+  hooks: ExecuteHooks,
+  stepId: string,
+  item?: WorkflowItem,
 ): Promise<StepResult> {
   const adapter = ctx.deps.createAdapter(step.agent, ctx.deps.binaries?.[step.agent]);
   const prompt = renderPrompt(step.prompt, {
     input: ctx.input,
     outputs: ctx.outputs,
     results: ctx.results,
+    item,
   });
   const stepCwd = step.cwd ? resolvePath(ctx.deps.cwd, step.cwd) : ctx.deps.cwd;
   const started = Date.now();
@@ -324,7 +373,7 @@ async function executeAgentStep(
       timeoutMs: ctx.deps.timeoutMs,
       signal: ctx.signal,
     })) {
-      pushAgentEvent(event);
+      hooks.pushAgentEvent(stepId, event);
       if (event.kind === "text_delta") {
         if (!event.thinking) streamedText += event.text;
       } else if (event.kind === "result") {
@@ -352,13 +401,115 @@ async function executeAgentStep(
     : errorMessage || finalText || streamedText || (cancelled ? "cancelled" : "");
 
   return {
-    stepId: step.id,
+    stepId,
     ok,
     output,
+    item,
     error: ok ? undefined : (errorMessage ?? (cancelled ? "cancelled" : "failed")),
     durationMs: Date.now() - started,
     costUsd,
   };
+}
+
+async function executeForEachStep(
+  step: WorkerStep & AgentBackedWorkflowStep,
+  ctx: ExecuteContext,
+  hooks: ExecuteHooks,
+): Promise<ExecutionOutcome> {
+  const started = Date.now();
+  const sourceStepId = parseForEachSource(step.forEach ?? "");
+  const source = sourceStepId ? ctx.results.get(sourceStepId) : undefined;
+  const values = source?.items ?? splitItemsFromOutput(source?.output);
+
+  if (!sourceStepId || !source) {
+    return {
+      result: {
+        stepId: step.id,
+        ok: false,
+        output: `forEach source '${step.forEach}' is unavailable`,
+        error: `forEach source '${step.forEach}' is unavailable`,
+        durationMs: Date.now() - started,
+      },
+    };
+  }
+
+  const childResults: StepResult[] = [];
+  const limit = Math.min(Math.max(1, ctx.deps.maxConcurrency), MAX_CONCURRENCY);
+  await runPool(
+    values.map((value, index) => ({
+      value,
+      item: { sourceStepId, index, value },
+      stepId: `${step.id}[${index}]`,
+    })),
+    limit,
+    async ({ value: _value, item, stepId }) => {
+      hooks.pushWorkflowEvent({
+        kind: "step_start",
+        phaseId: hooks.phaseId,
+        stepId,
+        blockKind: workflowStepKind(step),
+        agent: step.agent,
+        model: step.model,
+        cwd: step.cwd,
+        parentStepId: step.id,
+        item,
+        ts: Date.now(),
+      });
+
+      const cached = ctx.cache.get(stepId);
+      const result = cached
+        ? { ...cached, stepId, parentStepId: step.id, item }
+        : {
+            ...(await executeAgentStep(step, ctx, hooks, stepId, item)),
+            stepId,
+            parentStepId: step.id,
+            item,
+          };
+
+      ctx.outputs.set(stepId, result.output);
+      ctx.results.set(stepId, result);
+      if (result.ok) ctx.cache.set(stepId, result);
+      childResults[item.index] = result;
+
+      hooks.pushWorkflowEvent({
+        kind: "step_done",
+        phaseId: hooks.phaseId,
+        stepId,
+        result,
+        cached: Boolean(cached),
+        ts: Date.now(),
+      });
+    },
+    ctx.signal,
+  );
+
+  const compactChildren = childResults.filter(Boolean);
+  const ok = compactChildren.length === values.length && compactChildren.every((child) => child.ok);
+  const output = compactChildren
+    .map((child) => `--- ${child.stepId} (${child.item?.value ?? "item"}) ---\n${child.output}`)
+    .join("\n\n");
+
+  return {
+    result: {
+      stepId: step.id,
+      ok,
+      output,
+      items: values,
+      childResults: compactChildren,
+      error: ok ? undefined : "one or more fan-out items failed",
+      durationMs: Date.now() - started,
+    },
+    childResults: compactChildren,
+  };
+}
+
+function splitItemsFromOutput(output: string | undefined): string[] {
+  return output
+    ? output
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+    : [];
 }
 
 function consolidateOutputs(

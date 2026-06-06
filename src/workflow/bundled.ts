@@ -174,8 +174,63 @@ const bugHunt: WorkflowSpec = {
   ],
 };
 
+const targetSweep: WorkflowSpec = {
+  name: "target-sweep",
+  description:
+    "Split a request into target areas, run one processor per target, then consolidate the findings.",
+  phases: [
+    {
+      id: "split",
+      title: "Distribute target areas",
+      steps: [
+        {
+          id: "targets",
+          kind: "distributor",
+          items: [
+            "implementation concerns for {{input}}",
+            "test coverage concerns for {{input}}",
+            "documentation and rollout concerns for {{input}}",
+          ],
+        },
+      ],
+    },
+    {
+      id: "process",
+      title: "Process one target per generated agent run",
+      steps: [
+        {
+          id: "sweep-each",
+          kind: "processor",
+          agent: "claude",
+          model: "claude-sonnet-4-6",
+          dependsOn: ["targets"],
+          forEach: "steps.targets.items",
+          prompt:
+            "Analyze this target area for the task. Be concrete and concise.\n\nTarget {{item.index}} from {{item.sourceStepId}}:\n{{item}}\n\nTask: {{input}}",
+        },
+      ],
+    },
+    {
+      id: "report",
+      title: "Consolidate target outputs",
+      steps: [
+        {
+          id: "report",
+          kind: "consolidator",
+          agent: "claude",
+          model: "claude-sonnet-4-6",
+          dependsOn: ["sweep-each"],
+          prompt:
+            "Merge the per-target analyses below into one prioritized report. Deduplicate overlap and keep concrete action items.\n\n{{steps.sweep-each.output}}",
+        },
+      ],
+    },
+  ],
+};
+
 /** name → spec. Merged under any user `workflows` from steamtrain.json. */
 export const BUNDLED_WORKFLOWS: Record<string, WorkflowSpec> = {
   [multiPlan.name]: multiPlan,
   [bugHunt.name]: bugHunt,
+  [targetSweep.name]: targetSweep,
 };

@@ -129,6 +129,48 @@ describe("workflowReducer", () => {
     expect(step?.activity).toBe("gate passed → ready");
   });
 
+  it("tracks generated fan-out child steps", () => {
+    const child: StepResult = {
+      stepId: "work[0]",
+      parentStepId: "work",
+      item: { sourceStepId: "split", index: 0, value: "api" },
+      ok: true,
+      output: "done api",
+      durationMs: 10,
+    };
+    const state = reduceAll([
+      { kind: "workflow_start", name: "w", phaseCount: 1, stepCount: 1, ts: 0 },
+      { kind: "phase_start", phaseId: "p1", title: "P1", index: 0, stepCount: 1, ts: 0 },
+      {
+        kind: "step_start",
+        phaseId: "p1",
+        stepId: "work",
+        blockKind: "processor",
+        agent: AGENT,
+        model: "m",
+        ts: 0,
+      },
+      {
+        kind: "step_start",
+        phaseId: "p1",
+        stepId: "work[0]",
+        blockKind: "processor",
+        agent: AGENT,
+        model: "m",
+        parentStepId: "work",
+        item: { sourceStepId: "split", index: 0, value: "api" },
+        ts: 0,
+      },
+      { kind: "step_done", phaseId: "p1", stepId: "work[0]", result: child, cached: false, ts: 0 },
+    ]);
+
+    expect(state.phases[0]?.stepCount).toBe(2);
+    const generated = flattenSteps(state).find((entry) => entry.step.stepId === "work[0]")?.step;
+    expect(generated?.parentStepId).toBe("work");
+    expect(generated?.item).toEqual({ sourceStepId: "split", index: 0, value: "api" });
+    expect(generated?.status).toBe("done");
+  });
+
   it("resets to the initial state", () => {
     const seeded = reduceAll([
       { kind: "workflow_start", name: "w", phaseCount: 0, stepCount: 0, ts: 0 },

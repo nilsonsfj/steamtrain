@@ -103,6 +103,7 @@ describe("workflowSpecSchema", () => {
               agent: "claude",
               model: "m",
               prompt: "{{steps.split.items}}",
+              forEach: "steps.split.items",
               dependsOn: ["split"],
             },
           ],
@@ -215,5 +216,71 @@ describe("validateWorkflow dependency rules", () => {
     const res = validateWorkflow(spec);
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/not in an earlier phase/);
+  });
+
+  it("rejects forEach references that are malformed, unknown, or same-phase", () => {
+    const malformed: WorkflowSpec = {
+      name: "malformed",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            {
+              id: "work",
+              kind: "processor",
+              agent: "claude",
+              model: "m",
+              prompt: "x",
+              forEach: "split",
+            },
+          ],
+        },
+      ],
+    };
+    expect(validateWorkflow(malformed).error).toMatch(/invalid forEach/);
+
+    const unknown: WorkflowSpec = {
+      name: "unknown",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            {
+              id: "work",
+              kind: "processor",
+              agent: "claude",
+              model: "m",
+              prompt: "x",
+              forEach: "steps.missing.items",
+            },
+          ],
+        },
+      ],
+    };
+    expect(validateWorkflow(unknown).error).toMatch(/unknown step/);
+
+    const samePhase: WorkflowSpec = {
+      name: "same",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            { id: "split", kind: "distributor", items: ["a"] },
+            {
+              id: "work",
+              kind: "processor",
+              agent: "claude",
+              model: "m",
+              prompt: "x",
+              forEach: "steps.split.items",
+            },
+          ],
+        },
+      ],
+    };
+    expect(validateWorkflow(samePhase).error).toMatch(/not in an earlier phase/);
   });
 });

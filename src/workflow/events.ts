@@ -1,5 +1,5 @@
 import type { AgentEvent, AgentId } from "../types/events";
-import type { GateStep, StepResult, WorkflowStepKind } from "./types";
+import type { GateStep, StepResult, WorkflowItem, WorkflowStepKind } from "./types";
 
 /**
  * The workflow-level event stream the TUI consumes. It wraps the per-step
@@ -33,6 +33,10 @@ export interface StepStartEvent {
   agent?: AgentId;
   model?: string;
   cwd?: string;
+  /** Parent dynamic `forEach` step, when this is a generated child run. */
+  parentStepId?: string;
+  /** Work item assigned to this generated child run. */
+  item?: WorkflowItem;
   ts: number;
 }
 
