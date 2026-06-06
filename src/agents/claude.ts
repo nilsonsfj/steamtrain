@@ -14,6 +14,14 @@ import { stringifyContent } from "./util";
 
 const AGENT: AgentId = "claude";
 
+/** Known Claude Code model ids (used by `/model` and autocomplete). */
+export const CLAUDE_MODELS = [
+  "claude-sonnet-4-6",
+  "claude-opus-4-8",
+  "claude-haiku-4-5",
+  "haiku",
+] as const;
+
 /**
  * Build a mapper for one Claude Code run.
  *

@@ -5,6 +5,14 @@ import { stringifyContent } from "./util";
 
 const AGENT: AgentId = "opencode";
 
+/** Known OpenCode model ids (provider/model; used by `/model` and autocomplete). */
+export const OPENCODE_MODELS = [
+  "openai/gpt-5.4-mini",
+  "openai/gpt-5.4",
+  "anthropic/claude-sonnet-4-6",
+  "anthropic/claude-opus-4-8",
+] as const;
+
 const TOOL_RUNNING = new Set(["pending", "running", "queued", "in_progress"]);
 const TOOL_DONE = new Set(["completed", "done", "success", "finished"]);
 const TOOL_FAILED = new Set(["error", "failed", "cancelled", "aborted"]);

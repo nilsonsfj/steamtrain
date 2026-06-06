@@ -1,9 +1,17 @@
 import { join } from "node:path";
 import { Box, Text, useApp, useInput } from "ink";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  type SlashCommandContext,
+  autocompleteSlashCommand,
+  executeSlashCommand,
+  isSlashCommandInput,
+  listSlashCommands,
+} from "../commands";
 import type { SteamtrainConfig } from "../config";
 import { type DoctorResult, runDoctor } from "../doctor";
 import { Orchestrator } from "../orchestrator";
+import { STEAMTRAIN_VERSION } from "../version";
 import {
   type StepResult,
   WORKFLOW_CACHE_DIR,
@@ -11,7 +19,7 @@ import {
   persistWorkflowStepDone,
   workflowCacheKey,
 } from "../workflow";
-import type { WorkspaceConfig, WorkspaceEntry } from "../workspace";
+import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 import { workspaceById, workspaceLabel } from "../workspace";
 import { EventStream } from "./EventStream";
 import { PromptInput } from "./PromptInput";
@@ -53,7 +61,9 @@ export function App({
   const [phase, setPhase] = useState<Phase>("banner");
   const [doctor, setDoctor] = useState<DoctorResult[] | null>(null);
   const [mode, setMode] = useState<Mode>("workflow");
+  const [runtimeWorkspaces, setRuntimeWorkspaces] = useState<WorkspaceConfig>(workspaces);
   const [value, setValue] = useState("");
+  const [commandSuggestions, setCommandSuggestions] = useState<readonly string[]>([]);
   const [running, setRunning] = useState(false);
   const [transcript, dispatch] = useReducer(transcriptReducer, initialTranscript);
 
@@ -69,12 +79,31 @@ export function App({
   const workflowCacheRef = useRef<Map<string, StepResult>>(new Map());
   const cacheStoreRef = useRef(createWorkflowCacheStore(join(process.cwd(), WORKFLOW_CACHE_DIR)));
 
-  const modes = useMemo(() => buildModes(workspaces), [workspaces]);
-  const workspaceMap = useMemo(() => workspaceById(workspaces), [workspaces]);
+  const modes = useMemo(() => buildModes(runtimeWorkspaces), [runtimeWorkspaces]);
+  const workspaceMap = useMemo(() => workspaceById(runtimeWorkspaces), [runtimeWorkspaces]);
+
+  const updateWorkspace = useCallback((id: WorkspaceId, patch: Partial<WorkspaceEntry>) => {
+    setRuntimeWorkspaces((prev) => ({
+      workspaces: prev.workspaces.map((w) => (w.id === id ? { ...w, ...patch } : w)),
+    }));
+  }, []);
+
+  const slashCtx = useMemo<SlashCommandContext>(
+    () => ({
+      mode,
+      modes,
+      workspaces: runtimeWorkspaces,
+      workspaceMap,
+      updateWorkspace,
+      setMode,
+      version: STEAMTRAIN_VERSION,
+    }),
+    [mode, modes, runtimeWorkspaces, workspaceMap, updateWorkspace],
+  );
 
   const orchestrator = useMemo(
-    () => new Orchestrator(config, workspaces, doctor ?? []),
-    [config, workspaces, doctor],
+    () => new Orchestrator(config, runtimeWorkspaces, doctor ?? []),
+    [config, runtimeWorkspaces, doctor],
   );
 
   const workflowEntries = useMemo(
@@ -189,10 +218,36 @@ export function App({
     [orchestrator],
   );
 
+  const handleValueChange = useCallback((next: string) => {
+    setValue(next);
+    setCommandSuggestions([]);
+  }, []);
+
+  const handleTab = useCallback(() => {
+    if (!isSlashCommandInput(value)) return;
+    const result = autocompleteSlashCommand(value, listSlashCommands(), slashCtx);
+    if (!result) return;
+    setValue(result.value);
+    setCommandSuggestions(result.suggestions);
+  }, [value, slashCtx]);
+
   const handleSubmit = useCallback(
     (raw: string) => {
       const prompt = raw.trim();
       if (running) return;
+
+      if (isSlashCommandInput(prompt)) {
+        const result = executeSlashCommand(prompt, slashCtx);
+        if (result.handled) {
+          if (result.clearInput) setValue("");
+          setCommandSuggestions([]);
+          for (const notice of result.notices ?? []) {
+            dispatch({ type: "notice", level: notice.level, text: notice.text });
+          }
+          if (result.exit) exit();
+          return;
+        }
+      }
 
       if (mode === "workflow") {
         // Resume the active run if one exists; otherwise start the picked one fresh.
@@ -292,6 +347,8 @@ export function App({
       wfPreview,
       runWorkflow,
       workspaceMap,
+      slashCtx,
+      exit,
     ],
   );
 
@@ -326,7 +383,7 @@ export function App({
       }
       return;
     }
-    if (key.tab && !running) {
+    if (key.tab && key.ctrl && !running) {
       setWfPreview(null);
       setWfLaunching(false);
       setMode((prev) => nextMode(prev, modes));
@@ -416,10 +473,12 @@ export function App({
       ) : null}
       <PromptInput
         value={value}
-        onChange={setValue}
+        onChange={handleValueChange}
         onSubmit={handleSubmit}
+        onTab={handleTab}
         focus={!running}
         running={running}
+        suggestions={commandSuggestions}
       />
       <Box paddingX={1}>
         <Text color="gray">{hint(mode, wf.started, wfLaunching, !!wfPreview, running)}</Text>
@@ -445,14 +504,14 @@ function hint(
   if (running) return "Esc cancel · Ctrl+C quit";
   if (mode === "workflow") {
     if (wfStarted || wfLaunching) {
-      return "↑/↓ step · Enter resume · Esc back · Tab switch mode · Ctrl+C quit";
+      return "↑/↓ step · Enter resume · Esc back · Ctrl+Tab switch mode · /commands · Ctrl+C quit";
     }
     if (wfPreviewing) {
-      return "↑/↓ step · Enter run · Esc back · Tab switch mode · Ctrl+C quit";
+      return "↑/↓ step · Enter run · Esc back · Ctrl+Tab switch mode · /commands · Ctrl+C quit";
     }
-    return "↑/↓ pick · Enter preview (input optional) · Tab switch mode · Ctrl+C quit";
+    return "↑/↓ pick · Enter preview · Ctrl+Tab switch mode · /commands · Ctrl+C quit";
   }
-  return "Enter dispatch · Tab switch mode · Esc cancel · Ctrl+C quit";
+  return "Enter dispatch · Ctrl+Tab switch mode · /commands (Tab complete) · Ctrl+C quit";
 }
 
 function message(err: unknown): string {

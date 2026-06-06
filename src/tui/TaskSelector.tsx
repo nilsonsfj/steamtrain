@@ -39,7 +39,7 @@ export function TaskSelector({ modes, workspaceMap, active, workflowName }: Task
             </Box>
           );
         })}
-        <Text color="gray">(Tab to switch)</Text>
+        <Text color="gray">(Ctrl+Tab to switch)</Text>
       </Box>
       <Box>
         {current ? (
