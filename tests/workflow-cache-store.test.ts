@@ -101,6 +101,14 @@ describe("workflow cache store", () => {
     expect(await loadWorkflowCache(root, mismatched)).toEqual(new Map());
   });
 
+  it("hashes specs with and without undefined fields the same way", () => {
+    const withDesc = { name: "wf", description: undefined, phases: [] };
+    const withoutDesc = { name: "wf", phases: [] };
+    expect(hashWorkflowSpec(withDesc as WorkflowSpec)).toBe(
+      hashWorkflowSpec(withoutDesc as WorkflowSpec),
+    );
+  });
+
   it("rejects cache when the workflow spec changes", async () => {
     const root = tempDir();
     const specV1: WorkflowSpec = {
@@ -130,6 +138,43 @@ describe("workflow cache store", () => {
     await writeFile(join(root, workflowCacheFileName(key)), "{ not valid json", "utf8");
 
     expect(await loadWorkflowCache(root, key)).toEqual(new Map());
+  });
+
+  it("rejects gate steps with invalid gate metadata", async () => {
+    const root = tempDir();
+    const key = workflowCacheKey("wf", "input", root, { name: "wf", phases: [] });
+    await mkdir(root, { recursive: true });
+    writeFileSync(
+      join(root, workflowCacheFileName(key)),
+      JSON.stringify({
+        version: WORKFLOW_CACHE_VERSION,
+        workflow: "wf",
+        cwd: root,
+        inputHash: hashWorkflowCacheInput("input"),
+        specHash: key.specHash,
+        updatedAt: 1,
+        steps: {
+          gate: {
+            stepId: "gate",
+            ok: true,
+            output: "blocked",
+            durationMs: 1,
+            gate: { passed: false, onFalse: "stop" },
+          },
+          tampered: {
+            stepId: "tampered",
+            ok: true,
+            output: "blocked",
+            durationMs: 1,
+            gate: { passed: false, onFalse: "bogus" },
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const loaded = await loadWorkflowCache(root, key);
+    expect([...loaded.keys()]).toEqual(["gate"]);
   });
 
   it("drops step entries with invalid shape", async () => {
@@ -207,6 +252,71 @@ describe("workflow cache store", () => {
 });
 
 describe("workflow cache resume", () => {
+  it("round-trips forEach parent childResults through disk", async () => {
+    const root = tempDir();
+    const spec: WorkflowSpec = {
+      name: "fan-out",
+      phases: [
+        {
+          id: "p1",
+          title: "Split",
+          steps: [{ id: "split", kind: "distributor", items: ["a", "b"] }],
+        },
+        {
+          id: "p2",
+          title: "Work",
+          steps: [
+            {
+              id: "work",
+              agent: "claude",
+              model: "m",
+              dependsOn: ["split"],
+              forEach: "steps.split.items",
+              prompt: "{{item}}",
+            },
+          ],
+        },
+      ],
+    };
+    const store = createWorkflowCacheStore(root);
+    const key = workflowCacheKey("fan-out", "items", root, spec);
+    const cache = new Map<string, StepResult>();
+
+    for await (const event of runWorkflow(
+      spec,
+      { input: key.input, cache },
+      {
+        createAdapter: (id) => ({
+          id,
+          binary: "fake",
+          run(opts: AgentRunOptions) {
+            return (async function* () {
+              yield {
+                kind: "result",
+                agent: id,
+                ts: 0,
+                isError: false,
+                text: `out:${opts.prompt}`,
+              } satisfies AgentEvent;
+            })();
+          },
+        }),
+        maxConcurrency: 2,
+        cwd: root,
+      },
+    )) {
+      if (event.kind === "step_done") {
+        await persistWorkflowStepDone(store, key, cache, event.stepId, event.result, event.cached);
+      }
+    }
+
+    const loaded = await store.load(key);
+    const parent = loaded.get("work");
+    expect(parent?.childResults).toHaveLength(2);
+    expect(loaded.get("work[0]")?.output).toContain("a");
+    expect(loaded.get("work[1]")?.output).toContain("b");
+  });
+
   it("replays persisted steps on a later run", async () => {
     const root = tempDir();
     const store = createWorkflowCacheStore(root);
