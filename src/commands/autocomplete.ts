@@ -19,9 +19,21 @@ function longestCommonPrefix(values: readonly string[]): string {
   return prefix;
 }
 
-function filterPrefix(candidates: readonly string[], prefix: string): string[] {
-  const lower = prefix.toLowerCase();
-  return candidates.filter((c) => c.toLowerCase().startsWith(lower));
+function filterMatches(candidates: readonly string[], query: string): string[] {
+  const lower = query.toLowerCase();
+  if (lower.length === 0) return [...candidates];
+
+  const prefixMatches: string[] = [];
+  const containsMatches: string[] = [];
+  for (const candidate of candidates) {
+    const candidateLower = candidate.toLowerCase();
+    if (candidateLower.startsWith(lower)) {
+      prefixMatches.push(candidate);
+    } else if (candidateLower.includes(lower)) {
+      containsMatches.push(candidate);
+    }
+  }
+  return [...prefixMatches, ...containsMatches];
 }
 
 function completeCommandName(
@@ -30,7 +42,7 @@ function completeCommandName(
   commands: readonly SlashCommand[],
   endsWithSpace: boolean,
 ): AutocompleteResult {
-  const matches = filterPrefix(
+  const matches = filterMatches(
     commands.map((c) => c.name),
     partial,
   );
@@ -78,7 +90,7 @@ export function autocompleteSlashCommand(
 
   const argTokens = endsWithSpace ? [...args, ""] : [...args.slice(0, -1), activeArg];
   const candidates = [...def.complete(argTokens, ctx)];
-  const matches = filterPrefix(candidates, activeArg);
+  const matches = filterMatches(candidates, activeArg);
   if (matches.length === 0) return { value: raw, suggestions: candidates };
 
   const completed = longestCommonPrefix(matches);

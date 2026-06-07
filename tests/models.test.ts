@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { OPENCODE_MODELS } from "../src/agents/opencode";
 import {
   defaultModelForAgent,
   effortForModelChange,
@@ -34,18 +35,25 @@ describe("model names", () => {
     clearOpencodeVariantCacheForTests();
   });
 
-  it("uses the live OpenCode catalog for autocomplete when cache is loaded", () => {
+  it("uses only the live OpenCode catalog when cache is loaded", () => {
     setOpencodeVariantCacheForTests(
       new Map([
         ["deepseek/deepseek-chat", { name: "DeepSeek Chat", efforts: [] }],
         ["opencode/gpt-5.4-mini", { name: "GPT 5.4 Mini", efforts: ["high"] }],
       ]),
     );
-    const ids = modelIdsForAgent("opencode");
-    expect(ids).toContain("deepseek/deepseek-chat");
-    expect(ids).toContain("opencode/gpt-5.4-mini");
+    expect(modelIdsForAgent("opencode")).toEqual([
+      "deepseek/deepseek-chat",
+      "opencode/gpt-5.4-mini",
+    ]);
+    expect(modelIdsForAgent("opencode")).not.toContain("opencode/big-pickle");
     expect(defaultModelForAgent("opencode")).toBe("opencode/gpt-5.4-mini");
     clearOpencodeVariantCacheForTests();
+  });
+
+  it("falls back to the static OpenCode catalog when cache is empty", () => {
+    clearOpencodeVariantCacheForTests();
+    expect(modelIdsForAgent("opencode")).toEqual(OPENCODE_MODELS.map((model) => model.id));
   });
 
   it("exposes id and name on catalog entries", () => {

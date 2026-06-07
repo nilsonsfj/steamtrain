@@ -17,21 +17,13 @@ export function isAgentId(value: string): value is AgentId {
 }
 
 function opencodeModelsWithLiveNames(): readonly AgentModel[] {
-  const byId = new Map<string, AgentModel>();
+  const cached = listOpencodeCachedAgentModels();
+  if (cached.length > 0) return cached;
 
-  for (const model of listOpencodeCachedAgentModels()) {
-    byId.set(model.id, model);
-  }
-  for (const model of OPENCODE_MODELS) {
-    if (!byId.has(model.id)) {
-      byId.set(model.id, {
-        id: model.id,
-        name: getOpencodeModelName(model.id) ?? model.name,
-      });
-    }
-  }
-
-  return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
+  return OPENCODE_MODELS.map((model) => ({
+    id: model.id,
+    name: getOpencodeModelName(model.id) ?? model.name,
+  }));
 }
 
 /** Model catalog for an agent provider (id + human-readable name). */

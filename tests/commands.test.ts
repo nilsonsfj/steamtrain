@@ -242,6 +242,46 @@ describe("autocompleteSlashCommand", () => {
     expect(result?.suggestions).toContain("claude-opus-4-8");
   });
 
+  it("matches model ids containing the query, prioritizing prefix matches", () => {
+    const ctx = makeCtx({
+      mode: "implement",
+      workspaceMap: workspaceById({
+        workspaces: [{ id: "implement", agent: "opencode", model: "opencode/gpt-5.4-mini" }],
+      }),
+    });
+    setOpencodeVariantCacheForTests(
+      new Map([
+        ["opencode/gpt-5.4-mini", { name: "GPT 5.4 Mini", efforts: [] }],
+        ["opencode/claude-sonnet-4-6", { name: "Claude Sonnet 4.6", efforts: [] }],
+        ["vendor/custom-gpt-wrapper", { name: "Custom GPT", efforts: [] }],
+      ]),
+    );
+    const result = autocompleteSlashCommand("/model gpt", listSlashCommands(), ctx);
+    expect(result?.suggestions).toEqual([
+      "opencode/gpt-5.4-mini",
+      "vendor/custom-gpt-wrapper",
+    ]);
+    clearOpencodeVariantCacheForTests();
+  });
+
+  it("finds models by substring when prefix matches none", () => {
+    const ctx = makeCtx({
+      mode: "implement",
+      workspaceMap: workspaceById({
+        workspaces: [{ id: "implement", agent: "opencode", model: "opencode/gpt-5.4-mini" }],
+      }),
+    });
+    setOpencodeVariantCacheForTests(
+      new Map([
+        ["opencode/claude-sonnet-4-6", { name: "Claude Sonnet 4.6", efforts: [] }],
+        ["opencode/claude-opus-4-8", { name: "Claude Opus 4.8", efforts: [] }],
+      ]),
+    );
+    const result = autocompleteSlashCommand("/model sonnet", listSlashCommands(), ctx);
+    expect(result?.suggestions).toEqual(["opencode/claude-sonnet-4-6"]);
+    clearOpencodeVariantCacheForTests();
+  });
+
   it("lists live OpenCode models for autocomplete when cache is loaded", () => {
     const ctx = makeCtx({
       mode: "implement",
@@ -317,7 +357,7 @@ describe("autocompleteSlashCommand edge cases", () => {
     expect(result?.suggestions).toEqual([]);
   });
 
-  it("keeps value but lists candidates when arg prefix matches nothing", () => {
+  it("keeps value but lists candidates when arg query matches nothing", () => {
     const result = autocompleteSlashCommand("/model zzz", listSlashCommands(), makeCtx());
     expect(result?.value).toBe("/model zzz");
     expect(result?.suggestions?.length).toBeGreaterThan(0);
