@@ -842,7 +842,7 @@ export function App({
   const handleWorkflowFreshRun = useCallback(() => {
     const prompt = value.trim();
     recordPromptHistory(value);
-    if (handleWorkflowRun(prompt, true)) updatePromptDraft({ promptEditing: false });
+    if (handleWorkflowRun(prompt, true)) updatePromptDraft({ value: "", promptEditing: false });
   }, [value, recordPromptHistory, handleWorkflowRun, updatePromptDraft]);
 
   useInput((input, key) => {
