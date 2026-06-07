@@ -1,5 +1,7 @@
 import { basename } from "node:path";
+import { CLAUDE_MODELS, CODEX_MODELS, OPENCODE_MODELS, formatAgentTarget } from "../agents";
 import { truncate } from "../agents/util";
+import type { AgentId } from "../types/events";
 import {
   type GateCondition,
   type WorkflowPhase,
@@ -71,6 +73,16 @@ export function distinctAgents(spec: WorkflowSpec): string[] {
   return [...set];
 }
 
+export function formatWorkflowAgentTarget(target: {
+  agent: AgentId;
+  model: string;
+  effort?: string;
+}): string {
+  const formatted = formatAgentTarget(target);
+  const staticName = staticModelName(target.agent, target.model);
+  return staticName && !formatted.includes(staticName) ? `${formatted} · ${staticName}` : formatted;
+}
+
 export function formatGateCondition(condition: GateCondition): string {
   const parts: string[] = [];
   if (condition.step) parts.push(`step=${condition.step}`);
@@ -136,4 +148,15 @@ export function promptForStep(step: WorkflowStep): string | undefined {
     return step.prompt;
   }
   return undefined;
+}
+
+function staticModelName(agent: AgentId, model: string): string | undefined {
+  switch (agent) {
+    case "claude":
+      return CLAUDE_MODELS.find((entry) => entry.id === model)?.name;
+    case "codex":
+      return CODEX_MODELS.find((entry) => entry.id === model)?.name;
+    case "opencode":
+      return OPENCODE_MODELS.find((entry) => entry.id === model)?.name;
+  }
 }

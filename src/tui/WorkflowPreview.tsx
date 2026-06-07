@@ -1,17 +1,22 @@
 import { Box, Text } from "ink";
 import { useMemo } from "react";
 import { truncate } from "../agents/util";
-import { formatAgentTarget } from "../agents";
 import type { DispatchCheck } from "../orchestrator";
-import { type WorkflowSourceKind, type WorkflowSpec, isAgentBackedStep, workflowStepKind } from "../workflow";
+import {
+  type WorkflowSourceKind,
+  type WorkflowSpec,
+  isAgentBackedStep,
+  workflowStepKind,
+} from "../workflow";
 import { AGENT_COLOR, WORKFLOW_SOURCE_COLOR } from "./theme";
+import { selectVisibleWindow } from "./workflow-list-window";
 import {
   BLOCK_LABEL,
   type FlatSpecStep,
   blockSummary,
   distinctAgents,
   flattenSpecSteps,
-  phaseStepOffsets,
+  formatWorkflowAgentTarget,
   promptForStep,
   specDetailLines,
   specStepRowMeta,
@@ -32,6 +37,10 @@ interface WorkflowPreviewProps {
   promptEditing?: boolean;
 }
 
+type PreviewRow =
+  | { kind: "phase"; phase: WorkflowSpec["phases"][number] }
+  | { kind: "step"; entry: FlatSpecStep };
+
 /**
  * Pre-run workflow visualization: full spec drill-down before dispatch.
  * Ctrl+R from the prompt runs the workflow; Enter resumes from cache; Esc backs out when idle.
@@ -49,9 +58,24 @@ export function WorkflowPreview({
 }: WorkflowPreviewProps) {
   const innerWidth = Math.max(20, width - 4);
   const flat = useMemo(() => flattenSpecSteps(spec), [spec]);
-  const phaseOffsets = useMemo(() => phaseStepOffsets(spec.phases), [spec]);
   const clampedIndex = Math.min(selectedIndex, Math.max(0, flat.length - 1));
   const selected = flat[clampedIndex];
+  const rows = useMemo<PreviewRow[]>(
+    () =>
+      spec.phases.flatMap((phase) => [
+        { kind: "phase" as const, phase },
+        ...flat
+          .filter((entry) => entry.phase.id === phase.id)
+          .map((entry) => ({ kind: "step" as const, entry })),
+      ]),
+    [spec.phases, flat],
+  );
+  const selectedRowIndex = Math.max(
+    0,
+    rows.findIndex((row) => row.kind === "step" && row.entry.flatIndex === clampedIndex),
+  );
+  const listBudget = Math.max(1, height - (selected ? 13 : 8));
+  const rowWindow = selectVisibleWindow(rows, selectedRowIndex, listBudget);
   const phaseCount = spec.phases.length;
   const stepCount = flat.length;
   const agents = useMemo(() => distinctAgents(spec), [spec]);
@@ -74,7 +98,7 @@ export function WorkflowPreview({
         <Text color="gray">
           {promptEditing
             ? `↑/↓ history${canResume ? " · Enter resume" : ""} · Esc list`
-            : "↑/↓ step · type to edit · Ctrl+R run · Esc back"}
+            : `↑/↓ step · → details${canResume ? " · Enter resume" : ""} · Ctrl+R run · Esc back`}
         </Text>
       </Box>
 
@@ -100,34 +124,52 @@ export function WorkflowPreview({
       </Box>
 
       <Box flexDirection="column" flexGrow={1}>
-        {spec.phases.length === 0 ? (
+        {rows.length === 0 ? (
           <Text color="gray">No phases defined.</Text>
         ) : (
-          spec.phases.map((phase, phaseIndex) => (
-            <Box key={phase.id} flexDirection="column">
-              <Box>
-                <Text color="cyan" bold>
-                  ─ {phase.title}
-                </Text>
-                <Text color="gray">
-                  {"  "}
-                  {phase.id} · {phase.steps.length} step{phase.steps.length === 1 ? "" : "s"}
-                </Text>
-              </Box>
-              {phase.steps.map((step, stepIndex) => (
+          <>
+            {rowWindow.hiddenBefore > 0 ? (
+              <Text color="gray">
+                {rowWindow.hiddenBefore} earlier row{rowWindow.hiddenBefore === 1 ? "" : "s"} hidden
+                ↑
+              </Text>
+            ) : null}
+            {rowWindow.visible.map((row, offset) =>
+              row.kind === "phase" ? (
+                <PhaseRow key={`phase-${row.phase.id}`} phase={row.phase} />
+              ) : (
                 <SpecStepRow
-                  key={step.id}
-                  step={step}
-                  selected={(phaseOffsets[phaseIndex] ?? 0) + stepIndex === clampedIndex}
+                  key={`step-${row.entry.step.id}`}
+                  step={row.entry.step}
+                  selected={rowWindow.start + offset === selectedRowIndex}
                   width={innerWidth}
                 />
-              ))}
-            </Box>
-          ))
+              ),
+            )}
+            {rowWindow.hiddenAfter > 0 ? (
+              <Text color="gray">
+                {rowWindow.hiddenAfter} later row{rowWindow.hiddenAfter === 1 ? "" : "s"} hidden ↓
+              </Text>
+            ) : null}
+          </>
         )}
       </Box>
 
       {selected ? <SpecStepDetail entry={selected} width={innerWidth} /> : null}
+    </Box>
+  );
+}
+
+function PhaseRow({ phase }: { phase: WorkflowSpec["phases"][number] }) {
+  return (
+    <Box>
+      <Text color="cyan" bold>
+        ─ {phase.title}
+      </Text>
+      <Text color="gray">
+        {"  "}
+        {phase.id} · {phase.steps.length} step{phase.steps.length === 1 ? "" : "s"}
+      </Text>
     </Box>
   );
 }
@@ -144,7 +186,7 @@ function SpecStepRow({
   const kind = workflowStepKind(step);
   const agentColor = isAgentBackedStep(step) ? (AGENT_COLOR[step.agent] ?? "white") : "gray";
   const runner = isAgentBackedStep(step)
-    ? formatAgentTarget({ agent: step.agent, model: step.model, effort: step.effort })
+    ? formatWorkflowAgentTarget({ agent: step.agent, model: step.model, effort: step.effort })
     : BLOCK_LABEL[kind];
   const meta = specStepRowMeta(step);
   return (
@@ -166,12 +208,17 @@ function SpecStepDetail({ entry, width }: { entry: FlatSpecStep; width: number }
   const kind = workflowStepKind(step);
   const lines = specDetailLines(step);
   const prompt = promptForStep(step);
+  const runner = isAgentBackedStep(step)
+    ? formatWorkflowAgentTarget({ agent: step.agent, model: step.model, effort: step.effort })
+    : undefined;
+  const runnerColor = isAgentBackedStep(step) ? (AGENT_COLOR[step.agent] ?? "white") : "gray";
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1}>
       <Text color="cyan">
         {step.id} · {kind} · phase {phase.title}
       </Text>
+      {runner ? <Text color={runnerColor}>runner: {runner}</Text> : null}
       {lines.map((line) => (
         <Text key={line} color="gray" wrap="truncate-end">
           {line}

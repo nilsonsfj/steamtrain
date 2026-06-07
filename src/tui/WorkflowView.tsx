@@ -2,9 +2,9 @@ import { basename } from "node:path";
 import { Box, Text } from "ink";
 import { useMemo } from "react";
 import { truncate } from "../agents/util";
-import { formatAgentTarget } from "../agents";
 import { AGENT_COLOR } from "./theme";
-import { BLOCK_LABEL, phaseStepOffsets } from "./workflow-spec-ui";
+import { selectVisibleWindow } from "./workflow-list-window";
+import { BLOCK_LABEL, formatWorkflowAgentTarget } from "./workflow-spec-ui";
 import {
   type PhaseState,
   type StepState,
@@ -18,7 +18,12 @@ interface WorkflowViewProps {
   height: number;
   /** Index into the flattened step list, for drill-in detail. */
   selectedIndex: number;
+  elapsedMs: number;
 }
+
+type WorkflowRow =
+  | { kind: "phase"; phase: PhaseState }
+  | { kind: "step"; phase: PhaseState; step: StepState; flatIndex: number };
 
 const STEP_GLYPH: Record<StepState["status"], { symbol: string; color: string }> = {
   pending: { symbol: "·", color: "gray" },
@@ -31,18 +36,44 @@ const STEP_GLYPH: Record<StepState["status"], { symbol: string; color: string }>
  * The live phase → step tree. Phases stack vertically; the selected step's
  * accumulated output is shown in a detail panel below (↑/↓ to drill in).
  */
-export function WorkflowView({ state, width, height, selectedIndex }: WorkflowViewProps) {
+export function WorkflowView({
+  state,
+  width,
+  height,
+  selectedIndex,
+  elapsedMs,
+}: WorkflowViewProps) {
   const innerWidth = Math.max(20, width - 4);
   const flat = useMemo(() => flattenSteps(state), [state]);
-  const phaseOffsets = useMemo(() => phaseStepOffsets(state.phases), [state.phases]);
   const clampedIndex = Math.min(selectedIndex, Math.max(0, flat.length - 1));
   const selected = flat[clampedIndex]?.step;
+  const rows = useMemo<WorkflowRow[]>(() => {
+    const out: WorkflowRow[] = [];
+    let flatIndex = 0;
+    for (const phase of state.phases) {
+      out.push({ kind: "phase", phase });
+      for (const step of phase.steps) {
+        out.push({ kind: "step", phase, step, flatIndex });
+        flatIndex += 1;
+      }
+    }
+    return out;
+  }, [state.phases]);
+  const selectedRowIndex = Math.max(
+    0,
+    rows.findIndex((row) => row.kind === "step" && row.flatIndex === clampedIndex),
+  );
+  const listBudget = Math.max(1, height - (selected ? 9 : 4));
+  const rowWindow = selectVisibleWindow(rows, selectedRowIndex, listBudget);
 
   const cost = sumCost(state);
-  const elapsed = state.startedAt ? (Date.now() - state.startedAt) / 1000 : 0;
+  const elapsed = elapsedMs / 1000;
   const doneSteps = flat.filter(
     (f) => f.step.status === "done" || f.step.status === "error",
   ).length;
+  const runningSteps = flat.filter((f) => f.step.status === "running").length;
+  const failedSteps = flat.filter((f) => f.step.status === "error").length;
+  const cachedSteps = flat.filter((f) => f.step.cached).length;
 
   return (
     <Box
@@ -58,6 +89,9 @@ export function WorkflowView({ state, width, height, selectedIndex }: WorkflowVi
         </Text>
         <Text color="gray">
           {doneSteps}/{flat.length} steps · {elapsed.toFixed(1)}s
+          {runningSteps > 0 ? ` · ${runningSteps} active` : ""}
+          {failedSteps > 0 ? ` · ${failedSteps} failed` : ""}
+          {cachedSteps > 0 ? ` · ${cachedSteps} cached` : ""}
           {cost > 0 ? ` · $${cost.toFixed(4)}` : ""}
           {state.done ? (state.ok ? " · done" : " · failed") : " · running"}
         </Text>
@@ -67,19 +101,31 @@ export function WorkflowView({ state, width, height, selectedIndex }: WorkflowVi
         {state.phases.length === 0 ? (
           <Text color="gray">starting workflow…</Text>
         ) : (
-          state.phases.map((phase, phaseIndex) => (
-            <Box key={phase.phaseId} flexDirection="column">
-              <PhaseHeader phase={phase} />
-              {phase.steps.map((step, stepIndex) => (
+          <>
+            {rowWindow.hiddenBefore > 0 ? (
+              <Text color="gray">
+                {rowWindow.hiddenBefore} earlier row{rowWindow.hiddenBefore === 1 ? "" : "s"} hidden
+                ↑
+              </Text>
+            ) : null}
+            {rowWindow.visible.map((row, offset) =>
+              row.kind === "phase" ? (
+                <PhaseHeader key={`phase-${row.phase.phaseId}`} phase={row.phase} />
+              ) : (
                 <StepRow
-                  key={step.stepId}
-                  step={step}
+                  key={`step-${row.step.stepId}`}
+                  step={row.step}
                   width={innerWidth}
-                  selected={(phaseOffsets[phaseIndex] ?? 0) + stepIndex === clampedIndex}
+                  selected={rowWindow.start + offset === selectedRowIndex}
                 />
-              ))}
-            </Box>
-          ))
+              ),
+            )}
+            {rowWindow.hiddenAfter > 0 ? (
+              <Text color="gray">
+                {rowWindow.hiddenAfter} later row{rowWindow.hiddenAfter === 1 ? "" : "s"} hidden ↓
+              </Text>
+            ) : null}
+          </>
         )}
       </Box>
 
@@ -119,7 +165,7 @@ function StepRow({
   const right = stepMeta(step);
   const runner =
     step.agent && step.model
-      ? formatAgentTarget({ agent: step.agent, model: step.model, effort: step.effort })
+      ? formatWorkflowAgentTarget({ agent: step.agent, model: step.model, effort: step.effort })
       : BLOCK_LABEL[step.blockKind];
   const indent = step.parentStepId ? 3 : 1;
   const item = step.item ? ` item ${step.item.index}: ${truncate(step.item.value, 32)}` : "";
