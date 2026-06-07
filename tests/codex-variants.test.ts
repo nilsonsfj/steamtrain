@@ -32,4 +32,18 @@ describe("parseCodexDebugModels", () => {
       efforts: [],
     });
   });
+
+  it("accepts string reasoning levels", () => {
+    const parsed = parseCodexDebugModels(`{
+      "models": [{
+        "slug": "gpt-5.2",
+        "display_name": "GPT-5.2",
+        "supported_reasoning_levels": ["low", "medium", "high"]
+      }]
+    }`);
+    expect(parsed.get("gpt-5.2")).toEqual({
+      name: "GPT-5.2",
+      efforts: ["high", "low", "medium"],
+    });
+  });
 });

@@ -1,7 +1,7 @@
 {
   "name": "steamtrain",
   "version": "0.1.0",
-  "description": "Terminal orchestrator that runs coding agents (Claude Code, OpenCode) as managed subprocesses and renders their activity live in an Ink TUI.",
+  "description": "Terminal orchestrator that runs coding agents (Claude Code, OpenCode, Codex) as managed subprocesses and renders their activity live in an Ink TUI.",
   "type": "module",
   "bin": {
     "steamtrain": "./dist/index.js"
