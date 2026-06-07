@@ -124,6 +124,7 @@ export function App({
   const [wfPreview, setWfPreview] = useState<{ name: string; input: string } | null>(null);
   const [wfLaunching, setWfLaunching] = useState(false);
   const [wfNotice, setWfNotice] = useState<string | null>(null);
+  const [wfCanResume, setWfCanResume] = useState(false);
   const activeWorkflowRef = useRef<string | undefined>(undefined);
   const activeWorkflowInputRef = useRef<string | undefined>(undefined);
   const workflowCacheRef = useRef<Map<string, StepResult>>(new Map());
@@ -246,8 +247,54 @@ export function App({
   const previewStepCount = previewFlatSteps.length;
   const previewDispatchCheck = wfPreview ? orchestrator.canDispatchWorkflow(wfPreview.name) : null;
 
+  useEffect(() => {
+    if (mode !== "workflow" || running) {
+      setWfCanResume(false);
+      return;
+    }
+
+    const prompt = value.trim();
+    if (prompt.length === 0) {
+      setWfCanResume(false);
+      return;
+    }
+
+    if (wf.started || wfLaunching) {
+      setWfCanResume(
+        activeWorkflowRef.current !== undefined &&
+          activeWorkflowInputRef.current === prompt &&
+          workflowCacheRef.current.size > 0,
+      );
+      return;
+    }
+
+    if (!wfPreview) {
+      setWfCanResume(false);
+      return;
+    }
+
+    const spec = orchestrator.listWorkflows()[wfPreview.name];
+    if (!spec) {
+      setWfCanResume(false);
+      return;
+    }
+
+    const key = workflowCacheKey(wfPreview.name, prompt, process.cwd(), spec);
+    let active = true;
+    void cacheStoreRef.current.load(key).then((cache) => {
+      if (active) setWfCanResume(cache.size > 0);
+    });
+    return () => {
+      active = false;
+    };
+  }, [mode, running, wf.started, wfLaunching, wfPreview, value, orchestrator]);
+
   const runWorkflow = useCallback(
-    (name: string, input: string, opts?: { reuseMemoryCache?: boolean }): boolean => {
+    (
+      name: string,
+      input: string,
+      opts?: { reuseMemoryCache?: boolean; fresh?: boolean },
+    ): boolean => {
       const check = orchestrator.canDispatchWorkflow(name);
       if (!check.ok) {
         setWfNotice(`cannot run '${name}': ${check.reason}`);
@@ -272,7 +319,10 @@ export function App({
         const cwd = process.cwd();
         const key = workflowCacheKey(name, input, cwd, spec);
         try {
-          if (!opts?.reuseMemoryCache) {
+          if (opts?.fresh) {
+            await store.clear(key);
+            workflowCacheRef.current = new Map();
+          } else if (!opts?.reuseMemoryCache) {
             workflowCacheRef.current = await store.load(key);
           }
           const cache = workflowCacheRef.current;
@@ -428,6 +478,67 @@ export function App({
     return map;
   }, [value, suggestionMenuOpen, mode, workspaceMap, opencodeCatalogTick]);
 
+  const launchWorkflow = useCallback(
+    (name: string, prompt: string, opts?: { reuseMemoryCache?: boolean; fresh?: boolean }) => {
+      setWfLaunching(true);
+      wfDispatch({ type: "reset" });
+      setStepIndex(0);
+      setWfPreview(null);
+      if (!runWorkflow(name, prompt, opts)) {
+        setWfLaunching(false);
+        setWfPreview({ name, input: prompt });
+      }
+    },
+    [runWorkflow],
+  );
+
+  const handleWorkflowRun = useCallback(
+    (prompt: string, fresh: boolean) => {
+      if (running || mode !== "workflow") return;
+
+      if (wf.started && activeWorkflowRef.current) {
+        if (prompt.length === 0) return;
+        if (!fresh) {
+          if (activeWorkflowInputRef.current !== prompt) return;
+          if (workflowCacheRef.current.size === 0) return;
+          runWorkflow(activeWorkflowRef.current, prompt, { reuseMemoryCache: true });
+          return;
+        }
+        launchWorkflow(activeWorkflowRef.current, prompt, { fresh: true });
+        return;
+      }
+
+      if (wfPreview) {
+        if (prompt.length === 0) {
+          setWfNotice("type input in the prompt before running");
+          return;
+        }
+        if (!fresh && !wfCanResume) return;
+        launchWorkflow(wfPreview.name, prompt, fresh ? { fresh: true } : undefined);
+        return;
+      }
+
+      const entry = workflowEntries[workflowIndex];
+      if (!entry) return;
+      if (prompt.length === 0) {
+        setWfNotice("type input in the prompt before running");
+        return;
+      }
+      launchWorkflow(entry.name, prompt, { fresh: true });
+    },
+    [
+      running,
+      mode,
+      wf.started,
+      wfPreview,
+      wfCanResume,
+      workflowEntries,
+      workflowIndex,
+      launchWorkflow,
+      runWorkflow,
+    ],
+  );
+
   const handleSubmit = useCallback(
     (raw: string) => {
       setCommandSuggestions([]);
@@ -451,34 +562,12 @@ export function App({
       if (running) return;
 
       if (mode === "workflow") {
-        // Resume the active run if one exists; otherwise start the picked one fresh.
         if (wf.started && activeWorkflowRef.current) {
-          if (prompt.length === 0) return;
-          if (activeWorkflowInputRef.current !== prompt) {
-            wfDispatch({ type: "reset" });
-            setStepIndex(0);
-            setWfLaunching(true);
-            runWorkflow(activeWorkflowRef.current, prompt);
-            return;
-          }
-          runWorkflow(activeWorkflowRef.current, prompt, { reuseMemoryCache: true });
+          handleWorkflowRun(prompt, false);
           return;
         }
-        // Preview screen: Enter dispatches the workflow.
         if (wfPreview) {
-          if (prompt.length === 0) {
-            setWfNotice("type input in the prompt before running");
-            return;
-          }
-          setWfLaunching(true);
-          wfDispatch({ type: "reset" });
-          setStepIndex(0);
-          const { name, input } = wfPreview;
-          setWfPreview(null);
-          if (!runWorkflow(name, prompt)) {
-            setWfLaunching(false);
-            setWfPreview({ name, input: prompt });
-          }
+          handleWorkflowRun(prompt, false);
           return;
         }
         const entry = workflowEntries[workflowIndex];
@@ -545,8 +634,7 @@ export function App({
       wf.started,
       workflowEntries,
       workflowIndex,
-      wfPreview,
-      runWorkflow,
+      handleWorkflowRun,
       workspaceMap,
       slashCtx,
       exit,
@@ -564,6 +652,12 @@ export function App({
     },
     [commandSuggestions, handleTab, handleSubmit, recordPromptHistory],
   );
+
+  const handleWorkflowFreshRun = useCallback(() => {
+    const prompt = value.trim();
+    recordPromptHistory(value);
+    handleWorkflowRun(prompt, true);
+  }, [value, recordPromptHistory, handleWorkflowRun]);
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
@@ -670,6 +764,7 @@ export function App({
             height={streamHeight}
             selectedIndex={stepIndex}
             dispatchCheck={previewDispatchCheck}
+            canResume={wfCanResume}
           />
         ) : (
           <WorkflowPicker
@@ -714,6 +809,7 @@ export function App({
           onChange={handleValueChange}
           onSubmit={handlePromptSubmit}
           onTab={handleTab}
+          onCtrlR={mode === "workflow" && !running ? handleWorkflowFreshRun : undefined}
           onSuggestionNavigate={handleSuggestionNavigate}
           onHistoryNavigate={handleHistoryNavigate}
           focus
@@ -723,7 +819,15 @@ export function App({
         />
         <Box paddingX={1}>
           <Text color="gray">
-            {hint(mode, wf.started, wfLaunching, !!wfPreview, running, suggestionMenuOpen)}
+            {hint(
+              mode,
+              wf.started,
+              wfLaunching,
+              !!wfPreview,
+              running,
+              suggestionMenuOpen,
+              wfCanResume,
+            )}
           </Text>
         </Box>
       </Box>
@@ -738,18 +842,20 @@ function hint(
   wfPreviewing: boolean,
   running: boolean,
   suggestionMenuOpen: boolean,
+  canResume: boolean,
 ): string {
   const completeHint = suggestionMenuOpen ? " · ↑/↓ complete · Tab/Enter pick · Esc cancel" : "";
   const historyHint = " · ↑/↓ history";
+  const resumeHint = canResume ? " · Enter resume" : "";
   if (running) return "Esc cancel · /exit quit · Ctrl+C quit";
   if (mode === "workflow") {
     if (wfStarted || wfLaunching) {
-      return `↑/↓ step/history · Enter resume · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step/history${resumeHint} · Ctrl+R run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
     }
     if (wfPreviewing) {
-      return `↑/↓ step/history · Enter run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step/history${resumeHint} · Ctrl+R run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
     }
-    return `↑/↓ pick/history · Enter preview · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+    return `↑/↓ pick/history · Enter preview · Ctrl+R run · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
   }
   return `Enter dispatch${historyHint} · Tab switch mode · /commands (Tab complete) · Ctrl+C quit${completeHint}`;
 }

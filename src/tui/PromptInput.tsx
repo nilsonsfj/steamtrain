@@ -1,4 +1,5 @@
 import { Box, Text, useInput } from "ink";
+import { useRef } from "react";
 import TextInput from "ink-text-input";
 
 interface PromptInputProps {
@@ -6,6 +7,7 @@ interface PromptInputProps {
   onChange: (value: string) => void;
   onSubmit: (value: string) => void;
   onTab?: () => void;
+  onCtrlR?: () => void;
   onSuggestionNavigate?: (direction: "up" | "down") => void;
   onHistoryNavigate?: (direction: "up" | "down") => boolean;
   focus: boolean;
@@ -14,12 +16,22 @@ interface PromptInputProps {
   cursorResetKey?: number;
 }
 
+/** ink-text-input still emits the letter on Ctrl+R; drop that lone insert. */
+function isSpuriousCtrlRInsert(prev: string, next: string): boolean {
+  if (next.length !== prev.length + 1) return false;
+  let i = 0;
+  while (i < prev.length && prev[i] === next[i]) i += 1;
+  if (next[i] !== "r") return false;
+  return prev.slice(i) === next.slice(i + 1);
+}
+
 /** Bottom prompt box. Slash commands stay available while a task is running. */
 export function PromptInput({
   value,
   onChange,
   onSubmit,
   onTab,
+  onCtrlR,
   onSuggestionNavigate,
   onHistoryNavigate,
   focus,
@@ -29,6 +41,26 @@ export function PromptInput({
 }: PromptInputProps) {
   const slashInput = value.trimStart().startsWith("/");
   const menuOpen = (suggestions?.length ?? 0) > 1;
+  const swallowNextCharRef = useRef(false);
+
+  const handleChange = (next: string) => {
+    if (swallowNextCharRef.current && isSpuriousCtrlRInsert(value, next)) {
+      swallowNextCharRef.current = false;
+      return;
+    }
+    swallowNextCharRef.current = false;
+    onChange(next);
+  };
+
+  useInput(
+    (input, key) => {
+      if (key.ctrl && input === "r" && onCtrlR) {
+        swallowNextCharRef.current = true;
+        onCtrlR();
+      }
+    },
+    { isActive: focus && !!onCtrlR && !running },
+  );
 
   useInput(
     (_input, key) => {
@@ -69,7 +101,7 @@ export function PromptInput({
         <TextInput
           key={cursorResetKey}
           value={value}
-          onChange={onChange}
+          onChange={handleChange}
           onSubmit={onSubmit}
           focus={focus}
           placeholder={

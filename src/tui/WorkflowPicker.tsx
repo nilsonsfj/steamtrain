@@ -8,7 +8,7 @@ interface WorkflowPickerProps {
   height: number;
 }
 
-/** The workflow launcher: pick one with ↑/↓, then type input and Enter to run. */
+/** The workflow launcher: pick one with ↑/↓, Enter for preview, Ctrl+R to run. */
 export function WorkflowPicker({ workflows, selectedIndex, height }: WorkflowPickerProps) {
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} height={height}>
@@ -16,7 +16,7 @@ export function WorkflowPicker({ workflows, selectedIndex, height }: WorkflowPic
         <Text color="cyan" bold>
           workflows
         </Text>
-        <Text color="gray">↑/↓ select · Enter preview · input optional below</Text>
+        <Text color="gray">↑/↓ select · Enter preview · Ctrl+R run · input below</Text>
       </Box>
       <Box flexDirection="column" flexGrow={1}>
         {workflows.length === 0 ? (

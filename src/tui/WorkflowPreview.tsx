@@ -27,11 +27,12 @@ interface WorkflowPreviewProps {
   height: number;
   selectedIndex: number;
   dispatchCheck: DispatchCheck;
+  canResume?: boolean;
 }
 
 /**
  * Pre-run workflow visualization: full spec drill-down before dispatch.
- * Enter from the prompt runs the workflow; Esc returns to the picker.
+ * Ctrl+R from the prompt runs the workflow; Enter resumes from cache; Esc returns to the picker.
  */
 export function WorkflowPreview({
   spec,
@@ -40,6 +41,7 @@ export function WorkflowPreview({
   height,
   selectedIndex,
   dispatchCheck,
+  canResume = false,
 }: WorkflowPreviewProps) {
   const innerWidth = Math.max(20, width - 4);
   const flat = useMemo(() => flattenSpecSteps(spec), [spec]);
@@ -64,7 +66,9 @@ export function WorkflowPreview({
         <Text color="cyan" bold>
           workflow preview · {spec.name}
         </Text>
-        <Text color="gray">↑/↓ step · Enter run · Esc back</Text>
+        <Text color="gray">
+          ↑/↓ step{canResume ? " · Enter resume" : ""} · Ctrl+R run · Esc back
+        </Text>
       </Box>
 
       {spec.description ? (
