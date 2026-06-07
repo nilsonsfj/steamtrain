@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { formatAgentTarget } from "../agents";
+import { formatAgentTarget, modelsForAgent } from "../agents";
 import { refreshOpencodeVariantCache } from "../agents/models";
 import {
   type SlashCommandContext,
@@ -48,7 +48,7 @@ import { WorkflowPicker } from "./WorkflowPicker";
 import { WorkflowPreview } from "./WorkflowPreview";
 import { WorkflowView } from "./WorkflowView";
 import { Banner } from "./banner";
-import { type Mode, buildModes, nextMode } from "./modes";
+import { type Mode, buildModes, isWorkspaceMode, nextMode } from "./modes";
 import {
   type PromptHistoryBrowse,
   type PromptHistoryByMode,
@@ -115,6 +115,7 @@ export function App({
     initialPromptHistoryBrowse,
   );
   const promptHistoryLimit = settings.promptHistoryLimit ?? DEFAULT_PROMPT_HISTORY_LIMIT;
+  const [opencodeCatalogTick, setOpencodeCatalogTick] = useState(0);
 
   // Workflow mode state.
   const [wf, wfDispatch] = useReducer(workflowReducer, initialWorkflowState);
@@ -210,7 +211,9 @@ export function App({
         const opencode = results.find((d) => d.agent === "opencode");
         if (opencode?.status === "ok") {
           const binary = config.binaries?.opencode ?? opencode.binaryPath ?? "opencode";
-          void refreshOpencodeVariantCache(binary);
+          void refreshOpencodeVariantCache(binary).then((ok) => {
+            if (ok && active) setOpencodeCatalogTick((n) => n + 1);
+          });
         }
       })
       .catch((err) => {
@@ -221,6 +224,18 @@ export function App({
       active = false;
     };
   }, [config]);
+
+  // Refresh an open /model completion menu once the live OpenCode catalog loads.
+  useEffect(() => {
+    if (opencodeCatalogTick === 0) return;
+    if (!isSlashCommandInput(value)) return;
+    const parsed = parseSlashInput(value);
+    if (parsed?.command !== "model") return;
+    const result = autocompleteSlashCommand(value, listSlashCommands(), slashCtx);
+    if (!result || result.suggestions.length <= 1) return;
+    setCommandSuggestions(result.suggestions);
+    setSuggestionIndex((i) => Math.min(i, result.suggestions.length - 1));
+  }, [opencodeCatalogTick, value, slashCtx]);
 
   const totalWfSteps = wf.phases.reduce((n, p) => n + p.steps.length, 0);
   const previewSpec = wfPreview ? orchestrator.listWorkflows()[wfPreview.name] : undefined;
@@ -391,6 +406,18 @@ export function App({
     if (!suggestionMenuOpen) return undefined;
     const parsed = parseSlashInput(value);
     if (!parsed) return undefined;
+
+    if (parsed.command === "model" && isWorkspaceMode(mode)) {
+      const entry = workspaceMap.get(mode);
+      if (!entry) return undefined;
+      void opencodeCatalogTick;
+      const map = new Map<string, string>();
+      for (const model of modelsForAgent(entry.agent)) {
+        if (model.name !== model.id) map.set(model.id, model.name);
+      }
+      return map.size > 0 ? map : undefined;
+    }
+
     const body = value.trimStart().slice(1);
     const hasArgumentTokens = body.includes(" ");
     if (hasArgumentTokens && parsed.command.length > 0) return undefined;
@@ -399,7 +426,7 @@ export function App({
       map.set(c.name, c.description);
     }
     return map;
-  }, [value, suggestionMenuOpen]);
+  }, [value, suggestionMenuOpen, mode, workspaceMap, opencodeCatalogTick]);
 
   const handleSubmit = useCallback(
     (raw: string) => {

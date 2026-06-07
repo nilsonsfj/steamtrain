@@ -1,4 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { modelIdsForAgent } from "../src/agents/models";
+import {
+  clearOpencodeVariantCacheForTests,
+  setOpencodeVariantCacheForTests,
+} from "../src/agents/opencode-variants";
 import { applySlashSuggestion, autocompleteSlashCommand } from "../src/commands/autocomplete";
 import { parseSlashInput, slashCommandArgs } from "../src/commands/parse";
 import {
@@ -12,6 +17,7 @@ import { workspaceById } from "../src/workspace";
 import { DEFAULT_WORKSPACE_CONFIG } from "../src/workspace/defaults";
 
 function makeCtx(overrides: Partial<SlashCommandContext> = {}): SlashCommandContext {
+  clearOpencodeVariantCacheForTests();
   const workspaces = DEFAULT_WORKSPACE_CONFIG;
   return {
     mode: "plan",
@@ -211,9 +217,7 @@ describe("executeSlashCommand", () => {
       makeCtx({
         updateWorkspace,
         workspaceMap: workspaceById({
-          workspaces: [
-            { id: "plan", agent: "claude", model: "claude-opus-4-8", effort: "max" },
-          ],
+          workspaces: [{ id: "plan", agent: "claude", model: "claude-opus-4-8", effort: "max" }],
         }),
       }),
     );
@@ -236,6 +240,25 @@ describe("autocompleteSlashCommand", () => {
     const result = autocompleteSlashCommand("/model claude-op", listSlashCommands(), makeCtx());
     expect(result?.value).toBe("/model claude-opus-4-");
     expect(result?.suggestions).toContain("claude-opus-4-8");
+  });
+
+  it("lists live OpenCode models for autocomplete when cache is loaded", () => {
+    const ctx = makeCtx({
+      mode: "implement",
+      workspaceMap: workspaceById({
+        workspaces: [{ id: "implement", agent: "opencode", model: "opencode/gpt-5.4-mini" }],
+      }),
+    });
+    setOpencodeVariantCacheForTests(
+      new Map([
+        ["deepseek/deepseek-chat", { name: "DeepSeek Chat", efforts: [] }],
+        ["opencode/gpt-5.4-mini", { name: "GPT 5.4 Mini", efforts: [] }],
+      ]),
+    );
+    const result = autocompleteSlashCommand("/model ", listSlashCommands(), ctx);
+    expect(result?.suggestions).toContain("deepseek/deepseek-chat");
+    expect(result?.suggestions?.length).toBe(modelIdsForAgent("opencode").length);
+    clearOpencodeVariantCacheForTests();
   });
 
   it("lists all commands for bare slash without jumping to the first", () => {

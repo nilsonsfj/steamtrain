@@ -1,8 +1,13 @@
 import type { AgentId } from "../types/events";
-import { formatModelOption, type AgentModel } from "./agent-model";
+import { type AgentModel, formatModelOption } from "./agent-model";
 import { CLAUDE_MODELS } from "./claude";
-import { getOpencodeModelName, getOpencodeEfforts, refreshOpencodeVariantCache } from "./opencode-variants";
 import { OPENCODE_MODELS } from "./opencode";
+import {
+  getOpencodeEfforts,
+  getOpencodeModelName,
+  listOpencodeCachedAgentModels,
+  refreshOpencodeVariantCache,
+} from "./opencode-variants";
 
 /** All agent ids steamtrain can dispatch to. */
 export const AGENT_IDS: readonly AgentId[] = ["claude", "opencode"];
@@ -12,10 +17,21 @@ export function isAgentId(value: string): value is AgentId {
 }
 
 function opencodeModelsWithLiveNames(): readonly AgentModel[] {
-  return OPENCODE_MODELS.map((model) => ({
-    id: model.id,
-    name: getOpencodeModelName(model.id) ?? model.name,
-  }));
+  const byId = new Map<string, AgentModel>();
+
+  for (const model of listOpencodeCachedAgentModels()) {
+    byId.set(model.id, model);
+  }
+  for (const model of OPENCODE_MODELS) {
+    if (!byId.has(model.id)) {
+      byId.set(model.id, {
+        id: model.id,
+        name: getOpencodeModelName(model.id) ?? model.name,
+      });
+    }
+  }
+
+  return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** Model catalog for an agent provider (id + human-readable name). */
@@ -43,6 +59,9 @@ export function modelNameForAgent(agent: AgentId, modelId: string): string {
 
 /** Default model when switching to an agent without an explicit model. */
 export function defaultModelForAgent(agent: AgentId): string {
+  if (agent === "opencode") {
+    return OPENCODE_MODELS[0]?.id ?? agent;
+  }
   return modelIdsForAgent(agent)[0] ?? agent;
 }
 

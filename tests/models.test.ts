@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  defaultModelForAgent,
   effortForModelChange,
   effortsForModel,
   formatAgentTarget,
   formatModelDisplay,
+  modelIdsForAgent,
   modelNameForAgent,
   modelsForAgent,
   supportsEffort,
@@ -26,11 +28,23 @@ describe("model names", () => {
 
   it("prefers live OpenCode names from the variant cache", () => {
     setOpencodeVariantCacheForTests(
-      new Map([
-        ["opencode-go/glm-5", { name: "GLM-5 (live)", efforts: [] }],
-      ]),
+      new Map([["opencode-go/glm-5", { name: "GLM-5 (live)", efforts: [] }]]),
     );
     expect(modelNameForAgent("opencode", "opencode-go/glm-5")).toBe("GLM-5 (live)");
+    clearOpencodeVariantCacheForTests();
+  });
+
+  it("uses the live OpenCode catalog for autocomplete when cache is loaded", () => {
+    setOpencodeVariantCacheForTests(
+      new Map([
+        ["deepseek/deepseek-chat", { name: "DeepSeek Chat", efforts: [] }],
+        ["opencode/gpt-5.4-mini", { name: "GPT 5.4 Mini", efforts: ["high"] }],
+      ]),
+    );
+    const ids = modelIdsForAgent("opencode");
+    expect(ids).toContain("deepseek/deepseek-chat");
+    expect(ids).toContain("opencode/gpt-5.4-mini");
+    expect(defaultModelForAgent("opencode")).toBe("opencode/gpt-5.4-mini");
     clearOpencodeVariantCacheForTests();
   });
 
@@ -40,9 +54,9 @@ describe("model names", () => {
   });
 
   it("includes display names in formatAgentTarget", () => {
-    expect(
-      formatAgentTarget({ agent: "claude", model: "claude-sonnet-4-6", effort: "high" }),
-    ).toBe("claude/Claude Sonnet 4.6 (claude-sonnet-4-6) · high");
+    expect(formatAgentTarget({ agent: "claude", model: "claude-sonnet-4-6", effort: "high" })).toBe(
+      "claude/Claude Sonnet 4.6 (claude-sonnet-4-6) · high",
+    );
   });
 
   it("formats model display without agent prefix", () => {
@@ -83,17 +97,11 @@ describe("effortsForModel claude", () => {
 
 describe("effortForModelChange", () => {
   it("keeps effort when still valid for the new model", () => {
-    expect(
-      effortForModelChange("claude", "claude-opus-4-7", "high"),
-    ).toBe("high");
+    expect(effortForModelChange("claude", "claude-opus-4-7", "high")).toBe("high");
   });
 
   it("drops effort when unsupported on the new model", () => {
-    expect(
-      effortForModelChange("claude", "claude-sonnet-4-6", "xhigh"),
-    ).toBeUndefined();
-    expect(
-      effortForModelChange("claude", "claude-haiku-4-5", "high"),
-    ).toBeUndefined();
+    expect(effortForModelChange("claude", "claude-sonnet-4-6", "xhigh")).toBeUndefined();
+    expect(effortForModelChange("claude", "claude-haiku-4-5", "high")).toBeUndefined();
   });
 });

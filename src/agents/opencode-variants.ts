@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import type { AgentModel } from "./agent-model";
 import { fallbackOpencodeEfforts } from "./opencode-efforts-fallback";
 
 const CACHE_TTL_MS = 60 * 60 * 1000;
@@ -137,6 +138,14 @@ export function getOpencodeModelName(model: string): string | undefined {
   return getCachedModel(model)?.name;
 }
 
+/** Model catalog from a fresh `opencode models --verbose` cache (empty when unavailable). */
+export function listOpencodeCachedAgentModels(): readonly AgentModel[] {
+  if (!cacheIsFresh()) return [];
+  return [...cache!.models.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([id, info]) => ({ id, name: info.name }));
+}
+
 /** Effort levels for an OpenCode model: live cache first, static heuristics as fallback. */
 export function getOpencodeEfforts(model: string): readonly string[] {
   const cached = getCachedModel(model);
@@ -150,9 +159,7 @@ export function hasOpencodeVariantCache(): boolean {
 }
 
 /** @internal Test helper — inject a model cache without spawning OpenCode. */
-export function setOpencodeVariantCacheForTests(
-  models: Map<string, OpencodeModelInfo>,
-): void {
+export function setOpencodeVariantCacheForTests(models: Map<string, OpencodeModelInfo>): void {
   cache = { models, fetchedAt: Date.now(), binary: "opencode" };
 }
 
