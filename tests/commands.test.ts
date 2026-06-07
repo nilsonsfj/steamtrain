@@ -85,10 +85,53 @@ describe("executeSlashCommand", () => {
     expect(updateWorkspace).toHaveBeenCalledWith("plan", { model: "claude-opus-4-8" });
   });
 
-  it("rejects /model in workflow mode", () => {
+  it("warns /model in workflow mode without a selected step", () => {
     const result = executeSlashCommand("/model", makeCtx({ mode: "workflow" }));
     expect(result.handled).toBe(true);
     expect(result.handled && result.notices?.[0]?.level).toBe("warn");
+    expect(result.handled && result.notices?.[0]?.text).toContain("selected agent-backed workflow step");
+  });
+
+  it("sets model on a selected workflow step", () => {
+    const updateWorkflowStep = vi.fn();
+    const result = executeSlashCommand(
+      "/model claude-opus-4-8",
+      makeCtx({
+        mode: "workflow",
+        workflowStep: {
+          workflowName: "multi-plan",
+          stepId: "plan",
+          agent: "claude",
+          model: "claude-sonnet-4-6",
+        },
+        updateWorkflowStep,
+      }),
+    );
+    expect(result.handled).toBe(true);
+    expect(updateWorkflowStep).toHaveBeenCalledWith("plan", { model: "claude-opus-4-8" });
+  });
+
+  it("sets agent on a selected workflow step", () => {
+    const updateWorkflowStep = vi.fn();
+    const result = executeSlashCommand(
+      "/agent codex",
+      makeCtx({
+        mode: "workflow",
+        workflowStep: {
+          workflowName: "multi-plan",
+          stepId: "plan",
+          agent: "claude",
+          model: "claude-sonnet-4-6",
+        },
+        updateWorkflowStep,
+      }),
+    );
+    expect(result.handled).toBe(true);
+    expect(updateWorkflowStep).toHaveBeenCalledWith("plan", {
+      agent: "codex",
+      model: "gpt-5.5",
+      effort: undefined,
+    });
   });
 
   it("sets agent and default model for codex", () => {

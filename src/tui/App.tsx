@@ -29,8 +29,11 @@ import { STEAMTRAIN_VERSION } from "../version";
 import {
   type StepResult,
   WORKFLOW_CACHE_DIR,
+  applyWorkflowStepOverrides,
   createWorkflowCacheStore,
+  isAgentBackedStep,
   persistWorkflowStepDone,
+  type WorkflowStepOverrides,
   workflowCacheKey,
 } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId, WorkspaceScope } from "../workspace";
@@ -132,6 +135,9 @@ export function App({
   const [workflowIndex, setWorkflowIndex] = useState(0);
   const [stepIndex, setStepIndex] = useState(0);
   const [wfPreview, setWfPreview] = useState<{ name: string; input: string } | null>(null);
+  const [wfStepOverrides, setWfStepOverrides] = useState<Record<string, WorkflowStepOverrides>>(
+    {},
+  );
   const [wfLaunching, setWfLaunching] = useState(false);
   const [wfNotice, setWfNotice] = useState<string | null>(null);
   const [wfCanResume, setWfCanResume] = useState(false);
@@ -173,22 +179,32 @@ export function App({
     [workspaceScope],
   );
 
-  const slashCtx = useMemo<SlashCommandContext>(
-    () => ({
-      mode,
-      modes,
-      workspaces: runtimeWorkspaces,
-      workspaceMap,
-      updateWorkspace,
-      setMode: switchMode,
-      version: STEAMTRAIN_VERSION,
-    }),
-    [mode, modes, runtimeWorkspaces, workspaceMap, updateWorkspace, switchMode],
+  const patchWorkflowStep = useCallback(
+    (stepId: string, patch: Partial<Pick<WorkspaceEntry, "agent" | "model" | "effort">>) => {
+      if (!wfPreview) return;
+      setWfStepOverrides((prev) => ({
+        ...prev,
+        [wfPreview.name]: {
+          ...(prev[wfPreview.name] ?? {}),
+          [stepId]: { ...(prev[wfPreview.name]?.[stepId] ?? {}), ...patch },
+        },
+      }));
+    },
+    [wfPreview],
   );
 
   const orchestrator = useMemo(
     () => new Orchestrator(config, runtimeWorkspaces, doctor ?? []),
     [config, runtimeWorkspaces, doctor],
+  );
+
+  const resolveWorkflowSpec = useCallback(
+    (name: string) => {
+      const base = orchestrator.listWorkflows()[name];
+      if (!base) return undefined;
+      return applyWorkflowStepOverrides(base, wfStepOverrides[name]);
+    },
+    [orchestrator, wfStepOverrides],
   );
 
   const workflowEntries = useMemo(
@@ -241,6 +257,57 @@ export function App({
     };
   }, [config]);
 
+  const totalWfSteps = wf.phases.reduce((n, p) => n + p.steps.length, 0);
+  const previewSpec = wfPreview ? resolveWorkflowSpec(wfPreview.name) : undefined;
+  const previewFlatSteps = useMemo(
+    () => (previewSpec ? flattenSpecSteps(previewSpec) : []),
+    [previewSpec],
+  );
+  const previewStepCount = previewFlatSteps.length;
+  const previewSelectedStep =
+    previewFlatSteps.length > 0
+      ? previewFlatSteps[Math.min(stepIndex, previewFlatSteps.length - 1)]
+      : undefined;
+  const previewStepSelection = useMemo(() => {
+    if (!wfPreview || !previewSelectedStep) return undefined;
+    const step = previewSelectedStep.step;
+    if (!isAgentBackedStep(step)) return undefined;
+    return {
+      workflowName: wfPreview.name,
+      stepId: step.id,
+      agent: step.agent,
+      model: step.model,
+      effort: step.effort,
+    };
+  }, [wfPreview, previewSelectedStep]);
+  const previewDispatchCheck =
+    previewSpec ? orchestrator.canDispatchWorkflowSpec(previewSpec) : null;
+
+  const slashCtx = useMemo<SlashCommandContext>(
+    () => ({
+      mode,
+      modes,
+      workspaces: runtimeWorkspaces,
+      workspaceMap,
+      updateWorkspace,
+      setMode: switchMode,
+      version: STEAMTRAIN_VERSION,
+      workflowStep: previewStepSelection,
+      updateWorkflowStep: wfPreview ? patchWorkflowStep : undefined,
+    }),
+    [
+      mode,
+      modes,
+      runtimeWorkspaces,
+      workspaceMap,
+      updateWorkspace,
+      switchMode,
+      wfPreview,
+      patchWorkflowStep,
+      previewStepSelection,
+    ],
+  );
+
   // Refresh an open /model completion menu once the live OpenCode catalog loads.
   useEffect(() => {
     if (agentCatalogTick === 0) return;
@@ -252,15 +319,6 @@ export function App({
     setCommandSuggestions(result.suggestions);
     setSuggestionIndex((i) => Math.min(i, result.suggestions.length - 1));
   }, [agentCatalogTick, value, slashCtx]);
-
-  const totalWfSteps = wf.phases.reduce((n, p) => n + p.steps.length, 0);
-  const previewSpec = wfPreview ? orchestrator.listWorkflows()[wfPreview.name] : undefined;
-  const previewFlatSteps = useMemo(
-    () => (previewSpec ? flattenSpecSteps(previewSpec) : []),
-    [previewSpec],
-  );
-  const previewStepCount = previewFlatSteps.length;
-  const previewDispatchCheck = wfPreview ? orchestrator.canDispatchWorkflow(wfPreview.name) : null;
 
   useEffect(() => {
     if (mode !== "workflow" || running) {
@@ -288,7 +346,7 @@ export function App({
       return;
     }
 
-    const spec = orchestrator.listWorkflows()[wfPreview.name];
+    const spec = resolveWorkflowSpec(wfPreview.name);
     if (!spec) {
       setWfCanResume(false);
       return;
@@ -302,7 +360,7 @@ export function App({
     return () => {
       active = false;
     };
-  }, [mode, running, wf.started, wfLaunching, wfPreview, value, orchestrator]);
+  }, [mode, running, wf.started, wfLaunching, wfPreview, value, orchestrator, resolveWorkflowSpec]);
 
   const runWorkflow = useCallback(
     (
@@ -310,7 +368,12 @@ export function App({
       input: string,
       opts?: { reuseMemoryCache?: boolean; fresh?: boolean },
     ): boolean => {
-      const check = orchestrator.canDispatchWorkflow(name);
+      const spec = resolveWorkflowSpec(name);
+      if (!spec) {
+        setWfNotice(`unknown workflow '${name}'`);
+        return false;
+      }
+      const check = orchestrator.canDispatchWorkflowSpec(spec);
       if (!check.ok) {
         setWfNotice(`cannot run '${name}': ${check.reason}`);
         return false;
@@ -323,13 +386,6 @@ export function App({
       abortRef.current = ac;
 
       void (async () => {
-        const spec = orchestrator.listWorkflows()[name];
-        if (!spec) {
-          setWfNotice(`unknown workflow '${name}'`);
-          setRunning(false);
-          setWfLaunching(false);
-          return;
-        }
         const store = cacheStoreRef.current;
         const cwd = process.cwd();
         const key = workflowCacheKey(name, input, cwd, spec);
@@ -341,7 +397,14 @@ export function App({
             workflowCacheRef.current = await store.load(key);
           }
           const cache = workflowCacheRef.current;
-          for await (const event of orchestrator.runWorkflow(name, input, ac.signal, cache, cwd)) {
+          for await (const event of orchestrator.runWorkflow(
+            name,
+            input,
+            ac.signal,
+            cache,
+            cwd,
+            spec,
+          )) {
             if (!mountedRef.current) return;
             wfDispatch({ type: "event", event });
             if (event.kind === "step_done") {
@@ -367,7 +430,7 @@ export function App({
       })();
       return true;
     },
-    [orchestrator],
+    [orchestrator, resolveWorkflowSpec],
   );
 
   const bumpCursorToEnd = useCallback(() => {
@@ -510,15 +573,25 @@ export function App({
     const parsed = parseSlashInput(value);
     if (!parsed) return undefined;
 
-    if (parsed.command === "model" && isWorkspaceMode(mode)) {
-      const entry = workspaceMap.get(mode);
-      if (!entry) return undefined;
-      void agentCatalogTick;
-      const map = new Map<string, string>();
-      for (const model of modelsForAgent(entry.agent)) {
-        if (model.name !== model.id) map.set(model.id, model.name);
+    if (parsed.command === "model") {
+      if (isWorkspaceMode(mode)) {
+        const entry = workspaceMap.get(mode);
+        if (!entry) return undefined;
+        void agentCatalogTick;
+        const map = new Map<string, string>();
+        for (const model of modelsForAgent(entry.agent)) {
+          if (model.name !== model.id) map.set(model.id, model.name);
+        }
+        return map.size > 0 ? map : undefined;
       }
-      return map.size > 0 ? map : undefined;
+      if (previewStepSelection) {
+        void agentCatalogTick;
+        const map = new Map<string, string>();
+        for (const model of modelsForAgent(previewStepSelection.agent)) {
+          if (model.name !== model.id) map.set(model.id, model.name);
+        }
+        return map.size > 0 ? map : undefined;
+      }
     }
 
     const body = value.trimStart().slice(1);
@@ -529,7 +602,7 @@ export function App({
       map.set(c.name, c.description);
     }
     return map;
-  }, [value, suggestionMenuOpen, mode, workspaceMap, agentCatalogTick]);
+  }, [value, suggestionMenuOpen, mode, workspaceMap, agentCatalogTick, previewStepSelection]);
 
   const launchWorkflow = useCallback(
     (name: string, prompt: string, opts?: { reuseMemoryCache?: boolean; fresh?: boolean }) => {
