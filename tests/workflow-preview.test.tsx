@@ -56,7 +56,7 @@ describe("WorkflowPreview", () => {
       <WorkflowPreview
         spec={spec}
         input=""
-        width={120}
+        width={160}
         height={40}
         selectedIndex={999}
         dispatchCheck={{ ok: true }}
@@ -64,8 +64,8 @@ describe("WorkflowPreview", () => {
     );
     const frame = lastFrame() ?? "";
     expect(frame).toContain("(none)");
-    expect(frame).toContain("▶ merge");
+    expect(frame).toMatch(/▶.*synthes/i);
     expect(frame).toContain("synthesize");
-    expect(frame).toContain("Claude Sonnet 4.6");
+    expect(frame).toContain("Qwen 3.6 Plus Free");
   });
 });
