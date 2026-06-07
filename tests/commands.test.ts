@@ -91,6 +91,16 @@ describe("executeSlashCommand", () => {
     expect(result.handled && result.notices?.[0]?.level).toBe("warn");
   });
 
+  it("sets agent and default model for codex", () => {
+    const updateWorkspace = vi.fn();
+    const result = executeSlashCommand("/agent codex", makeCtx({ updateWorkspace }));
+    expect(result.handled).toBe(true);
+    expect(updateWorkspace).toHaveBeenCalledWith("plan", {
+      agent: "codex",
+      model: "gpt-5.5",
+    });
+  });
+
   it("sets agent and default model", () => {
     const updateWorkspace = vi.fn();
     const result = executeSlashCommand("/agent opencode", makeCtx({ updateWorkspace }));
@@ -191,7 +201,7 @@ describe("executeSlashCommand", () => {
   it("rejects unknown effort for current agent", () => {
     const result = executeSlashCommand("/effort definitely-invalid", makeCtx());
     expect(result.handled).toBe(true);
-    expect(result.notices?.[0]?.level).toBe("error");
+    expect(result.handled && result.notices?.[0]?.level).toBe("error");
   });
 
   it("rejects xhigh for sonnet 4.6", () => {
@@ -206,7 +216,7 @@ describe("executeSlashCommand", () => {
       }),
     );
     expect(result.handled).toBe(true);
-    expect(result.notices?.[0]?.level).toBe("error");
+    expect(result.handled && result.notices?.[0]?.level).toBe("error");
     expect(updateWorkspace).not.toHaveBeenCalled();
   });
 

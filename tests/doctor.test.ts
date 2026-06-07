@@ -1,0 +1,14 @@
+import { describe, expect, it } from "vitest";
+import { checkAgent } from "../src/doctor/doctor";
+
+describe("checkAgent codex", () => {
+  it("reports missing binary with an install hint", async () => {
+    const result = await checkAgent("codex", "__steamtrain_missing_codex__");
+    expect(result).toMatchObject({
+      agent: "codex",
+      status: "binary_missing",
+      binary: "__steamtrain_missing_codex__",
+    });
+    expect(result.detail).toContain("npm i -g @openai/codex");
+  });
+});

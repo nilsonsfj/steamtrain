@@ -29,6 +29,7 @@ export const EVENT_STYLE = {
 export const AGENT_COLOR: Record<string, string> = {
   claude: "magenta",
   opencode: "blue",
+  codex: "green",
 };
 
 /** Solid backdrop for the slash-command completion popup (overlays content above the prompt). */

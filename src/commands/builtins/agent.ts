@@ -5,7 +5,7 @@ import type { SlashCommand } from "../types";
 export const agentCommand: SlashCommand = {
   name: "agent",
   description: "Set or list agents for the current workspace tab",
-  usage: "/agent [claude|opencode]",
+  usage: "/agent [claude|opencode|codex]",
   execute(args, ctx) {
     if (!isWorkspaceMode(ctx.mode)) {
       return {
