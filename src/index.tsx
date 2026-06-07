@@ -1,6 +1,7 @@
 import { render } from "ink";
 import { parseGlobalArgs, runCli } from "./cli";
 import { loadConfig } from "./config";
+import { loadSettings } from "./settings";
 import { App } from "./tui/App";
 import { loadWorkspaceConfig, workspaceScopeLabel } from "./workspace";
 
@@ -28,7 +29,12 @@ async function main(): Promise<void> {
   }
 
   const { config, source, warning } = loadConfig();
-  const { config: workspaces, scope, warning: workspaceWarning } = loadWorkspaceConfig({
+  const { settings, warning: settingsWarning } = loadSettings();
+  const {
+    config: workspaces,
+    scope,
+    warning: workspaceWarning,
+  } = loadWorkspaceConfig({
     customPath: workspacePath,
   });
   const app = render(
@@ -36,6 +42,8 @@ async function main(): Promise<void> {
       config={config}
       configSource={source}
       configWarning={warning}
+      settings={settings}
+      settingsWarning={settingsWarning}
       workspaces={workspaces}
       workspaceScope={scope}
       workspaceLabel={workspaceScopeLabel(scope)}

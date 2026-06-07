@@ -7,6 +7,7 @@ interface PromptInputProps {
   onSubmit: (value: string) => void;
   onTab?: () => void;
   onSuggestionNavigate?: (direction: "up" | "down") => void;
+  onHistoryNavigate?: (direction: "up" | "down") => boolean;
   focus: boolean;
   running: boolean;
   suggestions?: readonly string[];
@@ -20,6 +21,7 @@ export function PromptInput({
   onSubmit,
   onTab,
   onSuggestionNavigate,
+  onHistoryNavigate,
   focus,
   running,
   suggestions,
@@ -47,6 +49,15 @@ export function PromptInput({
       }
     },
     { isActive: focus && slashInput && (!!onTab || (menuOpen && !!onSuggestionNavigate)) },
+  );
+
+  useInput(
+    (_input, key) => {
+      if (!onHistoryNavigate) return;
+      if (key.upArrow && onHistoryNavigate("up")) return;
+      if (key.downArrow && onHistoryNavigate("down")) return;
+    },
+    { isActive: focus && !menuOpen && !!onHistoryNavigate },
   );
 
   return (

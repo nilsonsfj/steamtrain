@@ -1,9 +1,18 @@
 import { join } from "node:path";
 import { Box, Text, useApp, useInput } from "ink";
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { formatAgentTarget } from "../agents";
 import { refreshOpencodeVariantCache } from "../agents/models";
 import {
+  type SlashCommandContext,
   applySlashSuggestion,
   autocompleteSlashCommand,
   executeSlashCommand,
@@ -15,6 +24,7 @@ import {
 import type { SteamtrainConfig } from "../config";
 import { type DoctorResult, runDoctor } from "../doctor";
 import { Orchestrator } from "../orchestrator";
+import { DEFAULT_PROMPT_HISTORY_LIMIT, type SteamtrainSettings } from "../settings";
 import { STEAMTRAIN_VERSION } from "../version";
 import {
   type StepResult,
@@ -24,7 +34,11 @@ import {
   workflowCacheKey,
 } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId, WorkspaceScope } from "../workspace";
-import { saveWorkspaceConfig, workspaceById, workspaceLabel as formatEntryLabel } from "../workspace";
+import {
+  workspaceLabel as formatEntryLabel,
+  saveWorkspaceConfig,
+  workspaceById,
+} from "../workspace";
 import { CommandSuggestionMenu, suggestionMenuHeight } from "./CommandSuggestionMenu";
 import { EventStream } from "./EventStream";
 import { PromptInput } from "./PromptInput";
@@ -35,6 +49,15 @@ import { WorkflowPreview } from "./WorkflowPreview";
 import { WorkflowView } from "./WorkflowView";
 import { Banner } from "./banner";
 import { type Mode, buildModes, nextMode } from "./modes";
+import {
+  type PromptHistoryBrowse,
+  type PromptHistoryByMode,
+  initialPromptHistoryBrowse,
+  navigatePromptHistory,
+  pushPromptHistory,
+  shouldPromptHistoryCaptureDown,
+  shouldPromptHistoryCaptureUp,
+} from "./prompt-history";
 import {
   shouldApplySuggestionOnSubmit,
   shouldDismissSuggestionMenu,
@@ -49,6 +72,8 @@ interface AppProps {
   config: SteamtrainConfig;
   configSource: string;
   configWarning?: string;
+  settings: SteamtrainSettings;
+  settingsWarning?: string;
   workspaces: WorkspaceConfig;
   workspaceScope: WorkspaceScope;
   workspaceLabel: string;
@@ -62,6 +87,8 @@ export function App({
   config,
   configSource,
   configWarning,
+  settings,
+  settingsWarning,
   workspaces,
   workspaceScope,
   workspaceLabel,
@@ -81,6 +108,13 @@ export function App({
   const [cursorResetKey, setCursorResetKey] = useState(0);
   const [running, setRunning] = useState(false);
   const [transcript, dispatch] = useReducer(transcriptReducer, initialTranscript);
+  const [promptHistoryByMode, setPromptHistoryByMode] = useState<PromptHistoryByMode>(
+    () => new Map(),
+  );
+  const [historyBrowse, setHistoryBrowse] = useState<PromptHistoryBrowse>(
+    initialPromptHistoryBrowse,
+  );
+  const promptHistoryLimit = settings.promptHistoryLimit ?? DEFAULT_PROMPT_HISTORY_LIMIT;
 
   // Workflow mode state.
   const [wf, wfDispatch] = useReducer(workflowReducer, initialWorkflowState);
@@ -99,16 +133,24 @@ export function App({
   const modes = useMemo(() => buildModes(runtimeWorkspaces), [runtimeWorkspaces]);
   const workspaceMap = useMemo(() => workspaceById(runtimeWorkspaces), [runtimeWorkspaces]);
 
-  const updateWorkspace = useCallback((id: WorkspaceId, patch: Partial<WorkspaceEntry>) => {
-    const next: WorkspaceConfig = {
-      workspaces: runtimeWorkspacesRef.current.workspaces.map((w) =>
-        w.id === id ? { ...w, ...patch } : w,
-      ),
-    };
-    const label = saveWorkspaceConfig(next, workspaceScope);
-    setActiveWorkspaceLabel(label);
-    setRuntimeWorkspaces(next);
-  }, [workspaceScope]);
+  const setModeWithHistoryReset = useCallback((next: SetStateAction<Mode>) => {
+    setMode(next);
+    setHistoryBrowse(initialPromptHistoryBrowse);
+  }, []);
+
+  const updateWorkspace = useCallback(
+    (id: WorkspaceId, patch: Partial<WorkspaceEntry>) => {
+      const next: WorkspaceConfig = {
+        workspaces: runtimeWorkspacesRef.current.workspaces.map((w) =>
+          w.id === id ? { ...w, ...patch } : w,
+        ),
+      };
+      const label = saveWorkspaceConfig(next, workspaceScope);
+      setActiveWorkspaceLabel(label);
+      setRuntimeWorkspaces(next);
+    },
+    [workspaceScope],
+  );
 
   const slashCtx = useMemo<SlashCommandContext>(
     () => ({
@@ -117,10 +159,10 @@ export function App({
       workspaces: runtimeWorkspaces,
       workspaceMap,
       updateWorkspace,
-      setMode,
+      setMode: setModeWithHistoryReset,
       version: STEAMTRAIN_VERSION,
     }),
-    [mode, modes, runtimeWorkspaces, workspaceMap, updateWorkspace],
+    [mode, modes, runtimeWorkspaces, workspaceMap, updateWorkspace, setModeWithHistoryReset],
   );
 
   const orchestrator = useMemo(
@@ -148,6 +190,9 @@ export function App({
   useEffect(() => {
     if (workspaceWarning) dispatch({ type: "notice", level: "warn", text: workspaceWarning });
   }, [workspaceWarning]);
+  useEffect(() => {
+    if (settingsWarning) dispatch({ type: "notice", level: "warn", text: settingsWarning });
+  }, [settingsWarning]);
 
   // Show the banner briefly, then hand over to the main UI.
   useEffect(() => {
@@ -253,7 +298,42 @@ export function App({
     setValue(next);
     setCommandSuggestions([]);
     setSuggestionIndex(0);
+    setHistoryBrowse(initialPromptHistoryBrowse);
   }, []);
+
+  const recordPromptHistory = useCallback(
+    (raw: string) => {
+      setPromptHistoryByMode((prev) => pushPromptHistory(prev, mode, raw, promptHistoryLimit));
+      setHistoryBrowse(initialPromptHistoryBrowse);
+    },
+    [mode, promptHistoryLimit],
+  );
+
+  const handleHistoryNavigate = useCallback(
+    (direction: "up" | "down"): boolean => {
+      if (direction === "up") {
+        if (!shouldPromptHistoryCaptureUp(promptHistoryByMode, mode, value, historyBrowse)) {
+          return false;
+        }
+      } else if (!shouldPromptHistoryCaptureDown(historyBrowse)) {
+        return false;
+      }
+
+      const result = navigatePromptHistory(
+        promptHistoryByMode,
+        historyBrowse,
+        mode,
+        value,
+        direction,
+      );
+      if (!result) return false;
+      setValue(result.value);
+      setHistoryBrowse({ browseIndex: result.browseIndex, draft: result.draft });
+      bumpCursorToEnd();
+      return true;
+    },
+    [promptHistoryByMode, mode, value, historyBrowse, bumpCursorToEnd],
+  );
 
   const handleTab = useCallback(() => {
     if (!isSlashCommandInput(value)) return;
@@ -452,9 +532,10 @@ export function App({
         handleTab();
         return;
       }
+      recordPromptHistory(raw);
       handleSubmit(raw);
     },
-    [commandSuggestions, handleTab, handleSubmit],
+    [commandSuggestions, handleTab, handleSubmit, recordPromptHistory],
   );
 
   useInput((input, key) => {
@@ -496,11 +577,14 @@ export function App({
     if (key.tab && !key.shift && !running && !isSlashCommandInput(value)) {
       setWfPreview(null);
       setWfLaunching(false);
-      setMode((prev) => nextMode(prev, modes));
+      setModeWithHistoryReset((prev) => nextMode(prev, modes));
       return;
     }
     const menuOpen = shouldSuppressWorkflowNavigation(commandSuggestions, value);
-    if (mode === "workflow" && !menuOpen) {
+    const historyUp =
+      !menuOpen && shouldPromptHistoryCaptureUp(promptHistoryByMode, mode, value, historyBrowse);
+    const historyDown = !menuOpen && shouldPromptHistoryCaptureDown(historyBrowse);
+    if (mode === "workflow" && !menuOpen && !historyUp && !historyDown) {
       if (key.upArrow) {
         if (wf.started || wfLaunching) setStepIndex((i) => Math.max(0, i - 1));
         else if (wfPreview) setStepIndex((i) => Math.max(0, i - 1));
@@ -604,6 +688,7 @@ export function App({
           onSubmit={handlePromptSubmit}
           onTab={handleTab}
           onSuggestionNavigate={handleSuggestionNavigate}
+          onHistoryNavigate={handleHistoryNavigate}
           focus
           running={running}
           suggestions={commandSuggestions}
@@ -628,17 +713,18 @@ function hint(
   suggestionMenuOpen: boolean,
 ): string {
   const completeHint = suggestionMenuOpen ? " · ↑/↓ complete · Tab/Enter pick · Esc cancel" : "";
+  const historyHint = " · ↑/↓ history";
   if (running) return "Esc cancel · /exit quit · Ctrl+C quit";
   if (mode === "workflow") {
     if (wfStarted || wfLaunching) {
-      return `↑/↓ step · Enter resume · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step/history · Enter resume · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
     }
     if (wfPreviewing) {
-      return `↑/↓ step · Enter run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step/history · Enter run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
     }
-    return `↑/↓ pick · Enter preview · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+    return `↑/↓ pick/history · Enter preview · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
   }
-  return `Enter dispatch · Tab switch mode · /commands (Tab complete) · Ctrl+C quit${completeHint}`;
+  return `Enter dispatch${historyHint} · Tab switch mode · /commands (Tab complete) · Ctrl+C quit${completeHint}`;
 }
 
 function message(err: unknown): string {
