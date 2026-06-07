@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   initialPromptHistoryBrowse,
+  isPromptArrowActive,
   navigatePromptHistory,
   pushPromptHistory,
+  shouldPromptHistoryArrows,
   shouldPromptHistoryCaptureDown,
   shouldPromptHistoryCaptureUp,
 } from "../src/tui/prompt-history";
@@ -71,8 +73,32 @@ describe("navigatePromptHistory", () => {
   });
 });
 
+describe("isPromptArrowActive", () => {
+  const listCtx = { deferToListNavigation: true, promptEditing: false };
+
+  it("is always active outside workflow list navigation", () => {
+    expect(isPromptArrowActive(undefined, "", initialPromptHistoryBrowse)).toBe(true);
+    expect(
+      isPromptArrowActive({ deferToListNavigation: false, promptEditing: false }, "", initialPromptHistoryBrowse),
+    ).toBe(true);
+  });
+
+  it("follows prompt editing on workflow surfaces", () => {
+    expect(isPromptArrowActive(listCtx, "", initialPromptHistoryBrowse)).toBe(false);
+    expect(isPromptArrowActive(listCtx, "typing", initialPromptHistoryBrowse)).toBe(false);
+    expect(
+      isPromptArrowActive({ deferToListNavigation: true, promptEditing: true }, "", initialPromptHistoryBrowse),
+    ).toBe(true);
+    expect(
+      isPromptArrowActive({ deferToListNavigation: true, promptEditing: true }, "typing", initialPromptHistoryBrowse),
+    ).toBe(true);
+  });
+});
+
 describe("shouldPromptHistoryCaptureUp", () => {
   const byMode = new Map([["plan", ["one"]]]);
+  const listCtx = { deferToListNavigation: true, promptEditing: false };
+  const editingCtx = { deferToListNavigation: true, promptEditing: true };
 
   it("captures when browsing, typing, or history exists", () => {
     expect(shouldPromptHistoryCaptureUp(byMode, "plan", "", initialPromptHistoryBrowse)).toBe(true);
@@ -89,11 +115,68 @@ describe("shouldPromptHistoryCaptureUp", () => {
       false,
     );
   });
+
+  it("defers to list navigation until the prompt is being edited", () => {
+    const wfHistory = new Map([["workflow", ["one"]]]);
+    expect(
+      shouldPromptHistoryCaptureUp(wfHistory, "workflow", "", initialPromptHistoryBrowse, listCtx),
+    ).toBe(false);
+    expect(
+      shouldPromptHistoryCaptureUp(wfHistory, "workflow", "", initialPromptHistoryBrowse, editingCtx),
+    ).toBe(true);
+    expect(
+      shouldPromptHistoryCaptureUp(
+        wfHistory,
+        "workflow",
+        "typing",
+        initialPromptHistoryBrowse,
+        listCtx,
+      ),
+    ).toBe(false);
+    expect(
+      shouldPromptHistoryCaptureUp(
+        wfHistory,
+        "workflow",
+        "typing",
+        initialPromptHistoryBrowse,
+        editingCtx,
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("shouldPromptHistoryCaptureDown", () => {
+  const listCtx = { deferToListNavigation: true, promptEditing: false };
+  const editingCtx = { deferToListNavigation: true, promptEditing: true };
+
   it("captures only while browsing history", () => {
     expect(shouldPromptHistoryCaptureDown(initialPromptHistoryBrowse)).toBe(false);
     expect(shouldPromptHistoryCaptureDown({ browseIndex: 0, draft: "" })).toBe(true);
+  });
+
+  it("defers to list navigation until the prompt is being edited", () => {
+    expect(shouldPromptHistoryCaptureDown({ browseIndex: 0, draft: "" }, listCtx)).toBe(false);
+    expect(shouldPromptHistoryCaptureDown({ browseIndex: 0, draft: "" }, editingCtx)).toBe(true);
+  });
+});
+
+describe("shouldPromptHistoryArrows", () => {
+  it("is always on outside workflow list navigation", () => {
+    expect(shouldPromptHistoryArrows(undefined)).toBe(true);
+    expect(
+      shouldPromptHistoryArrows({ deferToListNavigation: false, promptEditing: false }),
+    ).toBe(true);
+  });
+
+  it("follows prompt editing on workflow surfaces", () => {
+    expect(
+      shouldPromptHistoryArrows({ deferToListNavigation: true, promptEditing: false }),
+    ).toBe(false);
+    expect(
+      shouldPromptHistoryArrows({ deferToListNavigation: true, promptEditing: true }),
+    ).toBe(true);
+    expect(
+      shouldPromptHistoryArrows({ deferToListNavigation: true, promptEditing: false }, "text"),
+    ).toBe(false);
   });
 });

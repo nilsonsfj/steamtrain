@@ -16,7 +16,7 @@ export function WorkflowPicker({ workflows, selectedIndex, height }: WorkflowPic
         <Text color="cyan" bold>
           workflows
         </Text>
-        <Text color="gray">↑/↓ select · Enter preview · Ctrl+R run · input below</Text>
+        <Text color="gray">↑/↓ select · / edit · Ctrl+R run</Text>
       </Box>
       <Box flexDirection="column" flexGrow={1}>
         {workflows.length === 0 ? (

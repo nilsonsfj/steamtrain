@@ -73,19 +73,51 @@ export function navigatePromptHistory(
   return { value: browse.draft, browseIndex: null, draft: browse.draft };
 }
 
+export interface PromptArrowContext {
+  /** When true, ↑/↓ serve a list above the prompt unless the user is editing it. */
+  deferToListNavigation: boolean;
+  promptEditing: boolean;
+}
+
+/** Whether the prompt owns ↑/↓ instead of a list above it. */
+export function isPromptArrowActive(
+  ctx: PromptArrowContext | undefined,
+  _value: string,
+  _browse: PromptHistoryBrowse,
+): boolean {
+  if (!ctx?.deferToListNavigation) return true;
+  return ctx.promptEditing;
+}
+
 /** Whether ↑ should navigate prompt history instead of other UI (e.g. workflow picker). */
 export function shouldPromptHistoryCaptureUp(
   byMode: PromptHistoryByMode,
   mode: string,
   value: string,
   browse: PromptHistoryBrowse,
+  ctx?: PromptArrowContext,
 ): boolean {
+  if (!isPromptArrowActive(ctx, value, browse)) return false;
   if (browse.browseIndex !== null) return true;
   if (value.length > 0) return true;
   return (byMode.get(mode)?.length ?? 0) > 0;
 }
 
+/** Whether prompt ↑/↓ history navigation is active for the current surface. */
+export function shouldPromptHistoryArrows(
+  ctx: PromptArrowContext | undefined,
+  value = "",
+  browse: PromptHistoryBrowse = initialPromptHistoryBrowse,
+): boolean {
+  return isPromptArrowActive(ctx, value, browse);
+}
+
 /** Whether ↓ should navigate prompt history instead of other UI. */
-export function shouldPromptHistoryCaptureDown(browse: PromptHistoryBrowse): boolean {
+export function shouldPromptHistoryCaptureDown(
+  browse: PromptHistoryBrowse,
+  ctx?: PromptArrowContext,
+  value = "",
+): boolean {
+  if (!isPromptArrowActive(ctx, value, browse)) return false;
   return browse.browseIndex !== null;
 }

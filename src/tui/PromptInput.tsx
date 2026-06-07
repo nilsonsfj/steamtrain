@@ -11,6 +11,8 @@ interface PromptInputProps {
   onSuggestionNavigate?: (direction: "up" | "down") => void;
   onHistoryNavigate?: (direction: "up" | "down") => boolean;
   focus: boolean;
+  /** Bright border while the prompt owns ↑/↓ (history); dim while a list above does. */
+  editing?: boolean;
   running: boolean;
   suggestions?: readonly string[];
   cursorResetKey?: number;
@@ -35,6 +37,7 @@ export function PromptInput({
   onSuggestionNavigate,
   onHistoryNavigate,
   focus,
+  editing = true,
   running,
   suggestions,
   cursorResetKey = 0,
@@ -80,7 +83,7 @@ export function PromptInput({
         }
       }
     },
-    { isActive: focus && slashInput && (!!onTab || (menuOpen && !!onSuggestionNavigate)) },
+    { isActive: focus && editing && slashInput && (!!onTab || (menuOpen && !!onSuggestionNavigate)) },
   );
 
   useInput(
@@ -94,7 +97,7 @@ export function PromptInput({
 
   return (
     <Box flexDirection="column">
-      <Box borderStyle="round" borderColor={focus ? "cyan" : "gray"} paddingX={1}>
+      <Box borderStyle="round" borderColor={focus && editing ? "cyan" : "gray"} paddingX={1}>
         <Text color={running ? "yellow" : "cyan"} bold>
           {running ? "… " : "❯ "}
         </Text>
@@ -107,7 +110,9 @@ export function PromptInput({
           placeholder={
             running
               ? "/exit to quit · Esc to cancel"
-              : "describe the task, or /command (Tab to complete)"
+              : editing
+                ? "describe the task, or /command (Tab to complete)"
+                : "/ to edit · describe the task"
           }
         />
       </Box>

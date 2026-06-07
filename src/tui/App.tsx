@@ -49,12 +49,15 @@ import { WorkflowPreview } from "./WorkflowPreview";
 import { WorkflowView } from "./WorkflowView";
 import { Banner } from "./banner";
 import { type Mode, buildModes, isWorkspaceMode, nextMode } from "./modes";
+import { workflowListNavigation } from "./prompt-editing";
 import {
+  type PromptArrowContext,
   type PromptHistoryBrowse,
   type PromptHistoryByMode,
   initialPromptHistoryBrowse,
   navigatePromptHistory,
   pushPromptHistory,
+  shouldPromptHistoryArrows,
   shouldPromptHistoryCaptureDown,
   shouldPromptHistoryCaptureUp,
 } from "./prompt-history";
@@ -114,6 +117,7 @@ export function App({
   const [historyBrowse, setHistoryBrowse] = useState<PromptHistoryBrowse>(
     initialPromptHistoryBrowse,
   );
+  const [promptEditing, setPromptEditing] = useState(false);
   const promptHistoryLimit = settings.promptHistoryLimit ?? DEFAULT_PROMPT_HISTORY_LIMIT;
   const [opencodeCatalogTick, setOpencodeCatalogTick] = useState(0);
 
@@ -138,6 +142,7 @@ export function App({
   const setModeWithHistoryReset = useCallback((next: SetStateAction<Mode>) => {
     setMode(next);
     setHistoryBrowse(initialPromptHistoryBrowse);
+    setPromptEditing(false);
   }, []);
 
   const updateWorkspace = useCallback(
@@ -359,12 +364,30 @@ export function App({
     setCursorResetKey((k) => k + 1);
   }, []);
 
+  const exitPromptEditing = useCallback(() => {
+    if (historyBrowse.browseIndex !== null) setValue(historyBrowse.draft);
+    setHistoryBrowse(initialPromptHistoryBrowse);
+    setCommandSuggestions([]);
+    setSuggestionIndex(0);
+    setPromptEditing(false);
+    bumpCursorToEnd();
+  }, [historyBrowse, bumpCursorToEnd]);
+
+  const promptArrowCtx = useMemo<PromptArrowContext>(
+    () => ({
+      deferToListNavigation: workflowListNavigation(mode),
+      promptEditing,
+    }),
+    [mode, promptEditing],
+  );
+
   const handleValueChange = useCallback((next: string) => {
+    if (next !== value) setPromptEditing(true);
     setValue(next);
     setCommandSuggestions([]);
     setSuggestionIndex(0);
     setHistoryBrowse(initialPromptHistoryBrowse);
-  }, []);
+  }, [value]);
 
   const recordPromptHistory = useCallback(
     (raw: string) => {
@@ -377,10 +400,18 @@ export function App({
   const handleHistoryNavigate = useCallback(
     (direction: "up" | "down"): boolean => {
       if (direction === "up") {
-        if (!shouldPromptHistoryCaptureUp(promptHistoryByMode, mode, value, historyBrowse)) {
+        if (
+          !shouldPromptHistoryCaptureUp(
+            promptHistoryByMode,
+            mode,
+            value,
+            historyBrowse,
+            promptArrowCtx,
+          )
+        ) {
           return false;
         }
-      } else if (!shouldPromptHistoryCaptureDown(historyBrowse)) {
+      } else if (!shouldPromptHistoryCaptureDown(historyBrowse, promptArrowCtx, value)) {
         return false;
       }
 
@@ -397,8 +428,10 @@ export function App({
       bumpCursorToEnd();
       return true;
     },
-    [promptHistoryByMode, mode, value, historyBrowse, bumpCursorToEnd],
+    [promptHistoryByMode, mode, value, historyBrowse, promptArrowCtx, bumpCursorToEnd],
   );
+
+  const promptHistoryArrows = shouldPromptHistoryArrows(promptArrowCtx, value, historyBrowse);
 
   const handleTab = useCallback(() => {
     if (!isSlashCommandInput(value)) return;
@@ -493,38 +526,39 @@ export function App({
   );
 
   const handleWorkflowRun = useCallback(
-    (prompt: string, fresh: boolean) => {
-      if (running || mode !== "workflow") return;
+    (prompt: string, fresh: boolean): boolean => {
+      if (running || mode !== "workflow") return false;
 
       if (wf.started && activeWorkflowRef.current) {
-        if (prompt.length === 0) return;
+        if (prompt.length === 0) return false;
         if (!fresh) {
-          if (activeWorkflowInputRef.current !== prompt) return;
-          if (workflowCacheRef.current.size === 0) return;
+          if (activeWorkflowInputRef.current !== prompt) return false;
+          if (workflowCacheRef.current.size === 0) return false;
           runWorkflow(activeWorkflowRef.current, prompt, { reuseMemoryCache: true });
-          return;
+          return true;
         }
         launchWorkflow(activeWorkflowRef.current, prompt, { fresh: true });
-        return;
+        return true;
       }
 
       if (wfPreview) {
         if (prompt.length === 0) {
           setWfNotice("type input in the prompt before running");
-          return;
+          return false;
         }
-        if (!fresh && !wfCanResume) return;
+        if (!fresh && !wfCanResume) return false;
         launchWorkflow(wfPreview.name, prompt, fresh ? { fresh: true } : undefined);
-        return;
+        return true;
       }
 
       const entry = workflowEntries[workflowIndex];
-      if (!entry) return;
+      if (!entry) return false;
       if (prompt.length === 0) {
         setWfNotice("type input in the prompt before running");
-        return;
+        return false;
       }
       launchWorkflow(entry.name, prompt, { fresh: true });
+      return true;
     },
     [
       running,
@@ -551,6 +585,7 @@ export function App({
         if (result.handled) {
           if (result.clearInput) setValue("");
           setCommandSuggestions([]);
+          setPromptEditing(false);
           for (const notice of result.notices ?? []) {
             dispatch({ type: "notice", level: notice.level, text: notice.text });
           }
@@ -563,11 +598,13 @@ export function App({
 
       if (mode === "workflow") {
         if (wf.started && activeWorkflowRef.current) {
-          handleWorkflowRun(prompt, false);
+          const ran = handleWorkflowRun(prompt, false);
+          if (ran) setPromptEditing(false);
           return;
         }
         if (wfPreview) {
-          handleWorkflowRun(prompt, false);
+          const ran = handleWorkflowRun(prompt, false);
+          if (ran) setPromptEditing(false);
           return;
         }
         const entry = workflowEntries[workflowIndex];
@@ -575,12 +612,14 @@ export function App({
         setWfNotice(null);
         setStepIndex(0);
         setWfPreview({ name: entry.name, input: prompt });
+        setPromptEditing(false);
         return;
       }
 
       // Workspace mode — `mode` is a workspace id here.
       if (prompt.length === 0) return;
       setValue("");
+      setPromptEditing(false);
       const entry = workspaceMap.get(mode);
       if (!entry) {
         dispatch({
@@ -656,7 +695,7 @@ export function App({
   const handleWorkflowFreshRun = useCallback(() => {
     const prompt = value.trim();
     recordPromptHistory(value);
-    handleWorkflowRun(prompt, true);
+    if (handleWorkflowRun(prompt, true)) setPromptEditing(false);
   }, [value, recordPromptHistory, handleWorkflowRun]);
 
   useInput((input, key) => {
@@ -673,6 +712,10 @@ export function App({
       }
       if (running) {
         abortRef.current?.abort();
+        return;
+      }
+      if (promptEditing && workflowListNavigation(mode)) {
+        exitPromptEditing();
         return;
       }
       // Not running: preview → picker, or finished run → picker.
@@ -695,16 +738,28 @@ export function App({
       }
       return;
     }
-    if (key.tab && !key.shift && !running && !isSlashCommandInput(value)) {
-      setWfPreview(null);
-      setWfLaunching(false);
-      setModeWithHistoryReset((prev) => nextMode(prev, modes));
+    if (key.tab && !key.shift && !running) {
+      const promptInputHandlesTab =
+        isSlashCommandInput(value) && (isWorkspaceMode(mode) || promptEditing);
+      if (!promptInputHandlesTab) {
+        setWfPreview(null);
+        setWfLaunching(false);
+        setModeWithHistoryReset((prev) => nextMode(prev, modes));
+      }
       return;
     }
     const menuOpen = shouldSuppressWorkflowNavigation(commandSuggestions, value);
     const historyUp =
-      !menuOpen && shouldPromptHistoryCaptureUp(promptHistoryByMode, mode, value, historyBrowse);
-    const historyDown = !menuOpen && shouldPromptHistoryCaptureDown(historyBrowse);
+      !menuOpen &&
+      shouldPromptHistoryCaptureUp(
+        promptHistoryByMode,
+        mode,
+        value,
+        historyBrowse,
+        promptArrowCtx,
+      );
+    const historyDown =
+      !menuOpen && shouldPromptHistoryCaptureDown(historyBrowse, promptArrowCtx, value);
     if (mode === "workflow" && !menuOpen && !historyUp && !historyDown) {
       if (key.upArrow) {
         if (wf.started || wfLaunching) setStepIndex((i) => Math.max(0, i - 1));
@@ -765,6 +820,7 @@ export function App({
             selectedIndex={stepIndex}
             dispatchCheck={previewDispatchCheck}
             canResume={wfCanResume}
+            promptEditing={promptEditing}
           />
         ) : (
           <WorkflowPicker
@@ -811,8 +867,9 @@ export function App({
           onTab={handleTab}
           onCtrlR={mode === "workflow" && !running ? handleWorkflowFreshRun : undefined}
           onSuggestionNavigate={handleSuggestionNavigate}
-          onHistoryNavigate={handleHistoryNavigate}
+          onHistoryNavigate={promptHistoryArrows ? handleHistoryNavigate : undefined}
           focus
+          editing={!workflowListNavigation(mode) || promptEditing}
           running={running}
           suggestions={commandSuggestions}
           cursorResetKey={cursorResetKey}
@@ -827,6 +884,7 @@ export function App({
               running,
               suggestionMenuOpen,
               wfCanResume,
+              promptEditing,
             )}
           </Text>
         </Box>
@@ -843,19 +901,25 @@ function hint(
   running: boolean,
   suggestionMenuOpen: boolean,
   canResume: boolean,
+  promptEditing: boolean,
 ): string {
   const completeHint = suggestionMenuOpen ? " · ↑/↓ complete · Tab/Enter pick · Esc cancel" : "";
   const historyHint = " · ↑/↓ history";
   const resumeHint = canResume ? " · Enter resume" : "";
   if (running) return "Esc cancel · /exit quit · Ctrl+C quit";
   if (mode === "workflow") {
+    if (promptEditing) {
+      const editingHint = `↑/↓ history${resumeHint} · Esc list · Ctrl+R run · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+      if (wfStarted || wfLaunching || wfPreviewing) return editingHint;
+      return `↑/↓ history · Enter preview · Esc list · Ctrl+R run · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+    }
     if (wfStarted || wfLaunching) {
-      return `↑/↓ step/history${resumeHint} · Ctrl+R run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step · / edit · Ctrl+R run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
     }
     if (wfPreviewing) {
-      return `↑/↓ step/history${resumeHint} · Ctrl+R run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step · / edit · Enter preview · Ctrl+R run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
     }
-    return `↑/↓ pick/history · Enter preview · Ctrl+R run · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+    return `↑/↓ pick · / edit · Enter preview · Ctrl+R run · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
   }
   return `Enter dispatch${historyHint} · Tab switch mode · /commands (Tab complete) · Ctrl+C quit${completeHint}`;
 }

@@ -28,6 +28,7 @@ interface WorkflowPreviewProps {
   selectedIndex: number;
   dispatchCheck: DispatchCheck;
   canResume?: boolean;
+  promptEditing?: boolean;
 }
 
 /**
@@ -42,6 +43,7 @@ export function WorkflowPreview({
   selectedIndex,
   dispatchCheck,
   canResume = false,
+  promptEditing = false,
 }: WorkflowPreviewProps) {
   const innerWidth = Math.max(20, width - 4);
   const flat = useMemo(() => flattenSpecSteps(spec), [spec]);
@@ -67,7 +69,9 @@ export function WorkflowPreview({
           workflow preview · {spec.name}
         </Text>
         <Text color="gray">
-          ↑/↓ step{canResume ? " · Enter resume" : ""} · Ctrl+R run · Esc back
+          {promptEditing
+            ? `↑/↓ history${canResume ? " · Enter resume" : ""} · Esc list`
+            : "↑/↓ step · / edit · Ctrl+R run · Esc back"}
         </Text>
       </Box>
 
