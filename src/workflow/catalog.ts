@@ -1,9 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { WORKSPACE_CONFIG_DIR } from "../workspace";
 import { BUNDLED_WORKFLOWS } from "./bundled";
+import { applyWorkflowStepOverrides, type WorkflowStepOverrides } from "./overrides";
 import { type WorkflowSpec, validateWorkflow, workflowSpecSchema } from "./types";
 
 export const WORKFLOWS_FILENAME = "workflows.json";
@@ -40,7 +41,7 @@ export function userWorkflowsPath(home: string = homedir()): string {
   return join(home, WORKSPACE_CONFIG_DIR, WORKFLOWS_FILENAME);
 }
 
-/** Merge bundled, user, and project workflows (later sources override by name). */
+/** Merge bundled, user, and project workflows. Each name appears once; project wins over user over bundled. */
 export function loadWorkflowCatalog(
   options: LoadWorkflowCatalogOptions = {},
 ): LoadedWorkflowCatalog {
@@ -80,6 +81,104 @@ export function workflowCatalogEntries(catalog: LoadedWorkflowCatalog): Workflow
       source: catalog.sources[name] ?? "bundled",
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export interface SaveSessionWorkflowsResult {
+  /** Path written when at least one workflow was saved. */
+  path?: string;
+  saved: string[];
+  skipped: Array<{ name: string; reason: string }>;
+  unchanged: string[];
+}
+
+export interface SaveSessionWorkflowsOptions {
+  catalog: LoadedWorkflowCatalog;
+  sessionOverrides: Record<string, WorkflowStepOverrides>;
+  home?: string;
+}
+
+/** Collect session step overrides that should be written to the user workflows file. */
+export function collectSessionWorkflowSaves(
+  options: SaveSessionWorkflowsOptions,
+): Omit<SaveSessionWorkflowsResult, "path"> & { toSave: Record<string, WorkflowSpec> } {
+  const home = options.home ?? homedir();
+  const userOnDisk = readUserWorkflowsFile(home).workflows ?? {};
+  const toSave: Record<string, WorkflowSpec> = {};
+  const saved: string[] = [];
+  const skipped: Array<{ name: string; reason: string }> = [];
+  const unchanged: string[] = [];
+
+  for (const [name, overrides] of Object.entries(options.sessionOverrides)) {
+    if (!overrides || Object.keys(overrides).length === 0) continue;
+
+    const source = options.catalog.sources[name];
+    const catalogSpec = options.catalog.workflows[name];
+    if (!source || !catalogSpec) {
+      skipped.push({ name, reason: "unknown workflow" });
+      continue;
+    }
+
+    if (source === "project") {
+      skipped.push({ name, reason: "project workflows are edited in steamtrain.json" });
+      continue;
+    }
+
+    const effective = applyWorkflowStepOverrides(catalogSpec, overrides);
+    const baseline =
+      source === "bundled"
+        ? BUNDLED_WORKFLOWS[name]
+        : (userOnDisk[name] ?? catalogSpec);
+
+    if (!baseline) {
+      skipped.push({ name, reason: "missing baseline workflow" });
+      continue;
+    }
+
+    if (workflowSpecsEqual(effective, baseline)) {
+      unchanged.push(name);
+      continue;
+    }
+
+    toSave[name] = effective;
+    saved.push(name);
+  }
+
+  return { toSave, saved, skipped, unchanged };
+}
+
+/** Persist session workflow changes to `~/.steamtrain/workflows.json`. */
+export function saveSessionWorkflowsToUser(
+  options: SaveSessionWorkflowsOptions,
+): SaveSessionWorkflowsResult {
+  const home = options.home ?? homedir();
+  const collected = collectSessionWorkflowSaves(options);
+  if (collected.saved.length === 0) {
+    return {
+      saved: collected.saved,
+      skipped: collected.skipped,
+      unchanged: collected.unchanged,
+    };
+  }
+
+  const userOnDisk = readUserWorkflowsFile(home).workflows ?? {};
+  const path = writeUserWorkflowsFile(home, { ...userOnDisk, ...collected.toSave });
+  return {
+    path,
+    saved: collected.saved,
+    skipped: collected.skipped,
+    unchanged: collected.unchanged,
+  };
+}
+
+export function workflowSpecsEqual(a: WorkflowSpec, b: WorkflowSpec): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+export function readUserWorkflowsFile(home: string = homedir()): {
+  workflows?: Record<string, WorkflowSpec>;
+  warning?: string;
+} {
+  return loadUserWorkflowsFile(home);
 }
 
 function loadUserWorkflowsFile(home: string): {
@@ -148,4 +247,17 @@ export function mergeWorkflowMap(
 function joinWarnings(...parts: Array<string | undefined>): string | undefined {
   const text = parts.filter(Boolean).join("; ");
   return text || undefined;
+}
+
+function writeUserWorkflowsFile(
+  home: string,
+  workflows: Record<string, WorkflowSpec>,
+): string {
+  const path = userWorkflowsPath(home);
+  mkdirSync(join(path, ".."), { recursive: true });
+  const payload = { workflows };
+  const temp = `${path}.${process.pid}.tmp`;
+  writeFileSync(temp, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  renameSync(temp, path);
+  return path;
 }

@@ -442,6 +442,30 @@ describe("autocompleteSlashCommand edge cases", () => {
   });
 });
 
+describe("saveworkflows command", () => {
+  it("delegates to the TUI save handler", () => {
+    const saveWorkflows = vi.fn(() => ({
+      handled: true as const,
+      clearInput: true,
+      notices: [{ level: "info" as const, text: "saved multi-plan" }],
+    }));
+    const result = executeSlashCommand("/saveworkflows", makeCtx({ saveWorkflows }));
+    expect(saveWorkflows).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({
+      handled: true,
+      notices: [{ level: "info", text: "saved multi-plan" }],
+    });
+  });
+
+  it("reports when save is unavailable outside the TUI", () => {
+    const result = executeSlashCommand("/saveworkflows", makeCtx());
+    expect(result).toMatchObject({
+      handled: true,
+      notices: [{ level: "warn", text: "/saveworkflows is only available in the TUI" }],
+    });
+  });
+});
+
 describe("registerSlashCommand", () => {
   it("overrides an existing command", () => {
     const original = listSlashCommands().find((c) => c.name === "version");

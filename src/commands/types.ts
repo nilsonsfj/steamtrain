@@ -34,6 +34,8 @@ export interface SlashCommandContext {
   workflowStep?: WorkflowStepSelection;
   /** Patch agent/model/effort on a workflow step (session-only). */
   updateWorkflowStep?: (stepId: string, patch: Partial<Pick<WorkflowStepSelection, "agent" | "model" | "effort">>) => void;
+  /** Persist session workflow overrides to the user workflows file. */
+  saveWorkflows?: () => SlashCommandResult;
 }
 
 export interface SlashCommand {

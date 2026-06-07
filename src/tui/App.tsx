@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { Box, Text, useApp, useInput } from "ink";
 import {
   type SetStateAction,
@@ -24,6 +25,7 @@ import {
 import type { SteamtrainConfig } from "../config";
 import { type DoctorResult, runDoctor } from "../doctor";
 import { Orchestrator } from "../orchestrator";
+import { homeRelativePath } from "../paths";
 import { DEFAULT_PROMPT_HISTORY_LIMIT, type SteamtrainSettings } from "../settings";
 import { STEAMTRAIN_VERSION } from "../version";
 import {
@@ -35,7 +37,9 @@ import {
   applyWorkflowStepOverrides,
   createWorkflowCacheStore,
   isAgentBackedStep,
+  loadWorkflowCatalog,
   persistWorkflowStepDone,
+  saveSessionWorkflowsToUser,
   workflowCacheKey,
   workflowCatalogEntries,
 } from "../workflow";
@@ -118,6 +122,7 @@ export function App({
   const [doctor, setDoctor] = useState<DoctorResult[] | null>(null);
   const [mode, setMode] = useState<Mode>("workflow");
   const [runtimeWorkspaces, setRuntimeWorkspaces] = useState<WorkspaceConfig>(workspaces);
+  const [runtimeCatalog, setRuntimeCatalog] = useState<LoadedWorkflowCatalog>(workflowCatalog);
   const [activeWorkspaceLabel, setActiveWorkspaceLabel] = useState(workspaceLabel);
   const [draftByMode, setDraftByMode] = useState<PromptDraftByMode>(() => new Map());
   const activeDraft = getPromptDraft(draftByMode, mode);
@@ -199,8 +204,8 @@ export function App({
   );
 
   const orchestrator = useMemo(
-    () => new Orchestrator(config, runtimeWorkspaces, doctor ?? [], workflowCatalog),
-    [config, runtimeWorkspaces, doctor, workflowCatalog],
+    () => new Orchestrator(config, runtimeWorkspaces, doctor ?? [], runtimeCatalog),
+    [config, runtimeWorkspaces, doctor, runtimeCatalog],
   );
 
   const resolveWorkflowSpec = useCallback(
@@ -213,9 +218,46 @@ export function App({
   );
 
   const workflowEntries = useMemo<WorkflowCatalogEntry[]>(
-    () => workflowCatalogEntries(workflowCatalog),
-    [workflowCatalog],
+    () => workflowCatalogEntries(runtimeCatalog),
+    [runtimeCatalog],
   );
+
+  const saveWorkflows = useCallback(() => {
+    const home = homedir();
+    const result = saveSessionWorkflowsToUser({
+      catalog: runtimeCatalog,
+      sessionOverrides: wfStepOverrides,
+      home,
+    });
+
+    if (result.saved.length === 0) {
+      const notices: Array<{ level: "info" | "warn"; text: string }> = [
+        { level: "info", text: "no workflow changes to save" },
+      ];
+      for (const entry of result.skipped) {
+        notices.push({ level: "warn", text: `skipped '${entry.name}': ${entry.reason}` });
+      }
+      return { handled: true as const, clearInput: true, notices };
+    }
+
+    setRuntimeCatalog(loadWorkflowCatalog({ home, projectWorkflows: config.workflows }));
+    setWfStepOverrides((prev) => {
+      const next = { ...prev };
+      for (const name of result.saved) delete next[name];
+      return next;
+    });
+
+    const notices: Array<{ level: "info" | "warn"; text: string }> = [
+      {
+        level: "info",
+        text: `saved ${result.saved.join(", ")} to ${homeRelativePath(result.path!, home)}`,
+      },
+    ];
+    for (const entry of result.skipped) {
+      notices.push({ level: "warn", text: `skipped '${entry.name}': ${entry.reason}` });
+    }
+    return { handled: true as const, clearInput: true, notices };
+  }, [runtimeCatalog, wfStepOverrides, config.workflows]);
 
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
@@ -236,10 +278,10 @@ export function App({
     if (settingsWarning) dispatch({ type: "notice", level: "warn", text: settingsWarning });
   }, [settingsWarning]);
   useEffect(() => {
-    if (workflowCatalog.warning) {
-      dispatch({ type: "notice", level: "warn", text: workflowCatalog.warning });
+    if (runtimeCatalog.warning) {
+      dispatch({ type: "notice", level: "warn", text: runtimeCatalog.warning });
     }
-  }, [workflowCatalog.warning]);
+  }, [runtimeCatalog.warning]);
 
   // Show the banner briefly, then hand over to the main UI.
   useEffect(() => {
@@ -304,6 +346,7 @@ export function App({
       version: STEAMTRAIN_VERSION,
       workflowStep: previewStepSelection,
       updateWorkflowStep: wfPreview ? patchWorkflowStep : undefined,
+      saveWorkflows,
     }),
     [
       mode,
@@ -315,6 +358,7 @@ export function App({
       wfPreview,
       patchWorkflowStep,
       previewStepSelection,
+      saveWorkflows,
     ],
   );
 
