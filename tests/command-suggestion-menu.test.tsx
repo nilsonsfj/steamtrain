@@ -36,6 +36,22 @@ describe("suggestionMenuHeight", () => {
 });
 
 describe("CommandSuggestionMenu", () => {
+  it("keeps bordered rows within the menu width", () => {
+    const width = 60;
+    const { lastFrame } = render(
+      <CommandSuggestionMenu
+        suggestions={["version", "exit", "model"]}
+        selectedIndex={1}
+        width={width}
+        descriptions={new Map([["exit", "Quit the TUI"]])}
+      />,
+    );
+    for (const line of (lastFrame() ?? "").split("\n")) {
+      if (!line.startsWith("│")) continue;
+      expect(line.length).toBeLessThanOrEqual(width);
+    }
+  });
+
   it("renders suggestions with the selected row highlighted", () => {
     const descriptions = new Map([
       ["version", "Print version"],

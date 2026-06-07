@@ -31,5 +31,9 @@ export const AGENT_COLOR: Record<string, string> = {
   opencode: "blue",
 };
 
+/** Solid backdrop for the slash-command completion popup (overlays content above the prompt). */
+export const SUGGESTION_MENU_BG = "#1a1a1a";
+export const SUGGESTION_MENU_ACTIVE_BG = "#2a2a2a";
+
 /** Active workspace tab name in the event stream header. */
 export const TAB_LABEL_COLOR = "#FFFFE0";
