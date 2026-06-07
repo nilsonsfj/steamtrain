@@ -51,6 +51,12 @@ import { Banner } from "./banner";
 import { type Mode, buildModes, isWorkspaceMode, nextMode } from "./modes";
 import { workflowListNavigation } from "./prompt-editing";
 import {
+  type PromptDraftByMode,
+  getPromptDraft,
+  initialPromptTabState,
+  patchPromptDraft,
+} from "./prompt-draft";
+import {
   type PromptArrowContext,
   type PromptHistoryBrowse,
   type PromptHistoryByMode,
@@ -105,7 +111,11 @@ export function App({
   const [mode, setMode] = useState<Mode>("workflow");
   const [runtimeWorkspaces, setRuntimeWorkspaces] = useState<WorkspaceConfig>(workspaces);
   const [activeWorkspaceLabel, setActiveWorkspaceLabel] = useState(workspaceLabel);
-  const [value, setValue] = useState("");
+  const [draftByMode, setDraftByMode] = useState<PromptDraftByMode>(() => new Map());
+  const activeDraft = getPromptDraft(draftByMode, mode);
+  const value = activeDraft.value;
+  const historyBrowse = activeDraft.historyBrowse;
+  const promptEditing = activeDraft.promptEditing;
   const [commandSuggestions, setCommandSuggestions] = useState<readonly string[]>([]);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [cursorResetKey, setCursorResetKey] = useState(0);
@@ -114,10 +124,6 @@ export function App({
   const [promptHistoryByMode, setPromptHistoryByMode] = useState<PromptHistoryByMode>(
     () => new Map(),
   );
-  const [historyBrowse, setHistoryBrowse] = useState<PromptHistoryBrowse>(
-    initialPromptHistoryBrowse,
-  );
-  const [promptEditing, setPromptEditing] = useState(false);
   const promptHistoryLimit = settings.promptHistoryLimit ?? DEFAULT_PROMPT_HISTORY_LIMIT;
   const [opencodeCatalogTick, setOpencodeCatalogTick] = useState(0);
 
@@ -139,10 +145,18 @@ export function App({
   const modes = useMemo(() => buildModes(runtimeWorkspaces), [runtimeWorkspaces]);
   const workspaceMap = useMemo(() => workspaceById(runtimeWorkspaces), [runtimeWorkspaces]);
 
-  const setModeWithHistoryReset = useCallback((next: SetStateAction<Mode>) => {
+  const updatePromptDraft = useCallback(
+    (patch: Partial<typeof initialPromptTabState>) => {
+      setDraftByMode((prev) => patchPromptDraft(prev, mode, patch));
+    },
+    [mode],
+  );
+
+  const switchMode = useCallback((next: SetStateAction<Mode>) => {
     setMode(next);
-    setHistoryBrowse(initialPromptHistoryBrowse);
-    setPromptEditing(false);
+    setCommandSuggestions([]);
+    setSuggestionIndex(0);
+    setCursorResetKey((k) => k + 1);
   }, []);
 
   const updateWorkspace = useCallback(
@@ -166,10 +180,10 @@ export function App({
       workspaces: runtimeWorkspaces,
       workspaceMap,
       updateWorkspace,
-      setMode: setModeWithHistoryReset,
+      setMode: switchMode,
       version: STEAMTRAIN_VERSION,
     }),
-    [mode, modes, runtimeWorkspaces, workspaceMap, updateWorkspace, setModeWithHistoryReset],
+    [mode, modes, runtimeWorkspaces, workspaceMap, updateWorkspace, switchMode],
   );
 
   const orchestrator = useMemo(
@@ -365,13 +379,16 @@ export function App({
   }, []);
 
   const exitPromptEditing = useCallback(() => {
-    if (historyBrowse.browseIndex !== null) setValue(historyBrowse.draft);
-    setHistoryBrowse(initialPromptHistoryBrowse);
+    const patch: Partial<typeof initialPromptTabState> = {
+      historyBrowse: initialPromptHistoryBrowse,
+      promptEditing: false,
+    };
+    if (historyBrowse.browseIndex !== null) patch.value = historyBrowse.draft;
+    updatePromptDraft(patch);
     setCommandSuggestions([]);
     setSuggestionIndex(0);
-    setPromptEditing(false);
     bumpCursorToEnd();
-  }, [historyBrowse, bumpCursorToEnd]);
+  }, [historyBrowse, updatePromptDraft, bumpCursorToEnd]);
 
   const promptArrowCtx = useMemo<PromptArrowContext>(
     () => ({
@@ -381,20 +398,25 @@ export function App({
     [mode, promptEditing],
   );
 
-  const handleValueChange = useCallback((next: string) => {
-    if (next !== value) setPromptEditing(true);
-    setValue(next);
-    setCommandSuggestions([]);
-    setSuggestionIndex(0);
-    setHistoryBrowse(initialPromptHistoryBrowse);
-  }, [value]);
+  const handleValueChange = useCallback(
+    (next: string) => {
+      updatePromptDraft({
+        value: next,
+        promptEditing: true,
+        historyBrowse: initialPromptHistoryBrowse,
+      });
+      setCommandSuggestions([]);
+      setSuggestionIndex(0);
+    },
+    [updatePromptDraft],
+  );
 
   const recordPromptHistory = useCallback(
     (raw: string) => {
       setPromptHistoryByMode((prev) => pushPromptHistory(prev, mode, raw, promptHistoryLimit));
-      setHistoryBrowse(initialPromptHistoryBrowse);
+      updatePromptDraft({ historyBrowse: initialPromptHistoryBrowse });
     },
-    [mode, promptHistoryLimit],
+    [mode, promptHistoryLimit, updatePromptDraft],
   );
 
   const handleHistoryNavigate = useCallback(
@@ -423,12 +445,14 @@ export function App({
         direction,
       );
       if (!result) return false;
-      setValue(result.value);
-      setHistoryBrowse({ browseIndex: result.browseIndex, draft: result.draft });
+      updatePromptDraft({
+        value: result.value,
+        historyBrowse: { browseIndex: result.browseIndex, draft: result.draft },
+      });
       bumpCursorToEnd();
       return true;
     },
-    [promptHistoryByMode, mode, value, historyBrowse, promptArrowCtx, bumpCursorToEnd],
+    [promptHistoryByMode, mode, value, historyBrowse, promptArrowCtx, updatePromptDraft, bumpCursorToEnd],
   );
 
   const promptHistoryArrows = shouldPromptHistoryArrows(promptArrowCtx, value, historyBrowse);
@@ -442,7 +466,7 @@ export function App({
       if (!pick) return;
       const nextValue = applySlashSuggestion(value, pick, commands, slashCtx);
       if (nextValue !== value) {
-        setValue(nextValue);
+        updatePromptDraft({ value: nextValue, promptEditing: true });
         bumpCursorToEnd();
       }
       const result = autocompleteSlashCommand(nextValue, commands, slashCtx);
@@ -463,12 +487,12 @@ export function App({
       return;
     }
     if (result.value !== value) {
-      setValue(result.value);
+      updatePromptDraft({ value: result.value, promptEditing: true });
       bumpCursorToEnd();
     }
     setCommandSuggestions(result.suggestions);
     setSuggestionIndex(0);
-  }, [value, slashCtx, commandSuggestions, suggestionIndex, bumpCursorToEnd]);
+  }, [value, slashCtx, commandSuggestions, suggestionIndex, updatePromptDraft, bumpCursorToEnd]);
 
   const handleSuggestionNavigate = useCallback(
     (direction: "up" | "down") => {
@@ -583,9 +607,10 @@ export function App({
       if (isRegisteredSlashCommand(prompt)) {
         const result = executeSlashCommand(prompt, slashCtx);
         if (result.handled) {
-          if (result.clearInput) setValue("");
+          updatePromptDraft(
+            result.clearInput ? { value: "", promptEditing: false } : { promptEditing: false },
+          );
           setCommandSuggestions([]);
-          setPromptEditing(false);
           for (const notice of result.notices ?? []) {
             dispatch({ type: "notice", level: notice.level, text: notice.text });
           }
@@ -599,12 +624,12 @@ export function App({
       if (mode === "workflow") {
         if (wf.started && activeWorkflowRef.current) {
           const ran = handleWorkflowRun(prompt, false);
-          if (ran) setPromptEditing(false);
+          if (ran) updatePromptDraft({ promptEditing: false });
           return;
         }
         if (wfPreview) {
           const ran = handleWorkflowRun(prompt, false);
-          if (ran) setPromptEditing(false);
+          if (ran) updatePromptDraft({ promptEditing: false });
           return;
         }
         const entry = workflowEntries[workflowIndex];
@@ -612,14 +637,13 @@ export function App({
         setWfNotice(null);
         setStepIndex(0);
         setWfPreview({ name: entry.name, input: prompt });
-        setPromptEditing(false);
+        updatePromptDraft({ promptEditing: false });
         return;
       }
 
       // Workspace mode — `mode` is a workspace id here.
       if (prompt.length === 0) return;
-      setValue("");
-      setPromptEditing(false);
+      updatePromptDraft({ value: "", promptEditing: false });
       const entry = workspaceMap.get(mode);
       if (!entry) {
         dispatch({
@@ -695,8 +719,8 @@ export function App({
   const handleWorkflowFreshRun = useCallback(() => {
     const prompt = value.trim();
     recordPromptHistory(value);
-    if (handleWorkflowRun(prompt, true)) setPromptEditing(false);
-  }, [value, recordPromptHistory, handleWorkflowRun]);
+    if (handleWorkflowRun(prompt, true)) updatePromptDraft({ promptEditing: false });
+  }, [value, recordPromptHistory, handleWorkflowRun, updatePromptDraft]);
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
@@ -744,7 +768,7 @@ export function App({
       if (!promptInputHandlesTab) {
         setWfPreview(null);
         setWfLaunching(false);
-        setModeWithHistoryReset((prev) => nextMode(prev, modes));
+        switchMode((prev) => nextMode(prev, modes));
       }
       return;
     }
