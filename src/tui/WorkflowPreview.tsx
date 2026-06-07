@@ -34,7 +34,7 @@ interface WorkflowPreviewProps {
 
 /**
  * Pre-run workflow visualization: full spec drill-down before dispatch.
- * Ctrl+R from the prompt runs the workflow; Enter resumes from cache; Esc returns to the picker.
+ * Ctrl+R from the prompt runs the workflow; Enter resumes from cache; Esc backs out when idle.
  */
 export function WorkflowPreview({
   spec,

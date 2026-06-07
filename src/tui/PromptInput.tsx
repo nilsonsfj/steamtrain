@@ -16,6 +16,8 @@ interface PromptInputProps {
   /** Tab completion and slash-menu arrows while the prompt owns keyboard focus. */
   promptEditing?: boolean;
   running: boolean;
+  /** Shown in the running placeholder, e.g. Esc or Ctrl+Q. */
+  cancelKeyHint?: string;
   suggestions?: readonly string[];
   cursorResetKey?: number;
 }
@@ -42,6 +44,7 @@ export function PromptInput({
   editing = true,
   promptEditing = true,
   running,
+  cancelKeyHint = "Esc",
   suggestions,
   cursorResetKey = 0,
 }: PromptInputProps) {
@@ -112,7 +115,7 @@ export function PromptInput({
           focus={focus}
           placeholder={
             running
-              ? "/exit to quit · Esc to cancel"
+              ? `/exit to quit · ${cancelKeyHint} to cancel`
               : editing
                 ? "describe the task, or /command (Tab to complete)"
                 : "type to edit · describe the task, or /command"

@@ -851,6 +851,10 @@ export function App({
       exit();
       return;
     }
+    if (key.ctrl && input === "q" && running && mode === "workflow") {
+      abortRef.current?.abort();
+      return;
+    }
     if (key.escape) {
       if (shouldDismissSuggestionMenu(commandSuggestions, value)) {
         setCommandSuggestions([]);
@@ -858,7 +862,9 @@ export function App({
         return;
       }
       if (running) {
-        abortRef.current?.abort();
+        if (mode !== "workflow") {
+          abortRef.current?.abort();
+        }
         return;
       }
       if (promptEditing) {
@@ -1020,6 +1026,7 @@ export function App({
           editing={!workflowListNavigation(mode) || promptEditing}
           promptEditing={promptEditing}
           running={running}
+          cancelKeyHint={mode === "workflow" ? "Ctrl+Q" : "Esc"}
           suggestions={commandSuggestions}
           cursorResetKey={cursorResetKey}
         />
@@ -1057,7 +1064,11 @@ function hint(
   const completeHint = suggestionMenuOpen ? " · ↑/↓ complete · Tab/Enter pick · Esc cancel" : "";
   const historyHint = " · ↑/↓ history";
   const resumeHint = canResume ? " · Enter resume" : "";
-  if (running) return "Esc cancel · /exit quit · Ctrl+C quit";
+  if (running) {
+    return mode === "workflow"
+      ? "Ctrl+Q cancel · /exit quit · Ctrl+C quit"
+      : "Esc cancel · /exit quit · Ctrl+C quit";
+  }
   if (mode === "workflow") {
     if (promptEditing) {
       const tabHint = slashInput ? " · Esc unfocus" : " · Esc list";
@@ -1066,7 +1077,7 @@ function hint(
       return `↑/↓ history · Enter preview${tabHint} · Ctrl+R run · /commands · Ctrl+C quit${completeHint}`;
     }
     if (wfStarted || wfLaunching) {
-      return `↑/↓ step · type to edit · Ctrl+R run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step · type to edit · Ctrl+R run · Ctrl+Q cancel · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
     }
     if (wfPreviewing) {
       return `↑/↓ step · type to edit · Enter preview · Ctrl+R run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
