@@ -1,18 +1,30 @@
-import { effortForModelChange, formatModelOption, modelIdsForAgent, modelNameForAgent, modelsForAgent } from "../../agents";
+import {
+  effortForModelChange,
+  formatModelOption,
+  modelIdsForAgent,
+  modelNameForAgent,
+  modelsForAgent,
+} from "../../agents";
 import { isWorkspaceMode } from "../../tui/modes";
 import type { SlashCommand } from "../types";
+import {
+  completeWorkflowModelArgs,
+  executeWorkflowModelCommand,
+  hasWorkflowStepTarget,
+  workflowStepUnavailableNotice,
+} from "../workflow-step-target";
 
 export const modelCommand: SlashCommand = {
   name: "model",
-  description: "Set or list models for the current workspace tab",
+  description: "Set or list models for the current workspace tab or workflow step",
   usage: "/model [model-id]",
   execute(args, ctx) {
+    if (hasWorkflowStepTarget(ctx)) {
+      return executeWorkflowModelCommand(args, ctx);
+    }
+
     if (!isWorkspaceMode(ctx.mode)) {
-      return {
-        handled: true,
-        clearInput: true,
-        notices: [{ level: "warn", text: "/model only applies to workspace tabs (not workflow)" }],
-      };
+      return workflowStepUnavailableNotice("model");
     }
 
     const entry = ctx.workspaceMap.get(ctx.mode);
@@ -69,6 +81,10 @@ export const modelCommand: SlashCommand = {
     };
   },
   complete(args, ctx) {
+    if (hasWorkflowStepTarget(ctx)) {
+      if (args.length > 1) return [];
+      return completeWorkflowModelArgs(ctx);
+    }
     if (!isWorkspaceMode(ctx.mode)) return [];
     const entry = ctx.workspaceMap.get(ctx.mode);
     if (!entry) return [];

@@ -53,3 +53,4 @@ export {
   type WorkflowCacheKey,
   type WorkflowCacheStore,
 } from "./cache-store";
+export { applyWorkflowStepOverrides, type WorkflowStepOverrides } from "./overrides";

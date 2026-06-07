@@ -1,6 +1,7 @@
 import { render } from "ink";
+import { homedir } from "node:os";
 import { parseGlobalArgs, runCli } from "./cli";
-import { loadConfig } from "./config";
+import { configDisplayLabel, loadConfig } from "./config";
 import { loadSettings } from "./settings";
 import { App } from "./tui/App";
 import { loadWorkspaceConfig, workspaceScopeLabel } from "./workspace";
@@ -16,7 +17,7 @@ import { loadWorkspaceConfig, workspaceScopeLabel } from "./workspace";
  * renders the TUI. Workflow subcommands run headlessly for scripts/CI.
  */
 async function main(): Promise<void> {
-  const { args, workspacePath, error } = parseGlobalArgs(process.argv.slice(2));
+  const { args, workspacePath, configPath, error } = parseGlobalArgs(process.argv.slice(2));
   if (error) {
     process.stderr.write(`${error}\n`);
     process.exitCode = 1;
@@ -24,29 +25,32 @@ async function main(): Promise<void> {
   }
 
   if (args.length > 0) {
-    process.exitCode = await runCli(args, { workspacePath });
+    process.exitCode = await runCli(args, { workspacePath, configPath });
     return;
   }
 
-  const { config, source, warning } = loadConfig();
-  const { settings, warning: settingsWarning } = loadSettings();
+  const home = homedir();
+  const { config, scope, warning } = loadConfig({ customPath: configPath });
+  const { settings, hasUserFile, warning: settingsWarning } = loadSettings(home);
+  const configLabel = configDisplayLabel(scope, { hasUserSettings: hasUserFile, home });
   const {
     config: workspaces,
-    scope,
+    scope: workspaceScope,
     warning: workspaceWarning,
   } = loadWorkspaceConfig({
     customPath: workspacePath,
+    home,
   });
   const app = render(
     <App
       config={config}
-      configSource={source}
+      configSource={configLabel}
       configWarning={warning}
       settings={settings}
       settingsWarning={settingsWarning}
       workspaces={workspaces}
-      workspaceScope={scope}
-      workspaceLabel={workspaceScopeLabel(scope)}
+      workspaceScope={workspaceScope}
+      workspaceLabel={workspaceScopeLabel(workspaceScope, home)}
       workspaceWarning={workspaceWarning}
     />,
   );

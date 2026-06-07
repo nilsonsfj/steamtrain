@@ -1,5 +1,15 @@
+import type { AgentId } from "../types/events";
 import type { Mode } from "../tui/modes";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
+
+/** Selected agent-backed step in the workflow preview drill-down. */
+export interface WorkflowStepSelection {
+  workflowName: string;
+  stepId: string;
+  agent: AgentId;
+  model: string;
+  effort?: string;
+}
 
 export interface SlashCommandNotice {
   level: "info" | "warn" | "error";
@@ -20,6 +30,10 @@ export interface SlashCommandContext {
   updateWorkspace: (id: WorkspaceId, patch: Partial<WorkspaceEntry>) => void;
   setMode: (mode: Mode) => void;
   version: string;
+  /** Set when workflow preview has an agent-backed step selected. */
+  workflowStep?: WorkflowStepSelection;
+  /** Patch agent/model/effort on a workflow step (session-only). */
+  updateWorkflowStep?: (stepId: string, patch: Partial<Pick<WorkflowStepSelection, "agent" | "model" | "effort">>) => void;
 }
 
 export interface SlashCommand {

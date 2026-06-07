@@ -9,8 +9,8 @@ export const SETTINGS_FILENAME = "settings.json";
 
 export interface LoadedSettings {
   settings: SteamtrainSettings;
-  /** Absolute path when a file exists, otherwise a note about defaults. */
-  source: string;
+  /** True when `~/.steamtrain/settings.json` exists. */
+  hasUserFile: boolean;
   warning?: string;
 }
 
@@ -23,7 +23,7 @@ export function settingsConfigPath(home: string = homedir()): string {
 export function loadSettings(home: string = homedir()): LoadedSettings {
   const path = settingsConfigPath(home);
   if (!existsSync(path)) {
-    return { settings: DEFAULT_SETTINGS, source: "built-in defaults" };
+    return { settings: DEFAULT_SETTINGS, hasUserFile: false };
   }
 
   let parsed: unknown;
@@ -32,7 +32,7 @@ export function loadSettings(home: string = homedir()): LoadedSettings {
   } catch (err) {
     return {
       settings: DEFAULT_SETTINGS,
-      source: "built-in defaults",
+      hasUserFile: true,
       warning: `could not parse ${path}: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
@@ -41,14 +41,14 @@ export function loadSettings(home: string = homedir()): LoadedSettings {
   if (!result.success) {
     return {
       settings: DEFAULT_SETTINGS,
-      source: "built-in defaults",
+      hasUserFile: true,
       warning: `invalid ${path}: ${result.error.issues[0]?.message ?? "schema error"}`,
     };
   }
 
   return {
     settings: mergeSettings(DEFAULT_SETTINGS, result.data),
-    source: path,
+    hasUserFile: true,
   };
 }
 

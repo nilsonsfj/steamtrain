@@ -1,18 +1,24 @@
 import { AGENT_IDS, defaultModelForAgent, isAgentId } from "../../agents";
 import { isWorkspaceMode } from "../../tui/modes";
 import type { SlashCommand } from "../types";
+import {
+  completeWorkflowAgentArgs,
+  executeWorkflowAgentCommand,
+  hasWorkflowStepTarget,
+  workflowStepUnavailableNotice,
+} from "../workflow-step-target";
 
 export const agentCommand: SlashCommand = {
   name: "agent",
-  description: "Set or list agents for the current workspace tab",
+  description: "Set or list agents for the current workspace tab or workflow step",
   usage: "/agent [claude|opencode|codex]",
   execute(args, ctx) {
+    if (hasWorkflowStepTarget(ctx)) {
+      return executeWorkflowAgentCommand(args, ctx);
+    }
+
     if (!isWorkspaceMode(ctx.mode)) {
-      return {
-        handled: true,
-        clearInput: true,
-        notices: [{ level: "warn", text: "/agent only applies to workspace tabs (not workflow)" }],
-      };
+      return workflowStepUnavailableNotice("agent");
     }
 
     const entry = ctx.workspaceMap.get(ctx.mode);
@@ -67,6 +73,10 @@ export const agentCommand: SlashCommand = {
     };
   },
   complete(args, ctx) {
+    if (hasWorkflowStepTarget(ctx)) {
+      if (args.length > 1) return [];
+      return completeWorkflowAgentArgs();
+    }
     if (!isWorkspaceMode(ctx.mode)) return [];
     if (!ctx.workspaceMap.get(ctx.mode)) return [];
     if (args.length > 1) return [];

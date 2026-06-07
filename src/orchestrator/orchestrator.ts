@@ -98,9 +98,13 @@ export class Orchestrator {
   canDispatchWorkflow(name: string): DispatchCheck {
     const spec = this.listWorkflows()[name];
     if (!spec) return { ok: false, reason: `unknown workflow '${name}'` };
+    return this.canDispatchWorkflowSpec(spec);
+  }
 
+  /** Like {@link canDispatchWorkflow} but for an already-resolved spec (e.g. with session overrides). */
+  canDispatchWorkflowSpec(spec: WorkflowSpec): DispatchCheck {
     const valid = validateWorkflow(spec);
-    if (!valid.ok) return { ok: false, reason: `invalid workflow '${name}': ${valid.error}` };
+    if (!valid.ok) return { ok: false, reason: `invalid workflow '${spec.name}': ${valid.error}` };
 
     for (const agent of workflowAgents(spec)) {
       const health = this.doctor.find((d) => d.agent === agent);
@@ -125,8 +129,9 @@ export class Orchestrator {
     signal?: AbortSignal,
     cache?: Map<string, StepResult>,
     cwd: string = process.cwd(),
+    specOverride?: WorkflowSpec,
   ): AsyncIterable<WorkflowEvent> {
-    const spec = this.listWorkflows()[name];
+    const spec = specOverride ?? this.listWorkflows()[name];
     if (!spec) throw new Error(`unknown workflow '${name}'`);
 
     return runWorkflow(

@@ -10,7 +10,7 @@ describe("loadSettings", () => {
     const home = mkdtempSync(join(tmpdir(), "steamtrain-settings-"));
     const loaded = loadSettings(home);
     expect(loaded.settings.promptHistoryLimit).toBe(DEFAULT_PROMPT_HISTORY_LIMIT);
-    expect(loaded.source).toBe("built-in defaults");
+    expect(loaded.hasUserFile).toBe(false);
   });
 
   it("merges promptHistoryLimit from user settings", () => {
@@ -21,7 +21,7 @@ describe("loadSettings", () => {
 
     const loaded = loadSettings(home);
     expect(loaded.settings.promptHistoryLimit).toBe(250);
-    expect(loaded.source).toBe(settingsConfigPath(home));
+    expect(loaded.hasUserFile).toBe(true);
   });
 
   it("falls back to defaults on invalid settings", () => {

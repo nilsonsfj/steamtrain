@@ -31,7 +31,7 @@ describe("TUI components", () => {
     const { lastFrame } = render(
       <StatusBar
         doctor={doctor}
-        configSource="built-in defaults"
+        configSource="defaults"
         workspaceLabel="user"
         running={false}
       />,

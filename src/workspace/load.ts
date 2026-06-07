@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { homeRelativePath } from "../paths";
 import { DEFAULT_WORKSPACE_CONFIG } from "./defaults";
 import {
   type WorkspaceConfig,
@@ -37,9 +38,9 @@ export interface LoadedWorkspaceConfig {
   warning?: string;
 }
 
-/** Status-bar label: `user`, `project`, or the absolute custom file path. */
-export function workspaceScopeLabel(scope: WorkspaceScope): string {
-  return scope.kind === "custom" ? scope.path : scope.kind;
+/** Status-bar label: `user`, `project`, or a custom file path (home-relative when under `~`). */
+export function workspaceScopeLabel(scope: WorkspaceScope, home: string = homedir()): string {
+  return scope.kind === "custom" ? homeRelativePath(scope.path, home) : scope.kind;
 }
 
 /** Default path: `~/.steamtrain/workspace.json`. */

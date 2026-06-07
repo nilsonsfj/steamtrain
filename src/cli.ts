@@ -1,7 +1,8 @@
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { refreshAgentCatalogCaches } from "./agents/models";
-import { type SteamtrainConfig, loadConfig } from "./config";
+import { type SteamtrainConfig, configDisplayLabel, loadConfig } from "./config";
+import { loadSettings } from "./settings";
 import { runDoctor } from "./doctor";
 import { Orchestrator } from "./orchestrator";
 import {
@@ -20,6 +21,7 @@ import { loadWorkspaceConfig } from "./workspace";
 export interface GlobalCliOptions {
   args: string[];
   workspacePath?: string;
+  configPath?: string;
   error?: string;
 }
 
@@ -27,6 +29,7 @@ export interface GlobalCliOptions {
 export function parseGlobalArgs(args: string[]): GlobalCliOptions {
   const rest: string[] = [];
   let workspacePath: string | undefined;
+  let configPath: string | undefined;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
     if (arg === "-w" || arg === "--workspace") {
@@ -38,14 +41,24 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
       i += 1;
       continue;
     }
+    if (arg === "--config-file") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("-")) {
+        return { args: [], error: `${arg} requires a path argument` };
+      }
+      configPath = value;
+      i += 1;
+      continue;
+    }
     rest.push(arg);
   }
-  return { args: rest, workspacePath };
+  return { args: rest, workspacePath, configPath };
 }
 
 export interface CliIO {
   cwd?: string;
   workspacePath?: string;
+  configPath?: string;
   stdin?: Readable;
   stdout?: (text: string) => void;
   stderr?: (text: string) => void;
@@ -74,8 +87,10 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
   }
 
   const cwd = io.cwd ?? process.cwd();
-  const { config, source, warning } = loadConfig(cwd);
+  const { config, scope: configScope, warning } = loadConfig({ cwd, customPath: io.configPath });
   if (warning) err(`${warning}\n`);
+  const { hasUserFile: hasUserSettings } = loadSettings();
+  const configLabel = configDisplayLabel(configScope, { hasUserSettings });
   const { config: workspaces, warning: workspaceWarning } = loadWorkspaceConfig({
     cwd,
     customPath: io.workspacePath,
@@ -86,7 +101,7 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
   switch (command ?? "list") {
     case "list":
     case "ls":
-      printWorkflowList(orchestrator.listWorkflows(), source, out);
+      printWorkflowList(orchestrator.listWorkflows(), configLabel, out);
       return 0;
     case "validate":
       return validateWorkflows(orchestrator.listWorkflows(), rest[0], out, err);
@@ -376,7 +391,8 @@ the on-disk cache for that run. Parallel runs of the same workflow + input are n
 Running steamtrain with no command opens the workflow-first TUI.
 
 Global options (TUI and workflow commands):
-  -w, --workspace <path>   Load workspace presets from a custom workspace.json
+  -w, --workspace <path>     Load workspace presets from a custom workspace.json
+      --config-file <path>   Load project config from a custom steamtrain.json
 `;
 }
 

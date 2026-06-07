@@ -51,6 +51,17 @@ describe("parseGlobalArgs", () => {
       error: "-w requires a path argument",
     });
   });
+
+  it("extracts --config-file before subcommands", () => {
+    expect(parseGlobalArgs(["--config-file", "./cfg.json", "workflow", "list"])).toEqual({
+      args: ["workflow", "list"],
+      configPath: "./cfg.json",
+    });
+    expect(parseGlobalArgs(["--config-file"])).toEqual({
+      args: [],
+      error: "--config-file requires a path argument",
+    });
+  });
 });
 
 describe("runCli", () => {

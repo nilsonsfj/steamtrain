@@ -90,13 +90,13 @@ describe("loadWorkspaceConfig", () => {
   });
 
   it("materializes and loads a custom workspace file when customPath is set", () => {
-    const cwd = mkdtempSync(join(tmpdir(), "steamtrain-cwd-"));
-    const custom = join(cwd, "team.json");
+    const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
+    const custom = join(home, "team.json");
     expect(existsSync(custom)).toBe(false);
 
-    const loaded = loadWorkspaceConfig({ cwd, customPath: custom });
+    const loaded = loadWorkspaceConfig({ home, customPath: custom });
     expect(loaded.scope).toEqual({ kind: "custom", path: custom });
-    expect(workspaceScopeLabel(loaded.scope)).toBe(custom);
+    expect(workspaceScopeLabel(loaded.scope, home)).toBe("~/team.json");
     expect(loaded.config).toEqual(DEFAULT_WORKSPACE_CONFIG);
     expect(existsSync(custom)).toBe(true);
   });
