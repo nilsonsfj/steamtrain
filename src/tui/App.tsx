@@ -738,7 +738,7 @@ export function App({
         abortRef.current?.abort();
         return;
       }
-      if (promptEditing && workflowListNavigation(mode)) {
+      if (promptEditing) {
         exitPromptEditing();
         return;
       }
@@ -763,8 +763,7 @@ export function App({
       return;
     }
     if (key.tab && !key.shift && !running) {
-      const promptInputHandlesTab =
-        isSlashCommandInput(value) && (isWorkspaceMode(mode) || promptEditing);
+      const promptInputHandlesTab = isSlashCommandInput(value) && promptEditing;
       if (!promptInputHandlesTab) {
         setWfPreview(null);
         setWfLaunching(false);
@@ -894,6 +893,7 @@ export function App({
           onHistoryNavigate={promptHistoryArrows ? handleHistoryNavigate : undefined}
           focus
           editing={!workflowListNavigation(mode) || promptEditing}
+          promptEditing={promptEditing}
           running={running}
           suggestions={commandSuggestions}
           cursorResetKey={cursorResetKey}
@@ -909,6 +909,7 @@ export function App({
               suggestionMenuOpen,
               wfCanResume,
               promptEditing,
+              isSlashCommandInput(value),
             )}
           </Text>
         </Box>
@@ -926,6 +927,7 @@ function hint(
   suggestionMenuOpen: boolean,
   canResume: boolean,
   promptEditing: boolean,
+  slashInput: boolean,
 ): string {
   const completeHint = suggestionMenuOpen ? " · ↑/↓ complete · Tab/Enter pick · Esc cancel" : "";
   const historyHint = " · ↑/↓ history";
@@ -933,9 +935,10 @@ function hint(
   if (running) return "Esc cancel · /exit quit · Ctrl+C quit";
   if (mode === "workflow") {
     if (promptEditing) {
-      const editingHint = `↑/↓ history${resumeHint} · Esc list · Ctrl+R run · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+      const tabHint = slashInput ? " · Esc unfocus" : " · Esc list";
+      const editingHint = `↑/↓ history${resumeHint}${tabHint} · Ctrl+R run · /commands · Ctrl+C quit${completeHint}`;
       if (wfStarted || wfLaunching || wfPreviewing) return editingHint;
-      return `↑/↓ history · Enter preview · Esc list · Ctrl+R run · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ history · Enter preview${tabHint} · Ctrl+R run · /commands · Ctrl+C quit${completeHint}`;
     }
     if (wfStarted || wfLaunching) {
       return `↑/↓ step · / edit · Ctrl+R run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
@@ -945,7 +948,9 @@ function hint(
     }
     return `↑/↓ pick · / edit · Enter preview · Ctrl+R run · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
   }
-  return `Enter dispatch${historyHint} · Tab switch mode · /commands (Tab complete) · Ctrl+C quit${completeHint}`;
+  return promptEditing && slashInput
+    ? `Enter dispatch${historyHint} · Esc unfocus · /commands (Tab complete) · Ctrl+C quit${completeHint}`
+    : `Enter dispatch${historyHint} · Tab switch mode · /commands (Tab complete) · Ctrl+C quit${completeHint}`;
 }
 
 function message(err: unknown): string {

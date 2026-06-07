@@ -13,6 +13,8 @@ interface PromptInputProps {
   focus: boolean;
   /** Bright border while the prompt owns ↑/↓ (history); dim while a list above does. */
   editing?: boolean;
+  /** Tab completion and slash-menu arrows while the prompt owns keyboard focus. */
+  promptEditing?: boolean;
   running: boolean;
   suggestions?: readonly string[];
   cursorResetKey?: number;
@@ -38,6 +40,7 @@ export function PromptInput({
   onHistoryNavigate,
   focus,
   editing = true,
+  promptEditing = true,
   running,
   suggestions,
   cursorResetKey = 0,
@@ -83,7 +86,7 @@ export function PromptInput({
         }
       }
     },
-    { isActive: focus && editing && slashInput && (!!onTab || (menuOpen && !!onSuggestionNavigate)) },
+    { isActive: focus && promptEditing && slashInput && (!!onTab || (menuOpen && !!onSuggestionNavigate)) },
   );
 
   useInput(
