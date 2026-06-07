@@ -941,12 +941,12 @@ function hint(
       return `↑/↓ history · Enter preview${tabHint} · Ctrl+R run · /commands · Ctrl+C quit${completeHint}`;
     }
     if (wfStarted || wfLaunching) {
-      return `↑/↓ step · / edit · Ctrl+R run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step · type to edit · Ctrl+R run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
     }
     if (wfPreviewing) {
-      return `↑/↓ step · / edit · Enter preview · Ctrl+R run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step · type to edit · Enter preview · Ctrl+R run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
     }
-    return `↑/↓ pick · / edit · Enter preview · Ctrl+R run · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+    return `↑/↓ pick · type to edit · Enter preview · Ctrl+R run · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
   }
   return promptEditing && slashInput
     ? `Enter dispatch${historyHint} · Esc unfocus · /commands (Tab complete) · Ctrl+C quit${completeHint}`

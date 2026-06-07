@@ -115,7 +115,7 @@ export function PromptInput({
               ? "/exit to quit · Esc to cancel"
               : editing
                 ? "describe the task, or /command (Tab to complete)"
-                : "/ to edit · describe the task"
+                : "type to edit · describe the task, or /command"
           }
         />
       </Box>

@@ -71,7 +71,7 @@ export function WorkflowPreview({
         <Text color="gray">
           {promptEditing
             ? `↑/↓ history${canResume ? " · Enter resume" : ""} · Esc list`
-            : "↑/↓ step · / edit · Ctrl+R run · Esc back"}
+            : "↑/↓ step · type to edit · Ctrl+R run · Esc back"}
         </Text>
       </Box>
 
