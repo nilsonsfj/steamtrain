@@ -17,7 +17,11 @@ export interface SteamtrainConfig {
 export const configFileSchema = z
   .object({
     binaries: z
-      .object({ claude: z.string().optional(), opencode: z.string().optional() })
+      .object({
+        claude: z.string().optional(),
+        opencode: z.string().optional(),
+        codex: z.string().optional(),
+      })
       .partial()
       .optional(),
     timeoutMs: z.number().positive().optional(),

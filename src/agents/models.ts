@@ -1,6 +1,15 @@
+import type { SteamtrainConfig } from "../config/types";
+import type { DoctorResult } from "../doctor";
 import type { AgentId } from "../types/events";
 import { type AgentModel, formatModelOption } from "./agent-model";
 import { CLAUDE_MODELS } from "./claude";
+import { CODEX_MODELS } from "./codex";
+import {
+  getCodexEfforts,
+  getCodexModelName,
+  listCodexCachedAgentModels,
+  refreshCodexVariantCache,
+} from "./codex-variants";
 import { OPENCODE_MODELS } from "./opencode";
 import {
   getOpencodeEfforts,
@@ -10,7 +19,7 @@ import {
 } from "./opencode-variants";
 
 /** All agent ids steamtrain can dispatch to. */
-export const AGENT_IDS: readonly AgentId[] = ["claude", "opencode"];
+export const AGENT_IDS: readonly AgentId[] = ["claude", "opencode", "codex"];
 
 export function isAgentId(value: string): value is AgentId {
   return (AGENT_IDS as readonly string[]).includes(value);
@@ -26,6 +35,16 @@ function opencodeModelsWithLiveNames(): readonly AgentModel[] {
   }));
 }
 
+function codexModelsWithLiveNames(): readonly AgentModel[] {
+  const cached = listCodexCachedAgentModels();
+  if (cached.length > 0) return cached;
+
+  return CODEX_MODELS.map((model) => ({
+    id: model.id,
+    name: getCodexModelName(model.id) ?? model.name,
+  }));
+}
+
 /** Model catalog for an agent provider (id + human-readable name). */
 export function modelsForAgent(agent: AgentId): readonly AgentModel[] {
   switch (agent) {
@@ -33,6 +52,8 @@ export function modelsForAgent(agent: AgentId): readonly AgentModel[] {
       return CLAUDE_MODELS;
     case "opencode":
       return opencodeModelsWithLiveNames();
+    case "codex":
+      return codexModelsWithLiveNames();
   }
 }
 
@@ -46,6 +67,7 @@ export function modelNameForAgent(agent: AgentId, modelId: string): string {
   const fromCatalog = modelsForAgent(agent).find((model) => model.id === modelId);
   if (fromCatalog) return fromCatalog.name;
   if (agent === "opencode") return getOpencodeModelName(modelId) ?? modelId;
+  if (agent === "codex") return getCodexModelName(modelId) ?? modelId;
   return modelId;
 }
 
@@ -53,6 +75,9 @@ export function modelNameForAgent(agent: AgentId, modelId: string): string {
 export function defaultModelForAgent(agent: AgentId): string {
   if (agent === "opencode") {
     return OPENCODE_MODELS[0]?.id ?? agent;
+  }
+  if (agent === "codex") {
+    return CODEX_MODELS[0]?.id ?? agent;
   }
   return modelIdsForAgent(agent)[0] ?? agent;
 }
@@ -97,6 +122,8 @@ export function effortsForModel(agent: AgentId, model: string): readonly string[
       return claudeEfforts(model);
     case "opencode":
       return getOpencodeEfforts(model);
+    case "codex":
+      return getCodexEfforts(model);
   }
 }
 
@@ -135,5 +162,27 @@ export function formatAgentTarget(target: {
   return `${target.agent}/${formatModelDisplay(target)}`;
 }
 
-export { formatModelOption, refreshOpencodeVariantCache };
+/** Refresh live model catalogs for agents that passed doctor preflight. */
+export async function refreshAgentCatalogCaches(
+  config: SteamtrainConfig,
+  doctor: DoctorResult[],
+): Promise<boolean> {
+  let refreshed = false;
+
+  const opencode = doctor.find((d) => d.agent === "opencode");
+  if (opencode?.status === "ok") {
+    const binary = config.binaries?.opencode ?? opencode.binaryPath ?? "opencode";
+    if (await refreshOpencodeVariantCache(binary)) refreshed = true;
+  }
+
+  const codex = doctor.find((d) => d.agent === "codex");
+  if (codex?.status === "ok") {
+    const binary = config.binaries?.codex ?? codex.binaryPath ?? "codex";
+    if (await refreshCodexVariantCache(binary)) refreshed = true;
+  }
+
+  return refreshed;
+}
+
+export { formatModelOption, refreshCodexVariantCache, refreshOpencodeVariantCache };
 export type { AgentModel };

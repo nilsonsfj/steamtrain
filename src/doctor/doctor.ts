@@ -19,7 +19,11 @@ export interface DoctorResult {
   detail?: string;
 }
 
-const DEFAULT_BINARY: Record<AgentId, string> = { claude: "claude", opencode: "opencode" };
+const DEFAULT_BINARY: Record<AgentId, string> = {
+  claude: "claude",
+  opencode: "opencode",
+  codex: "codex",
+};
 const VERSION_TIMEOUT_MS = 8000;
 const AUTH_PATTERN =
   /not logged in|unauthor|authenticat|please run.*login|login required|no api key|api key not|set .*_api_key/i;
@@ -153,22 +157,32 @@ export async function checkAgent(agent: AgentId, binary: string): Promise<Doctor
   };
 }
 
-/** Run preflight for both agents (honoring config binary overrides). */
+/** Run preflight for all agents (honoring config binary overrides). */
 export function runDoctor(config: SteamtrainConfig): Promise<DoctorResult[]> {
-  const agents: AgentId[] = ["claude", "opencode"];
+  const agents: AgentId[] = ["claude", "opencode", "codex"];
   return Promise.all(
     agents.map((agent) => checkAgent(agent, config.binaries?.[agent] ?? DEFAULT_BINARY[agent])),
   );
 }
 
 function installHint(agent: AgentId): string {
-  return agent === "claude"
-    ? "Install Claude Code (npm i -g @anthropic-ai/claude-code) and ensure `claude` is on PATH."
-    : "Install OpenCode (brew install sst/tap/opencode, or npm i -g opencode-ai) and ensure `opencode` is on PATH.";
+  switch (agent) {
+    case "claude":
+      return "Install Claude Code (npm i -g @anthropic-ai/claude-code) and ensure `claude` is on PATH.";
+    case "opencode":
+      return "Install OpenCode (brew install sst/tap/opencode, or npm i -g opencode-ai) and ensure `opencode` is on PATH.";
+    case "codex":
+      return "Install Codex (npm i -g @openai/codex) and ensure `codex` is on PATH.";
+  }
 }
 
 function authHint(agent: AgentId): string {
-  return agent === "claude"
-    ? "Run `claude` and `/login` (subscription) or set ANTHROPIC_API_KEY."
-    : "Run `opencode auth login` for the provider you want to use.";
+  switch (agent) {
+    case "claude":
+      return "Run `claude` and `/login` (subscription) or set ANTHROPIC_API_KEY.";
+    case "opencode":
+      return "Run `opencode auth login` for the provider you want to use.";
+    case "codex":
+      return "Run `codex login` (ChatGPT) or set CODEX_API_KEY for `codex exec`.";
+  }
 }

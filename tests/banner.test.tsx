@@ -21,6 +21,12 @@ describe("TUI components", () => {
         binary: "opencode",
         message: "'opencode' not found on PATH",
       },
+      {
+        agent: "codex",
+        status: "not_authenticated",
+        binary: "codex",
+        message: "not authenticated",
+      },
     ];
     const { lastFrame } = render(
       <StatusBar
@@ -34,6 +40,7 @@ describe("TUI components", () => {
     expect(frame).toContain("claude");
     expect(frame).toContain("ready");
     expect(frame).toContain("opencode");
+    expect(frame).toContain("codex");
     expect(frame).toContain("missing");
   });
 });

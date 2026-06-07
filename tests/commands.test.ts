@@ -91,6 +91,16 @@ describe("executeSlashCommand", () => {
     expect(result.handled && result.notices?.[0]?.level).toBe("warn");
   });
 
+  it("sets agent and default model for codex", () => {
+    const updateWorkspace = vi.fn();
+    const result = executeSlashCommand("/agent codex", makeCtx({ updateWorkspace }));
+    expect(result.handled).toBe(true);
+    expect(updateWorkspace).toHaveBeenCalledWith("plan", {
+      agent: "codex",
+      model: "gpt-5.5",
+    });
+  });
+
   it("sets agent and default model", () => {
     const updateWorkspace = vi.fn();
     const result = executeSlashCommand("/agent opencode", makeCtx({ updateWorkspace }));

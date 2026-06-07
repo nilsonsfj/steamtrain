@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import type { Readable } from "node:stream";
-import { refreshOpencodeVariantCache } from "./agents/models";
+import { refreshAgentCatalogCaches } from "./agents/models";
 import { type SteamtrainConfig, loadConfig } from "./config";
 import { runDoctor } from "./doctor";
 import { Orchestrator } from "./orchestrator";
@@ -219,11 +219,7 @@ async function runWorkflowCommand(
   const cwd = io.cwd ?? process.cwd();
   const doctor = await runDoctor(config);
   orchestrator.setDoctor(doctor);
-  const opencode = doctor.find((d) => d.agent === "opencode");
-  if (opencode?.status === "ok") {
-    const binary = config.binaries?.opencode ?? opencode.binaryPath ?? "opencode";
-    await refreshOpencodeVariantCache(binary);
-  }
+  await refreshAgentCatalogCaches(config, doctor);
   const check = orchestrator.canDispatchWorkflow(name);
   if (!check.ok) {
     err(`cannot run '${name}': ${check.reason}\n`);

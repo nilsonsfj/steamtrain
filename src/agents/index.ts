@@ -1,6 +1,7 @@
 import type { AgentId } from "../types/events";
 import type { AgentAdapter } from "./adapter";
 import { ClaudeCodeAdapter } from "./claude";
+import { CodexAdapter } from "./codex";
 import { OpenCodeAdapter } from "./opencode";
 
 export type { AgentAdapter, AgentRunOptions } from "./adapter";
@@ -8,6 +9,7 @@ export { runAgentProcess } from "./adapter";
 export type { AgentModel } from "./agent-model";
 export { formatModelOption } from "./agent-model";
 export { ClaudeCodeAdapter, CLAUDE_MODELS, createClaudeMapper } from "./claude";
+export { CodexAdapter, CODEX_MODELS, createCodexMapper } from "./codex";
 export {
   AGENT_IDS,
   defaultModelForAgent,
@@ -19,9 +21,17 @@ export {
   modelIdsForAgent,
   modelNameForAgent,
   modelsForAgent,
+  refreshAgentCatalogCaches,
+  refreshCodexVariantCache,
   refreshOpencodeVariantCache,
   supportsEffort,
 } from "./models";
+export {
+  clearCodexVariantCacheForTests,
+  parseCodexDebugModels,
+  setCodexVariantCacheForTests,
+} from "./codex-variants";
+export { fallbackCodexEfforts } from "./codex-efforts-fallback";
 export {
   clearOpencodeVariantCacheForTests,
   parseOpencodeModelsVerbose,
@@ -39,5 +49,7 @@ export function createAdapter(id: AgentId, binary?: string): AgentAdapter {
       return new ClaudeCodeAdapter(binary);
     case "opencode":
       return new OpenCodeAdapter(binary);
+    case "codex":
+      return new CodexAdapter(binary);
   }
 }

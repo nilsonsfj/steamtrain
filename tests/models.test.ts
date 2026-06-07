@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { OPENCODE_MODELS } from "../src/agents/opencode";
+import {
+  clearCodexVariantCacheForTests,
+  setCodexVariantCacheForTests,
+} from "../src/agents/codex-variants";
 import {
   defaultModelForAgent,
   effortForModelChange,
@@ -11,6 +14,7 @@ import {
   modelsForAgent,
   supportsEffort,
 } from "../src/agents/models";
+import { OPENCODE_MODELS } from "../src/agents/opencode";
 import {
   clearOpencodeVariantCacheForTests,
   setOpencodeVariantCacheForTests,
@@ -20,6 +24,31 @@ describe("model names", () => {
   it("returns hardcoded Claude display names", () => {
     expect(modelNameForAgent("claude", "claude-sonnet-4-6")).toBe("Claude Sonnet 4.6");
     expect(modelNameForAgent("claude", "sonnet")).toBe("Sonnet (latest)");
+  });
+
+  it("returns static Codex display names when cache is empty", () => {
+    clearCodexVariantCacheForTests();
+    expect(modelNameForAgent("codex", "gpt-5.4-mini")).toBe("GPT-5.4 Mini");
+  });
+
+  it("prefers live Codex names from the variant cache", () => {
+    setCodexVariantCacheForTests(
+      new Map([["gpt-5.5", { name: "GPT-5.5 (live)", efforts: ["high"] }]]),
+    );
+    expect(modelNameForAgent("codex", "gpt-5.5")).toBe("GPT-5.5 (live)");
+    clearCodexVariantCacheForTests();
+  });
+
+  it("uses only the live Codex catalog when cache is loaded", () => {
+    setCodexVariantCacheForTests(
+      new Map([
+        ["gpt-5.5", { name: "GPT-5.5", efforts: ["high"] }],
+        ["gpt-5.4-mini", { name: "GPT-5.4 Mini", efforts: ["low"] }],
+      ]),
+    );
+    expect(modelIdsForAgent("codex")).toEqual(["gpt-5.4-mini", "gpt-5.5"]);
+    expect(defaultModelForAgent("codex")).toBe("gpt-5.5");
+    clearCodexVariantCacheForTests();
   });
 
   it("returns static OpenCode display names when cache is empty", () => {

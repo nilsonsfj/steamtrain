@@ -160,7 +160,7 @@ export const MAX_STEPS = 1000;
 /** Hard ceiling on parallel agents; the configured value is clamped to this. */
 export const MAX_CONCURRENCY = 16;
 
-const agentId = z.enum(["claude", "opencode"]);
+const agentId = z.enum(["claude", "opencode", "codex"]);
 
 const baseStepShape = {
   id: z.string().min(1),
