@@ -8,6 +8,7 @@ interface PromptInputProps {
   onSubmit: (value: string) => void;
   onTab?: () => void;
   onCtrlR?: () => void;
+  onCtrlQ?: () => void;
   onSuggestionNavigate?: (direction: "up" | "down") => void;
   onHistoryNavigate?: (direction: "up" | "down") => boolean;
   focus: boolean;
@@ -22,12 +23,12 @@ interface PromptInputProps {
   cursorResetKey?: number;
 }
 
-/** ink-text-input still emits the letter on Ctrl+R; drop that lone insert. */
-function isSpuriousCtrlRInsert(prev: string, next: string): boolean {
+/** ink-text-input still emits the letter on Ctrl+R / Ctrl+Q; drop that lone insert. */
+function isSpuriousCtrlLetterInsert(prev: string, next: string, letter: string): boolean {
   if (next.length !== prev.length + 1) return false;
   let i = 0;
   while (i < prev.length && prev[i] === next[i]) i += 1;
-  if (next[i] !== "r") return false;
+  if (next[i]?.toLowerCase() !== letter.toLowerCase()) return false;
   return prev.slice(i) === next.slice(i + 1);
 }
 
@@ -38,6 +39,7 @@ export function PromptInput({
   onSubmit,
   onTab,
   onCtrlR,
+  onCtrlQ,
   onSuggestionNavigate,
   onHistoryNavigate,
   focus,
@@ -51,13 +53,17 @@ export function PromptInput({
   const slashInput = value.trimStart().startsWith("/");
   const menuOpen = (suggestions?.length ?? 0) > 1;
   const swallowNextCharRef = useRef(false);
+  const swallowLetterRef = useRef<string | null>(null);
 
   const handleChange = (next: string) => {
-    if (swallowNextCharRef.current && isSpuriousCtrlRInsert(value, next)) {
+    const letter = swallowLetterRef.current;
+    if (swallowNextCharRef.current && letter && isSpuriousCtrlLetterInsert(value, next, letter)) {
       swallowNextCharRef.current = false;
+      swallowLetterRef.current = null;
       return;
     }
     swallowNextCharRef.current = false;
+    swallowLetterRef.current = null;
     onChange(next);
   };
 
@@ -65,10 +71,22 @@ export function PromptInput({
     (input, key) => {
       if (key.ctrl && input === "r" && onCtrlR) {
         swallowNextCharRef.current = true;
+        swallowLetterRef.current = "r";
         onCtrlR();
       }
     },
     { isActive: focus && !!onCtrlR && !running },
+  );
+
+  useInput(
+    (input, key) => {
+      if (key.ctrl && input === "q" && onCtrlQ) {
+        swallowNextCharRef.current = true;
+        swallowLetterRef.current = "q";
+        onCtrlQ();
+      }
+    },
+    { isActive: focus && !!onCtrlQ },
   );
 
   useInput(

@@ -839,6 +839,10 @@ export function App({
     [commandSuggestions, handleTab, handleSubmit, recordPromptHistory],
   );
 
+  const handleWorkflowCancel = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
   const handleWorkflowFreshRun = useCallback(() => {
     const prompt = value.trim();
     recordPromptHistory(value);
@@ -849,10 +853,6 @@ export function App({
     if (key.ctrl && input === "c") {
       abortRef.current?.abort();
       exit();
-      return;
-    }
-    if (key.ctrl && input === "q" && running && mode === "workflow") {
-      abortRef.current?.abort();
       return;
     }
     if (key.escape) {
@@ -1020,6 +1020,7 @@ export function App({
           onSubmit={handlePromptSubmit}
           onTab={handleTab}
           onCtrlR={mode === "workflow" && !running ? handleWorkflowFreshRun : undefined}
+          onCtrlQ={mode === "workflow" && running ? handleWorkflowCancel : undefined}
           onSuggestionNavigate={handleSuggestionNavigate}
           onHistoryNavigate={promptHistoryArrows ? handleHistoryNavigate : undefined}
           focus
