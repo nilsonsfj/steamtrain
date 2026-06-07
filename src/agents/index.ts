@@ -9,7 +9,7 @@ export { runAgentProcess } from "./adapter";
 export type { AgentModel } from "./agent-model";
 export { formatModelOption } from "./agent-model";
 export { ClaudeCodeAdapter, CLAUDE_MODELS, createClaudeMapper } from "./claude";
-export { CodexAdapter, CODEX_MODELS, createCodexMapper } from "./codex";
+export { CodexAdapter, CODEX_MODELS, buildCodexExecArgs, createCodexMapper } from "./codex";
 export {
   AGENT_IDS,
   defaultModelForAgent,

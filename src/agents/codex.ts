@@ -60,6 +60,27 @@ export function createCodexMapper(agent: AgentId = AGENT): EventMapper {
     if (delta) out.push({ kind: "text_delta", agent, ts, text: delta, thinking });
   };
 
+  const emitCommandResult = (item: CodexThreadItem, ts: number, out: AgentEvent[]): void => {
+    const id = item.id ?? item.command ?? "command";
+    if (toolFinished.has(id)) return;
+    toolFinished.add(id);
+
+    const name = item.command ? "command_execution" : "tool";
+    const status = item.status;
+    const failed = status !== undefined && COMMAND_FAILED.has(status);
+    const output = item.aggregated_output ?? stringifyContent(item.result ?? item.error);
+    out.push({
+      kind: "tool_result",
+      agent,
+      ts,
+      id,
+      name,
+      output,
+      isError: failed || (item.exit_code != null && item.exit_code !== 0),
+      status,
+    });
+  };
+
   const handleCommandItem = (
     item: CodexThreadItem,
     ts: number,
@@ -84,24 +105,33 @@ export function createCodexMapper(agent: AgentId = AGENT): EventMapper {
             status,
           });
         }
+        return;
+      }
+      if (status !== undefined && (COMMAND_DONE.has(status) || COMMAND_FAILED.has(status))) {
+        emitCommandResult(item, ts, out);
       }
       return;
     }
 
+    emitCommandResult(item, ts, out);
+  };
+
+  const emitMcpResult = (item: CodexThreadItem, ts: number, out: AgentEvent[]): void => {
+    const id = item.id ?? `${item.server ?? "mcp"}/${item.tool ?? "tool"}`;
     if (toolFinished.has(id)) return;
     toolFinished.add(id);
 
-    const failed = status !== undefined && COMMAND_FAILED.has(status);
-    const output = item.aggregated_output ?? stringifyContent(item.result ?? item.error);
+    const name = item.tool ?? "mcp_tool_call";
+    const failed = item.status !== undefined && COMMAND_FAILED.has(item.status);
     out.push({
       kind: "tool_result",
       agent,
       ts,
       id,
       name,
-      output,
-      isError: failed || (item.exit_code != null && item.exit_code !== 0),
-      status,
+      output: stringifyContent(item.result ?? item.error),
+      isError: failed || item.error != null,
+      status: item.status,
     });
   };
 
@@ -128,24 +158,18 @@ export function createCodexMapper(agent: AgentId = AGENT): EventMapper {
             status: item.status,
           });
         }
+        return;
+      }
+      if (
+        item.status !== undefined &&
+        (COMMAND_DONE.has(item.status) || COMMAND_FAILED.has(item.status))
+      ) {
+        emitMcpResult(item, ts, out);
       }
       return;
     }
 
-    if (toolFinished.has(id)) return;
-    toolFinished.add(id);
-
-    const failed = item.status !== undefined && COMMAND_FAILED.has(item.status);
-    out.push({
-      kind: "tool_result",
-      agent,
-      ts,
-      id,
-      name,
-      output: stringifyContent(item.result ?? item.error),
-      isError: failed || item.error != null,
-      status: item.status,
-    });
+    emitMcpResult(item, ts, out);
   };
 
   const handleItem = (
@@ -256,6 +280,24 @@ export function createCodexMapper(agent: AgentId = AGENT): EventMapper {
   };
 }
 
+/** Build argv for `codex exec --json` (shared by the adapter and tests). */
+export function buildCodexExecArgs(opts: AgentRunOptions): string[] {
+  return [
+    "exec",
+    "--json",
+    "--sandbox",
+    "workspace-write",
+    "-c",
+    'approval_policy="never"',
+    "--skip-git-repo-check",
+    "--model",
+    opts.model,
+    ...(opts.effort ? ["-c", `model_reasoning_effort="${opts.effort}"`] : []),
+    ...(opts.extraArgs ?? []),
+    opts.prompt,
+  ];
+}
+
 /** Runs the real `codex` CLI in JSON event mode. */
 export class CodexAdapter implements AgentAdapter {
   readonly id: AgentId = AGENT;
@@ -266,24 +308,10 @@ export class CodexAdapter implements AgentAdapter {
   }
 
   run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
-    const args = [
-      "exec",
-      "--json",
-      "--sandbox",
-      "workspace-write",
-      "-c",
-      'approval_policy="never"',
-      "--skip-git-repo-check",
-      "--model",
-      opts.model,
-      ...(opts.effort ? ["-c", `model_reasoning_effort="${opts.effort}"`] : []),
-      ...(opts.extraArgs ?? []),
-      opts.prompt,
-    ];
     return runAgentProcess({
       id: this.id,
       binary: this.binary,
-      args,
+      args: buildCodexExecArgs(opts),
       opts,
       map: createCodexMapper(this.id),
     });

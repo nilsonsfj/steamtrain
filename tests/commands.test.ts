@@ -201,7 +201,7 @@ describe("executeSlashCommand", () => {
   it("rejects unknown effort for current agent", () => {
     const result = executeSlashCommand("/effort definitely-invalid", makeCtx());
     expect(result.handled).toBe(true);
-    expect(result.notices?.[0]?.level).toBe("error");
+    expect(result.handled && result.notices?.[0]?.level).toBe("error");
   });
 
   it("rejects xhigh for sonnet 4.6", () => {
@@ -216,7 +216,7 @@ describe("executeSlashCommand", () => {
       }),
     );
     expect(result.handled).toBe(true);
-    expect(result.notices?.[0]?.level).toBe("error");
+    expect(result.handled && result.notices?.[0]?.level).toBe("error");
     expect(updateWorkspace).not.toHaveBeenCalled();
   });
 

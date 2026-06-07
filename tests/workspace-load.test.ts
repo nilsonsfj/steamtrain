@@ -10,6 +10,7 @@ import {
   projectWorkspaceConfigPath,
   resolveWorkspaceScope,
   saveWorkspaceConfig,
+  type WorkspaceConfig,
   workspaceConfigPath,
   workspaceScopeLabel,
 } from "../src/workspace";
@@ -198,7 +199,7 @@ describe("saveWorkspaceConfig", () => {
   it("writes the full workspace list to the user file", () => {
     const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
     const scope = userScope(home);
-    const config = {
+    const config: WorkspaceConfig = {
       workspaces: [
         { id: "plan", agent: "opencode", model: "openai/gpt-5.4-mini" },
         { id: "implement", agent: "opencode", model: "openai/gpt-5.4-mini" },
@@ -218,7 +219,7 @@ describe("saveWorkspaceConfig", () => {
   it("writes the full workspace list to the project workspace file", () => {
     const cwd = mkdtempSync(join(tmpdir(), "steamtrain-cwd-"));
     const scope = { kind: "project" as const, path: projectWorkspaceConfigPath(cwd) };
-    const config = {
+    const config: WorkspaceConfig = {
       workspaces: [
         { id: "plan", agent: "opencode", model: "openai/gpt-5.4-mini" },
         { id: "implement", agent: "opencode", model: "openai/gpt-5.4-mini" },

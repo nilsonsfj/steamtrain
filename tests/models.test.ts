@@ -51,6 +51,14 @@ describe("model names", () => {
     clearCodexVariantCacheForTests();
   });
 
+  it("falls back to the first cached Codex model when the static default is absent", () => {
+    setCodexVariantCacheForTests(
+      new Map([["gpt-5.4-mini", { name: "GPT-5.4 Mini", efforts: ["low"] }]]),
+    );
+    expect(defaultModelForAgent("codex")).toBe("gpt-5.4-mini");
+    clearCodexVariantCacheForTests();
+  });
+
   it("returns static OpenCode display names when cache is empty", () => {
     clearOpencodeVariantCacheForTests();
     expect(modelNameForAgent("opencode", "opencode/gpt-5.4-mini")).toBe("GPT 5.4 Mini");

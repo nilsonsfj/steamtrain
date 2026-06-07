@@ -32,7 +32,7 @@ export interface WorkflowItem {
 
 export interface AgentRunFields {
   agent: AgentId;
-  /** Model string in the agent's own format (claude: `claude-…`, opencode: `provider/model`). */
+  /** Model string in the agent's own format (claude: `claude-…`, opencode: `provider/model`, codex: plain slug). */
   model: string;
   /** Prompt template; may reference `{{input}}` and `{{steps.<id>.output}}`. */
   prompt: string;
@@ -42,7 +42,7 @@ export interface AgentRunFields {
   env?: Record<string, string>;
   /** Extra CLI flags appended to the agent's own args (advanced targets). */
   extraArgs?: string[];
-  /** Reasoning effort / variant (claude: `--effort`, opencode: `--variant`). */
+  /** Reasoning effort / variant (claude: `--effort`, opencode: `--variant`, codex: `-c model_reasoning_effort=…`). */
   effort?: string;
 }
 

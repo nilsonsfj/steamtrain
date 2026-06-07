@@ -73,13 +73,15 @@ export function modelNameForAgent(agent: AgentId, modelId: string): string {
 
 /** Default model when switching to an agent without an explicit model. */
 export function defaultModelForAgent(agent: AgentId): string {
-  if (agent === "opencode") {
-    return OPENCODE_MODELS[0]?.id ?? agent;
-  }
-  if (agent === "codex") {
-    return CODEX_MODELS[0]?.id ?? agent;
-  }
-  return modelIdsForAgent(agent)[0] ?? agent;
+  const preferred =
+    agent === "opencode"
+      ? OPENCODE_MODELS[0]?.id
+      : agent === "codex"
+        ? CODEX_MODELS[0]?.id
+        : undefined;
+  const available = modelIdsForAgent(agent);
+  if (preferred && available.includes(preferred)) return preferred;
+  return available[0] ?? preferred ?? agent;
 }
 
 const CLAUDE_OPUS_48_47_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
