@@ -27,14 +27,17 @@ import { Orchestrator } from "../orchestrator";
 import { DEFAULT_PROMPT_HISTORY_LIMIT, type SteamtrainSettings } from "../settings";
 import { STEAMTRAIN_VERSION } from "../version";
 import {
+  type LoadedWorkflowCatalog,
   type StepResult,
+  type WorkflowCatalogEntry,
+  type WorkflowStepOverrides,
   WORKFLOW_CACHE_DIR,
   applyWorkflowStepOverrides,
   createWorkflowCacheStore,
   isAgentBackedStep,
   persistWorkflowStepDone,
-  type WorkflowStepOverrides,
   workflowCacheKey,
+  workflowCatalogEntries,
 } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId, WorkspaceScope } from "../workspace";
 import {
@@ -86,6 +89,7 @@ interface AppProps {
   configWarning?: string;
   settings: SteamtrainSettings;
   settingsWarning?: string;
+  workflowCatalog: LoadedWorkflowCatalog;
   workspaces: WorkspaceConfig;
   workspaceScope: WorkspaceScope;
   workspaceLabel: string;
@@ -101,6 +105,7 @@ export function App({
   configWarning,
   settings,
   settingsWarning,
+  workflowCatalog,
   workspaces,
   workspaceScope,
   workspaceLabel,
@@ -194,8 +199,8 @@ export function App({
   );
 
   const orchestrator = useMemo(
-    () => new Orchestrator(config, runtimeWorkspaces, doctor ?? []),
-    [config, runtimeWorkspaces, doctor],
+    () => new Orchestrator(config, runtimeWorkspaces, doctor ?? [], workflowCatalog),
+    [config, runtimeWorkspaces, doctor, workflowCatalog],
   );
 
   const resolveWorkflowSpec = useCallback(
@@ -207,9 +212,9 @@ export function App({
     [orchestrator, wfStepOverrides],
   );
 
-  const workflowEntries = useMemo(
-    () => Object.entries(orchestrator.listWorkflows()).map(([name, spec]) => ({ name, spec })),
-    [orchestrator],
+  const workflowEntries = useMemo<WorkflowCatalogEntry[]>(
+    () => workflowCatalogEntries(workflowCatalog),
+    [workflowCatalog],
   );
 
   const abortRef = useRef<AbortController | null>(null);
@@ -230,6 +235,11 @@ export function App({
   useEffect(() => {
     if (settingsWarning) dispatch({ type: "notice", level: "warn", text: settingsWarning });
   }, [settingsWarning]);
+  useEffect(() => {
+    if (workflowCatalog.warning) {
+      dispatch({ type: "notice", level: "warn", text: workflowCatalog.warning });
+    }
+  }, [workflowCatalog.warning]);
 
   // Show the banner briefly, then hand over to the main UI.
   useEffect(() => {
@@ -906,6 +916,7 @@ export function App({
         ) : wfPreview && previewSpec && previewDispatchCheck ? (
           <WorkflowPreview
             spec={previewSpec}
+            source={orchestrator.workflowSource(wfPreview.name) ?? "bundled"}
             input={value.trim() || wfPreview.input}
             width={columns}
             height={streamHeight}
@@ -935,6 +946,7 @@ export function App({
         workspaceMap={workspaceMap}
         active={mode}
         workflowName={isWorkflow ? workflowEntries[workflowIndex]?.name : undefined}
+        workflowSource={isWorkflow ? workflowEntries[workflowIndex]?.source : undefined}
       />
       {wfNotice && isWorkflow ? (
         <Box paddingX={1}>

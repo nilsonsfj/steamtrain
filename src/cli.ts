@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { homedir } from "node:os";
 import type { Readable } from "node:stream";
 import { refreshAgentCatalogCaches } from "./agents/models";
 import { type SteamtrainConfig, configDisplayLabel, loadConfig } from "./config";
@@ -17,6 +18,7 @@ import {
   workflowStepKind,
 } from "./workflow";
 import { loadWorkspaceConfig } from "./workspace";
+import { loadWorkflowCatalog, workflowCatalogEntries } from "./workflow";
 
 export interface GlobalCliOptions {
   args: string[];
@@ -96,12 +98,17 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
     customPath: io.workspacePath,
   });
   if (workspaceWarning) err(`${workspaceWarning}\n`);
-  const orchestrator = new Orchestrator(config, workspaces, []);
+  const workflowCatalog = loadWorkflowCatalog({
+    home: homedir(),
+    projectWorkflows: config.workflows,
+  });
+  if (workflowCatalog.warning) err(`${workflowCatalog.warning}\n`);
+  const orchestrator = new Orchestrator(config, workspaces, [], workflowCatalog);
 
   switch (command ?? "list") {
     case "list":
     case "ls":
-      printWorkflowList(orchestrator.listWorkflows(), configLabel, out);
+      printWorkflowList(workflowCatalogEntries(workflowCatalog), configLabel, out);
       return 0;
     case "validate":
       return validateWorkflows(orchestrator.listWorkflows(), rest[0], out, err);
@@ -121,13 +128,13 @@ function normalizeArgs(args: string[]): string[] {
 }
 
 function printWorkflowList(
-  workflows: Record<string, WorkflowSpec>,
+  workflows: { name: string; spec: WorkflowSpec; source: string }[],
   source: string,
   out: (text: string) => void,
 ): void {
   out(`workflows (${source})\n`);
-  for (const [name, spec] of Object.entries(workflows)) {
-    out(`- ${name}  ${workflowSummary(spec)}\n`);
+  for (const { name, spec, source: workflowSource } of workflows) {
+    out(`- ${name} [${workflowSource}]  ${workflowSummary(spec)}\n`);
     if (spec.description) out(`  ${spec.description}\n`);
   }
 }

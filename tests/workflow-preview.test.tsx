@@ -18,6 +18,7 @@ describe("WorkflowPreview", () => {
     const { lastFrame } = render(
       <WorkflowPreview
         spec={spec}
+        source="bundled"
         input="add workflow preview screen"
         width={100}
         height={30}
@@ -27,6 +28,7 @@ describe("WorkflowPreview", () => {
     );
     const frame = lastFrame() ?? "";
     expect(frame).toContain("workflow preview · multi-plan");
+    expect(frame).toContain("(bundled)");
     expect(frame).toContain("add workflow preview screen");
     expect(frame).toContain("planning-lenses");
     expect(frame).toContain("ready to run");
@@ -38,6 +40,7 @@ describe("WorkflowPreview", () => {
     const { lastFrame } = render(
       <WorkflowPreview
         spec={spec}
+        source="bundled"
         input="scan auth module"
         width={100}
         height={30}
@@ -55,6 +58,7 @@ describe("WorkflowPreview", () => {
     const { lastFrame } = render(
       <WorkflowPreview
         spec={spec}
+        source="bundled"
         input=""
         width={160}
         height={40}

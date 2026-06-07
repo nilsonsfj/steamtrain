@@ -3,8 +3,8 @@ import { useMemo } from "react";
 import { truncate } from "../agents/util";
 import { formatAgentTarget } from "../agents";
 import type { DispatchCheck } from "../orchestrator";
-import { type WorkflowSpec, isAgentBackedStep, workflowStepKind } from "../workflow";
-import { AGENT_COLOR } from "./theme";
+import { type WorkflowSourceKind, type WorkflowSpec, isAgentBackedStep, workflowStepKind } from "../workflow";
+import { AGENT_COLOR, WORKFLOW_SOURCE_COLOR } from "./theme";
 import {
   BLOCK_LABEL,
   type FlatSpecStep,
@@ -22,6 +22,7 @@ export { flattenSpecSteps };
 
 interface WorkflowPreviewProps {
   spec: WorkflowSpec;
+  source: WorkflowSourceKind;
   input: string;
   width: number;
   height: number;
@@ -37,6 +38,7 @@ interface WorkflowPreviewProps {
  */
 export function WorkflowPreview({
   spec,
+  source,
   input,
   width,
   height,
@@ -66,7 +68,8 @@ export function WorkflowPreview({
     >
       <Box justifyContent="space-between">
         <Text color="cyan" bold>
-          workflow preview · {spec.name}
+          workflow preview · {spec.name}{" "}
+          <Text color={WORKFLOW_SOURCE_COLOR[source]}>({source})</Text>
         </Text>
         <Text color="gray">
           {promptEditing

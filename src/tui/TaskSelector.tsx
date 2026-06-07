@@ -1,9 +1,10 @@
 import { Box, Text } from "ink";
 import { formatModelDisplay } from "../agents";
 import type { WorkspaceEntry } from "../workspace";
+import type { WorkflowSourceKind } from "../workflow";
 import { workspaceLabel } from "../workspace";
 import { type Mode, isWorkspaceMode } from "./modes";
-import { AGENT_COLOR } from "./theme";
+import { AGENT_COLOR, WORKFLOW_SOURCE_COLOR } from "./theme";
 
 interface TaskSelectorProps {
   modes: readonly Mode[];
@@ -11,10 +12,17 @@ interface TaskSelectorProps {
   active: Mode;
   /** Name of the currently selected workflow (shown when in workflow mode). */
   workflowName?: string;
+  workflowSource?: WorkflowSourceKind;
 }
 
 /** Mode bar: workflow plus user-configured workspace presets. */
-export function TaskSelector({ modes, workspaceMap, active, workflowName }: TaskSelectorProps) {
+export function TaskSelector({
+  modes,
+  workspaceMap,
+  active,
+  workflowName,
+  workflowSource,
+}: TaskSelectorProps) {
   const current: WorkspaceEntry | undefined = isWorkspaceMode(active)
     ? workspaceMap.get(active)
     : undefined;
@@ -54,7 +62,14 @@ export function TaskSelector({ modes, workspaceMap, active, workflowName }: Task
         ) : (
           <>
             <Text color="gray">→ workflow</Text>
-            {workflowName ? <Text color="cyan" bold>{`: ${workflowName}`}</Text> : null}
+            {workflowName ? (
+              <>
+                <Text color="cyan" bold>{`: ${workflowName}`}</Text>
+                {workflowSource ? (
+                  <Text color={WORKFLOW_SOURCE_COLOR[workflowSource]}> {workflowSource}</Text>
+                ) : null}
+              </>
+            ) : null}
           </>
         )}
       </Box>

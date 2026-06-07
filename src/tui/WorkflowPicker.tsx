@@ -1,9 +1,10 @@
 import { Box, Text } from "ink";
-import type { WorkflowSpec } from "../workflow";
+import type { WorkflowCatalogEntry } from "../workflow";
 import { blockSummary } from "./workflow-spec-ui";
+import { WORKFLOW_SOURCE_COLOR } from "./theme";
 
 interface WorkflowPickerProps {
-  workflows: { name: string; spec: WorkflowSpec }[];
+  workflows: WorkflowCatalogEntry[];
   selectedIndex: number;
   height: number;
 }
@@ -22,7 +23,7 @@ export function WorkflowPicker({ workflows, selectedIndex, height }: WorkflowPic
         {workflows.length === 0 ? (
           <Text color="gray">No workflows defined.</Text>
         ) : (
-          workflows.map(({ name, spec }, i) => {
+          workflows.map(({ name, spec, source }, i) => {
             const active = i === selectedIndex;
             const phaseCount = spec.phases.length;
             const stepCount = spec.phases.reduce((n, p) => n + p.steps.length, 0);
@@ -34,6 +35,7 @@ export function WorkflowPicker({ workflows, selectedIndex, height }: WorkflowPic
                   <Text color={active ? "cyan" : "white"} bold={active}>
                     {name}
                   </Text>
+                  <Text color={WORKFLOW_SOURCE_COLOR[source]}> {source}</Text>
                   <Text color="gray">
                     {"  "}
                     {phaseCount} phase{phaseCount === 1 ? "" : "s"} · {stepCount} step

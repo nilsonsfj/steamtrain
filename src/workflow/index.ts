@@ -54,3 +54,14 @@ export {
   type WorkflowCacheStore,
 } from "./cache-store";
 export { applyWorkflowStepOverrides, type WorkflowStepOverrides } from "./overrides";
+export {
+  WORKFLOWS_FILENAME,
+  type LoadedWorkflowCatalog,
+  type LoadWorkflowCatalogOptions,
+  type WorkflowCatalogEntry,
+  type WorkflowSourceKind,
+  loadWorkflowCatalog,
+  mergeWorkflowMap,
+  userWorkflowsPath,
+  workflowCatalogEntries,
+} from "./catalog";

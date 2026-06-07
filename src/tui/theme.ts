@@ -32,6 +32,13 @@ export const AGENT_COLOR: Record<string, string> = {
   codex: "green",
 };
 
+/** Ink color for workflow catalog source labels in the picker and preview. */
+export const WORKFLOW_SOURCE_COLOR = {
+  bundled: "gray",
+  user: "blue",
+  project: "yellow",
+} as const;
+
 /** Solid backdrop for the slash-command completion popup (overlays content above the prompt). */
 export const SUGGESTION_MENU_BG = "#1a1a1a";
 export const SUGGESTION_MENU_ACTIVE_BG = "#2a2a2a";

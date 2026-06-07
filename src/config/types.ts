@@ -7,7 +7,7 @@ export interface SteamtrainConfig {
   binaries?: Partial<Record<AgentId, string>>;
   /** Per-run wall-clock timeout in ms (workflows and workspace dispatches). */
   timeoutMs?: number;
-  /** User-defined workflows, keyed by launch name. Merged over the bundled ones. */
+  /** Project workflows from `steamtrain.json`, keyed by launch name. Merged over bundled and user workflows. */
   workflows?: Record<string, WorkflowSpec>;
   /** Max steps run in parallel within a workflow phase (clamped to MAX_CONCURRENCY). */
   maxConcurrency?: number;

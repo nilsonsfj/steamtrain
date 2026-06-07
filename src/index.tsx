@@ -5,6 +5,7 @@ import { configDisplayLabel, loadConfig } from "./config";
 import { loadSettings } from "./settings";
 import { App } from "./tui/App";
 import { loadWorkspaceConfig, workspaceScopeLabel } from "./workspace";
+import { loadWorkflowCatalog } from "./workflow";
 
 /**
  * steamtrain entry point.
@@ -12,9 +13,8 @@ import { loadWorkspaceConfig, workspaceScopeLabel } from "./workspace";
  *   bun src/index.tsx     # dev (TSX, no build step)
  *   steamtrain            # after `npm run build` + global install
  *
- * With no args, loads project config (defaults + optional steamtrain.json) and
- * workspace presets (~/.steamtrain/workspace.json or ./workspace.json), then
- * renders the TUI. Workflow subcommands run headlessly for scripts/CI.
+ * With no args, loads project config (defaults + optional steamtrain.json),
+ * user workflows (~/.steamtrain/workflows.json), workspace presets, then renders the TUI.
  */
 async function main(): Promise<void> {
   const { args, workspacePath, configPath, error } = parseGlobalArgs(process.argv.slice(2));
@@ -41,6 +41,10 @@ async function main(): Promise<void> {
     customPath: workspacePath,
     home,
   });
+  const workflowCatalog = loadWorkflowCatalog({
+    home,
+    projectWorkflows: config.workflows,
+  });
   const app = render(
     <App
       config={config}
@@ -48,6 +52,7 @@ async function main(): Promise<void> {
       configWarning={warning}
       settings={settings}
       settingsWarning={settingsWarning}
+      workflowCatalog={workflowCatalog}
       workspaces={workspaces}
       workspaceScope={workspaceScope}
       workspaceLabel={workspaceScopeLabel(workspaceScope, home)}

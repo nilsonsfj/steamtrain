@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homeRelativePath } from "../paths";
-import { type WorkflowSpec, validateWorkflow } from "../workflow/types";
+import { mergeWorkflowMap } from "../workflow/catalog";
 import { WORKSPACE_CONFIG_FILENAME } from "../workspace";
 import { DEFAULT_CONFIG } from "./defaults";
 import { type ConfigFile, type SteamtrainConfig, configFileSchema } from "./types";
@@ -124,27 +124,8 @@ export function mergeConfig(
     maxConcurrency: override.maxConcurrency ?? base.maxConcurrency,
   };
 
-  const { workflows, warnings } = mergeWorkflows(base.workflows, override.workflows);
-  if (workflows) merged.workflows = workflows;
+  const { workflows, warning } = mergeWorkflowMap({}, {}, override.workflows, "project");
+  if (Object.keys(workflows).length > 0) merged.workflows = workflows;
+  const warnings = warning ? [warning] : [];
   return { config: merged, warnings };
-}
-
-/** Merge user workflows over base, injecting each map key as the spec `name`. */
-function mergeWorkflows(
-  base: Record<string, WorkflowSpec> | undefined,
-  override: ConfigFile["workflows"],
-): { workflows?: Record<string, WorkflowSpec>; warnings: string[] } {
-  if (!override) return { workflows: base, warnings: [] };
-  const out: Record<string, WorkflowSpec> = { ...base };
-  const warnings: string[] = [];
-  for (const [name, spec] of Object.entries(override)) {
-    const full = { ...spec, name };
-    const valid = validateWorkflow(full);
-    if (!valid.ok) {
-      warnings.push(`workflow '${name}' ignored: ${valid.error}`);
-      continue;
-    }
-    out[name] = full;
-  }
-  return { workflows: out, warnings };
 }

@@ -3,9 +3,10 @@ import type { SteamtrainConfig } from "../config";
 import type { DoctorResult } from "../doctor";
 import type { AgentEvent, AgentId } from "../types/events";
 import {
-  BUNDLED_WORKFLOWS,
+  type LoadedWorkflowCatalog,
   type StepResult,
   type WorkflowEvent,
+  type WorkflowSourceKind,
   type WorkflowSpec,
   isAgentBackedStep,
   runWorkflow,
@@ -31,13 +32,18 @@ export type DispatchCheck = { ok: true } | { ok: false; reason: string };
  */
 export class Orchestrator {
   private readonly workspaceMap: Map<WorkspaceId, WorkspaceEntry>;
+  private readonly workflowCatalog: Record<string, WorkflowSpec>;
+  private readonly workflowSources: Record<string, WorkflowSourceKind>;
 
   constructor(
     private readonly config: SteamtrainConfig,
     workspaces: WorkspaceConfig,
     private doctor: DoctorResult[],
+    catalog: LoadedWorkflowCatalog,
   ) {
     this.workspaceMap = workspaceById(workspaces);
+    this.workflowCatalog = catalog.workflows;
+    this.workflowSources = catalog.sources;
   }
 
   setDoctor(results: DoctorResult[]): void {
@@ -86,9 +92,13 @@ export class Orchestrator {
 
   // --- Workflows -----------------------------------------------------------
 
-  /** All available workflows: the bundled ones plus any from steamtrain.json. */
+  /** All available workflows: bundled, user, and project merged by name. */
   listWorkflows(): Record<string, WorkflowSpec> {
-    return { ...BUNDLED_WORKFLOWS, ...this.config.workflows };
+    return this.workflowCatalog;
+  }
+
+  workflowSource(name: string): WorkflowSourceKind | undefined {
+    return this.workflowSources[name];
   }
 
   /**
