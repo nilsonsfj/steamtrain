@@ -1,4 +1,5 @@
 import { agentCommand } from "./builtins/agent";
+import { createWorkflowCommand } from "./builtins/createworkflow";
 import { effortCommand } from "./builtins/effort";
 import { exitCommand } from "./builtins/exit";
 import { modelCommand } from "./builtins/model";
@@ -14,6 +15,7 @@ const BUILTIN_COMMANDS: SlashCommand[] = [
   effortCommand,
   agentCommand,
   saveWorkflowsCommand,
+  createWorkflowCommand,
 ];
 
 /** Mutable registry — append custom commands at runtime to extend the TUI. */

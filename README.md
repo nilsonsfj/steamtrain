@@ -51,7 +51,19 @@ steamtrain workflow run multi-plan --input "design the cache migration"
 steamtrain workflow run bug-hunt --stdin --json
 steamtrain workflow run multi-plan --input "design the cache migration" --fresh
 steamtrain workflow cache clear
+
+# Draft a brand-new workflow from a description (LLM delegation), then save it.
+steamtrain workflow create --input "review a PR from three angles then merge findings"
+steamtrain workflow create --input "audit the auth module" --agent claude --model claude-sonnet-4-6 --save
 ```
+
+Every headless run ends with a **status summary** — one line per step (status,
+duration, gate result, cost) plus run totals — so a CI log shows exactly what
+happened. Agentless workflows (only distributors / consolidators / gates) run
+without any agent installed, which makes them ideal smoke tests.
+
+See [`docs/workflow-creation.md`](docs/workflow-creation.md) for the creation flow
+(CLI `workflow create` and the TUI `/createworkflow` command).
 
 ### Build a standalone binary
 

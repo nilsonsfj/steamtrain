@@ -197,6 +197,9 @@ function Detail({ step, width }: { step: StepState; width: number }) {
         {step.stepId} · {step.blockKind} · {step.status}
         {step.cached ? " (cached)" : ""}
       </Text>
+      {step.dependsOn && step.dependsOn.length > 0 ? (
+        <Text color="gray">← inputs: {step.dependsOn.join(", ")}</Text>
+      ) : null}
       {step.item ? (
         <Text color="gray">
           item {step.item.index} from {step.item.sourceStepId}: {step.item.value}

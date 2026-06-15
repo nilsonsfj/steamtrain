@@ -115,6 +115,7 @@ export async function* runWorkflow(
         model: agentBacked?.model,
         effort: agentBacked?.effort,
         cwd: "cwd" in step ? step.cwd : undefined,
+        dependsOn: step.dependsOn,
         ts: Date.now(),
       });
 
@@ -154,6 +155,7 @@ export async function* runWorkflow(
             agent: agentBacked?.agent,
             model: agentBacked?.model,
             cwd: "cwd" in step ? step.cwd : undefined,
+            dependsOn: step.dependsOn,
             parentStepId: step.id,
             item: child.item,
             ts: Date.now(),
@@ -542,6 +544,7 @@ async function executeForEachStep(
         model: step.model,
         effort: step.effort,
         cwd: step.cwd,
+        dependsOn: step.dependsOn,
         parentStepId: step.id,
         item,
         ts: Date.now(),

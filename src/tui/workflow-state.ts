@@ -22,6 +22,8 @@ export interface StepState {
   model?: string;
   effort?: string;
   cwd?: string;
+  /** Earlier steps whose outputs feed this step. */
+  dependsOn?: string[];
   parentStepId?: string;
   item?: WorkflowItem;
   status: StepStatus;
@@ -153,6 +155,7 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
                     model: e.model,
                     effort: e.effort,
                     cwd: e.cwd,
+                    dependsOn: e.dependsOn,
                     parentStepId: e.parentStepId,
                     item: e.item,
                     status: "running",

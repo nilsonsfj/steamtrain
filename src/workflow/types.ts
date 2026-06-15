@@ -317,6 +317,12 @@ export const workflowSpecSchema = z
     }
   });
 
+/**
+ * The raw shape parsed from JSON (config / user file) before a name is injected
+ * from the map key. `name` is optional here; loaders normalize it to a string.
+ */
+export type WorkflowSpecInput = z.infer<typeof workflowSpecSchema>;
+
 export interface ValidationResult {
   ok: boolean;
   error?: string;
@@ -337,6 +343,17 @@ export function parseForEachSource(source: string): string | undefined {
 
 export function isAgentBackedStep(step: WorkflowStep): step is AgentBackedWorkflowStep {
   return "agent" in step && typeof step.agent === "string";
+}
+
+/** Distinct agent ids a workflow's steps will spawn (empty for agentless flows). */
+export function workflowAgentIds(spec: WorkflowSpec): AgentId[] {
+  const set = new Set<AgentId>();
+  for (const phase of spec.phases) {
+    for (const step of phase.steps) {
+      if (isAgentBackedStep(step)) set.add(step.agent);
+    }
+  }
+  return [...set];
 }
 
 /**

@@ -1,5 +1,5 @@
-import type { AgentId } from "../types/events";
 import type { Mode } from "../tui/modes";
+import type { AgentId } from "../types/events";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 
 /** Selected agent-backed step in the workflow preview drill-down. */
@@ -33,9 +33,14 @@ export interface SlashCommandContext {
   /** Set when workflow preview has an agent-backed step selected. */
   workflowStep?: WorkflowStepSelection;
   /** Patch agent/model/effort on a workflow step (session-only). */
-  updateWorkflowStep?: (stepId: string, patch: Partial<Pick<WorkflowStepSelection, "agent" | "model" | "effort">>) => void;
+  updateWorkflowStep?: (
+    stepId: string,
+    patch: Partial<Pick<WorkflowStepSelection, "agent" | "model" | "effort">>,
+  ) => void;
   /** Persist session workflow overrides to the user workflows file. */
   saveWorkflows?: () => SlashCommandResult;
+  /** Start LLM-delegated generation of a new workflow from a description (TUI only). */
+  createWorkflow?: (description: string) => SlashCommandResult;
 }
 
 export interface SlashCommand {

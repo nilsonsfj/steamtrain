@@ -4,8 +4,13 @@ import { join } from "node:path";
 import { z } from "zod";
 import { WORKSPACE_CONFIG_DIR } from "../workspace";
 import { BUNDLED_WORKFLOWS } from "./bundled";
-import { applyWorkflowStepOverrides, type WorkflowStepOverrides } from "./overrides";
-import { type WorkflowSpec, validateWorkflow, workflowSpecSchema } from "./types";
+import { type WorkflowStepOverrides, applyWorkflowStepOverrides } from "./overrides";
+import {
+  type WorkflowSpec,
+  type WorkflowSpecInput,
+  validateWorkflow,
+  workflowSpecSchema,
+} from "./types";
 
 export const WORKFLOWS_FILENAME = "workflows.json";
 
@@ -60,12 +65,7 @@ export function loadWorkflowCatalog(
   Object.assign(sources, userMerged.sources);
   warning = joinWarnings(warning, userMerged.warning);
 
-  const projectMerged = mergeWorkflowMap(
-    workflows,
-    sources,
-    options.projectWorkflows,
-    "project",
-  );
+  const projectMerged = mergeWorkflowMap(workflows, sources, options.projectWorkflows, "project");
   workflows = projectMerged.workflows;
   Object.assign(sources, projectMerged.sources);
   warning = joinWarnings(warning, projectMerged.warning);
@@ -125,9 +125,7 @@ export function collectSessionWorkflowSaves(
 
     const effective = applyWorkflowStepOverrides(catalogSpec, overrides);
     const baseline =
-      source === "bundled"
-        ? BUNDLED_WORKFLOWS[name]
-        : (userOnDisk[name] ?? catalogSpec);
+      source === "bundled" ? BUNDLED_WORKFLOWS[name] : (userOnDisk[name] ?? catalogSpec);
 
     if (!baseline) {
       skipped.push({ name, reason: "missing baseline workflow" });
@@ -174,6 +172,35 @@ export function workflowSpecsEqual(a: WorkflowSpec, b: WorkflowSpec): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+export interface SaveUserWorkflowResult {
+  ok: boolean;
+  path?: string;
+  /** True when an existing workflow of the same name was replaced. */
+  replaced?: boolean;
+  error?: string;
+}
+
+/**
+ * Persist a single workflow to `~/.steamtrain/workflows.json`, merging it next
+ * to any existing user workflows. The spec is validated first (same rules as the
+ * engine) so we never write a workflow that can't run. The stored `name` is
+ * taken from `name`, not from the spec body, so the catalog key stays canonical.
+ */
+export function saveUserWorkflow(
+  name: string,
+  spec: WorkflowSpec,
+  home: string = homedir(),
+): SaveUserWorkflowResult {
+  const full: WorkflowSpec = { ...spec, name };
+  const valid = validateWorkflow(full);
+  if (!valid.ok) return { ok: false, error: valid.error };
+
+  const userOnDisk = readUserWorkflowsFile(home).workflows ?? {};
+  const replaced = Boolean(userOnDisk[name]);
+  const path = writeUserWorkflowsFile(home, { ...userOnDisk, [name]: full });
+  return { ok: true, path, replaced };
+}
+
 export function readUserWorkflowsFile(home: string = homedir()): {
   workflows?: Record<string, WorkflowSpec>;
   warning?: string;
@@ -204,14 +231,19 @@ function loadUserWorkflowsFile(home: string): {
     };
   }
 
-  return { workflows: result.data.workflows };
+  // Inject the map key as `name` so every loaded spec is a complete WorkflowSpec.
+  const workflows: Record<string, WorkflowSpec> = {};
+  for (const [name, spec] of Object.entries(result.data.workflows)) {
+    workflows[name] = { ...spec, name };
+  }
+  return { workflows };
 }
 
 /** Validate and merge workflow specs, recording the source for each name. */
 export function mergeWorkflowMap(
   base: Record<string, WorkflowSpec>,
   baseSources: Record<string, WorkflowSourceKind>,
-  override: Record<string, WorkflowSpec> | undefined,
+  override: Record<string, WorkflowSpecInput> | undefined,
   overrideSource: WorkflowSourceKind,
 ): {
   workflows: Record<string, WorkflowSpec>;
@@ -249,10 +281,7 @@ function joinWarnings(...parts: Array<string | undefined>): string | undefined {
   return text || undefined;
 }
 
-function writeUserWorkflowsFile(
-  home: string,
-  workflows: Record<string, WorkflowSpec>,
-): string {
+function writeUserWorkflowsFile(home: string, workflows: Record<string, WorkflowSpec>): string {
   const path = userWorkflowsPath(home);
   mkdirSync(join(path, ".."), { recursive: true });
   const payload = { workflows };

@@ -231,6 +231,57 @@ describe("runCli", () => {
     expect(c.stdout.slice(afterFirst)).not.toContain("(cached)");
   });
 
+  it("prints a status summary at the end of an agentless run", async () => {
+    const c = capture();
+    const agentless = {
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [{ id: "areas", kind: "distributor", items: ["a: {{input}}", "b"] }],
+        },
+        {
+          id: "gate",
+          title: "Gate",
+          steps: [
+            {
+              id: "ready",
+              kind: "gate",
+              dependsOn: ["areas"],
+              condition: { step: "areas", contains: "a:" },
+              onFalse: "fail",
+            },
+          ],
+        },
+      ],
+    };
+    writeFileSync(
+      join(c.io.cwd, "steamtrain.json"),
+      JSON.stringify({ workflows: { agentless: agentless } }),
+    );
+
+    const code = await runCli(["workflow", "run", "agentless", "--input", "task"], c.io);
+    expect(code).toBe(0);
+    expect(c.stdout).toContain("summary");
+    expect(c.stdout).toContain("ok   areas");
+    expect(c.stdout).toContain("gate:passed");
+    expect(c.stdout).toContain("2 ok");
+  });
+
+  it("requires a description for workflow create", async () => {
+    const c = capture();
+    const code = await runCli(["workflow", "create"], c.io);
+    expect(code).toBe(1);
+    expect(c.stderr).toContain("requires --input");
+  });
+
+  it("rejects an unknown agent for workflow create", async () => {
+    const c = capture();
+    const code = await runCli(["workflow", "create", "--input", "x", "--agent", "bogus"], c.io);
+    expect(code).toBe(1);
+    expect(c.stderr).toContain("usage: steamtrain workflow create");
+  });
+
   it("tolerates corrupt on-disk cache files", async () => {
     const c = capture();
     const agentless = {
