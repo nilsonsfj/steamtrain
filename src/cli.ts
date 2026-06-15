@@ -401,24 +401,39 @@ async function runWorkflowCreateCommand(
   }
 
   const spec = result.spec;
+
+  // Perform the save (if requested) before reporting, so machine-readable
+  // output reflects the real outcome rather than just the --save flag.
+  const saved = options.save ? saveUserWorkflow(spec.name, spec) : undefined;
+
   if (options.json) {
-    out(`${JSON.stringify({ ok: true, spec, saved: options.save }, null, 2)}\n`);
-  } else {
-    out(`\ngenerated workflow '${spec.name}'  ${workflowSummary(spec)}\n`);
-    if (spec.description) out(`  ${spec.description}\n`);
-    out(`\n${JSON.stringify({ workflows: { [spec.name]: spec } }, null, 2)}\n`);
+    out(
+      `${JSON.stringify(
+        {
+          ok: true,
+          spec,
+          saved: saved?.ok ?? false,
+          ...(saved?.ok ? { savedPath: saved.path } : {}),
+          ...(saved && !saved.ok ? { saveError: saved.error } : {}),
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return saved && !saved.ok ? 1 : 0;
   }
 
-  if (options.save) {
-    const saved = saveUserWorkflow(spec.name, spec);
+  out(`\ngenerated workflow '${spec.name}'  ${workflowSummary(spec)}\n`);
+  if (spec.description) out(`  ${spec.description}\n`);
+  out(`\n${JSON.stringify({ workflows: { [spec.name]: spec } }, null, 2)}\n`);
+
+  if (saved) {
     if (!saved.ok) {
       err(`could not save '${spec.name}': ${saved.error}\n`);
       return 1;
     }
-    if (!options.json) {
-      out(`\n${saved.replaced ? "updated" : "saved"} '${spec.name}' → ${saved.path}\n`);
-    }
-  } else if (!options.json) {
+    out(`\n${saved.replaced ? "updated" : "saved"} '${spec.name}' → ${saved.path}\n`);
+  } else {
     out("\n(not saved — re-run with --save to write it to ~/.steamtrain/workflows.json)\n");
   }
   return 0;
