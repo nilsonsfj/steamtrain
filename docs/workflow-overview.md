@@ -580,9 +580,17 @@ steamtrain
 - phase → step tree
 - block kind labels (`fan-out`, `process`, `merge`, `gate`)
 - generated child steps indented under their parent
+- a step's drill-in panel shows its **`← inputs:`** (its `dependsOn`), so you can
+  see work flowing from one phase into the next
 - `↑/↓` drill into a step's output
 - `Esc` cancel while running
 - `Esc` again after stop/finish to return to picker
+
+### Creating a workflow (`/createworkflow`)
+
+In workflow mode, `/createworkflow <description>` delegates to an agent to draft a
+new workflow, validates it, saves it to your user catalog, and selects it in the
+picker. See [`workflow-creation.md`](workflow-creation.md).
 
 ### Mode switching
 
@@ -598,6 +606,7 @@ steamtrain workflow validate [name]
 steamtrain workflow run <name> --input "task text"
 steamtrain workflow run <name> --stdin --json
 steamtrain workflow run <name> --input "task text" --fresh
+steamtrain workflow create --input "describe the workflow you want" [--save]
 steamtrain workflow cache clear
 steamtrain workflow cache clear <name> --input "task text"
 ```
@@ -607,9 +616,15 @@ Exit codes:
 | result | exit code |
 | --- | --- |
 | success | `0` |
-| validation failure / dispatch blocked / workflow failed | non-zero |
+| validation failure / dispatch blocked / workflow failed / generation failed | non-zero |
 
-`--json` prints one `WorkflowEvent` per line, suitable for scripting.
+`--json` prints one `WorkflowEvent` per line, suitable for scripting. In human
+mode, a run ends with a **status summary**: one line per step (status, duration,
+gate result, cost) followed by run totals.
+
+Workflows that use **no agents** (only distributors / consolidators / gates) skip
+the doctor + agent-catalog preflight entirely, so they run end-to-end without any
+agent CLI installed — handy for smoke tests and CI.
 
 ---
 

@@ -1,24 +1,29 @@
-import { join } from "node:path";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import type { Readable } from "node:stream";
+import { createAdapter } from "./agents";
 import { refreshAgentCatalogCaches } from "./agents/models";
 import { type SteamtrainConfig, configDisplayLabel, loadConfig } from "./config";
-import { loadSettings } from "./settings";
 import { runDoctor } from "./doctor";
 import { Orchestrator } from "./orchestrator";
+import { loadSettings } from "./settings";
+import type { AgentId } from "./types/events";
 import {
   type StepResult,
   WORKFLOW_CACHE_DIR,
   type WorkflowEvent,
   type WorkflowSpec,
   createWorkflowCacheStore,
+  generateWorkflow,
   persistWorkflowStepDone,
+  saveUserWorkflow,
   validateWorkflow,
+  workflowAgentIds,
   workflowCacheKey,
   workflowStepKind,
 } from "./workflow";
-import { loadWorkspaceConfig } from "./workspace";
 import { loadWorkflowCatalog, workflowCatalogEntries } from "./workflow";
+import { loadWorkspaceConfig } from "./workspace";
 
 export interface GlobalCliOptions {
   args: string[];
@@ -116,6 +121,9 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
       return runCacheCommand(rest, cwd, io, orchestrator, out, err);
     case "run":
       return runWorkflowCommand(orchestrator, config, rest, io, out, err);
+    case "create":
+    case "new":
+      return runWorkflowCreateCommand(config, rest, io, out, err);
     default:
       err(`unknown workflow command '${command}'\n\n${helpText()}`);
       return 1;
@@ -239,19 +247,24 @@ async function runWorkflowCommand(
   }
 
   const cwd = io.cwd ?? process.cwd();
-  const doctor = await runDoctor(config);
-  orchestrator.setDoctor(doctor);
-  await refreshAgentCatalogCaches(config, doctor);
-  const check = orchestrator.canDispatchWorkflow(name);
-  if (!check.ok) {
-    err(`cannot run '${name}': ${check.reason}\n`);
-    return 1;
-  }
-
   const spec = orchestrator.listWorkflows()[name];
   if (!spec) {
     err(`unknown workflow '${name}'\n`);
     return 1;
+  }
+
+  // Agentless workflows (only distributors / consolidators / gates) never spawn
+  // a CLI, so skip the doctor + catalog refresh — they would otherwise spawn
+  // real agent binaries just to gate a run that needs none.
+  if (workflowAgentIds(spec).length > 0) {
+    const doctor = await runDoctor(config);
+    orchestrator.setDoctor(doctor);
+    await refreshAgentCatalogCaches(config, doctor);
+    const check = orchestrator.canDispatchWorkflow(name);
+    if (!check.ok) {
+      err(`cannot run '${name}': ${check.reason}\n`);
+      return 1;
+    }
   }
 
   const store = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
@@ -271,9 +284,186 @@ async function runWorkflowCommand(
     if (event.kind === "step_done") {
       await persistWorkflowStepDone(store, key, cache, event.stepId, event.result, event.cached);
     }
-    if (event.kind === "workflow_done") ok = event.ok;
+    if (event.kind === "workflow_done") {
+      ok = event.ok;
+      if (!options.json) printRunSummary(event.results, out);
+    }
   }
   return ok ? 0 : 1;
+}
+
+/**
+ * A compact, end-of-run report: per-step status (with data-flow source for
+ * fan-out children), duration, cache/cost, and roll-up totals. This is the CLI
+ * analog of the TUI's live status header.
+ */
+function printRunSummary(results: StepResult[], out: (text: string) => void): void {
+  if (results.length === 0) return;
+  out("\nsummary\n");
+  let okCount = 0;
+  let failCount = 0;
+  let totalCost = 0;
+  let totalMs = 0;
+  for (const result of results) {
+    if (result.childResults?.length) continue; // children are listed individually
+    const status = result.ok ? "ok  " : "fail";
+    if (result.ok) okCount += 1;
+    else failCount += 1;
+    const cost = result.costUsd ?? 0;
+    totalCost += cost;
+    totalMs += result.durationMs;
+    const bits = [`${(result.durationMs / 1000).toFixed(1)}s`];
+    if (cost > 0) bits.push(`$${cost.toFixed(4)}`);
+    if (result.gate) bits.push(result.gate.passed ? "gate:passed" : "gate:blocked");
+    const from = result.item ? ` (item ${result.item.index})` : "";
+    out(`  ${status} ${result.stepId}${from}  ${bits.join(" · ")}\n`);
+  }
+  const totals = [
+    `${okCount} ok`,
+    failCount > 0 ? `${failCount} failed` : undefined,
+    totalCost > 0 ? `$${totalCost.toFixed(4)}` : undefined,
+    `${(totalMs / 1000).toFixed(1)}s total`,
+  ].filter(Boolean);
+  out(`  ── ${totals.join(" · ")}\n`);
+}
+
+interface CreateOptions {
+  input?: string;
+  stdin: boolean;
+  json: boolean;
+  save: boolean;
+  agent: AgentId;
+  model?: string;
+  effort?: string;
+  name?: string;
+}
+
+const DEFAULT_CREATE_AGENT: AgentId = "opencode";
+const DEFAULT_CREATE_MODEL = "opencode/qwen3.6-plus-free";
+
+async function runWorkflowCreateCommand(
+  config: SteamtrainConfig,
+  args: string[],
+  io: CliIO,
+  out: (text: string) => void,
+  err: (text: string) => void,
+): Promise<number> {
+  const options = parseCreateOptions(args);
+  if (!options) {
+    err(
+      "usage: steamtrain workflow create --input <description> [--agent <id>] [--model <model>] [--effort <e>] [--name <name>] [--save] [--json]\n",
+    );
+    return 1;
+  }
+
+  const description =
+    options.input ?? (options.stdin ? await readAll(io.stdin ?? process.stdin) : undefined);
+  if (!description?.trim()) {
+    err("workflow create requires --input <description> or --stdin\n");
+    return 1;
+  }
+
+  const model =
+    options.model ?? (options.agent === DEFAULT_CREATE_AGENT ? DEFAULT_CREATE_MODEL : undefined);
+  if (!model) {
+    err(`workflow create requires --model when --agent is '${options.agent}'\n`);
+    return 1;
+  }
+
+  if (!options.json) {
+    err(`generating workflow with ${options.agent} (${model})…\n`);
+  }
+
+  const result = await generateWorkflow(
+    {
+      description: description.trim(),
+      agent: options.agent,
+      model,
+      effort: options.effort,
+      name: options.name,
+    },
+    {
+      createAdapter,
+      binaries: config.binaries,
+      timeoutMs: config.timeoutMs,
+      cwd: io.cwd ?? process.cwd(),
+    },
+  );
+
+  if (!result.ok || !result.spec) {
+    if (options.json) {
+      out(`${JSON.stringify({ ok: false, error: result.error, raw: result.raw })}\n`);
+    } else {
+      err(`workflow generation failed: ${result.error ?? "unknown error"}\n`);
+      if (result.raw) err(`\n--- model output ---\n${result.raw}\n`);
+    }
+    return 1;
+  }
+
+  const spec = result.spec;
+  if (options.json) {
+    out(`${JSON.stringify({ ok: true, spec, saved: options.save }, null, 2)}\n`);
+  } else {
+    out(`\ngenerated workflow '${spec.name}'  ${workflowSummary(spec)}\n`);
+    if (spec.description) out(`  ${spec.description}\n`);
+    out(`\n${JSON.stringify({ workflows: { [spec.name]: spec } }, null, 2)}\n`);
+  }
+
+  if (options.save) {
+    const saved = saveUserWorkflow(spec.name, spec);
+    if (!saved.ok) {
+      err(`could not save '${spec.name}': ${saved.error}\n`);
+      return 1;
+    }
+    if (!options.json) {
+      out(`\n${saved.replaced ? "updated" : "saved"} '${spec.name}' → ${saved.path}\n`);
+    }
+  } else if (!options.json) {
+    out("\n(not saved — re-run with --save to write it to ~/.steamtrain/workflows.json)\n");
+  }
+  return 0;
+}
+
+function parseCreateOptions(args: string[]): CreateOptions | null {
+  const options: CreateOptions = {
+    stdin: false,
+    json: false,
+    save: false,
+    agent: DEFAULT_CREATE_AGENT,
+  };
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--input" || arg === "-i") {
+      const value = args[++i];
+      if (!value) return null;
+      options.input = value;
+    } else if (arg === "--agent") {
+      const value = args[++i];
+      if (value !== "claude" && value !== "opencode" && value !== "codex") return null;
+      options.agent = value;
+    } else if (arg === "--model") {
+      const value = args[++i];
+      if (!value) return null;
+      options.model = value;
+    } else if (arg === "--effort") {
+      const value = args[++i];
+      if (!value) return null;
+      options.effort = value;
+    } else if (arg === "--name") {
+      const value = args[++i];
+      if (!value) return null;
+      options.name = value;
+    } else if (arg === "--stdin") {
+      options.stdin = true;
+    } else if (arg === "--json") {
+      options.json = true;
+    } else if (arg === "--save") {
+      options.save = true;
+    } else {
+      return null;
+    }
+  }
+  return options;
 }
 
 interface CacheClearOptions {
@@ -389,7 +579,13 @@ Usage:
   steamtrain workflow validate [name]
   steamtrain workflow run <name> --input <text> [--json] [--fresh]
   steamtrain workflow run <name> --stdin [--json] [--fresh]
+  steamtrain workflow create --input <description> [--agent <id>] [--model <model>] [--name <name>] [--save] [--json]
   steamtrain workflow cache clear [<workflow> --input <text> | --stdin]
+
+workflow create delegates to an agent (default: opencode/qwen3.6-plus-free) to
+draft a workflow from a plain-English description, validates it, prints the JSON,
+and (with --save) writes it to ~/.steamtrain/workflows.json so it shows up in the
+picker and CLI alongside the bundled workflows.
 
 Workflow runs resume from ${WORKFLOW_CACHE_DIR} by default (file name from workflow +
 input + cwd; contents validated with specHash). Pass --fresh to ignore and delete

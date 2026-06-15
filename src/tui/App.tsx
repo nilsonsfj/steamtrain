@@ -10,7 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { formatAgentTarget, modelsForAgent } from "../agents";
+import { createAdapter, defaultModelForAgent, formatAgentTarget, modelsForAgent } from "../agents";
 import { refreshAgentCatalogCaches } from "../agents/models";
 import {
   type SlashCommandContext,
@@ -34,13 +34,16 @@ import {
   WORKFLOW_CACHE_DIR,
   type WorkflowCatalogEntry,
   type WorkflowSourceKind,
+  type WorkflowSpec,
   type WorkflowStepOverrides,
   applyWorkflowStepOverrides,
   createWorkflowCacheStore,
+  generateWorkflow,
   isAgentBackedStep,
   loadWorkflowCatalog,
   persistWorkflowStepDone,
   saveSessionWorkflowsToUser,
+  saveUserWorkflow,
   workflowCacheKey,
   workflowCatalogEntries,
 } from "../workflow";
@@ -55,6 +58,7 @@ import { EventStream } from "./EventStream";
 import { PromptInput } from "./PromptInput";
 import { StatusBar } from "./StatusBar";
 import { TaskSelector } from "./TaskSelector";
+import { WorkflowCreate, type WorkflowCreateState } from "./WorkflowCreate";
 import { WorkflowPicker } from "./WorkflowPicker";
 import { WorkflowPreview } from "./WorkflowPreview";
 import { WorkflowStepDetails } from "./WorkflowStepDetails";
@@ -153,6 +157,8 @@ export function App({
   const [wfCanResume, setWfCanResume] = useState(false);
   const [wfStepDetails, setWfStepDetails] = useState<"preview" | "live" | null>(null);
   const [wfNow, setWfNow] = useState(() => Date.now());
+  const [wfCreate, setWfCreate] = useState<WorkflowCreateState | null>(null);
+  const createAbortRef = useRef<AbortController | null>(null);
   const activeWorkflowRef = useRef<string | undefined>(undefined);
   const activeWorkflowInputRef = useRef<string | undefined>(undefined);
   const workflowCacheRef = useRef<Map<string, StepResult>>(new Map());
@@ -263,6 +269,130 @@ export function App({
 
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
+
+  const createWorkflow = useCallback(
+    (description: string) => {
+      if (running) {
+        return {
+          handled: true as const,
+          clearInput: true,
+          notices: [
+            {
+              level: "warn" as const,
+              text: "finish or cancel the current run before creating a workflow",
+            },
+          ],
+        };
+      }
+      const target = pickGenerationTarget(doctor);
+      if (!target) {
+        return {
+          handled: true as const,
+          clearInput: true,
+          notices: [
+            {
+              level: "error" as const,
+              text: "no healthy agent available to draft a workflow (check the doctor panel)",
+            },
+          ],
+        };
+      }
+
+      createAbortRef.current?.abort();
+      const ac = new AbortController();
+      createAbortRef.current = ac;
+      setWfCreate({
+        status: "generating",
+        description,
+        agent: target.agent,
+        model: target.model,
+        text: "",
+      });
+
+      void (async () => {
+        const result = await generateWorkflow(
+          {
+            description,
+            agent: target.agent,
+            model: target.model,
+            signal: ac.signal,
+            onEvent: (event) => {
+              if (event.kind === "text_delta" && !event.thinking) {
+                setWfCreate((prev) =>
+                  prev && prev.status === "generating"
+                    ? { ...prev, text: prev.text + event.text }
+                    : prev,
+                );
+              }
+            },
+          },
+          {
+            createAdapter,
+            binaries: config.binaries,
+            timeoutMs: config.timeoutMs,
+            cwd: process.cwd(),
+          },
+        );
+        if (!mountedRef.current || ac.signal.aborted) return;
+
+        if (!result.ok || !result.spec) {
+          setWfCreate((prev) =>
+            prev
+              ? { ...prev, status: "error", error: result.error, text: result.raw || prev.text }
+              : prev,
+          );
+          dispatch({
+            type: "notice",
+            level: "error",
+            text: `workflow creation failed: ${result.error ?? "unknown error"}`,
+          });
+          return;
+        }
+
+        const spec = result.spec;
+        const saved = saveUserWorkflow(spec.name, spec, homedir());
+        if (!saved.ok) {
+          setWfCreate((prev) => (prev ? { ...prev, status: "error", error: saved.error } : prev));
+          dispatch({
+            type: "notice",
+            level: "error",
+            text: `could not save '${spec.name}': ${saved.error}`,
+          });
+          return;
+        }
+
+        const reloaded = loadWorkflowCatalog({
+          home: homedir(),
+          projectWorkflows: config.workflows,
+        });
+        setRuntimeCatalog(reloaded);
+        const entries = workflowCatalogEntries(reloaded);
+        const newIndex = entries.findIndex((entry) => entry.name === spec.name);
+        if (newIndex >= 0) setWorkflowIndex(newIndex);
+        setWfCreate((prev) =>
+          prev ? { ...prev, status: "done", spec, savedPath: saved.path, error: undefined } : prev,
+        );
+        dispatch({
+          type: "notice",
+          level: "info",
+          text: `created workflow '${spec.name}' (${saved.replaced ? "updated" : "saved"})`,
+        });
+      })();
+
+      return {
+        handled: true as const,
+        clearInput: true,
+        notices: [
+          {
+            level: "info" as const,
+            text: `drafting workflow with ${target.agent} (${target.model})…`,
+          },
+        ],
+      };
+    },
+    [running, doctor, config.binaries, config.timeoutMs, config.workflows],
+  );
+
   useEffect(() => {
     return () => {
       mountedRef.current = false;
@@ -371,6 +501,7 @@ export function App({
       workflowStep: previewStepSelection,
       updateWorkflowStep: wfPreview ? patchWorkflowStep : undefined,
       saveWorkflows,
+      createWorkflow,
     }),
     [
       mode,
@@ -383,6 +514,7 @@ export function App({
       patchWorkflowStep,
       previewStepSelection,
       saveWorkflows,
+      createWorkflow,
     ],
   );
 
@@ -708,6 +840,7 @@ export function App({
   const handleWorkflowRun = useCallback(
     (prompt: string, fresh: boolean): boolean => {
       if (running || mode !== "workflow") return false;
+      if (wfCreate?.status === "generating") return false;
 
       if (wf.started && activeWorkflowRef.current) {
         if (prompt.length === 0) return false;
@@ -749,6 +882,7 @@ export function App({
       workflowEntries,
       workflowIndex,
       launchWorkflow,
+      wfCreate,
     ],
   );
 
@@ -900,6 +1034,11 @@ export function App({
         setWfStepDetails(null);
         return;
       }
+      if (wfCreate) {
+        createAbortRef.current?.abort();
+        setWfCreate(null);
+        return;
+      }
       if (running) {
         if (mode !== "workflow") {
           abortRef.current?.abort();
@@ -1028,7 +1167,9 @@ export function App({
         running={running}
       />
       {isWorkflow ? (
-        wfStepDetails === "live" && showWorkflowView ? (
+        wfCreate ? (
+          <WorkflowCreate state={wfCreate} width={columns} height={streamHeight} />
+        ) : wfStepDetails === "live" && showWorkflowView ? (
           <WorkflowStepDetails
             kind="live"
             state={wf}
@@ -1199,4 +1340,22 @@ function hint(
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Choose which agent drafts a new workflow. Prefer OpenCode (free models, no
+ * paid credentials), then Claude, then Codex — but only among doctor-healthy
+ * agents, since generation spawns a real CLI.
+ */
+function pickGenerationTarget(
+  doctor: DoctorResult[] | null,
+): { agent: "claude" | "opencode" | "codex"; model: string } | undefined {
+  if (!doctor) return undefined;
+  const healthy = new Set(doctor.filter((d) => d.status === "ok").map((d) => d.agent));
+  for (const agent of ["opencode", "claude", "codex"] as const) {
+    if (!healthy.has(agent)) continue;
+    const model = agent === "opencode" ? "opencode/qwen3.6-plus-free" : defaultModelForAgent(agent);
+    return { agent, model };
+  }
+  return undefined;
 }

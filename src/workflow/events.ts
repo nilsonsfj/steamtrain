@@ -34,6 +34,8 @@ export interface StepStartEvent {
   model?: string;
   effort?: string;
   cwd?: string;
+  /** Earlier steps whose outputs feed this step (for data-flow display). */
+  dependsOn?: string[];
   /** Parent dynamic `forEach` step, when this is a generated child run. */
   parentStepId?: string;
   /** Work item assigned to this generated child run. */

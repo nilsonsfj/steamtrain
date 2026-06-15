@@ -34,7 +34,14 @@ describe("loadWorkflowCatalog", () => {
               {
                 id: "only",
                 title: "Only",
-                steps: [{ id: "a", agent: "opencode", model: "opencode/qwen3.6-plus-free", prompt: "{{input}}" }],
+                steps: [
+                  {
+                    id: "a",
+                    agent: "opencode",
+                    model: "opencode/qwen3.6-plus-free",
+                    prompt: "{{input}}",
+                  },
+                ],
               },
             ],
           },
@@ -61,7 +68,14 @@ describe("loadWorkflowCatalog", () => {
               {
                 id: "user",
                 title: "User",
-                steps: [{ id: "u", agent: "opencode", model: "opencode/qwen3.6-plus-free", prompt: "user" }],
+                steps: [
+                  {
+                    id: "u",
+                    agent: "opencode",
+                    model: "opencode/qwen3.6-plus-free",
+                    prompt: "user",
+                  },
+                ],
               },
             ],
           },
@@ -77,7 +91,14 @@ describe("loadWorkflowCatalog", () => {
               {
                 id: "project",
                 title: "Project",
-                steps: [{ id: "p", agent: "opencode", model: "opencode/qwen3.6-plus-free", prompt: "project" }],
+                steps: [
+                  {
+                    id: "p",
+                    agent: "opencode",
+                    model: "opencode/qwen3.6-plus-free",
+                    prompt: "project",
+                  },
+                ],
               },
             ],
           },
@@ -114,7 +135,14 @@ describe("loadWorkflowCatalog", () => {
               {
                 id: "user",
                 title: "User",
-                steps: [{ id: "u", agent: "opencode", model: "opencode/qwen3.6-plus-free", prompt: "user" }],
+                steps: [
+                  {
+                    id: "u",
+                    agent: "opencode",
+                    model: "opencode/qwen3.6-plus-free",
+                    prompt: "user",
+                  },
+                ],
               },
             ],
           },
@@ -130,7 +158,14 @@ describe("loadWorkflowCatalog", () => {
               {
                 id: "project",
                 title: "Project",
-                steps: [{ id: "p", agent: "opencode", model: "opencode/qwen3.6-plus-free", prompt: "project" }],
+                steps: [
+                  {
+                    id: "p",
+                    agent: "opencode",
+                    model: "opencode/qwen3.6-plus-free",
+                    prompt: "project",
+                  },
+                ],
               },
             ],
           },
@@ -170,7 +205,10 @@ describe("saveSessionWorkflowsToUser", () => {
 
     const reloaded = loadWorkflowCatalog({ home });
     expect(reloaded.sources["multi-plan"]).toBe("user");
-    expect(reloaded.workflows["multi-plan"].phases[1].steps[0].model).toBe("opencode/minimax-m3-free");
+    const reloadedStep = reloaded.workflows["multi-plan"]?.phases[1]?.steps[0] as
+      | { model?: string }
+      | undefined;
+    expect(reloadedStep?.model).toBe("opencode/minimax-m3-free");
     expect(reloaded.workflows["multi-plan"]).not.toEqual(BUNDLED_WORKFLOWS["multi-plan"]);
   });
 
@@ -186,7 +224,14 @@ describe("saveSessionWorkflowsToUser", () => {
               {
                 id: "only",
                 title: "Only",
-                steps: [{ id: "a", agent: "opencode", model: "opencode/qwen3.6-plus-free", prompt: "{{input}}" }],
+                steps: [
+                  {
+                    id: "a",
+                    agent: "opencode",
+                    model: "opencode/qwen3.6-plus-free",
+                    prompt: "{{input}}",
+                  },
+                ],
               },
             ],
           },

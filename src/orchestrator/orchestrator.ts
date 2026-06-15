@@ -1,16 +1,16 @@
 import { type AgentAdapter, createAdapter } from "../agents";
 import type { SteamtrainConfig } from "../config";
 import type { DoctorResult } from "../doctor";
-import type { AgentEvent, AgentId } from "../types/events";
+import type { AgentEvent } from "../types/events";
 import {
   type LoadedWorkflowCatalog,
   type StepResult,
   type WorkflowEvent,
   type WorkflowSourceKind,
   type WorkflowSpec,
-  isAgentBackedStep,
   runWorkflow,
   validateWorkflow,
+  workflowAgentIds,
 } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 import { workspaceById } from "../workspace";
@@ -116,7 +116,7 @@ export class Orchestrator {
     const valid = validateWorkflow(spec);
     if (!valid.ok) return { ok: false, reason: `invalid workflow '${spec.name}': ${valid.error}` };
 
-    for (const agent of workflowAgents(spec)) {
+    for (const agent of workflowAgentIds(spec)) {
       const health = this.doctor.find((d) => d.agent === agent);
       if (!health) {
         return { ok: false, reason: `${agent}: health unknown (doctor has not run yet)` };
@@ -157,15 +157,4 @@ export class Orchestrator {
       signal,
     );
   }
-}
-
-/** Distinct agent ids used by a workflow's steps. */
-function workflowAgents(spec: WorkflowSpec): AgentId[] {
-  const set = new Set<AgentId>();
-  for (const phase of spec.phases) {
-    for (const step of phase.steps) {
-      if (isAgentBackedStep(step)) set.add(step.agent);
-    }
-  }
-  return [...set];
 }

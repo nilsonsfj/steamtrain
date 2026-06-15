@@ -18,6 +18,7 @@ export {
   workflowStepKind,
   parseForEachSource,
   isAgentBackedStep,
+  workflowAgentIds,
   MAX_STEPS,
   MAX_CONCURRENCY,
 } from "./types";
@@ -55,6 +56,16 @@ export {
 } from "./cache-store";
 export { applyWorkflowStepOverrides, type WorkflowStepOverrides } from "./overrides";
 export {
+  buildWorkflowGenerationPrompt,
+  extractWorkflowSpec,
+  generateWorkflow,
+  slugifyWorkflowName,
+  type ExtractResult,
+  type GenerateWorkflowDeps,
+  type GenerateWorkflowRequest,
+  type GenerateWorkflowResult,
+} from "./generate";
+export {
   WORKFLOWS_FILENAME,
   type LoadedWorkflowCatalog,
   type LoadWorkflowCatalogOptions,
@@ -70,4 +81,6 @@ export {
   userWorkflowsPath,
   workflowCatalogEntries,
   workflowSpecsEqual,
+  saveUserWorkflow,
+  type SaveUserWorkflowResult,
 } from "./catalog";
