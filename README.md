@@ -42,6 +42,23 @@ You'll see a steam-train banner, then a preflight **doctor** panel checking that
 `steamtrain` opens on **workflow** mode. `Tab` cycles through your configured
 workspace presets (defaults: `plan`, `implement`, `review`).
 
+### Web UI
+
+Prefer a browser? Launch the same workflow engine behind a local web UI:
+
+```bash
+steamtrain --web-ui                 # serves http://127.0.0.1:4317
+steamtrain --web-ui --port 8080     # custom port
+steamtrain --web-ui --host 0.0.0.0  # listen on all interfaces
+```
+
+It pairs the workflow picker with a **vertical pipeline visualization**: phases
+stack top-to-bottom, parallel steps render as live cards (colored by block kind),
+each showing status, agent/model, data-flow inputs, a streamed output tail, and
+per-step duration/cost — backed by the same runner, on-disk cache, and doctor
+gating as the TUI and CLI. Runs stream over SSE; cancel a run from the browser.
+See [`docs/web-ui.md`](docs/web-ui.md).
+
 ### Workflow CLI
 
 ```bash

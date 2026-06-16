@@ -62,6 +62,23 @@ describe("parseGlobalArgs", () => {
       error: "--config-file requires a path argument",
     });
   });
+
+  it("parses --web-ui with optional --port and --host", () => {
+    expect(parseGlobalArgs(["--web-ui"])).toEqual({ args: [], webUi: true });
+    expect(parseGlobalArgs(["--web-ui", "--port", "8080", "--host", "0.0.0.0"])).toEqual({
+      args: [],
+      webUi: true,
+      port: 8080,
+      host: "0.0.0.0",
+    });
+  });
+
+  it("rejects an invalid --port", () => {
+    expect(parseGlobalArgs(["--web-ui", "--port", "notanumber"])).toEqual({
+      args: [],
+      error: "--port requires an integer 0-65535",
+    });
+  });
 });
 
 describe("runCli", () => {
