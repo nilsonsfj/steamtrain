@@ -10,7 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { createAdapter, defaultModelForAgent, formatAgentTarget, modelsForAgent } from "../agents";
+import { defaultModelForAgent, formatAgentTarget, modelsForAgent } from "../agents";
 import { refreshAgentCatalogCaches } from "../agents/models";
 import {
   type SlashCommandContext,
@@ -29,21 +29,18 @@ import { homeRelativePath } from "../paths";
 import { DEFAULT_PROMPT_HISTORY_LIMIT, type SteamtrainSettings } from "../settings";
 import { STEAMTRAIN_VERSION } from "../version";
 import {
+  type AuthoringHost,
   type LoadedWorkflowCatalog,
   type StepResult,
   WORKFLOW_CACHE_DIR,
+  WorkflowAuthor,
   type WorkflowCatalogEntry,
   type WorkflowSourceKind,
   type WorkflowSpec,
   type WorkflowStepOverrides,
-  applyWorkflowStepOverrides,
   createWorkflowCacheStore,
-  generateWorkflow,
   isAgentBackedStep,
-  loadWorkflowCatalog,
   persistWorkflowStepDone,
-  saveSessionWorkflowsToUser,
-  saveUserWorkflow,
   workflowCacheKey,
   workflowCatalogEntries,
 } from "../workflow";
@@ -216,13 +213,32 @@ export function App({
     [config, runtimeWorkspaces, doctor, runtimeCatalog],
   );
 
+  // Shared authoring core: the TUI drives the same `WorkflowAuthor` the web
+  // server uses, bridging its catalog reloads back into React state.
+  const authoringHost = useMemo<AuthoringHost>(
+    () => ({
+      listWorkflows: () => orchestrator.listWorkflows(),
+      workflowSource: (name) => orchestrator.workflowSource(name),
+      isAgentHealthy: (agent) => orchestrator.isAgentHealthy(agent),
+      setCatalog: (catalog) => setRuntimeCatalog(catalog),
+    }),
+    [orchestrator],
+  );
+  const author = useMemo(
+    () =>
+      new WorkflowAuthor({
+        host: authoringHost,
+        config,
+        home: homedir(),
+        cwd: process.cwd(),
+        projectWorkflows: config.workflows,
+      }),
+    [authoringHost, config],
+  );
+
   const resolveWorkflowSpec = useCallback(
-    (name: string) => {
-      const base = orchestrator.listWorkflows()[name];
-      if (!base) return undefined;
-      return applyWorkflowStepOverrides(base, wfStepOverrides[name]);
-    },
-    [orchestrator, wfStepOverrides],
+    (name: string) => author.previewWithOverrides(name, wfStepOverrides[name]),
+    [author, wfStepOverrides],
   );
 
   const workflowEntries = useMemo<WorkflowCatalogEntry[]>(
@@ -230,13 +246,92 @@ export function App({
     [runtimeCatalog],
   );
 
+  const selectedWorkflowName =
+    workflowEntries[Math.min(workflowIndex, Math.max(0, workflowEntries.length - 1))]?.name;
+  const userWorkflowNames = useMemo(
+    () => workflowEntries.filter((entry) => entry.source === "user").map((entry) => entry.name),
+    [workflowEntries],
+  );
+  const pendingSelectRef = useRef<string | null>(null);
+
+  // Keep the picker selection in range and honor a queued post-write selection
+  // (e.g. jump to a freshly cloned workflow once the catalog reloads).
+  useEffect(() => {
+    const pending = pendingSelectRef.current;
+    if (pending) {
+      const idx = workflowEntries.findIndex((entry) => entry.name === pending);
+      if (idx >= 0) {
+        pendingSelectRef.current = null;
+        setWorkflowIndex(idx);
+        return;
+      }
+    }
+    setWorkflowIndex((i) => Math.min(i, Math.max(0, workflowEntries.length - 1)));
+  }, [workflowEntries]);
+
+  const cloneWorkflow = useCallback(
+    (newName: string) => {
+      const source = selectedWorkflowName;
+      if (!source) {
+        return {
+          handled: true as const,
+          clearInput: true,
+          notices: [{ level: "warn" as const, text: "no workflow selected to clone" }],
+        };
+      }
+      const result = author.clone(source, newName);
+      if (!result.ok) {
+        return {
+          handled: true as const,
+          clearInput: true,
+          notices: [
+            { level: "error" as const, text: `could not clone '${source}': ${result.error}` },
+          ],
+        };
+      }
+      pendingSelectRef.current = result.name ?? null;
+      return {
+        handled: true as const,
+        clearInput: true,
+        notices: [{ level: "info" as const, text: `cloned '${source}' → '${result.name}'` }],
+      };
+    },
+    [author, selectedWorkflowName],
+  );
+
+  const deleteWorkflow = useCallback(
+    (name: string) => {
+      const result = author.remove(name);
+      if (!result.ok) {
+        return {
+          handled: true as const,
+          clearInput: true,
+          notices: [
+            { level: "error" as const, text: `could not delete '${name}': ${result.error}` },
+          ],
+        };
+      }
+      setWfStepOverrides((prev) => {
+        if (!prev[name]) return prev;
+        const next = { ...prev };
+        delete next[name];
+        return next;
+      });
+      setWfPreview((prev) => (prev?.name === name ? null : prev));
+      return {
+        handled: true as const,
+        clearInput: true,
+        notices: [{ level: "info" as const, text: `deleted workflow '${name}'` }],
+      };
+    },
+    [author],
+  );
+
   const saveWorkflows = useCallback(() => {
     const home = homedir();
-    const result = saveSessionWorkflowsToUser({
-      catalog: runtimeCatalog,
-      sessionOverrides: wfStepOverrides,
-      home,
-    });
+    // The session flushes overrides and reloads the catalog into React state
+    // (via the authoring host's setCatalog) when anything is written.
+    const result = author.flushSessionOverrides(wfStepOverrides);
 
     if (result.saved.length === 0) {
       const notices: Array<{ level: "info" | "warn"; text: string }> = [
@@ -248,7 +343,6 @@ export function App({
       return { handled: true as const, clearInput: true, notices };
     }
 
-    setRuntimeCatalog(loadWorkflowCatalog({ home, projectWorkflows: config.workflows }));
     setWfStepOverrides((prev) => {
       const next = { ...prev };
       for (const name of result.saved) delete next[name];
@@ -265,7 +359,7 @@ export function App({
       notices.push({ level: "warn", text: `skipped '${entry.name}': ${entry.reason}` });
     }
     return { handled: true as const, clearInput: true, notices };
-  }, [runtimeCatalog, wfStepOverrides, config.workflows]);
+  }, [author, wfStepOverrides]);
 
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
@@ -310,28 +404,16 @@ export function App({
       });
 
       void (async () => {
-        const result = await generateWorkflow(
-          {
-            description,
-            agent: target.agent,
-            model: target.model,
-            signal: ac.signal,
-            onEvent: (event) => {
-              if (event.kind === "text_delta" && !event.thinking) {
-                setWfCreate((prev) =>
-                  prev && prev.status === "generating"
-                    ? { ...prev, text: prev.text + event.text }
-                    : prev,
-                );
-              }
-            },
+        // Draft + validate + persist + reload through the shared authoring core
+        // (the same path the web server uses); we only own the live preview.
+        const result = await author.generate(
+          { description, agent: target.agent, model: target.model },
+          (text) => {
+            setWfCreate((prev) =>
+              prev && prev.status === "generating" ? { ...prev, text: prev.text + text } : prev,
+            );
           },
-          {
-            createAdapter,
-            binaries: config.binaries,
-            timeoutMs: config.timeoutMs,
-            cwd: process.cwd(),
-          },
+          ac.signal,
         );
         if (!mountedRef.current || ac.signal.aborted) return;
 
@@ -350,32 +432,16 @@ export function App({
         }
 
         const spec = result.spec;
-        const saved = saveUserWorkflow(spec.name, spec, homedir());
-        if (!saved.ok) {
-          setWfCreate((prev) => (prev ? { ...prev, status: "error", error: saved.error } : prev));
-          dispatch({
-            type: "notice",
-            level: "error",
-            text: `could not save '${spec.name}': ${saved.error}`,
-          });
-          return;
-        }
-
-        const reloaded = loadWorkflowCatalog({
-          home: homedir(),
-          projectWorkflows: config.workflows,
-        });
-        setRuntimeCatalog(reloaded);
-        const entries = workflowCatalogEntries(reloaded);
-        const newIndex = entries.findIndex((entry) => entry.name === spec.name);
-        if (newIndex >= 0) setWorkflowIndex(newIndex);
+        pendingSelectRef.current = spec.name;
         setWfCreate((prev) =>
-          prev ? { ...prev, status: "done", spec, savedPath: saved.path, error: undefined } : prev,
+          prev
+            ? { ...prev, status: "done", spec, savedPath: result.savedPath, error: undefined }
+            : prev,
         );
         dispatch({
           type: "notice",
           level: "info",
-          text: `created workflow '${spec.name}' (${saved.replaced ? "updated" : "saved"})`,
+          text: `created workflow '${spec.name}' (${result.replaced ? "updated" : "saved"})`,
         });
       })();
 
@@ -390,7 +456,7 @@ export function App({
         ],
       };
     },
-    [running, doctor, config.binaries, config.timeoutMs, config.workflows],
+    [running, doctor, author],
   );
 
   useEffect(() => {
@@ -502,6 +568,9 @@ export function App({
       updateWorkflowStep: wfPreview ? patchWorkflowStep : undefined,
       saveWorkflows,
       createWorkflow,
+      cloneWorkflow,
+      deleteWorkflow,
+      userWorkflowNames,
     }),
     [
       mode,
@@ -515,6 +584,9 @@ export function App({
       previewStepSelection,
       saveWorkflows,
       createWorkflow,
+      cloneWorkflow,
+      deleteWorkflow,
+      userWorkflowNames,
     ],
   );
 

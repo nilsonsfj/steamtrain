@@ -8,6 +8,7 @@ import { Orchestrator } from "../orchestrator";
 import {
   type LoadedWorkflowCatalog,
   WORKFLOW_CACHE_DIR,
+  WorkflowAuthor,
   type WorkflowSourceKind,
   type WorkflowSpec,
   createWorkflowCacheStore,
@@ -15,7 +16,6 @@ import {
   workflowStepKind,
 } from "../workflow";
 import type { WorkspaceConfig } from "../workspace";
-import { WorkflowAuthor } from "./authoring";
 import { PAGE_HTML } from "./html";
 import { type WorkflowHost, WorkflowRunManager } from "./runs";
 

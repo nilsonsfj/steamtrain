@@ -66,6 +66,14 @@ export {
   type GenerateWorkflowResult,
 } from "./generate";
 export {
+  type AuthoringHost,
+  type AuthorDeleteResult,
+  type AuthorWriteResult,
+  type GenerateRequest,
+  type WorkflowAuthorOptions,
+  WorkflowAuthor,
+} from "./authoring";
+export {
   WORKFLOWS_FILENAME,
   type LoadedWorkflowCatalog,
   type LoadWorkflowCatalogOptions,

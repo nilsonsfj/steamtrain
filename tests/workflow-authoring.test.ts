@@ -7,12 +7,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AgentAdapter, AgentRunOptions } from "../src/agents";
 import type { SteamtrainConfig } from "../src/config";
 import type { AgentEvent, AgentId } from "../src/types/events";
-import { WorkflowAuthor } from "../src/web/authoring";
 import { type WorkflowHost, WorkflowRunManager } from "../src/web/runs";
 import { createWebServer } from "../src/web/server";
 import {
   type LoadedWorkflowCatalog,
   type StepResult,
+  WorkflowAuthor,
   type WorkflowCacheStore,
   type WorkflowEvent,
   type WorkflowSourceKind,
@@ -41,6 +41,11 @@ const VALID_SPEC = {
 
 function userFileSpec(name: string): WorkflowSpec {
   return { name, ...VALID_SPEC } as WorkflowSpec;
+}
+
+/** First step of a spec as a loose record (the union type hides `model`/`prompt`). */
+function firstStep(spec: WorkflowSpec | undefined): Record<string, unknown> {
+  return (spec?.phases[0]?.steps[0] ?? {}) as Record<string, unknown>;
 }
 
 /** Adapter that emits a fenced JSON workflow then a clean result. */
@@ -211,6 +216,52 @@ describe("WorkflowAuthor", () => {
     expect(result.ok).toBe(true);
     expect(host.workflowSource("new-name")).toBe("user");
     expect(host.workflowSource("old-name")).toBeUndefined();
+  });
+
+  it("clones a bundled workflow into a user copy, leaving the source intact", () => {
+    const host = new FakeHost(home);
+    const author = makeAuthor(host);
+    const result = author.clone("bug-hunt", "My Bug Hunt");
+    expect(result.ok).toBe(true);
+    expect(result.name).toBe("my-bug-hunt");
+    expect(host.workflowSource("my-bug-hunt")).toBe("user");
+    // Original is untouched.
+    expect(host.workflowSource("bug-hunt")).toBe("bundled");
+  });
+
+  it("refuses to clone an unknown workflow or onto the same name", () => {
+    const host = new FakeHost(home);
+    const author = makeAuthor(host);
+    expect(author.clone("nope", "x").ok).toBe(false);
+    expect(author.clone("bug-hunt", "bug-hunt").error).toMatch(/different name/i);
+  });
+
+  it("previews a workflow with staged step overrides without saving", () => {
+    const host = new FakeHost(home);
+    const author = makeAuthor(host);
+    author.save("flow", userFileSpec("flow"));
+    const preview = author.previewWithOverrides("flow", { s1: { model: "opencode/other" } });
+    expect(firstStep(preview).model).toBe("opencode/other");
+    // Disk is unchanged: re-reading still has the original model.
+    const onDisk = JSON.parse(
+      readFileSync(join(home, ".steamtrain", "workflows.json"), "utf8"),
+    ) as { workflows: Record<string, WorkflowSpec> };
+    expect(firstStep(onDisk.workflows.flow).model).toBe("opencode/mimo-v2.5-free");
+  });
+
+  it("flushes staged overrides, reporting saved and unchanged", () => {
+    const host = new FakeHost(home);
+    const author = makeAuthor(host);
+    author.save("flow", userFileSpec("flow"));
+
+    const saved = author.flushSessionOverrides({ flow: { s1: { model: "opencode/changed" } } });
+    expect(saved.saved).toEqual(["flow"]);
+    expect(firstStep(host.listWorkflows().flow).model).toBe("opencode/changed");
+
+    // Re-flushing the identical override is a no-op (unchanged).
+    const again = author.flushSessionOverrides({ flow: { s1: { model: "opencode/changed" } } });
+    expect(again.saved).toEqual([]);
+    expect(again.unchanged).toEqual(["flow"]);
   });
 });
 

@@ -41,6 +41,12 @@ export interface SlashCommandContext {
   saveWorkflows?: () => SlashCommandResult;
   /** Start LLM-delegated generation of a new workflow from a description (TUI only). */
   createWorkflow?: (description: string) => SlashCommandResult;
+  /** Save the selected workflow under a new name as a user copy (TUI only). */
+  cloneWorkflow?: (newName: string) => SlashCommandResult;
+  /** Delete a user workflow by name from `~/.steamtrain/workflows.json` (TUI only). */
+  deleteWorkflow?: (name: string) => SlashCommandResult;
+  /** Names of user-source workflows (for `/deleteworkflow` completion). */
+  userWorkflowNames?: readonly string[];
 }
 
 export interface SlashCommand {
