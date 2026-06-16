@@ -90,10 +90,13 @@ async function* hangingRun(_input: string, signal?: AbortSignal): AsyncIterable<
     blockKind: "worker",
     ts: Date.now(),
   };
-  await new Promise<void>((_resolve, reject) => {
-    if (signal?.aborted) return reject(new Error("aborted"));
-    signal?.addEventListener("abort", () => reject(new Error("aborted")));
+  // Mirror the real engine's graceful abort: it does NOT throw — it breaks the
+  // loop and yields a final workflow_done with ok:false, then returns normally.
+  await new Promise<void>((resolve) => {
+    if (signal?.aborted) return resolve();
+    signal?.addEventListener("abort", () => resolve());
   });
+  yield { kind: "workflow_done", ok: false, results: [], ts: Date.now() };
 }
 
 function makeServer(host: WorkflowHost): { server: Server; runs: WorkflowRunManager } {

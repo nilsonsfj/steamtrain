@@ -194,8 +194,16 @@ export class WorkflowRunManager {
         }
         if (event.kind === "workflow_done") ok = event.ok;
       }
-      run.status = ok === false ? "error" : "done";
-      run.ok = ok ?? true;
+      // The engine exits gracefully on abort (it yields a final workflow_done
+      // with ok:false and returns — it does not throw), so a real cancel
+      // completes the loop without entering the catch. Check the abort signal
+      // first, otherwise a canceled run would be mislabeled "error".
+      if (run.controller.signal.aborted) {
+        run.status = "canceled";
+      } else {
+        run.status = ok === false ? "error" : "done";
+        run.ok = ok ?? true;
+      }
     } catch (err) {
       if (run.controller.signal.aborted) {
         run.status = "canceled";
