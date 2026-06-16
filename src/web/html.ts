@@ -162,6 +162,88 @@ export const PAGE_HTML = `<!doctype html>
   .summary th, .summary td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
   .summary th { color: var(--muted); font-weight: 600; }
   .summary td.ok { color: var(--done); } .summary td.fail { color: var(--error); }
+
+  /* ---- authoring: sidebar + runbar actions ---- */
+  aside h2 { display: flex; align-items: center; }
+  .newbtn {
+    margin-left: auto; border: 1px solid var(--accent-dim); background: var(--panel-2);
+    color: var(--accent); border-radius: 7px; padding: 2px 9px; font: inherit; font-size: 11px;
+    font-weight: 600; cursor: pointer; letter-spacing: 0;
+  }
+  .newbtn:hover { background: #1b2a2a; }
+  .wfactions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .btn.small { padding: 0 12px; height: 30px; line-height: 28px; font-size: 12px; border-radius: 8px; }
+  .runbar .srcline { color: var(--muted); font-size: 11px; margin-top: 2px; display: flex; gap: 8px; align-items: center; }
+  .runbar .srcline .src {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+    border: 1px solid var(--border); border-radius: 5px; padding: 0 5px;
+  }
+
+  /* ---- modal ---- */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(4,7,11,.66); backdrop-filter: blur(2px);
+    display: none; align-items: flex-start; justify-content: center; z-index: 50; padding: 40px 16px; overflow-y: auto;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+    width: 100%; max-width: 760px; box-shadow: 0 18px 60px rgba(0,0,0,.5);
+    display: flex; flex-direction: column; max-height: calc(100vh - 80px);
+  }
+  .modal.wide { max-width: 920px; }
+  .modal .mhead {
+    display: flex; align-items: center; gap: 10px; padding: 15px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .modal .mhead .mtitle { font-size: 16px; font-weight: 700; }
+  .modal .mhead .msub { color: var(--muted); font-size: 12px; }
+  .modal .mhead .x {
+    margin-left: auto; cursor: pointer; color: var(--muted); font-size: 18px; line-height: 1;
+    border: none; background: none; padding: 4px 8px; border-radius: 6px;
+  }
+  .modal .mhead .x:hover { color: var(--text); background: var(--panel-2); }
+  .modal .mbody { padding: 16px 18px; overflow-y: auto; }
+  .modal .mfoot {
+    display: flex; gap: 10px; align-items: center; padding: 14px 18px;
+    border-top: 1px solid var(--border);
+  }
+  .modal .mfoot .spacer { flex: 1; }
+  .field { margin-bottom: 14px; }
+  .field > label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 5px; }
+  .field .hint { color: var(--muted); font-size: 11px; margin-top: 4px; }
+  .row2 { display: flex; gap: 12px; flex-wrap: wrap; }
+  .row2 > .field { flex: 1 1 200px; }
+  input.txt, select.sel, textarea.ta {
+    width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px; font: inherit;
+  }
+  textarea.ta { resize: vertical; min-height: 64px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+  input.txt:focus, select.sel:focus, textarea.ta:focus { outline: none; border-color: var(--accent-dim); }
+  select.sel { cursor: pointer; }
+  .draft {
+    margin-top: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 9px 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
+    color: #c4d0dd; white-space: pre-wrap; max-height: 220px; overflow-y: auto; display: none;
+  }
+  .draft.show { display: block; }
+  .mbanner { padding: 8px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; display: none; }
+  .mbanner.show { display: block; }
+  .mbanner.err { background: #2a1314; border: 1px solid #6f2424; color: #f7b6b3; }
+  .mbanner.info { background: #122230; border: 1px solid #1f4a6f; color: #bcdcf5; }
+  /* per-step editor */
+  .ephase { margin-bottom: 14px; }
+  .ephase .et { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
+  .estep {
+    background: var(--panel-2); border: 1px solid var(--border); border-left: 3px solid var(--pending);
+    border-radius: 10px; padding: 11px 12px; margin-bottom: 9px;
+  }
+  .estep.worker { border-left-color: #6fb1ff; } .estep.processor { border-left-color: #9d8cff; }
+  .estep.distributor { border-left-color: #ffce6f; } .estep.consolidator { border-left-color: #5fe0c6; }
+  .estep.gate { border-left-color: #f0a35e; }
+  .estep .eh { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .estep .eh .esid { font-weight: 700; }
+  .estep .eh .ek { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); border: 1px solid var(--border); border-radius: 5px; padding: 0 5px; }
+  .estep .ro { color: var(--muted); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -171,11 +253,20 @@ export const PAGE_HTML = `<!doctype html>
   <div class="health" id="health"></div>
 </header>
 <main>
-  <aside id="sidebar"><h2>Workflows</h2><div id="wflist"></div></aside>
+  <aside id="sidebar">
+    <h2>Workflows <button class="newbtn" id="newWfBtn" title="Create a workflow">&#43; New</button></h2>
+    <div id="wflist"></div>
+  </aside>
   <section class="work">
     <div class="runbar">
       <div class="title" id="wfTitle">Select a workflow</div>
       <div class="sub" id="wfSub">Pick a workflow on the left to view its pipeline and run it.</div>
+      <div class="srcline" id="srcLine" style="display:none"></div>
+      <div class="wfactions" id="wfActions" style="display:none">
+        <button class="btn small" id="editBtn">&#9998; Configure</button>
+        <button class="btn small" id="cloneBtn">&#10697; Clone</button>
+        <button class="btn small danger" id="deleteBtn" style="display:none">&#128465; Delete</button>
+      </div>
       <div class="row" id="runRow" style="display:none">
         <textarea id="input" placeholder="Describe the input for this run..."></textarea>
         <div class="btnstack">
@@ -198,17 +289,18 @@ export const PAGE_HTML = `<!doctype html>
     </div>
   </section>
 </main>
+<div class="modal-overlay" id="overlay"><div class="modal" id="modal"></div></div>
 <script>
 (function () {
   "use strict";
 
   var KIND_LABEL = { worker: "worker", processor: "process", distributor: "fan-out", consolidator: "merge", gate: "gate" };
   var S = {
-    workflows: [], selected: null, spec: null,
+    workflows: [], selected: null, source: null, spec: null, agents: [],
     runId: null, es: null, started: false, done: false, ok: true,
     startedAt: 0, timer: null, results: [],
     phaseOrder: [], phaseDone: {}, live: {}, childOf: {}, specStepIds: {},
-    rafQueued: false
+    rafQueued: false, draftAbort: null
   };
 
   function h(tag, attrs) {
@@ -244,7 +336,23 @@ export const PAGE_HTML = `<!doctype html>
       if (r.body.configLabel) document.getElementById("config").textContent = r.body.configLabel;
       renderSidebar();
     });
+    loadMeta();
     pollDoctor(0);
+  }
+
+  // Agent/model/effort catalog for the create + configure forms.
+  function loadMeta() {
+    api("GET", "/api/meta").then(function (r) { S.agents = (r.body && r.body.agents) || []; });
+  }
+  function agentById(id) {
+    for (var i = 0; i < S.agents.length; i++) if (S.agents[i].id === id) return S.agents[i];
+    return null;
+  }
+  function modelsFor(agentId) { var a = agentById(agentId); return a ? a.models : []; }
+  function effortsFor(agentId, modelId) {
+    var ms = modelsFor(agentId);
+    for (var i = 0; i < ms.length; i++) if (ms[i].id === modelId) return ms[i].efforts || [];
+    return [];
   }
 
   // Health probes run in the background on the server; poll a few times until
@@ -291,13 +399,27 @@ export const PAGE_HTML = `<!doctype html>
     api("GET", "/api/workflows/" + encodeURIComponent(name)).then(function (r) {
       if (r.status !== 200) { setBanner(r.body.error || "failed to load", "err"); return; }
       S.spec = r.body.spec;
+      S.source = r.body.source;
       document.getElementById("wfTitle").textContent = r.body.spec.name;
-      document.getElementById("wfSub").textContent = r.body.spec.description || ("source: " + r.body.source);
+      document.getElementById("wfSub").textContent = r.body.spec.description || "";
       document.getElementById("runRow").style.display = "flex";
+      renderSourceLine();
       resetRunModel();
       seedFromSpec();
       render();
     });
+  }
+
+  function renderSourceLine() {
+    var line = document.getElementById("srcLine");
+    clear(line);
+    line.style.display = "flex";
+    line.appendChild(h("span", { class: "src", text: S.source || "unknown" }));
+    var counts = S.spec ? S.spec.phases.length + " phase" + (S.spec.phases.length === 1 ? "" : "s") : "";
+    if (counts) line.appendChild(h("span", { text: counts }));
+    if (S.source !== "user") line.appendChild(h("span", { text: "\\u00b7 configuring saves a user copy" }));
+    document.getElementById("wfActions").style.display = "flex";
+    document.getElementById("deleteBtn").style.display = S.source === "user" ? "block" : "none";
   }
 
   // ---- run model -----------------------------------------------------------
@@ -579,6 +701,358 @@ export const PAGE_HTML = `<!doctype html>
     b.textContent = text;
   }
 
+  // ---- authoring: modal scaffolding ---------------------------------------
+  function openModal(node) {
+    var modal = document.getElementById("modal");
+    clear(modal);
+    modal.appendChild(node);
+    document.getElementById("overlay").classList.add("show");
+  }
+  function closeModal() {
+    if (S.draftAbort) { try { S.draftAbort.abort(); } catch (e) {} S.draftAbort = null; }
+    document.getElementById("overlay").classList.remove("show");
+    clear(document.getElementById("modal"));
+  }
+  function modalShell(title, sub, bodyNode, footNode, wide) {
+    var x = h("button", { class: "x", title: "Close", onClick: closeModal }, "\\u00d7");
+    var head = h("div", { class: "mhead" },
+      h("div", null, h("div", { class: "mtitle", text: title }), sub ? h("div", { class: "msub", text: sub }) : null),
+      x
+    );
+    var shell = h("div", { class: "modal" + (wide ? " wide" : "") }, head, h("div", { class: "mbody" }, bodyNode), footNode);
+    return shell;
+  }
+  function field(label, control, hint) {
+    return h("div", { class: "field" },
+      h("label", { text: label }), control,
+      hint ? h("div", { class: "hint", text: hint }) : null);
+  }
+  function selectEl(opts, selected, onChange) {
+    var sel = h("select", { class: "sel" });
+    fillOptions(sel, opts, selected);
+    if (onChange) sel.addEventListener("change", onChange);
+    return sel;
+  }
+  function fillOptions(sel, opts, selected) {
+    clear(sel);
+    opts.forEach(function (o) { sel.appendChild(h("option", { value: o.value }, o.label)); });
+    if (selected != null) sel.value = selected;
+    if (!sel.value && opts.length) sel.value = opts[0].value;
+  }
+  function agentOptions() {
+    return S.agents.map(function (a) {
+      return { value: a.id, label: a.id + (a.healthy ? "" : " (unavailable)") };
+    });
+  }
+  function modelOptions(agentId) {
+    return modelsFor(agentId).map(function (m) { return { value: m.id, label: m.name }; });
+  }
+  // Keep the step's current model selectable even if it's not in the live
+  // catalog (e.g. a paid or removed model), so configuring never silently
+  // rewrites it.
+  function modelOptionsWith(agentId, current) {
+    var opts = modelOptions(agentId);
+    if (current && !opts.some(function (o) { return o.value === current; })) {
+      opts = [{ value: current, label: current + " (current)" }].concat(opts);
+    }
+    return opts;
+  }
+  function effortOptions(agentId, modelId, current) {
+    var list = effortsFor(agentId, modelId);
+    var opts = [{ value: "", label: "default" }].concat(list.map(function (e) { return { value: e, label: e }; }));
+    if (current && !opts.some(function (o) { return o.value === current; })) {
+      opts.push({ value: current, label: current });
+    }
+    return opts;
+  }
+  function preferredAgent() {
+    for (var i = 0; i < S.agents.length; i++) if (S.agents[i].healthy) return S.agents[i];
+    return S.agents[0] || null;
+  }
+  function mbanner(node, text, kind) {
+    if (!text) { node.className = "mbanner"; node.textContent = ""; return; }
+    node.className = "mbanner show " + (kind === "err" ? "err" : "info");
+    node.textContent = text;
+  }
+
+  // ---- create (LLM-drafted) -----------------------------------------------
+  function openCreate() {
+    if (!S.agents.length) { setBanner("agent catalog still loading; try again in a moment", "info"); return; }
+    var a0 = preferredAgent();
+    var agentSel = selectEl(agentOptions(), a0.id, function () { onCreateAgent(); });
+    var modelSel = selectEl(modelOptions(a0.id), a0.defaultModel);
+    var effortWrap = h("div", { class: "field", id: "cEffortField" });
+    var nameInput = h("input", { class: "txt", placeholder: "auto from description", maxlength: "48" });
+    var descTa = h("textarea", { class: "ta", placeholder: "Describe what the workflow should do, in plain language..." });
+    descTa.style.minHeight = "92px";
+    var banner = h("div", { class: "mbanner" });
+    var draft = h("div", { class: "draft" });
+
+    function onCreateAgent() {
+      var ag = agentSel.value;
+      var a = agentById(ag);
+      fillOptions(modelSel, modelOptions(ag), a ? a.defaultModel : null);
+      renderEffort();
+    }
+    function renderEffort() {
+      clear(effortWrap);
+      var opts = effortOptions(agentSel.value, modelSel.value);
+      if (opts.length <= 1) return;
+      effortWrap.appendChild(h("label", { text: "Effort" }));
+      effortWrap.appendChild(selectEl(opts, ""));
+    }
+    modelSel.addEventListener("change", renderEffort);
+    renderEffort();
+
+    var body = h("div", null,
+      banner,
+      field("Description", descTa),
+      h("div", { class: "row2" },
+        field("Draft with", agentSel),
+        field("Model", modelSel),
+        effortWrap
+      ),
+      field("Name (optional)", nameInput, "Lowercase, kebab-case. Left blank, it's derived from the description."),
+      draft
+    );
+
+    var createBtn = h("button", { class: "btn primary", text: "Create \\u2728" });
+    var foot = h("div", { class: "mfoot" },
+      h("button", { class: "btn", text: "Cancel", onClick: closeModal }),
+      h("div", { class: "spacer" }),
+      createBtn
+    );
+
+    createBtn.addEventListener("click", function () {
+      var desc = descTa.value.trim();
+      if (!desc) { mbanner(banner, "enter a description first", "info"); return; }
+      var effortSel = effortWrap.querySelector("select");
+      mbanner(banner, "", "");
+      draft.className = "draft show"; draft.textContent = "";
+      createBtn.disabled = true; createBtn.textContent = "Drafting\\u2026";
+      var payload = {
+        description: desc, agent: agentSel.value, model: modelSel.value,
+        effort: effortSel ? effortSel.value : "", name: nameInput.value.trim()
+      };
+      var ac = new AbortController();
+      S.draftAbort = ac;
+      streamGenerate(payload, ac.signal, function (frame) {
+        if (frame.type === "delta") { draft.textContent += frame.text; draft.scrollTop = draft.scrollHeight; }
+        else if (frame.type === "done") {
+          S.draftAbort = null;
+          createBtn.disabled = false; createBtn.textContent = "Create \\u2728";
+          if (frame.ok && frame.spec) {
+            closeModal();
+            refreshAfterWrite(frame.name || frame.spec.name, frame.replaced ? "updated" : "created");
+          } else {
+            mbanner(banner, frame.error || "generation failed", "err");
+          }
+        }
+      });
+    });
+
+    openModal(modalShell("Create workflow", "An agent drafts a runnable pipeline from your description.", body, foot));
+    setTimeout(function () { descTa.focus(); }, 0);
+  }
+
+  // Stream the SSE response of POST /api/workflows/generate (EventSource is
+  // GET-only, so read the body directly).
+  function streamGenerate(payload, signal, onFrame) {
+    fetch("/api/workflows/generate", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload), signal: signal
+    }).then(function (res) {
+      var reader = res.body.getReader();
+      var dec = new TextDecoder();
+      var buf = "";
+      function pump() {
+        return reader.read().then(function (r) {
+          if (r.done) return;
+          buf += dec.decode(r.value, { stream: true });
+          var idx;
+          while ((idx = buf.indexOf("\\n\\n")) >= 0) {
+            var chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+            var line = chunk.split("\\n").find(function (l) { return l.indexOf("data: ") === 0; });
+            if (!line) continue;
+            var frame; try { frame = JSON.parse(line.slice(6)); } catch (e) { continue; }
+            onFrame(frame);
+          }
+          return pump();
+        });
+      }
+      return pump();
+    }).catch(function (e) {
+      if (signal && signal.aborted) return;
+      onFrame({ type: "done", ok: false, error: String(e) });
+    });
+  }
+
+  // ---- configure / clone ---------------------------------------------------
+  function isAgentStep(st) {
+    if (st.agent) return true;
+    var k = st.kind || "worker";
+    return k === "worker" || k === "processor";
+  }
+  function openEditor(clone) {
+    if (!S.spec) return;
+    if (!S.agents.length) { setBanner("agent catalog still loading; try again in a moment", "info"); return; }
+    var spec = JSON.parse(JSON.stringify(S.spec));
+    var creating = !!clone;
+    var nameInput = h("input", { class: "txt", maxlength: "48", value: creating ? spec.name + "-copy" : spec.name });
+    if (!creating) nameInput.setAttribute("disabled", "true");
+    var descInput = h("input", { class: "txt", value: spec.description || "", placeholder: "one-line description" });
+    var banner = h("div", { class: "mbanner" });
+    var refs = {};
+
+    var phasesWrap = h("div", null);
+    spec.phases.forEach(function (p) {
+      var pe = h("div", { class: "ephase" }, h("div", { class: "et", text: (p.title || p.id) }));
+      p.steps.forEach(function (st) {
+        pe.appendChild(stepEditor(st, refs));
+      });
+      phasesWrap.appendChild(pe);
+    });
+
+    var body = h("div", null,
+      banner,
+      h("div", { class: "row2" },
+        field(creating ? "New name" : "Name", nameInput, creating ? "Saved as a new user workflow." : (S.source === "user" ? "" : "Editing creates a user copy that overrides the " + S.source + " one.")),
+        field("Description", descInput)
+      ),
+      phasesWrap
+    );
+
+    var saveBtn = h("button", { class: "btn primary", text: creating ? "Save copy" : "Save" });
+    var foot = h("div", { class: "mfoot" },
+      h("button", { class: "btn", text: "Cancel", onClick: closeModal }),
+      h("div", { class: "spacer" }),
+      saveBtn
+    );
+
+    saveBtn.addEventListener("click", function () {
+      var targetName = creating ? nameInput.value.trim() : spec.name;
+      if (!targetName) { mbanner(banner, "a name is required", "info"); return; }
+      spec.description = descInput.value.trim() || undefined;
+      spec.phases.forEach(function (p) {
+        p.steps.forEach(function (st) {
+          var r = refs[st.id];
+          if (!r) return;
+          st.agent = r.agentSel.value;
+          st.model = r.modelSel.value;
+          var ef = r.effortSel ? r.effortSel.value : "";
+          if (ef) st.effort = ef; else delete st.effort;
+          st.prompt = r.promptTa.value;
+        });
+      });
+      saveBtn.disabled = true; saveBtn.textContent = "Saving\\u2026";
+      var payload = { spec: spec };
+      if (!creating) payload.previousName = S.selected;
+      api("PUT", "/api/workflows/" + encodeURIComponent(targetName), payload).then(function (r) {
+        saveBtn.disabled = false; saveBtn.textContent = creating ? "Save copy" : "Save";
+        if (r.status === 200 && r.body.ok) {
+          closeModal();
+          refreshAfterWrite(r.body.name || targetName, "saved");
+        } else {
+          mbanner(banner, (r.body && r.body.error) || "save failed", "err");
+        }
+      });
+    });
+
+    openModal(modalShell(creating ? "Clone workflow" : "Configure " + spec.name,
+      "Set the agent, model, effort, and prompt for each step.", body, foot, true));
+  }
+
+  function stepEditor(st, refs) {
+    var kind = st.kind || "worker";
+    var card = h("div", { class: "estep " + kind },
+      h("div", { class: "eh" },
+        h("span", { class: "esid", text: st.id }),
+        h("span", { class: "ek", text: kind }),
+        st.dependsOn && st.dependsOn.length ? h("span", { class: "ro", text: "\\u2190 " + st.dependsOn.join(", ") }) : null
+      )
+    );
+    if (!isAgentStep(st)) {
+      var note = kind === "gate"
+        ? "gate: " + describeGate(st)
+        : (st.items ? "distributes " + st.items.length + " item(s)" : "passthrough merge (no agent)");
+      card.appendChild(h("div", { class: "ro", text: note }));
+      return card;
+    }
+    var agent = st.agent || preferredAgent().id;
+    var agentSel = selectEl(agentOptions(), agent);
+    var modelSel = selectEl(modelOptionsWith(agent, st.model), st.model);
+    var effortField = h("div", { class: "field" });
+    var promptTa = h("textarea", { class: "ta", text: st.prompt || "" });
+
+    function renderEffort() {
+      clear(effortField);
+      var opts = effortOptions(agentSel.value, modelSel.value, st.effort);
+      if (opts.length <= 1) { refs[st.id].effortSel = null; return; }
+      effortField.appendChild(h("label", { text: "Effort" }));
+      var es = selectEl(opts, st.effort || "");
+      effortField.appendChild(es);
+      refs[st.id].effortSel = es;
+    }
+    agentSel.addEventListener("change", function () {
+      var a = agentById(agentSel.value);
+      fillOptions(modelSel, modelOptions(agentSel.value), a ? a.defaultModel : null);
+      renderEffort();
+    });
+    modelSel.addEventListener("change", renderEffort);
+
+    refs[st.id] = { agentSel: agentSel, modelSel: modelSel, effortSel: null, promptTa: promptTa };
+    card.appendChild(h("div", { class: "row2" },
+      field("Agent", agentSel), field("Model", modelSel), effortField));
+    card.appendChild(field("Prompt", promptTa));
+    renderEffort();
+    return card;
+  }
+
+  function describeGate(st) {
+    var c = st.condition || {};
+    var parts = [];
+    if (c.step) parts.push("step " + c.step);
+    if (c.ok != null) parts.push(c.ok ? "ok" : "not ok");
+    if (c.contains) parts.push('contains "' + c.contains + '"');
+    if (c.matches) parts.push("matches /" + c.matches + "/");
+    if (st.onFalse) parts.push("else " + st.onFalse);
+    return parts.join(", ") || "condition";
+  }
+
+  function doDelete() {
+    if (!S.selected || S.source !== "user") return;
+    if (!window.confirm("Delete workflow \\"" + S.selected + "\\"? This removes it from your user workflows file.")) return;
+    var name = S.selected;
+    api("DELETE", "/api/workflows/" + encodeURIComponent(name)).then(function (r) {
+      if (r.status === 200 && r.body.ok) {
+        S.selected = null; S.spec = null; S.source = null;
+        document.getElementById("wfActions").style.display = "none";
+        document.getElementById("srcLine").style.display = "none";
+        document.getElementById("runRow").style.display = "none";
+        document.getElementById("wfTitle").textContent = "Select a workflow";
+        document.getElementById("wfSub").textContent = "Pick a workflow on the left to view its pipeline and run it.";
+        clear(document.getElementById("canvas"));
+        document.getElementById("canvas").appendChild(h("div", { class: "empty", text: "Deleted " + name + "." }));
+        reloadCatalog();
+      } else {
+        setBanner((r.body && r.body.error) || "delete failed", "err");
+      }
+    });
+  }
+
+  function reloadCatalog() {
+    return api("GET", "/api/workflows").then(function (r) {
+      S.workflows = r.body.workflows || [];
+      renderSidebar();
+    });
+  }
+  function refreshAfterWrite(name, verb) {
+    reloadCatalog().then(function () {
+      selectWorkflow(name);
+      setBanner("Workflow \\u201c" + name + "\\u201d " + (verb || "saved") + ".", "ok");
+    });
+  }
+
   // ---- utils ---------------------------------------------------------------
   function tail(text, n) { return text.length > n ? "\\u2026" + text.slice(text.length - n) : text; }
   function truncate(text, n) { return text.length > n ? text.slice(0, n) + "\\u2026" : text; }
@@ -587,6 +1061,16 @@ export const PAGE_HTML = `<!doctype html>
   document.getElementById("cancelBtn").addEventListener("click", cancelRun);
   document.getElementById("input").addEventListener("keydown", function (e) {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") startRun();
+  });
+  document.getElementById("newWfBtn").addEventListener("click", openCreate);
+  document.getElementById("editBtn").addEventListener("click", function () { openEditor(false); });
+  document.getElementById("cloneBtn").addEventListener("click", function () { openEditor(true); });
+  document.getElementById("deleteBtn").addEventListener("click", doDelete);
+  document.getElementById("overlay").addEventListener("click", function (e) {
+    if (e.target === document.getElementById("overlay")) closeModal();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && document.getElementById("overlay").classList.contains("show")) closeModal();
   });
 
   loadWorkflows();

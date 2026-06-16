@@ -201,6 +201,31 @@ export function saveUserWorkflow(
   return { ok: true, path, replaced };
 }
 
+export interface DeleteUserWorkflowResult {
+  ok: boolean;
+  path?: string;
+  /** True when the workflow existed and was removed. */
+  removed?: boolean;
+  error?: string;
+}
+
+/**
+ * Remove a single workflow from `~/.steamtrain/workflows.json`. Only user-file
+ * workflows can be deleted here; bundled and project workflows live elsewhere.
+ * Returns `removed: false` (still ok) when no such user workflow exists.
+ */
+export function deleteUserWorkflow(
+  name: string,
+  home: string = homedir(),
+): DeleteUserWorkflowResult {
+  const userOnDisk = readUserWorkflowsFile(home).workflows ?? {};
+  if (!userOnDisk[name]) return { ok: true, removed: false };
+
+  const { [name]: _removed, ...rest } = userOnDisk;
+  const path = writeUserWorkflowsFile(home, rest);
+  return { ok: true, path, removed: true };
+}
+
 export function readUserWorkflowsFile(home: string = homedir()): {
   workflows?: Record<string, WorkflowSpec>;
   warning?: string;
