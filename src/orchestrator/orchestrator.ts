@@ -1,7 +1,7 @@
 import { type AgentAdapter, createAdapter } from "../agents";
 import type { SteamtrainConfig } from "../config";
 import type { DoctorResult } from "../doctor";
-import type { AgentEvent } from "../types/events";
+import type { AgentEvent, AgentId } from "../types/events";
 import {
   type LoadedWorkflowCatalog,
   type StepResult,
@@ -32,8 +32,8 @@ export type DispatchCheck = { ok: true } | { ok: false; reason: string };
  */
 export class Orchestrator {
   private readonly workspaceMap: Map<WorkspaceId, WorkspaceEntry>;
-  private readonly workflowCatalog: Record<string, WorkflowSpec>;
-  private readonly workflowSources: Record<string, WorkflowSourceKind>;
+  private workflowCatalog: Record<string, WorkflowSpec>;
+  private workflowSources: Record<string, WorkflowSourceKind>;
 
   constructor(
     private readonly config: SteamtrainConfig,
@@ -48,6 +48,26 @@ export class Orchestrator {
 
   setDoctor(results: DoctorResult[]): void {
     this.doctor = results;
+  }
+
+  /** The reasoning config (binaries, timeouts) this orchestrator was built with. */
+  getConfig(): SteamtrainConfig {
+    return this.config;
+  }
+
+  /**
+   * Replace the live workflow catalog (e.g. after the web UI creates, edits, or
+   * deletes a user workflow). Subsequent runs and listings see the new map
+   * without restarting the server.
+   */
+  setCatalog(catalog: LoadedWorkflowCatalog): void {
+    this.workflowCatalog = catalog.workflows;
+    this.workflowSources = catalog.sources;
+  }
+
+  /** Whether an agent is currently doctor-healthy (used to gate authoring). */
+  isAgentHealthy(agent: AgentId): boolean {
+    return this.doctor.find((d) => d.agent === agent)?.status === "ok";
   }
 
   resolve(id: WorkspaceId): ResolvedWorkspace {

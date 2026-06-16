@@ -1,4 +1,5 @@
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { refreshAgentCatalogCaches } from "../agents/models";
 import type { SteamtrainConfig } from "../config";
@@ -14,12 +15,15 @@ import {
   workflowStepKind,
 } from "../workflow";
 import type { WorkspaceConfig } from "../workspace";
+import { WorkflowAuthor } from "./authoring";
 import { PAGE_HTML } from "./html";
 import { type WorkflowHost, WorkflowRunManager } from "./runs";
 
 export interface WebServerDeps {
   host: WorkflowHost;
   runs: WorkflowRunManager;
+  /** Optional authoring service; when absent, create/edit/delete routes 501. */
+  author?: WorkflowAuthor;
   workflowSource?: (name: string) => WorkflowSourceKind | undefined;
   doctor?: () => DoctorResult[];
   configLabel?: string;
@@ -83,13 +87,17 @@ async function readBody(req: IncomingMessage): Promise<string> {
  * tests with fakes and started for real by {@link startWebUi}.
  *
  * Routes:
- *   GET  /                       the single-page app
- *   GET  /api/workflows          catalog summaries
- *   GET  /api/workflows/:name    full spec (for visualization)
- *   GET  /api/doctor             agent health
- *   POST /api/runs               { workflow, input, fresh? } -> { runId }
- *   GET  /api/runs/:id/stream    SSE of WorkflowEvents + terminal status
- *   POST /api/runs/:id/cancel    abort a run
+ *   GET    /                        the single-page app
+ *   GET    /api/workflows           catalog summaries
+ *   GET    /api/workflows/:name     full spec (for visualization)
+ *   PUT    /api/workflows/:name     save a created/edited workflow (authoring)
+ *   DELETE /api/workflows/:name     delete a user workflow (authoring)
+ *   POST   /api/workflows/generate  SSE: LLM-draft a workflow + save (authoring)
+ *   GET    /api/meta                agents, models, efforts, health (authoring)
+ *   GET    /api/doctor              agent health
+ *   POST   /api/runs                { workflow, input, fresh? } -> { runId }
+ *   GET    /api/runs/:id/stream     SSE of WorkflowEvents + terminal status
+ *   POST   /api/runs/:id/cancel     abort a run
  */
 export function createWebServer(deps: WebServerDeps): Server {
   return createServer((req, res) => {
@@ -125,16 +133,73 @@ async function handle(
     return;
   }
 
-  const wfMatch = path.match(/^\/api\/workflows\/([^/]+)$/);
-  if (method === "GET" && wfMatch) {
-    const name = decodeURIComponent(wfMatch[1]!);
-    const spec = deps.host.listWorkflows()[name];
-    if (!spec) {
-      sendJson(res, 404, { error: `unknown workflow '${name}'` });
+  if (method === "GET" && path === "/api/meta") {
+    if (!deps.author) {
+      sendJson(res, 200, { agents: [] });
       return;
     }
-    sendJson(res, 200, { name, source: deps.workflowSource?.(name) ?? "unknown", spec });
+    sendJson(res, 200, { agents: deps.author.agentMeta() });
     return;
+  }
+
+  // Draft a workflow from a description; streams the agent's output as SSE and a
+  // terminal `done` frame with the saved spec (or an error).
+  if (method === "POST" && path === "/api/workflows/generate") {
+    if (!deps.author) {
+      sendJson(res, 501, { error: "workflow authoring is not enabled" });
+      return;
+    }
+    await streamGenerate(req, res, deps.author);
+    return;
+  }
+
+  const wfMatch = path.match(/^\/api\/workflows\/([^/]+)$/);
+  if (wfMatch) {
+    const name = decodeURIComponent(wfMatch[1]!);
+
+    if (method === "GET") {
+      const spec = deps.host.listWorkflows()[name];
+      if (!spec) {
+        sendJson(res, 404, { error: `unknown workflow '${name}'` });
+        return;
+      }
+      sendJson(res, 200, { name, source: deps.workflowSource?.(name) ?? "unknown", spec });
+      return;
+    }
+
+    if (method === "PUT") {
+      if (!deps.author) {
+        sendJson(res, 501, { error: "workflow authoring is not enabled" });
+        return;
+      }
+      const body = await readBody(req);
+      let parsed: { spec?: unknown; previousName?: unknown };
+      try {
+        parsed = body ? JSON.parse(body) : {};
+      } catch {
+        sendJson(res, 400, { error: "invalid JSON body" });
+        return;
+      }
+      if (!parsed.spec || typeof parsed.spec !== "object") {
+        sendJson(res, 400, { error: "body must include a 'spec' object" });
+        return;
+      }
+      const previousName =
+        typeof parsed.previousName === "string" ? parsed.previousName : undefined;
+      const result = deps.author.save(name, parsed.spec as WorkflowSpec, previousName);
+      sendJson(res, result.ok ? 200 : 400, result);
+      return;
+    }
+
+    if (method === "DELETE") {
+      if (!deps.author) {
+        sendJson(res, 501, { error: "workflow authoring is not enabled" });
+        return;
+      }
+      const result = deps.author.remove(name);
+      sendJson(res, result.ok ? 200 : 400, result);
+      return;
+    }
   }
 
   if (method === "GET" && path === "/api/doctor") {
@@ -180,6 +245,68 @@ async function handle(
   }
 
   sendJson(res, 404, { error: `not found: ${method} ${path}` });
+}
+
+/**
+ * Run an LLM-delegated workflow generation over a streaming response. Each
+ * `delta` frame carries a chunk of the drafting agent's output; the single
+ * terminal `done` frame carries the validated/saved spec or an error. Aborting
+ * the request (client navigates away / cancels) cancels the generation.
+ */
+async function streamGenerate(
+  req: IncomingMessage,
+  res: ServerResponse,
+  author: WorkflowAuthor,
+): Promise<void> {
+  const body = await readBody(req);
+  let parsed: {
+    description?: unknown;
+    agent?: unknown;
+    model?: unknown;
+    effort?: unknown;
+    name?: unknown;
+  };
+  try {
+    parsed = body ? JSON.parse(body) : {};
+  } catch {
+    sendJson(res, 400, { error: "invalid JSON body" });
+    return;
+  }
+  if (typeof parsed.description !== "string" || typeof parsed.agent !== "string") {
+    sendJson(res, 400, { error: "body must include string 'description' and 'agent'" });
+    return;
+  }
+
+  res.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+  });
+  res.write(": open\n\n");
+
+  const controller = new AbortController();
+  res.on("close", () => controller.abort());
+
+  const send = (frame: unknown): void => {
+    res.write(`data: ${JSON.stringify(frame)}\n\n`);
+  };
+
+  const result = await author.generate(
+    {
+      description: parsed.description,
+      agent: parsed.agent as never,
+      model: typeof parsed.model === "string" ? parsed.model : "",
+      effort: typeof parsed.effort === "string" ? parsed.effort : undefined,
+      name: typeof parsed.name === "string" ? parsed.name : undefined,
+    },
+    (text) => send({ type: "delta", text }),
+    controller.signal,
+  );
+
+  if (!res.writableEnded) {
+    send({ type: "done", ...result });
+    res.end();
+  }
 }
 
 function streamRun(runId: string, runs: WorkflowRunManager, res: ServerResponse): void {
@@ -250,9 +377,17 @@ export async function startWebUi(
 
   const cacheStore = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
   const runs = new WorkflowRunManager({ host: orchestrator, cacheStore, cwd });
+  const author = new WorkflowAuthor({
+    host: orchestrator,
+    config: options.config,
+    home: homedir(),
+    cwd,
+    projectWorkflows: options.config.workflows,
+  });
   const server = createWebServer({
     host: orchestrator,
     runs,
+    author,
     workflowSource: (name) => orchestrator.workflowSource(name),
     doctor: () => doctor,
     configLabel: options.configLabel,

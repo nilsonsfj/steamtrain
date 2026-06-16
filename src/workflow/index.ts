@@ -83,4 +83,6 @@ export {
   workflowSpecsEqual,
   saveUserWorkflow,
   type SaveUserWorkflowResult,
+  deleteUserWorkflow,
+  type DeleteUserWorkflowResult,
 } from "./catalog";
