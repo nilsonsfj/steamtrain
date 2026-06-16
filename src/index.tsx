@@ -63,6 +63,11 @@ async function main(): Promise<void> {
     });
     const shutdown = (): void => {
       server.close(() => process.exit(0));
+      // SSE responses are held open with keep-alive (and EventSource
+      // auto-reconnects), so server.close() alone would never fire its
+      // callback. Tear down live sockets, then force-exit as a safety net.
+      server.closeAllConnections?.();
+      setTimeout(() => process.exit(0), 1000).unref();
     };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
