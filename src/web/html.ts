@@ -300,7 +300,7 @@ export const PAGE_HTML = `<!doctype html>
     runId: null, es: null, started: false, done: false, ok: true,
     startedAt: 0, timer: null, results: [],
     phaseOrder: [], phaseDone: {}, live: {}, childOf: {}, specStepIds: {},
-    rafQueued: false, draftAbort: null
+    rafQueued: false, draftAbort: null, doctor: []
   };
 
   function h(tag, attrs) {
@@ -342,7 +342,21 @@ export const PAGE_HTML = `<!doctype html>
 
   // Agent/model/effort catalog for the create + configure forms.
   function loadMeta() {
-    api("GET", "/api/meta").then(function (r) { S.agents = (r.body && r.body.agents) || []; });
+    api("GET", "/api/meta").then(function (r) {
+      S.agents = (r.body && r.body.agents) || [];
+      applyHealth();
+    });
+  }
+  // The server serves immediately and runs the doctor in the background, so the
+  // health flag baked into /api/meta is often stale (all false) at first
+  // paint. Fold the live /api/doctor results into the cached agent catalog so
+  // the create/configure picker reflects real health once the doctor lands,
+  // without a full page reload. Handles either fetch resolving first.
+  function applyHealth() {
+    if (!S.doctor.length || !S.agents.length) return;
+    S.agents.forEach(function (a) {
+      a.healthy = S.doctor.some(function (d) { return d.agent === a.id && d.status === "ok"; });
+    });
   }
   function agentById(id) {
     for (var i = 0; i < S.agents.length; i++) if (S.agents[i].id === id) return S.agents[i];
@@ -360,7 +374,9 @@ export const PAGE_HTML = `<!doctype html>
   function pollDoctor(attempt) {
     api("GET", "/api/doctor").then(function (r) {
       var list = r.body.doctor || [];
+      S.doctor = list;
       renderHealth(list);
+      applyHealth();
       if (!list.length && attempt < 12) setTimeout(function () { pollDoctor(attempt + 1); }, 1500);
     });
   }
