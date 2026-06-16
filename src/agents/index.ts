@@ -8,6 +8,12 @@ export type { AgentAdapter, AgentRunOptions } from "./adapter";
 export { runAgentProcess } from "./adapter";
 export type { AgentModel } from "./agent-model";
 export { formatModelOption } from "./agent-model";
+export {
+  type AgentMeta,
+  type AgentModelMeta,
+  buildAgentMeta,
+  defaultDraftModel,
+} from "./agent-meta";
 export { ClaudeCodeAdapter, CLAUDE_MODELS, createClaudeMapper } from "./claude";
 export { CodexAdapter, CODEX_MODELS, buildCodexExecArgs, createCodexMapper } from "./codex";
 export {

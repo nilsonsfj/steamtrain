@@ -1,23 +1,26 @@
 import { type AgentAdapter, createAdapter } from "../agents";
-import { AGENT_IDS, defaultModelForAgent, effortsForModel, modelsForAgent } from "../agents/models";
+import { type AgentMeta, buildAgentMeta, defaultDraftModel } from "../agents/agent-meta";
+import { AGENT_IDS } from "../agents/models";
 import type { SteamtrainConfig } from "../config";
 import type { AgentId } from "../types/events";
 import {
   type LoadedWorkflowCatalog,
-  type WorkflowSourceKind,
-  type WorkflowSpec,
-  deleteUserWorkflow,
-  generateWorkflow,
   loadWorkflowCatalog,
-  saveUserWorkflow,
-  slugifyWorkflowName,
-  validateWorkflow,
-} from "../workflow";
+  saveSessionWorkflowsToUser,
+} from "./catalog";
+import { deleteUserWorkflow, saveUserWorkflow } from "./catalog";
+import type { SaveSessionWorkflowsResult, WorkflowSourceKind } from "./catalog";
+import { generateWorkflow, slugifyWorkflowName } from "./generate";
+import { applyWorkflowStepOverrides } from "./overrides";
+import type { WorkflowStepOverrides } from "./overrides";
+import { type WorkflowSpec, validateWorkflow } from "./types";
 
 /**
  * The slice of the orchestrator the authoring layer needs: read the catalog,
  * check agent health, and swap the live catalog after a write. Declaring it as
- * an interface keeps {@link WorkflowAuthor} unit-testable with a small fake.
+ * an interface keeps {@link WorkflowAuthor} usable from both the web server
+ * (Orchestrator implements it) and the TUI (a thin adapter over React state),
+ * and unit-testable with a small fake.
  */
 export interface AuthoringHost {
   listWorkflows(): Record<string, WorkflowSpec>;
@@ -37,20 +40,6 @@ export interface WorkflowAuthorOptions {
   projectWorkflows?: Record<string, WorkflowSpec>;
   /** Injectable adapter factory for tests; defaults to the real one. */
   createAdapter?: (id: AgentId, binary?: string) => AgentAdapter;
-}
-
-export interface AgentModelMeta {
-  id: string;
-  name: string;
-  /** Reasoning effort / variant levels this model accepts (may be empty). */
-  efforts: string[];
-}
-
-export interface AgentMeta {
-  id: AgentId;
-  models: AgentModelMeta[];
-  defaultModel: string;
-  healthy: boolean;
 }
 
 export interface GenerateRequest {
@@ -82,10 +71,12 @@ export interface AuthorDeleteResult {
 }
 
 /**
- * Web-side workflow authoring: LLM-delegated creation, manual edits, and
- * deletion, all persisted to `~/.steamtrain/workflows.json` and reflected in the
- * live orchestrator catalog so the change is usable without a restart. This is
- * the web analogue of the TUI's `/createworkflow` + step overrides + save flow.
+ * The shared workflow authoring core used by every frontend: LLM-delegated
+ * creation, manual edits, clone, deletion, staged per-step overrides, and a
+ * flush of those overrides — all persisted to `~/.steamtrain/workflows.json`
+ * and reflected in the live catalog (via {@link AuthoringHost.setCatalog}) so a
+ * change is usable without a restart. The web server and the TUI both drive
+ * this one class; each only owns rendering + input.
  */
 export class WorkflowAuthor {
   private readonly host: AuthoringHost;
@@ -106,16 +97,7 @@ export class WorkflowAuthor {
 
   /** Agents with their model catalogs, effort levels, defaults, and live health. */
   agentMeta(): AgentMeta[] {
-    return AGENT_IDS.map((agent) => ({
-      id: agent,
-      models: modelsForAgent(agent).map((model) => ({
-        id: model.id,
-        name: model.name,
-        efforts: [...effortsForModel(agent, model.id)],
-      })),
-      defaultModel: webDefaultModel(agent),
-      healthy: this.host.isAgentHealthy(agent),
-    }));
+    return buildAgentMeta((agent) => this.host.isAgentHealthy(agent));
   }
 
   /**
@@ -134,7 +116,7 @@ export class WorkflowAuthor {
       return { ok: false, error: `${req.agent} is not available (check agent health)` };
     }
 
-    const model = req.model?.trim() || webDefaultModel(req.agent);
+    const model = req.model?.trim() || defaultDraftModel(req.agent);
     const result = await generateWorkflow(
       {
         description: req.description,
@@ -186,17 +168,60 @@ export class WorkflowAuthor {
     return written;
   }
 
+  /**
+   * Save an existing workflow (bundled, user, or project) under a new name as a
+   * user copy. The source is left untouched. Used by the TUI/web "clone".
+   */
+  clone(sourceName: string, newName: string): AuthorWriteResult {
+    const source = this.host.listWorkflows()[sourceName];
+    if (!source) return { ok: false, error: `unknown workflow '${sourceName}'` };
+
+    const slug = slugifyWorkflowName(newName || "");
+    if (!slug) return { ok: false, error: "a new workflow name is required" };
+    if (slug === sourceName) return { ok: false, error: "the clone needs a different name" };
+
+    return this.persist(slug, { ...source, name: slug });
+  }
+
   /** Remove a user workflow from disk and the live catalog. */
   remove(name: string): AuthorDeleteResult {
     const source = this.host.workflowSource(name);
     if (!source) return { ok: false, error: `unknown workflow '${name}'` };
     if (source !== "user") {
-      return { ok: false, error: `${source} workflow '${name}' cannot be deleted from the web UI` };
+      return { ok: false, error: `${source} workflow '${name}' cannot be deleted` };
     }
     const result = deleteUserWorkflow(name, this.home);
     if (!result.ok) return { ok: false, error: result.error };
     this.reload();
     return { ok: true, removed: result.removed };
+  }
+
+  /**
+   * Resolve a workflow with staged (in-session, unsaved) per-step overrides
+   * applied — the spec a "try without saving" run would use. Returns undefined
+   * when the workflow is unknown.
+   */
+  previewWithOverrides(name: string, overrides?: WorkflowStepOverrides): WorkflowSpec | undefined {
+    const base = this.host.listWorkflows()[name];
+    if (!base) return undefined;
+    return applyWorkflowStepOverrides(base, overrides);
+  }
+
+  /**
+   * Flush staged session overrides to the user workflows file, reporting
+   * saved / skipped / unchanged. Reloads the live catalog when anything was
+   * written. This is the shared core behind the TUI's `/saveworkflows`.
+   */
+  flushSessionOverrides(
+    sessionOverrides: Record<string, WorkflowStepOverrides>,
+  ): SaveSessionWorkflowsResult {
+    const result = saveSessionWorkflowsToUser({
+      catalog: this.catalog(),
+      sessionOverrides,
+      home: this.home,
+    });
+    if (result.saved.length > 0) this.reload();
+    return result;
   }
 
   private persist(name: string, spec: WorkflowSpec, extra?: { raw?: string }): AuthorWriteResult {
@@ -219,6 +244,16 @@ export class WorkflowAuthor {
     };
   }
 
+  /** The current live catalog as seen through the host. */
+  private catalog(): LoadedWorkflowCatalog {
+    const workflows = this.host.listWorkflows();
+    const sources: Record<string, WorkflowSourceKind> = {};
+    for (const name of Object.keys(workflows)) {
+      sources[name] = this.host.workflowSource(name) ?? "bundled";
+    }
+    return { workflows, sources };
+  }
+
   /** Re-read the catalog from disk (+ project) and swap it into the host. */
   private reload(): void {
     const catalog = loadWorkflowCatalog({
@@ -231,17 +266,4 @@ export class WorkflowAuthor {
 
 function isKnownAgent(agent: string): agent is AgentId {
   return (AGENT_IDS as readonly string[]).includes(agent);
-}
-
-/**
- * Default model for the web create form. Mirrors the TUI: opencode prefers the
- * free MiMo model (the catalog default is a paid model), other agents use their
- * normal default.
- */
-export function webDefaultModel(agent: AgentId): string {
-  if (agent === "opencode") {
-    const free = "opencode/mimo-v2.5-free";
-    if (modelsForAgent(agent).some((m) => m.id === free)) return free;
-  }
-  return defaultModelForAgent(agent);
 }
