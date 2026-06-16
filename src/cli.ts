@@ -369,7 +369,7 @@ interface CreateOptions {
 }
 
 const DEFAULT_CREATE_AGENT: AgentId = "opencode";
-const DEFAULT_CREATE_MODEL = "opencode/qwen3.6-plus-free";
+const DEFAULT_CREATE_MODEL = "opencode/mimo-v2.5-free";
 
 async function runWorkflowCreateCommand(
   config: SteamtrainConfig,
@@ -627,7 +627,7 @@ Usage:
   steamtrain workflow create --input <description> [--agent <id>] [--model <model>] [--name <name>] [--save] [--json]
   steamtrain workflow cache clear [<workflow> --input <text> | --stdin]
 
-workflow create delegates to an agent (default: opencode/qwen3.6-plus-free) to
+workflow create delegates to an agent (default: opencode/mimo-v2.5-free) to
 draft a workflow from a plain-English description, validates it, prints the JSON,
 and (with --save) writes it to ~/.steamtrain/workflows.json so it shows up in the
 picker and CLI alongside the bundled workflows.

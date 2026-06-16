@@ -18,11 +18,10 @@ import type { WorkflowSpec } from "./types";
 
 /** OpenCode Zen free models — see https://opencode.ai/zen/v1/models */
 const FREE = {
-  qwen: "opencode/qwen3.6-plus-free",
   nemotronUltra: "opencode/nemotron-3-ultra-free",
   deepseekFlash: "opencode/deepseek-v4-flash-free",
   mimo: "opencode/mimo-v2.5-free",
-  minimax: "opencode/minimax-m3-free",
+  northMini: "opencode/north-mini-code-free",
 } as const;
 
 const multiPlan: WorkflowSpec = {
@@ -52,7 +51,7 @@ const multiPlan: WorkflowSpec = {
           id: "draft-correctness",
           kind: "worker",
           agent: "opencode",
-          model: FREE.qwen,
+          model: FREE.northMini,
           dependsOn: ["planning-lenses"],
           prompt:
             "Draft a concise, step-by-step implementation plan for the task below. Optimize for correctness, simplicity, and reuse of existing patterns. List concrete files/steps.\n\nPlanning lenses:\n{{steps.planning-lenses.items}}\n\nTask: {{input}}",
@@ -91,7 +90,7 @@ const multiPlan: WorkflowSpec = {
           id: "synthesize",
           kind: "consolidator",
           agent: "opencode",
-          model: FREE.qwen,
+          model: FREE.deepseekFlash,
           dependsOn: ["draft-correctness", "draft-pragmatic", "critique"],
           prompt:
             "Using the two drafts and the critique below, produce a single, final implementation plan that takes the strongest parts of each and addresses the critique. Output only the final plan.\n\nTask: {{input}}\n\n--- PLAN A ---\n{{steps.draft-correctness.output}}\n\n--- PLAN B ---\n{{steps.draft-pragmatic.output}}\n\n--- CRITIQUE ---\n{{steps.critique.output}}",
@@ -122,7 +121,7 @@ const bugHunt: WorkflowSpec = {
           id: "scan-errors",
           kind: "worker",
           agent: "opencode",
-          model: FREE.qwen,
+          model: FREE.mimo,
           prompt:
             "Hunt for error-handling and resource bugs in the scope below: swallowed errors, missing awaits, leaked handles/processes, unchecked failures. For each finding give file:line, the risk, and a fix. Scope: {{input}}",
         },
@@ -130,7 +129,7 @@ const bugHunt: WorkflowSpec = {
           id: "scan-security",
           kind: "worker",
           agent: "opencode",
-          model: FREE.minimax,
+          model: FREE.northMini,
           prompt:
             "Hunt for security issues in the scope below: missing input validation, injection, unsafe shell/exec, missing authz checks. For each finding give file:line, the risk, and a fix. Scope: {{input}}",
         },
@@ -173,7 +172,7 @@ const bugHunt: WorkflowSpec = {
           id: "report",
           kind: "consolidator",
           agent: "opencode",
-          model: FREE.qwen,
+          model: FREE.deepseekFlash,
           dependsOn: ["cross-check", "findings-ready"],
           prompt:
             "Turn the verified findings below into a prioritized report (highest-severity first). For each: a one-line summary, file:line, severity, and the recommended fix. Output only the report.\n\n{{steps.cross-check.output}}",
@@ -227,7 +226,7 @@ const targetSweep: WorkflowSpec = {
           id: "report",
           kind: "consolidator",
           agent: "opencode",
-          model: FREE.qwen,
+          model: FREE.mimo,
           dependsOn: ["sweep-each"],
           prompt:
             "Merge the per-target analyses below into one prioritized report. Deduplicate overlap and keep concrete action items.\n\n{{steps.sweep-each.output}}",

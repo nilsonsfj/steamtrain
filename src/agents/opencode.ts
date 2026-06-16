@@ -51,10 +51,8 @@ export const OPENCODE_MODELS: readonly AgentModel[] = [
   { id: "opencode/big-pickle", name: "Big Pickle" },
   { id: "opencode/deepseek-v4-flash-free", name: "DeepSeek V4 Flash Free" },
   { id: "opencode/mimo-v2.5-free", name: "MiMo V2.5 Free" },
-  { id: "opencode/qwen3.6-plus-free", name: "Qwen 3.6 Plus Free" },
-  { id: "opencode/minimax-m3-free", name: "MiniMax M3 Free" },
   { id: "opencode/nemotron-3-ultra-free", name: "Nemotron 3 Ultra Free" },
-  { id: "opencode/nemotron-3-super-free", name: "Nemotron 3 Super Free" },
+  { id: "opencode/north-mini-code-free", name: "North Mini Code Free" },
   // OpenCode Go (https://opencode.ai/zen/go/v1/models)
   { id: "opencode-go/deepseek-v4-flash", name: "DeepSeek V4 Flash" },
   { id: "opencode-go/deepseek-v4-pro", name: "DeepSeek V4 Pro" },

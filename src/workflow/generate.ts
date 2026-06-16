@@ -90,9 +90,9 @@ ONE valid workflow as JSON.
 
 # Agents & models
 Prefer free models so the workflow runs without paid credentials:
-agent "opencode" with models like "opencode/qwen3.6-plus-free",
+agent "opencode" with models like "opencode/mimo-v2.5-free",
 "opencode/deepseek-v4-flash-free", "opencode/nemotron-3-ultra-free",
-"opencode/mimo-v2.5-free", "opencode/minimax-m3-free".
+"opencode/north-mini-code-free".
 Every agent-backed step MUST set agent, model, and a non-empty prompt.
 
 # Output format (STRICT)
@@ -102,11 +102,11 @@ Output ONLY a single JSON object, no prose, no markdown fences. Shape:
   "phases": [
     { "id": "scan", "title": "Scan", "steps": [
       { "id": "scan-a", "kind": "worker", "agent": "opencode",
-        "model": "opencode/qwen3.6-plus-free", "prompt": "... {{input}} ..." }
+        "model": "opencode/mimo-v2.5-free", "prompt": "... {{input}} ..." }
     ] },
     { "id": "report", "title": "Report", "steps": [
       { "id": "report", "kind": "consolidator", "agent": "opencode",
-        "model": "opencode/qwen3.6-plus-free", "dependsOn": ["scan-a"],
+        "model": "opencode/mimo-v2.5-free", "dependsOn": ["scan-a"],
         "prompt": "Summarize {{steps.scan-a.output}} for {{input}}" }
     ] }
   ]

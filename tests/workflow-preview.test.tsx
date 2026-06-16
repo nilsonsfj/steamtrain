@@ -70,6 +70,6 @@ describe("WorkflowPreview", () => {
     expect(frame).toContain("(none)");
     expect(frame).toMatch(/▶.*synthes/i);
     expect(frame).toContain("synthesize");
-    expect(frame).toContain("Qwen 3.6 Plus Free");
+    expect(frame).toContain("DeepSeek V4 Flash Free");
   });
 });

@@ -1354,7 +1354,7 @@ function pickGenerationTarget(
   const healthy = new Set(doctor.filter((d) => d.status === "ok").map((d) => d.agent));
   for (const agent of ["opencode", "claude", "codex"] as const) {
     if (!healthy.has(agent)) continue;
-    const model = agent === "opencode" ? "opencode/qwen3.6-plus-free" : defaultModelForAgent(agent);
+    const model = agent === "opencode" ? "opencode/mimo-v2.5-free" : defaultModelForAgent(agent);
     return { agent, model };
   }
   return undefined;
