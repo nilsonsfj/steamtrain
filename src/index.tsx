@@ -1,11 +1,12 @@
-import { render } from "ink";
 import { homedir } from "node:os";
+import { render } from "ink";
 import { parseGlobalArgs, runCli } from "./cli";
 import { configDisplayLabel, loadConfig } from "./config";
 import { loadSettings } from "./settings";
 import { App } from "./tui/App";
-import { loadWorkspaceConfig, workspaceScopeLabel } from "./workspace";
+import { startWebUi } from "./web";
 import { loadWorkflowCatalog } from "./workflow";
+import { loadWorkspaceConfig, workspaceScopeLabel } from "./workspace";
 
 /**
  * steamtrain entry point.
@@ -17,7 +18,9 @@ import { loadWorkflowCatalog } from "./workflow";
  * user workflows (~/.steamtrain/workflows.json), workspace presets, then renders the TUI.
  */
 async function main(): Promise<void> {
-  const { args, workspacePath, configPath, error } = parseGlobalArgs(process.argv.slice(2));
+  const { args, workspacePath, configPath, webUi, port, host, error } = parseGlobalArgs(
+    process.argv.slice(2),
+  );
   if (error) {
     process.stderr.write(`${error}\n`);
     process.exitCode = 1;
@@ -45,6 +48,27 @@ async function main(): Promise<void> {
     home,
     projectWorkflows: config.workflows,
   });
+
+  if (webUi) {
+    if (warning) process.stderr.write(`${warning}\n`);
+    if (workspaceWarning) process.stderr.write(`${workspaceWarning}\n`);
+    if (workflowCatalog.warning) process.stderr.write(`${workflowCatalog.warning}\n`);
+    const { server } = await startWebUi({
+      config,
+      workspaces,
+      workflowCatalog,
+      configLabel,
+      port,
+      host,
+    });
+    const shutdown = (): void => {
+      server.close(() => process.exit(0));
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+    return;
+  }
+
   const app = render(
     <App
       config={config}

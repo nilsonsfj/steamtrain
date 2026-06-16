@@ -29,14 +29,21 @@ export interface GlobalCliOptions {
   args: string[];
   workspacePath?: string;
   configPath?: string;
+  /** Launch the browser-based UI instead of the TUI. */
+  webUi?: boolean;
+  port?: number;
+  host?: string;
   error?: string;
 }
 
-/** Strip global flags (e.g. `-w`) before dispatching subcommands or the TUI. */
+/** Strip global flags (e.g. `-w`, `--web-ui`) before dispatching subcommands or the TUI. */
 export function parseGlobalArgs(args: string[]): GlobalCliOptions {
   const rest: string[] = [];
   let workspacePath: string | undefined;
   let configPath: string | undefined;
+  let webUi = false;
+  let port: number | undefined;
+  let host: string | undefined;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
     if (arg === "-w" || arg === "--workspace") {
@@ -57,9 +64,32 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
       i += 1;
       continue;
     }
+    if (arg === "--web-ui" || arg === "--web") {
+      webUi = true;
+      continue;
+    }
+    if (arg === "--port") {
+      const value = args[i + 1];
+      const parsed = value ? Number(value) : Number.NaN;
+      if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
+        return { args: [], error: "--port requires an integer 0-65535" };
+      }
+      port = parsed;
+      i += 1;
+      continue;
+    }
+    if (arg === "--host") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("-")) {
+        return { args: [], error: "--host requires a value" };
+      }
+      host = value;
+      i += 1;
+      continue;
+    }
     rest.push(arg);
   }
-  return { args: rest, workspacePath, configPath };
+  return { args: rest, workspacePath, configPath, webUi: webUi || undefined, port, host };
 }
 
 export interface CliIO {
@@ -607,10 +637,14 @@ input + cwd; contents validated with specHash). Pass --fresh to ignore and delet
 the on-disk cache for that run. Parallel runs of the same workflow + input are not supported.
 
 Running steamtrain with no command opens the workflow-first TUI.
+Running steamtrain --web-ui opens the same engine behind a local browser UI.
 
 Global options (TUI and workflow commands):
   -w, --workspace <path>     Load workspace presets from a custom workspace.json
       --config-file <path>   Load project config from a custom steamtrain.json
+      --web-ui               Serve the browser UI instead of the TUI
+      --port <n>             Web UI port (default 4317; with --web-ui)
+      --host <host>          Web UI bind host (default 127.0.0.1; with --web-ui)
 `;
 }
 

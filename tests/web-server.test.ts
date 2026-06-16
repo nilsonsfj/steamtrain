@@ -1,0 +1,251 @@
+import type { Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
+import { type WorkflowHost, WorkflowRunManager } from "../src/web/runs";
+import { createWebServer } from "../src/web/server";
+import type { StepResult, WorkflowCacheStore, WorkflowEvent, WorkflowSpec } from "../src/workflow";
+
+const servers: Server[] = [];
+
+afterEach(async () => {
+  while (servers.length) {
+    const server = servers.pop()!;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+function demoSpec(name = "demo"): WorkflowSpec {
+  return {
+    name,
+    description: "a demo workflow",
+    phases: [
+      {
+        id: "p1",
+        title: "Phase 1",
+        steps: [{ id: "s1", kind: "worker", agent: "opencode", model: "m", prompt: "{{input}}" }],
+      },
+    ],
+  };
+}
+
+const noopStore: WorkflowCacheStore = {
+  rootDir: "/tmp/none",
+  async load() {
+    return new Map<string, StepResult>();
+  },
+  async save() {},
+  async clear() {},
+  async clearAll() {},
+};
+
+class FakeHost implements WorkflowHost {
+  constructor(
+    private readonly spec: WorkflowSpec,
+    private readonly gen: (input: string, signal?: AbortSignal) => AsyncIterable<WorkflowEvent>,
+    private readonly dispatchable = true,
+  ) {}
+  listWorkflows(): Record<string, WorkflowSpec> {
+    return { [this.spec.name]: this.spec };
+  }
+  canDispatchWorkflowSpec(): { ok: true } | { ok: false; reason: string } {
+    return this.dispatchable ? { ok: true } : { ok: false, reason: "agent is down" };
+  }
+  runWorkflow(name: string, input: string, signal?: AbortSignal): AsyncIterable<WorkflowEvent> {
+    return this.gen(input, signal);
+  }
+}
+
+async function* happyRun(input: string): AsyncIterable<WorkflowEvent> {
+  const ts = () => Date.now();
+  yield { kind: "workflow_start", name: "demo", phaseCount: 1, stepCount: 1, ts: ts() };
+  yield { kind: "phase_start", phaseId: "p1", title: "Phase 1", index: 0, stepCount: 1, ts: ts() };
+  yield {
+    kind: "step_start",
+    phaseId: "p1",
+    stepId: "s1",
+    blockKind: "worker",
+    agent: "opencode",
+    model: "m",
+    ts: ts(),
+  };
+  yield {
+    kind: "step_event",
+    phaseId: "p1",
+    stepId: "s1",
+    event: { kind: "text_delta", text: `hi ${input}`, agent: "opencode", ts: Date.now() },
+    ts: ts(),
+  };
+  const result: StepResult = { stepId: "s1", ok: true, output: `hi ${input}`, durationMs: 5 };
+  yield { kind: "step_done", phaseId: "p1", stepId: "s1", result, cached: false, ts: ts() };
+  yield { kind: "phase_done", phaseId: "p1", ok: true, ts: ts() };
+  yield { kind: "workflow_done", ok: true, results: [result], ts: ts() };
+}
+
+async function* hangingRun(_input: string, signal?: AbortSignal): AsyncIterable<WorkflowEvent> {
+  yield { kind: "workflow_start", name: "demo", phaseCount: 1, stepCount: 1, ts: Date.now() };
+  yield {
+    kind: "step_start",
+    phaseId: "p1",
+    stepId: "s1",
+    blockKind: "worker",
+    ts: Date.now(),
+  };
+  await new Promise<void>((_resolve, reject) => {
+    if (signal?.aborted) return reject(new Error("aborted"));
+    signal?.addEventListener("abort", () => reject(new Error("aborted")));
+  });
+}
+
+function makeServer(host: WorkflowHost): { server: Server; runs: WorkflowRunManager } {
+  const runs = new WorkflowRunManager({ host, cacheStore: noopStore, cwd: "/tmp" });
+  const server = createWebServer({
+    host,
+    runs,
+    workflowSource: () => "bundled",
+    doctor: () => [{ agent: "opencode", status: "ok", message: "ready" }] as never,
+    configLabel: "test config",
+  });
+  servers.push(server);
+  return { server, runs };
+}
+
+async function start(server: Server): Promise<string> {
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const { port } = server.address() as AddressInfo;
+  return `http://127.0.0.1:${port}`;
+}
+
+/** Read an SSE response, collecting `data:` payloads until the terminal status frame. */
+async function readSse(url: string): Promise<{ type: string; [k: string]: unknown }[]> {
+  const res = await fetch(url);
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  const frames: { type: string; [k: string]: unknown }[] = [];
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx: number;
+    // biome-ignore lint/suspicious/noAssignInExpressions: standard SSE frame split
+    while ((idx = buf.indexOf("\n\n")) >= 0) {
+      const chunk = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      const line = chunk.split("\n").find((l) => l.startsWith("data: "));
+      if (!line) continue;
+      const frame = JSON.parse(line.slice(6));
+      frames.push(frame);
+      if (frame.type === "status") {
+        await reader.cancel();
+        return frames;
+      }
+    }
+  }
+  return frames;
+}
+
+describe("web server", () => {
+  it("serves the single-page app", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/`);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const html = await res.text();
+    expect(html).toContain("steam");
+    expect(html).toContain('id="wflist"');
+    expect(html).toContain("/api/runs/");
+  });
+
+  it("lists workflows with summaries", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/workflows`);
+    const body = (await res.json()) as {
+      configLabel: string;
+      workflows: Record<string, unknown>[];
+    };
+    expect(body.configLabel).toBe("test config");
+    expect(body.workflows).toHaveLength(1);
+    expect(body.workflows[0]).toMatchObject({
+      name: "demo",
+      source: "bundled",
+      phaseCount: 1,
+      stepCount: 1,
+      kinds: { worker: 1 },
+      agents: ["opencode"],
+    });
+  });
+
+  it("returns a full spec and 404s unknown workflows", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const ok = await fetch(`${base}/api/workflows/demo`);
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as { spec: { name: string } }).spec.name).toBe("demo");
+    const missing = await fetch(`${base}/api/workflows/nope`);
+    expect(missing.status).toBe(404);
+  });
+
+  it("rejects runs for unknown or undispatchable workflows", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun, false));
+    const base = await start(server);
+    const unknown = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "nope", input: "x" }),
+    });
+    expect(unknown.status).toBe(400);
+    const blocked = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "demo", input: "x" }),
+    });
+    expect(blocked.status).toBe(400);
+    expect(((await blocked.json()) as { error: string }).error).toContain("agent is down");
+  });
+
+  it("streams workflow events then a terminal done status", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const created = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "demo", input: "world" }),
+    });
+    expect(created.status).toBe(201);
+    const { runId } = (await created.json()) as { runId: string };
+    expect(runId).toBeTruthy();
+
+    const frames = await readSse(`${base}/api/runs/${runId}/stream`);
+    const events = frames.filter((f) => f.type === "event").map((f) => f.event as WorkflowEvent);
+    const kinds = events.map((e) => e.kind);
+    expect(kinds).toContain("workflow_start");
+    expect(kinds).toContain("step_done");
+    expect(kinds).toContain("workflow_done");
+
+    const status = frames[frames.length - 1]!;
+    expect(status.type).toBe("status");
+    expect(status.status).toBe("done");
+    expect(status.ok).toBe(true);
+  });
+
+  it("cancels a running workflow", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), hangingRun));
+    const base = await start(server);
+    const created = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "demo", input: "x" }),
+    });
+    const { runId } = (await created.json()) as { runId: string };
+
+    const cancel = await fetch(`${base}/api/runs/${runId}/cancel`, { method: "POST" });
+    expect(cancel.status).toBe(200);
+    expect(((await cancel.json()) as { canceled: boolean }).canceled).toBe(true);
+
+    const frames = await readSse(`${base}/api/runs/${runId}/stream`);
+    const status = frames[frames.length - 1]!;
+    expect(status.type).toBe("status");
+    expect(status.status).toBe("canceled");
+  });
+});
