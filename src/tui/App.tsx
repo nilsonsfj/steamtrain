@@ -271,7 +271,9 @@ export function App({
 
   const cloneWorkflow = useCallback(
     (newName: string) => {
-      const source = selectedWorkflowName;
+      // Prefer the previewed workflow (stable across catalog re-sorts) over the
+      // picker index, which can drift to another row when the catalog reloads.
+      const source = wfPreview?.name ?? selectedWorkflowName;
       if (!source) {
         return {
           handled: true as const,
@@ -296,7 +298,7 @@ export function App({
         notices: [{ level: "info" as const, text: `cloned '${source}' → '${result.name}'` }],
       };
     },
-    [author, selectedWorkflowName],
+    [author, selectedWorkflowName, wfPreview],
   );
 
   const deleteWorkflow = useCallback(
