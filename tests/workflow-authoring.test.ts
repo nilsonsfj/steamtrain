@@ -236,6 +236,23 @@ describe("WorkflowAuthor", () => {
     expect(author.clone("bug-hunt", "bug-hunt").error).toMatch(/different name/i);
   });
 
+  it("refuses to clone onto an existing workflow rather than clobbering it", () => {
+    const host = new FakeHost(home);
+    const author = makeAuthor(host);
+    author.save("keep-me", userFileSpec("keep-me"));
+    // Cloning onto an existing user workflow must fail...
+    const ontoUser = author.clone("bug-hunt", "keep-me");
+    expect(ontoUser.ok).toBe(false);
+    expect(ontoUser.error).toMatch(/already exists/i);
+    // ...and the existing workflow is left intact.
+    expect(host.workflowSource("keep-me")).toBe("user");
+    // Cloning onto a bundled name is likewise refused (no silent shadow).
+    const ontoBundled = author.clone("keep-me", "bug-hunt");
+    expect(ontoBundled.ok).toBe(false);
+    expect(ontoBundled.error).toMatch(/already exists/i);
+    expect(host.workflowSource("bug-hunt")).toBe("bundled");
+  });
+
   it("previews a workflow with staged step overrides without saving", () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);

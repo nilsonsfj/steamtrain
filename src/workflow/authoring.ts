@@ -179,6 +179,11 @@ export class WorkflowAuthor {
     const slug = slugifyWorkflowName(newName || "");
     if (!slug) return { ok: false, error: "a new workflow name is required" };
     if (slug === sourceName) return { ok: false, error: "the clone needs a different name" };
+    // Cloning is non-destructive: refuse to land on top of any existing
+    // workflow (user/bundled/project) rather than silently clobbering it.
+    if (this.host.listWorkflows()[slug]) {
+      return { ok: false, error: `a workflow named '${slug}' already exists` };
+    }
 
     return this.persist(slug, { ...source, name: slug });
   }
