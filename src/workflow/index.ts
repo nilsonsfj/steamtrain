@@ -54,6 +54,32 @@ export {
   type WorkflowCacheKey,
   type WorkflowCacheStore,
 } from "./cache-store";
+export {
+  RUN_RECORD_VERSION,
+  MAX_STEP_TEXT,
+  RunRecordBuilder,
+  computeRunTotals,
+  runRecordSummary,
+  type RunRecord,
+  type RunRecordSummary,
+  type RunRecordStatus,
+  type RunRecordMeta,
+  type RunStepStatus,
+  type RunTotals,
+  type HistoryPhase,
+  type HistoryStep,
+} from "./history";
+export {
+  WORKFLOW_HISTORY_DIR,
+  DEFAULT_HISTORY_LIMIT,
+  createWorkflowHistoryStore,
+  saveRunRecord,
+  listRunRecords,
+  getRunRecord,
+  removeRunRecord,
+  clearAllRunRecords,
+  type WorkflowHistoryStore,
+} from "./history-store";
 export { applyWorkflowStepOverrides, type WorkflowStepOverrides } from "./overrides";
 export {
   buildWorkflowGenerationPrompt,

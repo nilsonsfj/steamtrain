@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { Box, Text, useApp, useInput } from "ink";
@@ -31,14 +32,19 @@ import { STEAMTRAIN_VERSION } from "../version";
 import {
   type AuthoringHost,
   type LoadedWorkflowCatalog,
+  type RunRecord,
+  RunRecordBuilder,
+  type RunRecordSummary,
   type StepResult,
   WORKFLOW_CACHE_DIR,
+  WORKFLOW_HISTORY_DIR,
   WorkflowAuthor,
   type WorkflowCatalogEntry,
   type WorkflowSourceKind,
   type WorkflowSpec,
   type WorkflowStepOverrides,
   createWorkflowCacheStore,
+  createWorkflowHistoryStore,
   isAgentBackedStep,
   persistWorkflowStepDone,
   workflowCacheKey,
@@ -56,6 +62,7 @@ import { PromptInput } from "./PromptInput";
 import { StatusBar } from "./StatusBar";
 import { TaskSelector } from "./TaskSelector";
 import { WorkflowCreate, type WorkflowCreateState } from "./WorkflowCreate";
+import { WorkflowHistory } from "./WorkflowHistory";
 import { WorkflowPicker } from "./WorkflowPicker";
 import { WorkflowPreview } from "./WorkflowPreview";
 import { WorkflowStepDetails } from "./WorkflowStepDetails";
@@ -88,7 +95,13 @@ import {
 import { initialTranscript, transcriptReducer } from "./transcript";
 import { useTerminalSize } from "./useTerminalSize";
 import { flattenSpecSteps } from "./workflow-spec-ui";
-import { flattenSteps, initialWorkflowState, workflowReducer } from "./workflow-state";
+import {
+  type WorkflowState,
+  flattenSteps,
+  initialWorkflowState,
+  workflowReducer,
+  workflowStateFromRecord,
+} from "./workflow-state";
 
 interface AppProps {
   config: SteamtrainConfig;
@@ -105,6 +118,20 @@ interface AppProps {
 
 type Phase = "banner" | "main";
 const BANNER_MS = 1100;
+
+/** State for the past-run history browser (opened with `/history`). */
+interface HistoryUiState {
+  view: "list" | "detail";
+  runs: RunRecordSummary[];
+  index: number;
+  loading: boolean;
+  error?: string;
+  record?: RunRecord;
+  recordState?: WorkflowState;
+  stepIndex: number;
+  /** Whether the per-step drill-in panel is open in the detail view. */
+  detail: boolean;
+}
 
 export function App({
   config,
@@ -155,11 +182,15 @@ export function App({
   const [wfStepDetails, setWfStepDetails] = useState<"preview" | "live" | null>(null);
   const [wfNow, setWfNow] = useState(() => Date.now());
   const [wfCreate, setWfCreate] = useState<WorkflowCreateState | null>(null);
+  const [history, setHistory] = useState<HistoryUiState | null>(null);
   const createAbortRef = useRef<AbortController | null>(null);
   const activeWorkflowRef = useRef<string | undefined>(undefined);
   const activeWorkflowInputRef = useRef<string | undefined>(undefined);
   const workflowCacheRef = useRef<Map<string, StepResult>>(new Map());
   const cacheStoreRef = useRef(createWorkflowCacheStore(join(process.cwd(), WORKFLOW_CACHE_DIR)));
+  const historyStoreRef = useRef(
+    createWorkflowHistoryStore(join(process.cwd(), WORKFLOW_HISTORY_DIR)),
+  );
   const runtimeWorkspacesRef = useRef(runtimeWorkspaces);
   runtimeWorkspacesRef.current = runtimeWorkspaces;
 
@@ -461,6 +492,51 @@ export function App({
     [running, doctor, author],
   );
 
+  const openHistory = useCallback(() => {
+    setHistory({
+      view: "list",
+      runs: [],
+      index: 0,
+      loading: true,
+      stepIndex: 0,
+      detail: false,
+    });
+    void (async () => {
+      try {
+        const runs = await historyStoreRef.current.list();
+        if (!mountedRef.current) return;
+        setHistory((prev) => (prev ? { ...prev, runs, loading: false } : prev));
+      } catch (err) {
+        if (!mountedRef.current) return;
+        setHistory((prev) => (prev ? { ...prev, loading: false, error: message(err) } : prev));
+      }
+    })();
+    return { handled: true as const, clearInput: true };
+  }, []);
+
+  const openHistoryRecord = useCallback((id: string) => {
+    void (async () => {
+      try {
+        const record = await historyStoreRef.current.get(id);
+        if (!mountedRef.current || !record) return;
+        setHistory((prev) =>
+          prev
+            ? {
+                ...prev,
+                view: "detail",
+                record,
+                recordState: workflowStateFromRecord(record),
+                stepIndex: 0,
+                detail: false,
+              }
+            : prev,
+        );
+      } catch {
+        // A missing/corrupt record just leaves the list view in place.
+      }
+    })();
+  }, []);
+
   useEffect(() => {
     return () => {
       mountedRef.current = false;
@@ -573,6 +649,7 @@ export function App({
       cloneWorkflow,
       deleteWorkflow,
       userWorkflowNames,
+      openHistory,
     }),
     [
       mode,
@@ -589,6 +666,7 @@ export function App({
       cloneWorkflow,
       deleteWorkflow,
       userWorkflowNames,
+      openHistory,
     ],
   );
 
@@ -673,6 +751,9 @@ export function App({
         const store = cacheStoreRef.current;
         const cwd = process.cwd();
         const key = workflowCacheKey(name, input, cwd, spec);
+        const recorder = new RunRecordBuilder({ id: randomUUID(), workflow: name, input, cwd });
+        let runError: string | undefined;
+        let workflowOk = true;
         try {
           if (opts?.fresh) {
             await store.clear(key);
@@ -689,6 +770,8 @@ export function App({
             cwd,
             spec,
           )) {
+            recorder.handle(event);
+            if (event.kind === "workflow_done") workflowOk = event.ok;
             if (!mountedRef.current) return;
             wfDispatch({ type: "event", event });
             if (event.kind === "step_done") {
@@ -703,8 +786,18 @@ export function App({
             }
           }
         } catch (err) {
-          if (mountedRef.current) setWfNotice(`run failed: ${message(err)}`);
+          runError = message(err);
+          if (mountedRef.current) setWfNotice(`run failed: ${runError}`);
         } finally {
+          // Best-effort: record the run to history regardless of UI mount state.
+          const status = ac.signal.aborted
+            ? "canceled"
+            : runError || !workflowOk
+              ? "error"
+              : "done";
+          void historyStoreRef.current
+            .save(recorder.build({ status, error: runError }))
+            .catch(() => {});
           if (mountedRef.current) {
             setRunning(false);
             setWfLaunching(false);
@@ -1098,6 +1191,49 @@ export function App({
       exit();
       return;
     }
+    // The history browser is a modal overlay: while open it owns all keys.
+    if (history) {
+      if (key.escape || (key.leftArrow && history.view === "list")) {
+        if (history.view === "detail") {
+          if (history.detail) setHistory({ ...history, detail: false });
+          else setHistory({ ...history, view: "list", record: undefined, recordState: undefined });
+        } else {
+          setHistory(null);
+        }
+        return;
+      }
+      if (history.view === "list") {
+        if (key.upArrow) {
+          setHistory({ ...history, index: Math.max(0, history.index - 1) });
+        } else if (key.downArrow) {
+          setHistory({
+            ...history,
+            index: Math.min(Math.max(0, history.runs.length - 1), history.index + 1),
+          });
+        } else if (key.return) {
+          const run = history.runs[history.index];
+          if (run) openHistoryRecord(run.id);
+        }
+        return;
+      }
+      // Detail view: navigate steps and toggle the per-step drill-in.
+      const totalSteps = history.recordState
+        ? history.recordState.phases.reduce((n, p) => n + p.steps.length, 0)
+        : 0;
+      if (key.leftArrow && history.detail) {
+        setHistory({ ...history, detail: false });
+      } else if (key.rightArrow && !history.detail && totalSteps > 0) {
+        setHistory({ ...history, detail: true });
+      } else if (key.upArrow) {
+        setHistory({ ...history, stepIndex: Math.max(0, history.stepIndex - 1) });
+      } else if (key.downArrow) {
+        setHistory({
+          ...history,
+          stepIndex: Math.min(Math.max(0, totalSteps - 1), history.stepIndex + 1),
+        });
+      }
+      return;
+    }
     if (key.escape) {
       if (shouldDismissSuggestionMenu(commandSuggestions, value)) {
         setCommandSuggestions([]);
@@ -1240,7 +1376,9 @@ export function App({
         workspaceLabel={activeWorkspaceLabel}
         running={running}
       />
-      {isWorkflow ? (
+      {history ? (
+        <HistoryPanel history={history} width={columns} height={streamHeight} />
+      ) : isWorkflow ? (
         wfCreate ? (
           <WorkflowCreate state={wfCreate} width={columns} height={streamHeight} />
         ) : wfStepDetails === "live" && showWorkflowView ? (
@@ -1337,8 +1475,8 @@ export function App({
           onCtrlQ={mode === "workflow" && running ? handleWorkflowCancel : undefined}
           onSuggestionNavigate={handleSuggestionNavigate}
           onHistoryNavigate={promptHistoryArrows ? handleHistoryNavigate : undefined}
-          focus
-          editing={!workflowListNavigation(mode) || promptEditing}
+          focus={!history}
+          editing={!history && (!workflowListNavigation(mode) || promptEditing)}
           promptEditing={promptEditing}
           running={running}
           cancelKeyHint={mode === "workflow" ? "Ctrl+Q" : "Esc"}
@@ -1347,18 +1485,20 @@ export function App({
         />
         <Box paddingX={1}>
           <Text color="gray">
-            {hint(
-              mode,
-              wf.started,
-              wfLaunching,
-              !!wfPreview,
-              running,
-              suggestionMenuOpen,
-              wfCanResume,
-              promptEditing,
-              isSlashCommandInput(value),
-              !!wfStepDetails,
-            )}
+            {history
+              ? historyHint(history)
+              : hint(
+                  mode,
+                  wf.started,
+                  wfLaunching,
+                  !!wfPreview,
+                  running,
+                  suggestionMenuOpen,
+                  wfCanResume,
+                  promptEditing,
+                  isSlashCommandInput(value),
+                  !!wfStepDetails,
+                )}
           </Text>
         </Box>
       </Box>
@@ -1412,8 +1552,72 @@ function hint(
     : `Enter dispatch${historyHint} · Tab switch mode · /commands (Tab complete) · Ctrl+C quit${completeHint}`;
 }
 
+function historyHint(history: HistoryUiState): string {
+  if (history.view === "detail") {
+    return history.detail
+      ? "↑/↓ step · ←/Esc back · Ctrl+C quit"
+      : "↑/↓ step · → details · ←/Esc back to list · Ctrl+C quit";
+  }
+  return "↑/↓ select · Enter inspect · Esc close · Ctrl+C quit";
+}
+
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Renders the past-run history: a list of recorded runs, or a selected run's
+ * phase -> step tree (reusing the live `WorkflowView` / `WorkflowStepDetails`).
+ */
+function HistoryPanel({
+  history,
+  width,
+  height,
+}: {
+  history: HistoryUiState;
+  width: number;
+  height: number;
+}) {
+  if (history.view === "detail" && history.recordState) {
+    const state = history.recordState;
+    const flat = flattenSteps(state);
+    const total = flat.length;
+    const clamped = Math.min(history.stepIndex, Math.max(0, total - 1));
+    const elapsed = history.record?.durationMs ?? 0;
+    if (history.detail) {
+      return (
+        <WorkflowStepDetails
+          kind="live"
+          state={state}
+          entry={flat[clamped]}
+          height={height}
+          width={width}
+          selectedIndex={clamped}
+          totalSteps={total}
+          elapsedMs={elapsed}
+        />
+      );
+    }
+    return (
+      <WorkflowView
+        state={state}
+        height={height}
+        width={width}
+        selectedIndex={clamped}
+        elapsedMs={elapsed}
+      />
+    );
+  }
+  return (
+    <WorkflowHistory
+      runs={history.runs}
+      selectedIndex={history.index}
+      loading={history.loading}
+      error={history.error}
+      width={width}
+      height={height}
+    />
+  );
 }
 
 /**

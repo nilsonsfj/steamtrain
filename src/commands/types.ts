@@ -47,6 +47,8 @@ export interface SlashCommandContext {
   deleteWorkflow?: (name: string) => SlashCommandResult;
   /** Names of user-source workflows (for `/deleteworkflow` completion). */
   userWorkflowNames?: readonly string[];
+  /** Open the past-run history browser (TUI only). */
+  openHistory?: () => SlashCommandResult;
 }
 
 export interface SlashCommand {

@@ -1,6 +1,7 @@
 import type { AgentEvent, AgentId } from "../types/events";
 import type {
   GateStep,
+  RunRecord,
   StepResult,
   WorkflowEvent,
   WorkflowItem,
@@ -73,6 +74,32 @@ export function flattenSteps(state: WorkflowState): { phase: PhaseState; step: S
     for (const step of phase.steps) out.push({ phase, step });
   }
   return out;
+}
+
+/**
+ * Rebuild a render-ready {@link WorkflowState} from a saved run record, so the
+ * history viewer can reuse the live `WorkflowView` / `WorkflowStepDetails`
+ * components. The record's phase/step shapes mirror the live tree, so phases map
+ * across directly (a recorded step has no transient `activity`).
+ */
+export function workflowStateFromRecord(record: RunRecord): WorkflowState {
+  return {
+    name: record.workflow,
+    startedAt: record.startedAt,
+    phases: record.phases.map((phase) => ({
+      phaseId: phase.phaseId,
+      title: phase.title,
+      index: phase.index,
+      stepCount: phase.stepCount,
+      done: phase.done,
+      ok: phase.ok,
+      steps: phase.steps.map((step) => ({ ...step })),
+    })),
+    results: [],
+    started: true,
+    done: true,
+    ok: record.ok,
+  };
 }
 
 function updateStep(

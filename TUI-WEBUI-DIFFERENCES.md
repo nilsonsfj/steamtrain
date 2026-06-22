@@ -70,6 +70,7 @@ These two reducers are near-duplicates and are a prime extraction target (see §
 | Explicit "save session changes" step | ✅ | ⚠️ | TUI `/saveworkflows` → shared flush; web persists on each save |
 | Skip/unchanged reporting on save | ✅ | ❌ | `flushSessionOverrides`/`saveSessionWorkflowsToUser` returns saved/skipped/unchanged (TUI surfaces it) |
 | Agent health display | ✅ | ✅ | TUI doctor panel; web health chips |
+| Run history (inspect past runs) | ✅ | ✅ | Shared `RunRecordBuilder` + `WorkflowHistoryStore` (`.steamtrain/history`); TUI `/history`, web ⏱ History, CLI `workflow history` |
 | Prompt history / drafts | ✅ | ❌ | TUI-only (`prompt-history`, `prompt-draft`) |
 | Workspaces (non-workflow dispatch) | ✅ | ❌ | Out of scope for unification (for now) |
 

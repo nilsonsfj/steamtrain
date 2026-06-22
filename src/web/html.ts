@@ -244,12 +244,33 @@ export const PAGE_HTML = `<!doctype html>
   .estep .eh .esid { font-weight: 700; }
   .estep .eh .ek { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); border: 1px solid var(--border); border-radius: 5px; padding: 0 5px; }
   .estep .ro { color: var(--muted); font-size: 12px; }
+  /* ---- run history ---- */
+  .hruns { display: flex; flex-direction: column; gap: 8px; }
+  .hrun {
+    background: var(--panel-2); border: 1px solid var(--border); border-left: 3px solid var(--pending);
+    border-radius: 10px; padding: 10px 12px; cursor: pointer; transition: background .12s;
+  }
+  .hrun:hover { background: #243040; }
+  .hrun.done { border-left-color: var(--done); }
+  .hrun.error { border-left-color: var(--error); }
+  .hrun.canceled { border-left-color: var(--gate); }
+  .hrun .hr-top { display: flex; align-items: center; gap: 8px; }
+  .hrun .hr-name { font-weight: 700; }
+  .hrun .hr-status { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .hrun.done .hr-status { color: var(--done); }
+  .hrun.error .hr-status { color: var(--error); }
+  .hrun.canceled .hr-status { color: var(--gate); }
+  .hrun .hr-meta { color: var(--muted); font-size: 11px; margin-left: auto; }
+  .hrun .hr-input { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .hback { cursor: pointer; color: var(--accent); font-size: 13px; margin-bottom: 12px; display: inline-block; }
+  .hback:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
 <header>
   <div class="logo">&#128642; <span class="accent">steam</span>train</div>
   <div class="config" id="config"></div>
+  <button class="newbtn" id="historyBtn" style="margin-left:auto" title="View past runs">&#9201; History</button>
   <div class="health" id="health"></div>
 </header>
 <main>
@@ -1069,6 +1090,108 @@ export const PAGE_HTML = `<!doctype html>
     });
   }
 
+  // ---- run history ---------------------------------------------------------
+  function openHistory() {
+    var holder = h("div", null, h("div", { class: "ro", text: "Loading run history\\u2026" }));
+    var foot = h("div", { class: "mfoot" },
+      h("button", { class: "btn danger small", text: "Clear all", onClick: clearHistory }),
+      h("div", { class: "spacer" }),
+      h("button", { class: "btn", text: "Close", onClick: closeModal })
+    );
+    openModal(modalShell("Run history", "Past workflow runs recorded on disk.", holder, foot, true));
+    reopenHistoryList(holder);
+  }
+
+  function reopenHistoryList(holder) {
+    clear(holder);
+    holder.appendChild(h("div", { class: "ro", text: "Loading\\u2026" }));
+    api("GET", "/api/history").then(function (r) {
+      renderHistoryList(holder, (r.body && r.body.runs) || []);
+    });
+  }
+
+  function renderHistoryList(holder, runs) {
+    clear(holder);
+    if (!runs.length) {
+      holder.appendChild(h("div", { class: "ro", text: "No recorded runs yet. Run a workflow to start building history." }));
+      return;
+    }
+    var list = h("div", { class: "hruns" });
+    runs.forEach(function (run) {
+      var t = run.totals || { ok: 0, steps: 0, failed: 0, costUsd: 0 };
+      var meta = t.ok + "/" + t.steps + " ok"
+        + (t.failed ? " \\u00b7 " + t.failed + " failed" : "")
+        + " \\u00b7 " + ((run.durationMs || 0) / 1000).toFixed(1) + "s"
+        + (t.costUsd ? " \\u00b7 $" + t.costUsd.toFixed(4) : "");
+      var row = h("div", { class: "hrun " + run.status, onClick: (function (id) { return function () { openHistoryRun(holder, id); }; })(run.id) },
+        h("div", { class: "hr-top" },
+          h("span", { class: "hr-name", text: run.workflow }),
+          h("span", { class: "hr-status", text: run.status }),
+          h("span", { class: "hr-meta", text: fmtTime(run.startedAt) + " \\u00b7 " + meta })
+        ),
+        h("div", { class: "hr-input", text: truncate(((run.input || "").replace(/\\s+/g, " ").trim()) || "(no input)", 160) })
+      );
+      list.appendChild(row);
+    });
+    holder.appendChild(list);
+  }
+
+  function openHistoryRun(holder, id) {
+    api("GET", "/api/history/" + encodeURIComponent(id)).then(function (r) {
+      if (r.status !== 200 || !r.body.record) {
+        renderHistoryList(holder, []);
+        holder.insertBefore(h("div", { class: "mbanner show err", text: "Could not load that run." }), holder.firstChild);
+        return;
+      }
+      renderHistoryDetail(holder, r.body.record);
+    });
+  }
+
+  function renderHistoryDetail(holder, record) {
+    clear(holder);
+    holder.appendChild(h("span", { class: "hback", text: "\\u2190 back to runs", onClick: function () { reopenHistoryList(holder); } }));
+    var t = record.totals || { ok: 0, steps: 0, costUsd: 0 };
+    holder.appendChild(h("div", { class: "title", style: "font-size:16px;font-weight:700", text: record.workflow }));
+    holder.appendChild(h("div", { class: "sub", style: "color:var(--muted);font-size:12px;margin-top:2px",
+      text: record.status + " \\u00b7 " + fmtTime(record.startedAt) + " \\u00b7 " + ((record.durationMs || 0) / 1000).toFixed(1) + "s \\u00b7 "
+        + t.ok + "/" + t.steps + " ok" + (t.costUsd ? " \\u00b7 $" + t.costUsd.toFixed(4) : "") }));
+    if (record.input) holder.appendChild(h("div", { class: "hr-input", style: "margin:8px 0 12px", text: "input: " + record.input }));
+    if (record.error) holder.appendChild(h("div", { class: "mbanner show err", text: record.error }));
+    (record.phases || []).forEach(function (p, idx) {
+      if (idx > 0) holder.appendChild(h("div", { class: "connector" }));
+      var pstat = p.done ? (p.ok ? "done" : "failed") : "";
+      var phaseEl = h("div", { class: "phase" + (p.done ? " done" : "") },
+        h("div", { class: "phead" },
+          h("div", { class: "pidx", text: String(idx + 1) }),
+          h("div", { class: "ptitle", text: p.title }),
+          pstat ? h("div", { class: "pstat", text: "\\u00b7 " + pstat }) : null
+        )
+      );
+      var cards = h("div", { class: "cards" });
+      (p.steps || []).forEach(function (st) { cards.appendChild(renderCard(historyStepView(st))); });
+      phaseEl.appendChild(cards);
+      holder.appendChild(phaseEl);
+    });
+  }
+
+  // Map a recorded step onto the shape renderCard expects (live step view).
+  function historyStepView(st) {
+    return {
+      id: st.stepId, kind: st.blockKind || "worker", agent: st.agent, model: st.model,
+      dependsOn: st.dependsOn, forEach: null, item: st.item, status: st.status,
+      text: st.text || (st.result && st.result.output) || "", activity: null,
+      result: st.result, cached: st.cached,
+      gate: st.gate ? { passed: st.gate.passed, target: st.gate.target } : null
+    };
+  }
+
+  function clearHistory() {
+    if (!window.confirm("Clear all recorded runs? This deletes the on-disk history.")) return;
+    api("DELETE", "/api/history").then(function () { closeModal(); });
+  }
+
+  function fmtTime(ts) { try { return new Date(ts).toLocaleString(); } catch (e) { return ""; } }
+
   // ---- utils ---------------------------------------------------------------
   function tail(text, n) { return text.length > n ? "\\u2026" + text.slice(text.length - n) : text; }
   function truncate(text, n) { return text.length > n ? text.slice(0, n) + "\\u2026" : text; }
@@ -1079,6 +1202,7 @@ export const PAGE_HTML = `<!doctype html>
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") startRun();
   });
   document.getElementById("newWfBtn").addEventListener("click", openCreate);
+  document.getElementById("historyBtn").addEventListener("click", openHistory);
   document.getElementById("editBtn").addEventListener("click", function () { openEditor(false); });
   document.getElementById("cloneBtn").addEventListener("click", function () { openEditor(true); });
   document.getElementById("deleteBtn").addEventListener("click", doDelete);

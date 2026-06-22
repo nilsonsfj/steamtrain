@@ -53,12 +53,24 @@ browser ──POST /api/runs──▶ run manager ──▶ Orchestrator.runWork
 | `/api/runs` | POST | `{ workflow, input, fresh? }` → `{ runId }` |
 | `/api/runs/:id/stream` | GET | Server-Sent Events: each `WorkflowEvent`, then a terminal `status` frame |
 | `/api/runs/:id/cancel` | POST | abort a running workflow |
+| `/api/history` | GET | past-run summaries (newest first) |
+| `/api/history/:id` | GET | one past run's full record (phase → step tree) |
+| `/api/history` / `/api/history/:id` | DELETE | clear all runs, or delete one |
 
 The client folds the streamed `WorkflowEvent`s into a phase → step tree with the
 same model the TUI uses (`src/tui/workflow-state.ts`), so the visualization stays
 faithful to the engine's real behavior. Step results are persisted to the same
 `.steamtrain/cache` directory, so a canceled web run resumes from where it left
 off on the next launch — exactly like the TUI.
+
+## Run history
+
+Every completed run is recorded to `.steamtrain/history/` (the shared
+`RunRecordBuilder` folds the same `WorkflowEvent` stream into one JSON record, and
+the same store backs the TUI and CLI). Click **⏱ History** in the header to list
+past runs; click a run to replay its pipeline — the phase → step tree, each step's
+output, metrics, and the run summary — rendered with the same components a live
+run uses. "Clear all" removes the on-disk records.
 
 ## Scope & security
 

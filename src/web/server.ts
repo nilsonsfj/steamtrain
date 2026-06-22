@@ -8,10 +8,13 @@ import { Orchestrator } from "../orchestrator";
 import {
   type LoadedWorkflowCatalog,
   WORKFLOW_CACHE_DIR,
+  WORKFLOW_HISTORY_DIR,
   WorkflowAuthor,
+  type WorkflowHistoryStore,
   type WorkflowSourceKind,
   type WorkflowSpec,
   createWorkflowCacheStore,
+  createWorkflowHistoryStore,
   isAgentBackedStep,
   workflowStepKind,
 } from "../workflow";
@@ -24,6 +27,8 @@ export interface WebServerDeps {
   runs: WorkflowRunManager;
   /** Optional authoring service; when absent, create/edit/delete routes 501. */
   author?: WorkflowAuthor;
+  /** Optional run history; when absent, history routes return empty/404. */
+  history?: WorkflowHistoryStore;
   workflowSource?: (name: string) => WorkflowSourceKind | undefined;
   doctor?: () => DoctorResult[];
   configLabel?: string;
@@ -95,6 +100,10 @@ async function readBody(req: IncomingMessage): Promise<string> {
  *   POST   /api/workflows/generate  SSE: LLM-draft a workflow + save (authoring)
  *   GET    /api/meta                agents, models, efforts, health (authoring)
  *   GET    /api/doctor              agent health
+ *   GET    /api/history             past-run summaries (newest first)
+ *   GET    /api/history/:id         one past run's full record
+ *   DELETE /api/history             clear all past runs
+ *   DELETE /api/history/:id         delete one past run
  *   POST   /api/runs                { workflow, input, fresh? } -> { runId }
  *   GET    /api/runs/:id/stream     SSE of WorkflowEvents + terminal status
  *   POST   /api/runs/:id/cancel     abort a run
@@ -205,6 +214,38 @@ async function handle(
   if (method === "GET" && path === "/api/doctor") {
     sendJson(res, 200, { doctor: deps.doctor?.() ?? [] });
     return;
+  }
+
+  if (path === "/api/history") {
+    if (method === "GET") {
+      const runs = deps.history ? await deps.history.list() : [];
+      sendJson(res, 200, { runs });
+      return;
+    }
+    if (method === "DELETE") {
+      if (deps.history) await deps.history.clearAll();
+      sendJson(res, 200, { cleared: true });
+      return;
+    }
+  }
+
+  const historyMatch = path.match(/^\/api\/history\/([^/]+)$/);
+  if (historyMatch) {
+    const id = decodeURIComponent(historyMatch[1]!);
+    if (method === "GET") {
+      const record = await deps.history?.get(id);
+      if (!record) {
+        sendJson(res, 404, { error: `unknown run '${id}'` });
+        return;
+      }
+      sendJson(res, 200, { record });
+      return;
+    }
+    if (method === "DELETE") {
+      if (deps.history) await deps.history.remove(id);
+      sendJson(res, 200, { deleted: true });
+      return;
+    }
   }
 
   if (method === "POST" && path === "/api/runs") {
@@ -376,7 +417,8 @@ export async function startWebUi(
   let doctor: DoctorResult[] = [];
 
   const cacheStore = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
-  const runs = new WorkflowRunManager({ host: orchestrator, cacheStore, cwd });
+  const historyStore = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
+  const runs = new WorkflowRunManager({ host: orchestrator, cacheStore, historyStore, cwd });
   const author = new WorkflowAuthor({
     host: orchestrator,
     config: options.config,
@@ -388,6 +430,7 @@ export async function startWebUi(
     host: orchestrator,
     runs,
     author,
+    history: historyStore,
     workflowSource: (name) => orchestrator.workflowSource(name),
     doctor: () => doctor,
     configLabel: options.configLabel,
