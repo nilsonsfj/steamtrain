@@ -525,6 +525,17 @@ async function executeForEachStep(
     };
   }
 
+  // Announce the resolved fan-out size before dispatching children, so consumers
+  // (live reducers + history recorder) know how many child runs to expect even
+  // if the run is canceled before the pool gets to all of them.
+  hooks.pushWorkflowEvent({
+    kind: "fan_out",
+    phaseId: hooks.phaseId,
+    parentStepId: step.id,
+    count: values.length,
+    ts: Date.now(),
+  });
+
   const childResults: StepResult[] = [];
   const limit = Math.min(Math.max(1, ctx.deps.maxConcurrency), MAX_CONCURRENCY);
   await runPool(

@@ -9,7 +9,7 @@ import { runWorkflow } from "../src/workflow/engine";
 import type { WorkflowEvent } from "../src/workflow/events";
 import { RUN_RECORD_VERSION, RunRecordBuilder } from "../src/workflow/history";
 import { createWorkflowHistoryStore } from "../src/workflow/history-store";
-import type { WorkflowSpec } from "../src/workflow/types";
+import type { StepResult, WorkflowSpec } from "../src/workflow/types";
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "steamtrain-history-"));
@@ -182,11 +182,76 @@ describe("RunRecordBuilder", () => {
     const record = builder.build({ status: "canceled" });
     const phase = record.phases[0]!;
     // The phase claimed 3 static steps; only one dispatched, so the other two
-    // appear as pending placeholders rather than silently vanishing. (Unstarted
-    // fan-out children are a known gap — see finalizePhases / §5.1.)
+    // appear as pending placeholders rather than silently vanishing. (Fan-out
+    // children are covered too — see the next test.)
     expect(phase.steps).toHaveLength(3);
     expect(phase.steps.filter((s) => s.status === "pending")).toHaveLength(2);
     // Placeholders never executed, so they don't inflate the executed totals.
+    expect(record.totals.steps).toBe(1);
+    expect(record.totals.ok).toBe(1);
+  });
+
+  it("records unstarted fan-out children as not-run placeholders", () => {
+    const builder = new RunRecordBuilder({ id: "r", workflow: "wf", input: "i", cwd: "/tmp" });
+    builder.handle({ kind: "workflow_start", name: "wf", phaseCount: 1, stepCount: 1, ts: 1 });
+    builder.handle({
+      kind: "phase_start",
+      phaseId: "p1",
+      title: "Work",
+      index: 0,
+      stepCount: 1,
+      ts: 2,
+    });
+    // The fan-out parent starts, resolves to 3 items, but only one child runs
+    // before the run is canceled.
+    builder.handle({
+      kind: "step_start",
+      phaseId: "p1",
+      stepId: "work",
+      blockKind: "worker",
+      ts: 3,
+    });
+    builder.handle({ kind: "fan_out", phaseId: "p1", parentStepId: "work", count: 3, ts: 4 });
+    builder.handle({
+      kind: "step_start",
+      phaseId: "p1",
+      stepId: "work[0]",
+      blockKind: "worker",
+      parentStepId: "work",
+      item: { sourceStepId: "split", index: 0, value: "a" },
+      ts: 5,
+    });
+    const child: StepResult = {
+      stepId: "work[0]",
+      parentStepId: "work",
+      ok: true,
+      output: "did a",
+      durationMs: 1,
+    };
+    builder.handle({
+      kind: "step_done",
+      phaseId: "p1",
+      stepId: "work[0]",
+      result: child,
+      cached: false,
+      ts: 6,
+    });
+    builder.handle({
+      kind: "step_done",
+      phaseId: "p1",
+      stepId: "work",
+      result: { stepId: "work", ok: false, output: "", durationMs: 1, childResults: [child] },
+      cached: false,
+      ts: 7,
+    });
+    const record = builder.build({ status: "canceled" });
+
+    const phase = record.phases[0]!;
+    // parent + 1 started child + 2 placeholders for the children that never ran.
+    expect(phase.steps).toHaveLength(4);
+    expect(phase.steps.filter((s) => s.status === "pending")).toHaveLength(2);
+    // Only the one child that actually executed counts toward totals (the parent
+    // is summarized by its children; placeholders never ran).
     expect(record.totals.steps).toBe(1);
     expect(record.totals.ok).toBe(1);
   });

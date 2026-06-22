@@ -499,6 +499,18 @@ export const PAGE_HTML = `<!doctype html>
         if (!S.phaseOrder.some(function (p) { return p.id === ev.phaseId; }))
           S.phaseOrder.push({ id: ev.phaseId, title: ev.title || ev.phaseId });
         break;
+      case "fan_out": {
+        // Pre-create pending cards for the resolved fan-out children (the engine
+        // names them parent[i]), so the canvas shows the true fan-out size and
+        // the progress denominator is right immediately. Each real step_start
+        // below reuses the matching entry and flips it to running.
+        for (var fi = 0; fi < ev.count; fi++) {
+          var childId = ev.parentStepId + "[" + fi + "]";
+          var fc = ensureLive(childId, ev.phaseId);
+          fc.parentStepId = ev.parentStepId;
+        }
+        break;
+      }
       case "step_start": {
         var s = ensureLive(ev.stepId, ev.phaseId);
         s.status = "running"; s.phaseId = ev.phaseId;

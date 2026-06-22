@@ -11,7 +11,7 @@ describe("WorkflowCreate panel", () => {
       description: "review the checkout service for bugs",
       agent: "opencode",
       model: "opencode/qwen3.6-plus-free",
-      text: "thinking...\n{ \"phases\":",
+      text: 'thinking...\n{ "phases":',
     };
     const { lastFrame } = render(<WorkflowCreate state={state} width={100} height={20} />);
     const frame = lastFrame() ?? "";

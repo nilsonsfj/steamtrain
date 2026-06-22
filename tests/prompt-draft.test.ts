@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  getPromptDraft,
-  initialPromptTabState,
-  patchPromptDraft,
-} from "../src/tui/prompt-draft";
+import { getPromptDraft, initialPromptTabState, patchPromptDraft } from "../src/tui/prompt-draft";
 import { initialPromptHistoryBrowse } from "../src/tui/prompt-history";
 
 describe("prompt draft by mode", () => {

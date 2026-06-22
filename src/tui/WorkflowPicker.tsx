@@ -1,7 +1,7 @@
 import { Box, Text } from "ink";
 import type { WorkflowCatalogEntry } from "../workflow";
-import { blockSummary } from "./workflow-spec-ui";
 import { WORKFLOW_SOURCE_COLOR } from "./theme";
+import { blockSummary } from "./workflow-spec-ui";
 
 interface WorkflowPickerProps {
   workflows: WorkflowCatalogEntry[];

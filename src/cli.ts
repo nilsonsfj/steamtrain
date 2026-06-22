@@ -738,6 +738,11 @@ function printHumanEvent(event: WorkflowEvent, out: (text: string) => void): voi
     case "step_start":
       out(`  start ${event.blockKind ?? "worker"} ${event.stepId}\n`);
       return;
+    case "fan_out":
+      out(
+        `  fan-out ${event.parentStepId} -> ${event.count} item${event.count === 1 ? "" : "s"}\n`,
+      );
+      return;
     case "step_event":
       if (event.event.kind === "text_delta" && !event.event.thinking) out(event.event.text);
       return;

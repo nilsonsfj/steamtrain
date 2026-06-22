@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { applyWorkflowStepOverrides } from "../src/workflow/overrides";
 import type { WorkflowSpec } from "../src/workflow";
+import { applyWorkflowStepOverrides } from "../src/workflow/overrides";
 
 const spec: WorkflowSpec = {
   name: "test",

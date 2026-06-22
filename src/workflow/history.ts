@@ -192,6 +192,14 @@ export class RunRecordBuilder {
           ok: true,
         });
         break;
+      case "fan_out": {
+        const phase = this.phaseOf(event.phaseId);
+        if (!phase) break;
+        // The parent step is already counted; reserve room for its children so a
+        // run canceled mid-fan-out still knows how many were expected.
+        phase.stepCount = Math.max(phase.stepCount, phase.steps.length + event.count);
+        break;
+      }
       case "step_start": {
         const phase = this.phaseOf(event.phaseId);
         if (!phase) break;
@@ -290,15 +298,11 @@ export class RunRecordBuilder {
       const steps: HistoryStep[] = phase.steps.map((step) =>
         step.status === "running" ? { ...step, status: "error" as const } : step,
       );
-      // Known gap: this recovers static/sequential steps that were scheduled
-      // but never dispatched, since `phase.stepCount` carries the phase's
-      // expected count up front. It does NOT recover unstarted fan-out
-      // (`forEach`) children — the engine only emits a `step_start` per child as
-      // `runPool` dispatches it and never announces the resolved item count, so
-      // a run canceled mid-fan-out records only the children that started. Fully
-      // closing this needs an early "fan-out expanded to N" event from
-      // `executeForEachStep`, tracked with the reducer unification in
-      // TUI-WEBUI-DIFFERENCES.md §5.1.
+      // Steps reserved but never dispatched (the run ended before the pool
+      // reached them) show as not-run placeholders. `phase.stepCount` carries
+      // the full expected count: static steps from `phase_start`, and fan-out
+      // (`forEach`) children from the `fan_out` event, so canceling mid-fan-out
+      // still records the children that were queued but never started.
       const missing = Math.max(0, phase.stepCount - steps.length);
       for (let i = 0; i < missing; i++) {
         steps.push({

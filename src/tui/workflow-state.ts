@@ -168,6 +168,18 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
           },
         ],
       };
+    case "fan_out":
+      // Reserve room for the resolved fan-out children so the progress
+      // denominator reflects the true count immediately, not just as each child
+      // is dispatched.
+      return {
+        ...state,
+        phases: state.phases.map((p) =>
+          p.phaseId === e.phaseId
+            ? { ...p, stepCount: Math.max(p.stepCount, p.steps.length + e.count) }
+            : p,
+        ),
+      };
     case "step_start":
       return {
         ...state,

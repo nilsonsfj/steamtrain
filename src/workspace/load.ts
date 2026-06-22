@@ -70,8 +70,7 @@ export function resolveWorkspaceScope(options: WorkspaceLoadOptions = {}): Works
 export function loadWorkspaceConfig(
   options: WorkspaceLoadOptions | string = {},
 ): LoadedWorkspaceConfig {
-  const opts: WorkspaceLoadOptions =
-    typeof options === "string" ? { home: options } : options;
+  const opts: WorkspaceLoadOptions = typeof options === "string" ? { home: options } : options;
   const home = opts.home ?? homedir();
   const cwd = opts.cwd ?? process.cwd();
 

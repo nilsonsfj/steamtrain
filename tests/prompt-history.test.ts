@@ -79,7 +79,11 @@ describe("isPromptArrowActive", () => {
   it("is always active outside workflow list navigation", () => {
     expect(isPromptArrowActive(undefined, "", initialPromptHistoryBrowse)).toBe(true);
     expect(
-      isPromptArrowActive({ deferToListNavigation: false, promptEditing: false }, "", initialPromptHistoryBrowse),
+      isPromptArrowActive(
+        { deferToListNavigation: false, promptEditing: false },
+        "",
+        initialPromptHistoryBrowse,
+      ),
     ).toBe(true);
   });
 
@@ -87,10 +91,18 @@ describe("isPromptArrowActive", () => {
     expect(isPromptArrowActive(listCtx, "", initialPromptHistoryBrowse)).toBe(false);
     expect(isPromptArrowActive(listCtx, "typing", initialPromptHistoryBrowse)).toBe(false);
     expect(
-      isPromptArrowActive({ deferToListNavigation: true, promptEditing: true }, "", initialPromptHistoryBrowse),
+      isPromptArrowActive(
+        { deferToListNavigation: true, promptEditing: true },
+        "",
+        initialPromptHistoryBrowse,
+      ),
     ).toBe(true);
     expect(
-      isPromptArrowActive({ deferToListNavigation: true, promptEditing: true }, "typing", initialPromptHistoryBrowse),
+      isPromptArrowActive(
+        { deferToListNavigation: true, promptEditing: true },
+        "typing",
+        initialPromptHistoryBrowse,
+      ),
     ).toBe(true);
   });
 });
@@ -122,7 +134,13 @@ describe("shouldPromptHistoryCaptureUp", () => {
       shouldPromptHistoryCaptureUp(wfHistory, "workflow", "", initialPromptHistoryBrowse, listCtx),
     ).toBe(false);
     expect(
-      shouldPromptHistoryCaptureUp(wfHistory, "workflow", "", initialPromptHistoryBrowse, editingCtx),
+      shouldPromptHistoryCaptureUp(
+        wfHistory,
+        "workflow",
+        "",
+        initialPromptHistoryBrowse,
+        editingCtx,
+      ),
     ).toBe(true);
     expect(
       shouldPromptHistoryCaptureUp(
@@ -163,18 +181,18 @@ describe("shouldPromptHistoryCaptureDown", () => {
 describe("shouldPromptHistoryArrows", () => {
   it("is always on outside workflow list navigation", () => {
     expect(shouldPromptHistoryArrows(undefined)).toBe(true);
-    expect(
-      shouldPromptHistoryArrows({ deferToListNavigation: false, promptEditing: false }),
-    ).toBe(true);
+    expect(shouldPromptHistoryArrows({ deferToListNavigation: false, promptEditing: false })).toBe(
+      true,
+    );
   });
 
   it("follows prompt editing on workflow surfaces", () => {
-    expect(
-      shouldPromptHistoryArrows({ deferToListNavigation: true, promptEditing: false }),
-    ).toBe(false);
-    expect(
-      shouldPromptHistoryArrows({ deferToListNavigation: true, promptEditing: true }),
-    ).toBe(true);
+    expect(shouldPromptHistoryArrows({ deferToListNavigation: true, promptEditing: false })).toBe(
+      false,
+    );
+    expect(shouldPromptHistoryArrows({ deferToListNavigation: true, promptEditing: true })).toBe(
+      true,
+    );
     expect(
       shouldPromptHistoryArrows({ deferToListNavigation: true, promptEditing: false }, "text"),
     ).toBe(false);

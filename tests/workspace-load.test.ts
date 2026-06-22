@@ -5,12 +5,12 @@ import { describe, expect, it } from "vitest";
 import {
   PROJECT_WORKSPACE_FILENAME,
   WORKSPACE_CONFIG_FILENAME,
+  type WorkspaceConfig,
   loadWorkspaceConfig,
   mergeWorkspaceEntries,
   projectWorkspaceConfigPath,
   resolveWorkspaceScope,
   saveWorkspaceConfig,
-  type WorkspaceConfig,
   workspaceConfigPath,
   workspaceScopeLabel,
 } from "../src/workspace";

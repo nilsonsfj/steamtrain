@@ -89,7 +89,9 @@ describe("executeSlashCommand", () => {
     const result = executeSlashCommand("/model", makeCtx({ mode: "workflow" }));
     expect(result.handled).toBe(true);
     expect(result.handled && result.notices?.[0]?.level).toBe("warn");
-    expect(result.handled && result.notices?.[0]?.text).toContain("selected agent-backed workflow step");
+    expect(result.handled && result.notices?.[0]?.text).toContain(
+      "selected agent-backed workflow step",
+    );
   });
 
   it("sets model on a selected workflow step", () => {
@@ -310,10 +312,7 @@ describe("autocompleteSlashCommand", () => {
       ]),
     );
     const result = autocompleteSlashCommand("/model gpt", listSlashCommands(), ctx);
-    expect(result?.suggestions).toEqual([
-      "opencode/gpt-5.4-mini",
-      "vendor/custom-gpt-wrapper",
-    ]);
+    expect(result?.suggestions).toEqual(["opencode/gpt-5.4-mini", "vendor/custom-gpt-wrapper"]);
     clearOpencodeVariantCacheForTests();
   });
 
