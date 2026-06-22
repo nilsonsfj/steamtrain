@@ -290,6 +290,15 @@ export class RunRecordBuilder {
       const steps: HistoryStep[] = phase.steps.map((step) =>
         step.status === "running" ? { ...step, status: "error" as const } : step,
       );
+      // Known gap: this recovers static/sequential steps that were scheduled
+      // but never dispatched, since `phase.stepCount` carries the phase's
+      // expected count up front. It does NOT recover unstarted fan-out
+      // (`forEach`) children — the engine only emits a `step_start` per child as
+      // `runPool` dispatches it and never announces the resolved item count, so
+      // a run canceled mid-fan-out records only the children that started. Fully
+      // closing this needs an early "fan-out expanded to N" event from
+      // `executeForEachStep`, tracked with the reducer unification in
+      // TUI-WEBUI-DIFFERENCES.md §5.1.
       const missing = Math.max(0, phase.stepCount - steps.length);
       for (let i = 0; i < missing; i++) {
         steps.push({

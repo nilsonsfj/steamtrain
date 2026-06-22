@@ -181,8 +181,9 @@ describe("RunRecordBuilder", () => {
     });
     const record = builder.build({ status: "canceled" });
     const phase = record.phases[0]!;
-    // The phase claimed 3 steps; only one dispatched, so the other two appear as
-    // pending placeholders rather than silently vanishing.
+    // The phase claimed 3 static steps; only one dispatched, so the other two
+    // appear as pending placeholders rather than silently vanishing. (Unstarted
+    // fan-out children are a known gap — see finalizePhases / §5.1.)
     expect(phase.steps).toHaveLength(3);
     expect(phase.steps.filter((s) => s.status === "pending")).toHaveLength(2);
     // Placeholders never executed, so they don't inflate the executed totals.

@@ -160,6 +160,13 @@ the TUI and the staged-flush seam (§5.3). What's left:
 1. **Extract the `WorkflowEvent` reducer** into a shared, UI-agnostic module and
    bundle it into `html.ts` so the browser uses the same fold as the TUI
    (§5.1). Needs a small browser build step for the page script.
+   - *Known gap to fold in here:* run-history records steps scheduled but never
+     dispatched as `pending` placeholders for static/sequential steps, but not
+     for fan-out (`forEach`) children — the engine emits a `step_start` per child
+     only as `runPool` dispatches it and never announces the resolved item count,
+     so a run canceled mid-fan-out records only the children that started.
+     Closing it needs an early "fan-out expanded to N" event from
+     `executeForEachStep` that both the reducer and `RunRecordBuilder` consume.
 2. **Render the full edit surface in the TUI** — per-step prompt editing and
    name/description editing (the core already persists them) (§4 / §5.4).
 3. **Add a staged mode to the web** — "try without saving" + an explicit flush

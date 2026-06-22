@@ -6,7 +6,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type WorkflowHost, WorkflowRunManager } from "../src/web/runs";
 import { createWebServer } from "../src/web/server";
-import type { StepResult, WorkflowCacheStore, WorkflowEvent, WorkflowSpec } from "../src/workflow";
+import type {
+  StepResult,
+  WorkflowCacheStore,
+  WorkflowEvent,
+  WorkflowHistoryStore,
+  WorkflowSpec,
+} from "../src/workflow";
 import { createWorkflowHistoryStore } from "../src/workflow";
 
 const servers: Server[] = [];
@@ -299,22 +305,62 @@ describe("web server", () => {
     expect(status.status).toBe("canceled");
   });
 
-  it("reports a finished run as not cancelable", async () => {
-    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+  it("is not cancelable in the settled-but-not-terminal window", async () => {
+    // Pin the exact race the settled/terminal split closes: the run's outcome is
+    // resolved (settled === true) but the terminal SSE frame hasn't been emitted
+    // yet (terminal === false) because the history write is still in flight. A
+    // blocking history store parks `drive()` inside that window. The old code,
+    // which keyed cancel() off `terminal`, would (wrongly) report this run as
+    // cancelable; the new code keys off `settled`.
+    let enterWindow!: () => void;
+    const inWindow = new Promise<void>((resolve) => {
+      enterWindow = resolve;
+    });
+    let releaseWrite!: () => void;
+    const writeReleased = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    const blockingHistory: WorkflowHistoryStore = {
+      rootDir: "/tmp/none",
+      async save() {
+        enterWindow();
+        await writeReleased;
+      },
+      async list() {
+        return [];
+      },
+      async get() {
+        return undefined;
+      },
+      async remove() {},
+      async clearAll() {},
+    };
+
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: noopStore,
+      historyStore: blockingHistory,
+      cwd: "/tmp",
+    });
+    const server = createWebServer({ host, runs, workflowSource: () => "bundled" });
+    servers.push(server);
     const base = await start(server);
+
     const created = await fetch(`${base}/api/runs`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ workflow: "demo", input: "x" }),
     });
     const { runId } = (await created.json()) as { runId: string };
-    // Drain to terminal so the run has fully settled (history persisted).
-    await readSse(`${base}/api/runs/${runId}/stream`);
 
-    // A run that has already settled is not cancelable: the route reports this
-    // as 404 (not 200/true), even right after it finished.
+    // Wait until drive() is parked mid-write: settled === true, terminal === false.
+    await inWindow;
     const cancel = await fetch(`${base}/api/runs/${runId}/cancel`, { method: "POST" });
     expect(cancel.status).toBe(404);
     expect(((await cancel.json()) as { canceled: boolean }).canceled).toBe(false);
+
+    // Let the write finish so the run reaches its terminal state and closes out.
+    releaseWrite();
   });
 });
