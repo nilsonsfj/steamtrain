@@ -1,9 +1,19 @@
+import { mkdtempSync } from "node:fs";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type WorkflowHost, WorkflowRunManager } from "../src/web/runs";
 import { createWebServer } from "../src/web/server";
-import type { StepResult, WorkflowCacheStore, WorkflowEvent, WorkflowSpec } from "../src/workflow";
+import type {
+  StepResult,
+  WorkflowCacheStore,
+  WorkflowEvent,
+  WorkflowHistoryStore,
+  WorkflowSpec,
+} from "../src/workflow";
+import { createWorkflowHistoryStore } from "../src/workflow";
 
 const servers: Server[] = [];
 
@@ -232,6 +242,49 @@ describe("web server", () => {
     expect(status.ok).toBe(true);
   });
 
+  it("records a completed run and serves it from the history routes", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const root = mkdtempSync(join(tmpdir(), "steamtrain-web-history-"));
+    const historyStore = createWorkflowHistoryStore(root);
+    const runs = new WorkflowRunManager({ host, cacheStore: noopStore, historyStore, cwd: "/tmp" });
+    const server = createWebServer({
+      host,
+      runs,
+      history: historyStore,
+      workflowSource: () => "bundled",
+    });
+    servers.push(server);
+    const base = await start(server);
+
+    const created = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "demo", input: "world" }),
+    });
+    const { runId } = (await created.json()) as { runId: string };
+    // Drain the stream so the run reaches its terminal state (and history save).
+    await readSse(`${base}/api/runs/${runId}/stream`);
+
+    const listRes = await fetch(`${base}/api/history`);
+    const { runs: list } = (await listRes.json()) as { runs: { id: string; workflow: string }[] };
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: runId, workflow: "demo" });
+    expect(list[0]).not.toHaveProperty("phases");
+
+    const recRes = await fetch(`${base}/api/history/${runId}`);
+    expect(recRes.status).toBe(200);
+    const { record } = (await recRes.json()) as { record: { phases: unknown[] } };
+    expect(record.phases).toHaveLength(1);
+
+    const missing = await fetch(`${base}/api/history/nope`);
+    expect(missing.status).toBe(404);
+
+    const del = await fetch(`${base}/api/history/${runId}`, { method: "DELETE" });
+    expect(del.status).toBe(200);
+    const after = await fetch(`${base}/api/history`);
+    expect(((await after.json()) as { runs: unknown[] }).runs).toHaveLength(0);
+  });
+
   it("cancels a running workflow", async () => {
     const { server } = makeServer(new FakeHost(demoSpec(), hangingRun));
     const base = await start(server);
@@ -250,5 +303,64 @@ describe("web server", () => {
     const status = frames[frames.length - 1]!;
     expect(status.type).toBe("status");
     expect(status.status).toBe("canceled");
+  });
+
+  it("is not cancelable in the settled-but-not-terminal window", async () => {
+    // Pin the exact race the settled/terminal split closes: the run's outcome is
+    // resolved (settled === true) but the terminal SSE frame hasn't been emitted
+    // yet (terminal === false) because the history write is still in flight. A
+    // blocking history store parks `drive()` inside that window. The old code,
+    // which keyed cancel() off `terminal`, would (wrongly) report this run as
+    // cancelable; the new code keys off `settled`.
+    let enterWindow!: () => void;
+    const inWindow = new Promise<void>((resolve) => {
+      enterWindow = resolve;
+    });
+    let releaseWrite!: () => void;
+    const writeReleased = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    const blockingHistory: WorkflowHistoryStore = {
+      rootDir: "/tmp/none",
+      async save() {
+        enterWindow();
+        await writeReleased;
+      },
+      async list() {
+        return [];
+      },
+      async get() {
+        return undefined;
+      },
+      async remove() {},
+      async clearAll() {},
+    };
+
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: noopStore,
+      historyStore: blockingHistory,
+      cwd: "/tmp",
+    });
+    const server = createWebServer({ host, runs, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+
+    const created = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "demo", input: "x" }),
+    });
+    const { runId } = (await created.json()) as { runId: string };
+
+    // Wait until drive() is parked mid-write: settled === true, terminal === false.
+    await inWindow;
+    const cancel = await fetch(`${base}/api/runs/${runId}/cancel`, { method: "POST" });
+    expect(cancel.status).toBe(404);
+    expect(((await cancel.json()) as { canceled: boolean }).canceled).toBe(false);
+
+    // Let the write finish so the run reaches its terminal state and closes out.
+    releaseWrite();
   });
 });

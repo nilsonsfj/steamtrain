@@ -69,6 +69,11 @@ steamtrain workflow run bug-hunt --stdin --json
 steamtrain workflow run multi-plan --input "design the cache migration" --fresh
 steamtrain workflow cache clear
 
+# Inspect past runs (recorded automatically to .steamtrain/history/)
+steamtrain workflow history              # list recent runs (newest first)
+steamtrain workflow history show <id>    # full phase → step breakdown of one run
+steamtrain workflow history clear [<id>] # delete one run, or all of them
+
 # Draft a brand-new workflow from a description (LLM delegation), then save it.
 steamtrain workflow create --input "review a PR from three angles then merge findings"
 steamtrain workflow create --input "audit the auth module" --agent claude --model claude-sonnet-4-6 --save
@@ -78,6 +83,20 @@ Every headless run ends with a **status summary** — one line per step (status,
 duration, gate result, cost) plus run totals — so a CI log shows exactly what
 happened. Agentless workflows (only distributors / consolidators / gates) run
 without any agent installed, which makes them ideal smoke tests.
+
+### Run history
+
+Every workflow run (TUI, web UI, or CLI) is recorded to `.steamtrain/history/`
+as one JSON record — the full phase → step tree with each step's status, output,
+duration, cost, gate result, and any error. The newest 100 runs are kept; older
+records are pruned automatically.
+
+- **TUI:** type `/history` to open the run browser. `↑/↓` pick a run, `Enter`
+  inspect it (the same phase → step view a live run uses), `→` drills into a
+  step's output, `Esc` backs out.
+- **Web UI:** click **⏱ History** in the header to list past runs; click one to
+  see its pipeline, per-step output, and run summary.
+- **CLI:** `steamtrain workflow history` (see above).
 
 See [`docs/workflow-creation.md`](docs/workflow-creation.md) for the creation flow
 (CLI `workflow create` and the TUI `/createworkflow` command).

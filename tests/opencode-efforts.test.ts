@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { effortsForModel } from "../src/agents/models";
 import { fallbackOpencodeEfforts } from "../src/agents/opencode-efforts-fallback";
 import {
   clearOpencodeVariantCacheForTests,
   setOpencodeVariantCacheForTests,
 } from "../src/agents/opencode-variants";
-import { effortsForModel } from "../src/agents/models";
 
 describe("fallbackOpencodeEfforts", () => {
   it("returns openai reasoning levels for opencode gpt models", () => {
@@ -61,10 +61,6 @@ describe("effortsForModel opencode cache", () => {
         ["opencode-go/deepseek-v4-pro", { name: "DeepSeek V4 Pro", efforts: ["low", "max"] }],
       ]),
     );
-    expect(effortsForModel("opencode", "opencode-go/kimi-k2.6")).toEqual([
-      "low",
-      "medium",
-      "high",
-    ]);
+    expect(effortsForModel("opencode", "opencode-go/kimi-k2.6")).toEqual(["low", "medium", "high"]);
   });
 });

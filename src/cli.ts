@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
@@ -9,11 +10,16 @@ import { Orchestrator } from "./orchestrator";
 import { loadSettings } from "./settings";
 import type { AgentId } from "./types/events";
 import {
+  RunRecordBuilder,
+  type RunRecordSummary,
   type StepResult,
   WORKFLOW_CACHE_DIR,
+  WORKFLOW_HISTORY_DIR,
   type WorkflowEvent,
   type WorkflowSpec,
   createWorkflowCacheStore,
+  createWorkflowHistoryStore,
+  formatRunTotals,
   generateWorkflow,
   persistWorkflowStepDone,
   saveUserWorkflow,
@@ -149,6 +155,8 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
       return validateWorkflows(orchestrator.listWorkflows(), rest[0], out, err);
     case "cache":
       return runCacheCommand(rest, cwd, io, orchestrator, out, err);
+    case "history":
+      return runHistoryCommand(rest, cwd, out, err);
     case "run":
       return runWorkflowCommand(orchestrator, config, rest, io, out, err);
     case "create":
@@ -249,6 +257,104 @@ async function runCacheCommand(
   return 0;
 }
 
+async function runHistoryCommand(
+  args: string[],
+  cwd: string,
+  out: (text: string) => void,
+  err: (text: string) => void,
+): Promise<number> {
+  const store = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
+  const sub = args[0] ?? "list";
+
+  if (sub === "list" || sub === "ls") {
+    const runs = await store.list();
+    if (runs.length === 0) {
+      out("no recorded runs\n");
+      return 0;
+    }
+    out(`run history (${runs.length})\n`);
+    for (const run of runs) printHistoryRow(run, out);
+    return 0;
+  }
+
+  if (sub === "show") {
+    const id = args[1];
+    if (!id) {
+      err("usage: steamtrain workflow history show <id>\n");
+      return 1;
+    }
+    const record = await store.get(id);
+    if (!record) {
+      err(`unknown run '${id}'\n`);
+      return 1;
+    }
+    printHistoryRecord(record, out);
+    return 0;
+  }
+
+  if (sub === "clear") {
+    const id = args[1];
+    if (id) {
+      await store.remove(id);
+      out(`removed run '${id}'\n`);
+    } else {
+      await store.clearAll();
+      out(`cleared all run history in ${store.rootDir}\n`);
+    }
+    return 0;
+  }
+
+  err(`unknown workflow history command '${sub}'\n\n${helpText()}`);
+  return 1;
+}
+
+function printHistoryRow(run: RunRecordSummary, out: (text: string) => void): void {
+  const when = new Date(run.startedAt).toISOString();
+  const statusGlyph = run.status === "done" ? "ok  " : run.status === "canceled" ? "cxl " : "fail";
+  const totals = formatRunTotals(run.totals, { durationMs: run.durationMs });
+  out(`  ${statusGlyph} ${run.id}  ${run.workflow}  ${when}  ${totals}\n`);
+  out(`       input: ${truncateLine(run.input, 100)}\n`);
+}
+
+function printHistoryRecord(
+  record: Awaited<ReturnType<WorkflowHistoryStoreGet>>,
+  out: (text: string) => void,
+): void {
+  if (!record) return;
+  out(`run ${record.id}\n`);
+  out(`  workflow: ${record.workflow}\n`);
+  out(`  status:   ${record.status}${record.ok ? "" : " (not ok)"}\n`);
+  out(`  started:  ${new Date(record.startedAt).toISOString()}\n`);
+  out(`  duration: ${(record.durationMs / 1000).toFixed(1)}s\n`);
+  out(`  input:    ${truncateLine(record.input, 200)}\n`);
+  if (record.error) out(`  error:    ${record.error}\n`);
+  out(`  totals:   ${formatRunTotals(record.totals, { cached: true })}\n`);
+  for (const phase of record.phases) {
+    out(
+      `\n  phase ${phase.index + 1}: ${phase.title}${phase.done ? (phase.ok ? "" : " (failed)") : ""}\n`,
+    );
+    for (const step of phase.steps) {
+      const glyph = step.status === "done" ? "✓" : step.status === "error" ? "✗" : "·";
+      const runner = step.agent ? ` ${step.agent}${step.model ? `/${step.model}` : ""}` : "";
+      const dur = step.result ? ` · ${(step.result.durationMs / 1000).toFixed(1)}s` : "";
+      const cost = step.result?.costUsd ? ` · $${step.result.costUsd.toFixed(4)}` : "";
+      const cached = step.cached ? " · cached" : "";
+      const indent = step.parentStepId ? "      " : "    ";
+      out(`${indent}${glyph} ${step.stepId}${runner}${dur}${cost}${cached}\n`);
+      if (step.text.trim()) {
+        out(`${indent}    ${truncateLine(step.text.replace(/\s+/g, " ").trim(), 160)}\n`);
+      }
+    }
+  }
+}
+
+type WorkflowHistoryStoreGet = ReturnType<typeof createWorkflowHistoryStore>["get"];
+
+function truncateLine(text: string, max: number): string {
+  const oneLine = text.replace(/\n/g, " ");
+  return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
+}
+
 async function runWorkflowCommand(
   orchestrator: Orchestrator,
   config: SteamtrainConfig,
@@ -298,6 +404,7 @@ async function runWorkflowCommand(
   }
 
   const store = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
+  const historyStore = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
   const key = workflowCacheKey(name, input.trim(), cwd, spec);
   const cache = new Map<string, StepResult>();
   if (options.fresh) {
@@ -307,19 +414,74 @@ async function runWorkflowCommand(
     for (const [stepId, result] of loaded) cache.set(stepId, result);
   }
 
+  const recorder = new RunRecordBuilder({
+    id: randomUUID(),
+    workflow: name,
+    input: input.trim(),
+    cwd,
+  });
+  // Wire cancellation so Ctrl+C unwinds the run and records it as "canceled"
+  // (matching the TUI and web drivers) instead of hard-killing the process
+  // before history is written. A second Ctrl+C force-exits.
+  const ac = new AbortController();
+  let interrupts = 0;
+  const onSigint = () => {
+    interrupts += 1;
+    if (interrupts === 1) ac.abort();
+    else process.exit(130);
+  };
+  process.on("SIGINT", onSigint);
   let ok = false;
-  for await (const event of orchestrator.runWorkflow(name, input.trim(), undefined, cache, cwd)) {
-    if (options.json) out(`${JSON.stringify(event)}\n`);
-    else printHumanEvent(event, out);
-    if (event.kind === "step_done") {
-      await persistWorkflowStepDone(store, key, cache, event.stepId, event.result, event.cached);
+  try {
+    for await (const event of orchestrator.runWorkflow(name, input.trim(), ac.signal, cache, cwd)) {
+      recorder.handle(event);
+      if (options.json) out(`${JSON.stringify(event)}\n`);
+      else printHumanEvent(event, out);
+      if (event.kind === "step_done") {
+        await persistWorkflowStepDone(store, key, cache, event.stepId, event.result, event.cached);
+      }
+      if (event.kind === "workflow_done") {
+        ok = event.ok;
+        if (!options.json) printRunSummary(event.results, out);
+      }
     }
-    if (event.kind === "workflow_done") {
-      ok = event.ok;
-      if (!options.json) printRunSummary(event.results, out);
+    // The engine yields a final workflow_done on abort rather than throwing, so
+    // check the signal first: a canceled run must not be mislabeled done/error.
+    if (ac.signal.aborted) {
+      await saveHistory(historyStore, recorder, "canceled", err);
+      return 130;
     }
+    await saveHistory(historyStore, recorder, ok ? "done" : "error", err);
+  } catch (runErr) {
+    if (ac.signal.aborted) {
+      await saveHistory(historyStore, recorder, "canceled", err);
+      return 130;
+    }
+    await saveHistory(historyStore, recorder, "error", err, message(runErr));
+    throw runErr;
+  } finally {
+    process.removeListener("SIGINT", onSigint);
   }
   return ok ? 0 : 1;
+}
+
+function message(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** Persist a finished run to history; a write failure only warns, never fails the run. */
+async function saveHistory(
+  historyStore: ReturnType<typeof createWorkflowHistoryStore>,
+  recorder: RunRecordBuilder,
+  status: "done" | "error" | "canceled",
+  err: (text: string) => void,
+  error?: string,
+): Promise<void> {
+  try {
+    await historyStore.save(recorder.build({ status, error }));
+  } catch (e) {
+    err(`warning: could not record run history: ${message(e)}\n`);
+  }
 }
 
 /**
@@ -576,6 +738,11 @@ function printHumanEvent(event: WorkflowEvent, out: (text: string) => void): voi
     case "step_start":
       out(`  start ${event.blockKind ?? "worker"} ${event.stepId}\n`);
       return;
+    case "fan_out":
+      out(
+        `  fan-out ${event.parentStepId} -> ${event.count} item${event.count === 1 ? "" : "s"}\n`,
+      );
+      return;
     case "step_event":
       if (event.event.kind === "text_delta" && !event.event.thinking) out(event.event.text);
       return;
@@ -626,6 +793,9 @@ Usage:
   steamtrain workflow run <name> --stdin [--json] [--fresh]
   steamtrain workflow create --input <description> [--agent <id>] [--model <model>] [--name <name>] [--save] [--json]
   steamtrain workflow cache clear [<workflow> --input <text> | --stdin]
+  steamtrain workflow history [list]
+  steamtrain workflow history show <id>
+  steamtrain workflow history clear [<id>]
 
 workflow create delegates to an agent (default: opencode/mimo-v2.5-free) to
 draft a workflow from a plain-English description, validates it, prints the JSON,
@@ -635,6 +805,10 @@ picker and CLI alongside the bundled workflows.
 Workflow runs resume from ${WORKFLOW_CACHE_DIR} by default (file name from workflow +
 input + cwd; contents validated with specHash). Pass --fresh to ignore and delete
 the on-disk cache for that run. Parallel runs of the same workflow + input are not supported.
+
+Every run is recorded to ${WORKFLOW_HISTORY_DIR} (one JSON record per run, newest
+${100} kept). Inspect past runs with 'workflow history', 'workflow history show <id>',
+and remove them with 'workflow history clear [<id>]'.
 
 Running steamtrain with no command opens the workflow-first TUI.
 Running steamtrain --web-ui opens the same engine behind a local browser UI.

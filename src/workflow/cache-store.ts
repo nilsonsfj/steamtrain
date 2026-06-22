@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { atomicWriteFile, isEnoent } from "./fs-util";
 import type { GateStep, StepResult, WorkflowSpec } from "./types";
 
 export const WORKFLOW_CACHE_DIR = ".steamtrain/cache";
@@ -92,7 +93,6 @@ export async function saveWorkflowCache(
   key: WorkflowCacheKey,
   cache: Map<string, StepResult>,
 ): Promise<void> {
-  await mkdir(rootDir, { recursive: true });
   const payload: WorkflowCacheFile = {
     version: WORKFLOW_CACHE_VERSION,
     workflow: key.workflow,
@@ -103,9 +103,7 @@ export async function saveWorkflowCache(
     steps: Object.fromEntries(cache),
   };
   const target = join(rootDir, workflowCacheFileName(key));
-  const temp = `${target}.${process.pid}.tmp`;
-  await writeFile(temp, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  await rename(temp, target);
+  await atomicWriteFile(target, `${JSON.stringify(payload, null, 2)}\n`);
 }
 
 export async function clearWorkflowCache(rootDir: string, key: WorkflowCacheKey): Promise<void> {
@@ -227,8 +225,4 @@ function stableStringify(value: unknown): string {
     .filter((k) => obj[k] !== undefined)
     .sort();
   return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(",")}}`;
-}
-
-function isEnoent(err: unknown): boolean {
-  return Boolean(err && typeof err === "object" && "code" in err && err.code === "ENOENT");
 }

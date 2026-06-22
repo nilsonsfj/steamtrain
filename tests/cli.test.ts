@@ -285,6 +285,48 @@ describe("runCli", () => {
     expect(c.stdout).toContain("2 ok");
   });
 
+  it("records a run and lists/shows/clears it via workflow history", async () => {
+    const c = capture();
+    const agentless = {
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [{ id: "areas", kind: "distributor", items: ["a: {{input}}", "b"] }],
+        },
+      ],
+    };
+    writeFileSync(
+      join(c.io.cwd, "steamtrain.json"),
+      JSON.stringify({ workflows: { agentless: agentless } }),
+    );
+
+    expect(await runCli(["workflow", "run", "agentless", "--input", "task"], c.io)).toBe(0);
+
+    const list = capture();
+    list.io.cwd = c.io.cwd;
+    expect(await runCli(["workflow", "history"], list.io)).toBe(0);
+    expect(list.stdout).toContain("run history (1)");
+    expect(list.stdout).toContain("agentless");
+
+    // Extract the run id from the list output and show it.
+    const id = list.stdout.match(/ok\s+([0-9a-f-]{36})/)?.[1];
+    expect(id).toBeTruthy();
+    const show = capture();
+    show.io.cwd = c.io.cwd;
+    expect(await runCli(["workflow", "history", "show", id!], show.io)).toBe(0);
+    expect(show.stdout).toContain("workflow: agentless");
+    expect(show.stdout).toContain("phase 1: Split");
+
+    const clear = capture();
+    clear.io.cwd = c.io.cwd;
+    expect(await runCli(["workflow", "history", "clear"], clear.io)).toBe(0);
+    const empty = capture();
+    empty.io.cwd = c.io.cwd;
+    expect(await runCli(["workflow", "history"], empty.io)).toBe(0);
+    expect(empty.stdout).toContain("no recorded runs");
+  });
+
   it("requires a description for workflow create", async () => {
     const c = capture();
     const code = await runCli(["workflow", "create"], c.io);

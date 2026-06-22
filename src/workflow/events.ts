@@ -43,6 +43,23 @@ export interface StepStartEvent {
   ts: number;
 }
 
+/**
+ * A dynamic `forEach` step has resolved its work items and is about to dispatch
+ * `count` child runs. Emitted *before* the children's `step_start`s so consumers
+ * know the true fan-out cardinality up front — otherwise a run canceled
+ * mid-fan-out would only ever reveal the children that happened to start (the
+ * pool dispatches them lazily, bounded by concurrency).
+ */
+export interface FanOutEvent {
+  kind: "fan_out";
+  phaseId: string;
+  /** The `forEach` step expanding into children. */
+  parentStepId: string;
+  /** Number of child runs this step expands into. */
+  count: number;
+  ts: number;
+}
+
 /** One normalized agent event, attributed to the step that produced it. */
 export interface StepStreamEvent {
   kind: "step_event";
@@ -90,6 +107,7 @@ export type WorkflowEvent =
   | WorkflowStartEvent
   | PhaseStartEvent
   | StepStartEvent
+  | FanOutEvent
   | StepStreamEvent
   | GateEvaluatedEvent
   | StepDoneEvent

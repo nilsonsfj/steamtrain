@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { flattenSteps, initialWorkflowState, workflowReducer } from "../src/tui/workflow-state";
+import {
+  flattenSteps,
+  initialWorkflowState,
+  workflowReducer,
+  workflowStateFromRecord,
+} from "../src/tui/workflow-state";
 import type { AgentId } from "../src/types/events";
-import type { StepResult, WorkflowEvent } from "../src/workflow";
+import type { RunRecord, StepResult, WorkflowEvent } from "../src/workflow";
 
 const AGENT: AgentId = "claude";
 
@@ -169,6 +174,54 @@ describe("workflowReducer", () => {
     expect(generated?.parentStepId).toBe("work");
     expect(generated?.item).toEqual({ sourceStepId: "split", index: 0, value: "api" });
     expect(generated?.status).toBe("done");
+  });
+
+  it("rebuilds a render-ready state from a saved run record", () => {
+    const record: RunRecord = {
+      version: 1,
+      id: "r1",
+      workflow: "demo",
+      input: "go",
+      cwd: "/tmp",
+      status: "done",
+      ok: true,
+      startedAt: 100,
+      endedAt: 200,
+      durationMs: 100,
+      totals: { steps: 1, ok: 1, failed: 0, cached: 0, costUsd: 0, durationMs: 5 },
+      phases: [
+        {
+          phaseId: "p1",
+          title: "One",
+          index: 0,
+          stepCount: 1,
+          done: true,
+          ok: true,
+          steps: [
+            {
+              stepId: "a",
+              blockKind: "worker",
+              agent: AGENT,
+              model: "m",
+              status: "done",
+              text: "hello",
+              cached: false,
+              result: { stepId: "a", ok: true, output: "hello", durationMs: 5 },
+            },
+          ],
+        },
+      ],
+    };
+
+    const state = workflowStateFromRecord(record);
+    expect(state.done).toBe(true);
+    expect(state.ok).toBe(true);
+    expect(state.name).toBe("demo");
+    expect(state.startedAt).toBe(100);
+    const flat = flattenSteps(state);
+    expect(flat).toHaveLength(1);
+    expect(flat[0]?.step.text).toBe("hello");
+    expect(flat[0]?.step.result?.output).toBe("hello");
   });
 
   it("resets to the initial state", () => {

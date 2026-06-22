@@ -1,7 +1,7 @@
 import { Box, Text } from "ink";
 import { formatModelDisplay } from "../agents";
-import type { WorkspaceEntry } from "../workspace";
 import type { WorkflowSourceKind } from "../workflow";
+import type { WorkspaceEntry } from "../workspace";
 import { workspaceLabel } from "../workspace";
 import { type Mode, isWorkspaceMode } from "./modes";
 import { AGENT_COLOR, WORKFLOW_SOURCE_COLOR } from "./theme";

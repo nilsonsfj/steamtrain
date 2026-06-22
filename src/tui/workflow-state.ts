@@ -1,6 +1,7 @@
 import type { AgentEvent, AgentId } from "../types/events";
 import type {
   GateStep,
+  RunRecord,
   StepResult,
   WorkflowEvent,
   WorkflowItem,
@@ -75,6 +76,35 @@ export function flattenSteps(state: WorkflowState): { phase: PhaseState; step: S
   return out;
 }
 
+/**
+ * Rebuild a render-ready {@link WorkflowState} from a saved run record, so the
+ * history viewer can reuse the live `WorkflowView` / `WorkflowStepDetails`
+ * components. The record's phase/step shapes mirror the live tree, so phases map
+ * across directly (a recorded step has no transient `activity`).
+ */
+export function workflowStateFromRecord(record: RunRecord): WorkflowState {
+  return {
+    name: record.workflow,
+    startedAt: record.startedAt,
+    phases: record.phases.map((phase) => ({
+      phaseId: phase.phaseId,
+      title: phase.title,
+      index: phase.index,
+      stepCount: phase.stepCount,
+      done: phase.done,
+      ok: phase.ok,
+      steps: phase.steps.map((step) => ({ ...step })),
+    })),
+    results: [],
+    started: true,
+    // Derive "done" from the phases themselves rather than forcing it: the
+    // builder finalizes every started phase to `done` for a terminal run, so a
+    // record never yields a "finished" wrapper around an unfinished phase.
+    done: record.phases.every((phase) => phase.done),
+    ok: record.ok,
+  };
+}
+
 function updateStep(
   state: WorkflowState,
   phaseId: string,
@@ -137,6 +167,18 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
             ok: true,
           },
         ],
+      };
+    case "fan_out":
+      // Reserve room for the resolved fan-out children so the progress
+      // denominator reflects the true count immediately, not just as each child
+      // is dispatched.
+      return {
+        ...state,
+        phases: state.phases.map((p) =>
+          p.phaseId === e.phaseId
+            ? { ...p, stepCount: Math.max(p.stepCount, p.steps.length + e.count) }
+            : p,
+        ),
       };
     case "step_start":
       return {

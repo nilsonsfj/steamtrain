@@ -1,7 +1,4 @@
-import {
-  type PromptHistoryBrowse,
-  initialPromptHistoryBrowse,
-} from "./prompt-history";
+import { type PromptHistoryBrowse, initialPromptHistoryBrowse } from "./prompt-history";
 
 export interface PromptTabState {
   value: string;

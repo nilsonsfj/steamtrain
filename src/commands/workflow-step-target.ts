@@ -88,8 +88,7 @@ export function executeWorkflowModelCommand(
   const modelIds = modelIdsForAgent(step.agent);
   if (args.length === 0) {
     const currentName = modelNameForAgent(step.agent, step.model);
-    const currentLabel =
-      currentName === step.model ? step.model : `${currentName} (${step.model})`;
+    const currentLabel = currentName === step.model ? step.model : `${currentName} (${step.model})`;
     return {
       handled: true,
       clearInput: true,

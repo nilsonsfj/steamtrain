@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
+  RunRecordBuilder,
   type StepResult,
   type WorkflowCacheStore,
   type WorkflowEvent,
+  type WorkflowHistoryStore,
   type WorkflowSpec,
   persistWorkflowStepDone,
   workflowCacheKey,
@@ -47,7 +49,16 @@ interface Run {
   startedAt: number;
   endedAt?: number;
   frames: RunFrame[];
+  /** The terminal status frame has been emitted; set in lockstep with that emit. */
   terminal: boolean;
+  /**
+   * The run's outcome is resolved and it can no longer be canceled. Set
+   * synchronously when the run settles, *before* the async history write, so
+   * `cancel()` doesn't briefly report an already-finished run as cancelable
+   * while history is still being persisted (`terminal` is deferred so a late
+   * subscriber can still register for the terminal frame).
+   */
+  settled: boolean;
   listeners: Set<RunListener>;
   controller: AbortController;
 }
@@ -73,6 +84,8 @@ export interface RunManagerOptions {
   host: WorkflowHost;
   cacheStore: WorkflowCacheStore;
   cwd: string;
+  /** Optional: persist each completed run to on-disk history. */
+  historyStore?: WorkflowHistoryStore;
   /** Keep finished runs around this long (ms) so a reload can still replay. */
   retainMs?: number;
 }
@@ -90,12 +103,14 @@ export class WorkflowRunManager {
   private readonly host: WorkflowHost;
   private readonly cacheStore: WorkflowCacheStore;
   private readonly cwd: string;
+  private readonly historyStore?: WorkflowHistoryStore;
   private readonly retainMs: number;
 
   constructor(options: RunManagerOptions) {
     this.host = options.host;
     this.cacheStore = options.cacheStore;
     this.cwd = options.cwd;
+    this.historyStore = options.historyStore;
     this.retainMs = options.retainMs ?? DEFAULT_RETAIN_MS;
   }
 
@@ -118,6 +133,7 @@ export class WorkflowRunManager {
       startedAt: Date.now(),
       frames: [],
       terminal: false,
+      settled: false,
       listeners: new Set(),
       controller: new AbortController(),
     };
@@ -143,7 +159,7 @@ export class WorkflowRunManager {
 
   cancel(runId: string): boolean {
     const run = this.runs.get(runId);
-    if (!run || run.terminal) return false;
+    if (!run || run.settled) return false;
     run.controller.abort();
     return true;
   }
@@ -164,6 +180,10 @@ export class WorkflowRunManager {
 
   private async drive(run: Run, spec: WorkflowSpec, fresh: boolean): Promise<void> {
     const key = workflowCacheKey(run.workflow, run.input, this.cwd, spec);
+    const recorder = new RunRecordBuilder(
+      { id: run.id, workflow: run.workflow, input: run.input, cwd: this.cwd },
+      run.startedAt,
+    );
     let ok: boolean | undefined;
     try {
       let cache: Map<string, StepResult>;
@@ -181,6 +201,7 @@ export class WorkflowRunManager {
         this.cwd,
         spec,
       )) {
+        recorder.handle(event);
         this.emit(run, JSON.stringify({ type: "event", event }), false);
         if (event.kind === "step_done") {
           await persistWorkflowStepDone(
@@ -213,6 +234,13 @@ export class WorkflowRunManager {
       }
     } finally {
       run.endedAt = Date.now();
+      // The outcome is resolved now; lock out cancellation synchronously before
+      // the async history write, so a cancel during that window can't report an
+      // already-finished run as cancelable.
+      run.settled = true;
+      // Persist before marking terminal: a subscriber that connects during this
+      // await must still be registered to receive the terminal status frame.
+      await this.persistHistory(run, recorder);
       run.terminal = true;
       this.emit(
         run,
@@ -226,6 +254,19 @@ export class WorkflowRunManager {
       );
       run.listeners.clear();
       this.scheduleGc(run.id);
+    }
+  }
+
+  /** Save the completed run to history; never let a write failure break the run. */
+  private async persistHistory(run: Run, recorder: RunRecordBuilder): Promise<void> {
+    if (!this.historyStore) return;
+    const status = run.status === "running" ? "done" : run.status;
+    try {
+      await this.historyStore.save(
+        recorder.build({ status, error: run.error, endedAt: run.endedAt }),
+      );
+    } catch {
+      // History is best-effort; a failed write must not surface to the run.
     }
   }
 

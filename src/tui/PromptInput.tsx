@@ -1,6 +1,6 @@
 import { Box, Text, useInput } from "ink";
-import { useRef } from "react";
 import TextInput from "ink-text-input";
+import { useRef } from "react";
 
 interface PromptInputProps {
   value: string;
@@ -107,7 +107,10 @@ export function PromptInput({
         }
       }
     },
-    { isActive: focus && promptEditing && slashInput && (!!onTab || (menuOpen && !!onSuggestionNavigate)) },
+    {
+      isActive:
+        focus && promptEditing && slashInput && (!!onTab || (menuOpen && !!onSuggestionNavigate)),
+    },
   );
 
   useInput(
