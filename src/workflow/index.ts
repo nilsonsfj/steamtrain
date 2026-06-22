@@ -59,6 +59,7 @@ export {
   MAX_STEP_TEXT,
   RunRecordBuilder,
   computeRunTotals,
+  formatRunTotals,
   runRecordSummary,
   type RunRecord,
   type RunRecordSummary,

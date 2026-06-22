@@ -49,7 +49,16 @@ interface Run {
   startedAt: number;
   endedAt?: number;
   frames: RunFrame[];
+  /** The terminal status frame has been emitted; set in lockstep with that emit. */
   terminal: boolean;
+  /**
+   * The run's outcome is resolved and it can no longer be canceled. Set
+   * synchronously when the run settles, *before* the async history write, so
+   * `cancel()` doesn't briefly report an already-finished run as cancelable
+   * while history is still being persisted (`terminal` is deferred so a late
+   * subscriber can still register for the terminal frame).
+   */
+  settled: boolean;
   listeners: Set<RunListener>;
   controller: AbortController;
 }
@@ -124,6 +133,7 @@ export class WorkflowRunManager {
       startedAt: Date.now(),
       frames: [],
       terminal: false,
+      settled: false,
       listeners: new Set(),
       controller: new AbortController(),
     };
@@ -149,7 +159,7 @@ export class WorkflowRunManager {
 
   cancel(runId: string): boolean {
     const run = this.runs.get(runId);
-    if (!run || run.terminal) return false;
+    if (!run || run.settled) return false;
     run.controller.abort();
     return true;
   }
@@ -224,6 +234,10 @@ export class WorkflowRunManager {
       }
     } finally {
       run.endedAt = Date.now();
+      // The outcome is resolved now; lock out cancellation synchronously before
+      // the async history write, so a cancel during that window can't report an
+      // already-finished run as cancelable.
+      run.settled = true;
       // Persist before marking terminal: a subscriber that connects during this
       // await must still be registered to receive the terminal status frame.
       await this.persistHistory(run, recorder);

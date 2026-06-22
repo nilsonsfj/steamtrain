@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AgentAdapter, AgentRunOptions } from "../src/agents";
+import { initialWorkflowState, workflowReducer } from "../src/tui/workflow-state";
 import type { AgentEvent, AgentId } from "../src/types/events";
 import { runWorkflow } from "../src/workflow/engine";
 import type { WorkflowEvent } from "../src/workflow/events";
@@ -128,7 +129,7 @@ describe("RunRecordBuilder", () => {
     expect(step.text).toContain("boom");
   });
 
-  it("marks a canceled run terminal even mid-flight", () => {
+  it("reconciles an in-flight step and finalizes the phase when canceled mid-flight", () => {
     const builder = new RunRecordBuilder({ id: "r", workflow: "wf", input: "i", cwd: "/tmp" });
     builder.handle({ kind: "workflow_start", name: "wf", phaseCount: 1, stepCount: 1, ts: 1 });
     builder.handle({
@@ -149,7 +150,86 @@ describe("RunRecordBuilder", () => {
     const record = builder.build({ status: "canceled" });
     expect(record.status).toBe("canceled");
     expect(record.ok).toBe(false);
-    expect(record.phases[0]!.steps[0]!.status).toBe("running");
+    // The in-flight step is recorded as a (failed) terminal state, never left
+    // "running", so the history viewer can't render a spinning step in a
+    // finished run.
+    const phase = record.phases[0]!;
+    expect(phase.steps[0]!.status).toBe("error");
+    expect(phase.done).toBe(true);
+    expect(phase.ok).toBe(false);
+  });
+
+  it("records scheduled-but-unstarted steps as not-run placeholders", () => {
+    const builder = new RunRecordBuilder({ id: "r", workflow: "wf", input: "i", cwd: "/tmp" });
+    builder.handle({ kind: "workflow_start", name: "wf", phaseCount: 1, stepCount: 3, ts: 1 });
+    builder.handle({
+      kind: "phase_start",
+      phaseId: "p1",
+      title: "One",
+      index: 0,
+      stepCount: 3,
+      ts: 2,
+    });
+    builder.handle({ kind: "step_start", phaseId: "p1", stepId: "a", blockKind: "worker", ts: 3 });
+    builder.handle({
+      kind: "step_done",
+      phaseId: "p1",
+      stepId: "a",
+      result: { stepId: "a", ok: true, output: "done a", durationMs: 1 },
+      cached: false,
+      ts: 4,
+    });
+    const record = builder.build({ status: "canceled" });
+    const phase = record.phases[0]!;
+    // The phase claimed 3 steps; only one dispatched, so the other two appear as
+    // pending placeholders rather than silently vanishing.
+    expect(phase.steps).toHaveLength(3);
+    expect(phase.steps.filter((s) => s.status === "pending")).toHaveLength(2);
+    // Placeholders never executed, so they don't inflate the executed totals.
+    expect(record.totals.steps).toBe(1);
+    expect(record.totals.ok).toBe(1);
+  });
+
+  it("builds a tree that matches the live reducer for the same events", async () => {
+    const cwd = tempDir();
+    const events: WorkflowEvent[] = [];
+    const builder = new RunRecordBuilder({ id: "r", workflow: fanOutSpec.name, input: "go", cwd });
+    for await (const event of runWorkflow(
+      fanOutSpec,
+      { input: "go" },
+      { createAdapter: fakeAdapter, maxConcurrency: 2, cwd },
+    )) {
+      events.push(event as WorkflowEvent);
+      builder.handle(event as WorkflowEvent);
+    }
+    const record = builder.build({ status: "done" });
+    const state = events.reduce(
+      (s, event) => workflowReducer(s, { type: "event", event }),
+      initialWorkflowState,
+    );
+
+    // The recorded tree and the live render tree must stay in lockstep: a future
+    // change to one fold that isn't mirrored in the other fails here.
+    const project = (
+      phases: {
+        phaseId: string;
+        title: string;
+        stepCount: number;
+        steps: { stepId: string; blockKind: string; status: string; text: string }[];
+      }[],
+    ) =>
+      phases.map((p) => ({
+        phaseId: p.phaseId,
+        title: p.title,
+        stepCount: p.stepCount,
+        steps: p.steps.map((s) => ({
+          stepId: s.stepId,
+          blockKind: s.blockKind,
+          status: s.status,
+          text: s.text,
+        })),
+      }));
+    expect(project(record.phases)).toEqual(project(state.phases));
   });
 });
 

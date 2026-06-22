@@ -795,9 +795,15 @@ export function App({
             : runError || !workflowOk
               ? "error"
               : "done";
-          void historyStoreRef.current
-            .save(recorder.build({ status, error: runError }))
-            .catch(() => {});
+          // Persist before flipping `running` back off: doing so re-enables
+          // `/history`, and a user who opens it immediately must see the run
+          // that just finished. Await the write so the record exists first
+          // (mirrors the web driver, which persists before signaling terminal).
+          try {
+            await historyStoreRef.current.save(recorder.build({ status, error: runError }));
+          } catch {
+            // History is best-effort; a failed write must not break the run.
+          }
           if (mountedRef.current) {
             setRunning(false);
             setWfLaunching(false);

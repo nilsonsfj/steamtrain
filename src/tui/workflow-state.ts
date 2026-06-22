@@ -97,7 +97,10 @@ export function workflowStateFromRecord(record: RunRecord): WorkflowState {
     })),
     results: [],
     started: true,
-    done: true,
+    // Derive "done" from the phases themselves rather than forcing it: the
+    // builder finalizes every started phase to `done` for a terminal run, so a
+    // record never yields a "finished" wrapper around an unfinished phase.
+    done: record.phases.every((phase) => phase.done),
     ok: record.ok,
   };
 }

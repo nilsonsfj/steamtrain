@@ -19,6 +19,7 @@ import {
   type WorkflowSpec,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
+  formatRunTotals,
   generateWorkflow,
   persistWorkflowStepDone,
   saveUserWorkflow,
@@ -310,12 +311,8 @@ async function runHistoryCommand(
 function printHistoryRow(run: RunRecordSummary, out: (text: string) => void): void {
   const when = new Date(run.startedAt).toISOString();
   const statusGlyph = run.status === "done" ? "ok  " : run.status === "canceled" ? "cxl " : "fail";
-  const cost = run.totals.costUsd > 0 ? ` · $${run.totals.costUsd.toFixed(4)}` : "";
-  const failed = run.totals.failed > 0 ? `, ${run.totals.failed} failed` : "";
-  out(
-    `  ${statusGlyph} ${run.id}  ${run.workflow}  ${when}  ` +
-      `${run.totals.ok}/${run.totals.steps} ok${failed} · ${(run.durationMs / 1000).toFixed(1)}s${cost}\n`,
-  );
+  const totals = formatRunTotals(run.totals, { durationMs: run.durationMs });
+  out(`  ${statusGlyph} ${run.id}  ${run.workflow}  ${when}  ${totals}\n`);
   out(`       input: ${truncateLine(run.input, 100)}\n`);
 }
 
@@ -331,12 +328,7 @@ function printHistoryRecord(
   out(`  duration: ${(record.durationMs / 1000).toFixed(1)}s\n`);
   out(`  input:    ${truncateLine(record.input, 200)}\n`);
   if (record.error) out(`  error:    ${record.error}\n`);
-  out(
-    `  totals:   ${record.totals.ok}/${record.totals.steps} ok` +
-      `${record.totals.failed ? `, ${record.totals.failed} failed` : ""}` +
-      `${record.totals.cached ? `, ${record.totals.cached} cached` : ""}` +
-      `${record.totals.costUsd ? ` · $${record.totals.costUsd.toFixed(4)}` : ""}\n`,
-  );
+  out(`  totals:   ${formatRunTotals(record.totals, { cached: true })}\n`);
   for (const phase of record.phases) {
     out(
       `\n  phase ${phase.index + 1}: ${phase.title}${phase.done ? (phase.ok ? "" : " (failed)") : ""}\n`,
@@ -428,9 +420,20 @@ async function runWorkflowCommand(
     input: input.trim(),
     cwd,
   });
+  // Wire cancellation so Ctrl+C unwinds the run and records it as "canceled"
+  // (matching the TUI and web drivers) instead of hard-killing the process
+  // before history is written. A second Ctrl+C force-exits.
+  const ac = new AbortController();
+  let interrupts = 0;
+  const onSigint = () => {
+    interrupts += 1;
+    if (interrupts === 1) ac.abort();
+    else process.exit(130);
+  };
+  process.on("SIGINT", onSigint);
   let ok = false;
   try {
-    for await (const event of orchestrator.runWorkflow(name, input.trim(), undefined, cache, cwd)) {
+    for await (const event of orchestrator.runWorkflow(name, input.trim(), ac.signal, cache, cwd)) {
       recorder.handle(event);
       if (options.json) out(`${JSON.stringify(event)}\n`);
       else printHumanEvent(event, out);
@@ -442,10 +445,22 @@ async function runWorkflowCommand(
         if (!options.json) printRunSummary(event.results, out);
       }
     }
+    // The engine yields a final workflow_done on abort rather than throwing, so
+    // check the signal first: a canceled run must not be mislabeled done/error.
+    if (ac.signal.aborted) {
+      await saveHistory(historyStore, recorder, "canceled", err);
+      return 130;
+    }
     await saveHistory(historyStore, recorder, ok ? "done" : "error", err);
   } catch (runErr) {
+    if (ac.signal.aborted) {
+      await saveHistory(historyStore, recorder, "canceled", err);
+      return 130;
+    }
     await saveHistory(historyStore, recorder, "error", err, message(runErr));
     throw runErr;
+  } finally {
+    process.removeListener("SIGINT", onSigint);
   }
   return ok ? 0 : 1;
 }

@@ -1118,11 +1118,7 @@ export const PAGE_HTML = `<!doctype html>
     }
     var list = h("div", { class: "hruns" });
     runs.forEach(function (run) {
-      var t = run.totals || { ok: 0, steps: 0, failed: 0, costUsd: 0 };
-      var meta = t.ok + "/" + t.steps + " ok"
-        + (t.failed ? " \\u00b7 " + t.failed + " failed" : "")
-        + " \\u00b7 " + ((run.durationMs || 0) / 1000).toFixed(1) + "s"
-        + (t.costUsd ? " \\u00b7 $" + t.costUsd.toFixed(4) : "");
+      var meta = fmtTotals(run.totals, { durationMs: run.durationMs || 0 });
       var row = h("div", { class: "hrun " + run.status, onClick: (function (id) { return function () { openHistoryRun(holder, id); }; })(run.id) },
         h("div", { class: "hr-top" },
           h("span", { class: "hr-name", text: run.workflow }),
@@ -1150,11 +1146,10 @@ export const PAGE_HTML = `<!doctype html>
   function renderHistoryDetail(holder, record) {
     clear(holder);
     holder.appendChild(h("span", { class: "hback", text: "\\u2190 back to runs", onClick: function () { reopenHistoryList(holder); } }));
-    var t = record.totals || { ok: 0, steps: 0, costUsd: 0 };
     holder.appendChild(h("div", { class: "title", style: "font-size:16px;font-weight:700", text: record.workflow }));
     holder.appendChild(h("div", { class: "sub", style: "color:var(--muted);font-size:12px;margin-top:2px",
-      text: record.status + " \\u00b7 " + fmtTime(record.startedAt) + " \\u00b7 " + ((record.durationMs || 0) / 1000).toFixed(1) + "s \\u00b7 "
-        + t.ok + "/" + t.steps + " ok" + (t.costUsd ? " \\u00b7 $" + t.costUsd.toFixed(4) : "") }));
+      text: record.status + " \\u00b7 " + fmtTime(record.startedAt) + " \\u00b7 "
+        + ((record.durationMs || 0) / 1000).toFixed(1) + "s \\u00b7 " + fmtTotals(record.totals, { cached: true }) }));
     if (record.input) holder.appendChild(h("div", { class: "hr-input", style: "margin:8px 0 12px", text: "input: " + record.input }));
     if (record.error) holder.appendChild(h("div", { class: "mbanner show err", text: record.error }));
     (record.phases || []).forEach(function (p, idx) {
@@ -1191,6 +1186,20 @@ export const PAGE_HTML = `<!doctype html>
   }
 
   function fmtTime(ts) { try { return new Date(ts).toLocaleString(); } catch (e) { return ""; } }
+
+  // Mirror of formatRunTotals() in src/workflow/history.ts: keep the CLI, TUI,
+  // and web run summaries formatted identically. (The TS function can't be
+  // imported here because this page script isn't bundled.)
+  function fmtTotals(totals, opts) {
+    var t = totals || { ok: 0, steps: 0, failed: 0, cached: 0, costUsd: 0 };
+    opts = opts || {};
+    var parts = [t.ok + "/" + t.steps + " ok"];
+    if (t.failed > 0) parts.push(t.failed + " failed");
+    if (opts.cached && t.cached > 0) parts.push(t.cached + " cached");
+    if (typeof opts.durationMs === "number") parts.push((opts.durationMs / 1000).toFixed(1) + "s");
+    if (t.costUsd > 0) parts.push("$" + t.costUsd.toFixed(4));
+    return parts.join(" \\u00b7 ");
+  }
 
   // ---- utils ---------------------------------------------------------------
   function tail(text, n) { return text.length > n ? "\\u2026" + text.slice(text.length - n) : text; }

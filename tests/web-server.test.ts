@@ -298,4 +298,23 @@ describe("web server", () => {
     expect(status.type).toBe("status");
     expect(status.status).toBe("canceled");
   });
+
+  it("reports a finished run as not cancelable", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const created = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "demo", input: "x" }),
+    });
+    const { runId } = (await created.json()) as { runId: string };
+    // Drain to terminal so the run has fully settled (history persisted).
+    await readSse(`${base}/api/runs/${runId}/stream`);
+
+    // A run that has already settled is not cancelable: the route reports this
+    // as 404 (not 200/true), even right after it finished.
+    const cancel = await fetch(`${base}/api/runs/${runId}/cancel`, { method: "POST" });
+    expect(cancel.status).toBe(404);
+    expect(((await cancel.json()) as { canceled: boolean }).canceled).toBe(false);
+  });
 });

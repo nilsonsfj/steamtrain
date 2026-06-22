@@ -93,7 +93,7 @@ export function runRecordSummary(record: RunRecord): RunRecordSummary {
   return summary;
 }
 
-/** Roll up per-step metrics, counting leaf steps only (fan-out parents excluded). */
+/** Roll up per-step metrics, counting leaf steps that actually ran. */
 export function computeRunTotals(phases: HistoryPhase[]): RunTotals {
   const totals: RunTotals = { steps: 0, ok: 0, failed: 0, cached: 0, costUsd: 0, durationMs: 0 };
   for (const phase of phases) {
@@ -101,6 +101,10 @@ export function computeRunTotals(phases: HistoryPhase[]): RunTotals {
       // A fan-out parent is summarized by its children, which appear as their
       // own steps; counting the parent too would double-count.
       if (step.result?.childResults?.length) continue;
+      // Steps that never dispatched (the run ended early) are recorded as
+      // placeholders so the tree shows them as not-run — but they didn't
+      // execute, so they don't contribute to the executed-step totals.
+      if (step.status === "pending") continue;
       totals.steps += 1;
       if (step.status === "error") totals.failed += 1;
       else if (step.status === "done") totals.ok += 1;
@@ -110,6 +114,24 @@ export function computeRunTotals(phases: HistoryPhase[]): RunTotals {
     }
   }
   return totals;
+}
+
+/**
+ * The canonical one-line run summary ("X/Y ok · N failed · …") shared by the
+ * CLI, TUI, and (mirrored in JS) the web UI, so all three surfaces format the
+ * same totals identically. Duration is opt-in because list views show the run's
+ * wall-clock time while detail views render it separately.
+ */
+export function formatRunTotals(
+  totals: RunTotals,
+  opts?: { durationMs?: number; cached?: boolean },
+): string {
+  const parts = [`${totals.ok}/${totals.steps} ok`];
+  if (totals.failed > 0) parts.push(`${totals.failed} failed`);
+  if (opts?.cached && totals.cached > 0) parts.push(`${totals.cached} cached`);
+  if (typeof opts?.durationMs === "number") parts.push(`${(opts.durationMs / 1000).toFixed(1)}s`);
+  if (totals.costUsd > 0) parts.push(`$${totals.costUsd.toFixed(4)}`);
+  return parts.join(" · ");
 }
 
 function capText(text: string): string {
@@ -142,6 +164,15 @@ export class RunRecordBuilder {
     this.startedAt = startedAt;
   }
 
+  /**
+   * Fold one event into the record tree. This deliberately mirrors the live
+   * `workflowReducer` (src/tui/workflow-state.ts) so a replayed record matches
+   * what was shown during the run — the same fan-out `stepCount` bump and the
+   * same non-thinking text accumulation. The two folds are kept in lockstep by
+   * `tests/workflow-history.test.ts` ("builder tree matches the live reducer"),
+   * which fails if they diverge; unifying them into one shared, UI-agnostic
+   * reducer is tracked as the run-fold half of TUI-WEBUI-DIFFERENCES.md §5.1.
+   */
   handle(event: WorkflowEvent): void {
     switch (event.kind) {
       case "workflow_start":
@@ -222,6 +253,7 @@ export class RunRecordBuilder {
 
   build(opts: { status: RunRecordStatus; error?: string; endedAt?: number }): RunRecord {
     const endedAt = opts.endedAt ?? Date.now();
+    const phases = this.finalizePhases();
     return {
       version: RUN_RECORD_VERSION,
       id: this.meta.id,
@@ -233,10 +265,44 @@ export class RunRecordBuilder {
       startedAt: this.startedAt,
       endedAt,
       durationMs: Math.max(0, endedAt - this.startedAt),
-      phases: this.phases,
-      totals: computeRunTotals(this.phases),
+      phases,
+      totals: computeRunTotals(phases),
       error: opts.error,
     };
+  }
+
+  /**
+   * Reconcile the recorded tree into a self-consistent terminal snapshot. The
+   * run is over by the time {@link build} is called, so no phase or step may be
+   * left mid-flight:
+   *  - a step still `"running"` (the run was canceled/crashed before its
+   *    `step_done`) is recorded as `"error"` — it never completed;
+   *  - steps that were scheduled but never dispatched (the run ended before the
+   *    pool reached them) are added as `"pending"` placeholders so the tree
+   *    shows them as not-run rather than silently dropping them;
+   *  - every started phase is marked `done`, with `ok` reflecting whether all of
+   *    its steps actually succeeded.
+   * This guarantees the history viewer never renders an "impossible" live state
+   * (e.g. a finished run with a spinning step) when it replays the record.
+   */
+  private finalizePhases(): HistoryPhase[] {
+    return this.phases.map((phase) => {
+      const steps: HistoryStep[] = phase.steps.map((step) =>
+        step.status === "running" ? { ...step, status: "error" as const } : step,
+      );
+      const missing = Math.max(0, phase.stepCount - steps.length);
+      for (let i = 0; i < missing; i++) {
+        steps.push({
+          stepId: `${phase.phaseId}::unstarted-${i}`,
+          blockKind: "worker",
+          status: "pending",
+          text: "",
+          cached: false,
+        });
+      }
+      const ok = phase.done ? phase.ok : steps.every((step) => step.status === "done");
+      return { ...phase, steps, done: true, ok };
+    });
   }
 
   private phaseOf(phaseId: string): HistoryPhase | undefined {

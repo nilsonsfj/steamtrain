@@ -1,5 +1,6 @@
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { readFile, readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { atomicWriteFile, isEnoent } from "./fs-util";
 import {
   RUN_RECORD_VERSION,
   type RunRecord,
@@ -54,11 +55,8 @@ export async function saveRunRecord(
   record: RunRecord,
   limit: number = DEFAULT_HISTORY_LIMIT,
 ): Promise<void> {
-  await mkdir(rootDir, { recursive: true });
   const target = join(rootDir, recordFileName(record.id));
-  const temp = `${target}.${process.pid}.tmp`;
-  await writeFile(temp, `${JSON.stringify(record, null, 2)}\n`, "utf8");
-  await rename(temp, target);
+  await atomicWriteFile(target, `${JSON.stringify(record, null, 2)}\n`);
   await pruneRunRecords(rootDir, limit);
 }
 
@@ -70,12 +68,12 @@ export async function listRunRecords(rootDir: string, limit?: number): Promise<R
     if (isEnoent(err)) return [];
     throw err;
   }
-  const summaries: RunRecordSummary[] = [];
-  for (const name of entries) {
-    if (!name.endsWith(".json")) continue;
-    const record = await readRecord(join(rootDir, name));
-    if (record) summaries.push(runRecordSummary(record));
-  }
+  const records = await Promise.all(
+    entries.filter((name) => name.endsWith(".json")).map((name) => readRecord(join(rootDir, name))),
+  );
+  const summaries = records
+    .filter((record): record is RunRecord => record !== undefined)
+    .map(runRecordSummary);
   summaries.sort((a, b) => b.startedAt - a.startedAt);
   return typeof limit === "number" ? summaries.slice(0, limit) : summaries;
 }
@@ -105,12 +103,40 @@ export async function clearAllRunRecords(rootDir: string): Promise<void> {
   }
 }
 
+/**
+ * Drop the oldest records past the retention limit. This runs after every save,
+ * so it must stay cheap: rather than reading and parsing every record's full
+ * (potentially large) JSON tree just to sort by `startedAt`, it orders files by
+ * filesystem mtime — a faithful proxy for write order, since each record is
+ * written once when its run finishes — and deletes the tail.
+ */
 async function pruneRunRecords(rootDir: string, limit: number): Promise<void> {
   if (limit <= 0) return;
-  const summaries = await listRunRecords(rootDir);
-  if (summaries.length <= limit) return;
-  const stale = summaries.slice(limit);
-  await Promise.all(stale.map((s) => removeRunRecord(rootDir, s.id)));
+  let entries: string[];
+  try {
+    entries = await readdir(rootDir);
+  } catch (err) {
+    if (isEnoent(err)) return;
+    throw err;
+  }
+  const files = entries.filter((name) => name.endsWith(".json"));
+  if (files.length <= limit) return;
+  const stamped = await Promise.all(
+    files.map(async (name) => {
+      try {
+        const info = await stat(join(rootDir, name));
+        return { name, mtimeMs: info.mtimeMs };
+      } catch (err) {
+        if (isEnoent(err)) return undefined;
+        throw err;
+      }
+    }),
+  );
+  const present = stamped.filter((s): s is { name: string; mtimeMs: number } => s !== undefined);
+  if (present.length <= limit) return;
+  present.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const stale = present.slice(limit);
+  await Promise.all(stale.map((s) => rm(join(rootDir, s.name), { force: true })));
 }
 
 async function readRecord(path: string): Promise<RunRecord | undefined> {
@@ -154,8 +180,4 @@ function validateRecord(file: string): RunRecord | undefined {
     totals: r.totals ?? computeRunTotals(r.phases),
     error: typeof r.error === "string" ? r.error : undefined,
   };
-}
-
-function isEnoent(err: unknown): boolean {
-  return Boolean(err && typeof err === "object" && "code" in err && err.code === "ENOENT");
 }

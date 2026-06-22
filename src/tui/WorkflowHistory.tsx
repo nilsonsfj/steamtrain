@@ -1,5 +1,5 @@
 import { Box, Text } from "ink";
-import type { RunRecordSummary } from "../workflow";
+import { type RunRecordSummary, formatRunTotals } from "../workflow";
 import { selectVisibleWindow } from "./workflow-list-window";
 
 interface WorkflowHistoryProps {
@@ -82,9 +82,7 @@ function HistoryRow({
 }) {
   const g = STATUS_GLYPH[run.status];
   const when = relativeTime(run.startedAt);
-  const cost = run.totals.costUsd > 0 ? ` · $${run.totals.costUsd.toFixed(4)}` : "";
-  const failed = run.totals.failed > 0 ? ` · ${run.totals.failed} failed` : "";
-  const meta = `${run.totals.ok}/${run.totals.steps} ok${failed} · ${(run.durationMs / 1000).toFixed(1)}s${cost}`;
+  const meta = formatRunTotals(run.totals, { durationMs: run.durationMs });
   return (
     <Box flexDirection="column">
       <Box>
