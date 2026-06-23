@@ -147,4 +147,47 @@ describe("seeded cache re-run", () => {
     expect(secondSpawns).toEqual(["beta"]); // only the failed child re-ran
     expect(ok).toBe(true); // the run now succeeds
   });
+
+  it("replays a blocked gate and still stops the phase on retry", async () => {
+    // A gate whose condition fails with onFalse:"stop" is recorded as `done`
+    // (ok:true) and gets seeded. On replay it must re-derive the stop so retry
+    // doesn't bypass the gate and run downstream steps that never ran.
+    const gateSpec: WorkflowSpec = {
+      name: "gated",
+      description: "d",
+      phases: [
+        {
+          id: "g",
+          title: "Gate",
+          steps: [{ id: "gate", kind: "gate", condition: { contains: "yes" }, onFalse: "stop" }],
+        },
+        {
+          id: "w",
+          title: "Work",
+          steps: [{ id: "work", kind: "worker", agent: "claude", model: "sonnet", prompt: "go" }],
+        },
+      ],
+    };
+
+    const firstSpawns: string[] = [];
+    const builder = new RunRecordBuilder({ id: "g1", workflow: "gated", input: "no", cwd: "/tmp" });
+    for await (const ev of runWorkflow(gateSpec, { input: "no" }, makeDeps(firstSpawns))) {
+      builder.handle(ev);
+    }
+    expect(firstSpawns).toEqual([]); // gate stopped the run; the worker never ran
+    const record = builder.build({ status: "done" });
+
+    const seed = seedCacheFromRecord(record);
+    expect(seed.has("gate")).toBe(true); // a blocked-but-ok gate is seeded
+
+    const secondSpawns: string[] = [];
+    for await (const ev of runWorkflow(
+      gateSpec,
+      { input: "no", cache: seed },
+      makeDeps(secondSpawns),
+    )) {
+      void ev;
+    }
+    expect(secondSpawns).toEqual([]); // gate replays as blocked, re-stops; worker stays unrun
+  });
 });

@@ -26,6 +26,7 @@ import {
   isRerunError,
   persistWorkflowStepDone,
   planRerun,
+  rerunDowngradeMessage,
   saveUserWorkflow,
   validateWorkflow,
   workflowAgentIds,
@@ -388,27 +389,40 @@ async function runWorkflowCommand(
   let seed: Map<string, StepResult> | undefined;
   let forceFresh = options.fresh;
 
+  if (options.retryFailed && !options.from) {
+    err("--retry-failed only applies with --from <runId>\n");
+    return 1;
+  }
+
   // --from <runId>: take the workflow + input from a recorded run and decide
   // whether to seed the cache (retry-failed) or run fresh (re-run).
   if (options.from) {
+    if (positional) {
+      err("workflow run: pass a workflow name or --from <runId>, not both\n");
+      return 1;
+    }
     const record = await historyStore.get(options.from);
     if (!record) {
       err(`unknown run '${options.from}'\n`);
       return 1;
     }
     name = record.workflow;
-    input = options.input ?? record.input;
     const mode: RerunMode = options.retryFailed ? "retry-failed" : "rerun";
-    const plan = planRerun(record, mode, orchestrator.listWorkflows()[name]);
+    const plan = planRerun(record, mode, orchestrator.listWorkflows()[name], {
+      input: options.input,
+      cwd,
+    });
     if (isRerunError(plan)) {
       err(`${plan.error}\n`);
       return 1;
     }
+    input = plan.input;
     if (plan.downgraded) {
-      err("note: workflow changed since this run; doing a full re-run\n");
+      err(`note: ${rerunDowngradeMessage(plan.downgraded)}\n`);
     }
-    seed = plan.seedCache;
-    forceFresh = mode === "rerun" || Boolean(plan.downgraded);
+    // An explicit --fresh forces a clean run and ignores any seed.
+    forceFresh = options.fresh || mode === "rerun" || Boolean(plan.downgraded);
+    seed = forceFresh ? undefined : plan.seedCache;
   } else {
     input = options.input ?? (options.stdin ? await readAll(io.stdin ?? process.stdin) : undefined);
   }

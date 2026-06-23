@@ -409,6 +409,54 @@ describe("runCli", () => {
     expect(c.stderr).toContain("unknown run 'does-not-exist'");
   });
 
+  it("rejects a positional name combined with --from", async () => {
+    const c = capture();
+    writeFileSync(join(c.io.cwd, "steamtrain.json"), JSON.stringify({ workflows: {} }));
+    const code = await runCli(["workflow", "run", "agentless", "--from", "abc"], c.io);
+    expect(code).toBe(1);
+    expect(c.stderr).toContain("not both");
+  });
+
+  it("rejects --retry-failed without --from", async () => {
+    const c = capture();
+    writeFileSync(join(c.io.cwd, "steamtrain.json"), JSON.stringify({ workflows: {} }));
+    const code = await runCli(["workflow", "run", "x", "--input", "y", "--retry-failed"], c.io);
+    expect(code).toBe(1);
+    expect(c.stderr).toContain("--retry-failed only applies with --from");
+  });
+
+  it("retry-failed with a changed --input downgrades to a fresh run (no stale replay)", async () => {
+    const c = capture();
+    const agentless = {
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [{ id: "areas", kind: "distributor", items: ["a: {{input}}", "b"] }],
+        },
+      ],
+    };
+    writeFileSync(
+      join(c.io.cwd, "steamtrain.json"),
+      JSON.stringify({ workflows: { agentless: agentless } }),
+    );
+
+    expect(await runCli(["workflow", "run", "agentless", "--input", "task"], c.io)).toBe(0);
+    const id = latestRecordId(c.io.cwd);
+
+    const retry = capture();
+    retry.io.cwd = c.io.cwd;
+    const code = await runCli(
+      ["workflow", "run", "--from", id, "--retry-failed", "--input", "different"],
+      retry.io,
+    );
+    expect(code).toBe(0);
+    // The input differs from the record, so the seed (computed for the old
+    // input) must NOT be replayed — run fresh under the new input instead.
+    expect(retry.stderr).toContain("input differs from the recorded run");
+    expect(retry.stdout).not.toContain("(cached)");
+  });
+
   it("requires a description for workflow create", async () => {
     const c = capture();
     const code = await runCli(["workflow", "create"], c.io);

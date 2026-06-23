@@ -139,4 +139,46 @@ describe("planRerun", () => {
     expect(plan.seedCache.size).toBe(0);
     expect(plan.downgraded).toBe("spec-changed");
   });
+
+  it("retry-failed downgrades when the input differs from the record", () => {
+    const rec = record({
+      specHash: hashWorkflowSpec(spec),
+      input: "in",
+      phases: [phase([step({ stepId: "a" })])],
+    });
+    const plan = planRerun(rec, "retry-failed", spec, { input: "something else" }) as RerunPlan;
+    expect(plan.seedCache.size).toBe(0);
+    expect(plan.downgraded).toBe("input-changed");
+    expect(plan.input).toBe("something else");
+  });
+
+  it("retry-failed downgrades when the cwd differs from the record", () => {
+    const rec = record({
+      specHash: hashWorkflowSpec(spec),
+      cwd: "/tmp",
+      phases: [phase([step({ stepId: "a" })])],
+    });
+    const plan = planRerun(rec, "retry-failed", spec, { cwd: "/elsewhere" }) as RerunPlan;
+    expect(plan.seedCache.size).toBe(0);
+    expect(plan.downgraded).toBe("cwd-changed");
+  });
+
+  it("retry-failed still seeds when input and cwd match", () => {
+    const rec = record({
+      specHash: hashWorkflowSpec(spec),
+      input: "in",
+      cwd: "/tmp",
+      phases: [phase([step({ stepId: "a" })])],
+    });
+    const plan = planRerun(rec, "retry-failed", spec, { input: "in", cwd: "/tmp" }) as RerunPlan;
+    expect(plan.seedCache.has("a")).toBe(true);
+    expect(plan.downgraded).toBeUndefined();
+  });
+
+  it("re-run carries an input override into the plan", () => {
+    const rec = record({ specHash: hashWorkflowSpec(spec) });
+    const plan = planRerun(rec, "rerun", spec, { input: "fresh input" }) as RerunPlan;
+    expect(plan.input).toBe("fresh input");
+    expect(plan.seedCache.size).toBe(0);
+  });
 });

@@ -51,6 +51,7 @@ import {
   isRerunError,
   persistWorkflowStepDone,
   planRerun,
+  rerunDowngradeMessage,
   workflowCacheKey,
   workflowCatalogEntries,
 } from "../workflow";
@@ -734,6 +735,14 @@ export function App({
       input: string,
       opts?: { reuseMemoryCache?: boolean; fresh?: boolean; seed?: Map<string, StepResult> },
     ): boolean => {
+      // Re-entrancy guard: a run is already in flight (its AbortController is
+      // live). Starting another would clobber `abortRef` — orphaning the first
+      // run's cancellation — and race its cache writes. This can be reached by
+      // opening `/history` mid-run and pressing `r`/`f`.
+      if (abortRef.current) {
+        setWfNotice("a run is already in progress");
+        return false;
+      }
       const spec = resolveWorkflowSpec(name);
       if (!spec) {
         setWfNotice(`unknown workflow '${name}'`);
@@ -835,14 +844,16 @@ export function App({
   // overlay, then launch through the normal run loop with the seeded cache.
   const rerunFromRecord = useCallback(
     (record: RunRecord, mode: RerunMode) => {
-      const plan = planRerun(record, mode, resolveWorkflowSpec(record.workflow));
+      const plan = planRerun(record, mode, resolveWorkflowSpec(record.workflow), {
+        cwd: process.cwd(),
+      });
       if (isRerunError(plan)) {
         setWfNotice(plan.error);
         return;
       }
       setHistory(null);
       if (plan.downgraded) {
-        setWfNotice("workflow changed since this run; doing a full re-run");
+        setWfNotice(rerunDowngradeMessage(plan.downgraded));
       }
       runWorkflow(plan.workflow, plan.input, {
         fresh: mode === "rerun" || Boolean(plan.downgraded),

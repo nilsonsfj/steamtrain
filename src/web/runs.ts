@@ -162,7 +162,7 @@ export class WorkflowRunManager {
     mode: RerunMode,
   ): StartRunResult & { downgraded?: RerunPlan["downgraded"] } {
     const spec = this.host.listWorkflows()[record.workflow];
-    const plan = planRerun(record, mode, spec);
+    const plan = planRerun(record, mode, spec, { cwd: this.cwd });
     if (isRerunError(plan)) return { ok: false, error: plan.error };
     const started = this.start(plan.workflow, plan.input, {
       fresh: mode === "rerun" || Boolean(plan.downgraded),

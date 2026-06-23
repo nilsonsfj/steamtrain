@@ -125,7 +125,9 @@ export {
   type RerunMode,
   type RerunPlan,
   type RerunError,
+  type RerunDowngrade,
   isRerunError,
   planRerun,
+  rerunDowngradeMessage,
   seedCacheFromRecord,
 } from "./rerun";
