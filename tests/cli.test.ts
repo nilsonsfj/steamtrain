@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -10,6 +10,17 @@ import {
   workflowCacheFileName,
   workflowCacheKey,
 } from "../src/workflow/cache-store";
+import { WORKFLOW_HISTORY_DIR } from "../src/workflow/history-store";
+
+/** Read the id of the newest run record written under `cwd`. */
+function latestRecordId(cwd: string): string {
+  const dir = join(cwd, WORKFLOW_HISTORY_DIR);
+  const records = readdirSync(dir)
+    .filter((f) => f.endsWith(".json"))
+    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")) as { id: string; startedAt: number });
+  records.sort((a, b) => b.startedAt - a.startedAt);
+  return records[0]!.id;
+}
 
 function capture() {
   let stdout = "";
@@ -325,6 +336,68 @@ describe("runCli", () => {
     empty.io.cwd = c.io.cwd;
     expect(await runCli(["workflow", "history"], empty.io)).toBe(0);
     expect(empty.stdout).toContain("no recorded runs");
+  });
+
+  it("re-runs a recorded run with --from (fresh, defaulting the input)", async () => {
+    const c = capture();
+    const agentless = {
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [{ id: "areas", kind: "distributor", items: ["a: {{input}}", "b"] }],
+        },
+      ],
+    };
+    writeFileSync(
+      join(c.io.cwd, "steamtrain.json"),
+      JSON.stringify({ workflows: { agentless: agentless } }),
+    );
+
+    expect(await runCli(["workflow", "run", "agentless", "--input", "task"], c.io)).toBe(0);
+    const id = latestRecordId(c.io.cwd);
+
+    const rerun = capture();
+    rerun.io.cwd = c.io.cwd;
+    expect(await runCli(["workflow", "run", "--from", id], rerun.io)).toBe(0);
+    // Ran the same workflow with the recorded input, and fresh (no cache replay).
+    expect(rerun.stdout).toContain("workflow agentless started");
+    expect(rerun.stdout).toContain("ok   areas");
+    expect(rerun.stdout).not.toContain("(cached)");
+  });
+
+  it("retry-failed seeds succeeded steps from the record (replays as cached)", async () => {
+    const c = capture();
+    const agentless = {
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [{ id: "areas", kind: "distributor", items: ["a: {{input}}", "b"] }],
+        },
+      ],
+    };
+    writeFileSync(
+      join(c.io.cwd, "steamtrain.json"),
+      JSON.stringify({ workflows: { agentless: agentless } }),
+    );
+
+    expect(await runCli(["workflow", "run", "agentless", "--input", "task"], c.io)).toBe(0);
+    const id = latestRecordId(c.io.cwd);
+
+    const retry = capture();
+    retry.io.cwd = c.io.cwd;
+    expect(await runCli(["workflow", "run", "--from", id, "--retry-failed"], retry.io)).toBe(0);
+    // The successful step was seeded from the record, so it replays as cached.
+    expect(retry.stdout).toContain("(cached)");
+  });
+
+  it("errors on --from with an unknown run id", async () => {
+    const c = capture();
+    writeFileSync(join(c.io.cwd, "steamtrain.json"), JSON.stringify({ workflows: {} }));
+    const code = await runCli(["workflow", "run", "--from", "does-not-exist"], c.io);
+    expect(code).toBe(1);
+    expect(c.stderr).toContain("unknown run 'does-not-exist'");
   });
 
   it("requires a description for workflow create", async () => {
