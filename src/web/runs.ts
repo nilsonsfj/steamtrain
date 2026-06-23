@@ -233,7 +233,7 @@ export class WorkflowRunManager {
       } else {
         cache = await this.cacheStore.load(key);
       }
-      if (seed) {
+      if (seed && seed.size > 0) {
         // Seed already-succeeded steps and make them the resume baseline.
         for (const [stepId, result] of seed) cache.set(stepId, result);
         await this.cacheStore.save(key, cache);

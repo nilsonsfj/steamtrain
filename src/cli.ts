@@ -451,7 +451,7 @@ async function runWorkflowCommand(
     const loaded = await store.load(key);
     for (const [stepId, result] of loaded) cache.set(stepId, result);
   }
-  if (seed) {
+  if (seed && seed.size > 0) {
     // Seed the already-succeeded steps and make them the resume baseline so an
     // interrupted retry can pick up from here too.
     for (const [stepId, result] of seed) cache.set(stepId, result);

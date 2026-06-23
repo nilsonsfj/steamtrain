@@ -772,7 +772,7 @@ export function App({
             workflowCacheRef.current = await store.load(key);
           }
           const cache = workflowCacheRef.current;
-          if (opts?.seed) {
+          if (opts?.seed && opts.seed.size > 0) {
             // Seed already-succeeded steps and make them the resume baseline.
             for (const [stepId, result] of opts.seed) cache.set(stepId, result);
             await store.save(key, cache);
@@ -1258,12 +1258,19 @@ export function App({
         }
         return;
       }
-      // Detail view: re-run / retry-failed, navigate steps, toggle drill-in.
-      if (input === "r" && history.record) {
+      // Detail view: re-run / retry-failed (only in the step list, matching the
+      // footer hint — not while the per-step drill-in panel is open), navigate
+      // steps, toggle drill-in.
+      if (!history.detail && input === "r" && history.record) {
         rerunFromRecord(history.record, "rerun");
         return;
       }
-      if (input === "f" && history.record && (history.record.totals?.failed ?? 0) > 0) {
+      if (
+        !history.detail &&
+        input === "f" &&
+        history.record &&
+        (history.record.totals?.failed ?? 0) > 0
+      ) {
         rerunFromRecord(history.record, "retry-failed");
         return;
       }
