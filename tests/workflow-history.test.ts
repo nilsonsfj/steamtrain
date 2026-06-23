@@ -366,4 +366,23 @@ describe("workflow history store", () => {
     await store.clearAll();
     expect(await store.list()).toEqual([]);
   });
+
+  it("records and round-trips an optional specHash", async () => {
+    const builder = new RunRecordBuilder({
+      id: "r-spec",
+      workflow: "demo",
+      input: "hi",
+      cwd: "/tmp",
+      specHash: "abc123",
+    });
+    builder.handle({ kind: "workflow_start", name: "demo", phaseCount: 0, stepCount: 0, ts: 1 });
+    builder.handle({ kind: "workflow_done", ok: true, results: [], ts: 2 });
+    const record = builder.build({ status: "done" });
+    expect(record.specHash).toBe("abc123");
+
+    const store = createWorkflowHistoryStore(tempDir());
+    await store.save(record);
+    const loaded = await store.get("r-spec");
+    expect(loaded?.specHash).toBe("abc123");
+  });
 });

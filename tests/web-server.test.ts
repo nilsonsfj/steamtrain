@@ -13,7 +13,7 @@ import type {
   WorkflowHistoryStore,
   WorkflowSpec,
 } from "../src/workflow";
-import { createWorkflowHistoryStore } from "../src/workflow";
+import { RunRecordBuilder, createWorkflowHistoryStore } from "../src/workflow";
 
 const servers: Server[] = [];
 
@@ -362,5 +362,87 @@ describe("web server", () => {
 
     // Let the write finish so the run reaches its terminal state and closes out.
     releaseWrite();
+  });
+
+  it("re-runs a past run via POST /api/history/:id/rerun", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const historyStore = createWorkflowHistoryStore(
+      mkdtempSync(join(tmpdir(), "steamtrain-web-rerun-")),
+    );
+    const runs = new WorkflowRunManager({ host, cacheStore: noopStore, historyStore, cwd: "/tmp" });
+    const server = createWebServer({
+      host,
+      runs,
+      history: historyStore,
+      workflowSource: () => "bundled",
+    });
+    servers.push(server);
+    const base = await start(server);
+
+    const created = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "demo", input: "world" }),
+    });
+    const { runId } = (await created.json()) as { runId: string };
+    await readSse(`${base}/api/runs/${runId}/stream`);
+
+    const rerun = await fetch(`${base}/api/history/${runId}/rerun`, { method: "POST" });
+    expect(rerun.status).toBe(201);
+    const body = (await rerun.json()) as { runId: string; downgraded?: string };
+    expect(body.runId).toBeTruthy();
+    expect(body.runId).not.toBe(runId);
+    expect(runs.get(body.runId)?.workflow).toBe("demo");
+  });
+
+  it("retry-failed flags a drift downgrade when the spec changed", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const historyStore = createWorkflowHistoryStore(
+      mkdtempSync(join(tmpdir(), "steamtrain-web-retry-")),
+    );
+    const runs = new WorkflowRunManager({ host, cacheStore: noopStore, historyStore, cwd: "/tmp" });
+    const server = createWebServer({
+      host,
+      runs,
+      history: historyStore,
+      workflowSource: () => "bundled",
+    });
+    servers.push(server);
+    const base = await start(server);
+
+    // A record whose specHash does not match the current demo spec.
+    const builder = new RunRecordBuilder({
+      id: "stale-run",
+      workflow: "demo",
+      input: "world",
+      cwd: "/tmp",
+      specHash: "stale",
+    });
+    for await (const ev of happyRun("world")) builder.handle(ev);
+    await historyStore.save(builder.build({ status: "done" }));
+
+    const retry = await fetch(`${base}/api/history/stale-run/retry`, { method: "POST" });
+    expect(retry.status).toBe(201);
+    const body = (await retry.json()) as { runId: string; downgraded?: string };
+    expect(body.downgraded).toBe("spec-changed");
+  });
+
+  it("returns 404 for a rerun of an unknown run id", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const historyStore = createWorkflowHistoryStore(
+      mkdtempSync(join(tmpdir(), "steamtrain-web-rerun404-")),
+    );
+    const runs = new WorkflowRunManager({ host, cacheStore: noopStore, historyStore, cwd: "/tmp" });
+    const server = createWebServer({
+      host,
+      runs,
+      history: historyStore,
+      workflowSource: () => "bundled",
+    });
+    servers.push(server);
+    const base = await start(server);
+
+    const res = await fetch(`${base}/api/history/nope/rerun`, { method: "POST" });
+    expect(res.status).toBe(404);
   });
 });

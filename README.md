@@ -74,6 +74,10 @@ steamtrain workflow history              # list recent runs (newest first)
 steamtrain workflow history show <id>    # full phase → step breakdown of one run
 steamtrain workflow history clear [<id>] # delete one run, or all of them
 
+# Act on a past run (workflow + input come from the record)
+steamtrain workflow run --from <runId>                 # re-run it fresh
+steamtrain workflow run --from <runId> --retry-failed  # re-run only failed/not-run steps
+
 # Draft a brand-new workflow from a description (LLM delegation), then save it.
 steamtrain workflow create --input "review a PR from three angles then merge findings"
 steamtrain workflow create --input "audit the auth module" --agent claude --model claude-sonnet-4-6 --save

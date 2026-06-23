@@ -62,6 +62,8 @@ export interface RunRecord {
   workflow: string;
   input: string;
   cwd: string;
+  /** Hash of the workflow spec at run time; enables drift-safe retry-failed. */
+  specHash?: string;
   status: RunRecordStatus;
   ok: boolean;
   startedAt: number;
@@ -144,6 +146,7 @@ export interface RunRecordMeta {
   workflow: string;
   input: string;
   cwd: string;
+  specHash?: string;
 }
 
 /**
@@ -268,6 +271,7 @@ export class RunRecordBuilder {
       workflow: this.name ?? this.meta.workflow,
       input: this.meta.input,
       cwd: this.meta.cwd,
+      specHash: this.meta.specHash,
       status: opts.status,
       ok: opts.status === "done" && this.ok,
       startedAt: this.startedAt,

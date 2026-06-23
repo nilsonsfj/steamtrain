@@ -32,6 +32,7 @@ import { STEAMTRAIN_VERSION } from "../version";
 import {
   type AuthoringHost,
   type LoadedWorkflowCatalog,
+  type RerunMode,
   type RunRecord,
   RunRecordBuilder,
   type RunRecordSummary,
@@ -45,8 +46,12 @@ import {
   type WorkflowStepOverrides,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
+  hashWorkflowSpec,
   isAgentBackedStep,
+  isRerunError,
   persistWorkflowStepDone,
+  planRerun,
+  rerunDowngradeMessage,
   workflowCacheKey,
   workflowCatalogEntries,
 } from "../workflow";
@@ -728,8 +733,16 @@ export function App({
     (
       name: string,
       input: string,
-      opts?: { reuseMemoryCache?: boolean; fresh?: boolean },
+      opts?: { reuseMemoryCache?: boolean; fresh?: boolean; seed?: Map<string, StepResult> },
     ): boolean => {
+      // Re-entrancy guard: a run is already in flight (its AbortController is
+      // live). Starting another would clobber `abortRef` — orphaning the first
+      // run's cancellation — and race its cache writes. This can be reached by
+      // opening `/history` mid-run and pressing `r`/`f`.
+      if (abortRef.current) {
+        setWfNotice("a run is already in progress");
+        return false;
+      }
       const spec = resolveWorkflowSpec(name);
       if (!spec) {
         setWfNotice(`unknown workflow '${name}'`);
@@ -751,7 +764,13 @@ export function App({
         const store = cacheStoreRef.current;
         const cwd = process.cwd();
         const key = workflowCacheKey(name, input, cwd, spec);
-        const recorder = new RunRecordBuilder({ id: randomUUID(), workflow: name, input, cwd });
+        const recorder = new RunRecordBuilder({
+          id: randomUUID(),
+          workflow: name,
+          input,
+          cwd,
+          specHash: hashWorkflowSpec(spec),
+        });
         let runError: string | undefined;
         let workflowOk = true;
         try {
@@ -762,6 +781,11 @@ export function App({
             workflowCacheRef.current = await store.load(key);
           }
           const cache = workflowCacheRef.current;
+          if (opts?.seed && opts.seed.size > 0) {
+            // Seed already-succeeded steps and make them the resume baseline.
+            for (const [stepId, result] of opts.seed) cache.set(stepId, result);
+            await store.save(key, cache);
+          }
           for await (const event of orchestrator.runWorkflow(
             name,
             input,
@@ -814,6 +838,29 @@ export function App({
       return true;
     },
     [orchestrator, resolveWorkflowSpec],
+  );
+
+  // Re-run / retry-failed a saved record: resolve the plan, close the history
+  // overlay, then launch through the normal run loop with the seeded cache.
+  const rerunFromRecord = useCallback(
+    (record: RunRecord, mode: RerunMode) => {
+      const plan = planRerun(record, mode, resolveWorkflowSpec(record.workflow), {
+        cwd: process.cwd(),
+      });
+      if (isRerunError(plan)) {
+        setWfNotice(plan.error);
+        return;
+      }
+      setHistory(null);
+      if (plan.downgraded) {
+        setWfNotice(rerunDowngradeMessage(plan.downgraded));
+      }
+      runWorkflow(plan.workflow, plan.input, {
+        fresh: mode === "rerun" || Boolean(plan.downgraded),
+        seed: plan.seedCache,
+      });
+    },
+    [resolveWorkflowSpec, runWorkflow],
   );
 
   const bumpCursorToEnd = useCallback(() => {
@@ -1222,7 +1269,22 @@ export function App({
         }
         return;
       }
-      // Detail view: navigate steps and toggle the per-step drill-in.
+      // Detail view: re-run / retry-failed (only in the step list, matching the
+      // footer hint — not while the per-step drill-in panel is open), navigate
+      // steps, toggle drill-in.
+      if (!history.detail && input === "r" && history.record) {
+        rerunFromRecord(history.record, "rerun");
+        return;
+      }
+      if (
+        !history.detail &&
+        input === "f" &&
+        history.record &&
+        (history.record.totals?.failed ?? 0) > 0
+      ) {
+        rerunFromRecord(history.record, "retry-failed");
+        return;
+      }
       const totalSteps = history.recordState
         ? history.recordState.phases.reduce((n, p) => n + p.steps.length, 0)
         : 0;
@@ -1560,9 +1622,9 @@ function hint(
 
 function historyHint(history: HistoryUiState): string {
   if (history.view === "detail") {
-    return history.detail
-      ? "↑/↓ step · ←/Esc back · Ctrl+C quit"
-      : "↑/↓ step · → details · ←/Esc back to list · Ctrl+C quit";
+    if (history.detail) return "↑/↓ step · ←/Esc back · Ctrl+C quit";
+    const retryHint = (history.record?.totals?.failed ?? 0) > 0 ? " · f retry failed" : "";
+    return `↑/↓ step · → details · r re-run${retryHint} · ←/Esc back to list · Ctrl+C quit`;
   }
   return "↑/↓ select · Enter inspect · Esc close · Ctrl+C quit";
 }

@@ -171,6 +171,7 @@ function validateRecord(file: string): RunRecord | undefined {
     workflow: r.workflow,
     input: typeof r.input === "string" ? r.input : "",
     cwd: typeof r.cwd === "string" ? r.cwd : "",
+    specHash: typeof r.specHash === "string" ? r.specHash : undefined,
     status: r.status,
     ok: Boolean(r.ok),
     startedAt: r.startedAt,

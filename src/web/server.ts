@@ -104,6 +104,8 @@ async function readBody(req: IncomingMessage): Promise<string> {
  *   GET    /api/history/:id         one past run's full record
  *   DELETE /api/history             clear all past runs
  *   DELETE /api/history/:id         delete one past run
+ *   POST   /api/history/:id/rerun   re-run a past run -> { runId }
+ *   POST   /api/history/:id/retry   retry failed steps -> { runId, downgraded? }
  *   POST   /api/runs                { workflow, input, fresh? } -> { runId }
  *   GET    /api/runs/:id/stream     SSE of WorkflowEvents + terminal status
  *   POST   /api/runs/:id/cancel     abort a run
@@ -246,6 +248,24 @@ async function handle(
       sendJson(res, 200, { deleted: true });
       return;
     }
+  }
+
+  const rerunMatch = path.match(/^\/api\/history\/([^/]+)\/(rerun|retry)$/);
+  if (method === "POST" && rerunMatch) {
+    const id = decodeURIComponent(rerunMatch[1]!);
+    const mode = rerunMatch[2] === "retry" ? "retry-failed" : "rerun";
+    const record = await deps.history?.get(id);
+    if (!record) {
+      sendJson(res, 404, { error: `unknown run '${id}'` });
+      return;
+    }
+    const result = deps.runs.rerunFromRecord(record, mode);
+    if (!result.ok) {
+      sendJson(res, 400, { error: result.error });
+      return;
+    }
+    sendJson(res, 201, { runId: result.runId, downgraded: result.downgraded });
+    return;
   }
 
   if (method === "POST" && path === "/api/runs") {

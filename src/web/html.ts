@@ -426,7 +426,7 @@ export const PAGE_HTML = `<!doctype html>
     });
   }
 
-  function selectWorkflow(name) {
+  function selectWorkflow(name, after) {
     if (S.es) { S.es.close(); S.es = null; }
     stopTimer();
     S.selected = name; S.runId = null; S.started = false; S.done = false;
@@ -444,6 +444,31 @@ export const PAGE_HTML = `<!doctype html>
       resetRunModel();
       seedFromSpec();
       render();
+      if (after) after();
+    });
+  }
+
+  // Re-run / retry-failed a recorded run: launch via the history route, then
+  // switch to the live run view for the returned run id.
+  function rerunHistory(id, workflow, mode) {
+    api("POST", "/api/history/" + encodeURIComponent(id) + "/" + mode).then(function (r) {
+      if (r.status !== 201) {
+        setBanner((r.body && r.body.error) || "could not start re-run", "err");
+        return;
+      }
+      var runId = r.body.runId;
+      var downgraded = r.body.downgraded;
+      closeModal();
+      selectWorkflow(workflow, function () {
+        if (downgraded) setBanner("Workflow changed since this run \\u2014 doing a full re-run.", "info");
+        S.runId = runId;
+        setRunning(true);
+        S.startedAt = Date.now();
+        startTimer();
+        document.getElementById("statusLine").style.display = "flex";
+        openStream(runId);
+        render();
+      });
     });
   }
 
@@ -1164,6 +1189,14 @@ export const PAGE_HTML = `<!doctype html>
         + ((record.durationMs || 0) / 1000).toFixed(1) + "s \\u00b7 " + fmtTotals(record.totals, { cached: true }) }));
     if (record.input) holder.appendChild(h("div", { class: "hr-input", style: "margin:8px 0 12px", text: "input: " + record.input }));
     if (record.error) holder.appendChild(h("div", { class: "mbanner show err", text: record.error }));
+    var canRetry = record.totals && record.totals.failed > 0;
+    var actions = h("div", { class: "run-actions", style: "display:flex;gap:8px;margin:4px 0 12px" },
+      h("button", { class: "btn primary", text: "Re-run",
+        onClick: function () { rerunHistory(record.id, record.workflow, "rerun"); } }),
+      canRetry ? h("button", { class: "btn", text: "Retry failed",
+        onClick: function () { rerunHistory(record.id, record.workflow, "retry"); } }) : null
+    );
+    holder.appendChild(actions);
     (record.phases || []).forEach(function (p, idx) {
       if (idx > 0) holder.appendChild(h("div", { class: "connector" }));
       var pstat = p.done ? (p.ok ? "done" : "failed") : "";

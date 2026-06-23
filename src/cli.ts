@@ -10,6 +10,7 @@ import { Orchestrator } from "./orchestrator";
 import { loadSettings } from "./settings";
 import type { AgentId } from "./types/events";
 import {
+  type RerunMode,
   RunRecordBuilder,
   type RunRecordSummary,
   type StepResult,
@@ -21,7 +22,11 @@ import {
   createWorkflowHistoryStore,
   formatRunTotals,
   generateWorkflow,
+  hashWorkflowSpec,
+  isRerunError,
   persistWorkflowStepDone,
+  planRerun,
+  rerunDowngradeMessage,
   saveUserWorkflow,
   validateWorkflow,
   workflowAgentIds,
@@ -112,6 +117,8 @@ interface RunOptions {
   stdin: boolean;
   json: boolean;
   fresh: boolean;
+  from?: string;
+  retryFailed: boolean;
 }
 
 export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
@@ -363,26 +370,72 @@ async function runWorkflowCommand(
   out: (text: string) => void,
   err: (text: string) => void,
 ): Promise<number> {
-  const name = args[0];
-  if (!name) {
-    err("workflow run requires a workflow name\n");
-    return 1;
-  }
-
-  const options = parseRunOptions(args.slice(1));
+  // The positional name is optional when re-launching a past run with --from.
+  const positional = args[0] && !args[0].startsWith("--") ? args[0] : undefined;
+  const options = parseRunOptions(positional ? args.slice(1) : args);
   if (!options) {
-    err("usage: steamtrain workflow run <name> --input <text> [--json] [--fresh]\n");
+    err(
+      "usage: steamtrain workflow run <name> --input <text> [--json] [--fresh]\n" +
+        "       steamtrain workflow run --from <runId> [--retry-failed] [--json]\n",
+    );
     return 1;
   }
 
-  const input =
-    options.input ?? (options.stdin ? await readAll(io.stdin ?? process.stdin) : undefined);
+  const cwd = io.cwd ?? process.cwd();
+  const historyStore = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
+
+  let name = positional;
+  let input = options.input;
+  let seed: Map<string, StepResult> | undefined;
+  let forceFresh = options.fresh;
+
+  if (options.retryFailed && !options.from) {
+    err("--retry-failed only applies with --from <runId>\n");
+    return 1;
+  }
+
+  // --from <runId>: take the workflow + input from a recorded run and decide
+  // whether to seed the cache (retry-failed) or run fresh (re-run).
+  if (options.from) {
+    if (positional) {
+      err("workflow run: pass a workflow name or --from <runId>, not both\n");
+      return 1;
+    }
+    const record = await historyStore.get(options.from);
+    if (!record) {
+      err(`unknown run '${options.from}'\n`);
+      return 1;
+    }
+    name = record.workflow;
+    const mode: RerunMode = options.retryFailed ? "retry-failed" : "rerun";
+    const plan = planRerun(record, mode, orchestrator.listWorkflows()[name], {
+      input: options.input,
+      cwd,
+    });
+    if (isRerunError(plan)) {
+      err(`${plan.error}\n`);
+      return 1;
+    }
+    input = plan.input;
+    if (plan.downgraded) {
+      err(`note: ${rerunDowngradeMessage(plan.downgraded)}\n`);
+    }
+    // An explicit --fresh forces a clean run and ignores any seed.
+    forceFresh = options.fresh || mode === "rerun" || Boolean(plan.downgraded);
+    seed = forceFresh ? undefined : plan.seedCache;
+  } else {
+    input = options.input ?? (options.stdin ? await readAll(io.stdin ?? process.stdin) : undefined);
+  }
+
+  if (!name) {
+    err("workflow run requires a workflow name (or --from <runId>)\n");
+    return 1;
+  }
   if (!input?.trim()) {
     err("workflow run requires --input <text> or --stdin\n");
     return 1;
   }
 
-  const cwd = io.cwd ?? process.cwd();
   const spec = orchestrator.listWorkflows()[name];
   if (!spec) {
     err(`unknown workflow '${name}'\n`);
@@ -404,14 +457,19 @@ async function runWorkflowCommand(
   }
 
   const store = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
-  const historyStore = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
   const key = workflowCacheKey(name, input.trim(), cwd, spec);
   const cache = new Map<string, StepResult>();
-  if (options.fresh) {
+  if (forceFresh) {
     await store.clear(key);
   } else {
     const loaded = await store.load(key);
     for (const [stepId, result] of loaded) cache.set(stepId, result);
+  }
+  if (seed && seed.size > 0) {
+    // Seed the already-succeeded steps and make them the resume baseline so an
+    // interrupted retry can pick up from here too.
+    for (const [stepId, result] of seed) cache.set(stepId, result);
+    await store.save(key, cache);
   }
 
   const recorder = new RunRecordBuilder({
@@ -419,6 +477,7 @@ async function runWorkflowCommand(
     workflow: name,
     input: input.trim(),
     cwd,
+    specHash: hashWorkflowSpec(spec),
   });
   // Wire cancellation so Ctrl+C unwinds the run and records it as "canceled"
   // (matching the TUI and web drivers) instead of hard-killing the process
@@ -704,7 +763,7 @@ function parseCacheClearOptions(args: string[]): CacheClearOptions | null {
 }
 
 function parseRunOptions(args: string[]): RunOptions | null {
-  const options: RunOptions = { stdin: false, json: false, fresh: false };
+  const options: RunOptions = { stdin: false, json: false, fresh: false, retryFailed: false };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--input" || arg === "-i") {
@@ -712,6 +771,13 @@ function parseRunOptions(args: string[]): RunOptions | null {
       if (!value) return null;
       options.input = value;
       i += 1;
+    } else if (arg === "--from") {
+      const value = args[i + 1];
+      if (!value) return null;
+      options.from = value;
+      i += 1;
+    } else if (arg === "--retry-failed") {
+      options.retryFailed = true;
     } else if (arg === "--stdin") {
       options.stdin = true;
     } else if (arg === "--json") {
@@ -791,6 +857,7 @@ Usage:
   steamtrain workflow validate [name]
   steamtrain workflow run <name> --input <text> [--json] [--fresh]
   steamtrain workflow run <name> --stdin [--json] [--fresh]
+  steamtrain workflow run --from <runId> [--retry-failed] [--input <text>] [--json]
   steamtrain workflow create --input <description> [--agent <id>] [--model <model>] [--name <name>] [--save] [--json]
   steamtrain workflow cache clear [<workflow> --input <text> | --stdin]
   steamtrain workflow history [list]

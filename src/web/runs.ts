@@ -1,12 +1,18 @@
 import { randomUUID } from "node:crypto";
 import {
+  type RerunMode,
+  type RerunPlan,
+  type RunRecord,
   RunRecordBuilder,
   type StepResult,
   type WorkflowCacheStore,
   type WorkflowEvent,
   type WorkflowHistoryStore,
   type WorkflowSpec,
+  hashWorkflowSpec,
+  isRerunError,
   persistWorkflowStepDone,
+  planRerun,
   workflowCacheKey,
 } from "../workflow";
 
@@ -115,7 +121,11 @@ export class WorkflowRunManager {
   }
 
   /** Validate and launch a run; the event loop runs detached in the background. */
-  start(workflow: string, input: string, opts?: { fresh?: boolean }): StartRunResult {
+  start(
+    workflow: string,
+    input: string,
+    opts?: { fresh?: boolean; seed?: Map<string, StepResult> },
+  ): StartRunResult {
     const text = input.trim();
     if (!text) return { ok: false, error: "input is required" };
 
@@ -138,8 +148,27 @@ export class WorkflowRunManager {
       controller: new AbortController(),
     };
     this.runs.set(run.id, run);
-    void this.drive(run, spec, opts?.fresh ?? false);
+    void this.drive(run, spec, opts?.fresh ?? false, opts?.seed);
     return { ok: true, runId: run.id };
+  }
+
+  /**
+   * Launch a re-run / retry-failed of a saved record. The plan (workflow,
+   * input, seed cache, drift downgrade) is resolved here so the route stays
+   * thin; a drift-downgraded retry falls back to a full re-run.
+   */
+  rerunFromRecord(
+    record: RunRecord,
+    mode: RerunMode,
+  ): StartRunResult & { downgraded?: RerunPlan["downgraded"] } {
+    const spec = this.host.listWorkflows()[record.workflow];
+    const plan = planRerun(record, mode, spec, { cwd: this.cwd });
+    if (isRerunError(plan)) return { ok: false, error: plan.error };
+    const started = this.start(plan.workflow, plan.input, {
+      fresh: mode === "rerun" || Boolean(plan.downgraded),
+      seed: plan.seedCache,
+    });
+    return started.ok ? { ...started, downgraded: plan.downgraded } : started;
   }
 
   /**
@@ -178,10 +207,21 @@ export class WorkflowRunManager {
     for (const listener of run.listeners) listener(payload, terminal);
   }
 
-  private async drive(run: Run, spec: WorkflowSpec, fresh: boolean): Promise<void> {
+  private async drive(
+    run: Run,
+    spec: WorkflowSpec,
+    fresh: boolean,
+    seed?: Map<string, StepResult>,
+  ): Promise<void> {
     const key = workflowCacheKey(run.workflow, run.input, this.cwd, spec);
     const recorder = new RunRecordBuilder(
-      { id: run.id, workflow: run.workflow, input: run.input, cwd: this.cwd },
+      {
+        id: run.id,
+        workflow: run.workflow,
+        input: run.input,
+        cwd: this.cwd,
+        specHash: hashWorkflowSpec(spec),
+      },
       run.startedAt,
     );
     let ok: boolean | undefined;
@@ -192,6 +232,11 @@ export class WorkflowRunManager {
         cache = new Map();
       } else {
         cache = await this.cacheStore.load(key);
+      }
+      if (seed && seed.size > 0) {
+        // Seed already-succeeded steps and make them the resume baseline.
+        for (const [stepId, result] of seed) cache.set(stepId, result);
+        await this.cacheStore.save(key, cache);
       }
       for await (const event of this.host.runWorkflow(
         run.workflow,
