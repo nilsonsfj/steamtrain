@@ -53,7 +53,6 @@ export type RerunMode = "rerun" | "retry-failed";
 export interface RerunPlan {
   workflow: string;
   input: string;
-  cwd: string;
   /** Steps to seed into the engine cache. Empty for a full re-run. */
   seedCache: Map<string, StepResult>;
   /** Set when retry-failed was downgraded to a full re-run. */
@@ -96,7 +95,9 @@ export function planRerun(
   - `record.specHash !== hashWorkflowSpec(currentSpec)` →
     `downgraded: "spec-changed"`, empty seed.
   - otherwise → `seedCache = seedCacheFromRecord(record)`.
-- `workflow` / `input` / `cwd` always come from the record.
+- `workflow` / `input` come from the record. `cwd` is **not** part of the plan:
+  each surface runs in its own current cwd (CLI: invocation cwd; web/TUI: the
+  process cwd), and `seedCacheFromRecord` is cwd-independent (keyed by stepId).
 
 Exported from `src/workflow/index.ts`.
 
