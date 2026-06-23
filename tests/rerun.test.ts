@@ -104,7 +104,11 @@ describe("planRerun", () => {
   });
 
   it("rerun mode produces an empty seed and no downgrade", () => {
-    const plan = planRerun(record({ specHash: hashWorkflowSpec(spec) }), "rerun", spec) as RerunPlan;
+    const plan = planRerun(
+      record({ specHash: hashWorkflowSpec(spec) }),
+      "rerun",
+      spec,
+    ) as RerunPlan;
     expect(isRerunError(plan)).toBe(false);
     expect(plan.seedCache.size).toBe(0);
     expect(plan.downgraded).toBeUndefined();

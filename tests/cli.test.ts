@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -17,7 +24,9 @@ function latestRecordId(cwd: string): string {
   const dir = join(cwd, WORKFLOW_HISTORY_DIR);
   const records = readdirSync(dir)
     .filter((f) => f.endsWith(".json"))
-    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")) as { id: string; startedAt: number });
+    .map(
+      (f) => JSON.parse(readFileSync(join(dir, f), "utf8")) as { id: string; startedAt: number },
+    );
   records.sort((a, b) => b.startedAt - a.startedAt);
   return records[0]!.id;
 }

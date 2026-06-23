@@ -10,6 +10,7 @@ import { Orchestrator } from "./orchestrator";
 import { loadSettings } from "./settings";
 import type { AgentId } from "./types/events";
 import {
+  type RerunMode,
   RunRecordBuilder,
   type RunRecordSummary,
   type StepResult,
@@ -25,7 +26,6 @@ import {
   isRerunError,
   persistWorkflowStepDone,
   planRerun,
-  type RerunMode,
   saveUserWorkflow,
   validateWorkflow,
   workflowAgentIds,

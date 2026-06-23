@@ -370,7 +370,12 @@ describe("web server", () => {
       mkdtempSync(join(tmpdir(), "steamtrain-web-rerun-")),
     );
     const runs = new WorkflowRunManager({ host, cacheStore: noopStore, historyStore, cwd: "/tmp" });
-    const server = createWebServer({ host, runs, history: historyStore, workflowSource: () => "bundled" });
+    const server = createWebServer({
+      host,
+      runs,
+      history: historyStore,
+      workflowSource: () => "bundled",
+    });
     servers.push(server);
     const base = await start(server);
 
@@ -396,7 +401,12 @@ describe("web server", () => {
       mkdtempSync(join(tmpdir(), "steamtrain-web-retry-")),
     );
     const runs = new WorkflowRunManager({ host, cacheStore: noopStore, historyStore, cwd: "/tmp" });
-    const server = createWebServer({ host, runs, history: historyStore, workflowSource: () => "bundled" });
+    const server = createWebServer({
+      host,
+      runs,
+      history: historyStore,
+      workflowSource: () => "bundled",
+    });
     servers.push(server);
     const base = await start(server);
 
@@ -423,7 +433,12 @@ describe("web server", () => {
       mkdtempSync(join(tmpdir(), "steamtrain-web-rerun404-")),
     );
     const runs = new WorkflowRunManager({ host, cacheStore: noopStore, historyStore, cwd: "/tmp" });
-    const server = createWebServer({ host, runs, history: historyStore, workflowSource: () => "bundled" });
+    const server = createWebServer({
+      host,
+      runs,
+      history: historyStore,
+      workflowSource: () => "bundled",
+    });
     servers.push(server);
     const base = await start(server);
 

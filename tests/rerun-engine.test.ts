@@ -18,7 +18,14 @@ const spec: WorkflowSpec = {
       id: "p2",
       title: "P2",
       steps: [
-        { id: "b", kind: "worker", agent: "claude", model: "sonnet", prompt: "do b", dependsOn: ["a"] },
+        {
+          id: "b",
+          kind: "worker",
+          agent: "claude",
+          model: "sonnet",
+          prompt: "do b",
+          dependsOn: ["a"],
+        },
       ],
     },
   ],

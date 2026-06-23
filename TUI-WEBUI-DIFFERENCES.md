@@ -71,6 +71,7 @@ These two reducers are near-duplicates and are a prime extraction target (see §
 | Skip/unchanged reporting on save | ✅ | ❌ | `flushSessionOverrides`/`saveSessionWorkflowsToUser` returns saved/skipped/unchanged (TUI surfaces it) |
 | Agent health display | ✅ | ✅ | TUI doctor panel; web health chips |
 | Run history (inspect past runs) | ✅ | ✅ | Shared `RunRecordBuilder` + `WorkflowHistoryStore` (`.steamtrain/history`); TUI `/history`, web ⏱ History, CLI `workflow history` |
+| Re-run / retry-failed a past run | ✅ | ✅ | Shared `planRerun`/`seedCacheFromRecord` (`src/workflow/rerun.ts`); TUI `r`/`f` in history detail, web Re-run/Retry buttons, CLI `workflow run --from <id> [--retry-failed]` |
 | Prompt history / drafts | ✅ | ❌ | TUI-only (`prompt-history`, `prompt-draft`) |
 | Workspaces (non-workflow dispatch) | ✅ | ❌ | Out of scope for unification (for now) |
 
