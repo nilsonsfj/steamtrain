@@ -121,3 +121,11 @@ export {
   deleteUserWorkflow,
   type DeleteUserWorkflowResult,
 } from "./catalog";
+export {
+  type RerunMode,
+  type RerunPlan,
+  type RerunError,
+  isRerunError,
+  planRerun,
+  seedCacheFromRecord,
+} from "./rerun";
