@@ -32,6 +32,8 @@ export interface HistoryStep {
   result?: StepResult;
   gate?: { passed: boolean; target?: string; onFalse?: GateStep["onFalse"] };
   cached: boolean;
+  /** Total attempts this step took (auto-retry); omitted/1 means it ran once. */
+  attempts?: number;
 }
 
 export interface HistoryPhase {
@@ -233,6 +235,13 @@ export class RunRecordBuilder {
         }
         break;
       }
+      case "step_retry": {
+        const step = this.stepOf(event.phaseId, event.stepId);
+        if (!step) break;
+        // The failed attempt just completed; the next one is about to start.
+        step.attempts = event.attempt + 1;
+        break;
+      }
       case "gate_evaluated": {
         const step = this.stepOf(event.phaseId, event.stepId);
         if (!step) break;
@@ -246,6 +255,9 @@ export class RunRecordBuilder {
         step.result = event.result;
         step.cached = event.cached;
         if (!step.text) step.text = capText(event.result.output ?? "");
+        // Prefer the authoritative count from the result; fall back to any
+        // count accrued from step_retry events.
+        if (event.result.attempts !== undefined) step.attempts = event.result.attempts;
         break;
       }
       case "phase_done": {
