@@ -555,6 +555,12 @@ export const PAGE_HTML = `<!doctype html>
         else if (a.kind === "tool_result") st.activity = (a.isError ? "\\u2717 " : "\\u2713 ") + (a.name || "tool");
         break;
       }
+      case "step_retry": {
+        var rt = S.live[ev.stepId]; if (!rt) break;
+        rt.attempts = ev.attempt + 1;
+        rt.activity = "\\u21bb retry " + ev.attempt + "/" + (ev.maxAttempts - 1) + " (" + Math.round(ev.delayMs) + "ms)";
+        break;
+      }
       case "gate_evaluated": {
         var g = S.live[ev.stepId]; if (!g) break;
         g.gate = { passed: ev.passed, target: ev.target };
@@ -635,7 +641,9 @@ export const PAGE_HTML = `<!doctype html>
     var kindEl = h("span", { class: "kind " + s.kind });
     if (s.status === "running") kindEl.appendChild(h("span", { class: "pulse" }));
     kindEl.appendChild(document.createTextNode(KIND_LABEL[s.kind] || s.kind));
+    var attempts = s.attempts || (s.result && s.result.attempts);
     var stateLabel = s.status === "pending" ? "pending" : s.status;
+    if (attempts && attempts > 1) stateLabel += " \\u00b7 " + attempts + " tries";
     card.appendChild(h("div", { class: "top" },
       h("span", { class: "sid", text: s.id }),
       kindEl,
@@ -1220,7 +1228,7 @@ export const PAGE_HTML = `<!doctype html>
       id: st.stepId, kind: st.blockKind || "worker", agent: st.agent, model: st.model,
       dependsOn: st.dependsOn, forEach: null, item: st.item, status: st.status,
       text: st.text || (st.result && st.result.output) || "", activity: null,
-      result: st.result, cached: st.cached,
+      result: st.result, cached: st.cached, attempts: st.attempts,
       gate: st.gate ? { passed: st.gate.passed, target: st.gate.target } : null
     };
   }

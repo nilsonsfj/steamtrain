@@ -134,6 +134,27 @@ describe("workflowReducer", () => {
     expect(step?.activity).toBe("gate passed → ready");
   });
 
+  it("marks a step retrying and records attempts on step_retry", () => {
+    const state = reduceAll([
+      { kind: "workflow_start", name: "w", phaseCount: 1, stepCount: 1, ts: 0 },
+      { kind: "phase_start", phaseId: "p1", title: "P1", index: 0, stepCount: 1, ts: 0 },
+      { kind: "step_start", phaseId: "p1", stepId: "a", agent: AGENT, model: "m", ts: 0 },
+      {
+        kind: "step_retry",
+        phaseId: "p1",
+        stepId: "a",
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 1000,
+        reason: "transient",
+        ts: 0,
+      },
+    ]);
+    const step = flattenSteps(state)[0]?.step;
+    expect(step?.attempts).toBe(2);
+    expect(step?.activity).toBe("↻ retry 1/2 (1000ms)");
+  });
+
   it("tracks generated fan-out child steps", () => {
     const child: StepResult = {
       stepId: "work[0]",

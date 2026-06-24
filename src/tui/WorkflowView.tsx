@@ -220,9 +220,11 @@ function stepMeta(step: StepState): string {
     return step.gate.target ? `${gateState} → ${step.gate.target}` : gateState;
   }
   if (step.result) {
+    const attempts = step.result.attempts ?? step.attempts;
     const bits = [
       step.cached ? "cached" : `${(step.result.durationMs / 1000).toFixed(1)}s`,
       step.result.costUsd ? `$${step.result.costUsd.toFixed(4)}` : undefined,
+      attempts && attempts > 1 ? `${attempts} tries` : undefined,
     ].filter(Boolean);
     return bits.join(" · ");
   }
