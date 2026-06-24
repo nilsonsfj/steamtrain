@@ -80,6 +80,7 @@ execution behavior. **Examples:** [`workflow-examples.md`](workflow-examples.md)
 | `name` | no in `steamtrain.json` | Launch name. The map key is injected as `name`. |
 | `description` | no | Human-readable picker/list text. |
 | `phases` | yes | Ordered list of workflow phases. |
+| `retry` | no | Default auto-retry policy for every agent worker/processor step. See [Auto-retry](#auto-retry-on-transient-failures). |
 
 ## Phase fields
 
@@ -106,7 +107,7 @@ Existing no-`kind` steps are treated as workers.
 
 Required fields: `agent`, `model`, `prompt`.
 
-Optional fields: `cwd`, `env`, `extraArgs`.
+Optional fields: `cwd`, `env`, `extraArgs`, `effort`, `forEach`, `retry`.
 
 ```jsonc
 {
@@ -225,6 +226,58 @@ Gate condition fields are combined with logical AND:
 | `stop` | Stop scheduling later phases after the current phase completes while keeping the workflow successful. |
 
 Steps with `dependsOn` are skipped when any referenced earlier step failed.
+
+## Auto-retry on transient failures
+
+Agent worker/processor steps (and each `forEach` child) automatically re-attempt
+**transient, side-effect-free** failures with exponential backoff. Auto-retry is
+on by default.
+
+A failure is retried only when the agent **never completed a turn** — a
+transport/spawn error or a crash before any result. A step that runs to
+completion and reports an error (`isError`) is **never** auto-retried, because it
+may already have made changes (commits, edits, API calls). Cancellations, gates,
+distributors, and consolidators are never auto-retried. This is deliberately
+conservative: only failures that almost certainly did no work are retried.
+
+Set a default for the whole workflow with the top-level `retry` field, and/or
+override it per step. Every field is optional; unset fields fall back through the
+workflow default to the built-in defaults.
+
+| field | default | meaning |
+| --- | --- | --- |
+| `maxAttempts` | `3` | Total tries including the first. `1` disables retry. (1–10) |
+| `initialDelayMs` | `1000` | Backoff before the second attempt. (0–60000) |
+| `factor` | `2` | Geometric growth per attempt: 1s, 2s, 4s, … (1–10) |
+| `maxDelayMs` | `30000` | Cap on any single backoff wait. (0–600000) |
+| `jitter` | `true` | Scale each wait by a random `[0,1)` so fan-out children desync. |
+
+```jsonc
+{
+  "name": "build-and-test",
+  "retry": { "maxAttempts": 4 },        // workflow default
+  "phases": [
+    {
+      "id": "p1",
+      "title": "Work",
+      "steps": [
+        {
+          "id": "flaky",
+          "agent": "claude",
+          "model": "claude-sonnet-4-6",
+          "prompt": "{{input}}",
+          "retry": { "maxAttempts": 1 } // disable for just this step
+        }
+      ]
+    }
+  ]
+}
+```
+
+Retries surface live in the TUI and web UI (`↻ retry n/N`), and the total
+attempt count is recorded per step in run history. Auto-retry handles *transient*
+failures during a run; to re-run *persistent* failures after fixing their cause
+while keeping completed work, use `run --from <id> --retry-failed`.
 
 ## Templates
 

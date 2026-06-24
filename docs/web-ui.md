@@ -63,7 +63,9 @@ The client folds the streamed `WorkflowEvent`s into a phase → step tree with t
 same model the TUI uses (`src/tui/workflow-state.ts`), so the visualization stays
 faithful to the engine's real behavior. Step results are persisted to the same
 `.steamtrain/cache` directory, so a canceled web run resumes from where it left
-off on the next launch — exactly like the TUI.
+off on the next launch — exactly like the TUI. Transient agent failures
+auto-retry (a `step_retry` event renders as `↻ retry n/N` on the step), and a
+step's total attempt count shows on its card when it took more than one try.
 
 ## Run history
 

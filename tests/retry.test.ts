@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  DEFAULT_RETRY,
-  backoffDelayMs,
-  resolveRetryPolicy,
-} from "../src/workflow/retry";
+import { DEFAULT_RETRY, backoffDelayMs, resolveRetryPolicy } from "../src/workflow/retry";
 
 describe("resolveRetryPolicy", () => {
   it("falls back to built-in defaults when nothing is set", () => {

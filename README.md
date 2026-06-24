@@ -257,6 +257,12 @@ input, and cwd — editing a workflow invalidates stale entries automatically.
 Use `steamtrain workflow run … --fresh` to ignore the on-disk cache, or
 `steamtrain workflow cache clear` to delete it.
 
+Agent steps **auto-retry transient failures** (a crash or transport/spawn error
+before the agent completed a turn) with exponential backoff — on by default,
+configurable via a workflow-level or per-step `retry` policy. A step that ran to
+completion and reported an error is never auto-retried (it may have made changes).
+See [docs/workflow-spec.md](docs/workflow-spec.md#auto-retry-on-transient-failures).
+
 Workflow documentation:
 
 - [`docs/workflow-overview.md`](docs/workflow-overview.md) — mental model, diagrams, execution behavior

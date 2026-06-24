@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { AgentAdapter } from "../src/agents";
 import type { AgentEvent, AgentId } from "../src/types/events";
-import { runWorkflow } from "../src/workflow/engine";
 import type { RetryPolicy, StepResult, WorkflowEvent, WorkflowSpec } from "../src/workflow";
+import { runWorkflow } from "../src/workflow/engine";
 
 /** A scripted outcome for one adapter invocation. */
 type Outcome =
@@ -56,7 +56,9 @@ function workerSpec(retry: RetryPolicy): WorkflowSpec {
       {
         id: "p1",
         title: "P1",
-        steps: [{ id: "a", kind: "worker", agent: "claude", model: "sonnet", prompt: "do a", retry }],
+        steps: [
+          { id: "a", kind: "worker", agent: "claude", model: "sonnet", prompt: "do a", retry },
+        ],
       },
     ],
   };

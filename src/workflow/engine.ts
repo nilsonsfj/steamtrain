@@ -538,7 +538,10 @@ async function executeAgentStep(
   const retryEligible = kind === "worker" || kind === "processor";
   const stepRetry =
     retryEligible && "retry" in step ? (step.retry as RetryPolicy | undefined) : undefined;
-  const policy = resolveRetryPolicy(stepRetry, retryEligible ? ctx.retryDefault : { maxAttempts: 1 });
+  const policy = resolveRetryPolicy(
+    stepRetry,
+    retryEligible ? ctx.retryDefault : { maxAttempts: 1 },
+  );
 
   let attempt = 0;
   while (true) {
