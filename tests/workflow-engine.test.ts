@@ -594,6 +594,8 @@ describe("runWorkflow", () => {
         : echo(opts, id);
     const spec: WorkflowSpec = {
       name: "skip-deps",
+      // This test exercises dependency-skipping, not retry; keep "a" to one run.
+      retry: { maxAttempts: 1 },
       phases: [
         {
           id: "p1",

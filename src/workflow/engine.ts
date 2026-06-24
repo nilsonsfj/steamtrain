@@ -3,6 +3,7 @@ import type { AgentAdapter } from "../agents";
 import type { AgentEvent, AgentId } from "../types/events";
 import type { WorkflowEvent } from "./events";
 import { createChannel, runPool } from "./pool";
+import { type RetryPolicy, backoffDelayMs, resolveRetryPolicy } from "./retry";
 import { renderPrompt } from "./template";
 import {
   type AgentBackedWorkflowStep,
@@ -209,6 +210,7 @@ export async function* runWorkflow(
           reserveDynamicSteps,
           deps,
           signal,
+          retryDefault: spec.retry,
         },
         {
           pushAgentEvent: (stepId, event) => {
@@ -289,6 +291,8 @@ interface ExecuteContext {
   reserveDynamicSteps: (count: number) => boolean;
   deps: WorkflowDeps;
   signal?: AbortSignal;
+  /** Workflow-level auto-retry default; per-step `retry` overrides it. */
+  retryDefault?: RetryPolicy;
 }
 
 interface ExecutionOutcome {
@@ -408,44 +412,37 @@ async function executeStep(
   };
 }
 
-async function executeAgentStep(
+/**
+ * One agent invocation. Returns its result plus whether the failure (if any) is
+ * a *retryable transient*: a transport-level `error` event or a thrown exception
+ * with **no completed `result` ever observed**. A completed `result` (even
+ * `isError`) is never retryable — the agent ran a full turn and may have caused
+ * side effects. Cancellation is never retryable.
+ */
+async function runAgentAttempt(
   step: AgentBackedWorkflowStep,
   ctx: ExecuteContext,
   hooks: ExecuteHooks,
   stepId: string,
-  item?: WorkflowItem,
-): Promise<StepResult> {
-  const adapter = ctx.deps.createAdapter(step.agent, ctx.deps.binaries?.[step.agent]);
-  const prompt = renderPrompt(step.prompt, {
-    input: ctx.input,
-    outputs: ctx.outputs,
-    results: ctx.results,
-    item,
-  });
-  const stepCwd = step.cwd ? resolvePath(ctx.deps.cwd, step.cwd) : ctx.deps.cwd;
+  item: WorkflowItem | undefined,
+  prompt: string,
+  stepCwd: string,
+): Promise<{ result: StepResult; retryable: boolean }> {
   const started = Date.now();
-
   let finalText = "";
   let streamedText = "";
   let costUsd: number | undefined;
   let errored = false;
   let errorMessage: string | undefined;
+  let sawResult = false;
 
   try {
-    for await (const event of adapter.run({
-      prompt,
-      model: step.model,
-      effort: step.effort,
-      cwd: stepCwd,
-      env: step.env,
-      extraArgs: step.extraArgs,
-      timeoutMs: ctx.deps.timeoutMs,
-      signal: ctx.signal,
-    })) {
+    for await (const event of adapterRun(step, ctx, stepCwd, prompt)) {
       hooks.pushAgentEvent(stepId, event);
       if (event.kind === "text_delta") {
         if (!event.thinking) streamedText += event.text;
       } else if (event.kind === "result") {
+        sawResult = true;
         if (event.text) finalText = event.text;
         if (typeof event.costUsd === "number") costUsd = event.costUsd;
         if (event.isError) {
@@ -470,14 +467,111 @@ async function executeAgentStep(
     : errorMessage || finalText || streamedText || (cancelled ? "cancelled" : "");
 
   return {
-    stepId,
-    ok,
-    output,
-    item,
-    error: ok ? undefined : (errorMessage ?? (cancelled ? "cancelled" : "failed")),
-    durationMs: Date.now() - started,
-    costUsd,
+    result: {
+      stepId,
+      ok,
+      output,
+      item,
+      error: ok ? undefined : (errorMessage ?? (cancelled ? "cancelled" : "failed")),
+      durationMs: Date.now() - started,
+      costUsd,
+    },
+    // Transient + side-effect-free: errored, not cancelled, and the agent never
+    // completed a turn (no `result` event).
+    retryable: errored && !cancelled && !sawResult,
   };
+}
+
+function adapterRun(
+  step: AgentBackedWorkflowStep,
+  ctx: ExecuteContext,
+  stepCwd: string,
+  prompt: string,
+): AsyncIterable<AgentEvent> {
+  const adapter = ctx.deps.createAdapter(step.agent, ctx.deps.binaries?.[step.agent]);
+  return adapter.run({
+    prompt,
+    model: step.model,
+    effort: step.effort,
+    cwd: stepCwd,
+    env: step.env,
+    extraArgs: step.extraArgs,
+    timeoutMs: ctx.deps.timeoutMs,
+    signal: ctx.signal,
+  });
+}
+
+/** Sleep `ms`, resolving early if the signal aborts. */
+function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  if (signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function executeAgentStep(
+  step: AgentBackedWorkflowStep,
+  ctx: ExecuteContext,
+  hooks: ExecuteHooks,
+  stepId: string,
+  item?: WorkflowItem,
+): Promise<StepResult> {
+  const prompt = renderPrompt(step.prompt, {
+    input: ctx.input,
+    outputs: ctx.outputs,
+    results: ctx.results,
+    item,
+  });
+  const stepCwd = step.cwd ? resolvePath(ctx.deps.cwd, step.cwd) : ctx.deps.cwd;
+  // Auto-retry is scoped to worker/processor steps (and their fan-out children).
+  // Agent-backed distributors/consolidators run exactly once.
+  const kind = workflowStepKind(step);
+  const retryEligible = kind === "worker" || kind === "processor";
+  const stepRetry =
+    retryEligible && "retry" in step ? (step.retry as RetryPolicy | undefined) : undefined;
+  const policy = resolveRetryPolicy(stepRetry, retryEligible ? ctx.retryDefault : { maxAttempts: 1 });
+
+  let attempt = 0;
+  while (true) {
+    attempt += 1;
+    const { result, retryable } = await runAgentAttempt(
+      step,
+      ctx,
+      hooks,
+      stepId,
+      item,
+      prompt,
+      stepCwd,
+    );
+    const isLastAttempt = attempt >= policy.maxAttempts;
+    if (result.ok || !retryable || isLastAttempt || ctx.signal?.aborted) {
+      return attempt > 1 ? { ...result, attempts: attempt } : result;
+    }
+    const delayMs = backoffDelayMs(policy, attempt);
+    hooks.pushWorkflowEvent({
+      kind: "step_retry",
+      phaseId: hooks.phaseId,
+      stepId,
+      attempt,
+      maxAttempts: policy.maxAttempts,
+      delayMs,
+      reason: result.error ?? "transient failure",
+      ts: Date.now(),
+    });
+    await abortableSleep(delayMs, ctx.signal);
+    // A cancel during the backoff wait ends the step now — don't start another
+    // attempt (which would spawn the agent again).
+    if (ctx.signal?.aborted) return { ...result, attempts: attempt };
+  }
 }
 
 async function executeForEachStep(
