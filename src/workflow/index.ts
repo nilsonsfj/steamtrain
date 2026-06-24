@@ -35,6 +35,13 @@ export type {
   WorkflowDoneEvent,
 } from "./events";
 export { runWorkflow, type WorkflowDeps, type WorkflowRunContext } from "./engine";
+export {
+  type RetryPolicy,
+  type ResolvedRetryPolicy,
+  DEFAULT_RETRY,
+  resolveRetryPolicy,
+  backoffDelayMs,
+} from "./retry";
 export { BUNDLED_WORKFLOWS } from "./bundled";
 export { renderPrompt, type TemplateContext } from "./template";
 export { runPool, createChannel, type Channel } from "./pool";

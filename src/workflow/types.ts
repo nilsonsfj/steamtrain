@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { AgentId } from "../types/events";
+import type { RetryPolicy } from "./retry";
 
 /**
  * The declarative workflow model. A `WorkflowSpec` is a sequence of phases;
@@ -53,6 +54,8 @@ export interface WorkerStep extends WorkflowStepBase, AgentRunFields {
    * Syntax: `steps.<id>.items` (or `<id>.items`).
    */
   forEach?: string;
+  /** Per-step auto-retry policy for transient failures (overrides the workflow default). */
+  retry?: RetryPolicy;
 }
 
 export interface DistributorStep extends WorkflowStepBase {
@@ -128,6 +131,8 @@ export interface WorkflowSpec {
   name: string;
   description?: string;
   phases: WorkflowPhase[];
+  /** Default auto-retry policy applied to every agent step (per-step `retry` overrides). */
+  retry?: RetryPolicy;
 }
 
 /** The outcome of one step, fed into downstream templates and the cache. */
@@ -153,6 +158,8 @@ export interface StepResult {
   error?: string;
   durationMs: number;
   costUsd?: number;
+  /** Total attempts this step took (auto-retry); omitted/1 means it ran once. */
+  attempts?: number;
 }
 
 /** Total steps a single run may contain (matches the dynamic-workflows cap). */
@@ -187,10 +194,19 @@ const optionalAgentRunShape = {
   effort: z.string().min(1).optional(),
 };
 
+const retryPolicySchema = z.object({
+  maxAttempts: z.number().int().min(1).max(10).optional(),
+  initialDelayMs: z.number().int().min(0).max(60000).optional(),
+  factor: z.number().min(1).max(10).optional(),
+  maxDelayMs: z.number().int().min(0).max(600000).optional(),
+  jitter: z.boolean().optional(),
+});
+
 const workflowWorkerStepSchema = z.object({
   ...baseStepShape,
   kind: z.enum(["worker", "processor"]).optional(),
   forEach: z.string().min(1).optional(),
+  retry: retryPolicySchema.optional(),
   ...agentRunShape,
 });
 
@@ -293,6 +309,7 @@ export const workflowSpecSchema = z
     name: z.string().min(1).optional(),
     description: z.string().optional(),
     phases: z.array(workflowPhaseSchema).min(1),
+    retry: retryPolicySchema.optional(),
   })
   .superRefine((spec, ctx) => {
     const seen = new Set<string>();
