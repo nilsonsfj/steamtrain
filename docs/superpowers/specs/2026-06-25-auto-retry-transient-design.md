@@ -31,6 +31,12 @@ changed nothing: spawn failures and immediate transport/rate-limit errors before
 got underway. We also do **not** sniff result text for "rate limit" strings: a `result`
 event means a turn completed, so we cannot assume it was side-effect-free.
 
+An adapter that can't parse an envelope downgrades it to a `kind: "unknown"` event tagged
+with a `rawType` rather than dropping it. The classifier honors that tag: an `unknown`
+whose `rawType` is `tool_use`/`tool_result`/`assistant`/`user` is treated as a tool
+invocation (blocks retry), and `rawType: "result"` is treated as a completed turn — so a
+side-effecting but unparsed tool call can't slip through as a "clean" transport failure.
+
 ## Scope
 
 - Applies to **agent-backed worker/processor steps**, and to **each fan-out child

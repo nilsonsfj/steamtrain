@@ -462,6 +462,21 @@ async function runAgentAttempt(
       } else if (event.kind === "error") {
         errored = true;
         errorMessage ??= event.message;
+      } else if (event.kind === "unknown") {
+        // An adapter downgrades an envelope it can't parse to `unknown` rather
+        // than dropping it (e.g. a malformed/future-shaped tool_use or assistant
+        // line). Honor the tagged `rawType` so a side-effecting tool call — or a
+        // completed turn — still blocks retry even when its payload didn't parse.
+        if (
+          event.rawType === "tool_use" ||
+          event.rawType === "tool_result" ||
+          event.rawType === "assistant" ||
+          event.rawType === "user"
+        ) {
+          sawToolUse = true;
+        } else if (event.rawType === "result") {
+          sawResult = true;
+        }
       }
     }
   } catch (err) {
@@ -487,7 +502,8 @@ async function runAgentAttempt(
       costUsd,
     },
     // Transient + side-effect-free: errored, not cancelled, and the agent neither
-    // completed a turn (`result`) nor invoked a tool (`tool_use`/`tool_result`).
+    // completed a turn (`result`) nor invoked a tool (`tool_use`/`tool_result`),
+    // including unparsed `unknown` envelopes tagged as such.
     retryable: errored && !cancelled && !sawResult && !sawToolUse,
   };
 }

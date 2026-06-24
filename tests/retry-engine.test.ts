@@ -10,7 +10,8 @@ type Outcome =
   | { kind: "error" } // transport-level ErrorEvent (retryable)
   | { kind: "throw" } // adapter throws before any result (retryable)
   | { kind: "result-error" } // completed turn reporting failure (NOT retryable)
-  | { kind: "tool-then-error" }; // a tool ran (possible side effect) then a crash (NOT retryable)
+  | { kind: "tool-then-error" } // a tool ran (possible side effect) then a crash (NOT retryable)
+  | { kind: "unknown-tool-then-error" }; // an unparsed tool envelope then a crash (NOT retryable)
 
 /**
  * Build deps whose adapter follows a per-prompt script of {@link Outcome}s,
@@ -40,6 +41,13 @@ function scriptedDeps(script: Record<string, Outcome[]>, calls: string[]) {
         // before completing a turn — must NOT be retried.
         yield { kind: "tool_use", name: "Bash", agent: id, ts: Date.now() };
         throw new Error("crashed after tool use");
+      }
+      if (outcome.kind === "unknown-tool-then-error") {
+        // An adapter couldn't parse a tool envelope and downgraded it to
+        // `unknown` (tagged rawType "tool_use"), then the process crashed — the
+        // tool may still have had a side effect, so this must NOT be retried.
+        yield { kind: "unknown", rawType: "tool_use", raw: {}, agent: id, ts: Date.now() };
+        throw new Error("crashed after unparsed tool use");
       }
       yield {
         kind: "result",
@@ -130,6 +138,14 @@ describe("auto-retry transient failures", () => {
     const deps = scriptedDeps({ a: [{ kind: "tool-then-error" }, { kind: "ok" }] }, calls);
     const { ok } = await drain(workerSpec(fastRetry), deps);
     expect(calls).toEqual(["a"]); // ran exactly once despite the crash being transport-level
+    expect(ok).toBe(false);
+  });
+
+  it("never retries after an unparsed (unknown) tool envelope", async () => {
+    const calls: string[] = [];
+    const deps = scriptedDeps({ a: [{ kind: "unknown-tool-then-error" }, { kind: "ok" }] }, calls);
+    const { ok } = await drain(workerSpec(fastRetry), deps);
+    expect(calls).toEqual(["a"]); // the unparsed tool signal still blocked retry
     expect(ok).toBe(false);
   });
 
