@@ -558,7 +558,7 @@ export const PAGE_HTML = `<!doctype html>
       case "step_retry": {
         var rt = S.live[ev.stepId]; if (!rt) break;
         rt.attempts = ev.attempt + 1;
-        rt.activity = "\\u21bb retry " + ev.attempt + "/" + (ev.maxAttempts - 1) + " (" + Math.round(ev.delayMs) + "ms)";
+        rt.activity = "\\u21bb retrying " + (ev.attempt + 1) + "/" + ev.maxAttempts + " (" + Math.round(ev.delayMs) + "ms)";
         break;
       }
       case "gate_evaluated": {

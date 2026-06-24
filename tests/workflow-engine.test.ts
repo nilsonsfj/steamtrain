@@ -169,6 +169,8 @@ describe("runWorkflow", () => {
         : echo(opts, id);
     const spec: WorkflowSpec = {
       name: "fail",
+      // This test asserts failure handling, not retry; keep "a" to one attempt.
+      retry: { maxAttempts: 1 },
       phases: [
         { id: "p1", title: "P1", steps: [{ id: "a", agent: "claude", model: "bad", prompt: "x" }] },
         { id: "p2", title: "P2", steps: [{ id: "b", agent: "claude", model: "ok", prompt: "x" }] },

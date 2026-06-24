@@ -152,7 +152,7 @@ describe("workflowReducer", () => {
     ]);
     const step = flattenSteps(state)[0]?.step;
     expect(step?.attempts).toBe(2);
-    expect(step?.activity).toBe("↻ retry 1/2 (1000ms)");
+    expect(step?.activity).toBe("↻ retrying 2/3 (1000ms)");
   });
 
   it("tracks generated fan-out child steps", () => {

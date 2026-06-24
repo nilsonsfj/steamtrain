@@ -9,7 +9,8 @@ type Outcome =
   | { kind: "ok"; text?: string }
   | { kind: "error" } // transport-level ErrorEvent (retryable)
   | { kind: "throw" } // adapter throws before any result (retryable)
-  | { kind: "result-error" }; // completed turn reporting failure (NOT retryable)
+  | { kind: "result-error" } // completed turn reporting failure (NOT retryable)
+  | { kind: "tool-then-error" }; // a tool ran (possible side effect) then a crash (NOT retryable)
 
 /**
  * Build deps whose adapter follows a per-prompt script of {@link Outcome}s,
@@ -33,6 +34,12 @@ function scriptedDeps(script: Record<string, Outcome[]>, calls: string[]) {
       if (outcome.kind === "result-error") {
         yield { kind: "result", text: "logic fail", isError: true, agent: id, ts: Date.now() };
         return;
+      }
+      if (outcome.kind === "tool-then-error") {
+        // The agent invoked a tool (a possible side effect) and then crashed
+        // before completing a turn — must NOT be retried.
+        yield { kind: "tool_use", name: "Bash", agent: id, ts: Date.now() };
+        throw new Error("crashed after tool use");
       }
       yield {
         kind: "result",
@@ -115,6 +122,14 @@ describe("auto-retry transient failures", () => {
     const deps = scriptedDeps({ a: [{ kind: "result-error" }, { kind: "ok" }] }, calls);
     const { ok } = await drain(workerSpec(fastRetry), deps);
     expect(calls).toEqual(["a"]); // ran exactly once
+    expect(ok).toBe(false);
+  });
+
+  it("never retries after the agent invoked a tool (possible side effects)", async () => {
+    const calls: string[] = [];
+    const deps = scriptedDeps({ a: [{ kind: "tool-then-error" }, { kind: "ok" }] }, calls);
+    const { ok } = await drain(workerSpec(fastRetry), deps);
+    expect(calls).toEqual(["a"]); // ran exactly once despite the crash being transport-level
     expect(ok).toBe(false);
   });
 

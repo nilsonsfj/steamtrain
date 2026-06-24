@@ -217,7 +217,7 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
       return updateStep(state, e.phaseId, e.stepId, (s) => ({
         ...s,
         attempts: e.attempt + 1,
-        activity: `↻ retry ${e.attempt}/${e.maxAttempts - 1} (${Math.round(e.delayMs)}ms)`,
+        activity: `↻ retrying ${e.attempt + 1}/${e.maxAttempts} (${Math.round(e.delayMs)}ms)`,
       }));
     case "gate_evaluated":
       return updateStep(state, e.phaseId, e.stepId, (s) => ({

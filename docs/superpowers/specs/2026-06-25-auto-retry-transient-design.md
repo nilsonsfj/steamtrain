@@ -14,17 +14,22 @@ distinguishes two failure sources, and they map cleanly onto that line:
 
 | Failure source (in `executeAgentStep`) | Meaning | Retryable? |
 |---|---|---|
-| `event.kind === "error"`, or a thrown exception from `adapter.run`, **with no `result` event seen** | subprocess couldn't run / crashed / transport error | **Yes** — transient, no completed turn, no side effects |
+| `event.kind === "error"`, or a thrown exception from `adapter.run`, **with no `result` and no `tool_use`/`tool_result` seen** | subprocess couldn't run / crashed / transport error before the agent did any work | **Yes** — transient, no observable work, no side effects |
 | `event.kind === "result"` with `isError: true` | the agent ran to completion and reported failure | **No** — may have committed / edited / called APIs |
+| any failure after a `tool_use`/`tool_result` was seen | the agent already invoked a tool | **No** — a tool may have had side effects |
 | any failure after a `result` event was already seen | agent completed a turn first | **No** — work likely done |
 | cancelled (`signal.aborted`) | user stopped the run | **No** — never |
 | gate `onFalse`, skipped-dependency, distributor, non-agent consolidator | decisions / deterministic | **No** — never (not agent subprocess failures) |
 
-The rule: **retry only when the agent never emitted a completed `result`.** This single
-condition is simultaneously the strongest "this was transient" signal and the strongest
-"no side effects yet" signal — they coincide. Erring on safety is built into the
-classification, not bolted on. We do **not** sniff result text for "rate limit" strings:
-a `result` event means a turn completed, so we cannot assume it was side-effect-free.
+The rule: **retry only when the agent did no observable work** — it neither emitted a
+completed `result` nor invoked a tool. A completed `result` means a full turn ran; a
+`tool_use`/`tool_result` means a tool may already have caused a side effect (a commit, a
+file write, an API call) even if the agent later crashed before reporting a result. Both
+block retry. This is conservative by design — a read-only tool call also blocks a
+(probably-safe) retry — but it keeps the retried set to failures that almost certainly
+changed nothing: spawn failures and immediate transport/rate-limit errors before the agent
+got underway. We also do **not** sniff result text for "rate limit" strings: a `result`
+event means a turn completed, so we cannot assume it was side-effect-free.
 
 ## Scope
 

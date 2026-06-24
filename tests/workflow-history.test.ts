@@ -106,6 +106,8 @@ describe("RunRecordBuilder", () => {
     });
     const spec: WorkflowSpec = {
       name: "single",
+      // This test asserts failure capture, not retry; keep "a" to one attempt.
+      retry: { maxAttempts: 1 },
       phases: [
         { id: "p1", title: "One", steps: [{ id: "a", agent: "claude", model: "m", prompt: "x" }] },
       ],

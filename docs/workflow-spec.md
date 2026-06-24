@@ -233,12 +233,15 @@ Agent worker/processor steps (and each `forEach` child) automatically re-attempt
 **transient, side-effect-free** failures with exponential backoff. Auto-retry is
 on by default.
 
-A failure is retried only when the agent **never completed a turn** — a
-transport/spawn error or a crash before any result. A step that runs to
-completion and reports an error (`isError`) is **never** auto-retried, because it
-may already have made changes (commits, edits, API calls). Cancellations, gates,
-distributors, and consolidators are never auto-retried. This is deliberately
-conservative: only failures that almost certainly did no work are retried.
+A failure is retried only when the agent **did no observable work** — a
+transport/spawn error or a crash that happened *before the agent completed a turn
+and before it invoked any tool*. A step is **never** auto-retried if it ran to
+completion and reported an error (`isError`), or if it had already started using
+tools when it failed — either case may have made changes (commits, edits, API
+calls). Cancellations, gates, distributors, and consolidators are never
+auto-retried. This is deliberately conservative: in practice it retries spawn
+failures and immediate transport/rate-limit errors, not failures that occur once
+the agent is underway.
 
 Set a default for the whole workflow with the top-level `retry` field, and/or
 override it per step. Every field is optional; unset fields fall back through the

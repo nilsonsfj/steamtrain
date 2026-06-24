@@ -415,9 +415,15 @@ async function executeStep(
 /**
  * One agent invocation. Returns its result plus whether the failure (if any) is
  * a *retryable transient*: a transport-level `error` event or a thrown exception
- * with **no completed `result` ever observed**. A completed `result` (even
- * `isError`) is never retryable — the agent ran a full turn and may have caused
- * side effects. Cancellation is never retryable.
+ * where the agent did **no observable work** — it neither completed a turn (no
+ * `result` event) nor invoked any tool (no `tool_use`). A completed `result`
+ * (even `isError`) is never retryable, and — conservatively — neither is any
+ * attempt in which the agent started using tools, because a tool call may have
+ * had side effects (a commit, a file write, an API call) even if the agent later
+ * crashed before reporting a result. Cancellation is never retryable. This errs
+ * on the side of safety: we only retry failures that almost certainly changed
+ * nothing (spawn failures, immediate transport/rate-limit errors before any
+ * tool ran).
  */
 async function runAgentAttempt(
   step: AgentBackedWorkflowStep,
@@ -435,12 +441,16 @@ async function runAgentAttempt(
   let errored = false;
   let errorMessage: string | undefined;
   let sawResult = false;
+  let sawToolUse = false;
 
   try {
     for await (const event of adapterRun(step, ctx, stepCwd, prompt)) {
       hooks.pushAgentEvent(stepId, event);
       if (event.kind === "text_delta") {
         if (!event.thinking) streamedText += event.text;
+      } else if (event.kind === "tool_use" || event.kind === "tool_result") {
+        // The agent invoked a tool — assume it may have caused a side effect.
+        sawToolUse = true;
       } else if (event.kind === "result") {
         sawResult = true;
         if (event.text) finalText = event.text;
@@ -476,9 +486,9 @@ async function runAgentAttempt(
       durationMs: Date.now() - started,
       costUsd,
     },
-    // Transient + side-effect-free: errored, not cancelled, and the agent never
-    // completed a turn (no `result` event).
-    retryable: errored && !cancelled && !sawResult,
+    // Transient + side-effect-free: errored, not cancelled, and the agent neither
+    // completed a turn (`result`) nor invoked a tool (`tool_use`/`tool_result`).
+    retryable: errored && !cancelled && !sawResult && !sawToolUse,
   };
 }
 
@@ -543,6 +553,7 @@ async function executeAgentStep(
     retryEligible ? ctx.retryDefault : { maxAttempts: 1 },
   );
 
+  const firstStarted = Date.now();
   let attempt = 0;
   while (true) {
     attempt += 1;
@@ -557,7 +568,11 @@ async function executeAgentStep(
     );
     const isLastAttempt = attempt >= policy.maxAttempts;
     if (result.ok || !retryable || isLastAttempt || ctx.signal?.aborted) {
-      return attempt > 1 ? { ...result, attempts: attempt } : result;
+      // After a retry, report true wall-clock for the whole step (all attempts
+      // plus the backoff waits between them), not just the last attempt.
+      return attempt > 1
+        ? { ...result, attempts: attempt, durationMs: Date.now() - firstStarted }
+        : result;
     }
     const delayMs = backoffDelayMs(policy, attempt);
     hooks.pushWorkflowEvent({
@@ -573,7 +588,9 @@ async function executeAgentStep(
     await abortableSleep(delayMs, ctx.signal);
     // A cancel during the backoff wait ends the step now — don't start another
     // attempt (which would spawn the agent again).
-    if (ctx.signal?.aborted) return { ...result, attempts: attempt };
+    if (ctx.signal?.aborted) {
+      return { ...result, attempts: attempt, durationMs: Date.now() - firstStarted };
+    }
   }
 }
 
