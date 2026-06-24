@@ -79,6 +79,23 @@ export interface StepDoneEvent {
   ts: number;
 }
 
+/**
+ * A retryable (transient, side-effect-free) agent failure occurred and the step
+ * is about to back off and try again. Emitted *after* the failed attempt and
+ * *before* the backoff sleep. `attempt` is the 1-based attempt that just failed;
+ * `delayMs` is the upcoming wait.
+ */
+export interface StepRetryEvent {
+  kind: "step_retry";
+  phaseId: string;
+  stepId: string;
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  reason: string;
+  ts: number;
+}
+
 export interface GateEvaluatedEvent {
   kind: "gate_evaluated";
   phaseId: string;
@@ -109,6 +126,7 @@ export type WorkflowEvent =
   | StepStartEvent
   | FanOutEvent
   | StepStreamEvent
+  | StepRetryEvent
   | GateEvaluatedEvent
   | StepDoneEvent
   | PhaseDoneEvent
