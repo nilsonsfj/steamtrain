@@ -74,7 +74,6 @@ export const OPENCODE_MODELS: readonly AgentModel[] = [
   { id: "opencode-go/hy3-preview", name: "Hy3 Preview" },
 ];
 
-const TOOL_RUNNING = new Set(["pending", "running", "queued", "in_progress"]);
 const TOOL_DONE = new Set(["completed", "done", "success", "finished"]);
 const TOOL_FAILED = new Set(["error", "failed", "cancelled", "aborted"]);
 
@@ -120,14 +119,7 @@ export function createOpenCodeMapper(agent: AgentId = AGENT): EventMapper {
       const name = part.tool ?? "tool";
       const status = part.state?.status;
 
-      if (status === undefined || TOOL_RUNNING.has(status)) {
-        if (!toolStarted.has(id)) {
-          toolStarted.add(id);
-          out.push({ kind: "tool_use", agent, ts, id, name, input: part.state?.input, status });
-        }
-        return;
-      }
-      if (TOOL_FAILED.has(status)) {
+      if (status !== undefined && TOOL_FAILED.has(status)) {
         if (!toolFinished.has(id)) {
           toolFinished.add(id);
           out.push({
@@ -143,7 +135,7 @@ export function createOpenCodeMapper(agent: AgentId = AGENT): EventMapper {
         }
         return;
       }
-      if (TOOL_DONE.has(status)) {
+      if (status !== undefined && TOOL_DONE.has(status)) {
         if (!toolFinished.has(id)) {
           toolFinished.add(id);
           out.push({
@@ -161,6 +153,15 @@ export function createOpenCodeMapper(agent: AgentId = AGENT): EventMapper {
         }
         return;
       }
+      // undefined, a running status, OR an unrecognized status: surface a tool
+      // start so an unknown future status is never silently dropped (e.g. so
+      // retry never treats a step that already ran a tool as a clean, retryable
+      // transport failure).
+      if (!toolStarted.has(id)) {
+        toolStarted.add(id);
+        out.push({ kind: "tool_use", agent, ts, id, name, input: part.state?.input, status });
+      }
+      return;
     }
     // step-start / step-finish parts and other shapes carry no displayable text.
   };
