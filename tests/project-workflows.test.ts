@@ -90,6 +90,23 @@ describe("saveProjectWorkflow", () => {
     saveProjectWorkflow("renamed", sampleSpec("original"), cwd);
     expect(loadProjectWorkflows(cwd).renamed?.name).toBe("renamed");
   });
+
+  it("refuses to clobber an unparseable steamtrain.json", () => {
+    const cwd = tmpCwd();
+    writeFileSync(join(cwd, CONFIG_FILENAME), "{ not valid json");
+    const result = saveProjectWorkflow("my-flow", sampleSpec("my-flow"), cwd);
+    expect(result.ok).toBe(false);
+    // The original (broken) file is left untouched, not overwritten.
+    expect(readFileSync(join(cwd, CONFIG_FILENAME), "utf8")).toBe("{ not valid json");
+  });
+
+  it("refuses to clobber a non-object top-level config (e.g. an array)", () => {
+    const cwd = tmpCwd();
+    writeFileSync(join(cwd, CONFIG_FILENAME), JSON.stringify([1, 2, 3]));
+    const result = saveProjectWorkflow("my-flow", sampleSpec("my-flow"), cwd);
+    expect(result.ok).toBe(false);
+    expect(JSON.parse(readFileSync(join(cwd, CONFIG_FILENAME), "utf8"))).toEqual([1, 2, 3]);
+  });
 });
 
 describe("deleteProjectWorkflow", () => {

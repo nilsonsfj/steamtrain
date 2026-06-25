@@ -101,14 +101,16 @@ export function deleteProjectWorkflow(
 
 /**
  * Read and JSON-parse a config file as a plain object. Returns `null` when the
- * file does not exist, `undefined` when it exists but cannot be parsed (so
- * callers can refuse to clobber a broken config), and the object otherwise.
+ * file does not exist, `undefined` when it exists but cannot be parsed *or*
+ * holds a non-object top-level value (e.g. an array) — so callers refuse to
+ * clobber a broken config rather than silently discarding its contents — and
+ * the object otherwise.
  */
 function readRawConfig(path: string): Record<string, unknown> | null | undefined {
   if (!existsSync(path)) return null;
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8"));
-    return isObject(parsed) ? parsed : {};
+    return isObject(parsed) ? parsed : undefined;
   } catch {
     return undefined;
   }

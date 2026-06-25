@@ -1117,8 +1117,9 @@ export const PAGE_HTML = `<!doctype html>
   }
 
   function doDelete() {
-    if (!S.selected || S.source !== "user") return;
-    if (!window.confirm("Delete workflow \\"" + S.selected + "\\"? This removes it from your user workflows file.")) return;
+    if (!S.selected || (S.source !== "user" && S.source !== "project")) return;
+    var fileLabel = S.source === "project" ? "the project steamtrain.json" : "your user workflows file";
+    if (!window.confirm("Delete workflow \\"" + S.selected + "\\"? This removes it from " + fileLabel + ".")) return;
     var name = S.selected;
     api("DELETE", "/api/workflows/" + encodeURIComponent(name)).then(function (r) {
       if (r.status === 200 && r.body.ok) {
