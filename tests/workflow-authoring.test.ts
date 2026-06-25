@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -291,6 +291,29 @@ describe("WorkflowAuthor", () => {
     expect(removed.ok).toBe(true);
     expect(removed.removed).toBe(true);
     expect(host.workflowSource("team-bug-hunt")).toBeUndefined();
+  });
+
+  it("writes project workflows to an explicit projectConfigPath (honors --config-file)", () => {
+    const host = new FakeHost(home);
+    // A config path that is NOT <cwd>/steamtrain.json, mirroring `--config-file`.
+    const customPath = join(home, "nested", "custom.steamtrain.json");
+    const author = new WorkflowAuthor({
+      host,
+      config,
+      home,
+      cwd: home,
+      projectConfigPath: customPath,
+      createAdapter: jsonAdapter(VALID_SPEC),
+    });
+
+    const result = author.save("custom-proj", userFileSpec("custom-proj"), undefined, "project");
+    expect(result.ok).toBe(true);
+    expect(result.savedPath).toBe(customPath);
+    expect(host.workflowSource("custom-proj")).toBe("project");
+    // The default cwd location was NOT touched.
+    expect(existsSync(join(home, "steamtrain.json"))).toBe(false);
+    const onDisk = JSON.parse(readFileSync(customPath, "utf8"));
+    expect(onDisk.workflows["custom-proj"]).toBeTruthy();
   });
 
   it("renaming a project workflow drops the old project entry (no duplicate)", () => {

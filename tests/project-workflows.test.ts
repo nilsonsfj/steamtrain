@@ -111,6 +111,19 @@ describe("saveProjectWorkflow", () => {
     expect(result.ok).toBe(false);
     expect(JSON.parse(readFileSync(cfg(cwd), "utf8"))).toEqual([1, 2, 3]);
   });
+
+  it("fails loud when the existing config would not survive a strict load", () => {
+    // The file already holds an unrecognized top-level key, so the engine would
+    // ignore it wholesale at load time — a written workflow would be invisible.
+    // Refuse at write time (with a clear error) instead, and leave the file as-is.
+    const cwd = tmpCwd();
+    const original = JSON.stringify({ workflows: {}, bogusKey: true });
+    writeFileSync(cfg(cwd), original);
+    const result = saveProjectWorkflow("my-flow", sampleSpec("my-flow"), cfg(cwd));
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/cannot save/i);
+    expect(readFileSync(cfg(cwd), "utf8")).toBe(original);
+  });
 });
 
 describe("deleteProjectWorkflow", () => {
@@ -176,6 +189,9 @@ describe("loadProjectWorkflows", () => {
     const cwd = tmpCwd();
     // configFileSchema is strict, so the engine rejects the entire file (and so
     // must this loader, or the live catalog would diverge from a fresh run).
+    // This parity is also why saveProjectWorkflow refuses to write into such a
+    // file (see "fails loud when the existing config would not survive a strict
+    // load" above) — together they avoid a save that silently disappears.
     writeFileSync(
       cfg(cwd),
       JSON.stringify({ workflows: { good: sampleSpec("good") }, bogusKey: true }),

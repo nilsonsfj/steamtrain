@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import type { WorkflowSpec } from "../workflow/types";
 import { validateWorkflow } from "../workflow/types";
 import { loadConfig, projectConfigPath } from "./load";
+import { configFileSchema } from "./types";
 
 /**
  * Read/write the **project** workflow layer — the `workflows` section of a
@@ -16,6 +17,13 @@ import { loadConfig, projectConfigPath } from "./load";
  * Every function takes the **config file path** (not a directory), so authoring
  * targets the exact `steamtrain.json` the rest of the process loaded —
  * including a `--config-file` path outside the working directory.
+ *
+ * Reads go through the engine's strict {@link loadConfig}, so the catalog view
+ * matches a fresh run exactly. To avoid a "saved it but it vanished" trap, a
+ * write also validates the *whole merged config* against {@link configFileSchema}
+ * first and refuses (with a clear error) if the existing file already holds
+ * something the engine would reject — e.g. an unrecognized top-level key — since
+ * such a file is ignored wholesale at load time.
  */
 
 export interface SaveProjectWorkflowResult {
@@ -74,6 +82,20 @@ export function saveProjectWorkflow(
   const existing = isObject(base.workflows) ? (base.workflows as Record<string, unknown>) : {};
   const replaced = Boolean(existing[name]);
   const next = { ...base, workflows: { ...existing, [name]: full } };
+
+  // Fail loud rather than silently: if the merged config wouldn't survive the
+  // engine's strict load (e.g. the file already has an unrecognized top-level
+  // key), the written workflow would be invisible to the catalog. Refuse here so
+  // the caller learns at write time instead of wondering where it went.
+  const check = configFileSchema.safeParse(next);
+  if (!check.success) {
+    const issue = check.error.issues[0];
+    const detail = issue
+      ? `${issue.path.join(".") || "config"}: ${issue.message}`
+      : "invalid config";
+    return { ok: false, error: `cannot save into ${configPath} (${detail})` };
+  }
+
   writeRawConfig(configPath, next);
   return { ok: true, path: configPath, replaced };
 }
