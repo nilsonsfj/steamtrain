@@ -692,7 +692,9 @@ export function App({
         mode,
         history: Boolean(history),
         wfCreate: Boolean(wfCreate),
-        wfPreview: Boolean(wfPreview),
+        // Mirror the render tree: a preview only occupies the screen when its
+        // spec (and dispatch check) resolve; otherwise the picker is shown.
+        previewing: Boolean(wfPreview && previewSpec && previewDispatchCheck),
         showWorkflowView,
       })
         ? {
@@ -713,6 +715,8 @@ export function App({
       wfPreview,
       patchWorkflowStep,
       previewStepSelection,
+      previewSpec,
+      previewDispatchCheck,
       history,
       wfCreate,
       showWorkflowView,

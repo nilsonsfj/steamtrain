@@ -42,7 +42,7 @@ describe("isWorkflowPickerActive", () => {
     mode: "workflow",
     history: false,
     wfCreate: false,
-    wfPreview: false,
+    previewing: false,
     showWorkflowView: false,
   };
 
@@ -57,7 +57,7 @@ describe("isWorkflowPickerActive", () => {
   it("is false while previewing, running, drafting, or in history", () => {
     // These are exactly the states where mode stays "workflow" but the picker is
     // hidden — `/model` must fall back to its legacy warning, not set a draft.
-    expect(isWorkflowPickerActive({ ...picker, wfPreview: true })).toBe(false);
+    expect(isWorkflowPickerActive({ ...picker, previewing: true })).toBe(false);
     expect(isWorkflowPickerActive({ ...picker, showWorkflowView: true })).toBe(false);
     expect(isWorkflowPickerActive({ ...picker, wfCreate: true })).toBe(false);
     expect(isWorkflowPickerActive({ ...picker, history: true })).toBe(false);

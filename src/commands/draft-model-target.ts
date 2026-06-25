@@ -5,19 +5,22 @@ import {
   formatDraftTarget,
   parseDraftModelRequest,
 } from "../tui/draft-model";
-import type { SlashCommandContext, SlashCommandResult } from "./types";
+import type { DraftModelContext, SlashCommandResult } from "./types";
 
 /**
  * Drive the drafting agent/model from `/model` while sitting on the workflow
  * picker (no step selected). This is the sibling of the workflow-step and
  * workspace-tab `/model` handlers: same command, different target depending on
  * where you are. The override it sets is what `/createworkflow` drafts with.
+ *
+ * Takes the (already narrowed) {@link DraftModelContext} directly rather than the
+ * whole command context, so the caller's `if (ctx.draftModel)` guard is the type
+ * guard — no non-null assertion here.
  */
 export function executeDraftModelCommand(
   args: string[],
-  ctx: SlashCommandContext,
+  dm: DraftModelContext,
 ): SlashCommandResult {
-  const dm = ctx.draftModel!;
   const healthy = new Set(dm.healthyAgents);
   const req = parseDraftModelRequest(args, healthy);
 
@@ -50,9 +53,8 @@ export function executeDraftModelCommand(
   return notice("info", lines.join("\n"));
 }
 
-export function completeDraftModelArgs(ctx: SlashCommandContext): readonly string[] {
-  if (!ctx.draftModel) return [];
-  return draftModelCompletions(new Set(ctx.draftModel.healthyAgents));
+export function completeDraftModelArgs(dm: DraftModelContext): readonly string[] {
+  return draftModelCompletions(new Set(dm.healthyAgents));
 }
 
 function availableLine(healthyAgents: readonly DraftTarget["agent"][]): string | undefined {

@@ -29,7 +29,7 @@ export const modelCommand: SlashCommand = {
       // On the workflow picker, `/model` sets the model used to draft new
       // workflows (`/createworkflow`). Only available when the host wires it.
       if (ctx.draftModel) {
-        return executeDraftModelCommand(args, ctx);
+        return executeDraftModelCommand(args, ctx.draftModel);
       }
       return workflowStepUnavailableNotice("model");
     }
@@ -93,7 +93,7 @@ export const modelCommand: SlashCommand = {
       return completeWorkflowModelArgs(ctx);
     }
     if (!isWorkspaceMode(ctx.mode)) {
-      if (ctx.draftModel && args.length <= 1) return completeDraftModelArgs(ctx);
+      if (ctx.draftModel && args.length <= 1) return completeDraftModelArgs(ctx.draftModel);
       return [];
     }
     const entry = ctx.workspaceMap.get(ctx.mode);

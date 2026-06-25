@@ -22,7 +22,8 @@ export interface WorkflowScreenState {
   mode: Mode;
   history: boolean;
   wfCreate: boolean;
-  wfPreview: boolean;
+  /** A preview screen is actually rendering (its spec resolved), not merely selected. */
+  previewing: boolean;
   showWorkflowView: boolean;
 }
 
@@ -30,8 +31,11 @@ export interface WorkflowScreenState {
  * Whether the workflow picker is the visible screen — the only place `/model`
  * targets the drafting model. In workflow mode the picker is hidden while
  * browsing history, drafting (create panel), previewing, or running a workflow;
- * in those states `/model` keeps its legacy "select a step" warning.
+ * in those states `/model` keeps its legacy "select a step" warning. `previewing`
+ * is the resolved-preview flag (not raw `wfPreview`), so a stale selection whose
+ * spec no longer resolves — where the picker falls through and renders — still
+ * counts as the picker.
  */
 export function isWorkflowPickerActive(s: WorkflowScreenState): boolean {
-  return s.mode === "workflow" && !s.history && !s.wfCreate && !s.wfPreview && !s.showWorkflowView;
+  return s.mode === "workflow" && !s.history && !s.wfCreate && !s.previewing && !s.showWorkflowView;
 }
