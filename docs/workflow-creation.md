@@ -95,6 +95,24 @@ validates the result, saves it to your user catalog, and selects it in the
 picker — ready to run. Press `Esc` to cancel an in-flight draft or dismiss the
 panel.
 
+### Choosing the drafting model
+
+The effective drafting agent · model is shown in the workflow picker header
+(`draft: …`, tagged `(auto)` when it's the automatic pick). To override it, use
+`/model` while on the picker (no step selected):
+
+```
+/model claude                      # that agent's default draft model
+/model claude claude-sonnet-4-6    # an explicit agent + model
+/model opencode/mimo-v2.5-free     # a bare model id (agent inferred)
+/model                             # show the current target + options
+/model auto                        # clear the override, back to auto-pick
+```
+
+The override is session-only and only accepts a **doctor-healthy** agent (a
+draft spawns a real CLI). It's the same `/model` you use on a selected workflow
+step or a workspace tab — the target just depends on where you are.
+
 Add `--project` to save into the project's `./steamtrain.json` instead:
 
 ```

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { defaultDraftModel } from "../src/agents";
 import { modelIdsForAgent } from "../src/agents/models";
 import {
   clearOpencodeVariantCacheForTests,
@@ -111,6 +112,64 @@ describe("executeSlashCommand", () => {
     );
     expect(result.handled).toBe(true);
     expect(updateWorkflowStep).toHaveBeenCalledWith("plan", { model: "claude-opus-4-8" });
+  });
+
+  it("sets the drafting model from /model on the workflow picker", () => {
+    const set = vi.fn();
+    const model = modelIdsForAgent("claude")[0]!;
+    const result = executeSlashCommand(
+      `/model claude ${model}`,
+      makeCtx({
+        mode: "workflow",
+        draftModel: { usingOverride: false, healthyAgents: ["opencode", "claude"], set },
+      }),
+    );
+    expect(result.handled).toBe(true);
+    expect(set).toHaveBeenCalledWith({ agent: "claude", model });
+  });
+
+  it("resets the drafting model with /model auto", () => {
+    const set = vi.fn();
+    const result = executeSlashCommand(
+      "/model auto",
+      makeCtx({
+        mode: "workflow",
+        draftModel: { usingOverride: true, healthyAgents: ["opencode"], set },
+      }),
+    );
+    expect(result.handled).toBe(true);
+    expect(set).toHaveBeenCalledWith(null);
+  });
+
+  it("shows the current drafting model with bare /model on the picker", () => {
+    const set = vi.fn();
+    const result = executeSlashCommand(
+      "/model",
+      makeCtx({
+        mode: "workflow",
+        draftModel: {
+          current: { agent: "opencode", model: defaultDraftModel("opencode") },
+          usingOverride: false,
+          healthyAgents: ["opencode"],
+          set,
+        },
+      }),
+    );
+    expect(set).not.toHaveBeenCalled();
+    expect(result.handled && result.notices?.[0]?.text).toContain("drafting model:");
+  });
+
+  it("errors when /model targets an unhealthy agent on the picker", () => {
+    const set = vi.fn();
+    const result = executeSlashCommand(
+      "/model codex",
+      makeCtx({
+        mode: "workflow",
+        draftModel: { usingOverride: false, healthyAgents: ["opencode"], set },
+      }),
+    );
+    expect(set).not.toHaveBeenCalled();
+    expect(result.handled && result.notices?.[0]?.level).toBe("error");
   });
 
   it("sets agent on a selected workflow step", () => {

@@ -57,7 +57,7 @@ These two reducers are near-duplicates and are a prime extraction target (see §
 | Cancel a run | ✅ | ✅ | |
 | Resume from on-disk cache | ✅ | ✅ | |
 | Create workflow via LLM draft | ✅ | ✅ | Different draft-target selection (below) |
-| Choose drafting agent/model/effort | ❌ | ✅ | TUI auto-picks first healthy agent (`pickGenerationTarget`) |
+| Choose drafting agent/model | ⚠️ | ✅ | TUI: `/model` on the picker sets a session draft override (`src/tui/draft-model.ts`), shown in the header; auto-picks first healthy agent otherwise. Web: per-draft agent/model/effort selects in the create modal. TUI override has no effort knob yet |
 | Per-step **agent** override | ✅ | ✅ | |
 | Per-step **model** override | ✅ | ✅ | |
 | Per-step **effort** override | ✅ | ✅ | |

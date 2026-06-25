@@ -7,16 +7,30 @@ interface WorkflowPickerProps {
   workflows: WorkflowCatalogEntry[];
   selectedIndex: number;
   height: number;
+  /** Effective drafting agent · model for /createworkflow (right-aligned in the header). */
+  draftLabel?: string;
 }
 
 /** The workflow launcher: pick one with ↑/↓, Enter for preview, Ctrl+R to run. */
-export function WorkflowPicker({ workflows, selectedIndex, height }: WorkflowPickerProps) {
+export function WorkflowPicker({
+  workflows,
+  selectedIndex,
+  height,
+  draftLabel,
+}: WorkflowPickerProps) {
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} height={height}>
       <Box justifyContent="space-between">
-        <Text color="cyan" bold>
-          workflows
-        </Text>
+        <Box>
+          <Text color="cyan" bold>
+            workflows
+          </Text>
+          {draftLabel ? (
+            <Text color="gray">
+              {"  "}draft: {draftLabel}
+            </Text>
+          ) : null}
+        </Box>
         <Text color="gray">↑/↓ select · type to edit · Ctrl+R run</Text>
       </Box>
       <Box flexDirection="column" flexGrow={1}>
