@@ -1,5 +1,6 @@
 import type { Mode } from "../tui/modes";
 import type { AgentId } from "../types/events";
+import type { WorkflowScope } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 
 /** Selected agent-backed step in the workflow preview drill-down. */
@@ -40,12 +41,12 @@ export interface SlashCommandContext {
   /** Persist session workflow overrides to the user workflows file. */
   saveWorkflows?: () => SlashCommandResult;
   /** Start LLM-delegated generation of a new workflow from a description (TUI only). */
-  createWorkflow?: (description: string) => SlashCommandResult;
-  /** Save the selected workflow under a new name as a user copy (TUI only). */
-  cloneWorkflow?: (newName: string) => SlashCommandResult;
-  /** Delete a user workflow by name from `~/.steamtrain/workflows.json` (TUI only). */
+  createWorkflow?: (description: string, scope?: WorkflowScope) => SlashCommandResult;
+  /** Save the selected workflow under a new name (user or project copy) (TUI only). */
+  cloneWorkflow?: (newName: string, scope?: WorkflowScope) => SlashCommandResult;
+  /** Delete a user or project workflow by name (TUI only). */
   deleteWorkflow?: (name: string) => SlashCommandResult;
-  /** Names of user-source workflows (for `/deleteworkflow` completion). */
+  /** Names of deletable (user + project) workflows, for `/deleteworkflow` completion. */
   userWorkflowNames?: readonly string[];
   /** Open the past-run history browser (TUI only). */
   openHistory?: () => SlashCommandResult;

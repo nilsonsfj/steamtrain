@@ -2,7 +2,7 @@ import type { SlashCommand } from "../types";
 
 export const deleteWorkflowCommand: SlashCommand = {
   name: "deleteworkflow",
-  description: "Delete a user workflow from ~/.steamtrain/workflows.json",
+  description: "Delete a user or project workflow (from workflows.json or steamtrain.json)",
   usage: "/deleteworkflow <name>",
   execute(args, ctx) {
     if (!ctx.deleteWorkflow) {

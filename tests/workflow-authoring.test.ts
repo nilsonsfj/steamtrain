@@ -253,6 +253,46 @@ describe("WorkflowAuthor", () => {
     expect(host.workflowSource("bug-hunt")).toBe("bundled");
   });
 
+  it("saves a hand-edited spec to the project layer (steamtrain.json)", () => {
+    const host = new FakeHost(home);
+    const author = makeAuthor(host);
+    const result = author.save("Proj Flow", userFileSpec("Proj Flow"), undefined, "project");
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("project");
+    expect(host.workflowSource("proj-flow")).toBe("project");
+    // cwd is `home` in the fake, so the project config lives there.
+    const cfg = JSON.parse(readFileSync(join(home, "steamtrain.json"), "utf8"));
+    expect(cfg.workflows["proj-flow"]).toBeTruthy();
+  });
+
+  it("generates into the project layer when scoped to project", async () => {
+    const host = new FakeHost(home);
+    const result = await makeAuthor(host).generate({
+      description: "echo things",
+      agent: "opencode",
+      model: "opencode/mimo-v2.5-free",
+      name: "ProjEcho",
+      scope: "project",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("project");
+    expect(host.workflowSource("projecho")).toBe("project");
+  });
+
+  it("clones into the project layer and removes a project workflow", () => {
+    const host = new FakeHost(home);
+    const author = makeAuthor(host);
+    const cloned = author.clone("bug-hunt", "Team Bug Hunt", "project");
+    expect(cloned.ok).toBe(true);
+    expect(host.workflowSource("team-bug-hunt")).toBe("project");
+    expect(host.workflowSource("bug-hunt")).toBe("bundled");
+
+    const removed = author.remove("team-bug-hunt");
+    expect(removed.ok).toBe(true);
+    expect(removed.removed).toBe(true);
+    expect(host.workflowSource("team-bug-hunt")).toBeUndefined();
+  });
+
   it("previews a workflow with staged step overrides without saving", () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);

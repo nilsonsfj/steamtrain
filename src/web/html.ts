@@ -479,9 +479,9 @@ export const PAGE_HTML = `<!doctype html>
     line.appendChild(h("span", { class: "src", text: S.source || "unknown" }));
     var counts = S.spec ? S.spec.phases.length + " phase" + (S.spec.phases.length === 1 ? "" : "s") : "";
     if (counts) line.appendChild(h("span", { text: counts }));
-    if (S.source !== "user") line.appendChild(h("span", { text: "\\u00b7 configuring saves a user copy" }));
+    if (S.source !== "user" && S.source !== "project") line.appendChild(h("span", { text: "\\u00b7 configuring saves a user copy" }));
     document.getElementById("wfActions").style.display = "flex";
-    document.getElementById("deleteBtn").style.display = S.source === "user" ? "block" : "none";
+    document.getElementById("deleteBtn").style.display = (S.source === "user" || S.source === "project") ? "block" : "none";
   }
 
   // ---- run model -----------------------------------------------------------
@@ -826,6 +826,12 @@ export const PAGE_HTML = `<!doctype html>
       return { value: a.id, label: a.id + (a.healthy ? "" : " (unavailable)") };
     });
   }
+  function scopeOptions() {
+    return [
+      { value: "user", label: "Personal (~/.steamtrain/workflows.json)" },
+      { value: "project", label: "Project (./steamtrain.json)" }
+    ];
+  }
   function modelOptions(agentId) {
     return modelsFor(agentId).map(function (m) { return { value: m.id, label: m.name }; });
   }
@@ -865,6 +871,7 @@ export const PAGE_HTML = `<!doctype html>
     var modelSel = selectEl(modelOptions(a0.id), a0.defaultModel);
     var effortWrap = h("div", { class: "field", id: "cEffortField" });
     var nameInput = h("input", { class: "txt", placeholder: "auto from description", maxlength: "48" });
+    var scopeSel = selectEl(scopeOptions(), "user");
     var descTa = h("textarea", { class: "ta", placeholder: "Describe what the workflow should do, in plain language..." });
     descTa.style.minHeight = "92px";
     var banner = h("div", { class: "mbanner" });
@@ -894,7 +901,10 @@ export const PAGE_HTML = `<!doctype html>
         field("Model", modelSel),
         effortWrap
       ),
-      field("Name (optional)", nameInput, "Lowercase, kebab-case. Left blank, it's derived from the description."),
+      h("div", { class: "row2" },
+        field("Name (optional)", nameInput, "Lowercase, kebab-case. Left blank, it's derived from the description."),
+        field("Save to", scopeSel, "Project = ./steamtrain.json (committable, shared).")
+      ),
       draft
     );
 
@@ -914,7 +924,8 @@ export const PAGE_HTML = `<!doctype html>
       createBtn.disabled = true; createBtn.textContent = "Drafting\\u2026";
       var payload = {
         description: desc, agent: agentSel.value, model: modelSel.value,
-        effort: effortSel ? effortSel.value : "", name: nameInput.value.trim()
+        effort: effortSel ? effortSel.value : "", name: nameInput.value.trim(),
+        scope: scopeSel.value
       };
       var ac = new AbortController();
       S.draftAbort = ac;
@@ -983,6 +994,7 @@ export const PAGE_HTML = `<!doctype html>
     var nameInput = h("input", { class: "txt", maxlength: "48", value: creating ? spec.name + "-copy" : spec.name });
     if (!creating) nameInput.setAttribute("disabled", "true");
     var descInput = h("input", { class: "txt", value: spec.description || "", placeholder: "one-line description" });
+    var scopeSel = selectEl(scopeOptions(), "user");
     var banner = h("div", { class: "mbanner" });
     var refs = {};
 
@@ -998,9 +1010,10 @@ export const PAGE_HTML = `<!doctype html>
     var body = h("div", null,
       banner,
       h("div", { class: "row2" },
-        field(creating ? "New name" : "Name", nameInput, creating ? "Saved as a new user workflow." : (S.source === "user" ? "" : "Editing creates a user copy that overrides the " + S.source + " one.")),
+        field(creating ? "New name" : "Name", nameInput, creating ? "Saved as a new workflow." : (S.source === "user" || S.source === "project" ? "" : "Editing creates a user copy that overrides the " + S.source + " one.")),
         field("Description", descInput)
       ),
+      creating ? field("Save to", scopeSel, "Project = ./steamtrain.json (committable, shared).") : null,
       phasesWrap
     );
 
@@ -1027,7 +1040,9 @@ export const PAGE_HTML = `<!doctype html>
         });
       });
       saveBtn.disabled = true; saveBtn.textContent = "Saving\\u2026";
-      var payload = { spec: spec };
+      // Cloning uses the chosen scope; editing re-saves to the workflow's own
+      // writable layer (project edits stay in steamtrain.json, otherwise user).
+      var payload = { spec: spec, scope: creating ? scopeSel.value : (S.source === "project" ? "project" : "user") };
       if (!creating) payload.previousName = S.selected;
       api("PUT", "/api/workflows/" + encodeURIComponent(targetName), payload).then(function (r) {
         saveBtn.disabled = false; saveBtn.textContent = creating ? "Save copy" : "Save";

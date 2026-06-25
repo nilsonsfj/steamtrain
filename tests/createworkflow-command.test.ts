@@ -29,8 +29,14 @@ describe("/createworkflow", () => {
       "/createworkflow review the auth module for security",
       makeCtx({ createWorkflow }),
     );
-    expect(createWorkflow).toHaveBeenCalledWith("review the auth module for security");
+    expect(createWorkflow).toHaveBeenCalledWith("review the auth module for security", "user");
     expect(result.handled).toBe(true);
+  });
+
+  it("routes to the project layer with --project", () => {
+    const createWorkflow = vi.fn(() => ({ handled: true as const, clearInput: true }));
+    executeSlashCommand("/createworkflow --project audit the api", makeCtx({ createWorkflow }));
+    expect(createWorkflow).toHaveBeenCalledWith("audit the api", "project");
   });
 
   it("errors when no description is given", () => {

@@ -107,6 +107,7 @@ export {
   type AuthorWriteResult,
   type GenerateRequest,
   type WorkflowAuthorOptions,
+  type WorkflowScope,
   WorkflowAuthor,
 } from "./authoring";
 export {
