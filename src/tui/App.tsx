@@ -80,7 +80,7 @@ import {
   healthyAgentSet,
   resolveDraftTarget,
 } from "./draft-model";
-import { type Mode, buildModes, isWorkspaceMode, nextMode } from "./modes";
+import { type Mode, buildModes, isWorkflowPickerActive, isWorkspaceMode, nextMode } from "./modes";
 import {
   type PromptDraftByMode,
   getPromptDraft,
@@ -684,16 +684,24 @@ export function App({
       deleteWorkflow,
       userWorkflowNames,
       openHistory,
-      // Only on the picker (no step selected) does `/model` set the draft model.
-      draftModel:
-        mode === "workflow" && !previewStepSelection
-          ? {
-              current: draftResolution.target,
-              usingOverride: draftResolution.usingOverride,
-              healthyAgents: [...healthyAgents],
-              set: setDraftOverride,
-            }
-          : undefined,
+      // `/model` sets the draft model only when the picker is actually showing —
+      // not while previewing, running, drafting, or browsing history (where
+      // `mode` stays "workflow" but the picker is hidden). Those keep the legacy
+      // "select a step" warning.
+      draftModel: isWorkflowPickerActive({
+        mode,
+        history: Boolean(history),
+        wfCreate: Boolean(wfCreate),
+        wfPreview: Boolean(wfPreview),
+        showWorkflowView,
+      })
+        ? {
+            current: draftResolution.target,
+            usingOverride: draftResolution.usingOverride,
+            healthyAgents: [...healthyAgents],
+            set: setDraftOverride,
+          }
+        : undefined,
     }),
     [
       mode,
@@ -705,6 +713,9 @@ export function App({
       wfPreview,
       patchWorkflowStep,
       previewStepSelection,
+      history,
+      wfCreate,
+      showWorkflowView,
       saveWorkflows,
       createWorkflow,
       cloneWorkflow,

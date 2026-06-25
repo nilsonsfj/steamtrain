@@ -16,3 +16,22 @@ export function nextMode(current: Mode, modes: readonly Mode[]): Mode {
   const idx = modes.indexOf(current);
   return modes[(idx + 1) % modes.length] ?? current;
 }
+
+/** Screen flags that hide the workflow picker even though `mode` is "workflow". */
+export interface WorkflowScreenState {
+  mode: Mode;
+  history: boolean;
+  wfCreate: boolean;
+  wfPreview: boolean;
+  showWorkflowView: boolean;
+}
+
+/**
+ * Whether the workflow picker is the visible screen — the only place `/model`
+ * targets the drafting model. In workflow mode the picker is hidden while
+ * browsing history, drafting (create panel), previewing, or running a workflow;
+ * in those states `/model` keeps its legacy "select a step" warning.
+ */
+export function isWorkflowPickerActive(s: WorkflowScreenState): boolean {
+  return s.mode === "workflow" && !s.history && !s.wfCreate && !s.wfPreview && !s.showWorkflowView;
+}
