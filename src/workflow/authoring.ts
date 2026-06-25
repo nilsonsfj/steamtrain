@@ -42,6 +42,13 @@ export interface WorkflowAuthorOptions {
   home: string;
   /** Working directory for the drafting agent (it needs no repo access). */
   cwd: string;
+  /**
+   * Path of the project `steamtrain.json` that project-scope authoring reads and
+   * writes. Defaults to `<cwd>/steamtrain.json`; pass the resolved config path
+   * (e.g. from `--config-file`) so project writes land in the same file the rest
+   * of the process loaded.
+   */
+  projectConfigPath?: string;
   /** Project workflows preserved across reloads (from `steamtrain.json`). */
   projectWorkflows?: Record<string, WorkflowSpec>;
   /** Injectable adapter factory for tests; defaults to the real one. */
@@ -100,6 +107,7 @@ export class WorkflowAuthor {
   private readonly config: SteamtrainConfig;
   private readonly home: string;
   private readonly cwd: string;
+  private readonly projectConfigPath: string;
   private readonly projectWorkflows?: Record<string, WorkflowSpec>;
   private readonly makeAdapter: (id: AgentId, binary?: string) => AgentAdapter;
 
@@ -108,6 +116,7 @@ export class WorkflowAuthor {
     this.config = options.config;
     this.home = options.home;
     this.cwd = options.cwd;
+    this.projectConfigPath = options.projectConfigPath ?? projectConfigPath(options.cwd);
     this.projectWorkflows = options.projectWorkflows;
     this.makeAdapter = options.createAdapter ?? createAdapter;
   }
@@ -186,7 +195,7 @@ export class WorkflowAuthor {
         deleteUserWorkflow(previousName, this.home);
         this.reload();
       } else if (previousSource === "project") {
-        deleteProjectWorkflow(previousName, this.cwd);
+        deleteProjectWorkflow(previousName, this.projectConfigPath);
         this.reload();
       }
     }
@@ -226,7 +235,7 @@ export class WorkflowAuthor {
     }
     const result =
       source === "project"
-        ? deleteProjectWorkflow(name, this.cwd)
+        ? deleteProjectWorkflow(name, this.projectConfigPath)
         : deleteUserWorkflow(name, this.home);
     if (!result.ok) return { ok: false, error: result.error };
     this.reload();
@@ -273,7 +282,7 @@ export class WorkflowAuthor {
 
     const saved =
       scope === "project"
-        ? saveProjectWorkflow(name, full, this.cwd)
+        ? saveProjectWorkflow(name, full, this.projectConfigPath)
         : saveUserWorkflow(name, full, this.home);
     if (!saved.ok) return { ok: false, error: saved.error, raw: extra?.raw };
 
@@ -303,15 +312,15 @@ export class WorkflowAuthor {
    * Re-read the catalog from disk (+ project) and swap it into the host. Project
    * workflows are re-read from `<cwd>/steamtrain.json` so a project-layer write
    * is reflected live; the constructor's `projectWorkflows` is the fallback for
-   * the first load and for configs loaded from a non-cwd custom path that has no
-   * `steamtrain.json` in the working directory.
+   * the first load and for the case where the project config file does not exist
+   * yet.
    */
   private reload(): void {
     // Trust the on-disk project file whenever it exists (even with zero
     // workflows, so deleting the last project workflow takes effect); fall back
-    // to the constructor's snapshot only when cwd has no steamtrain.json.
-    const projectWorkflows = existsSync(projectConfigPath(this.cwd))
-      ? loadProjectWorkflows(this.cwd)
+    // to the constructor's snapshot only when the config file is absent.
+    const projectWorkflows = existsSync(this.projectConfigPath)
+      ? loadProjectWorkflows(this.projectConfigPath)
       : this.projectWorkflows;
     const catalog = loadWorkflowCatalog({ home: this.home, projectWorkflows });
     this.host.setCatalog(catalog);

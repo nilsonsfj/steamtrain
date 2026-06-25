@@ -293,6 +293,36 @@ describe("WorkflowAuthor", () => {
     expect(host.workflowSource("team-bug-hunt")).toBeUndefined();
   });
 
+  it("renaming a project workflow drops the old project entry (no duplicate)", () => {
+    const host = new FakeHost(home);
+    const author = makeAuthor(host);
+    author.save("proj-old", userFileSpec("proj-old"), undefined, "project");
+    expect(host.workflowSource("proj-old")).toBe("project");
+
+    const renamed = author.save("proj-new", userFileSpec("proj-new"), "proj-old", "project");
+    expect(renamed.ok).toBe(true);
+    expect(host.workflowSource("proj-new")).toBe("project");
+    expect(host.workflowSource("proj-old")).toBeUndefined();
+  });
+
+  it("removing the last project workflow leaves zero project entries after reload", () => {
+    const host = new FakeHost(home);
+    const author = makeAuthor(host);
+    author.save("only-proj", userFileSpec("only-proj"), undefined, "project");
+    expect(host.workflowSource("only-proj")).toBe("project");
+
+    // remove() reloads from disk; the steamtrain.json still exists (now with an
+    // empty workflows map), so the deletion must not be resurrected.
+    const removed = author.remove("only-proj");
+    expect(removed.ok).toBe(true);
+    expect(host.workflowSource("only-proj")).toBeUndefined();
+    // No catalog entry remains project-sourced.
+    const projectNames = Object.keys(host.listWorkflows()).filter(
+      (name) => host.workflowSource(name) === "project",
+    );
+    expect(projectNames).toEqual([]);
+  });
+
   it("previews a workflow with staged step overrides without saving", () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);

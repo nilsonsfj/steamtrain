@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { type WorkflowSpec, validateWorkflow, workflowSpecSchema } from "../workflow/types";
-import { projectConfigPath } from "./load";
+import type { WorkflowSpec } from "../workflow/types";
+import { validateWorkflow } from "../workflow/types";
+import { loadConfig, projectConfigPath } from "./load";
 
 /**
  * Read/write the **project** workflow layer — the `workflows` section of a
@@ -11,6 +12,10 @@ import { projectConfigPath } from "./load";
  * preserves all other top-level keys and only touches `workflows`. The spec is
  * validated with the same rules the engine enforces, and the write is atomic
  * (temp file + rename) so a crash never leaves a half-written config.
+ *
+ * Every function takes the **config file path** (not a directory), so authoring
+ * targets the exact `steamtrain.json` the rest of the process loaded —
+ * including a `--config-file` path outside the working directory.
  */
 
 export interface SaveProjectWorkflowResult {
@@ -29,22 +34,19 @@ export interface DeleteProjectWorkflowResult {
   error?: string;
 }
 
-/** Read the `workflows` map out of a project `steamtrain.json`, keyed by name. */
-export function loadProjectWorkflows(cwd: string = process.cwd()): Record<string, WorkflowSpec> {
-  const path = projectConfigPath(cwd);
-  const raw = readRawConfig(path);
-  if (!raw) return {};
-
-  const workflowsValue = (raw as { workflows?: unknown }).workflows;
-  if (!workflowsValue || typeof workflowsValue !== "object") return {};
-
-  const out: Record<string, WorkflowSpec> = {};
-  for (const [name, value] of Object.entries(workflowsValue as Record<string, unknown>)) {
-    const parsed = workflowSpecSchema.safeParse(value);
-    if (!parsed.success) continue;
-    out[name] = { ...parsed.data, name };
-  }
-  return out;
+/**
+ * Read the project workflows from a `steamtrain.json`, keyed by name. Goes
+ * through the engine's own {@link loadConfig}, so the result is byte-for-byte
+ * what the engine sees at startup: a file the strict schema rejects (e.g. an
+ * unknown top-level key) yields no project workflows here too, and a
+ * semantically invalid entry is dropped while the valid ones survive — no
+ * divergence between the live catalog and a fresh run.
+ */
+export function loadProjectWorkflows(
+  configPath: string = projectConfigPath(),
+): Record<string, WorkflowSpec> {
+  if (!existsSync(configPath)) return {};
+  return loadConfig({ customPath: configPath }).config.workflows ?? {};
 }
 
 /**
@@ -56,24 +58,24 @@ export function loadProjectWorkflows(cwd: string = process.cwd()): Record<string
 export function saveProjectWorkflow(
   name: string,
   spec: WorkflowSpec,
-  cwd: string = process.cwd(),
+  configPath: string = projectConfigPath(),
 ): SaveProjectWorkflowResult {
   const full: WorkflowSpec = { ...spec, name };
   const valid = validateWorkflow(full);
   if (!valid.ok) return { ok: false, error: valid.error };
 
-  const path = projectConfigPath(cwd);
-  const raw = readRawConfig(path);
+  const raw = readRawConfig(configPath);
   if (raw === undefined) {
-    return { ok: false, error: `could not parse ${path}` };
+    return { ok: false, error: `could not parse ${configPath}` };
   }
 
+  // `raw` is null when the file does not exist yet — start from an empty config.
   const base = raw ?? {};
   const existing = isObject(base.workflows) ? (base.workflows as Record<string, unknown>) : {};
   const replaced = Boolean(existing[name]);
   const next = { ...base, workflows: { ...existing, [name]: full } };
-  writeRawConfig(path, next);
-  return { ok: true, path, replaced };
+  writeRawConfig(configPath, next);
+  return { ok: true, path: configPath, replaced };
 }
 
 /**
@@ -83,11 +85,10 @@ export function saveProjectWorkflow(
  */
 export function deleteProjectWorkflow(
   name: string,
-  cwd: string = process.cwd(),
+  configPath: string = projectConfigPath(),
 ): DeleteProjectWorkflowResult {
-  const path = projectConfigPath(cwd);
-  const raw = readRawConfig(path);
-  if (raw === undefined) return { ok: false, error: `could not parse ${path}` };
+  const raw = readRawConfig(configPath);
+  if (raw === undefined) return { ok: false, error: `could not parse ${configPath}` };
   if (!raw) return { ok: true, removed: false };
 
   const existing = isObject(raw.workflows) ? (raw.workflows as Record<string, unknown>) : {};
@@ -95,8 +96,8 @@ export function deleteProjectWorkflow(
 
   const { [name]: _removed, ...rest } = existing;
   const next = { ...raw, workflows: rest };
-  writeRawConfig(path, next);
-  return { ok: true, path, removed: true };
+  writeRawConfig(configPath, next);
+  return { ok: true, path: configPath, removed: true };
 }
 
 /**

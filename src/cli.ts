@@ -173,7 +173,7 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
       return runWorkflowCommand(orchestrator, config, rest, io, out, err);
     case "create":
     case "new":
-      return runWorkflowCreateCommand(config, rest, io, out, err);
+      return runWorkflowCreateCommand(config, rest, io, out, err, configScope.path);
     default:
       err(`unknown workflow command '${command}'\n\n${helpText()}`);
       return 1;
@@ -604,6 +604,8 @@ async function runWorkflowCreateCommand(
   io: CliIO,
   out: (text: string) => void,
   err: (text: string) => void,
+  /** Resolved project config path (honors `--config-file`); used for `--scope project`. */
+  projectConfigPath: string,
 ): Promise<number> {
   const options = parseCreateOptions(args);
   if (!options) {
@@ -662,11 +664,10 @@ async function runWorkflowCreateCommand(
   // Perform the save (if requested) before reporting, so machine-readable
   // output reflects the real outcome rather than just the --save flag. The
   // scope picks the layer: user (`~/.steamtrain/workflows.json`) or project
-  // (the `workflows` section of `<cwd>/steamtrain.json`).
-  const projectCwd = io.cwd ?? process.cwd();
+  // (the `workflows` section of the resolved `steamtrain.json`).
   const saved = options.save
     ? options.scope === "project"
-      ? saveProjectWorkflow(spec.name, spec, projectCwd)
+      ? saveProjectWorkflow(spec.name, spec, projectConfigPath)
       : saveUserWorkflow(spec.name, spec)
     : undefined;
 

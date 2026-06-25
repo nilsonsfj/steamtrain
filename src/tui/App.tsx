@@ -112,6 +112,8 @@ import {
 interface AppProps {
   config: SteamtrainConfig;
   configSource: string;
+  /** Resolved project `steamtrain.json` path for project-scope authoring. */
+  configPath?: string;
   configWarning?: string;
   settings: SteamtrainSettings;
   settingsWarning?: string;
@@ -142,6 +144,7 @@ interface HistoryUiState {
 export function App({
   config,
   configSource,
+  configPath,
   configWarning,
   settings,
   settingsWarning,
@@ -268,9 +271,10 @@ export function App({
         config,
         home: homedir(),
         cwd: process.cwd(),
+        projectConfigPath: configPath,
         projectWorkflows: config.workflows,
       }),
-    [authoringHost, config],
+    [authoringHost, config, configPath],
   );
 
   const resolveWorkflowSpec = useCallback(

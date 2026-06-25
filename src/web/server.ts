@@ -404,6 +404,8 @@ export interface StartWebUiOptions {
   workflowCatalog: LoadedWorkflowCatalog;
   configLabel?: string;
   cwd?: string;
+  /** Resolved project `steamtrain.json` path for project-scope authoring. */
+  configPath?: string;
   port?: number;
   host?: string;
   stdout?: (text: string) => void;
@@ -447,6 +449,7 @@ export async function startWebUi(
     config: options.config,
     home: homedir(),
     cwd,
+    projectConfigPath: options.configPath,
     projectWorkflows: options.config.workflows,
   });
   const server = createWebServer({

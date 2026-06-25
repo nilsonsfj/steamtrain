@@ -35,7 +35,11 @@ Authoring writes to one of two layers, selectable everywhere (CLI, TUI, web):
 
 Project writes are read-modify-write: only the `workflows` section is touched,
 and all other config keys (`binaries`, `timeoutMs`, `maxConcurrency`) are
-preserved. The same scope applies to clone and delete.
+preserved. The same scope applies to clone and delete. Authoring targets the
+**same** `steamtrain.json` the process loaded, so `--config-file <path>` is
+honored (the workflow is written to that file, not the working directory's).
+The live catalog re-reads the project layer through the engine's own config
+loader, so what you see after a write matches a fresh run exactly.
 
 ## CLI: `steamtrain workflow create`
 
