@@ -4,7 +4,12 @@ import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { createAdapter } from "./agents";
 import { refreshAgentCatalogCaches } from "./agents/models";
-import { type SteamtrainConfig, configDisplayLabel, loadConfig } from "./config";
+import {
+  type SteamtrainConfig,
+  configDisplayLabel,
+  loadConfig,
+  saveProjectWorkflow,
+} from "./config";
 import { runDoctor } from "./doctor";
 import { Orchestrator } from "./orchestrator";
 import { loadSettings } from "./settings";
@@ -168,7 +173,7 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
       return runWorkflowCommand(orchestrator, config, rest, io, out, err);
     case "create":
     case "new":
-      return runWorkflowCreateCommand(config, rest, io, out, err);
+      return runWorkflowCreateCommand(config, rest, io, out, err, configScope.path);
     default:
       err(`unknown workflow command '${command}'\n\n${helpText()}`);
       return 1;
@@ -583,6 +588,7 @@ interface CreateOptions {
   stdin: boolean;
   json: boolean;
   save: boolean;
+  scope: "user" | "project";
   agent: AgentId;
   model?: string;
   effort?: string;
@@ -598,11 +604,13 @@ async function runWorkflowCreateCommand(
   io: CliIO,
   out: (text: string) => void,
   err: (text: string) => void,
+  /** Resolved project config path (honors `--config-file`); used for `--scope project`. */
+  projectConfigPath: string,
 ): Promise<number> {
   const options = parseCreateOptions(args);
   if (!options) {
     err(
-      "usage: steamtrain workflow create --input <description> [--agent <id>] [--model <model>] [--effort <e>] [--name <name>] [--save] [--json]\n",
+      "usage: steamtrain workflow create --input <description> [--agent <id>] [--model <model>] [--effort <e>] [--name <name>] [--save] [--scope user|project] [--json]\n",
     );
     return 1;
   }
@@ -654,8 +662,14 @@ async function runWorkflowCreateCommand(
   const spec = result.spec;
 
   // Perform the save (if requested) before reporting, so machine-readable
-  // output reflects the real outcome rather than just the --save flag.
-  const saved = options.save ? saveUserWorkflow(spec.name, spec) : undefined;
+  // output reflects the real outcome rather than just the --save flag. The
+  // scope picks the layer: user (`~/.steamtrain/workflows.json`) or project
+  // (the `workflows` section of the resolved `steamtrain.json`).
+  const saved = options.save
+    ? options.scope === "project"
+      ? saveProjectWorkflow(spec.name, spec, projectConfigPath)
+      : saveUserWorkflow(spec.name, spec)
+    : undefined;
 
   if (options.json) {
     out(
@@ -685,7 +699,9 @@ async function runWorkflowCreateCommand(
     }
     out(`\n${saved.replaced ? "updated" : "saved"} '${spec.name}' → ${saved.path}\n`);
   } else {
-    out("\n(not saved — re-run with --save to write it to ~/.steamtrain/workflows.json)\n");
+    out(
+      "\n(not saved — re-run with --save [--scope project] to write it to ~/.steamtrain/workflows.json or ./steamtrain.json)\n",
+    );
   }
   return 0;
 }
@@ -695,6 +711,7 @@ function parseCreateOptions(args: string[]): CreateOptions | null {
     stdin: false,
     json: false,
     save: false,
+    scope: "user",
     agent: DEFAULT_CREATE_AGENT,
   };
   for (let i = 0; i < args.length; i++) {
@@ -725,6 +742,12 @@ function parseCreateOptions(args: string[]): CreateOptions | null {
       options.json = true;
     } else if (arg === "--save") {
       options.save = true;
+    } else if (arg === "--scope") {
+      const value = args[++i];
+      if (value !== "user" && value !== "project") return null;
+      options.scope = value;
+    } else if (arg === "--project") {
+      options.scope = "project";
     } else {
       return null;
     }
@@ -858,7 +881,7 @@ Usage:
   steamtrain workflow run <name> --input <text> [--json] [--fresh]
   steamtrain workflow run <name> --stdin [--json] [--fresh]
   steamtrain workflow run --from <runId> [--retry-failed] [--input <text>] [--json]
-  steamtrain workflow create --input <description> [--agent <id>] [--model <model>] [--name <name>] [--save] [--json]
+  steamtrain workflow create --input <description> [--agent <id>] [--model <model>] [--name <name>] [--save] [--scope user|project] [--json]
   steamtrain workflow cache clear [<workflow> --input <text> | --stdin]
   steamtrain workflow history [list]
   steamtrain workflow history show <id>
@@ -866,8 +889,10 @@ Usage:
 
 workflow create delegates to an agent (default: opencode/mimo-v2.5-free) to
 draft a workflow from a plain-English description, validates it, prints the JSON,
-and (with --save) writes it to ~/.steamtrain/workflows.json so it shows up in the
-picker and CLI alongside the bundled workflows.
+and (with --save) writes it so it shows up in the picker and CLI alongside the
+bundled workflows. --scope user (default) writes to ~/.steamtrain/workflows.json;
+--scope project (or --project) writes to the project's ./steamtrain.json so the
+workflow can be committed and shared with the team.
 
 Workflow runs resume from ${WORKFLOW_CACHE_DIR} by default (file name from workflow +
 input + cwd; contents validated with specHash). Pass --fresh to ignore and delete

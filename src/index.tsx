@@ -58,6 +58,7 @@ async function main(): Promise<void> {
       workspaces,
       workflowCatalog,
       configLabel,
+      configPath: scope.path,
       port,
       host,
     });
@@ -78,6 +79,7 @@ async function main(): Promise<void> {
     <App
       config={config}
       configSource={configLabel}
+      configPath={scope.path}
       configWarning={warning}
       settings={settings}
       settingsWarning={settingsWarning}

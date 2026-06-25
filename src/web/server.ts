@@ -184,7 +184,7 @@ async function handle(
         return;
       }
       const body = await readBody(req);
-      let parsed: { spec?: unknown; previousName?: unknown };
+      let parsed: { spec?: unknown; previousName?: unknown; scope?: unknown };
       try {
         parsed = body ? JSON.parse(body) : {};
       } catch {
@@ -197,7 +197,8 @@ async function handle(
       }
       const previousName =
         typeof parsed.previousName === "string" ? parsed.previousName : undefined;
-      const result = deps.author.save(name, parsed.spec as WorkflowSpec, previousName);
+      const scope = parsed.scope === "project" ? "project" : "user";
+      const result = deps.author.save(name, parsed.spec as WorkflowSpec, previousName, scope);
       sendJson(res, result.ok ? 200 : 400, result);
       return;
     }
@@ -326,6 +327,7 @@ async function streamGenerate(
     model?: unknown;
     effort?: unknown;
     name?: unknown;
+    scope?: unknown;
   };
   try {
     parsed = body ? JSON.parse(body) : {};
@@ -359,6 +361,7 @@ async function streamGenerate(
       model: typeof parsed.model === "string" ? parsed.model : "",
       effort: typeof parsed.effort === "string" ? parsed.effort : undefined,
       name: typeof parsed.name === "string" ? parsed.name : undefined,
+      scope: parsed.scope === "project" ? "project" : "user",
     },
     (text) => send({ type: "delta", text }),
     controller.signal,
@@ -401,6 +404,8 @@ export interface StartWebUiOptions {
   workflowCatalog: LoadedWorkflowCatalog;
   configLabel?: string;
   cwd?: string;
+  /** Resolved project `steamtrain.json` path for project-scope authoring. */
+  configPath?: string;
   port?: number;
   host?: string;
   stdout?: (text: string) => void;
@@ -444,6 +449,7 @@ export async function startWebUi(
     config: options.config,
     home: homedir(),
     cwd,
+    projectConfigPath: options.configPath,
     projectWorkflows: options.config.workflows,
   });
   const server = createWebServer({

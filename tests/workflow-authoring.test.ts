@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -251,6 +251,99 @@ describe("WorkflowAuthor", () => {
     expect(ontoBundled.ok).toBe(false);
     expect(ontoBundled.error).toMatch(/already exists/i);
     expect(host.workflowSource("bug-hunt")).toBe("bundled");
+  });
+
+  it("saves a hand-edited spec to the project layer (steamtrain.json)", () => {
+    const host = new FakeHost(home);
+    const author = makeAuthor(host);
+    const result = author.save("Proj Flow", userFileSpec("Proj Flow"), undefined, "project");
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("project");
+    expect(host.workflowSource("proj-flow")).toBe("project");
+    // cwd is `home` in the fake, so the project config lives there.
+    const cfg = JSON.parse(readFileSync(join(home, "steamtrain.json"), "utf8"));
+    expect(cfg.workflows["proj-flow"]).toBeTruthy();
+  });
+
+  it("generates into the project layer when scoped to project", async () => {
+    const host = new FakeHost(home);
+    const result = await makeAuthor(host).generate({
+      description: "echo things",
+      agent: "opencode",
+      model: "opencode/mimo-v2.5-free",
+      name: "ProjEcho",
+      scope: "project",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("project");
+    expect(host.workflowSource("projecho")).toBe("project");
+  });
+
+  it("clones into the project layer and removes a project workflow", () => {
+    const host = new FakeHost(home);
+    const author = makeAuthor(host);
+    const cloned = author.clone("bug-hunt", "Team Bug Hunt", "project");
+    expect(cloned.ok).toBe(true);
+    expect(host.workflowSource("team-bug-hunt")).toBe("project");
+    expect(host.workflowSource("bug-hunt")).toBe("bundled");
+
+    const removed = author.remove("team-bug-hunt");
+    expect(removed.ok).toBe(true);
+    expect(removed.removed).toBe(true);
+    expect(host.workflowSource("team-bug-hunt")).toBeUndefined();
+  });
+
+  it("writes project workflows to an explicit projectConfigPath (honors --config-file)", () => {
+    const host = new FakeHost(home);
+    // A config path that is NOT <cwd>/steamtrain.json, mirroring `--config-file`.
+    const customPath = join(home, "nested", "custom.steamtrain.json");
+    const author = new WorkflowAuthor({
+      host,
+      config,
+      home,
+      cwd: home,
+      projectConfigPath: customPath,
+      createAdapter: jsonAdapter(VALID_SPEC),
+    });
+
+    const result = author.save("custom-proj", userFileSpec("custom-proj"), undefined, "project");
+    expect(result.ok).toBe(true);
+    expect(result.savedPath).toBe(customPath);
+    expect(host.workflowSource("custom-proj")).toBe("project");
+    // The default cwd location was NOT touched.
+    expect(existsSync(join(home, "steamtrain.json"))).toBe(false);
+    const onDisk = JSON.parse(readFileSync(customPath, "utf8"));
+    expect(onDisk.workflows["custom-proj"]).toBeTruthy();
+  });
+
+  it("renaming a project workflow drops the old project entry (no duplicate)", () => {
+    const host = new FakeHost(home);
+    const author = makeAuthor(host);
+    author.save("proj-old", userFileSpec("proj-old"), undefined, "project");
+    expect(host.workflowSource("proj-old")).toBe("project");
+
+    const renamed = author.save("proj-new", userFileSpec("proj-new"), "proj-old", "project");
+    expect(renamed.ok).toBe(true);
+    expect(host.workflowSource("proj-new")).toBe("project");
+    expect(host.workflowSource("proj-old")).toBeUndefined();
+  });
+
+  it("removing the last project workflow leaves zero project entries after reload", () => {
+    const host = new FakeHost(home);
+    const author = makeAuthor(host);
+    author.save("only-proj", userFileSpec("only-proj"), undefined, "project");
+    expect(host.workflowSource("only-proj")).toBe("project");
+
+    // remove() reloads from disk; the steamtrain.json still exists (now with an
+    // empty workflows map), so the deletion must not be resurrected.
+    const removed = author.remove("only-proj");
+    expect(removed.ok).toBe(true);
+    expect(host.workflowSource("only-proj")).toBeUndefined();
+    // No catalog entry remains project-sourced.
+    const projectNames = Object.keys(host.listWorkflows()).filter(
+      (name) => host.workflowSource(name) === "project",
+    );
+    expect(projectNames).toEqual([]);
   });
 
   it("previews a workflow with staged step overrides without saving", () => {

@@ -15,13 +15,31 @@ flowchart LR
   agent["agent run\n(claude / opencode / codex)"]
   extract["extract JSON\n(fenced or balanced)"]
   validate["validateWorkflow()\n(same rules as the engine)"]
-  save["~/.steamtrain/workflows.json"]
+  save["user: ~/.steamtrain/workflows.json\nproject: ./steamtrain.json"]
   run["picker / CLI run"]
 
   desc --> prompt --> agent --> extract --> validate
   validate -->|ok| save --> run
   validate -->|invalid| desc
 ```
+
+## Where workflows are saved: scope
+
+Authoring writes to one of two layers, selectable everywhere (CLI, TUI, web):
+
+- **user** (default) — `~/.steamtrain/workflows.json`, your personal catalog,
+  available in every project on the machine.
+- **project** — the `workflows` section of the project's `./steamtrain.json`,
+  so the workflow can be committed to the repo and shared with your team.
+  Project entries win over user, which win over bundled.
+
+Project writes are read-modify-write: only the `workflows` section is touched,
+and all other config keys (`binaries`, `timeoutMs`, `maxConcurrency`) are
+preserved. The same scope applies to clone and delete. Authoring targets the
+**same** `steamtrain.json` the process loaded, so `--config-file <path>` is
+honored (the workflow is written to that file, not the working directory's).
+The live catalog re-reads the project layer through the engine's own config
+loader, so what you see after a write matches a fresh run exactly.
 
 ## CLI: `steamtrain workflow create`
 
@@ -35,6 +53,11 @@ steamtrain workflow create \
   --agent claude --model claude-sonnet-4-6 \
   --name auth-audit --save
 
+# Save into the project's ./steamtrain.json so it can be committed and shared.
+steamtrain workflow create \
+  --input "team release checklist" --name release-check \
+  --save --scope project
+
 # Machine-readable output for scripting.
 steamtrain workflow create --input "..." --json
 ```
@@ -46,13 +69,14 @@ steamtrain workflow create --input "..." --json
 | `--model <model>` | `opencode/qwen3.6-plus-free` for opencode | model in the agent's own format |
 | `--effort <e>` | — | reasoning effort / variant |
 | `--name <name>` | derived from the description | slugified workflow name |
-| `--save` | off | write to `~/.steamtrain/workflows.json` |
+| `--save` | off | persist to the chosen scope |
+| `--scope <user\|project>` | `user` | target layer; `--project` is shorthand for `--scope project` |
 | `--json` | off | emit `{ ok, spec, … }` instead of human text |
 
 Without `--save`, the JSON is printed so you can paste it into a `steamtrain.json`
 `workflows` map or a `workflows.json` file yourself. With `--save`, the workflow
 appears immediately in `steamtrain workflow list` and the TUI picker, tagged as a
-`user` workflow.
+`user` (or `project`) workflow.
 
 The default agent is OpenCode on a **free** Zen model, so creation works without
 paid provider credentials.
@@ -70,6 +94,15 @@ model), shows a live **create workflow** panel with the model's streamed output,
 validates the result, saves it to your user catalog, and selects it in the
 picker — ready to run. Press `Esc` to cancel an in-flight draft or dismiss the
 panel.
+
+Add `--project` to save into the project's `./steamtrain.json` instead:
+
+```
+/createworkflow --project team release checklist with sign-off gate
+```
+
+The same flag works for cloning (`/cloneworkflow --project <new-name>`), and
+`/deleteworkflow <name>` removes either a user or a project workflow.
 
 ## How robust is extraction?
 

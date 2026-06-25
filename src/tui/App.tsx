@@ -41,6 +41,7 @@ import {
   WORKFLOW_HISTORY_DIR,
   WorkflowAuthor,
   type WorkflowCatalogEntry,
+  type WorkflowScope,
   type WorkflowSourceKind,
   type WorkflowSpec,
   type WorkflowStepOverrides,
@@ -111,6 +112,8 @@ import {
 interface AppProps {
   config: SteamtrainConfig;
   configSource: string;
+  /** Resolved project `steamtrain.json` path for project-scope authoring. */
+  configPath?: string;
   configWarning?: string;
   settings: SteamtrainSettings;
   settingsWarning?: string;
@@ -141,6 +144,7 @@ interface HistoryUiState {
 export function App({
   config,
   configSource,
+  configPath,
   configWarning,
   settings,
   settingsWarning,
@@ -267,9 +271,10 @@ export function App({
         config,
         home: homedir(),
         cwd: process.cwd(),
+        projectConfigPath: configPath,
         projectWorkflows: config.workflows,
       }),
-    [authoringHost, config],
+    [authoringHost, config, configPath],
   );
 
   const resolveWorkflowSpec = useCallback(
@@ -285,7 +290,10 @@ export function App({
   const selectedWorkflowName =
     workflowEntries[Math.min(workflowIndex, Math.max(0, workflowEntries.length - 1))]?.name;
   const userWorkflowNames = useMemo(
-    () => workflowEntries.filter((entry) => entry.source === "user").map((entry) => entry.name),
+    () =>
+      workflowEntries
+        .filter((entry) => entry.source === "user" || entry.source === "project")
+        .map((entry) => entry.name),
     [workflowEntries],
   );
   const pendingSelectRef = useRef<string | null>(null);
@@ -306,7 +314,7 @@ export function App({
   }, [workflowEntries]);
 
   const cloneWorkflow = useCallback(
-    (newName: string) => {
+    (newName: string, scope: WorkflowScope = "user") => {
       // Prefer the previewed workflow (stable across catalog re-sorts) over the
       // picker index, which can drift to another row when the catalog reloads.
       const source = wfPreview?.name ?? selectedWorkflowName;
@@ -317,7 +325,7 @@ export function App({
           notices: [{ level: "warn" as const, text: "no workflow selected to clone" }],
         };
       }
-      const result = author.clone(source, newName);
+      const result = author.clone(source, newName, scope);
       if (!result.ok) {
         return {
           handled: true as const,
@@ -328,10 +336,13 @@ export function App({
         };
       }
       pendingSelectRef.current = result.name ?? null;
+      const where = scope === "project" ? " (project)" : "";
       return {
         handled: true as const,
         clearInput: true,
-        notices: [{ level: "info" as const, text: `cloned '${source}' → '${result.name}'` }],
+        notices: [
+          { level: "info" as const, text: `cloned '${source}' → '${result.name}'${where}` },
+        ],
       };
     },
     [author, selectedWorkflowName, wfPreview],
@@ -403,7 +414,7 @@ export function App({
   const mountedRef = useRef(true);
 
   const createWorkflow = useCallback(
-    (description: string) => {
+    (description: string, scope: WorkflowScope = "user") => {
       if (running) {
         return {
           handled: true as const,
@@ -445,7 +456,7 @@ export function App({
         // Draft + validate + persist + reload through the shared authoring core
         // (the same path the web server uses); we only own the live preview.
         const result = await author.generate(
-          { description, agent: target.agent, model: target.model },
+          { description, agent: target.agent, model: target.model, scope },
           (text) => {
             setWfCreate((prev) =>
               prev && prev.status === "generating" ? { ...prev, text: prev.text + text } : prev,
@@ -479,7 +490,9 @@ export function App({
         dispatch({
           type: "notice",
           level: "info",
-          text: `created workflow '${spec.name}' (${result.replaced ? "updated" : "saved"})`,
+          text: `created workflow '${spec.name}' (${result.replaced ? "updated" : "saved"}${
+            scope === "project" ? ", project" : ""
+          })`,
         });
       })();
 

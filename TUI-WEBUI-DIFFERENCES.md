@@ -64,8 +64,9 @@ These two reducers are near-duplicates and are a prime extraction target (see §
 | Per-step **prompt** editing | ❌ | ✅ | TUI override is `Pick<…,"agent"\|"model"\|"effort">` only |
 | Edit workflow **name** | ❌ | ✅ | Web modal; rename drops old user entry |
 | Edit workflow **description** | ❌ | ✅ | |
-| Clone / duplicate a workflow | ✅ | ✅ | Both via `WorkflowAuthor.clone`; TUI `/cloneworkflow <new-name>` clones the selected workflow |
-| Delete a user workflow | ✅ | ✅ | Both via `WorkflowAuthor.remove`; TUI `/deleteworkflow <name>` (guarded: user-source only) |
+| Clone / duplicate a workflow | ✅ | ✅ | Both via `WorkflowAuthor.clone`; TUI `/cloneworkflow [--project] <new-name>` |
+| Delete a user or project workflow | ✅ | ✅ | Both via `WorkflowAuthor.remove`; TUI `/deleteworkflow <name>` (bundled still guarded) |
+| Author into the **project** layer (`steamtrain.json`) | ✅ | ✅ | Shared `WorkflowScope`; create/clone/save target user or project. CLI: `workflow create --scope project`; TUI: `--project`; web: scope selector |
 | Stage overrides *without* persisting | ✅ | ❌ | TUI session overrides (now flushed via `WorkflowAuthor.flushSessionOverrides`); web still saves immediately |
 | Explicit "save session changes" step | ✅ | ⚠️ | TUI `/saveworkflows` → shared flush; web persists on each save |
 | Skip/unchanged reporting on save | ✅ | ❌ | `flushSessionOverrides`/`saveSessionWorkflowsToUser` returns saved/skipped/unchanged (TUI surfaces it) |

@@ -49,6 +49,10 @@ browser ──POST /api/runs──▶ run manager ──▶ Orchestrator.runWork
 | `/` | GET | the single-page app (no build step, no client deps) |
 | `/api/workflows` | GET | catalog summaries for the sidebar |
 | `/api/workflows/:name` | GET | a full `WorkflowSpec` for visualization |
+| `/api/workflows/generate` | POST | SSE: LLM-draft + save a workflow (`scope: user\|project`) |
+| `/api/workflows/:name` | PUT | save a created/edited spec (`scope: user\|project`) |
+| `/api/workflows/:name` | DELETE | delete a user or project workflow |
+| `/api/meta` | GET | agents, models, efforts, health (for the create form) |
 | `/api/doctor` | GET | current agent health |
 | `/api/runs` | POST | `{ workflow, input, fresh? }` → `{ runId }` |
 | `/api/runs/:id/stream` | GET | Server-Sent Events: each `WorkflowEvent`, then a terminal `status` frame |

@@ -81,6 +81,8 @@ steamtrain workflow run --from <runId> --retry-failed  # re-run only failed/not-
 # Draft a brand-new workflow from a description (LLM delegation), then save it.
 steamtrain workflow create --input "review a PR from three angles then merge findings"
 steamtrain workflow create --input "audit the auth module" --agent claude --model claude-sonnet-4-6 --save
+# Save into the project's ./steamtrain.json so it can be committed and shared.
+steamtrain workflow create --input "team release checklist" --name release-check --save --scope project
 ```
 
 Every headless run ends with a **status summary** — one line per step (status,

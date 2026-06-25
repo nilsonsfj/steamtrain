@@ -27,7 +27,13 @@ describe("/cloneworkflow", () => {
     expect(isRegisteredSlashCommand("/cloneworkflow my copy")).toBe(true);
     const cloneWorkflow = vi.fn(() => ({ handled: true as const, clearInput: true }));
     executeSlashCommand("/cloneworkflow My Copy", makeCtx({ cloneWorkflow }));
-    expect(cloneWorkflow).toHaveBeenCalledWith("My Copy");
+    expect(cloneWorkflow).toHaveBeenCalledWith("My Copy", "user");
+  });
+
+  it("clones into the project layer with --project", () => {
+    const cloneWorkflow = vi.fn(() => ({ handled: true as const, clearInput: true }));
+    executeSlashCommand("/cloneworkflow --project Team Copy", makeCtx({ cloneWorkflow }));
+    expect(cloneWorkflow).toHaveBeenCalledWith("Team Copy", "project");
   });
 
   it("errors without a new name", () => {
