@@ -82,6 +82,24 @@ describe("opencode mapper (stateful, one mapper per run)", () => {
     ]);
   });
 
+  it("surfaces a tool_use for a tool part with an unrecognized (future) status", () => {
+    // A status outside the known running/done/failed sets must never be silently
+    // dropped — the tool invocation has to stay visible so retry can't treat a
+    // step that already ran a tool as a clean, retryable failure.
+    const m = createOpenCodeMapper();
+    m(JSON.parse(stepStart)); // establish the session first
+    const line =
+      '{"type":"tool_use","sessionID":"ses_abc","part":{"id":"prt_z","type":"tool","tool":"bash","callID":"call_z","state":{"status":"throttled_v2","input":{"command":"rm"}}}}';
+    expect(m(JSON.parse(line))).toEqual([
+      expect.objectContaining({
+        kind: "tool_use",
+        id: "call_z",
+        name: "bash",
+        status: "throttled_v2",
+      }),
+    ]);
+  });
+
   it("does not repeat session_start for later events", () => {
     const m = createOpenCodeMapper();
     m(JSON.parse(stepStart));

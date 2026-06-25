@@ -16,7 +16,6 @@ export const CODEX_MODELS: readonly AgentModel[] = [
   { id: "codex-auto-review", name: "Codex Auto Review" },
 ];
 
-const COMMAND_RUNNING = new Set(["in_progress", "running", "pending"]);
 const COMMAND_DONE = new Set(["completed", "done", "success", "finished"]);
 const COMMAND_FAILED = new Set(["failed", "error", "declined"]);
 
@@ -92,23 +91,25 @@ export function createCodexMapper(agent: AgentId = AGENT): EventMapper {
     const status = item.status;
 
     if (!terminal) {
-      if (status === undefined || COMMAND_RUNNING.has(status)) {
-        if (!toolStarted.has(id)) {
-          toolStarted.add(id);
-          out.push({
-            kind: "tool_use",
-            agent,
-            ts,
-            id,
-            name,
-            input: item.command ? { command: item.command } : item.arguments,
-            status,
-          });
-        }
-        return;
-      }
       if (status !== undefined && (COMMAND_DONE.has(status) || COMMAND_FAILED.has(status))) {
         emitCommandResult(item, ts, out);
+        return;
+      }
+      // undefined, a running status, OR an unrecognized status: surface a tool
+      // start. An unknown future status must never be silently dropped — the
+      // invocation has to stay visible (e.g. so retry never treats a step that
+      // already ran a tool as a clean, retryable transport failure).
+      if (!toolStarted.has(id)) {
+        toolStarted.add(id);
+        out.push({
+          kind: "tool_use",
+          agent,
+          ts,
+          id,
+          name,
+          input: item.command ? { command: item.command } : item.arguments,
+          status,
+        });
       }
       return;
     }
@@ -145,26 +146,26 @@ export function createCodexMapper(agent: AgentId = AGENT): EventMapper {
     const name = item.tool ?? "mcp_tool_call";
 
     if (!terminal) {
-      if (item.status === undefined || COMMAND_RUNNING.has(item.status)) {
-        if (!toolStarted.has(id)) {
-          toolStarted.add(id);
-          out.push({
-            kind: "tool_use",
-            agent,
-            ts,
-            id,
-            name,
-            input: item.arguments,
-            status: item.status,
-          });
-        }
-        return;
-      }
       if (
         item.status !== undefined &&
         (COMMAND_DONE.has(item.status) || COMMAND_FAILED.has(item.status))
       ) {
         emitMcpResult(item, ts, out);
+        return;
+      }
+      // undefined, a running status, OR an unrecognized status: surface a tool
+      // start so an unknown future status is never silently dropped.
+      if (!toolStarted.has(id)) {
+        toolStarted.add(id);
+        out.push({
+          kind: "tool_use",
+          agent,
+          ts,
+          id,
+          name,
+          input: item.arguments,
+          status: item.status,
+        });
       }
       return;
     }

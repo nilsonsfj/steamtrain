@@ -126,6 +126,45 @@ describe("codex mapper (stateful, one mapper per run)", () => {
     ]);
   });
 
+  it("surfaces a tool_use for a command with an unrecognized (future) status", () => {
+    // A status value outside the known running/done/failed sets must never be
+    // silently dropped — the tool invocation has to stay visible so retry can't
+    // treat a step that already ran a tool as a clean, retryable failure.
+    const m = createCodexMapper();
+    expect(
+      m(
+        JSON.parse(
+          '{"type":"item.started","item":{"id":"item_x","type":"command_execution","command":"bash -lc rm","status":"throttled_v2"}}',
+        ),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        kind: "tool_use",
+        id: "item_x",
+        name: "command_execution",
+        status: "throttled_v2",
+      }),
+    ]);
+  });
+
+  it("surfaces a tool_use for an MCP call with an unrecognized status", () => {
+    const m = createCodexMapper();
+    expect(
+      m(
+        JSON.parse(
+          '{"type":"item.started","item":{"id":"item_y","type":"mcp_tool_call","server":"s","tool":"search_code","arguments":{"q":"x"},"status":"weird_state"}}',
+        ),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        kind: "tool_use",
+        id: "item_y",
+        name: "search_code",
+        status: "weird_state",
+      }),
+    ]);
+  });
+
   it("maps MCP tool calls and item errors", () => {
     const m = createCodexMapper();
 

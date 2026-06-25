@@ -106,6 +106,8 @@ describe("RunRecordBuilder", () => {
     });
     const spec: WorkflowSpec = {
       name: "single",
+      // This test asserts failure capture, not retry; keep "a" to one attempt.
+      retry: { maxAttempts: 1 },
       phases: [
         { id: "p1", title: "One", steps: [{ id: "a", agent: "claude", model: "m", prompt: "x" }] },
       ],
@@ -322,6 +324,46 @@ describe("workflow history store", () => {
     const full = await store.get("a");
     expect(full?.phases).toHaveLength(2);
     expect(await store.get("missing")).toBeUndefined();
+  });
+
+  it("records and round-trips per-step retry attempts", async () => {
+    const root = tempDir();
+    const store = createWorkflowHistoryStore(root);
+    const builder = new RunRecordBuilder({ id: "ret", workflow: "wf", input: "i", cwd: "/tmp" });
+    const ts = Date.now();
+    builder.handle({ kind: "workflow_start", name: "wf", phaseCount: 1, stepCount: 1, ts });
+    builder.handle({ kind: "phase_start", phaseId: "p1", title: "P1", index: 0, stepCount: 1, ts });
+    builder.handle({
+      kind: "step_start",
+      phaseId: "p1",
+      stepId: "a",
+      blockKind: "worker",
+      ts,
+    });
+    builder.handle({
+      kind: "step_retry",
+      phaseId: "p1",
+      stepId: "a",
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 1,
+      reason: "transient",
+      ts,
+    });
+    builder.handle({
+      kind: "step_done",
+      phaseId: "p1",
+      stepId: "a",
+      cached: false,
+      result: { stepId: "a", ok: true, output: "ok", durationMs: 1, attempts: 3 },
+      ts,
+    });
+    builder.handle({ kind: "phase_done", phaseId: "p1", ok: true, ts });
+    builder.handle({ kind: "workflow_done", ok: true, results: [], ts });
+
+    await store.save(builder.build({ status: "done" }));
+    const full = await store.get("ret");
+    expect(full?.phases[0]?.steps[0]?.attempts).toBe(3);
   });
 
   it("prunes to the retention limit", async () => {

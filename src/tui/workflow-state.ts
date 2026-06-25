@@ -35,6 +35,8 @@ export interface StepState {
   result?: StepResult;
   gate?: { passed: boolean; target?: string; onFalse?: GateStep["onFalse"] };
   cached: boolean;
+  /** Total attempts so far when the step is auto-retrying a transient failure. */
+  attempts?: number;
 }
 
 export interface PhaseState {
@@ -211,6 +213,12 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
       };
     case "step_event":
       return updateStep(state, e.phaseId, e.stepId, (s) => applyAgentEvent(s, e.event));
+    case "step_retry":
+      return updateStep(state, e.phaseId, e.stepId, (s) => ({
+        ...s,
+        attempts: e.attempt + 1,
+        activity: `↻ retrying ${e.attempt + 1}/${e.maxAttempts} (${Math.round(e.delayMs)}ms)`,
+      }));
     case "gate_evaluated":
       return updateStep(state, e.phaseId, e.stepId, (s) => ({
         ...s,
