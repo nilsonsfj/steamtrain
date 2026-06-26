@@ -7,6 +7,11 @@ describe("createWorkflowPromptValue", () => {
     expect(createWorkflowPromptValue("   ")).toBe("/createworkflow ");
   });
 
+  it("honors the create intent for a lone slash instead of stranding it", () => {
+    expect(createWorkflowPromptValue("/")).toBe("/createworkflow ");
+    expect(createWorkflowPromptValue("  /  ")).toBe("/createworkflow ");
+  });
+
   it("wraps plain text as a /createworkflow description", () => {
     expect(createWorkflowPromptValue("build a release pipeline")).toBe(
       "/createworkflow build a release pipeline",
