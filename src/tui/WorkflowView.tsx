@@ -110,10 +110,13 @@ export function WorkflowView({
             ) : null}
             {rowWindow.visible.map((row, offset) =>
               row.kind === "phase" ? (
-                <PhaseHeader key={`phase-${row.phase.phaseId}`} phase={row.phase} />
+                <PhaseHeader
+                  key={`phase-${row.phase.phaseId}-${row.phase.iteration ?? 1}`}
+                  phase={row.phase}
+                />
               ) : (
                 <StepRow
-                  key={`step-${row.step.stepId}`}
+                  key={`step-${row.phase.phaseId}-${row.phase.iteration ?? 1}-${row.step.stepId}`}
                   step={row.step}
                   width={innerWidth}
                   selected={rowWindow.start + offset === selectedRowIndex}
@@ -142,6 +145,12 @@ function PhaseHeader({ phase }: { phase: PhaseState }) {
       <Text color={color} bold>
         ─ {phase.title}
       </Text>
+      {phase.iteration && phase.iteration > 1 ? (
+        <Text color="gray" dimColor>
+          {" "}
+          · iter {phase.iteration}
+        </Text>
+      ) : null}
       <Text color="gray">
         {"  "}
         {done}/{phase.stepCount}
