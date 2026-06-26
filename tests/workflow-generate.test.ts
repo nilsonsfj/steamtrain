@@ -368,6 +368,46 @@ describe("generateWorkflow auto-repair", () => {
     expect(result.attempts).toBe(1);
   });
 
+  it("does not repair (or accept) when the agent flags an error but the spec is valid", async () => {
+    // Legacy behavior: a valid spec accompanied by an agent error is surfaced as
+    // a failure, and we must NOT spend a repair attempt re-running it.
+    const seq = makeSequencedAdapter([
+      [
+        {
+          kind: "result",
+          agent: "opencode",
+          ts: 0,
+          isError: true,
+          text: JSON.stringify(VALID_SPEC),
+        },
+      ],
+    ]);
+    const result = await generateWorkflow(
+      { description: "x", agent: "opencode", model: "opencode/qwen3.6-plus-free" },
+      { createAdapter: seq.createAdapter },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.spec).toBeDefined();
+    expect(seq.calls).toBe(1);
+    expect(result.attempts).toBe(1);
+  });
+
+  it("clears the live buffer between attempts via onAttemptStart", async () => {
+    const seq = makeSequencedAdapter([resultEvents(SAME_PHASE_SPEC), resultEvents(VALID_SPEC)]);
+    const attemptStarts: number[] = [];
+    const result = await generateWorkflow(
+      {
+        description: "x",
+        agent: "opencode",
+        model: "opencode/qwen3.6-plus-free",
+        onAttemptStart: (n) => attemptStarts.push(n),
+      },
+      { createAdapter: seq.createAdapter },
+    );
+    expect(result.ok).toBe(true);
+    expect(attemptStarts).toEqual([1, 2]);
+  });
+
   it("does not waste a repair when the agent errors with no output", async () => {
     const seq = makeSequencedAdapter([
       [{ kind: "error", agent: "opencode", ts: 0, message: "boom" }],

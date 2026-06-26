@@ -41,6 +41,12 @@ export interface GenerateWorkflowRequest {
   signal?: AbortSignal;
   /** Stream the underlying agent events so a UI can show live progress. */
   onEvent?: (event: AgentEvent) => void;
+  /**
+   * Called at the start of each agent run with the 1-based attempt number, so a
+   * UI streaming `onEvent` can reset its live buffer between repair attempts
+   * (otherwise a rejected draft and its repair concatenate into one blob).
+   */
+  onAttemptStart?: (attempt: number) => void;
 }
 
 export interface GenerateWorkflowResult {
@@ -121,6 +127,11 @@ Never make a later phase loop back into an earlier one.
   "condition": { "step": "x", "ok": true }, "onFalse": "fail" }. condition.step
   must be in an earlier phase.
 
+# Keep it small
+A workflow may expand to at most 1000 steps; a forEach step counts as (number of
+distributor items) steps. Keep distributor item lists short (a handful) and the
+phase count modest.
+
 # Templates available in prompts/items
 {{input}} (the user's task), {{steps.<id>.output}}, {{steps.<id>.items}},
 {{item}}, {{item.index}}.
@@ -150,21 +161,21 @@ review->fix "loop" is unrolled into two phases:
         "prompt": "Implement this task fully:\\n{{item}}" }
     ] },
     { "id": "review", "title": "Review each implementation", "steps": [
-      { "id": "review", "kind": "processor", "agent": "opencode",
+      { "id": "review-each", "kind": "processor", "agent": "opencode",
         "model": "opencode/mimo-v2.5-free", "forEach": "steps.tasks.items",
         "dependsOn": ["impl"],
         "prompt": "Review the implementation for {{item}}:\\n{{steps.impl.output}}\\nList concrete issues to fix." }
     ] },
     { "id": "fix", "title": "Apply review fixes", "steps": [
-      { "id": "fix", "kind": "processor", "agent": "opencode",
+      { "id": "apply-fixes", "kind": "processor", "agent": "opencode",
         "model": "opencode/mimo-v2.5-free", "forEach": "steps.tasks.items",
-        "dependsOn": ["impl", "review"],
-        "prompt": "Apply the review fixes for {{item}}.\\nReview findings:\\n{{steps.review.output}}" }
+        "dependsOn": ["impl", "review-each"],
+        "prompt": "Apply the review fixes for {{item}}.\\nReview findings:\\n{{steps.review-each.output}}" }
     ] },
     { "id": "report", "title": "Consolidate", "steps": [
       { "id": "report", "kind": "consolidator", "agent": "opencode",
-        "model": "opencode/mimo-v2.5-free", "dependsOn": ["fix"],
-        "prompt": "Summarize the final result across all tasks:\\n{{steps.fix.output}}" }
+        "model": "opencode/mimo-v2.5-free", "dependsOn": ["apply-fixes"],
+        "prompt": "Summarize the final result across all tasks:\\n{{steps.apply-fixes.output}}" }
     ] }
   ]
 }
@@ -326,6 +337,7 @@ export async function generateWorkflow(
   let lastResult: GenerateWorkflowResult = { ok: false, raw: "", attempts: 0 };
 
   for (let attempt = 1; attempt <= maxRepairAttempts + 1; attempt++) {
+    req.onAttemptStart?.(attempt);
     const { raw, errored, errorMessage } = await runGenerationAgent(adapter, prompt, req, deps);
 
     // An agent error with no output at all: repairing has nothing to work from.

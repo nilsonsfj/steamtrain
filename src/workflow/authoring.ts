@@ -128,13 +128,15 @@ export class WorkflowAuthor {
 
   /**
    * Draft a workflow from a description with an agent, then persist it. `onDelta`
-   * streams the model's output so the UI can show live drafting. Fails fast when
-   * the chosen agent is unhealthy.
+   * streams the model's output so the UI can show live drafting; `onAttemptStart`
+   * fires when an auto-repair retry begins so the UI can reset that live buffer.
+   * Fails fast when the chosen agent is unhealthy.
    */
   async generate(
     req: GenerateRequest,
     onDelta?: (text: string) => void,
     signal?: AbortSignal,
+    onAttemptStart?: (attempt: number) => void,
   ): Promise<AuthorWriteResult> {
     if (!isKnownAgent(req.agent)) return { ok: false, error: `unknown agent '${req.agent}'` };
     if (!req.description.trim()) return { ok: false, error: "a description is required" };
@@ -154,6 +156,7 @@ export class WorkflowAuthor {
         onEvent: (event) => {
           if (event.kind === "text_delta" && !event.thinking) onDelta?.(event.text);
         },
+        onAttemptStart,
       },
       {
         createAdapter: this.makeAdapter,

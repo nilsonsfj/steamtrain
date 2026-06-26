@@ -931,6 +931,7 @@ export const PAGE_HTML = `<!doctype html>
       S.draftAbort = ac;
       streamGenerate(payload, ac.signal, function (frame) {
         if (frame.type === "delta") { draft.textContent += frame.text; draft.scrollTop = draft.scrollHeight; }
+        else if (frame.type === "attempt") { if (frame.attempt > 1) draft.textContent = ""; }
         else if (frame.type === "done") {
           S.draftAbort = null;
           createBtn.disabled = false; createBtn.textContent = "Create \\u2728";

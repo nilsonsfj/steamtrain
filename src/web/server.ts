@@ -365,6 +365,9 @@ async function streamGenerate(
     },
     (text) => send({ type: "delta", text }),
     controller.signal,
+    // Auto-repair retry: tell the client to clear the live draft buffer so a
+    // rejected draft and its repair don't concatenate.
+    (attempt) => send({ type: "attempt", attempt }),
   );
 
   if (!res.writableEnded) {

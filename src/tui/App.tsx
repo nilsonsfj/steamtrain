@@ -487,6 +487,13 @@ export function App({
             );
           },
           ac.signal,
+          // Auto-repair retry: clear the live buffer so a rejected draft and its
+          // repair don't concatenate into one garbled blob.
+          () => {
+            setWfCreate((prev) =>
+              prev && prev.status === "generating" ? { ...prev, text: "" } : prev,
+            );
+          },
         );
         if (!mountedRef.current || ac.signal.aborted) return;
 
