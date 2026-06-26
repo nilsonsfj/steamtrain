@@ -78,6 +78,25 @@ describe("buildWorkflowGenerationPrompt", () => {
     expect(prompt).toContain("consolidator");
     expect(prompt).toContain("phases");
   });
+
+  it("teaches the same-phase dependency rule and loop unrolling", () => {
+    const prompt = buildWorkflowGenerationPrompt("anything");
+    expect(prompt).toContain("DIFFERENT phases");
+    expect(prompt).toContain("UNROLL");
+  });
+
+  it("embeds a worked example that passes the engine's own validation", () => {
+    // The example is what the model imitates; if it ever stops validating, the
+    // prompt is teaching an invalid shape. Extract + validate it for real.
+    const prompt = buildWorkflowGenerationPrompt("anything");
+    const example = prompt.slice(prompt.indexOf("# Worked example"));
+    const result = extractWorkflowSpec(example);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // The review->fix "loop" is unrolled into distinct phases.
+      expect(result.spec.phases.length).toBeGreaterThanOrEqual(4);
+    }
+  });
 });
 
 describe("extractWorkflowSpec", () => {

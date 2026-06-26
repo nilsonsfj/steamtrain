@@ -70,19 +70,45 @@ ONE valid workflow as JSON.
 
 # Execution model
 - A workflow has "phases" that run SEQUENTIALLY (top to bottom).
-- The "steps" inside a phase run in PARALLEL.
-- A step may only reference (via dependsOn / templates) steps in an EARLIER phase.
-  Never reference a step in the same phase or a later phase.
+- The "steps" inside a phase run in PARALLEL (with no ordering between them).
+- A step may only reference (via dependsOn / forEach / gate condition / templates)
+  steps in a STRICTLY EARLIER phase — never a step in the SAME phase, never a
+  later phase.
+
+# THE #1 RULE (most generated workflows fail here)
+If step B uses step A's output, A and B MUST be in DIFFERENT phases, with A's
+phase ABOVE B's phase. Two steps in the same phase run at the same time, so they
+can NEVER depend on each other. When in doubt, give each dependent step its own
+phase.
+
+  WRONG (same phase — validation rejects this):
+    phase "review": steps [ {id: "review-task", ...},
+                            {id: "check-issues", dependsOn: ["review-task"], ...} ]
+
+  RIGHT (split into two phases):
+    phase "review":      steps [ {id: "review-task", ...} ]
+    phase "check":       steps [ {id: "check-issues", dependsOn: ["review-task"], ...} ]
+
+# Loops are NOT supported — UNROLL them
+There is no looping, no "while", no going back. A "review loop" or "review then
+fix then re-review" must be written as a FIXED chain of phases, each depending
+only on earlier ones. Pick a small fixed number of passes (1-2 is usually
+enough) and lay them out as separate phases:
+  implement -> review -> fix   (and optionally -> review-2 -> fix-2)
+Never make a later phase loop back into an earlier one.
 
 # Step kinds
-- "distributor": fan one input into many items. Use { "kind": "distributor",
-  "items": ["...{{input}}...", "..."] }. Items are templates.
+- "distributor": fan work into a FIXED list of items, written now at authoring
+  time (the engine cannot count items dynamically from a file). Use
+  { "kind": "distributor", "items": ["...{{input}}...", "..."] }. Items are templates.
 - "worker" (or "processor"): one agent run. Requires agent, model, prompt.
   A processor may add "forEach": "steps.<distributorId>.items" to run once per item
-  (reference the current item with {{item}} and {{item.index}}).
+  IN PARALLEL (reference the current item with {{item}} and {{item.index}}). The
+  forEach source distributor MUST be in an earlier phase.
 - "consolidator": merge earlier outputs. Requires dependsOn; usually agent+model+prompt.
 - "gate": evaluate a condition, e.g. { "kind": "gate", "dependsOn": ["x"],
-  "condition": { "step": "x", "ok": true }, "onFalse": "fail" }.
+  "condition": { "step": "x", "ok": true }, "onFalse": "fail" }. condition.step
+  must be in an earlier phase.
 
 # Templates available in prompts/items
 {{input}} (the user's task), {{steps.<id>.output}}, {{steps.<id>.items}},
@@ -95,22 +121,52 @@ agent "opencode" with models like "opencode/mimo-v2.5-free",
 "opencode/north-mini-code-free".
 Every agent-backed step MUST set agent, model, and a non-empty prompt.
 
-# Output format (STRICT)
-Output ONLY a single JSON object, no prose, no markdown fences. Shape:
+# Worked example: parallel implement, then review, then fix
+This is the canonical shape for "split work into tasks, do them in parallel, then
+review/fix each". Note how every dependency points to an EARLIER phase, and the
+review->fix "loop" is unrolled into two phases:
 {
-  "description": "one sentence",
+  "description": "Split a backlog into tasks, implement each in parallel, then review and fix.",
   "phases": [
-    { "id": "scan", "title": "Scan", "steps": [
-      { "id": "scan-a", "kind": "worker", "agent": "opencode",
-        "model": "opencode/mimo-v2.5-free", "prompt": "... {{input}} ..." }
+    { "id": "split", "title": "Split into tasks", "steps": [
+      { "id": "tasks", "kind": "distributor",
+        "items": ["Task 1 from backlog: {{input}}", "Task 2 from backlog: {{input}}",
+                  "Task 3 from backlog: {{input}}"] }
     ] },
-    { "id": "report", "title": "Report", "steps": [
+    { "id": "implement", "title": "Implement in parallel", "steps": [
+      { "id": "impl", "kind": "processor", "agent": "opencode",
+        "model": "opencode/mimo-v2.5-free", "forEach": "steps.tasks.items",
+        "prompt": "Implement this task fully:\\n{{item}}" }
+    ] },
+    { "id": "review", "title": "Review each implementation", "steps": [
+      { "id": "review", "kind": "processor", "agent": "opencode",
+        "model": "opencode/mimo-v2.5-free", "forEach": "steps.tasks.items",
+        "dependsOn": ["impl"],
+        "prompt": "Review the implementation for {{item}}:\\n{{steps.impl.output}}\\nList concrete issues to fix." }
+    ] },
+    { "id": "fix", "title": "Apply review fixes", "steps": [
+      { "id": "fix", "kind": "processor", "agent": "opencode",
+        "model": "opencode/mimo-v2.5-free", "forEach": "steps.tasks.items",
+        "dependsOn": ["impl", "review"],
+        "prompt": "Apply the review fixes for {{item}}.\\nReview findings:\\n{{steps.review.output}}" }
+    ] },
+    { "id": "report", "title": "Consolidate", "steps": [
       { "id": "report", "kind": "consolidator", "agent": "opencode",
-        "model": "opencode/mimo-v2.5-free", "dependsOn": ["scan-a"],
-        "prompt": "Summarize {{steps.scan-a.output}} for {{input}}" }
+        "model": "opencode/mimo-v2.5-free", "dependsOn": ["fix"],
+        "prompt": "Summarize the final result across all tasks:\\n{{steps.fix.output}}" }
     ] }
   ]
 }
+
+# Output format (STRICT)
+Output ONLY a single JSON object, no prose, no markdown fences. Use the shape and
+field names shown above ("description", "phases", each phase with "id"/"title"/"steps").
+
+# Before you answer — self-check
+For EVERY dependsOn, forEach source, and gate condition.step you wrote, confirm
+the referenced step lives in a phase that appears ABOVE the current step's phase.
+If any reference is in the same phase or below, MOVE the dependent step into a
+later phase until it is valid. Then output the JSON.
 
 # User request
 ${description}
