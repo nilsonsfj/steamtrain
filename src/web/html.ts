@@ -318,13 +318,313 @@ export const PAGE_HTML = `<!doctype html>
 (function () {
   "use strict";
 
+  /* BEGIN_REDUCER_BUNDLE */
+"use strict";
+var SteamtrainReducer = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // src/workflow/reducer.ts
+  var reducer_exports = {};
+  __export(reducer_exports, {
+    flattenSteps: () => flattenSteps,
+    initialWorkflowState: () => initialWorkflowState,
+    workflowReducer: () => workflowReducer,
+    workflowStateFromRecord: () => workflowStateFromRecord,
+    workflowStateFromSpec: () => workflowStateFromSpec
+  });
+  var initialWorkflowState = {
+    phases: [],
+    results: [],
+    started: false,
+    done: false,
+    ok: true,
+    loopMarkers: []
+  };
+  function flattenSteps(state) {
+    const out = [];
+    for (const phase of state.phases) {
+      for (const step of phase.steps) out.push({ phase, step });
+    }
+    return out;
+  }
+  function workflowStateFromSpec(spec) {
+    return {
+      name: spec.name,
+      phases: spec.phases.map((p, idx) => ({
+        phaseId: p.id,
+        title: p.title || p.id,
+        index: idx,
+        stepCount: p.steps.length,
+        done: false,
+        ok: true,
+        steps: p.steps.map((st) => ({
+          stepId: st.id,
+          blockKind: st.kind ?? "worker",
+          agent: "agent" in st ? st.agent : void 0,
+          model: "model" in st ? st.model : void 0,
+          effort: "effort" in st ? st.effort : void 0,
+          cwd: "cwd" in st ? st.cwd : void 0,
+          dependsOn: st.dependsOn,
+          status: "pending",
+          text: "",
+          cached: false,
+          loopTo: "loopTo" in st ? st.loopTo : void 0,
+          maxIterations: "maxIterations" in st ? st.maxIterations : void 0,
+          forEach: "forEach" in st ? st.forEach : void 0
+        }))
+      })),
+      results: [],
+      started: false,
+      done: false,
+      ok: true,
+      loopMarkers: []
+    };
+  }
+  function workflowStateFromRecord(record) {
+    return {
+      name: record.workflow,
+      startedAt: record.startedAt,
+      phases: record.phases.map((phase) => ({
+        phaseId: phase.phaseId,
+        title: phase.title,
+        index: phase.index,
+        stepCount: phase.stepCount,
+        done: phase.done,
+        ok: phase.ok,
+        iteration: phase.iteration,
+        steps: phase.steps.map((step) => ({
+          ...step,
+          status: step.status,
+          blockKind: step.blockKind
+        }))
+      })),
+      results: [],
+      started: true,
+      done: record.phases.every((phase) => phase.done),
+      ok: record.ok,
+      loopMarkers: []
+    };
+  }
+  function sameInstance(p, phaseId, iteration) {
+    return p.phaseId === phaseId && (p.iteration ?? 1) === (iteration ?? 1);
+  }
+  function phaseOfStep(state, stepId) {
+    for (const p of state.phases) {
+      if (p.steps.some((s) => s.stepId === stepId)) return p.phaseId;
+    }
+    return void 0;
+  }
+  function updateStep(state, phaseId, stepId, iteration, fn) {
+    return {
+      ...state,
+      phases: state.phases.map(
+        (p) => sameInstance(p, phaseId, iteration) ? { ...p, steps: p.steps.map((s) => s.stepId === stepId ? fn(s) : s) } : p
+      )
+    };
+  }
+  function applyAgentEvent(step, event) {
+    switch (event.kind) {
+      case "text_delta":
+        return event.thinking ? step : { ...step, text: step.text + event.text };
+      case "tool_use":
+        return { ...step, activity: "\u2699 " + event.name };
+      case "tool_result":
+        return {
+          ...step,
+          activity: (event.isError ? "\u2717" : "\u2713") + " " + (event.name ?? "tool")
+        };
+      default:
+        return step;
+    }
+  }
+  function workflowReducer(state, action) {
+    if (action.type === "reset") return initialWorkflowState;
+    const e = action.event;
+    switch (e.kind) {
+      case "workflow_start":
+        return {
+          ...state,
+          name: e.name,
+          startedAt: e.ts,
+          phases: state.phases.length > 0 ? state.phases : [],
+          results: [],
+          started: true,
+          done: false,
+          ok: true,
+          loopMarkers: []
+        };
+      case "phase_start": {
+        const iter = e.iteration ?? 1;
+        const existing = state.phases.find((p) => sameInstance(p, e.phaseId, iter));
+        if (existing) {
+          return state;
+        }
+        return {
+          ...state,
+          phases: [
+            ...state.phases,
+            {
+              phaseId: e.phaseId,
+              title: e.title,
+              index: e.index,
+              stepCount: e.stepCount,
+              steps: [],
+              done: false,
+              ok: true,
+              iteration: iter
+            }
+          ]
+        };
+      }
+      case "fan_out":
+        return {
+          ...state,
+          phases: state.phases.map((p) => {
+            if (!sameInstance(p, e.phaseId, e.iteration)) return p;
+            const updatedSteps = [...p.steps];
+            for (let fi = 0; fi < e.count; fi++) {
+              const childId = e.parentStepId + "[" + fi + "]";
+              if (!updatedSteps.some((s) => s.stepId === childId)) {
+                updatedSteps.push({
+                  stepId: childId,
+                  blockKind: "worker",
+                  status: "pending",
+                  text: "",
+                  cached: false,
+                  parentStepId: e.parentStepId
+                });
+              }
+            }
+            return {
+              ...p,
+              steps: updatedSteps,
+              stepCount: Math.max(p.stepCount, updatedSteps.length)
+            };
+          })
+        };
+      case "step_start":
+        return {
+          ...state,
+          phases: state.phases.map((p) => {
+            if (!sameInstance(p, e.phaseId, e.iteration)) return p;
+            const stepExists = p.steps.some((s) => s.stepId === e.stepId);
+            const newStep = {
+              stepId: e.stepId,
+              blockKind: e.blockKind ?? "worker",
+              agent: e.agent,
+              model: e.model,
+              effort: e.effort,
+              cwd: e.cwd,
+              dependsOn: e.dependsOn,
+              parentStepId: e.parentStepId,
+              item: e.item,
+              status: "running",
+              text: "",
+              cached: false,
+              loopTo: e.loopTo,
+              maxIterations: e.maxIterations
+            };
+            return {
+              ...p,
+              stepCount: e.parentStepId && !stepExists ? Math.max(p.stepCount, p.steps.length + 1) : p.stepCount,
+              steps: stepExists ? p.steps.map((s) => s.stepId === e.stepId ? { ...s, ...newStep } : s) : [...p.steps, newStep]
+            };
+          })
+        };
+      case "step_event":
+        return updateStep(
+          state,
+          e.phaseId,
+          e.stepId,
+          e.iteration,
+          (s) => applyAgentEvent(s, e.event)
+        );
+      case "step_retry":
+        return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
+          ...s,
+          attempts: e.attempt + 1,
+          activity: "\u21BB retrying " + (e.attempt + 1) + "/" + e.maxAttempts + " (" + Math.round(e.delayMs) + "ms)"
+        }));
+      case "gate_evaluated":
+        return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
+          ...s,
+          gate: { passed: e.passed, target: e.target, onFalse: e.onFalse },
+          activity: e.passed ? "gate passed" + (e.target ? " \u2192 " + e.target : "") : "gate blocked"
+        }));
+      case "step_done":
+        return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
+          ...s,
+          status: e.result.ok ? "done" : "error",
+          result: e.result,
+          cached: e.cached,
+          text: s.text || e.result.output
+        }));
+      case "phase_done":
+        return {
+          ...state,
+          phases: state.phases.map(
+            (p) => sameInstance(p, e.phaseId, e.iteration) ? { ...p, done: true, ok: e.ok } : p
+          )
+        };
+      case "workflow_done":
+        return { ...state, done: true, ok: e.ok, results: e.results };
+      case "loop_iteration": {
+        const gatePhaseId = phaseOfStep(state, e.gateStepId);
+        let gatePhaseIteration = 0;
+        if (gatePhaseId) {
+          for (let i = state.phases.length - 1; i >= 0; i--) {
+            const p = state.phases[i];
+            if (p.phaseId === gatePhaseId && p.iteration && p.done) {
+              gatePhaseIteration = p.iteration;
+              break;
+            }
+          }
+        }
+        return {
+          ...state,
+          loopMarkers: [
+            ...state.loopMarkers ?? [],
+            {
+              gateStepId: e.gateStepId,
+              loopTo: e.loopTo,
+              iteration: e.iteration,
+              maxIterations: e.maxIterations,
+              gatePhaseId,
+              gatePhaseIteration
+            }
+          ]
+        };
+      }
+    }
+  }
+  return __toCommonJS(reducer_exports);
+})();
+  /* END_REDUCER_BUNDLE */
+
+
   var KIND_LABEL = { worker: "worker", processor: "process", distributor: "fan-out", consolidator: "merge", gate: "gate" };
   var S = {
     workflows: [], selected: null, source: null, spec: null, agents: [],
-    runId: null, es: null, started: false, done: false, ok: true,
-    startedAt: 0, timer: null, results: [],
-    phaseOrder: [], phaseDone: {}, live: {}, childOf: {}, specStepIds: {},
-    rafQueued: false, draftAbort: null, doctor: [], loopMarkers: []
+    runId: null, es: null,
+    startedAt: 0, timer: null,
+    runState: null,
+    rafQueued: false, draftAbort: null, doctor: []
   };
 
   function h(tag, attrs) {
@@ -432,7 +732,7 @@ export const PAGE_HTML = `<!doctype html>
   function selectWorkflow(name, after) {
     if (S.es) { S.es.close(); S.es = null; }
     stopTimer();
-    S.selected = name; S.runId = null; S.started = false; S.done = false;
+    S.selected = name; S.runId = null; S.runState = null;
     renderSidebar();
     document.getElementById("statusLine").style.display = "none";
     setBanner("", "");
@@ -444,8 +744,7 @@ export const PAGE_HTML = `<!doctype html>
       document.getElementById("wfSub").textContent = r.body.spec.description || "";
       document.getElementById("runRow").style.display = "flex";
       renderSourceLine();
-      resetRunModel();
-      seedFromSpec();
+      S.runState = SteamtrainReducer.workflowStateFromSpec(r.body.spec);
       render();
       if (after) after();
     });
@@ -488,129 +787,11 @@ export const PAGE_HTML = `<!doctype html>
   }
 
   // ---- run model -----------------------------------------------------------
-  function resetRunModel() {
-    S.phaseOrder = []; S.phaseDone = {}; S.live = {}; S.childOf = {};
-    S.specStepIds = {}; S.results = []; S.ok = true; S.loopMarkers = [];
-  }
-  function seedFromSpec() {
-    if (!S.spec) return;
-    S.spec.phases.forEach(function (p) {
-      S.phaseOrder.push({ id: p.id, title: p.title || p.id });
-      (p.steps || []).forEach(function (st) {
-        S.specStepIds[st.id] = p.id;
-        S.live[st.id] = {
-          id: st.id, phaseId: p.id, kind: st.kind || "worker", agent: st.agent, model: st.model,
-          dependsOn: st.dependsOn, forEach: st.forEach, loopTo: st.loopTo, maxIterations: st.maxIterations,
-          status: "pending", text: "", activity: null,
-          result: null, cached: false, gate: null, item: null, child: false
-        };
-      });
-    });
-  }
-  function ensureLive(stepId, phaseId) {
-    if (!S.live[stepId]) {
-      S.live[stepId] = {
-        id: stepId, phaseId: phaseId, kind: "worker", status: "pending", text: "",
-        activity: null, result: null, cached: false, gate: null, item: null, child: true
-      };
-      if (!S.specStepIds[stepId]) {
-        (S.childOf[phaseId] = S.childOf[phaseId] || []).push(stepId);
-      }
-    }
-    return S.live[stepId];
-  }
-
   function reduce(ev) {
-    switch (ev.kind) {
-      case "workflow_start":
-        S.started = true; S.startedAt = Date.now(); break;
-      case "phase_start": {
-        var iter = ev.iteration || 1;
-        // Drop the spec-preview block (no iteration tag) once the real run
-        // reaches this phase, so the live iteration block replaces it instead
-        // of rendering alongside as a duplicate.
-        if (iter === 1)
-          S.phaseOrder = S.phaseOrder.filter(function (p) {
-            return p.id !== ev.phaseId || p.iteration !== undefined;
-          });
-        if (!S.phaseOrder.some(function (p) { return p.id === ev.phaseId && p.iteration === iter; }))
-          S.phaseOrder.push({ id: ev.phaseId, title: ev.title || ev.phaseId, iteration: iter });
-        break;
-      }
-      case "fan_out": {
-        // Pre-create pending cards for the resolved fan-out children (the engine
-        // names them parent[i]), so the canvas shows the true fan-out size and
-        // the progress denominator is right immediately. Each real step_start
-        // below reuses the matching entry and flips it to running.
-        for (var fi = 0; fi < ev.count; fi++) {
-          var childId = ev.parentStepId + "[" + fi + "]";
-          var fc = ensureLive(childId, ev.phaseId);
-          fc.parentStepId = ev.parentStepId;
-        }
-        break;
-      }
-      case "step_start": {
-        var s = ensureLive(ev.stepId, ev.phaseId);
-        s.status = "running"; s.phaseId = ev.phaseId;
-        if (ev.blockKind) s.kind = ev.blockKind;
-        if (ev.agent) s.agent = ev.agent;
-        if (ev.model) s.model = ev.model;
-        if (ev.dependsOn) s.dependsOn = ev.dependsOn;
-        if (ev.item) s.item = ev.item;
-        if (ev.parentStepId) s.parentStepId = ev.parentStepId;
-        break;
-      }
-      case "step_event": {
-        var st = S.live[ev.stepId]; if (!st) break;
-        var a = ev.event;
-        if (a.kind === "text_delta") { if (!a.thinking) st.text += a.text; }
-        else if (a.kind === "tool_use") st.activity = "\\u2699 " + a.name;
-        else if (a.kind === "tool_result") st.activity = (a.isError ? "\\u2717 " : "\\u2713 ") + (a.name || "tool");
-        break;
-      }
-      case "step_retry": {
-        var rt = S.live[ev.stepId]; if (!rt) break;
-        rt.attempts = ev.attempt + 1;
-        rt.activity = "\\u21bb retrying " + (ev.attempt + 1) + "/" + ev.maxAttempts + " (" + Math.round(ev.delayMs) + "ms)";
-        break;
-      }
-      case "gate_evaluated": {
-        var g = S.live[ev.stepId]; if (!g) break;
-        g.gate = { passed: ev.passed, target: ev.target };
-        g.activity = ev.passed ? ("gate passed" + (ev.target ? " \\u2192 " + ev.target : "")) : "gate blocked";
-        break;
-      }
-      case "step_done": {
-        var d = S.live[ev.stepId]; if (!d) break;
-        d.status = ev.result.ok ? "done" : "error";
-        d.result = ev.result; d.cached = ev.cached;
-        if (!d.text) d.text = ev.result.output || "";
-        break;
-      }
-      case "phase_done":
-        S.phaseDone[ev.phaseId + "@" + (ev.iteration || 1)] = { ok: ev.ok }; break;
-      case "loop_iteration": {
-        // Record which gate-phase instance emitted this marker so render()
-        // can place it after that exact instance instead of clustering all
-        // markers after the last occurrence.
-        var gp = S.specStepIds[ev.gateStepId];
-        var gateIter = 0;
-        if (gp) {
-          for (var gi = S.phaseOrder.length - 1; gi >= 0; gi--) {
-            var pe = S.phaseOrder[gi];
-            if (pe.id === gp && pe.iteration) { gateIter = pe.iteration; break; }
-          }
-        }
-        S.loopMarkers.push({
-          gateStepId: ev.gateStepId, loopTo: ev.loopTo,
-          iteration: ev.iteration, maxIterations: ev.maxIterations,
-          gatePhaseId: gp, gatePhaseIteration: gateIter
-        });
-        break;
-      }
-      case "workflow_done":
-        S.done = true; S.ok = ev.ok; S.results = ev.results || []; break;
+    if (!S.runState) {
+      S.runState = SteamtrainReducer.initialWorkflowState;
     }
+    S.runState = SteamtrainReducer.workflowReducer(S.runState, { type: "event", event: ev });
   }
 
   // ---- rendering -----------------------------------------------------------
@@ -618,13 +799,6 @@ export const PAGE_HTML = `<!doctype html>
     if (S.rafQueued) return;
     S.rafQueued = true;
     requestAnimationFrame(function () { S.rafQueued = false; render(); });
-  }
-
-  function stepsForPhase(phaseId) {
-    var ids = [];
-    (S.spec ? (S.spec.phases.find(function (p) { return p.id === phaseId; }) || {}).steps || [] : []).forEach(function (st) { ids.push(st.id); });
-    (S.childOf[phaseId] || []).forEach(function (id) { ids.push(id); });
-    return ids.map(function (id) { return S.live[id]; }).filter(Boolean);
   }
 
   function render() {
@@ -637,23 +811,21 @@ export const PAGE_HTML = `<!doctype html>
       legendItem("distributor", "fan-out"), legendItem("consolidator", "merge"), legendItem("gate", "gate")
     ));
 
-    // Highest iteration seen per phase id — a phase block is "latest" when its
-    // iteration equals this. Only the latest instance shows live step cards;
-    // earlier instances were superseded by a re-run and get a placeholder.
     var maxIter = {};
-    S.phaseOrder.forEach(function (p) {
-      if (p.iteration && (!maxIter[p.id] || p.iteration > maxIter[p.id])) maxIter[p.id] = p.iteration;
+    var phases = S.runState ? S.runState.phases : [];
+    phases.forEach(function (p) {
+      if (p.iteration && (!maxIter[p.phaseId] || p.iteration > maxIter[p.phaseId])) maxIter[p.phaseId] = p.iteration;
     });
 
-    S.phaseOrder.forEach(function (p, idx) {
+    phases.forEach(function (p, idx) {
       if (idx > 0) canvas.appendChild(h("div", { class: "connector" }));
       var piter = p.iteration || 1;
-      var done = S.phaseDone[p.id + "@" + piter];
-      var steps = stepsForPhase(p.id);
+      var done = p.done ? { ok: p.ok } : null;
+      var steps = p.steps || [];
       var running = steps.some(function (s) { return s.status === "running"; });
-      var pstat = done ? (done.ok ? "done" : "failed") : (running ? "running" : (S.started ? "" : "pending"));
+      var pstat = p.done ? (p.ok ? "done" : "failed") : (running ? "running" : (S.runState && S.runState.started ? "" : "pending"));
       var ptitle = p.title + (p.iteration && p.iteration > 1 ? " \\u00b7 iteration " + p.iteration : "");
-      var phaseEl = h("div", { class: "phase" + (done ? " done" : "") },
+      var phaseEl = h("div", { class: "phase" + (p.done ? " done" : "") },
         h("div", { class: "phead" },
           h("div", { class: "pidx", text: String(idx + 1) }),
           h("div", { class: "ptitle", text: ptitle }),
@@ -661,37 +833,31 @@ export const PAGE_HTML = `<!doctype html>
         )
       );
       var cards = h("div", { class: "cards" });
-      // Seed-preview blocks (no iteration) and the latest iteration of each
-      // phase render the real live cards. Earlier iterations were superseded
-      // by a re-run — show a placeholder instead of the stale (last-written)
-      // card, so the timeline doesn't lie about each iteration's output.
-      var isLatest = !p.iteration || p.iteration === (maxIter[p.id] || 1);
+      var isLatest = !p.iteration || p.iteration === (maxIter[p.phaseId] || 1);
       steps.forEach(function (s) {
         if (isLatest) cards.appendChild(renderCard(s));
         else cards.appendChild(h("div", { class: "card superseded" },
           h("div", { class: "top" },
-            h("span", { class: "sid", text: s.id }),
-            h("span", { class: "state", text: "iteration " + piter + " \\u2192 superseded by iteration " + maxIter[p.id] })
+            h("span", { class: "sid", text: s.stepId }),
+            h("span", { class: "state", text: "iteration " + piter + " \\u2192 superseded by iteration " + maxIter[p.phaseId] })
           )
         ));
       });
       phaseEl.appendChild(cards);
       canvas.appendChild(phaseEl);
 
-      // Place each loop marker right after the gate-phase instance that
-      // emitted it (matched by phase id + iteration), instead of clustering
-      // all markers after the last occurrence of the phase.
-      S.loopMarkers.forEach(function (m) {
-        if (m.gatePhaseId === p.id && m.gatePhaseIteration === piter) {
+      var loopMarkers = S.runState ? (S.runState.loopMarkers || []) : [];
+      loopMarkers.forEach(function (m) {
+        if (m.gatePhaseId === p.phaseId && m.gatePhaseIteration === piter) {
           canvas.appendChild(h("div", { class: "loop-marker" },
             h("span", { class: "chip warn",
-              text: "\\u21ba loop \\u2192 " + m.loopTo + " \\u00b7 iteration " + m.iteration + "/" + m.maxIterations })
+              text: "\\u21ba loop \\u2192 " + m.loopTo + " \\u00b7 iteration " + m.iteration + "/" + (m.maxIterations || "") })
           ));
         }
       });
     });
 
-    if (S.done) renderSummary(canvas);
+    if (S.runState && S.runState.done) renderSummary(canvas);
     updateProgress();
   }
 
@@ -705,14 +871,14 @@ export const PAGE_HTML = `<!doctype html>
 
   function renderCard(s) {
     var card = h("div", { class: "card " + s.status });
-    var kindEl = h("span", { class: "kind " + s.kind });
+    var kindEl = h("span", { class: "kind " + s.blockKind });
     if (s.status === "running") kindEl.appendChild(h("span", { class: "pulse" }));
-    kindEl.appendChild(document.createTextNode(KIND_LABEL[s.kind] || s.kind));
+    kindEl.appendChild(document.createTextNode(KIND_LABEL[s.blockKind] || s.blockKind));
     var attempts = s.attempts || (s.result && s.result.attempts);
     var stateLabel = s.status === "pending" ? "pending" : s.status;
     if (attempts && attempts > 1) stateLabel += " \\u00b7 " + attempts + " tries";
     card.appendChild(h("div", { class: "top" },
-      h("span", { class: "sid", text: s.id }),
+      h("span", { class: "sid", text: s.stepId }),
       kindEl,
       h("span", { class: "state " + s.status, text: stateLabel })
     ));
@@ -745,7 +911,8 @@ export const PAGE_HTML = `<!doctype html>
   }
 
   function renderSummary(canvas) {
-    var leaves = S.results.filter(function (r) { return !(r.childResults && r.childResults.length); });
+    var results = S.runState ? (S.runState.results || []) : [];
+    var leaves = results.filter(function (r) { return !(r.childResults && r.childResults.length); });
     if (!leaves.length) return;
     var wrap = h("div", { class: "summary" });
     wrap.appendChild(h("h2", { text: "Run summary", style: "color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em" }));
@@ -776,9 +943,14 @@ export const PAGE_HTML = `<!doctype html>
   }
 
   function updateProgress() {
-    var all = Object.keys(S.live).map(function (k) { return S.live[k]; });
-    var total = all.length || (S.spec ? 0 : 0);
-    var doneN = all.filter(function (s) { return s.status === "done" || s.status === "error"; }).length;
+    var steps = [];
+    if (S.runState) {
+      S.runState.phases.forEach(function (p) {
+        p.steps.forEach(function (s) { steps.push(s); });
+      });
+    }
+    var total = steps.length;
+    var doneN = steps.filter(function (s) { return s.status === "done" || s.status === "error"; }).length;
     var bar = document.getElementById("progressBar");
     var pct = total ? Math.round((doneN / total) * 100) : 0;
     bar.style.width = pct + "%";
@@ -789,8 +961,7 @@ export const PAGE_HTML = `<!doctype html>
   function startRun() {
     var input = document.getElementById("input").value;
     if (!input.trim()) { setBanner("enter some input first", "info"); return; }
-    resetRunModel(); seedFromSpec();
-    S.started = false; S.done = false; S.ok = true;
+    S.runState = SteamtrainReducer.workflowStateFromSpec(S.spec);
     setBanner("", "");
     document.getElementById("statusLine").style.display = "flex";
     api("POST", "/api/runs", { workflow: S.selected, input: input, fresh: document.getElementById("freshChk").checked })
@@ -822,7 +993,7 @@ export const PAGE_HTML = `<!doctype html>
       }
     };
     es.onerror = function () {
-      if (S.done) return;
+      if (S.runState && S.runState.done) return;
       // The browser will retry automatically; surface a hint if it persists.
     };
   }
@@ -1315,7 +1486,7 @@ export const PAGE_HTML = `<!doctype html>
   // Map a recorded step onto the shape renderCard expects (live step view).
   function historyStepView(st) {
     return {
-      id: st.stepId, kind: st.blockKind || "worker", agent: st.agent, model: st.model,
+      stepId: st.stepId, blockKind: st.blockKind || "worker", agent: st.agent, model: st.model,
       dependsOn: st.dependsOn, forEach: null, item: st.item, status: st.status,
       text: st.text || (st.result && st.result.output) || "", activity: null,
       result: st.result, cached: st.cached, attempts: st.attempts,
