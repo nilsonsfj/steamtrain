@@ -13,12 +13,21 @@ import { type WorkflowSpec, validateWorkflow, workflowSpecSchema } from "./types
 const DEFAULT_NAME = "workflow";
 const MAX_NAME_LENGTH = 48;
 
+/** Default number of corrective re-prompts after an invalid first draft. */
+export const DEFAULT_REPAIR_ATTEMPTS = 2;
+
 export interface GenerateWorkflowDeps {
   createAdapter: (id: AgentId, binary?: string) => AgentAdapter;
   binaries?: Partial<Record<AgentId, string>>;
   timeoutMs?: number;
   /** Working directory for the generating agent (it does not need repo access). */
   cwd?: string;
+  /**
+   * How many times to re-prompt the agent with the validation error when the
+   * first draft is invalid (same-phase deps, bad shape, no JSON, …). 0 disables
+   * repair. Defaults to {@link DEFAULT_REPAIR_ATTEMPTS}.
+   */
+  maxRepairAttempts?: number;
 }
 
 export interface GenerateWorkflowRequest {
@@ -40,6 +49,8 @@ export interface GenerateWorkflowResult {
   /** Raw model text, kept for display/debugging when extraction fails. */
   raw: string;
   error?: string;
+  /** How many agent runs it took (1 = first draft was valid; >1 = repaired). */
+  attempts: number;
 }
 
 export type ExtractResult =
@@ -174,6 +185,41 @@ ${description}
 Respond with the JSON object only.`;
 }
 
+/** Truncate raw model output so a repair prompt stays a sane size. */
+const MAX_REPAIR_OUTPUT_CHARS = 4000;
+
+/**
+ * The repair prompt. When a draft fails to parse or validate, we show the model
+ * its own previous output and the EXACT validation error (the same message the
+ * engine produced) and ask for a corrected JSON object. This is the safety net
+ * behind {@link buildWorkflowGenerationPrompt}: even a weak model usually fixes a
+ * concrete, named error ("step X dependsOn Y, which is not in an earlier phase").
+ */
+export function buildWorkflowRepairPrompt(
+  description: string,
+  previousOutput: string,
+  error: string,
+): string {
+  const trimmed =
+    previousOutput.length > MAX_REPAIR_OUTPUT_CHARS
+      ? `${previousOutput.slice(0, MAX_REPAIR_OUTPUT_CHARS)}\n…(truncated)`
+      : previousOutput;
+  return `${buildWorkflowGenerationPrompt(description)}
+
+# Your previous attempt was INVALID
+You already tried, and it was rejected with this error:
+
+${error}
+
+Your previous output was:
+${trimmed}
+
+Fix ONLY what the error calls out, keeping the rest of the intent. The most
+common cause is two dependent steps sharing a phase — if so, move the dependent
+step into a later phase. Re-read the self-check above, then output the corrected
+JSON object only (no prose, no fences).`;
+}
+
 /**
  * Pull a workflow spec out of a model reply. Tries fenced ```json blocks first,
  * then a balanced top-level object, then validates with the engine's rules.
@@ -214,14 +260,19 @@ export function extractWorkflowSpec(
   return { ok: true, spec };
 }
 
-/** Run the agent and turn its reply into a validated workflow spec. */
-export async function generateWorkflow(
+interface AgentRunOutcome {
+  raw: string;
+  errored: boolean;
+  errorMessage?: string;
+}
+
+/** One agent run: stream events through `onEvent`, collect the reply text. */
+async function runGenerationAgent(
+  adapter: AgentAdapter,
+  prompt: string,
   req: GenerateWorkflowRequest,
   deps: GenerateWorkflowDeps,
-): Promise<GenerateWorkflowResult> {
-  const adapter = deps.createAdapter(req.agent, deps.binaries?.[req.agent]);
-  const prompt = buildWorkflowGenerationPrompt(req.description);
-
+): Promise<AgentRunOutcome> {
   let finalText = "";
   let streamedText = "";
   let errored = false;
@@ -255,21 +306,60 @@ export async function generateWorkflow(
     errorMessage ??= message(err);
   }
 
-  const raw = finalText || streamedText;
-  if (errored && !raw) {
-    return { ok: false, raw: raw || "", error: errorMessage ?? "workflow generation failed" };
-  }
+  return { raw: finalText || streamedText, errored, errorMessage };
+}
 
-  const extracted = extractWorkflowSpec(raw, { name: req.name, fallbackName: req.description });
-  if (!extracted.ok) {
+/**
+ * Run the agent and turn its reply into a validated workflow spec. When the
+ * first draft is invalid, re-prompt the agent with the exact validation error up
+ * to `maxRepairAttempts` times (see {@link buildWorkflowRepairPrompt}) before
+ * giving up. `result.attempts` reports how many runs it took.
+ */
+export async function generateWorkflow(
+  req: GenerateWorkflowRequest,
+  deps: GenerateWorkflowDeps,
+): Promise<GenerateWorkflowResult> {
+  const adapter = deps.createAdapter(req.agent, deps.binaries?.[req.agent]);
+  const maxRepairAttempts = Math.max(0, deps.maxRepairAttempts ?? DEFAULT_REPAIR_ATTEMPTS);
+
+  let prompt = buildWorkflowGenerationPrompt(req.description);
+  let lastResult: GenerateWorkflowResult = { ok: false, raw: "", attempts: 0 };
+
+  for (let attempt = 1; attempt <= maxRepairAttempts + 1; attempt++) {
+    const { raw, errored, errorMessage } = await runGenerationAgent(adapter, prompt, req, deps);
+
+    // An agent error with no output at all: repairing has nothing to work from.
+    if (errored && !raw) {
+      return {
+        ok: false,
+        raw: "",
+        error: errorMessage ?? "workflow generation failed",
+        attempts: attempt,
+      };
+    }
+
+    const extracted = extractWorkflowSpec(raw, { name: req.name, fallbackName: req.description });
+    if (extracted.ok) {
+      // The agent flagged an error yet still produced a usable spec: surface the
+      // error (legacy behavior) rather than silently accepting it.
+      return errored
+        ? { ok: false, raw, spec: extracted.spec, error: errorMessage, attempts: attempt }
+        : { ok: true, raw, spec: extracted.spec, attempts: attempt };
+    }
+
     const detail =
       errored && errorMessage ? `${errorMessage}; ${extracted.error}` : extracted.error;
-    return { ok: false, raw, error: detail };
+    lastResult = { ok: false, raw, error: detail, attempts: attempt };
+
+    // Re-prompt with the concrete error if we have budget and something to fix.
+    if (attempt <= maxRepairAttempts && !req.signal?.aborted) {
+      prompt = buildWorkflowRepairPrompt(req.description, raw, extracted.error);
+    } else {
+      break;
+    }
   }
-  if (errored) {
-    return { ok: false, raw, spec: extracted.spec, error: errorMessage };
-  }
-  return { ok: true, raw, spec: extracted.spec };
+
+  return lastResult;
 }
 
 /**
