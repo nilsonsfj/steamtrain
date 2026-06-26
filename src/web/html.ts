@@ -1278,7 +1278,8 @@ export const PAGE_HTML = `<!doctype html>
       dependsOn: st.dependsOn, forEach: null, item: st.item, status: st.status,
       text: st.text || (st.result && st.result.output) || "", activity: null,
       result: st.result, cached: st.cached, attempts: st.attempts,
-      gate: st.gate ? { passed: st.gate.passed, target: st.gate.target } : null
+      gate: st.gate ? { passed: st.gate.passed, target: st.gate.target } : null,
+      loopTo: st.loopTo, maxIterations: st.maxIterations
     };
   }
 

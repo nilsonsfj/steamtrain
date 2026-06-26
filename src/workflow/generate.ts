@@ -109,7 +109,7 @@ phase.
 # Loops (bounded cycles) ARE supported — use a loop-back gate
 For iterative work ("review then fix then re-review until clean"), use a gate
 with a "loopTo" pointing to an EARLIER phase, plus an optional "maxIterations":
-  { "kind": "gate", "dependsOn": ["fix"], "condition": { "step": "fix", "contains": "DONE" },
+  { "kind": "gate", "dependsOn": ["review"], "condition": { "step": "review", "contains": "DONE" },
     "loopTo": "review", "maxIterations": 5, "onFalse": "fail" }
 Semantics:
   - condition TRUE  → loop converged; continue forward.

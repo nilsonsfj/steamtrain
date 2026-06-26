@@ -37,6 +37,10 @@ export interface StepState {
   cached: boolean;
   /** Total attempts so far when the step is auto-retrying a transient failure. */
   attempts?: number;
+  /** A loop-back gate's target phase, when this step is such a gate. */
+  loopTo?: string;
+  /** The gate's own iteration cap, when this step is a loop-back gate. */
+  maxIterations?: number;
 }
 
 export interface PhaseState {
@@ -215,6 +219,8 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
                     status: "running",
                     text: "",
                     cached: false,
+                    loopTo: e.loopTo,
+                    maxIterations: e.maxIterations,
                   },
                 ],
               }

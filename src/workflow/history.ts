@@ -34,6 +34,10 @@ export interface HistoryStep {
   cached: boolean;
   /** Total attempts this step took (auto-retry); omitted/1 means it ran once. */
   attempts?: number;
+  /** A loop-back gate's target phase, when this step is such a gate. */
+  loopTo?: string;
+  /** The gate's own iteration cap, when this step is a loop-back gate. */
+  maxIterations?: number;
 }
 
 export interface HistoryPhase {
@@ -227,6 +231,8 @@ export class RunRecordBuilder {
           status: "running",
           text: "",
           cached: false,
+          loopTo: event.loopTo,
+          maxIterations: event.maxIterations,
         });
         break;
       }

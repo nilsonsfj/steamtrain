@@ -44,6 +44,10 @@ export interface StepStartEvent {
   item?: WorkflowItem;
   /** Loop iteration (1-based); omitted ⇒ 1 (no loop). */
   iteration?: number;
+  /** A loop-back gate's target phase, when this step is such a gate. */
+  loopTo?: string;
+  /** The gate's own iteration cap, when this step is a loop-back gate. */
+  maxIterations?: number;
   ts: number;
 }
 

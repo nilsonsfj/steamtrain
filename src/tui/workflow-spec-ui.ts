@@ -115,7 +115,7 @@ export function specStepRowMeta(step: WorkflowStep): string {
   if ("cwd" in step && step.cwd) bits.push(`cwd: ${basename(step.cwd)}`);
   if (step.kind === "distributor" && step.items?.length) bits.push(`${step.items.length} items`);
   if (step.kind === "gate") bits.push(formatGateCondition(step.condition));
-  if (step.kind === "gate" && step.loopTo) bits.push(`↺ ${step.loopTo}`);
+  if (step.kind === "gate" && step.loopTo) bits.push(formatGateLoop(step));
   return bits.join(" · ");
 }
 
