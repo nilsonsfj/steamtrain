@@ -469,6 +469,57 @@ describe("authoring HTTP routes", () => {
     expect(host.workflowSource("edited")).toBeUndefined();
   });
 
+  it("round-trips a loop gate's loopTo/maxIterations through PUT and GET", async () => {
+    const host = new FakeHost(home);
+    const base = await start(makeServer(host));
+
+    const loopSpec: WorkflowSpec = {
+      name: "review-loop",
+      phases: [
+        {
+          id: "review",
+          title: "review",
+          steps: [{ id: "r", agent: "opencode", model: "m", prompt: "review {{input}}" }],
+        },
+        {
+          id: "fix",
+          title: "fix",
+          steps: [{ id: "f", agent: "opencode", model: "m", prompt: "fix {{steps.r.output}}" }],
+        },
+        {
+          id: "check",
+          title: "check",
+          steps: [
+            {
+              id: "g",
+              kind: "gate",
+              dependsOn: ["f"],
+              condition: { step: "f", contains: "DONE" },
+              loopTo: "review",
+              maxIterations: 4,
+              onFalse: "fail",
+            },
+          ],
+        },
+      ],
+    } as WorkflowSpec;
+
+    const put = await fetch(`${base}/api/workflows/review-loop`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ spec: loopSpec }),
+    });
+    expect(put.status).toBe(200);
+    expect(((await put.json()) as { ok: boolean }).ok).toBe(true);
+
+    const get = await fetch(`${base}/api/workflows/review-loop`);
+    expect(get.status).toBe(200);
+    const { spec } = (await get.json()) as { spec: WorkflowSpec };
+    const gate = firstStep({ ...spec, phases: [spec.phases[2]!] } as WorkflowSpec);
+    expect(gate.loopTo).toBe("review");
+    expect(gate.maxIterations).toBe(4);
+  });
+
   it("rejects deleting a bundled workflow", async () => {
     const base = await start(makeServer(new FakeHost(home)));
     const del = await fetch(`${base}/api/workflows/bug-hunt`, { method: "DELETE" });

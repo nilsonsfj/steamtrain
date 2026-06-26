@@ -116,6 +116,7 @@ export const PAGE_HTML = `<!doctype html>
   .phase .ptitle { font-weight: 700; }
   .phase .pstat { font-size: 11px; color: var(--muted); }
   .connector { width: 2px; height: 18px; background: var(--border); margin: 0 auto; }
+  .loop-marker { display: flex; justify-content: center; margin: 6px 0; }
   .cards { display: flex; flex-wrap: wrap; gap: 12px; }
   .card {
     flex: 1 1 280px; max-width: 520px; min-width: 240px;
@@ -321,7 +322,7 @@ export const PAGE_HTML = `<!doctype html>
     runId: null, es: null, started: false, done: false, ok: true,
     startedAt: 0, timer: null, results: [],
     phaseOrder: [], phaseDone: {}, live: {}, childOf: {}, specStepIds: {},
-    rafQueued: false, draftAbort: null, doctor: []
+    rafQueued: false, draftAbort: null, doctor: [], loopMarkers: []
   };
 
   function h(tag, attrs) {
@@ -487,7 +488,7 @@ export const PAGE_HTML = `<!doctype html>
   // ---- run model -----------------------------------------------------------
   function resetRunModel() {
     S.phaseOrder = []; S.phaseDone = {}; S.live = {}; S.childOf = {};
-    S.specStepIds = {}; S.results = []; S.ok = true;
+    S.specStepIds = {}; S.results = []; S.ok = true; S.loopMarkers = [];
   }
   function seedFromSpec() {
     if (!S.spec) return;
@@ -497,7 +498,8 @@ export const PAGE_HTML = `<!doctype html>
         S.specStepIds[st.id] = p.id;
         S.live[st.id] = {
           id: st.id, phaseId: p.id, kind: st.kind || "worker", agent: st.agent, model: st.model,
-          dependsOn: st.dependsOn, forEach: st.forEach, status: "pending", text: "", activity: null,
+          dependsOn: st.dependsOn, forEach: st.forEach, loopTo: st.loopTo, maxIterations: st.maxIterations,
+          status: "pending", text: "", activity: null,
           result: null, cached: false, gate: null, item: null, child: false
         };
       });
@@ -520,10 +522,12 @@ export const PAGE_HTML = `<!doctype html>
     switch (ev.kind) {
       case "workflow_start":
         S.started = true; S.startedAt = Date.now(); break;
-      case "phase_start":
-        if (!S.phaseOrder.some(function (p) { return p.id === ev.phaseId; }))
-          S.phaseOrder.push({ id: ev.phaseId, title: ev.title || ev.phaseId });
+      case "phase_start": {
+        var iter = ev.iteration || 1;
+        if (!S.phaseOrder.some(function (p) { return p.id === ev.phaseId && p.iteration === iter; }))
+          S.phaseOrder.push({ id: ev.phaseId, title: ev.title || ev.phaseId, iteration: iter });
         break;
+      }
       case "fan_out": {
         // Pre-create pending cards for the resolved fan-out children (the engine
         // names them parent[i]), so the canvas shows the true fan-out size and
@@ -576,6 +580,12 @@ export const PAGE_HTML = `<!doctype html>
       }
       case "phase_done":
         S.phaseDone[ev.phaseId] = { ok: ev.ok }; break;
+      case "loop_iteration":
+        S.loopMarkers.push({
+          gateStepId: ev.gateStepId, loopTo: ev.loopTo,
+          iteration: ev.iteration, maxIterations: ev.maxIterations
+        });
+        break;
       case "workflow_done":
         S.done = true; S.ok = ev.ok; S.results = ev.results || []; break;
     }
@@ -611,10 +621,11 @@ export const PAGE_HTML = `<!doctype html>
       var steps = stepsForPhase(p.id);
       var running = steps.some(function (s) { return s.status === "running"; });
       var pstat = done ? (done.ok ? "done" : "failed") : (running ? "running" : (S.started ? "" : "pending"));
+      var ptitle = p.title + (p.iteration && p.iteration > 1 ? " \\u00b7 iteration " + p.iteration : "");
       var phaseEl = h("div", { class: "phase" + (done ? " done" : "") },
         h("div", { class: "phead" },
           h("div", { class: "pidx", text: String(idx + 1) }),
-          h("div", { class: "ptitle", text: p.title }),
+          h("div", { class: "ptitle", text: ptitle }),
           pstat ? h("div", { class: "pstat", text: "\\u00b7 " + pstat }) : null
         )
       );
@@ -622,6 +633,21 @@ export const PAGE_HTML = `<!doctype html>
       steps.forEach(function (s) { cards.appendChild(renderCard(s)); });
       phaseEl.appendChild(cards);
       canvas.appendChild(phaseEl);
+
+      // Loop markers belong right after the phase that holds the gate which
+      // fired them; render any whose gate lives in this phase instance once
+      // it's the last (most recent) occurrence rendered so far.
+      var lastIdxForPhase = -1;
+      for (var li = 0; li < S.phaseOrder.length; li++) if (S.phaseOrder[li].id === p.id) lastIdxForPhase = li;
+      if (idx === lastIdxForPhase) {
+        S.loopMarkers.forEach(function (m) {
+          if (S.specStepIds[m.gateStepId] !== p.id) return;
+          canvas.appendChild(h("div", { class: "loop-marker" },
+            h("span", { class: "chip warn",
+              text: "\\u21ba loop \\u2192 " + m.loopTo + " \\u00b7 iteration " + m.iteration + "/" + m.maxIterations })
+          ));
+        });
+      }
     });
 
     if (S.done) renderSummary(canvas);
@@ -652,6 +678,9 @@ export const PAGE_HTML = `<!doctype html>
     if (s.agent) card.appendChild(h("div", { class: "agent", text: s.agent + (s.model ? " \\u00b7 " + s.model : "") }));
     if (s.dependsOn && s.dependsOn.length) card.appendChild(h("div", { class: "inputs", text: "inputs: " + s.dependsOn.join(", ") }));
     if (s.forEach) card.appendChild(h("div", { class: "inputs", text: "forEach: " + s.forEach }));
+    if (s.loopTo) card.appendChild(h("div", { class: "inputs" },
+      h("span", { class: "chip warn", text: "\\u21ba " + s.loopTo + (s.maxIterations ? " \\u00b7 max " + s.maxIterations : "") })
+    ));
     if (s.item) card.appendChild(h("div", { class: "item", text: "item #" + s.item.index + ": " + truncate(s.item.value, 80) }));
     if (s.activity) card.appendChild(h("div", { class: "activity", text: s.activity }));
 
