@@ -367,8 +367,10 @@ function decideLoopJump(
     const state = loopState.get(step.id);
     if (!state) continue;
     const res = results.get(step.id);
-    // Gate "passed" (condition true) ⇒ converged, no loop.
-    if (res?.gate?.passed) return undefined;
+    // No evaluated gate result (e.g. the gate was skipped because a dependency
+    // failed) ⇒ it never tested its condition, so do not loop. A passed gate
+    // (condition true) ⇒ converged, so do not loop either.
+    if (!res?.gate || res.gate.passed) return undefined;
     const cap = step.maxIterations ?? effectiveLoopMax;
     if (state.iteration >= cap) return undefined; // exhausted ⇒ onFalse already applied
     state.iteration += 1;

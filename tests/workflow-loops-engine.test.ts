@@ -148,4 +148,45 @@ describe("engine loops", () => {
     expect(seenPrompts).toContain("review go (iter 1)");
     expect(seenPrompts).toContain("review go (iter 2)");
   });
+
+  it("does not loop when the gate is skipped because its dependency failed", async () => {
+    // fix-step always errors, so check-gate (dependsOn fix-step) is skipped, never
+    // evaluating its condition. A skipped gate must not trigger a loop-back jump.
+    const spec: WorkflowSpec = {
+      name: "loop-skip-gate",
+      phases: [
+        workerPhase("review", "review {{input}} (iter {{iteration}})"),
+        workerPhase("fix", "fix based on {{steps.review-step.output}}"),
+        {
+          id: "check",
+          title: "check",
+          steps: [
+            {
+              id: "check-gate",
+              kind: "gate" as const,
+              dependsOn: ["fix-step"],
+              condition: { step: "fix-step", contains: "DONE" },
+              loopTo: "review",
+              onFalse: "fail" as const,
+            },
+          ],
+        },
+      ],
+    };
+    const deps = {
+      createAdapter: () =>
+        fakeAdapter((prompt) => {
+          if (prompt.startsWith("fix")) return { text: "boom", isError: true };
+          return { text: "reviewed" };
+        }),
+      maxConcurrency: 2,
+      cwd: "/tmp",
+      loopMaxIterations: 10,
+    };
+    const events = await collect(spec, deps);
+    const loops = events.filter((e) => e.kind === "loop_iteration");
+    expect(loops.length).toBe(0);
+    const done = events.find((e) => e.kind === "workflow_done") as { ok: boolean };
+    expect(done.ok).toBe(false);
+  });
 });
