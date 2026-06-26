@@ -535,6 +535,16 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
 
   // Worst-case step budget with loops: a region's body steps run `maxIterations`
   // times; nested regions multiply by every region that fully contains them.
+  // NOTE: this deliberately DOUBLE-COUNTS nested-region body expansion — the
+  // inner region's body is part of the outer region's `bodySteps` (summed from
+  // `start..end`), so it is already counted in the outer's
+  // `(outer.max - 1) * bodySteps`, AND counted again when the inner region's
+  // own `(inner.max - 1) * outerMultiplier` extras fire. The over-estimate is
+  // intentional: a verifier should err pessimistic. Do NOT "correct" this to
+  // subtract the inner body from the outer sum — that would under-budget real
+  // pathological nested loops. The slack is small in practice (nested loops are
+  // rare and bodies are modest) and MAX_STEPS is a safety backstop, not a tight
+  // quota.
   const phaseStepCount = spec.phases.map((p) => p.steps.length);
   let loopExpansion = 0;
   for (const r of regions) {

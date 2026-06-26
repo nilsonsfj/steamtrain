@@ -288,6 +288,11 @@ const reviewLoop: WorkflowSpec = {
       title: "Converged?",
       steps: [
         {
+          // The gate re-checks REVIEW (not fix): the loop converges when the
+          // reviewer reports nothing left to fix, so the gate must test the
+          // review step's output for "DONE". Gating on fix instead is a common
+          // authoring mistake — fix always runs and always produces output, so
+          // a fix-conditioned gate never converges and the loop burns its cap.
           id: "loop-gate",
           kind: "gate",
           dependsOn: ["review"],

@@ -101,11 +101,14 @@ export function formatGateCondition(condition: GateCondition): string {
   return parts.join(" ");
 }
 
-/** Compact loop summary for a gate, or "" when it is not a loop. */
+/** Compact loop summary for a gate, or "" when it is not a loop. The `phase:`
+ * prefix distinguishes the loop target (a phase id) from the step-id references
+ * used elsewhere in the row meta (`deps:`, `forEach:`), so a reader can tell at
+ * a glance what `↺` refers to. */
 export function formatGateLoop(step: WorkflowStep): string {
   if (step.kind !== "gate" || step.loopTo === undefined) return "";
   const max = step.maxIterations !== undefined ? ` · max ${step.maxIterations}` : "";
-  return `↺ ${step.loopTo}${max}`;
+  return `↺ phase:${step.loopTo}${max}`;
 }
 
 export function specStepRowMeta(step: WorkflowStep): string {

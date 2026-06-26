@@ -119,6 +119,14 @@ function sameInstance(p: PhaseState, phaseId: string, iteration?: number): boole
   return p.phaseId === phaseId && (p.iteration ?? 1) === (iteration ?? 1);
 }
 
+/** Phase id of the instance (any iteration) that holds `stepId`, or undefined. */
+function phaseOfStep(state: WorkflowState, stepId: string): string | undefined {
+  for (const p of state.phases) {
+    if (p.steps.some((s) => s.stepId === stepId)) return p.phaseId;
+  }
+  return undefined;
+}
+
 function updateStep(
   state: WorkflowState,
   phaseId: string,
@@ -260,9 +268,26 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
       };
     case "workflow_done":
       return { ...state, done: true, ok: e.ok, results: e.results };
-    case "loop_iteration":
+    case "loop_iteration": {
       // No TUI representation yet; the phase/step events around the jump
-      // already update the visible state.
+      // already update the visible state. Used here as an invariant assertion
+      // point: when the gate's phase instance is present in the fold state it
+      // must already be done — the engine emits loop_iteration only after the
+      // gate's phase_done, so a present-but-not-done instance means the fold's
+      // iteration keying has drifted from the engine's ordering. (Minimal
+      // synthetic test streams may omit the gate's phase entirely, so we only
+      // assert when the instance is actually present.) No-op in production but
+      // pins the coupling the folds rely on.
+      const gatePhaseId = phaseOfStep(state, e.gateStepId);
+      if (gatePhaseId) {
+        const instance = state.phases.find((p) => p.phaseId === gatePhaseId && p.done);
+        console.assert(
+          instance,
+          "loop_iteration for gate %s arrived without a completed phase instance",
+          e.gateStepId,
+        );
+      }
       return state;
+    }
   }
 }

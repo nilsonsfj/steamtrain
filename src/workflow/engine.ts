@@ -345,23 +345,29 @@ export async function* runWorkflow(
     // Loop-back decision: did this phase contain an unmet loop gate? A jump
     // means this pass is superseded by a re-run, so its failure (e.g. the
     // gate's own "not yet converged" result) must NOT poison workflowOk.
-    const jump = decideLoopJump(phase, results, loopState, effectiveLoopMax);
-    if (jump) {
+    const contended = findContendedLoopGate(phase, results, loopState, effectiveLoopMax);
+    if (contended) {
+      // The predicate found the gate; this is the only place its iteration
+      // counter advances, keeping the decision (findContendedLoopGate) and the
+      // mutation (increment + jump) as separate steps.
+      const state = loopState.get(contended.gateId)!;
+      state.iteration += 1;
+      const loopToIndex = contended.loopToIndex;
       // invalidate cache + results for the region so the body re-runs
-      invalidateRegion(spec, jump.loopToIndex, pi, cache, results);
+      invalidateRegion(spec, loopToIndex, pi, cache, results);
       // The outer loop is restarting a region that may contain other (inner)
       // loop gates; their iteration budgets must restart too, or the inner
       // loop would already be "exhausted" on the outer loop's 2nd+ pass.
-      resetNestedLoops(loopState, jump.loopToIndex, pi, jump.gateId);
+      resetNestedLoops(loopState, loopToIndex, pi, contended.gateId);
       yield {
         kind: "loop_iteration",
-        gateStepId: jump.gateId,
-        loopTo: spec.phases[jump.loopToIndex]?.id ?? "",
-        iteration: jump.iteration,
-        maxIterations: jump.maxIterations,
+        gateStepId: contended.gateId,
+        loopTo: spec.phases[loopToIndex]?.id ?? "",
+        iteration: state.iteration,
+        maxIterations: contended.cap,
         ts: Date.now(),
       };
-      pi = jump.loopToIndex;
+      pi = loopToIndex;
       continue;
     }
 
@@ -388,38 +394,35 @@ export async function* runWorkflow(
 }
 
 /**
- * If `phase` holds a loop gate whose condition failed and whose iteration budget
- * remains, return the jump (target index, next iteration, cap, gateId). The gate's
- * own StepResult (already in `results`) tells us whether it passed.
+ * Pure predicate: find the first loop gate in `phase` whose condition failed
+ * and whose iteration budget still remains, without mutating any state. Returns
+ * the gate id, its target index, and the cap to apply. The caller owns the
+ * counter increment (see the call site), which keeps "decide" separate from
+ * "mutate" so H1-class bugs (a scan that bails early) are easy to grep and test.
+ *
+ * A gate is skipped (not contended) when it has no evaluated result (e.g. a
+ * dependency failed so it never tested its condition), when it passed
+ * (condition true ⇒ converged), or when its budget is exhausted (onFalse
+ * already applied). None of those say anything about *other* loop gates that
+ * may share this phase (validation permits several loop gates per phase when
+ * their regions are nested or disjoint), so the scan keeps going instead of
+ * bailing the whole phase.
  */
-function decideLoopJump(
+function findContendedLoopGate(
   phase: WorkflowPhase,
   results: Map<string, StepResult>,
   loopState: Map<string, { loopToIndex: number; gatePhaseIndex: number; iteration: number }>,
   effectiveLoopMax: number,
-): { gateId: string; loopToIndex: number; iteration: number; maxIterations: number } | undefined {
+): { gateId: string; loopToIndex: number; cap: number } | undefined {
   for (const step of phase.steps) {
     if (step.kind !== "gate" || step.loopTo === undefined) continue;
     const state = loopState.get(step.id);
     if (!state) continue;
     const res = results.get(step.id);
-    // No evaluated gate result (e.g. the gate was skipped because a dependency
-    // failed) ⇒ it never tested its condition, so do not loop. A passed gate
-    // (condition true) ⇒ converged, so do not loop either. An exhausted gate
-    // ⇒ onFalse already applied. None of these say anything about *other* loop
-    // gates that may share this phase (validation permits several loop gates
-    // per phase when their regions are nested or disjoint), so keep scanning
-    // instead of bailing the whole phase.
     if (!res?.gate || res.gate.passed) continue;
     const cap = step.maxIterations ?? effectiveLoopMax;
     if (state.iteration >= cap) continue; // exhausted ⇒ onFalse already applied
-    state.iteration += 1;
-    return {
-      gateId: step.id,
-      loopToIndex: state.loopToIndex,
-      iteration: state.iteration,
-      maxIterations: cap,
-    };
+    return { gateId: step.id, loopToIndex: state.loopToIndex, cap };
   }
   return undefined;
 }

@@ -19,6 +19,6 @@ describe("loop gate display", () => {
   });
 
   it("shows the loop in the compact row meta", () => {
-    expect(specStepRowMeta(gate)).toContain("↺ review");
+    expect(specStepRowMeta(gate)).toContain("↺ phase:review");
   });
 });
