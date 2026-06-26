@@ -18,7 +18,7 @@
     "typecheck": "tsc --noEmit",
     "pretest": "bun scripts/build-reducer.ts",
     "test": "vitest run",
-    "test:watch": "vitest",
+    "test:watch": "bun scripts/build-reducer.ts && vitest",
     "lint": "biome check .",
     "format": "biome format --write ."
   },

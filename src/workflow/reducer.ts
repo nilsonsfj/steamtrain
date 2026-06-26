@@ -233,7 +233,14 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
       const iter = e.iteration ?? 1;
       const existing = state.phases.find((p) => sameInstance(p, e.phaseId, iter));
       if (existing) {
-        return state;
+        return {
+          ...state,
+          phases: state.phases.map((p) =>
+            sameInstance(p, e.phaseId, iter)
+              ? { ...p, title: e.title, index: e.index, stepCount: e.stepCount }
+              : p,
+          ),
+        };
       }
       return {
         ...state,
@@ -387,6 +394,11 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
           },
         ],
       };
+    }
+    default: {
+      const _exhaustive: never = e;
+      void _exhaustive;
+      return state;
     }
   }
 }

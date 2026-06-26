@@ -17,10 +17,13 @@ describe("reducer bundle lockstep", () => {
       format: "iife",
       globalName: "SteamtrainReducer",
       write: false,
+      target: ["es2020"],
     });
 
     const rawCode = result.outputFiles[0]!.text;
-    const expectedCode = rawCode.trim().replace(/`/g, "\\`").replace(/\${/g, "\\${");
+    const expectedCode = `// @generated\n${rawCode.trim()}`
+      .replace(/`/g, "\\`")
+      .replace(/\${/g, "\\${");
 
     const htmlContent = fs.readFileSync(htmlPath, "utf8");
     const beginMarker = "/* BEGIN_REDUCER_BUNDLE */";

@@ -14,6 +14,7 @@ async function main() {
     format: "iife",
     globalName: "SteamtrainReducer",
     write: false,
+    target: ["es2020"],
   });
 
   if (!result.outputFiles || result.outputFiles.length === 0) {
@@ -32,7 +33,7 @@ async function main() {
     throw new Error("Reducer bundle markers not found in html.ts");
   }
 
-  const updatedHtmlContent = htmlContent.replace(regex, `$1\n${escapedCode}\n  $2`);
+  const updatedHtmlContent = htmlContent.replace(regex, `$1\n// @generated\n${escapedCode}\n  $2`);
 
   if (htmlContent === updatedHtmlContent) {
     console.log("Embedded reducer is already up to date. Skipping write.");
