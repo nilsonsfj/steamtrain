@@ -339,15 +339,15 @@ var SteamtrainReducer = (() => {
   };
   var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-  // src/workflow/reducer.ts
+  // src/web/reducer.ts
   var reducer_exports = {};
   __export(reducer_exports, {
-    flattenSteps: () => flattenSteps,
     initialWorkflowState: () => initialWorkflowState,
     workflowReducer: () => workflowReducer,
-    workflowStateFromRecord: () => workflowStateFromRecord,
     workflowStateFromSpec: () => workflowStateFromSpec
   });
+
+  // src/workflow/reducer.ts
   var initialWorkflowState = {
     phases: [],
     results: [],
@@ -356,13 +356,6 @@ var SteamtrainReducer = (() => {
     ok: true,
     loopMarkers: []
   };
-  function flattenSteps(state) {
-    const out = [];
-    for (const phase of state.phases) {
-      for (const step of phase.steps) out.push({ phase, step });
-    }
-    return out;
-  }
   function workflowStateFromSpec(spec) {
     return {
       name: spec.name,
@@ -373,6 +366,7 @@ var SteamtrainReducer = (() => {
         stepCount: p.steps.length,
         done: false,
         ok: true,
+        iteration: 1,
         steps: p.steps.map((st) => ({
           stepId: st.id,
           blockKind: st.kind ?? "worker",
@@ -393,31 +387,6 @@ var SteamtrainReducer = (() => {
       started: false,
       done: false,
       ok: true,
-      loopMarkers: []
-    };
-  }
-  function workflowStateFromRecord(record) {
-    return {
-      name: record.workflow,
-      startedAt: record.startedAt,
-      phases: record.phases.map((phase) => ({
-        phaseId: phase.phaseId,
-        title: phase.title,
-        index: phase.index,
-        stepCount: phase.stepCount,
-        done: phase.done,
-        ok: phase.ok,
-        iteration: phase.iteration,
-        steps: phase.steps.map((step) => ({
-          ...step,
-          status: step.status,
-          blockKind: step.blockKind
-        }))
-      })),
-      results: [],
-      started: true,
-      done: record.phases.every((phase) => phase.done),
-      ok: record.ok,
       loopMarkers: []
     };
   }
@@ -443,11 +412,11 @@ var SteamtrainReducer = (() => {
       case "text_delta":
         return event.thinking ? step : { ...step, text: step.text + event.text };
       case "tool_use":
-        return { ...step, activity: "\u2699 " + event.name };
+        return { ...step, activity: \`\u2699 \${event.name}\` };
       case "tool_result":
         return {
           ...step,
-          activity: (event.isError ? "\u2717" : "\u2713") + " " + (event.name ?? "tool")
+          activity: \`\${event.isError ? "\u2717" : "\u2713"} \${event.name ?? "tool"}\`
         };
       default:
         return step;
@@ -462,6 +431,9 @@ var SteamtrainReducer = (() => {
           ...state,
           name: e.name,
           startedAt: e.ts,
+          // Preserve prior phases if seeded (e.g., from the spec in the web client).
+          // The TUI resets state via a separate "reset" action before workflow_start,
+          // so it does not contain stale phase state.
           phases: state.phases.length > 0 ? state.phases : [],
           results: [],
           started: true,
@@ -499,7 +471,7 @@ var SteamtrainReducer = (() => {
             if (!sameInstance(p, e.phaseId, e.iteration)) return p;
             const updatedSteps = [...p.steps];
             for (let fi = 0; fi < e.count; fi++) {
-              const childId = e.parentStepId + "[" + fi + "]";
+              const childId = \`\${e.parentStepId}[\${fi}]\`;
               if (!updatedSteps.some((s) => s.stepId === childId)) {
                 updatedSteps.push({
                   stepId: childId,
@@ -559,13 +531,13 @@ var SteamtrainReducer = (() => {
         return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
           ...s,
           attempts: e.attempt + 1,
-          activity: "\u21BB retrying " + (e.attempt + 1) + "/" + e.maxAttempts + " (" + Math.round(e.delayMs) + "ms)"
+          activity: \`\u21BB retrying \${e.attempt + 1}/\${e.maxAttempts} (\${Math.round(e.delayMs)}ms)\`
         }));
       case "gate_evaluated":
         return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
           ...s,
           gate: { passed: e.passed, target: e.target, onFalse: e.onFalse },
-          activity: e.passed ? "gate passed" + (e.target ? " \u2192 " + e.target : "") : "gate blocked"
+          activity: e.passed ? \`gate passed\${e.target ? \` \u2192 \${e.target}\` : ""}\` : "gate blocked"
         }));
       case "step_done":
         return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
@@ -586,6 +558,14 @@ var SteamtrainReducer = (() => {
         return { ...state, done: true, ok: e.ok, results: e.results };
       case "loop_iteration": {
         const gatePhaseId = phaseOfStep(state, e.gateStepId);
+        if (gatePhaseId) {
+          const instance = state.phases.find((p) => p.phaseId === gatePhaseId && p.done);
+          console.assert(
+            instance,
+            "loop_iteration for gate %s arrived without a completed phase instance",
+            e.gateStepId
+          );
+        }
         let gatePhaseIteration = 0;
         if (gatePhaseId) {
           for (let i = state.phases.length - 1; i >= 0; i--) {

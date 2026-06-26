@@ -1,13 +1,15 @@
-import * as esbuild from "esbuild";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import * as esbuild from "esbuild";
 
-const reducerPath = path.resolve("src/workflow/reducer.ts");
-const htmlPath = path.resolve("src/web/html.ts");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const entryPath = path.resolve(__dirname, "../src/web/reducer.ts");
+const htmlPath = path.resolve(__dirname, "../src/web/html.ts");
 
 async function main() {
   const result = await esbuild.build({
-    entryPoints: [reducerPath],
+    entryPoints: [entryPath],
     bundle: true,
     format: "iife",
     globalName: "SteamtrainReducer",
@@ -18,25 +20,24 @@ async function main() {
     throw new Error("No output from esbuild build");
   }
 
-  const code = result.outputFiles[0]!.text;
+  const rawCode = result.outputFiles[0]!.text;
+  // Escape backticks and ${} to prevent string interpolation errors inside html.ts PAGE_HTML template literal
+  const escapedCode = rawCode.trim().replace(/`/g, "\\`").replace(/\${/g, "\\${");
 
   const htmlContent = fs.readFileSync(htmlPath, "utf8");
-  const beginMarker = "/* BEGIN_REDUCER_BUNDLE */";
-  const endMarker = "/* END_REDUCER_BUNDLE */";
 
-  const beginIndex = htmlContent.indexOf(beginMarker);
-  const endIndex = htmlContent.indexOf(endMarker);
-
-  if (beginIndex === -1 || endIndex === -1) {
-    throw new Error("Markers not found in html.ts");
+  // Robustly replace content inside markers using Regex
+  const regex = /(\/\* BEGIN_REDUCER_BUNDLE \*\/)[\s\S]*?(\/\* END_REDUCER_BUNDLE \*\/)/;
+  if (!regex.test(htmlContent)) {
+    throw new Error("Reducer bundle markers not found in html.ts");
   }
 
-  const updatedHtmlContent =
-    htmlContent.slice(0, beginIndex + beginMarker.length) +
-    "\n" +
-    code.trim() +
-    "\n  " +
-    htmlContent.slice(endIndex);
+  const updatedHtmlContent = htmlContent.replace(regex, `$1\n${escapedCode}\n  $2`);
+
+  if (htmlContent === updatedHtmlContent) {
+    console.log("Embedded reducer is already up to date. Skipping write.");
+    return;
+  }
 
   fs.writeFileSync(htmlPath, updatedHtmlContent, "utf8");
   console.log("Successfully bundled and embedded reducer in src/web/html.ts");

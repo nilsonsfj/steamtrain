@@ -1,22 +1,26 @@
-import { describe, expect, it } from "vitest";
-import * as esbuild from "esbuild";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import * as esbuild from "esbuild";
+import { describe, expect, it } from "vitest";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 describe("reducer bundle lockstep", () => {
   it("verifies that src/web/html.ts has the latest bundled reducer embedded", async () => {
-    const reducerPath = path.resolve("src/workflow/reducer.ts");
-    const htmlPath = path.resolve("src/web/html.ts");
+    const entryPath = path.resolve(__dirname, "../src/web/reducer.ts");
+    const htmlPath = path.resolve(__dirname, "../src/web/html.ts");
 
     const result = await esbuild.build({
-      entryPoints: [reducerPath],
+      entryPoints: [entryPath],
       bundle: true,
       format: "iife",
       globalName: "SteamtrainReducer",
       write: false,
     });
 
-    const expectedCode = result.outputFiles[0]!.text.trim();
+    const rawCode = result.outputFiles[0]!.text;
+    const expectedCode = rawCode.trim().replace(/`/g, "\\`").replace(/\${/g, "\\${");
 
     const htmlContent = fs.readFileSync(htmlPath, "utf8");
     const beginMarker = "/* BEGIN_REDUCER_BUNDLE */";

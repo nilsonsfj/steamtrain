@@ -119,12 +119,10 @@ wraps `saveSessionWorkflowsToUser`), but the **web UI** doesn't surface them:
 
 Status after `feat/unify-workflow-authoring`:
 
-1. ⚠️ **Two event reducers.** `src/tui/workflow-state.ts#workflowReducer` and
-   the `reduce()` in `src/web/html.ts` still independently fold `WorkflowEvent`s.
-   **Not yet unified** — the web reducer is plain JS embedded in a (non-bundled)
-   page template, so sharing the TUI's TS reducer needs a browser bundling step
-   for `html.ts`. Deferred to its own change. This is now the largest remaining
-   divergence.
+1. ✅ **Event reducer unified.** `src/workflow/reducer.ts` is the single
+   source of truth for folding `WorkflowEvent`s. It is shared natively by the
+   TUI and compiled/embedded via a build-time esbuild step into `src/web/html.ts`
+   for the browser UI. This eliminates the near-duplicate implementations.
 
 2. ✅ **Authoring logic unified.** `WorkflowAuthor` moved to
    `src/workflow/authoring.ts` and is the single authoring core. The web server
@@ -160,9 +158,9 @@ Status after `feat/unify-workflow-authoring`:
 Done in `feat/unify-workflow-authoring`: §5.2, §5.5, §5.6, plus clone/delete in
 the TUI and the staged-flush seam (§5.3). What's left:
 
-1. **Extract the `WorkflowEvent` reducer** into a shared, UI-agnostic module and
-   bundle it into `html.ts` so the browser uses the same fold as the TUI
-   (§5.1). Needs a small browser build step for the page script.
+1. ✅ **Extract the `WorkflowEvent` reducer** into a shared, UI-agnostic module and
+   bundle it into `html.ts` so the browser uses the same fold as the TUI (§5.1).
+   Done!
 2. **Render the full edit surface in the TUI** — per-step prompt editing and
    name/description editing (the core already persists them) (§4 / §5.4).
 3. **Add a staged mode to the web** — "try without saving" + an explicit flush
@@ -173,5 +171,5 @@ the TUI and the staged-flush seam (§5.3). What's left:
 
 End state: `src/tui` and `src/web` contain only rendering + input; everything
 about workflows (load, edit, draft, validate, persist, run, fold events) lives
-in shared modules under `src/workflow` (+ orchestrator). The authoring half of
-that is now done; the run-fold (reducer) half is the main piece left.
+in shared modules under `src/workflow` (+ orchestrator). Both the authoring half
+and the run-fold (reducer) half are now done.
