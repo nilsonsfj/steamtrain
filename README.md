@@ -278,6 +278,7 @@ Workflow documentation:
 | `multi-plan` | Distributes planning lenses, drafts from two independent angles (claude + opencode), critiques both, then synthesizes the strongest merged plan. |
 | `bug-hunt`   | Sweeps a scope for logic / error-handling / security bugs in parallel across three models, cross-checks to drop false positives, gates verified findings, then reports them. |
 | `target-sweep` | Distributes a request into target areas, dynamically creates one processor run per item, then consolidates the generated outputs. |
+| `review-loop` | Implements, then reviews and fixes in a bounded loop-back gate until the review reports "DONE" (or the iteration cap is hit). |
 
 ### Defining your own
 
@@ -346,6 +347,10 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
 - **Limits:** ≤ 16 parallel steps per phase and 1000 steps per run. Every step is a
   full agent run only when it is agent-backed, so costs add up for worker and
   agent-backed distributor/consolidator blocks.
+- **Loops:** a gate can set `loopTo` to jump back to an earlier phase (with an
+  optional `maxIterations`) for bounded "review until clean" cycles — see the
+  bundled `review-loop` workflow and
+  [docs/workflow-creation.md#loops](docs/workflow-creation.md#loops).
 
 ---
 

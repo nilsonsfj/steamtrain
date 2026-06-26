@@ -144,10 +144,11 @@ describe("buildWorkflowGenerationPrompt", () => {
     expect(prompt).toContain("phases");
   });
 
-  it("teaches the same-phase dependency rule and loop unrolling", () => {
+  it("teaches the same-phase dependency rule and loop-back gates", () => {
     const prompt = buildWorkflowGenerationPrompt("anything");
     expect(prompt).toContain("DIFFERENT phases");
-    expect(prompt).toContain("UNROLL");
+    expect(prompt).toContain("loopTo");
+    expect(prompt).not.toContain("UNROLL");
   });
 
   it("embeds a worked example that passes the engine's own validation", () => {
@@ -465,6 +466,9 @@ describe("buildWorkflowRepairPrompt", () => {
     const huge = "x".repeat(10000);
     const prompt = buildWorkflowRepairPrompt("d", huge, "err");
     expect(prompt).toContain("…(truncated)");
-    expect(prompt.length).toBeLessThan(huge.length + 2000);
+    // The previous output itself is capped at MAX_REPAIR_OUTPUT_CHARS (4000); the
+    // rest of the prompt is the (larger, but bounded) base generation prompt plus
+    // a small amount of repair scaffolding — not proportional to `huge`.
+    expect(prompt.length).toBeLessThan(huge.length + 5000);
   });
 });
