@@ -59,6 +59,18 @@ export function WorkflowView({
     }
     return out;
   }, [state.phases]);
+  // Highest iteration seen per phase id, so PhaseHeader can badge the FIRST
+  // instance of a multi-iteration phase too (iter 1/N) instead of only
+  // labelling iteration >= 2 — readers can then see at a glance how many passes
+  // ran, not just that "some later pass existed".
+  const maxIterByPhase = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of state.phases) {
+      const it = p.iteration ?? 1;
+      if (!m.has(p.phaseId) || it > (m.get(p.phaseId) ?? 0)) m.set(p.phaseId, it);
+    }
+    return m;
+  }, [state.phases]);
   const selectedRowIndex = Math.max(
     0,
     rows.findIndex((row) => row.kind === "step" && row.flatIndex === clampedIndex),
@@ -110,10 +122,14 @@ export function WorkflowView({
             ) : null}
             {rowWindow.visible.map((row, offset) =>
               row.kind === "phase" ? (
-                <PhaseHeader key={`phase-${row.phase.phaseId}`} phase={row.phase} />
+                <PhaseHeader
+                  key={`phase-${row.phase.phaseId}-${row.phase.iteration ?? 1}`}
+                  phase={row.phase}
+                  maxIteration={maxIterByPhase.get(row.phase.phaseId) ?? 1}
+                />
               ) : (
                 <StepRow
-                  key={`step-${row.step.stepId}`}
+                  key={`step-${row.phase.phaseId}-${row.phase.iteration ?? 1}-${row.step.stepId}`}
                   step={row.step}
                   width={innerWidth}
                   selected={rowWindow.start + offset === selectedRowIndex}
@@ -134,14 +150,25 @@ export function WorkflowView({
   );
 }
 
-function PhaseHeader({ phase }: { phase: PhaseState }) {
+function PhaseHeader({ phase, maxIteration }: { phase: PhaseState; maxIteration: number }) {
   const done = phase.steps.filter((s) => s.status === "done" || s.status === "error").length;
   const color = phase.done ? (phase.ok ? "green" : "red") : "cyan";
+  const iter = phase.iteration ?? 1;
+  // Show an iteration badge whenever the phase ran more than once. The first
+  // pass gets "iter 1/N" (not omitted), so the total pass count is visible on
+  // the first instance instead of only becoming apparent at iteration >= 2.
+  const showIter = maxIteration > 1;
   return (
     <Box>
       <Text color={color} bold>
         ─ {phase.title}
       </Text>
+      {showIter ? (
+        <Text color="gray" dimColor>
+          {" "}
+          · iter {iter}/{maxIteration}
+        </Text>
+      ) : null}
       <Text color="gray">
         {"  "}
         {done}/{phase.stepCount}

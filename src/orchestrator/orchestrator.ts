@@ -133,7 +133,10 @@ export class Orchestrator {
 
   /** Like {@link canDispatchWorkflow} but for an already-resolved spec (e.g. with session overrides). */
   canDispatchWorkflowSpec(spec: WorkflowSpec): DispatchCheck {
-    const valid = validateWorkflow(spec);
+    // Budget loops against the same configured cap the engine will use at run
+    // time (deps.loopMaxIterations), so this pre-dispatch gate agrees with the
+    // engine's own validateWorkflow rather than the default-10 fallback.
+    const valid = validateWorkflow(spec, this.config.loopMaxIterations);
     if (!valid.ok) return { ok: false, reason: `invalid workflow '${spec.name}': ${valid.error}` };
 
     for (const agent of workflowAgentIds(spec)) {
@@ -173,6 +176,7 @@ export class Orchestrator {
         timeoutMs: this.config.timeoutMs,
         maxConcurrency: this.config.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY,
         cwd,
+        loopMaxIterations: this.config.loopMaxIterations,
       },
       signal,
     );

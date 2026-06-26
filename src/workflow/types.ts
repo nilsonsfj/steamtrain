@@ -115,6 +115,15 @@ export interface GateStep extends WorkflowStepBase {
   target?: string;
   /** What to do when the condition is false (default: continue). */
   onFalse?: "continue" | "fail" | "stop";
+  /**
+   * When set, this gate is a loop: while its condition is false and the
+   * per-loop iteration budget remains, execution jumps back to this (earlier)
+   * phase id and re-runs the body. When the budget is exhausted, `onFalse`
+   * applies. Omitting `loopTo` makes a plain (non-looping) gate.
+   */
+  loopTo?: string;
+  /** Per-loop iteration cap (1..LOOP_MAX_ITERATIONS_CEILING). Omitted → config default. */
+  maxIterations?: number;
 }
 
 export type WorkflowStep = WorkerStep | DistributorStep | ConsolidatorStep | GateStep;
@@ -160,12 +169,18 @@ export interface StepResult {
   costUsd?: number;
   /** Total attempts this step took (auto-retry); omitted/1 means it ran once. */
   attempts?: number;
+  /** Loop iteration this result belongs to (1-based); omitted ⇒ 1. */
+  iteration?: number;
 }
 
 /** Total steps a single run may contain (matches the dynamic-workflows cap). */
 export const MAX_STEPS = 1000;
 /** Hard ceiling on parallel agents; the configured value is clamped to this. */
 export const MAX_CONCURRENCY = 16;
+/** Default per-loop iteration cap when a loop gate omits `maxIterations`. */
+export const DEFAULT_LOOP_MAX_ITERATIONS = 10;
+/** Hard ceiling on a loop gate's `maxIterations` (runaway backstop). */
+export const LOOP_MAX_ITERATIONS_CEILING = 100;
 
 const agentId = z.enum(["claude", "opencode", "codex", "amp"]);
 
@@ -284,6 +299,8 @@ const workflowGateStepSchema = z.object({
   condition: gateConditionSchema,
   target: z.string().min(1).optional(),
   onFalse: z.enum(["continue", "fail", "stop"]).optional(),
+  loopTo: z.string().min(1).optional(),
+  maxIterations: z.number().int().min(1).max(LOOP_MAX_ITERATIONS_CEILING).optional(),
 });
 
 const workflowStepSchema = z.union([
@@ -378,8 +395,21 @@ export function workflowAgentIds(spec: WorkflowSpec): AgentId[] {
  * may only reference a step in an EARLIER phase. Phases run sequentially while
  * steps within a phase run in parallel, so same-phase and forward references
  * (and therefore cycles) are rejected.
+ *
+ * The worst-case step budget for a loop gate that omits `maxIterations` is
+ * computed against `loopMaxIterations` (the runtime config default) — or
+ * {@link DEFAULT_LOOP_MAX_ITERATIONS} when neither the gate nor the caller
+ * specifies one — NOT the ceiling. The ceiling ({@link
+ * LOOP_MAX_ITERATIONS_CEILING}) stays a hard "cannot be configured above this"
+ * backstop enforced by the schema; it is not the budget assumption, so that a
+ * spec bounded at runtime by the default (10) is not falsely rejected by the
+ * static verifier.
+ *
+ * @param loopMaxIterations the configured runtime cap to budget against when a
+ *   gate omits `maxIterations`. Pass the engine's `deps.loopMaxIterations` so
+ *   the static budget matches the runtime clamp.
  */
-export function validateWorkflow(spec: WorkflowSpec): ValidationResult {
+export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number): ValidationResult {
   const parsed = workflowSpecSchema.safeParse(spec);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "invalid workflow" };
@@ -446,6 +476,90 @@ export function validateWorkflow(spec: WorkflowSpec): ValidationResult {
     // steps in the same phase can't depend on each other.
     for (const step of phase.steps) earlierIds.add(step.id);
   }
+
+  // ---- Loop (loopTo) validation ----
+  const phaseIndexById = new Map<string, number>();
+  spec.phases.forEach((p, i) => phaseIndexById.set(p.id, i));
+
+  // Each loop gate defines a region [loopToIndex .. gatePhaseIndex].
+  interface LoopRegion {
+    gateId: string;
+    start: number; // loopTo phase index
+    end: number; // gate phase index
+    maxIterations: number; // effective bound for the static budget (per-gate, config, or default 10)
+  }
+  const regions: LoopRegion[] = [];
+  for (let pi = 0; pi < spec.phases.length; pi++) {
+    const phase = spec.phases[pi];
+    if (!phase) continue;
+    for (const step of phase.steps) {
+      if (step.kind !== "gate" || step.loopTo === undefined) continue;
+      const start = phaseIndexById.get(step.loopTo);
+      if (start === undefined) {
+        return {
+          ok: false,
+          error: `gate '${step.id}' loopTo references unknown phase '${step.loopTo}'`,
+        };
+      }
+      if (start >= pi) {
+        return {
+          ok: false,
+          error: `gate '${step.id}' loopTo '${step.loopTo}' must be an earlier phase (loops only go backward, not to the gate's own phase)`,
+        };
+      }
+      regions.push({
+        gateId: step.id,
+        start,
+        end: pi,
+        maxIterations: step.maxIterations ?? loopMaxIterations ?? DEFAULT_LOOP_MAX_ITERATIONS,
+      });
+    }
+  }
+
+  // Regions must be disjoint or properly nested — never partially overlapping.
+  for (let i = 0; i < regions.length; i++) {
+    for (let j = i + 1; j < regions.length; j++) {
+      const a = regions[i] as LoopRegion;
+      const b = regions[j] as LoopRegion;
+      const disjoint = a.end < b.start || b.end < a.start;
+      const aContainsB = a.start <= b.start && b.end <= a.end;
+      const bContainsA = b.start <= a.start && a.end <= b.end;
+      if (!disjoint && !aContainsB && !bContainsA) {
+        return {
+          ok: false,
+          error: `loop regions for gates '${a.gateId}' and '${b.gateId}' partially overlap (loops must be nested or disjoint)`,
+        };
+      }
+    }
+  }
+
+  // Worst-case step budget with loops: a region's body steps run `maxIterations`
+  // times; nested regions multiply by every region that fully contains them.
+  // NOTE: this deliberately DOUBLE-COUNTS nested-region body expansion — the
+  // inner region's body is part of the outer region's `bodySteps` (summed from
+  // `start..end`), so it is already counted in the outer's
+  // `(outer.max - 1) * bodySteps`, AND counted again when the inner region's
+  // own `(inner.max - 1) * outerMultiplier` extras fire. The over-estimate is
+  // intentional: a verifier should err pessimistic. Do NOT "correct" this to
+  // subtract the inner body from the outer sum — that would under-budget real
+  // pathological nested loops. The slack is small in practice (nested loops are
+  // rare and bodies are modest) and MAX_STEPS is a safety backstop, not a tight
+  // quota.
+  const phaseStepCount = spec.phases.map((p) => p.steps.length);
+  let loopExpansion = 0;
+  for (const r of regions) {
+    let bodySteps = 0;
+    for (let k = r.start; k <= r.end; k++) bodySteps += phaseStepCount[k] ?? 0;
+    // multiplier from every OTHER region that fully contains this one
+    let outerMultiplier = 1;
+    for (const o of regions) {
+      if (o === r) continue;
+      if (o.start <= r.start && r.end <= o.end) outerMultiplier *= o.maxIterations;
+    }
+    // (maxIterations - 1) extra passes beyond the first, times outer multiplier
+    loopExpansion += bodySteps * (r.maxIterations - 1) * outerMultiplier;
+  }
+  maxPossibleSteps += loopExpansion;
 
   if (maxPossibleSteps > MAX_STEPS) {
     return {

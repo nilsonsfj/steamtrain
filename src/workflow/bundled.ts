@@ -236,9 +236,80 @@ const targetSweep: WorkflowSpec = {
   ],
 };
 
+const reviewLoop: WorkflowSpec = {
+  name: "review-loop",
+  description: "Implement, then review and fix in a bounded loop until clean.",
+  phases: [
+    {
+      id: "implement",
+      title: "Implement",
+      steps: [
+        {
+          id: "impl",
+          kind: "worker",
+          agent: "opencode",
+          model: FREE.mimo,
+          prompt: "Implement the task fully:\n{{input}}",
+        },
+      ],
+    },
+    {
+      id: "review",
+      title: "Review",
+      steps: [
+        {
+          id: "review",
+          kind: "worker",
+          agent: "opencode",
+          model: FREE.mimo,
+          dependsOn: ["impl"],
+          prompt:
+            "Review the current implementation for issues (iteration {{iteration}}). If there are NO remaining issues, reply with the single word DONE. Otherwise list the issues.\n{{steps.impl.output}}",
+        },
+      ],
+    },
+    {
+      id: "fix",
+      title: "Fix",
+      steps: [
+        {
+          id: "fix",
+          kind: "worker",
+          agent: "opencode",
+          model: FREE.mimo,
+          dependsOn: ["review"],
+          prompt:
+            "Apply fixes for these review findings, then summarize what changed:\n{{steps.review.output}}",
+        },
+      ],
+    },
+    {
+      id: "gate",
+      title: "Converged?",
+      steps: [
+        {
+          // The gate re-checks REVIEW (not fix): the loop converges when the
+          // reviewer reports nothing left to fix, so the gate must test the
+          // review step's output for "DONE". Gating on fix instead is a common
+          // authoring mistake — fix always runs and always produces output, so
+          // a fix-conditioned gate never converges and the loop burns its cap.
+          id: "loop-gate",
+          kind: "gate",
+          dependsOn: ["review"],
+          condition: { step: "review", contains: "DONE" },
+          loopTo: "review",
+          maxIterations: 5,
+          onFalse: "continue",
+        },
+      ],
+    },
+  ],
+};
+
 /** name → spec. Merged under any user `workflows` from steamtrain.json. */
 export const BUNDLED_WORKFLOWS: Record<string, WorkflowSpec> = {
   [multiPlan.name]: multiPlan,
   [bugHunt.name]: bugHunt,
   [targetSweep.name]: targetSweep,
+  [reviewLoop.name]: reviewLoop,
 };

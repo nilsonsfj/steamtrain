@@ -25,6 +25,7 @@ export {
 export type {
   WorkflowEvent,
   WorkflowEventKind,
+  IterationTagged,
   WorkflowStartEvent,
   PhaseStartEvent,
   StepStartEvent,

@@ -116,6 +116,7 @@ export const PAGE_HTML = `<!doctype html>
   .phase .ptitle { font-weight: 700; }
   .phase .pstat { font-size: 11px; color: var(--muted); }
   .connector { width: 2px; height: 18px; background: var(--border); margin: 0 auto; }
+  .loop-marker { display: flex; justify-content: center; margin: 6px 0; }
   .cards { display: flex; flex-wrap: wrap; gap: 12px; }
   .card {
     flex: 1 1 280px; max-width: 520px; min-width: 240px;
@@ -126,6 +127,8 @@ export const PAGE_HTML = `<!doctype html>
   .card.running .kind .pulse { animation: pulse 1.1s ease-in-out infinite; }
   .card.done { border-left-color: var(--done); }
   .card.error { border-left-color: var(--error); }
+  .card.superseded { border-left-color: var(--muted); opacity: .55; }
+  .card.superseded .state { color: var(--muted); font-style: italic; }
   @keyframes pulse { 0%,100% { opacity: .35; } 50% { opacity: 1; } }
   .card .top { display: flex; align-items: center; gap: 8px; }
   .card .sid { font-weight: 700; font-size: 14px; }
@@ -321,7 +324,7 @@ export const PAGE_HTML = `<!doctype html>
     runId: null, es: null, started: false, done: false, ok: true,
     startedAt: 0, timer: null, results: [],
     phaseOrder: [], phaseDone: {}, live: {}, childOf: {}, specStepIds: {},
-    rafQueued: false, draftAbort: null, doctor: []
+    rafQueued: false, draftAbort: null, doctor: [], loopMarkers: []
   };
 
   function h(tag, attrs) {
@@ -487,7 +490,7 @@ export const PAGE_HTML = `<!doctype html>
   // ---- run model -----------------------------------------------------------
   function resetRunModel() {
     S.phaseOrder = []; S.phaseDone = {}; S.live = {}; S.childOf = {};
-    S.specStepIds = {}; S.results = []; S.ok = true;
+    S.specStepIds = {}; S.results = []; S.ok = true; S.loopMarkers = [];
   }
   function seedFromSpec() {
     if (!S.spec) return;
@@ -497,7 +500,8 @@ export const PAGE_HTML = `<!doctype html>
         S.specStepIds[st.id] = p.id;
         S.live[st.id] = {
           id: st.id, phaseId: p.id, kind: st.kind || "worker", agent: st.agent, model: st.model,
-          dependsOn: st.dependsOn, forEach: st.forEach, status: "pending", text: "", activity: null,
+          dependsOn: st.dependsOn, forEach: st.forEach, loopTo: st.loopTo, maxIterations: st.maxIterations,
+          status: "pending", text: "", activity: null,
           result: null, cached: false, gate: null, item: null, child: false
         };
       });
@@ -520,10 +524,19 @@ export const PAGE_HTML = `<!doctype html>
     switch (ev.kind) {
       case "workflow_start":
         S.started = true; S.startedAt = Date.now(); break;
-      case "phase_start":
-        if (!S.phaseOrder.some(function (p) { return p.id === ev.phaseId; }))
-          S.phaseOrder.push({ id: ev.phaseId, title: ev.title || ev.phaseId });
+      case "phase_start": {
+        var iter = ev.iteration || 1;
+        // Drop the spec-preview block (no iteration tag) once the real run
+        // reaches this phase, so the live iteration block replaces it instead
+        // of rendering alongside as a duplicate.
+        if (iter === 1)
+          S.phaseOrder = S.phaseOrder.filter(function (p) {
+            return p.id !== ev.phaseId || p.iteration !== undefined;
+          });
+        if (!S.phaseOrder.some(function (p) { return p.id === ev.phaseId && p.iteration === iter; }))
+          S.phaseOrder.push({ id: ev.phaseId, title: ev.title || ev.phaseId, iteration: iter });
         break;
+      }
       case "fan_out": {
         // Pre-create pending cards for the resolved fan-out children (the engine
         // names them parent[i]), so the canvas shows the true fan-out size and
@@ -575,7 +588,26 @@ export const PAGE_HTML = `<!doctype html>
         break;
       }
       case "phase_done":
-        S.phaseDone[ev.phaseId] = { ok: ev.ok }; break;
+        S.phaseDone[ev.phaseId + "@" + (ev.iteration || 1)] = { ok: ev.ok }; break;
+      case "loop_iteration": {
+        // Record which gate-phase instance emitted this marker so render()
+        // can place it after that exact instance instead of clustering all
+        // markers after the last occurrence.
+        var gp = S.specStepIds[ev.gateStepId];
+        var gateIter = 0;
+        if (gp) {
+          for (var gi = S.phaseOrder.length - 1; gi >= 0; gi--) {
+            var pe = S.phaseOrder[gi];
+            if (pe.id === gp && pe.iteration) { gateIter = pe.iteration; break; }
+          }
+        }
+        S.loopMarkers.push({
+          gateStepId: ev.gateStepId, loopTo: ev.loopTo,
+          iteration: ev.iteration, maxIterations: ev.maxIterations,
+          gatePhaseId: gp, gatePhaseIteration: gateIter
+        });
+        break;
+      }
       case "workflow_done":
         S.done = true; S.ok = ev.ok; S.results = ev.results || []; break;
     }
@@ -605,23 +637,58 @@ export const PAGE_HTML = `<!doctype html>
       legendItem("distributor", "fan-out"), legendItem("consolidator", "merge"), legendItem("gate", "gate")
     ));
 
+    // Highest iteration seen per phase id — a phase block is "latest" when its
+    // iteration equals this. Only the latest instance shows live step cards;
+    // earlier instances were superseded by a re-run and get a placeholder.
+    var maxIter = {};
+    S.phaseOrder.forEach(function (p) {
+      if (p.iteration && (!maxIter[p.id] || p.iteration > maxIter[p.id])) maxIter[p.id] = p.iteration;
+    });
+
     S.phaseOrder.forEach(function (p, idx) {
       if (idx > 0) canvas.appendChild(h("div", { class: "connector" }));
-      var done = S.phaseDone[p.id];
+      var piter = p.iteration || 1;
+      var done = S.phaseDone[p.id + "@" + piter];
       var steps = stepsForPhase(p.id);
       var running = steps.some(function (s) { return s.status === "running"; });
       var pstat = done ? (done.ok ? "done" : "failed") : (running ? "running" : (S.started ? "" : "pending"));
+      var ptitle = p.title + (p.iteration && p.iteration > 1 ? " \\u00b7 iteration " + p.iteration : "");
       var phaseEl = h("div", { class: "phase" + (done ? " done" : "") },
         h("div", { class: "phead" },
           h("div", { class: "pidx", text: String(idx + 1) }),
-          h("div", { class: "ptitle", text: p.title }),
+          h("div", { class: "ptitle", text: ptitle }),
           pstat ? h("div", { class: "pstat", text: "\\u00b7 " + pstat }) : null
         )
       );
       var cards = h("div", { class: "cards" });
-      steps.forEach(function (s) { cards.appendChild(renderCard(s)); });
+      // Seed-preview blocks (no iteration) and the latest iteration of each
+      // phase render the real live cards. Earlier iterations were superseded
+      // by a re-run — show a placeholder instead of the stale (last-written)
+      // card, so the timeline doesn't lie about each iteration's output.
+      var isLatest = !p.iteration || p.iteration === (maxIter[p.id] || 1);
+      steps.forEach(function (s) {
+        if (isLatest) cards.appendChild(renderCard(s));
+        else cards.appendChild(h("div", { class: "card superseded" },
+          h("div", { class: "top" },
+            h("span", { class: "sid", text: s.id }),
+            h("span", { class: "state", text: "iteration " + piter + " \\u2192 superseded by iteration " + maxIter[p.id] })
+          )
+        ));
+      });
       phaseEl.appendChild(cards);
       canvas.appendChild(phaseEl);
+
+      // Place each loop marker right after the gate-phase instance that
+      // emitted it (matched by phase id + iteration), instead of clustering
+      // all markers after the last occurrence of the phase.
+      S.loopMarkers.forEach(function (m) {
+        if (m.gatePhaseId === p.id && m.gatePhaseIteration === piter) {
+          canvas.appendChild(h("div", { class: "loop-marker" },
+            h("span", { class: "chip warn",
+              text: "\\u21ba loop \\u2192 " + m.loopTo + " \\u00b7 iteration " + m.iteration + "/" + m.maxIterations })
+          ));
+        }
+      });
     });
 
     if (S.done) renderSummary(canvas);
@@ -652,6 +719,9 @@ export const PAGE_HTML = `<!doctype html>
     if (s.agent) card.appendChild(h("div", { class: "agent", text: s.agent + (s.model ? " \\u00b7 " + s.model : "") }));
     if (s.dependsOn && s.dependsOn.length) card.appendChild(h("div", { class: "inputs", text: "inputs: " + s.dependsOn.join(", ") }));
     if (s.forEach) card.appendChild(h("div", { class: "inputs", text: "forEach: " + s.forEach }));
+    if (s.loopTo) card.appendChild(h("div", { class: "inputs" },
+      h("span", { class: "chip warn", text: "\\u21ba " + s.loopTo + (s.maxIterations ? " \\u00b7 max " + s.maxIterations : "") })
+    ));
     if (s.item) card.appendChild(h("div", { class: "item", text: "item #" + s.item.index + ": " + truncate(s.item.value, 80) }));
     if (s.activity) card.appendChild(h("div", { class: "activity", text: s.activity }));
 
@@ -1249,7 +1319,8 @@ export const PAGE_HTML = `<!doctype html>
       dependsOn: st.dependsOn, forEach: null, item: st.item, status: st.status,
       text: st.text || (st.result && st.result.output) || "", activity: null,
       result: st.result, cached: st.cached, attempts: st.attempts,
-      gate: st.gate ? { passed: st.gate.passed, target: st.gate.target } : null
+      gate: st.gate ? { passed: st.gate.passed, target: st.gate.target } : null,
+      loopTo: st.loopTo, maxIterations: st.maxIterations
     };
   }
 

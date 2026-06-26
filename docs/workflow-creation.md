@@ -157,6 +157,58 @@ output**, asking it to fix only what the error names. This runs up to two retrie
 same phase — is usually corrected automatically without you seeing it. The result
 reports `attempts` (1 = the first draft was already valid).
 
+## Loops
+
+For iterative work — "review then fix then re-review until clean" — a workflow
+can use a **loop-back gate**: a `gate` step whose `loopTo` names an **earlier**
+phase id, plus an optional `maxIterations`:
+
+```jsonc
+{ "id": "loop-gate", "kind": "gate", "dependsOn": ["review"],
+  "condition": { "step": "review", "contains": "DONE" },
+  "loopTo": "review", "maxIterations": 5, "onFalse": "continue" }
+```
+
+Semantics:
+
+- **condition true** → the loop converged; execution continues forward past the gate.
+- **condition false and iterations remain** → execution jumps back to the
+  `loopTo` phase and re-runs every phase from there through the gate again.
+- **condition false and the cap is hit** → `onFalse` applies (`continue` / `fail`
+  / `stop`), same as a non-looping gate.
+
+Rules enforced by `validateWorkflow` (the same rules the meta-prompt teaches the
+drafting model):
+
+- the gate must live in a phase **after** the phases it re-runs;
+- `loopTo` must name an earlier-or-equal phase — loops only go backward;
+- `maxIterations` defaults to 10 (`DEFAULT_LOOP_MAX_ITERATIONS`) when omitted,
+  and is capped at 100 (`LOOP_MAX_ITERATIONS_CEILING`); a project-level
+  `loopMaxIterations` config value can change the default;
+- loop regions must be cleanly nested or disjoint — never partially overlapping.
+
+Each pass through the loop body sees the current pass number via the
+`{{iteration}}` template (1-based), so a prompt can say "pass {{iteration}}" or
+adjust behavior on later iterations.
+
+### Cost note
+
+A loop **re-runs every step in its body on each pass** — there is no cross-
+iteration caching, so the real subprocess / LLM cost multiplies by the number
+of iterations that actually run (up to `maxIterations`). A `forEach` inside a
+loop body multiplies further (fan-out × iterations). Keep `maxIterations` small
+(≤ 5 is a good rule of thumb when each body step costs more than a few cents),
+and use `{{iteration}}` to let the model bail early when the work is done
+before the cap. The static step budget in `validateWorkflow` guards against
+pathological expansion but does **not** estimate dollar cost.
+
+The bundled `review-loop` workflow (`steamtrain workflow run review-loop`) is a
+worked example: implement → review (replies `DONE` when clean) → fix → a gate
+that loops back to `review` until it reports `DONE` or 5 iterations pass. The
+LLM workflow author (`steamtrain workflow create`) also knows this pattern —
+describing iterative work like "review and fix until clean" will draft a
+loop-back gate instead of unrolling a fixed chain of phases.
+
 ## Validation guarantees
 
 A generated workflow is held to the same bar as a hand-written one:

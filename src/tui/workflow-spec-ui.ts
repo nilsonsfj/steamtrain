@@ -101,6 +101,16 @@ export function formatGateCondition(condition: GateCondition): string {
   return parts.join(" ");
 }
 
+/** Compact loop summary for a gate, or "" when it is not a loop. The `phase:`
+ * prefix distinguishes the loop target (a phase id) from the step-id references
+ * used elsewhere in the row meta (`deps:`, `forEach:`), so a reader can tell at
+ * a glance what `↺` refers to. */
+export function formatGateLoop(step: WorkflowStep): string {
+  if (step.kind !== "gate" || step.loopTo === undefined) return "";
+  const max = step.maxIterations !== undefined ? ` · max ${step.maxIterations}` : "";
+  return `↺ phase:${step.loopTo}${max}`;
+}
+
 export function specStepRowMeta(step: WorkflowStep): string {
   const bits: string[] = [];
   if (step.dependsOn?.length) bits.push(`deps: ${step.dependsOn.join(", ")}`);
@@ -108,6 +118,7 @@ export function specStepRowMeta(step: WorkflowStep): string {
   if ("cwd" in step && step.cwd) bits.push(`cwd: ${basename(step.cwd)}`);
   if (step.kind === "distributor" && step.items?.length) bits.push(`${step.items.length} items`);
   if (step.kind === "gate") bits.push(formatGateCondition(step.condition));
+  if (step.kind === "gate" && step.loopTo) bits.push(formatGateLoop(step));
   return bits.join(" · ");
 }
 
@@ -145,6 +156,13 @@ export function specDetailLines(step: WorkflowStep): string[] {
     lines.push(`condition: ${formatGateCondition(step.condition)}`);
     if (step.target) lines.push(`target: ${step.target}`);
     if (step.onFalse) lines.push(`onFalse: ${step.onFalse}`);
+    if (step.loopTo) {
+      const max =
+        step.maxIterations !== undefined
+          ? ` (max ${step.maxIterations})`
+          : " (max: config default)";
+      lines.push(`loops back to ${step.loopTo}${max}`);
+    }
   }
   return lines;
 }

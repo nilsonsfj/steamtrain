@@ -122,6 +122,7 @@ export function mergeConfig(
     binaries: { ...base.binaries, ...override.binaries },
     timeoutMs: override.timeoutMs ?? base.timeoutMs,
     maxConcurrency: override.maxConcurrency ?? base.maxConcurrency,
+    loopMaxIterations: override.loopMaxIterations ?? base.loopMaxIterations,
   };
 
   const { workflows, warning } = mergeWorkflowMap({}, {}, override.workflows, "project");

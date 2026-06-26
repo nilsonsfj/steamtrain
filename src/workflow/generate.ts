@@ -106,13 +106,19 @@ phase.
     phase "review":      steps [ {id: "review-task", ...} ]
     phase "check":       steps [ {id: "check-issues", dependsOn: ["review-task"], ...} ]
 
-# Loops are NOT supported — UNROLL them
-There is no looping, no "while", no going back. A "review loop" or "review then
-fix then re-review" must be written as a FIXED chain of phases, each depending
-only on earlier ones. Pick a small fixed number of passes (1-2 is usually
-enough) and lay them out as separate phases:
-  implement -> review -> fix   (and optionally -> review-2 -> fix-2)
-Never make a later phase loop back into an earlier one.
+# Loops (bounded cycles) ARE supported — use a loop-back gate
+For iterative work ("review then fix then re-review until clean"), use a gate
+with a "loopTo" pointing to an EARLIER phase, plus an optional "maxIterations":
+  { "kind": "gate", "dependsOn": ["review"], "condition": { "step": "review", "contains": "DONE" },
+    "loopTo": "review", "maxIterations": 5, "onFalse": "fail" }
+Semantics:
+  - condition TRUE  → loop converged; continue forward.
+  - condition FALSE and iterations remain → jump back to "loopTo" and re-run the body.
+  - condition FALSE and the cap is hit → apply "onFalse" (fail/stop/continue).
+Rules: the gate must be in a phase AFTER the phases it re-runs; "loopTo" names an
+earlier phase; the loop body re-runs each pass; the current pass is available as
+{{iteration}}. Keep maxIterations small (default cap is 10). Loops must be nested
+or disjoint, never partially overlapping.
 
 # Step kinds
 - "distributor": fan work into a FIXED list of items, written now at authoring
@@ -180,6 +186,36 @@ review->fix "loop" is unrolled into two phases:
   ]
 }
 
+# Worked example: a bounded review/fix loop
+This is the canonical shape for "review then fix then re-review until clean".
+The gate sits AFTER the body it re-runs, and "loopTo" names that earlier phase:
+{
+  "description": "Implement, then review and fix in a bounded loop until clean.",
+  "phases": [
+    { "id": "implement", "title": "Implement", "steps": [
+      { "id": "impl", "kind": "worker", "agent": "opencode",
+        "model": "opencode/mimo-v2.5-free", "prompt": "Implement the task fully:\\n{{input}}" }
+    ] },
+    { "id": "review", "title": "Review", "steps": [
+      { "id": "review", "kind": "worker", "agent": "opencode",
+        "model": "opencode/mimo-v2.5-free", "dependsOn": ["impl"],
+        "prompt": "Review the implementation (pass {{iteration}}). If there are NO remaining issues, reply with the single word DONE. Otherwise list the issues.\\n{{steps.impl.output}}" }
+    ] },
+    { "id": "fix", "title": "Fix", "steps": [
+      { "id": "fix", "kind": "worker", "agent": "opencode",
+        "model": "opencode/mimo-v2.5-free", "dependsOn": ["review"],
+        "prompt": "Apply fixes for these review findings:\\n{{steps.review.output}}" }
+    ] },
+    { "id": "gate", "title": "Converged?", "steps": [
+      { "id": "loop-gate", "kind": "gate", "dependsOn": ["review"],
+        "condition": { "step": "review", "contains": "DONE" },
+        "loopTo": "review", "maxIterations": 5, "onFalse": "continue" }
+    ] }
+  ]
+}
+Note the gate's condition inspects "review" (not "fix") so the loop re-checks the
+review verdict each pass; "loopTo": "review" re-runs review then fix on each cycle.
+
 # Output format (STRICT)
 Output ONLY a single JSON object, no prose, no markdown fences. Use the shape and
 field names shown above ("description", "phases", each phase with "id"/"title"/"steps").
@@ -188,7 +224,9 @@ field names shown above ("description", "phases", each phase with "id"/"title"/"
 For EVERY dependsOn, forEach source, and gate condition.step you wrote, confirm
 the referenced step lives in a phase that appears ABOVE the current step's phase.
 If any reference is in the same phase or below, MOVE the dependent step into a
-later phase until it is valid. Then output the JSON.
+later phase until it is valid.
+For any gate with "loopTo", confirm it points to an EARLIER phase and that the
+gate sits in a phase BELOW the body it re-runs. Then output the JSON.
 
 # User request
 ${description}
