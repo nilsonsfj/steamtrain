@@ -74,6 +74,7 @@ import { WorkflowPreview } from "./WorkflowPreview";
 import { WorkflowStepDetails } from "./WorkflowStepDetails";
 import { WorkflowView } from "./WorkflowView";
 import { Banner } from "./banner";
+import { createWorkflowPromptValue } from "./create-workflow-prompt";
 import {
   type DraftTarget,
   formatDraftTarget,
@@ -294,8 +295,13 @@ export function App({
     [runtimeCatalog],
   );
 
-  const selectedWorkflowName =
-    workflowEntries[Math.min(workflowIndex, Math.max(0, workflowEntries.length - 1))]?.name;
+  // The picker's last selectable row is a synthetic "create" action (index ===
+  // entry count), not a real workflow — so nothing is "selected" for
+  // preview/clone/run while it is highlighted.
+  const onCreateRow = workflowIndex >= workflowEntries.length;
+  const selectedWorkflowName = onCreateRow
+    ? undefined
+    : workflowEntries[Math.min(workflowIndex, Math.max(0, workflowEntries.length - 1))]?.name;
   const userWorkflowNames = useMemo(
     () =>
       workflowEntries
@@ -317,7 +323,9 @@ export function App({
         return;
       }
     }
-    setWorkflowIndex((i) => Math.min(i, Math.max(0, workflowEntries.length - 1)));
+    // Allow `length` as a valid index: the create row sits one past the last
+    // workflow and must stay reachable (and is the only row when empty).
+    setWorkflowIndex((i) => Math.min(i, workflowEntries.length));
   }, [workflowEntries]);
 
   const cloneWorkflow = useCallback(
@@ -651,6 +659,22 @@ export function App({
   const previewDispatchCheck = previewSpec
     ? orchestrator.canDispatchWorkflowSpec(previewSpec)
     : null;
+  // The workflow picker is the visible screen (not previewing, running,
+  // drafting, or browsing history — all states where `mode` stays "workflow").
+  // Shared by the `/model` draft gate, the Ctrl+N create shortcut, and the
+  // selectable "create" row. `previewing` mirrors the render tree: a preview
+  // only occupies the screen once its spec (and dispatch check) resolve.
+  const workflowPickerActive = useMemo(
+    () =>
+      isWorkflowPickerActive({
+        mode,
+        history: Boolean(history),
+        wfCreate: Boolean(wfCreate),
+        previewing: Boolean(wfPreview && previewSpec && previewDispatchCheck),
+        showWorkflowView,
+      }),
+    [mode, history, wfCreate, wfPreview, previewSpec, previewDispatchCheck, showWorkflowView],
+  );
   const wfElapsedMs = wf.startedAt ? Math.max(0, (wf.done ? Date.now() : wfNow) - wf.startedAt) : 0;
 
   useEffect(() => {
@@ -684,19 +708,10 @@ export function App({
       deleteWorkflow,
       userWorkflowNames,
       openHistory,
-      // `/model` sets the draft model only when the picker is actually showing —
-      // not while previewing, running, drafting, or browsing history (where
-      // `mode` stays "workflow" but the picker is hidden). Those keep the legacy
-      // "select a step" warning.
-      draftModel: isWorkflowPickerActive({
-        mode,
-        history: Boolean(history),
-        wfCreate: Boolean(wfCreate),
-        // Mirror the render tree: a preview only occupies the screen when its
-        // spec (and dispatch check) resolve; otherwise the picker is shown.
-        previewing: Boolean(wfPreview && previewSpec && previewDispatchCheck),
-        showWorkflowView,
-      })
+      // `/model` sets the draft model only on the bare picker (see
+      // `workflowPickerActive`); elsewhere it keeps its legacy "select a step"
+      // warning.
+      draftModel: workflowPickerActive
         ? {
             current: draftResolution.target,
             usingOverride: draftResolution.usingOverride,
@@ -715,11 +730,7 @@ export function App({
       wfPreview,
       patchWorkflowStep,
       previewStepSelection,
-      previewSpec,
-      previewDispatchCheck,
-      history,
-      wfCreate,
-      showWorkflowView,
+      workflowPickerActive,
       saveWorkflows,
       createWorkflow,
       cloneWorkflow,
@@ -934,6 +945,26 @@ export function App({
     setSuggestionIndex(0);
     bumpCursorToEnd();
   }, [historyBrowse, updatePromptDraft, bumpCursorToEnd]);
+
+  // Discoverable entry to workflow creation: prefill the prompt with
+  // `/createworkflow ` (carrying any text the user already typed) and focus it,
+  // so the create row and Ctrl+N teach the command instead of requiring it to be
+  // known up front. A confirming Enter then runs the registered slash command.
+  const focusCreateWorkflowPrompt = useCallback(
+    (seed = "") => {
+      if (running) return;
+      const nextValue = createWorkflowPromptValue(seed);
+      updatePromptDraft({
+        value: nextValue,
+        promptEditing: true,
+        historyBrowse: initialPromptHistoryBrowse,
+      });
+      setCommandSuggestions([]);
+      setSuggestionIndex(0);
+      bumpCursorToEnd();
+    },
+    [running, updatePromptDraft, bumpCursorToEnd],
+  );
 
   const promptArrowCtx = useMemo<PromptArrowContext>(
     () => ({
@@ -1197,6 +1228,11 @@ export function App({
           if (ran) updatePromptDraft({ promptEditing: false });
           return;
         }
+        if (workflowIndex >= workflowEntries.length) {
+          // The selectable "create" row at the end of the picker.
+          focusCreateWorkflowPrompt(prompt);
+          return;
+        }
         const entry = workflowEntries[workflowIndex];
         if (!entry) return;
         setWfNotice(null);
@@ -1265,6 +1301,7 @@ export function App({
       workflowIndex,
       handleWorkflowRun,
       updatePromptDraft,
+      focusCreateWorkflowPrompt,
       wfPreview,
       workspaceMap,
       slashCtx,
@@ -1403,6 +1440,11 @@ export function App({
       }
       return;
     }
+    // Ctrl+N: jump straight into workflow creation from the picker.
+    if (key.ctrl && input === "n" && !running && workflowPickerActive) {
+      focusCreateWorkflowPrompt(value);
+      return;
+    }
     if (key.tab && !key.shift && !running) {
       const promptInputHandlesTab = isSlashCommandInput(value) && promptEditing;
       if (!promptInputHandlesTab) {
@@ -1456,7 +1498,8 @@ export function App({
           setStepIndex((i) => Math.min(Math.max(0, previewStepCount - 1), i + 1));
         } else {
           setWorkflowIndex((i) => {
-            const next = Math.min(Math.max(0, workflowEntries.length - 1), i + 1);
+            // `length` is the create row, one past the last workflow.
+            const next = Math.min(workflowEntries.length, i + 1);
             if (next !== i) {
               setStepIndex(0);
               setWfStepDetails(null);
@@ -1676,7 +1719,7 @@ function hint(
     if (wfPreviewing) {
       return `↑/↓ step · → details${resumeHint} · type to edit · Ctrl+R run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
     }
-    return `↑/↓ pick · type to edit · Enter preview · Ctrl+R run · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+    return `↑/↓ pick · Ctrl+N new · type to edit · Enter preview · Ctrl+R run · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
   }
   return promptEditing && slashInput
     ? `Enter dispatch${historyHint} · Esc unfocus · /commands (Tab complete) · Ctrl+C quit${completeHint}`

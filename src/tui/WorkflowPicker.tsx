@@ -11,13 +11,19 @@ interface WorkflowPickerProps {
   draftLabel?: string;
 }
 
-/** The workflow launcher: pick one with ↑/↓, Enter for preview, Ctrl+R to run. */
+/**
+ * The workflow launcher: pick one with ↑/↓, Enter for preview, Ctrl+R to run.
+ * A trailing "+ Create a new workflow…" row (selectable, or via Ctrl+N) drafts a
+ * new workflow; it is the only row when none exist yet.
+ */
 export function WorkflowPicker({
   workflows,
   selectedIndex,
   height,
   draftLabel,
 }: WorkflowPickerProps) {
+  // The synthetic "create" row sits one past the last workflow.
+  const createRowActive = selectedIndex === workflows.length;
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} height={height}>
       <Box justifyContent="space-between">
@@ -31,11 +37,11 @@ export function WorkflowPicker({
             </Text>
           ) : null}
         </Box>
-        <Text color="gray">↑/↓ select · type to edit · Ctrl+R run</Text>
+        <Text color="gray">↑/↓ select · Ctrl+N new · Ctrl+R run</Text>
       </Box>
       <Box flexDirection="column" flexGrow={1}>
         {workflows.length === 0 ? (
-          <Text color="gray">No workflows defined.</Text>
+          <Text color="gray">No workflows yet — create your first one:</Text>
         ) : (
           workflows.map(({ name, spec, source }, i) => {
             const active = i === selectedIndex;
@@ -70,6 +76,15 @@ export function WorkflowPicker({
             );
           })
         )}
+        {/* Synthetic trailing row: the always-present "create" action. Its index
+            is one past the last workflow, so it is selectable with ↑/↓. */}
+        <Box marginTop={workflows.length === 0 ? 0 : 1}>
+          <Text color={createRowActive ? "cyan" : "gray"}>{createRowActive ? "▶ " : "  "}</Text>
+          <Text color={createRowActive ? "cyan" : "green"} bold={createRowActive}>
+            + Create a new workflow…
+          </Text>
+          <Text color="gray">{"  "}Ctrl+N</Text>
+        </Box>
       </Box>
     </Box>
   );
