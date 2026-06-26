@@ -115,6 +115,15 @@ export interface GateStep extends WorkflowStepBase {
   target?: string;
   /** What to do when the condition is false (default: continue). */
   onFalse?: "continue" | "fail" | "stop";
+  /**
+   * When set, this gate is a loop: while its condition is false and the
+   * per-loop iteration budget remains, execution jumps back to this (earlier)
+   * phase id and re-runs the body. When the budget is exhausted, `onFalse`
+   * applies. Omitting `loopTo` makes a plain (non-looping) gate.
+   */
+  loopTo?: string;
+  /** Per-loop iteration cap (1..LOOP_MAX_ITERATIONS_CEILING). Omitted → config default. */
+  maxIterations?: number;
 }
 
 export type WorkflowStep = WorkerStep | DistributorStep | ConsolidatorStep | GateStep;
@@ -166,6 +175,10 @@ export interface StepResult {
 export const MAX_STEPS = 1000;
 /** Hard ceiling on parallel agents; the configured value is clamped to this. */
 export const MAX_CONCURRENCY = 16;
+/** Default per-loop iteration cap when a loop gate omits `maxIterations`. */
+export const DEFAULT_LOOP_MAX_ITERATIONS = 10;
+/** Hard ceiling on a loop gate's `maxIterations` (runaway backstop). */
+export const LOOP_MAX_ITERATIONS_CEILING = 100;
 
 const agentId = z.enum(["claude", "opencode", "codex", "amp"]);
 
@@ -284,6 +297,8 @@ const workflowGateStepSchema = z.object({
   condition: gateConditionSchema,
   target: z.string().min(1).optional(),
   onFalse: z.enum(["continue", "fail", "stop"]).optional(),
+  loopTo: z.string().min(1).optional(),
+  maxIterations: z.number().int().min(1).max(LOOP_MAX_ITERATIONS_CEILING).optional(),
 });
 
 const workflowStepSchema = z.union([
@@ -446,6 +461,80 @@ export function validateWorkflow(spec: WorkflowSpec): ValidationResult {
     // steps in the same phase can't depend on each other.
     for (const step of phase.steps) earlierIds.add(step.id);
   }
+
+  // ---- Loop (loopTo) validation ----
+  const phaseIndexById = new Map<string, number>();
+  spec.phases.forEach((p, i) => phaseIndexById.set(p.id, i));
+
+  // Each loop gate defines a region [loopToIndex .. gatePhaseIndex].
+  interface LoopRegion {
+    gateId: string;
+    start: number; // loopTo phase index
+    end: number; // gate phase index
+    maxIterations: number; // effective bound for the static budget (ceiling when omitted)
+  }
+  const regions: LoopRegion[] = [];
+  for (let pi = 0; pi < spec.phases.length; pi++) {
+    const phase = spec.phases[pi];
+    if (!phase) continue;
+    for (const step of phase.steps) {
+      if (step.kind !== "gate" || step.loopTo === undefined) continue;
+      const start = phaseIndexById.get(step.loopTo);
+      if (start === undefined) {
+        return {
+          ok: false,
+          error: `gate '${step.id}' loopTo references unknown phase '${step.loopTo}'`,
+        };
+      }
+      if (start > pi) {
+        return {
+          ok: false,
+          error: `gate '${step.id}' loopTo '${step.loopTo}' must be an earlier-or-equal phase (loops only go backward)`,
+        };
+      }
+      regions.push({
+        gateId: step.id,
+        start,
+        end: pi,
+        maxIterations: step.maxIterations ?? LOOP_MAX_ITERATIONS_CEILING,
+      });
+    }
+  }
+
+  // Regions must be disjoint or properly nested — never partially overlapping.
+  for (let i = 0; i < regions.length; i++) {
+    for (let j = i + 1; j < regions.length; j++) {
+      const a = regions[i] as LoopRegion;
+      const b = regions[j] as LoopRegion;
+      const disjoint = a.end < b.start || b.end < a.start;
+      const aContainsB = a.start <= b.start && b.end <= a.end;
+      const bContainsA = b.start <= a.start && a.end <= b.end;
+      if (!disjoint && !aContainsB && !bContainsA) {
+        return {
+          ok: false,
+          error: `loop regions for gates '${a.gateId}' and '${b.gateId}' partially overlap (loops must be nested or disjoint)`,
+        };
+      }
+    }
+  }
+
+  // Worst-case step budget with loops: a region's body steps run `maxIterations`
+  // times; nested regions multiply by every region that fully contains them.
+  const phaseStepCount = spec.phases.map((p) => p.steps.length);
+  let loopExpansion = 0;
+  for (const r of regions) {
+    let bodySteps = 0;
+    for (let k = r.start; k <= r.end; k++) bodySteps += phaseStepCount[k] ?? 0;
+    // multiplier from every OTHER region that fully contains this one
+    let outerMultiplier = 1;
+    for (const o of regions) {
+      if (o === r) continue;
+      if (o.start <= r.start && r.end <= o.end) outerMultiplier *= o.maxIterations;
+    }
+    // (maxIterations - 1) extra passes beyond the first, times outer multiplier
+    loopExpansion += bodySteps * (r.maxIterations - 1) * outerMultiplier;
+  }
+  maxPossibleSteps += loopExpansion;
 
   if (maxPossibleSteps > MAX_STEPS) {
     return {
