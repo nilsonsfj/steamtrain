@@ -17,13 +17,18 @@ export interface TemplateContext {
   /** stepId → output text, accumulated as the run progresses. */
   outputs: Map<string, string>;
   /** Full step results, when templates need status or structured payloads. */
-  results?: Map<string, { ok: boolean; error?: string; items?: string[]; target?: string }>;
+  results?: Map<
+    string,
+    { ok: boolean; error?: string; items?: string[]; target?: string; iteration?: number }
+  >;
   /** Current dynamic fan-out item for `forEach` worker/processor runs. */
   item?: WorkflowItem;
+  /** Current loop iteration (1-based); default 1. */
+  iteration?: number;
 }
 
 const PLACEHOLDER = /\{\{\s*([^{}]+?)\s*\}\}/g;
-const STEP_FIELD = /^steps\.(.+)\.(output|items|ok|error|target)$/;
+const STEP_FIELD = /^steps\.(.+)\.(output|items|ok|error|target|iteration)$/;
 
 export function renderPrompt(template: string, ctx: TemplateContext): string {
   return template.replace(PLACEHOLDER, (match, exprRaw: string) => {
@@ -32,6 +37,7 @@ export function renderPrompt(template: string, ctx: TemplateContext): string {
     if (expr === "item" || expr === "item.value") return ctx.item?.value ?? "";
     if (expr === "item.index") return ctx.item ? String(ctx.item.index) : "";
     if (expr === "item.sourceStepId") return ctx.item?.sourceStepId ?? "";
+    if (expr === "iteration") return String(ctx.iteration ?? 1);
     const step = STEP_FIELD.exec(expr);
     if (step) {
       const id = step[1] as string;
@@ -43,6 +49,8 @@ export function renderPrompt(template: string, ctx: TemplateContext): string {
       if (field === "ok") return String(result.ok);
       if (field === "error") return result.error ?? "";
       if (field === "target") return result.target ?? "";
+      if (field === "iteration")
+        return result.iteration !== undefined ? String(result.iteration) : "";
     }
     return match;
   });
