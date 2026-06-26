@@ -191,6 +191,17 @@ Each pass through the loop body sees the current pass number via the
 `{{iteration}}` template (1-based), so a prompt can say "pass {{iteration}}" or
 adjust behavior on later iterations.
 
+### Cost note
+
+A loop **re-runs every step in its body on each pass** — there is no cross-
+iteration caching, so the real subprocess / LLM cost multiplies by the number
+of iterations that actually run (up to `maxIterations`). A `forEach` inside a
+loop body multiplies further (fan-out × iterations). Keep `maxIterations` small
+(≤ 5 is a good rule of thumb when each body step costs more than a few cents),
+and use `{{iteration}}` to let the model bail early when the work is done
+before the cap. The static step budget in `validateWorkflow` guards against
+pathological expansion but does **not** estimate dollar cost.
+
 The bundled `review-loop` workflow (`steamtrain workflow run review-loop`) is a
 worked example: implement → review (replies `DONE` when clean) → fix → a gate
 that loops back to `review` until it reports `DONE` or 5 iterations pass. The

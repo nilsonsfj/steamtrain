@@ -496,4 +496,75 @@ describe("engine loops", () => {
     const done = events.find((e) => e.kind === "workflow_done") as { ok: boolean };
     expect(done.ok).toBe(false); // onFalse=fail after the cap was exhausted
   });
+
+  it("workflow_done.results has one entry per step (no intermediate loop iterations)", async () => {
+    // Without dedup, a 3-iteration loop produces 9 results (3 review + 3 fix +
+    // 3 gate, including 2 "not yet converged" gate results). Downstream
+    // consumers (CLI/web summary, cost roll-ups) would double-count. The final
+    // results should contain exactly one entry per step id — the latest.
+    let fixCalls = 0;
+    const deps = {
+      createAdapter: () =>
+        fakeAdapter((prompt) => {
+          if (prompt.startsWith("fix")) {
+            fixCalls++;
+            return { text: fixCalls >= 3 ? "DONE" : "NOPE" };
+          }
+          return { text: "reviewed" };
+        }),
+      maxConcurrency: 2,
+      cwd: "/tmp",
+      loopMaxIterations: 10,
+    };
+    const events = await collect(loopSpec(), deps);
+    const done = events.find((e) => e.kind === "workflow_done") as {
+      ok: boolean;
+      results: { stepId: string; iteration?: number; gate?: { passed: boolean } }[];
+    };
+    expect(done.ok).toBe(true);
+    const ids = done.results.map((r) => r.stepId);
+    // One per step, no duplicates from intermediate iterations.
+    expect(ids).toHaveLength(new Set(ids).size);
+    expect(ids.sort()).toEqual(["check-gate", "fix-step", "review-step"]);
+    // The gate's final result is the converged (passed) one, not a stale
+    // "not yet converged" from an earlier iteration.
+    const gateResult = done.results.find((r) => r.stepId === "check-gate");
+    expect(gateResult?.gate?.passed).toBe(true);
+  });
+
+  it("a downstream step reads the CURRENT iteration's output, not a stale prior pass (outputs invariant)", async () => {
+    // invalidateRegion clears `results`/`cache` for the loop body but
+    // deliberately leaves `outputs` intact, so a "fix" step can read the prior
+    // "review" until review re-runs and overwrites its own output. This only
+    // stays correct because phases run sequentially and body steps process in
+    // phase order (pi increments forward from loopToIndex): review always
+    // re-runs before fix reads it. This test pins that invariant — if a future
+    // change makes fix see a stale review output (e.g. a "skip cache-hit inside
+    // a loop" optimization that skips re-running review), it fails.
+    let reviewCalls = 0;
+    const seenByFix: string[] = [];
+    const deps = {
+      createAdapter: () =>
+        fakeAdapter((prompt) => {
+          if (prompt.startsWith("review")) {
+            reviewCalls++;
+            return { text: `review-v${reviewCalls}` };
+          }
+          // fix's prompt is "fix based on {{steps.review-step.output}}" — the
+          // rendered prompt reveals which review output fix actually saw.
+          if (prompt.startsWith("fix")) {
+            seenByFix.push(prompt);
+            return { text: "NOPE" }; // never converge → burn cap 2
+          }
+          return { text: "ok" };
+        }),
+      maxConcurrency: 2,
+      cwd: "/tmp",
+      loopMaxIterations: 2,
+    };
+    await collect(loopSpec(2), deps);
+    // Two iterations ran. In iteration 1 fix must see review-v1; in iteration 2
+    // it must see review-v2 (the current pass's output), NOT review-v1 (stale).
+    expect(seenByFix).toEqual(["fix based on review-v1", "fix based on review-v2"]);
+  });
 });

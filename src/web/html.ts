@@ -127,6 +127,8 @@ export const PAGE_HTML = `<!doctype html>
   .card.running .kind .pulse { animation: pulse 1.1s ease-in-out infinite; }
   .card.done { border-left-color: var(--done); }
   .card.error { border-left-color: var(--error); }
+  .card.superseded { border-left-color: var(--muted); opacity: .55; }
+  .card.superseded .state { color: var(--muted); font-style: italic; }
   @keyframes pulse { 0%,100% { opacity: .35; } 50% { opacity: 1; } }
   .card .top { display: flex; align-items: center; gap: 8px; }
   .card .sid { font-weight: 700; font-size: 14px; }
@@ -524,6 +526,13 @@ export const PAGE_HTML = `<!doctype html>
         S.started = true; S.startedAt = Date.now(); break;
       case "phase_start": {
         var iter = ev.iteration || 1;
+        // Drop the spec-preview block (no iteration tag) once the real run
+        // reaches this phase, so the live iteration block replaces it instead
+        // of rendering alongside as a duplicate.
+        if (iter === 1)
+          S.phaseOrder = S.phaseOrder.filter(function (p) {
+            return p.id !== ev.phaseId || p.iteration !== undefined;
+          });
         if (!S.phaseOrder.some(function (p) { return p.id === ev.phaseId && p.iteration === iter; }))
           S.phaseOrder.push({ id: ev.phaseId, title: ev.title || ev.phaseId, iteration: iter });
         break;
@@ -579,13 +588,26 @@ export const PAGE_HTML = `<!doctype html>
         break;
       }
       case "phase_done":
-        S.phaseDone[ev.phaseId] = { ok: ev.ok }; break;
-      case "loop_iteration":
+        S.phaseDone[ev.phaseId + "@" + (ev.iteration || 1)] = { ok: ev.ok }; break;
+      case "loop_iteration": {
+        // Record which gate-phase instance emitted this marker so render()
+        // can place it after that exact instance instead of clustering all
+        // markers after the last occurrence.
+        var gp = S.specStepIds[ev.gateStepId];
+        var gateIter = 0;
+        if (gp) {
+          for (var gi = S.phaseOrder.length - 1; gi >= 0; gi--) {
+            var pe = S.phaseOrder[gi];
+            if (pe.id === gp && pe.iteration) { gateIter = pe.iteration; break; }
+          }
+        }
         S.loopMarkers.push({
           gateStepId: ev.gateStepId, loopTo: ev.loopTo,
-          iteration: ev.iteration, maxIterations: ev.maxIterations
+          iteration: ev.iteration, maxIterations: ev.maxIterations,
+          gatePhaseId: gp, gatePhaseIteration: gateIter
         });
         break;
+      }
       case "workflow_done":
         S.done = true; S.ok = ev.ok; S.results = ev.results || []; break;
     }
@@ -615,9 +637,18 @@ export const PAGE_HTML = `<!doctype html>
       legendItem("distributor", "fan-out"), legendItem("consolidator", "merge"), legendItem("gate", "gate")
     ));
 
+    // Highest iteration seen per phase id — a phase block is "latest" when its
+    // iteration equals this. Only the latest instance shows live step cards;
+    // earlier instances were superseded by a re-run and get a placeholder.
+    var maxIter = {};
+    S.phaseOrder.forEach(function (p) {
+      if (p.iteration && (!maxIter[p.id] || p.iteration > maxIter[p.id])) maxIter[p.id] = p.iteration;
+    });
+
     S.phaseOrder.forEach(function (p, idx) {
       if (idx > 0) canvas.appendChild(h("div", { class: "connector" }));
-      var done = S.phaseDone[p.id];
+      var piter = p.iteration || 1;
+      var done = S.phaseDone[p.id + "@" + piter];
       var steps = stepsForPhase(p.id);
       var running = steps.some(function (s) { return s.status === "running"; });
       var pstat = done ? (done.ok ? "done" : "failed") : (running ? "running" : (S.started ? "" : "pending"));
@@ -630,24 +661,34 @@ export const PAGE_HTML = `<!doctype html>
         )
       );
       var cards = h("div", { class: "cards" });
-      steps.forEach(function (s) { cards.appendChild(renderCard(s)); });
+      // Seed-preview blocks (no iteration) and the latest iteration of each
+      // phase render the real live cards. Earlier iterations were superseded
+      // by a re-run — show a placeholder instead of the stale (last-written)
+      // card, so the timeline doesn't lie about each iteration's output.
+      var isLatest = !p.iteration || p.iteration === (maxIter[p.id] || 1);
+      steps.forEach(function (s) {
+        if (isLatest) cards.appendChild(renderCard(s));
+        else cards.appendChild(h("div", { class: "card superseded" },
+          h("div", { class: "top" },
+            h("span", { class: "sid", text: s.id }),
+            h("span", { class: "state", text: "superseded \\u2192 iteration " + maxIter[p.id] })
+          )
+        ));
+      });
       phaseEl.appendChild(cards);
       canvas.appendChild(phaseEl);
 
-      // Loop markers belong right after the phase that holds the gate which
-      // fired them; render any whose gate lives in this phase instance once
-      // it's the last (most recent) occurrence rendered so far.
-      var lastIdxForPhase = -1;
-      for (var li = 0; li < S.phaseOrder.length; li++) if (S.phaseOrder[li].id === p.id) lastIdxForPhase = li;
-      if (idx === lastIdxForPhase) {
-        S.loopMarkers.forEach(function (m) {
-          if (S.specStepIds[m.gateStepId] !== p.id) return;
+      // Place each loop marker right after the gate-phase instance that
+      // emitted it (matched by phase id + iteration), instead of clustering
+      // all markers after the last occurrence of the phase.
+      S.loopMarkers.forEach(function (m) {
+        if (m.gatePhaseId === p.id && m.gatePhaseIteration === piter) {
           canvas.appendChild(h("div", { class: "loop-marker" },
             h("span", { class: "chip warn",
               text: "\\u21ba loop \\u2192 " + m.loopTo + " \\u00b7 iteration " + m.iteration + "/" + m.maxIterations })
           ));
-        });
-      }
+        }
+      });
     });
 
     if (S.done) renderSummary(canvas);

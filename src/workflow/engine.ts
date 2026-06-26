@@ -370,10 +370,19 @@ export async function* runWorkflow(
     pi++;
   }
 
+  // `allResults` accumulates one entry per step per loop iteration (a body
+  // step that ran 3 passes has 3 entries, plus 3 intermediate "not yet
+  // converged" gate results). Downstream consumers — the CLI/web run summary,
+  // cost roll-ups — would otherwise double-count every intermediate pass. Keep
+  // only the latest result per step id (the final state of each step); earlier
+  // iterations were superseded by re-runs.
+  const finalResults = new Map<string, StepResult>();
+  for (const r of allResults) finalResults.set(r.stepId, r);
+
   yield {
     kind: "workflow_done",
     ok: workflowOk && !signal?.aborted,
-    results: allResults,
+    results: [...finalResults.values()],
     ts: Date.now(),
   };
 }
