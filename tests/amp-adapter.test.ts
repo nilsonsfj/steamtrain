@@ -159,4 +159,10 @@ describe("buildAmpExecArgs", () => {
       "--no-archive-after-execute",
     ]);
   });
+
+  it("drops --effort for the rush mode, which rejects reasoning effort", () => {
+    const args = buildAmpExecArgs({ prompt: "go", model: "rush", effort: "high" });
+    expect(args).not.toContain("--effort");
+    expect(args).toEqual(["-x", "go", "--stream-json", "--stream-json-thinking", "-m", "rush"]);
+  });
 });

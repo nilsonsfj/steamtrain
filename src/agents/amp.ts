@@ -1,5 +1,6 @@
 import type { AgentEvent, AgentId, EventMapper } from "../types/events";
 import { ampAssistant, ampEnvelope, ampResult, ampSystemInit, ampUser } from "../types/raw-amp";
+import type { ClaudeAssistant } from "../types/raw-claude";
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
 import { stringifyContent } from "./util";
@@ -138,10 +139,7 @@ export function createAmpMapper(agent: AgentId = AGENT): EventMapper {
   };
 }
 
-function humanizeAssistantError(a: {
-  message: { content?: { type: string; text?: string }[] };
-  error?: string;
-}): string {
+function humanizeAssistantError(a: ClaudeAssistant): string {
   const firstText = a.message.content?.find((b) => b.type === "text")?.text;
   const code = a.error;
   if (firstText && code) return `${firstText} (${code})`;
@@ -153,9 +151,11 @@ function humanizeAssistantError(a: {
  *
  * amp requires the prompt to be the *value* of `-x`/`--execute`; a trailing
  * positional after other flags is rejected. `--stream-json-thinking` implies
- * `--stream-json` and additionally surfaces reasoning blocks.
+ * `--stream-json` and additionally surfaces reasoning blocks. `--effort` is
+ * dropped for the `rush` mode, which has no reasoning and rejects the flag.
  */
 export function buildAmpExecArgs(opts: AgentRunOptions): string[] {
+  const wantsEffort = Boolean(opts.effort) && opts.model !== "rush";
   return [
     "-x",
     opts.prompt,
@@ -163,7 +163,7 @@ export function buildAmpExecArgs(opts: AgentRunOptions): string[] {
     "--stream-json-thinking",
     "-m",
     opts.model,
-    ...(opts.effort ? ["--effort", opts.effort] : []),
+    ...(wantsEffort ? ["--effort", opts.effort as string] : []),
     ...(opts.extraArgs ?? []),
   ];
 }
