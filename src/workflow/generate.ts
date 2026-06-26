@@ -13,12 +13,21 @@ import { type WorkflowSpec, validateWorkflow, workflowSpecSchema } from "./types
 const DEFAULT_NAME = "workflow";
 const MAX_NAME_LENGTH = 48;
 
+/** Default number of corrective re-prompts after an invalid first draft. */
+export const DEFAULT_REPAIR_ATTEMPTS = 2;
+
 export interface GenerateWorkflowDeps {
   createAdapter: (id: AgentId, binary?: string) => AgentAdapter;
   binaries?: Partial<Record<AgentId, string>>;
   timeoutMs?: number;
   /** Working directory for the generating agent (it does not need repo access). */
   cwd?: string;
+  /**
+   * How many times to re-prompt the agent with the validation error when the
+   * first draft is invalid (same-phase deps, bad shape, no JSON, …). 0 disables
+   * repair. Defaults to {@link DEFAULT_REPAIR_ATTEMPTS}.
+   */
+  maxRepairAttempts?: number;
 }
 
 export interface GenerateWorkflowRequest {
@@ -32,6 +41,12 @@ export interface GenerateWorkflowRequest {
   signal?: AbortSignal;
   /** Stream the underlying agent events so a UI can show live progress. */
   onEvent?: (event: AgentEvent) => void;
+  /**
+   * Called at the start of each agent run with the 1-based attempt number, so a
+   * UI streaming `onEvent` can reset its live buffer between repair attempts
+   * (otherwise a rejected draft and its repair concatenate into one blob).
+   */
+  onAttemptStart?: (attempt: number) => void;
 }
 
 export interface GenerateWorkflowResult {
@@ -40,6 +55,8 @@ export interface GenerateWorkflowResult {
   /** Raw model text, kept for display/debugging when extraction fails. */
   raw: string;
   error?: string;
+  /** How many agent runs it took (1 = first draft was valid; >1 = repaired). */
+  attempts: number;
 }
 
 export type ExtractResult =
@@ -70,19 +87,50 @@ ONE valid workflow as JSON.
 
 # Execution model
 - A workflow has "phases" that run SEQUENTIALLY (top to bottom).
-- The "steps" inside a phase run in PARALLEL.
-- A step may only reference (via dependsOn / templates) steps in an EARLIER phase.
-  Never reference a step in the same phase or a later phase.
+- The "steps" inside a phase run in PARALLEL (with no ordering between them).
+- A step may only reference (via dependsOn / forEach / gate condition / templates)
+  steps in a STRICTLY EARLIER phase — never a step in the SAME phase, never a
+  later phase.
+
+# THE #1 RULE (most generated workflows fail here)
+If step B uses step A's output, A and B MUST be in DIFFERENT phases, with A's
+phase ABOVE B's phase. Two steps in the same phase run at the same time, so they
+can NEVER depend on each other. When in doubt, give each dependent step its own
+phase.
+
+  WRONG (same phase — validation rejects this):
+    phase "review": steps [ {id: "review-task", ...},
+                            {id: "check-issues", dependsOn: ["review-task"], ...} ]
+
+  RIGHT (split into two phases):
+    phase "review":      steps [ {id: "review-task", ...} ]
+    phase "check":       steps [ {id: "check-issues", dependsOn: ["review-task"], ...} ]
+
+# Loops are NOT supported — UNROLL them
+There is no looping, no "while", no going back. A "review loop" or "review then
+fix then re-review" must be written as a FIXED chain of phases, each depending
+only on earlier ones. Pick a small fixed number of passes (1-2 is usually
+enough) and lay them out as separate phases:
+  implement -> review -> fix   (and optionally -> review-2 -> fix-2)
+Never make a later phase loop back into an earlier one.
 
 # Step kinds
-- "distributor": fan one input into many items. Use { "kind": "distributor",
-  "items": ["...{{input}}...", "..."] }. Items are templates.
+- "distributor": fan work into a FIXED list of items, written now at authoring
+  time (the engine cannot count items dynamically from a file). Use
+  { "kind": "distributor", "items": ["...{{input}}...", "..."] }. Items are templates.
 - "worker" (or "processor"): one agent run. Requires agent, model, prompt.
   A processor may add "forEach": "steps.<distributorId>.items" to run once per item
-  (reference the current item with {{item}} and {{item.index}}).
+  IN PARALLEL (reference the current item with {{item}} and {{item.index}}). The
+  forEach source distributor MUST be in an earlier phase.
 - "consolidator": merge earlier outputs. Requires dependsOn; usually agent+model+prompt.
 - "gate": evaluate a condition, e.g. { "kind": "gate", "dependsOn": ["x"],
-  "condition": { "step": "x", "ok": true }, "onFalse": "fail" }.
+  "condition": { "step": "x", "ok": true }, "onFalse": "fail" }. condition.step
+  must be in an earlier phase.
+
+# Keep it small
+A workflow may expand to at most 1000 steps; a forEach step counts as (number of
+distributor items) steps. Keep distributor item lists short (a handful) and the
+phase count modest.
 
 # Templates available in prompts/items
 {{input}} (the user's task), {{steps.<id>.output}}, {{steps.<id>.items}},
@@ -95,27 +143,92 @@ agent "opencode" with models like "opencode/mimo-v2.5-free",
 "opencode/north-mini-code-free".
 Every agent-backed step MUST set agent, model, and a non-empty prompt.
 
-# Output format (STRICT)
-Output ONLY a single JSON object, no prose, no markdown fences. Shape:
+# Worked example: parallel implement, then review, then fix
+This is the canonical shape for "split work into tasks, do them in parallel, then
+review/fix each". Note how every dependency points to an EARLIER phase, and the
+review->fix "loop" is unrolled into two phases:
 {
-  "description": "one sentence",
+  "description": "Split a backlog into tasks, implement each in parallel, then review and fix.",
   "phases": [
-    { "id": "scan", "title": "Scan", "steps": [
-      { "id": "scan-a", "kind": "worker", "agent": "opencode",
-        "model": "opencode/mimo-v2.5-free", "prompt": "... {{input}} ..." }
+    { "id": "split", "title": "Split into tasks", "steps": [
+      { "id": "tasks", "kind": "distributor",
+        "items": ["Task 1 from backlog: {{input}}", "Task 2 from backlog: {{input}}",
+                  "Task 3 from backlog: {{input}}"] }
     ] },
-    { "id": "report", "title": "Report", "steps": [
+    { "id": "implement", "title": "Implement in parallel", "steps": [
+      { "id": "impl", "kind": "processor", "agent": "opencode",
+        "model": "opencode/mimo-v2.5-free", "forEach": "steps.tasks.items",
+        "prompt": "Implement this task fully:\\n{{item}}" }
+    ] },
+    { "id": "review", "title": "Review each implementation", "steps": [
+      { "id": "review-each", "kind": "processor", "agent": "opencode",
+        "model": "opencode/mimo-v2.5-free", "forEach": "steps.tasks.items",
+        "dependsOn": ["impl"],
+        "prompt": "Review the implementation for {{item}}:\\n{{steps.impl.output}}\\nList concrete issues to fix." }
+    ] },
+    { "id": "fix", "title": "Apply review fixes", "steps": [
+      { "id": "apply-fixes", "kind": "processor", "agent": "opencode",
+        "model": "opencode/mimo-v2.5-free", "forEach": "steps.tasks.items",
+        "dependsOn": ["impl", "review-each"],
+        "prompt": "Apply the review fixes for {{item}}.\\nReview findings:\\n{{steps.review-each.output}}" }
+    ] },
+    { "id": "report", "title": "Consolidate", "steps": [
       { "id": "report", "kind": "consolidator", "agent": "opencode",
-        "model": "opencode/mimo-v2.5-free", "dependsOn": ["scan-a"],
-        "prompt": "Summarize {{steps.scan-a.output}} for {{input}}" }
+        "model": "opencode/mimo-v2.5-free", "dependsOn": ["apply-fixes"],
+        "prompt": "Summarize the final result across all tasks:\\n{{steps.apply-fixes.output}}" }
     ] }
   ]
 }
+
+# Output format (STRICT)
+Output ONLY a single JSON object, no prose, no markdown fences. Use the shape and
+field names shown above ("description", "phases", each phase with "id"/"title"/"steps").
+
+# Before you answer — self-check
+For EVERY dependsOn, forEach source, and gate condition.step you wrote, confirm
+the referenced step lives in a phase that appears ABOVE the current step's phase.
+If any reference is in the same phase or below, MOVE the dependent step into a
+later phase until it is valid. Then output the JSON.
 
 # User request
 ${description}
 
 Respond with the JSON object only.`;
+}
+
+/** Truncate raw model output so a repair prompt stays a sane size. */
+const MAX_REPAIR_OUTPUT_CHARS = 4000;
+
+/**
+ * The repair prompt. When a draft fails to parse or validate, we show the model
+ * its own previous output and the EXACT validation error (the same message the
+ * engine produced) and ask for a corrected JSON object. This is the safety net
+ * behind {@link buildWorkflowGenerationPrompt}: even a weak model usually fixes a
+ * concrete, named error ("step X dependsOn Y, which is not in an earlier phase").
+ */
+export function buildWorkflowRepairPrompt(
+  description: string,
+  previousOutput: string,
+  error: string,
+): string {
+  const trimmed =
+    previousOutput.length > MAX_REPAIR_OUTPUT_CHARS
+      ? `${previousOutput.slice(0, MAX_REPAIR_OUTPUT_CHARS)}\n…(truncated)`
+      : previousOutput;
+  return `${buildWorkflowGenerationPrompt(description)}
+
+# Your previous attempt was INVALID
+You already tried, and it was rejected with this error:
+
+${error}
+
+Your previous output was:
+${trimmed}
+
+Fix ONLY what the error calls out, keeping the rest of the intent. The most
+common cause is two dependent steps sharing a phase — if so, move the dependent
+step into a later phase. Re-read the self-check above, then output the corrected
+JSON object only (no prose, no fences).`;
 }
 
 /**
@@ -158,14 +271,19 @@ export function extractWorkflowSpec(
   return { ok: true, spec };
 }
 
-/** Run the agent and turn its reply into a validated workflow spec. */
-export async function generateWorkflow(
+interface AgentRunOutcome {
+  raw: string;
+  errored: boolean;
+  errorMessage?: string;
+}
+
+/** One agent run: stream events through `onEvent`, collect the reply text. */
+async function runGenerationAgent(
+  adapter: AgentAdapter,
+  prompt: string,
   req: GenerateWorkflowRequest,
   deps: GenerateWorkflowDeps,
-): Promise<GenerateWorkflowResult> {
-  const adapter = deps.createAdapter(req.agent, deps.binaries?.[req.agent]);
-  const prompt = buildWorkflowGenerationPrompt(req.description);
-
+): Promise<AgentRunOutcome> {
   let finalText = "";
   let streamedText = "";
   let errored = false;
@@ -199,21 +317,65 @@ export async function generateWorkflow(
     errorMessage ??= message(err);
   }
 
-  const raw = finalText || streamedText;
-  if (errored && !raw) {
-    return { ok: false, raw: raw || "", error: errorMessage ?? "workflow generation failed" };
-  }
+  return { raw: finalText || streamedText, errored, errorMessage };
+}
 
-  const extracted = extractWorkflowSpec(raw, { name: req.name, fallbackName: req.description });
-  if (!extracted.ok) {
+/**
+ * Run the agent and turn its reply into a validated workflow spec. When the
+ * first draft is invalid, re-prompt the agent with the exact validation error up
+ * to `maxRepairAttempts` times (see {@link buildWorkflowRepairPrompt}) before
+ * giving up. `result.attempts` reports how many runs it took.
+ */
+export async function generateWorkflow(
+  req: GenerateWorkflowRequest,
+  deps: GenerateWorkflowDeps,
+): Promise<GenerateWorkflowResult> {
+  const adapter = deps.createAdapter(req.agent, deps.binaries?.[req.agent]);
+  const maxRepairAttempts = Number.isFinite(deps.maxRepairAttempts)
+    ? Math.max(0, Math.floor(deps.maxRepairAttempts as number))
+    : DEFAULT_REPAIR_ATTEMPTS;
+
+  let prompt = buildWorkflowGenerationPrompt(req.description);
+  let lastResult: GenerateWorkflowResult = { ok: false, raw: "", attempts: 0 };
+
+  for (let attempt = 1; attempt <= maxRepairAttempts + 1; attempt++) {
+    // Don't start a fresh agent run once the caller has aborted.
+    if (req.signal?.aborted) break;
+    req.onAttemptStart?.(attempt);
+    const { raw, errored, errorMessage } = await runGenerationAgent(adapter, prompt, req, deps);
+
+    // An agent error with no output at all: repairing has nothing to work from.
+    if (errored && !raw) {
+      return {
+        ok: false,
+        raw: "",
+        error: errorMessage ?? "workflow generation failed",
+        attempts: attempt,
+      };
+    }
+
+    const extracted = extractWorkflowSpec(raw, { name: req.name, fallbackName: req.description });
+    if (extracted.ok) {
+      // The agent flagged an error yet still produced a usable spec: surface the
+      // error (legacy behavior) rather than silently accepting it.
+      return errored
+        ? { ok: false, raw, spec: extracted.spec, error: errorMessage, attempts: attempt }
+        : { ok: true, raw, spec: extracted.spec, attempts: attempt };
+    }
+
     const detail =
       errored && errorMessage ? `${errorMessage}; ${extracted.error}` : extracted.error;
-    return { ok: false, raw, error: detail };
+    lastResult = { ok: false, raw, error: detail, attempts: attempt };
+
+    // Re-prompt with the concrete error if we have budget and something to fix.
+    if (attempt <= maxRepairAttempts && !req.signal?.aborted) {
+      prompt = buildWorkflowRepairPrompt(req.description, raw, extracted.error);
+    } else {
+      break;
+    }
   }
-  if (errored) {
-    return { ok: false, raw, spec: extracted.spec, error: errorMessage };
-  }
-  return { ok: true, raw, spec: extracted.spec };
+
+  return lastResult;
 }
 
 /**

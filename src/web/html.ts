@@ -931,6 +931,7 @@ export const PAGE_HTML = `<!doctype html>
       S.draftAbort = ac;
       streamGenerate(payload, ac.signal, function (frame) {
         if (frame.type === "delta") { draft.textContent += frame.text; draft.scrollTop = draft.scrollHeight; }
+        else if (frame.type === "attempt") { if (frame.attempt > 1) draft.textContent = ""; }
         else if (frame.type === "done") {
           S.draftAbort = null;
           createBtn.disabled = false; createBtn.textContent = "Create \\u2728";
@@ -938,6 +939,9 @@ export const PAGE_HTML = `<!doctype html>
             closeModal();
             refreshAfterWrite(frame.name || frame.spec.name, frame.replaced ? "updated" : "created");
           } else {
+            // Show the full final raw output behind the error (parity with the
+            // TUI), not just whatever streamed during the last attempt.
+            if (frame.raw) draft.textContent = frame.raw;
             mbanner(banner, frame.error || "generation failed", "err");
           }
         }

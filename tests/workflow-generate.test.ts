@@ -3,6 +3,7 @@ import type { AgentAdapter, AgentRunOptions } from "../src/agents";
 import type { AgentEvent, AgentId } from "../src/types/events";
 import {
   buildWorkflowGenerationPrompt,
+  buildWorkflowRepairPrompt,
   extractWorkflowSpec,
   generateWorkflow,
   slugifyWorkflowName,
@@ -49,6 +50,70 @@ function makeAdapter(events: AgentEvent[]): (id: AgentId) => AgentAdapter {
   });
 }
 
+/** A single `result` event carrying `obj` as JSON — the common model reply shape. */
+function resultEvents(obj: unknown): AgentEvent[] {
+  return [{ kind: "result", agent: "opencode", ts: 0, isError: false, text: JSON.stringify(obj) }];
+}
+
+/**
+ * An adapter whose Nth run yields the Nth response set (the last set repeats),
+ * recording every prompt it was given so tests can assert the repair re-prompt.
+ */
+function makeSequencedAdapter(responses: AgentEvent[][]) {
+  const prompts: string[] = [];
+  let calls = 0;
+  const createAdapter = (id: AgentId): AgentAdapter => ({
+    id,
+    binary: "fake",
+    run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
+      prompts.push(opts.prompt);
+      const events = responses[Math.min(calls, responses.length - 1)] ?? [];
+      calls += 1;
+      return (async function* () {
+        for (const event of events) {
+          await Promise.resolve();
+          yield event;
+        }
+      })();
+    },
+  });
+  return {
+    createAdapter,
+    prompts,
+    get calls() {
+      return calls;
+    },
+  };
+}
+
+// Parses fine but fails the cross-phase rule: `b` depends on same-phase `a`.
+const SAME_PHASE_SPEC = {
+  description: "Two steps in one phase with a dependency (invalid).",
+  phases: [
+    {
+      id: "p",
+      title: "P",
+      steps: [
+        {
+          id: "a",
+          kind: "worker",
+          agent: "opencode",
+          model: "opencode/mimo-v2.5-free",
+          prompt: "x {{input}}",
+        },
+        {
+          id: "b",
+          kind: "worker",
+          agent: "opencode",
+          model: "opencode/mimo-v2.5-free",
+          dependsOn: ["a"],
+          prompt: "y {{steps.a.output}}",
+        },
+      ],
+    },
+  ],
+};
+
 describe("slugifyWorkflowName", () => {
   it("kebab-cases free text and trims junk", () => {
     expect(slugifyWorkflowName("Review my API changes!")).toBe("review-my-api-changes");
@@ -77,6 +142,25 @@ describe("buildWorkflowGenerationPrompt", () => {
     expect(prompt).toContain("distributor");
     expect(prompt).toContain("consolidator");
     expect(prompt).toContain("phases");
+  });
+
+  it("teaches the same-phase dependency rule and loop unrolling", () => {
+    const prompt = buildWorkflowGenerationPrompt("anything");
+    expect(prompt).toContain("DIFFERENT phases");
+    expect(prompt).toContain("UNROLL");
+  });
+
+  it("embeds a worked example that passes the engine's own validation", () => {
+    // The example is what the model imitates; if it ever stops validating, the
+    // prompt is teaching an invalid shape. Extract + validate it for real.
+    const prompt = buildWorkflowGenerationPrompt("anything");
+    const example = prompt.slice(prompt.indexOf("# Worked example"));
+    const result = extractWorkflowSpec(example);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // The review->fix "loop" is unrolled into distinct phases.
+      expect(result.spec.phases.length).toBeGreaterThanOrEqual(4);
+    }
   });
 });
 
@@ -233,5 +317,154 @@ describe("generateWorkflow", () => {
     );
     expect(result.ok).toBe(false);
     expect(result.raw).toContain("no json here");
+  });
+
+  it("reports attempts === 1 when the first draft is valid", async () => {
+    const adapter = makeAdapter(resultEvents(VALID_SPEC));
+    const result = await generateWorkflow(
+      { description: "x", agent: "opencode", model: "opencode/qwen3.6-plus-free" },
+      { createAdapter: adapter },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.attempts).toBe(1);
+  });
+});
+
+describe("generateWorkflow auto-repair", () => {
+  it("re-prompts with the validation error and recovers on the second attempt", async () => {
+    const seq = makeSequencedAdapter([resultEvents(SAME_PHASE_SPEC), resultEvents(VALID_SPEC)]);
+    const result = await generateWorkflow(
+      { description: "summarize areas", agent: "opencode", model: "opencode/qwen3.6-plus-free" },
+      { createAdapter: seq.createAdapter },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.attempts).toBe(2);
+    expect(seq.calls).toBe(2);
+    // The second run is a repair prompt carrying the concrete validation error.
+    expect(seq.prompts[1]).toContain("previous attempt was INVALID");
+    expect(seq.prompts[1]).toContain("not in an earlier phase");
+  });
+
+  it("gives up after 2 retries (3 runs total) and returns the last error", async () => {
+    const seq = makeSequencedAdapter([resultEvents(SAME_PHASE_SPEC)]); // always invalid
+    const result = await generateWorkflow(
+      { description: "x", agent: "opencode", model: "opencode/qwen3.6-plus-free" },
+      { createAdapter: seq.createAdapter },
+    );
+    expect(result.ok).toBe(false);
+    expect(seq.calls).toBe(3); // default: 1 draft + 2 repairs
+    expect(result.attempts).toBe(3);
+    expect(result.error).toContain("not in an earlier phase");
+  });
+
+  it("falls back to the default when maxRepairAttempts is not a finite number", async () => {
+    const seq = makeSequencedAdapter([resultEvents(SAME_PHASE_SPEC)]);
+    const result = await generateWorkflow(
+      { description: "x", agent: "opencode", model: "opencode/qwen3.6-plus-free" },
+      { createAdapter: seq.createAdapter, maxRepairAttempts: Number.NaN },
+    );
+    expect(result.ok).toBe(false);
+    expect(seq.calls).toBe(3); // NaN must not collapse the loop; default 2 retries
+  });
+
+  it("does not repair when maxRepairAttempts is 0", async () => {
+    const seq = makeSequencedAdapter([resultEvents(SAME_PHASE_SPEC)]);
+    const result = await generateWorkflow(
+      { description: "x", agent: "opencode", model: "opencode/qwen3.6-plus-free" },
+      { createAdapter: seq.createAdapter, maxRepairAttempts: 0 },
+    );
+    expect(result.ok).toBe(false);
+    expect(seq.calls).toBe(1);
+    expect(result.attempts).toBe(1);
+  });
+
+  it("does not repair (or accept) when the agent flags an error but the spec is valid", async () => {
+    // Legacy behavior: a valid spec accompanied by an agent error is surfaced as
+    // a failure, and we must NOT spend a repair attempt re-running it.
+    const seq = makeSequencedAdapter([
+      [
+        {
+          kind: "result",
+          agent: "opencode",
+          ts: 0,
+          isError: true,
+          text: JSON.stringify(VALID_SPEC),
+        },
+      ],
+    ]);
+    const result = await generateWorkflow(
+      { description: "x", agent: "opencode", model: "opencode/qwen3.6-plus-free" },
+      { createAdapter: seq.createAdapter },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.spec).toBeDefined();
+    expect(seq.calls).toBe(1);
+    expect(result.attempts).toBe(1);
+  });
+
+  it("clears the live buffer between attempts via onAttemptStart", async () => {
+    const seq = makeSequencedAdapter([resultEvents(SAME_PHASE_SPEC), resultEvents(VALID_SPEC)]);
+    const attemptStarts: number[] = [];
+    const result = await generateWorkflow(
+      {
+        description: "x",
+        agent: "opencode",
+        model: "opencode/qwen3.6-plus-free",
+        onAttemptStart: (n) => attemptStarts.push(n),
+      },
+      { createAdapter: seq.createAdapter },
+    );
+    expect(result.ok).toBe(true);
+    expect(attemptStarts).toEqual([1, 2]);
+  });
+
+  it("never starts an agent run when aborted before the first attempt", async () => {
+    const seq = makeSequencedAdapter([resultEvents(VALID_SPEC)]);
+    const result = await generateWorkflow(
+      {
+        description: "x",
+        agent: "opencode",
+        model: "opencode/qwen3.6-plus-free",
+        signal: AbortSignal.abort(),
+      },
+      { createAdapter: seq.createAdapter },
+    );
+    expect(result.ok).toBe(false);
+    expect(seq.calls).toBe(0);
+    expect(result.attempts).toBe(0);
+  });
+
+  it("does not waste a repair when the agent errors with no output", async () => {
+    const seq = makeSequencedAdapter([
+      [{ kind: "error", agent: "opencode", ts: 0, message: "boom" }],
+    ]);
+    const result = await generateWorkflow(
+      { description: "x", agent: "opencode", model: "opencode/qwen3.6-plus-free" },
+      { createAdapter: seq.createAdapter },
+    );
+    expect(result.ok).toBe(false);
+    expect(seq.calls).toBe(1);
+    expect(result.error).toMatch(/boom/);
+  });
+});
+
+describe("buildWorkflowRepairPrompt", () => {
+  it("includes the base prompt, the prior output, and the exact error", () => {
+    const prompt = buildWorkflowRepairPrompt(
+      "do the thing",
+      '{ "phases": [] }',
+      "step 'b' dependsOn 'a', which is not in an earlier phase",
+    );
+    expect(prompt).toContain("do the thing"); // base generation prompt embedded
+    expect(prompt).toContain("previous attempt was INVALID");
+    expect(prompt).toContain('{ "phases": [] }');
+    expect(prompt).toContain("not in an earlier phase");
+  });
+
+  it("truncates a very long previous output", () => {
+    const huge = "x".repeat(10000);
+    const prompt = buildWorkflowRepairPrompt("d", huge, "err");
+    expect(prompt).toContain("…(truncated)");
+    expect(prompt.length).toBeLessThan(huge.length + 2000);
   });
 });

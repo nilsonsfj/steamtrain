@@ -15,12 +15,13 @@ flowchart LR
   agent["agent run\n(claude / opencode / codex)"]
   extract["extract JSON\n(fenced or balanced)"]
   validate["validateWorkflow()\n(same rules as the engine)"]
+  repair["repair prompt\n(+ the exact error)"]
   save["user: ~/.steamtrain/workflows.json\nproject: ./steamtrain.json"]
   run["picker / CLI run"]
 
   desc --> prompt --> agent --> extract --> validate
   validate -->|ok| save --> run
-  validate -->|invalid| desc
+  validate -->|"invalid (≤2 retries)"| repair --> agent
 ```
 
 ## Where workflows are saved: scope
@@ -145,6 +146,16 @@ Models often wrap JSON in prose or ```json fences. The extractor:
 
 If any step fails, `create` exits non-zero (CLI) or shows the error plus the raw
 model output (TUI) — it never saves an invalid workflow.
+
+### Auto-repair
+
+Before surfacing a failure, the generator gives the model a chance to fix its own
+mistake. When a draft doesn't parse or fails validation, it re-prompts the same
+agent with the original request **plus the exact validation error and the prior
+output**, asking it to fix only what the error names. This runs up to two retries
+(three agent runs total), so the common slip — two dependent steps placed in the
+same phase — is usually corrected automatically without you seeing it. The result
+reports `attempts` (1 = the first draft was already valid).
 
 ## Validation guarantees
 

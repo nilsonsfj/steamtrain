@@ -93,6 +93,8 @@ export {
 export { applyWorkflowStepOverrides, type WorkflowStepOverrides } from "./overrides";
 export {
   buildWorkflowGenerationPrompt,
+  buildWorkflowRepairPrompt,
+  DEFAULT_REPAIR_ATTEMPTS,
   extractWorkflowSpec,
   generateWorkflow,
   slugifyWorkflowName,
