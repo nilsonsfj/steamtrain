@@ -83,7 +83,16 @@ paid provider credentials.
 
 ## TUI: `/createworkflow`
 
-In the TUI (workflow mode), type:
+In the TUI (workflow mode), the workflow picker always ends with a selectable
+**`+ Create a new workflow…`** row. Three ways to start a draft, all equivalent:
+
+- Highlight that row with ↑/↓ and press `Enter`.
+- Press `Ctrl+N` from anywhere on the picker.
+- Type the `/createworkflow` command yourself.
+
+The first two prefill the prompt with `/createworkflow ` (carrying anything you
+already typed) so you can finish the description and press `Enter`. When no
+workflows exist yet, the create row is the only thing on screen.
 
 ```
 /createworkflow review the checkout service for race conditions, then report
