@@ -16,6 +16,7 @@
     "start": "node dist/index.js",
     "build": "bun scripts/build-reducer.ts && tsup",
     "typecheck": "tsc --noEmit",
+    "pretest": "bun scripts/build-reducer.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "biome check .",

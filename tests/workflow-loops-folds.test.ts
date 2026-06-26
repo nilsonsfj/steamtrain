@@ -109,6 +109,9 @@ describe("loop folds", () => {
     const fixPhases = state.phases.filter((p) => p.phaseId === "fix");
     expect(fixPhases.length).toBe(2);
 
+    // The agent/model from the seeded spec should not have been clobbered by step_start events that omit them
+    expect(fixPhases[0]?.steps[0]?.agent).toBe("claude");
+
     // The first iteration is superseded, the second is latest
     const maxIter = 2;
     const isLatest1 = (fixPhases[0]?.iteration ?? 1) === maxIter;

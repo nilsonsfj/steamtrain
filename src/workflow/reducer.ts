@@ -309,7 +309,13 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
                 ? Math.max(p.stepCount, p.steps.length + 1)
                 : p.stepCount,
             steps: stepExists
-              ? p.steps.map((s) => (s.stepId === e.stepId ? { ...s, ...newStep } : s))
+              ? p.steps.map((s) => {
+                  if (s.stepId !== e.stepId) return s;
+                  const updates = Object.fromEntries(
+                    Object.entries(newStep).filter(([, v]) => v !== undefined),
+                  );
+                  return { ...s, ...updates };
+                })
               : [...p.steps, newStep],
           };
         }),
