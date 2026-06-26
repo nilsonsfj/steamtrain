@@ -408,6 +408,22 @@ describe("generateWorkflow auto-repair", () => {
     expect(attemptStarts).toEqual([1, 2]);
   });
 
+  it("never starts an agent run when aborted before the first attempt", async () => {
+    const seq = makeSequencedAdapter([resultEvents(VALID_SPEC)]);
+    const result = await generateWorkflow(
+      {
+        description: "x",
+        agent: "opencode",
+        model: "opencode/qwen3.6-plus-free",
+        signal: AbortSignal.abort(),
+      },
+      { createAdapter: seq.createAdapter },
+    );
+    expect(result.ok).toBe(false);
+    expect(seq.calls).toBe(0);
+    expect(result.attempts).toBe(0);
+  });
+
   it("does not waste a repair when the agent errors with no output", async () => {
     const seq = makeSequencedAdapter([
       [{ kind: "error", agent: "opencode", ts: 0, message: "boom" }],
