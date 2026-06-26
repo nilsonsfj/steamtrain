@@ -92,31 +92,45 @@ export async function* runWorkflow(
   const allResults: StepResult[] = [];
   let workflowOk = true;
 
-  // Loop bookkeeping: gateId → { loopToIndex, iteration count so far }.
+  // Loop bookkeeping: gateId → { loopToIndex, gatePhaseIndex, iteration count so far }.
   const phaseIndexById = new Map<string, number>();
   spec.phases.forEach((p, i) => phaseIndexById.set(p.id, i));
-  const loopState = new Map<string, { loopToIndex: number; iteration: number }>();
-  for (const phase of spec.phases) {
+  const loopState = new Map<
+    string,
+    { loopToIndex: number; gatePhaseIndex: number; iteration: number }
+  >();
+  spec.phases.forEach((phase, gatePhaseIndex) => {
     for (const step of phase.steps) {
       if (step.kind === "gate" && step.loopTo !== undefined) {
         const loopToIndex = phaseIndexById.get(step.loopTo);
         if (loopToIndex !== undefined) {
-          loopState.set(step.id, { loopToIndex, iteration: 1 });
+          loopState.set(step.id, { loopToIndex, gatePhaseIndex, iteration: 1 });
         }
       }
     }
-  }
+  });
   const effectiveLoopMax = deps.loopMaxIterations ?? DEFAULT_LOOP_MAX_ITERATIONS;
 
+  // Per-phase monotonic run counter: how many times phase index `pi` has
+  // STARTED. Used (not the gate's own loop-iteration counter) as the
+  // `iteration` event tag, so every (re)execution of a phase — at any
+  // nesting depth — gets a unique tag. Never reset on a loop jump: that is
+  // exactly what prevents an outer loop's re-run of an inner loop's body from
+  // re-emitting iteration tags already used by a previous outer pass (which
+  // would collide in the `phaseId+iteration`-keyed folds and overwrite
+  // history/reducer state instead of appending to it).
+  const phaseRunCount = new Map<number, number>();
+
   let pi = 0;
-  let currentIteration = 1; // iteration tag for the phases currently executing
   while (pi < spec.phases.length) {
     const phase = spec.phases[pi];
     if (!phase) {
       pi++;
       continue;
     }
-    const iteration = currentIteration;
+    const runs = (phaseRunCount.get(pi) ?? 0) + 1;
+    phaseRunCount.set(pi, runs);
+    const iteration = runs;
 
     yield {
       kind: "phase_start",
@@ -145,6 +159,8 @@ export async function* runWorkflow(
         cwd: "cwd" in step ? step.cwd : undefined,
         dependsOn: step.dependsOn,
         iteration,
+        loopTo: step.kind === "gate" ? step.loopTo : undefined,
+        maxIterations: step.kind === "gate" ? step.maxIterations : undefined,
         ts: Date.now(),
       });
 
@@ -323,7 +339,10 @@ export async function* runWorkflow(
     if (jump) {
       // invalidate cache + results for the region so the body re-runs
       invalidateRegion(spec, jump.loopToIndex, pi, cache, results);
-      currentIteration = jump.iteration;
+      // The outer loop is restarting a region that may contain other (inner)
+      // loop gates; their iteration budgets must restart too, or the inner
+      // loop would already be "exhausted" on the outer loop's 2nd+ pass.
+      resetNestedLoops(loopState, jump.loopToIndex, pi, jump.gateId);
       yield {
         kind: "loop_iteration",
         gateStepId: jump.gateId,
@@ -338,8 +357,6 @@ export async function* runWorkflow(
 
     if (!phaseOk) workflowOk = false;
     if (stopAfterPhase) break;
-    // Leaving a loop region: reset the iteration tag to 1 for subsequent phases.
-    currentIteration = 1;
     pi++;
   }
 
@@ -359,7 +376,7 @@ export async function* runWorkflow(
 function decideLoopJump(
   phase: WorkflowPhase,
   results: Map<string, StepResult>,
-  loopState: Map<string, { loopToIndex: number; iteration: number }>,
+  loopState: Map<string, { loopToIndex: number; gatePhaseIndex: number; iteration: number }>,
   effectiveLoopMax: number,
 ): { gateId: string; loopToIndex: number; iteration: number; maxIterations: number } | undefined {
   for (const step of phase.steps) {
@@ -384,7 +401,13 @@ function decideLoopJump(
   return undefined;
 }
 
-/** Delete cache/results entries for every step id in phases [start..end] so they re-run. */
+/**
+ * Delete cache/results entries for every step id in phases [start..end] so
+ * they re-run. `outputs` is deliberately left untouched here — it lives in
+ * the caller's closure and is never cleared on a loop jump, so the previous
+ * iteration's text stays readable (e.g. a fix step reads the prior review)
+ * until each step overwrites its own output as it re-runs.
+ */
 function invalidateRegion(
   spec: WorkflowSpec,
   start: number,
@@ -398,12 +421,31 @@ function invalidateRegion(
     for (const step of phase.steps) {
       cache.delete(step.id);
       results.delete(step.id);
-      // outputs intentionally NOT deleted: the previous iteration's text stays
-      // readable (e.g. a fix step reads the prior review) until each step
-      // overwrites its own output as it re-runs.
       // Also drop generated forEach children (id like `step[<n>]`).
       for (const key of [...cache.keys()]) if (key.startsWith(`${step.id}[`)) cache.delete(key);
       for (const key of [...results.keys()]) if (key.startsWith(`${step.id}[`)) results.delete(key);
+    }
+  }
+}
+
+/**
+ * When loop gate `jumpGateId` jumps back to re-run region [loopToIndex..gatePhaseIndex],
+ * reset to 1 the iteration budget of every OTHER loop gate nested inside that
+ * region (its own gate phase index falls within the region) — they are part of
+ * the body being re-run, so their budgets must restart on each outer pass. The
+ * jumping gate itself is excluded: it just incremented its own counter as part
+ * of deciding to jump.
+ */
+function resetNestedLoops(
+  loopState: Map<string, { loopToIndex: number; gatePhaseIndex: number; iteration: number }>,
+  loopToIndex: number,
+  gatePhaseIndex: number,
+  jumpGateId: string,
+): void {
+  for (const [gateId, state] of loopState) {
+    if (gateId === jumpGateId) continue;
+    if (state.gatePhaseIndex >= loopToIndex && state.gatePhaseIndex <= gatePhaseIndex) {
+      state.iteration = 1;
     }
   }
 }

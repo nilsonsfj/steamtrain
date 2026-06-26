@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { AgentAdapter } from "../src/agents";
+import { initialWorkflowState, workflowReducer } from "../src/tui/workflow-state";
 import type { AgentEvent } from "../src/types/events";
 import { runWorkflow } from "../src/workflow/engine";
 import type { WorkflowEvent } from "../src/workflow/events";
+import { RunRecordBuilder } from "../src/workflow/history";
 import type { WorkflowSpec } from "../src/workflow/types";
 
 /** Fake adapter: emits a result whose text is provided by `script(stepPrompt, callIndex)`. */
@@ -188,5 +190,132 @@ describe("engine loops", () => {
     expect(loops.length).toBe(0);
     const done = events.find((e) => e.kind === "workflow_done") as { ok: boolean };
     expect(done.ok).toBe(false);
+  });
+
+  it("runs the inner loop's full budget on every outer pass (nested loops)", async () => {
+    // Topology: seed -> inner-body -> inner-gate(loopTo: inner-body) -> outer-tail
+    //           -> outer-gate(loopTo: seed)
+    // inner-gate allows 2 inner passes per outer pass; outer-gate allows 2 outer
+    // passes. So inner-body must execute exactly innerPasses * outerPasses = 4
+    // times total — and the run must terminate (workflow_done emitted).
+    const innerPasses = 2;
+    const outerPasses = 2;
+
+    let innerBodyCalls = 0; // total inner-body executions across the whole run
+    let innerBodyCallsThisOuterPass = 0;
+    let outerTailCalls = 0;
+
+    const spec: WorkflowSpec = {
+      name: "nested-loop",
+      phases: [
+        {
+          id: "seed",
+          title: "seed",
+          steps: [{ id: "seed-step", agent: "opencode", model: "m", prompt: "seed {{input}}" }],
+        },
+        {
+          id: "inner-body",
+          title: "inner-body",
+          steps: [
+            {
+              id: "inner-body-step",
+              agent: "opencode",
+              model: "m",
+              prompt: "inner-body run",
+            },
+          ],
+        },
+        {
+          id: "inner-gate-phase",
+          title: "inner-gate-phase",
+          steps: [
+            {
+              id: "inner-gate",
+              kind: "gate" as const,
+              dependsOn: ["inner-body-step"],
+              condition: { step: "inner-body-step", contains: "INNER_DONE" },
+              loopTo: "inner-body",
+              maxIterations: innerPasses,
+              onFalse: "continue" as const,
+            },
+          ],
+        },
+        {
+          id: "outer-tail",
+          title: "outer-tail",
+          steps: [
+            { id: "outer-tail-step", agent: "opencode", model: "m", prompt: "outer-tail run" },
+          ],
+        },
+        {
+          id: "outer-gate-phase",
+          title: "outer-gate-phase",
+          steps: [
+            {
+              id: "outer-gate",
+              kind: "gate" as const,
+              dependsOn: ["outer-tail-step"],
+              condition: { step: "outer-tail-step", contains: "OUTER_DONE" },
+              loopTo: "seed",
+              maxIterations: outerPasses,
+              onFalse: "continue" as const,
+            },
+          ],
+        },
+      ],
+    };
+
+    const deps = {
+      createAdapter: () =>
+        fakeAdapter((prompt) => {
+          if (prompt.startsWith("inner-body")) {
+            innerBodyCalls++;
+            innerBodyCallsThisOuterPass++;
+            // Converge (report INNER_DONE) only on the last allotted inner pass
+            // of this outer pass, so each outer pass burns the full inner budget.
+            const done = innerBodyCallsThisOuterPass >= innerPasses;
+            return { text: done ? "INNER_DONE" : "inner not yet" };
+          }
+          if (prompt.startsWith("outer-tail")) {
+            outerTailCalls++;
+            innerBodyCallsThisOuterPass = 0; // reset for the next outer pass
+            const done = outerTailCalls >= outerPasses;
+            return { text: done ? "OUTER_DONE" : "outer not yet" };
+          }
+          return { text: "seeded" };
+        }),
+      maxConcurrency: 2,
+      cwd: "/tmp",
+      loopMaxIterations: 10,
+    };
+
+    const events = await collect(spec, deps);
+
+    // Bug B check: the inner loop must run its FULL budget on EACH outer pass.
+    const innerBodyStarts = events.filter(
+      (e) => e.kind === "step_start" && (e as { stepId: string }).stepId === "inner-body-step",
+    );
+    expect(innerBodyStarts.length).toBe(innerPasses * outerPasses);
+    expect(innerBodyCalls).toBe(innerPasses * outerPasses);
+
+    // The run must terminate.
+    const done = events.find((e) => e.kind === "workflow_done");
+    expect(done).toBeDefined();
+    expect((done as { ok: boolean }).ok).toBe(true);
+
+    // Bug A check: no fold collision. Feed the stream through BOTH the live
+    // reducer and the history builder, and confirm the number of distinct
+    // inner-body phase instances/step records equals the actual execution
+    // count — a collision would silently overwrite instead of appending.
+    let state = initialWorkflowState;
+    for (const e of events) state = workflowReducer(state, { type: "event", event: e });
+    const innerBodyPhaseInstances = state.phases.filter((p) => p.phaseId === "inner-body");
+    expect(innerBodyPhaseInstances.length).toBe(innerPasses * outerPasses);
+
+    const builder = new RunRecordBuilder({ id: "r", workflow: "w", input: "", cwd: "/tmp" });
+    for (const e of events) builder.handle(e);
+    const record = builder.build({ status: "done" });
+    const innerBodyHistoryInstances = record.phases.filter((p) => p.phaseId === "inner-body");
+    expect(innerBodyHistoryInstances.length).toBe(innerPasses * outerPasses);
   });
 });
