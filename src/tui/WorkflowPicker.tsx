@@ -22,6 +22,8 @@ export function WorkflowPicker({
   height,
   draftLabel,
 }: WorkflowPickerProps) {
+  // The synthetic "create" row sits one past the last workflow.
+  const createRowActive = selectedIndex === workflows.length;
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} height={height}>
       <Box justifyContent="space-between">
@@ -77,18 +79,11 @@ export function WorkflowPicker({
         {/* Synthetic trailing row: the always-present "create" action. Its index
             is one past the last workflow, so it is selectable with ↑/↓. */}
         <Box marginTop={workflows.length === 0 ? 0 : 1}>
-          {(() => {
-            const active = selectedIndex === workflows.length;
-            return (
-              <>
-                <Text color={active ? "cyan" : "gray"}>{active ? "▶ " : "  "}</Text>
-                <Text color={active ? "cyan" : "green"} bold={active}>
-                  + Create a new workflow…
-                </Text>
-                <Text color="gray">{"  "}Ctrl+N</Text>
-              </>
-            );
-          })()}
+          <Text color={createRowActive ? "cyan" : "gray"}>{createRowActive ? "▶ " : "  "}</Text>
+          <Text color={createRowActive ? "cyan" : "green"} bold={createRowActive}>
+            + Create a new workflow…
+          </Text>
+          <Text color="gray">{"  "}Ctrl+N</Text>
         </Box>
       </Box>
     </Box>

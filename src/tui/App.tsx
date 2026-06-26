@@ -74,6 +74,7 @@ import { WorkflowPreview } from "./WorkflowPreview";
 import { WorkflowStepDetails } from "./WorkflowStepDetails";
 import { WorkflowView } from "./WorkflowView";
 import { Banner } from "./banner";
+import { createWorkflowPromptValue } from "./create-workflow-prompt";
 import {
   type DraftTarget,
   formatDraftTarget,
@@ -952,9 +953,9 @@ export function App({
   const focusCreateWorkflowPrompt = useCallback(
     (seed = "") => {
       if (running) return;
-      const trimmed = seed.trim();
+      const nextValue = createWorkflowPromptValue(seed);
       updatePromptDraft({
-        value: trimmed ? `/createworkflow ${trimmed}` : "/createworkflow ",
+        value: nextValue,
         promptEditing: true,
         historyBrowse: initialPromptHistoryBrowse,
       });
