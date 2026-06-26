@@ -309,7 +309,7 @@ export async function* runWorkflow(
     for await (const ev of channel) yield ev;
     await poolDone;
 
-    yield { kind: "phase_done", phaseId: phase.id, ok: phaseOk, ts: Date.now() };
+    yield { kind: "phase_done", phaseId: phase.id, ok: phaseOk, iteration, ts: Date.now() };
 
     if (signal?.aborted) {
       workflowOk = false;

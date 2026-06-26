@@ -124,6 +124,8 @@ export interface PhaseDoneEvent {
   kind: "phase_done";
   phaseId: string;
   ok: boolean;
+  /** Loop iteration (1-based); omitted ⇒ 1 (no loop). */
+  iteration?: number;
   ts: number;
 }
 

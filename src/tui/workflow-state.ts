@@ -47,6 +47,8 @@ export interface PhaseState {
   steps: StepState[];
   done: boolean;
   ok: boolean;
+  /** Loop iteration (1-based) this phase instance belongs to; omitted ⇒ 1. */
+  iteration?: number;
 }
 
 export interface WorkflowState {
@@ -95,6 +97,7 @@ export function workflowStateFromRecord(record: RunRecord): WorkflowState {
       stepCount: phase.stepCount,
       done: phase.done,
       ok: phase.ok,
+      iteration: phase.iteration,
       steps: phase.steps.map((step) => ({ ...step })),
     })),
     results: [],
@@ -107,16 +110,22 @@ export function workflowStateFromRecord(record: RunRecord): WorkflowState {
   };
 }
 
+/** Matches a phase to a specific loop iteration instance; omitted iteration ⇒ 1. */
+function sameInstance(p: PhaseState, phaseId: string, iteration?: number): boolean {
+  return p.phaseId === phaseId && (p.iteration ?? 1) === (iteration ?? 1);
+}
+
 function updateStep(
   state: WorkflowState,
   phaseId: string,
   stepId: string,
+  iteration: number | undefined,
   fn: (s: StepState) => StepState,
 ): WorkflowState {
   return {
     ...state,
     phases: state.phases.map((p) =>
-      p.phaseId === phaseId
+      sameInstance(p, phaseId, iteration)
         ? { ...p, steps: p.steps.map((s) => (s.stepId === stepId ? fn(s) : s)) }
         : p,
     ),
@@ -167,6 +176,7 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
             steps: [],
             done: false,
             ok: true,
+            iteration: e.iteration,
           },
         ],
       };
@@ -177,7 +187,7 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
       return {
         ...state,
         phases: state.phases.map((p) =>
-          p.phaseId === e.phaseId
+          sameInstance(p, e.phaseId, e.iteration)
             ? { ...p, stepCount: Math.max(p.stepCount, p.steps.length + e.count) }
             : p,
         ),
@@ -186,7 +196,7 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
       return {
         ...state,
         phases: state.phases.map((p) =>
-          p.phaseId === e.phaseId
+          sameInstance(p, e.phaseId, e.iteration)
             ? {
                 ...p,
                 stepCount: e.parentStepId ? Math.max(p.stepCount, p.steps.length + 1) : p.stepCount,
@@ -212,21 +222,23 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
         ),
       };
     case "step_event":
-      return updateStep(state, e.phaseId, e.stepId, (s) => applyAgentEvent(s, e.event));
+      return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) =>
+        applyAgentEvent(s, e.event),
+      );
     case "step_retry":
-      return updateStep(state, e.phaseId, e.stepId, (s) => ({
+      return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
         ...s,
         attempts: e.attempt + 1,
         activity: `↻ retrying ${e.attempt + 1}/${e.maxAttempts} (${Math.round(e.delayMs)}ms)`,
       }));
     case "gate_evaluated":
-      return updateStep(state, e.phaseId, e.stepId, (s) => ({
+      return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
         ...s,
         gate: { passed: e.passed, target: e.target, onFalse: e.onFalse },
         activity: e.passed ? `gate passed${e.target ? ` → ${e.target}` : ""}` : "gate blocked",
       }));
     case "step_done":
-      return updateStep(state, e.phaseId, e.stepId, (s) => ({
+      return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
         ...s,
         status: e.result.ok ? "done" : "error",
         result: e.result,
@@ -237,7 +249,7 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
       return {
         ...state,
         phases: state.phases.map((p) =>
-          p.phaseId === e.phaseId ? { ...p, done: true, ok: e.ok } : p,
+          sameInstance(p, e.phaseId, e.iteration) ? { ...p, done: true, ok: e.ok } : p,
         ),
       };
     case "workflow_done":

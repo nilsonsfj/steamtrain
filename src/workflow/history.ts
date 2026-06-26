@@ -44,6 +44,8 @@ export interface HistoryPhase {
   steps: HistoryStep[];
   done: boolean;
   ok: boolean;
+  /** Loop iteration (1-based) this phase instance belongs to; omitted ⇒ 1. */
+  iteration?: number;
 }
 
 /** Terminal outcome of a run (mirrors the web run manager, minus "running"). */
@@ -195,10 +197,11 @@ export class RunRecordBuilder {
           steps: [],
           done: false,
           ok: true,
+          iteration: event.iteration,
         });
         break;
       case "fan_out": {
-        const phase = this.phaseOf(event.phaseId);
+        const phase = this.phaseOf(event.phaseId, event.iteration);
         if (!phase) break;
         // The parent step is already counted; reserve room for its children so a
         // run canceled mid-fan-out still knows how many were expected.
@@ -206,7 +209,7 @@ export class RunRecordBuilder {
         break;
       }
       case "step_start": {
-        const phase = this.phaseOf(event.phaseId);
+        const phase = this.phaseOf(event.phaseId, event.iteration);
         if (!phase) break;
         if (event.parentStepId) {
           phase.stepCount = Math.max(phase.stepCount, phase.steps.length + 1);
@@ -228,7 +231,7 @@ export class RunRecordBuilder {
         break;
       }
       case "step_event": {
-        const step = this.stepOf(event.phaseId, event.stepId);
+        const step = this.stepOf(event.phaseId, event.stepId, event.iteration);
         if (!step) break;
         if (event.event.kind === "text_delta" && !event.event.thinking) {
           step.text = capText(step.text + event.event.text);
@@ -236,20 +239,20 @@ export class RunRecordBuilder {
         break;
       }
       case "step_retry": {
-        const step = this.stepOf(event.phaseId, event.stepId);
+        const step = this.stepOf(event.phaseId, event.stepId, event.iteration);
         if (!step) break;
         // The failed attempt just completed; the next one is about to start.
         step.attempts = event.attempt + 1;
         break;
       }
       case "gate_evaluated": {
-        const step = this.stepOf(event.phaseId, event.stepId);
+        const step = this.stepOf(event.phaseId, event.stepId, event.iteration);
         if (!step) break;
         step.gate = { passed: event.passed, target: event.target, onFalse: event.onFalse };
         break;
       }
       case "step_done": {
-        const step = this.stepOf(event.phaseId, event.stepId);
+        const step = this.stepOf(event.phaseId, event.stepId, event.iteration);
         if (!step) break;
         step.status = event.result.ok ? "done" : "error";
         step.result = event.result;
@@ -261,7 +264,7 @@ export class RunRecordBuilder {
         break;
       }
       case "phase_done": {
-        const phase = this.phaseOf(event.phaseId);
+        const phase = this.phaseOf(event.phaseId, event.iteration);
         if (phase) {
           phase.done = true;
           phase.ok = event.ok;
@@ -270,6 +273,10 @@ export class RunRecordBuilder {
       }
       case "workflow_done":
         this.ok = event.ok;
+        break;
+      case "loop_iteration":
+        // Marker only; the phase/step events around the jump already update
+        // the tree.
         break;
     }
   }
@@ -334,11 +341,13 @@ export class RunRecordBuilder {
     });
   }
 
-  private phaseOf(phaseId: string): HistoryPhase | undefined {
-    return this.phases.find((p) => p.phaseId === phaseId);
+  private phaseOf(phaseId: string, iteration?: number): HistoryPhase | undefined {
+    return this.phases.find(
+      (p) => p.phaseId === phaseId && (p.iteration ?? 1) === (iteration ?? 1),
+    );
   }
 
-  private stepOf(phaseId: string, stepId: string): HistoryStep | undefined {
-    return this.phaseOf(phaseId)?.steps.find((s) => s.stepId === stepId);
+  private stepOf(phaseId: string, stepId: string, iteration?: number): HistoryStep | undefined {
+    return this.phaseOf(phaseId, iteration)?.steps.find((s) => s.stepId === stepId);
   }
 }
