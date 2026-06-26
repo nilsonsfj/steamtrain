@@ -488,8 +488,10 @@ export function App({
           },
           ac.signal,
           // Auto-repair retry: clear the live buffer so a rejected draft and its
-          // repair don't concatenate into one garbled blob.
-          () => {
+          // repair don't concatenate into one garbled blob. Only on retries, so
+          // we never wipe any text seeded before the first run.
+          (attempt) => {
+            if (attempt <= 1) return;
             setWfCreate((prev) =>
               prev && prev.status === "generating" ? { ...prev, text: "" } : prev,
             );

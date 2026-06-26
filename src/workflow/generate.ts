@@ -337,6 +337,8 @@ export async function generateWorkflow(
   let lastResult: GenerateWorkflowResult = { ok: false, raw: "", attempts: 0 };
 
   for (let attempt = 1; attempt <= maxRepairAttempts + 1; attempt++) {
+    // Don't start a fresh agent run once the caller has aborted.
+    if (req.signal?.aborted) break;
     req.onAttemptStart?.(attempt);
     const { raw, errored, errorMessage } = await runGenerationAgent(adapter, prompt, req, deps);
 

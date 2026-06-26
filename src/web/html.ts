@@ -939,6 +939,9 @@ export const PAGE_HTML = `<!doctype html>
             closeModal();
             refreshAfterWrite(frame.name || frame.spec.name, frame.replaced ? "updated" : "created");
           } else {
+            // Show the full final raw output behind the error (parity with the
+            // TUI), not just whatever streamed during the last attempt.
+            if (frame.raw) draft.textContent = frame.raw;
             mbanner(banner, frame.error || "generation failed", "err");
           }
         }
