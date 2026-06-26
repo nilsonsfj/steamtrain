@@ -242,5 +242,9 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
       };
     case "workflow_done":
       return { ...state, done: true, ok: e.ok, results: e.results };
+    case "loop_iteration":
+      // No TUI representation yet; the phase/step events around the jump
+      // already update the visible state.
+      return state;
   }
 }

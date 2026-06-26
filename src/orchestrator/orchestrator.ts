@@ -173,6 +173,7 @@ export class Orchestrator {
         timeoutMs: this.config.timeoutMs,
         maxConcurrency: this.config.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY,
         cwd,
+        loopMaxIterations: this.config.loopMaxIterations,
       },
       signal,
     );

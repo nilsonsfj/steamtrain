@@ -7,12 +7,14 @@ import { type RetryPolicy, backoffDelayMs, resolveRetryPolicy } from "./retry";
 import { renderPrompt } from "./template";
 import {
   type AgentBackedWorkflowStep,
+  DEFAULT_LOOP_MAX_ITERATIONS,
   type GateCondition,
   MAX_CONCURRENCY,
   MAX_STEPS,
   type StepResult,
   type WorkerStep,
   type WorkflowItem,
+  type WorkflowPhase,
   type WorkflowSpec,
   type WorkflowStep,
   isAgentBackedStep,
@@ -33,6 +35,8 @@ export interface WorkflowDeps {
   maxConcurrency: number;
   /** Base cwd; a step's relative `cwd` resolves against this. */
   cwd: string;
+  /** Default per-loop iteration cap; a gate's own `maxIterations` overrides it. */
+  loopMaxIterations?: number;
 }
 
 export interface WorkflowRunContext {
@@ -88,9 +92,31 @@ export async function* runWorkflow(
   const allResults: StepResult[] = [];
   let workflowOk = true;
 
-  for (let pi = 0; pi < spec.phases.length; pi++) {
+  // Loop bookkeeping: gateId → { loopToIndex, iteration count so far }.
+  const phaseIndexById = new Map<string, number>();
+  spec.phases.forEach((p, i) => phaseIndexById.set(p.id, i));
+  const loopState = new Map<string, { loopToIndex: number; iteration: number }>();
+  for (const phase of spec.phases) {
+    for (const step of phase.steps) {
+      if (step.kind === "gate" && step.loopTo !== undefined) {
+        const loopToIndex = phaseIndexById.get(step.loopTo);
+        if (loopToIndex !== undefined) {
+          loopState.set(step.id, { loopToIndex, iteration: 1 });
+        }
+      }
+    }
+  }
+  const effectiveLoopMax = deps.loopMaxIterations ?? DEFAULT_LOOP_MAX_ITERATIONS;
+
+  let pi = 0;
+  let currentIteration = 1; // iteration tag for the phases currently executing
+  while (pi < spec.phases.length) {
     const phase = spec.phases[pi];
-    if (!phase) continue;
+    if (!phase) {
+      pi++;
+      continue;
+    }
+    const iteration = currentIteration;
 
     yield {
       kind: "phase_start",
@@ -98,6 +124,7 @@ export async function* runWorkflow(
       title: phase.title,
       index: pi,
       stepCount: phase.steps.length,
+      iteration,
       ts: Date.now(),
     };
 
@@ -117,12 +144,14 @@ export async function* runWorkflow(
         effort: agentBacked?.effort,
         cwd: "cwd" in step ? step.cwd : undefined,
         dependsOn: step.dependsOn,
+        iteration,
         ts: Date.now(),
       });
 
       const failedDependency = findFailedDependency(step, results);
       if (failedDependency) {
         const skipped = skippedStepResult(step.id, failedDependency);
+        skipped.iteration = iteration;
         outputs.set(step.id, skipped.output);
         results.set(step.id, skipped);
         allResults.push(skipped);
@@ -136,6 +165,7 @@ export async function* runWorkflow(
           stepId: step.id,
           result: skipped,
           cached: false,
+          iteration,
           ts: Date.now(),
         });
         return;
@@ -159,6 +189,7 @@ export async function* runWorkflow(
             dependsOn: step.dependsOn,
             parentStepId: step.id,
             item: child.item,
+            iteration,
             ts: Date.now(),
           });
           channel.push({
@@ -167,6 +198,7 @@ export async function* runWorkflow(
             stepId: child.stepId,
             result: child,
             cached: true,
+            iteration,
             ts: Date.now(),
           });
         }
@@ -182,6 +214,7 @@ export async function* runWorkflow(
             passed: cached.gate.passed,
             target: cached.target,
             onFalse: cached.gate.onFalse,
+            iteration,
             ts: Date.now(),
           });
           if (!cached.gate.passed) {
@@ -195,6 +228,7 @@ export async function* runWorkflow(
           stepId: step.id,
           result: cached,
           cached: true,
+          iteration,
           ts: Date.now(),
         });
         return;
@@ -211,6 +245,7 @@ export async function* runWorkflow(
           deps,
           signal,
           retryDefault: spec.retry,
+          iteration,
         },
         {
           pushAgentEvent: (stepId, event) => {
@@ -219,6 +254,7 @@ export async function* runWorkflow(
               phaseId: phase.id,
               stepId,
               event,
+              iteration,
               ts: Date.now(),
             });
           },
@@ -235,12 +271,15 @@ export async function* runWorkflow(
           passed: execution.gate.passed,
           target: execution.gate.target,
           onFalse: execution.gate.onFalse,
+          iteration,
           ts: Date.now(),
         });
       }
 
       const { result } = execution;
+      result.iteration = iteration;
       for (const child of execution.childResults ?? []) {
+        child.iteration = iteration;
         outputs.set(child.stepId, child.output);
         results.set(child.stepId, child);
         allResults.push(child);
@@ -258,6 +297,7 @@ export async function* runWorkflow(
         stepId: step.id,
         result,
         cached: false,
+        iteration,
         ts: Date.now(),
       });
     };
@@ -269,10 +309,38 @@ export async function* runWorkflow(
     for await (const ev of channel) yield ev;
     await poolDone;
 
-    if (!phaseOk) workflowOk = false;
     yield { kind: "phase_done", phaseId: phase.id, ok: phaseOk, ts: Date.now() };
 
-    if (signal?.aborted || stopAfterPhase) break;
+    if (signal?.aborted) {
+      workflowOk = false;
+      break;
+    }
+
+    // Loop-back decision: did this phase contain an unmet loop gate? A jump
+    // means this pass is superseded by a re-run, so its failure (e.g. the
+    // gate's own "not yet converged" result) must NOT poison workflowOk.
+    const jump = decideLoopJump(phase, results, loopState, effectiveLoopMax);
+    if (jump) {
+      // invalidate cache + results for the region so the body re-runs
+      invalidateRegion(spec, jump.loopToIndex, pi, cache, results);
+      currentIteration = jump.iteration;
+      yield {
+        kind: "loop_iteration",
+        gateStepId: jump.gateId,
+        loopTo: spec.phases[jump.loopToIndex]?.id ?? "",
+        iteration: jump.iteration,
+        maxIterations: jump.maxIterations,
+        ts: Date.now(),
+      };
+      pi = jump.loopToIndex;
+      continue;
+    }
+
+    if (!phaseOk) workflowOk = false;
+    if (stopAfterPhase) break;
+    // Leaving a loop region: reset the iteration tag to 1 for subsequent phases.
+    currentIteration = 1;
+    pi++;
   }
 
   yield {
@@ -281,6 +349,61 @@ export async function* runWorkflow(
     results: allResults,
     ts: Date.now(),
   };
+}
+
+/**
+ * If `phase` holds a loop gate whose condition failed and whose iteration budget
+ * remains, return the jump (target index, next iteration, cap, gateId). The gate's
+ * own StepResult (already in `results`) tells us whether it passed.
+ */
+function decideLoopJump(
+  phase: WorkflowPhase,
+  results: Map<string, StepResult>,
+  loopState: Map<string, { loopToIndex: number; iteration: number }>,
+  effectiveLoopMax: number,
+): { gateId: string; loopToIndex: number; iteration: number; maxIterations: number } | undefined {
+  for (const step of phase.steps) {
+    if (step.kind !== "gate" || step.loopTo === undefined) continue;
+    const state = loopState.get(step.id);
+    if (!state) continue;
+    const res = results.get(step.id);
+    // Gate "passed" (condition true) ⇒ converged, no loop.
+    if (res?.gate?.passed) return undefined;
+    const cap = step.maxIterations ?? effectiveLoopMax;
+    if (state.iteration >= cap) return undefined; // exhausted ⇒ onFalse already applied
+    state.iteration += 1;
+    return {
+      gateId: step.id,
+      loopToIndex: state.loopToIndex,
+      iteration: state.iteration,
+      maxIterations: cap,
+    };
+  }
+  return undefined;
+}
+
+/** Delete cache/results entries for every step id in phases [start..end] so they re-run. */
+function invalidateRegion(
+  spec: WorkflowSpec,
+  start: number,
+  end: number,
+  cache: Map<string, StepResult>,
+  results: Map<string, StepResult>,
+): void {
+  for (let i = start; i <= end; i++) {
+    const phase = spec.phases[i];
+    if (!phase) continue;
+    for (const step of phase.steps) {
+      cache.delete(step.id);
+      results.delete(step.id);
+      // outputs intentionally NOT deleted: the previous iteration's text stays
+      // readable (e.g. a fix step reads the prior review) until each step
+      // overwrites its own output as it re-runs.
+      // Also drop generated forEach children (id like `step[<n>]`).
+      for (const key of [...cache.keys()]) if (key.startsWith(`${step.id}[`)) cache.delete(key);
+      for (const key of [...results.keys()]) if (key.startsWith(`${step.id}[`)) results.delete(key);
+    }
+  }
 }
 
 interface ExecuteContext {
@@ -293,6 +416,8 @@ interface ExecuteContext {
   signal?: AbortSignal;
   /** Workflow-level auto-retry default; per-step `retry` overrides it. */
   retryDefault?: RetryPolicy;
+  /** Loop iteration this step is executing under (1-based). */
+  iteration: number;
 }
 
 interface ExecutionOutcome {
@@ -326,7 +451,12 @@ async function executeStep(
       const started = Date.now();
       const items = step.items
         .map((item) =>
-          renderPrompt(item, { input: ctx.input, outputs: ctx.outputs, results: ctx.results }),
+          renderPrompt(item, {
+            input: ctx.input,
+            outputs: ctx.outputs,
+            results: ctx.results,
+            iteration: ctx.iteration,
+          }),
         )
         .map((item) => item.trim())
         .filter(Boolean);
@@ -368,7 +498,12 @@ async function executeStep(
     }
     const started = Date.now();
     const output = step.prompt
-      ? renderPrompt(step.prompt, { input: ctx.input, outputs: ctx.outputs, results: ctx.results })
+      ? renderPrompt(step.prompt, {
+          input: ctx.input,
+          outputs: ctx.outputs,
+          results: ctx.results,
+          iteration: ctx.iteration,
+        })
       : consolidateOutputs(step.dependsOn ?? [], ctx.outputs, step.separator);
     return {
       result: {
@@ -556,6 +691,7 @@ async function executeAgentStep(
     outputs: ctx.outputs,
     results: ctx.results,
     item,
+    iteration: ctx.iteration,
   });
   const stepCwd = step.cwd ? resolvePath(ctx.deps.cwd, step.cwd) : ctx.deps.cwd;
   // Auto-retry is scoped to worker/processor steps (and their fan-out children).
@@ -599,6 +735,7 @@ async function executeAgentStep(
       maxAttempts: policy.maxAttempts,
       delayMs,
       reason: result.error ?? "transient failure",
+      iteration: ctx.iteration,
       ts: Date.now(),
     });
     await abortableSleep(delayMs, ctx.signal);
@@ -663,6 +800,7 @@ async function executeForEachStep(
     phaseId: hooks.phaseId,
     parentStepId: step.id,
     count: values.length,
+    iteration: ctx.iteration,
     ts: Date.now(),
   });
 
@@ -688,17 +826,19 @@ async function executeForEachStep(
         dependsOn: step.dependsOn,
         parentStepId: step.id,
         item,
+        iteration: ctx.iteration,
         ts: Date.now(),
       });
 
       const cached = ctx.cache.get(stepId);
       const result = cached
-        ? { ...cached, stepId, parentStepId: step.id, item }
+        ? { ...cached, stepId, parentStepId: step.id, item, iteration: ctx.iteration }
         : {
             ...(await executeAgentStep(step, ctx, hooks, stepId, item)),
             stepId,
             parentStepId: step.id,
             item,
+            iteration: ctx.iteration,
           };
 
       ctx.outputs.set(stepId, result.output);
@@ -712,6 +852,7 @@ async function executeForEachStep(
         stepId,
         result,
         cached: Boolean(cached),
+        iteration: ctx.iteration,
         ts: Date.now(),
       });
     },
@@ -795,6 +936,7 @@ function evaluateGate(
       input: ctx.input,
       outputs: ctx.outputs,
       results: ctx.results,
+      iteration: ctx.iteration,
     });
     passed = passed && text.includes(needle);
   }
@@ -803,6 +945,7 @@ function evaluateGate(
       input: ctx.input,
       outputs: ctx.outputs,
       results: ctx.results,
+      iteration: ctx.iteration,
     });
     passed = passed && text === expected;
   }
@@ -812,6 +955,7 @@ function evaluateGate(
         input: ctx.input,
         outputs: ctx.outputs,
         results: ctx.results,
+        iteration: ctx.iteration,
       });
       passed = passed && new RegExp(pattern).test(text);
     } catch (err) {

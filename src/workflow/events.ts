@@ -22,6 +22,8 @@ export interface PhaseStartEvent {
   /** Zero-based position in the spec. */
   index: number;
   stepCount: number;
+  /** Loop iteration (1-based); omitted ⇒ 1 (no loop). */
+  iteration?: number;
   ts: number;
 }
 
@@ -40,6 +42,8 @@ export interface StepStartEvent {
   parentStepId?: string;
   /** Work item assigned to this generated child run. */
   item?: WorkflowItem;
+  /** Loop iteration (1-based); omitted ⇒ 1 (no loop). */
+  iteration?: number;
   ts: number;
 }
 
@@ -57,6 +61,8 @@ export interface FanOutEvent {
   parentStepId: string;
   /** Number of child runs this step expands into. */
   count: number;
+  /** Loop iteration (1-based); omitted ⇒ 1 (no loop). */
+  iteration?: number;
   ts: number;
 }
 
@@ -66,6 +72,8 @@ export interface StepStreamEvent {
   phaseId: string;
   stepId: string;
   event: AgentEvent;
+  /** Loop iteration (1-based); omitted ⇒ 1 (no loop). */
+  iteration?: number;
   ts: number;
 }
 
@@ -76,6 +84,8 @@ export interface StepDoneEvent {
   result: StepResult;
   /** True when replayed from memory/disk cache (resume), not a fresh agent run. */
   cached: boolean;
+  /** Loop iteration (1-based); omitted ⇒ 1 (no loop). */
+  iteration?: number;
   ts: number;
 }
 
@@ -93,6 +103,8 @@ export interface StepRetryEvent {
   maxAttempts: number;
   delayMs: number;
   reason: string;
+  /** Loop iteration (1-based); omitted ⇒ 1 (no loop). */
+  iteration?: number;
   ts: number;
 }
 
@@ -103,6 +115,8 @@ export interface GateEvaluatedEvent {
   passed: boolean;
   target?: string;
   onFalse?: GateStep["onFalse"];
+  /** Loop iteration (1-based); omitted ⇒ 1 (no loop). */
+  iteration?: number;
   ts: number;
 }
 
@@ -120,6 +134,20 @@ export interface WorkflowDoneEvent {
   ts: number;
 }
 
+/**
+ * A loop-back gate's condition was not met and the iteration budget still
+ * remains, so execution is about to jump back to `loopTo` and re-run the body.
+ * `iteration` is the iteration that is ABOUT TO START (2 = the first re-run).
+ */
+export interface LoopIterationEvent {
+  kind: "loop_iteration";
+  gateStepId: string;
+  loopTo: string;
+  iteration: number;
+  maxIterations: number;
+  ts: number;
+}
+
 export type WorkflowEvent =
   | WorkflowStartEvent
   | PhaseStartEvent
@@ -130,6 +158,7 @@ export type WorkflowEvent =
   | GateEvaluatedEvent
   | StepDoneEvent
   | PhaseDoneEvent
-  | WorkflowDoneEvent;
+  | WorkflowDoneEvent
+  | LoopIterationEvent;
 
 export type WorkflowEventKind = WorkflowEvent["kind"];

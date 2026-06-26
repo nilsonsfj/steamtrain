@@ -169,6 +169,8 @@ export interface StepResult {
   costUsd?: number;
   /** Total attempts this step took (auto-retry); omitted/1 means it ran once. */
   attempts?: number;
+  /** Loop iteration this result belongs to (1-based); omitted ⇒ 1. */
+  iteration?: number;
 }
 
 /** Total steps a single run may contain (matches the dynamic-workflows cap). */
