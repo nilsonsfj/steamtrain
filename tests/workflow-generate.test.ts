@@ -357,6 +357,16 @@ describe("generateWorkflow auto-repair", () => {
     expect(result.error).toContain("not in an earlier phase");
   });
 
+  it("falls back to the default when maxRepairAttempts is not a finite number", async () => {
+    const seq = makeSequencedAdapter([resultEvents(SAME_PHASE_SPEC)]);
+    const result = await generateWorkflow(
+      { description: "x", agent: "opencode", model: "opencode/qwen3.6-plus-free" },
+      { createAdapter: seq.createAdapter, maxRepairAttempts: Number.NaN },
+    );
+    expect(result.ok).toBe(false);
+    expect(seq.calls).toBe(3); // NaN must not collapse the loop; default 2 retries
+  });
+
   it("does not repair when maxRepairAttempts is 0", async () => {
     const seq = makeSequencedAdapter([resultEvents(SAME_PHASE_SPEC)]);
     const result = await generateWorkflow(

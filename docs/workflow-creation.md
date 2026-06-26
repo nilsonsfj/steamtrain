@@ -15,12 +15,13 @@ flowchart LR
   agent["agent run\n(claude / opencode / codex)"]
   extract["extract JSON\n(fenced or balanced)"]
   validate["validateWorkflow()\n(same rules as the engine)"]
+  repair["repair prompt\n(+ the exact error)"]
   save["user: ~/.steamtrain/workflows.json\nproject: ./steamtrain.json"]
   run["picker / CLI run"]
 
   desc --> prompt --> agent --> extract --> validate
   validate -->|ok| save --> run
-  validate -->|invalid| desc
+  validate -->|"invalid (≤2 retries)"| repair --> agent
 ```
 
 ## Where workflows are saved: scope

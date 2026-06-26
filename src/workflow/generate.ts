@@ -331,7 +331,9 @@ export async function generateWorkflow(
   deps: GenerateWorkflowDeps,
 ): Promise<GenerateWorkflowResult> {
   const adapter = deps.createAdapter(req.agent, deps.binaries?.[req.agent]);
-  const maxRepairAttempts = Math.max(0, deps.maxRepairAttempts ?? DEFAULT_REPAIR_ATTEMPTS);
+  const maxRepairAttempts = Number.isFinite(deps.maxRepairAttempts)
+    ? Math.max(0, Math.floor(deps.maxRepairAttempts as number))
+    : DEFAULT_REPAIR_ATTEMPTS;
 
   let prompt = buildWorkflowGenerationPrompt(req.description);
   let lastResult: GenerateWorkflowResult = { ok: false, raw: "", attempts: 0 };
