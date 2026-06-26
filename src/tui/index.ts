@@ -19,7 +19,14 @@ export {
   specStepRowMeta,
 } from "./workflow-spec-ui";
 export { WorkflowView } from "./WorkflowView";
-export { type Mode, buildModes, isWorkspaceMode, nextMode } from "./modes";
+export {
+  type Mode,
+  type WorkflowScreenState,
+  buildModes,
+  isWorkflowPickerActive,
+  isWorkspaceMode,
+  nextMode,
+} from "./modes";
 export {
   type DisplayItem,
   type TranscriptState,

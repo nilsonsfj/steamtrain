@@ -11,7 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { defaultModelForAgent, formatAgentTarget, modelsForAgent } from "../agents";
+import { formatAgentTarget, modelsForAgent } from "../agents";
 import { refreshAgentCatalogCaches } from "../agents/models";
 import {
   type SlashCommandContext,
@@ -74,7 +74,13 @@ import { WorkflowPreview } from "./WorkflowPreview";
 import { WorkflowStepDetails } from "./WorkflowStepDetails";
 import { WorkflowView } from "./WorkflowView";
 import { Banner } from "./banner";
-import { type Mode, buildModes, isWorkspaceMode, nextMode } from "./modes";
+import {
+  type DraftTarget,
+  formatDraftTarget,
+  healthyAgentSet,
+  resolveDraftTarget,
+} from "./draft-model";
+import { type Mode, buildModes, isWorkflowPickerActive, isWorkspaceMode, nextMode } from "./modes";
 import {
   type PromptDraftByMode,
   getPromptDraft,
@@ -191,6 +197,7 @@ export function App({
   const [wfStepDetails, setWfStepDetails] = useState<"preview" | "live" | null>(null);
   const [wfNow, setWfNow] = useState(() => Date.now());
   const [wfCreate, setWfCreate] = useState<WorkflowCreateState | null>(null);
+  const [draftOverride, setDraftOverride] = useState<DraftTarget | null>(null);
   const [history, setHistory] = useState<HistoryUiState | null>(null);
   const createAbortRef = useRef<AbortController | null>(null);
   const activeWorkflowRef = useRef<string | undefined>(undefined);
@@ -413,6 +420,15 @@ export function App({
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
 
+  // Drafting target for /createworkflow: a user override (via /model on the
+  // picker) when its agent is healthy, else an auto pick. Shared by the create
+  // action and the picker's status line.
+  const healthyAgents = useMemo(() => healthyAgentSet(doctor), [doctor]);
+  const draftResolution = useMemo(
+    () => resolveDraftTarget(healthyAgents, draftOverride),
+    [healthyAgents, draftOverride],
+  );
+
   const createWorkflow = useCallback(
     (description: string, scope: WorkflowScope = "user") => {
       if (running) {
@@ -427,7 +443,7 @@ export function App({
           ],
         };
       }
-      const target = pickGenerationTarget(doctor);
+      const target = draftResolution.target;
       if (!target) {
         return {
           handled: true as const,
@@ -507,7 +523,7 @@ export function App({
         ],
       };
     },
-    [running, doctor, author],
+    [running, draftResolution, author],
   );
 
   const openHistory = useCallback(() => {
@@ -668,6 +684,26 @@ export function App({
       deleteWorkflow,
       userWorkflowNames,
       openHistory,
+      // `/model` sets the draft model only when the picker is actually showing —
+      // not while previewing, running, drafting, or browsing history (where
+      // `mode` stays "workflow" but the picker is hidden). Those keep the legacy
+      // "select a step" warning.
+      draftModel: isWorkflowPickerActive({
+        mode,
+        history: Boolean(history),
+        wfCreate: Boolean(wfCreate),
+        // Mirror the render tree: a preview only occupies the screen when its
+        // spec (and dispatch check) resolve; otherwise the picker is shown.
+        previewing: Boolean(wfPreview && previewSpec && previewDispatchCheck),
+        showWorkflowView,
+      })
+        ? {
+            current: draftResolution.target,
+            usingOverride: draftResolution.usingOverride,
+            healthyAgents: [...healthyAgents],
+            set: setDraftOverride,
+          }
+        : undefined,
     }),
     [
       mode,
@@ -679,12 +715,19 @@ export function App({
       wfPreview,
       patchWorkflowStep,
       previewStepSelection,
+      previewSpec,
+      previewDispatchCheck,
+      history,
+      wfCreate,
+      showWorkflowView,
       saveWorkflows,
       createWorkflow,
       cloneWorkflow,
       deleteWorkflow,
       userWorkflowNames,
       openHistory,
+      draftResolution,
+      healthyAgents,
     ],
   );
 
@@ -1513,6 +1556,13 @@ export function App({
             workflows={workflowEntries}
             selectedIndex={workflowIndex}
             height={streamHeight}
+            draftLabel={
+              draftResolution.target
+                ? `${formatDraftTarget(draftResolution.target)}${
+                    draftResolution.usingOverride ? "" : " (auto)"
+                  }`
+                : undefined
+            }
           />
         )
       ) : (
@@ -1699,22 +1749,4 @@ function HistoryPanel({
       height={height}
     />
   );
-}
-
-/**
- * Choose which agent drafts a new workflow. Prefer OpenCode (free models, no
- * paid credentials), then Claude, then Codex — but only among doctor-healthy
- * agents, since generation spawns a real CLI.
- */
-function pickGenerationTarget(
-  doctor: DoctorResult[] | null,
-): { agent: "claude" | "opencode" | "codex"; model: string } | undefined {
-  if (!doctor) return undefined;
-  const healthy = new Set(doctor.filter((d) => d.status === "ok").map((d) => d.agent));
-  for (const agent of ["opencode", "claude", "codex"] as const) {
-    if (!healthy.has(agent)) continue;
-    const model = agent === "opencode" ? "opencode/mimo-v2.5-free" : defaultModelForAgent(agent);
-    return { agent, model };
-  }
-  return undefined;
 }

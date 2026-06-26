@@ -6,6 +6,7 @@ import {
   modelsForAgent,
 } from "../../agents";
 import { isWorkspaceMode } from "../../tui/modes";
+import { completeDraftModelArgs, executeDraftModelCommand } from "../draft-model-target";
 import type { SlashCommand } from "../types";
 import {
   completeWorkflowModelArgs,
@@ -16,7 +17,8 @@ import {
 
 export const modelCommand: SlashCommand = {
   name: "model",
-  description: "Set or list models for the current workspace tab or workflow step",
+  description:
+    "Set or list models for the current workspace tab, workflow step, or workflow drafting",
   usage: "/model [model-id]",
   execute(args, ctx) {
     if (hasWorkflowStepTarget(ctx)) {
@@ -24,6 +26,11 @@ export const modelCommand: SlashCommand = {
     }
 
     if (!isWorkspaceMode(ctx.mode)) {
+      // On the workflow picker, `/model` sets the model used to draft new
+      // workflows (`/createworkflow`). Only available when the host wires it.
+      if (ctx.draftModel) {
+        return executeDraftModelCommand(args, ctx.draftModel);
+      }
       return workflowStepUnavailableNotice("model");
     }
 
@@ -85,7 +92,10 @@ export const modelCommand: SlashCommand = {
       if (args.length > 1) return [];
       return completeWorkflowModelArgs(ctx);
     }
-    if (!isWorkspaceMode(ctx.mode)) return [];
+    if (!isWorkspaceMode(ctx.mode)) {
+      if (ctx.draftModel && args.length <= 1) return completeDraftModelArgs(ctx.draftModel);
+      return [];
+    }
     const entry = ctx.workspaceMap.get(ctx.mode);
     if (!entry) return [];
     if (args.length > 1) return [];

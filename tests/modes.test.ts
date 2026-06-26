@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildModes, nextMode } from "../src/tui/modes";
+import {
+  type WorkflowScreenState,
+  buildModes,
+  isWorkflowPickerActive,
+  nextMode,
+} from "../src/tui/modes";
 import { DEFAULT_WORKSPACE_CONFIG } from "../src/workspace/defaults";
 
 describe("buildModes", () => {
@@ -29,5 +34,32 @@ describe("nextMode", () => {
     const modes = buildModes(DEFAULT_WORKSPACE_CONFIG);
     expect(nextMode("workflow", modes)).toBe("plan");
     expect(nextMode("review", modes)).toBe("workflow");
+  });
+});
+
+describe("isWorkflowPickerActive", () => {
+  const picker: WorkflowScreenState = {
+    mode: "workflow",
+    history: false,
+    wfCreate: false,
+    previewing: false,
+    showWorkflowView: false,
+  };
+
+  it("is true only on the bare workflow picker", () => {
+    expect(isWorkflowPickerActive(picker)).toBe(true);
+  });
+
+  it("is false in a workspace mode", () => {
+    expect(isWorkflowPickerActive({ ...picker, mode: "plan" })).toBe(false);
+  });
+
+  it("is false while previewing, running, drafting, or in history", () => {
+    // These are exactly the states where mode stays "workflow" but the picker is
+    // hidden — `/model` must fall back to its legacy warning, not set a draft.
+    expect(isWorkflowPickerActive({ ...picker, previewing: true })).toBe(false);
+    expect(isWorkflowPickerActive({ ...picker, showWorkflowView: true })).toBe(false);
+    expect(isWorkflowPickerActive({ ...picker, wfCreate: true })).toBe(false);
+    expect(isWorkflowPickerActive({ ...picker, history: true })).toBe(false);
   });
 });

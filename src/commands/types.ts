@@ -50,6 +50,23 @@ export interface SlashCommandContext {
   userWorkflowNames?: readonly string[];
   /** Open the past-run history browser (TUI only). */
   openHistory?: () => SlashCommandResult;
+  /**
+   * Drafting agent/model for `/createworkflow`, set via `/model` in the workflow
+   * picker (TUI only). Present only when sitting on the picker (no step target).
+   */
+  draftModel?: DraftModelContext;
+}
+
+/** The drafting-model knob `/model` drives when no workflow step is selected. */
+export interface DraftModelContext {
+  /** Effective target (override if usable, else the auto pick); absent when no agent is healthy. */
+  current?: { agent: AgentId; model: string };
+  /** True when `current` comes from a user override rather than the auto pick. */
+  usingOverride: boolean;
+  /** Agents the doctor reports healthy, used to validate a requested target. */
+  healthyAgents: readonly AgentId[];
+  /** Apply a new override, or `null` to reset to auto. */
+  set: (target: { agent: AgentId; model: string } | null) => void;
 }
 
 export interface SlashCommand {
