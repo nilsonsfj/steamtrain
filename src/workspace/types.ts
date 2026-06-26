@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { AgentId } from "../types/events";
 
-const agentId = z.enum(["claude", "opencode", "codex"]);
+const agentId = z.enum(["claude", "opencode", "codex", "amp"]);
 
 /** Reserved for the built-in workflow mode; cannot be used as a workspace id. */
 export const RESERVED_WORKSPACE_ID = "workflow";

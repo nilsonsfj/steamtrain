@@ -1,7 +1,7 @@
 # Creating workflows with LLM delegation
 
 steamtrain can **draft a workflow for you**: describe what you want in plain
-English and an agent (Claude / OpenCode / Codex) writes a valid
+English and an agent (Claude / OpenCode / Codex / Amp) writes a valid
 [`WorkflowSpec`](workflow-spec.md), which steamtrain validates with the exact
 rules the engine enforces at run time before you ever run it.
 
@@ -12,7 +12,7 @@ model, then review, save, and run it like any bundled workflow.
 flowchart LR
   desc["plain-English description"]
   prompt["meta-prompt\n(teaches the spec format)"]
-  agent["agent run\n(claude / opencode / codex)"]
+  agent["agent run\n(claude / opencode / codex / amp)"]
   extract["extract JSON\n(fenced or balanced)"]
   validate["validateWorkflow()\n(same rules as the engine)"]
   repair["repair prompt\n(+ the exact error)"]

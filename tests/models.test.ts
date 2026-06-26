@@ -20,6 +20,28 @@ import {
   setOpencodeVariantCacheForTests,
 } from "../src/agents/opencode-variants";
 
+describe("amp modes", () => {
+  it("exposes the three amp modes with smart as the default", () => {
+    expect(modelIdsForAgent("amp")).toEqual(["smart", "deep", "rush"]);
+    expect(defaultModelForAgent("amp")).toBe("smart");
+    expect(modelNameForAgent("amp", "deep")).toBe("Deep (extended reasoning)");
+  });
+
+  it("maps reasoning efforts per mode", () => {
+    expect(effortsForModel("amp", "deep")).toEqual(["low", "medium", "xhigh"]);
+    expect(effortsForModel("amp", "smart")).toEqual(["high", "xhigh", "max"]);
+    expect(effortsForModel("amp", "rush")).toEqual([]);
+    expect(supportsEffort("amp", "smart")).toBe(true);
+    expect(supportsEffort("amp", "rush")).toBe(false);
+  });
+
+  it("drops an effort that the next mode does not support", () => {
+    expect(effortForModelChange("amp", "smart", "max")).toBe("max");
+    expect(effortForModelChange("amp", "deep", "max")).toBeUndefined();
+    expect(effortForModelChange("amp", "rush", "high")).toBeUndefined();
+  });
+});
+
 describe("model names", () => {
   it("returns hardcoded Claude display names", () => {
     expect(modelNameForAgent("claude", "claude-sonnet-4-6")).toBe("Claude Sonnet 4.6");

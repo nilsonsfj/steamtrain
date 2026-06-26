@@ -2,6 +2,7 @@ import type { SteamtrainConfig } from "../config/types";
 import type { DoctorResult } from "../doctor";
 import type { AgentId } from "../types/events";
 import { type AgentModel, formatModelOption } from "./agent-model";
+import { AMP_MODELS } from "./amp";
 import { CLAUDE_MODELS } from "./claude";
 import { CODEX_MODELS } from "./codex";
 import {
@@ -19,7 +20,7 @@ import {
 } from "./opencode-variants";
 
 /** All agent ids steamtrain can dispatch to. */
-export const AGENT_IDS: readonly AgentId[] = ["claude", "opencode", "codex"];
+export const AGENT_IDS: readonly AgentId[] = ["claude", "opencode", "codex", "amp"];
 
 export function isAgentId(value: string): value is AgentId {
   return (AGENT_IDS as readonly string[]).includes(value);
@@ -54,6 +55,8 @@ export function modelsForAgent(agent: AgentId): readonly AgentModel[] {
       return opencodeModelsWithLiveNames();
     case "codex":
       return codexModelsWithLiveNames();
+    case "amp":
+      return AMP_MODELS;
   }
 }
 
@@ -117,6 +120,17 @@ function claudeEfforts(model: string): readonly string[] {
   return [];
 }
 
+// amp toggles reasoning effort per mode: deep cycles low/medium/xhigh, smart
+// cycles high/xhigh/max, rush has no reasoning. See https://ampcode.com/manual.
+const AMP_DEEP_EFFORTS = ["low", "medium", "xhigh"] as const;
+const AMP_SMART_EFFORTS = ["high", "xhigh", "max"] as const;
+
+function ampEfforts(model: string): readonly string[] {
+  if (model === "deep") return AMP_DEEP_EFFORTS;
+  if (model === "smart") return AMP_SMART_EFFORTS;
+  return [];
+}
+
 /** Known effort / variant levels for a specific model (used by `/effort` and autocomplete). */
 export function effortsForModel(agent: AgentId, model: string): readonly string[] {
   switch (agent) {
@@ -126,6 +140,8 @@ export function effortsForModel(agent: AgentId, model: string): readonly string[
       return getOpencodeEfforts(model);
     case "codex":
       return getCodexEfforts(model);
+    case "amp":
+      return ampEfforts(model);
   }
 }
 

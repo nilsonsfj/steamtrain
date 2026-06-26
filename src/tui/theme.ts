@@ -30,6 +30,7 @@ export const AGENT_COLOR: Record<string, string> = {
   claude: "magenta",
   opencode: "blue",
   codex: "green",
+  amp: "yellow",
 };
 
 /** Ink color for workflow catalog source labels in the picker and preview. */

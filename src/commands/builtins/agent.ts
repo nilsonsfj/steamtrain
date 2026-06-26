@@ -11,7 +11,7 @@ import {
 export const agentCommand: SlashCommand = {
   name: "agent",
   description: "Set or list agents for the current workspace tab or workflow step",
-  usage: "/agent [claude|opencode|codex]",
+  usage: "/agent [claude|opencode|codex|amp]",
   execute(args, ctx) {
     if (hasWorkflowStepTarget(ctx)) {
       return executeWorkflowAgentCommand(args, ctx);

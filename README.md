@@ -333,7 +333,7 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
 
 - **Step kinds:** `worker` / `processor`, `distributor`, `consolidator`, and
   `gate`. Existing steps without `kind` are workers.
-- **Agent-backed fields:** `agent` (`claude` | `opencode`), `model`, `prompt`,
+- **Agent-backed fields:** `agent` (`claude` | `opencode` | `codex` | `amp`), `model`, `prompt`,
   plus optional `cwd` (the **target** dir; relative paths resolve against the
   launch cwd), `env` (extra vars), and `extraArgs` (extra CLI flags).
 - **Dynamic fan-out:** add `forEach: "steps.<id>.items"` to a worker/processor

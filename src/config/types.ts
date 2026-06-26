@@ -21,6 +21,7 @@ export const configFileSchema = z
         claude: z.string().optional(),
         opencode: z.string().optional(),
         codex: z.string().optional(),
+        amp: z.string().optional(),
       })
       .partial()
       .optional(),
