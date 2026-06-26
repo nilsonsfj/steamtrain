@@ -441,17 +441,26 @@ function invalidateRegion(
   cache: Map<string, StepResult>,
   results: Map<string, StepResult>,
 ): void {
+  // Collect all step ids in the region and their forEach-child prefixes so we
+  // can invalidate in a single pass over each Map instead of scanning all keys
+  // per step (avoids O(steps_in_region × cache_size) with large fan-outs).
+  const exact = new Set<string>();
+  const childPrefixes: string[] = [];
   for (let i = start; i <= end; i++) {
     const phase = spec.phases[i];
     if (!phase) continue;
     for (const step of phase.steps) {
-      cache.delete(step.id);
-      results.delete(step.id);
-      // Also drop generated forEach children (id like `step[<n>]`).
-      for (const key of [...cache.keys()]) if (key.startsWith(`${step.id}[`)) cache.delete(key);
-      for (const key of [...results.keys()]) if (key.startsWith(`${step.id}[`)) results.delete(key);
+      exact.add(step.id);
+      childPrefixes.push(`${step.id}[`);
     }
   }
+  const shouldDelete = (key: string): boolean => {
+    if (exact.has(key)) return true;
+    for (const prefix of childPrefixes) if (key.startsWith(prefix)) return true;
+    return false;
+  };
+  for (const key of cache.keys()) if (shouldDelete(key)) cache.delete(key);
+  for (const key of results.keys()) if (shouldDelete(key)) results.delete(key);
 }
 
 /**

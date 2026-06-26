@@ -567,4 +567,82 @@ describe("engine loops", () => {
     // it must see review-v2 (the current pass's output), NOT review-v1 (stale).
     expect(seenByFix).toEqual(["fix based on review-v1", "fix based on review-v2"]);
   });
+
+  it("stops cleanly when the run is aborted mid-loop", async () => {
+    // Abort during the second iteration's body. The engine should emit
+    // workflow_done with ok:false and not start any further iterations.
+    const controller = new AbortController();
+    let fixCalls = 0;
+    const deps = {
+      createAdapter: () =>
+        fakeAdapter((prompt) => {
+          if (prompt.startsWith("fix")) {
+            fixCalls++;
+            if (fixCalls === 2) controller.abort(); // abort on second fix run
+            return { text: "NOPE" };
+          }
+          return { text: "reviewed" };
+        }),
+      maxConcurrency: 2,
+      cwd: "/tmp",
+      loopMaxIterations: 10,
+    };
+    const events: WorkflowEvent[] = [];
+    for await (const e of runWorkflow(loopSpec(), { input: "go" }, deps, controller.signal)) {
+      events.push(e);
+    }
+    const done = events.find((e) => e.kind === "workflow_done") as { ok: boolean };
+    expect(done).toBeDefined();
+    expect(done.ok).toBe(false);
+    // Should have looped back at most once (iteration 2 started, then aborted).
+    const loops = events.filter((e) => e.kind === "loop_iteration");
+    expect(loops.length).toBeLessThanOrEqual(1);
+  });
+
+  it("stops at the cap and applies onFalse=stop when never converging", async () => {
+    // Same as the onFalse=fail test but with onFalse=stop — both should
+    // terminate the workflow after the cap is exhausted.
+    const spec: WorkflowSpec = {
+      name: "loop-stop",
+      phases: [
+        workerPhase("review", "review {{input}} (iter {{iteration}})"),
+        workerPhase("fix", "fix based on {{steps.review-step.output}}"),
+        {
+          id: "check",
+          title: "check",
+          steps: [
+            {
+              id: "check-gate",
+              kind: "gate" as const,
+              dependsOn: ["fix-step"],
+              condition: { step: "fix-step", contains: "DONE" },
+              loopTo: "review",
+              maxIterations: 3,
+              onFalse: "stop" as const,
+            },
+          ],
+        },
+      ],
+    };
+    const deps = {
+      createAdapter: () => fakeAdapter(() => ({ text: "NOPE" })),
+      maxConcurrency: 2,
+      cwd: "/tmp",
+      loopMaxIterations: 10,
+    };
+    const events = await collect(spec, deps);
+    const loops = events.filter((e) => e.kind === "loop_iteration");
+    expect(loops.length).toBe(2); // iterations 2 and 3 (first pass is iteration 1)
+    const done = events.find((e) => e.kind === "workflow_done") as { ok: boolean };
+    // "stop" halts the workflow gracefully (ok:true), unlike "fail" (ok:false).
+    // The key contract is that execution stops after the cap — no further phases
+    // beyond the gate phase should run.
+    expect(done.ok).toBe(true);
+    // No phases after the gate phase should have run (stop breaks the loop).
+    const phaseIds = events
+      .filter((e) => e.kind === "phase_start")
+      .map((e) => (e as { phaseId: string }).phaseId);
+    const uniquePhases = [...new Set(phaseIds)];
+    expect(uniquePhases).toEqual(["review", "fix", "check"]);
+  });
 });

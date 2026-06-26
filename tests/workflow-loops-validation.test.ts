@@ -181,4 +181,31 @@ describe("validateWorkflow loop topology", () => {
     expect(validateWorkflow(s).ok).toBe(false); // default 10 → over budget
     expect(validateWorkflow(s, 2).ok).toBe(true); // config 2 → within budget
   });
+
+  it("rejects loopTo referencing the gate's own phase (self-loop)", () => {
+    // A gate that loops to its own phase creates a useless self-loop: no body
+    // steps run between evaluations, so the gate re-evaluates with the same
+    // result and burns the entire cap doing nothing.
+    const s = spec([
+      workerPhase("review"),
+      {
+        id: "check",
+        title: "check",
+        steps: [
+          {
+            id: "check-gate",
+            kind: "gate" as const,
+            dependsOn: ["review-step"],
+            condition: { step: "review-step", ok: true },
+            loopTo: "check", // self-loop: targets the gate's own phase
+            maxIterations: 3,
+            onFalse: "fail" as const,
+          },
+        ],
+      },
+    ]);
+    const r = validateWorkflow(s);
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("earlier phase");
+  });
 });

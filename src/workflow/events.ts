@@ -140,10 +140,11 @@ export interface WorkflowDoneEvent {
  * remains, so execution is about to jump back to `loopTo` and re-run the body.
  * `iteration` is the iteration that is ABOUT TO START (2 = the first re-run).
  */
-export interface LoopIterationEvent {
+export interface LoopIterationEvent extends IterationTagged {
   kind: "loop_iteration";
   gateStepId: string;
   loopTo: string;
+  /** The iteration that is ABOUT TO START (2 = the first re-run). Always defined. */
   iteration: number;
   maxIterations: number;
   ts: number;

@@ -671,7 +671,7 @@ export const PAGE_HTML = `<!doctype html>
         else cards.appendChild(h("div", { class: "card superseded" },
           h("div", { class: "top" },
             h("span", { class: "sid", text: s.id }),
-            h("span", { class: "state", text: "superseded \\u2192 iteration " + maxIter[p.id] })
+            h("span", { class: "state", text: "iteration " + piter + " \\u2192 superseded by iteration " + maxIter[p.id] })
           )
         ));
       });

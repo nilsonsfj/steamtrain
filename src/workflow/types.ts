@@ -501,10 +501,10 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
           error: `gate '${step.id}' loopTo references unknown phase '${step.loopTo}'`,
         };
       }
-      if (start > pi) {
+      if (start >= pi) {
         return {
           ok: false,
-          error: `gate '${step.id}' loopTo '${step.loopTo}' must be an earlier-or-equal phase (loops only go backward)`,
+          error: `gate '${step.id}' loopTo '${step.loopTo}' must be an earlier phase (loops only go backward, not to the gate's own phase)`,
         };
       }
       regions.push({
