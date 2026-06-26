@@ -318,4 +318,182 @@ describe("engine loops", () => {
     const innerBodyHistoryInstances = record.phases.filter((p) => p.phaseId === "inner-body");
     expect(innerBodyHistoryInstances.length).toBe(innerPasses * outerPasses);
   });
+
+  it("inspects every loop gate in a phase, not just the first (two gates, one phase)", async () => {
+    // Topology with BOTH loop gates in the same phase — legal per validation
+    // (outer region [seed..gate] fully contains inner [inner-body..gate]):
+    //   seed -> inner-body -> gate-phase[ outer-gate(loopTo: seed, always passes),
+    //                                    inner-gate(loopTo: inner-body, converges on iter 2) ]
+    // outer-gate is listed first, so decideLoopJump scans it first. It passes,
+    // which must NOT terminate the scan — the inner-gate still wants to jump.
+    let innerBodyCalls = 0;
+    const spec: WorkflowSpec = {
+      name: "two-gates-one-phase",
+      phases: [
+        {
+          id: "seed",
+          title: "seed",
+          steps: [{ id: "seed-step", agent: "opencode", model: "m", prompt: "seed {{input}}" }],
+        },
+        {
+          id: "inner-body",
+          title: "inner-body",
+          steps: [
+            { id: "inner-body-step", agent: "opencode", model: "m", prompt: "inner-body run" },
+          ],
+        },
+        {
+          id: "gate",
+          title: "gate",
+          steps: [
+            {
+              id: "outer-gate",
+              kind: "gate" as const,
+              dependsOn: ["seed-step"],
+              condition: { step: "seed-step", ok: true },
+              loopTo: "seed",
+              maxIterations: 3,
+              onFalse: "continue" as const,
+            },
+            {
+              id: "inner-gate",
+              kind: "gate" as const,
+              dependsOn: ["inner-body-step"],
+              condition: { step: "inner-body-step", contains: "DONE" },
+              loopTo: "inner-body",
+              maxIterations: 3,
+              onFalse: "fail" as const,
+            },
+          ],
+        },
+      ],
+    };
+
+    const deps = {
+      createAdapter: () =>
+        fakeAdapter((prompt) => {
+          if (prompt.startsWith("inner-body")) {
+            innerBodyCalls++;
+            return { text: innerBodyCalls >= 2 ? "DONE" : "NOPE" };
+          }
+          if (prompt.startsWith("seed")) return { text: "seeded" };
+          return { text: "ok" };
+        }),
+      maxConcurrency: 2,
+      cwd: "/tmp",
+      loopMaxIterations: 10,
+    };
+
+    const events = await collect(spec, deps);
+
+    // The inner loop must fire even though the (first-scanned) outer gate
+    // passes. A short-circuit on the outer gate would leave 0 loops and fail
+    // the run via inner-gate onFalse=fail.
+    const loops = events.filter((e) => e.kind === "loop_iteration");
+    expect(loops.length).toBe(1);
+    const innerBodyStarts = events.filter(
+      (e) => e.kind === "step_start" && (e as { stepId: string }).stepId === "inner-body-step",
+    );
+    expect(innerBodyStarts.length).toBe(2);
+    const done = events.find((e) => e.kind === "workflow_done") as { ok: boolean };
+    expect(done.ok).toBe(true);
+  });
+
+  it("releases the forEach dynamic-step budget on each loop pass (forEach inside a loop)", async () => {
+    // A forEach distributor inside a loop body re-spawns its N children every
+    // pass. The dynamic-step budget (`generatedSteps`) must be released when
+    // invalidateRegion drops the prior pass's children, otherwise the budget
+    // accumulates N per pass and a later pass falsely hits the MAX_STEPS cap.
+    //
+    //   src(100 items) -> body[ each(forEach src.items) ] -> check-gate(loopTo body, cap 12)
+    //
+    // N=100, cap=12. Budget = MAX_STEPS - totalSteps = 1000 - 3 = 997. With the
+    // H3 bug (monotonic accumulator), pass 10 reserves 100 on top of 900 cached
+    // → 1000 > 997 → "exceed max workflow steps" and the run aborts at pass 10
+    // (9 loops). With the fix, each pass re-syncs to 0 after invalidation, so
+    // the full cap of 12 is used (11 loops) and no spurious budget error fires.
+    const itemCount = 100;
+    const cap = 12;
+    const items = Array.from({ length: itemCount }, (_, i) => `i${i}`);
+    const spec: WorkflowSpec = {
+      name: "foreach-in-loop",
+      phases: [
+        {
+          id: "src",
+          title: "src",
+          steps: [{ id: "src", kind: "distributor" as const, items }],
+        },
+        {
+          id: "body",
+          title: "body",
+          steps: [
+            {
+              id: "each",
+              kind: "processor" as const,
+              agent: "opencode",
+              model: "m",
+              dependsOn: ["src"],
+              forEach: "steps.src.items",
+              prompt: "do {{item}}",
+            },
+          ],
+        },
+        {
+          id: "check",
+          title: "check",
+          steps: [
+            {
+              id: "check-gate",
+              kind: "gate" as const,
+              dependsOn: ["each"],
+              // Never converges (the forEach output never contains "NEVER") so
+              // the loop burns its full cap and then applies onFalse=fail.
+              condition: { step: "each", contains: "NEVER" },
+              loopTo: "body",
+              maxIterations: cap,
+              onFalse: "fail" as const,
+            },
+          ],
+        },
+      ],
+    };
+
+    const deps = {
+      createAdapter: () => fakeAdapter(() => ({ text: "ok" })),
+      maxConcurrency: 8,
+      cwd: "/tmp",
+      loopMaxIterations: cap,
+    };
+
+    const events = await collect(spec, deps);
+
+    // Full cap used — not cut short by a spurious budget exhaustion.
+    const loops = events.filter((e) => e.kind === "loop_iteration");
+    expect(loops.length).toBe(cap - 1);
+
+    // The forEach parent re-ran every pass and re-spawned all children each time.
+    const eachStarts = events.filter(
+      (e) => e.kind === "step_start" && (e as { stepId: string }).stepId === "each",
+    );
+    expect(eachStarts.length).toBe(cap);
+    const childStarts = events.filter(
+      (e) => e.kind === "step_start" && (e as { parentStepId?: string }).parentStepId === "each",
+    );
+    expect(childStarts.length).toBe(itemCount * cap);
+
+    // No child/parent hit the MAX_STEPS budget cap — the run ended only via the
+    // gate's onFalse=fail after exhaustion, which is the expected terminal state.
+    const budgetError = events.find(
+      (e) =>
+        e.kind === "step_done" &&
+        typeof (e as { result?: { error?: string } }).result?.error === "string" &&
+        /(exceed max workflow steps|would expand)/.test(
+          (e as { result: { error: string } }).result.error,
+        ),
+    );
+    expect(budgetError).toBeUndefined();
+
+    const done = events.find((e) => e.kind === "workflow_done") as { ok: boolean };
+    expect(done.ok).toBe(false); // onFalse=fail after the cap was exhausted
+  });
 });

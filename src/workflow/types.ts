@@ -395,8 +395,21 @@ export function workflowAgentIds(spec: WorkflowSpec): AgentId[] {
  * may only reference a step in an EARLIER phase. Phases run sequentially while
  * steps within a phase run in parallel, so same-phase and forward references
  * (and therefore cycles) are rejected.
+ *
+ * The worst-case step budget for a loop gate that omits `maxIterations` is
+ * computed against `loopMaxIterations` (the runtime config default) — or
+ * {@link DEFAULT_LOOP_MAX_ITERATIONS} when neither the gate nor the caller
+ * specifies one — NOT the ceiling. The ceiling ({@link
+ * LOOP_MAX_ITERATIONS_CEILING}) stays a hard "cannot be configured above this"
+ * backstop enforced by the schema; it is not the budget assumption, so that a
+ * spec bounded at runtime by the default (10) is not falsely rejected by the
+ * static verifier.
+ *
+ * @param loopMaxIterations the configured runtime cap to budget against when a
+ *   gate omits `maxIterations`. Pass the engine's `deps.loopMaxIterations` so
+ *   the static budget matches the runtime clamp.
  */
-export function validateWorkflow(spec: WorkflowSpec): ValidationResult {
+export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number): ValidationResult {
   const parsed = workflowSpecSchema.safeParse(spec);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "invalid workflow" };
@@ -473,7 +486,7 @@ export function validateWorkflow(spec: WorkflowSpec): ValidationResult {
     gateId: string;
     start: number; // loopTo phase index
     end: number; // gate phase index
-    maxIterations: number; // effective bound for the static budget (ceiling when omitted)
+    maxIterations: number; // effective bound for the static budget (per-gate, config, or default 10)
   }
   const regions: LoopRegion[] = [];
   for (let pi = 0; pi < spec.phases.length; pi++) {
@@ -498,7 +511,7 @@ export function validateWorkflow(spec: WorkflowSpec): ValidationResult {
         gateId: step.id,
         start,
         end: pi,
-        maxIterations: step.maxIterations ?? LOOP_MAX_ITERATIONS_CEILING,
+        maxIterations: step.maxIterations ?? loopMaxIterations ?? DEFAULT_LOOP_MAX_ITERATIONS,
       });
     }
   }

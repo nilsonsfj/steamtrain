@@ -62,7 +62,7 @@ export async function* runWorkflow(
   deps: WorkflowDeps,
   signal?: AbortSignal,
 ): AsyncGenerator<WorkflowEvent> {
-  const valid = validateWorkflow(spec);
+  const valid = validateWorkflow(spec, deps.loopMaxIterations);
   if (!valid.ok) throw new Error(`invalid workflow '${spec.name}': ${valid.error}`);
 
   const cache = ctx.cache ?? new Map<string, StepResult>();
@@ -128,6 +128,16 @@ export async function* runWorkflow(
       pi++;
       continue;
     }
+    // Re-sync the dynamic-step budget to the cache at the start of every phase.
+    // `generatedSteps` is otherwise a monotonic accumulator that only ever
+    // grows, but `invalidateRegion` drops forEach children (ids like `step[n]`)
+    // from the cache on a loop jump. Without this re-sync, each pass over a
+    // forEach body re-reserves its N children and the budget accumulates N per
+    // pass — so a forEach inside a loop falsely hits the MAX_STEPS cap after
+    // enough iterations despite the live footprint never exceeding N. During
+    // forward progress the cache only grows, so this is a no-op then; it only
+    // releases budget that invalidation just freed.
+    generatedSteps = countCachedDynamicSteps(cache);
     const runs = (phaseRunCount.get(pi) ?? 0) + 1;
     phaseRunCount.set(pi, runs);
     const iteration = runs;
@@ -386,10 +396,14 @@ function decideLoopJump(
     const res = results.get(step.id);
     // No evaluated gate result (e.g. the gate was skipped because a dependency
     // failed) ⇒ it never tested its condition, so do not loop. A passed gate
-    // (condition true) ⇒ converged, so do not loop either.
-    if (!res?.gate || res.gate.passed) return undefined;
+    // (condition true) ⇒ converged, so do not loop either. An exhausted gate
+    // ⇒ onFalse already applied. None of these say anything about *other* loop
+    // gates that may share this phase (validation permits several loop gates
+    // per phase when their regions are nested or disjoint), so keep scanning
+    // instead of bailing the whole phase.
+    if (!res?.gate || res.gate.passed) continue;
     const cap = step.maxIterations ?? effectiveLoopMax;
-    if (state.iteration >= cap) return undefined; // exhausted ⇒ onFalse already applied
+    if (state.iteration >= cap) continue; // exhausted ⇒ onFalse already applied
     state.iteration += 1;
     return {
       gateId: step.id,
