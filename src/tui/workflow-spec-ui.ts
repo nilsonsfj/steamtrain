@@ -1,5 +1,11 @@
 import { basename } from "node:path";
-import { CLAUDE_MODELS, CODEX_MODELS, OPENCODE_MODELS, formatAgentTarget } from "../agents";
+import {
+  AMP_MODELS,
+  CLAUDE_MODELS,
+  CODEX_MODELS,
+  OPENCODE_MODELS,
+  formatAgentTarget,
+} from "../agents";
 import { truncate } from "../agents/util";
 import type { AgentId } from "../types/events";
 import {
@@ -158,5 +164,7 @@ function staticModelName(agent: AgentId, model: string): string | undefined {
       return CODEX_MODELS.find((entry) => entry.id === model)?.name;
     case "opencode":
       return OPENCODE_MODELS.find((entry) => entry.id === model)?.name;
+    case "amp":
+      return AMP_MODELS.find((entry) => entry.id === model)?.name;
   }
 }

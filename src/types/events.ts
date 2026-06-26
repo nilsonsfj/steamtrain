@@ -6,7 +6,7 @@
  * shapes, so adding a new agent never touches the UI.
  */
 
-export type AgentId = "claude" | "opencode" | "codex";
+export type AgentId = "claude" | "opencode" | "codex" | "amp";
 
 export interface BaseEvent {
   /** Which agent produced this event. */

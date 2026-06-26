@@ -1,5 +1,6 @@
 import type { AgentId } from "../types/events";
 import type { AgentAdapter } from "./adapter";
+import { AmpAdapter } from "./amp";
 import { ClaudeCodeAdapter } from "./claude";
 import { CodexAdapter } from "./codex";
 import { OpenCodeAdapter } from "./opencode";
@@ -14,6 +15,7 @@ export {
   buildAgentMeta,
   defaultDraftModel,
 } from "./agent-meta";
+export { AmpAdapter, AMP_MODELS, buildAmpExecArgs, createAmpMapper } from "./amp";
 export { ClaudeCodeAdapter, CLAUDE_MODELS, createClaudeMapper } from "./claude";
 export { CodexAdapter, CODEX_MODELS, buildCodexExecArgs, createCodexMapper } from "./codex";
 export {
@@ -57,5 +59,7 @@ export function createAdapter(id: AgentId, binary?: string): AgentAdapter {
       return new OpenCodeAdapter(binary);
     case "codex":
       return new CodexAdapter(binary);
+    case "amp":
+      return new AmpAdapter(binary);
   }
 }

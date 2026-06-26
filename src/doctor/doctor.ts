@@ -23,6 +23,7 @@ const DEFAULT_BINARY: Record<AgentId, string> = {
   claude: "claude",
   opencode: "opencode",
   codex: "codex",
+  amp: "amp",
 };
 const VERSION_TIMEOUT_MS = 8000;
 const AUTH_PATTERN =
@@ -159,7 +160,7 @@ export async function checkAgent(agent: AgentId, binary: string): Promise<Doctor
 
 /** Run preflight for all agents (honoring config binary overrides). */
 export function runDoctor(config: SteamtrainConfig): Promise<DoctorResult[]> {
-  const agents: AgentId[] = ["claude", "opencode", "codex"];
+  const agents: AgentId[] = ["claude", "opencode", "codex", "amp"];
   return Promise.all(
     agents.map((agent) => checkAgent(agent, config.binaries?.[agent] ?? DEFAULT_BINARY[agent])),
   );
@@ -173,6 +174,8 @@ function installHint(agent: AgentId): string {
       return "Install OpenCode (brew install sst/tap/opencode, or npm i -g opencode-ai) and ensure `opencode` is on PATH.";
     case "codex":
       return "Install Codex (npm i -g @openai/codex) and ensure `codex` is on PATH.";
+    case "amp":
+      return "Install Amp (npm i -g @sourcegraph/amp) and ensure `amp` is on PATH.";
   }
 }
 
@@ -184,5 +187,7 @@ function authHint(agent: AgentId): string {
       return "Run `opencode auth login` for the provider you want to use.";
     case "codex":
       return "Run `codex login` (ChatGPT) or set CODEX_API_KEY for `codex exec`.";
+    case "amp":
+      return "Run `amp login`, or set AMP_API_KEY for non-interactive use (execute mode needs paid credits).";
   }
 }

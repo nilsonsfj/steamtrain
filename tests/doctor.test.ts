@@ -12,3 +12,15 @@ describe("checkAgent codex", () => {
     expect(result.detail).toContain("npm i -g @openai/codex");
   });
 });
+
+describe("checkAgent amp", () => {
+  it("reports missing binary with an install hint", async () => {
+    const result = await checkAgent("amp", "__steamtrain_missing_amp__");
+    expect(result).toMatchObject({
+      agent: "amp",
+      status: "binary_missing",
+      binary: "__steamtrain_missing_amp__",
+    });
+    expect(result.detail).toContain("npm i -g @sourcegraph/amp");
+  });
+});
