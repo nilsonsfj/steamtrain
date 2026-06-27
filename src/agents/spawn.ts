@@ -126,8 +126,11 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
 
   let timer: NodeJS.Timeout | undefined;
   let cancelKill: (() => void) | undefined;
+  let killed = false;
 
   const startKill = (): void => {
+    if (killed) return;
+    killed = true;
     cancelKill?.();
     const { cancel } = killProcess(child);
     cancelKill = cancel;
