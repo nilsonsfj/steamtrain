@@ -7,7 +7,7 @@ export default defineConfig({
   target: "node20",
   clean: true,
   sourcemap: true,
-  dts: true,
+  dts: false,
   // Keep runtime deps external; they are installed from package.json.
   skipNodeModulesBundle: true,
   // Add a shebang so the built bin is directly executable.

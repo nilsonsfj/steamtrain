@@ -461,10 +461,10 @@ function findJsonObject(text: string): string | undefined {
 /** Return the contents of the first ```json (or ```) fenced block, if any. */
 function extractFenced(text: string): string | undefined {
   // Prefer ```json blocks first
-  const jsonFence = /```json\s*\n([\s\S]*?)```/i.exec(text);
+  const jsonFence = /```json[ \t]*\r?\n?([\s\S]*?)```/i.exec(text);
   if (jsonFence?.[1]) return jsonFence[1];
   // Fall back to bare ``` blocks
-  const bareFence = /```\s*\n([\s\S]*?)```/i.exec(text);
+  const bareFence = /```[ \t]*\r?\n?([\s\S]*?)```/i.exec(text);
   return bareFence?.[1];
 }
 

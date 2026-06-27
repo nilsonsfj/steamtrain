@@ -137,7 +137,7 @@ export class WorkflowRunManager {
     if (!text) return { ok: false, error: "input is required" };
 
     if (this.maxConcurrent > 0 && this.runningCount >= this.maxConcurrent) {
-      return { ok: false, error: `too many concurrent runs (max ${this.maxConcurrent})` };
+      throw new Error(`too many concurrent runs (max ${this.maxConcurrent})`);
     }
 
     const spec = this.host.listWorkflows()[workflow];

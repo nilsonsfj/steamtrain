@@ -91,13 +91,22 @@ class PayloadTooLarge extends Error {
   }
 }
 
+class TooManyRuns extends Error {
+  constructor(max: number) {
+    super(`too many concurrent runs (max ${max})`);
+    this.name = "TooManyRuns";
+  }
+}
+
 async function readBody(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   let totalBytes = 0;
   for await (const chunk of req) {
     const buf = chunk as Buffer;
     totalBytes += buf.length;
-    if (totalBytes > MAX_BODY_BYTES) throw new PayloadTooLarge();
+    if (totalBytes > MAX_BODY_BYTES) {
+      throw new PayloadTooLarge();
+    }
     chunks.push(buf);
   }
   return Buffer.concat(chunks).toString("utf8");
@@ -137,6 +146,8 @@ export function createWebServer(deps: WebServerDeps): Server {
             ? "payload too large"
             : "internal server error";
         sendJson(res, status, { error });
+        // Drain any remaining body data to free memory
+        if (err instanceof PayloadTooLarge) req.destroy();
       } else {
         res.end();
       }
@@ -289,12 +300,20 @@ async function handle(
       sendJson(res, 404, { error: `unknown run '${id}'` });
       return;
     }
-    const result = deps.runs.rerunFromRecord(record, mode);
-    if (!result.ok) {
-      sendJson(res, 400, { error: result.error });
-      return;
+    try {
+      const result = deps.runs.rerunFromRecord(record, mode);
+      if (!result.ok) {
+        sendJson(res, 400, { error: result.error });
+        return;
+      }
+      sendJson(res, 201, { runId: result.runId, downgraded: result.downgraded });
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("too many concurrent")) {
+        sendJson(res, 503, { error: err.message });
+      } else {
+        throw err;
+      }
     }
-    sendJson(res, 201, { runId: result.runId, downgraded: result.downgraded });
     return;
   }
 
@@ -311,14 +330,22 @@ async function handle(
       sendJson(res, 400, { error: "body must include string 'workflow' and 'input'" });
       return;
     }
-    const result = deps.runs.start(parsed.workflow, parsed.input, {
-      fresh: parsed.fresh === true,
-    });
-    if (!result.ok) {
-      sendJson(res, 400, { error: result.error });
-      return;
+    try {
+      const result = deps.runs.start(parsed.workflow, parsed.input, {
+        fresh: parsed.fresh === true,
+      });
+      if (!result.ok) {
+        sendJson(res, 400, { error: result.error });
+        return;
+      }
+      sendJson(res, 201, { runId: result.runId });
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("too many concurrent")) {
+        sendJson(res, 503, { error: err.message });
+      } else {
+        throw err;
+      }
     }
-    sendJson(res, 201, { runId: result.runId });
     return;
   }
 
@@ -444,6 +471,8 @@ export interface StartWebUiOptions {
   host?: string;
   stdout?: (text: string) => void;
   stderr?: (text: string) => void;
+  /** Maximum concurrent workflow runs. 0 = unlimited. */
+  maxConcurrent?: number;
 }
 
 export const DEFAULT_WEB_PORT = 4317;
@@ -477,7 +506,13 @@ export async function startWebUi(
 
   const cacheStore = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
   const historyStore = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
-  const runs = new WorkflowRunManager({ host: orchestrator, cacheStore, historyStore, cwd });
+  const runs = new WorkflowRunManager({
+    host: orchestrator,
+    cacheStore,
+    historyStore,
+    cwd,
+    maxConcurrent: options.maxConcurrent ?? 5,
+  });
   const author = new WorkflowAuthor({
     host: orchestrator,
     config: options.config,
