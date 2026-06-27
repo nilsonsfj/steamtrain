@@ -393,6 +393,14 @@ export function App({
 
   const renameWorkflow = useCallback(
     (oldName: string, newName: string) => {
+      if (running) {
+        return {
+          handled: true as const,
+          clearInput: true,
+          notices: [{ level: "warn" as const, text: "cannot rename while a workflow is running" }],
+        };
+      }
+
       const source = oldName.trim() || wfPreview?.name || selectedWorkflowName;
       if (!source) {
         return {
@@ -439,7 +447,7 @@ export function App({
         ],
       };
     },
-    [author, selectedWorkflowName, wfPreview],
+    [author, selectedWorkflowName, wfPreview, running],
   );
 
   const saveWorkflows = useCallback(() => {
@@ -1262,16 +1270,6 @@ export function App({
 
       const prompt = raw.trim();
 
-      if (wfCreate && wfCreate.status === "done" && wfCreate.spec) {
-        const specName = wfCreate.spec.name;
-        setWfCreate(null);
-        setWfPreview({ name: specName, input: prompt });
-        setStepIndex(0);
-        setWfNotice(null);
-        updatePromptDraft({ promptEditing: false });
-        return;
-      }
-
       if (isRegisteredSlashCommand(prompt)) {
         const result = executeSlashCommand(prompt, slashCtx);
         if (result.handled) {
@@ -1285,6 +1283,16 @@ export function App({
           if (result.exit) exit();
           return;
         }
+      }
+
+      if (wfCreate && wfCreate.status === "done" && wfCreate.spec) {
+        const specName = wfCreate.spec.name;
+        setWfCreate(null);
+        setWfPreview({ name: specName, input: prompt });
+        setStepIndex(0);
+        setWfNotice(null);
+        updatePromptDraft({ promptEditing: false });
+        return;
       }
 
       if (running) return;
@@ -1869,6 +1877,9 @@ function HistoryPanel({
 
 /**
  * Migrate session overrides from an old workflow name to a new one.
+ *
+ * NOTE: Returning `prev` by reference when no migration is needed is an intentional
+ * React state updater optimization to prevent unnecessary component re-renders.
  */
 export function migrateSessionOverrides(
   prev: Record<string, WorkflowStepOverrides>,

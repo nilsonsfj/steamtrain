@@ -1290,10 +1290,8 @@ var SteamtrainReducer = (() => {
         });
       });
       saveBtn.disabled = true; saveBtn.textContent = "Saving\u2026";
-      // Cloning uses the chosen scope; editing re-saves to the workflow's own
-      // writable layer (project edits stay in steamtrain.json, otherwise user).
       var payload = { spec: spec, scope: creating ? scopeSel.value : (S.source === "project" ? "project" : "user") };
-      if (!creating) payload.previousName = S.selected;
+      if (!creating && isWritable) payload.previousName = S.selected;
       api("PUT", "/api/workflows/" + encodeURIComponent(targetName), payload).then(function (r) {
         saveBtn.disabled = false; saveBtn.textContent = creating ? "Save copy" : "Save";
         if (r.status === 200 && r.body.ok) {

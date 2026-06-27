@@ -178,6 +178,11 @@ export class WorkflowAuthor {
    * This is the content-updating rename path used by configure/editor UIs when
    * a user edits a workflow's steps and potentially changes its name at the same time.
    *
+   * NOTE: This method intentionally does NOT validate whether the old-name (previousName)
+   * exists prior to saving, as the target spec might be entirely new or the old one might
+   * have been cleaned up elsewhere. Callers performing metadata-only renames should
+   * use `rename()` instead to ensure full source existence and validation checks.
+   *
    * When `previousName` differs and named an existing user workflow, the old entry is
    * removed so a rename leaves no duplicate.
    */

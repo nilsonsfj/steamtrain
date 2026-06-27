@@ -302,6 +302,12 @@ export function extractWorkflowSpec(
     };
   }
 
+  if (opts.name && shape.data.name && opts.name !== shape.data.name) {
+    console.warn(
+      `[extractWorkflowSpec] User-provided name hint '${opts.name}' overrides LLM-generated name '${shape.data.name}'`,
+    );
+  }
+
   const nameSource =
     opts.name ?? shape.data.name ?? opts.fallbackName ?? shape.data.description ?? DEFAULT_NAME;
   const spec: WorkflowSpec = { ...shape.data, name: slugifyWorkflowName(nameSource) };
