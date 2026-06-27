@@ -54,6 +54,8 @@ export interface Channel<T> {
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
 
+const MAX_QUEUE_SIZE = 1000;
+
 /**
  * A single-consumer async queue. Producers (parallel step workers) call
  * `push`; one consumer (the engine's phase loop) iterates the items in order.
@@ -75,6 +77,7 @@ export function createChannel<T>(): Channel<T> {
   return {
     push(item: T): void {
       if (closed) return;
+      if (queue.length >= MAX_QUEUE_SIZE) return;
       queue.push(item);
       wake();
     },

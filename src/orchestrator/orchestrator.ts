@@ -99,6 +99,8 @@ export class Orchestrator {
 
   /** Stream normalized events for a workspace dispatch. */
   run(id: WorkspaceId, prompt: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
+    const dispatchCheck = this.canDispatch(id);
+    if (!dispatchCheck.ok) throw new Error(dispatchCheck.reason);
     const { adapter, entry } = this.resolve(id);
     return adapter.run({
       prompt,

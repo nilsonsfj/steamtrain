@@ -16,6 +16,8 @@ import {
   workflowCacheKey,
 } from "../workflow";
 
+const MAX_FRAMES_PER_RUN = 5000;
+
 /**
  * The slice of the {@link Orchestrator} the web layer depends on. Declaring it
  * as an interface keeps the server testable with a lightweight fake and avoids
@@ -35,6 +37,13 @@ export interface WorkflowHost {
 }
 
 export type RunStatus = "running" | "done" | "error" | "canceled";
+
+export class TooManyRuns extends Error {
+  constructor(max: number) {
+    super(`too many concurrent runs (max ${max})`);
+    this.name = "TooManyRuns";
+  }
+}
 
 /** One serialized server-sent frame, retained so late subscribers can replay. */
 interface RunFrame {
@@ -94,6 +103,8 @@ export interface RunManagerOptions {
   historyStore?: WorkflowHistoryStore;
   /** Keep finished runs around this long (ms) so a reload can still replay. */
   retainMs?: number;
+  /** Maximum concurrent running workflows. Exceeding returns 503-style error. 0 = unlimited. */
+  maxConcurrent?: number;
 }
 
 const DEFAULT_RETAIN_MS = 5 * 60_000;
@@ -111,6 +122,8 @@ export class WorkflowRunManager {
   private readonly cwd: string;
   private readonly historyStore?: WorkflowHistoryStore;
   private readonly retainMs: number;
+  private readonly maxConcurrent: number;
+  private runningCount = 0;
 
   constructor(options: RunManagerOptions) {
     this.host = options.host;
@@ -118,6 +131,7 @@ export class WorkflowRunManager {
     this.cwd = options.cwd;
     this.historyStore = options.historyStore;
     this.retainMs = options.retainMs ?? DEFAULT_RETAIN_MS;
+    this.maxConcurrent = options.maxConcurrent ?? 0;
   }
 
   /** Validate and launch a run; the event loop runs detached in the background. */
@@ -128,6 +142,10 @@ export class WorkflowRunManager {
   ): StartRunResult {
     const text = input.trim();
     if (!text) return { ok: false, error: "input is required" };
+
+    if (this.maxConcurrent > 0 && this.runningCount >= this.maxConcurrent) {
+      throw new TooManyRuns(this.maxConcurrent);
+    }
 
     const spec = this.host.listWorkflows()[workflow];
     if (!spec) return { ok: false, error: `unknown workflow '${workflow}'` };
@@ -148,6 +166,7 @@ export class WorkflowRunManager {
       controller: new AbortController(),
     };
     this.runs.set(run.id, run);
+    this.runningCount += 1;
     void this.drive(run, spec, opts?.fresh ?? false, opts?.seed);
     return { ok: true, runId: run.id };
   }
@@ -203,7 +222,9 @@ export class WorkflowRunManager {
   }
 
   private emit(run: Run, payload: string, terminal: boolean): void {
-    run.frames.push({ payload, terminal });
+    if (run.frames.length < MAX_FRAMES_PER_RUN || terminal) {
+      run.frames.push({ payload, terminal });
+    }
     for (const listener of run.listeners) listener(payload, terminal);
   }
 
@@ -278,6 +299,7 @@ export class WorkflowRunManager {
         run.error = err instanceof Error ? err.message : String(err);
       }
     } finally {
+      this.runningCount = Math.max(0, this.runningCount - 1);
       run.endedAt = Date.now();
       // The outcome is resolved now; lock out cancellation synchronously before
       // the async history write, so a cancel during that window can't report an

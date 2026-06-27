@@ -770,7 +770,7 @@ describe("runWorkflow", () => {
     expect(state.runs).toHaveLength(0);
     expect(resumed.some((e) => e.kind === "phase_start" && e.phaseId === "later")).toBe(false);
     expect(resumed.some((e) => e.kind === "step_done" && e.stepId === "gate" && e.cached)).toBe(
-      true,
+      false,
     );
   });
 
@@ -811,6 +811,7 @@ describe("runWorkflow", () => {
     );
     expect(state.runs).toHaveLength(0);
     expect(events.some((e) => e.kind === "phase_start" && e.phaseId === "later")).toBe(false);
+    // onFalse: "stop" is a graceful halt — workflow stays ok
     expect(events.at(-1)).toMatchObject({ kind: "workflow_done", ok: true });
   });
 

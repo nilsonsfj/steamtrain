@@ -186,12 +186,12 @@ export class WorkflowAuthor {
    * When `previousName` differs and named an existing user workflow, the old entry is
    * removed so a rename leaves no duplicate.
    */
-  save(
+  async save(
     name: string,
     spec: WorkflowSpec,
     previousName?: string,
     scope: WorkflowScope = "user",
-  ): AuthorWriteResult {
+  ): Promise<AuthorWriteResult> {
     const slug = slugifyWorkflowName(name || spec.name || "");
     // Defensive check; slugifyWorkflowName currently always returns a fallback name.
     if (!slug) return { ok: false, error: "a workflow name is required" };
@@ -207,7 +207,7 @@ export class WorkflowAuthor {
     const previousSource =
       previousName && previousName !== slug ? this.host.workflowSource(previousName) : undefined;
 
-    const written = this.persist(slug, spec, { scope });
+    const written = await this.persist(slug, spec, { scope });
     if (!written.ok) return written;
 
     // On a rename, drop the old entry so we don't leave a duplicate. Only an
@@ -217,7 +217,7 @@ export class WorkflowAuthor {
     // workflow in case the save operation fails, accepting the double reload.
     if (previousName && previousName !== slug && previousSource) {
       if (previousSource === "user") {
-        deleteUserWorkflow(previousName, this.home);
+        await deleteUserWorkflow(previousName, this.home);
         this.reload();
       } else if (previousSource === "project") {
         deleteProjectWorkflow(previousName, this.projectConfigPath);
@@ -288,7 +288,7 @@ export class WorkflowAuthor {
    * workflows are deleted from `~/.steamtrain/workflows.json`, project workflows
    * from the project `steamtrain.json`; bundled workflows cannot be deleted.
    */
-  remove(name: string): AuthorDeleteResult {
+  async remove(name: string): Promise<AuthorDeleteResult> {
     const source = this.host.workflowSource(name);
     if (!source) return { ok: false, error: `unknown workflow '${name}'` };
     if (source === "bundled") {
@@ -297,7 +297,7 @@ export class WorkflowAuthor {
     const result =
       source === "project"
         ? deleteProjectWorkflow(name, this.projectConfigPath)
-        : deleteUserWorkflow(name, this.home);
+        : await deleteUserWorkflow(name, this.home);
     if (!result.ok) return { ok: false, error: result.error };
     this.reload();
     return { ok: true, removed: result.removed };
@@ -319,10 +319,10 @@ export class WorkflowAuthor {
    * saved / skipped / unchanged. Reloads the live catalog when anything was
    * written. This is the shared core behind the TUI's `/saveworkflows`.
    */
-  flushSessionOverrides(
+  async flushSessionOverrides(
     sessionOverrides: Record<string, WorkflowStepOverrides>,
-  ): SaveSessionWorkflowsResult {
-    const result = saveSessionWorkflowsToUser({
+  ): Promise<SaveSessionWorkflowsResult> {
+    const result = await saveSessionWorkflowsToUser({
       catalog: this.catalog(),
       sessionOverrides,
       home: this.home,
@@ -331,11 +331,11 @@ export class WorkflowAuthor {
     return result;
   }
 
-  private persist(
+  private async persist(
     name: string,
     spec: WorkflowSpec,
     extra?: { raw?: string; scope?: WorkflowScope },
-  ): AuthorWriteResult {
+  ): Promise<AuthorWriteResult> {
     const scope: WorkflowScope = extra?.scope ?? "user";
     const full: WorkflowSpec = { ...spec, name };
     const valid = validateWorkflow(full);
@@ -344,7 +344,7 @@ export class WorkflowAuthor {
     const saved =
       scope === "project"
         ? saveProjectWorkflow(name, full, this.projectConfigPath)
-        : saveUserWorkflow(name, full, this.home);
+        : await saveUserWorkflow(name, full, this.home);
     if (!saved.ok) return { ok: false, error: saved.error, raw: extra?.raw };
 
     this.reload();

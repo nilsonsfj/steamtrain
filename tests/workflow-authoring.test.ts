@@ -144,10 +144,10 @@ describe("WorkflowAuthor", () => {
     expect(claude!.models.some((m) => m.efforts.length > 0)).toBe(true);
   });
 
-  it("saves a hand-edited spec to the user file and live catalog", () => {
+  it("saves a hand-edited spec to the user file and live catalog", async () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);
-    const result = author.save("My Flow", userFileSpec("My Flow"));
+    const result = await author.save("My Flow", userFileSpec("My Flow"));
     expect(result.ok).toBe(true);
     expect(result.name).toBe("my-flow");
     expect(host.workflowSource("my-flow")).toBe("user");
@@ -155,9 +155,9 @@ describe("WorkflowAuthor", () => {
     expect(onDisk.workflows["my-flow"]).toBeTruthy();
   });
 
-  it("rejects an invalid spec", () => {
+  it("rejects an invalid spec", async () => {
     const host = new FakeHost(home);
-    const result = makeAuthor(host).save("broken", { name: "broken", phases: [] } as WorkflowSpec);
+    const result = await makeAuthor(host).save("broken", { name: "broken", phases: [] } as WorkflowSpec);
     expect(result.ok).toBe(false);
     expect(result.error).toBeTruthy();
   });
@@ -192,36 +192,36 @@ describe("WorkflowAuthor", () => {
     expect(result.error).toMatch(/not available/i);
   });
 
-  it("removes a user workflow but refuses bundled ones", () => {
+  it("removes a user workflow but refuses bundled ones", async () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);
-    author.save("temp", userFileSpec("temp"));
+    await author.save("temp", userFileSpec("temp"));
     expect(host.workflowSource("temp")).toBe("user");
 
-    const removed = author.remove("temp");
+    const removed = await author.remove("temp");
     expect(removed.ok).toBe(true);
     expect(removed.removed).toBe(true);
     expect(host.workflowSource("temp")).toBeUndefined();
 
-    const bundled = author.remove("bug-hunt");
+    const bundled = await author.remove("bug-hunt");
     expect(bundled.ok).toBe(false);
     expect(bundled.error).toMatch(/cannot be deleted/i);
   });
 
-  it("renames by dropping the previous user entry", () => {
+  it("renames by dropping the previous user entry", async () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);
-    author.save("old-name", userFileSpec("old-name"));
-    const result = author.save("new-name", userFileSpec("new-name"), "old-name");
+    await author.save("old-name", userFileSpec("old-name"));
+    const result = await author.save("new-name", userFileSpec("new-name"), "old-name");
     expect(result.ok).toBe(true);
     expect(host.workflowSource("new-name")).toBe("user");
     expect(host.workflowSource("old-name")).toBeUndefined();
   });
 
-  it("clones a bundled workflow into a user copy, leaving the source intact", () => {
+  it("clones a bundled workflow into a user copy, leaving the source intact", async () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);
-    const result = author.clone("bug-hunt", "My Bug Hunt");
+    const result = await author.clone("bug-hunt", "My Bug Hunt");
     expect(result.ok).toBe(true);
     expect(result.name).toBe("my-bug-hunt");
     expect(host.workflowSource("my-bug-hunt")).toBe("user");
@@ -229,34 +229,34 @@ describe("WorkflowAuthor", () => {
     expect(host.workflowSource("bug-hunt")).toBe("bundled");
   });
 
-  it("refuses to clone an unknown workflow or onto the same name", () => {
+  it("refuses to clone an unknown workflow or onto the same name", async () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);
-    expect(author.clone("nope", "x").ok).toBe(false);
-    expect(author.clone("bug-hunt", "bug-hunt").error).toMatch(/different name/i);
+    expect((await author.clone("nope", "x")).ok).toBe(false);
+    expect((await author.clone("bug-hunt", "bug-hunt")).error).toMatch(/different name/i);
   });
 
-  it("refuses to clone onto an existing workflow rather than clobbering it", () => {
+  it("refuses to clone onto an existing workflow rather than clobbering it", async () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);
-    author.save("keep-me", userFileSpec("keep-me"));
+    await author.save("keep-me", userFileSpec("keep-me"));
     // Cloning onto an existing user workflow must fail...
-    const ontoUser = author.clone("bug-hunt", "keep-me");
+    const ontoUser = await author.clone("bug-hunt", "keep-me");
     expect(ontoUser.ok).toBe(false);
     expect(ontoUser.error).toMatch(/already exists/i);
     // ...and the existing workflow is left intact.
     expect(host.workflowSource("keep-me")).toBe("user");
     // Cloning onto a bundled name is likewise refused (no silent shadow).
-    const ontoBundled = author.clone("keep-me", "bug-hunt");
+    const ontoBundled = await author.clone("keep-me", "bug-hunt");
     expect(ontoBundled.ok).toBe(false);
     expect(ontoBundled.error).toMatch(/already exists/i);
     expect(host.workflowSource("bug-hunt")).toBe("bundled");
   });
 
-  it("saves a hand-edited spec to the project layer (steamtrain.json)", () => {
+  it("saves a hand-edited spec to the project layer (steamtrain.json)", async () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);
-    const result = author.save("Proj Flow", userFileSpec("Proj Flow"), undefined, "project");
+    const result = await author.save("Proj Flow", userFileSpec("Proj Flow"), undefined, "project");
     expect(result.ok).toBe(true);
     expect(result.source).toBe("project");
     expect(host.workflowSource("proj-flow")).toBe("project");
@@ -279,21 +279,21 @@ describe("WorkflowAuthor", () => {
     expect(host.workflowSource("projecho")).toBe("project");
   });
 
-  it("clones into the project layer and removes a project workflow", () => {
+  it("clones into the project layer and removes a project workflow", async () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);
-    const cloned = author.clone("bug-hunt", "Team Bug Hunt", "project");
+    const cloned = await author.clone("bug-hunt", "Team Bug Hunt", "project");
     expect(cloned.ok).toBe(true);
     expect(host.workflowSource("team-bug-hunt")).toBe("project");
     expect(host.workflowSource("bug-hunt")).toBe("bundled");
 
-    const removed = author.remove("team-bug-hunt");
+    const removed = await author.remove("team-bug-hunt");
     expect(removed.ok).toBe(true);
     expect(removed.removed).toBe(true);
     expect(host.workflowSource("team-bug-hunt")).toBeUndefined();
   });
 
-  it("writes project workflows to an explicit projectConfigPath (honors --config-file)", () => {
+  it("writes project workflows to an explicit projectConfigPath (honors --config-file)", async () => {
     const host = new FakeHost(home);
     // A config path that is NOT <cwd>/steamtrain.json, mirroring `--config-file`.
     const customPath = join(home, "nested", "custom.steamtrain.json");
@@ -306,7 +306,7 @@ describe("WorkflowAuthor", () => {
       createAdapter: jsonAdapter(VALID_SPEC),
     });
 
-    const result = author.save("custom-proj", userFileSpec("custom-proj"), undefined, "project");
+    const result = await author.save("custom-proj", userFileSpec("custom-proj"), undefined, "project");
     expect(result.ok).toBe(true);
     expect(result.savedPath).toBe(customPath);
     expect(host.workflowSource("custom-proj")).toBe("project");
@@ -316,78 +316,78 @@ describe("WorkflowAuthor", () => {
     expect(onDisk.workflows["custom-proj"]).toBeTruthy();
   });
 
-  it("renaming a project workflow drops the old project entry (no duplicate)", () => {
+  it("renaming a project workflow drops the old project entry (no duplicate)", async () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);
-    author.save("proj-old", userFileSpec("proj-old"), undefined, "project");
+    await author.save("proj-old", userFileSpec("proj-old"), undefined, "project");
     expect(host.workflowSource("proj-old")).toBe("project");
 
-    const renamed = author.save("proj-new", userFileSpec("proj-new"), "proj-old", "project");
+    const renamed = await author.save("proj-new", userFileSpec("proj-new"), "proj-old", "project");
     expect(renamed.ok).toBe(true);
     expect(host.workflowSource("proj-new")).toBe("project");
     expect(host.workflowSource("proj-old")).toBeUndefined();
   });
 
-  it("renames a user workflow using the rename method", () => {
+  it("renames a user workflow using the rename method", async () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);
-    author.save("user-old", userFileSpec("user-old"));
+    await author.save("user-old", userFileSpec("user-old"));
     expect(host.workflowSource("user-old")).toBe("user");
 
-    const renamed = author.rename("user-old", "user-new");
+    const renamed = await author.rename("user-old", "user-new");
     expect(renamed.ok).toBe(true);
     expect(renamed.name).toBe("user-new");
     expect(host.workflowSource("user-new")).toBe("user");
     expect(host.workflowSource("user-old")).toBeUndefined();
   });
 
-  it("refuses to rename bundled workflows", () => {
+  it("refuses to rename bundled workflows", async () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);
     expect(host.workflowSource("bug-hunt")).toBe("bundled");
 
-    const renamed = author.rename("bug-hunt", "bug-hunt-new");
+    const renamed = await author.rename("bug-hunt", "bug-hunt-new");
     expect(renamed.ok).toBe(false);
     expect(renamed.error).toContain("only user or project workflows can be renamed");
     expect(host.workflowSource("bug-hunt")).toBe("bundled");
     expect(host.workflowSource("bug-hunt-new")).toBeUndefined();
   });
 
-  it("refuses to rename to an existing workflow name", () => {
+  it("refuses to rename to an existing workflow name", async () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);
-    author.save("wf1", userFileSpec("wf1"));
-    author.save("wf2", userFileSpec("wf2"));
+    await author.save("wf1", userFileSpec("wf1"));
+    await author.save("wf2", userFileSpec("wf2"));
 
-    const renamed = author.rename("wf1", "wf2");
+    const renamed = await author.rename("wf1", "wf2");
     expect(renamed.ok).toBe(false);
     expect(renamed.error).toContain("already exists");
     expect(host.workflowSource("wf1")).toBe("user");
     expect(host.workflowSource("wf2")).toBe("user");
   });
 
-  it("save method refuses to rename/overwrite an existing workflow name when previousName is provided", () => {
+  it("save method refuses to rename/overwrite an existing workflow name when previousName is provided", async () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);
-    author.save("wf1", userFileSpec("wf1"));
-    author.save("wf2", userFileSpec("wf2"));
+    await author.save("wf1", userFileSpec("wf1"));
+    await author.save("wf2", userFileSpec("wf2"));
 
-    const renamed = author.save("wf2", userFileSpec("wf2-updated"), "wf1");
+    const renamed = await author.save("wf2", userFileSpec("wf2-updated"), "wf1");
     expect(renamed.ok).toBe(false);
     expect(renamed.error).toContain("already exists");
     expect(host.workflowSource("wf1")).toBe("user");
     expect(host.workflowSource("wf2")).toBe("user");
   });
 
-  it("removing the last project workflow leaves zero project entries after reload", () => {
+  it("removing the last project workflow leaves zero project entries after reload", async () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);
-    author.save("only-proj", userFileSpec("only-proj"), undefined, "project");
+    await author.save("only-proj", userFileSpec("only-proj"), undefined, "project");
     expect(host.workflowSource("only-proj")).toBe("project");
 
     // remove() reloads from disk; the steamtrain.json still exists (now with an
     // empty workflows map), so the deletion must not be resurrected.
-    const removed = author.remove("only-proj");
+    const removed = await author.remove("only-proj");
     expect(removed.ok).toBe(true);
     expect(host.workflowSource("only-proj")).toBeUndefined();
     // No catalog entry remains project-sourced.
@@ -397,10 +397,10 @@ describe("WorkflowAuthor", () => {
     expect(projectNames).toEqual([]);
   });
 
-  it("previews a workflow with staged step overrides without saving", () => {
+  it("previews a workflow with staged step overrides without saving", async () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);
-    author.save("flow", userFileSpec("flow"));
+    await author.save("flow", userFileSpec("flow"));
     const preview = author.previewWithOverrides("flow", { s1: { model: "opencode/other" } });
     expect(firstStep(preview).model).toBe("opencode/other");
     // Disk is unchanged: re-reading still has the original model.
@@ -410,17 +410,17 @@ describe("WorkflowAuthor", () => {
     expect(firstStep(onDisk.workflows.flow).model).toBe("opencode/mimo-v2.5-free");
   });
 
-  it("flushes staged overrides, reporting saved and unchanged", () => {
+  it("flushes staged overrides, reporting saved and unchanged", async () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);
-    author.save("flow", userFileSpec("flow"));
+    await author.save("flow", userFileSpec("flow"));
 
-    const saved = author.flushSessionOverrides({ flow: { s1: { model: "opencode/changed" } } });
+    const saved = await author.flushSessionOverrides({ flow: { s1: { model: "opencode/changed" } } });
     expect(saved.saved).toEqual(["flow"]);
     expect(firstStep(host.listWorkflows().flow).model).toBe("opencode/changed");
 
     // Re-flushing the identical override is a no-op (unchanged).
-    const again = author.flushSessionOverrides({ flow: { s1: { model: "opencode/changed" } } });
+    const again = await author.flushSessionOverrides({ flow: { s1: { model: "opencode/changed" } } });
     expect(again.saved).toEqual([]);
     expect(again.unchanged).toEqual(["flow"]);
   });

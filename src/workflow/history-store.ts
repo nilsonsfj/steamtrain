@@ -68,9 +68,14 @@ export async function listRunRecords(rootDir: string, limit?: number): Promise<R
     if (isEnoent(err)) return [];
     throw err;
   }
-  const records = await Promise.all(
-    entries.filter((name) => name.endsWith(".json")).map((name) => readRecord(join(rootDir, name))),
-  );
+  const BATCH_SIZE = 10;
+  const records: (RunRecord | undefined)[] = [];
+  const filesToRead = entries.filter((name) => name.endsWith(".json"));
+  for (let i = 0; i < filesToRead.length; i += BATCH_SIZE) {
+    const batch = filesToRead.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.all(batch.map((name) => readRecord(join(rootDir, name))));
+    records.push(...batchResults);
+  }
   const summaries = records
     .filter((record): record is RunRecord => record !== undefined)
     .map(runRecordSummary);
@@ -165,6 +170,12 @@ function validateRecord(file: string): RunRecord | undefined {
   if (typeof r.startedAt !== "number") return undefined;
   if (r.status !== "done" && r.status !== "error" && r.status !== "canceled") return undefined;
   if (!Array.isArray(r.phases)) return undefined;
+  for (const phase of r.phases as unknown[]) {
+    if (!phase || typeof phase !== "object") return undefined;
+    const p = phase as Record<string, unknown>;
+    if (typeof p.phaseId !== "string" || typeof p.title !== "string") return undefined;
+    if (typeof p.index !== "number" || !Array.isArray(p.steps)) return undefined;
+  }
   return {
     version: r.version,
     id: r.id,

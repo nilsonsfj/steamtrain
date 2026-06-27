@@ -1,4 +1,6 @@
 import { Box, Text } from "ink";
+import { useEffect, useState } from "react";
+import { truncate } from "../agents/util";
 import { type RunRecordSummary, formatRunTotals } from "../workflow";
 import { selectVisibleWindow } from "./workflow-list-window";
 
@@ -30,6 +32,12 @@ export function WorkflowHistory({
   const clamped = Math.min(selectedIndex, Math.max(0, runs.length - 1));
   const listBudget = Math.max(1, height - 3);
   const window = selectVisibleWindow(runs, clamped, listBudget);
+
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} height={height}>
@@ -103,10 +111,6 @@ function HistoryRow({
       </Box>
     </Box>
   );
-}
-
-function truncate(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
 function relativeTime(ts: number): string {

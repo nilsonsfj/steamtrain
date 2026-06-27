@@ -668,7 +668,7 @@ async function runWorkflowCreateCommand(
   const saved = options.save
     ? options.scope === "project"
       ? saveProjectWorkflow(spec.name, spec, projectConfigPath)
-      : saveUserWorkflow(spec.name, spec)
+      : await saveUserWorkflow(spec.name, spec)
     : undefined;
 
   if (options.json) {

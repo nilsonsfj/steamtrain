@@ -65,9 +65,14 @@ export async function* runAgentProcess(params: AgentProcessParams): AsyncGenerat
         yield { kind: "unknown", agent: id, ts: Date.now(), raw: item.line };
         continue;
       }
-      for (const event of map(raw)) {
-        if (event.kind === "error") sawError = true;
-        yield event;
+      try {
+        for (const event of map(raw)) {
+          if (event.kind === "error") sawError = true;
+          yield event;
+        }
+      } catch (err) {
+        sawError = true;
+        yield { kind: "error", agent: id, ts: Date.now(), message: `mapper error: ${err instanceof Error ? err.message : String(err)}` };
       }
       continue;
     }

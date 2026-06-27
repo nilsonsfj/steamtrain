@@ -20,7 +20,7 @@ import {
 } from "../workflow";
 import type { WorkspaceConfig } from "../workspace";
 import { PAGE_HTML } from "./html";
-import { type WorkflowHost, WorkflowRunManager } from "./runs";
+import { type WorkflowHost, WorkflowRunManager, TooManyRuns } from "./runs";
 
 export interface WebServerDeps {
   host: WorkflowHost;
@@ -76,13 +76,32 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
   });
   res.end(text);
 }
 
+/** Maximum body size: 1 MiB. Rejects larger payloads with HTTP 413. */
+const MAX_BODY_BYTES = 1 * 1024 * 1024;
+
+class PayloadTooLarge extends Error {
+  constructor() {
+    super("payload too large");
+    this.name = "PayloadTooLarge";
+  }
+}
+
 async function readBody(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let totalBytes = 0;
+  for await (const chunk of req) {
+    const buf = chunk as Buffer;
+    totalBytes += buf.length;
+    if (totalBytes > MAX_BODY_BYTES) {
+      throw new PayloadTooLarge();
+    }
+    chunks.push(buf);
+  }
   return Buffer.concat(chunks).toString("utf8");
 }
 
@@ -113,9 +132,18 @@ async function readBody(req: IncomingMessage): Promise<string> {
 export function createWebServer(deps: WebServerDeps): Server {
   return createServer((req, res) => {
     void handle(req, res, deps).catch((err) => {
-      if (!res.headersSent)
-        sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
-      else res.end();
+      if (!res.headersSent) {
+        const status = err instanceof PayloadTooLarge ? 413 : 500;
+        const error =
+          err instanceof PayloadTooLarge
+            ? "payload too large"
+            : "internal server error";
+        sendJson(res, status, { error });
+        // Drain any remaining body data to free memory
+        if (err instanceof PayloadTooLarge) req.destroy();
+      } else {
+        res.end();
+      }
     });
   });
 }
@@ -130,7 +158,12 @@ async function handle(
   const method = req.method ?? "GET";
 
   if (method === "GET" && (path === "/" || path === "/index.html")) {
-    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+    res.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+    });
     res.end(PAGE_HTML);
     return;
   }
@@ -198,7 +231,7 @@ async function handle(
       const previousName =
         typeof parsed.previousName === "string" ? parsed.previousName : undefined;
       const scope = parsed.scope === "project" ? "project" : "user";
-      const result = deps.author.save(name, parsed.spec as WorkflowSpec, previousName, scope);
+      const result = await deps.author.save(name, parsed.spec as WorkflowSpec, previousName, scope);
       sendJson(res, result.ok ? 200 : 400, result);
       return;
     }
@@ -208,7 +241,7 @@ async function handle(
         sendJson(res, 501, { error: "workflow authoring is not enabled" });
         return;
       }
-      const result = deps.author.remove(name);
+      const result = await deps.author.remove(name);
       sendJson(res, result.ok ? 200 : 400, result);
       return;
     }
@@ -260,12 +293,20 @@ async function handle(
       sendJson(res, 404, { error: `unknown run '${id}'` });
       return;
     }
-    const result = deps.runs.rerunFromRecord(record, mode);
-    if (!result.ok) {
-      sendJson(res, 400, { error: result.error });
-      return;
+    try {
+      const result = deps.runs.rerunFromRecord(record, mode);
+      if (!result.ok) {
+        sendJson(res, 400, { error: result.error });
+        return;
+      }
+      sendJson(res, 201, { runId: result.runId, downgraded: result.downgraded });
+    } catch (err) {
+      if (err instanceof TooManyRuns) {
+        sendJson(res, 503, { error: err.message });
+      } else {
+        throw err;
+      }
     }
-    sendJson(res, 201, { runId: result.runId, downgraded: result.downgraded });
     return;
   }
 
@@ -282,14 +323,22 @@ async function handle(
       sendJson(res, 400, { error: "body must include string 'workflow' and 'input'" });
       return;
     }
-    const result = deps.runs.start(parsed.workflow, parsed.input, {
-      fresh: parsed.fresh === true,
-    });
-    if (!result.ok) {
-      sendJson(res, 400, { error: result.error });
-      return;
+    try {
+      const result = deps.runs.start(parsed.workflow, parsed.input, {
+        fresh: parsed.fresh === true,
+      });
+      if (!result.ok) {
+        sendJson(res, 400, { error: result.error });
+        return;
+      }
+      sendJson(res, 201, { runId: result.runId });
+    } catch (err) {
+      if (err instanceof TooManyRuns) {
+        sendJson(res, 503, { error: err.message });
+      } else {
+        throw err;
+      }
     }
-    sendJson(res, 201, { runId: result.runId });
     return;
   }
 
@@ -343,6 +392,7 @@ async function streamGenerate(
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache, no-transform",
+    "x-content-type-options": "nosniff",
     connection: "keep-alive",
   });
   res.write(": open\n\n");
@@ -380,6 +430,7 @@ function streamRun(runId: string, runs: WorkflowRunManager, res: ServerResponse)
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache, no-transform",
+    "x-content-type-options": "nosniff",
     connection: "keep-alive",
   });
   // A first comment line opens the stream promptly for the browser.
@@ -413,6 +464,8 @@ export interface StartWebUiOptions {
   host?: string;
   stdout?: (text: string) => void;
   stderr?: (text: string) => void;
+  /** Maximum concurrent workflow runs. 0 = unlimited. */
+  maxConcurrent?: number;
 }
 
 export const DEFAULT_WEB_PORT = 4317;
@@ -442,11 +495,17 @@ export async function startWebUi(
   // Health is reported live via /api/doctor; the page must not wait on it (the
   // doctor probes agent binaries and can take seconds), so we serve immediately
   // and let the catalog/health populate in the background.
-  let doctor: DoctorResult[] = [];
+  const doctorState = { results: [] as DoctorResult[] };
 
   const cacheStore = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
   const historyStore = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
-  const runs = new WorkflowRunManager({ host: orchestrator, cacheStore, historyStore, cwd });
+  const runs = new WorkflowRunManager({
+    host: orchestrator,
+    cacheStore,
+    historyStore,
+    cwd,
+    maxConcurrent: options.maxConcurrent ?? 5,
+  });
   const author = new WorkflowAuthor({
     host: orchestrator,
     config: options.config,
@@ -461,7 +520,7 @@ export async function startWebUi(
     author,
     history: historyStore,
     workflowSource: (name) => orchestrator.workflowSource(name),
-    doctor: () => doctor,
+    doctor: () => doctorState.results,
     configLabel: options.configLabel,
   });
 
@@ -483,7 +542,7 @@ export async function startWebUi(
       const results = await runDoctor(options.config);
       orchestrator.setDoctor(results);
       await refreshAgentCatalogCaches(options.config, results);
-      doctor = results;
+      doctorState.results = results;
       const bad = results.filter((d) => d.status !== "ok").map((d) => d.agent);
       out(
         bad.length
@@ -495,5 +554,5 @@ export async function startWebUi(
     }
   })();
 
-  return { server, url, doctor };
+  return { server, url, get doctor() { return doctorState.results; } };
 }

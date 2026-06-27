@@ -460,8 +460,12 @@ function findJsonObject(text: string): string | undefined {
 
 /** Return the contents of the first ```json (or ```) fenced block, if any. */
 function extractFenced(text: string): string | undefined {
-  const fence = /```(?:json)?\s*\n?([\s\S]*?)```/i.exec(text);
-  return fence?.[1];
+  // Prefer ```json blocks first
+  const jsonFence = /```json[ \t]*\r?\n?([\s\S]*?)```/i.exec(text);
+  if (jsonFence?.[1]) return jsonFence[1];
+  // Fall back to bare ``` blocks
+  const bareFence = /```[ \t]*\r?\n?([\s\S]*?)```/i.exec(text);
+  return bareFence?.[1];
 }
 
 function message(err: unknown): string {

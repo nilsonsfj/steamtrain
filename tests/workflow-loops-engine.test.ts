@@ -634,9 +634,8 @@ describe("engine loops", () => {
     const loops = events.filter((e) => e.kind === "loop_iteration");
     expect(loops.length).toBe(2); // iterations 2 and 3 (first pass is iteration 1)
     const done = events.find((e) => e.kind === "workflow_done") as { ok: boolean };
-    // "stop" halts the workflow gracefully (ok:true), unlike "fail" (ok:false).
-    // The key contract is that execution stops after the cap — no further phases
-    // beyond the gate phase should run.
+    // "stop" halts the workflow gracefully (workflow ok:true) — the step is
+    // marked ok:false (gate condition failed) but the workflow stays ok.
     expect(done.ok).toBe(true);
     // No phases after the gate phase should have run (stop breaks the loop).
     const phaseIds = events

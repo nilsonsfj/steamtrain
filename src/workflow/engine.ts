@@ -231,7 +231,11 @@ export async function* runWorkflow(
         outputs.set(step.id, cached.output);
         results.set(step.id, cached);
         allResults.push(cached);
-        if (!cached.ok) phaseOk = false;
+        if (!cached.ok) {
+          // onFalse: "stop" is a graceful halt — same logic as the live path
+          const isGracefulStop = cached.gate?.onFalse === "stop";
+          if (!isGracefulStop) phaseOk = false;
+        }
         if (cached.gate) {
           channel.push({
             kind: "gate_evaluated",
@@ -314,7 +318,13 @@ export async function* runWorkflow(
       results.set(step.id, result);
       if (result.ok) cache.set(step.id, result);
       allResults.push(result);
-      if (!result.ok) phaseOk = false;
+      if (!result.ok) {
+        // onFalse: "stop" is a graceful halt — the step is not ok (gate
+        // condition failed) but the workflow stays ok per the documented
+        // contract. onFalse: "fail" should make the workflow fail.
+        const isGracefulStop = execution.gate?.onFalse === "stop";
+        if (!isGracefulStop) phaseOk = false;
+      }
       if (execution.stop) stopAfterPhase = true;
 
       channel.push({
@@ -598,7 +608,7 @@ async function executeStep(
     const started = Date.now();
     const evaluation = evaluateGate(step.condition, ctx);
     const onFalse = step.onFalse ?? "continue";
-    const ok = evaluation.passed || onFalse !== "fail";
+    const ok = evaluation.passed || onFalse === "continue";
     const target = step.target ?? (evaluation.passed ? "passed" : "blocked");
     return {
       result: {
@@ -883,7 +893,12 @@ async function executeForEachStep(
     ts: Date.now(),
   });
 
-  const childResults: StepResult[] = [];
+  const childResults: StepResult[] = values.map((_value, index) => ({
+    stepId: `${step.id}[${index}]`,
+    ok: false,
+    output: "child failed before producing a result",
+    durationMs: 0,
+  }));
   const limit = Math.min(Math.max(1, ctx.deps.maxConcurrency), MAX_CONCURRENCY);
   await runPool(
     values.map((value, index) => ({
@@ -938,9 +953,8 @@ async function executeForEachStep(
     ctx.signal,
   );
 
-  const compactChildren = childResults.filter(Boolean);
-  const ok = compactChildren.length === values.length && compactChildren.every((child) => child.ok);
-  const output = compactChildren
+  const ok = childResults.length === values.length && childResults.every((child) => child.ok);
+  const output = childResults
     .map((child) => `--- ${child.stepId} (${child.item?.value ?? "item"}) ---\n${child.output}`)
     .join("\n\n");
 
@@ -950,11 +964,11 @@ async function executeForEachStep(
       ok,
       output,
       items: values,
-      childResults: compactChildren,
+      childResults,
       error: ok ? undefined : "one or more fan-out items failed",
       durationMs: Date.now() - started,
     },
-    childResults: compactChildren,
+    childResults,
   };
 }
 

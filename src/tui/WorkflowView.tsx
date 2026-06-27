@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import { useMemo } from "react";
 import { truncate } from "../agents/util";
 import { AGENT_COLOR } from "./theme";
+import { statusWord } from "./status-word";
 import { selectVisibleWindow } from "./workflow-list-window";
 import { BLOCK_LABEL, formatWorkflowAgentTarget } from "./workflow-spec-ui";
 import {
@@ -71,10 +72,8 @@ export function WorkflowView({
     }
     return m;
   }, [state.phases]);
-  const selectedRowIndex = Math.max(
-    0,
-    rows.findIndex((row) => row.kind === "step" && row.flatIndex === clampedIndex),
-  );
+  const foundIndex = rows.findIndex((row) => row.kind === "step" && row.flatIndex === clampedIndex);
+  const selectedRowIndex = foundIndex >= 0 ? foundIndex : 0;
   const listBudget = Math.max(1, height - (selected ? 9 : 4));
   const rowWindow = selectVisibleWindow(rows, selectedRowIndex, listBudget);
 
@@ -217,7 +216,7 @@ function StepRow({
 
 function Detail({ step, width }: { step: StepState; width: number }) {
   const body = (step.result?.output ?? step.text).trim();
-  const preview = body ? truncate(body, 700) : step.activity || statusWord(step);
+  const preview = body ? truncate(body, 700) : step.activity || statusWord(step.status);
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1}>
       <Text color="cyan">
@@ -256,20 +255,7 @@ function stepMeta(step: StepState): string {
     return bits.join(" · ");
   }
   if (step.activity) return step.activity;
-  return statusWord(step);
-}
-
-function statusWord(step: StepState): string {
-  switch (step.status) {
-    case "running":
-      return "running…";
-    case "pending":
-      return "pending";
-    case "done":
-      return "done";
-    case "error":
-      return "error";
-  }
+  return statusWord(step.status);
 }
 
 function sumCost(state: WorkflowState): number {

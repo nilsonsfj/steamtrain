@@ -304,10 +304,10 @@ const workflowGateStepSchema = z.object({
 });
 
 const workflowStepSchema = z.union([
-  workflowWorkerStepSchema,
+  workflowGateStepSchema,
   workflowDistributorStepSchema,
   workflowConsolidatorStepSchema,
-  workflowGateStepSchema,
+  workflowWorkerStepSchema,
 ]);
 
 const workflowPhaseSchema = z.object({

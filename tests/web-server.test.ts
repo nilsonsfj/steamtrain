@@ -38,15 +38,26 @@ function demoSpec(name = "demo"): WorkflowSpec {
   };
 }
 
-const noopStore: WorkflowCacheStore = {
-  rootDir: "/tmp/none",
-  async load() {
-    return new Map<string, StepResult>();
-  },
-  async save() {},
-  async clear() {},
-  async clearAll() {},
-};
+function createInMemoryStore(): WorkflowCacheStore {
+  const store = new Map<string, Map<string, StepResult>>();
+  return {
+    rootDir: "/tmp/test-cache",
+    async load(key) {
+      const k = `${key.workflow}:${key.cwd}:${key.input}:${key.specHash}`;
+      return store.get(k) ?? new Map();
+    },
+    async save(key, cache) {
+      const k = `${key.workflow}:${key.cwd}:${key.input}:${key.specHash}`;
+      store.set(k, new Map(cache));
+    },
+    async clear(key) {
+      store.delete(`${key.workflow}:${key.cwd}:${key.input}:${key.specHash}`);
+    },
+    async clearAll() {
+      store.clear();
+    },
+  };
+}
 
 class FakeHost implements WorkflowHost {
   constructor(
@@ -110,7 +121,7 @@ async function* hangingRun(_input: string, signal?: AbortSignal): AsyncIterable<
 }
 
 function makeServer(host: WorkflowHost): { server: Server; runs: WorkflowRunManager } {
-  const runs = new WorkflowRunManager({ host, cacheStore: noopStore, cwd: "/tmp" });
+  const runs = new WorkflowRunManager({ host, cacheStore: createInMemoryStore(), cwd: "/tmp" });
   const server = createWebServer({
     host,
     runs,
@@ -246,7 +257,7 @@ describe("web server", () => {
     const host = new FakeHost(demoSpec(), happyRun);
     const root = mkdtempSync(join(tmpdir(), "steamtrain-web-history-"));
     const historyStore = createWorkflowHistoryStore(root);
-    const runs = new WorkflowRunManager({ host, cacheStore: noopStore, historyStore, cwd: "/tmp" });
+    const runs = new WorkflowRunManager({ host, cacheStore: createInMemoryStore(), historyStore, cwd: "/tmp" });
     const server = createWebServer({
       host,
       runs,
@@ -339,7 +350,7 @@ describe("web server", () => {
     const host = new FakeHost(demoSpec(), happyRun);
     const runs = new WorkflowRunManager({
       host,
-      cacheStore: noopStore,
+      cacheStore: createInMemoryStore(),
       historyStore: blockingHistory,
       cwd: "/tmp",
     });
@@ -369,7 +380,7 @@ describe("web server", () => {
     const historyStore = createWorkflowHistoryStore(
       mkdtempSync(join(tmpdir(), "steamtrain-web-rerun-")),
     );
-    const runs = new WorkflowRunManager({ host, cacheStore: noopStore, historyStore, cwd: "/tmp" });
+    const runs = new WorkflowRunManager({ host, cacheStore: createInMemoryStore(), historyStore, cwd: "/tmp" });
     const server = createWebServer({
       host,
       runs,
@@ -400,7 +411,7 @@ describe("web server", () => {
     const historyStore = createWorkflowHistoryStore(
       mkdtempSync(join(tmpdir(), "steamtrain-web-retry-")),
     );
-    const runs = new WorkflowRunManager({ host, cacheStore: noopStore, historyStore, cwd: "/tmp" });
+    const runs = new WorkflowRunManager({ host, cacheStore: createInMemoryStore(), historyStore, cwd: "/tmp" });
     const server = createWebServer({
       host,
       runs,
@@ -427,12 +438,111 @@ describe("web server", () => {
     expect(body.downgraded).toBe("spec-changed");
   });
 
+  it("rejects runs when concurrent limit is exceeded", async () => {
+    const host = new FakeHost(demoSpec(), hangingRun);
+    const runs = new WorkflowRunManager({ host, cacheStore: createInMemoryStore(), cwd: "/tmp", maxConcurrent: 1 });
+    const server = createWebServer({ host, runs, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+
+    const first = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "demo", input: "a" }),
+    });
+    expect(first.status).toBe(201);
+
+    const second = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "demo", input: "b" }),
+    });
+    expect(second.status).toBe(503);
+    expect(((await second.json()) as { error: string }).error).toContain("too many concurrent");
+  });
+
+  it("rejects POST /api/runs with empty body", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects POST /api/runs with missing workflow field", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ input: "test" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects POST /api/runs with non-string workflow", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: 123, input: "test" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects PUT /api/workflows/:name when authoring not enabled", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/workflows/demo`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: "not json",
+    });
+    expect(res.status).toBe(501);
+  });
+
+  it("rejects PUT /api/workflows/:name with missing spec (501 without author)", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/workflows/demo`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(501);
+  });
+
+  it("returns 404 for unknown routes", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/nonexistent`);
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects oversized payloads with 413", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const bigBody = "x".repeat(2 * 1024 * 1024);
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: bigBody,
+    });
+    expect(res.status).toBe(413);
+    const json = (await res.json()) as { error: string };
+    expect(json.error).toContain("too large");
+  });
+
   it("returns 404 for a rerun of an unknown run id", async () => {
     const host = new FakeHost(demoSpec(), happyRun);
     const historyStore = createWorkflowHistoryStore(
       mkdtempSync(join(tmpdir(), "steamtrain-web-rerun404-")),
     );
-    const runs = new WorkflowRunManager({ host, cacheStore: noopStore, historyStore, cwd: "/tmp" });
+    const runs = new WorkflowRunManager({ host, cacheStore: createInMemoryStore(), historyStore, cwd: "/tmp" });
     const server = createWebServer({
       host,
       runs,

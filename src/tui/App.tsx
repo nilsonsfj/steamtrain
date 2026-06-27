@@ -329,7 +329,7 @@ export function App({
   }, [workflowEntries]);
 
   const cloneWorkflow = useCallback(
-    (newName: string, scope: WorkflowScope = "user") => {
+    async (newName: string, scope: WorkflowScope = "user") => {
       // Prefer the previewed workflow (stable across catalog re-sorts) over the
       // picker index, which can drift to another row when the catalog reloads.
       const source = wfPreview?.name ?? selectedWorkflowName;
@@ -340,7 +340,7 @@ export function App({
           notices: [{ level: "warn" as const, text: "no workflow selected to clone" }],
         };
       }
-      const result = author.clone(source, newName, scope);
+      const result = await author.clone(source, newName, scope);
       if (!result.ok) {
         return {
           handled: true as const,
@@ -364,8 +364,8 @@ export function App({
   );
 
   const deleteWorkflow = useCallback(
-    (name: string) => {
-      const result = author.remove(name);
+    async (name: string) => {
+      const result = await author.remove(name);
       if (!result.ok) {
         return {
           handled: true as const,
@@ -450,11 +450,11 @@ export function App({
     [author, selectedWorkflowName, wfPreview, running],
   );
 
-  const saveWorkflows = useCallback(() => {
+  const saveWorkflows = useCallback(async () => {
     const home = homedir();
     // The session flushes overrides and reloads the catalog into React state
     // (via the authoring host's setCatalog) when anything is written.
-    const result = author.flushSessionOverrides(wfStepOverrides);
+    const result = await author.flushSessionOverrides(wfStepOverrides);
 
     if (result.saved.length === 0) {
       const notices: Array<{ level: "info" | "warn"; text: string }> = [
@@ -1561,14 +1561,12 @@ export function App({
         if (wf.started || wfLaunching) setStepIndex((i) => Math.max(0, i - 1));
         else if (wfPreview) setStepIndex((i) => Math.max(0, i - 1));
         else {
-          setWorkflowIndex((i) => {
-            const next = Math.max(0, i - 1);
-            if (next !== i) {
-              setStepIndex(0);
-              setWfStepDetails(null);
-            }
-            return next;
-          });
+          const next = Math.max(0, workflowIndex - 1);
+          if (next !== workflowIndex) {
+            setStepIndex(0);
+            setWfStepDetails(null);
+          }
+          setWorkflowIndex(next);
         }
         return;
       }
@@ -1578,15 +1576,12 @@ export function App({
         } else if (wfPreview) {
           setStepIndex((i) => Math.min(Math.max(0, previewStepCount - 1), i + 1));
         } else {
-          setWorkflowIndex((i) => {
-            // `length` is the create row, one past the last workflow.
-            const next = Math.min(workflowEntries.length, i + 1);
-            if (next !== i) {
-              setStepIndex(0);
-              setWfStepDetails(null);
-            }
-            return next;
-          });
+          const next = Math.min(workflowEntries.length, workflowIndex + 1);
+          if (next !== workflowIndex) {
+            setStepIndex(0);
+            setWfStepDetails(null);
+          }
+          setWorkflowIndex(next);
         }
         return;
       }

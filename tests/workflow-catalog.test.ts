@@ -183,10 +183,10 @@ describe("loadWorkflowCatalog", () => {
 });
 
 describe("saveSessionWorkflowsToUser", () => {
-  it("writes bundled workflows with session overrides to the user file", () => {
+  it("writes bundled workflows with session overrides to the user file", async () => {
     const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
     const catalog = loadWorkflowCatalog({ home });
-    const result = saveSessionWorkflowsToUser({
+    const result = await saveSessionWorkflowsToUser({
       catalog,
       home,
       sessionOverrides: {

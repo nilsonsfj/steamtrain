@@ -107,6 +107,7 @@ export function runRecordSummary(record: RunRecord): RunRecordSummary {
 export function computeRunTotals(phases: HistoryPhase[]): RunTotals {
   const totals: RunTotals = { steps: 0, ok: 0, failed: 0, cached: 0, costUsd: 0, durationMs: 0 };
   for (const phase of phases) {
+    let phaseMaxDuration = 0;
     for (const step of phase.steps) {
       // A fan-out parent is summarized by its children, which appear as their
       // own steps; counting the parent too would double-count.
@@ -120,8 +121,9 @@ export function computeRunTotals(phases: HistoryPhase[]): RunTotals {
       else if (step.status === "done") totals.ok += 1;
       if (step.cached) totals.cached += 1;
       if (step.result?.costUsd) totals.costUsd += step.result.costUsd;
-      if (step.result?.durationMs) totals.durationMs += step.result.durationMs;
+      if (step.result?.durationMs) phaseMaxDuration = Math.max(phaseMaxDuration, step.result.durationMs);
     }
+    totals.durationMs += phaseMaxDuration;
   }
   return totals;
 }

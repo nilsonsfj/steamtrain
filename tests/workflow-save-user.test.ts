@@ -23,9 +23,9 @@ const spec: WorkflowSpec = {
 };
 
 describe("saveUserWorkflow", () => {
-  it("writes a validated workflow to the user file and reloads it", () => {
+  it("writes a validated workflow to the user file and reloads it", async () => {
     const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
-    const result = saveUserWorkflow("echo-flow", spec, home);
+    const result = await saveUserWorkflow("echo-flow", spec, home);
 
     expect(result.ok).toBe(true);
     expect(result.replaced).toBe(false);
@@ -39,13 +39,13 @@ describe("saveUserWorkflow", () => {
     expect(catalog.workflows["echo-flow"]?.phases).toHaveLength(1);
   });
 
-  it("reports replaced=true when overwriting and preserves other workflows", () => {
+  it("reports replaced=true when overwriting and preserves other workflows", async () => {
     const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
-    saveUserWorkflow("one", spec, home);
-    const first = saveUserWorkflow("two", spec, home);
+    await saveUserWorkflow("one", spec, home);
+    const first = await saveUserWorkflow("two", spec, home);
     expect(first.replaced).toBe(false);
 
-    const second = saveUserWorkflow("two", spec, home);
+    const second = await saveUserWorkflow("two", spec, home);
     expect(second.replaced).toBe(true);
 
     const catalog = loadWorkflowCatalog({ home });
@@ -53,10 +53,10 @@ describe("saveUserWorkflow", () => {
     expect(catalog.sources.two).toBe("user");
   });
 
-  it("refuses to write an invalid workflow", () => {
+  it("refuses to write an invalid workflow", async () => {
     const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
     const bad: WorkflowSpec = { name: "x", phases: [] };
-    const result = saveUserWorkflow("bad", bad, home);
+    const result = await saveUserWorkflow("bad", bad, home);
     expect(result.ok).toBe(false);
     expect(result.error).toBeTruthy();
   });
