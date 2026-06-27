@@ -10,7 +10,7 @@ export function parseSlashInput(raw: string): ParsedSlashInput | null {
     return { command: "", args: [], activeArg: "", activeArgIndex: 0 };
   }
 
-  const tokens = body.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
+  const tokens = body.match(/(?:[^\s"']+|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')+/g) ?? [];
   const command = tokens[0] ?? "";
   const args = tokens.slice(1).map(stripQuotes);
   const endsWithSpace = /\s$/.test(body);
@@ -36,7 +36,10 @@ function stripQuotes(token: string): string {
     (token.startsWith('"') && token.endsWith('"')) ||
     (token.startsWith("'") && token.endsWith("'"))
   ) {
-    return token.slice(1, -1);
+    return token
+      .slice(1, -1)
+      .replace(/\\"/g, '"')
+      .replace(/\\'/g, "'");
   }
   return token;
 }

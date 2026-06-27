@@ -1271,7 +1271,17 @@ export function App({
       const prompt = raw.trim();
 
       if (isRegisteredSlashCommand(prompt)) {
-        const result = executeSlashCommand(prompt, slashCtx);
+        let result;
+        try {
+          result = executeSlashCommand(prompt, slashCtx);
+        } catch (err) {
+          dispatch({
+            type: "notice",
+            level: "error",
+            text: err instanceof Error ? err.message : String(err),
+          });
+          return;
+        }
         if (result.handled) {
           updatePromptDraft(
             result.clearInput ? { value: "", promptEditing: false } : { promptEditing: false },

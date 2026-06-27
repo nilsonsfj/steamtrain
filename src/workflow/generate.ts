@@ -281,7 +281,7 @@ JSON object only (no prose, no fences).`;
  */
 export function extractWorkflowSpec(
   text: string,
-  opts: { name?: string; fallbackName?: string } = {},
+  opts: { name?: string; fallbackName?: string; onWarn?: (msg: string) => void } = {},
 ): ExtractResult {
   const json = findJsonObject(text);
   if (!json) return { ok: false, error: "no JSON object found in the model output" };
@@ -303,7 +303,7 @@ export function extractWorkflowSpec(
   }
 
   if (opts.name && shape.data.name && opts.name !== shape.data.name) {
-    console.warn(
+    opts.onWarn?.(
       `[extractWorkflowSpec] User-provided name hint '${opts.name}' overrides LLM-generated name '${shape.data.name}'`,
     );
   }

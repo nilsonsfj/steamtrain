@@ -34,17 +34,14 @@ describe("extractWorkflowScope", () => {
     });
   });
 
-  it("ignores --scope with no following value (stays default, drops the flag)", () => {
-    expect(extractWorkflowScope(["--scope"])).toEqual({ scope: "user", rest: [] });
+  it("throws when --scope has no following value", () => {
+    expect(() => extractWorkflowScope(["--scope"])).toThrow("--scope requires a value");
   });
 
-  it("ignores an invalid --scope value (the value falls through as free text)", () => {
-    // Documents the (safe) behavior: an unrecognized value is not consumed, so
-    // it remains in the positional args rather than silently changing scope.
-    expect(extractWorkflowScope(["--scope", "bogus", "x"])).toEqual({
-      scope: "user",
-      rest: ["bogus", "x"],
-    });
+  it("throws for an invalid --scope value", () => {
+    expect(() => extractWorkflowScope(["--scope", "bogus", "x"])).toThrow(
+      "--scope requires a value: 'user' or 'project'",
+    );
   });
 
   it("lets the last flag win when both are present", () => {
