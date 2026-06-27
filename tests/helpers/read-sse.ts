@@ -33,6 +33,7 @@ async function consumeStream(
 /** Read all SSE frames from a URL (early-exits on status frame). */
 export async function readSse(url: string): Promise<SseFrame[]> {
   const res = await fetch(url);
+  if (!res.ok) throw new Error(`SSE fetch failed: ${res.status} ${res.statusText}`);
   return consumeStream(res.body!, true);
 }
 
