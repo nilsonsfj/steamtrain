@@ -468,27 +468,6 @@ async function start(server: Server): Promise<string> {
   return `http://127.0.0.1:${port}`;
 }
 
-async function readSse(res: Response): Promise<Record<string, unknown>[]> {
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  const frames: Record<string, unknown>[] = [];
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let idx: number;
-    // biome-ignore lint/suspicious/noAssignInExpressions: standard SSE split
-    while ((idx = buf.indexOf("\n\n")) >= 0) {
-      const chunk = buf.slice(0, idx);
-      buf = buf.slice(idx + 2);
-      const line = chunk.split("\n").find((l) => l.startsWith("data: "));
-      if (line) frames.push(JSON.parse(line.slice(6)));
-    }
-  }
-  return frames;
-}
-
 describe("authoring HTTP routes", () => {
   it("serves agent metadata", async () => {
     const base = await start(makeServer(new FakeHost(home)));

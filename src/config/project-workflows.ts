@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { isEnoent } from "../workflow/fs-util";
 import type { WorkflowSpec } from "../workflow/types";
 import { validateWorkflow } from "../workflow/types";
 import { loadConfig, projectConfigPath } from "./load";
@@ -145,14 +146,7 @@ function readRawConfig(path: string): Record<string, unknown> | null | undefined
     const parsed = JSON.parse(readFileSync(path, "utf8"));
     return isObject(parsed) ? parsed : undefined;
   } catch (err: unknown) {
-    if (
-      err &&
-      typeof err === "object" &&
-      "code" in err &&
-      (err as { code: string }).code === "ENOENT"
-    ) {
-      return null;
-    }
+    if (isEnoent(err)) return null;
     return undefined;
   }
 }

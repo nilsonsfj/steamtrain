@@ -25,10 +25,22 @@ export const configFileSchema = z
   .object({
     binaries: z
       .object({
-        claude: z.string().min(1).optional(),
-        opencode: z.string().min(1).optional(),
-        codex: z.string().min(1).optional(),
-        amp: z.string().min(1).optional(),
+        claude: z
+          .string()
+          .refine((s) => s.trim().length > 0, "must not be empty or whitespace")
+          .optional(),
+        opencode: z
+          .string()
+          .refine((s) => s.trim().length > 0, "must not be empty or whitespace")
+          .optional(),
+        codex: z
+          .string()
+          .refine((s) => s.trim().length > 0, "must not be empty or whitespace")
+          .optional(),
+        amp: z
+          .string()
+          .refine((s) => s.trim().length > 0, "must not be empty or whitespace")
+          .optional(),
       })
       .partial()
       .optional(),
