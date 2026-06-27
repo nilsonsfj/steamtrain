@@ -450,11 +450,11 @@ export function App({
     [author, selectedWorkflowName, wfPreview, running],
   );
 
-  const saveWorkflows = useCallback(() => {
+  const saveWorkflows = useCallback(async () => {
     const home = homedir();
     // The session flushes overrides and reloads the catalog into React state
     // (via the authoring host's setCatalog) when anything is written.
-    const result = author.flushSessionOverrides(wfStepOverrides);
+    const result = await author.flushSessionOverrides(wfStepOverrides);
 
     if (result.saved.length === 0) {
       const notices: Array<{ level: "info" | "warn"; text: string }> = [
