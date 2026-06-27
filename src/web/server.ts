@@ -473,7 +473,7 @@ export async function startWebUi(
   // Health is reported live via /api/doctor; the page must not wait on it (the
   // doctor probes agent binaries and can take seconds), so we serve immediately
   // and let the catalog/health populate in the background.
-  let doctor: DoctorResult[] = [];
+  const doctorState = { results: [] as DoctorResult[] };
 
   const cacheStore = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
   const historyStore = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
@@ -492,7 +492,7 @@ export async function startWebUi(
     author,
     history: historyStore,
     workflowSource: (name) => orchestrator.workflowSource(name),
-    doctor: () => doctor,
+    doctor: () => doctorState.results,
     configLabel: options.configLabel,
   });
 
@@ -514,7 +514,7 @@ export async function startWebUi(
       const results = await runDoctor(options.config);
       orchestrator.setDoctor(results);
       await refreshAgentCatalogCaches(options.config, results);
-      doctor = results;
+      doctorState.results = results;
       const bad = results.filter((d) => d.status !== "ok").map((d) => d.agent);
       out(
         bad.length
@@ -526,5 +526,5 @@ export async function startWebUi(
     }
   })();
 
-  return { server, url, doctor };
+  return { server, url, get doctor() { return doctorState.results; } };
 }
