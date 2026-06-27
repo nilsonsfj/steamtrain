@@ -4,7 +4,7 @@
 **Date:** 2026-06-27
 **Reviewer:** Principal Software Engineer (MIMO-CODE-2.5)
 **Scope:** Full codebase — correctness, architecture, code quality, security, testing
-**Last updated:** 2026-06-27 — items resolved in PR #23 (37 commits) and PR #24 (Medium fixes) removed
+**Last updated:** 2026-06-27 — items resolved in PR #23, #24, and #25 removed
 
 ---
 
@@ -24,10 +24,11 @@
 | Performance | B | Async catalog I/O, transcript/frame caps, backpressure; TUI re-render concerns remain |
 | Maintainability | B- | App.tsx is a 1905-line monolith, html.ts is 1547 lines of inline JS/CSS |
 
-**Remaining findings: 73** (1 Critical, 2 High, 6 Medium, 50 Low, 14 Architectural + test gaps)
+**Remaining findings: 63** (1 Critical, 2 High, 6 Medium, 40 Low, 14 Architectural + test gaps)
 
 **Resolved in PR #23: 39 findings** (6 Critical, 22 High, 11 Medium)
-**Resolved in PR #24: 30 findings** (30 Medium, 3 tests added)
+**Resolved in PR #24: 30 findings** (30 Medium)
+**Resolved in PR #25: 10 findings** (10 Low)
 
 ---
 
@@ -103,9 +104,6 @@
 ### L1. `LineBuffer.push` uses O(n²) string concatenation
 - **File:** `src/agents/line-buffer.ts:15`
 
-### L2. `LineBuffer.stripCarriageReturn` only strips single trailing `\r`
-- **File:** `src/agents/line-buffer.ts:44-46`
-
 ### L3. `stringifyContent` doesn't handle circular references gracefully
 - **File:** `src/agents/util.ts:4,26-32`
 
@@ -117,9 +115,6 @@
 
 ### L6. `codex-variants.ts` and `opencode-variants.ts` share duplicated interfaces
 - **File:** `src/agents/codex-variants.ts:8-11`, `src/agents/opencode-variants.ts:8-11`
-
-### L7. `humanizeAssistantError` duplicated between `claude.ts` and `amp.ts`
-- **File:** `src/agents/claude.ts:200-205`, `src/agents/amp.ts:142-147`
 
 ### L8. Adapter creation path inconsistency
 - **File:** `src/orchestrator/orchestrator.ts:73-79` vs `159-183`
@@ -142,17 +137,8 @@
 ### L14. `closeAllConnections?.()` requires Node >= 18.2.0
 - **File:** `src/index.tsx:70`
 
-### L15. `readAll` in CLI has no byte ceiling
-- **File:** `src/cli.ts:918-928`
-
-### L16. Config TOCTOU: `existsSync` before `readFileSync`
-- **File:** `src/config/project-workflows.ts:132-140`
-
 ### L17. `homeRelativePath` follows symlinks
 - **File:** `src/paths.ts:6-7`
-
-### L18. Doctor binary path from config not sanitized
-- **File:** `src/doctor/doctor.ts:66-70`
 
 ### L19. Client-side `getElementById` lacks null guards
 - **File:** `src/web/html.ts`
@@ -160,26 +146,17 @@
 ### L20. Port 0 accepted without notification
 - **File:** `src/cli.ts:88-95`
 
-### L21. `configFileSchema` binary fields accept empty strings
-- **File:** `src/config/types.ts:28-33`
-
 ### L22. EventSource auto-reconnect after run completion
 - **File:** `src/web/html.ts:976-996`
 
 ### L23. Temp directory cleanup inconsistency in tests
 - **File:** ~15 test files
 
-### L24. `package.json` lacks `engines.bun` constraint
-- **File:** `package.json:12`
-
 ### L25. No test timeout configuration
 - **File:** `vitest.config.ts`
 
 ### L26. `biome.json` disables `useImportType`
 - **File:** `biome.json:37`
-
-### L27. Dual lockfiles (`bun.lock` and `package-lock.json`)
-- **Files:** `bun.lock`, `package-lock.json`
 
 ### L28. SSE reader doesn't handle partial `data:` lines
 - **File:** `tests/web-server.test.ts:132-158`
@@ -192,9 +169,6 @@
 
 ### L31. `codex-efforts.test.ts` uses `beforeEach` but `models.test.ts` doesn't
 - **File:** `tests/codex-efforts.test.ts:25-27`
-
-### L32. `readSse` helper duplicated across 3 test files
-- **Files:** `tests/web-server.test.ts`, `tests/web-loops.test.ts`, `tests/workflow-authoring.test.ts`
 
 ### L33. `MenuBackdrop` negative margin overlay is fragile
 - **File:** `src/tui/CommandSuggestionMenu.tsx:106-119`
@@ -213,9 +187,6 @@
 
 ### L38. `migrateSessionOverrides` exported but only used locally
 - **File:** `src/tui/App.tsx:1884-1894`
-
-### L39. `DRAFT_AGENT_ORDER` not `as const`
-- **File:** `src/tui/draft-model.ts:16`
 
 ### L40. `STATUS_GLYPH` vs `STATUS_STYLE` naming confusion
 - **File:** `src/tui/WorkflowHistory.tsx:14-18`
@@ -273,7 +244,6 @@
 | **html.ts inline bundle** | 1547 lines of CSS+JS in a template literal. Extract to served `.js` file. |
 | **server.ts route organization** | 15+ routes in a single `handle()` function. Adding middleware is painful. |
 | **Variant cache duplication** | `codex-variants.ts` and `opencode-variants.ts` are near-identical. |
-| **Duplicate functions** | `humanizeAssistantError` in `claude.ts`/`amp.ts`. |
 | **No request logging** | Zero logging of HTTP requests or responses. |
 
 ---
@@ -447,7 +417,28 @@ The following findings were fixed across 8 commits in [PR #24](https://github.co
 
 ---
 
+## 12. Resolved in PR #25
+
+The following findings were fixed in [PR #25](https://github.com/nilsonsfj/steamtrain/pull/25):
+
+### Low (10 resolved)
+
+| ID | Finding | Resolution |
+|----|---------|------------|
+| L2 | `stripCarriageReturn` only strips single `\r` | Loops to strip all trailing CR chars |
+| L7 | `humanizeAssistantError` duplicated | Extracted to shared `agents/util.ts` |
+| L15 | `readAll` no byte ceiling | 10MB limit via `Buffer.byteLength` |
+| L16 | Config TOCTOU `existsSync`/`readFileSync` | Single `readFileSync` with `isEnoent` catch |
+| L18 | Doctor binary path not sanitized | Early return on empty/whitespace path |
+| L21 | Binary fields accept empty strings | `.refine()` rejects empty and whitespace-only |
+| L24 | Missing `engines.bun` | Added `"bun": ">=1"` |
+| L27 | Dual lockfiles | Removed `package-lock.json` |
+| L32 | `readSse` duplicated across test files | Shared helper in `tests/helpers/read-sse.ts` |
+| L39 | `DRAFT_AGENT_ORDER` not `as const` | Added `as const` assertion |
+
+---
+
 *Generated by MIMO-CODE-2.5 Principal Engineer Review Agent*
 *Review date: 2026-06-27*
 *Files reviewed: 80+ source files, 65 test files, 5 build configs*
-*Last updated: 2026-06-27 — 39 findings resolved in PR #23, 30 findings resolved in PR #24*
+*Last updated: 2026-06-27 — 39 findings resolved in PR #23, 30 in PR #24, 10 in PR #25*

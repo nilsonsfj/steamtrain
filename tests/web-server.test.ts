@@ -14,6 +14,7 @@ import type {
   WorkflowSpec,
 } from "../src/workflow";
 import { RunRecordBuilder, createWorkflowHistoryStore } from "../src/workflow";
+import { readSse } from "./helpers/read-sse";
 
 const servers: Server[] = [];
 
@@ -139,35 +140,6 @@ async function start(server: Server): Promise<string> {
   return `http://127.0.0.1:${port}`;
 }
 
-/** Read an SSE response, collecting `data:` payloads until the terminal status frame. */
-async function readSse(url: string): Promise<{ type: string; [k: string]: unknown }[]> {
-  const res = await fetch(url);
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  const frames: { type: string; [k: string]: unknown }[] = [];
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let idx: number;
-    // biome-ignore lint/suspicious/noAssignInExpressions: standard SSE frame split
-    while ((idx = buf.indexOf("\n\n")) >= 0) {
-      const chunk = buf.slice(0, idx);
-      buf = buf.slice(idx + 2);
-      const line = chunk.split("\n").find((l) => l.startsWith("data: "));
-      if (!line) continue;
-      const frame = JSON.parse(line.slice(6));
-      frames.push(frame);
-      if (frame.type === "status") {
-        await reader.cancel();
-        return frames;
-      }
-    }
-  }
-  return frames;
-}
-
 describe("web server", () => {
   it("serves the single-page app", async () => {
     const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
@@ -257,7 +229,12 @@ describe("web server", () => {
     const host = new FakeHost(demoSpec(), happyRun);
     const root = mkdtempSync(join(tmpdir(), "steamtrain-web-history-"));
     const historyStore = createWorkflowHistoryStore(root);
-    const runs = new WorkflowRunManager({ host, cacheStore: createInMemoryStore(), historyStore, cwd: "/tmp" });
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      historyStore,
+      cwd: "/tmp",
+    });
     const server = createWebServer({
       host,
       runs,
@@ -380,7 +357,12 @@ describe("web server", () => {
     const historyStore = createWorkflowHistoryStore(
       mkdtempSync(join(tmpdir(), "steamtrain-web-rerun-")),
     );
-    const runs = new WorkflowRunManager({ host, cacheStore: createInMemoryStore(), historyStore, cwd: "/tmp" });
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      historyStore,
+      cwd: "/tmp",
+    });
     const server = createWebServer({
       host,
       runs,
@@ -411,7 +393,12 @@ describe("web server", () => {
     const historyStore = createWorkflowHistoryStore(
       mkdtempSync(join(tmpdir(), "steamtrain-web-retry-")),
     );
-    const runs = new WorkflowRunManager({ host, cacheStore: createInMemoryStore(), historyStore, cwd: "/tmp" });
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      historyStore,
+      cwd: "/tmp",
+    });
     const server = createWebServer({
       host,
       runs,
@@ -440,7 +427,12 @@ describe("web server", () => {
 
   it("rejects runs when concurrent limit is exceeded", async () => {
     const host = new FakeHost(demoSpec(), hangingRun);
-    const runs = new WorkflowRunManager({ host, cacheStore: createInMemoryStore(), cwd: "/tmp", maxConcurrent: 1 });
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: "/tmp",
+      maxConcurrent: 1,
+    });
     const server = createWebServer({ host, runs, workflowSource: () => "bundled" });
     servers.push(server);
     const base = await start(server);
@@ -525,7 +517,7 @@ describe("web server", () => {
       body: JSON.stringify({ spec: demoSpec() }),
     });
     expect(res.status).toBe(400);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toContain("invalid workflow name");
   });
 
@@ -555,7 +547,12 @@ describe("web server", () => {
     const historyStore = createWorkflowHistoryStore(
       mkdtempSync(join(tmpdir(), "steamtrain-web-rerun404-")),
     );
-    const runs = new WorkflowRunManager({ host, cacheStore: createInMemoryStore(), historyStore, cwd: "/tmp" });
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      historyStore,
+      cwd: "/tmp",
+    });
     const server = createWebServer({
       host,
       runs,

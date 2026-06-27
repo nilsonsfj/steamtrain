@@ -11,7 +11,7 @@ import {
 } from "../types/raw-claude";
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
-import { stringifyContent } from "./util";
+import { humanizeAssistantError, stringifyContent } from "./util";
 
 const AGENT: AgentId = "claude";
 
@@ -195,13 +195,6 @@ export function createClaudeMapper(agent: AgentId = AGENT): EventMapper {
         return [{ kind: "unknown", agent, ts, rawType: env.data.type, raw }];
     }
   };
-}
-
-function humanizeAssistantError(a: ClaudeAssistant): string {
-  const firstText = a.message.content?.find((b) => b.type === "text")?.text;
-  const code = a.error;
-  if (firstText && code) return `${firstText} (${code})`;
-  return firstText ?? code ?? "assistant error";
 }
 
 /** Runs the real `claude` CLI in streaming JSON mode. */

@@ -42,5 +42,7 @@ export class LineBuffer {
 }
 
 function stripCarriageReturn(line: string): string {
-  return line.endsWith("\r") ? line.slice(0, -1) : line;
+  let end = line.length;
+  while (end > 0 && line.charCodeAt(end - 1) === 13) end--;
+  return end === line.length ? line : line.slice(0, end);
 }

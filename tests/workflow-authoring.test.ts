@@ -19,6 +19,7 @@ import {
   type WorkflowSpec,
   loadWorkflowCatalog,
 } from "../src/workflow";
+import { readSseFromResponse } from "./helpers/read-sse";
 
 const VALID_SPEC = {
   description: "Echo the input.",
@@ -157,7 +158,10 @@ describe("WorkflowAuthor", () => {
 
   it("rejects an invalid spec", async () => {
     const host = new FakeHost(home);
-    const result = await makeAuthor(host).save("broken", { name: "broken", phases: [] } as WorkflowSpec);
+    const result = await makeAuthor(host).save("broken", {
+      name: "broken",
+      phases: [],
+    } as WorkflowSpec);
     expect(result.ok).toBe(false);
     expect(result.error).toBeTruthy();
   });
@@ -306,7 +310,12 @@ describe("WorkflowAuthor", () => {
       createAdapter: jsonAdapter(VALID_SPEC),
     });
 
-    const result = await author.save("custom-proj", userFileSpec("custom-proj"), undefined, "project");
+    const result = await author.save(
+      "custom-proj",
+      userFileSpec("custom-proj"),
+      undefined,
+      "project",
+    );
     expect(result.ok).toBe(true);
     expect(result.savedPath).toBe(customPath);
     expect(host.workflowSource("custom-proj")).toBe("project");
@@ -415,12 +424,16 @@ describe("WorkflowAuthor", () => {
     const author = makeAuthor(host);
     await author.save("flow", userFileSpec("flow"));
 
-    const saved = await author.flushSessionOverrides({ flow: { s1: { model: "opencode/changed" } } });
+    const saved = await author.flushSessionOverrides({
+      flow: { s1: { model: "opencode/changed" } },
+    });
     expect(saved.saved).toEqual(["flow"]);
     expect(firstStep(host.listWorkflows().flow).model).toBe("opencode/changed");
 
     // Re-flushing the identical override is a no-op (unchanged).
-    const again = await author.flushSessionOverrides({ flow: { s1: { model: "opencode/changed" } } });
+    const again = await author.flushSessionOverrides({
+      flow: { s1: { model: "opencode/changed" } },
+    });
     expect(again.saved).toEqual([]);
     expect(again.unchanged).toEqual(["flow"]);
   });
@@ -455,27 +468,6 @@ async function start(server: Server): Promise<string> {
   return `http://127.0.0.1:${port}`;
 }
 
-async function readSse(res: Response): Promise<Record<string, unknown>[]> {
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  const frames: Record<string, unknown>[] = [];
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let idx: number;
-    // biome-ignore lint/suspicious/noAssignInExpressions: standard SSE split
-    while ((idx = buf.indexOf("\n\n")) >= 0) {
-      const chunk = buf.slice(0, idx);
-      buf = buf.slice(idx + 2);
-      const line = chunk.split("\n").find((l) => l.startsWith("data: "));
-      if (line) frames.push(JSON.parse(line.slice(6)));
-    }
-  }
-  return frames;
-}
-
 describe("authoring HTTP routes", () => {
   it("serves agent metadata", async () => {
     const base = await start(makeServer(new FakeHost(home)));
@@ -492,9 +484,9 @@ describe("authoring HTTP routes", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ description: "echo", agent: "opencode", name: "Echo" }),
     });
-    const frames = await readSse(res);
+    const frames = await readSseFromResponse(res);
     expect(frames.some((f) => f.type === "delta")).toBe(true);
-    const done = frames.find((f) => f.type === "done") as { ok: boolean; name: string };
+    const done = frames.find((f) => f.type === "done") as unknown as { ok: boolean; name: string };
     expect(done.ok).toBe(true);
     expect(done.name).toBe("echo");
 
