@@ -391,6 +391,65 @@ export function App({
     [author],
   );
 
+  const renameWorkflow = useCallback(
+    (oldName: string, newName: string) => {
+      if (running) {
+        return {
+          handled: true as const,
+          clearInput: true,
+          notices: [{ level: "warn" as const, text: "cannot rename while a workflow is running" }],
+        };
+      }
+
+      const source = oldName.trim() || wfPreview?.name || selectedWorkflowName;
+      if (!source) {
+        return {
+          handled: true as const,
+          clearInput: true,
+          notices: [{ level: "warn" as const, text: "no workflow selected to rename" }],
+        };
+      }
+
+      const result = author.rename(source, newName);
+      if (!result.ok) {
+        return {
+          handled: true as const,
+          clearInput: true,
+          notices: [
+            { level: "error" as const, text: `could not rename '${source}': ${result.error}` },
+          ],
+        };
+      }
+
+      const targetSlug = result.name;
+      if (!targetSlug) {
+        return {
+          handled: true as const,
+          clearInput: true,
+          notices: [
+            { level: "error" as const, text: `could not rename '${source}': missing target name` },
+          ],
+        };
+      }
+
+      // Migrate session overrides if any (M4)
+      setWfStepOverrides((prev) => migrateSessionOverrides(prev, source, targetSlug));
+
+      // Update preview if renaming the previewed workflow (M4)
+      setWfPreview((prev) => updatePreviewOnRename(prev, source, targetSlug));
+      pendingSelectRef.current = targetSlug;
+
+      return {
+        handled: true as const,
+        clearInput: true,
+        notices: [
+          { level: "info" as const, text: `renamed workflow '${source}' → '${targetSlug}'` },
+        ],
+      };
+    },
+    [author, selectedWorkflowName, wfPreview, running],
+  );
+
   const saveWorkflows = useCallback(() => {
     const home = homedir();
     // The session flushes overrides and reloads the catalog into React state
@@ -715,6 +774,7 @@ export function App({
       createWorkflow,
       cloneWorkflow,
       deleteWorkflow,
+      renameWorkflow,
       userWorkflowNames,
       openHistory,
       // `/model` sets the draft model only on the bare picker (see
@@ -744,6 +804,7 @@ export function App({
       createWorkflow,
       cloneWorkflow,
       deleteWorkflow,
+      renameWorkflow,
       userWorkflowNames,
       openHistory,
       draftResolution,
@@ -1224,6 +1285,16 @@ export function App({
         }
       }
 
+      if (wfCreate && wfCreate.status === "done" && wfCreate.spec) {
+        const specName = wfCreate.spec.name;
+        setWfCreate(null);
+        setWfPreview({ name: specName, input: prompt });
+        setStepIndex(0);
+        setWfNotice(null);
+        updatePromptDraft({ promptEditing: false });
+        return;
+      }
+
       if (running) return;
 
       if (mode === "workflow") {
@@ -1312,6 +1383,7 @@ export function App({
       updatePromptDraft,
       focusCreateWorkflowPrompt,
       wfPreview,
+      wfCreate,
       workspaceMap,
       slashCtx,
       exit,
@@ -1801,4 +1873,33 @@ function HistoryPanel({
       height={height}
     />
   );
+}
+
+/**
+ * Migrate session overrides from an old workflow name to a new one.
+ *
+ * NOTE: Returning `prev` by reference when no migration is needed is an intentional
+ * React state updater optimization to prevent unnecessary component re-renders.
+ */
+export function migrateSessionOverrides(
+  prev: Record<string, WorkflowStepOverrides>,
+  source: string,
+  targetSlug: string,
+): Record<string, WorkflowStepOverrides> {
+  if (!prev[source]) return prev;
+  const next = { ...prev };
+  next[targetSlug] = next[source]!;
+  delete next[source];
+  return next;
+}
+
+/**
+ * Update the preview state if the renamed workflow was being previewed.
+ */
+export function updatePreviewOnRename(
+  prev: { name: string; input: string } | null,
+  source: string,
+  targetSlug: string,
+): { name: string; input: string } | null {
+  return prev?.name === source ? { name: targetSlug, input: prev.input } : prev;
 }

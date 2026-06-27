@@ -6,6 +6,7 @@ import { effortCommand } from "./builtins/effort";
 import { exitCommand } from "./builtins/exit";
 import { historyCommand } from "./builtins/history";
 import { modelCommand } from "./builtins/model";
+import { renameWorkflowCommand } from "./builtins/renameworkflow";
 import { saveWorkflowsCommand } from "./builtins/saveworkflows";
 import { versionCommand } from "./builtins/version";
 import { parseSlashInput, slashCommandArgs } from "./parse";
@@ -21,6 +22,7 @@ const BUILTIN_COMMANDS: SlashCommand[] = [
   createWorkflowCommand,
   cloneWorkflowCommand,
   deleteWorkflowCommand,
+  renameWorkflowCommand,
   historyCommand,
 ];
 

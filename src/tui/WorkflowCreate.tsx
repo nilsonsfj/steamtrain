@@ -1,8 +1,10 @@
 import { Box, Text } from "ink";
+import { useEffect, useState } from "react";
 import { truncate } from "../agents/util";
 import type { AgentId } from "../types/events";
 import type { WorkflowSpec } from "../workflow";
 import { AGENT_COLOR } from "./theme";
+import { SPINNER_FRAMES, useWorkIndicator } from "./useWorkIndicator";
 import { blockSummary } from "./workflow-spec-ui";
 
 export interface WorkflowCreateState {
@@ -36,6 +38,8 @@ export function WorkflowCreate({
   const borderColor = state.status === "done" ? "green" : state.status === "error" ? "red" : "cyan";
   const tail = lastLines(state.text, Math.max(3, height - 9));
 
+  const { spinnerFrame, elapsedSeconds } = useWorkIndicator(state.status === "generating");
+
   return (
     <Box
       flexDirection="column"
@@ -54,7 +58,11 @@ export function WorkflowCreate({
       </Box>
       <Text color="gray">“{truncate(state.description, innerWidth - 2)}”</Text>
 
-      {state.status === "generating" ? <Text color="yellow">⟳ drafting workflow…</Text> : null}
+      {state.status === "generating" ? (
+        <Text color="yellow">
+          {SPINNER_FRAMES[spinnerFrame]} drafting workflow… ({elapsedSeconds}s)
+        </Text>
+      ) : null}
 
       {state.status === "done" && state.spec ? (
         <Box flexDirection="column" marginTop={1}>
@@ -65,7 +73,7 @@ export function WorkflowCreate({
             <Text color="gray">{truncate(state.spec.description, innerWidth)}</Text>
           ) : null}
           {state.savedPath ? <Text color="gray">saved → {state.savedPath}</Text> : null}
-          <Text color="gray">Esc to return to the picker · it's selected and ready to run</Text>
+          <Text color="gray">Enter to view/run the workflow · Esc to return to the picker</Text>
         </Box>
       ) : null}
 

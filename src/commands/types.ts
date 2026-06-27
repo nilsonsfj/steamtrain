@@ -46,7 +46,9 @@ export interface SlashCommandContext {
   cloneWorkflow?: (newName: string, scope?: WorkflowScope) => SlashCommandResult;
   /** Delete a user or project workflow by name (TUI only). */
   deleteWorkflow?: (name: string) => SlashCommandResult;
-  /** Names of deletable (user + project) workflows, for `/deleteworkflow` completion. */
+  /** Rename a user or project workflow (TUI only). */
+  renameWorkflow?: (oldName: string, newName: string) => SlashCommandResult;
+  /** Names of writable (user + project) workflows, for `/deleteworkflow` and `/renameworkflow` completion. */
   userWorkflowNames?: readonly string[];
   /** Open the past-run history browser (TUI only). */
   openHistory?: () => SlashCommandResult;

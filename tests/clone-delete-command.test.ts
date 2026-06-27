@@ -72,3 +72,48 @@ describe("/deleteworkflow", () => {
     expect(completions).toEqual(["my-flow"]);
   });
 });
+
+describe("/renameworkflow", () => {
+  it("is registered and passes old-name and new-name to ctx.renameWorkflow", () => {
+    expect(isRegisteredSlashCommand("/renameworkflow old new")).toBe(true);
+    const renameWorkflow = vi.fn(() => ({ handled: true as const, clearInput: true }));
+    executeSlashCommand("/renameworkflow old-flow new-flow", makeCtx({ renameWorkflow }));
+    expect(renameWorkflow).toHaveBeenCalledWith("old-flow", "new-flow");
+  });
+
+  it("works with just a new name (renames active/selected workflow)", () => {
+    const renameWorkflow = vi.fn(() => ({ handled: true as const, clearInput: true }));
+    executeSlashCommand("/renameworkflow new-flow", makeCtx({ renameWorkflow }));
+    expect(renameWorkflow).toHaveBeenCalledWith("", "new-flow");
+  });
+
+  it("errors without a new name", () => {
+    const renameWorkflow = vi.fn();
+    const result = executeSlashCommand("/renameworkflow", makeCtx({ renameWorkflow }));
+    expect(renameWorkflow).not.toHaveBeenCalled();
+    if (result.handled) expect(result.notices?.[0]?.level).toBe("error");
+  });
+
+  it("completes against user workflow names", () => {
+    const cmd = listSlashCommands().find((c) => c.name === "renameworkflow");
+    const completions = cmd?.complete?.(
+      ["my"],
+      makeCtx({ userWorkflowNames: ["my-flow", "other"] }),
+    );
+    expect(completions).toEqual(["my-flow"]);
+  });
+
+  it("does not complete the second argument (new-name)", () => {
+    const cmd = listSlashCommands().find((c) => c.name === "renameworkflow");
+    const completions = cmd?.complete?.(
+      ["old-flow", "my"],
+      makeCtx({ userWorkflowNames: ["my-flow", "other"] }),
+    );
+    expect(completions).toEqual([]);
+  });
+
+  it("warns when unavailable (headless)", () => {
+    const result = executeSlashCommand("/renameworkflow x", makeCtx());
+    if (result.handled) expect(result.notices?.[0]?.text).toContain("only available in the TUI");
+  });
+});

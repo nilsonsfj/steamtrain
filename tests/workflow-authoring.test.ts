@@ -328,6 +328,57 @@ describe("WorkflowAuthor", () => {
     expect(host.workflowSource("proj-old")).toBeUndefined();
   });
 
+  it("renames a user workflow using the rename method", () => {
+    const host = new FakeHost(home);
+    const author = makeAuthor(host);
+    author.save("user-old", userFileSpec("user-old"));
+    expect(host.workflowSource("user-old")).toBe("user");
+
+    const renamed = author.rename("user-old", "user-new");
+    expect(renamed.ok).toBe(true);
+    expect(renamed.name).toBe("user-new");
+    expect(host.workflowSource("user-new")).toBe("user");
+    expect(host.workflowSource("user-old")).toBeUndefined();
+  });
+
+  it("refuses to rename bundled workflows", () => {
+    const host = new FakeHost(home);
+    const author = makeAuthor(host);
+    expect(host.workflowSource("bug-hunt")).toBe("bundled");
+
+    const renamed = author.rename("bug-hunt", "bug-hunt-new");
+    expect(renamed.ok).toBe(false);
+    expect(renamed.error).toContain("only user or project workflows can be renamed");
+    expect(host.workflowSource("bug-hunt")).toBe("bundled");
+    expect(host.workflowSource("bug-hunt-new")).toBeUndefined();
+  });
+
+  it("refuses to rename to an existing workflow name", () => {
+    const host = new FakeHost(home);
+    const author = makeAuthor(host);
+    author.save("wf1", userFileSpec("wf1"));
+    author.save("wf2", userFileSpec("wf2"));
+
+    const renamed = author.rename("wf1", "wf2");
+    expect(renamed.ok).toBe(false);
+    expect(renamed.error).toContain("already exists");
+    expect(host.workflowSource("wf1")).toBe("user");
+    expect(host.workflowSource("wf2")).toBe("user");
+  });
+
+  it("save method refuses to rename/overwrite an existing workflow name when previousName is provided", () => {
+    const host = new FakeHost(home);
+    const author = makeAuthor(host);
+    author.save("wf1", userFileSpec("wf1"));
+    author.save("wf2", userFileSpec("wf2"));
+
+    const renamed = author.save("wf2", userFileSpec("wf2-updated"), "wf1");
+    expect(renamed.ok).toBe(false);
+    expect(renamed.error).toContain("already exists");
+    expect(host.workflowSource("wf1")).toBe("user");
+    expect(host.workflowSource("wf2")).toBe("user");
+  });
+
   it("removing the last project workflow leaves zero project entries after reload", () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);
@@ -467,6 +518,32 @@ describe("authoring HTTP routes", () => {
     const del = await fetch(`${base}/api/workflows/edited`, { method: "DELETE" });
     expect(del.status).toBe(200);
     expect(host.workflowSource("edited")).toBeUndefined();
+  });
+
+  it("renames via PUT with previousName", async () => {
+    const host = new FakeHost(home);
+    const base = await start(makeServer(host));
+
+    // First save user-old
+    const putInit = await fetch(`${base}/api/workflows/user-old`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ spec: userFileSpec("user-old") }),
+    });
+    expect(putInit.status).toBe(200);
+    expect(host.workflowSource("user-old")).toBe("user");
+
+    // Rename to user-new by sending previousName
+    const renameRes = await fetch(`${base}/api/workflows/user-new`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ spec: userFileSpec("user-new"), previousName: "user-old" }),
+    });
+    expect(renameRes.status).toBe(200);
+    expect(((await renameRes.json()) as { ok: boolean }).ok).toBe(true);
+
+    expect(host.workflowSource("user-new")).toBe("user");
+    expect(host.workflowSource("user-old")).toBeUndefined();
   });
 
   it("round-trips a loop gate's loopTo/maxIterations through PUT and GET", async () => {

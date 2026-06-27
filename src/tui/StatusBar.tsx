@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 import type { DoctorResult } from "../doctor";
 import { STATUS_STYLE } from "./theme";
+import { SPINNER_FRAMES, useWorkIndicator } from "./useWorkIndicator";
 
 interface StatusBarProps {
   doctor: DoctorResult[] | null;
@@ -10,6 +11,8 @@ interface StatusBarProps {
 }
 
 export function StatusBar({ doctor, configSource, workspaceLabel, running }: StatusBarProps) {
+  const { spinnerFrame, elapsedSeconds } = useWorkIndicator(running);
+
   return (
     <Box borderStyle="round" borderColor="gray" paddingX={1} justifyContent="space-between">
       <Box>
@@ -28,7 +31,13 @@ export function StatusBar({ doctor, configSource, workspaceLabel, running }: Sta
         )}
       </Box>
       <Box>
-        {running ? <Text color="yellow">● working</Text> : <Text color="gray">idle</Text>}
+        {running ? (
+          <Text color="yellow">
+            {SPINNER_FRAMES[spinnerFrame]} working ({elapsedSeconds}s)
+          </Text>
+        ) : (
+          <Text color="gray">idle</Text>
+        )}
         <Text color="gray">
           {"  "}cfg: {shorten(configSource)}
           {"  "}ws: {shorten(workspaceLabel)}
