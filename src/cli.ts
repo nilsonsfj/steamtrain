@@ -923,11 +923,19 @@ Global options (TUI and workflow commands):
 `;
 }
 
+const MAX_READ_BYTES = 10 * 1024 * 1024;
+
 function readAll(stream: Readable): Promise<string> {
   return new Promise((resolve, reject) => {
     let text = "";
+    let bytes = 0;
     stream.setEncoding("utf8");
     stream.on("data", (chunk) => {
+      bytes += Buffer.byteLength(chunk, "utf8");
+      if (bytes > MAX_READ_BYTES) {
+        stream.destroy(new Error(`input exceeds ${MAX_READ_BYTES} byte limit`));
+        return;
+      }
       text += String(chunk);
     });
     stream.on("end", () => resolve(text));

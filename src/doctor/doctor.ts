@@ -64,6 +64,14 @@ interface VersionRun {
 }
 
 function runVersion(binaryPath: string): Promise<VersionRun> {
+  if (!binaryPath || !binaryPath.trim()) {
+    return Promise.resolve({
+      code: null,
+      stdout: "",
+      stderr: "empty binary path",
+      timedOut: false,
+    });
+  }
   return new Promise((resolve) => {
     const child = spawn(binaryPath, ["--version"], {
       stdio: ["ignore", "pipe", "pipe"],

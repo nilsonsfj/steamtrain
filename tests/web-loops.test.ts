@@ -5,6 +5,7 @@ import { type WorkflowHost, WorkflowRunManager } from "../src/web/runs";
 import { createWebServer } from "../src/web/server";
 import type { StepResult, WorkflowCacheStore, WorkflowEvent, WorkflowSpec } from "../src/workflow";
 import { validateWorkflow } from "../src/workflow/types";
+import { readSse } from "./helpers/read-sse";
 
 const loopWorkflow: WorkflowSpec = {
   name: "review-loop",
@@ -301,35 +302,6 @@ async function start(server: Server): Promise<string> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const { port } = server.address() as AddressInfo;
   return `http://127.0.0.1:${port}`;
-}
-
-/** Read an SSE response, collecting `data:` payloads until the terminal status frame. */
-async function readSse(url: string): Promise<{ type: string; [k: string]: unknown }[]> {
-  const res = await fetch(url);
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  const frames: { type: string; [k: string]: unknown }[] = [];
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let idx: number;
-    // biome-ignore lint/suspicious/noAssignInExpressions: standard SSE frame split
-    while ((idx = buf.indexOf("\n\n")) >= 0) {
-      const chunk = buf.slice(0, idx);
-      buf = buf.slice(idx + 2);
-      const line = chunk.split("\n").find((l) => l.startsWith("data: "));
-      if (!line) continue;
-      const frame = JSON.parse(line.slice(6));
-      frames.push(frame);
-      if (frame.type === "status") {
-        await reader.cancel();
-        return frames;
-      }
-    }
-  }
-  return frames;
 }
 
 describe("web accepts loop workflows", () => {

@@ -1,5 +1,7 @@
 /** Small helpers shared by the adapters and their mappers. */
 
+import type { ClaudeAssistant } from "../types/raw-claude";
+
 /** Coerce a CLI "content" value (string | block[] | object) into display text. */
 export function stringifyContent(content: unknown): string {
   if (content == null) return "";
@@ -39,4 +41,11 @@ export function firstLine(text: string): string {
 export function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, Math.max(0, max - 1))}…`;
+}
+
+export function humanizeAssistantError(a: ClaudeAssistant): string {
+  const firstText = a.message.content?.find((b) => b.type === "text")?.text;
+  const code = a.error;
+  if (firstText && code) return `${firstText} (${code})`;
+  return firstText ?? code ?? "assistant error";
 }

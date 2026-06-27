@@ -13,7 +13,7 @@ export interface DraftTarget {
  * models, no paid credentials), then Claude, then Codex. Shared by the auto
  * resolver and the single-token model lookup so both agree on precedence.
  */
-const DRAFT_AGENT_ORDER: readonly AgentId[] = ["opencode", "claude", "codex", "amp"];
+const DRAFT_AGENT_ORDER = ["opencode", "claude", "codex", "amp"] as const;
 
 /** The set of agents the doctor reports as healthy (runnable). */
 export function healthyAgentSet(doctor: DoctorResult[] | null): Set<AgentId> {

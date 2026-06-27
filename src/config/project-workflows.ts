@@ -141,11 +141,18 @@ export function deleteProjectWorkflow(
  * the object otherwise.
  */
 function readRawConfig(path: string): Record<string, unknown> | null | undefined {
-  if (!existsSync(path)) return null;
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8"));
     return isObject(parsed) ? parsed : undefined;
-  } catch {
+  } catch (err: unknown) {
+    if (
+      err &&
+      typeof err === "object" &&
+      "code" in err &&
+      (err as { code: string }).code === "ENOENT"
+    ) {
+      return null;
+    }
     return undefined;
   }
 }

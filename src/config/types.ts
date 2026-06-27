@@ -25,10 +25,10 @@ export const configFileSchema = z
   .object({
     binaries: z
       .object({
-        claude: z.string().optional(),
-        opencode: z.string().optional(),
-        codex: z.string().optional(),
-        amp: z.string().optional(),
+        claude: z.string().min(1).optional(),
+        opencode: z.string().min(1).optional(),
+        codex: z.string().min(1).optional(),
+        amp: z.string().min(1).optional(),
       })
       .partial()
       .optional(),
