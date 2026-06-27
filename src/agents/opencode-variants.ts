@@ -36,13 +36,22 @@ export function parseOpencodeModelsVerbose(output: string): Map<string, Opencode
     if (i >= lines.length || lines[i]?.trim() !== "{") continue;
 
     let depth = 0;
+    let inString = false;
+    let escaped = false;
     const jsonLines: string[] = [];
     for (; i < lines.length; i++) {
       const chunk = lines[i] ?? "";
       jsonLines.push(chunk);
       for (const ch of chunk) {
-        if (ch === "{") depth += 1;
-        else if (ch === "}") depth -= 1;
+        if (inString) {
+          if (escaped) escaped = false;
+          else if (ch === "\\") escaped = true;
+          else if (ch === '"') inString = false;
+        } else {
+          if (ch === '"') inString = true;
+          else if (ch === "{") depth += 1;
+          else if (ch === "}") depth -= 1;
+        }
       }
       if (depth === 0) break;
     }

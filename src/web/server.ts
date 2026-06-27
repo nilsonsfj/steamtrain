@@ -31,6 +31,7 @@ export interface WebServerDeps {
   history?: WorkflowHistoryStore;
   workflowSource?: (name: string) => WorkflowSourceKind | undefined;
   doctor?: () => DoctorResult[];
+  doctorError?: () => string | null;
   configLabel?: string;
 }
 
@@ -263,7 +264,11 @@ async function handle(
   }
 
   if (method === "GET" && path === "/api/doctor") {
-    sendJson(res, 200, { doctor: deps.doctor?.() ?? [] });
+    const error = deps.doctorError?.();
+    sendJson(res, 200, {
+      doctor: deps.doctor?.() ?? [],
+      ...(error ? { error } : {}),
+    });
     return;
   }
 
@@ -435,8 +440,10 @@ async function streamGenerate(
     (attempt) => send({ type: "attempt", attempt }),
   );
 
-  if (!res.writableEnded) {
+  if (!res.writableEnded && !controller.signal.aborted) {
     send({ type: "done", ...result });
+    res.end();
+  } else if (!res.writableEnded) {
     res.end();
   }
 }
@@ -510,7 +517,7 @@ export async function startWebUi(
   // Health is reported live via /api/doctor; the page must not wait on it (the
   // doctor probes agent binaries and can take seconds), so we serve immediately
   // and let the catalog/health populate in the background.
-  const doctorState = { results: [] as DoctorResult[] };
+  const doctorState = { results: [] as DoctorResult[], error: null as string | null };
 
   const cacheStore = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
   const historyStore = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
@@ -536,6 +543,7 @@ export async function startWebUi(
     history: historyStore,
     workflowSource: (name) => orchestrator.workflowSource(name),
     doctor: () => doctorState.results,
+    doctorError: () => doctorState.error,
     configLabel: options.configLabel,
   });
 
@@ -565,7 +573,8 @@ export async function startWebUi(
           : `   agent health: all ${results.length} agents ok\n`,
       );
     } catch (e) {
-      err(`   doctor failed: ${e instanceof Error ? e.message : String(e)}\n`);
+      doctorState.error = e instanceof Error ? e.message : String(e);
+      err(`   doctor failed: ${doctorState.error}\n`);
     }
   })();
 
