@@ -231,7 +231,7 @@ async function handle(
       const previousName =
         typeof parsed.previousName === "string" ? parsed.previousName : undefined;
       const scope = parsed.scope === "project" ? "project" : "user";
-      const result = deps.author.save(name, parsed.spec as WorkflowSpec, previousName, scope);
+      const result = await deps.author.save(name, parsed.spec as WorkflowSpec, previousName, scope);
       sendJson(res, result.ok ? 200 : 400, result);
       return;
     }
@@ -241,7 +241,7 @@ async function handle(
         sendJson(res, 501, { error: "workflow authoring is not enabled" });
         return;
       }
-      const result = deps.author.remove(name);
+      const result = await deps.author.remove(name);
       sendJson(res, result.ok ? 200 : 400, result);
       return;
     }

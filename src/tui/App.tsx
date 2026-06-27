@@ -329,7 +329,7 @@ export function App({
   }, [workflowEntries]);
 
   const cloneWorkflow = useCallback(
-    (newName: string, scope: WorkflowScope = "user") => {
+    async (newName: string, scope: WorkflowScope = "user") => {
       // Prefer the previewed workflow (stable across catalog re-sorts) over the
       // picker index, which can drift to another row when the catalog reloads.
       const source = wfPreview?.name ?? selectedWorkflowName;
@@ -340,7 +340,7 @@ export function App({
           notices: [{ level: "warn" as const, text: "no workflow selected to clone" }],
         };
       }
-      const result = author.clone(source, newName, scope);
+      const result = await author.clone(source, newName, scope);
       if (!result.ok) {
         return {
           handled: true as const,
@@ -364,8 +364,8 @@ export function App({
   );
 
   const deleteWorkflow = useCallback(
-    (name: string) => {
-      const result = author.remove(name);
+    async (name: string) => {
+      const result = await author.remove(name);
       if (!result.ok) {
         return {
           handled: true as const,

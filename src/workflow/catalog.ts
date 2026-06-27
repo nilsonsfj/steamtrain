@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { atomicWriteFile } from "./fs-util";
 import { z } from "zod";
 import { WORKSPACE_CONFIG_DIR } from "../workspace";
 import { BUNDLED_WORKFLOWS } from "./bundled";
@@ -145,9 +146,9 @@ export function collectSessionWorkflowSaves(
 }
 
 /** Persist session workflow changes to `~/.steamtrain/workflows.json`. */
-export function saveSessionWorkflowsToUser(
+export async function saveSessionWorkflowsToUser(
   options: SaveSessionWorkflowsOptions,
-): SaveSessionWorkflowsResult {
+): Promise<SaveSessionWorkflowsResult> {
   const home = options.home ?? homedir();
   const collected = collectSessionWorkflowSaves(options);
   if (collected.saved.length === 0) {
@@ -159,7 +160,7 @@ export function saveSessionWorkflowsToUser(
   }
 
   const userOnDisk = readUserWorkflowsFile(home).workflows ?? {};
-  const path = writeUserWorkflowsFile(home, { ...userOnDisk, ...collected.toSave });
+  const path = await writeUserWorkflowsFile(home, { ...userOnDisk, ...collected.toSave });
   return {
     path,
     saved: collected.saved,
@@ -186,18 +187,18 @@ export interface SaveUserWorkflowResult {
  * engine) so we never write a workflow that can't run. The stored `name` is
  * taken from `name`, not from the spec body, so the catalog key stays canonical.
  */
-export function saveUserWorkflow(
+export async function saveUserWorkflow(
   name: string,
   spec: WorkflowSpec,
   home: string = homedir(),
-): SaveUserWorkflowResult {
+): Promise<SaveUserWorkflowResult> {
   const full: WorkflowSpec = { ...spec, name };
   const valid = validateWorkflow(full);
   if (!valid.ok) return { ok: false, error: valid.error };
 
   const userOnDisk = readUserWorkflowsFile(home).workflows ?? {};
   const replaced = Boolean(userOnDisk[name]);
-  const path = writeUserWorkflowsFile(home, { ...userOnDisk, [name]: full });
+  const path = await writeUserWorkflowsFile(home, { ...userOnDisk, [name]: full });
   return { ok: true, path, replaced };
 }
 
@@ -214,15 +215,15 @@ export interface DeleteUserWorkflowResult {
  * workflows can be deleted here; bundled and project workflows live elsewhere.
  * Returns `removed: false` (still ok) when no such user workflow exists.
  */
-export function deleteUserWorkflow(
+export async function deleteUserWorkflow(
   name: string,
   home: string = homedir(),
-): DeleteUserWorkflowResult {
+): Promise<DeleteUserWorkflowResult> {
   const userOnDisk = readUserWorkflowsFile(home).workflows ?? {};
   if (!userOnDisk[name]) return { ok: true, removed: false };
 
   const { [name]: _removed, ...rest } = userOnDisk;
-  const path = writeUserWorkflowsFile(home, rest);
+  const path = await writeUserWorkflowsFile(home, rest);
   return { ok: true, path, removed: true };
 }
 
@@ -306,12 +307,8 @@ function joinWarnings(...parts: Array<string | undefined>): string | undefined {
   return text || undefined;
 }
 
-function writeUserWorkflowsFile(home: string, workflows: Record<string, WorkflowSpec>): string {
+async function writeUserWorkflowsFile(home: string, workflows: Record<string, WorkflowSpec>): Promise<string> {
   const path = userWorkflowsPath(home);
-  mkdirSync(join(path, ".."), { recursive: true });
-  const payload = { workflows };
-  const temp = `${path}.${process.pid}.tmp`;
-  writeFileSync(temp, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  renameSync(temp, path);
+  await atomicWriteFile(path, `${JSON.stringify({ workflows }, null, 2)}\n`);
   return path;
 }
