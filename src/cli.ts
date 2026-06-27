@@ -495,6 +495,13 @@ async function runWorkflowCommand(
     else process.exit(130);
   };
   process.on("SIGINT", onSigint);
+  // Enforce wall-clock timeout if configured.
+  const timeoutMs = orchestrator.getConfig().timeoutMs;
+  const timeoutTimer =
+    typeof timeoutMs === "number" && timeoutMs > 0
+      ? setTimeout(() => ac.abort(), timeoutMs)
+      : undefined;
+  timeoutTimer?.unref?.();
   let ok = false;
   try {
     for await (const event of orchestrator.runWorkflow(name, input.trim(), ac.signal, cache, cwd)) {
@@ -524,6 +531,7 @@ async function runWorkflowCommand(
     await saveHistory(historyStore, recorder, "error", err, message(runErr));
     throw runErr;
   } finally {
+    if (timeoutTimer) clearTimeout(timeoutTimer);
     process.removeListener("SIGINT", onSigint);
   }
   return ok ? 0 : 1;

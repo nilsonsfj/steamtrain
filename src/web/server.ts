@@ -16,6 +16,7 @@ import {
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   isAgentBackedStep,
+  workflowSpecSchema,
   workflowStepKind,
 } from "../workflow";
 import type { WorkspaceConfig } from "../workspace";
@@ -244,10 +245,17 @@ async function handle(
         sendJson(res, 400, { error: "body must include a 'spec' object" });
         return;
       }
+      const specCheck = workflowSpecSchema.safeParse(parsed.spec);
+      if (!specCheck.success) {
+        sendJson(res, 400, {
+          error: `invalid workflow spec: ${specCheck.error.issues[0]?.message ?? "schema error"}`,
+        });
+        return;
+      }
       const previousName =
         typeof parsed.previousName === "string" ? parsed.previousName : undefined;
       const scope = parsed.scope === "project" ? "project" : "user";
-      const result = await deps.author.save(name, parsed.spec as WorkflowSpec, previousName, scope);
+      const result = await deps.author.save(name, specCheck.data, previousName, scope);
       sendJson(res, result.ok ? 200 : 400, result);
       return;
     }
@@ -527,6 +535,7 @@ export async function startWebUi(
     historyStore,
     cwd,
     maxConcurrent: options.maxConcurrent ?? 5,
+    timeoutMs: options.config.timeoutMs,
   });
   const author = new WorkflowAuthor({
     host: orchestrator,

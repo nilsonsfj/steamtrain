@@ -375,6 +375,11 @@ export function parseForEachSource(source: string): string | undefined {
   return shorthand?.[1];
 }
 
+/**
+ * Whether a step has an `agent` field set. Returns true for worker, processor,
+ * agent-backed distributor, and agent-backed consolidator steps. Gate steps
+ * never have an agent field.
+ */
 export function isAgentBackedStep(step: WorkflowStep): step is AgentBackedWorkflowStep {
   return "agent" in step && typeof step.agent === "string";
 }
