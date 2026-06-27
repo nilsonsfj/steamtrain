@@ -516,6 +516,19 @@ describe("web server", () => {
     expect(res.status).toBe(501);
   });
 
+  it("rejects workflow names with control characters (M12)", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/workflows/demo%00evil`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ spec: demoSpec() }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: string };
+    expect(body.error).toContain("invalid workflow name");
+  });
+
   it("returns 404 for unknown routes", async () => {
     const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);
