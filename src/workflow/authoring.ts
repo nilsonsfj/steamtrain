@@ -202,8 +202,9 @@ export class WorkflowAuthor {
       }
     }
 
-    // H3: Resolve the previous source BEFORE persist reloads the catalog.
-    // This removes the implicit temporal dependency on reload side-effects.
+    // Resolve the previous source BEFORE persist reloads the catalog.
+    // This is intentional: we need the source reference from before the save
+    // so the rename logic can drop the old entry from the correct layer.
     const previousSource =
       previousName && previousName !== slug ? this.host.workflowSource(previousName) : undefined;
 

@@ -63,13 +63,26 @@ function fetchCodexDebugModels(binary: string, bundled: boolean): Promise<string
     const args = ["debug", "models", ...(bundled ? ["--bundled"] : [])];
     const child = spawn(binary, args, {
       stdio: ["ignore", "pipe", "pipe"],
-      env: process.env,
+      env: { ...process.env },
     });
 
     let stdout = "";
     let stderr = "";
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(() => {
-      child.kill("SIGTERM");
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // already gone
+      }
+      killTimer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // already gone
+        }
+      }, 2000);
+      killTimer.unref?.();
       reject(new Error(`codex debug models timed out after ${FETCH_TIMEOUT_MS}ms`));
     }, FETCH_TIMEOUT_MS);
 
@@ -83,10 +96,12 @@ function fetchCodexDebugModels(binary: string, bundled: boolean): Promise<string
     });
     child.on("error", (err) => {
       clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
       reject(err);
     });
     child.on("close", (code) => {
       clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
       if (code === 0) {
         resolve(stdout);
         return;

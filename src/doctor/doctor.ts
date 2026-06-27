@@ -75,10 +75,10 @@ function runVersion(binaryPath: string): Promise<VersionRun> {
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (c: string) => {
-      stdout += c;
+      if (stdout.length < 10_000) stdout += c;
     });
     child.stderr.on("data", (c: string) => {
-      stderr += c;
+      if (stderr.length < 10_000) stderr += c;
     });
     const timer = setTimeout(() => {
       timedOut = true;

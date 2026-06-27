@@ -133,6 +133,7 @@ interface AppProps {
 
 type Phase = "banner" | "main";
 const BANNER_MS = 1100;
+const EMPTY_DOCTOR: DoctorResult[] = [];
 
 /** State for the past-run history browser (opened with `/history`). */
 interface HistoryUiState {
@@ -257,7 +258,7 @@ export function App({
   );
 
   const orchestrator = useMemo(
-    () => new Orchestrator(config, runtimeWorkspaces, doctor ?? [], runtimeCatalog),
+    () => new Orchestrator(config, runtimeWorkspaces, doctor ?? EMPTY_DOCTOR, runtimeCatalog),
     [config, runtimeWorkspaces, doctor, runtimeCatalog],
   );
 
@@ -486,6 +487,8 @@ export function App({
 
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
+  const valueRef = useRef(value);
+  valueRef.current = value;
 
   // Drafting target for /createworkflow: a user override (via /model on the
   // picker) when its agent is healthy, else an auto pick. Shared by the create
@@ -1271,7 +1274,17 @@ export function App({
       const prompt = raw.trim();
 
       if (isRegisteredSlashCommand(prompt)) {
-        const result = executeSlashCommand(prompt, slashCtx);
+        let result;
+        try {
+          result = executeSlashCommand(prompt, slashCtx);
+        } catch (err) {
+          dispatch({
+            type: "notice",
+            level: "error",
+            text: err instanceof Error ? err.message : String(err),
+          });
+          return;
+        }
         if (result.handled) {
           updatePromptDraft(
             result.clearInput ? { value: "", promptEditing: false } : { promptEditing: false },
@@ -1407,10 +1420,10 @@ export function App({
   }, []);
 
   const handleWorkflowFreshRun = useCallback(() => {
-    const prompt = value.trim();
-    recordPromptHistory(value);
+    const prompt = valueRef.current.trim();
+    recordPromptHistory(valueRef.current);
     if (handleWorkflowRun(prompt, true)) updatePromptDraft({ value: "", promptEditing: false });
-  }, [value, recordPromptHistory, handleWorkflowRun, updatePromptDraft]);
+  }, [recordPromptHistory, handleWorkflowRun, updatePromptDraft]);
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
@@ -1639,7 +1652,7 @@ export function App({
           <WorkflowStepDetails
             kind="preview"
             spec={previewSpec}
-            source={orchestrator.workflowSource(wfPreview.name) ?? "bundled"}
+            source={activeWorkflowSource ?? "bundled"}
             input={value.trim() || wfPreview.input}
             height={streamHeight}
             width={columns}
@@ -1661,7 +1674,7 @@ export function App({
         ) : wfPreview && previewSpec && previewDispatchCheck ? (
           <WorkflowPreview
             spec={previewSpec}
-            source={orchestrator.workflowSource(wfPreview.name) ?? "bundled"}
+            source={activeWorkflowSource ?? "bundled"}
             input={value.trim() || wfPreview.input}
             width={columns}
             height={streamHeight}

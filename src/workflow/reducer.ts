@@ -131,6 +131,12 @@ export function workflowStateFromSpec(spec: WorkflowSpec): WorkflowState {
  * across directly (a recorded step has no transient `activity`).
  */
 export function workflowStateFromRecord(record: RunRecord): WorkflowState {
+  const results: StepResult[] = [];
+  for (const phase of record.phases) {
+    for (const step of phase.steps) {
+      if (step.result) results.push(step.result);
+    }
+  }
   return {
     name: record.workflow,
     startedAt: record.startedAt,
@@ -148,7 +154,7 @@ export function workflowStateFromRecord(record: RunRecord): WorkflowState {
         blockKind: step.blockKind,
       })),
     })),
-    results: [],
+    results,
     started: true,
     done: record.phases.every((phase) => phase.done),
     ok: record.ok,
@@ -160,7 +166,7 @@ function parseStepStatus(status: string): StepStatus {
   if (status === "pending" || status === "running" || status === "done" || status === "error") {
     return status;
   }
-  return "pending";
+  return "error";
 }
 
 /** Matches a phase to a specific loop iteration instance; omitted iteration ⇒ 1. */

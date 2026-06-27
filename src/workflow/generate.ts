@@ -281,7 +281,7 @@ JSON object only (no prose, no fences).`;
  */
 export function extractWorkflowSpec(
   text: string,
-  opts: { name?: string; fallbackName?: string } = {},
+  opts: { name?: string; fallbackName?: string; onWarn?: (msg: string) => void } = {},
 ): ExtractResult {
   const json = findJsonObject(text);
   if (!json) return { ok: false, error: "no JSON object found in the model output" };
@@ -303,7 +303,7 @@ export function extractWorkflowSpec(
   }
 
   if (opts.name && shape.data.name && opts.name !== shape.data.name) {
-    console.warn(
+    opts.onWarn?.(
       `[extractWorkflowSpec] User-provided name hint '${opts.name}' overrides LLM-generated name '${shape.data.name}'`,
     );
   }
@@ -434,26 +434,34 @@ export async function generateWorkflow(
 function findJsonObject(text: string): string | undefined {
   const fenced = extractFenced(text);
   const haystack = fenced ?? text;
-  const start = haystack.indexOf("{");
-  if (start === -1) return undefined;
 
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = start; i < haystack.length; i++) {
-    const ch = haystack[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (ch === "\\") escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
+  let searchFrom = 0;
+  while (searchFrom < haystack.length) {
+    const start = haystack.indexOf("{", searchFrom);
+    if (start === -1) return undefined;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < haystack.length; i++) {
+      const ch = haystack[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === "{") depth += 1;
+      else if (ch === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          return haystack.slice(start, i + 1);
+        }
+      }
     }
-    if (ch === '"') inString = true;
-    else if (ch === "{") depth += 1;
-    else if (ch === "}") {
-      depth -= 1;
-      if (depth === 0) return haystack.slice(start, i + 1);
-    }
+    // If we get here, the brace wasn't balanced — try the next `{`.
+    searchFrom = start + 1;
   }
   return undefined;
 }

@@ -16,6 +16,7 @@ import {
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   isAgentBackedStep,
+  workflowSpecSchema,
   workflowStepKind,
 } from "../workflow";
 import type { WorkspaceConfig } from "../workspace";
@@ -31,6 +32,7 @@ export interface WebServerDeps {
   history?: WorkflowHistoryStore;
   workflowSource?: (name: string) => WorkflowSourceKind | undefined;
   doctor?: () => DoctorResult[];
+  doctorError?: () => string | null;
   configLabel?: string;
 }
 
@@ -83,6 +85,16 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 
 /** Maximum body size: 1 MiB. Rejects larger payloads with HTTP 413. */
 const MAX_BODY_BYTES = 1 * 1024 * 1024;
+
+/** Maximum workflow name length. */
+const MAX_WORKFLOW_NAME = 128;
+
+function isValidWorkflowName(name: string): boolean {
+  if (name.length === 0 || name.length > MAX_WORKFLOW_NAME) return false;
+  // Reject control characters and null bytes.
+  // eslint-disable-next-line no-control-regex
+  return !/[\x00-\x1f\x7f]/.test(name);
+}
 
 class PayloadTooLarge extends Error {
   constructor() {
@@ -201,6 +213,11 @@ async function handle(
   if (wfMatch) {
     const name = decodeURIComponent(wfMatch[1]!);
 
+    if (!isValidWorkflowName(name)) {
+      sendJson(res, 400, { error: "invalid workflow name" });
+      return;
+    }
+
     if (method === "GET") {
       const spec = deps.host.listWorkflows()[name];
       if (!spec) {
@@ -228,10 +245,17 @@ async function handle(
         sendJson(res, 400, { error: "body must include a 'spec' object" });
         return;
       }
+      const specCheck = workflowSpecSchema.safeParse(parsed.spec);
+      if (!specCheck.success) {
+        sendJson(res, 400, {
+          error: `invalid workflow spec: ${specCheck.error.issues[0]?.message ?? "schema error"}`,
+        });
+        return;
+      }
       const previousName =
         typeof parsed.previousName === "string" ? parsed.previousName : undefined;
       const scope = parsed.scope === "project" ? "project" : "user";
-      const result = await deps.author.save(name, parsed.spec as WorkflowSpec, previousName, scope);
+      const result = await deps.author.save(name, specCheck.data, previousName, scope);
       sendJson(res, result.ok ? 200 : 400, result);
       return;
     }
@@ -248,7 +272,11 @@ async function handle(
   }
 
   if (method === "GET" && path === "/api/doctor") {
-    sendJson(res, 200, { doctor: deps.doctor?.() ?? [] });
+    const doctorError = deps.doctorError?.();
+    sendJson(res, 200, {
+      doctor: deps.doctor?.() ?? [],
+      ...(doctorError ? { doctorError } : {}),
+    });
     return;
   }
 
@@ -388,6 +416,10 @@ async function streamGenerate(
     sendJson(res, 400, { error: "body must include string 'description' and 'agent'" });
     return;
   }
+  if (typeof parsed.name === "string" && !isValidWorkflowName(parsed.name)) {
+    sendJson(res, 400, { error: "invalid workflow name" });
+    return;
+  }
 
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
@@ -420,8 +452,10 @@ async function streamGenerate(
     (attempt) => send({ type: "attempt", attempt }),
   );
 
-  if (!res.writableEnded) {
+  if (!res.writableEnded && !controller.signal.aborted) {
     send({ type: "done", ...result });
+    res.end();
+  } else if (!res.writableEnded) {
     res.end();
   }
 }
@@ -495,7 +529,7 @@ export async function startWebUi(
   // Health is reported live via /api/doctor; the page must not wait on it (the
   // doctor probes agent binaries and can take seconds), so we serve immediately
   // and let the catalog/health populate in the background.
-  const doctorState = { results: [] as DoctorResult[] };
+  const doctorState = { results: [] as DoctorResult[], error: null as string | null };
 
   const cacheStore = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
   const historyStore = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
@@ -505,6 +539,7 @@ export async function startWebUi(
     historyStore,
     cwd,
     maxConcurrent: options.maxConcurrent ?? 5,
+    timeoutMs: options.config.timeoutMs,
   });
   const author = new WorkflowAuthor({
     host: orchestrator,
@@ -521,6 +556,7 @@ export async function startWebUi(
     history: historyStore,
     workflowSource: (name) => orchestrator.workflowSource(name),
     doctor: () => doctorState.results,
+    doctorError: () => doctorState.error,
     configLabel: options.configLabel,
   });
 
@@ -550,7 +586,8 @@ export async function startWebUi(
           : `   agent health: all ${results.length} agents ok\n`,
       );
     } catch (e) {
-      err(`   doctor failed: ${e instanceof Error ? e.message : String(e)}\n`);
+      doctorState.error = e instanceof Error ? e.message : String(e);
+      err(`   doctor failed: ${doctorState.error}\n`);
     }
   })();
 

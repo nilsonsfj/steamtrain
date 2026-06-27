@@ -149,6 +149,24 @@ describe("deleteProjectWorkflow", () => {
     expect(result.ok).toBe(true);
     expect(result.removed).toBe(false);
   });
+
+  it("rejects deletion when merged config would fail schema validation (M15)", () => {
+    const cwd = tmpCwd();
+    // Write a config with an unrecognized top-level key — the strict schema
+    // rejects it. Deleting a workflow from it should fail rather than write
+    // a config the engine would ignore.
+    writeFileSync(
+      cfg(cwd),
+      JSON.stringify({ workflows: { a: sampleSpec("a") }, bogusKey: true }),
+    );
+    const result = deleteProjectWorkflow("a", cfg(cwd));
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/cannot delete/i);
+    // The original file should be untouched.
+    const raw = JSON.parse(readFileSync(cfg(cwd), "utf8"));
+    expect(raw.bogusKey).toBe(true);
+    expect(raw.workflows.a).toBeDefined();
+  });
 });
 
 describe("loadProjectWorkflows", () => {

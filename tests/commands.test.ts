@@ -56,6 +56,18 @@ describe("parseSlashInput", () => {
     expect(parsed?.command).toBe("model");
     expect(slashCommandArgs(parsed!)).toEqual(["claude-sonnet-4-6"]);
   });
+
+  it("handles escaped quotes inside quoted strings", () => {
+    const parsed = parseSlashInput('/prompt "hello \\"world\\""');
+    expect(parsed?.command).toBe("prompt");
+    expect(slashCommandArgs(parsed!)).toEqual(['hello "world"']);
+  });
+
+  it("handles escaped single quotes inside single-quoted strings", () => {
+    const parsed = parseSlashInput("/prompt 'it\\'s a test'");
+    expect(parsed?.command).toBe("prompt");
+    expect(slashCommandArgs(parsed!)).toEqual(["it's a test"]);
+  });
 });
 
 describe("executeSlashCommand", () => {

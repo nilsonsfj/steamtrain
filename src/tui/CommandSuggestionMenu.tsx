@@ -150,7 +150,7 @@ export function CommandSuggestionMenu({
           const active = index === selectedIndex;
           return (
             <SuggestionRow
-              key={`${suggestion}-${index}`}
+              key={suggestion}
               marker={active ? "▶  " : "   "}
               suggestion={suggestion}
               description={descriptions?.get(suggestion)}

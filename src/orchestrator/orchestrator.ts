@@ -102,6 +102,7 @@ export class Orchestrator {
     const dispatchCheck = this.canDispatch(id);
     if (!dispatchCheck.ok) throw new Error(dispatchCheck.reason);
     const { adapter, entry } = this.resolve(id);
+    if (!entry.model) throw new Error(`workspace '${id}' has no model configured`);
     return adapter.run({
       prompt,
       model: entry.model,

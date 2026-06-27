@@ -76,6 +76,7 @@ interface Run {
   settled: boolean;
   listeners: Set<RunListener>;
   controller: AbortController;
+  timeoutTimer?: ReturnType<typeof setTimeout>;
 }
 
 export interface RunSummary {
@@ -105,6 +106,8 @@ export interface RunManagerOptions {
   retainMs?: number;
   /** Maximum concurrent running workflows. Exceeding returns 503-style error. 0 = unlimited. */
   maxConcurrent?: number;
+  /** Wall-clock timeout (ms) for each run. Omitted = no timeout. */
+  timeoutMs?: number;
 }
 
 const DEFAULT_RETAIN_MS = 5 * 60_000;
@@ -123,6 +126,7 @@ export class WorkflowRunManager {
   private readonly historyStore?: WorkflowHistoryStore;
   private readonly retainMs: number;
   private readonly maxConcurrent: number;
+  private readonly timeoutMs?: number;
   private runningCount = 0;
 
   constructor(options: RunManagerOptions) {
@@ -132,6 +136,7 @@ export class WorkflowRunManager {
     this.historyStore = options.historyStore;
     this.retainMs = options.retainMs ?? DEFAULT_RETAIN_MS;
     this.maxConcurrent = options.maxConcurrent ?? 0;
+    this.timeoutMs = options.timeoutMs;
   }
 
   /** Validate and launch a run; the event loop runs detached in the background. */
@@ -165,6 +170,10 @@ export class WorkflowRunManager {
       listeners: new Set(),
       controller: new AbortController(),
     };
+    if (typeof this.timeoutMs === "number" && this.timeoutMs > 0) {
+      run.timeoutTimer = setTimeout(() => run.controller.abort(), this.timeoutMs);
+      run.timeoutTimer.unref?.();
+    }
     this.runs.set(run.id, run);
     this.runningCount += 1;
     void this.drive(run, spec, opts?.fresh ?? false, opts?.seed);
@@ -299,6 +308,7 @@ export class WorkflowRunManager {
         run.error = err instanceof Error ? err.message : String(err);
       }
     } finally {
+      if (run.timeoutTimer) clearTimeout(run.timeoutTimer);
       this.runningCount = Math.max(0, this.runningCount - 1);
       run.endedAt = Date.now();
       // The outcome is resolved now; lock out cancellation synchronously before

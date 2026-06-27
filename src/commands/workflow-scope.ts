@@ -20,6 +20,8 @@ export function extractWorkflowScope(args: string[]): { scope: WorkflowScope; re
       if (value === "project" || value === "user") {
         scope = value;
         i += 1;
+      } else {
+        throw new Error("--scope requires a value: 'user' or 'project'");
       }
     } else if (arg !== undefined) {
       rest.push(arg);

@@ -83,20 +83,7 @@ export interface RunRecord {
 }
 
 /** The lightweight shape used for history list views (record minus the tree). */
-export interface RunRecordSummary {
-  version: number;
-  id: string;
-  workflow: string;
-  input: string;
-  cwd: string;
-  status: RunRecordStatus;
-  ok: boolean;
-  startedAt: number;
-  endedAt: number;
-  durationMs: number;
-  totals: RunTotals;
-  error?: string;
-}
+export type RunRecordSummary = Omit<RunRecord, "phases">;
 
 export function runRecordSummary(record: RunRecord): RunRecordSummary {
   const { phases: _phases, ...summary } = record;
@@ -170,6 +157,7 @@ export class RunRecordBuilder {
   private name?: string;
   private startedAt: number;
   private phases: HistoryPhase[] = [];
+  private phaseIndex = new Map<string, HistoryPhase>();
   private ok = true;
 
   constructor(meta: RunRecordMeta, startedAt: number = Date.now()) {
@@ -192,10 +180,11 @@ export class RunRecordBuilder {
         this.name = event.name;
         this.startedAt = event.ts;
         this.phases = [];
+        this.phaseIndex.clear();
         this.ok = true;
         break;
-      case "phase_start":
-        this.phases.push({
+      case "phase_start": {
+        const phase: HistoryPhase = {
           phaseId: event.phaseId,
           title: event.title,
           index: event.index,
@@ -204,8 +193,11 @@ export class RunRecordBuilder {
           done: false,
           ok: true,
           iteration: event.iteration,
-        });
+        };
+        this.phases.push(phase);
+        this.phaseIndex.set(`${event.phaseId}:${event.iteration ?? 1}`, phase);
         break;
+      }
       case "fan_out": {
         const phase = this.phaseOf(event.phaseId, event.iteration);
         if (!phase) break;
@@ -350,9 +342,7 @@ export class RunRecordBuilder {
   }
 
   private phaseOf(phaseId: string, iteration?: number): HistoryPhase | undefined {
-    return this.phases.find(
-      (p) => p.phaseId === phaseId && (p.iteration ?? 1) === (iteration ?? 1),
-    );
+    return this.phaseIndex.get(`${phaseId}:${iteration ?? 1}`);
   }
 
   private stepOf(phaseId: string, stepId: string, iteration?: number): HistoryStep | undefined {

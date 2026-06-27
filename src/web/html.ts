@@ -695,16 +695,21 @@ var SteamtrainReducer = (() => {
   function pollDoctor(attempt) {
     api("GET", "/api/doctor").then(function (r) {
       var list = r.body.doctor || [];
+      var err = r.body.doctorError;
       S.doctor = list;
-      renderHealth(list);
+      renderHealth(list, err);
       applyHealth();
-      if (!list.length && attempt < 12) setTimeout(function () { pollDoctor(attempt + 1); }, 1500);
+      if (!list.length && !err && attempt < 12) setTimeout(function () { pollDoctor(attempt + 1); }, 1500);
     });
   }
 
-  function renderHealth(list) {
+  function renderHealth(list, err) {
     var box = document.getElementById("health");
     clear(box);
+    if (err) {
+      box.appendChild(h("span", { class: "chip bad" }, h("span", { class: "dot" }), "doctor: " + err));
+      return;
+    }
     list.forEach(function (d) {
       var cls = d.status === "ok" ? "ok" : (d.status === "warn" ? "warn" : "bad");
       box.appendChild(h("span", { class: "chip " + cls }, h("span", { class: "dot" }), d.agent));

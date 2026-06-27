@@ -154,7 +154,7 @@ function Line({
 function summarizeInput(input: unknown): string {
   if (input == null) return "";
   if (typeof input === "string") return input;
-  if (typeof input === "object") {
+  if (typeof input === "object" && !Array.isArray(input)) {
     const obj = input as Record<string, unknown>;
     // Surface the most useful single field if present.
     for (const key of ["command", "file_path", "path", "pattern", "query", "description"]) {

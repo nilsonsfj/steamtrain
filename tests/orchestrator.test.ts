@@ -173,6 +173,19 @@ describe("Orchestrator", () => {
     expect(() => orch.run("nope", "hello")).toThrow("unknown workspace");
   });
 
+  it("run throws when workspace has no model configured (M6)", () => {
+    const noModelWorkspaces: WorkspaceConfig = {
+      workspaces: [{ id: "ws-nomodel", agent: "opencode" }],
+    };
+    const orch = new Orchestrator(
+      makeConfig(),
+      noModelWorkspaces,
+      [healthyDoctor("opencode")],
+      makeCatalog(),
+    );
+    expect(() => orch.run("ws-nomodel", "hello")).toThrow("has no model configured");
+  });
+
   it("run throws when agent is unhealthy (canDispatch check)", () => {
     const orch = new Orchestrator(
       makeConfig(),

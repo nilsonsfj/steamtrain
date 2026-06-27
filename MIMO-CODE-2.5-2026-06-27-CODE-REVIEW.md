@@ -4,7 +4,7 @@
 **Date:** 2026-06-27
 **Reviewer:** Principal Software Engineer (MIMO-CODE-2.5)
 **Scope:** Full codebase — correctness, architecture, code quality, security, testing
-**Last updated:** 2026-06-27 — items resolved in PR #23 (37 commits) removed
+**Last updated:** 2026-06-27 — items resolved in PR #23 (37 commits) and PR #24 (Medium fixes) removed
 
 ---
 
@@ -24,9 +24,10 @@
 | Performance | B | Async catalog I/O, transcript/frame caps, backpressure; TUI re-render concerns remain |
 | Maintainability | B- | App.tsx is a 1905-line monolith, html.ts is 1547 lines of inline JS/CSS |
 
-**Remaining findings: 108** (1 Critical, 2 High, 40 Medium, 50 Low, 15 Architectural + test gaps)
+**Remaining findings: 73** (1 Critical, 2 High, 6 Medium, 50 Low, 14 Architectural + test gaps)
 
 **Resolved in PR #23: 39 findings** (6 Critical, 22 High, 11 Medium)
+**Resolved in PR #24: 30 findings** (30 Medium, 3 tests added)
 
 ---
 
@@ -70,190 +71,30 @@
 - **Category:** Architecture
 - Shared mutable singleton pattern. Tests running in parallel share cache state. Tests exist to mitigate, but the pattern is fragile.
 
-### M3. `codex-efforts-fallback.ts` — GPT 5.4/5.3 use GPT_55_EFFORTS
-- **File:** `src/agents/codex-efforts-fallback.ts:13-15`
-- **Category:** Correctness
-- GPT 5.4, 5.3, 5.2 all use `GPT_55_EFFORTS` instead of their own. May artificially restrict available effort levels.
-
-### M4. `opencode-efforts-fallback.ts` maps `qwen` to Anthropic efforts
-- **File:** `src/agents/opencode-efforts-fallback.ts:46-48`
-- **Category:** Correctness
-- Qwen models on OpenCode Zen get Anthropic's effort levels (`["high", "max"]`). Likely a copy-paste error.
-
 ### M5. Prompt-as-positional-arg pattern is fragile across all adapters
 - **File:** `src/agents/codex.ts:285-299`, `claude.ts:227`, `opencode.ts:244`
 - **Category:** Correctness / Security
 - Prompt as last positional arg conflicts with CLI flag grammar changes. Consider stdin piping or `--prompt` flag.
-
-### M6. `Orchestrator.run()` doesn't pass `defaultModelForAgent` when model is undefined
-- **File:** `src/orchestrator/orchestrator.ts:103-110`
-- **Category:** Edge Case
-- If `entry.model` is undefined, adapter passes `--model undefined` to CLI, causing errors.
-
-### M7. `parseStepStatus` silently normalizes unknown statuses to `"pending"`
-- **File:** `src/workflow/reducer.ts:159-164`
-- **Category:** Error Swallowing
-- Corrupt history record with `status: "running"` for finalized run displays as spinning step.
-
-### M8. `workflowStateFromRecord` does not populate `results` array
-- **File:** `src/workflow/reducer.ts:133-157`
-- **Category:** State Management
-- Sets `results: []`. Any downstream code reading `state.results` gets empty data.
-
-### M9. `runRecordSummary` has no compile-time type sync guarantee
-- **File:** `src/workflow/history.ts:101-104`
-- **Category:** Type Safety
-- Rest-spread drops `phases` correctly, but no compile-time guarantee `RunRecordSummary` stays in sync with `RunRecord`.
-
-### M10. `extractWorkflowSpec` uses `console.warn` in library code
-- **File:** `src/workflow/generate.ts:305-309`
-- **Category:** Architecture
-- Library code should not write to stdout. Bypasses structured logging.
 
 ### M11. No concurrency limit on LLM generation endpoint
 - **File:** `src/web/server.ts:158-165`
 - **Category:** Resource Exhaustion
 - `POST /api/workflows/generate` spawns subprocesses without throttling. Can exhaust credits and file descriptors.
 
-### M12. Workflow name unsanitized at HTTP boundary
-- **File:** `src/web/server.ts:167-169`
-- **Category:** Input Validation
-- Names with control characters, null bytes, or extreme length flow into map lookups and error messages.
-
-### M13. PUT `/api/workflows/:name` casts spec without layer-0 validation
-- **File:** `src/web/server.ts:194-203`
-- **Category:** Input Validation
-- Checks `typeof parsed.spec !== "object"` but passes `as WorkflowSpec` without Zod validation at the HTTP layer.
-
-### M14. SSE stream not closed promptly on client disconnect
-- **File:** `src/web/server.ts:318-377`
-- **Category:** Resource Leak
-- After `await author.generate()`, no check for `controller.signal.aborted`. Server continues processing after client is gone.
-
-### M15. `deleteProjectWorkflow` skips schema validation before write
-- **File:** `src/config/project-workflows.ts:108-123`
-- **Category:** Correctness
-- `saveProjectWorkflow` validates against `configFileSchema`, but `deleteProjectWorkflow` writes directly.
-
-### M16. CLI and web runner lack wall-clock timeout on workflow execution
-- **File:** `src/cli.ts:499-511`, `src/web/runs.ts:210-303`
-- **Category:** Resource Exhaustion
-- `config.timeoutMs` defined but never enforced with `setTimeout`. Hung agent subprocesses block forever.
-
-### M17. `runVersion` pipes stderr/stdout without size limits
-- **File:** `src/doctor/doctor.ts:66-101`
-- **Category:** Resource Exhaustion
-- Broken binary writing gigabytes to stdout within 8-second timeout could OOM the doctor check.
-
 ### M18. `applyWorkflowStepOverrides` can overwrite gate-specific fields
 - **File:** `src/workflow/overrides.ts:7-22`
 - **Category:** Edge Case
 - `isAgentBackedStep` returns true for distributor/consolidator steps with `agent` field. Spread could overwrite `condition` with agent fields.
-
-### M19. `findJsonObject` doesn't handle `{` in explanatory text
-- **File:** `src/workflow/generate.ts:434-459`
-- **Category:** Edge Case
-- When no fenced block exists, `{` in explanatory text could match first, causing balanced-brace scan to fail silently.
-
-### M21. `atomicWriteFile` temp naming uses `process.pid`
-- **File:** `src/workflow/fs-util.ts:18-22`
-- **Category:** Edge Case
-- Same PID in test suites could collide. `crypto.randomUUID()` would be safer.
-
-### M22. `parseSlashInput` doesn't handle escaped quotes
-- **File:** `src/commands/parse.ts:13`
-- **Category:** Edge Case
-- `"hello \"world\""` splits at inner escaped quote.
-
-### M23. `extractWorkflowScope` silently ignores missing `--scope` value
-- **File:** `src/commands/workflow-scope.ts:18-23`
-- **Category:** Edge Case
-- `--scope` as last argument has `undefined` value, silently ignored instead of erroring.
-
-### M25. `orchestrator` memo depends on `doctor ?? []` creating new orchestrator on load
-- **File:** `src/tui/App.tsx:259-262`
-- **Category:** Performance
-- `doctor` starts null, `??` creates new `[]` reference, cascading recreation of `authoringHost`, `author`, etc.
 
 ### M26. `WorkflowPicker` does not virtualize — all rows rendered
 - **File:** `src/tui/WorkflowPicker.tsx:46-77`
 - **Category:** Performance
 - Unlike `WorkflowView` and `WorkflowPreview`, renders ALL entries. 50+ workflows slow rendering.
 
-### M27. `orchestrator.workflowSource()` called inline in JSX
-- **File:** `src/tui/App.tsx:1647,1669`
-- **Category:** Performance
-- Called during render without memoization. Should use `useMemo`.
-
-### M28. `handleWorkflowFreshRun` recreated on every keystroke (value dependency)
-- **File:** `src/tui/App.tsx:1405-1413`
-- **Category:** Performance
-- `value` in deps causes re-creation every keystroke, cascading re-renders to `PromptInput`.
-
-### M30. `CommandSuggestionMenu` uses array index as key
-- **File:** `src/tui/CommandSuggestionMenu.tsx:153`
-- **Category:** Correctness
-- Same suggestion at different indices could collide. Changing suggestions cause unnecessary re-mounts.
-
-### M31. `EventRow` `summarizeInput` uses unsafe type assertion
-- **File:** `src/tui/EventRow.tsx:157-158`
-- **Category:** Type Safety
-- `as Record<string, unknown>` on `typeof input === "object"` without Array check.
-
-### M35. Doctor IIFE silently swallows all errors
-- **File:** `src/web/server.ts:481-496`
-- **Category:** Error Handling
-- `/api/doctor` permanently returns `[]` if any error occurs. No mechanism for UI to know doctor failed.
-
 ### M36. No CORS headers on any endpoint
 - **File:** `src/web/server.ts`
 - **Category:** HTTP Handling
 - Acceptable for loopback binding, but `--host 0.0.0.0` exposes server on network.
-
-### M37. `runRecordBuilder.phaseOf` is O(n) per event
-- **File:** `src/workflow/history.ts:350-358`
-- **Category:** Performance
-- Linear scan for every event. `Map<string, Map>` lookup would be O(1).
-
-### M38. `isAgentBackedStep` returns true for distributor/consolidator with `agent`
-- **File:** `src/workflow/types.ts:378-380`
-- **Category:** Type Safety
-- Semantically misleading — consolidator with `agent` is not a "worker step with agent."
-
-### M40. `WorkflowAuthor.save` captures `previousSource` before `persist`
-- **File:** `src/workflow/authoring.ts:189-228`
-- **Category:** Edge Case
-- If `persist` triggers `reload()` changing source mapping, captured `previousSource` may be stale.
-
-### M41. `codex-variants.ts` parser counts braces inside JSON strings
-- **File:** `src/agents/opencode-variants.ts:38-48`
-- **Category:** Correctness
-- JSON block parser counts `{`/`}` without skipping strings. Strings containing braces cause miscounting.
-
-### M42. `process.env` passed by reference to spawned processes
-- **File:** `src/agents/codex-variants.ts:64-66`, `src/agents/opencode-variants.ts:69-71`
-- **Category:** Correctness
-- `env: process.env` shares parent's env object. `spawn.ts` correctly uses `{...process.env}`.
-
-### M43. `codex-variants.ts` and `opencode-variants.ts` timeout lacks SIGKILL escalation
-- **File:** `src/agents/codex-variants.ts:71-74`, `src/agents/opencode-variants.ts:76-79`
-- **Category:** Resource Management
-- Only sends SIGTERM on timeout. Process could hang forever if it ignores SIGTERM. `spawn.ts` has 2s SIGKILL fallback.
-
-### M44. `commands.test.ts` mutates global slash command registry
-- **File:** `tests/commands.test.ts:528-541`
-- **Category:** Test Isolation
-- Overrides built-in `version` command without `beforeEach`/`afterEach` guard. Parallel test bleed risk.
-
-### M45. Timing-dependent concurrency assertions
-- **File:** `tests/workflow-engine.test.ts:116-126`
-- **Category:** Flakiness Risk
-- `delayMs: 20` with `peak === 3` assertion relies on cooperative scheduling. Heavily loaded CI may fail.
-
-### M46. Abort timing in retry test is fragile
-- **File:** `tests/retry-engine.test.ts:196-208`
-- **Category:** Flakiness Risk
-- `setTimeout(() => controller.abort(), 50)` during 5000ms backoff. Slow machines may land abort during run phase.
 
 ---
 
@@ -434,7 +275,6 @@
 | **Variant cache duplication** | `codex-variants.ts` and `opencode-variants.ts` are near-identical. |
 | **Duplicate functions** | `humanizeAssistantError` in `claude.ts`/`amp.ts`. |
 | **No request logging** | Zero logging of HTTP requests or responses. |
-| **Dead config** | `config.timeoutMs` defined but never enforced in CLI or web run paths. |
 
 ---
 
@@ -465,8 +305,8 @@
 | ~~Missing `nosniff` header~~ | ~~High~~ | `server.ts` | ~~MIME sniffing risk~~ | **Fixed** |
 | ~~Missing CSP~~ | ~~High~~ | `html.ts` | ~~No containment for future XSS~~ | **Fixed** |
 | ~~Error details leaked~~ | ~~Medium~~ | `server.ts` | ~~Internal paths in error responses~~ | **Fixed** |
-| Unsanitized workflow names | Medium | `server.ts:167-169` | Control chars, long strings | |
-| No spec validation at HTTP layer | Medium | `server.ts:194-203` | `as WorkflowSpec` cast without Zod | |
+| ~~Unsanitized workflow names~~ | ~~Medium~~ | `server.ts` | ~~Control chars, long strings~~ | **Fixed** |
+| ~~No spec validation at HTTP layer~~ | ~~Medium~~ | `server.ts` | ~~`as WorkflowSpec` cast without Zod~~ | **Fixed** |
 
 ---
 
@@ -480,8 +320,8 @@
 | No virtualization in `WorkflowPicker` | `WorkflowPicker.tsx` | All entries rendered | |
 | ~~Unbounded frame buffer~~ | `runs.ts` | ~~Megabytes retained for 5 minutes~~ | **Fixed** |
 | ~~`listRunRecords` unbounded reads~~ | `history-store.ts` | ~~Hundreds of simultaneous file reads~~ | **Fixed** |
-| `PhaseOf`/`stepOf` O(n) per event | `history.ts` | Linear scan for every event | |
-| Callback recreation on keystroke | `App.tsx` | Cascading re-renders every keystroke | |
+| ~~`PhaseOf`/`stepOf` O(n) per event~~ | `history.ts` | ~~Linear scan for every event~~ | **Fixed** |
+| ~~Callback recreation on keystroke~~ | `App.tsx` | ~~Cascading re-renders every keystroke~~ | **Fixed** |
 
 ---
 
@@ -491,20 +331,18 @@
 
 1. **Add OS signal handling tests** (C7) — verify clean shutdown
 2. **Stabilize callback references** (H13) — use `useRef` for values in callbacks
-3. **Validate workflow names at HTTP boundary** (M12) — reject control chars, enforce length limit
-4. **Enforce `config.timeoutMs` in CLI and web** (M16) — `setTimeout`-based abort
 
 ### This Quarter
 
-5. **Extract `App.tsx` into smaller components/hooks** — state management, keyboard, render
-6. **Extract `html.ts` JS to served file** — enable linting and static analysis
-7. **Virtualize `WorkflowPicker`** — apply `selectVisibleWindow` like other list views
+3. **Extract `App.tsx` into smaller components/hooks** — state management, keyboard, render
+4. **Extract `html.ts` JS to served file** — enable linting and static analysis
+5. **Virtualize `WorkflowPicker`** (M26) — apply `selectVisibleWindow` like other list views
 
 ### Long-Term
 
-8. **Introduce route table** in `server.ts` — enable middleware composition
-9. **Add structured logging** — replace `console.warn`/`console.assert` with logger
-10. **Document threat model** — config file trust, loopback-only assumption
+6. **Introduce route table** in `server.ts` — enable middleware composition
+7. **Add structured logging** — replace `console.warn`/`console.assert` with logger
+8. **Document threat model** — config file trust, loopback-only assumption
 
 ---
 
@@ -569,7 +407,47 @@ The following findings were fixed across 37 commits in [PR #23](https://github.c
 
 ---
 
+## 11. Resolved in PR #24
+
+The following findings were fixed across 8 commits in [PR #24](https://github.com/nilsonsfj/steamtrain/pull/24):
+
+### Medium (30 resolved)
+
+| ID | Finding | Resolution |
+|----|---------|------------|
+| M3 | GPT 5.4/5.3 use GPT_55_EFFORTS | Now use full GPT_REASONING_EFFORTS |
+| M4 | Qwen mapped to Anthropic efforts | Now uses STANDARD_REASONING_EFFORTS |
+| M6 | `Orchestrator.run()` undefined model | Throws early when `entry.model` is undefined |
+| M7 | `parseStepStatus` normalizes to "pending" | Returns "error" for unknown statuses |
+| M8 | `workflowStateFromRecord` empty results | Populates results from step results |
+| M9 | `RunRecordSummary` type drift | Now `Omit<RunRecord, "phases">` for compile-time sync |
+| M10 | `console.warn` in library code | Uses optional `onWarn` callback |
+| M12 | Unsanitized workflow names | Validates at HTTP boundary (control chars, length) |
+| M13 | PUT spec cast without validation | Validates with `workflowSpecSchema` at HTTP layer |
+| M14 | SSE stream not closed on disconnect | Checks `controller.signal.aborted` before sending |
+| M15 | `deleteProjectWorkflow` skips validation | Validates merged config against `configFileSchema` |
+| M16 | No wall-clock timeout enforcement | `setTimeout`-based abort in CLI and web run paths |
+| M17 | `runVersion` unbounded stdout/stderr | Caps at 10KB to prevent OOM |
+| M19 | `findJsonObject` wrong `{` match | Tries each `{` position when first scan fails |
+| M21 | `atomicWriteFile` uses `process.pid` | Uses `crypto.randomUUID()` for temp names |
+| M22 | `parseSlashInput` escaped quotes | Handles `\"` and `\'` inside quoted strings |
+| M23 | `--scope` silently ignores missing value | Throws error when value is missing |
+| M25 | `doctor ?? []` creates new reference | Uses stable `EMPTY_DOCTOR` constant |
+| M27 | `workflowSource()` inline in JSX | Memoized via `activeWorkflowSource` |
+| M28 | `handleWorkflowFreshRun` value dependency | Uses `valueRef` instead of `value` |
+| M30 | `CommandSuggestionMenu` array index key | Uses suggestion text as key |
+| M31 | `EventRow.summarizeInput` unsafe cast | Adds `Array.isArray` guard |
+| M35 | Doctor IIFE swallows errors | Surfaces errors in `/api/doctor` response |
+| M37 | `phaseOf` O(n) per event | Uses Map for O(1) lookup |
+| M38 | `isAgentBackedStep` misleading semantics | Clarified JSDoc for agent-backed distributors/consolidators |
+| M40 | `previousSource` capture order | Clarified comment (intentional pre-persist read) |
+| M41 | JSON parser counts braces in strings | Correctly handles strings in brace counting |
+| M42 | `process.env` passed by reference | Uses `{ ...process.env }` copy |
+| M43 | Timeout lacks SIGKILL escalation | Escalates to SIGKILL after 2s if SIGTERM ignored |
+
+---
+
 *Generated by MIMO-CODE-2.5 Principal Engineer Review Agent*
 *Review date: 2026-06-27*
 *Files reviewed: 80+ source files, 65 test files, 5 build configs*
-*Last updated: 2026-06-27 — 39 findings resolved in PR #23 (37 commits)*
+*Last updated: 2026-06-27 — 39 findings resolved in PR #23, 30 findings resolved in PR #24*

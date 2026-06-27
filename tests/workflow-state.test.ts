@@ -245,6 +245,74 @@ describe("workflowReducer", () => {
     expect(flat[0]?.step.result?.output).toBe("hello");
   });
 
+  it("populates results from step results in workflowStateFromRecord (M8)", () => {
+    const result1: StepResult = { stepId: "a", ok: true, output: "done a", durationMs: 10 };
+    const result2: StepResult = { stepId: "b", ok: false, output: "fail b", error: "boom", durationMs: 5 };
+    const record: RunRecord = {
+      version: 1,
+      id: "r2",
+      workflow: "test",
+      input: "x",
+      cwd: "/tmp",
+      status: "error",
+      ok: false,
+      startedAt: 100,
+      endedAt: 200,
+      durationMs: 100,
+      totals: { steps: 2, ok: 1, failed: 1, cached: 0, costUsd: 0, durationMs: 15 },
+      phases: [
+        {
+          phaseId: "p1",
+          title: "P1",
+          index: 0,
+          stepCount: 2,
+          done: true,
+          ok: false,
+          steps: [
+            { stepId: "a", blockKind: "worker", status: "done", text: "", cached: false, result: result1 },
+            { stepId: "b", blockKind: "worker", status: "error", text: "", cached: false, result: result2 },
+          ],
+        },
+      ],
+    };
+    const state = workflowStateFromRecord(record);
+    expect(state.results).toHaveLength(2);
+    expect(state.results).toContainEqual(result1);
+    expect(state.results).toContainEqual(result2);
+  });
+
+  it("normalizes unknown step statuses to 'error' in workflowStateFromRecord (M7)", () => {
+    const record = {
+      version: 1,
+      id: "r3",
+      workflow: "test",
+      input: "x",
+      cwd: "/tmp",
+      status: "done",
+      ok: true,
+      startedAt: 100,
+      endedAt: 200,
+      durationMs: 100,
+      totals: { steps: 1, ok: 1, failed: 0, cached: 0, costUsd: 0, durationMs: 5 },
+      phases: [
+        {
+          phaseId: "p1",
+          title: "P1",
+          index: 0,
+          stepCount: 1,
+          done: true,
+          ok: true,
+          steps: [
+            { stepId: "a", blockKind: "worker", status: "corrupted", text: "", cached: false },
+          ],
+        },
+      ],
+    } as unknown as RunRecord;
+    const state = workflowStateFromRecord(record);
+    const step = flattenSteps(state)[0]?.step;
+    expect(step?.status).toBe("error");
+  });
+
   it("resets to the initial state", () => {
     const seeded = reduceAll([
       { kind: "workflow_start", name: "w", phaseCount: 0, stepCount: 0, ts: 0 },
