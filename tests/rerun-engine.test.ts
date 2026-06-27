@@ -178,7 +178,7 @@ describe("seeded cache re-run", () => {
     const record = builder.build({ status: "done" });
 
     const seed = seedCacheFromRecord(record);
-    expect(seed.has("gate")).toBe(true); // a blocked-but-ok gate is seeded
+    expect(seed.has("gate")).toBe(false); // a blocked gate is not ok and not seeded
 
     const secondSpawns: string[] = [];
     for await (const ev of runWorkflow(
