@@ -128,5 +128,7 @@ export function transcriptReducer(
       return push(state, { kind: "notice", level: action.level, text: action.text });
     case "event":
       return applyEvent(state, action.event);
+    default:
+      return state;
   }
 }
