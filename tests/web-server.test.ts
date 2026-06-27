@@ -427,6 +427,20 @@ describe("web server", () => {
     expect(body.downgraded).toBe("spec-changed");
   });
 
+  it("rejects oversized payloads with 413", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const bigBody = "x".repeat(2 * 1024 * 1024);
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: bigBody,
+    });
+    expect(res.status).toBe(413);
+    const json = (await res.json()) as { error: string };
+    expect(json.error).toContain("too large");
+  });
+
   it("returns 404 for a rerun of an unknown run id", async () => {
     const host = new FakeHost(demoSpec(), happyRun);
     const historyStore = createWorkflowHistoryStore(

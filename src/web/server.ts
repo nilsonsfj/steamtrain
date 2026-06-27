@@ -76,13 +76,30 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
   });
   res.end(text);
 }
 
+/** Maximum body size: 1 MiB. Rejects larger payloads with HTTP 413. */
+const MAX_BODY_BYTES = 1 * 1024 * 1024;
+
+class PayloadTooLarge extends Error {
+  constructor() {
+    super("payload too large");
+    this.name = "PayloadTooLarge";
+  }
+}
+
 async function readBody(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let totalBytes = 0;
+  for await (const chunk of req) {
+    const buf = chunk as Buffer;
+    totalBytes += buf.length;
+    if (totalBytes > MAX_BODY_BYTES) throw new PayloadTooLarge();
+    chunks.push(buf);
+  }
   return Buffer.concat(chunks).toString("utf8");
 }
 
@@ -113,9 +130,16 @@ async function readBody(req: IncomingMessage): Promise<string> {
 export function createWebServer(deps: WebServerDeps): Server {
   return createServer((req, res) => {
     void handle(req, res, deps).catch((err) => {
-      if (!res.headersSent)
-        sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
-      else res.end();
+      if (!res.headersSent) {
+        const status = err instanceof PayloadTooLarge ? 413 : 500;
+        const error =
+          err instanceof PayloadTooLarge
+            ? "payload too large"
+            : "internal server error";
+        sendJson(res, status, { error });
+      } else {
+        res.end();
+      }
     });
   });
 }
@@ -130,7 +154,12 @@ async function handle(
   const method = req.method ?? "GET";
 
   if (method === "GET" && (path === "/" || path === "/index.html")) {
-    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+    res.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+    });
     res.end(PAGE_HTML);
     return;
   }
@@ -343,6 +372,7 @@ async function streamGenerate(
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache, no-transform",
+    "x-content-type-options": "nosniff",
     connection: "keep-alive",
   });
   res.write(": open\n\n");
@@ -380,6 +410,7 @@ function streamRun(runId: string, runs: WorkflowRunManager, res: ServerResponse)
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache, no-transform",
+    "x-content-type-options": "nosniff",
     connection: "keep-alive",
   });
   // A first comment line opens the stream promptly for the browser.
