@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import { useEffect, useState } from "react";
+import { truncate } from "../agents/util";
 import { type RunRecordSummary, formatRunTotals } from "../workflow";
 import { selectVisibleWindow } from "./workflow-list-window";
 
@@ -110,10 +111,6 @@ function HistoryRow({
       </Box>
     </Box>
   );
-}
-
-function truncate(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
 function relativeTime(ts: number): string {
