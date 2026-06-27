@@ -427,6 +427,29 @@ describe("web server", () => {
     expect(body.downgraded).toBe("spec-changed");
   });
 
+  it("rejects runs when concurrent limit is exceeded", async () => {
+    const host = new FakeHost(demoSpec(), hangingRun);
+    const runs = new WorkflowRunManager({ host, cacheStore: noopStore, cwd: "/tmp", maxConcurrent: 1 });
+    const server = createWebServer({ host, runs, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+
+    const first = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "demo", input: "a" }),
+    });
+    expect(first.status).toBe(201);
+
+    const second = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "demo", input: "b" }),
+    });
+    expect(second.status).toBe(400);
+    expect(((await second.json()) as { error: string }).error).toContain("too many concurrent");
+  });
+
   it("rejects oversized payloads with 413", async () => {
     const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);

@@ -94,6 +94,8 @@ export interface RunManagerOptions {
   historyStore?: WorkflowHistoryStore;
   /** Keep finished runs around this long (ms) so a reload can still replay. */
   retainMs?: number;
+  /** Maximum concurrent running workflows. Exceeding returns 503-style error. 0 = unlimited. */
+  maxConcurrent?: number;
 }
 
 const DEFAULT_RETAIN_MS = 5 * 60_000;
@@ -111,6 +113,8 @@ export class WorkflowRunManager {
   private readonly cwd: string;
   private readonly historyStore?: WorkflowHistoryStore;
   private readonly retainMs: number;
+  private readonly maxConcurrent: number;
+  private runningCount = 0;
 
   constructor(options: RunManagerOptions) {
     this.host = options.host;
@@ -118,6 +122,7 @@ export class WorkflowRunManager {
     this.cwd = options.cwd;
     this.historyStore = options.historyStore;
     this.retainMs = options.retainMs ?? DEFAULT_RETAIN_MS;
+    this.maxConcurrent = options.maxConcurrent ?? 0;
   }
 
   /** Validate and launch a run; the event loop runs detached in the background. */
@@ -128,6 +133,10 @@ export class WorkflowRunManager {
   ): StartRunResult {
     const text = input.trim();
     if (!text) return { ok: false, error: "input is required" };
+
+    if (this.maxConcurrent > 0 && this.runningCount >= this.maxConcurrent) {
+      return { ok: false, error: `too many concurrent runs (max ${this.maxConcurrent})` };
+    }
 
     const spec = this.host.listWorkflows()[workflow];
     if (!spec) return { ok: false, error: `unknown workflow '${workflow}'` };
@@ -148,6 +157,7 @@ export class WorkflowRunManager {
       controller: new AbortController(),
     };
     this.runs.set(run.id, run);
+    this.runningCount += 1;
     void this.drive(run, spec, opts?.fresh ?? false, opts?.seed);
     return { ok: true, runId: run.id };
   }
@@ -278,6 +288,7 @@ export class WorkflowRunManager {
         run.error = err instanceof Error ? err.message : String(err);
       }
     } finally {
+      this.runningCount = Math.max(0, this.runningCount - 1);
       run.endedAt = Date.now();
       // The outcome is resolved now; lock out cancellation synchronously before
       // the async history write, so a cancel during that window can't report an
