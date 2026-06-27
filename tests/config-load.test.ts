@@ -42,6 +42,14 @@ describe("loadConfig", () => {
     expect(configDisplayLabel(loaded.scope)).toBe("project");
   });
 
+  it("returns defaults when custom path does not exist", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "steamtrain-config-"));
+    const loaded = loadConfig({ cwd, customPath: join(cwd, "nonexistent.json") });
+    expect(loaded.config).toBeDefined();
+    expect(loaded.warning).toBeDefined();
+    expect(loaded.scope.kind).toBe("custom");
+  });
+
   it("warns when legacy tasks key is present", () => {
     const cwd = mkdtempSync(join(tmpdir(), "steamtrain-config-"));
     writeFileSync(
