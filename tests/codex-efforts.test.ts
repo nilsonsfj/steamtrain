@@ -8,7 +8,7 @@ import { effortsForModel } from "../src/agents/models";
 
 describe("fallbackCodexEfforts", () => {
   it("returns gpt-5.4 reasoning levels", () => {
-    expect(fallbackCodexEfforts("gpt-5.4-mini")).toEqual(["low", "medium", "high", "xhigh"]);
+    expect(fallbackCodexEfforts("gpt-5.4-mini")).toEqual(["none", "minimal", "low", "medium", "high", "xhigh"]);
   });
 
   it("returns broader openai reasoning levels for unknown gpt slugs", () => {
@@ -37,6 +37,6 @@ describe("effortsForModel codex cache", () => {
     setCodexVariantCacheForTests(
       new Map([["gpt-5.4-mini", { name: "GPT-5.4 Mini", efforts: ["low", "max"] }]]),
     );
-    expect(effortsForModel("codex", "gpt-5.3-codex")).toEqual(["low", "medium", "high", "xhigh"]);
+    expect(effortsForModel("codex", "gpt-5.3-codex")).toEqual(["none", "minimal", "low", "medium", "high", "xhigh"]);
   });
 });

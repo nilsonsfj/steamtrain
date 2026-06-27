@@ -44,7 +44,7 @@ export function fallbackOpencodeEfforts(model: string): readonly string[] {
   if (parsed.provider === "google") return GEMINI_EFFORTS;
 
   if (parsed.id.startsWith("qwen")) {
-    return parsed.provider === "opencode" ? ANTHROPIC_VARIANT_EFFORTS : STANDARD_REASONING_EFFORTS;
+    return STANDARD_REASONING_EFFORTS;
   }
 
   return effortsForOpencodeModelId(parsed.id);

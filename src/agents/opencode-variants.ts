@@ -68,13 +68,25 @@ function fetchOpencodeModelsVerbose(binary: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(binary, ["models", "--verbose"], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: process.env,
+      env: { ...process.env },
     });
 
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => {
-      child.kill("SIGTERM");
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // already gone
+      }
+      const killTimer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // already gone
+        }
+      }, 2000);
+      killTimer.unref?.();
       reject(new Error(`opencode models --verbose timed out after ${FETCH_TIMEOUT_MS}ms`));
     }, FETCH_TIMEOUT_MS);
 

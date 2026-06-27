@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
@@ -17,7 +18,7 @@ export function isEnoent(err: unknown): boolean {
  */
 export async function atomicWriteFile(target: string, contents: string): Promise<void> {
   await mkdir(dirname(target), { recursive: true });
-  const temp = `${target}.${process.pid}.tmp`;
+  const temp = `${target}.${randomUUID()}.tmp`;
   await writeFile(temp, contents, "utf8");
   await rename(temp, target);
 }

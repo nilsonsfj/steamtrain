@@ -11,7 +11,7 @@ export function fallbackCodexEfforts(model: string): readonly string[] {
   if (slug === "codex-auto-review") return AUTO_REVIEW_EFFORTS;
   if (slug === "gpt-5.5" || slug.startsWith("gpt-5.5-")) return GPT_55_EFFORTS;
   if (slug.startsWith("gpt-5.4") || slug.startsWith("gpt-5.3") || slug.startsWith("gpt-5.2")) {
-    return GPT_55_EFFORTS;
+    return GPT_REASONING_EFFORTS;
   }
   if (slug.startsWith("gpt-")) return GPT_REASONING_EFFORTS;
 
