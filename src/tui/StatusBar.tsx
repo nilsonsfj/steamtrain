@@ -10,6 +10,8 @@ interface StatusBarProps {
   running: boolean;
 }
 
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
 export function StatusBar({ doctor, configSource, workspaceLabel, running }: StatusBarProps) {
   const [spinnerFrame, setSpinnerFrame] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -20,9 +22,8 @@ export function StatusBar({ doctor, configSource, workspaceLabel, running }: Sta
       return;
     }
 
-    const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     const spinnerInterval = setInterval(() => {
-      setSpinnerFrame((f) => (f + 1) % spinnerFrames.length);
+      setSpinnerFrame((f) => (f + 1) % SPINNER_FRAMES.length);
     }, 80);
 
     const startTime = Date.now();
@@ -35,8 +36,6 @@ export function StatusBar({ doctor, configSource, workspaceLabel, running }: Sta
       clearInterval(timerInterval);
     };
   }, [running]);
-
-  const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
   return (
     <Box borderStyle="round" borderColor="gray" paddingX={1} justifyContent="space-between">
@@ -58,7 +57,7 @@ export function StatusBar({ doctor, configSource, workspaceLabel, running }: Sta
       <Box>
         {running ? (
           <Text color="yellow">
-            {spinnerFrames[spinnerFrame]} working ({elapsedSeconds}s)
+            {SPINNER_FRAMES[spinnerFrame]} working ({elapsedSeconds}s)
           </Text>
         ) : (
           <Text color="gray">idle</Text>

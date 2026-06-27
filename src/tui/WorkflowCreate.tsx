@@ -23,6 +23,8 @@ export interface WorkflowCreateState {
  * shows the agent doing the drafting, a tail of its streamed output, and the
  * validated result (or the error + raw output when generation fails).
  */
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
 export function WorkflowCreate({
   state,
   width,
@@ -46,9 +48,8 @@ export function WorkflowCreate({
       return;
     }
 
-    const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     const spinnerInterval = setInterval(() => {
-      setSpinnerFrame((f) => (f + 1) % spinnerFrames.length);
+      setSpinnerFrame((f) => (f + 1) % SPINNER_FRAMES.length);
     }, 80);
 
     const startTime = Date.now();
@@ -61,8 +62,6 @@ export function WorkflowCreate({
       clearInterval(timerInterval);
     };
   }, [state.status]);
-
-  const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
   return (
     <Box
@@ -84,7 +83,7 @@ export function WorkflowCreate({
 
       {state.status === "generating" ? (
         <Text color="yellow">
-          {spinnerFrames[spinnerFrame]} drafting workflow… ({elapsedSeconds}s)
+          {SPINNER_FRAMES[spinnerFrame]} drafting workflow… ({elapsedSeconds}s)
         </Text>
       ) : null}
 

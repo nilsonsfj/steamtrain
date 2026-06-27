@@ -103,6 +103,15 @@ describe("/renameworkflow", () => {
     expect(completions).toEqual(["my-flow"]);
   });
 
+  it("does not complete the second argument (new-name)", () => {
+    const cmd = listSlashCommands().find((c) => c.name === "renameworkflow");
+    const completions = cmd?.complete?.(
+      ["old-flow", "my"],
+      makeCtx({ userWorkflowNames: ["my-flow", "other"] }),
+    );
+    expect(completions).toEqual([]);
+  });
+
   it("warns when unavailable (headless)", () => {
     const result = executeSlashCommand("/renameworkflow x", makeCtx());
     if (result.handled) expect(result.notices?.[0]?.text).toContain("only available in the TUI");

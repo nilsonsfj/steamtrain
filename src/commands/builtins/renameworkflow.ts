@@ -39,8 +39,8 @@ export const renameWorkflowCommand: SlashCommand = {
     return ctx.renameWorkflow(oldName, newName);
   },
   complete(args, ctx) {
-    if (args.length > 2) return [];
-    const token = (args[args.length - 1] ?? "").toLowerCase();
+    if (args.length > 1) return [];
+    const token = (args[0] ?? "").toLowerCase();
     return (ctx.userWorkflowNames ?? []).filter((name) => name.toLowerCase().startsWith(token));
   },
 };
