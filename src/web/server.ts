@@ -20,7 +20,7 @@ import {
 } from "../workflow";
 import type { WorkspaceConfig } from "../workspace";
 import { PAGE_HTML } from "./html";
-import { type WorkflowHost, WorkflowRunManager } from "./runs";
+import { type WorkflowHost, WorkflowRunManager, TooManyRuns } from "./runs";
 
 export interface WebServerDeps {
   host: WorkflowHost;
@@ -88,13 +88,6 @@ class PayloadTooLarge extends Error {
   constructor() {
     super("payload too large");
     this.name = "PayloadTooLarge";
-  }
-}
-
-class TooManyRuns extends Error {
-  constructor(max: number) {
-    super(`too many concurrent runs (max ${max})`);
-    this.name = "TooManyRuns";
   }
 }
 
@@ -308,7 +301,7 @@ async function handle(
       }
       sendJson(res, 201, { runId: result.runId, downgraded: result.downgraded });
     } catch (err) {
-      if (err instanceof Error && err.message.includes("too many concurrent")) {
+      if (err instanceof TooManyRuns) {
         sendJson(res, 503, { error: err.message });
       } else {
         throw err;
@@ -340,7 +333,7 @@ async function handle(
       }
       sendJson(res, 201, { runId: result.runId });
     } catch (err) {
-      if (err instanceof Error && err.message.includes("too many concurrent")) {
+      if (err instanceof TooManyRuns) {
         sendJson(res, 503, { error: err.message });
       } else {
         throw err;

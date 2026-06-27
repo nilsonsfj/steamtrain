@@ -38,6 +38,13 @@ export interface WorkflowHost {
 
 export type RunStatus = "running" | "done" | "error" | "canceled";
 
+export class TooManyRuns extends Error {
+  constructor(max: number) {
+    super(`too many concurrent runs (max ${max})`);
+    this.name = "TooManyRuns";
+  }
+}
+
 /** One serialized server-sent frame, retained so late subscribers can replay. */
 interface RunFrame {
   payload: string;
@@ -137,7 +144,7 @@ export class WorkflowRunManager {
     if (!text) return { ok: false, error: "input is required" };
 
     if (this.maxConcurrent > 0 && this.runningCount >= this.maxConcurrent) {
-      throw new Error(`too many concurrent runs (max ${this.maxConcurrent})`);
+      throw new TooManyRuns(this.maxConcurrent);
     }
 
     const spec = this.host.listWorkflows()[workflow];

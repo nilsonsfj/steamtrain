@@ -231,7 +231,11 @@ export async function* runWorkflow(
         outputs.set(step.id, cached.output);
         results.set(step.id, cached);
         allResults.push(cached);
-        if (!cached.ok) phaseOk = false;
+        if (!cached.ok) {
+          // onFalse: "stop" is a graceful halt — same logic as the live path
+          const isGracefulStop = cached.gate?.onFalse === "stop";
+          if (!isGracefulStop) phaseOk = false;
+        }
         if (cached.gate) {
           channel.push({
             kind: "gate_evaluated",
