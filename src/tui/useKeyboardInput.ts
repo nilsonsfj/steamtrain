@@ -1,11 +1,10 @@
+import { useCallback, useRef } from "react";
 import { useApp, useInput } from "ink";
 import type { WorkflowCreateState } from "./WorkflowCreate";
 import type { Mode } from "./modes";
 import type { HistoryUiState } from "./useHistory";
 import type { WorkflowSpec } from "../workflow";
-import {
-  isSlashCommandInput,
-} from "../commands";
+import { isSlashCommandInput } from "../commands";
 import {
   shouldDismissSuggestionMenu,
   shouldSuppressWorkflowNavigation,
@@ -14,7 +13,7 @@ import {
   shouldPromptHistoryCaptureDown,
   shouldPromptHistoryCaptureUp,
 } from "./prompt-history";
-import type { PromptArrowContext, PromptHistoryByMode } from "./prompt-history";
+import type { PromptArrowContext, PromptHistoryByMode, PromptHistoryBrowse } from "./prompt-history";
 import { workflowListNavigation } from "./prompt-editing";
 import { nextMode } from "./modes";
 
@@ -60,238 +59,203 @@ export interface UseKeyboardInputParams {
   switchMode: (next: React.SetStateAction<Mode>) => void;
   setCommandSuggestions: React.Dispatch<React.SetStateAction<readonly string[]>>;
   setSuggestionIndex: React.Dispatch<React.SetStateAction<number>>;
-  promptHistoryByMode: unknown;
-  historyBrowse: unknown;
+  promptHistoryByMode: PromptHistoryByMode;
+  historyBrowse: PromptHistoryBrowse;
   promptArrowCtx: PromptArrowContext;
 }
 
 export function useKeyboardInput(params: UseKeyboardInputParams) {
-  const {
-    mode,
-    modes,
-    running,
-    promptEditing,
-    value,
-    commandSuggestions,
-    history,
-    setHistory,
-    openHistoryRecord,
-    rerunFromRecord,
-    wfPreview,
-    setWfPreview,
-    wfCreate,
-    setWfCreate,
-    createAbortRef,
-    wfStepDetails,
-    setWfStepDetails,
-    showWorkflowView,
-    previewSpec,
-    previewStepCount,
-    stepIndex,
-    setStepIndex,
-    workflowIndex,
-    setWorkflowIndex,
-    workflowEntries,
-    totalWfSteps,
-    wf,
-    wfLaunching,
-    wfDispatch,
-    activeWorkflowRef,
-    activeWorkflowInputRef,
-    workflowCacheRef,
-    setWfNotice,
-    setWfLaunching,
-    abortRef,
-    workflowPickerActive,
-    focusCreateWorkflowPrompt,
-    exitPromptEditing,
-    switchMode,
-    setCommandSuggestions,
-    setSuggestionIndex,
-    promptHistoryByMode,
-    historyBrowse,
-    promptArrowCtx,
-  } = params;
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
 
   const { exit } = useApp();
 
-  useInput((input, key) => {
-    if (key.ctrl && input === "c") {
-      abortRef.current?.abort();
-      exit();
-      return;
-    }
-    // The history browser is a modal overlay: while open it owns all keys.
-    if (history) {
-      if (key.escape || (key.leftArrow && history.view === "list")) {
-        if (history.view === "detail") {
-          if (history.detail) setHistory({ ...history, detail: false });
-          else setHistory({ ...history, view: "list", record: undefined, recordState: undefined });
-        } else {
-          setHistory(null);
-        }
+  useInput(
+    useCallback((input, key) => {
+      const cur = paramsRef.current;
+
+      if (key.ctrl && input === "c") {
+        cur.abortRef.current?.abort();
+        exit();
         return;
       }
-      if (history.view === "list") {
-        if (key.upArrow) {
-          setHistory({ ...history, index: Math.max(0, history.index - 1) });
+      // The history browser is a modal overlay: while open it owns all keys.
+      if (cur.history) {
+        if (key.escape || (key.leftArrow && cur.history.view === "list")) {
+          if (cur.history.view === "detail") {
+            if (cur.history.detail) {
+              cur.setHistory({ ...cur.history, detail: false });
+            } else {
+              cur.setHistory({ ...cur.history, view: "list", record: undefined, recordState: undefined });
+            }
+          } else {
+            cur.setHistory(null);
+          }
+          return;
+        }
+        if (cur.history.view === "list") {
+          if (key.upArrow) {
+            cur.setHistory({ ...cur.history, index: Math.max(0, cur.history.index - 1) });
+          } else if (key.downArrow) {
+            cur.setHistory({
+              ...cur.history,
+              index: Math.min(Math.max(0, cur.history.runs.length - 1), cur.history.index + 1),
+            });
+          } else if (key.return) {
+            const run = cur.history.runs[cur.history.index];
+            if (run) cur.openHistoryRecord(run.id);
+          }
+          return;
+        }
+        // Detail view: re-run / retry-failed, navigate steps, toggle drill-in.
+        if (!cur.history.detail && input === "r" && cur.history.record) {
+          cur.rerunFromRecord(cur.history.record, "rerun");
+          return;
+        }
+        if (
+          !cur.history.detail &&
+          input === "f" &&
+          cur.history.record &&
+          (cur.history.record.totals?.failed ?? 0) > 0
+        ) {
+          cur.rerunFromRecord(cur.history.record, "retry-failed");
+          return;
+        }
+        const totalSteps = cur.history.recordState
+          ? cur.history.recordState.phases.reduce((n, p) => n + p.steps.length, 0)
+          : 0;
+        if (key.leftArrow && cur.history.detail) {
+          cur.setHistory({ ...cur.history, detail: false });
+        } else if (key.rightArrow && !cur.history.detail && totalSteps > 0) {
+          cur.setHistory({ ...cur.history, detail: true });
+        } else if (key.upArrow) {
+          cur.setHistory({ ...cur.history, stepIndex: Math.max(0, cur.history.stepIndex - 1) });
         } else if (key.downArrow) {
-          setHistory({
-            ...history,
-            index: Math.min(Math.max(0, history.runs.length - 1), history.index + 1),
+          cur.setHistory({
+            ...cur.history,
+            stepIndex: Math.min(Math.max(0, totalSteps - 1), cur.history.stepIndex + 1),
           });
-        } else if (key.return) {
-          const run = history.runs[history.index];
-          if (run) openHistoryRecord(run.id);
         }
         return;
       }
-      // Detail view: re-run / retry-failed, navigate steps, toggle drill-in.
-      if (!history.detail && input === "r" && history.record) {
-        rerunFromRecord(history.record, "rerun");
-        return;
-      }
-      if (
-        !history.detail &&
-        input === "f" &&
-        history.record &&
-        (history.record.totals?.failed ?? 0) > 0
-      ) {
-        rerunFromRecord(history.record, "retry-failed");
-        return;
-      }
-      const totalSteps = history.recordState
-        ? history.recordState.phases.reduce((n, p) => n + p.steps.length, 0)
-        : 0;
-      if (key.leftArrow && history.detail) {
-        setHistory({ ...history, detail: false });
-      } else if (key.rightArrow && !history.detail && totalSteps > 0) {
-        setHistory({ ...history, detail: true });
-      } else if (key.upArrow) {
-        setHistory({ ...history, stepIndex: Math.max(0, history.stepIndex - 1) });
-      } else if (key.downArrow) {
-        setHistory({
-          ...history,
-          stepIndex: Math.min(Math.max(0, totalSteps - 1), history.stepIndex + 1),
-        });
-      }
-      return;
-    }
-    if (key.escape) {
-      if (shouldDismissSuggestionMenu(commandSuggestions, value)) {
-        setCommandSuggestions([]);
-        setSuggestionIndex(0);
-        return;
-      }
-      if (wfStepDetails) {
-        setWfStepDetails(null);
-        return;
-      }
-      if (wfCreate) {
-        createAbortRef.current?.abort();
-        setWfCreate(null);
-        return;
-      }
-      if (running) {
-        if (mode !== "workflow") {
-          abortRef.current?.abort();
-        }
-        return;
-      }
-      if (promptEditing) {
-        exitPromptEditing();
-        return;
-      }
-      // Not running: preview → picker, or finished run → picker.
-      if (mode === "workflow") {
-        if (wfPreview) {
-          setWfPreview(null);
-          setStepIndex(0);
-          setWfNotice(null);
+      if (key.escape) {
+        if (shouldDismissSuggestionMenu(cur.commandSuggestions, cur.value)) {
+          cur.setCommandSuggestions([]);
+          cur.setSuggestionIndex(0);
           return;
         }
-        if (wf.started || wfLaunching) {
-          wfDispatch({ type: "reset" });
-          setStepIndex(0);
-          setWfLaunching(false);
-          activeWorkflowRef.current = undefined;
-          activeWorkflowInputRef.current = undefined;
-          workflowCacheRef.current = new Map();
-          setWfNotice(null);
-        }
-      }
-      return;
-    }
-    // Ctrl+N: jump straight into workflow creation from the picker.
-    if (key.ctrl && input === "n" && !running && workflowPickerActive) {
-      focusCreateWorkflowPrompt(value);
-      return;
-    }
-    if (key.tab && !key.shift && !running) {
-      const promptInputHandlesTab = isSlashCommandInput(value) && promptEditing;
-      if (!promptInputHandlesTab) {
-        setWfPreview(null);
-        setWfLaunching(false);
-        setWfStepDetails(null);
-        switchMode((prev) => nextMode(prev, modes));
-      }
-      return;
-    }
-    const menuOpen = shouldSuppressWorkflowNavigation(commandSuggestions, value);
-    const historyUp =
-      !menuOpen &&
-      shouldPromptHistoryCaptureUp(
-        promptHistoryByMode as any,
-        mode,
-        value,
-        historyBrowse as any,
-        promptArrowCtx,
-      );
-    const historyDown =
-      !menuOpen && shouldPromptHistoryCaptureDown(historyBrowse as any, promptArrowCtx, value);
-    if (mode === "workflow" && !menuOpen && !historyUp && !historyDown) {
-      if (key.leftArrow && wfStepDetails) {
-        setWfStepDetails(null);
-        return;
-      }
-      if (key.rightArrow && !promptEditing && !wfStepDetails) {
-        if (showWorkflowView) {
-          setWfStepDetails("live");
+        if (cur.wfStepDetails) {
+          cur.setWfStepDetails(null);
           return;
         }
-        if (wfPreview && previewSpec) {
-          setWfStepDetails("preview");
+        if (cur.wfCreate) {
+          cur.createAbortRef.current?.abort();
+          cur.setWfCreate(null);
           return;
         }
-      }
-      if (key.upArrow) {
-        if (wf.started || wfLaunching) setStepIndex((i) => Math.max(0, i - 1));
-        else if (wfPreview) setStepIndex((i) => Math.max(0, i - 1));
-        else {
-          const next = Math.max(0, workflowIndex - 1);
-          if (next !== workflowIndex) {
-            setStepIndex(0);
-            setWfStepDetails(null);
+        if (cur.running) {
+          if (cur.mode !== "workflow") {
+            cur.abortRef.current?.abort();
           }
-          setWorkflowIndex(next);
+          return;
         }
-        return;
-      }
-      if (key.downArrow) {
-        if (wf.started || wfLaunching) {
-          setStepIndex((i) => Math.min(Math.max(0, totalWfSteps - 1), i + 1));
-        } else if (wfPreview) {
-          setStepIndex((i) => Math.min(Math.max(0, previewStepCount - 1), i + 1));
-        } else {
-          const next = Math.min(workflowEntries.length, workflowIndex + 1);
-          if (next !== workflowIndex) {
-            setStepIndex(0);
-            setWfStepDetails(null);
+        if (cur.promptEditing) {
+          cur.exitPromptEditing();
+          return;
+        }
+        // Not running: preview → picker, or finished run → picker.
+        if (cur.mode === "workflow") {
+          if (cur.wfPreview) {
+            cur.setWfPreview(null);
+            cur.setStepIndex(0);
+            cur.setWfNotice(null);
+            return;
           }
-          setWorkflowIndex(next);
+          if (cur.wf.started || cur.wfLaunching) {
+            cur.wfDispatch({ type: "reset" });
+            cur.setStepIndex(0);
+            cur.setWfLaunching(false);
+            cur.activeWorkflowRef.current = undefined;
+            cur.activeWorkflowInputRef.current = undefined;
+            cur.workflowCacheRef.current = new Map();
+            cur.setWfNotice(null);
+          }
         }
         return;
       }
-    }
-  });
+      // Ctrl+N: jump straight into workflow creation from the picker.
+      if (key.ctrl && input === "n" && !cur.running && cur.workflowPickerActive) {
+        cur.focusCreateWorkflowPrompt(cur.value);
+        return;
+      }
+      if (key.tab && !key.shift && !cur.running) {
+        const promptInputHandlesTab = isSlashCommandInput(cur.value) && cur.promptEditing;
+        if (!promptInputHandlesTab) {
+          cur.setWfPreview(null);
+          cur.setWfLaunching(false);
+          cur.setWfStepDetails(null);
+          cur.switchMode((prev) => nextMode(prev, cur.modes));
+        }
+        return;
+      }
+      const menuOpen = shouldSuppressWorkflowNavigation(cur.commandSuggestions, cur.value);
+      const historyUp =
+        !menuOpen &&
+        shouldPromptHistoryCaptureUp(
+          cur.promptHistoryByMode,
+          cur.mode,
+          cur.value,
+          cur.historyBrowse,
+          cur.promptArrowCtx,
+        );
+      const historyDown =
+        !menuOpen && shouldPromptHistoryCaptureDown(cur.historyBrowse, cur.promptArrowCtx, cur.value);
+      if (cur.mode === "workflow" && !menuOpen && !historyUp && !historyDown) {
+        if (key.leftArrow && cur.wfStepDetails) {
+          cur.setWfStepDetails(null);
+          return;
+        }
+        if (key.rightArrow && !cur.promptEditing && !cur.wfStepDetails) {
+          if (cur.showWorkflowView) {
+            cur.setWfStepDetails("live");
+            return;
+          }
+          if (cur.wfPreview && cur.previewSpec) {
+            cur.setWfStepDetails("preview");
+            return;
+          }
+        }
+        if (key.upArrow) {
+          if (cur.wf.started || cur.wfLaunching) {
+            cur.setStepIndex((i) => Math.max(0, i - 1));
+          } else if (cur.wfPreview) {
+            cur.setStepIndex((i) => Math.max(0, i - 1));
+          } else {
+            const next = Math.max(0, cur.workflowIndex - 1);
+            if (next !== cur.workflowIndex) {
+              cur.setStepIndex(0);
+              cur.setWfStepDetails(null);
+            }
+            cur.setWorkflowIndex(next);
+          }
+          return;
+        }
+        if (key.downArrow) {
+          if (cur.wf.started || cur.wfLaunching) {
+            cur.setStepIndex((i) => Math.min(Math.max(0, cur.totalWfSteps - 1), i + 1));
+          } else if (cur.wfPreview) {
+            cur.setStepIndex((i) => Math.min(Math.max(0, cur.previewStepCount - 1), i + 1));
+          } else {
+            const next = Math.min(cur.workflowEntries.length, cur.workflowIndex + 1);
+            if (next !== cur.workflowIndex) {
+              cur.setStepIndex(0);
+              cur.setWfStepDetails(null);
+            }
+            cur.setWorkflowIndex(next);
+          }
+          return;
+        }
+      }
+    }, [exit]),
+  );
 }

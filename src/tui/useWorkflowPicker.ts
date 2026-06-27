@@ -43,6 +43,9 @@ export interface UseWorkflowPickerParams {
   wfCreate: WorkflowCreateState | null;
   mountedRef: React.RefObject<boolean>;
   dispatch: React.Dispatch<TranscriptAction>;
+  wfStepOverrides: Record<string, WorkflowStepOverrides>;
+  setWfStepOverrides: React.Dispatch<React.SetStateAction<Record<string, WorkflowStepOverrides>>>;
+  resolveWorkflowSpec: (name: string) => WorkflowSpec | undefined;
 }
 
 export function useWorkflowPicker({
@@ -57,10 +60,12 @@ export function useWorkflowPicker({
   wfCreate,
   mountedRef,
   dispatch,
+  wfStepOverrides,
+  setWfStepOverrides,
+  resolveWorkflowSpec,
 }: UseWorkflowPickerParams) {
   const [workflowIndex, setWorkflowIndex] = useState(0);
   const [wfPreview, setWfPreview] = useState<{ name: string; input: string } | null>(null);
-  const [wfStepOverrides, setWfStepOverrides] = useState<Record<string, WorkflowStepOverrides>>({});
   const [wfCreateState, setWfCreate] = useState<WorkflowCreateState | null>(null);
   const [draftOverride, setDraftOverride] = useState<DraftTarget | null>(null);
   const pendingSelectRef = useRef<string | null>(null);
@@ -101,10 +106,7 @@ export function useWorkflowPicker({
     setWorkflowIndex((i) => Math.min(i, workflowEntries.length));
   }, [workflowEntries]);
 
-  const resolveWorkflowSpec = useCallback(
-    (name: string) => author.previewWithOverrides(name, wfStepOverrides[name]),
-    [author, wfStepOverrides],
-  );
+
 
   const healthyAgents = useMemo(() => healthyAgentSet(doctor), [doctor]);
   const draftResolution = useMemo(

@@ -30,6 +30,7 @@ import {
   WorkflowAuthor,
   isAgentBackedStep,
   workflowCacheKey,
+  type WorkflowStepOverrides,
 } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId, WorkspaceScope } from "../workspace";
 import {
@@ -164,10 +165,17 @@ export function App({
     [authoringHost, config, configPath],
   );
 
+  const [wfStepOverrides, setWfStepOverrides] = useState<Record<string, WorkflowStepOverrides>>({});
+
+  const resolveWorkflowSpec = useCallback(
+    (name: string) => author.previewWithOverrides(name, wfStepOverrides[name]),
+    [author, wfStepOverrides],
+  );
+
   // ── Workflow Runner hook ─────────────────────────────────────────────
   const runner = useWorkflowRunner({
     orchestrator,
-    resolveWorkflowSpec: (name: string) => author.previewWithOverrides(name, picker.wfStepOverrides[name]),
+    resolveWorkflowSpec,
     mountedRef,
   });
 
@@ -187,10 +195,10 @@ export function App({
     wfCreate: null, // managed internally by picker
     mountedRef,
     dispatch,
+    wfStepOverrides,
+    setWfStepOverrides,
+    resolveWorkflowSpec,
   });
-
-  // Update resolveWorkflowSpec to use picker's overrides (workaround for circular init).
-  const resolveWorkflowSpec = picker.resolveWorkflowSpec;
 
   // Preview step selection derivation (used by slash context and prompt).
   const previewSelectedStep =
@@ -648,7 +656,7 @@ export function App({
     },
     setCommandSuggestions: prompt.setCommandSuggestions,
     setSuggestionIndex: prompt.setSuggestionIndex,
-    promptHistoryByMode: undefined as any, // consumed by shouldPromptHistoryCaptureUp/Down inside useKeyboardInput
+    promptHistoryByMode: prompt.promptHistoryByMode,
     historyBrowse: prompt.historyBrowse,
     promptArrowCtx: prompt.promptArrowCtx,
   });

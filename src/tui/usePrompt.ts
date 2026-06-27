@@ -55,6 +55,7 @@ export interface UsePromptReturn {
   promptHistoryArrows: boolean;
   suggestionMenuOpen: boolean;
   suggestionDescriptions: Map<string, string> | undefined;
+  promptHistoryByMode: PromptHistoryByMode;
   promptArrowCtx: PromptArrowContext;
   updatePromptDraft: (patch: Partial<typeof initialPromptTabState>) => void;
   handleValueChange: (next: string) => void;
@@ -296,6 +297,7 @@ export function usePrompt({
     suggestionIndex,
     cursorResetKey,
     promptHistoryArrows,
+    promptHistoryByMode,
     suggestionMenuOpen,
     suggestionDescriptions,
     promptArrowCtx,
