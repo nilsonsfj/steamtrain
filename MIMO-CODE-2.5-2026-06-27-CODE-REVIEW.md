@@ -4,7 +4,7 @@
 **Date:** 2026-06-27
 **Reviewer:** Principal Software Engineer (MIMO-CODE-2.5)
 **Scope:** Full codebase — correctness, architecture, code quality, security, testing
-**Last updated:** 2026-06-27 — items resolved in PR #23 (37 commits) removed
+**Last updated:** 2026-06-27 — items resolved in PR #23 (37 commits) and PR #24 (Medium fixes) removed
 
 ---
 
@@ -24,9 +24,10 @@
 | Performance | B | Async catalog I/O, transcript/frame caps, backpressure; TUI re-render concerns remain |
 | Maintainability | B- | App.tsx is a 1905-line monolith, html.ts is 1547 lines of inline JS/CSS |
 
-**Remaining findings: 108** (1 Critical, 2 High, 40 Medium, 50 Low, 15 Architectural + test gaps)
+**Remaining findings: 76** (1 Critical, 2 High, 11 Medium, 50 Low, 12 Architectural + test gaps)
 
 **Resolved in PR #23: 39 findings** (6 Critical, 22 High, 11 Medium)
+**Resolved in PR #24: 33 findings** (30 Medium, 3 tests added)
 
 ---
 
