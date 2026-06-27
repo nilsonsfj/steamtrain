@@ -8,6 +8,7 @@ import {
   workflowStepKind,
 } from "../workflow";
 import { AGENT_COLOR, WORKFLOW_SOURCE_COLOR } from "./theme";
+import { statusWord } from "./status-word";
 import {
   BLOCK_LABEL,
   type FlatSpecStep,
@@ -289,19 +290,6 @@ function statusColor(status: StepState["status"]): string {
       return "yellow";
     case "pending":
       return "gray";
-  }
-}
-
-function statusWord(status: StepState["status"]): string {
-  switch (status) {
-    case "running":
-      return "running";
-    case "pending":
-      return "pending";
-    case "done":
-      return "done";
-    case "error":
-      return "error";
   }
 }
 
