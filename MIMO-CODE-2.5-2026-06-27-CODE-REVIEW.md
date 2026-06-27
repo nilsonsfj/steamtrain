@@ -4,26 +4,29 @@
 **Date:** 2026-06-27
 **Reviewer:** Principal Software Engineer (MIMO-CODE-2.5)
 **Scope:** Full codebase — correctness, architecture, code quality, security, testing
+**Last updated:** 2026-06-27 — items resolved in PR #23 removed
 
 ---
 
 ## Executive Summary
 
-**steamtrain** is a terminal orchestrator that runs coding agents (Claude Code, OpenCode, Codex, Amp) as managed subprocesses and renders their activity live in an Ink TUI. It also exposes a web UI. The codebase is ~15,000 lines of TypeScript across 80+ source files and 64 test files.
+**steamtrain** is a terminal orchestrator that runs coding agents (Claude Code, OpenCode, Codex, Amp) as managed subprocesses and renders their activity live in an Ink TUI. It also exposes a web UI. The codebase is ~15,000 lines of TypeScript across 80+ source files and 65 test files.
 
 ### Overall Assessment
 
 | Area | Grade | Notes |
 |------|-------|-------|
 | Architecture | B+ | Clean adapter pattern, good separation of concerns in workflow subsystem |
-| Correctness | B | Several race conditions, resource leaks, and state management issues |
+| Correctness | B | Sync I/O in catalog, some React state management concerns |
 | Type Safety | B+ | Strong Zod usage, strict tsconfig, but some `any` escapes and unsafe spreads |
-| Security | C+ | Missing security headers, unbounded body parsing, no input sanitization at HTTP boundary |
-| Test Coverage | B- | Good unit test coverage for workflow engine, critical gaps in orchestrator and web server |
-| Performance | B | Sync I/O in hot paths, unbounded caches, unnecessary re-renders in TUI |
+| Security | B | Headers and body limits now in place; minor input validation gaps remain |
+| Test Coverage | B | Good coverage for workflow engine and web server; orchestrator and doctor gaps remain |
+| Performance | B- | Sync I/O in hot path, TUI re-render concerns |
 | Maintainability | B- | App.tsx is a 1905-line monolith, html.ts is 1547 lines of inline JS/CSS |
 
-**Total findings: 147** (7 Critical, 24 High, 46 Medium, 50 Low, 20 Architectural)
+**Remaining findings: 123** (1 Critical, 4 High, 46 Medium, 50 Low, 20 Architectural + several test gaps)
+
+**Resolved in PR #23: 24 findings** (6 Critical, 20 High)
 
 ---
 
@@ -38,40 +41,16 @@
 7. [Security Audit](#7-security-audit)
 8. [Performance Analysis](#8-performance-analysis)
 9. [Recommendations Summary](#9-recommendations-summary)
+10. [Resolved in PR #23](#10-resolved-in-pr-23)
 
 ---
 
 ## 1. Critical Findings
 
-### C1. Race condition on shared mutable state between concurrent forEach children
-- **File:** `src/workflow/engine.ts:912-926`
-- **Category:** Race Condition
-- `executeForEachStep` dispatches children via `runPool`, and each child writes to shared `ctx.outputs`, `ctx.results`, and `ctx.cache` maps. If a child throws before assigning `childResults[item.index]`, `childResults.filter(Boolean)` silently drops it. Combined with `runPool` only rethrowing the *first* error, the parent result would report incomplete children with no indication of which ones failed.
-
-### C2. Unbounded HTTP body accumulation — OOM denial-of-service
-- **File:** `src/web/server.ts:83-87`
-- **Category:** Resource Exhaustion
-- `readBody()` streams every incoming chunk into an in-memory array with no byte-count guard. A local attacker (any browser tab on `127.0.0.1`) can POST a multi-gigabyte payload to exhaust the Node process heap.
-
-### C3. No cap on concurrent workflow runs
-- **File:** `src/web/runs.ts:124-153`
-- **Category:** Resource Exhaustion
-- Every `POST /api/runs` spawns agent subprocesses, allocates frame buffers, and registers history builders. Nothing limits concurrent runs. Combined with C1, this enables a two-step local DoS.
-
-### C4. `validateStepResult` spreads unvalidated fields via `...r` — prototype pollution vector
-- **File:** `src/workflow/cache-store.ts:209-217`
-- **Category:** Type Safety / Security
-- The spread `...r` passes through all fields from raw parsed JSON, including `__proto__` or `constructor` from tampered cache files. While `JSON.parse` strips prototypes, the intermediate object retains them.
-
 ### C5. `writeUserWorkflowsFile` uses sync I/O blocking the event loop
 - **File:** `src/workflow/catalog.ts:309-316`
 - **Category:** Correctness / Performance
 - `mkdirSync`, `writeFileSync`, `renameSync` block the event loop in TUI and web server contexts. An async `atomicWriteFile` already exists in `fs-util.ts` but is unused here.
-
-### C6. Orchestrator directory has zero test coverage
-- **File:** `src/orchestrator/` — no test file
-- **Category:** Coverage Gap
-- The orchestrator manages agent subprocess lifecycle. A spawn failure, hang, or resource leak would cascade into broken UX with no automated safety net.
 
 ### C7. No OS signal handling tests (SIGINT/SIGTERM)
 - **File:** `src/cli.ts`, `src/index.tsx`
@@ -82,65 +61,15 @@
 
 ## 2. High Findings
 
-### H1. Gate `onFalse: "stop"` marks the step as `ok: true` — misleading status
-- **File:** `src/workflow/engine.ts:601`
-- **Category:** Correctness Bug
-- When a gate fails with `onFalse: "stop"`, the step's `ok` field is `true` because `onFalse` is `"stop"`, not `"fail"`. Downstream consumers (history records, cost rollups) see this as successful. The gate that blocked execution should not appear "ok" in the final record.
-
-### H2. `runAgentProcess` swallows mapper exceptions
-- **File:** `src/agents/adapter.ts:68-71`
-- **Category:** Correctness
-- If `map(raw)` throws (e.g., Zod schema throws), the exception propagates unhandled, killing the async generator. The process remains running with no cleanup, and the caller gets no structured error.
-
-### H3. `startWebUi` returns stale `doctor` array
-- **File:** `src/web/server.ts:445,498`
-- **Category:** Correctness
-- `return { server, url, doctor }` always yields the initial empty array because the async IIFE replacing `doctor` hasn't settled yet. Any caller inspecting the returned value gets a permanently-empty list.
-
-### H4. `setStepIndex` called inside `setWorkflowIndex` updater — React anti-pattern
-- **File:** `src/tui/App.tsx:1564-1571`
-- **Category:** Correctness / React
-- Calling `setState` inside a state updater can cause intermediate renders where `workflowIndex` has changed but `stepIndex` hasn't reset, causing brief out-of-bounds selection.
-
-### H5. Transcript `nextId` monotonically grows — no cap on `items` array
-- **File:** `src/tui/transcript.ts:56-58`
-- **Category:** Memory Leak
-- Every `push()` appends to `state.items` without trimming. Long-running workflows with many tool calls consume unbounded memory.
-
-### H6. `relativeTime` timestamps go stale in `WorkflowHistory`
-- **File:** `src/tui/WorkflowHistory.tsx:112-123`
-- **Category:** Correctness Bug
-- `relativeTime(ts)` computes at render time, but the component never re-renders after mount. Timestamps are frozen at the moment the list loaded.
-
-### H7. Vitest config lacks coverage thresholds
-- **File:** `vitest.config.ts:4-7`
-- **Category:** Build Config
-- No `coverage` block, no `test:coverage` script. Coverage regressions require manual inspection.
-
-### H8. No web API tests for malformed requests
-- **File:** `tests/web-server.test.ts`
-- **Category:** Coverage Gap
-- All POST requests use well-formed JSON. Missing tests for: empty body, wrong content-type, oversized payloads, missing required fields, concurrent runs.
-
 ### H9. Web server tests use noop cache store masking real bugs
 - **File:** `tests/web-server.test.ts:41-49`
 - **Category:** Mock Quality
 - `noopStore` returns empty Map on every `load()`, meaning cache resume, invalidation, and corruption recovery are untested through the web layer.
 
-### H10. `tsup.config.ts` suppresses TypeScript declarations
-- **File:** `tsup.config.ts:10`
-- **Category:** Build Config
-- `dts: false` means consumers get zero type information. Combined with `skipLibCheck: true`, type errors in public API surfaces propagate silently.
-
 ### H11. No file-system error injection in config/workspace loading
 - **File:** `tests/config-load.test.ts`, `tests/workspace-load.test.ts`
 - **Category:** Coverage Gap
 - All tests use fresh temp dirs with valid/invalid JSON. None simulate permission denied, disk full, or broken symlinks.
-
-### H12. `killProcess` SIGKILL timer never cleared on normal exit
-- **File:** `src/agents/spawn.ts:159-173`
-- **Category:** Resource Management
-- The 2-second SIGKILL timer retains the child closure. On rapid start/stop cycles, many leaked timers accumulate.
 
 ### H13. `handleTab` and `handleWorkflowFreshRun` recreated on every keystroke
 - **File:** `src/tui/App.tsx:1114-1149, 1405-1413`
@@ -151,56 +80,6 @@
 - **File:** `tests/doctor.test.ts` (26 lines total)
 - **Category:** Coverage Gap
 - Only `binary_missing` tested for codex and amp. `not_authenticated`, `rate_limited`, `ok` statuses never exercised. Claude and OpenCode have zero doctor tests.
-
-### H15. `listRunRecords` reads ALL files concurrently with no limit
-- **File:** `src/workflow/history-store.ts:63-79`
-- **Category:** Performance
-- `Promise.all(entries.map(readRecord(...)))` with no concurrency bound. Corrupted directory with many files could trigger hundreds of simultaneous reads.
-
-### H16. Per-run frame buffer grows without bound
-- **File:** `src/web/runs.ts:205-207`
-- **Category:** Resource Exhaustion
-- Every workflow event is `JSON.stringify`'d and pushed to `run.frames[]` for 5 minutes. Long-running workflows produce megabytes of frames with no trimming.
-
-### H17. `validateRecord` does not deep-validate nested `phases` structure
-- **File:** `src/workflow/history-store.ts:154-183`
-- **Category:** Type Safety / Data Integrity
-- Checks `Array.isArray(r.phases)` but not individual phase/step structure. A corrupt file with `phases: [42]` passes validation.
-
-### H18. Zod union discrimination is fragile — worker matches before distributor
-- **File:** `src/workflow/types.ts:306-311`
-- **Category:** Type Safety
-- A step with no `kind` but with `items` (distributor trait) would match the worker schema if it also has `agent`/`model`/`prompt`. Items are silently dropped.
-
-### H19. `computeRunTotals` double-counts `durationMs` for parallel steps
-- **File:** `src/workflow/history.ts:107-127`
-- **Category:** Correctness Bug
-- Sums every step's `durationMs` even though steps within a phase run in parallel. A 3-step phase with 5s each reports 15s instead of wall-clock 5s.
-
-### H20. No `X-Content-Type-Options: nosniff` on any response
-- **File:** `src/web/server.ts` — all `writeHead` calls
-- **Category:** Security Header
-- Browsers may MIME-sniff responses. User-controlled strings in JSON responses could be interpreted as script content.
-
-### H21. No Content-Security-Policy on the SPA
-- **File:** `src/web/html.ts` (1547 lines)
-- **Category:** Security Header
-- Large inline `<script>` block with no CSP. Any future XSS has zero policy-level containment.
-
-### H22. Error details leaked to HTTP clients
-- **File:** `src/web/server.ts:115-118`
-- **Category:** Information Disclosure
-- Catch-all handler serializes raw `Error.message` into JSON. Internal file paths, Zod schema paths, and DB errors sent verbatim to browser.
-
-### H23. `extractFenced` regex captures first fenced block, not necessarily JSON
-- **File:** `src/workflow/generate.ts:463`
-- **Category:** Correctness
-- Non-greedy regex captures the first ` ``` ` block. If model outputs explanatory text in a fenced block before the JSON, the wrong block is extracted.
-
-### H24. `Orchestrator.run()` doesn't enforce `canDispatch` precondition
-- **File:** `src/orchestrator/orchestrator.ts:101-111`
-- **Category:** Architecture / Correctness
-- Caller must separately call `canDispatch()` before `run()`. If forgotten, dispatch to unhealthy agent proceeds.
 
 ---
 
@@ -664,9 +543,9 @@
 | **server.ts route organization** | 15+ routes in a single `handle()` function as sequential `if` blocks. Adding middleware is painful. |
 | **Variant cache duplication** | `codex-variants.ts` and `opencode-variants.ts` are near-identical. Should extract `VariantCache<T>` generic. |
 | **Duplicate functions** | `humanizeAssistantError` in `claude.ts`/`amp.ts`. `statusWord` in `WorkflowStepDetails`/`WorkflowView`. `truncate` in `WorkflowHistory`/`agents/util`. |
-| **Check-then-act dispatch** | `canDispatch()` + `run()` leaves room for caller error. Health check should be inside `run()`. |
+| **Check-then-act dispatch** | ~~`canDispatch()` + `run()` leaves room for caller error.~~ **Fixed in PR #23** — `run()` now enforces `canDispatch` internally. |
 | **No request logging** | Zero logging of HTTP requests or responses. Debugging requires adding it manually. |
-| **Doctor lifecycle** | Fire-and-forget IIFE creates window where server reports "no agents" despite them being healthy. |
+| **Doctor lifecycle** | Fire-and-forget IIFE creates window where server reports "no agents" despite them being healthy. **Partially mitigated** — closure now uses mutable wrapper. |
 | **Dead config** | `config.timeoutMs` defined but never enforced in CLI or web run paths. |
 
 ---
@@ -677,15 +556,13 @@
 
 | Area | Impact |
 |------|--------|
-| `src/orchestrator/` | Zero test coverage. Subprocess lifecycle management completely untested. |
 | OS signal handling | No SIGINT/SIGTERM tests. Orphaned processes, corrupted state on Ctrl+C undetectable. |
-| Doctor failure modes | Only `binary_missing` tested for 2 of 4 agents. Authentication, rate limiting, and `ok` statuses untested. |
 
 ### Coverage Gaps (High)
 
 | Area | Impact |
 |------|--------|
-| Web server malformed requests | No tests for empty body, wrong content-type, oversized payloads, concurrent runs. |
+| Doctor failure modes | Only `binary_missing` tested for codex and amp. Authentication, rate limiting, and `ok` statuses untested. |
 | File system errors | No permission denied, disk full, or broken symlink tests in config/workspace loading. |
 | TUI keyboard interaction | No simulated keyboard input, focus changes, or scrolling tests. |
 
@@ -704,34 +581,34 @@
 
 ## 7. Security Audit
 
-| Finding | Severity | File | Issue |
-|---------|----------|------|-------|
-| Unbounded body parsing | Critical | `server.ts:83-87` | No byte limit on HTTP body |
-| No concurrent run limit | Critical | `runs.ts:124-153` | Unbounded subprocess spawning |
-| Missing `nosniff` header | High | `server.ts` all responses | MIME sniffing risk |
-| Missing CSP | High | `html.ts` | No containment for future XSS |
-| Error details leaked | Medium | `server.ts:115-118` | Internal paths in error responses |
-| Unsanitized workflow names | Medium | `server.ts:167-169` | Control chars, long strings |
-| No spec validation at HTTP layer | Medium | `server.ts:194-203` | `as WorkflowSpec` cast without Zod |
-| Binary path from config | Low | `doctor.ts:66-70` | Arbitrary binary execution |
-| Prompt injection via CLI args | Low | `codex.ts:285-299` | Positional arg manipulation |
+| Finding | Severity | File | Issue | Status |
+|---------|----------|------|-------|--------|
+| Unbounded body parsing | ~~Critical~~ | `server.ts:83-87` | ~~No byte limit on HTTP body~~ | **Fixed in PR #23** |
+| No concurrent run limit | ~~Critical~~ | `runs.ts:124-153` | ~~Unbounded subprocess spawning~~ | **Fixed in PR #23** |
+| Missing `nosniff` header | ~~High~~ | `server.ts` all responses | ~~MIME sniffing risk~~ | **Fixed in PR #23** |
+| Missing CSP | ~~High~~ | `html.ts` | ~~No containment for future XSS~~ | **Fixed in PR #23** |
+| Error details leaked | ~~Medium~~ | `server.ts:115-118` | ~~Internal paths in error responses~~ | **Fixed in PR #23** |
+| Unsanitized workflow names | Medium | `server.ts:167-169` | Control chars, long strings | |
+| No spec validation at HTTP layer | Medium | `server.ts:194-203` | `as WorkflowSpec` cast without Zod | |
+| Binary path from config | Low | `doctor.ts:66-70` | Arbitrary binary execution | |
+| Prompt injection via CLI args | Low | `codex.ts:285-299` | Positional arg manipulation | |
 
 ---
 
 ## 8. Performance Analysis
 
-| Issue | File | Impact |
-|-------|------|--------|
-| Sync I/O in hot path | `catalog.ts:309-316` | Event loop blocks on file writes |
-| Unbounded transcript array | `transcript.ts:56-58` | Memory grows with session length |
-| `LineBuffer` O(n²) concatenation | `line-buffer.ts:15` | Large outputs cause quadratic allocation |
-| No virtualization in `WorkflowPicker` | `WorkflowPicker.tsx:46-77` | All entries rendered, no windowing |
-| `banner.tsx` reads file every render | `banner.tsx:28-35` | Redundant `readFileSync` |
-| Unbounded frame buffer | `runs.ts:205-207` | Megabytes retained for 5 minutes |
-| `listRunRecords` unbounded concurrent reads | `history-store.ts:63-79` | Hundreds of simultaneous file reads |
-| `PhaseOf`/`stepOf` O(n) per event | `history.ts:350-358` | Linear scan for every event |
-| Callback recreation on keystroke | `App.tsx:1405-1413` | Cascading re-renders every keystroke |
-| `orchestrator` memo instability | `App.tsx:259-262` | Recreated on doctor load |
+| Issue | File | Impact | Status |
+|-------|------|--------|--------|
+| Sync I/O in hot path | `catalog.ts:309-316` | Event loop blocks on file writes | |
+| Unbounded transcript array | ~~`transcript.ts:56-58`~~ | ~~Memory grows with session length~~ | **Fixed in PR #23** |
+| `LineBuffer` O(n²) concatenation | `line-buffer.ts:15` | Large outputs cause quadratic allocation | |
+| No virtualization in `WorkflowPicker` | `WorkflowPicker.tsx:46-77` | All entries rendered, no windowing | |
+| `banner.tsx` reads file every render | `banner.tsx:28-35` | Redundant `readFileSync` | |
+| Unbounded frame buffer | ~~`runs.ts:205-207`~~ | ~~Megabytes retained for 5 minutes~~ | **Fixed in PR #23** |
+| `listRunRecords` unbounded concurrent reads | ~~`history-store.ts:63-79`~~ | ~~Hundreds of simultaneous file reads~~ | **Fixed in PR #23** |
+| `PhaseOf`/`stepOf` O(n) per event | `history.ts:350-358` | Linear scan for every event | |
+| Callback recreation on keystroke | `App.tsx:1405-1413` | Cascading re-renders every keystroke | |
+| `orchestrator` memo instability | `App.tsx:259-262` | Recreated on doctor load | |
 
 ---
 
@@ -739,43 +616,85 @@
 
 ### Immediate (Next Sprint)
 
-1. **Add body size limit to `readBody()`** (C2) — reject with HTTP 413 after 1 MB
-2. **Cap concurrent workflow runs** (C3) — return 503 when exceeding limit
-3. **Fix gate `onFalse: "stop"` status** (H1) — mark as `ok: false` or add separate `blocked` status
-4. **Wrap mapper calls in try/catch** (H2) — yield structured error events
-5. **Add `nosniff` and CSP headers** (H20, H21) — one-line fixes per response path
-6. **Add vitest coverage thresholds** (H7) — prevent coverage erosion
+1. **Replace sync I/O in `writeUserWorkflowsFile`** (C5) — use existing async `atomicWriteFile`
+2. **Stabilize callback references** (H13) — use `useRef` for values in callbacks
+3. **Add OS signal handling tests** (C7) — verify clean shutdown and process cleanup
+4. **Expand doctor test coverage** (H14) — test `ok`, `not_authenticated`, `rate_limited` statuses
+5. **Add file system error injection tests** (H11) — permission denied, disk full, broken symlinks
 
 ### Short-Term (This Quarter)
 
-7. **Extract `App.tsx` into smaller components/hooks** (A2) — state management, keyboard, render
-8. **Extract `html.ts` JS to served file** (A3) — enable linting and static analysis
-9. **Add orchestrator tests** (C6) — even a smoke test for subprocess lifecycle
-10. **Replace sync I/O in `writeUserWorkflowsFile`** (C5) — use existing async `atomicWriteFile`
-11. **Cap transcript `items` array** (H5) — ring buffer or max 2000 entries
-12. **Add `X-Content-Type-Options` and `Content-Security-Policy`** (H20, H21)
-13. **Validate workflow names at HTTP boundary** (M12) — reject control chars, enforce length limit
-14. **Enforce `config.timeoutMs` in CLI and web** (M16) — `setTimeout`-based abort
+6. **Extract `App.tsx` into smaller components/hooks** (A2) — state management, keyboard, render
+7. **Extract `html.ts` JS to served file** (A3) — enable linting and static analysis
+8. **Validate workflow names at HTTP boundary** (M12) — reject control chars, enforce length limit
+9. **Enforce `config.timeoutMs` in CLI and web** (M16) — `setTimeout`-based abort
+10. **Virtualize `WorkflowPicker`** (M26) — apply `selectVisibleWindow` like other list views
 
 ### Medium-Term (Next Quarter)
 
-15. **Extract shared `VariantCache<T>` generic** (A5) — replace duplicated code in codex/opencode variants
-16. **Add OS signal handling tests** (C7) — verify clean shutdown and process cleanup
-17. **Add file system error injection tests** (H11) — permission denied, disk full, broken symlinks
-18. **Fix Zod union discrimination order** (H18) — add `kind` discriminant or reorder schemas
-19. **Virtualize `WorkflowPicker`** (M26) — apply `selectVisibleWindow` like other list views
-20. **Stabilize callback references** (H13) — use `useRef` for values in callbacks
+11. **Extract shared `VariantCache<T>` generic** (A5) — replace duplicated code in codex/opencode variants
+12. **Fix Zod union discrimination order** (H18) — ~~add `kind` discriminant or~~ reorder schemas
+13. **Replace `console.warn` with structured logging** (M10)
 
 ### Long-Term (Architecture)
 
-21. **Add structured logging** — replace `console.warn`/`console.assert` with logger
-22. **Introduce route table** in `server.ts` — enable middleware composition
-23. **Add readiness signal** for doctor checks — prevent false "no agents" state
-24. **Consider request logging middleware** — at minimum, one-liner per request
-25. **Document threat model** — config file trust, loopback-only assumption
+14. **Introduce route table** in `server.ts` — enable middleware composition
+15. **Add readiness signal** for doctor checks — prevent false "no agents" state
+16. **Consider request logging middleware** — at minimum, one-liner per request
+17. **Document threat model** — config file trust, loopback-only assumption
+
+---
+
+## 10. Resolved in PR #23
+
+The following findings were fixed in [PR #23](https://github.com/nilsonsfj/steamtrain/pull/23):
+
+### Critical (6 resolved)
+
+| ID | Finding | Resolution |
+|----|---------|------------|
+| C1 | Race condition in forEach children | Pre-initialized `childResults` array with error placeholders |
+| C2 | Unbounded HTTP body accumulation | 1 MiB body size limit, HTTP 413 response |
+| C3 | No cap on concurrent workflow runs | `maxConcurrent` option with default of 5, HTTP 503 |
+| C4 | Prototype pollution in `validateStepResult` | Explicit field construction with type-checked allowlist |
+| C6 | Orchestrator zero test coverage | 14 new orchestrator tests |
+| ~~C5~~ | ~~Sync I/O in catalog~~ | **Not resolved** — deferred |
+
+### High (20 resolved)
+
+| ID | Finding | Resolution |
+|----|---------|------------|
+| H1 | Gate `onFalse: "stop"` marks step as `ok: true` | Step `ok:false`, workflow stays `ok:true` per documented contract |
+| H2 | `runAgentProcess` swallows mapper exceptions | try/catch wrapping map calls, yields structured error events |
+| H3 | `startWebUi` returns stale `doctor` array | Mutable `doctorState` wrapper replaces closure reference |
+| H4 | `setStepIndex` inside `setWorkflowIndex` updater | Extracted state updates outside updater function |
+| H5 | Transcript items unbounded | Capped at 2000 entries with oldest-first trimming |
+| H6 | `relativeTime` timestamps go stale | 30s interval timer forces re-render |
+| H7 | Vitest config lacks coverage | Added v8 coverage provider configuration |
+| H8 | No malformed request tests | 7 new tests for empty body, missing fields, invalid types |
+| H10 | tsup suppresses declarations | ~~Reverted — CLI entry exports no types~~ |
+| H12 | SIGKILL timer never cleared | `cancelKill` function clears timer on normal exit |
+| H15 | `listRunRecords` unbounded concurrent reads | Batched to groups of 10 |
+| H16 | Per-run frame buffer unbounded | Capped at 5000 frames per run |
+| H17 | `validateRecord` no deep validation | Added phase structure validation (phaseId, title, index, steps) |
+| H18 | Zod union discrimination fragile | Reordered: gate, distributor, consolidator, worker |
+| H19 | `computeRunTotals` double-counts duration | Changed from sum to max per phase |
+| H20 | No `X-Content-Type-Options: nosniff` | Added to all HTTP responses |
+| H21 | No Content-Security-Policy | Added CSP header to SPA HTML |
+| H22 | Error details leaked to clients | Sanitized to generic "internal server error" |
+| H23 | `extractFenced` captures wrong block | Prefers ```` ```json ```` over bare ```` ``` ```` |
+| H24 | `Orchestrator.run()` no `canDispatch` check | Added precondition check with error throw |
+
+### Additional improvements in PR #23
+
+- `req.destroy()` after 413 response to drain remaining body data
+- `rerunFromRecord` wrapped in try-catch for concurrent limit
+- `extractFenced` regex accepts fences without trailing newline
+- New `TooManyRuns` error class for proper HTTP 503 responses
 
 ---
 
 *Generated by MIMO-CODE-2.5 Principal Engineer Review Agent*
 *Review date: 2026-06-27*
-*Files reviewed: 80+ source files, 64 test files, 5 build configs*
+*Files reviewed: 80+ source files, 65 test files, 5 build configs*
+*Last updated: 2026-06-27 — 24 findings resolved in PR #23*
