@@ -125,17 +125,25 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
   child.on("close", (code, signal) => settle(code, signal));
 
   let timer: NodeJS.Timeout | undefined;
+  let cancelKill: (() => void) | undefined;
+
+  const startKill = (): void => {
+    cancelKill?.();
+    const { cancel } = killProcess(child);
+    cancelKill = cancel;
+  };
+
   if (opts.timeoutMs && opts.timeoutMs > 0) {
     timer = setTimeout(() => {
       timedOut = true;
-      killProcess(child);
+      startKill();
     }, opts.timeoutMs);
     timer.unref?.();
   }
 
-  const onAbort = (): void => killProcess(child);
+  const onAbort = (): void => startKill();
   if (opts.signal) {
-    if (opts.signal.aborted) killProcess(child);
+    if (opts.signal.aborted) startKill();
     else opts.signal.addEventListener("abort", onAbort, { once: true });
   }
 
@@ -152,24 +160,35 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
   } finally {
     if (timer) clearTimeout(timer);
     opts.signal?.removeEventListener("abort", onAbort);
-    if (!settled) killProcess(child);
+    if (!settled) startKill();
+    cancelKill?.();
   }
 }
 
-function killProcess(child: PipedChild): void {
+function killProcess(child: PipedChild): { cancel: () => void } {
+  let killed = false;
+  let sigkillTimer: NodeJS.Timeout | undefined;
   try {
     child.kill("SIGTERM");
   } catch {
     // already gone
   }
-  const t = setTimeout(() => {
+  sigkillTimer = setTimeout(() => {
     try {
       child.kill("SIGKILL");
     } catch {
       // already gone
     }
   }, SIGKILL_GRACE_MS);
-  t.unref?.();
+  sigkillTimer.unref?.();
+  return {
+    cancel() {
+      if (!killed) {
+        killed = true;
+        if (sigkillTimer) clearTimeout(sigkillTimer);
+      }
+    },
+  };
 }
 
 function errorMessage(err: unknown): string {
