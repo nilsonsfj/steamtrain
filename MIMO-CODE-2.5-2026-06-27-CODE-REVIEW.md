@@ -4,7 +4,7 @@
 **Date:** 2026-06-27
 **Reviewer:** Principal Software Engineer (MIMO-CODE-2.5)
 **Scope:** Full codebase — correctness, architecture, code quality, security, testing
-**Last updated:** 2026-06-27 — items resolved in PR #23, #24, and #25 removed
+**Last updated:** 2026-06-27
 
 ---
 
@@ -24,11 +24,7 @@
 | Performance | B | Async catalog I/O, transcript/frame caps, backpressure; TUI re-render concerns remain |
 | Maintainability | B- | App.tsx is a 1905-line monolith, html.ts is 1547 lines of inline JS/CSS |
 
-**Remaining findings: 63** (1 Critical, 2 High, 6 Medium, 40 Low, 14 Architectural + test gaps)
-
-**Resolved in PR #23: 39 findings** (6 Critical, 22 High, 11 Medium)
-**Resolved in PR #24: 30 findings** (30 Medium)
-**Resolved in PR #25: 10 findings** (10 Low)
+**Remaining findings: 47** (1 Critical, 1 High, 6 Medium, 40 Low)
 
 ---
 
@@ -43,7 +39,6 @@
 7. [Security Audit](#7-security-audit)
 8. [Performance Analysis](#8-performance-analysis)
 9. [Recommendations Summary](#9-recommendations-summary)
-10. [Resolved in PR #23](#10-resolved-in-pr-23)
 
 ---
 
@@ -316,129 +311,6 @@
 
 ---
 
-## 10. Resolved in PR #23
-
-The following findings were fixed across 37 commits in [PR #23](https://github.com/nilsonsfj/steamtrain/pull/23):
-
-### Critical (6 resolved)
-
-| ID | Finding | Resolution |
-|----|---------|------------|
-| C1 | Race condition in forEach children | Pre-initialized `childResults` array with error placeholders |
-| C2 | Unbounded HTTP body accumulation | 1 MiB body size limit, HTTP 413 response |
-| C3 | No cap on concurrent workflow runs | `maxConcurrent` option with default of 5, HTTP 503 |
-| C4 | Prototype pollution in `validateStepResult` | Explicit field construction with type-checked allowlist |
-| C5 | Sync I/O in catalog | Replaced with async `atomicWriteFile`, full async cascade |
-| C6 | Orchestrator zero test coverage | 14 new orchestrator tests |
-
-### High (22 resolved)
-
-| ID | Finding | Resolution |
-|----|---------|------------|
-| H1 | Gate `onFalse: "stop"` marks step as `ok: true` | Step `ok:false`, workflow stays `ok:true` per documented contract |
-| H2 | `runAgentProcess` swallows mapper exceptions | try/catch wrapping map calls, yields structured error events |
-| H3 | `startWebUi` returns stale `doctor` array | Mutable `doctorState` wrapper replaces closure reference |
-| H4 | `setStepIndex` inside `setWorkflowIndex` updater | Extracted state updates outside updater function |
-| H5 | Transcript items unbounded | Capped at 2000 entries with oldest-first trimming |
-| H6 | `relativeTime` timestamps go stale | 30s interval timer forces re-render |
-| H7 | Vitest config lacks coverage | Added v8 coverage provider configuration |
-| H8 | No malformed request tests | 7 new tests for empty body, missing fields, invalid types |
-| H9 | noopStore masking real bugs | Replaced with real in-memory cache store |
-| H10 | tsup suppresses declarations | Reverted to `dts: false` (CLI exports no types) |
-| H11 | No FS error injection tests | Added non-existent config path edge case test |
-| H12 | SIGKILL timer never cleared | `cancelKill` function clears timer on normal exit |
-| H14 | Doctor checks skip failure modes | Added ok-status doctor test |
-| H15 | `listRunRecords` unbounded concurrent reads | Batched to groups of 10 |
-| H16 | Per-run frame buffer unbounded | Capped at 5000 frames per run |
-| H17 | `validateRecord` no deep validation | Added phase structure validation |
-| H18 | Zod union discrimination fragile | Reordered: gate, distributor, consolidator, worker |
-| H19 | `computeRunTotals` double-counts duration | Changed from sum to max per phase |
-| H20 | No `X-Content-Type-Options: nosniff` | Added to all HTTP responses |
-| H21 | No Content-Security-Policy | Added CSP header to SPA HTML |
-| H22 | Error details leaked to clients | Sanitized to generic "internal server error" |
-| H23 | `extractFenced` captures wrong block | Prefers ```` ```json ```` over bare ```` ``` ```` |
-| H24 | `Orchestrator.run()` no `canDispatch` check | Added precondition check with error throw |
-
-### Medium (11 resolved)
-
-| ID | Finding | Resolution |
-|----|---------|------------|
-| M1 | `killProcess` redundant calls | Added `killed` boolean guard |
-| M20 | `Channel` has no backpressure | Added MAX_QUEUE_SIZE=1000 with drop |
-| M24 | `banner.tsx` reads file every render | Cached in module-level singleton |
-| M29 | `selectedRowIndex` fallback wrong row | Explicit findIndex check |
-| M32 | `transcriptReducer` no default case | Added default: return state |
-| M33 | `statusWord` duplicated | Extracted to shared `status-word.ts` |
-| M34 | `truncate` duplicated | Consolidated to use `agents/util` |
-| M39 | `rerunDowngradeMessage` no exhaustiveness | Added `never` check |
-| M44 | Global registry mutation | (covered by existing test isolation) |
-| M45 | Timing-dependent assertions | (covered by existing tests) |
-| M46 | Abort timing fragile | (covered by existing tests) |
-
----
-
-## 11. Resolved in PR #24
-
-The following findings were fixed across 8 commits in [PR #24](https://github.com/nilsonsfj/steamtrain/pull/24):
-
-### Medium (30 resolved)
-
-| ID | Finding | Resolution |
-|----|---------|------------|
-| M3 | GPT 5.4/5.3 use GPT_55_EFFORTS | Now use full GPT_REASONING_EFFORTS |
-| M4 | Qwen mapped to Anthropic efforts | Now uses STANDARD_REASONING_EFFORTS |
-| M6 | `Orchestrator.run()` undefined model | Throws early when `entry.model` is undefined |
-| M7 | `parseStepStatus` normalizes to "pending" | Returns "error" for unknown statuses |
-| M8 | `workflowStateFromRecord` empty results | Populates results from step results |
-| M9 | `RunRecordSummary` type drift | Now `Omit<RunRecord, "phases">` for compile-time sync |
-| M10 | `console.warn` in library code | Uses optional `onWarn` callback |
-| M12 | Unsanitized workflow names | Validates at HTTP boundary (control chars, length) |
-| M13 | PUT spec cast without validation | Validates with `workflowSpecSchema` at HTTP layer |
-| M14 | SSE stream not closed on disconnect | Checks `controller.signal.aborted` before sending |
-| M15 | `deleteProjectWorkflow` skips validation | Validates merged config against `configFileSchema` |
-| M16 | No wall-clock timeout enforcement | `setTimeout`-based abort in CLI and web run paths |
-| M17 | `runVersion` unbounded stdout/stderr | Caps at 10KB to prevent OOM |
-| M19 | `findJsonObject` wrong `{` match | Tries each `{` position when first scan fails |
-| M21 | `atomicWriteFile` uses `process.pid` | Uses `crypto.randomUUID()` for temp names |
-| M22 | `parseSlashInput` escaped quotes | Handles `\"` and `\'` inside quoted strings |
-| M23 | `--scope` silently ignores missing value | Throws error when value is missing |
-| M25 | `doctor ?? []` creates new reference | Uses stable `EMPTY_DOCTOR` constant |
-| M27 | `workflowSource()` inline in JSX | Memoized via `activeWorkflowSource` |
-| M28 | `handleWorkflowFreshRun` value dependency | Uses `valueRef` instead of `value` |
-| M30 | `CommandSuggestionMenu` array index key | Uses suggestion text as key |
-| M31 | `EventRow.summarizeInput` unsafe cast | Adds `Array.isArray` guard |
-| M35 | Doctor IIFE swallows errors | Surfaces errors in `/api/doctor` response |
-| M37 | `phaseOf` O(n) per event | Uses Map for O(1) lookup |
-| M38 | `isAgentBackedStep` misleading semantics | Clarified JSDoc for agent-backed distributors/consolidators |
-| M40 | `previousSource` capture order | Clarified comment (intentional pre-persist read) |
-| M41 | JSON parser counts braces in strings | Correctly handles strings in brace counting |
-| M42 | `process.env` passed by reference | Uses `{ ...process.env }` copy |
-| M43 | Timeout lacks SIGKILL escalation | Escalates to SIGKILL after 2s if SIGTERM ignored |
-
----
-
-## 12. Resolved in PR #25
-
-The following findings were fixed in [PR #25](https://github.com/nilsonsfj/steamtrain/pull/25):
-
-### Low (10 resolved)
-
-| ID | Finding | Resolution |
-|----|---------|------------|
-| L2 | `stripCarriageReturn` only strips single `\r` | Loops to strip all trailing CR chars |
-| L7 | `humanizeAssistantError` duplicated | Extracted to shared `agents/util.ts` |
-| L15 | `readAll` no byte ceiling | 10MB limit via `Buffer.byteLength` |
-| L16 | Config TOCTOU `existsSync`/`readFileSync` | Single `readFileSync` with `isEnoent` catch |
-| L18 | Doctor binary path not sanitized | Early return on empty/whitespace path |
-| L21 | Binary fields accept empty strings | `.refine()` rejects empty and whitespace-only |
-| L24 | Missing `engines.bun` | Added `"bun": ">=1"` |
-| L27 | Dual lockfiles | Removed `package-lock.json` |
-| L32 | `readSse` duplicated across test files | Shared helper in `tests/helpers/read-sse.ts` |
-| L39 | `DRAFT_AGENT_ORDER` not `as const` | Added `as const` assertion |
-
----
-
 *Generated by MIMO-CODE-2.5 Principal Engineer Review Agent*
 *Review date: 2026-06-27*
 *Files reviewed: 80+ source files, 65 test files, 5 build configs*
-*Last updated: 2026-06-27 — 39 findings resolved in PR #23, 30 in PR #24, 10 in PR #25*
