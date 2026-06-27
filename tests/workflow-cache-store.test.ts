@@ -177,6 +177,48 @@ describe("workflow cache store", () => {
     expect([...loaded.keys()]).toEqual(["gate"]);
   });
 
+  it("strips extra fields from cached step results (no prototype pollution)", async () => {
+    const root = tempDir();
+    const key = workflowCacheKey("wf", "input", root, { name: "wf", phases: [] });
+    await mkdir(root, { recursive: true });
+    writeFileSync(
+      join(root, workflowCacheFileName(key)),
+      JSON.stringify({
+        version: WORKFLOW_CACHE_VERSION,
+        workflow: "wf",
+        cwd: root,
+        inputHash: hashWorkflowCacheInput("input"),
+        specHash: key.specHash,
+        updatedAt: 1,
+        steps: {
+          s1: {
+            stepId: "s1",
+            ok: true,
+            output: "ok",
+            durationMs: 10,
+            extraField: "should be stripped",
+            anotherExtra: 42,
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const loaded = await loadWorkflowCache(root, key);
+    const result = loaded.get("s1");
+    expect(result).toBeDefined();
+    expect(result!.stepId).toBe("s1");
+    expect(result!.ok).toBe(true);
+    expect(result!.output).toBe("ok");
+    expect(result!.durationMs).toBe(10);
+    // Extra fields must not be carried through the spread
+    expect(Object.keys(result!)).toEqual(
+      expect.arrayContaining(["stepId", "ok", "output", "durationMs"]),
+    );
+    expect((result as Record<string, unknown>).extraField).toBeUndefined();
+    expect((result as Record<string, unknown>).anotherExtra).toBeUndefined();
+  });
+
   it("drops step entries with invalid shape", async () => {
     const root = tempDir();
     const key = workflowCacheKey("wf", "input", root, { name: "wf", phases: [] });

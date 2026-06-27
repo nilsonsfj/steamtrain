@@ -207,8 +207,7 @@ function validateStepResult(stepId: string, value: unknown): StepResult | undefi
   }
 
   return {
-    ...r,
-    stepId: r.stepId ?? stepId,
+    stepId: typeof r.stepId === "string" ? r.stepId : stepId,
     ok: r.ok,
     output: r.output,
     durationMs: r.durationMs,
