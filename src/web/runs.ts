@@ -16,6 +16,8 @@ import {
   workflowCacheKey,
 } from "../workflow";
 
+const MAX_FRAMES_PER_RUN = 5000;
+
 /**
  * The slice of the {@link Orchestrator} the web layer depends on. Declaring it
  * as an interface keeps the server testable with a lightweight fake and avoids
@@ -213,7 +215,9 @@ export class WorkflowRunManager {
   }
 
   private emit(run: Run, payload: string, terminal: boolean): void {
-    run.frames.push({ payload, terminal });
+    if (run.frames.length < MAX_FRAMES_PER_RUN || terminal) {
+      run.frames.push({ payload, terminal });
+    }
     for (const listener of run.listeners) listener(payload, terminal);
   }
 
