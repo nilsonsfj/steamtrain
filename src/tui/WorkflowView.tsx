@@ -72,10 +72,8 @@ export function WorkflowView({
     }
     return m;
   }, [state.phases]);
-  const selectedRowIndex = Math.max(
-    0,
-    rows.findIndex((row) => row.kind === "step" && row.flatIndex === clampedIndex),
-  );
+  const foundIndex = rows.findIndex((row) => row.kind === "step" && row.flatIndex === clampedIndex);
+  const selectedRowIndex = foundIndex >= 0 ? foundIndex : 0;
   const listBudget = Math.max(1, height - (selected ? 9 : 4));
   const rowWindow = selectVisibleWindow(rows, selectedRowIndex, listBudget);
 
