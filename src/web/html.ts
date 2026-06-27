@@ -695,7 +695,7 @@ var SteamtrainReducer = (() => {
   function pollDoctor(attempt) {
     api("GET", "/api/doctor").then(function (r) {
       var list = r.body.doctor || [];
-      var err = r.body.error;
+      var err = r.body.doctorError;
       S.doctor = list;
       renderHealth(list, err);
       applyHealth();

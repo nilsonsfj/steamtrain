@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { WorkflowSpec } from "../workflow/types";
@@ -151,7 +152,7 @@ function readRawConfig(path: string): Record<string, unknown> | null | undefined
 
 function writeRawConfig(path: string, value: Record<string, unknown>): void {
   mkdirSync(dirname(path), { recursive: true });
-  const temp = `${path}.${process.pid}.tmp`;
+  const temp = `${path}.${randomUUID()}.tmp`;
   writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   renameSync(temp, path);
 }

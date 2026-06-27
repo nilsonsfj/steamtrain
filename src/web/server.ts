@@ -272,10 +272,10 @@ async function handle(
   }
 
   if (method === "GET" && path === "/api/doctor") {
-    const error = deps.doctorError?.();
+    const doctorError = deps.doctorError?.();
     sendJson(res, 200, {
       doctor: deps.doctor?.() ?? [],
-      ...(error ? { error } : {}),
+      ...(doctorError ? { doctorError } : {}),
     });
     return;
   }
