@@ -109,6 +109,7 @@ function MenuBackdrop({ width, rows, color }: { width: number; rows: number; col
   return (
     <Box flexDirection="column" width={width} marginBottom={-rows}>
       {Array.from({ length: rows }, (_, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: indices are stable backdrop rows
         <Text key={i} backgroundColor={color}>
           {line}
         </Text>
