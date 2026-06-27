@@ -496,3 +496,43 @@ describe("buildWorkflowRepairPrompt", () => {
     expect(prompt.length).toBeLessThan(huge.length + 5000);
   });
 });
+
+describe("extractWorkflowSpec findJsonObject (M19)", () => {
+  it("finds JSON after unbalanced braces in explanatory text", () => {
+    const text = `Here is some text with { braces that confuse things.
+The real JSON is: {"name":"test","description":"x","phases":[{"id":"p","title":"P","steps":[{"id":"s","kind":"worker","agent":"opencode","model":"m","prompt":"hi"}]}]}`;
+    const result = extractWorkflowSpec(text);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.spec.name).toBe("test");
+  });
+
+  it("finds JSON when fenced block has prose before the object", () => {
+    const text = `Here is the output:
+Some explanation with { braces.
+\`\`\`json
+{"name":"fenced","description":"y","phases":[{"id":"p","title":"P","steps":[{"id":"s","kind":"worker","agent":"opencode","model":"m","prompt":"hi"}]}]}
+\`\`\``;
+    const result = extractWorkflowSpec(text);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.spec.name).toBe("fenced");
+  });
+});
+
+describe("opencode-variants JSON parser (M41)", () => {
+  it("correctly parses JSON with braces inside string values", async () => {
+    const { parseOpencodeModelsVerbose } = await import("../src/agents/opencode-variants");
+    const output = `opencode/mimo-v2.5-pro
+{
+  "name": "Mimo V2.5 Pro",
+  "variants": {
+    "low": {"reasoning_effort": "low"},
+    "high": {"reasoning_effort": "high", "hint": "use { for JSON"}
+  }
+}`;
+    const models = parseOpencodeModelsVerbose(output);
+    expect(models.size).toBe(1);
+    const info = models.get("opencode/mimo-v2.5-pro");
+    expect(info).toBeDefined();
+    expect(info?.efforts).toEqual(["high", "low"]);
+  });
+});

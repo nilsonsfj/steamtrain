@@ -82,13 +82,14 @@ function fetchOpencodeModelsVerbose(binary: string): Promise<string> {
 
     let stdout = "";
     let stderr = "";
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(() => {
       try {
         child.kill("SIGTERM");
       } catch {
         // already gone
       }
-      const killTimer = setTimeout(() => {
+      killTimer = setTimeout(() => {
         try {
           child.kill("SIGKILL");
         } catch {
@@ -109,10 +110,12 @@ function fetchOpencodeModelsVerbose(binary: string): Promise<string> {
     });
     child.on("error", (err) => {
       clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
       reject(err);
     });
     child.on("close", (code) => {
       clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
       if (code === 0) {
         resolve(stdout);
         return;

@@ -416,6 +416,10 @@ async function streamGenerate(
     sendJson(res, 400, { error: "body must include string 'description' and 'agent'" });
     return;
   }
+  if (typeof parsed.name === "string" && !isValidWorkflowName(parsed.name)) {
+    sendJson(res, 400, { error: "invalid workflow name" });
+    return;
+  }
 
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",

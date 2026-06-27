@@ -32,6 +32,15 @@ describe("fallbackOpencodeEfforts", () => {
   it("returns standard reasoning levels for openai-compatible go models", () => {
     expect(fallbackOpencodeEfforts("opencode-go/kimi-k2.6")).toEqual(["low", "medium", "high"]);
   });
+
+  it("returns standard reasoning levels for qwen on opencode provider (M4)", () => {
+    expect(fallbackOpencodeEfforts("opencode/qwen3.6-plus-free")).toEqual(["low", "medium", "high"]);
+    expect(fallbackOpencodeEfforts("opencode/qwen-turbo")).toEqual(["low", "medium", "high"]);
+  });
+
+  it("returns standard reasoning levels for qwen on non-openai/anthropic/google providers", () => {
+    expect(fallbackOpencodeEfforts("opencode/qwen-72b")).toEqual(["low", "medium", "high"]);
+  });
 });
 
 describe("effortsForModel opencode cache", () => {

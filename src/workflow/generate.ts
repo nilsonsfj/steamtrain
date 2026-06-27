@@ -443,7 +443,6 @@ function findJsonObject(text: string): string | undefined {
     let depth = 0;
     let inString = false;
     let escaped = false;
-    let found = false;
     for (let i = start; i < haystack.length; i++) {
       const ch = haystack[i];
       if (inString) {
