@@ -118,6 +118,16 @@ export function deleteProjectWorkflow(
 
   const { [name]: _removed, ...rest } = existing;
   const next = { ...raw, workflows: rest };
+
+  const check = configFileSchema.safeParse(next);
+  if (!check.success) {
+    const issue = check.error.issues[0];
+    const detail = issue
+      ? `${issue.path.join(".") || "config"}: ${issue.message}`
+      : "invalid config";
+    return { ok: false, error: `cannot delete from ${configPath} (${detail})` };
+  }
+
   writeRawConfig(configPath, next);
   return { ok: true, path: configPath, removed: true };
 }

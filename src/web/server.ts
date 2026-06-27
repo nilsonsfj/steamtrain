@@ -84,6 +84,16 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 /** Maximum body size: 1 MiB. Rejects larger payloads with HTTP 413. */
 const MAX_BODY_BYTES = 1 * 1024 * 1024;
 
+/** Maximum workflow name length. */
+const MAX_WORKFLOW_NAME = 128;
+
+function isValidWorkflowName(name: string): boolean {
+  if (name.length === 0 || name.length > MAX_WORKFLOW_NAME) return false;
+  // Reject control characters and null bytes.
+  // eslint-disable-next-line no-control-regex
+  return !/[\x00-\x1f\x7f]/.test(name);
+}
+
 class PayloadTooLarge extends Error {
   constructor() {
     super("payload too large");
@@ -200,6 +210,11 @@ async function handle(
   const wfMatch = path.match(/^\/api\/workflows\/([^/]+)$/);
   if (wfMatch) {
     const name = decodeURIComponent(wfMatch[1]!);
+
+    if (!isValidWorkflowName(name)) {
+      sendJson(res, 400, { error: "invalid workflow name" });
+      return;
+    }
 
     if (method === "GET") {
       const spec = deps.host.listWorkflows()[name];

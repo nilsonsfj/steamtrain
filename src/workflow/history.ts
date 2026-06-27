@@ -83,20 +83,7 @@ export interface RunRecord {
 }
 
 /** The lightweight shape used for history list views (record minus the tree). */
-export interface RunRecordSummary {
-  version: number;
-  id: string;
-  workflow: string;
-  input: string;
-  cwd: string;
-  status: RunRecordStatus;
-  ok: boolean;
-  startedAt: number;
-  endedAt: number;
-  durationMs: number;
-  totals: RunTotals;
-  error?: string;
-}
+export type RunRecordSummary = Omit<RunRecord, "phases">;
 
 export function runRecordSummary(record: RunRecord): RunRecordSummary {
   const { phases: _phases, ...summary } = record;
