@@ -450,6 +450,68 @@ describe("web server", () => {
     expect(((await second.json()) as { error: string }).error).toContain("too many concurrent");
   });
 
+  it("rejects POST /api/runs with empty body", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects POST /api/runs with missing workflow field", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ input: "test" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects POST /api/runs with non-string workflow", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: 123, input: "test" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects PUT /api/workflows/:name when authoring not enabled", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/workflows/demo`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: "not json",
+    });
+    expect(res.status).toBe(501);
+  });
+
+  it("rejects PUT /api/workflows/:name with missing spec (501 without author)", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/workflows/demo`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(501);
+  });
+
+  it("returns 404 for unknown routes", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/nonexistent`);
+    expect(res.status).toBe(404);
+  });
+
   it("rejects oversized payloads with 413", async () => {
     const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);
