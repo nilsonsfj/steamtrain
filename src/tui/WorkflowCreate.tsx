@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { truncate } from "../agents/util";
 import type { AgentId } from "../types/events";
 import type { WorkflowSpec } from "../workflow";
-import { AGENT_COLOR, SPINNER_FRAMES } from "./theme";
+import { AGENT_COLOR } from "./theme";
+import { SPINNER_FRAMES, useWorkIndicator } from "./useWorkIndicator";
 import { blockSummary } from "./workflow-spec-ui";
 
 export interface WorkflowCreateState {
@@ -18,6 +19,11 @@ export interface WorkflowCreateState {
   savedPath?: string;
 }
 
+/**
+ * The live panel for LLM-delegated workflow creation (`/createworkflow`). It
+ * shows the agent doing the drafting, a tail of its streamed output, and the
+ * validated result (or the error + raw output when generation fails).
+ */
 export function WorkflowCreate({
   state,
   width,
@@ -32,30 +38,7 @@ export function WorkflowCreate({
   const borderColor = state.status === "done" ? "green" : state.status === "error" ? "red" : "cyan";
   const tail = lastLines(state.text, Math.max(3, height - 9));
 
-  const [spinnerFrame, setSpinnerFrame] = useState(0);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-
-  useEffect(() => {
-    if (state.status !== "generating") {
-      setElapsedSeconds(0);
-      setSpinnerFrame(0);
-      return;
-    }
-
-    const spinnerInterval = setInterval(() => {
-      setSpinnerFrame((f) => (f + 1) % SPINNER_FRAMES.length);
-    }, 80);
-
-    const startTime = Date.now();
-    const timerInterval = setInterval(() => {
-      setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
-    }, 200);
-
-    return () => {
-      clearInterval(spinnerInterval);
-      clearInterval(timerInterval);
-    };
-  }, [state.status]);
+  const { spinnerFrame, elapsedSeconds } = useWorkIndicator(state.status === "generating");
 
   return (
     <Box

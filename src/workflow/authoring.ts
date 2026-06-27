@@ -193,6 +193,7 @@ export class WorkflowAuthor {
     scope: WorkflowScope = "user",
   ): AuthorWriteResult {
     const slug = slugifyWorkflowName(name || spec.name || "");
+    // Defensive check; slugifyWorkflowName currently always returns a fallback name.
     if (!slug) return { ok: false, error: "a workflow name is required" };
 
     if (previousName && previousName !== slug) {
@@ -248,6 +249,7 @@ export class WorkflowAuthor {
     }
 
     const slug = slugifyWorkflowName(newName);
+    // Defensive check; slugifyWorkflowName currently always returns a fallback name.
     if (!slug) return { ok: false, error: "a new workflow name is required" };
     if (slug === oldName) return { ok: false, error: "the new name must be different" };
 
@@ -269,6 +271,7 @@ export class WorkflowAuthor {
     if (!source) return { ok: false, error: `unknown workflow '${sourceName}'` };
 
     const slug = slugifyWorkflowName(newName || "");
+    // Defensive check; slugifyWorkflowName currently always returns a fallback name.
     if (!slug) return { ok: false, error: "a new workflow name is required" };
     if (slug === sourceName) return { ok: false, error: "the clone needs a different name" };
     // Cloning is non-destructive: refuse to land on top of any existing

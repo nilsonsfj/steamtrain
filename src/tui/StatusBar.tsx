@@ -1,7 +1,7 @@
 import { Box, Text } from "ink";
-import { useEffect, useState } from "react";
 import type { DoctorResult } from "../doctor";
-import { SPINNER_FRAMES, STATUS_STYLE } from "./theme";
+import { STATUS_STYLE } from "./theme";
+import { SPINNER_FRAMES, useWorkIndicator } from "./useWorkIndicator";
 
 interface StatusBarProps {
   doctor: DoctorResult[] | null;
@@ -11,30 +11,7 @@ interface StatusBarProps {
 }
 
 export function StatusBar({ doctor, configSource, workspaceLabel, running }: StatusBarProps) {
-  const [spinnerFrame, setSpinnerFrame] = useState(0);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-
-  useEffect(() => {
-    if (!running) {
-      setElapsedSeconds(0);
-      setSpinnerFrame(0);
-      return;
-    }
-
-    const spinnerInterval = setInterval(() => {
-      setSpinnerFrame((f) => (f + 1) % SPINNER_FRAMES.length);
-    }, 80);
-
-    const startTime = Date.now();
-    const timerInterval = setInterval(() => {
-      setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
-    }, 200);
-
-    return () => {
-      clearInterval(spinnerInterval);
-      clearInterval(timerInterval);
-    };
-  }, [running]);
+  const { spinnerFrame, elapsedSeconds } = useWorkIndicator(running);
 
   return (
     <Box borderStyle="round" borderColor="gray" paddingX={1} justifyContent="space-between">
