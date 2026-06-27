@@ -25,13 +25,16 @@ const FALLBACK_BANNER = String.raw`
 const LINE_COLORS = ["magenta", "magenta", "blue", "cyan", "blue", "blue", "yellow"] as const;
 const TITLE_LINE = 3;
 
+let cachedBanner: string | undefined;
 function loadBannerArt(): string {
+  if (cachedBanner !== undefined) return cachedBanner;
   try {
     const here = dirname(fileURLToPath(import.meta.url));
-    return readFileSync(join(here, "banner.txt"), "utf8");
+    cachedBanner = readFileSync(join(here, "banner.txt"), "utf8");
   } catch {
-    return FALLBACK_BANNER;
+    cachedBanner = FALLBACK_BANNER;
   }
+  return cachedBanner;
 }
 
 export function Banner() {
