@@ -42,6 +42,8 @@ export function rerunDowngradeMessage(reason: RerunDowngrade): string {
     case "cwd-changed":
       return "the working directory differs from the recorded run; doing a full re-run";
   }
+  const _exhaustive: never = reason;
+  throw new Error(`unhandled rerun mode: ${_exhaustive}`);
 }
 
 /**
