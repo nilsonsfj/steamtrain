@@ -53,9 +53,13 @@ export type TranscriptAction =
 
 export const initialTranscript: TranscriptState = { items: [], nextId: 0 };
 
+const MAX_TRANSCRIPT_ITEMS = 2000;
+
 function push(state: TranscriptState, data: DisplayItemData): TranscriptState {
   const item = { id: state.nextId, ...data } as DisplayItem;
-  return { items: [...state.items, item], nextId: state.nextId + 1 };
+  const items = [...state.items, item];
+  const trimmed = items.length > MAX_TRANSCRIPT_ITEMS ? items.slice(items.length - MAX_TRANSCRIPT_ITEMS) : items;
+  return { items: trimmed, nextId: state.nextId + 1 };
 }
 
 function applyEvent(state: TranscriptState, e: AgentEvent): TranscriptState {
