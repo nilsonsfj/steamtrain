@@ -1561,14 +1561,12 @@ export function App({
         if (wf.started || wfLaunching) setStepIndex((i) => Math.max(0, i - 1));
         else if (wfPreview) setStepIndex((i) => Math.max(0, i - 1));
         else {
-          setWorkflowIndex((i) => {
-            const next = Math.max(0, i - 1);
-            if (next !== i) {
-              setStepIndex(0);
-              setWfStepDetails(null);
-            }
-            return next;
-          });
+          const next = Math.max(0, workflowIndex - 1);
+          if (next !== workflowIndex) {
+            setStepIndex(0);
+            setWfStepDetails(null);
+          }
+          setWorkflowIndex(next);
         }
         return;
       }
@@ -1578,15 +1576,12 @@ export function App({
         } else if (wfPreview) {
           setStepIndex((i) => Math.min(Math.max(0, previewStepCount - 1), i + 1));
         } else {
-          setWorkflowIndex((i) => {
-            // `length` is the create row, one past the last workflow.
-            const next = Math.min(workflowEntries.length, i + 1);
-            if (next !== i) {
-              setStepIndex(0);
-              setWfStepDetails(null);
-            }
-            return next;
-          });
+          const next = Math.min(workflowEntries.length, workflowIndex + 1);
+          if (next !== workflowIndex) {
+            setStepIndex(0);
+            setWfStepDetails(null);
+          }
+          setWorkflowIndex(next);
         }
         return;
       }
