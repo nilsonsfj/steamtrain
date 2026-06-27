@@ -173,8 +173,12 @@ export class WorkflowAuthor {
   }
 
   /**
-   * Validate and persist a hand-edited spec under `name` (slugified). When
-   * `previousName` differs and named an existing user workflow, the old entry is
+   * Validate and persist a hand-edited spec under `name` (slugified).
+   *
+   * This is the content-updating rename path used by configure/editor UIs when
+   * a user edits a workflow's steps and potentially changes its name at the same time.
+   *
+   * When `previousName` differs and named an existing user workflow, the old entry is
    * removed so a rename leaves no duplicate.
    */
   save(
@@ -192,14 +196,20 @@ export class WorkflowAuthor {
       }
     }
 
+    // H3: Resolve the previous source BEFORE persist reloads the catalog.
+    // This removes the implicit temporal dependency on reload side-effects.
+    const previousSource =
+      previousName && previousName !== slug ? this.host.workflowSource(previousName) : undefined;
+
     const written = this.persist(slug, spec, { scope });
     if (!written.ok) return written;
 
     // On a rename, drop the old entry so we don't leave a duplicate. Only an
     // entry living in the *same* writable layer is removed; renaming away from a
     // bundled name (or across layers) leaves the other entry be.
-    if (previousName && previousName !== slug) {
-      const previousSource = this.host.workflowSource(previousName);
+    // L2: We intentionally call delete AFTER persist to avoid deleting the old
+    // workflow in case the save operation fails, accepting the double reload.
+    if (previousName && previousName !== slug && previousSource) {
       if (previousSource === "user") {
         deleteUserWorkflow(previousName, this.home);
         this.reload();
@@ -212,7 +222,12 @@ export class WorkflowAuthor {
   }
 
   /**
-   * Rename a workflow. The source workflow must be a user or project workflow.
+   * Rename a workflow from metadata.
+   *
+   * This is the metadata-only rename path used by CLIs and TUIs where the user
+   * renames a workflow without editing its content/steps.
+   *
+   * The source workflow must be a user or project workflow.
    * Modifies its internal spec name and deletes the old entry.
    */
   rename(oldName: string, newName: string): AuthorWriteResult {

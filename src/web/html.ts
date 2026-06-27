@@ -1253,7 +1253,7 @@ var SteamtrainReducer = (() => {
     var body = h("div", null,
       banner,
       h("div", { class: "row2" },
-        field(creating ? "New name" : "Name", nameInput, creating ? "Saved as a new workflow." : (isWritable ? "Renaming deletes the old workflow." : "Editing creates a user copy that overrides the " + S.source + " one.")),
+        field(creating ? "New name" : "Name", nameInput, creating ? "Saved as a new workflow." : (isWritable ? "Changing the name will save as a new workflow and remove the old one." : "Editing creates a user copy that overrides the " + S.source + " one.")),
         field("Description", descInput)
       ),
       creating ? field("Save to", scopeSel, "Project = ./steamtrain.json (committable, shared).") : null,
@@ -1270,6 +1270,12 @@ var SteamtrainReducer = (() => {
     saveBtn.addEventListener("click", function () {
       var targetName = (creating || isWritable) ? nameInput.value.trim() : spec.name;
       if (!targetName) { mbanner(banner, "a name is required", "info"); return; }
+      if (!creating && isWritable && targetName !== spec.name) {
+        var msg = "Are you sure you want to rename this workflow? Changing the name to '" + targetName + "' will save it under the new name and delete the old workflow '" + spec.name + "'.";
+        if (!window.confirm(msg)) {
+          return;
+        }
+      }
       spec.name = targetName;
       spec.description = descInput.value.trim() || undefined;
       spec.phases.forEach(function (p) {

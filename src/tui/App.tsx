@@ -413,21 +413,22 @@ export function App({
         };
       }
 
-      const targetSlug = result.name!;
+      const targetSlug = result.name;
+      if (!targetSlug) {
+        return {
+          handled: true as const,
+          clearInput: true,
+          notices: [
+            { level: "error" as const, text: `could not rename '${source}': missing target name` },
+          ],
+        };
+      }
 
-      // Migrate session overrides if any
-      setWfStepOverrides((prev) => {
-        if (!prev[source]) return prev;
-        const next = { ...prev };
-        next[targetSlug] = next[source]!;
-        delete next[source];
-        return next;
-      });
+      // Migrate session overrides if any (M4)
+      setWfStepOverrides((prev) => migrateSessionOverrides(prev, source, targetSlug));
 
-      // Update preview if renaming the previewed workflow
-      setWfPreview((prev) =>
-        prev?.name === source ? { name: targetSlug, input: prev.input } : prev,
-      );
+      // Update preview if renaming the previewed workflow (M4)
+      setWfPreview((prev) => updatePreviewOnRename(prev, source, targetSlug));
       pendingSelectRef.current = targetSlug;
 
       return {
@@ -1864,4 +1865,30 @@ function HistoryPanel({
       height={height}
     />
   );
+}
+
+/**
+ * Migrate session overrides from an old workflow name to a new one.
+ */
+export function migrateSessionOverrides(
+  prev: Record<string, WorkflowStepOverrides>,
+  source: string,
+  targetSlug: string,
+): Record<string, WorkflowStepOverrides> {
+  if (!prev[source]) return prev;
+  const next = { ...prev };
+  next[targetSlug] = next[source]!;
+  delete next[source];
+  return next;
+}
+
+/**
+ * Update the preview state if the renamed workflow was being previewed.
+ */
+export function updatePreviewOnRename(
+  prev: { name: string; input: string } | null,
+  source: string,
+  targetSlug: string,
+): { name: string; input: string } | null {
+  return prev?.name === source ? { name: targetSlug, input: prev.input } : prev;
 }

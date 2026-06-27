@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { truncate } from "../agents/util";
 import type { AgentId } from "../types/events";
 import type { WorkflowSpec } from "../workflow";
-import { AGENT_COLOR } from "./theme";
+import { AGENT_COLOR, SPINNER_FRAMES } from "./theme";
 import { blockSummary } from "./workflow-spec-ui";
 
 export interface WorkflowCreateState {
@@ -17,13 +17,6 @@ export interface WorkflowCreateState {
   spec?: WorkflowSpec;
   savedPath?: string;
 }
-
-/**
- * The live panel for LLM-delegated workflow creation (`/createworkflow`). It
- * shows the agent doing the drafting, a tail of its streamed output, and the
- * validated result (or the error + raw output when generation fails).
- */
-const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 export function WorkflowCreate({
   state,
@@ -45,6 +38,7 @@ export function WorkflowCreate({
   useEffect(() => {
     if (state.status !== "generating") {
       setElapsedSeconds(0);
+      setSpinnerFrame(0);
       return;
     }
 

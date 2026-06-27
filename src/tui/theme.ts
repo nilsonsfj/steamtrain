@@ -46,3 +46,6 @@ export const SUGGESTION_MENU_ACTIVE_BG = "#2a2a2a";
 
 /** Active workspace tab name in the event stream header. */
 export const TAB_LABEL_COLOR = "#FFFFE0";
+
+/** Standard braille spinner frames for TUI waiting indicators. */
+export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];

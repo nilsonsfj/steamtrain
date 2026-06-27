@@ -1,7 +1,7 @@
 import { Box, Text } from "ink";
 import { useEffect, useState } from "react";
 import type { DoctorResult } from "../doctor";
-import { STATUS_STYLE } from "./theme";
+import { SPINNER_FRAMES, STATUS_STYLE } from "./theme";
 
 interface StatusBarProps {
   doctor: DoctorResult[] | null;
@@ -10,8 +10,6 @@ interface StatusBarProps {
   running: boolean;
 }
 
-const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
 export function StatusBar({ doctor, configSource, workspaceLabel, running }: StatusBarProps) {
   const [spinnerFrame, setSpinnerFrame] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -19,6 +17,7 @@ export function StatusBar({ doctor, configSource, workspaceLabel, running }: Sta
   useEffect(() => {
     if (!running) {
       setElapsedSeconds(0);
+      setSpinnerFrame(0);
       return;
     }
 

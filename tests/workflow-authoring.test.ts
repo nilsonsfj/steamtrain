@@ -520,6 +520,32 @@ describe("authoring HTTP routes", () => {
     expect(host.workflowSource("edited")).toBeUndefined();
   });
 
+  it("renames via PUT with previousName", async () => {
+    const host = new FakeHost(home);
+    const base = await start(makeServer(host));
+
+    // First save user-old
+    const putInit = await fetch(`${base}/api/workflows/user-old`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ spec: userFileSpec("user-old") }),
+    });
+    expect(putInit.status).toBe(200);
+    expect(host.workflowSource("user-old")).toBe("user");
+
+    // Rename to user-new by sending previousName
+    const renameRes = await fetch(`${base}/api/workflows/user-new`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ spec: userFileSpec("user-new"), previousName: "user-old" }),
+    });
+    expect(renameRes.status).toBe(200);
+    expect(((await renameRes.json()) as { ok: boolean }).ok).toBe(true);
+
+    expect(host.workflowSource("user-new")).toBe("user");
+    expect(host.workflowSource("user-old")).toBeUndefined();
+  });
+
   it("round-trips a loop gate's loopTo/maxIterations through PUT and GET", async () => {
     const host = new FakeHost(home);
     const base = await start(makeServer(host));
