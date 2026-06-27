@@ -186,6 +186,12 @@ export class WorkflowAuthor {
     const slug = slugifyWorkflowName(name || spec.name || "");
     if (!slug) return { ok: false, error: "a workflow name is required" };
 
+    if (previousName && previousName !== slug) {
+      if (this.host.listWorkflows()[slug]) {
+        return { ok: false, error: `a workflow named '${slug}' already exists` };
+      }
+    }
+
     const written = this.persist(slug, spec, { scope });
     if (!written.ok) return written;
 

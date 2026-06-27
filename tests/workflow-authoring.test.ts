@@ -366,6 +366,19 @@ describe("WorkflowAuthor", () => {
     expect(host.workflowSource("wf2")).toBe("user");
   });
 
+  it("save method refuses to rename/overwrite an existing workflow name when previousName is provided", () => {
+    const host = new FakeHost(home);
+    const author = makeAuthor(host);
+    author.save("wf1", userFileSpec("wf1"));
+    author.save("wf2", userFileSpec("wf2"));
+
+    const renamed = author.save("wf2", userFileSpec("wf2-updated"), "wf1");
+    expect(renamed.ok).toBe(false);
+    expect(renamed.error).toContain("already exists");
+    expect(host.workflowSource("wf1")).toBe("user");
+    expect(host.workflowSource("wf2")).toBe("user");
+  });
+
   it("removing the last project workflow leaves zero project entries after reload", () => {
     const host = new FakeHost(home);
     const author = makeAuthor(host);

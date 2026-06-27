@@ -197,6 +197,30 @@ describe("extractWorkflowSpec", () => {
     expect(result.ok && result.spec.name).toBe("cache-migration");
   });
 
+  it("derives a name from the spec name if hint is absent", () => {
+    const spec = { ...VALID_SPEC, name: "Spec Name" };
+    const result = extractWorkflowSpec(JSON.stringify(spec));
+    expect(result.ok && result.spec.name).toBe("spec-name");
+  });
+
+  it("derives a name from fallbackName if hint and spec name are absent", () => {
+    const { name, ...spec } = VALID_SPEC;
+    const result = extractWorkflowSpec(JSON.stringify(spec), { fallbackName: "Fallback Name" });
+    expect(result.ok && result.spec.name).toBe("fallback-name");
+  });
+
+  it("derives a name from spec description if hint, spec name, and fallbackName are absent", () => {
+    const { name, ...spec } = { ...VALID_SPEC, description: "Description Name" };
+    const result = extractWorkflowSpec(JSON.stringify(spec));
+    expect(result.ok && result.spec.name).toBe("description-name");
+  });
+
+  it("falls back to DEFAULT_NAME if all name sources are absent or resolve to empty", () => {
+    const { name, description, ...spec } = VALID_SPEC;
+    const result = extractWorkflowSpec(JSON.stringify(spec));
+    expect(result.ok && result.spec.name).toBe("workflow");
+  });
+
   it("rejects text with no JSON object", () => {
     const result = extractWorkflowSpec("I cannot help with that.");
     expect(result.ok).toBe(false);
