@@ -24,3 +24,16 @@ describe("checkAgent amp", () => {
     expect(result.detail).toContain("npm i -g @sourcegraph/amp");
   });
 });
+
+describe("checkAgent ok", () => {
+  it("reports ok status for a reachable binary", async () => {
+    const result = await checkAgent("claude", "node");
+    expect(result).toMatchObject({
+      agent: "claude",
+      status: "ok",
+      binary: "node",
+    });
+    expect(result.version).toBeDefined();
+    expect(result.message).toBe("ready");
+  });
+});
