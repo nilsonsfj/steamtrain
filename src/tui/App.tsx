@@ -18,6 +18,7 @@ import {
   isSlashCommandInput,
   listSlashCommands,
   parseSlashInput,
+  type SlashCommandResult,
 } from "../commands";
 import type { SteamtrainConfig } from "../config";
 import { type DoctorResult, runDoctor } from "../doctor";
@@ -463,9 +464,9 @@ export function App({
       const promptText = raw.trim();
 
       if (isRegisteredSlashCommand(promptText)) {
-        let result;
+        let resultOrPromise;
         try {
-          result = executeSlashCommand(promptText, slashHook.slashCtx);
+          resultOrPromise = executeSlashCommand(promptText, slashHook.slashCtx);
         } catch (err) {
           dispatch({
             type: "notice",
@@ -474,17 +475,28 @@ export function App({
           });
           return;
         }
-        if (result.handled) {
-          prompt.updatePromptDraft(
-            result.clearInput ? { value: "", promptEditing: false } : { promptEditing: false },
-          );
-          prompt.setCommandSuggestions([]);
-          for (const notice of result.notices ?? []) {
-            dispatch({ type: "notice", level: notice.level, text: notice.text });
+
+        const handleResult = (result: SlashCommandResult) => {
+          if (result.handled) {
+            prompt.updatePromptDraft(
+              result.clearInput ? { value: "", promptEditing: false } : { promptEditing: false },
+            );
+            prompt.setCommandSuggestions([]);
+            for (const notice of result.notices ?? []) {
+              dispatch({ type: "notice", level: notice.level, text: notice.text });
+            }
+            if (result.exit) exit();
           }
-          if (result.exit) exit();
-          return;
+        };
+
+        if (resultOrPromise instanceof Promise) {
+          void resultOrPromise.then(handleResult).catch((err) => {
+            dispatch({ type: "notice", level: "error", text: message(err) });
+          });
+        } else {
+          handleResult(resultOrPromise);
         }
+        return;
       }
 
       if (picker.wfCreate && picker.wfCreate.status === "done" && picker.wfCreate.spec) {

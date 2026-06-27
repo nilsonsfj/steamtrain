@@ -18,7 +18,6 @@ import {
 } from "../workflow";
 import {
   type WorkflowState,
-  type WorkflowStateAction,
   flattenSteps,
   initialWorkflowState,
   workflowReducer,
@@ -30,8 +29,6 @@ export interface UseWorkflowRunnerParams {
   resolveWorkflowSpec: (name: string) => WorkflowSpec | undefined;
   mountedRef: React.RefObject<boolean>;
 }
-
-
 
 export function useWorkflowRunner({
   orchestrator,

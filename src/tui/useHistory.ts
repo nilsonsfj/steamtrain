@@ -44,8 +44,6 @@ export interface UseHistoryReturn {
   rerunFromRecord: (record: RunRecord, mode: RerunMode) => void;
 }
 
-
-
 export function useHistory({
   historyStoreRef,
   mountedRef,
