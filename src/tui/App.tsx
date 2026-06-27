@@ -56,6 +56,8 @@ import { workflowListNavigation } from "./prompt-editing";
 import { initialTranscript, transcriptReducer } from "./transcript";
 import { useTerminalSize } from "./useTerminalSize";
 import { flattenSteps } from "./workflow-state";
+import { createWorkflowPromptValue } from "./create-workflow-prompt";
+import { initialPromptHistoryBrowse } from "./prompt-history";
 
 // Custom hooks — each owns a cohesive slice of state.
 import { type HistoryUiState, useHistory } from "./useHistory";
@@ -179,20 +181,13 @@ export function App({
     mountedRef,
   });
 
-  // ── Workflow Picker hook ─────────────────────────────────────────────
   const picker = useWorkflowPicker({
-    config,
-    configPath,
     mode,
     doctor,
     runtimeCatalog,
-    setRuntimeCatalog,
     orchestrator,
     author,
     running: runner.running,
-    showWorkflowView: runner.showWorkflowView,
-    history: false, // will be updated below
-    wfCreate: null, // managed internally by picker
     mountedRef,
     dispatch,
     wfStepOverrides,
@@ -200,10 +195,9 @@ export function App({
     resolveWorkflowSpec,
   });
 
-  // Preview step selection derivation (used by slash context and prompt).
   const previewSelectedStep =
-    picker.previewFlatSteps.length > 0
-      ? picker.previewFlatSteps[Math.min(runner.stepIndex, picker.previewFlatSteps.length - 1)]
+    picker.preview.flatSteps.length > 0
+      ? picker.preview.flatSteps[Math.min(runner.stepIndex, picker.preview.flatSteps.length - 1)]
       : undefined;
   const previewStepSelection = useMemo(() => {
     if (!picker.wfPreview || !previewSelectedStep) return undefined;
@@ -235,10 +229,10 @@ export function App({
         mode,
         history: Boolean(historyHook.history),
         wfCreate: Boolean(picker.wfCreate),
-        previewing: Boolean(picker.wfPreview && picker.previewSpec && picker.previewDispatchCheck),
+        previewing: Boolean(picker.wfPreview && picker.preview.spec && picker.preview.dispatchCheck),
         showWorkflowView: runner.showWorkflowView,
       }),
-    [mode, historyHook.history, picker.wfCreate, picker.wfPreview, picker.previewSpec, picker.previewDispatchCheck, runner.showWorkflowView],
+    [mode, historyHook.history, picker.wfCreate, picker.wfPreview, picker.preview.spec, picker.preview.dispatchCheck, runner.showWorkflowView],
   );
 
   const slashHook = useSlashContext({
@@ -388,15 +382,18 @@ export function App({
   // ── Cross-cutting callbacks ──────────────────────────────────────────
   const focusCreateWorkflowPrompt = useCallback(
     (seed = "") => {
-      picker.focusCreateWorkflowPrompt(
-        seed,
-        prompt.updatePromptDraft,
-        prompt.bumpCursorToEnd,
-        prompt.setCommandSuggestions,
-        prompt.setSuggestionIndex,
-      );
+      if (runner.running) return;
+      const nextValue = createWorkflowPromptValue(seed);
+      prompt.updatePromptDraft({
+        value: nextValue,
+        promptEditing: true,
+        historyBrowse: initialPromptHistoryBrowse,
+      });
+      prompt.setCommandSuggestions([]);
+      prompt.setSuggestionIndex(0);
+      prompt.bumpCursorToEnd();
     },
-    [picker.focusCreateWorkflowPrompt, prompt.updatePromptDraft, prompt.bumpCursorToEnd, prompt.setCommandSuggestions, prompt.setSuggestionIndex],
+    [runner.running, prompt.updatePromptDraft, prompt.bumpCursorToEnd, prompt.setCommandSuggestions, prompt.setSuggestionIndex],
   );
 
   const handleWorkflowRun = useCallback(
@@ -608,57 +605,24 @@ export function App({
       prompt.updatePromptDraft({ value: "", promptEditing: false });
   }, [prompt.recordPromptHistory, handleWorkflowRun, prompt.updatePromptDraft]);
 
+
+
   // ── Keyboard input hook ──────────────────────────────────────────────
   useKeyboardInput({
     mode,
     modes: slashHook.modes,
-    running: runner.running,
-    promptEditing: prompt.promptEditing,
-    value: prompt.value,
-    commandSuggestions: prompt.commandSuggestions,
-    history: historyHook.history,
-    setHistory: historyHook.setHistory,
-    openHistoryRecord: historyHook.openHistoryRecord,
-    rerunFromRecord: historyHook.rerunFromRecord,
-    wfPreview: picker.wfPreview,
-    setWfPreview: picker.setWfPreview,
-    wfCreate: picker.wfCreate,
-    setWfCreate: picker.setWfCreate,
-    createAbortRef: picker.createAbortRef,
-    wfStepDetails: runner.wfStepDetails,
-    setWfStepDetails: runner.setWfStepDetails,
-    showWorkflowView: runner.showWorkflowView,
-    previewSpec: picker.previewSpec,
-    previewStepCount: picker.previewStepCount,
-    stepIndex: runner.stepIndex,
-    setStepIndex: runner.setStepIndex,
-    workflowIndex: picker.workflowIndex,
-    setWorkflowIndex: picker.setWorkflowIndex,
-    workflowEntries: picker.workflowEntries,
-    totalWfSteps: runner.totalWfSteps,
-    wf: runner.wf,
-    wfLaunching: runner.wfLaunching,
-    wfDispatch: runner.wfDispatch,
-    activeWorkflowRef: runner.activeWorkflowRef,
-    activeWorkflowInputRef: runner.activeWorkflowInputRef,
-    workflowCacheRef: runner.workflowCacheRef,
-    setWfNotice: runner.setWfNotice,
-    setWfLaunching: runner.setWfLaunching,
-    abortRef: runner.abortRef,
+    prompt,
+    picker,
+    runner,
+    historyHook,
     workflowPickerActive,
     focusCreateWorkflowPrompt,
-    exitPromptEditing: prompt.exitPromptEditing,
     switchMode: (next) => {
       setMode(next);
       prompt.setCommandSuggestions([]);
       prompt.setSuggestionIndex(0);
       prompt.bumpCursorToEnd();
     },
-    setCommandSuggestions: prompt.setCommandSuggestions,
-    setSuggestionIndex: prompt.setSuggestionIndex,
-    promptHistoryByMode: prompt.promptHistoryByMode,
-    historyBrowse: prompt.historyBrowse,
-    promptArrowCtx: prompt.promptArrowCtx,
   });
 
   // ── Render ───────────────────────────────────────────────────────────
@@ -709,19 +673,19 @@ export function App({
             totalSteps={runner.totalWfSteps}
             elapsedMs={runner.wfElapsedMs}
           />
-        ) : runner.wfStepDetails === "preview" && picker.wfPreview && picker.previewSpec && picker.previewDispatchCheck ? (
+        ) : runner.wfStepDetails === "preview" && picker.wfPreview && picker.preview.spec && picker.preview.dispatchCheck ? (
           <WorkflowStepDetails
             kind="preview"
-            spec={picker.previewSpec}
+            spec={picker.preview.spec}
             source={activeWorkflowSource ?? "bundled"}
             input={prompt.value.trim() || picker.wfPreview.input}
             height={streamHeight}
             width={columns}
             entry={previewSelectedStep}
             selectedIndex={runner.stepIndex}
-            totalSteps={picker.previewStepCount}
-            dispatchOk={picker.previewDispatchCheck.ok}
-            dispatchReason={picker.previewDispatchCheck.ok ? undefined : picker.previewDispatchCheck.reason}
+            totalSteps={picker.preview.stepCount}
+            dispatchOk={picker.preview.dispatchCheck.ok}
+            dispatchReason={picker.preview.dispatchCheck.ok ? undefined : picker.preview.dispatchCheck.reason}
             canResume={runner.wfCanResume}
           />
         ) : runner.showWorkflowView ? (
@@ -732,15 +696,15 @@ export function App({
             selectedIndex={runner.stepIndex}
             elapsedMs={runner.wfElapsedMs}
           />
-        ) : picker.wfPreview && picker.previewSpec && picker.previewDispatchCheck ? (
+        ) : picker.wfPreview && picker.preview.spec && picker.preview.dispatchCheck ? (
           <WorkflowPreview
-            spec={picker.previewSpec}
+            spec={picker.preview.spec}
             source={activeWorkflowSource ?? "bundled"}
             input={prompt.value.trim() || picker.wfPreview.input}
             width={columns}
             height={streamHeight}
             selectedIndex={runner.stepIndex}
-            dispatchCheck={picker.previewDispatchCheck}
+            dispatchCheck={picker.preview.dispatchCheck}
             canResume={runner.wfCanResume}
             promptEditing={prompt.promptEditing}
           />

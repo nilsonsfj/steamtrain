@@ -23,6 +23,7 @@ import {
   initialWorkflowState,
   workflowReducer,
 } from "./workflow-state";
+import { message } from "./util";
 
 export interface UseWorkflowRunnerParams {
   orchestrator: Orchestrator;
@@ -30,9 +31,7 @@ export interface UseWorkflowRunnerParams {
   mountedRef: React.RefObject<boolean>;
 }
 
-function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
+
 
 export function useWorkflowRunner({
   orchestrator,

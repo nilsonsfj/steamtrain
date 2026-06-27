@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { homedir } from "node:os";
-import type { SteamtrainConfig } from "../config";
 import type { DoctorResult } from "../doctor";
 import type { Orchestrator } from "../orchestrator";
 import { homeRelativePath } from "../paths";
@@ -19,28 +18,18 @@ import {
 import type { WorkspaceEntry } from "../workspace";
 import type { WorkflowCreateState } from "./WorkflowCreate";
 import type { DraftTarget } from "./draft-model";
-import { healthyAgentSet, resolveDraftTarget, formatDraftTarget } from "./draft-model";
+import { healthyAgentSet, resolveDraftTarget } from "./draft-model";
 import type { Mode } from "./modes";
-import { isWorkflowPickerActive } from "./modes";
-import { createWorkflowPromptValue } from "./create-workflow-prompt";
 import { flattenSpecSteps } from "./workflow-spec-ui";
 import type { TranscriptAction } from "./transcript";
-import { initialPromptHistoryBrowse } from "./prompt-history";
-import type { initialPromptTabState } from "./prompt-draft";
 
 export interface UseWorkflowPickerParams {
-  config: SteamtrainConfig;
-  configPath?: string;
   mode: Mode;
   doctor: DoctorResult[] | null;
   runtimeCatalog: LoadedWorkflowCatalog;
-  setRuntimeCatalog: React.Dispatch<React.SetStateAction<LoadedWorkflowCatalog>>;
   orchestrator: Orchestrator;
   author: WorkflowAuthor;
   running: boolean;
-  showWorkflowView: boolean;
-  history: boolean;
-  wfCreate: WorkflowCreateState | null;
   mountedRef: React.RefObject<boolean>;
   dispatch: React.Dispatch<TranscriptAction>;
   wfStepOverrides: Record<string, WorkflowStepOverrides>;
@@ -55,9 +44,6 @@ export function useWorkflowPicker({
   orchestrator,
   author,
   running,
-  showWorkflowView,
-  history,
-  wfCreate,
   mountedRef,
   dispatch,
   wfStepOverrides,
@@ -66,14 +52,10 @@ export function useWorkflowPicker({
 }: UseWorkflowPickerParams) {
   const [workflowIndex, setWorkflowIndex] = useState(0);
   const [wfPreview, setWfPreview] = useState<{ name: string; input: string } | null>(null);
-  const [wfCreateState, setWfCreate] = useState<WorkflowCreateState | null>(null);
+  const [wfCreate, setWfCreate] = useState<WorkflowCreateState | null>(null);
   const [draftOverride, setDraftOverride] = useState<DraftTarget | null>(null);
   const pendingSelectRef = useRef<string | null>(null);
   const createAbortRef = useRef<AbortController | null>(null);
-
-  // Use the external wfCreate if provided, otherwise the internal one.
-  // This allows the App component to manage wfCreate state externally.
-  const effectiveWfCreate = wfCreate ?? wfCreateState;
 
   const workflowEntries = useMemo<WorkflowCatalogEntry[]>(
     () => workflowCatalogEntries(runtimeCatalog),
@@ -106,8 +88,6 @@ export function useWorkflowPicker({
     setWorkflowIndex((i) => Math.min(i, workflowEntries.length));
   }, [workflowEntries]);
 
-
-
   const healthyAgents = useMemo(() => healthyAgentSet(doctor), [doctor]);
   const draftResolution = useMemo(
     () => resolveDraftTarget(healthyAgents, draftOverride),
@@ -125,7 +105,7 @@ export function useWorkflowPicker({
         },
       }));
     },
-    [wfPreview],
+    [wfPreview, setWfStepOverrides],
   );
 
   // Preview derivations.
@@ -138,18 +118,6 @@ export function useWorkflowPicker({
   const previewDispatchCheck = previewSpec
     ? orchestrator.canDispatchWorkflowSpec(previewSpec)
     : null;
-
-  const workflowPickerActive = useMemo(
-    () =>
-      isWorkflowPickerActive({
-        mode,
-        history,
-        wfCreate: Boolean(effectiveWfCreate),
-        previewing: Boolean(wfPreview && previewSpec && previewDispatchCheck),
-        showWorkflowView,
-      }),
-    [mode, history, effectiveWfCreate, wfPreview, previewSpec, previewDispatchCheck, showWorkflowView],
-  );
 
   const cloneWorkflow = useCallback(
     async (newName: string, scope: WorkflowScope = "user") => {
@@ -209,7 +177,7 @@ export function useWorkflowPicker({
         notices: [{ level: "info" as const, text: `deleted workflow '${name}'` }],
       };
     },
-    [author],
+    [author, setWfStepOverrides],
   );
 
   const renameWorkflow = useCallback(
@@ -265,7 +233,7 @@ export function useWorkflowPicker({
         ],
       };
     },
-    [author, selectedWorkflowName, wfPreview, running],
+    [author, selectedWorkflowName, wfPreview, running, setWfStepOverrides],
   );
 
   const saveWorkflows = useCallback(async () => {
@@ -298,7 +266,7 @@ export function useWorkflowPicker({
       notices.push({ level: "warn", text: `skipped '${entry.name}': ${entry.reason}` });
     }
     return { handled: true as const, clearInput: true, notices };
-  }, [author, wfStepOverrides]);
+  }, [author, wfStepOverrides, setWfStepOverrides]);
 
   const createWorkflow = useCallback(
     (description: string, scope: WorkflowScope = "user") => {
@@ -401,36 +369,12 @@ export function useWorkflowPicker({
     [running, draftResolution, author, mountedRef, dispatch],
   );
 
-  const focusCreateWorkflowPrompt = useCallback(
-    (
-      seed: string,
-      updatePromptDraft: (patch: Partial<typeof initialPromptTabState>) => void,
-      bumpCursorToEnd: () => void,
-      setCommandSuggestions: React.Dispatch<React.SetStateAction<readonly string[]>>,
-      setSuggestionIndex: React.Dispatch<React.SetStateAction<number>>,
-    ) => {
-      if (running) return;
-      const nextValue = createWorkflowPromptValue(seed);
-      updatePromptDraft({
-        value: nextValue,
-        promptEditing: true,
-        historyBrowse: initialPromptHistoryBrowse,
-      });
-      setCommandSuggestions([]);
-      setSuggestionIndex(0);
-      bumpCursorToEnd();
-    },
-    [running],
-  );
-
   return {
     workflowIndex,
     setWorkflowIndex,
     wfPreview,
     setWfPreview,
-    wfStepOverrides,
-    setWfStepOverrides,
-    wfCreate: effectiveWfCreate,
+    wfCreate,
     setWfCreate,
     draftOverride,
     setDraftOverride,
@@ -440,21 +384,20 @@ export function useWorkflowPicker({
     onCreateRow,
     selectedWorkflowName,
     userWorkflowNames,
-    resolveWorkflowSpec,
     healthyAgents,
     draftResolution,
     patchWorkflowStep,
-    previewSpec,
-    previewFlatSteps,
-    previewStepCount,
-    previewDispatchCheck,
-    workflowPickerActive,
     cloneWorkflow,
     deleteWorkflow,
     renameWorkflow,
     saveWorkflows,
     createWorkflow,
-    focusCreateWorkflowPrompt,
+    preview: {
+      spec: previewSpec,
+      flatSteps: previewFlatSteps,
+      stepCount: previewStepCount,
+      dispatchCheck: previewDispatchCheck,
+    },
   };
 }
 

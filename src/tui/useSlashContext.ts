@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type {
   DraftModelContext,
   SlashCommandContext,
+  SlashCommandResult,
   WorkflowStepSelection,
 } from "../commands/types";
 import { STEAMTRAIN_VERSION } from "../version";
@@ -25,13 +26,13 @@ export interface UseSlashContextParams {
   ) => void;
   previewStepSelection: WorkflowStepSelection | undefined;
   workflowPickerActive: boolean;
-  saveWorkflows: () => any;
-  createWorkflow: (description: string, scope?: WorkflowScope) => any;
-  cloneWorkflow: (newName: string, scope?: WorkflowScope) => any;
-  deleteWorkflow: (name: string) => any;
-  renameWorkflow: (oldName: string, newName: string) => any;
+  saveWorkflows: () => Promise<SlashCommandResult>;
+  createWorkflow: (description: string, scope?: WorkflowScope) => SlashCommandResult;
+  cloneWorkflow: (newName: string, scope?: WorkflowScope) => Promise<SlashCommandResult>;
+  deleteWorkflow: (name: string) => Promise<SlashCommandResult>;
+  renameWorkflow: (oldName: string, newName: string) => SlashCommandResult;
   userWorkflowNames: readonly string[];
-  openHistory: () => any;
+  openHistory: () => SlashCommandResult;
   draftResolution: { target?: DraftTarget; usingOverride: boolean };
   healthyAgents: ReadonlySet<AgentId>;
   setDraftOverride: (target: DraftTarget | null) => void;
@@ -73,10 +74,10 @@ export function useSlashContext(params: UseSlashContextParams) {
       version: STEAMTRAIN_VERSION,
       workflowStep: previewStepSelection,
       updateWorkflowStep: wfPreview ? patchWorkflowStep : undefined,
-      saveWorkflows,
+      saveWorkflows: saveWorkflows as any,
       createWorkflow,
-      cloneWorkflow,
-      deleteWorkflow,
+      cloneWorkflow: cloneWorkflow as any,
+      deleteWorkflow: deleteWorkflow as any,
       renameWorkflow,
       userWorkflowNames,
       openHistory,

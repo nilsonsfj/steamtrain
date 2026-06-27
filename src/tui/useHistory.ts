@@ -8,6 +8,7 @@ import {
 } from "../workflow";
 import type { WorkflowState } from "./workflow-state";
 import { workflowStateFromRecord } from "./workflow-state";
+import { message } from "./util";
 
 /** State for the past-run history browser (opened with `/history`). */
 export interface HistoryUiState {
@@ -43,9 +44,7 @@ export interface UseHistoryReturn {
   rerunFromRecord: (record: RunRecord, mode: RerunMode) => void;
 }
 
-function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
+
 
 export function useHistory({
   historyStoreRef,
