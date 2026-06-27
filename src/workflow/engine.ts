@@ -314,7 +314,13 @@ export async function* runWorkflow(
       results.set(step.id, result);
       if (result.ok) cache.set(step.id, result);
       allResults.push(result);
-      if (!result.ok) phaseOk = false;
+      if (!result.ok) {
+        // onFalse: "stop" is a graceful halt — the step is not ok (gate
+        // condition failed) but the workflow stays ok per the documented
+        // contract. onFalse: "fail" should make the workflow fail.
+        const isGracefulStop = execution.gate?.onFalse === "stop";
+        if (!isGracefulStop) phaseOk = false;
+      }
       if (execution.stop) stopAfterPhase = true;
 
       channel.push({

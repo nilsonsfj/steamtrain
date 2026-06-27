@@ -811,7 +811,8 @@ describe("runWorkflow", () => {
     );
     expect(state.runs).toHaveLength(0);
     expect(events.some((e) => e.kind === "phase_start" && e.phaseId === "later")).toBe(false);
-    expect(events.at(-1)).toMatchObject({ kind: "workflow_done", ok: false });
+    // onFalse: "stop" is a graceful halt — workflow stays ok
+    expect(events.at(-1)).toMatchObject({ kind: "workflow_done", ok: true });
   });
 
   it("aborts mid-run without hanging and does not start later phases", async () => {

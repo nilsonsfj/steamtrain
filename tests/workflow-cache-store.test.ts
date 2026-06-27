@@ -177,7 +177,7 @@ describe("workflow cache store", () => {
     expect([...loaded.keys()]).toEqual(["gate"]);
   });
 
-  it("strips extra fields from cached step results (no prototype pollution)", async () => {
+  it("strips unknown fields but preserves known optional fields", async () => {
     const root = tempDir();
     const key = workflowCacheKey("wf", "input", root, { name: "wf", phases: [] });
     await mkdir(root, { recursive: true });
@@ -196,6 +196,13 @@ describe("workflow cache store", () => {
             ok: true,
             output: "ok",
             durationMs: 10,
+            target: "passed",
+            error: "some error",
+            costUsd: 0.05,
+            attempts: 3,
+            iteration: 2,
+            items: ["a", "b"],
+            parentStepId: "parent",
             extraField: "should be stripped",
             anotherExtra: 42,
           },
@@ -207,14 +214,20 @@ describe("workflow cache store", () => {
     const loaded = await loadWorkflowCache(root, key);
     const result = loaded.get("s1");
     expect(result).toBeDefined();
+    // Required fields
     expect(result!.stepId).toBe("s1");
     expect(result!.ok).toBe(true);
     expect(result!.output).toBe("ok");
     expect(result!.durationMs).toBe(10);
-    // Extra fields must not be carried through the spread
-    expect(Object.keys(result!)).toEqual(
-      expect.arrayContaining(["stepId", "ok", "output", "durationMs"]),
-    );
+    // Known optional fields must be preserved
+    expect(result!.target).toBe("passed");
+    expect(result!.error).toBe("some error");
+    expect(result!.costUsd).toBe(0.05);
+    expect(result!.attempts).toBe(3);
+    expect(result!.iteration).toBe(2);
+    expect(result!.items).toEqual(["a", "b"]);
+    expect(result!.parentStepId).toBe("parent");
+    // Unknown fields must be stripped
     expect((result as Record<string, unknown>).extraField).toBeUndefined();
     expect((result as Record<string, unknown>).anotherExtra).toBeUndefined();
   });
