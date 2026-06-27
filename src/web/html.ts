@@ -1233,8 +1233,9 @@ var SteamtrainReducer = (() => {
     if (!S.agents.length) { setBanner("agent catalog still loading; try again in a moment", "info"); return; }
     var spec = JSON.parse(JSON.stringify(S.spec));
     var creating = !!clone;
+    var isWritable = S.source === "user" || S.source === "project";
     var nameInput = h("input", { class: "txt", maxlength: "48", value: creating ? spec.name + "-copy" : spec.name });
-    if (!creating) nameInput.setAttribute("disabled", "true");
+    if (!creating && !isWritable) nameInput.setAttribute("disabled", "true");
     var descInput = h("input", { class: "txt", value: spec.description || "", placeholder: "one-line description" });
     var scopeSel = selectEl(scopeOptions(), "user");
     var banner = h("div", { class: "mbanner" });
@@ -1252,7 +1253,7 @@ var SteamtrainReducer = (() => {
     var body = h("div", null,
       banner,
       h("div", { class: "row2" },
-        field(creating ? "New name" : "Name", nameInput, creating ? "Saved as a new workflow." : (S.source === "user" || S.source === "project" ? "" : "Editing creates a user copy that overrides the " + S.source + " one.")),
+        field(creating ? "New name" : "Name", nameInput, creating ? "Saved as a new workflow." : (isWritable ? "Renaming deletes the old workflow." : "Editing creates a user copy that overrides the " + S.source + " one.")),
         field("Description", descInput)
       ),
       creating ? field("Save to", scopeSel, "Project = ./steamtrain.json (committable, shared).") : null,
@@ -1267,8 +1268,9 @@ var SteamtrainReducer = (() => {
     );
 
     saveBtn.addEventListener("click", function () {
-      var targetName = creating ? nameInput.value.trim() : spec.name;
+      var targetName = (creating || isWritable) ? nameInput.value.trim() : spec.name;
       if (!targetName) { mbanner(banner, "a name is required", "info"); return; }
+      spec.name = targetName;
       spec.description = descInput.value.trim() || undefined;
       spec.phases.forEach(function (p) {
         p.steps.forEach(function (st) {
@@ -1281,7 +1283,7 @@ var SteamtrainReducer = (() => {
           st.prompt = r.promptTa.value;
         });
       });
-      saveBtn.disabled = true; saveBtn.textContent = "Saving\\u2026";
+      saveBtn.disabled = true; saveBtn.textContent = "Saving\u2026";
       // Cloning uses the chosen scope; editing re-saves to the workflow's own
       // writable layer (project edits stay in steamtrain.json, otherwise user).
       var payload = { spec: spec, scope: creating ? scopeSel.value : (S.source === "project" ? "project" : "user") };

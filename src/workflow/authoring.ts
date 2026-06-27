@@ -206,6 +206,35 @@ export class WorkflowAuthor {
   }
 
   /**
+   * Rename a workflow. The source workflow must be a user or project workflow.
+   * Modifies its internal spec name and deletes the old entry.
+   */
+  rename(oldName: string, newName: string): AuthorWriteResult {
+    const source = this.host.listWorkflows()[oldName];
+    if (!source) return { ok: false, error: `unknown workflow '${oldName}'` };
+
+    const sourceKind = this.host.workflowSource(oldName);
+    if (sourceKind !== "user" && sourceKind !== "project") {
+      return {
+        ok: false,
+        error: `cannot rename '${oldName}': only user or project workflows can be renamed`,
+      };
+    }
+
+    const slug = slugifyWorkflowName(newName);
+    if (!slug) return { ok: false, error: "a new workflow name is required" };
+    if (slug === oldName) return { ok: false, error: "the new name must be different" };
+
+    if (this.host.listWorkflows()[slug]) {
+      return { ok: false, error: `a workflow named '${slug}' already exists` };
+    }
+
+    // Save under new name and delete old one
+    const result = this.save(slug, { ...source, name: slug }, oldName, sourceKind);
+    return result;
+  }
+
+  /**
    * Save an existing workflow (bundled, user, or project) under a new name as a
    * user copy. The source is left untouched. Used by the TUI/web "clone".
    */

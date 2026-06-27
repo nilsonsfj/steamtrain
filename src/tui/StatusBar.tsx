@@ -1,4 +1,5 @@
 import { Box, Text } from "ink";
+import { useEffect, useState } from "react";
 import type { DoctorResult } from "../doctor";
 import { STATUS_STYLE } from "./theme";
 
@@ -10,6 +11,33 @@ interface StatusBarProps {
 }
 
 export function StatusBar({ doctor, configSource, workspaceLabel, running }: StatusBarProps) {
+  const [spinnerFrame, setSpinnerFrame] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!running) {
+      setElapsedSeconds(0);
+      return;
+    }
+
+    const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    const spinnerInterval = setInterval(() => {
+      setSpinnerFrame((f) => (f + 1) % spinnerFrames.length);
+    }, 80);
+
+    const startTime = Date.now();
+    const timerInterval = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
+    }, 200);
+
+    return () => {
+      clearInterval(spinnerInterval);
+      clearInterval(timerInterval);
+    };
+  }, [running]);
+
+  const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
   return (
     <Box borderStyle="round" borderColor="gray" paddingX={1} justifyContent="space-between">
       <Box>
@@ -28,7 +56,13 @@ export function StatusBar({ doctor, configSource, workspaceLabel, running }: Sta
         )}
       </Box>
       <Box>
-        {running ? <Text color="yellow">● working</Text> : <Text color="gray">idle</Text>}
+        {running ? (
+          <Text color="yellow">
+            {spinnerFrames[spinnerFrame]} working ({elapsedSeconds}s)
+          </Text>
+        ) : (
+          <Text color="gray">idle</Text>
+        )}
         <Text color="gray">
           {"  "}cfg: {shorten(configSource)}
           {"  "}ws: {shorten(workspaceLabel)}

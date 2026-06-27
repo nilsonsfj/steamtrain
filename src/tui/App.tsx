@@ -391,6 +391,56 @@ export function App({
     [author],
   );
 
+  const renameWorkflow = useCallback(
+    (oldName: string, newName: string) => {
+      const source = oldName.trim() || wfPreview?.name || selectedWorkflowName;
+      if (!source) {
+        return {
+          handled: true as const,
+          clearInput: true,
+          notices: [{ level: "warn" as const, text: "no workflow selected to rename" }],
+        };
+      }
+
+      const result = author.rename(source, newName);
+      if (!result.ok) {
+        return {
+          handled: true as const,
+          clearInput: true,
+          notices: [
+            { level: "error" as const, text: `could not rename '${source}': ${result.error}` },
+          ],
+        };
+      }
+
+      const targetSlug = result.name!;
+
+      // Migrate session overrides if any
+      setWfStepOverrides((prev) => {
+        if (!prev[source]) return prev;
+        const next = { ...prev };
+        next[targetSlug] = next[source]!;
+        delete next[source];
+        return next;
+      });
+
+      // Update preview if renaming the previewed workflow
+      setWfPreview((prev) =>
+        prev?.name === source ? { name: targetSlug, input: prev.input } : prev,
+      );
+      pendingSelectRef.current = targetSlug;
+
+      return {
+        handled: true as const,
+        clearInput: true,
+        notices: [
+          { level: "info" as const, text: `renamed workflow '${source}' → '${targetSlug}'` },
+        ],
+      };
+    },
+    [author, selectedWorkflowName, wfPreview],
+  );
+
   const saveWorkflows = useCallback(() => {
     const home = homedir();
     // The session flushes overrides and reloads the catalog into React state
@@ -715,6 +765,7 @@ export function App({
       createWorkflow,
       cloneWorkflow,
       deleteWorkflow,
+      renameWorkflow,
       userWorkflowNames,
       openHistory,
       // `/model` sets the draft model only on the bare picker (see
@@ -744,6 +795,7 @@ export function App({
       createWorkflow,
       cloneWorkflow,
       deleteWorkflow,
+      renameWorkflow,
       userWorkflowNames,
       openHistory,
       draftResolution,
@@ -1209,6 +1261,16 @@ export function App({
 
       const prompt = raw.trim();
 
+      if (wfCreate && wfCreate.status === "done" && wfCreate.spec) {
+        const specName = wfCreate.spec.name;
+        setWfCreate(null);
+        setWfPreview({ name: specName, input: prompt });
+        setStepIndex(0);
+        setWfNotice(null);
+        updatePromptDraft({ promptEditing: false });
+        return;
+      }
+
       if (isRegisteredSlashCommand(prompt)) {
         const result = executeSlashCommand(prompt, slashCtx);
         if (result.handled) {
@@ -1312,6 +1374,7 @@ export function App({
       updatePromptDraft,
       focusCreateWorkflowPrompt,
       wfPreview,
+      wfCreate,
       workspaceMap,
       slashCtx,
       exit,

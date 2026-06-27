@@ -1,4 +1,5 @@
 import { Box, Text } from "ink";
+import { useEffect, useState } from "react";
 import { truncate } from "../agents/util";
 import type { AgentId } from "../types/events";
 import type { WorkflowSpec } from "../workflow";
@@ -36,6 +37,33 @@ export function WorkflowCreate({
   const borderColor = state.status === "done" ? "green" : state.status === "error" ? "red" : "cyan";
   const tail = lastLines(state.text, Math.max(3, height - 9));
 
+  const [spinnerFrame, setSpinnerFrame] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    if (state.status !== "generating") {
+      setElapsedSeconds(0);
+      return;
+    }
+
+    const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    const spinnerInterval = setInterval(() => {
+      setSpinnerFrame((f) => (f + 1) % spinnerFrames.length);
+    }, 80);
+
+    const startTime = Date.now();
+    const timerInterval = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
+    }, 200);
+
+    return () => {
+      clearInterval(spinnerInterval);
+      clearInterval(timerInterval);
+    };
+  }, [state.status]);
+
+  const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
   return (
     <Box
       flexDirection="column"
@@ -54,7 +82,11 @@ export function WorkflowCreate({
       </Box>
       <Text color="gray">“{truncate(state.description, innerWidth - 2)}”</Text>
 
-      {state.status === "generating" ? <Text color="yellow">⟳ drafting workflow…</Text> : null}
+      {state.status === "generating" ? (
+        <Text color="yellow">
+          {spinnerFrames[spinnerFrame]} drafting workflow… ({elapsedSeconds}s)
+        </Text>
+      ) : null}
 
       {state.status === "done" && state.spec ? (
         <Box flexDirection="column" marginTop={1}>
@@ -65,7 +97,7 @@ export function WorkflowCreate({
             <Text color="gray">{truncate(state.spec.description, innerWidth)}</Text>
           ) : null}
           {state.savedPath ? <Text color="gray">saved → {state.savedPath}</Text> : null}
-          <Text color="gray">Esc to return to the picker · it's selected and ready to run</Text>
+          <Text color="gray">Enter to view/run the workflow · Esc to return to the picker</Text>
         </Box>
       ) : null}
 

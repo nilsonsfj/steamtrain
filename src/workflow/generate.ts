@@ -154,6 +154,7 @@ This is the canonical shape for "split work into tasks, do them in parallel, the
 review/fix each". Note how every dependency points to an EARLIER phase, and the
 review->fix "loop" is unrolled into two phases:
 {
+  "name": "split-implement-review",
   "description": "Split a backlog into tasks, implement each in parallel, then review and fix.",
   "phases": [
     { "id": "split", "title": "Split into tasks", "steps": [
@@ -190,6 +191,7 @@ review->fix "loop" is unrolled into two phases:
 This is the canonical shape for "review then fix then re-review until clean".
 The gate sits AFTER the body it re-runs, and "loopTo" names that earlier phase:
 {
+  "name": "bounded-review-loop",
   "description": "Implement, then review and fix in a bounded loop until clean.",
   "phases": [
     { "id": "implement", "title": "Implement", "steps": [
@@ -218,7 +220,9 @@ review verdict each pass; "loopTo": "review" re-runs review then fix on each cyc
 
 # Output format (STRICT)
 Output ONLY a single JSON object, no prose, no markdown fences. Use the shape and
-field names shown above ("description", "phases", each phase with "id"/"title"/"steps").
+field names shown above ("name", "description", "phases", each phase with "id"/"title"/"steps").
+
+- "name": a short, descriptive kebab-case name for the workflow (e.g. "deploy-app", "code-review"). If the user explicitly asks for a name in their prompt (e.g. "named test-deploy" or "called foo"), use that exact name (slugified).
 
 # Before you answer — self-check
 For EVERY dependsOn, forEach source, and gate condition.step you wrote, confirm
