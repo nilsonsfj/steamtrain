@@ -122,8 +122,15 @@ async function* hangingRun(_input: string, signal?: AbortSignal): AsyncIterable<
   yield { kind: "workflow_done", ok: false, results: [], ts: Date.now() };
 }
 
+const testRunConfig = { stepTimeoutSec: 60, workflowTimeoutSec: 60 * 60 };
+
 function makeServer(host: WorkflowHost): { server: Server; runs: WorkflowRunManager } {
-  const runs = new WorkflowRunManager({ host, cacheStore: createInMemoryStore(), cwd: "/tmp" });
+  const runs = new WorkflowRunManager({
+    host,
+    cacheStore: createInMemoryStore(),
+    cwd: "/tmp",
+    config: testRunConfig,
+  });
   const server = createWebServer({
     host,
     runs,
@@ -300,6 +307,7 @@ describe("web server", () => {
       cacheStore: createInMemoryStore(),
       historyStore,
       cwd: "/tmp",
+      config: testRunConfig,
     });
     const server = createWebServer({
       host,
@@ -396,6 +404,7 @@ describe("web server", () => {
       cacheStore: createInMemoryStore(),
       historyStore: blockingHistory,
       cwd: "/tmp",
+      config: testRunConfig,
     });
     const server = createWebServer({ host, runs, workflowSource: () => "bundled" });
     servers.push(server);
@@ -428,6 +437,7 @@ describe("web server", () => {
       cacheStore: createInMemoryStore(),
       historyStore,
       cwd: "/tmp",
+      config: testRunConfig,
     });
     const server = createWebServer({
       host,
@@ -464,6 +474,7 @@ describe("web server", () => {
       cacheStore: createInMemoryStore(),
       historyStore,
       cwd: "/tmp",
+      config: testRunConfig,
     });
     const server = createWebServer({
       host,
@@ -498,6 +509,7 @@ describe("web server", () => {
       cacheStore: createInMemoryStore(),
       cwd: "/tmp",
       maxConcurrent: 1,
+      config: testRunConfig,
     });
     const server = createWebServer({ host, runs, workflowSource: () => "bundled" });
     servers.push(server);
@@ -618,6 +630,7 @@ describe("web server", () => {
       cacheStore: createInMemoryStore(),
       historyStore,
       cwd: "/tmp",
+      config: testRunConfig,
     });
     const server = createWebServer({
       host,
@@ -665,13 +678,13 @@ describe("web server", () => {
     expect(body.doctorError).toBeUndefined();
   });
 
-  it("aborts run after timeoutMs (M16)", async () => {
+  it("aborts run after workflowTimeoutSec (M16)", async () => {
     const host = new FakeHost(demoSpec(), hangingRun);
     const runs = new WorkflowRunManager({
       host,
       cacheStore: createInMemoryStore(),
       cwd: "/tmp",
-      timeoutMs: 200,
+      config: { workflowTimeoutSec: 0.2, stepTimeoutSec: 60 },
     });
     const server = createWebServer({ host, runs });
     servers.push(server);

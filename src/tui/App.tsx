@@ -21,6 +21,7 @@ import {
   type SlashCommandResult,
 } from "../commands";
 import type { SteamtrainConfig } from "../config";
+import { saveProjectConfig } from "../config/project-config";
 import { type DoctorResult, runDoctor } from "../doctor";
 import { Orchestrator } from "../orchestrator";
 import type { SteamtrainSettings } from "../settings";
@@ -112,6 +113,7 @@ export function App({
   const [mode, setMode] = useState<Mode>("workflow");
   const [runtimeWorkspaces, setRuntimeWorkspaces] = useState<WorkspaceConfig>(workspaces);
   const [runtimeCatalog, setRuntimeCatalog] = useState<LoadedWorkflowCatalog>(workflowCatalog);
+  const [runtimeConfig, setRuntimeConfig] = useState<SteamtrainConfig>(config);
   const [activeWorkspaceLabel, setActiveWorkspaceLabel] = useState(workspaceLabel);
   const [transcript, dispatch] = useReducer(transcriptReducer, initialTranscript);
   const [agentCatalogTick, setAgentCatalogTick] = useState(0);
@@ -142,8 +144,20 @@ export function App({
 
   // ── Orchestrator & Author ────────────────────────────────────────────
   const orchestrator = useMemo(
-    () => new Orchestrator(config, runtimeWorkspaces, doctor ?? EMPTY_DOCTOR, runtimeCatalog),
-    [config, runtimeWorkspaces, doctor, runtimeCatalog],
+    () => new Orchestrator(runtimeConfig, runtimeWorkspaces, doctor ?? EMPTY_DOCTOR, runtimeCatalog),
+    [runtimeConfig, runtimeWorkspaces, doctor, runtimeCatalog],
+  );
+
+  const updateConfig = useCallback(
+    (patch: Parameters<typeof saveProjectConfig>[0]) => {
+      if (!configPath) {
+        return { ok: false, error: "no project steamtrain.json path configured" };
+      }
+      const saved = saveProjectConfig(patch, configPath);
+      if (saved.ok && saved.config) setRuntimeConfig(saved.config);
+      return { ok: saved.ok, error: saved.error };
+    },
+    [configPath],
   );
 
   const authoringHost = useMemo<AuthoringHost>(
@@ -159,13 +173,13 @@ export function App({
     () =>
       new WorkflowAuthor({
         host: authoringHost,
-        config,
+        config: runtimeConfig,
         home: homedir(),
         cwd: process.cwd(),
         projectConfigPath: configPath,
-        projectWorkflows: config.workflows,
+        projectWorkflows: runtimeConfig.workflows,
       }),
-    [authoringHost, config, configPath],
+    [authoringHost, runtimeConfig, configPath],
   );
 
   const [wfStepOverrides, setWfStepOverrides] = useState<Record<string, WorkflowStepOverrides>>({});
@@ -210,6 +224,7 @@ export function App({
       agent: step.agent,
       model: step.model,
       effort: step.effort,
+      stepTimeoutSec: step.stepTimeoutSec,
     };
   }, [picker.wfPreview, previewSelectedStep]);
 
@@ -245,6 +260,10 @@ export function App({
     wfPreview: picker.wfPreview,
     patchWorkflowStep: picker.patchWorkflowStep,
     previewStepSelection,
+    workflowSpec: picker.preview.spec,
+    config: runtimeConfig,
+    configPath,
+    updateConfig,
     workflowPickerActive,
     saveWorkflows: picker.saveWorkflows,
     createWorkflow: picker.createWorkflow,

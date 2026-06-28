@@ -101,7 +101,7 @@ class FakeHost implements WorkflowHost {
   }
 }
 
-const config: SteamtrainConfig = { timeoutMs: 1000 };
+const config: SteamtrainConfig = { stepTimeoutSec: 1 };
 
 const noopStore: WorkflowCacheStore = {
   rootDir: "/tmp/none",
@@ -450,7 +450,7 @@ afterEach(async () => {
 });
 
 function makeServer(host: FakeHost, adapter?: (id: AgentId) => AgentAdapter): Server {
-  const runs = new WorkflowRunManager({ host, cacheStore: noopStore, cwd: home });
+  const runs = new WorkflowRunManager({ host, cacheStore: noopStore, cwd: home, config: {} });
   const server = createWebServer({
     host,
     runs,
@@ -598,7 +598,7 @@ describe("authoring HTTP routes", () => {
 
   it("501s authoring routes when no author is configured", async () => {
     const host = new FakeHost(home);
-    const runs = new WorkflowRunManager({ host, cacheStore: noopStore, cwd: home });
+    const runs = new WorkflowRunManager({ host, cacheStore: noopStore, cwd: home, config: {} });
     const server = createWebServer({ host, runs, workflowSource: (n) => host.workflowSource(n) });
     servers.push(server);
     const base = await start(server);

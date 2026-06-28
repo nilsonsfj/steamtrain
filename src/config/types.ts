@@ -10,8 +10,10 @@ import {
 export interface SteamtrainConfig {
   /** Optional per-agent binary path/name overrides. */
   binaries?: Partial<Record<AgentId, string>>;
-  /** Per-run wall-clock timeout in ms (workflows and workspace dispatches). */
-  timeoutMs?: number;
+  /** Per-agent subprocess wall-clock limit in seconds (workspace dispatches and workflow steps). */
+  stepTimeoutSec?: number;
+  /** Whole-workflow wall-clock abort limit in seconds. Omitted → stepCount × stepTimeoutSec. */
+  workflowTimeoutSec?: number;
   /** Project workflows from `steamtrain.json`, keyed by launch name. Merged over bundled and user workflows. */
   workflows?: Record<string, WorkflowSpec>;
   /** Max steps run in parallel within a workflow phase (clamped to MAX_CONCURRENCY). */
@@ -19,6 +21,12 @@ export interface SteamtrainConfig {
   /** Default per-loop iteration cap; a loop gate's own `maxIterations` overrides it. */
   loopMaxIterations?: number;
 }
+
+const legacyTimeoutFields = {
+  stepTimeoutMs: z.number().positive().optional(),
+  workflowTimeoutMs: z.number().positive().optional(),
+  timeoutMs: z.number().positive().optional(),
+};
 
 /** Schema for a (partial) steamtrain.json — every section is optional and merged onto defaults. */
 export const configFileSchema = z
@@ -44,7 +52,9 @@ export const configFileSchema = z
       })
       .partial()
       .optional(),
-    timeoutMs: z.number().positive().optional(),
+    stepTimeoutSec: z.number().positive().optional(),
+    workflowTimeoutSec: z.number().positive().optional(),
+    ...legacyTimeoutFields,
     workflows: z.record(workflowSpecSchema).optional(),
     maxConcurrency: z.number().int().positive().max(MAX_CONCURRENCY).optional(),
     loopMaxIterations: z.number().int().min(1).max(LOOP_MAX_ITERATIONS_CEILING).optional(),

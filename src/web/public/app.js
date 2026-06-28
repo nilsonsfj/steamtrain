@@ -11,7 +11,8 @@
     runId: null, es: null,
     startedAt: 0, timer: null,
     runState: null,
-    rafQueued: false, draftAbort: null, doctor: []
+    rafQueued: false, draftAbort: null, doctor: [],
+    projectConfig: null
   };
 
   function h(tag, attrs) {
@@ -48,7 +49,61 @@
       renderSidebar();
     });
     loadMeta();
+    loadProjectConfig();
     pollDoctor(0);
+  }
+
+  function loadProjectConfig() {
+    api("GET", "/api/config").then(function (r) {
+      if (r.status === 200) S.projectConfig = r.body;
+    });
+  }
+
+  function openConfigModal() {
+    if (!S.projectConfig) { setBanner("project config is not available", "info"); return; }
+    var stepMin = Math.round((S.projectConfig.stepTimeoutSec || 900) / 60);
+    var wfMin = S.projectConfig.workflowTimeoutSec
+      ? Math.round(S.projectConfig.workflowTimeoutSec / 60)
+      : "";
+    var stepInput = h("input", { class: "txt", type: "number", min: "1", value: String(stepMin) });
+    var wfInput = h("input", { class: "txt", type: "number", min: "1", placeholder: "auto (steps × step)", value: wfMin });
+    var autoChk = h("input", { type: "checkbox", checked: !S.projectConfig.workflowTimeoutSec });
+    var banner = h("div", { class: "mbanner" });
+    var body = h("div", null,
+      banner,
+      field("Step timeout (minutes)", stepInput, "Per-agent subprocess limit (default 15)."),
+      field("Workflow timeout (minutes)", wfInput, "Whole-run limit. Leave empty or check auto to use steps × step timeout."),
+      h("label", { style: "display:flex;gap:6px;align-items:center;margin-top:8px" },
+        autoChk, h("span", { text: "Auto workflow timeout (steps × step)" }))
+    );
+    var saveBtn = h("button", { class: "btn primary", text: "Save" });
+  saveBtn.addEventListener("click", function () {
+      var stepSec = Number(stepInput.value) * 60;
+      if (!stepSec || stepSec <= 0) { mbanner(banner, "step timeout must be a positive number of minutes", "err"); return; }
+      var payload = { stepTimeoutSec: stepSec };
+      if (autoChk.checked) payload.clearWorkflowTimeout = true;
+      else {
+        var wfSec = Number(wfInput.value) * 60;
+        if (!wfSec || wfSec <= 0) { mbanner(banner, "workflow timeout must be a positive number of minutes", "err"); return; }
+        payload.workflowTimeoutSec = wfSec;
+      }
+      saveBtn.disabled = true;
+      api("PUT", "/api/config", payload).then(function (r) {
+        saveBtn.disabled = false;
+        if (r.status === 200 && r.body.ok) {
+          S.projectConfig = Object.assign({}, S.projectConfig, r.body);
+          closeModal();
+          setBanner("timeouts saved", "info");
+        } else {
+          mbanner(banner, (r.body && r.body.error) || "save failed", "err");
+        }
+      });
+    });
+    openModal(modalShell("Project timeouts", "Applies to ./steamtrain.json", body,
+      h("div", { class: "mfoot" },
+        h("button", { class: "btn", text: "Cancel", onClick: closeModal }),
+        h("div", { class: "spacer" }),
+        saveBtn), true));
   }
 
   // Agent/model/effort catalog for the create + configure forms.
@@ -632,6 +687,10 @@
     var nameInput = h("input", { class: "txt", maxlength: "48", value: creating ? spec.name + "-copy" : spec.name });
     if (!creating && !isWritable) nameInput.setAttribute("disabled", "true");
     var descInput = h("input", { class: "txt", value: spec.description || "", placeholder: "one-line description" });
+    var wfStepMin = spec.stepTimeoutSec ? Math.round(spec.stepTimeoutSec / 60) : "";
+    var wfRunMin = spec.workflowTimeoutSec ? Math.round(spec.workflowTimeoutSec / 60) : "";
+    var wfStepInput = h("input", { class: "txt", type: "number", min: "1", placeholder: "project default", value: wfStepMin });
+    var wfRunInput = h("input", { class: "txt", type: "number", min: "1", placeholder: "auto", value: wfRunMin });
     var scopeSel = selectEl(scopeOptions(), "user");
     var banner = h("div", { class: "mbanner" });
     var refs = {};
@@ -650,6 +709,10 @@
       h("div", { class: "row2" },
         field(creating ? "New name" : "Name", nameInput, creating ? "Saved as a new workflow." : (isWritable ? "Changing the name will save as a new workflow and remove the old one." : "Editing creates a user copy that overrides the " + S.source + " one.")),
         field("Description", descInput)
+      ),
+      h("div", { class: "row2" },
+        field("Default step timeout (min)", wfStepInput, "Override per-agent limit for all steps in this workflow."),
+        field("Workflow timeout (min)", wfRunInput, "Whole-run limit. Empty = steps × step timeout.")
       ),
       creating ? field("Save to", scopeSel, "Project = ./steamtrain.json (committable, shared).") : null,
       phasesWrap
@@ -673,6 +736,10 @@
       }
       spec.name = targetName;
       spec.description = descInput.value.trim() || undefined;
+      var wfStepSec = Number(wfStepInput.value) * 60;
+      if (wfStepInput.value.trim() && wfStepSec > 0) spec.stepTimeoutSec = wfStepSec; else delete spec.stepTimeoutSec;
+      var wfRunSec = Number(wfRunInput.value) * 60;
+      if (wfRunInput.value.trim() && wfRunSec > 0) spec.workflowTimeoutSec = wfRunSec; else delete spec.workflowTimeoutSec;
       spec.phases.forEach(function (p) {
         p.steps.forEach(function (st) {
           var r = refs[st.id];
@@ -682,6 +749,10 @@
           var ef = r.effortSel ? r.effortSel.value : "";
           if (ef) st.effort = ef; else delete st.effort;
           st.prompt = r.promptTa.value;
+          if (r.stepTimeoutInput && r.stepTimeoutInput.value.trim()) {
+            var stepSec = Number(r.stepTimeoutInput.value) * 60;
+            if (stepSec > 0) st.stepTimeoutSec = stepSec; else delete st.stepTimeoutSec;
+          } else delete st.stepTimeoutSec;
         });
       });
       saveBtn.disabled = true; saveBtn.textContent = "Saving…";
@@ -722,6 +793,10 @@
     var agentSel = selectEl(agentOptions(), agent);
     var modelSel = selectEl(modelOptionsWith(agent, st.model), st.model);
     var effortField = h("div", { class: "field" });
+    var stepTimeoutInput = h("input", {
+      class: "txt", type: "number", min: "1", placeholder: "workflow default",
+      value: st.stepTimeoutSec ? String(Math.round(st.stepTimeoutSec / 60)) : ""
+    });
     var promptTa = h("textarea", { class: "ta", text: st.prompt || "" });
 
     function renderEffort() {
@@ -740,9 +815,10 @@
     });
     modelSel.addEventListener("change", renderEffort);
 
-    refs[st.id] = { agentSel: agentSel, modelSel: modelSel, effortSel: null, promptTa: promptTa };
+    refs[st.id] = { agentSel: agentSel, modelSel: modelSel, effortSel: null, promptTa: promptTa, stepTimeoutInput: stepTimeoutInput };
     card.appendChild(h("div", { class: "row2" },
       field("Agent", agentSel), field("Model", modelSel), effortField));
+    card.appendChild(field("Step timeout (min)", stepTimeoutInput, "Per-agent subprocess limit for this step."));
     card.appendChild(field("Prompt", promptTa));
     renderEffort();
     return card;
@@ -925,6 +1001,7 @@
   });
   document.getElementById("newWfBtn").addEventListener("click", openCreate);
   document.getElementById("historyBtn").addEventListener("click", openHistory);
+  document.getElementById("configBtn").addEventListener("click", openConfigModal);
   document.getElementById("editBtn").addEventListener("click", function () { openEditor(false); });
   document.getElementById("cloneBtn").addEventListener("click", function () { openEditor(true); });
   document.getElementById("deleteBtn").addEventListener("click", doDelete);

@@ -114,13 +114,36 @@ function joinWarnings(...parts: Array<string | undefined>): string | undefined {
   return text || undefined;
 }
 
+function mergeTimeoutFields(
+  base: SteamtrainConfig,
+  override: ConfigFile,
+): Pick<SteamtrainConfig, "stepTimeoutSec" | "workflowTimeoutSec"> {
+  const msToSec = (ms: number): number => ms / 1000;
+
+  const stepTimeoutSec =
+    override.stepTimeoutSec ??
+    (override.stepTimeoutMs !== undefined ? msToSec(override.stepTimeoutMs) : undefined) ??
+    (override.timeoutMs !== undefined ? msToSec(override.timeoutMs) : undefined) ??
+    base.stepTimeoutSec;
+
+  const workflowTimeoutSec =
+    override.workflowTimeoutSec ??
+    (override.workflowTimeoutMs !== undefined ? msToSec(override.workflowTimeoutMs) : undefined) ??
+    base.workflowTimeoutSec;
+
+  const out: Pick<SteamtrainConfig, "stepTimeoutSec" | "workflowTimeoutSec"> = {};
+  if (stepTimeoutSec !== undefined) out.stepTimeoutSec = stepTimeoutSec;
+  if (workflowTimeoutSec !== undefined) out.workflowTimeoutSec = workflowTimeoutSec;
+  return out;
+}
+
 export function mergeConfig(
   base: SteamtrainConfig,
   override: ConfigFile,
 ): { config: SteamtrainConfig; warnings: string[] } {
   const merged: SteamtrainConfig = {
     binaries: { ...base.binaries, ...override.binaries },
-    timeoutMs: override.timeoutMs ?? base.timeoutMs,
+    ...mergeTimeoutFields(base, override),
     maxConcurrency: override.maxConcurrency ?? base.maxConcurrency,
     loopMaxIterations: override.loopMaxIterations ?? base.loopMaxIterations,
   };

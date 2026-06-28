@@ -7,7 +7,9 @@ import type {
 } from "../commands/types";
 import type { AgentId } from "../types/events";
 import { STEAMTRAIN_VERSION } from "../version";
-import type { WorkflowScope } from "../workflow";
+import type { SteamtrainConfig } from "../config/types";
+import type { ProjectConfigPatch } from "../config/project-config";
+import type { WorkflowScope, WorkflowSpec } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 import type { DraftTarget } from "./draft-model";
 import type { Mode } from "./modes";
@@ -22,9 +24,13 @@ export interface UseSlashContextParams {
   wfPreview: { name: string; input: string } | null;
   patchWorkflowStep: (
     stepId: string,
-    patch: Partial<Pick<WorkspaceEntry, "agent" | "model" | "effort">>,
+    patch: Partial<Pick<WorkspaceEntry, "agent" | "model" | "effort"> & { stepTimeoutSec?: number }>,
   ) => void;
   previewStepSelection: WorkflowStepSelection | undefined;
+  workflowSpec?: WorkflowSpec;
+  config?: SteamtrainConfig;
+  configPath?: string;
+  updateConfig?: (patch: ProjectConfigPatch) => { ok: boolean; error?: string };
   workflowPickerActive: boolean;
   saveWorkflows: () => Promise<SlashCommandResult>;
   createWorkflow: (description: string, scope?: WorkflowScope) => SlashCommandResult;
@@ -51,6 +57,10 @@ export function useSlashContext(params: UseSlashContextParams) {
     wfPreview,
     patchWorkflowStep,
     previewStepSelection,
+    workflowSpec,
+    config,
+    configPath,
+    updateConfig,
     workflowPickerActive,
     saveWorkflows,
     createWorkflow,
@@ -77,6 +87,10 @@ export function useSlashContext(params: UseSlashContextParams) {
       version: STEAMTRAIN_VERSION,
       workflowStep: previewStepSelection,
       updateWorkflowStep: wfPreview ? patchWorkflowStep : undefined,
+      workflowSpec,
+      config,
+      configPath,
+      updateConfig,
       saveWorkflows,
       createWorkflow,
       cloneWorkflow,
@@ -103,6 +117,10 @@ export function useSlashContext(params: UseSlashContextParams) {
       wfPreview,
       patchWorkflowStep,
       previewStepSelection,
+      workflowSpec,
+      config,
+      configPath,
+      updateConfig,
       workflowPickerActive,
       saveWorkflows,
       createWorkflow,

@@ -14,6 +14,8 @@ import {
   createWorkflowHistoryStore,
   hashWorkflowSpec,
   persistWorkflowStepDone,
+  resolveWorkflowTimeoutSec,
+  timeoutMsFromSec,
   workflowCacheKey,
 } from "../workflow";
 import {
@@ -101,6 +103,12 @@ export function useWorkflowRunner({
       setRunning(true);
       const ac = new AbortController();
       abortRef.current = ac;
+      const workflowTimeoutMs = timeoutMsFromSec(
+        resolveWorkflowTimeoutSec(spec, orchestrator.getConfig()),
+      );
+      const timeoutTimer =
+        workflowTimeoutMs > 0 ? setTimeout(() => ac.abort(), workflowTimeoutMs) : undefined;
+      timeoutTimer?.unref?.();
 
       void (async () => {
         const store = cacheStoreRef.current;
@@ -154,6 +162,7 @@ export function useWorkflowRunner({
           runError = message(err);
           if (mountedRef.current) setWfNotice(`run failed: ${runError}`);
         } finally {
+          if (timeoutTimer) clearTimeout(timeoutTimer);
           const status = ac.signal.aborted
             ? "canceled"
             : runError || !workflowOk

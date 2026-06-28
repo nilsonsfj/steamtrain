@@ -1,6 +1,8 @@
 import type { Mode } from "../tui/modes";
 import type { AgentId } from "../types/events";
-import type { WorkflowScope } from "../workflow";
+import type { SteamtrainConfig } from "../config/types";
+import type { ProjectConfigPatch } from "../config/project-config";
+import type { WorkflowScope, WorkflowSpec } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 
 /** Selected agent-backed step in the workflow preview drill-down. */
@@ -10,6 +12,7 @@ export interface WorkflowStepSelection {
   agent: AgentId;
   model: string;
   effort?: string;
+  stepTimeoutSec?: number;
 }
 
 export interface SlashCommandNotice {
@@ -33,11 +36,19 @@ export interface SlashCommandContext {
   version: string;
   /** Set when workflow preview has an agent-backed step selected. */
   workflowStep?: WorkflowStepSelection;
-  /** Patch agent/model/effort on a workflow step (session-only). */
+  /** Patch agent/model/effort/timeout on a workflow step (session-only). */
   updateWorkflowStep?: (
     stepId: string,
-    patch: Partial<Pick<WorkflowStepSelection, "agent" | "model" | "effort">>,
+    patch: Partial<Pick<WorkflowStepSelection, "agent" | "model" | "effort" | "stepTimeoutSec">>,
   ) => void;
+  /** Active workflow spec when previewing or configuring (for /timeout, etc.). */
+  workflowSpec?: WorkflowSpec;
+  /** Live project config (timeouts, concurrency, …). */
+  config?: SteamtrainConfig;
+  /** Resolved project `steamtrain.json` path, when writable. */
+  configPath?: string;
+  /** Persist timeout-related project config keys. */
+  updateConfig?: (patch: ProjectConfigPatch) => { ok: boolean; error?: string };
   /** Persist session workflow overrides to the user workflows file. */
   saveWorkflows?: () => SlashCommandResult | Promise<SlashCommandResult>;
   /** Start LLM-delegated generation of a new workflow from a description (TUI only). */

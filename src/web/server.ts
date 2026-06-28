@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { refreshAgentCatalogCaches } from "../agents/models";
 import type { SteamtrainConfig } from "../config";
+import { saveProjectConfig } from "../config/project-config";
 import { type DoctorResult, runDoctor } from "../doctor";
 import { Orchestrator } from "../orchestrator";
 import {
@@ -16,9 +17,11 @@ import {
   type WorkflowHistoryStore,
   type WorkflowSourceKind,
   type WorkflowSpec,
+  DEFAULT_STEP_TIMEOUT_SEC,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   isAgentBackedStep,
+  resolveStepTimeoutSec,
   workflowSpecSchema,
   workflowStepKind,
 } from "../workflow";
@@ -124,6 +127,9 @@ export interface WebServerDeps {
   configLabel?: string;
   /** The host address the server is bound to. Used for CORS decisions. */
   bindHost?: string;
+  /** Live project config (mutated in place when saved via /api/config). */
+  config?: SteamtrainConfig;
+  configPath?: string;
 }
 
 function isNonLocalHost(host?: string): boolean {
@@ -325,6 +331,66 @@ async function handle(
     return;
   }
 
+  if (method === "GET" && path === "/api/config") {
+    const cfg = deps.config;
+    if (!cfg) {
+      sendJson(res, 404, { error: "config is not available" });
+      return;
+    }
+    const stepTimeoutSec = resolveStepTimeoutSec(undefined, undefined, cfg);
+    sendJson(res, 200, {
+      stepTimeoutSec,
+      workflowTimeoutSec: cfg.workflowTimeoutSec,
+      defaultStepTimeoutSec: DEFAULT_STEP_TIMEOUT_SEC,
+      configPath: deps.configPath,
+    });
+    return;
+  }
+
+  if (method === "PUT" && path === "/api/config") {
+    if (!deps.config || !deps.configPath) {
+      sendJson(res, 501, { error: "project config is not writable" });
+      return;
+    }
+    const body = await readBody(req);
+    let parsed: {
+      stepTimeoutSec?: unknown;
+      workflowTimeoutSec?: unknown;
+      clearWorkflowTimeout?: unknown;
+    };
+    try {
+      parsed = body ? JSON.parse(body) : {};
+    } catch {
+      sendJson(res, 400, { error: "invalid JSON body" });
+      return;
+    }
+    const hasStep = typeof parsed.stepTimeoutSec === "number" && parsed.stepTimeoutSec > 0;
+    const hasWf = typeof parsed.workflowTimeoutSec === "number" && parsed.workflowTimeoutSec > 0;
+    const clearWf = Boolean(parsed.clearWorkflowTimeout);
+    if (!hasStep && !hasWf && !clearWf) {
+      sendJson(res, 400, {
+        error: "body must include stepTimeoutSec, workflowTimeoutSec, or clearWorkflowTimeout",
+      });
+      return;
+    }
+    const patch: { stepTimeoutSec?: number; workflowTimeoutSec?: number } = {};
+    if (hasStep) patch.stepTimeoutSec = parsed.stepTimeoutSec as number;
+    if (clearWf) patch.workflowTimeoutSec = undefined;
+    else if (hasWf) patch.workflowTimeoutSec = parsed.workflowTimeoutSec as number;
+    const saved = saveProjectConfig(patch, deps.configPath);
+    if (!saved.ok || !saved.config) {
+      sendJson(res, 400, { error: saved.error ?? "save failed" });
+      return;
+    }
+    Object.assign(deps.config, saved.config);
+    sendJson(res, 200, {
+      ok: true,
+      stepTimeoutSec: resolveStepTimeoutSec(undefined, undefined, deps.config),
+      workflowTimeoutSec: deps.config.workflowTimeoutSec,
+    });
+    return;
+  }
+
   // Draft a workflow from a description; streams the agent's output as SSE and a
   // terminal `done` frame with the saved spec (or an error).
   if (method === "POST" && path === "/api/workflows/generate") {
@@ -382,7 +448,12 @@ async function handle(
       const previousName =
         typeof parsed.previousName === "string" ? parsed.previousName : undefined;
       const scope = parsed.scope === "project" ? "project" : "user";
-      const result = await deps.author.save(name, specCheck.data, previousName, scope);
+      const result = await deps.author.save(
+        name,
+        { ...specCheck.data, name },
+        previousName,
+        scope,
+      );
       sendJson(res, result.ok ? 200 : 400, result);
       return;
     }
@@ -660,8 +731,9 @@ export async function startWebUi(
   const port = options.port ?? DEFAULT_WEB_PORT;
   const host = options.host ?? DEFAULT_WEB_HOST;
 
+  const liveConfig: SteamtrainConfig = { ...options.config };
   const orchestrator = new Orchestrator(
-    options.config,
+    liveConfig,
     options.workspaces,
     [],
     options.workflowCatalog,
@@ -681,11 +753,11 @@ export async function startWebUi(
     historyStore,
     cwd,
     maxConcurrent: options.maxConcurrent ?? 5,
-    timeoutMs: options.config.timeoutMs,
+    config: liveConfig,
   });
   const author = new WorkflowAuthor({
     host: orchestrator,
-    config: options.config,
+    config: liveConfig,
     home: homedir(),
     cwd,
     projectConfigPath: options.configPath,
@@ -701,6 +773,8 @@ export async function startWebUi(
     doctorError: () => doctorState.error,
     configLabel: options.configLabel,
     bindHost: host,
+    config: liveConfig,
+    configPath: options.configPath,
   });
 
   // Fail loudly and early when the static web assets are missing instead of

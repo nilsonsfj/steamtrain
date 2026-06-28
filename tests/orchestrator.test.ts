@@ -9,7 +9,7 @@ function makeConfig(overrides?: Partial<SteamtrainConfig>): SteamtrainConfig {
   return {
     binaries: {},
     maxConcurrency: 2,
-    timeoutMs: 30_000,
+    stepTimeoutSec: 30,
     loopMaxIterations: 10,
     ...overrides,
   };
@@ -207,7 +207,7 @@ describe("Orchestrator", () => {
   });
 
   it("getConfig returns the config", () => {
-    const config = makeConfig({ timeoutMs: 5000 });
+    const config = makeConfig({ stepTimeoutSec: 5 });
     const orch = new Orchestrator(config, makeWorkspaces(), [], makeCatalog());
     expect(orch.getConfig()).toBe(config);
   });

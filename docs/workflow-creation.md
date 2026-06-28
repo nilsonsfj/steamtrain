@@ -35,7 +35,7 @@ Authoring writes to one of two layers, selectable everywhere (CLI, TUI, web):
   Project entries win over user, which win over bundled.
 
 Project writes are read-modify-write: only the `workflows` section is touched,
-and all other config keys (`binaries`, `timeoutMs`, `maxConcurrency`) are
+and all other config keys (`binaries`, `stepTimeoutSec`, `workflowTimeoutSec`, `maxConcurrency`) are
 preserved. The same scope applies to clone and delete. Authoring targets the
 **same** `steamtrain.json` the process loaded, so `--config-file <path>` is
 honored (the workflow is written to that file, not the working directory's).

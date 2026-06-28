@@ -18,3 +18,9 @@ export {
   loadProjectWorkflows,
   saveProjectWorkflow,
 } from "./project-workflows";
+export {
+  type ProjectConfigPatch,
+  type SaveProjectConfigResult,
+  readProjectConfig,
+  saveProjectConfig,
+} from "./project-config";
