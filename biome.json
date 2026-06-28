@@ -6,8 +6,20 @@
     "useIgnoreFile": true
   },
   "files": {
-    "ignore": ["dist", "node_modules", "*.txt"]
+    "ignore": [
+      "dist",
+      "node_modules",
+      "*.txt",
+      "src/web/public/steamtrain-reducer.bundle.js"
+    ]
   },
+  "overrides": [
+    {
+      "include": ["src/web/public/app.js"],
+      "formatter": { "enabled": false },
+      "linter": { "rules": { "recommended": false, "all": false } }
+    }
+  ],
   "organizeImports": {
     "enabled": true
   },

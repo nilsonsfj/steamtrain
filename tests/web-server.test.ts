@@ -149,7 +149,51 @@ describe("web server", () => {
     const html = await res.text();
     expect(html).toContain("steam");
     expect(html).toContain('id="wflist"');
-    expect(html).toContain("/api/runs/");
+    expect(html).toContain('id="runBtn"');
+    // The page now references external static assets rather than inlining them.
+    expect(html).toContain('<link rel="stylesheet" href="/static/app.css?v=');
+    expect(html).toContain('<script src="/static/steamtrain-reducer.bundle.js?v=');
+    expect(html).toContain('<script src="/static/app.js?v=');
+    // The inline bundle must not be served on the page anymore.
+    expect(html).not.toContain("BEGIN_REDUCER_BUNDLE");
+    // Scripts: 'unsafe-inline' removed so we rely on external static assets
+    // shipped under script-src 'self'.
+    const csp = res.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("script-src 'self'");
+    expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
+  });
+
+  it("serves static app.js and app.css with immutable caching headers", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+
+    const js = await fetch(`${base}/static/app.js`);
+    expect(js.status).toBe(200);
+    expect(js.headers.get("content-type")).toContain("text/javascript");
+    expect(js.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    expect(js.headers.get("x-content-type-options")).toBe("nosniff");
+    const jsText = await js.text();
+    expect(jsText).toContain("SteamtrainReducer");
+    expect(jsText).not.toContain("BEGIN_REDUCER_BUNDLE");
+
+    const css = await fetch(`${base}/static/app.css`);
+    expect(css.status).toBe(200);
+    expect(css.headers.get("content-type")).toContain("text/css");
+    expect(css.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    const cssText = await css.text();
+    expect(cssText).toContain("--accent");
+
+    const bundle = await fetch(`${base}/static/steamtrain-reducer.bundle.js`);
+    expect(bundle.status).toBe(200);
+    const bundleText = await bundle.text();
+    expect(bundleText).toContain("function workflowReducer");
+  });
+
+  it("returns 404 for unknown static assets", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/static/does-not-exist.js`);
+    expect(res.status).toBe(404);
   });
 
   it("lists workflows with summaries", async () => {

@@ -236,7 +236,7 @@
 | Area | Observation |
 |------|-------------|
 | **App.tsx monolith** | 1905 lines, 30+ `useState`, 20+ `useCallback`. Should be split into hooks. |
-| **html.ts inline bundle** | 1547 lines of CSS+JS in a template literal. Extract to served `.js` file. |
+| ~~**html.ts inline bundle**~~ | ~~1547 lines of CSS+JS in a template literal. Extract to served `.js` file.~~ **Fixed** — the CSS + reducer bundle + hand-written client JS now live as real files under `src/web/public/` and are served at `/static/*` with immutable, content-hash cache-busted URLs (`?v=<sha>`). The page itself stayed a tiny template in `src/web/html.ts` and `script-src 'unsafe-inline'` was dropped from the CSP, so client code is now lintable (biome), statically analyzable by IDEs, and cached aggressively by browsers. |
 | **server.ts route organization** | 15+ routes in a single `handle()` function. Adding middleware is painful. |
 | **Variant cache duplication** | `codex-variants.ts` and `opencode-variants.ts` are near-identical. |
 | **No request logging** | Zero logging of HTTP requests or responses. |
@@ -300,7 +300,7 @@
 ### This Quarter
 
 3. **Extract `App.tsx` into smaller components/hooks** — state management, keyboard, render
-4. **Extract `html.ts` JS to served file** — enable linting and static analysis
+4. ~~**Extract `html.ts` JS to served file** — enable linting and static analysis~~ **Done**
 5. **Virtualize `WorkflowPicker`** (M26) — apply `selectVisibleWindow` like other list views
 
 ### Long-Term
