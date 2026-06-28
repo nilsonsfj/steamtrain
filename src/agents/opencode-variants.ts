@@ -16,8 +16,41 @@ interface VariantCache {
   binary: string;
 }
 
-let cache: VariantCache | null = null;
-let refreshPromise: Promise<boolean> | null = null;
+class OpencodeVariantCacheStore {
+  private cache: VariantCache | null = null;
+  private refreshPromise: Promise<boolean> | null = null;
+
+  cacheIsFresh(): boolean {
+    return this.cache !== null && Date.now() - this.cache.fetchedAt < CACHE_TTL_MS;
+  }
+
+  get models(): Map<string, OpencodeModelInfo> | null {
+    return this.cache?.models ?? null;
+  }
+
+  set models(value: Map<string, OpencodeModelInfo> | null) {
+    if (value === null) {
+      this.cache = null;
+    } else {
+      this.cache = { models: value, fetchedAt: Date.now(), binary: "opencode" };
+    }
+  }
+
+  get refreshInFlight(): Promise<boolean> | null {
+    return this.refreshPromise;
+  }
+
+  set refreshInFlight(value: Promise<boolean> | null) {
+    this.refreshPromise = value;
+  }
+
+  clear(): void {
+    this.cache = null;
+    this.refreshPromise = null;
+  }
+}
+
+const store = new OpencodeVariantCacheStore();
 
 /**
  * Parse `opencode models --verbose` output into provider/model metadata.
@@ -126,35 +159,31 @@ function fetchOpencodeModelsVerbose(binary: string): Promise<string> {
 }
 
 function cacheIsFresh(): boolean {
-  return cache !== null && Date.now() - cache.fetchedAt < CACHE_TTL_MS;
+  return store.cacheIsFresh();
 }
 
 /** Load model metadata from the local OpenCode install. Returns false when unavailable. */
 export async function refreshOpencodeVariantCache(binary = "opencode"): Promise<boolean> {
-  if (refreshPromise) return refreshPromise;
+  if (store.refreshInFlight) return store.refreshInFlight;
 
-  refreshPromise = (async () => {
+  store.refreshInFlight = (async () => {
     try {
       const output = await fetchOpencodeModelsVerbose(binary);
-      cache = {
-        models: parseOpencodeModelsVerbose(output),
-        fetchedAt: Date.now(),
-        binary,
-      };
+      store.models = parseOpencodeModelsVerbose(output);
       return true;
     } catch {
       return false;
     } finally {
-      refreshPromise = null;
+      store.refreshInFlight = null;
     }
   })();
 
-  return refreshPromise;
+  return store.refreshInFlight;
 }
 
 function getCachedModel(model: string): OpencodeModelInfo | undefined {
-  if (!cacheIsFresh()) return undefined;
-  return cache!.models.get(model);
+  if (!store.cacheIsFresh()) return undefined;
+  return store.models?.get(model);
 }
 
 /** Human-readable name for an OpenCode model from the live cache, if known. */
@@ -164,8 +193,10 @@ export function getOpencodeModelName(model: string): string | undefined {
 
 /** Model catalog from a fresh `opencode models --verbose` cache (empty when unavailable). */
 export function listOpencodeCachedAgentModels(): readonly AgentModel[] {
-  if (!cacheIsFresh()) return [];
-  return [...cache!.models.entries()]
+  if (!store.cacheIsFresh()) return [];
+  const models = store.models;
+  if (!models) return [];
+  return [...models.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([id, info]) => ({ id, name: info.name }));
 }
@@ -179,16 +210,15 @@ export function getOpencodeEfforts(model: string): readonly string[] {
 
 /** Whether a fresh variant cache is loaded (tests may inject via `setOpencodeVariantCacheForTests`). */
 export function hasOpencodeVariantCache(): boolean {
-  return cacheIsFresh();
+  return store.cacheIsFresh();
 }
 
 /** @internal Test helper — inject a model cache without spawning OpenCode. */
 export function setOpencodeVariantCacheForTests(models: Map<string, OpencodeModelInfo>): void {
-  cache = { models, fetchedAt: Date.now(), binary: "opencode" };
+  store.models = models;
 }
 
 /** @internal Test helper — clear the in-memory variant cache. */
 export function clearOpencodeVariantCacheForTests(): void {
-  cache = null;
-  refreshPromise = null;
+  store.clear();
 }

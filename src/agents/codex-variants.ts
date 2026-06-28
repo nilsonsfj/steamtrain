@@ -16,8 +16,41 @@ interface VariantCache {
   binary: string;
 }
 
-let cache: VariantCache | null = null;
-let refreshPromise: Promise<boolean> | null = null;
+class CodexVariantCacheStore {
+  private cache: VariantCache | null = null;
+  private refreshPromise: Promise<boolean> | null = null;
+
+  cacheIsFresh(): boolean {
+    return this.cache !== null && Date.now() - this.cache.fetchedAt < CACHE_TTL_MS;
+  }
+
+  get models(): Map<string, CodexModelInfo> | null {
+    return this.cache?.models ?? null;
+  }
+
+  set models(value: Map<string, CodexModelInfo> | null) {
+    if (value === null) {
+      this.cache = null;
+    } else {
+      this.cache = { models: value, fetchedAt: Date.now(), binary: "codex" };
+    }
+  }
+
+  get refreshInFlight(): Promise<boolean> | null {
+    return this.refreshPromise;
+  }
+
+  set refreshInFlight(value: Promise<boolean> | null) {
+    this.refreshPromise = value;
+  }
+
+  clear(): void {
+    this.cache = null;
+    this.refreshPromise = null;
+  }
+}
+
+const store = new CodexVariantCacheStore();
 
 /**
  * Parse `codex debug models` JSON output into slug metadata.
@@ -112,14 +145,14 @@ function fetchCodexDebugModels(binary: string, bundled: boolean): Promise<string
 }
 
 function cacheIsFresh(): boolean {
-  return cache !== null && Date.now() - cache.fetchedAt < CACHE_TTL_MS;
+  return store.cacheIsFresh();
 }
 
 /** Load model metadata from the local Codex install. Returns false when unavailable. */
 export async function refreshCodexVariantCache(binary = "codex"): Promise<boolean> {
-  if (refreshPromise) return refreshPromise;
+  if (store.refreshInFlight) return store.refreshInFlight;
 
-  refreshPromise = (async () => {
+  store.refreshInFlight = (async () => {
     try {
       let output: string;
       try {
@@ -131,25 +164,21 @@ export async function refreshCodexVariantCache(binary = "codex"): Promise<boolea
       const models = parseCodexDebugModels(output);
       if (models.size === 0) return false;
 
-      cache = {
-        models,
-        fetchedAt: Date.now(),
-        binary,
-      };
+      store.models = models;
       return true;
     } catch {
       return false;
     } finally {
-      refreshPromise = null;
+      store.refreshInFlight = null;
     }
   })();
 
-  return refreshPromise;
+  return store.refreshInFlight;
 }
 
 function getCachedModel(model: string): CodexModelInfo | undefined {
-  if (!cacheIsFresh()) return undefined;
-  return cache!.models.get(model);
+  if (!store.cacheIsFresh()) return undefined;
+  return store.models?.get(model);
 }
 
 /** Human-readable name for a Codex model from the live cache, if known. */
@@ -159,8 +188,10 @@ export function getCodexModelName(model: string): string | undefined {
 
 /** Model catalog from a fresh `codex debug models` cache (empty when unavailable). */
 export function listCodexCachedAgentModels(): readonly AgentModel[] {
-  if (!cacheIsFresh()) return [];
-  return [...cache!.models.entries()]
+  if (!store.cacheIsFresh()) return [];
+  const models = store.models;
+  if (!models) return [];
+  return [...models.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([id, info]) => ({ id, name: info.name }));
 }
@@ -174,16 +205,15 @@ export function getCodexEfforts(model: string): readonly string[] {
 
 /** Whether a fresh variant cache is loaded (tests may inject via `setCodexVariantCacheForTests`). */
 export function hasCodexVariantCache(): boolean {
-  return cacheIsFresh();
+  return store.cacheIsFresh();
 }
 
 /** @internal Test helper — inject a model cache without spawning Codex. */
 export function setCodexVariantCacheForTests(models: Map<string, CodexModelInfo>): void {
-  cache = { models, fetchedAt: Date.now(), binary: "codex" };
+  store.models = models;
 }
 
 /** @internal Test helper — clear the in-memory variant cache. */
 export function clearCodexVariantCacheForTests(): void {
-  cache = null;
-  refreshPromise = null;
+  store.clear();
 }
