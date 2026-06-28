@@ -61,7 +61,7 @@ has settled (success, failure, skip, or cancel).
 ### Steps in a phase are parallel
 
 All steps in the same phase are scheduled together, bounded by `maxConcurrency`
-(default 3, hard cap 16). There is **no guaranteed order** among steps in the
+(default 5, hard cap 16). There is **no guaranteed order** among steps in the
 same phase.
 
 When a step's target directory is inside a git repository, each agent-backed step
@@ -687,7 +687,7 @@ before relying on a custom workflow in CI or scripts.
 | limit | value |
 | --- | --- |
 | max steps per run (static + generated) | 1000 |
-| max parallel steps per phase | 16 (`maxConcurrency` config, capped) |
+| max parallel steps per phase | 5 default, 16 max (`maxConcurrency` config) |
 | per-step timeout | `stepTimeoutSec` in config |
 
 Every agent-backed worker, processor, distributor, or consolidator is a full

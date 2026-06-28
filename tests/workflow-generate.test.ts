@@ -151,6 +151,23 @@ describe("buildWorkflowGenerationPrompt", () => {
     expect(prompt).not.toContain("UNROLL");
   });
 
+  it("teaches agent-backed distributors and forbids hardcoded task indices", () => {
+    const prompt = buildWorkflowGenerationPrompt("anything");
+    expect(prompt).toContain("Agent-backed (PREFERRED for backlogs");
+    expect(prompt).toContain("One task per line only");
+    expect(prompt).not.toContain("Task 1 from backlog");
+    expect(prompt).toContain("NEVER hardcode");
+    expect(prompt).toContain("forEach");
+    expect(prompt).toContain("FULL aggregate of ALL items");
+    const example = prompt.slice(
+      prompt.indexOf("# Worked example: parallel backlog implement"),
+      prompt.indexOf("# Worked example: a bounded review/fix loop"),
+    );
+    expect(example).toContain('"agent": "opencode"');
+    expect(example).not.toContain('"items":');
+    expect(example).not.toContain("review-each");
+  });
+
   it("embeds a worked example that passes the engine's own validation", () => {
     // The example is what the model imitates; if it ever stops validating, the
     // prompt is teaching an invalid shape. Extract + validate it for real.
@@ -159,8 +176,21 @@ describe("buildWorkflowGenerationPrompt", () => {
     const result = extractWorkflowSpec(example);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      // The review->fix "loop" is unrolled into distinct phases.
-      expect(result.spec.phases.length).toBeGreaterThanOrEqual(4);
+      expect(result.spec.phases.length).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it("embeds a bounded loop example that passes validation", () => {
+    const prompt = buildWorkflowGenerationPrompt("anything");
+    const loopExample = prompt.slice(
+      prompt.indexOf("# Worked example: a bounded review/fix loop"),
+      prompt.indexOf("# Output format"),
+    );
+    const result = extractWorkflowSpec(loopExample);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.spec.name).toBe("bounded-review-loop");
+      expect(result.spec.phases.some((p) => p.steps.some((s) => s.kind === "gate"))).toBe(true);
     }
   });
 });
