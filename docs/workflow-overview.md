@@ -64,6 +64,12 @@ All steps in the same phase are scheduled together, bounded by `maxConcurrency`
 (default 3, hard cap 16). There is **no guaranteed order** among steps in the
 same phase.
 
+When a step's target directory is inside a git repository, each agent-backed step
+runs in its own git worktree. Parallel workers and `forEach` children therefore
+do not edit the same checkout. The workflow's cache and history still use the
+launch cwd; only the agent subprocess cwd is remapped into the isolated
+worktree.
+
 ```mermaid
 flowchart LR
   subgraph p1["Phase 1: scan"]
@@ -118,6 +124,19 @@ even if you avoid `dependsOn`:
 ```
 
 Use a later phase for anything that reads another step's output.
+
+### Agent worktree isolation
+
+Agent-backed workers, processors, distributors, and consolidators run from an
+isolated git worktree whenever their resolved `cwd` is inside a git repository
+with a valid `HEAD`. The worktree is created from the current commit on a unique
+`steamtrain/...` branch, then steamtrain snapshots tracked dirty changes and
+untracked non-ignored files into it before the agent starts. If a step sets
+`cwd` to a subdirectory, the agent lands in the matching subdirectory of its
+worktree.
+
+Directories outside git repositories keep the previous behavior and run in the
+resolved `cwd`.
 
 ---
 

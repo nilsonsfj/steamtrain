@@ -11,6 +11,7 @@ import {
   runWorkflow,
   validateWorkflow,
   workflowAgentIds,
+  createGitWorktreeManager,
 } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 import { workspaceById } from "../workspace";
@@ -179,6 +180,7 @@ export class Orchestrator {
         timeoutMs: this.config.timeoutMs,
         maxConcurrency: this.config.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY,
         cwd,
+        agentWorkspace: createGitWorktreeManager(),
         loopMaxIterations: this.config.loopMaxIterations,
       },
       signal,

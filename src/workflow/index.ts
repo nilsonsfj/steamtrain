@@ -39,6 +39,13 @@ export type {
 } from "./events";
 export { runWorkflow, type WorkflowDeps, type WorkflowRunContext } from "./engine";
 export {
+  createGitWorktreeManager,
+  type AgentWorkspaceLease,
+  type AgentWorkspaceManager,
+  type AgentWorkspaceRequest,
+  type GitWorktreeManagerOptions,
+} from "./worktree";
+export {
   type RetryPolicy,
   type ResolvedRetryPolicy,
   DEFAULT_RETRY,

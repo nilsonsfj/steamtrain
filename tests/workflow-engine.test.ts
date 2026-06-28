@@ -4,6 +4,8 @@ import type { AgentAdapter, AgentRunOptions } from "../src/agents";
 import type { AgentEvent, AgentId } from "../src/types/events";
 import {
   MAX_STEPS,
+  type AgentWorkspaceManager,
+  type AgentWorkspaceRequest,
   type StepResult,
   type WorkflowDeps,
   type WorkflowEvent,
@@ -67,13 +69,19 @@ function makeCreateAdapter(script: Script, state: FakeState) {
 
 function makeDeps(
   script: Script,
-  over: { maxConcurrency?: number; cwd?: string; delayMs?: number } = {},
+  over: {
+    maxConcurrency?: number;
+    cwd?: string;
+    delayMs?: number;
+    agentWorkspace?: AgentWorkspaceManager;
+  } = {},
 ): { deps: WorkflowDeps; state: FakeState } {
   const state: FakeState = { runs: [], active: 0, peak: 0, delayMs: over.delayMs ?? 0 };
   const deps: WorkflowDeps = {
     createAdapter: makeCreateAdapter(script, state),
     maxConcurrency: over.maxConcurrency ?? 4,
     cwd: over.cwd ?? "/base",
+    agentWorkspace: over.agentWorkspace,
   };
   return { deps, state };
 }
@@ -253,6 +261,106 @@ describe("runWorkflow", () => {
     expect(rec?.opts.env).toEqual({ FOO: "bar" });
     expect(rec?.opts.effort).toBe("high");
     expect(rec?.opts.extraArgs).toEqual(["--add-dir", "."]);
+  });
+
+  it("runs parallel agent steps in separate allocated workspaces", async () => {
+    const requests: AgentWorkspaceRequest[] = [];
+    const agentWorkspace: AgentWorkspaceManager = {
+      async allocate(request) {
+        requests.push(request);
+        return { cwd: `/isolated/${request.stepId}`, dispose: () => {} };
+      },
+    };
+    const { deps, state } = makeDeps(echo, {
+      maxConcurrency: 3,
+      delayMs: 20,
+      agentWorkspace,
+    });
+
+    await collect(twoPhase, "hi", deps);
+
+    expect(requests.map((request) => request.stepId)).toEqual(["a", "b", "c", "d"]);
+    expect(new Set(state.runs.map((run) => run.opts.cwd)).size).toBe(4);
+    expect(state.runs.map((run) => run.opts.cwd)).toEqual([
+      "/isolated/a",
+      "/isolated/b",
+      "/isolated/c",
+      "/isolated/d",
+    ]);
+  });
+
+  it("runs forEach children in separate allocated workspaces", async () => {
+    const requests: AgentWorkspaceRequest[] = [];
+    const agentWorkspace: AgentWorkspaceManager = {
+      async allocate(request) {
+        requests.push(request);
+        return { cwd: `/isolated/${request.stepId}`, dispose: () => {} };
+      },
+    };
+    const spec: WorkflowSpec = {
+      name: "dynamic-isolation",
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [{ id: "targets", kind: "distributor", items: ["api", "web"] }],
+        },
+        {
+          id: "process",
+          title: "Process",
+          steps: [
+            {
+              id: "review-each",
+              kind: "processor",
+              agent: "claude",
+              model: "m",
+              dependsOn: ["targets"],
+              forEach: "steps.targets.items",
+              prompt: "review {{item}}",
+            },
+          ],
+        },
+      ],
+    };
+    const { deps, state } = makeDeps(echo, { maxConcurrency: 2, agentWorkspace });
+
+    await collect(spec, "task", deps);
+
+    expect(requests.map((request) => request.stepId)).toEqual(["review-each[0]", "review-each[1]"]);
+    expect(requests.map((request) => request.item?.value)).toEqual(["api", "web"]);
+    expect(state.runs.map((run) => run.opts.cwd)).toEqual([
+      "/isolated/review-each[0]",
+      "/isolated/review-each[1]",
+    ]);
+  });
+
+  it("reports workspace allocation failures as step failures", async () => {
+    const agentWorkspace: AgentWorkspaceManager = {
+      async allocate() {
+        throw new Error("unable to create worktree");
+      },
+    };
+    const spec: WorkflowSpec = {
+      name: "workspace-failure",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "a", agent: "claude", model: "ma", prompt: "x" }],
+        },
+      ],
+    };
+    const { deps, state } = makeDeps(echo, { agentWorkspace });
+
+    const events = await collect(spec, "task", deps);
+
+    expect(state.runs).toHaveLength(0);
+    const done = events.find((event) => event.kind === "step_done" && event.stepId === "a");
+    expect(done && done.kind === "step_done" && done.result).toMatchObject({
+      ok: false,
+      error: "unable to create worktree",
+    });
+    expect(events.at(-1)).toMatchObject({ kind: "workflow_done", ok: false });
   });
 
   it("executes distributor, consolidator, and gate blocks", async () => {

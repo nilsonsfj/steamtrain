@@ -109,6 +109,11 @@ Required fields: `agent`, `model`, `prompt`.
 
 Optional fields: `cwd`, `env`, `extraArgs`, `effort`, `forEach`, `retry`.
 
+If the resolved `cwd` is inside a git repository, the agent subprocess runs from
+a matching path in its own git worktree. The worktree starts at the current
+`HEAD` and includes a snapshot of tracked dirty changes plus untracked
+non-ignored files. Non-git directories run directly in the resolved `cwd`.
+
 ```jsonc
 {
   "id": "review-api",
