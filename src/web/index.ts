@@ -4,6 +4,7 @@ export {
   DEFAULT_WEB_HOST,
   DEFAULT_WEB_PORT,
   createWebServer,
+  missingPublicAssets,
   publicAssetsLoaded,
   startWebUi,
 } from "./server";

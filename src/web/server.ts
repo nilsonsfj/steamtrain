@@ -52,7 +52,10 @@ interface StaticAsset {
   /** Filesystem-relative path inside {@link PUBLIC_DIR} (e.g. `app.js`). */
   relPath: string;
   body: Buffer;
-  /** First 8 hex chars of the asset's SHA-256, used in cache-busting URLs. */
+  /** First 16 hex chars of the asset's SHA-256, used in cache-busting URLs.
+   * 16 chars (64 bits) is well beyond any plausible collision space for three
+   * small files and keeps the `?v=` token short enough to live in any cache
+   * key or log line. */
   rev: string;
   mime: string;
 }
@@ -61,10 +64,15 @@ function loadAsset(relPath: string, mime: string): StaticAsset | null {
   const file = join(PUBLIC_DIR, relPath);
   if (!existsSync(file)) return null;
   const body = readFileSync(file);
-  const rev = createHash("sha256").update(body).digest("hex").slice(0, 8);
+  const rev = createHash("sha256").update(body).digest("hex").slice(0, 16);
   return { relPath, body, rev, mime };
 }
 
+// Loaded once at module init and never re-read. Tests and production serve
+// from this in-memory snapshot, so the immutable /static/* cache headers are
+// always consistent with the `?v=` revisions embedded by renderIndex(). The
+// trade-off: editing `app.js` / `app.css` on disk while the dev server is
+// running will NOT take effect until the process restarts (bun src/index.tsx).
 const STATIC_ASSETS: Record<string, StaticAsset | null> = {
   "/static/app.css": loadAsset("app.css", "text/css; charset=utf-8"),
   "/static/app.js": loadAsset("app.js", "text/javascript; charset=utf-8"),
@@ -86,6 +94,17 @@ const PUBLIC_REVISIONS: PageAssetRevisions = {
  */
 export function publicAssetsLoaded(): boolean {
   return Object.values(STATIC_ASSETS).every((a) => a !== null);
+}
+
+/**
+ * Names of the static web assets that were not found on disk at module init,
+ * in the form they appear in `/static/*` URLs (e.g. `"/static/app.js"`).
+ * Empty when every asset loaded successfully.
+ */
+export function missingPublicAssets(): string[] {
+  return Object.entries(STATIC_ASSETS)
+    .filter(([, a]) => a === null)
+    .map(([path]) => path);
 }
 
 export interface WebServerDeps {
@@ -645,6 +664,20 @@ export async function startWebUi(
     doctorError: () => doctorState.error,
     configLabel: options.configLabel,
   });
+
+  // Fail loudly and early when the static web assets are missing instead of
+  // silently serving a broken UI (empty `?v=` revisions + 404 on every
+  // /static/* request). This typically means `bun scripts/copy-assets.ts`
+  // wasn't run after `tsup`, or the dev source tree was modified without
+  // re-running `bun scripts/build-reducer.ts`.
+  const missing = missingPublicAssets();
+  if (missing.length > 0) {
+    err(
+      `\n⚠️  steamtrain web UI is missing static assets: ${missing.join(", ")}\n` +
+        `   Rebuild them with \`bun scripts/build-reducer.ts\` (dev) or \`bun scripts/copy-assets.ts\` (after \`tsup\`).\n` +
+        `   Expected location: ${PUBLIC_DIR}\n`,
+    );
+  }
 
   const url = `http://${host}:${port}`;
   await new Promise<void>((resolve, reject) => {

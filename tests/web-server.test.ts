@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -187,6 +188,27 @@ describe("web server", () => {
     expect(bundle.status).toBe(200);
     const bundleText = await bundle.text();
     expect(bundleText).toContain("function workflowReducer");
+
+    // The `?v=` revision embedded in the index page MUST match the first 16
+    // hex chars of the SHA-256 of the bytes actually served at `/static/*`.
+    // Otherwise `renderIndex` and the in-memory asset snapshot have drifted
+    // apart and cache-busting stops being meaningful.
+    const indexRes = await fetch(`${base}/`);
+    const html = await indexRes.text();
+    const expectedRevs = {
+      "/static/app.css": createHash("sha256").update(cssText).digest("hex").slice(0, 16),
+      "/static/app.js": createHash("sha256").update(jsText).digest("hex").slice(0, 16),
+      "/static/steamtrain-reducer.bundle.js": createHash("sha256")
+        .update(bundleText)
+        .digest("hex")
+        .slice(0, 16),
+    };
+    for (const [assetPath, expectedRev] of Object.entries(expectedRevs)) {
+      const escaped = assetPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const m = html.match(new RegExp(`${escaped}\\?v=([0-9a-f]{16})`));
+      expect(m, `index page should reference ${assetPath}?v=<16 hex chars>`).not.toBeNull();
+      expect(m![1]).toBe(expectedRev);
+    }
   });
 
   it("returns 404 for unknown static assets", async () => {
