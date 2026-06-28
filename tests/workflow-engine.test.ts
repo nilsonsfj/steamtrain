@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { AgentAdapter, AgentRunOptions } from "../src/agents";
 import type { AgentEvent, AgentId } from "../src/types/events";
 import {
-  MAX_STEPS,
   type AgentWorkspaceManager,
   type AgentWorkspaceRequest,
+  MAX_STEPS,
   type StepResult,
   type WorkflowDeps,
   type WorkflowEvent,

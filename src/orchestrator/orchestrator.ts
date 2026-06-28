@@ -8,10 +8,10 @@ import {
   type WorkflowEvent,
   type WorkflowSourceKind,
   type WorkflowSpec,
+  createGitWorktreeManager,
   runWorkflow,
   validateWorkflow,
   workflowAgentIds,
-  createGitWorktreeManager,
 } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 import { workspaceById } from "../workspace";

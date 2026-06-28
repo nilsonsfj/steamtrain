@@ -22,7 +22,7 @@ import {
   validateWorkflow,
   workflowStepKind,
 } from "./types";
-import type { AgentWorkspaceManager, AgentWorkspaceLease } from "./worktree";
+import type { AgentWorkspaceLease, AgentWorkspaceManager } from "./worktree";
 
 /**
  * Everything the engine needs from the outside world. `createAdapter` is

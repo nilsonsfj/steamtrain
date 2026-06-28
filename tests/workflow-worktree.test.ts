@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -60,7 +60,10 @@ describe("git worktree agent workspace manager", () => {
 
   it("falls back to the original cwd outside a git repository", async () => {
     const root = await tempDir();
-    const manager = createGitWorktreeManager({ baseDir: join(root, "worktrees"), runId: "run-test" });
+    const manager = createGitWorktreeManager({
+      baseDir: join(root, "worktrees"),
+      runId: "run-test",
+    });
     const lease = await manager.allocate({
       workflowName: "demo",
       stepId: "a",

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { randomBytes, createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { copyFile, lstat, mkdir, readlink, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
@@ -172,6 +172,7 @@ function safeRefPart(value: string): string {
   const sanitized = value
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 64);
   return sanitized.length > 0 ? sanitized : "step";
