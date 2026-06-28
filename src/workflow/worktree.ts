@@ -78,13 +78,15 @@ class GitWorktreeManager implements AgentWorkspaceManager {
     const worktreeRoot = join(this.baseDir, repoDir, this.runId, `${stepPart}-${unique}`);
     const branch = `steamtrain/${this.runId}/${stepPart}-${unique}`;
     let linkedIgnoredPaths: string[] = [];
+    let worktreeHead = repo.head;
 
     await mkdir(dirname(worktreeRoot), { recursive: true });
     try {
-      await this.inRepoQueue(repo.root, async () => {
+      await this.inRepoQueue(repo.root, request.signal, async () => {
         throwIfAborted(request.signal);
+        worktreeHead = await currentGitHead(repo.root, request.signal);
         await runGit(
-          ["worktree", "add", "-b", branch, worktreeRoot, repo.head],
+          ["worktree", "add", "-b", branch, worktreeRoot, worktreeHead],
           repo.root,
           undefined,
           request.signal,
@@ -93,7 +95,7 @@ class GitWorktreeManager implements AgentWorkspaceManager {
       linkedIgnoredPaths = await copyWorkingTreeState(
         repo.root,
         worktreeRoot,
-        repo.head,
+        worktreeHead,
         request.signal,
       );
     } catch (err) {
@@ -112,35 +114,43 @@ class GitWorktreeManager implements AgentWorkspaceManager {
     };
   }
 
-  private async inRepoQueue<T>(repoRoot: string, fn: () => Promise<T>): Promise<T> {
+  private async inRepoQueue<T>(
+    repoRoot: string,
+    signal: AbortSignal | undefined,
+    fn: () => Promise<T>,
+  ): Promise<T> {
     const previous = repoQueues.get(repoRoot) ?? Promise.resolve();
     const run = (async () => {
       await previous.catch(() => {});
+      throwIfAborted(signal);
       return fn();
     })();
     const current = run.then(
       () => {},
       () => {},
     );
-    repoQueues.set(repoRoot, current);
-    try {
-      return await run;
-    } finally {
+    current.then(() => {
       if (repoQueues.get(repoRoot) === current) repoQueues.delete(repoRoot);
-    }
+    });
+    repoQueues.set(repoRoot, current);
+    return signal ? await raceWithAbort(run, signal) : await run;
   }
 }
 
 async function discoverGitRepo(cwd: string, signal?: AbortSignal): Promise<GitRepo | undefined> {
   try {
     const root = (await runGitText(["rev-parse", "--show-toplevel"], cwd, signal)).trim();
-    const head = (await runGitText(["rev-parse", "--verify", "HEAD"], root, signal)).trim();
+    const head = await currentGitHead(root, signal);
     if (!root || !head) return undefined;
     return { root: await canonicalPath(root), head };
   } catch {
     throwIfAborted(signal);
     return undefined;
   }
+}
+
+async function currentGitHead(repoRoot: string, signal?: AbortSignal): Promise<string> {
+  return (await runGitText(["rev-parse", "--verify", "HEAD"], repoRoot, signal)).trim();
 }
 
 async function copyWorkingTreeState(
@@ -246,6 +256,30 @@ async function canonicalPath(path: string): Promise<string> {
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new Error("cancelled");
+}
+
+function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolvePromise, reject) => {
+    if (signal.aborted) {
+      reject(new Error("cancelled"));
+      return;
+    }
+    const onAbort = (): void => {
+      signal.removeEventListener("abort", onAbort);
+      reject(new Error("cancelled"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolvePromise(value);
+      },
+      (err) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
 }
 
 function isOutside(rel: string): boolean {
