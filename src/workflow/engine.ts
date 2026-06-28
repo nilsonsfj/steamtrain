@@ -898,6 +898,7 @@ async function allocateAgentWorkspace(
     stepCwd,
     iteration: ctx.iteration,
     item,
+    signal: ctx.signal,
   });
 }
 

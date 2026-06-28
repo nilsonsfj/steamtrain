@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -85,6 +85,59 @@ describe("git worktree agent workspace manager", () => {
     expect(lease.cwd).toBe(root);
     expect(lease.root).toBeUndefined();
     expect(lease.branch).toBeUndefined();
+  });
+
+  it("normalizes symlinked repo paths before mapping step cwd", async () => {
+    const root = await tempDir();
+    const repo = join(root, "repo");
+    const repoLink = join(root, "repo-link");
+    await initRepo(repo);
+    await mkdir(join(repo, "src"), { recursive: true });
+    await writeFile(join(repo, "src", "tracked.txt"), "committed\n");
+    await git(repo, "add", ".");
+    await git(repo, "commit", "-m", "add src");
+    await symlink(repo, repoLink);
+
+    const manager = createGitWorktreeManager({
+      baseDir: join(root, "worktrees"),
+      runId: "run-test",
+    });
+    const lease = await manager.allocate({
+      workflowName: "demo",
+      stepId: "a",
+      agent: "claude",
+      baseCwd: repoLink,
+      stepCwd: join(repoLink, "src"),
+      iteration: 1,
+    });
+
+    expect(lease.cwd).not.toBe(join(repoLink, "src"));
+    expect(lease.root).toBeDefined();
+    expect(await readFile(join(lease.cwd, "tracked.txt"), "utf8")).toBe("committed\n");
+  });
+
+  it("honors cancellation before creating a worktree", async () => {
+    const root = await tempDir();
+    const repo = join(root, "repo");
+    await initRepo(repo);
+    const controller = new AbortController();
+    controller.abort();
+    const manager = createGitWorktreeManager({
+      baseDir: join(root, "worktrees"),
+      runId: "run-test",
+    });
+
+    await expect(
+      manager.allocate({
+        workflowName: "demo",
+        stepId: "a",
+        agent: "claude",
+        baseCwd: repo,
+        stepCwd: repo,
+        iteration: 1,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("cancelled");
   });
 });
 

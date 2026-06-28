@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { copyFile, lstat, mkdir, readlink, symlink } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readlink, realpath, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { AgentId } from "../types/events";
@@ -16,6 +16,7 @@ export interface AgentWorkspaceRequest {
   stepCwd: string;
   iteration: number;
   item?: WorkflowItem;
+  signal?: AbortSignal;
 }
 
 export interface AgentWorkspaceLease {
@@ -45,6 +46,7 @@ interface GitRepo {
 }
 
 const DEFAULT_BASE_DIR = join(tmpdir(), "steamtrain-worktrees");
+const repoQueues = new Map<string, Promise<void>>();
 
 export function createGitWorktreeManager(
   options: GitWorktreeManagerOptions = {},
@@ -55,7 +57,6 @@ export function createGitWorktreeManager(
 class GitWorktreeManager implements AgentWorkspaceManager {
   private readonly baseDir: string;
   private readonly runId: string;
-  private readonly repoQueues = new Map<string, Promise<void>>();
 
   constructor(options: GitWorktreeManagerOptions) {
     this.baseDir = options.baseDir ?? DEFAULT_BASE_DIR;
@@ -63,10 +64,12 @@ class GitWorktreeManager implements AgentWorkspaceManager {
   }
 
   async allocate(request: AgentWorkspaceRequest): Promise<AgentWorkspaceLease> {
-    const repo = await discoverGitRepo(request.stepCwd);
+    throwIfAborted(request.signal);
+    const repo = await discoverGitRepo(request.stepCwd, request.signal);
     if (!repo) return originalCwdLease(request.stepCwd);
 
-    const relativeStepCwd = relative(repo.root, request.stepCwd);
+    const stepCwd = await canonicalPath(request.stepCwd);
+    const relativeStepCwd = relative(repo.root, stepCwd);
     if (isOutside(relativeStepCwd)) return originalCwdLease(request.stepCwd);
 
     const repoDir = `${safeRefPart(basename(repo.root))}-${shortHash(repo.root)}`;
@@ -79,9 +82,20 @@ class GitWorktreeManager implements AgentWorkspaceManager {
     await mkdir(dirname(worktreeRoot), { recursive: true });
     try {
       await this.inRepoQueue(repo.root, async () => {
-        await runGit(["worktree", "add", "-b", branch, worktreeRoot, repo.head], repo.root);
+        throwIfAborted(request.signal);
+        await runGit(
+          ["worktree", "add", "-b", branch, worktreeRoot, repo.head],
+          repo.root,
+          undefined,
+          request.signal,
+        );
       });
-      linkedIgnoredPaths = await copyWorkingTreeState(repo.root, worktreeRoot);
+      linkedIgnoredPaths = await copyWorkingTreeState(
+        repo.root,
+        worktreeRoot,
+        repo.head,
+        request.signal,
+      );
     } catch (err) {
       await removeWorktreeBestEffort(repo.root, worktreeRoot, branch);
       throw err;
@@ -92,12 +106,14 @@ class GitWorktreeManager implements AgentWorkspaceManager {
       root: worktreeRoot,
       branch,
       linkedIgnoredPaths,
+      // Worktrees are retained after successful runs so users can inspect,
+      // commit, or merge agent-created files from the recorded branch.
       dispose: () => {},
     };
   }
 
   private async inRepoQueue<T>(repoRoot: string, fn: () => Promise<T>): Promise<T> {
-    const previous = this.repoQueues.get(repoRoot) ?? Promise.resolve();
+    const previous = repoQueues.get(repoRoot) ?? Promise.resolve();
     const run = (async () => {
       await previous.catch(() => {});
       return fn();
@@ -106,56 +122,75 @@ class GitWorktreeManager implements AgentWorkspaceManager {
       () => {},
       () => {},
     );
-    this.repoQueues.set(repoRoot, current);
+    repoQueues.set(repoRoot, current);
     try {
       return await run;
     } finally {
-      if (this.repoQueues.get(repoRoot) === current) this.repoQueues.delete(repoRoot);
+      if (repoQueues.get(repoRoot) === current) repoQueues.delete(repoRoot);
     }
   }
 }
 
-async function discoverGitRepo(cwd: string): Promise<GitRepo | undefined> {
+async function discoverGitRepo(cwd: string, signal?: AbortSignal): Promise<GitRepo | undefined> {
   try {
-    const root = (await runGitText(["rev-parse", "--show-toplevel"], cwd)).trim();
-    const head = (await runGitText(["rev-parse", "--verify", "HEAD"], root)).trim();
+    const root = (await runGitText(["rev-parse", "--show-toplevel"], cwd, signal)).trim();
+    const head = (await runGitText(["rev-parse", "--verify", "HEAD"], root, signal)).trim();
     if (!root || !head) return undefined;
-    return { root: resolve(root), head };
+    return { root: await canonicalPath(root), head };
   } catch {
+    throwIfAborted(signal);
     return undefined;
   }
 }
 
-async function copyWorkingTreeState(repoRoot: string, worktreeRoot: string): Promise<string[]> {
-  const diff = await runGit(["diff", "--binary", "HEAD", "--"], repoRoot);
+async function copyWorkingTreeState(
+  repoRoot: string,
+  worktreeRoot: string,
+  head: string,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  throwIfAborted(signal);
+  const diff = await runGit(["diff", "--binary", head, "--"], repoRoot, undefined, signal);
   if (diff.length > 0) {
-    await runGit(["apply", "--binary", "-"], worktreeRoot, diff);
+    await runGit(["apply", "--binary", "-"], worktreeRoot, diff, signal);
   }
 
-  const untracked = await runGit(["ls-files", "--others", "--exclude-standard", "-z"], repoRoot);
+  const untracked = await runGit(
+    ["ls-files", "--others", "--exclude-standard", "-z"],
+    repoRoot,
+    undefined,
+    signal,
+  );
   for (const rel of splitNul(untracked)) {
+    throwIfAborted(signal);
     await copyUntrackedPath(join(repoRoot, rel), join(worktreeRoot, rel));
   }
 
-  return linkIgnoredRuntimeEntries(repoRoot, worktreeRoot);
+  return linkIgnoredRuntimeEntries(repoRoot, worktreeRoot, signal);
 }
 
 async function linkIgnoredRuntimeEntries(
   repoRoot: string,
   worktreeRoot: string,
+  signal?: AbortSignal,
 ): Promise<string[]> {
+  throwIfAborted(signal);
   const ignored = await runGit(
     ["ls-files", "--others", "--ignored", "--exclude-standard", "-z"],
     repoRoot,
+    undefined,
+    signal,
   );
   const linkRoots = new Set<string>();
   for (const rel of splitNul(ignored)) {
+    throwIfAborted(signal);
     const root = await ignoredLinkRoot(rel, worktreeRoot);
     if (root) linkRoots.add(root);
   }
 
   const linked: string[] = [];
   for (const rel of [...linkRoots].sort()) {
+    throwIfAborted(signal);
     try {
       await symlink(join(repoRoot, rel), join(worktreeRoot, rel));
       linked.push(rel);
@@ -188,6 +223,8 @@ async function copyUntrackedPath(source: string, dest: string): Promise<void> {
   } else if (stat.isFile()) {
     await copyFile(source, dest);
   }
+  // Git reports untracked files, not empty directories. Non-empty directories
+  // are copied file-by-file as their contents appear in `ls-files --others`.
 }
 
 async function removeWorktreeBestEffort(
@@ -201,6 +238,14 @@ async function removeWorktreeBestEffort(
 
 function originalCwdLease(cwd: string): AgentWorkspaceLease {
   return { cwd, dispose: () => {} };
+}
+
+async function canonicalPath(path: string): Promise<string> {
+  return resolve(await realpath(path));
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new Error("cancelled");
 }
 
 function isOutside(rel: string): boolean {
@@ -232,20 +277,47 @@ function randomId(): string {
   return randomBytes(5).toString("hex");
 }
 
-async function runGitText(args: string[], cwd: string): Promise<string> {
-  return (await runGit(args, cwd)).toString("utf8");
+async function runGitText(args: string[], cwd: string, signal?: AbortSignal): Promise<string> {
+  return (await runGit(args, cwd, undefined, signal)).toString("utf8");
 }
 
-function runGit(args: string[], cwd: string, input?: Buffer): Promise<Buffer> {
+function runGit(
+  args: string[],
+  cwd: string,
+  input?: Buffer,
+  signal?: AbortSignal,
+): Promise<Buffer> {
+  throwIfAborted(signal);
   return new Promise((resolvePromise, reject) => {
+    let settled = false;
     const child = spawn("git", args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
+    const cleanup = (): void => signal?.removeEventListener("abort", onAbort);
+    const onAbort = (): void => {
+      if (settled) return;
+      settled = true;
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // already gone
+      }
+      cleanup();
+      reject(new Error("cancelled"));
+    };
 
     child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
     child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
-    child.on("error", reject);
+    child.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(err);
+    });
     child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
       if (code === 0) {
         resolvePromise(Buffer.concat(stdout));
         return;
@@ -253,6 +325,7 @@ function runGit(args: string[], cwd: string, input?: Buffer): Promise<Buffer> {
       const message = Buffer.concat(stderr).toString("utf8").trim();
       reject(new Error(`git ${args.join(" ")} failed${message ? `: ${message}` : ""}`));
     });
+    signal?.addEventListener("abort", onAbort, { once: true });
 
     if (input) child.stdin.end(input);
     else child.stdin.end();
