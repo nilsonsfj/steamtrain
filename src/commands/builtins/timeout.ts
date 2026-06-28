@@ -1,14 +1,15 @@
 import { type ProjectConfigPatch, saveProjectConfig } from "../../config/project-config";
 import type { SteamtrainConfig } from "../../config/types";
-import type { WorkflowSpec } from "../../workflow/types";
 import {
   formatDurationMs,
   parseDurationMs,
   resolveStepTimeoutMs,
   resolveWorkflowTimeoutMs,
+  workflowTimeoutStepBudget,
 } from "../../workflow/timeout";
-import { hasWorkflowStepTarget } from "../workflow-step-target";
+import type { WorkflowSpec } from "../../workflow/types";
 import type { SlashCommand, SlashCommandContext } from "../types";
+import { hasWorkflowStepTarget } from "../workflow-step-target";
 
 function describeTimeouts(config: SteamtrainConfig, spec?: WorkflowSpec): string {
   const stepMs = spec
@@ -25,11 +26,22 @@ function describeTimeouts(config: SteamtrainConfig, spec?: WorkflowSpec): string
   ];
   if (spec) {
     const workflowMs = resolveWorkflowTimeoutMs(spec, config);
-    lines.push(
-      spec.workflowTimeoutMs !== undefined
-        ? `  workflow '${spec.name}' workflowTimeoutMs: ${formatDurationMs(spec.workflowTimeoutMs)}`
-        : `  workflow '${spec.name}' run limit: ${formatDurationMs(workflowMs)} (${spec.phases.reduce((n, p) => n + p.steps.length, 0)} steps)`,
-    );
+    if (spec.workflowTimeoutMs !== undefined) {
+      lines.push(
+        `  workflow '${spec.name}' workflowTimeoutMs: ${formatDurationMs(spec.workflowTimeoutMs)}`,
+      );
+    } else if (config.workflowTimeoutMs !== undefined) {
+      lines.push(
+        `  workflow '${spec.name}' run limit: ${formatDurationMs(workflowMs)} (project workflowTimeoutMs)`,
+      );
+    } else {
+      // Auto: loop bodies are budgeted, so report the worst-case step count the
+      // limit is sized against, not just the static step count.
+      const budget = workflowTimeoutStepBudget(spec, config.loopMaxIterations);
+      lines.push(
+        `  workflow '${spec.name}' run limit: ${formatDurationMs(workflowMs)} (auto: ${budget} steps × step timeout)`,
+      );
+    }
   }
   return lines.join("\n");
 }
@@ -63,7 +75,9 @@ export const timeoutCommand: SlashCommand = {
         return {
           handled: true,
           clearInput: true,
-          notices: [{ level: "error", text: `invalid duration '${args[1]}' (try 15m, 900000, 1h)` }],
+          notices: [
+            { level: "error", text: `invalid duration '${args[1]}' (try 15m, 900000, 1h)` },
+          ],
         };
       }
       ctx.updateWorkflowStep!(ctx.workflowStep!.stepId, { stepTimeoutMs: ms });
@@ -135,7 +149,9 @@ export const timeoutCommand: SlashCommand = {
       return {
         handled: true,
         clearInput: true,
-        notices: [{ level: "error", text: `invalid duration '${args[1]}' (try 15m, 900000, 1h, auto)` }],
+        notices: [
+          { level: "error", text: `invalid duration '${args[1]}' (try 15m, 900000, 1h, auto)` },
+        ],
       };
     }
 

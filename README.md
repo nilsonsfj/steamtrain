@@ -226,7 +226,7 @@ Override any subset in the working directory:
 {
   "binaries": { "opencode": "/opt/homebrew/bin/opencode" }, // optional path overrides
   "stepTimeoutMs": 900000,                                  // per-agent subprocess limit (default 15m)
-  "workflowTimeoutMs": 1800000,                             // optional whole-run cap; omit = steps × stepTimeoutMs
+  "workflowTimeoutMs": 1800000,                             // optional whole-run cap; omit = (loop-aware) steps × stepTimeoutMs
   "maxConcurrency": 3                                       // parallel steps per workflow phase (≤ 16)
   // "workflows": { … }                                     // see “Workflows” below
 }

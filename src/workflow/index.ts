@@ -56,6 +56,7 @@ export {
 export {
   DEFAULT_STEP_TIMEOUT_MS,
   countStaticWorkflowSteps,
+  workflowTimeoutStepBudget,
   formatDurationMs,
   parseDurationMs,
   resolveStepTimeoutMs,
