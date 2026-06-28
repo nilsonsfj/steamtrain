@@ -22,9 +22,9 @@
 | Security | A- | Headers, body limits, prototype pollution, and error sanitization all addressed |
 | Test Coverage | B+ | Orchestrator, malformed requests, doctor, and cache store tests added |
 | Performance | B | Async catalog I/O, transcript/frame caps, backpressure; TUI re-render concerns remain |
-| Maintainability | B- | App.tsx is a 1905-line monolith, html.ts is 1547 lines of inline JS/CSS |
+| Maintainability | B- | App.tsx is a 923-line monolith (decomposed from 1905), server.ts route organization |
 
-**Remaining findings: 47** (1 Critical, 1 High, 6 Medium, 40 Low)
+**Remaining findings: 44** (1 Critical, 0 High, 5 Medium, 38 Low)
 
 ---
 
@@ -53,10 +53,7 @@
 
 ## 2. High Findings
 
-### H13. `handleTab` and `handleWorkflowFreshRun` recreated on every keystroke
-- **File:** `src/tui/App.tsx:1114-1149, 1405-1413`
-- **Category:** Performance
-- Dependency arrays include changing values (`commandSuggestions`, `value`), causing cascading re-renders to `PromptInput` on every keystroke.
+(none remaining)
 
 ---
 
@@ -81,11 +78,6 @@
 - **File:** `src/workflow/overrides.ts:7-22`
 - **Category:** Edge Case
 - `isAgentBackedStep` returns true for distributor/consolidator steps with `agent` field. Spread could overwrite `condition` with agent fields.
-
-### M26. `WorkflowPicker` does not virtualize — all rows rendered
-- **File:** `src/tui/WorkflowPicker.tsx:46-77`
-- **Category:** Performance
-- Unlike `WorkflowView` and `WorkflowPreview`, renders ALL entries. 50+ workflows slow rendering.
 
 ### M36. No CORS headers on any endpoint
 - **File:** `src/web/server.ts`
@@ -186,9 +178,6 @@
 ### L40. `STATUS_GLYPH` vs `STATUS_STYLE` naming confusion
 - **File:** `src/tui/WorkflowHistory.tsx:14-18`
 
-### L41. `handleTab` depends on `commandSuggestions` — recreated on every keystroke
-- **File:** `src/tui/App.tsx:1114-1149`
-
 ### L42. `EventRow` `summarizeInput` unsafe cast
 - **File:** `src/tui/EventRow.tsx:157-158`
 
@@ -209,9 +198,6 @@
 
 ### L48. `WorkflowHistory` `selectVisibleWindow` misleading when empty
 - **File:** `src/tui/WorkflowHistory.tsx:30`
-
-### L49. `useWorkIndicator` resets elapsed on inactive
-- **File:** `src/tui/useWorkIndicator.ts:14-18`
 
 ### L50. `WorkflowStepDetails` prompt truncation too generous
 - **File:** `src/tui/WorkflowStepDetails.tsx:214`
@@ -235,8 +221,7 @@
 
 | Area | Observation |
 |------|-------------|
-| **App.tsx monolith** | 1905 lines, 30+ `useState`, 20+ `useCallback`. Should be split into hooks. |
-| ~~**html.ts inline bundle**~~ | ~~1547 lines of CSS+JS in a template literal. Extract to served `.js` file.~~ **Fixed** — the CSS + reducer bundle + hand-written client JS now live as real files under `src/web/public/` and are served at `/static/*` with immutable, content-hash cache-busted URLs (`?v=<sha>`). The page itself stayed a tiny template in `src/web/html.ts` and `script-src 'unsafe-inline'` was dropped from the CSP, so client code is now lintable (biome), statically analyzable by IDEs, and cached aggressively by browsers. |
+| **App.tsx monolith** | 923 lines (decomposed from 1905), state management extracted to hooks. |
 | **server.ts route organization** | 15+ routes in a single `handle()` function. Adding middleware is painful. |
 | **Variant cache duplication** | `codex-variants.ts` and `opencode-variants.ts` are near-identical. |
 | **No request logging** | Zero logging of HTTP requests or responses. |
@@ -263,15 +248,7 @@
 
 ## 7. Security Audit
 
-| Finding | Severity | File | Issue | Status |
-|---------|----------|------|-------|--------|
-| ~~Unbounded body parsing~~ | ~~Critical~~ | `server.ts` | ~~No byte limit on HTTP body~~ | **Fixed** |
-| ~~No concurrent run limit~~ | ~~Critical~~ | `runs.ts` | ~~Unbounded subprocess spawning~~ | **Fixed** |
-| ~~Missing `nosniff` header~~ | ~~High~~ | `server.ts` | ~~MIME sniffing risk~~ | **Fixed** |
-| ~~Missing CSP~~ | ~~High~~ | `html.ts` | ~~No containment for future XSS~~ | **Fixed** |
-| ~~Error details leaked~~ | ~~Medium~~ | `server.ts` | ~~Internal paths in error responses~~ | **Fixed** |
-| ~~Unsanitized workflow names~~ | ~~Medium~~ | `server.ts` | ~~Control chars, long strings~~ | **Fixed** |
-| ~~No spec validation at HTTP layer~~ | ~~Medium~~ | `server.ts` | ~~`as WorkflowSpec` cast without Zod~~ | **Fixed** |
+(all findings fixed)
 
 ---
 
@@ -279,14 +256,7 @@
 
 | Issue | File | Impact | Status |
 |-------|------|--------|--------|
-| ~~Sync I/O in hot path~~ | `catalog.ts` | ~~Event loop blocks on file writes~~ | **Fixed** |
-| ~~Unbounded transcript array~~ | `transcript.ts` | ~~Memory grows with session length~~ | **Fixed** |
 | `LineBuffer` O(n²) concatenation | `line-buffer.ts` | Large outputs cause quadratic allocation | |
-| No virtualization in `WorkflowPicker` | `WorkflowPicker.tsx` | All entries rendered | |
-| ~~Unbounded frame buffer~~ | `runs.ts` | ~~Megabytes retained for 5 minutes~~ | **Fixed** |
-| ~~`listRunRecords` unbounded reads~~ | `history-store.ts` | ~~Hundreds of simultaneous file reads~~ | **Fixed** |
-| ~~`PhaseOf`/`stepOf` O(n) per event~~ | `history.ts` | ~~Linear scan for every event~~ | **Fixed** |
-| ~~Callback recreation on keystroke~~ | `App.tsx` | ~~Cascading re-renders every keystroke~~ | **Fixed** |
 
 ---
 
@@ -295,19 +265,12 @@
 ### Next Sprint
 
 1. **Add OS signal handling tests** (C7) — verify clean shutdown
-2. **Stabilize callback references** (H13) — use `useRef` for values in callbacks
-
-### This Quarter
-
-3. **Extract `App.tsx` into smaller components/hooks** — state management, keyboard, render
-4. ~~**Extract `html.ts` JS to served file** — enable linting and static analysis~~ **Done**
-5. **Virtualize `WorkflowPicker`** (M26) — apply `selectVisibleWindow` like other list views
 
 ### Long-Term
 
-6. **Introduce route table** in `server.ts` — enable middleware composition
-7. **Add structured logging** — replace `console.warn`/`console.assert` with logger
-8. **Document threat model** — config file trust, loopback-only assumption
+2. **Introduce route table** in `server.ts` — enable middleware composition
+3. **Add structured logging** — replace `console.warn`/`console.assert` with logger
+4. **Document threat model** — config file trust, loopback-only assumption
 
 ---
 
