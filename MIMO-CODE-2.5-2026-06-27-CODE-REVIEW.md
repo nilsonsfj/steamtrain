@@ -24,7 +24,7 @@
 | Performance | B | Async catalog I/O, transcript/frame caps, backpressure; TUI re-render concerns remain |
 | Maintainability | B- | App.tsx is a 923-line monolith (decomposed from 1905), server.ts route organization |
 
-**Remaining findings: 38** (0 Critical, 0 High, 1 Medium, 37 Low)
+**Remaining findings: 37** (0 Critical, 0 High, 0 Medium, 37 Low)
 
 ---
 
@@ -78,10 +78,11 @@
 - `POST /api/workflows/generate` spawns subprocesses without throttling. Can exhaust credits and file descriptors.
 - **Resolution:** Added `maxConcurrentGenerations` option (default 2) to `StartWebUiOptions`. Module-level counter tracks active generations; returns 503 when limit reached. Counter decremented in `finally` block to ensure cleanup on errors.
 
-### M18. `applyWorkflowStepOverrides` can overwrite gate-specific fields
+### M18. `applyWorkflowStepOverrides` can overwrite gate-specific fields — **RESOLVED**
 - **File:** `src/workflow/overrides.ts:7-22`
 - **Category:** Edge Case
 - `isAgentBackedStep` returns true for distributor/consolidator steps with `agent` field. Spread could overwrite `condition` with agent fields.
+- **Resolution:** For distributor/consolidator steps, only apply the safe subset of agent fields (`agent`, `model`, `prompt`, `cwd`, `env`, `extraArgs`, `effort`, `stepTimeoutSec`, `stepTimeoutMs`). Worker/processor steps receive the full patch.
 
 ### M36. No CORS headers on any endpoint — **RESOLVED**
 - **File:** `src/web/server.ts`
