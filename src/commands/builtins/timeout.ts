@@ -1,45 +1,43 @@
 import { type ProjectConfigPatch, saveProjectConfig } from "../../config/project-config";
 import type { SteamtrainConfig } from "../../config/types";
+import type { WorkflowSpec } from "../../workflow/types";
 import {
-  formatDurationMs,
-  parseDurationMs,
-  resolveStepTimeoutMs,
-  resolveWorkflowTimeoutMs,
+  formatDurationSec,
+  parseDurationSec,
+  resolveStepTimeoutSec,
+  resolveWorkflowTimeoutSec,
   workflowTimeoutStepBudget,
 } from "../../workflow/timeout";
-import type { WorkflowSpec } from "../../workflow/types";
-import type { SlashCommand, SlashCommandContext } from "../types";
 import { hasWorkflowStepTarget } from "../workflow-step-target";
+import type { SlashCommand, SlashCommandContext } from "../types";
 
 function describeTimeouts(config: SteamtrainConfig, spec?: WorkflowSpec): string {
-  const stepMs = spec
-    ? resolveStepTimeoutMs(undefined, spec, config)
-    : resolveStepTimeoutMs(undefined, undefined, config);
+  const stepSec = spec
+    ? resolveStepTimeoutSec(undefined, spec, config)
+    : resolveStepTimeoutSec(undefined, undefined, config);
   const lines = [
-    `step timeout: ${formatDurationMs(stepMs)} (${stepMs}ms)`,
-    config.stepTimeoutMs !== undefined
-      ? `  project stepTimeoutMs: ${formatDurationMs(config.stepTimeoutMs)}`
-      : "  project stepTimeoutMs: (default 15m)",
-    config.workflowTimeoutMs !== undefined
-      ? `  project workflowTimeoutMs: ${formatDurationMs(config.workflowTimeoutMs)}`
-      : "  project workflowTimeoutMs: (auto: steps × step timeout)",
+    `step timeout: ${formatDurationSec(stepSec)} (${stepSec}s)`,
+    config.stepTimeoutSec !== undefined
+      ? `  project stepTimeoutSec: ${formatDurationSec(config.stepTimeoutSec)}`
+      : "  project stepTimeoutSec: (default 15m)",
+    config.workflowTimeoutSec !== undefined
+      ? `  project workflowTimeoutSec: ${formatDurationSec(config.workflowTimeoutSec)}`
+      : "  project workflowTimeoutSec: (auto: steps × step timeout)",
   ];
   if (spec) {
-    const workflowMs = resolveWorkflowTimeoutMs(spec, config);
-    if (spec.workflowTimeoutMs !== undefined) {
+    const workflowSec = resolveWorkflowTimeoutSec(spec, config);
+    if (spec.workflowTimeoutSec !== undefined) {
       lines.push(
-        `  workflow '${spec.name}' workflowTimeoutMs: ${formatDurationMs(spec.workflowTimeoutMs)}`,
+        `  workflow '${spec.name}' workflowTimeoutSec: ${formatDurationSec(spec.workflowTimeoutSec)}`,
       );
-    } else if (config.workflowTimeoutMs !== undefined) {
+    } else if (config.workflowTimeoutSec !== undefined) {
       lines.push(
-        `  workflow '${spec.name}' run limit: ${formatDurationMs(workflowMs)} (project workflowTimeoutMs)`,
+        `  workflow '${spec.name}' run limit: ${formatDurationSec(workflowSec)} (project workflowTimeoutSec)`,
       );
     } else {
-      // Auto: loop bodies are budgeted, so report the worst-case step count the
-      // limit is sized against, not just the static step count.
       const budget = workflowTimeoutStepBudget(spec, config.loopMaxIterations);
       lines.push(
-        `  workflow '${spec.name}' run limit: ${formatDurationMs(workflowMs)} (auto: ${budget} steps × step timeout)`,
+        `  workflow '${spec.name}' run limit: ${formatDurationSec(workflowSec)} (auto: ${budget} steps × step timeout)`,
       );
     }
   }
@@ -70,24 +68,22 @@ export const timeoutCommand: SlashCommand = {
 
     const scope = args[0]?.toLowerCase();
     if (scope === "step" && args.length >= 2 && hasWorkflowStepTarget(ctx)) {
-      const ms = parseDurationMs(args[1]!);
-      if (!ms) {
+      const sec = parseDurationSec(args[1]!);
+      if (!sec) {
         return {
           handled: true,
           clearInput: true,
-          notices: [
-            { level: "error", text: `invalid duration '${args[1]}' (try 15m, 900000, 1h)` },
-          ],
+          notices: [{ level: "error", text: `invalid duration '${args[1]}' (try 15m, 900, 1h)` }],
         };
       }
-      ctx.updateWorkflowStep!(ctx.workflowStep!.stepId, { stepTimeoutMs: ms });
+      ctx.updateWorkflowStep!(ctx.workflowStep!.stepId, { stepTimeoutSec: sec });
       return {
         handled: true,
         clearInput: true,
         notices: [
           {
             level: "info",
-            text: `step '${ctx.workflowStep!.stepId}' timeout set to ${formatDurationMs(ms)}`,
+            text: `step '${ctx.workflowStep!.stepId}' timeout set to ${formatDurationSec(sec)}`,
           },
         ],
       };
@@ -129,7 +125,7 @@ export const timeoutCommand: SlashCommand = {
 
     const raw = args[1]!.toLowerCase();
     if (scope === "workflow" && (raw === "auto" || raw === "clear" || raw === "default")) {
-      const result = ctx.updateConfig({ workflowTimeoutMs: undefined });
+      const result = ctx.updateConfig({ workflowTimeoutSec: undefined });
       if (!result.ok) {
         return {
           handled: true,
@@ -144,19 +140,17 @@ export const timeoutCommand: SlashCommand = {
       };
     }
 
-    const ms = parseDurationMs(args[1]!);
-    if (!ms) {
+    const sec = parseDurationSec(args[1]!);
+    if (!sec) {
       return {
         handled: true,
         clearInput: true,
-        notices: [
-          { level: "error", text: `invalid duration '${args[1]}' (try 15m, 900000, 1h, auto)` },
-        ],
+        notices: [{ level: "error", text: `invalid duration '${args[1]}' (try 15m, 900, 1h, auto)` }],
       };
     }
 
     const patch: ProjectConfigPatch =
-      scope === "step" ? { stepTimeoutMs: ms } : { workflowTimeoutMs: ms };
+      scope === "step" ? { stepTimeoutSec: sec } : { workflowTimeoutSec: sec };
     const result = ctx.updateConfig(patch);
     if (!result.ok) {
       return {
@@ -172,7 +166,7 @@ export const timeoutCommand: SlashCommand = {
       notices: [
         {
           level: "info",
-          text: `${scope} timeout set to ${formatDurationMs(ms)} in ${ctx.configPath}`,
+          text: `${scope} timeout set to ${formatDurationSec(sec)} in ${ctx.configPath}`,
         },
       ],
     };

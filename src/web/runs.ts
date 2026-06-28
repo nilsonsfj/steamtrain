@@ -14,7 +14,8 @@ import {
   isRerunError,
   persistWorkflowStepDone,
   planRerun,
-  resolveWorkflowTimeoutMs,
+  resolveWorkflowTimeoutSec,
+  timeoutMsFromSec,
   workflowCacheKey,
 } from "../workflow";
 
@@ -172,7 +173,7 @@ export class WorkflowRunManager {
       listeners: new Set(),
       controller: new AbortController(),
     };
-    const workflowTimeoutMs = resolveWorkflowTimeoutMs(spec, this.config);
+    const workflowTimeoutMs = timeoutMsFromSec(resolveWorkflowTimeoutSec(spec, this.config));
     if (workflowTimeoutMs > 0) {
       run.timeoutTimer = setTimeout(() => run.controller.abort(), workflowTimeoutMs);
       run.timeoutTimer.unref?.();

@@ -314,7 +314,7 @@ describe("web accepts loop workflows", () => {
       host: new FakeHost(loopWorkflow, loopRun),
       cacheStore: noopStore,
       cwd: "/tmp",
-      config: { stepTimeoutMs: 60_000, workflowTimeoutMs: 60 * 60 * 1000 },
+      config: { stepTimeoutSec: 60, workflowTimeoutSec: 60 * 60 },
     });
     const server = createWebServer({
       host: new FakeHost(loopWorkflow, loopRun),

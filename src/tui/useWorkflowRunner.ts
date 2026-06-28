@@ -14,7 +14,8 @@ import {
   createWorkflowHistoryStore,
   hashWorkflowSpec,
   persistWorkflowStepDone,
-  resolveWorkflowTimeoutMs,
+  resolveWorkflowTimeoutSec,
+  timeoutMsFromSec,
   workflowCacheKey,
 } from "../workflow";
 import {
@@ -102,7 +103,9 @@ export function useWorkflowRunner({
       setRunning(true);
       const ac = new AbortController();
       abortRef.current = ac;
-      const workflowTimeoutMs = resolveWorkflowTimeoutMs(spec, orchestrator.getConfig());
+      const workflowTimeoutMs = timeoutMsFromSec(
+        resolveWorkflowTimeoutSec(spec, orchestrator.getConfig()),
+      );
       const timeoutTimer =
         workflowTimeoutMs > 0 ? setTimeout(() => ac.abort(), workflowTimeoutMs) : undefined;
       timeoutTimer?.unref?.();

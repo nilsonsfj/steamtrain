@@ -24,7 +24,7 @@ export interface UseSlashContextParams {
   wfPreview: { name: string; input: string } | null;
   patchWorkflowStep: (
     stepId: string,
-    patch: Partial<Pick<WorkspaceEntry, "agent" | "model" | "effort"> & { stepTimeoutMs?: number }>,
+    patch: Partial<Pick<WorkspaceEntry, "agent" | "model" | "effort"> & { stepTimeoutSec?: number }>,
   ) => void;
   previewStepSelection: WorkflowStepSelection | undefined;
   workflowSpec?: WorkflowSpec;

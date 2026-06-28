@@ -98,7 +98,7 @@ export async function* runAgentProcess(params: AgentProcessParams): AsyncGenerat
           kind: "error",
           agent: id,
           ts,
-          message: `'${binary}' timed out after ${opts.timeoutMs}ms`,
+          message: `'${binary}' timed out after ${opts.timeoutMs! / 1000}s`,
           stderr: stderr || undefined,
           code: item.code,
         };

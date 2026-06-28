@@ -117,15 +117,25 @@ function joinWarnings(...parts: Array<string | undefined>): string | undefined {
 function mergeTimeoutFields(
   base: SteamtrainConfig,
   override: ConfigFile,
-): Pick<SteamtrainConfig, "stepTimeoutMs" | "workflowTimeoutMs" | "timeoutMs"> {
-  const stepTimeoutMs =
-    override.stepTimeoutMs ?? override.timeoutMs ?? base.stepTimeoutMs ?? base.timeoutMs;
-  const workflowTimeoutMs =
-    override.workflowTimeoutMs ?? override.timeoutMs ?? base.workflowTimeoutMs ?? base.timeoutMs;
+): Pick<SteamtrainConfig, "stepTimeoutSec" | "workflowTimeoutSec" | "timeoutMs"> {
+  const msToSec = (ms: number): number => ms / 1000;
+
+  const stepTimeoutSec =
+    override.stepTimeoutSec ??
+    (override.stepTimeoutMs !== undefined ? msToSec(override.stepTimeoutMs) : undefined) ??
+    (override.timeoutMs !== undefined ? msToSec(override.timeoutMs) : undefined) ??
+    base.stepTimeoutSec;
+
+  const workflowTimeoutSec =
+    override.workflowTimeoutSec ??
+    (override.workflowTimeoutMs !== undefined ? msToSec(override.workflowTimeoutMs) : undefined) ??
+    (override.timeoutMs !== undefined ? msToSec(override.timeoutMs) : undefined) ??
+    base.workflowTimeoutSec;
+
   const legacy = override.timeoutMs ?? base.timeoutMs;
-  const out: Pick<SteamtrainConfig, "stepTimeoutMs" | "workflowTimeoutMs" | "timeoutMs"> = {};
-  if (stepTimeoutMs !== undefined) out.stepTimeoutMs = stepTimeoutMs;
-  if (workflowTimeoutMs !== undefined) out.workflowTimeoutMs = workflowTimeoutMs;
+  const out: Pick<SteamtrainConfig, "stepTimeoutSec" | "workflowTimeoutSec" | "timeoutMs"> = {};
+  if (stepTimeoutSec !== undefined) out.stepTimeoutSec = stepTimeoutSec;
+  if (workflowTimeoutSec !== undefined) out.workflowTimeoutSec = workflowTimeoutSec;
   if (legacy !== undefined) out.timeoutMs = legacy;
   return out;
 }

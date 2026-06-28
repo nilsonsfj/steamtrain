@@ -18,7 +18,7 @@ import { deleteUserWorkflow, saveUserWorkflow } from "./catalog";
 import type { SaveSessionWorkflowsResult, WorkflowSourceKind } from "./catalog";
 import { generateWorkflow, slugifyWorkflowName } from "./generate";
 import { applyWorkflowStepOverrides } from "./overrides";
-import { resolveStepTimeoutMs } from "./timeout";
+import { resolveStepTimeoutSec } from "./timeout";
 import type { WorkflowStepOverrides } from "./overrides";
 import { type WorkflowSpec, validateWorkflow } from "./types";
 
@@ -162,7 +162,7 @@ export class WorkflowAuthor {
       {
         createAdapter: this.makeAdapter,
         binaries: this.config.binaries,
-        stepTimeoutMs: resolveStepTimeoutMs(undefined, undefined, this.config),
+        stepTimeoutSec: resolveStepTimeoutSec(undefined, undefined, this.config),
         cwd: this.cwd,
       },
     );

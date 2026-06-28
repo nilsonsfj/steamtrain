@@ -122,7 +122,7 @@ async function* hangingRun(_input: string, signal?: AbortSignal): AsyncIterable<
   yield { kind: "workflow_done", ok: false, results: [], ts: Date.now() };
 }
 
-const testRunConfig = { stepTimeoutMs: 60_000, workflowTimeoutMs: 60 * 60 * 1000 };
+const testRunConfig = { stepTimeoutSec: 60, workflowTimeoutSec: 60 * 60 };
 
 function makeServer(host: WorkflowHost): { server: Server; runs: WorkflowRunManager } {
   const runs = new WorkflowRunManager({
@@ -678,13 +678,13 @@ describe("web server", () => {
     expect(body.doctorError).toBeUndefined();
   });
 
-  it("aborts run after workflowTimeoutMs (M16)", async () => {
+  it("aborts run after workflowTimeoutSec (M16)", async () => {
     const host = new FakeHost(demoSpec(), hangingRun);
     const runs = new WorkflowRunManager({
       host,
       cacheStore: createInMemoryStore(),
       cwd: "/tmp",
-      config: { workflowTimeoutMs: 200, stepTimeoutMs: 60_000 },
+      config: { workflowTimeoutSec: 0.2, stepTimeoutSec: 60 },
     });
     const server = createWebServer({ host, runs });
     servers.push(server);

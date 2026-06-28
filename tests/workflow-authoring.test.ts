@@ -101,7 +101,7 @@ class FakeHost implements WorkflowHost {
   }
 }
 
-const config: SteamtrainConfig = { stepTimeoutMs: 1000 };
+const config: SteamtrainConfig = { stepTimeoutSec: 1 };
 
 const noopStore: WorkflowCacheStore = {
   rootDir: "/tmp/none",

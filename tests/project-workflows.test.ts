@@ -72,8 +72,8 @@ describe("saveProjectWorkflow", () => {
     expect(result.ok).toBe(true);
 
     const config = mergedConfig(cwd);
-    expect(config.stepTimeoutMs).toBe(12345);
-    expect(config.workflowTimeoutMs).toBe(12345);
+    expect(config.stepTimeoutSec).toBe(12.345);
+    expect(config.workflowTimeoutSec).toBe(12.345);
     expect(config.timeoutMs).toBe(12345);
     expect(config.binaries).toEqual({ codex: "/usr/bin/codex" });
     expect(config.maxConcurrency).toBe(2);
@@ -147,7 +147,7 @@ describe("deleteProjectWorkflow", () => {
     expect(remaining.a).toBeUndefined();
     expect(remaining.b).toBeDefined();
     expect(readConfig(cwd).timeoutMs).toBe(999);
-    expect(mergedConfig(cwd).stepTimeoutMs).toBe(999);
+    expect(mergedConfig(cwd).stepTimeoutSec).toBe(0.999);
   });
 
   it("is a no-op (still ok) when the workflow is absent", () => {

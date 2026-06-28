@@ -61,13 +61,13 @@
 
   function openConfigModal() {
     if (!S.projectConfig) { setBanner("project config is not available", "info"); return; }
-    var stepMin = Math.round((S.projectConfig.stepTimeoutMs || 900000) / 60000);
-    var wfMin = S.projectConfig.workflowTimeoutMs
-      ? Math.round(S.projectConfig.workflowTimeoutMs / 60000)
+    var stepMin = Math.round((S.projectConfig.stepTimeoutSec || 900) / 60);
+    var wfMin = S.projectConfig.workflowTimeoutSec
+      ? Math.round(S.projectConfig.workflowTimeoutSec / 60)
       : "";
     var stepInput = h("input", { class: "txt", type: "number", min: "1", value: String(stepMin) });
     var wfInput = h("input", { class: "txt", type: "number", min: "1", placeholder: "auto (steps × step)", value: wfMin });
-    var autoChk = h("input", { type: "checkbox", checked: !S.projectConfig.workflowTimeoutMs });
+    var autoChk = h("input", { type: "checkbox", checked: !S.projectConfig.workflowTimeoutSec });
     var banner = h("div", { class: "mbanner" });
     var body = h("div", null,
       banner,
@@ -78,14 +78,14 @@
     );
     var saveBtn = h("button", { class: "btn primary", text: "Save" });
   saveBtn.addEventListener("click", function () {
-      var stepMs = Number(stepInput.value) * 60000;
-      if (!stepMs || stepMs <= 0) { mbanner(banner, "step timeout must be a positive number of minutes", "err"); return; }
-      var payload = { stepTimeoutMs: stepMs };
+      var stepSec = Number(stepInput.value) * 60;
+      if (!stepSec || stepSec <= 0) { mbanner(banner, "step timeout must be a positive number of minutes", "err"); return; }
+      var payload = { stepTimeoutSec: stepSec };
       if (autoChk.checked) payload.clearWorkflowTimeout = true;
       else {
-        var wfMs = Number(wfInput.value) * 60000;
-        if (!wfMs || wfMs <= 0) { mbanner(banner, "workflow timeout must be a positive number of minutes", "err"); return; }
-        payload.workflowTimeoutMs = wfMs;
+        var wfSec = Number(wfInput.value) * 60;
+        if (!wfSec || wfSec <= 0) { mbanner(banner, "workflow timeout must be a positive number of minutes", "err"); return; }
+        payload.workflowTimeoutSec = wfSec;
       }
       saveBtn.disabled = true;
       api("PUT", "/api/config", payload).then(function (r) {
@@ -687,8 +687,8 @@
     var nameInput = h("input", { class: "txt", maxlength: "48", value: creating ? spec.name + "-copy" : spec.name });
     if (!creating && !isWritable) nameInput.setAttribute("disabled", "true");
     var descInput = h("input", { class: "txt", value: spec.description || "", placeholder: "one-line description" });
-    var wfStepMin = spec.stepTimeoutMs ? Math.round(spec.stepTimeoutMs / 60000) : "";
-    var wfRunMin = spec.workflowTimeoutMs ? Math.round(spec.workflowTimeoutMs / 60000) : "";
+    var wfStepMin = spec.stepTimeoutSec ? Math.round(spec.stepTimeoutSec / 60) : "";
+    var wfRunMin = spec.workflowTimeoutSec ? Math.round(spec.workflowTimeoutSec / 60) : "";
     var wfStepInput = h("input", { class: "txt", type: "number", min: "1", placeholder: "project default", value: wfStepMin });
     var wfRunInput = h("input", { class: "txt", type: "number", min: "1", placeholder: "auto", value: wfRunMin });
     var scopeSel = selectEl(scopeOptions(), "user");
@@ -736,10 +736,10 @@
       }
       spec.name = targetName;
       spec.description = descInput.value.trim() || undefined;
-      var wfStepMs = Number(wfStepInput.value) * 60000;
-      if (wfStepInput.value.trim() && wfStepMs > 0) spec.stepTimeoutMs = wfStepMs; else delete spec.stepTimeoutMs;
-      var wfRunMs = Number(wfRunInput.value) * 60000;
-      if (wfRunInput.value.trim() && wfRunMs > 0) spec.workflowTimeoutMs = wfRunMs; else delete spec.workflowTimeoutMs;
+      var wfStepSec = Number(wfStepInput.value) * 60;
+      if (wfStepInput.value.trim() && wfStepSec > 0) spec.stepTimeoutSec = wfStepSec; else delete spec.stepTimeoutSec;
+      var wfRunSec = Number(wfRunInput.value) * 60;
+      if (wfRunInput.value.trim() && wfRunSec > 0) spec.workflowTimeoutSec = wfRunSec; else delete spec.workflowTimeoutSec;
       spec.phases.forEach(function (p) {
         p.steps.forEach(function (st) {
           var r = refs[st.id];
@@ -750,9 +750,9 @@
           if (ef) st.effort = ef; else delete st.effort;
           st.prompt = r.promptTa.value;
           if (r.stepTimeoutInput && r.stepTimeoutInput.value.trim()) {
-            var stepMs = Number(r.stepTimeoutInput.value) * 60000;
-            if (stepMs > 0) st.stepTimeoutMs = stepMs; else delete st.stepTimeoutMs;
-          } else delete st.stepTimeoutMs;
+            var stepSec = Number(r.stepTimeoutInput.value) * 60;
+            if (stepSec > 0) st.stepTimeoutSec = stepSec; else delete st.stepTimeoutSec;
+          } else delete st.stepTimeoutSec;
         });
       });
       saveBtn.disabled = true; saveBtn.textContent = "Saving…";
@@ -795,7 +795,7 @@
     var effortField = h("div", { class: "field" });
     var stepTimeoutInput = h("input", {
       class: "txt", type: "number", min: "1", placeholder: "workflow default",
-      value: st.stepTimeoutMs ? String(Math.round(st.stepTimeoutMs / 60000)) : ""
+      value: st.stepTimeoutSec ? String(Math.round(st.stepTimeoutSec / 60)) : ""
     });
     var promptTa = h("textarea", { class: "ta", text: st.prompt || "" });
 

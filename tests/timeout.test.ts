@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "../src/config/defaults";
 import { mergeConfig } from "../src/config/load";
 import {
-  DEFAULT_STEP_TIMEOUT_MS,
+  DEFAULT_STEP_TIMEOUT_SEC,
   countStaticWorkflowSteps,
-  formatDurationMs,
-  parseDurationMs,
-  resolveStepTimeoutMs,
-  resolveWorkflowTimeoutMs,
+  formatDurationSec,
+  parseDurationSec,
+  resolveStepTimeoutSec,
+  resolveWorkflowTimeoutSec,
+  timeoutMsFromSec,
   workflowTimeoutStepBudget,
 } from "../src/workflow/timeout";
 import type { WorkflowSpec } from "../src/workflow/types";
@@ -65,24 +66,32 @@ const demoSpec = (steps = 2): WorkflowSpec => ({
 });
 
 describe("timeout resolution", () => {
-  it("defaults step timeout to 15 minutes", () => {
-    expect(resolveStepTimeoutMs(undefined, undefined, {})).toBe(DEFAULT_STEP_TIMEOUT_MS);
-    expect(DEFAULT_CONFIG.stepTimeoutMs).toBe(DEFAULT_STEP_TIMEOUT_MS);
+  it("defaults step timeout to 15 minutes in seconds", () => {
+    expect(resolveStepTimeoutSec(undefined, undefined, {})).toBe(DEFAULT_STEP_TIMEOUT_SEC);
+    expect(DEFAULT_CONFIG.stepTimeoutSec).toBe(DEFAULT_STEP_TIMEOUT_SEC);
+    expect(timeoutMsFromSec(900)).toBe(900_000);
   });
 
   it("defaults workflow timeout to stepCount × step timeout", () => {
     const spec = demoSpec(4);
-    expect(resolveWorkflowTimeoutMs(spec, {})).toBe(4 * DEFAULT_STEP_TIMEOUT_MS);
+    expect(resolveWorkflowTimeoutSec(spec, {})).toBe(4 * DEFAULT_STEP_TIMEOUT_SEC);
     expect(countStaticWorkflowSteps(spec)).toBe(4);
   });
 
-  it("honors per-layer overrides", () => {
+  it("honors per-layer overrides in seconds", () => {
     const spec = demoSpec(2);
-    spec.stepTimeoutMs = 60_000;
+    spec.stepTimeoutSec = 60;
+    spec.workflowTimeoutSec = 120;
+    expect(resolveStepTimeoutSec({ stepTimeoutSec: 30 }, spec, {})).toBe(30);
+    expect(resolveStepTimeoutSec(undefined, spec, {})).toBe(60);
+    expect(resolveWorkflowTimeoutSec(spec, {})).toBe(120);
+  });
+
+  it("migrates legacy millisecond fields at resolve time", () => {
+    expect(resolveStepTimeoutSec({ stepTimeoutMs: 30_000 }, undefined, {})).toBe(30);
+    const spec = demoSpec(1);
     spec.workflowTimeoutMs = 120_000;
-    expect(resolveStepTimeoutMs({ stepTimeoutMs: 30_000 }, spec, {})).toBe(30_000);
-    expect(resolveStepTimeoutMs(undefined, spec, {})).toBe(60_000);
-    expect(resolveWorkflowTimeoutMs(spec, {})).toBe(120_000);
+    expect(resolveWorkflowTimeoutSec(spec, {})).toBe(120);
   });
 
   it("budgets loop re-runs into the auto workflow timeout", () => {
@@ -91,42 +100,44 @@ describe("timeout resolution", () => {
     const spec = loopSpec(5);
     expect(countStaticWorkflowSteps(spec)).toBe(4);
     expect(workflowTimeoutStepBudget(spec, 5)).toBe(16);
-    expect(resolveWorkflowTimeoutMs(spec, {})).toBe(16 * DEFAULT_STEP_TIMEOUT_MS);
+    expect(resolveWorkflowTimeoutSec(spec, {})).toBe(16 * DEFAULT_STEP_TIMEOUT_SEC);
   });
 
   it("falls back to the config loop cap when a loop gate omits maxIterations", () => {
     const spec = loopSpec();
     // config loopMaxIterations 3 → body (3 steps) runs 3× → 4 + (3-1)*3 = 10.
     expect(workflowTimeoutStepBudget(spec, 3)).toBe(10);
-    expect(resolveWorkflowTimeoutMs(spec, { loopMaxIterations: 3 })).toBe(
-      10 * DEFAULT_STEP_TIMEOUT_MS,
+    expect(resolveWorkflowTimeoutSec(spec, { loopMaxIterations: 3 })).toBe(
+      10 * DEFAULT_STEP_TIMEOUT_SEC,
     );
     // default loop cap (10) → 4 + (10-1)*3 = 31.
     expect(workflowTimeoutStepBudget(spec)).toBe(31);
   });
 
-  it("explicit workflowTimeoutMs still overrides the loop-aware default", () => {
-    const spec = loopSpec(5);
-    spec.workflowTimeoutMs = 120_000;
-    expect(resolveWorkflowTimeoutMs(spec, {})).toBe(120_000);
+  it("explicit workflowTimeoutSec still overrides the loop-aware default", () => {
+    const spec = demoSpec(2);
+    spec.workflowTimeoutSec = 120;
+    expect(resolveWorkflowTimeoutSec(spec, {})).toBe(120);
   });
 
-  it("migrates legacy timeoutMs in config merge", () => {
+  it("migrates legacy timeoutMs in config merge to seconds", () => {
     const { config } = mergeConfig(DEFAULT_CONFIG, { timeoutMs: 250_000 });
-    expect(config.stepTimeoutMs).toBe(250_000);
-    expect(config.workflowTimeoutMs).toBe(250_000);
+    expect(config.stepTimeoutSec).toBe(250);
+    expect(config.workflowTimeoutSec).toBe(250);
     expect(config.timeoutMs).toBe(250_000);
   });
 
-  it("parses human duration tokens", () => {
-    expect(parseDurationMs("900000")).toBe(900_000);
-    expect(parseDurationMs("15m")).toBe(15 * 60 * 1000);
-    expect(parseDurationMs("1h")).toBe(60 * 60 * 1000);
-    expect(parseDurationMs("bad")).toBeUndefined();
+  it("parses human duration tokens into seconds", () => {
+    expect(parseDurationSec("900")).toBe(900);
+    expect(parseDurationSec("15m")).toBe(15 * 60);
+    expect(parseDurationSec("1h")).toBe(60 * 60);
+    expect(parseDurationSec("500ms")).toBe(0.5);
+    expect(parseDurationSec("bad")).toBeUndefined();
   });
 
-  it("formats durations readably", () => {
-    expect(formatDurationMs(900_000)).toBe("15m");
-    expect(formatDurationMs(3_600_000)).toBe("1h");
+  it("formats durations readably from seconds", () => {
+    expect(formatDurationSec(900)).toBe("15m");
+    expect(formatDurationSec(3600)).toBe("1h");
+    expect(formatDurationSec(0.5)).toBe("500ms");
   });
 });

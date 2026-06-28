@@ -1,8 +1,13 @@
 import type { SteamtrainConfig } from "../config/types";
 import { DEFAULT_LOOP_MAX_ITERATIONS, type WorkflowSpec } from "./types";
 
-/** Default per-agent subprocess wall-clock limit: 15 minutes. */
-export const DEFAULT_STEP_TIMEOUT_MS = 15 * 60 * 1000;
+/** Default per-agent subprocess wall-clock limit: 15 minutes (in seconds). */
+export const DEFAULT_STEP_TIMEOUT_SEC = 15 * 60;
+
+/** Convert a second-based timeout to milliseconds for timers and subprocess kills. */
+export function timeoutMsFromSec(sec: number): number {
+  return Math.round(sec * 1000);
+}
 
 /** Count static steps declared in a workflow spec (excludes dynamic fan-out children). */
 export function countStaticWorkflowSteps(spec: WorkflowSpec): number {
@@ -13,13 +18,7 @@ export function countStaticWorkflowSteps(spec: WorkflowSpec): number {
  * Worst-case step count used to size the auto workflow timeout. Starts from the
  * static step count and adds the extra passes a loop gate (`loopTo`) re-runs its
  * body, so a looping workflow's auto limit reflects its real wall-clock envelope
- * instead of killing it mid-loop. Mirrors the loop-expansion accounting in
- * {@link validateWorkflow} (each region's body runs `maxIterations` times,
- * multiplied by every region that fully contains it).
- *
- * Dynamic fan-out (`forEach`) children are deliberately excluded: their count is
- * not known until run time, and they execute in parallel (bounded by
- * concurrency) so they add far less wall-clock than a sequential loop re-run.
+ * instead of killing it mid-loop.
  */
 export function workflowTimeoutStepBudget(spec: WorkflowSpec, loopMaxIterations?: number): number {
   const base = countStaticWorkflowSteps(spec);
@@ -60,57 +59,82 @@ export function workflowTimeoutStepBudget(spec: WorkflowSpec, loopMaxIterations?
   return base + expansion;
 }
 
-function legacyTimeoutMs(config?: Pick<SteamtrainConfig, "timeoutMs">): number | undefined {
-  return config?.timeoutMs;
+type StepTimeoutSource = {
+  stepTimeoutSec?: number;
+  /** @deprecated milliseconds — converted to seconds at resolve time. */
+  stepTimeoutMs?: number;
+};
+
+type WorkflowTimeoutSource = {
+  workflowTimeoutSec?: number;
+  /** @deprecated milliseconds — converted to seconds at resolve time. */
+  workflowTimeoutMs?: number;
+};
+
+type ConfigTimeoutSource = Pick<
+  SteamtrainConfig,
+  "stepTimeoutSec" | "workflowTimeoutSec" | "timeoutMs"
+>;
+
+function secFromMs(ms: number): number {
+  return ms / 1000;
+}
+
+function stepTimeoutSecFromSource(source?: StepTimeoutSource): number | undefined {
+  if (!source) return undefined;
+  if (source.stepTimeoutSec !== undefined) return source.stepTimeoutSec;
+  if (source.stepTimeoutMs !== undefined) return secFromMs(source.stepTimeoutMs);
+  return undefined;
+}
+
+function workflowTimeoutSecFromSource(source?: WorkflowTimeoutSource): number | undefined {
+  if (!source) return undefined;
+  if (source.workflowTimeoutSec !== undefined) return source.workflowTimeoutSec;
+  if (source.workflowTimeoutMs !== undefined) return secFromMs(source.workflowTimeoutMs);
+  return undefined;
 }
 
 /**
- * Resolve the per-agent subprocess timeout for one step.
+ * Resolve the per-agent subprocess timeout for one step (seconds).
  * Chain: step override → workflow default → config → legacy `timeoutMs` → built-in default.
  */
-export function resolveStepTimeoutMs(
-  step?: { stepTimeoutMs?: number },
-  workflow?: Pick<WorkflowSpec, "stepTimeoutMs">,
-  config?: Pick<SteamtrainConfig, "stepTimeoutMs" | "timeoutMs">,
+export function resolveStepTimeoutSec(
+  step?: StepTimeoutSource,
+  workflow?: StepTimeoutSource,
+  config?: ConfigTimeoutSource,
 ): number {
-  const fromStep = step?.stepTimeoutMs;
+  const fromStep = stepTimeoutSecFromSource(step);
   if (fromStep !== undefined) return fromStep;
-  if (workflow?.stepTimeoutMs !== undefined) return workflow.stepTimeoutMs;
-  if (config?.stepTimeoutMs !== undefined) return config.stepTimeoutMs;
-  const legacy = legacyTimeoutMs(config);
-  if (legacy !== undefined) return legacy;
-  return DEFAULT_STEP_TIMEOUT_MS;
+  const fromWorkflow = stepTimeoutSecFromSource(workflow);
+  if (fromWorkflow !== undefined) return fromWorkflow;
+  if (config?.stepTimeoutSec !== undefined) return config.stepTimeoutSec;
+  if (config?.timeoutMs !== undefined) return secFromMs(config.timeoutMs);
+  return DEFAULT_STEP_TIMEOUT_SEC;
 }
 
 /**
- * Resolve the whole-workflow wall-clock abort limit.
+ * Resolve the whole-workflow wall-clock abort limit (seconds).
  * Chain: workflow override → config override → legacy `timeoutMs` → loop-aware
- * stepCount × step timeout. The auto default uses {@link workflowTimeoutStepBudget}
- * so a looping workflow's body re-runs are budgeted (otherwise the default limit
- * would abort a bounded loop mid-iteration even though each step is well within
- * its own step timeout).
+ * stepCount × step timeout.
  */
-export function resolveWorkflowTimeoutMs(
+export function resolveWorkflowTimeoutSec(
   spec: WorkflowSpec,
-  config?: Pick<
-    SteamtrainConfig,
-    "stepTimeoutMs" | "workflowTimeoutMs" | "timeoutMs" | "loopMaxIterations"
-  >,
+  config?: Pick<SteamtrainConfig, "stepTimeoutSec" | "workflowTimeoutSec" | "timeoutMs" | "loopMaxIterations">,
 ): number {
-  if (spec.workflowTimeoutMs !== undefined) return spec.workflowTimeoutMs;
-  if (config?.workflowTimeoutMs !== undefined) return config.workflowTimeoutMs;
-  const legacy = legacyTimeoutMs(config);
-  if (legacy !== undefined) return legacy;
-  const stepTimeout = resolveStepTimeoutMs(undefined, spec, config);
+  const fromSpec = workflowTimeoutSecFromSource(spec);
+  if (fromSpec !== undefined) return fromSpec;
+  if (config?.workflowTimeoutSec !== undefined) return config.workflowTimeoutSec;
+  if (config?.timeoutMs !== undefined) return secFromMs(config.timeoutMs);
+  const stepTimeout = resolveStepTimeoutSec(undefined, spec, config);
   const steps = Math.max(1, workflowTimeoutStepBudget(spec, config?.loopMaxIterations));
   return steps * stepTimeout;
 }
 
-/** Parse a duration token (`900000`, `15m`, `1h`, `30s`) into milliseconds. */
-export function parseDurationMs(raw: string): number | undefined {
+/** Parse a duration token (`900`, `15m`, `1h`, `30s`, `500ms`) into seconds. */
+export function parseDurationSec(raw: string): number | undefined {
   const trimmed = raw.trim().toLowerCase();
   if (!trimmed) return undefined;
-  if (/^\d+$/.test(trimmed)) {
+  if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
     const n = Number(trimmed);
     return Number.isFinite(n) && n > 0 ? n : undefined;
   }
@@ -120,28 +144,29 @@ export function parseDurationMs(raw: string): number | undefined {
   if (!Number.isFinite(value) || value <= 0) return undefined;
   switch (match[2]) {
     case "ms":
-      return Math.round(value);
+      return value / 1000;
     case "s":
     case "sec":
     case "secs":
-      return Math.round(value * 1000);
+      return value;
     case "m":
     case "min":
     case "mins":
-      return Math.round(value * 60 * 1000);
+      return value * 60;
     case "h":
     case "hr":
     case "hrs":
-      return Math.round(value * 60 * 60 * 1000);
+      return value * 60 * 60;
     default:
       return undefined;
   }
 }
 
-/** Human-readable duration for notices and labels. */
-export function formatDurationMs(ms: number): string {
-  if (ms % (60 * 60 * 1000) === 0) return `${ms / (60 * 60 * 1000)}h`;
-  if (ms % (60 * 1000) === 0) return `${ms / (60 * 1000)}m`;
-  if (ms % 1000 === 0) return `${ms / 1000}s`;
-  return `${ms}ms`;
+/** Human-readable duration for notices and labels (input is seconds). */
+export function formatDurationSec(sec: number): string {
+  if (sec % (60 * 60) === 0) return `${sec / (60 * 60)}h`;
+  if (sec % 60 === 0) return `${sec / 60}m`;
+  if (sec >= 1 && Number.isInteger(sec)) return `${sec}s`;
+  if (sec < 1) return `${Math.round(sec * 1000)}ms`;
+  return `${sec}s`;
 }

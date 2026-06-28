@@ -9,7 +9,9 @@ import {
   type WorkflowSourceKind,
   type WorkflowSpec,
   createGitWorktreeManager,
-  resolveStepTimeoutMs,
+  resolveStepTimeoutSec,
+  resolveWorkflowTimeoutSec,
+  timeoutMsFromSec,
   runWorkflow,
   validateWorkflow,
   workflowAgentIds,
@@ -110,7 +112,7 @@ export class Orchestrator {
       model: entry.model,
       effort: entry.effort,
       cwd: process.cwd(),
-      timeoutMs: resolveStepTimeoutMs(undefined, undefined, this.config),
+      timeoutMs: timeoutMsFromSec(resolveStepTimeoutSec(undefined, undefined, this.config)),
       signal,
     });
   }
@@ -178,7 +180,7 @@ export class Orchestrator {
       {
         createAdapter,
         binaries: this.config.binaries,
-        stepTimeoutMs: resolveStepTimeoutMs(undefined, undefined, this.config),
+        stepTimeoutSec: resolveStepTimeoutSec(undefined, undefined, this.config),
         maxConcurrency: this.config.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY,
         cwd,
         agentWorkspace: createGitWorktreeManager(),

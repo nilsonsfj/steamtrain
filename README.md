@@ -225,8 +225,8 @@ Override any subset in the working directory:
 ```jsonc
 {
   "binaries": { "opencode": "/opt/homebrew/bin/opencode" }, // optional path overrides
-  "stepTimeoutMs": 900000,                                  // per-agent subprocess limit (default 15m)
-  "workflowTimeoutMs": 1800000,                             // optional whole-run cap; omit = (loop-aware) steps × stepTimeoutMs
+  "stepTimeoutSec": 900,                                    // per-agent subprocess limit in seconds (default 15m = 900)
+  "workflowTimeoutSec": 1800,                               // optional whole-run cap in seconds; omit = (loop-aware) steps × stepTimeoutSec
   "maxConcurrency": 3                                       // parallel steps per workflow phase (≤ 16)
   // "workflows": { … }                                     // see “Workflows” below
 }

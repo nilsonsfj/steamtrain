@@ -45,7 +45,9 @@ export interface AgentRunFields {
   extraArgs?: string[];
   /** Reasoning effort / variant (claude: `--effort`, opencode: `--variant`, codex: `-c model_reasoning_effort=…`). */
   effort?: string;
-  /** Per-step subprocess wall-clock limit in ms (overrides workflow and config defaults). */
+  /** Per-step subprocess wall-clock limit in seconds (overrides workflow and config defaults). */
+  stepTimeoutSec?: number;
+  /** @deprecated Use `stepTimeoutSec`. Milliseconds in JSON are converted at resolve time. */
   stepTimeoutMs?: number;
 }
 
@@ -77,6 +79,7 @@ export interface DistributorStep extends WorkflowStepBase {
   env?: Record<string, string>;
   extraArgs?: string[];
   effort?: string;
+  stepTimeoutSec?: number;
   stepTimeoutMs?: number;
 }
 
@@ -93,6 +96,7 @@ export interface ConsolidatorStep extends WorkflowStepBase {
   env?: Record<string, string>;
   extraArgs?: string[];
   effort?: string;
+  stepTimeoutSec?: number;
   stepTimeoutMs?: number;
   separator?: string;
 }
@@ -146,9 +150,13 @@ export interface WorkflowSpec {
   phases: WorkflowPhase[];
   /** Default auto-retry policy applied to every agent step (per-step `retry` overrides). */
   retry?: RetryPolicy;
-  /** Default per-agent subprocess timeout for agent-backed steps (per-step `stepTimeoutMs` overrides). */
+  /** Default per-agent subprocess timeout for agent-backed steps (per-step `stepTimeoutSec` overrides). */
+  stepTimeoutSec?: number;
+  /** Whole-workflow wall-clock abort limit in seconds. Omitted → stepCount × stepTimeoutSec. */
+  workflowTimeoutSec?: number;
+  /** @deprecated Use `stepTimeoutSec`. */
   stepTimeoutMs?: number;
-  /** Whole-workflow wall-clock abort limit. Omitted → stepCount × resolved step timeout. */
+  /** @deprecated Use `workflowTimeoutSec`. */
   workflowTimeoutMs?: number;
 }
 
@@ -220,6 +228,7 @@ const agentRunShape = {
   env: z.record(z.string()).optional(),
   extraArgs: z.array(z.string()).optional(),
   effort: z.string().min(1).optional(),
+  stepTimeoutSec: z.number().positive().optional(),
   stepTimeoutMs: z.number().positive().optional(),
 };
 
@@ -231,6 +240,7 @@ const optionalAgentRunShape = {
   env: z.record(z.string()).optional(),
   extraArgs: z.array(z.string()).optional(),
   effort: z.string().min(1).optional(),
+  stepTimeoutSec: z.number().positive().optional(),
   stepTimeoutMs: z.number().positive().optional(),
 };
 
@@ -352,6 +362,8 @@ export const workflowSpecSchema = z
     description: z.string().optional(),
     phases: z.array(workflowPhaseSchema).min(1),
     retry: retryPolicySchema.optional(),
+    stepTimeoutSec: z.number().positive().optional(),
+    workflowTimeoutSec: z.number().positive().optional(),
     stepTimeoutMs: z.number().positive().optional(),
     workflowTimeoutMs: z.number().positive().optional(),
   })

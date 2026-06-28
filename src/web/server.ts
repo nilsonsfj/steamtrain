@@ -17,11 +17,11 @@ import {
   type WorkflowHistoryStore,
   type WorkflowSourceKind,
   type WorkflowSpec,
-  DEFAULT_STEP_TIMEOUT_MS,
+  DEFAULT_STEP_TIMEOUT_SEC,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   isAgentBackedStep,
-  resolveStepTimeoutMs,
+  resolveStepTimeoutSec,
   workflowSpecSchema,
   workflowStepKind,
 } from "../workflow";
@@ -337,11 +337,11 @@ async function handle(
       sendJson(res, 404, { error: "config is not available" });
       return;
     }
-    const stepTimeoutMs = resolveStepTimeoutMs(undefined, undefined, cfg);
+    const stepTimeoutSec = resolveStepTimeoutSec(undefined, undefined, cfg);
     sendJson(res, 200, {
-      stepTimeoutMs,
-      workflowTimeoutMs: cfg.workflowTimeoutMs,
-      defaultStepTimeoutMs: DEFAULT_STEP_TIMEOUT_MS,
+      stepTimeoutSec,
+      workflowTimeoutSec: cfg.workflowTimeoutSec,
+      defaultStepTimeoutSec: DEFAULT_STEP_TIMEOUT_SEC,
       configPath: deps.configPath,
     });
     return;
@@ -354,8 +354,8 @@ async function handle(
     }
     const body = await readBody(req);
     let parsed: {
-      stepTimeoutMs?: unknown;
-      workflowTimeoutMs?: unknown;
+      stepTimeoutSec?: unknown;
+      workflowTimeoutSec?: unknown;
       clearWorkflowTimeout?: unknown;
     };
     try {
@@ -364,17 +364,19 @@ async function handle(
       sendJson(res, 400, { error: "invalid JSON body" });
       return;
     }
-    const hasStep = typeof parsed.stepTimeoutMs === "number" && parsed.stepTimeoutMs > 0;
-    const hasWf = typeof parsed.workflowTimeoutMs === "number" && parsed.workflowTimeoutMs > 0;
+    const hasStep = typeof parsed.stepTimeoutSec === "number" && parsed.stepTimeoutSec > 0;
+    const hasWf = typeof parsed.workflowTimeoutSec === "number" && parsed.workflowTimeoutSec > 0;
     const clearWf = Boolean(parsed.clearWorkflowTimeout);
     if (!hasStep && !hasWf && !clearWf) {
-      sendJson(res, 400, { error: "body must include stepTimeoutMs, workflowTimeoutMs, or clearWorkflowTimeout" });
+      sendJson(res, 400, {
+        error: "body must include stepTimeoutSec, workflowTimeoutSec, or clearWorkflowTimeout",
+      });
       return;
     }
-    const patch: { stepTimeoutMs?: number; workflowTimeoutMs?: number } = {};
-    if (hasStep) patch.stepTimeoutMs = parsed.stepTimeoutMs as number;
-    if (clearWf) patch.workflowTimeoutMs = undefined;
-    else if (hasWf) patch.workflowTimeoutMs = parsed.workflowTimeoutMs as number;
+    const patch: { stepTimeoutSec?: number; workflowTimeoutSec?: number } = {};
+    if (hasStep) patch.stepTimeoutSec = parsed.stepTimeoutSec as number;
+    if (clearWf) patch.workflowTimeoutSec = undefined;
+    else if (hasWf) patch.workflowTimeoutSec = parsed.workflowTimeoutSec as number;
     const saved = saveProjectConfig(patch, deps.configPath);
     if (!saved.ok || !saved.config) {
       sendJson(res, 400, { error: saved.error ?? "save failed" });
@@ -383,8 +385,8 @@ async function handle(
     Object.assign(deps.config, saved.config);
     sendJson(res, 200, {
       ok: true,
-      stepTimeoutMs: resolveStepTimeoutMs(undefined, undefined, deps.config),
-      workflowTimeoutMs: deps.config.workflowTimeoutMs,
+      stepTimeoutSec: resolveStepTimeoutSec(undefined, undefined, deps.config),
+      workflowTimeoutSec: deps.config.workflowTimeoutSec,
     });
     return;
   }

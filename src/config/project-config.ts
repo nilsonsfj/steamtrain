@@ -15,7 +15,7 @@ export interface SaveProjectConfigResult {
 
 /** Keys that may be updated via project config save helpers. */
 export type ProjectConfigPatch = Partial<
-  Pick<SteamtrainConfig, "stepTimeoutMs" | "workflowTimeoutMs" | "maxConcurrency" | "loopMaxIterations">
+  Pick<SteamtrainConfig, "stepTimeoutSec" | "workflowTimeoutSec" | "maxConcurrency" | "loopMaxIterations">
 >;
 
 /**

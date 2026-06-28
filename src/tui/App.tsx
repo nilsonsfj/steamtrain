@@ -224,7 +224,7 @@ export function App({
       agent: step.agent,
       model: step.model,
       effort: step.effort,
-      stepTimeoutMs: step.stepTimeoutMs,
+      stepTimeoutSec: step.stepTimeoutSec,
     };
   }, [picker.wfPreview, previewSelectedStep]);
 

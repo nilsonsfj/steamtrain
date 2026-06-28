@@ -12,7 +12,7 @@ export interface WorkflowStepSelection {
   agent: AgentId;
   model: string;
   effort?: string;
-  stepTimeoutMs?: number;
+  stepTimeoutSec?: number;
 }
 
 export interface SlashCommandNotice {
@@ -39,7 +39,7 @@ export interface SlashCommandContext {
   /** Patch agent/model/effort/timeout on a workflow step (session-only). */
   updateWorkflowStep?: (
     stepId: string,
-    patch: Partial<Pick<WorkflowStepSelection, "agent" | "model" | "effort" | "stepTimeoutMs">>,
+    patch: Partial<Pick<WorkflowStepSelection, "agent" | "model" | "effort" | "stepTimeoutSec">>,
   ) => void;
   /** Active workflow spec when previewing or configuring (for /timeout, etc.). */
   workflowSpec?: WorkflowSpec;

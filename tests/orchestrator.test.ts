@@ -9,7 +9,7 @@ function makeConfig(overrides?: Partial<SteamtrainConfig>): SteamtrainConfig {
   return {
     binaries: {},
     maxConcurrency: 2,
-    stepTimeoutMs: 30_000,
+    stepTimeoutSec: 30,
     loopMaxIterations: 10,
     ...overrides,
   };

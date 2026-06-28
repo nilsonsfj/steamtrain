@@ -688,7 +688,7 @@ before relying on a custom workflow in CI or scripts.
 | --- | --- |
 | max steps per run (static + generated) | 1000 |
 | max parallel steps per phase | 16 (`maxConcurrency` config, capped) |
-| per-step timeout | `timeoutMs` in config |
+| per-step timeout | `stepTimeoutSec` in config |
 
 Every agent-backed worker, processor, distributor, or consolidator is a full
 agent run. Dynamic fan-out multiplies cost linearly with item count.

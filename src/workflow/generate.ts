@@ -1,4 +1,5 @@
 import type { AgentAdapter } from "../agents";
+import { DEFAULT_STEP_TIMEOUT_SEC, timeoutMsFromSec } from "./timeout";
 import type { AgentEvent, AgentId } from "../types/events";
 import { type WorkflowSpec, validateWorkflow, workflowSpecSchema } from "./types";
 
@@ -19,8 +20,7 @@ export const DEFAULT_REPAIR_ATTEMPTS = 2;
 export interface GenerateWorkflowDeps {
   createAdapter: (id: AgentId, binary?: string) => AgentAdapter;
   binaries?: Partial<Record<AgentId, string>>;
-  timeoutMs?: number;
-  stepTimeoutMs?: number;
+  stepTimeoutSec?: number;
   /** Working directory for the generating agent (it does not need repo access). */
   cwd?: string;
   /**
@@ -344,7 +344,7 @@ async function runGenerationAgent(
       model: req.model,
       effort: req.effort,
       cwd: deps.cwd,
-      timeoutMs: deps.stepTimeoutMs ?? deps.timeoutMs,
+      timeoutMs: timeoutMsFromSec(deps.stepTimeoutSec ?? DEFAULT_STEP_TIMEOUT_SEC),
       signal: req.signal,
     })) {
       req.onEvent?.(event);

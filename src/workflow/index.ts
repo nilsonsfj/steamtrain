@@ -54,13 +54,14 @@ export {
   backoffDelayMs,
 } from "./retry";
 export {
-  DEFAULT_STEP_TIMEOUT_MS,
+  DEFAULT_STEP_TIMEOUT_SEC,
   countStaticWorkflowSteps,
   workflowTimeoutStepBudget,
-  formatDurationMs,
-  parseDurationMs,
-  resolveStepTimeoutMs,
-  resolveWorkflowTimeoutMs,
+  formatDurationSec,
+  parseDurationSec,
+  resolveStepTimeoutSec,
+  resolveWorkflowTimeoutSec,
+  timeoutMsFromSec,
 } from "./timeout";
 export { BUNDLED_WORKFLOWS } from "./bundled";
 export { renderPrompt, type TemplateContext } from "./template";
