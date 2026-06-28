@@ -111,11 +111,12 @@ phase.
 For iterative work ("review then fix then re-review until clean"), use a gate
 with a "loopTo" pointing to an EARLIER phase, plus an optional "maxIterations":
   { "kind": "gate", "dependsOn": ["review"], "condition": { "step": "review", "contains": "DONE" },
-    "loopTo": "review", "maxIterations": 5, "onFalse": "fail" }
+    "loopTo": "review", "maxIterations": 5, "onFalse": "continue" }
 Semantics:
   - condition TRUE  → loop converged; continue forward.
   - condition FALSE and iterations remain → jump back to "loopTo" and re-run the body.
-  - condition FALSE and the cap is hit → apply "onFalse" (fail/stop/continue).
+  - condition FALSE and the cap is hit → apply "onFalse" ("continue" proceeds after the
+    cap; use "fail" only when non-convergence must fail the whole run).
 Rules: the gate must be in a phase AFTER the phases it re-runs; "loopTo" names an
 earlier phase; the loop body re-runs each pass; the current pass is available as
 {{iteration}}. Keep maxIterations small (default cap is 10). Loops must be nested
@@ -129,7 +130,7 @@ or disjoint, never partially overlapping.
     tasks is not known at authoring time.
   - Static (only when you know the exact branches upfront): set items:
     ["...{{input}}...", "..."] with templated strings. If items is present, it
-    takes precedence — do not also set agent fields unless you intend static distribution.
+    takes precedence — do not set agent/model/prompt.
   NEVER hardcode "Task 1", "Task 2", ... in items, and NEVER create separate
   worker/processor steps per index ("pick the 1st item", "pick the 2nd item").
   Use ONE processor with "forEach": "steps.<distributorId>.items" instead.
@@ -155,7 +156,8 @@ phase count modest.
 
 # Templates available in prompts/items
 {{input}} / {{args}} (the user's task), {{steps.<id>.output}}, {{steps.<id>.items}},
-{{steps.<id>.ok}}, {{item}}, {{item.index}}, {{item.sourceStepId}}, {{iteration}}.
+{{steps.<id>.ok}}, {{steps.<id>.error}}, {{steps.<id>.target}}, {{item}},
+{{item.index}}, {{item.sourceStepId}}, {{iteration}}.
 
 # Agents & models
 Prefer free models so the workflow runs without paid credentials:
@@ -181,7 +183,8 @@ outputs — see the forEach template rule above):
     ] },
     { "id": "implement", "title": "Implement in parallel", "steps": [
       { "id": "impl", "kind": "processor", "agent": "opencode",
-        "model": "opencode/mimo-v2.5-free", "forEach": "steps.tasks.items",
+        "model": "opencode/mimo-v2.5-free", "dependsOn": ["tasks"],
+        "forEach": "steps.tasks.items",
         "prompt": "Implement this backlog task fully. Review your work and fix any issues before finishing.\\n\\nTask:\\n{{item}}\\n\\nContext:\\n{{input}}" }
     ] },
     { "id": "report", "title": "Consolidate", "steps": [

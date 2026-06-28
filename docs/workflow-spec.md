@@ -319,7 +319,7 @@ Unknown placeholders are left unchanged.
 - A workflow may contain at most 1000 total static + generated steps. Static
   distributor item counts are checked at validation time; agent-generated item
   counts are checked at runtime before child runs are scheduled.
-- `maxConcurrency` is capped at 16.
+- `maxConcurrency` defaults to 5 and is capped at 16.
 - Distributor steps require `items` or `agent` + `model` + `prompt`.
 - Consolidator steps require `dependsOn`.
 - Agent-backed consolidators require `agent`, `model`, and `prompt` together.

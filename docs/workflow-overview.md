@@ -687,7 +687,7 @@ before relying on a custom workflow in CI or scripts.
 | limit | value |
 | --- | --- |
 | max steps per run (static + generated) | 1000 |
-| max parallel steps per phase | 16 (`maxConcurrency` config, capped) |
+| max parallel steps per phase | 5 default, 16 max (`maxConcurrency` config) |
 | per-step timeout | `stepTimeoutSec` in config |
 
 Every agent-backed worker, processor, distributor, or consolidator is a full
