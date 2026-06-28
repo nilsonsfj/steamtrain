@@ -1,6 +1,7 @@
 export {
   type AgentBackedWorkflowStep,
   type AgentRunFields,
+  type AgentWorktreeInfo,
   type ConsolidatorStep,
   type DistributorStep,
   type GateCondition,

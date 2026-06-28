@@ -25,6 +25,8 @@ export interface AgentWorkspaceLease {
   root?: string;
   /** Branch checked out by the isolated worktree when one was created. */
   branch?: string;
+  /** Ignored runtime entries linked from the source checkout into the worktree. */
+  linkedIgnoredPaths?: string[];
   dispose: () => Promise<void> | void;
 }
 
@@ -72,13 +74,14 @@ class GitWorktreeManager implements AgentWorkspaceManager {
     const unique = randomId();
     const worktreeRoot = join(this.baseDir, repoDir, this.runId, `${stepPart}-${unique}`);
     const branch = `steamtrain/${this.runId}/${stepPart}-${unique}`;
+    let linkedIgnoredPaths: string[] = [];
 
     await mkdir(dirname(worktreeRoot), { recursive: true });
     try {
       await this.inRepoQueue(repo.root, async () => {
         await runGit(["worktree", "add", "-b", branch, worktreeRoot, repo.head], repo.root);
       });
-      await copyWorkingTreeState(repo.root, worktreeRoot);
+      linkedIgnoredPaths = await copyWorkingTreeState(repo.root, worktreeRoot);
     } catch (err) {
       await removeWorktreeBestEffort(repo.root, worktreeRoot, branch);
       throw err;
@@ -88,6 +91,7 @@ class GitWorktreeManager implements AgentWorkspaceManager {
       cwd: relativeStepCwd ? join(worktreeRoot, relativeStepCwd) : worktreeRoot,
       root: worktreeRoot,
       branch,
+      linkedIgnoredPaths,
       dispose: () => {},
     };
   }
@@ -122,7 +126,7 @@ async function discoverGitRepo(cwd: string): Promise<GitRepo | undefined> {
   }
 }
 
-async function copyWorkingTreeState(repoRoot: string, worktreeRoot: string): Promise<void> {
+async function copyWorkingTreeState(repoRoot: string, worktreeRoot: string): Promise<string[]> {
   const diff = await runGit(["diff", "--binary", "HEAD", "--"], repoRoot);
   if (diff.length > 0) {
     await runGit(["apply", "--binary", "-"], worktreeRoot, diff);
@@ -132,6 +136,48 @@ async function copyWorkingTreeState(repoRoot: string, worktreeRoot: string): Pro
   for (const rel of splitNul(untracked)) {
     await copyUntrackedPath(join(repoRoot, rel), join(worktreeRoot, rel));
   }
+
+  return linkIgnoredRuntimeEntries(repoRoot, worktreeRoot);
+}
+
+async function linkIgnoredRuntimeEntries(
+  repoRoot: string,
+  worktreeRoot: string,
+): Promise<string[]> {
+  const ignored = await runGit(
+    ["ls-files", "--others", "--ignored", "--exclude-standard", "-z"],
+    repoRoot,
+  );
+  const linkRoots = new Set<string>();
+  for (const rel of splitNul(ignored)) {
+    const root = await ignoredLinkRoot(rel, worktreeRoot);
+    if (root) linkRoots.add(root);
+  }
+
+  const linked: string[] = [];
+  for (const rel of [...linkRoots].sort()) {
+    try {
+      await symlink(join(repoRoot, rel), join(worktreeRoot, rel));
+      linked.push(rel);
+    } catch {
+      // Best effort: the agent can still run if a runtime-only ignored path
+      // races with another process or is not representable as a symlink.
+    }
+  }
+  return linked;
+}
+
+async function ignoredLinkRoot(rel: string, worktreeRoot: string): Promise<string | undefined> {
+  const parts = rel.split(/[\\/]+/).filter(Boolean);
+  for (let i = 1; i <= parts.length; i++) {
+    const candidate = parts.slice(0, i).join(sep);
+    try {
+      await lstat(join(worktreeRoot, candidate));
+    } catch {
+      return candidate;
+    }
+  }
+  return undefined;
 }
 
 async function copyUntrackedPath(source: string, dest: string): Promise<void> {

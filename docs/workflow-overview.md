@@ -131,9 +131,15 @@ Agent-backed workers, processors, distributors, and consolidators run from an
 isolated git worktree whenever their resolved `cwd` is inside a git repository
 with a valid `HEAD`. The worktree is created from the current commit on a unique
 `steamtrain/...` branch, then steamtrain snapshots tracked dirty changes and
-untracked non-ignored files into it before the agent starts. If a step sets
-`cwd` to a subdirectory, the agent lands in the matching subdirectory of its
-worktree.
+untracked non-ignored files into it before the agent starts. Ignored runtime
+entries such as `.env` or `node_modules/` are linked into the worktree so local
+commands see the same runtime context without sharing tracked source edits. If a
+step sets `cwd` to a subdirectory, the agent lands in the matching subdirectory
+of its worktree.
+
+Worktrees are retained after the run so agent-created files can be inspected,
+committed, or merged from their `steamtrain/...` branches. Completed agent step
+results include the worktree cwd, root, branch, and linked ignored paths.
 
 Directories outside git repositories keep the previous behavior and run in the
 resolved `cwd`.

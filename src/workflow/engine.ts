@@ -7,6 +7,7 @@ import { type RetryPolicy, backoffDelayMs, resolveRetryPolicy } from "./retry";
 import { renderPrompt } from "./template";
 import {
   type AgentBackedWorkflowStep,
+  type AgentWorktreeInfo,
   DEFAULT_LOOP_MAX_ITERATIONS,
   type GateCondition,
   MAX_CONCURRENCY,
@@ -830,11 +831,12 @@ async function executeAgentStep(
       );
       const isLastAttempt = attempt >= policy.maxAttempts;
       if (result.ok || !retryable || isLastAttempt || ctx.signal?.aborted) {
+        const finalResult = attachWorktreeInfo(result, workspace, stepCwd);
         // After a retry, report true wall-clock for the whole step (all attempts
         // plus the backoff waits between them), not just the last attempt.
         return attempt > 1
-          ? { ...result, attempts: attempt, durationMs: Date.now() - firstStarted }
-          : result;
+          ? { ...finalResult, attempts: attempt, durationMs: Date.now() - firstStarted }
+          : finalResult;
       }
       const delayMs = backoffDelayMs(policy, attempt);
       hooks.pushWorkflowEvent({
@@ -852,12 +854,32 @@ async function executeAgentStep(
       // A cancel during the backoff wait ends the step now — don't start another
       // attempt (which would spawn the agent again).
       if (ctx.signal?.aborted) {
-        return { ...result, attempts: attempt, durationMs: Date.now() - firstStarted };
+        return attachWorktreeInfo(
+          { ...result, attempts: attempt, durationMs: Date.now() - firstStarted },
+          workspace,
+          stepCwd,
+        );
       }
     }
   } finally {
     await workspace.dispose();
   }
+}
+
+function attachWorktreeInfo(
+  result: StepResult,
+  workspace: AgentWorkspaceLease,
+  originalCwd: string,
+): StepResult {
+  if (!workspace.root || !workspace.branch) return result;
+  const worktree: AgentWorktreeInfo = {
+    originalCwd,
+    cwd: workspace.cwd,
+    root: workspace.root,
+    branch: workspace.branch,
+    linkedIgnoredPaths: workspace.linkedIgnoredPaths,
+  };
+  return { ...result, worktree };
 }
 
 async function allocateAgentWorkspace(

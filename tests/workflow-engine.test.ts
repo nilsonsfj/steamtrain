@@ -135,7 +135,7 @@ describe("runWorkflow", () => {
 
   it("honors maxConcurrency", async () => {
     const { deps, state } = makeDeps(echo, { maxConcurrency: 2, delayMs: 20 });
-    await collect(twoPhase, "hi", deps);
+    const events = await collect(twoPhase, "hi", deps);
     expect(state.peak).toBe(2);
   });
 
@@ -268,7 +268,12 @@ describe("runWorkflow", () => {
     const agentWorkspace: AgentWorkspaceManager = {
       async allocate(request) {
         requests.push(request);
-        return { cwd: `/isolated/${request.stepId}`, dispose: () => {} };
+        return {
+          cwd: `/isolated/${request.stepId}`,
+          root: `/isolated/${request.stepId}`,
+          branch: `steamtrain/test/${request.stepId}`,
+          dispose: () => {},
+        };
       },
     };
     const { deps, state } = makeDeps(echo, {
@@ -277,7 +282,7 @@ describe("runWorkflow", () => {
       agentWorkspace,
     });
 
-    await collect(twoPhase, "hi", deps);
+    const events = await collect(twoPhase, "hi", deps);
 
     expect(requests.map((request) => request.stepId)).toEqual(["a", "b", "c", "d"]);
     expect(new Set(state.runs.map((run) => run.opts.cwd)).size).toBe(4);
@@ -287,6 +292,14 @@ describe("runWorkflow", () => {
       "/isolated/c",
       "/isolated/d",
     ]);
+    const aDone = events.find((event) => event.kind === "step_done" && event.stepId === "a");
+    expect(aDone && aDone.kind === "step_done" && aDone.result.worktree).toEqual({
+      originalCwd: "/base",
+      cwd: "/isolated/a",
+      root: "/isolated/a",
+      branch: "steamtrain/test/a",
+      linkedIgnoredPaths: undefined,
+    });
   });
 
   it("runs forEach children in separate allocated workspaces", async () => {

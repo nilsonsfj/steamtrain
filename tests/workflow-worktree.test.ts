@@ -21,12 +21,16 @@ describe("git worktree agent workspace manager", () => {
     const worktrees = join(root, "worktrees");
     await initRepo(repo);
     await mkdir(join(repo, "src"), { recursive: true });
+    await writeFile(join(repo, ".gitignore"), ".env\nnode_modules/\n");
     await writeFile(join(repo, "src", "tracked.txt"), "committed\n");
     await git(repo, "add", ".");
     await git(repo, "commit", "-m", "add src");
 
     await writeFile(join(repo, "src", "tracked.txt"), "dirty\n");
     await writeFile(join(repo, "src", "untracked.txt"), "new\n");
+    await writeFile(join(repo, ".env"), "TOKEN=secret\n");
+    await mkdir(join(repo, "node_modules", ".bin"), { recursive: true });
+    await writeFile(join(repo, "node_modules", ".bin", "tool"), "runtime\n");
 
     const manager = createGitWorktreeManager({ baseDir: worktrees, runId: "run-test" });
     const first = await manager.allocate({
@@ -50,6 +54,11 @@ describe("git worktree agent workspace manager", () => {
     expect(second.cwd).not.toBe(first.cwd);
     expect(await readFile(join(first.cwd, "tracked.txt"), "utf8")).toBe("dirty\n");
     expect(await readFile(join(first.cwd, "untracked.txt"), "utf8")).toBe("new\n");
+    expect(await readFile(join(first.root ?? "", ".env"), "utf8")).toBe("TOKEN=secret\n");
+    expect(await readFile(join(first.root ?? "", "node_modules", ".bin", "tool"), "utf8")).toBe(
+      "runtime\n",
+    );
+    expect(first.linkedIgnoredPaths).toEqual([".env", "node_modules"]);
     expect(await git(first.cwd, "branch", "--show-current")).toMatch(
       /^steamtrain\/run-test\/review-0-1-/,
     );
