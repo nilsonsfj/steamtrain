@@ -117,7 +117,7 @@ function joinWarnings(...parts: Array<string | undefined>): string | undefined {
 function mergeTimeoutFields(
   base: SteamtrainConfig,
   override: ConfigFile,
-): Pick<SteamtrainConfig, "stepTimeoutSec" | "workflowTimeoutSec" | "timeoutMs"> {
+): Pick<SteamtrainConfig, "stepTimeoutSec" | "workflowTimeoutSec"> {
   const msToSec = (ms: number): number => ms / 1000;
 
   const stepTimeoutSec =
@@ -129,14 +129,11 @@ function mergeTimeoutFields(
   const workflowTimeoutSec =
     override.workflowTimeoutSec ??
     (override.workflowTimeoutMs !== undefined ? msToSec(override.workflowTimeoutMs) : undefined) ??
-    (override.timeoutMs !== undefined ? msToSec(override.timeoutMs) : undefined) ??
     base.workflowTimeoutSec;
 
-  const legacy = override.timeoutMs ?? base.timeoutMs;
-  const out: Pick<SteamtrainConfig, "stepTimeoutSec" | "workflowTimeoutSec" | "timeoutMs"> = {};
+  const out: Pick<SteamtrainConfig, "stepTimeoutSec" | "workflowTimeoutSec"> = {};
   if (stepTimeoutSec !== undefined) out.stepTimeoutSec = stepTimeoutSec;
   if (workflowTimeoutSec !== undefined) out.workflowTimeoutSec = workflowTimeoutSec;
-  if (legacy !== undefined) out.timeoutMs = legacy;
   return out;
 }
 

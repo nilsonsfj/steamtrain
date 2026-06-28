@@ -120,11 +120,51 @@ describe("timeout resolution", () => {
     expect(resolveWorkflowTimeoutSec(spec, {})).toBe(120);
   });
 
-  it("migrates legacy timeoutMs in config merge to seconds", () => {
+  it("migrates legacy timeoutMs in config merge to stepTimeoutSec only", () => {
     const { config } = mergeConfig(DEFAULT_CONFIG, { timeoutMs: 250_000 });
     expect(config.stepTimeoutSec).toBe(250);
-    expect(config.workflowTimeoutSec).toBe(250);
-    expect(config.timeoutMs).toBe(250_000);
+    expect(config.workflowTimeoutSec).toBeUndefined();
+    expect("timeoutMs" in config).toBe(false);
+  });
+
+  it("uses auto workflow timeout when legacy timeoutMs is present without workflowTimeoutSec", () => {
+    const spec = demoSpec(2);
+    const { config } = mergeConfig(DEFAULT_CONFIG, { timeoutMs: 250_000 });
+    expect(resolveWorkflowTimeoutSec(spec, config)).toBe(2 * 250);
+  });
+
+  it("budgets static forEach fan-out into the auto workflow timeout", () => {
+    const spec: WorkflowSpec = {
+      name: "fanout",
+      phases: [
+        {
+          id: "dist",
+          title: "Dist",
+          steps: [
+            {
+              id: "tasks",
+              kind: "distributor",
+              items: ["a", "b", "c"],
+            },
+          ],
+        },
+        {
+          id: "work",
+          title: "Work",
+          steps: [
+            {
+              id: "each",
+              agent: "opencode",
+              model: "m",
+              prompt: "go",
+              forEach: "steps.tasks.items",
+            },
+          ],
+        },
+      ],
+    };
+    expect(workflowTimeoutStepBudget(spec)).toBe(5);
+    expect(resolveWorkflowTimeoutSec(spec, {})).toBe(5 * DEFAULT_STEP_TIMEOUT_SEC);
   });
 
   it("parses human duration tokens into seconds", () => {

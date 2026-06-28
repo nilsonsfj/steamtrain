@@ -1,5 +1,10 @@
 import type { SteamtrainConfig } from "../config/types";
-import { DEFAULT_LOOP_MAX_ITERATIONS, type WorkflowSpec } from "./types";
+import {
+  DEFAULT_LOOP_MAX_ITERATIONS,
+  parseForEachSource,
+  type WorkflowSpec,
+  type WorkflowStep,
+} from "./types";
 
 /** Default per-agent subprocess wall-clock limit: 15 minutes (in seconds). */
 export const DEFAULT_STEP_TIMEOUT_SEC = 15 * 60;
@@ -15,16 +20,43 @@ export function countStaticWorkflowSteps(spec: WorkflowSpec): number {
 }
 
 /**
+ * Per-phase step budget including static `forEach` fan-out over distributor items.
+ * Agent-backed distributors with runtime-only item lists are not counted.
+ */
+function expandedPhaseStepCounts(spec: WorkflowSpec): number[] {
+  const stepsById = new Map<string, WorkflowStep>();
+  for (const phase of spec.phases) {
+    for (const step of phase.steps) stepsById.set(step.id, step);
+  }
+
+  return spec.phases.map((phase) => {
+    let count = phase.steps.length;
+    for (const step of phase.steps) {
+      if (
+        (step.kind === "worker" || step.kind === "processor" || !step.kind) &&
+        step.forEach
+      ) {
+        const sourceStepId = parseForEachSource(step.forEach);
+        const source = sourceStepId ? stepsById.get(sourceStepId) : undefined;
+        if (source?.kind === "distributor") {
+          count += source.items?.length ?? 0;
+        }
+      }
+    }
+    return count;
+  });
+}
+
+/**
  * Worst-case step count used to size the auto workflow timeout. Starts from the
- * static step count and adds the extra passes a loop gate (`loopTo`) re-runs its
- * body, so a looping workflow's auto limit reflects its real wall-clock envelope
- * instead of killing it mid-loop.
+ * expanded static step count (including `forEach` fan-out) and adds the extra
+ * passes a loop gate (`loopTo`) re-runs its body.
  */
 export function workflowTimeoutStepBudget(spec: WorkflowSpec, loopMaxIterations?: number): number {
-  const base = countStaticWorkflowSteps(spec);
+  const phaseStepCount = expandedPhaseStepCounts(spec);
+  const base = phaseStepCount.reduce((n, c) => n + c, 0);
   const phaseIndexById = new Map<string, number>();
   spec.phases.forEach((p, i) => phaseIndexById.set(p.id, i));
-  const phaseStepCount = spec.phases.map((p) => p.steps.length);
 
   interface Region {
     start: number;
@@ -71,10 +103,7 @@ type WorkflowTimeoutSource = {
   workflowTimeoutMs?: number;
 };
 
-type ConfigTimeoutSource = Pick<
-  SteamtrainConfig,
-  "stepTimeoutSec" | "workflowTimeoutSec" | "timeoutMs"
->;
+type ConfigTimeoutSource = Pick<SteamtrainConfig, "stepTimeoutSec">;
 
 function secFromMs(ms: number): number {
   return ms / 1000;
@@ -96,7 +125,7 @@ function workflowTimeoutSecFromSource(source?: WorkflowTimeoutSource): number | 
 
 /**
  * Resolve the per-agent subprocess timeout for one step (seconds).
- * Chain: step override → workflow default → config → legacy `timeoutMs` → built-in default.
+ * Chain: step override → workflow default → config → built-in default.
  */
 export function resolveStepTimeoutSec(
   step?: StepTimeoutSource,
@@ -108,23 +137,20 @@ export function resolveStepTimeoutSec(
   const fromWorkflow = stepTimeoutSecFromSource(workflow);
   if (fromWorkflow !== undefined) return fromWorkflow;
   if (config?.stepTimeoutSec !== undefined) return config.stepTimeoutSec;
-  if (config?.timeoutMs !== undefined) return secFromMs(config.timeoutMs);
   return DEFAULT_STEP_TIMEOUT_SEC;
 }
 
 /**
  * Resolve the whole-workflow wall-clock abort limit (seconds).
- * Chain: workflow override → config override → legacy `timeoutMs` → loop-aware
- * stepCount × step timeout.
+ * Chain: workflow override → config override → loop-aware stepCount × step timeout.
  */
 export function resolveWorkflowTimeoutSec(
   spec: WorkflowSpec,
-  config?: Pick<SteamtrainConfig, "stepTimeoutSec" | "workflowTimeoutSec" | "timeoutMs" | "loopMaxIterations">,
+  config?: Pick<SteamtrainConfig, "stepTimeoutSec" | "workflowTimeoutSec" | "loopMaxIterations">,
 ): number {
   const fromSpec = workflowTimeoutSecFromSource(spec);
   if (fromSpec !== undefined) return fromSpec;
   if (config?.workflowTimeoutSec !== undefined) return config.workflowTimeoutSec;
-  if (config?.timeoutMs !== undefined) return secFromMs(config.timeoutMs);
   const stepTimeout = resolveStepTimeoutSec(undefined, spec, config);
   const steps = Math.max(1, workflowTimeoutStepBudget(spec, config?.loopMaxIterations));
   return steps * stepTimeout;

@@ -207,7 +207,7 @@ describe("Orchestrator", () => {
   });
 
   it("getConfig returns the config", () => {
-    const config = makeConfig({ timeoutMs: 5000 });
+    const config = makeConfig({ stepTimeoutSec: 5 });
     const orch = new Orchestrator(config, makeWorkspaces(), [], makeCatalog());
     expect(orch.getConfig()).toBe(config);
   });

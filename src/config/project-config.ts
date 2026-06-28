@@ -18,6 +18,9 @@ export type ProjectConfigPatch = Partial<
   Pick<SteamtrainConfig, "stepTimeoutSec" | "workflowTimeoutSec" | "maxConcurrency" | "loopMaxIterations">
 >;
 
+/** Legacy timeout keys accepted in JSON on read; stripped on project config save. */
+const LEGACY_TIMEOUT_FILE_KEYS = ["timeoutMs", "stepTimeoutMs", "workflowTimeoutMs"] as const;
+
 /**
  * Merge a patch into the project `steamtrain.json`, preserving workflows and
  * other keys. Validates the full merged document against {@link configFileSchema}.
@@ -36,6 +39,7 @@ export function saveProjectConfig(
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) delete next[key];
   }
+  for (const key of LEGACY_TIMEOUT_FILE_KEYS) delete next[key];
 
   const check = configFileSchema.safeParse(next);
   if (!check.success) {

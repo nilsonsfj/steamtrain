@@ -14,11 +14,6 @@ export interface SteamtrainConfig {
   stepTimeoutSec?: number;
   /** Whole-workflow wall-clock abort limit in seconds. Omitted → stepCount × stepTimeoutSec. */
   workflowTimeoutSec?: number;
-  /**
-   * @deprecated Legacy millisecond timeout from older configs. Converted to seconds at load;
-   * not written back on save.
-   */
-  timeoutMs?: number;
   /** Project workflows from `steamtrain.json`, keyed by launch name. Merged over bundled and user workflows. */
   workflows?: Record<string, WorkflowSpec>;
   /** Max steps run in parallel within a workflow phase (clamped to MAX_CONCURRENCY). */

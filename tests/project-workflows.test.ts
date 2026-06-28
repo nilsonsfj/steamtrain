@@ -73,8 +73,7 @@ describe("saveProjectWorkflow", () => {
 
     const config = mergedConfig(cwd);
     expect(config.stepTimeoutSec).toBe(12.345);
-    expect(config.workflowTimeoutSec).toBe(12.345);
-    expect(config.timeoutMs).toBe(12345);
+    expect(config.workflowTimeoutSec).toBeUndefined();
     expect(config.binaries).toEqual({ codex: "/usr/bin/codex" });
     expect(config.maxConcurrency).toBe(2);
     expect((config.workflows as Record<string, unknown>)["my-flow"]).toBeDefined();
