@@ -5,13 +5,13 @@ import type {
   SlashCommandResult,
   WorkflowStepSelection,
 } from "../commands/types";
+import type { AgentId } from "../types/events";
 import { STEAMTRAIN_VERSION } from "../version";
 import type { WorkflowScope } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 import type { DraftTarget } from "./draft-model";
 import type { Mode } from "./modes";
 import { buildModes } from "./modes";
-import type { AgentId } from "../types/events";
 
 export interface UseSlashContextParams {
   mode: Mode;
@@ -30,7 +30,10 @@ export interface UseSlashContextParams {
   createWorkflow: (description: string, scope?: WorkflowScope) => SlashCommandResult;
   cloneWorkflow: (newName: string, scope?: WorkflowScope) => Promise<SlashCommandResult>;
   deleteWorkflow: (name: string) => Promise<SlashCommandResult>;
-  renameWorkflow: (oldName: string, newName: string) => SlashCommandResult;
+  renameWorkflow: (
+    oldName: string,
+    newName: string,
+  ) => SlashCommandResult | Promise<SlashCommandResult>;
   userWorkflowNames: readonly string[];
   openHistory: () => SlashCommandResult;
   draftResolution: { target?: DraftTarget; usingOverride: boolean };

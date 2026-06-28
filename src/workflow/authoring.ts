@@ -237,7 +237,7 @@ export class WorkflowAuthor {
    * The source workflow must be a user or project workflow.
    * Modifies its internal spec name and deletes the old entry.
    */
-  rename(oldName: string, newName: string): AuthorWriteResult {
+  async rename(oldName: string, newName: string): Promise<AuthorWriteResult> {
     const source = this.host.listWorkflows()[oldName];
     if (!source) return { ok: false, error: `unknown workflow '${oldName}'` };
 
@@ -259,15 +259,18 @@ export class WorkflowAuthor {
     }
 
     // Save under new name and delete old one
-    const result = this.save(slug, { ...source, name: slug }, oldName, sourceKind);
-    return result;
+    return await this.save(slug, { ...source, name: slug }, oldName, sourceKind);
   }
 
   /**
    * Save an existing workflow (bundled, user, or project) under a new name as a
    * user copy. The source is left untouched. Used by the TUI/web "clone".
    */
-  clone(sourceName: string, newName: string, scope: WorkflowScope = "user"): AuthorWriteResult {
+  async clone(
+    sourceName: string,
+    newName: string,
+    scope: WorkflowScope = "user",
+  ): Promise<AuthorWriteResult> {
     const source = this.host.listWorkflows()[sourceName];
     if (!source) return { ok: false, error: `unknown workflow '${sourceName}'` };
 
@@ -281,7 +284,7 @@ export class WorkflowAuthor {
       return { ok: false, error: `a workflow named '${slug}' already exists` };
     }
 
-    return this.persist(slug, { ...source, name: slug }, { scope });
+    return await this.persist(slug, { ...source, name: slug }, { scope });
   }
 
   /**

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { homedir } from "node:os";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DoctorResult } from "../doctor";
 import type { Orchestrator } from "../orchestrator";
 import { homeRelativePath } from "../paths";
@@ -11,17 +11,14 @@ import type {
   WorkflowSpec,
   WorkflowStepOverrides,
 } from "../workflow";
-import {
-  isAgentBackedStep,
-  workflowCatalogEntries,
-} from "../workflow";
+import { isAgentBackedStep, workflowCatalogEntries } from "../workflow";
 import type { WorkspaceEntry } from "../workspace";
 import type { WorkflowCreateState } from "./WorkflowCreate";
 import type { DraftTarget } from "./draft-model";
 import { healthyAgentSet, resolveDraftTarget } from "./draft-model";
 import type { Mode } from "./modes";
-import { flattenSpecSteps } from "./workflow-spec-ui";
 import type { TranscriptAction } from "./transcript";
+import { flattenSpecSteps } from "./workflow-spec-ui";
 
 export interface UseWorkflowPickerParams {
   mode: Mode;
@@ -181,7 +178,7 @@ export function useWorkflowPicker({
   );
 
   const renameWorkflow = useCallback(
-    (oldName: string, newName: string) => {
+    async (oldName: string, newName: string) => {
       if (running) {
         return {
           handled: true as const,
@@ -199,7 +196,7 @@ export function useWorkflowPicker({
         };
       }
 
-      const result = author.rename(source, newName);
+      const result = await author.rename(source, newName);
       if (!result.ok) {
         return {
           handled: true as const,
