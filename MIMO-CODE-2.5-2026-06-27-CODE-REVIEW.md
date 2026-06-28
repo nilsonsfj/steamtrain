@@ -20,11 +20,11 @@
 | Correctness | B+ | Most critical issues resolved; minor edge cases remain |
 | Type Safety | B+ | Strong Zod usage, strict tsconfig, exhaustiveness checks added |
 | Security | A- | Headers, body limits, prototype pollution, and error sanitization all addressed |
-| Test Coverage | B+ | Orchestrator, malformed requests, doctor, and cache store tests added |
+| Test Coverage | A- | 605 tests; OS signal handling, orchestrator, malformed requests, doctor, cache store covered |
 | Performance | B | Async catalog I/O, transcript/frame caps, backpressure; TUI re-render concerns remain |
 | Maintainability | B- | App.tsx is a 923-line monolith (decomposed from 1905), server.ts route organization |
 
-**Remaining findings: 44** (1 Critical, 0 High, 5 Medium, 38 Low)
+**Remaining findings: 43** (0 Critical, 0 High, 5 Medium, 38 Low)
 
 ---
 
@@ -44,10 +44,11 @@
 
 ## 1. Critical Findings
 
-### C7. No OS signal handling tests (SIGINT/SIGTERM)
+### C7. No OS signal handling tests (SIGINT/SIGTERM) — **RESOLVED**
 - **File:** `src/cli.ts`, `src/index.tsx`
 - **Category:** Coverage Gap
 - Without signal handling tests, orphaned agent processes, corrupted cache files, or incomplete history writes on Ctrl+C remain undetectable.
+- **Resolution:** Added `tests/spawn-signal.test.ts` (10 tests) covering `runProcessLines` AbortSignal propagation, SIGKILL fallback, timeout, and child cleanup. Added `tests/cli-signal.test.ts` (8 tests) covering the CLI interrupt handler pattern (abort on first Ctrl+C, force exit on second), signal propagation through the full chain (SIGINT → AbortController → runProcessLines → kill), and SIGTERM/SIGKILL integration with real child processes. Also fixed a latent bug where `resolveWait()` was needed to unblock the generator when `startKill()` is called externally (abort signal/timeout) while the generator is blocked on `await waitForItem()`.
 
 ---
 
@@ -234,7 +235,7 @@
 
 | Area | Impact |
 |------|--------|
-| OS signal handling | No SIGINT/SIGTERM tests. Orphaned processes undetectable. |
+| OS signal handling | 18 tests covering AbortSignal propagation, SIGKILL fallback, CLI interrupt pattern, process cleanup |
 
 ### Test Quality Concerns
 
@@ -264,7 +265,7 @@
 
 ### Next Sprint
 
-1. **Add OS signal handling tests** (C7) — verify clean shutdown
+1. ~~**Add OS signal handling tests** (C7) — verify clean shutdown~~ ✅ Done
 
 ### Long-Term
 
