@@ -2,6 +2,7 @@ import { resolve as resolvePath } from "node:path";
 import type { AgentAdapter } from "../agents";
 import type { AgentEvent, AgentId } from "../types/events";
 import type { WorkflowEvent } from "./events";
+import { resolveStepTimeoutMs } from "./timeout";
 import { createChannel, runPool } from "./pool";
 import { type RetryPolicy, backoffDelayMs, resolveRetryPolicy } from "./retry";
 import { renderPrompt } from "./template";
@@ -33,7 +34,8 @@ import type { AgentWorkspaceLease, AgentWorkspaceManager } from "./worktree";
 export interface WorkflowDeps {
   createAdapter: (id: AgentId, binary?: string) => AgentAdapter;
   binaries?: Partial<Record<AgentId, string>>;
-  timeoutMs?: number;
+  /** Config default per-agent subprocess timeout (ms). */
+  stepTimeoutMs?: number;
   maxConcurrency: number;
   /** Base cwd; a step's relative `cwd` resolves against this. */
   cwd: string;
@@ -280,6 +282,7 @@ export async function* runWorkflow(
           signal,
           workflowName: spec.name,
           retryDefault: spec.retry,
+          stepTimeoutDefault: spec.stepTimeoutMs,
           iteration,
         },
         {
@@ -511,6 +514,8 @@ interface ExecuteContext {
   workflowName: string;
   /** Workflow-level auto-retry default; per-step `retry` overrides it. */
   retryDefault?: RetryPolicy;
+  /** Workflow-level per-step timeout default; per-step `stepTimeoutMs` overrides it. */
+  stepTimeoutDefault?: number;
   /** Loop iteration this step is executing under (1-based). */
   iteration: number;
 }
@@ -745,6 +750,9 @@ function adapterRun(
   prompt: string,
 ): AsyncIterable<AgentEvent> {
   const adapter = ctx.deps.createAdapter(step.agent, ctx.deps.binaries?.[step.agent]);
+  const timeoutMs = resolveStepTimeoutMs(step, { stepTimeoutMs: ctx.stepTimeoutDefault }, {
+    stepTimeoutMs: ctx.deps.stepTimeoutMs,
+  });
   return adapter.run({
     prompt,
     model: step.model,
@@ -752,7 +760,7 @@ function adapterRun(
     cwd: stepCwd,
     env: step.env,
     extraArgs: step.extraArgs,
-    timeoutMs: ctx.deps.timeoutMs,
+    timeoutMs,
     signal: ctx.signal,
   });
 }

@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CONFIG_FILENAME } from "../src/config";
+import { CONFIG_FILENAME, loadConfig } from "../src/config";
 import {
   deleteProjectWorkflow,
   loadProjectWorkflows,
@@ -43,6 +43,10 @@ function readConfig(cwd: string): Record<string, unknown> {
   return JSON.parse(readFileSync(cfg(cwd), "utf8"));
 }
 
+function mergedConfig(cwd: string) {
+  return loadConfig({ customPath: cfg(cwd) }).config;
+}
+
 describe("saveProjectWorkflow", () => {
   it("creates steamtrain.json with the workflow when none exists", () => {
     const cwd = tmpCwd();
@@ -67,7 +71,9 @@ describe("saveProjectWorkflow", () => {
     const result = saveProjectWorkflow("my-flow", sampleSpec("my-flow"), cfg(cwd));
     expect(result.ok).toBe(true);
 
-    const config = readConfig(cwd);
+    const config = mergedConfig(cwd);
+    expect(config.stepTimeoutMs).toBe(12345);
+    expect(config.workflowTimeoutMs).toBe(12345);
     expect(config.timeoutMs).toBe(12345);
     expect(config.binaries).toEqual({ codex: "/usr/bin/codex" });
     expect(config.maxConcurrency).toBe(2);
@@ -141,6 +147,7 @@ describe("deleteProjectWorkflow", () => {
     expect(remaining.a).toBeUndefined();
     expect(remaining.b).toBeDefined();
     expect(readConfig(cwd).timeoutMs).toBe(999);
+    expect(mergedConfig(cwd).stepTimeoutMs).toBe(999);
   });
 
   it("is a no-op (still ok) when the workflow is absent", () => {

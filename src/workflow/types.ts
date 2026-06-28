@@ -45,6 +45,8 @@ export interface AgentRunFields {
   extraArgs?: string[];
   /** Reasoning effort / variant (claude: `--effort`, opencode: `--variant`, codex: `-c model_reasoning_effort=…`). */
   effort?: string;
+  /** Per-step subprocess wall-clock limit in ms (overrides workflow and config defaults). */
+  stepTimeoutMs?: number;
 }
 
 export interface WorkerStep extends WorkflowStepBase, AgentRunFields {
@@ -75,6 +77,7 @@ export interface DistributorStep extends WorkflowStepBase {
   env?: Record<string, string>;
   extraArgs?: string[];
   effort?: string;
+  stepTimeoutMs?: number;
 }
 
 export interface ConsolidatorStep extends WorkflowStepBase {
@@ -90,6 +93,7 @@ export interface ConsolidatorStep extends WorkflowStepBase {
   env?: Record<string, string>;
   extraArgs?: string[];
   effort?: string;
+  stepTimeoutMs?: number;
   separator?: string;
 }
 
@@ -142,6 +146,10 @@ export interface WorkflowSpec {
   phases: WorkflowPhase[];
   /** Default auto-retry policy applied to every agent step (per-step `retry` overrides). */
   retry?: RetryPolicy;
+  /** Default per-agent subprocess timeout for agent-backed steps (per-step `stepTimeoutMs` overrides). */
+  stepTimeoutMs?: number;
+  /** Whole-workflow wall-clock abort limit. Omitted → stepCount × resolved step timeout. */
+  workflowTimeoutMs?: number;
 }
 
 export interface AgentWorktreeInfo {
@@ -212,6 +220,7 @@ const agentRunShape = {
   env: z.record(z.string()).optional(),
   extraArgs: z.array(z.string()).optional(),
   effort: z.string().min(1).optional(),
+  stepTimeoutMs: z.number().positive().optional(),
 };
 
 const optionalAgentRunShape = {
@@ -222,6 +231,7 @@ const optionalAgentRunShape = {
   env: z.record(z.string()).optional(),
   extraArgs: z.array(z.string()).optional(),
   effort: z.string().min(1).optional(),
+  stepTimeoutMs: z.number().positive().optional(),
 };
 
 const retryPolicySchema = z.object({
@@ -342,6 +352,8 @@ export const workflowSpecSchema = z
     description: z.string().optional(),
     phases: z.array(workflowPhaseSchema).min(1),
     retry: retryPolicySchema.optional(),
+    stepTimeoutMs: z.number().positive().optional(),
+    workflowTimeoutMs: z.number().positive().optional(),
   })
   .superRefine((spec, ctx) => {
     const seen = new Set<string>();

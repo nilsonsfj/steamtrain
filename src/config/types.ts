@@ -10,7 +10,14 @@ import {
 export interface SteamtrainConfig {
   /** Optional per-agent binary path/name overrides. */
   binaries?: Partial<Record<AgentId, string>>;
-  /** Per-run wall-clock timeout in ms (workflows and workspace dispatches). */
+  /** Per-agent subprocess wall-clock limit in ms (workspace dispatches and workflow steps). */
+  stepTimeoutMs?: number;
+  /** Whole-workflow wall-clock abort limit in ms. Omitted → stepCount × stepTimeoutMs. */
+  workflowTimeoutMs?: number;
+  /**
+   * @deprecated Use `stepTimeoutMs` and `workflowTimeoutMs`. When set and the new
+   * keys are absent, applies to both step and workflow timeouts for migration.
+   */
   timeoutMs?: number;
   /** Project workflows from `steamtrain.json`, keyed by launch name. Merged over bundled and user workflows. */
   workflows?: Record<string, WorkflowSpec>;
@@ -44,6 +51,8 @@ export const configFileSchema = z
       })
       .partial()
       .optional(),
+    stepTimeoutMs: z.number().positive().optional(),
+    workflowTimeoutMs: z.number().positive().optional(),
     timeoutMs: z.number().positive().optional(),
     workflows: z.record(workflowSpecSchema).optional(),
     maxConcurrency: z.number().int().positive().max(MAX_CONCURRENCY).optional(),

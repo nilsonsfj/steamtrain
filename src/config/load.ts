@@ -114,13 +114,29 @@ function joinWarnings(...parts: Array<string | undefined>): string | undefined {
   return text || undefined;
 }
 
+function mergeTimeoutFields(
+  base: SteamtrainConfig,
+  override: ConfigFile,
+): Pick<SteamtrainConfig, "stepTimeoutMs" | "workflowTimeoutMs" | "timeoutMs"> {
+  const stepTimeoutMs =
+    override.stepTimeoutMs ?? override.timeoutMs ?? base.stepTimeoutMs ?? base.timeoutMs;
+  const workflowTimeoutMs =
+    override.workflowTimeoutMs ?? override.timeoutMs ?? base.workflowTimeoutMs ?? base.timeoutMs;
+  const legacy = override.timeoutMs ?? base.timeoutMs;
+  const out: Pick<SteamtrainConfig, "stepTimeoutMs" | "workflowTimeoutMs" | "timeoutMs"> = {};
+  if (stepTimeoutMs !== undefined) out.stepTimeoutMs = stepTimeoutMs;
+  if (workflowTimeoutMs !== undefined) out.workflowTimeoutMs = workflowTimeoutMs;
+  if (legacy !== undefined) out.timeoutMs = legacy;
+  return out;
+}
+
 export function mergeConfig(
   base: SteamtrainConfig,
   override: ConfigFile,
 ): { config: SteamtrainConfig; warnings: string[] } {
   const merged: SteamtrainConfig = {
     binaries: { ...base.binaries, ...override.binaries },
-    timeoutMs: override.timeoutMs ?? base.timeoutMs,
+    ...mergeTimeoutFields(base, override),
     maxConcurrency: override.maxConcurrency ?? base.maxConcurrency,
     loopMaxIterations: override.loopMaxIterations ?? base.loopMaxIterations,
   };

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { SteamtrainConfig } from "../config";
 import {
   type RerunMode,
   type RerunPlan,
@@ -13,6 +14,7 @@ import {
   isRerunError,
   persistWorkflowStepDone,
   planRerun,
+  resolveWorkflowTimeoutMs,
   workflowCacheKey,
 } from "../workflow";
 
@@ -106,8 +108,8 @@ export interface RunManagerOptions {
   retainMs?: number;
   /** Maximum concurrent running workflows. Exceeding returns 503-style error. 0 = unlimited. */
   maxConcurrent?: number;
-  /** Wall-clock timeout (ms) for each run. Omitted = no timeout. */
-  timeoutMs?: number;
+  /** Project config — used to resolve per-run workflow wall-clock limits. */
+  config: SteamtrainConfig;
 }
 
 const DEFAULT_RETAIN_MS = 5 * 60_000;
@@ -126,7 +128,7 @@ export class WorkflowRunManager {
   private readonly historyStore?: WorkflowHistoryStore;
   private readonly retainMs: number;
   private readonly maxConcurrent: number;
-  private readonly timeoutMs?: number;
+  private readonly config: SteamtrainConfig;
   private runningCount = 0;
 
   constructor(options: RunManagerOptions) {
@@ -136,7 +138,7 @@ export class WorkflowRunManager {
     this.historyStore = options.historyStore;
     this.retainMs = options.retainMs ?? DEFAULT_RETAIN_MS;
     this.maxConcurrent = options.maxConcurrent ?? 0;
-    this.timeoutMs = options.timeoutMs;
+    this.config = options.config;
   }
 
   /** Validate and launch a run; the event loop runs detached in the background. */
@@ -170,8 +172,9 @@ export class WorkflowRunManager {
       listeners: new Set(),
       controller: new AbortController(),
     };
-    if (typeof this.timeoutMs === "number" && this.timeoutMs > 0) {
-      run.timeoutTimer = setTimeout(() => run.controller.abort(), this.timeoutMs);
+    const workflowTimeoutMs = resolveWorkflowTimeoutMs(spec, this.config);
+    if (workflowTimeoutMs > 0) {
+      run.timeoutTimer = setTimeout(() => run.controller.abort(), workflowTimeoutMs);
       run.timeoutTimer.unref?.();
     }
     this.runs.set(run.id, run);

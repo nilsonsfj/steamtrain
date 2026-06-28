@@ -32,6 +32,8 @@ import {
   persistWorkflowStepDone,
   planRerun,
   rerunDowngradeMessage,
+  resolveStepTimeoutMs,
+  resolveWorkflowTimeoutMs,
   saveUserWorkflow,
   validateWorkflow,
   workflowAgentIds,
@@ -495,12 +497,10 @@ async function runWorkflowCommand(
     else process.exit(130);
   };
   process.on("SIGINT", onSigint);
-  // Enforce wall-clock timeout if configured.
-  const timeoutMs = orchestrator.getConfig().timeoutMs;
+  // Enforce whole-workflow wall-clock timeout.
+  const workflowTimeoutMs = resolveWorkflowTimeoutMs(spec, orchestrator.getConfig());
   const timeoutTimer =
-    typeof timeoutMs === "number" && timeoutMs > 0
-      ? setTimeout(() => ac.abort(), timeoutMs)
-      : undefined;
+    workflowTimeoutMs > 0 ? setTimeout(() => ac.abort(), workflowTimeoutMs) : undefined;
   timeoutTimer?.unref?.();
   let ok = false;
   try {
@@ -652,7 +652,7 @@ async function runWorkflowCreateCommand(
     {
       createAdapter,
       binaries: config.binaries,
-      timeoutMs: config.timeoutMs,
+      timeoutMs: resolveStepTimeoutMs(undefined, undefined, config),
       cwd: io.cwd ?? process.cwd(),
     },
   );

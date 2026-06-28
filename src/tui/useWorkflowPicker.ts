@@ -92,7 +92,10 @@ export function useWorkflowPicker({
   );
 
   const patchWorkflowStep = useCallback(
-    (stepId: string, patch: Partial<Pick<WorkspaceEntry, "agent" | "model" | "effort">>) => {
+    (
+      stepId: string,
+      patch: Partial<Pick<WorkspaceEntry, "agent" | "model" | "effort"> & { stepTimeoutMs?: number }>,
+    ) => {
       if (!wfPreview) return;
       setWfStepOverrides((prev) => ({
         ...prev,

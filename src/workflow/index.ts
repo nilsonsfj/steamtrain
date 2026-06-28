@@ -53,6 +53,14 @@ export {
   resolveRetryPolicy,
   backoffDelayMs,
 } from "./retry";
+export {
+  DEFAULT_STEP_TIMEOUT_MS,
+  countStaticWorkflowSteps,
+  formatDurationMs,
+  parseDurationMs,
+  resolveStepTimeoutMs,
+  resolveWorkflowTimeoutMs,
+} from "./timeout";
 export { BUNDLED_WORKFLOWS } from "./bundled";
 export { renderPrompt, type TemplateContext } from "./template";
 export { runPool, createChannel, type Channel } from "./pool";

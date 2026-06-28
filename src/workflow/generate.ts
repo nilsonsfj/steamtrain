@@ -20,6 +20,7 @@ export interface GenerateWorkflowDeps {
   createAdapter: (id: AgentId, binary?: string) => AgentAdapter;
   binaries?: Partial<Record<AgentId, string>>;
   timeoutMs?: number;
+  stepTimeoutMs?: number;
   /** Working directory for the generating agent (it does not need repo access). */
   cwd?: string;
   /**
@@ -343,7 +344,7 @@ async function runGenerationAgent(
       model: req.model,
       effort: req.effort,
       cwd: deps.cwd,
-      timeoutMs: deps.timeoutMs,
+      timeoutMs: deps.stepTimeoutMs ?? deps.timeoutMs,
       signal: req.signal,
     })) {
       req.onEvent?.(event);
