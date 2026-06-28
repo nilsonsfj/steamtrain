@@ -1,9 +1,9 @@
 import type { SteamtrainConfig } from "../config/types";
 import {
   DEFAULT_LOOP_MAX_ITERATIONS,
-  parseForEachSource,
   type WorkflowSpec,
   type WorkflowStep,
+  parseForEachSource,
 } from "./types";
 
 /** Default per-agent subprocess wall-clock limit: 15 minutes (in seconds). */
@@ -32,10 +32,7 @@ function expandedPhaseStepCounts(spec: WorkflowSpec): number[] {
   return spec.phases.map((phase) => {
     let count = phase.steps.length;
     for (const step of phase.steps) {
-      if (
-        (step.kind === "worker" || step.kind === "processor" || !step.kind) &&
-        step.forEach
-      ) {
+      if ((step.kind === "worker" || step.kind === "processor" || !step.kind) && step.forEach) {
         const sourceStepId = parseForEachSource(step.forEach);
         const source = sourceStepId ? stepsById.get(sourceStepId) : undefined;
         if (source?.kind === "distributor") {

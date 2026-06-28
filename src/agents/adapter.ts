@@ -75,7 +75,12 @@ export async function* runAgentProcess(params: AgentProcessParams): AsyncGenerat
         }
       } catch (err) {
         sawError = true;
-        yield { kind: "error", agent: id, ts: Date.now(), message: `mapper error: ${err instanceof Error ? err.message : String(err)}` };
+        yield {
+          kind: "error",
+          agent: id,
+          ts: Date.now(),
+          message: `mapper error: ${err instanceof Error ? err.message : String(err)}`,
+        };
       }
       continue;
     }

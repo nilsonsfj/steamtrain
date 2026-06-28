@@ -52,7 +52,10 @@ export function isRegisteredSlashCommand(raw: string): boolean {
   return registry.some((c) => c.name === parsed.command);
 }
 
-export function executeSlashCommand(raw: string, ctx: SlashCommandContext): SlashCommandResult | Promise<SlashCommandResult> {
+export function executeSlashCommand(
+  raw: string,
+  ctx: SlashCommandContext,
+): SlashCommandResult | Promise<SlashCommandResult> {
   const trimmed = raw.trim();
   if (!trimmed.startsWith("/")) return { handled: false };
 

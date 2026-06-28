@@ -2,10 +2,10 @@ import { resolve as resolvePath } from "node:path";
 import type { AgentAdapter } from "../agents";
 import type { AgentEvent, AgentId } from "../types/events";
 import type { WorkflowEvent } from "./events";
-import { resolveStepTimeoutSec, timeoutMsFromSec } from "./timeout";
 import { createChannel, runPool } from "./pool";
 import { type RetryPolicy, backoffDelayMs, resolveRetryPolicy } from "./retry";
 import { renderPrompt } from "./template";
+import { resolveStepTimeoutSec, timeoutMsFromSec } from "./timeout";
 import {
   type AgentBackedWorkflowStep,
   type AgentWorktreeInfo,
@@ -750,9 +750,13 @@ function adapterRun(
   prompt: string,
 ): AsyncIterable<AgentEvent> {
   const adapter = ctx.deps.createAdapter(step.agent, ctx.deps.binaries?.[step.agent]);
-  const timeoutSec = resolveStepTimeoutSec(step, { stepTimeoutSec: ctx.stepTimeoutDefault }, {
-    stepTimeoutSec: ctx.deps.stepTimeoutSec,
-  });
+  const timeoutSec = resolveStepTimeoutSec(
+    step,
+    { stepTimeoutSec: ctx.stepTimeoutDefault },
+    {
+      stepTimeoutSec: ctx.deps.stepTimeoutSec,
+    },
+  );
   return adapter.run({
     prompt,
     model: step.model,

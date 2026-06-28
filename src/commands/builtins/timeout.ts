@@ -1,6 +1,5 @@
 import { type ProjectConfigPatch, saveProjectConfig } from "../../config/project-config";
 import type { SteamtrainConfig } from "../../config/types";
-import type { WorkflowSpec } from "../../workflow/types";
 import {
   formatDurationSec,
   parseDurationSec,
@@ -8,8 +7,9 @@ import {
   resolveWorkflowTimeoutSec,
   workflowTimeoutStepBudget,
 } from "../../workflow/timeout";
-import { hasWorkflowStepTarget } from "../workflow-step-target";
+import type { WorkflowSpec } from "../../workflow/types";
 import type { SlashCommand, SlashCommandContext } from "../types";
+import { hasWorkflowStepTarget } from "../workflow-step-target";
 
 function describeTimeouts(config: SteamtrainConfig, spec?: WorkflowSpec): string {
   const stepSec = spec
@@ -145,7 +145,9 @@ export const timeoutCommand: SlashCommand = {
       return {
         handled: true,
         clearInput: true,
-        notices: [{ level: "error", text: `invalid duration '${args[1]}' (try 15m, 900, 1h, auto)` }],
+        notices: [
+          { level: "error", text: `invalid duration '${args[1]}' (try 15m, 900, 1h, auto)` },
+        ],
       };
     }
 

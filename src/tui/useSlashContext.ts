@@ -5,10 +5,10 @@ import type {
   SlashCommandResult,
   WorkflowStepSelection,
 } from "../commands/types";
+import type { ProjectConfigPatch } from "../config/project-config";
+import type { SteamtrainConfig } from "../config/types";
 import type { AgentId } from "../types/events";
 import { STEAMTRAIN_VERSION } from "../version";
-import type { SteamtrainConfig } from "../config/types";
-import type { ProjectConfigPatch } from "../config/project-config";
 import type { WorkflowScope, WorkflowSpec } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 import type { DraftTarget } from "./draft-model";
@@ -24,7 +24,9 @@ export interface UseSlashContextParams {
   wfPreview: { name: string; input: string } | null;
   patchWorkflowStep: (
     stepId: string,
-    patch: Partial<Pick<WorkspaceEntry, "agent" | "model" | "effort"> & { stepTimeoutSec?: number }>,
+    patch: Partial<
+      Pick<WorkspaceEntry, "agent" | "model" | "effort"> & { stepTimeoutSec?: number }
+    >,
   ) => void;
   previewStepSelection: WorkflowStepSelection | undefined;
   workflowSpec?: WorkflowSpec;

@@ -185,13 +185,12 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
 
 function killProcess(child: PipedChild | PipedChildWithStdin): { cancel: () => void } {
   let killed = false;
-  let sigkillTimer: NodeJS.Timeout | undefined;
   try {
     child.kill("SIGTERM");
   } catch {
     // already gone
   }
-  sigkillTimer = setTimeout(() => {
+  const sigkillTimer = setTimeout(() => {
     try {
       child.kill("SIGKILL");
     } catch {

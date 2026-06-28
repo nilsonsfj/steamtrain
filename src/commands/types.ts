@@ -1,7 +1,7 @@
+import type { ProjectConfigPatch } from "../config/project-config";
+import type { SteamtrainConfig } from "../config/types";
 import type { Mode } from "../tui/modes";
 import type { AgentId } from "../types/events";
-import type { SteamtrainConfig } from "../config/types";
-import type { ProjectConfigPatch } from "../config/project-config";
 import type { WorkflowScope, WorkflowSpec } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 

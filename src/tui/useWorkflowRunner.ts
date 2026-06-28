@@ -1,15 +1,12 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { Orchestrator } from "../orchestrator";
-import type {
-  StepResult,
-  WorkflowSpec,
-} from "../workflow";
+import type { StepResult, WorkflowSpec } from "../workflow";
 import {
+  RunRecordBuilder,
   WORKFLOW_CACHE_DIR,
   WORKFLOW_HISTORY_DIR,
-  RunRecordBuilder,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   hashWorkflowSpec,
@@ -18,13 +15,13 @@ import {
   timeoutMsFromSec,
   workflowCacheKey,
 } from "../workflow";
+import { message } from "./util";
 import {
   type WorkflowState,
   flattenSteps,
   initialWorkflowState,
   workflowReducer,
 } from "./workflow-state";
-import { message } from "./util";
 
 export interface UseWorkflowRunnerParams {
   orchestrator: Orchestrator;
@@ -62,9 +59,7 @@ export function useWorkflowRunner({
     liveFlatSteps.length > 0
       ? liveFlatSteps[Math.min(stepIndex, liveFlatSteps.length - 1)]
       : undefined;
-  const wfElapsedMs = wf.startedAt
-    ? Math.max(0, (wf.done ? Date.now() : wfNow) - wf.startedAt)
-    : 0;
+  const wfElapsedMs = wf.startedAt ? Math.max(0, (wf.done ? Date.now() : wfNow) - wf.startedAt) : 0;
 
   // Elapsed timer for running workflows.
   useEffect(() => {

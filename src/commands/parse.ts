@@ -36,10 +36,7 @@ function stripQuotes(token: string): string {
     (token.startsWith('"') && token.endsWith('"')) ||
     (token.startsWith("'") && token.endsWith("'"))
   ) {
-    return token
-      .slice(1, -1)
-      .replace(/\\"/g, '"')
-      .replace(/\\'/g, "'");
+    return token.slice(1, -1).replace(/\\"/g, '"').replace(/\\'/g, "'");
   }
   return token;
 }

@@ -34,7 +34,11 @@ describe("fallbackOpencodeEfforts", () => {
   });
 
   it("returns standard reasoning levels for qwen on opencode provider (M4)", () => {
-    expect(fallbackOpencodeEfforts("opencode/qwen3.6-plus-free")).toEqual(["low", "medium", "high"]);
+    expect(fallbackOpencodeEfforts("opencode/qwen3.6-plus-free")).toEqual([
+      "low",
+      "medium",
+      "high",
+    ]);
     expect(fallbackOpencodeEfforts("opencode/qwen-turbo")).toEqual(["low", "medium", "high"]);
   });
 

@@ -1,10 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { atomicWriteFile } from "./fs-util";
 import { z } from "zod";
 import { WORKSPACE_CONFIG_DIR } from "../workspace";
 import { BUNDLED_WORKFLOWS } from "./bundled";
+import { atomicWriteFile } from "./fs-util";
 import { type WorkflowStepOverrides, applyWorkflowStepOverrides } from "./overrides";
 import {
   type WorkflowSpec,
@@ -307,7 +307,10 @@ function joinWarnings(...parts: Array<string | undefined>): string | undefined {
   return text || undefined;
 }
 
-async function writeUserWorkflowsFile(home: string, workflows: Record<string, WorkflowSpec>): Promise<string> {
+async function writeUserWorkflowsFile(
+  home: string,
+  workflows: Record<string, WorkflowSpec>,
+): Promise<string> {
   const path = userWorkflowsPath(home);
   await atomicWriteFile(path, `${JSON.stringify({ workflows }, null, 2)}\n`);
   return path;

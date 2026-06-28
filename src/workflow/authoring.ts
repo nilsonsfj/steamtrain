@@ -18,8 +18,8 @@ import { deleteUserWorkflow, saveUserWorkflow } from "./catalog";
 import type { SaveSessionWorkflowsResult, WorkflowSourceKind } from "./catalog";
 import { generateWorkflow, slugifyWorkflowName } from "./generate";
 import { applyWorkflowStepOverrides } from "./overrides";
-import { resolveStepTimeoutSec } from "./timeout";
 import type { WorkflowStepOverrides } from "./overrides";
+import { resolveStepTimeoutSec } from "./timeout";
 import { type WorkflowSpec, validateWorkflow } from "./types";
 
 /**

@@ -2,8 +2,8 @@ import { basename } from "node:path";
 import { Box, Text } from "ink";
 import { useMemo } from "react";
 import { truncate } from "../agents/util";
-import { AGENT_COLOR } from "./theme";
 import { statusWord } from "./status-word";
+import { AGENT_COLOR } from "./theme";
 import { selectVisibleWindow } from "./workflow-list-window";
 import { BLOCK_LABEL, formatWorkflowAgentTarget } from "./workflow-spec-ui";
 import {

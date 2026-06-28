@@ -1,7 +1,17 @@
 {
   "name": "steamtrain",
   "version": "0.1.0",
-  "description": "Terminal orchestrator that runs coding agents (Claude Code, OpenCode, Codex) as managed subprocesses and renders their activity live in an Ink TUI.",
+  "description": "Terminal orchestrator that runs coding agents (Claude Code, OpenCode, Codex, Amp) as managed subprocesses and renders their activity live in an Ink TUI.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nilsonsfj/steamtrain.git"
+  },
+  "homepage": "https://github.com/nilsonsfj/steamtrain",
+  "bugs": {
+    "url": "https://github.com/nilsonsfj/steamtrain/issues"
+  },
+  "keywords": ["cli", "agent", "orchestrator", "workflow", "claude", "codex", "tui"],
   "type": "module",
   "bin": {
     "steamtrain": "./dist/index.js"
@@ -21,7 +31,8 @@
     "test": "vitest run",
     "test:watch": "bun scripts/build-reducer.ts && vitest",
     "lint": "biome check .",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "@inkjs/ui": "^2.0.0",

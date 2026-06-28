@@ -7,8 +7,8 @@ import {
   isAgentBackedStep,
   workflowStepKind,
 } from "../workflow";
-import { AGENT_COLOR, WORKFLOW_SOURCE_COLOR } from "./theme";
 import { statusWord } from "./status-word";
+import { AGENT_COLOR, WORKFLOW_SOURCE_COLOR } from "./theme";
 import {
   BLOCK_LABEL,
   type FlatSpecStep,

@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { executeSlashCommand as originalExecuteSlashCommand, isRegisteredSlashCommand } from "../src/commands/registry";
+import {
+  isRegisteredSlashCommand,
+  executeSlashCommand as originalExecuteSlashCommand,
+} from "../src/commands/registry";
 import type { SlashCommandContext, SlashCommandResult } from "../src/commands/types";
 import { workspaceById } from "../src/workspace";
 import { DEFAULT_WORKSPACE_CONFIG } from "../src/workspace/defaults";

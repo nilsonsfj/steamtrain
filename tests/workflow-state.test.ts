@@ -247,7 +247,13 @@ describe("workflowReducer", () => {
 
   it("populates results from step results in workflowStateFromRecord (M8)", () => {
     const result1: StepResult = { stepId: "a", ok: true, output: "done a", durationMs: 10 };
-    const result2: StepResult = { stepId: "b", ok: false, output: "fail b", error: "boom", durationMs: 5 };
+    const result2: StepResult = {
+      stepId: "b",
+      ok: false,
+      output: "fail b",
+      error: "boom",
+      durationMs: 5,
+    };
     const record: RunRecord = {
       version: 1,
       id: "r2",
@@ -269,8 +275,22 @@ describe("workflowReducer", () => {
           done: true,
           ok: false,
           steps: [
-            { stepId: "a", blockKind: "worker", status: "done", text: "", cached: false, result: result1 },
-            { stepId: "b", blockKind: "worker", status: "error", text: "", cached: false, result: result2 },
+            {
+              stepId: "a",
+              blockKind: "worker",
+              status: "done",
+              text: "",
+              cached: false,
+              result: result1,
+            },
+            {
+              stepId: "b",
+              blockKind: "worker",
+              status: "error",
+              text: "",
+              cached: false,
+              result: result2,
+            },
           ],
         },
       ],

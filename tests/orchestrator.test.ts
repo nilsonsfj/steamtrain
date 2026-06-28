@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { Orchestrator } from "../src/orchestrator/orchestrator";
 import type { SteamtrainConfig } from "../src/config";
 import type { DoctorResult } from "../src/doctor";
+import { Orchestrator } from "../src/orchestrator/orchestrator";
 import type { LoadedWorkflowCatalog, WorkflowSpec } from "../src/workflow";
 import type { WorkspaceConfig } from "../src/workspace";
 
@@ -66,12 +66,7 @@ describe("Orchestrator", () => {
   });
 
   it("setCatalog replaces the live catalog", () => {
-    const orch = new Orchestrator(
-      makeConfig(),
-      makeWorkspaces("ws1"),
-      [],
-      makeCatalog(),
-    );
+    const orch = new Orchestrator(makeConfig(), makeWorkspaces("ws1"), [], makeCatalog());
     expect(orch.listWorkflows()).toEqual({});
     orch.setCatalog(makeCatalog({ demo: demoSpec }, { demo: "user" }));
     expect(orch.listWorkflows()).toEqual({ demo: demoSpec });
@@ -197,12 +192,7 @@ describe("Orchestrator", () => {
   });
 
   it("runWorkflow throws for unknown workflow", () => {
-    const orch = new Orchestrator(
-      makeConfig(),
-      makeWorkspaces("ws1"),
-      [],
-      makeCatalog(),
-    );
+    const orch = new Orchestrator(makeConfig(), makeWorkspaces("ws1"), [], makeCatalog());
     expect(() => orch.runWorkflow("nope", "hello")).toThrow("unknown workflow");
   });
 

@@ -12,13 +12,13 @@ import {
 import { formatAgentTarget } from "../agents";
 import { refreshAgentCatalogCaches } from "../agents/models";
 import {
+  type SlashCommandResult,
   autocompleteSlashCommand,
   executeSlashCommand,
   isRegisteredSlashCommand,
   isSlashCommandInput,
   listSlashCommands,
   parseSlashInput,
-  type SlashCommandResult,
 } from "../commands";
 import type { SteamtrainConfig } from "../config";
 import { saveProjectConfig } from "../config/project-config";
@@ -28,11 +28,11 @@ import type { SteamtrainSettings } from "../settings";
 import {
   type AuthoringHost,
   type LoadedWorkflowCatalog,
-  type WorkflowSourceKind,
   WorkflowAuthor,
+  type WorkflowSourceKind,
+  type WorkflowStepOverrides,
   isAgentBackedStep,
   workflowCacheKey,
-  type WorkflowStepOverrides,
 } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId, WorkspaceScope } from "../workspace";
 import {
@@ -52,22 +52,26 @@ import { WorkflowPreview } from "./WorkflowPreview";
 import { WorkflowStepDetails } from "./WorkflowStepDetails";
 import { WorkflowView } from "./WorkflowView";
 import { Banner } from "./banner";
+import { createWorkflowPromptValue } from "./create-workflow-prompt";
 import { formatDraftTarget } from "./draft-model";
 import { type Mode, isWorkflowPickerActive } from "./modes";
 import { workflowListNavigation } from "./prompt-editing";
+import { initialPromptHistoryBrowse } from "./prompt-history";
 import { initialTranscript, transcriptReducer } from "./transcript";
 import { useTerminalSize } from "./useTerminalSize";
 import { flattenSteps } from "./workflow-state";
-import { createWorkflowPromptValue } from "./create-workflow-prompt";
-import { initialPromptHistoryBrowse } from "./prompt-history";
 
 // Custom hooks — each owns a cohesive slice of state.
 import { type HistoryUiState, useHistory } from "./useHistory";
+import { useKeyboardInput } from "./useKeyboardInput";
 import { usePrompt } from "./usePrompt";
 import { useSlashContext } from "./useSlashContext";
-import { useWorkflowPicker, migrateSessionOverrides, updatePreviewOnRename } from "./useWorkflowPicker";
+import {
+  migrateSessionOverrides,
+  updatePreviewOnRename,
+  useWorkflowPicker,
+} from "./useWorkflowPicker";
 import { useWorkflowRunner } from "./useWorkflowRunner";
-import { useKeyboardInput } from "./useKeyboardInput";
 
 // Re-export pure helpers so the existing test import path (`./App`) keeps working.
 export { migrateSessionOverrides, updatePreviewOnRename };
@@ -144,7 +148,8 @@ export function App({
 
   // ── Orchestrator & Author ────────────────────────────────────────────
   const orchestrator = useMemo(
-    () => new Orchestrator(runtimeConfig, runtimeWorkspaces, doctor ?? EMPTY_DOCTOR, runtimeCatalog),
+    () =>
+      new Orchestrator(runtimeConfig, runtimeWorkspaces, doctor ?? EMPTY_DOCTOR, runtimeCatalog),
     [runtimeConfig, runtimeWorkspaces, doctor, runtimeCatalog],
   );
 
@@ -245,10 +250,20 @@ export function App({
         mode,
         history: Boolean(historyHook.history),
         wfCreate: Boolean(picker.wfCreate),
-        previewing: Boolean(picker.wfPreview && picker.preview.spec && picker.preview.dispatchCheck),
+        previewing: Boolean(
+          picker.wfPreview && picker.preview.spec && picker.preview.dispatchCheck,
+        ),
         showWorkflowView: runner.showWorkflowView,
       }),
-    [mode, historyHook.history, picker.wfCreate, picker.wfPreview, picker.preview.spec, picker.preview.dispatchCheck, runner.showWorkflowView],
+    [
+      mode,
+      historyHook.history,
+      picker.wfCreate,
+      picker.wfPreview,
+      picker.preview.spec,
+      picker.preview.dispatchCheck,
+      runner.showWorkflowView,
+    ],
   );
 
   const slashHook = useSlashContext({
@@ -343,7 +358,15 @@ export function App({
     return () => {
       active = false;
     };
-  }, [mode, runner.running, runner.wf.started, runner.wfLaunching, picker.wfPreview, prompt.value, resolveWorkflowSpec]);
+  }, [
+    mode,
+    runner.running,
+    runner.wf.started,
+    runner.wfLaunching,
+    picker.wfPreview,
+    prompt.value,
+    resolveWorkflowSpec,
+  ]);
 
   // ── Step index reset effect ──────────────────────────────────────────
   useEffect(() => {
@@ -413,7 +436,13 @@ export function App({
       prompt.setSuggestionIndex(0);
       prompt.bumpCursorToEnd();
     },
-    [runner.running, prompt.updatePromptDraft, prompt.bumpCursorToEnd, prompt.setCommandSuggestions, prompt.setSuggestionIndex],
+    [
+      runner.running,
+      prompt.updatePromptDraft,
+      prompt.bumpCursorToEnd,
+      prompt.setCommandSuggestions,
+      prompt.setSuggestionIndex,
+    ],
   );
 
   const handleWorkflowRun = useCallback(
@@ -483,7 +512,7 @@ export function App({
       const promptText = raw.trim();
 
       if (isRegisteredSlashCommand(promptText)) {
-        let resultOrPromise;
+        let resultOrPromise: SlashCommandResult | Promise<SlashCommandResult>;
         try {
           resultOrPromise = executeSlashCommand(promptText, slashHook.slashCtx);
         } catch (err) {
@@ -636,8 +665,6 @@ export function App({
       prompt.updatePromptDraft({ value: "", promptEditing: false });
   }, [prompt.recordPromptHistory, handleWorkflowRun, prompt.updatePromptDraft]);
 
-
-
   // ── Keyboard input hook ──────────────────────────────────────────────
   useKeyboardInput({
     mode,
@@ -677,7 +704,9 @@ export function App({
     ? suggestionMenuHeight(prompt.commandSuggestions.length, prompt.suggestionIndex)
     : 0;
   const activeWorkflowName = isWorkflow
-    ? (runner.activeWorkflowRef.current ?? picker.wfPreview?.name ?? picker.workflowEntries[picker.workflowIndex]?.name)
+    ? (runner.activeWorkflowRef.current ??
+      picker.wfPreview?.name ??
+      picker.workflowEntries[picker.workflowIndex]?.name)
     : undefined;
   const activeWorkflowSource: WorkflowSourceKind | undefined = activeWorkflowName
     ? (picker.workflowEntries.find((entry) => entry.name === activeWorkflowName)?.source ??
@@ -708,7 +737,10 @@ export function App({
             totalSteps={runner.totalWfSteps}
             elapsedMs={runner.wfElapsedMs}
           />
-        ) : runner.wfStepDetails === "preview" && picker.wfPreview && picker.preview.spec && picker.preview.dispatchCheck ? (
+        ) : runner.wfStepDetails === "preview" &&
+          picker.wfPreview &&
+          picker.preview.spec &&
+          picker.preview.dispatchCheck ? (
           <WorkflowStepDetails
             kind="preview"
             spec={picker.preview.spec}
@@ -720,7 +752,9 @@ export function App({
             selectedIndex={runner.stepIndex}
             totalSteps={picker.preview.stepCount}
             dispatchOk={picker.preview.dispatchCheck.ok}
-            dispatchReason={picker.preview.dispatchCheck.ok ? undefined : picker.preview.dispatchCheck.reason}
+            dispatchReason={
+              picker.preview.dispatchCheck.ok ? undefined : picker.preview.dispatchCheck.reason
+            }
             canResume={runner.wfCanResume}
           />
         ) : runner.showWorkflowView ? (

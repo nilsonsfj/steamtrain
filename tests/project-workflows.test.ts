@@ -161,10 +161,7 @@ describe("deleteProjectWorkflow", () => {
     // Write a config with an unrecognized top-level key — the strict schema
     // rejects it. Deleting a workflow from it should fail rather than write
     // a config the engine would ignore.
-    writeFileSync(
-      cfg(cwd),
-      JSON.stringify({ workflows: { a: sampleSpec("a") }, bogusKey: true }),
-    );
+    writeFileSync(cfg(cwd), JSON.stringify({ workflows: { a: sampleSpec("a") }, bogusKey: true }));
     const result = deleteProjectWorkflow("a", cfg(cwd));
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/cannot delete/i);

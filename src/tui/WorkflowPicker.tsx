@@ -88,8 +88,7 @@ export function WorkflowPicker({
             })}
             {window.hiddenAfter > 0 ? (
               <Text color="gray">
-                {window.hiddenAfter} later workflow{window.hiddenAfter === 1 ? "" : "s"} hidden
-                ↓
+                {window.hiddenAfter} later workflow{window.hiddenAfter === 1 ? "" : "s"} hidden ↓
               </Text>
             ) : null}
           </>

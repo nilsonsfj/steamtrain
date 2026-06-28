@@ -216,8 +216,10 @@ function validateStepResult(stepId: string, value: unknown): StepResult | undefi
     costUsd: typeof r.costUsd === "number" ? r.costUsd : undefined,
     attempts: typeof r.attempts === "number" ? r.attempts : undefined,
     iteration: typeof r.iteration === "number" ? r.iteration : undefined,
-    items: Array.isArray(r.items) ? r.items.filter((i): i is string => typeof i === "string") : undefined,
-    item: r.item && typeof r.item === "object" ? r.item as StepResult["item"] : undefined,
+    items: Array.isArray(r.items)
+      ? r.items.filter((i): i is string => typeof i === "string")
+      : undefined,
+    item: r.item && typeof r.item === "object" ? (r.item as StepResult["item"]) : undefined,
     parentStepId: typeof r.parentStepId === "string" ? r.parentStepId : undefined,
     gate,
     childResults,

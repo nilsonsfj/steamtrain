@@ -1,14 +1,14 @@
 import { useCallback, useRef, useState } from "react";
-import type { RunRecord, RerunMode, RunRecordSummary, StepResult } from "../workflow";
+import type { RerunMode, RunRecord, RunRecordSummary, StepResult } from "../workflow";
 import {
   createWorkflowHistoryStore,
   isRerunError,
   planRerun,
   rerunDowngradeMessage,
 } from "../workflow";
+import { message } from "./util";
 import type { WorkflowState } from "./workflow-state";
 import { workflowStateFromRecord } from "./workflow-state";
-import { message } from "./util";
 
 /** State for the past-run history browser (opened with `/history`). */
 export interface HistoryUiState {

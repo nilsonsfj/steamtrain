@@ -1,6 +1,6 @@
 import type { AgentAdapter } from "../agents";
-import { DEFAULT_STEP_TIMEOUT_SEC, timeoutMsFromSec } from "./timeout";
 import type { AgentEvent, AgentId } from "../types/events";
+import { DEFAULT_STEP_TIMEOUT_SEC, timeoutMsFromSec } from "./timeout";
 import { type WorkflowSpec, validateWorkflow, workflowSpecSchema } from "./types";
 
 /**

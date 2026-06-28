@@ -10,6 +10,7 @@ import { saveProjectConfig } from "../config/project-config";
 import { type DoctorResult, runDoctor } from "../doctor";
 import { Orchestrator } from "../orchestrator";
 import {
+  DEFAULT_STEP_TIMEOUT_SEC,
   type LoadedWorkflowCatalog,
   WORKFLOW_CACHE_DIR,
   WORKFLOW_HISTORY_DIR,
@@ -17,7 +18,6 @@ import {
   type WorkflowHistoryStore,
   type WorkflowSourceKind,
   type WorkflowSpec,
-  DEFAULT_STEP_TIMEOUT_SEC,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   isAgentBackedStep,
@@ -193,7 +193,7 @@ const MAX_WORKFLOW_NAME = 128;
 function isValidWorkflowName(name: string): boolean {
   if (name.length === 0 || name.length > MAX_WORKFLOW_NAME) return false;
   // Reject control characters and null bytes.
-  // eslint-disable-next-line no-control-regex
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control char rejection
   return !/[\x00-\x1f\x7f]/.test(name);
 }
 
@@ -448,12 +448,7 @@ async function handle(
       const previousName =
         typeof parsed.previousName === "string" ? parsed.previousName : undefined;
       const scope = parsed.scope === "project" ? "project" : "user";
-      const result = await deps.author.save(
-        name,
-        { ...specCheck.data, name },
-        previousName,
-        scope,
-      );
+      const result = await deps.author.save(name, { ...specCheck.data, name }, previousName, scope);
       sendJson(res, result.ok ? 200 : 400, result);
       return;
     }
@@ -785,9 +780,7 @@ export async function startWebUi(
   const missing = missingPublicAssets();
   if (missing.length > 0) {
     err(
-      `\n⚠️  steamtrain web UI is missing static assets: ${missing.join(", ")}\n` +
-        `   Rebuild them with \`bun scripts/build-reducer.ts\` (dev) or \`bun scripts/copy-assets.ts\` (after \`tsup\`).\n` +
-        `   Expected location: ${PUBLIC_DIR}\n`,
+      `\n⚠️  steamtrain web UI is missing static assets: ${missing.join(", ")}\n   Rebuild them with \`bun scripts/build-reducer.ts\` (dev) or \`bun scripts/copy-assets.ts\` (after \`tsup\`).\n   Expected location: ${PUBLIC_DIR}\n`,
     );
   }
 

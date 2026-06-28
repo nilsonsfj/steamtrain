@@ -11,8 +11,8 @@ import {
   createGitWorktreeManager,
   resolveStepTimeoutSec,
   resolveWorkflowTimeoutSec,
-  timeoutMsFromSec,
   runWorkflow,
+  timeoutMsFromSec,
   validateWorkflow,
   workflowAgentIds,
 } from "../workflow";

@@ -38,7 +38,10 @@ describe("/cloneworkflow", () => {
 
   it("errors without a new name", () => {
     const cloneWorkflow = vi.fn();
-    const result = executeSlashCommand("/cloneworkflow", makeCtx({ cloneWorkflow })) as SlashCommandResult;
+    const result = executeSlashCommand(
+      "/cloneworkflow",
+      makeCtx({ cloneWorkflow }),
+    ) as SlashCommandResult;
     expect(cloneWorkflow).not.toHaveBeenCalled();
     if (result.handled) expect(result.notices?.[0]?.level).toBe("error");
   });
@@ -58,7 +61,10 @@ describe("/deleteworkflow", () => {
 
   it("errors without a name", () => {
     const deleteWorkflow = vi.fn();
-    const result = executeSlashCommand("/deleteworkflow", makeCtx({ deleteWorkflow })) as SlashCommandResult;
+    const result = executeSlashCommand(
+      "/deleteworkflow",
+      makeCtx({ deleteWorkflow }),
+    ) as SlashCommandResult;
     expect(deleteWorkflow).not.toHaveBeenCalled();
     if (result.handled) expect(result.notices?.[0]?.level).toBe("error");
   });
@@ -89,7 +95,10 @@ describe("/renameworkflow", () => {
 
   it("errors without a new name", () => {
     const renameWorkflow = vi.fn();
-    const result = executeSlashCommand("/renameworkflow", makeCtx({ renameWorkflow })) as SlashCommandResult;
+    const result = executeSlashCommand(
+      "/renameworkflow",
+      makeCtx({ renameWorkflow }),
+    ) as SlashCommandResult;
     expect(renameWorkflow).not.toHaveBeenCalled();
     if (result.handled) expect(result.notices?.[0]?.level).toBe("error");
   });

@@ -23,8 +23,8 @@ import {
 import { workflowListNavigation } from "./prompt-editing";
 import {
   type PromptArrowContext,
-  type PromptHistoryByMode,
   type PromptHistoryBrowse,
+  type PromptHistoryByMode,
   initialPromptHistoryBrowse,
   navigatePromptHistory,
   pushPromptHistory,
@@ -32,9 +32,7 @@ import {
   shouldPromptHistoryCaptureDown,
   shouldPromptHistoryCaptureUp,
 } from "./prompt-history";
-import {
-  shouldApplySuggestionOnSubmit,
-} from "./slash-completion";
+import { shouldApplySuggestionOnSubmit } from "./slash-completion";
 
 export interface UsePromptParams {
   mode: Mode;

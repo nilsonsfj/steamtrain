@@ -58,7 +58,8 @@ const MAX_TRANSCRIPT_ITEMS = 2000;
 function push(state: TranscriptState, data: DisplayItemData): TranscriptState {
   const item = { id: state.nextId, ...data } as DisplayItem;
   const items = [...state.items, item];
-  const trimmed = items.length > MAX_TRANSCRIPT_ITEMS ? items.slice(items.length - MAX_TRANSCRIPT_ITEMS) : items;
+  const trimmed =
+    items.length > MAX_TRANSCRIPT_ITEMS ? items.slice(items.length - MAX_TRANSCRIPT_ITEMS) : items;
   return { items: trimmed, nextId: state.nextId + 1 };
 }
 

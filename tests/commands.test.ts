@@ -8,9 +8,9 @@ import {
 import { applySlashSuggestion, autocompleteSlashCommand } from "../src/commands/autocomplete";
 import { parseSlashInput, slashCommandArgs } from "../src/commands/parse";
 import {
-  executeSlashCommand as originalExecuteSlashCommand,
   isRegisteredSlashCommand,
   listSlashCommands,
+  executeSlashCommand as originalExecuteSlashCommand,
   registerSlashCommand,
 } from "../src/commands/registry";
 import type { SlashCommandContext, SlashCommandResult } from "../src/commands/types";

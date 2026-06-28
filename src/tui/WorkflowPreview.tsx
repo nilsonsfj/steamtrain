@@ -70,7 +70,9 @@ export function WorkflowPreview({
       ]),
     [spec.phases, flat],
   );
-  const foundIndex = rows.findIndex((row) => row.kind === "step" && row.entry.flatIndex === clampedIndex);
+  const foundIndex = rows.findIndex(
+    (row) => row.kind === "step" && row.entry.flatIndex === clampedIndex,
+  );
   const selectedRowIndex = foundIndex >= 0 ? foundIndex : 0;
   const listBudget = Math.max(1, height - (selected ? 13 : 8));
   const rowWindow = selectVisibleWindow(rows, selectedRowIndex, listBudget);

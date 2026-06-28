@@ -130,14 +130,7 @@ describe("amp mapper", () => {
 describe("buildAmpExecArgs", () => {
   it("attaches the prompt to -x and requests Claude-compatible stream JSON", () => {
     const args = buildAmpExecArgs({ prompt: "do a thing", model: "smart" });
-    expect(args).toEqual([
-      "-x",
-      "",
-      "--stream-json",
-      "--stream-json-thinking",
-      "-m",
-      "smart",
-    ]);
+    expect(args).toEqual(["-x", "", "--stream-json", "--stream-json-thinking", "-m", "smart"]);
   });
 
   it("appends --effort and extraArgs when provided", () => {
