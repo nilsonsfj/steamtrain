@@ -5,7 +5,7 @@ import * as esbuild from "esbuild";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const entryPath = path.resolve(__dirname, "../src/web/reducer.ts");
-const htmlPath = path.resolve(__dirname, "../src/web/html.ts");
+const bundlePath = path.resolve(__dirname, "../src/web/public/steamtrain-reducer.bundle.js");
 
 async function main() {
   const result = await esbuild.build({
@@ -21,27 +21,22 @@ async function main() {
     throw new Error("No output from esbuild build");
   }
 
-  const rawCode = result.outputFiles[0]!.text;
-  // Escape backticks and ${} to prevent string interpolation errors inside html.ts PAGE_HTML template literal
-  const escapedCode = rawCode.trim().replace(/`/g, "\\`").replace(/\${/g, "\\${");
+  const bundleCode = result.outputFiles[0]!.text.trim();
+  // The bundle is a real, standalone browser script now (it lives in its own
+  // `.js` file served at `/static/steamtrain-reducer.bundle.js`), so no
+  // template-literal escaping is needed — just tag it generated for the linter.
+  const generated = `// @generated\n${bundleCode}\n`;
 
-  const htmlContent = fs.readFileSync(htmlPath, "utf8");
-
-  // Robustly replace content inside markers using Regex
-  const regex = /(\/\* BEGIN_REDUCER_BUNDLE \*\/)[\s\S]*?(\/\* END_REDUCER_BUNDLE \*\/)/;
-  if (!regex.test(htmlContent)) {
-    throw new Error("Reducer bundle markers not found in html.ts");
-  }
-
-  const updatedHtmlContent = htmlContent.replace(regex, `$1\n// @generated\n${escapedCode}\n  $2`);
-
-  if (htmlContent === updatedHtmlContent) {
+  const existed = fs.existsSync(bundlePath);
+  const previous = existed ? fs.readFileSync(bundlePath, "utf8") : null;
+  if (previous === generated) {
     console.log("Embedded reducer is already up to date. Skipping write.");
     return;
   }
 
-  fs.writeFileSync(htmlPath, updatedHtmlContent, "utf8");
-  console.log("Successfully bundled and embedded reducer in src/web/html.ts");
+  fs.mkdirSync(path.dirname(bundlePath), { recursive: true });
+  fs.writeFileSync(bundlePath, generated, "utf8");
+  console.log(`Bundled reducer -> ${path.relative(path.resolve(__dirname, ".."), bundlePath)}`);
 }
 
 main().catch((err) => {

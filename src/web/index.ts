@@ -4,6 +4,8 @@ export {
   DEFAULT_WEB_HOST,
   DEFAULT_WEB_PORT,
   createWebServer,
+  missingPublicAssets,
+  publicAssetsLoaded,
   startWebUi,
 } from "./server";
 export {
@@ -14,4 +16,4 @@ export {
   type WorkflowHost,
   WorkflowRunManager,
 } from "./runs";
-export { PAGE_HTML } from "./html";
+export { PAGE_HTML, renderIndex, type PageAssetRevisions } from "./html";

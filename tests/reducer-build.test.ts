@@ -7,9 +7,9 @@ import { describe, expect, it } from "vitest";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 describe("reducer bundle lockstep", () => {
-  it("verifies that src/web/html.ts has the latest bundled reducer embedded", async () => {
+  it("verifies that src/web/public/steamtrain-reducer.bundle.js has the latest bundled reducer", async () => {
     const entryPath = path.resolve(__dirname, "../src/web/reducer.ts");
-    const htmlPath = path.resolve(__dirname, "../src/web/html.ts");
+    const bundlePath = path.resolve(__dirname, "../src/web/public/steamtrain-reducer.bundle.js");
 
     const result = await esbuild.build({
       entryPoints: [entryPath],
@@ -20,23 +20,12 @@ describe("reducer bundle lockstep", () => {
       target: ["es2020"],
     });
 
-    const rawCode = result.outputFiles[0]!.text;
-    const expectedCode = `// @generated\n${rawCode.trim()}`
-      .replace(/`/g, "\\`")
-      .replace(/\${/g, "\\${");
+    const rawCode = result.outputFiles[0]!.text.trim();
+    const expectedCode = `// @generated\n${rawCode}\n`;
 
-    const htmlContent = fs.readFileSync(htmlPath, "utf8");
-    const beginMarker = "/* BEGIN_REDUCER_BUNDLE */";
-    const endMarker = "/* END_REDUCER_BUNDLE */";
+    expect(fs.existsSync(bundlePath)).toBe(true);
+    const onDisk = fs.readFileSync(bundlePath, "utf8");
 
-    const beginIndex = htmlContent.indexOf(beginMarker);
-    const endIndex = htmlContent.indexOf(endMarker);
-
-    expect(beginIndex).not.toBe(-1);
-    expect(endIndex).not.toBe(-1);
-
-    const embeddedCode = htmlContent.slice(beginIndex + beginMarker.length, endIndex).trim();
-
-    expect(embeddedCode).toBe(expectedCode);
+    expect(onDisk).toBe(expectedCode);
   });
 });

@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { refreshAgentCatalogCaches } from "../agents/models";
 import type { SteamtrainConfig } from "../config";
 import { type DoctorResult, runDoctor } from "../doctor";
@@ -20,8 +23,89 @@ import {
   workflowStepKind,
 } from "../workflow";
 import type { WorkspaceConfig } from "../workspace";
-import { PAGE_HTML } from "./html";
-import { type WorkflowHost, WorkflowRunManager, TooManyRuns } from "./runs";
+import { type PageAssetRevisions, renderIndex } from "./html";
+import { TooManyRuns, type WorkflowHost, WorkflowRunManager } from "./runs";
+
+/**
+ * Locate the static web-assets directory.
+ *
+ * In development (`bun src/index.tsx`) the running module is `src/web/server.ts`
+ * and the assets live next to it at `src/web/public/`. After the production
+ * build (`tsup`) every web file is bundled into `dist/index.js` and the assets
+ * are copied next to it at `dist/public/` by `scripts/copy-assets.ts`, so
+ * `import.meta.url` resolves there and the same lookup works at runtime.
+ */
+function resolvePublicDir(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [join(here, "public"), resolve(here, "..", "web", "public")];
+  for (const candidate of candidates) {
+    if (existsSync(join(candidate, "app.js"))) return candidate;
+  }
+  // Fall back to the first candidate so the error surfaced to the operator
+  // points at the expected location.
+  return candidates[0]!;
+}
+
+const PUBLIC_DIR = resolvePublicDir();
+
+interface StaticAsset {
+  /** Filesystem-relative path inside {@link PUBLIC_DIR} (e.g. `app.js`). */
+  relPath: string;
+  body: Buffer;
+  /** First 16 hex chars of the asset's SHA-256, used in cache-busting URLs.
+   * 16 chars (64 bits) is well beyond any plausible collision space for three
+   * small files and keeps the `?v=` token short enough to live in any cache
+   * key or log line. */
+  rev: string;
+  mime: string;
+}
+
+function loadAsset(relPath: string, mime: string): StaticAsset | null {
+  const file = join(PUBLIC_DIR, relPath);
+  if (!existsSync(file)) return null;
+  const body = readFileSync(file);
+  const rev = createHash("sha256").update(body).digest("hex").slice(0, 16);
+  return { relPath, body, rev, mime };
+}
+
+// Loaded once at module init and never re-read. Tests and production serve
+// from this in-memory snapshot, so the immutable /static/* cache headers are
+// always consistent with the `?v=` revisions embedded by renderIndex(). The
+// trade-off: editing `app.js` / `app.css` on disk while the dev server is
+// running will NOT take effect until the process restarts (bun src/index.tsx).
+const STATIC_ASSETS: Record<string, StaticAsset | null> = {
+  "/static/app.css": loadAsset("app.css", "text/css; charset=utf-8"),
+  "/static/app.js": loadAsset("app.js", "text/javascript; charset=utf-8"),
+  "/static/steamtrain-reducer.bundle.js": loadAsset(
+    "steamtrain-reducer.bundle.js",
+    "text/javascript; charset=utf-8",
+  ),
+};
+
+const PUBLIC_REVISIONS: PageAssetRevisions = {
+  bundle: STATIC_ASSETS["/static/steamtrain-reducer.bundle.js"]?.rev ?? "",
+  appJs: STATIC_ASSETS["/static/app.js"]?.rev ?? "",
+  appCss: STATIC_ASSETS["/static/app.css"]?.rev ?? "",
+};
+
+/**
+ * Status reported by {@link publicAssetsLoaded}. Useful for diagnostics when
+ * the static assets can't be found (e.g., a stale build).
+ */
+export function publicAssetsLoaded(): boolean {
+  return Object.values(STATIC_ASSETS).every((a) => a !== null);
+}
+
+/**
+ * Names of the static web assets that were not found on disk at module init,
+ * in the form they appear in `/static/*` URLs (e.g. `"/static/app.js"`).
+ * Empty when every asset loaded successfully.
+ */
+export function missingPublicAssets(): string[] {
+  return Object.entries(STATIC_ASSETS)
+    .filter(([, a]) => a === null)
+    .map(([path]) => path);
+}
 
 export interface WebServerDeps {
   host: WorkflowHost;
@@ -147,9 +231,7 @@ export function createWebServer(deps: WebServerDeps): Server {
       if (!res.headersSent) {
         const status = err instanceof PayloadTooLarge ? 413 : 500;
         const error =
-          err instanceof PayloadTooLarge
-            ? "payload too large"
-            : "internal server error";
+          err instanceof PayloadTooLarge ? "payload too large" : "internal server error";
         sendJson(res, status, { error });
         // Drain any remaining body data to free memory
         if (err instanceof PayloadTooLarge) req.destroy();
@@ -170,13 +252,36 @@ async function handle(
   const method = req.method ?? "GET";
 
   if (method === "GET" && (path === "/" || path === "/index.html")) {
+    // The page itself is `no-store` so a fresh release swaps in the new
+    // cache-busted asset hashes on the next navigation.
     res.writeHead(200, {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
       "x-content-type-options": "nosniff",
-      "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+      // Scripts are now external; only inline `style="..."` attributes remain
+      // (marking `style-src 'unsafe-inline'` keeps those painting).
+      "content-security-policy":
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'",
     });
-    res.end(PAGE_HTML);
+    res.end(renderIndex(PUBLIC_REVISIONS));
+    return;
+  }
+
+  if (method === "GET" && path.startsWith("/static/")) {
+    const asset = STATIC_ASSETS[path];
+    if (!asset) {
+      sendJson(res, 404, { error: `unknown static asset: ${path}` });
+      return;
+    }
+    // Immutable content-hashed URLs let every cache between the server and the
+    // browser keep the asset forever; the index page changes its `?v=`
+    // whenever the bytes do.
+    res.writeHead(200, {
+      "content-type": asset.mime,
+      "cache-control": "public, max-age=31536000, immutable",
+      "x-content-type-options": "nosniff",
+    });
+    res.end(asset.body);
     return;
   }
 
@@ -560,6 +665,20 @@ export async function startWebUi(
     configLabel: options.configLabel,
   });
 
+  // Fail loudly and early when the static web assets are missing instead of
+  // silently serving a broken UI (empty `?v=` revisions + 404 on every
+  // /static/* request). This typically means `bun scripts/copy-assets.ts`
+  // wasn't run after `tsup`, or the dev source tree was modified without
+  // re-running `bun scripts/build-reducer.ts`.
+  const missing = missingPublicAssets();
+  if (missing.length > 0) {
+    err(
+      `\n⚠️  steamtrain web UI is missing static assets: ${missing.join(", ")}\n` +
+        `   Rebuild them with \`bun scripts/build-reducer.ts\` (dev) or \`bun scripts/copy-assets.ts\` (after \`tsup\`).\n` +
+        `   Expected location: ${PUBLIC_DIR}\n`,
+    );
+  }
+
   const url = `http://${host}:${port}`;
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -591,5 +710,11 @@ export async function startWebUi(
     }
   })();
 
-  return { server, url, get doctor() { return doctorState.results; } };
+  return {
+    server,
+    url,
+    get doctor() {
+      return doctorState.results;
+    },
+  };
 }

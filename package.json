@@ -15,7 +15,7 @@
   "scripts": {
     "dev": "bun scripts/build-reducer.ts && bun src/index.tsx",
     "start": "node dist/index.js",
-    "build": "bun scripts/build-reducer.ts && tsup",
+    "build": "bun scripts/build-reducer.ts && tsup && bun scripts/copy-assets.ts",
     "typecheck": "tsc --noEmit",
     "pretest": "bun scripts/build-reducer.ts",
     "test": "vitest run",

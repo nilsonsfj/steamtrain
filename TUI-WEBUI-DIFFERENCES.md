@@ -11,6 +11,9 @@ with each layer owning only presentation + input handling.
 
 Last updated: 2026-06-16 (after the first unification pass in
 `feat/unify-workflow-authoring`: the authoring core is now shared).
+Updated 2026-06-28: web client code + reducer bundle now live as real files
+under `src/web/public/` and are served at `/static/*` (no longer embedded in
+`src/web/html.ts`).
 
 ---
 
@@ -38,7 +41,9 @@ Both UIs also fold the **same `WorkflowEvent` stream** into a phase→step rende
 model — independently:
 
 - TUI: `src/tui/workflow-state.ts` (`workflowReducer`)
-- Web: the `reduce()` function embedded in `src/web/html.ts`
+- Web: the shared `workflowReducer` shipped to the browser as the static
+  `/static/steamtrain-reducer.bundle.js` (built by `scripts/build-reducer.ts`
+  from `src/web/reducer.ts`) and folded in page script `src/web/public/app.js`
 
 These two reducers are near-duplicates and are a prime extraction target (see §5).
 
@@ -121,8 +126,10 @@ Status after `feat/unify-workflow-authoring`:
 
 1. ✅ **Event reducer unified.** `src/workflow/reducer.ts` is the single
    source of truth for folding `WorkflowEvent`s. It is shared natively by the
-   TUI and compiled/embedded via a build-time esbuild step into `src/web/html.ts`
-   for the browser UI. This eliminates the near-duplicate implementations.
+   TUI and compiled via a build-time esbuild step (`scripts/build-reducer.ts`)
+   into `src/web/public/steamtrain-reducer.bundle.js`, served at
+   `/static/steamtrain-reducer.bundle.js` for the browser UI. This eliminates the
+   near-duplicate implementations.
 
 2. ✅ **Authoring logic unified.** `WorkflowAuthor` moved to
    `src/workflow/authoring.ts` and is the single authoring core. The web server
@@ -159,8 +166,9 @@ Done in `feat/unify-workflow-authoring`: §5.2, §5.5, §5.6, plus clone/delete 
 the TUI and the staged-flush seam (§5.3). What's left:
 
 1. ✅ **Extract the `WorkflowEvent` reducer** into a shared, UI-agnostic module and
-   bundle it into `html.ts` so the browser uses the same fold as the TUI (§5.1).
-   Done!
+   bundle it for the browser (now built into `src/web/public/steamtrain-reducer.bundle.js`
+   and served at `/static/steamtrain-reducer.bundle.js`; previously embedded in
+   `html.ts`) so the web UI uses the same fold as the TUI (§5.1). Done!
 2. **Render the full edit surface in the TUI** — per-step prompt editing and
    name/description editing (the core already persists them) (§4 / §5.4).
 3. **Add a staged mode to the web** — "try without saving" + an explicit flush
