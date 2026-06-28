@@ -128,25 +128,18 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
   let cancelKill: (() => void) | undefined;
   let killed = false;
 
-  // When a kill is initiated (abort/timeout), resolve any pending
-  // waitForItem() so the generator can loop back and wait for the exit event.
-  // Without this, the generator stays stuck at await waitForItem() if the kill
-  // was triggered externally (e.g. AbortSignal) and the child hasn't exited yet.
-  const resolveWait = (): void => {
+  const startKill = (): void => {
+    if (killed) return;
+    killed = true;
+    const { cancel } = killProcess(child);
+    cancelKill = cancel;
+    // Wake the generator if it's blocked on waitForItem(), so it can
+    // check the `killed` flag and exit instead of re-blocking.
     if (resolveNext) {
       const r = resolveNext;
       resolveNext = null;
       r();
     }
-  };
-
-  const startKill = (): void => {
-    if (killed) return;
-    killed = true;
-    cancelKill?.();
-    const { cancel } = killProcess(child);
-    cancelKill = cancel;
-    resolveWait();
   };
 
   if (opts.timeoutMs && opts.timeoutMs > 0) {
@@ -171,6 +164,7 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
         if (item.kind === "exit") return;
       }
       if (finished) return;
+      if (killed) return; // kill initiated — exit so finally can clean up
       await waitForItem();
     }
   } finally {

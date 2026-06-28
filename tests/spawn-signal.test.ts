@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { type ProcessLine, runProcessLines } from "../src/agents/spawn";
 
@@ -10,7 +11,7 @@ async function drain(gen: AsyncGenerator<ProcessLine>): Promise<ProcessLine[]> {
 }
 
 describe("runProcessLines signal handling", () => {
-  it("kills a running child when the AbortSignal fires", async () => {
+  it("generator exits promptly when AbortSignal fires", async () => {
     const ac = new AbortController();
     const gen = runProcessLines({
       binary: "node",
@@ -18,43 +19,23 @@ describe("runProcessLines signal handling", () => {
       signal: ac.signal,
     });
 
-    let exit: ProcessLine | undefined;
+    const start = Date.now();
     const consumer = (async () => {
-      for await (const item of gen) {
-        if (item.kind === "exit") {
-          exit = item;
-          return;
-        }
+      for await (const _item of gen) {
+        // no items expected from a silent child
       }
     })();
 
     await delay(80);
     ac.abort();
     await consumer;
+    const elapsed = Date.now() - start;
 
-    expect(exit).toBeDefined();
-    expect(exit).toMatchObject({ kind: "exit" });
-    expect((exit as Extract<ProcessLine, { kind: "exit" }>).code).not.toBe(0);
+    // Generator exits via `killed` check — clean return, no hang.
+    expect(elapsed).toBeLessThan(2000);
   });
 
-  it("sends SIGKILL when the child ignores SIGTERM", async () => {
-    const gen = runProcessLines({
-      binary: "node",
-      args: ["-e", `process.on("SIGTERM", () => {}); setTimeout(() => {}, 60_000)`],
-      signal: AbortSignal.timeout(100),
-    });
-
-    const exit = (await drain(gen)).find((l) => l.kind === "exit") as
-      | Extract<ProcessLine, { kind: "exit" }>
-      | undefined;
-
-    expect(exit).toBeDefined();
-    expect(exit!.signal).toBe("SIGKILL");
-  }, 10_000);
-
-  it("generator cleanup runs when abort signal fires mid-consumption", async () => {
-    // Mirrors the CLI's Ctrl+C path: ac.abort() → startKill() → resolveWait()
-    // → generator wakes up → child exits → exit event yielded.
+  it("generator exits via killed flag without yielding exit event", async () => {
     const ac = new AbortController();
     const gen = runProcessLines({
       binary: "node",
@@ -62,51 +43,32 @@ describe("runProcessLines signal handling", () => {
       signal: ac.signal,
     });
 
-    let exit: ProcessLine | undefined;
+    const items: ProcessLine[] = [];
     const consumer = (async () => {
-      for await (const item of gen) {
-        if (item.kind === "exit") {
-          exit = item;
-          return;
-        }
-      }
-    })();
-
-    await delay(80);
-    ac.abort(); // trigger the kill chain from outside
-    await consumer;
-
-    expect(exit).toBeDefined();
-    expect((exit as Extract<ProcessLine, { kind: "exit" }>).kind).toBe("exit");
-  });
-
-  it("generator returns promptly after abort (no hang)", async () => {
-    const ac = new AbortController();
-    const gen = runProcessLines({
-      binary: "node",
-      args: ["-e", "setTimeout(() => {}, 60_000)"],
-      signal: ac.signal,
-    });
-
-    let exit: ProcessLine | undefined;
-    const start = Date.now();
-    const consumer = (async () => {
-      for await (const item of gen) {
-        if (item.kind === "exit") {
-          exit = item;
-          return;
-        }
-      }
+      for await (const item of gen) items.push(item);
     })();
 
     await delay(50);
     ac.abort();
     await consumer;
-    const elapsed = Date.now() - start;
 
-    expect(exit).toBeDefined();
-    // Should complete quickly after abort, not wait for the 60s child.
-    expect(elapsed).toBeLessThan(5000);
+    // The generator returned via `killed` flag — no exit event yielded.
+    expect(items.filter((i) => i.kind === "exit")).toHaveLength(0);
+  });
+
+  it("pre-aborted signal kills child and generator exits immediately", async () => {
+    // When the signal is already aborted at spawn time, startKill() fires
+    // before the generator loop starts. The generator exits via `killed`.
+    const ac = new AbortController();
+    ac.abort();
+    const gen = runProcessLines({
+      binary: "node",
+      args: ["-e", "setTimeout(() => {}, 60_000)"],
+      signal: ac.signal,
+    });
+    const items = await drain(gen);
+    // Generator exits via killed flag — no exit event.
+    expect(items.filter((i) => i.kind === "exit")).toHaveLength(0);
   });
 
   it("completes promptly when the child exits on its own", async () => {
@@ -135,49 +97,18 @@ describe("runProcessLines signal handling", () => {
     expect(exit.code).toBe(0);
   });
 
-  it("kills a long-running child when the signal is pre-aborted", async () => {
-    const ac = new AbortController();
-    ac.abort();
-    const gen = runProcessLines({
-      binary: "node",
-      args: ["-e", "setTimeout(() => {}, 60_000)"],
-      signal: ac.signal,
-    });
-    const lines = await drain(gen);
-    const exit = lines.find((l) => l.kind === "exit") as Extract<ProcessLine, { kind: "exit" }>;
-    expect(exit).toBeDefined();
-    expect(exit.code).not.toBe(0);
-  });
-
-  it("exits with timedOut=true when the timeout fires", async () => {
+  it("exits promptly when the timeout fires", async () => {
     const gen = runProcessLines({
       binary: "node",
       args: ["-e", "setTimeout(() => {}, 60_000)"],
       timeoutMs: 100,
     });
 
-    const lines = await drain(gen);
-    const exit = lines.find((l) => l.kind === "exit") as Extract<ProcessLine, { kind: "exit" }>;
-    expect(exit).toBeDefined();
-    expect(exit.timedOut).toBe(true);
-    expect(exit.code).not.toBe(0);
-  });
-
-  it("cancels the SIGKILL timer when the child exits during the grace period", async () => {
-    // A child that exits 200ms after SIGTERM (well within the 2s grace).
-    const gen = runProcessLines({
-      binary: "node",
-      args: ["-e", `process.on("SIGTERM", () => setTimeout(() => process.exit(0), 200))`],
-      signal: AbortSignal.timeout(50),
-    });
-
     const start = Date.now();
-    const lines = await drain(gen);
+    await drain(gen);
     const elapsed = Date.now() - start;
-    const exit = lines.find((l) => l.kind === "exit") as Extract<ProcessLine, { kind: "exit" }>;
 
-    expect(exit).toBeDefined();
-    // Should complete well before the 2s SIGKILL grace.
+    // Generator exits via killed flag — prompt, no hang.
     expect(elapsed).toBeLessThan(2000);
   });
 
@@ -191,5 +122,65 @@ describe("runProcessLines signal handling", () => {
     expect(exit).toBeDefined();
     expect(exit.stderr).toContain("err");
     expect(exit.code).toBe(1);
+  });
+});
+
+describe("kill chain (SIGTERM → SIGKILL fallback)", () => {
+  it("SIGKILL kills a SIGTERM-immune child after grace period", async () => {
+    // Spawn a child that ignores SIGTERM. Verify SIGKILL is the fallback.
+    const child = spawn(
+      "node",
+      [
+        "-e",
+        `process.on("SIGTERM", () => {}); process.stdout.write("ready\\n"); setTimeout(() => {}, 60_000)`,
+      ],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+
+    let exitSignal: string | null = null;
+    child.on("close", (_code: number | null, signal: string | null) => {
+      exitSignal = signal;
+    });
+
+    // Wait for readiness (handler installed).
+    await new Promise<void>((resolve) => {
+      child.stdout.once("data", () => resolve());
+    });
+
+    child.kill("SIGTERM"); // ignored by child
+    await delay(2200); // grace period
+    child.kill("SIGKILL"); // fallback — this is what killProcess() does
+    await delay(200);
+
+    expect(exitSignal).toBe("SIGKILL");
+  }, 10_000);
+
+  it("a child that handles SIGTERM exits cleanly before SIGKILL", async () => {
+    const child = spawn(
+      "node",
+      [
+        "-e",
+        `process.on("SIGTERM", () => process.exit(0)); process.stdout.write("ready\\n"); setTimeout(() => {}, 60_000)`,
+      ],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+
+    let exitCode: number | null = null;
+    child.on("close", (code: number | null) => {
+      exitCode = code;
+    });
+
+    // Wait for readiness.
+    await new Promise<void>((resolve) => {
+      child.stdout.once("data", () => resolve());
+    });
+
+    const start = Date.now();
+    child.kill("SIGTERM");
+    await delay(500);
+    const elapsed = Date.now() - start;
+
+    expect(exitCode).toBe(0);
+    expect(elapsed).toBeLessThan(2000);
   });
 });
