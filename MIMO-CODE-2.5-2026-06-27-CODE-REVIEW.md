@@ -24,7 +24,7 @@
 | Performance | B | Async catalog I/O, transcript/frame caps, backpressure; TUI re-render concerns remain |
 | Maintainability | B- | App.tsx is a 923-line monolith (decomposed from 1905), server.ts route organization |
 
-**Remaining findings: 39** (0 Critical, 0 High, 2 Medium, 37 Low)
+**Remaining findings: 38** (0 Critical, 0 High, 1 Medium, 37 Low)
 
 ---
 
@@ -66,10 +66,11 @@
 - Shared mutable singleton pattern. Tests running in parallel share cache state. Tests exist to mitigate, but the pattern is fragile.
 - **Resolution:** Extracted cache state into `CodexVariantCacheStore` and `OpencodeVariantCacheStore` classes. Module-level `store` instance encapsulates mutable state. Public API unchanged; test helpers now use store methods.
 
-### M5. Prompt-as-positional-arg pattern is fragile across all adapters
+### M5. Prompt-as-positional-arg pattern is fragile across all adapters — **RESOLVED**
 - **File:** `src/agents/codex.ts:285-299`, `claude.ts:227`, `opencode.ts:244`
 - **Category:** Correctness / Security
 - Prompt as last positional arg conflicts with CLI flag grammar changes. Consider stdin piping or `--prompt` flag.
+- **Resolution:** All adapters now pass prompt via stdin instead of positional arguments. Added `prompt` option to `ProcessRunOptions` and `AgentProcessParams`. `runProcessLines` pipes stdin when prompt is provided. Amp adapter uses empty `-x ""` flag with stdin.
 
 ### M11. No concurrency limit on LLM generation endpoint — **RESOLVED**
 - **File:** `src/web/server.ts:158-165`

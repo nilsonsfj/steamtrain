@@ -216,7 +216,6 @@ describe("buildCodexExecArgs", () => {
       "-c",
       'model_reasoning_effort="high"',
       "--ephemeral",
-      "hello",
     ]);
   });
 
@@ -231,7 +230,6 @@ describe("buildCodexExecArgs", () => {
       "--skip-git-repo-check",
       "--model",
       "gpt-5.5",
-      "ping",
     ]);
   });
 });

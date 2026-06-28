@@ -33,6 +33,8 @@ export interface AgentProcessParams {
   opts: AgentRunOptions;
   /** Per-run mapper (may be stateful — create a fresh one per run). */
   map: EventMapper;
+  /** Prompt text to write to stdin. When provided, stdin is piped instead of ignored. */
+  prompt?: string;
 }
 
 /**
@@ -41,7 +43,7 @@ export interface AgentProcessParams {
  * output, timeout) into `error` events. Adapters differ only in args + mapper.
  */
 export async function* runAgentProcess(params: AgentProcessParams): AsyncGenerator<AgentEvent> {
-  const { id, binary, args, opts, map } = params;
+  const { id, binary, args, opts, map, prompt } = params;
   let lineCount = 0;
   let sawError = false;
 
@@ -52,6 +54,7 @@ export async function* runAgentProcess(params: AgentProcessParams): AsyncGenerat
     env: opts.env,
     timeoutMs: opts.timeoutMs,
     signal: opts.signal,
+    prompt,
   };
 
   for await (const item of runProcessLines(processOpts)) {

@@ -132,7 +132,7 @@ describe("buildAmpExecArgs", () => {
     const args = buildAmpExecArgs({ prompt: "do a thing", model: "smart" });
     expect(args).toEqual([
       "-x",
-      "do a thing",
+      "",
       "--stream-json",
       "--stream-json-thinking",
       "-m",
@@ -149,7 +149,7 @@ describe("buildAmpExecArgs", () => {
     });
     expect(args).toEqual([
       "-x",
-      "go",
+      "",
       "--stream-json",
       "--stream-json-thinking",
       "-m",
@@ -163,6 +163,6 @@ describe("buildAmpExecArgs", () => {
   it("drops --effort for the rush mode, which rejects reasoning effort", () => {
     const args = buildAmpExecArgs({ prompt: "go", model: "rush", effort: "high" });
     expect(args).not.toContain("--effort");
-    expect(args).toEqual(["-x", "go", "--stream-json", "--stream-json-thinking", "-m", "rush"]);
+    expect(args).toEqual(["-x", "", "--stream-json", "--stream-json-thinking", "-m", "rush"]);
   });
 });

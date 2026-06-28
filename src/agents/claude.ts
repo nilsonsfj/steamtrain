@@ -217,7 +217,6 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       opts.model,
       ...(opts.effort ? ["--effort", opts.effort] : []),
       ...(opts.extraArgs ?? []),
-      opts.prompt,
     ];
     return runAgentProcess({
       id: this.id,
@@ -225,6 +224,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       args,
       opts,
       map: createClaudeMapper(this.id),
+      prompt: opts.prompt,
     });
   }
 }

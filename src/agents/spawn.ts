@@ -1,8 +1,9 @@
 import { type ChildProcessByStdio, spawn } from "node:child_process";
-import type { Readable } from "node:stream";
+import type { Readable, Writable } from "node:stream";
 import { LineBuffer } from "./line-buffer";
 
 type PipedChild = ChildProcessByStdio<null, Readable, Readable>;
+type PipedChildWithStdin = ChildProcessByStdio<Writable, Readable, Readable>;
 
 export interface ProcessRunOptions {
   binary: string;
@@ -14,6 +15,8 @@ export interface ProcessRunOptions {
   timeoutMs?: number;
   /** External cancellation. Aborting kills the process. */
   signal?: AbortSignal;
+  /** Prompt text to write to stdin and close. When provided, stdin is piped instead of ignored. */
+  prompt?: string;
 }
 
 export type ProcessLine =
@@ -59,13 +62,18 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
       resolveNext = resolve;
     });
 
-  let child: PipedChild;
+  let child: PipedChild | PipedChildWithStdin;
   try {
+    const useStdin = typeof opts.prompt === "string";
     child = spawn(opts.binary, opts.args, {
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [useStdin ? "pipe" : "ignore", "pipe", "pipe"],
       env: { ...process.env, ...opts.env },
       cwd: opts.cwd,
-    });
+    }) as PipedChild | PipedChildWithStdin;
+    if (useStdin && child.stdin) {
+      child.stdin.write(opts.prompt);
+      child.stdin.end();
+    }
   } catch (err) {
     // Synchronous spawn failure (rare; usually surfaces via the 'error' event).
     yield {
@@ -175,7 +183,7 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
   }
 }
 
-function killProcess(child: PipedChild): { cancel: () => void } {
+function killProcess(child: PipedChild | PipedChildWithStdin): { cancel: () => void } {
   let killed = false;
   let sigkillTimer: NodeJS.Timeout | undefined;
   try {

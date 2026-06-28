@@ -295,7 +295,6 @@ export function buildCodexExecArgs(opts: AgentRunOptions): string[] {
     opts.model,
     ...(opts.effort ? ["-c", `model_reasoning_effort="${opts.effort}"`] : []),
     ...(opts.extraArgs ?? []),
-    opts.prompt,
   ];
 }
 
@@ -315,6 +314,7 @@ export class CodexAdapter implements AgentAdapter {
       args: buildCodexExecArgs(opts),
       opts,
       map: createCodexMapper(this.id),
+      prompt: opts.prompt,
     });
   }
 }

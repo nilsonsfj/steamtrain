@@ -241,7 +241,6 @@ export class OpenCodeAdapter implements AgentAdapter {
       opts.model,
       ...(opts.effort ? ["--variant", opts.effort] : []),
       ...(opts.extraArgs ?? []),
-      opts.prompt,
     ];
     return runAgentProcess({
       id: this.id,
@@ -249,6 +248,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       args,
       opts,
       map: createOpenCodeMapper(this.id),
+      prompt: opts.prompt,
     });
   }
 }
