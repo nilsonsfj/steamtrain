@@ -7,6 +7,7 @@ import { type RetryPolicy, backoffDelayMs, resolveRetryPolicy } from "./retry";
 import { renderPrompt } from "./template";
 import {
   type AgentBackedWorkflowStep,
+  type AgentWorktreeInfo,
   DEFAULT_LOOP_MAX_ITERATIONS,
   type GateCondition,
   MAX_CONCURRENCY,
@@ -22,6 +23,7 @@ import {
   validateWorkflow,
   workflowStepKind,
 } from "./types";
+import type { AgentWorkspaceLease, AgentWorkspaceManager } from "./worktree";
 
 /**
  * Everything the engine needs from the outside world. `createAdapter` is
@@ -35,6 +37,8 @@ export interface WorkflowDeps {
   maxConcurrency: number;
   /** Base cwd; a step's relative `cwd` resolves against this. */
   cwd: string;
+  /** Optional per-agent workspace isolation. */
+  agentWorkspace?: AgentWorkspaceManager;
   /** Default per-loop iteration cap; a gate's own `maxIterations` overrides it. */
   loopMaxIterations?: number;
 }
@@ -274,6 +278,7 @@ export async function* runWorkflow(
           reserveDynamicSteps,
           deps,
           signal,
+          workflowName: spec.name,
           retryDefault: spec.retry,
           iteration,
         },
@@ -503,6 +508,7 @@ interface ExecuteContext {
   reserveDynamicSteps: (count: number) => boolean;
   deps: WorkflowDeps;
   signal?: AbortSignal;
+  workflowName: string;
   /** Workflow-level auto-retry default; per-step `retry` overrides it. */
   retryDefault?: RetryPolicy;
   /** Loop iteration this step is executing under (1-based). */
@@ -783,6 +789,21 @@ async function executeAgentStep(
     iteration: ctx.iteration,
   });
   const stepCwd = step.cwd ? resolvePath(ctx.deps.cwd, step.cwd) : ctx.deps.cwd;
+  const workspaceStarted = Date.now();
+  let workspace: AgentWorkspaceLease;
+  try {
+    workspace = await allocateAgentWorkspace(step, ctx, stepId, item, stepCwd);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      stepId,
+      ok: false,
+      output: message,
+      item,
+      error: message,
+      durationMs: Date.now() - workspaceStarted,
+    };
+  }
   // Auto-retry is scoped to worker/processor steps (and their fan-out children).
   // Agent-backed distributors/consolidators run exactly once.
   const kind = workflowStepKind(step);
@@ -796,44 +817,89 @@ async function executeAgentStep(
 
   const firstStarted = Date.now();
   let attempt = 0;
-  while (true) {
-    attempt += 1;
-    const { result, retryable } = await runAgentAttempt(
-      step,
-      ctx,
-      hooks,
-      stepId,
-      item,
-      prompt,
-      stepCwd,
-    );
-    const isLastAttempt = attempt >= policy.maxAttempts;
-    if (result.ok || !retryable || isLastAttempt || ctx.signal?.aborted) {
-      // After a retry, report true wall-clock for the whole step (all attempts
-      // plus the backoff waits between them), not just the last attempt.
-      return attempt > 1
-        ? { ...result, attempts: attempt, durationMs: Date.now() - firstStarted }
-        : result;
+  try {
+    while (true) {
+      attempt += 1;
+      const { result, retryable } = await runAgentAttempt(
+        step,
+        ctx,
+        hooks,
+        stepId,
+        item,
+        prompt,
+        workspace.cwd,
+      );
+      const isLastAttempt = attempt >= policy.maxAttempts;
+      if (result.ok || !retryable || isLastAttempt || ctx.signal?.aborted) {
+        const finalResult = attachWorktreeInfo(result, workspace, stepCwd);
+        // After a retry, report true wall-clock for the whole step (all attempts
+        // plus the backoff waits between them), not just the last attempt.
+        return attempt > 1
+          ? { ...finalResult, attempts: attempt, durationMs: Date.now() - firstStarted }
+          : finalResult;
+      }
+      const delayMs = backoffDelayMs(policy, attempt);
+      hooks.pushWorkflowEvent({
+        kind: "step_retry",
+        phaseId: hooks.phaseId,
+        stepId,
+        attempt,
+        maxAttempts: policy.maxAttempts,
+        delayMs,
+        reason: result.error ?? "transient failure",
+        iteration: ctx.iteration,
+        ts: Date.now(),
+      });
+      await abortableSleep(delayMs, ctx.signal);
+      // A cancel during the backoff wait ends the step now — don't start another
+      // attempt (which would spawn the agent again).
+      if (ctx.signal?.aborted) {
+        return attachWorktreeInfo(
+          { ...result, attempts: attempt, durationMs: Date.now() - firstStarted },
+          workspace,
+          stepCwd,
+        );
+      }
     }
-    const delayMs = backoffDelayMs(policy, attempt);
-    hooks.pushWorkflowEvent({
-      kind: "step_retry",
-      phaseId: hooks.phaseId,
-      stepId,
-      attempt,
-      maxAttempts: policy.maxAttempts,
-      delayMs,
-      reason: result.error ?? "transient failure",
-      iteration: ctx.iteration,
-      ts: Date.now(),
-    });
-    await abortableSleep(delayMs, ctx.signal);
-    // A cancel during the backoff wait ends the step now — don't start another
-    // attempt (which would spawn the agent again).
-    if (ctx.signal?.aborted) {
-      return { ...result, attempts: attempt, durationMs: Date.now() - firstStarted };
-    }
+  } finally {
+    await workspace.dispose();
   }
+}
+
+function attachWorktreeInfo(
+  result: StepResult,
+  workspace: AgentWorkspaceLease,
+  originalCwd: string,
+): StepResult {
+  if (!workspace.root || !workspace.branch) return result;
+  const worktree: AgentWorktreeInfo = {
+    originalCwd,
+    cwd: workspace.cwd,
+    root: workspace.root,
+    branch: workspace.branch,
+    linkedIgnoredPaths: workspace.linkedIgnoredPaths,
+  };
+  return { ...result, worktree };
+}
+
+async function allocateAgentWorkspace(
+  step: AgentBackedWorkflowStep,
+  ctx: ExecuteContext,
+  stepId: string,
+  item: WorkflowItem | undefined,
+  stepCwd: string,
+): Promise<AgentWorkspaceLease> {
+  if (!ctx.deps.agentWorkspace) return { cwd: stepCwd, dispose: () => {} };
+  return ctx.deps.agentWorkspace.allocate({
+    workflowName: ctx.workflowName,
+    stepId,
+    agent: step.agent,
+    baseCwd: ctx.deps.cwd,
+    stepCwd,
+    iteration: ctx.iteration,
+    item,
+    signal: ctx.signal,
+  });
 }
 
 async function executeForEachStep(

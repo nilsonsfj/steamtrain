@@ -1,6 +1,12 @@
 import type { AgentId } from "../types/events";
 import type { WorkflowEvent } from "./events";
-import type { GateStep, StepResult, WorkflowItem, WorkflowStepKind } from "./types";
+import type {
+  AgentWorktreeInfo,
+  GateStep,
+  StepResult,
+  WorkflowItem,
+  WorkflowStepKind,
+} from "./types";
 
 /**
  * The history record model: a serializable snapshot of one completed workflow
@@ -34,6 +40,8 @@ export interface HistoryStep {
   cached: boolean;
   /** Total attempts this step took (auto-retry); omitted/1 means it ran once. */
   attempts?: number;
+  /** Isolated worktree metadata for agent-backed steps. */
+  worktree?: AgentWorktreeInfo;
   /** A loop-back gate's target phase, when this step is such a gate. */
   loopTo?: string;
   /** The gate's own iteration cap, when this step is a loop-back gate. */
@@ -108,7 +116,8 @@ export function computeRunTotals(phases: HistoryPhase[]): RunTotals {
       else if (step.status === "done") totals.ok += 1;
       if (step.cached) totals.cached += 1;
       if (step.result?.costUsd) totals.costUsd += step.result.costUsd;
-      if (step.result?.durationMs) phaseMaxDuration = Math.max(phaseMaxDuration, step.result.durationMs);
+      if (step.result?.durationMs)
+        phaseMaxDuration = Math.max(phaseMaxDuration, step.result.durationMs);
     }
     totals.durationMs += phaseMaxDuration;
   }
@@ -256,6 +265,7 @@ export class RunRecordBuilder {
         if (!step) break;
         step.status = event.result.ok ? "done" : "error";
         step.result = event.result;
+        step.worktree = event.result.worktree;
         step.cached = event.cached;
         if (!step.text) step.text = capText(event.result.output ?? "");
         // Prefer the authoritative count from the result; fall back to any

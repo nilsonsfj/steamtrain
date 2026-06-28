@@ -144,6 +144,19 @@ export interface WorkflowSpec {
   retry?: RetryPolicy;
 }
 
+export interface AgentWorktreeInfo {
+  /** Original resolved cwd requested by the workflow step. */
+  originalCwd: string;
+  /** Actual cwd used for the agent subprocess. */
+  cwd: string;
+  /** Root of the isolated git worktree. */
+  root: string;
+  /** Branch checked out by the isolated git worktree. */
+  branch: string;
+  /** Ignored runtime entries linked from the source checkout into the worktree. */
+  linkedIgnoredPaths?: string[];
+}
+
 /** The outcome of one step, fed into downstream templates and the cache. */
 export interface StepResult {
   stepId: string;
@@ -169,6 +182,8 @@ export interface StepResult {
   costUsd?: number;
   /** Total attempts this step took (auto-retry); omitted/1 means it ran once. */
   attempts?: number;
+  /** Isolated git worktree metadata for agent-backed steps. */
+  worktree?: AgentWorktreeInfo;
   /** Loop iteration this result belongs to (1-based); omitted ⇒ 1. */
   iteration?: number;
 }

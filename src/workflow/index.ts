@@ -1,6 +1,7 @@
 export {
   type AgentBackedWorkflowStep,
   type AgentRunFields,
+  type AgentWorktreeInfo,
   type ConsolidatorStep,
   type DistributorStep,
   type GateCondition,
@@ -38,6 +39,13 @@ export type {
   WorkflowDoneEvent,
 } from "./events";
 export { runWorkflow, type WorkflowDeps, type WorkflowRunContext } from "./engine";
+export {
+  createGitWorktreeManager,
+  type AgentWorkspaceLease,
+  type AgentWorkspaceManager,
+  type AgentWorkspaceRequest,
+  type GitWorktreeManagerOptions,
+} from "./worktree";
 export {
   type RetryPolicy,
   type ResolvedRetryPolicy,
