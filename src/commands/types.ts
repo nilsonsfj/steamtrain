@@ -39,13 +39,13 @@ export interface SlashCommandContext {
     patch: Partial<Pick<WorkflowStepSelection, "agent" | "model" | "effort">>,
   ) => void;
   /** Persist session workflow overrides to the user workflows file. */
-  saveWorkflows?: () => SlashCommandResult;
+  saveWorkflows?: () => SlashCommandResult | Promise<SlashCommandResult>;
   /** Start LLM-delegated generation of a new workflow from a description (TUI only). */
   createWorkflow?: (description: string, scope?: WorkflowScope) => SlashCommandResult;
   /** Save the selected workflow under a new name (user or project copy) (TUI only). */
-  cloneWorkflow?: (newName: string, scope?: WorkflowScope) => SlashCommandResult;
+  cloneWorkflow?: (newName: string, scope?: WorkflowScope) => SlashCommandResult | Promise<SlashCommandResult>;
   /** Delete a user or project workflow by name (TUI only). */
-  deleteWorkflow?: (name: string) => SlashCommandResult;
+  deleteWorkflow?: (name: string) => SlashCommandResult | Promise<SlashCommandResult>;
   /** Rename a user or project workflow (TUI only). */
   renameWorkflow?: (oldName: string, newName: string) => SlashCommandResult;
   /** Names of writable (user + project) workflows, for `/deleteworkflow` and `/renameworkflow` completion. */
@@ -76,7 +76,7 @@ export interface SlashCommand {
   readonly name: string;
   readonly description: string;
   readonly usage?: string;
-  execute(args: string[], ctx: SlashCommandContext): SlashCommandResult;
+  execute(args: string[], ctx: SlashCommandContext): SlashCommandResult | Promise<SlashCommandResult>;
   /** Return argument completions for the given token index (0 = first arg after command). */
   complete?(args: string[], ctx: SlashCommandContext): readonly string[];
 }

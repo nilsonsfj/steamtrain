@@ -4,7 +4,7 @@ import {
   isRegisteredSlashCommand,
   listSlashCommands,
 } from "../src/commands/registry";
-import type { SlashCommandContext } from "../src/commands/types";
+import type { SlashCommandContext, SlashCommandResult } from "../src/commands/types";
 import { workspaceById } from "../src/workspace";
 import { DEFAULT_WORKSPACE_CONFIG } from "../src/workspace/defaults";
 
@@ -38,13 +38,13 @@ describe("/cloneworkflow", () => {
 
   it("errors without a new name", () => {
     const cloneWorkflow = vi.fn();
-    const result = executeSlashCommand("/cloneworkflow", makeCtx({ cloneWorkflow }));
+    const result = executeSlashCommand("/cloneworkflow", makeCtx({ cloneWorkflow })) as SlashCommandResult;
     expect(cloneWorkflow).not.toHaveBeenCalled();
     if (result.handled) expect(result.notices?.[0]?.level).toBe("error");
   });
 
   it("warns when unavailable (headless)", () => {
-    const result = executeSlashCommand("/cloneworkflow x", makeCtx());
+    const result = executeSlashCommand("/cloneworkflow x", makeCtx()) as SlashCommandResult;
     if (result.handled) expect(result.notices?.[0]?.text).toContain("only available in the TUI");
   });
 });
@@ -58,7 +58,7 @@ describe("/deleteworkflow", () => {
 
   it("errors without a name", () => {
     const deleteWorkflow = vi.fn();
-    const result = executeSlashCommand("/deleteworkflow", makeCtx({ deleteWorkflow }));
+    const result = executeSlashCommand("/deleteworkflow", makeCtx({ deleteWorkflow })) as SlashCommandResult;
     expect(deleteWorkflow).not.toHaveBeenCalled();
     if (result.handled) expect(result.notices?.[0]?.level).toBe("error");
   });
@@ -89,7 +89,7 @@ describe("/renameworkflow", () => {
 
   it("errors without a new name", () => {
     const renameWorkflow = vi.fn();
-    const result = executeSlashCommand("/renameworkflow", makeCtx({ renameWorkflow }));
+    const result = executeSlashCommand("/renameworkflow", makeCtx({ renameWorkflow })) as SlashCommandResult;
     expect(renameWorkflow).not.toHaveBeenCalled();
     if (result.handled) expect(result.notices?.[0]?.level).toBe("error");
   });
@@ -113,7 +113,7 @@ describe("/renameworkflow", () => {
   });
 
   it("warns when unavailable (headless)", () => {
-    const result = executeSlashCommand("/renameworkflow x", makeCtx());
+    const result = executeSlashCommand("/renameworkflow x", makeCtx()) as SlashCommandResult;
     if (result.handled) expect(result.notices?.[0]?.text).toContain("only available in the TUI");
   });
 });

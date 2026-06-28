@@ -8,14 +8,17 @@ import {
 import { applySlashSuggestion, autocompleteSlashCommand } from "../src/commands/autocomplete";
 import { parseSlashInput, slashCommandArgs } from "../src/commands/parse";
 import {
-  executeSlashCommand,
+  executeSlashCommand as originalExecuteSlashCommand,
   isRegisteredSlashCommand,
   listSlashCommands,
   registerSlashCommand,
 } from "../src/commands/registry";
-import type { SlashCommandContext } from "../src/commands/types";
+import type { SlashCommandContext, SlashCommandResult } from "../src/commands/types";
 import { workspaceById } from "../src/workspace";
 import { DEFAULT_WORKSPACE_CONFIG } from "../src/workspace/defaults";
+
+const executeSlashCommand = (raw: string, ctx: SlashCommandContext) =>
+  originalExecuteSlashCommand(raw, ctx) as SlashCommandResult;
 
 function makeCtx(overrides: Partial<SlashCommandContext> = {}): SlashCommandContext {
   clearOpencodeVariantCacheForTests();
