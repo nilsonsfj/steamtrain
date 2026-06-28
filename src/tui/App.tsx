@@ -648,7 +648,11 @@ export function App({
   }
 
   const isWorkflow = mode === "workflow";
-  const streamHeight = Math.max(6, rows - 9);
+  // Account for prompt wrapping: border(2) + padding(2) + prefix("❯ " = 2) = 6 columns overhead.
+  const promptAreaWidth = Math.max(1, columns - 6);
+  const promptTextLen = Math.max(1, prompt.value.length + 1); // +1 for cursor
+  const promptExtraLines = Math.max(0, Math.ceil(promptTextLen / promptAreaWidth) - 1);
+  const streamHeight = Math.max(6, rows - 9 - promptExtraLines);
 
   const menuOverlayRows = prompt.suggestionMenuOpen
     ? suggestionMenuHeight(prompt.commandSuggestions.length, prompt.suggestionIndex)
