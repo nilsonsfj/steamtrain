@@ -6,6 +6,6 @@ import type { SteamtrainConfig } from "./types";
 export const DEFAULT_CONFIG: SteamtrainConfig = {
   stepTimeoutSec: DEFAULT_STEP_TIMEOUT_SEC,
   // workflowTimeoutSec omitted — computed at run time as stepCount × stepTimeoutSec.
-  maxConcurrency: 3,
+  maxConcurrency: 5,
   loopMaxIterations: DEFAULT_LOOP_MAX_ITERATIONS,
 };

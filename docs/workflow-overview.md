@@ -61,7 +61,7 @@ has settled (success, failure, skip, or cancel).
 ### Steps in a phase are parallel
 
 All steps in the same phase are scheduled together, bounded by `maxConcurrency`
-(default 3, hard cap 16). There is **no guaranteed order** among steps in the
+(default 5, hard cap 16). There is **no guaranteed order** among steps in the
 same phase.
 
 When a step's target directory is inside a git repository, each agent-backed step

@@ -12,7 +12,7 @@ execution behavior. **Examples:** [`workflow-examples.md`](workflow-examples.md)
 
 ```jsonc
 {
-  "maxConcurrency": 3,
+  "maxConcurrency": 5,
   "workflows": {
     "example": {
       "description": "Split work, process it, gate it, then merge a report.",

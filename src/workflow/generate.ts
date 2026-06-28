@@ -122,9 +122,16 @@ earlier phase; the loop body re-runs each pass; the current pass is available as
 or disjoint, never partially overlapping.
 
 # Step kinds
-- "distributor": fan work into a FIXED list of items, written now at authoring
-  time (the engine cannot count items dynamically from a file). Use
-  { "kind": "distributor", "items": ["...{{input}}...", "..."] }. Items are templates.
+- "distributor": fan work into multiple items for downstream forEach steps.
+  - Agent-backed (PREFERRED for backlogs and unknown item counts): set agent, model,
+    and prompt. The agent's final output is split on non-empty lines into items
+    (one task per line; no numbering or bullets). Use this whenever the number of
+    tasks is not known at authoring time.
+  - Static (only when you know the exact branches upfront): set items:
+    ["...{{input}}...", "..."] with templated strings.
+  NEVER hardcode "Task 1", "Task 2", ... in items, and NEVER create separate
+  worker/processor steps per index ("pick the 1st item", "pick the 2nd item").
+  Use ONE processor with "forEach": "steps.<distributorId>.items" instead.
 - "worker" (or "processor"): one agent run. Requires agent, model, prompt.
   A processor may add "forEach": "steps.<distributorId>.items" to run once per item
   IN PARALLEL (reference the current item with {{item}} and {{item.index}}). The
@@ -136,7 +143,8 @@ or disjoint, never partially overlapping.
 
 # Keep it small
 A workflow may expand to at most 1000 steps; a forEach step counts as (number of
-distributor items) steps. Keep distributor item lists short (a handful) and the
+distributor items) steps. Agent-backed distributors scale to however many lines
+the splitter emits; static item lists should stay short (a handful). Keep the
 phase count modest.
 
 # Templates available in prompts/items
@@ -151,17 +159,18 @@ agent "opencode" with models like "opencode/mimo-v2.5-free",
 Every agent-backed step MUST set agent, model, and a non-empty prompt.
 
 # Worked example: parallel implement, then review, then fix
-This is the canonical shape for "split work into tasks, do them in parallel, then
-review/fix each". Note how every dependency points to an EARLIER phase, and the
-review->fix "loop" is unrolled into two phases:
+This is the canonical shape for "split a backlog into tasks, do them in parallel,
+then review/fix each". The split phase uses an agent-backed distributor so the
+task count is determined at runtime (not hardcoded). Note how every dependency
+points to an EARLIER phase, and the review->fix "loop" is unrolled into two phases:
 {
   "name": "split-implement-review",
   "description": "Split a backlog into tasks, implement each in parallel, then review and fix.",
   "phases": [
     { "id": "split", "title": "Split into tasks", "steps": [
-      { "id": "tasks", "kind": "distributor",
-        "items": ["Task 1 from backlog: {{input}}", "Task 2 from backlog: {{input}}",
-                  "Task 3 from backlog: {{input}}"] }
+      { "id": "tasks", "kind": "distributor", "agent": "opencode",
+        "model": "opencode/mimo-v2.5-free",
+        "prompt": "Read the backlog below and output each distinct task as its own line (no numbering, no bullets). One task per line only.\\n\\nBacklog:\\n{{input}}" }
     ] },
     { "id": "implement", "title": "Implement in parallel", "steps": [
       { "id": "impl", "kind": "processor", "agent": "opencode",

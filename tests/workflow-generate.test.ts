@@ -151,6 +151,21 @@ describe("buildWorkflowGenerationPrompt", () => {
     expect(prompt).not.toContain("UNROLL");
   });
 
+  it("teaches agent-backed distributors and forbids hardcoded task indices", () => {
+    const prompt = buildWorkflowGenerationPrompt("anything");
+    expect(prompt).toContain("Agent-backed (PREFERRED for backlogs");
+    expect(prompt).toContain("One task per line only");
+    expect(prompt).not.toContain("Task 1 from backlog");
+    expect(prompt).toContain("NEVER hardcode");
+    expect(prompt).toContain("forEach");
+    const example = prompt.slice(
+      prompt.indexOf("# Worked example: parallel implement"),
+      prompt.indexOf("# Worked example: a bounded review/fix loop"),
+    );
+    expect(example).toContain('"agent": "opencode"');
+    expect(example).not.toContain('"items":');
+  });
+
   it("embeds a worked example that passes the engine's own validation", () => {
     // The example is what the model imitates; if it ever stops validating, the
     // prompt is teaching an invalid shape. Extract + validate it for real.

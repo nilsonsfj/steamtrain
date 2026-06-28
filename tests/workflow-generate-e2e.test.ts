@@ -18,9 +18,13 @@ function makeDeps() {
     binary: "fake",
     run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
       prompts.push(opts.prompt);
+      const text =
+        opts.prompt.includes("One task per line only") && opts.prompt.includes("Backlog:")
+          ? "Fix auth module\nAdd tests for API\nUpdate docs"
+          : `out:${opts.model}`;
       return (async function* () {
         await Promise.resolve();
-        yield { kind: "result", agent: id, ts: 0, isError: false, text: `out:${opts.model}` };
+        yield { kind: "result", agent: id, ts: 0, isError: false, text };
       })();
     },
   });
@@ -53,13 +57,12 @@ describe("the meta-prompt's worked example actually executes on the engine", () 
     const { deps, prompts } = makeDeps();
     const events = await run(extracted.spec, "go through my backlog", deps);
 
-    // distributor has 3 items -> impl x3, review-each x3, apply-fixes x3, report x1 = 10 runs.
-    expect(prompts).toHaveLength(10);
+    // agent-backed distributor emits 3 lines -> split x1, impl x3, review-each x3,
+    // apply-fixes x3, report x1 = 11 runs.
+    expect(prompts).toHaveLength(11);
 
     // forEach substituted the current item into each fanned-out prompt.
-    expect(prompts.some((p) => p.includes("Task 1 from backlog: go through my backlog"))).toBe(
-      true,
-    );
+    expect(prompts.some((p) => p.includes("Fix auth module"))).toBe(true);
 
     // The consolidator (report) ran last, after the fix phase.
     const reportDone = events.findIndex((e) => e.kind === "step_done" && e.stepId === "report");

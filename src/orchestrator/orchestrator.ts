@@ -19,7 +19,7 @@ import {
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 import { workspaceById } from "../workspace";
 
-const DEFAULT_MAX_CONCURRENCY = 3;
+const DEFAULT_MAX_CONCURRENCY = 5;
 
 export interface ResolvedWorkspace {
   id: WorkspaceId;

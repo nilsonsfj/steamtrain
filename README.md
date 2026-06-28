@@ -227,7 +227,7 @@ Override any subset in the working directory:
   "binaries": { "opencode": "/opt/homebrew/bin/opencode" }, // optional path overrides
   "stepTimeoutSec": 900,                                    // per-agent subprocess limit in seconds (default 15m = 900)
   "workflowTimeoutSec": 1800,                               // optional whole-run cap in seconds; omit = (loop-aware) steps × stepTimeoutSec
-  "maxConcurrency": 3                                       // parallel steps per workflow phase (≤ 16)
+  "maxConcurrency": 5                                       // parallel steps per workflow phase (≤ 16, default 5)
   // "workflows": { … }                                     // see “Workflows” below
 }
 ```
@@ -288,7 +288,7 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
 
 ```jsonc
 {
-  "maxConcurrency": 3,                 // parallel steps per phase (≤ 16, default 3)
+  "maxConcurrency": 5,                 // parallel steps per phase (≤ 16, default 5)
   "workflows": {
     "audit": {
       "description": "Audit each service for missing auth checks.",
