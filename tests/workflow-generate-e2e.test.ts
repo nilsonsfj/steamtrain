@@ -57,21 +57,24 @@ describe("the meta-prompt's worked example actually executes on the engine", () 
     const { deps, prompts } = makeDeps();
     const events = await run(extracted.spec, "go through my backlog", deps);
 
-    // agent-backed distributor emits 3 lines -> split x1, impl x3, review-each x3,
-    // apply-fixes x3, report x1 = 11 runs.
-    expect(prompts).toHaveLength(11);
+    // agent-backed distributor emits 3 lines -> split x1, impl x3, report x1 = 5 runs.
+    expect(prompts).toHaveLength(5);
 
-    // forEach substituted the current item into each fanned-out prompt.
-    expect(prompts.some((p) => p.includes("Fix auth module"))).toBe(true);
+    // forEach substituted the current item into each implement prompt.
+    const implementPrompts = prompts.filter((p) => p.startsWith("Implement this backlog task fully"));
+    expect(implementPrompts).toHaveLength(3);
+    expect(implementPrompts.some((p) => p.includes("Task:\nFix auth module"))).toBe(true);
+    expect(implementPrompts.some((p) => p.includes("Task:\nAdd tests for API"))).toBe(true);
+    expect(implementPrompts.some((p) => p.includes("Task:\nUpdate docs"))).toBe(true);
 
-    // The consolidator (report) ran last, after the fix phase.
+    // The consolidator (report) ran last, after the implement phase.
     const reportDone = events.findIndex((e) => e.kind === "step_done" && e.stepId === "report");
-    const lastFixDone = events
+    const lastImplDone = events
       .map((e, i) => ({ e, i }))
-      .filter(({ e }) => e.kind === "step_done" && e.stepId === "apply-fixes")
+      .filter(({ e }) => e.kind === "step_done" && e.stepId === "impl")
       .map(({ i }) => i)
       .at(-1);
-    expect(reportDone).toBeGreaterThan(lastFixDone ?? Number.POSITIVE_INFINITY);
+    expect(reportDone).toBeGreaterThan(lastImplDone ?? Number.POSITIVE_INFINITY);
 
     // The whole workflow succeeded.
     expect(events.at(-1)).toMatchObject({ kind: "workflow_done", ok: true });

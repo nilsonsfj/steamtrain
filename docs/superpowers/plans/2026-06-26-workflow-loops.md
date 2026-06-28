@@ -426,7 +426,7 @@ In `src/config/defaults.ts`, import and set the default:
 
 ```ts
 import { DEFAULT_LOOP_MAX_ITERATIONS } from "../workflow/types";
-// inside the defaults object, alongside maxConcurrency: 3
+// inside the defaults object, alongside maxConcurrency: 5
   loopMaxIterations: DEFAULT_LOOP_MAX_ITERATIONS,
 ```
 

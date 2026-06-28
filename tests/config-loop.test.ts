@@ -22,3 +22,9 @@ describe("loopMaxIterations config", () => {
     expect(configFileSchema.safeParse({ loopMaxIterations: 0 }).success).toBe(false);
   });
 });
+
+describe("maxConcurrency config", () => {
+  it("defaults to 5", () => {
+    expect(DEFAULT_CONFIG.maxConcurrency).toBe(5);
+  });
+});

@@ -1,5 +1,5 @@
 import { type AgentAdapter, createAdapter } from "../agents";
-import type { SteamtrainConfig } from "../config";
+import { DEFAULT_CONFIG, type SteamtrainConfig } from "../config";
 import type { DoctorResult } from "../doctor";
 import type { AgentEvent, AgentId } from "../types/events";
 import {
@@ -18,8 +18,6 @@ import {
 } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 import { workspaceById } from "../workspace";
-
-const DEFAULT_MAX_CONCURRENCY = 5;
 
 export interface ResolvedWorkspace {
   id: WorkspaceId;
@@ -181,7 +179,7 @@ export class Orchestrator {
         createAdapter,
         binaries: this.config.binaries,
         stepTimeoutSec: resolveStepTimeoutSec(undefined, undefined, this.config),
-        maxConcurrency: this.config.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY,
+        maxConcurrency: this.config.maxConcurrency ?? DEFAULT_CONFIG.maxConcurrency,
         cwd,
         agentWorkspace: createGitWorktreeManager(),
         loopMaxIterations: this.config.loopMaxIterations,

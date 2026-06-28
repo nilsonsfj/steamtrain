@@ -128,7 +128,8 @@ or disjoint, never partially overlapping.
     (one task per line; no numbering or bullets). Use this whenever the number of
     tasks is not known at authoring time.
   - Static (only when you know the exact branches upfront): set items:
-    ["...{{input}}...", "..."] with templated strings.
+    ["...{{input}}...", "..."] with templated strings. If items is present, it
+    takes precedence — do not also set agent fields unless you intend static distribution.
   NEVER hardcode "Task 1", "Task 2", ... in items, and NEVER create separate
   worker/processor steps per index ("pick the 1st item", "pick the 2nd item").
   Use ONE processor with "forEach": "steps.<distributorId>.items" instead.
@@ -136,6 +137,11 @@ or disjoint, never partially overlapping.
   A processor may add "forEach": "steps.<distributorId>.items" to run once per item
   IN PARALLEL (reference the current item with {{item}} and {{item.index}}). The
   forEach source distributor MUST be in an earlier phase.
+  IMPORTANT forEach template rule: inside a forEach child, {{steps.<id>.output}} for
+  a prior forEach parent is the FULL aggregate of ALL items (with --- headers), not
+  the matching item. Do NOT chain multiple forEach steps expecting per-item upstream
+  outputs. Combine per-item work into one forEach prompt, or fan out once then use a
+  single consolidator/worker on the aggregate.
 - "consolidator": merge earlier outputs. Requires dependsOn; usually agent+model+prompt.
 - "gate": evaluate a condition, e.g. { "kind": "gate", "dependsOn": ["x"],
   "condition": { "step": "x", "ok": true }, "onFalse": "fail" }. condition.step
@@ -148,8 +154,8 @@ the splitter emits; static item lists should stay short (a handful). Keep the
 phase count modest.
 
 # Templates available in prompts/items
-{{input}} (the user's task), {{steps.<id>.output}}, {{steps.<id>.items}},
-{{item}}, {{item.index}}.
+{{input}} / {{args}} (the user's task), {{steps.<id>.output}}, {{steps.<id>.items}},
+{{steps.<id>.ok}}, {{item}}, {{item.index}}, {{item.sourceStepId}}, {{iteration}}.
 
 # Agents & models
 Prefer free models so the workflow runs without paid credentials:
@@ -158,14 +164,15 @@ agent "opencode" with models like "opencode/mimo-v2.5-free",
 "opencode/north-mini-code-free".
 Every agent-backed step MUST set agent, model, and a non-empty prompt.
 
-# Worked example: parallel implement, then review, then fix
+# Worked example: parallel backlog implement, then consolidate
 This is the canonical shape for "split a backlog into tasks, do them in parallel,
-then review/fix each". The split phase uses an agent-backed distributor so the
-task count is determined at runtime (not hardcoded). Note how every dependency
-points to an EARLIER phase, and the review->fix "loop" is unrolled into two phases:
+then merge results". The split phase uses an agent-backed distributor so the
+task count is determined at runtime (not hardcoded). Each forEach child handles
+one task in a single prompt (do not chain forEach steps expecting per-item upstream
+outputs — see the forEach template rule above):
 {
-  "name": "split-implement-review",
-  "description": "Split a backlog into tasks, implement each in parallel, then review and fix.",
+  "name": "split-implement-report",
+  "description": "Split a backlog into tasks, implement each in parallel, then consolidate.",
   "phases": [
     { "id": "split", "title": "Split into tasks", "steps": [
       { "id": "tasks", "kind": "distributor", "agent": "opencode",
@@ -175,24 +182,12 @@ points to an EARLIER phase, and the review->fix "loop" is unrolled into two phas
     { "id": "implement", "title": "Implement in parallel", "steps": [
       { "id": "impl", "kind": "processor", "agent": "opencode",
         "model": "opencode/mimo-v2.5-free", "forEach": "steps.tasks.items",
-        "prompt": "Implement this task fully:\\n{{item}}" }
-    ] },
-    { "id": "review", "title": "Review each implementation", "steps": [
-      { "id": "review-each", "kind": "processor", "agent": "opencode",
-        "model": "opencode/mimo-v2.5-free", "forEach": "steps.tasks.items",
-        "dependsOn": ["impl"],
-        "prompt": "Review the implementation for {{item}}:\\n{{steps.impl.output}}\\nList concrete issues to fix." }
-    ] },
-    { "id": "fix", "title": "Apply review fixes", "steps": [
-      { "id": "apply-fixes", "kind": "processor", "agent": "opencode",
-        "model": "opencode/mimo-v2.5-free", "forEach": "steps.tasks.items",
-        "dependsOn": ["impl", "review-each"],
-        "prompt": "Apply the review fixes for {{item}}.\\nReview findings:\\n{{steps.review-each.output}}" }
+        "prompt": "Implement this backlog task fully. Review your work and fix any issues before finishing.\\n\\nTask:\\n{{item}}\\n\\nContext:\\n{{input}}" }
     ] },
     { "id": "report", "title": "Consolidate", "steps": [
       { "id": "report", "kind": "consolidator", "agent": "opencode",
-        "model": "opencode/mimo-v2.5-free", "dependsOn": ["apply-fixes"],
-        "prompt": "Summarize the final result across all tasks:\\n{{steps.apply-fixes.output}}" }
+        "model": "opencode/mimo-v2.5-free", "dependsOn": ["impl"],
+        "prompt": "Summarize the final result across all tasks:\\n{{steps.impl.output}}" }
     ] }
   ]
 }
