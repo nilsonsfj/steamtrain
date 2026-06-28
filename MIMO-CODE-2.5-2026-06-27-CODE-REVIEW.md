@@ -24,7 +24,7 @@
 | Performance | B | Async catalog I/O, transcript/frame caps, backpressure; TUI re-render concerns remain |
 | Maintainability | B- | App.tsx is a 923-line monolith (decomposed from 1905), server.ts route organization |
 
-**Remaining findings: 43** (0 Critical, 0 High, 5 Medium, 38 Low)
+**Remaining findings: 42** (0 Critical, 0 High, 4 Medium, 38 Low)
 
 ---
 
@@ -70,10 +70,11 @@
 - **Category:** Correctness / Security
 - Prompt as last positional arg conflicts with CLI flag grammar changes. Consider stdin piping or `--prompt` flag.
 
-### M11. No concurrency limit on LLM generation endpoint
+### M11. No concurrency limit on LLM generation endpoint — **RESOLVED**
 - **File:** `src/web/server.ts:158-165`
 - **Category:** Resource Exhaustion
 - `POST /api/workflows/generate` spawns subprocesses without throttling. Can exhaust credits and file descriptors.
+- **Resolution:** Added `maxConcurrentGenerations` option (default 2) to `StartWebUiOptions`. Module-level counter tracks active generations; returns 503 when limit reached. Counter decremented in `finally` block to ensure cleanup on errors.
 
 ### M18. `applyWorkflowStepOverrides` can overwrite gate-specific fields
 - **File:** `src/workflow/overrides.ts:7-22`

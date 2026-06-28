@@ -26,6 +26,10 @@ import type { WorkspaceConfig } from "../workspace";
 import { type PageAssetRevisions, renderIndex } from "./html";
 import { TooManyRuns, type WorkflowHost, WorkflowRunManager } from "./runs";
 
+const DEFAULT_MAX_CONCURRENT_GENERATIONS = 2;
+let activeGenerations = 0;
+let maxConcurrentGenerations = DEFAULT_MAX_CONCURRENT_GENERATIONS;
+
 /**
  * Locate the static web-assets directory.
  *
@@ -526,6 +530,13 @@ async function streamGenerate(
     return;
   }
 
+  if (maxConcurrentGenerations > 0 && activeGenerations >= maxConcurrentGenerations) {
+    sendJson(res, 503, {
+      error: `too many concurrent generations (max ${maxConcurrentGenerations})`,
+    });
+    return;
+  }
+
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache, no-transform",
@@ -541,27 +552,32 @@ async function streamGenerate(
     res.write(`data: ${JSON.stringify(frame)}\n\n`);
   };
 
-  const result = await author.generate(
-    {
-      description: parsed.description,
-      agent: parsed.agent as never,
-      model: typeof parsed.model === "string" ? parsed.model : "",
-      effort: typeof parsed.effort === "string" ? parsed.effort : undefined,
-      name: typeof parsed.name === "string" ? parsed.name : undefined,
-      scope: parsed.scope === "project" ? "project" : "user",
-    },
-    (text) => send({ type: "delta", text }),
-    controller.signal,
-    // Auto-repair retry: tell the client to clear the live draft buffer so a
-    // rejected draft and its repair don't concatenate.
-    (attempt) => send({ type: "attempt", attempt }),
-  );
+  activeGenerations += 1;
+  try {
+    const result = await author.generate(
+      {
+        description: parsed.description,
+        agent: parsed.agent as never,
+        model: typeof parsed.model === "string" ? parsed.model : "",
+        effort: typeof parsed.effort === "string" ? parsed.effort : undefined,
+        name: typeof parsed.name === "string" ? parsed.name : undefined,
+        scope: parsed.scope === "project" ? "project" : "user",
+      },
+      (text) => send({ type: "delta", text }),
+      controller.signal,
+      // Auto-repair retry: tell the client to clear the live draft buffer so a
+      // rejected draft and its repair don't concatenate.
+      (attempt) => send({ type: "attempt", attempt }),
+    );
 
-  if (!res.writableEnded && !controller.signal.aborted) {
-    send({ type: "done", ...result });
-    res.end();
-  } else if (!res.writableEnded) {
-    res.end();
+    if (!res.writableEnded && !controller.signal.aborted) {
+      send({ type: "done", ...result });
+      res.end();
+    } else if (!res.writableEnded) {
+      res.end();
+    }
+  } finally {
+    activeGenerations -= 1;
   }
 }
 
@@ -605,6 +621,8 @@ export interface StartWebUiOptions {
   stderr?: (text: string) => void;
   /** Maximum concurrent workflow runs. 0 = unlimited. */
   maxConcurrent?: number;
+  /** Maximum concurrent LLM generations. 0 = unlimited. Default 2. */
+  maxConcurrentGenerations?: number;
 }
 
 export const DEFAULT_WEB_PORT = 4317;
@@ -638,6 +656,7 @@ export async function startWebUi(
 
   const cacheStore = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
   const historyStore = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
+  maxConcurrentGenerations = options.maxConcurrentGenerations ?? DEFAULT_MAX_CONCURRENT_GENERATIONS;
   const runs = new WorkflowRunManager({
     host: orchestrator,
     cacheStore,
