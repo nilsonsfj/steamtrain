@@ -24,7 +24,7 @@
 | Performance | B | Async catalog I/O, transcript/frame caps, backpressure; TUI re-render concerns remain |
 | Maintainability | B- | App.tsx is a 923-line monolith (decomposed from 1905), server.ts route organization |
 
-**Remaining findings: 42** (0 Critical, 0 High, 4 Medium, 38 Low)
+**Remaining findings: 40** (0 Critical, 0 High, 3 Medium, 37 Low)
 
 ---
 
@@ -81,10 +81,11 @@
 - **Category:** Edge Case
 - `isAgentBackedStep` returns true for distributor/consolidator steps with `agent` field. Spread could overwrite `condition` with agent fields.
 
-### M36. No CORS headers on any endpoint
+### M36. No CORS headers on any endpoint — **RESOLVED**
 - **File:** `src/web/server.ts`
 - **Category:** HTTP Handling
 - Acceptable for loopback binding, but `--host 0.0.0.0` exposes server on network.
+- **Resolution:** Added CORS headers (`Access-Control-Allow-Origin: *`, `Allow-Methods`, `Allow-Headers`) when server is bound to non-localhost address. OPTIONS preflight requests return 204. Headers not added for localhost/127.0.0.1/::1 bindings.
 
 ---
 
@@ -119,9 +120,6 @@
 
 ### L12. `Channel` queue grows without bound
 - **File:** `src/workflow/pool.ts:62-96`
-
-### L13. No CORS headers
-- **File:** `src/web/server.ts`
 
 ### L14. `closeAllConnections?.()` requires Node >= 18.2.0
 - **File:** `src/index.tsx:70`

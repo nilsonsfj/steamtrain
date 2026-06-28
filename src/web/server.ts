@@ -122,6 +122,13 @@ export interface WebServerDeps {
   doctor?: () => DoctorResult[];
   doctorError?: () => string | null;
   configLabel?: string;
+  /** The host address the server is bound to. Used for CORS decisions. */
+  bindHost?: string;
+}
+
+function isNonLocalHost(host?: string): boolean {
+  if (!host) return false;
+  return host !== "127.0.0.1" && host !== "::1" && host !== "localhost";
 }
 
 interface WorkflowListItem {
@@ -254,6 +261,17 @@ async function handle(
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname;
   const method = req.method ?? "GET";
+
+  if (isNonLocalHost(deps.bindHost)) {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    if (method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+  }
 
   if (method === "GET" && (path === "/" || path === "/index.html")) {
     // The page itself is `no-store` so a fresh release swaps in the new
@@ -682,6 +700,7 @@ export async function startWebUi(
     doctor: () => doctorState.results,
     doctorError: () => doctorState.error,
     configLabel: options.configLabel,
+    bindHost: host,
   });
 
   // Fail loudly and early when the static web assets are missing instead of
