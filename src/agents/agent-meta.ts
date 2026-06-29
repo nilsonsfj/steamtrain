@@ -1,5 +1,7 @@
-import type { AgentId } from "../types/events";
-import { AGENT_IDS, defaultModelForAgent, effortsForModel, modelsForAgent } from "./models";
+import type { SteamtrainConfig } from "../config/types";
+import type { AgentId, AgentProviderId } from "../types/events";
+import { resolveAgentInstances } from "./config";
+import { defaultModelForAgent, effortsForModel, modelsForAgent } from "./models";
 
 export interface AgentModelMeta {
   id: string;
@@ -10,9 +12,15 @@ export interface AgentModelMeta {
 
 export interface AgentMeta {
   id: AgentId;
+  provider: AgentProviderId;
+  label: string;
   models: AgentModelMeta[];
   defaultModel: string;
   healthy: boolean;
+  enabled: boolean;
+  binary: string;
+  env?: Record<string, string>;
+  extraArgs?: string[];
 }
 
 /**
@@ -21,12 +29,16 @@ export interface AgentMeta {
  * normal default. Shared by the TUI's `/createworkflow` and the web create form
  * so both pick the same starting point.
  */
-export function defaultDraftModel(agent: AgentId): string {
-  if (agent === "opencode") {
+export function defaultDraftModel(agent: AgentId, config?: SteamtrainConfig): string {
+  const instance = resolveAgentInstances(config, { includeDisabled: true }).find(
+    (a) => a.id === agent,
+  );
+  if (instance?.defaultModel) return instance.defaultModel;
+  if (instance?.provider === "opencode") {
     const free = "opencode/mimo-v2.5-free";
-    if (modelsForAgent(agent).some((m) => m.id === free)) return free;
+    if (modelsForAgent(agent, config).some((m) => m.id === free)) return free;
   }
-  return defaultModelForAgent(agent);
+  return defaultModelForAgent(agent, config);
 }
 
 /**
@@ -35,15 +47,25 @@ export function defaultDraftModel(agent: AgentId): string {
  * health so callers don't reach into the orchestrator themselves. This is the
  * one place the picker shape is defined; `/api/meta` returns it verbatim.
  */
-export function buildAgentMeta(isHealthy: (agent: AgentId) => boolean): AgentMeta[] {
-  return AGENT_IDS.map((agent) => ({
-    id: agent,
-    models: modelsForAgent(agent).map((model) => ({
+export function buildAgentMeta(
+  config: SteamtrainConfig,
+  isHealthy: (agent: AgentId) => boolean,
+  options: { includeDisabled?: boolean } = {},
+): AgentMeta[] {
+  return resolveAgentInstances(config, options).map((agent) => ({
+    id: agent.id,
+    provider: agent.provider,
+    label: agent.label,
+    models: modelsForAgent(agent.id, config).map((model) => ({
       id: model.id,
       name: model.name,
-      efforts: [...effortsForModel(agent, model.id)],
+      efforts: [...effortsForModel(agent.id, model.id, config)],
     })),
-    defaultModel: defaultDraftModel(agent),
-    healthy: isHealthy(agent),
+    defaultModel: defaultDraftModel(agent.id, config),
+    healthy: isHealthy(agent.id),
+    enabled: agent.enabled,
+    binary: agent.binary,
+    env: agent.env,
+    extraArgs: agent.extraArgs,
   }));
 }

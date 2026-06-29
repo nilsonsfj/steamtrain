@@ -105,6 +105,7 @@ export function useSlashContext(params: UseSlashContextParams) {
             current: draftResolution.target,
             usingOverride: draftResolution.usingOverride,
             healthyAgents: [...healthyAgents],
+            config,
             set: setDraftOverride,
           }
         : undefined,

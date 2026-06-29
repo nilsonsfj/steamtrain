@@ -1,12 +1,11 @@
 import {
-  AGENT_IDS,
   defaultModelForAgent,
   effortForModelChange,
   formatModelOption,
-  isAgentId,
   modelIdsForAgent,
   modelNameForAgent,
   modelsForAgent,
+  resolveAgentInstances,
 } from "../agents";
 import type { SlashCommandContext, SlashCommandResult } from "./types";
 
@@ -33,6 +32,7 @@ export function executeWorkflowAgentCommand(
 ): SlashCommandResult {
   const step = ctx.workflowStep!;
   const update = ctx.updateWorkflowStep!;
+  const enabledIds = resolveAgentInstances(ctx.config).map((agent) => agent.id);
 
   if (args.length === 0) {
     return {
@@ -41,27 +41,27 @@ export function executeWorkflowAgentCommand(
       notices: [
         {
           level: "info",
-          text: `agents: ${AGENT_IDS.join(", ")} (step '${step.stepId}': ${step.agent})`,
+          text: `agents: ${enabledIds.join(", ")} (step '${step.stepId}': ${step.agent})`,
         },
       ],
     };
   }
 
   const next = args[0]!;
-  if (!isAgentId(next)) {
+  if (!enabledIds.includes(next)) {
     return {
       handled: true,
       clearInput: true,
       notices: [
         {
           level: "error",
-          text: `unknown agent '${next}'; try: ${AGENT_IDS.join(", ")}`,
+          text: `unknown or disabled agent '${next}'; try: ${enabledIds.join(", ")}`,
         },
       ],
     };
   }
 
-  const model = step.agent === next ? step.model : defaultModelForAgent(next);
+  const model = step.agent === next ? step.model : defaultModelForAgent(next, ctx.config);
   const effort = step.agent === next ? step.effort : undefined;
   update(step.stepId, { agent: next, model, effort });
   const effortNote = effort ? ` · ${effort}` : "";
@@ -84,10 +84,10 @@ export function executeWorkflowModelCommand(
   const step = ctx.workflowStep!;
   const update = ctx.updateWorkflowStep!;
 
-  const models = modelsForAgent(step.agent);
-  const modelIds = modelIdsForAgent(step.agent);
+  const models = modelsForAgent(step.agent, ctx.config);
+  const modelIds = modelIdsForAgent(step.agent, ctx.config);
   if (args.length === 0) {
-    const currentName = modelNameForAgent(step.agent, step.model);
+    const currentName = modelNameForAgent(step.agent, step.model, ctx.config);
     const currentLabel = currentName === step.model ? step.model : `${currentName} (${step.model})`;
     return {
       handled: true,
@@ -117,9 +117,9 @@ export function executeWorkflowModelCommand(
 
   update(step.stepId, {
     model: next,
-    effort: effortForModelChange(step.agent, next, step.effort),
+    effort: effortForModelChange(step.agent, next, step.effort, ctx.config),
   });
-  const nextName = modelNameForAgent(step.agent, next);
+  const nextName = modelNameForAgent(step.agent, next, ctx.config);
   const nextLabel = nextName === next ? next : `${nextName} (${next})`;
   return {
     handled: true,
@@ -131,9 +131,9 @@ export function executeWorkflowModelCommand(
 export function completeWorkflowModelArgs(ctx: SlashCommandContext): readonly string[] {
   const step = ctx.workflowStep;
   if (!step) return [];
-  return modelIdsForAgent(step.agent);
+  return modelIdsForAgent(step.agent, ctx.config);
 }
 
-export function completeWorkflowAgentArgs(): readonly string[] {
-  return AGENT_IDS;
+export function completeWorkflowAgentArgs(ctx?: SlashCommandContext): readonly string[] {
+  return resolveAgentInstances(ctx?.config).map((agent) => agent.id);
 }

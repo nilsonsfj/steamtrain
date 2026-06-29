@@ -1,5 +1,9 @@
+import { resolveAgentInstance } from "../agents";
 import type { AgentAdapter } from "../agents";
+import type { ResolvedAgentInstance } from "../agents/config";
+import type { SteamtrainConfig } from "../config/types";
 import type { AgentEvent, AgentId } from "../types/events";
+import type { AgentProviderId } from "../types/events";
 import { DEFAULT_STEP_TIMEOUT_SEC, timeoutMsFromSec } from "./timeout";
 import { type WorkflowSpec, validateWorkflow, workflowSpecSchema } from "./types";
 
@@ -18,8 +22,9 @@ const MAX_NAME_LENGTH = 48;
 export const DEFAULT_REPAIR_ATTEMPTS = 2;
 
 export interface GenerateWorkflowDeps {
-  createAdapter: (id: AgentId, binary?: string) => AgentAdapter;
-  binaries?: Partial<Record<AgentId, string>>;
+  createAdapter: (id: AgentProviderId, binary?: string) => AgentAdapter;
+  binaries?: Partial<Record<AgentProviderId, string>>;
+  agentConfig?: SteamtrainConfig;
   stepTimeoutSec?: number;
   /** Working directory for the generating agent (it does not need repo access). */
   cwd?: string;
@@ -339,6 +344,7 @@ async function runGenerationAgent(
   prompt: string,
   req: GenerateWorkflowRequest,
   deps: GenerateWorkflowDeps,
+  instance: ResolvedAgentInstance,
 ): Promise<AgentRunOutcome> {
   let finalText = "";
   let streamedText = "";
@@ -351,6 +357,8 @@ async function runGenerationAgent(
       model: req.model,
       effort: req.effort,
       cwd: deps.cwd,
+      env: instance.env,
+      extraArgs: instance.extraArgs,
       timeoutMs: timeoutMsFromSec(deps.stepTimeoutSec ?? DEFAULT_STEP_TIMEOUT_SEC),
       signal: req.signal,
     })) {
@@ -386,7 +394,16 @@ export async function generateWorkflow(
   req: GenerateWorkflowRequest,
   deps: GenerateWorkflowDeps,
 ): Promise<GenerateWorkflowResult> {
-  const adapter = deps.createAdapter(req.agent, deps.binaries?.[req.agent]);
+  const instance = resolveAgentInstance(deps.agentConfig, req.agent);
+  if (!instance) {
+    return {
+      ok: false,
+      error: `agent '${req.agent}' is disabled or not configured`,
+      raw: "",
+      attempts: 0,
+    };
+  }
+  const adapter = deps.createAdapter(instance.provider, instance.binary);
   const maxRepairAttempts = Number.isFinite(deps.maxRepairAttempts)
     ? Math.max(0, Math.floor(deps.maxRepairAttempts as number))
     : DEFAULT_REPAIR_ATTEMPTS;
@@ -398,7 +415,13 @@ export async function generateWorkflow(
     // Don't start a fresh agent run once the caller has aborted.
     if (req.signal?.aborted) break;
     req.onAttemptStart?.(attempt);
-    const { raw, errored, errorMessage } = await runGenerationAgent(adapter, prompt, req, deps);
+    const { raw, errored, errorMessage } = await runGenerationAgent(
+      adapter,
+      prompt,
+      req,
+      deps,
+      instance,
+    );
 
     // An agent error with no output at all: repairing has nothing to work from.
     if (errored && !raw) {

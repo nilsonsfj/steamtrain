@@ -22,7 +22,7 @@ export function executeDraftModelCommand(
   dm: DraftModelContext,
 ): SlashCommandResult {
   const healthy = new Set(dm.healthyAgents);
-  const req = parseDraftModelRequest(args, healthy);
+  const req = parseDraftModelRequest(args, healthy, dm.config);
 
   if (req.kind === "error") {
     return notice("error", req.message);
@@ -35,30 +35,35 @@ export function executeDraftModelCommand(
 
   if (req.kind === "set") {
     dm.set(req.target);
-    return notice("info", `drafting model set to ${formatDraftTarget(req.target)}`);
+    return notice("info", `drafting model set to ${formatDraftTarget(req.target, dm.config)}`);
   }
 
   // show
   const lines: string[] = [];
   if (dm.current) {
     lines.push(
-      `drafting model: ${formatDraftTarget(dm.current)} (${dm.usingOverride ? "override" : "auto"})`,
+      `drafting model: ${formatDraftTarget(dm.current, dm.config)} (${dm.usingOverride ? "override" : "auto"})`,
     );
   } else {
     lines.push("drafting model: none — no healthy agent (check the doctor panel)");
   }
-  const available = availableLine(dm.healthyAgents);
+  const available = availableLine(dm.healthyAgents, dm.config);
   if (available) lines.push(available);
   lines.push("set with /model <model-id> or /model <agent> [model]; /model auto resets");
   return notice("info", lines.join("\n"));
 }
 
 export function completeDraftModelArgs(dm: DraftModelContext): readonly string[] {
-  return draftModelCompletions(new Set(dm.healthyAgents));
+  return draftModelCompletions(new Set(dm.healthyAgents), dm.config);
 }
 
-function availableLine(healthyAgents: readonly DraftTarget["agent"][]): string | undefined {
-  const parts = healthyAgents.map((agent) => `${agent}: ${modelIdsForAgent(agent).join(", ")}`);
+function availableLine(
+  healthyAgents: readonly DraftTarget["agent"][],
+  config: DraftModelContext["config"],
+): string | undefined {
+  const parts = healthyAgents.map(
+    (agent) => `${agent}: ${modelIdsForAgent(agent, config).join(", ")}`,
+  );
   return parts.length ? `available — ${parts.join("  ·  ")}` : undefined;
 }
 

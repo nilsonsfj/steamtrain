@@ -50,7 +50,7 @@ export function renderIndex(revs: PageAssetRevisions): string {
 <header>
   <div class="logo">&#128642; <span class="accent">steam</span>train</div>
   <div class="config" id="config"></div>
-  <button class="newbtn" id="configBtn" title="Project timeout settings">&#9201; Timeouts</button>
+  <button class="newbtn" id="configBtn" title="Project agent and timeout settings">&#9881; Config</button>
   <button class="newbtn" id="historyBtn" style="margin-left:auto" title="View past runs">&#9201; History</button>
   <div class="health" id="health"></div>
 </header>

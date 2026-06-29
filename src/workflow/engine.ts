@@ -1,6 +1,8 @@
 import { resolve as resolvePath } from "node:path";
+import { resolveAgentInstance } from "../agents";
 import type { AgentAdapter } from "../agents";
-import type { AgentEvent, AgentId } from "../types/events";
+import type { SteamtrainConfig } from "../config/types";
+import type { AgentEvent, AgentId, AgentProviderId } from "../types/events";
 import type { WorkflowEvent } from "./events";
 import { createChannel, runPool } from "./pool";
 import { type RetryPolicy, backoffDelayMs, resolveRetryPolicy } from "./retry";
@@ -32,8 +34,9 @@ import type { AgentWorkspaceLease, AgentWorkspaceManager } from "./worktree";
  * never spawns a real CLI in a unit test.
  */
 export interface WorkflowDeps {
-  createAdapter: (id: AgentId, binary?: string) => AgentAdapter;
-  binaries?: Partial<Record<AgentId, string>>;
+  createAdapter: (id: AgentProviderId, binary?: string) => AgentAdapter;
+  binaries?: Partial<Record<AgentProviderId, string>>;
+  agentConfig?: SteamtrainConfig;
   /** Config default per-agent subprocess timeout (seconds). */
   stepTimeoutSec?: number;
   maxConcurrency: number;
@@ -749,7 +752,9 @@ function adapterRun(
   stepCwd: string,
   prompt: string,
 ): AsyncIterable<AgentEvent> {
-  const adapter = ctx.deps.createAdapter(step.agent, ctx.deps.binaries?.[step.agent]);
+  const instance = resolveAgentInstance(ctx.deps.agentConfig, step.agent);
+  if (!instance) throw new Error(`agent '${step.agent}' is disabled or not configured`);
+  const adapter = ctx.deps.createAdapter(instance.provider, instance.binary);
   const timeoutSec = resolveStepTimeoutSec(
     step,
     { stepTimeoutSec: ctx.stepTimeoutDefault },
@@ -762,8 +767,8 @@ function adapterRun(
     model: step.model,
     effort: step.effort,
     cwd: stepCwd,
-    env: step.env,
-    extraArgs: step.extraArgs,
+    env: { ...instance.env, ...step.env },
+    extraArgs: [...(instance.extraArgs ?? []), ...(step.extraArgs ?? [])],
     timeoutMs: timeoutMsFromSec(timeoutSec),
     signal: ctx.signal,
   });

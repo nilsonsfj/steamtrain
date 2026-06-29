@@ -6,7 +6,10 @@
  * shapes, so adding a new agent never touches the UI.
  */
 
-export type AgentId = "claude" | "opencode" | "codex" | "amp";
+export type AgentProviderId = "claude" | "opencode" | "codex" | "amp";
+
+/** A configured runnable agent instance id. Built-in zero-config ids match providers. */
+export type AgentId = string;
 
 export interface BaseEvent {
   /** Which agent produced this event. */

@@ -85,10 +85,11 @@ export function useWorkflowPicker({
     setWorkflowIndex((i) => Math.min(i, workflowEntries.length));
   }, [workflowEntries]);
 
+  const config = orchestrator.getConfig();
   const healthyAgents = useMemo(() => healthyAgentSet(doctor), [doctor]);
   const draftResolution = useMemo(
-    () => resolveDraftTarget(healthyAgents, draftOverride),
-    [healthyAgents, draftOverride],
+    () => resolveDraftTarget(healthyAgents, draftOverride, config),
+    [healthyAgents, draftOverride, config],
   );
 
   const patchWorkflowStep = useCallback(

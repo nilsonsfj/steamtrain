@@ -706,6 +706,9 @@ textarea.ta {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12.5px;
 }
+textarea.ta.mini {
+  min-height: 46px;
+}
 input.txt:focus,
 select.sel:focus,
 textarea.ta:focus {
@@ -714,6 +717,24 @@ textarea.ta:focus {
 }
 select.sel {
   cursor: pointer;
+}
+.agentcfg {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+.agentrow {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 10px;
+  background: var(--panel-2);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.agentrow > label {
+  grid-column: 1 / -1;
 }
 .draft {
   margin-top: 12px;

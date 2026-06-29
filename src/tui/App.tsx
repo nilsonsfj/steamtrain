@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { formatAgentTarget } from "../agents";
+import { formatAgentTarget, resolveAgentInstances } from "../agents";
 import { refreshAgentCatalogCaches } from "../agents/models";
 import {
   type SlashCommandResult,
@@ -124,7 +124,17 @@ export function App({
   const mountedRef = useRef(true);
   const valueRef = useRef("");
 
-  const workspaceMap = useMemo(() => workspaceById(runtimeWorkspaces), [runtimeWorkspaces]);
+  const enabledAgentIds = useMemo(
+    () => new Set(resolveAgentInstances(runtimeConfig).map((agent) => agent.id)),
+    [runtimeConfig],
+  );
+  const visibleWorkspaces = useMemo<WorkspaceConfig>(
+    () => ({
+      workspaces: runtimeWorkspaces.workspaces.filter((entry) => enabledAgentIds.has(entry.agent)),
+    }),
+    [runtimeWorkspaces, enabledAgentIds],
+  );
+  const workspaceMap = useMemo(() => workspaceById(visibleWorkspaces), [visibleWorkspaces]);
   const runtimeWorkspacesRef = useRef(runtimeWorkspaces);
   runtimeWorkspacesRef.current = runtimeWorkspaces;
 
@@ -149,9 +159,13 @@ export function App({
   // ── Orchestrator & Author ────────────────────────────────────────────
   const orchestrator = useMemo(
     () =>
-      new Orchestrator(runtimeConfig, runtimeWorkspaces, doctor ?? EMPTY_DOCTOR, runtimeCatalog),
-    [runtimeConfig, runtimeWorkspaces, doctor, runtimeCatalog],
+      new Orchestrator(runtimeConfig, visibleWorkspaces, doctor ?? EMPTY_DOCTOR, runtimeCatalog),
+    [runtimeConfig, visibleWorkspaces, doctor, runtimeCatalog],
   );
+
+  useEffect(() => {
+    if (mode !== "workflow" && !workspaceMap.has(mode)) setMode("workflow");
+  }, [mode, workspaceMap]);
 
   const updateConfig = useCallback(
     (patch: Parameters<typeof saveProjectConfig>[0]) => {
@@ -268,7 +282,7 @@ export function App({
 
   const slashHook = useSlashContext({
     mode,
-    runtimeWorkspaces,
+    runtimeWorkspaces: visibleWorkspaces,
     workspaceMap,
     updateWorkspace,
     switchMode,
@@ -405,11 +419,11 @@ export function App({
 
   useEffect(() => {
     let active = true;
-    runDoctor(config)
+    runDoctor(runtimeConfig)
       .then((results) => {
         if (!active) return;
         setDoctor(results);
-        void refreshAgentCatalogCaches(config, results).then((ok) => {
+        void refreshAgentCatalogCaches(runtimeConfig, results).then((ok) => {
           if (ok && active) setAgentCatalogTick((n) => n + 1);
         });
       })
@@ -420,7 +434,7 @@ export function App({
     return () => {
       active = false;
     };
-  }, [config]);
+  }, [runtimeConfig]);
 
   // ── Cross-cutting callbacks ──────────────────────────────────────────
   const focusCreateWorkflowPrompt = useCallback(
@@ -784,7 +798,7 @@ export function App({
             height={streamHeight}
             draftLabel={
               picker.draftResolution.target
-                ? `${formatDraftTarget(picker.draftResolution.target)}${
+                ? `${formatDraftTarget(picker.draftResolution.target, config)}${
                     picker.draftResolution.usingOverride ? "" : " (auto)"
                   }`
                 : undefined

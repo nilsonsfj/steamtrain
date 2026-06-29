@@ -1,14 +1,17 @@
 import { spawn } from "node:child_process";
 import { constants, access } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
+import { DEFAULT_AGENT_BINARY, resolveAgentInstances } from "../agents/config";
 import { firstLine } from "../agents/util";
 import type { SteamtrainConfig } from "../config/types";
-import type { AgentId } from "../types/events";
+import type { AgentId, AgentProviderId } from "../types/events";
 
 export type DoctorStatus = "ok" | "binary_missing" | "not_authenticated" | "unknown_error";
 
 export interface DoctorResult {
   agent: AgentId;
+  provider?: AgentProviderId;
+  label?: string;
   status: DoctorStatus;
   binary: string;
   binaryPath?: string;
@@ -19,12 +22,6 @@ export interface DoctorResult {
   detail?: string;
 }
 
-const DEFAULT_BINARY: Record<AgentId, string> = {
-  claude: "claude",
-  opencode: "opencode",
-  codex: "codex",
-  amp: "amp",
-};
 const VERSION_TIMEOUT_MS = 8000;
 const AUTH_PATTERN =
   /not logged in|unauthor|authenticat|please run.*login|login required|no api key|api key not|set .*_api_key/i;
@@ -63,7 +60,7 @@ interface VersionRun {
   timedOut: boolean;
 }
 
-function runVersion(binaryPath: string): Promise<VersionRun> {
+function runVersion(binaryPath: string, env?: Record<string, string>): Promise<VersionRun> {
   if (!binaryPath || !binaryPath.trim()) {
     return Promise.resolve({
       code: null,
@@ -75,7 +72,7 @@ function runVersion(binaryPath: string): Promise<VersionRun> {
   return new Promise((resolve) => {
     const child = spawn(binaryPath, ["--version"], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env },
+      env: { ...process.env, ...env },
     });
     let stdout = "";
     let stderr = "";
@@ -109,22 +106,31 @@ function runVersion(binaryPath: string): Promise<VersionRun> {
 }
 
 /** Check one agent: resolve its binary, run `--version`, classify readiness. */
-export async function checkAgent(agent: AgentId, binary: string): Promise<DoctorResult> {
+export async function checkAgent(
+  agent: AgentId,
+  binary: string,
+  options: { provider?: AgentProviderId; label?: string; env?: Record<string, string> } = {},
+): Promise<DoctorResult> {
+  const provider = options.provider ?? (agent as AgentProviderId);
   const binaryPath = await resolveBinary(binary);
   if (!binaryPath) {
     return {
       agent,
+      provider,
+      label: options.label,
       status: "binary_missing",
       binary,
       message: `'${binary}' not found on PATH`,
-      detail: installHint(agent),
+      detail: installHint(provider),
     };
   }
 
-  const run = await runVersion(binaryPath);
+  const run = await runVersion(binaryPath, options.env);
   if (run.timedOut) {
     return {
       agent,
+      provider,
+      label: options.label,
       status: "unknown_error",
       binary,
       binaryPath,
@@ -137,6 +143,8 @@ export async function checkAgent(agent: AgentId, binary: string): Promise<Doctor
   if ((run.code ?? 1) === 0) {
     return {
       agent,
+      provider,
+      label: options.label,
       status: "ok",
       binary,
       binaryPath,
@@ -148,16 +156,20 @@ export async function checkAgent(agent: AgentId, binary: string): Promise<Doctor
   if (AUTH_PATTERN.test(combined)) {
     return {
       agent,
+      provider,
+      label: options.label,
       status: "not_authenticated",
       binary,
       binaryPath,
       message: "not authenticated",
-      detail: authHint(agent),
+      detail: authHint(provider),
     };
   }
 
   return {
     agent,
+    provider,
+    label: options.label,
     status: "unknown_error",
     binary,
     binaryPath,
@@ -168,13 +180,18 @@ export async function checkAgent(agent: AgentId, binary: string): Promise<Doctor
 
 /** Run preflight for all agents (honoring config binary overrides). */
 export function runDoctor(config: SteamtrainConfig): Promise<DoctorResult[]> {
-  const agents: AgentId[] = ["claude", "opencode", "codex", "amp"];
   return Promise.all(
-    agents.map((agent) => checkAgent(agent, config.binaries?.[agent] ?? DEFAULT_BINARY[agent])),
+    resolveAgentInstances(config).map((agent) =>
+      checkAgent(agent.id, agent.binary ?? DEFAULT_AGENT_BINARY[agent.provider], {
+        provider: agent.provider,
+        label: agent.label,
+        env: agent.env,
+      }),
+    ),
   );
 }
 
-function installHint(agent: AgentId): string {
+function installHint(agent: AgentProviderId): string {
   switch (agent) {
     case "claude":
       return "Install Claude Code (npm i -g @anthropic-ai/claude-code) and ensure `claude` is on PATH.";
@@ -187,7 +204,7 @@ function installHint(agent: AgentId): string {
   }
 }
 
-function authHint(agent: AgentId): string {
+function authHint(agent: AgentProviderId): string {
   switch (agent) {
     case "claude":
       return "Run `claude` and `/login` (subscription) or set ANTHROPIC_API_KEY.";

@@ -213,7 +213,7 @@ export const DEFAULT_LOOP_MAX_ITERATIONS = 10;
 /** Hard ceiling on a loop gate's `maxIterations` (runaway backstop). */
 export const LOOP_MAX_ITERATIONS_CEILING = 100;
 
-const agentId = z.enum(["claude", "opencode", "codex", "amp"]);
+const agentId = z.string().min(1);
 
 const baseStepShape = {
   id: z.string().min(1),

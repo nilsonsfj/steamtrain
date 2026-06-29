@@ -1,4 +1,4 @@
-import { type AgentAdapter, createAdapter } from "../agents";
+import { type AgentAdapter, createAdapter, resolveAgentInstance } from "../agents";
 import { DEFAULT_CONFIG, type SteamtrainConfig } from "../config";
 import type { DoctorResult } from "../doctor";
 import type { AgentEvent, AgentId } from "../types/events";
@@ -72,11 +72,17 @@ export class Orchestrator {
     return this.doctor.find((d) => d.agent === agent)?.status === "ok";
   }
 
+  private agentHealth(agent: AgentId): DoctorResult | undefined {
+    return this.doctor.find((d) => d.agent === agent);
+  }
+
   resolve(id: WorkspaceId): ResolvedWorkspace {
     const entry = this.workspaceMap.get(id);
     if (!entry) throw new Error(`unknown workspace '${id}'`);
-    const adapter = createAdapter(entry.agent, this.config.binaries?.[entry.agent]);
-    const health = this.doctor.find((d) => d.agent === entry.agent);
+    const instance = resolveAgentInstance(this.config, entry.agent);
+    if (!instance) throw new Error(`agent '${entry.agent}' is disabled or not configured`);
+    const adapter = createAdapter(instance.provider, instance.binary);
+    const health = this.agentHealth(entry.agent);
     return { id, entry, adapter, health };
   }
 
@@ -85,7 +91,11 @@ export class Orchestrator {
     const entry = this.workspaceMap.get(id);
     if (!entry) return { ok: false, reason: `unknown workspace '${id}'` };
 
-    const health = this.doctor.find((d) => d.agent === entry.agent);
+    const instance = resolveAgentInstance(this.config, entry.agent);
+    if (!instance) {
+      return { ok: false, reason: `${entry.agent} is disabled or not configured` };
+    }
+    const health = this.agentHealth(entry.agent);
     if (!health) {
       return { ok: false, reason: `${entry.agent}: health unknown (doctor has not run yet)` };
     }
@@ -104,12 +114,16 @@ export class Orchestrator {
     const dispatchCheck = this.canDispatch(id);
     if (!dispatchCheck.ok) throw new Error(dispatchCheck.reason);
     const { adapter, entry } = this.resolve(id);
+    const instance = resolveAgentInstance(this.config, entry.agent);
+    if (!instance) throw new Error(`agent '${entry.agent}' is disabled or not configured`);
     if (!entry.model) throw new Error(`workspace '${id}' has no model configured`);
     return adapter.run({
       prompt,
       model: entry.model,
       effort: entry.effort,
       cwd: process.cwd(),
+      env: instance.env,
+      extraArgs: instance.extraArgs,
       timeoutMs: timeoutMsFromSec(resolveStepTimeoutSec(undefined, undefined, this.config)),
       signal,
     });
@@ -145,7 +159,11 @@ export class Orchestrator {
     if (!valid.ok) return { ok: false, reason: `invalid workflow '${spec.name}': ${valid.error}` };
 
     for (const agent of workflowAgentIds(spec)) {
-      const health = this.doctor.find((d) => d.agent === agent);
+      const instance = resolveAgentInstance(this.config, agent);
+      if (!instance) {
+        return { ok: false, reason: `${agent} is disabled or not configured` };
+      }
+      const health = this.agentHealth(agent);
       if (!health) {
         return { ok: false, reason: `${agent}: health unknown (doctor has not run yet)` };
       }
@@ -178,8 +196,9 @@ export class Orchestrator {
       {
         createAdapter,
         binaries: this.config.binaries,
+        agentConfig: this.config,
         stepTimeoutSec: resolveStepTimeoutSec(undefined, undefined, this.config),
-        maxConcurrency: this.config.maxConcurrency ?? DEFAULT_CONFIG.maxConcurrency,
+        maxConcurrency: this.config.maxConcurrency ?? DEFAULT_CONFIG.maxConcurrency ?? 5,
         cwd,
         agentWorkspace: createGitWorktreeManager(),
         loopMaxIterations: this.config.loopMaxIterations,

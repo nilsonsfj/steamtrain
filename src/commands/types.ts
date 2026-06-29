@@ -84,6 +84,8 @@ export interface DraftModelContext {
   usingOverride: boolean;
   /** Agents the doctor reports healthy, used to validate a requested target. */
   healthyAgents: readonly AgentId[];
+  /** Live config used to map agent instances to provider model catalogs. */
+  config?: SteamtrainConfig;
   /** Apply a new override, or `null` to reset to auto. */
   set: (target: { agent: AgentId; model: string } | null) => void;
 }

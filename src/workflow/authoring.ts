@@ -8,7 +8,7 @@ import {
   loadProjectWorkflows,
   saveProjectWorkflow,
 } from "../config/project-workflows";
-import type { AgentId } from "../types/events";
+import type { AgentId, AgentProviderId } from "../types/events";
 import {
   type LoadedWorkflowCatalog,
   loadWorkflowCatalog,
@@ -53,7 +53,7 @@ export interface WorkflowAuthorOptions {
   /** Project workflows preserved across reloads (from `steamtrain.json`). */
   projectWorkflows?: Record<string, WorkflowSpec>;
   /** Injectable adapter factory for tests; defaults to the real one. */
-  createAdapter?: (id: AgentId, binary?: string) => AgentAdapter;
+  createAdapter?: (id: AgentProviderId, binary?: string) => AgentAdapter;
 }
 
 /**
@@ -110,7 +110,7 @@ export class WorkflowAuthor {
   private readonly cwd: string;
   private readonly projectConfigPath: string;
   private readonly projectWorkflows?: Record<string, WorkflowSpec>;
-  private readonly makeAdapter: (id: AgentId, binary?: string) => AgentAdapter;
+  private readonly makeAdapter: (id: AgentProviderId, binary?: string) => AgentAdapter;
 
   constructor(options: WorkflowAuthorOptions) {
     this.host = options.host;
@@ -124,7 +124,7 @@ export class WorkflowAuthor {
 
   /** Agents with their model catalogs, effort levels, defaults, and live health. */
   agentMeta(): AgentMeta[] {
-    return buildAgentMeta((agent) => this.host.isAgentHealthy(agent));
+    return buildAgentMeta(this.config, (agent) => this.host.isAgentHealthy(agent));
   }
 
   /**
@@ -145,7 +145,7 @@ export class WorkflowAuthor {
       return { ok: false, error: `${req.agent} is not available (check agent health)` };
     }
 
-    const model = req.model?.trim() || defaultDraftModel(req.agent);
+    const model = req.model?.trim() || defaultDraftModel(req.agent, this.config);
     const result = await generateWorkflow(
       {
         description: req.description,
@@ -162,6 +162,7 @@ export class WorkflowAuthor {
       {
         createAdapter: this.makeAdapter,
         binaries: this.config.binaries,
+        agentConfig: this.config,
         stepTimeoutSec: resolveStepTimeoutSec(undefined, undefined, this.config),
         cwd: this.cwd,
       },
