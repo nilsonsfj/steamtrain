@@ -1,4 +1,9 @@
-export { type SteamtrainConfig, type ConfigFile, configFileSchema } from "./types";
+export {
+  type SteamtrainConfig,
+  type ConfigFile,
+  configFileSchema,
+  parseAgentsConfig,
+} from "./types";
 export { DEFAULT_CONFIG } from "./defaults";
 export {
   CONFIG_FILENAME,

@@ -143,6 +143,7 @@ export function mergeConfig(
 ): { config: SteamtrainConfig; warnings: string[] } {
   const merged: SteamtrainConfig = {
     binaries: { ...base.binaries, ...override.binaries },
+    agents: override.agents ?? base.agents,
     ...mergeTimeoutFields(base, override),
     maxConcurrency: override.maxConcurrency ?? base.maxConcurrency,
     loopMaxIterations: override.loopMaxIterations ?? base.loopMaxIterations,

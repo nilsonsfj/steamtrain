@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentId } from "../types/events";
+import type { AgentEvent, AgentInstanceId } from "../types/events";
 
 /**
  * The display model. It mirrors the normalized events but coalesces a run of
@@ -9,17 +9,24 @@ export type DisplayItem =
   | {
       id: number;
       kind: "session_start";
-      agent: AgentId;
+      agent: AgentInstanceId;
       sessionId?: string;
       model?: string;
       toolCount?: number;
     }
-  | { id: number; kind: "text"; agent: AgentId; text: string; thinking: boolean }
-  | { id: number; kind: "tool_use"; agent: AgentId; name: string; input?: unknown; status?: string }
+  | { id: number; kind: "text"; agent: AgentInstanceId; text: string; thinking: boolean }
+  | {
+      id: number;
+      kind: "tool_use";
+      agent: AgentInstanceId;
+      name: string;
+      input?: unknown;
+      status?: string;
+    }
   | {
       id: number;
       kind: "tool_result";
-      agent: AgentId;
+      agent: AgentInstanceId;
       name?: string;
       output?: string;
       isError?: boolean;
@@ -27,16 +34,16 @@ export type DisplayItem =
   | {
       id: number;
       kind: "result";
-      agent: AgentId;
+      agent: AgentInstanceId;
       isError: boolean;
       text?: string;
       subtype?: string;
       durationMs?: number;
       costUsd?: number;
     }
-  | { id: number; kind: "error"; agent: AgentId; message: string }
+  | { id: number; kind: "error"; agent: AgentInstanceId; message: string }
   | { id: number; kind: "notice"; level: "info" | "warn" | "error"; text: string }
-  | { id: number; kind: "unknown"; agent: AgentId; rawType?: string };
+  | { id: number; kind: "unknown"; agent: AgentInstanceId; rawType?: string };
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 type DisplayItemData = DistributiveOmit<DisplayItem, "id">;

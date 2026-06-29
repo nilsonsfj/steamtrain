@@ -35,13 +35,20 @@ function makeCatalog(
   };
 }
 
-function healthyDoctor(agent: string): DoctorResult {
-  return { agent: agent as never, status: "ok", binary: agent, message: "ready" };
+function healthyDoctor(agent: string, provider: string = agent): DoctorResult {
+  return {
+    agent,
+    provider: provider as DoctorResult["provider"],
+    status: "ok",
+    binary: agent,
+    message: "ready",
+  };
 }
 
-function unhealthyDoctor(agent: string): DoctorResult {
+function unhealthyDoctor(agent: string, provider: string = agent): DoctorResult {
   return {
-    agent: agent as never,
+    agent,
+    provider: provider as DoctorResult["provider"],
     status: "unknown_error",
     binary: agent,
     message: "binary missing",

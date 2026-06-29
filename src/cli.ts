@@ -13,7 +13,7 @@ import {
 import { runDoctor } from "./doctor";
 import { Orchestrator } from "./orchestrator";
 import { loadSettings } from "./settings";
-import type { AgentId } from "./types/events";
+import type { AgentInstanceId } from "./types/events";
 import {
   type RerunMode,
   RunRecordBuilder,
@@ -600,13 +600,13 @@ interface CreateOptions {
   json: boolean;
   save: boolean;
   scope: "user" | "project";
-  agent: AgentId;
+  agent: AgentInstanceId;
   model?: string;
   effort?: string;
   name?: string;
 }
 
-const DEFAULT_CREATE_AGENT: AgentId = "opencode";
+const DEFAULT_CREATE_AGENT: AgentInstanceId = "opencode";
 const DEFAULT_CREATE_MODEL = "opencode/mimo-v2.5-free";
 
 async function runWorkflowCreateCommand(
@@ -654,6 +654,7 @@ async function runWorkflowCreateCommand(
     },
     {
       createAdapter,
+      agentConfig: config,
       binaries: config.binaries,
       stepTimeoutSec: resolveStepTimeoutSec(undefined, undefined, config),
       cwd: io.cwd ?? process.cwd(),

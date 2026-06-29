@@ -40,14 +40,18 @@ describe("workflowSpecSchema", () => {
     expect(validateWorkflow(validSpec)).toEqual({ ok: true });
   });
 
-  it("rejects an unknown agent", () => {
-    const bad = {
+  it("accepts custom agent instance ids at parse time (validated at run time)", () => {
+    const custom = {
       ...validSpec,
       phases: [
-        { id: "p", title: "P", steps: [{ id: "a", agent: "gpt", model: "m", prompt: "x" }] },
+        {
+          id: "p",
+          title: "P",
+          steps: [{ id: "a", agent: "opencode-fork", model: "m", prompt: "x" }],
+        },
       ],
     };
-    expect(workflowSpecSchema.safeParse(bad).success).toBe(false);
+    expect(workflowSpecSchema.safeParse(custom).success).toBe(true);
   });
 
   it("rejects empty phases and empty steps", () => {

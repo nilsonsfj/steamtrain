@@ -1,7 +1,12 @@
-import { type AgentAdapter, createAdapter } from "../agents";
+import {
+  type AgentAdapter,
+  type ResolvedAgentInstance,
+  createAdapter,
+  resolveAgentInstance,
+} from "../agents";
 import { DEFAULT_CONFIG, type SteamtrainConfig } from "../config";
 import type { DoctorResult } from "../doctor";
-import type { AgentEvent, AgentId } from "../types/events";
+import type { AgentEvent, AgentInstanceId } from "../types/events";
 import {
   type LoadedWorkflowCatalog,
   type StepResult,
@@ -23,6 +28,7 @@ export interface ResolvedWorkspace {
   id: WorkspaceId;
   entry: WorkspaceEntry;
   adapter: AgentAdapter;
+  instance: ResolvedAgentInstance;
   health?: DoctorResult;
 }
 
@@ -68,16 +74,22 @@ export class Orchestrator {
   }
 
   /** Whether an agent is currently doctor-healthy (used to gate authoring). */
-  isAgentHealthy(agent: AgentId): boolean {
+  isAgentHealthy(agent: AgentInstanceId): boolean {
     return this.doctor.find((d) => d.agent === agent)?.status === "ok";
+  }
+
+  private agentHealth(agent: AgentInstanceId): DoctorResult | undefined {
+    return this.doctor.find((d) => d.agent === agent);
   }
 
   resolve(id: WorkspaceId): ResolvedWorkspace {
     const entry = this.workspaceMap.get(id);
     if (!entry) throw new Error(`unknown workspace '${id}'`);
-    const adapter = createAdapter(entry.agent, this.config.binaries?.[entry.agent]);
-    const health = this.doctor.find((d) => d.agent === entry.agent);
-    return { id, entry, adapter, health };
+    const instance = resolveAgentInstance(this.config, entry.agent);
+    if (!instance) throw new Error(`agent '${entry.agent}' is disabled or not configured`);
+    const adapter = createAdapter(instance.provider, instance.binary);
+    const health = this.agentHealth(entry.agent);
+    return { id, entry, adapter, instance, health };
   }
 
   /** Whether a workspace may be dispatched given current agent health. */
@@ -85,7 +97,11 @@ export class Orchestrator {
     const entry = this.workspaceMap.get(id);
     if (!entry) return { ok: false, reason: `unknown workspace '${id}'` };
 
-    const health = this.doctor.find((d) => d.agent === entry.agent);
+    const instance = resolveAgentInstance(this.config, entry.agent);
+    if (!instance) {
+      return { ok: false, reason: `${entry.agent} is disabled or not configured` };
+    }
+    const health = this.agentHealth(entry.agent);
     if (!health) {
       return { ok: false, reason: `${entry.agent}: health unknown (doctor has not run yet)` };
     }
@@ -103,13 +119,16 @@ export class Orchestrator {
   run(id: WorkspaceId, prompt: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
     const dispatchCheck = this.canDispatch(id);
     if (!dispatchCheck.ok) throw new Error(dispatchCheck.reason);
-    const { adapter, entry } = this.resolve(id);
+    const { adapter, entry, instance } = this.resolve(id);
     if (!entry.model) throw new Error(`workspace '${id}' has no model configured`);
     return adapter.run({
       prompt,
       model: entry.model,
       effort: entry.effort,
       cwd: process.cwd(),
+      env: instance.env,
+      extraArgs: instance.extraArgs,
+      agentId: instance.id,
       timeoutMs: timeoutMsFromSec(resolveStepTimeoutSec(undefined, undefined, this.config)),
       signal,
     });
@@ -145,7 +164,11 @@ export class Orchestrator {
     if (!valid.ok) return { ok: false, reason: `invalid workflow '${spec.name}': ${valid.error}` };
 
     for (const agent of workflowAgentIds(spec)) {
-      const health = this.doctor.find((d) => d.agent === agent);
+      const instance = resolveAgentInstance(this.config, agent);
+      if (!instance) {
+        return { ok: false, reason: `${agent} is disabled or not configured` };
+      }
+      const health = this.agentHealth(agent);
       if (!health) {
         return { ok: false, reason: `${agent}: health unknown (doctor has not run yet)` };
       }
@@ -178,6 +201,7 @@ export class Orchestrator {
       {
         createAdapter,
         binaries: this.config.binaries,
+        agentConfig: this.config,
         stepTimeoutSec: resolveStepTimeoutSec(undefined, undefined, this.config),
         maxConcurrency: this.config.maxConcurrency ?? DEFAULT_CONFIG.maxConcurrency!,
         cwd,

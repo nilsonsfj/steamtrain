@@ -22,6 +22,7 @@
         if (k === "class") e.className = attrs[k];
         else if (k === "text") e.textContent = attrs[k];
         else if (k.indexOf("on") === 0) e.addEventListener(k.slice(2).toLowerCase(), attrs[k]);
+        else if (typeof attrs[k] === "boolean" && k in e) e[k] = attrs[k];
         else if (attrs[k] != null) e.setAttribute(k, attrs[k]);
       }
     }
@@ -69,18 +70,76 @@
     var wfInput = h("input", { class: "txt", type: "number", min: "1", placeholder: "auto (steps × step)", value: wfMin });
     var autoChk = h("input", { type: "checkbox", checked: !S.projectConfig.workflowTimeoutSec });
     var banner = h("div", { class: "mbanner" });
+    var agentRows = [];
+    var agentList = h("div", { class: "agentcfg" });
+    function renderAgentConfigRows() {
+      clear(agentList);
+      agentRows = [];
+      (S.projectConfig.agents || []).forEach(function (a) {
+        var enabled = h("input", { type: "checkbox", checked: a.enabled !== false });
+        var id = h("input", { class: "txt", value: a.id || "" });
+        var label = h("input", { class: "txt", placeholder: "optional display label", value: a.label || "" });
+        var provider = selectEl([
+          { value: "claude", label: "claude" },
+          { value: "opencode", label: "opencode" },
+          { value: "codex", label: "codex" },
+          { value: "amp", label: "amp" }
+        ], a.provider || "claude");
+        var binary = h("input", { class: "txt", placeholder: "default binary", value: a.binary || "" });
+        var env = h("textarea", { class: "ta mini", placeholder: "env JSON", rows: "2" });
+        env.value = a.env ? JSON.stringify(a.env) : "";
+        var extraArgs = h("textarea", { class: "ta mini", placeholder: "[]", rows: "2" });
+        extraArgs.value = JSON.stringify(a.extraArgs || []);
+        var defaultModel = h("input", { class: "txt", placeholder: "default model", value: a.defaultModel || "" });
+        var row = { enabled: enabled, id: id, label: label, provider: provider, binary: binary, env: env, extraArgs: extraArgs, defaultModel: defaultModel };
+        agentRows.push(row);
+        agentList.appendChild(h("div", { class: "agentrow" },
+          h("label", null, enabled, h("span", { text: " enabled" })),
+          field("ID", id),
+          field("Label", label),
+          field("Provider", provider),
+          field("Binary", binary),
+          field("Env", env, "JSON object, merged into process env."),
+          field("Extra args", extraArgs, "JSON array of flags appended before the prompt."),
+          field("Default model", defaultModel)
+        ));
+      });
+    }
+    function addAgentRow() {
+      S.projectConfig.agents = (S.projectConfig.agents || []).concat([{
+        id: "claude-fork",
+        provider: "claude",
+        enabled: true,
+        binary: "claude"
+      }]);
+      renderAgentConfigRows();
+    }
+    renderAgentConfigRows();
     var body = h("div", null,
       banner,
       field("Step timeout (minutes)", stepInput, "Per-agent subprocess limit (default 15)."),
       field("Workflow timeout (minutes)", wfInput, "Whole-run limit. Leave empty or check auto to use steps × step timeout."),
       h("label", { style: "display:flex;gap:6px;align-items:center;margin-top:8px" },
-        autoChk, h("span", { text: "Auto workflow timeout (steps × step)" }))
+        autoChk, h("span", { text: "Auto workflow timeout (steps × step)" })),
+      h("hr"),
+      h("div", { class: "field" },
+        h("label", { text: "Agents" }),
+        h("div", { class: "help", text: "Only enabled agents appear in pickers and health outside this page." }),
+        agentList,
+        h("button", { class: "btn small", text: "+ Add agent", onClick: addAgentRow }))
     );
     var saveBtn = h("button", { class: "btn primary", text: "Save" });
   saveBtn.addEventListener("click", function () {
       var stepSec = Number(stepInput.value) * 60;
       if (!stepSec || stepSec <= 0) { mbanner(banner, "step timeout must be a positive number of minutes", "err"); return; }
-      var payload = { stepTimeoutSec: stepSec };
+      var agents;
+      try {
+        agents = collectAgentConfigRows(agentRows);
+      } catch (e) {
+        mbanner(banner, e.message || String(e), "err");
+        return;
+      }
+      var payload = { stepTimeoutSec: stepSec, agents: agents };
       if (autoChk.checked) payload.clearWorkflowTimeout = true;
       else {
         var wfSec = Number(wfInput.value) * 60;
@@ -92,18 +151,54 @@
         saveBtn.disabled = false;
         if (r.status === 200 && r.body.ok) {
           S.projectConfig = Object.assign({}, S.projectConfig, r.body);
+          S.agents = (r.body.agents || []).filter(function (a) { return a.enabled !== false; });
           closeModal();
-          setBanner("timeouts saved", "info");
+          pollDoctor(0);
+          setBanner("project config saved", "info");
         } else {
           mbanner(banner, (r.body && r.body.error) || "save failed", "err");
         }
       });
     });
-    openModal(modalShell("Project timeouts", "Applies to ./steamtrain.json", body,
+    openModal(modalShell("Project config", "Applies to ./steamtrain.json", body,
       h("div", { class: "mfoot" },
         h("button", { class: "btn", text: "Cancel", onClick: closeModal }),
         h("div", { class: "spacer" }),
         saveBtn), true));
+  }
+
+  function collectAgentConfigRows(rows) {
+    var ids = {};
+    return rows.map(function (row) {
+      var id = row.id.value.trim();
+      if (!id) throw new Error("agent id is required");
+      if (ids[id]) throw new Error("duplicate agent id: " + id);
+      ids[id] = true;
+      var envText = row.env.value.trim();
+      var env;
+      if (envText) {
+        env = JSON.parse(envText);
+        if (!env || Array.isArray(env) || typeof env !== "object") throw new Error("env for " + id + " must be a JSON object");
+      }
+      var argsText = row.extraArgs.value.trim();
+      var args;
+      if (argsText) {
+        args = JSON.parse(argsText);
+        if (!Array.isArray(args) || args.some(function (arg) { return typeof arg !== "string"; })) {
+          throw new Error("extra args for " + id + " must be a JSON string array");
+        }
+      }
+      return {
+        id: id,
+        provider: row.provider.value,
+        enabled: row.enabled.checked,
+        label: row.label.value.trim() || undefined,
+        binary: row.binary.value.trim() || undefined,
+        env: env,
+        extraArgs: args,
+        defaultModel: row.defaultModel.value.trim() || undefined
+      };
+    });
   }
 
   // Agent/model/effort catalog for the create + configure forms.
@@ -511,8 +606,16 @@
   }
   function agentOptions() {
     return S.agents.map(function (a) {
-      return { value: a.id, label: a.id + (a.healthy ? "" : " (unavailable)") };
+      var label = a.label && a.label !== a.id ? a.label + " (" + a.id + ")" : a.id;
+      return { value: a.id, label: label + (a.healthy ? "" : " (unavailable)") };
     });
+  }
+  function agentOptionsWith(current) {
+    var opts = agentOptions();
+    if (current && !opts.some(function (o) { return o.value === current; })) {
+      opts = [{ value: current, label: current + " (current unavailable)" }].concat(opts);
+    }
+    return opts;
   }
   function scopeOptions() {
     return [
@@ -790,7 +893,7 @@
       return card;
     }
     var agent = st.agent || preferredAgent().id;
-    var agentSel = selectEl(agentOptions(), agent);
+    var agentSel = selectEl(agentOptionsWith(agent), agent);
     var modelSel = selectEl(modelOptionsWith(agent, st.model), st.model);
     var effortField = h("div", { class: "field" });
     var stepTimeoutInput = h("input", {

@@ -6,11 +6,17 @@
  * shapes, so adding a new agent never touches the UI.
  */
 
-export type AgentId = "claude" | "opencode" | "codex" | "amp";
+export type AgentProviderId = "claude" | "opencode" | "codex" | "amp";
+
+/** Built-in provider identity used by adapters and binary config. */
+export type AgentId = AgentProviderId;
+
+/** A configured runnable agent instance id (e.g. opencode-fork). Built-in zero-config ids match providers. */
+export type AgentInstanceId = string;
 
 export interface BaseEvent {
-  /** Which agent produced this event. */
-  agent: AgentId;
+  /** Which configured agent instance produced this event. */
+  agent: AgentInstanceId;
   /** Wall-clock timestamp (ms since epoch) stamped at normalization time. */
   ts: number;
 }

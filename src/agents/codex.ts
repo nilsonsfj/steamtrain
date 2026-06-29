@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentId, EventMapper } from "../types/events";
+import type { AgentEvent, AgentId, AgentInstanceId, EventMapper } from "../types/events";
 import { type CodexThreadItem, codexEnvelope, codexEvent } from "../types/raw-codex";
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
@@ -48,7 +48,7 @@ function errorMessage(error: unknown): string {
  *
  * Create a fresh mapper per run so this state never leaks between tasks.
  */
-export function createCodexMapper(agent: AgentId = AGENT): EventMapper {
+export function createCodexMapper(agent: AgentInstanceId = AGENT): EventMapper {
   const textSeen = new Map<string, string>();
   const toolStarted = new Set<string>();
   const toolFinished = new Set<string>();
@@ -373,7 +373,7 @@ export class CodexAdapter implements AgentAdapter {
       binary: this.binary,
       args: buildCodexExecArgs(opts),
       opts,
-      map: createCodexMapper(this.id),
+      map: createCodexMapper(opts.agentId ?? this.id),
       prompt: opts.prompt,
     });
   }

@@ -135,7 +135,15 @@ function makeServer(host: WorkflowHost): { server: Server; runs: WorkflowRunMana
     host,
     runs,
     workflowSource: () => "bundled",
-    doctor: () => [{ agent: "opencode", status: "ok", message: "ready" }] as never,
+    doctor: () => [
+      {
+        agent: "opencode",
+        provider: "opencode",
+        status: "ok",
+        binary: "opencode",
+        message: "ready",
+      },
+    ],
     configLabel: "test config",
   });
   servers.push(server);

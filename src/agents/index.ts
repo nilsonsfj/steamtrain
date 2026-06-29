@@ -1,4 +1,4 @@
-import type { AgentId } from "../types/events";
+import type { AgentProviderId } from "../types/events";
 import type { AgentAdapter } from "./adapter";
 import { AmpAdapter } from "./amp";
 import { ClaudeCodeAdapter } from "./claude";
@@ -19,8 +19,17 @@ export { AmpAdapter, AMP_MODELS, buildAmpExecArgs, createAmpMapper } from "./amp
 export { ClaudeCodeAdapter, CLAUDE_MODELS, createClaudeMapper } from "./claude";
 export { CodexAdapter, CODEX_MODELS, buildCodexExecArgs, createCodexMapper } from "./codex";
 export {
+  DEFAULT_AGENT_BINARY,
+  defaultAgentInstance,
+  resolveAgentInstance,
+  resolveAgentInstances,
+  type ResolvedAgentInstance,
+} from "./config";
+export {
   AGENT_IDS,
+  agentProviderFor,
   defaultModelForAgent,
+  isAgentProviderId,
   effortForModelChange,
   effortsForModel,
   formatAgentTarget,
@@ -51,7 +60,7 @@ export { LineBuffer } from "./line-buffer";
 export { runProcessLines } from "./spawn";
 
 /** Construct the adapter for an agent id, optionally overriding the binary. */
-export function createAdapter(id: AgentId, binary?: string): AgentAdapter {
+export function createAdapter(id: AgentProviderId, binary?: string): AgentAdapter {
   switch (id) {
     case "claude":
       return new ClaudeCodeAdapter(binary);

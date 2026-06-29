@@ -1,10 +1,16 @@
-import { defaultDraftModel, isAgentId, modelIdsForAgent, modelNameForAgent } from "../agents";
+import {
+  defaultDraftModel,
+  modelIdsForAgent,
+  modelNameForAgent,
+  resolveAgentInstances,
+} from "../agents";
+import type { SteamtrainConfig } from "../config/types";
 import type { DoctorResult } from "../doctor";
-import type { AgentId } from "../types/events";
+import type { AgentInstanceId } from "../types/events";
 
 /** Agent + model used to draft (LLM-author) a new workflow. */
 export interface DraftTarget {
-  agent: AgentId;
+  agent: AgentInstanceId;
   model: string;
 }
 
@@ -15,9 +21,28 @@ export interface DraftTarget {
  */
 const DRAFT_AGENT_ORDER = ["opencode", "claude", "codex", "amp"] as const;
 
+const draftOrderCache = new WeakMap<SteamtrainConfig, AgentInstanceId[]>();
+
+function draftAgentOrder(config?: SteamtrainConfig): AgentInstanceId[] {
+  if (config) {
+    const cached = draftOrderCache.get(config);
+    if (cached) return cached;
+  }
+  const instances = resolveAgentInstances(config);
+  const order = [...instances]
+    .sort((a, b) => {
+      const ap = DRAFT_AGENT_ORDER.indexOf(a.provider);
+      const bp = DRAFT_AGENT_ORDER.indexOf(b.provider);
+      return (ap === -1 ? 99 : ap) - (bp === -1 ? 99 : bp);
+    })
+    .map((agent) => agent.id);
+  if (config) draftOrderCache.set(config, order);
+  return order;
+}
+
 /** The set of agents the doctor reports as healthy (runnable). */
-export function healthyAgentSet(doctor: DoctorResult[] | null): Set<AgentId> {
-  const set = new Set<AgentId>();
+export function healthyAgentSet(doctor: DoctorResult[] | null): Set<AgentInstanceId> {
+  const set = new Set<AgentInstanceId>();
   if (!doctor) return set;
   for (const d of doctor) if (d.status === "ok") set.add(d.agent);
   return set;
@@ -28,9 +53,12 @@ export function healthyAgentSet(doctor: DoctorResult[] | null): Set<AgentId> {
  * model. Returns undefined when no agent is healthy (generation spawns a real
  * CLI, so an unhealthy agent can't draft).
  */
-export function autoDraftTarget(healthy: ReadonlySet<AgentId>): DraftTarget | undefined {
-  for (const agent of DRAFT_AGENT_ORDER) {
-    if (healthy.has(agent)) return { agent, model: defaultDraftModel(agent) };
+export function autoDraftTarget(
+  healthy: ReadonlySet<AgentInstanceId>,
+  config?: SteamtrainConfig,
+): DraftTarget | undefined {
+  for (const agent of draftAgentOrder(config)) {
+    if (healthy.has(agent)) return { agent, model: defaultDraftModel(agent, config) };
   }
   return undefined;
 }
@@ -41,22 +69,23 @@ export function autoDraftTarget(healthy: ReadonlySet<AgentId>): DraftTarget | un
  * the auto pick. `usingOverride` reports which one won, for display.
  */
 export function resolveDraftTarget(
-  healthy: ReadonlySet<AgentId>,
+  healthy: ReadonlySet<AgentInstanceId>,
   override: DraftTarget | null,
+  config?: SteamtrainConfig,
 ): { target?: DraftTarget; usingOverride: boolean } {
   if (
     override &&
     healthy.has(override.agent) &&
-    modelIdsForAgent(override.agent).includes(override.model)
+    modelIdsForAgent(override.agent, config).includes(override.model)
   ) {
     return { target: override, usingOverride: true };
   }
-  return { target: autoDraftTarget(healthy), usingOverride: false };
+  return { target: autoDraftTarget(healthy, config), usingOverride: false };
 }
 
 /** `agent · model-name` (falls back to the raw id when no friendly name). */
-export function formatDraftTarget(target: DraftTarget): string {
-  const name = modelNameForAgent(target.agent, target.model);
+export function formatDraftTarget(target: DraftTarget, config?: SteamtrainConfig): string {
+  const name = modelNameForAgent(target.agent, target.model, config);
   return name === target.model ? `${target.agent} · ${target.model}` : `${target.agent} · ${name}`;
 }
 
@@ -80,7 +109,8 @@ export type DraftModelRequest =
  */
 export function parseDraftModelRequest(
   args: string[],
-  healthy: ReadonlySet<AgentId>,
+  healthy: ReadonlySet<AgentInstanceId>,
+  config?: SteamtrainConfig,
 ): DraftModelRequest {
   if (args.length === 0) return { kind: "show" };
 
@@ -91,12 +121,12 @@ export function parseDraftModelRequest(
   }
 
   // `<agent>` or `<agent> <model>`
-  if (isAgentId(first)) {
+  if (draftAgentOrder(config).includes(first)) {
     if (!healthy.has(first)) return unhealthyAgentError(first, healthy);
     if (args.length === 1)
-      return { kind: "set", target: { agent: first, model: defaultDraftModel(first) } };
+      return { kind: "set", target: { agent: first, model: defaultDraftModel(first, config) } };
     const model = args[1]!;
-    const ids = modelIdsForAgent(first);
+    const ids = modelIdsForAgent(first, config);
     if (!ids.includes(model)) {
       return {
         kind: "error",
@@ -107,14 +137,16 @@ export function parseDraftModelRequest(
   }
 
   // `<model-id>` — find the healthy agent that owns it (preference order).
-  for (const agent of DRAFT_AGENT_ORDER) {
-    if (healthy.has(agent) && modelIdsForAgent(agent).includes(first)) {
+  for (const agent of draftAgentOrder(config)) {
+    if (healthy.has(agent) && modelIdsForAgent(agent, config).includes(first)) {
       return { kind: "set", target: { agent, model: first } };
     }
   }
 
   // Not owned by any healthy agent — give the most useful reason we can.
-  const owner = DRAFT_AGENT_ORDER.find((agent) => modelIdsForAgent(agent).includes(first));
+  const owner = draftAgentOrder(config).find((agent) =>
+    modelIdsForAgent(agent, config).includes(first),
+  );
   if (owner) {
     return {
       kind: "error",
@@ -127,26 +159,32 @@ export function parseDraftModelRequest(
   };
 }
 
-function unhealthyAgentError(agent: AgentId, healthy: ReadonlySet<AgentId>): DraftModelRequest {
+function unhealthyAgentError(
+  agent: AgentInstanceId,
+  healthy: ReadonlySet<AgentInstanceId>,
+): DraftModelRequest {
   return {
     kind: "error",
     message: `${agent} isn't healthy (check the doctor panel); ${healthyHint(healthy)}`,
   };
 }
 
-function healthyHint(healthy: ReadonlySet<AgentId>): string {
-  const agents = DRAFT_AGENT_ORDER.filter((a) => healthy.has(a));
+function healthyHint(healthy: ReadonlySet<AgentInstanceId>): string {
+  const agents = [...healthy];
   if (agents.length === 0) return "no agents are healthy";
   return `healthy: ${agents.join(", ")}`;
 }
 
 /** Completion candidates for `/model` in the workflow picker. */
-export function draftModelCompletions(healthy: ReadonlySet<AgentId>): string[] {
+export function draftModelCompletions(
+  healthy: ReadonlySet<AgentInstanceId>,
+  config?: SteamtrainConfig,
+): string[] {
   const out = ["auto"];
-  for (const agent of DRAFT_AGENT_ORDER) {
+  for (const agent of draftAgentOrder(config)) {
     if (!healthy.has(agent)) continue;
     out.push(agent);
-    out.push(...modelIdsForAgent(agent));
+    out.push(...modelIdsForAgent(agent, config));
   }
   return out;
 }

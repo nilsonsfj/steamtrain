@@ -330,6 +330,25 @@ describe("generateWorkflow", () => {
     expect(seen.length).toBeGreaterThan(0);
   });
 
+  it("honors binaries override when agentConfig is omitted", async () => {
+    let seenBinary: string | undefined;
+    const createAdapter = (id: AgentId, binary?: string) => {
+      seenBinary = binary;
+      return makeAdapter(resultEvents(VALID_SPEC))(id);
+    };
+    const result = await generateWorkflow(
+      {
+        description: "summarize areas",
+        agent: "opencode",
+        model: "opencode/qwen3.6-plus-free",
+      },
+      { createAdapter, binaries: { opencode: "opencode-fork" } },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(seenBinary).toBe("opencode-fork");
+  });
+
   it("prefers the final result text over streamed deltas", async () => {
     const adapter = makeAdapter([
       { kind: "text_delta", agent: "opencode", ts: 0, text: "thinking out loud, ignore me" },

@@ -43,10 +43,10 @@ export const modelCommand: SlashCommand = {
       };
     }
 
-    const models = modelsForAgent(entry.agent);
-    const modelIds = modelIdsForAgent(entry.agent);
+    const models = modelsForAgent(entry.agent, ctx.config);
+    const modelIds = modelIdsForAgent(entry.agent, ctx.config);
     if (args.length === 0) {
-      const currentName = modelNameForAgent(entry.agent, entry.model);
+      const currentName = modelNameForAgent(entry.agent, entry.model, ctx.config);
       const currentLabel =
         currentName === entry.model ? entry.model : `${currentName} (${entry.model})`;
       return {
@@ -77,9 +77,9 @@ export const modelCommand: SlashCommand = {
 
     ctx.updateWorkspace(ctx.mode, {
       model: next,
-      effort: effortForModelChange(entry.agent, next, entry.effort),
+      effort: effortForModelChange(entry.agent, next, entry.effort, ctx.config),
     });
-    const nextName = modelNameForAgent(entry.agent, next);
+    const nextName = modelNameForAgent(entry.agent, next, ctx.config);
     const nextLabel = nextName === next ? next : `${nextName} (${next})`;
     return {
       handled: true,
@@ -99,6 +99,6 @@ export const modelCommand: SlashCommand = {
     const entry = ctx.workspaceMap.get(ctx.mode);
     if (!entry) return [];
     if (args.length > 1) return [];
-    return modelIdsForAgent(entry.agent);
+    return modelIdsForAgent(entry.agent, ctx.config);
   },
 };

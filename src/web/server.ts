@@ -4,8 +4,10 @@ import { type IncomingMessage, type Server, type ServerResponse, createServer } 
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildAgentMeta } from "../agents/agent-meta";
 import { refreshAgentCatalogCaches } from "../agents/models";
 import type { SteamtrainConfig } from "../config";
+import { parseAgentsConfig } from "../config";
 import { saveProjectConfig } from "../config/project-config";
 import { type DoctorResult, runDoctor } from "../doctor";
 import { Orchestrator } from "../orchestrator";
@@ -124,6 +126,7 @@ export interface WebServerDeps {
   workflowSource?: (name: string) => WorkflowSourceKind | undefined;
   doctor?: () => DoctorResult[];
   doctorError?: () => string | null;
+  setDoctor?: (doctor: DoctorResult[]) => void;
   configLabel?: string;
   /** The host address the server is bound to. Used for CORS decisions. */
   bindHost?: string;
@@ -343,6 +346,11 @@ async function handle(
       workflowTimeoutSec: cfg.workflowTimeoutSec,
       defaultStepTimeoutSec: DEFAULT_STEP_TIMEOUT_SEC,
       configPath: deps.configPath,
+      agents: buildAgentMeta(
+        cfg,
+        (agent) => (deps.doctor?.() ?? []).some((d) => d.agent === agent && d.status === "ok"),
+        { includeDisabled: true, includeConfig: true },
+      ),
     });
     return;
   }
@@ -357,6 +365,7 @@ async function handle(
       stepTimeoutSec?: unknown;
       workflowTimeoutSec?: unknown;
       clearWorkflowTimeout?: unknown;
+      agents?: unknown;
     };
     try {
       parsed = body ? JSON.parse(body) : {};
@@ -367,26 +376,54 @@ async function handle(
     const hasStep = typeof parsed.stepTimeoutSec === "number" && parsed.stepTimeoutSec > 0;
     const hasWf = typeof parsed.workflowTimeoutSec === "number" && parsed.workflowTimeoutSec > 0;
     const clearWf = Boolean(parsed.clearWorkflowTimeout);
-    if (!hasStep && !hasWf && !clearWf) {
+    const hasAgents = parsed.agents !== undefined;
+    if (!hasStep && !hasWf && !clearWf && !hasAgents) {
       sendJson(res, 400, {
-        error: "body must include stepTimeoutSec, workflowTimeoutSec, or clearWorkflowTimeout",
+        error:
+          "body must include stepTimeoutSec, workflowTimeoutSec, clearWorkflowTimeout, or agents",
       });
       return;
     }
-    const patch: { stepTimeoutSec?: number; workflowTimeoutSec?: number } = {};
+    const patch: Partial<
+      Pick<SteamtrainConfig, "stepTimeoutSec" | "workflowTimeoutSec" | "agents">
+    > = {};
     if (hasStep) patch.stepTimeoutSec = parsed.stepTimeoutSec as number;
     if (clearWf) patch.workflowTimeoutSec = undefined;
     else if (hasWf) patch.workflowTimeoutSec = parsed.workflowTimeoutSec as number;
+    if (hasAgents) {
+      try {
+        patch.agents = parseAgentsConfig(parsed.agents);
+      } catch (err) {
+        sendJson(res, 400, {
+          error: err instanceof Error ? err.message : "invalid agents",
+        });
+        return;
+      }
+    }
     const saved = saveProjectConfig(patch, deps.configPath);
     if (!saved.ok || !saved.config) {
       sendJson(res, 400, { error: saved.error ?? "save failed" });
       return;
     }
     Object.assign(deps.config, saved.config);
+    if (hasAgents) {
+      try {
+        const results = await runDoctor(deps.config);
+        deps.setDoctor?.(results);
+        await refreshAgentCatalogCaches(deps.config, results);
+      } catch {
+        // The regular doctor polling endpoint will report the previous state if refresh fails.
+      }
+    }
     sendJson(res, 200, {
       ok: true,
       stepTimeoutSec: resolveStepTimeoutSec(undefined, undefined, deps.config),
       workflowTimeoutSec: deps.config.workflowTimeoutSec,
+      agents: buildAgentMeta(
+        deps.config,
+        (agent) => (deps.doctor?.() ?? []).some((d) => d.agent === agent && d.status === "ok"),
+        { includeDisabled: true, includeConfig: true },
+      ),
     });
     return;
   }
@@ -766,6 +803,11 @@ export async function startWebUi(
     workflowSource: (name) => orchestrator.workflowSource(name),
     doctor: () => doctorState.results,
     doctorError: () => doctorState.error,
+    setDoctor: (results) => {
+      doctorState.results = results;
+      doctorState.error = null;
+      orchestrator.setDoctor(results);
+    },
     configLabel: options.configLabel,
     bindHost: host,
     config: liveConfig,
@@ -799,9 +841,9 @@ export async function startWebUi(
 
   void (async () => {
     try {
-      const results = await runDoctor(options.config);
+      const results = await runDoctor(liveConfig);
       orchestrator.setDoctor(results);
-      await refreshAgentCatalogCaches(options.config, results);
+      await refreshAgentCatalogCaches(liveConfig, results);
       doctorState.results = results;
       const bad = results.filter((d) => d.status !== "ok").map((d) => d.agent);
       out(

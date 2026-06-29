@@ -24,10 +24,10 @@ export const effortCommand: SlashCommand = {
       };
     }
 
-    const efforts = effortsForModel(entry.agent, entry.model);
+    const efforts = effortsForModel(entry.agent, entry.model, ctx.config);
     if (args.length === 0) {
       const current = entry.effort ?? "default";
-      if (!supportsEffort(entry.agent, entry.model)) {
+      if (!supportsEffort(entry.agent, entry.model, ctx.config)) {
         return {
           handled: true,
           clearInput: true,
@@ -61,7 +61,7 @@ export const effortCommand: SlashCommand = {
       };
     }
 
-    if (!supportsEffort(entry.agent, entry.model)) {
+    if (!supportsEffort(entry.agent, entry.model, ctx.config)) {
       return {
         handled: true,
         clearInput: true,
@@ -99,7 +99,7 @@ export const effortCommand: SlashCommand = {
     const entry = ctx.workspaceMap.get(ctx.mode);
     if (!entry) return [];
     if (args.length > 1) return [];
-    const efforts = effortsForModel(entry.agent, entry.model);
+    const efforts = effortsForModel(entry.agent, entry.model, ctx.config);
     if (efforts.length === 0) return ["clear"];
     return [...efforts, "clear"];
   },

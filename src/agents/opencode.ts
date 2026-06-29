@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentId, EventMapper } from "../types/events";
+import type { AgentEvent, AgentId, AgentInstanceId, EventMapper } from "../types/events";
 import { type OpenCodePart, opencodeEnvelope, opencodeEvent } from "../types/raw-opencode";
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
@@ -88,7 +88,7 @@ const TOOL_FAILED = new Set(["error", "failed", "cancelled", "aborted"]);
  *
  * Create a fresh mapper per run so this state never leaks between tasks.
  */
-export function createOpenCodeMapper(agent: AgentId = AGENT): EventMapper {
+export function createOpenCodeMapper(agent: AgentInstanceId = AGENT): EventMapper {
   let sessionStarted = false;
   const textSeen = new Map<string, string>();
   const toolStarted = new Set<string>();
@@ -247,7 +247,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       binary: this.binary,
       args,
       opts,
-      map: createOpenCodeMapper(this.id),
+      map: createOpenCodeMapper(opts.agentId ?? this.id),
       prompt: opts.prompt,
     });
   }

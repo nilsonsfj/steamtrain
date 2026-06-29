@@ -1,14 +1,13 @@
 import { existsSync } from "node:fs";
-import { type AgentAdapter, createAdapter } from "../agents";
+import { type AgentAdapter, createAdapter, resolveAgentInstance } from "../agents";
 import { type AgentMeta, buildAgentMeta, defaultDraftModel } from "../agents/agent-meta";
-import { AGENT_IDS } from "../agents/models";
 import { type SteamtrainConfig, projectConfigPath } from "../config";
 import {
   deleteProjectWorkflow,
   loadProjectWorkflows,
   saveProjectWorkflow,
 } from "../config/project-workflows";
-import type { AgentId } from "../types/events";
+import type { AgentInstanceId, AgentProviderId } from "../types/events";
 import {
   type LoadedWorkflowCatalog,
   loadWorkflowCatalog,
@@ -32,7 +31,7 @@ import { type WorkflowSpec, validateWorkflow } from "./types";
 export interface AuthoringHost {
   listWorkflows(): Record<string, WorkflowSpec>;
   workflowSource(name: string): WorkflowSourceKind | undefined;
-  isAgentHealthy(agent: AgentId): boolean;
+  isAgentHealthy(agent: AgentInstanceId): boolean;
   setCatalog(catalog: LoadedWorkflowCatalog): void;
 }
 
@@ -53,7 +52,7 @@ export interface WorkflowAuthorOptions {
   /** Project workflows preserved across reloads (from `steamtrain.json`). */
   projectWorkflows?: Record<string, WorkflowSpec>;
   /** Injectable adapter factory for tests; defaults to the real one. */
-  createAdapter?: (id: AgentId, binary?: string) => AgentAdapter;
+  createAdapter?: (id: AgentProviderId, binary?: string) => AgentAdapter;
 }
 
 /**
@@ -67,7 +66,7 @@ export type WorkflowScope = "user" | "project";
 
 export interface GenerateRequest {
   description: string;
-  agent: AgentId;
+  agent: AgentInstanceId;
   model: string;
   effort?: string;
   name?: string;
@@ -110,7 +109,7 @@ export class WorkflowAuthor {
   private readonly cwd: string;
   private readonly projectConfigPath: string;
   private readonly projectWorkflows?: Record<string, WorkflowSpec>;
-  private readonly makeAdapter: (id: AgentId, binary?: string) => AgentAdapter;
+  private readonly makeAdapter: (id: AgentProviderId, binary?: string) => AgentAdapter;
 
   constructor(options: WorkflowAuthorOptions) {
     this.host = options.host;
@@ -124,7 +123,7 @@ export class WorkflowAuthor {
 
   /** Agents with their model catalogs, effort levels, defaults, and live health. */
   agentMeta(): AgentMeta[] {
-    return buildAgentMeta((agent) => this.host.isAgentHealthy(agent));
+    return buildAgentMeta(this.config, (agent) => this.host.isAgentHealthy(agent));
   }
 
   /**
@@ -139,13 +138,15 @@ export class WorkflowAuthor {
     signal?: AbortSignal,
     onAttemptStart?: (attempt: number) => void,
   ): Promise<AuthorWriteResult> {
-    if (!isKnownAgent(req.agent)) return { ok: false, error: `unknown agent '${req.agent}'` };
+    if (!resolveAgentInstance(this.config, req.agent)) {
+      return { ok: false, error: `unknown or disabled agent '${req.agent}'` };
+    }
     if (!req.description.trim()) return { ok: false, error: "a description is required" };
     if (!this.host.isAgentHealthy(req.agent)) {
       return { ok: false, error: `${req.agent} is not available (check agent health)` };
     }
 
-    const model = req.model?.trim() || defaultDraftModel(req.agent);
+    const model = req.model?.trim() || defaultDraftModel(req.agent, this.config);
     const result = await generateWorkflow(
       {
         description: req.description,
@@ -162,6 +163,7 @@ export class WorkflowAuthor {
       {
         createAdapter: this.makeAdapter,
         binaries: this.config.binaries,
+        agentConfig: this.config,
         stepTimeoutSec: resolveStepTimeoutSec(undefined, undefined, this.config),
         cwd: this.cwd,
       },
@@ -391,8 +393,4 @@ export class WorkflowAuthor {
     const catalog = loadWorkflowCatalog({ home: this.home, projectWorkflows });
     this.host.setCatalog(catalog);
   }
-}
-
-function isKnownAgent(agent: string): agent is AgentId {
-  return (AGENT_IDS as readonly string[]).includes(agent);
 }

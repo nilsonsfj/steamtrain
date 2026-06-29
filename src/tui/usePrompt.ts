@@ -250,7 +250,7 @@ export function usePrompt({
         if (!entry) return undefined;
         void agentCatalogTick;
         const map = new Map<string, string>();
-        for (const model of modelsForAgent(entry.agent)) {
+        for (const model of modelsForAgent(entry.agent, slashCtx.config)) {
           if (model.name !== model.id) map.set(model.id, model.name);
         }
         return map.size > 0 ? map : undefined;
@@ -258,7 +258,7 @@ export function usePrompt({
       if (previewStepSelection) {
         void agentCatalogTick;
         const map = new Map<string, string>();
-        for (const model of modelsForAgent(previewStepSelection.agent)) {
+        for (const model of modelsForAgent(previewStepSelection.agent, slashCtx.config)) {
           if (model.name !== model.id) map.set(model.id, model.name);
         }
         return map.size > 0 ? map : undefined;

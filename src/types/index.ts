@@ -1,5 +1,7 @@
 export type {
   AgentId,
+  AgentInstanceId,
+  AgentProviderId,
   AgentEvent,
   AgentEventKind,
   BaseEvent,
