@@ -11,11 +11,7 @@ export function useWorkIndicator(active: boolean) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   useEffect(() => {
-    if (!active) {
-      setElapsedSeconds(0);
-      setSpinnerFrame(0);
-      return;
-    }
+    if (!active) return;
 
     const spinnerInterval = setInterval(() => {
       setSpinnerFrame((f) => (f + 1) % SPINNER_FRAMES.length);

@@ -104,13 +104,20 @@ function selectVisible(
 }
 
 function estimateRows(item: DisplayItem, width: number): number {
-  const wrap = (len: number, cap: number): number =>
-    Math.min(cap, Math.max(1, Math.ceil(len / Math.max(1, width))));
+  const w = Math.max(1, width);
+  const wrapLines = (text: string, cap: number): number => {
+    let rows = 0;
+    for (const line of text.split("\n")) {
+      rows += Math.max(1, Math.ceil(line.length / w));
+      if (rows >= cap) return cap;
+    }
+    return Math.max(1, rows);
+  };
   switch (item.kind) {
     case "text":
-      return wrap(item.text.length, 24);
+      return wrapLines(item.text, 24);
     case "result":
-      return 1 + (item.text ? wrap(Math.min(item.text.length, 600), 12) : 0);
+      return 1 + (item.text ? wrapLines(item.text.slice(0, 600), 12) : 0);
     default:
       return 1;
   }

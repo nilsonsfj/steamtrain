@@ -212,7 +212,7 @@ function previewLines(
   const prompt = promptForStep(step);
   if (prompt) {
     lines.push({
-      text: `prompt: ${truncate(collapseWhitespace(prompt), Math.max(120, width * 5))}`,
+      text: `prompt: ${truncate(collapseWhitespace(prompt), Math.max(80, width - 20))}`,
     });
   }
 

@@ -779,6 +779,10 @@ export function App({
             selectedIndex={runner.stepIndex}
             elapsedMs={runner.wfElapsedMs}
           />
+        ) : picker.wfPreview && !picker.preview.spec ? (
+          <Box justifyContent="center" alignItems="center" height={streamHeight}>
+            <Text color="gray">loading workflow…</Text>
+          </Box>
         ) : picker.wfPreview && picker.preview.spec && picker.preview.dispatchCheck ? (
           <WorkflowPreview
             spec={picker.preview.spec}

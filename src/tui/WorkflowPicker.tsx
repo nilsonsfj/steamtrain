@@ -56,9 +56,9 @@ export function WorkflowPicker({
             {window.visible.map(({ name, spec, source }, offset) => {
               const i = window.start + offset;
               const active = i === selectedIndex;
-              const phaseCount = spec.phases.length;
-              const stepCount = spec.phases.reduce((n, p) => n + p.steps.length, 0);
               const blocks = blockSummary(spec);
+              const phases = spec.phases.length;
+              const steps = spec.phases.reduce((n, p) => n + p.steps.length, 0);
               return (
                 <Box key={name} flexDirection="column" marginTop={offset === 0 ? 0 : 1}>
                   <Box>
@@ -69,8 +69,8 @@ export function WorkflowPicker({
                     <Text color={WORKFLOW_SOURCE_COLOR[source]}> {source}</Text>
                     <Text color="gray">
                       {"  "}
-                      {phaseCount} phase{phaseCount === 1 ? "" : "s"} · {stepCount} step
-                      {stepCount === 1 ? "" : "s"}
+                      {phases} phase{phases === 1 ? "" : "s"} · {steps} step
+                      {steps === 1 ? "" : "s"}
                     </Text>
                   </Box>
                   <Box paddingLeft={2}>

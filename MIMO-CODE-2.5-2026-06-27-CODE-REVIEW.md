@@ -20,11 +20,11 @@
 | Correctness | A- | All critical/high/medium issues resolved; minor edge cases remain |
 | Type Safety | B+ | Strong Zod usage, strict tsconfig, exhaustiveness checks added |
 | Security | A- | Headers, body limits, prototype pollution, and error sanitization all addressed |
-| Test Coverage | A- | 643 tests; OS signal handling, orchestrator, malformed requests, doctor, cache store covered |
+| Test Coverage | A- | 654 tests; OS signal handling, orchestrator, malformed requests, doctor, cache store covered |
 | Performance | B | Async catalog I/O, transcript/frame caps, backpressure; TUI re-render concerns remain |
 | Maintainability | B- | App.tsx monolith (decomposed from 1905), server.ts route organization |
 
-**Remaining findings: 31** (0 Critical, 0 High, 0 Medium, 31 Low)
+**Remaining findings: 24** (0 Critical, 0 High, 0 Medium, 24 Low)
 
 ---
 
@@ -116,26 +116,8 @@
 ### L33. `MenuBackdrop` negative margin overlay is fragile
 - **File:** `src/tui/CommandSuggestionMenu.tsx:106-119`
 
-### L34. `useWorkIndicator` resets elapsed to 0 on inactive
-- **File:** `src/tui/useWorkIndicator.ts:14-18`
-
-### L35. `WorkflowStepDetails` truncation uses `Math.max(120, width * 5)`
-- **File:** `src/tui/WorkflowStepDetails.tsx:214`
-
-### L36. `EventStream` `estimateRows` is a rough heuristic
-- **File:** `src/tui/EventStream.tsx:106-116`
-
-### L37. No loading state in `WorkflowPreview` when spec unresolved
-- **File:** `src/tui/App.tsx:1666-1691`
-
 ### L40. `STATUS_GLYPH` vs `STATUS_STYLE` naming confusion
 - **File:** `src/tui/WorkflowHistory.tsx:14-18`
-
-### L42. `EventRow` `summarizeInput` unsafe cast
-- **File:** `src/tui/EventRow.tsx:157-158`
-
-### L43. `WorkflowPicker` computes `phaseCount`/`stepCount` inline
-- **File:** `src/tui/WorkflowPicker.tsx:48-49`
 
 ### L44. `orchestrator` recreation cascading through memoized values
 - **File:** `src/tui/App.tsx:259-262`
@@ -151,9 +133,6 @@
 
 ### L48. `WorkflowHistory` `selectVisibleWindow` misleading when empty
 - **File:** `src/tui/WorkflowHistory.tsx:30`
-
-### L50. `WorkflowStepDetails` prompt truncation too generous
-- **File:** `src/tui/WorkflowStepDetails.tsx:214`
 
 ---
 
