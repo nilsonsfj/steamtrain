@@ -24,7 +24,7 @@
 | Performance | B | Async catalog I/O, transcript/frame caps, backpressure; TUI re-render concerns remain |
 | Maintainability | B- | App.tsx monolith (decomposed from 1905), server.ts route organization |
 
-**Remaining findings: 16** (0 Critical, 0 High, 0 Medium, 16 Low)
+**Remaining findings: 13** (0 Critical, 0 High, 0 Medium, 13 Low)
 
 ---
 
@@ -62,12 +62,6 @@
 
 ## 4. Low Findings
 
-### L1. `LineBuffer.push` uses O(n²) string concatenation
-- **File:** `src/agents/line-buffer.ts:15`
-
-### L6. `codex-variants.ts` and `opencode-variants.ts` share duplicated interfaces
-- **File:** `src/agents/codex-variants.ts:8-11`, `src/agents/opencode-variants.ts:8-11`
-
 ### L14. `closeAllConnections?.()` requires Node >= 18.2.0
 - **File:** `src/index.tsx:70`
 
@@ -76,9 +70,6 @@
 
 ### L19. Client-side `getElementById` lacks null guards
 - **File:** `src/web/html.ts`
-
-### L20. Port 0 accepted without notification
-- **File:** `src/cli.ts:88-95`
 
 ### L23. Temp directory cleanup inconsistency in tests
 - **File:** ~15 test files

@@ -1,14 +1,12 @@
 import { spawn } from "node:child_process";
 import type { AgentModel } from "./agent-model";
 import { fallbackOpencodeEfforts } from "./opencode-efforts-fallback";
+import type { VariantModelInfo } from "./variant-info";
+
+export type OpencodeModelInfo = VariantModelInfo;
 
 const CACHE_TTL_MS = 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 20_000;
-
-export interface OpencodeModelInfo {
-  name: string;
-  efforts: readonly string[];
-}
 
 interface VariantCache {
   models: Map<string, OpencodeModelInfo>;

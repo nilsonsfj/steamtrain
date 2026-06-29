@@ -826,7 +826,6 @@ export async function startWebUi(
     );
   }
 
-  const url = `http://${host}:${port}`;
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, host, () => {
@@ -834,6 +833,10 @@ export async function startWebUi(
       resolve();
     });
   });
+
+  const addr = server.address();
+  const actualPort = typeof addr === "object" && addr ? addr.port : port;
+  const url = `http://${host}:${actualPort}`;
 
   out(`\n🚂 steamtrain web UI running at ${url}\n`);
   out("   open it in your browser; press Ctrl+C to stop.\n");
