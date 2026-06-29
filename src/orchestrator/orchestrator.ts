@@ -50,12 +50,12 @@ export class Orchestrator {
     catalog: LoadedWorkflowCatalog,
   ) {
     this.workspaceMap = workspaceById(workspaces);
-    this.workflowCatalog = catalog.workflows;
-    this.workflowSources = catalog.sources;
+    this.workflowCatalog = { ...catalog.workflows };
+    this.workflowSources = { ...catalog.sources };
   }
 
   setDoctor(results: DoctorResult[]): void {
-    this.doctor = results;
+    this.doctor = [...results];
   }
 
   /** The reasoning config (binaries, timeouts) this orchestrator was built with. */
@@ -69,8 +69,8 @@ export class Orchestrator {
    * without restarting the server.
    */
   setCatalog(catalog: LoadedWorkflowCatalog): void {
-    this.workflowCatalog = catalog.workflows;
-    this.workflowSources = catalog.sources;
+    this.workflowCatalog = { ...catalog.workflows };
+    this.workflowSources = { ...catalog.sources };
   }
 
   /** Whether an agent is currently doctor-healthy (used to gate authoring). */
@@ -116,7 +116,12 @@ export class Orchestrator {
   }
 
   /** Stream normalized events for a workspace dispatch. */
-  run(id: WorkspaceId, prompt: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
+  run(
+    id: WorkspaceId,
+    prompt: string,
+    signal?: AbortSignal,
+    cwd?: string,
+  ): AsyncIterable<AgentEvent> {
     const dispatchCheck = this.canDispatch(id);
     if (!dispatchCheck.ok) throw new Error(dispatchCheck.reason);
     const { adapter, entry, instance } = this.resolve(id);
@@ -125,7 +130,7 @@ export class Orchestrator {
       prompt,
       model: entry.model,
       effort: entry.effort,
-      cwd: process.cwd(),
+      cwd: cwd ?? process.cwd(),
       env: instance.env,
       extraArgs: instance.extraArgs,
       agentId: instance.id,
@@ -138,7 +143,7 @@ export class Orchestrator {
 
   /** All available workflows: bundled, user, and project merged by name. */
   listWorkflows(): Record<string, WorkflowSpec> {
-    return this.workflowCatalog;
+    return { ...this.workflowCatalog };
   }
 
   workflowSource(name: string): WorkflowSourceKind | undefined {

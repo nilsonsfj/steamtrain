@@ -24,7 +24,7 @@
 | Performance | B | Async catalog I/O, transcript/frame caps, backpressure; TUI re-render concerns remain |
 | Maintainability | B- | App.tsx monolith (decomposed from 1905), server.ts route organization |
 
-**Remaining findings: 20** (0 Critical, 0 High, 0 Medium, 20 Low)
+**Remaining findings: 16** (0 Critical, 0 High, 0 Medium, 16 Low)
 
 ---
 
@@ -67,18 +67,6 @@
 
 ### L6. `codex-variants.ts` and `opencode-variants.ts` share duplicated interfaces
 - **File:** `src/agents/codex-variants.ts:8-11`, `src/agents/opencode-variants.ts:8-11`
-
-### L8. Adapter creation path inconsistency
-- **File:** `src/orchestrator/orchestrator.ts:73-79` vs `159-183`
-
-### L9. `Orchestrator` uses `process.cwd()` as default cwd
-- **File:** `src/orchestrator/orchestrator.ts:107`
-
-### L10. `Orchestrator` workflow catalog not defensively copied
-- **File:** `src/orchestrator/orchestrator.ts:44-46,63-66`
-
-### L11. `setDoctor()` replaces entire array — TOCTOU with `resolve()`
-- **File:** `src/orchestrator/orchestrator.ts:42,49-51`
 
 ### L14. `closeAllConnections?.()` requires Node >= 18.2.0
 - **File:** `src/index.tsx:70`
