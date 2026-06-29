@@ -334,7 +334,8 @@ function estimateCostUsd(
   const reasoning = usage.reasoning_output_tokens ?? 0;
   const total = input + cached + output + reasoning;
   if (total === 0) return undefined;
-  return ((input - cached) * 0.3 + cached * 0.03 + (output + reasoning) * 1.2) / 1_000_000;
+  const uncached = Math.max(0, input - cached);
+  return (uncached * 0.3 + cached * 0.03 + (output + reasoning) * 1.2) / 1_000_000;
 }
 
 /** Build argv for `codex exec --json` (shared by the adapter and tests). */

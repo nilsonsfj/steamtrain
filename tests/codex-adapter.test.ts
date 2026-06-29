@@ -277,6 +277,30 @@ describe("codex mapper (stateful, one mapper per run)", () => {
       }),
     ]);
   });
+
+  it("omits costUsd when all usage token counts are zero", () => {
+    const m = createCodexMapper();
+    const result = m(
+      JSON.parse('{"type":"turn.completed","usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0}}'),
+    );
+    expect(result).toEqual([
+      expect.objectContaining({
+        kind: "result",
+        costUsd: undefined,
+      }),
+    ]);
+  });
+
+  it("returns undefined durationMs when turn.started was never received", () => {
+    const m = createCodexMapper();
+    const result = m(JSON.parse(SAMPLES.turnCompleted));
+    expect(result).toEqual([
+      expect.objectContaining({
+        kind: "result",
+        durationMs: undefined,
+      }),
+    ]);
+  });
 });
 
 describe("buildCodexExecArgs", () => {
