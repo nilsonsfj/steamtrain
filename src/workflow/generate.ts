@@ -385,6 +385,17 @@ async function runGenerationAgent(
   return { raw: finalText || streamedText, errored, errorMessage };
 }
 
+/** Resolve the drafting instance, honoring legacy `binaries`-only deps when `agentConfig` is omitted. */
+function resolveGenerationInstance(
+  deps: GenerateWorkflowDeps,
+  agent: AgentInstanceId,
+): ResolvedAgentInstance | undefined {
+  const config =
+    deps.agentConfig ??
+    (deps.binaries ? ({ binaries: deps.binaries } satisfies SteamtrainConfig) : undefined);
+  return resolveAgentInstance(config, agent);
+}
+
 /**
  * Run the agent and turn its reply into a validated workflow spec. When the
  * first draft is invalid, re-prompt the agent with the exact validation error up
@@ -395,7 +406,7 @@ export async function generateWorkflow(
   req: GenerateWorkflowRequest,
   deps: GenerateWorkflowDeps,
 ): Promise<GenerateWorkflowResult> {
-  const instance = resolveAgentInstance(deps.agentConfig, req.agent);
+  const instance = resolveGenerationInstance(deps, req.agent);
   if (!instance) {
     return {
       ok: false,

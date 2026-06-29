@@ -654,6 +654,7 @@ async function runWorkflowCreateCommand(
     },
     {
       createAdapter,
+      agentConfig: config,
       binaries: config.binaries,
       stepTimeoutSec: resolveStepTimeoutSec(undefined, undefined, config),
       cwd: io.cwd ?? process.cwd(),
