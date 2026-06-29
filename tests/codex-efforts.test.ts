@@ -23,6 +23,36 @@ describe("fallbackCodexEfforts", () => {
     expect(fallbackCodexEfforts("gpt-5")).toContain("none");
   });
 
+  it("returns reasoning levels for gpt-5.1 codex variants", () => {
+    expect(fallbackCodexEfforts("gpt-5.1-codex")).toEqual([
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+    expect(fallbackCodexEfforts("gpt-5.1-codex-mini")).toEqual([
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+  });
+
+  it("returns reasoning levels for gpt-5-codex", () => {
+    expect(fallbackCodexEfforts("gpt-5-codex")).toEqual([
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+  });
+
   it("returns no levels for unknown slugs", () => {
     expect(fallbackCodexEfforts("unknown-model")).toEqual([]);
   });

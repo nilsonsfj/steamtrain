@@ -192,6 +192,136 @@ describe("codex mapper (stateful, one mapper per run)", () => {
       expect.objectContaining({ kind: "error", message: "tool execution failed" }),
     ]);
   });
+
+  it("includes model and tools in session_start when present", () => {
+    const m = createCodexMapper();
+    const event = m(
+      JSON.parse(
+        '{"type":"thread.started","thread_id":"t1","model":"gpt-5.4-mini","tools":["bash","file_edit"]}',
+      ),
+    );
+    expect(event).toEqual([
+      expect.objectContaining({
+        kind: "session_start",
+        agent: "codex",
+        sessionId: "t1",
+        model: "gpt-5.4-mini",
+        tools: ["bash", "file_edit"],
+      }),
+    ]);
+  });
+
+  it("omits model and tools from session_start when absent", () => {
+    const m = createCodexMapper();
+    const event = m(JSON.parse(SAMPLES.threadStarted));
+    expect(event).toEqual([
+      expect.objectContaining({
+        kind: "session_start",
+        sessionId: "0199a213-81c0-7800-8aa1-bbab2a035a53",
+      }),
+    ]);
+    expect(event[0]).not.toHaveProperty("model");
+    expect(event[0]).not.toHaveProperty("tools");
+  });
+
+  it("tracks turn duration from turn.started to turn.completed", () => {
+    const m = createCodexMapper();
+    m(JSON.parse(SAMPLES.turnStarted));
+    const result = m(JSON.parse(SAMPLES.turnCompleted));
+    expect(result).toEqual([
+      expect.objectContaining({
+        kind: "result",
+        isError: false,
+        subtype: "turn.completed",
+        durationMs: expect.any(Number),
+      }),
+    ]);
+    expect((result[0] as { durationMs: number }).durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("tracks turn duration from turn.started to turn.failed", () => {
+    const m = createCodexMapper();
+    m(JSON.parse(SAMPLES.turnStarted));
+    const result = m(JSON.parse(SAMPLES.turnFailed));
+    const resultEvent = result.find((e) => e.kind === "result");
+    expect(resultEvent).toEqual(
+      expect.objectContaining({
+        kind: "result",
+        isError: true,
+        subtype: "turn.failed",
+        durationMs: expect.any(Number),
+      }),
+    );
+  });
+
+  it("estimates costUsd from usage tokens on turn.completed", () => {
+    const m = createCodexMapper();
+    const result = m(JSON.parse(SAMPLES.turnCompleted));
+    expect(result).toEqual([
+      expect.objectContaining({
+        kind: "result",
+        costUsd: expect.any(Number),
+      }),
+    ]);
+    // SAMPLES.turnCompleted: input=8497, cached=8448, output=51
+    // uncached=49*$0.30/M + cached=8448*$0.03/M + output=51*$1.20/M
+    // (reasoning_output_tokens is a subset of output_tokens, not double-counted)
+    const cost = (result[0] as { costUsd: number }).costUsd;
+    expect(cost).toBeCloseTo(0.00032934, 8);
+  });
+
+  it("omits costUsd when usage is absent", () => {
+    const m = createCodexMapper();
+    const result = m(JSON.parse('{"type":"turn.completed"}'));
+    expect(result).toEqual([
+      expect.objectContaining({
+        kind: "result",
+        costUsd: undefined,
+      }),
+    ]);
+  });
+
+  it("omits costUsd when all usage token counts are zero", () => {
+    const m = createCodexMapper();
+    const result = m(
+      JSON.parse(
+        '{"type":"turn.completed","usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0}}',
+      ),
+    );
+    expect(result).toEqual([
+      expect.objectContaining({
+        kind: "result",
+        costUsd: undefined,
+      }),
+    ]);
+  });
+
+  it("does not double-count reasoning_output_tokens (subset of output_tokens)", () => {
+    const m = createCodexMapper();
+    // output_tokens=100 includes reasoning_output_tokens=40
+    const result = m(
+      JSON.parse(
+        '{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":100,"reasoning_output_tokens":40}}',
+      ),
+    );
+    const cost = (result[0] as { costUsd: number }).costUsd;
+    // Should only count output_tokens (100), NOT output_tokens + reasoning_output_tokens (140)
+    const expectedWithOnlyOutput = (1000 * 0.3 + 100 * 1.2) / 1_000_000;
+    const wrongExpected = (1000 * 0.3 + (100 + 40) * 1.2) / 1_000_000;
+    expect(cost).toBeCloseTo(expectedWithOnlyOutput, 8);
+    expect(cost).not.toBeCloseTo(wrongExpected, 8);
+  });
+
+  it("returns undefined durationMs when turn.started was never received", () => {
+    const m = createCodexMapper();
+    const result = m(JSON.parse(SAMPLES.turnCompleted));
+    expect(result).toEqual([
+      expect.objectContaining({
+        kind: "result",
+        durationMs: undefined,
+      }),
+    ]);
+  });
 });
 
 describe("buildCodexExecArgs", () => {

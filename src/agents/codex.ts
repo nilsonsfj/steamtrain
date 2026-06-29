@@ -12,7 +12,17 @@ export const CODEX_MODELS: readonly AgentModel[] = [
   { id: "gpt-5.4", name: "GPT-5.4" },
   { id: "gpt-5.4-mini", name: "GPT-5.4 Mini" },
   { id: "gpt-5.3-codex", name: "GPT-5.3 Codex" },
+  { id: "gpt-5.3-codex-mini", name: "GPT-5.3 Codex Mini" },
+  { id: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark" },
+  { id: "gpt-5.3-codex-max", name: "GPT-5.3 Codex Max" },
   { id: "gpt-5.2", name: "GPT-5.2" },
+  { id: "gpt-5.2-codex", name: "GPT-5.2 Codex" },
+  { id: "gpt-5.1", name: "GPT-5.1" },
+  { id: "gpt-5.1-codex", name: "GPT-5.1 Codex" },
+  { id: "gpt-5.1-codex-mini", name: "GPT-5.1 Codex Mini" },
+  { id: "gpt-5.1-codex-max", name: "GPT-5.1 Codex Max" },
+  { id: "gpt-5", name: "GPT-5" },
+  { id: "gpt-5-codex", name: "GPT-5 Codex" },
   { id: "codex-auto-review", name: "Codex Auto Review" },
 ];
 
@@ -42,6 +52,7 @@ export function createCodexMapper(agent: AgentId = AGENT): EventMapper {
   const textSeen = new Map<string, string>();
   const toolStarted = new Set<string>();
   const toolFinished = new Set<string>();
+  let turnStartedAt: number | undefined;
 
   const diff = (key: string, full: string): string => {
     const prev = textSeen.get(key) ?? "";
@@ -220,31 +231,45 @@ export function createCodexMapper(agent: AgentId = AGENT): EventMapper {
     const out: AgentEvent[] = [];
 
     switch (e.type) {
-      case "thread.started":
-        out.push({
+      case "thread.started": {
+        const event: AgentEvent & { kind: "session_start" } = {
           kind: "session_start",
           agent,
           ts,
           sessionId: e.thread_id,
-        });
+        };
+        if (e.model !== undefined) event.model = e.model;
+        if (e.tools !== undefined) event.tools = e.tools;
+        out.push(event);
         return out;
+      }
 
       case "turn.started":
+        // Record wall-clock time for duration estimation. Unlike Claude/Amp
+        // which use API-reported duration_ms, Codex does not expose turn
+        // latency — this is mapper-local and sufficient for TUI display.
+        turnStartedAt = ts;
         return out;
 
       case "turn.completed": {
+        const durationMs = turnStartedAt !== undefined ? ts - turnStartedAt : undefined;
+        turnStartedAt = undefined;
         out.push({
           kind: "result",
           agent,
           ts,
           isError: false,
           subtype: "turn.completed",
+          durationMs,
+          costUsd: estimateCostUsd(e.usage),
         });
         return out;
       }
 
       case "turn.failed": {
         const message = errorMessage(e.error);
+        const durationMs = turnStartedAt !== undefined ? ts - turnStartedAt : undefined;
+        turnStartedAt = undefined;
         out.push({ kind: "error", agent, ts, message });
         out.push({
           kind: "result",
@@ -253,6 +278,8 @@ export function createCodexMapper(agent: AgentId = AGENT): EventMapper {
           isError: true,
           subtype: "turn.failed",
           text: message,
+          durationMs,
+          costUsd: estimateCostUsd(e.usage),
         });
         return out;
       }
@@ -279,6 +306,39 @@ export function createCodexMapper(agent: AgentId = AGENT): EventMapper {
         return out;
     }
   };
+}
+
+/**
+ * Estimate USD cost from Codex usage tokens.
+ *
+ * Codex reports token counts but not cost. We estimate using GPT-5.4-mini
+ * pricing as a reasonable baseline — actual cost varies by model, but this
+ * gives a useful ballpark for cost tracking and display.
+ *
+ * Pricing per million tokens (GPT-5.4-mini):
+ *  - input:  $0.30
+ *  - cached: $0.03  (90% discount)
+ *  - output: $1.20  (includes reasoning tokens — OpenAI bills reasoning
+ *            as output, so reasoning_output_tokens is a subset, not extra)
+ */
+function estimateCostUsd(
+  usage:
+    | {
+        input_tokens?: number;
+        cached_input_tokens?: number;
+        output_tokens?: number;
+        reasoning_output_tokens?: number;
+      }
+    | undefined,
+): number | undefined {
+  if (!usage) return undefined;
+  const input = usage.input_tokens ?? 0;
+  const cached = usage.cached_input_tokens ?? 0;
+  const output = usage.output_tokens ?? 0;
+  const total = input + cached + output;
+  if (total === 0) return undefined;
+  const uncached = Math.max(0, input - cached);
+  return (uncached * 0.3 + cached * 0.03 + output * 1.2) / 1_000_000;
 }
 
 /** Build argv for `codex exec --json` (shared by the adapter and tests). */

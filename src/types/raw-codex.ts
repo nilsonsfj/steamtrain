@@ -43,6 +43,8 @@ export const codexEvent = z
   .object({
     type: z.string(),
     thread_id: z.string().optional(),
+    model: z.string().optional(),
+    tools: z.array(z.string()).optional(),
     item: codexThreadItem.optional(),
     usage: codexUsage.optional(),
     error: z
