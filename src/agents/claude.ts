@@ -223,7 +223,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       binary: this.binary,
       args,
       opts,
-      map: createClaudeMapper(this.id),
+      map: createClaudeMapper(opts.agentId ?? this.id),
       prompt: opts.prompt,
     });
   }

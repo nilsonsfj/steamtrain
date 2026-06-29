@@ -348,7 +348,7 @@ async function handle(
       agents: buildAgentMeta(
         cfg,
         (agent) => (deps.doctor?.() ?? []).some((d) => d.agent === agent && d.status === "ok"),
-        { includeDisabled: true },
+        { includeDisabled: true, includeConfig: true },
       ),
     });
     return;
@@ -412,7 +412,7 @@ async function handle(
       agents: buildAgentMeta(
         deps.config,
         (agent) => (deps.doctor?.() ?? []).some((d) => d.agent === agent && d.status === "ok"),
-        { includeDisabled: true },
+        { includeDisabled: true, includeConfig: true },
       ),
     });
     return;

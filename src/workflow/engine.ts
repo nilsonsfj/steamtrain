@@ -769,6 +769,7 @@ function adapterRun(
     cwd: stepCwd,
     env: { ...instance.env, ...step.env },
     extraArgs: [...(instance.extraArgs ?? []), ...(step.extraArgs ?? [])],
+    agentId: instance.id,
     timeoutMs: timeoutMsFromSec(timeoutSec),
     signal: ctx.signal,
   });

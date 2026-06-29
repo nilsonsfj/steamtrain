@@ -195,6 +195,10 @@ export const agentCommand: SlashCommand = {
   },
   complete(args, ctx) {
     const enabledIds = resolveAgentInstances(ctx.config).map((agent) => agent.id);
+    if ((args[0] === "enable" || args[0] === "disable") && args.length === 2) {
+      return resolveAgentInstances(ctx.config, { includeDisabled: true }).map((agent) => agent.id);
+    }
+    if (args[0] === "add" && args.length === 3) return AGENT_IDS;
     if (hasWorkflowStepTarget(ctx)) {
       if (args.length > 1) return [];
       return completeWorkflowAgentArgs(ctx);
@@ -203,10 +207,6 @@ export const agentCommand: SlashCommand = {
     if (!ctx.workspaceMap.get(ctx.mode)) return [];
     if (args.length > 1) return [];
     if (args.length === 1) return ["list", "enable", "disable", "add", ...enabledIds];
-    if ((args[0] === "enable" || args[0] === "disable") && args.length === 2) {
-      return resolveAgentInstances(ctx.config, { includeDisabled: true }).map((agent) => agent.id);
-    }
-    if (args[0] === "add" && args.length === 3) return AGENT_IDS;
     return enabledIds;
   },
 };

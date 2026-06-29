@@ -373,7 +373,7 @@ export class CodexAdapter implements AgentAdapter {
       binary: this.binary,
       args: buildCodexExecArgs(opts),
       opts,
-      map: createCodexMapper(this.id),
+      map: createCodexMapper(opts.agentId ?? this.id),
       prompt: opts.prompt,
     });
   }

@@ -247,7 +247,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       binary: this.binary,
       args,
       opts,
-      map: createOpenCodeMapper(this.id),
+      map: createOpenCodeMapper(opts.agentId ?? this.id),
       prompt: opts.prompt,
     });
   }

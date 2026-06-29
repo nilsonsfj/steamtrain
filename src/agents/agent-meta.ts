@@ -18,7 +18,7 @@ export interface AgentMeta {
   defaultModel: string;
   healthy: boolean;
   enabled: boolean;
-  binary: string;
+  binary?: string;
   env?: Record<string, string>;
   extraArgs?: string[];
 }
@@ -43,14 +43,13 @@ export function defaultDraftModel(agent: AgentId, config?: SteamtrainConfig): st
 
 /**
  * The agent → models → efforts → default → health view-model that both UIs use
- * to populate agent/model/effort pickers. `isHealthy` supplies live doctor
- * health so callers don't reach into the orchestrator themselves. This is the
- * one place the picker shape is defined; `/api/meta` returns it verbatim.
+ * to populate agent/model/effort pickers. Full config-only fields are included
+ * only when requested by config surfaces.
  */
 export function buildAgentMeta(
   config: SteamtrainConfig,
   isHealthy: (agent: AgentId) => boolean,
-  options: { includeDisabled?: boolean } = {},
+  options: { includeDisabled?: boolean; includeConfig?: boolean } = {},
 ): AgentMeta[] {
   return resolveAgentInstances(config, options).map((agent) => ({
     id: agent.id,
@@ -64,8 +63,8 @@ export function buildAgentMeta(
     defaultModel: defaultDraftModel(agent.id, config),
     healthy: isHealthy(agent.id),
     enabled: agent.enabled,
-    binary: agent.binary,
-    env: agent.env,
-    extraArgs: agent.extraArgs,
+    ...(options.includeConfig
+      ? { binary: agent.binary, env: agent.env, extraArgs: agent.extraArgs }
+      : {}),
   }));
 }

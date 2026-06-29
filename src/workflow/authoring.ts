@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
-import { type AgentAdapter, createAdapter } from "../agents";
+import { type AgentAdapter, createAdapter, resolveAgentInstance } from "../agents";
 import { type AgentMeta, buildAgentMeta, defaultDraftModel } from "../agents/agent-meta";
-import { AGENT_IDS } from "../agents/models";
 import { type SteamtrainConfig, projectConfigPath } from "../config";
 import {
   deleteProjectWorkflow,
@@ -139,7 +138,9 @@ export class WorkflowAuthor {
     signal?: AbortSignal,
     onAttemptStart?: (attempt: number) => void,
   ): Promise<AuthorWriteResult> {
-    if (!isKnownAgent(req.agent)) return { ok: false, error: `unknown agent '${req.agent}'` };
+    if (!resolveAgentInstance(this.config, req.agent)) {
+      return { ok: false, error: `unknown or disabled agent '${req.agent}'` };
+    }
     if (!req.description.trim()) return { ok: false, error: "a description is required" };
     if (!this.host.isAgentHealthy(req.agent)) {
       return { ok: false, error: `${req.agent} is not available (check agent health)` };
@@ -392,8 +393,4 @@ export class WorkflowAuthor {
     const catalog = loadWorkflowCatalog({ home: this.home, projectWorkflows });
     this.host.setCatalog(catalog);
   }
-}
-
-function isKnownAgent(agent: string): agent is AgentId {
-  return (AGENT_IDS as readonly string[]).includes(agent);
 }

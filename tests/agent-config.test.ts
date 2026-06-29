@@ -10,7 +10,12 @@ import type { SteamtrainConfig } from "../src/config";
 import { runDoctor } from "../src/doctor";
 import { Orchestrator } from "../src/orchestrator";
 import type { AgentProviderId } from "../src/types/events";
-import { type WorkflowSpec, runWorkflow } from "../src/workflow";
+import {
+  type LoadedWorkflowCatalog,
+  WorkflowAuthor,
+  type WorkflowSpec,
+  runWorkflow,
+} from "../src/workflow";
 import type { WorkspaceConfig } from "../src/workspace";
 
 const customConfig: SteamtrainConfig = {
@@ -36,13 +41,14 @@ function fakeAdapter(provider: AgentProviderId, binary?: string): AgentAdapter {
     async *run(opts) {
       yield {
         kind: "result",
-        agent: provider,
+        agent: opts.agentId ?? provider,
         ts: Date.now(),
         isError: false,
         text: JSON.stringify({
           binary,
           env: opts.env,
           extraArgs: opts.extraArgs,
+          agentId: opts.agentId,
           model: opts.model,
         }),
       };
@@ -72,6 +78,7 @@ describe("agent configuration", () => {
   it("builds metadata for custom instances from their provider catalog", () => {
     const meta = buildAgentMeta(customConfig, (agent) => agent === "opencode-fork", {
       includeDisabled: true,
+      includeConfig: true,
     });
     const fork = meta.find((agent) => agent.id === "opencode-fork");
     expect(fork).toMatchObject({
@@ -83,6 +90,14 @@ describe("agent configuration", () => {
     });
     expect(fork?.models.some((model) => model.id === "opencode/mimo-v2.5-free")).toBe(true);
     expect(defaultDraftModel("opencode-fork", customConfig)).toBe("opencode/mimo-v2.5-free");
+  });
+
+  it("keeps config-only fields out of normal metadata", () => {
+    const meta = buildAgentMeta(customConfig, () => false);
+    const fork = meta.find((agent) => agent.id === "opencode-fork");
+    expect(fork).not.toHaveProperty("binary");
+    expect(fork).not.toHaveProperty("env");
+    expect(fork).not.toHaveProperty("extraArgs");
   });
 
   it("runs doctor only for enabled configured instances", async () => {
@@ -150,6 +165,7 @@ describe("agent configuration", () => {
       ],
     };
     const done = [];
+    const stepEvents = [];
     for await (const event of runWorkflow(
       spec,
       { input: "x" },
@@ -161,8 +177,10 @@ describe("agent configuration", () => {
       },
     )) {
       if (event.kind === "step_done") done.push(event.result);
+      if (event.kind === "step_event") stepEvents.push(event.event);
     }
 
+    expect(stepEvents[0]?.agent).toBe("opencode-fork");
     expect(done).toHaveLength(1);
     expect(JSON.parse(done[0]!.output)).toMatchObject({
       binary: "opencode-fork",
@@ -180,5 +198,61 @@ describe("agent configuration", () => {
     expect(resolveAgentInstance(customConfig, "claude", { includeDisabled: true })?.enabled).toBe(
       false,
     );
+  });
+
+  it("allows workflow authoring with a configured instance id", async () => {
+    let catalog: LoadedWorkflowCatalog = { workflows: {}, sources: {} };
+    const host = {
+      listWorkflows: () => catalog.workflows,
+      workflowSource: () => undefined,
+      isAgentHealthy: (agent: string) => agent === "opencode-fork",
+      setCatalog: (next: LoadedWorkflowCatalog) => {
+        catalog = next;
+      },
+    };
+    const author = new WorkflowAuthor({
+      host,
+      config: customConfig,
+      home: "/tmp",
+      cwd: "/tmp",
+      createAdapter: () => ({
+        id: "opencode",
+        binary: "fake",
+        async *run(opts) {
+          expect(opts.agentId).toBe("opencode-fork");
+          yield {
+            kind: "result",
+            agent: opts.agentId ?? "opencode",
+            ts: Date.now(),
+            isError: false,
+            text: JSON.stringify({
+              name: "generated",
+              phases: [
+                {
+                  id: "p1",
+                  title: "P1",
+                  steps: [
+                    {
+                      id: "s1",
+                      agent: "opencode-fork",
+                      model: opts.model,
+                      prompt: "{{input}}",
+                    },
+                  ],
+                },
+              ],
+            }),
+          };
+        },
+      }),
+    });
+
+    const result = await author.generate({
+      description: "make a workflow",
+      agent: "opencode-fork",
+      model: "opencode/mimo-v2.5-free",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.spec?.phases[0]?.steps[0]).toMatchObject({ agent: "opencode-fork" });
   });
 });

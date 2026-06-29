@@ -78,6 +78,7 @@
       (S.projectConfig.agents || []).forEach(function (a) {
         var enabled = h("input", { type: "checkbox", checked: a.enabled !== false });
         var id = h("input", { class: "txt", value: a.id || "" });
+        var label = h("input", { class: "txt", placeholder: "optional display label", value: a.label || "" });
         var provider = selectEl([
           { value: "claude", label: "claude" },
           { value: "opencode", label: "opencode" },
@@ -87,17 +88,19 @@
         var binary = h("input", { class: "txt", placeholder: "default binary", value: a.binary || "" });
         var env = h("textarea", { class: "ta mini", placeholder: "env JSON", rows: "2" });
         env.value = a.env ? JSON.stringify(a.env) : "";
-        var extraArgs = h("input", { class: "txt", placeholder: "--flag value", value: (a.extraArgs || []).join(" ") });
+        var extraArgs = h("textarea", { class: "ta mini", placeholder: "[]", rows: "2" });
+        extraArgs.value = JSON.stringify(a.extraArgs || []);
         var defaultModel = h("input", { class: "txt", placeholder: "default model", value: a.defaultModel || "" });
-        var row = { enabled: enabled, id: id, provider: provider, binary: binary, env: env, extraArgs: extraArgs, defaultModel: defaultModel };
+        var row = { enabled: enabled, id: id, label: label, provider: provider, binary: binary, env: env, extraArgs: extraArgs, defaultModel: defaultModel };
         agentRows.push(row);
         agentList.appendChild(h("div", { class: "agentrow" },
           h("label", null, enabled, h("span", { text: " enabled" })),
           field("ID", id),
+          field("Label", label),
           field("Provider", provider),
           field("Binary", binary),
           field("Env", env, "JSON object, merged into process env."),
-          field("Extra args", extraArgs, "Space-separated flags appended before the prompt."),
+          field("Extra args", extraArgs, "JSON array of flags appended before the prompt."),
           field("Default model", defaultModel)
         ));
       });
@@ -177,11 +180,19 @@
         env = JSON.parse(envText);
         if (!env || Array.isArray(env) || typeof env !== "object") throw new Error("env for " + id + " must be a JSON object");
       }
-      var args = row.extraArgs.value.trim() ? row.extraArgs.value.trim().split(/\s+/) : undefined;
+      var argsText = row.extraArgs.value.trim();
+      var args;
+      if (argsText) {
+        args = JSON.parse(argsText);
+        if (!Array.isArray(args) || args.some(function (arg) { return typeof arg !== "string"; })) {
+          throw new Error("extra args for " + id + " must be a JSON string array");
+        }
+      }
       return {
         id: id,
         provider: row.provider.value,
         enabled: row.enabled.checked,
+        label: row.label.value.trim() || undefined,
         binary: row.binary.value.trim() || undefined,
         env: env,
         extraArgs: args,
@@ -599,6 +610,13 @@
       return { value: a.id, label: label + (a.healthy ? "" : " (unavailable)") };
     });
   }
+  function agentOptionsWith(current) {
+    var opts = agentOptions();
+    if (current && !opts.some(function (o) { return o.value === current; })) {
+      opts = [{ value: current, label: current + " (current unavailable)" }].concat(opts);
+    }
+    return opts;
+  }
   function scopeOptions() {
     return [
       { value: "user", label: "Personal (~/.steamtrain/workflows.json)" },
@@ -875,7 +893,7 @@
       return card;
     }
     var agent = st.agent || preferredAgent().id;
-    var agentSel = selectEl(agentOptions(), agent);
+    var agentSel = selectEl(agentOptionsWith(agent), agent);
     var modelSel = selectEl(modelOptionsWith(agent, st.model), st.model);
     var effortField = h("div", { class: "field" });
     var stepTimeoutInput = h("input", {

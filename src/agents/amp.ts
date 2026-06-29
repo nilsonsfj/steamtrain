@@ -176,7 +176,7 @@ export class AmpAdapter implements AgentAdapter {
       binary: this.binary,
       args,
       opts,
-      map: createAmpMapper(this.id),
+      map: createAmpMapper(opts.agentId ?? this.id),
       prompt: opts.prompt,
     });
   }

@@ -124,6 +124,7 @@ export class Orchestrator {
       cwd: process.cwd(),
       env: instance.env,
       extraArgs: instance.extraArgs,
+      agentId: instance.id,
       timeoutMs: timeoutMsFromSec(resolveStepTimeoutSec(undefined, undefined, this.config)),
       signal,
     });

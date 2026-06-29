@@ -359,6 +359,7 @@ async function runGenerationAgent(
       cwd: deps.cwd,
       env: instance.env,
       extraArgs: instance.extraArgs,
+      agentId: instance.id,
       timeoutMs: timeoutMsFromSec(deps.stepTimeoutSec ?? DEFAULT_STEP_TIMEOUT_SEC),
       signal: req.signal,
     })) {

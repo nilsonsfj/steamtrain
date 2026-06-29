@@ -14,6 +14,8 @@ export interface AgentRunOptions {
   env?: Record<string, string>;
   /** Extra CLI flags appended to the agent's own args, before the prompt. */
   extraArgs?: string[];
+  /** Configured instance id to stamp on normalized events. Defaults to provider id. */
+  agentId?: AgentId;
 }
 
 /**
@@ -43,7 +45,8 @@ export interface AgentProcessParams {
  * output, timeout) into `error` events. Adapters differ only in args + mapper.
  */
 export async function* runAgentProcess(params: AgentProcessParams): AsyncGenerator<AgentEvent> {
-  const { id, binary, args, opts, map, prompt } = params;
+  const { binary, args, opts, map, prompt } = params;
+  const id = opts.agentId ?? params.id;
   let lineCount = 0;
   let sawError = false;
 
