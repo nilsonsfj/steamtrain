@@ -716,6 +716,11 @@ describe("web server", () => {
     reader.cancel();
     // The run should have settled (canceled or error due to abort)
     const run = runs.get(runId);
-    expect(run?.settled ?? true).toBe(true);
+    expect(
+      run?.status === "canceled" ||
+        run?.status === "error" ||
+        run?.status === "done" ||
+        run === undefined,
+    ).toBe(true);
   });
 });
