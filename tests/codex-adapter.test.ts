@@ -263,8 +263,10 @@ describe("codex mapper (stateful, one mapper per run)", () => {
         costUsd: expect.any(Number),
       }),
     ]);
+    // SAMPLES.turnCompleted: input=8497, cached=8448, output=51
+    // uncached=49*$0.30/M + cached=8448*$0.03/M + output=51*$1.20/M
     const cost = (result[0] as { costUsd: number }).costUsd;
-    expect(cost).toBeGreaterThan(0);
+    expect(cost).toBeCloseTo(0.00032934, 8);
   });
 
   it("omits costUsd when usage is absent", () => {

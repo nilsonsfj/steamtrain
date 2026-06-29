@@ -244,6 +244,9 @@ export function createCodexMapper(agent: AgentId = AGENT): EventMapper {
       }
 
       case "turn.started":
+        // Record wall-clock time for duration estimation. Unlike Claude/Amp
+        // which use API-reported duration_ms, Codex does not expose turn
+        // latency — this is mapper-local and sufficient for TUI display.
         turnStartedAt = ts;
         return out;
 
