@@ -11,4 +11,4 @@
   - Headless CLI: `bun src/index.tsx workflow list|validate|run ...` (or `node dist/index.js ...` after `npm run build`).
 - **Agent CLIs are NOT installed here.** Workflow steps of kind `worker`/`processor` (and `workflow create`) spawn an external agent CLI (`claude`/`opencode`/`codex`/`amp`) that must be installed and authenticated; without one, the doctor preflight aborts the run with `binary_missing`. This is expected, not an environment failure.
 - **To exercise the engine end-to-end without any agent**, use an "agentless" workflow whose steps are only `distributor`/`consolidator`/`gate`. Define it in a `steamtrain.json` and run via `--config-file <path>`; the doctor preflight is skipped when a workflow spawns no agents.
-- **Known pre-existing issues on the current checkout** (not caused by env setup, do not block setup): `npm run lint` (Biome) reports a formatting error, `npm run typecheck` reports several type errors, and one test - `tests/web-server.test.ts > rejects oversized payloads with 413` - times out. The remaining 629 tests pass.
+- **All checks pass on `main`**: `npm run lint`, `npm run typecheck`, and `npm run test` (643 tests) are green.
