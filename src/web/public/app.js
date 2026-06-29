@@ -22,6 +22,7 @@
         if (k === "class") e.className = attrs[k];
         else if (k === "text") e.textContent = attrs[k];
         else if (k.indexOf("on") === 0) e.addEventListener(k.slice(2).toLowerCase(), attrs[k]);
+        else if (typeof attrs[k] === "boolean" && k in e) e[k] = attrs[k];
         else if (attrs[k] != null) e.setAttribute(k, attrs[k]);
       }
     }
