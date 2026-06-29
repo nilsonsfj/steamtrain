@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AgentId, AgentProviderId } from "../types/events";
+import type { AgentInstanceId, AgentProviderId } from "../types/events";
 import {
   LOOP_MAX_ITERATIONS_CEILING,
   MAX_CONCURRENCY,
@@ -26,7 +26,7 @@ export interface SteamtrainConfig {
 
 export interface AgentInstanceConfig {
   /** Instance id referenced by workspaces and workflow steps. */
-  id: AgentId;
+  id: AgentInstanceId;
   /** Adapter/model provider this instance uses. */
   provider: AgentProviderId;
   /** Defaults to true. Disabled instances are hidden outside config surfaces. */
@@ -107,3 +107,16 @@ export const configFileSchema = z
   .strict();
 
 export type ConfigFile = z.infer<typeof configFileSchema>;
+
+/** Validate an agents array from API/CLI input before merging into project config. */
+export function parseAgentsConfig(agents: unknown): AgentInstanceConfig[] {
+  const parsed = configFileSchema.partial().safeParse({ agents });
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const detail = issue
+      ? `${issue.path.join(".") || "agents"}: ${issue.message}`
+      : "invalid agents";
+    throw new Error(detail);
+  }
+  return parsed.data.agents ?? [];
+}

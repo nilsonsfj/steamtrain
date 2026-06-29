@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentId, EventMapper } from "../types/events";
+import type { AgentEvent, AgentId, AgentInstanceId, EventMapper } from "../types/events";
 import {
   type ClaudeAssistant,
   claudeAssistant,
@@ -64,7 +64,7 @@ export const CLAUDE_MODELS: readonly AgentModel[] = [
  *
  * Stateless across lines, so it is also a pure function over each raw line.
  */
-export function createClaudeMapper(agent: AgentId = AGENT): EventMapper {
+export function createClaudeMapper(agent: AgentInstanceId = AGENT): EventMapper {
   return (raw: unknown): AgentEvent[] => {
     const ts = Date.now();
     const env = claudeEnvelope.safeParse(raw);

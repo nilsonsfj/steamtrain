@@ -1,7 +1,7 @@
 import { Box, Text } from "ink";
 import { useEffect, useState } from "react";
 import { truncate } from "../agents/util";
-import type { AgentId } from "../types/events";
+import type { AgentInstanceId } from "../types/events";
 import type { WorkflowSpec } from "../workflow";
 import { AGENT_COLOR } from "./theme";
 import { SPINNER_FRAMES, useWorkIndicator } from "./useWorkIndicator";
@@ -10,7 +10,7 @@ import { blockSummary } from "./workflow-spec-ui";
 export interface WorkflowCreateState {
   status: "generating" | "done" | "error";
   description: string;
-  agent: AgentId;
+  agent: AgentInstanceId;
   model: string;
   /** Streamed model output (tail shown live). */
   text: string;

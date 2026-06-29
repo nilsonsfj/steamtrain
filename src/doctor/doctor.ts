@@ -4,13 +4,13 @@ import { delimiter, isAbsolute, join } from "node:path";
 import { DEFAULT_AGENT_BINARY, resolveAgentInstances } from "../agents/config";
 import { firstLine } from "../agents/util";
 import type { SteamtrainConfig } from "../config/types";
-import type { AgentId, AgentProviderId } from "../types/events";
+import type { AgentInstanceId, AgentProviderId } from "../types/events";
 
 export type DoctorStatus = "ok" | "binary_missing" | "not_authenticated" | "unknown_error";
 
 export interface DoctorResult {
-  agent: AgentId;
-  provider?: AgentProviderId;
+  agent: AgentInstanceId;
+  provider: AgentProviderId;
   label?: string;
   status: DoctorStatus;
   binary: string;
@@ -107,11 +107,11 @@ function runVersion(binaryPath: string, env?: Record<string, string>): Promise<V
 
 /** Check one agent: resolve its binary, run `--version`, classify readiness. */
 export async function checkAgent(
-  agent: AgentId,
+  agent: AgentInstanceId,
   binary: string,
-  options: { provider?: AgentProviderId; label?: string; env?: Record<string, string> } = {},
+  options: { provider: AgentProviderId; label?: string; env?: Record<string, string> },
 ): Promise<DoctorResult> {
-  const provider = options.provider ?? (agent as AgentProviderId);
+  const provider = options.provider;
   const binaryPath = await resolveBinary(binary);
   if (!binaryPath) {
     return {

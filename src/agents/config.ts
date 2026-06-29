@@ -1,5 +1,5 @@
 import type { AgentInstanceConfig, SteamtrainConfig } from "../config/types";
-import type { AgentId, AgentProviderId } from "../types/events";
+import type { AgentId, AgentInstanceId, AgentProviderId } from "../types/events";
 
 const AGENT_PROVIDER_IDS: readonly AgentProviderId[] = ["claude", "opencode", "codex", "amp"];
 
@@ -11,7 +11,7 @@ export const DEFAULT_AGENT_BINARY: Record<AgentProviderId, string> = {
 };
 
 export interface ResolvedAgentInstance {
-  id: AgentId;
+  id: AgentInstanceId;
   provider: AgentProviderId;
   label: string;
   enabled: boolean;
@@ -61,7 +61,7 @@ export function resolveAgentInstances(
   config?: SteamtrainConfig,
   options: ResolveAgentOptions = {},
 ): ResolvedAgentInstance[] {
-  const byId = new Map<AgentId, ResolvedAgentInstance>();
+  const byId = new Map<AgentInstanceId, ResolvedAgentInstance>();
   for (const provider of AGENT_PROVIDER_IDS)
     byId.set(provider, defaultAgentInstance(provider, config));
 
@@ -85,23 +85,8 @@ export function resolveAgentInstances(
 
 export function resolveAgentInstance(
   config: SteamtrainConfig | undefined,
-  id: AgentId,
+  id: AgentInstanceId,
   options: ResolveAgentOptions = {},
 ): ResolvedAgentInstance | undefined {
   return resolveAgentInstances(config, options).find((agent) => agent.id === id);
-}
-
-export function serializeAgentInstancesForConfig(
-  agents: readonly AgentInstanceConfig[],
-): AgentInstanceConfig[] {
-  return agents.map((agent) => ({
-    id: agent.id,
-    provider: agent.provider,
-    ...(agent.label ? { label: agent.label } : {}),
-    ...(agent.enabled === false ? { enabled: false } : { enabled: true }),
-    ...(agent.binary ? { binary: agent.binary } : {}),
-    ...(agent.env ? { env: agent.env } : {}),
-    ...(agent.extraArgs ? { extraArgs: agent.extraArgs } : {}),
-    ...(agent.defaultModel ? { defaultModel: agent.defaultModel } : {}),
-  }));
 }

@@ -1,7 +1,7 @@
 import type { ProjectConfigPatch } from "../config/project-config";
 import type { SteamtrainConfig } from "../config/types";
 import type { Mode } from "../tui/modes";
-import type { AgentId } from "../types/events";
+import type { AgentInstanceId } from "../types/events";
 import type { WorkflowScope, WorkflowSpec } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 
@@ -9,7 +9,7 @@ import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace"
 export interface WorkflowStepSelection {
   workflowName: string;
   stepId: string;
-  agent: AgentId;
+  agent: AgentInstanceId;
   model: string;
   effort?: string;
   stepTimeoutSec?: number;
@@ -79,15 +79,15 @@ export interface SlashCommandContext {
 /** The drafting-model knob `/model` drives when no workflow step is selected. */
 export interface DraftModelContext {
   /** Effective target (override if usable, else the auto pick); absent when no agent is healthy. */
-  current?: { agent: AgentId; model: string };
+  current?: { agent: AgentInstanceId; model: string };
   /** True when `current` comes from a user override rather than the auto pick. */
   usingOverride: boolean;
   /** Agents the doctor reports healthy, used to validate a requested target. */
-  healthyAgents: readonly AgentId[];
+  healthyAgents: readonly AgentInstanceId[];
   /** Live config used to map agent instances to provider model catalogs. */
   config?: SteamtrainConfig;
   /** Apply a new override, or `null` to reset to auto. */
-  set: (target: { agent: AgentId; model: string } | null) => void;
+  set: (target: { agent: AgentInstanceId; model: string } | null) => void;
 }
 
 export interface SlashCommand {

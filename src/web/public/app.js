@@ -84,7 +84,7 @@
           { value: "opencode", label: "opencode" },
           { value: "codex", label: "codex" },
           { value: "amp", label: "amp" }
-        ], a.provider || "opencode");
+        ], a.provider || "claude");
         var binary = h("input", { class: "txt", placeholder: "default binary", value: a.binary || "" });
         var env = h("textarea", { class: "ta mini", placeholder: "env JSON", rows: "2" });
         env.value = a.env ? JSON.stringify(a.env) : "";
@@ -107,10 +107,10 @@
     }
     function addAgentRow() {
       S.projectConfig.agents = (S.projectConfig.agents || []).concat([{
-        id: "opencode-fork",
-        provider: "opencode",
+        id: "claude-fork",
+        provider: "claude",
         enabled: true,
-        binary: "opencode"
+        binary: "claude"
       }]);
       renderAgentConfigRows();
     }

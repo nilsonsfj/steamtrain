@@ -1,6 +1,6 @@
 import type { SteamtrainConfig } from "../config/types";
 import type { DoctorResult } from "../doctor";
-import type { AgentId, AgentProviderId } from "../types/events";
+import type { AgentInstanceId, AgentProviderId } from "../types/events";
 import { type AgentModel, formatModelOption } from "./agent-model";
 import { AMP_MODELS } from "./amp";
 import { CLAUDE_MODELS } from "./claude";
@@ -31,7 +31,7 @@ export const isAgentId = isAgentProviderId;
 
 export function agentProviderFor(
   config: SteamtrainConfig | undefined,
-  agent: AgentId,
+  agent: AgentInstanceId,
 ): AgentProviderId | undefined {
   return resolveAgentInstance(config, agent, { includeDisabled: true })?.provider;
 }
@@ -71,19 +71,25 @@ export function modelsForProvider(provider: AgentProviderId): readonly AgentMode
 }
 
 /** Model catalog for a configured agent instance (id + human-readable name). */
-export function modelsForAgent(agent: AgentId, config?: SteamtrainConfig): readonly AgentModel[] {
+export function modelsForAgent(
+  agent: AgentInstanceId,
+  config?: SteamtrainConfig,
+): readonly AgentModel[] {
   const provider = agentProviderFor(config, agent);
   return provider ? modelsForProvider(provider) : [];
 }
 
 /** Model ids for an agent (used by autocomplete and validation). */
-export function modelIdsForAgent(agent: AgentId, config?: SteamtrainConfig): readonly string[] {
+export function modelIdsForAgent(
+  agent: AgentInstanceId,
+  config?: SteamtrainConfig,
+): readonly string[] {
   return modelsForAgent(agent, config).map((model) => model.id);
 }
 
 /** Human-readable name for a model id, falling back to the id itself. */
 export function modelNameForAgent(
-  agent: AgentId,
+  agent: AgentInstanceId,
   modelId: string,
   config?: SteamtrainConfig,
 ): string {
@@ -96,7 +102,7 @@ export function modelNameForAgent(
 }
 
 /** Default model when switching to an agent without an explicit model. */
-export function defaultModelForAgent(agent: AgentId, config?: SteamtrainConfig): string {
+export function defaultModelForAgent(agent: AgentInstanceId, config?: SteamtrainConfig): string {
   const instance = resolveAgentInstance(config, agent, { includeDisabled: true });
   if (instance?.defaultModel) return instance.defaultModel;
   const provider = instance?.provider;
@@ -157,7 +163,7 @@ function ampEfforts(model: string): readonly string[] {
 
 /** Known effort / variant levels for a specific model (used by `/effort` and autocomplete). */
 export function effortsForModel(
-  agent: AgentId,
+  agent: AgentInstanceId,
   model: string,
   config?: SteamtrainConfig,
 ): readonly string[] {
@@ -177,13 +183,17 @@ export function effortsForModel(
 }
 
 /** Whether the model accepts an effort / variant override at all. */
-export function supportsEffort(agent: AgentId, model: string, config?: SteamtrainConfig): boolean {
+export function supportsEffort(
+  agent: AgentInstanceId,
+  model: string,
+  config?: SteamtrainConfig,
+): boolean {
   return effortsForModel(agent, model, config).length > 0;
 }
 
 /** Keep effort when switching models only if the new model supports it. */
 export function effortForModelChange(
-  agent: AgentId,
+  agent: AgentInstanceId,
   nextModel: string,
   currentEffort?: string,
   config?: SteamtrainConfig,
@@ -196,7 +206,7 @@ export function effortForModelChange(
 
 /** Human-readable model label, optionally with effort (no agent prefix). */
 export function formatModelDisplay(target: {
-  agent: AgentId;
+  agent: AgentInstanceId;
   model: string;
   effort?: string;
   config?: SteamtrainConfig;
@@ -208,7 +218,7 @@ export function formatModelDisplay(target: {
 
 /** Compact label for agent + model (+ optional effort). */
 export function formatAgentTarget(target: {
-  agent: AgentId;
+  agent: AgentInstanceId;
   model: string;
   effort?: string;
 }): string {
@@ -222,14 +232,14 @@ export async function refreshAgentCatalogCaches(
 ): Promise<boolean> {
   let refreshed = false;
 
-  const opencode = doctor.find((d) => (d.provider ?? d.agent) === "opencode" && d.status === "ok");
+  const opencode = doctor.find((d) => d.provider === "opencode" && d.status === "ok");
   if (opencode?.status === "ok") {
     const binary =
       resolveAgentInstance(config, opencode.agent)?.binary ?? opencode.binaryPath ?? "opencode";
     if (await refreshOpencodeVariantCache(binary)) refreshed = true;
   }
 
-  const codex = doctor.find((d) => (d.provider ?? d.agent) === "codex" && d.status === "ok");
+  const codex = doctor.find((d) => d.provider === "codex" && d.status === "ok");
   if (codex?.status === "ok") {
     const binary = resolveAgentInstance(config, codex.agent)?.binary ?? codex.binaryPath ?? "codex";
     if (await refreshCodexVariantCache(binary)) refreshed = true;

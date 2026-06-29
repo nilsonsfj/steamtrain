@@ -1,5 +1,5 @@
 import type { SteamtrainConfig } from "../config/types";
-import type { AgentId, AgentProviderId } from "../types/events";
+import type { AgentInstanceId, AgentProviderId } from "../types/events";
 import { resolveAgentInstances } from "./config";
 import { defaultModelForAgent, effortsForModel, modelsForAgent } from "./models";
 
@@ -11,7 +11,7 @@ export interface AgentModelMeta {
 }
 
 export interface AgentMeta {
-  id: AgentId;
+  id: AgentInstanceId;
   provider: AgentProviderId;
   label: string;
   models: AgentModelMeta[];
@@ -29,7 +29,7 @@ export interface AgentMeta {
  * normal default. Shared by the TUI's `/createworkflow` and the web create form
  * so both pick the same starting point.
  */
-export function defaultDraftModel(agent: AgentId, config?: SteamtrainConfig): string {
+export function defaultDraftModel(agent: AgentInstanceId, config?: SteamtrainConfig): string {
   const instance = resolveAgentInstances(config, { includeDisabled: true }).find(
     (a) => a.id === agent,
   );
@@ -48,7 +48,7 @@ export function defaultDraftModel(agent: AgentId, config?: SteamtrainConfig): st
  */
 export function buildAgentMeta(
   config: SteamtrainConfig,
-  isHealthy: (agent: AgentId) => boolean,
+  isHealthy: (agent: AgentInstanceId) => boolean,
   options: { includeDisabled?: boolean; includeConfig?: boolean } = {},
 ): AgentMeta[] {
   return resolveAgentInstances(config, options).map((agent) => ({

@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentId, EventMapper } from "../types/events";
+import type { AgentEvent, AgentId, AgentInstanceId, EventMapper } from "../types/events";
 import { type ProcessRunOptions, runProcessLines } from "./spawn";
 import { firstLine } from "./util";
 
@@ -15,7 +15,7 @@ export interface AgentRunOptions {
   /** Extra CLI flags appended to the agent's own args, before the prompt. */
   extraArgs?: string[];
   /** Configured instance id to stamp on normalized events. Defaults to provider id. */
-  agentId?: AgentId;
+  agentId?: AgentInstanceId;
 }
 
 /**

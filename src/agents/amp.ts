@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentId, EventMapper } from "../types/events";
+import type { AgentEvent, AgentId, AgentInstanceId, EventMapper } from "../types/events";
 import { ampAssistant, ampEnvelope, ampResult, ampSystemInit, ampUser } from "../types/raw-amp";
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
@@ -36,7 +36,7 @@ export const AMP_MODELS: readonly AgentModel[] = [
  *
  * Stateless across lines, so it is also a pure function over each raw line.
  */
-export function createAmpMapper(agent: AgentId = AGENT): EventMapper {
+export function createAmpMapper(agent: AgentInstanceId = AGENT): EventMapper {
   return (raw: unknown): AgentEvent[] => {
     const ts = Date.now();
     const env = ampEnvelope.safeParse(raw);

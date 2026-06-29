@@ -456,7 +456,15 @@ function makeServer(host: FakeHost, adapter?: (id: AgentId) => AgentAdapter): Se
     runs,
     author: makeAuthor(host, adapter),
     workflowSource: (name) => host.workflowSource(name),
-    doctor: () => [{ agent: "opencode", status: "ok", message: "ready" }] as never,
+    doctor: () => [
+      {
+        agent: "opencode",
+        provider: "opencode",
+        status: "ok",
+        binary: "opencode",
+        message: "ready",
+      },
+    ],
   });
   servers.push(server);
   return server;

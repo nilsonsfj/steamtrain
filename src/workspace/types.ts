@@ -1,6 +1,7 @@
 import { z } from "zod";
-import type { AgentId } from "../types/events";
+import type { AgentInstanceId } from "../types/events";
 
+/** Instance ids are validated at run time (resolveAgentInstance), not at parse time. */
 const agentId = z.string().min(1);
 
 /** Reserved for the built-in workflow mode; cannot be used as a workspace id. */

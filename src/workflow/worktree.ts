@@ -3,13 +3,13 @@ import { createHash, randomBytes } from "node:crypto";
 import { copyFile, lstat, mkdir, readlink, realpath, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import type { AgentId } from "../types/events";
+import type { AgentInstanceId } from "../types/events";
 import type { WorkflowItem } from "./types";
 
 export interface AgentWorkspaceRequest {
   workflowName: string;
   stepId: string;
-  agent: AgentId;
+  agent: AgentInstanceId;
   /** Original workflow cwd. */
   baseCwd: string;
   /** Resolved target cwd for this step in the original checkout. */

@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentId } from "../types/events";
+import type { AgentEvent, AgentInstanceId } from "../types/events";
 import type { WorkflowEvent } from "./events";
 import type { RunRecord } from "./history";
 import type { GateStep, StepResult, WorkflowItem, WorkflowSpec, WorkflowStepKind } from "./types";
@@ -8,7 +8,7 @@ export type StepStatus = "pending" | "running" | "done" | "error";
 export interface StepState {
   stepId: string;
   blockKind: WorkflowStepKind;
-  agent?: AgentId;
+  agent?: AgentInstanceId;
   model?: string;
   effort?: string;
   cwd?: string;

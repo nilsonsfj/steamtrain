@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentId } from "../types/events";
+import type { AgentEvent, AgentInstanceId } from "../types/events";
 import type { GateStep, StepResult, WorkflowItem, WorkflowStepKind } from "./types";
 
 /**
@@ -41,7 +41,7 @@ export interface StepStartEvent extends IterationTagged {
   phaseId: string;
   stepId: string;
   blockKind?: WorkflowStepKind;
-  agent?: AgentId;
+  agent?: AgentInstanceId;
   model?: string;
   effort?: string;
   cwd?: string;

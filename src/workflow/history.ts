@@ -1,4 +1,4 @@
-import type { AgentId } from "../types/events";
+import type { AgentInstanceId } from "../types/events";
 import type { WorkflowEvent } from "./events";
 import type {
   AgentWorktreeInfo,
@@ -24,7 +24,7 @@ export type RunStepStatus = "pending" | "running" | "done" | "error";
 export interface HistoryStep {
   stepId: string;
   blockKind: WorkflowStepKind;
-  agent?: AgentId;
+  agent?: AgentInstanceId;
   model?: string;
   effort?: string;
   cwd?: string;

@@ -1,7 +1,12 @@
-import { type AgentAdapter, createAdapter, resolveAgentInstance } from "../agents";
+import {
+  type AgentAdapter,
+  type ResolvedAgentInstance,
+  createAdapter,
+  resolveAgentInstance,
+} from "../agents";
 import { DEFAULT_CONFIG, type SteamtrainConfig } from "../config";
 import type { DoctorResult } from "../doctor";
-import type { AgentEvent, AgentId } from "../types/events";
+import type { AgentEvent, AgentInstanceId } from "../types/events";
 import {
   type LoadedWorkflowCatalog,
   type StepResult,
@@ -23,6 +28,7 @@ export interface ResolvedWorkspace {
   id: WorkspaceId;
   entry: WorkspaceEntry;
   adapter: AgentAdapter;
+  instance: ResolvedAgentInstance;
   health?: DoctorResult;
 }
 
@@ -68,11 +74,11 @@ export class Orchestrator {
   }
 
   /** Whether an agent is currently doctor-healthy (used to gate authoring). */
-  isAgentHealthy(agent: AgentId): boolean {
+  isAgentHealthy(agent: AgentInstanceId): boolean {
     return this.doctor.find((d) => d.agent === agent)?.status === "ok";
   }
 
-  private agentHealth(agent: AgentId): DoctorResult | undefined {
+  private agentHealth(agent: AgentInstanceId): DoctorResult | undefined {
     return this.doctor.find((d) => d.agent === agent);
   }
 
@@ -83,7 +89,7 @@ export class Orchestrator {
     if (!instance) throw new Error(`agent '${entry.agent}' is disabled or not configured`);
     const adapter = createAdapter(instance.provider, instance.binary);
     const health = this.agentHealth(entry.agent);
-    return { id, entry, adapter, health };
+    return { id, entry, adapter, instance, health };
   }
 
   /** Whether a workspace may be dispatched given current agent health. */
@@ -113,9 +119,7 @@ export class Orchestrator {
   run(id: WorkspaceId, prompt: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
     const dispatchCheck = this.canDispatch(id);
     if (!dispatchCheck.ok) throw new Error(dispatchCheck.reason);
-    const { adapter, entry } = this.resolve(id);
-    const instance = resolveAgentInstance(this.config, entry.agent);
-    if (!instance) throw new Error(`agent '${entry.agent}' is disabled or not configured`);
+    const { adapter, entry, instance } = this.resolve(id);
     if (!entry.model) throw new Error(`workspace '${id}' has no model configured`);
     return adapter.run({
       prompt,

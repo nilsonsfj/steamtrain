@@ -8,11 +8,16 @@ import {
   parseDraftModelRequest,
   resolveDraftTarget,
 } from "../src/tui/draft-model";
-import type { AgentId } from "../src/types/events";
+import type { AgentInstanceId } from "../src/types/events";
 
-function doctor(statuses: Partial<Record<AgentId, DoctorResult["status"]>>): DoctorResult[] {
-  return (Object.keys(statuses) as AgentId[]).map((agent) => ({
+function doctor(
+  statuses: Partial<Record<AgentInstanceId, DoctorResult["status"]>>,
+): DoctorResult[] {
+  return (Object.keys(statuses) as AgentInstanceId[]).map((agent) => ({
     agent,
+    provider: (["claude", "opencode", "codex", "amp"].includes(agent)
+      ? agent
+      : "opencode") as DoctorResult["provider"],
     status: statuses[agent]!,
     binary: agent,
     message: "",
@@ -20,7 +25,7 @@ function doctor(statuses: Partial<Record<AgentId, DoctorResult["status"]>>): Doc
 }
 
 /** A real model id for an agent, so tests don't hard-code catalog specifics. */
-function aModelFor(agent: AgentId): string {
+function aModelFor(agent: AgentInstanceId): string {
   const id = modelIdsForAgent(agent)[0];
   if (!id) throw new Error(`no models for ${agent}`);
   return id;
@@ -39,13 +44,13 @@ describe("healthyAgentSet", () => {
 
 describe("autoDraftTarget", () => {
   it("prefers opencode when healthy", () => {
-    const t = autoDraftTarget(new Set<AgentId>(["opencode", "claude"]));
+    const t = autoDraftTarget(new Set<AgentInstanceId>(["opencode", "claude"]));
     expect(t).toEqual({ agent: "opencode", model: defaultDraftModel("opencode") });
   });
 
   it("falls back to claude, then codex, in order", () => {
-    expect(autoDraftTarget(new Set<AgentId>(["claude", "codex"]))?.agent).toBe("claude");
-    expect(autoDraftTarget(new Set<AgentId>(["codex"]))?.agent).toBe("codex");
+    expect(autoDraftTarget(new Set<AgentInstanceId>(["claude", "codex"]))?.agent).toBe("claude");
+    expect(autoDraftTarget(new Set<AgentInstanceId>(["codex"]))?.agent).toBe("codex");
   });
 
   it("returns undefined when nothing is healthy", () => {
@@ -56,7 +61,7 @@ describe("autoDraftTarget", () => {
 describe("resolveDraftTarget", () => {
   it("uses a valid, healthy override", () => {
     const model = aModelFor("claude");
-    const res = resolveDraftTarget(new Set<AgentId>(["opencode", "claude"]), {
+    const res = resolveDraftTarget(new Set<AgentInstanceId>(["opencode", "claude"]), {
       agent: "claude",
       model,
     });
@@ -64,7 +69,7 @@ describe("resolveDraftTarget", () => {
   });
 
   it("ignores an override whose agent is unhealthy and auto-picks instead", () => {
-    const res = resolveDraftTarget(new Set<AgentId>(["opencode"]), {
+    const res = resolveDraftTarget(new Set<AgentInstanceId>(["opencode"]), {
       agent: "claude",
       model: aModelFor("claude"),
     });
@@ -73,7 +78,7 @@ describe("resolveDraftTarget", () => {
   });
 
   it("ignores an override whose model is no longer valid", () => {
-    const res = resolveDraftTarget(new Set<AgentId>(["claude"]), {
+    const res = resolveDraftTarget(new Set<AgentInstanceId>(["claude"]), {
       agent: "claude",
       model: "ghost-model-that-does-not-exist",
     });
@@ -90,7 +95,7 @@ describe("resolveDraftTarget", () => {
 });
 
 describe("parseDraftModelRequest", () => {
-  const healthy = new Set<AgentId>(["opencode", "claude"]);
+  const healthy = new Set<AgentInstanceId>(["opencode", "claude"]);
 
   it("shows on no args", () => {
     expect(parseDraftModelRequest([], healthy)).toEqual({ kind: "show" });
@@ -155,7 +160,7 @@ describe("parseDraftModelRequest", () => {
 
 describe("draftModelCompletions", () => {
   it("offers auto plus healthy agents and their models", () => {
-    const out = draftModelCompletions(new Set<AgentId>(["claude"]));
+    const out = draftModelCompletions(new Set<AgentInstanceId>(["claude"]));
     expect(out).toContain("auto");
     expect(out).toContain("claude");
     expect(out).toContain(aModelFor("claude"));

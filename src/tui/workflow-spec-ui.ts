@@ -7,7 +7,7 @@ import {
   formatAgentTarget,
 } from "../agents";
 import { truncate } from "../agents/util";
-import type { AgentId } from "../types/events";
+import type { AgentInstanceId } from "../types/events";
 import {
   type GateCondition,
   type WorkflowPhase,
@@ -80,7 +80,7 @@ export function distinctAgents(spec: WorkflowSpec): string[] {
 }
 
 export function formatWorkflowAgentTarget(target: {
-  agent: AgentId;
+  agent: AgentInstanceId;
   model: string;
   effort?: string;
 }): string {
@@ -174,7 +174,7 @@ export function promptForStep(step: WorkflowStep): string | undefined {
   return undefined;
 }
 
-function staticModelName(agent: AgentId, model: string): string | undefined {
+function staticModelName(agent: AgentInstanceId, model: string): string | undefined {
   switch (agent) {
     case "claude":
       return CLAUDE_MODELS.find((entry) => entry.id === model)?.name;

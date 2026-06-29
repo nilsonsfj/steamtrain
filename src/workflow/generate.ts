@@ -2,7 +2,7 @@ import { resolveAgentInstance } from "../agents";
 import type { AgentAdapter } from "../agents";
 import type { ResolvedAgentInstance } from "../agents/config";
 import type { SteamtrainConfig } from "../config/types";
-import type { AgentEvent, AgentId } from "../types/events";
+import type { AgentEvent, AgentInstanceId } from "../types/events";
 import type { AgentProviderId } from "../types/events";
 import { DEFAULT_STEP_TIMEOUT_SEC, timeoutMsFromSec } from "./timeout";
 import { type WorkflowSpec, validateWorkflow, workflowSpecSchema } from "./types";
@@ -39,7 +39,7 @@ export interface GenerateWorkflowDeps {
 export interface GenerateWorkflowRequest {
   /** What the workflow should do, in the user's own words. */
   description: string;
-  agent: AgentId;
+  agent: AgentInstanceId;
   model: string;
   effort?: string;
   /** Desired name; slugified. When omitted, derived from the description. */

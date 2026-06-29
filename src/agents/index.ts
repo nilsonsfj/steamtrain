@@ -23,7 +23,6 @@ export {
   defaultAgentInstance,
   resolveAgentInstance,
   resolveAgentInstances,
-  serializeAgentInstancesForConfig,
   type ResolvedAgentInstance,
 } from "./config";
 export {

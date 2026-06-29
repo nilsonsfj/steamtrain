@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { buildAgentMeta } from "../agents/agent-meta";
 import { refreshAgentCatalogCaches } from "../agents/models";
 import type { SteamtrainConfig } from "../config";
+import { parseAgentsConfig } from "../config";
 import { saveProjectConfig } from "../config/project-config";
 import { type DoctorResult, runDoctor } from "../doctor";
 import { Orchestrator } from "../orchestrator";
@@ -389,7 +390,16 @@ async function handle(
     if (hasStep) patch.stepTimeoutSec = parsed.stepTimeoutSec as number;
     if (clearWf) patch.workflowTimeoutSec = undefined;
     else if (hasWf) patch.workflowTimeoutSec = parsed.workflowTimeoutSec as number;
-    if (hasAgents) patch.agents = parsed.agents as SteamtrainConfig["agents"];
+    if (hasAgents) {
+      try {
+        patch.agents = parseAgentsConfig(parsed.agents);
+      } catch (err) {
+        sendJson(res, 400, {
+          error: err instanceof Error ? err.message : "invalid agents",
+        });
+        return;
+      }
+    }
     const saved = saveProjectConfig(patch, deps.configPath);
     if (!saved.ok || !saved.config) {
       sendJson(res, 400, { error: saved.error ?? "save failed" });

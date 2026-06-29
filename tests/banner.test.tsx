@@ -14,15 +14,17 @@ describe("TUI components", () => {
 
   it("renders per-agent doctor status in the status bar", () => {
     const doctor: DoctorResult[] = [
-      { agent: "claude", status: "ok", binary: "claude", message: "ready" },
+      { agent: "claude", provider: "claude", status: "ok", binary: "claude", message: "ready" },
       {
         agent: "opencode",
+        provider: "opencode",
         status: "binary_missing",
         binary: "opencode",
         message: "'opencode' not found on PATH",
       },
       {
         agent: "codex",
+        provider: "codex",
         status: "not_authenticated",
         binary: "codex",
         message: "not authenticated",

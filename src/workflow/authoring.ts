@@ -7,7 +7,7 @@ import {
   loadProjectWorkflows,
   saveProjectWorkflow,
 } from "../config/project-workflows";
-import type { AgentId, AgentProviderId } from "../types/events";
+import type { AgentInstanceId, AgentProviderId } from "../types/events";
 import {
   type LoadedWorkflowCatalog,
   loadWorkflowCatalog,
@@ -31,7 +31,7 @@ import { type WorkflowSpec, validateWorkflow } from "./types";
 export interface AuthoringHost {
   listWorkflows(): Record<string, WorkflowSpec>;
   workflowSource(name: string): WorkflowSourceKind | undefined;
-  isAgentHealthy(agent: AgentId): boolean;
+  isAgentHealthy(agent: AgentInstanceId): boolean;
   setCatalog(catalog: LoadedWorkflowCatalog): void;
 }
 
@@ -66,7 +66,7 @@ export type WorkflowScope = "user" | "project";
 
 export interface GenerateRequest {
   description: string;
-  agent: AgentId;
+  agent: AgentInstanceId;
   model: string;
   effort?: string;
   name?: string;

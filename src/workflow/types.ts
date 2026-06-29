@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AgentId } from "../types/events";
+import type { AgentInstanceId } from "../types/events";
 import type { RetryPolicy } from "./retry";
 
 /**
@@ -32,7 +32,7 @@ export interface WorkflowItem {
 }
 
 export interface AgentRunFields {
-  agent: AgentId;
+  agent: AgentInstanceId;
   /** Model string in the agent's own format (claude: `claude-…`, opencode: `provider/model`, codex: plain slug). */
   model: string;
   /** Prompt template; may reference `{{input}}` and `{{steps.<id>.output}}`. */
@@ -72,7 +72,7 @@ export interface DistributorStep extends WorkflowStepBase {
    * Optional agent-backed splitter. When provided, the agent output becomes the
    * distributed payload; when `items` is also present, static items win.
    */
-  agent?: AgentId;
+  agent?: AgentInstanceId;
   model?: string;
   prompt?: string;
   cwd?: string;
@@ -89,7 +89,7 @@ export interface ConsolidatorStep extends WorkflowStepBase {
    * Optional agent-backed merge. Without an agent, the consolidator emits the
    * rendered prompt or a sectioned merge of its dependencies.
    */
-  agent?: AgentId;
+  agent?: AgentInstanceId;
   model?: string;
   prompt?: string;
   cwd?: string;
@@ -213,7 +213,10 @@ export const DEFAULT_LOOP_MAX_ITERATIONS = 10;
 /** Hard ceiling on a loop gate's `maxIterations` (runaway backstop). */
 export const LOOP_MAX_ITERATIONS_CEILING = 100;
 
-const agentId = z.string().min(1);
+const agentId = z
+  .string()
+  .min(1)
+  .describe("Configured agent instance id; validated at run time via resolveAgentInstance");
 
 const baseStepShape = {
   id: z.string().min(1),
@@ -424,8 +427,8 @@ export function isAgentBackedStep(step: WorkflowStep): step is AgentBackedWorkfl
 }
 
 /** Distinct agent ids a workflow's steps will spawn (empty for agentless flows). */
-export function workflowAgentIds(spec: WorkflowSpec): AgentId[] {
-  const set = new Set<AgentId>();
+export function workflowAgentIds(spec: WorkflowSpec): AgentInstanceId[] {
+  const set = new Set<AgentInstanceId>();
   for (const phase of spec.phases) {
     for (const step of phase.steps) {
       if (isAgentBackedStep(step)) set.add(step.agent);

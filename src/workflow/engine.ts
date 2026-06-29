@@ -2,7 +2,7 @@ import { resolve as resolvePath } from "node:path";
 import { resolveAgentInstance } from "../agents";
 import type { AgentAdapter } from "../agents";
 import type { SteamtrainConfig } from "../config/types";
-import type { AgentEvent, AgentId, AgentProviderId } from "../types/events";
+import type { AgentEvent, AgentInstanceId, AgentProviderId } from "../types/events";
 import type { WorkflowEvent } from "./events";
 import { createChannel, runPool } from "./pool";
 import { type RetryPolicy, backoffDelayMs, resolveRetryPolicy } from "./retry";

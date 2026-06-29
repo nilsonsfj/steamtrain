@@ -7,7 +7,7 @@ import type {
 } from "../commands/types";
 import type { ProjectConfigPatch } from "../config/project-config";
 import type { SteamtrainConfig } from "../config/types";
-import type { AgentId } from "../types/events";
+import type { AgentInstanceId } from "../types/events";
 import { STEAMTRAIN_VERSION } from "../version";
 import type { WorkflowScope, WorkflowSpec } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
@@ -45,7 +45,7 @@ export interface UseSlashContextParams {
   userWorkflowNames: readonly string[];
   openHistory: () => SlashCommandResult;
   draftResolution: { target?: DraftTarget; usingOverride: boolean };
-  healthyAgents: ReadonlySet<AgentId>;
+  healthyAgents: ReadonlySet<AgentInstanceId>;
   setDraftOverride: (target: DraftTarget | null) => void;
 }
 

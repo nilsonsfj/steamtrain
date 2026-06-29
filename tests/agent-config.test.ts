@@ -7,6 +7,7 @@ import {
 } from "../src/agents";
 import type { AgentAdapter } from "../src/agents";
 import type { SteamtrainConfig } from "../src/config";
+import { parseAgentsConfig } from "../src/config";
 import { runDoctor } from "../src/doctor";
 import { Orchestrator } from "../src/orchestrator";
 import type { AgentProviderId } from "../src/types/events";
@@ -198,6 +199,17 @@ describe("agent configuration", () => {
     expect(resolveAgentInstance(customConfig, "claude", { includeDisabled: true })?.enabled).toBe(
       false,
     );
+  });
+
+  it("rejects invalid agent config payloads", () => {
+    expect(() => parseAgentsConfig([{ id: "bad id", provider: "claude" }])).toThrow(/id/);
+    expect(() => parseAgentsConfig([{ id: "a", provider: "unknown" }])).toThrow(/provider/);
+    expect(() =>
+      parseAgentsConfig([
+        { id: "dup", provider: "claude" },
+        { id: "dup", provider: "opencode" },
+      ]),
+    ).toThrow(/duplicate/);
   });
 
   it("allows workflow authoring with a configured instance id", async () => {
