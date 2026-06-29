@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   clearCodexVariantCacheForTests,
   setCodexVariantCacheForTests,
@@ -43,13 +43,17 @@ describe("amp modes", () => {
 });
 
 describe("model names", () => {
+  beforeEach(() => {
+    clearCodexVariantCacheForTests();
+    clearOpencodeVariantCacheForTests();
+  });
+
   it("returns hardcoded Claude display names", () => {
     expect(modelNameForAgent("claude", "claude-sonnet-4-6")).toBe("Claude Sonnet 4.6");
     expect(modelNameForAgent("claude", "sonnet")).toBe("Sonnet (latest)");
   });
 
   it("returns static Codex display names when cache is empty", () => {
-    clearCodexVariantCacheForTests();
     expect(modelNameForAgent("codex", "gpt-5.4-mini")).toBe("GPT-5.4 Mini");
   });
 
@@ -82,7 +86,6 @@ describe("model names", () => {
   });
 
   it("returns static OpenCode display names when cache is empty", () => {
-    clearOpencodeVariantCacheForTests();
     expect(modelNameForAgent("opencode", "opencode/gpt-5.4-mini")).toBe("GPT 5.4 Mini");
   });
 
@@ -111,7 +114,6 @@ describe("model names", () => {
   });
 
   it("falls back to the static OpenCode catalog when cache is empty", () => {
-    clearOpencodeVariantCacheForTests();
     expect(modelIdsForAgent("opencode")).toEqual(OPENCODE_MODELS.map((model) => model.id));
   });
 

@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import {
   flattenSteps,
@@ -203,7 +204,7 @@ describe("workflowReducer", () => {
       id: "r1",
       workflow: "demo",
       input: "go",
-      cwd: "/tmp",
+      cwd: tmpdir(),
       status: "done",
       ok: true,
       startedAt: 100,
@@ -259,7 +260,7 @@ describe("workflowReducer", () => {
       id: "r2",
       workflow: "test",
       input: "x",
-      cwd: "/tmp",
+      cwd: tmpdir(),
       status: "error",
       ok: false,
       startedAt: 100,
@@ -307,7 +308,7 @@ describe("workflowReducer", () => {
       id: "r3",
       workflow: "test",
       input: "x",
-      cwd: "/tmp",
+      cwd: tmpdir(),
       status: "done",
       ok: true,
       startedAt: 100,

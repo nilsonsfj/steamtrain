@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import type { AgentAdapter } from "../src/agents";
 import { initialWorkflowState, workflowReducer } from "../src/tui/workflow-state";
@@ -88,7 +89,7 @@ describe("engine loops", () => {
           return { text: "reviewed" };
         }),
       maxConcurrency: 2,
-      cwd: "/tmp",
+      cwd: tmpdir(),
       loopMaxIterations: 10,
     };
     const events = await collect(loopSpec(), deps);
@@ -107,7 +108,7 @@ describe("engine loops", () => {
     const deps = {
       createAdapter: () => fakeAdapter(() => ({ text: "NOPE" })),
       maxConcurrency: 2,
-      cwd: "/tmp",
+      cwd: tmpdir(),
       loopMaxIterations: 10,
     };
     const events = await collect(loopSpec(3), deps); // cap 3
@@ -121,7 +122,7 @@ describe("engine loops", () => {
     const deps = {
       createAdapter: () => fakeAdapter(() => ({ text: "NOPE" })),
       maxConcurrency: 2,
-      cwd: "/tmp",
+      cwd: tmpdir(),
       loopMaxIterations: 2, // cap via config
     };
     const events = await collect(loopSpec(), deps); // no per-gate cap
@@ -143,7 +144,7 @@ describe("engine loops", () => {
           return { text: "reviewed" };
         }),
       maxConcurrency: 2,
-      cwd: "/tmp",
+      cwd: tmpdir(),
       loopMaxIterations: 10,
     };
     await collect(loopSpec(), deps);
@@ -182,7 +183,7 @@ describe("engine loops", () => {
           return { text: "reviewed" };
         }),
       maxConcurrency: 2,
-      cwd: "/tmp",
+      cwd: tmpdir(),
       loopMaxIterations: 10,
     };
     const events = await collect(spec, deps);
@@ -285,7 +286,7 @@ describe("engine loops", () => {
           return { text: "seeded" };
         }),
       maxConcurrency: 2,
-      cwd: "/tmp",
+      cwd: tmpdir(),
       loopMaxIterations: 10,
     };
 
@@ -312,7 +313,7 @@ describe("engine loops", () => {
     const innerBodyPhaseInstances = state.phases.filter((p) => p.phaseId === "inner-body");
     expect(innerBodyPhaseInstances.length).toBe(innerPasses * outerPasses);
 
-    const builder = new RunRecordBuilder({ id: "r", workflow: "w", input: "", cwd: "/tmp" });
+    const builder = new RunRecordBuilder({ id: "r", workflow: "w", input: "", cwd: tmpdir() });
     for (const e of events) builder.handle(e);
     const record = builder.build({ status: "done" });
     const innerBodyHistoryInstances = record.phases.filter((p) => p.phaseId === "inner-body");
@@ -380,7 +381,7 @@ describe("engine loops", () => {
           return { text: "ok" };
         }),
       maxConcurrency: 2,
-      cwd: "/tmp",
+      cwd: tmpdir(),
       loopMaxIterations: 10,
     };
 
@@ -461,7 +462,7 @@ describe("engine loops", () => {
     const deps = {
       createAdapter: () => fakeAdapter(() => ({ text: "ok" })),
       maxConcurrency: 8,
-      cwd: "/tmp",
+      cwd: tmpdir(),
       loopMaxIterations: cap,
     };
 
@@ -513,7 +514,7 @@ describe("engine loops", () => {
           return { text: "reviewed" };
         }),
       maxConcurrency: 2,
-      cwd: "/tmp",
+      cwd: tmpdir(),
       loopMaxIterations: 10,
     };
     const events = await collect(loopSpec(), deps);
@@ -559,7 +560,7 @@ describe("engine loops", () => {
           return { text: "ok" };
         }),
       maxConcurrency: 2,
-      cwd: "/tmp",
+      cwd: tmpdir(),
       loopMaxIterations: 2,
     };
     await collect(loopSpec(2), deps);
@@ -584,7 +585,7 @@ describe("engine loops", () => {
           return { text: "reviewed" };
         }),
       maxConcurrency: 2,
-      cwd: "/tmp",
+      cwd: tmpdir(),
       loopMaxIterations: 10,
     };
     const events: WorkflowEvent[] = [];
@@ -627,7 +628,7 @@ describe("engine loops", () => {
     const deps = {
       createAdapter: () => fakeAdapter(() => ({ text: "NOPE" })),
       maxConcurrency: 2,
-      cwd: "/tmp",
+      cwd: tmpdir(),
       loopMaxIterations: 10,
     };
     const events = await collect(spec, deps);

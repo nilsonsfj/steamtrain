@@ -128,7 +128,7 @@ function makeServer(host: WorkflowHost): { server: Server; runs: WorkflowRunMana
   const runs = new WorkflowRunManager({
     host,
     cacheStore: createInMemoryStore(),
-    cwd: "/tmp",
+    cwd: tmpdir(),
     config: testRunConfig,
   });
   const server = createWebServer({
@@ -314,7 +314,7 @@ describe("web server", () => {
       host,
       cacheStore: createInMemoryStore(),
       historyStore,
-      cwd: "/tmp",
+      cwd: tmpdir(),
       config: testRunConfig,
     });
     const server = createWebServer({
@@ -391,7 +391,7 @@ describe("web server", () => {
       releaseWrite = resolve;
     });
     const blockingHistory: WorkflowHistoryStore = {
-      rootDir: "/tmp/none",
+      rootDir: join(tmpdir(), "none"),
       async save() {
         enterWindow();
         await writeReleased;
@@ -411,7 +411,7 @@ describe("web server", () => {
       host,
       cacheStore: createInMemoryStore(),
       historyStore: blockingHistory,
-      cwd: "/tmp",
+      cwd: tmpdir(),
       config: testRunConfig,
     });
     const server = createWebServer({ host, runs, workflowSource: () => "bundled" });
@@ -444,7 +444,7 @@ describe("web server", () => {
       host,
       cacheStore: createInMemoryStore(),
       historyStore,
-      cwd: "/tmp",
+      cwd: tmpdir(),
       config: testRunConfig,
     });
     const server = createWebServer({
@@ -481,7 +481,7 @@ describe("web server", () => {
       host,
       cacheStore: createInMemoryStore(),
       historyStore,
-      cwd: "/tmp",
+      cwd: tmpdir(),
       config: testRunConfig,
     });
     const server = createWebServer({
@@ -498,7 +498,7 @@ describe("web server", () => {
       id: "stale-run",
       workflow: "demo",
       input: "world",
-      cwd: "/tmp",
+      cwd: tmpdir(),
       specHash: "stale",
     });
     for await (const ev of happyRun("world")) builder.handle(ev);
@@ -515,7 +515,7 @@ describe("web server", () => {
     const runs = new WorkflowRunManager({
       host,
       cacheStore: createInMemoryStore(),
-      cwd: "/tmp",
+      cwd: tmpdir(),
       maxConcurrent: 1,
       config: testRunConfig,
     });
@@ -637,7 +637,7 @@ describe("web server", () => {
       host,
       cacheStore: createInMemoryStore(),
       historyStore,
-      cwd: "/tmp",
+      cwd: tmpdir(),
       config: testRunConfig,
     });
     const server = createWebServer({
@@ -691,7 +691,7 @@ describe("web server", () => {
     const runs = new WorkflowRunManager({
       host,
       cacheStore: createInMemoryStore(),
-      cwd: "/tmp",
+      cwd: tmpdir(),
       config: { workflowTimeoutSec: 0.2, stepTimeoutSec: 60 },
     });
     const server = createWebServer({ host, runs });

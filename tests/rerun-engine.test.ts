@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import type { AgentAdapter } from "../src/agents";
 import type { AgentEvent, AgentId } from "../src/types/events";
@@ -46,11 +47,11 @@ function makeDeps(spawns: string[], failStep?: string) {
       yield { kind: "result", text: `${which}-ok`, isError: false, agent: id, ts: Date.now() };
     },
   });
-  return { createAdapter, maxConcurrency: 2, cwd: "/tmp" };
+  return { createAdapter, maxConcurrency: 2, cwd: tmpdir() };
 }
 
 async function drain(cache: Map<string, StepResult>, deps: ReturnType<typeof makeDeps>) {
-  const builder = new RunRecordBuilder({ id: "x", workflow: "demo", input: "in", cwd: "/tmp" });
+  const builder = new RunRecordBuilder({ id: "x", workflow: "demo", input: "in", cwd: tmpdir() });
   for await (const ev of runWorkflow(spec, { input: "in", cache }, deps)) builder.handle(ev);
   return builder;
 }
@@ -114,11 +115,16 @@ describe("seeded cache re-run", () => {
           yield { kind: "result", text: `${item}-ok`, isError: false, agent: id, ts: Date.now() };
         },
       });
-      return { createAdapter, maxConcurrency: 2, cwd: "/tmp" };
+      return { createAdapter, maxConcurrency: 2, cwd: tmpdir() };
     }
 
     const firstSpawns: string[] = [];
-    const builder = new RunRecordBuilder({ id: "fan", workflow: "fan", input: "in", cwd: "/tmp" });
+    const builder = new RunRecordBuilder({
+      id: "fan",
+      workflow: "fan",
+      input: "in",
+      cwd: tmpdir(),
+    });
     for await (const ev of runWorkflow(fanSpec, { input: "in" }, fanDeps(firstSpawns, "beta"))) {
       builder.handle(ev);
     }
@@ -134,7 +140,7 @@ describe("seeded cache re-run", () => {
     expect(seed.has("work")).toBe(false); // parent is error
 
     const secondSpawns: string[] = [];
-    const replay = new RunRecordBuilder({ id: "f2", workflow: "fan", input: "in", cwd: "/tmp" });
+    const replay = new RunRecordBuilder({ id: "f2", workflow: "fan", input: "in", cwd: tmpdir() });
     let ok = true;
     for await (const ev of runWorkflow(
       fanSpec,
@@ -170,7 +176,12 @@ describe("seeded cache re-run", () => {
     };
 
     const firstSpawns: string[] = [];
-    const builder = new RunRecordBuilder({ id: "g1", workflow: "gated", input: "no", cwd: "/tmp" });
+    const builder = new RunRecordBuilder({
+      id: "g1",
+      workflow: "gated",
+      input: "no",
+      cwd: tmpdir(),
+    });
     for await (const ev of runWorkflow(gateSpec, { input: "no" }, makeDeps(firstSpawns))) {
       builder.handle(ev);
     }

@@ -1,5 +1,7 @@
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type WorkflowHost, WorkflowRunManager } from "../src/web/runs";
 import { createWebServer } from "../src/web/server";
@@ -39,7 +41,7 @@ const loopWorkflow: WorkflowSpec = {
 };
 
 const noopStore: WorkflowCacheStore = {
-  rootDir: "/tmp/none",
+  rootDir: join(tmpdir(), "none"),
   async load() {
     return new Map<string, StepResult>();
   },
@@ -313,7 +315,7 @@ describe("web accepts loop workflows", () => {
     const runs = new WorkflowRunManager({
       host: new FakeHost(loopWorkflow, loopRun),
       cacheStore: noopStore,
-      cwd: "/tmp",
+      cwd: tmpdir(),
       config: { stepTimeoutSec: 60, workflowTimeoutSec: 60 * 60 },
     });
     const server = createWebServer({

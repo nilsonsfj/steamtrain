@@ -104,7 +104,7 @@ class FakeHost implements WorkflowHost {
 const config: SteamtrainConfig = { stepTimeoutSec: 1 };
 
 const noopStore: WorkflowCacheStore = {
-  rootDir: "/tmp/none",
+  rootDir: join(tmpdir(), "none"),
   async load() {
     return new Map<string, StepResult>();
   },

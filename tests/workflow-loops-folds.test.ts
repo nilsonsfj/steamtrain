@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { initialWorkflowState, workflowReducer } from "../src/tui/workflow-state";
 import { workflowStateFromSpec } from "../src/workflow";
@@ -62,7 +63,7 @@ describe("loop folds", () => {
   });
 
   it("history builder creates one phase instance per iteration", () => {
-    const b = new RunRecordBuilder({ id: "r", workflow: "w", input: "", cwd: "/tmp" });
+    const b = new RunRecordBuilder({ id: "r", workflow: "w", input: "", cwd: tmpdir() });
     for (const e of events) b.handle(e);
     const rec = b.build({ status: "done" });
     const fixPhases = rec.phases.filter((p) => p.phaseId === "fix");

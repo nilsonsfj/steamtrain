@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import {
   buildAgentMeta,
@@ -174,7 +175,7 @@ describe("agent configuration", () => {
         createAdapter: fakeAdapter,
         agentConfig: customConfig,
         maxConcurrency: 1,
-        cwd: "/tmp",
+        cwd: tmpdir(),
       },
     )) {
       if (event.kind === "step_done") done.push(event.result);
@@ -225,8 +226,8 @@ describe("agent configuration", () => {
     const author = new WorkflowAuthor({
       host,
       config: customConfig,
-      home: "/tmp",
-      cwd: "/tmp",
+      home: tmpdir(),
+      cwd: tmpdir(),
       createAdapter: () => ({
         id: "opencode",
         binary: "fake",

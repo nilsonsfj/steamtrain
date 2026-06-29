@@ -132,7 +132,7 @@ describe("RunRecordBuilder", () => {
   });
 
   it("reconciles an in-flight step and finalizes the phase when canceled mid-flight", () => {
-    const builder = new RunRecordBuilder({ id: "r", workflow: "wf", input: "i", cwd: "/tmp" });
+    const builder = new RunRecordBuilder({ id: "r", workflow: "wf", input: "i", cwd: tmpdir() });
     builder.handle({ kind: "workflow_start", name: "wf", phaseCount: 1, stepCount: 1, ts: 1 });
     builder.handle({
       kind: "phase_start",
@@ -162,7 +162,7 @@ describe("RunRecordBuilder", () => {
   });
 
   it("records scheduled-but-unstarted steps as not-run placeholders", () => {
-    const builder = new RunRecordBuilder({ id: "r", workflow: "wf", input: "i", cwd: "/tmp" });
+    const builder = new RunRecordBuilder({ id: "r", workflow: "wf", input: "i", cwd: tmpdir() });
     builder.handle({ kind: "workflow_start", name: "wf", phaseCount: 1, stepCount: 3, ts: 1 });
     builder.handle({
       kind: "phase_start",
@@ -194,7 +194,7 @@ describe("RunRecordBuilder", () => {
   });
 
   it("records unstarted fan-out children as not-run placeholders", () => {
-    const builder = new RunRecordBuilder({ id: "r", workflow: "wf", input: "i", cwd: "/tmp" });
+    const builder = new RunRecordBuilder({ id: "r", workflow: "wf", input: "i", cwd: tmpdir() });
     builder.handle({ kind: "workflow_start", name: "wf", phaseCount: 1, stepCount: 1, ts: 1 });
     builder.handle({
       kind: "phase_start",
@@ -329,7 +329,7 @@ describe("workflow history store", () => {
   it("records and round-trips per-step retry attempts", async () => {
     const root = tempDir();
     const store = createWorkflowHistoryStore(root);
-    const builder = new RunRecordBuilder({ id: "ret", workflow: "wf", input: "i", cwd: "/tmp" });
+    const builder = new RunRecordBuilder({ id: "ret", workflow: "wf", input: "i", cwd: tmpdir() });
     const ts = Date.now();
     builder.handle({ kind: "workflow_start", name: "wf", phaseCount: 1, stepCount: 1, ts });
     builder.handle({ kind: "phase_start", phaseId: "p1", title: "P1", index: 0, stepCount: 1, ts });
@@ -414,7 +414,7 @@ describe("workflow history store", () => {
       id: "r-spec",
       workflow: "demo",
       input: "hi",
-      cwd: "/tmp",
+      cwd: tmpdir(),
       specHash: "abc123",
     });
     builder.handle({ kind: "workflow_start", name: "demo", phaseCount: 0, stepCount: 0, ts: 1 });

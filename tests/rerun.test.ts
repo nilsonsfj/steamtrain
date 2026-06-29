@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { hashWorkflowSpec } from "../src/workflow/cache-store";
 import type { HistoryPhase, HistoryStep, RunRecord } from "../src/workflow/history";
@@ -39,7 +40,7 @@ function record(over: Partial<RunRecord>): RunRecord {
     id: "r1",
     workflow: "demo",
     input: "in",
-    cwd: "/tmp",
+    cwd: tmpdir(),
     status: "error",
     ok: false,
     startedAt: 1,
@@ -155,7 +156,7 @@ describe("planRerun", () => {
   it("retry-failed downgrades when the cwd differs from the record", () => {
     const rec = record({
       specHash: hashWorkflowSpec(spec),
-      cwd: "/tmp",
+      cwd: tmpdir(),
       phases: [phase([step({ stepId: "a" })])],
     });
     const plan = planRerun(rec, "retry-failed", spec, { cwd: "/elsewhere" }) as RerunPlan;
@@ -167,10 +168,10 @@ describe("planRerun", () => {
     const rec = record({
       specHash: hashWorkflowSpec(spec),
       input: "in",
-      cwd: "/tmp",
+      cwd: tmpdir(),
       phases: [phase([step({ stepId: "a" })])],
     });
-    const plan = planRerun(rec, "retry-failed", spec, { input: "in", cwd: "/tmp" }) as RerunPlan;
+    const plan = planRerun(rec, "retry-failed", spec, { input: "in", cwd: tmpdir() }) as RerunPlan;
     expect(plan.seedCache.has("a")).toBe(true);
     expect(plan.downgraded).toBeUndefined();
   });

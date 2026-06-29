@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import type { AgentAdapter } from "../src/agents";
 import type { AgentEvent, AgentId } from "../src/types/events";
@@ -58,7 +59,7 @@ function scriptedDeps(script: Record<string, Outcome[]>, calls: string[]) {
       };
     },
   });
-  return { createAdapter, maxConcurrency: 2, cwd: "/tmp" };
+  return { createAdapter, maxConcurrency: 2, cwd: tmpdir() };
 }
 
 const fastRetry: RetryPolicy = { maxAttempts: 3, initialDelayMs: 1, factor: 1, jitter: false };

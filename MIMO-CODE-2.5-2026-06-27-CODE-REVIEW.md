@@ -24,7 +24,7 @@
 | Performance | B | Async catalog I/O, transcript/frame caps, backpressure; TUI re-render concerns remain |
 | Maintainability | B- | App.tsx monolith (decomposed from 1905), server.ts route organization |
 
-**Remaining findings: 24** (0 Critical, 0 High, 0 Medium, 24 Low)
+**Remaining findings: 20** (0 Critical, 0 High, 0 Medium, 20 Low)
 
 ---
 
@@ -95,23 +95,11 @@
 ### L23. Temp directory cleanup inconsistency in tests
 - **File:** ~15 test files
 
-### L25. No test timeout configuration
-- **File:** `vitest.config.ts`
-
-### L26. `biome.json` disables `useImportType`
-- **File:** `biome.json:37`
-
 ### L28. SSE reader doesn't handle partial `data:` lines
 - **File:** `tests/web-server.test.ts:132-158`
 
 ### L29. `reducer-build.test.ts` runs esbuild inside a test
 - **File:** `tests/reducer-build.test.ts:10-41`
-
-### L30. Hardcoded `/tmp` in many test specs
-- **File:** `tests/workflow-engine.test.ts:77`
-
-### L31. `codex-efforts.test.ts` uses `beforeEach` but `models.test.ts` doesn't
-- **File:** `tests/codex-efforts.test.ts:25-27`
 
 ### L33. `MenuBackdrop` negative margin overlay is fragile
 - **File:** `src/tui/CommandSuggestionMenu.tsx:106-119`
