@@ -265,6 +265,7 @@ describe("codex mapper (stateful, one mapper per run)", () => {
     ]);
     // SAMPLES.turnCompleted: input=8497, cached=8448, output=51
     // uncached=49*$0.30/M + cached=8448*$0.03/M + output=51*$1.20/M
+    // (reasoning_output_tokens is a subset of output_tokens, not double-counted)
     const cost = (result[0] as { costUsd: number }).costUsd;
     expect(cost).toBeCloseTo(0.00032934, 8);
   });
@@ -283,7 +284,9 @@ describe("codex mapper (stateful, one mapper per run)", () => {
   it("omits costUsd when all usage token counts are zero", () => {
     const m = createCodexMapper();
     const result = m(
-      JSON.parse('{"type":"turn.completed","usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0}}'),
+      JSON.parse(
+        '{"type":"turn.completed","usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0}}',
+      ),
     );
     expect(result).toEqual([
       expect.objectContaining({
@@ -291,6 +294,22 @@ describe("codex mapper (stateful, one mapper per run)", () => {
         costUsd: undefined,
       }),
     ]);
+  });
+
+  it("does not double-count reasoning_output_tokens (subset of output_tokens)", () => {
+    const m = createCodexMapper();
+    // output_tokens=100 includes reasoning_output_tokens=40
+    const result = m(
+      JSON.parse(
+        '{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":100,"reasoning_output_tokens":40}}',
+      ),
+    );
+    const cost = (result[0] as { costUsd: number }).costUsd;
+    // Should only count output_tokens (100), NOT output_tokens + reasoning_output_tokens (140)
+    const expectedWithOnlyOutput = (1000 * 0.3 + 100 * 1.2) / 1_000_000;
+    const wrongExpected = (1000 * 0.3 + (100 + 40) * 1.2) / 1_000_000;
+    expect(cost).toBeCloseTo(expectedWithOnlyOutput, 8);
+    expect(cost).not.toBeCloseTo(wrongExpected, 8);
   });
 
   it("returns undefined durationMs when turn.started was never received", () => {

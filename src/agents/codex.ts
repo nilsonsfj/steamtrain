@@ -13,6 +13,7 @@ export const CODEX_MODELS: readonly AgentModel[] = [
   { id: "gpt-5.4-mini", name: "GPT-5.4 Mini" },
   { id: "gpt-5.3-codex", name: "GPT-5.3 Codex" },
   { id: "gpt-5.3-codex-mini", name: "GPT-5.3 Codex Mini" },
+  { id: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark" },
   { id: "gpt-5.3-codex-max", name: "GPT-5.3 Codex Max" },
   { id: "gpt-5.2", name: "GPT-5.2" },
   { id: "gpt-5.2-codex", name: "GPT-5.2 Codex" },
@@ -317,8 +318,8 @@ export function createCodexMapper(agent: AgentId = AGENT): EventMapper {
  * Pricing per million tokens (GPT-5.4-mini):
  *  - input:  $0.30
  *  - cached: $0.03  (90% discount)
- *  - output: $1.20
- *  - reasoning: $1.20 (same as output)
+ *  - output: $1.20  (includes reasoning tokens — OpenAI bills reasoning
+ *            as output, so reasoning_output_tokens is a subset, not extra)
  */
 function estimateCostUsd(
   usage:
@@ -334,11 +335,10 @@ function estimateCostUsd(
   const input = usage.input_tokens ?? 0;
   const cached = usage.cached_input_tokens ?? 0;
   const output = usage.output_tokens ?? 0;
-  const reasoning = usage.reasoning_output_tokens ?? 0;
-  const total = input + cached + output + reasoning;
+  const total = input + cached + output;
   if (total === 0) return undefined;
   const uncached = Math.max(0, input - cached);
-  return (uncached * 0.3 + cached * 0.03 + (output + reasoning) * 1.2) / 1_000_000;
+  return (uncached * 0.3 + cached * 0.03 + output * 1.2) / 1_000_000;
 }
 
 /** Build argv for `codex exec --json` (shared by the adapter and tests). */
