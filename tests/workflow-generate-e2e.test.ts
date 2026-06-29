@@ -140,14 +140,12 @@ describe("the meta-prompt's bounded loop example executes on the engine", () => 
     // impl x1, review x2 (loop once), fix x2 = 5 agent runs (gate is not agent-backed).
     expect(prompts).toHaveLength(5);
     expect(prompts.filter((p) => p.startsWith("Review the implementation"))).toHaveLength(2);
-    expect(prompts.filter((p) => p.startsWith("Apply fixes for these review findings:"))).toHaveLength(
-      2,
-    );
+    expect(
+      prompts.filter((p) => p.startsWith("Apply fixes for these review findings:")),
+    ).toHaveLength(2);
 
     expect(events.filter((e) => e.kind === "loop_iteration")).toHaveLength(1);
-    expect(
-      events.filter((e) => e.kind === "step_start" && e.stepId === "review").length,
-    ).toBe(2);
+    expect(events.filter((e) => e.kind === "step_start" && e.stepId === "review").length).toBe(2);
     expect(events.at(-1)).toMatchObject({ kind: "workflow_done", ok: true });
   });
 });

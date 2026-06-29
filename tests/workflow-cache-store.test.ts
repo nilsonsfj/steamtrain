@@ -228,8 +228,8 @@ describe("workflow cache store", () => {
     expect(result!.items).toEqual(["a", "b"]);
     expect(result!.parentStepId).toBe("parent");
     // Unknown fields must be stripped
-    expect((result as Record<string, unknown>).extraField).toBeUndefined();
-    expect((result as Record<string, unknown>).anotherExtra).toBeUndefined();
+    expect((result as unknown as Record<string, unknown>).extraField).toBeUndefined();
+    expect((result as unknown as Record<string, unknown>).anotherExtra).toBeUndefined();
   });
 
   it("drops step entries with invalid shape", async () => {

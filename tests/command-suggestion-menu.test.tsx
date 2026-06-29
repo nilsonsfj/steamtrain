@@ -89,4 +89,37 @@ describe("CommandSuggestionMenu", () => {
     );
     expect(lastFrame()).toBe("");
   });
+
+  it("truncates long model IDs to fit within menu width", () => {
+    const longId = "claude-opus-4-6-20250514-with-extra-long-identifier";
+    const { lastFrame } = render(
+      <CommandSuggestionMenu
+        suggestions={[longId, "short"]}
+        selectedIndex={0}
+        width={40}
+        descriptions={new Map([[longId, "Claude Opus 4.6"]])}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    for (const line of frame.split("\n")) {
+      if (!line.startsWith("│")) continue;
+      expect(line.length).toBeLessThanOrEqual(40);
+    }
+    expect(frame).toContain("…");
+    expect(frame).toContain("short");
+  });
+
+  it("shows description alongside truncated ID when space permits", () => {
+    const longId = "anthropic/claude-sonnet-4-6-20250514";
+    const { lastFrame } = render(
+      <CommandSuggestionMenu
+        suggestions={[longId, "other"]}
+        selectedIndex={0}
+        width={80}
+        descriptions={new Map([[longId, "Claude Sonnet 4.6"]])}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Claude Sonnet 4.6");
+  });
 });

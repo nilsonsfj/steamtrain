@@ -199,7 +199,7 @@ export class Orchestrator {
         binaries: this.config.binaries,
         agentConfig: this.config,
         stepTimeoutSec: resolveStepTimeoutSec(undefined, undefined, this.config),
-        maxConcurrency: this.config.maxConcurrency ?? DEFAULT_CONFIG.maxConcurrency ?? 5,
+        maxConcurrency: this.config.maxConcurrency ?? DEFAULT_CONFIG.maxConcurrency!,
         cwd,
         agentWorkspace: createGitWorktreeManager(),
         loopMaxIterations: this.config.loopMaxIterations,

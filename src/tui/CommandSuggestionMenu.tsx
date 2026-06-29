@@ -77,12 +77,17 @@ function SuggestionRow({
   active: boolean;
 }) {
   const rowBg = active ? SUGGESTION_MENU_ACTIVE_BG : SUGGESTION_MENU_BG;
+  const markerW = stringWidth(marker);
+  const maxIdLen = Math.max(0, innerWidth - markerW);
+  const displayId = truncateEnd(suggestion, maxIdLen);
   const descGap = description ? "  " : "";
-  const prefixWidth = stringWidth(marker) + stringWidth(suggestion) + stringWidth(descGap);
-  const maxDescLen = Math.max(0, innerWidth - prefixWidth);
+  const maxDescLen = Math.max(
+    0,
+    innerWidth - markerW - stringWidth(displayId) - stringWidth(descGap),
+  );
   const descText = description ? truncateEnd(description, maxDescLen) : "";
   const descPart = description ? `${descGap}${descText}` : "";
-  const visible = `${marker}${suggestion}${descPart}`;
+  const visible = `${marker}${displayId}${descPart}`;
 
   return (
     <Text backgroundColor={rowBg}>
@@ -90,7 +95,7 @@ function SuggestionRow({
         {marker}
       </Text>
       <Text color={active ? "cyan" : "white"} bold={active} backgroundColor={rowBg}>
-        {suggestion}
+        {displayId}
       </Text>
       {description ? (
         <Text color="gray" backgroundColor={rowBg}>

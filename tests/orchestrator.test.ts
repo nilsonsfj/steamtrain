@@ -36,11 +36,16 @@ function makeCatalog(
 }
 
 function healthyDoctor(agent: string): DoctorResult {
-  return { agent: agent as never, status: "ok", message: "ready" };
+  return { agent: agent as never, status: "ok", binary: agent, message: "ready" };
 }
 
 function unhealthyDoctor(agent: string): DoctorResult {
-  return { agent: agent as never, status: "error", message: "binary missing" };
+  return {
+    agent: agent as never,
+    status: "unknown_error",
+    binary: agent,
+    message: "binary missing",
+  };
 }
 
 const demoSpec: WorkflowSpec = {
@@ -170,7 +175,7 @@ describe("Orchestrator", () => {
 
   it("run throws when workspace has no model configured (M6)", () => {
     const noModelWorkspaces: WorkspaceConfig = {
-      workspaces: [{ id: "ws-nomodel", agent: "opencode" }],
+      workspaces: [{ id: "ws-nomodel", agent: "opencode", model: "" }],
     };
     const orch = new Orchestrator(
       makeConfig(),
