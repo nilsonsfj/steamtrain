@@ -197,7 +197,7 @@ function SpecStepRow({
         {step.id}
       </Text>
       <Text color="gray">{"  "}</Text>
-      <Text color={agentColor}>{runner}</Text>
+      <Text color={agentColor}>{truncate(runner, width - 30)}</Text>
       {meta ? <Text color="gray">{truncate(`  ${meta}`, Math.max(8, width - 44))}</Text> : null}
     </Box>
   );

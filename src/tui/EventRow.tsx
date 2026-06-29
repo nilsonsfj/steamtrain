@@ -18,7 +18,7 @@ export function EventRow({ item, width }: EventRowProps) {
       const s = EVENT_STYLE.session_start;
       const bits = [
         item.sessionId ? `session ${item.sessionId}` : "session started",
-        item.model,
+        item.model ? truncate(item.model, 30) : undefined,
         item.toolCount !== undefined ? `${item.toolCount} tools` : undefined,
       ].filter(Boolean);
       return (

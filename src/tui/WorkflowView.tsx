@@ -204,7 +204,7 @@ function StepRow({
         {step.stepId}
       </Text>
       <Text color="gray">{"  "}</Text>
-      <Text color={agentColor}>{runner}</Text>
+      <Text color={agentColor}>{truncate(runner, width - 30)}</Text>
       <Text color="gray">
         {target}
         {item}

@@ -53,7 +53,7 @@ export function WorkflowCreate({
           create workflow
         </Text>
         <Text color={agentColor}>
-          {state.agent} · {state.model}
+          {truncate(`${state.agent} · ${state.model}`, innerWidth - 15)}
         </Text>
       </Box>
       <Text color="gray">“{truncate(state.description, innerWidth - 2)}”</Text>

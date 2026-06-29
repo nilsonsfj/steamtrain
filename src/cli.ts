@@ -383,8 +383,9 @@ async function runWorkflowCommand(
   const options = parseRunOptions(positional ? args.slice(1) : args);
   if (!options) {
     err(
-      "usage: steamtrain workflow run <name> --input <text> [--json] [--fresh]\n" +
-        "       steamtrain workflow run --from <runId> [--retry-failed] [--json]\n",
+      `usage: steamtrain workflow run <name> --input <text> [--json] [--fresh]
+       steamtrain workflow run --from <runId> [--retry-failed] [--json]
+`,
     );
     return 1;
   }

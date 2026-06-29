@@ -4,27 +4,27 @@
 **Date:** 2026-06-27
 **Reviewer:** Principal Software Engineer (MIMO-CODE-2.5)
 **Scope:** Full codebase — correctness, architecture, code quality, security, testing
-**Last updated:** 2026-06-27
+**Last updated:** 2026-06-29
 
 ---
 
 ## Executive Summary
 
-**steamtrain** is a terminal orchestrator that runs coding agents (Claude Code, OpenCode, Codex, Amp) as managed subprocesses and renders their activity live in an Ink TUI. It also exposes a web UI. The codebase is ~15,000 lines of TypeScript across 80+ source files and 65 test files.
+**steamtrain** is a terminal orchestrator that runs coding agents (Claude Code, OpenCode, Codex, Amp) as managed subprocesses and renders their activity live in an Ink TUI. It also exposes a web UI. The codebase is ~15,000 lines of TypeScript across 80+ source files and 70 test files.
 
 ### Overall Assessment
 
 | Area | Grade | Notes |
 |------|-------|-------|
 | Architecture | B+ | Clean adapter pattern, good separation of concerns in workflow subsystem |
-| Correctness | B+ | Most critical issues resolved; minor edge cases remain |
+| Correctness | A- | All critical/high/medium issues resolved; minor edge cases remain |
 | Type Safety | B+ | Strong Zod usage, strict tsconfig, exhaustiveness checks added |
 | Security | A- | Headers, body limits, prototype pollution, and error sanitization all addressed |
-| Test Coverage | A- | 605 tests; OS signal handling, orchestrator, malformed requests, doctor, cache store covered |
+| Test Coverage | A- | 643 tests; OS signal handling, orchestrator, malformed requests, doctor, cache store covered |
 | Performance | B | Async catalog I/O, transcript/frame caps, backpressure; TUI re-render concerns remain |
-| Maintainability | B- | App.tsx is a 923-line monolith (decomposed from 1905), server.ts route organization |
+| Maintainability | B- | App.tsx monolith (decomposed from 1905), server.ts route organization |
 
-**Remaining findings: 37** (0 Critical, 0 High, 0 Medium, 37 Low)
+**Remaining findings: 31** (0 Critical, 0 High, 0 Medium, 31 Low)
 
 ---
 
@@ -44,11 +44,7 @@
 
 ## 1. Critical Findings
 
-### C7. No OS signal handling tests (SIGINT/SIGTERM) — **RESOLVED**
-- **File:** `src/cli.ts`, `src/index.tsx`
-- **Category:** Coverage Gap
-- Without signal handling tests, orphaned agent processes, corrupted cache files, or incomplete history writes on Ctrl+C remain undetectable.
-- **Resolution:** Added `tests/spawn-signal.test.ts` (10 tests) covering `runProcessLines` AbortSignal propagation, SIGKILL fallback, timeout, and child cleanup. Added `tests/cli-signal.test.ts` (8 tests) covering the CLI interrupt handler pattern (abort on first Ctrl+C, force exit on second), signal propagation through the full chain (SIGINT → AbortController → runProcessLines → kill), and SIGTERM/SIGKILL integration with real child processes. Also fixed a latent bug where `resolveWait()` was needed to unblock the generator when `startKill()` is called externally (abort signal/timeout) while the generator is blocked on `await waitForItem()`.
+(none remaining)
 
 ---
 
@@ -60,35 +56,7 @@
 
 ## 3. Medium Findings
 
-### M2. Variant caches use module-level mutable state — **RESOLVED**
-- **File:** `src/agents/codex-variants.ts:19-20`, `src/agents/opencode-variants.ts:19-20`
-- **Category:** Architecture
-- Shared mutable singleton pattern. Tests running in parallel share cache state. Tests exist to mitigate, but the pattern is fragile.
-- **Resolution:** Extracted cache state into `CodexVariantCacheStore` and `OpencodeVariantCacheStore` classes. Module-level `store` instance encapsulates mutable state. Public API unchanged; test helpers now use store methods.
-
-### M5. Prompt-as-positional-arg pattern is fragile across all adapters — **RESOLVED**
-- **File:** `src/agents/codex.ts:285-299`, `claude.ts:227`, `opencode.ts:244`
-- **Category:** Correctness / Security
-- Prompt as last positional arg conflicts with CLI flag grammar changes. Consider stdin piping or `--prompt` flag.
-- **Resolution:** All adapters now pass prompt via stdin instead of positional arguments. Added `prompt` option to `ProcessRunOptions` and `AgentProcessParams`. `runProcessLines` pipes stdin when prompt is provided. Amp adapter uses empty `-x ""` flag with stdin.
-
-### M11. No concurrency limit on LLM generation endpoint — **RESOLVED**
-- **File:** `src/web/server.ts:158-165`
-- **Category:** Resource Exhaustion
-- `POST /api/workflows/generate` spawns subprocesses without throttling. Can exhaust credits and file descriptors.
-- **Resolution:** Added `maxConcurrentGenerations` option (default 2) to `StartWebUiOptions`. Module-level counter tracks active generations; returns 503 when limit reached. Counter decremented in `finally` block to ensure cleanup on errors.
-
-### M18. `applyWorkflowStepOverrides` can overwrite gate-specific fields — **RESOLVED**
-- **File:** `src/workflow/overrides.ts:7-22`
-- **Category:** Edge Case
-- `isAgentBackedStep` returns true for distributor/consolidator steps with `agent` field. Spread could overwrite `condition` with agent fields.
-- **Resolution:** For distributor/consolidator steps, only apply the safe subset of agent fields (`agent`, `model`, `prompt`, `cwd`, `env`, `extraArgs`, `effort`, `stepTimeoutSec`, `stepTimeoutMs`). Worker/processor steps receive the full patch.
-
-### M36. No CORS headers on any endpoint — **RESOLVED**
-- **File:** `src/web/server.ts`
-- **Category:** HTTP Handling
-- Acceptable for loopback binding, but `--host 0.0.0.0` exposes server on network.
-- **Resolution:** Added CORS headers (`Access-Control-Allow-Origin: *`, `Allow-Methods`, `Allow-Headers`) when server is bound to non-localhost address. OPTIONS preflight requests return 204. Headers not added for localhost/127.0.0.1/::1 bindings.
+(none remaining)
 
 ---
 
@@ -96,15 +64,6 @@
 
 ### L1. `LineBuffer.push` uses O(n²) string concatenation
 - **File:** `src/agents/line-buffer.ts:15`
-
-### L3. `stringifyContent` doesn't handle circular references gracefully
-- **File:** `src/agents/util.ts:4,26-32`
-
-### L4. `codex-efforts-fallback.ts` GPT 5.4/5.3/5.2 all use GPT_55_EFFORTS
-- **File:** `src/agents/codex-efforts-fallback.ts:13-15`
-
-### L5. `opencode-efforts-fallback.ts` maps Qwen to Anthropic efforts
-- **File:** `src/agents/opencode-efforts-fallback.ts:46-48`
 
 ### L6. `codex-variants.ts` and `opencode-variants.ts` share duplicated interfaces
 - **File:** `src/agents/codex-variants.ts:8-11`, `src/agents/opencode-variants.ts:8-11`
@@ -121,9 +80,6 @@
 ### L11. `setDoctor()` replaces entire array — TOCTOU with `resolve()`
 - **File:** `src/orchestrator/orchestrator.ts:42,49-51`
 
-### L12. `Channel` queue grows without bound
-- **File:** `src/workflow/pool.ts:62-96`
-
 ### L14. `closeAllConnections?.()` requires Node >= 18.2.0
 - **File:** `src/index.tsx:70`
 
@@ -135,9 +91,6 @@
 
 ### L20. Port 0 accepted without notification
 - **File:** `src/cli.ts:88-95`
-
-### L22. EventSource auto-reconnect after run completion
-- **File:** `src/web/html.ts:976-996`
 
 ### L23. Temp directory cleanup inconsistency in tests
 - **File:** ~15 test files
@@ -174,9 +127,6 @@
 
 ### L37. No loading state in `WorkflowPreview` when spec unresolved
 - **File:** `src/tui/App.tsx:1666-1691`
-
-### L38. `migrateSessionOverrides` exported but only used locally
-- **File:** `src/tui/App.tsx:1884-1894`
 
 ### L40. `STATUS_GLYPH` vs `STATUS_STYLE` naming confusion
 - **File:** `src/tui/WorkflowHistory.tsx:14-18`
@@ -279,4 +229,5 @@
 
 *Generated by MIMO-CODE-2.5 Principal Engineer Review Agent*
 *Review date: 2026-06-27*
-*Files reviewed: 80+ source files, 65 test files, 5 build configs*
+*Last updated: 2026-06-29*
+*Files reviewed: 80+ source files, 70 test files, 5 build configs*
