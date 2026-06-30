@@ -1,7 +1,6 @@
 import { effortsForModel, supportsEffort } from "../../agents";
 import { isWorkspaceMode } from "../../tui/modes";
-import type { SlashCommand, SlashCommandContext } from "../types";
-import type { SlashCommandResult } from "../types";
+import type { SlashCommand, SlashCommandContext, SlashCommandResult } from "../types";
 import { hasWorkflowStepTarget, workflowStepUnavailableNotice } from "../workflow-step-target";
 
 export const effortCommand: SlashCommand = {

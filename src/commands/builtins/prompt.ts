@@ -40,4 +40,8 @@ export const promptCommand: SlashCommand = {
       ],
     };
   },
+  complete(args, ctx) {
+    if (!hasWorkflowStepTarget(ctx) || args.length > 0) return [];
+    return [];
+  },
 };

@@ -51,6 +51,7 @@ export function useWorkflowPicker({
   const [wfPreview, setWfPreview] = useState<{ name: string; input: string } | null>(null);
   const [wfCreate, setWfCreate] = useState<WorkflowCreateState | null>(null);
   const [draftOverride, setDraftOverride] = useState<DraftTarget | null>(null);
+  const [catalogVersion, setCatalogVersion] = useState(0);
   const pendingSelectRef = useRef<string | null>(null);
   const createAbortRef = useRef<AbortController | null>(null);
 
@@ -287,6 +288,7 @@ export function useWorkflowPicker({
         };
       }
 
+      setCatalogVersion((v) => v + 1);
       return {
         handled: true as const,
         clearInput: true,

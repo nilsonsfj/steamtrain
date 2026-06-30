@@ -539,6 +539,173 @@ describe("saveworkflows command", () => {
   });
 });
 
+describe("/prompt command", () => {
+  it("warns without a selected workflow step", () => {
+    const result = executeSlashCommand("/prompt", makeCtx({ mode: "workflow" }));
+    expect(result).toMatchObject({ handled: true });
+    expect(result.handled && result.notices?.[0]?.level).toBe("warn");
+  });
+
+  it("shows prompt for selected step", () => {
+    const result = executeSlashCommand(
+      "/prompt",
+      makeCtx({
+        mode: "workflow",
+        workflowStep: {
+          workflowName: "multi-plan",
+          stepId: "plan",
+          agent: "claude",
+          model: "claude-sonnet-4-6",
+          prompt: "Analyze the codebase",
+        },
+        updateWorkflowStep: vi.fn(),
+      }),
+    );
+    expect(result).toMatchObject({ handled: true });
+    expect(result.handled && result.notices?.[0]?.text).toContain("Analyze the codebase");
+  });
+
+  it("shows (none) when step has no prompt", () => {
+    const result = executeSlashCommand(
+      "/prompt",
+      makeCtx({
+        mode: "workflow",
+        workflowStep: {
+          workflowName: "multi-plan",
+          stepId: "plan",
+          agent: "claude",
+          model: "claude-sonnet-4-6",
+        },
+        updateWorkflowStep: vi.fn(),
+      }),
+    );
+    expect(result).toMatchObject({ handled: true });
+    expect(result.handled && result.notices?.[0]?.text).toContain("(none)");
+  });
+
+  it("updates prompt on selected step", () => {
+    const updateWorkflowStep = vi.fn();
+    const result = executeSlashCommand(
+      "/prompt do the thing",
+      makeCtx({
+        mode: "workflow",
+        workflowStep: {
+          workflowName: "multi-plan",
+          stepId: "plan",
+          agent: "claude",
+          model: "claude-sonnet-4-6",
+        },
+        updateWorkflowStep,
+      }),
+    );
+    expect(result).toMatchObject({ handled: true });
+    expect(updateWorkflowStep).toHaveBeenCalledWith("plan", { prompt: "do the thing" });
+  });
+});
+
+describe("/describeworkflow command", () => {
+  it("warns without a workflow spec", () => {
+    const result = executeSlashCommand("/describeworkflow", makeCtx({ mode: "workflow" }));
+    expect(result).toMatchObject({ handled: true });
+    expect(result.handled && result.notices?.[0]?.level).toBe("warn");
+  });
+
+  it("warns outside TUI", () => {
+    const result = executeSlashCommand("/describeworkflow", makeCtx());
+    expect(result).toMatchObject({ handled: true });
+    expect(result.handled && result.notices?.[0]?.text).toContain("only available in the TUI");
+  });
+
+  it("shows description for current workflow", () => {
+    const result = executeSlashCommand(
+      "/describeworkflow",
+      makeCtx({
+        mode: "workflow",
+        workflowSpec: { name: "test", phases: [] },
+        updateWorkflowDescription: vi.fn(),
+      }),
+    );
+    expect(result).toMatchObject({ handled: true });
+    expect(result.handled && result.notices?.[0]?.text).toContain("description for 'test'");
+  });
+
+  it("updates description for current workflow", () => {
+    const updateWorkflowDescription = vi.fn(() => ({
+      handled: true as const,
+      notices: [{ level: "info" as const, text: "done" }],
+    }));
+    const result = executeSlashCommand(
+      "/describeworkflow my new description",
+      makeCtx({
+        mode: "workflow",
+        workflowSpec: { name: "test", phases: [] },
+        updateWorkflowDescription,
+      }),
+    );
+    expect(result).toMatchObject({ handled: true });
+    expect(updateWorkflowDescription).toHaveBeenCalledWith("test", "my new description");
+  });
+});
+
+describe("/effort on workflow steps", () => {
+  it("sets effort on a selected workflow step", () => {
+    const updateWorkflowStep = vi.fn();
+    const result = executeSlashCommand(
+      "/effort high",
+      makeCtx({
+        mode: "workflow",
+        workflowStep: {
+          workflowName: "multi-plan",
+          stepId: "plan",
+          agent: "claude",
+          model: "claude-sonnet-4-6",
+        },
+        updateWorkflowStep,
+      }),
+    );
+    expect(result).toMatchObject({ handled: true });
+    expect(updateWorkflowStep).toHaveBeenCalledWith("plan", { effort: "high" });
+  });
+
+  it("clears effort on a selected workflow step", () => {
+    const updateWorkflowStep = vi.fn();
+    const result = executeSlashCommand(
+      "/effort clear",
+      makeCtx({
+        mode: "workflow",
+        workflowStep: {
+          workflowName: "multi-plan",
+          stepId: "plan",
+          agent: "claude",
+          model: "claude-sonnet-4-6",
+          effort: "high",
+        },
+        updateWorkflowStep,
+      }),
+    );
+    expect(result).toMatchObject({ handled: true });
+    expect(updateWorkflowStep).toHaveBeenCalledWith("plan", { effort: undefined });
+  });
+
+  it("shows effort options for selected step", () => {
+    const result = executeSlashCommand(
+      "/effort",
+      makeCtx({
+        mode: "workflow",
+        workflowStep: {
+          workflowName: "multi-plan",
+          stepId: "plan",
+          agent: "claude",
+          model: "claude-sonnet-4-6",
+        },
+        updateWorkflowStep: vi.fn(),
+      }),
+    );
+    expect(result).toMatchObject({ handled: true });
+    expect(result.handled && result.notices?.[0]?.text).toContain("effort for");
+  });
+});
+
 describe("registerSlashCommand", () => {
   it("overrides an existing command", () => {
     const original = listSlashCommands().find((c) => c.name === "version");
