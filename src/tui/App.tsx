@@ -242,7 +242,11 @@ export function App({
       stepId: step.id,
       agent: step.agent,
       model: step.model,
+      prompt: step.prompt,
       effort: step.effort,
+      cwd: step.cwd,
+      env: step.env,
+      extraArgs: step.extraArgs,
       stepTimeoutSec: step.stepTimeoutSec,
     };
   }, [picker.wfPreview, previewSelectedStep]);
@@ -299,6 +303,7 @@ export function App({
     cloneWorkflow: picker.cloneWorkflow,
     deleteWorkflow: picker.deleteWorkflow,
     renameWorkflow: picker.renameWorkflow,
+    updateWorkflowDescription: picker.updateWorkflowDescription,
     userWorkflowNames: picker.userWorkflowNames,
     openHistory: historyHook.openHistory,
     draftResolution: picker.draftResolution,

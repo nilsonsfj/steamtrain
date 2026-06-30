@@ -51,6 +51,7 @@ export function useWorkflowPicker({
   const [wfPreview, setWfPreview] = useState<{ name: string; input: string } | null>(null);
   const [wfCreate, setWfCreate] = useState<WorkflowCreateState | null>(null);
   const [draftOverride, setDraftOverride] = useState<DraftTarget | null>(null);
+  const [catalogVersion, setCatalogVersion] = useState(0);
   const pendingSelectRef = useRef<string | null>(null);
   const createAbortRef = useRef<AbortController | null>(null);
 
@@ -96,7 +97,13 @@ export function useWorkflowPicker({
     (
       stepId: string,
       patch: Partial<
-        Pick<WorkspaceEntry, "agent" | "model" | "effort"> & { stepTimeoutSec?: number }
+        Pick<WorkspaceEntry, "agent" | "model" | "effort"> & {
+          prompt?: string;
+          stepTimeoutSec?: number;
+          cwd?: string;
+          env?: Record<string, string>;
+          extraArgs?: string[];
+        }
       >,
     ) => {
       if (!wfPreview) return;
@@ -237,6 +244,63 @@ export function useWorkflowPicker({
       };
     },
     [author, selectedWorkflowName, wfPreview, running, setWfStepOverrides],
+  );
+
+  const updateWorkflowDescription = useCallback(
+    async (name: string, description: string) => {
+      if (running) {
+        return {
+          handled: true as const,
+          clearInput: true,
+          notices: [{ level: "warn" as const, text: "cannot edit while a workflow is running" }],
+        };
+      }
+
+      const workflowName = name.trim() || wfPreview?.name;
+      if (!workflowName) {
+        return {
+          handled: true as const,
+          clearInput: true,
+          notices: [{ level: "warn" as const, text: "no workflow selected" }],
+        };
+      }
+
+      const spec = runtimeCatalog.workflows[workflowName];
+      if (!spec) {
+        return {
+          handled: true as const,
+          clearInput: true,
+          notices: [{ level: "error" as const, text: `workflow '${workflowName}' not found` }],
+        };
+      }
+
+      const source = runtimeCatalog.sources[workflowName];
+      const scope = source === "user" || source === "project" ? source : "user";
+      const updatedSpec = { ...spec, description };
+      const result = await author.save(workflowName, updatedSpec, undefined, scope);
+      if (!result.ok) {
+        return {
+          handled: true as const,
+          clearInput: true,
+          notices: [
+            { level: "error" as const, text: `could not update description: ${result.error}` },
+          ],
+        };
+      }
+
+      setCatalogVersion((v) => v + 1);
+      return {
+        handled: true as const,
+        clearInput: true,
+        notices: [
+          {
+            level: "info" as const,
+            text: `description updated for '${workflowName}' (${description.length} chars)`,
+          },
+        ],
+      };
+    },
+    [author, runtimeCatalog, wfPreview, running],
   );
 
   const saveWorkflows = useCallback(async () => {
@@ -393,6 +457,7 @@ export function useWorkflowPicker({
     cloneWorkflow,
     deleteWorkflow,
     renameWorkflow,
+    updateWorkflowDescription,
     saveWorkflows,
     createWorkflow,
     preview: {
