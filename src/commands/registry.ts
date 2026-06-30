@@ -2,10 +2,12 @@ import { agentCommand } from "./builtins/agent";
 import { cloneWorkflowCommand } from "./builtins/cloneworkflow";
 import { createWorkflowCommand } from "./builtins/createworkflow";
 import { deleteWorkflowCommand } from "./builtins/deleteworkflow";
+import { describeWorkflowCommand } from "./builtins/describeworkflow";
 import { effortCommand } from "./builtins/effort";
 import { exitCommand } from "./builtins/exit";
 import { historyCommand } from "./builtins/history";
 import { modelCommand } from "./builtins/model";
+import { promptCommand } from "./builtins/prompt";
 import { renameWorkflowCommand } from "./builtins/renameworkflow";
 import { saveWorkflowsCommand } from "./builtins/saveworkflows";
 import { timeoutCommand } from "./builtins/timeout";
@@ -19,11 +21,13 @@ const BUILTIN_COMMANDS: SlashCommand[] = [
   modelCommand,
   effortCommand,
   agentCommand,
+  promptCommand,
   saveWorkflowsCommand,
   createWorkflowCommand,
   cloneWorkflowCommand,
   deleteWorkflowCommand,
   renameWorkflowCommand,
+  describeWorkflowCommand,
   timeoutCommand,
   historyCommand,
 ];

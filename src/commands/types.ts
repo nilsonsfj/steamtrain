@@ -11,7 +11,11 @@ export interface WorkflowStepSelection {
   stepId: string;
   agent: AgentInstanceId;
   model: string;
+  prompt?: string;
   effort?: string;
+  cwd?: string;
+  env?: Record<string, string>;
+  extraArgs?: string[];
   stepTimeoutSec?: number;
 }
 
@@ -36,10 +40,15 @@ export interface SlashCommandContext {
   version: string;
   /** Set when workflow preview has an agent-backed step selected. */
   workflowStep?: WorkflowStepSelection;
-  /** Patch agent/model/effort/timeout on a workflow step (session-only). */
+  /** Patch agent/model/prompt/effort/cwd/env/extraArgs/timeout on a workflow step (session-only). */
   updateWorkflowStep?: (
     stepId: string,
-    patch: Partial<Pick<WorkflowStepSelection, "agent" | "model" | "effort" | "stepTimeoutSec">>,
+    patch: Partial<
+      Pick<
+        WorkflowStepSelection,
+        "agent" | "model" | "prompt" | "effort" | "stepTimeoutSec" | "cwd" | "env" | "extraArgs"
+      >
+    >,
   ) => void;
   /** Active workflow spec when previewing or configuring (for /timeout, etc.). */
   workflowSpec?: WorkflowSpec;
@@ -64,6 +73,11 @@ export interface SlashCommandContext {
   renameWorkflow?: (
     oldName: string,
     newName: string,
+  ) => SlashCommandResult | Promise<SlashCommandResult>;
+  /** Update a workflow's description (TUI only). */
+  updateWorkflowDescription?: (
+    name: string,
+    description: string,
   ) => SlashCommandResult | Promise<SlashCommandResult>;
   /** Names of writable (user + project) workflows, for `/deleteworkflow` and `/renameworkflow` completion. */
   userWorkflowNames?: readonly string[];

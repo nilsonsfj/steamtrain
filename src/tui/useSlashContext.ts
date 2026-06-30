@@ -25,7 +25,8 @@ export interface UseSlashContextParams {
   patchWorkflowStep: (
     stepId: string,
     patch: Partial<
-      Pick<WorkspaceEntry, "agent" | "model" | "effort"> & { stepTimeoutSec?: number }
+      Pick<WorkspaceEntry, "agent" | "model" | "effort"> &
+        Pick<WorkflowStepSelection, "prompt" | "cwd" | "env" | "extraArgs" | "stepTimeoutSec">
     >,
   ) => void;
   previewStepSelection: WorkflowStepSelection | undefined;
@@ -41,6 +42,10 @@ export interface UseSlashContextParams {
   renameWorkflow: (
     oldName: string,
     newName: string,
+  ) => SlashCommandResult | Promise<SlashCommandResult>;
+  updateWorkflowDescription: (
+    name: string,
+    description: string,
   ) => SlashCommandResult | Promise<SlashCommandResult>;
   userWorkflowNames: readonly string[];
   openHistory: () => SlashCommandResult;
@@ -69,6 +74,7 @@ export function useSlashContext(params: UseSlashContextParams) {
     cloneWorkflow,
     deleteWorkflow,
     renameWorkflow,
+    updateWorkflowDescription,
     userWorkflowNames,
     openHistory,
     draftResolution,
@@ -130,6 +136,7 @@ export function useSlashContext(params: UseSlashContextParams) {
       cloneWorkflow,
       deleteWorkflow,
       renameWorkflow,
+      updateWorkflowDescription,
       userWorkflowNames,
       openHistory,
       draftResolution,
