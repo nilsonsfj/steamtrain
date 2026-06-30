@@ -24,7 +24,7 @@
 | Performance | B | Async catalog I/O, transcript/frame caps, backpressure; TUI re-render concerns remain |
 | Maintainability | B- | App.tsx monolith (decomposed from 1905), server.ts route organization |
 
-**Remaining findings: 13** (0 Critical, 0 High, 0 Medium, 13 Low)
+**Remaining findings: 7** (0 Critical, 0 High, 0 Medium, 7 Low)
 
 ---
 
@@ -71,20 +71,8 @@
 ### L19. Client-side `getElementById` lacks null guards
 - **File:** `src/web/html.ts`
 
-### L23. Temp directory cleanup inconsistency in tests
-- **File:** ~15 test files
-
-### L28. SSE reader doesn't handle partial `data:` lines
-- **File:** `tests/web-server.test.ts:132-158`
-
 ### L29. `reducer-build.test.ts` runs esbuild inside a test
 - **File:** `tests/reducer-build.test.ts:10-41`
-
-### L33. `MenuBackdrop` negative margin overlay is fragile
-- **File:** `src/tui/CommandSuggestionMenu.tsx:106-119`
-
-### L40. `STATUS_GLYPH` vs `STATUS_STYLE` naming confusion
-- **File:** `src/tui/WorkflowHistory.tsx:14-18`
 
 ### L44. `orchestrator` recreation cascading through memoized values
 - **File:** `src/tui/App.tsx:259-262`
@@ -94,12 +82,6 @@
 
 ### L46. `useEffect` with `configWarning` etc. can fire stale dispatches
 - **File:** `src/tui/App.tsx:657-670`
-
-### L47. `WorkflowCreate` `innerWidth` calculation assumes standard borders
-- **File:** `src/tui/WorkflowCreate.tsx:36`
-
-### L48. `WorkflowHistory` `selectVisibleWindow` misleading when empty
-- **File:** `src/tui/WorkflowHistory.tsx:30`
 
 ---
 
@@ -122,7 +104,6 @@
 |------|-------------|
 | **App.tsx monolith** | 923 lines (decomposed from 1905), state management extracted to hooks. |
 | **server.ts route organization** | 15+ routes in a single `handle()` function. Adding middleware is painful. |
-| **Variant cache duplication** | `codex-variants.ts` and `opencode-variants.ts` are near-identical. |
 | **No request logging** | Zero logging of HTTP requests or responses. |
 
 ---
