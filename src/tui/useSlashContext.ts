@@ -104,6 +104,7 @@ export function useSlashContext(params: UseSlashContextParams) {
       cloneWorkflow,
       deleteWorkflow,
       renameWorkflow,
+      updateWorkflowDescription,
       userWorkflowNames,
       openHistory,
       draftModel: workflowPickerActive

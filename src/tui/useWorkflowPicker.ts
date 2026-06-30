@@ -265,7 +265,7 @@ export function useWorkflowPicker({
         };
       }
 
-      const spec = resolveWorkflowSpec(workflowName);
+      const spec = runtimeCatalog.workflows[workflowName];
       if (!spec) {
         return {
           handled: true as const,
@@ -300,7 +300,7 @@ export function useWorkflowPicker({
         ],
       };
     },
-    [author, resolveWorkflowSpec, runtimeCatalog, wfPreview, running],
+    [author, runtimeCatalog, wfPreview, running],
   );
 
   const saveWorkflows = useCallback(async () => {
