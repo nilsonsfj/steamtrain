@@ -397,14 +397,27 @@ export function App({
     };
   }, []);
 
+  const lastConfigWarningRef = useRef(configWarning);
+  const lastWorkspaceWarningRef = useRef(workspaceWarning);
+  const lastSettingsWarningRef = useRef(settingsWarning);
+
   useEffect(() => {
-    if (configWarning) dispatch({ type: "notice", level: "warn", text: configWarning });
+    if (configWarning && configWarning !== lastConfigWarningRef.current) {
+      dispatch({ type: "notice", level: "warn", text: configWarning });
+      lastConfigWarningRef.current = configWarning;
+    }
   }, [configWarning]);
   useEffect(() => {
-    if (workspaceWarning) dispatch({ type: "notice", level: "warn", text: workspaceWarning });
+    if (workspaceWarning && workspaceWarning !== lastWorkspaceWarningRef.current) {
+      dispatch({ type: "notice", level: "warn", text: workspaceWarning });
+      lastWorkspaceWarningRef.current = workspaceWarning;
+    }
   }, [workspaceWarning]);
   useEffect(() => {
-    if (settingsWarning) dispatch({ type: "notice", level: "warn", text: settingsWarning });
+    if (settingsWarning && settingsWarning !== lastSettingsWarningRef.current) {
+      dispatch({ type: "notice", level: "warn", text: settingsWarning });
+      lastSettingsWarningRef.current = settingsWarning;
+    }
   }, [settingsWarning]);
   useEffect(() => {
     if (runtimeCatalog.warning) {
