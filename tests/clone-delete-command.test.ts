@@ -22,24 +22,24 @@ function makeCtx(overrides: Partial<SlashCommandContext> = {}): SlashCommandCont
   };
 }
 
-describe("/cloneworkflow", () => {
+describe("/clone-workflow", () => {
   it("is registered and passes the new name to ctx.cloneWorkflow", () => {
-    expect(isRegisteredSlashCommand("/cloneworkflow my copy")).toBe(true);
+    expect(isRegisteredSlashCommand("/clone-workflow my copy")).toBe(true);
     const cloneWorkflow = vi.fn(() => ({ handled: true as const, clearInput: true }));
-    executeSlashCommand("/cloneworkflow My Copy", makeCtx({ cloneWorkflow }));
+    executeSlashCommand("/clone-workflow My Copy", makeCtx({ cloneWorkflow }));
     expect(cloneWorkflow).toHaveBeenCalledWith("My Copy", "user");
   });
 
   it("clones into the project layer with --project", () => {
     const cloneWorkflow = vi.fn(() => ({ handled: true as const, clearInput: true }));
-    executeSlashCommand("/cloneworkflow --project Team Copy", makeCtx({ cloneWorkflow }));
+    executeSlashCommand("/clone-workflow --project Team Copy", makeCtx({ cloneWorkflow }));
     expect(cloneWorkflow).toHaveBeenCalledWith("Team Copy", "project");
   });
 
   it("errors without a new name", () => {
     const cloneWorkflow = vi.fn();
     const result = executeSlashCommand(
-      "/cloneworkflow",
+      "/clone-workflow",
       makeCtx({ cloneWorkflow }),
     ) as SlashCommandResult;
     expect(cloneWorkflow).not.toHaveBeenCalled();
@@ -47,22 +47,22 @@ describe("/cloneworkflow", () => {
   });
 
   it("warns when unavailable (headless)", () => {
-    const result = executeSlashCommand("/cloneworkflow x", makeCtx()) as SlashCommandResult;
+    const result = executeSlashCommand("/clone-workflow x", makeCtx()) as SlashCommandResult;
     if (result.handled) expect(result.notices?.[0]?.text).toContain("only available in the TUI");
   });
 });
 
-describe("/deleteworkflow", () => {
+describe("/delete-workflow", () => {
   it("is registered and passes the name to ctx.deleteWorkflow", () => {
     const deleteWorkflow = vi.fn(() => ({ handled: true as const, clearInput: true }));
-    executeSlashCommand("/deleteworkflow my-flow", makeCtx({ deleteWorkflow }));
+    executeSlashCommand("/delete-workflow my-flow", makeCtx({ deleteWorkflow }));
     expect(deleteWorkflow).toHaveBeenCalledWith("my-flow");
   });
 
   it("errors without a name", () => {
     const deleteWorkflow = vi.fn();
     const result = executeSlashCommand(
-      "/deleteworkflow",
+      "/delete-workflow",
       makeCtx({ deleteWorkflow }),
     ) as SlashCommandResult;
     expect(deleteWorkflow).not.toHaveBeenCalled();
@@ -70,7 +70,7 @@ describe("/deleteworkflow", () => {
   });
 
   it("completes against user workflow names", () => {
-    const cmd = listSlashCommands().find((c) => c.name === "deleteworkflow");
+    const cmd = listSlashCommands().find((c) => c.name === "delete-workflow");
     const completions = cmd?.complete?.(
       ["my"],
       makeCtx({ userWorkflowNames: ["my-flow", "other"] }),
@@ -79,24 +79,24 @@ describe("/deleteworkflow", () => {
   });
 });
 
-describe("/renameworkflow", () => {
+describe("/rename-workflow", () => {
   it("is registered and passes old-name and new-name to ctx.renameWorkflow", () => {
-    expect(isRegisteredSlashCommand("/renameworkflow old new")).toBe(true);
+    expect(isRegisteredSlashCommand("/rename-workflow old new")).toBe(true);
     const renameWorkflow = vi.fn(() => ({ handled: true as const, clearInput: true }));
-    executeSlashCommand("/renameworkflow old-flow new-flow", makeCtx({ renameWorkflow }));
+    executeSlashCommand("/rename-workflow old-flow new-flow", makeCtx({ renameWorkflow }));
     expect(renameWorkflow).toHaveBeenCalledWith("old-flow", "new-flow");
   });
 
   it("works with just a new name (renames active/selected workflow)", () => {
     const renameWorkflow = vi.fn(() => ({ handled: true as const, clearInput: true }));
-    executeSlashCommand("/renameworkflow new-flow", makeCtx({ renameWorkflow }));
+    executeSlashCommand("/rename-workflow new-flow", makeCtx({ renameWorkflow }));
     expect(renameWorkflow).toHaveBeenCalledWith("", "new-flow");
   });
 
   it("errors without a new name", () => {
     const renameWorkflow = vi.fn();
     const result = executeSlashCommand(
-      "/renameworkflow",
+      "/rename-workflow",
       makeCtx({ renameWorkflow }),
     ) as SlashCommandResult;
     expect(renameWorkflow).not.toHaveBeenCalled();
@@ -104,7 +104,7 @@ describe("/renameworkflow", () => {
   });
 
   it("completes against user workflow names", () => {
-    const cmd = listSlashCommands().find((c) => c.name === "renameworkflow");
+    const cmd = listSlashCommands().find((c) => c.name === "rename-workflow");
     const completions = cmd?.complete?.(
       ["my"],
       makeCtx({ userWorkflowNames: ["my-flow", "other"] }),
@@ -113,7 +113,7 @@ describe("/renameworkflow", () => {
   });
 
   it("does not complete the second argument (new-name)", () => {
-    const cmd = listSlashCommands().find((c) => c.name === "renameworkflow");
+    const cmd = listSlashCommands().find((c) => c.name === "rename-workflow");
     const completions = cmd?.complete?.(
       ["old-flow", "my"],
       makeCtx({ userWorkflowNames: ["my-flow", "other"] }),
@@ -122,7 +122,7 @@ describe("/renameworkflow", () => {
   });
 
   it("warns when unavailable (headless)", () => {
-    const result = executeSlashCommand("/renameworkflow x", makeCtx()) as SlashCommandResult;
+    const result = executeSlashCommand("/rename-workflow x", makeCtx()) as SlashCommandResult;
     if (result.handled) expect(result.notices?.[0]?.text).toContain("only available in the TUI");
   });
 });

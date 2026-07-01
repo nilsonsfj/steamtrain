@@ -24,15 +24,15 @@ function makeCtx(overrides: Partial<SlashCommandContext> = {}): SlashCommandCont
   };
 }
 
-describe("/createworkflow", () => {
+describe("/create-workflow", () => {
   it("is a registered slash command", () => {
-    expect(isRegisteredSlashCommand("/createworkflow audit my code")).toBe(true);
+    expect(isRegisteredSlashCommand("/create-workflow audit my code")).toBe(true);
   });
 
   it("delegates the description to ctx.createWorkflow", () => {
     const createWorkflow = vi.fn(() => ({ handled: true as const, clearInput: true }));
     const result = executeSlashCommand(
-      "/createworkflow review the auth module for security",
+      "/create-workflow review the auth module for security",
       makeCtx({ createWorkflow }),
     );
     expect(createWorkflow).toHaveBeenCalledWith("review the auth module for security", "user");
@@ -41,13 +41,13 @@ describe("/createworkflow", () => {
 
   it("routes to the project layer with --project", () => {
     const createWorkflow = vi.fn(() => ({ handled: true as const, clearInput: true }));
-    executeSlashCommand("/createworkflow --project audit the api", makeCtx({ createWorkflow }));
+    executeSlashCommand("/create-workflow --project audit the api", makeCtx({ createWorkflow }));
     expect(createWorkflow).toHaveBeenCalledWith("audit the api", "project");
   });
 
   it("errors when no description is given", () => {
     const createWorkflow = vi.fn();
-    const result = executeSlashCommand("/createworkflow", makeCtx({ createWorkflow }));
+    const result = executeSlashCommand("/create-workflow", makeCtx({ createWorkflow }));
     expect(createWorkflow).not.toHaveBeenCalled();
     expect(result.handled).toBe(true);
     if (result.handled) {
@@ -56,7 +56,7 @@ describe("/createworkflow", () => {
   });
 
   it("warns when the TUI callback is unavailable (e.g. headless)", () => {
-    const result = executeSlashCommand("/createworkflow do a thing", makeCtx());
+    const result = executeSlashCommand("/create-workflow do a thing", makeCtx());
     expect(result.handled).toBe(true);
     if (result.handled) {
       expect(result.notices?.[0]?.level).toBe("warn");

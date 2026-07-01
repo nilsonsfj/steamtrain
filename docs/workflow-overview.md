@@ -611,9 +611,9 @@ steamtrain
 - `Esc` cancel while running
 - `Esc` again after stop/finish to return to picker
 
-### Creating a workflow (`/createworkflow`)
+### Creating a workflow (`/create-workflow`)
 
-In workflow mode, `/createworkflow <description>` delegates to an agent to draft a
+In workflow mode, `/create-workflow <description>` delegates to an agent to draft a
 new workflow, validates it, saves it to your user catalog, and selects it in the
 picker. See [`workflow-creation.md`](workflow-creation.md).
 

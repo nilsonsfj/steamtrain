@@ -21,7 +21,7 @@ export interface WorkflowCreateState {
 }
 
 /**
- * The live panel for LLM-delegated workflow creation (`/createworkflow`). It
+ * The live panel for LLM-delegated workflow creation (`/create-workflow`). It
  * shows the agent doing the drafting, a tail of its streamed output, and the
  * validated result (or the error + raw output when generation fails).
  */

@@ -1,15 +1,15 @@
 import type { SlashCommand } from "../types";
 
 export const describeWorkflowCommand: SlashCommand = {
-  name: "describeworkflow",
+  name: "describe-workflow",
   description: "View or edit the description of a workflow",
-  usage: "/describeworkflow [new-description]",
+  usage: "/describe-workflow [new-description]",
   execute(args, ctx) {
     if (!ctx.updateWorkflowDescription) {
       return {
         handled: true,
         clearInput: true,
-        notices: [{ level: "warn", text: "/describeworkflow is only available in the TUI" }],
+        notices: [{ level: "warn", text: "/describe-workflow is only available in the TUI" }],
       };
     }
 
@@ -20,7 +20,7 @@ export const describeWorkflowCommand: SlashCommand = {
         notices: [
           {
             level: "warn",
-            text: "/describeworkflow requires an active workflow preview",
+            text: "/describe-workflow requires an active workflow preview",
           },
         ],
       };

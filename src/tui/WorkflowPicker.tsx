@@ -8,7 +8,7 @@ interface WorkflowPickerProps {
   workflows: WorkflowCatalogEntry[];
   selectedIndex: number;
   height: number;
-  /** Effective drafting agent · model for /createworkflow (right-aligned in the header). */
+  /** Effective drafting agent · model for /create-workflow (right-aligned in the header). */
   draftLabel?: string;
 }
 

@@ -2,9 +2,9 @@ import type { SlashCommand } from "../types";
 import { extractWorkflowScope } from "../workflow-scope";
 
 export const createWorkflowCommand: SlashCommand = {
-  name: "createworkflow",
+  name: "create-workflow",
   description: "Generate a new workflow from a description, via an agent (LLM delegation)",
-  usage: "/createworkflow [--project] <describe the workflow you want>",
+  usage: "/create-workflow [--project] <describe the workflow you want>",
   execute(args, ctx) {
     const { scope, rest } = extractWorkflowScope(args);
     const description = rest.join(" ").trim();
@@ -15,7 +15,7 @@ export const createWorkflowCommand: SlashCommand = {
         notices: [
           {
             level: "error",
-            text: "usage: /createworkflow [--project] <describe the workflow you want>",
+            text: "usage: /create-workflow [--project] <describe the workflow you want>",
           },
         ],
       };
@@ -25,7 +25,7 @@ export const createWorkflowCommand: SlashCommand = {
       return {
         handled: true,
         clearInput: true,
-        notices: [{ level: "warn", text: "/createworkflow is only available in the TUI" }],
+        notices: [{ level: "warn", text: "/create-workflow is only available in the TUI" }],
       };
     }
 

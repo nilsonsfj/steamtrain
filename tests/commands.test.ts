@@ -515,14 +515,14 @@ describe("autocompleteSlashCommand edge cases", () => {
   });
 });
 
-describe("saveworkflows command", () => {
+describe("save-workflows command", () => {
   it("delegates to the TUI save handler", () => {
     const saveWorkflows = vi.fn(() => ({
       handled: true as const,
       clearInput: true,
       notices: [{ level: "info" as const, text: "saved multi-plan" }],
     }));
-    const result = executeSlashCommand("/saveworkflows", makeCtx({ saveWorkflows }));
+    const result = executeSlashCommand("/save-workflows", makeCtx({ saveWorkflows }));
     expect(saveWorkflows).toHaveBeenCalledOnce();
     expect(result).toMatchObject({
       handled: true,
@@ -531,10 +531,10 @@ describe("saveworkflows command", () => {
   });
 
   it("reports when save is unavailable outside the TUI", () => {
-    const result = executeSlashCommand("/saveworkflows", makeCtx());
+    const result = executeSlashCommand("/save-workflows", makeCtx());
     expect(result).toMatchObject({
       handled: true,
-      notices: [{ level: "warn", text: "/saveworkflows is only available in the TUI" }],
+      notices: [{ level: "warn", text: "/save-workflows is only available in the TUI" }],
     });
   });
 });
@@ -603,22 +603,22 @@ describe("/prompt command", () => {
   });
 });
 
-describe("/describeworkflow command", () => {
+describe("/describe-workflow command", () => {
   it("warns without a workflow spec", () => {
-    const result = executeSlashCommand("/describeworkflow", makeCtx({ mode: "workflow" }));
+    const result = executeSlashCommand("/describe-workflow", makeCtx({ mode: "workflow" }));
     expect(result).toMatchObject({ handled: true });
     expect(result.handled && result.notices?.[0]?.level).toBe("warn");
   });
 
   it("warns outside TUI", () => {
-    const result = executeSlashCommand("/describeworkflow", makeCtx());
+    const result = executeSlashCommand("/describe-workflow", makeCtx());
     expect(result).toMatchObject({ handled: true });
     expect(result.handled && result.notices?.[0]?.text).toContain("only available in the TUI");
   });
 
   it("shows description for current workflow", () => {
     const result = executeSlashCommand(
-      "/describeworkflow",
+      "/describe-workflow",
       makeCtx({
         mode: "workflow",
         workflowSpec: { name: "test", phases: [] },
@@ -635,7 +635,7 @@ describe("/describeworkflow command", () => {
       notices: [{ level: "info" as const, text: "done" }],
     }));
     const result = executeSlashCommand(
-      "/describeworkflow my new description",
+      "/describe-workflow my new description",
       makeCtx({
         mode: "workflow",
         workflowSpec: { name: "test", phases: [] },
