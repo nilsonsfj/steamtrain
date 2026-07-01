@@ -28,18 +28,15 @@ export function executeDraftEffortCommand(
   }
 
   if (req.kind === "clear") {
-    dm.set(dm.current ? { ...dm.current, effort: undefined } : null);
+    dm.set({ ...dm.current!, effort: undefined });
     return notice("info", "drafting effort cleared (model default)");
   }
 
   if (req.kind === "set") {
-    if (!dm.current) {
-      return notice("error", "no draft target set (use /model first)");
-    }
-    dm.set({ ...dm.current, effort: req.effort });
+    dm.set({ ...dm.current!, effort: req.effort });
     return notice(
       "info",
-      `drafting effort set to ${req.effort} for ${formatDraftTarget({ ...dm.current, effort: req.effort }, dm.config)}`,
+      `drafting effort set to ${req.effort} for ${formatDraftTarget({ ...dm.current!, effort: req.effort }, dm.config)}`,
     );
   }
 

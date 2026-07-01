@@ -21,6 +21,33 @@ describe("WorkflowCreate panel", () => {
     expect(frame).toContain("checkout service");
   });
 
+  it("shows effort in the header when set", () => {
+    const state: WorkflowCreateState = {
+      status: "generating",
+      description: "review the checkout service",
+      agent: "claude",
+      model: "claude-sonnet-4-6",
+      effort: "high",
+      text: "",
+    };
+    const { lastFrame } = render(<WorkflowCreate state={state} width={100} height={20} />);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("effort high");
+  });
+
+  it("omits effort from the header when not set", () => {
+    const state: WorkflowCreateState = {
+      status: "generating",
+      description: "review code",
+      agent: "opencode",
+      model: "opencode/qwen3.6-plus-free",
+      text: "",
+    };
+    const { lastFrame } = render(<WorkflowCreate state={state} width={100} height={20} />);
+    const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("effort");
+  });
+
   it("shows the created workflow summary when done", () => {
     const state: WorkflowCreateState = {
       status: "done",
