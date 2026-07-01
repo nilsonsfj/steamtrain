@@ -93,7 +93,7 @@ export interface SlashCommandContext {
 /** The drafting-model knob `/model` drives when no workflow step is selected. */
 export interface DraftModelContext {
   /** Effective target (override if usable, else the auto pick); absent when no agent is healthy. */
-  current?: { agent: AgentInstanceId; model: string };
+  current?: { agent: AgentInstanceId; model: string; effort?: string };
   /** True when `current` comes from a user override rather than the auto pick. */
   usingOverride: boolean;
   /** Agents the doctor reports healthy, used to validate a requested target. */
@@ -101,7 +101,7 @@ export interface DraftModelContext {
   /** Live config used to map agent instances to provider model catalogs. */
   config?: SteamtrainConfig;
   /** Apply a new override, or `null` to reset to auto. */
-  set: (target: { agent: AgentInstanceId; model: string } | null) => void;
+  set: (target: { agent: AgentInstanceId; model: string; effort?: string } | null) => void;
 }
 
 export interface SlashCommand {

@@ -1,15 +1,21 @@
 import { effortsForModel, supportsEffort } from "../../agents";
 import { isWorkspaceMode } from "../../tui/modes";
+import { completeDraftEffortArgs, executeDraftEffortCommand } from "../draft-effort-target";
 import type { SlashCommand, SlashCommandContext, SlashCommandResult } from "../types";
 import { hasWorkflowStepTarget, workflowStepUnavailableNotice } from "../workflow-step-target";
 
 export const effortCommand: SlashCommand = {
   name: "effort",
-  description: "Set or list reasoning effort for the current workspace tab or workflow step",
+  description:
+    "Set or list reasoning effort for the current workspace tab, workflow step, or draft target",
   usage: "/effort [level|clear]",
   execute(args, ctx) {
     if (hasWorkflowStepTarget(ctx)) {
       return executeWorkflowEffortCommand(args, ctx);
+    }
+
+    if (ctx.draftModel) {
+      return executeDraftEffortCommand(args, ctx.draftModel);
     }
 
     if (!isWorkspaceMode(ctx.mode)) {
@@ -98,6 +104,9 @@ export const effortCommand: SlashCommand = {
   complete(args, ctx) {
     if (hasWorkflowStepTarget(ctx)) {
       return completeWorkflowEffortArgs(args, ctx);
+    }
+    if (ctx.draftModel) {
+      return completeDraftEffortArgs(args, ctx.draftModel);
     }
     if (!isWorkspaceMode(ctx.mode)) return [];
     const entry = ctx.workspaceMap.get(ctx.mode);

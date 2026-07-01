@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { defaultDraftModel, modelIdsForAgent } from "../src/agents";
+import { defaultDraftModel, effortsForModel, modelIdsForAgent } from "../src/agents";
 import type { DoctorResult } from "../src/doctor";
 import {
   autoDraftTarget,
+  draftEffortCompletions,
   draftModelCompletions,
+  formatDraftTarget,
   healthyAgentSet,
+  parseDraftEffortRequest,
   parseDraftModelRequest,
   resolveDraftTarget,
 } from "../src/tui/draft-model";
@@ -165,5 +168,94 @@ describe("draftModelCompletions", () => {
     expect(out).toContain("claude");
     expect(out).toContain(aModelFor("claude"));
     expect(out).not.toContain("codex");
+  });
+});
+
+describe("formatDraftTarget", () => {
+  it("includes effort when set", () => {
+    const model = aModelFor("claude");
+    const formatted = formatDraftTarget({ agent: "claude", model, effort: "high" });
+    expect(formatted).toContain("claude");
+    expect(formatted).toContain("effort high");
+  });
+
+  it("omits effort when not set", () => {
+    const model = aModelFor("claude");
+    const formatted = formatDraftTarget({ agent: "claude", model });
+    expect(formatted).toContain("claude");
+    expect(formatted).not.toContain("effort");
+  });
+});
+
+describe("parseDraftEffortRequest", () => {
+  it("returns error when no draft target is set", () => {
+    const res = parseDraftEffortRequest([], undefined);
+    expect(res.kind).toBe("error");
+    expect(res.kind === "error" && res.message).toMatch(/no draft target set/);
+  });
+
+  it("shows current effort on no args", () => {
+    const model = aModelFor("claude");
+    const efforts = effortsForModel("claude", model);
+    const res = parseDraftEffortRequest([], { agent: "claude", model });
+    expect(res.kind).toBe("show");
+    if (res.kind === "show") {
+      expect(res.current).toBe("default");
+      expect(res.efforts).toEqual(efforts);
+    }
+  });
+
+  it("shows override effort when set", () => {
+    const model = aModelFor("claude");
+    const res = parseDraftEffortRequest([], { agent: "claude", model, effort: "high" });
+    expect(res.kind).toBe("show");
+    if (res.kind === "show") {
+      expect(res.current).toBe("high");
+    }
+  });
+
+  it("clears effort on 'clear' or 'default'", () => {
+    const model = aModelFor("claude");
+    for (const word of ["clear", "DEFAULT"]) {
+      const res = parseDraftEffortRequest([word], { agent: "claude", model });
+      expect(res.kind).toBe("clear");
+    }
+  });
+
+  it("sets a valid effort level", () => {
+    const model = aModelFor("claude");
+    const efforts = effortsForModel("claude", model);
+    if (efforts.length > 0) {
+      const res = parseDraftEffortRequest([efforts[0]!], { agent: "claude", model });
+      expect(res.kind).toBe("set");
+      if (res.kind === "set") {
+        expect(res.effort).toBe(efforts[0]);
+      }
+    }
+  });
+
+  it("rejects an unknown effort level", () => {
+    const model = aModelFor("claude");
+    const res = parseDraftEffortRequest(["nonexistent"], { agent: "claude", model });
+    expect(res.kind).toBe("error");
+    expect(res.kind === "error" && res.message).toMatch(/unknown effort/);
+  });
+});
+
+describe("draftEffortCompletions", () => {
+  it("returns efforts plus clear when supported", () => {
+    const model = aModelFor("claude");
+    const efforts = effortsForModel("claude", model);
+    const out = draftEffortCompletions({ agent: "claude", model });
+    if (efforts.length > 0) {
+      expect(out).toContain(efforts[0]!);
+      expect(out).toContain("clear");
+    } else {
+      expect(out).toEqual(["clear"]);
+    }
+  });
+
+  it("returns only clear when no target", () => {
+    expect(draftEffortCompletions(undefined)).toEqual(["clear"]);
   });
 });
