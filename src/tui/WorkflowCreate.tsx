@@ -12,6 +12,7 @@ export interface WorkflowCreateState {
   description: string;
   agent: AgentInstanceId;
   model: string;
+  effort?: string;
   /** Streamed model output (tail shown live). */
   text: string;
   error?: string;
@@ -53,7 +54,10 @@ export function WorkflowCreate({
           create workflow
         </Text>
         <Text color={agentColor}>
-          {truncate(`${state.agent} · ${state.model}`, innerWidth - 15)}
+          {truncate(
+            `${state.agent} · ${state.model}${state.effort ? ` · effort ${state.effort}` : ""}`,
+            innerWidth - 15,
+          )}
         </Text>
       </Box>
       <Text color="gray">“{truncate(state.description, innerWidth - 2)}”</Text>

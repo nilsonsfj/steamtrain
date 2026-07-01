@@ -1,17 +1,20 @@
 import {
   defaultDraftModel,
+  effortsForModel,
   modelIdsForAgent,
   modelNameForAgent,
   resolveAgentInstances,
+  supportsEffort,
 } from "../agents";
 import type { SteamtrainConfig } from "../config/types";
 import type { DoctorResult } from "../doctor";
 import type { AgentInstanceId } from "../types/events";
 
-/** Agent + model used to draft (LLM-author) a new workflow. */
+/** Agent + model (+ optional effort) used to draft (LLM-author) a new workflow. */
 export interface DraftTarget {
   agent: AgentInstanceId;
   model: string;
+  effort?: string;
 }
 
 /**
@@ -83,10 +86,12 @@ export function resolveDraftTarget(
   return { target: autoDraftTarget(healthy, config), usingOverride: false };
 }
 
-/** `agent · model-name` (falls back to the raw id when no friendly name). */
+/** `agent · model-name` (falls back to the raw id when no friendly name), plus effort if set. */
 export function formatDraftTarget(target: DraftTarget, config?: SteamtrainConfig): string {
   const name = modelNameForAgent(target.agent, target.model, config);
-  return name === target.model ? `${target.agent} · ${target.model}` : `${target.agent} · ${name}`;
+  const base =
+    name === target.model ? `${target.agent} · ${target.model}` : `${target.agent} · ${name}`;
+  return target.effort ? `${base} · effort ${target.effort}` : base;
 }
 
 export type DraftModelRequest =
@@ -187,4 +192,72 @@ export function draftModelCompletions(
     out.push(...modelIdsForAgent(agent, config));
   }
   return out;
+}
+
+export type DraftEffortRequest =
+  | { kind: "show"; current: string; efforts: readonly string[] }
+  | { kind: "clear" }
+  | { kind: "set"; effort: string }
+  | { kind: "error"; message: string };
+
+/**
+ * Parse `/effort` args (in the workflow picker) into a draft-effort action:
+ *
+ * - no args → show the current effort
+ * - `clear` / `default` → clear the effort override
+ * - `<level>` → set the effort level (validated against the current target)
+ */
+export function parseDraftEffortRequest(
+  args: string[],
+  current: DraftTarget | undefined,
+  config?: SteamtrainConfig,
+): DraftEffortRequest {
+  if (!current) {
+    return { kind: "error", message: "no draft target set (use /model first)" };
+  }
+
+  if (args.length === 0) {
+    const currentEffort = current.effort ?? "default";
+    if (!supportsEffort(current.agent, current.model, config)) {
+      return {
+        kind: "error",
+        message: `${current.model} does not support effort levels (current: ${currentEffort})`,
+      };
+    }
+    const efforts = effortsForModel(current.agent, current.model, config);
+    return { kind: "show", current: currentEffort, efforts };
+  }
+
+  const next = args[0]!;
+  const lowered = next.toLowerCase();
+  if (lowered === "clear" || lowered === "default") {
+    return { kind: "clear" };
+  }
+
+  if (!supportsEffort(current.agent, current.model, config)) {
+    return {
+      kind: "error",
+      message: `${current.model} does not support effort levels`,
+    };
+  }
+
+  const efforts = effortsForModel(current.agent, current.model, config);
+  if (!efforts.includes(next)) {
+    return {
+      kind: "error",
+      message: `unknown effort '${next}' for ${current.model}; try: ${efforts.join(", ")} or clear`,
+    };
+  }
+
+  return { kind: "set", effort: next };
+}
+
+/** Completion candidates for `/effort` in the workflow picker. */
+export function draftEffortCompletions(
+  current: DraftTarget | undefined,
+  config?: SteamtrainConfig,
+): string[] {
+  if (!current || !supportsEffort(current.agent, current.model, config)) return ["clear"];
+  const efforts = effortsForModel(current.agent, current.model, config);
+  return efforts.length > 0 ? [...efforts, "clear"] : ["clear"];
 }

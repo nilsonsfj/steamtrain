@@ -62,13 +62,13 @@ These two reducers are near-duplicates and are a prime extraction target (see §
 | Cancel a run | ✅ | ✅ | |
 | Resume from on-disk cache | ✅ | ✅ | |
 | Create workflow via LLM draft | ✅ | ✅ | Different draft-target selection (below) |
-| Choose drafting agent/model | ⚠️ | ✅ | TUI: `/model` on the picker sets a session draft override (`src/tui/draft-model.ts`), shown in the header; auto-picks first healthy agent otherwise. Web: per-draft agent/model/effort selects in the create modal. TUI override has no effort knob yet |
+| Choose drafting agent/model | ✅ | ✅ | TUI: `/model` + `/effort` on the picker sets a session draft override; Web: per-draft agent/model/effort selects in the create modal |
 | Per-step **agent** override | ✅ | ✅ | |
 | Per-step **model** override | ✅ | ✅ | |
 | Per-step **effort** override | ✅ | ✅ | |
-| Per-step **prompt** editing | ❌ | ✅ | TUI override is `Pick<…,"agent"\|"model"\|"effort">` only |
-| Edit workflow **name** | ❌ | ✅ | Web modal; rename drops old user entry |
-| Edit workflow **description** | ❌ | ✅ | |
+| Per-step **prompt** editing | ✅ | ✅ | TUI `/prompt <text>`; Web modal |
+| Edit workflow **name** | ✅ | ✅ | TUI `/renameworkflow <old> <new>`; Web modal |
+| Edit workflow **description** | ✅ | ✅ | TUI `/describeworkflow <name> <desc>`; Web modal |
 | Clone / duplicate a workflow | ✅ | ✅ | Both via `WorkflowAuthor.clone`; TUI `/cloneworkflow [--project] <new-name>` |
 | Delete a user or project workflow | ✅ | ✅ | Both via `WorkflowAuthor.remove`; TUI `/deleteworkflow <name>` (bundled still guarded) |
 | Author into the **project** layer (`steamtrain.json`) | ✅ | ✅ | Shared `WorkflowScope`; create/clone/save target user or project. CLI: `workflow create --scope project`; TUI: `--project`; web: scope selector |
@@ -90,21 +90,15 @@ Now in the **shared core** and exposed by the TUI:
 
 - ✅ **Clone / duplicate** — `WorkflowAuthor.clone`; TUI `/cloneworkflow`.
 - ✅ **Delete** a user workflow — `WorkflowAuthor.remove`; TUI `/deleteworkflow`.
+- ✅ **Per-step prompt editing** — TUI `/prompt` command.
+- ✅ **Workflow description editing** — TUI `/describeworkflow` command.
+- ✅ **Workflow name editing** — TUI `/renameworkflow` command.
+- ✅ **Explicit draft-target selection** — TUI `/model` (agent/model) + `/effort` (effort level) in the workflow picker.
 
 Still web-only (the shared core can persist them, but the TUI has no editing UI
 for them yet):
 
-1. **Per-step prompt editing.** The web Configure modal rewrites any
-   agent-backed step's prompt. The TUI step override is still
-   `agent`/`model`/`effort` only. The shared `save`/`clone` path *can* write an
-   edited prompt — the TUI just lacks an editor affordance.
-2. **Workflow name & description editing**, including clean rename
-   (`WorkflowAuthor.save(name, spec, previousName)` already handles the rename;
-   the TUI has no rename/description editor).
-3. **Explicit draft-target selection** — the web create form picks agent + model
-   + effort from `/api/meta`; the TUI still auto-picks the first healthy agent
-   (`pickGenerationTarget`). `agentMeta()` is shared, so a TUI picker is now a
-   thin add-on.
+(none remaining)
 
 ## 4. TUI-only capabilities (remaining gaps to expose in the web)
 
@@ -144,9 +138,9 @@ Status after `feat/unify-workflow-authoring`:
    TUI uses the staged path; the web uses immediate. The seam exists for the web
    to add a staged mode.
 
-4. ⚠️ **Capability surface.** The core exposes the full edit surface
+4. ✅ **Capability surface.** The core exposes the full edit surface
    (prompt/name/description via `save`, clone, delete). The TUI now renders
-   clone + delete; prompt/name/description editors are still web-only UI.
+   all of them: clone, delete, prompt, name, description, and draft-target selection.
 
 5. ✅ **Metadata view-model.** `buildAgentMeta` / `defaultDraftModel` in
    `src/agents/agent-meta.ts` is the one agent→model→effort→default→health
@@ -169,13 +163,13 @@ the TUI and the staged-flush seam (§5.3). What's left:
    bundle it for the browser (now built into `src/web/public/steamtrain-reducer.bundle.js`
    and served at `/static/steamtrain-reducer.bundle.js`; previously embedded in
    `html.ts`) so the web UI uses the same fold as the TUI (§5.1). Done!
-2. **Render the full edit surface in the TUI** — per-step prompt editing and
-   name/description editing (the core already persists them) (§4 / §5.4).
+2. ✅ **Render the full edit surface in the TUI** — per-step prompt editing and
+   name/description editing (the core already persists them) (§4 / §5.4). Done!
 3. **Add a staged mode to the web** — "try without saving" + an explicit flush
    button with saved/skipped/unchanged reporting, using `previewWithOverrides` /
    `flushSessionOverrides` (§4).
-4. **TUI draft-target picker** — let the TUI choose agent/model/effort for the
-   LLM draft using the shared `agentMeta()` instead of auto-picking (§3).
+4. ✅ **TUI draft-target picker** — let the TUI choose agent/model/effort for the
+   LLM draft using the shared `agentMeta()` instead of auto-picking (§3). Done!
 
 End state: `src/tui` and `src/web` contain only rendering + input; everything
 about workflows (load, edit, draft, validate, persist, run, fold events) lives

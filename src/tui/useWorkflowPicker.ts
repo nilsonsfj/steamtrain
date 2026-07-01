@@ -371,12 +371,13 @@ export function useWorkflowPicker({
         description,
         agent: target.agent,
         model: target.model,
+        effort: target.effort,
         text: "",
       });
 
       void (async () => {
         const result = await author.generate(
-          { description, agent: target.agent, model: target.model, scope },
+          { description, agent: target.agent, model: target.model, effort: target.effort, scope },
           (text) => {
             setWfCreate((prev) =>
               prev && prev.status === "generating" ? { ...prev, text: prev.text + text } : prev,
@@ -428,7 +429,7 @@ export function useWorkflowPicker({
         notices: [
           {
             level: "info" as const,
-            text: `drafting workflow with ${target.agent} (${target.model})…`,
+            text: `drafting workflow with ${target.agent} (${target.model})${target.effort ? ` · effort ${target.effort}` : ""}…`,
           },
         ],
       };
