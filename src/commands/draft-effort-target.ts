@@ -23,7 +23,8 @@ export function executeDraftEffortCommand(
   const req = parseDraftEffortRequest(args, dm.current, dm.config);
 
   if (req.kind === "error") {
-    return notice("error", req.message);
+    const isUnsupported = /does not support effort/.test(req.message);
+    return notice(isUnsupported ? "info" : "error", req.message);
   }
 
   if (req.kind === "clear") {

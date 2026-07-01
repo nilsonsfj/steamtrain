@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { defaultDraftModel, effortsForModel, modelIdsForAgent } from "../src/agents";
+import {
+  defaultDraftModel,
+  effortForModelChange,
+  effortsForModel,
+  modelIdsForAgent,
+} from "../src/agents";
+import type { SlashCommandResult } from "../src/commands/types";
 import type { DoctorResult } from "../src/doctor";
 import {
   autoDraftTarget,
@@ -257,5 +263,107 @@ describe("draftEffortCompletions", () => {
 
   it("returns only clear when no target", () => {
     expect(draftEffortCompletions(undefined)).toEqual(["clear"]);
+  });
+});
+
+describe("executeDraftEffortCommand", () => {
+  function makeDm(
+    current?: { agent: AgentInstanceId; model: string; effort?: string },
+    usingOverride = false,
+  ) {
+    const calls: Array<{ agent: AgentInstanceId; model: string; effort?: string } | null> = [];
+    return {
+      current,
+      usingOverride,
+      healthyAgents: ["claude", "opencode"] as AgentInstanceId[],
+      config: undefined,
+      set: (target: { agent: AgentInstanceId; model: string; effort?: string } | null) => {
+        calls.push(target);
+      },
+      calls,
+    };
+  }
+
+  it("returns error notice when no draft target is set and no args", async () => {
+    const dm = makeDm(undefined);
+    const { executeDraftEffortCommand } = await import("../src/commands/draft-effort-target");
+    const result = executeDraftEffortCommand([], dm) as Extract<
+      SlashCommandResult,
+      { handled: true }
+    >;
+    expect(result.handled).toBe(true);
+    expect(result.notices?.[0]?.level).toBe("error");
+  });
+
+  it("clears effort and calls dm.set", async () => {
+    const model = aModelFor("claude");
+    const dm = makeDm({ agent: "claude", model, effort: "high" });
+    const { executeDraftEffortCommand } = await import("../src/commands/draft-effort-target");
+    const result = executeDraftEffortCommand(["clear"], dm) as Extract<
+      SlashCommandResult,
+      { handled: true }
+    >;
+    expect(result.handled).toBe(true);
+    expect(result.notices?.[0]?.text).toMatch(/cleared/);
+    expect(dm.calls[0]).toEqual({ agent: "claude", model, effort: undefined });
+  });
+
+  it("sets effort and calls dm.set", async () => {
+    const model = aModelFor("claude");
+    const dm = makeDm({ agent: "claude", model });
+    const efforts = effortsForModel("claude", model);
+    if (efforts.length > 0) {
+      const { executeDraftEffortCommand } = await import("../src/commands/draft-effort-target");
+      const result = executeDraftEffortCommand([efforts[0]!], dm) as Extract<
+        SlashCommandResult,
+        { handled: true }
+      >;
+      expect(result.handled).toBe(true);
+      expect(result.notices?.[0]?.text).toMatch(/set to/);
+      expect(dm.calls[0]?.effort).toBe(efforts[0]);
+    }
+  });
+
+  it("shows current effort on no args", async () => {
+    const model = aModelFor("claude");
+    const dm = makeDm({ agent: "claude", model, effort: "high" }, true);
+    const { executeDraftEffortCommand } = await import("../src/commands/draft-effort-target");
+    const result = executeDraftEffortCommand([], dm) as Extract<
+      SlashCommandResult,
+      { handled: true }
+    >;
+    expect(result.handled).toBe(true);
+    expect(result.notices?.[0]?.text).toMatch(/high/);
+    expect(result.notices?.[0]?.text).toMatch(/override/);
+  });
+});
+
+describe("completeDraftEffortArgs", () => {
+  it("returns completions for first arg", async () => {
+    const model = aModelFor("claude");
+    const dm = {
+      current: { agent: "claude" as AgentInstanceId, model },
+      usingOverride: false,
+      healthyAgents: ["claude"] as AgentInstanceId[],
+      config: undefined,
+      set: () => {},
+    };
+    const { completeDraftEffortArgs } = await import("../src/commands/draft-effort-target");
+    const out = completeDraftEffortArgs([], dm);
+    expect(out.length).toBeGreaterThan(0);
+  });
+
+  it("returns empty for second arg", async () => {
+    const model = aModelFor("claude");
+    const dm = {
+      current: { agent: "claude" as AgentInstanceId, model },
+      usingOverride: false,
+      healthyAgents: ["claude"] as AgentInstanceId[],
+      config: undefined,
+      set: () => {},
+    };
+    const { completeDraftEffortArgs } = await import("../src/commands/draft-effort-target");
+    const out = completeDraftEffortArgs(["high", ""], dm);
+    expect(out).toEqual([]);
   });
 });

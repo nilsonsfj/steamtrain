@@ -1,4 +1,4 @@
-import { modelIdsForAgent } from "../agents";
+import { effortForModelChange, modelIdsForAgent } from "../agents";
 import {
   type DraftTarget,
   draftModelCompletions,
@@ -34,8 +34,17 @@ export function executeDraftModelCommand(
   }
 
   if (req.kind === "set") {
-    dm.set(req.target);
-    return notice("info", `drafting model set to ${formatDraftTarget(req.target, dm.config)}`);
+    const prevEffort = dm.current?.effort;
+    const sameAgent = dm.current?.agent === req.target.agent;
+    const effort =
+      sameAgent && prevEffort
+        ? effortForModelChange(req.target.agent, req.target.model, prevEffort, dm.config)
+        : undefined;
+    dm.set({ ...req.target, effort });
+    return notice(
+      "info",
+      `drafting model set to ${formatDraftTarget({ ...req.target, effort }, dm.config)}`,
+    );
   }
 
   // show
