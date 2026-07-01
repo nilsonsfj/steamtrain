@@ -1,15 +1,15 @@
 import type { SlashCommand } from "../types";
 
 export const saveWorkflowsCommand: SlashCommand = {
-  name: "saveworkflows",
+  name: "save-workflows",
   description: "Save session workflow step changes to ~/.steamtrain/workflows.json",
-  usage: "/saveworkflows",
+  usage: "/save-workflows",
   execute(args, ctx) {
     if (args.length > 0) {
       return {
         handled: true,
         clearInput: true,
-        notices: [{ level: "error", text: "usage: /saveworkflows" }],
+        notices: [{ level: "error", text: "usage: /save-workflows" }],
       };
     }
 
@@ -17,7 +17,7 @@ export const saveWorkflowsCommand: SlashCommand = {
       return {
         handled: true,
         clearInput: true,
-        notices: [{ level: "warn", text: "/saveworkflows is only available in the TUI" }],
+        notices: [{ level: "warn", text: "/save-workflows is only available in the TUI" }],
       };
     }
 

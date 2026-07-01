@@ -67,13 +67,13 @@ These two reducers are near-duplicates and are a prime extraction target (see §
 | Per-step **model** override | ✅ | ✅ | |
 | Per-step **effort** override | ✅ | ✅ | |
 | Per-step **prompt** editing | ✅ | ✅ | TUI `/prompt <text>`; Web modal |
-| Edit workflow **name** | ✅ | ✅ | TUI `/renameworkflow <old> <new>`; Web modal |
-| Edit workflow **description** | ✅ | ✅ | TUI `/describeworkflow <name> <desc>`; Web modal |
-| Clone / duplicate a workflow | ✅ | ✅ | Both via `WorkflowAuthor.clone`; TUI `/cloneworkflow [--project] <new-name>` |
-| Delete a user or project workflow | ✅ | ✅ | Both via `WorkflowAuthor.remove`; TUI `/deleteworkflow <name>` (bundled still guarded) |
+| Edit workflow **name** | ✅ | ✅ | TUI `/rename-workflow <old> <new>`; Web modal |
+| Edit workflow **description** | ✅ | ✅ | TUI `/describe-workflow <name> <desc>`; Web modal |
+| Clone / duplicate a workflow | ✅ | ✅ | Both via `WorkflowAuthor.clone`; TUI `/clone-workflow [--project] <new-name>` |
+| Delete a user or project workflow | ✅ | ✅ | Both via `WorkflowAuthor.remove`; TUI `/delete-workflow <name>` (bundled still guarded) |
 | Author into the **project** layer (`steamtrain.json`) | ✅ | ✅ | Shared `WorkflowScope`; create/clone/save target user or project. CLI: `workflow create --scope project`; TUI: `--project`; web: scope selector |
 | Stage overrides *without* persisting | ✅ | ❌ | TUI session overrides (now flushed via `WorkflowAuthor.flushSessionOverrides`); web still saves immediately |
-| Explicit "save session changes" step | ✅ | ⚠️ | TUI `/saveworkflows` → shared flush; web persists on each save |
+| Explicit "save session changes" step | ✅ | ⚠️ | TUI `/save-workflows` → shared flush; web persists on each save |
 | Skip/unchanged reporting on save | ✅ | ❌ | `flushSessionOverrides`/`saveSessionWorkflowsToUser` returns saved/skipped/unchanged (TUI surfaces it) |
 | Agent health display | ✅ | ✅ | TUI doctor panel; web health chips |
 | Run history (inspect past runs) | ✅ | ✅ | Shared `RunRecordBuilder` + `WorkflowHistoryStore` (`.steamtrain/history`); TUI `/history`, web ⏱ History, CLI `workflow history` |
@@ -88,11 +88,11 @@ These two reducers are near-duplicates and are a prime extraction target (see §
 
 Now in the **shared core** and exposed by the TUI:
 
-- ✅ **Clone / duplicate** — `WorkflowAuthor.clone`; TUI `/cloneworkflow`.
-- ✅ **Delete** a user workflow — `WorkflowAuthor.remove`; TUI `/deleteworkflow`.
+- ✅ **Clone / duplicate** — `WorkflowAuthor.clone`; TUI `/clone-workflow`.
+- ✅ **Delete** a user workflow — `WorkflowAuthor.remove`; TUI `/delete-workflow`.
 - ✅ **Per-step prompt editing** — TUI `/prompt` command.
-- ✅ **Workflow description editing** — TUI `/describeworkflow` command.
-- ✅ **Workflow name editing** — TUI `/renameworkflow` command.
+- ✅ **Workflow description editing** — TUI `/describe-workflow` command.
+- ✅ **Workflow name editing** — TUI `/rename-workflow` command.
 - ✅ **Explicit draft-target selection** — TUI `/model` (agent/model) + `/effort` (effort level) in the workflow picker.
 
 Still web-only (the shared core can persist them, but the TUI has no editing UI
@@ -108,7 +108,7 @@ wraps `saveSessionWorkflowsToUser`), but the **web UI** doesn't surface them:
 1. **Staged session overrides** — change a step's agent/model/effort for the
    *next run only* without writing to disk. The web still commits immediately;
    `previewWithOverrides` + `flushSessionOverrides` exist for it to adopt.
-2. **`/saveworkflows`-style flush** with **saved / skipped / unchanged**
+2. **`/save-workflows`-style flush** with **saved / skipped / unchanged**
    reporting — available via the shared core; the web has no "flush" button yet.
 3. **Prompt history & drafts** — part of the run experience the web lacks.
 
@@ -130,7 +130,7 @@ Status after `feat/unify-workflow-authoring`:
    drives it via `Orchestrator` (which implements `AuthoringHost`); the TUI
    drives the **same class** via a small React-state adapter host. The TUI's
    `createWorkflow`, `saveWorkflows`, and preview resolution all route through
-   it; `/cloneworkflow` and `/deleteworkflow` are thin wrappers over it.
+   it; `/clone-workflow` and `/delete-workflow` are thin wrappers over it.
 
 3. ⚠️ **Override vs. edit model.** The core now exposes both:
    `previewWithOverrides` (staged, non-destructive) and `flushSessionOverrides`

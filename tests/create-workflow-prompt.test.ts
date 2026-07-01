@@ -3,27 +3,27 @@ import { createWorkflowPromptValue } from "../src/tui/create-workflow-prompt";
 
 describe("createWorkflowPromptValue", () => {
   it("returns the bare command for an empty or whitespace seed", () => {
-    expect(createWorkflowPromptValue("")).toBe("/createworkflow ");
-    expect(createWorkflowPromptValue("   ")).toBe("/createworkflow ");
+    expect(createWorkflowPromptValue("")).toBe("/create-workflow ");
+    expect(createWorkflowPromptValue("   ")).toBe("/create-workflow ");
   });
 
   it("honors the create intent for a lone slash instead of stranding it", () => {
-    expect(createWorkflowPromptValue("/")).toBe("/createworkflow ");
-    expect(createWorkflowPromptValue("  /  ")).toBe("/createworkflow ");
+    expect(createWorkflowPromptValue("/")).toBe("/create-workflow ");
+    expect(createWorkflowPromptValue("  /  ")).toBe("/create-workflow ");
   });
 
-  it("wraps plain text as a /createworkflow description", () => {
+  it("wraps plain text as a /create-workflow description", () => {
     expect(createWorkflowPromptValue("build a release pipeline")).toBe(
-      "/createworkflow build a release pipeline",
+      "/create-workflow build a release pipeline",
     );
   });
 
   it("trims surrounding whitespace from plain text", () => {
-    expect(createWorkflowPromptValue("  audit deps  ")).toBe("/createworkflow audit deps");
+    expect(createWorkflowPromptValue("  audit deps  ")).toBe("/create-workflow audit deps");
   });
 
-  it("leaves an in-progress /createworkflow command untouched (no double prefix)", () => {
-    const seed = "/createworkflow build a release pipeline";
+  it("leaves an in-progress /create-workflow command untouched (no double prefix)", () => {
+    const seed = "/create-workflow build a release pipeline";
     expect(createWorkflowPromptValue(seed)).toBe(seed);
   });
 

@@ -10,7 +10,7 @@ import type { DraftModelContext, SlashCommandResult } from "./types";
  * Drive the drafting effort from `/effort` while sitting on the workflow
  * picker (no step selected). This is the sibling of the workflow-step and
  * workspace-tab `/effort` handlers: same command, different target depending on
- * where you are. The override it sets is what `/createworkflow` drafts with.
+ * where you are. The override it sets is what `/create-workflow` drafts with.
  *
  * Takes the (already narrowed) {@link DraftModelContext} directly rather than the
  * whole command context, so the caller's `if (ctx.draftModel)` guard is the type

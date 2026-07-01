@@ -1,15 +1,15 @@
 import type { SlashCommand } from "../types";
 
 export const renameWorkflowCommand: SlashCommand = {
-  name: "renameworkflow",
+  name: "rename-workflow",
   description: "Rename a user or project workflow",
-  usage: "/renameworkflow [old-name] <new-name>",
+  usage: "/rename-workflow [old-name] <new-name>",
   execute(args, ctx) {
     if (!ctx.renameWorkflow) {
       return {
         handled: true,
         clearInput: true,
-        notices: [{ level: "warn", text: "/renameworkflow is only available in the TUI" }],
+        notices: [{ level: "warn", text: "/rename-workflow is only available in the TUI" }],
       };
     }
 
@@ -24,7 +24,7 @@ export const renameWorkflowCommand: SlashCommand = {
       return {
         handled: true,
         clearInput: true,
-        notices: [{ level: "error", text: "usage: /renameworkflow [old-name] <new-name>" }],
+        notices: [{ level: "error", text: "usage: /rename-workflow [old-name] <new-name>" }],
       };
     }
 

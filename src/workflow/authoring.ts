@@ -324,7 +324,7 @@ export class WorkflowAuthor {
   /**
    * Flush staged session overrides to the user workflows file, reporting
    * saved / skipped / unchanged. Reloads the live catalog when anything was
-   * written. This is the shared core behind the TUI's `/saveworkflows`.
+   * written. This is the shared core behind the TUI's `/save-workflows`.
    */
   async flushSessionOverrides(
     sessionOverrides: Record<string, WorkflowStepOverrides>,

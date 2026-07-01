@@ -82,23 +82,23 @@ appears immediately in `steamtrain workflow list` and the TUI picker, tagged as 
 The default agent is OpenCode on a **free** Zen model, so creation works without
 paid provider credentials.
 
-## TUI: `/createworkflow`
+## TUI: `/create-workflow`
 
 In the TUI (workflow mode), the workflow picker always ends with a selectable
 **`+ Create a new workflow…`** row. Three ways to start a draft:
 
 - Highlight that row with ↑/↓ and press `Enter`.
 - Press `Ctrl+N` from anywhere on the picker.
-- Type the `/createworkflow` command yourself.
+- Type the `/create-workflow` command yourself.
 
-The first two prefill the prompt with `/createworkflow ` (carrying any plain text
+The first two prefill the prompt with `/create-workflow ` (carrying any plain text
 you already typed) and focus it, so you finish the description and press `Enter`
 to run it — one extra keystroke than typing the command directly, but nothing to
 memorize. When no workflows exist yet, the create row is the only thing on
 screen.
 
 ```
-/createworkflow review the checkout service for race conditions, then report
+/create-workflow review the checkout service for race conditions, then report
 ```
 
 steamtrain picks the first doctor-healthy agent (preferring OpenCode's free
@@ -128,11 +128,11 @@ step or a workspace tab — the target just depends on where you are.
 Add `--project` to save into the project's `./steamtrain.json` instead:
 
 ```
-/createworkflow --project team release checklist with sign-off gate
+/create-workflow --project team release checklist with sign-off gate
 ```
 
-The same flag works for cloning (`/cloneworkflow --project <new-name>`), and
-`/deleteworkflow <name>` removes either a user or a project workflow.
+The same flag works for cloning (`/clone-workflow --project <new-name>`), and
+`/delete-workflow <name>` removes either a user or a project workflow.
 
 ## How robust is extraction?
 

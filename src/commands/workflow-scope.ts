@@ -3,7 +3,7 @@ import type { WorkflowScope } from "../workflow";
 /**
  * Pull a `--project` / `--scope <user|project>` flag out of a command's
  * arguments, returning the chosen scope (default `user`) and the remaining
- * positional args. Lets `/createworkflow` and `/cloneworkflow` target the
+ * positional args. Lets `/create-workflow` and `/clone-workflow` target the
  * project layer (`./steamtrain.json`) without disturbing their free-text args.
  */
 export function extractWorkflowScope(args: string[]): { scope: WorkflowScope; rest: string[] } {

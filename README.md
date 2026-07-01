@@ -105,7 +105,7 @@ records are pruned automatically.
 - **CLI:** `steamtrain workflow history` (see above).
 
 See [`docs/workflow-creation.md`](docs/workflow-creation.md) for the creation flow
-(CLI `workflow create` and the TUI `/createworkflow` command).
+(CLI `workflow create` and the TUI `/create-workflow` command).
 
 ### Build a standalone binary
 

@@ -1,15 +1,15 @@
 import type { SlashCommand } from "../types";
 
 export const deleteWorkflowCommand: SlashCommand = {
-  name: "deleteworkflow",
+  name: "delete-workflow",
   description: "Delete a user or project workflow (from workflows.json or steamtrain.json)",
-  usage: "/deleteworkflow <name>",
+  usage: "/delete-workflow <name>",
   execute(args, ctx) {
     if (!ctx.deleteWorkflow) {
       return {
         handled: true,
         clearInput: true,
-        notices: [{ level: "warn", text: "/deleteworkflow is only available in the TUI" }],
+        notices: [{ level: "warn", text: "/delete-workflow is only available in the TUI" }],
       };
     }
 
@@ -18,7 +18,7 @@ export const deleteWorkflowCommand: SlashCommand = {
       return {
         handled: true,
         clearInput: true,
-        notices: [{ level: "error", text: "usage: /deleteworkflow <name>" }],
+        notices: [{ level: "error", text: "usage: /delete-workflow <name>" }],
       };
     }
 

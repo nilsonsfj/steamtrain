@@ -27,7 +27,7 @@ export const modelCommand: SlashCommand = {
 
     if (!isWorkspaceMode(ctx.mode)) {
       // On the workflow picker, `/model` sets the model used to draft new
-      // workflows (`/createworkflow`). Only available when the host wires it.
+      // workflows (`/create-workflow`). Only available when the host wires it.
       if (ctx.draftModel) {
         return executeDraftModelCommand(args, ctx.draftModel);
       }

@@ -79,12 +79,12 @@ export interface SlashCommandContext {
     name: string,
     description: string,
   ) => SlashCommandResult | Promise<SlashCommandResult>;
-  /** Names of writable (user + project) workflows, for `/deleteworkflow` and `/renameworkflow` completion. */
+  /** Names of writable (user + project) workflows, for `/delete-workflow` and `/rename-workflow` completion. */
   userWorkflowNames?: readonly string[];
   /** Open the past-run history browser (TUI only). */
   openHistory?: () => SlashCommandResult;
   /**
-   * Drafting agent/model for `/createworkflow`, set via `/model` in the workflow
+   * Drafting agent/model for `/create-workflow`, set via `/model` in the workflow
    * picker (TUI only). Present only when sitting on the picker (no step target).
    */
   draftModel?: DraftModelContext;
