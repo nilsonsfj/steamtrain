@@ -510,7 +510,7 @@
     setBanner("", "");
     document.getElementById("statusLine").style.display = "flex";
     var payload = { workflow: S.selected, input: input, fresh: document.getElementById("freshChk").checked };
-    if (S.stagedOverrides[S.selected]) payload.overrides = S.stagedOverrides[S.selected];
+    if (S.stagedOverrides[S.selected]) payload.overrides = stripWfKeys(S.stagedOverrides[S.selected]);
     api("POST", "/api/runs", payload)
       .then(function (r) {
         if (r.status !== 201) { setBanner(r.body.error || "could not start run", "err"); return; }
@@ -893,22 +893,20 @@
             patch.agent = r.agentSel.value;
             patch.model = r.modelSel.value;
             var ef = r.effortSel ? r.effortSel.value : "";
-            if (ef) patch.effort = ef; else delete patch.effort;
+            patch.effort = ef || null;
             patch.prompt = r.promptTa.value;
             if (r.stepTimeoutInput && r.stepTimeoutInput.value.trim()) {
               var stepSec = Number(r.stepTimeoutInput.value) * 60;
-              if (stepSec > 0) patch.stepTimeoutSec = stepSec; else delete patch.stepTimeoutSec;
-            } else delete patch.stepTimeoutSec;
+              patch.stepTimeoutSec = stepSec > 0 ? stepSec : null;
+            } else patch.stepTimeoutSec = null;
             if (Object.keys(patch).length > 0) overrides[st.id] = patch;
           });
         });
         // Capture workflow-level timeouts as special keys
         var wfStepSec = Number(wfStepInput.value) * 60;
-        if (wfStepInput.value.trim() && wfStepSec > 0) overrides.__wf_stepTimeoutSec__ = wfStepSec;
-        else delete overrides.__wf_stepTimeoutSec__;
+        overrides.__wf_stepTimeoutSec__ = wfStepInput.value.trim() && wfStepSec > 0 ? wfStepSec : null;
         var wfRunSec = Number(wfRunInput.value) * 60;
-        if (wfRunInput.value.trim() && wfRunSec > 0) overrides.__wf_workflowTimeoutSec__ = wfRunSec;
-        else delete overrides.__wf_workflowTimeoutSec__;
+        overrides.__wf_workflowTimeoutSec__ = wfRunInput.value.trim() && wfRunSec > 0 ? wfRunSec : null;
         if (Object.keys(overrides).length > 0) {
           S.stagedOverrides[S.selected] = overrides;
         } else {
@@ -916,6 +914,7 @@
         }
         closeModal();
         renderStagedIndicator();
+        renderSidebar();
         setBanner(Object.keys(overrides).length > 0 ? "Overrides staged for next run (not saved to disk)." : "No changes to stage.", "info");
       });
     }
@@ -1158,22 +1157,40 @@
     return false;
   }
 
+  function stripWfKeys(overrides) {
+    var result = {};
+    for (var k in overrides) {
+      if (k.indexOf("__wf_") === 0) continue;
+      var patch = overrides[k];
+      if (patch && typeof patch === "object" && !Array.isArray(patch)) {
+        var clean = {};
+        for (var fk in patch) { if (patch[fk] != null) clean[fk] = patch[fk]; }
+        if (Object.keys(clean).length > 0) result[k] = clean;
+      } else if (patch) {
+        result[k] = patch;
+      }
+    }
+    return result;
+  }
+
   function effectiveSpec() {
     if (!S.spec) return null;
     var staged = S.stagedOverrides[S.selected];
     if (!staged || Object.keys(staged).length === 0) return S.spec;
     var spec = JSON.parse(JSON.stringify(S.spec));
-    // Apply workflow-level timeouts
-    if (staged.__wf_stepTimeoutSec__) spec.stepTimeoutSec = staged.__wf_stepTimeoutSec__;
-    else if (("__wf_stepTimeoutSec__" in staged)) delete spec.stepTimeoutSec;
-    if (staged.__wf_workflowTimeoutSec__) spec.workflowTimeoutSec = staged.__wf_workflowTimeoutSec__;
-    else if (("__wf_workflowTimeoutSec__" in staged)) delete spec.workflowTimeoutSec;
-    // Apply step-level overrides
+    // Apply workflow-level timeouts (null sentinel = clear the field)
+    if (staged.__wf_stepTimeoutSec__ != null) spec.stepTimeoutSec = staged.__wf_stepTimeoutSec__;
+    else if ("__wf_stepTimeoutSec__" in staged) delete spec.stepTimeoutSec;
+    if (staged.__wf_workflowTimeoutSec__ != null) spec.workflowTimeoutSec = staged.__wf_workflowTimeoutSec__;
+    else if ("__wf_workflowTimeoutSec__" in staged) delete spec.workflowTimeoutSec;
+    // Apply step-level overrides (null sentinel = clear the field)
     spec.phases.forEach(function (p) {
       p.steps.forEach(function (st) {
         var patch = staged[st.id];
         if (patch) {
-          for (var k in patch) { st[k] = patch[k]; }
+          for (var k in patch) {
+            if (patch[k] === null) delete st[k]; else st[k] = patch[k];
+          }
         }
       });
     });
@@ -1205,7 +1222,12 @@
       flushInFlight = false;
       if (flushBtn) { flushBtn.disabled = false; flushBtn.textContent = "\u{1F4BE} Flush to disk"; }
     }
-    api("POST", "/api/overrides/flush", { overrides: S.stagedOverrides }).then(function (r) {
+    // Strip __wf_* keys — workflow-level fields are applied client-side via effectiveSpec()
+    var serverOverrides = {};
+    for (var wfName in S.stagedOverrides) {
+      serverOverrides[wfName] = stripWfKeys(S.stagedOverrides[wfName]);
+    }
+    api("POST", "/api/overrides/flush", { overrides: serverOverrides }).then(function (r) {
       resetFlushState();
       if (r.status !== 200) { setBanner((r.body && r.body.error) || "flush failed", "err"); return; }
       var parts = [];
