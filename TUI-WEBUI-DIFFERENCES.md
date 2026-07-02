@@ -72,9 +72,9 @@ These two reducers are near-duplicates and are a prime extraction target (see §
 | Clone / duplicate a workflow | ✅ | ✅ | Both via `WorkflowAuthor.clone`; TUI `/clone-workflow [--project] <new-name>` |
 | Delete a user or project workflow | ✅ | ✅ | Both via `WorkflowAuthor.remove`; TUI `/delete-workflow <name>` (bundled still guarded) |
 | Author into the **project** layer (`steamtrain.json`) | ✅ | ✅ | Shared `WorkflowScope`; create/clone/save target user or project. CLI: `workflow create --scope project`; TUI: `--project`; web: scope selector |
-| Stage overrides *without* persisting | ✅ | ❌ | TUI session overrides (now flushed via `WorkflowAuthor.flushSessionOverrides`); web still saves immediately |
-| Explicit "save session changes" step | ✅ | ⚠️ | TUI `/save-workflows` → shared flush; web persists on each save |
-| Skip/unchanged reporting on save | ✅ | ❌ | `flushSessionOverrides`/`saveSessionWorkflowsToUser` returns saved/skipped/unchanged (TUI surfaces it) |
+| Stage overrides *without* persisting | ✅ | ✅ | TUI session overrides (now flushed via `WorkflowAuthor.flushSessionOverrides`); web "Try without saving" stores session overrides |
+| Explicit "save session changes" step | ✅ | ✅ | TUI `/save-workflows` → shared flush; web "Flush to disk" button calls `POST /api/overrides/flush` |
+| Skip/unchanged reporting on save | ✅ | ✅ | `flushSessionOverrides`/`saveSessionWorkflowsToUser` returns saved/skipped/unchanged; both TUI and web surface the report |
 | Agent health display | ✅ | ✅ | TUI doctor panel; web health chips |
 | Run history (inspect past runs) | ✅ | ✅ | Shared `RunRecordBuilder` + `WorkflowHistoryStore` (`.steamtrain/history`); TUI `/history`, web ⏱ History, CLI `workflow history` |
 | Re-run / retry-failed a past run | ✅ | ✅ | Shared `planRerun`/`seedCacheFromRecord` (`src/workflow/rerun.ts`); TUI `r`/`f` in history detail, web Re-run/Retry buttons, CLI `workflow run --from <id> [--retry-failed]` |
@@ -102,14 +102,8 @@ for them yet):
 
 ## 4. TUI-only capabilities (remaining gaps to expose in the web)
 
-The persistence primitives are shared (`WorkflowAuthor.flushSessionOverrides`
-wraps `saveSessionWorkflowsToUser`), but the **web UI** doesn't surface them:
-
-1. **Staged session overrides** — change a step's agent/model/effort for the
-   *next run only* without writing to disk. The web still commits immediately;
-   `previewWithOverrides` + `flushSessionOverrides` exist for it to adopt.
-2. **`/save-workflows`-style flush** with **saved / skipped / unchanged**
-   reporting — available via the shared core; the web has no "flush" button yet.
+1. ~~**Staged session overrides**~~ — Done. Web now has "Try without saving" in the configure modal, staged override state, and "Flush to disk" button with saved/skipped/unchanged reporting.
+2. ~~**`/save-workflows`-style flush**~~ — Done. `POST /api/overrides/flush` calls the shared `flushSessionOverrides` and returns the report.
 3. **Prompt history & drafts** — part of the run experience the web lacks.
 
 ---
@@ -165,13 +159,13 @@ the TUI and the staged-flush seam (§5.3). What's left:
    `html.ts`) so the web UI uses the same fold as the TUI (§5.1). Done!
 2. ✅ **Render the full edit surface in the TUI** — per-step prompt editing and
    name/description editing (the core already persists them) (§4 / §5.4). Done!
-3. **Add a staged mode to the web** — "try without saving" + an explicit flush
+3. ✅ **Add a staged mode to the web** — "try without saving" + an explicit flush
    button with saved/skipped/unchanged reporting, using `previewWithOverrides` /
-   `flushSessionOverrides` (§4).
+   `flushSessionOverrides` (§4). Done!
 4. ✅ **TUI draft-target picker** — let the TUI choose agent/model/effort for the
    LLM draft using the shared `agentMeta()` instead of auto-picking (§3). Done!
 
-End state: `src/tui` and `src/web` contain only rendering + input; everything
-about workflows (load, edit, draft, validate, persist, run, fold events) lives
-in shared modules under `src/workflow` (+ orchestrator). Both the authoring half
-and the run-fold (reducer) half are now done.
+End state reached: `src/tui` and `src/web` are now pure rendering + input layers.
+All workflow logic (load, edit, draft, validate, persist, stage overrides, run,
+fold events) lives in shared modules under `src/workflow` (+ orchestrator). Both
+the authoring half and the run-fold (reducer) half are unified.
