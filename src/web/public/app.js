@@ -421,6 +421,7 @@
     kindEl.appendChild(document.createTextNode(KIND_LABEL[s.blockKind] || s.blockKind));
     var attempts = s.attempts || (s.result && s.result.attempts);
     var stateLabel = s.status === "pending" ? "pending" : s.status;
+    if (s.result && s.result.skipped) stateLabel = "skipped";
     if (attempts && attempts > 1) stateLabel += " \u00b7 " + attempts + " tries";
     card.appendChild(h("div", { class: "top" },
       h("span", { class: "sid", text: s.stepId }),

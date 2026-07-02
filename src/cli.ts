@@ -581,6 +581,7 @@ function printRunSummary(results: StepResult[], out: (text: string) => void): vo
     totalCost += cost;
     totalMs += result.durationMs;
     const bits = [`${(result.durationMs / 1000).toFixed(1)}s`];
+    if (result.skipped) bits.push("skipped");
     if (cost > 0) bits.push(`$${cost.toFixed(4)}`);
     if (result.gate) bits.push(result.gate.passed ? "gate:passed" : "gate:blocked");
     const from = result.item ? ` (item ${result.item.index})` : "";

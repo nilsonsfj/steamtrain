@@ -60,10 +60,47 @@ export interface WorkflowRunContext {
 }
 
 /**
+ * Shared mutable state one run's schedulers and step executions operate on.
+ * Built once per {@link runWorkflow} call and threaded through both scheduling
+ * strategies so the per-step execution logic is identical in each.
+ */
+interface RunEnv {
+  spec: WorkflowSpec;
+  ctx: WorkflowRunContext;
+  deps: WorkflowDeps;
+  signal?: AbortSignal;
+  cache: Map<string, StepResult>;
+  outputs: Map<string, string>;
+  results: Map<string, StepResult>;
+  allResults: StepResult[];
+  limit: number;
+  /** Dynamic (forEach child) step budget; see the resync note in the phased scheduler. */
+  budget: { generated: number };
+  reserveDynamicSteps: (count: number) => boolean;
+}
+
+/** What one step's completion means for its phase and for run control flow. */
+interface StepFlags {
+  /** The step failed in a way that should mark the phase (and run) not-ok. */
+  notOk: boolean;
+  /** A gate requested a halt: no step in a LATER phase may start. */
+  stop: boolean;
+}
+
+/**
  * Execute a workflow as a single ordered stream of {@link WorkflowEvent}s.
- * Phases run sequentially; the steps within a phase run in parallel, bounded by
- * `deps.maxConcurrency`. Cached steps replay immediately. Aborting `signal`
- * cancels in-flight steps (their processes are killed) and ends the run.
+ *
+ * Scheduling: loop-free workflows are dependency (DAG) scheduled — a step
+ * starts as soon as every step it depends on has finished (see
+ * {@link computeEffectiveDeps} for what "depends on" includes), bounded by
+ * `deps.maxConcurrency`. A step that omits `dependsOn` implicitly depends on
+ * every step in all earlier phases, so phases act as barriers for it exactly
+ * as they did before DAG scheduling. Workflows containing loop-back gates
+ * (`loopTo`) run phase-by-phase, since a loop re-runs a contiguous range of
+ * phases and its body must be complete before the gate re-checks convergence.
+ *
+ * Cached steps replay immediately. Aborting `signal` cancels in-flight steps
+ * (their processes are killed) and ends the run.
  */
 export async function* runWorkflow(
   spec: WorkflowSpec,
@@ -84,10 +121,10 @@ export async function* runWorkflow(
 
   const limit = Math.min(Math.max(1, deps.maxConcurrency), MAX_CONCURRENCY);
   const totalSteps = spec.phases.reduce((n, p) => n + p.steps.length, 0);
-  let generatedSteps = countCachedDynamicSteps(cache);
+  const budget = { generated: countCachedDynamicSteps(cache) };
   const reserveDynamicSteps = (count: number): boolean => {
-    if (generatedSteps + count > MAX_STEPS - totalSteps) return false;
-    generatedSteps += count;
+    if (budget.generated + count > MAX_STEPS - totalSteps) return false;
+    budget.generated += count;
     return true;
   };
   yield {
@@ -98,7 +135,60 @@ export async function* runWorkflow(
     ts: Date.now(),
   };
 
-  const allResults: StepResult[] = [];
+  const env: RunEnv = {
+    spec,
+    ctx,
+    deps,
+    signal,
+    cache,
+    outputs,
+    results,
+    allResults: [],
+    limit,
+    budget,
+    reserveDynamicSteps,
+  };
+
+  const workflowOk = specHasLoopGates(spec)
+    ? yield* runPhasedScheduler(env)
+    : yield* runDagScheduler(env);
+
+  // `allResults` accumulates one entry per step per loop iteration (a body
+  // step that ran 3 passes has 3 entries, plus 3 intermediate "not yet
+  // converged" gate results). Downstream consumers — the CLI/web run summary,
+  // cost roll-ups — would otherwise double-count every intermediate pass. Keep
+  // only the latest result per step id (the final state of each step); earlier
+  // iterations were superseded by re-runs.
+  const finalResults = new Map<string, StepResult>();
+  for (const r of env.allResults) finalResults.set(r.stepId, r);
+
+  yield {
+    kind: "workflow_done",
+    ok: workflowOk && !signal?.aborted,
+    results: [...finalResults.values()],
+    ts: Date.now(),
+  };
+}
+
+/** Whether any gate in the spec is a loop-back gate (`loopTo`). */
+function specHasLoopGates(spec: WorkflowSpec): boolean {
+  for (const phase of spec.phases) {
+    for (const step of phase.steps) {
+      if (step.kind === "gate" && step.loopTo !== undefined) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Phase-sequential scheduler, used for workflows with loop-back gates: phases
+ * run one after another and the steps within a phase run in parallel. A loop
+ * re-runs a contiguous phase range, which only makes sense when the range ran
+ * to completion as a unit — so loop workflows keep the barrier model.
+ * Returns whether the run is ok.
+ */
+async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, boolean> {
+  const { spec, deps, signal, cache, results, limit } = env;
   let workflowOk = true;
 
   // Loop bookkeeping: gateId → { loopToIndex, gatePhaseIndex, iteration count so far }.
@@ -138,7 +228,7 @@ export async function* runWorkflow(
       continue;
     }
     // Re-sync the dynamic-step budget to the cache at the start of every phase.
-    // `generatedSteps` is otherwise a monotonic accumulator that only ever
+    // `budget.generated` is otherwise a monotonic accumulator that only ever
     // grows, but `invalidateRegion` drops forEach children (ids like `step[n]`)
     // from the cache on a loop jump. Without this re-sync, each pass over a
     // forEach body re-reserves its N children and the budget accumulates N per
@@ -146,7 +236,7 @@ export async function* runWorkflow(
     // enough iterations despite the live footprint never exceeding N. During
     // forward progress the cache only grows, so this is a no-op then; it only
     // releases budget that invalidation just freed.
-    generatedSteps = countCachedDynamicSteps(cache);
+    env.budget.generated = countCachedDynamicSteps(cache);
     const runs = (phaseRunCount.get(pi) ?? 0) + 1;
     phaseRunCount.set(pi, runs);
     const iteration = runs;
@@ -165,193 +255,18 @@ export async function* runWorkflow(
     let phaseOk = true;
     let stopAfterPhase = false;
 
-    const runStep = async (step: WorkflowStep): Promise<void> => {
-      const agentBacked = isAgentBackedStep(step) ? step : undefined;
-      channel.push({
-        kind: "step_start",
-        phaseId: phase.id,
-        stepId: step.id,
-        blockKind: workflowStepKind(step),
-        agent: agentBacked?.agent,
-        model: agentBacked?.model,
-        effort: agentBacked?.effort,
-        cwd: "cwd" in step ? step.cwd : undefined,
-        dependsOn: step.dependsOn,
-        iteration,
-        loopTo: step.kind === "gate" ? step.loopTo : undefined,
-        maxIterations: step.kind === "gate" ? step.maxIterations : undefined,
-        ts: Date.now(),
-      });
-
-      const failedDependency = findFailedDependency(step, results);
-      if (failedDependency) {
-        const skipped = skippedStepResult(step.id, failedDependency);
-        skipped.iteration = iteration;
-        outputs.set(step.id, skipped.output);
-        results.set(step.id, skipped);
-        allResults.push(skipped);
-        phaseOk = false;
-        if (step.kind === "gate" && (step.onFalse === "fail" || step.onFalse === "stop")) {
-          stopAfterPhase = true;
-        }
-        channel.push({
-          kind: "step_done",
-          phaseId: phase.id,
-          stepId: step.id,
-          result: skipped,
-          cached: false,
-          iteration,
-          ts: Date.now(),
-        });
-        return;
-      }
-
-      // Cache hit → replay without spawning (resume).
-      const cached = cache.get(step.id);
-      if (cached) {
-        for (const child of cached.childResults ?? []) {
-          outputs.set(child.stepId, child.output);
-          results.set(child.stepId, child);
-          allResults.push(child);
-          channel.push({
-            kind: "step_start",
-            phaseId: phase.id,
-            stepId: child.stepId,
-            blockKind: workflowStepKind(step),
-            agent: agentBacked?.agent,
-            model: agentBacked?.model,
-            cwd: "cwd" in step ? step.cwd : undefined,
-            dependsOn: step.dependsOn,
-            parentStepId: step.id,
-            item: child.item,
-            iteration,
-            ts: Date.now(),
-          });
-          channel.push({
-            kind: "step_done",
-            phaseId: phase.id,
-            stepId: child.stepId,
-            result: child,
-            cached: true,
-            iteration,
-            ts: Date.now(),
-          });
-        }
-        outputs.set(step.id, cached.output);
-        results.set(step.id, cached);
-        allResults.push(cached);
-        if (!cached.ok) {
-          // onFalse: "stop" is a graceful halt — same logic as the live path
-          const isGracefulStop = cached.gate?.onFalse === "stop";
-          if (!isGracefulStop) phaseOk = false;
-        }
-        if (cached.gate) {
-          channel.push({
-            kind: "gate_evaluated",
-            phaseId: phase.id,
-            stepId: step.id,
-            passed: cached.gate.passed,
-            target: cached.target,
-            onFalse: cached.gate.onFalse,
-            iteration,
-            ts: Date.now(),
-          });
-          if (!cached.gate.passed) {
-            const onFalse = cached.gate.onFalse;
-            if (onFalse === "fail" || onFalse === "stop") stopAfterPhase = true;
-          }
-        }
-        channel.push({
-          kind: "step_done",
-          phaseId: phase.id,
-          stepId: step.id,
-          result: cached,
-          cached: true,
-          iteration,
-          ts: Date.now(),
-        });
-        return;
-      }
-
-      const execution = await executeStep(
-        step,
-        {
-          input: ctx.input,
-          outputs,
-          results,
-          cache,
-          reserveDynamicSteps,
-          deps,
-          signal,
-          workflowName: spec.name,
-          retryDefault: spec.retry,
-          stepTimeoutDefault: spec.stepTimeoutSec,
-          iteration,
-        },
-        {
-          pushAgentEvent: (stepId, event) => {
-            channel.push({
-              kind: "step_event",
-              phaseId: phase.id,
-              stepId,
-              event,
-              iteration,
-              ts: Date.now(),
-            });
-          },
-          pushWorkflowEvent: (event) => channel.push(event),
-          phaseId: phase.id,
-        },
-      );
-
-      if (execution.gate) {
-        channel.push({
-          kind: "gate_evaluated",
-          phaseId: phase.id,
-          stepId: step.id,
-          passed: execution.gate.passed,
-          target: execution.gate.target,
-          onFalse: execution.gate.onFalse,
-          iteration,
-          ts: Date.now(),
-        });
-      }
-
-      const { result } = execution;
-      result.iteration = iteration;
-      for (const child of execution.childResults ?? []) {
-        child.iteration = iteration;
-        outputs.set(child.stepId, child.output);
-        results.set(child.stepId, child);
-        allResults.push(child);
-      }
-      outputs.set(step.id, result.output);
-      results.set(step.id, result);
-      if (result.ok) cache.set(step.id, result);
-      allResults.push(result);
-      if (!result.ok) {
-        // onFalse: "stop" is a graceful halt — the step is not ok (gate
-        // condition failed) but the workflow stays ok per the documented
-        // contract. onFalse: "fail" should make the workflow fail.
-        const isGracefulStop = execution.gate?.onFalse === "stop";
-        if (!isGracefulStop) phaseOk = false;
-      }
-      if (execution.stop) stopAfterPhase = true;
-
-      channel.push({
-        kind: "step_done",
-        phaseId: phase.id,
-        stepId: step.id,
-        result,
-        cached: false,
-        iteration,
-        ts: Date.now(),
-      });
-    };
-
-    // runStep never throws (it captures its own errors), so runPool never
+    // runSingleStep never throws (it captures its own errors), so runPool never
     // rejects; the channel closes once every step in the phase settles.
-    const poolDone = runPool(phase.steps, limit, runStep, signal).finally(() => channel.close());
+    const poolDone = runPool(
+      phase.steps,
+      limit,
+      async (step) => {
+        const flags = await runSingleStep(step, phase, iteration, env, channel.push);
+        if (flags.notOk) phaseOk = false;
+        if (flags.stop) stopAfterPhase = true;
+      },
+      signal,
+    ).finally(() => channel.close());
 
     for await (const ev of channel) yield ev;
     await poolDone;
@@ -397,21 +312,440 @@ export async function* runWorkflow(
     pi++;
   }
 
-  // `allResults` accumulates one entry per step per loop iteration (a body
-  // step that ran 3 passes has 3 entries, plus 3 intermediate "not yet
-  // converged" gate results). Downstream consumers — the CLI/web run summary,
-  // cost roll-ups — would otherwise double-count every intermediate pass. Keep
-  // only the latest result per step id (the final state of each step); earlier
-  // iterations were superseded by re-runs.
-  const finalResults = new Map<string, StepResult>();
-  for (const r of allResults) finalResults.set(r.stepId, r);
+  return workflowOk;
+}
 
-  yield {
-    kind: "workflow_done",
-    ok: workflowOk && !signal?.aborted,
-    results: [...finalResults.values()],
-    ts: Date.now(),
+/**
+ * Dependency (DAG) scheduler, used for loop-free workflows: every step starts
+ * the moment its effective dependencies have settled, bounded by the global
+ * concurrency limit — a slow step no longer blocks unrelated steps in later
+ * phases. Phases remain presentation/grouping: `phase_start` is emitted just
+ * before a phase's first step starts and `phase_done` once all of its steps
+ * settle, so phases may overlap in time.
+ *
+ * A failed stop/fail gate halts scheduling of every step in a LATER phase
+ * (steps in the gate's own or earlier phases still run to completion, matching
+ * the phase-sequential semantics). This is safe because every step in a later
+ * phase carries an implicit control dependency on such gates — none of them
+ * can already be running when the gate settles.
+ *
+ * Returns whether the run is ok.
+ */
+async function* runDagScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, boolean> {
+  const { spec, signal, limit } = env;
+
+  interface DagNode {
+    step: WorkflowStep;
+    phase: WorkflowPhase;
+    phaseIndex: number;
+    deps: ReadonlySet<string>;
+  }
+  const effectiveDeps = computeEffectiveDeps(spec);
+  const pending: DagNode[] = [];
+  spec.phases.forEach((phase, phaseIndex) => {
+    for (const step of phase.steps) {
+      pending.push({ step, phase, phaseIndex, deps: effectiveDeps.get(step.id) ?? new Set() });
+    }
+  });
+
+  const phaseState = spec.phases.map((p) => ({
+    started: false,
+    remaining: p.steps.length,
+    ok: true,
+  }));
+  const settled = new Set<string>();
+  // Steps in phases strictly after this index are not scheduled (a stop/fail
+  // gate at this index failed). Infinity ⇒ no halt.
+  let haltAfterPhase = Number.POSITIVE_INFINITY;
+  let workflowOk = true;
+
+  const channel = createChannel<WorkflowEvent>();
+
+  const launch = (node: DagNode, inFlight: Map<string, Promise<void>>): void => {
+    const state = phaseState[node.phaseIndex]!;
+    if (!state.started) {
+      state.started = true;
+      channel.push({
+        kind: "phase_start",
+        phaseId: node.phase.id,
+        title: node.phase.title,
+        index: node.phaseIndex,
+        stepCount: node.phase.steps.length,
+        iteration: 1,
+        ts: Date.now(),
+      });
+    }
+    const task = runSingleStep(node.step, node.phase, 1, env, channel.push)
+      .then((flags) => {
+        if (flags.notOk) {
+          state.ok = false;
+          workflowOk = false;
+        }
+        if (flags.stop) haltAfterPhase = Math.min(haltAfterPhase, node.phaseIndex);
+      })
+      .finally(() => {
+        settled.add(node.step.id);
+        inFlight.delete(node.step.id);
+        state.remaining -= 1;
+        if (state.remaining === 0) {
+          channel.push({
+            kind: "phase_done",
+            phaseId: node.phase.id,
+            ok: state.ok,
+            iteration: 1,
+            ts: Date.now(),
+          });
+        }
+      });
+    inFlight.set(node.step.id, task);
   };
+
+  const driver = (async () => {
+    const inFlight = new Map<string, Promise<void>>();
+    while (true) {
+      if (!signal?.aborted) {
+        // Launch every ready step, scanning in spec order so ties dispatch
+        // deterministically. Steps in phases beyond a halt stay pending
+        // forever — the loop below exits once nothing is in flight.
+        let i = 0;
+        while (i < pending.length && inFlight.size < limit) {
+          const node = pending[i]!;
+          if (node.phaseIndex > haltAfterPhase || !isSubsetOf(node.deps, settled)) {
+            i++;
+            continue;
+          }
+          pending.splice(i, 1);
+          launch(node, inFlight);
+        }
+      }
+      if (inFlight.size === 0) break;
+      await Promise.race(inFlight.values());
+    }
+  })().finally(() => channel.close());
+
+  for await (const ev of channel) yield ev;
+  await driver;
+
+  if (signal?.aborted) workflowOk = false;
+  return workflowOk;
+}
+
+function isSubsetOf(subset: ReadonlySet<string>, superset: ReadonlySet<string>): boolean {
+  for (const item of subset) {
+    if (!superset.has(item)) return false;
+  }
+  return true;
+}
+
+/** Matches `{{steps.<id>.<field>}}` template references; group 1 is the id. */
+const TEMPLATE_STEP_REF = /\{\{\s*steps\.(.+?)\.(?:output|items|ok|error|target|iteration)\s*\}\}/g;
+
+function templateStepRefs(text: string | undefined): string[] {
+  if (!text) return [];
+  const refs: string[] = [];
+  for (const match of text.matchAll(TEMPLATE_STEP_REF)) refs.push(match[1] as string);
+  return refs;
+}
+
+/**
+ * The step ids each step must wait for under DAG scheduling:
+ *
+ *  - its explicit `dependsOn` — or, when omitted, EVERY step in all earlier
+ *    phases (the barrier default that preserves pre-DAG behavior);
+ *  - implicit data references: a gate's `condition.step`, a `when` condition's
+ *    `step`, a `forEach` source, and any `{{steps.<id>.…}}` template reference
+ *    in prompts / distributor items / condition strings. Under the phase
+ *    barrier these were always complete; scheduling on `dependsOn` alone would
+ *    otherwise let them race and silently render as empty text;
+ *  - implicit control dependencies: every stop/fail gate in an earlier phase.
+ *    Later-phase steps must not start before such a gate decides whether the
+ *    run halts.
+ *
+ * Referenced ids that are unknown (a typo'd template ref) or not in an earlier
+ * phase are ignored — templates already render them as-is/empty, and the
+ * validator has its own rules for the explicit fields. A `steps.work[3].…`
+ * child reference resolves to its `work` parent.
+ */
+function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
+  const idsByPhase = spec.phases.map((p) => p.steps.map((s) => s.id));
+  const phaseIndexOf = new Map<string, number>();
+  idsByPhase.forEach((ids, pi) => {
+    for (const id of ids) phaseIndexOf.set(id, pi);
+  });
+  const controlGates: { id: string; phaseIndex: number }[] = [];
+  spec.phases.forEach((phase, pi) => {
+    for (const step of phase.steps) {
+      if (step.kind === "gate" && (step.onFalse === "fail" || step.onFalse === "stop")) {
+        controlGates.push({ id: step.id, phaseIndex: pi });
+      }
+    }
+  });
+
+  const deps = new Map<string, Set<string>>();
+  spec.phases.forEach((phase, pi) => {
+    for (const step of phase.steps) {
+      const stepDeps = new Set<string>();
+      const addEarlier = (ref: string | undefined): void => {
+        if (!ref) return;
+        // A `work[3]` fan-out child reference depends on its `work` parent.
+        const id = phaseIndexOf.has(ref) ? ref : ref.replace(/\[\d+\]$/, "");
+        const refPhase = phaseIndexOf.get(id);
+        if (refPhase !== undefined && refPhase < pi) stepDeps.add(id);
+      };
+
+      if (step.dependsOn) {
+        for (const dep of step.dependsOn) addEarlier(dep);
+      } else {
+        for (let pj = 0; pj < pi; pj++) {
+          for (const id of idsByPhase[pj] ?? []) stepDeps.add(id);
+        }
+      }
+
+      const conditions: (GateCondition | undefined)[] = [step.when];
+      if (step.kind === "gate") conditions.push(step.condition);
+      const templatedTexts: (string | undefined)[] = [];
+      for (const condition of conditions) {
+        if (!condition) continue;
+        addEarlier(condition.step);
+        templatedTexts.push(condition.contains, condition.equals, condition.matches);
+      }
+      if ((step.kind === "worker" || step.kind === "processor" || !step.kind) && step.forEach) {
+        addEarlier(parseForEachSource(step.forEach));
+      }
+      if ("prompt" in step) templatedTexts.push(step.prompt);
+      if (step.kind === "distributor" && step.items) templatedTexts.push(...step.items);
+      for (const text of templatedTexts) {
+        for (const ref of templateStepRefs(text)) addEarlier(ref);
+      }
+
+      for (const gate of controlGates) {
+        if (gate.phaseIndex < pi && gate.id !== step.id) stepDeps.add(gate.id);
+      }
+
+      deps.set(step.id, stepDeps);
+    }
+  });
+  return deps;
+}
+
+/**
+ * Run one step end to end — emit its `step_start`, resolve it via failed-
+ * dependency skip, cache replay, `when` skip, or live execution, record the
+ * result into the shared maps, and emit its `step_done`. Shared by both
+ * schedulers; never throws.
+ */
+async function runSingleStep(
+  step: WorkflowStep,
+  phase: WorkflowPhase,
+  iteration: number,
+  env: RunEnv,
+  push: (event: WorkflowEvent) => void,
+): Promise<StepFlags> {
+  const { spec, ctx, deps, signal, cache, outputs, results, allResults } = env;
+  const agentBacked = isAgentBackedStep(step) ? step : undefined;
+  push({
+    kind: "step_start",
+    phaseId: phase.id,
+    stepId: step.id,
+    blockKind: workflowStepKind(step),
+    agent: agentBacked?.agent,
+    model: agentBacked?.model,
+    effort: agentBacked?.effort,
+    cwd: "cwd" in step ? step.cwd : undefined,
+    dependsOn: step.dependsOn,
+    iteration,
+    loopTo: step.kind === "gate" ? step.loopTo : undefined,
+    maxIterations: step.kind === "gate" ? step.maxIterations : undefined,
+    ts: Date.now(),
+  });
+
+  const failedDependency = findFailedDependency(step, results);
+  if (failedDependency) {
+    const failed = dependencyFailedResult(step.id, failedDependency);
+    failed.iteration = iteration;
+    outputs.set(step.id, failed.output);
+    results.set(step.id, failed);
+    allResults.push(failed);
+    const stop = step.kind === "gate" && (step.onFalse === "fail" || step.onFalse === "stop");
+    push({
+      kind: "step_done",
+      phaseId: phase.id,
+      stepId: step.id,
+      result: failed,
+      cached: false,
+      iteration,
+      ts: Date.now(),
+    });
+    return { notOk: true, stop };
+  }
+
+  // Cache hit → replay without spawning (resume).
+  const cached = cache.get(step.id);
+  if (cached) {
+    for (const child of cached.childResults ?? []) {
+      outputs.set(child.stepId, child.output);
+      results.set(child.stepId, child);
+      allResults.push(child);
+      push({
+        kind: "step_start",
+        phaseId: phase.id,
+        stepId: child.stepId,
+        blockKind: workflowStepKind(step),
+        agent: agentBacked?.agent,
+        model: agentBacked?.model,
+        cwd: "cwd" in step ? step.cwd : undefined,
+        dependsOn: step.dependsOn,
+        parentStepId: step.id,
+        item: child.item,
+        iteration,
+        ts: Date.now(),
+      });
+      push({
+        kind: "step_done",
+        phaseId: phase.id,
+        stepId: child.stepId,
+        result: child,
+        cached: true,
+        iteration,
+        ts: Date.now(),
+      });
+    }
+    outputs.set(step.id, cached.output);
+    results.set(step.id, cached);
+    allResults.push(cached);
+    let notOk = false;
+    let stop = false;
+    if (!cached.ok) {
+      // onFalse: "stop" is a graceful halt — same logic as the live path
+      const isGracefulStop = cached.gate?.onFalse === "stop";
+      if (!isGracefulStop) notOk = true;
+    }
+    if (cached.gate) {
+      push({
+        kind: "gate_evaluated",
+        phaseId: phase.id,
+        stepId: step.id,
+        passed: cached.gate.passed,
+        target: cached.target,
+        onFalse: cached.gate.onFalse,
+        iteration,
+        ts: Date.now(),
+      });
+      if (!cached.gate.passed) {
+        const onFalse = cached.gate.onFalse;
+        if (onFalse === "fail" || onFalse === "stop") stop = true;
+      }
+    }
+    push({
+      kind: "step_done",
+      phaseId: phase.id,
+      stepId: step.id,
+      result: cached,
+      cached: true,
+      iteration,
+      ts: Date.now(),
+    });
+    return { notOk, stop };
+  }
+
+  // `when` condition / skip cascade: the step is recorded as skipped (ok,
+  // empty output) rather than executed. Skips are cached like any other ok
+  // result so a resumed run replays the same decision.
+  const skipReason = findSkipReason(step, { input: ctx.input, outputs, results, iteration });
+  if (skipReason) {
+    const skipped = skippedStepResult(step.id);
+    skipped.iteration = iteration;
+    outputs.set(step.id, skipped.output);
+    results.set(step.id, skipped);
+    cache.set(step.id, skipped);
+    allResults.push(skipped);
+    push({
+      kind: "step_done",
+      phaseId: phase.id,
+      stepId: step.id,
+      result: skipped,
+      cached: false,
+      iteration,
+      ts: Date.now(),
+    });
+    return { notOk: false, stop: false };
+  }
+
+  const execution = await executeStep(
+    step,
+    {
+      input: ctx.input,
+      outputs,
+      results,
+      cache,
+      reserveDynamicSteps: env.reserveDynamicSteps,
+      deps,
+      signal,
+      workflowName: spec.name,
+      retryDefault: spec.retry,
+      stepTimeoutDefault: spec.stepTimeoutSec,
+      iteration,
+    },
+    {
+      pushAgentEvent: (stepId, event) => {
+        push({
+          kind: "step_event",
+          phaseId: phase.id,
+          stepId,
+          event,
+          iteration,
+          ts: Date.now(),
+        });
+      },
+      pushWorkflowEvent: push,
+      phaseId: phase.id,
+    },
+  );
+
+  if (execution.gate) {
+    push({
+      kind: "gate_evaluated",
+      phaseId: phase.id,
+      stepId: step.id,
+      passed: execution.gate.passed,
+      target: execution.gate.target,
+      onFalse: execution.gate.onFalse,
+      iteration,
+      ts: Date.now(),
+    });
+  }
+
+  const { result } = execution;
+  result.iteration = iteration;
+  for (const child of execution.childResults ?? []) {
+    child.iteration = iteration;
+    outputs.set(child.stepId, child.output);
+    results.set(child.stepId, child);
+    allResults.push(child);
+  }
+  outputs.set(step.id, result.output);
+  results.set(step.id, result);
+  if (result.ok) cache.set(step.id, result);
+  allResults.push(result);
+  let notOk = false;
+  if (!result.ok) {
+    // onFalse: "stop" is a graceful halt — the step is not ok (gate
+    // condition failed) but the workflow stays ok per the documented
+    // contract. onFalse: "fail" should make the workflow fail.
+    const isGracefulStop = execution.gate?.onFalse === "stop";
+    if (!isGracefulStop) notOk = true;
+  }
+
+  push({
+    kind: "step_done",
+    phaseId: phase.id,
+    stepId: step.id,
+    result,
+    cached: false,
+    iteration,
+    ts: Date.now(),
+  });
+  return { notOk, stop: Boolean(execution.stop) };
 }
 
 /**
@@ -607,7 +941,7 @@ async function executeStep(
           results: ctx.results,
           iteration: ctx.iteration,
         })
-      : consolidateOutputs(step.dependsOn ?? [], ctx.outputs, step.separator);
+      : consolidateOutputs(step.dependsOn ?? [], ctx.outputs, ctx.results, step.separator);
     return {
       result: {
         stepId: step.id,
@@ -1076,7 +1410,7 @@ function findFailedDependency(
   return undefined;
 }
 
-function skippedStepResult(stepId: string, dependencyId: string): StepResult {
+function dependencyFailedResult(stepId: string, dependencyId: string): StepResult {
   return {
     stepId,
     ok: false,
@@ -1086,17 +1420,81 @@ function skippedStepResult(stepId: string, dependencyId: string): StepResult {
   };
 }
 
+/**
+ * Why a step should be skipped (recorded as ok + `skipped: true`, not run),
+ * or undefined to run it:
+ *
+ *  - its `when` condition evaluates false;
+ *  - skip cascade: an explicit dependency (or its `forEach` source) was itself
+ *    skipped. Consolidators are the exception — they treat skipped inputs as
+ *    absent and merge the rest, so they only skip when EVERY dependency was
+ *    skipped.
+ *
+ * Failed dependencies take precedence (checked by the caller before this) and
+ * keep their existing not-ok semantics.
+ */
+function findSkipReason(step: WorkflowStep, ctx: GateEvalContext): string | undefined {
+  const dependsOn = step.dependsOn ?? [];
+  const skippedDeps = dependsOn.filter((dep) => ctx.results.get(dep)?.skipped);
+  if (workflowStepKind(step) === "consolidator") {
+    if (dependsOn.length > 0 && skippedDeps.length === dependsOn.length) {
+      return "all dependencies were skipped";
+    }
+  } else if (skippedDeps.length > 0) {
+    return `dependency '${skippedDeps[0]}' was skipped`;
+  }
+  if ((step.kind === "worker" || step.kind === "processor" || !step.kind) && step.forEach) {
+    const sourceStepId = parseForEachSource(step.forEach);
+    if (sourceStepId && ctx.results.get(sourceStepId)?.skipped) {
+      return `forEach source '${sourceStepId}' was skipped`;
+    }
+  }
+  if (step.when && !evaluateGate(step.when, ctx).passed) {
+    return "when condition not met";
+  }
+  return undefined;
+}
+
+function skippedStepResult(stepId: string): StepResult {
+  return {
+    stepId,
+    ok: true,
+    skipped: true,
+    // Empty output so downstream templates see a skipped step as absent.
+    output: "",
+    target: "skipped",
+    durationMs: 0,
+  };
+}
+
+/**
+ * Sectioned merge of dependency outputs. Skipped dependencies are treated as
+ * absent — their section is omitted entirely rather than rendered empty or
+ * failed.
+ */
 function consolidateOutputs(
   ids: string[],
   outputs: Map<string, string>,
+  results: Map<string, StepResult>,
   separator?: string,
 ): string {
-  return ids.map((id) => `--- ${id} ---\n${outputs.get(id) ?? ""}`).join(separator ?? "\n\n");
+  return ids
+    .filter((id) => !results.get(id)?.skipped)
+    .map((id) => `--- ${id} ---\n${outputs.get(id) ?? ""}`)
+    .join(separator ?? "\n\n");
+}
+
+/** The subset of run state a gate/`when` condition evaluation needs. */
+interface GateEvalContext {
+  input: string;
+  outputs: Map<string, string>;
+  results: Map<string, StepResult>;
+  iteration: number;
 }
 
 function evaluateGate(
   condition: GateCondition,
-  ctx: ExecuteContext,
+  ctx: GateEvalContext,
 ): { passed: boolean; message?: string } {
   const subject = condition.step ? ctx.results.get(condition.step) : undefined;
   const text = condition.step
