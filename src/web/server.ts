@@ -224,6 +224,13 @@ async function readBody(req: IncomingMessage): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+/** Discard any unread request bytes so keep-alive sockets can close cleanly. */
+function drainRequestBody(req: IncomingMessage): void {
+  req.resume();
+  req.on("error", () => {});
+  req.on("data", () => {});
+}
+
 /**
  * Build the steamtrain web-UI HTTP server. Pure wiring over an injected
  * {@link WorkflowHost} and {@link WorkflowRunManager}, so it can be exercised in
@@ -257,8 +264,7 @@ export function createWebServer(deps: WebServerDeps): Server {
         const error =
           err instanceof PayloadTooLarge ? "payload too large" : "internal server error";
         sendJson(res, status, { error });
-        // Drain any remaining body data to free memory
-        if (err instanceof PayloadTooLarge) req.destroy();
+        if (err instanceof PayloadTooLarge) drainRequestBody(req);
       } else {
         res.end();
       }
