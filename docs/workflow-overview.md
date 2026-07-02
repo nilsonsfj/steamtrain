@@ -25,8 +25,8 @@ flowchart TB
 
   subgraph engine["Workflow engine"]
   validate["validateWorkflow()"]
-  phases["Run phases sequentially"]
-  pool["Run phase steps in parallel"]
+  phases["Schedule steps by dependencies"]
+  pool["Run ready steps in parallel"]
   events["Emit WorkflowEvent stream"]
   end
 
@@ -53,16 +53,30 @@ when you launch the TUI.
 
 ## Execution model
 
-### Phases are sequential
+### Steps are scheduled by their dependencies (DAG)
 
-Phases run one after another. Phase 2 does not start until every step in phase 1
-has settled (success, failure, skip, or cancel).
+A step starts as soon as every step it depends on has settled (success,
+failure, skip, or cancel), bounded by `maxConcurrency` (default 5, hard cap
+16). "Depends on" means the step's `dependsOn`, plus everything it references
+implicitly: a gate's `condition.step`, a `when` condition's `step`, a `forEach`
+source, and any `{{steps.<id>.…}}` template reference. A slow step therefore no
+longer blocks unrelated steps in later phases.
 
-### Steps in a phase are parallel
+### Phases are grouping — and the default dependency
 
-All steps in the same phase are scheduled together, bounded by `maxConcurrency`
-(default 5, hard cap 16). There is **no guaranteed order** among steps in the
-same phase.
+Phases order and group steps for authoring and display. A step that **omits**
+`dependsOn` implicitly depends on **every step in all earlier phases**, so for
+it phases behave exactly like the old sequential barriers. Two more phase-level
+rules preserve the pre-DAG semantics:
+
+- a gate with `onFalse: fail` or `onFalse: stop` holds back every step in a
+  **later** phase until it has evaluated; if it trips, later phases never
+  start (steps in the gate's own or earlier phases still finish);
+- workflows containing **loop-back gates** (`loopTo`) run phase-by-phase, since
+  a loop re-runs a contiguous range of phases as a unit.
+
+There is **no guaranteed order** among steps in the same phase, and steps from
+different phases may now overlap in time when their dependencies allow it.
 
 When a step's target directory is inside a git repository, each agent-backed step
 runs in its own git worktree. Parallel workers and `forEach` children therefore
@@ -476,12 +490,52 @@ flowchart TD
 
 ---
 
+## Per-step conditions (`when`)
+
+Any step (worker, processor, distributor, consolidator, or gate) may carry a
+`when` condition using the same schema as a gate condition. It is evaluated
+right before the step would run; when false, the step is **skipped** rather
+than executed:
+
+```jsonc
+{
+  "id": "fix-frontend",
+  "agent": "claude",
+  "model": "claude-sonnet-4-6",
+  "dependsOn": ["triage"],
+  "when": { "step": "triage", "contains": "frontend" },
+  "prompt": "Fix the frontend issues:\n{{steps.triage.output}}"
+}
+```
+
+Skip semantics:
+
+- a skipped step is recorded **ok** with `skipped: true`, empty output, and
+  target `skipped` — it never fails the run;
+- templates see a skipped step as absent: `{{steps.<id>.output}}` renders empty;
+- skips **cascade**: a step whose `dependsOn` (or `forEach` source) was skipped
+  is skipped too — **except consolidators**, which treat skipped inputs as
+  absent, merge the rest, and are only skipped when *every* dependency was
+  skipped;
+- a skipped gate does not evaluate its condition (no `gate_evaluated`, no
+  `onFalse` routing);
+- skips are cached like any successful result, so a resumed run replays the
+  same decision.
+
+Use `when` to run a branch only when it is relevant. Use a gate with
+`onFalse: stop`/`fail` when the **whole run** should halt.
+
+---
+
 ## Dependencies (`dependsOn`)
 
-`dependsOn` serves two roles:
+`dependsOn` serves three roles:
 
-1. **documentation / intent** — this step logically follows those steps
-2. **execution gating** — if any referenced earlier step failed, this step is
+1. **scheduling** — the step starts as soon as the referenced steps settle,
+   instead of waiting for every step in all earlier phases (which is the
+   default when `dependsOn` is omitted)
+2. **documentation / intent** — this step logically follows those steps
+3. **execution gating** — if any referenced earlier step failed, this step is
    skipped
 
 ```mermaid
@@ -687,7 +741,7 @@ before relying on a custom workflow in CI or scripts.
 | limit | value |
 | --- | --- |
 | max steps per run (static + generated) | 1000 |
-| max parallel steps per phase | 5 default, 16 max (`maxConcurrency` config) |
+| max parallel steps per run | 5 default, 16 max (`maxConcurrency` config) |
 | per-step timeout | `stepTimeoutSec` in config |
 
 Every agent-backed worker, processor, distributor, or consolidator is a full

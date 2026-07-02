@@ -241,6 +241,7 @@ function Detail({ step, width }: { step: StepState; width: number }) {
 }
 
 function stepMeta(step: StepState): string {
+  if (step.result?.skipped) return "skipped";
   if (step.gate) {
     const gateState = step.gate.passed ? "passed" : "blocked";
     return step.gate.target ? `${gateState} → ${step.gate.target}` : gateState;

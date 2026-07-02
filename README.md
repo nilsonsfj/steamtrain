@@ -227,7 +227,7 @@ Override any subset in the working directory:
   "binaries": { "opencode": "/opt/homebrew/bin/opencode" }, // optional path overrides
   "stepTimeoutSec": 900,                                    // per-agent subprocess limit in seconds (default 15m = 900)
   "workflowTimeoutSec": 1800,                               // optional whole-run cap in seconds; omit = (loop-aware) steps × stepTimeoutSec
-  "maxConcurrency": 5                                       // parallel steps per workflow phase (≤ 16, default 5)
+  "maxConcurrency": 5                                       // parallel steps per run (≤ 16, default 5)
   // "workflows": { … }                                     // see “Workflows” below
 }
 ```
@@ -246,10 +246,12 @@ warning in the stream); only the keys you specify are overridden.
 ## Workflows
 
 A **workflow** is steamtrain's central unit: a declarative sequence of **phases**
-made from standard building blocks. Phases run in order; the **steps** inside a
-phase run in **parallel**. Distributors can produce many work items, processors
-can dynamically fan out to one generated agent run per item, and later steps can
-gate or consolidate the aggregate output.
+made from standard building blocks. Steps are **dependency-scheduled**: each
+step starts as soon as the steps it references have finished, in parallel with
+anything unrelated. A step without `dependsOn` waits for all earlier phases, so
+phases still act as barriers for it. Distributors can produce many work items,
+processors can dynamically fan out to one generated agent run per item, and
+later steps can gate or consolidate the aggregate output.
 
 The TUI starts in workflow mode. Pick one with `↑/↓`, type the input, and
 **Enter** to launch. The phase -> step tree streams live; `↑/↓` drills into a
@@ -288,7 +290,7 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
 
 ```jsonc
 {
-  "maxConcurrency": 5,                 // parallel steps per phase (≤ 16, default 5)
+  "maxConcurrency": 5,                 // parallel steps per run (≤ 16, default 5)
   "workflows": {
     "audit": {
       "description": "Audit each service for missing auth checks.",
@@ -342,10 +344,16 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
   to create one generated child agent run per distributor item. Use `{{item}}`,
   `{{item.index}}`, and `{{item.sourceStepId}}` in that prompt.
 - **Dependencies:** `dependsOn` may reference only steps in *earlier* phases.
+  Steps are scheduled by these dependencies; a step without `dependsOn` waits
+  for every step in all earlier phases.
+- **Conditions:** any step may set `when` (gate-condition schema) to run only
+  when it matches — otherwise the step is *skipped* (not failed), skips cascade
+  to dependents, and consolidators treat skipped inputs as absent. See
+  [docs/workflow-spec.md](docs/workflow-spec.md#per-step-conditions-when).
 - **Prompt templates:** `{{input}}` / `{{args}}` expand to what you typed;
   `{{steps.<id>.output}}`, `{{steps.<id>.items}}`, `{{steps.<id>.ok}}`,
   `{{steps.<id>.error}}`, and `{{steps.<id>.target}}` expose earlier results.
-- **Limits:** ≤ 16 parallel steps per phase and 1000 steps per run. Every step is a
+- **Limits:** ≤ 16 parallel steps per run and 1000 steps per run. Every step is a
   full agent run only when it is agent-backed, so costs add up for worker and
   agent-backed distributor/consolidator blocks.
 - **Loops:** a gate can set `loopTo` to jump back to an earlier phase (with an

@@ -3,9 +3,14 @@ import type { AgentInstanceId } from "../types/events";
 import type { RetryPolicy } from "./retry";
 
 /**
- * The declarative workflow model. A `WorkflowSpec` is a sequence of phases;
- * phases run one after another, and the steps inside a phase run in parallel
- * (bounded by `maxConcurrency`). Steps are explicit workflow building blocks:
+ * The declarative workflow model. A `WorkflowSpec` is a sequence of phases.
+ * Steps are scheduled by their dependencies: a step runs as soon as its
+ * `dependsOn` steps (plus any steps its templates/conditions reference) have
+ * finished, bounded by `maxConcurrency`. A step that omits `dependsOn`
+ * implicitly depends on every step in all earlier phases, so phases act as
+ * barriers for it — which is exactly the pre-DAG behavior. Workflows that
+ * contain loop-back gates (`loopTo`) run phase-by-phase, since a loop re-runs
+ * a contiguous range of phases. Steps are explicit workflow building blocks:
  * distributors fan one input into many items, workers/processors do 1:1 work,
  * consolidators fan results back in, and gates route/filter based on conditions.
  *
@@ -20,6 +25,15 @@ export interface WorkflowStepBase {
   id: string;
   /** Step ids (in earlier phases) whose outputs this step references. */
   dependsOn?: string[];
+  /**
+   * Per-step condition (same schema as a gate condition). Evaluated right
+   * before the step would run; when false the step is *skipped* — recorded as
+   * ok with `skipped: true` and empty output, never failed. Steps whose
+   * `dependsOn` were all consumed by skips cascade: a non-consolidator step is
+   * skipped when ANY explicit dependency was skipped; a consolidator treats
+   * skipped inputs as absent and is skipped only when ALL of them were.
+   */
+  when?: GateCondition;
 }
 
 export interface WorkflowItem {
@@ -193,6 +207,12 @@ export interface StepResult {
     passed: boolean;
     onFalse: GateStep["onFalse"];
   };
+  /**
+   * True when the step did not run because its `when` condition was false (or
+   * a skip cascaded from a skipped dependency). Skipped steps are `ok` with
+   * empty output so downstream templates see them as absent, not failed.
+   */
+  skipped?: boolean;
   error?: string;
   durationMs: number;
   costUsd?: number;
@@ -218,9 +238,39 @@ const agentId = z
   .min(1)
   .describe("Configured agent instance id; validated at run time via resolveAgentInstance");
 
+const gateConditionSchema = z
+  .object({
+    step: z.string().min(1).optional(),
+    ok: z.boolean().optional(),
+    contains: z.string().optional(),
+    matches: z.string().optional(),
+    equals: z.string().optional(),
+    not: z.boolean().optional(),
+  })
+  .superRefine((condition, ctx) => {
+    if (
+      condition.ok === undefined &&
+      condition.contains === undefined &&
+      condition.matches === undefined &&
+      condition.equals === undefined
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "gate condition requires ok, contains, matches, or equals",
+      });
+    }
+    if (condition.ok !== undefined && !condition.step) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "gate condition ok requires condition.step",
+      });
+    }
+  });
+
 const baseStepShape = {
   id: z.string().min(1),
   dependsOn: z.array(z.string().min(1)).optional(),
+  when: gateConditionSchema.optional(),
 };
 
 const agentRunShape = {
@@ -298,35 +348,6 @@ const workflowConsolidatorStepSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "consolidator step requires dependsOn",
-      });
-    }
-  });
-
-const gateConditionSchema = z
-  .object({
-    step: z.string().min(1).optional(),
-    ok: z.boolean().optional(),
-    contains: z.string().optional(),
-    matches: z.string().optional(),
-    equals: z.string().optional(),
-    not: z.boolean().optional(),
-  })
-  .superRefine((condition, ctx) => {
-    if (
-      condition.ok === undefined &&
-      condition.contains === undefined &&
-      condition.matches === undefined &&
-      condition.equals === undefined
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "gate condition requires ok, contains, matches, or equals",
-      });
-    }
-    if (condition.ok !== undefined && !condition.step) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "gate condition ok requires condition.step",
       });
     }
   });
@@ -491,6 +512,14 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
           error: allIds.has(step.condition.step)
             ? `gate '${step.id}' condition references '${step.condition.step}', which is not in an earlier phase`
             : `gate '${step.id}' condition references unknown step '${step.condition.step}'`,
+        };
+      }
+      if (step.when?.step && !earlierIds.has(step.when.step)) {
+        return {
+          ok: false,
+          error: allIds.has(step.when.step)
+            ? `step '${step.id}' when condition references '${step.when.step}', which is not in an earlier phase`
+            : `step '${step.id}' when condition references unknown step '${step.when.step}'`,
         };
       }
       if ((step.kind === "worker" || step.kind === "processor" || !step.kind) && step.forEach) {

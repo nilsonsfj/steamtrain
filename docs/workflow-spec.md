@@ -96,7 +96,8 @@ execution behavior. **Examples:** [`workflow-examples.md`](workflow-examples.md)
 | --- | --- | --- |
 | `id` | yes | Unique across the whole workflow. |
 | `kind` | no | One of `worker`, `processor`, `distributor`, `consolidator`, `gate`. Missing means `worker`. |
-| `dependsOn` | no | Step ids from earlier phases only. Same-phase and forward dependencies are invalid. |
+| `dependsOn` | no | Step ids from earlier phases only. Same-phase and forward dependencies are invalid. Steps are scheduled by these dependencies; omitting `dependsOn` makes the step wait for every step in all earlier phases. |
+| `when` | no | Per-step condition (same schema as a gate condition). When false the step is skipped, not failed. See [Per-step conditions](#per-step-conditions-when). |
 
 ## Building blocks
 
@@ -234,6 +235,42 @@ Gate condition fields are combined with logical AND:
 | `stop` | Stop scheduling later phases after the current phase completes while keeping the workflow successful. |
 
 Steps with `dependsOn` are skipped when any referenced earlier step failed.
+
+## Per-step conditions (`when`)
+
+Any step may carry a `when` condition using the gate-condition schema. It is
+evaluated just before the step would run; when false the step is **skipped** —
+recorded ok with `skipped: true`, target `skipped`, and empty output — instead
+of executed.
+
+```jsonc
+{
+  "id": "fix-frontend",
+  "agent": "claude",
+  "model": "claude-sonnet-4-6",
+  "dependsOn": ["triage"],
+  "when": { "step": "triage", "contains": "frontend" },
+  "prompt": "Fix the frontend issues:\n{{steps.triage.output}}"
+}
+```
+
+- `when.step` must reference a step in an earlier phase; omitting `step`
+  applies text conditions to the workflow input.
+- Skips cascade through `dependsOn` and `forEach` sources. Consolidators are
+  the exception: they treat skipped inputs as absent (the default sectioned
+  merge omits them) and are skipped only when every dependency was skipped.
+- A skipped gate does not evaluate its condition and never stops the run.
+- Skipped results are cached, so resumed runs replay the same decision.
+
+## Scheduling
+
+Steps are dependency (DAG) scheduled: a step starts once its `dependsOn` — plus
+anything it references via `forEach`, gate `condition.step`, `when.step`, or
+`{{steps.<id>.…}}` templates — has settled, bounded by `maxConcurrency`. A step
+without `dependsOn` waits for every step in all earlier phases, so phases act
+as barriers for it (the pre-DAG behavior). Gates with `onFalse: fail`/`stop`
+hold back all later-phase steps until they evaluate, and workflows containing
+loop-back gates (`loopTo`) run phase-by-phase.
 
 ## Auto-retry on transient failures
 
