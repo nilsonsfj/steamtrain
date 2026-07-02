@@ -590,9 +590,23 @@ async function handle(
       typeof parsed.overrides === "object" &&
       !Array.isArray(parsed.overrides)
     ) {
-      const base = deps.host.listWorkflows()[parsed.workflow];
-      if (base)
-        specOverride = applyWorkflowStepOverrides(base, parsed.overrides as WorkflowStepOverrides);
+      const overrides = parsed.overrides as Record<string, unknown>;
+      let valid = true;
+      for (const key of Object.keys(overrides)) {
+        if (
+          !overrides[key] ||
+          typeof overrides[key] !== "object" ||
+          Array.isArray(overrides[key])
+        ) {
+          valid = false;
+          break;
+        }
+      }
+      if (valid) {
+        const base = deps.host.listWorkflows()[parsed.workflow];
+        if (base)
+          specOverride = applyWorkflowStepOverrides(base, overrides as WorkflowStepOverrides);
+      }
     }
     try {
       const result = deps.runs.start(parsed.workflow, parsed.input, {
@@ -648,9 +662,28 @@ async function handle(
       sendJson(res, 400, { error: "body must include 'overrides' object" });
       return;
     }
+    const overrides = parsed.overrides as Record<string, unknown>;
+    for (const key of Object.keys(overrides)) {
+      if (!overrides[key] || typeof overrides[key] !== "object" || Array.isArray(overrides[key])) {
+        sendJson(res, 400, { error: `overrides.${key} must be an object` });
+        return;
+      }
+      // Validate nested step patches are also objects
+      const wfOverrides = overrides[key] as Record<string, unknown>;
+      for (const stepId of Object.keys(wfOverrides)) {
+        if (
+          !wfOverrides[stepId] ||
+          typeof wfOverrides[stepId] !== "object" ||
+          Array.isArray(wfOverrides[stepId])
+        ) {
+          sendJson(res, 400, { error: `overrides.${key}.${stepId} must be an object` });
+          return;
+        }
+      }
+    }
     try {
       const result = await deps.author.flushSessionOverrides(
-        parsed.overrides as Record<string, WorkflowStepOverrides>,
+        overrides as Record<string, WorkflowStepOverrides>,
       );
       sendJson(res, 200, {
         ok: true,

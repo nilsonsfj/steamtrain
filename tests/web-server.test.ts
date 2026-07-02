@@ -1094,6 +1094,83 @@ describe("web server", () => {
     expect(res.status).toBe(400);
   });
 
+  it("POST /api/runs with non-object step patches is ignored", async () => {
+    let receivedSpec: WorkflowSpec | undefined;
+    const host: WorkflowHost = {
+      listWorkflows: () => ({ demo: demoSpec() }),
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      async *runWorkflow(_name, _input, _signal, _cache, _cwd, specOverride) {
+        receivedSpec = specOverride;
+        yield { kind: "workflow_done", ok: true, results: [], ts: Date.now() };
+      },
+    };
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const server = createWebServer({ host, runs, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workflow: "demo",
+        input: "test",
+        overrides: { s1: "codex" },
+      }),
+    });
+    expect(res.status).toBe(201);
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Spec should be unchanged — the invalid patch was silently ignored
+    expect(receivedSpec).toBeDefined();
+    const step = receivedSpec!.phases[0]!.steps[0]! as { agent: string };
+    expect(step.agent).toBe("opencode");
+  });
+
+  it("POST /api/overrides/flush with non-object step patches returns 400", async () => {
+    const host: WorkflowHost & {
+      workflowSource(): undefined;
+      isAgentHealthy(): boolean;
+      setCatalog(): void;
+    } = {
+      listWorkflows: () => ({ demo: demoSpec() }),
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      async *runWorkflow() {
+        yield { kind: "workflow_done", ok: true, results: [], ts: Date.now() };
+      },
+      workflowSource: () => undefined,
+      isAgentHealthy: () => true,
+      setCatalog: () => {},
+    };
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const author = new WorkflowAuthor({
+      host,
+      config: testRunConfig,
+      cwd: tmpdir(),
+      home: mkdtempSync(join(tmpdir(), "flush-nonobj-")),
+    });
+    const server = createWebServer({ host, runs, author, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+
+    const res = await fetch(`${base}/api/overrides/flush`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ overrides: { demo: { s1: "codex" } } }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("POST /api/overrides/flush returns 500 when flushSessionOverrides throws", async () => {
     const host: WorkflowHost & {
       workflowSource(): undefined;

@@ -287,7 +287,7 @@
       document.getElementById("wfSub").textContent = r.body.spec.description || "";
       document.getElementById("runRow").style.display = "flex";
       renderSourceLine();
-      S.runState = SteamtrainReducer.workflowStateFromSpec(r.body.spec);
+      S.runState = SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || r.body.spec);
       render();
       renderStagedIndicator();
       if (after) after();
@@ -505,7 +505,7 @@
   function startRun() {
     var input = document.getElementById("input").value;
     if (!input.trim()) { setBanner("enter some input first", "info"); return; }
-    S.runState = SteamtrainReducer.workflowStateFromSpec(S.spec);
+    S.runState = SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || S.spec);
     setBanner("", "");
     document.getElementById("statusLine").style.display = "flex";
     var payload = { workflow: S.selected, input: input, fresh: document.getElementById("freshChk").checked };
@@ -788,20 +788,7 @@
   function openEditor(clone) {
     if (!S.spec) return;
     if (!S.agents.length) { setBanner("agent catalog still loading; try again in a moment", "info"); return; }
-    var spec = JSON.parse(JSON.stringify(S.spec));
-    // Merge staged overrides into the cloned spec so the editor reflects
-    // what the user previously staged via "Try without saving".
-    var staged = S.stagedOverrides[S.selected];
-    if (staged) {
-      spec.phases.forEach(function (p) {
-        p.steps.forEach(function (st) {
-          var patch = staged[st.id];
-          if (patch) {
-            for (var k in patch) { st[k] = patch[k]; }
-          }
-        });
-      });
-    }
+    var spec = JSON.parse(JSON.stringify(effectiveSpec() || S.spec));
     var creating = !!clone;
     var isWritable = S.source === "user" || S.source === "project";
     var nameInput = h("input", { class: "txt", maxlength: "48", value: creating ? spec.name + "-copy" : spec.name });
@@ -884,7 +871,14 @@
         saveBtn.disabled = false; saveBtn.textContent = creating ? "Save copy" : "Save";
         if (r.status === 200 && r.body.ok) {
           closeModal();
-          refreshAfterWrite(r.body.name || targetName, "saved");
+          var savedName = r.body.name || targetName;
+          // Clear staged overrides for the saved workflow — the persisted spec
+          // is now the source of truth. On rename, migrate from old name.
+          if (!creating && isWritable && targetName !== S.selected && S.stagedOverrides[S.selected]) {
+            S.stagedOverrides[savedName] = S.stagedOverrides[S.selected];
+          }
+          delete S.stagedOverrides[S.selected || savedName];
+          refreshAfterWrite(savedName, "saved");
         } else {
           mbanner(banner, (r.body && r.body.error) || "save failed", "err");
         }
@@ -902,12 +896,12 @@
             patch.agent = r.agentSel.value;
             patch.model = r.modelSel.value;
             var ef = r.effortSel ? r.effortSel.value : "";
-            if (ef) patch.effort = ef;
+            if (ef) patch.effort = ef; else delete patch.effort;
             patch.prompt = r.promptTa.value;
             if (r.stepTimeoutInput && r.stepTimeoutInput.value.trim()) {
               var stepSec = Number(r.stepTimeoutInput.value) * 60;
-              if (stepSec > 0) patch.stepTimeoutSec = stepSec;
-            }
+              if (stepSec > 0) patch.stepTimeoutSec = stepSec; else delete patch.stepTimeoutSec;
+            } else delete patch.stepTimeoutSec;
             if (Object.keys(patch).length > 0) overrides[st.id] = patch;
           });
         });
@@ -1153,6 +1147,29 @@
     return S.selected && S.stagedOverrides[S.selected] && Object.keys(S.stagedOverrides[S.selected]).length > 0;
   }
 
+  function hasAnyStaged() {
+    for (var k in S.stagedOverrides) {
+      if (Object.keys(S.stagedOverrides[k]).length > 0) return true;
+    }
+    return false;
+  }
+
+  function effectiveSpec() {
+    if (!S.spec) return null;
+    var staged = S.stagedOverrides[S.selected];
+    if (!staged || Object.keys(staged).length === 0) return S.spec;
+    var spec = JSON.parse(JSON.stringify(S.spec));
+    spec.phases.forEach(function (p) {
+      p.steps.forEach(function (st) {
+        var patch = staged[st.id];
+        if (patch) {
+          for (var k in patch) { st[k] = patch[k]; }
+        }
+      });
+    });
+    return spec;
+  }
+
   function renderStagedIndicator() {
     var el = document.getElementById("wfTitle");
     if (!el || !el.parentNode) return;
@@ -1165,7 +1182,7 @@
       );
     }
     var flushBtn = document.getElementById("flushBtn");
-    if (flushBtn) flushBtn.style.display = hasStaged() ? "block" : "none";
+    if (flushBtn) flushBtn.style.display = hasAnyStaged() ? "block" : "none";
   }
 
   var flushInFlight = false;
