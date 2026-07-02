@@ -591,22 +591,18 @@ async function handle(
       !Array.isArray(parsed.overrides)
     ) {
       const overrides = parsed.overrides as Record<string, unknown>;
-      let valid = true;
       for (const key of Object.keys(overrides)) {
         if (
           !overrides[key] ||
           typeof overrides[key] !== "object" ||
           Array.isArray(overrides[key])
         ) {
-          valid = false;
-          break;
+          sendJson(res, 400, { error: `overrides.${key} must be an object` });
+          return;
         }
       }
-      if (valid) {
-        const base = deps.host.listWorkflows()[parsed.workflow];
-        if (base)
-          specOverride = applyWorkflowStepOverrides(base, overrides as WorkflowStepOverrides);
-      }
+      const base = deps.host.listWorkflows()[parsed.workflow];
+      if (base) specOverride = applyWorkflowStepOverrides(base, overrides as WorkflowStepOverrides);
     }
     try {
       const result = deps.runs.start(parsed.workflow, parsed.input, {

@@ -263,8 +263,9 @@
     S.workflows.forEach(function (w) {
       var kinds = Object.keys(w.kinds || {}).map(function (k) { return (KIND_LABEL[k] || k) + ":" + w.kinds[k]; }).join(" \u00b7 ");
       var meta = w.phaseCount + " phase" + (w.phaseCount === 1 ? "" : "s") + " \u00b7 " + w.stepCount + " step" + (w.stepCount === 1 ? "" : "s");
+      var isStaged = S.stagedOverrides[w.name] && Object.keys(S.stagedOverrides[w.name]).length > 0;
       var card = h("div", { class: "wf" + (S.selected === w.name ? " sel" : ""), onClick: function () { selectWorkflow(w.name); } },
-        h("div", { class: "name" }, w.name, h("span", { class: "src", text: w.source })),
+        h("div", { class: "name" }, w.name, h("span", { class: "src", text: w.source }), isStaged ? h("span", { class: "badge staged", text: "staged" }) : null),
         w.description ? h("div", { class: "desc", text: w.description }) : null,
         h("div", { class: "meta", text: meta + (kinds ? " \u00b7 " + kinds : "") })
       );
@@ -872,12 +873,8 @@
         if (r.status === 200 && r.body.ok) {
           closeModal();
           var savedName = r.body.name || targetName;
-          // Clear staged overrides for the saved workflow — the persisted spec
-          // is now the source of truth. On rename, migrate from old name.
-          if (!creating && isWritable && targetName !== S.selected && S.stagedOverrides[S.selected]) {
-            S.stagedOverrides[savedName] = S.stagedOverrides[S.selected];
-          }
           delete S.stagedOverrides[S.selected || savedName];
+          if (savedName !== S.selected) delete S.stagedOverrides[savedName];
           refreshAfterWrite(savedName, "saved");
         } else {
           mbanner(banner, (r.body && r.body.error) || "save failed", "err");
@@ -905,6 +902,13 @@
             if (Object.keys(patch).length > 0) overrides[st.id] = patch;
           });
         });
+        // Capture workflow-level timeouts as special keys
+        var wfStepSec = Number(wfStepInput.value) * 60;
+        if (wfStepInput.value.trim() && wfStepSec > 0) overrides.__wf_stepTimeoutSec__ = wfStepSec;
+        else delete overrides.__wf_stepTimeoutSec__;
+        var wfRunSec = Number(wfRunInput.value) * 60;
+        if (wfRunInput.value.trim() && wfRunSec > 0) overrides.__wf_workflowTimeoutSec__ = wfRunSec;
+        else delete overrides.__wf_workflowTimeoutSec__;
         if (Object.keys(overrides).length > 0) {
           S.stagedOverrides[S.selected] = overrides;
         } else {
@@ -1159,6 +1163,12 @@
     var staged = S.stagedOverrides[S.selected];
     if (!staged || Object.keys(staged).length === 0) return S.spec;
     var spec = JSON.parse(JSON.stringify(S.spec));
+    // Apply workflow-level timeouts
+    if (staged.__wf_stepTimeoutSec__) spec.stepTimeoutSec = staged.__wf_stepTimeoutSec__;
+    else if (("__wf_stepTimeoutSec__" in staged)) delete spec.stepTimeoutSec;
+    if (staged.__wf_workflowTimeoutSec__) spec.workflowTimeoutSec = staged.__wf_workflowTimeoutSec__;
+    else if (("__wf_workflowTimeoutSec__" in staged)) delete spec.workflowTimeoutSec;
+    // Apply step-level overrides
     spec.phases.forEach(function (p) {
       p.steps.forEach(function (st) {
         var patch = staged[st.id];
@@ -1173,7 +1183,7 @@
   function renderStagedIndicator() {
     var el = document.getElementById("wfTitle");
     if (!el || !el.parentNode) return;
-    var existing = el.parentNode.querySelector(".staged-badge");
+    var existing = el.parentNode.querySelector(".badge.staged");
     if (existing) existing.remove();
     if (hasStaged()) {
       el.parentNode.insertBefore(
@@ -1187,7 +1197,7 @@
 
   var flushInFlight = false;
   function flushStaged() {
-    if (!hasStaged() || flushInFlight) return;
+    if (!hasAnyStaged() || flushInFlight) return;
     flushInFlight = true;
     var flushBtn = document.getElementById("flushBtn");
     if (flushBtn) { flushBtn.disabled = true; flushBtn.textContent = "Flushing\u2026"; }
@@ -1204,17 +1214,14 @@
       if (r.body.skipped && r.body.skipped.length) {
         parts.push("skipped: " + r.body.skipped.map(function (s) { return s.name + " (" + s.reason + ")"; }).join(", "));
       }
-      if (r.body.skipped && r.body.skipped.length) {
-        var skippedNames = {};
-        r.body.skipped.forEach(function (s) { skippedNames[s.name] = true; });
-        var remaining = {};
-        for (var k in S.stagedOverrides) {
-          if (skippedNames[k]) remaining[k] = S.stagedOverrides[k];
-        }
-        S.stagedOverrides = remaining;
-      } else {
-        S.stagedOverrides = {};
+      // Preserve skipped and unchanged entries; only clear saved ones.
+      var savedNames = {};
+      (r.body.saved || []).forEach(function (n) { savedNames[n] = true; });
+      var remaining = {};
+      for (var k in S.stagedOverrides) {
+        if (!savedNames[k]) remaining[k] = S.stagedOverrides[k];
       }
+      S.stagedOverrides = remaining;
       renderStagedIndicator();
       var bannerMsg = parts.length ? "Flush: " + parts.join("; ") : "No staged changes to flush.";
       reloadCatalog().then(function () {
