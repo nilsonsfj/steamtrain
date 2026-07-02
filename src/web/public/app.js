@@ -789,6 +789,19 @@
     if (!S.spec) return;
     if (!S.agents.length) { setBanner("agent catalog still loading; try again in a moment", "info"); return; }
     var spec = JSON.parse(JSON.stringify(S.spec));
+    // Merge staged overrides into the cloned spec so the editor reflects
+    // what the user previously staged via "Try without saving".
+    var staged = S.stagedOverrides[S.selected];
+    if (staged) {
+      spec.phases.forEach(function (p) {
+        p.steps.forEach(function (st) {
+          var patch = staged[st.id];
+          if (patch) {
+            for (var k in patch) { st[k] = patch[k]; }
+          }
+        });
+      });
+    }
     var creating = !!clone;
     var isWritable = S.source === "user" || S.source === "project";
     var nameInput = h("input", { class: "txt", maxlength: "48", value: creating ? spec.name + "-copy" : spec.name });
@@ -1186,8 +1199,10 @@
         S.stagedOverrides = {};
       }
       renderStagedIndicator();
-      reloadCatalog().then(function () { selectWorkflow(S.selected); });
-      setBanner(parts.length ? "Flush: " + parts.join("; ") : "No staged changes to flush.", "ok");
+      var bannerMsg = parts.length ? "Flush: " + parts.join("; ") : "No staged changes to flush.";
+      reloadCatalog().then(function () {
+        selectWorkflow(S.selected, function () { setBanner(bannerMsg, "ok"); });
+      });
     }).catch(function () {
       resetFlushState();
       setBanner("flush failed: network error", "err");
