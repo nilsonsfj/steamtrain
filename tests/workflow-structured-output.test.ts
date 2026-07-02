@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AgentAdapter, AgentRunOptions } from "../src/agents";
 import type { AgentEvent, AgentId } from "../src/types/events";
@@ -9,6 +12,11 @@ import {
   runWorkflow,
   validateWorkflow,
 } from "../src/workflow";
+import {
+  loadWorkflowCache,
+  saveWorkflowCache,
+  workflowCacheKey,
+} from "../src/workflow/cache-store";
 import {
   extractJsonValue,
   jsonFieldText,
@@ -61,9 +69,10 @@ async function collect(
   spec: WorkflowSpec,
   input: string,
   deps: WorkflowDeps,
+  cache?: Map<string, StepResult>,
 ): Promise<WorkflowEvent[]> {
   const events: WorkflowEvent[] = [];
-  for await (const ev of runWorkflow(spec, { input }, deps)) events.push(ev);
+  for await (const ev of runWorkflow(spec, { input, cache }, deps)) events.push(ev);
   return events;
 }
 
@@ -622,5 +631,46 @@ describe("engine: structured step outputs", () => {
 
     expect(finalResult(events, "celebrate").skipped).toBe(true);
     expect(runs).toHaveLength(1); // only the review agent ran
+  });
+
+  it("replays json from a disk round-tripped cache (resume)", async () => {
+    const spec = reviewSpec([
+      {
+        id: "gate-phase",
+        title: "Gate",
+        steps: [
+          {
+            id: "check",
+            kind: "gate",
+            dependsOn: ["review"],
+            condition: { step: "review", path: "verdict", equals: "pass" },
+            onFalse: "fail",
+          },
+        ],
+      },
+    ]);
+
+    // First run populates the cache; persist it through the disk store.
+    const first = makeDeps(() => reply('{"verdict": "pass"}'));
+    const cache = new Map<string, StepResult>();
+    await collect(spec, "x", first.deps, cache);
+    expect(first.runs).toHaveLength(1);
+    const root = mkdtempSync(join(tmpdir(), "steamtrain-structured-"));
+    const key = workflowCacheKey("structured", "x", root, spec);
+    await saveWorkflowCache(root, key, cache);
+
+    // Resume from the reloaded cache: no agent runs, and the path gate still
+    // sees the parsed json rather than empty text. Drop the gate's own cached
+    // result so it genuinely re-evaluates against the replayed review result.
+    const reloaded = await loadWorkflowCache(root, key);
+    reloaded.delete("check");
+    const second = makeDeps(() => reply("must not run"));
+    const events = await collect(spec, "x", second.deps, reloaded);
+    expect(second.runs).toHaveLength(0);
+    expect(finalResult(events, "review").json).toEqual({ verdict: "pass" });
+    const gate = events.find((e) => e.kind === "gate_evaluated");
+    expect(gate?.kind === "gate_evaluated" && gate.passed).toBe(true);
+    const done = events.at(-1);
+    expect(done?.kind === "workflow_done" && done.ok).toBe(true);
   });
 });
