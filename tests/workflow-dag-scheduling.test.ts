@@ -223,7 +223,11 @@ describe("DAG scheduling", () => {
     };
     const collected = collect(spec, "hi", deps);
     // Give the scheduler a tick to (incorrectly) dispatch "merge" early, then
-    // release the slow step.
+    // release the slow step. This delay can't cause a false failure: a correct
+    // engine always waits for "slow" and renders "out:fast + out:slow"
+    // regardless of timing. The wait only widens the window in which a
+    // hypothetical regression (ignoring template refs) would dispatch "merge"
+    // early and get caught, so it can't be flaky in the failing direction.
     await new Promise((r) => setTimeout(r, 10));
     slowGate.resolve();
     await collected;
