@@ -146,7 +146,7 @@ export class WorkflowRunManager {
   start(
     workflow: string,
     input: string,
-    opts?: { fresh?: boolean; seed?: Map<string, StepResult> },
+    opts?: { fresh?: boolean; seed?: Map<string, StepResult>; specOverride?: WorkflowSpec },
   ): StartRunResult {
     const text = input.trim();
     if (!text) return { ok: false, error: "input is required" };
@@ -155,8 +155,10 @@ export class WorkflowRunManager {
       throw new TooManyRuns(this.maxConcurrent);
     }
 
-    const spec = this.host.listWorkflows()[workflow];
-    if (!spec) return { ok: false, error: `unknown workflow '${workflow}'` };
+    const baseSpec = this.host.listWorkflows()[workflow];
+    if (!baseSpec) return { ok: false, error: `unknown workflow '${workflow}'` };
+
+    const spec = opts?.specOverride ?? baseSpec;
 
     const check = this.host.canDispatchWorkflowSpec(spec);
     if (!check.ok) return { ok: false, error: check.reason };

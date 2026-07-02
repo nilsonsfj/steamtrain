@@ -12,6 +12,7 @@
     startedAt: 0, timer: null,
     runState: null,
     rafQueued: false, draftAbort: null, doctor: [],
+    stagedOverrides: {},
     projectConfig: null
   };
 
@@ -288,6 +289,7 @@
       renderSourceLine();
       S.runState = SteamtrainReducer.workflowStateFromSpec(r.body.spec);
       render();
+      renderStagedIndicator();
       if (after) after();
     });
   }
@@ -506,7 +508,9 @@
     S.runState = SteamtrainReducer.workflowStateFromSpec(S.spec);
     setBanner("", "");
     document.getElementById("statusLine").style.display = "flex";
-    api("POST", "/api/runs", { workflow: S.selected, input: input, fresh: document.getElementById("freshChk").checked })
+    var payload = { workflow: S.selected, input: input, fresh: document.getElementById("freshChk").checked };
+    if (S.stagedOverrides[S.selected]) payload.overrides = S.stagedOverrides[S.selected];
+    api("POST", "/api/runs", payload)
       .then(function (r) {
         if (r.status !== 201) { setBanner(r.body.error || "could not start run", "err"); return; }
         S.runId = r.body.runId;
@@ -822,9 +826,11 @@
     );
 
     var saveBtn = h("button", { class: "btn primary", text: creating ? "Save copy" : "Save" });
+    var tryBtn = creating ? null : h("button", { class: "btn", text: "Try without saving" });
     var foot = h("div", { class: "mfoot" },
       h("button", { class: "btn", text: "Cancel", onClick: closeModal }),
       h("div", { class: "spacer" }),
+      tryBtn,
       saveBtn
     );
 
@@ -871,6 +877,37 @@
         }
       });
     });
+
+    if (tryBtn) {
+      tryBtn.addEventListener("click", function () {
+        var overrides = {};
+        spec.phases.forEach(function (p) {
+          p.steps.forEach(function (st) {
+            var r = refs[st.id];
+            if (!r) return;
+            var patch = {};
+            patch.agent = r.agentSel.value;
+            patch.model = r.modelSel.value;
+            var ef = r.effortSel ? r.effortSel.value : "";
+            if (ef) patch.effort = ef;
+            patch.prompt = r.promptTa.value;
+            if (r.stepTimeoutInput && r.stepTimeoutInput.value.trim()) {
+              var stepSec = Number(r.stepTimeoutInput.value) * 60;
+              if (stepSec > 0) patch.stepTimeoutSec = stepSec;
+            }
+            if (Object.keys(patch).length > 0) overrides[st.id] = patch;
+          });
+        });
+        if (Object.keys(overrides).length > 0) {
+          S.stagedOverrides[S.selected] = overrides;
+        } else {
+          delete S.stagedOverrides[S.selected];
+        }
+        closeModal();
+        renderStagedIndicator();
+        setBanner(Object.keys(overrides).length > 0 ? "Overrides staged for next run (not saved to disk)." : "No changes to stage.", "info");
+      });
+    }
 
     openModal(modalShell(creating ? "Clone workflow" : "Configure " + spec.name,
       "Set the agent, model, effort, and prompt for each step.", body, foot, true));
@@ -945,6 +982,7 @@
     var name = S.selected;
     api("DELETE", "/api/workflows/" + encodeURIComponent(name)).then(function (r) {
       if (r.status === 200 && r.body.ok) {
+        delete S.stagedOverrides[name];
         S.selected = null; S.spec = null; S.source = null;
         document.getElementById("wfActions").style.display = "none";
         document.getElementById("srcLine").style.display = "none";
@@ -1097,8 +1135,45 @@
   function tail(text, n) { return text.length > n ? "\u2026" + text.slice(text.length - n) : text; }
   function truncate(text, n) { return text.length > n ? text.slice(0, n) + "\u2026" : text; }
 
+  // ---- staged overrides ---------------------------------------------------
+  function hasStaged() {
+    return S.selected && S.stagedOverrides[S.selected] && Object.keys(S.stagedOverrides[S.selected]).length > 0;
+  }
+
+  function renderStagedIndicator() {
+    var el = document.getElementById("wfTitle");
+    var existing = el.parentNode.querySelector(".staged-badge");
+    if (existing) existing.remove();
+    if (hasStaged()) {
+      el.parentNode.insertBefore(
+        h("span", { class: "badge staged", text: "staged" }),
+        el.nextSibling
+      );
+    }
+    var flushBtn = document.getElementById("flushBtn");
+    if (flushBtn) flushBtn.style.display = hasStaged() ? "block" : "none";
+  }
+
+  function flushStaged() {
+    if (!hasStaged()) return;
+    api("POST", "/api/overrides/flush", { overrides: S.stagedOverrides }).then(function (r) {
+      if (r.status !== 200) { setBanner((r.body && r.body.error) || "flush failed", "err"); return; }
+      var parts = [];
+      if (r.body.saved && r.body.saved.length) parts.push("saved: " + r.body.saved.join(", "));
+      if (r.body.unchanged && r.body.unchanged.length) parts.push("unchanged: " + r.body.unchanged.join(", "));
+      if (r.body.skipped && r.body.skipped.length) {
+        parts.push("skipped: " + r.body.skipped.map(function (s) { return s.name + " (" + s.reason + ")"; }).join(", "));
+      }
+      S.stagedOverrides = {};
+      renderStagedIndicator();
+      reloadCatalog().then(function () { selectWorkflow(S.selected); });
+      setBanner(parts.length ? "Flush: " + parts.join("; ") : "No staged changes to flush.", "ok");
+    });
+  }
+
   document.getElementById("runBtn").addEventListener("click", startRun);
   document.getElementById("cancelBtn").addEventListener("click", cancelRun);
+  document.getElementById("flushBtn").addEventListener("click", flushStaged);
   document.getElementById("input").addEventListener("keydown", function (e) {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") startRun();
   });

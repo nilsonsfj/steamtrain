@@ -14,7 +14,7 @@ import type {
   WorkflowHistoryStore,
   WorkflowSpec,
 } from "../src/workflow";
-import { RunRecordBuilder, createWorkflowHistoryStore } from "../src/workflow";
+import { RunRecordBuilder, WorkflowAuthor, createWorkflowHistoryStore } from "../src/workflow";
 import { readSse } from "./helpers/read-sse";
 
 const servers: Server[] = [];
@@ -730,5 +730,241 @@ describe("web server", () => {
         run?.status === "done" ||
         run === undefined,
     ).toBe(true);
+  });
+
+  it("POST /api/runs with overrides merges them into the spec", async () => {
+    let receivedSpec: WorkflowSpec | undefined;
+    const host: WorkflowHost = {
+      listWorkflows: () => ({ demo: demoSpec() }),
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      async *runWorkflow(_name, _input, _signal, _cache, _cwd, specOverride) {
+        receivedSpec = specOverride;
+        yield { kind: "workflow_done", ok: true, results: [], ts: Date.now() };
+      },
+    };
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const server = createWebServer({ host, runs, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workflow: "demo",
+        input: "test",
+        overrides: { s1: { agent: "codex", model: "gpt-5" } },
+      }),
+    });
+    expect(res.status).toBe(201);
+
+    // Give the drive loop a tick to call runWorkflow
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(receivedSpec).toBeDefined();
+    const step = receivedSpec!.phases[0]!.steps[0]! as { agent: string; model: string };
+    expect(step.agent).toBe("codex");
+    expect(step.model).toBe("gpt-5");
+  });
+
+  it("POST /api/runs without overrides passes the base spec", async () => {
+    let receivedSpec: WorkflowSpec | undefined;
+    const host: WorkflowHost = {
+      listWorkflows: () => ({ demo: demoSpec() }),
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      async *runWorkflow(_name, _input, _signal, _cache, _cwd, specOverride) {
+        receivedSpec = specOverride;
+        yield { kind: "workflow_done", ok: true, results: [], ts: Date.now() };
+      },
+    };
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const server = createWebServer({ host, runs, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "demo", input: "test" }),
+    });
+    expect(res.status).toBe(201);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(receivedSpec).toBeDefined();
+    expect((receivedSpec!.phases[0]!.steps[0]! as { agent: string }).agent).toBe("opencode");
+  });
+
+  it("POST /api/overrides/flush persists staged overrides and returns report", async () => {
+    const host: WorkflowHost & {
+      workflowSource(): undefined;
+      isAgentHealthy(): boolean;
+      setCatalog(): void;
+    } = {
+      listWorkflows: () => ({ demo: demoSpec() }),
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      async *runWorkflow() {
+        yield { kind: "workflow_done", ok: true, results: [], ts: Date.now() };
+      },
+      workflowSource: () => undefined,
+      isAgentHealthy: () => true,
+      setCatalog: () => {},
+    };
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const author = new WorkflowAuthor({
+      host,
+      config: testRunConfig,
+      cwd: tmpdir(),
+      home: mkdtempSync(join(tmpdir(), "flush-test-")),
+    });
+    const server = createWebServer({ host, runs, author, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+
+    // Flush with overrides for a workflow that doesn't exist in the catalog
+    // (it should be reported as skipped)
+    const res = await fetch(`${base}/api/overrides/flush`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ overrides: { nonexistent: { s1: { agent: "codex" } } } }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      saved: string[];
+      skipped: Array<{ name: string; reason: string }>;
+      unchanged: string[];
+    };
+    expect(body.ok).toBe(true);
+    expect(body.saved).toEqual([]);
+    expect(body.skipped.length).toBe(1);
+    expect(body.skipped[0]!.name).toBe("nonexistent");
+  });
+
+  it("POST /api/overrides/flush without author returns 501", async () => {
+    const host: WorkflowHost = {
+      listWorkflows: () => ({ demo: demoSpec() }),
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      async *runWorkflow() {
+        yield { kind: "workflow_done", ok: true, results: [], ts: Date.now() };
+      },
+    };
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const server = createWebServer({ host, runs, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+
+    const res = await fetch(`${base}/api/overrides/flush`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ overrides: {} }),
+    });
+    expect(res.status).toBe(501);
+  });
+
+  it("POST /api/overrides/flush with invalid body returns 400", async () => {
+    const host: WorkflowHost & {
+      workflowSource(): undefined;
+      isAgentHealthy(): boolean;
+      setCatalog(): void;
+    } = {
+      listWorkflows: () => ({ demo: demoSpec() }),
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      async *runWorkflow() {
+        yield { kind: "workflow_done", ok: true, results: [], ts: Date.now() };
+      },
+      workflowSource: () => undefined,
+      isAgentHealthy: () => true,
+      setCatalog: () => {},
+    };
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const author = new WorkflowAuthor({
+      host,
+      config: testRunConfig,
+      cwd: tmpdir(),
+      home: mkdtempSync(join(tmpdir(), "flush-invalid-")),
+    });
+    const server = createWebServer({ host, runs, author, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+
+    const res = await fetch(`${base}/api/overrides/flush`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ notOverrides: true }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /api/overrides/flush with empty overrides returns ok with empty results", async () => {
+    const host: WorkflowHost & {
+      workflowSource(): undefined;
+      isAgentHealthy(): boolean;
+      setCatalog(): void;
+    } = {
+      listWorkflows: () => ({ demo: demoSpec() }),
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      async *runWorkflow() {
+        yield { kind: "workflow_done", ok: true, results: [], ts: Date.now() };
+      },
+      workflowSource: () => undefined,
+      isAgentHealthy: () => true,
+      setCatalog: () => {},
+    };
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const author = new WorkflowAuthor({
+      host,
+      config: testRunConfig,
+      cwd: tmpdir(),
+      home: mkdtempSync(join(tmpdir(), "flush-empty-")),
+    });
+    const server = createWebServer({ host, runs, author, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+
+    const res = await fetch(`${base}/api/overrides/flush`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ overrides: {} }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      saved: string[];
+      skipped: Array<{ name: string; reason: string }>;
+      unchanged: string[];
+    };
+    expect(body.ok).toBe(true);
+    expect(body.saved).toEqual([]);
+    expect(body.skipped).toEqual([]);
+    expect(body.unchanged).toEqual([]);
   });
 });

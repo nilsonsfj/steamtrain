@@ -20,6 +20,8 @@ import {
   type WorkflowHistoryStore,
   type WorkflowSourceKind,
   type WorkflowSpec,
+  type WorkflowStepOverrides,
+  applyWorkflowStepOverrides,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   isAgentBackedStep,
@@ -241,9 +243,10 @@ async function readBody(req: IncomingMessage): Promise<string> {
  *   DELETE /api/history/:id         delete one past run
  *   POST   /api/history/:id/rerun   re-run a past run -> { runId }
  *   POST   /api/history/:id/retry   retry failed steps -> { runId, downgraded? }
- *   POST   /api/runs                { workflow, input, fresh? } -> { runId }
+ *   POST   /api/runs                { workflow, input, fresh?, overrides? } -> { runId }
  *   GET    /api/runs/:id/stream     SSE of WorkflowEvents + terminal status
  *   POST   /api/runs/:id/cancel     abort a run
+ *   POST   /api/overrides/flush     flush staged session overrides -> { saved, skipped, unchanged }
  */
 export function createWebServer(deps: WebServerDeps): Server {
   return createServer((req, res) => {
@@ -570,7 +573,7 @@ async function handle(
 
   if (method === "POST" && path === "/api/runs") {
     const body = await readBody(req);
-    let parsed: { workflow?: unknown; input?: unknown; fresh?: unknown };
+    let parsed: { workflow?: unknown; input?: unknown; fresh?: unknown; overrides?: unknown };
     try {
       parsed = body ? JSON.parse(body) : {};
     } catch {
@@ -581,9 +584,16 @@ async function handle(
       sendJson(res, 400, { error: "body must include string 'workflow' and 'input'" });
       return;
     }
+    let specOverride: WorkflowSpec | undefined;
+    if (parsed.overrides && typeof parsed.overrides === "object") {
+      const base = deps.host.listWorkflows()[parsed.workflow];
+      if (base)
+        specOverride = applyWorkflowStepOverrides(base, parsed.overrides as WorkflowStepOverrides);
+    }
     try {
       const result = deps.runs.start(parsed.workflow, parsed.input, {
         fresh: parsed.fresh === true,
+        specOverride,
       });
       if (!result.ok) {
         sendJson(res, 400, { error: result.error });
@@ -610,6 +620,35 @@ async function handle(
   if (method === "POST" && cancelMatch) {
     const ok = deps.runs.cancel(cancelMatch[1]!);
     sendJson(res, ok ? 200 : 404, { canceled: ok });
+    return;
+  }
+
+  if (method === "POST" && path === "/api/overrides/flush") {
+    if (!deps.author) {
+      sendJson(res, 501, { error: "workflow authoring is not enabled" });
+      return;
+    }
+    const body = await readBody(req);
+    let parsed: { overrides?: unknown };
+    try {
+      parsed = body ? JSON.parse(body) : {};
+    } catch {
+      sendJson(res, 400, { error: "invalid JSON body" });
+      return;
+    }
+    if (!parsed.overrides || typeof parsed.overrides !== "object") {
+      sendJson(res, 400, { error: "body must include 'overrides' object" });
+      return;
+    }
+    const result = await deps.author.flushSessionOverrides(
+      parsed.overrides as Record<string, WorkflowStepOverrides>,
+    );
+    sendJson(res, 200, {
+      ok: true,
+      saved: result.saved,
+      skipped: result.skipped,
+      unchanged: result.unchanged,
+    });
     return;
   }
 

@@ -67,6 +67,7 @@ export function renderIndex(revs: PageAssetRevisions): string {
       <div class="wfactions" id="wfActions" style="display:none">
         <button class="btn small" id="editBtn">&#9998; Configure</button>
         <button class="btn small" id="cloneBtn">&#10697; Clone</button>
+        <button class="btn small warn" id="flushBtn" style="display:none">&#128190; Flush to disk</button>
         <button class="btn small danger" id="deleteBtn" style="display:none">&#128465; Delete</button>
       </div>
       <div class="row" id="runRow" style="display:none">
