@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -1163,6 +1163,132 @@ describe("web server", () => {
       body: JSON.stringify({ overrides: { demo: { s1: "codex" } } }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it("POST /api/runs with structured overrides applies workflow-level timeouts", async () => {
+    let receivedSpec: WorkflowSpec | undefined;
+    const host: WorkflowHost = {
+      listWorkflows: () => ({ demo: demoSpec() }),
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      async *runWorkflow(_name, _input, _signal, _cache, _cwd, specOverride) {
+        receivedSpec = specOverride;
+        yield { kind: "workflow_done", ok: true, results: [], ts: Date.now() };
+      },
+    };
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const server = createWebServer({ host, runs, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workflow: "demo",
+        input: "test",
+        overrides: {
+          steps: { s1: { agent: "codex", model: "gpt-5" } },
+          stepTimeoutSec: 900,
+        },
+      }),
+    });
+    expect(res.status).toBe(201);
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(receivedSpec).toBeDefined();
+    expect(receivedSpec!.stepTimeoutSec).toBe(900);
+    expect((receivedSpec!.phases[0]!.steps[0]! as { agent: string }).agent).toBe("codex");
+  });
+
+  it("POST /api/runs rejects legacy __wf_* override keys", async () => {
+    const host: WorkflowHost = {
+      listWorkflows: () => ({ demo: demoSpec() }),
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      async *runWorkflow() {
+        yield { kind: "workflow_done", ok: true, results: [], ts: Date.now() };
+      },
+    };
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const server = createWebServer({ host, runs, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workflow: "demo",
+        input: "test",
+        overrides: { __wf_stepTimeoutSec__: 900 },
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("legacy override key");
+  });
+
+  it("POST /api/overrides/flush with workflow-level timeouts saves to disk", async () => {
+    const home = mkdtempSync(join(tmpdir(), "flush-wf-timeout-"));
+    const host: WorkflowHost & {
+      workflowSource(n: string): "user" | undefined;
+      isAgentHealthy(): boolean;
+      setCatalog(): void;
+    } = {
+      listWorkflows: () => ({ demo: demoSpec() }),
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      async *runWorkflow() {
+        yield { kind: "workflow_done", ok: true, results: [], ts: Date.now() };
+      },
+      workflowSource: (n) => (n === "demo" ? "user" : undefined),
+      isAgentHealthy: () => true,
+      setCatalog: () => {},
+    };
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const author = new WorkflowAuthor({
+      host,
+      config: testRunConfig,
+      cwd: tmpdir(),
+      home,
+    });
+    const server = createWebServer({ host, runs, author, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+
+    const res = await fetch(`${base}/api/overrides/flush`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        overrides: {
+          demo: {
+            steps: { s1: { agent: "codex" } },
+            stepTimeoutSec: 1200,
+          },
+        },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { saved: string[] };
+    expect(body.saved).toContain("demo");
+    const onDisk = JSON.parse(
+      readFileSync(join(home, ".steamtrain", "workflows.json"), "utf8"),
+    ) as { workflows: Record<string, WorkflowSpec> };
+    expect(onDisk.workflows.demo!.stepTimeoutSec).toBe(1200);
+    expect(onDisk.workflows.demo!.phases[0]!.steps[0]).toMatchObject({ agent: "codex" });
   });
 
   it("POST /api/overrides/flush returns 500 when flushSessionOverrides throws", async () => {

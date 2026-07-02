@@ -5,7 +5,13 @@ import { z } from "zod";
 import { WORKSPACE_CONFIG_DIR } from "../workspace";
 import { BUNDLED_WORKFLOWS } from "./bundled";
 import { atomicWriteFile } from "./fs-util";
-import { type WorkflowStepOverrides, applyWorkflowStepOverrides } from "./overrides";
+import {
+  type WorkflowSessionOverrides,
+  type WorkflowStepOverrides,
+  applyWorkflowSessionOverrides,
+  normalizeSessionOverrides,
+  sessionOverridesEmpty,
+} from "./overrides";
 import {
   type WorkflowSpec,
   type WorkflowSpecInput,
@@ -94,7 +100,7 @@ export interface SaveSessionWorkflowsResult {
 
 export interface SaveSessionWorkflowsOptions {
   catalog: LoadedWorkflowCatalog;
-  sessionOverrides: Record<string, WorkflowStepOverrides>;
+  sessionOverrides: Record<string, WorkflowSessionOverrides | WorkflowStepOverrides>;
   home?: string;
 }
 
@@ -109,8 +115,18 @@ export function collectSessionWorkflowSaves(
   const skipped: Array<{ name: string; reason: string }> = [];
   const unchanged: string[] = [];
 
-  for (const [name, overrides] of Object.entries(options.sessionOverrides)) {
-    if (!overrides || Object.keys(overrides).length === 0) continue;
+  for (const [name, rawOverrides] of Object.entries(options.sessionOverrides)) {
+    let overrides: WorkflowSessionOverrides | undefined;
+    try {
+      overrides = normalizeSessionOverrides(rawOverrides);
+    } catch (err) {
+      skipped.push({
+        name,
+        reason: err instanceof Error ? err.message : "invalid session overrides",
+      });
+      continue;
+    }
+    if (sessionOverridesEmpty(overrides)) continue;
 
     const source = options.catalog.sources[name];
     const catalogSpec = options.catalog.workflows[name];
@@ -124,7 +140,7 @@ export function collectSessionWorkflowSaves(
       continue;
     }
 
-    const effective = applyWorkflowStepOverrides(catalogSpec, overrides);
+    const effective = applyWorkflowSessionOverrides(catalogSpec, overrides);
     const baseline =
       source === "bundled" ? BUNDLED_WORKFLOWS[name] : (userOnDisk[name] ?? catalogSpec);
 

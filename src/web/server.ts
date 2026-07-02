@@ -18,13 +18,14 @@ import {
   WORKFLOW_HISTORY_DIR,
   WorkflowAuthor,
   type WorkflowHistoryStore,
+  type WorkflowSessionOverrides,
   type WorkflowSourceKind,
   type WorkflowSpec,
-  type WorkflowStepOverrides,
-  applyWorkflowStepOverrides,
+  applyWorkflowSessionOverrides,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   isAgentBackedStep,
+  parseSessionOverrides,
   resolveStepTimeoutSec,
   workflowSpecSchema,
   workflowStepKind,
@@ -590,19 +591,15 @@ async function handle(
       typeof parsed.overrides === "object" &&
       !Array.isArray(parsed.overrides)
     ) {
-      const overrides = parsed.overrides as Record<string, unknown>;
-      for (const key of Object.keys(overrides)) {
-        if (
-          !overrides[key] ||
-          typeof overrides[key] !== "object" ||
-          Array.isArray(overrides[key])
-        ) {
-          sendJson(res, 400, { error: `overrides.${key} must be an object` });
-          return;
-        }
+      const parsedOverrides = parseSessionOverrides(parsed.overrides);
+      if (!parsedOverrides.ok) {
+        sendJson(res, 400, { error: parsedOverrides.error });
+        return;
       }
       const base = deps.host.listWorkflows()[parsed.workflow];
-      if (base) specOverride = applyWorkflowStepOverrides(base, overrides as WorkflowStepOverrides);
+      if (base) {
+        specOverride = applyWorkflowSessionOverrides(base, parsedOverrides.overrides);
+      }
     }
     try {
       const result = deps.runs.start(parsed.workflow, parsed.input, {
@@ -659,28 +656,19 @@ async function handle(
       return;
     }
     const overrides = parsed.overrides as Record<string, unknown>;
-    for (const key of Object.keys(overrides)) {
-      if (!overrides[key] || typeof overrides[key] !== "object" || Array.isArray(overrides[key])) {
-        sendJson(res, 400, { error: `overrides.${key} must be an object` });
+    const sessionOverrides: Record<string, WorkflowSessionOverrides> = {};
+    for (const [workflowName, rawWorkflowOverrides] of Object.entries(overrides)) {
+      const parsedWorkflowOverrides = parseSessionOverrides(rawWorkflowOverrides);
+      if (!parsedWorkflowOverrides.ok) {
+        sendJson(res, 400, {
+          error: `overrides.${workflowName}: ${parsedWorkflowOverrides.error}`,
+        });
         return;
       }
-      // Validate nested step patches are also objects
-      const wfOverrides = overrides[key] as Record<string, unknown>;
-      for (const stepId of Object.keys(wfOverrides)) {
-        if (
-          !wfOverrides[stepId] ||
-          typeof wfOverrides[stepId] !== "object" ||
-          Array.isArray(wfOverrides[stepId])
-        ) {
-          sendJson(res, 400, { error: `overrides.${key}.${stepId} must be an object` });
-          return;
-        }
-      }
+      sessionOverrides[workflowName] = parsedWorkflowOverrides.overrides;
     }
     try {
-      const result = await deps.author.flushSessionOverrides(
-        overrides as Record<string, WorkflowStepOverrides>,
-      );
+      const result = await deps.author.flushSessionOverrides(sessionOverrides);
       sendJson(res, 200, {
         ok: true,
         saved: result.saved,
