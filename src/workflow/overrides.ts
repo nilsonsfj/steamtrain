@@ -24,6 +24,28 @@ const AGENT_FIELD_KEYS = new Set<keyof AgentRunFields>([
 
 const LEGACY_WF_KEY_PREFIX = "__wf_";
 
+function isWorkflowTimeoutValue(value: unknown): boolean {
+  return value === null || typeof value === "number";
+}
+
+/** Distinguish structured `{ steps, stepTimeoutSec? }` from flat `{ stepId: patch }` maps. */
+function isStructuredSessionOverridesPayload(record: Record<string, unknown>): boolean {
+  if (
+    ("stepTimeoutSec" in record && isWorkflowTimeoutValue(record.stepTimeoutSec)) ||
+    ("workflowTimeoutSec" in record && isWorkflowTimeoutValue(record.workflowTimeoutSec))
+  ) {
+    return true;
+  }
+  if (!("steps" in record)) return false;
+  const steps = record.steps;
+  if (typeof steps !== "object" || steps === null || Array.isArray(steps)) return false;
+  const stepEntries = Object.entries(steps as Record<string, unknown>);
+  if (stepEntries.length === 0) return true;
+  return stepEntries.every(
+    ([, patch]) => patch !== null && typeof patch === "object" && !Array.isArray(patch),
+  );
+}
+
 function applyAgentPatch<T extends object>(step: T, patch: Partial<AgentRunFields>): T {
   const next = { ...step } as Record<string, unknown>;
   for (const [key, value] of Object.entries(patch)) {
@@ -58,10 +80,7 @@ export function normalizeSessionOverrides(
   }
 
   const record = input as Record<string, unknown>;
-  const structured =
-    "steps" in record || "stepTimeoutSec" in record || "workflowTimeoutSec" in record;
-
-  if (structured) {
+  if (isStructuredSessionOverridesPayload(record)) {
     const session = input as WorkflowSessionOverrides;
     return {
       ...(session.steps ? { steps: session.steps } : {}),
@@ -149,7 +168,7 @@ export function parseSessionOverrides(raw: unknown): ParseSessionOverridesResult
   }
 
   const result: WorkflowSessionOverrides = {};
-  const structured = "steps" in obj || "stepTimeoutSec" in obj || "workflowTimeoutSec" in obj;
+  const structured = isStructuredSessionOverridesPayload(obj);
 
   if (structured) {
     if ("steps" in obj) {

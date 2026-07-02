@@ -136,4 +136,18 @@ describe("normalizeSessionOverrides", () => {
       normalizeSessionOverrides({ __wf_stepTimeoutSec__: 1 } as Record<string, unknown>),
     ).toThrow(/legacy override key/);
   });
+
+  it("treats flat maps with a step id named steps as legacy step overrides", () => {
+    const normalized = normalizeSessionOverrides({
+      steps: { agent: "codex", model: "gpt-5" },
+    });
+    expect(normalized?.steps?.steps).toEqual({ agent: "codex", model: "gpt-5" });
+  });
+
+  it("treats flat maps with a step id named stepTimeoutSec as legacy step overrides", () => {
+    const normalized = normalizeSessionOverrides({
+      stepTimeoutSec: { agent: "codex" },
+    });
+    expect(normalized?.steps?.stepTimeoutSec).toEqual({ agent: "codex" });
+  });
 });
