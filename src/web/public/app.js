@@ -1161,9 +1161,12 @@
     flushInFlight = true;
     var flushBtn = document.getElementById("flushBtn");
     if (flushBtn) { flushBtn.disabled = true; flushBtn.textContent = "Flushing\u2026"; }
-    api("POST", "/api/overrides/flush", { overrides: S.stagedOverrides }).then(function (r) {
+    function resetFlushState() {
       flushInFlight = false;
       if (flushBtn) { flushBtn.disabled = false; flushBtn.textContent = "\u{1F4BE} Flush to disk"; }
+    }
+    api("POST", "/api/overrides/flush", { overrides: S.stagedOverrides }).then(function (r) {
+      resetFlushState();
       if (r.status !== 200) { setBanner((r.body && r.body.error) || "flush failed", "err"); return; }
       var parts = [];
       if (r.body.saved && r.body.saved.length) parts.push("saved: " + r.body.saved.join(", "));
@@ -1171,10 +1174,23 @@
       if (r.body.skipped && r.body.skipped.length) {
         parts.push("skipped: " + r.body.skipped.map(function (s) { return s.name + " (" + s.reason + ")"; }).join(", "));
       }
-      S.stagedOverrides = {};
+      if (r.body.skipped && r.body.skipped.length) {
+        var skippedNames = {};
+        r.body.skipped.forEach(function (s) { skippedNames[s.name] = true; });
+        var remaining = {};
+        for (var k in S.stagedOverrides) {
+          if (skippedNames[k]) remaining[k] = S.stagedOverrides[k];
+        }
+        S.stagedOverrides = remaining;
+      } else {
+        S.stagedOverrides = {};
+      }
       renderStagedIndicator();
       reloadCatalog().then(function () { selectWorkflow(S.selected); });
       setBanner(parts.length ? "Flush: " + parts.join("; ") : "No staged changes to flush.", "ok");
+    }).catch(function () {
+      resetFlushState();
+      setBanner("flush failed: network error", "err");
     });
   }
 

@@ -1093,4 +1093,50 @@ describe("web server", () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it("POST /api/overrides/flush returns 500 when flushSessionOverrides throws", async () => {
+    const host: WorkflowHost & {
+      workflowSource(): undefined;
+      isAgentHealthy(): boolean;
+      setCatalog(): void;
+    } = {
+      listWorkflows: () => ({ demo: demoSpec() }),
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      async *runWorkflow() {
+        yield { kind: "workflow_done", ok: true, results: [], ts: Date.now() };
+      },
+      workflowSource: () => undefined,
+      isAgentHealthy: () => true,
+      setCatalog: () => {},
+    };
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const realAuthor = new WorkflowAuthor({
+      host,
+      config: testRunConfig,
+      cwd: tmpdir(),
+      home: mkdtempSync(join(tmpdir(), "flush-throw-")),
+    });
+    // Wrap author to make flushSessionOverrides throw
+    const author = Object.create(realAuthor);
+    author.flushSessionOverrides = async () => {
+      throw new Error("disk write failed");
+    };
+    const server = createWebServer({ host, runs, author, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+
+    const res = await fetch(`${base}/api/overrides/flush`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ overrides: { demo: { s1: { agent: "codex" } } } }),
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("disk write failed");
+  });
 });
