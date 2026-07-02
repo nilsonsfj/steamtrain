@@ -46,6 +46,11 @@ function isStructuredSessionOverridesPayload(record: Record<string, unknown>): b
   );
 }
 
+/**
+ * Merge an agent-field patch into a step. A patch value of `null` removes that
+ * field from the step (rather than setting it to null). Used by both the web
+ * API and the TUI flat-map override path.
+ */
 function applyAgentPatch<T extends object>(step: T, patch: Partial<AgentRunFields>): T {
   const next = { ...step } as Record<string, unknown>;
   for (const [key, value] of Object.entries(patch)) {
@@ -53,6 +58,19 @@ function applyAgentPatch<T extends object>(step: T, patch: Partial<AgentRunField
     else next[key] = value;
   }
   return next as T;
+}
+
+function validateStepPatchKeys(
+  stepId: string,
+  patch: Record<string, unknown>,
+  pathPrefix: string,
+): string | null {
+  for (const key of Object.keys(patch)) {
+    if (!AGENT_FIELD_KEYS.has(key as keyof AgentRunFields)) {
+      return `${pathPrefix}.${stepId}.${key} is not a recognized agent field`;
+    }
+  }
+  return null;
 }
 
 /** True when a session override object carries no staged changes. */
@@ -81,14 +99,7 @@ export function normalizeSessionOverrides(
 
   const record = input as Record<string, unknown>;
   if (isStructuredSessionOverridesPayload(record)) {
-    const session = input as WorkflowSessionOverrides;
-    return {
-      ...(session.steps ? { steps: session.steps } : {}),
-      ...(session.stepTimeoutSec !== undefined ? { stepTimeoutSec: session.stepTimeoutSec } : {}),
-      ...(session.workflowTimeoutSec !== undefined
-        ? { workflowTimeoutSec: session.workflowTimeoutSec }
-        : {}),
-    };
+    return input as WorkflowSessionOverrides;
   }
 
   return { steps: input as WorkflowStepOverrides };
@@ -118,7 +129,11 @@ export function applyWorkflowSessionOverrides(
   return next;
 }
 
-/** Merge session overrides into a workflow spec (preview + run). */
+/**
+ * Merge per-step overrides into a workflow spec (preview + run).
+ * Patch values of `null` remove optional fields from the step; this applies to
+ * the TUI flat-map path as well as structured session overrides.
+ */
 export function applyWorkflowStepOverrides(
   spec: WorkflowSpec,
   overrides: WorkflowStepOverrides | undefined,
@@ -184,6 +199,12 @@ export function parseSessionOverrides(raw: unknown): ParseSessionOverridesResult
           if (typeof patch !== "object" || Array.isArray(patch)) {
             return { ok: false, error: `overrides.steps.${stepId} must be an object` };
           }
+          const keyError = validateStepPatchKeys(
+            stepId,
+            patch as Record<string, unknown>,
+            "overrides.steps",
+          );
+          if (keyError) return { ok: false, error: keyError };
           parsedSteps[stepId] = patch as Partial<AgentRunFields>;
         }
         result.steps = parsedSteps;
@@ -196,6 +217,8 @@ export function parseSessionOverrides(raw: unknown): ParseSessionOverridesResult
       if (typeof val !== "object" || Array.isArray(val)) {
         return { ok: false, error: `overrides.${key} must be an object` };
       }
+      const keyError = validateStepPatchKeys(key, val as Record<string, unknown>, "overrides");
+      if (keyError) return { ok: false, error: keyError };
       parsedSteps[key] = val as Partial<AgentRunFields>;
     }
     result.steps = parsedSteps;

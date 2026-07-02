@@ -121,6 +121,22 @@ describe("parseSessionOverrides", () => {
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) expect(parsed.error).toContain("legacy override key");
   });
+
+  it("rejects unknown step patch field names", () => {
+    const structured = parseSessionOverrides({
+      steps: { s1: { agent: "codex", typoField: "x" } },
+    });
+    expect(structured.ok).toBe(false);
+    if (!structured.ok) {
+      expect(structured.error).toBe("overrides.steps.s1.typoField is not a recognized agent field");
+    }
+
+    const flat = parseSessionOverrides({ s1: { agent: "codex", typoField: "x" } });
+    expect(flat.ok).toBe(false);
+    if (!flat.ok) {
+      expect(flat.error).toBe("overrides.s1.typoField is not a recognized agent field");
+    }
+  });
 });
 
 describe("sessionOverridesEmpty", () => {
