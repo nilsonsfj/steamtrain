@@ -326,6 +326,80 @@ describe("workflow-level cost budget", () => {
   });
 });
 
+describe("per-step (forEach) cost budget", () => {
+  /** A fan-out over three items, each billed on the same model, with a per-step cap. */
+  function fanOutSpec(maxCostUsd: number): WorkflowSpec {
+    return {
+      name: "fanout-budget",
+      phases: [
+        {
+          id: "split",
+          title: "split",
+          steps: [{ id: "targets", kind: "distributor", items: ["a", "b", "c"] }],
+        },
+        {
+          id: "process",
+          title: "process",
+          steps: [
+            {
+              id: "review",
+              kind: "processor",
+              agent: "claude",
+              model: "m1",
+              dependsOn: ["targets"],
+              forEach: "steps.targets.items",
+              maxCostUsd,
+              prompt: "review {{item}}",
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  it("stops dispatching children once the per-step cap is reached", async () => {
+    // Each child costs $0.05; cap $0.08. review[0] ($0.05) and review[1] ($0.10 ≥
+    // 0.08) run, then the step budget latches and review[2] is left not-run.
+    const deps = makeBillingDeps({ m1: { cost: 0.05, tokens: { input: 10 } } });
+    const events = await collect(fanOutSpec(0.08), deps);
+
+    const budget = events.find((e) => e.kind === "budget_exceeded");
+    expect(budget).toMatchObject({ kind: "budget_exceeded", scope: "step", stepId: "review" });
+
+    // Only two children actually ran (produced a real, non-cached result).
+    const childDone = events.filter(
+      (e): e is Extract<WorkflowEvent, { kind: "step_done" }> =>
+        e.kind === "step_done" && (e as { stepId: string }).stepId.startsWith("review["),
+    );
+    const ran = childDone.filter((e) => !e.result.notRun).map((e) => e.stepId);
+    expect(ran.sort()).toEqual(["review[0]", "review[1]"]);
+
+    // The fan-out parent is marked not-ok with a budget message; run ends not-ok.
+    const parentDone = events.find(
+      (e) => e.kind === "step_done" && (e as { stepId: string }).stepId === "review",
+    ) as Extract<WorkflowEvent, { kind: "step_done" }>;
+    expect(parentDone.result.ok).toBe(false);
+    expect(parentDone.result.error).toContain("step cost budget");
+    const final = events.at(-1) as Extract<WorkflowEvent, { kind: "workflow_done" }>;
+    expect(final.ok).toBe(false);
+  });
+
+  it("runs every child when the per-step cap is generous", async () => {
+    const deps = makeBillingDeps({ m1: { cost: 0.01 } });
+    const events = await collect(fanOutSpec(1), deps);
+    expect(events.some((e) => e.kind === "budget_exceeded")).toBe(false);
+    const ran = events.filter(
+      (e): e is Extract<WorkflowEvent, { kind: "step_done" }> =>
+        e.kind === "step_done" &&
+        (e as { stepId: string }).stepId.startsWith("review[") &&
+        !e.result.notRun,
+    );
+    expect(ran).toHaveLength(3);
+    const final = events.at(-1) as Extract<WorkflowEvent, { kind: "workflow_done" }>;
+    expect(final.ok).toBe(true);
+  });
+});
+
 describe("aggregateCosts across history", () => {
   it("breaks spend down by workflow, step, and model", () => {
     const mkRecord = (
