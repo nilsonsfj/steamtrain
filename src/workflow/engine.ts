@@ -1546,6 +1546,7 @@ async function executeForEachStep(
           parentStepId: step.id,
           item,
           ok: false,
+          notRun: true,
           output: "not run: step cost budget reached",
           error: "step cost budget reached",
           durationMs: 0,

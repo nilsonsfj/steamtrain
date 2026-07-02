@@ -297,6 +297,7 @@ export function* resultLeaves(
 ): Generator<LeafUsage> {
   for (const r of results) {
     if (r.childResults?.length) continue; // parent — its children appear flat
+    if (r.notRun) continue; // budget-truncated placeholder — not a real leaf
     const meta = stepMeta.get(r.parentStepId ?? r.stepId);
     yield { agent: meta?.agent, model: meta?.model, costUsd: r.costUsd, tokens: r.tokens };
   }

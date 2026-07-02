@@ -247,6 +247,32 @@ describe("live summary helpers do not double-count fan-out children", () => {
     expect(totalTokens(opus?.tokens ?? {})).toBe(200);
     expect(byModel.find((m) => m.model === "claude/haiku")).toMatchObject({ steps: 1 });
   });
+
+  it("excludes budget-truncated not-run placeholders from the by-model breakdown", () => {
+    const stepMeta = new Map([["f", { agent: "claude", model: "opus" }]]);
+    const withPlaceholder: StepResult[] = [
+      {
+        stepId: "f#0",
+        parentStepId: "f",
+        ok: true,
+        output: "c0",
+        durationMs: 1,
+        costUsd: 0.02,
+        tokens: { input: 100 },
+      },
+      // undispatched child: no cost/tokens, marked notRun — must not count as a leaf.
+      {
+        stepId: "f#1",
+        parentStepId: "f",
+        ok: false,
+        notRun: true,
+        output: "not run",
+        durationMs: 0,
+      },
+    ];
+    const byModel = aggregateLeavesByModel(resultLeaves(withPlaceholder, stepMeta));
+    expect(byModel.find((m) => m.model === "claude/opus")).toMatchObject({ steps: 1 });
+  });
 });
 
 describe("workflow-level cost budget", () => {

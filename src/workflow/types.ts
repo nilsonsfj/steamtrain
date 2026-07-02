@@ -261,6 +261,12 @@ export interface StepResult {
    * empty output so downstream templates see them as absent, not failed.
    */
   skipped?: boolean;
+  /**
+   * True for a fan-out child that was never dispatched because a per-step
+   * `maxCostUsd` was reached. It is a placeholder (no cost/tokens) that a resume
+   * re-runs; analytics skip it so live and recorded step counts agree.
+   */
+  notRun?: boolean;
   error?: string;
   durationMs: number;
   costUsd?: number;
