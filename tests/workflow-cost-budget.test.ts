@@ -14,7 +14,9 @@ import {
   aggregateCosts,
   aggregateLeavesByModel,
   formatTokens,
+  resultLeaves,
   runWorkflow,
+  tokensForResults,
   totalTokens,
 } from "../src/workflow";
 
@@ -170,6 +172,80 @@ describe("engine threads tokens into StepResult and totals", () => {
     const record = builder.build({ status: "done" });
     expect(record.totals.tokens).toMatchObject({ input: 300, output: 60, cacheRead: 50 });
     expect(totalTokens(record.totals.tokens)).toBe(410);
+  });
+});
+
+describe("live summary helpers do not double-count fan-out children", () => {
+  // The engine flattens a fan-out into allResults as: each child (with
+  // parentStepId) *and* the parent (with childResults). The summary helpers must
+  // count the flat children once and skip the parent — never descend into it.
+  const flatResults: StepResult[] = [
+    { stepId: "a", ok: true, output: "x", durationMs: 1, costUsd: 0.01, tokens: { input: 50 } },
+    // fan-out parent "f" with two children, also present flat below:
+    {
+      stepId: "f",
+      ok: true,
+      output: "sum",
+      durationMs: 2,
+      costUsd: 0.04,
+      tokens: { input: 200 },
+      childResults: [
+        {
+          stepId: "f#0",
+          parentStepId: "f",
+          ok: true,
+          output: "c0",
+          durationMs: 1,
+          costUsd: 0.02,
+          tokens: { input: 100 },
+        },
+        {
+          stepId: "f#1",
+          parentStepId: "f",
+          ok: true,
+          output: "c1",
+          durationMs: 1,
+          costUsd: 0.02,
+          tokens: { input: 100 },
+        },
+      ],
+    },
+    {
+      stepId: "f#0",
+      parentStepId: "f",
+      ok: true,
+      output: "c0",
+      durationMs: 1,
+      costUsd: 0.02,
+      tokens: { input: 100 },
+    },
+    {
+      stepId: "f#1",
+      parentStepId: "f",
+      ok: true,
+      output: "c1",
+      durationMs: 1,
+      costUsd: 0.02,
+      tokens: { input: 100 },
+    },
+  ];
+
+  it("tokensForResults counts each leaf exactly once", () => {
+    // a(50) + f#0(100) + f#1(100) = 250, NOT 450 (would be doubled if it descended).
+    expect(totalTokens(tokensForResults(flatResults))).toBe(250);
+  });
+
+  it("resultLeaves attributes children to the parent step's model, once each", () => {
+    const stepMeta = new Map([
+      ["a", { agent: "claude", model: "haiku" }],
+      ["f", { agent: "claude", model: "opus" }],
+    ]);
+    const byModel = aggregateLeavesByModel(resultLeaves(flatResults, stepMeta));
+    const opus = byModel.find((m) => m.model === "claude/opus");
+    expect(opus).toMatchObject({ steps: 2 });
+    expect(opus?.costUsd).toBeCloseTo(0.04, 5);
+    expect(totalTokens(opus?.tokens ?? {})).toBe(200);
+    expect(byModel.find((m) => m.model === "claude/haiku")).toMatchObject({ steps: 1 });
   });
 });
 

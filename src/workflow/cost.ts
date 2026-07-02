@@ -282,51 +282,42 @@ export function stepMetaFromSpec(
   return map;
 }
 
-/** Leaves from a live {@link StepResult} list (used by the CLI end-of-run summary). */
+/**
+ * Leaves from a live {@link StepResult} list (used by the CLI end-of-run summary).
+ *
+ * The engine flattens every fan-out into `allResults`: each child is a top-level
+ * entry (carrying `parentStepId`) *and* the parent (with `childResults`) is also
+ * present. We therefore count the flat children and skip the parents, matching
+ * the summary's per-row loop — descending into `childResults` here would
+ * double-count. Children's model/agent come from the parent step's meta.
+ */
 export function* resultLeaves(
   results: StepResult[],
   stepMeta: Map<string, { agent?: string; model?: string }>,
 ): Generator<LeafUsage> {
   for (const r of results) {
-    if (r.childResults?.length) {
-      for (const child of r.childResults) {
-        const meta = stepMeta.get(r.stepId);
-        yield {
-          agent: meta?.agent,
-          model: meta?.model,
-          costUsd: child.costUsd,
-          tokens: child.tokens,
-        };
-      }
-      continue;
-    }
-    const meta = stepMeta.get(r.stepId);
+    if (r.childResults?.length) continue; // parent — its children appear flat
+    const meta = stepMeta.get(r.parentStepId ?? r.stepId);
     yield { agent: meta?.agent, model: meta?.model, costUsd: r.costUsd, tokens: r.tokens };
   }
 }
 
-/** Sum leaf token usage from a flat list of {@link StepResult}s (fan-out aware). */
+/** Sum leaf token usage from the engine's flat {@link StepResult} list (skips fan-out parents). */
 export function tokensForResults(results: StepResult[]): Required<TokenUsage> {
   const total = emptyTokens();
   for (const r of results) {
-    if (r.childResults?.length) {
-      for (const child of r.childResults) addTokensInto(total, child.tokens);
-    } else {
-      addTokensInto(total, r.tokens);
-    }
+    if (r.childResults?.length) continue; // parent — its children appear flat
+    addTokensInto(total, r.tokens);
   }
   return total;
 }
 
-/** Sum leaf cost from a flat list of {@link StepResult}s (fan-out aware). */
+/** Sum leaf cost from the engine's flat {@link StepResult} list (skips fan-out parents). */
 export function costForResults(results: StepResult[]): number {
   let total = 0;
   for (const r of results) {
-    if (r.childResults?.length) {
-      for (const child of r.childResults) total += child.costUsd ?? 0;
-    } else {
-      total += r.costUsd ?? 0;
-    }
+    if (r.childResults?.length) continue; // parent — its children appear flat
+    total += r.costUsd ?? 0;
   }
   return total;
 }
