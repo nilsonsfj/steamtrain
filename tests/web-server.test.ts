@@ -22,6 +22,7 @@ const servers: Server[] = [];
 afterEach(async () => {
   while (servers.length) {
     const server = servers.pop()!;
+    server.closeAllConnections?.();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
@@ -617,7 +618,7 @@ describe("web server", () => {
   it("rejects oversized payloads with 413", async () => {
     const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);
-    const bigBody = "x".repeat(2 * 1024 * 1024);
+    const bigBody = "x".repeat(1024 * 1024 + 1);
     const res = await fetch(`${base}/api/runs`, {
       method: "POST",
       headers: { "content-type": "application/json" },

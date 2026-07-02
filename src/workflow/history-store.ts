@@ -110,10 +110,9 @@ export async function clearAllRunRecords(rootDir: string): Promise<void> {
 
 /**
  * Drop the oldest records past the retention limit. This runs after every save,
- * so it must stay cheap: rather than reading and parsing every record's full
- * (potentially large) JSON tree just to sort by `startedAt`, it orders files by
- * filesystem mtime — a faithful proxy for write order, since each record is
- * written once when its run finishes — and deletes the tail.
+ * so it must stay cheap: read only each file's `startedAt` (via the same
+ * validator as list/get) rather than relying on filesystem mtime, which can
+ * collide or reorder when saves happen in the same millisecond.
  */
 async function pruneRunRecords(rootDir: string, limit: number): Promise<void> {
   if (limit <= 0) return;
@@ -128,18 +127,21 @@ async function pruneRunRecords(rootDir: string, limit: number): Promise<void> {
   if (files.length <= limit) return;
   const stamped = await Promise.all(
     files.map(async (name) => {
+      const path = join(rootDir, name);
+      const record = await readRecord(path);
+      if (record) return { name, startedAt: record.startedAt };
       try {
-        const info = await stat(join(rootDir, name));
-        return { name, mtimeMs: info.mtimeMs };
+        const info = await stat(path);
+        return { name, startedAt: info.mtimeMs };
       } catch (err) {
         if (isEnoent(err)) return undefined;
         throw err;
       }
     }),
   );
-  const present = stamped.filter((s): s is { name: string; mtimeMs: number } => s !== undefined);
+  const present = stamped.filter((s): s is { name: string; startedAt: number } => s !== undefined);
   if (present.length <= limit) return;
-  present.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  present.sort((a, b) => b.startedAt - a.startedAt);
   const stale = present.slice(limit);
   await Promise.all(stale.map((s) => rm(join(rootDir, s.name), { force: true })));
 }
