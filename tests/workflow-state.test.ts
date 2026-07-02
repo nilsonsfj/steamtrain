@@ -210,7 +210,15 @@ describe("workflowReducer", () => {
       startedAt: 100,
       endedAt: 200,
       durationMs: 100,
-      totals: { steps: 1, ok: 1, failed: 0, cached: 0, costUsd: 0, durationMs: 5 },
+      totals: {
+        steps: 1,
+        ok: 1,
+        failed: 0,
+        cached: 0,
+        costUsd: 0,
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+        durationMs: 5,
+      },
       phases: [
         {
           phaseId: "p1",
@@ -266,7 +274,15 @@ describe("workflowReducer", () => {
       startedAt: 100,
       endedAt: 200,
       durationMs: 100,
-      totals: { steps: 2, ok: 1, failed: 1, cached: 0, costUsd: 0, durationMs: 15 },
+      totals: {
+        steps: 2,
+        ok: 1,
+        failed: 1,
+        cached: 0,
+        costUsd: 0,
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+        durationMs: 15,
+      },
       phases: [
         {
           phaseId: "p1",
@@ -314,7 +330,15 @@ describe("workflowReducer", () => {
       startedAt: 100,
       endedAt: 200,
       durationMs: 100,
-      totals: { steps: 1, ok: 1, failed: 0, cached: 0, costUsd: 0, durationMs: 5 },
+      totals: {
+        steps: 1,
+        ok: 1,
+        failed: 0,
+        cached: 0,
+        costUsd: 0,
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+        durationMs: 5,
+      },
       phases: [
         {
           phaseId: "p1",

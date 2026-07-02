@@ -2,6 +2,16 @@ import { basename } from "node:path";
 import { Box, Text } from "ink";
 import { useMemo } from "react";
 import { truncate } from "../agents/util";
+import {
+  type ModelUsage,
+  addTokensInto,
+  aggregateLeavesByModel,
+  emptyTokens,
+  formatTokenSummary,
+  formatTokens,
+  formatUsd,
+  totalTokens,
+} from "../workflow";
 import { statusWord } from "./status-word";
 import { AGENT_COLOR } from "./theme";
 import { selectVisibleWindow } from "./workflow-list-window";
@@ -78,6 +88,8 @@ export function WorkflowView({
   const rowWindow = selectVisibleWindow(rows, selectedRowIndex, listBudget);
 
   const cost = sumCost(state);
+  const tokens = sumTokens(state);
+  const byModel = modelBreakdown(state);
   const elapsed = elapsedMs / 1000;
   const doneSteps = flat.filter(
     (f) => f.step.status === "done" || f.step.status === "error",
@@ -104,9 +116,36 @@ export function WorkflowView({
           {failedSteps > 0 ? ` · ${failedSteps} failed` : ""}
           {cachedSteps > 0 ? ` · ${cachedSteps} cached` : ""}
           {cost > 0 ? ` · $${cost.toFixed(4)}` : ""}
-          {state.done ? (state.ok ? " · done" : " · failed") : " · running"}
+          {totalTokens(tokens) > 0 ? ` · ${formatTokens(totalTokens(tokens))} tok` : ""}
+          {state.budget
+            ? " · budget-exceeded"
+            : state.done
+              ? state.ok
+                ? " · done"
+                : " · failed"
+              : " · running"}
         </Text>
       </Box>
+      {state.budget ? (
+        <Text color="yellow">
+          ⚠{" "}
+          {state.budget.scope === "step" && state.budget.stepId
+            ? `step '${state.budget.stepId}'`
+            : "workflow"}{" "}
+          cost budget {formatUsd(state.budget.limitUsd)} reached (spent{" "}
+          {formatUsd(state.budget.spentUsd)}) — resume after raising the cap
+        </Text>
+      ) : null}
+      {byModel.length > 0 ? (
+        <Text color="gray">
+          {byModel
+            .slice(0, 4)
+            .map(
+              (m) => `${m.model}: ${formatUsd(m.costUsd)}/${formatTokens(totalTokens(m.tokens))}t`,
+            )
+            .join("  ")}
+        </Text>
+      ) : null}
 
       <Box flexDirection="column" flexGrow={1}>
         {state.phases.length === 0 ? (
@@ -248,9 +287,11 @@ function stepMeta(step: StepState): string {
   }
   if (step.result) {
     const attempts = step.result.attempts ?? step.attempts;
+    const tokenLine = formatTokenSummary(step.result.tokens);
     const bits = [
       step.cached ? "cached" : `${(step.result.durationMs / 1000).toFixed(1)}s`,
       step.result.costUsd ? `$${step.result.costUsd.toFixed(4)}` : undefined,
+      tokenLine || undefined,
       attempts && attempts > 1 ? `${attempts} tries` : undefined,
     ].filter(Boolean);
     return bits.join(" · ");
@@ -267,4 +308,28 @@ function sumCost(state: WorkflowState): number {
     }
   }
   return total;
+}
+
+/**
+ * Sum leaf token usage across the live tree. Fan-out parents carry no tokens of
+ * their own (their children are separate steps), so summing every step's result
+ * tokens counts each leaf exactly once.
+ */
+function sumTokens(state: WorkflowState): ReturnType<typeof emptyTokens> {
+  const total = emptyTokens();
+  for (const { step } of flattenSteps(state)) addTokensInto(total, step.result?.tokens);
+  return total;
+}
+
+/** Per-model cost/token breakdown from the live tree, biggest spender first. */
+function modelBreakdown(state: WorkflowState): ModelUsage[] {
+  const leaves = flattenSteps(state)
+    .filter((f) => f.step.result && !f.step.result.childResults?.length)
+    .map((f) => ({
+      agent: f.step.agent,
+      model: f.step.model,
+      costUsd: f.step.result?.costUsd,
+      tokens: f.step.result?.tokens,
+    }));
+  return aggregateLeavesByModel(leaves).filter((m) => m.costUsd > 0 || totalTokens(m.tokens) > 0);
 }

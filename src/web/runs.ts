@@ -39,7 +39,7 @@ export interface WorkflowHost {
   ): AsyncIterable<WorkflowEvent>;
 }
 
-export type RunStatus = "running" | "done" | "error" | "canceled";
+export type RunStatus = "running" | "done" | "error" | "canceled" | "budget-exceeded";
 
 export class TooManyRuns extends Error {
   constructor(max: number) {
@@ -261,6 +261,7 @@ export class WorkflowRunManager {
       run.startedAt,
     );
     let ok: boolean | undefined;
+    let budgetExceeded = false;
     try {
       let cache: Map<string, StepResult>;
       if (fresh) {
@@ -294,7 +295,10 @@ export class WorkflowRunManager {
             event.cached,
           );
         }
-        if (event.kind === "workflow_done") ok = event.ok;
+        if (event.kind === "workflow_done") {
+          ok = event.ok;
+          if (event.budgetExceeded) budgetExceeded = true;
+        }
       }
       // The engine exits gracefully on abort (it yields a final workflow_done
       // with ok:false and returns — it does not throw), so a real cancel
@@ -302,6 +306,9 @@ export class WorkflowRunManager {
       // first, otherwise a canceled run would be mislabeled "error".
       if (run.controller.signal.aborted) {
         run.status = "canceled";
+      } else if (budgetExceeded) {
+        run.status = "budget-exceeded";
+        run.ok = false;
       } else {
         run.status = ok === false ? "error" : "done";
         run.ok = ok ?? true;

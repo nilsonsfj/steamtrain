@@ -31,7 +31,10 @@ import {
   WorkflowAuthor,
   type WorkflowSourceKind,
   type WorkflowStepOverrides,
+  addTokensInto,
+  emptyTokens,
   isAgentBackedStep,
+  totalTokens,
   workflowCacheKey,
 } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId, WorkspaceScope } from "../workspace";
@@ -214,6 +217,19 @@ export function App({
     resolveWorkflowSpec,
     mountedRef,
   });
+
+  // Live cost/token ticker for the status bar, summed from the running tree.
+  const { runCostUsd, runTokens } = useMemo(() => {
+    let cost = 0;
+    const tokens = emptyTokens();
+    for (const phase of runner.wf.phases) {
+      for (const step of phase.steps) {
+        if (step.result?.costUsd) cost += step.result.costUsd;
+        addTokensInto(tokens, step.result?.tokens);
+      }
+    }
+    return { runCostUsd: cost, runTokens: totalTokens(tokens) };
+  }, [runner.wf]);
 
   const picker = useWorkflowPicker({
     mode,
@@ -752,6 +768,8 @@ export function App({
         configSource={configSource}
         workspaceLabel={activeWorkspaceLabel}
         running={runner.running}
+        runCostUsd={runCostUsd}
+        runTokens={runTokens}
       />
       {historyHook.history ? (
         <HistoryPanel history={historyHook.history} width={columns} height={streamHeight} />

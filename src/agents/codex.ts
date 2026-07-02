@@ -1,4 +1,10 @@
-import type { AgentEvent, AgentId, AgentInstanceId, EventMapper } from "../types/events";
+import type {
+  AgentEvent,
+  AgentId,
+  AgentInstanceId,
+  EventMapper,
+  TokenUsage,
+} from "../types/events";
 import { type CodexThreadItem, codexEnvelope, codexEvent } from "../types/raw-codex";
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
@@ -262,6 +268,7 @@ export function createCodexMapper(agent: AgentInstanceId = AGENT): EventMapper {
           subtype: "turn.completed",
           durationMs,
           costUsd: estimateCostUsd(e.usage),
+          tokens: codexTokens(e.usage),
         });
         return out;
       }
@@ -280,6 +287,7 @@ export function createCodexMapper(agent: AgentInstanceId = AGENT): EventMapper {
           text: message,
           durationMs,
           costUsd: estimateCostUsd(e.usage),
+          tokens: codexTokens(e.usage),
         });
         return out;
       }
@@ -339,6 +347,33 @@ function estimateCostUsd(
   if (total === 0) return undefined;
   const uncached = Math.max(0, input - cached);
   return (uncached * 0.3 + cached * 0.03 + output * 1.2) / 1_000_000;
+}
+
+/**
+ * Map Codex usage onto the normalized {@link TokenUsage}. Codex's `input_tokens`
+ * is the *total* input including cached, so uncached input is `input_tokens -
+ * cached_input_tokens`. Reasoning is billed inside `output_tokens`, so it is
+ * reported as a subset (`reasoning`), not added to the total.
+ */
+function codexTokens(
+  usage:
+    | {
+        input_tokens?: number;
+        cached_input_tokens?: number;
+        output_tokens?: number;
+        reasoning_output_tokens?: number;
+      }
+    | undefined,
+): TokenUsage | undefined {
+  if (!usage) return undefined;
+  const cached = usage.cached_input_tokens ?? 0;
+  const input = usage.input_tokens ?? 0;
+  const tokens: TokenUsage = {};
+  if (usage.input_tokens !== undefined) tokens.input = Math.max(0, input - cached);
+  if (usage.cached_input_tokens !== undefined) tokens.cacheRead = cached;
+  if (usage.output_tokens !== undefined) tokens.output = usage.output_tokens;
+  if (usage.reasoning_output_tokens !== undefined) tokens.reasoning = usage.reasoning_output_tokens;
+  return Object.keys(tokens).length > 0 ? tokens : undefined;
 }
 
 /** Build argv for `codex exec --json` (shared by the adapter and tests). */

@@ -2,7 +2,8 @@ import { resolve as resolvePath } from "node:path";
 import { resolveAgentInstance } from "../agents";
 import type { AgentAdapter } from "../agents";
 import type { SteamtrainConfig } from "../config/types";
-import type { AgentEvent, AgentInstanceId, AgentProviderId } from "../types/events";
+import type { AgentEvent, AgentInstanceId, AgentProviderId, TokenUsage } from "../types/events";
+import { addTokens } from "./cost";
 import type { WorkflowEvent } from "./events";
 import { createChannel, runPool } from "./pool";
 import { type RetryPolicy, backoffDelayMs, resolveRetryPolicy } from "./retry";
@@ -85,6 +86,14 @@ interface RunEnv {
   /** Dynamic (forEach child) step budget; see the resync note in the phased scheduler. */
   budget: { generated: number };
   reserveDynamicSteps: (count: number) => boolean;
+  /**
+   * Running total of leaf-step spend (USD) for workflow-level `maxCostUsd`
+   * enforcement. Fan-out children add their own cost as they settle; the parent
+   * (whose cost is the sum of its children) adds nothing to avoid double-count.
+   */
+  spent: { costUsd: number };
+  /** Latched once a cost budget stops scheduling, so `budget_exceeded` emits once. */
+  budgetState: { exceeded: boolean };
 }
 
 /** What one step's completion means for its phase and for run control flow. */
@@ -155,6 +164,8 @@ export async function* runWorkflow(
     limit,
     budget,
     reserveDynamicSteps,
+    spent: { costUsd: costOfCachedResults(cache) },
+    budgetState: { exceeded: false },
   };
 
   const workflowOk = specHasLoopGates(spec)
@@ -172,8 +183,43 @@ export async function* runWorkflow(
 
   yield {
     kind: "workflow_done",
-    ok: workflowOk && !signal?.aborted,
+    ok: workflowOk && !signal?.aborted && !env.budgetState.exceeded,
     results: [...finalResults.values()],
+    budgetExceeded: env.budgetState.exceeded,
+    ts: Date.now(),
+  };
+}
+
+/** Sum leaf-step cost across cached results, so a resumed run counts prior spend. */
+function costOfCachedResults(cache: Map<string, StepResult>): number {
+  let total = 0;
+  for (const result of cache.values()) {
+    if (result.childResults?.length) {
+      for (const child of result.childResults) total += child.costUsd ?? 0;
+    } else if (result.parentStepId === undefined) {
+      total += result.costUsd ?? 0;
+    }
+  }
+  return total;
+}
+
+/**
+ * Latch and describe a workflow-level budget breach. Returns a one-shot
+ * `budget_exceeded` event the first time accumulated spend reaches the cap, and
+ * `undefined` afterwards (already latched) or when no cap is set / the cap isn't
+ * reached yet. Once latched, `env.budgetState.exceeded` stays true so schedulers
+ * stop launching new steps.
+ */
+function maybeWorkflowBudgetEvent(env: RunEnv): WorkflowEvent | undefined {
+  const cap = env.spec.maxCostUsd;
+  if (cap === undefined || env.spent.costUsd < cap) return undefined;
+  if (env.budgetState.exceeded) return undefined;
+  env.budgetState.exceeded = true;
+  return {
+    kind: "budget_exceeded",
+    scope: "workflow",
+    limitUsd: cap,
+    spentUsd: env.spent.costUsd,
     ts: Date.now(),
   };
 }
@@ -245,6 +291,17 @@ async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, b
     // forward progress the cache only grows, so this is a no-op then; it only
     // releases budget that invalidation just freed.
     env.budget.generated = countCachedDynamicSteps(cache);
+
+    // Cost budget: enforced at phase boundaries here (a loop workflow runs
+    // phase-by-phase, so a phase is the scheduling unit). If prior phases have
+    // already reached the cap, stop before starting this one — its steps never
+    // dispatch, so raising the cap and resuming continues from here.
+    const budgetEvent = maybeWorkflowBudgetEvent(env);
+    if (budgetEvent) {
+      yield budgetEvent;
+      break;
+    }
+
     const runs = (phaseRunCount.get(pi) ?? 0) + 1;
     phaseRunCount.set(pi, runs);
     const iteration = runs;
@@ -411,7 +468,13 @@ async function* runDagScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, bool
   const driver = (async () => {
     const inFlight = new Map<string, Promise<void>>();
     while (true) {
-      if (!signal?.aborted) {
+      // A reached cost budget stops scheduling NEW steps; in-flight steps run to
+      // completion, and any still-pending steps stay pending (recorded as
+      // not-run), so raising the cap and resuming replays the cache and picks up
+      // exactly where the budget stopped it.
+      const budgetEvent = maybeWorkflowBudgetEvent(env);
+      if (budgetEvent) channel.push(budgetEvent);
+      if (!signal?.aborted && !env.budgetState.exceeded) {
         // Launch every ready step, scanning in spec order so ties dispatch
         // deterministically. Steps in phases beyond a halt stay pending
         // forever — the loop below exits once nothing is in flight.
@@ -736,11 +799,15 @@ async function runSingleStep(
     outputs.set(child.stepId, child.output);
     results.set(child.stepId, child);
     allResults.push(child);
+    // Fan-out children hold the real cost; the parent's is their sum, so count
+    // children here and skip the parent below to avoid double-counting.
+    env.spent.costUsd += child.costUsd ?? 0;
   }
   outputs.set(step.id, result.output);
   results.set(step.id, result);
   if (result.ok) cache.set(step.id, result);
   allResults.push(result);
+  if (!execution.childResults) env.spent.costUsd += result.costUsd ?? 0;
   let notOk = false;
   if (!result.ok) {
     // onFalse: "stop" is a graceful halt — the step is not ok (gate
@@ -1031,6 +1098,7 @@ async function runAgentAttempt(
   let finalText = "";
   let streamedText = "";
   let costUsd: number | undefined;
+  let tokens: TokenUsage | undefined;
   let errored = false;
   let errorMessage: string | undefined;
   let sawResult = false;
@@ -1048,6 +1116,11 @@ async function runAgentAttempt(
         sawResult = true;
         if (event.text) finalText = event.text;
         if (typeof event.costUsd === "number") costUsd = event.costUsd;
+        // Tokens follow the same "last result wins" semantics as `costUsd`:
+        // adapters that emit several `result` events per turn (opencode's
+        // per-step finishes) report cumulative running totals, so the final
+        // event already carries the whole-turn usage.
+        if (event.tokens) tokens = event.tokens;
         if (event.isError) {
           errored = true;
           errorMessage ??= event.text;
@@ -1093,6 +1166,7 @@ async function runAgentAttempt(
       error: ok ? undefined : (errorMessage ?? (cancelled ? "cancelled" : "failed")),
       durationMs: Date.now() - started,
       costUsd,
+      tokens,
     },
     // Transient + side-effect-free: errored, not cancelled, and the agent neither
     // completed a turn (`result`) nor invoked a tool (`tool_use`/`tool_result`),
@@ -1307,11 +1381,18 @@ async function enforceStructuredOutput(
     result.costUsd === undefined && fix.result.costUsd === undefined
       ? undefined
       : (result.costUsd ?? 0) + (fix.result.costUsd ?? 0);
+  // The fix attempt is a second billable turn — sum both turns' token usage so
+  // the step's recorded tokens match its recorded cost.
+  const tokens =
+    result.tokens || fix.result.tokens ? addTokens(result.tokens, fix.result.tokens) : undefined;
   const reparsed = fix.result.ok
     ? parseStructuredOutput(fix.result.output, outputSchema)
     : undefined;
   if (reparsed?.ok) {
-    return { result: { ...fix.result, json: reparsed.value, costUsd }, attempt: attempt + 1 };
+    return {
+      result: { ...fix.result, json: reparsed.value, costUsd, tokens },
+      attempt: attempt + 1,
+    };
   }
   const reason = reparsed ? reparsed.error : (fix.result.error ?? "the retry attempt failed");
   return {
@@ -1320,6 +1401,7 @@ async function enforceStructuredOutput(
       ok: false,
       error: `structured output retry failed: ${reason}`,
       costUsd,
+      tokens,
     },
     attempt: attempt + 1,
   };
@@ -1425,6 +1507,15 @@ async function executeForEachStep(
     durationMs: 0,
   }));
   const limit = Math.min(Math.max(1, ctx.deps.maxConcurrency), MAX_CONCURRENCY);
+  // Per-step cost budget: once this fan-out's dispatched children have spent
+  // `step.maxCostUsd`, stop dispatching new ones. Undispatched children are
+  // never started (no events emitted) so they show as not-run and a resume
+  // re-runs only them. `stepSpent` is safe to mutate without a lock — runPool
+  // workers interleave only at `await` points, never truly in parallel.
+  const stepSpent = { costUsd: 0 };
+  let stepBudgetHit = false;
+  const stepBudgetReached = (): boolean =>
+    step.maxCostUsd !== undefined && stepSpent.costUsd >= step.maxCostUsd;
   await runPool(
     values.map((value, index) => ({
       value,
@@ -1433,6 +1524,35 @@ async function executeForEachStep(
     })),
     limit,
     async ({ value: _value, item, stepId }) => {
+      // A child already in cache is a cheap replay — always allow it (it adds no
+      // new spend), so a resume completes the fan-out. Only gate fresh work.
+      if (!ctx.cache.get(stepId) && stepBudgetReached()) {
+        if (!stepBudgetHit) {
+          stepBudgetHit = true;
+          hooks.pushWorkflowEvent({
+            kind: "budget_exceeded",
+            scope: "step",
+            stepId: step.id,
+            limitUsd: step.maxCostUsd as number,
+            spentUsd: stepSpent.costUsd,
+            iteration: ctx.iteration,
+            ts: Date.now(),
+          });
+        }
+        // Leave this child not-run (no events): it shows as a not-run placeholder
+        // and a resume re-runs only the undispatched children.
+        childResults[item.index] = {
+          stepId,
+          parentStepId: step.id,
+          item,
+          ok: false,
+          output: "not run: step cost budget reached",
+          error: "step cost budget reached",
+          durationMs: 0,
+          iteration: ctx.iteration,
+        };
+        return;
+      }
       hooks.pushWorkflowEvent({
         kind: "step_start",
         phaseId: hooks.phaseId,
@@ -1464,6 +1584,9 @@ async function executeForEachStep(
       ctx.results.set(stepId, result);
       if (result.ok) ctx.cache.set(stepId, result);
       childResults[item.index] = result;
+      // Count freshly-run children toward the per-step budget (cached replays
+      // add no new spend). This gates whether later children still dispatch.
+      if (!cached) stepSpent.costUsd += result.costUsd ?? 0;
 
       hooks.pushWorkflowEvent({
         kind: "step_done",
@@ -1483,6 +1606,12 @@ async function executeForEachStep(
     .map((child) => `--- ${child.stepId} (${child.item?.value ?? "item"}) ---\n${child.output}`)
     .join("\n\n");
 
+  const error = ok
+    ? undefined
+    : stepBudgetHit
+      ? `step cost budget $${(step.maxCostUsd as number).toFixed(4)} reached after $${stepSpent.costUsd.toFixed(4)}`
+      : "one or more fan-out items failed";
+
   return {
     result: {
       stepId: step.id,
@@ -1490,7 +1619,7 @@ async function executeForEachStep(
       output,
       items: values,
       childResults,
-      error: ok ? undefined : "one or more fan-out items failed",
+      error,
       durationMs: Date.now() - started,
     },
     childResults,

@@ -4,6 +4,7 @@ import { truncate } from "../agents/util";
 import {
   type WorkflowSourceKind,
   type WorkflowSpec,
+  formatTokenSummary,
   isAgentBackedStep,
   workflowStepKind,
 } from "../workflow";
@@ -261,6 +262,8 @@ function liveLines(phase: PhaseState, step: StepState, width: number): DetailLin
       }`,
       color: step.result.ok ? "green" : "red",
     });
+    const tokenLine = formatTokenSummary(step.result.tokens);
+    if (tokenLine) lines.push({ text: `tokens: ${tokenLine}`, color: "gray" });
   }
   if (step.activity) lines.push({ text: `activity: ${step.activity}`, color: "gray" });
 

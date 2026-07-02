@@ -132,6 +132,30 @@ export interface WorkflowDoneEvent {
   kind: "workflow_done";
   ok: boolean;
   results: StepResult[];
+  /**
+   * The run stopped scheduling new steps because a cost budget (workflow- or
+   * step-level `maxCostUsd`) was reached. The run is resumable: raise the cap
+   * and re-run, and completed steps replay from cache. `ok` is false when set.
+   */
+  budgetExceeded?: boolean;
+  ts: number;
+}
+
+/**
+ * A cost budget (workflow- or step-level `maxCostUsd`) was reached. Emitted once,
+ * when the engine first decides to stop scheduling new steps; in-flight steps
+ * still finish. Consumers surface this as a distinct "budget-exceeded" outcome.
+ */
+export interface BudgetExceededEvent extends IterationTagged {
+  kind: "budget_exceeded";
+  /** Whether the whole-workflow budget or a single step's budget was hit. */
+  scope: "workflow" | "step";
+  /** The step whose `maxCostUsd` was hit (scope "step" only). */
+  stepId?: string;
+  /** The configured cap in USD. */
+  limitUsd: number;
+  /** Accumulated spend (USD) at the moment the cap was hit. */
+  spentUsd: number;
   ts: number;
 }
 
@@ -161,6 +185,7 @@ export type WorkflowEvent =
   | StepDoneEvent
   | PhaseDoneEvent
   | WorkflowDoneEvent
-  | LoopIterationEvent;
+  | LoopIterationEvent
+  | BudgetExceededEvent;
 
 export type WorkflowEventKind = WorkflowEvent["kind"];

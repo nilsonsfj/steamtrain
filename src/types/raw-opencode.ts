@@ -52,6 +52,19 @@ export const opencodeError = z
   })
   .passthrough();
 
+/** OpenCode's per-step token block: `{ input, output, reasoning, cache: { read, write } }`. */
+export const opencodeTokens = z
+  .object({
+    input: z.number().optional(),
+    output: z.number().optional(),
+    reasoning: z.number().optional(),
+    cache: z
+      .object({ read: z.number().optional(), write: z.number().optional() })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
 export const opencodeEvent = z
   .object({
     type: z.string(),
@@ -61,8 +74,10 @@ export const opencodeEvent = z
     properties: z.object({ part: opencodePart.optional() }).passthrough().optional(),
     error: opencodeError.optional(),
     cost: z.number().optional(),
+    tokens: opencodeTokens.optional(),
   })
   .passthrough();
 
 export type OpenCodePart = z.infer<typeof opencodePart>;
 export type OpenCodeEvent = z.infer<typeof opencodeEvent>;
+export type OpenCodeTokens = z.infer<typeof opencodeTokens>;

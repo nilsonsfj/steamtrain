@@ -17,6 +17,7 @@ const STATUS_GLYPH: Record<RunRecordSummary["status"], { symbol: string; color: 
   done: { symbol: "✓", color: "green" },
   error: { symbol: "✗", color: "red" },
   canceled: { symbol: "⊘", color: "yellow" },
+  "budget-exceeded": { symbol: "$", color: "yellow" },
 };
 
 /** A browser for past workflow runs: ↑/↓ select, Enter to inspect, Esc to close. */
@@ -90,7 +91,7 @@ function HistoryRow({
 }) {
   const g = STATUS_GLYPH[run.status];
   const when = relativeTime(run.startedAt);
-  const meta = formatRunTotals(run.totals, { durationMs: run.durationMs });
+  const meta = formatRunTotals(run.totals, { durationMs: run.durationMs, tokens: true });
   return (
     <Box flexDirection="column">
       <Box>

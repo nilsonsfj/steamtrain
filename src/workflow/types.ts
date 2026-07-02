@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AgentInstanceId } from "../types/events";
+import type { AgentInstanceId, TokenUsage } from "../types/events";
 import type { RetryPolicy } from "./retry";
 import type { JsonSchema } from "./structured";
 
@@ -82,6 +82,14 @@ export interface WorkerStep extends WorkflowStepBase, AgentRunFields {
   forEach?: string;
   /** Per-step auto-retry policy for transient failures (overrides the workflow default). */
   retry?: RetryPolicy;
+  /**
+   * Optional per-step USD budget. Meaningful for `forEach` fan-outs: once the
+   * step's children have spent this much, the engine stops dispatching new
+   * children (in-flight children finish). The step is marked not-ok with a
+   * budget-exceeded error; already-completed children stay cached so a resume
+   * (after raising the cap) continues rather than re-running them.
+   */
+  maxCostUsd?: number;
 }
 
 export interface DistributorStep extends WorkflowStepBase {
@@ -198,6 +206,14 @@ export interface WorkflowSpec {
   stepTimeoutMs?: number;
   /** @deprecated Use `workflowTimeoutSec`. */
   workflowTimeoutMs?: number;
+  /**
+   * Optional whole-workflow USD budget. Once the run's accumulated cost reaches
+   * this cap the engine stops scheduling new steps; steps already in flight run
+   * to completion. The run ends with status `budget-exceeded` and its cache
+   * intact, so raising the cap and re-running resumes from where it stopped
+   * (completed steps replay from cache) rather than starting over.
+   */
+  maxCostUsd?: number;
 }
 
 export interface AgentWorktreeInfo {
@@ -248,6 +264,8 @@ export interface StepResult {
   error?: string;
   durationMs: number;
   costUsd?: number;
+  /** Normalized token usage the agent reported for this step, when available. */
+  tokens?: TokenUsage;
   /** Total attempts this step took (auto-retry); omitted/1 means it ran once. */
   attempts?: number;
   /** Isolated git worktree metadata for agent-backed steps. */
@@ -354,6 +372,7 @@ const workflowWorkerStepSchema = z.object({
   kind: z.enum(["worker", "processor"]).optional(),
   forEach: z.string().min(1).optional(),
   retry: retryPolicySchema.optional(),
+  maxCostUsd: z.number().positive().optional(),
   ...agentRunShape,
 });
 
@@ -441,6 +460,7 @@ export const workflowSpecSchema = z
     workflowTimeoutSec: z.number().positive().optional(),
     stepTimeoutMs: z.number().positive().optional(),
     workflowTimeoutMs: z.number().positive().optional(),
+    maxCostUsd: z.number().positive().optional(),
   })
   .superRefine((spec, ctx) => {
     const seen = new Set<string>();

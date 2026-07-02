@@ -115,20 +115,28 @@ artifact a pipeline can consume, no turnkey way to run `bug-hunt` on every PR.
 leverage distribution channel for the whole tool, and `bug-hunt`-on-every-PR is
 the demo that sells itself.
 
-## 1.5 Cost budgets and cost analytics
+## 1.5 Cost budgets and cost analytics ✅ Shipped
 
 **The gap:** steamtrain already tracks per-step and per-run cost, but only
 *reports* it after the fact. A fan-out with `forEach` over 30 items on an Opus
 model, inside a loop-back gate, can quietly burn real money.
 
-**The feature:**
-- `maxCostUsd` at workflow and step level: the engine stops scheduling new
-  steps when the budget is hit (existing steps finish; run is marked
-  `budget-exceeded`, resumable after raising the cap — the cache makes this
-  cheap).
-- A live cost ticker in the TUI status bar / web header during a run.
-- `steamtrain workflow costs`: aggregate spend from history by workflow, step,
-  agent, and model — "which step is eating the budget?"
+**The feature (shipped):**
+- `maxCostUsd` at workflow and step (`forEach`) level: the engine stops
+  scheduling new steps when the budget is hit (existing steps finish; run is
+  marked `budget-exceeded`, resumable after raising the cap — the cache makes
+  this cheap, and prior spend from the cache counts toward the cap on resume).
+- A live cost **and token** ticker in the TUI status bar / web header during a
+  run, plus a per-model breakdown line.
+- Full token accounting (input, output, cache read, cache write, reasoning)
+  normalized across all four agents (Claude, OpenCode, Codex, Amp), reported per
+  step, in run totals, and aggregated per model — visible in the TUI, web UI,
+  and CLI.
+- `steamtrain workflow costs [--workflow <name>] [--json]`: aggregate spend and
+  tokens from history by workflow, step, agent, and model — "which step is
+  eating the budget?"
+
+See [cost-and-budgets.md](./cost-and-budgets.md) for details.
 
 **Why it matters:** cost anxiety is the #1 practical brake on running big
 parallel workflows. A hard cap plus visibility removes the fear that keeps

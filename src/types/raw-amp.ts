@@ -38,7 +38,17 @@ export const ampSystemInit = z
   })
   .passthrough();
 
-/** `{"type":"result","subtype":"success"|"error_during_execution", is_error, error?, result?, ...}` */
+/** Anthropic-shaped usage block (Amp runs on Claude models). */
+export const ampUsage = z
+  .object({
+    input_tokens: z.number().optional(),
+    output_tokens: z.number().optional(),
+    cache_creation_input_tokens: z.number().optional(),
+    cache_read_input_tokens: z.number().optional(),
+  })
+  .passthrough();
+
+/** `{"type":"result","subtype":"success"|"error_during_execution", is_error, error?, result?, usage?, ...}` */
 export const ampResult = z
   .object({
     type: z.literal("result"),
@@ -48,7 +58,9 @@ export const ampResult = z
     error: z.string().optional(),
     duration_ms: z.number().optional(),
     total_cost_usd: z.number().optional(),
+    usage: ampUsage.optional(),
   })
   .passthrough();
 
 export type AmpResult = z.infer<typeof ampResult>;
+export type AmpUsage = z.infer<typeof ampUsage>;

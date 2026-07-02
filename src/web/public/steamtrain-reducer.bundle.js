@@ -119,7 +119,8 @@ var SteamtrainReducer = (() => {
           started: true,
           done: false,
           ok: true,
-          loopMarkers: []
+          loopMarkers: [],
+          budget: void 0
         };
       case "phase_start": {
         const iter = e.iteration ?? 1;
@@ -244,6 +245,16 @@ var SteamtrainReducer = (() => {
           phases: state.phases.map(
             (p) => sameInstance(p, e.phaseId, e.iteration) ? { ...p, done: true, ok: e.ok } : p
           )
+        };
+      case "budget_exceeded":
+        return {
+          ...state,
+          budget: {
+            scope: e.scope,
+            stepId: e.stepId,
+            limitUsd: e.limitUsd,
+            spentUsd: e.spentUsd
+          }
         };
       case "workflow_done":
         return { ...state, done: true, ok: e.ok, results: e.results };

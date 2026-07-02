@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import type { DoctorResult } from "../doctor";
+import { formatTokens, formatUsd } from "../workflow";
 import { STATUS_STYLE } from "./theme";
 import { SPINNER_FRAMES, useWorkIndicator } from "./useWorkIndicator";
 
@@ -8,10 +9,22 @@ interface StatusBarProps {
   configSource: string;
   workspaceLabel: string;
   running: boolean;
+  /** Live spend for the active run, shown as a cost ticker while running. */
+  runCostUsd?: number;
+  /** Live total tokens for the active run. */
+  runTokens?: number;
 }
 
-export function StatusBar({ doctor, configSource, workspaceLabel, running }: StatusBarProps) {
+export function StatusBar({
+  doctor,
+  configSource,
+  workspaceLabel,
+  running,
+  runCostUsd,
+  runTokens,
+}: StatusBarProps) {
   const { spinnerFrame, elapsedSeconds } = useWorkIndicator(running);
+  const showTicker = running && ((runCostUsd ?? 0) > 0 || (runTokens ?? 0) > 0);
 
   return (
     <Box borderStyle="round" borderColor="gray" paddingX={1} justifyContent="space-between">
@@ -38,6 +51,13 @@ export function StatusBar({ doctor, configSource, workspaceLabel, running }: Sta
         ) : (
           <Text color="gray">idle</Text>
         )}
+        {showTicker ? (
+          <Text color="green">
+            {"  "}
+            {formatUsd(runCostUsd ?? 0)}
+            {(runTokens ?? 0) > 0 ? ` · ${formatTokens(runTokens ?? 0)} tok` : ""}
+          </Text>
+        ) : null}
         <Text color="gray">
           {"  "}cfg: {shorten(configSource)}
           {"  "}ws: {shorten(workspaceLabel)}

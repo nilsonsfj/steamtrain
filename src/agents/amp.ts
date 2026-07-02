@@ -1,5 +1,18 @@
-import type { AgentEvent, AgentId, AgentInstanceId, EventMapper } from "../types/events";
-import { ampAssistant, ampEnvelope, ampResult, ampSystemInit, ampUser } from "../types/raw-amp";
+import type {
+  AgentEvent,
+  AgentId,
+  AgentInstanceId,
+  EventMapper,
+  TokenUsage,
+} from "../types/events";
+import {
+  type AmpUsage,
+  ampAssistant,
+  ampEnvelope,
+  ampResult,
+  ampSystemInit,
+  ampUser,
+} from "../types/raw-amp";
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
 import { humanizeAssistantError, stringifyContent } from "./util";
@@ -128,6 +141,7 @@ export function createAmpMapper(agent: AgentInstanceId = AGENT): EventMapper {
           subtype: r.data.subtype,
           durationMs: r.data.duration_ms,
           costUsd: r.data.total_cost_usd,
+          tokens: ampTokens(r.data.usage),
         });
         return out;
       }
@@ -136,6 +150,18 @@ export function createAmpMapper(agent: AgentInstanceId = AGENT): EventMapper {
         return [{ kind: "unknown", agent, ts, rawType: env.data.type, raw }];
     }
   };
+}
+
+/** Map Amp's Anthropic-shaped usage onto the normalized {@link TokenUsage}. */
+function ampTokens(usage: AmpUsage | undefined): TokenUsage | undefined {
+  if (!usage) return undefined;
+  const tokens: TokenUsage = {};
+  if (usage.input_tokens !== undefined) tokens.input = usage.input_tokens;
+  if (usage.output_tokens !== undefined) tokens.output = usage.output_tokens;
+  if (usage.cache_read_input_tokens !== undefined) tokens.cacheRead = usage.cache_read_input_tokens;
+  if (usage.cache_creation_input_tokens !== undefined)
+    tokens.cacheWrite = usage.cache_creation_input_tokens;
+  return Object.keys(tokens).length > 0 ? tokens : undefined;
 }
 
 /**

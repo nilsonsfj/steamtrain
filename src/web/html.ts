@@ -81,6 +81,7 @@ export function renderIndex(revs: PageAssetRevisions): string {
         <span id="elapsed">0.0s</span>
         <div class="progress"><span id="progressBar"></span></div>
         <span id="progressText"></span>
+        <span id="costTicker" class="cost-ticker"></span>
         <label style="display:inline-flex;gap:5px;align-items:center;cursor:pointer">
           <input type="checkbox" id="freshChk" /> fresh (ignore cache)
         </label>

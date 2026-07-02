@@ -448,6 +448,8 @@
       if (s.result) {
         metrics.appendChild(h("span", { text: (s.result.durationMs / 1000).toFixed(1) + "s" }));
         if (s.result.costUsd) metrics.appendChild(h("span", { text: "$" + s.result.costUsd.toFixed(4) }));
+        var tokenLine = fmtTokenSummary(s.result.tokens);
+        if (tokenLine) metrics.appendChild(h("span", { text: tokenLine }));
       }
       if (s.cached) metrics.appendChild(h("span", { class: "badge cached", text: "cached" }));
       if (s.gate) metrics.appendChild(h("span", { class: "badge " + (s.gate.passed ? "gate-pass" : "gate-block"), text: s.gate.passed ? "gate passed" : "gate blocked" }));
@@ -465,11 +467,12 @@
     var table = h("table");
     table.appendChild(h("tr", null,
       h("th", { text: "" }), h("th", { text: "step" }), h("th", { text: "time" }),
-      h("th", { text: "cost" }), h("th", { text: "notes" })
+      h("th", { text: "cost" }), h("th", { text: "tokens" }), h("th", { text: "notes" })
     ));
-    var totalMs = 0, totalCost = 0, okN = 0, failN = 0;
+    var totalMs = 0, totalCost = 0, okN = 0, failN = 0, totalTok = emptyTokens();
     leaves.forEach(function (r) {
       totalMs += r.durationMs || 0; totalCost += r.costUsd || 0;
+      addTokensInto(totalTok, r.tokens);
       if (r.ok) okN++; else failN++;
       var notes = [];
       if (r.item) notes.push("item " + r.item.index);
@@ -479,12 +482,33 @@
         h("td", { text: r.stepId }),
         h("td", { text: ((r.durationMs || 0) / 1000).toFixed(1) + "s" }),
         h("td", { text: r.costUsd ? "$" + r.costUsd.toFixed(4) : "" }),
+        h("td", { text: fmtTokenSummary(r.tokens) }),
         h("td", { text: notes.join(" \u00b7 ") })
       ));
     });
     wrap.appendChild(table);
-    var totals = okN + " ok" + (failN ? " \u00b7 " + failN + " failed" : "") + (totalCost ? " \u00b7 $" + totalCost.toFixed(4) : "") + " \u00b7 " + (totalMs / 1000).toFixed(1) + "s total";
+    var tokTotal = totalTokens(totalTok);
+    var totals = okN + " ok" + (failN ? " \u00b7 " + failN + " failed" : "") + (totalCost ? " \u00b7 $" + totalCost.toFixed(4) : "") + (tokTotal ? " \u00b7 " + fmtTokens(tokTotal) + " tok" : "") + " \u00b7 " + (totalMs / 1000).toFixed(1) + "s total";
     wrap.appendChild(h("div", { class: "meta", style: "color:var(--muted);font-size:12px;margin-top:8px", text: totals }));
+
+    // Per-model breakdown \u2014 "which model is eating the budget?".
+    var allSteps = [];
+    if (S.runState) S.runState.phases.forEach(function (p) { p.steps.forEach(function (s) { allSteps.push(s); }); });
+    var byModel = aggregateByModel(allSteps);
+    if (byModel.length) {
+      var mtable = h("table", { style: "margin-top:12px" });
+      mtable.appendChild(h("tr", null, h("th", { text: "model" }), h("th", { text: "steps" }), h("th", { text: "cost" }), h("th", { text: "tokens" })));
+      byModel.forEach(function (m) {
+        mtable.appendChild(h("tr", null,
+          h("td", { text: m.model }),
+          h("td", { text: String(m.steps) }),
+          h("td", { text: m.costUsd ? "$" + m.costUsd.toFixed(4) : "" }),
+          h("td", { text: fmtTokenSummary(m.tokens) })
+        ));
+      });
+      wrap.appendChild(h("div", { class: "meta", style: "color:var(--muted);font-size:12px;margin-top:12px;text-transform:uppercase;letter-spacing:.08em", text: "By model" }));
+      wrap.appendChild(mtable);
+    }
     canvas.appendChild(wrap);
   }
 
@@ -501,6 +525,24 @@
     var pct = total ? Math.round((doneN / total) * 100) : 0;
     bar.style.width = pct + "%";
     document.getElementById("progressText").textContent = doneN + " / " + total + " steps";
+
+    // Live cost/token ticker + budget badge.
+    var cost = 0, tokens = emptyTokens();
+    steps.forEach(function (s) {
+      if (s.result && s.result.costUsd) cost += s.result.costUsd;
+      if (s.result) addTokensInto(tokens, s.result.tokens);
+    });
+    var ticker = document.getElementById("costTicker");
+    if (ticker) {
+      var bits = [];
+      if (cost > 0) bits.push("$" + cost.toFixed(4));
+      var tk = totalTokens(tokens);
+      if (tk > 0) bits.push(fmtTokens(tk) + " tok");
+      var budget = S.runState && S.runState.budget;
+      if (budget) bits.push("⚠ budget $" + budget.limitUsd.toFixed(4) + " reached");
+      ticker.textContent = bits.join(" · ");
+      ticker.className = "cost-ticker" + (budget ? " over-budget" : "");
+    }
   }
 
   // ---- running -------------------------------------------------------------
@@ -535,6 +577,7 @@
       else if (frame.type === "status") {
         es.close(); S.es = null; setRunning(false); stopTimer();
         if (frame.status === "canceled") setBanner("Run canceled.", "info");
+        else if (frame.status === "budget-exceeded") setBanner("Run stopped: cost budget reached. Raise maxCostUsd and re-run to resume.", "err");
         else if (frame.status === "error" || frame.ok === false) setBanner("Run failed" + (frame.error ? ": " + frame.error : "."), "err");
         else setBanner("Run complete.", "ok");
         render();
@@ -1049,7 +1092,7 @@
     }
     var list = h("div", { class: "hruns" });
     runs.forEach(function (run) {
-      var meta = fmtTotals(run.totals, { durationMs: run.durationMs || 0 });
+      var meta = fmtTotals(run.totals, { durationMs: run.durationMs || 0, tokens: true });
       var row = h("div", { class: "hrun " + run.status, onClick: (function (id) { return function () { openHistoryRun(holder, id); }; })(run.id) },
         h("div", { class: "hr-top" },
           h("span", { class: "hr-name", text: run.workflow }),
@@ -1080,9 +1123,29 @@
     holder.appendChild(h("div", { class: "title", style: "font-size:16px;font-weight:700", text: record.workflow }));
     holder.appendChild(h("div", { class: "sub", style: "color:var(--muted);font-size:12px;margin-top:2px",
       text: record.status + " \u00b7 " + fmtTime(record.startedAt) + " \u00b7 "
-        + ((record.durationMs || 0) / 1000).toFixed(1) + "s \u00b7 " + fmtTotals(record.totals, { cached: true }) }));
+        + ((record.durationMs || 0) / 1000).toFixed(1) + "s \u00b7 " + fmtTotals(record.totals, { cached: true, tokens: true }) }));
     if (record.input) holder.appendChild(h("div", { class: "hr-input", style: "margin:8px 0 12px", text: "input: " + record.input }));
+    if (record.budget) {
+      var bScope = record.budget.scope === "step" && record.budget.stepId ? "step '" + record.budget.stepId + "'" : "workflow";
+      holder.appendChild(h("div", { class: "mbanner show err", text: bScope + " cost budget $" + record.budget.limitUsd.toFixed(4) + " reached (spent $" + record.budget.spentUsd.toFixed(4) + ") \u2014 resumable after raising the cap" }));
+    }
     if (record.error) holder.appendChild(h("div", { class: "mbanner show err", text: record.error }));
+    // Per-model breakdown from the recorded tree.
+    var histSteps = [];
+    (record.phases || []).forEach(function (p) { (p.steps || []).forEach(function (s) { histSteps.push(s); }); });
+    var histByModel = aggregateByModel(histSteps);
+    if (histByModel.length) {
+      var hmt = h("table", { style: "margin:4px 0 12px" });
+      hmt.appendChild(h("tr", null, h("th", { text: "model" }), h("th", { text: "steps" }), h("th", { text: "cost" }), h("th", { text: "tokens" })));
+      histByModel.forEach(function (m) {
+        hmt.appendChild(h("tr", null,
+          h("td", { text: m.model }), h("td", { text: String(m.steps) }),
+          h("td", { text: m.costUsd ? "$" + m.costUsd.toFixed(4) : "" }),
+          h("td", { text: fmtTokenSummary(m.tokens) })
+        ));
+      });
+      holder.appendChild(hmt);
+    }
     var canRetry = record.totals && record.totals.failed > 0;
     var actions = h("div", { class: "run-actions", style: "display:flex;gap:8px;margin:4px 0 12px" },
       h("button", { class: "btn primary", text: "Re-run",
@@ -1138,7 +1201,54 @@
     if (opts.cached && t.cached > 0) parts.push(t.cached + " cached");
     if (typeof opts.durationMs === "number") parts.push((opts.durationMs / 1000).toFixed(1) + "s");
     if (t.costUsd > 0) parts.push("$" + t.costUsd.toFixed(4));
+    if (opts.tokens) { var tk = totalTokens(t.tokens); if (tk > 0) parts.push(fmtTokens(tk) + " tok"); }
     return parts.join(" \u00b7 ");
+  }
+
+  // Mirror of the token helpers in src/workflow/cost.ts. TOKEN_KEYS order and
+  // labels must match so every surface reports the same categories.
+  var TOKEN_KEYS = ["input", "output", "cacheRead", "cacheWrite", "reasoning"];
+  var TOKEN_LABELS = { input: "in", output: "out", cacheRead: "cache r", cacheWrite: "cache w", reasoning: "reason" };
+  function totalTokens(t) {
+    if (!t) return 0;
+    return (t.input || 0) + (t.output || 0) + (t.cacheRead || 0) + (t.cacheWrite || 0);
+  }
+  function fmtTokens(n) {
+    if (n < 1000) return String(Math.round(n));
+    if (n < 1000000) return (n / 1000).toFixed(n < 10000 ? 1 : 0) + "k";
+    return (n / 1000000).toFixed(n < 10000000 ? 1 : 0) + "M";
+  }
+  function fmtTokenSummary(t) {
+    var total = totalTokens(t);
+    if (total === 0 || !t) return "";
+    var parts = [];
+    for (var i = 0; i < TOKEN_KEYS.length; i++) {
+      var k = TOKEN_KEYS[i]; var v = t[k] || 0;
+      if (v > 0) parts.push(TOKEN_LABELS[k] + " " + fmtTokens(v));
+    }
+    return fmtTokens(total) + " tok (" + parts.join(" \u00b7 ") + ")";
+  }
+  // Add one token object into another (mutates + returns `a`).
+  function addTokensInto(a, b) {
+    if (!b) return a;
+    for (var i = 0; i < TOKEN_KEYS.length; i++) { var k = TOKEN_KEYS[i]; a[k] = (a[k] || 0) + (b[k] || 0); }
+    return a;
+  }
+  function emptyTokens() { return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }; }
+  // Per-model roll-up of leaf steps, biggest spender first (mirrors cost.ts).
+  function aggregateByModel(steps) {
+    var map = {};
+    steps.forEach(function (s) {
+      if (!s.result || (s.result.childResults && s.result.childResults.length)) return;
+      var key = s.model && s.agent ? s.agent + "/" + s.model : (s.model || s.agent || "unknown");
+      var e = map[key] || (map[key] = { model: key, costUsd: 0, tokens: emptyTokens(), steps: 0 });
+      e.costUsd += s.result.costUsd || 0;
+      addTokensInto(e.tokens, s.result.tokens);
+      e.steps += 1;
+    });
+    return Object.keys(map).map(function (k) { return map[k]; })
+      .filter(function (m) { return m.costUsd > 0 || totalTokens(m.tokens) > 0; })
+      .sort(function (a, b) { return b.costUsd - a.costUsd; });
   }
 
   // ---- utils ---------------------------------------------------------------
