@@ -422,6 +422,9 @@ async function* runDagScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, bool
             i++;
             continue;
           }
+          // Safe to mutate `pending` mid-scan: the driver is single-threaded
+          // between awaits, so there are no concurrent readers, and the O(n)
+          // splice is negligible at the ≤1000-step scale we schedule.
           pending.splice(i, 1);
           launch(node, inFlight);
         }
@@ -512,18 +515,20 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
 
       const conditions: (GateCondition | undefined)[] = [step.when];
       if (step.kind === "gate") conditions.push(step.condition);
-      const templatedTexts: (string | undefined)[] = [];
+      // Condition predicates aren't templates themselves, but they're rendered
+      // as such (their {{steps.*}} refs resolve), so they contribute deps too.
+      const renderableTexts: (string | undefined)[] = [];
       for (const condition of conditions) {
         if (!condition) continue;
         addEarlier(condition.step);
-        templatedTexts.push(condition.contains, condition.equals, condition.matches);
+        renderableTexts.push(condition.contains, condition.equals, condition.matches);
       }
       if ((step.kind === "worker" || step.kind === "processor" || !step.kind) && step.forEach) {
         addEarlier(parseForEachSource(step.forEach));
       }
-      if ("prompt" in step) templatedTexts.push(step.prompt);
-      if (step.kind === "distributor" && step.items) templatedTexts.push(...step.items);
-      for (const text of templatedTexts) {
+      if ("prompt" in step) renderableTexts.push(step.prompt);
+      if (step.kind === "distributor" && step.items) renderableTexts.push(...step.items);
+      for (const text of renderableTexts) {
         for (const ref of templateStepRefs(text)) addEarlier(ref);
       }
 
