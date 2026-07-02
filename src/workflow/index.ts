@@ -40,6 +40,16 @@ export type {
 } from "./events";
 export { runWorkflow, type WorkflowDeps, type WorkflowRunContext } from "./engine";
 export {
+  type JsonSchema,
+  type StructuredParseResult,
+  extractJsonValue,
+  jsonFieldText,
+  jsonPathGet,
+  parseJsonPath,
+  parseStructuredOutput,
+  validateAgainstSchema,
+} from "./structured";
+export {
   createGitWorktreeManager,
   type AgentWorkspaceLease,
   type AgentWorkspaceManager,

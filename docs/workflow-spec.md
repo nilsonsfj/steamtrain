@@ -108,7 +108,8 @@ Existing no-`kind` steps are treated as workers.
 
 Required fields: `agent`, `model`, `prompt`.
 
-Optional fields: `cwd`, `env`, `extraArgs`, `effort`, `forEach`, `retry`.
+Optional fields: `cwd`, `env`, `extraArgs`, `effort`, `forEach`, `retry`,
+`output` (see [Structured step outputs](#structured-step-outputs-output)).
 
 If the resolved `cwd` is inside a git repository, the agent subprocess runs from
 a matching path in its own git worktree. The worktree starts at the current
@@ -161,7 +162,8 @@ Downstream steps reference the aggregate parent result:
 
 `forEach` sources must be successful distributor steps from earlier phases. If
 the distributor is agent-backed, its final output is split on non-empty lines to
-form `items`.
+form `items` — unless it declares an `output` schema, in which case `items`
+come from a JSON array (see below).
 
 ### Distributor
 
@@ -181,6 +183,28 @@ Static distributor results expose:
 
 - `{{steps.areas.output}}` as the items joined by newline.
 - `{{steps.areas.items}}` as the structured items joined by newline.
+
+An agent-backed distributor normally splits the agent's output on non-empty
+lines. Give it an `output` JSON schema to fan out over a **JSON array**
+instead: the parsed value itself must be an array, or set `itemsPath` to the
+field holding one. String elements become item payloads as-is; other values
+are JSON-serialized.
+
+```jsonc
+{
+  "id": "split",
+  "kind": "distributor",
+  "agent": "claude",
+  "model": "claude-sonnet-4-6",
+  "prompt": "List the areas of {{input}} to review.",
+  "output": {
+    "type": "object",
+    "required": ["targets"],
+    "properties": { "targets": { "type": "array", "items": { "type": "string" } } }
+  },
+  "itemsPath": "targets"
+}
+```
 
 ### Consolidator
 
@@ -221,10 +245,25 @@ Gate condition fields are combined with logical AND:
 | --- | --- |
 | `step` | Inspect this earlier step. If omitted, inspect workflow input text. |
 | `ok` | Require the referenced step's success state. |
+| `path` | Inspect one field of the step's structured output (e.g. `verdict`, `issues[0].severity`) instead of its full text. Requires `step`; the step should declare an `output` schema. Missing fields evaluate as empty text. |
 | `contains` | Require output/input text to contain this rendered string. |
 | `matches` | Require output/input text to match this rendered regular expression. |
 | `equals` | Require output/input text to equal this rendered string. |
 | `not` | Invert the final result. |
+
+With `path`, gates route on typed fields instead of substring heuristics — a
+reviewer that prints "no P0 issues found" no longer trips a `contains: "P0"`
+gate:
+
+```jsonc
+{
+  "id": "check",
+  "kind": "gate",
+  "dependsOn": ["review"],
+  "condition": { "step": "review", "path": "verdict", "equals": "pass" },
+  "onFalse": "fail"
+}
+```
 
 `onFalse` controls a false condition:
 
@@ -261,6 +300,46 @@ of executed.
   merge omits them) and are skipped only when every dependency was skipped.
 - A skipped gate does not evaluate its condition and never stops the run.
 - Skipped results are cached, so resumed runs replay the same decision.
+
+## Structured step outputs (`output`)
+
+Any agent-backed step (worker, processor, agent-backed distributor or
+consolidator) may declare an `output` JSON schema. The engine appends a
+"required output format" contract to the rendered prompt, then extracts the
+JSON from the agent's final reply (raw, inside a ` ```json ` fence, or embedded
+in prose — the last parseable value wins) and validates it against the schema.
+
+```jsonc
+{
+  "id": "review",
+  "agent": "claude",
+  "model": "claude-sonnet-4-6",
+  "prompt": "Review {{input}}. Verdict: pass or fail.",
+  "output": {
+    "type": "object",
+    "required": ["verdict"],
+    "properties": {
+      "verdict": { "type": "string", "enum": ["pass", "fail"] },
+      "issues": { "type": "array", "items": { "type": "string" } }
+    }
+  }
+}
+```
+
+- On a parse/validation failure the engine runs **one** bounded "fix your
+  JSON" retry: the agent is re-invoked with the schema, the validation error,
+  and its previous reply. If that reply still doesn't match, the step fails.
+  The retry surfaces in the TUI/web UI like a transient retry, and the extra
+  attempt is counted in the step's `attempts` and cost.
+- The parsed value is stored on the step result as `json` and drives
+  `{{steps.<id>.json…}}` templates, gate/`when` `path` conditions, and
+  distributor array fan-out. The step's `output` text remains the raw reply.
+
+Supported schema keywords (a pragmatic JSON Schema subset): `type` (including
+`integer`, and arrays of types), `enum`, `const`, `properties`, `required`,
+`additionalProperties: false`, `items`, `minItems`/`maxItems`,
+`minLength`/`maxLength`, `pattern`, `minimum`/`maximum`. Unknown keywords are
+ignored.
 
 ## Scheduling
 
@@ -339,6 +418,8 @@ Prompt templates and several block fields support:
 | `{{steps.<id>.ok}}` | `true` or `false`. |
 | `{{steps.<id>.error}}` | Prior step error text, if any. |
 | `{{steps.<id>.target}}` | Prior gate target/state, if any. |
+| `{{steps.<id>.json}}` | Prior step's parsed structured output, JSON-serialized. |
+| `{{steps.<id>.json.<path>}}` | A field of it, e.g. `json.verdict` or `json.targets[2]`. Strings render raw, other values JSON-serialized, missing fields empty. |
 | `{{item}}`, `{{item.value}}` | Current dynamic fan-out item inside a `forEach` worker/processor. |
 | `{{item.index}}` | Zero-based index of the current fan-out item. |
 | `{{item.sourceStepId}}` | Distributor step id that produced the current item. |
@@ -362,6 +443,9 @@ Unknown placeholders are left unchanged.
 - Agent-backed consolidators require `agent`, `model`, and `prompt` together.
 - Gate conditions require at least one of `ok`, `contains`, `matches`, or
   `equals`.
+- A gate/`when` condition `path` requires `step`.
+- Distributor `itemsPath` requires an agent-backed step with an `output`
+  schema.
 
 ## CLI
 

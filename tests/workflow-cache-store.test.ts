@@ -202,6 +202,8 @@ describe("workflow cache store", () => {
             attempts: 3,
             iteration: 2,
             items: ["a", "b"],
+            json: { verdict: "pass", targets: ["a", "b"] },
+            skipped: true,
             parentStepId: "parent",
             extraField: "should be stripped",
             anotherExtra: 42,
@@ -226,6 +228,8 @@ describe("workflow cache store", () => {
     expect(result!.attempts).toBe(3);
     expect(result!.iteration).toBe(2);
     expect(result!.items).toEqual(["a", "b"]);
+    expect(result!.json).toEqual({ verdict: "pass", targets: ["a", "b"] });
+    expect(result!.skipped).toBe(true);
     expect(result!.parentStepId).toBe("parent");
     // Unknown fields must be stripped
     expect((result as unknown as Record<string, unknown>).extraField).toBeUndefined();

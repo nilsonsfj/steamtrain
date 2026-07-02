@@ -245,6 +245,10 @@ with zero items fails.
 The agent's final text output is split on non-empty lines and stored as `items`.
 This is useful when the split itself should be model-driven.
 
+Add an `output` JSON schema (plus optional `itemsPath`) to fan out over a
+validated **JSON array** instead of line-splitting — see
+[structured step outputs](workflow-spec.md#structured-step-outputs-output).
+
 ```mermaid
 flowchart LR
   in["{{input}}"]
@@ -583,6 +587,8 @@ Templates are rendered into prompts and some gate/distributor fields.
 | `{{steps.<id>.ok}}` | `true` or `false` |
 | `{{steps.<id>.error}}` | error text, if any |
 | `{{steps.<id>.target}}` | gate target label |
+| `{{steps.<id>.json}}` | parsed structured output, JSON-serialized |
+| `{{steps.<id>.json.<path>}}` | one field of it, e.g. `json.verdict`, `json.targets[2]` |
 
 ### Dynamic fan-out item context
 

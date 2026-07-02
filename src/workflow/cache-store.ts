@@ -219,6 +219,9 @@ function validateStepResult(stepId: string, value: unknown): StepResult | undefi
     items: Array.isArray(r.items)
       ? r.items.filter((i): i is string => typeof i === "string")
       : undefined,
+    // Any JSON value is a valid parsed structured output; absent stays absent.
+    json: r.json,
+    skipped: typeof r.skipped === "boolean" ? r.skipped : undefined,
     item: r.item && typeof r.item === "object" ? (r.item as StepResult["item"]) : undefined,
     parentStepId: typeof r.parentStepId === "string" ? r.parentStepId : undefined,
     gate,

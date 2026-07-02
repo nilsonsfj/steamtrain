@@ -71,6 +71,11 @@ whole point of a workflow orchestrator.
 
 ## 1.3 Structured step outputs (typed data flow)
 
+> **Shipped** — per-step `output` schemas, `{{steps.<id>.json.<path>}}`
+> templates, gate/`when` `path` conditions, and distributor JSON-array
+> fan-out. See
+> [`workflow-spec.md`](workflow-spec.md#structured-step-outputs-output).
+
 **The gap:** every step's output is a text blob; agent-backed distributors
 split on lines; gates can only substring/regex the text. That makes multi-step
 data flow brittle — a reviewer step that emits "no P0 issues found, but P0
