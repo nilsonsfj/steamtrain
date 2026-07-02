@@ -10,10 +10,10 @@ jobs:
   opencode:
     if: |
       github.actor != 'cursor[bot]' &&
-      (contains(github.event.comment.body, ' /oc') ||
-      startsWith(github.event.comment.body, '/oc') ||
-      contains(github.event.comment.body, ' /opencode') ||
-      startsWith(github.event.comment.body, '/opencode'))
+      (github.event.comment.body == '/oc' ||
+      github.event.comment.body == '/opencode' ||
+      startsWith(github.event.comment.body, '/oc ') ||
+      startsWith(github.event.comment.body, '/opencode '))
     runs-on: ubuntu-latest
     permissions:
       id-token: write
