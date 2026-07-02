@@ -16,8 +16,11 @@ import {
 import { deleteUserWorkflow, saveUserWorkflow } from "./catalog";
 import type { SaveSessionWorkflowsResult, WorkflowSourceKind } from "./catalog";
 import { generateWorkflow, slugifyWorkflowName } from "./generate";
-import { applyWorkflowStepOverrides } from "./overrides";
-import type { WorkflowStepOverrides } from "./overrides";
+import {
+  type WorkflowSessionOverrides,
+  type WorkflowStepOverrides,
+  applyWorkflowSessionOverrides,
+} from "./overrides";
 import { resolveStepTimeoutSec } from "./timeout";
 import { type WorkflowSpec, validateWorkflow } from "./types";
 
@@ -315,10 +318,13 @@ export class WorkflowAuthor {
    * applied — the spec a "try without saving" run would use. Returns undefined
    * when the workflow is unknown.
    */
-  previewWithOverrides(name: string, overrides?: WorkflowStepOverrides): WorkflowSpec | undefined {
+  previewWithOverrides(
+    name: string,
+    overrides?: WorkflowSessionOverrides | WorkflowStepOverrides,
+  ): WorkflowSpec | undefined {
     const base = this.host.listWorkflows()[name];
     if (!base) return undefined;
-    return applyWorkflowStepOverrides(base, overrides);
+    return applyWorkflowSessionOverrides(base, overrides);
   }
 
   /**
@@ -327,7 +333,7 @@ export class WorkflowAuthor {
    * written. This is the shared core behind the TUI's `/save-workflows`.
    */
   async flushSessionOverrides(
-    sessionOverrides: Record<string, WorkflowStepOverrides>,
+    sessionOverrides: Record<string, WorkflowSessionOverrides | WorkflowStepOverrides>,
   ): Promise<SaveSessionWorkflowsResult> {
     const result = await saveSessionWorkflowsToUser({
       catalog: this.catalog(),

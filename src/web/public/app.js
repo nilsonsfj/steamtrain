@@ -263,7 +263,7 @@
     S.workflows.forEach(function (w) {
       var kinds = Object.keys(w.kinds || {}).map(function (k) { return (KIND_LABEL[k] || k) + ":" + w.kinds[k]; }).join(" \u00b7 ");
       var meta = w.phaseCount + " phase" + (w.phaseCount === 1 ? "" : "s") + " \u00b7 " + w.stepCount + " step" + (w.stepCount === 1 ? "" : "s");
-      var isStaged = S.stagedOverrides[w.name] && Object.keys(S.stagedOverrides[w.name]).length > 0;
+      var isStaged = workflowHasStaged(S.stagedOverrides[w.name]);
       var card = h("div", { class: "wf" + (S.selected === w.name ? " sel" : ""), onClick: function () { selectWorkflow(w.name); } },
         h("div", { class: "name" }, w.name, h("span", { class: "src", text: w.source }), isStaged ? h("span", { class: "badge staged", text: "staged" }) : null),
         w.description ? h("div", { class: "desc", text: w.description }) : null,
@@ -510,7 +510,7 @@
     setBanner("", "");
     document.getElementById("statusLine").style.display = "flex";
     var payload = { workflow: S.selected, input: input, fresh: document.getElementById("freshChk").checked };
-    if (S.stagedOverrides[S.selected]) payload.overrides = stripWfKeys(S.stagedOverrides[S.selected]);
+    if (workflowHasStaged(S.stagedOverrides[S.selected])) payload.overrides = S.stagedOverrides[S.selected];
     api("POST", "/api/runs", payload)
       .then(function (r) {
         if (r.status !== 201) { setBanner(r.body.error || "could not start run", "err"); return; }
@@ -884,7 +884,7 @@
 
     if (tryBtn) {
       tryBtn.addEventListener("click", function () {
-        var overrides = {};
+        var overrides = { steps: {} };
         spec.phases.forEach(function (p) {
           p.steps.forEach(function (st) {
             var r = refs[st.id];
@@ -899,15 +899,14 @@
               var stepSec = Number(r.stepTimeoutInput.value) * 60;
               patch.stepTimeoutSec = stepSec > 0 ? stepSec : null;
             } else patch.stepTimeoutSec = null;
-            if (Object.keys(patch).length > 0) overrides[st.id] = patch;
+            if (Object.keys(patch).length > 0) overrides.steps[st.id] = patch;
           });
         });
-        // Capture workflow-level timeouts as special keys
         var wfStepSec = Number(wfStepInput.value) * 60;
-        overrides.__wf_stepTimeoutSec__ = wfStepInput.value.trim() && wfStepSec > 0 ? wfStepSec : null;
+        overrides.stepTimeoutSec = wfStepInput.value.trim() && wfStepSec > 0 ? wfStepSec : null;
         var wfRunSec = Number(wfRunInput.value) * 60;
-        overrides.__wf_workflowTimeoutSec__ = wfRunInput.value.trim() && wfRunSec > 0 ? wfRunSec : null;
-        if (Object.keys(overrides).length > 0) {
+        overrides.workflowTimeoutSec = wfRunInput.value.trim() && wfRunSec > 0 ? wfRunSec : null;
+        if (!sessionOverridesEmpty(overrides)) {
           S.stagedOverrides[S.selected] = overrides;
         } else {
           delete S.stagedOverrides[S.selected];
@@ -915,7 +914,7 @@
         closeModal();
         renderStagedIndicator();
         renderSidebar();
-        setBanner(Object.keys(overrides).length > 0 ? "Overrides staged for next run (not saved to disk)." : "No changes to stage.", "info");
+        setBanner(!sessionOverridesEmpty(overrides) ? "Overrides staged for next run (not saved to disk)." : "No changes to stage.", "info");
       });
     }
 
@@ -1146,47 +1145,44 @@
   function truncate(text, n) { return text.length > n ? text.slice(0, n) + "\u2026" : text; }
 
   // ---- staged overrides ---------------------------------------------------
+  function sessionOverridesEmpty(o) {
+    if (!o) return true;
+    var hasSteps = o.steps && Object.keys(o.steps).length > 0;
+    return !(hasSteps || o.stepTimeoutSec !== undefined || o.workflowTimeoutSec !== undefined);
+  }
+
+  function workflowHasStaged(o) {
+    return !sessionOverridesEmpty(o);
+  }
+
   function hasStaged() {
-    return S.selected && S.stagedOverrides[S.selected] && Object.keys(S.stagedOverrides[S.selected]).length > 0;
+    return S.selected && workflowHasStaged(S.stagedOverrides[S.selected]);
   }
 
   function hasAnyStaged() {
     for (var k in S.stagedOverrides) {
-      if (Object.keys(S.stagedOverrides[k]).length > 0) return true;
+      if (workflowHasStaged(S.stagedOverrides[k])) return true;
     }
     return false;
-  }
-
-  function stripWfKeys(overrides) {
-    var result = {};
-    for (var k in overrides) {
-      if (k.indexOf("__wf_") === 0) continue;
-      var patch = overrides[k];
-      if (patch && typeof patch === "object" && !Array.isArray(patch)) {
-        var clean = {};
-        for (var fk in patch) { if (patch[fk] != null) clean[fk] = patch[fk]; }
-        if (Object.keys(clean).length > 0) result[k] = clean;
-      } else if (patch) {
-        result[k] = patch;
-      }
-    }
-    return result;
   }
 
   function effectiveSpec() {
     if (!S.spec) return null;
     var staged = S.stagedOverrides[S.selected];
-    if (!staged || Object.keys(staged).length === 0) return S.spec;
+    if (sessionOverridesEmpty(staged)) return S.spec;
     var spec = JSON.parse(JSON.stringify(S.spec));
-    // Apply workflow-level timeouts (null sentinel = clear the field)
-    if (staged.__wf_stepTimeoutSec__ != null) spec.stepTimeoutSec = staged.__wf_stepTimeoutSec__;
-    else if ("__wf_stepTimeoutSec__" in staged) delete spec.stepTimeoutSec;
-    if (staged.__wf_workflowTimeoutSec__ != null) spec.workflowTimeoutSec = staged.__wf_workflowTimeoutSec__;
-    else if ("__wf_workflowTimeoutSec__" in staged) delete spec.workflowTimeoutSec;
-    // Apply step-level overrides (null sentinel = clear the field)
+    if (staged.stepTimeoutSec !== undefined) {
+      if (staged.stepTimeoutSec === null) delete spec.stepTimeoutSec;
+      else spec.stepTimeoutSec = staged.stepTimeoutSec;
+    }
+    if (staged.workflowTimeoutSec !== undefined) {
+      if (staged.workflowTimeoutSec === null) delete spec.workflowTimeoutSec;
+      else spec.workflowTimeoutSec = staged.workflowTimeoutSec;
+    }
+    var steps = staged.steps || {};
     spec.phases.forEach(function (p) {
       p.steps.forEach(function (st) {
-        var patch = staged[st.id];
+        var patch = steps[st.id];
         if (patch) {
           for (var k in patch) {
             if (patch[k] === null) delete st[k]; else st[k] = patch[k];
@@ -1222,12 +1218,7 @@
       flushInFlight = false;
       if (flushBtn) { flushBtn.disabled = false; flushBtn.textContent = "\u{1F4BE} Flush to disk"; }
     }
-    // Strip __wf_* keys — workflow-level fields are applied client-side via effectiveSpec()
-    var serverOverrides = {};
-    for (var wfName in S.stagedOverrides) {
-      serverOverrides[wfName] = stripWfKeys(S.stagedOverrides[wfName]);
-    }
-    api("POST", "/api/overrides/flush", { overrides: serverOverrides }).then(function (r) {
+    api("POST", "/api/overrides/flush", { overrides: S.stagedOverrides }).then(function (r) {
       resetFlushState();
       if (r.status !== 200) { setBanner((r.body && r.body.error) || "flush failed", "err"); return; }
       var parts = [];

@@ -109,7 +109,16 @@ export {
   clearAllRunRecords,
   type WorkflowHistoryStore,
 } from "./history-store";
-export { applyWorkflowStepOverrides, type WorkflowStepOverrides } from "./overrides";
+export {
+  applyWorkflowSessionOverrides,
+  applyWorkflowStepOverrides,
+  normalizeSessionOverrides,
+  parseSessionOverrides,
+  sessionOverridesEmpty,
+  type ParseSessionOverridesResult,
+  type WorkflowSessionOverrides,
+  type WorkflowStepOverrides,
+} from "./overrides";
 export {
   buildWorkflowGenerationPrompt,
   buildWorkflowRepairPrompt,
