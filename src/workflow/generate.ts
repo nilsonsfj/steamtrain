@@ -166,6 +166,22 @@ skipped inputs as absent and merge the rest. Prefer "when" over a gate with
 "onFalse": "stop"/"fail" whenever you only want to skip a branch rather than
 halt the whole run. when.step must be in an earlier phase.
 
+# Structured outputs (typed gates and fan-out)
+Any agent-backed step may set "output" to a JSON schema (subset: type, properties,
+required, enum, items, const, additionalProperties). The engine instructs the agent
+to end its reply with matching JSON, validates it (with one bounded fix retry), and
+exposes the parsed value as {{steps.<id>.json}} / {{steps.<id>.json.<path>}}.
+Prefer a schema + field condition over substring matching whenever a gate or loop
+routes on a verdict/score/list — prose like "no P0 issues" can false-match a
+contains check:
+  { "id": "review", ..., "output": { "type": "object", "required": ["verdict"],
+    "properties": { "verdict": { "type": "string", "enum": ["pass", "fail"] } } } }
+  { "kind": "gate", "dependsOn": ["review"],
+    "condition": { "step": "review", "path": "verdict", "equals": "pass" }, ... }
+A distributor with an "output" schema fans out over a JSON array instead of
+splitting lines; set "itemsPath" (e.g. "targets") when the array is a field of the
+object rather than the whole value.
+
 # Keep it small
 A workflow may expand to at most 1000 steps; a forEach step counts as (number of
 distributor items) steps. Agent-backed distributors scale to however many lines
@@ -174,7 +190,8 @@ phase count modest.
 
 # Templates available in prompts/items
 {{input}} / {{args}} (the user's task), {{steps.<id>.output}}, {{steps.<id>.items}},
-{{steps.<id>.ok}}, {{steps.<id>.error}}, {{steps.<id>.target}}, {{item}},
+{{steps.<id>.ok}}, {{steps.<id>.error}}, {{steps.<id>.target}},
+{{steps.<id>.json}} / {{steps.<id>.json.<path>}} (structured output fields), {{item}},
 {{item.index}}, {{item.sourceStepId}}, {{iteration}}.
 
 # Agents & models

@@ -6,6 +6,14 @@ import type { AgentEvent, AgentInstanceId, AgentProviderId } from "../types/even
 import type { WorkflowEvent } from "./events";
 import { createChannel, runPool } from "./pool";
 import { type RetryPolicy, backoffDelayMs, resolveRetryPolicy } from "./retry";
+import {
+  type JsonSchema,
+  jsonFieldText,
+  jsonPathGet,
+  parseStructuredOutput,
+  structuredOutputFixPrompt,
+  withStructuredOutputInstructions,
+} from "./structured";
 import { renderPrompt } from "./template";
 import { resolveStepTimeoutSec, timeoutMsFromSec } from "./timeout";
 import {
@@ -438,7 +446,8 @@ function isSubsetOf(subset: ReadonlySet<string>, superset: ReadonlySet<string>):
 }
 
 /** Matches `{{steps.<id>.<field>}}` template references; group 1 is the id. */
-const TEMPLATE_STEP_REF = /\{\{\s*steps\.(.+?)\.(?:output|items|ok|error|target|iteration)\s*\}\}/g;
+const TEMPLATE_STEP_REF =
+  /\{\{\s*steps\.(.+?)\.(?:output|items|ok|error|target|iteration|json(?:[.[][^{}]*)?)\s*\}\}/g;
 
 function templateStepRefs(text: string | undefined): string[] {
   if (!text) return [];
@@ -920,12 +929,19 @@ async function executeStep(
     }
     if (isAgentBackedStep(step)) {
       const result = await executeAgentStep(step, ctx, hooks, step.id);
-      return {
-        result: {
-          ...result,
-          items: result.ok ? splitItemsFromOutput(result.output) : undefined,
-        },
-      };
+      if (!result.ok) return { result };
+      // With an `output` schema the parsed JSON (or the array at `itemsPath`)
+      // is the distribution source — a typed contract instead of line-splitting.
+      if (step.kind === "distributor" && step.output) {
+        const source = step.itemsPath ? jsonPathGet(result.json, step.itemsPath) : result.json;
+        if (!Array.isArray(source)) {
+          const where = step.itemsPath ? `at itemsPath '${step.itemsPath}'` : "output";
+          const message = `distributor structured ${where} is not a JSON array`;
+          return { result: { ...result, ok: false, output: message, error: message } };
+        }
+        return { result: { ...result, items: source.map(jsonFieldText) } };
+      }
+      return { result: { ...result, items: splitItemsFromOutput(result.output) } };
     }
   }
 
@@ -1133,13 +1149,15 @@ async function executeAgentStep(
   stepId: string,
   item?: WorkflowItem,
 ): Promise<StepResult> {
-  const prompt = renderPrompt(step.prompt, {
+  const rendered = renderPrompt(step.prompt, {
     input: ctx.input,
     outputs: ctx.outputs,
     results: ctx.results,
     item,
     iteration: ctx.iteration,
   });
+  const outputSchema = step.output;
+  const prompt = outputSchema ? withStructuredOutputInstructions(rendered, outputSchema) : rendered;
   const stepCwd = step.cwd ? resolvePath(ctx.deps.cwd, step.cwd) : ctx.deps.cwd;
   const workspaceStarted = Date.now();
   let workspace: AgentWorkspaceLease;
@@ -1170,9 +1188,10 @@ async function executeAgentStep(
   const firstStarted = Date.now();
   let attempt = 0;
   try {
+    let result: StepResult;
     while (true) {
       attempt += 1;
-      const { result, retryable } = await runAgentAttempt(
+      const attemptOutcome = await runAgentAttempt(
         step,
         ctx,
         hooks,
@@ -1181,15 +1200,9 @@ async function executeAgentStep(
         prompt,
         workspace.cwd,
       );
+      result = attemptOutcome.result;
       const isLastAttempt = attempt >= policy.maxAttempts;
-      if (result.ok || !retryable || isLastAttempt || ctx.signal?.aborted) {
-        const finalResult = attachWorktreeInfo(result, workspace, stepCwd);
-        // After a retry, report true wall-clock for the whole step (all attempts
-        // plus the backoff waits between them), not just the last attempt.
-        return attempt > 1
-          ? { ...finalResult, attempts: attempt, durationMs: Date.now() - firstStarted }
-          : finalResult;
-      }
+      if (result.ok || !attemptOutcome.retryable || isLastAttempt || ctx.signal?.aborted) break;
       const delayMs = backoffDelayMs(policy, attempt);
       hooks.pushWorkflowEvent({
         kind: "step_retry",
@@ -1213,9 +1226,98 @@ async function executeAgentStep(
         );
       }
     }
+    if (outputSchema && result.ok) {
+      const fixed = await enforceStructuredOutput(
+        step,
+        ctx,
+        hooks,
+        stepId,
+        item,
+        result,
+        outputSchema,
+        workspace.cwd,
+        attempt,
+      );
+      result = fixed.result;
+      attempt = fixed.attempt;
+    }
+    const finalResult = attachWorktreeInfo(result, workspace, stepCwd);
+    // After a retry, report true wall-clock for the whole step (all attempts
+    // plus the backoff waits between them), not just the last attempt.
+    return attempt > 1
+      ? { ...finalResult, attempts: attempt, durationMs: Date.now() - firstStarted }
+      : finalResult;
   } finally {
     await workspace.dispose();
   }
+}
+
+/**
+ * Parse + validate a successful agent result against the step's `output`
+ * schema. On a mismatch, run ONE bounded "fix your JSON" retry — the agent is
+ * re-invoked with the schema, the validation error, and its previous reply —
+ * then the step fails if the retry still doesn't match. Costs of the extra
+ * attempt are summed into the returned result.
+ */
+async function enforceStructuredOutput(
+  step: AgentBackedWorkflowStep,
+  ctx: ExecuteContext,
+  hooks: ExecuteHooks,
+  stepId: string,
+  item: WorkflowItem | undefined,
+  result: StepResult,
+  outputSchema: JsonSchema,
+  workspaceCwd: string,
+  attempt: number,
+): Promise<{ result: StepResult; attempt: number }> {
+  const parsed = parseStructuredOutput(result.output, outputSchema);
+  if (parsed.ok) return { result: { ...result, json: parsed.value }, attempt };
+  if (ctx.signal?.aborted) {
+    return {
+      result: { ...result, ok: false, error: `structured output invalid: ${parsed.error}` },
+      attempt,
+    };
+  }
+  hooks.pushWorkflowEvent({
+    kind: "step_retry",
+    phaseId: hooks.phaseId,
+    stepId,
+    attempt,
+    maxAttempts: attempt + 1,
+    delayMs: 0,
+    reason: `structured output invalid: ${parsed.error}`,
+    iteration: ctx.iteration,
+    ts: Date.now(),
+  });
+  const fix = await runAgentAttempt(
+    step,
+    ctx,
+    hooks,
+    stepId,
+    item,
+    structuredOutputFixPrompt(outputSchema, result.output, parsed.error),
+    workspaceCwd,
+  );
+  const costUsd =
+    result.costUsd === undefined && fix.result.costUsd === undefined
+      ? undefined
+      : (result.costUsd ?? 0) + (fix.result.costUsd ?? 0);
+  const reparsed = fix.result.ok
+    ? parseStructuredOutput(fix.result.output, outputSchema)
+    : undefined;
+  if (reparsed?.ok) {
+    return { result: { ...fix.result, json: reparsed.value, costUsd }, attempt: attempt + 1 };
+  }
+  const reason = reparsed ? reparsed.error : (fix.result.error ?? "the retry attempt failed");
+  return {
+    result: {
+      ...fix.result,
+      ok: false,
+      error: `structured output retry failed: ${reason}`,
+      costUsd,
+    },
+    attempt: attempt + 1,
+  };
 }
 
 function attachWorktreeInfo(
@@ -1497,8 +1599,13 @@ function evaluateGate(
   ctx: GateEvalContext,
 ): { passed: boolean; message?: string } {
   const subject = condition.step ? ctx.results.get(condition.step) : undefined;
+  // `path` narrows the inspected text to one field of the step's parsed
+  // structured output; a missing field (or a step without parsed JSON)
+  // evaluates as empty text, so text conditions fail rather than match prose.
   const text = condition.step
-    ? (subject?.output ?? ctx.outputs.get(condition.step) ?? "")
+    ? condition.path !== undefined
+      ? jsonFieldText(jsonPathGet(subject?.json, condition.path))
+      : (subject?.output ?? ctx.outputs.get(condition.step) ?? "")
     : ctx.input;
   let passed = true;
   let message: string | undefined;

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { AgentInstanceId } from "../types/events";
 import type { RetryPolicy } from "./retry";
+import type { JsonSchema } from "./structured";
 
 /**
  * The declarative workflow model. A `WorkflowSpec` is a sequence of phases.
@@ -63,6 +64,13 @@ export interface AgentRunFields {
   stepTimeoutSec?: number;
   /** @deprecated Use `stepTimeoutSec`. Milliseconds in JSON are converted at resolve time. */
   stepTimeoutMs?: number;
+  /**
+   * Optional JSON schema (subset; see `structured.ts`) the agent's final
+   * output must match. The agent is prompted to end its reply with matching
+   * JSON; the engine extracts and validates it (one bounded "fix your JSON"
+   * retry) and stores the parsed value on `StepResult.json`.
+   */
+  output?: JsonSchema;
 }
 
 export interface WorkerStep extends WorkflowStepBase, AgentRunFields {
@@ -95,6 +103,15 @@ export interface DistributorStep extends WorkflowStepBase {
   effort?: string;
   stepTimeoutSec?: number;
   stepTimeoutMs?: number;
+  /** Output JSON schema for the agent-backed splitter; see {@link AgentRunFields.output}. */
+  output?: JsonSchema;
+  /**
+   * Path into the parsed structured output (e.g. `targets`) whose JSON array
+   * becomes the distributed items. Requires `output`; omitted means the parsed
+   * value itself must be an array. Without `output`, agent output is split on
+   * non-empty lines as before.
+   */
+  itemsPath?: string;
 }
 
 export interface ConsolidatorStep extends WorkflowStepBase {
@@ -113,6 +130,8 @@ export interface ConsolidatorStep extends WorkflowStepBase {
   stepTimeoutSec?: number;
   stepTimeoutMs?: number;
   separator?: string;
+  /** Output JSON schema for the agent-backed merge; see {@link AgentRunFields.output}. */
+  output?: JsonSchema;
 }
 
 export interface GateCondition {
@@ -120,6 +139,13 @@ export interface GateCondition {
   step?: string;
   /** Match the referenced step's ok/error state. */
   ok?: boolean;
+  /**
+   * Path into the referenced step's structured output (e.g. `verdict`,
+   * `issues[0].severity`). Text conditions then apply to that field — strings
+   * raw, other values JSON-serialized, missing fields as empty text. Requires
+   * `step`, and the step must declare an `output` schema to have parsed JSON.
+   */
+  path?: string;
   /** Text condition against the referenced output (or input). */
   contains?: string;
   /** Regular expression condition against the referenced output (or input). */
@@ -195,6 +221,12 @@ export interface StepResult {
   output: string;
   /** Distributed item payloads, when a distributor produced structured items. */
   items?: string[];
+  /**
+   * Parsed structured output, when the step declared an `output` schema and
+   * its final text contained matching JSON. Read by
+   * `{{steps.<id>.json.<path>}}` templates and gate `path` conditions.
+   */
+  json?: unknown;
   /** The work item assigned to this generated child result, if any. */
   item?: WorkflowItem;
   /** Parent dynamic step id for generated child results. */
@@ -242,6 +274,7 @@ const gateConditionSchema = z
   .object({
     step: z.string().min(1).optional(),
     ok: z.boolean().optional(),
+    path: z.string().min(1).optional(),
     contains: z.string().optional(),
     matches: z.string().optional(),
     equals: z.string().optional(),
@@ -265,6 +298,12 @@ const gateConditionSchema = z
         message: "gate condition ok requires condition.step",
       });
     }
+    if (condition.path !== undefined && !condition.step) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "gate condition path requires condition.step",
+      });
+    }
   });
 
 const baseStepShape = {
@@ -272,6 +311,9 @@ const baseStepShape = {
   dependsOn: z.array(z.string().min(1)).optional(),
   when: gateConditionSchema.optional(),
 };
+
+/** A JSON Schema object for structured step output (subset; see structured.ts). */
+const outputJsonSchema = z.record(z.unknown());
 
 const agentRunShape = {
   agent: agentId,
@@ -283,6 +325,7 @@ const agentRunShape = {
   effort: z.string().min(1).optional(),
   stepTimeoutSec: z.number().positive().optional(),
   stepTimeoutMs: z.number().positive().optional(),
+  output: outputJsonSchema.optional(),
 };
 
 const optionalAgentRunShape = {
@@ -295,6 +338,7 @@ const optionalAgentRunShape = {
   effort: z.string().min(1).optional(),
   stepTimeoutSec: z.number().positive().optional(),
   stepTimeoutMs: z.number().positive().optional(),
+  output: outputJsonSchema.optional(),
 };
 
 const retryPolicySchema = z.object({
@@ -319,9 +363,16 @@ const workflowDistributorStepSchema = z
     kind: z.literal("distributor"),
     items: z.array(z.string()).min(1).optional(),
     separator: z.string().optional(),
+    itemsPath: z.string().min(1).optional(),
     ...optionalAgentRunShape,
   })
   .superRefine((step, ctx) => {
+    if (step.itemsPath && !(step.agent && step.output)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "distributor itemsPath requires an agent-backed step with an output schema",
+      });
+    }
     if (step.items) return;
     if (step.agent && step.model && step.prompt) return;
     ctx.addIssue({

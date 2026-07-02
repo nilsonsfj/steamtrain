@@ -5,11 +5,14 @@
  *   {{steps.<id>.items}}    → distributor items joined by newlines
  *   {{steps.<id>.ok}}       → "true" / "false"
  *   {{steps.<id>.error}}    → error text, if any
+ *   {{steps.<id>.json}}     → the step's parsed structured output, serialized
+ *   {{steps.<id>.json.<path>}} → a field of it, e.g. json.verdict or json.targets[2]
  *   {{item}} / {{item.value}} → current fan-out item, inside `forEach`
  * Unknown placeholders (and stray braces) are left untouched, so prompts that
  * legitimately contain `{{` survive.
  */
 
+import { jsonFieldText, jsonPathGet } from "./structured";
 import type { WorkflowItem } from "./types";
 
 export interface TemplateContext {
@@ -19,7 +22,14 @@ export interface TemplateContext {
   /** Full step results, when templates need status or structured payloads. */
   results?: Map<
     string,
-    { ok: boolean; error?: string; items?: string[]; target?: string; iteration?: number }
+    {
+      ok: boolean;
+      error?: string;
+      items?: string[];
+      target?: string;
+      iteration?: number;
+      json?: unknown;
+    }
   >;
   /** Current dynamic fan-out item for `forEach` worker/processor runs. */
   item?: WorkflowItem;
@@ -29,6 +39,8 @@ export interface TemplateContext {
 
 const PLACEHOLDER = /\{\{\s*([^{}]+?)\s*\}\}/g;
 const STEP_FIELD = /^steps\.(.+)\.(output|items|ok|error|target|iteration)$/;
+/** `steps.<id>.json` with an optional `.field`/`[index]` path after it. */
+const STEP_JSON_FIELD = /^steps\.(.+?)\.json((?:\.|\[).+)?$/;
 
 export function renderPrompt(template: string, ctx: TemplateContext): string {
   return template.replace(PLACEHOLDER, (match, exprRaw: string) => {
@@ -38,6 +50,15 @@ export function renderPrompt(template: string, ctx: TemplateContext): string {
     if (expr === "item.index") return ctx.item ? String(ctx.item.index) : "";
     if (expr === "item.sourceStepId") return ctx.item?.sourceStepId ?? "";
     if (expr === "iteration") return String(ctx.iteration ?? 1);
+    const jsonRef = STEP_JSON_FIELD.exec(expr);
+    if (jsonRef) {
+      const json = ctx.results?.get(jsonRef[1] as string)?.json;
+      if (json === undefined) return "";
+      const path = jsonRef[2];
+      return jsonFieldText(
+        path === undefined ? json : jsonPathGet(json, path.startsWith(".") ? path.slice(1) : path),
+      );
+    }
     const step = STEP_FIELD.exec(expr);
     if (step) {
       const id = step[1] as string;
