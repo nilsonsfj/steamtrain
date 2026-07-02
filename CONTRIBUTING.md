@@ -35,6 +35,8 @@ npm install
 3. Run `npm run lint && npm run typecheck && npm test` to verify
 4. Submit a pull request with a clear description of the change
 
+CI runs on every push and pull request to `main` (lint, typecheck, test via Bun). OpenCode also posts automated PR reviews and responds to `/opencode` or `/oc` comments when the `OPENCODE_API_KEY` repository secret is configured (same setup as [camelo](https://github.com/nilsonsfj/camelo)).
+
 ## Architecture overview
 
 - `src/agents/` — Agent adapters (Claude Code, OpenCode, Codex, Amp) with shared spawn/process logic
