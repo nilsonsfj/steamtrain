@@ -1142,6 +1142,7 @@
 
   function renderStagedIndicator() {
     var el = document.getElementById("wfTitle");
+    if (!el || !el.parentNode) return;
     var existing = el.parentNode.querySelector(".staged-badge");
     if (existing) existing.remove();
     if (hasStaged()) {
@@ -1154,9 +1155,15 @@
     if (flushBtn) flushBtn.style.display = hasStaged() ? "block" : "none";
   }
 
+  var flushInFlight = false;
   function flushStaged() {
-    if (!hasStaged()) return;
+    if (!hasStaged() || flushInFlight) return;
+    flushInFlight = true;
+    var flushBtn = document.getElementById("flushBtn");
+    if (flushBtn) { flushBtn.disabled = true; flushBtn.textContent = "Flushing\u2026"; }
     api("POST", "/api/overrides/flush", { overrides: S.stagedOverrides }).then(function (r) {
+      flushInFlight = false;
+      if (flushBtn) { flushBtn.disabled = false; flushBtn.textContent = "\u{1F4BE} Flush to disk"; }
       if (r.status !== 200) { setBanner((r.body && r.body.error) || "flush failed", "err"); return; }
       var parts = [];
       if (r.body.saved && r.body.saved.length) parts.push("saved: " + r.body.saved.join(", "));

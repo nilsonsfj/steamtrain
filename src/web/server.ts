@@ -585,7 +585,11 @@ async function handle(
       return;
     }
     let specOverride: WorkflowSpec | undefined;
-    if (parsed.overrides && typeof parsed.overrides === "object") {
+    if (
+      parsed.overrides &&
+      typeof parsed.overrides === "object" &&
+      !Array.isArray(parsed.overrides)
+    ) {
       const base = deps.host.listWorkflows()[parsed.workflow];
       if (base)
         specOverride = applyWorkflowStepOverrides(base, parsed.overrides as WorkflowStepOverrides);
@@ -636,19 +640,29 @@ async function handle(
       sendJson(res, 400, { error: "invalid JSON body" });
       return;
     }
-    if (!parsed.overrides || typeof parsed.overrides !== "object") {
+    if (
+      !parsed.overrides ||
+      typeof parsed.overrides !== "object" ||
+      Array.isArray(parsed.overrides)
+    ) {
       sendJson(res, 400, { error: "body must include 'overrides' object" });
       return;
     }
-    const result = await deps.author.flushSessionOverrides(
-      parsed.overrides as Record<string, WorkflowStepOverrides>,
-    );
-    sendJson(res, 200, {
-      ok: true,
-      saved: result.saved,
-      skipped: result.skipped,
-      unchanged: result.unchanged,
-    });
+    try {
+      const result = await deps.author.flushSessionOverrides(
+        parsed.overrides as Record<string, WorkflowStepOverrides>,
+      );
+      sendJson(res, 200, {
+        ok: true,
+        saved: result.saved,
+        skipped: result.skipped,
+        unchanged: result.unchanged,
+      });
+    } catch (err) {
+      sendJson(res, 500, {
+        error: err instanceof Error ? err.message : "flush failed",
+      });
+    }
     return;
   }
 
