@@ -312,6 +312,19 @@ describe("codex mapper (stateful, one mapper per run)", () => {
     expect(cost).not.toBeCloseTo(wrongExpected, 8);
   });
 
+  it("uses per-model pricing when model is present in turn event", () => {
+    const m = createCodexMapper();
+    const result = m(
+      JSON.parse(
+        '{"type":"turn.completed","model":"gpt-5.4","usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":100}}',
+      ),
+    );
+    const cost = (result[0] as { costUsd: number }).costUsd;
+    // gpt-5.4 rates: input=$2.50/M, cached=$0.25/M, output=$10.00/M
+    const expected = (1000 * 2.5 + 100 * 10.0) / 1_000_000;
+    expect(cost).toBeCloseTo(expected, 8);
+  });
+
   it("returns undefined durationMs when turn.started was never received", () => {
     const m = createCodexMapper();
     const result = m(JSON.parse(SAMPLES.turnCompleted));
