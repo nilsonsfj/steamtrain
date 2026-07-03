@@ -286,7 +286,11 @@ outputs first-class. steamtrain's worktree isolation is a strength — this
 keeps it while fixing the "steps are blind to each other's work" hole, and it
 pairs directly with Part 1's diff/merge-back (1.1).
 
-## 2.3 True DAG scheduling and per-step conditions
+## 2.3 True DAG scheduling and per-step conditions ✅ Shipped
+
+> **Shipped** — steps schedule by `dependsOn` alone (phases are
+> presentation/grouping), and per-step `when` conditions skip steps individually
+> with automatic downstream skip propagation. See commit `8325d1a`.
 
 **The gap:** phases are hard barriers — a step cannot start until *every* step
 in all earlier phases finished, even when its `dependsOn` completed long ago.
@@ -514,8 +518,8 @@ Three tracks can proceed largely in parallel:
   directly on the previous one.
 - **Language track (workflow authoring power):** 2.8's lint half and 2.1
   command steps first (small, high leverage), then 2.2 artifacts/worktree
-  inheritance, 2.4 typed inputs, and 2.3 DAG scheduling; 2.5–2.7 and 2.9–2.10
-  follow as demand dictates.
+  inheritance, 2.4 typed inputs, and 2.5–2.7, 2.9–2.10 follow as demand
+  dictates.
 
 1.7 detached runs, 1.8 notifications, and 1.9 sharing slot in whenever
 bandwidth allows (1.8 should land with or right after 1.2/1.7; Part 3's
