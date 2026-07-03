@@ -339,7 +339,7 @@ describe("codex mapper (stateful, one mapper per run)", () => {
     expect(cost).toBeCloseTo(expected, 8);
   });
 
-  it("uses correct rates for gpt-5.1-codex-mini (lower mini tier)", () => {
+  it("uses correct rates for gpt-5.1-codex-mini (mini-tier)", () => {
     const m = createCodexMapper();
     const result = m(
       JSON.parse(
