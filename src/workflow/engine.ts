@@ -1721,6 +1721,13 @@ async function executeMergeStep(
   const resolver: ConflictResolver | undefined =
     onConflict === "agent"
       ? async ({ stagingRoot, stepId: sourceStepId, files }) => {
+          // Synthetic one-shot step for the conflict-resolution turn. The
+          // schema guarantees agent+model whenever onConflict is "agent"
+          // (workflowMergeStepSchema's superRefine), hence the casts. The
+          // `kind: "processor"` label only describes the attempt to event
+          // consumers — runAgentAttempt reads agent/model/effort/env/
+          // extraArgs/stepTimeoutSec plus the prompt argument and never
+          // dispatches on kind (this does NOT go through executeStep).
           const synthetic: AgentBackedWorkflowStep = {
             id: step.id,
             kind: "processor",

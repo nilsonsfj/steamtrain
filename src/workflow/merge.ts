@@ -223,11 +223,13 @@ function parseNumstat(numstat: string, nameStatus: string): DiffFileStat[] {
     if (status && path) statusByPath.set(path, status[0] ?? "?");
   }
   const files: DiffFileStat[] = [];
+  const seen = new Set<string>();
   for (const line of numstat.split("\n")) {
     if (!line.trim()) continue;
     const [added, deleted, ...paths] = line.split("\t");
     const path = paths.join("\t");
     if (!path) continue;
+    seen.add(path);
     files.push({
       path,
       status: statusByPath.get(path) ?? "?",
@@ -235,6 +237,12 @@ function parseNumstat(numstat: string, nameStatus: string): DiffFileStat[] {
       additions: added === "-" ? 0 : Number(added) || 0,
       deletions: deleted === "-" ? 0 : Number(deleted) || 0,
     });
+  }
+  // Entries numstat has no line counts for (submodule pointer changes, some
+  // rename edges) still exist in name-status — keep them with 0/0 counts
+  // rather than dropping them from the report.
+  for (const [path, status] of statusByPath) {
+    if (!seen.has(path)) files.push({ path, status, additions: 0, deletions: 0 });
   }
   return files;
 }
@@ -382,6 +390,7 @@ async function mergeOneSource(
   const message =
     request.commitMessage ?? `steamtrain: merge step '${source.stepId}' (${source.branch})`;
   const strategyArgs = request.strategyOption ? ["-X", request.strategyOption] : [];
+  let mergeError: string | undefined;
   const merged = await runGit(
     [...GIT_IDENT, "merge", "--no-ff", ...strategyArgs, "-m", message, commit],
     stagingDir,
@@ -389,7 +398,10 @@ async function mergeOneSource(
     signal,
   ).then(
     () => true,
-    () => false,
+    (err: unknown) => {
+      mergeError = err instanceof Error ? err.message : String(err);
+      return false;
+    },
   );
   if (merged) return;
 
@@ -401,9 +413,11 @@ async function mergeOneSource(
     .filter(Boolean);
   if (unmerged.length === 0) {
     // The merge failed for a non-conflict reason (unrelated histories, dirty
-    // staging tree, …) — abort and surface it.
+    // staging tree, …) — abort and surface git's own explanation.
     await runGit(["merge", "--abort"], stagingDir).catch(() => {});
-    throw new Error(`git merge of step '${source.stepId}' (${commit.slice(0, 12)}) failed`);
+    throw new Error(
+      `git merge of step '${source.stepId}' (${commit.slice(0, 12)}) failed${mergeError ? `: ${mergeError}` : ""}`,
+    );
   }
   if (!request.resolveConflicts) {
     await runGit(["merge", "--abort"], stagingDir).catch(() => {});
