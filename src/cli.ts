@@ -330,6 +330,10 @@ async function runHistoryCommand(
     const flags = args.slice(2);
     if (flags.includes("--diff")) {
       const stepFilter = flagValue(flags, "--step");
+      if (stepFilter === null) {
+        err("--step requires a value: --step <stepId>\n");
+        return 1;
+      }
       return printHistoryDiff(record, stepFilter, flags.includes("--stat"), out, err);
     }
     printHistoryRecord(record, out);
@@ -347,7 +351,12 @@ async function runHistoryCommand(
       err(`unknown run '${id}'\n`);
       return 1;
     }
-    return applyHistoryWorktrees(store, record, flagValue(args.slice(2), "--step"), out, err);
+    const stepFilter = flagValue(args.slice(2), "--step");
+    if (stepFilter === null) {
+      err("--step requires a value: --step <stepId>\n");
+      return 1;
+    }
+    return applyHistoryWorktrees(store, record, stepFilter, out, err);
   }
 
   if (sub === "prune") {
@@ -536,9 +545,12 @@ function printHistoryRecord(
 
 type WorkflowHistoryStoreGet = ReturnType<typeof createWorkflowHistoryStore>["get"];
 
-function flagValue(args: string[], flag: string): string | undefined {
+/** Value following `flag`; undefined if absent, null if the flag has no value. */
+function flagValue(args: string[], flag: string): string | undefined | null {
   const index = args.indexOf(flag);
-  return index >= 0 ? args[index + 1] : undefined;
+  if (index < 0) return undefined;
+  const value = args[index + 1];
+  return value === undefined || value.startsWith("--") ? null : value;
 }
 
 /**

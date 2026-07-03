@@ -117,27 +117,40 @@ class GitWorktreeManager implements AgentWorkspaceManager {
     };
   }
 
-  private async inRepoQueue<T>(
+  private inRepoQueue<T>(
     repoRoot: string,
     signal: AbortSignal | undefined,
     fn: () => Promise<T>,
   ): Promise<T> {
-    const previous = repoQueues.get(repoRoot) ?? Promise.resolve();
-    const run = (async () => {
-      await previous.catch(() => {});
-      throwIfAborted(signal);
-      return fn();
-    })();
-    const current = run.then(
-      () => {},
-      () => {},
-    );
-    current.then(() => {
-      if (repoQueues.get(repoRoot) === current) repoQueues.delete(repoRoot);
-    });
-    repoQueues.set(repoRoot, current);
-    return signal ? await raceWithAbort(run, signal) : await run;
+    return withRepoWorktreeLock(repoRoot, signal, fn);
   }
+}
+
+/**
+ * Serialize `git worktree add` (and similar ref/index-mutating setup) per
+ * repository — concurrent adds on the same repo race on refs and fail. Shared
+ * by the worktree manager and the merge-back harvest pipeline.
+ */
+export async function withRepoWorktreeLock<T>(
+  repoRoot: string,
+  signal: AbortSignal | undefined,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const previous = repoQueues.get(repoRoot) ?? Promise.resolve();
+  const run = (async () => {
+    await previous.catch(() => {});
+    throwIfAborted(signal);
+    return fn();
+  })();
+  const current = run.then(
+    () => {},
+    () => {},
+  );
+  current.then(() => {
+    if (repoQueues.get(repoRoot) === current) repoQueues.delete(repoRoot);
+  });
+  repoQueues.set(repoRoot, current);
+  return signal ? await raceWithAbort(run, signal) : await run;
 }
 
 async function discoverGitRepo(cwd: string, signal?: AbortSignal): Promise<GitRepo | undefined> {

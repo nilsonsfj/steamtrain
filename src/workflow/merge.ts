@@ -4,7 +4,7 @@ import { rm, stat, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentWorktreeInfo } from "./types";
-import { runGit, runGitText } from "./worktree";
+import { runGit, runGitText, withRepoWorktreeLock } from "./worktree";
 
 /**
  * Worktree harvesting: turn the retained per-step git worktrees (see
@@ -227,8 +227,13 @@ function parseNumstat(numstat: string, nameStatus: string): DiffFileStat[] {
   for (const line of numstat.split("\n")) {
     if (!line.trim()) continue;
     const [added, deleted, ...paths] = line.split("\t");
-    const path = paths.join("\t");
-    if (!path) continue;
+    const rawPath = paths.join("\t");
+    if (!rawPath) continue;
+    // `--numstat` prints renames as "old => new" (optionally brace-collapsed,
+    // "src/{old => new}/file"), while `--name-status` keys them by the new
+    // path only — resolve to the new path so one rename isn't reported twice.
+    const renamed = numstatRenamePath(rawPath);
+    const path = renamed !== undefined && statusByPath.has(renamed) ? renamed : rawPath;
     seen.add(path);
     files.push({
       path,
@@ -245,6 +250,15 @@ function parseNumstat(numstat: string, nameStatus: string): DiffFileStat[] {
     if (!seen.has(path)) files.push({ path, status, additions: 0, deletions: 0 });
   }
   return files;
+}
+
+/** New path of a numstat rename entry, or undefined if `raw` is not one. */
+function numstatRenamePath(raw: string): string | undefined {
+  if (!raw.includes(" => ")) return undefined;
+  if (raw.includes("{")) {
+    return raw.replace(/\{([^{}]*) => ([^{}]*)\}/g, "$2").replace(/\/{2,}/g, "/");
+  }
+  return raw.slice(raw.indexOf(" => ") + 4);
 }
 
 /**
@@ -299,8 +313,14 @@ export function defaultHarvestBranchName(label: string): string {
  * only via a pre-checked `git apply` (all-or-nothing, uncommitted).
  */
 export async function harvestWorktrees(request: HarvestRequest): Promise<HarvestResult> {
-  const { repoRoot, sources, mode, signal } = request;
+  const { sources, mode, signal } = request;
   if (sources.length === 0) throw new Error("no worktree sources to merge");
+  // `git apply` silently skips paths outside its cwd, so a repoRoot that is
+  // actually a subdirectory (e.g. a run recorded from packages/app) would drop
+  // out-of-tree changes while reporting success — resolve the true top level.
+  const repoRoot = (
+    await runGitText(["rev-parse", "--show-toplevel"], request.repoRoot, signal)
+  ).trim();
   const targetHead = (await runGitText(["rev-parse", "--verify", "HEAD"], repoRoot, signal)).trim();
 
   // Snapshot every source first (commit its working state on its own branch).
@@ -329,11 +349,13 @@ export async function harvestWorktrees(request: HarvestRequest): Promise<Harvest
   const conflicts: ConflictRecord[] = [];
   let keepBranch = false;
   try {
-    await runGit(
-      ["worktree", "add", "-B", branch, stagingDir, targetHead],
-      repoRoot,
-      undefined,
-      signal,
+    await withRepoWorktreeLock(repoRoot, signal, () =>
+      runGit(
+        ["worktree", "add", "-B", branch, stagingDir, targetHead],
+        repoRoot,
+        undefined,
+        signal,
+      ),
     );
 
     for (const { source, commit } of snapshots) {

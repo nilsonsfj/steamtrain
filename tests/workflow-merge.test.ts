@@ -88,6 +88,36 @@ describe("worktree merge-back core", () => {
     expect(branches).toBe("");
   });
 
+  it("applies changes outside a subdirectory repoRoot (resolves the repo top level)", async () => {
+    const { repo, allocate } = await repoWithManager();
+    const source = await allocate("subdir");
+    // A change at the repo root, applied with repoRoot pointing at src/ —
+    // `git apply` run from a subdirectory silently skips out-of-tree paths.
+    await writeFile(join(source.root, "top.txt"), "top-level file\n");
+
+    const result = await harvestWorktrees({
+      repoRoot: join(repo, "src"),
+      sources: [source],
+      mode: "apply",
+    });
+
+    expect(result.noChanges).toBe(false);
+    expect(result.files.map((f) => f.path)).toEqual(["top.txt"]);
+    expect(await readFile(join(repo, "top.txt"), "utf8")).toBe("top-level file\n");
+  });
+
+  it("reports a rename as a single entry keyed by the new path", async () => {
+    const { allocate } = await repoWithManager();
+    const source = await allocate("rename");
+    await git(source.root, "mv", "src/a.txt", "src/renamed.txt");
+
+    const diff = await worktreeDiff(source);
+
+    const paths = diff.files.map((f) => f.path).sort();
+    expect(paths).toEqual(["src/renamed.txt"]);
+    expect(diff.files[0]?.status).toBe("R");
+  });
+
   it("reports no changes when every source worktree is untouched", async () => {
     const { repo, allocate } = await repoWithManager();
     const source = await allocate("idle");
