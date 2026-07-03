@@ -325,6 +325,32 @@ describe("codex mapper (stateful, one mapper per run)", () => {
     expect(cost).toBeCloseTo(expected, 8);
   });
 
+  it("uses correct rates for gpt-5.1-codex-mini (lower mini tier)", () => {
+    const m = createCodexMapper();
+    const result = m(
+      JSON.parse(
+        '{"type":"turn.completed","model":"gpt-5.1-codex-mini","usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":100}}',
+      ),
+    );
+    const cost = (result[0] as { costUsd: number }).costUsd;
+    // gpt-5.1-codex-mini rates: input=$0.20/M, cached=$0.02/M, output=$0.80/M
+    const expected = (1000 * 0.2 + 100 * 0.8) / 1_000_000;
+    expect(cost).toBeCloseTo(expected, 8);
+  });
+
+  it("falls back to default pricing for unknown model", () => {
+    const m = createCodexMapper();
+    const result = m(
+      JSON.parse(
+        '{"type":"turn.completed","model":"future-model-v99","usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":100}}',
+      ),
+    );
+    const cost = (result[0] as { costUsd: number }).costUsd;
+    // default (gpt-5.4-mini) rates: input=$0.30/M, output=$1.20/M
+    const expected = (1000 * 0.3 + 100 * 1.2) / 1_000_000;
+    expect(cost).toBeCloseTo(expected, 8);
+  });
+
   it("returns undefined durationMs when turn.started was never received", () => {
     const m = createCodexMapper();
     const result = m(JSON.parse(SAMPLES.turnCompleted));
