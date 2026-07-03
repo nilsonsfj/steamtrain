@@ -22,6 +22,8 @@ export interface RunShellCommandOptions {
   env?: Record<string, string>;
   /** Wall-clock limit; the process group gets SIGTERM, then SIGKILL. */
   timeoutMs?: number;
+  /** Grace between SIGTERM and the SIGKILL escalation (default 5s). */
+  killGraceMs?: number;
   signal?: AbortSignal;
   /** Called with each raw chunk (stdout and stderr interleaved) for live streaming. */
   onChunk?: (text: string) => void;
@@ -83,18 +85,27 @@ export async function runShellCommand(
       }
     };
 
+    // Timeout and abort both terminate the same way: SIGTERM, then SIGKILL
+    // after a grace period — a command that traps SIGTERM (dev servers, test
+    // runners) must not outlive a cancellation and hold its worktree lease.
+    let killTimer: NodeJS.Timeout | undefined;
+    const terminate = (): void => {
+      killTree("SIGTERM");
+      killTimer ??= setTimeout(() => killTree("SIGKILL"), opts.killGraceMs ?? 5000);
+      killTimer.unref();
+    };
+
     const timer =
       opts.timeoutMs !== undefined && opts.timeoutMs > 0
         ? setTimeout(() => {
             timedOut = true;
-            killTree("SIGTERM");
-            setTimeout(() => killTree("SIGKILL"), 5000).unref();
+            terminate();
           }, opts.timeoutMs)
         : undefined;
 
     const onAbort = (): void => {
       cancelled = true;
-      killTree("SIGTERM");
+      terminate();
     };
     opts.signal?.addEventListener("abort", onAbort, { once: true });
 
@@ -116,6 +127,9 @@ export async function runShellCommand(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      // Clear the pending SIGKILL escalation so it can't fire after the
+      // process already exited (PID/PGID-reuse window).
+      if (killTimer) clearTimeout(killTimer);
       opts.signal?.removeEventListener("abort", onAbort);
       let output = Buffer.concat(chunks).toString("utf8");
       if (output.length > MAX_COMMAND_OUTPUT_BYTES) {

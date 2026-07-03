@@ -414,6 +414,26 @@ describe("runShellCommand", () => {
     expect(result.output).not.toContain("line-00000"); // head dropped
   });
 
+  it("escalates to SIGKILL on abort when the command traps SIGTERM", async () => {
+    const controller = new AbortController();
+    const started = Date.now();
+    // `trap '' TERM` ignores SIGTERM, and the shell exec-optimizes the trailing
+    // `sleep` which inherits the ignored signal — so only SIGKILL ends it early.
+    const pending = runShellCommand("trap '' TERM; sleep 30", {
+      cwd: process.cwd(),
+      signal: controller.signal,
+      killGraceMs: 300,
+    });
+    // Let the shell start and install its trap before aborting.
+    await new Promise((r) => setTimeout(r, 300));
+    controller.abort();
+    const result = await pending;
+    expect(result.cancelled).toBe(true);
+    expect(result.exitCode).toBeUndefined();
+    // Ended via the SIGKILL escalation, not the 30s sleep running out.
+    expect(Date.now() - started).toBeLessThan(10000);
+  }, 15000);
+
   it("reports a cancelled run when the signal aborts mid-flight", async () => {
     const controller = new AbortController();
     const pending = runShellCommand("sleep 30", {
