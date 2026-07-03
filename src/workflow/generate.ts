@@ -155,6 +155,14 @@ or disjoint, never partially overlapping.
 - "gate": evaluate a condition, e.g. { "kind": "gate", "dependsOn": ["x"],
   "condition": { "step": "x", "ok": true }, "onFalse": "fail" }. condition.step
   must be in an earlier phase.
+- "command": run a deterministic shell command — NO agent, NO cost. Requires "cmd"
+  (a templated shell line, e.g. "npm test" or "grep -rn TODO src"). Optional cwd,
+  env, stepTimeoutSec. Output is the command's stdout+stderr; ok is true exactly
+  when it exits 0, and {{steps.<id>.exitCode}} is available to templates. Use a
+  command step (NOT an agent) whenever the work is "run the tests / linter /
+  build / a script" — it is faster, free, and cannot misreport results. Gate on
+  it with { "step": "<id>", "ok": true }. Command steps run in the same isolated
+  git worktree machinery as agent steps.
 - "merge": land the FILE CHANGES of earlier agent steps (each runs in an isolated
   git worktree) back into the user's repository. Requires dependsOn (or "from":
   ["stepId", ...]). "mode": "apply" (default; changes land uncommitted in the
@@ -200,6 +208,7 @@ phase count modest.
 # Templates available in prompts/items
 {{input}} / {{args}} (the user's task), {{steps.<id>.output}}, {{steps.<id>.items}},
 {{steps.<id>.ok}}, {{steps.<id>.error}}, {{steps.<id>.target}},
+{{steps.<id>.exitCode}} (a command step's exit code),
 {{steps.<id>.json}} / {{steps.<id>.json.<path>}} (structured output fields),
 {{steps.<id>.worktree.root}} / {{steps.<id>.worktree.branch}} (an agent step's
 isolated git worktree, for custom integration steps), {{item}},

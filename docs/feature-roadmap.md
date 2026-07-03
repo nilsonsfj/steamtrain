@@ -252,7 +252,14 @@ Gaps in the workflow language and run experience specifically, with
 comparisons to established orchestrators. Roughly ranked; the first three are
 the ones users will hit within their first week of writing real workflows.
 
-## 2.1 Deterministic command steps (`kind: "command"`)
+## 2.1 Deterministic command steps (`kind: "command"`) ✅ Shipped
+
+> **Shipped** — a `command` step kind: templated `cmd` run through the platform
+> shell inside the same worktree isolation as agent steps, stdout+stderr
+> captured as `{{steps.x.output}}` (streamed live, tail-truncated at 512 KiB),
+> `ok` = exit 0, `{{steps.x.exitCode}}` for templates, optional structured
+> `output` schema, and the usual `cwd`/`env`/`stepTimeoutSec` fields. See
+> [`workflow-spec.md`](workflow-spec.md#command-deterministic-shell-step).
 
 **The gap:** every executable step is an agent run. There is no way to express
 "run the test suite", "run the linter", or "grep for TODOs" as a cheap,

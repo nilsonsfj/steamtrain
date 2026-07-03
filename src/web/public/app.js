@@ -5,7 +5,7 @@
   
 
 
-  var KIND_LABEL = { worker: "worker", processor: "process", distributor: "fan-out", consolidator: "merge", gate: "gate", merge: "merge-back" };
+  var KIND_LABEL = { worker: "worker", processor: "process", distributor: "fan-out", consolidator: "merge", gate: "gate", merge: "merge-back", command: "command" };
   var S = {
     workflows: [], selected: null, source: null, spec: null, agents: [],
     runId: null, es: null,
@@ -353,7 +353,7 @@
 
     canvas.appendChild(h("div", { class: "legend" },
       legendItem("worker", "worker"), legendItem("processor", "process"),
-      legendItem("distributor", "fan-out"), legendItem("consolidator", "merge"), legendItem("gate", "gate"), legendItem("merge", "merge-back")
+      legendItem("distributor", "fan-out"), legendItem("consolidator", "merge"), legendItem("gate", "gate"), legendItem("merge", "merge-back"), legendItem("command", "command")
     ));
 
     var maxIter = {};
@@ -978,7 +978,9 @@
     if (!isAgentStep(st)) {
       var note = kind === "gate"
         ? "gate: " + describeGate(st)
-        : (st.items ? "distributes " + st.items.length + " item(s)" : "passthrough merge (no agent)");
+        : kind === "command"
+          ? "$ " + (st.cmd || "")
+          : (st.items ? "distributes " + st.items.length + " item(s)" : "passthrough merge (no agent)");
       card.appendChild(h("div", { class: "ro", text: note }));
       return card;
     }

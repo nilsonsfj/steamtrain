@@ -33,6 +33,7 @@ export const BLOCK_LABEL: Record<ReturnType<typeof workflowStepKind>, string> = 
   consolidator: "merge",
   gate: "gate",
   merge: "merge-back",
+  command: "command",
 };
 
 /** Cumulative flat step index at the start of each phase. */
@@ -118,6 +119,7 @@ export function specStepRowMeta(step: WorkflowStep): string {
   if ("forEach" in step && step.forEach) bits.push(`forEach: ${step.forEach}`);
   if ("cwd" in step && step.cwd) bits.push(`cwd: ${basename(step.cwd)}`);
   if (step.kind === "distributor" && step.items?.length) bits.push(`${step.items.length} items`);
+  if (step.kind === "command") bits.push(`$ ${truncate(step.cmd, 60)}`);
   if (step.kind === "gate") bits.push(formatGateCondition(step.condition));
   if (step.kind === "gate" && step.loopTo) bits.push(formatGateLoop(step));
   if (step.kind === "merge") {
@@ -165,6 +167,9 @@ export function specDetailLines(step: WorkflowStep): string[] {
     if (step.branch) lines.push(`branch: ${step.branch}`);
     if (step.perSource) lines.push("perSource: true (one branch/PR per source worktree)");
     if (step.prTitle) lines.push(`prTitle: ${truncate(step.prTitle, 120)}`);
+  }
+  if (step.kind === "command") {
+    lines.push(`cmd: ${truncate(step.cmd, 200)}`);
   }
   if (step.kind === "gate") {
     lines.push(`condition: ${formatGateCondition(step.condition)}`);
