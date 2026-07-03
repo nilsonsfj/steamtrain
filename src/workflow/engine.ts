@@ -3,6 +3,7 @@ import { resolveAgentInstance } from "../agents";
 import type { AgentAdapter } from "../agents";
 import type { SteamtrainConfig } from "../config/types";
 import type { AgentEvent, AgentInstanceId, AgentProviderId, TokenUsage } from "../types/events";
+import { runShellCommand } from "./command";
 import { addTokens } from "./cost";
 import type { WorkflowEvent } from "./events";
 import {
@@ -28,6 +29,7 @@ import { resolveStepTimeoutSec, timeoutMsFromSec } from "./timeout";
 import {
   type AgentBackedWorkflowStep,
   type AgentWorktreeInfo,
+  type CommandStep,
   DEFAULT_LOOP_MAX_ITERATIONS,
   type GateCondition,
   MAX_CONCURRENCY,
@@ -252,7 +254,12 @@ function specHasLoopGates(spec: WorkflowSpec): boolean {
  */
 async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, boolean> {
   const { spec, deps, signal, cache, results, limit } = env;
-  let workflowOk = true;
+  // Failure accounting is per phase index, not a single latch: when a loop
+  // gate jumps back, every failure inside the re-run region is superseded by
+  // the next pass (a `command` step's failing tests are EXPECTED mid-loop) and
+  // must not poison the final verdict if a later pass succeeds. Failures in
+  // phases outside any jumped region stay recorded.
+  const notOkPhases = new Set<number>();
 
   // Loop bookkeeping: gateId → { loopToIndex, gatePhaseIndex, iteration count so far }.
   const phaseIndexById = new Map<string, number>();
@@ -347,14 +354,11 @@ async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, b
 
     yield { kind: "phase_done", phaseId: phase.id, ok: phaseOk, iteration, ts: Date.now() };
 
-    if (signal?.aborted) {
-      workflowOk = false;
-      break;
-    }
+    if (signal?.aborted) return false;
 
     // Loop-back decision: did this phase contain an unmet loop gate? A jump
-    // means this pass is superseded by a re-run, so its failure (e.g. the
-    // gate's own "not yet converged" result) must NOT poison workflowOk.
+    // means this pass — the whole region being re-run, not just the gate's
+    // phase — is superseded, so its failures must NOT poison the verdict.
     const contended = findContendedLoopGate(phase, results, loopState, effectiveLoopMax);
     if (contended) {
       // The predicate found the gate; this is the only place its iteration
@@ -377,16 +381,19 @@ async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, b
         maxIterations: contended.cap,
         ts: Date.now(),
       };
+      // The jump re-runs [loopToIndex..pi]; failures recorded for phases in
+      // that region belong to the superseded pass.
+      for (let k = loopToIndex; k <= pi; k++) notOkPhases.delete(k);
       pi = loopToIndex;
       continue;
     }
 
-    if (!phaseOk) workflowOk = false;
+    if (!phaseOk) notOkPhases.add(pi);
     if (stopAfterPhase) break;
     pi++;
   }
 
-  return workflowOk;
+  return notOkPhases.size === 0;
 }
 
 /**
@@ -522,7 +529,7 @@ function isSubsetOf(subset: ReadonlySet<string>, superset: ReadonlySet<string>):
 
 /** Matches `{{steps.<id>.<field>}}` template references; group 1 is the id. */
 const TEMPLATE_STEP_REF =
-  /\{\{\s*steps\.(.+?)\.(?:output|items|ok|error|target|iteration|worktree\.(?:root|branch|cwd)|json(?:[.[][^{}]*)?)\s*\}\}/g;
+  /\{\{\s*steps\.(.+?)\.(?:output|items|ok|error|target|iteration|exitCode|worktree\.(?:root|branch|cwd)|json(?:[.[][^{}]*)?)\s*\}\}/g;
 
 function templateStepRefs(text: string | undefined): string[] {
   if (!text) return [];
@@ -603,6 +610,7 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
         renderableTexts.push(step.branch, step.commitMessage, step.prTitle, step.prBody);
       }
       if ("prompt" in step) renderableTexts.push(step.prompt);
+      if (step.kind === "command") renderableTexts.push(step.cmd);
       if (step.kind === "distributor" && step.items) renderableTexts.push(...step.items);
       for (const text of renderableTexts) {
         for (const ref of templateStepRefs(text)) addEarlier(ref);
@@ -1055,6 +1063,10 @@ async function executeStep(
 
   if (kind === "merge" && step.kind === "merge") {
     return executeMergeStep(step, ctx, hooks);
+  }
+
+  if (kind === "command" && step.kind === "command") {
+    return { result: await executeCommandStep(step, ctx, hooks) };
   }
 
   if (kind === "gate" && step.kind === "gate") {
@@ -1646,6 +1658,117 @@ async function executeForEachStep(
 }
 
 /**
+ * Execute a `command` step: render the `cmd` template and run it through the
+ * platform shell, inside the same per-step worktree isolation as agent steps.
+ * Deterministic — no agent, no cost. The step is ok exactly when the command
+ * exits 0; the exit code lands on the result for `{{steps.<id>.exitCode}}`.
+ * Output (stdout+stderr interleaved) streams as `text_delta` step events so
+ * long commands tail live in the TUI/web UI like agent steps do.
+ */
+async function executeCommandStep(
+  step: CommandStep,
+  ctx: ExecuteContext,
+  hooks: ExecuteHooks,
+): Promise<StepResult> {
+  const started = Date.now();
+  const cmd = renderPrompt(step.cmd, {
+    input: ctx.input,
+    outputs: ctx.outputs,
+    results: ctx.results,
+    iteration: ctx.iteration,
+  });
+  const stepCwd = step.cwd ? resolvePath(ctx.deps.cwd, step.cwd) : ctx.deps.cwd;
+
+  let workspace: AgentWorkspaceLease;
+  try {
+    workspace = ctx.deps.agentWorkspace
+      ? await ctx.deps.agentWorkspace.allocate({
+          workflowName: ctx.workflowName,
+          stepId: step.id,
+          agent: "command",
+          baseCwd: ctx.deps.cwd,
+          stepCwd,
+          iteration: ctx.iteration,
+          signal: ctx.signal,
+        })
+      : { cwd: stepCwd, dispose: () => {} };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      stepId: step.id,
+      ok: false,
+      output: message,
+      error: message,
+      durationMs: Date.now() - started,
+    };
+  }
+
+  try {
+    const timeoutSec = resolveStepTimeoutSec(
+      step,
+      { stepTimeoutSec: ctx.stepTimeoutDefault },
+      { stepTimeoutSec: ctx.deps.stepTimeoutSec },
+    );
+    const run = await runShellCommand(cmd, {
+      cwd: workspace.cwd,
+      env: step.env,
+      timeoutMs: timeoutMsFromSec(timeoutSec),
+      signal: ctx.signal,
+      onChunk: (text) => {
+        hooks.pushAgentEvent(step.id, {
+          kind: "text_delta",
+          agent: "command",
+          ts: Date.now(),
+          text,
+        });
+      },
+    });
+
+    const error = run.cancelled
+      ? "cancelled"
+      : run.timedOut
+        ? `command timed out after ${timeoutSec}s`
+        : run.spawnError
+          ? `command failed to start: ${run.spawnError}`
+          : run.exitCode === undefined
+            ? "command was killed before exiting"
+            : run.exitCode !== 0
+              ? `command exited with code ${run.exitCode}`
+              : undefined;
+
+    // Unlike agent steps, a failed command keeps its captured output as the
+    // step output (the diagnostics ARE the output); the error is appended so
+    // downstream prompts and the UIs see both.
+    const output = error
+      ? [run.output.trimEnd(), `[${error}]`].filter(Boolean).join("\n")
+      : run.output;
+    let result: StepResult = {
+      stepId: step.id,
+      ok: error === undefined,
+      output,
+      error,
+      exitCode: run.exitCode,
+      durationMs: Date.now() - started,
+    };
+    if (result.ok && step.output) {
+      const parsed = parseStructuredOutput(result.output, step.output);
+      // No "fix your JSON" retry here — the command is deterministic, so a
+      // mismatch is a real contract violation and re-running can't change it.
+      result = parsed.ok
+        ? { ...result, json: parsed.value }
+        : {
+            ...result,
+            ok: false,
+            error: `structured output invalid: ${parsed.error}`,
+          };
+    }
+    return attachWorktreeInfo(result, workspace, stepCwd);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
  * Execute a `merge` step: collect the source steps' recorded worktrees (a
  * fan-out parent contributes every child worktree), merge them in an isolated
  * staging worktree, and deliver per `mode` — apply to the user's checkout,
@@ -1916,6 +2039,17 @@ function findFailedDependency(
     // fan-out source that is not-ok only because the budget stopped some
     // children before they ran still has completed worktrees to harvest.
     if (mergeSources?.has(dep) && isPartialFanOut(result)) continue;
+    // A gate whose condition EXPLICITLY tests the dep's ok state has opted in
+    // to inspecting failure ("loop until the tests pass" gates on a failing
+    // `command` step's ok). Cascading would replace its evaluation with a
+    // dependency-failed result, making "route on failure" unreachable whenever
+    // the gate also declares the ordering dependency. Text-only conditions
+    // (contains/matches/equals) assume the dep produced meaningful output and
+    // keep the cascade: an errored agent mid-loop halts the loop rather than
+    // burning the iteration budget re-running a persistent failure.
+    if (step.kind === "gate" && step.condition.step === dep && step.condition.ok !== undefined) {
+      continue;
+    }
     return dep;
   }
   return undefined;

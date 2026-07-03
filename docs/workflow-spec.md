@@ -96,7 +96,7 @@ execution behavior. **Examples:** [`workflow-examples.md`](workflow-examples.md)
 | field | required | meaning |
 | --- | --- | --- |
 | `id` | yes | Unique across the whole workflow. |
-| `kind` | no | One of `worker`, `processor`, `distributor`, `consolidator`, `gate`. Missing means `worker`. |
+| `kind` | no | One of `worker`, `processor`, `distributor`, `consolidator`, `gate`, `merge`, `command`. Missing means `worker`. |
 | `dependsOn` | no | Step ids from earlier phases only. Same-phase and forward dependencies are invalid. Steps are scheduled by these dependencies; omitting `dependsOn` makes the step wait for every step in all earlier phases. |
 | `when` | no | Per-step condition (same schema as a gate condition). When false the step is skipped, not failed. See [Per-step conditions](#per-step-conditions-when). |
 
@@ -276,7 +276,26 @@ gate:
 | `fail` | Mark the gate, phase, and workflow failed, then stop scheduling later phases. |
 | `stop` | Stop scheduling later phases after the current phase completes while keeping the workflow successful. |
 
-Steps with `dependsOn` are skipped when any referenced earlier step failed.
+Steps with `dependsOn` are skipped when any referenced earlier step failed —
+with one exception: a gate whose condition **explicitly tests `ok`** for that
+same step still evaluates, since it opted in to inspecting failure. That is
+what lets a gate (or a loop) route on a failing `command` step:
+
+```jsonc
+{
+  "id": "converged",
+  "kind": "gate",
+  "dependsOn": ["tests"],
+  "condition": { "step": "tests", "ok": true },
+  "loopTo": "fix",
+  "onFalse": "fail"
+}
+```
+
+Text-only conditions (`contains`/`matches`/`equals`) keep the skip: they assume
+the referenced step produced meaningful output, and an errored agent mid-loop
+should halt the loop rather than burn its iteration budget re-running a
+persistent failure.
 
 ### Merge (worktree merge-back)
 
@@ -339,6 +358,65 @@ Past runs can be harvested manually with the same machinery:
 `history apply <id> [--step <stepId>]`, and `history prune <id>` (discard the
 run's worktrees and branches). See
 [`worktree-merge-back.md`](worktree-merge-back.md) for the full design.
+
+### Command (deterministic shell step)
+
+Runs one shell command — no agent, no cost, no LLM in the loop. The canonical
+use is letting deterministic tools verify what non-deterministic agents
+produced: gate a fix loop on `npm test` actually passing instead of an agent
+claiming "DONE".
+
+Required field: `cmd` — a templated shell line, run through the platform shell.
+
+Optional fields: `cwd`, `env`, `stepTimeoutSec`, `output` (see
+[Structured step outputs](#structured-step-outputs-output) — validated without
+the agent "fix your JSON" retry, since re-running a deterministic command can't
+change its output).
+
+```jsonc
+{
+  "id": "tests",
+  "kind": "command",
+  "dependsOn": ["implement"],
+  "cmd": "npm test"
+}
+```
+
+Semantics:
+
+- The step's output is the command's stdout and stderr, interleaved in arrival
+  order and streamed live to the TUI/web UI. Output above 512 KiB is
+  tail-truncated (the head is dropped — failures conventionally print last).
+- The step is **ok exactly when the command exits 0**. On any other exit the
+  captured output is kept (the diagnostics are the output) with the failure
+  appended, and `error` says what happened (`command exited with code 1`,
+  `command timed out after 900s`, …).
+- `{{steps.<id>.exitCode}}` exposes the exit code to templates; a downstream
+  gate routes on `{ "step": "<id>", "ok": true }`.
+- `stepTimeoutSec` follows the same chain as agent steps (step → workflow →
+  config → 15-minute default). On timeout the whole process tree is killed.
+- Command steps run inside the same per-step git-worktree isolation as agent
+  steps: in a git repository the command executes in its own worktree
+  (snapshotting your dirty state), so a command that writes files never touches
+  your checkout — and a later `merge` step can harvest what it wrote. The
+  worktree is recorded on the result like any agent step's.
+
+A typical trustworthy fix loop:
+
+```jsonc
+{ "id": "fix", "steps": [
+  { "id": "fix-it", "agent": "claude", "model": "claude-sonnet-4-6",
+    "prompt": "Fix the failing tests:\n{{steps.tests.output}}" }
+] },
+{ "id": "verify", "steps": [
+  { "id": "tests", "kind": "command", "cmd": "npm test" }
+] },
+{ "id": "check", "steps": [
+  { "id": "converged", "kind": "gate", "dependsOn": ["tests"],
+    "condition": { "step": "tests", "ok": true },
+    "loopTo": "fix", "maxIterations": 5, "onFalse": "fail" }
+] }
+```
 
 ## Per-step conditions (`when`)
 
@@ -483,6 +561,7 @@ Prompt templates and several block fields support:
 | `{{steps.<id>.ok}}` | `true` or `false`. |
 | `{{steps.<id>.error}}` | Prior step error text, if any. |
 | `{{steps.<id>.target}}` | Prior gate target/state, if any. |
+| `{{steps.<id>.exitCode}}` | A prior command step's exit code, e.g. `0` (empty for other steps). |
 | `{{steps.<id>.json}}` | Prior step's parsed structured output, JSON-serialized. |
 | `{{steps.<id>.json.<path>}}` | A field of it, e.g. `json.verdict` or `json.targets[2]`. Strings render raw, other values JSON-serialized, missing fields empty. |
 | `{{steps.<id>.worktree.root}}` | The step's isolated git worktree directory (empty when the step ran without one). |
@@ -518,6 +597,7 @@ Unknown placeholders are left unchanged.
   phases only.
 - A merge step with `onConflict: "agent"` requires `agent` and `model`.
 - A merge step with `perSource` requires `mode` `"branch"` or `"pr"`.
+- Command steps require a non-empty `cmd`.
 
 ## CLI
 

@@ -13,7 +13,9 @@ import type { JsonSchema } from "./structured";
  * contain loop-back gates (`loopTo`) run phase-by-phase, since a loop re-runs
  * a contiguous range of phases. Steps are explicit workflow building blocks:
  * distributors fan one input into many items, workers/processors do 1:1 work,
- * consolidators fan results back in, and gates route/filter based on conditions.
+ * consolidators fan results back in, gates route/filter based on conditions,
+ * command steps run deterministic shell commands, and merge steps land
+ * worktree changes back in the repository.
  *
  * Existing specs without a `kind` field remain valid; those steps are treated as
  * `worker` blocks.
@@ -25,7 +27,8 @@ export type WorkflowStepKind =
   | "distributor"
   | "consolidator"
   | "gate"
-  | "merge";
+  | "merge"
+  | "command";
 
 export interface WorkflowStepBase {
   /** Unique across the whole workflow; referenced by `dependsOn` and templates. */
@@ -204,6 +207,42 @@ export interface MergeStep extends WorkflowStepBase {
   stepTimeoutSec?: number;
 }
 
+/**
+ * Deterministic shell-command step: run `cmd` through the platform shell and
+ * capture its combined stdout+stderr as the step output — no agent, no cost,
+ * no LLM in the loop. The canonical use is letting deterministic tools verify
+ * what non-deterministic agents produced ("run the test suite", "run the
+ * linter") and gating on the result.
+ *
+ * The step is ok exactly when the command exits 0. The exit code is recorded
+ * on the result and available to templates as `{{steps.<id>.exitCode}}`; a
+ * gate on `{ "step": "<id>", "ok": true }` is the usual routing.
+ *
+ * Command steps run inside the same per-step git-worktree isolation as agent
+ * steps (when the workflow runs in a git repository), so a command that writes
+ * files never touches the user's checkout, and a `merge` step can harvest what
+ * it wrote.
+ */
+export interface CommandStep extends WorkflowStepBase {
+  kind: "command";
+  /** Shell command line (run via the platform shell). Template. */
+  cmd: string;
+  /** Target working directory (absolute, or relative to the run's base cwd). */
+  cwd?: string;
+  /** Extra env vars merged over `process.env` for this step only. */
+  env?: Record<string, string>;
+  /** Per-step subprocess wall-clock limit in seconds (overrides workflow and config defaults). */
+  stepTimeoutSec?: number;
+  /**
+   * Optional JSON schema (subset; see `structured.ts`) the command's output
+   * must match — for commands that print JSON (test reporters, `jq`, custom
+   * scripts). The engine extracts and validates it and stores the parsed value
+   * on `StepResult.json`. Unlike agent steps there is no "fix your JSON" retry:
+   * the command is deterministic, so a mismatch simply fails the step.
+   */
+  output?: JsonSchema;
+}
+
 export interface GateCondition {
   /** Step whose result is inspected; omitted means inspect the workflow input. */
   step?: string;
@@ -244,7 +283,13 @@ export interface GateStep extends WorkflowStepBase {
   maxIterations?: number;
 }
 
-export type WorkflowStep = WorkerStep | DistributorStep | ConsolidatorStep | GateStep | MergeStep;
+export type WorkflowStep =
+  | WorkerStep
+  | DistributorStep
+  | ConsolidatorStep
+  | GateStep
+  | MergeStep
+  | CommandStep;
 
 export interface WorkflowPhase {
   id: string;
@@ -338,6 +383,8 @@ export interface StepResult {
   tokens?: TokenUsage;
   /** Total attempts this step took (auto-retry); omitted/1 means it ran once. */
   attempts?: number;
+  /** Subprocess exit code, for `command` steps (`{{steps.<id>.exitCode}}`). */
+  exitCode?: number;
   /** Isolated git worktree metadata for agent-backed steps. */
   worktree?: AgentWorktreeInfo;
   /** Loop iteration this result belongs to (1-based); omitted ⇒ 1. */
@@ -552,11 +599,22 @@ const workflowMergeStepSchema = z
     }
   });
 
+const workflowCommandStepSchema = z.object({
+  ...baseStepShape,
+  kind: z.literal("command"),
+  cmd: z.string().min(1),
+  cwd: z.string().min(1).optional(),
+  env: z.record(z.string()).optional(),
+  stepTimeoutSec: z.number().positive().optional(),
+  output: outputJsonSchema.optional(),
+});
+
 const workflowStepSchema = z.union([
   workflowGateStepSchema,
   workflowDistributorStepSchema,
   workflowConsolidatorStepSchema,
   workflowMergeStepSchema,
+  workflowCommandStepSchema,
   workflowWorkerStepSchema,
 ]);
 

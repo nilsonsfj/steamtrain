@@ -185,6 +185,8 @@ flowchart LR
 | `worker` / `processor` | one agent run per work item | yes | review, implement, analyze |
 | `gate` | evaluate a condition, emit state | no | readiness checks, quality bars |
 | `consolidator` | merge prior outputs | optional | reports, synthesis, dedupe |
+| `command` | run a deterministic shell command | no | tests, linters, builds, scripts |
+| `merge` | land agent worktree changes in the repo | conflict resolution only | apply/branch/PR delivery |
 
 Steps without `kind` are treated as `worker` blocks for backward compatibility.
 
@@ -564,6 +566,8 @@ Rules:
 - same-phase dependencies are rejected by validation
 - gates with `dependsOn` on failed steps are skipped; if the gate uses
   `onFalse: fail` or `onFalse: stop`, later phases stop
+- exception: a gate whose condition explicitly tests `ok` for the failed step
+  still evaluates (that's how a gate/loop routes on a failing `command` step)
 
 ---
 

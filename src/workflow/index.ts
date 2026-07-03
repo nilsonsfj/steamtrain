@@ -2,6 +2,7 @@ export {
   type AgentBackedWorkflowStep,
   type AgentRunFields,
   type AgentWorktreeInfo,
+  type CommandStep,
   type ConsolidatorStep,
   type DistributorStep,
   type GateCondition,
@@ -68,6 +69,12 @@ export {
   costForResults,
 } from "./cost";
 export { runWorkflow, type WorkflowDeps, type WorkflowRunContext } from "./engine";
+export {
+  runShellCommand,
+  MAX_COMMAND_OUTPUT_BYTES,
+  type RunShellCommandOptions,
+  type ShellCommandResult,
+} from "./command";
 export {
   type JsonSchema,
   type StructuredParseResult,

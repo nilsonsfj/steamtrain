@@ -5,6 +5,7 @@
  *   {{steps.<id>.items}}    → distributor items joined by newlines
  *   {{steps.<id>.ok}}       → "true" / "false"
  *   {{steps.<id>.error}}    → error text, if any
+ *   {{steps.<id>.exitCode}} → a command step's exit code, e.g. "0"
  *   {{steps.<id>.json}}     → the step's parsed structured output, serialized
  *   {{steps.<id>.json.<path>}} → a field of it, e.g. json.verdict or json.targets[2]
  *   {{steps.<id>.worktree.root}}   → the step's isolated git worktree directory
@@ -31,6 +32,8 @@ export interface TemplateContext {
       items?: string[];
       target?: string;
       iteration?: number;
+      /** A command step's subprocess exit code. */
+      exitCode?: number;
       json?: unknown;
       /** Isolated git worktree metadata, when the step ran in one. */
       worktree?: { root: string; branch: string; cwd: string };
@@ -43,7 +46,7 @@ export interface TemplateContext {
 }
 
 const PLACEHOLDER = /\{\{\s*([^{}]+?)\s*\}\}/g;
-const STEP_FIELD = /^steps\.(.+)\.(output|items|ok|error|target|iteration)$/;
+const STEP_FIELD = /^steps\.(.+)\.(output|items|ok|error|target|iteration|exitCode)$/;
 const STEP_WORKTREE_FIELD = /^steps\.(.+)\.worktree\.(root|branch|cwd)$/;
 /** `steps.<id>.json` with an optional `.field`/`[index]` path after it. */
 const STEP_JSON_FIELD = /^steps\.(.+?)\.json((?:\.|\[).+)?$/;
@@ -84,6 +87,7 @@ export function renderPrompt(template: string, ctx: TemplateContext): string {
       if (field === "target") return result.target ?? "";
       if (field === "iteration")
         return result.iteration !== undefined ? String(result.iteration) : "";
+      if (field === "exitCode") return result.exitCode !== undefined ? String(result.exitCode) : "";
     }
     return match;
   });
