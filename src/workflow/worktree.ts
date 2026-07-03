@@ -26,6 +26,8 @@ export interface AgentWorkspaceLease {
   root?: string;
   /** Branch checked out by the isolated worktree when one was created. */
   branch?: string;
+  /** Commit the worktree branch started from (the merge-back diff base). */
+  baseCommit?: string;
   /** Ignored runtime entries linked from the source checkout into the worktree. */
   linkedIgnoredPaths?: string[];
   dispose: () => Promise<void> | void;
@@ -107,6 +109,7 @@ class GitWorktreeManager implements AgentWorkspaceManager {
       cwd: relativeStepCwd ? join(worktreeRoot, relativeStepCwd) : worktreeRoot,
       root: worktreeRoot,
       branch,
+      baseCommit: worktreeHead,
       linkedIgnoredPaths,
       // Worktrees are retained after successful runs so users can inspect,
       // commit, or merge agent-created files from the recorded branch.
@@ -114,27 +117,40 @@ class GitWorktreeManager implements AgentWorkspaceManager {
     };
   }
 
-  private async inRepoQueue<T>(
+  private inRepoQueue<T>(
     repoRoot: string,
     signal: AbortSignal | undefined,
     fn: () => Promise<T>,
   ): Promise<T> {
-    const previous = repoQueues.get(repoRoot) ?? Promise.resolve();
-    const run = (async () => {
-      await previous.catch(() => {});
-      throwIfAborted(signal);
-      return fn();
-    })();
-    const current = run.then(
-      () => {},
-      () => {},
-    );
-    current.then(() => {
-      if (repoQueues.get(repoRoot) === current) repoQueues.delete(repoRoot);
-    });
-    repoQueues.set(repoRoot, current);
-    return signal ? await raceWithAbort(run, signal) : await run;
+    return withRepoWorktreeLock(repoRoot, signal, fn);
   }
+}
+
+/**
+ * Serialize `git worktree add` (and similar ref/index-mutating setup) per
+ * repository — concurrent adds on the same repo race on refs and fail. Shared
+ * by the worktree manager and the merge-back harvest pipeline.
+ */
+export async function withRepoWorktreeLock<T>(
+  repoRoot: string,
+  signal: AbortSignal | undefined,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const previous = repoQueues.get(repoRoot) ?? Promise.resolve();
+  const run = (async () => {
+    await previous.catch(() => {});
+    throwIfAborted(signal);
+    return fn();
+  })();
+  const current = run.then(
+    () => {},
+    () => {},
+  );
+  current.then(() => {
+    if (repoQueues.get(repoRoot) === current) repoQueues.delete(repoRoot);
+  });
+  repoQueues.set(repoRoot, current);
+  return signal ? await raceWithAbort(run, signal) : await run;
 }
 
 async function discoverGitRepo(cwd: string, signal?: AbortSignal): Promise<GitRepo | undefined> {
@@ -311,20 +327,29 @@ function randomId(): string {
   return randomBytes(5).toString("hex");
 }
 
-async function runGitText(args: string[], cwd: string, signal?: AbortSignal): Promise<string> {
+export async function runGitText(
+  args: string[],
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<string> {
   return (await runGit(args, cwd, undefined, signal)).toString("utf8");
 }
 
-function runGit(
+export function runGit(
   args: string[],
   cwd: string,
   input?: Buffer,
   signal?: AbortSignal,
+  env?: Record<string, string>,
 ): Promise<Buffer> {
   throwIfAborted(signal);
   return new Promise((resolvePromise, reject) => {
     let settled = false;
-    const child = spawn("git", args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn("git", args, {
+      cwd,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: env ? { ...process.env, ...env } : undefined,
+    });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     const cleanup = (): void => signal?.removeEventListener("abort", onAbort);

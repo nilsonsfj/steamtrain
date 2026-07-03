@@ -32,6 +32,7 @@ export const BLOCK_LABEL: Record<ReturnType<typeof workflowStepKind>, string> = 
   processor: "process",
   consolidator: "merge",
   gate: "gate",
+  merge: "merge-back",
 };
 
 /** Cumulative flat step index at the start of each phase. */
@@ -119,6 +120,11 @@ export function specStepRowMeta(step: WorkflowStep): string {
   if (step.kind === "distributor" && step.items?.length) bits.push(`${step.items.length} items`);
   if (step.kind === "gate") bits.push(formatGateCondition(step.condition));
   if (step.kind === "gate" && step.loopTo) bits.push(formatGateLoop(step));
+  if (step.kind === "merge") {
+    bits.push(`mode: ${step.mode ?? "apply"}`);
+    if (step.from?.length) bits.push(`from: ${step.from.join(", ")}`);
+    if (step.onConflict && step.onConflict !== "fail") bits.push(`onConflict: ${step.onConflict}`);
+  }
   return bits.join(" · ");
 }
 
@@ -151,6 +157,14 @@ export function specDetailLines(step: WorkflowStep): string[] {
   }
   if (step.kind === "consolidator" && step.separator) {
     lines.push(`separator: ${JSON.stringify(step.separator)}`);
+  }
+  if (step.kind === "merge") {
+    lines.push(`mode: ${step.mode ?? "apply"}`);
+    if (step.from?.length) lines.push(`from: ${step.from.join(", ")}`);
+    lines.push(`onConflict: ${step.onConflict ?? "fail"}`);
+    if (step.branch) lines.push(`branch: ${step.branch}`);
+    if (step.perSource) lines.push("perSource: true (one branch/PR per source worktree)");
+    if (step.prTitle) lines.push(`prTitle: ${truncate(step.prTitle, 120)}`);
   }
   if (step.kind === "gate") {
     lines.push(`condition: ${formatGateCondition(step.condition)}`);

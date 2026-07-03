@@ -5,6 +5,14 @@ import type { SteamtrainConfig } from "../config/types";
 import type { AgentEvent, AgentInstanceId, AgentProviderId, TokenUsage } from "../types/events";
 import { addTokens } from "./cost";
 import type { WorkflowEvent } from "./events";
+import {
+  type ConflictResolver,
+  type HarvestResult,
+  type WorktreeSource,
+  defaultHarvestBranchName,
+  harvestWorktrees,
+  worktreeSourceFromInfo,
+} from "./merge";
 import { createChannel, runPool } from "./pool";
 import { type RetryPolicy, backoffDelayMs, resolveRetryPolicy } from "./retry";
 import {
@@ -24,6 +32,7 @@ import {
   type GateCondition,
   MAX_CONCURRENCY,
   MAX_STEPS,
+  type MergeStep,
   type StepResult,
   type WorkerStep,
   type WorkflowItem,
@@ -35,7 +44,7 @@ import {
   validateWorkflow,
   workflowStepKind,
 } from "./types";
-import type { AgentWorkspaceLease, AgentWorkspaceManager } from "./worktree";
+import { type AgentWorkspaceLease, type AgentWorkspaceManager, runGitText } from "./worktree";
 
 /**
  * Everything the engine needs from the outside world. `createAdapter` is
@@ -513,7 +522,7 @@ function isSubsetOf(subset: ReadonlySet<string>, superset: ReadonlySet<string>):
 
 /** Matches `{{steps.<id>.<field>}}` template references; group 1 is the id. */
 const TEMPLATE_STEP_REF =
-  /\{\{\s*steps\.(.+?)\.(?:output|items|ok|error|target|iteration|json(?:[.[][^{}]*)?)\s*\}\}/g;
+  /\{\{\s*steps\.(.+?)\.(?:output|items|ok|error|target|iteration|worktree\.(?:root|branch|cwd)|json(?:[.[][^{}]*)?)\s*\}\}/g;
 
 function templateStepRefs(text: string | undefined): string[] {
   if (!text) return [];
@@ -588,6 +597,10 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
       }
       if ((step.kind === "worker" || step.kind === "processor" || !step.kind) && step.forEach) {
         addEarlier(parseForEachSource(step.forEach));
+      }
+      if (step.kind === "merge") {
+        for (const ref of step.from ?? []) addEarlier(ref);
+        renderableTexts.push(step.branch, step.commitMessage, step.prTitle, step.prBody);
       }
       if ("prompt" in step) renderableTexts.push(step.prompt);
       if (step.kind === "distributor" && step.items) renderableTexts.push(...step.items);
@@ -1040,6 +1053,10 @@ async function executeStep(
     };
   }
 
+  if (kind === "merge" && step.kind === "merge") {
+    return executeMergeStep(step, ctx, hooks);
+  }
+
   if (kind === "gate" && step.kind === "gate") {
     const started = Date.now();
     const evaluation = evaluateGate(step.condition, ctx);
@@ -1418,6 +1435,7 @@ function attachWorktreeInfo(
     cwd: workspace.cwd,
     root: workspace.root,
     branch: workspace.branch,
+    baseCommit: workspace.baseCommit,
     linkedIgnoredPaths: workspace.linkedIgnoredPaths,
   };
   return { ...result, worktree };
@@ -1627,6 +1645,255 @@ async function executeForEachStep(
   };
 }
 
+/**
+ * Execute a `merge` step: collect the source steps' recorded worktrees (a
+ * fan-out parent contributes every child worktree), merge them in an isolated
+ * staging worktree, and deliver per `mode` — apply to the user's checkout,
+ * leave a branch, or push + open a PR. Deterministic except for
+ * `onConflict: "agent"`, where the configured agent is launched inside the
+ * staging worktree to resolve real conflict markers; its cost/tokens are
+ * accounted to this step.
+ */
+async function executeMergeStep(
+  step: MergeStep,
+  ctx: ExecuteContext,
+  hooks: ExecuteHooks,
+): Promise<ExecutionOutcome> {
+  const started = Date.now();
+  let conflictCostUsd = 0;
+  let conflictTokens: TokenUsage | undefined;
+  const fail = (message: string): ExecutionOutcome => ({
+    result: {
+      stepId: step.id,
+      ok: false,
+      output: message,
+      error: message,
+      durationMs: Date.now() - started,
+      costUsd: conflictCostUsd > 0 ? conflictCostUsd : undefined,
+      tokens: conflictTokens,
+    },
+  });
+
+  let repoRoot: string;
+  try {
+    repoRoot = (
+      await runGitText(["rev-parse", "--show-toplevel"], ctx.deps.cwd, ctx.signal)
+    ).trim();
+  } catch {
+    return fail(`merge step '${step.id}' requires the workflow to run inside a git repository`);
+  }
+
+  const sourceIds = step.from ?? step.dependsOn ?? [];
+  const sources: WorktreeSource[] = [];
+  const missingWorktrees: string[] = [];
+  for (const id of sourceIds) {
+    const result = ctx.results.get(id);
+    if (!result) return fail(`merge source '${id}' has no result`);
+    if (result.skipped) continue;
+    // Judge fan-out sources leaf by leaf, not by the parent's ok flag: a
+    // parent is not-ok when ANY child failed or never ran (budget), but
+    // skipped/not-run children are simply absent from the merge — only a
+    // child that actually failed poisons it and fails the step.
+    const leaves = result.childResults?.length ? result.childResults : [result];
+    for (const leaf of leaves) {
+      if (leaf.skipped || leaf.notRun) continue;
+      if (!leaf.ok) return fail(`merge source '${leaf.stepId}' failed; nothing was merged`);
+      if (leaf.worktree) sources.push(worktreeSourceFromInfo(leaf.stepId, leaf.worktree));
+      else missingWorktrees.push(leaf.stepId);
+    }
+  }
+  if (sources.length === 0) {
+    return fail(
+      missingWorktrees.length > 0
+        ? `merge step '${step.id}': no worktrees recorded for ${missingWorktrees.join(", ")} (agent steps get worktrees only inside a git repository)`
+        : `merge step '${step.id}' has no source worktrees to merge`,
+    );
+  }
+
+  const mode = step.mode ?? "apply";
+  const onConflict = step.onConflict ?? "fail";
+  const render = (text: string | undefined): string | undefined =>
+    text === undefined
+      ? undefined
+      : renderPrompt(text, {
+          input: ctx.input,
+          outputs: ctx.outputs,
+          results: ctx.results,
+          iteration: ctx.iteration,
+        });
+
+  const resolver: ConflictResolver | undefined =
+    onConflict === "agent"
+      ? async ({ stagingRoot, stepId: sourceStepId, files }) => {
+          // Synthetic one-shot step for the conflict-resolution turn. The
+          // schema guarantees agent+model whenever onConflict is "agent"
+          // (workflowMergeStepSchema's superRefine), hence the casts. The
+          // `kind: "processor"` label only describes the attempt to event
+          // consumers — runAgentAttempt reads agent/model/effort/env/
+          // extraArgs/stepTimeoutSec plus the prompt argument and never
+          // dispatches on kind (this does NOT go through executeStep).
+          const synthetic: AgentBackedWorkflowStep = {
+            id: step.id,
+            kind: "processor",
+            agent: step.agent as AgentInstanceId,
+            model: step.model as string,
+            effort: step.effort,
+            env: step.env,
+            extraArgs: step.extraArgs,
+            stepTimeoutSec: step.stepTimeoutSec,
+            prompt: "",
+          };
+          const prompt = conflictResolutionPrompt(sourceStepId, files, render(step.prompt));
+          const attempt = await runAgentAttempt(
+            synthetic,
+            ctx,
+            hooks,
+            step.id,
+            undefined,
+            prompt,
+            stagingRoot,
+          );
+          conflictCostUsd += attempt.result.costUsd ?? 0;
+          if (attempt.result.tokens) {
+            conflictTokens = addTokens(conflictTokens, attempt.result.tokens);
+          }
+          if (!attempt.result.ok) {
+            throw new Error(
+              `conflict-resolution agent failed: ${attempt.result.error ?? "unknown error"}`,
+            );
+          }
+        }
+      : undefined;
+  const strategyOption = onConflict === "ours" || onConflict === "theirs" ? onConflict : undefined;
+
+  const harvests: HarvestResult[] = [];
+  try {
+    if (step.perSource) {
+      const branchBase = render(step.branch);
+      for (const [index, source] of sources.entries()) {
+        harvests.push(
+          await harvestWorktrees({
+            repoRoot,
+            sources: [source],
+            mode,
+            branchName: branchBase
+              ? `${branchBase}-${index}`
+              : defaultHarvestBranchName(source.stepId),
+            commitMessage: render(step.commitMessage),
+            prTitle: render(step.prTitle),
+            prBody: render(step.prBody),
+            strategyOption,
+            resolveConflicts: resolver,
+            signal: ctx.signal,
+          }),
+        );
+      }
+    } else {
+      harvests.push(
+        await harvestWorktrees({
+          repoRoot,
+          sources,
+          mode,
+          // `||`, not `??`: a branch template that renders to "" (e.g. an
+          // empty step output) must still fall back to a generated name.
+          branchName: render(step.branch) || defaultHarvestBranchName(step.id),
+          commitMessage: render(step.commitMessage),
+          prTitle: render(step.prTitle),
+          prBody: render(step.prBody),
+          strategyOption,
+          resolveConflicts: resolver,
+          signal: ctx.signal,
+        }),
+      );
+    }
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : String(err));
+  }
+  if (ctx.signal?.aborted) return fail("cancelled");
+
+  const merged = harvests.flatMap((h) => h.mergedSources);
+  const unchanged = harvests.flatMap((h) => h.unchangedSources);
+  const conflicts = harvests.flatMap((h) =>
+    h.conflicts.map((c) => ({ stepId: c.stepId, files: c.files, resolvedBy: c.resolvedBy })),
+  );
+  const branches = harvests.map((h) => h.branch).filter((b): b is string => Boolean(b));
+  const prUrls = harvests.map((h) => h.prUrl).filter((u): u is string => Boolean(u));
+  const additions = harvests.reduce((n, h) => n + h.additions, 0);
+  const deletions = harvests.reduce((n, h) => n + h.deletions, 0);
+  const fileCount = harvests.reduce((n, h) => n + h.files.length, 0);
+  const noChanges = harvests.every((h) => h.noChanges);
+
+  const lines: string[] = [];
+  if (noChanges) {
+    lines.push(`no changes to merge (${unchanged.length} unchanged worktree(s))`);
+  } else {
+    const target =
+      mode === "apply"
+        ? `applied to ${repoRoot} (uncommitted)`
+        : mode === "branch"
+          ? `left on branch ${branches.join(", ")}`
+          : `opened PR ${prUrls.join(", ")}`;
+    lines.push(
+      `merged ${merged.length} worktree(s): ${fileCount} file(s) +${additions} -${deletions} — ${target}`,
+    );
+    for (const h of harvests) {
+      for (const f of h.files)
+        lines.push(`  ${f.status} ${f.path} (+${f.additions} -${f.deletions})`);
+    }
+  }
+  if (conflicts.length > 0) {
+    for (const c of conflicts) {
+      lines.push(
+        `conflicts in ${c.files.join(", ")} (from ${c.stepId}) resolved by ${c.resolvedBy}`,
+      );
+    }
+  }
+  if (unchanged.length > 0 && !noChanges) lines.push(`unchanged: ${unchanged.join(", ")}`);
+  if (missingWorktrees.length > 0) lines.push(`no worktree: ${missingWorktrees.join(", ")}`);
+
+  return {
+    result: {
+      stepId: step.id,
+      ok: true,
+      output: lines.join("\n"),
+      json: {
+        mode,
+        merged,
+        unchanged,
+        missingWorktrees,
+        files: harvests.flatMap((h) => h.files),
+        additions,
+        deletions,
+        conflicts,
+        branches,
+        prUrls,
+        noChanges,
+      },
+      durationMs: Date.now() - started,
+      costUsd: conflictCostUsd > 0 ? conflictCostUsd : undefined,
+      tokens: conflictTokens,
+    },
+  };
+}
+
+/** The built-in prompt for the conflict-resolution agent (LLM-driven merges). */
+function conflictResolutionPrompt(
+  sourceStepId: string,
+  files: string[],
+  extraGuidance?: string,
+): string {
+  return [
+    "You are resolving git merge conflicts in the current working directory (a staging worktree; a merge is in progress).",
+    `Merging the changes from workflow step '${sourceStepId}' left git conflict markers (<<<<<<< / ======= / >>>>>>>) in these files:`,
+    ...files.map((f) => `- ${f}`),
+    "",
+    `Edit each conflicted file to a correct, coherent resolution that preserves the intent of BOTH sides wherever possible. Remove every conflict marker. Do not resolve by blindly picking one side unless the changes are genuinely incompatible. Do not run 'git commit' and do not abort the merge — just fix the files and stop.`,
+    extraGuidance ? `\nAdditional guidance:\n${extraGuidance}` : undefined,
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join("\n");
+}
+
 function splitItemsFromOutput(output: string | undefined): string[] {
   return output
     ? output
@@ -1640,11 +1907,31 @@ function findFailedDependency(
   step: WorkflowStep,
   results: Map<string, StepResult>,
 ): string | undefined {
+  const mergeSources =
+    step.kind === "merge" ? new Set(step.from ?? step.dependsOn ?? []) : undefined;
   for (const dep of step.dependsOn ?? []) {
     const result = results.get(dep);
-    if (result && !result.ok) return dep;
+    if (!result || result.ok) continue;
+    // A merge step judges its sources leaf by leaf (executeMergeStep): a
+    // fan-out source that is not-ok only because the budget stopped some
+    // children before they ran still has completed worktrees to harvest.
+    if (mergeSources?.has(dep) && isPartialFanOut(result)) continue;
+    return dep;
   }
   return undefined;
+}
+
+/**
+ * A fan-out parent where every child either succeeded or never ran (budget
+ * latch / skip) — no child actually failed — and at least one completed.
+ */
+function isPartialFanOut(result: StepResult): boolean {
+  const leaves = result.childResults;
+  if (!leaves?.length) return false;
+  return (
+    leaves.every((leaf) => leaf.ok || leaf.notRun || leaf.skipped) &&
+    leaves.some((leaf) => leaf.ok && !leaf.notRun && !leaf.skipped)
+  );
 }
 
 function dependencyFailedResult(stepId: string, dependencyId: string): StepResult {
@@ -1671,9 +1958,15 @@ function dependencyFailedResult(stepId: string, dependencyId: string): StepResul
  * keep their existing not-ok semantics.
  */
 function findSkipReason(step: WorkflowStep, ctx: GateEvalContext): string | undefined {
-  const dependsOn = step.dependsOn ?? [];
+  const kind = workflowStepKind(step);
+  // A merge step's sources are `from ?? dependsOn` (matching
+  // executeMergeStep); like a consolidator it treats skipped sources as
+  // absent and only skips when ALL of them were. When `from` is set, any
+  // extra `dependsOn` entries are ordering-only and don't cascade skips.
+  const dependsOn =
+    step.kind === "merge" ? (step.from ?? step.dependsOn ?? []) : (step.dependsOn ?? []);
   const skippedDeps = dependsOn.filter((dep) => ctx.results.get(dep)?.skipped);
-  if (workflowStepKind(step) === "consolidator") {
+  if (kind === "consolidator" || kind === "merge") {
     if (dependsOn.length > 0 && skippedDeps.length === dependsOn.length) {
       return "all dependencies were skipped";
     }

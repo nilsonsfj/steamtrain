@@ -93,6 +93,17 @@ export interface RunRecord {
   error?: string;
   /** Set when a cost budget stopped the run; drives the "budget-exceeded" status. */
   budget?: RunBudgetInfo;
+  /** What happened to this run's step worktrees after the run (CLI apply/prune). */
+  harvest?: RunHarvestInfo;
+}
+
+/** Post-run worktree harvesting status, recorded by `workflow history apply/prune`. */
+export interface RunHarvestInfo {
+  /** Steps whose worktree changes were applied to the workspace. */
+  appliedSteps?: string[];
+  appliedAt?: number;
+  /** Set once the run's worktrees/branches were pruned (discarded). */
+  prunedAt?: number;
 }
 
 /** The cost-budget breach that ended a run (workflow- or step-level `maxCostUsd`). */

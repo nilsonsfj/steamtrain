@@ -7,6 +7,9 @@
  *   {{steps.<id>.error}}    → error text, if any
  *   {{steps.<id>.json}}     → the step's parsed structured output, serialized
  *   {{steps.<id>.json.<path>}} → a field of it, e.g. json.verdict or json.targets[2]
+ *   {{steps.<id>.worktree.root}}   → the step's isolated git worktree directory
+ *   {{steps.<id>.worktree.branch}} → the steamtrain branch checked out there
+ *   {{steps.<id>.worktree.cwd}}    → the cwd the agent actually ran in
  *   {{item}} / {{item.value}} → current fan-out item, inside `forEach`
  * Unknown placeholders (and stray braces) are left untouched, so prompts that
  * legitimately contain `{{` survive.
@@ -29,6 +32,8 @@ export interface TemplateContext {
       target?: string;
       iteration?: number;
       json?: unknown;
+      /** Isolated git worktree metadata, when the step ran in one. */
+      worktree?: { root: string; branch: string; cwd: string };
     }
   >;
   /** Current dynamic fan-out item for `forEach` worker/processor runs. */
@@ -39,6 +44,7 @@ export interface TemplateContext {
 
 const PLACEHOLDER = /\{\{\s*([^{}]+?)\s*\}\}/g;
 const STEP_FIELD = /^steps\.(.+)\.(output|items|ok|error|target|iteration)$/;
+const STEP_WORKTREE_FIELD = /^steps\.(.+)\.worktree\.(root|branch|cwd)$/;
 /** `steps.<id>.json` with an optional `.field`/`[index]` path after it. */
 const STEP_JSON_FIELD = /^steps\.(.+?)\.json((?:\.|\[).+)?$/;
 
@@ -50,6 +56,12 @@ export function renderPrompt(template: string, ctx: TemplateContext): string {
     if (expr === "item.index") return ctx.item ? String(ctx.item.index) : "";
     if (expr === "item.sourceStepId") return ctx.item?.sourceStepId ?? "";
     if (expr === "iteration") return String(ctx.iteration ?? 1);
+    const worktreeRef = STEP_WORKTREE_FIELD.exec(expr);
+    if (worktreeRef) {
+      const worktree = ctx.results?.get(worktreeRef[1] as string)?.worktree;
+      if (!worktree) return "";
+      return worktree[worktreeRef[2] as "root" | "branch" | "cwd"] ?? "";
+    }
     const jsonRef = STEP_JSON_FIELD.exec(expr);
     if (jsonRef) {
       const json = ctx.results?.get(jsonRef[1] as string)?.json;
