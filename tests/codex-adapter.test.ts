@@ -254,6 +254,20 @@ describe("codex mapper (stateful, one mapper per run)", () => {
     );
   });
 
+  it("estimates costUsd from usage tokens on turn.failed", () => {
+    const m = createCodexMapper();
+    const result = m(
+      JSON.parse(
+        '{"type":"turn.failed","model":"gpt-5.2","usage":{"input_tokens":500,"cached_input_tokens":0,"output_tokens":50},"error":{"message":"timeout"}}',
+      ),
+    );
+    const costEvent = result.find((e) => e.kind === "result");
+    expect(costEvent).toEqual(expect.objectContaining({ costUsd: expect.any(Number) }));
+    // gpt-5.2 rates: input=$2.50/M, output=$15.00/M
+    const expected = (500 * 2.5 + 50 * 15.0) / 1_000_000;
+    expect((costEvent as { costUsd: number }).costUsd).toBeCloseTo(expected, 8);
+  });
+
   it("estimates costUsd from usage tokens on turn.completed", () => {
     const m = createCodexMapper();
     const result = m(JSON.parse(SAMPLES.turnCompleted));
