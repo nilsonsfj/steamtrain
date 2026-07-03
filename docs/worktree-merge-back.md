@@ -87,7 +87,8 @@ All harvesting is plain git, shared between the engine step and the CLI
    - `branch` — the merged state stays on a named local branch; the checkout
      is untouched.
    - `pr` — the branch is pushed to `origin` and `gh pr create` opens a pull
-     request. With `perSource: true` the whole pipeline runs once per source
+     request targeting the branch the run started from (falling back to the
+     remote's default branch on a detached HEAD). With `perSource: true` the whole pipeline runs once per source
      worktree: one branch + PR per parallel agent, the "human reviews each
      implementation with trace" operating model.
 

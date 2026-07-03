@@ -328,10 +328,14 @@ export async function harvestWorktrees(request: HarvestRequest): Promise<Harvest
   const targetHead = (await runGitText(["rev-parse", "--verify", "HEAD"], repoRoot, signal)).trim();
 
   // Snapshot every source first (commit its working state on its own branch).
+  // Under the repo lock: concurrent merge steps sharing a source would
+  // otherwise run add/commit on the same worktree index at once.
   const snapshots: { source: WorktreeSource; commit: string }[] = [];
   const unchangedSources: string[] = [];
   for (const source of sources) {
-    const snap = await snapshotWorktreeState(source, signal);
+    const snap = await withRepoWorktreeLock(repoRoot, signal, () =>
+      snapshotWorktreeState(source, signal),
+    );
     if (snap.changed) snapshots.push({ source, commit: snap.commit });
     else unchangedSources.push(source.stepId);
   }
@@ -389,9 +393,16 @@ export async function harvestWorktrees(request: HarvestRequest): Promise<Harvest
     keepBranch = true;
     result.branch = branch;
     if (mode === "pr") {
+      // Base the PR on the branch the merge targeted: without --base, gh
+      // defaults to the remote's default branch, so a run from a feature
+      // branch would open a PR whose diff includes the whole feature branch.
+      const baseBranch = await runGitText(["symbolic-ref", "--short", "HEAD"], repoRoot, signal)
+        .then((b) => b.trim() || undefined)
+        .catch(() => undefined);
       await runGit(["push", "-u", "origin", branch], stagingDir, undefined, signal);
       result.prUrl = await createPullRequest(stagingDir, {
         branch,
+        base: baseBranch,
         title: request.prTitle,
         body: request.prBody,
         signal,
@@ -509,13 +520,14 @@ async function applyRangeToWorkspace(
 
 async function createPullRequest(
   cwd: string,
-  opts: { branch: string; title?: string; body?: string; signal?: AbortSignal },
+  opts: { branch: string; base?: string; title?: string; body?: string; signal?: AbortSignal },
 ): Promise<string> {
   const args = [
     "pr",
     "create",
     "--head",
     opts.branch,
+    ...(opts.base ? ["--base", opts.base] : []),
     "--title",
     opts.title ?? `steamtrain: ${opts.branch}`,
     "--body",

@@ -571,6 +571,22 @@ function worktreeStepsOf(record: RunRecord, stepFilter?: string): WorktreeSource
   return [...byId.values()];
 }
 
+/**
+ * EVERY recorded worktree of a run, including non-final loop iterations
+ * (deduped by worktree root, not step id) — prune must remove them all, not
+ * just each step's final iteration.
+ */
+function allWorktreesOf(record: RunRecord): WorktreeSource[] {
+  const byRoot = new Map<string, WorktreeSource>();
+  for (const phase of record.phases) {
+    for (const step of phase.steps) {
+      if (!step.worktree) continue;
+      byRoot.set(step.worktree.root, worktreeSourceFromInfo(step.stepId, step.worktree));
+    }
+  }
+  return [...byRoot.values()];
+}
+
 /** `workflow history show <id> --diff` — per-step worktree diffs of a past run. */
 async function printHistoryDiff(
   record: RunRecord,
@@ -664,7 +680,7 @@ async function pruneHistoryWorktrees(
   out: (text: string) => void,
   err: (text: string) => void,
 ): Promise<number> {
-  const sources = worktreeStepsOf(record);
+  const sources = allWorktreesOf(record);
   if (sources.length === 0) {
     out(`run '${record.id}' has no step worktrees to prune\n`);
     return 0;

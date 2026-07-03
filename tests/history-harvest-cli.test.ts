@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -60,6 +60,65 @@ describe("workflow history diff/apply/prune CLI", () => {
     expect(pruned?.harvest?.prunedAt).toBeTypeOf("number");
     const goneOut = await cli(repo, ["workflow", "history", "show", runId, "--diff"]);
     expect(goneOut.stderr).toContain("no longer exists");
+  });
+
+  it("prunes every loop iteration's worktree, not just the final one", async () => {
+    const { repo } = await makeRepoWithRun();
+    const wtBase = await mkdtemp(join(tmpdir(), "steamtrain-harvest-loop-wt-"));
+    tempRoots.push(wtBase);
+    const manager = createGitWorktreeManager({ baseDir: wtBase, runId: "loop-run" });
+
+    // A loop body step allocates a fresh worktree per iteration; the record
+    // holds one phase entry per iteration with the same stepId.
+    const leases = [];
+    for (const iteration of [1, 2]) {
+      const lease = await manager.allocate({
+        workflowName: "demo",
+        stepId: "implement",
+        agent: "claude",
+        baseCwd: repo,
+        stepCwd: repo,
+        iteration,
+      });
+      if (!lease.root || !lease.branch) throw new Error("expected worktree lease");
+      await writeFile(join(lease.root, `iter${iteration}.txt`), "x\n");
+      leases.push(lease);
+    }
+    const phases: HistoryPhase[] = leases.map((lease, index) => ({
+      phaseId: "impl",
+      title: "Implement",
+      index,
+      stepCount: 1,
+      done: true,
+      ok: true,
+      steps: [
+        {
+          stepId: "implement",
+          blockKind: "worker",
+          agent: "claude",
+          model: "m",
+          status: "done",
+          text: "done",
+          cached: false,
+          worktree: {
+            originalCwd: repo,
+            cwd: lease.cwd,
+            root: lease.root as string,
+            branch: lease.branch as string,
+            baseCommit: lease.baseCommit,
+          },
+        },
+      ],
+    }));
+    const store = createWorkflowHistoryStore(join(repo, WORKFLOW_HISTORY_DIR));
+    await store.save(bareRecord("loop-run-id", repo, phases));
+
+    const pruneOut = await cli(repo, ["workflow", "history", "prune", "loop-run-id"]);
+    expect(pruneOut.code).toBe(0);
+    expect(pruneOut.stdout).toContain("pruned 2/2");
+    for (const lease of leases) {
+      await expect(stat(lease.root as string)).rejects.toThrow();
+    }
   });
 
   it("errors usefully for runs without worktrees", async () => {
