@@ -55,7 +55,31 @@ export interface ToolResultEvent extends BaseEvent {
   status?: string;
 }
 
-/** The turn finished with a final answer and (optionally) cost/timing. */
+/**
+ * Normalized token usage for one agent turn. Every adapter maps its CLI's own
+ * usage shape onto these categories so the engine, history, and every UI report
+ * tokens the same way regardless of which agent produced them. All fields are
+ * optional — an adapter only sets what its CLI reports.
+ *
+ *  - `input`      uncached prompt/input tokens (cache reads/writes excluded)
+ *  - `output`     completion tokens (includes reasoning where the provider bills
+ *                 reasoning as output, e.g. Codex — so `reasoning` is a subset,
+ *                 not an addition)
+ *  - `cacheRead`  input tokens served from the prompt cache (cheaper)
+ *  - `cacheWrite` input tokens written to the prompt cache (cache creation)
+ *  - `reasoning`  reasoning/thinking tokens, when the provider reports them
+ *                 separately (may overlap `output`; never summed into `total`
+ *                 on its own)
+ */
+export interface TokenUsage {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  reasoning?: number;
+}
+
+/** The turn finished with a final answer and (optionally) cost/timing/tokens. */
 export interface ResultEvent extends BaseEvent {
   kind: "result";
   isError: boolean;
@@ -63,6 +87,8 @@ export interface ResultEvent extends BaseEvent {
   subtype?: string;
   durationMs?: number;
   costUsd?: number;
+  /** Normalized token usage for this turn, when the agent reports it. */
+  tokens?: TokenUsage;
 }
 
 /** A process- or protocol-level failure (non-zero exit, timeout, auth, ...). */

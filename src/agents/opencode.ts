@@ -1,5 +1,16 @@
-import type { AgentEvent, AgentId, AgentInstanceId, EventMapper } from "../types/events";
-import { type OpenCodePart, opencodeEnvelope, opencodeEvent } from "../types/raw-opencode";
+import type {
+  AgentEvent,
+  AgentId,
+  AgentInstanceId,
+  EventMapper,
+  TokenUsage,
+} from "../types/events";
+import {
+  type OpenCodePart,
+  type OpenCodeTokens,
+  opencodeEnvelope,
+  opencodeEvent,
+} from "../types/raw-opencode";
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
 import { stringifyContent } from "./util";
@@ -202,6 +213,7 @@ export function createOpenCodeMapper(agent: AgentInstanceId = AGENT): EventMappe
           isError: false,
           subtype: "step_finish",
           costUsd: e.cost,
+          tokens: opencodeTokens(e.tokens),
         });
         return out;
       }
@@ -220,6 +232,22 @@ export function createOpenCodeMapper(agent: AgentInstanceId = AGENT): EventMappe
       }
     }
   };
+}
+
+/**
+ * Map OpenCode's per-step token block onto the normalized {@link TokenUsage}.
+ * OpenCode reports cache reads/writes under `cache`, so `input` is the uncached
+ * prompt count and `reasoning` is a separately-reported category.
+ */
+function opencodeTokens(tokens: OpenCodeTokens | undefined): TokenUsage | undefined {
+  if (!tokens) return undefined;
+  const out: TokenUsage = {};
+  if (tokens.input !== undefined) out.input = tokens.input;
+  if (tokens.output !== undefined) out.output = tokens.output;
+  if (tokens.reasoning !== undefined) out.reasoning = tokens.reasoning;
+  if (tokens.cache?.read !== undefined) out.cacheRead = tokens.cache.read;
+  if (tokens.cache?.write !== undefined) out.cacheWrite = tokens.cache.write;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /** Runs the real `opencode` CLI in JSON event mode. */

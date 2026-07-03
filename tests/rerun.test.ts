@@ -47,7 +47,15 @@ function record(over: Partial<RunRecord>): RunRecord {
     endedAt: 2,
     durationMs: 1,
     phases: [],
-    totals: { steps: 0, ok: 0, failed: 0, cached: 0, costUsd: 0, durationMs: 0 },
+    totals: {
+      steps: 0,
+      ok: 0,
+      failed: 0,
+      cached: 0,
+      costUsd: 0,
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+      durationMs: 0,
+    },
     ...over,
   };
 }

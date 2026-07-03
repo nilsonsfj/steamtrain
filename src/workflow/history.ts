@@ -1,4 +1,5 @@
-import type { AgentInstanceId } from "../types/events";
+import type { AgentInstanceId, TokenUsage } from "../types/events";
+import { addTokensInto, emptyTokens, formatTokens, totalTokens } from "./cost";
 import type { WorkflowEvent } from "./events";
 import type {
   AgentWorktreeInfo,
@@ -61,7 +62,7 @@ export interface HistoryPhase {
 }
 
 /** Terminal outcome of a run (mirrors the web run manager, minus "running"). */
-export type RunRecordStatus = "done" | "error" | "canceled";
+export type RunRecordStatus = "done" | "error" | "canceled" | "budget-exceeded";
 
 export interface RunTotals {
   steps: number;
@@ -69,6 +70,8 @@ export interface RunTotals {
   failed: number;
   cached: number;
   costUsd: number;
+  /** Aggregate token usage across all leaf steps (fan-out children, not parents). */
+  tokens: Required<TokenUsage>;
   durationMs: number;
 }
 
@@ -88,6 +91,16 @@ export interface RunRecord {
   phases: HistoryPhase[];
   totals: RunTotals;
   error?: string;
+  /** Set when a cost budget stopped the run; drives the "budget-exceeded" status. */
+  budget?: RunBudgetInfo;
+}
+
+/** The cost-budget breach that ended a run (workflow- or step-level `maxCostUsd`). */
+export interface RunBudgetInfo {
+  scope: "workflow" | "step";
+  stepId?: string;
+  limitUsd: number;
+  spentUsd: number;
 }
 
 /** The lightweight shape used for history list views (record minus the tree). */
@@ -100,7 +113,15 @@ export function runRecordSummary(record: RunRecord): RunRecordSummary {
 
 /** Roll up per-step metrics, counting leaf steps that actually ran. */
 export function computeRunTotals(phases: HistoryPhase[]): RunTotals {
-  const totals: RunTotals = { steps: 0, ok: 0, failed: 0, cached: 0, costUsd: 0, durationMs: 0 };
+  const totals: RunTotals = {
+    steps: 0,
+    ok: 0,
+    failed: 0,
+    cached: 0,
+    costUsd: 0,
+    tokens: emptyTokens(),
+    durationMs: 0,
+  };
   for (const phase of phases) {
     let phaseMaxDuration = 0;
     for (const step of phase.steps) {
@@ -116,6 +137,7 @@ export function computeRunTotals(phases: HistoryPhase[]): RunTotals {
       else if (step.status === "done") totals.ok += 1;
       if (step.cached) totals.cached += 1;
       if (step.result?.costUsd) totals.costUsd += step.result.costUsd;
+      addTokensInto(totals.tokens, step.result?.tokens);
       if (step.result?.durationMs)
         phaseMaxDuration = Math.max(phaseMaxDuration, step.result.durationMs);
     }
@@ -132,13 +154,17 @@ export function computeRunTotals(phases: HistoryPhase[]): RunTotals {
  */
 export function formatRunTotals(
   totals: RunTotals,
-  opts?: { durationMs?: number; cached?: boolean },
+  opts?: { durationMs?: number; cached?: boolean; tokens?: boolean },
 ): string {
   const parts = [`${totals.ok}/${totals.steps} ok`];
   if (totals.failed > 0) parts.push(`${totals.failed} failed`);
   if (opts?.cached && totals.cached > 0) parts.push(`${totals.cached} cached`);
   if (typeof opts?.durationMs === "number") parts.push(`${(opts.durationMs / 1000).toFixed(1)}s`);
   if (totals.costUsd > 0) parts.push(`$${totals.costUsd.toFixed(4)}`);
+  if (opts?.tokens) {
+    const tok = totalTokens(totals.tokens);
+    if (tok > 0) parts.push(`${formatTokens(tok)} tok`);
+  }
   return parts.join(" · ");
 }
 
@@ -168,6 +194,7 @@ export class RunRecordBuilder {
   private phases: HistoryPhase[] = [];
   private phaseIndex = new Map<string, HistoryPhase>();
   private ok = true;
+  private budget?: RunBudgetInfo;
 
   constructor(meta: RunRecordMeta, startedAt: number = Date.now()) {
     this.meta = meta;
@@ -191,6 +218,7 @@ export class RunRecordBuilder {
         this.phases = [];
         this.phaseIndex.clear();
         this.ok = true;
+        this.budget = undefined;
         break;
       case "phase_start": {
         const phase: HistoryPhase = {
@@ -281,6 +309,15 @@ export class RunRecordBuilder {
         }
         break;
       }
+      case "budget_exceeded":
+        // Keep the first breach (the one that stopped scheduling).
+        this.budget ??= {
+          scope: event.scope,
+          stepId: event.stepId,
+          limitUsd: event.limitUsd,
+          spentUsd: event.spentUsd,
+        };
+        break;
       case "workflow_done":
         this.ok = event.ok;
         break;
@@ -309,6 +346,7 @@ export class RunRecordBuilder {
       phases,
       totals: computeRunTotals(phases),
       error: opts.error,
+      budget: this.budget,
     };
   }
 

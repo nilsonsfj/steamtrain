@@ -87,7 +87,17 @@ export const claudeStreamEvent = z
   })
   .passthrough();
 
-/** `{"type":"result","subtype":"success","is_error":false, result, duration_ms, total_cost_usd, ...}` */
+/** Anthropic usage block, as reported on Claude Code's `result` (and message) events. */
+export const claudeUsage = z
+  .object({
+    input_tokens: z.number().optional(),
+    output_tokens: z.number().optional(),
+    cache_creation_input_tokens: z.number().optional(),
+    cache_read_input_tokens: z.number().optional(),
+  })
+  .passthrough();
+
+/** `{"type":"result","subtype":"success","is_error":false, result, duration_ms, total_cost_usd, usage, ...}` */
 export const claudeResult = z
   .object({
     type: z.literal("result"),
@@ -96,9 +106,11 @@ export const claudeResult = z
     result: z.string().optional(),
     duration_ms: z.number().optional(),
     total_cost_usd: z.number().optional(),
+    usage: claudeUsage.optional(),
   })
   .passthrough();
 
 export type ClaudeContentBlock = z.infer<typeof claudeContentBlock>;
 export type ClaudeAssistant = z.infer<typeof claudeAssistant>;
 export type ClaudeResult = z.infer<typeof claudeResult>;
+export type ClaudeUsage = z.infer<typeof claudeUsage>;

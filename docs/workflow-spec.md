@@ -81,6 +81,7 @@ execution behavior. **Examples:** [`workflow-examples.md`](workflow-examples.md)
 | `description` | no | Human-readable picker/list text. |
 | `phases` | yes | Ordered list of workflow phases. |
 | `retry` | no | Default auto-retry policy for every agent worker/processor step. See [Auto-retry](#auto-retry-on-transient-failures). |
+| `maxCostUsd` | no | Whole-workflow USD budget. The engine stops scheduling new steps once the run's cost reaches it; the run ends `budget-exceeded` and is resumable after raising the cap. See [Cost budgets](./cost-and-budgets.md). |
 
 ## Phase fields
 
@@ -109,6 +110,8 @@ Existing no-`kind` steps are treated as workers.
 Required fields: `agent`, `model`, `prompt`.
 
 Optional fields: `cwd`, `env`, `extraArgs`, `effort`, `forEach`, `retry`,
+`maxCostUsd` (per-step USD budget for `forEach` fan-outs — see
+[Cost budgets](./cost-and-budgets.md)),
 `output` (see [Structured step outputs](#structured-step-outputs-output)).
 
 If the resolved `cwd` is inside a git repository, the agent subprocess runs from

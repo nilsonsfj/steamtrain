@@ -252,6 +252,15 @@ textarea#input:focus {
   background: linear-gradient(90deg, var(--accent-dim), var(--accent));
   transition: width .25s;
 }
+.cost-ticker {
+  font-variant-numeric: tabular-nums;
+  color: var(--ok, #2ea043);
+  white-space: nowrap;
+}
+.cost-ticker.over-budget {
+  color: var(--err, #f85149);
+  font-weight: 600;
+}
 .banner {
   margin-top: 10px;
   padding: 8px 12px;
@@ -868,6 +877,9 @@ select.sel {
 }
 .hrun.canceled {
   border-left-color: var(--gate);
+}
+.hrun.budget-exceeded {
+  border-left-color: var(--warn, #d29922);
 }
 .hrun .hr-top {
   display: flex;

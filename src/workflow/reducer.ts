@@ -54,6 +54,14 @@ export interface LoopMarker {
   gatePhaseIteration?: number;
 }
 
+/** A cost budget breach surfaced live, so UIs can badge the run/step. */
+export interface BudgetState {
+  scope: "workflow" | "step";
+  stepId?: string;
+  limitUsd: number;
+  spentUsd: number;
+}
+
 export interface WorkflowState {
   name?: string;
   startedAt?: number;
@@ -63,6 +71,8 @@ export interface WorkflowState {
   done: boolean;
   ok: boolean;
   loopMarkers?: LoopMarker[];
+  /** Set once a cost budget stopped the run scheduling new steps. */
+  budget?: BudgetState;
 }
 
 export const initialWorkflowState: WorkflowState = {
@@ -234,6 +244,7 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
         done: false,
         ok: true,
         loopMarkers: [],
+        budget: undefined,
       };
     case "phase_start": {
       const iter = e.iteration ?? 1;
@@ -363,6 +374,16 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
         phases: state.phases.map((p) =>
           sameInstance(p, e.phaseId, e.iteration) ? { ...p, done: true, ok: e.ok } : p,
         ),
+      };
+    case "budget_exceeded":
+      return {
+        ...state,
+        budget: {
+          scope: e.scope,
+          stepId: e.stepId,
+          limitUsd: e.limitUsd,
+          spentUsd: e.spentUsd,
+        },
       };
     case "workflow_done":
       return { ...state, done: true, ok: e.ok, results: e.results };

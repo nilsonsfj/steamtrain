@@ -1,6 +1,13 @@
-import type { AgentEvent, AgentId, AgentInstanceId, EventMapper } from "../types/events";
+import type {
+  AgentEvent,
+  AgentId,
+  AgentInstanceId,
+  EventMapper,
+  TokenUsage,
+} from "../types/events";
 import {
   type ClaudeAssistant,
+  type ClaudeUsage,
   claudeAssistant,
   claudeContentBlock,
   claudeEnvelope,
@@ -187,6 +194,7 @@ export function createClaudeMapper(agent: AgentInstanceId = AGENT): EventMapper 
             subtype: r.data.subtype,
             durationMs: r.data.duration_ms,
             costUsd: r.data.total_cost_usd,
+            tokens: claudeTokens(r.data.usage),
           },
         ];
       }
@@ -195,6 +203,22 @@ export function createClaudeMapper(agent: AgentInstanceId = AGENT): EventMapper 
         return [{ kind: "unknown", agent, ts, rawType: env.data.type, raw }];
     }
   };
+}
+
+/**
+ * Map Anthropic's usage block onto the normalized {@link TokenUsage}. Anthropic
+ * reports cache reads/writes separately from `input_tokens`, so `input` is
+ * already the uncached prompt count.
+ */
+function claudeTokens(usage: ClaudeUsage | undefined): TokenUsage | undefined {
+  if (!usage) return undefined;
+  const tokens: TokenUsage = {};
+  if (usage.input_tokens !== undefined) tokens.input = usage.input_tokens;
+  if (usage.output_tokens !== undefined) tokens.output = usage.output_tokens;
+  if (usage.cache_read_input_tokens !== undefined) tokens.cacheRead = usage.cache_read_input_tokens;
+  if (usage.cache_creation_input_tokens !== undefined)
+    tokens.cacheWrite = usage.cache_creation_input_tokens;
+  return Object.keys(tokens).length > 0 ? tokens : undefined;
 }
 
 /** Runs the real `claude` CLI in streaming JSON mode. */

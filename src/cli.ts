@@ -15,27 +15,40 @@ import { Orchestrator } from "./orchestrator";
 import { loadSettings } from "./settings";
 import type { AgentInstanceId } from "./types/events";
 import {
+  type ModelUsage,
   type RerunMode,
+  type RunRecord,
   RunRecordBuilder,
+  type RunRecordStatus,
   type RunRecordSummary,
   type StepResult,
   WORKFLOW_CACHE_DIR,
   WORKFLOW_HISTORY_DIR,
   type WorkflowEvent,
   type WorkflowSpec,
+  aggregateCosts,
+  aggregateLeavesByModel,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   formatRunTotals,
+  formatTokenSummary,
+  formatTokens,
+  formatUsd,
   generateWorkflow,
   hashWorkflowSpec,
   isRerunError,
+  modelBreakdownForRecord,
   persistWorkflowStepDone,
   planRerun,
   rerunDowngradeMessage,
   resolveStepTimeoutSec,
   resolveWorkflowTimeoutSec,
+  resultLeaves,
   saveUserWorkflow,
+  stepMetaFromSpec,
   timeoutMsFromSec,
+  tokensForResults,
+  totalTokens,
   validateWorkflow,
   workflowAgentIds,
   workflowCacheKey,
@@ -172,6 +185,9 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
       return runCacheCommand(rest, cwd, io, orchestrator, out, err);
     case "history":
       return runHistoryCommand(rest, cwd, out, err);
+    case "costs":
+    case "cost":
+      return runCostsCommand(rest, cwd, out, err);
     case "run":
       return runWorkflowCommand(orchestrator, config, rest, io, out, err);
     case "create":
@@ -323,10 +339,101 @@ async function runHistoryCommand(
   return 1;
 }
 
+/**
+ * `steamtrain workflow costs [--workflow <name>] [--json]` — aggregate recorded
+ * spend by workflow, step, agent, and model. Answers "which step / model is
+ * eating the budget?" from history rather than one run at a time.
+ */
+async function runCostsCommand(
+  args: string[],
+  cwd: string,
+  out: (text: string) => void,
+  err: (text: string) => void,
+): Promise<number> {
+  let workflowFilter: string | undefined;
+  let json = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--json") json = true;
+    else if (arg === "--workflow" || arg === "-w") workflowFilter = args[++i];
+    else {
+      err(`unknown flag '${arg}' for workflow costs\n`);
+      return 1;
+    }
+  }
+
+  const store = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
+  const summaries = await store.list();
+  const records: RunRecord[] = [];
+  for (const summary of summaries) {
+    if (workflowFilter && summary.workflow !== workflowFilter) continue;
+    const full = await store.get(summary.id);
+    if (full) records.push(full);
+  }
+
+  if (records.length === 0) {
+    out(
+      workflowFilter ? `no recorded runs for workflow '${workflowFilter}'\n` : "no recorded runs\n",
+    );
+    return 0;
+  }
+
+  const analytics = aggregateCosts(records);
+
+  if (json) {
+    out(`${JSON.stringify(analytics, null, 2)}\n`);
+    return 0;
+  }
+
+  const scopeLabel = workflowFilter ? ` · workflow '${workflowFilter}'` : "";
+  out(`workflow costs (${analytics.runs} run${analytics.runs === 1 ? "" : "s"}${scopeLabel})\n`);
+  out(
+    `  total: ${formatUsd(analytics.costUsd)} · ${formatTokens(totalTokens(analytics.tokens))} tok\n`,
+  );
+  const tok = formatTokenSummary(analytics.tokens);
+  if (tok) out(`         ${tok}\n`);
+
+  if (!workflowFilter && analytics.byWorkflow.length > 0) {
+    out("\n  by workflow\n");
+    for (const w of analytics.byWorkflow) {
+      out(
+        `    ${w.workflow.padEnd(24)} ${formatUsd(w.costUsd).padStart(10)}  ${formatTokens(totalTokens(w.tokens))} tok  (${w.runs} run${w.runs === 1 ? "" : "s"}, ${w.steps} step${w.steps === 1 ? "" : "s"})\n`,
+      );
+    }
+  }
+
+  if (analytics.byModel.length > 0) {
+    out("\n  by model\n");
+    for (const m of analytics.byModel) {
+      out(
+        `    ${m.model.padEnd(28)} ${formatUsd(m.costUsd).padStart(10)}  ${formatTokens(totalTokens(m.tokens))} tok  (${m.steps} step${m.steps === 1 ? "" : "s"})\n`,
+      );
+    }
+  }
+
+  if (analytics.byStep.length > 0) {
+    out("\n  by step (top spenders)\n");
+    for (const s of analytics.byStep.slice(0, 20)) {
+      const label = workflowFilter ? s.stepId : `${s.workflow}/${s.stepId}`;
+      out(
+        `    ${label.padEnd(32)} ${formatUsd(s.costUsd).padStart(10)}  ${formatTokens(totalTokens(s.tokens))} tok  (${s.runs}×)\n`,
+      );
+    }
+  }
+  return 0;
+}
+
 function printHistoryRow(run: RunRecordSummary, out: (text: string) => void): void {
   const when = new Date(run.startedAt).toISOString();
-  const statusGlyph = run.status === "done" ? "ok  " : run.status === "canceled" ? "cxl " : "fail";
-  const totals = formatRunTotals(run.totals, { durationMs: run.durationMs });
+  const statusGlyph =
+    run.status === "done"
+      ? "ok  "
+      : run.status === "canceled"
+        ? "cxl "
+        : run.status === "budget-exceeded"
+          ? "bdgt"
+          : "fail";
+  const totals = formatRunTotals(run.totals, { durationMs: run.durationMs, tokens: true });
   out(`  ${statusGlyph} ${run.id}  ${run.workflow}  ${when}  ${totals}\n`);
   out(`       input: ${truncateLine(run.input, 100)}\n`);
 }
@@ -343,7 +450,15 @@ function printHistoryRecord(
   out(`  duration: ${(record.durationMs / 1000).toFixed(1)}s\n`);
   out(`  input:    ${truncateLine(record.input, 200)}\n`);
   if (record.error) out(`  error:    ${record.error}\n`);
-  out(`  totals:   ${formatRunTotals(record.totals, { cached: true })}\n`);
+  if (record.budget) {
+    const b = record.budget;
+    const scope = b.scope === "step" && b.stepId ? `step '${b.stepId}'` : "workflow";
+    out(
+      `  budget:   ${scope} cap ${formatUsd(b.limitUsd)} reached (spent ${formatUsd(b.spentUsd)}) — resumable after raising the cap\n`,
+    );
+  }
+  out(`  totals:   ${formatRunTotals(record.totals, { cached: true, tokens: true })}\n`);
+  printModelBreakdown(modelBreakdownForRecord(record), out);
   for (const phase of record.phases) {
     out(
       `\n  phase ${phase.index + 1}: ${phase.title}${phase.done ? (phase.ok ? "" : " (failed)") : ""}\n`,
@@ -353,9 +468,11 @@ function printHistoryRecord(
       const runner = step.agent ? ` ${step.agent}${step.model ? `/${step.model}` : ""}` : "";
       const dur = step.result ? ` · ${(step.result.durationMs / 1000).toFixed(1)}s` : "";
       const cost = step.result?.costUsd ? ` · $${step.result.costUsd.toFixed(4)}` : "";
+      const tokenLine = formatTokenSummary(step.result?.tokens);
+      const tok = tokenLine ? ` · ${tokenLine}` : "";
       const cached = step.cached ? " · cached" : "";
       const indent = step.parentStepId ? "      " : "    ";
-      out(`${indent}${glyph} ${step.stepId}${runner}${dur}${cost}${cached}\n`);
+      out(`${indent}${glyph} ${step.stepId}${runner}${dur}${cost}${tok}${cached}\n`);
       if (step.text.trim()) {
         out(`${indent}    ${truncateLine(step.text.replace(/\s+/g, " ").trim(), 160)}\n`);
       }
@@ -507,6 +624,7 @@ async function runWorkflowCommand(
     workflowTimeoutMs > 0 ? setTimeout(() => ac.abort(), workflowTimeoutMs) : undefined;
   timeoutTimer?.unref?.();
   let ok = false;
+  let budgetExceeded = false;
   try {
     for await (const event of orchestrator.runWorkflow(name, input.trim(), ac.signal, cache, cwd)) {
       recorder.handle(event);
@@ -517,7 +635,8 @@ async function runWorkflowCommand(
       }
       if (event.kind === "workflow_done") {
         ok = event.ok;
-        if (!options.json) printRunSummary(event.results, out);
+        budgetExceeded = Boolean(event.budgetExceeded);
+        if (!options.json) printRunSummary(event.results, out, stepMetaFromSpec(spec));
       }
     }
     // The engine yields a final workflow_done on abort rather than throwing, so
@@ -526,7 +645,12 @@ async function runWorkflowCommand(
       await saveHistory(historyStore, recorder, "canceled", err);
       return 130;
     }
-    await saveHistory(historyStore, recorder, ok ? "done" : "error", err);
+    await saveHistory(
+      historyStore,
+      recorder,
+      budgetExceeded ? "budget-exceeded" : ok ? "done" : "error",
+      err,
+    );
   } catch (runErr) {
     if (ac.signal.aborted) {
       await saveHistory(historyStore, recorder, "canceled", err);
@@ -549,7 +673,7 @@ function message(err: unknown): string {
 async function saveHistory(
   historyStore: ReturnType<typeof createWorkflowHistoryStore>,
   recorder: RunRecordBuilder,
-  status: "done" | "error" | "canceled",
+  status: RunRecordStatus,
   err: (text: string) => void,
   error?: string,
 ): Promise<void> {
@@ -565,7 +689,11 @@ async function saveHistory(
  * fan-out children), duration, cache/cost, and roll-up totals. This is the CLI
  * analog of the TUI's live status header.
  */
-function printRunSummary(results: StepResult[], out: (text: string) => void): void {
+function printRunSummary(
+  results: StepResult[],
+  out: (text: string) => void,
+  stepMeta?: Map<string, { agent?: string; model?: string }>,
+): void {
   if (results.length === 0) return;
   out("\nsummary\n");
   let okCount = 0;
@@ -583,17 +711,41 @@ function printRunSummary(results: StepResult[], out: (text: string) => void): vo
     const bits = [`${(result.durationMs / 1000).toFixed(1)}s`];
     if (result.skipped) bits.push("skipped");
     if (cost > 0) bits.push(`$${cost.toFixed(4)}`);
+    const tokenLine = formatTokenSummary(result.tokens);
+    if (tokenLine) bits.push(tokenLine);
     if (result.gate) bits.push(result.gate.passed ? "gate:passed" : "gate:blocked");
     const from = result.item ? ` (item ${result.item.index})` : "";
     out(`  ${status} ${result.stepId}${from}  ${bits.join(" · ")}\n`);
   }
+  const grandTokens = tokensForResults(results);
   const totals = [
     `${okCount} ok`,
     failCount > 0 ? `${failCount} failed` : undefined,
     totalCost > 0 ? `$${totalCost.toFixed(4)}` : undefined,
+    totalTokens(grandTokens) > 0 ? `${formatTokens(totalTokens(grandTokens))} tok` : undefined,
     `${(totalMs / 1000).toFixed(1)}s total`,
   ].filter(Boolean);
   out(`  ── ${totals.join(" · ")}\n`);
+
+  // Per-model breakdown — "which model is eating the budget?".
+  if (stepMeta) {
+    const byModel = aggregateLeavesByModel(resultLeaves(results, stepMeta));
+    printModelBreakdown(byModel, out);
+  }
+}
+
+/** Render the per-model cost/token breakdown shared by the run summary and history show. */
+function printModelBreakdown(byModel: ModelUsage[], out: (text: string) => void): void {
+  const models = byModel.filter((m) => m.costUsd > 0 || totalTokens(m.tokens) > 0);
+  if (models.length === 0) return;
+  out("  by model\n");
+  for (const m of models) {
+    const bits = [`${m.steps} step${m.steps === 1 ? "" : "s"}`];
+    if (m.costUsd > 0) bits.push(formatUsd(m.costUsd));
+    const tokenLine = formatTokenSummary(m.tokens);
+    if (tokenLine) bits.push(tokenLine);
+    out(`    ${m.model}  ${bits.join(" · ")}\n`);
+  }
 }
 
 interface CreateOptions {
@@ -865,8 +1017,17 @@ function printHumanEvent(event: WorkflowEvent, out: (text: string) => void): voi
     case "phase_done":
       out(`phase ${event.phaseId} ${event.ok ? "ok" : "failed"}\n`);
       return;
+    case "budget_exceeded": {
+      const where = event.scope === "step" && event.stepId ? `step '${event.stepId}'` : "workflow";
+      out(
+        `\n  ⚠ ${where} cost budget ${formatUsd(event.limitUsd)} reached (spent ${formatUsd(event.spentUsd)}) — stopping new steps; resume after raising the cap\n`,
+      );
+      return;
+    }
     case "workflow_done":
-      out(`\nworkflow ${event.ok ? "done" : "failed"}\n`);
+      out(
+        `\nworkflow ${event.budgetExceeded ? "budget-exceeded" : event.ok ? "done" : "failed"}\n`,
+      );
       return;
   }
 }
@@ -901,6 +1062,7 @@ Usage:
   steamtrain workflow history [list]
   steamtrain workflow history show <id>
   steamtrain workflow history clear [<id>]
+  steamtrain workflow costs [--workflow <name>] [--json]
 
 workflow create delegates to an agent (default: opencode/mimo-v2.5-free) to
 draft a workflow from a plain-English description, validates it, prints the JSON,
@@ -915,7 +1077,13 @@ the on-disk cache for that run. Parallel runs of the same workflow + input are n
 
 Every run is recorded to ${WORKFLOW_HISTORY_DIR} (one JSON record per run, newest
 ${100} kept). Inspect past runs with 'workflow history', 'workflow history show <id>',
-and remove them with 'workflow history clear [<id>]'.
+and remove them with 'workflow history clear [<id>]'. 'workflow costs' aggregates
+recorded spend and tokens by workflow, step, and model — "which step is eating the
+budget?".
+
+Set 'maxCostUsd' on a workflow (or a forEach step) to cap spend: the engine stops
+scheduling new steps once the cap is reached, records the run as budget-exceeded,
+and leaves the cache intact so raising the cap and re-running resumes it.
 
 Running steamtrain with no command opens the workflow-first TUI.
 Running steamtrain --web-ui opens the same engine behind a local browser UI.
