@@ -223,6 +223,87 @@ describe("merge workflow step", () => {
     expect(await readFile(join(repo, "shared.txt"), "utf8")).toBe("resolved by agent\n");
   });
 
+  it("skips when all from-sources were skipped, even if an ordering dep ran", async () => {
+    const { repo, worktrees } = await makeRepo();
+    const spec: WorkflowSpec = {
+      name: "skip-cascade",
+      phases: [
+        {
+          id: "work",
+          title: "Work",
+          steps: [
+            {
+              id: "a",
+              agent: "claude",
+              model: "m",
+              prompt: "WRITE a.txt\nfrom a\n",
+              // Input is "task", so this never matches — `a` is skipped.
+              when: { contains: "halt" },
+            },
+            { id: "b", agent: "claude", model: "m", prompt: "WRITE b.txt\nfrom b\n" },
+          ],
+        },
+        {
+          id: "land",
+          title: "Land",
+          steps: [{ id: "land", kind: "merge", from: ["a"], dependsOn: ["b"] }],
+        },
+      ],
+    };
+
+    const events = await runToEvents(spec, repo, worktrees);
+    expect(workflowOk(events)).toBe(true);
+    const land = doneResults(events).get("land");
+    expect(land?.skipped).toBe(true);
+    expect(await git(repo, "status", "--porcelain")).toBe("");
+  });
+
+  it("falls back to a generated branch name when the branch template renders empty", async () => {
+    const { repo, worktrees } = await makeRepo();
+    const spec: WorkflowSpec = {
+      name: "empty-branch-template",
+      phases: [
+        {
+          id: "work",
+          title: "Work",
+          steps: [
+            {
+              id: "a",
+              agent: "claude",
+              model: "m",
+              prompt: "WRITE a.txt\nfrom a\n",
+              when: { contains: "halt" },
+            },
+            { id: "b", agent: "claude", model: "m", prompt: "WRITE b.txt\nfrom b\n" },
+          ],
+        },
+        {
+          id: "land",
+          title: "Land",
+          steps: [
+            {
+              id: "land",
+              kind: "merge",
+              from: ["a", "b"],
+              mode: "branch",
+              // `a` was skipped, so its output is "" — the step must still
+              // get a usable generated branch name.
+              branch: "{{steps.a.output}}",
+            },
+          ],
+        },
+      ],
+    };
+
+    const events = await runToEvents(spec, repo, worktrees);
+    expect(workflowOk(events)).toBe(true);
+    const land = doneResults(events).get("land");
+    expect(land?.ok).toBe(true);
+    const json = land?.json as { merged: string[]; branches: string[] };
+    expect(json.merged).toEqual(["b"]);
+    expect(json.branches[0]).toMatch(/^steamtrain\/merged\//);
+  });
+
   it("fails the merge step (and run) on conflicts when onConflict is fail", async () => {
     const { repo, worktrees } = await makeRepo();
     const spec: WorkflowSpec = {

@@ -273,6 +273,11 @@ export async function snapshotWorktreeState(
   signal?: AbortSignal,
 ): Promise<{ commit: string; changed: boolean }> {
   await assertWorktreeExists(source);
+  // Resolve the base BEFORE committing: for sources without a recorded
+  // baseCommit the fallback is a merge-base against the worktree's own HEAD,
+  // which after the snapshot commit would be the snapshot itself — every
+  // source would then look unchanged and harvesting would silently no-op.
+  const base = await resolveBase(source, "HEAD", signal);
   await runGit(["add", "-A", "."], source.root, undefined, signal);
   const staged = await runGit(["diff", "--cached", "--quiet"], source.root, undefined, signal).then(
     () => false,
@@ -287,7 +292,6 @@ export async function snapshotWorktreeState(
     );
   }
   const head = (await runGitText(["rev-parse", "--verify", "HEAD"], source.root, signal)).trim();
-  const base = await resolveBase(source, "HEAD", signal);
   return { commit: head, changed: head !== base };
 }
 

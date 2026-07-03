@@ -1790,7 +1790,9 @@ async function executeMergeStep(
           repoRoot,
           sources,
           mode,
-          branchName: render(step.branch) ?? defaultHarvestBranchName(step.id),
+          // `||`, not `??`: a branch template that renders to "" (e.g. an
+          // empty step output) must still fall back to a generated name.
+          branchName: render(step.branch) || defaultHarvestBranchName(step.id),
           commitMessage: render(step.commitMessage),
           prTitle: render(step.prTitle),
           prBody: render(step.prBody),
@@ -1933,12 +1935,12 @@ function dependencyFailedResult(stepId: string, dependencyId: string): StepResul
  */
 function findSkipReason(step: WorkflowStep, ctx: GateEvalContext): string | undefined {
   const kind = workflowStepKind(step);
-  // A merge step's sources are `from ?? dependsOn`; like a consolidator it
-  // treats skipped sources as absent and only skips when ALL of them were.
+  // A merge step's sources are `from ?? dependsOn` (matching
+  // executeMergeStep); like a consolidator it treats skipped sources as
+  // absent and only skips when ALL of them were. When `from` is set, any
+  // extra `dependsOn` entries are ordering-only and don't cascade skips.
   const dependsOn =
-    step.kind === "merge"
-      ? [...new Set([...(step.dependsOn ?? []), ...(step.from ?? [])])]
-      : (step.dependsOn ?? []);
+    step.kind === "merge" ? (step.from ?? step.dependsOn ?? []) : (step.dependsOn ?? []);
   const skippedDeps = dependsOn.filter((dep) => ctx.results.get(dep)?.skipped);
   if (kind === "consolidator" || kind === "merge") {
     if (dependsOn.length > 0 && skippedDeps.length === dependsOn.length) {

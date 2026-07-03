@@ -118,6 +118,21 @@ describe("worktree merge-back core", () => {
     expect(diff.files[0]?.status).toBe("R");
   });
 
+  it("harvests sources without a recorded baseCommit (legacy records)", async () => {
+    const { repo, allocate } = await repoWithManager();
+    const source = await allocate("legacy");
+    await writeFile(join(source.root, "src", "a.txt"), "legacy change\n");
+    // Older run records predate baseCommit; the merge-base fallback must
+    // resolve against the pre-snapshot HEAD or every source looks unchanged.
+    const legacy: WorktreeSource = { ...source, baseCommit: undefined };
+
+    const result = await harvestWorktrees({ repoRoot: repo, sources: [legacy], mode: "apply" });
+
+    expect(result.noChanges).toBe(false);
+    expect(result.mergedSources).toEqual(["legacy"]);
+    expect(await readFile(join(repo, "src", "a.txt"), "utf8")).toBe("legacy change\n");
+  });
+
   it("reports no changes when every source worktree is untouched", async () => {
     const { repo, allocate } = await repoWithManager();
     const source = await allocate("idle");
