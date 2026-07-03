@@ -1690,10 +1690,14 @@ async function executeMergeStep(
     const result = ctx.results.get(id);
     if (!result) return fail(`merge source '${id}' has no result`);
     if (result.skipped) continue;
-    if (!result.ok) return fail(`merge source '${id}' failed; nothing was merged`);
+    // Judge fan-out sources leaf by leaf, not by the parent's ok flag: a
+    // parent is not-ok when ANY child failed or never ran (budget), but
+    // skipped/not-run children are simply absent from the merge — only a
+    // child that actually failed poisons it and fails the step.
     const leaves = result.childResults?.length ? result.childResults : [result];
     for (const leaf of leaves) {
       if (leaf.skipped || leaf.notRun) continue;
+      if (!leaf.ok) return fail(`merge source '${leaf.stepId}' failed; nothing was merged`);
       if (leaf.worktree) sources.push(worktreeSourceFromInfo(leaf.stepId, leaf.worktree));
       else missingWorktrees.push(leaf.stepId);
     }
@@ -1903,11 +1907,31 @@ function findFailedDependency(
   step: WorkflowStep,
   results: Map<string, StepResult>,
 ): string | undefined {
+  const mergeSources =
+    step.kind === "merge" ? new Set(step.from ?? step.dependsOn ?? []) : undefined;
   for (const dep of step.dependsOn ?? []) {
     const result = results.get(dep);
-    if (result && !result.ok) return dep;
+    if (!result || result.ok) continue;
+    // A merge step judges its sources leaf by leaf (executeMergeStep): a
+    // fan-out source that is not-ok only because the budget stopped some
+    // children before they ran still has completed worktrees to harvest.
+    if (mergeSources?.has(dep) && isPartialFanOut(result)) continue;
+    return dep;
   }
   return undefined;
+}
+
+/**
+ * A fan-out parent where every child either succeeded or never ran (budget
+ * latch / skip) — no child actually failed — and at least one completed.
+ */
+function isPartialFanOut(result: StepResult): boolean {
+  const leaves = result.childResults;
+  if (!leaves?.length) return false;
+  return (
+    leaves.every((leaf) => leaf.ok || leaf.notRun || leaf.skipped) &&
+    leaves.some((leaf) => leaf.ok && !leaf.notRun && !leaf.skipped)
+  );
 }
 
 function dependencyFailedResult(stepId: string, dependencyId: string): StepResult {

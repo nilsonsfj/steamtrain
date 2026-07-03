@@ -304,8 +304,8 @@ except when an agent is asked to resolve conflicts.
 | `from` | Step ids whose worktrees to merge. Defaults to `dependsOn`. A `forEach` fan-out parent contributes every child worktree. Sources whose worktrees have no changes are skipped. |
 | `mode` | `apply` (default): the merged diff lands in the user's checkout as **uncommitted** working-tree changes (pre-checked and all-or-nothing; the step fails with guidance when local edits conflict). `branch`: the merged state is left on a local branch. `pr`: the branch is pushed to `origin` and a pull request is opened with the `gh` CLI. |
 | `branch` | Branch name template for `branch`/`pr` modes; a unique `steamtrain/merged/…` name is generated when omitted. |
-| `perSource` | One branch/PR **per source worktree** instead of one combined merge — e.g. each parallel `forEach` implementer gets its own PR for human review. |
-| `onConflict` | What to do when sources conflict with each other: `fail` (default), `ours`/`theirs` (deterministic, via `git merge -X`), or `agent` — the configured agent runs inside the staging worktree and resolves the conflict markers. Requires `agent` + `model`. |
+| `perSource` | One branch/PR **per source worktree** instead of one combined merge — e.g. each parallel `forEach` implementer gets its own PR for human review. Requires `mode` `branch` or `pr`. |
+| `onConflict` | What to do when sources conflict with each other: `fail` (default), `ours`/`theirs` (deterministic, via `git merge -X` — resolves content conflicts only; tree-level conflicts like modify/delete still fail), or `agent` — the configured agent runs inside the staging worktree and resolves the conflict markers. Requires `agent` + `model`. |
 | `prompt` | Extra guidance appended to the built-in conflict-resolution prompt. |
 | `commitMessage`, `prTitle`, `prBody` | Templates for the merge commit and the PR (all support `{{…}}` placeholders). |
 
@@ -517,6 +517,7 @@ Unknown placeholders are left unchanged.
 - Merge steps require `from` or `dependsOn`; `from` may reference earlier
   phases only.
 - A merge step with `onConflict: "agent"` requires `agent` and `model`.
+- A merge step with `perSource` requires `mode` `"branch"` or `"pr"`.
 
 ## CLI
 

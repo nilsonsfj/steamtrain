@@ -171,9 +171,10 @@ export interface ConsolidatorStep extends WorkflowStepBase {
  *
  * Conflicts BETWEEN sources (two agents touched the same lines) follow
  * `onConflict`: `"fail"` (default), `"ours"` / `"theirs"` (first-merged wins /
- * incoming wins, via `git merge -X`), or `"agent"` — the configured agent is
- * launched inside the staging worktree with the conflict markers and asked to
- * resolve them.
+ * incoming wins, via `git merge -X` — content conflicts only; tree-level
+ * conflicts such as modify/delete or rename/rename still fail), or `"agent"`
+ * — the configured agent is launched inside the staging worktree with the
+ * conflict markers and asked to resolve them.
  */
 export interface MergeStep extends WorkflowStepBase {
   kind: "merge";
@@ -183,7 +184,7 @@ export interface MergeStep extends WorkflowStepBase {
   mode?: "apply" | "branch" | "pr";
   /** Branch name template for branch/pr modes; generated when omitted. */
   branch?: string;
-  /** One branch/PR per source worktree instead of one combined merge. */
+  /** One branch/PR per source worktree instead of one combined merge (branch/pr modes only). */
   perSource?: boolean;
   /** What to do when source worktrees conflict with each other. Default `"fail"`. */
   onConflict?: "fail" | "ours" | "theirs" | "agent";
@@ -532,6 +533,15 @@ const workflowMergeStepSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'merge step with onConflict "agent" requires agent and model',
+      });
+    }
+    // Applying source diffs one at a time to the same checkout can't be
+    // all-or-nothing across sources (a later source's failed apply would
+    // leave earlier sources' changes in the working tree).
+    if (step.perSource && (step.mode ?? "apply") === "apply") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'merge step with perSource requires mode "branch" or "pr"',
       });
     }
     if ((step.agent || step.model) && !(step.agent && step.model)) {

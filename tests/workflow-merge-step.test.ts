@@ -304,6 +304,61 @@ describe("merge workflow step", () => {
     expect(json.branches[0]).toMatch(/^steamtrain\/merged\//);
   });
 
+  it("merges completed fan-out children when the budget stopped the rest", async () => {
+    const { repo, worktrees } = await makeRepo();
+    const spec: WorkflowSpec = {
+      name: "budget-partial-fanout",
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [{ id: "targets", kind: "distributor", items: ["one", "two"] }],
+        },
+        {
+          id: "work",
+          title: "Work",
+          steps: [
+            {
+              id: "impl",
+              forEach: "steps.targets.items",
+              agent: "claude",
+              model: "m",
+              // The fake adapter bills $0.01 per child; the cap latches after
+              // the first child, so impl[1] is left not-run.
+              maxCostUsd: 0.005,
+              prompt: "WRITE {{item}}.txt\ncontent of {{item}}\n",
+            },
+          ],
+        },
+        {
+          id: "land",
+          title: "Land",
+          steps: [
+            { id: "land", kind: "merge", dependsOn: ["impl"], mode: "branch", branch: "b/partial" },
+          ],
+        },
+      ],
+    };
+
+    const deps: WorkflowDeps = {
+      createAdapter: fileWritingAdapter(),
+      maxConcurrency: 1, // children run sequentially so the latch point is deterministic
+      cwd: repo,
+      agentWorkspace: createGitWorktreeManager({ baseDir: worktrees, runId: "merge-step-test" }),
+    };
+    const events: WorkflowEvent[] = [];
+    for await (const ev of runWorkflow(spec, { input: "task" }, deps)) events.push(ev);
+
+    // The run is not-ok (budget latched), but the merge step still harvests
+    // the child that completed instead of failing on the not-ok parent.
+    const land = doneResults(events).get("land");
+    expect(land?.ok).toBe(true);
+    const json = land?.json as { merged: string[] };
+    expect(json.merged).toEqual(["impl[0]"]);
+    expect(await git(repo, "show", "b/partial:one.txt")).toBe("content of one");
+    await expect(git(repo, "show", "b/partial:two.txt")).rejects.toThrow();
+  });
+
   it("fails the merge step (and run) on conflicts when onConflict is fail", async () => {
     const { repo, worktrees } = await makeRepo();
     const spec: WorkflowSpec = {
@@ -408,6 +463,27 @@ describe("merge step validation", () => {
     const result = validateWorkflow(bad);
     expect(result.ok).toBe(false);
     expect(result.error).toContain("unknown step 'ghost'");
+  });
+
+  it("rejects perSource with apply mode", () => {
+    const bad: WorkflowSpec = {
+      name: "w",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "a", agent: "claude", model: "m", prompt: "x" }],
+        },
+        {
+          id: "p2",
+          title: "P2",
+          steps: [{ id: "land", kind: "merge", dependsOn: ["a"], perSource: true }],
+        },
+      ],
+    };
+    const result = validateWorkflow(bad);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('perSource requires mode "branch" or "pr"');
   });
 
   it("requires agent and model for onConflict agent", () => {

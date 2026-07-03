@@ -68,7 +68,9 @@ All harvesting is plain git, shared between the engine step and the CLI
    this works even when the user's HEAD moved since the run started.
 3. **Resolve.** A conflicting merge follows `onConflict`:
    - `fail` (default): abort, step fails listing the conflicted files.
-   - `ours` / `theirs`: `git merge -X ours|theirs` — deterministic winner.
+   - `ours` / `theirs`: `git merge -X ours|theirs` — deterministic winner for
+     content conflicts. Tree-level conflicts (modify/delete, rename/rename)
+     are not auto-resolved by `-X` and still fail; use `agent` for those.
    - `agent`: the configured agent is spawned *inside the staging worktree*
      with a built-in prompt naming the conflicted files (plus optional
      `prompt` guidance). It edits the files; the engine stages, verifies no
@@ -115,7 +117,8 @@ of its history.
   DAG scheduling, alongside `dependsOn` and template references.
 - **Skips:** like a consolidator, a merge step treats skipped sources as
   absent and is skipped only when *all* of its sources were skipped.
-- **Failures:** any failed source fails the merge step (nothing is merged).
+- **Failures:** any failed source (or failed fan-out child) fails the merge
+  step — nothing is merged.
 - **Caching/resume:** a successful merge step is cached like any step; a
   resumed run replays it without re-applying.
 - **Fan-out:** a `forEach` parent source contributes every child worktree;
