@@ -838,6 +838,9 @@ select.sel {
 .estep.merge {
   border-left-color: #ff9ecb;
 }
+.estep.command {
+  border-left-color: #b8c4d0;
+}
 .estep .eh {
   display: flex;
   align-items: center;

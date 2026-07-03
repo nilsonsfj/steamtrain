@@ -411,7 +411,7 @@
     return h("span", null, i, label);
   }
   function kindColor(k) {
-    return { worker: "#6fb1ff", processor: "#9d8cff", distributor: "#ffce6f", consolidator: "#5fe0c6", gate: "#f0a35e", merge: "#ff9ecb" }[k] || "#6fb1ff";
+    return { worker: "#6fb1ff", processor: "#9d8cff", distributor: "#ffce6f", consolidator: "#5fe0c6", gate: "#f0a35e", merge: "#ff9ecb", command: "#b8c4d0" }[k] || "#6fb1ff";
   }
 
   function renderCard(s) {
