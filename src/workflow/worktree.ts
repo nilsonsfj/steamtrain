@@ -26,6 +26,8 @@ export interface AgentWorkspaceLease {
   root?: string;
   /** Branch checked out by the isolated worktree when one was created. */
   branch?: string;
+  /** Commit the worktree branch started from (the merge-back diff base). */
+  baseCommit?: string;
   /** Ignored runtime entries linked from the source checkout into the worktree. */
   linkedIgnoredPaths?: string[];
   dispose: () => Promise<void> | void;
@@ -107,6 +109,7 @@ class GitWorktreeManager implements AgentWorkspaceManager {
       cwd: relativeStepCwd ? join(worktreeRoot, relativeStepCwd) : worktreeRoot,
       root: worktreeRoot,
       branch,
+      baseCommit: worktreeHead,
       linkedIgnoredPaths,
       // Worktrees are retained after successful runs so users can inspect,
       // commit, or merge agent-created files from the recorded branch.
@@ -311,20 +314,29 @@ function randomId(): string {
   return randomBytes(5).toString("hex");
 }
 
-async function runGitText(args: string[], cwd: string, signal?: AbortSignal): Promise<string> {
+export async function runGitText(
+  args: string[],
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<string> {
   return (await runGit(args, cwd, undefined, signal)).toString("utf8");
 }
 
-function runGit(
+export function runGit(
   args: string[],
   cwd: string,
   input?: Buffer,
   signal?: AbortSignal,
+  env?: Record<string, string>,
 ): Promise<Buffer> {
   throwIfAborted(signal);
   return new Promise((resolvePromise, reject) => {
     let settled = false;
-    const child = spawn("git", args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn("git", args, {
+      cwd,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: env ? { ...process.env, ...env } : undefined,
+    });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     const cleanup = (): void => signal?.removeEventListener("abort", onAbort);

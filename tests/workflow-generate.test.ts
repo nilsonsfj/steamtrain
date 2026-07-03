@@ -542,7 +542,7 @@ describe("buildWorkflowRepairPrompt", () => {
     // The previous output itself is capped at MAX_REPAIR_OUTPUT_CHARS (4000); the
     // rest of the prompt is the (larger, but bounded) base generation prompt plus
     // a small amount of repair scaffolding — not proportional to `huge`.
-    expect(prompt.length).toBeLessThan(huge.length + 6000);
+    expect(prompt.length).toBeLessThan(huge.length + 7000);
   });
 });
 

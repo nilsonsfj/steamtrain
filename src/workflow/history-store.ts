@@ -170,7 +170,14 @@ function validateRecord(file: string): RunRecord | undefined {
   if (r.version !== RUN_RECORD_VERSION) return undefined;
   if (typeof r.id !== "string" || typeof r.workflow !== "string") return undefined;
   if (typeof r.startedAt !== "number") return undefined;
-  if (r.status !== "done" && r.status !== "error" && r.status !== "canceled") return undefined;
+  if (
+    r.status !== "done" &&
+    r.status !== "error" &&
+    r.status !== "canceled" &&
+    r.status !== "budget-exceeded"
+  ) {
+    return undefined;
+  }
   if (!Array.isArray(r.phases)) return undefined;
   for (const phase of r.phases as unknown[]) {
     if (!phase || typeof phase !== "object") return undefined;
@@ -193,5 +200,7 @@ function validateRecord(file: string): RunRecord | undefined {
     phases: r.phases,
     totals: r.totals ?? computeRunTotals(r.phases),
     error: typeof r.error === "string" ? r.error : undefined,
+    budget: r.budget && typeof r.budget === "object" ? r.budget : undefined,
+    harvest: r.harvest && typeof r.harvest === "object" ? r.harvest : undefined,
   };
 }

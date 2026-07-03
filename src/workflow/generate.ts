@@ -155,6 +155,15 @@ or disjoint, never partially overlapping.
 - "gate": evaluate a condition, e.g. { "kind": "gate", "dependsOn": ["x"],
   "condition": { "step": "x", "ok": true }, "onFalse": "fail" }. condition.step
   must be in an earlier phase.
+- "merge": land the FILE CHANGES of earlier agent steps (each runs in an isolated
+  git worktree) back into the user's repository. Requires dependsOn (or "from":
+  ["stepId", ...]). "mode": "apply" (default; changes land uncommitted in the
+  user's checkout), "branch" (left on a local branch), or "pr" (pushed + a GitHub
+  PR is opened; "perSource": true opens one PR per parallel source). "onConflict":
+  "fail" (default), "ours", "theirs", or "agent" (requires agent+model; the agent
+  resolves conflict markers). Add a final merge step to any workflow whose agents
+  EDIT files (implement/fix/refactor) — without one the edits stay stranded in
+  worktrees. Review-only workflows don't need it.
 
 # Per-step conditions ("when")
 Any step may carry a "when" condition (same shape as a gate condition), e.g.
@@ -191,7 +200,9 @@ phase count modest.
 # Templates available in prompts/items
 {{input}} / {{args}} (the user's task), {{steps.<id>.output}}, {{steps.<id>.items}},
 {{steps.<id>.ok}}, {{steps.<id>.error}}, {{steps.<id>.target}},
-{{steps.<id>.json}} / {{steps.<id>.json.<path>}} (structured output fields), {{item}},
+{{steps.<id>.json}} / {{steps.<id>.json.<path>}} (structured output fields),
+{{steps.<id>.worktree.root}} / {{steps.<id>.worktree.branch}} (an agent step's
+isolated git worktree, for custom integration steps), {{item}},
 {{item.index}}, {{item.sourceStepId}}, {{iteration}}.
 
 # Agents & models

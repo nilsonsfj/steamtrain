@@ -6,6 +6,7 @@ export {
   type DistributorStep,
   type GateCondition,
   type GateStep,
+  type MergeStep,
   type WorkerStep,
   type WorkflowItem,
   type WorkflowStep,
@@ -85,6 +86,22 @@ export {
   type GitWorktreeManagerOptions,
 } from "./worktree";
 export {
+  MergeConflictError,
+  defaultHarvestBranchName,
+  harvestWorktrees,
+  pruneWorktree,
+  snapshotWorktreeState,
+  worktreeDiff,
+  worktreeSourceFromInfo,
+  type ConflictRecord,
+  type ConflictResolver,
+  type DiffFileStat,
+  type HarvestRequest,
+  type HarvestResult,
+  type WorktreeDiff,
+  type WorktreeSource,
+} from "./merge";
+export {
   type RetryPolicy,
   type ResolvedRetryPolicy,
   DEFAULT_RETRY,
@@ -134,6 +151,7 @@ export {
   type RunStepStatus,
   type RunTotals,
   type RunBudgetInfo,
+  type RunHarvestInfo,
   type HistoryPhase,
   type HistoryStep,
 } from "./history";

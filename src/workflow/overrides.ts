@@ -147,7 +147,7 @@ export function applyWorkflowStepOverrides(
         const patch = overrides[step.id];
         if (!patch || !isAgentBackedStep(step)) return step;
         const kind = workflowStepKind(step);
-        if (kind === "distributor" || kind === "consolidator") {
+        if (kind === "distributor" || kind === "consolidator" || kind === "merge") {
           const safePatch: Partial<AgentRunFields> = {};
           for (const key of AGENT_FIELD_KEYS) {
             if (key in patch) {

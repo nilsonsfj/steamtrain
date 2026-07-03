@@ -278,6 +278,68 @@ gate:
 
 Steps with `dependsOn` are skipped when any referenced earlier step failed.
 
+### Merge (worktree merge-back)
+
+Agent steps run in isolated git worktrees, so their file edits never land in
+the user's checkout by themselves. A `merge` step harvests those worktrees:
+it snapshots each source step's working state into a commit on its steamtrain
+branch, merges the sources together in an isolated staging worktree, and
+delivers the result. It is engine-executed (deterministic, no agent, no cost)
+except when an agent is asked to resolve conflicts.
+
+```jsonc
+{
+  "id": "land",
+  "kind": "merge",
+  "dependsOn": ["implement"],          // sources default to dependsOn
+  "mode": "apply",                     // apply | branch | pr
+  "onConflict": "agent",               // fail | ours | theirs | agent
+  "agent": "claude",                   // conflict-resolution agent (onConflict: "agent")
+  "model": "claude-sonnet-4-6"
+}
+```
+
+| field | meaning |
+| --- | --- |
+| `from` | Step ids whose worktrees to merge. Defaults to `dependsOn`. A `forEach` fan-out parent contributes every child worktree. Sources whose worktrees have no changes are skipped. |
+| `mode` | `apply` (default): the merged diff lands in the user's checkout as **uncommitted** working-tree changes (pre-checked and all-or-nothing; the step fails with guidance when local edits conflict). `branch`: the merged state is left on a local branch. `pr`: the branch is pushed to `origin` and a pull request is opened with the `gh` CLI. |
+| `branch` | Branch name template for `branch`/`pr` modes; a unique `steamtrain/merged/…` name is generated when omitted. |
+| `perSource` | One branch/PR **per source worktree** instead of one combined merge — e.g. each parallel `forEach` implementer gets its own PR for human review. |
+| `onConflict` | What to do when sources conflict with each other: `fail` (default), `ours`/`theirs` (deterministic, via `git merge -X`), or `agent` — the configured agent runs inside the staging worktree and resolves the conflict markers. Requires `agent` + `model`. |
+| `prompt` | Extra guidance appended to the built-in conflict-resolution prompt. |
+| `commitMessage`, `prTitle`, `prBody` | Templates for the merge commit and the PR (all support `{{…}}` placeholders). |
+
+The step's output is a human-readable summary, and its structured result
+(`{{steps.<id>.json.<path>}}`, gate `path` conditions) reports `mode`,
+`merged`, `unchanged`, `files`, `additions`, `deletions`, `conflicts`,
+`branches`, `prUrls`, and `noChanges` — so a downstream gate can, for example,
+fail the run when nothing was produced:
+
+```jsonc
+{
+  "id": "produced-changes",
+  "kind": "gate",
+  "dependsOn": ["land"],
+  "condition": { "step": "land", "path": "noChanges", "equals": "false" },
+  "onFalse": "fail"
+}
+```
+
+Conflicts with the *user's checkout* are deliberately out of scope for
+`apply`: the merged diff is checked first and the step fails cleanly (use
+`mode: "branch"` or stash the local edits), so a run can never leave the
+checkout half-patched or spray conflict markers into it.
+
+For bespoke integration flows, skip the `merge` step and give a plain agent
+step the worktree paths via templates:
+`{{steps.<id>.worktree.root}}` / `{{steps.<id>.worktree.branch}}`.
+
+Past runs can be harvested manually with the same machinery:
+`steamtrain workflow history show <id> --diff [--step <stepId>] [--stat]`,
+`history apply <id> [--step <stepId>]`, and `history prune <id>` (discard the
+run's worktrees and branches). See
+[`worktree-merge-back.md`](worktree-merge-back.md) for the full design.
+
 ## Per-step conditions (`when`)
 
 Any step may carry a `when` condition using the gate-condition schema. It is
@@ -423,6 +485,9 @@ Prompt templates and several block fields support:
 | `{{steps.<id>.target}}` | Prior gate target/state, if any. |
 | `{{steps.<id>.json}}` | Prior step's parsed structured output, JSON-serialized. |
 | `{{steps.<id>.json.<path>}}` | A field of it, e.g. `json.verdict` or `json.targets[2]`. Strings render raw, other values JSON-serialized, missing fields empty. |
+| `{{steps.<id>.worktree.root}}` | The step's isolated git worktree directory (empty when the step ran without one). |
+| `{{steps.<id>.worktree.branch}}` | The steamtrain branch checked out in that worktree. |
+| `{{steps.<id>.worktree.cwd}}` | The cwd the agent actually ran in (inside the worktree). |
 | `{{item}}`, `{{item.value}}` | Current dynamic fan-out item inside a `forEach` worker/processor. |
 | `{{item.index}}` | Zero-based index of the current fan-out item. |
 | `{{item.sourceStepId}}` | Distributor step id that produced the current item. |
@@ -449,6 +514,9 @@ Unknown placeholders are left unchanged.
 - A gate/`when` condition `path` requires `step`.
 - Distributor `itemsPath` requires an agent-backed step with an `output`
   schema.
+- Merge steps require `from` or `dependsOn`; `from` may reference earlier
+  phases only.
+- A merge step with `onConflict: "agent"` requires `agent` and `model`.
 
 ## CLI
 

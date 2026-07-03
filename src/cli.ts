@@ -15,6 +15,8 @@ import { Orchestrator } from "./orchestrator";
 import { loadSettings } from "./settings";
 import type { AgentInstanceId } from "./types/events";
 import {
+  type HarvestResult,
+  MergeConflictError,
   type ModelUsage,
   type RerunMode,
   type RunRecord,
@@ -26,6 +28,8 @@ import {
   WORKFLOW_HISTORY_DIR,
   type WorkflowEvent,
   type WorkflowSpec,
+  type WorktreeDiff,
+  type WorktreeSource,
   aggregateCosts,
   aggregateLeavesByModel,
   createWorkflowCacheStore,
@@ -35,11 +39,13 @@ import {
   formatTokens,
   formatUsd,
   generateWorkflow,
+  harvestWorktrees,
   hashWorkflowSpec,
   isRerunError,
   modelBreakdownForRecord,
   persistWorkflowStepDone,
   planRerun,
+  pruneWorktree,
   rerunDowngradeMessage,
   resolveStepTimeoutSec,
   resolveWorkflowTimeoutSec,
@@ -53,6 +59,8 @@ import {
   workflowAgentIds,
   workflowCacheKey,
   workflowStepKind,
+  worktreeDiff,
+  worktreeSourceFromInfo,
 } from "./workflow";
 import { loadWorkflowCatalog, workflowCatalogEntries } from "./workflow";
 import { loadWorkspaceConfig } from "./workspace";
@@ -311,7 +319,7 @@ async function runHistoryCommand(
   if (sub === "show") {
     const id = args[1];
     if (!id) {
-      err("usage: steamtrain workflow history show <id>\n");
+      err("usage: steamtrain workflow history show <id> [--diff [--step <stepId>] [--stat]]\n");
       return 1;
     }
     const record = await store.get(id);
@@ -319,8 +327,41 @@ async function runHistoryCommand(
       err(`unknown run '${id}'\n`);
       return 1;
     }
+    const flags = args.slice(2);
+    if (flags.includes("--diff")) {
+      const stepFilter = flagValue(flags, "--step");
+      return printHistoryDiff(record, stepFilter, flags.includes("--stat"), out, err);
+    }
     printHistoryRecord(record, out);
     return 0;
+  }
+
+  if (sub === "apply") {
+    const id = args[1];
+    if (!id) {
+      err("usage: steamtrain workflow history apply <id> [--step <stepId>]\n");
+      return 1;
+    }
+    const record = await store.get(id);
+    if (!record) {
+      err(`unknown run '${id}'\n`);
+      return 1;
+    }
+    return applyHistoryWorktrees(store, record, flagValue(args.slice(2), "--step"), out, err);
+  }
+
+  if (sub === "prune") {
+    const id = args[1];
+    if (!id) {
+      err("usage: steamtrain workflow history prune <id>\n");
+      return 1;
+    }
+    const record = await store.get(id);
+    if (!record) {
+      err(`unknown run '${id}'\n`);
+      return 1;
+    }
+    return pruneHistoryWorktrees(store, record, out, err);
   }
 
   if (sub === "clear") {
@@ -457,6 +498,19 @@ function printHistoryRecord(
       `  budget:   ${scope} cap ${formatUsd(b.limitUsd)} reached (spent ${formatUsd(b.spentUsd)}) — resumable after raising the cap\n`,
     );
   }
+  if (record.harvest) {
+    const bits: string[] = [];
+    if (record.harvest.appliedSteps?.length) {
+      const when = record.harvest.appliedAt
+        ? ` at ${new Date(record.harvest.appliedAt).toISOString()}`
+        : "";
+      bits.push(`applied ${record.harvest.appliedSteps.join(", ")}${when}`);
+    }
+    if (record.harvest.prunedAt) {
+      bits.push(`worktrees pruned at ${new Date(record.harvest.prunedAt).toISOString()}`);
+    }
+    if (bits.length > 0) out(`  harvest:  ${bits.join(" · ")}\n`);
+  }
   out(`  totals:   ${formatRunTotals(record.totals, { cached: true, tokens: true })}\n`);
   printModelBreakdown(modelBreakdownForRecord(record), out);
   for (const phase of record.phases) {
@@ -481,6 +535,139 @@ function printHistoryRecord(
 }
 
 type WorkflowHistoryStoreGet = ReturnType<typeof createWorkflowHistoryStore>["get"];
+
+function flagValue(args: string[], flag: string): string | undefined {
+  const index = args.indexOf(flag);
+  return index >= 0 ? args[index + 1] : undefined;
+}
+
+/**
+ * The harvestable steps of a recorded run: every step that ran in a git
+ * worktree, deduped by step id keeping the LAST occurrence (a loop body step
+ * appears once per iteration; the final iteration's worktree is its final
+ * state).
+ */
+function worktreeStepsOf(record: RunRecord, stepFilter?: string): WorktreeSource[] {
+  const byId = new Map<string, WorktreeSource>();
+  for (const phase of record.phases) {
+    for (const step of phase.steps) {
+      if (!step.worktree) continue;
+      if (stepFilter && step.stepId !== stepFilter) continue;
+      byId.set(step.stepId, worktreeSourceFromInfo(step.stepId, step.worktree));
+    }
+  }
+  return [...byId.values()];
+}
+
+/** `workflow history show <id> --diff` — per-step worktree diffs of a past run. */
+async function printHistoryDiff(
+  record: RunRecord,
+  stepFilter: string | undefined,
+  statOnly: boolean,
+  out: (text: string) => void,
+  err: (text: string) => void,
+): Promise<number> {
+  const sources = worktreeStepsOf(record, stepFilter);
+  if (sources.length === 0) {
+    err(
+      stepFilter
+        ? `run '${record.id}' has no worktree recorded for step '${stepFilter}'\n`
+        : `run '${record.id}' has no step worktrees (agent steps get worktrees only inside a git repository)\n`,
+    );
+    return 1;
+  }
+  let printed = 0;
+  for (const source of sources) {
+    let diff: WorktreeDiff;
+    try {
+      diff = await worktreeDiff(source, { patch: !statOnly });
+    } catch (e) {
+      err(`── ${source.stepId}: ${message(e)}\n`);
+      continue;
+    }
+    if (diff.files.length === 0) continue;
+    printed += 1;
+    out(`── ${source.stepId} (${source.branch})\n`);
+    for (const file of diff.files) {
+      out(`   ${file.status} ${file.path}  +${file.additions} -${file.deletions}\n`);
+    }
+    out(`   ${diff.files.length} file(s), +${diff.additions} -${diff.deletions}\n`);
+    if (!statOnly && diff.patch) out(`\n${diff.patch}\n`);
+  }
+  if (printed === 0) out("no changes in any recorded worktree\n");
+  return 0;
+}
+
+/** `workflow history apply <id>` — merge a past run's worktrees into the workspace. */
+async function applyHistoryWorktrees(
+  store: ReturnType<typeof createWorkflowHistoryStore>,
+  record: RunRecord,
+  stepFilter: string | undefined,
+  out: (text: string) => void,
+  err: (text: string) => void,
+): Promise<number> {
+  const sources = worktreeStepsOf(record, stepFilter);
+  if (sources.length === 0) {
+    err(
+      stepFilter
+        ? `run '${record.id}' has no worktree recorded for step '${stepFilter}'\n`
+        : `run '${record.id}' has no step worktrees to apply\n`,
+    );
+    return 1;
+  }
+  let result: HarvestResult;
+  try {
+    result = await harvestWorktrees({ repoRoot: record.cwd, sources, mode: "apply" });
+  } catch (e) {
+    err(`${message(e)}\n`);
+    if (e instanceof MergeConflictError) {
+      err(
+        'hint: apply steps one at a time with --step <stepId>, or add a merge step with onConflict "agent" to the workflow\n',
+      );
+    }
+    return 1;
+  }
+  if (result.noChanges) {
+    out("no changes to apply\n");
+    return 0;
+  }
+  out(
+    `applied ${result.mergedSources.join(", ")} to ${record.cwd} (uncommitted): ${result.files.length} file(s) +${result.additions} -${result.deletions}\n`,
+  );
+  record.harvest = {
+    ...record.harvest,
+    appliedSteps: [...new Set([...(record.harvest?.appliedSteps ?? []), ...result.mergedSources])],
+    appliedAt: Date.now(),
+  };
+  await store
+    .save(record)
+    .catch((e) => err(`warning: could not update run record: ${message(e)}\n`));
+  return 0;
+}
+
+/** `workflow history prune <id>` — discard a past run's worktrees and branches. */
+async function pruneHistoryWorktrees(
+  store: ReturnType<typeof createWorkflowHistoryStore>,
+  record: RunRecord,
+  out: (text: string) => void,
+  err: (text: string) => void,
+): Promise<number> {
+  const sources = worktreeStepsOf(record);
+  if (sources.length === 0) {
+    out(`run '${record.id}' has no step worktrees to prune\n`);
+    return 0;
+  }
+  let pruned = 0;
+  for (const source of sources) {
+    if (await pruneWorktree(source, record.cwd)) pruned += 1;
+  }
+  record.harvest = { ...record.harvest, prunedAt: Date.now() };
+  await store
+    .save(record)
+    .catch((e) => err(`warning: could not update run record: ${message(e)}\n`));
+  out(`pruned ${pruned}/${sources.length} worktree(s) for run '${record.id}'\n`);
+  return 0;
+}
 
 function truncateLine(text: string, max: number): string {
   const oneLine = text.replace(/\n/g, " ");
@@ -1060,7 +1247,9 @@ Usage:
   steamtrain workflow create --input <description> [--agent <id>] [--model <model>] [--name <name>] [--save] [--scope user|project] [--json]
   steamtrain workflow cache clear [<workflow> --input <text> | --stdin]
   steamtrain workflow history [list]
-  steamtrain workflow history show <id>
+  steamtrain workflow history show <id> [--diff [--step <stepId>] [--stat]]
+  steamtrain workflow history apply <id> [--step <stepId>]
+  steamtrain workflow history prune <id>
   steamtrain workflow history clear [<id>]
   steamtrain workflow costs [--workflow <name>] [--json]
 
@@ -1080,6 +1269,13 @@ ${100} kept). Inspect past runs with 'workflow history', 'workflow history show 
 and remove them with 'workflow history clear [<id>]'. 'workflow costs' aggregates
 recorded spend and tokens by workflow, step, and model — "which step is eating the
 budget?".
+
+Agent steps run in isolated git worktrees that are retained after the run.
+'history show <id> --diff' shows what each step changed (--stat for a summary,
+--step to focus one step); 'history apply <id>' merges those changes into the
+workspace as uncommitted edits; 'history prune <id>' discards the run's
+worktrees and branches. To harvest changes automatically instead, end the
+workflow with a "merge" step (see docs/workflow-spec.md).
 
 Set 'maxCostUsd' on a workflow (or a forEach step) to cap spend: the engine stops
 scheduling new steps once the cap is reached, records the run as budget-exceeded,

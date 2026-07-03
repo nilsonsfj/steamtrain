@@ -19,7 +19,13 @@ import type { JsonSchema } from "./structured";
  * `worker` blocks.
  */
 
-export type WorkflowStepKind = "worker" | "processor" | "distributor" | "consolidator" | "gate";
+export type WorkflowStepKind =
+  | "worker"
+  | "processor"
+  | "distributor"
+  | "consolidator"
+  | "gate"
+  | "merge";
 
 export interface WorkflowStepBase {
   /** Unique across the whole workflow; referenced by `dependsOn` and templates. */
@@ -142,6 +148,61 @@ export interface ConsolidatorStep extends WorkflowStepBase {
   output?: JsonSchema;
 }
 
+/**
+ * Merge-back step: harvest the git worktrees of earlier agent steps and land
+ * their changes somewhere useful. Deterministic (engine-executed, no agent) in
+ * the common path; an optional agent resolves merge conflicts when
+ * `onConflict: "agent"`.
+ *
+ * Sources are `from` (default: `dependsOn`). A source that is a `forEach`
+ * fan-out parent contributes every child worktree. Sources whose worktrees
+ * have no changes are skipped.
+ *
+ * Delivery `mode`:
+ *  - `"apply"` (default): the merged diff lands in the user's checkout as
+ *    uncommitted working-tree changes (pre-checked, all-or-nothing; the step
+ *    fails with guidance when local edits conflict).
+ *  - `"branch"`: the merged state is left on a local branch (`branch`, or a
+ *    generated `steamtrain/merged/…` name).
+ *  - `"pr"`: the branch is pushed to `origin` and a pull request is opened via
+ *    the `gh` CLI (`prTitle` / `prBody` templates). With `perSource: true`,
+ *    each source worktree gets its own branch + PR — the "one PR per parallel
+ *    agent, reviewed by a human" operating model.
+ *
+ * Conflicts BETWEEN sources (two agents touched the same lines) follow
+ * `onConflict`: `"fail"` (default), `"ours"` / `"theirs"` (first-merged wins /
+ * incoming wins, via `git merge -X`), or `"agent"` — the configured agent is
+ * launched inside the staging worktree with the conflict markers and asked to
+ * resolve them.
+ */
+export interface MergeStep extends WorkflowStepBase {
+  kind: "merge";
+  /** Steps whose worktrees to merge; defaults to `dependsOn`. */
+  from?: string[];
+  /** Where the merged changes land (see kind docs). Default `"apply"`. */
+  mode?: "apply" | "branch" | "pr";
+  /** Branch name template for branch/pr modes; generated when omitted. */
+  branch?: string;
+  /** One branch/PR per source worktree instead of one combined merge. */
+  perSource?: boolean;
+  /** What to do when source worktrees conflict with each other. Default `"fail"`. */
+  onConflict?: "fail" | "ours" | "theirs" | "agent";
+  /** Merge-commit message template. */
+  commitMessage?: string;
+  /** PR title/body templates (pr mode). */
+  prTitle?: string;
+  prBody?: string;
+  /** Conflict-resolution agent (`onConflict: "agent"`). */
+  agent?: AgentInstanceId;
+  model?: string;
+  effort?: string;
+  /** Extra guidance appended to the built-in conflict-resolution prompt. */
+  prompt?: string;
+  env?: Record<string, string>;
+  extraArgs?: string[];
+  stepTimeoutSec?: number;
+}
+
 export interface GateCondition {
   /** Step whose result is inspected; omitted means inspect the workflow input. */
   step?: string;
@@ -182,7 +243,7 @@ export interface GateStep extends WorkflowStepBase {
   maxIterations?: number;
 }
 
-export type WorkflowStep = WorkerStep | DistributorStep | ConsolidatorStep | GateStep;
+export type WorkflowStep = WorkerStep | DistributorStep | ConsolidatorStep | GateStep | MergeStep;
 
 export interface WorkflowPhase {
   id: string;
@@ -225,6 +286,8 @@ export interface AgentWorktreeInfo {
   root: string;
   /** Branch checked out by the isolated git worktree. */
   branch: string;
+  /** Commit the worktree branch started from (the merge-back diff base). */
+  baseCommit?: string;
   /** Ignored runtime entries linked from the source checkout into the worktree. */
   linkedIgnoredPaths?: string[];
 }
@@ -438,10 +501,52 @@ const workflowGateStepSchema = z.object({
   maxIterations: z.number().int().min(1).max(LOOP_MAX_ITERATIONS_CEILING).optional(),
 });
 
+const workflowMergeStepSchema = z
+  .object({
+    ...baseStepShape,
+    kind: z.literal("merge"),
+    from: z.array(z.string().min(1)).min(1).optional(),
+    mode: z.enum(["apply", "branch", "pr"]).optional(),
+    branch: z.string().min(1).optional(),
+    perSource: z.boolean().optional(),
+    onConflict: z.enum(["fail", "ours", "theirs", "agent"]).optional(),
+    commitMessage: z.string().min(1).optional(),
+    prTitle: z.string().min(1).optional(),
+    prBody: z.string().min(1).optional(),
+    agent: agentId.optional(),
+    model: z.string().min(1).optional(),
+    effort: z.string().min(1).optional(),
+    prompt: z.string().min(1).optional(),
+    env: z.record(z.string()).optional(),
+    extraArgs: z.array(z.string()).optional(),
+    stepTimeoutSec: z.number().positive().optional(),
+  })
+  .superRefine((step, ctx) => {
+    if (!step.from?.length && !step.dependsOn?.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "merge step requires from or dependsOn (the steps whose worktrees to merge)",
+      });
+    }
+    if (step.onConflict === "agent" && !(step.agent && step.model)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'merge step with onConflict "agent" requires agent and model',
+      });
+    }
+    if ((step.agent || step.model) && !(step.agent && step.model)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "merge step conflict agent requires agent and model together",
+      });
+    }
+  });
+
 const workflowStepSchema = z.union([
   workflowGateStepSchema,
   workflowDistributorStepSchema,
   workflowConsolidatorStepSchema,
+  workflowMergeStepSchema,
   workflowWorkerStepSchema,
 ]);
 
@@ -590,6 +695,18 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
             ? `gate '${step.id}' condition references '${step.condition.step}', which is not in an earlier phase`
             : `gate '${step.id}' condition references unknown step '${step.condition.step}'`,
         };
+      }
+      if (step.kind === "merge") {
+        for (const ref of step.from ?? []) {
+          if (!earlierIds.has(ref)) {
+            return {
+              ok: false,
+              error: allIds.has(ref)
+                ? `merge step '${step.id}' from references '${ref}', which is not in an earlier phase`
+                : `merge step '${step.id}' from references unknown step '${ref}'`,
+            };
+          }
+        }
       }
       if (step.when?.step && !earlierIds.has(step.when.step)) {
         return {

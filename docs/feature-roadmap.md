@@ -28,7 +28,17 @@ just polish), does it protect the user's time/money/repo, and does it build on
 machinery that already exists (worktrees, history, the shared authoring core)
 so the cost is proportionate.
 
-## 1.1 Worktree diff review and merge-back
+## 1.1 Worktree diff review and merge-back ✅ Shipped (core)
+
+> **Shipped** — a declarative `merge` step kind (modes `apply` / `branch` /
+> `pr`, `perSource` PRs, `onConflict: fail|ours|theirs|agent` with LLM conflict
+> resolution), worktree template fields
+> (`{{steps.<id>.worktree.root|branch|cwd}}`), and CLI harvesting
+> (`workflow history show <id> --diff [--stat] [--step]`, `history apply`,
+> `history prune`, with applied/pruned status recorded in run history). See
+> [`worktree-merge-back.md`](worktree-merge-back.md). Remaining follow-up:
+> graphical diff panels in the TUI/web UI (the diff primitives are UI-agnostic
+> and ready).
 
 **The gap:** agent steps already run in isolated git worktrees, and the step
 result records the worktree path and branch — but nothing helps the user *use*

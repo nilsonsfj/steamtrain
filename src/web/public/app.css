@@ -433,6 +433,9 @@ textarea#input:focus {
 .kind.gate {
   background: #f0a35e;
 }
+.kind.merge {
+  background: #ff9ecb;
+}
 .card .state {
   margin-left: auto;
   font-size: 11px;
@@ -828,6 +831,9 @@ select.sel {
 }
 .estep.gate {
   border-left-color: #f0a35e;
+}
+.estep.merge {
+  border-left-color: #ff9ecb;
 }
 .estep .eh {
   display: flex;
