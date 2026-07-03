@@ -254,6 +254,20 @@ describe("codex mapper (stateful, one mapper per run)", () => {
     );
   });
 
+  it("estimates costUsd from usage tokens on turn.failed", () => {
+    const m = createCodexMapper();
+    const result = m(
+      JSON.parse(
+        '{"type":"turn.failed","model":"gpt-5.2","usage":{"input_tokens":500,"cached_input_tokens":0,"output_tokens":50},"error":{"message":"timeout"}}',
+      ),
+    );
+    const costEvent = result.find((e) => e.kind === "result");
+    expect(costEvent).toEqual(expect.objectContaining({ costUsd: expect.any(Number) }));
+    // gpt-5.2 rates: input=$2.50/M, output=$15.00/M
+    const expected = (500 * 2.5 + 50 * 15.0) / 1_000_000;
+    expect((costEvent as { costUsd: number }).costUsd).toBeCloseTo(expected, 8);
+  });
+
   it("estimates costUsd from usage tokens on turn.completed", () => {
     const m = createCodexMapper();
     const result = m(JSON.parse(SAMPLES.turnCompleted));
@@ -264,10 +278,10 @@ describe("codex mapper (stateful, one mapper per run)", () => {
       }),
     ]);
     // SAMPLES.turnCompleted: input=8497, cached=8448, output=51
-    // uncached=49*$0.30/M + cached=8448*$0.03/M + output=51*$1.20/M
+    // uncached=49*$0.75/M + cached=8448*$0.075/M + output=51*$4.50/M
     // (reasoning_output_tokens is a subset of output_tokens, not double-counted)
     const cost = (result[0] as { costUsd: number }).costUsd;
-    expect(cost).toBeCloseTo(0.00032934, 8);
+    expect(cost).toBeCloseTo(0.00089985, 8);
   });
 
   it("omits costUsd when usage is absent", () => {
@@ -306,10 +320,49 @@ describe("codex mapper (stateful, one mapper per run)", () => {
     );
     const cost = (result[0] as { costUsd: number }).costUsd;
     // Should only count output_tokens (100), NOT output_tokens + reasoning_output_tokens (140)
-    const expectedWithOnlyOutput = (1000 * 0.3 + 100 * 1.2) / 1_000_000;
-    const wrongExpected = (1000 * 0.3 + (100 + 40) * 1.2) / 1_000_000;
+    const expectedWithOnlyOutput = (1000 * 0.75 + 100 * 4.5) / 1_000_000;
+    const wrongExpected = (1000 * 0.75 + (100 + 40) * 4.5) / 1_000_000;
     expect(cost).toBeCloseTo(expectedWithOnlyOutput, 8);
     expect(cost).not.toBeCloseTo(wrongExpected, 8);
+  });
+
+  it("uses per-model pricing when model is present in turn event", () => {
+    const m = createCodexMapper();
+    const result = m(
+      JSON.parse(
+        '{"type":"turn.completed","model":"gpt-5.4","usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":100}}',
+      ),
+    );
+    const cost = (result[0] as { costUsd: number }).costUsd;
+    // gpt-5.4 rates: input=$2.50/M, cached=$0.25/M, output=$15.00/M
+    const expected = (1000 * 2.5 + 100 * 15.0) / 1_000_000;
+    expect(cost).toBeCloseTo(expected, 8);
+  });
+
+  it("uses correct rates for gpt-5.1-codex-mini (mini-tier)", () => {
+    const m = createCodexMapper();
+    const result = m(
+      JSON.parse(
+        '{"type":"turn.completed","model":"gpt-5.1-codex-mini","usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":100}}',
+      ),
+    );
+    const cost = (result[0] as { costUsd: number }).costUsd;
+    // gpt-5.1-codex-mini rates (mini-tier): input=$0.75/M, cached=$0.075/M, output=$4.50/M
+    const expected = (1000 * 0.75 + 100 * 4.5) / 1_000_000;
+    expect(cost).toBeCloseTo(expected, 8);
+  });
+
+  it("falls back to default pricing for unknown model", () => {
+    const m = createCodexMapper();
+    const result = m(
+      JSON.parse(
+        '{"type":"turn.completed","model":"future-model-v99","usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":100}}',
+      ),
+    );
+    const cost = (result[0] as { costUsd: number }).costUsd;
+    // default (gpt-5.4-mini) rates: input=$0.75/M, output=$4.50/M
+    const expected = (1000 * 0.75 + 100 * 4.5) / 1_000_000;
+    expect(cost).toBeCloseTo(expected, 8);
   });
 
   it("returns undefined durationMs when turn.started was never received", () => {

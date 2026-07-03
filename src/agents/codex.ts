@@ -267,7 +267,7 @@ export function createCodexMapper(agent: AgentInstanceId = AGENT): EventMapper {
           isError: false,
           subtype: "turn.completed",
           durationMs,
-          costUsd: estimateCostUsd(e.usage),
+          costUsd: estimateCostUsd(e.usage, e.model),
           tokens: codexTokens(e.usage),
         });
         return out;
@@ -286,7 +286,7 @@ export function createCodexMapper(agent: AgentInstanceId = AGENT): EventMapper {
           subtype: "turn.failed",
           text: message,
           durationMs,
-          costUsd: estimateCostUsd(e.usage),
+          costUsd: estimateCostUsd(e.usage, e.model),
           tokens: codexTokens(e.usage),
         });
         return out;
@@ -317,17 +317,59 @@ export function createCodexMapper(agent: AgentInstanceId = AGENT): EventMapper {
 }
 
 /**
+ * Per-model pricing in USD per million tokens.
+ *
+ * Codex reports token counts but not cost. We estimate using these published
+ * OpenAI rates. Reasoning tokens are billed as output (OpenAI charges reasoning
+ * within `output_tokens`, so `reasoning_output_tokens` is a subset, not extra).
+ */
+interface ModelPricing {
+  input: number;
+  cached: number;
+  output: number;
+}
+
+const CODEX_MODEL_PRICES: Record<string, ModelPricing> = {
+  // Published rates from https://developers.openai.com/api/docs/pricing
+  "gpt-5.5": { input: 5.0, cached: 0.5, output: 30.0 },
+  "gpt-5.4": { input: 2.5, cached: 0.25, output: 15.0 },
+  "gpt-5.4-mini": { input: 0.75, cached: 0.075, output: 4.5 },
+  "gpt-5.3-codex": { input: 1.75, cached: 0.175, output: 14.0 },
+  // Codex-specific variants not listed on the pricing page — estimated from
+  // naming convention (mini/spark = mini-tier, max = full-tier).
+  "gpt-5.3-codex-mini": { input: 0.75, cached: 0.075, output: 4.5 },
+  "gpt-5.3-codex-spark": { input: 0.75, cached: 0.075, output: 4.5 },
+  "gpt-5.3-codex-max": { input: 2.5, cached: 0.25, output: 15.0 },
+  "gpt-5.2": { input: 2.5, cached: 0.25, output: 15.0 },
+  "gpt-5.2-codex": { input: 1.75, cached: 0.175, output: 14.0 },
+  "gpt-5.1": { input: 2.5, cached: 0.25, output: 15.0 },
+  "gpt-5.1-codex": { input: 1.75, cached: 0.175, output: 14.0 },
+  "gpt-5.1-codex-mini": { input: 0.75, cached: 0.075, output: 4.5 },
+  "gpt-5.1-codex-max": { input: 2.5, cached: 0.25, output: 15.0 },
+  "gpt-5": { input: 2.5, cached: 0.25, output: 15.0 },
+  "gpt-5-codex": { input: 1.75, cached: 0.175, output: 14.0 },
+  "codex-auto-review": { input: 1.75, cached: 0.175, output: 14.0 },
+};
+
+const DEFAULT_MODEL_PRICING: ModelPricing = {
+  input: 0.75,
+  cached: 0.075,
+  output: 4.5,
+};
+
+function codexModelPrice(model: string | undefined): ModelPricing {
+  if (model) {
+    const price = CODEX_MODEL_PRICES[model];
+    if (price) return price;
+  }
+  return DEFAULT_MODEL_PRICING;
+}
+
+/**
  * Estimate USD cost from Codex usage tokens.
  *
- * Codex reports token counts but not cost. We estimate using GPT-5.4-mini
- * pricing as a reasonable baseline — actual cost varies by model, but this
- * gives a useful ballpark for cost tracking and display.
- *
- * Pricing per million tokens (GPT-5.4-mini):
- *  - input:  $0.30
- *  - cached: $0.03  (90% discount)
- *  - output: $1.20  (includes reasoning tokens — OpenAI bills reasoning
- *            as output, so reasoning_output_tokens is a subset, not extra)
+ * Pricing varies by model; we look up per-model rates from {@link CODEX_MODEL_PRICES}.
+ * Falls back to GPT-5.4-mini rates when the model is unknown or absent.
  */
 function estimateCostUsd(
   usage:
@@ -338,6 +380,7 @@ function estimateCostUsd(
         reasoning_output_tokens?: number;
       }
     | undefined,
+  model?: string,
 ): number | undefined {
   if (!usage) return undefined;
   const input = usage.input_tokens ?? 0;
@@ -345,8 +388,9 @@ function estimateCostUsd(
   const output = usage.output_tokens ?? 0;
   const total = input + cached + output;
   if (total === 0) return undefined;
+  const { input: inputRate, cached: cachedRate, output: outputRate } = codexModelPrice(model);
   const uncached = Math.max(0, input - cached);
-  return (uncached * 0.3 + cached * 0.03 + output * 1.2) / 1_000_000;
+  return (uncached * inputRate + cached * cachedRate + output * outputRate) / 1_000_000;
 }
 
 /**
