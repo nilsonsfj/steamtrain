@@ -330,28 +330,31 @@ interface ModelPricing {
 }
 
 const CODEX_MODEL_PRICES: Record<string, ModelPricing> = {
-  "gpt-5.5": { input: 2.5, cached: 0.25, output: 10.0 },
-  "gpt-5.4": { input: 2.5, cached: 0.25, output: 10.0 },
-  "gpt-5.4-mini": { input: 0.3, cached: 0.03, output: 1.2 },
-  "gpt-5.3-codex": { input: 2.5, cached: 0.25, output: 10.0 },
-  "gpt-5.3-codex-mini": { input: 0.3, cached: 0.03, output: 1.2 },
-  "gpt-5.3-codex-spark": { input: 0.3, cached: 0.03, output: 1.2 },
-  "gpt-5.3-codex-max": { input: 2.5, cached: 0.25, output: 10.0 },
-  "gpt-5.2": { input: 1.5, cached: 0.15, output: 6.0 },
-  "gpt-5.2-codex": { input: 1.5, cached: 0.15, output: 6.0 },
-  "gpt-5.1": { input: 1.0, cached: 0.1, output: 4.0 },
-  "gpt-5.1-codex": { input: 1.0, cached: 0.1, output: 4.0 },
-  "gpt-5.1-codex-mini": { input: 0.2, cached: 0.02, output: 0.8 },
-  "gpt-5.1-codex-max": { input: 1.0, cached: 0.1, output: 4.0 },
-  "gpt-5": { input: 1.0, cached: 0.1, output: 4.0 },
-  "gpt-5-codex": { input: 1.0, cached: 0.1, output: 4.0 },
-  "codex-auto-review": { input: 2.5, cached: 0.25, output: 10.0 },
+  // Published rates from https://developers.openai.com/api/docs/pricing
+  "gpt-5.5": { input: 5.0, cached: 0.5, output: 30.0 },
+  "gpt-5.4": { input: 2.5, cached: 0.25, output: 15.0 },
+  "gpt-5.4-mini": { input: 0.75, cached: 0.075, output: 4.5 },
+  "gpt-5.3-codex": { input: 1.75, cached: 0.175, output: 14.0 },
+  // Codex-specific variants not listed on the pricing page — estimated from
+  // naming convention (mini/spark = mini-tier, max = full-tier).
+  "gpt-5.3-codex-mini": { input: 0.75, cached: 0.075, output: 4.5 },
+  "gpt-5.3-codex-spark": { input: 0.75, cached: 0.075, output: 4.5 },
+  "gpt-5.3-codex-max": { input: 2.5, cached: 0.25, output: 15.0 },
+  "gpt-5.2": { input: 2.5, cached: 0.25, output: 15.0 },
+  "gpt-5.2-codex": { input: 1.75, cached: 0.175, output: 14.0 },
+  "gpt-5.1": { input: 2.5, cached: 0.25, output: 15.0 },
+  "gpt-5.1-codex": { input: 1.75, cached: 0.175, output: 14.0 },
+  "gpt-5.1-codex-mini": { input: 0.75, cached: 0.075, output: 4.5 },
+  "gpt-5.1-codex-max": { input: 2.5, cached: 0.25, output: 15.0 },
+  "gpt-5": { input: 2.5, cached: 0.25, output: 15.0 },
+  "gpt-5-codex": { input: 1.75, cached: 0.175, output: 14.0 },
+  "codex-auto-review": { input: 1.75, cached: 0.175, output: 14.0 },
 };
 
 const DEFAULT_MODEL_PRICING: ModelPricing = {
-  input: 0.3,
-  cached: 0.03,
-  output: 1.2,
+  input: 0.75,
+  cached: 0.075,
+  output: 4.5,
 };
 
 function codexModelPrice(model: string | undefined): ModelPricing {

@@ -264,10 +264,10 @@ describe("codex mapper (stateful, one mapper per run)", () => {
       }),
     ]);
     // SAMPLES.turnCompleted: input=8497, cached=8448, output=51
-    // uncached=49*$0.30/M + cached=8448*$0.03/M + output=51*$1.20/M
+    // uncached=49*$0.75/M + cached=8448*$0.075/M + output=51*$4.50/M
     // (reasoning_output_tokens is a subset of output_tokens, not double-counted)
     const cost = (result[0] as { costUsd: number }).costUsd;
-    expect(cost).toBeCloseTo(0.00032934, 8);
+    expect(cost).toBeCloseTo(0.00089985, 8);
   });
 
   it("omits costUsd when usage is absent", () => {
@@ -306,8 +306,8 @@ describe("codex mapper (stateful, one mapper per run)", () => {
     );
     const cost = (result[0] as { costUsd: number }).costUsd;
     // Should only count output_tokens (100), NOT output_tokens + reasoning_output_tokens (140)
-    const expectedWithOnlyOutput = (1000 * 0.3 + 100 * 1.2) / 1_000_000;
-    const wrongExpected = (1000 * 0.3 + (100 + 40) * 1.2) / 1_000_000;
+    const expectedWithOnlyOutput = (1000 * 0.75 + 100 * 4.5) / 1_000_000;
+    const wrongExpected = (1000 * 0.75 + (100 + 40) * 4.5) / 1_000_000;
     expect(cost).toBeCloseTo(expectedWithOnlyOutput, 8);
     expect(cost).not.toBeCloseTo(wrongExpected, 8);
   });
@@ -320,8 +320,8 @@ describe("codex mapper (stateful, one mapper per run)", () => {
       ),
     );
     const cost = (result[0] as { costUsd: number }).costUsd;
-    // gpt-5.4 rates: input=$2.50/M, cached=$0.25/M, output=$10.00/M
-    const expected = (1000 * 2.5 + 100 * 10.0) / 1_000_000;
+    // gpt-5.4 rates: input=$2.50/M, cached=$0.25/M, output=$15.00/M
+    const expected = (1000 * 2.5 + 100 * 15.0) / 1_000_000;
     expect(cost).toBeCloseTo(expected, 8);
   });
 
@@ -333,8 +333,8 @@ describe("codex mapper (stateful, one mapper per run)", () => {
       ),
     );
     const cost = (result[0] as { costUsd: number }).costUsd;
-    // gpt-5.1-codex-mini rates: input=$0.20/M, cached=$0.02/M, output=$0.80/M
-    const expected = (1000 * 0.2 + 100 * 0.8) / 1_000_000;
+    // gpt-5.1-codex-mini rates (mini-tier): input=$0.75/M, cached=$0.075/M, output=$4.50/M
+    const expected = (1000 * 0.75 + 100 * 4.5) / 1_000_000;
     expect(cost).toBeCloseTo(expected, 8);
   });
 
@@ -346,8 +346,8 @@ describe("codex mapper (stateful, one mapper per run)", () => {
       ),
     );
     const cost = (result[0] as { costUsd: number }).costUsd;
-    // default (gpt-5.4-mini) rates: input=$0.30/M, output=$1.20/M
-    const expected = (1000 * 0.3 + 100 * 1.2) / 1_000_000;
+    // default (gpt-5.4-mini) rates: input=$0.75/M, output=$4.50/M
+    const expected = (1000 * 0.75 + 100 * 4.5) / 1_000_000;
     expect(cost).toBeCloseTo(expected, 8);
   });
 
