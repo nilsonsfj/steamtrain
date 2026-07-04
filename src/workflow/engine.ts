@@ -1,8 +1,11 @@
-import { resolve as resolvePath } from "node:path";
+import { randomBytes } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join as joinPath, resolve as resolvePath } from "node:path";
 import { resolveAgentInstance } from "../agents";
 import type { AgentAdapter } from "../agents";
 import type { SteamtrainConfig } from "../config/types";
 import type { AgentEvent, AgentInstanceId, AgentProviderId, TokenUsage } from "../types/events";
+import { collectArtifacts } from "./artifacts";
 import { runShellCommand } from "./command";
 import { addTokens } from "./cost";
 import type { WorkflowEvent } from "./events";
@@ -45,6 +48,7 @@ import {
   parseForEachSource,
   validateWorkflow,
   workflowStepKind,
+  workspaceSourceId,
 } from "./types";
 import { type AgentWorkspaceLease, type AgentWorkspaceManager, runGitText } from "./worktree";
 
@@ -64,6 +68,12 @@ export interface WorkflowDeps {
   cwd: string;
   /** Optional per-agent workspace isolation. */
   agentWorkspace?: AgentWorkspaceManager;
+  /**
+   * Directory declared step artifacts are snapshotted into (one subdirectory
+   * per step). Defaults to a fresh per-run directory under the OS tmpdir, the
+   * same lifetime story as the step worktrees themselves.
+   */
+  artifactsDir?: string;
   /** Default per-loop iteration cap; a gate's own `maxIterations` overrides it. */
   loopMaxIterations?: number;
 }
@@ -94,6 +104,8 @@ interface RunEnv {
   results: Map<string, StepResult>;
   allResults: StepResult[];
   limit: number;
+  /** Resolved per-run artifact snapshot directory. */
+  artifactsDir: string;
   /** Dynamic (forEach child) step budget; see the resync note in the phased scheduler. */
   budget: { generated: number };
   reserveDynamicSteps: (count: number) => boolean;
@@ -173,6 +185,9 @@ export async function* runWorkflow(
     results,
     allResults: [],
     limit,
+    artifactsDir:
+      deps.artifactsDir ??
+      joinPath(tmpdir(), "steamtrain-artifacts", randomBytes(5).toString("hex")),
     budget,
     reserveDynamicSteps,
     spent: { costUsd: costOfCachedResults(cache) },
@@ -529,7 +544,7 @@ function isSubsetOf(subset: ReadonlySet<string>, superset: ReadonlySet<string>):
 
 /** Matches `{{steps.<id>.<field>}}` template references; group 1 is the id. */
 const TEMPLATE_STEP_REF =
-  /\{\{\s*steps\.(.+?)\.(?:output|items|ok|error|target|iteration|exitCode|worktree\.(?:root|branch|cwd)|json(?:[.[][^{}]*)?)\s*\}\}/g;
+  /\{\{\s*steps\.(.+?)\.(?:output|items|ok|error|target|iteration|exitCode|worktree\.(?:root|branch|cwd)|artifacts\.[^{}]+?|json(?:[.[][^{}]*)?)\s*\}\}/g;
 
 function templateStepRefs(text: string | undefined): string[] {
   if (!text) return [];
@@ -605,6 +620,8 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
       if ((step.kind === "worker" || step.kind === "processor" || !step.kind) && step.forEach) {
         addEarlier(parseForEachSource(step.forEach));
       }
+      // Inheriting a workspace means waiting for the source's worktree.
+      addEarlier(workspaceSourceId(step));
       if (step.kind === "merge") {
         for (const ref of step.from ?? []) addEarlier(ref);
         renderableTexts.push(step.branch, step.commitMessage, step.prTitle, step.prBody);
@@ -780,6 +797,7 @@ async function runSingleStep(
       deps,
       signal,
       workflowName: spec.name,
+      artifactsDir: env.artifactsDir,
       retryDefault: spec.retry,
       stepTimeoutDefault: spec.stepTimeoutSec,
       iteration,
@@ -951,6 +969,8 @@ interface ExecuteContext {
   deps: WorkflowDeps;
   signal?: AbortSignal;
   workflowName: string;
+  /** Per-run artifact snapshot directory (see {@link WorkflowDeps.artifactsDir}). */
+  artifactsDir: string;
   /** Workflow-level auto-retry default; per-step `retry` overrides it. */
   retryDefault?: RetryPolicy;
   /** Workflow-level per-step timeout default in seconds; per-step `stepTimeoutSec` overrides it. */
@@ -1349,6 +1369,7 @@ async function executeAgentStep(
       result = fixed.result;
       attempt = fixed.attempt;
     }
+    result = await applyDeclaredArtifacts(step, ctx, stepId, workspace.cwd, result);
     const finalResult = attachWorktreeInfo(result, workspace, stepCwd);
     // After a retry, report true wall-clock for the whole step (all attempts
     // plus the backoff waits between them), not just the last attempt.
@@ -1469,8 +1490,79 @@ async function allocateAgentWorkspace(
     stepCwd,
     iteration: ctx.iteration,
     item,
+    inheritFrom: resolveInheritedWorkspace(step, ctx),
     signal: ctx.signal,
   });
+}
+
+/**
+ * Resolve a step's `workspace: "inherit:<stepId>"` to the source step's
+ * recorded worktree. Undefined when the step doesn't inherit — or when the
+ * source ran in the plain cwd (no git repo / no isolation manager), in which
+ * case this step runs there too and already sees the source's files.
+ * Throws when the source's worktrees are ambiguous or absent; the callers'
+ * allocation error handling turns that into a failed step.
+ */
+function resolveInheritedWorkspace(
+  step: WorkflowStep,
+  ctx: ExecuteContext,
+): { stepId: string; root: string; baseCommit?: string } | undefined {
+  const sourceId = workspaceSourceId(step);
+  if (!sourceId) return undefined;
+  const source = ctx.results.get(sourceId);
+  if (!source) {
+    throw new Error(`workspace inherit source '${sourceId}' has not produced a result`);
+  }
+  if (source.childResults?.length) {
+    throw new Error(
+      `workspace inherit source '${sourceId}' fanned out into ${source.childResults.length} worktrees; merge them first`,
+    );
+  }
+  if (!source.worktree) return undefined;
+  return {
+    stepId: sourceId,
+    root: source.worktree.root,
+    baseCommit: source.worktree.baseCommit,
+  };
+}
+
+/**
+ * Snapshot a successful step's declared `artifacts` out of its workspace into
+ * the run's artifact directory and record them on the result. A declared
+ * artifact the step did not produce fails the step — the declaration is a
+ * contract downstream steps rely on.
+ */
+async function applyDeclaredArtifacts(
+  step: WorkflowStep,
+  ctx: ExecuteContext,
+  stepId: string,
+  workspaceCwd: string,
+  result: StepResult,
+): Promise<StepResult> {
+  const declared = "artifacts" in step ? step.artifacts : undefined;
+  if (!declared?.length || !result.ok) return result;
+  try {
+    const collected = await collectArtifacts({
+      declared,
+      stepCwd: workspaceCwd,
+      artifactsDir: ctx.artifactsDir,
+      stepId,
+      signal: ctx.signal,
+    });
+    if (collected.missing.length > 0) {
+      const message = `declared artifact${collected.missing.length > 1 ? "s" : ""} not produced: ${collected.missing.join(", ")}`;
+      return {
+        ...result,
+        ok: false,
+        error: message,
+        artifacts: collected.artifacts.length > 0 ? collected.artifacts : undefined,
+      };
+    }
+    return { ...result, artifacts: collected.artifacts };
+  } catch (err) {
+    const message = `artifact snapshot failed: ${err instanceof Error ? err.message : String(err)}`;
+    return { ...result, ok: false, error: message };
+  }
 }
 
 async function executeForEachStep(
@@ -1689,6 +1781,7 @@ async function executeCommandStep(
           baseCwd: ctx.deps.cwd,
           stepCwd,
           iteration: ctx.iteration,
+          inheritFrom: resolveInheritedWorkspace(step, ctx),
           signal: ctx.signal,
         })
       : { cwd: stepCwd, dispose: () => {} };
@@ -1762,6 +1855,7 @@ async function executeCommandStep(
             error: `structured output invalid: ${parsed.error}`,
           };
     }
+    result = await applyDeclaredArtifacts(step, ctx, step.id, workspace.cwd, result);
     return attachWorktreeInfo(result, workspace, stepCwd);
   } finally {
     await workspace.dispose();
@@ -2032,7 +2126,14 @@ function findFailedDependency(
 ): string | undefined {
   const mergeSources =
     step.kind === "merge" ? new Set(step.from ?? step.dependsOn ?? []) : undefined;
-  for (const dep of step.dependsOn ?? []) {
+  // A workspace-inherit source is an implicit dependency: a step cannot start
+  // from the worktree of a step that failed.
+  const wsSource = workspaceSourceId(step);
+  const deps =
+    wsSource && !step.dependsOn?.includes(wsSource)
+      ? [...(step.dependsOn ?? []), wsSource]
+      : (step.dependsOn ?? []);
+  for (const dep of deps) {
     const result = results.get(dep);
     if (!result || result.ok) continue;
     // A merge step judges its sources leaf by leaf (executeMergeStep): a
@@ -2112,6 +2213,10 @@ function findSkipReason(step: WorkflowStep, ctx: GateEvalContext): string | unde
     if (sourceStepId && ctx.results.get(sourceStepId)?.skipped) {
       return `forEach source '${sourceStepId}' was skipped`;
     }
+  }
+  const wsSource = workspaceSourceId(step);
+  if (wsSource && ctx.results.get(wsSource)?.skipped) {
+    return `workspace source '${wsSource}' was skipped`;
   }
   if (step.when && !evaluateGate(step.when, ctx).passed) {
     return "when condition not met";

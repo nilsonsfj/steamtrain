@@ -155,6 +155,15 @@ Worktrees are retained after the run so agent-created files can be inspected,
 committed, or merged from their `steamtrain/...` branches. Completed agent step
 results include the worktree cwd, root, branch, and linked ignored paths.
 
+Isolation also means a later step does **not** see an earlier step's file edits
+by default. When it should — implement → review, implement → run the tests —
+give the later step `"workspace": "inherit:<stepId>"`: its worktree is then
+seeded from the source step's final worktree state instead of your checkout
+(the source becomes an implicit dependency). Steps can also declare
+`"artifacts": ["report.md"]` — output files snapshotted after success and
+handed to later prompts as `{{steps.<id>.artifacts.report}}`. See the
+[workflow spec](workflow-spec.md#workspace-inheritance-and-artifacts-file-handoff).
+
 Directories outside git repositories keep the previous behavior and run in the
 resolved `cwd`.
 
@@ -568,6 +577,9 @@ Rules:
   `onFalse: fail` or `onFalse: stop`, later phases stop
 - exception: a gate whose condition explicitly tests `ok` for the failed step
   still evaluates (that's how a gate/loop routes on a failing `command` step)
+- a `workspace: "inherit:<stepId>"` source is an implicit dependency: the
+  inheriting step waits for it, skips when it was skipped, and fails when it
+  failed
 
 ---
 

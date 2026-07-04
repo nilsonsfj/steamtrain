@@ -173,6 +173,25 @@ or disjoint, never partially overlapping.
   EDIT files (implement/fix/refactor) — without one the edits stay stranded in
   worktrees. Review-only workflows don't need it.
 
+# File handoff between steps ("workspace" and "artifacts")
+Each worker/processor/command step runs in its OWN isolated worktree snapshotted
+from the user's checkout — by default a later step does NOT see an earlier step's
+file edits, only its text output. When a step must build on another step's edits
+(implement → review the diff, implement → run the tests, iterative fix loops),
+give it "workspace": "inherit:<stepId>" — its worktree then starts from that
+step's final files. The source must be a single worker/processor/command step in
+an earlier phase (not a forEach fan-out; merge those first). Chains compose:
+review inherits implement, test inherits review. Merging an inherited worktree
+lands the whole chain's changes, so point the final merge step at the LAST step
+of a chain, not every link.
+A worker/processor/command step may also declare "artifacts": ["report.md",
+"coverage/"] — paths (relative to its cwd) it promises to produce. They are
+snapshotted after the step succeeds (a missing one FAILS the step) and later
+prompts can pass the snapshot path along as {{steps.<id>.artifacts.<name>}}
+(name = filename minus extension: report.md → report). Use artifacts when a
+step's real product is a file a later step should read, rather than pasting
+huge content through text outputs.
+
 # Per-step conditions ("when")
 Any step may carry a "when" condition (same shape as a gate condition), e.g.
   { "id": "fix-frontend", "when": { "step": "triage", "contains": "frontend" }, ... }
@@ -210,6 +229,7 @@ phase count modest.
 {{steps.<id>.ok}}, {{steps.<id>.error}}, {{steps.<id>.target}},
 {{steps.<id>.exitCode}} (a command step's exit code),
 {{steps.<id>.json}} / {{steps.<id>.json.<path>}} (structured output fields),
+{{steps.<id>.artifacts.<name>}} (the snapshot path of a declared artifact),
 {{steps.<id>.worktree.root}} / {{steps.<id>.worktree.branch}} (an agent step's
 isolated git worktree, for custom integration steps), {{item}},
 {{item.index}}, {{item.sourceStepId}}, {{iteration}}.

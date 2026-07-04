@@ -14,12 +14,16 @@ export {
   type WorkflowStepKind,
   type WorkflowPhase,
   type WorkflowSpec,
+  type WorkspaceFields,
+  type StepArtifact,
   type StepResult,
   type ValidationResult,
   workflowSpecSchema,
   validateWorkflow,
   workflowStepKind,
   parseForEachSource,
+  workspaceSourceId,
+  artifactName,
   isAgentBackedStep,
   workflowAgentIds,
   MAX_STEPS,
@@ -75,6 +79,11 @@ export {
   type RunShellCommandOptions,
   type ShellCommandResult,
 } from "./command";
+export {
+  collectArtifacts,
+  type CollectArtifactsOptions,
+  type CollectArtifactsResult,
+} from "./artifacts";
 export {
   type JsonSchema,
   type StructuredParseResult,

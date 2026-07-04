@@ -112,7 +112,9 @@ Required fields: `agent`, `model`, `prompt`.
 Optional fields: `cwd`, `env`, `extraArgs`, `effort`, `forEach`, `retry`,
 `maxCostUsd` (per-step USD budget for `forEach` fan-outs — see
 [Cost budgets](./cost-and-budgets.md)),
-`output` (see [Structured step outputs](#structured-step-outputs-output)).
+`output` (see [Structured step outputs](#structured-step-outputs-output)),
+`workspace` / `artifacts` (see
+[Workspace inheritance and artifacts](#workspace-inheritance-and-artifacts-file-handoff)).
 
 If the resolved `cwd` is inside a git repository, the agent subprocess runs from
 a matching path in its own git worktree. The worktree starts at the current
@@ -371,7 +373,8 @@ Required field: `cmd` — a templated shell line, run through the platform shell
 Optional fields: `cwd`, `env`, `stepTimeoutSec`, `output` (see
 [Structured step outputs](#structured-step-outputs-output) — validated without
 the agent "fix your JSON" retry, since re-running a deterministic command can't
-change its output).
+change its output), `workspace` / `artifacts` (see
+[Workspace inheritance and artifacts](#workspace-inheritance-and-artifacts-file-handoff)).
 
 ```jsonc
 {
@@ -417,6 +420,86 @@ A typical trustworthy fix loop:
     "loopTo": "fix", "maxIterations": 5, "onFalse": "fail" }
 ] }
 ```
+
+## Workspace inheritance and artifacts (file handoff)
+
+Each worker/processor/command step runs in its **own** worktree snapshotted
+from your checkout — by default a later step sees an earlier step's *text
+output*, never its file edits. Two fields fix that when steps must build on
+each other's work:
+
+### `workspace: "inherit:<stepId>"`
+
+Start this step's worktree from the named step's **final worktree state**
+(tracked edits, untracked files, and any commits the step made) instead of the
+original checkout. The reviewer actually sees the implementer's diff; the test
+run actually exercises the fix. Your checkout stays untouched — the step still
+gets its own isolated worktree, just seeded differently.
+
+```jsonc
+{ "id": "build", "steps": [
+  { "id": "implement", "agent": "claude", "model": "claude-sonnet-4-6",
+    "prompt": "Implement: {{input}}" }
+] },
+{ "id": "verify", "steps": [
+  { "id": "tests", "kind": "command", "workspace": "inherit:implement",
+    "cmd": "npm test" }
+] },
+{ "id": "review", "steps": [
+  { "id": "critique", "agent": "claude", "model": "claude-opus-4-8",
+    "workspace": "inherit:implement",
+    "prompt": "Review the uncommitted changes in this working tree (git diff)." }
+] }
+```
+
+Semantics:
+
+- The source becomes an **implicit dependency**: the inheriting step is
+  scheduled after it, is skipped when it was skipped, and fails when it failed.
+- The source must be a single worker/processor/command step in an earlier
+  phase. A `forEach` fan-out parent has one worktree per item and cannot be
+  inherited — merge its worktrees first.
+- Chains compose (`b` inherits `a`, `c` inherits `b`), and the **diff base is
+  inherited too**: merging the tail of a chain (via a `merge` step or `history
+  apply`) lands the whole chain's changes. Point the final merge at the last
+  step of a chain, not every link.
+- Inside a loop (`loopTo`), each iteration inherits the source's **latest**
+  worktree — a fix → test loop keeps building on the newest fix.
+- Outside a git repository steps share the plain `cwd` and inheritance is
+  trivially satisfied.
+- On a resumed run the source may replay from cache; its recorded worktree is
+  reused (worktrees are retained). If it was pruned (`history prune`), the
+  inheriting step fails with a clear error — re-run without the stale cache.
+
+### `artifacts: ["report.md", "coverage/"]`
+
+Output files or directories the step **promises to produce**, relative to its
+cwd. After the step succeeds, each is snapshotted out of the (ephemeral,
+prunable) worktree into a per-run artifacts directory and recorded on the step
+result; a declared artifact that was not produced **fails the step** — the
+declaration is a contract downstream steps rely on.
+
+Templates hand the snapshot path to later steps as
+`{{steps.<id>.artifacts.<name>}}`, where `<name>` is the last path segment
+minus its extension (`report.md` → `report`, `coverage/` → `coverage`) —
+names must be unique within a step:
+
+```jsonc
+{ "id": "audit", "steps": [
+  { "id": "scan", "kind": "command", "cmd": "npm audit --json > audit.json; true",
+    "artifacts": ["audit.json"] }
+] },
+{ "id": "summarize", "steps": [
+  { "id": "summary", "agent": "claude", "model": "claude-sonnet-4-6",
+    "prompt": "Summarize the audit report at {{steps.scan.artifacts.audit}}" }
+] }
+```
+
+Snapshot paths stay valid independent of worktree lifecycle (a `history prune`
+doesn't invalidate them), and a loop iteration re-running a step replaces its
+previous snapshot — latest wins, matching step outputs. Artifact paths must be
+relative and stay inside the step's cwd; use artifacts when a step's real
+product is a file, rather than pasting large content through text outputs.
 
 ## Per-step conditions (`when`)
 
@@ -564,6 +647,7 @@ Prompt templates and several block fields support:
 | `{{steps.<id>.exitCode}}` | A prior command step's exit code, e.g. `0` (empty for other steps). |
 | `{{steps.<id>.json}}` | Prior step's parsed structured output, JSON-serialized. |
 | `{{steps.<id>.json.<path>}}` | A field of it, e.g. `json.verdict` or `json.targets[2]`. Strings render raw, other values JSON-serialized, missing fields empty. |
+| `{{steps.<id>.artifacts.<name>}}` | The snapshot path of a prior step's declared artifact (empty when unknown). |
 | `{{steps.<id>.worktree.root}}` | The step's isolated git worktree directory (empty when the step ran without one). |
 | `{{steps.<id>.worktree.branch}}` | The steamtrain branch checked out in that worktree. |
 | `{{steps.<id>.worktree.cwd}}` | The cwd the agent actually ran in (inside the worktree). |
@@ -598,6 +682,10 @@ Unknown placeholders are left unchanged.
 - A merge step with `onConflict: "agent"` requires `agent` and `model`.
 - A merge step with `perSource` requires `mode` `"branch"` or `"pr"`.
 - Command steps require a non-empty `cmd`.
+- `workspace` must be `"inherit:<stepId>"`; the source must be a
+  worker/processor/command step in an earlier phase, without `forEach`.
+- `artifacts` entries must be relative paths that stay inside the step's cwd,
+  with unique template names per step.
 
 ## CLI
 

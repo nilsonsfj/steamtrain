@@ -117,6 +117,7 @@ export function specStepRowMeta(step: WorkflowStep): string {
   const bits: string[] = [];
   if (step.dependsOn?.length) bits.push(`deps: ${step.dependsOn.join(", ")}`);
   if ("forEach" in step && step.forEach) bits.push(`forEach: ${step.forEach}`);
+  if ("workspace" in step && step.workspace) bits.push(`workspace: ${step.workspace}`);
   if ("cwd" in step && step.cwd) bits.push(`cwd: ${basename(step.cwd)}`);
   if (step.kind === "distributor" && step.items?.length) bits.push(`${step.items.length} items`);
   if (step.kind === "command") bits.push(`$ ${truncate(step.cmd, 60)}`);
@@ -134,6 +135,10 @@ export function specDetailLines(step: WorkflowStep): string[] {
   const lines: string[] = [];
   if (step.dependsOn?.length) lines.push(`dependsOn: ${step.dependsOn.join(", ")}`);
   if ("forEach" in step && step.forEach) lines.push(`forEach: ${step.forEach}`);
+  if ("workspace" in step && step.workspace) lines.push(`workspace: ${step.workspace}`);
+  if ("artifacts" in step && step.artifacts?.length) {
+    lines.push(`artifacts: ${step.artifacts.join(", ")}`);
+  }
   if ("cwd" in step && step.cwd) lines.push(`cwd: ${step.cwd}`);
   if ("env" in step && step.env && Object.keys(step.env).length > 0) {
     lines.push(

@@ -82,7 +82,43 @@ export interface AgentRunFields {
   output?: JsonSchema;
 }
 
-export interface WorkerStep extends WorkflowStepBase, AgentRunFields {
+/**
+ * Fields shared by steps that run inside a per-step workspace (worker/processor
+ * and command steps): worktree inheritance and declared artifacts.
+ */
+export interface WorkspaceFields {
+  /**
+   * `"inherit:<stepId>"` — start this step's isolated worktree from the named
+   * earlier step's final worktree state (tracked edits AND untracked files)
+   * instead of the original checkout. This is how sequential steps share files:
+   * an implement → review → test pipeline where each step actually sees the
+   * previous step's edits, while the user's checkout stays untouched.
+   *
+   * The source becomes an implicit dependency: this step is scheduled after it,
+   * skips when it was skipped, and fails when it failed. The source must be a
+   * worker/processor/command step without `forEach` (a fan-out parent has many
+   * worktrees — merge them first). Outside a git repository steps share the
+   * plain cwd, so inheritance is trivially satisfied.
+   *
+   * Merging an inherited worktree lands the whole chain's changes: its diff
+   * base stays the original base commit, so it includes the inherited edits
+   * plus this step's own.
+   */
+  workspace?: string;
+  /**
+   * Output files/directories this step promises to produce, as paths relative
+   * to the step's cwd (e.g. `["report.md", "coverage/"]`). After the step
+   * succeeds, each is snapshotted out of the (ephemeral, prunable) worktree
+   * into a per-run artifacts directory and recorded on `StepResult.artifacts`;
+   * templates reference the snapshot path as `{{steps.<id>.artifacts.<name>}}`
+   * where `<name>` is the last path segment minus its extension (`report.md` →
+   * `report`, `coverage/` → `coverage`). A declared artifact that was not
+   * produced fails the step — declarations are a contract.
+   */
+  artifacts?: string[];
+}
+
+export interface WorkerStep extends WorkflowStepBase, AgentRunFields, WorkspaceFields {
   kind?: "worker" | "processor";
   /**
    * Dynamically fan this worker/processor out over prior distributor items.
@@ -223,7 +259,7 @@ export interface MergeStep extends WorkflowStepBase {
  * files never touches the user's checkout, and a `merge` step can harvest what
  * it wrote.
  */
-export interface CommandStep extends WorkflowStepBase {
+export interface CommandStep extends WorkflowStepBase, WorkspaceFields {
   kind: "command";
   /** Shell command line (run via the platform shell). Template. */
   cmd: string;
@@ -338,6 +374,20 @@ export interface AgentWorktreeInfo {
   linkedIgnoredPaths?: string[];
 }
 
+/** One declared step output, snapshotted into the run's artifact directory. */
+export interface StepArtifact {
+  /** Template name (`{{steps.<id>.artifacts.<name>}}`): last path segment minus extension. */
+  name: string;
+  /** The declared path, relative to the step's cwd. */
+  source: string;
+  /** Absolute path of the snapshot in the run's artifact directory. */
+  path: string;
+  /** Total bytes snapshotted (file sizes summed for a directory artifact). */
+  bytes: number;
+  /** Number of files snapshotted (1 for a plain file artifact). */
+  files: number;
+}
+
 /** The outcome of one step, fed into downstream templates and the cache. */
 export interface StepResult {
   stepId: string;
@@ -385,6 +435,8 @@ export interface StepResult {
   attempts?: number;
   /** Subprocess exit code, for `command` steps (`{{steps.<id>.exitCode}}`). */
   exitCode?: number;
+  /** Declared artifacts snapshotted after the step succeeded. */
+  artifacts?: StepArtifact[];
   /** Isolated git worktree metadata for agent-backed steps. */
   worktree?: AgentWorktreeInfo;
   /** Loop iteration this result belongs to (1-based); omitted ⇒ 1. */
@@ -476,6 +528,14 @@ const optionalAgentRunShape = {
   output: outputJsonSchema.optional(),
 };
 
+const workspaceShape = {
+  workspace: z
+    .string()
+    .regex(/^inherit:.+$/, 'workspace must be "inherit:<stepId>"')
+    .optional(),
+  artifacts: z.array(z.string().min(1)).min(1).optional(),
+};
+
 const retryPolicySchema = z.object({
   maxAttempts: z.number().int().min(1).max(10).optional(),
   initialDelayMs: z.number().int().min(0).max(60000).optional(),
@@ -491,6 +551,7 @@ const workflowWorkerStepSchema = z.object({
   retry: retryPolicySchema.optional(),
   maxCostUsd: z.number().positive().optional(),
   ...agentRunShape,
+  ...workspaceShape,
 });
 
 const workflowDistributorStepSchema = z
@@ -607,6 +668,7 @@ const workflowCommandStepSchema = z.object({
   env: z.record(z.string()).optional(),
   stepTimeoutSec: z.number().positive().optional(),
   output: outputJsonSchema.optional(),
+  ...workspaceShape,
 });
 
 const workflowStepSchema = z.union([
@@ -680,6 +742,42 @@ export function workflowStepKind(step: WorkflowStep): WorkflowStepKind {
 }
 
 export type AgentBackedWorkflowStep = WorkflowStep & AgentRunFields;
+
+/** The step id a `workspace: "inherit:<stepId>"` field names, if any. */
+export function workspaceSourceId(step: WorkflowStep): string | undefined {
+  const workspace = "workspace" in step ? step.workspace : undefined;
+  if (!workspace) return undefined;
+  return /^inherit:(.+)$/.exec(workspace)?.[1];
+}
+
+/**
+ * Template name an artifact path is referenced by: the last path segment minus
+ * a trailing extension (`report.md` → `report`, `coverage/` → `coverage`,
+ * `dist/app.tar.gz` → `app.tar`; dotfiles like `.env` keep their name).
+ */
+export function artifactName(source: string): string {
+  const segments = source.split(/[\\/]+/).filter(Boolean);
+  const base = segments[segments.length - 1] ?? source;
+  return base.replace(/(?<=.)\.[^.]+$/, "");
+}
+
+/**
+ * Why a declared artifact path is unusable, or undefined when it is fine.
+ * Artifact paths must stay inside the step's working directory — they are
+ * copied out of the workspace, so an absolute path or a `..` escape would
+ * snapshot files the step doesn't own.
+ */
+function artifactPathError(source: string): string | undefined {
+  if (/^([a-zA-Z]:[\\/]|[\\/])/.test(source)) return "must be a relative path";
+  const parts = source.split(/[\\/]+/).filter((part) => part.length > 0 && part !== ".");
+  if (parts.length === 0) return "does not name a file or directory";
+  let depth = 0;
+  for (const part of parts) {
+    depth += part === ".." ? -1 : 1;
+    if (depth < 0) return "escapes the step directory";
+  }
+  return undefined;
+}
 
 export function parseForEachSource(source: string): string | undefined {
   const explicit = /^steps\.(.+)\.items$/.exec(source);
@@ -808,6 +906,52 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
           };
         }
         maxPossibleSteps += sourceStep.items?.length ?? 0;
+      }
+      const wsSource = workspaceSourceId(step);
+      if (wsSource) {
+        if (!earlierIds.has(wsSource)) {
+          return {
+            ok: false,
+            error: allIds.has(wsSource)
+              ? `step '${step.id}' workspace inherits '${wsSource}', which is not in an earlier phase`
+              : `step '${step.id}' workspace inherits unknown step '${wsSource}'`,
+          };
+        }
+        const sourceStep = stepsById.get(wsSource);
+        const sourceKind = sourceStep ? workflowStepKind(sourceStep) : undefined;
+        if (sourceKind !== "worker" && sourceKind !== "processor" && sourceKind !== "command") {
+          return {
+            ok: false,
+            error: `step '${step.id}' workspace inherits '${wsSource}', which is a ${sourceKind} step (only worker, processor, and command steps leave a worktree to inherit)`,
+          };
+        }
+        if (sourceStep && "forEach" in sourceStep && sourceStep.forEach) {
+          return {
+            ok: false,
+            error: `step '${step.id}' workspace inherits fan-out step '${wsSource}', which has one worktree per item (merge them first, or inherit a non-forEach step)`,
+          };
+        }
+      }
+      const artifacts = "artifacts" in step ? step.artifacts : undefined;
+      if (artifacts) {
+        const names = new Set<string>();
+        for (const source of artifacts) {
+          const pathError = artifactPathError(source);
+          if (pathError) {
+            return {
+              ok: false,
+              error: `step '${step.id}' artifact '${source}' ${pathError} (artifact paths are relative to the step's cwd)`,
+            };
+          }
+          const name = artifactName(source);
+          if (names.has(name)) {
+            return {
+              ok: false,
+              error: `step '${step.id}' artifacts '${source}' and another entry share the template name '${name}' (names are the last path segment minus extension and must be unique per step)`,
+            };
+          }
+          names.add(name);
+        }
       }
     }
     // Promote this phase's ids only after the whole phase is checked, so two

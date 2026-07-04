@@ -540,9 +540,9 @@ describe("buildWorkflowRepairPrompt", () => {
     const prompt = buildWorkflowRepairPrompt("d", huge, "err");
     expect(prompt).toContain("…(truncated)");
     // The previous output itself is capped at MAX_REPAIR_OUTPUT_CHARS (4000); the
-    // rest of the prompt is the (larger, but bounded) base generation prompt plus
-    // a small amount of repair scaffolding — not proportional to `huge`.
-    expect(prompt.length).toBeLessThan(huge.length + 7000);
+    // rest of the prompt is the base generation prompt plus a small amount of
+    // repair scaffolding — not proportional to `huge`.
+    expect(prompt.length).toBeLessThan(buildWorkflowGenerationPrompt("d").length + 4000 + 1000);
   });
 });
 
