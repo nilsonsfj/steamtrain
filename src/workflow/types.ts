@@ -776,6 +776,12 @@ function artifactPathError(source: string): string | undefined {
     depth += part === ".." ? -1 : 1;
     if (depth < 0) return "escapes the step directory";
   }
+  // The LAST segment becomes the artifact's template name and its snapshot
+  // directory entry; a trailing `..` (e.g. `src/..`) would make the snapshot
+  // destination the shared run artifacts directory itself.
+  if (parts[parts.length - 1] === "..") {
+    return "must name a file or directory, not a parent reference";
+  }
   return undefined;
 }
 

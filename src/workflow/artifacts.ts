@@ -63,6 +63,12 @@ export async function collectArtifacts(
     }
     const name = artifactName(source);
     const dest = join(stepDir, name);
+    // The spec validator rejects names that resolve outside the step's own
+    // snapshot directory, but `rm`/`cp` below are destructive against a
+    // directory SHARED by every step of the run — never trust the name alone.
+    if (dest === stepDir || isOutside(relative(stepDir, dest))) {
+      throw new Error(`artifact '${source}' resolves outside the step's snapshot directory`);
+    }
     await rm(dest, { recursive: true, force: true });
     await mkdir(dirname(dest), { recursive: true });
     await cp(sourcePath, dest, { recursive: true });

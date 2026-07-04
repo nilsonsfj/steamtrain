@@ -12,6 +12,7 @@ import {
   type WorkflowEvent,
   type WorkflowSpec,
   artifactName,
+  collectArtifacts,
   createGitWorktreeManager,
   renderPrompt,
   runWorkflow,
@@ -214,7 +215,17 @@ describe("workspace inheritance validation", () => {
   });
 
   it("rejects absolute and escaping artifact paths", () => {
-    for (const bad of ["/etc/passwd", "../outside.txt", "a/../../outside.txt", "."]) {
+    // Trailing `..` segments are rejected even when depth-balanced: the last
+    // segment becomes the snapshot directory entry, so `src/..` would target
+    // the shared run artifacts directory itself.
+    for (const bad of [
+      "/etc/passwd",
+      "../outside.txt",
+      "a/../../outside.txt",
+      ".",
+      "src/..",
+      "a/b/..",
+    ]) {
       const result = validateWorkflow(
         base([{ id: "a", kind: "command", cmd: "true", artifacts: [bad] }]),
       );
@@ -602,6 +613,31 @@ describe("declared artifacts", () => {
     const results = doneResults(events);
     expect(workflowOk(events)).toBe(false);
     expect(results.get("build")?.artifacts).toBeUndefined();
+  });
+});
+
+describe("artifact snapshot guard", () => {
+  afterEach(async () => {
+    await Promise.all(tempRoots.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  it("refuses to snapshot a name that resolves outside the step's snapshot dir", async () => {
+    // Defense in depth below the validator: a depth-balanced trailing `..`
+    // must never let rm/cp target the shared run artifacts directory.
+    const root = await tempDir();
+    const stepCwd = join(root, "work");
+    const artifactsDir = join(root, "artifacts");
+    await mkdir(join(stepCwd, "src"), { recursive: true });
+    await mkdir(join(artifactsDir, "other-step"), { recursive: true });
+    await writeFile(join(artifactsDir, "other-step", "keep.txt"), "precious\n");
+
+    await expect(
+      collectArtifacts({ declared: ["src/.."], stepCwd, artifactsDir, stepId: "evil" }),
+    ).rejects.toThrow("resolves outside the step's snapshot directory");
+    // The other step's snapshot survived untouched.
+    expect((await readFile(join(artifactsDir, "other-step", "keep.txt"), "utf8")).trim()).toBe(
+      "precious",
+    );
   });
 });
 
