@@ -34,6 +34,7 @@ export const BLOCK_LABEL: Record<ReturnType<typeof workflowStepKind>, string> = 
   gate: "gate",
   merge: "merge-back",
   command: "command",
+  workflow: "sub-workflow",
 };
 
 /** Cumulative flat step index at the start of each phase. */
@@ -128,6 +129,10 @@ export function specStepRowMeta(step: WorkflowStep): string {
     if (step.from?.length) bits.push(`from: ${step.from.join(", ")}`);
     if (step.onConflict && step.onConflict !== "fail") bits.push(`onConflict: ${step.onConflict}`);
   }
+  if (step.kind === "workflow") {
+    bits.push(`workflow: ${step.workflow}`);
+    if (step.outputStep) bits.push(`outputStep: ${step.outputStep}`);
+  }
   return bits.join(" · ");
 }
 
@@ -187,6 +192,11 @@ export function specDetailLines(step: WorkflowStep): string[] {
           : " (max: config default)";
       lines.push(`loops back to ${step.loopTo}${max}`);
     }
+  }
+  if (step.kind === "workflow") {
+    lines.push(`workflow: ${step.workflow}`);
+    if (step.input) lines.push(`input: ${truncate(step.input, 200)}`);
+    if (step.outputStep) lines.push(`outputStep: ${step.outputStep}`);
   }
   return lines;
 }

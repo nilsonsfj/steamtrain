@@ -96,7 +96,7 @@ execution behavior. **Examples:** [`workflow-examples.md`](workflow-examples.md)
 | field | required | meaning |
 | --- | --- | --- |
 | `id` | yes | Unique across the whole workflow. |
-| `kind` | no | One of `worker`, `processor`, `distributor`, `consolidator`, `gate`, `merge`, `command`. Missing means `worker`. |
+| `kind` | no | One of `worker`, `processor`, `distributor`, `consolidator`, `gate`, `merge`, `command`, `workflow`. Missing means `worker`. |
 | `dependsOn` | no | Step ids from earlier phases only. Same-phase and forward dependencies are invalid. Steps are scheduled by these dependencies; omitting `dependsOn` makes the step wait for every step in all earlier phases. |
 | `when` | no | Per-step condition (same schema as a gate condition). When false the step is skipped, not failed. See [Per-step conditions](#per-step-conditions-when). |
 
@@ -421,6 +421,53 @@ A typical trustworthy fix loop:
 ] }
 ```
 
+### Workflow (sub-workflow invocation)
+
+Invokes another named workflow as a child run, so a proven workflow (e.g.
+`bug-hunt`) can be embedded as one stage of a bigger pipeline instead of being
+copy-pasted or hand-unrolled. Never spawns an agent or owns a worktree itself
+— the child run's own steps handle that internally — so it is not an eligible
+`workspace: "inherit:<stepId>"` source (like gate/distributor/consolidator/
+merge steps).
+
+Required field: `workflow` — the name of the workflow to invoke, resolved
+against the same catalog `steamtrain workflow list` shows.
+
+Optional fields: `input` (a template rendered to become the child run's
+`{{input}}`; omitted means this run's own `{{input}}` passes through
+unchanged), `outputStep` (the id of the child step whose `output`/`json`
+surface as this step's own result; omitted means the child spec's last step,
+by phase/array position — not by which step happens to finish last, which is
+not deterministic under concurrent scheduling).
+
+```jsonc
+{
+  "id": "bug-sweep",
+  "kind": "workflow",
+  "workflow": "bug-hunt",
+  "input": "{{input}} — focus on the changed files in this release"
+}
+```
+
+The child run's own phases and steps fold into this run's own history and
+live view under a namespaced id, `<thisStepId>::<childStepId>` (and
+`<thisStepId>::<childPhaseId>` for phases) — e.g. `bug-sweep::triage`,
+`bug-sweep::report`. Downstream steps normally just reference
+`{{steps.bug-sweep.output}}` (the resolved output step's text) or
+`{{steps.bug-sweep.json.<path>}}`, but can reach a specific child step
+directly by its namespaced id, e.g. `{{steps.bug-sweep::report.output}}` —
+this works with no special syntax, and (like any other `{{steps.<id>…}}`
+reference) creates an implicit scheduling dependency on the `bug-sweep` step.
+
+The child run enforces its own independent 1000-step budget (`MAX_STEPS`) —
+it is not combined with the parent's. `MAX_WORKFLOW_NESTING_DEPTH` is 5, but
+because the root spec's own name is folded into the cycle/depth-tracking
+call stack before any nesting happens, at most 4 `workflow` invocations can
+succeed below the root before the 5th is rejected with a depth-exceeded
+error at run time. A cycle (workflow A invoking B invoking A, directly or
+through further nesting) is rejected the same way, at whatever depth it's
+detected.
+
 ## Workspace inheritance and artifacts (file handoff)
 
 Each worker/processor/command step runs in its **own** worktree snapshotted
@@ -685,6 +732,14 @@ Unknown placeholders are left unchanged.
 - A merge step with `onConflict: "agent"` requires `agent` and `model`.
 - A merge step with `perSource` requires `mode` `"branch"` or `"pr"`.
 - Command steps require a non-empty `cmd`.
+- Workflow steps require a non-empty `workflow` name. The referenced
+  workflow's existence, cycle-freedom, and nesting depth (at most 4
+  successful nested invocations below the root; see above) are checked at
+  **run time**, not at validate time — see
+  [the sub-workflows design doc](superpowers/specs/2026-07-04-sub-workflows-design.md)
+  for why. A workflow step counts as a fixed cost of 1 toward its own spec's
+  1000-step budget regardless of how large the invoked child workflow is;
+  the child enforces its own independent 1000-step budget.
 - `workspace` must be `"inherit:<stepId>"`; the source must be a
   worker/processor/command step in an earlier phase, without `forEach`.
 - `artifacts` entries must be relative paths that stay inside the step's cwd,

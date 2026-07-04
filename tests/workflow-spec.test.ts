@@ -368,3 +368,68 @@ describe("validateWorkflow dependency rules", () => {
     expect(validateWorkflow(workerSource).error).toMatch(/must be a distributor/);
   });
 });
+
+describe("workflow (sub-workflow) step", () => {
+  function specWith(step: Record<string, unknown>): WorkflowSpec {
+    return {
+      name: "parent",
+      phases: [{ id: "p1", title: "P1", steps: [step as never] }],
+    };
+  }
+
+  it("accepts a minimal workflow step", () => {
+    const result = validateWorkflow(specWith({ id: "call", kind: "workflow", workflow: "child" }));
+    expect(result.ok).toBe(true);
+  });
+
+  it("accepts input and outputStep fields", () => {
+    const result = validateWorkflow(
+      specWith({
+        id: "call",
+        kind: "workflow",
+        workflow: "child",
+        input: "{{input}} extra",
+        outputStep: "final",
+      }),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects a workflow step with an empty workflow name", () => {
+    const result = validateWorkflow(specWith({ id: "call", kind: "workflow", workflow: "" }));
+    expect(result.ok).toBe(false);
+  });
+
+  it("rejects a workflow step missing the workflow field", () => {
+    const result = validateWorkflow(specWith({ id: "call", kind: "workflow" }));
+    expect(result.ok).toBe(false);
+  });
+
+  it("rejects a later step from inheriting a workflow step's workspace", () => {
+    const spec: WorkflowSpec = {
+      name: "parent",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "call", kind: "workflow", workflow: "child" } as never],
+        },
+        {
+          id: "p2",
+          title: "P2",
+          steps: [
+            {
+              id: "next",
+              kind: "command",
+              cmd: "echo hi",
+              workspace: "inherit:call",
+            },
+          ],
+        },
+      ],
+    };
+    const result = validateWorkflow(spec);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("workflow");
+  });
+});

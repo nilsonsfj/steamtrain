@@ -17,6 +17,7 @@ model and diagrams, see [`workflow-overview.md`](workflow-overview.md).
 | distribute lenses + parallel drafts | distributor + workers | `multi-plan` |
 | cross-check + gate + report | consolidator + gate + consolidator | `bug-hunt` |
 | audit many repos/services | distributor + `forEach` + gate | README `audit` example |
+| compose another workflow as one stage | `workflow` step | `release` |
 
 ---
 
@@ -371,6 +372,57 @@ Default output:
 ```
 
 Add a `prompt` if you want a template-shaped merge without spawning an agent.
+
+---
+
+## Pattern 9: compose another workflow as one stage
+
+Use when a proven workflow (e.g. `bug-hunt`) should be embedded as one stage
+of a bigger pipeline, instead of being copy-pasted or hand-unrolled into the
+new spec.
+
+### Bundled walkthrough: `release`
+
+```jsonc
+{
+  "name": "release",
+  "description": "Release checklist that runs the bug-hunt sweep as one of its stages.",
+  "phases": [
+    {
+      "id": "checks",
+      "title": "Checks",
+      "steps": [
+        {
+          "id": "bug-sweep",
+          "kind": "workflow",
+          "workflow": "bug-hunt",
+          "input": "{{input}} — pre-release sweep"
+        }
+      ]
+    },
+    {
+      "id": "gate",
+      "title": "Gate",
+      "steps": [
+        {
+          "id": "clean",
+          "kind": "gate",
+          "dependsOn": ["bug-sweep"],
+          "condition": { "step": "bug-sweep", "ok": true },
+          "onFalse": "fail"
+        }
+      ]
+    }
+  ]
+}
+```
+
+`bug-sweep`'s internal phases and steps show up in
+`steamtrain workflow history show <id>` namespaced as `bug-sweep::<step>`
+(e.g. `bug-sweep::cross-check`, `bug-sweep::report`) — the child run's event
+stream folds into this run's own history rather than appearing as a separate
+run. The gate then routes on `bug-sweep`'s own `ok`, exactly as it would for
+any other step.
 
 ---
 

@@ -93,6 +93,56 @@ describe("RunRecordBuilder", () => {
     expect(record.totals.costUsd).toBeCloseTo(0.02);
   });
 
+  it("flattens a sub-workflow step's child run under a namespaced id without double-counting cost", async () => {
+    const cwd = tempDir();
+    const childSpec: WorkflowSpec = {
+      name: "child",
+      phases: [
+        {
+          id: "only",
+          title: "Only",
+          steps: [{ id: "greet", agent: "claude", model: "m", prompt: "hi" }],
+        },
+      ],
+    };
+    const parentSpec: WorkflowSpec = {
+      name: "parent",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "call", kind: "workflow", workflow: "child" } as never],
+        },
+      ],
+    };
+    const builder = new RunRecordBuilder({
+      id: "run-2",
+      workflow: parentSpec.name,
+      input: "go",
+      cwd,
+    });
+    let ok = true;
+    for await (const event of runWorkflow(
+      parentSpec,
+      { input: "go" },
+      { createAdapter: fakeAdapter, maxConcurrency: 2, cwd, resolveWorkflow: () => childSpec },
+    )) {
+      builder.handle(event as WorkflowEvent);
+      if (event.kind === "workflow_done") ok = event.ok;
+    }
+    const record = builder.build({ status: ok ? "done" : "error" });
+
+    expect(record.ok).toBe(true);
+    // The child's phase is its own HistoryPhase, namespaced.
+    const childPhase = record.phases.find((p) => p.phaseId === "call::only");
+    expect(childPhase).toBeDefined();
+    expect(childPhase?.steps.map((s) => s.stepId)).toContain("call::greet");
+    // The workflow step itself is excluded from totals (its childResults are
+    // counted instead) — same rule that already applies to forEach parents.
+    expect(record.totals.steps).toBe(1); // only call::greet
+    expect(record.totals.costUsd).toBeCloseTo(0.01);
+  });
+
   it("captures step output and error status on failure", async () => {
     const cwd = tempDir();
     const failingAdapter = (id: AgentId): AgentAdapter => ({

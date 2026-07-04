@@ -28,7 +28,8 @@ export type WorkflowStepKind =
   | "consolidator"
   | "gate"
   | "merge"
-  | "command";
+  | "command"
+  | "workflow";
 
 export interface WorkflowStepBase {
   /** Unique across the whole workflow; referenced by `dependsOn` and templates. */
@@ -279,6 +280,44 @@ export interface CommandStep extends WorkflowStepBase, WorkspaceFields {
   output?: JsonSchema;
 }
 
+/**
+ * Invokes another named workflow as a child run. The child run's own steps
+ * fold into THIS run's history under a namespaced id
+ * (`<thisStepId>::<childStepId>`) — see `executeWorkflowStep` in engine.ts.
+ * Never itself owns a worktree or spawns an agent; the child's own steps
+ * handle that internally, so it deliberately does NOT mix in
+ * `AgentRunFields`/`WorkspaceFields` and is not an eligible
+ * `workspace: "inherit:<stepId>"` source (enforced by the same allowlist
+ * check that already excludes gate/distributor/consolidator/merge steps).
+ *
+ * Budget note: this step counts as a fixed cost of 1 toward the PARENT
+ * spec's own `MAX_STEPS`; the child spec enforces its own independent
+ * `MAX_STEPS` at its own validate time. See
+ * docs/superpowers/specs/2026-07-04-sub-workflows-design.md
+ * ("Step budget decision") for why this is a deliberate deviation from
+ * combining both into one static ceiling.
+ */
+export interface WorkflowCallStep extends WorkflowStepBase {
+  kind: "workflow";
+  /** Name of the workflow to invoke (resolved via `WorkflowDeps.resolveWorkflow` at run time). */
+  workflow: string;
+  /** Template rendered to become the child run's `{{input}}`. Omitted ⇒ this run's own `{{input}}` passes through unchanged. */
+  input?: string;
+  /**
+   * Id of the child step whose `output`/`json` surface as this step's own
+   * result. Omitted ⇒ the child spec's last step (last phase, last step by
+   * array position — NOT chronological completion order, which is
+   * non-deterministic under concurrent scheduling).
+   *
+   * Not validated against the child spec at spec-validate time: the child is
+   * resolved via `WorkflowDeps.resolveWorkflow`, which isn't available during
+   * pure structural validation. An `outputStep` naming a nonexistent child
+   * step is caught at run time (the step fails with a clear "did not produce a
+   * result" error).
+   */
+  outputStep?: string;
+}
+
 export interface GateCondition {
   /** Step whose result is inspected; omitted means inspect the workflow input. */
   step?: string;
@@ -325,7 +364,8 @@ export type WorkflowStep =
   | ConsolidatorStep
   | GateStep
   | MergeStep
-  | CommandStep;
+  | CommandStep
+  | WorkflowCallStep;
 
 export interface WorkflowPhase {
   id: string;
@@ -451,6 +491,8 @@ export const MAX_CONCURRENCY = 16;
 export const DEFAULT_LOOP_MAX_ITERATIONS = 10;
 /** Hard ceiling on a loop gate's `maxIterations` (runaway backstop). */
 export const LOOP_MAX_ITERATIONS_CEILING = 100;
+/** Hard ceiling on nested `workflow` step call-stack depth (cycle/blast-radius backstop). */
+export const MAX_WORKFLOW_NESTING_DEPTH = 5;
 
 const agentId = z
   .string()
@@ -671,12 +713,21 @@ const workflowCommandStepSchema = z.object({
   ...workspaceShape,
 });
 
+const workflowCallStepSchema = z.object({
+  ...baseStepShape,
+  kind: z.literal("workflow"),
+  workflow: z.string().min(1),
+  input: z.string().min(1).optional(),
+  outputStep: z.string().min(1).optional(),
+});
+
 const workflowStepSchema = z.union([
   workflowGateStepSchema,
   workflowDistributorStepSchema,
   workflowConsolidatorStepSchema,
   workflowMergeStepSchema,
   workflowCommandStepSchema,
+  workflowCallStepSchema,
   workflowWorkerStepSchema,
 ]);
 

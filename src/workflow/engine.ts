@@ -37,9 +37,11 @@ import {
   type GateCondition,
   MAX_CONCURRENCY,
   MAX_STEPS,
+  MAX_WORKFLOW_NESTING_DEPTH,
   type MergeStep,
   type StepResult,
   type WorkerStep,
+  type WorkflowCallStep,
   type WorkflowItem,
   type WorkflowPhase,
   type WorkflowSpec,
@@ -76,6 +78,15 @@ export interface WorkflowDeps {
   artifactsDir?: string;
   /** Default per-loop iteration cap; a gate's own `maxIterations` overrides it. */
   loopMaxIterations?: number;
+  /**
+   * Resolves a `workflow`-kind step's `workflow` name to its spec, e.g. via
+   * an already-loaded catalog (`Record<string, WorkflowSpec>` lookup).
+   * Injected (not imported from `catalog.ts`) so the engine stays decoupled
+   * from filesystem/home-dir concerns and unit-testable with fakes. Omitted
+   * ⇒ any `workflow` step fails immediately with a clear "not supported in
+   * this context" error rather than crashing.
+   */
+  resolveWorkflow?: (name: string) => WorkflowSpec | undefined;
 }
 
 export interface WorkflowRunContext {
@@ -87,6 +98,15 @@ export interface WorkflowRunContext {
    * run resumes. Pass the same Map across runs to enable resume.
    */
   cache?: Map<string, StepResult>;
+  /**
+   * Names of workflows currently being invoked in the call stack that led to
+   * this run (outermost first). Only ever set internally, when a `workflow`
+   * step recurses into `runWorkflow` for a child spec — used to detect
+   * cycles (A invokes B invokes A) and to enforce
+   * `MAX_WORKFLOW_NESTING_DEPTH`. Callers starting a top-level run should
+   * never set this.
+   */
+  workflowCallStack?: string[];
 }
 
 /**
@@ -220,6 +240,10 @@ export async function* runWorkflow(
 function costOfCachedResults(cache: Map<string, StepResult>): number {
   let total = 0;
   for (const result of cache.values()) {
+    // A parent that carries children (a `forEach` fan-out or a `workflow`
+    // sub-run) never has its own `costUsd` — the spend lives on the leaves in
+    // `childResults`. Summing only the leaves here avoids double-counting the
+    // wrapper against those leaves.
     if (result.childResults?.length) {
       for (const child of result.childResults) total += child.costUsd ?? 0;
     } else if (result.parentStepId === undefined) {
@@ -599,8 +623,13 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
       const stepDeps = new Set<string>();
       const addEarlier = (ref: string | undefined): void => {
         if (!ref) return;
+        // A namespaced sub-workflow child reference (`wf::child`) depends on
+        // its owning `workflow` step; strip to the owner BEFORE the existing
+        // forEach `[n]`-suffix stripping, so `wf::child[2]`-shaped refs (a
+        // forEach step nested inside a sub-workflow) still resolve correctly.
+        const owner = ref.includes("::") ? ref.slice(0, ref.indexOf("::")) : ref;
         // A `work[3]` fan-out child reference depends on its `work` parent.
-        const id = phaseIndexOf.has(ref) ? ref : ref.replace(/\[\d+\]$/, "");
+        const id = phaseIndexOf.has(owner) ? owner : owner.replace(/\[\d+\]$/, "");
         const refPhase = phaseIndexOf.get(id);
         if (refPhase !== undefined && refPhase < pi) stepDeps.add(id);
       };
@@ -634,6 +663,7 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
       }
       if ("prompt" in step) renderableTexts.push(step.prompt);
       if (step.kind === "command") renderableTexts.push(step.cmd);
+      if (step.kind === "workflow") renderableTexts.push(step.input);
       if (step.kind === "distributor" && step.items) renderableTexts.push(...step.items);
       for (const text of renderableTexts) {
         for (const ref of templateStepRefs(text)) addEarlier(ref);
@@ -807,6 +837,7 @@ async function runSingleStep(
       retryDefault: spec.retry,
       stepTimeoutDefault: spec.stepTimeoutSec,
       iteration,
+      workflowCallStack: ctx.workflowCallStack ?? [],
     },
     {
       pushAgentEvent: (stepId, event) => {
@@ -983,6 +1014,8 @@ interface ExecuteContext {
   stepTimeoutDefault?: number;
   /** Loop iteration this step is executing under (1-based). */
   iteration: number;
+  /** Names of workflows already on the call stack (see `WorkflowRunContext.workflowCallStack`). Always an array (never undefined) once inside `executeStep`. */
+  workflowCallStack: string[];
 }
 
 interface ExecutionOutcome {
@@ -1114,6 +1147,10 @@ async function executeStep(
       gate: { passed: evaluation.passed, target, onFalse },
       stop: !evaluation.passed && (onFalse === "stop" || onFalse === "fail"),
     };
+  }
+
+  if (kind === "workflow" && step.kind === "workflow") {
+    return executeWorkflowStep(step, ctx, hooks);
   }
 
   return {
@@ -1872,6 +1909,206 @@ async function executeCommandStep(
   }
 }
 
+/** The last step (by array position, NOT chronological completion order) of a spec's last phase. Deterministic default output source for a `workflow` step that omits `outputStep`. */
+function lastStepId(spec: WorkflowSpec): string | undefined {
+  const lastPhase = spec.phases[spec.phases.length - 1];
+  const steps = lastPhase?.steps ?? [];
+  return steps[steps.length - 1]?.id;
+}
+
+/**
+ * Execute a `workflow` step: recursively run another named workflow (resolved
+ * via `ctx.deps.resolveWorkflow`) and fold its event stream into this run's
+ * own, under the namespace `<thisStepId>::<childId>` for both phase and step
+ * ids. The child's leaf step results become this step's `childResults` —
+ * exactly the shape a `forEach` fan-out parent already produces — so the
+ * existing cost/token summation (`runSingleStep`) and run-history flattening
+ * (`computeRunTotals`, which already skips any step whose result carries
+ * `childResults`) apply completely unmodified. Cycle/depth-guarded via
+ * `ctx.workflowCallStack`; never itself allocates a worktree (no agent, no
+ * `WorkspaceFields`) — the child's own steps handle that internally.
+ */
+async function executeWorkflowStep(
+  step: WorkflowCallStep,
+  ctx: ExecuteContext,
+  hooks: ExecuteHooks,
+): Promise<ExecutionOutcome> {
+  const started = Date.now();
+  const fail = (message: string): ExecutionOutcome => ({
+    result: {
+      stepId: step.id,
+      ok: false,
+      output: message,
+      error: message,
+      durationMs: Date.now() - started,
+    },
+  });
+
+  const resolveWorkflow = ctx.deps.resolveWorkflow;
+  if (!resolveWorkflow) {
+    return fail("workflow steps are not supported in this context (no resolveWorkflow configured)");
+  }
+  const childSpec = resolveWorkflow(step.workflow);
+  if (!childSpec) return fail(`unknown workflow '${step.workflow}'`);
+
+  // `ctx.workflowCallStack` tracks workflows already entered via a `workflow`
+  // step; a non-root spec's own name is already its last entry (its parent
+  // appended it before recursing). The root run's call stack starts `[]` and
+  // never gets its own name pushed (per `WorkflowRunContext.workflowCallStack`
+  // — "callers starting a top-level run should never set this"), so a root
+  // spec invoking itself (or being re-entered indirectly) wouldn't otherwise
+  // show up in `stack`. Fold `ctx.workflowName` in so cycle/depth accounting
+  // is uniform regardless of nesting level.
+  const stack = ctx.workflowCallStack.includes(ctx.workflowName)
+    ? ctx.workflowCallStack
+    : [...ctx.workflowCallStack, ctx.workflowName];
+  if (stack.includes(step.workflow)) {
+    return fail(`workflow cycle detected: ${[...stack, step.workflow].join(" -> ")}`);
+  }
+  if (stack.length >= MAX_WORKFLOW_NESTING_DEPTH) {
+    return fail(
+      `workflow nesting depth exceeded ${MAX_WORKFLOW_NESTING_DEPTH} (invoking '${step.workflow}')`,
+    );
+  }
+
+  const childInput = step.input
+    ? renderPrompt(step.input, {
+        input: ctx.input,
+        outputs: ctx.outputs,
+        results: ctx.results,
+        iteration: ctx.iteration,
+      })
+    : ctx.input;
+
+  const namespace = (id: string): string => `${step.id}::${id}`;
+  const childResults: StepResult[] = [];
+  const rawResults = new Map<string, StepResult>();
+  let childOk = false;
+
+  // Translated events below carry `iteration` (and `result.iteration`)
+  // straight through via `...event`/`...event.result` — that's always the
+  // CHILD run's own independent loop-iteration counter, not this parent
+  // spec's current iteration. If this `workflow` step sits inside a
+  // loop-back gate's body (`runPhasedScheduler`) and the parent loop re-runs
+  // it multiple times, every pass's namespaced nested steps will show
+  // whatever iteration the child run itself was on (typically always 1),
+  // not the parent's 1/2/3… — a live-view/history display limitation only,
+  // not a cost/correctness bug (see docs/superpowers/plans/2026-07-04-sub-workflows.md,
+  // "Post-plan follow-ups").
+  for await (const event of runWorkflow(
+    childSpec,
+    { input: childInput, workflowCallStack: [...stack, step.workflow] },
+    ctx.deps,
+    ctx.signal,
+  )) {
+    switch (event.kind) {
+      case "workflow_start":
+        break;
+      case "workflow_done":
+        childOk = event.ok;
+        break;
+      case "phase_start":
+      case "phase_done":
+        hooks.pushWorkflowEvent({ ...event, phaseId: namespace(event.phaseId) });
+        break;
+      case "step_start":
+        hooks.pushWorkflowEvent({
+          ...event,
+          phaseId: namespace(event.phaseId),
+          stepId: namespace(event.stepId),
+          parentStepId: event.parentStepId ? namespace(event.parentStepId) : step.id,
+          dependsOn: event.dependsOn?.map(namespace),
+          loopTo: event.loopTo ? namespace(event.loopTo) : undefined,
+        });
+        break;
+      case "step_done": {
+        rawResults.set(event.result.stepId, event.result);
+        // Only this event's own top-level stepId/parentStepId get namespaced
+        // here. If `event.result` itself carries a nested `childResults`
+        // array (e.g. this child step was itself a `forEach` fan-out parent,
+        // or itself a nested `workflow` step), that array's own inner ids are
+        // left as whatever id they already carried one level down (raw or
+        // namespaced-once, never re-namespaced at this level). This is
+        // intentional, not a bug: a fan-out/nested-workflow wrapper's own
+        // result never carries `costUsd` (see `runSingleStep`), so cost
+        // summation is unaffected, and `computeRunTotals` derives totals
+        // from the flat, already-namespaced `step_done` *event* stream —
+        // it never walks into `childResults` — so nothing actually reads
+        // these inner ids for anything that would be namespace-sensitive.
+        const namespaced: StepResult = {
+          ...event.result,
+          stepId: namespace(event.result.stepId),
+          parentStepId: event.result.parentStepId ? namespace(event.result.parentStepId) : step.id,
+        };
+        childResults.push(namespaced);
+        hooks.pushWorkflowEvent({
+          ...event,
+          phaseId: namespace(event.phaseId),
+          stepId: namespace(event.stepId),
+          result: namespaced,
+        });
+        break;
+      }
+      case "step_event":
+      case "step_retry":
+      case "gate_evaluated":
+        hooks.pushWorkflowEvent({
+          ...event,
+          phaseId: namespace(event.phaseId),
+          stepId: namespace(event.stepId),
+        });
+        break;
+      case "fan_out":
+        hooks.pushWorkflowEvent({
+          ...event,
+          phaseId: namespace(event.phaseId),
+          parentStepId: namespace(event.parentStepId),
+        });
+        break;
+      case "loop_iteration":
+        hooks.pushWorkflowEvent({
+          ...event,
+          gateStepId: namespace(event.gateStepId),
+          loopTo: namespace(event.loopTo),
+        });
+        break;
+      case "budget_exceeded":
+        // A step-scoped breach carries a child stepId we namespace; a
+        // workflow-scoped breach (the child run hitting its own maxCostUsd)
+        // has no stepId and passes through as-is — it describes the child
+        // run's budget, not a step, and the child's partial leaf costs still
+        // roll up via `childResults` so the parent's accounting stays correct.
+        hooks.pushWorkflowEvent(
+          event.stepId ? { ...event, stepId: namespace(event.stepId) } : event,
+        );
+        break;
+    }
+  }
+
+  const outputStepId = step.outputStep ?? lastStepId(childSpec);
+  const outputResult = outputStepId ? rawResults.get(outputStepId) : undefined;
+  if (!outputResult) {
+    return fail(
+      step.outputStep
+        ? `outputStep '${step.outputStep}' did not produce a result in workflow '${step.workflow}'`
+        : `workflow '${step.workflow}' produced no step results`,
+    );
+  }
+
+  return {
+    result: {
+      stepId: step.id,
+      ok: childOk,
+      output: outputResult.output,
+      json: outputResult.json,
+      error: childOk ? undefined : `sub-workflow '${step.workflow}' did not complete successfully`,
+      durationMs: Date.now() - started,
+      childResults,
+    },
+    childResults,
+  };
+}
+
 /**
  * Execute a `merge` step: collect the source steps' recorded worktrees (a
  * fan-out parent contributes every child worktree), merge them in an isolated
@@ -2327,7 +2564,16 @@ function evaluateGate(
   return { passed, message: message ?? (passed ? undefined : "gate condition did not pass") };
 }
 
-/** Count dynamic child step ids already present in a resumed cache. */
+/**
+ * Count dynamic child step ids already present in a resumed cache.
+ *
+ * This targets `forEach` fan-out expansion (children keyed with an `[n]`
+ * suffix), which is the unbounded-generation risk the step budget guards
+ * against. Namespaced sub-workflow children (`<parent>::<child>` ids) are
+ * intentionally NOT counted here: a `workflow` step's expansion is bounded by
+ * the child spec's own independent `MAX_STEPS` budget (enforced at the child's
+ * own validate/run time), not by the parent's dynamic-step counter.
+ */
 function countCachedDynamicSteps(cache: Map<string, StepResult>): number {
   let n = 0;
   for (const stepId of cache.keys()) {
