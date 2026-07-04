@@ -246,9 +246,14 @@ describe("workflow (sub-workflow) step", () => {
             {
               id: "downstream",
               kind: "command",
-              // No explicit dependsOn — this reaches into the child's own
-              // step by namespaced id, which must still create an implicit
-              // scheduling dependency on the "call" workflow step.
+              // Explicit (empty) dependsOn suppresses the barrier-default
+              // "depend on every earlier-phase step" rule, which would
+              // otherwise mask the bug this test targets (call is in an
+              // earlier phase either way). With dependsOn: [] the ONLY way
+              // "call" can end up a recognized dependency is via the
+              // template-ref scan resolving the "call::greet" ref down to
+              // its owning "call" step.
+              dependsOn: [],
               cmd: "echo got:{{steps.call::greet.output}}",
             },
           ],
