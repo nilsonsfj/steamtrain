@@ -98,16 +98,29 @@ describe("RunRecordBuilder", () => {
     const childSpec: WorkflowSpec = {
       name: "child",
       phases: [
-        { id: "only", title: "Only", steps: [{ id: "greet", agent: "claude", model: "m", prompt: "hi" }] },
+        {
+          id: "only",
+          title: "Only",
+          steps: [{ id: "greet", agent: "claude", model: "m", prompt: "hi" }],
+        },
       ],
     };
     const parentSpec: WorkflowSpec = {
       name: "parent",
       phases: [
-        { id: "p1", title: "P1", steps: [{ id: "call", kind: "workflow", workflow: "child" } as never] },
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "call", kind: "workflow", workflow: "child" } as never],
+        },
       ],
     };
-    const builder = new RunRecordBuilder({ id: "run-2", workflow: parentSpec.name, input: "go", cwd });
+    const builder = new RunRecordBuilder({
+      id: "run-2",
+      workflow: parentSpec.name,
+      input: "go",
+      cwd,
+    });
     let ok = true;
     for await (const event of runWorkflow(
       parentSpec,

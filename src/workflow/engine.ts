@@ -2078,7 +2078,9 @@ async function executeWorkflowStep(
         // has no stepId and passes through as-is — it describes the child
         // run's budget, not a step, and the child's partial leaf costs still
         // roll up via `childResults` so the parent's accounting stays correct.
-        hooks.pushWorkflowEvent(event.stepId ? { ...event, stepId: namespace(event.stepId) } : event);
+        hooks.pushWorkflowEvent(
+          event.stepId ? { ...event, stepId: namespace(event.stepId) } : event,
+        );
         break;
     }
   }

@@ -20,7 +20,10 @@ async function tempDir(): Promise<string> {
   return dir;
 }
 
-function fakeAdapter(id: AgentId, textOf: (opts: AgentRunOptions) => string = (o) => `out:${o.prompt}`): AgentAdapter {
+function fakeAdapter(
+  id: AgentId,
+  textOf: (opts: AgentRunOptions) => string = (o) => `out:${o.prompt}`,
+): AgentAdapter {
   return {
     id,
     binary: "fake",
@@ -48,7 +51,11 @@ function deps(cwd: string, over: Partial<WorkflowDeps> = {}): WorkflowDeps {
   };
 }
 
-async function runToEvents(spec: WorkflowSpec, d: WorkflowDeps, input = "task"): Promise<WorkflowEvent[]> {
+async function runToEvents(
+  spec: WorkflowSpec,
+  d: WorkflowDeps,
+  input = "task",
+): Promise<WorkflowEvent[]> {
   const events: WorkflowEvent[] = [];
   for await (const ev of runWorkflow(spec, { input }, d)) events.push(ev);
   return events;
@@ -132,7 +139,9 @@ describe("workflow (sub-workflow) step", () => {
         {
           id: "two",
           title: "Two",
-          steps: [{ id: "second", dependsOn: ["first"], agent: "claude", model: "m", prompt: "second" }],
+          steps: [
+            { id: "second", dependsOn: ["first"], agent: "claude", model: "m", prompt: "second" },
+          ],
         },
       ],
     };
@@ -146,10 +155,7 @@ describe("workflow (sub-workflow) step", () => {
         },
       ],
     };
-    const events = await runToEvents(
-      spec,
-      deps(cwd, { resolveWorkflow: () => twoStepChild }),
-    );
+    const events = await runToEvents(spec, deps(cwd, { resolveWorkflow: () => twoStepChild }));
     const results = doneResults(events);
     expect(results.get("call")?.output).toBe("out:first");
   });
@@ -175,7 +181,9 @@ describe("workflow (sub-workflow) step", () => {
     const cwd = await tempDir();
     const selfSpec: WorkflowSpec = {
       name: "loopy",
-      phases: [{ id: "p1", title: "P1", steps: [{ id: "call", kind: "workflow", workflow: "loopy" }] }],
+      phases: [
+        { id: "p1", title: "P1", steps: [{ id: "call", kind: "workflow", workflow: "loopy" }] },
+      ],
     };
     const events = await runToEvents(selfSpec, deps(cwd, { resolveWorkflow: () => selfSpec }));
     const results = doneResults(events);
@@ -187,14 +195,21 @@ describe("workflow (sub-workflow) step", () => {
     const cwd = await tempDir();
     const specA: WorkflowSpec = {
       name: "a",
-      phases: [{ id: "p1", title: "P1", steps: [{ id: "callB", kind: "workflow", workflow: "b" }] }],
+      phases: [
+        { id: "p1", title: "P1", steps: [{ id: "callB", kind: "workflow", workflow: "b" }] },
+      ],
     };
     const specB: WorkflowSpec = {
       name: "b",
-      phases: [{ id: "p1", title: "P1", steps: [{ id: "callA", kind: "workflow", workflow: "a" }] }],
+      phases: [
+        { id: "p1", title: "P1", steps: [{ id: "callA", kind: "workflow", workflow: "a" }] },
+      ],
     };
     const catalog: Record<string, WorkflowSpec> = { a: specA, b: specB };
-    const events = await runToEvents(specA, deps(cwd, { resolveWorkflow: (name) => catalog[name] }));
+    const events = await runToEvents(
+      specA,
+      deps(cwd, { resolveWorkflow: (name) => catalog[name] }),
+    );
     const results = doneResults(events);
     expect(results.get("callB")?.ok).toBe(false);
     // callB's own child run (b) fails at its "callA" step; that failure

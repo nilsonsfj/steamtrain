@@ -409,7 +409,11 @@ describe("workflow (sub-workflow) step", () => {
     const spec: WorkflowSpec = {
       name: "parent",
       phases: [
-        { id: "p1", title: "P1", steps: [{ id: "call", kind: "workflow", workflow: "child" } as never] },
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "call", kind: "workflow", workflow: "child" } as never],
+        },
         {
           id: "p2",
           title: "P2",
