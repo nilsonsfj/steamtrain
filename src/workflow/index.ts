@@ -9,6 +9,7 @@ export {
   type GateStep,
   type MergeStep,
   type WorkerStep,
+  type WorkflowCallStep,
   type WorkflowItem,
   type WorkflowStep,
   type WorkflowStepKind,
@@ -28,6 +29,7 @@ export {
   workflowAgentIds,
   MAX_STEPS,
   MAX_CONCURRENCY,
+  MAX_WORKFLOW_NESTING_DEPTH,
 } from "./types";
 export type {
   WorkflowEvent,
