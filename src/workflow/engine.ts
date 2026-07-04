@@ -76,6 +76,15 @@ export interface WorkflowDeps {
   artifactsDir?: string;
   /** Default per-loop iteration cap; a gate's own `maxIterations` overrides it. */
   loopMaxIterations?: number;
+  /**
+   * Resolves a `workflow`-kind step's `workflow` name to its spec, e.g. via
+   * an already-loaded catalog (`Record<string, WorkflowSpec>` lookup).
+   * Injected (not imported from `catalog.ts`) so the engine stays decoupled
+   * from filesystem/home-dir concerns and unit-testable with fakes. Omitted
+   * ⇒ any `workflow` step fails immediately with a clear "not supported in
+   * this context" error rather than crashing.
+   */
+  resolveWorkflow?: (name: string) => WorkflowSpec | undefined;
 }
 
 export interface WorkflowRunContext {
@@ -87,6 +96,15 @@ export interface WorkflowRunContext {
    * run resumes. Pass the same Map across runs to enable resume.
    */
   cache?: Map<string, StepResult>;
+  /**
+   * Names of workflows currently being invoked in the call stack that led to
+   * this run (outermost first). Only ever set internally, when a `workflow`
+   * step recurses into `runWorkflow` for a child spec — used to detect
+   * cycles (A invokes B invokes A) and to enforce
+   * `MAX_WORKFLOW_NESTING_DEPTH`. Callers starting a top-level run should
+   * never set this.
+   */
+  workflowCallStack?: string[];
 }
 
 /**
@@ -807,6 +825,7 @@ async function runSingleStep(
       retryDefault: spec.retry,
       stepTimeoutDefault: spec.stepTimeoutSec,
       iteration,
+      workflowCallStack: ctx.workflowCallStack ?? [],
     },
     {
       pushAgentEvent: (stepId, event) => {
@@ -983,6 +1002,8 @@ interface ExecuteContext {
   stepTimeoutDefault?: number;
   /** Loop iteration this step is executing under (1-based). */
   iteration: number;
+  /** Names of workflows already on the call stack (see `WorkflowRunContext.workflowCallStack`). Always an array (never undefined) once inside `executeStep`. */
+  workflowCallStack: string[];
 }
 
 interface ExecutionOutcome {
