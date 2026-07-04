@@ -308,6 +308,12 @@ export interface WorkflowCallStep extends WorkflowStepBase {
    * result. Omitted ⇒ the child spec's last step (last phase, last step by
    * array position — NOT chronological completion order, which is
    * non-deterministic under concurrent scheduling).
+   *
+   * Not validated against the child spec at spec-validate time: the child is
+   * resolved via `WorkflowDeps.resolveWorkflow`, which isn't available during
+   * pure structural validation. An `outputStep` naming a nonexistent child
+   * step is caught at run time (the step fails with a clear "did not produce a
+   * result" error).
    */
   outputStep?: string;
 }

@@ -2564,7 +2564,16 @@ function evaluateGate(
   return { passed, message: message ?? (passed ? undefined : "gate condition did not pass") };
 }
 
-/** Count dynamic child step ids already present in a resumed cache. */
+/**
+ * Count dynamic child step ids already present in a resumed cache.
+ *
+ * This targets `forEach` fan-out expansion (children keyed with an `[n]`
+ * suffix), which is the unbounded-generation risk the step budget guards
+ * against. Namespaced sub-workflow children (`<parent>::<child>` ids) are
+ * intentionally NOT counted here: a `workflow` step's expansion is bounded by
+ * the child spec's own independent `MAX_STEPS` budget (enforced at the child's
+ * own validate/run time), not by the parent's dynamic-step counter.
+ */
 function countCachedDynamicSteps(cache: Map<string, StepResult>): number {
   let n = 0;
   for (const stepId of cache.keys()) {
