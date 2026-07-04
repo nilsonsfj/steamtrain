@@ -1997,6 +1997,8 @@ async function executeWorkflowStep(
           phaseId: namespace(event.phaseId),
           stepId: namespace(event.stepId),
           parentStepId: event.parentStepId ? namespace(event.parentStepId) : step.id,
+          dependsOn: event.dependsOn?.map(namespace),
+          loopTo: event.loopTo ? namespace(event.loopTo) : undefined,
         });
         break;
       case "step_done": {
@@ -2032,7 +2034,11 @@ async function executeWorkflowStep(
         });
         break;
       case "loop_iteration":
-        hooks.pushWorkflowEvent({ ...event, gateStepId: namespace(event.gateStepId) });
+        hooks.pushWorkflowEvent({
+          ...event,
+          gateStepId: namespace(event.gateStepId),
+          loopTo: namespace(event.loopTo),
+        });
         break;
       case "budget_exceeded":
         hooks.pushWorkflowEvent(event.stepId ? { ...event, stepId: namespace(event.stepId) } : event);
