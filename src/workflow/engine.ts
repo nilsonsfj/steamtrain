@@ -37,9 +37,11 @@ import {
   type GateCondition,
   MAX_CONCURRENCY,
   MAX_STEPS,
+  MAX_WORKFLOW_NESTING_DEPTH,
   type MergeStep,
   type StepResult,
   type WorkerStep,
+  type WorkflowCallStep,
   type WorkflowItem,
   type WorkflowPhase,
   type WorkflowSpec,
@@ -1137,6 +1139,10 @@ async function executeStep(
     };
   }
 
+  if (kind === "workflow" && step.kind === "workflow") {
+    return executeWorkflowStep(step, ctx, hooks);
+  }
+
   return {
     result: {
       stepId: step.id,
@@ -1891,6 +1897,171 @@ async function executeCommandStep(
   } finally {
     await workspace.dispose();
   }
+}
+
+/** The last step (by array position, NOT chronological completion order) of a spec's last phase. Deterministic default output source for a `workflow` step that omits `outputStep`. */
+function lastStepId(spec: WorkflowSpec): string | undefined {
+  const lastPhase = spec.phases[spec.phases.length - 1];
+  const steps = lastPhase?.steps ?? [];
+  return steps[steps.length - 1]?.id;
+}
+
+/**
+ * Execute a `workflow` step: recursively run another named workflow (resolved
+ * via `ctx.deps.resolveWorkflow`) and fold its event stream into this run's
+ * own, under the namespace `<thisStepId>::<childId>` for both phase and step
+ * ids. The child's leaf step results become this step's `childResults` —
+ * exactly the shape a `forEach` fan-out parent already produces — so the
+ * existing cost/token summation (`runSingleStep`) and run-history flattening
+ * (`computeRunTotals`, which already skips any step whose result carries
+ * `childResults`) apply completely unmodified. Cycle/depth-guarded via
+ * `ctx.workflowCallStack`; never itself allocates a worktree (no agent, no
+ * `WorkspaceFields`) — the child's own steps handle that internally.
+ */
+async function executeWorkflowStep(
+  step: WorkflowCallStep,
+  ctx: ExecuteContext,
+  hooks: ExecuteHooks,
+): Promise<ExecutionOutcome> {
+  const started = Date.now();
+  const fail = (message: string): ExecutionOutcome => ({
+    result: {
+      stepId: step.id,
+      ok: false,
+      output: message,
+      error: message,
+      durationMs: Date.now() - started,
+    },
+  });
+
+  const resolveWorkflow = ctx.deps.resolveWorkflow;
+  if (!resolveWorkflow) {
+    return fail("workflow steps are not supported in this context (no resolveWorkflow configured)");
+  }
+  const childSpec = resolveWorkflow(step.workflow);
+  if (!childSpec) return fail(`unknown workflow '${step.workflow}'`);
+
+  // `ctx.workflowCallStack` tracks workflows already entered via a `workflow`
+  // step; a non-root spec's own name is already its last entry (its parent
+  // appended it before recursing). The root run's call stack starts `[]` and
+  // never gets its own name pushed (per `WorkflowRunContext.workflowCallStack`
+  // — "callers starting a top-level run should never set this"), so a root
+  // spec invoking itself (or being re-entered indirectly) wouldn't otherwise
+  // show up in `stack`. Fold `ctx.workflowName` in so cycle/depth accounting
+  // is uniform regardless of nesting level.
+  const stack = ctx.workflowCallStack.includes(ctx.workflowName)
+    ? ctx.workflowCallStack
+    : [...ctx.workflowCallStack, ctx.workflowName];
+  if (stack.includes(step.workflow)) {
+    return fail(`workflow cycle detected: ${[...stack, step.workflow].join(" -> ")}`);
+  }
+  if (stack.length >= MAX_WORKFLOW_NESTING_DEPTH) {
+    return fail(
+      `workflow nesting depth exceeded ${MAX_WORKFLOW_NESTING_DEPTH} (invoking '${step.workflow}')`,
+    );
+  }
+
+  const childInput = step.input
+    ? renderPrompt(step.input, {
+        input: ctx.input,
+        outputs: ctx.outputs,
+        results: ctx.results,
+        iteration: ctx.iteration,
+      })
+    : ctx.input;
+
+  const namespace = (id: string): string => `${step.id}::${id}`;
+  const childResults: StepResult[] = [];
+  const rawResults = new Map<string, StepResult>();
+  let childOk = false;
+
+  for await (const event of runWorkflow(
+    childSpec,
+    { input: childInput, workflowCallStack: [...stack, step.workflow] },
+    ctx.deps,
+    ctx.signal,
+  )) {
+    switch (event.kind) {
+      case "workflow_start":
+        break;
+      case "workflow_done":
+        childOk = event.ok;
+        break;
+      case "phase_start":
+      case "phase_done":
+        hooks.pushWorkflowEvent({ ...event, phaseId: namespace(event.phaseId) });
+        break;
+      case "step_start":
+        hooks.pushWorkflowEvent({
+          ...event,
+          phaseId: namespace(event.phaseId),
+          stepId: namespace(event.stepId),
+          parentStepId: event.parentStepId ? namespace(event.parentStepId) : step.id,
+        });
+        break;
+      case "step_done": {
+        rawResults.set(event.result.stepId, event.result);
+        const namespaced: StepResult = {
+          ...event.result,
+          stepId: namespace(event.result.stepId),
+          parentStepId: event.result.parentStepId ? namespace(event.result.parentStepId) : step.id,
+        };
+        childResults.push(namespaced);
+        hooks.pushWorkflowEvent({
+          ...event,
+          phaseId: namespace(event.phaseId),
+          stepId: namespace(event.stepId),
+          result: namespaced,
+        });
+        break;
+      }
+      case "step_event":
+      case "step_retry":
+      case "gate_evaluated":
+        hooks.pushWorkflowEvent({
+          ...event,
+          phaseId: namespace(event.phaseId),
+          stepId: namespace(event.stepId),
+        });
+        break;
+      case "fan_out":
+        hooks.pushWorkflowEvent({
+          ...event,
+          phaseId: namespace(event.phaseId),
+          parentStepId: namespace(event.parentStepId),
+        });
+        break;
+      case "loop_iteration":
+        hooks.pushWorkflowEvent({ ...event, gateStepId: namespace(event.gateStepId) });
+        break;
+      case "budget_exceeded":
+        hooks.pushWorkflowEvent(event.stepId ? { ...event, stepId: namespace(event.stepId) } : event);
+        break;
+    }
+  }
+
+  const outputStepId = step.outputStep ?? lastStepId(childSpec);
+  const outputResult = outputStepId ? rawResults.get(outputStepId) : undefined;
+  if (!outputResult) {
+    return fail(
+      step.outputStep
+        ? `outputStep '${step.outputStep}' did not produce a result in workflow '${step.workflow}'`
+        : `workflow '${step.workflow}' produced no step results`,
+    );
+  }
+
+  return {
+    result: {
+      stepId: step.id,
+      ok: childOk,
+      output: outputResult.output,
+      json: outputResult.json,
+      error: childOk ? undefined : `sub-workflow '${step.workflow}' did not complete successfully`,
+      durationMs: Date.now() - started,
+      childResults,
+    },
+    childResults,
+  };
 }
 
 /**
