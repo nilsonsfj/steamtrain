@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { cp, lstat, mkdir, readdir, rm } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
+import { isOutside } from "./fs-util";
 import { type StepArtifact, artifactName } from "./types";
 
 /**
@@ -104,10 +105,6 @@ function artifactStepDirName(stepId: string): string {
   const sanitized = stepId.replace(/[^a-zA-Z0-9._-]/g, "_");
   if (sanitized === stepId) return sanitized;
   return `${sanitized}-${createHash("sha1").update(stepId).digest("hex").slice(0, 8)}`;
-}
-
-function isOutside(rel: string): boolean {
-  return rel === ".." || rel.startsWith(`..${sep}`) || resolve(rel) === rel;
 }
 
 function throwIfAborted(signal?: AbortSignal): void {

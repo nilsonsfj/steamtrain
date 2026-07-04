@@ -497,7 +497,10 @@ names must be unique within a step:
 
 Snapshot paths stay valid independent of worktree lifecycle (a `history prune`
 doesn't invalidate them), and a loop iteration re-running a step replaces its
-previous snapshot — latest wins, matching step outputs. Artifact paths must be
+previous snapshot — latest wins, matching step outputs. On a `forEach` step
+artifacts are collected **per child** — each item's worktree yields its own
+snapshot, referenced as `{{steps.<id>[0].artifacts.<name>}}`; the aggregate
+parent records none (consolidate first if you need a single artifact). Artifact paths must be
 relative and stay inside the step's cwd; use artifacts when a step's real
 product is a file, rather than pasting large content through text outputs.
 

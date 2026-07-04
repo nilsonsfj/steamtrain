@@ -4,6 +4,7 @@ import { copyFile, lstat, mkdir, readlink, realpath, symlink } from "node:fs/pro
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { AgentInstanceId } from "../types/events";
+import { isOutside } from "./fs-util";
 import type { WorkflowItem } from "./types";
 
 export interface AgentWorkspaceRequest {
@@ -325,10 +326,6 @@ function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> 
       },
     );
   });
-}
-
-function isOutside(rel: string): boolean {
-  return rel === ".." || rel.startsWith(`..${sep}`) || resolve(rel) === rel;
 }
 
 function splitNul(buf: Buffer): string[] {

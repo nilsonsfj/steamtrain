@@ -379,6 +379,8 @@ describe("workspace inheritance", () => {
     expect(workflowOk(events)).toBe(false);
     expect(results.get("b")?.ok).toBe(false);
     expect(results.get("b")?.error).toContain("dependency 'a' failed");
+    // Failure cascade, not the skip cascade: the step counts as failed.
+    expect(results.get("b")?.skipped).toBeUndefined();
   });
 
   it("skips the inheriting step when its source was skipped", async () => {
@@ -562,6 +564,53 @@ describe("declared artifacts", () => {
     const artifact = results.get("author")?.artifacts?.[0];
     expect(artifact?.name).toBe("notes");
     expect((await readFile(artifact?.path as string, "utf8")).trim()).toBe("written by agent");
+  });
+
+  it("snapshots forEach artifacts per child, not on the aggregate parent", async () => {
+    const root = await tempDir();
+    const repo = await initRepo(root);
+    const events = await runToEvents(
+      spec([
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "split", kind: "distributor", items: ["one", "two"] }],
+        },
+        {
+          id: "p2",
+          title: "P2",
+          steps: [
+            {
+              id: "work",
+              kind: "processor",
+              forEach: "steps.split.items",
+              agent: "claude",
+              model: "m",
+              prompt: "{{item}}",
+              artifacts: ["notes.md"],
+            },
+          ],
+        },
+      ]),
+      fileWritingAgentDeps(repo, "notes.md", {
+        agentWorkspace: createGitWorktreeManager({
+          baseDir: join(root, "worktrees"),
+          runId: "handoff-test",
+        }),
+        artifactsDir: join(root, "artifacts"),
+      }),
+    );
+    const results = doneResults(events);
+    expect(workflowOk(events)).toBe(true);
+    // Each child snapshots its own artifact into a distinct destination.
+    const childPaths = ["work[0]", "work[1]"].map((id) => {
+      const artifacts = results.get(id)?.artifacts;
+      expect(artifacts?.map((a) => a.name)).toEqual(["notes"]);
+      return artifacts?.[0]?.path as string;
+    });
+    expect(new Set(childPaths).size).toBe(2);
+    // The aggregate parent records none.
+    expect(results.get("work")?.artifacts).toBeUndefined();
   });
 
   it("fails the step when a declared artifact was not produced", async () => {

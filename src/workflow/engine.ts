@@ -542,7 +542,13 @@ function isSubsetOf(subset: ReadonlySet<string>, superset: ReadonlySet<string>):
   return true;
 }
 
-/** Matches `{{steps.<id>.<field>}}` template references; group 1 is the id. */
+/**
+ * Matches `{{steps.<id>.<field>}}` template references; group 1 is the id.
+ * Deliberately LOOSER than the renderer's field regexes (template.ts): this
+ * only feeds dependency tracking, where over-matching a ref the renderer would
+ * leave unresolved (e.g. a misspelled artifact name) merely adds a harmless
+ * wait on the referenced step — don't tighten it to mirror the renderer.
+ */
 const TEMPLATE_STEP_REF =
   /\{\{\s*steps\.(.+?)\.(?:output|items|ok|error|target|iteration|exitCode|worktree\.(?:root|branch|cwd)|artifacts\.[^{}]+?|json(?:[.[][^{}]*)?)\s*\}\}/g;
 

@@ -49,6 +49,11 @@ export interface TemplateContext {
 }
 
 const PLACEHOLDER = /\{\{\s*([^{}]+?)\s*\}\}/g;
+// NOTE: STEP_FIELD's greedy `(.+)` id group means it also matches worktree/
+// artifact/json refs whose trailing part happens to end in a plain field name
+// (`steps.foo.artifacts.output` → id "foo.artifacts", field "output"), so
+// renderPrompt MUST test the more specific worktree/artifact/json regexes
+// before this one — the check order is load-bearing.
 const STEP_FIELD = /^steps\.(.+)\.(output|items|ok|error|target|iteration|exitCode)$/;
 const STEP_WORKTREE_FIELD = /^steps\.(.+)\.worktree\.(root|branch|cwd)$/;
 /** `steps.<id>.json` with an optional `.field`/`[index]` path after it. */

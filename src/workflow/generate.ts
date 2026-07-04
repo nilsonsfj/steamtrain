@@ -188,7 +188,9 @@ A worker/processor/command step may also declare "artifacts": ["report.md",
 "coverage/"] — paths (relative to its cwd) it promises to produce. They are
 snapshotted after the step succeeds (a missing one FAILS the step) and later
 prompts can pass the snapshot path along as {{steps.<id>.artifacts.<name>}}
-(name = filename minus extension: report.md → report). Use artifacts when a
+(name = filename minus extension: report.md → report). On a forEach step,
+artifacts are snapshotted per child ({{steps.<id>[0].artifacts.<name>}}), not
+on the aggregate parent. Use artifacts when a
 step's real product is a file a later step should read, rather than pasting
 huge content through text outputs.
 
