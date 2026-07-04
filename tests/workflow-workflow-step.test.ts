@@ -228,4 +228,42 @@ describe("workflow (sub-workflow) step", () => {
     );
     expect(workflowOk(events)).toBe(false);
   });
+
+  it("schedules a step referencing a namespaced child output strictly after the workflow step settles", async () => {
+    const cwd = await tempDir();
+    const spec: WorkflowSpec = {
+      name: "parent3",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "call", kind: "workflow", workflow: "child" }],
+        },
+        {
+          id: "p2",
+          title: "P2",
+          steps: [
+            {
+              id: "downstream",
+              kind: "command",
+              // No explicit dependsOn — this reaches into the child's own
+              // step by namespaced id, which must still create an implicit
+              // scheduling dependency on the "call" workflow step.
+              cmd: "echo got:{{steps.call::greet.output}}",
+            },
+          ],
+        },
+      ],
+    };
+    const events = await runToEvents(spec, deps(cwd, { resolveWorkflow: () => childSpec }));
+    const callDoneIndex = events.findIndex((ev) => ev.kind === "step_done" && ev.stepId === "call");
+    const downstreamStartIndex = events.findIndex(
+      (ev) => ev.kind === "step_start" && ev.stepId === "downstream",
+    );
+    expect(callDoneIndex).toBeGreaterThanOrEqual(0);
+    expect(downstreamStartIndex).toBeGreaterThan(callDoneIndex);
+    const results = doneResults(events);
+    expect(results.get("downstream")?.output).toContain("got:out:hi task");
+    expect(workflowOk(events)).toBe(true);
+  });
 });

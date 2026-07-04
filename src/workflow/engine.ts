@@ -619,8 +619,13 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
       const stepDeps = new Set<string>();
       const addEarlier = (ref: string | undefined): void => {
         if (!ref) return;
+        // A namespaced sub-workflow child reference (`wf::child`) depends on
+        // its owning `workflow` step; strip to the owner BEFORE the existing
+        // forEach `[n]`-suffix stripping, so `wf::child[2]`-shaped refs (a
+        // forEach step nested inside a sub-workflow) still resolve correctly.
+        const owner = ref.includes("::") ? ref.slice(0, ref.indexOf("::")) : ref;
         // A `work[3]` fan-out child reference depends on its `work` parent.
-        const id = phaseIndexOf.has(ref) ? ref : ref.replace(/\[\d+\]$/, "");
+        const id = phaseIndexOf.has(owner) ? owner : owner.replace(/\[\d+\]$/, "");
         const refPhase = phaseIndexOf.get(id);
         if (refPhase !== undefined && refPhase < pi) stepDeps.add(id);
       };
