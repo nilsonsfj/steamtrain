@@ -986,7 +986,9 @@
         ? "gate: " + describeGate(st)
         : kind === "command"
           ? "$ " + (st.cmd || "")
-          : (st.items ? "distributes " + st.items.length + " item(s)" : "passthrough merge (no agent)");
+          : kind === "workflow"
+            ? "invokes workflow: " + (st.workflow || "") + (st.outputStep ? " · outputStep: " + st.outputStep : "")
+            : (st.items ? "distributes " + st.items.length + " item(s)" : "passthrough merge (no agent)");
       card.appendChild(h("div", { class: "ro", text: note }));
       return card;
     }
