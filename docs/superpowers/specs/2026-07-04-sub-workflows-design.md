@@ -91,8 +91,11 @@ Current architecture (see `src/workflow/types.ts`, `src/workflow/engine.ts`):
    step results, so the *existing* cost/token summation (engine.ts's
    `runSingleStep`, history.ts's `computeRunTotals`) picks it up unmodified.
    `StepResult.output`/`.json` mirror the *designated output step's*
-   `output`/`json` — default the child's last step in execution order,
-   overridable via `outputStep`. No new template placeholder syntax needed.
+   `output`/`json` — default the child spec's last step by array position
+   (last phase, last step in that phase — deterministic; not by which step
+   happens to finish last, which is non-deterministic under concurrent DAG
+   scheduling), overridable via `outputStep`. No new template placeholder
+   syntax needed.
 7. **Not an inherit-eligible workspace source.** Same exclusion already
    applied to `gate`/`distributor`/`consolidator`/`merge`.
 
@@ -149,8 +152,11 @@ interface WorkflowCallStep extends WorkflowStepBase {
   workflow: string;      // name of the workflow to invoke (catalog lookup via resolveWorkflow)
   input?: string;        // template rendered to become the child run's {{input}}
   outputStep?: string;   // optional: id of the child step whose output/json surfaces
-                         // as this step's result. Default: the child's last
-                         // executed step (by execution order, not phase order).
+                         // as this step's result. Default: the child spec's
+                         // last step, by array position (last phase, last
+                         // step in that phase) — NOT by which step happens
+                         // to finish last, which is non-deterministic under
+                         // concurrent DAG scheduling.
 }
 ```
 
@@ -189,10 +195,11 @@ timed result):
    child step id as `<step.id>::<childStepId>`, and set `parentStepId:
    step.id` on each (decision 5) — these become this step's own
    `childResults`.
-6. Determine the output step: `step.outputStep` if given (must exist in the
-   child spec — validated statically, see below), else the child's
-   last-executed step. Copy that step's `output`/`json` onto this step's own
-   `StepResult`.
+6. Determine the output step: `step.outputStep` if given (checked against the
+   child's actual results at run time — see Validation below, this is not
+   checked statically), else the child spec's last step by array position
+   (last phase, last step in that phase). Copy that step's `output`/`json`
+   onto this step's own `StepResult`.
 7. `ok` = the child run's overall `ok` (i.e. the child completed
    successfully, no unhandled step failures per its own gate semantics).
 8. `costUsd`/`tokens` are left `undefined` on the top-level result — they're
