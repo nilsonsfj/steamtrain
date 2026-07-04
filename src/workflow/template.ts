@@ -8,6 +8,7 @@
  *   {{steps.<id>.exitCode}} → a command step's exit code, e.g. "0"
  *   {{steps.<id>.json}}     → the step's parsed structured output, serialized
  *   {{steps.<id>.json.<path>}} → a field of it, e.g. json.verdict or json.targets[2]
+ *   {{steps.<id>.artifacts.<name>}} → the snapshot path of a declared artifact
  *   {{steps.<id>.worktree.root}}   → the step's isolated git worktree directory
  *   {{steps.<id>.worktree.branch}} → the steamtrain branch checked out there
  *   {{steps.<id>.worktree.cwd}}    → the cwd the agent actually ran in
@@ -34,6 +35,8 @@ export interface TemplateContext {
       iteration?: number;
       /** A command step's subprocess exit code. */
       exitCode?: number;
+      /** Declared artifacts snapshotted for the step (name → snapshot path). */
+      artifacts?: { name: string; path: string }[];
       json?: unknown;
       /** Isolated git worktree metadata, when the step ran in one. */
       worktree?: { root: string; branch: string; cwd: string };
@@ -46,10 +49,17 @@ export interface TemplateContext {
 }
 
 const PLACEHOLDER = /\{\{\s*([^{}]+?)\s*\}\}/g;
+// NOTE: STEP_FIELD's greedy `(.+)` id group means it also matches worktree/
+// artifact/json refs whose trailing part happens to end in a plain field name
+// (`steps.foo.artifacts.output` → id "foo.artifacts", field "output"), so
+// renderPrompt MUST test the more specific worktree/artifact/json regexes
+// before this one — the check order is load-bearing.
 const STEP_FIELD = /^steps\.(.+)\.(output|items|ok|error|target|iteration|exitCode)$/;
 const STEP_WORKTREE_FIELD = /^steps\.(.+)\.worktree\.(root|branch|cwd)$/;
 /** `steps.<id>.json` with an optional `.field`/`[index]` path after it. */
 const STEP_JSON_FIELD = /^steps\.(.+?)\.json((?:\.|\[).+)?$/;
+/** `steps.<id>.artifacts.<name>` — the snapshot path of one declared artifact. */
+const STEP_ARTIFACT_FIELD = /^steps\.(.+?)\.artifacts\.(.+)$/;
 
 export function renderPrompt(template: string, ctx: TemplateContext): string {
   return template.replace(PLACEHOLDER, (match, exprRaw: string) => {
@@ -64,6 +74,11 @@ export function renderPrompt(template: string, ctx: TemplateContext): string {
       const worktree = ctx.results?.get(worktreeRef[1] as string)?.worktree;
       if (!worktree) return "";
       return worktree[worktreeRef[2] as "root" | "branch" | "cwd"] ?? "";
+    }
+    const artifactRef = STEP_ARTIFACT_FIELD.exec(expr);
+    if (artifactRef) {
+      const artifacts = ctx.results?.get(artifactRef[1] as string)?.artifacts;
+      return artifacts?.find((artifact) => artifact.name === artifactRef[2])?.path ?? "";
     }
     const jsonRef = STEP_JSON_FIELD.exec(expr);
     if (jsonRef) {

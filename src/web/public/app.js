@@ -975,6 +975,12 @@
         st.dependsOn && st.dependsOn.length ? h("span", { class: "ro", text: "\u2190 " + st.dependsOn.join(", ") }) : null
       )
     );
+    if (st.workspace || (st.artifacts && st.artifacts.length)) {
+      var wsBits = [];
+      if (st.workspace) wsBits.push("workspace: " + st.workspace);
+      if (st.artifacts && st.artifacts.length) wsBits.push("artifacts: " + st.artifacts.join(", "));
+      card.appendChild(h("div", { class: "ro", text: wsBits.join(" \u00b7 ") }));
+    }
     if (!isAgentStep(st)) {
       var note = kind === "gate"
         ? "gate: " + describeGate(st)

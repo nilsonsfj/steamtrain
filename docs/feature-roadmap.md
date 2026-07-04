@@ -278,7 +278,16 @@ steamtrain is unusual in *not* having it, and it's the single cheapest way to
 make workflows trustworthy: let deterministic tools verify what
 non-deterministic agents produce.
 
-## 2.2 File/artifact handoff between steps
+## 2.2 File/artifact handoff between steps ✅ Shipped
+
+> **Shipped** — `workspace: "inherit:<stepId>"` on worker/processor/command
+> steps (the worktree is seeded from the source step's final worktree state;
+> the source is an implicit dependency; chains compose and the merge-back diff
+> base is inherited so merging the tail lands the whole chain), and declared
+> `artifacts` (paths snapshotted into a per-run artifacts directory after
+> success — a missing one fails the step — exposed to templates as
+> `{{steps.<id>.artifacts.<name>}}`). See
+> [`workflow-spec.md`](workflow-spec.md#workspace-inheritance-and-artifacts-file-handoff).
 
 **The gap:** the only thing that flows between steps is **text output**. Each
 agent step gets its *own* worktree snapshotted from the original checkout's

@@ -1,6 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, resolve, sep } from "node:path";
+
+/**
+ * Whether a `relative(base, target)` result points outside `base`: it walks up
+ * (`..`), or it is absolute (`relative` returns the target verbatim when the
+ * two paths share no root). Used wherever a computed path gates a filesystem
+ * operation that must stay inside a sandbox directory (worktree cwds, artifact
+ * snapshot destinations).
+ */
+export function isOutside(rel: string): boolean {
+  return rel === ".." || rel.startsWith(`..${sep}`) || resolve(rel) === rel;
+}
 
 /** True when an error is a "file/dir does not exist" (ENOENT) failure. */
 export function isEnoent(err: unknown): boolean {

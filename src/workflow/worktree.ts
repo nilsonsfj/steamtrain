@@ -4,6 +4,7 @@ import { copyFile, lstat, mkdir, readlink, realpath, symlink } from "node:fs/pro
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { AgentInstanceId } from "../types/events";
+import { isOutside } from "./fs-util";
 import type { WorkflowItem } from "./types";
 
 export interface AgentWorkspaceRequest {
@@ -16,6 +17,15 @@ export interface AgentWorkspaceRequest {
   stepCwd: string;
   iteration: number;
   item?: WorkflowItem;
+  /**
+   * Inherit a prior step's worktree: the new worktree branches from the source
+   * worktree's HEAD and copies its full working-tree state (tracked edits and
+   * untracked files), instead of snapshotting the original checkout. The
+   * source step has already finished, so its worktree is stable. `baseCommit`
+   * is the source's own recorded diff base, inherited so a merge-back of the
+   * new worktree lands the whole chain's changes.
+   */
+  inheritFrom?: { stepId: string; root: string; baseCommit?: string };
   signal?: AbortSignal;
 }
 
@@ -82,11 +92,28 @@ class GitWorktreeManager implements AgentWorkspaceManager {
     let linkedIgnoredPaths: string[] = [];
     let worktreeHead = repo.head;
 
+    // Inheritance: snapshot the source step's worktree instead of the user's
+    // checkout — branch from ITS HEAD (so committed changes carry over) and
+    // copy ITS working-tree state (so uncommitted edits and new files do too).
+    const inherit = request.inheritFrom;
+    if (inherit) {
+      const exists = await lstat(inherit.root).then(
+        (st) => st.isDirectory(),
+        () => false,
+      );
+      if (!exists) {
+        throw new Error(
+          `cannot inherit workspace of step '${inherit.stepId}': its worktree no longer exists at ${inherit.root} (pruned or cleaned up?)`,
+        );
+      }
+    }
+    const snapshotSource = inherit ? inherit.root : repo.root;
+
     await mkdir(dirname(worktreeRoot), { recursive: true });
     try {
       await this.inRepoQueue(repo.root, request.signal, async () => {
         throwIfAborted(request.signal);
-        worktreeHead = await currentGitHead(repo.root, request.signal);
+        worktreeHead = await currentGitHead(snapshotSource, request.signal);
         await runGit(
           ["worktree", "add", "-b", branch, worktreeRoot, worktreeHead],
           repo.root,
@@ -95,7 +122,7 @@ class GitWorktreeManager implements AgentWorkspaceManager {
         );
       });
       linkedIgnoredPaths = await copyWorkingTreeState(
-        repo.root,
+        snapshotSource,
         worktreeRoot,
         worktreeHead,
         request.signal,
@@ -109,7 +136,10 @@ class GitWorktreeManager implements AgentWorkspaceManager {
       cwd: relativeStepCwd ? join(worktreeRoot, relativeStepCwd) : worktreeRoot,
       root: worktreeRoot,
       branch,
-      baseCommit: worktreeHead,
+      // An inherited worktree keeps the CHAIN's diff base: merging it back
+      // lands the inherited edits plus this step's own, so the tail of an
+      // implement → review chain carries the whole pipeline's work.
+      baseCommit: inherit ? (inherit.baseCommit ?? worktreeHead) : worktreeHead,
       linkedIgnoredPaths,
       // Worktrees are retained after successful runs so users can inspect,
       // commit, or merge agent-created files from the recorded branch.
@@ -296,10 +326,6 @@ function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> 
       },
     );
   });
-}
-
-function isOutside(rel: string): boolean {
-  return rel === ".." || rel.startsWith(`..${sep}`) || resolve(rel) === rel;
 }
 
 function splitNul(buf: Buffer): string[] {
