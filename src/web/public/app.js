@@ -5,7 +5,7 @@
   
 
 
-  var KIND_LABEL = { worker: "worker", processor: "process", distributor: "fan-out", consolidator: "merge", gate: "gate", merge: "merge-back", command: "command" };
+  var KIND_LABEL = { worker: "worker", processor: "process", distributor: "fan-out", consolidator: "merge", gate: "gate", merge: "merge-back", command: "command", workflow: "sub-workflow" };
   var S = {
     workflows: [], selected: null, source: null, spec: null, agents: [],
     runId: null, es: null,
@@ -353,7 +353,7 @@
 
     canvas.appendChild(h("div", { class: "legend" },
       legendItem("worker", "worker"), legendItem("processor", "process"),
-      legendItem("distributor", "fan-out"), legendItem("consolidator", "merge"), legendItem("gate", "gate"), legendItem("merge", "merge-back"), legendItem("command", "command")
+      legendItem("distributor", "fan-out"), legendItem("consolidator", "merge"), legendItem("gate", "gate"), legendItem("merge", "merge-back"), legendItem("command", "command"), legendItem("workflow", "sub-workflow")
     ));
 
     var maxIter = {};
@@ -411,7 +411,7 @@
     return h("span", null, i, label);
   }
   function kindColor(k) {
-    return { worker: "#6fb1ff", processor: "#9d8cff", distributor: "#ffce6f", consolidator: "#5fe0c6", gate: "#f0a35e", merge: "#ff9ecb", command: "#b8c4d0" }[k] || "#6fb1ff";
+    return { worker: "#6fb1ff", processor: "#9d8cff", distributor: "#ffce6f", consolidator: "#5fe0c6", gate: "#f0a35e", merge: "#ff9ecb", command: "#b8c4d0", workflow: "#7ce38b" }[k] || "#6fb1ff";
   }
 
   function renderCard(s) {

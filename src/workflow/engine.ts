@@ -240,6 +240,10 @@ export async function* runWorkflow(
 function costOfCachedResults(cache: Map<string, StepResult>): number {
   let total = 0;
   for (const result of cache.values()) {
+    // A parent that carries children (a `forEach` fan-out or a `workflow`
+    // sub-run) never has its own `costUsd` — the spend lives on the leaves in
+    // `childResults`. Summing only the leaves here avoids double-counting the
+    // wrapper against those leaves.
     if (result.childResults?.length) {
       for (const child of result.childResults) total += child.costUsd ?? 0;
     } else if (result.parentStepId === undefined) {
@@ -659,6 +663,7 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
       }
       if ("prompt" in step) renderableTexts.push(step.prompt);
       if (step.kind === "command") renderableTexts.push(step.cmd);
+      if (step.kind === "workflow") renderableTexts.push(step.input);
       if (step.kind === "distributor" && step.items) renderableTexts.push(...step.items);
       for (const text of renderableTexts) {
         for (const ref of templateStepRefs(text)) addEarlier(ref);
@@ -2068,6 +2073,11 @@ async function executeWorkflowStep(
         });
         break;
       case "budget_exceeded":
+        // A step-scoped breach carries a child stepId we namespace; a
+        // workflow-scoped breach (the child run hitting its own maxCostUsd)
+        // has no stepId and passes through as-is — it describes the child
+        // run's budget, not a step, and the child's partial leaf costs still
+        // roll up via `childResults` so the parent's accounting stays correct.
         hooks.pushWorkflowEvent(event.stepId ? { ...event, stepId: namespace(event.stepId) } : event);
         break;
     }

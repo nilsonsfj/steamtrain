@@ -353,4 +353,42 @@ describe("workflow (sub-workflow) step", () => {
     expect(results.get("downstream")?.output).toContain("got:out:hi task");
     expect(workflowOk(events)).toBe(true);
   });
+
+  it("derives an implicit dependency from a {{steps.*}} ref in the workflow step's input template", async () => {
+    const cwd = await tempDir();
+    const spec: WorkflowSpec = {
+      name: "parent4",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "up", agent: "claude", model: "m", prompt: "seed" }],
+        },
+        {
+          id: "p2",
+          title: "P2",
+          steps: [
+            {
+              id: "call",
+              kind: "workflow",
+              workflow: "child",
+              // dependsOn: [] suppresses the barrier-default rule, so the only
+              // way "up" becomes a recognized dependency is via the template
+              // scan of the workflow step's `input`.
+              dependsOn: [],
+              input: "{{steps.up.output}}-extra",
+            },
+          ],
+        },
+      ],
+    };
+    const events = await runToEvents(spec, deps(cwd, { resolveWorkflow: () => childSpec }));
+    const upDoneIndex = events.findIndex((ev) => ev.kind === "step_done" && ev.stepId === "up");
+    const callStartIndex = events.findIndex(
+      (ev) => ev.kind === "step_start" && ev.stepId === "call",
+    );
+    expect(upDoneIndex).toBeGreaterThanOrEqual(0);
+    expect(callStartIndex).toBeGreaterThan(upDoneIndex);
+    expect(workflowOk(events)).toBe(true);
+  });
 });
