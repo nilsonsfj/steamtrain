@@ -212,6 +212,7 @@ export class Orchestrator {
         cwd,
         agentWorkspace: createGitWorktreeManager(),
         loopMaxIterations: this.config.loopMaxIterations,
+        resolveWorkflow: (name) => this.workflowCatalog[name],
       },
       signal,
     );
