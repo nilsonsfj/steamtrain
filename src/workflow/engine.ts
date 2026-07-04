@@ -1546,6 +1546,10 @@ async function applyDeclaredArtifacts(
   result: StepResult,
 ): Promise<StepResult> {
   const declared = "artifacts" in step ? step.artifacts : undefined;
+  // Runs AFTER structured-output enforcement: a step that already failed (an
+  // agent error, invalid JSON, …) keeps its original error and snapshots
+  // nothing — artifacts are a product of success, and the first failure in
+  // the chain is the one worth reporting.
   if (!declared?.length || !result.ok) return result;
   try {
     const collected = await collectArtifacts({
