@@ -34,6 +34,7 @@ export const BLOCK_LABEL: Record<ReturnType<typeof workflowStepKind>, string> = 
   gate: "gate",
   merge: "merge-back",
   command: "command",
+  workflow: "sub-workflow",
 };
 
 /** Cumulative flat step index at the start of each phase. */
