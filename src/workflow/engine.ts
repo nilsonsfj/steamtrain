@@ -1980,6 +1980,16 @@ async function executeWorkflowStep(
   const rawResults = new Map<string, StepResult>();
   let childOk = false;
 
+  // Translated events below carry `iteration` (and `result.iteration`)
+  // straight through via `...event`/`...event.result` — that's always the
+  // CHILD run's own independent loop-iteration counter, not this parent
+  // spec's current iteration. If this `workflow` step sits inside a
+  // loop-back gate's body (`runPhasedScheduler`) and the parent loop re-runs
+  // it multiple times, every pass's namespaced nested steps will show
+  // whatever iteration the child run itself was on (typically always 1),
+  // not the parent's 1/2/3… — a live-view/history display limitation only,
+  // not a cost/correctness bug (see docs/superpowers/plans/2026-07-04-sub-workflows.md,
+  // "Post-plan follow-ups").
   for await (const event of runWorkflow(
     childSpec,
     { input: childInput, workflowCallStack: [...stack, step.workflow] },
@@ -2008,6 +2018,18 @@ async function executeWorkflowStep(
         break;
       case "step_done": {
         rawResults.set(event.result.stepId, event.result);
+        // Only this event's own top-level stepId/parentStepId get namespaced
+        // here. If `event.result` itself carries a nested `childResults`
+        // array (e.g. this child step was itself a `forEach` fan-out parent,
+        // or itself a nested `workflow` step), that array's own inner ids are
+        // left as whatever id they already carried one level down (raw or
+        // namespaced-once, never re-namespaced at this level). This is
+        // intentional, not a bug: a fan-out/nested-workflow wrapper's own
+        // result never carries `costUsd` (see `runSingleStep`), so cost
+        // summation is unaffected, and `computeRunTotals` derives totals
+        // from the flat, already-namespaced `step_done` *event* stream —
+        // it never walks into `childResults` — so nothing actually reads
+        // these inner ids for anything that would be namespace-sensitive.
         const namespaced: StepResult = {
           ...event.result,
           stepId: namespace(event.result.stepId),

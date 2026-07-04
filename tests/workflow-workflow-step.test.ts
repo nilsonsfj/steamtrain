@@ -229,6 +229,88 @@ describe("workflow (sub-workflow) step", () => {
     expect(workflowOk(events)).toBe(false);
   });
 
+  it("supports >=2-level nesting: doubly-namespaced ids, output propagation, and cost rollup with no double-counting", async () => {
+    const cwd = await tempDir();
+    const childSpec3: WorkflowSpec = {
+      name: "child",
+      phases: [
+        {
+          id: "only",
+          title: "Only",
+          steps: [{ id: "leaf", agent: "claude", model: "m", prompt: "leaf {{input}}" }],
+        },
+      ],
+    };
+    const parentSpec3: WorkflowSpec = {
+      name: "parent",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "inner", kind: "workflow", workflow: "child" }],
+        },
+      ],
+    };
+    const grandparentSpec: WorkflowSpec = {
+      name: "grandparent",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "outer", kind: "workflow", workflow: "parent" }],
+        },
+      ],
+    };
+    const catalog: Record<string, WorkflowSpec> = { parent: parentSpec3, child: childSpec3 };
+    const events = await runToEvents(
+      grandparentSpec,
+      deps(cwd, { resolveWorkflow: (name) => catalog[name] }),
+      "go",
+    );
+    const results = doneResults(events);
+
+    // Doubly-namespaced leaf id, reached through both levels of nesting.
+    expect(results.has("outer::inner::leaf")).toBe(true);
+    expect(results.get("outer::inner::leaf")?.output).toBe("out:leaf go");
+
+    // Default outputStep propagates through both levels: outer's output is
+    // inner's output, which is inner's own leaf's output. Note "inner" alone
+    // (unnamespaced) never appears as a top-level key — every event bubbling
+    // through "outer" is namespaced by outer's own namespace fn first.
+    expect(results.get("outer")?.output).toBe("out:leaf go");
+    expect(results.has("inner")).toBe(false);
+    expect(results.has("outer::inner")).toBe(true);
+    expect(workflowOk(events)).toBe(true);
+
+    // Cost rollup: the leaf's cost should surface exactly once at the
+    // top-level flattened view, on "outer::inner::leaf", while both wrapping
+    // "workflow" steps ("outer" and "outer::inner") are left costUsd-
+    // undefined so summation never double-counts. This directly exercises
+    // the same childResults-flattening invariant `computeRunTotals`
+    // (tests/workflow-history.test.ts) relies on — it sums costUsd across
+    // the flat step_done event stream and only the true leaf carries a cost
+    // — without needing to import history.ts. This is consistent with how
+    // this file's other cost-rollup test ("rolls up the child's leaf
+    // cost...") already asserts directly on StepResult/childResults from
+    // runWorkflow's own event stream, so we follow the same convention here.
+    expect(results.get("outer")?.costUsd).toBeUndefined();
+    expect(results.get("outer::inner")?.costUsd).toBeUndefined();
+    expect(results.get("outer::inner::leaf")?.costUsd).toBeCloseTo(0.01);
+
+    // outer's own childResults carries both the flattened leaf view AND the
+    // nested "outer::inner" wrapper (which itself still carries a further-
+    // nested, once-namespaced-relative-to-itself "inner::leaf" child) — this
+    // is the intentional raw/nested-id shape documented at the `step_done`
+    // spread site in engine.ts; only the flat top-level events (asserted
+    // above) matter for cost summation.
+    const outerResult = results.get("outer");
+    expect(outerResult?.childResults?.length).toBe(2);
+    const nestedInner = outerResult?.childResults?.find((r) => r.stepId === "outer::inner");
+    expect(nestedInner?.costUsd).toBeUndefined();
+    expect(nestedInner?.childResults?.[0]?.stepId).toBe("inner::leaf");
+    expect(nestedInner?.childResults?.[0]?.costUsd).toBeCloseTo(0.01);
+  });
+
   it("schedules a step referencing a namespaced child output strictly after the workflow step settles", async () => {
     const cwd = await tempDir();
     const spec: WorkflowSpec = {

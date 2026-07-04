@@ -460,9 +460,13 @@ this works with no special syntax, and (like any other `{{steps.<id>…}}`
 reference) creates an implicit scheduling dependency on the `bug-sweep` step.
 
 The child run enforces its own independent 1000-step budget (`MAX_STEPS`) —
-it is not combined with the parent's. Nesting more than 5 `workflow` steps
-deep, or a cycle (workflow A invoking B invoking A, directly or through
-further nesting), fails the step with a clear error at run time.
+it is not combined with the parent's. `MAX_WORKFLOW_NESTING_DEPTH` is 5, but
+because the root spec's own name is folded into the cycle/depth-tracking
+call stack before any nesting happens, at most 4 `workflow` invocations can
+succeed below the root before the 5th is rejected with a depth-exceeded
+error at run time. A cycle (workflow A invoking B invoking A, directly or
+through further nesting) is rejected the same way, at whatever depth it's
+detected.
 
 ## Workspace inheritance and artifacts (file handoff)
 
@@ -729,7 +733,8 @@ Unknown placeholders are left unchanged.
 - A merge step with `perSource` requires `mode` `"branch"` or `"pr"`.
 - Command steps require a non-empty `cmd`.
 - Workflow steps require a non-empty `workflow` name. The referenced
-  workflow's existence, cycle-freedom, and nesting depth (≤5) are checked at
+  workflow's existence, cycle-freedom, and nesting depth (at most 4
+  successful nested invocations below the root; see above) are checked at
   **run time**, not at validate time — see
   [the sub-workflows design doc](superpowers/specs/2026-07-04-sub-workflows-design.md)
   for why. A workflow step counts as a fixed cost of 1 toward its own spec's
