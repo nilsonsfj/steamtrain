@@ -114,7 +114,8 @@
         // Delete button
         var deleteBtn = h("button", { class: "agent-delete", title: "Remove agent", text: "\u00d7" });
         deleteBtn.addEventListener("click", function () {
-          if (!window.confirm("Remove agent \"" + originalId + "\"? This removes it from the project config.")) return;
+          var label = id.value.trim() || originalId;
+          if (!window.confirm("Remove agent \"" + label + "\"? This removes it from the project config.")) return;
           var agents = S.projectConfig.agents || [];
           var i = agents.findIndex(function (x) { return x.id === originalId; });
           if (i >= 0) agents.splice(i, 1);
@@ -195,8 +196,9 @@
       var fallback = preferredAgent();
       var provider = fallback ? fallback.provider : "claude";
       var binary = fallback ? fallback.binary : provider;
+      var agentId = fallback ? provider + "-fork" : "new-agent";
       S.projectConfig.agents = (S.projectConfig.agents || []).concat([{
-        id: provider + "-fork",
+        id: agentId,
         provider: provider,
         enabled: true,
         binary: binary
