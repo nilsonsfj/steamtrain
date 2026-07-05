@@ -86,6 +86,8 @@ describe("user config layer", () => {
     expect(loaded.config.agents?.map((agent) => agent.id)).toEqual(["mimocode"]);
     expect(loaded.scope.exists).toBe(false);
     expect(configDisplayLabel(loaded.scope, { hasUserConfig: loaded.user?.exists })).toBe("user");
+    // Either user-level file lights up the label on its own.
+    expect(configDisplayLabel(loaded.scope, { hasUserSettings: true })).toBe("user");
   });
 
   it("rejects workflows in the global config with a warning", () => {

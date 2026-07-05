@@ -112,6 +112,23 @@ describe("AgentManager", () => {
     expect(plain(lastFrame())).toContain("fork added (global)");
   });
 
+  it("cycles provider and scope with arrow keys in the add form", async () => {
+    const onAdd = vi.fn().mockReturnValue({ ok: true });
+    const { stdin } = renderManager({ onAdd });
+    // id "x", then →: provider claude → opencode; on scope, →: global → project.
+    await type(stdin, "a", "x", "\r", `${ESC}[C`, "\r", "\r", `${ESC}[C`, "\r");
+    expect(onAdd).toHaveBeenCalledWith({ id: "x", provider: "opencode", scope: "project" });
+  });
+
+  it("keeps the scope on project when the global layer is unavailable", async () => {
+    const onAdd = vi.fn().mockReturnValue({ ok: true });
+    const { stdin, lastFrame } = renderManager({ onAdd, canGlobal: false });
+    await type(stdin, "a", "x", "\r", "\r", "\r", `${ESC}[C`);
+    expect(plain(lastFrame())).toContain("global scope unavailable with a custom --config");
+    await type(stdin, "\r");
+    expect(onAdd).toHaveBeenCalledWith({ id: "x", provider: "claude", scope: "project" });
+  });
+
   it("rejects an empty id in the add form", async () => {
     const onAdd = vi.fn();
     const { stdin, lastFrame } = renderManager({ onAdd });

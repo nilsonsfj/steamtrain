@@ -42,11 +42,11 @@ export function saveUserConfig(
   configPath: string = userConfigPath(),
 ): SaveUserConfigResult {
   const raw = readRawConfig(configPath);
-  if (raw === undefined) {
-    return { ok: false, error: `could not parse ${configPath}` };
+  if (raw.kind === "error") {
+    return { ok: false, error: `could not read ${configPath}: ${raw.message}` };
   }
 
-  const base = raw ?? {};
+  const base = raw.kind === "ok" ? raw.value : {};
   const next: Record<string, unknown> = { ...base, ...patch };
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) delete next[key];
@@ -69,15 +69,27 @@ export function userConfigExists(configPath: string = userConfigPath()): boolean
   return existsSync(configPath);
 }
 
-function readRawConfig(path: string): Record<string, unknown> | null | undefined {
+type RawConfigRead =
+  | { kind: "ok"; value: Record<string, unknown> }
+  | { kind: "missing" }
+  | { kind: "error"; message: string };
+
+/** Distinguishes a missing file (fine — create it) from parse/I/O failures. */
+function readRawConfig(path: string): RawConfigRead {
+  let text: string;
   try {
-    const parsed = JSON.parse(readFileSync(path, "utf8"));
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : undefined;
+    text = readFileSync(path, "utf8");
   } catch (err: unknown) {
-    if (isEnoent(err)) return null;
-    return undefined;
+    if (isEnoent(err)) return { kind: "missing" };
+    return { kind: "error", message: err instanceof Error ? err.message : String(err) };
+  }
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? { kind: "ok", value: parsed as Record<string, unknown> }
+      : { kind: "error", message: "not a JSON object" };
+  } catch (err: unknown) {
+    return { kind: "error", message: err instanceof Error ? err.message : String(err) };
   }
 }
 

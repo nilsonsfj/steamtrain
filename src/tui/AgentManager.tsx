@@ -245,6 +245,7 @@ function AgentRow({
 }) {
   const state = agent.enabled ? { symbol: "●", color: "green" } : { symbol: "○", color: "gray" };
   const provider = agent.provider === agent.id ? "" : ` provider=${agent.provider}`;
+  const binary = agent.binary ? ` binary=${agent.binary}` : "";
   const model = agent.defaultModel ? ` model=${agent.defaultModel}` : "";
   return (
     <Box>
@@ -257,7 +258,8 @@ function AgentRow({
         {"  "}
         {agentScopeLabel(scope)}
         {agent.enabled ? "" : " disabled"}
-        {provider} binary={agent.binary}
+        {provider}
+        {binary}
         {model}
       </Text>
     </Box>
