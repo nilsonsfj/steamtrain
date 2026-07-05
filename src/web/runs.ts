@@ -209,6 +209,7 @@ export class WorkflowRunManager {
     const started = this.start(plan.workflow, plan.input, {
       fresh: mode === "rerun" || Boolean(plan.downgraded),
       seed: plan.seedCache,
+      params: plan.params,
     });
     return started.ok ? { ...started, downgraded: plan.downgraded } : started;
   }

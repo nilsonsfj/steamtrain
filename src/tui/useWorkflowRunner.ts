@@ -73,7 +73,12 @@ export function useWorkflowRunner({
     (
       name: string,
       input: string,
-      opts?: { reuseMemoryCache?: boolean; fresh?: boolean; seed?: Map<string, StepResult> },
+      opts?: {
+        reuseMemoryCache?: boolean;
+        fresh?: boolean;
+        seed?: Map<string, StepResult>;
+        params?: Record<string, string | number | boolean>;
+      },
     ): boolean => {
       // Re-entrancy guard: a run is already in flight (its AbortController is
       // live). Starting another would clobber `abortRef` — orphaning the first
@@ -108,13 +113,14 @@ export function useWorkflowRunner({
       void (async () => {
         const store = cacheStoreRef.current;
         const cwd = process.cwd();
-        const key = workflowCacheKey(name, input, cwd, spec);
+        const key = workflowCacheKey(name, input, cwd, spec, opts?.params);
         const recorder = new RunRecordBuilder({
           id: randomUUID(),
           workflow: name,
           input,
           cwd,
           specHash: hashWorkflowSpec(spec),
+          params: opts?.params,
         });
         let runError: string | undefined;
         let workflowOk = true;
@@ -137,6 +143,7 @@ export function useWorkflowRunner({
             cache,
             cwd,
             spec,
+            opts?.params,
           )) {
             recorder.handle(event);
             if (event.kind === "workflow_done") workflowOk = event.ok;

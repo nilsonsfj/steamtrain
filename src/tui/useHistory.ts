@@ -31,7 +31,12 @@ export interface UseHistoryParams {
   runWorkflow: (
     name: string,
     input: string,
-    opts?: { reuseMemoryCache?: boolean; fresh?: boolean; seed?: Map<string, StepResult> },
+    opts?: {
+      reuseMemoryCache?: boolean;
+      fresh?: boolean;
+      seed?: Map<string, StepResult>;
+      params?: Record<string, string | number | boolean>;
+    },
   ) => boolean;
   setWfNotice: (notice: string | null) => void;
 }
@@ -117,6 +122,7 @@ export function useHistory({
       runWorkflow(plan.workflow, plan.input, {
         fresh: mode === "rerun" || Boolean(plan.downgraded),
         seed: plan.seedCache,
+        params: plan.params,
       });
     },
     [resolveWorkflowSpec, runWorkflow, setWfNotice],
