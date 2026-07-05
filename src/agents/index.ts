@@ -56,6 +56,13 @@ export {
 } from "./opencode-variants";
 export { fallbackOpencodeEfforts } from "./opencode-efforts-fallback";
 export { OpenCodeAdapter, OPENCODE_MODELS, createOpenCodeMapper } from "./opencode";
+export {
+  type AgentLayers,
+  agentConfigScope,
+  agentScopeLabel,
+  removeAgent,
+  upsertAgent,
+} from "./manage";
 export { LineBuffer } from "./line-buffer";
 export { runProcessLines } from "./spawn";
 

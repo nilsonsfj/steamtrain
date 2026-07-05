@@ -108,6 +108,23 @@ export const configFileSchema = z
 
 export type ConfigFile = z.infer<typeof configFileSchema>;
 
+/**
+ * Schema for the global `~/.steamtrain/config.json` — same shape as the project
+ * file minus `workflows` (user workflows already live in `~/.steamtrain/workflows.json`)
+ * and the legacy timeout keys (which predate the global file).
+ */
+export const userConfigFileSchema = configFileSchema.omit({
+  workflows: true,
+  timeoutMs: true,
+  stepTimeoutMs: true,
+  workflowTimeoutMs: true,
+});
+
+export type UserConfigFile = z.infer<typeof userConfigFileSchema>;
+
+/** Which config file an agent instance entry is written in. */
+export type AgentConfigScope = "user" | "project";
+
 /** Validate an agents array from API/CLI input before merging into project config. */
 export function parseAgentsConfig(agents: unknown): AgentInstanceConfig[] {
   const parsed = configFileSchema.partial().safeParse({ agents });
