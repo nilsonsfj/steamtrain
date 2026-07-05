@@ -28,7 +28,7 @@ import {
   parseSlashInput,
 } from "../commands";
 import type { AgentConfigScope, ConfigScopeKind, SteamtrainConfig } from "../config";
-import { loadConfig, saveUserConfig, userConfigPath } from "../config";
+import { configDisplayLabel, loadConfig, saveUserConfig, userConfigPath } from "../config";
 import { saveProjectConfig } from "../config/project-config";
 import type { AgentInstanceConfig } from "../config/types";
 import type { UserConfigPatch } from "../config/user-config";
@@ -103,6 +103,8 @@ interface AppProps {
   userAgents?: AgentInstanceConfig[];
   /** Raw agent entries from the project config file. */
   projectAgents?: AgentInstanceConfig[];
+  /** Whether `~/.steamtrain/settings.json` exists (feeds the cfg label). */
+  hasUserSettings?: boolean;
   configWarning?: string;
   settings: SteamtrainSettings;
   settingsWarning?: string;
@@ -124,6 +126,7 @@ export function App({
   configKind = "project",
   userAgents,
   projectAgents,
+  hasUserSettings,
   configWarning,
   settings,
   settingsWarning,
@@ -148,6 +151,7 @@ export function App({
     projectAgents?: AgentInstanceConfig[];
   }>({ userAgents, projectAgents });
   const [agentManagerOpen, setAgentManagerOpen] = useState(false);
+  const [runtimeConfigSource, setRuntimeConfigSource] = useState(configSource);
   const [activeWorkspaceLabel, setActiveWorkspaceLabel] = useState(workspaceLabel);
   const [transcript, dispatch] = useReducer(transcriptReducer, initialTranscript);
   const [agentCatalogTick, setAgentCatalogTick] = useState(0);
@@ -198,14 +202,21 @@ export function App({
   }, [mode, workspaceMap]);
 
   // Re-read the full config stack (defaults → global → project) after a save
-  // so the merged view and raw per-scope agent layers stay consistent.
+  // so the merged view, raw per-scope agent layers, and the status-bar cfg
+  // label stay consistent (a first save may create a previously absent file).
   const reloadConfig = useCallback(() => {
     const loaded = loadConfig(
       configKind === "custom" && configPath ? { customPath: configPath } : {},
     );
     setRuntimeConfig(loaded.config);
     setAgentLayers({ userAgents: loaded.userAgents, projectAgents: loaded.projectAgents });
-  }, [configKind, configPath]);
+    setRuntimeConfigSource(
+      configDisplayLabel(loaded.scope, {
+        hasUserSettings,
+        hasUserConfig: loaded.user?.exists,
+      }),
+    );
+  }, [configKind, configPath, hasUserSettings]);
 
   const updateConfig = useCallback(
     (patch: Parameters<typeof saveProjectConfig>[0]) => {
@@ -293,6 +304,8 @@ export function App({
 
   const handleAgentDelete = useCallback(
     (id: string): AgentMutationResult => {
+      // If an id is configured in both scopes, this deletes the shadowing
+      // project entry first; a second delete then removes the global one.
       const scope = agentConfigScope(id, agentLayers);
       if (!scope) return { ok: false, error: `'${id}' is not configured` };
       const rawList = scope === "user" ? agentLayers.userAgents : agentLayers.projectAgents;
@@ -903,7 +916,7 @@ export function App({
     <Box flexDirection="column" width={columns}>
       <StatusBar
         doctor={doctor}
-        configSource={configSource}
+        configSource={runtimeConfigSource}
         workspaceLabel={activeWorkspaceLabel}
         running={runner.running}
         runCostUsd={runCostUsd}

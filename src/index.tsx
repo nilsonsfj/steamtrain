@@ -90,6 +90,7 @@ async function main(): Promise<void> {
       configKind={scope.kind}
       userAgents={userAgents}
       projectAgents={projectAgents}
+      hasUserSettings={hasUserFile}
       configWarning={warning}
       settings={settings}
       settingsWarning={settingsWarning}

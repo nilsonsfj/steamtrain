@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -136,8 +136,10 @@ describe("saveUserConfig", () => {
     const home = tempHome();
     const path = userConfigPath(home);
 
+    expect(existsSync(path)).toBe(false);
     const first = saveUserConfig({ agents: [{ id: "mimocode", provider: "opencode" }] }, path);
     expect(first.ok).toBe(true);
+    expect(existsSync(path)).toBe(true);
 
     const second = saveUserConfig({ stepTimeoutSec: 90 }, path);
     expect(second.ok).toBe(true);
