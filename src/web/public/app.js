@@ -197,7 +197,12 @@
       var provider = fallback ? fallback.provider : "claude";
       var binary = fallback ? fallback.binary : provider;
       var agentId = fallback ? provider + "-fork" : "new-agent";
-      S.projectConfig.agents = (S.projectConfig.agents || []).concat([{
+      var agents = S.projectConfig.agents || [];
+      var n = 2;
+      while (agents.some(function (a) { return a.id === agentId; })) {
+        agentId = (fallback ? provider + "-fork" : "new-agent") + "-" + n++;
+      }
+      S.projectConfig.agents = agents.concat([{
         id: agentId,
         provider: provider,
         enabled: true,
