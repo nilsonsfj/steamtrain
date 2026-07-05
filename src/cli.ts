@@ -277,7 +277,9 @@ async function runCacheCommand(
   const store = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
   const options = parseCacheClearOptions(args.slice(1));
   if (!options) {
-    err("usage: steamtrain workflow cache clear [--input <text> | --stdin] [<workflow>]\n");
+    err(
+      "usage: steamtrain workflow cache clear [--input <text> [--param key=value ...] | --stdin] [<workflow>]\n",
+    );
     return 1;
   }
 
@@ -293,6 +295,12 @@ async function runCacheCommand(
     return 1;
   }
 
+  const resolved = resolveInputs(spec, options.params);
+  if (resolved.errors.length > 0) {
+    for (const e of resolved.errors) err(`input error: ${e}\n`);
+    return 1;
+  }
+
   const input =
     options.input ?? (options.stdin ? await readAll(io.stdin ?? process.stdin) : undefined);
   if (!input?.trim()) {
@@ -300,7 +308,7 @@ async function runCacheCommand(
     return 1;
   }
 
-  const key = workflowCacheKey(options.workflow, input.trim(), cwd, spec);
+  const key = workflowCacheKey(options.workflow, input.trim(), cwd, spec, resolved.values);
   await store.clear(key);
   out(`cleared cache for workflow '${options.workflow}'\n`);
   return 0;
@@ -1173,10 +1181,11 @@ interface CacheClearOptions {
   workflow?: string;
   input?: string;
   stdin: boolean;
+  params: Record<string, string>;
 }
 
 function parseCacheClearOptions(args: string[]): CacheClearOptions | null {
-  const options: CacheClearOptions = { stdin: false };
+  const options: CacheClearOptions = { stdin: false, params: {} };
   const positional: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -1185,6 +1194,15 @@ function parseCacheClearOptions(args: string[]): CacheClearOptions | null {
       const value = args[i + 1];
       if (!value) return null;
       options.input = value;
+      i += 1;
+    } else if (arg === "--param" || arg === "-p") {
+      const value = args[i + 1];
+      if (!value) return null;
+      const eq = value.indexOf("=");
+      if (eq < 1) return null;
+      const key = value.slice(0, eq);
+      if (key.startsWith("-")) return null;
+      options.params[key] = value.slice(eq + 1);
       i += 1;
     } else if (arg === "--stdin") {
       options.stdin = true;
@@ -1318,9 +1336,9 @@ Usage:
   steamtrain workflow validate [name]
   steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh]
   steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh]
-  steamtrain workflow run --from <runId> [--retry-failed] [--input <text>] [--json]
+  steamtrain workflow run --from <runId> [--retry-failed] [--param key=value ...] [--input <text>] [--json]
   steamtrain workflow create --input <description> [--agent <id>] [--model <model>] [--name <name>] [--save] [--scope user|project] [--json]
-  steamtrain workflow cache clear [<workflow> --input <text> | --stdin]
+  steamtrain workflow cache clear [<workflow> --input <text> --param key=value ... | --stdin]
   steamtrain workflow history [list]
   steamtrain workflow history show <id> [--diff [--step <stepId>] [--stat]]
   steamtrain workflow history apply <id> [--step <stepId>]
