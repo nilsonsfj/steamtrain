@@ -111,7 +111,9 @@ export function defaultModelForAgent(agent: AgentInstanceId, config?: Steamtrain
       ? OPENCODE_MODELS[0]?.id
       : provider === "codex"
         ? CODEX_MODELS[0]?.id
-        : undefined;
+        : provider === "claude"
+          ? "claude-sonnet-5"
+          : undefined;
   const available = modelIdsForAgent(agent, config);
   if (preferred && available.includes(preferred)) return preferred;
   return available[0] ?? preferred ?? agent;
@@ -130,6 +132,9 @@ function claudeEfforts(model: string): readonly string[] {
   if (m === "opus" || m === "best" || m === "opusplan") {
     return CLAUDE_OPUS_48_47_EFFORTS;
   }
+  if (m === "fable") {
+    return CLAUDE_OPUS_48_47_EFFORTS;
+  }
   if (m === "sonnet") {
     return CLAUDE_OPUS_46_SONNET_46_EFFORTS;
   }
@@ -137,6 +142,12 @@ function claudeEfforts(model: string): readonly string[] {
     return [];
   }
 
+  if (/^claude-fable-5(?:$|-)/.test(m)) {
+    return CLAUDE_OPUS_48_47_EFFORTS;
+  }
+  if (/^claude-mythos-5(?:$|-)/.test(m)) {
+    return CLAUDE_OPUS_48_47_EFFORTS;
+  }
   if (/^claude-opus-4-(?:7|8)(?:$|-)/.test(m)) {
     return CLAUDE_OPUS_48_47_EFFORTS;
   }
@@ -144,6 +155,9 @@ function claudeEfforts(model: string): readonly string[] {
     return CLAUDE_OPUS_46_SONNET_46_EFFORTS;
   }
   if (m === "claude-sonnet-4-6" || m.startsWith("claude-sonnet-4-6")) {
+    return CLAUDE_OPUS_46_SONNET_46_EFFORTS;
+  }
+  if (/^claude-sonnet-5(?:$|-)/.test(m)) {
     return CLAUDE_OPUS_46_SONNET_46_EFFORTS;
   }
 

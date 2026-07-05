@@ -25,23 +25,30 @@ const AGENT: AgentId = "claude";
 /** Known Claude Code models (used by `/model` and autocomplete). */
 export const CLAUDE_MODELS: readonly AgentModel[] = [
   // Current (https://platform.claude.com/docs/en/about-claude/models/overview)
-  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+  { id: "claude-fable-5", name: "Claude Fable 5" },
   { id: "claude-opus-4-8", name: "Claude Opus 4.8" },
+  { id: "claude-sonnet-5", name: "Claude Sonnet 5" },
   { id: "claude-haiku-4-5", name: "Claude Haiku 4.5" },
   { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5 (20251001)" },
+  { id: "claude-mythos-5", name: "Claude Mythos 5 (limited)" },
   // Aliases (https://code.claude.com/docs/en/model-config)
+  { id: "fable", name: "Fable (latest)" },
   { id: "sonnet", name: "Sonnet (latest)" },
   { id: "opus", name: "Opus (latest)" },
   { id: "haiku", name: "Haiku (latest)" },
   { id: "best", name: "Best (latest)" },
   { id: "opusplan", name: "Opus Plan" },
   // 1M context
+  { id: "fable[1m]", name: "Fable (1M context)" },
   { id: "sonnet[1m]", name: "Sonnet (1M context)" },
   { id: "opus[1m]", name: "Opus (1M context)" },
-  { id: "claude-sonnet-4-6[1m]", name: "Claude Sonnet 4.6 (1M context)" },
+  { id: "claude-fable-5[1m]", name: "Claude Fable 5 (1M context)" },
+  { id: "claude-sonnet-5[1m]", name: "Claude Sonnet 5 (1M context)" },
   { id: "claude-opus-4-8[1m]", name: "Claude Opus 4.8 (1M context)" },
   { id: "claude-opus-4-7[1m]", name: "Claude Opus 4.7 (1M context)" },
+  { id: "claude-sonnet-4-6[1m]", name: "Claude Sonnet 4.6 (1M context)" },
   // Legacy
+  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
   { id: "claude-opus-4-7", name: "Claude Opus 4.7" },
   { id: "claude-opus-4-6", name: "Claude Opus 4.6" },
   { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" },
