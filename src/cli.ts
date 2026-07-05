@@ -1314,8 +1314,8 @@ function helpText(): string {
 Usage:
   steamtrain workflow list
   steamtrain workflow validate [name]
-  steamtrain workflow run <name> --input <text> [--json] [--fresh]
-  steamtrain workflow run <name> --stdin [--json] [--fresh]
+  steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh]
+  steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh]
   steamtrain workflow run --from <runId> [--retry-failed] [--input <text>] [--json]
   steamtrain workflow create --input <description> [--agent <id>] [--model <model>] [--name <name>] [--save] [--scope user|project] [--json]
   steamtrain workflow cache clear [<workflow> --input <text> | --stdin]
