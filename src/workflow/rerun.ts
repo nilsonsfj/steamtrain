@@ -11,11 +11,18 @@ export type RerunMode = "rerun" | "retry-failed";
  * when the workflow definition, input, and working directory all match the run
  * that produced them.
  */
-export type RerunDowngrade = "no-spec-hash" | "spec-changed" | "input-changed" | "cwd-changed";
+export type RerunDowngrade =
+  | "no-spec-hash"
+  | "spec-changed"
+  | "input-changed"
+  | "cwd-changed"
+  | "params-changed";
 
 export interface RerunPlan {
   workflow: string;
   input: string;
+  /** Resolved input params from the original run (or overridden by the user). */
+  params?: Record<string, string | number | boolean>;
   /** Steps to seed into the engine cache; empty for a full re-run. */
   seedCache: Map<string, StepResult>;
   /** Set when retry-failed could not safely seed and fell back to a full run. */
@@ -41,6 +48,8 @@ export function rerunDowngradeMessage(reason: RerunDowngrade): string {
       return "the input differs from the recorded run; doing a full re-run";
     case "cwd-changed":
       return "the working directory differs from the recorded run; doing a full re-run";
+    case "params-changed":
+      return "the input parameters differ from the recorded run; doing a full re-run";
   }
   const _exhaustive: never = reason;
   throw new Error(`unhandled rerun mode: ${_exhaustive}`);
@@ -77,12 +86,13 @@ export function planRerun(
   record: RunRecord,
   mode: RerunMode,
   currentSpec: WorkflowSpec | undefined,
-  ctx?: { input?: string; cwd?: string },
+  ctx?: { input?: string; cwd?: string; params?: Record<string, string | number | boolean> },
 ): RerunPlan | RerunError {
   if (!currentSpec) return { error: `workflow '${record.workflow}' no longer exists` };
 
   const input = ctx?.input ?? record.input;
-  const base = { workflow: record.workflow, input };
+  const params = ctx?.params ?? record.params;
+  const base = { workflow: record.workflow, input, params };
   if (mode === "rerun") return { ...base, seedCache: new Map() };
 
   let downgraded: RerunDowngrade | undefined;
@@ -91,6 +101,13 @@ export function planRerun(
   else if (ctx?.input !== undefined && ctx.input.trim() !== record.input.trim())
     downgraded = "input-changed";
   else if (ctx?.cwd !== undefined && ctx.cwd !== record.cwd) downgraded = "cwd-changed";
+  else if (
+    ctx?.params !== undefined &&
+    record.params !== undefined &&
+    JSON.stringify(Object.entries(ctx.params).sort()) !==
+      JSON.stringify(Object.entries(record.params).sort())
+  )
+    downgraded = "params-changed";
 
   if (downgraded) return { ...base, seedCache: new Map(), downgraded };
   return { ...base, seedCache: seedCacheFromRecord(record) };

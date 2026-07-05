@@ -951,6 +951,12 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
           };
         }
       }
+      if (input.required === true && input.default !== undefined) {
+        return {
+          ok: false,
+          error: `input '${name}' declares required: true but also has a default (required is redundant when default is set)`,
+        };
+      }
     }
   }
 

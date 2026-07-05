@@ -150,6 +150,26 @@ describe("resolveInputs", () => {
     expect(result.errors).toEqual([]);
     expect(result.values).toEqual({ name: "test", count: 5, verbose: true });
   });
+
+  it("handles values containing = signs", () => {
+    const spec = makeSpec({ url: { type: "string" } });
+    const result = resolveInputs(spec, { url: "key=val=ue" });
+    expect(result.errors).toEqual([]);
+    expect(result.values).toEqual({ url: "key=val=ue" });
+  });
+
+  it("handles empty string value by using default", () => {
+    const spec = makeSpec({ x: { type: "string", default: "fallback" } });
+    const result = resolveInputs(spec, { x: "" });
+    expect(result.errors).toEqual([]);
+    expect(result.values).toEqual({ x: "fallback" });
+  });
+
+  it("handles empty string value for required input without default", () => {
+    const spec = makeSpec({ x: { type: "string" } });
+    const result = resolveInputs(spec, { x: "" });
+    expect(result.errors).toEqual(["missing required input 'x'"]);
+  });
 });
 
 describe("validateWorkflow with inputs", () => {
@@ -232,6 +252,24 @@ describe("validateWorkflow with inputs", () => {
     const spec: WorkflowSpec = {
       ...baseSpec,
       inputs: { my_input: { type: "string" } },
+    };
+    expect(validateWorkflow(spec).ok).toBe(true);
+  });
+
+  it("rejects required: true with a default", () => {
+    const spec: WorkflowSpec = {
+      ...baseSpec,
+      inputs: { x: { type: "string", required: true, default: "val" } },
+    };
+    const result = validateWorkflow(spec);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("required: true but also has a default");
+  });
+
+  it("accepts required: false with a default", () => {
+    const spec: WorkflowSpec = {
+      ...baseSpec,
+      inputs: { x: { type: "string", required: false, default: "val" } },
     };
     expect(validateWorkflow(spec).ok).toBe(true);
   });

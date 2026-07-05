@@ -762,12 +762,19 @@ async function runWorkflowCommand(
     const plan = planRerun(record, mode, orchestrator.listWorkflows()[name], {
       input: options.input,
       cwd,
+      params: Object.keys(options.params).length > 0 ? options.params : undefined,
     });
     if (isRerunError(plan)) {
       err(`${plan.error}\n`);
       return 1;
     }
     input = plan.input;
+    if (plan.params) {
+      // Use the plan's resolved params (from the original run or user override).
+      for (const [k, v] of Object.entries(plan.params)) {
+        if (!(k in options.params)) options.params[k] = String(v);
+      }
+    }
     if (plan.downgraded) {
       err(`note: ${rerunDowngradeMessage(plan.downgraded)}\n`);
     }
@@ -835,6 +842,7 @@ async function runWorkflowCommand(
     input: input.trim(),
     cwd,
     specHash: hashWorkflowSpec(spec),
+    params: Object.keys(resolved.values).length > 0 ? resolved.values : undefined,
   });
   // Wire cancellation so Ctrl+C unwinds the run and records it as "canceled"
   // (matching the TUI and web drivers) instead of hard-killing the process
