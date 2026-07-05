@@ -62,6 +62,7 @@ import { workflowListNavigation } from "./prompt-editing";
 import { initialPromptHistoryBrowse } from "./prompt-history";
 import { initialTranscript, transcriptReducer } from "./transcript";
 import { useTerminalSize } from "./useTerminalSize";
+import { computeStreamHeight } from "./util";
 import { flattenSteps } from "./workflow-state";
 
 // Custom hooks — each owns a cohesive slice of state.
@@ -742,11 +743,14 @@ export function App({
   }
 
   const isWorkflow = mode === "workflow";
-  // Account for prompt wrapping: border(2) + padding(2) + prefix("❯ " = 2) = 6 columns overhead.
-  const promptAreaWidth = Math.max(1, columns - 6);
-  const promptTextLen = Math.max(1, prompt.value.length + 1); // +1 for cursor
-  const promptExtraLines = Math.max(0, Math.ceil(promptTextLen / promptAreaWidth) - 1);
-  const streamHeight = Math.max(6, rows - 9 - promptExtraLines);
+  const streamHeight = computeStreamHeight({
+    rows,
+    columns,
+    promptValueLength: prompt.value.length,
+    // The red notice line only renders in workflow mode; reserve its height so
+    // the frame never overflows the terminal (which flickers on every keypress).
+    notice: runner.wfNotice && isWorkflow ? runner.wfNotice : null,
+  });
 
   const menuOverlayRows = prompt.suggestionMenuOpen
     ? suggestionMenuHeight(prompt.commandSuggestions.length, prompt.suggestionIndex)
