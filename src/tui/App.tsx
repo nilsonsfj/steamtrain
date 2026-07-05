@@ -9,7 +9,14 @@ import {
   useRef,
   useState,
 } from "react";
-import { formatAgentTarget, resolveAgentInstances } from "../agents";
+import {
+  agentConfigScope,
+  agentScopeLabel,
+  formatAgentTarget,
+  removeAgent,
+  resolveAgentInstances,
+  upsertAgent,
+} from "../agents";
 import { refreshAgentCatalogCaches } from "../agents/models";
 import {
   type SlashCommandResult,
@@ -20,8 +27,11 @@ import {
   listSlashCommands,
   parseSlashInput,
 } from "../commands";
-import type { SteamtrainConfig } from "../config";
+import type { AgentConfigScope, ConfigScopeKind, SteamtrainConfig } from "../config";
+import { loadConfig, saveUserConfig, userConfigPath } from "../config";
 import { saveProjectConfig } from "../config/project-config";
+import type { AgentInstanceConfig } from "../config/types";
+import type { UserConfigPatch } from "../config/user-config";
 import { type DoctorResult, runDoctor } from "../doctor";
 import { Orchestrator } from "../orchestrator";
 import type { SteamtrainSettings } from "../settings";
@@ -43,6 +53,8 @@ import {
   saveWorkspaceConfig,
   workspaceById,
 } from "../workspace";
+import type { AgentAddRequest, AgentMutationResult } from "./AgentManager";
+import { AgentManager } from "./AgentManager";
 import { CommandSuggestionMenu, suggestionMenuHeight } from "./CommandSuggestionMenu";
 import { EventStream } from "./EventStream";
 import { PromptInput } from "./PromptInput";
@@ -85,6 +97,12 @@ interface AppProps {
   configSource: string;
   /** Resolved project `steamtrain.json` path for project-scope authoring. */
   configPath?: string;
+  /** `custom` when a `--config` file is loaded alone (no global layer). */
+  configKind?: ConfigScopeKind;
+  /** Raw agent entries from the global `~/.steamtrain/config.json`. */
+  userAgents?: AgentInstanceConfig[];
+  /** Raw agent entries from the project config file. */
+  projectAgents?: AgentInstanceConfig[];
   configWarning?: string;
   settings: SteamtrainSettings;
   settingsWarning?: string;
@@ -103,6 +121,9 @@ export function App({
   config,
   configSource,
   configPath,
+  configKind = "project",
+  userAgents,
+  projectAgents,
   configWarning,
   settings,
   settingsWarning,
@@ -122,6 +143,11 @@ export function App({
   const [runtimeWorkspaces, setRuntimeWorkspaces] = useState<WorkspaceConfig>(workspaces);
   const [runtimeCatalog, setRuntimeCatalog] = useState<LoadedWorkflowCatalog>(workflowCatalog);
   const [runtimeConfig, setRuntimeConfig] = useState<SteamtrainConfig>(config);
+  const [agentLayers, setAgentLayers] = useState<{
+    userAgents?: AgentInstanceConfig[];
+    projectAgents?: AgentInstanceConfig[];
+  }>({ userAgents, projectAgents });
+  const [agentManagerOpen, setAgentManagerOpen] = useState(false);
   const [activeWorkspaceLabel, setActiveWorkspaceLabel] = useState(workspaceLabel);
   const [transcript, dispatch] = useReducer(transcriptReducer, initialTranscript);
   const [agentCatalogTick, setAgentCatalogTick] = useState(0);
@@ -171,17 +197,109 @@ export function App({
     if (mode !== "workflow" && !workspaceMap.has(mode)) setMode("workflow");
   }, [mode, workspaceMap]);
 
+  // Re-read the full config stack (defaults → global → project) after a save
+  // so the merged view and raw per-scope agent layers stay consistent.
+  const reloadConfig = useCallback(() => {
+    const loaded = loadConfig(
+      configKind === "custom" && configPath ? { customPath: configPath } : {},
+    );
+    setRuntimeConfig(loaded.config);
+    setAgentLayers({ userAgents: loaded.userAgents, projectAgents: loaded.projectAgents });
+  }, [configKind, configPath]);
+
   const updateConfig = useCallback(
     (patch: Parameters<typeof saveProjectConfig>[0]) => {
       if (!configPath) {
         return { ok: false, error: "no project steamtrain.json path configured" };
       }
       const saved = saveProjectConfig(patch, configPath);
-      if (saved.ok && saved.config) setRuntimeConfig(saved.config);
+      if (saved.ok) reloadConfig();
       return { ok: saved.ok, error: saved.error };
     },
-    [configPath],
+    [configPath, reloadConfig],
   );
+
+  const updateUserConfig = useCallback(
+    (patch: UserConfigPatch) => {
+      const saved = saveUserConfig(patch);
+      if (saved.ok) reloadConfig();
+      return { ok: saved.ok, error: saved.error };
+    },
+    [reloadConfig],
+  );
+  // A custom --config file loads alone; there is no global layer to write.
+  const canGlobalConfig = configKind !== "custom";
+
+  const agentScopes = useMemo(() => {
+    const scopes = new Map<string, AgentConfigScope>();
+    for (const agent of agentLayers.userAgents ?? []) scopes.set(agent.id, "user");
+    for (const agent of agentLayers.projectAgents ?? []) scopes.set(agent.id, "project");
+    return scopes;
+  }, [agentLayers]);
+
+  const saveAgentsInScope = useCallback(
+    (scope: AgentConfigScope, agents: AgentInstanceConfig[]) =>
+      scope === "user" ? updateUserConfig({ agents }) : updateConfig({ agents }),
+    [updateUserConfig, updateConfig],
+  );
+
+  const handleAgentToggle = useCallback(
+    (id: string): AgentMutationResult => {
+      const resolved = resolveAgentInstances(runtimeConfig, { includeDisabled: true }).find(
+        (agent) => agent.id === id,
+      );
+      if (!resolved) return { ok: false, error: `unknown agent '${id}'` };
+      const scope =
+        agentConfigScope(id, agentLayers) ?? (canGlobalConfig ? "user" : ("project" as const));
+      const rawList = scope === "user" ? agentLayers.userAgents : agentLayers.projectAgents;
+      const raw = rawList?.find((agent) => agent.id === id);
+      const enabled = !resolved.enabled;
+      const entry: AgentInstanceConfig = raw
+        ? { ...raw, enabled }
+        : { id, provider: resolved.provider, enabled };
+      const saved = saveAgentsInScope(scope, upsertAgent(rawList, entry));
+      if (!saved.ok) return saved;
+      return {
+        ok: true,
+        text: `${id} ${enabled ? "enabled" : "disabled"} (${agentScopeLabel(scope)})`,
+      };
+    },
+    [runtimeConfig, agentLayers, canGlobalConfig, saveAgentsInScope],
+  );
+
+  const handleAgentAdd = useCallback(
+    (request: AgentAddRequest): AgentMutationResult => {
+      const scope = canGlobalConfig ? request.scope : "project";
+      const rawList = scope === "user" ? agentLayers.userAgents : agentLayers.projectAgents;
+      const entry: AgentInstanceConfig = {
+        id: request.id,
+        provider: request.provider,
+        enabled: true,
+        ...(request.binary ? { binary: request.binary } : {}),
+      };
+      const saved = saveAgentsInScope(scope, upsertAgent(rawList, entry));
+      if (!saved.ok) return saved;
+      return { ok: true, text: `${request.id} added (${agentScopeLabel(scope)})` };
+    },
+    [agentLayers, canGlobalConfig, saveAgentsInScope],
+  );
+
+  const handleAgentDelete = useCallback(
+    (id: string): AgentMutationResult => {
+      const scope = agentConfigScope(id, agentLayers);
+      if (!scope) return { ok: false, error: `'${id}' is not configured` };
+      const rawList = scope === "user" ? agentLayers.userAgents : agentLayers.projectAgents;
+      const saved = saveAgentsInScope(scope, removeAgent(rawList, id));
+      if (!saved.ok) return saved;
+      return { ok: true, text: `${id} removed (${agentScopeLabel(scope)})` };
+    },
+    [agentLayers, saveAgentsInScope],
+  );
+
+  const openAgentManager = useCallback(() => {
+    setAgentManagerOpen(true);
+    return { handled: true as const, clearInput: true };
+  }, []);
 
   const authoringHost = useMemo<AuthoringHost>(
     () => ({
@@ -314,6 +432,11 @@ export function App({
     config: runtimeConfig,
     configPath,
     updateConfig,
+    userConfigPath: canGlobalConfig ? userConfigPath() : undefined,
+    updateUserConfig: canGlobalConfig ? updateUserConfig : undefined,
+    userAgents: agentLayers.userAgents,
+    projectAgents: agentLayers.projectAgents,
+    openAgentManager,
     workflowPickerActive,
     saveWorkflows: picker.saveWorkflows,
     createWorkflow: picker.createWorkflow,
@@ -723,6 +846,10 @@ export function App({
     runner,
     historyHook,
     workflowPickerActive,
+    agentManagerOpen,
+    openAgentManager: () => {
+      openAgentManager();
+    },
     focusCreateWorkflowPrompt,
     switchMode: (next) => {
       setMode(next);
@@ -775,7 +902,19 @@ export function App({
         runCostUsd={runCostUsd}
         runTokens={runTokens}
       />
-      {historyHook.history ? (
+      {agentManagerOpen ? (
+        <AgentManager
+          agents={resolveAgentInstances(runtimeConfig, { includeDisabled: true })}
+          scopes={agentScopes}
+          canGlobal={canGlobalConfig}
+          width={columns}
+          height={streamHeight}
+          onToggle={handleAgentToggle}
+          onAdd={handleAgentAdd}
+          onDelete={handleAgentDelete}
+          onClose={() => setAgentManagerOpen(false)}
+        />
+      ) : historyHook.history ? (
         <HistoryPanel history={historyHook.history} width={columns} height={streamHeight} />
       ) : isWorkflow ? (
         picker.wfCreate ? (
@@ -890,8 +1029,12 @@ export function App({
           onCtrlQ={mode === "workflow" && runner.running ? runner.handleWorkflowCancel : undefined}
           onSuggestionNavigate={prompt.handleSuggestionNavigate}
           onHistoryNavigate={prompt.promptHistoryArrows ? prompt.handleHistoryNavigate : undefined}
-          focus={!historyHook.history}
-          editing={!historyHook.history && (!workflowListNavigation(mode) || prompt.promptEditing)}
+          focus={!historyHook.history && !agentManagerOpen}
+          editing={
+            !historyHook.history &&
+            !agentManagerOpen &&
+            (!workflowListNavigation(mode) || prompt.promptEditing)
+          }
           promptEditing={prompt.promptEditing}
           running={runner.running}
           cancelKeyHint={mode === "workflow" ? "Ctrl+Q" : "Esc"}
@@ -900,20 +1043,22 @@ export function App({
         />
         <Box paddingX={1}>
           <Text color="gray">
-            {historyHook.history
-              ? historyHintText(historyHook.history)
-              : hint(
-                  mode,
-                  runner.wf.started,
-                  runner.wfLaunching,
-                  !!picker.wfPreview,
-                  runner.running,
-                  prompt.suggestionMenuOpen,
-                  runner.wfCanResume,
-                  prompt.promptEditing,
-                  isSlashCommandInput(prompt.value),
-                  !!runner.wfStepDetails,
-                )}
+            {agentManagerOpen
+              ? "agent manager · ↑/↓ select · Enter/Space toggle · a add · d delete · Esc close · Ctrl+C quit"
+              : historyHook.history
+                ? historyHintText(historyHook.history)
+                : hint(
+                    mode,
+                    runner.wf.started,
+                    runner.wfLaunching,
+                    !!picker.wfPreview,
+                    runner.running,
+                    prompt.suggestionMenuOpen,
+                    runner.wfCanResume,
+                    prompt.promptEditing,
+                    isSlashCommandInput(prompt.value),
+                    !!runner.wfStepDetails,
+                  )}
           </Text>
         </Box>
       </Box>

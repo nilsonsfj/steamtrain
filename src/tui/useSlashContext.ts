@@ -6,7 +6,8 @@ import type {
   WorkflowStepSelection,
 } from "../commands/types";
 import type { ProjectConfigPatch } from "../config/project-config";
-import type { SteamtrainConfig } from "../config/types";
+import type { AgentInstanceConfig, SteamtrainConfig } from "../config/types";
+import type { UserConfigPatch } from "../config/user-config";
 import type { AgentInstanceId } from "../types/events";
 import { STEAMTRAIN_VERSION } from "../version";
 import type { WorkflowScope, WorkflowSpec } from "../workflow";
@@ -34,6 +35,11 @@ export interface UseSlashContextParams {
   config?: SteamtrainConfig;
   configPath?: string;
   updateConfig?: (patch: ProjectConfigPatch) => { ok: boolean; error?: string };
+  userConfigPath?: string;
+  updateUserConfig?: (patch: UserConfigPatch) => { ok: boolean; error?: string };
+  userAgents?: readonly AgentInstanceConfig[];
+  projectAgents?: readonly AgentInstanceConfig[];
+  openAgentManager?: () => SlashCommandResult;
   workflowPickerActive: boolean;
   saveWorkflows: () => Promise<SlashCommandResult>;
   createWorkflow: (description: string, scope?: WorkflowScope) => SlashCommandResult;
@@ -68,6 +74,11 @@ export function useSlashContext(params: UseSlashContextParams) {
     config,
     configPath,
     updateConfig,
+    userConfigPath,
+    updateUserConfig,
+    userAgents,
+    projectAgents,
+    openAgentManager,
     workflowPickerActive,
     saveWorkflows,
     createWorkflow,
@@ -99,6 +110,11 @@ export function useSlashContext(params: UseSlashContextParams) {
       config,
       configPath,
       updateConfig,
+      userConfigPath,
+      updateUserConfig,
+      userAgents,
+      projectAgents,
+      openAgentManager,
       saveWorkflows,
       createWorkflow,
       cloneWorkflow,
@@ -131,6 +147,11 @@ export function useSlashContext(params: UseSlashContextParams) {
       config,
       configPath,
       updateConfig,
+      userConfigPath,
+      updateUserConfig,
+      userAgents,
+      projectAgents,
+      openAgentManager,
       workflowPickerActive,
       saveWorkflows,
       createWorkflow,

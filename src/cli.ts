@@ -166,10 +166,18 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
   }
 
   const cwd = io.cwd ?? process.cwd();
-  const { config, scope: configScope, warning } = loadConfig({ cwd, customPath: io.configPath });
+  const {
+    config,
+    scope: configScope,
+    user: userConfig,
+    warning,
+  } = loadConfig({ cwd, customPath: io.configPath });
   if (warning) err(`${warning}\n`);
   const { hasUserFile: hasUserSettings } = loadSettings();
-  const configLabel = configDisplayLabel(configScope, { hasUserSettings });
+  const configLabel = configDisplayLabel(configScope, {
+    hasUserSettings,
+    hasUserConfig: userConfig?.exists,
+  });
   const { config: workspaces, warning: workspaceWarning } = loadWorkspaceConfig({
     cwd,
     customPath: io.workspacePath,

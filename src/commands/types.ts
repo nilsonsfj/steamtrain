@@ -1,5 +1,6 @@
 import type { ProjectConfigPatch } from "../config/project-config";
-import type { SteamtrainConfig } from "../config/types";
+import type { AgentInstanceConfig, SteamtrainConfig } from "../config/types";
+import type { UserConfigPatch } from "../config/user-config";
 import type { Mode } from "../tui/modes";
 import type { AgentInstanceId } from "../types/events";
 import type { WorkflowScope, WorkflowSpec } from "../workflow";
@@ -58,6 +59,16 @@ export interface SlashCommandContext {
   configPath?: string;
   /** Persist timeout-related project config keys. */
   updateConfig?: (patch: ProjectConfigPatch) => { ok: boolean; error?: string };
+  /** Resolved global `~/.steamtrain/config.json` path (absent with `--config`). */
+  userConfigPath?: string;
+  /** Persist global (user) config keys; absent when loading a custom `--config` file. */
+  updateUserConfig?: (patch: UserConfigPatch) => { ok: boolean; error?: string };
+  /** Raw agent entries from the global config file, for scoped saves. */
+  userAgents?: readonly AgentInstanceConfig[];
+  /** Raw agent entries from the project config file, for scoped saves. */
+  projectAgents?: readonly AgentInstanceConfig[];
+  /** Open the agent manager screen (TUI only). */
+  openAgentManager?: () => SlashCommandResult;
   /** Persist session workflow overrides to the user workflows file. */
   saveWorkflows?: () => SlashCommandResult | Promise<SlashCommandResult>;
   /** Start LLM-delegated generation of a new workflow from a description (TUI only). */

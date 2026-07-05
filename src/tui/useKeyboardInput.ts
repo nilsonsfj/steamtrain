@@ -20,6 +20,9 @@ export interface UseKeyboardInputParams {
   runner: ReturnType<typeof useWorkflowRunner>;
   historyHook: ReturnType<typeof useHistory>;
   workflowPickerActive: boolean;
+  /** True while the agent manager overlay owns the keyboard. */
+  agentManagerOpen: boolean;
+  openAgentManager: () => void;
   focusCreateWorkflowPrompt: (seed: string) => void;
   switchMode: (next: React.SetStateAction<Mode>) => void;
 }
@@ -39,6 +42,13 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
         if (key.ctrl && input === "c") {
           runner.abortRef.current?.abort();
           exit();
+          return;
+        }
+        // Ctrl+A opens the agent manager from any screen; while open, the
+        // overlay's own useInput handler owns every other key.
+        if (cur.agentManagerOpen) return;
+        if (key.ctrl && input === "a") {
+          cur.openAgentManager();
           return;
         }
         // The history browser is a modal overlay: while open it owns all keys.
