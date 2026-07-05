@@ -76,7 +76,16 @@
     function renderAgentConfigRows() {
       clear(agentList);
       agentRows = [];
-      (S.projectConfig.agents || []).forEach(function (a) {
+      var agents = S.projectConfig.agents || [];
+      if (!agents.length) {
+        agentList.appendChild(h("div", { class: "empty-state" },
+          h("p", { text: "No agents configured yet. Add an agent below to get started." })
+        ));
+        return;
+      }
+      agents.forEach(function (a) {
+        var originalId = a.id;
+        var meta = agentById(a.id);
         var enabled = h("input", { type: "checkbox", checked: a.enabled !== false });
         var id = h("input", { class: "txt", value: a.id || "" });
         var label = h("input", { class: "txt", placeholder: "optional display label", value: a.label || "" });
@@ -91,19 +100,95 @@
         env.value = a.env ? JSON.stringify(a.env) : "";
         var extraArgs = h("textarea", { class: "ta mini", placeholder: "[]", rows: "2" });
         extraArgs.value = JSON.stringify(a.extraArgs || []);
-        var defaultModel = h("input", { class: "txt", placeholder: "default model", value: a.defaultModel || "" });
+        var defaultModel = buildModelSelect(a);
         var row = { enabled: enabled, id: id, label: label, provider: provider, binary: binary, env: env, extraArgs: extraArgs, defaultModel: defaultModel };
         agentRows.push(row);
-        agentList.appendChild(h("div", { class: "agentrow" },
-          h("label", null, enabled, h("span", { text: " enabled" })),
-          field("ID", id),
-          field("Label", label),
+
+        // Health dot
+        var healthy = meta ? meta.healthy : null;
+        var healthDot = h("span", { class: "health-dot " + (healthy === true ? "ok" : healthy === false ? "err" : "unknown") });
+
+        // Provider tag (synced with select)
+        var providerTag = h("span", { class: "provider-tag", text: a.provider || "claude" });
+
+        // Delete button
+        var deleteBtn = h("button", { class: "agent-delete", title: "Remove agent", text: "\u00d7" });
+        deleteBtn.addEventListener("click", function () {
+          if (!window.confirm("Remove agent \"" + originalId + "\"? This removes it from the project config.")) return;
+          var agents = S.projectConfig.agents || [];
+          var i = agents.findIndex(function (x) { return x.id === originalId; });
+          if (i >= 0) agents.splice(i, 1);
+          renderAgentConfigRows();
+        });
+
+        // Header row: checkbox + ID label + provider tag + health dot + delete
+        var idLabel = h("span", { text: id.value.trim() || "new agent" });
+        var header = h("div", { class: "agentrow-header" },
+          h("label", null, enabled, idLabel),
+          providerTag,
+          healthDot,
+          deleteBtn
+        );
+        id.addEventListener("input", function () {
+          idLabel.textContent = id.value.trim() || "new agent";
+        });
+
+        // Enabled checkbox toggles row opacity
+        enabled.addEventListener("change", function () {
+          rowEl.classList.toggle("disabled", !enabled.checked);
+        });
+
+        // Provider change: sync tag and rebuild model select
+        provider.addEventListener("change", function () {
+          providerTag.textContent = provider.value;
+          var currentModel = row.defaultModel.value;
+          var newDefaultModel = buildModelSelect({ id: id.value.trim(), provider: provider.value, defaultModel: currentModel });
+          var modelField = rowEl.querySelector(".field-model");
+          if (modelField) {
+            var oldSelect = modelField.querySelector("select");
+            if (oldSelect) modelField.replaceChild(newDefaultModel, oldSelect);
+          }
+          row.defaultModel = newDefaultModel;
+        });
+
+        // Build row DOM (field() with 5th arg enables inline validation error display)
+        var rowEl = h("div", { class: "agentrow" + (enabled.checked ? "" : " disabled") },
+          header,
+          field("ID", id, null, null, true),
           field("Provider", provider),
+          field("Label", label),
           field("Binary", binary),
-          field("Env", env, "JSON object, merged into process env."),
-          field("Extra args", extraArgs, "JSON array of flags appended before the prompt."),
-          field("Default model", defaultModel)
-        ));
+          field("Env", env, "JSON object, merged into process env.", null, true),
+          field("Extra args", extraArgs, "JSON array of flags appended before the prompt.", null, true),
+          field("Default model", defaultModel, "Model ID or leave empty for provider default.", "field-model")
+        );
+        agentList.appendChild(rowEl);
+
+        // Inline validation — wired AFTER field() so _fieldError is set
+        addBlurValidation(id, function () {
+          var v = id.value.trim();
+          if (!v) return "Agent ID is required";
+          var dup = agentRows.filter(function (r) { return r !== row; }).some(function (r) { return r.id.value.trim() === v; });
+          if (dup) return "Duplicate agent ID";
+          return null;
+        });
+        addBlurValidation(env, function () {
+          var v = env.value.trim();
+          if (!v) return null;
+          try { var p = JSON.parse(v); if (!p || Array.isArray(p) || typeof p !== "object") return "Must be a JSON object"; }
+          catch (e) { return "Invalid JSON"; }
+          return null;
+        });
+        addBlurValidation(extraArgs, function () {
+          var v = extraArgs.value.trim();
+          if (!v) return null;
+          try {
+            var p = JSON.parse(v);
+            if (!Array.isArray(p)) return "Must be a JSON array";
+            if (p.some(function (x) { return typeof x !== "string"; })) return "Array must contain only strings";
+          } catch (e) { return "Invalid JSON"; }
+          return null;
+        });
       });
     }
     function addAgentRow() {
@@ -133,6 +218,7 @@
   saveBtn.addEventListener("click", function () {
       var stepSec = Number(stepInput.value) * 60;
       if (!stepSec || stepSec <= 0) { mbanner(banner, "step timeout must be a positive number of minutes", "err"); return; }
+      if (agentList.querySelector(".invalid")) { mbanner(banner, "Fix validation errors before saving", "err"); return; }
       var agents;
       try {
         agents = collectAgentConfigRows(agentRows);
@@ -152,7 +238,7 @@
         saveBtn.disabled = false;
         if (r.status === 200 && r.body.ok) {
           S.projectConfig = Object.assign({}, S.projectConfig, r.body);
-          S.agents = (r.body.agents || []).filter(function (a) { return a.enabled !== false; });
+          S.agents = r.body.agents || [];
           closeModal();
           pollDoctor(0);
           setBanner("project config saved", "info");
@@ -636,10 +722,57 @@
     var shell = h("div", { class: "modal" + (wide ? " wide" : "") }, head, h("div", { class: "mbody" }, bodyNode), footNode);
     return shell;
   }
-  function field(label, control, hint) {
-    return h("div", { class: "field" },
+  function field(label, control, hint, className, withValidation) {
+    var wrapper = h("div", { class: "field" + (className ? " " + className : "") },
       h("label", { text: label }), control,
       hint ? h("div", { class: "hint", text: hint }) : null);
+    if (withValidation) {
+      var errEl = h("div", { class: "field-error" });
+      wrapper.appendChild(errEl);
+      control._fieldError = errEl;
+    }
+    return wrapper;
+  }
+  function buildModelSelect(agentConfig) {
+    var agentId = agentConfig.id;
+    var provider = agentConfig.provider || "claude";
+    var current = agentConfig.defaultModel || "";
+    var meta = agentById(agentId);
+    // Fallback: if agent not found by ID or provider mismatches, use any agent
+    // with the same provider (model lists are provider-scoped, not agent-scoped).
+    if (!meta || meta.provider !== provider) {
+      for (var i = 0; i < S.agents.length; i++) {
+        if (S.agents[i].provider === provider) { meta = S.agents[i]; break; }
+      }
+    }
+    var models = meta ? meta.models : [];
+    var opts = [{ value: "", label: "(use provider default)" }];
+    models.forEach(function (m) {
+      opts.push({ value: m.id, label: m.name || m.id });
+    });
+    if (current && !opts.some(function (o) { return o.value === current; })) {
+      opts.push({ value: current, label: current + " (current)" });
+    }
+    return selectEl(opts, current);
+  }
+  function addBlurValidation(el, checkFn) {
+    var errEl = el._fieldError;
+    el.addEventListener("blur", function () {
+      var msg = checkFn();
+      if (msg) {
+        el.classList.add("invalid");
+        if (errEl) { errEl.textContent = msg; errEl.classList.add("show"); }
+      } else {
+        el.classList.remove("invalid");
+        if (errEl) { errEl.textContent = ""; errEl.classList.remove("show"); }
+      }
+    });
+    el.addEventListener("input", function () {
+      if (el.classList.contains("invalid")) {
+        el.classList.remove("invalid");
+        if (errEl) { errEl.textContent = ""; errEl.classList.remove("show"); }
+      }
+    });
   }
   function selectEl(opts, selected, onChange) {
     var sel = h("select", { class: "sel" });
@@ -654,7 +787,7 @@
     if (!sel.value && opts.length) sel.value = opts[0].value;
   }
   function agentOptions() {
-    return S.agents.map(function (a) {
+    return S.agents.filter(function (a) { return a.enabled !== false; }).map(function (a) {
       var label = a.label && a.label !== a.id ? a.label + " (" + a.id + ")" : a.id;
       return { value: a.id, label: label + (a.healthy ? "" : " (unavailable)") };
     });
@@ -694,8 +827,9 @@
     return opts;
   }
   function preferredAgent() {
-    for (var i = 0; i < S.agents.length; i++) if (S.agents[i].healthy) return S.agents[i];
-    return S.agents[0] || null;
+    var enabled = S.agents.filter(function (a) { return a.enabled !== false; });
+    for (var i = 0; i < enabled.length; i++) if (enabled[i].healthy) return enabled[i];
+    return enabled[0] || null;
   }
   function mbanner(node, text, kind) {
     if (!text) { node.className = "mbanner"; node.textContent = ""; return; }
