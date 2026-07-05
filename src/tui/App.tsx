@@ -252,7 +252,14 @@ export function App({
       const scope =
         agentConfigScope(id, agentLayers) ?? (canGlobalConfig ? "user" : ("project" as const));
       const rawList = scope === "user" ? agentLayers.userAgents : agentLayers.projectAgents;
-      const raw = rawList?.find((agent) => agent.id === id);
+      // Same fallback chain as /agent enable|disable: if the entry lives in
+      // the other scope, copy it so its fields survive the scoped write.
+      const raw =
+        rawList?.find((agent) => agent.id === id) ??
+        (scope === "user" ? agentLayers.projectAgents : agentLayers.userAgents)?.find(
+          (agent) => agent.id === id,
+        ) ??
+        runtimeConfig.agents?.find((agent) => agent.id === id);
       const enabled = !resolved.enabled;
       const entry: AgentInstanceConfig = raw
         ? { ...raw, enabled }

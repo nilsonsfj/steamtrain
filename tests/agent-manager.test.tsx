@@ -112,6 +112,14 @@ describe("AgentManager", () => {
     expect(plain(lastFrame())).toContain("fork added (global)");
   });
 
+  it("rejects an empty id in the add form", async () => {
+    const onAdd = vi.fn();
+    const { stdin, lastFrame } = renderManager({ onAdd });
+    await type(stdin, "a", "\r"); // open the form and submit with no id typed
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(plain(lastFrame())).toContain("agent id must not be empty");
+  });
+
   it("refuses to delete an unconfigured built-in", async () => {
     const onDelete = vi.fn();
     const { stdin, lastFrame } = renderManager({ onDelete });
