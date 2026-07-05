@@ -31,6 +31,7 @@ function fileWritingAdapter(): (id: AgentId) => AgentAdapter {
   return (id: AgentId): AgentAdapter => ({
     id,
     binary: "fake",
+    defaultModel: "test",
     run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
       return (async function* () {
         if (opts.prompt.includes("resolving git merge conflicts")) {

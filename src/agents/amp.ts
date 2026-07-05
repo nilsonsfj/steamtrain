@@ -190,6 +190,7 @@ export function buildAmpExecArgs(opts: AgentRunOptions): string[] {
 export class AmpAdapter implements AgentAdapter {
   readonly id: AgentId = AGENT;
   readonly binary: string;
+  readonly defaultModel = "smart";
 
   constructor(binary = "amp") {
     this.binary = binary;

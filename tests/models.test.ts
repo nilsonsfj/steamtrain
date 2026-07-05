@@ -100,6 +100,7 @@ describe("model names", () => {
   it("uses only the live OpenCode catalog when cache is loaded", () => {
     setOpencodeVariantCacheForTests(
       new Map([
+        ["opencode/mimo-v2.5-free", { name: "MiMo V2.5 Free", efforts: [] }],
         ["deepseek/deepseek-chat", { name: "DeepSeek Chat", efforts: [] }],
         ["opencode/gpt-5.4-mini", { name: "GPT 5.4 Mini", efforts: ["high"] }],
       ]),
@@ -107,10 +108,18 @@ describe("model names", () => {
     expect(modelIdsForAgent("opencode")).toEqual([
       "deepseek/deepseek-chat",
       "opencode/gpt-5.4-mini",
+      "opencode/mimo-v2.5-free",
     ]);
     expect(modelIdsForAgent("opencode")).not.toContain("opencode/big-pickle");
-    expect(defaultModelForAgent("opencode")).toBe("opencode/gpt-5.4-mini");
+    expect(defaultModelForAgent("opencode")).toBe("opencode/mimo-v2.5-free");
     clearOpencodeVariantCacheForTests();
+  });
+
+  it("returns each adapter's defaultModel via PROVIDER_ADAPTERS", () => {
+    expect(defaultModelForAgent("claude")).toBe("claude-sonnet-5");
+    expect(defaultModelForAgent("codex")).toBe("gpt-5.5");
+    expect(defaultModelForAgent("opencode")).toBe("opencode/mimo-v2.5-free");
+    expect(defaultModelForAgent("amp")).toBe("smart");
   });
 
   it("falls back to the static OpenCode catalog when cache is empty", () => {
@@ -119,7 +128,7 @@ describe("model names", () => {
 
   it("exposes id and name on catalog entries", () => {
     const claude = modelsForAgent("claude")[0];
-    expect(claude).toEqual({ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" });
+    expect(claude).toEqual({ id: "claude-fable-5", name: "Claude Fable 5" });
   });
 
   it("includes display names in formatAgentTarget", () => {

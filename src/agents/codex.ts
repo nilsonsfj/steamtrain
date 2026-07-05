@@ -441,6 +441,7 @@ export function buildCodexExecArgs(opts: AgentRunOptions): string[] {
 export class CodexAdapter implements AgentAdapter {
   readonly id: AgentId = AGENT;
   readonly binary: string;
+  readonly defaultModel = "gpt-5.5";
 
   constructor(binary = "codex") {
     this.binary = binary;

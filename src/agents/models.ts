@@ -1,10 +1,11 @@
 import type { SteamtrainConfig } from "../config/types";
 import type { DoctorResult } from "../doctor";
 import type { AgentInstanceId, AgentProviderId } from "../types/events";
+import type { AgentAdapter } from "./adapter";
 import { type AgentModel, formatModelOption } from "./agent-model";
-import { AMP_MODELS } from "./amp";
-import { CLAUDE_MODELS } from "./claude";
-import { CODEX_MODELS } from "./codex";
+import { AMP_MODELS, AmpAdapter } from "./amp";
+import { CLAUDE_MODELS, ClaudeCodeAdapter } from "./claude";
+import { CODEX_MODELS, CodexAdapter } from "./codex";
 import {
   getCodexEfforts,
   getCodexModelName,
@@ -12,7 +13,7 @@ import {
   refreshCodexVariantCache,
 } from "./codex-variants";
 import { resolveAgentInstance } from "./config";
-import { OPENCODE_MODELS } from "./opencode";
+import { OPENCODE_MODELS, OpenCodeAdapter } from "./opencode";
 import {
   getOpencodeEfforts,
   getOpencodeModelName,
@@ -101,19 +102,24 @@ export function modelNameForAgent(
   return modelId;
 }
 
+/**
+ * Factory map from provider ID to adapter constructor. `defaultModelForAgent`
+ * instantiates the adapter here to read its `defaultModel` — the adapter
+ * class is the single source of truth for each provider's default.
+ */
+const PROVIDER_ADAPTERS: Record<AgentProviderId, () => AgentAdapter> = {
+  claude: () => new ClaudeCodeAdapter(),
+  codex: () => new CodexAdapter(),
+  opencode: () => new OpenCodeAdapter(),
+  amp: () => new AmpAdapter(),
+};
+
 /** Default model when switching to an agent without an explicit model. */
 export function defaultModelForAgent(agent: AgentInstanceId, config?: SteamtrainConfig): string {
   const instance = resolveAgentInstance(config, agent, { includeDisabled: true });
   if (instance?.defaultModel) return instance.defaultModel;
   const provider = instance?.provider;
-  const preferred =
-    provider === "opencode"
-      ? OPENCODE_MODELS[0]?.id
-      : provider === "codex"
-        ? CODEX_MODELS[0]?.id
-        : provider === "claude"
-          ? "claude-sonnet-5"
-          : undefined;
+  const preferred = provider ? PROVIDER_ADAPTERS[provider]?.().defaultModel : undefined;
   const available = modelIdsForAgent(agent, config);
   if (preferred && available.includes(preferred)) return preferred;
   return available[0] ?? preferred ?? agent;

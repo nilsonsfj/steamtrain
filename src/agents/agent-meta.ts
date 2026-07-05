@@ -24,20 +24,12 @@ export interface AgentMeta {
 }
 
 /**
- * Default model for drafting/authoring a workflow. opencode prefers the free
- * MiMo model (the catalog default is a paid model); other agents use their
- * normal default. Shared by the TUI's `/create-workflow` and the web create form
- * so both pick the same starting point.
+ * Default model for drafting/authoring a workflow. Each agent's adapter
+ * declares its own default; this delegates to {@link defaultModelForAgent}.
+ * Shared by the TUI's `/create-workflow` and the web create form so both
+ * pick the same starting point.
  */
 export function defaultDraftModel(agent: AgentInstanceId, config?: SteamtrainConfig): string {
-  const instance = resolveAgentInstances(config, { includeDisabled: true }).find(
-    (a) => a.id === agent,
-  );
-  if (instance?.defaultModel) return instance.defaultModel;
-  if (instance?.provider === "opencode") {
-    const free = "opencode/mimo-v2.5-free";
-    if (modelsForAgent(agent, config).some((m) => m.id === free)) return free;
-  }
   return defaultModelForAgent(agent, config);
 }
 

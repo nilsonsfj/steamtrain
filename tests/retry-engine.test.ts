@@ -22,6 +22,7 @@ function scriptedDeps(script: Record<string, Outcome[]>, calls: string[]) {
   const createAdapter = (id: AgentId): AgentAdapter => ({
     id,
     binary: "fake",
+    defaultModel: "test",
     async *run(opts): AsyncGenerator<AgentEvent> {
       // Derive a key from the prompt: the item name, or "a".
       const key = opts.prompt.replace("do ", "").trim() || "a";

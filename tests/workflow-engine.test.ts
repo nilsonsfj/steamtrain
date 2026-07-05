@@ -45,6 +45,7 @@ function makeCreateAdapter(script: Script, state: FakeState) {
   return (id: AgentId): AgentAdapter => ({
     id,
     binary: "fake",
+    defaultModel: "test",
     run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
       return (async function* () {
         state.runs.push({ id, opts });

@@ -226,7 +226,7 @@ describe("executeSlashCommand", () => {
     expect(result.handled).toBe(true);
     expect(updateWorkspace).toHaveBeenCalledWith("plan", {
       agent: "opencode",
-      model: "opencode/gpt-5.4-mini",
+      model: "opencode/mimo-v2.5-free",
     });
   });
 
@@ -298,7 +298,7 @@ describe("executeSlashCommand", () => {
     expect(result.handled).toBe(true);
     expect(updateWorkspace).toHaveBeenCalledWith("plan", {
       agent: "opencode",
-      model: "opencode/gpt-5.4-mini",
+      model: "opencode/mimo-v2.5-free",
       effort: undefined,
     });
   });

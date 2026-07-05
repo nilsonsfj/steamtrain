@@ -17,6 +17,7 @@ function makeBacklogDeps() {
   const createAdapter = (id: AgentId): AgentAdapter => ({
     id,
     binary: "fake",
+    defaultModel: "test",
     run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
       prompts.push(opts.prompt);
       const text =
@@ -44,6 +45,7 @@ function makeLoopDeps() {
   const createAdapter = (id: AgentId): AgentAdapter => ({
     id,
     binary: "fake",
+    defaultModel: "test",
     run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
       prompts.push(opts.prompt);
       let text = `out:${opts.model}`;

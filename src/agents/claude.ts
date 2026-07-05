@@ -232,6 +232,7 @@ function claudeTokens(usage: ClaudeUsage | undefined): TokenUsage | undefined {
 export class ClaudeCodeAdapter implements AgentAdapter {
   readonly id: AgentId = AGENT;
   readonly binary: string;
+  readonly defaultModel = "claude-sonnet-5";
 
   constructor(binary = "claude") {
     this.binary = binary;
