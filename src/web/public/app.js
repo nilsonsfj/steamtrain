@@ -192,11 +192,14 @@
       });
     }
     function addAgentRow() {
+      var fallback = preferredAgent();
+      var provider = fallback ? fallback.provider : "claude";
+      var binary = fallback ? fallback.binary : provider;
       S.projectConfig.agents = (S.projectConfig.agents || []).concat([{
-        id: "claude-fork",
-        provider: "claude",
+        id: provider + "-fork",
+        provider: provider,
         enabled: true,
-        binary: "claude"
+        binary: binary
       }]);
       renderAgentConfigRows();
     }
@@ -238,6 +241,9 @@
         saveBtn.disabled = false;
         if (r.status === 200 && r.body.ok) {
           S.projectConfig = Object.assign({}, S.projectConfig, r.body);
+          // Keep all agents (including disabled) so health dots and the config
+          // modal can look them up. Callers that only want enabled agents
+          // (agentOptions, preferredAgent) filter at their call site.
           S.agents = r.body.agents || [];
           closeModal();
           pollDoctor(0);
