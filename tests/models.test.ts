@@ -115,6 +115,13 @@ describe("model names", () => {
     clearOpencodeVariantCacheForTests();
   });
 
+  it("returns each adapter's defaultModel via PROVIDER_ADAPTERS", () => {
+    expect(defaultModelForAgent("claude")).toBe("claude-sonnet-5");
+    expect(defaultModelForAgent("codex")).toBe("gpt-5.5");
+    expect(defaultModelForAgent("opencode")).toBe("opencode/mimo-v2.5-free");
+    expect(defaultModelForAgent("amp")).toBe("smart");
+  });
+
   it("falls back to the static OpenCode catalog when cache is empty", () => {
     expect(modelIdsForAgent("opencode")).toEqual(OPENCODE_MODELS.map((model) => model.id));
   });
