@@ -1,6 +1,7 @@
 /**
  * Prompt templating. A step prompt may reference:
  *   {{input}} / {{args}}    → the workflow's input (the user's prompt)
+ *   {{inputs.<key>}}        → a declared workflow input parameter
  *   {{steps.<id>.output}}   → the output of an earlier step
  *   {{steps.<id>.items}}    → distributor items joined by newlines
  *   {{steps.<id>.ok}}       → "true" / "false"
@@ -22,6 +23,8 @@ import type { WorkflowItem } from "./types";
 
 export interface TemplateContext {
   input: string;
+  /** Resolved workflow input parameters (`{{inputs.<key>}}`). */
+  inputs?: Record<string, string | number | boolean>;
   /** stepId → output text, accumulated as the run progresses. */
   outputs: Map<string, string>;
   /** Full step results, when templates need status or structured payloads. */
@@ -49,6 +52,7 @@ export interface TemplateContext {
 }
 
 const PLACEHOLDER = /\{\{\s*([^{}]+?)\s*\}\}/g;
+const INPUT_REF = /^inputs\.(.+)$/;
 // NOTE: STEP_FIELD's greedy `(.+)` id group means it also matches worktree/
 // artifact/json refs whose trailing part happens to end in a plain field name
 // (`steps.foo.artifacts.output` → id "foo.artifacts", field "output"), so
@@ -65,6 +69,12 @@ export function renderPrompt(template: string, ctx: TemplateContext): string {
   return template.replace(PLACEHOLDER, (match, exprRaw: string) => {
     const expr = exprRaw.trim();
     if (expr === "input" || expr === "args") return ctx.input;
+    const inputRef = INPUT_REF.exec(expr);
+    if (inputRef) {
+      const key = inputRef[1] as string;
+      const val = ctx.inputs?.[key];
+      return val !== undefined ? String(val) : "";
+    }
     if (expr === "item" || expr === "item.value") return ctx.item?.value ?? "";
     if (expr === "item.index") return ctx.item ? String(ctx.item.index) : "";
     if (expr === "item.sourceStepId") return ctx.item?.sourceStepId ?? "";

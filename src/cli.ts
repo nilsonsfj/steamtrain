@@ -47,6 +47,7 @@ import {
   planRerun,
   pruneWorktree,
   rerunDowngradeMessage,
+  resolveInputs,
   resolveStepTimeoutSec,
   resolveWorkflowTimeoutSec,
   resultLeaves,
@@ -148,6 +149,7 @@ interface RunOptions {
   fresh: boolean;
   from?: string;
   retryFailed: boolean;
+  params: Record<string, string>;
 }
 
 export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
@@ -723,7 +725,7 @@ async function runWorkflowCommand(
   const options = parseRunOptions(positional ? args.slice(1) : args);
   if (!options) {
     err(
-      `usage: steamtrain workflow run <name> --input <text> [--json] [--fresh]
+      `usage: steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh]
        steamtrain workflow run --from <runId> [--retry-failed] [--json]
 `,
     );
@@ -791,6 +793,12 @@ async function runWorkflowCommand(
     return 1;
   }
 
+  const resolved = resolveInputs(spec, options.params);
+  if (resolved.errors.length > 0) {
+    for (const e of resolved.errors) err(`input error: ${e}\n`);
+    return 1;
+  }
+
   // Agentless workflows (only distributors / consolidators / gates) never spawn
   // a CLI, so skip the doctor + catalog refresh — they would otherwise spawn
   // real agent binaries just to gate a run that needs none.
@@ -806,7 +814,7 @@ async function runWorkflowCommand(
   }
 
   const store = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
-  const key = workflowCacheKey(name, input.trim(), cwd, spec);
+  const key = workflowCacheKey(name, input.trim(), cwd, spec, resolved.values);
   const cache = new Map<string, StepResult>();
   if (forceFresh) {
     await store.clear(key);
@@ -849,7 +857,15 @@ async function runWorkflowCommand(
   let ok = false;
   let budgetExceeded = false;
   try {
-    for await (const event of orchestrator.runWorkflow(name, input.trim(), ac.signal, cache, cwd)) {
+    for await (const event of orchestrator.runWorkflow(
+      name,
+      input.trim(),
+      ac.signal,
+      cache,
+      cwd,
+      undefined,
+      resolved.values,
+    )) {
       recorder.handle(event);
       if (options.json) out(`${JSON.stringify(event)}\n`);
       else printHumanEvent(event, out);
@@ -1176,13 +1192,26 @@ function parseCacheClearOptions(args: string[]): CacheClearOptions | null {
 }
 
 function parseRunOptions(args: string[]): RunOptions | null {
-  const options: RunOptions = { stdin: false, json: false, fresh: false, retryFailed: false };
+  const options: RunOptions = {
+    stdin: false,
+    json: false,
+    fresh: false,
+    retryFailed: false,
+    params: {},
+  };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--input" || arg === "-i") {
       const value = args[i + 1];
       if (!value) return null;
       options.input = value;
+      i += 1;
+    } else if (arg === "--param" || arg === "-p") {
+      const value = args[i + 1];
+      if (!value) return null;
+      const eq = value.indexOf("=");
+      if (eq < 1) return null;
+      options.params[value.slice(0, eq)] = value.slice(eq + 1);
       i += 1;
     } else if (arg === "--from") {
       const value = args[i + 1];

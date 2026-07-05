@@ -964,6 +964,63 @@ describe("runWorkflow", () => {
     const { deps } = makeDeps(echo);
     await expect(collect(bad, "x", deps)).rejects.toThrow(/unknown step/);
   });
+
+  it("passes {{inputs.*}} values to step prompts", async () => {
+    const spec: WorkflowSpec = {
+      name: "with-inputs",
+      inputs: { repo: { type: "string" } },
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "a", agent: "claude", model: "m", prompt: "work on {{inputs.repo}}" }],
+        },
+      ],
+    };
+    const { deps, state } = makeDeps(echo);
+    const events: WorkflowEvent[] = [];
+    for await (const ev of runWorkflow(
+      spec,
+      { input: "task", inputs: { repo: "my-repo" } },
+      deps,
+    )) {
+      events.push(ev);
+    }
+    expect(state.runs[0]?.opts.prompt).toBe("work on my-repo");
+    expect(events.at(-1)).toMatchObject({ kind: "workflow_done", ok: true });
+  });
+
+  it("passes numeric and boolean inputs to step prompts", async () => {
+    const spec: WorkflowSpec = {
+      name: "typed-inputs",
+      inputs: { count: { type: "number" }, verbose: { type: "boolean" } },
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            {
+              id: "a",
+              agent: "claude",
+              model: "m",
+              prompt: "count={{inputs.count}} verbose={{inputs.verbose}}",
+            },
+          ],
+        },
+      ],
+    };
+    const { deps, state } = makeDeps(echo);
+    const events: WorkflowEvent[] = [];
+    for await (const ev of runWorkflow(
+      spec,
+      { input: "task", inputs: { count: 5, verbose: true } },
+      deps,
+    )) {
+      events.push(ev);
+    }
+    expect(state.runs[0]?.opts.prompt).toBe("count=5 verbose=true");
+    expect(events.at(-1)).toMatchObject({ kind: "workflow_done", ok: true });
+  });
 });
 
 function lastIndex(events: WorkflowEvent[], pred: (e: WorkflowEvent) => boolean): number {

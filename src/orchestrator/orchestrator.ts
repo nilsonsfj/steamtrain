@@ -196,13 +196,14 @@ export class Orchestrator {
     cache?: Map<string, StepResult>,
     cwd: string = process.cwd(),
     specOverride?: WorkflowSpec,
+    inputs?: Record<string, string | number | boolean>,
   ): AsyncIterable<WorkflowEvent> {
     const spec = specOverride ?? this.listWorkflows()[name];
     if (!spec) throw new Error(`unknown workflow '${name}'`);
 
     return runWorkflow(
       spec,
-      { input, cache },
+      { input, cache, inputs },
       {
         createAdapter,
         binaries: this.config.binaries,

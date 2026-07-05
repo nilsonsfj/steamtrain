@@ -374,10 +374,36 @@ export interface WorkflowPhase {
   steps: WorkflowStep[];
 }
 
+/**
+ * Declares a named input parameter for a workflow. Users supply values via
+ * `--param key=value` (CLI) or the input form (TUI/web). Templates reference
+ * the resolved value as `{{inputs.key}}`.
+ */
+export interface WorkflowInputSpec {
+  /** Expected type (default `"string"`). */
+  type?: "string" | "number" | "boolean";
+  /** Human-readable description shown in UIs and help text. */
+  description?: string;
+  /** Default value when the user omits this input. */
+  default?: string | number | boolean;
+  /**
+   * Whether the user must supply a value. Defaults to `true` when `default`
+   * is omitted, `false` when `default` is set.
+   */
+  required?: boolean;
+}
+
 export interface WorkflowSpec {
   /** Launch name; unique among available workflows. */
   name: string;
   description?: string;
+  /**
+   * Named input parameters. Each key becomes a `{{inputs.<key>}}` template
+   * variable. Users supply values via `--param key=value` (CLI) or the run
+   * form (TUI/web). Inputs with a `default` are optional; without one the
+   * user must provide a value or the run is rejected before it starts.
+   */
+  inputs?: Record<string, WorkflowInputSpec>;
   phases: WorkflowPhase[];
   /** Default auto-retry policy applied to every agent step (per-step `retry` overrides). */
   retry?: RetryPolicy;
@@ -578,6 +604,13 @@ const workspaceShape = {
   artifacts: z.array(z.string().min(1)).min(1).optional(),
 };
 
+const workflowInputSpecSchema = z.object({
+  type: z.enum(["string", "number", "boolean"]).optional(),
+  description: z.string().optional(),
+  default: z.union([z.string(), z.number(), z.boolean()]).optional(),
+  required: z.boolean().optional(),
+});
+
 const retryPolicySchema = z.object({
   maxAttempts: z.number().int().min(1).max(10).optional(),
   initialDelayMs: z.number().int().min(0).max(60000).optional(),
@@ -746,6 +779,7 @@ export const workflowSpecSchema = z
   .object({
     name: z.string().min(1).optional(),
     description: z.string().optional(),
+    inputs: z.record(workflowInputSpecSchema).optional(),
     phases: z.array(workflowPhaseSchema).min(1),
     retry: retryPolicySchema.optional(),
     stepTimeoutSec: z.number().positive().optional(),
@@ -886,6 +920,38 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
   const parsed = workflowSpecSchema.safeParse(spec);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "invalid workflow" };
+  }
+
+  if (spec.inputs) {
+    for (const [name, input] of Object.entries(spec.inputs)) {
+      if (!/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(name)) {
+        return {
+          ok: false,
+          error: `input name '${name}' is not a valid identifier (use letters, digits, underscores, hyphens; must start with a letter or underscore)`,
+        };
+      }
+      const inputType = input.type ?? "string";
+      if (input.default !== undefined) {
+        if (inputType === "number" && typeof input.default !== "number") {
+          return {
+            ok: false,
+            error: `input '${name}' declares type "number" but default is not a number`,
+          };
+        }
+        if (inputType === "boolean" && typeof input.default !== "boolean") {
+          return {
+            ok: false,
+            error: `input '${name}' declares type "boolean" but default is not a boolean`,
+          };
+        }
+        if (inputType === "string" && typeof input.default !== "string") {
+          return {
+            ok: false,
+            error: `input '${name}' declares type "string" but default is not a string`,
+          };
+        }
+      }
+    }
   }
 
   const stepsById = new Map<string, WorkflowStep>();
@@ -1108,4 +1174,68 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
   }
 
   return { ok: true };
+}
+
+export interface ResolvedInputs {
+  values: Record<string, string | number | boolean>;
+  errors: string[];
+}
+
+/**
+ * Validate user-supplied params against a workflow's declared `inputs`.
+ * Returns the final resolved values (with defaults applied and types coerced)
+ * plus any validation errors. Callers should check `errors` before starting
+ * the run.
+ */
+export function resolveInputs(spec: WorkflowSpec, params: Record<string, string>): ResolvedInputs {
+  const values: Record<string, string | number | boolean> = {};
+  const errors: string[] = [];
+  const specInputs = spec.inputs ?? {};
+
+  for (const [name, input] of Object.entries(specInputs)) {
+    const raw = params[name];
+    const inputType = input.type ?? "string";
+    const hasDefault = input.default !== undefined;
+    const required = input.required ?? !hasDefault;
+
+    if (raw === undefined || raw === "") {
+      if (hasDefault) {
+        values[name] = input.default!;
+        continue;
+      }
+      if (required) {
+        errors.push(`missing required input '${name}'`);
+        continue;
+      }
+      continue;
+    }
+
+    if (inputType === "number") {
+      const num = Number(raw);
+      if (Number.isNaN(num)) {
+        errors.push(`input '${name}' expects a number, got '${raw}'`);
+        continue;
+      }
+      values[name] = num;
+    } else if (inputType === "boolean") {
+      const lower = raw.toLowerCase();
+      if (lower === "true" || lower === "1" || lower === "yes") {
+        values[name] = true;
+      } else if (lower === "false" || lower === "0" || lower === "no") {
+        values[name] = false;
+      } else {
+        errors.push(`input '${name}' expects a boolean (true/false), got '${raw}'`);
+      }
+    } else {
+      values[name] = raw;
+    }
+  }
+
+  for (const key of Object.keys(params)) {
+    if (!(key in specInputs)) {
+      errors.push(`unknown input '${key}' (not declared in workflow inputs)`);
+    }
+  }
+
+  return { values, errors };
 }
