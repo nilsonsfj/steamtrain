@@ -361,7 +361,13 @@ declared fields; Temporal workflows take typed arguments. This is also what
 makes shared/imported workflows (1.9) self-documenting: the input schema *is*
 the usage doc.
 
-## 2.5 Sub-workflows and reusable step templates
+## 2.5 Sub-workflows and reusable step templates ✅ Shipped
+
+> **Shipped** — a `"kind": "workflow"` step invokes a named child workflow
+> with input templates; the child run renders nested in the step tree, records
+> into run history, and its consolidated output becomes the step output.
+> Recursion depth capped; the ≤1000-step budget applies to the expanded tree.
+> See commit `021c85e`.
 
 **The gap:** workflows can't compose. The `bug-hunt` sweep can't be embedded
 as one stage of a bigger release pipeline; a well-tuned "review step" (agent +
@@ -544,8 +550,8 @@ Three tracks can proceed largely in parallel:
   directly on the previous one.
 - **Language track (workflow authoring power):** 2.8's lint half and 2.1
   command steps first (small, high leverage), then 2.2 artifacts/worktree
-  inheritance, 2.4 typed inputs, and 2.5–2.7, 2.9–2.10 follow as demand
-  dictates.
+  inheritance, 2.4 typed inputs, and 2.5 sub-workflows (shipped); 2.6–2.7
+  and 2.9–2.10 follow as demand dictates.
 
 1.7 detached runs, 1.8 notifications, and 1.9 sharing slot in whenever
 bandwidth allows (1.8 should land with or right after 1.2/1.7; Part 3's
