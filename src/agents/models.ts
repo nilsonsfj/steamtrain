@@ -1,10 +1,11 @@
 import type { SteamtrainConfig } from "../config/types";
 import type { DoctorResult } from "../doctor";
 import type { AgentInstanceId, AgentProviderId } from "../types/events";
+import type { AgentAdapter } from "./adapter";
 import { type AgentModel, formatModelOption } from "./agent-model";
-import { AMP_MODELS } from "./amp";
-import { CLAUDE_MODELS } from "./claude";
-import { CODEX_MODELS } from "./codex";
+import { AMP_MODELS, AmpAdapter } from "./amp";
+import { CLAUDE_MODELS, ClaudeCodeAdapter } from "./claude";
+import { CODEX_MODELS, CodexAdapter } from "./codex";
 import {
   getCodexEfforts,
   getCodexModelName,
@@ -12,7 +13,7 @@ import {
   refreshCodexVariantCache,
 } from "./codex-variants";
 import { resolveAgentInstance } from "./config";
-import { OPENCODE_MODELS } from "./opencode";
+import { OPENCODE_MODELS, OpenCodeAdapter } from "./opencode";
 import {
   getOpencodeEfforts,
   getOpencodeModelName,
@@ -102,15 +103,15 @@ export function modelNameForAgent(
 }
 
 /**
- * Default model per provider. Each adapter class also carries its own
- * `defaultModel` property — this registry exists so `defaultModelForAgent`
- * can look up a default without instantiating the adapter.
+ * Default model per provider. Each adapter class carries its own
+ * `defaultModel` property — this registry is the fallback when the adapter
+ * can't be instantiated (e.g. the binary isn't installed).
  */
-const PROVIDER_DEFAULTS: Record<string, string> = {
-  claude: "claude-sonnet-5",
-  codex: "gpt-5.5",
-  opencode: "opencode/mimo-v2.5-free",
-  amp: "smart",
+const PROVIDER_ADAPTERS: Record<AgentProviderId, () => AgentAdapter> = {
+  claude: () => new ClaudeCodeAdapter(),
+  codex: () => new CodexAdapter(),
+  opencode: () => new OpenCodeAdapter(),
+  amp: () => new AmpAdapter(),
 };
 
 /** Default model when switching to an agent without an explicit model. */
@@ -118,7 +119,7 @@ export function defaultModelForAgent(agent: AgentInstanceId, config?: Steamtrain
   const instance = resolveAgentInstance(config, agent, { includeDisabled: true });
   if (instance?.defaultModel) return instance.defaultModel;
   const provider = instance?.provider;
-  const preferred = provider ? PROVIDER_DEFAULTS[provider] : undefined;
+  const preferred = provider ? PROVIDER_ADAPTERS[provider]?.().defaultModel : undefined;
   const available = modelIdsForAgent(agent, config);
   if (preferred && available.includes(preferred)) return preferred;
   return available[0] ?? preferred ?? agent;
