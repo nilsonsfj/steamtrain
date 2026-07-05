@@ -280,6 +280,33 @@ describe("/agent scope handling", () => {
     });
   });
 
+  it("preserves configured fields when a flag forces a different scope", () => {
+    const updateConfig = vi.fn().mockReturnValue({ ok: true });
+    const updateUserConfig = vi.fn().mockReturnValue({ ok: true });
+    const configured = {
+      id: "mimocode",
+      provider: "opencode" as const,
+      binary: "mimocode-fork",
+      env: { OPENCODE_CONFIG: "fork" },
+      defaultModel: "opencode/mimo-v2.5-free",
+    };
+    const ctx = makeCtx({
+      config: { agents: [configured] },
+      configPath: "/proj/steamtrain.json",
+      updateConfig,
+      userConfigPath: "/home/.steamtrain/config.json",
+      updateUserConfig,
+      userAgents: [configured],
+      projectAgents: [],
+    });
+
+    // Configured globally, but the user forces the project scope: the project
+    // copy must carry the global entry's fields, not a stripped-down default.
+    run("/agent disable mimocode --project", ctx);
+    expect(updateConfig).toHaveBeenCalledWith({ agents: [{ ...configured, enabled: false }] });
+    expect(updateUserConfig).not.toHaveBeenCalled();
+  });
+
   it("honors --project for enable/disable", () => {
     const updateConfig = vi.fn().mockReturnValue({ ok: true });
     const updateUserConfig = vi.fn().mockReturnValue({ ok: true });

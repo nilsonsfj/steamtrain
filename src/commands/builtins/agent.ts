@@ -111,7 +111,15 @@ export const agentCommand: SlashCommand = {
       // Write to the scope that configures the agent; built-ins default to global.
       const scope = scopeArg ?? agentConfigScope(id, layers) ?? defaultScope;
       const rawList = scope === "user" ? layers.userAgents : layers.projectAgents;
-      const raw = rawList?.find((agent) => agent.id === id);
+      // When a flag forces a scope the agent is not configured in, copy the
+      // entry from its owning scope so binary/env/extraArgs/defaultModel are
+      // not silently dropped by the new (shadowing) entry.
+      const raw =
+        rawList?.find((agent) => agent.id === id) ??
+        (scope === "user" ? layers.projectAgents : layers.userAgents)?.find(
+          (agent) => agent.id === id,
+        ) ??
+        ctx.config?.agents?.find((agent) => agent.id === id);
       const enabled = args[0] === "enable";
       const entry: AgentInstanceConfig = raw
         ? { ...raw, enabled }
