@@ -101,19 +101,24 @@ export function modelNameForAgent(
   return modelId;
 }
 
+/**
+ * Default model per provider. Each adapter class also carries its own
+ * `defaultModel` property — this registry exists so `defaultModelForAgent`
+ * can look up a default without instantiating the adapter.
+ */
+const PROVIDER_DEFAULTS: Record<string, string> = {
+  claude: "claude-sonnet-5",
+  codex: "gpt-5.5",
+  opencode: "opencode/mimo-v2.5-free",
+  amp: "smart",
+};
+
 /** Default model when switching to an agent without an explicit model. */
 export function defaultModelForAgent(agent: AgentInstanceId, config?: SteamtrainConfig): string {
   const instance = resolveAgentInstance(config, agent, { includeDisabled: true });
   if (instance?.defaultModel) return instance.defaultModel;
   const provider = instance?.provider;
-  const preferred =
-    provider === "opencode"
-      ? OPENCODE_MODELS[0]?.id
-      : provider === "codex"
-        ? CODEX_MODELS[0]?.id
-        : provider === "claude"
-          ? "claude-sonnet-5"
-          : undefined;
+  const preferred = provider ? PROVIDER_DEFAULTS[provider] : undefined;
   const available = modelIdsForAgent(agent, config);
   if (preferred && available.includes(preferred)) return preferred;
   return available[0] ?? preferred ?? agent;

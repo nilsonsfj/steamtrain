@@ -25,6 +25,7 @@ export interface AgentRunOptions {
 export interface AgentAdapter {
   readonly id: AgentId;
   readonly binary: string;
+  readonly defaultModel?: string;
   run(opts: AgentRunOptions): AsyncIterable<AgentEvent>;
 }
 

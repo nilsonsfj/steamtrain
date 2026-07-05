@@ -30,14 +30,6 @@ export interface AgentMeta {
  * so both pick the same starting point.
  */
 export function defaultDraftModel(agent: AgentInstanceId, config?: SteamtrainConfig): string {
-  const instance = resolveAgentInstances(config, { includeDisabled: true }).find(
-    (a) => a.id === agent,
-  );
-  if (instance?.defaultModel) return instance.defaultModel;
-  if (instance?.provider === "opencode") {
-    const free = "opencode/mimo-v2.5-free";
-    if (modelsForAgent(agent, config).some((m) => m.id === free)) return free;
-  }
   return defaultModelForAgent(agent, config);
 }
 

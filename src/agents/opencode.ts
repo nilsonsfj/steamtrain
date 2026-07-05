@@ -254,6 +254,7 @@ function opencodeTokens(tokens: OpenCodeTokens | undefined): TokenUsage | undefi
 export class OpenCodeAdapter implements AgentAdapter {
   readonly id: AgentId = AGENT;
   readonly binary: string;
+  readonly defaultModel = "opencode/mimo-v2.5-free";
 
   constructor(binary = "opencode") {
     this.binary = binary;
