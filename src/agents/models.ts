@@ -103,9 +103,9 @@ export function modelNameForAgent(
 }
 
 /**
- * Default model per provider. Each adapter class carries its own
- * `defaultModel` property — this registry is the fallback when the adapter
- * can't be instantiated (e.g. the binary isn't installed).
+ * Factory map from provider ID to adapter constructor. `defaultModelForAgent`
+ * instantiates the adapter here to read its `defaultModel` — the adapter
+ * class is the single source of truth for each provider's default.
  */
 const PROVIDER_ADAPTERS: Record<AgentProviderId, () => AgentAdapter> = {
   claude: () => new ClaudeCodeAdapter(),
