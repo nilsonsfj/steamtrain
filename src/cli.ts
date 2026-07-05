@@ -1219,7 +1219,9 @@ function parseRunOptions(args: string[]): RunOptions | null {
       if (!value) return null;
       const eq = value.indexOf("=");
       if (eq < 1) return null;
-      options.params[value.slice(0, eq)] = value.slice(eq + 1);
+      const key = value.slice(0, eq);
+      if (key.startsWith("-")) return null;
+      options.params[key] = value.slice(eq + 1);
       i += 1;
     } else if (arg === "--from") {
       const value = args[i + 1];
