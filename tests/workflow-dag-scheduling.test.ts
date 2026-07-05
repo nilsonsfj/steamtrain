@@ -47,6 +47,7 @@ function makeControlledDeps(
   const createAdapter = (id: AgentId): AgentAdapter => ({
     id,
     binary: "fake",
+    defaultModel: "test",
     run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
       return (async function* () {
         runs.push({ id, opts });

@@ -28,6 +28,7 @@ function makeBillingDeps(
   const createAdapter = (id: AgentId): AgentAdapter => ({
     id,
     binary: "fake",
+    defaultModel: "test",
     run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
       return (async function* () {
         const bill = billing[opts.model ?? ""] ?? { cost: 0 };

@@ -40,6 +40,7 @@ function fakeAdapter(id: AgentId): AgentAdapter {
   return {
     id,
     binary: "fake",
+    defaultModel: "test",
     run(opts: AgentRunOptions) {
       return (async function* () {
         yield {
@@ -148,6 +149,7 @@ describe("RunRecordBuilder", () => {
     const failingAdapter = (id: AgentId): AgentAdapter => ({
       id,
       binary: "fake",
+      defaultModel: "test",
       run() {
         return (async function* () {
           yield { kind: "error", agent: id, ts: 0, message: "boom" } satisfies AgentEvent;

@@ -27,6 +27,7 @@ function fakeAdapter(
   return {
     id,
     binary: "fake",
+    defaultModel: "test",
     run(opts: AgentRunOptions) {
       return (async function* () {
         yield {

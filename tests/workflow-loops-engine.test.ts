@@ -16,6 +16,7 @@ function fakeAdapter(
   const adapter: AgentAdapter = {
     id: "opencode",
     binary: "opencode",
+    defaultModel: "test",
     run(opts): AsyncIterable<AgentEvent> {
       const c = call++;
       const out = script(opts.prompt, c);

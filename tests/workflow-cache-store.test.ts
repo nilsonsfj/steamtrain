@@ -348,6 +348,7 @@ describe("workflow cache resume", () => {
         createAdapter: (id) => ({
           id,
           binary: "fake",
+          defaultModel: "test",
           run(opts: AgentRunOptions) {
             return (async function* () {
               yield {
@@ -385,6 +386,7 @@ describe("workflow cache resume", () => {
     const createAdapter = (id: AgentId): AgentAdapter => ({
       id,
       binary: "fake",
+      defaultModel: "test",
       run(opts: AgentRunOptions) {
         return (async function* () {
           runs.push(opts.prompt);
@@ -422,6 +424,7 @@ describe("workflow cache resume", () => {
         createAdapter: (id) => ({
           id,
           binary: "fake",
+          defaultModel: "test",
           run(opts: AgentRunOptions) {
             return (async function* () {
               replayRuns.push(opts.prompt);

@@ -39,6 +39,7 @@ function makeAdapter(events: AgentEvent[]): (id: AgentId) => AgentAdapter {
   return (id: AgentId) => ({
     id,
     binary: "fake",
+    defaultModel: "test",
     run(_opts: AgentRunOptions): AsyncIterable<AgentEvent> {
       return (async function* () {
         for (const event of events) {
@@ -65,6 +66,7 @@ function makeSequencedAdapter(responses: AgentEvent[][]) {
   const createAdapter = (id: AgentId): AgentAdapter => ({
     id,
     binary: "fake",
+    defaultModel: "test",
     run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
       prompts.push(opts.prompt);
       const events = responses[Math.min(calls, responses.length - 1)] ?? [];

@@ -40,6 +40,7 @@ function fakeAdapter(provider: AgentProviderId, binary?: string): AgentAdapter {
   return {
     id: provider,
     binary: binary ?? provider,
+    defaultModel: "test",
     async *run(opts) {
       yield {
         kind: "result",
@@ -231,6 +232,7 @@ describe("agent configuration", () => {
       createAdapter: () => ({
         id: "opencode",
         binary: "fake",
+        defaultModel: "test",
         async *run(opts) {
           expect(opts.agentId).toBe("opencode-fork");
           yield {

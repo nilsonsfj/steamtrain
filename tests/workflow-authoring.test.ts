@@ -60,6 +60,7 @@ function jsonAdapter(spec: unknown): (id: AgentId) => AgentAdapter {
   return (id: AgentId) => ({
     id,
     binary: "fake",
+    defaultModel: "test",
     run(_opts: AgentRunOptions): AsyncIterable<AgentEvent> {
       return (async function* () {
         for (const e of events) {

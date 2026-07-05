@@ -43,6 +43,7 @@ function fileWritingAgentDeps(
   const adapter: AgentAdapter = {
     id: "claude",
     binary: "fake",
+    defaultModel: "test",
     run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
       return (async function* () {
         await writeFile(join(opts.cwd ?? cwd, fileName), "written by agent\n");

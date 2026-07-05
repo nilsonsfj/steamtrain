@@ -37,6 +37,7 @@ function makeDeps(spawns: string[], failStep?: string) {
   const createAdapter = (id: AgentId): AgentAdapter => ({
     id,
     binary: "fake",
+    defaultModel: "test",
     async *run(opts): AsyncGenerator<AgentEvent> {
       const which = opts.prompt.includes("do b") ? "b" : "a";
       spawns.push(which);
@@ -105,6 +106,7 @@ describe("seeded cache re-run", () => {
       const createAdapter = (id: AgentId): AgentAdapter => ({
         id,
         binary: "fake",
+        defaultModel: "test",
         async *run(opts): AsyncGenerator<AgentEvent> {
           const item = opts.prompt.replace("do ", "");
           spawns.push(item);
