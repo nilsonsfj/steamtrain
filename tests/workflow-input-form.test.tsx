@@ -348,6 +348,33 @@ describe("WorkflowInputForm", () => {
     await tick();
     const frame = lastFrame() ?? "";
     // The error from resolveInputs should be displayed
-    expect(frame).toContain("req");
+    expect(frame).toContain("missing required input");
+  });
+
+  it("navigates backward with Shift+Tab", async () => {
+    const spec = makeSpec({
+      a: { type: "string", default: "val-a" },
+      b: { type: "string", default: "val-b" },
+      c: { type: "string", default: "val-c" },
+    });
+    const { stdin, lastFrame } = render(
+      <WorkflowInputForm
+        spec={spec}
+        width={80}
+        height={20}
+        onSubmit={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    await tick();
+    // Tab forward to field b
+    stdin.write("\t");
+    await tick();
+    // Shift+Tab back to field a
+    stdin.write("\u001b[Z");
+    await tick();
+    const frame = lastFrame() ?? "";
+    // Should still have focus indicator
+    expect(frame).toContain("▶");
   });
 });

@@ -869,12 +869,14 @@
         if (errEl) { errEl.textContent = ""; errEl.classList.remove("show"); }
       }
     });
-    el.addEventListener("input", function () {
+    function clearInvalid() {
       if (el.classList.contains("invalid")) {
         el.classList.remove("invalid");
         if (errEl) { errEl.textContent = ""; errEl.classList.remove("show"); }
       }
-    });
+    }
+    el.addEventListener("input", clearInvalid);
+    el.addEventListener("change", clearInvalid);
   }
   function selectEl(opts, selected, onChange) {
     var sel = h("select", { class: "sel" });
