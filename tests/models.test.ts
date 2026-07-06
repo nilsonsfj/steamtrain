@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import {
   clearCodexVariantCacheForTests,
   setCodexVariantCacheForTests,
@@ -44,6 +44,10 @@ describe("amp modes", () => {
 
 describe("model names", () => {
   beforeEach(() => {
+    clearCodexVariantCacheForTests();
+    clearOpencodeVariantCacheForTests();
+  });
+  afterAll(() => {
     clearCodexVariantCacheForTests();
     clearOpencodeVariantCacheForTests();
   });

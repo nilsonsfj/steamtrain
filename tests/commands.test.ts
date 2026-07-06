@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { defaultDraftModel } from "../src/agents";
 import { modelIdsForAgent } from "../src/agents/models";
 import {
@@ -359,6 +359,9 @@ describe("executeSlashCommand", () => {
 });
 
 describe("autocompleteSlashCommand", () => {
+  afterAll(() => {
+    clearOpencodeVariantCacheForTests();
+  });
   it("completes command prefix", () => {
     const result = autocompleteSlashCommand("/ver", listSlashCommands(), makeCtx());
     expect(result?.value).toBe("/version ");
