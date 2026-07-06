@@ -62,6 +62,7 @@ import { StatusBar } from "./StatusBar";
 import { TaskSelector } from "./TaskSelector";
 import { WorkflowCreate } from "./WorkflowCreate";
 import { WorkflowHistory } from "./WorkflowHistory";
+import { WorkflowInputForm } from "./WorkflowInputForm";
 import { WorkflowPicker } from "./WorkflowPicker";
 import { WorkflowPreview } from "./WorkflowPreview";
 import { WorkflowStepDetails } from "./WorkflowStepDetails";
@@ -157,6 +158,11 @@ export function App({
   const [agentCatalogTick, setAgentCatalogTick] = useState(0);
   const mountedRef = useRef(true);
   const valueRef = useRef("");
+  const [inputFormPending, setInputFormPending] = useState<{
+    name: string;
+    prompt: string;
+    fresh: boolean;
+  } | null>(null);
 
   const enabledAgentIds = useMemo(
     () => new Set(resolveAgentInstances(runtimeConfig).map((agent) => agent.id)),
@@ -652,6 +658,18 @@ export function App({
           });
           return true;
         }
+        // For fresh re-runs on workflows with inputs, show the input form first.
+        {
+          const spec = resolveWorkflowSpec(runner.activeWorkflowRef.current);
+          if (spec?.inputs && Object.keys(spec.inputs).length > 0) {
+            setInputFormPending({
+              name: runner.activeWorkflowRef.current,
+              prompt: promptText,
+              fresh: true,
+            });
+            return true;
+          }
+        }
         runner.launchWorkflow(runner.activeWorkflowRef.current, promptText, picker.setWfPreview, {
           fresh: true,
         });
@@ -664,6 +682,14 @@ export function App({
           return false;
         }
         if (!fresh && !runner.wfCanResume) return false;
+        // For fresh runs on workflows with inputs, show the input form first.
+        if (fresh) {
+          const spec = resolveWorkflowSpec(picker.wfPreview.name);
+          if (spec?.inputs && Object.keys(spec.inputs).length > 0) {
+            setInputFormPending({ name: picker.wfPreview.name, prompt: promptText, fresh: true });
+            return true;
+          }
+        }
         runner.launchWorkflow(
           picker.wfPreview.name,
           promptText,
@@ -679,6 +705,14 @@ export function App({
         runner.setWfNotice("type input in the prompt before running");
         return false;
       }
+      // For fresh runs on workflows with inputs, show the input form first.
+      {
+        const spec = resolveWorkflowSpec(entry.name);
+        if (spec?.inputs && Object.keys(spec.inputs).length > 0) {
+          setInputFormPending({ name: entry.name, prompt: promptText, fresh: true });
+          return true;
+        }
+      }
       runner.launchWorkflow(entry.name, promptText, picker.setWfPreview, { fresh: true });
       return true;
     },
@@ -693,6 +727,7 @@ export function App({
       runner.launchWorkflow,
       picker.wfCreate,
       picker.setWfPreview,
+      resolveWorkflowSpec,
     ],
   );
 
@@ -857,6 +892,27 @@ export function App({
       prompt.updatePromptDraft({ value: "", promptEditing: false });
   }, [prompt.recordPromptHistory, handleWorkflowRun, prompt.updatePromptDraft]);
 
+  const handleInputFormSubmit = useCallback(
+    (params: Record<string, string | number | boolean>) => {
+      const pending = inputFormPending;
+      if (!pending) return;
+      setInputFormPending(null);
+      prompt.updatePromptDraft({ value: "", promptEditing: false });
+      runner.launchWorkflow(pending.name, pending.prompt, picker.setWfPreview, {
+        fresh: pending.fresh,
+        params,
+      });
+    },
+    [inputFormPending, runner.launchWorkflow, picker.setWfPreview, prompt.updatePromptDraft],
+  );
+
+  const handleInputFormCancel = useCallback(() => {
+    if (inputFormPending) {
+      prompt.updatePromptDraft({ value: inputFormPending.prompt, promptEditing: false });
+    }
+    setInputFormPending(null);
+  }, [inputFormPending, prompt.updatePromptDraft]);
+
   // ── Keyboard input hook ──────────────────────────────────────────────
   useKeyboardInput({
     mode,
@@ -867,6 +923,7 @@ export function App({
     historyHook,
     workflowPickerActive,
     agentManagerOpen,
+    inputFormPending: inputFormPending !== null,
     openAgentManager: () => {
       openAgentManager();
     },
@@ -934,6 +991,19 @@ export function App({
           onDelete={handleAgentDelete}
           onClose={() => setAgentManagerOpen(false)}
         />
+      ) : inputFormPending ? (
+        (() => {
+          const inputSpec = resolveWorkflowSpec(inputFormPending.name);
+          return inputSpec ? (
+            <WorkflowInputForm
+              spec={inputSpec}
+              width={columns}
+              height={streamHeight}
+              onSubmit={handleInputFormSubmit}
+              onCancel={handleInputFormCancel}
+            />
+          ) : null;
+        })()
       ) : historyHook.history ? (
         <HistoryPanel history={historyHook.history} width={columns} height={streamHeight} />
       ) : isWorkflow ? (
@@ -1049,10 +1119,11 @@ export function App({
           onCtrlQ={mode === "workflow" && runner.running ? runner.handleWorkflowCancel : undefined}
           onSuggestionNavigate={prompt.handleSuggestionNavigate}
           onHistoryNavigate={prompt.promptHistoryArrows ? prompt.handleHistoryNavigate : undefined}
-          focus={!historyHook.history && !agentManagerOpen}
+          focus={!historyHook.history && !agentManagerOpen && !inputFormPending}
           editing={
             !historyHook.history &&
             !agentManagerOpen &&
+            !inputFormPending &&
             (!workflowListNavigation(mode) || prompt.promptEditing)
           }
           promptEditing={prompt.promptEditing}

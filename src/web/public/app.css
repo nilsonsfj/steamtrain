@@ -854,6 +854,28 @@ select.sel.invalid {
 .field-error.show {
   display: block;
 }
+.params-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 0;
+}
+.params-form .field {
+  flex: 1 1 180px;
+  margin-bottom: 0;
+}
+.params-form .field .param-type {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--muted);
+  margin-left: 6px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.params-form .field .param-required {
+  color: var(--error);
+  margin-left: 2px;
+}
 .draft {
   margin-top: 12px;
   background: var(--bg);

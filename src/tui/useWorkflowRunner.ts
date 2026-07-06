@@ -192,7 +192,11 @@ export function useWorkflowRunner({
       name: string,
       prompt: string,
       setWfPreview: React.Dispatch<React.SetStateAction<{ name: string; input: string } | null>>,
-      opts?: { reuseMemoryCache?: boolean; fresh?: boolean },
+      opts?: {
+        reuseMemoryCache?: boolean;
+        fresh?: boolean;
+        params?: Record<string, string | number | boolean>;
+      },
     ) => {
       setWfLaunching(true);
       wfDispatch({ type: "reset" });
