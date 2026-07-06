@@ -136,6 +136,8 @@ export function WorkflowInputForm({
         setFields(next);
         setError(null);
       } else if (input && !key.ctrl && !key.meta) {
+        // Filter non-numeric characters for number fields
+        if (field.type === "number" && !/[\d.\-eE+]/.test(input)) return;
         next[focusIndex] = { ...field, value: field.value + input };
         setFields(next);
         setError(null);

@@ -480,11 +480,12 @@
         hint ? h("div", { class: "hint", text: hint }) : null, errEl);
       container.appendChild(wrapper);
 
-      if (required) {
+      if (required || type === "number") {
         control._fieldError = errEl;
         addBlurValidation(control, function () {
           var val = control.value;
-          if (!val || (typeof val === "string" && !val.trim())) return key + " is required";
+          if (required && (!val || (typeof val === "string" && !val.trim()))) return key + " is required";
+          if (type === "number" && val && isNaN(Number(val))) return key + " must be a number";
           return null;
         });
       }

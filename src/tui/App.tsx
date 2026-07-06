@@ -907,8 +907,11 @@ export function App({
   );
 
   const handleInputFormCancel = useCallback(() => {
+    if (inputFormPending) {
+      prompt.updatePromptDraft({ value: inputFormPending.prompt, promptEditing: false });
+    }
     setInputFormPending(null);
-  }, []);
+  }, [inputFormPending, prompt.updatePromptDraft]);
 
   // ── Keyboard input hook ──────────────────────────────────────────────
   useKeyboardInput({
