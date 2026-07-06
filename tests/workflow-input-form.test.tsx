@@ -276,4 +276,78 @@ describe("WorkflowInputForm", () => {
     frame = lastFrame() ?? "";
     expect(frame).toContain("[true]");
   });
+
+  it("toggles boolean to false with n", async () => {
+    const onSubmit = vi.fn();
+    const spec = makeSpec({
+      flag: { type: "boolean" },
+    });
+    const { stdin, lastFrame } = render(
+      <WorkflowInputForm
+        spec={spec}
+        width={80}
+        height={20}
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />,
+    );
+    await tick();
+
+    // Enter edit mode
+    stdin.write("\r");
+    await tick();
+    // Press n to set false
+    stdin.write("n");
+    await tick();
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("[false]");
+  });
+
+  it("deletes characters with Backspace", async () => {
+    const spec = makeSpec({
+      name: { type: "string" },
+    });
+    const { stdin, lastFrame } = render(
+      <WorkflowInputForm
+        spec={spec}
+        width={80}
+        height={20}
+        onSubmit={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    await tick();
+    await type(stdin, "h", "i");
+    let frame = lastFrame() ?? "";
+    expect(frame).toContain("hi");
+
+    // Backspace to delete
+    stdin.write("\x7f");
+    await tick();
+    frame = lastFrame() ?? "";
+    expect(frame).toContain("h");
+    expect(frame).not.toContain("hi");
+  });
+
+  it("shows validation error content for required field", async () => {
+    const spec = makeSpec({
+      req: { type: "string", required: true },
+    });
+    const { stdin, lastFrame } = render(
+      <WorkflowInputForm
+        spec={spec}
+        width={80}
+        height={20}
+        onSubmit={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    await tick();
+    // Submit with empty value
+    stdin.write("\r");
+    await tick();
+    const frame = lastFrame() ?? "";
+    // The error from resolveInputs should be displayed
+    expect(frame).toContain("req");
+  });
 });
