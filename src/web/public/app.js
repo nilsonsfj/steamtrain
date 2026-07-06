@@ -475,9 +475,19 @@
       if (typeHint) {
         labelEl.appendChild(h("span", { class: "param-type", text: typeHint }));
       }
+      var errEl = h("div", { class: "field-error" });
       var wrapper = h("div", { class: "field" }, labelEl, control,
-        hint ? h("div", { class: "hint", text: hint }) : null);
+        hint ? h("div", { class: "hint", text: hint }) : null, errEl);
       container.appendChild(wrapper);
+
+      if (required) {
+        control._fieldError = errEl;
+        addBlurValidation(control, function () {
+          var val = control.value;
+          if (!val || (typeof val === "string" && !val.trim())) return key + " is required";
+          return null;
+        });
+      }
     });
   }
 
