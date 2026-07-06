@@ -36,6 +36,7 @@ export interface WorkflowHost {
     cache?: Map<string, StepResult>,
     cwd?: string,
     specOverride?: WorkflowSpec,
+    inputs?: Record<string, string | number | boolean>,
   ): AsyncIterable<WorkflowEvent>;
 }
 
@@ -61,6 +62,7 @@ interface Run {
   id: string;
   workflow: string;
   input: string;
+  params?: Record<string, string | number | boolean>;
   status: RunStatus;
   ok?: boolean;
   error?: string;
@@ -146,7 +148,12 @@ export class WorkflowRunManager {
   start(
     workflow: string,
     input: string,
-    opts?: { fresh?: boolean; seed?: Map<string, StepResult>; specOverride?: WorkflowSpec },
+    opts?: {
+      fresh?: boolean;
+      seed?: Map<string, StepResult>;
+      specOverride?: WorkflowSpec;
+      params?: Record<string, string | number | boolean>;
+    },
   ): StartRunResult {
     const text = input.trim();
     if (!text) return { ok: false, error: "input is required" };
@@ -167,6 +174,7 @@ export class WorkflowRunManager {
       id: randomUUID(),
       workflow,
       input: text,
+      params: opts?.params,
       status: "running",
       startedAt: Date.now(),
       frames: [],
@@ -201,6 +209,7 @@ export class WorkflowRunManager {
     const started = this.start(plan.workflow, plan.input, {
       fresh: mode === "rerun" || Boolean(plan.downgraded),
       seed: plan.seedCache,
+      params: plan.params,
     });
     return started.ok ? { ...started, downgraded: plan.downgraded } : started;
   }
@@ -249,7 +258,7 @@ export class WorkflowRunManager {
     fresh: boolean,
     seed?: Map<string, StepResult>,
   ): Promise<void> {
-    const key = workflowCacheKey(run.workflow, run.input, this.cwd, spec);
+    const key = workflowCacheKey(run.workflow, run.input, this.cwd, spec, run.params);
     const recorder = new RunRecordBuilder(
       {
         id: run.id,
@@ -257,6 +266,7 @@ export class WorkflowRunManager {
         input: run.input,
         cwd: this.cwd,
         specHash: hashWorkflowSpec(spec),
+        params: run.params,
       },
       run.startedAt,
     );
@@ -282,6 +292,7 @@ export class WorkflowRunManager {
         cache,
         this.cwd,
         spec,
+        run.params,
       )) {
         recorder.handle(event);
         this.emit(run, JSON.stringify({ type: "event", event }), false);

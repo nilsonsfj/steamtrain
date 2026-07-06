@@ -244,6 +244,7 @@ describe("runCli", () => {
   it("runs fresh after --fresh deletes the on-disk cache", async () => {
     const c = capture();
     const agentless = {
+      name: "agentless",
       phases: [
         {
           id: "only",

@@ -26,6 +26,7 @@ import {
   createWorkflowHistoryStore,
   isAgentBackedStep,
   parseSessionOverrides,
+  resolveInputs,
   resolveStepTimeoutSec,
   workflowSpecSchema,
   workflowStepKind,
@@ -580,7 +581,13 @@ async function handle(
 
   if (method === "POST" && path === "/api/runs") {
     const body = await readBody(req);
-    let parsed: { workflow?: unknown; input?: unknown; fresh?: unknown; overrides?: unknown };
+    let parsed: {
+      workflow?: unknown;
+      input?: unknown;
+      fresh?: unknown;
+      overrides?: unknown;
+      params?: unknown;
+    };
     try {
       parsed = body ? JSON.parse(body) : {};
     } catch {
@@ -607,10 +614,23 @@ async function handle(
         specOverride = applyWorkflowSessionOverrides(base, parsedOverrides.overrides);
       }
     }
+    let params: Record<string, string | number | boolean> | undefined;
+    if (parsed.params && typeof parsed.params === "object" && !Array.isArray(parsed.params)) {
+      const spec = specOverride ?? deps.host.listWorkflows()[parsed.workflow];
+      if (spec) {
+        const resolved = resolveInputs(spec, parsed.params as Record<string, string>);
+        if (resolved.errors.length > 0) {
+          sendJson(res, 400, { error: resolved.errors.join("; ") });
+          return;
+        }
+        params = Object.keys(resolved.values).length > 0 ? resolved.values : undefined;
+      }
+    }
     try {
       const result = deps.runs.start(parsed.workflow, parsed.input, {
         fresh: parsed.fresh === true,
         specOverride,
+        params,
       });
       if (!result.ok) {
         sendJson(res, 400, { error: result.error });

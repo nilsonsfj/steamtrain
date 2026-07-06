@@ -83,6 +83,8 @@ export interface RunRecord {
   cwd: string;
   /** Hash of the workflow spec at run time; enables drift-safe retry-failed. */
   specHash?: string;
+  /** Resolved input params; stored so --from reruns can reproduce them. */
+  params?: Record<string, string | number | boolean>;
   status: RunRecordStatus;
   ok: boolean;
   startedAt: number;
@@ -190,6 +192,8 @@ export interface RunRecordMeta {
   input: string;
   cwd: string;
   specHash?: string;
+  /** Resolved input params; stored so --from reruns can reproduce them. */
+  params?: Record<string, string | number | boolean>;
 }
 
 /**
@@ -349,6 +353,7 @@ export class RunRecordBuilder {
       input: this.meta.input,
       cwd: this.meta.cwd,
       specHash: this.meta.specHash,
+      params: this.meta.params,
       status: opts.status,
       ok: opts.status === "done" && this.ok,
       startedAt: this.startedAt,

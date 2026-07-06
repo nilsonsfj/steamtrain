@@ -226,8 +226,25 @@ distributor items) steps. Agent-backed distributors scale to however many lines
 the splitter emits; static item lists should stay short (a handful). Keep the
 phase count modest.
 
+# Workflow inputs (parameters)
+A workflow may declare named inputs in an "inputs" map. Each key becomes a
+{{inputs.<key>}} template variable. Users supply values via --param key=value.
+Input types: "string" (default), "number", "boolean". Set "default" to make an
+input optional; without it the user must provide a value. Use inputs to make
+workflows reusable — e.g. a "repo" input instead of hardcoding a repo name in
+every prompt.
+
+Example:
+  "inputs": {
+    "repo": { "type": "string", "description": "target repository" },
+    "maxIterations": { "type": "number", "default": 3 }
+  }
+Then reference in prompts: "Analyze {{inputs.repo}} with up to {{inputs.maxIterations}} passes"
+
 # Templates available in prompts/items
-{{input}} / {{args}} (the user's task), {{steps.<id>.output}}, {{steps.<id>.items}},
+{{input}} / {{args}} (the user's task), {{inputs.<key>}} (declared workflow input
+parameters — define them in the spec's "inputs" map and users pass --param key=value),
+{{steps.<id>.output}}, {{steps.<id>.items}},
 {{steps.<id>.ok}}, {{steps.<id>.error}}, {{steps.<id>.target}},
 {{steps.<id>.exitCode}} (a command step's exit code),
 {{steps.<id>.json}} / {{steps.<id>.json.<path>}} (structured output fields),

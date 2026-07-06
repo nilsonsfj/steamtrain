@@ -12,6 +12,8 @@ export interface WorkflowCacheKey {
   input: string;
   cwd: string;
   specHash: string;
+  /** Serialized input params; included in the cache hash so different values produce different caches. */
+  params?: string;
 }
 
 interface WorkflowCacheFile {
@@ -37,8 +39,13 @@ export function workflowCacheKey(
   input: string,
   cwd: string,
   spec: WorkflowSpec,
+  params?: Record<string, string | number | boolean>,
 ): WorkflowCacheKey {
-  return { workflow, input, cwd, specHash: hashWorkflowSpec(spec) };
+  const paramsStr =
+    params && Object.keys(params).length > 0
+      ? JSON.stringify(Object.entries(params).sort(([a], [b]) => a.localeCompare(b)))
+      : undefined;
+  return { workflow, input, cwd, specHash: hashWorkflowSpec(spec), params: paramsStr };
 }
 
 export function hashWorkflowCacheInput(input: string): string {
@@ -52,7 +59,7 @@ export function hashWorkflowSpec(spec: WorkflowSpec): string {
 
 export function workflowCacheFileName(key: WorkflowCacheKey): string {
   const digest = createHash("sha256")
-    .update(`${key.workflow}\0${key.cwd}\0${key.input}`)
+    .update(`${key.workflow}\0${key.cwd}\0${key.input}\0${key.specHash}\0${key.params ?? ""}`)
     .digest("hex");
   return `${digest}.json`;
 }

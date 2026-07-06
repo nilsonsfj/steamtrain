@@ -93,6 +93,12 @@ export interface WorkflowRunContext {
   /** The user's prompt; available to steps as `{{input}}` / `{{args}}`. */
   input: string;
   /**
+   * Resolved workflow input parameters, available to steps as
+   * `{{inputs.<key>}}`. Values are already validated and type-coerced by the
+   * caller (e.g. via `resolveInputs`).
+   */
+  inputs?: Record<string, string | number | boolean>;
+  /**
    * In-session cache of completed step results. Successful steps are stored
    * here; on a re-run they replay without spawning, which is how a cancelled
    * run resumes. Pass the same Map across runs to enable resume.
@@ -802,7 +808,13 @@ async function runSingleStep(
   // `when` condition / skip cascade: the step is recorded as skipped (ok,
   // empty output) rather than executed. Skips are cached like any other ok
   // result so a resumed run replays the same decision.
-  const skipReason = findSkipReason(step, { input: ctx.input, outputs, results, iteration });
+  const skipReason = findSkipReason(step, {
+    input: ctx.input,
+    inputs: ctx.inputs,
+    outputs,
+    results,
+    iteration,
+  });
   if (skipReason) {
     const skipped = skippedStepResult(step.id);
     skipped.iteration = iteration;
@@ -826,6 +838,7 @@ async function runSingleStep(
     step,
     {
       input: ctx.input,
+      inputs: ctx.inputs,
       outputs,
       results,
       cache,
@@ -999,6 +1012,7 @@ function resetNestedLoops(
 
 interface ExecuteContext {
   input: string;
+  inputs?: Record<string, string | number | boolean>;
   outputs: Map<string, string>;
   results: Map<string, StepResult>;
   cache: Map<string, StepResult>;
@@ -1051,6 +1065,7 @@ async function executeStep(
         .map((item) =>
           renderPrompt(item, {
             input: ctx.input,
+            inputs: ctx.inputs,
             outputs: ctx.outputs,
             results: ctx.results,
             iteration: ctx.iteration,
@@ -1105,6 +1120,7 @@ async function executeStep(
     const output = step.prompt
       ? renderPrompt(step.prompt, {
           input: ctx.input,
+          inputs: ctx.inputs,
           outputs: ctx.outputs,
           results: ctx.results,
           iteration: ctx.iteration,
@@ -1322,6 +1338,7 @@ async function executeAgentStep(
 ): Promise<StepResult> {
   const rendered = renderPrompt(step.prompt, {
     input: ctx.input,
+    inputs: ctx.inputs,
     outputs: ctx.outputs,
     results: ctx.results,
     item,
@@ -1812,6 +1829,7 @@ async function executeCommandStep(
   const started = Date.now();
   const cmd = renderPrompt(step.cmd, {
     input: ctx.input,
+    inputs: ctx.inputs,
     outputs: ctx.outputs,
     results: ctx.results,
     iteration: ctx.iteration,
@@ -1974,6 +1992,7 @@ async function executeWorkflowStep(
   const childInput = step.input
     ? renderPrompt(step.input, {
         input: ctx.input,
+        inputs: ctx.inputs,
         outputs: ctx.outputs,
         results: ctx.results,
         iteration: ctx.iteration,
@@ -2181,6 +2200,7 @@ async function executeMergeStep(
       ? undefined
       : renderPrompt(text, {
           input: ctx.input,
+          inputs: ctx.inputs,
           outputs: ctx.outputs,
           results: ctx.results,
           iteration: ctx.iteration,
@@ -2503,6 +2523,7 @@ function consolidateOutputs(
 /** The subset of run state a gate/`when` condition evaluation needs. */
 interface GateEvalContext {
   input: string;
+  inputs?: Record<string, string | number | boolean>;
   outputs: Map<string, string>;
   results: Map<string, StepResult>;
   iteration: number;
@@ -2530,6 +2551,7 @@ function evaluateGate(
   if (condition.contains !== undefined) {
     const needle = renderPrompt(condition.contains, {
       input: ctx.input,
+      inputs: ctx.inputs,
       outputs: ctx.outputs,
       results: ctx.results,
       iteration: ctx.iteration,
@@ -2539,6 +2561,7 @@ function evaluateGate(
   if (condition.equals !== undefined) {
     const expected = renderPrompt(condition.equals, {
       input: ctx.input,
+      inputs: ctx.inputs,
       outputs: ctx.outputs,
       results: ctx.results,
       iteration: ctx.iteration,
@@ -2549,6 +2572,7 @@ function evaluateGate(
     try {
       const pattern = renderPrompt(condition.matches, {
         input: ctx.input,
+        inputs: ctx.inputs,
         outputs: ctx.outputs,
         results: ctx.results,
         iteration: ctx.iteration,
