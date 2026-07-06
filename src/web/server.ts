@@ -239,6 +239,10 @@ function drainRequestBody(req: IncomingMessage): void {
 
 const AUTH_COOKIE = "__steamtrain_auth";
 
+function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
 function parseCookies(header: string | undefined): Record<string, string> {
   const cookies: Record<string, string> = {};
   if (!header) return cookies;
@@ -255,7 +259,19 @@ function parseCookies(header: string | undefined): Record<string, string> {
 function checkAuth(req: IncomingMessage, authToken: string | undefined): boolean {
   if (!authToken) return true;
   const cookies = parseCookies(req.headers.cookie);
-  return cookies[AUTH_COOKIE] === authToken;
+  // Compare against the hashed token stored in the cookie.
+  return cookies[AUTH_COOKIE] === hashToken(authToken);
+}
+
+/**
+ * Build the Set-Cookie header value for the auth session cookie.
+ * Uses SHA-256(token) as the cookie value so a leaked cookie does not expose
+ * the raw token. Adds Secure when binding to a non-local host.
+ */
+function authCookie(token: string, bindHost?: string): string {
+  const parts = [`${AUTH_COOKIE}=${hashToken(token)}`, "Path=/", "HttpOnly", "SameSite=Strict"];
+  if (isNonLocalHost(bindHost)) parts.push("Secure");
+  return parts.join("; ");
 }
 
 /**
@@ -285,7 +301,16 @@ function checkCsrf(
   try {
     const originUrl = new URL(origin);
     const host = req.headers.host;
-    if (!host || originUrl.host !== host) {
+    if (!host) {
+      sendJson(res, 403, { error: "missing host header" });
+      return false;
+    }
+    // Normalize port comparison: req.headers.host may omit default ports (80/443)
+    // while originUrl.host always includes them.
+    const hostParts = host.split(":");
+    const hostName = hostParts[0]!;
+    const hostPort = hostParts[1] || (originUrl.protocol === "https:" ? "443" : "80");
+    if (originUrl.hostname !== hostName || originUrl.port !== hostPort) {
       sendJson(res, 403, { error: "origin mismatch" });
       return false;
     }
@@ -396,7 +421,7 @@ async function handle(
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
       "x-content-type-options": "nosniff",
-      "set-cookie": `${AUTH_COOKIE}=${deps.authToken}; Path=/; HttpOnly; SameSite=Strict`,
+      "set-cookie": authCookie(deps.authToken, deps.bindHost),
     });
     res.end(JSON.stringify({ ok: true }));
     return;

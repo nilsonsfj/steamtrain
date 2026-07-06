@@ -70,7 +70,7 @@
     var msg = h("div", { class: "empty" },
       h("p", { text: "This server requires a token to access." }),
       h("div", { class: "login-form" },
-        h("input", { type: "password", id: "loginToken", class: "txt", placeholder: "Enter auth token" }),
+        h("input", { type: "text", id: "loginToken", class: "txt", placeholder: "Enter auth token", autocomplete: "off" }),
         h("button", { class: "btn primary", id: "loginBtn", text: "Log in" })
       ),
       h("p", { class: "login-error", id: "loginError" })
@@ -86,6 +86,7 @@
   function doLogin() {
     var input = document.getElementById("loginToken");
     var errEl = document.getElementById("loginError");
+    if (errEl) errEl.textContent = "";
     var token = input ? input.value : "";
     if (!token) { if (errEl) errEl.textContent = "Token is required."; return; }
     api("POST", "/api/auth", { token: token }).then(function (r) {
@@ -288,7 +289,7 @@
         payload.workflowTimeoutSec = wfSec;
       }
       saveBtn.disabled = true;
-      api("PUT", "/api/config", payload).then(function (r) {
+      apiAuth("PUT", "/api/config", payload).then(function (r) {
         saveBtn.disabled = false;
         if (r.status === 200 && r.body.ok) {
           S.projectConfig = Object.assign({}, S.projectConfig, r.body);
@@ -442,7 +443,7 @@
   // Re-run / retry-failed a recorded run: launch via the history route, then
   // switch to the live run view for the returned run id.
   function rerunHistory(id, workflow, mode) {
-    api("POST", "/api/history/" + encodeURIComponent(id) + "/" + mode).then(function (r) {
+    apiAuth("POST", "/api/history/" + encodeURIComponent(id) + "/" + mode).then(function (r) {
       if (r.status !== 201) {
         setBanner((r.body && r.body.error) || "could not start re-run", "err");
         return;
@@ -786,7 +787,7 @@
     var params = collectParams();
     if (params) payload.params = params;
     if (workflowHasStaged(S.stagedOverrides[S.selected])) payload.overrides = S.stagedOverrides[S.selected];
-    api("POST", "/api/runs", payload)
+    apiAuth("POST", "/api/runs", payload)
       .then(function (r) {
         if (r.status !== 201) { setBanner(r.body.error || "could not start run", "err"); return; }
         S.runId = r.body.runId;
@@ -800,30 +801,34 @@
 
   function openStream(runId) {
     if (S.es) S.es.close();
-    var es = new EventSource("/api/runs/" + runId + "/stream");
-    S.es = es;
-    es.onmessage = function (m) {
-      var frame;
-      try { frame = JSON.parse(m.data); } catch (e) { return; }
-      if (frame.type === "event") { reduce(frame.event); scheduleRender(); }
-      else if (frame.type === "status") {
-        es.close(); S.es = null; setRunning(false); stopTimer();
-        if (frame.status === "canceled") setBanner("Run canceled.", "info");
-        else if (frame.status === "budget-exceeded") setBanner("Run stopped: cost budget reached. Raise maxCostUsd and re-run to resume.", "err");
-        else if (frame.status === "error" || frame.ok === false) setBanner("Run failed" + (frame.error ? ": " + frame.error : "."), "err");
-        else setBanner("Run complete.", "ok");
-        render();
-      }
-    };
-    es.onerror = function () {
-      if (S.runState && S.runState.done) return;
-      // The browser will retry automatically; surface a hint if it persists.
-    };
+    // Pre-flight auth check: EventSource can't handle 401 (it silently retries).
+    api("GET", "/api/workflows").then(function (r) {
+      if (r.status === 401) { showLoginForm(); return; }
+      var es = new EventSource("/api/runs/" + runId + "/stream");
+      S.es = es;
+      es.onmessage = function (m) {
+        var frame;
+        try { frame = JSON.parse(m.data); } catch (e) { return; }
+        if (frame.type === "event") { reduce(frame.event); scheduleRender(); }
+        else if (frame.type === "status") {
+          es.close(); S.es = null; setRunning(false); stopTimer();
+          if (frame.status === "canceled") setBanner("Run canceled.", "info");
+          else if (frame.status === "budget-exceeded") setBanner("Run stopped: cost budget reached. Raise maxCostUsd and re-run to resume.", "err");
+          else if (frame.status === "error" || frame.ok === false) setBanner("Run failed" + (frame.error ? ": " + frame.error : "."), "err");
+          else setBanner("Run complete.", "ok");
+          render();
+        }
+      };
+      es.onerror = function () {
+        if (S.runState && S.runState.done) return;
+        // The browser will retry automatically; surface a hint if it persists.
+      };
+    });
   }
 
   function cancelRun() {
     if (!S.runId) return;
-    api("POST", "/api/runs/" + S.runId + "/cancel");
+    apiAuth("POST", "/api/runs/" + S.runId + "/cancel");
   }
 
   function setRunning(running) {
@@ -1081,6 +1086,7 @@
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify(payload), signal: signal
     }).then(function (res) {
+      if (res.status === 401) { showLoginForm(); return; }
       var reader = res.body.getReader();
       var dec = new TextDecoder();
       var buf = "";
@@ -1194,7 +1200,7 @@
       saveBtn.disabled = true; saveBtn.textContent = "Saving…";
       var payload = { spec: spec, scope: creating ? scopeSel.value : (S.source === "project" ? "project" : "user") };
       if (!creating && isWritable) payload.previousName = S.selected;
-      api("PUT", "/api/workflows/" + encodeURIComponent(targetName), payload).then(function (r) {
+      apiAuth("PUT", "/api/workflows/" + encodeURIComponent(targetName), payload).then(function (r) {
         saveBtn.disabled = false; saveBtn.textContent = creating ? "Save copy" : "Save";
         if (r.status === 200 && r.body.ok) {
           closeModal();
@@ -1325,7 +1331,7 @@
     var fileLabel = S.source === "project" ? "the project steamtrain.json" : "your user workflows file";
     if (!window.confirm("Delete workflow \"" + S.selected + "\"? This removes it from " + fileLabel + ".")) return;
     var name = S.selected;
-    api("DELETE", "/api/workflows/" + encodeURIComponent(name)).then(function (r) {
+    apiAuth("DELETE", "/api/workflows/" + encodeURIComponent(name)).then(function (r) {
       if (r.status === 200 && r.body.ok) {
         delete S.stagedOverrides[name];
         S.selected = null; S.spec = null; S.source = null;
@@ -1477,7 +1483,7 @@
 
   function clearHistory() {
     if (!window.confirm("Clear all recorded runs? This deletes the on-disk history.")) return;
-    api("DELETE", "/api/history").then(function () { closeModal(); });
+    apiAuth("DELETE", "/api/history").then(function () { closeModal(); });
   }
 
   function fmtTime(ts) { try { return new Date(ts).toLocaleString(); } catch (e) { return ""; } }
@@ -1621,7 +1627,7 @@
       flushInFlight = false;
       if (flushBtn) { flushBtn.disabled = false; flushBtn.textContent = "\u{1F4BE} Flush to disk"; }
     }
-    api("POST", "/api/overrides/flush", { overrides: S.stagedOverrides }).then(function (r) {
+    apiAuth("POST", "/api/overrides/flush", { overrides: S.stagedOverrides }).then(function (r) {
       resetFlushState();
       if (r.status !== 200) { setBanner((r.body && r.body.error) || "flush failed", "err"); return; }
       var parts = [];

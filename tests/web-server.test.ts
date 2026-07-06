@@ -1367,6 +1367,10 @@ describe("web server", () => {
 
 const AUTH_COOKIE = "__steamtrain_auth";
 
+function hashedCookie(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
 function makeAuthServer(
   host: WorkflowHost,
   authToken = "test-secret-token",
@@ -1418,7 +1422,7 @@ describe("web server — auth", () => {
     });
     expect(res.status).toBe(200);
     const setCookie = res.headers.get("set-cookie");
-    expect(setCookie).toContain(`${AUTH_COOKIE}=test-secret-token`);
+    expect(setCookie).toContain(`${AUTH_COOKIE}=${hashedCookie("test-secret-token")}`);
     expect(setCookie).toContain("HttpOnly");
     expect(setCookie).toContain("SameSite=Strict");
   });
@@ -1438,7 +1442,7 @@ describe("web server — auth", () => {
     const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);
     const res = await fetch(`${base}/api/workflows`, {
-      headers: { cookie: `${AUTH_COOKIE}=test-secret-token` },
+      headers: { cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret-token")}` },
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { workflows: unknown[] };
@@ -1477,7 +1481,7 @@ describe("web server — CSRF", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        cookie: `${AUTH_COOKIE}=test-secret-token`,
+        cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret-token")}`,
       },
       body: JSON.stringify({ workflow: "demo", input: "test" }),
     });
@@ -1489,12 +1493,11 @@ describe("web server — CSRF", () => {
   it("rejects POST with mismatched Origin when auth is enabled", async () => {
     const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);
-    const host = new URL(base).host;
     const res = await fetch(`${base}/api/runs`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        cookie: `${AUTH_COOKIE}=test-secret-token`,
+        cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret-token")}`,
         origin: "http://evil.example.com",
       },
       body: JSON.stringify({ workflow: "demo", input: "test" }),
@@ -1511,7 +1514,7 @@ describe("web server — CSRF", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        cookie: `${AUTH_COOKIE}=test-secret-token`,
+        cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret-token")}`,
         origin: base,
       },
       body: JSON.stringify({ workflow: "demo", input: "test" }),
@@ -1523,7 +1526,7 @@ describe("web server — CSRF", () => {
     const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);
     const res = await fetch(`${base}/api/workflows`, {
-      headers: { cookie: `${AUTH_COOKIE}=test-secret-token` },
+      headers: { cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret-token")}` },
     });
     expect(res.status).toBe(200);
   });
@@ -1575,7 +1578,7 @@ describe("web server — CSRF", () => {
       method: "PUT",
       headers: {
         "content-type": "application/json",
-        cookie: `${AUTH_COOKIE}=test-secret`,
+        cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret")}`,
         origin: "http://evil.example.com",
       },
       body: JSON.stringify({ spec: demoSpec() }),
@@ -1609,9 +1612,89 @@ describe("web server — CSRF", () => {
     const res = await fetch(`${base}/api/workflows/demo`, {
       method: "DELETE",
       headers: {
-        cookie: `${AUTH_COOKIE}=test-secret`,
+        cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret")}`,
         origin: "http://evil.example.com",
       },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("allows POST with matching Referer (not Origin) when auth is enabled", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret-token")}`,
+        referer: `${base}/`,
+      },
+      body: JSON.stringify({ workflow: "demo", input: "test" }),
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("returns 401 on SSE stream endpoint without cookie", async () => {
+    const { server, runs } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    // Start a run first so we have a valid runId
+    const startRes = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret-token")}`,
+        origin: base,
+      },
+      body: JSON.stringify({ workflow: "demo", input: "test" }),
+    });
+    const { runId } = (await startRes.json()) as { runId: string };
+    // Now try to stream without cookie
+    const res = await fetch(`${base}/api/runs/${runId}/stream`);
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 401 on generate endpoint without cookie", async () => {
+    const host = new FakeAuthoringHost(demoSpec());
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const realAuthor = new WorkflowAuthor({
+      host,
+      config: testRunConfig,
+      cwd: tmpdir(),
+      home: mkdtempSync(join(tmpdir(), "gen-auth-")),
+    });
+    const server = createWebServer({
+      host,
+      runs,
+      author: realAuthor,
+      workflowSource: () => "bundled",
+      authToken: "test-secret",
+    });
+    servers.push(server);
+    const base = await start(server);
+    const res = await fetch(`${base}/api/workflows/generate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ description: "test", agent: "opencode" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects POST with data: Referer when auth is enabled", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret-token")}`,
+        referer: "data:text/html,<script></script>",
+      },
+      body: JSON.stringify({ workflow: "demo", input: "test" }),
     });
     expect(res.status).toBe(403);
   });
