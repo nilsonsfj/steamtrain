@@ -212,6 +212,10 @@ class PayloadTooLarge extends Error {
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {
+  const contentLength = parseInt(req.headers["content-length"] ?? "0", 10);
+  if (contentLength > MAX_BODY_BYTES) {
+    throw new PayloadTooLarge();
+  }
   const chunks: Buffer[] = [];
   let totalBytes = 0;
   for await (const chunk of req) {
@@ -264,8 +268,8 @@ export function createWebServer(deps: WebServerDeps): Server {
         const status = err instanceof PayloadTooLarge ? 413 : 500;
         const error =
           err instanceof PayloadTooLarge ? "payload too large" : "internal server error";
-        sendJson(res, status, { error });
         if (err instanceof PayloadTooLarge) drainRequestBody(req);
+        sendJson(res, status, { error });
       } else {
         res.end();
       }

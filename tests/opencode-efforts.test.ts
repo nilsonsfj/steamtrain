@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { effortsForModel } from "../src/agents/models";
 import { fallbackOpencodeEfforts } from "../src/agents/opencode-efforts-fallback";
 import {
@@ -49,6 +49,9 @@ describe("fallbackOpencodeEfforts", () => {
 
 describe("effortsForModel opencode cache", () => {
   beforeEach(() => {
+    clearOpencodeVariantCacheForTests();
+  });
+  afterAll(() => {
     clearOpencodeVariantCacheForTests();
   });
 

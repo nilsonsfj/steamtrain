@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { fallbackCodexEfforts } from "../src/agents/codex-efforts-fallback";
 import {
   clearCodexVariantCacheForTests,
@@ -60,6 +60,9 @@ describe("fallbackCodexEfforts", () => {
 
 describe("effortsForModel codex cache", () => {
   beforeEach(() => {
+    clearCodexVariantCacheForTests();
+  });
+  afterAll(() => {
     clearCodexVariantCacheForTests();
   });
 
