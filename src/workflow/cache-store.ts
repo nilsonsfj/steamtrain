@@ -59,7 +59,7 @@ export function hashWorkflowSpec(spec: WorkflowSpec): string {
 
 export function workflowCacheFileName(key: WorkflowCacheKey): string {
   const digest = createHash("sha256")
-    .update(`${key.workflow}\0${key.cwd}\0${key.input}\0${key.params ?? ""}`)
+    .update(`${key.workflow}\0${key.cwd}\0${key.input}\0${key.specHash}\0${key.params ?? ""}`)
     .digest("hex");
   return `${digest}.json`;
 }
