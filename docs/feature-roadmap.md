@@ -340,7 +340,7 @@ trigger rules; Temporal expresses conditions in code. The phase model is a
 nice authoring simplification — it just shouldn't also be the scheduler's
 straitjacket.
 
-## 2.4 Named, typed workflow inputs (parameters) ✅ Shipped (core)
+## 2.4 Named, typed workflow inputs (parameters) ✅ Shipped
 
 > **Shipped** — an `inputs` map on `WorkflowSpec` declares typed parameters
 > (`string`, `number`, `boolean`) with `description`, `default`, and `required`.
@@ -350,7 +350,11 @@ straitjacket.
 > `validateWorkflow()` rejects type-mismatched defaults and `required: true`
 > with a default. Params are included in the cache key (deterministic sorted
 > serialization) and stored in `RunRecord` for `--from` reruns. The LLM
-> generation prompt teaches the LLM about inputs. See PR #54.
+> generation prompt teaches the LLM about inputs. The TUI shows an input form
+> when running a workflow with declared inputs (Tab between fields, y/n toggle
+> for booleans, Enter to submit, Esc to cancel). The web UI renders a params
+> form in the run bar (text/number inputs and boolean selects with descriptions
+> and defaults) and sends collected values to the API. See PR #54 and PR #55.
 
 **The gap:** a workflow takes exactly one anonymous text blob (`{{input}}`).
 A "release checklist" workflow that needs a version, a branch, and a
@@ -370,15 +374,6 @@ defaults and choice enums) is the model to copy; n8n generates run forms from
 declared fields; Temporal workflows take typed arguments. This is also what
 makes shared/imported workflows (1.9) self-documenting: the input schema *is*
 the usage doc.
-
-**Remaining follow-ups:**
-- **TUI input form:** when a workflow declares `inputs`, the TUI should prompt
-  the user for values before starting the run (sequential prompts or a form
-  in the workflow picker). Currently TUI runs always use empty params.
-- **Web UI input form:** the web UI's run modal should render a form generated
-  from the workflow's `inputs` map (text fields for string, number spinners
-  for number, checkboxes for boolean, with descriptions and defaults
-  pre-filled). Currently the web API accepts `params` but the UI has no form.
 
 ## 2.5 Sub-workflows and reusable step templates ✅ Shipped
 

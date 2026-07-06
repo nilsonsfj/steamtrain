@@ -387,6 +387,7 @@
       document.getElementById("wfSub").textContent = r.body.spec.description || "";
       document.getElementById("runRow").style.display = "flex";
       renderSourceLine();
+      renderParamsForm(r.body.spec);
       S.runState = SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || r.body.spec);
       render();
       renderStagedIndicator();
@@ -428,6 +429,71 @@
     if (S.source !== "user" && S.source !== "project") line.appendChild(h("span", { text: "\u00b7 configuring saves a user copy" }));
     document.getElementById("wfActions").style.display = "flex";
     document.getElementById("deleteBtn").style.display = (S.source === "user" || S.source === "project") ? "block" : "none";
+  }
+
+  function renderParamsForm(spec) {
+    var container = document.getElementById("paramsForm");
+    clear(container);
+    var inputs = spec && spec.inputs;
+    if (!inputs || Object.keys(inputs).length === 0) {
+      container.style.display = "none";
+      return;
+    }
+    container.style.display = "flex";
+    Object.keys(inputs).forEach(function (key) {
+      var inp = inputs[key];
+      var type = inp.type || "string";
+      var required = inp.required === true || (inp.required !== false && inp.default === undefined);
+      var defaultStr = inp.default !== undefined ? String(inp.default) : "";
+      var labelText = key;
+      var typeHint = type === "boolean" ? " (y/n)" : type === "number" ? " (number)" : "";
+      var hint = inp.description || "";
+      if (defaultStr) hint = hint ? hint + " \u00b7 default: " + defaultStr : "default: " + defaultStr;
+
+      var control;
+      if (type === "boolean") {
+        control = selectEl([
+          { value: "", label: "(not set)" },
+          { value: "true", label: "yes" },
+          { value: "false", label: "no" }
+        ], defaultStr === "true" ? "true" : defaultStr === "false" ? "false" : "");
+      } else {
+        control = h("input", {
+          class: "txt",
+          type: type === "number" ? "number" : "text",
+          placeholder: defaultStr || (required ? "required" : ""),
+          value: defaultStr
+        });
+      }
+      control.setAttribute("data-param-key", key);
+
+      var labelEl = h("label", { text: labelText });
+      if (required) {
+        var req = h("span", { class: "param-required", text: " *" });
+        labelEl.appendChild(req);
+      }
+      if (typeHint) {
+        labelEl.appendChild(h("span", { class: "param-type", text: typeHint }));
+      }
+      var wrapper = h("div", { class: "field" }, labelEl, control,
+        hint ? h("div", { class: "hint", text: hint }) : null);
+      container.appendChild(wrapper);
+    });
+  }
+
+  function collectParams() {
+    var container = document.getElementById("paramsForm");
+    if (container.style.display === "none") return undefined;
+    var fields = container.querySelectorAll("[data-param-key]");
+    if (fields.length === 0) return undefined;
+    var params = {};
+    for (var i = 0; i < fields.length; i++) {
+      var el = fields[i];
+      var key = el.getAttribute("data-param-key");
+      var val = el.value;
+      if (val !== "") params[key] = val;
+    }
+    return Object.keys(params).length > 0 ? params : undefined;
   }
 
   // ---- run model -----------------------------------------------------------
@@ -652,6 +718,8 @@
     setBanner("", "");
     document.getElementById("statusLine").style.display = "flex";
     var payload = { workflow: S.selected, input: input, fresh: document.getElementById("freshChk").checked };
+    var params = collectParams();
+    if (params) payload.params = params;
     if (workflowHasStaged(S.stagedOverrides[S.selected])) payload.overrides = S.stagedOverrides[S.selected];
     api("POST", "/api/runs", payload)
       .then(function (r) {
