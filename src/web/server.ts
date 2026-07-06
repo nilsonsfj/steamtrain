@@ -216,6 +216,8 @@ async function readBody(req: IncomingMessage): Promise<string> {
   // This avoids a Bun-specific issue where throwing mid-stream causes the
   // response status to be lost by the client (Bun's internal fetch does not
   // propagate HTTP status correctly when the server errors during body read).
+  // Note: non-numeric or missing Content-Length parses as NaN/0, both of which
+  // fall through to the streaming guard below — this is intentional.
   const contentLength = parseInt(req.headers["content-length"] ?? "0", 10);
   if (contentLength > MAX_BODY_BYTES) {
     throw new PayloadTooLarge();
