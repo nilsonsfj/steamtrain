@@ -121,27 +121,8 @@ export function renderPrompt(template: string, ctx: TemplateContext): string {
 
 // ---- Template reference linting (2.8) ----
 
-const STEP_FIELD_PATTERN = /^steps\.(.+)\.(output|items|ok|error|target|iteration|exitCode)$/;
-const STEP_WORKTREE_PATTERN = /^steps\.(.+)\.worktree\.(root|branch|cwd)$/;
-const STEP_JSON_PATTERN = /^steps\.(.+?)\.json((?:\.|\[).+)?$/;
-const STEP_ARTIFACT_PATTERN = /^steps\.(.+?)\.artifacts\.(.+)$/;
-
-const VALID_PLAIN_FIELDS: ReadonlySet<string> = new Set([
-  "output",
-  "items",
-  "ok",
-  "error",
-  "target",
-  "iteration",
-  "exitCode",
-]);
-
 function isCommandStep(step: WorkflowStep): boolean {
   return workflowStepKind(step) === "command";
-}
-
-function isDistributorStep(step: WorkflowStep): boolean {
-  return workflowStepKind(step) === "distributor";
 }
 
 function hasArtifacts(step: WorkflowStep): boolean {
@@ -230,11 +211,26 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
   const inputKeys = new Set(Object.keys(spec.inputs ?? {}));
   const stepIds = new Set<string>();
   const forEachChildIds = new Set<string>();
-  const loopRegionPhaseIds = new Set<string>();
 
   for (const phase of spec.phases) {
     for (const step of phase.steps) {
       stepIds.add(step.id);
+    }
+  }
+
+  // Build a set of phase indices that fall inside loop regions.
+  const phaseIndex = new Map<string, number>();
+  spec.phases.forEach((p, i) => phaseIndex.set(p.id, i));
+  const loopPhaseIndices = new Set<number>();
+  for (const phase of spec.phases) {
+    for (const step of phase.steps) {
+      if (step.kind === "gate" && step.loopTo) {
+        const targetIdx = phaseIndex.get(step.loopTo);
+        const gateIdx = phaseIndex.get(phase.id);
+        if (targetIdx !== undefined && gateIdx !== undefined) {
+          for (let i = targetIdx; i <= gateIdx; i++) loopPhaseIndices.add(i);
+        }
+      }
     }
   }
 
@@ -247,15 +243,13 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
       ) {
         forEachChildIds.add(step.id);
       }
-      if (step.kind === "gate" && step.loopTo) {
-        loopRegionPhaseIds.add(step.loopTo);
-        loopRegionPhaseIds.add(phase.id);
-      }
     }
   }
 
-  for (const phase of spec.phases) {
-    const inLoop = loopRegionPhaseIds.has(phase.id);
+  for (let pi = 0; pi < spec.phases.length; pi++) {
+    const phase = spec.phases[pi];
+    if (!phase) continue;
+    const inLoop = loopPhaseIndices.has(pi);
     for (const step of phase.steps) {
       const inForEach = forEachChildIds.has(step.id);
       const refs = stepRefs(step);
@@ -285,16 +279,22 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
         // {{iteration}} — only valid inside a loop region
         if (ref === "iteration") {
           if (!inLoop) {
-            warnings.push(
-              `step '${step.id}' uses '{{iteration}}' but is not inside a loop region (add a gate with loopTo, or use {{steps.<gateId>.iteration}} instead)`,
-            );
+            if (inForEach) {
+              warnings.push(
+                `step '${step.id}' uses '{{iteration}}' but forEach children don't have loop iteration context (use {{item.index}} for item position)`,
+              );
+            } else {
+              warnings.push(
+                `step '${step.id}' uses '{{iteration}}' but is not inside a loop region (add a gate with loopTo, or use {{steps.<gateId>.iteration}} instead)`,
+              );
+            }
           }
           continue;
         }
 
         // {{steps.<id>.<field>}}
         if (!ref.startsWith("steps.")) continue;
-        const stepFieldMatch = STEP_FIELD_PATTERN.exec(ref);
+        const stepFieldMatch = STEP_FIELD.exec(ref);
         if (stepFieldMatch) {
           const refId = stepFieldMatch[1] as string;
           const field = stepFieldMatch[2] as string;
@@ -311,7 +311,7 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
           continue;
         }
 
-        const worktreeMatch = STEP_WORKTREE_PATTERN.exec(ref);
+        const worktreeMatch = STEP_WORKTREE_FIELD.exec(ref);
         if (worktreeMatch) {
           const refId = worktreeMatch[1] as string;
           if (!stepIds.has(refId)) {
@@ -327,7 +327,7 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
           continue;
         }
 
-        const artifactMatch = STEP_ARTIFACT_PATTERN.exec(ref);
+        const artifactMatch = STEP_ARTIFACT_FIELD.exec(ref);
         if (artifactMatch) {
           const refId = artifactMatch[1] as string;
           if (!stepIds.has(refId)) {
@@ -343,7 +343,7 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
           continue;
         }
 
-        const jsonMatch = STEP_JSON_PATTERN.exec(ref);
+        const jsonMatch = STEP_JSON_FIELD.exec(ref);
         if (jsonMatch) {
           const refId = jsonMatch[1] as string;
           if (!stepIds.has(refId)) {

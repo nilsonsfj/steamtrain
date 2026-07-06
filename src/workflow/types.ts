@@ -2,6 +2,9 @@ import { z } from "zod";
 import type { AgentInstanceId, TokenUsage } from "../types/events";
 import type { RetryPolicy } from "./retry";
 import type { JsonSchema } from "./structured";
+// Circular import is safe: template.ts imports types from this module, and this
+// module imports lintTemplateRefs from template.ts. Both modules are fully
+// initialized before any cross-referenced function is called at runtime.
 import { lintTemplateRefs } from "./template";
 
 /**

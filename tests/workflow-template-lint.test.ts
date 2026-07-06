@@ -194,6 +194,27 @@ describe("lintTemplateRefs", () => {
       ]);
       expect(lintTemplateRefs(s)).toEqual([]);
     });
+
+    it("does not warn for {{iteration}} in intermediate phases of a loop region", () => {
+      const s = spec([
+        phase("p1", [worker("a", { prompt: "{{iteration}}" })]),
+        phase("p2", [worker("b", { prompt: "{{iteration}}" })]),
+        phase("p3", [gate("loop", { loopTo: "p1", condition: { contains: "done" } })]),
+      ]);
+      expect(lintTemplateRefs(s)).toEqual([]);
+    });
+
+    it("warns for forEach child using {{iteration}} with forEach-specific message", () => {
+      const s = spec([
+        phase("p1", [distributor("split")]),
+        phase("p2", [
+          worker("a", { prompt: "{{item}} {{iteration}}", forEach: "steps.split.items" }),
+        ]),
+      ]);
+      const warnings = lintTemplateRefs(s);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("forEach children don't have loop iteration context");
+    });
   });
 
   describe("exitCode on non-command step", () => {
