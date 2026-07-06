@@ -10,7 +10,7 @@ import type { TemplateContext } from "./template";
 import { renderPrompt } from "./template";
 import type {
   GateCondition,
-  StepResult,
+  GateStep,
   WorkflowPhase,
   WorkflowSpec,
   WorkflowStep,
@@ -115,8 +115,7 @@ function renderDryTemplate(
   const ctx: TemplateContext = {
     input,
     inputs,
-    outputs: new Map<string, string>(),
-    results: new Map<string, StepResult>(),
+    outputs: new Map(),
   };
   return renderPrompt(template, ctx);
 }
@@ -128,7 +127,8 @@ function stepIsDeterministic(step: WorkflowStep): boolean {
   if (kind === "consolidator" && !isAgentBackedStep(step)) return true;
   if (kind === "distributor" && !isAgentBackedStep(step)) return true;
   if (kind === "merge") return true;
-  if (kind === "workflow") return true;
+  // workflow steps invoke child workflows which may contain agent-backed steps,
+  // so they are NOT deterministic — treat them as delegated.
   return false;
 }
 
@@ -210,11 +210,7 @@ export function planWorkflow(
       let forEachSource: string | undefined;
       let forEachCount: number | undefined;
       let forEachDynamic: boolean | undefined;
-      if (
-        (kind === "worker" || kind === "processor" || !("kind" in step)) &&
-        "forEach" in step &&
-        step.forEach
-      ) {
+      if ((kind === "worker" || kind === "processor") && "forEach" in step && step.forEach) {
         const sourceId = parseForEachSource(step.forEach);
         if (sourceId) {
           forEachSource = sourceId;
@@ -283,12 +279,11 @@ export function planWorkflow(
         forEachCount,
         forEachDynamic,
         gateCondition: describeGateCondition(step),
-        gateOnFalse: "onFalse" in step ? (step as { onFalse?: string }).onFalse : undefined,
-        loopTo: "loopTo" in step ? (step as { loopTo?: string }).loopTo : undefined,
-        maxIterations:
-          "maxIterations" in step ? (step as { maxIterations?: number }).maxIterations : undefined,
+        gateOnFalse: kind === "gate" ? (step as GateStep).onFalse : undefined,
+        loopTo: kind === "gate" ? (step as GateStep).loopTo : undefined,
+        maxIterations: kind === "gate" ? (step as GateStep).maxIterations : undefined,
         whenCondition: describeWhenCondition(step),
-        workflowName: "workflow" in step ? (step as { workflow?: string }).workflow : undefined,
+        workflowName: kind === "workflow" ? (step as { workflow?: string }).workflow : undefined,
         mergeMode,
         workspaceSource,
         artifacts,

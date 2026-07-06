@@ -576,8 +576,8 @@ async function handle(
       }
       params = Object.keys(resolved.values).length > 0 ? resolved.values : undefined;
     }
-    const plan = planWorkflow(effectiveSpec, parsed.input, params);
-    sendJson(res, 200, plan);
+    const plan = planWorkflow(effectiveSpec, parsed.input.trim(), params);
+    sendJson(res, plan.ok ? 200 : 422, plan);
     return;
   }
 

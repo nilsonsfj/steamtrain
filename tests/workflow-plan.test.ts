@@ -174,7 +174,9 @@ describe("planWorkflow", () => {
     expect(result.workflowSteps).toHaveLength(1);
     expect(result.workflowSteps[0]!.workflow).toBe("child-wf");
     expect(result.steps[0]!.workflowName).toBe("child-wf");
-    expect(result.steps[0]!.isDeterministic).toBe(true);
+    // workflow steps invoke child workflows which may contain agent-backed steps,
+    // so they are NOT deterministic.
+    expect(result.steps[0]!.isDeterministic).toBe(false);
   });
 
   it("analyzes merge steps", () => {
