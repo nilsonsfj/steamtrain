@@ -354,6 +354,7 @@ function checkCsrf(
  *   GET    /api/runs/:id/stream     SSE of WorkflowEvents + terminal status
  *   POST   /api/runs/:id/cancel     abort a run
  *   POST   /api/overrides/flush     flush staged session overrides -> { saved, skipped, unchanged }
+ *   POST   /api/auth                validate token, set session cookie
  */
 export function createWebServer(deps: WebServerDeps): Server {
   return createServer((req, res) => {

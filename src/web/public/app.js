@@ -70,7 +70,7 @@
     var msg = h("div", { class: "empty" },
       h("p", { text: "This server requires a token to access." }),
       h("div", { class: "login-form" },
-        h("input", { type: "text", id: "loginToken", class: "txt", placeholder: "Enter auth token", autocomplete: "off" }),
+        h("input", { type: "password", id: "loginToken", class: "txt", placeholder: "Enter auth token", autocomplete: "off" }),
         h("button", { class: "btn primary", id: "loginBtn", text: "Log in" })
       ),
       h("p", { class: "login-error", id: "loginError" })
