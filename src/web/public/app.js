@@ -725,6 +725,16 @@
   function startRun() {
     var input = document.getElementById("input").value;
     if (!input.trim()) { setBanner("enter some input first", "info"); return; }
+    // Validate param fields before submission
+    var container = document.getElementById("paramsForm");
+    if (container.style.display !== "none") {
+      var invalidFields = container.querySelectorAll(".invalid");
+      if (invalidFields.length > 0) {
+        setBanner("fix parameter errors before running", "err");
+        invalidFields[0].focus();
+        return;
+      }
+    }
     S.runState = SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || S.spec);
     setBanner("", "");
     document.getElementById("statusLine").style.display = "flex";

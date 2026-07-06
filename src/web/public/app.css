@@ -876,12 +876,6 @@ select.sel.invalid {
   color: var(--error);
   margin-left: 2px;
 }
-.params-form .param-error {
-  width: 100%;
-  color: var(--error);
-  font-size: 12px;
-  padding: 4px 0;
-}
 .draft {
   margin-top: 12px;
   background: var(--bg);
