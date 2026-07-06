@@ -233,8 +233,14 @@ authoring session. Ecosystem features also compound over time.
 > Origin/Referer CSRF validation on all state-changing requests (POST/PUT/DELETE),
 > `Access-Control-Allow-Credentials` with specific origin when auth is enabled on a
 > non-local host, and a client-side login form that appears on 401. Public routes
-> (`/`, `/static/*`) remain accessible without auth. Read-only mode and reverse-proxy
-> docs are future follow-ups.
+> (`/`, `/static/*`) remain accessible without auth.
+
+**Follow-ups (not blockers):**
+- `--insecure-no-auth` opt-out for localhost (suppress the login form on 127.0.0.1)
+- Reverse-proxy + TLS docs for remote deployment
+- Read-only mode for sharing a run view with teammates
+- Basic rate limiting on `POST /api/auth` (or document that the token should be high-entropy for shared deployments)
+- Session expiry mid-run has no auto-re-login flow — the user must start a new run
 
 **The gap:** the web server binds happily to `0.0.0.0` with no authentication;
 anyone who can reach the port can run agents *with the host user's
