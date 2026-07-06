@@ -19,7 +19,8 @@
  */
 
 import { jsonFieldText, jsonPathGet } from "./structured";
-import type { WorkflowItem } from "./types";
+import type { GateCondition, WorkflowItem, WorkflowSpec, WorkflowStep } from "./types";
+import { workflowStepKind } from "./types";
 
 export interface TemplateContext {
   input: string;
@@ -116,4 +117,264 @@ export function renderPrompt(template: string, ctx: TemplateContext): string {
     }
     return match;
   });
+}
+
+// ---- Template reference linting (2.8) ----
+
+const STEP_FIELD_PATTERN = /^steps\.(.+)\.(output|items|ok|error|target|iteration|exitCode)$/;
+const STEP_WORKTREE_PATTERN = /^steps\.(.+)\.worktree\.(root|branch|cwd)$/;
+const STEP_JSON_PATTERN = /^steps\.(.+?)\.json((?:\.|\[).+)?$/;
+const STEP_ARTIFACT_PATTERN = /^steps\.(.+?)\.artifacts\.(.+)$/;
+
+const VALID_PLAIN_FIELDS: ReadonlySet<string> = new Set([
+  "output",
+  "items",
+  "ok",
+  "error",
+  "target",
+  "iteration",
+  "exitCode",
+]);
+
+function isCommandStep(step: WorkflowStep): boolean {
+  return workflowStepKind(step) === "command";
+}
+
+function isDistributorStep(step: WorkflowStep): boolean {
+  return workflowStepKind(step) === "distributor";
+}
+
+function hasArtifacts(step: WorkflowStep): boolean {
+  return "artifacts" in step && Array.isArray(step.artifacts) && step.artifacts.length > 0;
+}
+
+function hasWorkspace(step: WorkflowStep): boolean {
+  const kind = workflowStepKind(step);
+  return kind === "worker" || kind === "processor" || kind === "command";
+}
+
+function extractRefs(text: string | undefined): string[] {
+  if (!text) return [];
+  const refs: string[] = [];
+  for (const match of text.matchAll(PLACEHOLDER)) {
+    const expr = (match[1] as string).trim();
+    // Only flag references that look like steamtrain-specific patterns.
+    // Generic mustache templates (e.g. {{name}}) are left alone.
+    if (
+      expr.startsWith("steps.") ||
+      expr.startsWith("inputs.") ||
+      expr === "item" ||
+      expr === "item.value" ||
+      expr === "item.index" ||
+      expr === "item.sourceStepId" ||
+      expr === "iteration"
+    ) {
+      refs.push(expr);
+    }
+  }
+  return refs;
+}
+
+function scanConditionRefs(condition: GateCondition | undefined, refs: string[]): void {
+  if (!condition) return;
+  if (condition.contains) refs.push(...extractRefs(condition.contains));
+  if (condition.equals) refs.push(...extractRefs(condition.equals));
+  if (condition.matches) refs.push(...extractRefs(condition.matches));
+}
+
+function stepRefs(step: WorkflowStep): string[] {
+  const refs: string[] = [];
+  const kind = workflowStepKind(step);
+
+  if ("prompt" in step && typeof step.prompt === "string") refs.push(...extractRefs(step.prompt));
+  if (kind === "distributor" && "items" in step && Array.isArray(step.items)) {
+    for (const item of step.items) refs.push(...extractRefs(item));
+  }
+  if (kind === "gate" && "condition" in step) scanConditionRefs(step.condition, refs);
+  if (step.when) scanConditionRefs(step.when, refs);
+  if (kind === "merge") {
+    const ms = step as {
+      branch?: string;
+      commitMessage?: string;
+      prTitle?: string;
+      prBody?: string;
+    };
+    if (ms.branch) refs.push(...extractRefs(ms.branch));
+    if (ms.commitMessage) refs.push(...extractRefs(ms.commitMessage));
+    if (ms.prTitle) refs.push(...extractRefs(ms.prTitle));
+    if (ms.prBody) refs.push(...extractRefs(ms.prBody));
+  }
+  if (kind === "command" && "cmd" in step && typeof step.cmd === "string") {
+    refs.push(...extractRefs(step.cmd));
+  }
+  if (kind === "workflow" && "input" in step && typeof step.input === "string") {
+    refs.push(...extractRefs(step.input));
+  }
+
+  return refs;
+}
+
+/**
+ * Lint all `{{...}}` template references in a workflow spec.
+ *
+ * Returns an array of non-fatal warning strings for references that will
+ * silently render as empty at runtime — unknown step ids, invalid step fields,
+ * undeclared input keys, and contextual misuse of `{{item}}` / `{{iteration}}`.
+ *
+ * Unknown placeholders that do not match any steamtrain-specific pattern
+ * (e.g. `{{name}}` in a mustache-style prompt) are intentionally ignored.
+ */
+export function lintTemplateRefs(spec: WorkflowSpec): string[] {
+  const warnings: string[] = [];
+
+  const inputKeys = new Set(Object.keys(spec.inputs ?? {}));
+  const stepIds = new Set<string>();
+  const forEachChildIds = new Set<string>();
+  const loopRegionPhaseIds = new Set<string>();
+
+  for (const phase of spec.phases) {
+    for (const step of phase.steps) {
+      stepIds.add(step.id);
+    }
+  }
+
+  for (const phase of spec.phases) {
+    for (const step of phase.steps) {
+      if (
+        (step.kind === "worker" || step.kind === "processor" || !step.kind) &&
+        "forEach" in step &&
+        step.forEach
+      ) {
+        forEachChildIds.add(step.id);
+      }
+      if (step.kind === "gate" && step.loopTo) {
+        loopRegionPhaseIds.add(step.loopTo);
+        loopRegionPhaseIds.add(phase.id);
+      }
+    }
+  }
+
+  for (const phase of spec.phases) {
+    const inLoop = loopRegionPhaseIds.has(phase.id);
+    for (const step of phase.steps) {
+      const inForEach = forEachChildIds.has(step.id);
+      const refs = stepRefs(step);
+
+      for (const ref of refs) {
+        // {{inputs.<key>}}
+        if (ref.startsWith("inputs.")) {
+          const key = ref.slice(7);
+          if (!inputKeys.has(key)) {
+            warnings.push(
+              `step '${step.id}' references undeclared input '${key}' (available: ${[...inputKeys].join(", ") || "none"})`,
+            );
+          }
+          continue;
+        }
+
+        // {{item}} / {{item.*}} — only valid inside forEach
+        if (ref === "item" || ref.startsWith("item.")) {
+          if (!inForEach) {
+            warnings.push(
+              `step '${step.id}' uses '{{${ref}}}' but is not a forEach child (only forEach steps have access to item context)`,
+            );
+          }
+          continue;
+        }
+
+        // {{iteration}} — only valid inside a loop region
+        if (ref === "iteration") {
+          if (!inLoop) {
+            warnings.push(
+              `step '${step.id}' uses '{{iteration}}' but is not inside a loop region (add a gate with loopTo, or use {{steps.<gateId>.iteration}} instead)`,
+            );
+          }
+          continue;
+        }
+
+        // {{steps.<id>.<field>}}
+        if (!ref.startsWith("steps.")) continue;
+        const stepFieldMatch = STEP_FIELD_PATTERN.exec(ref);
+        if (stepFieldMatch) {
+          const refId = stepFieldMatch[1] as string;
+          const field = stepFieldMatch[2] as string;
+          if (!stepIds.has(refId)) {
+            warnings.push(`step '${step.id}' references unknown step '${refId}'`);
+          } else if (field === "exitCode") {
+            const refStep = findStep(spec, refId);
+            if (refStep && !isCommandStep(refStep)) {
+              warnings.push(
+                `step '${step.id}' references '${refId}.exitCode' but '${refId}' is not a command step (exitCode is only available on command steps)`,
+              );
+            }
+          }
+          continue;
+        }
+
+        const worktreeMatch = STEP_WORKTREE_PATTERN.exec(ref);
+        if (worktreeMatch) {
+          const refId = worktreeMatch[1] as string;
+          if (!stepIds.has(refId)) {
+            warnings.push(`step '${step.id}' references unknown step '${refId}'`);
+          } else {
+            const refStep = findStep(spec, refId);
+            if (refStep && !hasWorkspace(refStep)) {
+              warnings.push(
+                `step '${step.id}' references '${refId}.worktree.${worktreeMatch[2]}' but '${refId}' does not have workspace isolation (only worker, processor, and command steps have worktrees)`,
+              );
+            }
+          }
+          continue;
+        }
+
+        const artifactMatch = STEP_ARTIFACT_PATTERN.exec(ref);
+        if (artifactMatch) {
+          const refId = artifactMatch[1] as string;
+          if (!stepIds.has(refId)) {
+            warnings.push(`step '${step.id}' references unknown step '${refId}'`);
+          } else {
+            const refStep = findStep(spec, refId);
+            if (refStep && !hasArtifacts(refStep)) {
+              warnings.push(
+                `step '${step.id}' references '${refId}.artifacts.${artifactMatch[2]}' but '${refId}' has no declared artifacts`,
+              );
+            }
+          }
+          continue;
+        }
+
+        const jsonMatch = STEP_JSON_PATTERN.exec(ref);
+        if (jsonMatch) {
+          const refId = jsonMatch[1] as string;
+          if (!stepIds.has(refId)) {
+            warnings.push(`step '${step.id}' references unknown step '${refId}'`);
+          }
+          continue;
+        }
+
+        // Fallback: starts with "steps." but doesn't match any known pattern.
+        // Try to extract the step id and warn if unknown.
+        const looseId = /^steps\.([^.[\s]+)/.exec(ref);
+        if (looseId) {
+          const refId = looseId[1] as string;
+          if (!stepIds.has(refId)) {
+            warnings.push(`step '${step.id}' references unknown step '${refId}'`);
+          } else {
+            warnings.push(`step '${step.id}' uses invalid template reference '{{${ref}}}'`);
+          }
+        }
+      }
+    }
+  }
+
+  return warnings;
+}
+
+function findStep(spec: WorkflowSpec, id: string): WorkflowStep | undefined {
+  for (const phase of spec.phases) {
+    for (const step of phase.steps) {
+      if (step.id === id) return step;
+    }
+  }
+  return undefined;
 }

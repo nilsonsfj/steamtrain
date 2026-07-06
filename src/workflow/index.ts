@@ -140,7 +140,7 @@ export {
   timeoutMsFromSec,
 } from "./timeout";
 export { BUNDLED_WORKFLOWS } from "./bundled";
-export { renderPrompt, type TemplateContext } from "./template";
+export { renderPrompt, lintTemplateRefs, type TemplateContext } from "./template";
 export { runPool, createChannel, type Channel } from "./pool";
 export {
   WORKFLOW_CACHE_DIR,

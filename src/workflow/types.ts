@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { AgentInstanceId, TokenUsage } from "../types/events";
 import type { RetryPolicy } from "./retry";
 import type { JsonSchema } from "./structured";
+import { lintTemplateRefs } from "./template";
 
 /**
  * The declarative workflow model. A `WorkflowSpec` is a sequence of phases.
@@ -820,6 +821,8 @@ export type WorkflowSpecInput = z.infer<typeof workflowSpecSchema>;
 export interface ValidationResult {
   ok: boolean;
   error?: string;
+  /** Non-fatal template reference warnings from {@link lintTemplateRefs}. */
+  warnings?: string[];
 }
 
 export function workflowStepKind(step: WorkflowStep): WorkflowStepKind {
@@ -1179,7 +1182,8 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
     };
   }
 
-  return { ok: true };
+  const warnings = lintTemplateRefs(spec);
+  return { ok: true, warnings: warnings.length > 0 ? warnings : undefined };
 }
 
 export interface ResolvedInputs {

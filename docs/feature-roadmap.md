@@ -449,25 +449,38 @@ no "tolerate N failures".
 "same job, many variants." For an LLM orchestrator it's even more valuable:
 cross-model comparison is a core multi-agent pattern, not an edge case.
 
-## 2.8 Template validation and expressions
+## 2.8 Template validation and expressions ✅ Shipped
+
+> **Shipped** — `lintTemplateRefs()` scans every `{{…}}` template reference in
+> prompts, distributor items, gate/when conditions, merge fields, command `cmd`,
+> and workflow `input` templates. References that match steamtrain-specific
+> patterns but point to something invalid (unknown step id, invalid field,
+> undeclared input, wrong context like `{{item}}` outside `forEach` or
+> `{{iteration}}` outside a loop region, wrong step type for the field) produce
+> non-fatal warnings in `ValidationResult.warnings`. Warnings surface in CLI
+> (`workflow validate` and `workflow run`), TUI (yellow warning count in the
+> workflow preview), and web UI (save response `warnings` array + banner).
+> Generic mustache-style placeholders are intentionally ignored. Template
+> filters (`head`, `tail`, `default`, `jsonpath`) are a future follow-up.
 
 **The gap:** unknown placeholders are **left unchanged** — a typo like
 `{{steps.reviw.output}}` ships literally to the agent as line noise, no
-warning, and the run "succeeds". Beyond that, templates are pure
+warning, and the run "succeeds". Beyond that, templates are purely
 substitution: no way to truncate a huge output before re-prompting, no
 fallback when a step was skipped, no light conditionals.
 
 **The feature:**
 - **Strict reference validation** in `validateWorkflow` and at save time in
-  both UIs: any `{{steps.<id>…}}` naming an unknown id or field is an error;
-  unknown *forms* warn. (Highest value-to-effort item on this list.)
+  both UIs: any `{{steps.<id>…}}` naming an unknown id or field is a warning;
+  `{{inputs.<key>}}` referencing an undeclared input is a warning; `{{item}}`
+  outside `forEach` and `{{iteration}}` outside a loop region are warnings.
 - A tiny filter set — `{{steps.x.output | head:2000}}`, `| tail:50`,
   `| jsonpath:$.verdict}}` (pairs with 1.3), `| default:"(skipped)"}}` — and
-  nothing more; stop well short of a programming language.
+  nothing more; stop well short of a programming language. **(Future follow-up)**
 
 **Comparison:** GitHub Actions expressions and Airflow's Jinja show both the
 value and the trap — Jinja-in-YAML gets unreadable fast. The lint half is
-uncontroversial and copies what every mature system does: fail on dangling
+uncontroversial and copies what every mature system does: flag dangling
 references at *validation* time, not mid-run after three phases of paid agent
 work.
 

@@ -6,6 +6,7 @@ import {
   type WorkflowSourceKind,
   type WorkflowSpec,
   isAgentBackedStep,
+  lintTemplateRefs,
   workflowStepKind,
 } from "../workflow";
 import { AGENT_COLOR, WORKFLOW_SOURCE_COLOR } from "./theme";
@@ -81,6 +82,7 @@ export function WorkflowPreview({
   const agents = useMemo(() => distinctAgents(spec), [spec]);
   const blocks = useMemo(() => blockSummary(spec), [spec]);
   const inputLabel = input.length > 0 ? truncate(input, Math.max(24, innerWidth - 10)) : "(none)";
+  const templateWarnings = useMemo(() => lintTemplateRefs(spec), [spec]);
 
   return (
     <Box
@@ -121,6 +123,11 @@ export function WorkflowPreview({
         <Text color={dispatchCheck.ok ? "green" : "yellow"}>
           {dispatchCheck.ok ? "ready to run" : `blocked: ${dispatchCheck.reason}`}
         </Text>
+        {templateWarnings.length > 0 ? (
+          <Text color="yellow">
+            ⚠ {templateWarnings.length} template warning{templateWarnings.length === 1 ? "" : "s"}
+          </Text>
+        ) : null}
       </Box>
 
       <Box flexDirection="column" flexGrow={1}>

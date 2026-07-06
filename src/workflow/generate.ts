@@ -66,7 +66,7 @@ export interface GenerateWorkflowResult {
 }
 
 export type ExtractResult =
-  | { ok: true; spec: WorkflowSpec }
+  | { ok: true; spec: WorkflowSpec; warnings?: string[] }
   | { ok: false; error: string; json?: string };
 
 /** Turn arbitrary text into a safe, unique-ish kebab-case workflow name. */
@@ -253,6 +253,11 @@ parameters — define them in the spec's "inputs" map and users pass --param key
 isolated git worktree, for custom integration steps), {{item}},
 {{item.index}}, {{item.sourceStepId}}, {{iteration}}.
 
+IMPORTANT: validate that every {{steps.<id>...}} reference uses a step id that
+exists in the workflow, every {{inputs.<key>}} references a declared input, and
+{{item}} only appears inside forEach children. Typos in template references
+silently render as empty text at runtime and will produce validation warnings.
+
 # Agents & models
 Prefer free models so the workflow runs without paid credentials:
 agent "opencode" with models like "opencode/mimo-v2.5-free",
@@ -418,7 +423,7 @@ export function extractWorkflowSpec(
   if (!valid.ok) {
     return { ok: false, error: `generated workflow is invalid: ${valid.error}`, json };
   }
-  return { ok: true, spec };
+  return { ok: true, spec, warnings: valid.warnings };
 }
 
 interface AgentRunOutcome {
