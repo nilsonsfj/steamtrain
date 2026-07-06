@@ -226,7 +226,15 @@ recipes (release checklist, dependency-upgrade sweep, incident postmortem,
 docs audit) is what makes new users productive in minutes instead of an
 authoring session. Ecosystem features also compound over time.
 
-## 1.10 Web UI hardening for shared/remote use
+## 1.10 Web UI hardening for shared/remote use ✅ Shipped
+
+> **Shipped** — `--auth-token <token>` CLI flag enables cookie-based session auth
+> (HttpOnly, SameSite=Strict `__steamtrain_auth` cookie set by `POST /api/auth`),
+> Origin/Referer CSRF validation on all state-changing requests (POST/PUT/DELETE),
+> `Access-Control-Allow-Credentials` with specific origin when auth is enabled on a
+> non-local host, and a client-side login form that appears on 401. Public routes
+> (`/`, `/static/*`) remain accessible without auth. Read-only mode and reverse-proxy
+> docs are future follow-ups.
 
 **The gap:** the web server binds happily to `0.0.0.0` with no authentication;
 anyone who can reach the port can run agents *with the host user's

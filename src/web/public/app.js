@@ -43,9 +43,18 @@
     }).then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j }; }); });
   }
 
+  /** Like api() but redirects to login on 401 (session expired). */
+  function apiAuth(method, path, body) {
+    return api(method, path, body).then(function (r) {
+      if (r.status === 401) { showLoginForm(); throw new Error("auth required"); }
+      return r;
+    });
+  }
+
   // ---- workflow catalog ----------------------------------------------------
   function loadWorkflows() {
     api("GET", "/api/workflows").then(function (r) {
+      if (r.status === 401) { showLoginForm(); return; }
       S.workflows = r.body.workflows || [];
       if (r.body.configLabel) document.getElementById("config").textContent = r.body.configLabel;
       renderSidebar();
@@ -53,6 +62,41 @@
     loadMeta();
     loadProjectConfig();
     pollDoctor(0);
+  }
+
+  function showLoginForm() {
+    var main = document.querySelector("main");
+    clear(main);
+    var msg = h("div", { class: "empty" },
+      h("p", { text: "This server requires a token to access." }),
+      h("div", { class: "login-form" },
+        h("input", { type: "password", id: "loginToken", class: "txt", placeholder: "Enter auth token" }),
+        h("button", { class: "btn primary", id: "loginBtn", text: "Log in" })
+      ),
+      h("p", { class: "login-error", id: "loginError" })
+    );
+    main.appendChild(msg);
+    document.getElementById("loginBtn").addEventListener("click", doLogin);
+    document.getElementById("loginToken").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") doLogin();
+    });
+    document.getElementById("loginToken").focus();
+  }
+
+  function doLogin() {
+    var input = document.getElementById("loginToken");
+    var errEl = document.getElementById("loginError");
+    var token = input ? input.value : "";
+    if (!token) { if (errEl) errEl.textContent = "Token is required."; return; }
+    api("POST", "/api/auth", { token: token }).then(function (r) {
+      if (r.status === 200 && r.body.ok) {
+        window.location.reload();
+      } else {
+        if (errEl) errEl.textContent = (r.body && r.body.error) || "Login failed.";
+      }
+    }).catch(function () {
+      if (errEl) errEl.textContent = "Network error.";
+    });
   }
 
   function loadProjectConfig() {

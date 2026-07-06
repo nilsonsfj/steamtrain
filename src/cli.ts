@@ -74,6 +74,8 @@ export interface GlobalCliOptions {
   webUi?: boolean;
   port?: number;
   host?: string;
+  /** Require this token to access the web UI (sets a cookie-based session). */
+  authToken?: string;
   error?: string;
 }
 
@@ -85,6 +87,7 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
   let webUi = false;
   let port: number | undefined;
   let host: string | undefined;
+  let authToken: string | undefined;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
     if (arg === "-w" || arg === "--workspace") {
@@ -128,9 +131,26 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
       i += 1;
       continue;
     }
+    if (arg === "--auth-token") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("-")) {
+        return { args: [], error: "--auth-token requires a value" };
+      }
+      authToken = value;
+      i += 1;
+      continue;
+    }
     rest.push(arg);
   }
-  return { args: rest, workspacePath, configPath, webUi: webUi || undefined, port, host };
+  return {
+    args: rest,
+    workspacePath,
+    configPath,
+    webUi: webUi || undefined,
+    port,
+    host,
+    authToken,
+  };
 }
 
 export interface CliIO {
@@ -1383,6 +1403,7 @@ Global options (TUI and workflow commands):
       --web-ui               Serve the browser UI instead of the TUI
       --port <n>             Web UI port (default 4317; with --web-ui)
       --host <host>          Web UI bind host (default 127.0.0.1; with --web-ui)
+      --auth-token <token>   Require this token for web UI access (with --web-ui)
 `;
 }
 

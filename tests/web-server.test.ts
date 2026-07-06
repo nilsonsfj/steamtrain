@@ -15,6 +15,8 @@ import type {
   WorkflowSpec,
 } from "../src/workflow";
 import { RunRecordBuilder, WorkflowAuthor, createWorkflowHistoryStore } from "../src/workflow";
+import type { AuthoringHost, WorkflowSourceKind } from "../src/workflow";
+import type { LoadedWorkflowCatalog } from "../src/workflow";
 import { readSse } from "./helpers/read-sse";
 
 const servers: Server[] = [];
@@ -77,6 +79,30 @@ class FakeHost implements WorkflowHost {
   runWorkflow(name: string, input: string, signal?: AbortSignal): AsyncIterable<WorkflowEvent> {
     return this.gen(input, signal);
   }
+}
+
+/** A host that implements both WorkflowHost and AuthoringHost for auth/CSRF tests. */
+class FakeAuthoringHost implements WorkflowHost, AuthoringHost {
+  private readonly workflows: Record<string, WorkflowSpec>;
+  constructor(spec: WorkflowSpec) {
+    this.workflows = { [spec.name]: spec };
+  }
+  listWorkflows(): Record<string, WorkflowSpec> {
+    return this.workflows;
+  }
+  canDispatchWorkflowSpec(): { ok: true } | { ok: false; reason: string } {
+    return { ok: true };
+  }
+  runWorkflow(): AsyncIterable<WorkflowEvent> {
+    return (async function* () {})();
+  }
+  workflowSource(): WorkflowSourceKind | undefined {
+    return "user";
+  }
+  isAgentHealthy(): boolean {
+    return true;
+  }
+  setCatalog(): void {}
 }
 
 async function* happyRun(input: string): AsyncIterable<WorkflowEvent> {
@@ -1336,5 +1362,257 @@ describe("web server", () => {
     expect(res.status).toBe(500);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("disk write failed");
+  });
+});
+
+const AUTH_COOKIE = "__steamtrain_auth";
+
+function makeAuthServer(
+  host: WorkflowHost,
+  authToken = "test-secret-token",
+): { server: Server; runs: WorkflowRunManager } {
+  const runs = new WorkflowRunManager({
+    host,
+    cacheStore: createInMemoryStore(),
+    cwd: tmpdir(),
+    config: testRunConfig,
+  });
+  const server = createWebServer({
+    host,
+    runs,
+    workflowSource: () => "bundled",
+    authToken,
+  });
+  servers.push(server);
+  return { server, runs };
+}
+
+describe("web server — auth", () => {
+  it("returns 401 on API routes when auth-token is set and no cookie present", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/workflows`);
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("authentication required");
+  });
+
+  it("allows access to / and /static/* without auth", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const index = await fetch(`${base}/`);
+    expect(index.status).toBe(200);
+    const css = await fetch(`${base}/static/app.css`);
+    expect(css.status).toBe(200);
+    const js = await fetch(`${base}/static/app.js`);
+    expect(js.status).toBe(200);
+  });
+
+  it("POST /api/auth sets cookie on valid token", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/auth`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: "test-secret-token" }),
+    });
+    expect(res.status).toBe(200);
+    const setCookie = res.headers.get("set-cookie");
+    expect(setCookie).toContain(`${AUTH_COOKIE}=test-secret-token`);
+    expect(setCookie).toContain("HttpOnly");
+    expect(setCookie).toContain("SameSite=Strict");
+  });
+
+  it("POST /api/auth returns 401 on invalid token", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/auth`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: "wrong" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("allows API access with valid cookie", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/workflows`, {
+      headers: { cookie: `${AUTH_COOKIE}=test-secret-token` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { workflows: unknown[] };
+    expect(body.workflows).toBeDefined();
+  });
+
+  it("POST /api/auth reports auth not required when no authToken configured", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const server = createWebServer({ host, runs, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+    const res = await fetch(`${base}/api/auth`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: "anything" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; authRequired: boolean };
+    expect(body.ok).toBe(true);
+    expect(body.authRequired).toBe(false);
+  });
+});
+
+describe("web server — CSRF", () => {
+  it("rejects POST without Origin/Referer when auth is enabled", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    // Use a raw fetch that doesn't send Origin (node fetch doesn't send it by default)
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `${AUTH_COOKIE}=test-secret-token`,
+      },
+      body: JSON.stringify({ workflow: "demo", input: "test" }),
+    });
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("missing origin header");
+  });
+
+  it("rejects POST with mismatched Origin when auth is enabled", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const host = new URL(base).host;
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `${AUTH_COOKIE}=test-secret-token`,
+        origin: "http://evil.example.com",
+      },
+      body: JSON.stringify({ workflow: "demo", input: "test" }),
+    });
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("origin mismatch");
+  });
+
+  it("allows POST with matching Origin when auth is enabled", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `${AUTH_COOKIE}=test-secret-token`,
+        origin: base,
+      },
+      body: JSON.stringify({ workflow: "demo", input: "test" }),
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("allows GET without Origin when auth is enabled (read-only)", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/workflows`, {
+      headers: { cookie: `${AUTH_COOKIE}=test-secret-token` },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("skips CSRF check when no authToken configured", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const server = createWebServer({ host, runs, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+    // POST without Origin — should succeed because auth is not enabled
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "demo", input: "test" }),
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("rejects PUT with mismatched Origin when auth is enabled", async () => {
+    const host = new FakeAuthoringHost(demoSpec());
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const realAuthor = new WorkflowAuthor({
+      host,
+      config: testRunConfig,
+      cwd: tmpdir(),
+      home: mkdtempSync(join(tmpdir(), "csrf-test-")),
+    });
+    const server = createWebServer({
+      host,
+      runs,
+      author: realAuthor,
+      workflowSource: () => "bundled",
+      authToken: "test-secret",
+    });
+    servers.push(server);
+    const base = await start(server);
+    const res = await fetch(`${base}/api/workflows/demo`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        cookie: `${AUTH_COOKIE}=test-secret`,
+        origin: "http://evil.example.com",
+      },
+      body: JSON.stringify({ spec: demoSpec() }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects DELETE with mismatched Origin when auth is enabled", async () => {
+    const host = new FakeAuthoringHost(demoSpec());
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const realAuthor = new WorkflowAuthor({
+      host,
+      config: testRunConfig,
+      cwd: tmpdir(),
+      home: mkdtempSync(join(tmpdir(), "csrf-del-")),
+    });
+    const server = createWebServer({
+      host,
+      runs,
+      author: realAuthor,
+      workflowSource: () => "bundled",
+      authToken: "test-secret",
+    });
+    servers.push(server);
+    const base = await start(server);
+    const res = await fetch(`${base}/api/workflows/demo`, {
+      method: "DELETE",
+      headers: {
+        cookie: `${AUTH_COOKIE}=test-secret`,
+        origin: "http://evil.example.com",
+      },
+    });
+    expect(res.status).toBe(403);
   });
 });
