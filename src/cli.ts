@@ -46,6 +46,7 @@ import {
   modelBreakdownForRecord,
   persistWorkflowStepDone,
   planRerun,
+  planWorkflow,
   pruneWorktree,
   rerunDowngradeMessage,
   resolveInputs,
@@ -200,6 +201,9 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
       return 0;
     case "validate":
       return validateWorkflows(orchestrator.listWorkflows(), rest[0], out, err);
+    case "plan":
+    case "dry-run":
+      return runPlanCommand(orchestrator, rest, io, out, err);
     case "cache":
       return runCacheCommand(rest, cwd, io, orchestrator, out, err);
     case "history":
@@ -262,6 +266,167 @@ function validateWorkflows(
   }
 
   return ok ? 0 : 1;
+}
+
+// ── workflow plan (dry-run) ──────────────────────────────────────────────────
+
+interface PlanOptions {
+  input?: string;
+  stdin: boolean;
+  params: Record<string, string>;
+  json: boolean;
+}
+
+function parsePlanOptions(args: string[]): PlanOptions | null {
+  const options: PlanOptions = { stdin: false, json: false, params: {} };
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--input" || arg === "-i") {
+      const value = args[i + 1];
+      if (!value) return null;
+      options.input = value;
+      i += 1;
+    } else if (arg === "--param" || arg === "-p") {
+      const value = args[i + 1];
+      if (!value) return null;
+      const eq = value.indexOf("=");
+      if (eq < 1) return null;
+      const key = value.slice(0, eq);
+      if (key.startsWith("-")) return null;
+      options.params[key] = value.slice(eq + 1);
+      i += 1;
+    } else if (arg === "--stdin") {
+      options.stdin = true;
+    } else if (arg === "--json") {
+      options.json = true;
+    } else {
+      return null;
+    }
+  }
+  return options;
+}
+
+function runPlanCommand(
+  orchestrator: Orchestrator,
+  args: string[],
+  io: CliIO,
+  out: (text: string) => void,
+  err: (text: string) => void,
+): Promise<number> {
+  return planCommand(orchestrator, args, io, out, err);
+}
+
+async function planCommand(
+  orchestrator: Orchestrator,
+  args: string[],
+  io: CliIO,
+  out: (text: string) => void,
+  err: (text: string) => void,
+): Promise<number> {
+  const name = args[0] && !args[0].startsWith("--") ? args[0] : undefined;
+  const options = parsePlanOptions(name ? args.slice(1) : args);
+  if (!options || !name) {
+    err(
+      `usage: steamtrain workflow plan <name> --input <text> [--param key=value ...] [--json]
+       steamtrain workflow plan <name> --stdin [--param key=value ...] [--json]
+`,
+    );
+    return 1;
+  }
+
+  const input =
+    options.input ?? (options.stdin ? await readAll(io.stdin ?? process.stdin) : undefined);
+  if (!input?.trim()) {
+    err("workflow plan requires --input <text> or --stdin\n");
+    return 1;
+  }
+
+  const spec = orchestrator.listWorkflows()[name];
+  if (!spec) {
+    err(`unknown workflow '${name}'\n`);
+    return 1;
+  }
+
+  const resolved = resolveInputs(spec, options.params);
+  if (resolved.errors.length > 0) {
+    for (const e of resolved.errors) err(`input error: ${e}\n`);
+    return 1;
+  }
+
+  const plan = planWorkflow(spec, input.trim(), resolved.values);
+
+  if (options.json) {
+    out(`${JSON.stringify(plan, null, 2)}\n`);
+    return plan.ok ? 0 : 1;
+  }
+
+  if (!plan.ok) {
+    err(`plan failed: ${plan.error}\n`);
+    return 1;
+  }
+
+  // Print warnings.
+  if (plan.warnings) {
+    for (const w of plan.warnings) out(`warn: ${w}\n`);
+    if (plan.warnings.length > 0) out("\n");
+  }
+
+  // Summary line.
+  out(`plan: ${name}\n`);
+  out(
+    `  ${plan.phaseCount} phase${plan.phaseCount === 1 ? "" : "s"} · ${plan.staticStepCount} step${plan.staticStepCount === 1 ? "" : "s"}\n`,
+  );
+  out(
+    `  ${plan.agentCallCount} agent call${plan.agentCallCount === 1 ? "" : "s"} · ${plan.deterministicCount} deterministic step${plan.deterministicCount === 1 ? "" : "s"}\n`,
+  );
+  if (plan.agents.length > 0) out(`  agents: ${plan.agents.join(", ")}\n`);
+  if (plan.maxCostUsd !== undefined) out(`  budget: $${plan.maxCostUsd.toFixed(2)}\n`);
+
+  // forEach expansion.
+  for (const fe of plan.forEachSteps) {
+    out(`  fan-out: ${fe.stepId} → ${fe.source} (${fe.count} items)\n`);
+  }
+  for (const fe of plan.forEachDynamicSteps) {
+    out(`  fan-out: ${fe.stepId} → ${fe.source} (dynamic, items resolved at runtime)\n`);
+  }
+
+  // Loop gates.
+  for (const lg of plan.loopGates) {
+    out(`  loop: ${lg.gateId} → ${lg.loopTo} (max ${lg.maxIterations} iterations)\n`);
+  }
+
+  // Sub-workflows.
+  for (const ws of plan.workflowSteps) {
+    out(`  sub-workflow: ${ws.stepId} → ${ws.workflow}\n`);
+  }
+
+  // Step table.
+  out("\n");
+  out("  steps:\n");
+  for (const step of plan.steps) {
+    const tags: string[] = [];
+    if (step.isAgentBacked) tags.push(`${step.agent}/${step.model}`);
+    if (step.isDeterministic) tags.push("deterministic");
+    if (step.forEachSource) tags.push(`forEach→${step.forEachSource}`);
+    if (step.loopTo) tags.push(`loopTo→${step.loopTo}`);
+    if (step.whenCondition) tags.push(`when: ${step.whenCondition}`);
+    if (step.gateCondition) tags.push(`gate: ${step.gateCondition}`);
+    if (step.workflowName) tags.push(`workflow: ${step.workflowName}`);
+    if (step.mergeMode) tags.push(`merge: ${step.mergeMode}`);
+    if (step.workspaceSource) tags.push(`inherit: ${step.workspaceSource}`);
+    if (step.artifacts) tags.push(`artifacts: ${step.artifacts.join(", ")}`);
+
+    const tagStr = tags.length > 0 ? `  (${tags.join("; ")})` : "";
+    out(`    ${step.stepId} [${step.kind}]${tagStr}\n`);
+
+    if (step.renderedPrompt) {
+      const lines = step.renderedPrompt.split("\n");
+      const preview = lines.slice(0, 3).join("\n    ");
+      out(`      prompt: ${preview}${lines.length > 3 ? " ..." : ""}\n`);
+    }
+  }
+
+  return 0;
 }
 
 async function runCacheCommand(
@@ -1341,6 +1506,8 @@ function helpText(): string {
 Usage:
   steamtrain workflow list
   steamtrain workflow validate [name]
+  steamtrain workflow plan <name> --input <text> [--param key=value ...] [--json]
+  steamtrain workflow plan <name> --stdin [--param key=value ...] [--json]
   steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh]
   steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh]
   steamtrain workflow run --from <runId> [--retry-failed] [--param key=value ...] [--input <text>] [--json]

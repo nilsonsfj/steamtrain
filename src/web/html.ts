@@ -74,6 +74,7 @@ export function renderIndex(revs: PageAssetRevisions): string {
         <textarea id="input" placeholder="Describe the input for this run..."></textarea>
         <div id="paramsForm" class="params-form" style="display:none"></div>
         <div class="btnstack">
+          <button class="btn" id="planBtn">Plan</button>
           <button class="btn primary" id="runBtn">Run &#9654;</button>
           <button class="btn danger" id="cancelBtn" style="display:none">Cancel</button>
         </div>

@@ -484,7 +484,17 @@ uncontroversial and copies what every mature system does: flag dangling
 references at *validation* time, not mid-run after three phases of paid agent
 work.
 
-## 2.9 Dry-run / plan preview with cost estimate
+## 2.9 Dry-run / plan preview with cost estimate ✅ Shipped
+
+> **Shipped** — `planWorkflow()` produces a static analysis of a workflow spec
+> without executing any agents: rendered prompts (with `{{input}}` and
+> `{{inputs.*}}` resolved, `{{steps.*}}` as empty placeholders), step tree with
+> agent/model metadata, forEach expansion counts, loop gate structure,
+> sub-workflow references, gate/when condition descriptions, workspace
+> inheritance, artifacts, and dependency graph. Exposed as `workflow plan` CLI
+> command, `POST /api/workflows/:name/plan` web API endpoint, TUI dry-run
+> preview (Ctrl+D from the workflow preview), and web UI "Plan" button. 25
+> tests covering all step types and template rendering.
 
 **The gap:** `workflow validate` checks the schema, but there's no way to see
 what a run *will do* before spending money: which steps expand from the

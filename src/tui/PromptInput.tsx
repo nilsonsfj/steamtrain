@@ -8,6 +8,8 @@ interface PromptInputProps {
   onSubmit: (value: string) => void;
   onTab?: () => void;
   onCtrlR?: () => void;
+  /** Ctrl+D handler — plan/dry-run the current workflow. */
+  onCtrlD?: () => void;
   onCtrlQ?: () => void;
   onSuggestionNavigate?: (direction: "up" | "down") => void;
   onHistoryNavigate?: (direction: "up" | "down") => boolean;
@@ -39,6 +41,7 @@ export function PromptInput({
   onSubmit,
   onTab,
   onCtrlR,
+  onCtrlD,
   onCtrlQ,
   onSuggestionNavigate,
   onHistoryNavigate,
@@ -76,6 +79,17 @@ export function PromptInput({
       }
     },
     { isActive: focus && !!onCtrlR && !running },
+  );
+
+  useInput(
+    (input, key) => {
+      if (key.ctrl && input === "d" && onCtrlD) {
+        swallowNextCharRef.current = true;
+        swallowLetterRef.current = "d";
+        onCtrlD();
+      }
+    },
+    { isActive: focus && !!onCtrlD && !running },
   );
 
   useInput(

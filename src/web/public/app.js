@@ -1610,6 +1610,126 @@
     });
   }
 
+  // ---- plan (dry-run) -------------------------------------------------------
+  function startPlan() {
+    var input = document.getElementById("input").value;
+    if (!input.trim()) { setBanner("enter some input first", "info"); return; }
+    var payload = { input: input };
+    var params = collectParams();
+    if (params) payload.params = params;
+    if (workflowHasStaged(S.stagedOverrides[S.selected])) payload.overrides = S.stagedOverrides[S.selected];
+    setBanner("Planning...", "info");
+    api("POST", "/api/workflows/" + encodeURIComponent(S.selected) + "/plan", payload)
+      .then(function (r) {
+        if (r.status !== 200) { setBanner(r.body.error || "plan failed", "err"); return; }
+        renderPlanResult(r.body);
+      });
+  }
+
+  function renderPlanResult(plan) {
+    setBanner("", "");
+    var canvas = document.getElementById("canvas");
+    clear(canvas);
+
+    // Summary header.
+    var summary = h("div", { class: "plan-summary" });
+    summary.appendChild(h("div", { class: "plan-title", text: "Plan: " + S.selected }));
+    summary.appendChild(h("div", { class: "plan-stats",
+      text: plan.phaseCount + " phase" + (plan.phaseCount === 1 ? "" : "s") + " \u00b7 " +
+            plan.staticStepCount + " step" + (plan.staticStepCount === 1 ? "" : "s") + " \u00b7 " +
+            plan.agentCallCount + " agent call" + (plan.agentCallCount === 1 ? "" : "s") + " \u00b7 " +
+            plan.deterministicCount + " deterministic"
+    }));
+    if (plan.agents.length > 0) {
+      summary.appendChild(h("div", { class: "plan-agents", text: "agents: " + plan.agents.join(", ") }));
+    }
+    if (plan.maxCostUsd !== undefined) {
+      summary.appendChild(h("div", { class: "plan-budget", text: "budget: $" + plan.maxCostUsd.toFixed(2) }));
+    }
+    canvas.appendChild(summary);
+
+    // Warnings.
+    if (plan.warnings && plan.warnings.length > 0) {
+      var warnBox = h("div", { class: "plan-warnings" });
+      warnBox.appendChild(h("div", { class: "plan-warn-title", text: "\u26a0 " + plan.warnings.length + " template warning" + (plan.warnings.length === 1 ? "" : "s") }));
+      plan.warnings.forEach(function (w) {
+        warnBox.appendChild(h("div", { class: "plan-warn-item", text: w }));
+      });
+      canvas.appendChild(warnBox);
+    }
+
+    // Fan-out info.
+    plan.forEachSteps.forEach(function (fe) {
+      canvas.appendChild(h("div", { class: "plan-info", text: "\ud83d\udd00 " + fe.stepId + " \u2192 " + fe.source + " (" + fe.count + " items)" }));
+    });
+    plan.forEachDynamicSteps.forEach(function (fe) {
+      canvas.appendChild(h("div", { class: "plan-info", text: "\ud83d\udd00 " + fe.stepId + " \u2192 " + fe.source + " (dynamic, items resolved at runtime)" }));
+    });
+
+    // Loop gates.
+    plan.loopGates.forEach(function (lg) {
+      canvas.appendChild(h("div", { class: "plan-info", text: "\u21ba loop: " + lg.gateId + " \u2192 " + lg.loopTo + " (max " + lg.maxIterations + " iterations)" }));
+    });
+
+    // Sub-workflows.
+    plan.workflowSteps.forEach(function (ws) {
+      canvas.appendChild(h("div", { class: "plan-info", text: "\u2192 sub-workflow: " + ws.stepId + " \u2192 " + ws.workflow }));
+    });
+
+    // Step cards.
+    var stepsHeader = h("div", { class: "plan-steps-header", text: "Steps:" });
+    canvas.appendChild(stepsHeader);
+
+    var phases = {};
+    plan.steps.forEach(function (s) {
+      if (!phases[s.phaseId]) phases[s.phaseId] = { title: s.phaseTitle, index: s.phaseIndex, steps: [] };
+      phases[s.phaseId].steps.push(s);
+    });
+
+    Object.keys(phases).forEach(function (pid) {
+      var p = phases[pid];
+      var phaseEl = h("div", { class: "phase" });
+      phaseEl.appendChild(h("div", { class: "phead" },
+        h("div", { class: "pidx", text: String(p.index + 1) }),
+        h("div", { class: "ptitle", text: p.title })
+      ));
+      var cards = h("div", { class: "cards" });
+      p.steps.forEach(function (s) {
+        var card = h("div", { class: "card pending plan-step" });
+        var kindEl = h("span", { class: "kind " + s.kind });
+        kindEl.appendChild(document.createTextNode(KIND_LABEL[s.kind] || s.kind));
+        card.appendChild(h("div", { class: "top" },
+          h("span", { class: "sid", text: s.stepId }),
+          kindEl
+        ));
+        if (s.agent) card.appendChild(h("div", { class: "agent", text: s.agent + (s.model ? " \u00b7 " + s.model : "") }));
+        if (s.dependsOn && s.dependsOn.length) card.appendChild(h("div", { class: "inputs", text: "depends: " + s.dependsOn.join(", ") }));
+        if (s.forEachSource) card.appendChild(h("div", { class: "inputs", text: "forEach: " + s.forEachSource + (s.forEachCount ? " (" + s.forEachCount + " items)" : s.forEachDynamic ? " (dynamic)" : "") }));
+        if (s.loopTo) card.appendChild(h("div", { class: "inputs" },
+          h("span", { class: "chip warn", text: "\u21ba " + s.loopTo + (s.maxIterations ? " \u00b7 max " + s.maxIterations : "") })
+        ));
+        if (s.whenCondition) card.appendChild(h("div", { class: "inputs", text: "when: " + s.whenCondition }));
+        if (s.gateCondition) card.appendChild(h("div", { class: "inputs", text: "condition: " + s.gateCondition + (s.gateOnFalse ? " \u00b7 onFalse: " + s.gateOnFalse : "") }));
+        if (s.workflowName) card.appendChild(h("div", { class: "inputs", text: "workflow: " + s.workflowName }));
+        if (s.mergeMode) card.appendChild(h("div", { class: "inputs", text: "mode: " + s.mergeMode }));
+        if (s.workspaceSource) card.appendChild(h("div", { class: "inputs", text: "inherit: " + s.workspaceSource }));
+        if (s.artifacts) card.appendChild(h("div", { class: "inputs", text: "artifacts: " + s.artifacts.join(", ") }));
+        if (s.renderedPrompt) {
+          var lines = s.renderedPrompt.split("\n");
+          var preview = lines.slice(0, 3).join("\n");
+          var promptEl = h("div", { class: "plan-prompt" });
+          promptEl.appendChild(h("div", { class: "plan-prompt-label", text: "prompt:" }));
+          promptEl.appendChild(h("div", { class: "plan-prompt-text", text: preview + (lines.length > 3 ? " ..." : "") }));
+          card.appendChild(promptEl);
+        }
+        cards.appendChild(card);
+      });
+      phaseEl.appendChild(cards);
+      canvas.appendChild(phaseEl);
+    });
+  }
+
+  document.getElementById("planBtn").addEventListener("click", startPlan);
   document.getElementById("runBtn").addEventListener("click", startRun);
   document.getElementById("cancelBtn").addEventListener("click", cancelRun);
   document.getElementById("flushBtn").addEventListener("click", flushStaged);

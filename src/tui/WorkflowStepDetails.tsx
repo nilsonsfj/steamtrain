@@ -94,7 +94,7 @@ function PreviewStepDetails({
         </Text>
       </Box>
       <Text color="gray" wrap="truncate-end">
-        ←/Esc back · ↑/↓ step · Ctrl+R run{canResume ? " · Enter resume" : ""}
+        ←/Esc back · ↑/↓ step · Ctrl+R run · Ctrl+D plan{canResume ? " · Enter resume" : ""}
       </Text>
       <Box flexDirection="column" marginTop={1}>
         {visible.map((line, index) => (
