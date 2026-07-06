@@ -213,9 +213,9 @@ class PayloadTooLarge extends Error {
 
 async function readBody(req: IncomingMessage): Promise<string> {
   // Fast-reject: check the Content-Length header before consuming any bytes.
-  // This avoids a Bun-specific issue where throwing mid-stream causes the
-  // response status to be lost by the client (Bun's internal fetch does not
-  // propagate HTTP status correctly when the server errors during body read).
+  // This avoids buffering a multi-MiB body only to throw, and also works
+  // around a Bun-specific quirk where throwing mid-stream causes the response
+  // status to be lost by the client.
   // Note: non-numeric or missing Content-Length parses as NaN/0, both of which
   // fall through to the streaming guard below — this is intentional.
   const contentLength = parseInt(req.headers["content-length"] ?? "0", 10);
