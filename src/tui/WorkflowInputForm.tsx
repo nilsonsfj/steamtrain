@@ -69,12 +69,16 @@ export function WorkflowInputForm({
   useInput(
     (input, key) => {
       if (key.escape) {
+        if (editing) {
+          setEditing(false);
+          return;
+        }
         onCancel();
         return;
       }
 
       if (editing) {
-        // In editing mode for boolean fields — y/n selects
+        // In editing mode for boolean fields — y/n selects, Backspace/Delete clears
         const field = fields[focusIndex];
         if (field?.type === "boolean") {
           if (input === "y" || input === "1") {
@@ -89,17 +93,23 @@ export function WorkflowInputForm({
             setFields(next);
             setEditing(false);
             setError(null);
+          } else if (key.backspace || key.delete) {
+            const next = [...fields];
+            next[focusIndex] = { ...field, value: "" };
+            setFields(next);
+            setEditing(false);
+            setError(null);
           }
         }
         return;
       }
 
-      if (key.tab) {
+      if (key.tab && !key.shift) {
         setFocusIndex((i) => (i + 1) % fields.length);
         setError(null);
         return;
       }
-      if (key.shift && key.tab) {
+      if (key.tab && key.shift) {
         setFocusIndex((i) => (i - 1 + fields.length) % fields.length);
         setError(null);
         return;
@@ -143,7 +153,9 @@ export function WorkflowInputForm({
           input parameters · {spec.name}
         </Text>
         <Text color="gray">
-          {editing ? "y/n to toggle · Esc cancel" : "Tab field · Enter edit/submit · Esc cancel"}
+          {editing
+            ? "y/n toggle · Backspace clear · Esc cancel"
+            : "Tab field · Enter edit/submit · Esc cancel"}
         </Text>
       </Box>
 
