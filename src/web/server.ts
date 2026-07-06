@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import { homedir } from "node:os";
@@ -243,6 +243,12 @@ function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
+/** Timing-unsafe-safe string comparison. Both strings must be the same length. */
+function timingSafeCompare(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
 function parseCookies(header: string | undefined): Record<string, string> {
   const cookies: Record<string, string> = {};
   if (!header) return cookies;
@@ -413,7 +419,7 @@ async function handle(
       sendJson(res, 400, { error: "invalid JSON body" });
       return;
     }
-    if (typeof parsed.token !== "string" || parsed.token !== deps.authToken) {
+    if (typeof parsed.token !== "string" || !timingSafeCompare(parsed.token, deps.authToken)) {
       sendJson(res, 401, { error: "invalid token" });
       return;
     }

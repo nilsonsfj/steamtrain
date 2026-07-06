@@ -1059,7 +1059,7 @@ select.sel.invalid {
   width: 280px;
 }
 .login-error {
-  color: var(--err);
+  color: var(--error);
   font-size: 13px;
   min-height: 1.2em;
 }

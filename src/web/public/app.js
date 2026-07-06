@@ -101,7 +101,7 @@
   }
 
   function loadProjectConfig() {
-    api("GET", "/api/config").then(function (r) {
+    apiAuth("GET", "/api/config").then(function (r) {
       if (r.status === 200) S.projectConfig = r.body;
     });
   }
@@ -348,7 +348,7 @@
 
   // Agent/model/effort catalog for the create + configure forms.
   function loadMeta() {
-    api("GET", "/api/meta").then(function (r) {
+    apiAuth("GET", "/api/meta").then(function (r) {
       S.agents = (r.body && r.body.agents) || [];
       applyHealth();
     });
@@ -378,7 +378,7 @@
   // Health probes run in the background on the server; poll a few times until
   // they land so the chips appear without a manual reload.
   function pollDoctor(attempt) {
-    api("GET", "/api/doctor").then(function (r) {
+    apiAuth("GET", "/api/doctor").then(function (r) {
       var list = r.body.doctor || [];
       var err = r.body.doctorError;
       S.doctor = list;
@@ -424,7 +424,7 @@
     renderSidebar();
     document.getElementById("statusLine").style.display = "none";
     setBanner("", "");
-    api("GET", "/api/workflows/" + encodeURIComponent(name)).then(function (r) {
+    apiAuth("GET", "/api/workflows/" + encodeURIComponent(name)).then(function (r) {
       if (r.status !== 200) { setBanner(r.body.error || "failed to load", "err"); return; }
       S.spec = r.body.spec;
       S.source = r.body.source;
@@ -1350,7 +1350,7 @@
   }
 
   function reloadCatalog() {
-    return api("GET", "/api/workflows").then(function (r) {
+    return apiAuth("GET", "/api/workflows").then(function (r) {
       S.workflows = r.body.workflows || [];
       renderSidebar();
     });
@@ -1377,7 +1377,7 @@
   function reopenHistoryList(holder) {
     clear(holder);
     holder.appendChild(h("div", { class: "ro", text: "Loading\u2026" }));
-    api("GET", "/api/history").then(function (r) {
+    apiAuth("GET", "/api/history").then(function (r) {
       renderHistoryList(holder, (r.body && r.body.runs) || []);
     });
   }
@@ -1405,7 +1405,7 @@
   }
 
   function openHistoryRun(holder, id) {
-    api("GET", "/api/history/" + encodeURIComponent(id)).then(function (r) {
+    apiAuth("GET", "/api/history/" + encodeURIComponent(id)).then(function (r) {
       if (r.status !== 200 || !r.body.record) {
         renderHistoryList(holder, []);
         holder.insertBefore(h("div", { class: "mbanner show err", text: "Could not load that run." }), holder.firstChild);
