@@ -250,6 +250,7 @@ function SpecStepDetail({ entry, width }: { entry: FlatSpecStep; width: number }
 }
 
 function PlanResultView({ plan, width }: { plan: PlanResult; width: number }) {
+  const promptSteps = useMemo(() => plan.steps.filter((s) => s.renderedPrompt), [plan.steps]);
   return (
     <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor="cyan" paddingX={1}>
       <Text color="cyan" bold>
@@ -292,25 +293,20 @@ function PlanResultView({ plan, width }: { plan: PlanResult; width: number }) {
           ))}
         </Box>
       ) : null}
-      {plan.steps.filter((s) => s.renderedPrompt).length > 0 ? (
+      {promptSteps.length > 0 ? (
         <Box flexDirection="column" marginTop={1}>
-          <Text color="gray">
-            rendered prompts ({plan.steps.filter((s) => s.renderedPrompt).length}):
-          </Text>
-          {plan.steps
-            .filter((s) => s.renderedPrompt)
-            .slice(0, 5)
-            .map((s) => (
-              <Box key={s.stepId} flexDirection="column">
-                <Text color="white">
-                  {"  "}
-                  {s.stepId}: {truncate(s.renderedPrompt!, Math.max(40, width - 12))}
-                </Text>
-              </Box>
-            ))}
-          {plan.steps.filter((s) => s.renderedPrompt).length > 5 ? (
+          <Text color="gray">rendered prompts ({promptSteps.length}):</Text>
+          {promptSteps.slice(0, 5).map((s) => (
+            <Box key={s.stepId} flexDirection="column">
+              <Text color="white">
+                {"  "}
+                {s.stepId}: {truncate(s.renderedPrompt!, Math.max(40, width - 12))}
+              </Text>
+            </Box>
+          ))}
+          {promptSteps.length > 5 ? (
             <Text color="gray">
-              {"  "}... and {plan.steps.filter((s) => s.renderedPrompt).length - 5} more
+              {"  "}... and {promptSteps.length - 5} more
             </Text>
           ) : null}
         </Box>

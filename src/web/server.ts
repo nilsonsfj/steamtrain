@@ -550,8 +550,8 @@ async function handle(
       sendJson(res, 400, { error: "invalid JSON body" });
       return;
     }
-    if (typeof parsed.input !== "string") {
-      sendJson(res, 400, { error: "body must include string 'input'" });
+    if (typeof parsed.input !== "string" || !parsed.input.trim()) {
+      sendJson(res, 400, { error: "body must include non-empty string 'input'" });
       return;
     }
     let effectiveSpec = spec;

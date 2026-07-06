@@ -1618,7 +1618,7 @@
     var params = collectParams();
     if (params) payload.params = params;
     if (workflowHasStaged(S.stagedOverrides[S.selected])) payload.overrides = S.stagedOverrides[S.selected];
-    setBanner("Planning...", "info");
+    setBanner("Planning\u2026", "info");
     api("POST", "/api/workflows/" + encodeURIComponent(S.selected) + "/plan", payload)
       .then(function (r) {
         if (r.status !== 200) { setBanner(r.body.error || "plan failed", "err"); return; }

@@ -203,7 +203,7 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
       return validateWorkflows(orchestrator.listWorkflows(), rest[0], out, err);
     case "plan":
     case "dry-run":
-      return runPlanCommand(orchestrator, rest, io, out, err);
+      return planCommand(orchestrator, rest, io, out, err);
     case "cache":
       return runCacheCommand(rest, cwd, io, orchestrator, out, err);
     case "history":
@@ -306,16 +306,6 @@ function parsePlanOptions(args: string[]): PlanOptions | null {
   return options;
 }
 
-function runPlanCommand(
-  orchestrator: Orchestrator,
-  args: string[],
-  io: CliIO,
-  out: (text: string) => void,
-  err: (text: string) => void,
-): Promise<number> {
-  return planCommand(orchestrator, args, io, out, err);
-}
-
 async function planCommand(
   orchestrator: Orchestrator,
   args: string[],
@@ -405,7 +395,9 @@ async function planCommand(
   out("  steps:\n");
   for (const step of plan.steps) {
     const tags: string[] = [];
-    if (step.isAgentBacked) tags.push(`${step.agent}/${step.model}`);
+    if (step.isAgentBacked) {
+      tags.push(step.model ? `${step.agent}/${step.model}` : (step.agent ?? "agent"));
+    }
     if (step.isDeterministic) tags.push("deterministic");
     if (step.forEachSource) tags.push(`forEach→${step.forEachSource}`);
     if (step.loopTo) tags.push(`loopTo→${step.loopTo}`);
