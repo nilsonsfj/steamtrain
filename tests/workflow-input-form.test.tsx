@@ -167,4 +167,113 @@ describe("WorkflowInputForm", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("req");
   });
+
+  it("navigates between fields with Tab", async () => {
+    const spec = makeSpec({
+      a: { type: "string", default: "val-a" },
+      b: { type: "string", default: "val-b" },
+    });
+    const { stdin, lastFrame } = render(
+      <WorkflowInputForm
+        spec={spec}
+        width={80}
+        height={20}
+        onSubmit={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    await tick();
+    let frame = lastFrame() ?? "";
+    // First field (a) should be focused initially
+    expect(frame).toContain("▶");
+
+    // Tab to next field
+    stdin.write("\t");
+    await tick();
+    frame = lastFrame() ?? "";
+    // Focus indicator should still be present (on field b now)
+    expect(frame).toContain("▶");
+  });
+
+  it("allows typing into string fields", async () => {
+    const onSubmit = vi.fn();
+    const spec = makeSpec({
+      name: { type: "string" },
+    });
+    const { stdin, lastFrame } = render(
+      <WorkflowInputForm
+        spec={spec}
+        width={80}
+        height={20}
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />,
+    );
+    await tick();
+    // Type characters
+    await type(stdin, "h", "e", "l", "l", "o");
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("hello");
+
+    // Submit
+    stdin.write("\r");
+    await tick();
+    expect(onSubmit).toHaveBeenCalledWith({ name: "hello" });
+  });
+
+  it("filters non-numeric characters in number fields", async () => {
+    const spec = makeSpec({
+      count: { type: "number" },
+    });
+    const { stdin, lastFrame } = render(
+      <WorkflowInputForm
+        spec={spec}
+        width={80}
+        height={20}
+        onSubmit={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    await tick();
+    // Type valid number characters
+    await type(stdin, "1", "2", "3");
+    let frame = lastFrame() ?? "";
+    expect(frame).toContain("123");
+
+    // Type letter — should be filtered out
+    stdin.write("a");
+    await tick();
+    frame = lastFrame() ?? "";
+    expect(frame).toContain("123");
+    expect(frame).not.toContain("123a");
+  });
+
+  it("toggles boolean with y/n in edit mode", async () => {
+    const onSubmit = vi.fn();
+    const spec = makeSpec({
+      flag: { type: "boolean" },
+    });
+    const { stdin, lastFrame } = render(
+      <WorkflowInputForm
+        spec={spec}
+        width={80}
+        height={20}
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />,
+    );
+    await tick();
+
+    // Press Enter to enter boolean edit mode
+    stdin.write("\r");
+    await tick();
+    let frame = lastFrame() ?? "";
+    expect(frame).toContain("y/n");
+
+    // Press y to set true
+    stdin.write("y");
+    await tick();
+    frame = lastFrame() ?? "";
+    expect(frame).toContain("[true]");
+  });
 });
