@@ -156,6 +156,7 @@ function extractRefs(text: string | undefined): string[] {
   return refs;
 }
 
+/** Scan condition text fields for template refs. `condition.step` is intentionally skipped — it's a plain step id, not a template string. */
 function scanConditionRefs(condition: GateCondition | undefined, refs: string[]): void {
   if (!condition) return;
   if (condition.contains) refs.push(...extractRefs(condition.contains));

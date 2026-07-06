@@ -1160,7 +1160,8 @@
           var warns = r.body.warnings;
           refreshAfterWrite(savedName, "saved");
           if (warns && warns.length) {
-            setBanner("⚠ " + warns.length + " template warning" + (warns.length > 1 ? "s" : "") + ": " + warns[0], "info");
+            var suffix = warns.length > 1 ? " (and " + (warns.length - 1) + " more)" : "";
+            setBanner("⚠ " + warns.length + " template warning" + (warns.length > 1 ? "s" : "") + ": " + warns[0] + suffix, "info");
           }
         } else {
           mbanner(banner, (r.body && r.body.error) || "save failed", "err");
