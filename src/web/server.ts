@@ -212,10 +212,16 @@ class PayloadTooLarge extends Error {
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {
+  // Fast-reject: check the Content-Length header before consuming any bytes.
+  // This avoids a Bun-specific issue where throwing mid-stream causes the
+  // response status to be lost by the client (Bun's internal fetch does not
+  // propagate HTTP status correctly when the server errors during body read).
   const contentLength = parseInt(req.headers["content-length"] ?? "0", 10);
   if (contentLength > MAX_BODY_BYTES) {
     throw new PayloadTooLarge();
   }
+  // Defense-in-depth: also guard against chunked transfers or mismatched
+  // Content-Length headers by checking cumulative bytes during streaming.
   const chunks: Buffer[] = [];
   let totalBytes = 0;
   for await (const chunk of req) {
@@ -268,6 +274,9 @@ export function createWebServer(deps: WebServerDeps): Server {
         const status = err instanceof PayloadTooLarge ? 413 : 500;
         const error =
           err instanceof PayloadTooLarge ? "payload too large" : "internal server error";
+        // Drain unread body *before* sending the response — Bun requires
+        // the request stream to be consumed/discarded for the client-side
+        // fetch to receive the correct HTTP status code.
         if (err instanceof PayloadTooLarge) drainRequestBody(req);
         sendJson(res, status, { error });
       } else {
