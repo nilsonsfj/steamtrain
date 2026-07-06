@@ -218,7 +218,7 @@ async function readBody(req: IncomingMessage): Promise<string> {
   // status to be lost by the client.
   // Note: non-numeric or missing Content-Length parses as NaN/0, both of which
   // fall through to the streaming guard below — this is intentional.
-  const contentLength = parseInt(req.headers["content-length"] ?? "0", 10);
+  const contentLength = Number.parseInt(req.headers["content-length"] ?? "0", 10);
   if (contentLength > MAX_BODY_BYTES) {
     throw new PayloadTooLarge();
   }
