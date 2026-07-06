@@ -265,8 +265,11 @@ function parseCookies(header: string | undefined): Record<string, string> {
 function checkAuth(req: IncomingMessage, authToken: string | undefined): boolean {
   if (!authToken) return true;
   const cookies = parseCookies(req.headers.cookie);
-  // Compare against the hashed token stored in the cookie.
-  return cookies[AUTH_COOKIE] === hashToken(authToken);
+  const cookieVal = cookies[AUTH_COOKIE];
+  if (!cookieVal) return false;
+  // Compare against the hashed token stored in the cookie using
+  // timing-safe comparison to match the login endpoint's approach.
+  return timingSafeCompare(cookieVal, hashToken(authToken));
 }
 
 /**
