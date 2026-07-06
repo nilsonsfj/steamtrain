@@ -689,6 +689,7 @@ Prompt templates and several block fields support:
 | placeholder | expands to |
 | --- | --- |
 | `{{input}}`, `{{args}}` | The text supplied when the workflow starts. |
+| `{{inputs.<key>}}` | A declared workflow input parameter (see [Workflow inputs](#workflow-inputs)). |
 | `{{steps.<id>.output}}` | Prior step output. |
 | `{{steps.<id>.items}}` | Prior distributor items joined by newline. |
 | `{{steps.<id>.ok}}` | `true` or `false`. |
@@ -704,8 +705,10 @@ Prompt templates and several block fields support:
 | `{{item}}`, `{{item.value}}` | Current dynamic fan-out item inside a `forEach` worker/processor. |
 | `{{item.index}}` | Zero-based index of the current fan-out item. |
 | `{{item.sourceStepId}}` | Distributor step id that produced the current item. |
+| `{{iteration}}` | Current loop iteration (1-based, defaults to 1; available inside a loop gate region). |
 
-Unknown placeholders are left unchanged.
+Unknown placeholders are left unchanged. **Template validation** (below)
+catches steamtrain-specific references that will silently render as empty.
 
 ## Validation rules
 
@@ -744,6 +747,37 @@ Unknown placeholders are left unchanged.
   worker/processor/command step in an earlier phase, without `forEach`.
 - `artifacts` entries must be relative paths that stay inside the step's cwd,
   with unique template names per step.
+
+### Template validation
+
+`workflow validate` and `workflow run` check every `{{…}}` template reference
+in prompts, distributor items, gate conditions, merge fields, command `cmd`,
+and workflow `input` templates. References that match steamtrain-specific
+patterns but point to something invalid produce **warnings** (the workflow
+still runs, but the reference will silently render as empty):
+
+- **Unknown step id** — `{{steps.typo.output}}` when no step `typo` exists.
+- **Invalid step field** — `{{steps.foo.misspelled}}` where the field is not
+  one of `output`, `items`, `ok`, `error`, `target`, `iteration`, `exitCode`,
+  `json`, `worktree.*`, or `artifacts.*`.
+- **Undeclared input** — `{{inputs.version}}` when the workflow's `inputs` map
+  has no `version` key.
+- **Wrong context** — `{{item}}` outside a `forEach` child, or
+  `{{iteration}}` outside a loop gate region.
+- **Wrong step type** — `{{steps.foo.exitCode}}` on a non-command step,
+  `{{steps.foo.worktree.root}}` on a step without workspace isolation, or
+  `{{steps.foo.artifacts.x}}` on a step with no declared artifacts.
+
+Generic mustache-style placeholders (e.g. `{{name}}`) that don't match any
+steamtrain pattern are intentionally ignored — they may be legitimate template
+syntax in the user's prompts.
+
+Warnings appear in:
+- CLI: `workflow validate` prints `warn:` lines; `workflow run` prints them
+  before starting.
+- TUI: the workflow preview shows a yellow warning count.
+- Web UI: the save response includes a `warnings` array; the configure modal
+  shows the first warning in the banner.
 
 ## CLI
 

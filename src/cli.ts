@@ -42,6 +42,7 @@ import {
   harvestWorktrees,
   hashWorkflowSpec,
   isRerunError,
+  lintTemplateRefs,
   modelBreakdownForRecord,
   persistWorkflowStepDone,
   planRerun,
@@ -251,6 +252,9 @@ function validateWorkflows(
     const result = validateWorkflow(spec);
     if (result.ok) {
       out(`ok  ${workflowName}\n`);
+      if (result.warnings) {
+        for (const w of result.warnings) out(`    warn: ${w}\n`);
+      }
     } else {
       ok = false;
       err(`bad ${workflowName}: ${result.error}\n`);
@@ -813,6 +817,9 @@ async function runWorkflowCommand(
     for (const e of resolved.errors) err(`input error: ${e}\n`);
     return 1;
   }
+
+  const templateWarnings = lintTemplateRefs(spec);
+  for (const w of templateWarnings) out(`warn: ${w}\n`);
 
   // Agentless workflows (only distributors / consolidators / gates) never spawn
   // a CLI, so skip the doctor + catalog refresh — they would otherwise spawn

@@ -1157,7 +1157,12 @@
           var savedName = r.body.name || targetName;
           delete S.stagedOverrides[S.selected || savedName];
           if (savedName !== S.selected) delete S.stagedOverrides[savedName];
+          var warns = r.body.warnings;
           refreshAfterWrite(savedName, "saved");
+          if (warns && warns.length) {
+            var suffix = warns.length > 1 ? " (and " + (warns.length - 1) + " more)" : "";
+            setBanner("⚠ " + warns.length + " template warning" + (warns.length > 1 ? "s" : "") + ": " + warns[0] + suffix, "info");
+          }
         } else {
           mbanner(banner, (r.body && r.body.error) || "save failed", "err");
         }

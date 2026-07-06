@@ -89,6 +89,8 @@ export interface AuthorWriteResult {
   error?: string;
   /** Raw model text, surfaced when generation parsing fails. */
   raw?: string;
+  /** Non-fatal template reference warnings (workflow still saves). */
+  warnings?: string[];
 }
 
 export interface AuthorDeleteResult {
@@ -353,6 +355,7 @@ export class WorkflowAuthor {
     const full: WorkflowSpec = { ...spec, name };
     const valid = validateWorkflow(full);
     if (!valid.ok) return { ok: false, error: valid.error, raw: extra?.raw };
+    const warnings = valid.warnings;
 
     const saved =
       scope === "project"
@@ -369,6 +372,7 @@ export class WorkflowAuthor {
       savedPath: saved.path,
       replaced: saved.replaced,
       raw: extra?.raw,
+      warnings,
     };
   }
 
