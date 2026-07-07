@@ -15,6 +15,7 @@ import { Orchestrator } from "./orchestrator";
 import { loadSettings } from "./settings";
 import type { AgentInstanceId } from "./types/events";
 import {
+  type ApprovalProvider,
   type HarvestResult,
   MergeConflictError,
   type ModelUsage,
@@ -41,6 +42,7 @@ import {
   generateWorkflow,
   harvestWorktrees,
   hashWorkflowSpec,
+  headlessApprovalProvider,
   isRerunError,
   lintTemplateRefs,
   modelBreakdownForRecord,
@@ -172,6 +174,10 @@ interface RunOptions {
   from?: string;
   retryFailed: boolean;
   params: Record<string, string>;
+  /** `--approve-all`: auto-approve every human checkpoint (unattended). */
+  approveAll: boolean;
+  /** `--on-approval fail|stop`: auto-reject every human checkpoint with this disposition. */
+  onApproval?: "fail" | "stop";
 }
 
 export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
@@ -914,7 +920,7 @@ async function runWorkflowCommand(
   const options = parseRunOptions(positional ? args.slice(1) : args);
   if (!options) {
     err(
-      `usage: steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh]
+      `usage: steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--approve-all | --on-approval fail|stop]
        steamtrain workflow run --from <runId> [--retry-failed] [--json]
 `,
     );
@@ -1056,6 +1062,25 @@ async function runWorkflowCommand(
   timeoutTimer?.unref?.();
   let ok = false;
   let budgetExceeded = false;
+  // Human-approval checkpoints run non-interactively in the headless CLI:
+  // `--approve-all` approves; `--on-approval fail|stop` rejects with that
+  // disposition; with neither flag we auto-reject and stop (the safe default —
+  // don't spend money / mutate a repo without an explicit decision).
+  const approvalProvider: ApprovalProvider = options.approveAll
+    ? headlessApprovalProvider("approve-all")
+    : options.onApproval === "fail"
+      ? headlessApprovalProvider("reject-fail")
+      : headlessApprovalProvider("reject-stop");
+  const workflowCatalog = orchestrator.listWorkflows();
+  if (
+    !options.approveAll &&
+    !options.onApproval &&
+    specHasApprovalCheckpoints(spec, (childName) => workflowCatalog[childName])
+  ) {
+    err(
+      "note: this workflow has approval checkpoints; with no --approve-all / --on-approval they auto-reject and stop the run\n",
+    );
+  }
   try {
     for await (const event of orchestrator.runWorkflow(
       name,
@@ -1065,6 +1090,7 @@ async function runWorkflowCommand(
       cwd,
       undefined,
       resolved.values,
+      approvalProvider,
     )) {
       recorder.handle(event);
       if (options.json) out(`${JSON.stringify(event)}\n`);
@@ -1408,6 +1434,7 @@ function parseRunOptions(args: string[]): RunOptions | null {
     fresh: false,
     retryFailed: false,
     params: {},
+    approveAll: false,
   };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -1438,10 +1465,19 @@ function parseRunOptions(args: string[]): RunOptions | null {
       options.json = true;
     } else if (arg === "--fresh") {
       options.fresh = true;
+    } else if (arg === "--approve-all") {
+      options.approveAll = true;
+    } else if (arg === "--on-approval") {
+      const value = args[i + 1];
+      if (value !== "fail" && value !== "stop") return null;
+      options.onApproval = value;
+      i += 1;
     } else {
       return null;
     }
   }
+  // `--approve-all` and `--on-approval` are mutually exclusive intents.
+  if (options.approveAll && options.onApproval) return null;
   return options;
 }
 
@@ -1473,6 +1509,18 @@ function printHumanEvent(event: WorkflowEvent, out: (text: string) => void): voi
         }\n`,
       );
       return;
+    case "approval_pending": {
+      const review = event.reviewStepId ? ` (reviewing ${event.reviewStepId})` : "";
+      out(`  ⏳ approval ${event.stepId}${review} — awaiting decision\n`);
+      if (event.message) out(`     ${event.message}\n`);
+      return;
+    }
+    case "approval_resolved": {
+      const who = event.by ? ` by ${event.by}` : "";
+      const note = event.note ? ` — ${event.note}` : "";
+      out(`  ${event.approved ? "✓ approved" : "✗ rejected"} ${event.stepId}${who}${note}\n`);
+      return;
+    }
     case "step_done":
       out(
         `  ${event.result.ok ? "done" : "fail"} ${event.stepId}${event.cached ? " (cached)" : ""}\n`,
@@ -1494,6 +1542,32 @@ function printHumanEvent(event: WorkflowEvent, out: (text: string) => void): voi
       );
       return;
   }
+}
+
+/**
+ * Whether a workflow contains any human-approval checkpoint (approval step or
+ * human gate), recursing into named sub-workflows so a checkpoint nested inside
+ * a `kind: "workflow"` call still triggers the headless advisory. `resolve`
+ * looks up a child spec by name (the orchestrator catalog); `seen` guards
+ * against workflows that reference each other cyclically.
+ */
+function specHasApprovalCheckpoints(
+  spec: WorkflowSpec,
+  resolve?: (name: string) => WorkflowSpec | undefined,
+  seen: Set<string> = new Set(),
+): boolean {
+  for (const phase of spec.phases) {
+    for (const step of phase.steps) {
+      if (step.kind === "approval") return true;
+      if (step.kind === "gate" && step.condition.human === true) return true;
+      if (step.kind === "workflow" && resolve && !seen.has(step.workflow)) {
+        seen.add(step.workflow);
+        const child = resolve(step.workflow);
+        if (child && specHasApprovalCheckpoints(child, resolve, seen)) return true;
+      }
+    }
+  }
+  return false;
 }
 
 function workflowSummary(spec: WorkflowSpec): string {
@@ -1520,8 +1594,8 @@ Usage:
   steamtrain workflow validate [name]
   steamtrain workflow plan <name> --input <text> [--param key=value ...] [--json]
   steamtrain workflow plan <name> --stdin [--param key=value ...] [--json]
-  steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh]
-  steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh]
+  steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--approve-all | --on-approval fail|stop]
+  steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh] [--approve-all | --on-approval fail|stop]
   steamtrain workflow run --from <runId> [--retry-failed] [--param key=value ...] [--input <text>] [--json]
   steamtrain workflow create --input <description> [--agent <id>] [--model <model>] [--name <name>] [--save] [--scope user|project] [--json]
   steamtrain workflow cache clear [<workflow> --input <text> --param key=value ... | --stdin]

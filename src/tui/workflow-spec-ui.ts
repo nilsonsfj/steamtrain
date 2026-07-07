@@ -33,6 +33,7 @@ export const BLOCK_LABEL: Record<ReturnType<typeof workflowStepKind>, string> = 
   processor: "process",
   consolidator: "merge",
   gate: "gate",
+  approval: "approval",
   merge: "merge-back",
   command: "command",
   workflow: "sub-workflow",

@@ -1,4 +1,5 @@
 import type { AgentInstanceId, TokenUsage } from "../types/events";
+import type { ApprovalRejectDisposition } from "./approval";
 import { addTokensInto, emptyTokens, formatTokens, totalTokens } from "./cost";
 import type { WorkflowEvent } from "./events";
 import type {
@@ -38,6 +39,18 @@ export interface HistoryStep {
   text: string;
   result?: StepResult;
   gate?: { passed: boolean; target?: string; onFalse?: GateStep["onFalse"] };
+  /**
+   * Human-approval checkpoint decision, when this step is an `approval` step or
+   * a `gate` with `condition.human`. Records who decided and how, so the history
+   * viewer can show the checkpoint outcome.
+   */
+  approval?: {
+    approved?: boolean;
+    by?: string;
+    note?: string;
+    reviewStepId?: string;
+    onReject?: ApprovalRejectDisposition;
+  };
   cached: boolean;
   /** Total attempts this step took (auto-retry); omitted/1 means it ran once. */
   attempts?: number;
@@ -301,6 +314,27 @@ export class RunRecordBuilder {
         const step = this.stepOf(event.phaseId, event.stepId, event.iteration);
         if (!step) break;
         step.gate = { passed: event.passed, target: event.target, onFalse: event.onFalse };
+        break;
+      }
+      case "approval_pending": {
+        const step = this.stepOf(event.phaseId, event.stepId, event.iteration);
+        if (!step) break;
+        step.approval = {
+          ...step.approval,
+          reviewStepId: event.reviewStepId,
+          onReject: event.onReject,
+        };
+        break;
+      }
+      case "approval_resolved": {
+        const step = this.stepOf(event.phaseId, event.stepId, event.iteration);
+        if (!step) break;
+        step.approval = {
+          ...step.approval,
+          approved: event.approved,
+          by: event.by,
+          note: event.note,
+        };
         break;
       }
       case "step_done": {

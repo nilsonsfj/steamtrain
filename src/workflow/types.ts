@@ -31,6 +31,7 @@ export type WorkflowStepKind =
   | "distributor"
   | "consolidator"
   | "gate"
+  | "approval"
   | "merge"
   | "command"
   | "workflow";
@@ -325,6 +326,17 @@ export interface WorkflowCallStep extends WorkflowStepBase {
 export interface GateCondition {
   /** Step whose result is inspected; omitted means inspect the workflow input. */
   step?: string;
+  /**
+   * Human-in-the-loop condition: the gate pauses the run and waits for a
+   * human (or an automated `--approve-all` / `--on-approval` policy) to
+   * Approve or Reject. `passed` becomes the approval outcome, so the gate's
+   * `onFalse` (`continue` / `fail` / `stop`) and `target` route on it exactly
+   * like a mechanical gate, and `loopTo` can turn "reject" into a loop-back.
+   * When set, the mechanical predicates (`ok` / `contains` / `matches` /
+   * `equals` / `path`) are not used (and are rejected by validation). See the
+   * ergonomic `approval` step kind for the common case.
+   */
+  human?: boolean;
   /** Match the referenced step's ok/error state. */
   ok?: boolean;
   /**
@@ -362,11 +374,45 @@ export interface GateStep extends WorkflowStepBase {
   maxIterations?: number;
 }
 
+/**
+ * Human-in-the-loop approval checkpoint (§1.2). Pauses the run, surfaces the
+ * reviewed step's output — and, when it ran in an isolated git worktree, its
+ * diff — and waits for a human (TUI keypress, web Approve/Reject card) or an
+ * automated CI policy (`--approve-all` / `--on-approval fail|stop`) to decide.
+ * Approve continues the run (emitting `target`); Reject applies `onReject`.
+ *
+ * Sugar over a `gate` whose condition is `{ human: true }`: the engine routes
+ * both through one approval path, so an approval step reuses the gate's
+ * `gate_evaluated` event, history, and reducer handling. Unlike a gate it never
+ * loops and its reject disposition is `fail`/`stop` only (a "continue on
+ * reject" checkpoint is a no-op).
+ *
+ * Approval decisions are never cached, so a resumed run always re-asks while
+ * the cached steps around the checkpoint replay.
+ */
+export interface ApprovalStep extends WorkflowStepBase {
+  kind: "approval";
+  /**
+   * The step whose output/diff to surface for review. Defaults to this step's
+   * sole `dependsOn` entry when it has exactly one; must reference an earlier
+   * phase. Omit both `step` and a single `dependsOn` for a bare "proceed?"
+   * checkpoint with no reviewed output.
+   */
+  step?: string;
+  /** Human-readable instructions shown alongside the reviewed output. Templated. */
+  prompt?: string;
+  /** State/label emitted when the checkpoint is approved. Default `"approved"`. */
+  target?: string;
+  /** What a rejection does to control flow. Default `"fail"`. */
+  onReject?: "fail" | "stop";
+}
+
 export type WorkflowStep =
   | WorkerStep
   | DistributorStep
   | ConsolidatorStep
   | GateStep
+  | ApprovalStep
   | MergeStep
   | CommandStep
   | WorkflowCallStep;
@@ -511,6 +557,13 @@ export interface StepResult {
   worktree?: AgentWorktreeInfo;
   /** Loop iteration this result belongs to (1-based); omitted ⇒ 1. */
   iteration?: number;
+  /**
+   * When true this result must never be written to the step cache (in-memory
+   * or on-disk). Set for human-approval checkpoints so a resumed run always
+   * re-asks the decision instead of replaying a stale approval. Purely a
+   * runtime flag: it is not persisted (a `noCache` result is never stored).
+   */
+  noCache?: boolean;
 }
 
 /** Total steps a single run may contain (matches the dynamic-workflows cap). */
@@ -532,6 +585,7 @@ const agentId = z
 const gateConditionSchema = z
   .object({
     step: z.string().min(1).optional(),
+    human: z.boolean().optional(),
     ok: z.boolean().optional(),
     path: z.string().min(1).optional(),
     contains: z.string().optional(),
@@ -540,6 +594,23 @@ const gateConditionSchema = z
     not: z.boolean().optional(),
   })
   .superRefine((condition, ctx) => {
+    // A human-approval condition pauses for a decision instead of testing a
+    // predicate, so it is mutually exclusive with the mechanical checks.
+    if (condition.human) {
+      const mechanical =
+        condition.ok !== undefined ||
+        condition.path !== undefined ||
+        condition.contains !== undefined ||
+        condition.matches !== undefined ||
+        condition.equals !== undefined;
+      if (mechanical) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "gate condition human cannot be combined with ok/path/contains/matches/equals",
+        });
+      }
+      return;
+    }
     if (
       condition.ok === undefined &&
       condition.contains === undefined &&
@@ -548,7 +619,7 @@ const gateConditionSchema = z
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "gate condition requires ok, contains, matches, or equals",
+        message: "gate condition requires human, ok, contains, matches, or equals",
       });
     }
     if (condition.ok !== undefined && !condition.step) {
@@ -689,6 +760,15 @@ const workflowGateStepSchema = z.object({
   maxIterations: z.number().int().min(1).max(LOOP_MAX_ITERATIONS_CEILING).optional(),
 });
 
+const workflowApprovalStepSchema = z.object({
+  ...baseStepShape,
+  kind: z.literal("approval"),
+  step: z.string().min(1).optional(),
+  prompt: z.string().min(1).optional(),
+  target: z.string().min(1).optional(),
+  onReject: z.enum(["fail", "stop"]).optional(),
+});
+
 const workflowMergeStepSchema = z
   .object({
     ...baseStepShape,
@@ -760,6 +840,7 @@ const workflowCallStepSchema = z.object({
 
 const workflowStepSchema = z.union([
   workflowGateStepSchema,
+  workflowApprovalStepSchema,
   workflowDistributorStepSchema,
   workflowConsolidatorStepSchema,
   workflowMergeStepSchema,
@@ -995,6 +1076,14 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
           error: allIds.has(step.condition.step)
             ? `gate '${step.id}' condition references '${step.condition.step}', which is not in an earlier phase`
             : `gate '${step.id}' condition references unknown step '${step.condition.step}'`,
+        };
+      }
+      if (step.kind === "approval" && step.step && !earlierIds.has(step.step)) {
+        return {
+          ok: false,
+          error: allIds.has(step.step)
+            ? `approval '${step.id}' step references '${step.step}', which is not in an earlier phase`
+            : `approval '${step.id}' step references unknown step '${step.step}'`,
         };
       }
       if (step.kind === "merge") {

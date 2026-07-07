@@ -433,6 +433,9 @@ textarea#input:focus {
 .kind.gate {
   background: #f0a35e;
 }
+.kind.approval {
+  background: #ffd166;
+}
 .kind.merge {
   background: #ff9ecb;
 }
@@ -947,6 +950,9 @@ select.sel.invalid {
 .estep.gate {
   border-left-color: #f0a35e;
 }
+.estep.approval {
+  border-left-color: #ffd166;
+}
 .estep.merge {
   border-left-color: #ff9ecb;
 }
@@ -1129,4 +1135,83 @@ select.sel.invalid {
   word-break: break-word;
   max-height: 120px;
   overflow-y: auto;
+}
+
+/* Human-in-the-loop approval checkpoint card (§1.2). */
+.approval {
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  font-size: 12px;
+}
+.approval.pending {
+  border-color: var(--gate);
+  background: #241f10;
+}
+.approval.approved {
+  border-color: var(--done);
+}
+.approval.rejected {
+  border-color: var(--error);
+}
+.approval-review {
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+.approval-msg {
+  margin-bottom: 6px;
+  white-space: pre-wrap;
+}
+.approval-output {
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+}
+.approval-diff {
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+.approval-actions {
+  display: flex;
+  gap: 8px;
+}
+.approval-actions .btn {
+  height: 30px;
+  padding: 0 14px;
+  font-size: 12px;
+}
+.approval-actions .btn.approve {
+  color: #eafffb;
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+.approval-actions .btn.approve:hover {
+  background: #25867d;
+}
+.approval-actions .btn.reject {
+  color: var(--error);
+  border-color: #5e2a2a;
+}
+.approval-actions .btn.reject:hover {
+  background: #2d1212;
+}
+.approval-decision {
+  font-weight: 600;
+}
+.approval.approved .approval-decision {
+  color: var(--done);
+}
+.approval.rejected .approval-decision {
+  color: var(--error);
 }

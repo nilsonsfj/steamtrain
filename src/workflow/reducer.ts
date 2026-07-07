@@ -1,9 +1,49 @@
 import type { AgentEvent, AgentInstanceId } from "../types/events";
+import type { ApprovalRejectDisposition } from "./approval";
 import type { WorkflowEvent } from "./events";
 import type { RunRecord } from "./history";
+import type { WorktreeDiff } from "./merge";
 import type { GateStep, StepResult, WorkflowItem, WorkflowSpec, WorkflowStepKind } from "./types";
 
 export type StepStatus = "pending" | "running" | "done" | "error";
+
+/**
+ * Human-approval checkpoint state attached to an `approval` step / human gate.
+ * Mirrors the `approval_pending` / `approval_resolved` events so a UI can render
+ * the reviewed output/diff and the decision from the folded tree alone.
+ */
+export interface StepApprovalState {
+  /** True while the run is paused waiting for a decision. */
+  pending: boolean;
+  /** The decision, once resolved. */
+  approved?: boolean;
+  /** Who/what decided (e.g. `"human"`, `"auto:approve-all"`). */
+  by?: string;
+  /** Optional note attached to the decision. */
+  note?: string;
+  /** The step under review, when the checkpoint references one. */
+  reviewStepId?: string;
+  /** Human-readable instructions from the spec. */
+  message?: string;
+  /** The reviewed step's output (capped). */
+  output?: string;
+  /** The reviewed step's worktree diff, when it ran in one. */
+  diff?: WorktreeDiff;
+  /** What a rejection does to control flow. */
+  onReject?: ApprovalRejectDisposition;
+}
+
+/** A checkpoint the run is currently paused on, awaiting an Approve/Reject decision. */
+export interface PendingApproval {
+  phaseId: string;
+  stepId: string;
+  iteration: number;
+  reviewStepId?: string;
+  message?: string;
+  output?: string;
+  diff?: WorktreeDiff;
+  onReject?: ApprovalRejectDisposition;
+}
 
 export interface StepState {
   stepId: string;
@@ -23,6 +63,12 @@ export interface StepState {
   activity?: string;
   result?: StepResult;
   gate?: { passed: boolean; target?: string; onFalse?: GateStep["onFalse"] };
+  /**
+   * Human-approval checkpoint state, when this step is an `approval` step or a
+   * `gate` with `condition.human`. `pending` is true while the run waits for a
+   * decision; `approved`/`by`/`note` land once it resolves.
+   */
+  approval?: StepApprovalState;
   cached: boolean;
   /** Total attempts so far when the step is auto-retrying a transient failure. */
   attempts?: number;
@@ -73,6 +119,11 @@ export interface WorkflowState {
   loopMarkers?: LoopMarker[];
   /** Set once a cost budget stopped the run scheduling new steps. */
   budget?: BudgetState;
+  /**
+   * Checkpoints the run is currently paused on, awaiting Approve/Reject. UIs
+   * render an interactive card for each; entries clear as decisions arrive.
+   */
+  pendingApprovals?: PendingApproval[];
 }
 
 export const initialWorkflowState: WorkflowState = {
@@ -82,6 +133,7 @@ export const initialWorkflowState: WorkflowState = {
   done: false,
   ok: true,
   loopMarkers: [],
+  pendingApprovals: [],
 };
 
 export type WorkflowStateAction = { type: "event"; event: WorkflowEvent } | { type: "reset" };
@@ -162,6 +214,9 @@ export function workflowStateFromRecord(record: RunRecord): WorkflowState {
         ...step,
         status: parseStepStatus(step.status),
         blockKind: step.blockKind,
+        // HistoryStep.approval omits the live-only `pending` flag; a replayed
+        // record is always terminal, so pending is false.
+        approval: step.approval ? { pending: false, ...step.approval } : undefined,
       })),
     })),
     results,
@@ -245,6 +300,7 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
         ok: true,
         loopMarkers: [],
         budget: undefined,
+        pendingApprovals: [],
       };
     case "phase_start": {
       const iter = e.iteration ?? 1;
@@ -420,6 +476,53 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
             gatePhaseIteration,
           },
         ],
+      };
+    }
+    case "approval_pending": {
+      const withStep = updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
+        ...s,
+        activity: "⏳ awaiting approval",
+        approval: {
+          pending: true,
+          reviewStepId: e.reviewStepId,
+          message: e.message,
+          output: e.output,
+          diff: e.diff,
+          onReject: e.onReject,
+        },
+      }));
+      const pending: PendingApproval = {
+        phaseId: e.phaseId,
+        stepId: e.stepId,
+        iteration: e.iteration ?? 1,
+        reviewStepId: e.reviewStepId,
+        message: e.message,
+        output: e.output,
+        diff: e.diff,
+        onReject: e.onReject,
+      };
+      const others = (withStep.pendingApprovals ?? []).filter(
+        (p) => !(p.stepId === e.stepId && p.iteration === (e.iteration ?? 1)),
+      );
+      return { ...withStep, pendingApprovals: [...others, pending] };
+    }
+    case "approval_resolved": {
+      const withStep = updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
+        ...s,
+        activity: e.approved ? "approved" : "rejected",
+        approval: {
+          ...(s.approval ?? { pending: false }),
+          pending: false,
+          approved: e.approved,
+          by: e.by,
+          note: e.note,
+        },
+      }));
+      return {
+        ...withStep,
+        pendingApprovals: (withStep.pendingApprovals ?? []).filter(
+          (p) => !(p.stepId === e.stepId && p.iteration === (e.iteration ?? 1)),
+        ),
       };
     }
     default: {

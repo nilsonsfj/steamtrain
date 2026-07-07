@@ -304,6 +304,15 @@ describe("workflow cache store", () => {
       { stepId: "bad-step", ok: false, output: "nope", durationMs: 1 },
       false,
     );
+    // A noCache result (approval checkpoint) is never persisted, even when ok.
+    await persistWorkflowStepDone(
+      store,
+      key,
+      cache,
+      "approval-step",
+      { stepId: "approval-step", ok: true, output: "approved", durationMs: 1, noCache: true },
+      false,
+    );
 
     const loaded = await store.load(key);
     expect([...loaded.keys()]).toEqual(["ok-step"]);

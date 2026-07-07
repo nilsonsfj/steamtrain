@@ -1,5 +1,13 @@
 import type { AgentEvent, AgentInstanceId } from "../types/events";
-import type { GateStep, StepResult, WorkflowItem, WorkflowStepKind } from "./types";
+import type { ApprovalRejectDisposition } from "./approval";
+import type { WorktreeDiff } from "./merge";
+import type {
+  AgentWorktreeInfo,
+  GateStep,
+  StepResult,
+  WorkflowItem,
+  WorkflowStepKind,
+} from "./types";
 
 /**
  * The workflow-level event stream the TUI consumes. It wraps the per-step
@@ -174,6 +182,46 @@ export interface LoopIterationEvent extends IterationTagged {
   ts: number;
 }
 
+/**
+ * A human-approval checkpoint (`approval` step or `gate` with
+ * `condition.human`) has paused the run and is waiting for a decision. Carries
+ * everything a UI needs to render the checkpoint: the reviewed step's id,
+ * capped output, and (when it ran in a worktree) its diff. Emitted right before
+ * the engine awaits the injected approval provider; a matching
+ * {@link ApprovalResolvedEvent} follows once the decision arrives.
+ */
+export interface ApprovalPendingEvent extends IterationTagged {
+  kind: "approval_pending";
+  phaseId: string;
+  stepId: string;
+  /** The step under review, when the checkpoint references one. */
+  reviewStepId?: string;
+  /** Human-readable instructions from the spec (`prompt`), when provided. */
+  message?: string;
+  /** The reviewed step's output text (capped for transport/rendering). */
+  output?: string;
+  /** The reviewed step's worktree diff, when it ran in one with changes. */
+  diff?: WorktreeDiff;
+  /** The reviewed step's worktree metadata, when it ran in one. */
+  worktree?: AgentWorktreeInfo;
+  /** What a rejection will do to control flow. */
+  onReject: ApprovalRejectDisposition;
+  ts: number;
+}
+
+/** A pending approval checkpoint was decided (approved or rejected). */
+export interface ApprovalResolvedEvent extends IterationTagged {
+  kind: "approval_resolved";
+  phaseId: string;
+  stepId: string;
+  approved: boolean;
+  /** Who/what decided (e.g. `"human"`, `"auto:approve-all"`). */
+  by?: string;
+  /** Optional free-text note the decider attached. */
+  note?: string;
+  ts: number;
+}
+
 export type WorkflowEvent =
   | WorkflowStartEvent
   | PhaseStartEvent
@@ -186,6 +234,8 @@ export type WorkflowEvent =
   | PhaseDoneEvent
   | WorkflowDoneEvent
   | LoopIterationEvent
-  | BudgetExceededEvent;
+  | BudgetExceededEvent
+  | ApprovalPendingEvent
+  | ApprovalResolvedEvent;
 
 export type WorkflowEventKind = WorkflowEvent["kind"];

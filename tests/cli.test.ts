@@ -217,6 +217,119 @@ describe("runCli", () => {
     expect(c.stdout).toContain("workflow failed");
   });
 
+  const approveFlow = {
+    name: "approve-flow",
+    phases: [
+      {
+        id: "p1",
+        title: "Split",
+        steps: [{ id: "split", kind: "distributor", items: ["a", "b"] }],
+      },
+      {
+        id: "p2",
+        title: "Approve",
+        steps: [{ id: "chk", kind: "approval", step: "split", dependsOn: ["split"] }],
+      },
+      {
+        id: "p3",
+        title: "Merge",
+        steps: [
+          {
+            id: "out",
+            kind: "consolidator",
+            dependsOn: ["chk", "split"],
+            prompt: "done: {{steps.split.output}}",
+          },
+        ],
+      },
+    ],
+  };
+
+  function writeApproveFlow(cwd: string): void {
+    writeFileSync(
+      join(cwd, "steamtrain.json"),
+      JSON.stringify({ workflows: { "approve-flow": approveFlow } }),
+    );
+  }
+
+  it("--approve-all approves every checkpoint and runs to completion", async () => {
+    const c = capture();
+    writeApproveFlow(c.io.cwd);
+    const code = await runCli(
+      ["workflow", "run", "approve-flow", "--input", "task", "--approve-all"],
+      c.io,
+    );
+    expect(code).toBe(0);
+    expect(c.stdout).toContain("approved");
+    expect(c.stdout).toContain("done out");
+  });
+
+  it("--on-approval fail rejects and fails the run", async () => {
+    const c = capture();
+    writeApproveFlow(c.io.cwd);
+    const code = await runCli(
+      ["workflow", "run", "approve-flow", "--input", "task", "--on-approval", "fail"],
+      c.io,
+    );
+    expect(code).toBe(1);
+    expect(c.stdout).toContain("rejected");
+    expect(c.stdout).toContain("workflow failed");
+  });
+
+  it("warns and auto-rejects when no approval flag is passed", async () => {
+    const c = capture();
+    writeApproveFlow(c.io.cwd);
+    await runCli(["workflow", "run", "approve-flow", "--input", "task"], c.io);
+    expect(c.stderr).toContain("approval checkpoints");
+    expect(c.stdout).toContain("rejected");
+  });
+
+  it("warns when a checkpoint is nested in a sub-workflow", async () => {
+    const c = capture();
+    // The parent has no top-level checkpoint; the advisory must still fire by
+    // recursing into the named sub-workflow it calls.
+    writeFileSync(
+      join(c.io.cwd, "steamtrain.json"),
+      JSON.stringify({
+        workflows: {
+          "approve-flow": approveFlow,
+          parent: {
+            name: "parent",
+            phases: [
+              {
+                id: "p1",
+                title: "Call",
+                steps: [{ id: "child", kind: "workflow", workflow: "approve-flow" }],
+              },
+            ],
+          },
+        },
+      }),
+    );
+    await runCli(["workflow", "run", "parent", "--input", "task"], c.io);
+    expect(c.stderr).toContain("approval checkpoints");
+  });
+
+  it("rejects mutually exclusive --approve-all and --on-approval", async () => {
+    const c = capture();
+    writeApproveFlow(c.io.cwd);
+    const code = await runCli(
+      [
+        "workflow",
+        "run",
+        "approve-flow",
+        "--input",
+        "task",
+        "--approve-all",
+        "--on-approval",
+        "fail",
+      ],
+      c.io,
+    );
+    expect(code).toBe(1);
+    expect(c.stderr).toContain("usage:");
+  });
+
   it("clears all workflow caches", async () => {
     const c = capture();
     const cacheDir = join(c.io.cwd, WORKFLOW_CACHE_DIR);
