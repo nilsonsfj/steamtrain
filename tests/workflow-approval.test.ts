@@ -12,6 +12,7 @@ import {
   type WorkflowSpec,
   headlessApprovalProvider,
   initialWorkflowState,
+  matchApprovalKey,
   runWorkflow,
   validateWorkflow,
   workflowReducer,
@@ -345,6 +346,33 @@ describe("approval engine", () => {
     expect(done?.ok).toBe(true);
   });
 
+  it("supports a bare 'proceed?' checkpoint with no reviewed step", async () => {
+    const spec: WorkflowSpec = {
+      name: "bare",
+      phases: [
+        {
+          id: "p1",
+          title: "Go",
+          steps: [{ id: "proceed", kind: "approval", prompt: "Proceed?" }],
+        },
+      ],
+    };
+    const requests: ApprovalRequest[] = [];
+    const provider: ApprovalProvider = async (req) => {
+      requests.push(req);
+      return { approved: true };
+    };
+    const events = await collect(spec, makeDeps(provider));
+    expect(requests[0]!.reviewStepId).toBeUndefined();
+    expect(requests[0]!.output).toBeUndefined();
+    const pending = events.find((e) => e.kind === "approval_pending") as
+      | (WorkflowEvent & { kind: "approval_pending" })
+      | undefined;
+    expect(pending?.reviewStepId).toBeUndefined();
+    expect(pending?.message).toBe("Proceed?");
+    expect(findDone(events, "proceed")?.result.ok).toBe(true);
+  });
+
   it("unblocks a pending approval when the run is aborted", async () => {
     const ac = new AbortController();
     const provider: ApprovalProvider = () => new Promise<ApprovalDecision>(() => {});
@@ -382,6 +410,25 @@ describe("headless approval provider", () => {
   it("reject-stop rejects with the stop disposition", async () => {
     const d = await headlessApprovalProvider("reject-stop")({} as ApprovalRequest);
     expect(d).toMatchObject({ approved: false, rejectDisposition: "stop" });
+  });
+});
+
+describe("matchApprovalKey", () => {
+  it("matches a top-level step id exactly, honoring iteration", () => {
+    const keys = ["draft:1", "chk:1", "chk:2"];
+    expect(matchApprovalKey(keys, "chk", 2)).toBe("chk:2");
+    expect(matchApprovalKey(keys, "chk")).toBe("chk:1"); // first when iteration omitted
+    expect(matchApprovalKey(keys, "missing", 1)).toBeUndefined();
+  });
+
+  it("matches a namespaced sub-workflow id against a local resolver key", () => {
+    // The resolver registers the child-local id ("chk:1"); the UI posts the
+    // namespaced id ("call::chk").
+    const keys = ["call::draft:1", "chk:1"];
+    expect(matchApprovalKey(keys, "call::chk", 1)).toBe("chk:1");
+    expect(matchApprovalKey(keys, "call::chk")).toBe("chk:1");
+    // A deeper namespace still matches on the trailing segment.
+    expect(matchApprovalKey(["chk:1"], "outer::inner::chk", 1)).toBe("chk:1");
   });
 });
 
