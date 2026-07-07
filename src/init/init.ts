@@ -222,7 +222,17 @@ function statusGlyph(status: DoctorResult["status"]): string {
     case "not_authenticated":
     case "unknown_error":
       return "!";
+    default:
+      // A new DoctorStatus fails to compile here (the never check), while a
+      // value that sneaks past types at runtime degrades to "?" rather than
+      // rendering "undefined" in the readiness table.
+      return unreachableFallback(status, "?");
   }
+}
+
+/** Compile-time exhaustiveness guard with a graceful runtime fallback. */
+function unreachableFallback(_value: never, fallback: string): string {
+  return fallback;
 }
 
 function statusLine(result: DoctorResult): string {

@@ -34,18 +34,19 @@ the [`dry-run-followups.md`](dry-run-followups.md) precedent.
   prints before the doctor runs (version probes can be slow on a fresh
   machine); the generated `implement-verified` states that its agent is
   simply the first ready one and how to change it; the `verify` consolidator
-  header is "Check results" rather than claiming everything passed;
-  `statusGlyph` switches exhaustively over doctor statuses; the tour's
-  conductor documents that a skipped dependency doesn't block a consolidator.
+  header is "Check results" rather than claiming everything passed; the
+  tour's conductor documents that a skipped dependency doesn't block a
+  consolidator.
+- **`statusGlyph` exhaustiveness — both reviews satisfied.** One review asked
+  for an exhaustive switch (compile error when a new doctor status is
+  added); another asked for a runtime `"?"` default (graceful degradation
+  instead of rendering `undefined`). These looked mutually exclusive but
+  aren't: the switch is exhaustive over today's statuses AND has a `default`
+  that routes through a `never`-typed guard (`unreachableFallback`). A new
+  `DoctorStatus` fails to compile at that guard, while a value that sneaks
+  past the types at runtime renders `"?"`.
 
 ## Declined, with rationale
-
-- **`statusGlyph` `default: return "?"` fallback.** Two reviews pulled in
-  opposite directions: one asked for an exhaustive switch that fails to
-  compile when a new doctor status is added, another asked for a runtime
-  `"?"` default that degrades gracefully. These are mutually exclusive; the
-  exhaustive switch was chosen because a compile error at the source of the
-  new status is strictly more useful than a silent `"?"` in terminal output.
 - **`not` modifier on the tour's `express-service` `when` condition.** The
   reviewer noted it themselves: the step is *meant* to be skipped, and
   `contains: "express"` with no match is exactly the pedagogical point.
