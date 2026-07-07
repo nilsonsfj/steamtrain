@@ -1,0 +1,170 @@
+import { existsSync, readFileSync } from "node:fs";
+import { delimiter, join } from "node:path";
+
+/**
+ * Repo detection for `steamtrain init`: find the deterministic check commands
+ * (tests, linters, typecheckers) this project already has, so the generated
+ * starter workflows gate on real signals instead of an agent's opinion.
+ */
+
+export interface DetectedCheck {
+  /** Step id used in generated workflows (unique per detection, kebab-case). */
+  id: string;
+  /** Human-readable label ("npm run test"). */
+  label: string;
+  /** Shell command for a `command` step. */
+  cmd: string;
+  /**
+   * Marks the check that runs the test suite — set where the check is created
+   * (not inferred from the id) so `testCheck` selection can't drift as new
+   * ecosystems are added. `implement-verified` gates on this check.
+   */
+  test?: boolean;
+}
+
+export interface ProjectDetection {
+  /** Detected ecosystems, for the summary line ("node", "rust", …). */
+  stacks: string[];
+  /** All detected check commands, test-ish first. */
+  checks: DetectedCheck[];
+  /** The check `implement-verified` gates on (the test command, when present). */
+  testCheck?: DetectedCheck;
+}
+
+/** npm's scaffold placeholder — a "test" script that only errors out. */
+const NPM_PLACEHOLDER_TEST = /echo .*no test specified/i;
+
+/** Node script names worth turning into checks, in report order. */
+const NODE_CHECK_SCRIPTS = ["test", "lint", "typecheck", "check"] as const;
+
+export interface DetectOptions {
+  /** Injected binary-existence probe for tests (defaults to a PATH scan). */
+  hasCommand?: (name: string) => boolean;
+}
+
+export function detectProject(cwd: string, options: DetectOptions = {}): ProjectDetection {
+  const hasCommand = options.hasCommand ?? commandOnPath;
+  const stacks: string[] = [];
+  const checks: DetectedCheck[] = [];
+
+  const node = detectNode(cwd);
+  if (node) {
+    stacks.push(node.stack);
+    checks.push(...node.checks);
+  }
+  if (existsSync(join(cwd, "Cargo.toml"))) {
+    stacks.push("rust");
+    checks.push({ id: "cargo-test", label: "cargo test", cmd: "cargo test", test: true });
+  }
+  if (existsSync(join(cwd, "go.mod"))) {
+    stacks.push("go");
+    checks.push(
+      { id: "go-test", label: "go test ./...", cmd: "go test ./...", test: true },
+      { id: "go-vet", label: "go vet ./...", cmd: "go vet ./..." },
+    );
+  }
+  const python = detectPython(cwd);
+  if (python) {
+    stacks.push("python");
+    checks.push(...python.checks);
+  }
+  // Makefile `test` target: only as a fallback when nothing else surfaced a
+  // test command — Makefiles routinely wrap the same commands detected above.
+  // Only offered when `make` itself is installed: a Makefile without make
+  // (common on Windows) would generate a check that can only fail.
+  if (!checks.some((check) => check.test) && makefileHasTestTarget(cwd) && hasCommand("make")) {
+    checks.unshift({ id: "make-test", label: "make test", cmd: "make test", test: true });
+  }
+
+  return { stacks, checks, testCheck: checks.find((check) => check.test) };
+}
+
+function detectNode(cwd: string): { stack: string; checks: DetectedCheck[] } | undefined {
+  const raw = readTextIfExists(join(cwd, "package.json"));
+  if (raw === undefined) return undefined;
+  let scripts: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return undefined;
+    const value = (parsed as { scripts?: unknown }).scripts;
+    // An array-typed `scripts` passes typeof === "object" but indexes to
+    // undefined for every script name — guard it like any other wrong shape.
+    scripts =
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+  } catch {
+    return undefined; // unparseable package.json ⇒ don't guess
+  }
+
+  const runner = detectNodeRunner(cwd);
+  const checks: DetectedCheck[] = [];
+  for (const name of NODE_CHECK_SCRIPTS) {
+    const script = scripts[name];
+    if (typeof script !== "string" || script.trim() === "") continue;
+    if (name === "test" && NPM_PLACEHOLDER_TEST.test(script)) continue;
+    checks.push({
+      id: `node-${name}`,
+      label: `${runner} run ${name}`,
+      cmd: `${runner} run ${name}`,
+      ...(name === "test" ? { test: true } : {}),
+    });
+  }
+  return { stack: `node (${runner})`, checks };
+}
+
+function detectNodeRunner(cwd: string): string {
+  if (existsSync(join(cwd, "bun.lock")) || existsSync(join(cwd, "bun.lockb"))) return "bun";
+  if (existsSync(join(cwd, "pnpm-lock.yaml"))) return "pnpm";
+  if (existsSync(join(cwd, "yarn.lock"))) return "yarn";
+  return "npm";
+}
+
+/**
+ * Like `detectNode`, the stack is reported whenever the ecosystem's manifest
+ * exists — even with zero usable checks — so a Python repo with a bare
+ * `pyproject.toml` gets the same "detected, no checks configured" transparency
+ * a script-less `package.json` gets.
+ */
+function detectPython(cwd: string): { checks: DetectedCheck[] } | undefined {
+  const pyproject = readTextIfExists(join(cwd, "pyproject.toml"));
+  // Match config section headers, not bare words — "pytest" and "ruff" alone
+  // appear in comments and dependency pins of projects that don't run them.
+  const hasPytestConfig =
+    existsSync(join(cwd, "pytest.ini")) || pyproject?.includes("[tool.pytest") === true;
+  if (pyproject === undefined && !hasPytestConfig) return undefined;
+
+  const checks: DetectedCheck[] = [];
+  if (hasPytestConfig) checks.push({ id: "pytest", label: "pytest", cmd: "pytest", test: true });
+  if (pyproject?.includes("[tool.ruff")) {
+    checks.push({ id: "ruff", label: "ruff check .", cmd: "ruff check ." });
+  }
+  return { checks };
+}
+
+/** Synchronous PATH scan (mirrors the doctor's async resolveBinary, cheaply). */
+function commandOnPath(name: string): boolean {
+  const pathEnv = process.env.PATH ?? "";
+  const exts =
+    process.platform === "win32" ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";") : [""];
+  for (const dir of pathEnv.split(delimiter)) {
+    if (!dir) continue;
+    for (const ext of exts) {
+      if (existsSync(join(dir, name + ext))) return true;
+    }
+  }
+  return false;
+}
+
+function makefileHasTestTarget(cwd: string): boolean {
+  const makefile = readTextIfExists(join(cwd, "Makefile"));
+  return makefile !== undefined && /^test\s*:/m.test(makefile);
+}
+
+function readTextIfExists(path: string): string | undefined {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+}

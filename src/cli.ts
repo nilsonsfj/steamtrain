@@ -11,6 +11,7 @@ import {
   saveProjectWorkflow,
 } from "./config";
 import { runDoctor } from "./doctor";
+import { runInitCommand } from "./init";
 import { Orchestrator } from "./orchestrator";
 import { loadSettings } from "./settings";
 import type { AgentInstanceId } from "./types/events";
@@ -188,6 +189,10 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
   if (!scope || scope === "help" || scope === "--help" || scope === "-h") {
     out(helpText());
     return 0;
+  }
+
+  if (scope === "init") {
+    return runInitCommand(command === undefined ? [] : [command, ...rest], io);
   }
 
   if (scope !== "workflow") {
@@ -1590,6 +1595,7 @@ function helpText(): string {
   return `steamtrain workflow commands
 
 Usage:
+  steamtrain init [--yes]
   steamtrain workflow list
   steamtrain workflow validate [name]
   steamtrain workflow plan <name> --input <text> [--param key=value ...] [--json]
@@ -1605,6 +1611,12 @@ Usage:
   steamtrain workflow history prune <id>
   steamtrain workflow history clear [<id>]
   steamtrain workflow costs [--workflow <name>] [--json]
+
+init checks agent readiness (with copy-paste fixes), detects this repo's real
+test/lint commands, and offers starter workflows wired to them (written to
+./steamtrain.json; --yes accepts them all without prompting). To see the engine
+without installing any agent, ride the bundled $0 demo:
+'steamtrain workflow run tour --input "all aboard"'.
 
 workflow create delegates to an agent (default: opencode/mimo-v2.5-free) to
 draft a workflow from a plain-English description, validates it, prints the JSON,

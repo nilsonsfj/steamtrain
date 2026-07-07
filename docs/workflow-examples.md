@@ -442,6 +442,22 @@ Before running a new workflow:
 
 ## Testing workflows locally
 
+### The $0 tour
+
+Before anything else, the bundled `tour` workflow exercises most of the
+engine — a distributor, parallel `command` steps, a `when` skip, a loop-back
+gate driven by `{{iteration}}`, and an agentless consolidator — without
+spawning a single agent:
+
+```bash
+steamtrain workflow run tour --input "all aboard"
+```
+
+It is also a useful smoke test for a new install or a CI environment: it runs
+with zero credentials and exits non-zero only if the engine itself is broken.
+Read its spec in `src/workflow/bundled.ts` — every block it rides is a pattern
+from this document, in agentless form.
+
 ### TUI
 
 ```bash
