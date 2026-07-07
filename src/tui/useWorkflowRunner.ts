@@ -150,6 +150,14 @@ export function useWorkflowRunner({
               };
               const onAbort = (): void =>
                 settle({ approved: false, by: "auto:canceled", note: "run canceled" });
+              // Defensive: if a resolver is already registered for this key
+              // (should never happen — one checkpoint per step+iteration), settle
+              // the stale one as canceled so its promise can't hang forever.
+              approvalResolversRef.current.get(mapKey)?.({
+                approved: false,
+                by: "auto:canceled",
+                note: "superseded by a new checkpoint",
+              });
               approvalResolversRef.current.set(mapKey, settle);
               if (signal) {
                 if (signal.aborted) {

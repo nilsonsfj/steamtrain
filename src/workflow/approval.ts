@@ -141,6 +141,9 @@ export function headlessApprovalProvider(mode: HeadlessApprovalMode): ApprovalPr
 export const noProviderApprovalDecision = (request: ApprovalRequest): ApprovalDecision => ({
   approved: false,
   by: "auto:no-provider",
-  note: "no approval provider configured; rejecting the checkpoint",
+  note:
+    request.onReject === "continue"
+      ? "no approval provider configured; continuing per the checkpoint's onReject"
+      : "no approval provider configured; rejecting the checkpoint",
   rejectDisposition: request.onReject === "continue" ? undefined : request.onReject,
 });

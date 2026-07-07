@@ -243,6 +243,41 @@ describe("approval engine", () => {
     expect(findDone(events, "build")).toBeUndefined();
   });
 
+  it("with no provider and a human gate onFalse:continue, the run continues", async () => {
+    const spec: WorkflowSpec = {
+      name: "human-continue",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "draft", agent: "claude", model: "opus", prompt: "{{input}}" }],
+        },
+        {
+          id: "p2",
+          title: "Gate",
+          steps: [
+            {
+              id: "chk",
+              kind: "gate",
+              condition: { human: true, step: "draft" },
+              onFalse: "continue",
+              dependsOn: ["draft"],
+            },
+          ],
+        },
+        {
+          id: "p3",
+          title: "After",
+          steps: [{ id: "after", agent: "claude", model: "s", prompt: "x", dependsOn: ["chk"] }],
+        },
+      ],
+    };
+    const events = await collect(spec, makeDeps(undefined));
+    // No provider → rejected, but onFalse:continue keeps the run going.
+    expect(findDone(events, "chk")?.result.ok).toBe(true);
+    expect(findDone(events, "after")?.result.ok).toBe(true);
+  });
+
   it("honors a headless approve-all provider", async () => {
     const events = await collect(approvalSpec, makeDeps(headlessApprovalProvider("approve-all")));
     expect(findDone(events, "build")?.result.ok).toBe(true);
