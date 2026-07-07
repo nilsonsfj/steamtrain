@@ -3,6 +3,7 @@ import type { AgentAdapter } from "./adapter";
 import { AmpAdapter } from "./amp";
 import { ClaudeCodeAdapter } from "./claude";
 import { CodexAdapter } from "./codex";
+import { KiroCliAdapter } from "./kiro";
 import { OpenCodeAdapter } from "./opencode";
 
 export type { AgentAdapter, AgentRunOptions } from "./adapter";
@@ -25,6 +26,7 @@ export {
   resolveAgentInstances,
   type ResolvedAgentInstance,
 } from "./config";
+export { KiroCliAdapter, KIRO_MODELS, buildKiroExecArgs, createKiroMapper } from "./kiro";
 export {
   AGENT_IDS,
   agentProviderFor,
@@ -77,5 +79,7 @@ export function createAdapter(id: AgentProviderId, binary?: string): AgentAdapte
       return new CodexAdapter(binary);
     case "amp":
       return new AmpAdapter(binary);
+    case "kiro":
+      return new KiroCliAdapter(binary);
   }
 }

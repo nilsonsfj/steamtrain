@@ -25,6 +25,18 @@ describe("checkAgent amp", () => {
   });
 });
 
+describe("checkAgent kiro", () => {
+  it("reports missing binary with an install hint", async () => {
+    const result = await checkAgent("kiro", "__steamtrain_missing_kiro__", { provider: "kiro" });
+    expect(result).toMatchObject({
+      agent: "kiro",
+      status: "binary_missing",
+      binary: "__steamtrain_missing_kiro__",
+    });
+    expect(result.detail).toContain("npm i -g @anthropic-ai/kiro-cli");
+  });
+});
+
 describe("checkAgent ok", () => {
   it("reports ok status for a reachable binary", async () => {
     const result = await checkAgent("claude", "node", { provider: "claude" });

@@ -66,6 +66,7 @@ describe("agent configuration", () => {
       "opencode",
       "codex",
       "amp",
+      "kiro",
     ]);
   });
 
@@ -115,6 +116,7 @@ describe("agent configuration", () => {
       "opencode",
       "codex",
       "amp",
+      "kiro",
       "missing-opencode",
     ]);
     expect(result.some((agent) => agent.agent === "disabled-codex")).toBe(false);
