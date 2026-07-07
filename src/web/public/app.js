@@ -5,7 +5,7 @@
   
 
 
-  var KIND_LABEL = { worker: "worker", processor: "process", distributor: "fan-out", consolidator: "merge", gate: "gate", merge: "merge-back", command: "command", workflow: "sub-workflow" };
+  var KIND_LABEL = { worker: "worker", processor: "process", distributor: "fan-out", consolidator: "merge", gate: "gate", approval: "approval", merge: "merge-back", command: "command", workflow: "sub-workflow" };
   var S = {
     workflows: [], selected: null, source: null, spec: null, agents: [],
     runId: null, es: null,
@@ -574,7 +574,7 @@
 
     canvas.appendChild(h("div", { class: "legend" },
       legendItem("worker", "worker"), legendItem("processor", "process"),
-      legendItem("distributor", "fan-out"), legendItem("consolidator", "merge"), legendItem("gate", "gate"), legendItem("merge", "merge-back"), legendItem("command", "command"), legendItem("workflow", "sub-workflow")
+      legendItem("distributor", "fan-out"), legendItem("consolidator", "merge"), legendItem("gate", "gate"), legendItem("approval", "approval"), legendItem("merge", "merge-back"), legendItem("command", "command"), legendItem("workflow", "sub-workflow")
     ));
 
     var maxIter = {};
@@ -632,7 +632,7 @@
     return h("span", null, i, label);
   }
   function kindColor(k) {
-    return { worker: "#6fb1ff", processor: "#9d8cff", distributor: "#ffce6f", consolidator: "#5fe0c6", gate: "#f0a35e", merge: "#ff9ecb", command: "#b8c4d0", workflow: "#7ce38b" }[k] || "#6fb1ff";
+    return { worker: "#6fb1ff", processor: "#9d8cff", distributor: "#ffce6f", consolidator: "#5fe0c6", gate: "#f0a35e", approval: "#ffd166", merge: "#ff9ecb", command: "#b8c4d0", workflow: "#7ce38b" }[k] || "#6fb1ff";
   }
 
   function renderCard(s) {
@@ -658,6 +658,8 @@
     if (s.item) card.appendChild(h("div", { class: "item", text: "item #" + s.item.index + ": " + truncate(s.item.value, 80) }));
     if (s.activity) card.appendChild(h("div", { class: "activity", text: s.activity }));
 
+    if (s.approval) card.appendChild(renderApproval(s));
+
     var tailText = s.text ? tail(s.text, 600) : "";
     if (tailText) {
       var tailEl = h("div", { class: "tail show", text: tailText });
@@ -677,6 +679,39 @@
       card.appendChild(metrics);
     }
     return card;
+  }
+
+  function renderApproval(s) {
+    var a = s.approval;
+    var box = h("div", { class: "approval" + (a.pending ? " pending" : (a.approved ? " approved" : " rejected")) });
+    if (a.reviewStepId) box.appendChild(h("div", { class: "approval-review", text: "reviewing: " + a.reviewStepId }));
+    if (a.message) box.appendChild(h("div", { class: "approval-msg", text: a.message }));
+    if (a.output) box.appendChild(h("div", { class: "approval-output", text: tail(a.output, 600) }));
+    if (a.diff && a.diff.files && a.diff.files.length) {
+      box.appendChild(h("div", { class: "approval-diff",
+        text: a.diff.files.length + " file" + (a.diff.files.length === 1 ? "" : "s") +
+          " \u00b7 +" + a.diff.additions + " -" + a.diff.deletions }));
+    }
+    if (a.pending) {
+      var buttons = h("div", { class: "approval-actions" },
+        h("button", { class: "btn approve", text: "Approve", onClick: function () { resolveApproval(s.stepId, true); } }),
+        h("button", { class: "btn reject", text: "Reject", onClick: function () { resolveApproval(s.stepId, false); } })
+      );
+      box.appendChild(buttons);
+    } else {
+      var who = a.by ? " (" + a.by + ")" : "";
+      box.appendChild(h("div", { class: "approval-decision", text: (a.approved ? "\u2713 approved" : "\u2717 rejected") + who + (a.note ? " \u2014 " + a.note : "") }));
+    }
+    return box;
+  }
+
+  function resolveApproval(stepId, approved) {
+    if (!S.runId) return;
+    apiAuth("POST", "/api/runs/" + S.runId + "/approval", { stepId: stepId, approved: approved })
+      .then(function (r) {
+        if (r && r.status && r.status >= 400) setBanner("Could not record approval decision.", "err");
+      })
+      .catch(function () {});
   }
 
   function renderSummary(canvas) {

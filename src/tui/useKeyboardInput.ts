@@ -200,6 +200,23 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
           return;
         }
         const menuOpen = shouldSuppressWorkflowNavigation(prompt.commandSuggestions, prompt.value);
+        // Human-approval checkpoint: while a run is paused on one, `a` approves
+        // and `r` rejects the oldest pending checkpoint. Handled before prompt
+        // history / navigation so the keys aren't swallowed by them.
+        if (
+          cur.mode === "workflow" &&
+          runner.running &&
+          !menuOpen &&
+          !prompt.promptEditing &&
+          (input === "a" || input === "r")
+        ) {
+          const pending = runner.wf.pendingApprovals;
+          if (pending && pending.length > 0) {
+            const next = pending[0]!;
+            runner.resolveApproval(next.stepId, input === "a", next.iteration);
+            return;
+          }
+        }
         const historyUp =
           !menuOpen &&
           shouldPromptHistoryCaptureUp(

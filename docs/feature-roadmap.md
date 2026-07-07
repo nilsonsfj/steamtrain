@@ -61,6 +61,16 @@ diff; CI mode posts a diff).
 
 ## 1.2 Human-in-the-loop approval gates
 
+> **Shipped** — an `approval` step kind (and `gate` with
+> `"condition": {"human": true}`) that pauses the run, surfaces the reviewed
+> step's output (and, with 1.1, its worktree diff), and waits for a decision:
+> an interactive `a`/`r` prompt in the TUI, an Approve/Reject card in the web
+> UI (`POST /api/runs/:id/approval`), and `--approve-all` /
+> `--on-approval fail|stop` flags for headless CI. Decisions are recorded in
+> run history; the checkpoint is never cached, so a resumed run re-asks while
+> the cached steps around it replay. See
+> [`workflow-spec.md`](workflow-spec.md#human-in-the-loop-approval-gates).
+
 **The gap:** gates are purely mechanical (`contains` / `matches` / `equals` /
 `ok`). Real-world workflows that spend money or mutate a repo need a "show me
 what you've got before continuing" checkpoint — e.g. approve the synthesized

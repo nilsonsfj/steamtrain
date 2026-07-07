@@ -5,6 +5,16 @@ import { resolveAgentInstance } from "../agents";
 import type { AgentAdapter } from "../agents";
 import type { SteamtrainConfig } from "../config/types";
 import type { AgentEvent, AgentInstanceId, AgentProviderId, TokenUsage } from "../types/events";
+import {
+  APPROVAL_DIFF_CAP,
+  APPROVAL_OUTPUT_CAP,
+  type ApprovalDecision,
+  type ApprovalProvider,
+  type ApprovalRejectDisposition,
+  type ApprovalRequest,
+  capApprovalText,
+  noProviderApprovalDecision,
+} from "./approval";
 import { collectArtifacts } from "./artifacts";
 import { runShellCommand } from "./command";
 import { addTokens } from "./cost";
@@ -12,9 +22,11 @@ import type { WorkflowEvent } from "./events";
 import {
   type ConflictResolver,
   type HarvestResult,
+  type WorktreeDiff,
   type WorktreeSource,
   defaultHarvestBranchName,
   harvestWorktrees,
+  worktreeDiff,
   worktreeSourceFromInfo,
 } from "./merge";
 import { createChannel, runPool } from "./pool";
@@ -32,9 +44,11 @@ import { resolveStepTimeoutSec, timeoutMsFromSec } from "./timeout";
 import {
   type AgentBackedWorkflowStep,
   type AgentWorktreeInfo,
+  type ApprovalStep,
   type CommandStep,
   DEFAULT_LOOP_MAX_ITERATIONS,
   type GateCondition,
+  type GateStep,
   MAX_CONCURRENCY,
   MAX_STEPS,
   MAX_WORKFLOW_NESTING_DEPTH,
@@ -87,6 +101,15 @@ export interface WorkflowDeps {
    * this context" error rather than crashing.
    */
   resolveWorkflow?: (name: string) => WorkflowSpec | undefined;
+  /**
+   * Resolves a human-approval checkpoint (an `approval` step or a `gate` with
+   * `condition.human`). Injected per surface: the TUI resolves on a keypress,
+   * the web UI on a `POST /api/runs/:id/approval`, the headless CLI immediately
+   * from `--approve-all` / `--on-approval`. Omitted ⇒ the engine rejects every
+   * checkpoint with its own disposition (see {@link noProviderApprovalDecision})
+   * rather than hanging.
+   */
+  requestApproval?: ApprovalProvider;
 }
 
 export interface WorkflowRunContext {
@@ -617,7 +640,16 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
   const controlGates: { id: string; phaseIndex: number }[] = [];
   spec.phases.forEach((phase, pi) => {
     for (const step of phase.steps) {
-      if (step.kind === "gate" && (step.onFalse === "fail" || step.onFalse === "stop")) {
+      // A human-approval checkpoint (approval step, or a gate with
+      // `condition.human`) pauses the run: every later-phase step must wait for
+      // the decision regardless of its reject disposition. Mechanical gates are
+      // control deps only when they can halt (fail/stop).
+      const isApprovalCheckpoint =
+        step.kind === "approval" || (step.kind === "gate" && step.condition.human === true);
+      if (
+        isApprovalCheckpoint ||
+        (step.kind === "gate" && (step.onFalse === "fail" || step.onFalse === "stop"))
+      ) {
         controlGates.push({ id: step.id, phaseIndex: pi });
       }
     }
@@ -650,6 +682,8 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
 
       const conditions: (GateCondition | undefined)[] = [step.when];
       if (step.kind === "gate") conditions.push(step.condition);
+      // An approval step reviews `step` (else its sole dependsOn, already added).
+      if (step.kind === "approval") addEarlier(step.step);
       // Condition predicates aren't templates themselves, but they're rendered
       // as such (their {{steps.*}} refs resolve), so they contribute deps too.
       const renderableTexts: (string | undefined)[] = [];
@@ -894,7 +928,9 @@ async function runSingleStep(
   }
   outputs.set(step.id, result.output);
   results.set(step.id, result);
-  if (result.ok) cache.set(step.id, result);
+  // Approval checkpoints are never cached (`noCache`): a resumed run must
+  // re-ask the decision instead of replaying a stale approval.
+  if (result.ok && !result.noCache) cache.set(step.id, result);
   allResults.push(result);
   if (!execution.childResults) env.spent.costUsd += result.costUsd ?? 0;
   let notOk = false;
@@ -1144,7 +1180,12 @@ async function executeStep(
     return { result: await executeCommandStep(step, ctx, hooks) };
   }
 
+  if (kind === "approval" && step.kind === "approval") {
+    return executeApproval(step, ctx, hooks);
+  }
+
   if (kind === "gate" && step.kind === "gate") {
+    if (step.condition.human) return executeApproval(step, ctx, hooks);
     const started = Date.now();
     const evaluation = evaluateGate(step.condition, ctx);
     const onFalse = step.onFalse ?? "continue";
@@ -2527,6 +2568,185 @@ interface GateEvalContext {
   outputs: Map<string, string>;
   results: Map<string, StepResult>;
   iteration: number;
+}
+
+/**
+ * Execute a human-approval checkpoint: an `approval` step or a `gate` with
+ * `condition.human`. Surfaces the reviewed step's output (and, when it ran in
+ * an isolated worktree, its diff), emits `approval_pending`, awaits the injected
+ * approval provider (racing the abort signal so a cancel unblocks it), emits
+ * `approval_resolved`, and returns a gate-shaped outcome so the existing
+ * `gate_evaluated` / reducer / history / loop machinery routes on it unchanged.
+ *
+ * The result carries `noCache` so a resumed run always re-asks — approvals are
+ * never replayed from cache.
+ */
+async function executeApproval(
+  step: ApprovalStep | GateStep,
+  ctx: ExecuteContext,
+  hooks: ExecuteHooks,
+): Promise<ExecutionOutcome> {
+  const started = Date.now();
+  const isGate = step.kind === "gate";
+  const target = step.target ?? "approved";
+  // The step under review: an explicit `step` (approval) / `condition.step`
+  // (gate), else the approval step's sole `dependsOn` entry.
+  const reviewStepId = isGate
+    ? step.condition.step
+    : (step.step ?? (step.dependsOn?.length === 1 ? step.dependsOn[0] : undefined));
+  // A gate's `onFalse` doubles as its reject disposition (default "continue" to
+  // match plain gates); an approval step rejects with `onReject` (default "fail").
+  const declaredOnReject: ApprovalRejectDisposition = isGate
+    ? (step.onFalse ?? "continue")
+    : (step.onReject ?? "fail");
+  const message =
+    !isGate && step.prompt
+      ? renderPrompt(step.prompt, {
+          input: ctx.input,
+          inputs: ctx.inputs,
+          outputs: ctx.outputs,
+          results: ctx.results,
+          iteration: ctx.iteration,
+        })
+      : undefined;
+
+  const reviewed = reviewStepId ? ctx.results.get(reviewStepId) : undefined;
+  const output =
+    reviewed?.output !== undefined
+      ? capApprovalText(reviewed.output, APPROVAL_OUTPUT_CAP)
+      : undefined;
+  const worktree = reviewed?.worktree;
+  let diff: WorktreeDiff | undefined;
+  if (reviewStepId && worktree) {
+    try {
+      const full = await worktreeDiff(worktreeSourceFromInfo(reviewStepId, worktree), {
+        patch: true,
+        signal: ctx.signal,
+      });
+      if (full.files.length > 0) {
+        diff = {
+          ...full,
+          patch: full.patch ? capApprovalText(full.patch, APPROVAL_DIFF_CAP) : undefined,
+        };
+      }
+    } catch {
+      // A diff is best-effort context for the human — never fail the checkpoint
+      // because git couldn't produce one.
+    }
+  }
+
+  const request: ApprovalRequest = {
+    stepId: step.id,
+    phaseId: hooks.phaseId,
+    iteration: ctx.iteration,
+    reviewStepId,
+    message,
+    output,
+    diff,
+    worktree,
+    onReject: declaredOnReject,
+  };
+
+  hooks.pushWorkflowEvent({
+    kind: "approval_pending",
+    phaseId: hooks.phaseId,
+    stepId: step.id,
+    reviewStepId,
+    message,
+    output,
+    diff,
+    worktree,
+    onReject: declaredOnReject,
+    iteration: ctx.iteration,
+    ts: Date.now(),
+  });
+
+  const provider = ctx.deps.requestApproval;
+  const decision: ApprovalDecision = provider
+    ? await requestApprovalWithAbort(provider, request, ctx.signal)
+    : noProviderApprovalDecision(request);
+
+  hooks.pushWorkflowEvent({
+    kind: "approval_resolved",
+    phaseId: hooks.phaseId,
+    stepId: step.id,
+    approved: decision.approved,
+    by: decision.by,
+    note: decision.note,
+    iteration: ctx.iteration,
+    ts: Date.now(),
+  });
+
+  const passed = decision.approved;
+  // A rejection may override the disposition (headless `--on-approval`); an
+  // approval always continues to `target`.
+  const effectiveOnReject: "continue" | "fail" | "stop" = passed
+    ? declaredOnReject === "continue"
+      ? "continue"
+      : declaredOnReject
+    : (decision.rejectDisposition ??
+      (declaredOnReject === "continue" ? "continue" : declaredOnReject));
+  const ok = passed || effectiveOnReject === "continue";
+  const label = passed ? target : "rejected";
+  const error = ok ? undefined : (decision.note ?? "approval rejected");
+
+  return {
+    result: {
+      stepId: step.id,
+      ok,
+      output: label,
+      target: passed ? target : undefined,
+      gate: { passed, onFalse: effectiveOnReject },
+      error,
+      durationMs: Date.now() - started,
+      noCache: true,
+    },
+    gate: { passed, target: label, onFalse: effectiveOnReject },
+    stop: !passed && (effectiveOnReject === "stop" || effectiveOnReject === "fail"),
+  };
+}
+
+/** A canceled-mid-wait decision: reject without a disposition override. */
+function canceledApprovalDecision(): ApprovalDecision {
+  return { approved: false, by: "auto:canceled", note: "run canceled before a decision" };
+}
+
+/**
+ * Await the provider, but resolve to a canceled decision if `signal` aborts
+ * first — so a cancel/timeout during a pending approval unblocks the run
+ * instead of hanging on a UI that will never answer. A well-behaved provider
+ * also observes the same signal to tear down its own prompt.
+ */
+function requestApprovalWithAbort(
+  provider: ApprovalProvider,
+  request: ApprovalRequest,
+  signal?: AbortSignal,
+): Promise<ApprovalDecision> {
+  if (!signal) return provider(request);
+  if (signal.aborted) return Promise.resolve(canceledApprovalDecision());
+  return new Promise<ApprovalDecision>((resolve, reject) => {
+    let settled = false;
+    const onAbort = (): void => {
+      if (settled) return;
+      settled = true;
+      resolve(canceledApprovalDecision());
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    provider(request, signal).then(
+      (decision) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        resolve(decision);
+      },
+      (err) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
 }
 
 function evaluateGate(

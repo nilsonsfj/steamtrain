@@ -21,6 +21,7 @@ import {
   validateWorkflow,
   workflowAgentIds,
 } from "../workflow";
+import type { ApprovalProvider } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 import { workspaceById } from "../workspace";
 
@@ -197,6 +198,7 @@ export class Orchestrator {
     cwd: string = process.cwd(),
     specOverride?: WorkflowSpec,
     inputs?: Record<string, string | number | boolean>,
+    approval?: ApprovalProvider,
   ): AsyncIterable<WorkflowEvent> {
     const spec = specOverride ?? this.listWorkflows()[name];
     if (!spec) throw new Error(`unknown workflow '${name}'`);
@@ -214,6 +216,7 @@ export class Orchestrator {
         agentWorkspace: createGitWorktreeManager(),
         loopMaxIterations: this.config.loopMaxIterations,
         resolveWorkflow: (name) => this.workflowCatalog[name],
+        requestApproval: approval,
       },
       signal,
     );

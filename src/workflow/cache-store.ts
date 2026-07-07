@@ -151,7 +151,9 @@ export async function persistWorkflowStepDone(
   result: StepResult,
   cached: boolean,
 ): Promise<void> {
-  if (!store || !key || cached || !result.ok) return;
+  // `noCache` results (human-approval checkpoints) are never persisted, so a
+  // resumed run always re-asks the decision instead of replaying it from disk.
+  if (!store || !key || cached || !result.ok || result.noCache) return;
   cache.set(stepId, result);
   await store.save(key, cache);
 }

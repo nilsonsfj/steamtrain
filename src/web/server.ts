@@ -367,6 +367,7 @@ function checkCsrf(
  *   POST   /api/runs                { workflow, input, fresh?, overrides? } -> { runId }
  *   GET    /api/runs/:id/stream     SSE of WorkflowEvents + terminal status
  *   POST   /api/runs/:id/cancel     abort a run
+ *   POST   /api/runs/:id/approval   resolve a human-approval checkpoint
  *   POST   /api/overrides/flush     flush staged session overrides -> { saved, skipped, unchanged }
  *   POST   /api/auth                validate token, set session cookie
  */
@@ -880,6 +881,50 @@ async function handle(
   if (method === "POST" && cancelMatch) {
     const ok = deps.runs.cancel(cancelMatch[1]!);
     sendJson(res, ok ? 200 : 404, { canceled: ok });
+    return;
+  }
+
+  const approvalMatch = path.match(/^\/api\/runs\/([^/]+)\/approval$/);
+  if (method === "POST" && approvalMatch) {
+    const body = await readBody(req);
+    let parsed: {
+      stepId?: unknown;
+      iteration?: unknown;
+      approved?: unknown;
+      note?: unknown;
+      rejectDisposition?: unknown;
+    };
+    try {
+      parsed = body ? JSON.parse(body) : {};
+    } catch {
+      sendJson(res, 400, { error: "invalid JSON body" });
+      return;
+    }
+    if (typeof parsed.stepId !== "string" || !parsed.stepId) {
+      sendJson(res, 400, { error: "body must include a string 'stepId'" });
+      return;
+    }
+    if (typeof parsed.approved !== "boolean") {
+      sendJson(res, 400, { error: "body must include a boolean 'approved'" });
+      return;
+    }
+    const iteration = typeof parsed.iteration === "number" ? parsed.iteration : undefined;
+    const rejectDisposition =
+      parsed.rejectDisposition === "fail" || parsed.rejectDisposition === "stop"
+        ? parsed.rejectDisposition
+        : undefined;
+    const ok = deps.runs.resolveApproval(
+      approvalMatch[1]!,
+      parsed.stepId,
+      {
+        approved: parsed.approved,
+        by: "human:web",
+        note: typeof parsed.note === "string" ? parsed.note : undefined,
+        rejectDisposition: parsed.approved ? undefined : rejectDisposition,
+      },
+      iteration,
+    );
+    sendJson(res, ok ? 200 : 404, { resolved: ok });
     return;
   }
 

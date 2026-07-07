@@ -96,7 +96,7 @@ execution behavior. **Examples:** [`workflow-examples.md`](workflow-examples.md)
 | field | required | meaning |
 | --- | --- | --- |
 | `id` | yes | Unique across the whole workflow. |
-| `kind` | no | One of `worker`, `processor`, `distributor`, `consolidator`, `gate`, `merge`, `command`, `workflow`. Missing means `worker`. |
+| `kind` | no | One of `worker`, `processor`, `distributor`, `consolidator`, `gate`, `approval`, `merge`, `command`, `workflow`. Missing means `worker`. |
 | `dependsOn` | no | Step ids from earlier phases only. Same-phase and forward dependencies are invalid. Steps are scheduled by these dependencies; omitting `dependsOn` makes the step wait for every step in all earlier phases. |
 | `when` | no | Per-step condition (same schema as a gate condition). When false the step is skipped, not failed. See [Per-step conditions](#per-step-conditions-when). |
 
@@ -249,6 +249,7 @@ Gate condition fields are combined with logical AND:
 | field | meaning |
 | --- | --- |
 | `step` | Inspect this earlier step. If omitted, inspect workflow input text. |
+| `human` | Pause for a human Approve/Reject decision instead of a mechanical test (see [Human-in-the-loop approval gates](#human-in-the-loop-approval-gates)). Mutually exclusive with `ok`/`path`/`contains`/`matches`/`equals`. |
 | `ok` | Require the referenced step's success state. |
 | `path` | Inspect one field of the step's structured output (e.g. `verdict`, `issues[0].severity`) instead of its full text. Requires `step`; the step should declare an `output` schema. Missing fields evaluate as empty text. |
 | `contains` | Require output/input text to contain this rendered string. |
@@ -298,6 +299,53 @@ Text-only conditions (`contains`/`matches`/`equals`) keep the skip: they assume
 the referenced step produced meaningful output, and an errored agent mid-loop
 should halt the loop rather than burn its iteration budget re-running a
 persistent failure.
+
+### Approval (human-in-the-loop checkpoint)
+
+An `approval` step pauses the run, surfaces a reviewed step's output — and,
+when that step ran in an isolated git worktree, its diff — and waits for a
+human to Approve or Reject before continuing. It is the "show me what you've
+got before spending money / mutating the repo" checkpoint.
+
+```jsonc
+{
+  "id": "approve-plan",
+  "kind": "approval",
+  "dependsOn": ["synthesize"],
+  "step": "synthesize",          // reviewed step; defaults to the sole dependsOn
+  "prompt": "Approve this plan before implementing?",
+  "target": "approved",          // label emitted on approval (default "approved")
+  "onReject": "fail"             // "fail" (default) or "stop"
+}
+```
+
+| field | meaning |
+| --- | --- |
+| `step` | The step whose output/diff to review. Defaults to the sole `dependsOn` entry; must reference an earlier phase. Omit both for a bare "proceed?" checkpoint. |
+| `prompt` | Human-readable instructions shown with the reviewed output. Templated. |
+| `target` | State/label emitted on approval. Default `"approved"`. |
+| `onReject` | What a rejection does: `"fail"` (default; fail the run and halt later phases) or `"stop"` (graceful halt, run stays successful). |
+
+Equivalently, a `gate` with `"condition": { "human": true }` is a human gate:
+its `onFalse` (`continue`/`fail`/`stop`) and `target` route on the decision, and
+`loopTo` turns a rejection into a loop-back ("keep iterating until I approve").
+
+**Who decides.** Each surface answers checkpoints its own way:
+
+- **TUI** — the run pauses on a highlighted card; press `a` to approve or `r`
+  to reject.
+- **Web UI** — an Approve/Reject card renders inline; clicking posts to
+  `POST /api/runs/:id/approval`.
+- **Headless CLI** — non-interactive: `--approve-all` approves every
+  checkpoint, `--on-approval fail|stop` rejects with that disposition. With
+  neither flag the run auto-rejects and stops (the safe default — nothing
+  proceeds unattended), printing a note.
+
+**Decisions and resume.** Every decision (who decided, approve/reject, optional
+note) is recorded in run history. An approval is **never cached**, so resuming
+a paused run always re-asks while the cached steps around the checkpoint replay
+from `.steamtrain/cache/` — the same cache/rerun machinery every other step
+uses. Later-phase steps never start until the checkpoint is decided.
 
 ### Merge (worktree merge-back)
 

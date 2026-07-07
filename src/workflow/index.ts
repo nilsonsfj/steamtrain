@@ -7,6 +7,7 @@ export {
   type DistributorStep,
   type GateCondition,
   type GateStep,
+  type ApprovalStep,
   type MergeStep,
   type WorkerStep,
   type WorkflowCallStep,
@@ -49,7 +50,21 @@ export type {
   PhaseDoneEvent,
   WorkflowDoneEvent,
   BudgetExceededEvent,
+  ApprovalPendingEvent,
+  ApprovalResolvedEvent,
 } from "./events";
+export {
+  APPROVAL_OUTPUT_CAP,
+  APPROVAL_DIFF_CAP,
+  type ApprovalDecision,
+  type ApprovalProvider,
+  type ApprovalRejectDisposition,
+  type ApprovalRequest,
+  type HeadlessApprovalMode,
+  capApprovalText,
+  headlessApprovalProvider,
+  noProviderApprovalDecision,
+} from "./approval";
 export {
   TOKEN_KEYS,
   TOKEN_LABELS,
@@ -253,6 +268,8 @@ export {
 export {
   type StepStatus,
   type StepState,
+  type StepApprovalState,
+  type PendingApproval,
   type PhaseState,
   type LoopMarker,
   type BudgetState,

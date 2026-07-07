@@ -34,7 +34,8 @@ var SteamtrainReducer = (() => {
     started: false,
     done: false,
     ok: true,
-    loopMarkers: []
+    loopMarkers: [],
+    pendingApprovals: []
   };
   function workflowStateFromSpec(spec) {
     return {
@@ -120,7 +121,8 @@ var SteamtrainReducer = (() => {
           done: false,
           ok: true,
           loopMarkers: [],
-          budget: void 0
+          budget: void 0,
+          pendingApprovals: []
         };
       case "phase_start": {
         const iter = e.iteration ?? 1;
@@ -291,6 +293,53 @@ var SteamtrainReducer = (() => {
               gatePhaseIteration
             }
           ]
+        };
+      }
+      case "approval_pending": {
+        const withStep = updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
+          ...s,
+          activity: "\u23F3 awaiting approval",
+          approval: {
+            pending: true,
+            reviewStepId: e.reviewStepId,
+            message: e.message,
+            output: e.output,
+            diff: e.diff,
+            onReject: e.onReject
+          }
+        }));
+        const pending = {
+          phaseId: e.phaseId,
+          stepId: e.stepId,
+          iteration: e.iteration ?? 1,
+          reviewStepId: e.reviewStepId,
+          message: e.message,
+          output: e.output,
+          diff: e.diff,
+          onReject: e.onReject
+        };
+        const others = (withStep.pendingApprovals ?? []).filter(
+          (p) => !(p.stepId === e.stepId && p.iteration === (e.iteration ?? 1))
+        );
+        return { ...withStep, pendingApprovals: [...others, pending] };
+      }
+      case "approval_resolved": {
+        const withStep = updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
+          ...s,
+          activity: e.approved ? "approved" : "rejected",
+          approval: {
+            ...s.approval ?? { pending: false },
+            pending: false,
+            approved: e.approved,
+            by: e.by,
+            note: e.note
+          }
+        }));
+        return {
+          ...withStep,
+          pendingApprovals: (withStep.pendingApprovals ?? []).filter(
+            (p) => !(p.stepId === e.stepId && p.iteration === (e.iteration ?? 1))
+          )
         };
       }
       default: {

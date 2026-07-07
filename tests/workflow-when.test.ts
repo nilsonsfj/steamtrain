@@ -404,7 +404,7 @@ describe("when validation", () => {
     };
     const result = validateWorkflow(spec);
     expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/requires ok, contains, matches, or equals/);
+    expect(result.error).toMatch(/requires human, ok, contains, matches, or equals/);
   });
 
   it("accepts a valid when condition on any step kind", () => {

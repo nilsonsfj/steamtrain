@@ -17,6 +17,7 @@ import { AGENT_COLOR } from "./theme";
 import { selectVisibleWindow } from "./workflow-list-window";
 import { BLOCK_LABEL, formatWorkflowAgentTarget } from "./workflow-spec-ui";
 import {
+  type PendingApproval,
   type PhaseState,
   type StepState,
   type WorkflowState,
@@ -147,6 +148,10 @@ export function WorkflowView({
         </Text>
       ) : null}
 
+      {state.pendingApprovals && state.pendingApprovals.length > 0 ? (
+        <ApprovalPrompt approval={state.pendingApprovals[0]!} width={innerWidth} />
+      ) : null}
+
       <Box flexDirection="column" flexGrow={1}>
         {state.phases.length === 0 ? (
           <Text color="gray">starting workflow…</Text>
@@ -184,6 +189,47 @@ export function WorkflowView({
       </Box>
 
       {selected ? <Detail step={selected} width={innerWidth} /> : null}
+    </Box>
+  );
+}
+
+/** Prominent, interactive prompt for the checkpoint the run is paused on. */
+function ApprovalPrompt({ approval, width }: { approval: PendingApproval; width: number }) {
+  const disposition =
+    approval.onReject === "fail"
+      ? "fail the run"
+      : approval.onReject === "stop"
+        ? "stop the run"
+        : "continue";
+  const preview = approval.output ? truncate(approval.output.trim(), 500) : undefined;
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
+      <Text color="yellow" bold>
+        ⏳ approval required · {approval.stepId}
+        {approval.reviewStepId ? ` (reviewing ${approval.reviewStepId})` : ""}
+      </Text>
+      {approval.message ? (
+        <Box width={width}>
+          <Text wrap="wrap">{approval.message}</Text>
+        </Box>
+      ) : null}
+      {approval.diff && approval.diff.files.length > 0 ? (
+        <Text color="gray">
+          {approval.diff.files.length} file{approval.diff.files.length === 1 ? "" : "s"} · +
+          {approval.diff.additions} -{approval.diff.deletions}
+        </Text>
+      ) : null}
+      {preview ? (
+        <Box width={width}>
+          <Text color="gray" wrap="wrap">
+            {preview}
+          </Text>
+        </Box>
+      ) : null}
+      <Text color="cyan">
+        press <Text bold>a</Text> to approve · <Text bold>r</Text> to reject (rejection will{" "}
+        {disposition})
+      </Text>
     </Box>
   );
 }

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { SteamtrainConfig } from "../config";
 import {
+  type ApprovalDecision,
+  type ApprovalProvider,
   type RerunMode,
   type RerunPlan,
   type RunRecord,
@@ -37,6 +39,7 @@ export interface WorkflowHost {
     cwd?: string,
     specOverride?: WorkflowSpec,
     inputs?: Record<string, string | number | boolean>,
+    approval?: ApprovalProvider,
   ): AsyncIterable<WorkflowEvent>;
 }
 
@@ -82,6 +85,13 @@ interface Run {
   listeners: Set<RunListener>;
   controller: AbortController;
   timeoutTimer?: ReturnType<typeof setTimeout>;
+  /**
+   * Live approval checkpoints keyed by `<stepId>:<iteration>`. The engine's
+   * injected provider registers a resolver here and blocks; a
+   * `POST /api/runs/:id/approval` calls {@link WorkflowRunManager.resolveApproval}
+   * to settle it. Cleared as decisions arrive and when the run ends.
+   */
+  pendingApprovals: Map<string, (decision: ApprovalDecision) => void>;
 }
 
 export interface RunSummary {
@@ -182,6 +192,7 @@ export class WorkflowRunManager {
       settled: false,
       listeners: new Set(),
       controller: new AbortController(),
+      pendingApprovals: new Map(),
     };
     const workflowTimeoutMs = timeoutMsFromSec(resolveWorkflowTimeoutSec(spec, this.config));
     if (workflowTimeoutMs > 0) {
@@ -233,6 +244,59 @@ export class WorkflowRunManager {
     const run = this.runs.get(runId);
     if (!run || run.settled) return false;
     run.controller.abort();
+    return true;
+  }
+
+  /**
+   * Build the run's approval provider: each pending checkpoint registers a
+   * resolver keyed by `<stepId>:<iteration>` and blocks until a
+   * `POST /api/runs/:id/approval` calls {@link resolveApproval} — or the run's
+   * abort signal fires, which settles it as canceled so the engine unblocks.
+   */
+  private buildApprovalProvider(run: Run): ApprovalProvider {
+    return (request, signal) =>
+      new Promise<ApprovalDecision>((resolve) => {
+        const key = `${request.stepId}:${request.iteration}`;
+        const settle = (decision: ApprovalDecision): void => {
+          if (!run.pendingApprovals.has(key)) return;
+          run.pendingApprovals.delete(key);
+          signal?.removeEventListener("abort", onAbort);
+          resolve(decision);
+        };
+        const onAbort = (): void =>
+          settle({ approved: false, by: "auto:canceled", note: "run canceled before a decision" });
+        run.pendingApprovals.set(key, settle);
+        if (signal) {
+          if (signal.aborted) {
+            onAbort();
+            return;
+          }
+          signal.addEventListener("abort", onAbort, { once: true });
+        }
+      });
+  }
+
+  /**
+   * Settle a pending approval checkpoint from an HTTP request. `iteration`
+   * targets a specific pass; omitted resolves the single pending checkpoint for
+   * `stepId`. Returns false when the run or checkpoint is unknown.
+   */
+  resolveApproval(
+    runId: string,
+    stepId: string,
+    decision: ApprovalDecision,
+    iteration?: number,
+  ): boolean {
+    const run = this.runs.get(runId);
+    if (!run) return false;
+    const key =
+      iteration !== undefined
+        ? `${stepId}:${iteration}`
+        : [...run.pendingApprovals.keys()].find((k) => k.startsWith(`${stepId}:`));
+    if (!key) return false;
+    const settle = run.pendingApprovals.get(key);
+    if (!settle) return false;
+    settle(decision);
     return true;
   }
 
@@ -293,6 +357,7 @@ export class WorkflowRunManager {
         this.cwd,
         spec,
         run.params,
+        this.buildApprovalProvider(run),
       )) {
         recorder.handle(event);
         this.emit(run, JSON.stringify({ type: "event", event }), false);
@@ -333,6 +398,7 @@ export class WorkflowRunManager {
       }
     } finally {
       if (run.timeoutTimer) clearTimeout(run.timeoutTimer);
+      run.pendingApprovals.clear();
       this.runningCount = Math.max(0, this.runningCount - 1);
       run.endedAt = Date.now();
       // The outcome is resolved now; lock out cancellation synchronously before

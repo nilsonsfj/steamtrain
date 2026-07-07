@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { Orchestrator } from "../orchestrator";
-import type { StepResult, WorkflowSpec } from "../workflow";
+import type { ApprovalDecision, ApprovalProvider, StepResult, WorkflowSpec } from "../workflow";
 import {
   RunRecordBuilder,
   WORKFLOW_CACHE_DIR,
@@ -47,6 +47,9 @@ export function useWorkflowRunner({
   const activeWorkflowRef = useRef<string | undefined>(undefined);
   const activeWorkflowInputRef = useRef<string | undefined>(undefined);
   const workflowCacheRef = useRef<Map<string, StepResult>>(new Map());
+  // Live approval checkpoints keyed by `<stepId>:<iteration>`: the injected
+  // provider registers a resolver here and blocks until a keypress resolves it.
+  const approvalResolversRef = useRef<Map<string, (decision: ApprovalDecision) => void>>(new Map());
   const cacheStoreRef = useRef(createWorkflowCacheStore(join(process.cwd(), WORKFLOW_CACHE_DIR)));
   const historyStoreRef = useRef(
     createWorkflowHistoryStore(join(process.cwd(), WORKFLOW_HISTORY_DIR)),
@@ -136,6 +139,26 @@ export function useWorkflowRunner({
             for (const [stepId, result] of opts.seed) cache.set(stepId, result);
             await store.save(key, cache);
           }
+          const approvalProvider: ApprovalProvider = (request, signal) =>
+            new Promise<ApprovalDecision>((resolve) => {
+              const mapKey = `${request.stepId}:${request.iteration}`;
+              const settle = (decision: ApprovalDecision): void => {
+                if (!approvalResolversRef.current.has(mapKey)) return;
+                approvalResolversRef.current.delete(mapKey);
+                signal?.removeEventListener("abort", onAbort);
+                resolve(decision);
+              };
+              const onAbort = (): void =>
+                settle({ approved: false, by: "auto:canceled", note: "run canceled" });
+              approvalResolversRef.current.set(mapKey, settle);
+              if (signal) {
+                if (signal.aborted) {
+                  onAbort();
+                  return;
+                }
+                signal.addEventListener("abort", onAbort, { once: true });
+              }
+            });
           for await (const event of orchestrator.runWorkflow(
             name,
             input,
@@ -144,6 +167,7 @@ export function useWorkflowRunner({
             cwd,
             spec,
             opts?.params,
+            approvalProvider,
           )) {
             recorder.handle(event);
             if (event.kind === "workflow_done") workflowOk = event.ok;
@@ -165,6 +189,7 @@ export function useWorkflowRunner({
           if (mountedRef.current) setWfNotice(`run failed: ${runError}`);
         } finally {
           if (timeoutTimer) clearTimeout(timeoutTimer);
+          approvalResolversRef.current.clear();
           const status = ac.signal.aborted
             ? "canceled"
             : runError || !workflowOk
@@ -215,6 +240,26 @@ export function useWorkflowRunner({
     abortRef.current?.abort();
   }, []);
 
+  /**
+   * Resolve the run's pending approval checkpoint (invoked by the `a`/`r`
+   * keypress handler). `iteration` targets a specific pass; omitted resolves the
+   * single pending checkpoint for `stepId`.
+   */
+  const resolveApproval = useCallback(
+    (stepId: string, approved: boolean, iteration?: number): void => {
+      const resolvers = approvalResolversRef.current;
+      const mapKey =
+        iteration !== undefined
+          ? `${stepId}:${iteration}`
+          : [...resolvers.keys()].find((k) => k.startsWith(`${stepId}:`));
+      if (!mapKey) return;
+      const settle = resolvers.get(mapKey);
+      if (!settle) return;
+      settle({ approved, by: "human:tui" });
+    },
+    [],
+  );
+
   return {
     running,
     setRunning,
@@ -245,5 +290,6 @@ export function useWorkflowRunner({
     runWorkflow,
     launchWorkflow,
     handleWorkflowCancel,
+    resolveApproval,
   };
 }
