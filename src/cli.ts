@@ -1071,7 +1071,12 @@ async function runWorkflowCommand(
     : options.onApproval === "fail"
       ? headlessApprovalProvider("reject-fail")
       : headlessApprovalProvider("reject-stop");
-  if (!options.approveAll && !options.onApproval && specHasApprovalCheckpoints(spec)) {
+  const workflowCatalog = orchestrator.listWorkflows();
+  if (
+    !options.approveAll &&
+    !options.onApproval &&
+    specHasApprovalCheckpoints(spec, (childName) => workflowCatalog[childName])
+  ) {
     err(
       "note: this workflow has approval checkpoints; with no --approve-all / --on-approval they auto-reject and stop the run\n",
     );
@@ -1539,12 +1544,27 @@ function printHumanEvent(event: WorkflowEvent, out: (text: string) => void): voi
   }
 }
 
-/** Whether a workflow contains any human-approval checkpoint (approval step or human gate). */
-function specHasApprovalCheckpoints(spec: WorkflowSpec): boolean {
+/**
+ * Whether a workflow contains any human-approval checkpoint (approval step or
+ * human gate), recursing into named sub-workflows so a checkpoint nested inside
+ * a `kind: "workflow"` call still triggers the headless advisory. `resolve`
+ * looks up a child spec by name (the orchestrator catalog); `seen` guards
+ * against workflows that reference each other cyclically.
+ */
+function specHasApprovalCheckpoints(
+  spec: WorkflowSpec,
+  resolve?: (name: string) => WorkflowSpec | undefined,
+  seen: Set<string> = new Set(),
+): boolean {
   for (const phase of spec.phases) {
     for (const step of phase.steps) {
       if (step.kind === "approval") return true;
       if (step.kind === "gate" && step.condition.human === true) return true;
+      if (step.kind === "workflow" && resolve && !seen.has(step.workflow)) {
+        seen.add(step.workflow);
+        const child = resolve(step.workflow);
+        if (child && specHasApprovalCheckpoints(child, resolve, seen)) return true;
+      }
     }
   }
   return false;

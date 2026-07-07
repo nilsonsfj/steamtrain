@@ -284,6 +284,32 @@ describe("runCli", () => {
     expect(c.stdout).toContain("rejected");
   });
 
+  it("warns when a checkpoint is nested in a sub-workflow", async () => {
+    const c = capture();
+    // The parent has no top-level checkpoint; the advisory must still fire by
+    // recursing into the named sub-workflow it calls.
+    writeFileSync(
+      join(c.io.cwd, "steamtrain.json"),
+      JSON.stringify({
+        workflows: {
+          "approve-flow": approveFlow,
+          parent: {
+            name: "parent",
+            phases: [
+              {
+                id: "p1",
+                title: "Call",
+                steps: [{ id: "child", kind: "workflow", workflow: "approve-flow" }],
+              },
+            ],
+          },
+        },
+      }),
+    );
+    await runCli(["workflow", "run", "parent", "--input", "task"], c.io);
+    expect(c.stderr).toContain("approval checkpoints");
+  });
+
   it("rejects mutually exclusive --approve-all and --on-approval", async () => {
     const c = capture();
     writeApproveFlow(c.io.cwd);

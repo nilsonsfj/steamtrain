@@ -335,7 +335,10 @@ its `onFalse` (`continue`/`fail`/`stop`) and `target` route on the decision, and
 - **TUI** — the run pauses on a highlighted card; press `a` to approve or `r`
   to reject.
 - **Web UI** — an Approve/Reject card renders inline; clicking posts to
-  `POST /api/runs/:id/approval`.
+  `POST /api/runs/:id/approval` with `{ stepId, approved, iteration?, note?,
+  rejectDisposition? }`. Send `iteration` when the checkpoint sits inside a
+  loop (the card does this automatically) so the intended pass resolves rather
+  than the first pending one for that `stepId`.
 - **Headless CLI** — non-interactive: `--approve-all` approves every
   checkpoint, `--on-approval fail|stop` rejects with that disposition. With
   neither flag the run auto-rejects and stops (the safe default — nothing
