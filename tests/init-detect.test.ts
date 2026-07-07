@@ -73,16 +73,25 @@ describe("detectProject", () => {
   });
 
   it("falls back to a Makefile test target only when no other test command exists", async () => {
+    const hasMake = { hasCommand: (name: string) => name === "make" };
     const dir = await tempDir();
     await writeFile(join(dir, "Makefile"), "build:\n\ttrue\n\ntest:\n\ttrue\n");
-    const detection = detectProject(dir);
+    const detection = detectProject(dir, hasMake);
     expect(detection.checks.map((c) => c.id)).toEqual(["make-test"]);
     expect(detection.testCheck?.cmd).toBe("make test");
 
     const withNode = await tempDir();
     await writeJson(withNode, "package.json", { scripts: { test: "vitest run" } });
     await writeFile(join(withNode, "Makefile"), "test:\n\ttrue\n");
-    expect(detectProject(withNode).checks.map((c) => c.id)).toEqual(["node-test"]);
+    expect(detectProject(withNode, hasMake).checks.map((c) => c.id)).toEqual(["node-test"]);
+  });
+
+  it("skips the Makefile fallback when make is not installed", async () => {
+    const dir = await tempDir();
+    await writeFile(join(dir, "Makefile"), "test:\n\ttrue\n");
+    const detection = detectProject(dir, { hasCommand: () => false });
+    expect(detection.checks).toEqual([]);
+    expect(detection.testCheck).toBeUndefined();
   });
 
   it("ignores an unparseable package.json instead of guessing", async () => {

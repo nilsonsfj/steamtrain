@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 /**
  * Repo detection for `steamtrain init`: find the deterministic check commands
@@ -37,7 +37,13 @@ const NPM_PLACEHOLDER_TEST = /echo .*no test specified/i;
 /** Node script names worth turning into checks, in report order. */
 const NODE_CHECK_SCRIPTS = ["test", "lint", "typecheck", "check"] as const;
 
-export function detectProject(cwd: string): ProjectDetection {
+export interface DetectOptions {
+  /** Injected binary-existence probe for tests (defaults to a PATH scan). */
+  hasCommand?: (name: string) => boolean;
+}
+
+export function detectProject(cwd: string, options: DetectOptions = {}): ProjectDetection {
+  const hasCommand = options.hasCommand ?? commandOnPath;
   const stacks: string[] = [];
   const checks: DetectedCheck[] = [];
 
@@ -64,7 +70,9 @@ export function detectProject(cwd: string): ProjectDetection {
   }
   // Makefile `test` target: only as a fallback when nothing else surfaced a
   // test command — Makefiles routinely wrap the same commands detected above.
-  if (!checks.some((check) => check.test) && makefileHasTestTarget(cwd)) {
+  // Only offered when `make` itself is installed: a Makefile without make
+  // (common on Windows) would generate a check that can only fail.
+  if (!checks.some((check) => check.test) && makefileHasTestTarget(cwd) && hasCommand("make")) {
     checks.unshift({ id: "make-test", label: "make test", cmd: "make test", test: true });
   }
 
@@ -132,6 +140,20 @@ function detectPython(cwd: string): { checks: DetectedCheck[] } | undefined {
     checks.push({ id: "ruff", label: "ruff check .", cmd: "ruff check ." });
   }
   return { checks };
+}
+
+/** Synchronous PATH scan (mirrors the doctor's async resolveBinary, cheaply). */
+function commandOnPath(name: string): boolean {
+  const pathEnv = process.env.PATH ?? "";
+  const exts =
+    process.platform === "win32" ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";") : [""];
+  for (const dir of pathEnv.split(delimiter)) {
+    if (!dir) continue;
+    for (const ext of exts) {
+      if (existsSync(join(dir, name + ext))) return true;
+    }
+  }
+  return false;
 }
 
 function makefileHasTestTarget(cwd: string): boolean {

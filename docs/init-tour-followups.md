@@ -26,6 +26,12 @@ the [`dry-run-followups.md`](dry-run-followups.md) precedent.
 - **Stack-reporting parity:** a bare `pyproject.toml` now reports
   `detected: python` with zero checks, exactly like a script-less
   `package.json` reports `detected: node (…)`.
+- **Makefile fallback requires `make` on PATH.** Initially deferred, then
+  raised by a second review: a Makefile `test:` target on a machine without
+  `make` (common on Windows) generated a check that could only fail. The
+  fallback now runs a synchronous PATH scan (mirroring the doctor's async
+  `resolveBinary`) and is skipped when `make` is absent; tests inject the
+  probe to stay deterministic.
 - **Config-write safety:** unparseable JSON and a non-object `workflows` key
   abort with exit 1 and an expected-shape hint, leaving the file
   byte-identical; all other top-level keys are preserved; same-named
@@ -71,12 +77,14 @@ the [`dry-run-followups.md`](dry-run-followups.md) precedent.
   is deliberate scope control: a real TOML parser is a new dependency (or a
   hand-rolled one to maintain) to close a false-positive window that is
   already narrow. Revisit if detection grows more Python-specific rules.
-- **Verifying `make` (and other runners) exist on PATH before offering the
-  check.** Detection is synchronous and offline by design; binary resolution
-  is the doctor's job and would make `detectProject` async for marginal
-  benefit. A generated check whose binary is missing fails loudly with the
-  shell's own "command not found" — an honest, debuggable signal. Could be
-  folded into a future `workflow doctor`-style validation of command steps.
+- **Verifying every detected runner exists on PATH.** The `make` fallback now
+  checks (see above) because a Makefile is only *circumstantial* evidence of
+  the toolchain. The other detections stay unverified on purpose: a
+  `package.json` with scripts, a `Cargo.toml`, a `go.mod`, or a
+  `[tool.pytest` section *is* the project declaring its toolchain, and a
+  missing binary there fails loudly with the shell's own "command not found"
+  — an honest, debuggable signal. General command-step binary validation
+  could fold into a future `workflow doctor`-style pre-run check.
 - **Formatting-preserving config writes.** `init` re-serializes
   `steamtrain.json` with 2-space indentation, which discards hand-chosen
   formatting (never data — JSON has no comments). Preserving formatting
