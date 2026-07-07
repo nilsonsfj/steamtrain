@@ -165,15 +165,17 @@ function kiroTokens(usage: KiroUsage | undefined): TokenUsage | undefined {
 /**
  * Build the `kiro` argv for one print-mode run.
  *
- * kiro uses `--print --output-format stream-json --verbose --model MODEL`
+ * kiro uses `--print --output-format stream-json --include-partial-messages --verbose --model MODEL`
  * plus optional `--effort EFFORT` and any extra args. The prompt is written
- * to stdin (like Claude Code).
+ * to stdin (like Claude Code). `--include-partial-messages` ensures thinking/reasoning
+ * content blocks are emitted in the stream output.
  */
 export function buildKiroExecArgs(opts: AgentRunOptions): string[] {
   return [
     "--print",
     "--output-format",
     "stream-json",
+    "--include-partial-messages",
     "--verbose",
     "--model",
     opts.model,
