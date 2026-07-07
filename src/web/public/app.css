@@ -1048,6 +1048,21 @@ select.sel.invalid {
 .hback:hover {
   text-decoration: underline;
 }
+/* ---- auth login form ---- */
+.login-form {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin: 16px 0;
+}
+.login-form .txt {
+  width: 280px;
+}
+.login-error {
+  color: var(--error);
+  font-size: 13px;
+  min-height: 1.2em;
+}
 .plan-summary {
   margin-bottom: 16px;
 }

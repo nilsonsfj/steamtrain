@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import { homedir } from "node:os";
@@ -138,6 +138,11 @@ export interface WebServerDeps {
   /** Live project config (mutated in place when saved via /api/config). */
   config?: SteamtrainConfig;
   configPath?: string;
+  /**
+   * When set, all API routes require a valid `__steamtrain_auth` session cookie.
+   * The cookie is set by POST /api/auth with the matching token.
+   */
+  authToken?: string;
 }
 
 function isNonLocalHost(host?: string): boolean {
@@ -245,6 +250,99 @@ function drainRequestBody(req: IncomingMessage): void {
   req.on("data", () => {});
 }
 
+const AUTH_COOKIE = "__steamtrain_auth";
+
+function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+/** Timing-unsafe-safe string comparison. Both strings must be the same length. */
+function timingSafeCompare(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
+function parseCookies(header: string | undefined): Record<string, string> {
+  const cookies: Record<string, string> = {};
+  if (!header) return cookies;
+  for (const pair of header.split(";")) {
+    const idx = pair.indexOf("=");
+    if (idx < 1) continue;
+    const key = pair.slice(0, idx).trim();
+    const val = pair.slice(idx + 1).trim();
+    if (key) cookies[key] = val;
+  }
+  return cookies;
+}
+
+function checkAuth(req: IncomingMessage, authToken: string | undefined): boolean {
+  if (!authToken) return true;
+  const cookies = parseCookies(req.headers.cookie);
+  const cookieVal = cookies[AUTH_COOKIE];
+  if (!cookieVal) return false;
+  // Compare against the hashed token stored in the cookie using
+  // timing-safe comparison to match the login endpoint's approach.
+  return timingSafeCompare(cookieVal, hashToken(authToken));
+}
+
+/**
+ * Build the Set-Cookie header value for the auth session cookie.
+ * Uses SHA-256(token) as the cookie value so a leaked cookie does not expose
+ * the raw token. Adds Secure when binding to a non-local host.
+ */
+function authCookie(token: string, bindHost?: string): string {
+  const parts = [`${AUTH_COOKIE}=${hashToken(token)}`, "Path=/", "HttpOnly", "SameSite=Strict"];
+  if (isNonLocalHost(bindHost)) parts.push("Secure");
+  return parts.join("; ");
+}
+
+/**
+ * Validate Origin/Referer on state-changing requests. When auth is enabled,
+ * this prevents CSRF: a malicious page on a different origin cannot forge
+ * requests because the browser enforces same-origin on Origin/Referer headers
+ * and our cookie is SameSite=Strict.
+ *
+ * Returns true if the request is safe to proceed, false if it was rejected
+ * (response already sent).
+ */
+function checkCsrf(
+  req: IncomingMessage,
+  res: ServerResponse,
+  method: string,
+  authToken: string | undefined,
+): boolean {
+  if (!authToken) return true;
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return true;
+  const origin = req.headers.origin || req.headers.referer;
+  if (!origin) {
+    // No Origin/Referer — reject state-changing requests when auth is enabled.
+    // Legitimate browser requests always include Origin or Referer.
+    sendJson(res, 403, { error: "missing origin header" });
+    return false;
+  }
+  try {
+    const originUrl = new URL(origin);
+    const host = req.headers.host;
+    if (!host) {
+      sendJson(res, 403, { error: "missing host header" });
+      return false;
+    }
+    // Normalize port comparison: req.headers.host may omit default ports (80/443)
+    // while originUrl.host always includes them.
+    const hostParts = host.split(":");
+    const hostName = hostParts[0]!;
+    const hostPort = hostParts[1] || (originUrl.protocol === "https:" ? "443" : "80");
+    if (originUrl.hostname !== hostName || originUrl.port !== hostPort) {
+      sendJson(res, 403, { error: "origin mismatch" });
+      return false;
+    }
+  } catch {
+    sendJson(res, 403, { error: "invalid origin" });
+    return false;
+  }
+  return true;
+}
+
 /**
  * Build the steamtrain web-UI HTTP server. Pure wiring over an injected
  * {@link WorkflowHost} and {@link WorkflowRunManager}, so it can be exercised in
@@ -270,6 +368,7 @@ function drainRequestBody(req: IncomingMessage): void {
  *   GET    /api/runs/:id/stream     SSE of WorkflowEvents + terminal status
  *   POST   /api/runs/:id/cancel     abort a run
  *   POST   /api/overrides/flush     flush staged session overrides -> { saved, skipped, unchanged }
+ *   POST   /api/auth                validate token, set session cookie
  */
 export function createWebServer(deps: WebServerDeps): Server {
   return createServer((req, res) => {
@@ -299,16 +398,71 @@ async function handle(
   const path = url.pathname;
   const method = req.method ?? "GET";
 
+  // CORS headers: when auth is enabled with a non-local host, send specific
+  // origin + credentials instead of wildcard (cookies require it).
   if (isNonLocalHost(deps.bindHost)) {
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    if (deps.authToken) {
+      const origin = req.headers.origin;
+      if (origin) {
+        try {
+          const originUrl = new URL(origin);
+          if (originUrl.host === req.headers.host) {
+            res.setHeader("Access-Control-Allow-Origin", origin);
+            res.setHeader("Access-Control-Allow-Credentials", "true");
+          }
+        } catch {
+          // Invalid origin — don't set CORS headers.
+        }
+      }
+    } else {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+    }
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     if (method === "OPTIONS") {
       res.writeHead(204);
       res.end();
       return;
     }
   }
+
+  // Login endpoint: always accessible, sets the session cookie.
+  if (method === "POST" && path === "/api/auth") {
+    if (!deps.authToken) {
+      sendJson(res, 200, { ok: true, authRequired: false });
+      return;
+    }
+    let parsed: { token?: unknown };
+    try {
+      const body = await readBody(req);
+      parsed = body ? JSON.parse(body) : {};
+    } catch {
+      sendJson(res, 400, { error: "invalid JSON body" });
+      return;
+    }
+    if (typeof parsed.token !== "string" || !timingSafeCompare(parsed.token, deps.authToken)) {
+      sendJson(res, 401, { error: "invalid token" });
+      return;
+    }
+    res.writeHead(200, {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+      "set-cookie": authCookie(deps.authToken, deps.bindHost),
+    });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  // Auth check: skip for public routes (index, static assets).
+  const isPublicRoute = path === "/" || path === "/index.html" || path.startsWith("/static/");
+  if (!isPublicRoute && !checkAuth(req, deps.authToken)) {
+    sendJson(res, 401, { error: "authentication required" });
+    return;
+  }
+
+  // CSRF check on state-changing requests.
+  if (!checkCsrf(req, res, method, deps.authToken)) return;
 
   if (method === "GET" && (path === "/" || path === "/index.html")) {
     // The page itself is `no-store` so a fresh release swaps in the new
@@ -903,6 +1057,8 @@ export interface StartWebUiOptions {
   configPath?: string;
   port?: number;
   host?: string;
+  /** Require this token to access the web UI (cookie-based session). */
+  authToken?: string;
   stdout?: (text: string) => void;
   stderr?: (text: string) => void;
   /** Maximum concurrent workflow runs. 0 = unlimited. */
@@ -977,6 +1133,7 @@ export async function startWebUi(
     bindHost: host,
     config: liveConfig,
     configPath: options.configPath,
+    authToken: options.authToken,
   });
 
   // Fail loudly and early when the static web assets are missing instead of
@@ -1004,6 +1161,9 @@ export async function startWebUi(
   const url = `http://${host}:${actualPort}`;
 
   out(`\n🚂 steamtrain web UI running at ${url}\n`);
+  if (options.authToken) {
+    out("   🔒 auth enabled (--auth-token set); a login prompt will appear in the browser.\n");
+  }
   out("   open it in your browser; press Ctrl+C to stop.\n");
   out("   checking agent health in the background…\n");
 
