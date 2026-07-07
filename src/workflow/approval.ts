@@ -108,6 +108,32 @@ export function capApprovalText(text: string, cap: number): string {
 }
 
 /**
+ * Find the pending-approval resolver key that matches a decision request. Both
+ * UI bridges (web {@link ApprovalProvider} in the run manager, TUI runner) key
+ * their resolver map by `<stepId>:<iteration>` using the step's LOCAL id. When
+ * the checkpoint lives inside a sub-workflow, the surfaced event carries the
+ * NAMESPACED id (`parent::child`), so a UI resolving it posts that namespaced
+ * id. Match a resolver key when its local step id equals the posted id or is the
+ * trailing `::`-segment of it; `iteration` (when provided) must also match.
+ */
+export function matchApprovalKey(
+  keys: Iterable<string>,
+  stepId: string,
+  iteration?: number,
+): string | undefined {
+  for (const key of keys) {
+    const sep = key.lastIndexOf(":");
+    if (sep < 0) continue;
+    const keyStep = key.slice(0, sep);
+    const keyIteration = key.slice(sep + 1);
+    const stepMatches = keyStep === stepId || stepId.endsWith(`::${keyStep}`);
+    if (!stepMatches) continue;
+    if (iteration === undefined || String(iteration) === keyIteration) return key;
+  }
+  return undefined;
+}
+
+/**
  * The automated decision policy for a headless run. `approve-all` approves
  * every checkpoint; `reject-fail` / `reject-stop` reject with that disposition.
  */

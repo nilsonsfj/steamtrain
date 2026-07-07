@@ -433,6 +433,9 @@ textarea#input:focus {
 .kind.gate {
   background: #f0a35e;
 }
+.kind.approval {
+  background: #ffd166;
+}
 .kind.merge {
   background: #ff9ecb;
 }
@@ -946,6 +949,9 @@ select.sel.invalid {
 }
 .estep.gate {
   border-left-color: #f0a35e;
+}
+.estep.approval {
+  border-left-color: #ffd166;
 }
 .estep.merge {
   border-left-color: #ff9ecb;

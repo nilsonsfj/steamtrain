@@ -302,6 +302,49 @@ describe("approval engine", () => {
     expect(calls).toBe(2);
   });
 
+  it("surfaces an approval checkpoint nested inside a sub-workflow", async () => {
+    const child: WorkflowSpec = {
+      name: "child",
+      phases: [
+        {
+          id: "c1",
+          title: "Draft",
+          steps: [{ id: "draft", agent: "claude", model: "m", prompt: "{{input}}" }],
+        },
+        {
+          id: "c2",
+          title: "Approve",
+          steps: [{ id: "chk", kind: "approval", step: "draft", dependsOn: ["draft"] }],
+        },
+      ],
+    };
+    const parent: WorkflowSpec = {
+      name: "parent",
+      phases: [
+        { id: "p1", title: "Call", steps: [{ id: "call", kind: "workflow", workflow: "child" }] },
+      ],
+    };
+    const deps: WorkflowDeps = {
+      ...makeDeps(headlessApprovalProvider("approve-all")),
+      resolveWorkflow: (n) => (n === "child" ? child : undefined),
+    };
+    const events: WorkflowEvent[] = [];
+    for await (const ev of runWorkflow(parent, { input: "go" }, deps)) events.push(ev);
+    // The nested checkpoint's events surface with namespaced ids.
+    const pending = events.find((e) => e.kind === "approval_pending" && e.stepId === "call::chk") as
+      | (WorkflowEvent & { kind: "approval_pending" })
+      | undefined;
+    expect(pending).toBeDefined();
+    expect(pending?.reviewStepId).toBe("call::draft");
+    expect(events.some((e) => e.kind === "approval_resolved" && e.stepId === "call::chk")).toBe(
+      true,
+    );
+    const done = events.find((e) => e.kind === "workflow_done") as
+      | (WorkflowEvent & { kind: "workflow_done" })
+      | undefined;
+    expect(done?.ok).toBe(true);
+  });
+
   it("unblocks a pending approval when the run is aborted", async () => {
     const ac = new AbortController();
     const provider: ApprovalProvider = () => new Promise<ApprovalDecision>(() => {});

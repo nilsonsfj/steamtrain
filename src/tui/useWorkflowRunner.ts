@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { Orchestrator } from "../orchestrator";
 import type { ApprovalDecision, ApprovalProvider, StepResult, WorkflowSpec } from "../workflow";
+import { matchApprovalKey } from "../workflow";
 import {
   RunRecordBuilder,
   WORKFLOW_CACHE_DIR,
@@ -256,10 +257,7 @@ export function useWorkflowRunner({
   const resolveApproval = useCallback(
     (stepId: string, approved: boolean, iteration?: number): void => {
       const resolvers = approvalResolversRef.current;
-      const mapKey =
-        iteration !== undefined
-          ? `${stepId}:${iteration}`
-          : [...resolvers.keys()].find((k) => k.startsWith(`${stepId}:`));
+      const mapKey = matchApprovalKey(resolvers.keys(), stepId, iteration);
       if (!mapKey) return;
       const settle = resolvers.get(mapKey);
       if (!settle) return;

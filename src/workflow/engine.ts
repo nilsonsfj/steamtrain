@@ -2118,6 +2118,23 @@ async function executeWorkflowStep(
           stepId: namespace(event.stepId),
         });
         break;
+      case "approval_pending":
+        hooks.pushWorkflowEvent({
+          ...event,
+          phaseId: namespace(event.phaseId),
+          stepId: namespace(event.stepId),
+          // The reviewed step lives in the child run too — namespace it so it
+          // matches the namespaced step in the surfaced tree.
+          reviewStepId: event.reviewStepId ? namespace(event.reviewStepId) : undefined,
+        });
+        break;
+      case "approval_resolved":
+        hooks.pushWorkflowEvent({
+          ...event,
+          phaseId: namespace(event.phaseId),
+          stepId: namespace(event.stepId),
+        });
+        break;
       case "fan_out":
         hooks.pushWorkflowEvent({
           ...event,

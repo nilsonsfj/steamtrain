@@ -14,6 +14,7 @@ import {
   type WorkflowSpec,
   hashWorkflowSpec,
   isRerunError,
+  matchApprovalKey,
   persistWorkflowStepDone,
   planRerun,
   resolveWorkflowTimeoutSec,
@@ -289,10 +290,7 @@ export class WorkflowRunManager {
   ): boolean {
     const run = this.runs.get(runId);
     if (!run) return false;
-    const key =
-      iteration !== undefined
-        ? `${stepId}:${iteration}`
-        : [...run.pendingApprovals.keys()].find((k) => k.startsWith(`${stepId}:`));
+    const key = matchApprovalKey(run.pendingApprovals.keys(), stepId, iteration);
     if (!key) return false;
     const settle = run.pendingApprovals.get(key);
     if (!settle) return false;

@@ -1525,6 +1525,7 @@
       text: st.text || (st.result && st.result.output) || "", activity: null,
       result: st.result, cached: st.cached, attempts: st.attempts,
       gate: st.gate ? { passed: st.gate.passed, target: st.gate.target } : null,
+      approval: st.approval || null,
       loopTo: st.loopTo, maxIterations: st.maxIterations
     };
   }

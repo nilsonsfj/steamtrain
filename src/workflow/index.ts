@@ -63,6 +63,7 @@ export {
   type HeadlessApprovalMode,
   capApprovalText,
   headlessApprovalProvider,
+  matchApprovalKey,
   noProviderApprovalDecision,
 } from "./approval";
 export {
