@@ -280,7 +280,11 @@ export class WorkflowRunManager {
   /**
    * Settle a pending approval checkpoint from an HTTP request. `iteration`
    * targets a specific pass; omitted resolves the single pending checkpoint for
-   * `stepId`. Returns false when the run or checkpoint is unknown.
+   * `stepId`. That fallback is unambiguous: the engine awaits each checkpoint's
+   * decision before the loop advances, so at most one checkpoint per `stepId`
+   * is ever pending at once — {@link matchApprovalKey}'s first match is the
+   * intended one even when `iteration` is absent. Returns false when the run or
+   * checkpoint is unknown.
    */
   resolveApproval(
     runId: string,

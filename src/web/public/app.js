@@ -709,7 +709,10 @@
     if (!S.runId) return;
     var body = { stepId: stepId, approved: approved };
     // Send the iteration of the matching pending checkpoint so a loop that
-    // re-runs the same approval step id resolves the intended pass.
+    // re-runs the same approval step id resolves the intended pass. The engine
+    // awaits each checkpoint's decision before the loop advances, so at most one
+    // checkpoint per stepId is ever pending — find()'s first match is the right
+    // one — but threading iteration keeps the request unambiguous regardless.
     var pending = (S.runState && S.runState.pendingApprovals) || [];
     var match = pending.find(function (p) {
       return p.stepId === stepId;
