@@ -13,6 +13,11 @@ Deep dives:
 - [`worktree-merge-back.md`](worktree-merge-back.md) — landing agent worktree changes: the `merge` step, PR mode, and history diff/apply/prune
 - [`cost-and-budgets.md`](cost-and-budgets.md) — cost budgets, token accounting, and cost analytics
 
+## Planning
+
+- [`feature-roadmap.md`](feature-roadmap.md) — prioritized roadmap of next features and improvements
+- [`next-frontier.md`](next-frontier.md) — second-generation ideas beyond the roadmap: live run steering, right-sized primitives, workflows that learn
+
 ## Project
 
 - [`../README.md`](../README.md) — install, architecture, quick start
