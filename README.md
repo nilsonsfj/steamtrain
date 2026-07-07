@@ -42,6 +42,38 @@ You'll see a steam-train banner, then a preflight **doctor** panel checking that
 `steamtrain` opens on **workflow** mode. `Tab` cycles through your configured
 workspace presets (defaults: `plan`, `implement`, `review`).
 
+### Zero-credential test drive
+
+You don't need any agent installed (or a cent of credit) to see the engine
+work. The bundled `tour` workflow is fully agentless — a distributor fans out,
+command cars run in parallel, a `when` condition skips a step, a gate loops the
+train three laps around the track, and a consolidator renders the arrival
+report:
+
+```bash
+bun src/index.tsx workflow run tour --input "all aboard"   # $0, ~0.1s
+```
+
+Then let steamtrain set the repo up for real work:
+
+```bash
+bun src/index.tsx init          # or: steamtrain init
+```
+
+`init` reports each agent's readiness with copy-paste fixes, detects this
+repo's real test/lint commands, and offers starter workflows wired to them,
+written to `./steamtrain.json`:
+
+- **`verify`** — every detected check as a parallel `command` step plus a
+  combined report. Agentless, $0, and an honest exit code for CI.
+- **`implement-verified`** — an agent implements the task in an isolated
+  worktree, your actual test command re-runs against those edits (worktree
+  inheritance), a gate blocks failures, and a `merge` step applies only
+  verified changes to your checkout. (Offered when an agent is ready and a
+  test command was detected.)
+
+Pass `--yes` to accept all offers non-interactively.
+
 ### Web UI
 
 Prefer a browser? Launch the same workflow engine behind a local web UI:
@@ -278,6 +310,7 @@ Workflow documentation:
 
 | name         | what it does                                                                                                                         |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `tour`       | A $0, agentless guided ride through the engine: fan-out, parallel command cars, a `when` skip, a loop-back gate, and a consolidated arrival report. Runs with zero credentials. |
 | `multi-plan` | Distributes planning lenses, drafts from two independent angles (claude + opencode), critiques both, then synthesizes the strongest merged plan. |
 | `bug-hunt`   | Sweeps a scope for logic / error-handling / security bugs in parallel across three models, cross-checks to drop false positives, gates verified findings, then reports them. |
 | `target-sweep` | Distributes a request into target areas, dynamically creates one processor run per item, then consolidates the generated outputs. |

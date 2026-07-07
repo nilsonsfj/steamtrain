@@ -306,8 +306,118 @@ const reviewLoop: WorkflowSpec = {
   ],
 };
 
+/**
+ * The onboarding ride: a fully agentless workflow that demonstrates the engine
+ * — fan-out, parallel execution, template data flow, a `when` skip, a bounded
+ * loop-back gate, and a consolidated report — for $0, before any agent CLI is
+ * installed or authenticated. Command steps only echo fixed text; `{{input}}`
+ * is deliberately never templated into a `cmd` (user input must not reach the
+ * shell), only into the agentless consolidator's rendered report.
+ */
+const tour: WorkflowSpec = {
+  name: "tour",
+  description:
+    "A zero-cost guided ride through the engine: fan-out, parallel command cars, a when-skip, a loop-back gate, and an arrival report. No agents, no credentials, $0.",
+  phases: [
+    {
+      id: "depart",
+      title: "Departure — a distributor fans one input into items",
+      steps: [
+        {
+          id: "stations",
+          kind: "distributor",
+          items: [
+            "Union Station: one normalized event stream, no matter which agent produced it",
+            "Junction: dependency scheduling — steps depart the moment the steps they reference arrive",
+            "Roundhouse: every run is recorded to history and resumable from the on-disk cache",
+          ],
+        },
+      ],
+    },
+    {
+      id: "ride",
+      title: "Open track — three cars run in parallel",
+      steps: [
+        {
+          id: "car-fanout",
+          kind: "command",
+          dependsOn: ["stations"],
+          cmd: 'echo "This car received the distributor items through a template:" && echo "{{steps.stations.items}}"',
+        },
+        {
+          id: "car-parallel",
+          kind: "command",
+          dependsOn: ["stations"],
+          cmd: 'echo "All three cars in this phase run at the same time — steps start as soon as their dependencies finish, bounded by maxConcurrency."',
+        },
+        {
+          id: "car-isolation",
+          kind: "command",
+          dependsOn: ["stations"],
+          cmd: 'echo "Command steps like this one cost nothing and run inside the same worktree isolation as agent steps — in a git repo, writes never touch your checkout."',
+        },
+        {
+          id: "express-service",
+          kind: "command",
+          dependsOn: ["stations"],
+          when: { step: "stations", contains: "express" },
+          cmd: 'echo "You should never see this: the express service only runs when a station mentions it, and none does — so this step is SKIPPED, not failed."',
+        },
+      ],
+    },
+    {
+      id: "laps",
+      title: "Loop track — this phase re-runs until the signal clears",
+      steps: [
+        {
+          id: "lap",
+          kind: "command",
+          cmd: 'echo "lap {{iteration}} of 3 around the loop track"',
+        },
+      ],
+    },
+    {
+      id: "signal",
+      title: "Signal gate — loops the train back until laps complete",
+      steps: [
+        {
+          id: "loop-signal",
+          kind: "gate",
+          dependsOn: ["lap"],
+          condition: { step: "lap", contains: "lap 3" },
+          loopTo: "laps",
+          maxIterations: 3,
+          onFalse: "continue",
+          target: "all-laps-complete",
+        },
+      ],
+    },
+    {
+      id: "arrive",
+      title: "Arrival — an agentless consolidator renders the report",
+      steps: [
+        {
+          id: "conductor",
+          kind: "consolidator",
+          dependsOn: [
+            "car-fanout",
+            "car-parallel",
+            "car-isolation",
+            "express-service",
+            "lap",
+            "loop-signal",
+          ],
+          prompt:
+            '🚂 END OF THE LINE — tour complete for: {{input}}\n\nWhat just happened, in one $0 run:\n- A distributor fanned the departure into 3 station items (no agent involved).\n- Three command cars ran in parallel; their outputs are below.\n- The express-service step was skipped by its when-condition — skips cascade sensibly, and this report simply treats it as absent.\n- A gate looped the train around the track until "{{steps.lap.output}}" satisfied its condition, then emitted target "{{steps.loop-signal.target}}".\n\n--- CAR: fan-out ---\n{{steps.car-fanout.output}}\n--- CAR: parallel ---\n{{steps.car-parallel.output}}\n--- CAR: isolation ---\n{{steps.car-isolation.output}}\n\nNext stops:\n- steamtrain                                              → the TUI: pick a workflow, watch the live phase→step tree\n- steamtrain --web-ui                                     → the same engine behind a browser pipeline view\n- steamtrain init                                         → check agent readiness and add starter workflows for THIS repo\n- steamtrain workflow run tour --input "again" --fresh    → re-ride (runs resume from cache by default)\n\nEvery block you just rode — distributor, command, gate + loop, consolidator — is declarative JSON (docs/workflow-spec.md). Agent-backed workers and processors slot into the same tracks.',
+        },
+      ],
+    },
+  ],
+};
+
 /** name → spec. Merged under any user `workflows` from steamtrain.json. */
 export const BUNDLED_WORKFLOWS: Record<string, WorkflowSpec> = {
+  [tour.name]: tour,
   [multiPlan.name]: multiPlan,
   [bugHunt.name]: bugHunt,
   [targetSweep.name]: targetSweep,
