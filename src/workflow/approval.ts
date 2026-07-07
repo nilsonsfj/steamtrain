@@ -84,6 +84,12 @@ export interface ApprovalDecision {
    * Override the rejection disposition for this decision (rejection only).
    * Lets a headless `--on-approval fail|stop` force the outcome regardless of
    * the spec's declared `onReject`. Ignored when `approved` is true.
+   *
+   * Deliberately narrower than {@link ApprovalRejectDisposition}: a decision can
+   * only force a hard `fail`/`stop`, never `continue` (silently proceeding past
+   * a rejection is not something a decider overrides into). When this is
+   * `undefined` the engine falls back to the spec's declared disposition, which
+   * *may* be `continue` — so the effective disposition still spans all three.
    */
   rejectDisposition?: "fail" | "stop";
 }

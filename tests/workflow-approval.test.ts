@@ -421,6 +421,18 @@ describe("matchApprovalKey", () => {
     expect(matchApprovalKey(keys, "missing", 1)).toBeUndefined();
   });
 
+  it("disambiguates concurrent same-stepId iterations by iteration", () => {
+    // Two passes of the same looped checkpoint are pending at once. An explicit
+    // iteration targets the intended pass; omitting it falls back to the first
+    // registered key (the documented invariant — UIs thread iteration to avoid
+    // relying on it).
+    const keys = ["chk:2", "chk:1"];
+    expect(matchApprovalKey(keys, "chk", 1)).toBe("chk:1");
+    expect(matchApprovalKey(keys, "chk", 2)).toBe("chk:2");
+    expect(matchApprovalKey(keys, "chk")).toBe("chk:2"); // first in iteration order
+    expect(matchApprovalKey(keys, "chk", 3)).toBeUndefined();
+  });
+
   it("matches a namespaced sub-workflow id against a local resolver key", () => {
     // The resolver registers the child-local id ("chk:1"); the UI posts the
     // namespaced id ("call::chk").
