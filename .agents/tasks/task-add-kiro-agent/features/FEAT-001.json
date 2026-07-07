@@ -1,0 +1,37 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Add kiro-cli as a new agent provider throughout the steamtrain codebase. kiro-cli is Anthropic-backed (like amp), emits Claude Code-compatible stream-json output, and uses the same message-level format (no partial stream_event deltas). The binary is 'kiro' and it uses '--print --output-format stream-json --verbose --model MODEL' args similar to Claude Code but without --include-partial-messages (it only emits message-level events like amp).",
+  "status": "completed",
+  "steps": [
+    "1. Add 'kiro' to the AgentProviderId union type in src/types/events.ts: change the type to include '\"kiro\"'.",
+    "2. Create src/types/raw-kiro.ts: reuse Claude's schemas (like amp does) by re-exporting claudeEnvelope, claudeAssistant, claudeMessage, claudeContentBlock, claudeUser as kiro aliases. Add kiroSystemInit (type:'system', subtype:'init' with session_id, model, tools), kiroUsage (Anthropic-shaped), and kiroResult (same as Claude's result shape but with optional 'error' string like amp).",
+    "3. Create src/agents/kiro.ts: implement KiroCliAdapter class (id='kiro', binary default 'kiro', defaultModel='sonnet'), createKiroMapper function (message-level mapper like amp: system/init->session_start, assistant text/thinking->text_delta, assistant tool_use->tool_use, user tool_result->tool_result, result->result+error, unknown passthrough), KIRO_MODELS array (sonnet='Sonnet (latest)', opus='Opus (latest)', haiku='Haiku (latest)', claude-sonnet-5='Claude Sonnet 5', claude-opus-4-8='Claude Opus 4.8', claude-haiku-4-5='Claude Haiku 4.5'), buildKiroExecArgs function. The adapter run() uses: --print --output-format stream-json --verbose --model MODEL [--effort EFFORT] [extraArgs].",
+    "4. Update src/agents/config.ts: add 'kiro' to AGENT_PROVIDER_IDS array and DEFAULT_AGENT_BINARY record.",
+    "5. Update src/agents/models.ts: add 'kiro' to AGENT_IDS array, import KiroCliAdapter and KIRO_MODELS, add kiro case to modelsForProvider switch, add kiro case to effortsForModel (reuse claudeEfforts logic since kiro uses same Anthropic models), add kiro to PROVIDER_ADAPTERS record.",
+    "6. Update src/agents/index.ts: import and export KiroCliAdapter, KIRO_MODELS, createKiroMapper, buildKiroExecArgs from './kiro'. Add 'kiro' case to createAdapter switch.",
+    "7. Update src/config/types.ts: add 'kiro' to the agentProviderId z.enum array. Add 'kiro: nonEmptyString.optional()' to the binaries z.object in configFileSchema.",
+    "8. Update src/doctor/doctor.ts: add kiro case to installHint ('Install Kiro CLI (npm i -g @anthropic-ai/kiro-cli) and ensure `kiro` is on PATH.') and authHint ('Run `kiro` and authenticate, or set ANTHROPIC_API_KEY.').",
+    "9. Update src/tui/workflow-spec-ui.ts: import KIRO_MODELS from '../agents' and add 'kiro' case to staticModelName switch.",
+    "10. Create tests/kiro-adapter.test.ts following the pattern of tests/amp-adapter.test.ts: test createKiroMapper with sample init/assistant/user/result lines, test buildKiroExecArgs, test malformed input handling.",
+    "11. Update tests/models.test.ts: add a 'kiro models' describe block testing modelIdsForAgent('kiro'), defaultModelForAgent('kiro'), effortsForModel('kiro', ...) for the supported models.",
+    "12. Update tests/doctor.test.ts: add a 'checkAgent kiro' describe block testing binary_missing with install hint containing 'kiro-cli'.",
+    "13. Update tests/agent-config.test.ts: update the assertion that resolveAgentInstances() returns ['claude', 'opencode', 'codex', 'amp'] to also include 'kiro'.",
+    "14. Run `bunx biome check --write .` to fix any formatting issues, then verify all tests pass with `bunx vitest run`, lint passes with `bunx biome check .`, and types pass with `npx tsc --noEmit`."
+  ],
+  "acceptance_criteria": [
+    "AgentProviderId type includes 'kiro' and all TypeScript compilation passes with no errors",
+    "createKiroMapper correctly maps system/init, assistant text, assistant thinking, assistant tool_use, user tool_result, result success, result error, and unknown events",
+    "KiroCliAdapter.run() builds correct args: --print --output-format stream-json --verbose --model <model> [--effort <effort>] [extraArgs]",
+    "KIRO_MODELS includes at minimum sonnet, opus, haiku aliases and full model IDs",
+    "Config validation accepts 'kiro' as an agent provider and in binaries",
+    "Doctor reports install hint for kiro with npm package name",
+    "All existing 1052 tests continue to pass",
+    "New kiro-specific tests pass (mapper, args, doctor, models)",
+    "Biome lint passes with no errors",
+    "TypeScript typecheck passes with no errors"
+  ],
+  "verification": ["bunx vitest run", "bunx biome check .", "npx tsc --noEmit"],
+  "blocked_reason": null,
+  "findings": "All 1071 tests pass (19 new kiro-specific tests added). Also had to update src/tui/draft-model.ts DRAFT_AGENT_ORDER array to include kiro, as TypeScript narrowed the tuple type and rejected AgentProviderId (which now includes kiro) in indexOf calls. Post-review fix: added --include-partial-messages flag to buildKiroExecArgs so the CLI emits thinking content blocks in stream output (mirrors Claude Code pattern). Speculative model catalog and draft-order-last are acceptable by design."
+}
