@@ -463,29 +463,52 @@ no "tolerate N failures".
 "same job, many variants." For an LLM orchestrator it's even more valuable:
 cross-model comparison is a core multi-agent pattern, not an edge case.
 
-## 2.8 Template validation and expressions
+## 2.8 Template validation and expressions ✅ Shipped
+
+> **Shipped** — `lintTemplateRefs()` scans every `{{…}}` template reference in
+> prompts, distributor items, gate/when conditions, merge fields, command `cmd`,
+> and workflow `input` templates. References that match steamtrain-specific
+> patterns but point to something invalid (unknown step id, invalid field,
+> undeclared input, wrong context like `{{item}}` outside `forEach` or
+> `{{iteration}}` outside a loop region, wrong step type for the field) produce
+> non-fatal warnings in `ValidationResult.warnings`. Warnings surface in CLI
+> (`workflow validate` and `workflow run`), TUI (yellow warning count in the
+> workflow preview), and web UI (save response `warnings` array + banner).
+> Generic mustache-style placeholders are intentionally ignored. Template
+> filters (`head`, `tail`, `default`, `jsonpath`) are a future follow-up.
 
 **The gap:** unknown placeholders are **left unchanged** — a typo like
 `{{steps.reviw.output}}` ships literally to the agent as line noise, no
-warning, and the run "succeeds". Beyond that, templates are pure
+warning, and the run "succeeds". Beyond that, templates are purely
 substitution: no way to truncate a huge output before re-prompting, no
 fallback when a step was skipped, no light conditionals.
 
 **The feature:**
 - **Strict reference validation** in `validateWorkflow` and at save time in
-  both UIs: any `{{steps.<id>…}}` naming an unknown id or field is an error;
-  unknown *forms* warn. (Highest value-to-effort item on this list.)
+  both UIs: any `{{steps.<id>…}}` naming an unknown id or field is a warning;
+  `{{inputs.<key>}}` referencing an undeclared input is a warning; `{{item}}`
+  outside `forEach` and `{{iteration}}` outside a loop region are warnings.
 - A tiny filter set — `{{steps.x.output | head:2000}}`, `| tail:50`,
   `| jsonpath:$.verdict}}` (pairs with 1.3), `| default:"(skipped)"}}` — and
-  nothing more; stop well short of a programming language.
+  nothing more; stop well short of a programming language. **(Future follow-up)**
 
 **Comparison:** GitHub Actions expressions and Airflow's Jinja show both the
 value and the trap — Jinja-in-YAML gets unreadable fast. The lint half is
-uncontroversial and copies what every mature system does: fail on dangling
+uncontroversial and copies what every mature system does: flag dangling
 references at *validation* time, not mid-run after three phases of paid agent
 work.
 
-## 2.9 Dry-run / plan preview with cost estimate
+## 2.9 Dry-run / plan preview with cost estimate ✅ Shipped
+
+> **Shipped** — `planWorkflow()` produces a static analysis of a workflow spec
+> without executing any agents: rendered prompts (with `{{input}}` and
+> `{{inputs.*}}` resolved, `{{steps.*}}` as empty placeholders), step tree with
+> agent/model metadata, forEach expansion counts, loop gate structure,
+> sub-workflow references, gate/when condition descriptions, workspace
+> inheritance, artifacts, and dependency graph. Exposed as `workflow plan` CLI
+> command, `POST /api/workflows/:name/plan` web API endpoint, TUI dry-run
+> preview (Ctrl+D from the workflow preview), and web UI "Plan" button. 25
+> tests covering all step types and template rendering.
 
 **The gap:** `workflow validate` checks the schema, but there's no way to see
 what a run *will do* before spending money: which steps expand from the
