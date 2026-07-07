@@ -21,19 +21,9 @@ export {
   claudeContentBlock as kiroContentBlock,
   claudeEnvelope as kiroEnvelope,
   claudeMessage as kiroMessage,
+  claudeSystemInit as kiroSystemInit,
   claudeUser as kiroUser,
 } from "./raw-claude";
-
-/** `{"type":"system","subtype":"init", session_id, model, tools, ...}` */
-export const kiroSystemInit = z
-  .object({
-    type: z.literal("system"),
-    subtype: z.literal("init"),
-    session_id: z.string().optional(),
-    model: z.string().optional(),
-    tools: z.array(z.string()).optional(),
-  })
-  .passthrough();
 
 /** Anthropic-shaped usage block (Kiro runs on Claude models). */
 export const kiroUsage = z

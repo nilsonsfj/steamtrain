@@ -14,7 +14,7 @@ export const DEFAULT_AGENT_BINARY: Record<AgentProviderId, string> = {
   opencode: "opencode",
   codex: "codex",
   amp: "amp",
-  kiro: "kiro",
+  kiro: "kiro-cli",
 };
 
 export interface ResolvedAgentInstance {

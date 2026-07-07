@@ -165,17 +165,16 @@ function kiroTokens(usage: KiroUsage | undefined): TokenUsage | undefined {
 /**
  * Build the `kiro` argv for one print-mode run.
  *
- * kiro uses `--print --output-format stream-json --include-partial-messages --verbose --model MODEL`
+ * kiro uses `--print --output-format stream-json --verbose --model MODEL`
  * plus optional `--effort EFFORT` and any extra args. The prompt is written
- * to stdin (like Claude Code). `--include-partial-messages` ensures thinking/reasoning
- * content blocks are emitted in the stream output.
+ * to stdin (like Claude Code). kiro emits message-level JSON (not partial
+ * stream_event deltas), so thinking content is included in the full message.
  */
 export function buildKiroExecArgs(opts: AgentRunOptions): string[] {
   return [
     "--print",
     "--output-format",
     "stream-json",
-    "--include-partial-messages",
     "--verbose",
     "--model",
     opts.model,
@@ -190,7 +189,7 @@ export class KiroCliAdapter implements AgentAdapter {
   readonly binary: string;
   readonly defaultModel = "sonnet";
 
-  constructor(binary = "kiro") {
+  constructor(binary = "kiro-cli") {
     this.binary = binary;
   }
 
