@@ -175,6 +175,30 @@ describe("approval engine", () => {
     expect(findDone(events, "build")).toBeUndefined();
     const gate = events.find((e) => e.kind === "gate_evaluated" && e.stepId === "chk");
     expect(gate).toMatchObject({ passed: false });
+    // A graceful stop keeps the run successful (unlike a fail rejection).
+    const done = events.find((e) => e.kind === "workflow_done") as
+      | (WorkflowEvent & { kind: "workflow_done" })
+      | undefined;
+    expect(done?.ok).toBe(true);
+  });
+
+  it("degrades gracefully when the provider throws (no crash, treated as rejection)", async () => {
+    const provider: ApprovalProvider = async () => {
+      throw new Error("provider exploded");
+    };
+    const events = await collect(approvalSpec, makeDeps(provider));
+    const resolved = events.find((e) => e.kind === "approval_resolved") as
+      | (WorkflowEvent & { kind: "approval_resolved" })
+      | undefined;
+    expect(resolved?.approved).toBe(false);
+    expect(resolved?.by).toBe("auto:provider-error");
+    // The run settles (a failing checkpoint) instead of crashing.
+    const done = events.find((e) => e.kind === "workflow_done") as
+      | (WorkflowEvent & { kind: "workflow_done" })
+      | undefined;
+    expect(done).toBeDefined();
+    expect(done?.ok).toBe(false);
+    expect(findDone(events, "ok-to-proceed")?.result.ok).toBe(false);
   });
 
   it("routes a gate with condition.human like an approval", async () => {

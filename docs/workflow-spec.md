@@ -347,6 +347,11 @@ a paused run always re-asks while the cached steps around the checkpoint replay
 from `.steamtrain/cache/` — the same cache/rerun machinery every other step
 uses. Later-phase steps never start until the checkpoint is decided.
 
+> **Note:** the workflow wall-clock limit (`workflowTimeoutSec`) keeps running
+> while a checkpoint waits — a very slow decision can trip it and cancel the
+> run. For long-lived interactive approvals, raise `workflowTimeoutSec`; a
+> cancelled run resumes from cache (re-asking the checkpoint) after restarting.
+
 ### Merge (worktree merge-back)
 
 Agent steps run in isolated git worktrees, so their file edits never land in

@@ -2662,9 +2662,23 @@ async function executeApproval(
   });
 
   const provider = ctx.deps.requestApproval;
-  const decision: ApprovalDecision = provider
-    ? await requestApprovalWithAbort(provider, request, ctx.signal)
-    : noProviderApprovalDecision(request);
+  let decision: ApprovalDecision;
+  if (provider) {
+    try {
+      decision = await requestApprovalWithAbort(provider, request, ctx.signal);
+    } catch (err) {
+      // A provider that rejects must not crash the run (runSingleStep never
+      // throws): treat a provider error as a rejection so the checkpoint still
+      // emits approval_resolved / step_done and any UI clears its pending state.
+      decision = {
+        approved: false,
+        by: "auto:provider-error",
+        note: `approval provider failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  } else {
+    decision = noProviderApprovalDecision(request);
+  }
 
   hooks.pushWorkflowEvent({
     kind: "approval_resolved",
@@ -2679,13 +2693,10 @@ async function executeApproval(
 
   const passed = decision.approved;
   // A rejection may override the disposition (headless `--on-approval`); an
-  // approval always continues to `target`.
+  // approval always continues (its onFalse is only a label then).
   const effectiveOnReject: "continue" | "fail" | "stop" = passed
-    ? declaredOnReject === "continue"
-      ? "continue"
-      : declaredOnReject
-    : (decision.rejectDisposition ??
-      (declaredOnReject === "continue" ? "continue" : declaredOnReject));
+    ? declaredOnReject
+    : (decision.rejectDisposition ?? declaredOnReject);
   const ok = passed || effectiveOnReject === "continue";
   const label = passed ? target : "rejected";
   const error = ok ? undefined : (decision.note ?? "approval rejected");
