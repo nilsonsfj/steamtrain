@@ -29,6 +29,8 @@ export interface InitDeps {
 interface InitOptions {
   /** `--yes`: accept every offered starter without prompting. */
   yes: boolean;
+  /** `--help`: print init-specific help and exit. */
+  help: boolean;
 }
 
 export async function runInitCommand(
@@ -41,8 +43,12 @@ export async function runInitCommand(
 
   const options = parseInitOptions(args);
   if (!options) {
-    err("usage: steamtrain init [--yes]\n");
+    err("usage: steamtrain init [--yes]  (--help for details)\n");
     return 1;
+  }
+  if (options.help) {
+    out(initHelpText());
+    return 0;
   }
 
   const cwd = io.cwd ?? process.cwd();
@@ -52,6 +58,7 @@ export async function runInitCommand(
   out("steamtrain init — get this repo ride-ready\n");
 
   // 1. Agent readiness, with copy-paste fixes for anything not ok.
+  out("\nchecking agents (a fresh machine can take a few seconds per agent)…\n");
   const doctor = await (deps.doctor ?? runDoctor)(config);
   out("\nagents\n");
   for (const result of doctor) {
@@ -85,13 +92,10 @@ export async function runInitCommand(
     });
   }
   const firstReady = ready[0];
-  if (firstReady && detection.testCheck) {
+  const implementModel = firstReady ? defaultModelForAgent(firstReady.agent, config) : undefined;
+  if (firstReady && implementModel && detection.testCheck) {
     offers.push({
-      spec: buildImplementVerifiedWorkflow(
-        firstReady.agent,
-        defaultModelForAgent(firstReady.agent, config),
-        detection.testCheck,
-      ),
+      spec: buildImplementVerifiedWorkflow(firstReady.agent, implementModel, detection.testCheck),
       why: `${firstReady.agent} implements, ${detection.testCheck.label} verifies, only passing changes land`,
     });
   }
@@ -102,27 +106,44 @@ export async function runInitCommand(
     return 0;
   }
 
+  // Only an explicit --yes may write config unattended. Without a TTY (piped
+  // stdin, CI) and without --yes, list the offers but decline them — init
+  // must never mutate a repo just because output was redirected.
   const stdin: Readable = io.stdin ?? process.stdin;
   const interactive = deps.interactive ?? Boolean((stdin as { isTTY?: boolean }).isTTY);
+  const mode: "accept-all" | "ask" | "decline-all" = options.yes
+    ? "accept-all"
+    : interactive
+      ? "ask"
+      : "decline-all";
+
   const accepted: WorkflowSpec[] = [];
   out("\nstarter workflows\n");
+  const reader = mode === "ask" ? createPromptReader(stdin, out) : undefined;
   for (const offer of offers) {
     const validation = validateWorkflow(offer.spec);
     if (!validation.ok) {
       err(`  skipping '${offer.spec.name}': generated spec is invalid (${validation.error})\n`);
       continue;
     }
-    if (options.yes || !interactive) {
+    if (mode === "accept-all") {
       out(`  + ${offer.spec.name} — ${offer.why}\n`);
       accepted.push(offer.spec);
-      continue;
+    } else if (mode === "decline-all") {
+      out(`  · ${offer.spec.name} — ${offer.why}\n`);
+    } else if (reader) {
+      const add = await reader.ask(`  add '${offer.spec.name}' (${offer.why})? [Y/n] `);
+      if (add) accepted.push(offer.spec);
     }
-    const add = await askYesNo(stdin, out, `  add '${offer.spec.name}' (${offer.why})? [Y/n] `);
-    if (add) accepted.push(offer.spec);
+  }
+  reader?.dispose();
+  if (mode === "decline-all") {
+    out("\n  non-interactive session without --yes — nothing written.\n");
+    out("  re-run with --yes to add the starters above.\n");
   }
 
   if (accepted.length === 0) {
-    out("\nno starters added.\n");
+    if (mode !== "decline-all") out("\nno starters added.\n");
     printNextSteps(out, []);
     return 0;
   }
@@ -139,17 +160,57 @@ export async function runInitCommand(
   if (write.written.length > 0) {
     out(`\nwrote ${write.written.map((name) => `'${name}'`).join(", ")} → ${scope.path}\n`);
   }
+  if (write.written.includes("implement-verified") && firstReady) {
+    // The agent is simply the first one the doctor reported ready — make it
+    // obvious the choice is editable rather than a considered recommendation.
+    out(
+      `  implement-verified uses ${firstReady.agent} (${implementModel}) — the first ready agent;\n` +
+        `  edit its 'agent'/'model' in ${scope.path} to use a different one.\n`,
+    );
+  }
   printNextSteps(out, write.written);
   return 0;
 }
 
 function parseInitOptions(args: string[]): InitOptions | null {
-  const options: InitOptions = { yes: false };
+  const options: InitOptions = { yes: false, help: false };
   for (const arg of args) {
     if (arg === "--yes" || arg === "-y") options.yes = true;
+    else if (arg === "--help" || arg === "-h") options.help = true;
     else return null;
   }
   return options;
+}
+
+function initHelpText(): string {
+  return `steamtrain init — get this repo ride-ready
+
+Checks each agent's readiness (with copy-paste fixes for anything not ok),
+detects this repo's test/lint commands, and offers starter workflows wired to
+them, merged into ./steamtrain.json (existing keys and same-named workflows
+are never overwritten).
+
+Starter workflows:
+  verify              every detected check as a parallel $0 command step,
+                      plus a combined report (agentless)
+  implement-verified  an agent implements in an isolated worktree, your real
+                      test command verifies the edits, a gate blocks failures,
+                      and a merge step applies only verified changes
+                      (offered when an agent is ready and a test command was
+                      detected; edit agent/model in steamtrain.json to change)
+
+Usage:
+  steamtrain init            confirm each starter interactively
+  steamtrain init --yes      accept every offered starter without prompting
+                             (required to write in non-interactive sessions)
+
+Options:
+  -y, --yes    Accept all offers. Piped/CI sessions decline without it.
+  -h, --help   Show this help.
+
+Try the engine with zero credentials first:
+  steamtrain workflow run tour --input "all aboard"   # $0 demo ride
+`;
 }
 
 function statusGlyph(status: DoctorResult["status"]): string {
@@ -260,39 +321,81 @@ async function writeStarters(path: string, specs: WorkflowSpec[]): Promise<Write
   return { ok: true, written, skipped };
 }
 
-/** Minimal y/n prompt over an injected Readable (default: accept on Enter). */
-function askYesNo(
-  stdin: Readable,
-  out: (text: string) => void,
-  question: string,
-): Promise<boolean> {
-  return new Promise((resolve) => {
-    // A stream that already ended or was destroyed will never emit anything
-    // (its close/error fired before we could listen) — decline immediately.
-    if (stdin.destroyed || !stdin.readable) {
-      resolve(false);
-      return;
+interface PromptReader {
+  /** Print `question` and resolve with the next line's y/n answer (Enter accepts). */
+  ask(question: string): Promise<boolean>;
+  /** Detach from stdin (and pause it, so it can't hold the process open). */
+  dispose(): void;
+}
+
+/**
+ * Line-buffered y/n prompting over one shared Readable. One `data` chunk is
+ * NOT one answer: a paste or a scripted `write("y\nn\n")` delivers several
+ * answers in a single chunk, and a slow terminal can split one answer across
+ * chunks. So chunks are reassembled into lines and each pending question
+ * consumes exactly one line — extra lines wait for the next question
+ * (type-ahead), and a partial line waits for its newline (or end-of-input,
+ * which flushes it as a final answer). A closed/errored/already-dead stream
+ * resolves every pending and future question as "no" instead of hanging.
+ */
+function createPromptReader(stdin: Readable, out: (text: string) => void): PromptReader {
+  let buffer = "";
+  const lines: string[] = [];
+  const waiters: Array<(line: string | undefined) => void> = [];
+  let gone = stdin.destroyed || !stdin.readable;
+
+  const deliver = (): void => {
+    while (waiters.length > 0 && lines.length > 0) {
+      waiters.shift()?.(lines.shift());
     }
-    const cleanup = (): void => {
-      stdin.off("data", onData);
-      stdin.off("close", onGone);
-      stdin.off("error", onGone);
-    };
-    const onData = (chunk: unknown): void => {
-      cleanup();
-      const answer = String(chunk).trim().toLowerCase();
-      resolve(answer === "" || answer === "y" || answer === "yes");
-    };
-    // Stdin closing (or erroring) before an answer must decline, not hang.
-    const onGone = (): void => {
-      cleanup();
-      resolve(false);
-    };
-    // Listen before printing: an answer written in immediate reaction to the
-    // question (scripted stdin, paste-ahead) must never race the listener.
+    if (gone) {
+      while (waiters.length > 0) waiters.shift()?.(undefined);
+    }
+  };
+  const onData = (chunk: unknown): void => {
+    buffer += String(chunk);
+    const parts = buffer.split(/\r?\n/);
+    buffer = parts.pop() ?? "";
+    lines.push(...parts);
+    deliver();
+  };
+  const onGone = (): void => {
+    if (gone) return;
+    gone = true;
+    // "y" followed by EOF (no trailing newline) is still an answer.
+    if (buffer.trim() !== "") {
+      lines.push(buffer);
+      buffer = "";
+    }
+    deliver();
+  };
+  if (!gone) {
     stdin.on("data", onData);
+    stdin.on("end", onGone);
     stdin.on("close", onGone);
     stdin.on("error", onGone);
-    out(question);
-  });
+  }
+
+  return {
+    ask(question: string): Promise<boolean> {
+      out(question);
+      return new Promise((resolve) => {
+        waiters.push((line) => resolve(line !== undefined && isYesLine(line)));
+        deliver();
+      });
+    },
+    dispose(): void {
+      stdin.off("data", onData);
+      stdin.off("end", onGone);
+      stdin.off("close", onGone);
+      stdin.off("error", onGone);
+      // A resumed process.stdin keeps the event loop alive; release it.
+      stdin.pause();
+    },
+  };
+}
+
+function isYesLine(line: string): boolean {
+  const answer = line.trim().toLowerCase();
+  return answer === "" || answer === "y" || answer === "yes";
 }

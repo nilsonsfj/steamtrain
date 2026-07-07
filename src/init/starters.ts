@@ -37,7 +37,7 @@ export function buildVerifyWorkflow(checks: DetectedCheck[]): WorkflowSpec {
             id: "report",
             kind: "consolidator",
             dependsOn: checks.map((check) => check.id),
-            prompt: `All checks passed for: {{input}}\n\n${sections}`,
+            prompt: `Check results for: {{input}}\n\n${sections}`,
           },
         ],
       },

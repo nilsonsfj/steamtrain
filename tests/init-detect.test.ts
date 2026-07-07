@@ -105,6 +105,10 @@ describe("detectProject", () => {
       join(dir, "pyproject.toml"),
       '[project]\ndependencies = ["pytest>=7", "ruff==0.4"]\n',
     );
-    expect(detectProject(dir).checks).toEqual([]);
+    const detection = detectProject(dir);
+    expect(detection.checks).toEqual([]);
+    // The stack is still reported (same transparency a script-less
+    // package.json gets), just with no usable checks.
+    expect(detection.stacks).toEqual(["python"]);
   });
 });

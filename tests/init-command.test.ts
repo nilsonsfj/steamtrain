@@ -75,6 +75,15 @@ describe("steamtrain init", () => {
     expect(result.err).toContain("usage: steamtrain init");
   });
 
+  it("prints init-specific help for --help", async () => {
+    const cwd = await tempDir();
+    const result = await runInit(cwd, ["--help"], []);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("steamtrain init — get this repo ride-ready");
+    expect(result.out).toContain("--yes");
+    expect(result.out).toContain("workflow run tour");
+  });
+
   it("reports agent readiness with fix hints and writes nothing for an empty repo", async () => {
     const cwd = await tempDir();
     const result = await runInit(
@@ -213,6 +222,61 @@ describe("steamtrain init", () => {
     );
     expect(code).toBe(0);
     expect(out).toContain("add 'verify'");
+    expect(out).toContain("add 'implement-verified'");
+    const config = await readConfig(cwd);
+    expect(Object.keys(config.workflows ?? {})).toEqual(["verify"]);
+  });
+
+  it("declines all offers in a non-interactive session without --yes", async () => {
+    const cwd = await tempDir();
+    await writeFile(join(cwd, "package.json"), JSON.stringify({ scripts: { test: "vitest run" } }));
+    // interactive: false (the runInit default) models piped/CI stdin.
+    const result = await runInit(cwd, [], [doctorResult({})]);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("non-interactive session without --yes — nothing written");
+    expect(result.out).toContain("re-run with --yes");
+    await expect(readFile(join(cwd, "steamtrain.json"), "utf8")).rejects.toThrow();
+  });
+
+  it("answers both prompts from a single pre-written stdin chunk", async () => {
+    const cwd = await tempDir();
+    await writeFile(join(cwd, "package.json"), JSON.stringify({ scripts: { test: "vitest run" } }));
+    const stdin = new PassThrough();
+    // Both answers pasted ahead in ONE chunk, before any prompt is printed:
+    // accept verify, decline implement-verified. Line buffering must hand one
+    // line to each question instead of misreading "y\nn" as a single answer.
+    stdin.write("y\nn\n");
+    const result = await runInit(cwd, [], [doctorResult({})], { stdin, interactive: true });
+    expect(result.code).toBe(0);
+    const config = await readConfig(cwd);
+    expect(Object.keys(config.workflows ?? {})).toEqual(["verify"]);
+  });
+
+  it("reassembles an answer split across stdin chunks", async () => {
+    const cwd = await tempDir();
+    await writeFile(join(cwd, "package.json"), JSON.stringify({ scripts: { test: "vitest run" } }));
+    const stdin = new PassThrough();
+    let sentFragments = false;
+    let out = "";
+    const code = await runInitCommand(
+      [],
+      {
+        cwd,
+        stdin,
+        stdout: (text) => {
+          out += text;
+          if (text.includes("add 'verify'") && !sentFragments) {
+            sentFragments = true;
+            // "yes<Enter>" arrives one keystroke-ish fragment at a time.
+            stdin.write("ye");
+            setImmediate(() => stdin.write("s\nn\n"));
+          }
+        },
+        stderr: () => {},
+      },
+      { doctor: async () => [doctorResult({})], interactive: true },
+    );
+    expect(code).toBe(0);
     expect(out).toContain("add 'implement-verified'");
     const config = await readConfig(cwd);
     expect(Object.keys(config.workflows ?? {})).toEqual(["verify"]);

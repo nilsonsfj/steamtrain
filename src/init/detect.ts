@@ -60,7 +60,7 @@ export function detectProject(cwd: string): ProjectDetection {
   const python = detectPython(cwd);
   if (python) {
     stacks.push("python");
-    checks.push(...python);
+    checks.push(...python.checks);
   }
   // Makefile `test` target: only as a fallback when nothing else surfaced a
   // test command — Makefiles routinely wrap the same commands detected above.
@@ -112,7 +112,13 @@ function detectNodeRunner(cwd: string): string {
   return "npm";
 }
 
-function detectPython(cwd: string): DetectedCheck[] | undefined {
+/**
+ * Like `detectNode`, the stack is reported whenever the ecosystem's manifest
+ * exists — even with zero usable checks — so a Python repo with a bare
+ * `pyproject.toml` gets the same "detected, no checks configured" transparency
+ * a script-less `package.json` gets.
+ */
+function detectPython(cwd: string): { checks: DetectedCheck[] } | undefined {
   const pyproject = readTextIfExists(join(cwd, "pyproject.toml"));
   // Match config section headers, not bare words — "pytest" and "ruff" alone
   // appear in comments and dependency pins of projects that don't run them.
@@ -125,7 +131,7 @@ function detectPython(cwd: string): DetectedCheck[] | undefined {
   if (pyproject?.includes("[tool.ruff")) {
     checks.push({ id: "ruff", label: "ruff check .", cmd: "ruff check ." });
   }
-  return checks.length > 0 ? checks : undefined;
+  return { checks };
 }
 
 function makefileHasTestTarget(cwd: string): boolean {

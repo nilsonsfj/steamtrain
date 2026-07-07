@@ -70,9 +70,13 @@ written to `./steamtrain.json`:
   worktree, your actual test command re-runs against those edits (worktree
   inheritance), a gate blocks failures, and a `merge` step applies only
   verified changes to your checkout. (Offered when an agent is ready and a
-  test command was detected.)
+  test command was detected. The agent is simply the first one the doctor
+  reported ready, with its default model — edit `agent`/`model` in the
+  generated `steamtrain.json` to use a different one.)
 
-Pass `--yes` to accept all offers non-interactively.
+Pass `--yes` to accept all offers without prompting. In a non-interactive
+session (piped stdin, CI), `init` lists the offers but writes nothing unless
+`--yes` is given — redirected output alone never mutates your config.
 
 ### Web UI
 
