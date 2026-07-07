@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { claudeUsage } from "./raw-claude";
 
 /**
  * Zod schemas for the kiro CLI's `--output-format stream-json` lines.
@@ -22,18 +23,9 @@ export {
   claudeEnvelope as kiroEnvelope,
   claudeMessage as kiroMessage,
   claudeSystemInit as kiroSystemInit,
+  claudeUsage as kiroUsage,
   claudeUser as kiroUser,
 } from "./raw-claude";
-
-/** Anthropic-shaped usage block (Kiro runs on Claude models). */
-export const kiroUsage = z
-  .object({
-    input_tokens: z.number().optional(),
-    output_tokens: z.number().optional(),
-    cache_creation_input_tokens: z.number().optional(),
-    cache_read_input_tokens: z.number().optional(),
-  })
-  .passthrough();
 
 /** `{"type":"result","subtype":"success"|"error_during_execution", is_error, error?, result?, usage?, ...}` */
 export const kiroResult = z
@@ -45,9 +37,9 @@ export const kiroResult = z
     error: z.string().optional(),
     duration_ms: z.number().optional(),
     total_cost_usd: z.number().optional(),
-    usage: kiroUsage.optional(),
+    usage: claudeUsage.optional(),
   })
   .passthrough();
 
 export type KiroResult = z.infer<typeof kiroResult>;
-export type KiroUsage = z.infer<typeof kiroUsage>;
+export type KiroUsage = z.infer<typeof claudeUsage>;
