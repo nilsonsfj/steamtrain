@@ -158,7 +158,8 @@ function statusGlyph(status: DoctorResult["status"]): string {
       return "✓";
     case "binary_missing":
       return "✗";
-    default:
+    case "not_authenticated":
+    case "unknown_error":
       return "!";
   }
 }
@@ -229,7 +230,8 @@ async function writeStarters(path: string, specs: WorkflowSpec[]): Promise<Write
     ) {
       return {
         ok: false,
-        error: "existing 'workflows' is not an object (fix or remove it, then re-run init)",
+        error:
+          "existing 'workflows' is not an object (expected a name → spec map; fix or remove it, then re-run init)",
         written: [],
         skipped: [],
       };
@@ -265,14 +267,32 @@ function askYesNo(
   question: string,
 ): Promise<boolean> {
   return new Promise((resolve) => {
-    const onData = (chunk: unknown): void => {
+    // A stream that already ended or was destroyed will never emit anything
+    // (its close/error fired before we could listen) — decline immediately.
+    if (stdin.destroyed || !stdin.readable) {
+      resolve(false);
+      return;
+    }
+    const cleanup = (): void => {
       stdin.off("data", onData);
+      stdin.off("close", onGone);
+      stdin.off("error", onGone);
+    };
+    const onData = (chunk: unknown): void => {
+      cleanup();
       const answer = String(chunk).trim().toLowerCase();
       resolve(answer === "" || answer === "y" || answer === "yes");
+    };
+    // Stdin closing (or erroring) before an answer must decline, not hang.
+    const onGone = (): void => {
+      cleanup();
+      resolve(false);
     };
     // Listen before printing: an answer written in immediate reaction to the
     // question (scripted stdin, paste-ahead) must never race the listener.
     stdin.on("data", onData);
+    stdin.on("close", onGone);
+    stdin.on("error", onGone);
     out(question);
   });
 }

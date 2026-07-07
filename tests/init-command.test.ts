@@ -218,6 +218,41 @@ describe("steamtrain init", () => {
     expect(Object.keys(config.workflows ?? {})).toEqual(["verify"]);
   });
 
+  it("writes nothing when every offer is declined", async () => {
+    const cwd = await tempDir();
+    await writeFile(join(cwd, "package.json"), JSON.stringify({ scripts: { test: "vitest run" } }));
+    const stdin = new PassThrough();
+    let out = "";
+    const code = await runInitCommand(
+      [],
+      {
+        cwd,
+        stdin,
+        stdout: (text) => {
+          out += text;
+          if (text.includes("add '")) stdin.write("n\n");
+        },
+        stderr: () => {},
+      },
+      { doctor: async () => [doctorResult({})], interactive: true },
+    );
+    expect(code).toBe(0);
+    expect(out).toContain("no starters added");
+    await expect(readFile(join(cwd, "steamtrain.json"), "utf8")).rejects.toThrow();
+  });
+
+  it("declines a pending prompt instead of hanging when stdin closes", async () => {
+    const cwd = await tempDir();
+    await writeFile(join(cwd, "package.json"), JSON.stringify({ scripts: { test: "vitest run" } }));
+    const stdin = new PassThrough();
+    const runPromise = runInit(cwd, [], [doctorResult({})], { stdin, interactive: true });
+    stdin.destroy(); // stdin goes away before any answer arrives
+    const result = await runPromise;
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("no starters added");
+    await expect(readFile(join(cwd, "steamtrain.json"), "utf8")).rejects.toThrow();
+  });
+
   it("refuses to merge into a config whose 'workflows' key is not an object", async () => {
     const cwd = await tempDir();
     await writeFile(join(cwd, "package.json"), JSON.stringify({ scripts: { test: "vitest run" } }));

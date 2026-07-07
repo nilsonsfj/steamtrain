@@ -14,6 +14,12 @@ export interface DetectedCheck {
   label: string;
   /** Shell command for a `command` step. */
   cmd: string;
+  /**
+   * Marks the check that runs the test suite — set where the check is created
+   * (not inferred from the id) so `testCheck` selection can't drift as new
+   * ecosystems are added. `implement-verified` gates on this check.
+   */
+  test?: boolean;
 }
 
 export interface ProjectDetection {
@@ -42,12 +48,12 @@ export function detectProject(cwd: string): ProjectDetection {
   }
   if (existsSync(join(cwd, "Cargo.toml"))) {
     stacks.push("rust");
-    checks.push({ id: "cargo-test", label: "cargo test", cmd: "cargo test" });
+    checks.push({ id: "cargo-test", label: "cargo test", cmd: "cargo test", test: true });
   }
   if (existsSync(join(cwd, "go.mod"))) {
     stacks.push("go");
     checks.push(
-      { id: "go-test", label: "go test ./...", cmd: "go test ./..." },
+      { id: "go-test", label: "go test ./...", cmd: "go test ./...", test: true },
       { id: "go-vet", label: "go vet ./...", cmd: "go vet ./..." },
     );
   }
@@ -58,15 +64,11 @@ export function detectProject(cwd: string): ProjectDetection {
   }
   // Makefile `test` target: only as a fallback when nothing else surfaced a
   // test command — Makefiles routinely wrap the same commands detected above.
-  if (!checks.some(isTestCheck) && makefileHasTestTarget(cwd)) {
-    checks.unshift({ id: "make-test", label: "make test", cmd: "make test" });
+  if (!checks.some((check) => check.test) && makefileHasTestTarget(cwd)) {
+    checks.unshift({ id: "make-test", label: "make test", cmd: "make test", test: true });
   }
 
-  return { stacks, checks, testCheck: checks.find(isTestCheck) };
-}
-
-function isTestCheck(check: DetectedCheck): boolean {
-  return /(^|-)test$/.test(check.id) || check.id === "pytest";
+  return { stacks, checks, testCheck: checks.find((check) => check.test) };
 }
 
 function detectNode(cwd: string): { stack: string; checks: DetectedCheck[] } | undefined {
@@ -77,7 +79,12 @@ function detectNode(cwd: string): { stack: string; checks: DetectedCheck[] } | u
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return undefined;
     const value = (parsed as { scripts?: unknown }).scripts;
-    scripts = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+    // An array-typed `scripts` passes typeof === "object" but indexes to
+    // undefined for every script name — guard it like any other wrong shape.
+    scripts =
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
   } catch {
     return undefined; // unparseable package.json ⇒ don't guess
   }
@@ -92,6 +99,7 @@ function detectNode(cwd: string): { stack: string; checks: DetectedCheck[] } | u
       id: `node-${name}`,
       label: `${runner} run ${name}`,
       cmd: `${runner} run ${name}`,
+      ...(name === "test" ? { test: true } : {}),
     });
   }
   return { stack: `node (${runner})`, checks };
@@ -106,14 +114,14 @@ function detectNodeRunner(cwd: string): string {
 
 function detectPython(cwd: string): DetectedCheck[] | undefined {
   const pyproject = readTextIfExists(join(cwd, "pyproject.toml"));
+  // Match config section headers, not bare words — "pytest" and "ruff" alone
+  // appear in comments and dependency pins of projects that don't run them.
   const hasPytestConfig =
-    existsSync(join(cwd, "pytest.ini")) || pyproject?.includes("pytest") === true;
+    existsSync(join(cwd, "pytest.ini")) || pyproject?.includes("[tool.pytest") === true;
   if (pyproject === undefined && !hasPytestConfig) return undefined;
 
   const checks: DetectedCheck[] = [];
-  if (hasPytestConfig) checks.push({ id: "pytest", label: "pytest", cmd: "pytest" });
-  // Match the config section header, not the bare word — "ruff" alone appears
-  // in comments and dependency pins of projects that don't actually use it.
+  if (hasPytestConfig) checks.push({ id: "pytest", label: "pytest", cmd: "pytest", test: true });
   if (pyproject?.includes("[tool.ruff")) {
     checks.push({ id: "ruff", label: "ruff check .", cmd: "ruff check ." });
   }

@@ -90,4 +90,21 @@ describe("detectProject", () => {
     await writeFile(join(dir, "package.json"), "{ not json");
     expect(detectProject(dir).checks).toEqual([]);
   });
+
+  it("treats an array-typed scripts key as no scripts", async () => {
+    const dir = await tempDir();
+    await writeJson(dir, "package.json", { scripts: ["test", "lint"] });
+    const detection = detectProject(dir);
+    expect(detection.stacks).toEqual(["node (npm)"]);
+    expect(detection.checks).toEqual([]);
+  });
+
+  it("requires pytest/ruff config sections, not bare mentions in dependency pins", async () => {
+    const dir = await tempDir();
+    await writeFile(
+      join(dir, "pyproject.toml"),
+      '[project]\ndependencies = ["pytest>=7", "ruff==0.4"]\n',
+    );
+    expect(detectProject(dir).checks).toEqual([]);
+  });
 });

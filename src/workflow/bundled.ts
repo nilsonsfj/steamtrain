@@ -399,6 +399,9 @@ const tour: WorkflowSpec = {
         {
           id: "conductor",
           kind: "consolidator",
+          // express-service is skipped by its when-condition, and that is
+          // fine here: a skipped dependency doesn't block a consolidator
+          // (skipped ≠ failed) — it is treated as an absent input.
           dependsOn: [
             "car-fanout",
             "car-parallel",
