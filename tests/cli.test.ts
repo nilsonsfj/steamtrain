@@ -129,6 +129,58 @@ describe("runCli", () => {
     expect(c.stderr).toContain("unknown workflow 'missing'");
   });
 
+  it("plans a bundled workflow with --input", async () => {
+    const c = capture();
+    const code = await runCli(["workflow", "plan", "multi-plan", "--input", "add feature X"], c.io);
+
+    expect(code).toBe(0);
+    expect(c.stdout).toContain("plan: multi-plan");
+    expect(c.stdout).toContain("phases");
+    expect(c.stdout).toContain("steps");
+    expect(c.stdout).toContain("planning-lenses");
+  });
+
+  it("plans a workflow with --json output", async () => {
+    const c = capture();
+    const code = await runCli(
+      ["workflow", "plan", "multi-plan", "--input", "add feature X", "--json"],
+      c.io,
+    );
+
+    expect(code).toBe(0);
+    const parsed = JSON.parse(c.stdout);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.phaseCount).toBeGreaterThan(0);
+    expect(parsed.steps.length).toBeGreaterThan(0);
+  });
+
+  it("reports unknown workflow for plan", async () => {
+    const c = capture();
+    const code = await runCli(["workflow", "plan", "missing", "--input", "test"], c.io);
+
+    expect(code).toBe(1);
+    expect(c.stderr).toContain("unknown workflow 'missing'");
+  });
+
+  it("requires input for plan", async () => {
+    const c = capture();
+    const code = await runCli(["workflow", "plan", "multi-plan"], c.io);
+
+    expect(code).toBe(1);
+    expect(c.stderr).toContain("requires --input");
+  });
+
+  it("accepts --dry-run as alias for plan", async () => {
+    const c = capture();
+    const code = await runCli(
+      ["workflow", "dry-run", "multi-plan", "--input", "add feature X"],
+      c.io,
+    );
+
+    expect(code).toBe(0);
+    expect(c.stdout).toContain("plan: multi-plan");
+  });
+
   it("returns non-zero when a headless workflow run fails", async () => {
     const c = capture();
     writeFileSync(

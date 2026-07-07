@@ -26,6 +26,7 @@ import {
   createWorkflowHistoryStore,
   isAgentBackedStep,
   parseSessionOverrides,
+  planWorkflow,
   resolveInputs,
   resolveStepTimeoutSec,
   workflowSpecSchema,
@@ -256,6 +257,7 @@ function drainRequestBody(req: IncomingMessage): void {
  *   PUT    /api/workflows/:name     save a created/edited workflow (authoring)
  *   DELETE /api/workflows/:name     delete a user workflow (authoring)
  *   POST   /api/workflows/generate  SSE: LLM-draft a workflow + save (authoring)
+ *   POST   /api/workflows/:name/plan  dry-run plan (no agents executed)
  *   GET    /api/meta                agents, models, efforts, health (authoring)
  *   GET    /api/doctor              agent health
  *   GET    /api/history             past-run summaries (newest first)
@@ -525,6 +527,58 @@ async function handle(
       sendJson(res, result.ok ? 200 : 400, result);
       return;
     }
+  }
+
+  // Plan (dry-run) endpoint: POST /api/workflows/:name/plan
+  const planMatch = path.match(/^\/api\/workflows\/([^/]+)\/plan$/);
+  if (method === "POST" && planMatch) {
+    const name = decodeURIComponent(planMatch[1]!);
+    if (!isValidWorkflowName(name)) {
+      sendJson(res, 400, { error: "invalid workflow name" });
+      return;
+    }
+    const spec = deps.host.listWorkflows()[name];
+    if (!spec) {
+      sendJson(res, 404, { error: `unknown workflow '${name}'` });
+      return;
+    }
+    const body = await readBody(req);
+    let parsed: { input?: unknown; params?: unknown; overrides?: unknown };
+    try {
+      parsed = body ? JSON.parse(body) : {};
+    } catch {
+      sendJson(res, 400, { error: "invalid JSON body" });
+      return;
+    }
+    if (typeof parsed.input !== "string" || !parsed.input.trim()) {
+      sendJson(res, 400, { error: "body must include non-empty string 'input'" });
+      return;
+    }
+    let effectiveSpec = spec;
+    if (
+      parsed.overrides &&
+      typeof parsed.overrides === "object" &&
+      !Array.isArray(parsed.overrides)
+    ) {
+      const parsedOverrides = parseSessionOverrides(parsed.overrides);
+      if (!parsedOverrides.ok) {
+        sendJson(res, 400, { error: parsedOverrides.error });
+        return;
+      }
+      effectiveSpec = applyWorkflowSessionOverrides(spec, parsedOverrides.overrides);
+    }
+    let params: Record<string, string | number | boolean> | undefined;
+    if (parsed.params && typeof parsed.params === "object" && !Array.isArray(parsed.params)) {
+      const resolved = resolveInputs(effectiveSpec, parsed.params as Record<string, string>);
+      if (resolved.errors.length > 0) {
+        sendJson(res, 400, { error: resolved.errors.join("; ") });
+        return;
+      }
+      params = Object.keys(resolved.values).length > 0 ? resolved.values : undefined;
+    }
+    const plan = planWorkflow(effectiveSpec, parsed.input.trim(), params);
+    sendJson(res, plan.ok ? 200 : 422, plan);
+    return;
   }
 
   if (method === "GET" && path === "/api/doctor") {

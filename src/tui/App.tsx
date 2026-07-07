@@ -38,12 +38,14 @@ import type { SteamtrainSettings } from "../settings";
 import {
   type AuthoringHost,
   type LoadedWorkflowCatalog,
+  type PlanResult,
   WorkflowAuthor,
   type WorkflowSourceKind,
   type WorkflowStepOverrides,
   addTokensInto,
   emptyTokens,
   isAgentBackedStep,
+  planWorkflow,
   totalTokens,
   workflowCacheKey,
 } from "../workflow";
@@ -163,6 +165,7 @@ export function App({
     prompt: string;
     fresh: boolean;
   } | null>(null);
+  const [planResult, setPlanResult] = useState<PlanResult | null>(null);
 
   const enabledAgentIds = useMemo(
     () => new Set(resolveAgentInstances(runtimeConfig).map((agent) => agent.id)),
@@ -892,6 +895,40 @@ export function App({
       prompt.updatePromptDraft({ value: "", promptEditing: false });
   }, [prompt.recordPromptHistory, handleWorkflowRun, prompt.updatePromptDraft]);
 
+  const handlePlan = useCallback(() => {
+    if (runner.running || mode !== "workflow") return;
+    const promptText = valueRef.current.trim();
+    if (!promptText) {
+      runner.setWfNotice("type input in the prompt before planning");
+      return;
+    }
+    // Determine which workflow to plan.
+    let name: string | undefined;
+    if (picker.wfPreview) {
+      name = picker.wfPreview.name;
+    } else {
+      const entry = picker.workflowEntries[picker.workflowIndex];
+      name = entry?.name;
+    }
+    if (!name) return;
+    const spec = resolveWorkflowSpec(name);
+    if (!spec) return;
+    const plan = planWorkflow(spec, promptText);
+    setPlanResult(plan);
+  }, [
+    runner.running,
+    mode,
+    picker.wfPreview,
+    picker.workflowEntries,
+    picker.workflowIndex,
+    resolveWorkflowSpec,
+  ]);
+
+  // Clear plan result when workflow selection changes.
+  useEffect(() => {
+    setPlanResult(null);
+  }, [picker.wfPreview?.name, picker.workflowIndex]);
+
   const handleInputFormSubmit = useCallback(
     (params: Record<string, string | number | boolean>) => {
       const pending = inputFormPending;
@@ -1063,6 +1100,7 @@ export function App({
             dispatchCheck={picker.preview.dispatchCheck}
             canResume={runner.wfCanResume}
             promptEditing={prompt.promptEditing}
+            planResult={planResult}
           />
         ) : (
           <WorkflowPicker
@@ -1116,6 +1154,7 @@ export function App({
           onSubmit={handlePromptSubmit}
           onTab={prompt.handleTab}
           onCtrlR={mode === "workflow" && !runner.running ? handleWorkflowFreshRun : undefined}
+          onCtrlD={mode === "workflow" && !runner.running ? handlePlan : undefined}
           onCtrlQ={mode === "workflow" && runner.running ? runner.handleWorkflowCancel : undefined}
           onSuggestionNavigate={prompt.handleSuggestionNavigate}
           onHistoryNavigate={prompt.promptHistoryArrows ? prompt.handleHistoryNavigate : undefined}

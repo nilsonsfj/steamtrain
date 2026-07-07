@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { truncate } from "../agents/util";
 import type { DispatchCheck } from "../orchestrator";
 import {
+  type PlanResult,
   type WorkflowSourceKind,
   type WorkflowSpec,
   isAgentBackedStep,
@@ -36,6 +37,7 @@ interface WorkflowPreviewProps {
   dispatchCheck: DispatchCheck;
   canResume?: boolean;
   promptEditing?: boolean;
+  planResult?: PlanResult | null;
 }
 
 type PreviewRow =
@@ -56,6 +58,7 @@ export function WorkflowPreview({
   dispatchCheck,
   canResume = false,
   promptEditing = false,
+  planResult = null,
 }: WorkflowPreviewProps) {
   const innerWidth = Math.max(20, width - 4);
   const flat = useMemo(() => flattenSpecSteps(spec), [spec]);
@@ -100,7 +103,7 @@ export function WorkflowPreview({
         <Text color="gray">
           {promptEditing
             ? `↑/↓ history${canResume ? " · Enter resume" : ""} · Esc list`
-            : `↑/↓ step · → details${canResume ? " · Enter resume" : ""} · Ctrl+R run · Esc back`}
+            : `↑/↓ · → detail${canResume ? " · Enter resume" : ""} · Ctrl+R run · Ctrl+D plan · Esc`}
         </Text>
       </Box>
 
@@ -127,6 +130,11 @@ export function WorkflowPreview({
           <Text color="yellow">
             ⚠ {templateWarnings.length} template warning{templateWarnings.length === 1 ? "" : "s"}
           </Text>
+        ) : null}
+        {planResult?.ok ? (
+          <PlanResultView plan={planResult} width={innerWidth} />
+        ) : planResult && !planResult.ok ? (
+          <Text color="red">plan failed: {planResult.error}</Text>
         ) : null}
       </Box>
 
@@ -235,6 +243,72 @@ function SpecStepDetail({ entry, width }: { entry: FlatSpecStep; width: number }
         <Box width={width} flexDirection="column">
           <Text color="gray">prompt:</Text>
           <Text wrap="wrap">{truncate(prompt, 900)}</Text>
+        </Box>
+      ) : null}
+    </Box>
+  );
+}
+
+function PlanResultView({ plan, width }: { plan: PlanResult; width: number }) {
+  const promptSteps = useMemo(() => plan.steps.filter((s) => s.renderedPrompt), [plan.steps]);
+  return (
+    <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor="cyan" paddingX={1}>
+      <Text color="cyan" bold>
+        dry-run plan
+      </Text>
+      <Text color="white">
+        {plan.phaseCount} phase{plan.phaseCount === 1 ? "" : "s"} · {plan.staticStepCount} step
+        {plan.staticStepCount === 1 ? "" : "s"} · {plan.agentCallCount} agent call
+        {plan.agentCallCount === 1 ? "" : "s"} · {plan.deterministicCount} deterministic
+      </Text>
+      {plan.agents.length > 0 ? <Text color="gray">agents: {plan.agents.join(", ")}</Text> : null}
+      {plan.maxCostUsd !== undefined ? (
+        <Text color="gray">budget: ${plan.maxCostUsd.toFixed(2)}</Text>
+      ) : null}
+      {plan.forEachSteps.length > 0 || plan.forEachDynamicSteps.length > 0 ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Text color="gray">fan-out:</Text>
+          {plan.forEachSteps.map((fe) => (
+            <Text key={fe.stepId} color="gray">
+              {"  "}
+              {fe.stepId} → {fe.source} ({fe.count} items)
+            </Text>
+          ))}
+          {plan.forEachDynamicSteps.map((fe) => (
+            <Text key={fe.stepId} color="gray">
+              {"  "}
+              {fe.stepId} → {fe.source} (dynamic)
+            </Text>
+          ))}
+        </Box>
+      ) : null}
+      {plan.loopGates.length > 0 ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Text color="gray">loops:</Text>
+          {plan.loopGates.map((lg) => (
+            <Text key={lg.gateId} color="gray">
+              {"  "}
+              {lg.gateId} → {lg.loopTo} (max {lg.maxIterations} iterations)
+            </Text>
+          ))}
+        </Box>
+      ) : null}
+      {promptSteps.length > 0 ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Text color="gray">rendered prompts ({promptSteps.length}):</Text>
+          {promptSteps.slice(0, 5).map((s) => (
+            <Box key={s.stepId} flexDirection="column">
+              <Text color="white">
+                {"  "}
+                {s.stepId}: {truncate(s.renderedPrompt!, Math.max(40, width - 12))}
+              </Text>
+            </Box>
+          ))}
+          {promptSteps.length > 5 ? (
+            <Text color="gray">
+              {"  "}... and {promptSteps.length - 5} more
+            </Text>
+          ) : null}
         </Box>
       ) : null}
     </Box>
