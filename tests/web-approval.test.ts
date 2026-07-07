@@ -49,6 +49,13 @@ const approvalSpec: WorkflowSpec = {
 
 /** A host whose runWorkflow pauses on an approval, awaiting the injected provider. */
 class ApprovalHost implements WorkflowHost {
+  constructor(
+    private readonly onDecision?: (decision: {
+      approved: boolean;
+      by?: string;
+      rejectDisposition?: string;
+    }) => void,
+  ) {}
   listWorkflows(): Record<string, WorkflowSpec> {
     return { [approvalSpec.name]: approvalSpec };
   }
@@ -65,6 +72,7 @@ class ApprovalHost implements WorkflowHost {
     _inputs?: Record<string, string | number | boolean>,
     approval?: ApprovalProvider,
   ): AsyncIterable<WorkflowEvent> {
+    const onDecision = this.onDecision;
     return (async function* () {
       const ts = () => Date.now();
       yield { kind: "workflow_start", name: "approve-demo", phaseCount: 1, stepCount: 1, ts: ts() };
@@ -89,6 +97,7 @@ class ApprovalHost implements WorkflowHost {
       const decision = approval
         ? await approval({ stepId: "chk", phaseId: "p1", iteration: 1, onReject: "fail" }, _signal)
         : { approved: false };
+      onDecision?.(decision);
       yield {
         kind: "approval_resolved",
         phaseId: "p1",
@@ -113,8 +122,10 @@ class ApprovalHost implements WorkflowHost {
   }
 }
 
-function makeServer(): { server: Server; runs: WorkflowRunManager } {
-  const host = new ApprovalHost();
+function makeServer(
+  onDecision?: (d: { approved: boolean; by?: string; rejectDisposition?: string }) => void,
+): { server: Server; runs: WorkflowRunManager } {
+  const host = new ApprovalHost(onDecision);
   const runs = new WorkflowRunManager({
     host,
     cacheStore: createInMemoryStore(),
@@ -178,6 +189,40 @@ describe("web approval endpoint", () => {
     const done = frames.find((f) => f.type === "status");
     expect(pending).toBeDefined();
     expect(done).toMatchObject({ status: "done", ok: true });
+  });
+
+  it("forwards a rejection with an explicit rejectDisposition to the provider", async () => {
+    let captured: { approved: boolean; by?: string; rejectDisposition?: string } | undefined;
+    const { server } = makeServer((d) => {
+      captured = d;
+    });
+    const base = await start(server);
+    const startRes = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "approve-demo", input: "go" }),
+    });
+    const { runId } = (await startRes.json()) as { runId: string };
+    const streamRes = await fetch(`${base}/api/runs/${runId}/stream`);
+    const framesP = readSseFromResponse(streamRes);
+
+    let resolved = false;
+    for (let i = 0; i < 50 && !resolved; i++) {
+      const res = await fetch(`${base}/api/runs/${runId}/approval`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ stepId: "chk", approved: false, rejectDisposition: "stop" }),
+      });
+      resolved =
+        res.status === 200 && ((await res.json()) as { resolved?: boolean }).resolved === true;
+      if (!resolved) await delay(20);
+    }
+    await framesP;
+    expect(captured).toMatchObject({
+      approved: false,
+      by: "human:web",
+      rejectDisposition: "stop",
+    });
   });
 
   it("returns 404 for an unknown run", async () => {

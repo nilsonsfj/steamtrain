@@ -707,7 +707,15 @@
 
   function resolveApproval(stepId, approved) {
     if (!S.runId) return;
-    apiAuth("POST", "/api/runs/" + S.runId + "/approval", { stepId: stepId, approved: approved })
+    var body = { stepId: stepId, approved: approved };
+    // Send the iteration of the matching pending checkpoint so a loop that
+    // re-runs the same approval step id resolves the intended pass.
+    var pending = (S.runState && S.runState.pendingApprovals) || [];
+    var match = pending.find(function (p) {
+      return p.stepId === stepId;
+    });
+    if (match && typeof match.iteration === "number") body.iteration = match.iteration;
+    apiAuth("POST", "/api/runs/" + S.runId + "/approval", body)
       .then(function (r) {
         if (r && r.status && r.status >= 400) setBanner("Could not record approval decision.", "err");
       })
