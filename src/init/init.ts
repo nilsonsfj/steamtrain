@@ -218,12 +218,24 @@ async function writeStarters(path: string, specs: WorkflowSpec[]): Promise<Write
     }
   }
 
-  const workflows: Record<string, unknown> =
-    existing.workflows &&
-    typeof existing.workflows === "object" &&
-    !Array.isArray(existing.workflows)
-      ? { ...(existing.workflows as Record<string, unknown>) }
-      : {};
+  // A `workflows` key that isn't a name→spec map is broken config; replacing
+  // it would silently discard whatever the user meant. Same contract as
+  // unparseable JSON: refuse, and let them fix it first.
+  if (existing.workflows !== undefined) {
+    if (
+      !existing.workflows ||
+      typeof existing.workflows !== "object" ||
+      Array.isArray(existing.workflows)
+    ) {
+      return {
+        ok: false,
+        error: "existing 'workflows' is not an object (fix or remove it, then re-run init)",
+        written: [],
+        skipped: [],
+      };
+    }
+  }
+  const workflows: Record<string, unknown> = { ...(existing.workflows as Record<string, unknown>) };
 
   const written: string[] = [];
   const skipped: string[] = [];
@@ -239,6 +251,8 @@ async function writeStarters(path: string, specs: WorkflowSpec[]): Promise<Write
   }
 
   if (written.length > 0) {
+    // Spread keeps every other top-level key (maxConcurrency, binaries, …)
+    // byte-identical; only the merged `workflows` map is replaced.
     await atomicWriteFile(path, `${JSON.stringify({ ...existing, workflows }, null, 2)}\n`);
   }
   return { ok: true, written, skipped };
@@ -250,13 +264,15 @@ function askYesNo(
   out: (text: string) => void,
   question: string,
 ): Promise<boolean> {
-  out(question);
   return new Promise((resolve) => {
     const onData = (chunk: unknown): void => {
       stdin.off("data", onData);
       const answer = String(chunk).trim().toLowerCase();
       resolve(answer === "" || answer === "y" || answer === "yes");
     };
+    // Listen before printing: an answer written in immediate reaction to the
+    // question (scripted stdin, paste-ahead) must never race the listener.
     stdin.on("data", onData);
+    out(question);
   });
 }

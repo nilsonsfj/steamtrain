@@ -189,13 +189,43 @@ describe("steamtrain init", () => {
     const cwd = await tempDir();
     await writeFile(join(cwd, "package.json"), JSON.stringify({ scripts: { test: "vitest run" } }));
     const stdin = new PassThrough();
-    const runPromise = runInit(cwd, [], [doctorResult({})], { stdin, interactive: true });
-    // Two offers arrive in order: accept verify, decline implement-verified.
-    stdin.write("y\n");
-    setTimeout(() => stdin.write("n\n"), 20);
-    const result = await runPromise;
-    expect(result.code).toBe(0);
+    // Answer each prompt as it is printed (accept verify, decline
+    // implement-verified) — no timers, so the test can't race the prompts.
+    const answers: Record<string, string> = { verify: "y\n", "implement-verified": "n\n" };
+    let out = "";
+    const code = await runInitCommand(
+      [],
+      {
+        cwd,
+        stdin,
+        stdout: (text) => {
+          out += text;
+          for (const [name, answer] of Object.entries(answers)) {
+            if (text.includes(`add '${name}'`)) {
+              delete answers[name];
+              stdin.write(answer);
+            }
+          }
+        },
+        stderr: () => {},
+      },
+      { doctor: async () => [doctorResult({})], interactive: true },
+    );
+    expect(code).toBe(0);
+    expect(out).toContain("add 'verify'");
+    expect(out).toContain("add 'implement-verified'");
     const config = await readConfig(cwd);
     expect(Object.keys(config.workflows ?? {})).toEqual(["verify"]);
+  });
+
+  it("refuses to merge into a config whose 'workflows' key is not an object", async () => {
+    const cwd = await tempDir();
+    await writeFile(join(cwd, "package.json"), JSON.stringify({ scripts: { test: "vitest run" } }));
+    const broken = JSON.stringify({ maxConcurrency: 3, workflows: ["not", "a", "map"] });
+    await writeFile(join(cwd, "steamtrain.json"), broken);
+    const result = await runInit(cwd, ["--yes"], [doctorResult({})]);
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("'workflows' is not an object");
+    expect(await readFile(join(cwd, "steamtrain.json"), "utf8")).toBe(broken); // untouched
   });
 });

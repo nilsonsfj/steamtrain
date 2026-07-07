@@ -112,7 +112,9 @@ function detectPython(cwd: string): DetectedCheck[] | undefined {
 
   const checks: DetectedCheck[] = [];
   if (hasPytestConfig) checks.push({ id: "pytest", label: "pytest", cmd: "pytest" });
-  if (pyproject?.includes("ruff")) {
+  // Match the config section header, not the bare word — "ruff" alone appears
+  // in comments and dependency pins of projects that don't actually use it.
+  if (pyproject?.includes("[tool.ruff")) {
     checks.push({ id: "ruff", label: "ruff check .", cmd: "ruff check ." });
   }
   return checks.length > 0 ? checks : undefined;
