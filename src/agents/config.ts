@@ -1,13 +1,20 @@
 import type { AgentInstanceConfig, SteamtrainConfig } from "../config/types";
 import type { AgentId, AgentInstanceId, AgentProviderId } from "../types/events";
 
-const AGENT_PROVIDER_IDS: readonly AgentProviderId[] = ["claude", "opencode", "codex", "amp"];
+const AGENT_PROVIDER_IDS: readonly AgentProviderId[] = [
+  "claude",
+  "opencode",
+  "codex",
+  "amp",
+  "kiro",
+];
 
 export const DEFAULT_AGENT_BINARY: Record<AgentProviderId, string> = {
   claude: "claude",
   opencode: "opencode",
   codex: "codex",
   amp: "amp",
+  kiro: "kiro",
 };
 
 export interface ResolvedAgentInstance {

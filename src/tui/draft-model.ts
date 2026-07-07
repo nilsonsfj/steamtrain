@@ -22,7 +22,7 @@ export interface DraftTarget {
  * models, no paid credentials), then Claude, then Codex. Shared by the auto
  * resolver and the single-token model lookup so both agree on precedence.
  */
-const DRAFT_AGENT_ORDER = ["opencode", "claude", "codex", "amp"] as const;
+const DRAFT_AGENT_ORDER = ["opencode", "claude", "codex", "amp", "kiro"] as const;
 
 const draftOrderCache = new WeakMap<SteamtrainConfig, AgentInstanceId[]>();
 

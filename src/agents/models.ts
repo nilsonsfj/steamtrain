@@ -13,6 +13,7 @@ import {
   refreshCodexVariantCache,
 } from "./codex-variants";
 import { resolveAgentInstance } from "./config";
+import { KIRO_MODELS, KiroCliAdapter } from "./kiro";
 import { OPENCODE_MODELS, OpenCodeAdapter } from "./opencode";
 import {
   getOpencodeEfforts,
@@ -22,7 +23,7 @@ import {
 } from "./opencode-variants";
 
 /** All built-in agent providers steamtrain can dispatch to. */
-export const AGENT_IDS: readonly AgentProviderId[] = ["claude", "opencode", "codex", "amp"];
+export const AGENT_IDS: readonly AgentProviderId[] = ["claude", "opencode", "codex", "amp", "kiro"];
 
 export function isAgentProviderId(value: string): value is AgentProviderId {
   return (AGENT_IDS as readonly string[]).includes(value);
@@ -68,6 +69,8 @@ export function modelsForProvider(provider: AgentProviderId): readonly AgentMode
       return codexModelsWithLiveNames();
     case "amp":
       return AMP_MODELS;
+    case "kiro":
+      return KIRO_MODELS;
   }
 }
 
@@ -112,6 +115,7 @@ const PROVIDER_ADAPTERS: Record<AgentProviderId, () => AgentAdapter> = {
   codex: () => new CodexAdapter(),
   opencode: () => new OpenCodeAdapter(),
   amp: () => new AmpAdapter(),
+  kiro: () => new KiroCliAdapter(),
 };
 
 /** Default model when switching to an agent without an explicit model. */
@@ -197,6 +201,8 @@ export function effortsForModel(
       return getCodexEfforts(model);
     case "amp":
       return ampEfforts(model);
+    case "kiro":
+      return claudeEfforts(model);
     default:
       return [];
   }

@@ -201,6 +201,8 @@ function installHint(agent: AgentProviderId): string {
       return "Install Codex (npm i -g @openai/codex) and ensure `codex` is on PATH.";
     case "amp":
       return "Install Amp (npm i -g @sourcegraph/amp) and ensure `amp` is on PATH.";
+    case "kiro":
+      return "Install Kiro CLI (npm i -g @anthropic-ai/kiro-cli) and ensure `kiro` is on PATH.";
   }
 }
 
@@ -214,5 +216,7 @@ function authHint(agent: AgentProviderId): string {
       return "Run `codex login` (ChatGPT) or set CODEX_API_KEY for `codex exec`.";
     case "amp":
       return "Run `amp login`, or set AMP_API_KEY for non-interactive use (execute mode needs paid credits).";
+    case "kiro":
+      return "Run `kiro` and authenticate, or set ANTHROPIC_API_KEY.";
   }
 }

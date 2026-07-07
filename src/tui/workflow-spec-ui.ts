@@ -3,6 +3,7 @@ import {
   AMP_MODELS,
   CLAUDE_MODELS,
   CODEX_MODELS,
+  KIRO_MODELS,
   OPENCODE_MODELS,
   formatAgentTarget,
 } from "../agents";
@@ -218,5 +219,7 @@ function staticModelName(agent: AgentInstanceId, model: string): string | undefi
       return OPENCODE_MODELS.find((entry) => entry.id === model)?.name;
     case "amp":
       return AMP_MODELS.find((entry) => entry.id === model)?.name;
+    case "kiro":
+      return KIRO_MODELS.find((entry) => entry.id === model)?.name;
   }
 }

@@ -52,7 +52,7 @@ const legacyTimeoutFields = {
 const nonEmptyString = z
   .string()
   .refine((s) => s.trim().length > 0, "must not be empty or whitespace");
-const agentProviderId = z.enum(["claude", "opencode", "codex", "amp"]);
+const agentProviderId = z.enum(["claude", "opencode", "codex", "amp", "kiro"]);
 const agentInstanceSchema = z
   .object({
     id: z
@@ -78,6 +78,7 @@ export const configFileSchema = z
         opencode: nonEmptyString.optional(),
         codex: nonEmptyString.optional(),
         amp: nonEmptyString.optional(),
+        kiro: nonEmptyString.optional(),
       })
       .partial()
       .optional(),

@@ -42,6 +42,35 @@ describe("amp modes", () => {
   });
 });
 
+describe("kiro models", () => {
+  it("exposes kiro models with sonnet as the default", () => {
+    expect(modelIdsForAgent("kiro")).toEqual([
+      "sonnet",
+      "opus",
+      "haiku",
+      "claude-sonnet-5",
+      "claude-opus-4-8",
+      "claude-haiku-4-5",
+    ]);
+    expect(defaultModelForAgent("kiro")).toBe("sonnet");
+    expect(modelNameForAgent("kiro", "sonnet")).toBe("Sonnet (latest)");
+    expect(modelNameForAgent("kiro", "claude-sonnet-5")).toBe("Claude Sonnet 5");
+  });
+
+  it("reuses claude efforts for kiro models", () => {
+    expect(effortsForModel("kiro", "sonnet")).toEqual(["low", "medium", "high", "max"]);
+    expect(effortsForModel("kiro", "opus")).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(effortsForModel("kiro", "haiku")).toEqual([]);
+    expect(supportsEffort("kiro", "sonnet")).toBe(true);
+    expect(supportsEffort("kiro", "haiku")).toBe(false);
+  });
+
+  it("keeps effort when switching kiro models only if supported", () => {
+    expect(effortForModelChange("kiro", "sonnet", "high")).toBe("high");
+    expect(effortForModelChange("kiro", "haiku", "high")).toBeUndefined();
+  });
+});
+
 describe("model names", () => {
   beforeEach(() => {
     clearCodexVariantCacheForTests();
@@ -124,6 +153,7 @@ describe("model names", () => {
     expect(defaultModelForAgent("codex")).toBe("gpt-5.5");
     expect(defaultModelForAgent("opencode")).toBe("opencode/mimo-v2.5-free");
     expect(defaultModelForAgent("amp")).toBe("smart");
+    expect(defaultModelForAgent("kiro")).toBe("sonnet");
   });
 
   it("falls back to the static OpenCode catalog when cache is empty", () => {
