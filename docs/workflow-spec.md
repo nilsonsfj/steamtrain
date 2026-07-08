@@ -96,7 +96,7 @@ execution behavior. **Examples:** [`workflow-examples.md`](workflow-examples.md)
 | field | required | meaning |
 | --- | --- | --- |
 | `id` | yes | Unique across the whole workflow. |
-| `kind` | no | One of `worker`, `processor`, `distributor`, `consolidator`, `gate`, `approval`, `merge`, `command`, `workflow`. Missing means `worker`. |
+| `kind` | no | One of `worker`, `processor`, `distributor`, `consolidator`, `gate`, `approval`, `merge`, `command`, `llm`, `workflow`. Missing means `worker`. |
 | `dependsOn` | no | Step ids from earlier phases only. Same-phase and forward dependencies are invalid. Steps are scheduled by these dependencies; omitting `dependsOn` makes the step wait for every step in all earlier phases. |
 | `when` | no | Per-step condition (same schema as a gate condition). When false the step is skipped, not failed. See [Per-step conditions](#per-step-conditions-when). |
 
@@ -474,6 +474,97 @@ A typical trustworthy fix loop:
   { "id": "converged", "kind": "gate", "dependsOn": ["tests"],
     "condition": { "step": "tests", "ok": true },
     "loopTo": "fix", "maxIterations": 5, "onFalse": "fail" }
+] }
+```
+
+### Llm (direct API inference)
+
+One stateless LLM API call — the middle tier between a deterministic `command`
+step and a full coding-agent `worker`. No agent CLI, no tool harness, no
+worktree, no doctor preflight, near-zero startup, and exact token accounting
+straight from the API. The canonical uses are the judge / classify / summarize
+/ route touches that never needed tools: consolidators that merge text,
+verdict steps feeding gates, splitters that fan a request into a list.
+
+Required fields: `model`, `prompt`.
+
+Optional fields: `provider` (`"anthropic"` or `"openai"`; when omitted it is
+inferred — `claude-*` models → `anthropic`, everything else → the
+OpenAI-compatible wire format), `system`, `output` (JSON schema; see
+[Structured step outputs](#structured-step-outputs-output)), `itemsPath`,
+`maxTokens`, `temperature`, `effort`, `apiKeyEnv`, `baseUrl`, `retry`,
+`forEach`, `stepTimeoutSec`, `pricing`.
+
+```jsonc
+{
+  "id": "verdict",
+  "kind": "llm",
+  "model": "claude-opus-4-8",
+  "dependsOn": ["review"],
+  "prompt": "Judge whether this review found blocking issues:\n{{steps.review.output}}",
+  "output": {
+    "type": "object",
+    "required": ["verdict"],
+    "properties": { "verdict": { "type": "string", "enum": ["pass", "fail"] } }
+  }
+}
+```
+
+Semantics:
+
+- **API key from env.** `anthropic` reads `ANTHROPIC_API_KEY`, `openai` reads
+  `OPENAI_API_KEY`; `apiKeyEnv` names a different variable. A missing key fails
+  the step immediately with a clear message. This decouples "steamtrain needs
+  an agent CLI installed and authenticated" from "steamtrain needs an API key"
+  — an llm-only workflow needs no agent CLI at all, which also makes it CI
+  friendly.
+- **Any OpenAI-compatible endpoint.** `baseUrl` (or the conventional
+  `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` env vars) points the call at a
+  proxy or a compatible provider (Groq, Together, Ollama, vLLM, …). The OpenAI
+  convention includes the `/v1` path segment in the base URL; the Anthropic
+  convention does not.
+- **Structured output, more reliably.** With an `output` schema the step uses
+  the same machinery as agent steps (schema instructions, local validation,
+  one bounded "fix your JSON" retry) and additionally requests JSON-only
+  response mode at the API level where supported. The parsed value lands on
+  `{{steps.<id>.json}}` for typed gates.
+- **Splitter.** When the parsed structured value is a JSON array — or
+  `itemsPath` names an array field — it becomes the step's `items`, so an llm
+  step is a valid `forEach` source exactly like a distributor.
+- **Fan-out judge.** An llm step may itself carry
+  `"forEach": "steps.<id>.items"` to run once per item in parallel
+  (`{{item}}`, `{{item.index}}` available), like a processor.
+- **Always retry-safe.** An LLM call is stateless and side-effect-free, so
+  transient failures (429s, 5xx, network errors, timeouts) are auto-retried
+  under the step/workflow [retry policy](#auto-retry-on-transient-failures) —
+  no side-effect heuristics needed.
+- **Exact token accounting; optional exact cost.** The API's reported usage is
+  recorded on the result verbatim. Providers don't report dollar cost, so
+  `costUsd` is only set when the step declares `pricing` (USD per million
+  tokens): `{ "pricing": { "inputPerMTok": 5, "outputPerMTok": 25 } }` — with
+  it, `maxCostUsd` budgets and cost analytics see llm spend exactly.
+- **`effort`** maps to Anthropic `output_config.effort` / OpenAI
+  `reasoning_effort`. **`temperature`** is only sent when set (recent Anthropic
+  models reject sampling parameters).
+- No workspace: an llm step never owns a worktree, can't be a
+  `workspace: "inherit:…"` source, and declares no artifacts. If the step must
+  read or edit files, it isn't an llm step — use a worker/processor or command
+  step.
+
+A split → judge-each pipeline with zero agent CLIs:
+
+```jsonc
+{ "id": "split", "steps": [
+  { "id": "concerns", "kind": "llm", "model": "claude-opus-4-8",
+    "prompt": "List the 3-5 distinct concerns for: {{input}}",
+    "output": { "type": "object", "required": ["concerns"],
+      "properties": { "concerns": { "type": "array", "items": { "type": "string" } } } },
+    "itemsPath": "concerns" }
+] },
+{ "id": "assess", "steps": [
+  { "id": "assess-each", "kind": "llm", "model": "claude-opus-4-8",
+    "dependsOn": ["concerns"], "forEach": "steps.concerns.items",
+    "prompt": "Assess this concern in two sentences: {{item}}" }
 ] }
 ```
 

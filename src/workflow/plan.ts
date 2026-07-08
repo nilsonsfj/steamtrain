@@ -28,6 +28,8 @@ export interface PlanStep {
   kind: WorkflowStepKind;
   agent?: string;
   model?: string;
+  /** Resolved API dialect for direct-inference `llm` steps. */
+  llmProvider?: string;
   effort?: string;
   dependsOn?: string[];
   /** The rendered prompt (agent steps) or cmd (command steps). */
@@ -72,6 +74,8 @@ export interface PlanResult {
   staticStepCount: number;
   /** Number of agent-backed steps (will spawn agent CLIs). */
   agentCallCount: number;
+  /** Number of direct-API `llm` steps (no agent CLI, key from env). */
+  llmCallCount: number;
   /** Number of deterministic steps (commands, pure consolidators). */
   deterministicCount: number;
   /** Steps that have forEach with known static item counts. */
@@ -166,6 +170,7 @@ export function planWorkflow(
       phaseCount: 0,
       staticStepCount: 0,
       agentCallCount: 0,
+      llmCallCount: 0,
       deterministicCount: 0,
       forEachSteps: [],
       forEachDynamicSteps: [],
@@ -202,6 +207,8 @@ export function planWorkflow(
         renderedPrompt = renderDryTemplate(step.cmd, input, params);
       } else if (kind === "consolidator" && "prompt" in step && typeof step.prompt === "string") {
         renderedPrompt = renderDryTemplate(step.prompt, input, params);
+      } else if (kind === "llm" && "prompt" in step && typeof step.prompt === "string") {
+        renderedPrompt = renderDryTemplate(step.prompt, input, params);
       } else if (kind === "workflow" && "input" in step && typeof step.input === "string") {
         renderedPrompt = renderDryTemplate(step.input, input, params);
       }
@@ -210,7 +217,11 @@ export function planWorkflow(
       let forEachSource: string | undefined;
       let forEachCount: number | undefined;
       let forEachDynamic: boolean | undefined;
-      if ((kind === "worker" || kind === "processor") && "forEach" in step && step.forEach) {
+      if (
+        (kind === "worker" || kind === "processor" || kind === "llm") &&
+        "forEach" in step &&
+        step.forEach
+      ) {
         const sourceId = parseForEachSource(step.forEach);
         if (sourceId) {
           forEachSource = sourceId;
@@ -223,6 +234,10 @@ export function planWorkflow(
               forEachDynamic = true;
               forEachDynamicSteps.push({ stepId: step.id, source: sourceId });
             }
+          } else if (sourceStep?.kind === "llm") {
+            // llm splitters produce their items at run time.
+            forEachDynamic = true;
+            forEachDynamicSteps.push({ stepId: step.id, source: sourceId });
           }
         }
       }
@@ -269,8 +284,12 @@ export function planWorkflow(
         phaseIndex: pi,
         kind,
         agent: agentBacked ? step.agent : undefined,
-        model: agentBacked ? step.model : undefined,
-        effort: agentBacked && "effort" in step ? step.effort : undefined,
+        model: agentBacked || kind === "llm" ? (step as { model?: string }).model : undefined,
+        llmProvider:
+          step.kind === "llm"
+            ? (step.provider ?? (step.model.startsWith("claude") ? "anthropic" : "openai"))
+            : undefined,
+        effort: (agentBacked || kind === "llm") && "effort" in step ? step.effort : undefined,
         dependsOn: step.dependsOn,
         renderedPrompt,
         isAgentBacked: agentBacked,
@@ -298,6 +317,7 @@ export function planWorkflow(
     phaseCount: spec.phases.length,
     staticStepCount: steps.length,
     agentCallCount: steps.filter((s) => s.isAgentBacked).length,
+    llmCallCount: steps.filter((s) => s.kind === "llm").length,
     deterministicCount: steps.filter((s) => s.isDeterministic).length,
     forEachSteps,
     forEachDynamicSteps,

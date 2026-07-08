@@ -398,7 +398,7 @@ async function planCommand(
     `  ${plan.phaseCount} phase${plan.phaseCount === 1 ? "" : "s"} · ${plan.staticStepCount} step${plan.staticStepCount === 1 ? "" : "s"}\n`,
   );
   out(
-    `  ${plan.agentCallCount} agent call${plan.agentCallCount === 1 ? "" : "s"} · ${plan.deterministicCount} deterministic step${plan.deterministicCount === 1 ? "" : "s"}\n`,
+    `  ${plan.agentCallCount} agent call${plan.agentCallCount === 1 ? "" : "s"} · ${plan.llmCallCount} llm call${plan.llmCallCount === 1 ? "" : "s"} · ${plan.deterministicCount} deterministic step${plan.deterministicCount === 1 ? "" : "s"}\n`,
   );
   if (plan.agents.length > 0) out(`  agents: ${plan.agents.join(", ")}\n`);
   if (plan.maxCostUsd !== undefined) out(`  budget: $${plan.maxCostUsd.toFixed(2)}\n`);
@@ -428,6 +428,9 @@ async function planCommand(
     const tags: string[] = [];
     if (step.isAgentBacked) {
       tags.push(step.model ? `${step.agent}/${step.model}` : (step.agent ?? "agent"));
+    }
+    if (step.kind === "llm") {
+      tags.push(`${step.llmProvider ?? "llm"}/${step.model ?? ""}`);
     }
     if (step.isDeterministic) tags.push("deterministic");
     if (step.forEachSource) tags.push(`forEach→${step.forEachSource}`);

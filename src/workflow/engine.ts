@@ -20,6 +20,13 @@ import { runShellCommand } from "./command";
 import { addTokens } from "./cost";
 import type { WorkflowEvent } from "./events";
 import {
+  type LlmCallResult,
+  type LlmComplete,
+  callLlm,
+  llmApiKeyEnvName,
+  resolveLlmProvider,
+} from "./llm";
+import {
   type ConflictResolver,
   type HarvestResult,
   type WorktreeDiff,
@@ -49,6 +56,7 @@ import {
   DEFAULT_LOOP_MAX_ITERATIONS,
   type GateCondition,
   type GateStep,
+  type LlmStep,
   MAX_CONCURRENCY,
   MAX_STEPS,
   MAX_WORKFLOW_NESTING_DEPTH,
@@ -101,6 +109,12 @@ export interface WorkflowDeps {
    * this context" error rather than crashing.
    */
   resolveWorkflow?: (name: string) => WorkflowSpec | undefined;
+  /**
+   * Completion transport for `llm` steps. Injected (not imported) so tests can
+   * supply a fake and never touch the network; defaults to the fetch-based
+   * {@link callLlm}.
+   */
+  llmComplete?: LlmComplete;
   /**
    * Resolves a human-approval checkpoint (an `approval` step or a `gate` with
    * `condition.human`). Injected per surface: the TUI resolves on a keypress,
@@ -692,7 +706,13 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
         addEarlier(condition.step);
         renderableTexts.push(condition.contains, condition.equals, condition.matches);
       }
-      if ((step.kind === "worker" || step.kind === "processor" || !step.kind) && step.forEach) {
+      if (
+        (step.kind === "worker" ||
+          step.kind === "processor" ||
+          step.kind === "llm" ||
+          !step.kind) &&
+        step.forEach
+      ) {
         addEarlier(parseForEachSource(step.forEach));
       }
       // Inheriting a workspace means waiting for the source's worktree.
@@ -702,6 +722,7 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
         renderableTexts.push(step.branch, step.commitMessage, step.prTitle, step.prBody);
       }
       if ("prompt" in step) renderableTexts.push(step.prompt);
+      if (step.kind === "llm") renderableTexts.push(step.system);
       if (step.kind === "command") renderableTexts.push(step.cmd);
       if (step.kind === "workflow") renderableTexts.push(step.input);
       if (step.kind === "distributor" && step.items) renderableTexts.push(...step.items);
@@ -1178,6 +1199,11 @@ async function executeStep(
 
   if (kind === "command" && step.kind === "command") {
     return { result: await executeCommandStep(step, ctx, hooks) };
+  }
+
+  if (kind === "llm" && step.kind === "llm") {
+    if (step.forEach) return executeForEachStep(step, ctx, hooks);
+    return { result: await executeLlmStep(step, ctx, hooks, step.id) };
   }
 
   if (kind === "approval" && step.kind === "approval") {
@@ -1671,11 +1697,20 @@ async function applyDeclaredArtifacts(
 }
 
 async function executeForEachStep(
-  step: WorkerStep & AgentBackedWorkflowStep,
+  step: (WorkerStep & AgentBackedWorkflowStep) | LlmStep,
   ctx: ExecuteContext,
   hooks: ExecuteHooks,
 ): Promise<ExecutionOutcome> {
   const started = Date.now();
+  // llm fan-outs have no per-step cost budget field; the shared budget logic
+  // below is a no-op when the cap is undefined.
+  const maxCostUsd = step.kind === "llm" ? undefined : step.maxCostUsd;
+  const childAgent = isAgentBackedStep(step) ? step.agent : undefined;
+  const childCwd = "cwd" in step ? step.cwd : undefined;
+  const runChild = (childId: string, item: WorkflowItem): Promise<StepResult> =>
+    step.kind === "llm"
+      ? executeLlmStep(step, ctx, hooks, childId, item)
+      : executeAgentStep(step, ctx, hooks, childId, item);
   const sourceStepId = parseForEachSource(step.forEach ?? "");
   const source = sourceStepId ? ctx.results.get(sourceStepId) : undefined;
 
@@ -1742,7 +1777,7 @@ async function executeForEachStep(
   const stepSpent = { costUsd: 0 };
   let stepBudgetHit = false;
   const stepBudgetReached = (): boolean =>
-    step.maxCostUsd !== undefined && stepSpent.costUsd >= step.maxCostUsd;
+    maxCostUsd !== undefined && stepSpent.costUsd >= maxCostUsd;
   await runPool(
     values.map((value, index) => ({
       value,
@@ -1760,7 +1795,7 @@ async function executeForEachStep(
             kind: "budget_exceeded",
             scope: "step",
             stepId: step.id,
-            limitUsd: step.maxCostUsd as number,
+            limitUsd: maxCostUsd as number,
             spentUsd: stepSpent.costUsd,
             iteration: ctx.iteration,
             ts: Date.now(),
@@ -1786,10 +1821,10 @@ async function executeForEachStep(
         phaseId: hooks.phaseId,
         stepId,
         blockKind: workflowStepKind(step),
-        agent: step.agent,
+        agent: childAgent,
         model: step.model,
         effort: step.effort,
-        cwd: step.cwd,
+        cwd: childCwd,
         dependsOn: step.dependsOn,
         parentStepId: step.id,
         item,
@@ -1801,7 +1836,7 @@ async function executeForEachStep(
       const result = cached
         ? { ...cached, stepId, parentStepId: step.id, item, iteration: ctx.iteration }
         : {
-            ...(await executeAgentStep(step, ctx, hooks, stepId, item)),
+            ...(await runChild(stepId, item)),
             stepId,
             parentStepId: step.id,
             item,
@@ -1837,7 +1872,7 @@ async function executeForEachStep(
   const error = ok
     ? undefined
     : stepBudgetHit
-      ? `step cost budget $${(step.maxCostUsd as number).toFixed(4)} reached after $${stepSpent.costUsd.toFixed(4)}`
+      ? `step cost budget $${(maxCostUsd as number).toFixed(4)} reached after $${stepSpent.costUsd.toFixed(4)}`
       : "one or more fan-out items failed";
 
   return {
@@ -1966,6 +2001,312 @@ async function executeCommandStep(
   } finally {
     await workspace.dispose();
   }
+}
+
+/** Exact USD cost from declared per-MTok rates and the API-reported usage. */
+function llmCostUsd(step: LlmStep, tokens: TokenUsage | undefined): number | undefined {
+  const pricing = step.pricing;
+  if (!pricing || !tokens) return undefined;
+  const per = (count: number | undefined, rate: number | undefined): number =>
+    ((count ?? 0) * (rate ?? 0)) / 1_000_000;
+  return (
+    per(tokens.input, pricing.inputPerMTok) +
+    per(tokens.output, pricing.outputPerMTok) +
+    per(tokens.cacheRead, pricing.cacheReadPerMTok) +
+    per(tokens.cacheWrite, pricing.cacheWritePerMTok)
+  );
+}
+
+/**
+ * One completion call for an `llm` step, wrapped into the StepResult shape.
+ * Streams the completion text as a `text_delta` step event (like command steps
+ * do) so the TUI/web live views show the output as it lands.
+ */
+async function runLlmAttempt(
+  step: LlmStep,
+  ctx: ExecuteContext,
+  hooks: ExecuteHooks,
+  stepId: string,
+  item: WorkflowItem | undefined,
+  prompt: string,
+  system: string | undefined,
+  apiKey: string,
+  timeoutMs: number,
+): Promise<{ result: StepResult; retryable: boolean }> {
+  const started = Date.now();
+  const complete = ctx.deps.llmComplete ?? callLlm;
+  let outcome: LlmCallResult;
+  try {
+    outcome = await complete({
+      provider: resolveLlmProvider(step),
+      model: step.model,
+      prompt,
+      system,
+      maxTokens: step.maxTokens,
+      temperature: step.temperature,
+      effort: step.effort,
+      baseUrl: step.baseUrl,
+      apiKey,
+      jsonOutput: step.output !== undefined,
+      timeoutMs,
+      signal: ctx.signal,
+    });
+  } catch (err) {
+    // The injected transport should never throw, but a throw is by definition
+    // "the call may not have completed" — treat like a transport error.
+    outcome = {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      retryable: true,
+    };
+  }
+
+  const cancelled = Boolean(ctx.signal?.aborted);
+  if (outcome.ok && !cancelled) {
+    if (outcome.text) {
+      hooks.pushAgentEvent(stepId, {
+        kind: "text_delta",
+        agent: "llm",
+        ts: Date.now(),
+        text: outcome.text,
+      });
+    }
+    return {
+      result: {
+        stepId,
+        ok: true,
+        output: outcome.text,
+        item,
+        durationMs: Date.now() - started,
+        costUsd: llmCostUsd(step, outcome.tokens),
+        tokens: outcome.tokens,
+      },
+      retryable: false,
+    };
+  }
+  const error = cancelled ? "cancelled" : outcome.ok ? "cancelled" : outcome.error;
+  return {
+    result: {
+      stepId,
+      ok: false,
+      output: error,
+      item,
+      error,
+      durationMs: Date.now() - started,
+      costUsd: outcome.ok ? llmCostUsd(step, outcome.tokens) : undefined,
+      tokens: outcome.ok ? outcome.tokens : undefined,
+    },
+    // A cancelled step is never retried (and never cached, so resume re-runs it).
+    retryable: !cancelled && !outcome.ok && outcome.retryable,
+  };
+}
+
+/**
+ * Execute an `llm` step: render the prompt/system templates, make one
+ * stateless completion call, and (when an `output` schema is declared) enforce
+ * structured output with the same one-bounded-fix-retry contract agent steps
+ * get. No workspace, no worktree, no doctor dependency — the only external
+ * requirement is the provider API key in the environment.
+ *
+ * Transient failures (rate limit / 5xx / network / timeout) are auto-retried
+ * under the step/workflow retry policy: unlike agent attempts, an llm call is
+ * stateless and side-effect-free, so retry is always safe.
+ */
+async function executeLlmStep(
+  step: LlmStep,
+  ctx: ExecuteContext,
+  hooks: ExecuteHooks,
+  stepId: string,
+  item?: WorkflowItem,
+): Promise<StepResult> {
+  const started = Date.now();
+  const renderCtx = {
+    input: ctx.input,
+    inputs: ctx.inputs,
+    outputs: ctx.outputs,
+    results: ctx.results,
+    item,
+    iteration: ctx.iteration,
+  };
+  const rendered = renderPrompt(step.prompt, renderCtx);
+  const system = step.system ? renderPrompt(step.system, renderCtx) : undefined;
+  const outputSchema = step.output;
+  const prompt = outputSchema ? withStructuredOutputInstructions(rendered, outputSchema) : rendered;
+
+  const provider = resolveLlmProvider(step);
+  const keyEnv = llmApiKeyEnvName(provider, step.apiKeyEnv);
+  const apiKey = process.env[keyEnv];
+  if (!apiKey) {
+    const message = `llm step requires an API key in the ${keyEnv} environment variable (provider '${provider}')`;
+    return {
+      stepId,
+      ok: false,
+      output: message,
+      item,
+      error: message,
+      durationMs: Date.now() - started,
+    };
+  }
+
+  const timeoutSec = resolveStepTimeoutSec(
+    step,
+    { stepTimeoutSec: ctx.stepTimeoutDefault },
+    { stepTimeoutSec: ctx.deps.stepTimeoutSec },
+  );
+  const timeoutMs = timeoutMsFromSec(timeoutSec);
+  const policy = resolveRetryPolicy(step.retry, ctx.retryDefault);
+
+  let attempt = 0;
+  let result: StepResult;
+  while (true) {
+    attempt += 1;
+    const attemptOutcome = await runLlmAttempt(
+      step,
+      ctx,
+      hooks,
+      stepId,
+      item,
+      prompt,
+      system,
+      apiKey,
+      timeoutMs,
+    );
+    result = attemptOutcome.result;
+    const isLastAttempt = attempt >= policy.maxAttempts;
+    if (result.ok || !attemptOutcome.retryable || isLastAttempt || ctx.signal?.aborted) break;
+    const delayMs = backoffDelayMs(policy, attempt);
+    hooks.pushWorkflowEvent({
+      kind: "step_retry",
+      phaseId: hooks.phaseId,
+      stepId,
+      attempt,
+      maxAttempts: policy.maxAttempts,
+      delayMs,
+      reason: result.error ?? "transient failure",
+      iteration: ctx.iteration,
+      ts: Date.now(),
+    });
+    await abortableSleep(delayMs, ctx.signal);
+    if (ctx.signal?.aborted) break;
+  }
+
+  if (outputSchema && result.ok) {
+    const enforced = await enforceLlmStructuredOutput(
+      step,
+      ctx,
+      hooks,
+      stepId,
+      item,
+      result,
+      outputSchema,
+      apiKey,
+      timeoutMs,
+      attempt,
+    );
+    result = enforced.result;
+    attempt = enforced.attempt;
+  }
+
+  if (result.ok && step.itemsPath !== undefined) {
+    const source = jsonPathGet(result.json, step.itemsPath);
+    if (!Array.isArray(source)) {
+      const message = `llm structured output at itemsPath '${step.itemsPath}' is not a JSON array`;
+      result = { ...result, ok: false, output: message, error: message };
+    } else {
+      result = { ...result, items: source.map(jsonFieldText) };
+    }
+  } else if (result.ok && Array.isArray(result.json)) {
+    // A bare-array structured output is a splitter by construction; expose the
+    // elements as items so `forEach` consumers can fan out over them.
+    result = { ...result, items: result.json.map(jsonFieldText) };
+  }
+
+  return attempt > 1 ? { ...result, attempts: attempt, durationMs: Date.now() - started } : result;
+}
+
+/**
+ * The llm-step analog of {@link enforceStructuredOutput}: parse + validate the
+ * completion against the step's `output` schema, and on a mismatch run ONE
+ * bounded "fix your JSON" retry. Costs and tokens of the extra call are summed
+ * into the returned result.
+ */
+async function enforceLlmStructuredOutput(
+  step: LlmStep,
+  ctx: ExecuteContext,
+  hooks: ExecuteHooks,
+  stepId: string,
+  item: WorkflowItem | undefined,
+  result: StepResult,
+  outputSchema: JsonSchema,
+  apiKey: string,
+  timeoutMs: number,
+  attempt: number,
+): Promise<{ result: StepResult; attempt: number }> {
+  const parsed = parseStructuredOutput(result.output, outputSchema);
+  if (parsed.ok) return { result: { ...result, json: parsed.value }, attempt };
+  if (ctx.signal?.aborted) {
+    return {
+      result: { ...result, ok: false, error: `structured output invalid: ${parsed.error}` },
+      attempt,
+    };
+  }
+  hooks.pushWorkflowEvent({
+    kind: "step_retry",
+    phaseId: hooks.phaseId,
+    stepId,
+    attempt,
+    maxAttempts: attempt + 1,
+    delayMs: 0,
+    reason: `structured output invalid: ${parsed.error}`,
+    iteration: ctx.iteration,
+    ts: Date.now(),
+  });
+  const fix = await runLlmAttempt(
+    step,
+    ctx,
+    hooks,
+    stepId,
+    item,
+    structuredOutputFixPrompt(outputSchema, result.output, parsed.error),
+    step.system
+      ? renderPrompt(step.system, {
+          input: ctx.input,
+          inputs: ctx.inputs,
+          outputs: ctx.outputs,
+          results: ctx.results,
+          item,
+          iteration: ctx.iteration,
+        })
+      : undefined,
+    apiKey,
+    timeoutMs,
+  );
+  const costUsd =
+    result.costUsd === undefined && fix.result.costUsd === undefined
+      ? undefined
+      : (result.costUsd ?? 0) + (fix.result.costUsd ?? 0);
+  const tokens =
+    result.tokens || fix.result.tokens ? addTokens(result.tokens, fix.result.tokens) : undefined;
+  const reparsed = fix.result.ok
+    ? parseStructuredOutput(fix.result.output, outputSchema)
+    : undefined;
+  if (reparsed?.ok) {
+    return {
+      result: { ...fix.result, json: reparsed.value, costUsd, tokens },
+      attempt: attempt + 1,
+    };
+  }
+  const reason = reparsed ? reparsed.error : (fix.result.error ?? "the retry attempt failed");
+  return {
+    result: {
+      ...fix.result,
+      ok: false,
+      error: `structured output retry failed: ${reason}`,
+      costUsd,
+      tokens,
+    },
+    attempt: attempt + 1,
+  };
 }
 
 /** The last step (by array position, NOT chronological completion order) of a spec's last phase. Deterministic default output source for a `workflow` step that omits `outputStep`. */

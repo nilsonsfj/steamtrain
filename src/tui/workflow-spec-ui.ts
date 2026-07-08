@@ -11,6 +11,7 @@ import { truncate } from "../agents/util";
 import type { AgentInstanceId } from "../types/events";
 import {
   type GateCondition,
+  type LlmStep,
   type WorkflowPhase,
   type WorkflowSpec,
   type WorkflowStep,
@@ -36,6 +37,7 @@ export const BLOCK_LABEL: Record<ReturnType<typeof workflowStepKind>, string> = 
   approval: "approval",
   merge: "merge-back",
   command: "command",
+  llm: "llm",
   workflow: "sub-workflow",
 };
 
@@ -94,6 +96,12 @@ export function formatWorkflowAgentTarget(target: {
   return staticName && !formatted.includes(staticName) ? `${formatted} · ${staticName}` : formatted;
 }
 
+/** `provider/model` display target for a direct-API `llm` step. */
+export function formatLlmTarget(step: LlmStep): string {
+  const provider = step.provider ?? (step.model.startsWith("claude") ? "anthropic" : "openai");
+  return `${provider}/${step.model}`;
+}
+
 export function formatGateCondition(condition: GateCondition): string {
   const parts: string[] = [];
   if (condition.step) parts.push(`step=${condition.step}`);
@@ -124,6 +132,7 @@ export function specStepRowMeta(step: WorkflowStep): string {
   if ("cwd" in step && step.cwd) bits.push(`cwd: ${basename(step.cwd)}`);
   if (step.kind === "distributor" && step.items?.length) bits.push(`${step.items.length} items`);
   if (step.kind === "command") bits.push(`$ ${truncate(step.cmd, 60)}`);
+  if (step.kind === "llm") bits.push(`api: ${formatLlmTarget(step)}`);
   if (step.kind === "gate") bits.push(formatGateCondition(step.condition));
   if (step.kind === "gate" && step.loopTo) bits.push(formatGateLoop(step));
   if (step.kind === "merge") {
@@ -182,6 +191,15 @@ export function specDetailLines(step: WorkflowStep): string[] {
   }
   if (step.kind === "command") {
     lines.push(`cmd: ${truncate(step.cmd, 200)}`);
+  }
+  if (step.kind === "llm") {
+    lines.push(`api: ${formatLlmTarget(step)} (direct inference, no agent CLI)`);
+    if (step.system) lines.push(`system: ${truncate(step.system, 200)}`);
+    if (step.maxTokens !== undefined) lines.push(`maxTokens: ${step.maxTokens}`);
+    if (step.temperature !== undefined) lines.push(`temperature: ${step.temperature}`);
+    if (step.apiKeyEnv) lines.push(`apiKeyEnv: ${step.apiKeyEnv}`);
+    if (step.baseUrl) lines.push(`baseUrl: ${step.baseUrl}`);
+    if (step.itemsPath) lines.push(`itemsPath: ${step.itemsPath}`);
   }
   if (step.kind === "gate") {
     lines.push(`condition: ${formatGateCondition(step.condition)}`);

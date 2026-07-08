@@ -52,6 +52,14 @@ which quietly fixes the CI story too. This is the `BashOperator` /
 `PythonOperator` split every mature orchestrator converges on: the engine
 provides primitives at every cost tier, and the author picks.
 
+> **Shipped (2026-07-08):** `"kind": "llm"` — Anthropic + any OpenAI-compatible
+> endpoint, key from env, `system`, structured `output` with API-level JSON
+> mode where available, `itemsPath` splitting, `forEach` fan-out, always-safe
+> auto-retry, exact token accounting (plus exact `costUsd` via per-step
+> `pricing`). The bundled `quick-triage` workflow is built entirely on it; the
+> agent-backed bundled workflows deliberately keep their zero-API-key free-tier
+> models. See `docs/workflow-spec.md` → "Llm (direct API inference)".
+
 ## 2. Mid-run steering: pause, rewind, edit, replay
 
 **The gap:** once a run starts, the only verbs are *watch* and *cancel*

@@ -163,6 +163,21 @@ or disjoint, never partially overlapping.
   build / a script" — it is faster, free, and cannot misreport results. Gate on
   it with { "step": "<id>", "ok": true }. Command steps run in the same isolated
   git worktree machinery as agent steps.
+- "llm": ONE direct, stateless LLM API call — no agent CLI, no tools, no repo
+  access, near-zero startup. Requires "model" and "prompt"; optional "provider"
+  ("anthropic" or "openai"; inferred from the model name when omitted — claude-*
+  means anthropic), "system", "output" (JSON schema), "maxTokens", "effort",
+  "apiKeyEnv", "baseUrl" (any OpenAI-compatible endpoint). The API key is read
+  from the environment (ANTHROPIC_API_KEY / OPENAI_API_KEY by default). Use an
+  llm step instead of an agent-backed consolidator/worker whenever the work is
+  "turn one prompt into one completion" with no tool use: judging/classifying a
+  verdict for a gate, summarizing or merging earlier text outputs, splitting a
+  request into a list. It is dramatically faster and cheaper than booting an
+  agent. An llm step with an "output" schema whose value (or "itemsPath" field)
+  is a JSON array exposes it as items, so it can be a forEach source like a
+  distributor; an llm step may itself carry "forEach" to judge each item.
+  Do NOT use an llm step when the step must read/edit files or run commands —
+  that needs a worker/processor or command step.
 - "merge": land the FILE CHANGES of earlier agent steps (each runs in an isolated
   git worktree) back into the user's repository. Requires dependsOn (or "from":
   ["stepId", ...]). "mode": "apply" (default; changes land uncommitted in the

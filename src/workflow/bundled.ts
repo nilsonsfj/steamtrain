@@ -418,6 +418,110 @@ const tour: WorkflowSpec = {
   ],
 };
 
+/**
+ * A workflow built entirely on direct-API `llm` steps — the lightweight tier
+ * between command steps and full coding agents. Demonstrates the llm-step
+ * repertoire end to end: a structured splitter (`output` + `itemsPath`) acting
+ * as a fan-out source, a per-item `forEach` judge, a typed verdict feeding a
+ * gate `path` condition, and an llm consolidator. Needs no agent CLI at all —
+ * only `ANTHROPIC_API_KEY` in the environment — so it runs in CI and on
+ * machines with no agent installed. (The other bundled workflows keep their
+ * agent-backed free-tier models on purpose: they must run with zero API keys.)
+ */
+const quickTriage: WorkflowSpec = {
+  name: "quick-triage",
+  description:
+    "Split a request into concerns, assess each with direct API calls, and gate on a typed verdict — llm steps only, no agent CLI required (uses ANTHROPIC_API_KEY).",
+  phases: [
+    {
+      id: "split",
+      title: "Split the request into concerns (llm splitter)",
+      steps: [
+        {
+          id: "concerns",
+          kind: "llm",
+          model: "claude-opus-4-8",
+          prompt:
+            "List the 3 to 5 most important, distinct concerns to evaluate before doing the following. Keep each concern to one short sentence.\n\nRequest: {{input}}",
+          output: {
+            type: "object",
+            required: ["concerns"],
+            properties: {
+              concerns: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 5 },
+            },
+          },
+          itemsPath: "concerns",
+        },
+      ],
+    },
+    {
+      id: "assess",
+      title: "Assess each concern in parallel (llm forEach)",
+      steps: [
+        {
+          id: "assess-each",
+          kind: "llm",
+          model: "claude-opus-4-8",
+          dependsOn: ["concerns"],
+          forEach: "steps.concerns.items",
+          prompt:
+            "Assess this concern for the request below in 2-3 sentences: how risky is it, and what would mitigate it?\n\nConcern: {{item}}\n\nRequest: {{input}}",
+        },
+      ],
+    },
+    {
+      id: "verdict",
+      title: "Typed go / no-go verdict (llm judge)",
+      steps: [
+        {
+          id: "verdict",
+          kind: "llm",
+          model: "claude-opus-4-8",
+          dependsOn: ["assess-each"],
+          prompt:
+            'Given the per-concern assessments below, judge whether the request is ready to proceed. Answer "go" only when no assessment describes an unmitigated high risk.\n\n{{steps.assess-each.output}}',
+          output: {
+            type: "object",
+            required: ["verdict", "rationale"],
+            properties: {
+              verdict: { type: "string", enum: ["go", "no-go"] },
+              rationale: { type: "string" },
+            },
+          },
+        },
+      ],
+    },
+    {
+      id: "gate",
+      title: "Gate on the verdict",
+      steps: [
+        {
+          id: "ready",
+          kind: "gate",
+          dependsOn: ["verdict"],
+          condition: { step: "verdict", path: "verdict", equals: "go" },
+          target: "cleared",
+          onFalse: "continue",
+        },
+      ],
+    },
+    {
+      id: "report",
+      title: "Consolidated triage report (llm merge)",
+      steps: [
+        {
+          id: "report",
+          kind: "llm",
+          model: "claude-opus-4-8",
+          dependsOn: ["assess-each", "verdict", "ready"],
+          prompt:
+            "Write a short triage report for the request below: the verdict ({{steps.verdict.json.verdict}}), why ({{steps.verdict.json.rationale}}), then a prioritized list of the concerns and their assessments.\n\nRequest: {{input}}\n\nAssessments:\n{{steps.assess-each.output}}",
+        },
+      ],
+    },
+  ],
+};
+
 /** name → spec. Merged under any user `workflows` from steamtrain.json. */
 export const BUNDLED_WORKFLOWS: Record<string, WorkflowSpec> = {
   [tour.name]: tour,
@@ -425,4 +529,5 @@ export const BUNDLED_WORKFLOWS: Record<string, WorkflowSpec> = {
   [bugHunt.name]: bugHunt,
   [targetSweep.name]: targetSweep,
   [reviewLoop.name]: reviewLoop,
+  [quickTriage.name]: quickTriage,
 };

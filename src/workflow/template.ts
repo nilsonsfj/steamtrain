@@ -169,6 +169,9 @@ function stepRefs(step: WorkflowStep): string[] {
   const kind = workflowStepKind(step);
 
   if ("prompt" in step && typeof step.prompt === "string") refs.push(...extractRefs(step.prompt));
+  if (kind === "llm" && "system" in step && typeof step.system === "string") {
+    refs.push(...extractRefs(step.system));
+  }
   if (kind === "distributor" && "items" in step && Array.isArray(step.items)) {
     for (const item of step.items) refs.push(...extractRefs(item));
   }
@@ -238,7 +241,10 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
   for (const phase of spec.phases) {
     for (const step of phase.steps) {
       if (
-        (step.kind === "worker" || step.kind === "processor" || !step.kind) &&
+        (step.kind === "worker" ||
+          step.kind === "processor" ||
+          step.kind === "llm" ||
+          !step.kind) &&
         "forEach" in step &&
         step.forEach
       ) {

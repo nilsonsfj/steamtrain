@@ -18,6 +18,7 @@ import {
   blockSummary,
   distinctAgents,
   flattenSpecSteps,
+  formatLlmTarget,
   formatWorkflowAgentTarget,
   promptForStep,
   specDetailLines,
@@ -202,7 +203,9 @@ function SpecStepRow({
   const agentColor = isAgentBackedStep(step) ? (AGENT_COLOR[step.agent] ?? "white") : "gray";
   const runner = isAgentBackedStep(step)
     ? formatWorkflowAgentTarget({ agent: step.agent, model: step.model, effort: step.effort })
-    : BLOCK_LABEL[kind];
+    : step.kind === "llm"
+      ? formatLlmTarget(step)
+      : BLOCK_LABEL[kind];
   const meta = specStepRowMeta(step);
   return (
     <Box paddingLeft={1}>
@@ -225,7 +228,9 @@ function SpecStepDetail({ entry, width }: { entry: FlatSpecStep; width: number }
   const prompt = promptForStep(step);
   const runner = isAgentBackedStep(step)
     ? formatWorkflowAgentTarget({ agent: step.agent, model: step.model, effort: step.effort })
-    : undefined;
+    : step.kind === "llm"
+      ? formatLlmTarget(step)
+      : undefined;
   const runnerColor = isAgentBackedStep(step) ? (AGENT_COLOR[step.agent] ?? "white") : "gray";
 
   return (
@@ -259,7 +264,8 @@ function PlanResultView({ plan, width }: { plan: PlanResult; width: number }) {
       <Text color="white">
         {plan.phaseCount} phase{plan.phaseCount === 1 ? "" : "s"} · {plan.staticStepCount} step
         {plan.staticStepCount === 1 ? "" : "s"} · {plan.agentCallCount} agent call
-        {plan.agentCallCount === 1 ? "" : "s"} · {plan.deterministicCount} deterministic
+        {plan.agentCallCount === 1 ? "" : "s"} · {plan.llmCallCount} llm call
+        {plan.llmCallCount === 1 ? "" : "s"} · {plan.deterministicCount} deterministic
       </Text>
       {plan.agents.length > 0 ? <Text color="gray">agents: {plan.agents.join(", ")}</Text> : null}
       {plan.maxCostUsd !== undefined ? (

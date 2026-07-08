@@ -442,6 +442,9 @@ textarea#input:focus {
 .kind.command {
   background: #b8c4d0;
 }
+.kind.llm {
+  background: #62d2f5;
+}
 .card .state {
   margin-left: auto;
   font-size: 11px;

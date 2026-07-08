@@ -8,6 +8,8 @@ export {
   type GateCondition,
   type GateStep,
   type ApprovalStep,
+  type LlmPricing,
+  type LlmStep,
   type MergeStep,
   type WorkerStep,
   type WorkflowCallStep,
@@ -94,6 +96,17 @@ export {
   costForResults,
 } from "./cost";
 export { runWorkflow, type WorkflowDeps, type WorkflowRunContext } from "./engine";
+export {
+  DEFAULT_ANTHROPIC_MAX_TOKENS,
+  callLlm,
+  llmApiKeyEnvName,
+  resolveLlmBaseUrl,
+  resolveLlmProvider,
+  type LlmCallRequest,
+  type LlmCallResult,
+  type LlmComplete,
+  type LlmProviderId,
+} from "./llm";
 export {
   runShellCommand,
   MAX_COMMAND_OUTPUT_BYTES,
