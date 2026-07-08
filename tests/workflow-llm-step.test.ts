@@ -579,7 +579,14 @@ describe("llm step execution", () => {
     const results = doneResults(events);
     expect(results.get("judge-each")?.childResults?.[2]?.notRun).toBe(true);
     const budget = events.find((ev) => ev.kind === "budget_exceeded");
-    expect(budget?.kind === "budget_exceeded" && budget.scope).toBe("step");
+    expect(budget?.kind).toBe("budget_exceeded");
+    if (budget?.kind === "budget_exceeded") {
+      expect(budget.scope).toBe("step");
+      expect(budget.stepId).toBe("judge-each");
+      expect(budget.limitUsd).toBe(1.5);
+      // Two dispatched children at $1 each had settled when the cap tripped.
+      expect(budget.spentUsd).toBeCloseTo(2, 10);
+    }
   });
 });
 
