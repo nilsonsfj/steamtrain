@@ -103,6 +103,18 @@ describe("apis config validation", () => {
     expect(parseApisConfig([{ id: "groq", provider: "openai" }])).toHaveLength(1);
   });
 
+  it("rejects empty and typo'd pricing objects instead of silently billing $0", () => {
+    expect(() => parseApisConfig([{ id: "a", provider: "openai", pricing: {} }])).toThrow(
+      /at least one/,
+    );
+    expect(() =>
+      parseApisConfig([{ id: "a", provider: "openai", pricing: { inputPerMtok: 5 } }]),
+    ).toThrow();
+    expect(
+      parseApisConfig([{ id: "a", provider: "openai", pricing: { inputPerMTok: 5 } }]),
+    ).toHaveLength(1);
+  });
+
   it("rejects duplicate ids, unknown providers, and unknown fields", () => {
     expect(() =>
       parseApisConfig([

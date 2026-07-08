@@ -536,7 +536,11 @@
       // Keep polling until BOTH probe sets have landed: the agent doctor
       // (local --version checks) usually resolves before the API doctor
       // (a network probe), and stopping early would leave the API chips blank.
-      if ((!list.length || !apis.length) && !err && attempt < 12) setTimeout(function () { pollDoctor(attempt + 1); }, 1500);
+      // An agent-doctor error is terminal for the agent set only — keep
+      // waiting for the API probes in that case.
+      var agentsPending = !list.length && !err;
+      var apisPending = !apis.length;
+      if ((agentsPending || apisPending) && attempt < 12) setTimeout(function () { pollDoctor(attempt + 1); }, 1500);
     });
   }
 
@@ -552,14 +556,16 @@
   function renderHealth(list, apis, err) {
     var box = document.getElementById("health");
     clear(box);
+    // An agent-doctor failure replaces the agent chips with one error chip,
+    // but the API probes are independent — always render their chips too.
     if (err) {
       box.appendChild(h("span", { class: "chip bad" }, h("span", { class: "dot" }), "doctor: " + err));
-      return;
+    } else {
+      list.forEach(function (d) {
+        var cls = d.status === "ok" ? "ok" : (d.status === "warn" ? "warn" : "bad");
+        box.appendChild(h("span", { class: "chip " + cls, title: d.message || "" }, h("span", { class: "dot" }), d.agent));
+      });
     }
-    list.forEach(function (d) {
-      var cls = d.status === "ok" ? "ok" : (d.status === "warn" ? "warn" : "bad");
-      box.appendChild(h("span", { class: "chip " + cls, title: d.message || "" }, h("span", { class: "dot" }), d.agent));
-    });
     apis.forEach(function (d) {
       box.appendChild(h("span", { class: "chip " + apiChipClass(d.status), title: d.message || "" }, h("span", { class: "dot" }), d.api));
     });

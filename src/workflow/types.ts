@@ -929,12 +929,21 @@ const workflowCommandStepSchema = z.object({
   ...workspaceShape,
 });
 
-export const llmPricingSchema = z.object({
-  inputPerMTok: z.number().nonnegative().optional(),
-  outputPerMTok: z.number().nonnegative().optional(),
-  cacheReadPerMTok: z.number().nonnegative().optional(),
-  cacheWritePerMTok: z.number().nonnegative().optional(),
-});
+// Strict + non-empty: a typo'd rate key (`inputPerMtok`) or an empty object
+// would otherwise validate and silently bill the step at $0 — a money-
+// accounting footgun worth rejecting loudly.
+export const llmPricingSchema = z
+  .object({
+    inputPerMTok: z.number().nonnegative().optional(),
+    outputPerMTok: z.number().nonnegative().optional(),
+    cacheReadPerMTok: z.number().nonnegative().optional(),
+    cacheWritePerMTok: z.number().nonnegative().optional(),
+  })
+  .strict()
+  .refine(
+    (pricing) => Object.values(pricing).some((rate) => rate !== undefined),
+    "pricing must declare at least one per-MTok rate",
+  );
 
 const workflowLlmStepSchema = z
   .object({
