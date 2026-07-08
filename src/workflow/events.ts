@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInstanceId } from "../types/events";
+import type { AgentEvent, AgentInstanceId, ApiInstanceId } from "../types/events";
 import type { ApprovalRejectDisposition } from "./approval";
 import type { WorktreeDiff } from "./merge";
 import type {
@@ -50,6 +50,8 @@ export interface StepStartEvent extends IterationTagged {
   stepId: string;
   blockKind?: WorkflowStepKind;
   agent?: AgentInstanceId;
+  /** API instance a direct-inference `llm` step calls (agent steps carry `agent` instead). */
+  api?: ApiInstanceId;
   model?: string;
   effort?: string;
   cwd?: string;

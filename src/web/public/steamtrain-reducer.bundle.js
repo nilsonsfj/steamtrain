@@ -27,6 +27,15 @@ var SteamtrainReducer = (() => {
     workflowStateFromSpec: () => workflowStateFromSpec
   });
 
+  // src/workflow/llm.ts
+  function resolveLlmProvider(step) {
+    if (step.provider) return step.provider;
+    return step.model?.startsWith("claude") ? "anthropic" : "openai";
+  }
+  function llmStepApiId(step) {
+    return step.api ?? resolveLlmProvider(step);
+  }
+
   // src/workflow/reducer.ts
   var initialWorkflowState = {
     phases: [],
@@ -52,6 +61,7 @@ var SteamtrainReducer = (() => {
           stepId: st.id,
           blockKind: st.kind ?? "worker",
           agent: "agent" in st ? st.agent : void 0,
+          api: st.kind === "llm" ? llmStepApiId(st) : void 0,
           model: "model" in st ? st.model : void 0,
           effort: "effort" in st ? st.effort : void 0,
           cwd: "cwd" in st ? st.cwd : void 0,
@@ -188,6 +198,7 @@ var SteamtrainReducer = (() => {
               stepId: e.stepId,
               blockKind: e.blockKind ?? "worker",
               agent: e.agent,
+              api: e.api,
               model: e.model,
               effort: e.effort,
               cwd: e.cwd,

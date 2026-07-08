@@ -22,6 +22,8 @@ export interface UseKeyboardInputParams {
   workflowPickerActive: boolean;
   /** True while the agent manager overlay owns the keyboard. */
   agentManagerOpen: boolean;
+  /** True while the API manager overlay owns the keyboard. */
+  apiManagerOpen: boolean;
   /** True while the input form overlay owns the keyboard. */
   inputFormPending: boolean;
   openAgentManager: () => void;
@@ -46,9 +48,10 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
           exit();
           return;
         }
-        // Ctrl+A opens the agent manager from any screen; while open, the
-        // overlay's own useInput handler owns every other key.
-        if (cur.agentManagerOpen) return;
+        // Ctrl+A opens the agent manager from any screen; while a manager
+        // overlay (agents via Ctrl+A//agents, APIs via /apis) is open, its own
+        // useInput handler owns every other key.
+        if (cur.agentManagerOpen || cur.apiManagerOpen) return;
         // While the input form is active, its own useInput handler owns keys.
         if (cur.inputFormPending) return;
         if (key.ctrl && input === "a") {

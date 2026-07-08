@@ -227,8 +227,8 @@ function liveLines(phase: PhaseState, step: StepState, width: number): DetailLin
   const runner =
     step.agent && step.model
       ? formatWorkflowAgentTarget({ agent: step.agent, model: step.model, effort: step.effort })
-      : step.blockKind === "llm" && step.model
-        ? step.model
+      : step.blockKind === "llm" && (step.api || step.model)
+        ? [step.api, step.model].filter(Boolean).join("/")
         : BLOCK_LABEL[step.blockKind];
   const lines: DetailLine[] = [
     { text: `step: ${step.stepId}`, color: "cyan" },

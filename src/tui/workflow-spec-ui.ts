@@ -16,6 +16,7 @@ import {
   type WorkflowSpec,
   type WorkflowStep,
   isAgentBackedStep,
+  llmStepApiId,
   workflowStepKind,
 } from "../workflow";
 
@@ -96,10 +97,15 @@ export function formatWorkflowAgentTarget(target: {
   return staticName && !formatted.includes(staticName) ? `${formatted} · ${staticName}` : formatted;
 }
 
-/** `provider/model` display target for a direct-API `llm` step. */
+/**
+ * `api/model` display target for a direct-API `llm` step: the configured
+ * instance id (or inferred built-in provider), plus the step's model when it
+ * names one — a step inheriting the instance's `defaultModel` shows just the
+ * api id.
+ */
 export function formatLlmTarget(step: LlmStep): string {
-  const provider = step.provider ?? (step.model.startsWith("claude") ? "anthropic" : "openai");
-  return `${provider}/${step.model}`;
+  const api = llmStepApiId(step);
+  return step.model ? `${api}/${step.model}` : api;
 }
 
 export function formatGateCondition(condition: GateCondition): string {

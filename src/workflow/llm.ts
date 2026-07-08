@@ -1,4 +1,4 @@
-import type { TokenUsage } from "../types/events";
+import type { ApiProviderId, TokenUsage } from "../types/events";
 
 /**
  * Direct LLM inference for `llm` workflow steps: one stateless HTTP call to an
@@ -12,7 +12,7 @@ import type { TokenUsage } from "../types/events";
  * which defaults to {@link callLlm}, so unit tests never touch the network.
  */
 
-export type LlmProviderId = "anthropic" | "openai";
+export type LlmProviderId = ApiProviderId;
 
 /**
  * Default Anthropic `max_tokens` when the step doesn't set one. The Anthropic
@@ -81,13 +81,32 @@ export type LlmComplete = (request: LlmCallRequest) => Promise<LlmCallResult>;
  * Resolve a step's provider: explicit `provider` wins; otherwise `claude-*`
  * models default to Anthropic and everything else to the OpenAI-compatible
  * wire format (which is what Groq / Together / Ollama / vLLM etc. all speak).
+ * Steps that name neither (possible only with an `api` reference, whose
+ * instance then supplies the provider) fall back to the OpenAI wire format.
  */
 export function resolveLlmProvider(step: {
   provider?: LlmProviderId;
-  model: string;
+  model?: string;
 }): LlmProviderId {
   if (step.provider) return step.provider;
-  return step.model.startsWith("claude") ? "anthropic" : "openai";
+  return step.model?.startsWith("claude") ? "anthropic" : "openai";
+}
+
+/**
+ * The API instance id an `llm` step is attributed to, without needing config:
+ * its explicit `api` reference, else the built-in id for its inferred
+ * provider. Used for usage/cost attribution and static plan/preview display,
+ * where the merged config may not be at hand — for steps that resolve
+ * successfully this matches `resolveLlmStepApi(...).api.id`. Lives here (not
+ * in `src/apis`) so the browser-bundled reducer can import it without pulling
+ * in the config machinery.
+ */
+export function llmStepApiId(step: {
+  api?: string;
+  provider?: LlmProviderId;
+  model?: string;
+}): string {
+  return step.api ?? resolveLlmProvider(step);
 }
 
 /** Env var the API key is read from: step override, else the provider's convention. */

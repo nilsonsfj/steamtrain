@@ -11,9 +11,11 @@ steamtrain --web-ui --port 8080     # custom port
 steamtrain --web-ui --host 0.0.0.0  # bind all interfaces (e.g. a remote box)
 ```
 
-The server starts listening immediately and prints its URL; agent health is
-probed in the background and the picker's health chips fill in once it lands
-(the page never blocks on the doctor).
+The server starts listening immediately and prints its URL; agent health and
+llm-API readiness are probed in the background and the header's health chips
+fill in once they land (the page never blocks on the doctor). The project
+config page manages both [agent instances](agent-configuration.md) and the
+[API instances](api-configuration.md) direct-inference `llm` steps call.
 
 ## What it shows
 
@@ -52,8 +54,8 @@ browser ──POST /api/runs──▶ run manager ──▶ Orchestrator.runWork
 | `/api/workflows/generate` | POST | SSE: LLM-draft + save a workflow (`scope: user\|project`) |
 | `/api/workflows/:name` | PUT | save a created/edited spec (`scope: user\|project`) |
 | `/api/workflows/:name` | DELETE | delete a user or project workflow |
-| `/api/meta` | GET | agents, models, efforts, health (for the create form) |
-| `/api/doctor` | GET | current agent health |
+| `/api/meta` | GET | agents + APIs, models, efforts, health (for the create form) |
+| `/api/doctor` | GET | current agent health (`doctor`) and llm-API readiness (`apis`) |
 | `/api/runs` | POST | `{ workflow, input, fresh? }` → `{ runId }` |
 | `/api/runs/:id/stream` | GET | Server-Sent Events: each `WorkflowEvent`, then a terminal `status` frame |
 | `/api/runs/:id/cancel` | POST | abort a running workflow |

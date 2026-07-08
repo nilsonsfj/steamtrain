@@ -33,6 +33,7 @@ right and should expand:
 | `src/workflow/types.ts` | spec schema + `validateWorkflow` | both |
 | `src/agents/agent-meta.ts` | `buildAgentMeta` / `defaultDraftModel` — the agent→model→effort→default→health view-model | both (web via `/api/meta`; `WorkflowAuthor.agentMeta`) |
 | `src/agents/models.ts` | `modelsForAgent`, `effortsForModel`, defaults | TUI menus directly; the shared view-model wraps it |
+| `src/apis` | `resolveApiInstances` / `buildApiMeta` / `resolveLlmStepApi` — the API-instance view-model for direct-inference `llm` steps | both (web via `/api/meta` + `/api/config`; TUI manager + status bar) |
 
 `WorkflowAuthor` (formerly `src/web/authoring.ts`) moved into `src/workflow`
 and is now the single authoring core both frontends drive — see §5.
@@ -76,6 +77,9 @@ These two reducers are near-duplicates and are a prime extraction target (see §
 | Explicit "save session changes" step | ✅ | ✅ | TUI `/save-workflows` → shared flush; web "Flush to disk" button calls `POST /api/overrides/flush` |
 | Skip/unchanged reporting on save | ✅ | ✅ | `flushSessionOverrides`/`saveSessionWorkflowsToUser` returns saved/skipped/unchanged; both TUI and web surface the report |
 | Agent health display | ✅ | ✅ | TUI doctor panel; web health chips |
+| API health display (llm steps) | ✅ | ✅ | Shared `runApiDoctor`; TUI status bar `◆` entries, web health chips + `GET /api/doctor` `apis` |
+| Manage agent instances | ✅ | ✅ | TUI `/agent` + `/agents` manager (Ctrl+A); web project-config modal |
+| Manage API instances (llm steps) | ✅ | ✅ | Shared `src/apis` core; TUI `/api` + `/apis` manager; web project-config modal APIs section |
 | Run history (inspect past runs) | ✅ | ✅ | Shared `RunRecordBuilder` + `WorkflowHistoryStore` (`.steamtrain/history`); TUI `/history`, web ⏱ History, CLI `workflow history` |
 | Re-run / retry-failed a past run | ✅ | ✅ | Shared `planRerun`/`seedCacheFromRecord` (`src/workflow/rerun.ts`); TUI `r`/`f` in history detail, web Re-run/Retry buttons, CLI `workflow run --from <id> [--retry-failed]` |
 | Auto-retry transient failures | ✅ | ✅ | Shared engine (`src/workflow/retry.ts`); workflow/per-step `retry` policy, `step_retry` event surfaced as `↻ retry n/N` in both UIs, attempts recorded in history |

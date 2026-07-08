@@ -268,6 +268,7 @@ function PlanResultView({ plan, width }: { plan: PlanResult; width: number }) {
         {plan.llmCallCount === 1 ? "" : "s"} · {plan.deterministicCount} deterministic
       </Text>
       {plan.agents.length > 0 ? <Text color="gray">agents: {plan.agents.join(", ")}</Text> : null}
+      {plan.apis.length > 0 ? <Text color="gray">apis: {plan.apis.join(", ")}</Text> : null}
       {plan.maxCostUsd !== undefined ? (
         <Text color="gray">budget: ${plan.maxCostUsd.toFixed(2)}</Text>
       ) : null}

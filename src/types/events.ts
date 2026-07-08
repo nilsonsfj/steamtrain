@@ -14,6 +14,16 @@ export type AgentId = AgentProviderId;
 /** A configured runnable agent instance id (e.g. opencode-fork). Built-in zero-config ids match providers. */
 export type AgentInstanceId = string;
 
+/**
+ * API dialect a direct-inference `llm` step speaks: the Anthropic Messages API
+ * or the OpenAI chat-completions wire format (which Groq / Together / Ollama /
+ * vLLM and most proxies also speak).
+ */
+export type ApiProviderId = "anthropic" | "openai";
+
+/** A configured API endpoint instance id (e.g. groq). Built-in zero-config ids match providers. */
+export type ApiInstanceId = string;
+
 export interface BaseEvent {
   /** Which configured agent instance produced this event. */
   agent: AgentInstanceId;

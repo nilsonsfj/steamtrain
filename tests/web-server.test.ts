@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import type { ApiDoctorResult } from "../src/doctor";
 import { type WorkflowHost, WorkflowRunManager } from "../src/web/runs";
 import { createWebServer } from "../src/web/server";
 import type {
@@ -784,6 +785,119 @@ describe("web server", () => {
     // Without authoring enabled, this returns 501 — the name check runs after
     // the author gate. This test documents the endpoint exists and is reachable.
     expect(res.status).toBe(501);
+  });
+
+  it("reports api readiness alongside agents on /api/doctor and /api/meta", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const config = {
+      apis: [{ id: "groq", provider: "openai" as const, apiKeyEnv: "GROQ_API_KEY" }],
+    };
+    const author = new WorkflowAuthor({
+      host: new FakeAuthoringHost(demoSpec()),
+      config,
+      home: mkdtempSync(join(tmpdir(), "st-home-")),
+      cwd: tmpdir(),
+    });
+    const server = createWebServer({
+      host,
+      runs,
+      author,
+      config,
+      apiDoctor: () => [
+        {
+          api: "groq",
+          provider: "openai",
+          status: "ok",
+          keyEnv: "GROQ_API_KEY",
+          baseUrl: "https://api.groq.com/openai/v1",
+          message: "ready",
+        },
+      ],
+    });
+    servers.push(server);
+    const base = await start(server);
+
+    const doctorRes = await fetch(`${base}/api/doctor`);
+    const doctorBody = (await doctorRes.json()) as { apis: { api: string; status: string }[] };
+    expect(doctorBody.apis).toEqual([expect.objectContaining({ api: "groq", status: "ok" })]);
+
+    const metaRes = await fetch(`${base}/api/meta`);
+    const metaBody = (await metaRes.json()) as {
+      apis: { id: string; healthy: boolean; keyPresent: boolean }[];
+    };
+    const ids = metaBody.apis.map((a) => a.id);
+    expect(ids).toEqual(["anthropic", "openai", "groq"]);
+    expect(metaBody.apis.find((a) => a.id === "groq")).toMatchObject({ healthy: true });
+  });
+
+  it("PUT /api/config saves apis into the project file and re-probes readiness", async () => {
+    // Hide any real provider keys so the re-probe stays local (key_missing
+    // short-circuits before the network) and the assertion is deterministic.
+    const hidden = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"].map((name) => {
+      const value = process.env[name];
+      delete process.env[name];
+      return { name, value };
+    });
+    try {
+      const host = new FakeHost(demoSpec(), happyRun);
+      const runs = new WorkflowRunManager({
+        host,
+        cacheStore: createInMemoryStore(),
+        cwd: tmpdir(),
+        config: testRunConfig,
+      });
+      const dir = mkdtempSync(join(tmpdir(), "st-cfg-"));
+      const configPath = join(dir, "steamtrain.json");
+      writeFileSync(configPath, "{}\n");
+      const config = {};
+      let probed: ApiDoctorResult[] | undefined;
+      const server = createWebServer({
+        host,
+        runs,
+        config,
+        configPath,
+        apiDoctor: () => probed ?? [],
+        setApiDoctor: (results) => {
+          probed = results;
+        },
+      });
+      servers.push(server);
+      const base = await start(server);
+
+      const res = await fetch(`${base}/api/config`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          apis: [{ id: "groq", provider: "openai", apiKeyEnv: "STEAMTRAIN_TEST_UNSET_KEY" }],
+        }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { ok: boolean; apis: { id: string }[] };
+      expect(body.ok).toBe(true);
+      expect(body.apis.map((a) => a.id)).toEqual(["anthropic", "openai", "groq"]);
+
+      // The save re-ran the API doctor (all key_missing — no keys in env).
+      expect(probed?.map((r) => r.api)).toEqual(["anthropic", "openai", "groq"]);
+      expect(probed?.every((r) => r.status === "key_missing")).toBe(true);
+
+      // And the project file round-trips the entry.
+      const onDisk = JSON.parse(readFileSync(configPath, "utf8")) as {
+        apis: { id: string }[];
+      };
+      expect(onDisk.apis).toEqual([
+        { id: "groq", provider: "openai", apiKeyEnv: "STEAMTRAIN_TEST_UNSET_KEY" },
+      ]);
+    } finally {
+      for (const { name, value } of hidden) {
+        if (value !== undefined) process.env[name] = value;
+      }
+    }
   });
 
   it("returns doctorError field when doctor fails (M35)", async () => {

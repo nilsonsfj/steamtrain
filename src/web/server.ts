@@ -6,10 +6,11 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildAgentMeta } from "../agents/agent-meta";
 import { refreshAgentCatalogCaches } from "../agents/models";
+import { buildApiMeta } from "../apis";
 import type { SteamtrainConfig } from "../config";
-import { parseAgentsConfig } from "../config";
+import { parseAgentsConfig, parseApisConfig } from "../config";
 import { saveProjectConfig } from "../config/project-config";
-import { type DoctorResult, runDoctor } from "../doctor";
+import { type ApiDoctorResult, type DoctorResult, runApiDoctor, runDoctor } from "../doctor";
 import { Orchestrator } from "../orchestrator";
 import {
   DEFAULT_STEP_TIMEOUT_SEC,
@@ -132,6 +133,9 @@ export interface WebServerDeps {
   doctor?: () => DoctorResult[];
   doctorError?: () => string | null;
   setDoctor?: (doctor: DoctorResult[]) => void;
+  /** Live API-instance readiness (direct-inference llm steps), like `doctor` for agents. */
+  apiDoctor?: () => ApiDoctorResult[];
+  setApiDoctor?: (apis: ApiDoctorResult[]) => void;
   configLabel?: string;
   /** The host address the server is bound to. Used for CORS decisions. */
   bindHost?: string;
@@ -356,8 +360,8 @@ function checkCsrf(
  *   DELETE /api/workflows/:name     delete a user workflow (authoring)
  *   POST   /api/workflows/generate  SSE: LLM-draft a workflow + save (authoring)
  *   POST   /api/workflows/:name/plan  dry-run plan (no agents executed)
- *   GET    /api/meta                agents, models, efforts, health (authoring)
- *   GET    /api/doctor              agent health
+ *   GET    /api/meta                agents + apis, models, efforts, health (authoring)
+ *   GET    /api/doctor              agent + api health
  *   GET    /api/history             past-run summaries (newest first)
  *   GET    /api/history/:id         one past run's full record
  *   DELETE /api/history             clear all past runs
@@ -371,6 +375,18 @@ function checkCsrf(
  *   POST   /api/overrides/flush     flush staged session overrides -> { saved, skipped, unchanged }
  *   POST   /api/auth                validate token, set session cookie
  */
+/** API-instance view-model with health folded in from the live api doctor state. */
+function apiMetaFromDeps(
+  deps: WebServerDeps,
+  options: { includeDisabled?: boolean; includeConfig?: boolean } = {},
+) {
+  return buildApiMeta(
+    deps.config,
+    (api) => (deps.apiDoctor?.() ?? []).some((d) => d.api === api && d.status === "ok"),
+    options,
+  );
+}
+
 export function createWebServer(deps: WebServerDeps): Server {
   return createServer((req, res) => {
     void handle(req, res, deps).catch((err) => {
@@ -510,10 +526,10 @@ async function handle(
 
   if (method === "GET" && path === "/api/meta") {
     if (!deps.author) {
-      sendJson(res, 200, { agents: [] });
+      sendJson(res, 200, { agents: [], apis: [] });
       return;
     }
-    sendJson(res, 200, { agents: deps.author.agentMeta() });
+    sendJson(res, 200, { agents: deps.author.agentMeta(), apis: apiMetaFromDeps(deps) });
     return;
   }
 
@@ -534,6 +550,7 @@ async function handle(
         (agent) => (deps.doctor?.() ?? []).some((d) => d.agent === agent && d.status === "ok"),
         { includeDisabled: true, includeConfig: true },
       ),
+      apis: apiMetaFromDeps(deps, { includeDisabled: true, includeConfig: true }),
     });
     return;
   }
@@ -549,6 +566,7 @@ async function handle(
       workflowTimeoutSec?: unknown;
       clearWorkflowTimeout?: unknown;
       agents?: unknown;
+      apis?: unknown;
     };
     try {
       parsed = body ? JSON.parse(body) : {};
@@ -560,15 +578,16 @@ async function handle(
     const hasWf = typeof parsed.workflowTimeoutSec === "number" && parsed.workflowTimeoutSec > 0;
     const clearWf = Boolean(parsed.clearWorkflowTimeout);
     const hasAgents = parsed.agents !== undefined;
-    if (!hasStep && !hasWf && !clearWf && !hasAgents) {
+    const hasApis = parsed.apis !== undefined;
+    if (!hasStep && !hasWf && !clearWf && !hasAgents && !hasApis) {
       sendJson(res, 400, {
         error:
-          "body must include stepTimeoutSec, workflowTimeoutSec, clearWorkflowTimeout, or agents",
+          "body must include stepTimeoutSec, workflowTimeoutSec, clearWorkflowTimeout, agents, or apis",
       });
       return;
     }
     const patch: Partial<
-      Pick<SteamtrainConfig, "stepTimeoutSec" | "workflowTimeoutSec" | "agents">
+      Pick<SteamtrainConfig, "stepTimeoutSec" | "workflowTimeoutSec" | "agents" | "apis">
     > = {};
     if (hasStep) patch.stepTimeoutSec = parsed.stepTimeoutSec as number;
     if (clearWf) patch.workflowTimeoutSec = undefined;
@@ -579,6 +598,16 @@ async function handle(
       } catch (err) {
         sendJson(res, 400, {
           error: err instanceof Error ? err.message : "invalid agents",
+        });
+        return;
+      }
+    }
+    if (hasApis) {
+      try {
+        patch.apis = parseApisConfig(parsed.apis);
+      } catch (err) {
+        sendJson(res, 400, {
+          error: err instanceof Error ? err.message : "invalid apis",
         });
         return;
       }
@@ -598,6 +627,13 @@ async function handle(
         // The regular doctor polling endpoint will report the previous state if refresh fails.
       }
     }
+    if (hasApis) {
+      try {
+        deps.setApiDoctor?.(await runApiDoctor(deps.config));
+      } catch {
+        // The regular doctor polling endpoint will report the previous state if refresh fails.
+      }
+    }
     sendJson(res, 200, {
       ok: true,
       stepTimeoutSec: resolveStepTimeoutSec(undefined, undefined, deps.config),
@@ -607,6 +643,7 @@ async function handle(
         (agent) => (deps.doctor?.() ?? []).some((d) => d.agent === agent && d.status === "ok"),
         { includeDisabled: true, includeConfig: true },
       ),
+      apis: apiMetaFromDeps(deps, { includeDisabled: true, includeConfig: true }),
     });
     return;
   }
@@ -740,6 +777,7 @@ async function handle(
     const doctorError = deps.doctorError?.();
     sendJson(res, 200, {
       doctor: deps.doctor?.() ?? [],
+      apis: deps.apiDoctor?.() ?? [],
       ...(doctorError ? { doctorError } : {}),
     });
     return;
@@ -1140,7 +1178,11 @@ export async function startWebUi(
   // Health is reported live via /api/doctor; the page must not wait on it (the
   // doctor probes agent binaries and can take seconds), so we serve immediately
   // and let the catalog/health populate in the background.
-  const doctorState = { results: [] as DoctorResult[], error: null as string | null };
+  const doctorState = {
+    results: [] as DoctorResult[],
+    apis: [] as ApiDoctorResult[],
+    error: null as string | null,
+  };
 
   const cacheStore = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
   const historyStore = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
@@ -1173,6 +1215,10 @@ export async function startWebUi(
       doctorState.results = results;
       doctorState.error = null;
       orchestrator.setDoctor(results);
+    },
+    apiDoctor: () => doctorState.apis,
+    setApiDoctor: (apis) => {
+      doctorState.apis = apis;
     },
     configLabel: options.configLabel,
     bindHost: host,
@@ -1227,6 +1273,16 @@ export async function startWebUi(
     } catch (e) {
       doctorState.error = e instanceof Error ? e.message : String(e);
       err(`   doctor failed: ${doctorState.error}\n`);
+    }
+  })();
+
+  // API readiness probes run independently of the agent doctor so a slow
+  // agent binary never delays the API chips (and vice versa).
+  void (async () => {
+    try {
+      doctorState.apis = await runApiDoctor(liveConfig);
+    } catch (e) {
+      err(`   api doctor failed: ${e instanceof Error ? e.message : String(e)}\n`);
     }
   })();
 

@@ -18,6 +18,7 @@ import {
   upsertAgent,
 } from "../agents";
 import { refreshAgentCatalogCaches } from "../agents/models";
+import { apiConfigScope, apiScopeLabel, removeApi, resolveApiInstances, upsertApi } from "../apis";
 import {
   type SlashCommandResult,
   autocompleteSlashCommand,
@@ -27,12 +28,17 @@ import {
   listSlashCommands,
   parseSlashInput,
 } from "../commands";
-import type { AgentConfigScope, ConfigScopeKind, SteamtrainConfig } from "../config";
+import type {
+  AgentConfigScope,
+  ApiConfigScope,
+  ConfigScopeKind,
+  SteamtrainConfig,
+} from "../config";
 import { configDisplayLabel, loadConfig, saveUserConfig, userConfigPath } from "../config";
 import { saveProjectConfig } from "../config/project-config";
-import type { AgentInstanceConfig } from "../config/types";
+import type { AgentInstanceConfig, ApiInstanceConfig } from "../config/types";
 import type { UserConfigPatch } from "../config/user-config";
-import { type DoctorResult, runDoctor } from "../doctor";
+import { type ApiDoctorResult, type DoctorResult, runApiDoctor, runDoctor } from "../doctor";
 import { Orchestrator } from "../orchestrator";
 import type { SteamtrainSettings } from "../settings";
 import {
@@ -57,6 +63,8 @@ import {
 } from "../workspace";
 import type { AgentAddRequest, AgentMutationResult } from "./AgentManager";
 import { AgentManager } from "./AgentManager";
+import type { ApiAddRequest, ApiMutationResult } from "./ApiManager";
+import { ApiManager } from "./ApiManager";
 import { CommandSuggestionMenu, suggestionMenuHeight } from "./CommandSuggestionMenu";
 import { EventStream } from "./EventStream";
 import { PromptInput } from "./PromptInput";
@@ -106,6 +114,10 @@ interface AppProps {
   userAgents?: AgentInstanceConfig[];
   /** Raw agent entries from the project config file. */
   projectAgents?: AgentInstanceConfig[];
+  /** Raw API entries from the global `~/.steamtrain/config.json`. */
+  userApis?: ApiInstanceConfig[];
+  /** Raw API entries from the project config file. */
+  projectApis?: ApiInstanceConfig[];
   /** Whether `~/.steamtrain/settings.json` exists (feeds the cfg label). */
   hasUserSettings?: boolean;
   configWarning?: string;
@@ -129,6 +141,8 @@ export function App({
   configKind = "project",
   userAgents,
   projectAgents,
+  userApis,
+  projectApis,
   hasUserSettings,
   configWarning,
   settings,
@@ -153,7 +167,13 @@ export function App({
     userAgents?: AgentInstanceConfig[];
     projectAgents?: AgentInstanceConfig[];
   }>({ userAgents, projectAgents });
+  const [apiLayers, setApiLayers] = useState<{
+    userApis?: ApiInstanceConfig[];
+    projectApis?: ApiInstanceConfig[];
+  }>({ userApis, projectApis });
   const [agentManagerOpen, setAgentManagerOpen] = useState(false);
+  const [apiManagerOpen, setApiManagerOpen] = useState(false);
+  const [apiDoctor, setApiDoctor] = useState<ApiDoctorResult[] | null>(null);
   const [runtimeConfigSource, setRuntimeConfigSource] = useState(configSource);
   const [activeWorkspaceLabel, setActiveWorkspaceLabel] = useState(workspaceLabel);
   const [transcript, dispatch] = useReducer(transcriptReducer, initialTranscript);
@@ -219,6 +239,7 @@ export function App({
     );
     setRuntimeConfig(loaded.config);
     setAgentLayers({ userAgents: loaded.userAgents, projectAgents: loaded.projectAgents });
+    setApiLayers({ userApis: loaded.userApis, projectApis: loaded.projectApis });
     setRuntimeConfigSource(
       configDisplayLabel(loaded.scope, {
         hasUserSettings,
@@ -327,6 +348,91 @@ export function App({
 
   const openAgentManager = useCallback(() => {
     setAgentManagerOpen(true);
+    return { handled: true as const, clearInput: true };
+  }, []);
+
+  // ── API instances (direct-inference llm steps) ───────────────────────
+  // Mirrors the agent manager wiring above: same scope model, same fallback
+  // chain, writing `apis` entries instead of `agents`.
+  const apiScopes = useMemo(() => {
+    const scopes = new Map<string, ApiConfigScope>();
+    for (const api of apiLayers.userApis ?? []) scopes.set(api.id, "user");
+    for (const api of apiLayers.projectApis ?? []) scopes.set(api.id, "project");
+    return scopes;
+  }, [apiLayers]);
+
+  const saveApisInScope = useCallback(
+    (scope: ApiConfigScope, apis: ApiInstanceConfig[]) =>
+      scope === "user" ? updateUserConfig({ apis }) : updateConfig({ apis }),
+    [updateUserConfig, updateConfig],
+  );
+
+  const handleApiToggle = useCallback(
+    (id: string): ApiMutationResult => {
+      const resolved = resolveApiInstances(runtimeConfig, { includeDisabled: true }).find(
+        (api) => api.id === id,
+      );
+      if (!resolved) return { ok: false, error: `unknown api '${id}'` };
+      const scope =
+        apiConfigScope(id, apiLayers) ?? (canGlobalConfig ? "user" : ("project" as const));
+      const rawList = scope === "user" ? apiLayers.userApis : apiLayers.projectApis;
+      // Same fallback chain as the agent toggle: if the entry lives in the
+      // other scope, copy it so its fields survive the scoped write.
+      const raw =
+        rawList?.find((api) => api.id === id) ??
+        (scope === "user" ? apiLayers.projectApis : apiLayers.userApis)?.find(
+          (api) => api.id === id,
+        ) ??
+        runtimeConfig.apis?.find((api) => api.id === id);
+      const enabled = !resolved.enabled;
+      const entry: ApiInstanceConfig = raw
+        ? { ...raw, enabled }
+        : { id, provider: resolved.provider, enabled };
+      const saved = saveApisInScope(scope, upsertApi(rawList, entry));
+      if (!saved.ok) return saved;
+      return {
+        ok: true,
+        text: `${id} ${enabled ? "enabled" : "disabled"} (${apiScopeLabel(scope)})`,
+      };
+    },
+    [runtimeConfig, apiLayers, canGlobalConfig, saveApisInScope],
+  );
+
+  const handleApiAdd = useCallback(
+    (request: ApiAddRequest): ApiMutationResult => {
+      const scope = canGlobalConfig ? request.scope : "project";
+      const rawList = scope === "user" ? apiLayers.userApis : apiLayers.projectApis;
+      const entry: ApiInstanceConfig = {
+        id: request.id,
+        provider: request.provider,
+        enabled: true,
+        ...(request.baseUrl ? { baseUrl: request.baseUrl } : {}),
+        ...(request.apiKeyEnv ? { apiKeyEnv: request.apiKeyEnv } : {}),
+        ...(request.defaultModel ? { defaultModel: request.defaultModel } : {}),
+      };
+      const saved = saveApisInScope(scope, upsertApi(rawList, entry));
+      if (!saved.ok) return saved;
+      return { ok: true, text: `${request.id} added (${apiScopeLabel(scope)})` };
+    },
+    [apiLayers, canGlobalConfig, saveApisInScope],
+  );
+
+  const handleApiDelete = useCallback(
+    (id: string): ApiMutationResult => {
+      // If an id is configured in both scopes, this deletes the shadowing
+      // project entry first; a second delete then removes the global one.
+      const scope = apiConfigScope(id, apiLayers);
+      if (!scope) return { ok: false, error: `'${id}' is not configured` };
+      const rawList = scope === "user" ? apiLayers.userApis : apiLayers.projectApis;
+      const saved = saveApisInScope(scope, removeApi(rawList, id));
+      if (!saved.ok) return saved;
+      return { ok: true, text: `${id} removed (${apiScopeLabel(scope)})` };
+    },
+    [apiLayers, saveApisInScope],
+  );
+
+  const openApiManager = useCallback(() => {
+    setApiManagerOpen(true);
     return { handled: true as const, clearInput: true };
   }, []);
 
@@ -465,7 +571,10 @@ export function App({
     updateUserConfig: canGlobalConfig ? updateUserConfig : undefined,
     userAgents: agentLayers.userAgents,
     projectAgents: agentLayers.projectAgents,
+    userApis: apiLayers.userApis,
+    projectApis: apiLayers.projectApis,
     openAgentManager,
+    openApiManager,
     workflowPickerActive,
     saveWorkflows: picker.saveWorkflows,
     createWorkflow: picker.createWorkflow,
@@ -617,6 +726,16 @@ export function App({
       .catch((err) => {
         if (!active) return;
         dispatch({ type: "notice", level: "error", text: `preflight failed: ${message(err)}` });
+      });
+    // API readiness probes run independently of the agent doctor so a slow
+    // agent binary never delays the API chips (and vice versa).
+    runApiDoctor(runtimeConfig)
+      .then((results) => {
+        if (active) setApiDoctor(results);
+      })
+      .catch((err) => {
+        if (!active) return;
+        dispatch({ type: "notice", level: "error", text: `api preflight failed: ${message(err)}` });
       });
     return () => {
       active = false;
@@ -960,6 +1079,7 @@ export function App({
     historyHook,
     workflowPickerActive,
     agentManagerOpen,
+    apiManagerOpen,
     inputFormPending: inputFormPending !== null,
     openAgentManager: () => {
       openAgentManager();
@@ -1010,6 +1130,7 @@ export function App({
     <Box flexDirection="column" width={columns}>
       <StatusBar
         doctor={doctor}
+        apiDoctor={apiDoctor}
         configSource={runtimeConfigSource}
         workspaceLabel={activeWorkspaceLabel}
         running={runner.running}
@@ -1027,6 +1148,18 @@ export function App({
           onAdd={handleAgentAdd}
           onDelete={handleAgentDelete}
           onClose={() => setAgentManagerOpen(false)}
+        />
+      ) : apiManagerOpen ? (
+        <ApiManager
+          apis={resolveApiInstances(runtimeConfig, { includeDisabled: true })}
+          scopes={apiScopes}
+          canGlobal={canGlobalConfig}
+          width={columns}
+          height={streamHeight}
+          onToggle={handleApiToggle}
+          onAdd={handleApiAdd}
+          onDelete={handleApiDelete}
+          onClose={() => setApiManagerOpen(false)}
         />
       ) : inputFormPending ? (
         (() => {
@@ -1158,10 +1291,11 @@ export function App({
           onCtrlQ={mode === "workflow" && runner.running ? runner.handleWorkflowCancel : undefined}
           onSuggestionNavigate={prompt.handleSuggestionNavigate}
           onHistoryNavigate={prompt.promptHistoryArrows ? prompt.handleHistoryNavigate : undefined}
-          focus={!historyHook.history && !agentManagerOpen && !inputFormPending}
+          focus={!historyHook.history && !agentManagerOpen && !apiManagerOpen && !inputFormPending}
           editing={
             !historyHook.history &&
             !agentManagerOpen &&
+            !apiManagerOpen &&
             !inputFormPending &&
             (!workflowListNavigation(mode) || prompt.promptEditing)
           }
@@ -1175,20 +1309,22 @@ export function App({
           <Text color="gray">
             {agentManagerOpen
               ? "agent manager · ↑/↓ select · Enter/Space toggle · a add · d delete · Esc close · Ctrl+C quit"
-              : historyHook.history
-                ? historyHintText(historyHook.history)
-                : hint(
-                    mode,
-                    runner.wf.started,
-                    runner.wfLaunching,
-                    !!picker.wfPreview,
-                    runner.running,
-                    prompt.suggestionMenuOpen,
-                    runner.wfCanResume,
-                    prompt.promptEditing,
-                    isSlashCommandInput(prompt.value),
-                    !!runner.wfStepDetails,
-                  )}
+              : apiManagerOpen
+                ? "api manager · ↑/↓ select · Enter/Space toggle · a add · d delete · Esc close · Ctrl+C quit"
+                : historyHook.history
+                  ? historyHintText(historyHook.history)
+                  : hint(
+                      mode,
+                      runner.wf.started,
+                      runner.wfLaunching,
+                      !!picker.wfPreview,
+                      runner.running,
+                      prompt.suggestionMenuOpen,
+                      runner.wfCanResume,
+                      prompt.promptEditing,
+                      isSlashCommandInput(prompt.value),
+                      !!runner.wfStepDetails,
+                    )}
           </Text>
         </Box>
       </Box>

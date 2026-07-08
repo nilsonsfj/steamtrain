@@ -3,9 +3,12 @@ export {
   type ConfigFile,
   type UserConfigFile,
   type AgentConfigScope,
+  type ApiConfigScope,
+  type ApiInstanceConfig,
   configFileSchema,
   userConfigFileSchema,
   parseAgentsConfig,
+  parseApisConfig,
 } from "./types";
 export { DEFAULT_CONFIG } from "./defaults";
 export {
@@ -17,6 +20,7 @@ export {
   configDisplayLabel,
   loadConfig,
   mergeAgentLists,
+  mergeInstanceLists,
   mergeConfig,
   projectConfigPath,
 } from "./load";

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join as joinPath, resolve as resolvePath } from "node:path";
 import { resolveAgentInstance } from "../agents";
 import type { AgentAdapter } from "../agents";
+import { llmStepApiId, resolveLlmStepApi } from "../apis/resolve";
 import type { SteamtrainConfig } from "../config/types";
 import type { AgentEvent, AgentInstanceId, AgentProviderId, TokenUsage } from "../types/events";
 import {
@@ -19,13 +20,7 @@ import { collectArtifacts } from "./artifacts";
 import { runShellCommand } from "./command";
 import { addTokens } from "./cost";
 import type { WorkflowEvent } from "./events";
-import {
-  type LlmCallResult,
-  type LlmComplete,
-  callLlm,
-  llmApiKeyEnvName,
-  resolveLlmProvider,
-} from "./llm";
+import { type LlmCallResult, type LlmComplete, type LlmProviderId, callLlm } from "./llm";
 import {
   type ConflictResolver,
   type HarvestResult,
@@ -56,6 +51,7 @@ import {
   DEFAULT_LOOP_MAX_ITERATIONS,
   type GateCondition,
   type GateStep,
+  type LlmPricing,
   type LlmStep,
   MAX_CONCURRENCY,
   MAX_STEPS,
@@ -755,16 +751,29 @@ async function runSingleStep(
 ): Promise<StepFlags> {
   const { spec, ctx, deps, signal, cache, outputs, results, allResults } = env;
   const agentBacked = isAgentBackedStep(step) ? step : undefined;
-  // llm steps have a model/effort but no agent; carry them on the events so
-  // live views and history/cost roll-ups attribute the spend to the model.
+  // llm steps have an api/model/effort but no agent; carry them on the events
+  // so live views and history/cost roll-ups attribute the spend. The api and
+  // model resolve against the configured instance (a step may inherit its
+  // model from the instance's defaultModel); on a resolution error fall back
+  // to the step's literal fields so the display still shows what was asked.
   const llm = step.kind === "llm" ? step : undefined;
+  // A cache hit replays a completed result: prefer the api/model recorded on
+  // it (what actually ran and was billed) over a fresh resolution — the
+  // configured instance's endpoint or defaultModel may have changed since.
+  const cachedHit = cache.get(step.id);
+  const llmApi = llm && !cachedHit?.api ? resolveLlmStepApi(llm, deps.agentConfig) : undefined;
+  const llmApiId = llm
+    ? (cachedHit?.api ?? (llmApi?.ok ? llmApi.api.id : llmStepApiId(llm)))
+    : undefined;
+  const llmModel = llm ? (cachedHit?.model ?? (llmApi?.ok ? llmApi.model : llm.model)) : undefined;
   push({
     kind: "step_start",
     phaseId: phase.id,
     stepId: step.id,
     blockKind: workflowStepKind(step),
     agent: agentBacked?.agent,
-    model: agentBacked?.model ?? llm?.model,
+    api: llmApiId,
+    model: agentBacked?.model ?? llmModel,
     effort: agentBacked?.effort ?? llm?.effort,
     cwd: "cwd" in step ? step.cwd : undefined,
     dependsOn: step.dependsOn,
@@ -795,7 +804,7 @@ async function runSingleStep(
   }
 
   // Cache hit → replay without spawning (resume).
-  const cached = cache.get(step.id);
+  const cached = cachedHit;
   if (cached) {
     for (const child of cached.childResults ?? []) {
       outputs.set(child.stepId, child.output);
@@ -807,7 +816,8 @@ async function runSingleStep(
         stepId: child.stepId,
         blockKind: workflowStepKind(step),
         agent: agentBacked?.agent,
-        model: agentBacked?.model ?? llm?.model,
+        api: llm ? (child.api ?? llmApiId) : undefined,
+        model: agentBacked?.model ?? (llm ? (child.model ?? llmModel) : undefined),
         effort: agentBacked?.effort ?? llm?.effort,
         cwd: "cwd" in step ? step.cwd : undefined,
         dependsOn: step.dependsOn,
@@ -1709,6 +1719,12 @@ async function executeForEachStep(
   const maxCostUsd = step.maxCostUsd;
   const childAgent = isAgentBackedStep(step) ? step.agent : undefined;
   const childCwd = "cwd" in step ? step.cwd : undefined;
+  // llm fan-outs: the effective api/model for child step_start events (a step
+  // may inherit its model from the configured instance's defaultModel).
+  const llmApi = step.kind === "llm" ? resolveLlmStepApi(step, ctx.deps.agentConfig) : undefined;
+  const childApi =
+    step.kind === "llm" ? (llmApi?.ok ? llmApi.api.id : llmStepApiId(step)) : undefined;
+  const childModel = llmApi?.ok ? llmApi.model : step.model;
   const runChild = (childId: string, item: WorkflowItem): Promise<StepResult> =>
     step.kind === "llm"
       ? executeLlmStep(step, ctx, hooks, childId, item)
@@ -1818,13 +1834,17 @@ async function executeForEachStep(
         };
         return;
       }
+      // A cached child replays a completed call: attribute it to the api/model
+      // recorded on its result rather than a fresh (possibly drifted) resolution.
+      const cached = ctx.cache.get(stepId);
       hooks.pushWorkflowEvent({
         kind: "step_start",
         phaseId: hooks.phaseId,
         stepId,
         blockKind: workflowStepKind(step),
         agent: childAgent,
-        model: step.model,
+        api: step.kind === "llm" ? (cached?.api ?? childApi) : undefined,
+        model: step.kind === "llm" ? (cached?.model ?? childModel) : childModel,
         effort: step.effort,
         cwd: childCwd,
         dependsOn: step.dependsOn,
@@ -1834,7 +1854,6 @@ async function executeForEachStep(
         ts: Date.now(),
       });
 
-      const cached = ctx.cache.get(stepId);
       const result = cached
         ? { ...cached, stepId, parentStepId: step.id, item, iteration: ctx.iteration }
         : {
@@ -1886,6 +1905,9 @@ async function executeForEachStep(
       childResults,
       error,
       durationMs: Date.now() - started,
+      // Stamp llm parents like their children, so a resumed fan-out's parent
+      // step_start replays with the api/model that actually ran.
+      ...(step.kind === "llm" ? { api: childApi, model: childModel } : {}),
     },
     childResults,
   };
@@ -2005,9 +2027,11 @@ async function executeCommandStep(
   }
 }
 
-/** Exact USD cost from declared per-MTok rates and the API-reported usage. */
-function llmCostUsd(step: LlmStep, tokens: TokenUsage | undefined): number | undefined {
-  const pricing = step.pricing;
+/** Exact USD cost from the effective per-MTok rates and the API-reported usage. */
+function llmCostUsd(
+  pricing: LlmPricing | undefined,
+  tokens: TokenUsage | undefined,
+): number | undefined {
   if (!pricing || !tokens) return undefined;
   const per = (count: number | undefined, rate: number | undefined): number =>
     ((count ?? 0) * (rate ?? 0)) / 1_000_000;
@@ -2017,6 +2041,22 @@ function llmCostUsd(step: LlmStep, tokens: TokenUsage | undefined): number | und
     per(tokens.cacheRead, pricing.cacheReadPerMTok) +
     per(tokens.cacheWrite, pricing.cacheWritePerMTok)
   );
+}
+
+/**
+ * The effective call settings an `llm` step resolved against its API instance:
+ * the step's own fields override the instance's, which override the provider
+ * conventions (see `resolveLlmStepApi`). Computed once per step execution and
+ * threaded through every attempt (including the structured-output fix retry).
+ */
+interface LlmCallSettings {
+  /** Resolved API instance id, recorded on results for spend attribution. */
+  api: string;
+  provider: LlmProviderId;
+  model: string;
+  apiKey: string;
+  baseUrl?: string;
+  pricing?: LlmPricing;
 }
 
 /**
@@ -2032,7 +2072,7 @@ async function runLlmAttempt(
   item: WorkflowItem | undefined,
   prompt: string,
   system: string | undefined,
-  apiKey: string,
+  settings: LlmCallSettings,
   timeoutMs: number,
 ): Promise<{ result: StepResult; retryable: boolean }> {
   const started = Date.now();
@@ -2040,15 +2080,15 @@ async function runLlmAttempt(
   let outcome: LlmCallResult;
   try {
     outcome = await complete({
-      provider: resolveLlmProvider(step),
-      model: step.model,
+      provider: settings.provider,
+      model: settings.model,
       prompt,
       system,
       maxTokens: step.maxTokens,
       temperature: step.temperature,
       effort: step.effort,
-      baseUrl: step.baseUrl,
-      apiKey,
+      baseUrl: settings.baseUrl,
+      apiKey: settings.apiKey,
       jsonOutput: step.output !== undefined,
       timeoutMs,
       signal: ctx.signal,
@@ -2080,8 +2120,10 @@ async function runLlmAttempt(
         output: outcome.text,
         item,
         durationMs: Date.now() - started,
-        costUsd: llmCostUsd(step, outcome.tokens),
+        costUsd: llmCostUsd(settings.pricing, outcome.tokens),
         tokens: outcome.tokens,
+        api: settings.api,
+        model: settings.model,
       },
       retryable: false,
     };
@@ -2097,8 +2139,10 @@ async function runLlmAttempt(
       item,
       error,
       durationMs: Date.now() - started,
-      costUsd: outcome.ok ? llmCostUsd(step, outcome.tokens) : undefined,
+      costUsd: outcome.ok ? llmCostUsd(settings.pricing, outcome.tokens) : undefined,
       tokens: outcome.ok ? outcome.tokens : undefined,
+      api: settings.api,
+      model: settings.model,
     },
     // A cancelled step is never retried (and never cached, so resume re-runs it).
     retryable: !cancelled && !outcome.ok && outcome.retryable,
@@ -2137,11 +2181,20 @@ async function executeLlmStep(
   const outputSchema = step.output;
   const prompt = outputSchema ? withStructuredOutputInstructions(rendered, outputSchema) : rendered;
 
-  const provider = resolveLlmProvider(step);
-  const keyEnv = llmApiKeyEnvName(provider, step.apiKeyEnv);
-  const apiKey = process.env[keyEnv];
+  const resolved = resolveLlmStepApi(step, ctx.deps.agentConfig);
+  if (!resolved.ok) {
+    return {
+      stepId,
+      ok: false,
+      output: resolved.error,
+      item,
+      error: resolved.error,
+      durationMs: Date.now() - started,
+    };
+  }
+  const apiKey = process.env[resolved.apiKeyEnv];
   if (!apiKey) {
-    const message = `llm step requires an API key in the ${keyEnv} environment variable (provider '${provider}')`;
+    const message = `llm step requires an API key in the ${resolved.apiKeyEnv} environment variable (api '${resolved.api.id}')`;
     return {
       stepId,
       ok: false,
@@ -2151,6 +2204,14 @@ async function executeLlmStep(
       durationMs: Date.now() - started,
     };
   }
+  const settings: LlmCallSettings = {
+    api: resolved.api.id,
+    provider: resolved.provider,
+    model: resolved.model,
+    apiKey,
+    baseUrl: resolved.baseUrl,
+    pricing: resolved.pricing,
+  };
 
   const timeoutSec = resolveStepTimeoutSec(
     step,
@@ -2172,7 +2233,7 @@ async function executeLlmStep(
       item,
       prompt,
       system,
-      apiKey,
+      settings,
       timeoutMs,
     );
     result = attemptOutcome.result;
@@ -2203,7 +2264,7 @@ async function executeLlmStep(
       item,
       result,
       outputSchema,
-      apiKey,
+      settings,
       timeoutMs,
       attempt,
     );
@@ -2242,7 +2303,7 @@ async function enforceLlmStructuredOutput(
   item: WorkflowItem | undefined,
   result: StepResult,
   outputSchema: JsonSchema,
-  apiKey: string,
+  settings: LlmCallSettings,
   timeoutMs: number,
   attempt: number,
 ): Promise<{ result: StepResult; attempt: number }> {
@@ -2282,7 +2343,7 @@ async function enforceLlmStructuredOutput(
           iteration: ctx.iteration,
         })
       : undefined,
-    apiKey,
+    settings,
     timeoutMs,
   );
   const costUsd =

@@ -31,7 +31,13 @@ describe("TUI components", () => {
       },
     ];
     const { lastFrame } = render(
-      <StatusBar doctor={doctor} configSource="defaults" workspaceLabel="user" running={false} />,
+      <StatusBar
+        doctor={doctor}
+        apiDoctor={null}
+        configSource="defaults"
+        workspaceLabel="user"
+        running={false}
+      />,
     );
     const frame = lastFrame() ?? "";
     expect(frame).toContain("claude");
@@ -39,5 +45,39 @@ describe("TUI components", () => {
     expect(frame).toContain("opencode");
     expect(frame).toContain("codex");
     expect(frame).toContain("missing");
+  });
+
+  it("renders api readiness after the agents", () => {
+    const { lastFrame } = render(
+      <StatusBar
+        doctor={[]}
+        apiDoctor={[
+          {
+            api: "anthropic",
+            provider: "anthropic",
+            status: "ok",
+            keyEnv: "ANTHROPIC_API_KEY",
+            baseUrl: "https://api.anthropic.com",
+            message: "ready",
+          },
+          {
+            api: "openai",
+            provider: "openai",
+            status: "key_missing",
+            keyEnv: "OPENAI_API_KEY",
+            baseUrl: "https://api.openai.com/v1",
+            message: "OPENAI_API_KEY not set",
+          },
+        ]}
+        configSource="defaults"
+        workspaceLabel="user"
+        running={false}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("anthropic");
+    expect(frame).toContain("ready");
+    expect(frame).toContain("openai");
+    expect(frame).toContain("no key");
   });
 });

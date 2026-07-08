@@ -10,6 +10,8 @@ Start here if you are new to workflow authoring:
 
 Deep dives:
 
+- [`agent-configuration.md`](agent-configuration.md) — agent instances: scopes, slash commands, and the TUI agent manager
+- [`api-configuration.md`](api-configuration.md) — API instances for direct-inference `llm` steps: scopes, readiness checks, and the managers in every UI
 - [`worktree-merge-back.md`](worktree-merge-back.md) — landing agent worktree changes: the `merge` step, PR mode, and history diff/apply/prune
 - [`cost-and-budgets.md`](cost-and-budgets.md) — cost budgets, token accounting, and cost analytics
 - [`init-tour-followups.md`](init-tour-followups.md) — `steamtrain init` + `tour` review dispositions: applied, declined (with rationale), and deferred

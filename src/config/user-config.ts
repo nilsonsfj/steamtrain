@@ -26,6 +26,7 @@ export type UserConfigPatch = Partial<
     SteamtrainConfig,
     | "binaries"
     | "agents"
+    | "apis"
     | "stepTimeoutSec"
     | "workflowTimeoutSec"
     | "maxConcurrency"

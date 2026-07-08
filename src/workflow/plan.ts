@@ -6,6 +6,7 @@
  * preview (Ctrl+D), and the web UI's "Plan" button.
  */
 
+import { llmStepApiId, resolveLlmProvider } from "./llm";
 import type { TemplateContext } from "./template";
 import { renderPrompt } from "./template";
 import type {
@@ -28,6 +29,8 @@ export interface PlanStep {
   kind: WorkflowStepKind;
   agent?: string;
   model?: string;
+  /** API instance a direct-inference `llm` step calls (explicit `api`, else the built-in provider). */
+  llmApi?: string;
   /** Resolved API dialect for direct-inference `llm` steps. */
   llmProvider?: string;
   effort?: string;
@@ -88,6 +91,8 @@ export interface PlanResult {
   workflowSteps: { stepId: string; workflow: string }[];
   /** Distinct agents used. */
   agents: string[];
+  /** Distinct API instances used by `llm` steps. */
+  apis: string[];
   /** Workflow-level maxCostUsd, if set. */
   maxCostUsd?: number;
 }
@@ -177,6 +182,7 @@ export function planWorkflow(
       loopGates: [],
       workflowSteps: [],
       agents: [],
+      apis: [],
     };
   }
 
@@ -186,6 +192,7 @@ export function planWorkflow(
   const loopGates: PlanResult["loopGates"] = [];
   const workflowSteps: PlanResult["workflowSteps"] = [];
   const agentSet = new Set<string>();
+  const apiSet = new Set<string>();
 
   // Build step lookup for resolving forEach sources.
   const stepById = new Map<string, WorkflowStep>();
@@ -276,6 +283,7 @@ export function planWorkflow(
       }
 
       if (agentBacked) agentSet.add(step.agent);
+      if (step.kind === "llm") apiSet.add(llmStepApiId(step));
 
       steps.push({
         stepId: step.id,
@@ -285,9 +293,13 @@ export function planWorkflow(
         kind,
         agent: agentBacked ? step.agent : undefined,
         model: agentBacked || kind === "llm" ? (step as { model?: string }).model : undefined,
+        llmApi: step.kind === "llm" ? llmStepApiId(step) : undefined,
+        // A step that names neither provider nor model inherits the dialect
+        // from its configured api instance at run time; the static plan then
+        // reports the instance id (llmApi) without guessing a dialect.
         llmProvider:
-          step.kind === "llm"
-            ? (step.provider ?? (step.model.startsWith("claude") ? "anthropic" : "openai"))
+          step.kind === "llm" && (step.provider || step.model)
+            ? resolveLlmProvider(step)
             : undefined,
         effort: (agentBacked || kind === "llm") && "effort" in step ? step.effort : undefined,
         dependsOn: step.dependsOn,
@@ -324,6 +336,7 @@ export function planWorkflow(
     loopGates,
     workflowSteps,
     agents: [...agentSet],
+    apis: [...apiSet],
     maxCostUsd: spec.maxCostUsd,
   };
 }

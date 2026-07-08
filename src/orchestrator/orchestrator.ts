@@ -4,6 +4,7 @@ import {
   createAdapter,
   resolveAgentInstance,
 } from "../agents";
+import { workflowLlmApiIssues } from "../apis";
 import { DEFAULT_CONFIG, type SteamtrainConfig } from "../config";
 import type { DoctorResult } from "../doctor";
 import type { AgentEvent, AgentInstanceId } from "../types/events";
@@ -152,8 +153,9 @@ export class Orchestrator {
   }
 
   /**
-   * Whether a workflow may be dispatched: it must exist, validate, and every
-   * distinct agent it uses must be doctor-healthy.
+   * Whether a workflow may be dispatched: it must exist, validate, every
+   * distinct agent it uses must be doctor-healthy, and every `llm` step must
+   * resolve to an enabled API instance whose key is present in the environment.
    */
   canDispatchWorkflow(name: string): DispatchCheck {
     const spec = this.listWorkflows()[name];
@@ -182,6 +184,13 @@ export class Orchestrator {
         const detail = health.detail ?? health.message;
         return { ok: false, reason: `${agent} is ${health.status} — ${detail}` };
       }
+    }
+
+    // llm steps need no doctor pass (the checks are local: instance resolves,
+    // enabled, model known, key env var set), so gate on them directly.
+    const llmIssues = workflowLlmApiIssues(spec, this.config);
+    if (llmIssues.length > 0) {
+      return { ok: false, reason: llmIssues[0] as string };
     }
     return { ok: true };
   }

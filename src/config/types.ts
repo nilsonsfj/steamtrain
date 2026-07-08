@@ -1,9 +1,16 @@
 import { z } from "zod";
-import type { AgentInstanceId, AgentProviderId } from "../types/events";
+import type {
+  AgentInstanceId,
+  AgentProviderId,
+  ApiInstanceId,
+  ApiProviderId,
+} from "../types/events";
 import {
   LOOP_MAX_ITERATIONS_CEILING,
+  type LlmPricing,
   MAX_CONCURRENCY,
   type WorkflowSpec,
+  llmPricingSchema,
   workflowSpecSchema,
 } from "../workflow/types";
 
@@ -12,6 +19,8 @@ export interface SteamtrainConfig {
   binaries?: Partial<Record<AgentProviderId, string>>;
   /** Optional runnable agent instances. Omitted means all built-in agents are enabled. */
   agents?: AgentInstanceConfig[];
+  /** Optional LLM API endpoint instances for `llm` steps. Omitted means the built-in providers are enabled. */
+  apis?: ApiInstanceConfig[];
   /** Per-agent subprocess wall-clock limit in seconds (workspace dispatches and workflow steps). */
   stepTimeoutSec?: number;
   /** Whole-workflow wall-clock abort limit in seconds. Omitted → stepCount × stepTimeoutSec. */
@@ -43,6 +52,38 @@ export interface AgentInstanceConfig {
   defaultModel?: string;
 }
 
+/**
+ * A configured LLM API endpoint instance — the direct-inference analog of an
+ * {@link AgentInstanceConfig}. `llm` workflow steps reference an instance by
+ * `api: <id>` and inherit its provider, endpoint, key env var, default model,
+ * and pricing; a step's own fields override them individually. The built-in
+ * `anthropic` and `openai` instances exist with zero config; adding an entry
+ * with one of those ids customizes the built-in, any other id defines a new
+ * instance (a proxy, Groq, Together, Ollama, vLLM, …).
+ */
+export interface ApiInstanceConfig {
+  /** Instance id referenced by `llm` workflow steps via their `api` field. */
+  id: ApiInstanceId;
+  /** API dialect this instance speaks. */
+  provider: ApiProviderId;
+  /** Defaults to true. Disabled instances are hidden outside config surfaces and refuse runs. */
+  enabled?: boolean;
+  /** Optional display name for config surfaces. */
+  label?: string;
+  /** Endpoint base URL override (OpenAI convention: include `/v1`). */
+  baseUrl?: string;
+  /** Env var holding the API key. Defaults to `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` by provider. */
+  apiKeyEnv?: string;
+  /** Model used when a step referencing this instance omits `model`. */
+  defaultModel?: string;
+  /**
+   * Default per-MTok USD rates for steps on this instance that don't declare
+   * their own `pricing` — most useful when the instance fronts one model
+   * family (a proxy, a local server) with uniform billing.
+   */
+  pricing?: LlmPricing;
+}
+
 const legacyTimeoutFields = {
   stepTimeoutMs: z.number().positive().optional(),
   workflowTimeoutMs: z.number().positive().optional(),
@@ -53,12 +94,43 @@ const nonEmptyString = z
   .string()
   .refine((s) => s.trim().length > 0, "must not be empty or whitespace");
 const agentProviderId = z.enum(["claude", "opencode", "codex", "amp", "kiro"]);
+const apiProviderId = z.enum(["anthropic", "openai"]);
+const instanceIdSchema = z
+  .string()
+  .min(1)
+  .regex(/^[A-Za-z0-9_.-]+$/, "must contain only letters, numbers, '.', '_', or '-'");
+const apiInstanceSchema = z
+  .object({
+    id: instanceIdSchema,
+    provider: apiProviderId,
+    enabled: z.boolean().optional(),
+    label: nonEmptyString.optional(),
+    baseUrl: nonEmptyString.optional(),
+    apiKeyEnv: nonEmptyString.optional(),
+    defaultModel: nonEmptyString.optional(),
+    pricing: llmPricingSchema.optional(),
+  })
+  .strict();
+
+/** Reject duplicate `id`s inside one config file's instance list. */
+function uniqueIds(kind: "agent" | "api") {
+  return (items: readonly { id: string }[], ctx: z.RefinementCtx): void => {
+    const seen = new Set<string>();
+    for (const [index, item] of items.entries()) {
+      if (seen.has(item.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [index, "id"],
+          message: `duplicate ${kind} id '${item.id}'`,
+        });
+      }
+      seen.add(item.id);
+    }
+  };
+}
 const agentInstanceSchema = z
   .object({
-    id: z
-      .string()
-      .min(1)
-      .regex(/^[A-Za-z0-9_.-]+$/, "must contain only letters, numbers, '.', '_', or '-'"),
+    id: instanceIdSchema,
     provider: agentProviderId,
     enabled: z.boolean().optional(),
     label: nonEmptyString.optional(),
@@ -82,22 +154,8 @@ export const configFileSchema = z
       })
       .partial()
       .optional(),
-    agents: z
-      .array(agentInstanceSchema)
-      .superRefine((agents, ctx) => {
-        const seen = new Set<string>();
-        for (const [index, agent] of agents.entries()) {
-          if (seen.has(agent.id)) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              path: [index, "id"],
-              message: `duplicate agent id '${agent.id}'`,
-            });
-          }
-          seen.add(agent.id);
-        }
-      })
-      .optional(),
+    agents: z.array(agentInstanceSchema).superRefine(uniqueIds("agent")).optional(),
+    apis: z.array(apiInstanceSchema).superRefine(uniqueIds("api")).optional(),
     stepTimeoutSec: z.number().positive().optional(),
     workflowTimeoutSec: z.number().positive().optional(),
     ...legacyTimeoutFields,
@@ -126,6 +184,9 @@ export type UserConfigFile = z.infer<typeof userConfigFileSchema>;
 /** Which config file an agent instance entry is written in. */
 export type AgentConfigScope = "user" | "project";
 
+/** Which config file an API instance entry is written in (same scopes as agents). */
+export type ApiConfigScope = AgentConfigScope;
+
 /** Validate an agents array from API/CLI input before merging into project config. */
 export function parseAgentsConfig(agents: unknown): AgentInstanceConfig[] {
   const parsed = configFileSchema.partial().safeParse({ agents });
@@ -137,4 +198,15 @@ export function parseAgentsConfig(agents: unknown): AgentInstanceConfig[] {
     throw new Error(detail);
   }
   return parsed.data.agents ?? [];
+}
+
+/** Validate an apis array from API/CLI input before merging into project config. */
+export function parseApisConfig(apis: unknown): ApiInstanceConfig[] {
+  const parsed = configFileSchema.partial().safeParse({ apis });
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const detail = issue ? `${issue.path.join(".") || "apis"}: ${issue.message}` : "invalid apis";
+    throw new Error(detail);
+  }
+  return parsed.data.apis ?? [];
 }

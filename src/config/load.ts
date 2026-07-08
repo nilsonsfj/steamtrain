@@ -7,6 +7,7 @@ import { WORKSPACE_CONFIG_FILENAME } from "../workspace";
 import { DEFAULT_CONFIG } from "./defaults";
 import {
   type AgentInstanceConfig,
+  type ApiInstanceConfig,
   type ConfigFile,
   type SteamtrainConfig,
   type UserConfigFile,
@@ -43,6 +44,10 @@ export interface LoadedConfig {
   userAgents?: AgentInstanceConfig[];
   /** Raw agent entries from the project (or custom) config file (for scoped saves). */
   projectAgents?: AgentInstanceConfig[];
+  /** Raw API entries from the global config file (for scoped saves). */
+  userApis?: ApiInstanceConfig[];
+  /** Raw API entries from the project (or custom) config file (for scoped saves). */
+  projectApis?: ApiInstanceConfig[];
   /** Non-fatal problem encountered while loading (kept defaults). */
   warning?: string;
 }
@@ -93,6 +98,7 @@ export function loadConfig(options: ConfigLoadOptions | string = {}): LoadedConf
       scope: { kind: "project", path, exists: false },
       user,
       userAgents: userLayer.agents,
+      userApis: userLayer.apis,
       warning: userLayer.warning,
     };
   }
@@ -102,6 +108,7 @@ export function loadConfig(options: ConfigLoadOptions | string = {}): LoadedConf
     ...loaded,
     user,
     userAgents: userLayer.agents,
+    userApis: userLayer.apis,
     warning: joinWarnings(userLayer.warning, loaded.warning),
   };
 }
@@ -109,6 +116,7 @@ export function loadConfig(options: ConfigLoadOptions | string = {}): LoadedConf
 function loadUserConfigFile(path: string): {
   config: SteamtrainConfig;
   agents?: AgentInstanceConfig[];
+  apis?: ApiInstanceConfig[];
   exists: boolean;
   warning?: string;
 } {
@@ -137,7 +145,7 @@ function loadUserConfigFile(path: string): {
 
   const data: UserConfigFile = result.data;
   const { config } = mergeConfig(DEFAULT_CONFIG, data);
-  return { config, agents: data.agents, exists: true };
+  return { config, agents: data.agents, apis: data.apis, exists: true };
 }
 
 function loadConfigFile(path: string, scope: ConfigScope, base: SteamtrainConfig): LoadedConfig {
@@ -170,6 +178,7 @@ function loadConfigFile(path: string, scope: ConfigScope, base: SteamtrainConfig
     config,
     scope,
     projectAgents: result.data.agents,
+    projectApis: result.data.apis,
     warning: joinWarnings(legacyTasks, warnings.length > 0 ? warnings.join("; ") : undefined),
   };
 }
@@ -215,6 +224,7 @@ export function mergeConfig(
   const merged: SteamtrainConfig = {
     binaries: { ...base.binaries, ...override.binaries },
     agents: mergeAgentLists(base.agents, override.agents),
+    apis: mergeInstanceLists(base.apis, override.apis),
     ...mergeTimeoutFields(base, override),
     maxConcurrency: override.maxConcurrency ?? base.maxConcurrency,
     loopMaxIterations: override.loopMaxIterations ?? base.loopMaxIterations,
@@ -227,15 +237,23 @@ export function mergeConfig(
 }
 
 /**
- * Merge agent instance lists by id: override entries replace same-id base
- * entries wholesale (no field-level merge); new override ids are appended.
+ * Merge instance lists (agents, apis) by id: override entries replace same-id
+ * base entries wholesale (no field-level merge); new override ids are appended.
  */
+export function mergeInstanceLists<T extends { id: string }>(
+  base: T[] | undefined,
+  override: T[] | undefined,
+): T[] | undefined {
+  if (!base || base.length === 0) return override ?? base;
+  if (!override || override.length === 0) return base;
+  const overrideIds = new Set(override.map((item) => item.id));
+  return [...base.filter((item) => !overrideIds.has(item.id)), ...override];
+}
+
+/** {@link mergeInstanceLists} specialized to agent entries (kept for existing callers). */
 export function mergeAgentLists(
   base: AgentInstanceConfig[] | undefined,
   override: AgentInstanceConfig[] | undefined,
 ): AgentInstanceConfig[] | undefined {
-  if (!base || base.length === 0) return override ?? base;
-  if (!override || override.length === 0) return base;
-  const overrideIds = new Set(override.map((agent) => agent.id));
-  return [...base.filter((agent) => !overrideIds.has(agent.id)), ...override];
+  return mergeInstanceLists(base, override);
 }
