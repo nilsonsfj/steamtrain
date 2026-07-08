@@ -493,7 +493,9 @@ inferred — `claude-*` models → `anthropic`, everything else → the
 OpenAI-compatible wire format), `system`, `output` (JSON schema; see
 [Structured step outputs](#structured-step-outputs-output)), `itemsPath`,
 `maxTokens`, `temperature`, `effort`, `apiKeyEnv`, `baseUrl`, `retry`,
-`forEach`, `stepTimeoutSec`, `pricing`.
+`forEach`, `stepTimeoutSec`, `pricing`, `maxCostUsd` (per-step budget for
+`forEach` fan-outs, like a worker's — only meaningful with `pricing`, since
+without declared rates every call contributes $0).
 
 ```jsonc
 {

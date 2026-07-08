@@ -509,6 +509,111 @@ describe("llm step execution", () => {
     const result = doneResults(events).get("judge");
     expect(result?.costUsd).toBeCloseTo(5 + 25 * 0.2, 10);
   });
+
+  it("carries model and effort on the step_start event for cost attribution", async () => {
+    setKey();
+    const events = await runToEvents(
+      spec([
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            {
+              id: "judge",
+              kind: "llm",
+              model: "claude-opus-4-8",
+              effort: "low",
+              apiKeyEnv: KEY_ENV,
+              prompt: "x",
+            },
+          ],
+        },
+      ]),
+      llmDeps(async () => okResult("done")),
+    );
+    const start = events.find((ev) => ev.kind === "step_start" && ev.stepId === "judge");
+    expect(start?.kind === "step_start" && start.model).toBe("claude-opus-4-8");
+    expect(start?.kind === "step_start" && start.effort).toBe("low");
+    expect(start?.kind === "step_start" && start.agent).toBeUndefined();
+  });
+
+  it("enforces a per-step maxCostUsd budget on llm forEach fan-outs", async () => {
+    setKey();
+    let calls = 0;
+    const events = await runToEvents(
+      spec([
+        {
+          id: "p1",
+          title: "Split",
+          steps: [{ id: "targets", kind: "distributor", items: ["a", "b", "c"] }],
+        },
+        {
+          id: "p2",
+          title: "Judge",
+          steps: [
+            {
+              id: "judge-each",
+              kind: "llm",
+              model: "claude-opus-4-8",
+              apiKeyEnv: KEY_ENV,
+              dependsOn: ["targets"],
+              forEach: "steps.targets.items",
+              prompt: "judge {{item}}",
+              pricing: { outputPerMTok: 1 },
+              maxCostUsd: 1.5,
+            },
+          ],
+        },
+      ]),
+      llmDeps(
+        async () => {
+          calls += 1;
+          // Each call costs exactly $1 at the declared rate.
+          return { ok: true, text: "judged", tokens: { input: 0, output: 1_000_000 } };
+        },
+        { maxConcurrency: 1 },
+      ),
+    );
+    expect(workflowOk(events)).toBe(false);
+    expect(calls).toBe(2); // third child never dispatched
+    const results = doneResults(events);
+    expect(results.get("judge-each")?.childResults?.[2]?.notRun).toBe(true);
+    const budget = events.find((ev) => ev.kind === "budget_exceeded");
+    expect(budget?.kind === "budget_exceeded" && budget.scope).toBe("step");
+  });
+});
+
+describe("llm session overrides", () => {
+  it("applies model/prompt/effort patches to llm steps and drops agent-only fields", async () => {
+    const { applyWorkflowStepOverrides } = await import("../src/workflow");
+    const base = spec([
+      {
+        id: "p1",
+        title: "P1",
+        steps: [{ id: "judge", kind: "llm", model: "claude-opus-4-8", prompt: "old" }],
+      },
+    ]);
+    const patched = applyWorkflowStepOverrides(base, {
+      judge: {
+        model: "claude-haiku-4-5",
+        prompt: "new",
+        effort: "low",
+        agent: "claude",
+        cwd: "/x",
+      },
+    });
+    const step = patched.phases[0]?.steps[0];
+    expect(step).toMatchObject({
+      kind: "llm",
+      model: "claude-haiku-4-5",
+      prompt: "new",
+      effort: "low",
+    });
+    // Agent-only fields must never leak onto an llm step (an `agent` field
+    // would make it read as agent-backed).
+    expect(step && "agent" in step).toBe(false);
+    expect(step && "cwd" in step).toBe(false);
+  });
 });
 
 describe("llm plan integration", () => {

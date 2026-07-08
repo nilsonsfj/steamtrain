@@ -396,6 +396,12 @@ export interface LlmStep extends WorkflowStepBase {
   itemsPath?: string;
   /** Optional per-MTok rates to compute an exact `costUsd`; see {@link LlmPricing}. */
   pricing?: LlmPricing;
+  /**
+   * Optional per-step USD budget for `forEach` fan-outs, mirroring
+   * {@link WorkerStep.maxCostUsd}. Only meaningful together with `pricing` —
+   * without declared rates an llm call contributes $0 and the cap never trips.
+   */
+  maxCostUsd?: number;
 }
 
 export interface GateCondition {
@@ -932,6 +938,7 @@ const workflowLlmStepSchema = z
     output: outputJsonSchema.optional(),
     itemsPath: z.string().min(1).optional(),
     pricing: llmPricingSchema.optional(),
+    maxCostUsd: z.number().positive().optional(),
   })
   .superRefine((step, ctx) => {
     if (step.itemsPath && !step.output) {

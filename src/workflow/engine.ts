@@ -755,14 +755,17 @@ async function runSingleStep(
 ): Promise<StepFlags> {
   const { spec, ctx, deps, signal, cache, outputs, results, allResults } = env;
   const agentBacked = isAgentBackedStep(step) ? step : undefined;
+  // llm steps have a model/effort but no agent; carry them on the events so
+  // live views and history/cost roll-ups attribute the spend to the model.
+  const llm = step.kind === "llm" ? step : undefined;
   push({
     kind: "step_start",
     phaseId: phase.id,
     stepId: step.id,
     blockKind: workflowStepKind(step),
     agent: agentBacked?.agent,
-    model: agentBacked?.model,
-    effort: agentBacked?.effort,
+    model: agentBacked?.model ?? llm?.model,
+    effort: agentBacked?.effort ?? llm?.effort,
     cwd: "cwd" in step ? step.cwd : undefined,
     dependsOn: step.dependsOn,
     iteration,
@@ -804,7 +807,7 @@ async function runSingleStep(
         stepId: child.stepId,
         blockKind: workflowStepKind(step),
         agent: agentBacked?.agent,
-        model: agentBacked?.model,
+        model: agentBacked?.model ?? llm?.model,
         cwd: "cwd" in step ? step.cwd : undefined,
         dependsOn: step.dependsOn,
         parentStepId: step.id,
@@ -1702,9 +1705,7 @@ async function executeForEachStep(
   hooks: ExecuteHooks,
 ): Promise<ExecutionOutcome> {
   const started = Date.now();
-  // llm fan-outs have no per-step cost budget field; the shared budget logic
-  // below is a no-op when the cap is undefined.
-  const maxCostUsd = step.kind === "llm" ? undefined : step.maxCostUsd;
+  const maxCostUsd = step.maxCostUsd;
   const childAgent = isAgentBackedStep(step) ? step.agent : undefined;
   const childCwd = "cwd" in step ? step.cwd : undefined;
   const runChild = (childId: string, item: WorkflowItem): Promise<StepResult> =>
@@ -2084,7 +2085,9 @@ async function runLlmAttempt(
       retryable: false,
     };
   }
-  const error = cancelled ? "cancelled" : outcome.ok ? "cancelled" : outcome.error;
+  // Reached when cancelled OR the call failed; a cancel wins the label even
+  // if the (raced) call happened to complete.
+  const error = !outcome.ok && !cancelled ? outcome.error : "cancelled";
   return {
     result: {
       stepId,
@@ -2587,7 +2590,7 @@ async function executeMergeStep(
   if (sources.length === 0) {
     return fail(
       missingWorktrees.length > 0
-        ? `merge step '${step.id}': no worktrees recorded for ${missingWorktrees.join(", ")} (agent steps get worktrees only inside a git repository)`
+        ? `merge step '${step.id}': no worktrees recorded for ${missingWorktrees.join(", ")} (only worker/processor/command steps get worktrees, and only inside a git repository; gate/llm/consolidator steps never produce one)`
         : `merge step '${step.id}' has no source worktrees to merge`,
     );
   }
