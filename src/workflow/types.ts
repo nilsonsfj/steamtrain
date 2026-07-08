@@ -637,6 +637,15 @@ export interface StepResult {
   costUsd?: number;
   /** Normalized token usage the agent reported for this step, when available. */
   tokens?: TokenUsage;
+  /**
+   * The API instance and effective model a direct-inference `llm` step
+   * actually called. Recorded on the result (not just the `step_start` event)
+   * so cached replays and analytics attribute the recorded spend to what ran,
+   * even if the configured instance's endpoint or defaultModel changed since.
+   */
+  api?: ApiInstanceId;
+  /** Effective model the `llm` step called; see {@link StepResult.api}. */
+  model?: string;
   /** Total attempts this step took (auto-retry); omitted/1 means it ran once. */
   attempts?: number;
   /** Subprocess exit code, for `command` steps (`{{steps.<id>.exitCode}}`). */

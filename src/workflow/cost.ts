@@ -311,10 +311,13 @@ export function* resultLeaves(
     if (r.childResults?.length) continue; // parent — its children appear flat
     if (r.notRun) continue; // budget-truncated placeholder — not a real leaf
     const meta = stepMeta.get(r.parentStepId ?? r.stepId);
+    // llm results record the api/model that actually ran (an api-referencing
+    // step may inherit its model from config); prefer that over the spec's
+    // literal fields so attribution matches what was billed.
     yield {
       agent: meta?.agent,
-      api: meta?.api,
-      model: meta?.model,
+      api: r.api ?? meta?.api,
+      model: r.model ?? meta?.model,
       costUsd: r.costUsd,
       tokens: r.tokens,
     };

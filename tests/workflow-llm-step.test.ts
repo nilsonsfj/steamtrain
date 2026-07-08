@@ -817,6 +817,45 @@ describe("llm step api instances", () => {
     expect(result?.error).toContain("api 'groq'");
   });
 
+  it("replays cached results with the api/model that actually ran, not drifted config", async () => {
+    setKey();
+    const cache = new Map<string, StepResult>();
+    const oneStep = spec([
+      { id: "p1", title: "P1", steps: [{ id: "judge", kind: "llm", api: "groq", prompt: "x" }] },
+    ]);
+    const first = runWorkflow(
+      oneStep,
+      { input: "task", cache },
+      llmDeps(async () => okResult("done"), { agentConfig: groqConfig }),
+    );
+    for await (const _ev of first) {
+      // drain: populate the cache
+    }
+    expect(cache.get("judge")?.model).toBe("llama-3.3-70b");
+    expect(cache.get("judge")?.api).toBe("groq");
+
+    // The instance's defaultModel changed between runs; the cached replay must
+    // still attribute the recorded spend to the model that actually ran.
+    const driftedConfig = {
+      apis: [{ ...groqConfig.apis[0]!, defaultModel: "llama-4-preview" }],
+    };
+    const events: WorkflowEvent[] = [];
+    const second = runWorkflow(
+      oneStep,
+      { input: "task", cache },
+      llmDeps(
+        async () => {
+          throw new Error("cached step must not call the API again");
+        },
+        { agentConfig: driftedConfig },
+      ),
+    );
+    for await (const ev of second) events.push(ev);
+    const start = events.find((ev) => ev.kind === "step_start" && ev.stepId === "judge");
+    expect(start?.kind === "step_start" && start.model).toBe("llama-3.3-70b");
+    expect(start?.kind === "step_start" && start.api).toBe("groq");
+  });
+
   it("carries the api id onto forEach fan-out children", async () => {
     setKey();
     const events = await runToEvents(

@@ -533,7 +533,10 @@
       S.apiDoctor = apis;
       renderHealth(list, apis, err);
       applyHealth();
-      if (!list.length && !apis.length && !err && attempt < 12) setTimeout(function () { pollDoctor(attempt + 1); }, 1500);
+      // Keep polling until BOTH probe sets have landed: the agent doctor
+      // (local --version checks) usually resolves before the API doctor
+      // (a network probe), and stopping early would leave the API chips blank.
+      if ((!list.length || !apis.length) && !err && attempt < 12) setTimeout(function () { pollDoctor(attempt + 1); }, 1500);
     });
   }
 

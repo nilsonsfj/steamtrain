@@ -757,9 +757,15 @@ async function runSingleStep(
   // model from the instance's defaultModel); on a resolution error fall back
   // to the step's literal fields so the display still shows what was asked.
   const llm = step.kind === "llm" ? step : undefined;
-  const llmApi = llm ? resolveLlmStepApi(llm, deps.agentConfig) : undefined;
-  const llmApiId = llm ? (llmApi?.ok ? llmApi.api.id : llmStepApiId(llm)) : undefined;
-  const llmModel = llmApi?.ok ? llmApi.model : llm?.model;
+  // A cache hit replays a completed result: prefer the api/model recorded on
+  // it (what actually ran and was billed) over a fresh resolution — the
+  // configured instance's endpoint or defaultModel may have changed since.
+  const cachedHit = cache.get(step.id);
+  const llmApi = llm && !cachedHit?.api ? resolveLlmStepApi(llm, deps.agentConfig) : undefined;
+  const llmApiId = llm
+    ? (cachedHit?.api ?? (llmApi?.ok ? llmApi.api.id : llmStepApiId(llm)))
+    : undefined;
+  const llmModel = llm ? (cachedHit?.model ?? (llmApi?.ok ? llmApi.model : llm.model)) : undefined;
   push({
     kind: "step_start",
     phaseId: phase.id,
@@ -798,7 +804,7 @@ async function runSingleStep(
   }
 
   // Cache hit → replay without spawning (resume).
-  const cached = cache.get(step.id);
+  const cached = cachedHit;
   if (cached) {
     for (const child of cached.childResults ?? []) {
       outputs.set(child.stepId, child.output);
@@ -810,8 +816,8 @@ async function runSingleStep(
         stepId: child.stepId,
         blockKind: workflowStepKind(step),
         agent: agentBacked?.agent,
-        api: llmApiId,
-        model: agentBacked?.model ?? llmModel,
+        api: llm ? (child.api ?? llmApiId) : undefined,
+        model: agentBacked?.model ?? (llm ? (child.model ?? llmModel) : undefined),
         effort: agentBacked?.effort ?? llm?.effort,
         cwd: "cwd" in step ? step.cwd : undefined,
         dependsOn: step.dependsOn,
@@ -1828,14 +1834,17 @@ async function executeForEachStep(
         };
         return;
       }
+      // A cached child replays a completed call: attribute it to the api/model
+      // recorded on its result rather than a fresh (possibly drifted) resolution.
+      const cached = ctx.cache.get(stepId);
       hooks.pushWorkflowEvent({
         kind: "step_start",
         phaseId: hooks.phaseId,
         stepId,
         blockKind: workflowStepKind(step),
         agent: childAgent,
-        api: childApi,
-        model: childModel,
+        api: step.kind === "llm" ? (cached?.api ?? childApi) : undefined,
+        model: step.kind === "llm" ? (cached?.model ?? childModel) : childModel,
         effort: step.effort,
         cwd: childCwd,
         dependsOn: step.dependsOn,
@@ -1845,7 +1854,6 @@ async function executeForEachStep(
         ts: Date.now(),
       });
 
-      const cached = ctx.cache.get(stepId);
       const result = cached
         ? { ...cached, stepId, parentStepId: step.id, item, iteration: ctx.iteration }
         : {
@@ -1897,6 +1905,9 @@ async function executeForEachStep(
       childResults,
       error,
       durationMs: Date.now() - started,
+      // Stamp llm parents like their children, so a resumed fan-out's parent
+      // step_start replays with the api/model that actually ran.
+      ...(step.kind === "llm" ? { api: childApi, model: childModel } : {}),
     },
     childResults,
   };
@@ -2039,6 +2050,8 @@ function llmCostUsd(
  * threaded through every attempt (including the structured-output fix retry).
  */
 interface LlmCallSettings {
+  /** Resolved API instance id, recorded on results for spend attribution. */
+  api: string;
   provider: LlmProviderId;
   model: string;
   apiKey: string;
@@ -2109,6 +2122,8 @@ async function runLlmAttempt(
         durationMs: Date.now() - started,
         costUsd: llmCostUsd(settings.pricing, outcome.tokens),
         tokens: outcome.tokens,
+        api: settings.api,
+        model: settings.model,
       },
       retryable: false,
     };
@@ -2126,6 +2141,8 @@ async function runLlmAttempt(
       durationMs: Date.now() - started,
       costUsd: outcome.ok ? llmCostUsd(settings.pricing, outcome.tokens) : undefined,
       tokens: outcome.ok ? outcome.tokens : undefined,
+      api: settings.api,
+      model: settings.model,
     },
     // A cancelled step is never retried (and never cached, so resume re-runs it).
     retryable: !cancelled && !outcome.ok && outcome.retryable,
@@ -2188,6 +2205,7 @@ async function executeLlmStep(
     };
   }
   const settings: LlmCallSettings = {
+    api: resolved.api.id,
     provider: resolved.provider,
     model: resolved.model,
     apiKey,
