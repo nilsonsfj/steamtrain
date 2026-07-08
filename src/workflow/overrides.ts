@@ -22,6 +22,18 @@ const AGENT_FIELD_KEYS = new Set<keyof AgentRunFields>([
   "stepTimeoutMs",
 ]);
 
+/**
+ * The agent-field subset that also exists on a direct-API `llm` step. Other
+ * agent fields (`agent`, `cwd`, `env`, `extraArgs`) must never be patched onto
+ * an llm step — adding an `agent` field would make it read as agent-backed.
+ */
+const LLM_FIELD_KEYS = new Set<keyof AgentRunFields>([
+  "model",
+  "prompt",
+  "effort",
+  "stepTimeoutSec",
+]);
+
 const LEGACY_WF_KEY_PREFIX = "__wf_";
 
 function isWorkflowTimeoutValue(value: unknown): boolean {
@@ -145,7 +157,20 @@ export function applyWorkflowStepOverrides(
       ...phase,
       steps: phase.steps.map((step) => {
         const patch = overrides[step.id];
-        if (!patch || !isAgentBackedStep(step)) return step;
+        if (!patch) return step;
+        // llm steps accept the shared fields they actually carry (model,
+        // prompt, effort, timeout); the rest of the patch is dropped rather
+        // than silently no-oping the whole override.
+        if (workflowStepKind(step) === "llm") {
+          const safePatch: Partial<AgentRunFields> = {};
+          for (const key of LLM_FIELD_KEYS) {
+            if (key in patch) {
+              (safePatch as Record<string, unknown>)[key] = (patch as Record<string, unknown>)[key];
+            }
+          }
+          return applyAgentPatch(step, safePatch);
+        }
+        if (!isAgentBackedStep(step)) return step;
         const kind = workflowStepKind(step);
         if (kind === "distributor" || kind === "consolidator" || kind === "merge") {
           const safePatch: Partial<AgentRunFields> = {};

@@ -34,6 +34,7 @@ export type WorkflowStepKind =
   | "approval"
   | "merge"
   | "command"
+  | "llm"
   | "workflow";
 
 export interface WorkflowStepBase {
@@ -323,6 +324,86 @@ export interface WorkflowCallStep extends WorkflowStepBase {
   outputStep?: string;
 }
 
+/**
+ * Optional per-million-token USD rates for an `llm` step. The APIs report
+ * exact token usage but not dollar cost; when a step declares its model's
+ * rates, the engine computes an exact `costUsd` from the returned usage so
+ * budget enforcement (`maxCostUsd`) and cost analytics see llm spend. Omitted
+ * ⇒ tokens are still recorded but the step contributes $0 to budgets.
+ */
+export interface LlmPricing {
+  inputPerMTok?: number;
+  outputPerMTok?: number;
+  cacheReadPerMTok?: number;
+  cacheWritePerMTok?: number;
+}
+
+/**
+ * Lightweight LLM step: a single stateless API call (Anthropic or any
+ * OpenAI-compatible endpoint) that turns one prompt into one completion — the
+ * middle tier between a deterministic `command` step and a full coding-agent
+ * `worker`. No worktree, no agent CLI, no doctor preflight; the API key comes
+ * from the environment ({@link LlmStep.apiKeyEnv}). The canonical uses are the
+ * judge / classify / summarize / route touches that don't need tools:
+ * consolidators that merge text, verdict steps feeding gates, splitters that
+ * fan a request into a list.
+ *
+ * With an `output` schema the step reuses the shipped structured-output
+ * machinery (instructions + validation + one bounded fix retry), and — where
+ * the API supports it — JSON-only response mode is requested at the API level.
+ * When the parsed structured value (or the array at `itemsPath`) is a JSON
+ * array it becomes the step's `items`, so an llm step can serve as a `forEach`
+ * fan-out source exactly like a distributor. An llm step may itself carry
+ * `forEach` to run once per item of an earlier splitter.
+ *
+ * LLM calls are stateless and side-effect-free, so transient failures (rate
+ * limits, 5xx, network errors, timeouts) are always auto-retried under the
+ * step/workflow retry policy.
+ */
+export interface LlmStep extends WorkflowStepBase {
+  kind: "llm";
+  /** API dialect. Omitted ⇒ inferred: `claude-*` models → anthropic, everything else → openai. */
+  provider?: "anthropic" | "openai";
+  /** Model id in the provider's own format. */
+  model: string;
+  /** Prompt template; may reference `{{input}}` and `{{steps.<id>.output}}`. */
+  prompt: string;
+  /** Optional system prompt. Templated like `prompt`. */
+  system?: string;
+  /** Output-token cap (anthropic `max_tokens`, openai `max_completion_tokens`). */
+  maxTokens?: number;
+  /** Sampling temperature; only sent when set (recent Anthropic models reject it). */
+  temperature?: number;
+  /** Reasoning effort (anthropic `output_config.effort`, openai `reasoning_effort`). */
+  effort?: string;
+  /** Env var holding the API key. Default `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` by provider. */
+  apiKeyEnv?: string;
+  /** Endpoint override for proxies and OpenAI-compatible providers (OpenAI convention: include `/v1`). */
+  baseUrl?: string;
+  /** Per-call wall-clock limit in seconds (overrides workflow and config defaults). */
+  stepTimeoutSec?: number;
+  /** Per-step auto-retry policy for transient failures (overrides the workflow default). */
+  retry?: RetryPolicy;
+  /** Fan this step out over prior splitter items (`steps.<id>.items`). */
+  forEach?: string;
+  /** Output JSON schema; see {@link AgentRunFields.output}. */
+  output?: JsonSchema;
+  /**
+   * Path into the parsed structured output whose JSON array becomes the
+   * distributed items (requires `output`). Omitted ⇒ the parsed value itself
+   * becomes `items` when it is an array. See {@link DistributorStep.itemsPath}.
+   */
+  itemsPath?: string;
+  /** Optional per-MTok rates to compute an exact `costUsd`; see {@link LlmPricing}. */
+  pricing?: LlmPricing;
+  /**
+   * Optional per-step USD budget for `forEach` fan-outs, mirroring
+   * {@link WorkerStep.maxCostUsd}. Only meaningful together with `pricing` —
+   * without declared rates an llm call contributes $0 and the cap never trips.
+   */
+  maxCostUsd?: number;
+}
+
 export interface GateCondition {
   /** Step whose result is inspected; omitted means inspect the workflow input. */
   step?: string;
@@ -415,6 +496,7 @@ export type WorkflowStep =
   | ApprovalStep
   | MergeStep
   | CommandStep
+  | LlmStep
   | WorkflowCallStep;
 
 export interface WorkflowPhase {
@@ -830,6 +912,43 @@ const workflowCommandStepSchema = z.object({
   ...workspaceShape,
 });
 
+const llmPricingSchema = z.object({
+  inputPerMTok: z.number().nonnegative().optional(),
+  outputPerMTok: z.number().nonnegative().optional(),
+  cacheReadPerMTok: z.number().nonnegative().optional(),
+  cacheWritePerMTok: z.number().nonnegative().optional(),
+});
+
+const workflowLlmStepSchema = z
+  .object({
+    ...baseStepShape,
+    kind: z.literal("llm"),
+    provider: z.enum(["anthropic", "openai"]).optional(),
+    model: z.string().min(1),
+    prompt: z.string().min(1),
+    system: z.string().min(1).optional(),
+    maxTokens: z.number().int().positive().optional(),
+    temperature: z.number().min(0).max(2).optional(),
+    effort: z.string().min(1).optional(),
+    apiKeyEnv: z.string().min(1).optional(),
+    baseUrl: z.string().min(1).optional(),
+    stepTimeoutSec: z.number().positive().optional(),
+    retry: retryPolicySchema.optional(),
+    forEach: z.string().min(1).optional(),
+    output: outputJsonSchema.optional(),
+    itemsPath: z.string().min(1).optional(),
+    pricing: llmPricingSchema.optional(),
+    maxCostUsd: z.number().positive().optional(),
+  })
+  .superRefine((step, ctx) => {
+    if (step.itemsPath && !step.output) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "llm itemsPath requires an output schema",
+      });
+    }
+  });
+
 const workflowCallStepSchema = z.object({
   ...baseStepShape,
   kind: z.literal("workflow"),
@@ -845,6 +964,7 @@ const workflowStepSchema = z.union([
   workflowConsolidatorStepSchema,
   workflowMergeStepSchema,
   workflowCommandStepSchema,
+  workflowLlmStepSchema,
   workflowCallStepSchema,
   workflowWorkerStepSchema,
 ]);
@@ -1106,7 +1226,13 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
             : `step '${step.id}' when condition references unknown step '${step.when.step}'`,
         };
       }
-      if ((step.kind === "worker" || step.kind === "processor" || !step.kind) && step.forEach) {
+      if (
+        (step.kind === "worker" ||
+          step.kind === "processor" ||
+          step.kind === "llm" ||
+          !step.kind) &&
+        step.forEach
+      ) {
         const sourceStepId = parseForEachSource(step.forEach);
         if (!sourceStepId) {
           return {
@@ -1123,13 +1249,20 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
               : `step '${step.id}' forEach references unknown step '${sourceStepId}'`,
           };
         }
-        if (sourceStep?.kind !== "distributor") {
+        // An llm step with an `output` schema emits `items` from its structured
+        // array, so it is a valid fan-out source alongside distributors.
+        const validSource =
+          sourceStep?.kind === "distributor" ||
+          (sourceStep?.kind === "llm" && sourceStep.output !== undefined);
+        if (!validSource) {
           return {
             ok: false,
-            error: `step '${step.id}' forEach source '${sourceStepId}' must be a distributor step`,
+            error: `step '${step.id}' forEach source '${sourceStepId}' must be a distributor step (or an llm step with an output schema)`,
           };
         }
-        maxPossibleSteps += sourceStep.items?.length ?? 0;
+        if (sourceStep.kind === "distributor") {
+          maxPossibleSteps += sourceStep.items?.length ?? 0;
+        }
       }
       const wsSource = workspaceSourceId(step);
       if (wsSource) {

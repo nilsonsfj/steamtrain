@@ -5,7 +5,7 @@
   
 
 
-  var KIND_LABEL = { worker: "worker", processor: "process", distributor: "fan-out", consolidator: "merge", gate: "gate", approval: "approval", merge: "merge-back", command: "command", workflow: "sub-workflow" };
+  var KIND_LABEL = { worker: "worker", processor: "process", distributor: "fan-out", consolidator: "merge", gate: "gate", approval: "approval", merge: "merge-back", command: "command", llm: "llm", workflow: "sub-workflow" };
   var S = {
     workflows: [], selected: null, source: null, spec: null, agents: [],
     runId: null, es: null,
@@ -574,7 +574,7 @@
 
     canvas.appendChild(h("div", { class: "legend" },
       legendItem("worker", "worker"), legendItem("processor", "process"),
-      legendItem("distributor", "fan-out"), legendItem("consolidator", "merge"), legendItem("gate", "gate"), legendItem("approval", "approval"), legendItem("merge", "merge-back"), legendItem("command", "command"), legendItem("workflow", "sub-workflow")
+      legendItem("distributor", "fan-out"), legendItem("consolidator", "merge"), legendItem("gate", "gate"), legendItem("approval", "approval"), legendItem("merge", "merge-back"), legendItem("command", "command"), legendItem("llm", "llm"), legendItem("workflow", "sub-workflow")
     ));
 
     var maxIter = {};
@@ -632,7 +632,7 @@
     return h("span", null, i, label);
   }
   function kindColor(k) {
-    return { worker: "#6fb1ff", processor: "#9d8cff", distributor: "#ffce6f", consolidator: "#5fe0c6", gate: "#f0a35e", approval: "#ffd166", merge: "#ff9ecb", command: "#b8c4d0", workflow: "#7ce38b" }[k] || "#6fb1ff";
+    return { worker: "#6fb1ff", processor: "#9d8cff", distributor: "#ffce6f", consolidator: "#5fe0c6", gate: "#f0a35e", approval: "#ffd166", merge: "#ff9ecb", command: "#b8c4d0", llm: "#62d2f5", workflow: "#7ce38b" }[k] || "#6fb1ff";
   }
 
   function renderCard(s) {
@@ -650,6 +650,7 @@
       h("span", { class: "state " + s.status, text: stateLabel })
     ));
     if (s.agent) card.appendChild(h("div", { class: "agent", text: s.agent + (s.model ? " \u00b7 " + s.model : "") }));
+    else if (s.model) card.appendChild(h("div", { class: "agent", text: s.model }));
     if (s.dependsOn && s.dependsOn.length) card.appendChild(h("div", { class: "inputs", text: "inputs: " + s.dependsOn.join(", ") }));
     if (s.forEach) card.appendChild(h("div", { class: "inputs", text: "forEach: " + s.forEach }));
     if (s.loopTo) card.appendChild(h("div", { class: "inputs" },
@@ -1325,6 +1326,8 @@
         ? "gate: " + describeGate(st)
         : kind === "command"
           ? "$ " + (st.cmd || "")
+          : kind === "llm"
+          ? "api: " + ((st.provider || (st.model && st.model.indexOf("claude") === 0 ? "anthropic" : "openai")) + "/" + (st.model || ""))
           : kind === "workflow"
             ? "invokes workflow: " + (st.workflow || "") + (st.outputStep ? " · outputStep: " + st.outputStep : "")
             : (st.items ? "distributes " + st.items.length + " item(s)" : "passthrough merge (no agent)");
@@ -1735,6 +1738,7 @@
       text: plan.phaseCount + " phase" + (plan.phaseCount === 1 ? "" : "s") + " \u00b7 " +
             plan.staticStepCount + " step" + (plan.staticStepCount === 1 ? "" : "s") + " \u00b7 " +
             plan.agentCallCount + " agent call" + (plan.agentCallCount === 1 ? "" : "s") + " \u00b7 " +
+            (plan.llmCallCount || 0) + " llm call" + (plan.llmCallCount === 1 ? "" : "s") + " \u00b7 " +
             plan.deterministicCount + " deterministic"
     }));
     if (plan.agents.length > 0) {
@@ -1800,6 +1804,7 @@
           kindEl
         ));
         if (s.agent) card.appendChild(h("div", { class: "agent", text: s.agent + (s.model ? " \u00b7 " + s.model : "") }));
+        else if (s.model) card.appendChild(h("div", { class: "agent", text: (s.llmProvider ? s.llmProvider + "/" : "") + s.model }));
         if (s.dependsOn && s.dependsOn.length) card.appendChild(h("div", { class: "inputs", text: "depends: " + s.dependsOn.join(", ") }));
         if (s.forEachSource) card.appendChild(h("div", { class: "inputs", text: "forEach: " + s.forEachSource + (s.forEachCount ? " (" + s.forEachCount + " items)" : s.forEachDynamic ? " (dynamic)" : "") }));
         if (s.loopTo) card.appendChild(h("div", { class: "inputs" },

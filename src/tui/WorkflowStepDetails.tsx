@@ -13,6 +13,7 @@ import { AGENT_COLOR, WORKFLOW_SOURCE_COLOR } from "./theme";
 import {
   BLOCK_LABEL,
   type FlatSpecStep,
+  formatLlmTarget,
   formatWorkflowAgentTarget,
   promptForStep,
   specDetailLines,
@@ -204,6 +205,8 @@ function previewLines(
       })}`,
       color: AGENT_COLOR[step.agent] ?? "white",
     });
+  } else if (step.kind === "llm") {
+    lines.push({ text: `runner: ${formatLlmTarget(step)}`, color: "cyan" });
   }
 
   for (const line of specDetailLines(step)) {
@@ -224,7 +227,9 @@ function liveLines(phase: PhaseState, step: StepState, width: number): DetailLin
   const runner =
     step.agent && step.model
       ? formatWorkflowAgentTarget({ agent: step.agent, model: step.model, effort: step.effort })
-      : BLOCK_LABEL[step.blockKind];
+      : step.blockKind === "llm" && step.model
+        ? step.model
+        : BLOCK_LABEL[step.blockKind];
   const lines: DetailLine[] = [
     { text: `step: ${step.stepId}`, color: "cyan" },
     { text: `phase: ${phase.title} (${phase.phaseId})`, color: "gray" },

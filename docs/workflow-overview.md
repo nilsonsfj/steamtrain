@@ -195,6 +195,7 @@ flowchart LR
 | `gate` | evaluate a condition, emit state | no | readiness checks, quality bars |
 | `consolidator` | merge prior outputs | optional | reports, synthesis, dedupe |
 | `command` | run a deterministic shell command | no | tests, linters, builds, scripts |
+| `llm` | one direct, stateless LLM API call (no agent CLI) | no | judge, classify, summarize, split |
 | `merge` | land agent worktree changes in the repo | conflict resolution only | apply/branch/PR delivery |
 
 Steps without `kind` are treated as `worker` blocks for backward compatibility.
