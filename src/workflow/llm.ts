@@ -166,8 +166,12 @@ function buildRequestBody(request: LlmCallRequest): {
 } {
   const base = resolveLlmBaseUrl(request.provider, request.baseUrl);
   if (request.provider === "anthropic") {
+    // Tolerate a base URL that already ends in /v1 (the OpenAI convention,
+    // and what LiteLLM-style proxies expose) — appending /v1/messages to it
+    // would produce a /v1/v1/messages 404.
+    const root = base.replace(/\/v1$/, "");
     return {
-      url: `${base}/v1/messages`,
+      url: `${root}/v1/messages`,
       headers: {
         "content-type": "application/json",
         "x-api-key": request.apiKey,

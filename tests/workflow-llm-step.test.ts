@@ -823,6 +823,21 @@ describe("callLlm transport", () => {
     ]);
   });
 
+  it("tolerates an Anthropic baseUrl that already ends in /v1", async () => {
+    const capture: { url?: string; init?: RequestInit } = {};
+    await callLlm(
+      {
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        prompt: "p",
+        apiKey: "k",
+        baseUrl: "https://proxy.test/v1",
+      },
+      fetchStub(200, { content: [], usage: {} }, capture),
+    );
+    expect(capture.url).toBe("https://proxy.test/v1/messages");
+  });
+
   it("classifies HTTP failures as retryable or not", async () => {
     const rateLimited = await callLlm(
       { provider: "anthropic", model: "m", prompt: "p", apiKey: "k" },
