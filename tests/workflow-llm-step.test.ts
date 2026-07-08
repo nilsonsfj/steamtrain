@@ -706,6 +706,33 @@ describe("callLlm transport", () => {
     });
   });
 
+  it("omits unset optional fields from both providers' request bodies", async () => {
+    const anthropicCapture: { url?: string; init?: RequestInit } = {};
+    await callLlm(
+      { provider: "anthropic", model: "claude-opus-4-8", prompt: "p", apiKey: "k" },
+      fetchStub(200, { content: [], usage: {} }, anthropicCapture),
+    );
+    const anthropicBody = JSON.parse(String(anthropicCapture.init?.body));
+    for (const field of ["temperature", "system", "output_config"]) {
+      expect(anthropicBody).not.toHaveProperty(field);
+    }
+
+    const openaiCapture: { url?: string; init?: RequestInit } = {};
+    await callLlm(
+      { provider: "openai", model: "gpt-5", prompt: "p", apiKey: "k" },
+      fetchStub(200, { choices: [{ message: { content: "x" } }] }, openaiCapture),
+    );
+    const openaiBody = JSON.parse(String(openaiCapture.init?.body));
+    for (const field of [
+      "temperature",
+      "max_completion_tokens",
+      "reasoning_effort",
+      "response_format",
+    ]) {
+      expect(openaiBody).not.toHaveProperty(field);
+    }
+  });
+
   it("shapes an OpenAI-compatible request with JSON mode and parses usage", async () => {
     const capture: { url?: string; init?: RequestInit } = {};
     const result = await callLlm(
