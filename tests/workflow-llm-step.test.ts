@@ -453,6 +453,49 @@ describe("llm step execution", () => {
     expect(fanOut?.kind === "fan_out" && fanOut.count === 2).toBe(true);
   });
 
+  it("treats an empty splitter array as zero fan-out children (trivially ok)", async () => {
+    setKey();
+    const events = await runToEvents(
+      spec([
+        {
+          id: "p1",
+          title: "Split",
+          steps: [
+            {
+              id: "split",
+              kind: "llm",
+              model: "claude-opus-4-8",
+              apiKeyEnv: KEY_ENV,
+              prompt: "split",
+              output: { type: "array", items: { type: "string" } },
+            },
+          ],
+        },
+        {
+          id: "p2",
+          title: "Judge",
+          steps: [
+            {
+              id: "judge-each",
+              kind: "llm",
+              model: "claude-opus-4-8",
+              apiKeyEnv: KEY_ENV,
+              dependsOn: ["split"],
+              forEach: "steps.split.items",
+              prompt: "judge {{item}}",
+            },
+          ],
+        },
+      ]),
+      llmDeps(async () => okResult("[]")),
+    );
+    // No items → no work → ok, matching distributor fan-out semantics.
+    expect(workflowOk(events)).toBe(true);
+    const parent = doneResults(events).get("judge-each");
+    expect(parent?.ok).toBe(true);
+    expect(parent?.childResults).toEqual([]);
+  });
+
   it("fails the step when itemsPath does not resolve to an array", async () => {
     setKey();
     const events = await runToEvents(

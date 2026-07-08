@@ -427,6 +427,10 @@ const tour: WorkflowSpec = {
  * only `ANTHROPIC_API_KEY` in the environment — so it runs in CI and on
  * machines with no agent installed. (The other bundled workflows keep their
  * agent-backed free-tier models on purpose: they must run with zero API keys.)
+ *
+ * The model on each step is swappable without forking: session overrides
+ * (`{ steps: { concerns: { model: "…" } } }` via the TUI editor or the web
+ * API) patch llm steps' `model`/`prompt`/`effort` like any agent step's.
  */
 const quickTriage: WorkflowSpec = {
   name: "quick-triage",
