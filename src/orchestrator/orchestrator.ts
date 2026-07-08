@@ -5,7 +5,7 @@ import {
   resolveAgentInstance,
 } from "../agents";
 import { DEFAULT_CONFIG, type SteamtrainConfig } from "../config";
-import type { DoctorResult } from "../doctor";
+import { type DoctorResult, collectLlmKeyRequirements } from "../doctor";
 import type { AgentEvent, AgentInstanceId } from "../types/events";
 import {
   type LoadedWorkflowCatalog,
@@ -57,6 +57,21 @@ export class Orchestrator {
 
   setDoctor(results: DoctorResult[]): void {
     this.doctor = [...results];
+  }
+
+  /** Current preflight results (agents + any llm-key checks set since startup). */
+  getDoctor(): DoctorResult[] {
+    return [...this.doctor];
+  }
+
+  /**
+   * Replace only the llm-key readiness entries, preserving agent results. Used
+   * by the TUI/web run-start so each run's key checks refresh without erasing
+   * the cached agent binary health.
+   */
+  setLlmDoctor(checks: DoctorResult[]): void {
+    const agentResults = this.doctor.filter((d) => d.category === "agent");
+    this.doctor = [...agentResults, ...checks];
   }
 
   /** The reasoning config (binaries, timeouts) this orchestrator was built with. */
@@ -181,6 +196,21 @@ export class Orchestrator {
       if (health.status !== "ok") {
         const detail = health.detail ?? health.message;
         return { ok: false, reason: `${agent} is ${health.status} — ${detail}` };
+      }
+    }
+
+    // `llm` steps need only their provider API key (read from the env at run
+    // time). Gate on it here so an llm-only workflow fails fast at preflight
+    // instead of dying mid-run when the first `llm` step fires. We read
+    // process.env directly (not `this.doctor`) because the doctor panel is
+    // only a snapshot and env can change between startup and dispatch — the
+    // same pattern the engine uses at run time.
+    for (const req of collectLlmKeyRequirements(spec)) {
+      if (!process.env[req.envVar]) {
+        return {
+          ok: false,
+          reason: `llm API key missing: set ${req.envVar} to run workflows with ${req.provider} llm steps`,
+        };
       }
     }
     return { ok: true };

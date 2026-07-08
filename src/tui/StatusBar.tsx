@@ -36,7 +36,7 @@ export function StatusBar({
           <Text color="gray">running preflight…</Text>
         ) : (
           doctor.map((d, i) => (
-            <Box key={d.agent}>
+            <Box key={`${d.category}:${d.agent ?? d.requirement ?? i}`}>
               {i > 0 ? <Text color="gray">{"   "}</Text> : null}
               <AgentStatus result={d} />
             </Box>
@@ -69,10 +69,12 @@ export function StatusBar({
 
 function AgentStatus({ result }: { result: DoctorResult }) {
   const style = STATUS_STYLE[result.status];
+  const label =
+    result.category === "llm-key" ? (result.requirement ?? "llm key") : (result.agent ?? "unknown");
   return (
     <Text>
       <Text color={style.color}>{style.symbol}</Text>
-      <Text bold> {result.agent}</Text>
+      <Text bold> {label}</Text>
       <Text color="gray"> {style.label}</Text>
     </Text>
   );

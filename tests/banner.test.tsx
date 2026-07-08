@@ -14,8 +14,16 @@ describe("TUI components", () => {
 
   it("renders per-agent doctor status in the status bar", () => {
     const doctor: DoctorResult[] = [
-      { agent: "claude", provider: "claude", status: "ok", binary: "claude", message: "ready" },
       {
+        category: "agent",
+        agent: "claude",
+        provider: "claude",
+        status: "ok",
+        binary: "claude",
+        message: "ready",
+      },
+      {
+        category: "agent",
         agent: "opencode",
         provider: "opencode",
         status: "binary_missing",
@@ -23,6 +31,7 @@ describe("TUI components", () => {
         message: "'opencode' not found on PATH",
       },
       {
+        category: "agent",
         agent: "codex",
         provider: "codex",
         status: "not_authenticated",
@@ -39,5 +48,32 @@ describe("TUI components", () => {
     expect(frame).toContain("opencode");
     expect(frame).toContain("codex");
     expect(frame).toContain("missing");
+  });
+
+  it("renders llm-key doctor entries with env var name", () => {
+    const doctor: DoctorResult[] = [
+      {
+        category: "llm-key",
+        provider: "anthropic",
+        requirement: "ANTHROPIC_API_KEY",
+        status: "api_key_missing",
+        message: "ANTHROPIC_API_KEY not set",
+        detail: "Set ANTHROPIC_API_KEY in the environment.",
+      },
+      {
+        category: "llm-key",
+        provider: "openai",
+        requirement: "OPENAI_API_KEY",
+        status: "ok",
+        message: "OPENAI_API_KEY set",
+      },
+    ];
+    const { lastFrame } = render(
+      <StatusBar doctor={doctor} configSource="defaults" workspaceLabel="user" running={false} />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("ANTHROPIC_API_KEY");
+    expect(frame).toContain("OPENAI_API_KEY");
+    expect(frame).toContain("no key");
   });
 });

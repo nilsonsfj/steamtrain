@@ -37,6 +37,7 @@ function makeCatalog(
 
 function healthyDoctor(agent: string, provider: string = agent): DoctorResult {
   return {
+    category: "agent",
     agent,
     provider: provider as DoctorResult["provider"],
     status: "ok",
@@ -47,6 +48,7 @@ function healthyDoctor(agent: string, provider: string = agent): DoctorResult {
 
 function unhealthyDoctor(agent: string, provider: string = agent): DoctorResult {
   return {
+    category: "agent",
     agent,
     provider: provider as DoctorResult["provider"],
     status: "unknown_error",
@@ -168,6 +170,150 @@ describe("Orchestrator", () => {
     );
     const result = orch.canDispatchWorkflowSpec(demoSpec);
     expect(result.ok).toBe(false);
+  });
+
+  it("canDispatchWorkflowSpec rejects llm step when API key is missing", () => {
+    const llmSpec: WorkflowSpec = {
+      name: "llm-test",
+      phases: [
+        {
+          id: "p1",
+          title: "phase 1",
+          steps: [
+            {
+              id: "judge",
+              kind: "llm",
+              model: "claude-opus-4-8",
+              prompt: "Judge {{input}}",
+            },
+          ],
+        },
+      ],
+    };
+    const orch = new Orchestrator(
+      makeConfig(),
+      makeWorkspaces("ws1"),
+      [],
+      makeCatalog({ "llm-test": llmSpec }, { "llm-test": "bundled" }),
+    );
+    const orig = process.env.ANTHROPIC_API_KEY;
+    try {
+      // biome-ignore lint/performance/noDelete: setting to undefined sets the string "undefined" which is truthy
+      delete process.env.ANTHROPIC_API_KEY;
+      const result = orch.canDispatchWorkflowSpec(llmSpec);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toContain("ANTHROPIC_API_KEY");
+        expect(result.reason).toContain("llm API key missing");
+      }
+    } finally {
+      if (orig !== undefined) process.env.ANTHROPIC_API_KEY = orig;
+    }
+  });
+
+  it("canDispatchWorkflowSpec accepts llm step when API key is present", () => {
+    const llmSpec: WorkflowSpec = {
+      name: "llm-ok",
+      phases: [
+        {
+          id: "p1",
+          title: "phase 1",
+          steps: [
+            {
+              id: "judge",
+              kind: "llm",
+              model: "claude-opus-4-8",
+              prompt: "Judge {{input}}",
+            },
+          ],
+        },
+      ],
+    };
+    const orch = new Orchestrator(
+      makeConfig(),
+      makeWorkspaces("ws1"),
+      [],
+      makeCatalog({ "llm-ok": llmSpec }, { "llm-ok": "bundled" }),
+    );
+    const orig = process.env.ANTHROPIC_API_KEY;
+    try {
+      process.env.ANTHROPIC_API_KEY = "sk-test";
+      const result = orch.canDispatchWorkflowSpec(llmSpec);
+      expect(result).toEqual({ ok: true });
+    } finally {
+      if (orig !== undefined) process.env.ANTHROPIC_API_KEY = orig;
+      // biome-ignore lint/performance/noDelete: must remove env var entirely, not set to "undefined" string
+      else delete process.env.ANTHROPIC_API_KEY;
+    }
+  });
+
+  it("canDispatchWorkflowSpec rejects mixed agent+llm when key missing", () => {
+    const mixedSpec: WorkflowSpec = {
+      name: "mixed",
+      phases: [
+        {
+          id: "p1",
+          title: "phase 1",
+          steps: [
+            {
+              id: "llm-step",
+              kind: "llm",
+              model: "claude-opus-4-8",
+              prompt: "judge",
+            },
+            {
+              id: "agent-step",
+              kind: "worker",
+              agent: "opencode",
+              model: "m",
+              prompt: "{{input}}",
+            },
+          ],
+        },
+      ],
+    };
+    const orch = new Orchestrator(
+      makeConfig(),
+      makeWorkspaces("ws1"),
+      [healthyDoctor("opencode")],
+      makeCatalog({ mixed: mixedSpec }, { mixed: "bundled" }),
+    );
+    const orig = process.env.ANTHROPIC_API_KEY;
+    try {
+      // biome-ignore lint/performance/noDelete: must remove env var entirely, not set to "undefined" string
+      delete process.env.ANTHROPIC_API_KEY;
+      const result = orch.canDispatchWorkflowSpec(mixedSpec);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toContain("ANTHROPIC_API_KEY");
+      }
+    } finally {
+      if (orig !== undefined) process.env.ANTHROPIC_API_KEY = orig;
+    }
+  });
+
+  it("setLlmDoctor preserves agent results when refreshing llm-key entries", () => {
+    const orch = new Orchestrator(
+      makeConfig(),
+      makeWorkspaces("ws1"),
+      [healthyDoctor("opencode")],
+      makeCatalog({ demo: demoSpec }, { demo: "bundled" }),
+    );
+    orch.setLlmDoctor([
+      {
+        category: "llm-key",
+        provider: "anthropic",
+        requirement: "ANTHROPIC_API_KEY",
+        status: "api_key_missing",
+        message: "missing",
+      },
+    ]);
+    const doctor = orch.getDoctor();
+    expect(doctor).toHaveLength(2);
+    expect(doctor.some((d) => d.category === "agent" && d.agent === "opencode")).toBe(true);
+    expect(
+      doctor.some((d) => d.category === "llm-key" && d.requirement === "ANTHROPIC_API_KEY"),
+    ).toBe(true);
   });
 
   it("run throws for unknown workspace", () => {

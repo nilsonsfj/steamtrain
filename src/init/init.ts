@@ -59,10 +59,13 @@ export async function runInitCommand(
 
   // 1. Agent readiness, with copy-paste fixes for anything not ok.
   out("\nchecking agents (a fresh machine can take a few seconds per agent)…\n");
-  const doctor = await (deps.doctor ?? runDoctor)(config);
+  const allDoctor = await (deps.doctor ?? runDoctor)(config);
+  const doctor = allDoctor.filter((r) => r.category === "agent");
   out("\nagents\n");
   for (const result of doctor) {
-    out(`  ${statusGlyph(result.status)} ${result.agent.padEnd(10)} ${statusLine(result)}\n`);
+    out(
+      `  ${statusGlyph(result.status)} ${(result.agent ?? "unknown").padEnd(10)} ${statusLine(result)}\n`,
+    );
     if (result.status !== "ok" && result.detail) out(`      fix: ${result.detail}\n`);
   }
   const ready = doctor.filter((result) => result.status === "ok");
@@ -92,10 +95,10 @@ export async function runInitCommand(
     });
   }
   const firstReady = ready[0];
-  const implementModel = firstReady ? defaultModelForAgent(firstReady.agent, config) : undefined;
+  const implementModel = firstReady ? defaultModelForAgent(firstReady.agent!, config) : undefined;
   if (firstReady && implementModel && detection.testCheck) {
     offers.push({
-      spec: buildImplementVerifiedWorkflow(firstReady.agent, implementModel, detection.testCheck),
+      spec: buildImplementVerifiedWorkflow(firstReady.agent!, implementModel, detection.testCheck),
       why: `${firstReady.agent} implements, ${detection.testCheck.label} verifies, only passing changes land`,
     });
   }
@@ -220,6 +223,7 @@ function statusGlyph(status: DoctorResult["status"]): string {
     case "binary_missing":
       return "✗";
     case "not_authenticated":
+    case "api_key_missing":
     case "unknown_error":
       return "!";
     default:

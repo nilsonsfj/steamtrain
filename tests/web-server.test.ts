@@ -164,6 +164,7 @@ function makeServer(host: WorkflowHost): { server: Server; runs: WorkflowRunMana
     workflowSource: () => "bundled",
     doctor: () => [
       {
+        category: "agent",
         agent: "opencode",
         provider: "opencode",
         status: "ok",

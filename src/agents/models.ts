@@ -258,16 +258,25 @@ export async function refreshAgentCatalogCaches(
 ): Promise<boolean> {
   let refreshed = false;
 
-  const opencode = doctor.find((d) => d.provider === "opencode" && d.status === "ok");
+  const opencode = doctor.find(
+    (d) => d.category === "agent" && d.provider === "opencode" && d.status === "ok",
+  );
   if (opencode?.status === "ok") {
     const binary =
-      resolveAgentInstance(config, opencode.agent)?.binary ?? opencode.binaryPath ?? "opencode";
+      (opencode.agent ? resolveAgentInstance(config, opencode.agent)?.binary : undefined) ??
+      opencode.binaryPath ??
+      "opencode";
     if (await refreshOpencodeVariantCache(binary)) refreshed = true;
   }
 
-  const codex = doctor.find((d) => d.provider === "codex" && d.status === "ok");
+  const codex = doctor.find(
+    (d) => d.category === "agent" && d.provider === "codex" && d.status === "ok",
+  );
   if (codex?.status === "ok") {
-    const binary = resolveAgentInstance(config, codex.agent)?.binary ?? codex.binaryPath ?? "codex";
+    const binary =
+      (codex.agent ? resolveAgentInstance(config, codex.agent)?.binary : undefined) ??
+      codex.binaryPath ??
+      "codex";
     if (await refreshCodexVariantCache(binary)) refreshed = true;
   }
 

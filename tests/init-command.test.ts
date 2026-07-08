@@ -18,6 +18,7 @@ async function tempDir(): Promise<string> {
 
 function doctorResult(overrides: Partial<DoctorResult>): DoctorResult {
   return {
+    category: "agent",
     agent: "claude",
     provider: "claude",
     status: "ok",

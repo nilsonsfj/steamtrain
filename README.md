@@ -407,11 +407,16 @@ At startup, before any dispatch, steamtrain checks each agent:
 
 1. resolve the absolute binary on `PATH` (→ `binary_missing` with an install hint if absent),
 2. run `<binary> --version` to confirm it executes,
-3. classify readiness as `ok | binary_missing | not_authenticated | unknown_error`
+3. classify readiness as `ok | binary_missing | not_authenticated | api_key_missing | unknown_error`
    from exit code + stderr.
 
-The status bar shows a green/amber/red dot per agent, and **dispatch is blocked**
-for any task whose agent isn't `ok`, with a fix-it message.
+For `llm` steps, preflight also verifies the required API-key env var
+(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or a step-specific override) is set,
+surfacing `api_key_missing` when absent.
+
+The status bar shows a green/amber/red dot per agent (and per llm provider),
+and **dispatch is blocked** for any task whose agent isn't `ok` or whose
+required llm API key is missing.
 
 > `claude --version` returns success even when logged out, so the doctor can show
 > claude as `ready` while a dispatch later surfaces "Not logged in" as an `error`

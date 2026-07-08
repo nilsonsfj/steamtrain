@@ -135,6 +135,7 @@ describe("agent configuration", () => {
       workspaces,
       [
         {
+          category: "agent",
           agent: "opencode-fork",
           provider: "opencode",
           status: "ok",

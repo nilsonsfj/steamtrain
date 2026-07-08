@@ -9,7 +9,7 @@ import { refreshAgentCatalogCaches } from "../agents/models";
 import type { SteamtrainConfig } from "../config";
 import { parseAgentsConfig } from "../config";
 import { saveProjectConfig } from "../config/project-config";
-import { type DoctorResult, runDoctor } from "../doctor";
+import { type DoctorResult, checkLlmApiKeysForCatalog, runDoctor } from "../doctor";
 import { Orchestrator } from "../orchestrator";
 import {
   DEFAULT_STEP_TIMEOUT_SEC,
@@ -591,7 +591,9 @@ async function handle(
     Object.assign(deps.config, saved.config);
     if (hasAgents) {
       try {
-        const results = await runDoctor(deps.config);
+        const agentResults = await runDoctor(deps.config);
+        const llmResults = checkLlmApiKeysForCatalog(Object.values(deps.host.listWorkflows()));
+        const results = [...agentResults, ...llmResults];
         deps.setDoctor?.(results);
         await refreshAgentCatalogCaches(deps.config, results);
       } catch {
@@ -1214,11 +1216,15 @@ export async function startWebUi(
 
   void (async () => {
     try {
-      const results = await runDoctor(liveConfig);
+      const agentResults = await runDoctor(liveConfig);
+      const llmResults = checkLlmApiKeysForCatalog(Object.values(orchestrator.listWorkflows()));
+      const results = [...agentResults, ...llmResults];
       orchestrator.setDoctor(results);
       await refreshAgentCatalogCaches(liveConfig, results);
       doctorState.results = results;
-      const bad = results.filter((d) => d.status !== "ok").map((d) => d.agent);
+      const bad = results
+        .filter((d) => d.status !== "ok")
+        .map((d) => d.agent ?? d.requirement ?? d.label ?? "?");
       out(
         bad.length
           ? `   agent health: ${results.length - bad.length}/${results.length} ok (down: ${bad.join(", ")})\n`

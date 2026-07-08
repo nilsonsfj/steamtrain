@@ -6,6 +6,7 @@ export const STATUS_STYLE: Record<DoctorStatus, { color: string; symbol: string;
     ok: { color: "green", symbol: "●", label: "ready" },
     binary_missing: { color: "red", symbol: "●", label: "missing" },
     not_authenticated: { color: "yellow", symbol: "●", label: "auth" },
+    api_key_missing: { color: "red", symbol: "●", label: "no key" },
     unknown_error: { color: "red", symbol: "●", label: "error" },
   };
 

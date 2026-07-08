@@ -23,6 +23,7 @@ function doctor(
   statuses: Partial<Record<AgentInstanceId, DoctorResult["status"]>>,
 ): DoctorResult[] {
   return (Object.keys(statuses) as AgentInstanceId[]).map((agent) => ({
+    category: "agent" as const,
     agent,
     provider: (["claude", "opencode", "codex", "amp"].includes(agent)
       ? agent

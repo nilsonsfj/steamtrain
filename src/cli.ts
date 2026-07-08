@@ -10,7 +10,7 @@ import {
   loadConfig,
   saveProjectWorkflow,
 } from "./config";
-import { runDoctor } from "./doctor";
+import { checkLlmApiKeys, runDoctor } from "./doctor";
 import { runInitCommand } from "./init";
 import { Orchestrator } from "./orchestrator";
 import { loadSettings } from "./settings";
@@ -1012,18 +1012,21 @@ async function runWorkflowCommand(
   const templateWarnings = lintTemplateRefs(spec);
   for (const w of templateWarnings) out(`warn: ${w}\n`);
 
-  // Agentless workflows (only distributors / consolidators / gates) never spawn
-  // a CLI, so skip the doctor + catalog refresh — they would otherwise spawn
-  // real agent binaries just to gate a run that needs none.
+  // Agentless workflows (only distributors / consolidators / gates / llm steps)
+  // never spawn an agent CLI, so skip the agent binary preflight — but still
+  // check their llm API keys so a missing key fails fast here, not mid-run.
+  const llmChecks = checkLlmApiKeys(spec);
   if (workflowAgentIds(spec).length > 0) {
-    const doctor = await runDoctor(config);
-    orchestrator.setDoctor(doctor);
-    await refreshAgentCatalogCaches(config, doctor);
-    const check = orchestrator.canDispatchWorkflow(name);
-    if (!check.ok) {
-      err(`cannot run '${name}': ${check.reason}\n`);
-      return 1;
-    }
+    const agentDoctor = await runDoctor(config);
+    orchestrator.setDoctor([...agentDoctor, ...llmChecks]);
+    await refreshAgentCatalogCaches(config, [...agentDoctor, ...llmChecks]);
+  } else {
+    orchestrator.setDoctor(llmChecks);
+  }
+  const check = orchestrator.canDispatchWorkflow(name);
+  if (!check.ok) {
+    err(`cannot run '${name}': ${check.reason}\n`);
+    return 1;
   }
 
   const store = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));

@@ -459,6 +459,7 @@ function makeServer(host: FakeHost, adapter?: (id: AgentId) => AgentAdapter): Se
     workflowSource: (name) => host.workflowSource(name),
     doctor: () => [
       {
+        category: "agent",
         agent: "opencode",
         provider: "opencode",
         status: "ok",

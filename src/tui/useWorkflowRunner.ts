@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { checkLlmApiKeys } from "../doctor";
 import type { Orchestrator } from "../orchestrator";
 import type { ApprovalDecision, ApprovalProvider, StepResult, WorkflowSpec } from "../workflow";
 import { matchApprovalKey } from "../workflow";
@@ -96,6 +97,9 @@ export function useWorkflowRunner({
         setWfNotice(`unknown workflow '${name}'`);
         return false;
       }
+      // Refresh this workflow's llm API-key readiness into the preflight panel
+      // (agent health is already cached from startup) before gating the run.
+      orchestrator.setLlmDoctor(checkLlmApiKeys(spec));
       const check = orchestrator.canDispatchWorkflowSpec(spec);
       if (!check.ok) {
         setWfNotice(`cannot run '${name}': ${check.reason}`);

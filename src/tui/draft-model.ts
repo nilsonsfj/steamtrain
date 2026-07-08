@@ -47,7 +47,7 @@ function draftAgentOrder(config?: SteamtrainConfig): AgentInstanceId[] {
 export function healthyAgentSet(doctor: DoctorResult[] | null): Set<AgentInstanceId> {
   const set = new Set<AgentInstanceId>();
   if (!doctor) return set;
-  for (const d of doctor) if (d.status === "ok") set.add(d.agent);
+  for (const d of doctor) if (d.agent && d.status === "ok") set.add(d.agent);
   return set;
 }
 

@@ -5,17 +5,31 @@ import { DEFAULT_AGENT_BINARY, resolveAgentInstances } from "../agents/config";
 import { firstLine } from "../agents/util";
 import type { SteamtrainConfig } from "../config/types";
 import type { AgentInstanceId, AgentProviderId } from "../types/events";
+import { type LlmProviderId, llmApiKeyEnvName, resolveLlmProvider } from "../workflow/llm";
+import { type LlmStep, type WorkflowSpec, workflowStepKind } from "../workflow/types";
 
-export type DoctorStatus = "ok" | "binary_missing" | "not_authenticated" | "unknown_error";
+export type DoctorStatus =
+  | "ok"
+  | "binary_missing"
+  | "not_authenticated"
+  | "unknown_error"
+  | "api_key_missing";
 
 export interface DoctorResult {
-  agent: AgentInstanceId;
-  provider: AgentProviderId;
+  /** What this readiness entry checks: an agent CLI, or an llm-step API key. */
+  category: "agent" | "llm-key";
+  /** Agent instance id (agent checks only). */
+  agent?: AgentInstanceId;
+  /** For display: an agent provider, or "anthropic"/"openai" for llm keys. */
+  provider?: AgentProviderId | LlmProviderId;
   label?: string;
   status: DoctorStatus;
-  binary: string;
+  /** Agent binary (agent checks only). */
+  binary?: string;
   binaryPath?: string;
   version?: string;
+  /** For llm-key checks: the env var that must be set (e.g. "ANTHROPIC_API_KEY"). */
+  requirement?: string;
   /** Short status line for the panel. */
   message: string;
   /** Actionable fix-it hint when not ok. */
@@ -115,6 +129,7 @@ export async function checkAgent(
   const binaryPath = await resolveBinary(binary);
   if (!binaryPath) {
     return {
+      category: "agent",
       agent,
       provider,
       label: options.label,
@@ -129,6 +144,7 @@ export async function checkAgent(
   if (run.timedOut) {
     return {
       agent,
+      category: "agent",
       provider,
       label: options.label,
       status: "unknown_error",
@@ -142,6 +158,7 @@ export async function checkAgent(
   const combined = `${run.stdout}\n${run.stderr}`;
   if ((run.code ?? 1) === 0) {
     return {
+      category: "agent",
       agent,
       provider,
       label: options.label,
@@ -155,6 +172,7 @@ export async function checkAgent(
 
   if (AUTH_PATTERN.test(combined)) {
     return {
+      category: "agent",
       agent,
       provider,
       label: options.label,
@@ -167,6 +185,7 @@ export async function checkAgent(
   }
 
   return {
+    category: "agent",
     agent,
     provider,
     label: options.label,
@@ -189,6 +208,76 @@ export function runDoctor(config: SteamtrainConfig): Promise<DoctorResult[]> {
       }),
     ),
   );
+}
+
+/** A distinct API key a workflow's `llm` steps need at runtime. */
+export interface LlmKeyRequirement {
+  provider: LlmProviderId;
+  /** Env var holding the key, e.g. "ANTHROPIC_API_KEY". */
+  envVar: string;
+}
+
+/**
+ * Distinct API-key requirements of a workflow's `llm` steps. Each `llm` step
+ * resolves to a provider (explicit, or inferred from the model name) and an env
+ * var holding the key (step override, else the provider's convention). The
+ * result is deduped by env var, so a workflow with many anthropic steps yields
+ * a single `ANTHROPIC_API_KEY` entry.
+ */
+export function collectLlmKeyRequirements(spec: WorkflowSpec): LlmKeyRequirement[] {
+  const byEnv = new Map<string, LlmKeyRequirement>();
+  for (const phase of spec.phases) {
+    for (const step of phase.steps) {
+      if (workflowStepKind(step) !== "llm") continue;
+      const llm = step as LlmStep;
+      const provider = resolveLlmProvider(llm);
+      const envVar = llmApiKeyEnvName(provider, llm.apiKeyEnv);
+      if (!byEnv.has(envVar)) byEnv.set(envVar, { provider, envVar });
+    }
+  }
+  return [...byEnv.values()];
+}
+
+/**
+ * Preflight readiness of a workflow's `llm` API keys against the environment.
+ * An `llm` step is stateless and needs only its provider key (read from the
+ * env at run time); surfacing a missing key here lets the run fail fast at the
+ * preflight panel instead of mid-run when the first `llm` step fires.
+ */
+export function checkLlmApiKeys(
+  spec: WorkflowSpec,
+  env: Record<string, string | undefined> = process.env,
+): DoctorResult[] {
+  return collectLlmKeyRequirements(spec).map((req) => {
+    const present = !!env[req.envVar];
+    const providerLabel = req.provider === "anthropic" ? "Anthropic" : "OpenAI-compatible";
+    return {
+      category: "llm-key",
+      provider: req.provider,
+      requirement: req.envVar,
+      label: `${providerLabel} (${req.envVar})`,
+      status: present ? "ok" : "api_key_missing",
+      message: present ? `${req.envVar} set` : `${req.envVar} not set`,
+      detail: present
+        ? undefined
+        : `Set ${req.envVar} in the environment to run workflows with ${req.provider} llm steps.`,
+    };
+  });
+}
+
+/** Union of llm-key requirements across several workflows (for a global preflight panel). */
+export function checkLlmApiKeysForCatalog(
+  specs: WorkflowSpec[],
+  env: Record<string, string | undefined> = process.env,
+): DoctorResult[] {
+  const byEnv = new Map<string, DoctorResult>();
+  for (const spec of specs) {
+    for (const check of checkLlmApiKeys(spec, env)) {
+      const key = `${check.category}:${check.requirement ?? ""}`;
+      if (!byEnv.has(key)) byEnv.set(key, check);
+    }
+  }
+  return [...byEnv.values()];
 }
 
 function installHint(agent: AgentProviderId): string {
