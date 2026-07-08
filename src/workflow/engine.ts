@@ -808,6 +808,7 @@ async function runSingleStep(
         blockKind: workflowStepKind(step),
         agent: agentBacked?.agent,
         model: agentBacked?.model ?? llm?.model,
+        effort: agentBacked?.effort ?? llm?.effort,
         cwd: "cwd" in step ? step.cwd : undefined,
         dependsOn: step.dependsOn,
         parentStepId: step.id,
