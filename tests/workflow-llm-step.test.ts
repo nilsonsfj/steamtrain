@@ -510,6 +510,44 @@ describe("llm step execution", () => {
     expect(result?.costUsd).toBeCloseTo(5 + 25 * 0.2, 10);
   });
 
+  it("keeps tokens and cost when a cancel races with a completed call", async () => {
+    setKey();
+    const controller = new AbortController();
+    const events: WorkflowEvent[] = [];
+    const run = runWorkflow(
+      spec([
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            {
+              id: "judge",
+              kind: "llm",
+              model: "claude-opus-4-8",
+              apiKeyEnv: KEY_ENV,
+              prompt: "x",
+              pricing: { inputPerMTok: 5 },
+            },
+          ],
+        },
+      ]),
+      { input: "task" },
+      llmDeps(async () => {
+        // The call completed on the provider side, but the run was cancelled
+        // while it was in flight — the spend is real and must be recorded.
+        controller.abort();
+        return { ok: true, text: "done", tokens: { input: 1_000_000, output: 0 } };
+      }),
+      controller.signal,
+    );
+    for await (const ev of run) events.push(ev);
+    const result = doneResults(events).get("judge");
+    expect(result?.ok).toBe(false);
+    expect(result?.error).toBe("cancelled");
+    expect(result?.tokens).toEqual({ input: 1_000_000, output: 0 });
+    expect(result?.costUsd).toBeCloseTo(5, 10);
+  });
+
   it("carries model and effort on the step_start event for cost attribution", async () => {
     setKey();
     const events = await runToEvents(
