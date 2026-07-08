@@ -1,5 +1,6 @@
 import type { TokenUsage } from "../types/events";
 import type { HistoryPhase, HistoryStep, RunRecord } from "./history";
+import { llmStepApiId } from "./llm";
 import type { StepResult, WorkflowSpec } from "./types";
 
 /**
@@ -86,14 +87,16 @@ export function formatTokenSummary(t: TokenUsage | undefined): string {
   return `${formatTokens(total)} tok (${parts.join(" · ")})`;
 }
 
-/** Aggregate cost + tokens attributed to one model (or agent/model pair). */
+/** Aggregate cost + tokens attributed to one model (or agent/model, api/model pair). */
 export interface ModelUsage {
-  /** Display key: model string (or `agent/model` when both are known). */
+  /** Display key: model string (or `agent/model` / `api/model` when the runner is known). */
   model: string;
   /** The configured model string (as declared on the step). */
   modelId?: string;
   /** The agent instance that ran the model, when known. */
   agent?: string;
+  /** The API instance a direct-inference `llm` step called, when known. */
+  api?: string;
   costUsd: number;
   tokens: Required<TokenUsage>;
   /** Number of leaf steps (agent invocations) attributed to this model. */
@@ -138,16 +141,23 @@ function ensureModel(
  */
 export interface LeafUsage {
   agent?: string;
+  /** API instance for direct-inference `llm` leaves (mutually exclusive with `agent`). */
+  api?: string;
   model?: string;
   costUsd?: number;
   tokens?: TokenUsage;
 }
 
-/** The display key for a model breakdown row: `agent/model`, or `model`, or agent, or "unknown". */
-export function modelKey(leaf: { agent?: string; model?: string }): string {
-  if (leaf.model && leaf.agent) return `${leaf.agent}/${leaf.model}`;
+/**
+ * The display key for a model breakdown row: `<runner>/model`, or `model`, or
+ * the bare runner, or "unknown" — where the runner is the agent instance for
+ * agent-backed leaves and the API instance for direct-inference `llm` leaves.
+ */
+export function modelKey(leaf: { agent?: string; api?: string; model?: string }): string {
+  const runner = leaf.agent ?? leaf.api;
+  if (leaf.model && runner) return `${runner}/${leaf.model}`;
   if (leaf.model) return leaf.model;
-  if (leaf.agent) return leaf.agent;
+  if (runner) return runner;
   return "unknown";
 }
 
@@ -156,7 +166,7 @@ export function aggregateLeavesByModel(leaves: Iterable<LeafUsage>): ModelUsage[
   const map = new Map<string, ModelUsage>();
   for (const leaf of leaves) {
     const key = modelKey(leaf);
-    const entry = ensureModel(map, key, { modelId: leaf.model, agent: leaf.agent });
+    const entry = ensureModel(map, key, { modelId: leaf.model, agent: leaf.agent, api: leaf.api });
     entry.costUsd += leaf.costUsd ?? 0;
     addTokensInto(entry.tokens, leaf.tokens);
     entry.steps += 1;
@@ -181,6 +191,7 @@ export function* recordLeaves(phases: HistoryPhase[]): Generator<LeafUsage & { s
       yield {
         stepId: step.parentStepId ? step.parentStepId : step.stepId,
         agent: step.agent,
+        api: step.api,
         model: step.model,
         costUsd: step.result?.costUsd,
         tokens: step.result?.tokens,
@@ -267,16 +278,17 @@ export function aggregateCosts(records: RunRecord[]): CostAnalytics {
   };
 }
 
-/** Build a `stepId → { agent, model }` map from a spec, for attributing live results. */
+/** Build a `stepId → { agent, api, model }` map from a spec, for attributing live results. */
 export function stepMetaFromSpec(
   spec: WorkflowSpec,
-): Map<string, { agent?: string; model?: string }> {
-  const map = new Map<string, { agent?: string; model?: string }>();
+): Map<string, { agent?: string; api?: string; model?: string }> {
+  const map = new Map<string, { agent?: string; api?: string; model?: string }>();
   for (const phase of spec.phases) {
     for (const step of phase.steps) {
       const agent = "agent" in step ? step.agent : undefined;
+      const api = step.kind === "llm" ? llmStepApiId(step) : undefined;
       const model = "model" in step ? step.model : undefined;
-      map.set(step.id, { agent, model });
+      map.set(step.id, { agent, api, model });
     }
   }
   return map;
@@ -293,13 +305,19 @@ export function stepMetaFromSpec(
  */
 export function* resultLeaves(
   results: StepResult[],
-  stepMeta: Map<string, { agent?: string; model?: string }>,
+  stepMeta: Map<string, { agent?: string; api?: string; model?: string }>,
 ): Generator<LeafUsage> {
   for (const r of results) {
     if (r.childResults?.length) continue; // parent — its children appear flat
     if (r.notRun) continue; // budget-truncated placeholder — not a real leaf
     const meta = stepMeta.get(r.parentStepId ?? r.stepId);
-    yield { agent: meta?.agent, model: meta?.model, costUsd: r.costUsd, tokens: r.tokens };
+    yield {
+      agent: meta?.agent,
+      api: meta?.api,
+      model: meta?.model,
+      costUsd: r.costUsd,
+      tokens: r.tokens,
+    };
   }
 }
 

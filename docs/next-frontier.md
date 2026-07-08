@@ -59,6 +59,13 @@ provides primitives at every cost tier, and the author picks.
 > `pricing`). The bundled `quick-triage` workflow is built entirely on it; the
 > agent-backed bundled workflows deliberately keep their zero-API-key free-tier
 > models. See `docs/workflow-spec.md` → "Llm (direct API inference)".
+>
+> **Shipped (2026-07-08, follow-up):** configurable **API instances** — named
+> endpoints under `apis` in the global/project config, referenced from steps
+> via `api: <id>`, with the same treatment agents get everywhere: manageable
+> in every UI (`/api` + `/apis` in the TUI, the web config page), readiness in
+> the status bar / health chips / `GET /api/doctor`, pre-dispatch gating, and
+> `api/model` cost attribution. See `docs/api-configuration.md`.
 
 ## 2. Mid-run steering: pause, rewind, edit, replay
 

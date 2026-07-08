@@ -27,6 +27,8 @@ export interface HistoryStep {
   stepId: string;
   blockKind: WorkflowStepKind;
   agent?: AgentInstanceId;
+  /** API instance a direct-inference `llm` step called (agent steps carry `agent` instead). */
+  api?: string;
   model?: string;
   effort?: string;
   cwd?: string;
@@ -281,6 +283,7 @@ export class RunRecordBuilder {
           stepId: event.stepId,
           blockKind: event.blockKind ?? "worker",
           agent: event.agent,
+          api: event.api,
           model: event.model,
           effort: event.effort,
           cwd: event.cwd,

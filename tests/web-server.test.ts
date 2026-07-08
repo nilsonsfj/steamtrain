@@ -786,6 +786,55 @@ describe("web server", () => {
     expect(res.status).toBe(501);
   });
 
+  it("reports api readiness alongside agents on /api/doctor and /api/meta", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const config = {
+      apis: [{ id: "groq", provider: "openai" as const, apiKeyEnv: "GROQ_API_KEY" }],
+    };
+    const author = new WorkflowAuthor({
+      host: new FakeAuthoringHost(demoSpec()),
+      config,
+      home: mkdtempSync(join(tmpdir(), "st-home-")),
+      cwd: tmpdir(),
+    });
+    const server = createWebServer({
+      host,
+      runs,
+      author,
+      config,
+      apiDoctor: () => [
+        {
+          api: "groq",
+          provider: "openai",
+          status: "ok",
+          keyEnv: "GROQ_API_KEY",
+          baseUrl: "https://api.groq.com/openai/v1",
+          message: "ready",
+        },
+      ],
+    });
+    servers.push(server);
+    const base = await start(server);
+
+    const doctorRes = await fetch(`${base}/api/doctor`);
+    const doctorBody = (await doctorRes.json()) as { apis: { api: string; status: string }[] };
+    expect(doctorBody.apis).toEqual([expect.objectContaining({ api: "groq", status: "ok" })]);
+
+    const metaRes = await fetch(`${base}/api/meta`);
+    const metaBody = (await metaRes.json()) as {
+      apis: { id: string; healthy: boolean; keyPresent: boolean }[];
+    };
+    const ids = metaBody.apis.map((a) => a.id);
+    expect(ids).toEqual(["anthropic", "openai", "groq"]);
+    expect(metaBody.apis.find((a) => a.id === "groq")).toMatchObject({ healthy: true });
+  });
+
   it("returns doctorError field when doctor fails (M35)", async () => {
     const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);

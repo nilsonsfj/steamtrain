@@ -1,5 +1,5 @@
 import type { ProjectConfigPatch } from "../config/project-config";
-import type { AgentInstanceConfig, SteamtrainConfig } from "../config/types";
+import type { AgentInstanceConfig, ApiInstanceConfig, SteamtrainConfig } from "../config/types";
 import type { UserConfigPatch } from "../config/user-config";
 import type { Mode } from "../tui/modes";
 import type { AgentInstanceId } from "../types/events";
@@ -67,8 +67,14 @@ export interface SlashCommandContext {
   userAgents?: readonly AgentInstanceConfig[];
   /** Raw agent entries from the project config file, for scoped saves. */
   projectAgents?: readonly AgentInstanceConfig[];
+  /** Raw API entries from the global config file, for scoped saves. */
+  userApis?: readonly ApiInstanceConfig[];
+  /** Raw API entries from the project config file, for scoped saves. */
+  projectApis?: readonly ApiInstanceConfig[];
   /** Open the agent manager screen (TUI only). */
   openAgentManager?: () => SlashCommandResult;
+  /** Open the API manager screen (TUI only). */
+  openApiManager?: () => SlashCommandResult;
   /** Persist session workflow overrides to the user workflows file. */
   saveWorkflows?: () => SlashCommandResult | Promise<SlashCommandResult>;
   /** Start LLM-delegated generation of a new workflow from a description (TUI only). */

@@ -6,7 +6,7 @@ import type {
   WorkflowStepSelection,
 } from "../commands/types";
 import type { ProjectConfigPatch } from "../config/project-config";
-import type { AgentInstanceConfig, SteamtrainConfig } from "../config/types";
+import type { AgentInstanceConfig, ApiInstanceConfig, SteamtrainConfig } from "../config/types";
 import type { UserConfigPatch } from "../config/user-config";
 import type { AgentInstanceId } from "../types/events";
 import { STEAMTRAIN_VERSION } from "../version";
@@ -39,7 +39,10 @@ export interface UseSlashContextParams {
   updateUserConfig?: (patch: UserConfigPatch) => { ok: boolean; error?: string };
   userAgents?: readonly AgentInstanceConfig[];
   projectAgents?: readonly AgentInstanceConfig[];
+  userApis?: readonly ApiInstanceConfig[];
+  projectApis?: readonly ApiInstanceConfig[];
   openAgentManager?: () => SlashCommandResult;
+  openApiManager?: () => SlashCommandResult;
   workflowPickerActive: boolean;
   saveWorkflows: () => Promise<SlashCommandResult>;
   createWorkflow: (description: string, scope?: WorkflowScope) => SlashCommandResult;
@@ -78,7 +81,10 @@ export function useSlashContext(params: UseSlashContextParams) {
     updateUserConfig,
     userAgents,
     projectAgents,
+    userApis,
+    projectApis,
     openAgentManager,
+    openApiManager,
     workflowPickerActive,
     saveWorkflows,
     createWorkflow,
@@ -114,7 +120,10 @@ export function useSlashContext(params: UseSlashContextParams) {
       updateUserConfig,
       userAgents,
       projectAgents,
+      userApis,
+      projectApis,
       openAgentManager,
+      openApiManager,
       saveWorkflows,
       createWorkflow,
       cloneWorkflow,
@@ -151,7 +160,10 @@ export function useSlashContext(params: UseSlashContextParams) {
       updateUserConfig,
       userAgents,
       projectAgents,
+      userApis,
+      projectApis,
       openAgentManager,
+      openApiManager,
       workflowPickerActive,
       saveWorkflows,
       createWorkflow,

@@ -671,6 +671,187 @@ describe("llm step execution", () => {
   });
 });
 
+describe("llm step api instances", () => {
+  const groqConfig = {
+    apis: [
+      {
+        id: "groq",
+        provider: "openai" as const,
+        baseUrl: "https://api.groq.com/openai/v1",
+        apiKeyEnv: KEY_ENV,
+        defaultModel: "llama-3.3-70b",
+        pricing: { inputPerMTok: 2, outputPerMTok: 4 },
+      },
+    ],
+  };
+
+  it("inherits provider, endpoint, key env, model, and pricing from the referenced api", async () => {
+    setKey();
+    const requests: LlmCallRequest[] = [];
+    const events = await runToEvents(
+      spec([
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "judge", kind: "llm", api: "groq", prompt: "Judge {{input}}" }],
+        },
+      ]),
+      llmDeps(
+        async (request) => {
+          requests.push(request);
+          return { ok: true, text: "done", tokens: { input: 1_000_000, output: 500_000 } };
+        },
+        { agentConfig: groqConfig },
+      ),
+    );
+    expect(workflowOk(events)).toBe(true);
+    expect(requests[0]).toMatchObject({
+      provider: "openai",
+      model: "llama-3.3-70b",
+      baseUrl: "https://api.groq.com/openai/v1",
+      apiKey: "sk-test-123",
+    });
+    const result = doneResults(events).get("judge");
+    expect(result?.costUsd).toBeCloseTo(2 + 4 * 0.5, 10);
+    const start = events.find((ev) => ev.kind === "step_start" && ev.stepId === "judge");
+    expect(start?.kind === "step_start" && start.api).toBe("groq");
+    expect(start?.kind === "step_start" && start.model).toBe("llama-3.3-70b");
+  });
+
+  it("lets step fields override the instance's", async () => {
+    setKey("OTHER_KEY_ENV", "sk-other");
+    const requests: LlmCallRequest[] = [];
+    await runToEvents(
+      spec([
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            {
+              id: "judge",
+              kind: "llm",
+              api: "groq",
+              model: "llama-3.1-8b",
+              apiKeyEnv: "OTHER_KEY_ENV",
+              baseUrl: "https://proxy.local/v1",
+              prompt: "x",
+            },
+          ],
+        },
+      ]),
+      llmDeps(
+        async (request) => {
+          requests.push(request);
+          return okResult("done");
+        },
+        { agentConfig: groqConfig },
+      ),
+    );
+    expect(requests[0]).toMatchObject({
+      model: "llama-3.1-8b",
+      baseUrl: "https://proxy.local/v1",
+      apiKey: "sk-other",
+    });
+  });
+
+  it("attributes bare steps to the built-in instance for their provider", async () => {
+    setKey("ANTHROPIC_API_KEY");
+    const events = await runToEvents(
+      spec([
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "judge", kind: "llm", model: "claude-opus-4-8", prompt: "x" }],
+        },
+      ]),
+      llmDeps(async () => okResult("done")),
+    );
+    const start = events.find((ev) => ev.kind === "step_start" && ev.stepId === "judge");
+    expect(start?.kind === "step_start" && start.api).toBe("anthropic");
+  });
+
+  it("fails fast with a clear error for unknown or disabled api references", async () => {
+    setKey();
+    const unknown = await runToEvents(
+      spec([
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "judge", kind: "llm", api: "nope", model: "m", prompt: "x" }],
+        },
+      ]),
+      llmDeps(async () => okResult("never"), { agentConfig: groqConfig }),
+    );
+    expect(workflowOk(unknown)).toBe(false);
+    expect(doneResults(unknown).get("judge")?.error).toContain("unknown api 'nope'");
+
+    const disabled = await runToEvents(
+      spec([
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "judge", kind: "llm", api: "groq", prompt: "x" }],
+        },
+      ]),
+      llmDeps(async () => okResult("never"), {
+        agentConfig: { apis: [{ ...groqConfig.apis[0]!, enabled: false }] },
+      }),
+    );
+    expect(doneResults(disabled).get("judge")?.error).toContain("disabled");
+  });
+
+  it("names the instance's key env in the missing-key error", async () => {
+    const events = await runToEvents(
+      spec([
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "judge", kind: "llm", api: "groq", prompt: "x" }],
+        },
+      ]),
+      llmDeps(async () => okResult("never"), { agentConfig: groqConfig }),
+    );
+    const result = doneResults(events).get("judge");
+    expect(result?.ok).toBe(false);
+    expect(result?.error).toContain(KEY_ENV);
+    expect(result?.error).toContain("api 'groq'");
+  });
+
+  it("carries the api id onto forEach fan-out children", async () => {
+    setKey();
+    const events = await runToEvents(
+      spec([
+        {
+          id: "split",
+          title: "Split",
+          steps: [{ id: "items", kind: "distributor", items: ["a", "b"] }],
+        },
+        {
+          id: "judge",
+          title: "Judge",
+          steps: [
+            {
+              id: "judge-each",
+              kind: "llm",
+              api: "groq",
+              forEach: "steps.items.items",
+              dependsOn: ["items"],
+              prompt: "Judge {{item}}",
+            },
+          ],
+        },
+      ]),
+      llmDeps(async () => okResult("done"), { agentConfig: groqConfig }),
+    );
+    expect(workflowOk(events)).toBe(true);
+    const childStart = events.find(
+      (ev) => ev.kind === "step_start" && ev.stepId === "judge-each[0]",
+    );
+    expect(childStart?.kind === "step_start" && childStart.api).toBe("groq");
+    expect(childStart?.kind === "step_start" && childStart.model).toBe("llama-3.3-70b");
+  });
+});
+
 describe("llm session overrides", () => {
   it("applies model/prompt/effort patches to llm steps and drops agent-only fields", async () => {
     const { applyWorkflowStepOverrides } = await import("../src/workflow");

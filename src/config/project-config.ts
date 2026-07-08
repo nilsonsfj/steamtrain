@@ -17,7 +17,12 @@ export interface SaveProjectConfigResult {
 export type ProjectConfigPatch = Partial<
   Pick<
     SteamtrainConfig,
-    "stepTimeoutSec" | "workflowTimeoutSec" | "maxConcurrency" | "loopMaxIterations" | "agents"
+    | "stepTimeoutSec"
+    | "workflowTimeoutSec"
+    | "maxConcurrency"
+    | "loopMaxIterations"
+    | "agents"
+    | "apis"
   >
 >;
 

@@ -2,6 +2,7 @@ import type { AgentEvent, AgentInstanceId } from "../types/events";
 import type { ApprovalRejectDisposition } from "./approval";
 import type { WorkflowEvent } from "./events";
 import type { RunRecord } from "./history";
+import { llmStepApiId } from "./llm";
 import type { WorktreeDiff } from "./merge";
 import type { GateStep, StepResult, WorkflowItem, WorkflowSpec, WorkflowStepKind } from "./types";
 
@@ -49,6 +50,8 @@ export interface StepState {
   stepId: string;
   blockKind: WorkflowStepKind;
   agent?: AgentInstanceId;
+  /** API instance a direct-inference `llm` step calls (agent steps carry `agent` instead). */
+  api?: string;
   model?: string;
   effort?: string;
   cwd?: string;
@@ -166,6 +169,7 @@ export function workflowStateFromSpec(spec: WorkflowSpec): WorkflowState {
         stepId: st.id,
         blockKind: st.kind ?? "worker",
         agent: "agent" in st ? st.agent : undefined,
+        api: st.kind === "llm" ? llmStepApiId(st) : undefined,
         model: "model" in st ? st.model : undefined,
         effort: "effort" in st ? st.effort : undefined,
         cwd: "cwd" in st ? st.cwd : undefined,
@@ -369,6 +373,7 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
             stepId: e.stepId,
             blockKind: e.blockKind ?? "worker",
             agent: e.agent,
+            api: e.api,
             model: e.model,
             effort: e.effort,
             cwd: e.cwd,

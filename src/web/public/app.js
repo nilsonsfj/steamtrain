@@ -7,11 +7,11 @@
 
   var KIND_LABEL = { worker: "worker", processor: "process", distributor: "fan-out", consolidator: "merge", gate: "gate", approval: "approval", merge: "merge-back", command: "command", llm: "llm", workflow: "sub-workflow" };
   var S = {
-    workflows: [], selected: null, source: null, spec: null, agents: [],
+    workflows: [], selected: null, source: null, spec: null, agents: [], apis: [],
     runId: null, es: null,
     startedAt: 0, timer: null,
     runState: null,
-    rafQueued: false, draftAbort: null, doctor: [],
+    rafQueued: false, draftAbort: null, doctor: [], apiDoctor: [],
     stagedOverrides: {},
     projectConfig: null
   };
@@ -256,6 +256,107 @@
       renderAgentConfigRows();
     }
     renderAgentConfigRows();
+
+    // ---- APIs (direct llm steps): same row pattern as the agents above ----
+    var apiRows = [];
+    var apiList = h("div", { class: "agentcfg" });
+    function renderApiConfigRows() {
+      clear(apiList);
+      apiRows = [];
+      var apis = S.projectConfig.apis || [];
+      if (!apis.length) {
+        apiList.appendChild(h("div", { class: "empty-state" },
+          h("p", { text: "No APIs configured. llm steps use the built-in anthropic/openai instances; add one to point at a proxy or another provider." })
+        ));
+        return;
+      }
+      apis.forEach(function (a) {
+        var originalId = a.id;
+        var meta = apiInstanceById(a.id);
+        var enabled = h("input", { type: "checkbox", checked: a.enabled !== false });
+        var id = h("input", { class: "txt", value: a.id || "" });
+        var label = h("input", { class: "txt", placeholder: "optional display label", value: a.label || "" });
+        var provider = selectEl([
+          { value: "anthropic", label: "anthropic" },
+          { value: "openai", label: "openai (compatible)" }
+        ], a.provider || "anthropic");
+        var baseUrl = h("input", { class: "txt", placeholder: "provider default (openai style: include /v1)", value: a.baseUrl || "" });
+        var apiKeyEnv = h("input", { class: "txt", placeholder: a.provider === "openai" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY", value: a.apiKeyEnv || "" });
+        var defaultModel = h("input", { class: "txt", placeholder: "used when a step omits model", value: a.defaultModel || "" });
+        var pricing = h("textarea", { class: "ta mini", placeholder: '{"inputPerMTok": 5, "outputPerMTok": 25}', rows: "2" });
+        pricing.value = a.pricing ? JSON.stringify(a.pricing) : "";
+        var row = { enabled: enabled, id: id, label: label, provider: provider, baseUrl: baseUrl, apiKeyEnv: apiKeyEnv, defaultModel: defaultModel, pricing: pricing };
+        apiRows.push(row);
+
+        var healthy = meta ? meta.healthy : null;
+        var healthDot = h("span", { class: "health-dot " + (healthy === true ? "ok" : healthy === false ? "err" : "unknown") });
+        var providerTag = h("span", { class: "provider-tag", text: a.provider || "anthropic" });
+
+        var deleteBtn = h("button", { class: "agent-delete", title: "Remove API", text: "×" });
+        deleteBtn.addEventListener("click", function () {
+          var name = id.value.trim() || originalId;
+          if (!window.confirm("Remove API \"" + name + "\"? This removes it from the project config.")) return;
+          var apis = S.projectConfig.apis || [];
+          var i = apis.findIndex(function (x) { return x.id === originalId; });
+          if (i >= 0) apis.splice(i, 1);
+          renderApiConfigRows();
+        });
+
+        var idLabel = h("span", { text: id.value.trim() || "new api" });
+        var header = h("div", { class: "agentrow-header" },
+          h("label", null, enabled, idLabel),
+          providerTag,
+          healthDot,
+          deleteBtn
+        );
+        id.addEventListener("input", function () {
+          idLabel.textContent = id.value.trim() || "new api";
+        });
+        enabled.addEventListener("change", function () {
+          rowEl.classList.toggle("disabled", !enabled.checked);
+        });
+        provider.addEventListener("change", function () {
+          providerTag.textContent = provider.value;
+          apiKeyEnv.placeholder = provider.value === "openai" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
+        });
+
+        var rowEl = h("div", { class: "agentrow" + (enabled.checked ? "" : " disabled") },
+          header,
+          field("ID", id, null, null, true),
+          field("Provider", provider, "API dialect: Anthropic Messages, or OpenAI chat-completions (Groq, Together, Ollama, vLLM, proxies)."),
+          field("Label", label),
+          field("Base URL", baseUrl, "Endpoint override for proxies and compatible providers."),
+          field("Key env var", apiKeyEnv, "Environment variable the API key is read from (the key itself is never stored)."),
+          field("Default model", defaultModel, "Steps referencing this API inherit it when they omit model."),
+          field("Pricing", pricing, "JSON per-MTok USD rates applied to steps without their own pricing.", null, true)
+        );
+        apiList.appendChild(rowEl);
+
+        addBlurValidation(id, function () {
+          var v = id.value.trim();
+          if (!v) return "API ID is required";
+          var dup = apiRows.filter(function (r) { return r !== row; }).some(function (r) { return r.id.value.trim() === v; });
+          if (dup) return "Duplicate API ID";
+          return null;
+        });
+        addBlurValidation(pricing, function () {
+          var v = pricing.value.trim();
+          if (!v) return null;
+          try { var p = JSON.parse(v); if (!p || Array.isArray(p) || typeof p !== "object") return "Must be a JSON object"; }
+          catch (e) { return "Invalid JSON"; }
+          return null;
+        });
+      });
+    }
+    function addApiRow() {
+      var apiId = "new-api";
+      var apis = S.projectConfig.apis || [];
+      var n = 2;
+      while (apis.some(function (a) { return a.id === apiId; })) apiId = "new-api-" + n++;
+      S.projectConfig.apis = apis.concat([{ id: apiId, provider: "anthropic", enabled: true }]);
+      renderApiConfigRows();
+    }
+    renderApiConfigRows();
     var body = h("div", null,
       banner,
       field("Step timeout (minutes)", stepInput, "Per-agent subprocess limit (default 15)."),
@@ -267,21 +368,29 @@
         h("label", { text: "Agents" }),
         h("div", { class: "help", text: "Only enabled agents appear in pickers and health outside this page." }),
         agentList,
-        h("button", { class: "btn small", text: "+ Add agent", onClick: addAgentRow }))
+        h("button", { class: "btn small", text: "+ Add agent", onClick: addAgentRow })),
+      h("hr"),
+      h("div", { class: "field" },
+        h("label", { text: "APIs (direct llm steps)" }),
+        h("div", { class: "help", text: "Endpoint instances llm steps call via api: <id>. Only enabled APIs accept runs; health probes the endpoint with the configured key." }),
+        apiList,
+        h("button", { class: "btn small", text: "+ Add API", onClick: addApiRow }))
     );
     var saveBtn = h("button", { class: "btn primary", text: "Save" });
   saveBtn.addEventListener("click", function () {
       var stepSec = Number(stepInput.value) * 60;
       if (!stepSec || stepSec <= 0) { mbanner(banner, "step timeout must be a positive number of minutes", "err"); return; }
-      if (agentList.querySelector(".invalid")) { mbanner(banner, "Fix validation errors before saving", "err"); return; }
+      if (agentList.querySelector(".invalid") || apiList.querySelector(".invalid")) { mbanner(banner, "Fix validation errors before saving", "err"); return; }
       var agents;
+      var apis;
       try {
         agents = collectAgentConfigRows(agentRows);
+        apis = collectApiConfigRows(apiRows);
       } catch (e) {
         mbanner(banner, e.message || String(e), "err");
         return;
       }
-      var payload = { stepTimeoutSec: stepSec, agents: agents };
+      var payload = { stepTimeoutSec: stepSec, agents: agents, apis: apis };
       if (autoChk.checked) payload.clearWorkflowTimeout = true;
       else {
         var wfSec = Number(wfInput.value) * 60;
@@ -293,10 +402,11 @@
         saveBtn.disabled = false;
         if (r.status === 200 && r.body.ok) {
           S.projectConfig = Object.assign({}, S.projectConfig, r.body);
-          // Keep all agents (including disabled) so health dots and the config
-          // modal can look them up. Callers that only want enabled agents
-          // (agentOptions, preferredAgent) filter at their call site.
+          // Keep all agents/apis (including disabled) so health dots and the
+          // config modal can look them up. Callers that only want enabled
+          // entries (agentOptions, preferredAgent) filter at their call site.
           S.agents = r.body.agents || [];
+          S.apis = r.body.apis || [];
           closeModal();
           pollDoctor(0);
           setBanner("project config saved", "info");
@@ -346,26 +456,63 @@
     });
   }
 
-  // Agent/model/effort catalog for the create + configure forms.
+  function collectApiConfigRows(rows) {
+    var ids = {};
+    return rows.map(function (row) {
+      var id = row.id.value.trim();
+      if (!id) throw new Error("api id is required");
+      if (ids[id]) throw new Error("duplicate api id: " + id);
+      ids[id] = true;
+      var pricingText = row.pricing.value.trim();
+      var pricing;
+      if (pricingText) {
+        pricing = JSON.parse(pricingText);
+        if (!pricing || Array.isArray(pricing) || typeof pricing !== "object") throw new Error("pricing for " + id + " must be a JSON object");
+      }
+      return {
+        id: id,
+        provider: row.provider.value,
+        enabled: row.enabled.checked,
+        label: row.label.value.trim() || undefined,
+        baseUrl: row.baseUrl.value.trim() || undefined,
+        apiKeyEnv: row.apiKeyEnv.value.trim() || undefined,
+        defaultModel: row.defaultModel.value.trim() || undefined,
+        pricing: pricing
+      };
+    });
+  }
+
+  // Agent/model/effort + API-instance catalogs for the create + configure forms.
   function loadMeta() {
     apiAuth("GET", "/api/meta").then(function (r) {
       S.agents = (r.body && r.body.agents) || [];
+      S.apis = (r.body && r.body.apis) || [];
       applyHealth();
     });
   }
-  // The server serves immediately and runs the doctor in the background, so the
-  // health flag baked into /api/meta is often stale (all false) at first
-  // paint. Fold the live /api/doctor results into the cached agent catalog so
-  // the create/configure picker reflects real health once the doctor lands,
+  // The server serves immediately and runs the doctors in the background, so
+  // the health flags baked into /api/meta are often stale (all false) at first
+  // paint. Fold the live /api/doctor results into the cached catalogs so the
+  // create/configure pickers reflect real health once the doctors land,
   // without a full page reload. Handles either fetch resolving first.
   function applyHealth() {
-    if (!S.doctor.length || !S.agents.length) return;
-    S.agents.forEach(function (a) {
-      a.healthy = S.doctor.some(function (d) { return d.agent === a.id && d.status === "ok"; });
-    });
+    if (S.doctor.length && S.agents.length) {
+      S.agents.forEach(function (a) {
+        a.healthy = S.doctor.some(function (d) { return d.agent === a.id && d.status === "ok"; });
+      });
+    }
+    if (S.apiDoctor.length && S.apis.length) {
+      S.apis.forEach(function (a) {
+        a.healthy = S.apiDoctor.some(function (d) { return d.api === a.id && d.status === "ok"; });
+      });
+    }
   }
   function agentById(id) {
     for (var i = 0; i < S.agents.length; i++) if (S.agents[i].id === id) return S.agents[i];
+    return null;
+  }
+  function apiInstanceById(id) {
+    for (var i = 0; i < S.apis.length; i++) if (S.apis[i].id === id) return S.apis[i];
     return null;
   }
   function modelsFor(agentId) { var a = agentById(agentId); return a ? a.models : []; }
@@ -380,15 +527,26 @@
   function pollDoctor(attempt) {
     apiAuth("GET", "/api/doctor").then(function (r) {
       var list = r.body.doctor || [];
+      var apis = r.body.apis || [];
       var err = r.body.doctorError;
       S.doctor = list;
-      renderHealth(list, err);
+      S.apiDoctor = apis;
+      renderHealth(list, apis, err);
       applyHealth();
-      if (!list.length && !err && attempt < 12) setTimeout(function () { pollDoctor(attempt + 1); }, 1500);
+      if (!list.length && !apis.length && !err && attempt < 12) setTimeout(function () { pollDoctor(attempt + 1); }, 1500);
     });
   }
 
-  function renderHealth(list, err) {
+  // "no key" is a warning chip, not an error: an unset key is the normal state
+  // for a provider the user simply doesn't use, unlike a rejected key or an
+  // unreachable endpoint.
+  function apiChipClass(status) {
+    if (status === "ok") return "ok";
+    if (status === "key_missing") return "warn";
+    return "bad";
+  }
+
+  function renderHealth(list, apis, err) {
     var box = document.getElementById("health");
     clear(box);
     if (err) {
@@ -397,7 +555,10 @@
     }
     list.forEach(function (d) {
       var cls = d.status === "ok" ? "ok" : (d.status === "warn" ? "warn" : "bad");
-      box.appendChild(h("span", { class: "chip " + cls }, h("span", { class: "dot" }), d.agent));
+      box.appendChild(h("span", { class: "chip " + cls, title: d.message || "" }, h("span", { class: "dot" }), d.agent));
+    });
+    apis.forEach(function (d) {
+      box.appendChild(h("span", { class: "chip " + apiChipClass(d.status), title: d.message || "" }, h("span", { class: "dot" }), d.api));
     });
   }
 
@@ -649,7 +810,8 @@
       kindEl,
       h("span", { class: "state " + s.status, text: stateLabel })
     ));
-    if (s.agent) card.appendChild(h("div", { class: "agent", text: s.agent + (s.model ? " \u00b7 " + s.model : "") }));
+    var runnerId = s.agent || s.api;
+    if (runnerId) card.appendChild(h("div", { class: "agent", text: runnerId + (s.model ? " \u00b7 " + s.model : "") }));
     else if (s.model) card.appendChild(h("div", { class: "agent", text: s.model }));
     if (s.dependsOn && s.dependsOn.length) card.appendChild(h("div", { class: "inputs", text: "inputs: " + s.dependsOn.join(", ") }));
     if (s.forEach) card.appendChild(h("div", { class: "inputs", text: "forEach: " + s.forEach }));
@@ -1744,6 +1906,9 @@
     if (plan.agents.length > 0) {
       summary.appendChild(h("div", { class: "plan-agents", text: "agents: " + plan.agents.join(", ") }));
     }
+    if (plan.apis && plan.apis.length > 0) {
+      summary.appendChild(h("div", { class: "plan-agents", text: "apis: " + plan.apis.join(", ") }));
+    }
     if (plan.maxCostUsd !== undefined) {
       summary.appendChild(h("div", { class: "plan-budget", text: "budget: $" + plan.maxCostUsd.toFixed(2) }));
     }
@@ -1804,7 +1969,7 @@
           kindEl
         ));
         if (s.agent) card.appendChild(h("div", { class: "agent", text: s.agent + (s.model ? " \u00b7 " + s.model : "") }));
-        else if (s.model) card.appendChild(h("div", { class: "agent", text: (s.llmProvider ? s.llmProvider + "/" : "") + s.model }));
+        else if (s.llmApi || s.model) card.appendChild(h("div", { class: "agent", text: s.llmApi ? s.llmApi + (s.model ? "/" + s.model : "") : s.model }));
         if (s.dependsOn && s.dependsOn.length) card.appendChild(h("div", { class: "inputs", text: "depends: " + s.dependsOn.join(", ") }));
         if (s.forEachSource) card.appendChild(h("div", { class: "inputs", text: "forEach: " + s.forEachSource + (s.forEachCount ? " (" + s.forEachCount + " items)" : s.forEachDynamic ? " (dynamic)" : "") }));
         if (s.loopTo) card.appendChild(h("div", { class: "inputs" },

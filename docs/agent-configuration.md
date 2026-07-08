@@ -31,6 +31,9 @@ from the provider (e.g. a fork).
 Running with `--config <file>` loads that file alone — the global layer is not
 read, and global agent operations are unavailable.
 
+The endpoints that direct-inference `llm` steps call are configured the same
+way, under `apis` — see [API configuration](api-configuration.md).
+
 ## Slash commands
 
 ```

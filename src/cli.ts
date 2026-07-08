@@ -64,6 +64,7 @@ import {
   validateWorkflow,
   workflowAgentIds,
   workflowCacheKey,
+  workflowLlmSteps,
   workflowStepKind,
   worktreeDiff,
   worktreeSourceFromInfo,
@@ -401,6 +402,7 @@ async function planCommand(
     `  ${plan.agentCallCount} agent call${plan.agentCallCount === 1 ? "" : "s"} · ${plan.llmCallCount} llm call${plan.llmCallCount === 1 ? "" : "s"} · ${plan.deterministicCount} deterministic step${plan.deterministicCount === 1 ? "" : "s"}\n`,
   );
   if (plan.agents.length > 0) out(`  agents: ${plan.agents.join(", ")}\n`);
+  if (plan.apis.length > 0) out(`  apis: ${plan.apis.join(", ")}\n`);
   if (plan.maxCostUsd !== undefined) out(`  budget: $${plan.maxCostUsd.toFixed(2)}\n`);
 
   // forEach expansion.
@@ -430,7 +432,7 @@ async function planCommand(
       tags.push(step.model ? `${step.agent}/${step.model}` : (step.agent ?? "agent"));
     }
     if (step.kind === "llm") {
-      tags.push(`${step.llmProvider ?? "llm"}/${step.model ?? ""}`);
+      tags.push(step.model ? `${step.llmApi ?? "llm"}/${step.model}` : (step.llmApi ?? "llm"));
     }
     if (step.isDeterministic) tags.push("deterministic");
     if (step.forEachSource) tags.push(`forEach→${step.forEachSource}`);
@@ -741,7 +743,8 @@ function printHistoryRecord(
     );
     for (const step of phase.steps) {
       const glyph = step.status === "done" ? "✓" : step.status === "error" ? "✗" : "·";
-      const runner = step.agent ? ` ${step.agent}${step.model ? `/${step.model}` : ""}` : "";
+      const runnerId = step.agent ?? step.api;
+      const runner = runnerId ? ` ${runnerId}${step.model ? `/${step.model}` : ""}` : "";
       const dur = step.result ? ` · ${(step.result.durationMs / 1000).toFixed(1)}s` : "";
       const cost = step.result?.costUsd ? ` · $${step.result.costUsd.toFixed(4)}` : "";
       const tokenLine = formatTokenSummary(step.result?.tokens);
@@ -1014,11 +1017,16 @@ async function runWorkflowCommand(
 
   // Agentless workflows (only distributors / consolidators / gates) never spawn
   // a CLI, so skip the doctor + catalog refresh — they would otherwise spawn
-  // real agent binaries just to gate a run that needs none.
-  if (workflowAgentIds(spec).length > 0) {
+  // real agent binaries just to gate a run that needs none. llm-step workflows
+  // still get the dispatch gate (API instance resolves + key present), which is
+  // purely local and spawns nothing.
+  const usesAgents = workflowAgentIds(spec).length > 0;
+  if (usesAgents) {
     const doctor = await runDoctor(config);
     orchestrator.setDoctor(doctor);
     await refreshAgentCatalogCaches(config, doctor);
+  }
+  if (usesAgents || workflowLlmSteps(spec).length > 0) {
     const check = orchestrator.canDispatchWorkflow(name);
     if (!check.ok) {
       err(`cannot run '${name}': ${check.reason}\n`);
@@ -1165,7 +1173,7 @@ async function saveHistory(
 function printRunSummary(
   results: StepResult[],
   out: (text: string) => void,
-  stepMeta?: Map<string, { agent?: string; model?: string }>,
+  stepMeta?: Map<string, { agent?: string; api?: string; model?: string }>,
 ): void {
   if (results.length === 0) return;
   out("\nsummary\n");

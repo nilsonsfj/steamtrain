@@ -1,5 +1,7 @@
 import { agentCommand } from "./builtins/agent";
 import { agentsCommand } from "./builtins/agents";
+import { apiCommand } from "./builtins/api";
+import { apisCommand } from "./builtins/apis";
 import { cloneWorkflowCommand } from "./builtins/clone-workflow";
 import { createWorkflowCommand } from "./builtins/create-workflow";
 import { deleteWorkflowCommand } from "./builtins/delete-workflow";
@@ -23,6 +25,8 @@ const BUILTIN_COMMANDS: SlashCommand[] = [
   effortCommand,
   agentCommand,
   agentsCommand,
+  apiCommand,
+  apisCommand,
   promptCommand,
   saveWorkflowsCommand,
   createWorkflowCommand,

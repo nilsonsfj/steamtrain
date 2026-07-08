@@ -1,11 +1,13 @@
 import { Box, Text } from "ink";
-import type { DoctorResult } from "../doctor";
+import type { ApiDoctorResult, DoctorResult } from "../doctor";
 import { formatTokens, formatUsd } from "../workflow";
-import { STATUS_STYLE } from "./theme";
+import { API_STATUS_STYLE, STATUS_STYLE } from "./theme";
 import { SPINNER_FRAMES, useWorkIndicator } from "./useWorkIndicator";
 
 interface StatusBarProps {
   doctor: DoctorResult[] | null;
+  /** Direct-inference API readiness, shown after the agents (null while probing). */
+  apiDoctor: ApiDoctorResult[] | null;
   configSource: string;
   workspaceLabel: string;
   running: boolean;
@@ -17,6 +19,7 @@ interface StatusBarProps {
 
 export function StatusBar({
   doctor,
+  apiDoctor,
   configSource,
   workspaceLabel,
   running,
@@ -42,6 +45,17 @@ export function StatusBar({
             </Box>
           ))
         )}
+        {doctor !== null && apiDoctor && apiDoctor.length > 0 ? (
+          <>
+            <Text color="gray">{"  │  "}</Text>
+            {apiDoctor.map((d, i) => (
+              <Box key={d.api}>
+                {i > 0 ? <Text color="gray">{"   "}</Text> : null}
+                <ApiStatus result={d} />
+              </Box>
+            ))}
+          </>
+        ) : null}
       </Box>
       <Box>
         {running ? (
@@ -73,6 +87,17 @@ function AgentStatus({ result }: { result: DoctorResult }) {
     <Text>
       <Text color={style.color}>{style.symbol}</Text>
       <Text bold> {result.agent}</Text>
+      <Text color="gray"> {style.label}</Text>
+    </Text>
+  );
+}
+
+function ApiStatus({ result }: { result: ApiDoctorResult }) {
+  const style = API_STATUS_STYLE[result.status];
+  return (
+    <Text>
+      <Text color={style.color}>{style.symbol}</Text>
+      <Text bold> {result.api}</Text>
       <Text color="gray"> {style.label}</Text>
     </Text>
   );

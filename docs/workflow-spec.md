@@ -481,16 +481,20 @@ A typical trustworthy fix loop:
 
 One stateless LLM API call — the middle tier between a deterministic `command`
 step and a full coding-agent `worker`. No agent CLI, no tool harness, no
-worktree, no doctor preflight, near-zero startup, and exact token accounting
-straight from the API. The canonical uses are the judge / classify / summarize
-/ route touches that never needed tools: consolidators that merge text,
-verdict steps feeding gates, splitters that fan a request into a list.
+worktree, near-zero startup, and exact token accounting straight from the API.
+The canonical uses are the judge / classify / summarize / route touches that
+never needed tools: consolidators that merge text, verdict steps feeding
+gates, splitters that fan a request into a list.
 
-Required fields: `model`, `prompt`.
+Required fields: `prompt`, and `model` — unless `api` references a
+[configured API instance](api-configuration.md) with a `defaultModel`.
 
-Optional fields: `provider` (`"anthropic"` or `"openai"`; when omitted it is
-inferred — `claude-*` models → `anthropic`, everything else → the
-OpenAI-compatible wire format), `system`, `output` (JSON schema; see
+Optional fields: `api` (a configured API instance id; the step inherits its
+provider, endpoint, key env var, default model, and pricing — see
+[API configuration](api-configuration.md)), `provider` (`"anthropic"` or
+`"openai"`; when omitted it comes from `api`, else it is inferred — `claude-*`
+models → `anthropic`, everything else → the OpenAI-compatible wire format),
+`system`, `output` (JSON schema; see
 [Structured step outputs](#structured-step-outputs-output)), `itemsPath`,
 `maxTokens`, `temperature`, `effort`, `apiKeyEnv`, `baseUrl`, `retry`,
 `forEach`, `stepTimeoutSec`, `pricing`, `maxCostUsd` (per-step budget for
@@ -512,14 +516,30 @@ without declared rates every call contributes $0).
 }
 ```
 
+A step referencing a configured instance needs nothing else:
+
+```jsonc
+{ "id": "route", "kind": "llm", "api": "groq", "prompt": "Route: {{input}}" }
+```
+
 Semantics:
 
+- **Configured API instances.** `api: <id>` resolves against the `apis`
+  section of `steamtrain.json` / `~/.steamtrain/config.json` (managed via
+  `/apis` in the TUI, the web config page, or `/api add …`); the step inherits
+  the instance's provider, `baseUrl`, `apiKeyEnv`, `defaultModel`, and
+  `pricing`, and its own fields override them one by one. Steps without `api`
+  resolve through the built-in `anthropic`/`openai` instance of their
+  (explicit or inferred) provider, so configuring one of those ids customizes
+  every bare step of that provider. An unknown or disabled instance blocks the
+  run before dispatch. See [API configuration](api-configuration.md).
 - **API key from env.** `anthropic` reads `ANTHROPIC_API_KEY`, `openai` reads
-  `OPENAI_API_KEY`; `apiKeyEnv` names a different variable. A missing key fails
-  the step immediately with a clear message. This decouples "steamtrain needs
-  an agent CLI installed and authenticated" from "steamtrain needs an API key"
-  — an llm-only workflow needs no agent CLI at all, which also makes it CI
-  friendly.
+  `OPENAI_API_KEY`; the instance's or step's `apiKeyEnv` names a different
+  variable. A missing key blocks the run pre-dispatch (and would fail the step)
+  with a clear message. This decouples "steamtrain needs an agent CLI installed
+  and authenticated" from "steamtrain needs an API key" — an llm-only workflow
+  needs no agent CLI at all, which also makes it CI friendly. Readiness shows
+  up next to agent health in the TUI status bar and the web health chips.
 - **Any OpenAI-compatible endpoint.** `baseUrl` (or the conventional
   `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` env vars) points the call at a
   proxy or a compatible provider (Groq, Together, Ollama, vLLM, …). The OpenAI
@@ -542,9 +562,11 @@ Semantics:
   no side-effect heuristics needed.
 - **Exact token accounting; optional exact cost.** The API's reported usage is
   recorded on the result verbatim. Providers don't report dollar cost, so
-  `costUsd` is only set when the step declares `pricing` (USD per million
-  tokens): `{ "pricing": { "inputPerMTok": 5, "outputPerMTok": 25 } }` — with
-  it, `maxCostUsd` budgets and cost analytics see llm spend exactly.
+  `costUsd` is only set when the step (or its `api` instance) declares
+  `pricing` (USD per million tokens):
+  `{ "pricing": { "inputPerMTok": 5, "outputPerMTok": 25 } }` — with it,
+  `maxCostUsd` budgets and cost analytics see llm spend exactly, attributed
+  under `api/model` keys just like agent spend under `agent/model`.
 - **`effort`** maps to Anthropic `output_config.effort` / OpenAI
   `reasoning_effort`. **`temperature`** is only sent when set (recent Anthropic
   models reject sampling parameters).

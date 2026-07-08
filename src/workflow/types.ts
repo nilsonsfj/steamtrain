@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AgentInstanceId, TokenUsage } from "../types/events";
+import type { AgentInstanceId, ApiInstanceId, TokenUsage } from "../types/events";
 import type { RetryPolicy } from "./retry";
 import type { JsonSchema } from "./structured";
 // Circular import is safe: template.ts imports types from this module, and this
@@ -362,10 +362,18 @@ export interface LlmPricing {
  */
 export interface LlmStep extends WorkflowStepBase {
   kind: "llm";
-  /** API dialect. Omitted ⇒ inferred: `claude-*` models → anthropic, everything else → openai. */
+  /**
+   * Configured API instance this step calls (see `apis` in `steamtrain.json` /
+   * `~/.steamtrain/config.json`). The instance supplies the provider, endpoint,
+   * key env var, default model, and pricing; the step's own fields override
+   * them individually. Omitted ⇒ the built-in instance for the (explicit or
+   * inferred) provider, so existing specs keep working unchanged.
+   */
+  api?: ApiInstanceId;
+  /** API dialect. Omitted ⇒ from `api`, else inferred: `claude-*` models → anthropic, everything else → openai. */
   provider?: "anthropic" | "openai";
-  /** Model id in the provider's own format. */
-  model: string;
+  /** Model id in the provider's own format. May be omitted when `api` names an instance with a `defaultModel`. */
+  model?: string;
   /** Prompt template; may reference `{{input}}` and `{{steps.<id>.output}}`. */
   prompt: string;
   /** Optional system prompt. Templated like `prompt`. */
@@ -912,7 +920,7 @@ const workflowCommandStepSchema = z.object({
   ...workspaceShape,
 });
 
-const llmPricingSchema = z.object({
+export const llmPricingSchema = z.object({
   inputPerMTok: z.number().nonnegative().optional(),
   outputPerMTok: z.number().nonnegative().optional(),
   cacheReadPerMTok: z.number().nonnegative().optional(),
@@ -923,8 +931,9 @@ const workflowLlmStepSchema = z
   .object({
     ...baseStepShape,
     kind: z.literal("llm"),
+    api: z.string().min(1).optional(),
     provider: z.enum(["anthropic", "openai"]).optional(),
-    model: z.string().min(1),
+    model: z.string().min(1).optional(),
     prompt: z.string().min(1),
     system: z.string().min(1).optional(),
     maxTokens: z.number().int().positive().optional(),
@@ -945,6 +954,14 @@ const workflowLlmStepSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "llm itemsPath requires an output schema",
+      });
+    }
+    // Without an `api` reference there is no configured instance to supply a
+    // defaultModel, so the step must name its model explicitly.
+    if (!step.model && !step.api) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "llm step requires a model (or an api whose instance sets a defaultModel)",
       });
     }
   });
@@ -1102,6 +1119,17 @@ export function workflowAgentIds(spec: WorkflowSpec): AgentInstanceId[] {
     }
   }
   return [...set];
+}
+
+/** All direct-inference `llm` steps in a spec (empty when none). */
+export function workflowLlmSteps(spec: WorkflowSpec): LlmStep[] {
+  const out: LlmStep[] = [];
+  for (const phase of spec.phases) {
+    for (const step of phase.steps) {
+      if (step.kind === "llm") out.push(step);
+    }
+  }
+  return out;
 }
 
 /**

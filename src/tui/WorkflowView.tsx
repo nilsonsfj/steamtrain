@@ -277,7 +277,9 @@ function StepRow({
   const runner =
     step.agent && step.model
       ? formatWorkflowAgentTarget({ agent: step.agent, model: step.model, effort: step.effort })
-      : BLOCK_LABEL[step.blockKind];
+      : step.blockKind === "llm" && (step.api || step.model)
+        ? [step.api, step.model].filter(Boolean).join("/")
+        : BLOCK_LABEL[step.blockKind];
   const indent = step.parentStepId ? 3 : 1;
   const item = step.item ? ` item ${step.item.index}: ${truncate(step.item.value, 32)}` : "";
   return (
@@ -373,6 +375,7 @@ function modelBreakdown(state: WorkflowState): ModelUsage[] {
     .filter((f) => f.step.result && !f.step.result.childResults?.length)
     .map((f) => ({
       agent: f.step.agent,
+      api: f.step.api,
       model: f.step.model,
       costUsd: f.step.result?.costUsd,
       tokens: f.step.result?.tokens,
