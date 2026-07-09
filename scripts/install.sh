@@ -64,7 +64,7 @@ if [ "$DO_BUILD" -eq 1 ]; then
   fi
 
   info "Building steamtrain…"
-  (cd "$REPO_ROOT" && npm run build)
+  (cd "$REPO_ROOT" && "$PM" run build)
 fi
 
 TARGET="${REPO_ROOT}/dist/index.js"

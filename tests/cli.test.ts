@@ -99,6 +99,11 @@ describe("parseGlobalArgs", () => {
       error: "--port requires an integer 0-65535",
     });
   });
+
+  it("parses --version and -v", () => {
+    expect(parseGlobalArgs(["--version"])).toEqual({ args: [], version: true });
+    expect(parseGlobalArgs(["-v"])).toEqual({ args: [], version: true });
+  });
 });
 
 describe("runCli", () => {
