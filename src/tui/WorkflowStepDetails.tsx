@@ -215,9 +215,19 @@ function previewLines(
 
   const prompt = promptForStep(step);
   if (prompt) {
-    lines.push({
-      text: `prompt: ${truncate(collapseWhitespace(prompt), Math.max(80, width - 20))}`,
-    });
+    const promptLines = prompt.split("\n");
+    let isFirstPromptLine = true;
+    for (const promptLine of promptLines) {
+      const trimmedLine = promptLine.trim();
+      if (trimmedLine) {
+        lines.push({
+          text: isFirstPromptLine
+            ? `prompt: ${truncate(trimmedLine, Math.max(80, width - 20))}`
+            : `  ${truncate(trimmedLine, Math.max(80, width - 20))}`,
+        });
+        isFirstPromptLine = false;
+      }
+    }
   }
 
   return lines;
@@ -274,13 +284,29 @@ function liveLines(phase: PhaseState, step: StepState, width: number): DetailLin
 
   const output = (step.result?.output ?? step.text).trim();
   if (output) {
-    lines.push({
-      text: `${step.status === "error" ? "error" : "output"}: ${truncate(
-        collapseWhitespace(output),
-        Math.max(160, width * 7),
-      )}`,
-      color: step.status === "error" ? "red" : "white",
-    });
+    const prefix = step.status === "error" ? "error" : "output";
+    const outputColor = step.status === "error" ? "red" : "white";
+    const outputLines = output.split("\n");
+    for (const outputLine of outputLines) {
+      const trimmedLine = outputLine.trim();
+      if (trimmedLine) {
+        const lastLine = lines[lines.length - 1];
+        lines.push({
+          text:
+            !lastLine || lastLine.text.startsWith(prefix)
+              ? `${prefix}: ${truncate(trimmedLine, Math.max(160, width * 7))}`
+              : `  ${truncate(trimmedLine, Math.max(160, width * 7))}`,
+          color: outputColor,
+        });
+      }
+    }
+    const lastOutputLine = lines[lines.length - 1];
+    if (!lastOutputLine || !lastOutputLine.text.startsWith(prefix)) {
+      lines.push({
+        text: `${prefix}: (empty)`,
+        color: outputColor,
+      });
+    }
   } else {
     lines.push({ text: `tail: ${step.activity || statusWord(step.status)}`, color: "gray" });
   }
@@ -302,5 +328,8 @@ function statusColor(status: StepState["status"]): string {
 }
 
 function collapseWhitespace(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
+  return text
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }

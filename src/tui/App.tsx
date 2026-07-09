@@ -910,11 +910,23 @@ export function App({
 
       if (mode === "workflow") {
         if (runner.wf.started && runner.activeWorkflowRef.current) {
+          // Enter on a running/completed workflow step opens the step details
+          if (!runner.wfStepDetails) {
+            runner.setWfStepDetails("live");
+            prompt.updatePromptDraft({ promptEditing: false });
+            return;
+          }
           const ran = handleWorkflowRun(promptText, false);
           if (ran) prompt.updatePromptDraft({ promptEditing: false });
           return;
         }
         if (picker.wfPreview) {
+          // Enter on a preview workflow step opens the step details
+          if (!runner.wfStepDetails) {
+            runner.setWfStepDetails("preview");
+            prompt.updatePromptDraft({ promptEditing: false });
+            return;
+          }
           const ran = handleWorkflowRun(promptText, false);
           if (ran) prompt.updatePromptDraft({ promptEditing: false });
           return;
@@ -1368,10 +1380,10 @@ function hint(
       return `↑/↓ history · Enter preview${tabHint} · Ctrl+R run · /commands · Ctrl+C quit${completeHint}`;
     }
     if (wfStarted || wfLaunching) {
-      return `↑/↓ step · → details · type to edit · Ctrl+R run · Ctrl+Q cancel · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step · Enter details · type to edit · Ctrl+R run · Ctrl+Q cancel · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
     }
     if (wfPreviewing) {
-      return `↑/↓ step · → details${resumeHint} · type to edit · Ctrl+R run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step · Enter details${resumeHint} · type to edit · Ctrl+R run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
     }
     return `↑/↓ pick · Ctrl+N new · type to edit · Enter preview · Ctrl+R run · Ctrl+J history · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
   }
