@@ -135,6 +135,17 @@ the UI; unattended, `--approve-all` waves everything through or
 into CI. Headless runs end with a one-line-per-step **status summary** and an
 honest exit code.
 
+### Fire it off, come back later
+
+Long workflows shouldn't hold a terminal hostage. `workflow run --detach`
+executes under a background process that survives your session; **attach from
+any UI** — CLI (`workflow attach`), TUI (`/attach`), or the web UI's Active
+runs panel — to replay the record so far and tail it live. A shared
+**run queue** (`maxParallelRuns`) keeps concurrent runs from colliding over
+the cache and worktrees, and cancel/approve work cross-process: decide a
+detached run's approval checkpoint from whichever surface is handy. See
+[docs/detached-runs.md](docs/detached-runs.md).
+
 ### See it in the terminal or the browser
 
 The **TUI** opens on a workflow picker and streams the phase → step tree live;
@@ -170,6 +181,13 @@ steamtrain workflow cache clear
 # Unattended approval handling
 steamtrain workflow run review-loop --input "…" --approve-all
 steamtrain workflow run review-loop --input "…" --on-approval fail
+
+# Detached runs & the run queue (docs/detached-runs.md)
+steamtrain workflow run bug-hunt --input "…" --detach   # fire and return; survives this terminal
+steamtrain workflow runs                       # in-flight runs across every UI (--all, --json)
+steamtrain workflow attach <runId>             # replay + live tail; Ctrl+C detaches
+steamtrain workflow cancel <runId>             # stop a run owned by any process
+steamtrain workflow approve <runId> [--reject] # decide a parked approval checkpoint
 
 # Inspect past runs (recorded automatically to .steamtrain/history/)
 steamtrain workflow history                    # list recent runs (newest first)

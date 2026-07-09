@@ -34,6 +34,7 @@ right and should expand:
 | `src/agents/agent-meta.ts` | `buildAgentMeta` / `defaultDraftModel` — the agent→model→effort→default→health view-model | both (web via `/api/meta`; `WorkflowAuthor.agentMeta`) |
 | `src/agents/models.ts` | `modelsForAgent`, `effortsForModel`, defaults | TUI menus directly; the shared view-model wraps it |
 | `src/apis` | `resolveApiInstances` / `buildApiMeta` / `resolveLlmStepApi` — the API-instance view-model for direct-inference `llm` steps | both (web via `/api/meta` + `/api/config`; TUI manager + status bar) |
+| `src/workflow/live-run-store.ts` + `live-run.ts` | the shared live-run registry (`.steamtrain/runs/`): detached runs, attach tailing, the `maxParallelRuns` queue, cross-process cancel/approvals | all three (CLI `run/attach/runs/cancel/approve`; TUI runner + `/attach`; web run manager + `/api/runs*`) |
 
 `WorkflowAuthor` (formerly `src/web/authoring.ts`) moved into `src/workflow`
 and is now the single authoring core both frontends drive — see §5.

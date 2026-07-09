@@ -14,6 +14,7 @@ Deep dives:
 - [`api-configuration.md`](api-configuration.md) — API instances for direct-inference `llm` steps: scopes, readiness checks, and the managers in every UI
 - [`worktree-merge-back.md`](worktree-merge-back.md) — landing agent worktree changes: the `merge` step, PR mode, and history diff/apply/prune
 - [`cost-and-budgets.md`](cost-and-budgets.md) — cost budgets, token accounting, and cost analytics
+- [`detached-runs.md`](detached-runs.md) — detached (background) runs, the shared run queue, attach from any UI, cross-process cancel/approvals
 - [`init-tour-followups.md`](init-tour-followups.md) — `steamtrain init` + `tour` review dispositions: applied, declined (with rationale), and deferred
 
 ## Planning
