@@ -81,7 +81,7 @@ describe("TUI components", () => {
     expect(frame).toContain("no key");
   });
 
-  it("wraps a crowded status bar to two lines and hides the overflow", () => {
+  it("splits agents and APIs onto their own lines and hides the overflow", () => {
     const doctor = ["opencode", "codex", "amp", "kiro", "gemini", "cursor"].map(
       (agent) =>
         ({
@@ -117,10 +117,17 @@ describe("TUI components", () => {
       .replace(/\[[0-9;]*m/g, "")
       .split("\n")
       .filter((line) => line.startsWith("│"));
-    // Never more than two status lines — overflow is dropped, not wrapped onto a third.
+    // Exactly two status lines: one for agents, one for APIs.
     expect(rows.length).toBe(2);
-    // The dropped items are summarized by a "+N" marker rather than silently vanishing.
-    expect(rows.join("\n")).toMatch(/\+\d+/);
+    const [agentRow, apiRow] = rows as [string, string];
+    // Agents live on the first line, APIs on the second — no intermixing.
+    expect(agentRow).toContain("opencode");
+    expect(agentRow).not.toContain("anthropic");
+    expect(apiRow).toContain("anthropic");
+    expect(apiRow).not.toContain("opencode ready");
+    // Each overcrowded line drops its own overflow behind a "+N" marker.
+    expect(agentRow).toMatch(/\+\d+/);
+    expect(apiRow).toMatch(/\+\d+/);
     // Overflow items are hidden entirely, not split across the line boundary.
     expect(rows.join("\n")).not.toContain("together");
   });
