@@ -310,6 +310,10 @@ const reviewLoop: WorkflowSpec = {
       title: "Merge",
       steps: [
         {
+          // `from` must point to the TAIL of the inheritance chain only.
+          // fix inherits review which inherits impl, so fix's worktree
+          // already contains the full chain. Including impl would cause
+          // overlapping git merges and content conflicts.
           id: "merge",
           kind: "merge",
           dependsOn: ["loop-gate"],
