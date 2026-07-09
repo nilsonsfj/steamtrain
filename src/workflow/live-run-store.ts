@@ -496,6 +496,12 @@ async function readFrom(path: string, offset: number): Promise<Buffer> {
   }
 }
 
+/**
+ * A control-flow sleep: gates forward progress (tail polls), so its timer must
+ * KEEP the event loop alive — an unref'd timer here would let a process whose
+ * only remaining work is this wait (a headless attach, a parked detached
+ * runner) silently exit mid-wait.
+ */
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (signal?.aborted) {
@@ -506,7 +512,6 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
       signal?.removeEventListener("abort", onAbort);
       resolve();
     }, ms);
-    timer.unref?.();
     const onAbort = (): void => {
       clearTimeout(timer);
       resolve();

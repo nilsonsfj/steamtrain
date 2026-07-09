@@ -1,11 +1,14 @@
 import { Box, Text } from "ink";
 import { useEffect, useState } from "react";
 import { truncate } from "../agents/util";
-import { type RunRecordSummary, formatRunTotals } from "../workflow";
+import { type LiveRunMeta, type RunRecordSummary, formatRunTotals } from "../workflow";
 import { selectVisibleWindow } from "./workflow-list-window";
 
 interface WorkflowHistoryProps {
   runs: RunRecordSummary[];
+  /** In-flight (queued/running) runs listed above past runs; Enter attaches. */
+  liveRuns: LiveRunMeta[];
+  /** Selection index across live runs first, then past runs. */
   selectedIndex: number;
   loading: boolean;
   error?: string;
@@ -20,9 +23,16 @@ const STATUS_GLYPH: Record<RunRecordSummary["status"], { symbol: string; color: 
   "budget-exceeded": { symbol: "$", color: "yellow" },
 };
 
-/** A browser for past workflow runs: ↑/↓ select, Enter to inspect, Esc to close. */
+/** One selectable row in the browser: a live run or a recorded one. */
+type HistoryEntry = { kind: "live"; live: LiveRunMeta } | { kind: "record"; run: RunRecordSummary };
+
+/**
+ * A browser for workflow runs: in-flight runs (attachable) above recorded
+ * history. ↑/↓ select, Enter attaches (live) or inspects (past), Esc closes.
+ */
 export function WorkflowHistory({
   runs,
+  liveRuns,
   selectedIndex,
   loading,
   error,
@@ -30,9 +40,13 @@ export function WorkflowHistory({
   height,
 }: WorkflowHistoryProps) {
   const innerWidth = Math.max(20, width - 4);
-  const clamped = Math.min(selectedIndex, Math.max(0, runs.length - 1));
+  const entries: HistoryEntry[] = [
+    ...liveRuns.map((live): HistoryEntry => ({ kind: "live", live })),
+    ...runs.map((run): HistoryEntry => ({ kind: "record", run })),
+  ];
+  const clamped = Math.min(selectedIndex, Math.max(0, entries.length - 1));
   const listBudget = Math.max(1, height - 3);
-  const window = selectVisibleWindow(runs, clamped, listBudget);
+  const window = selectVisibleWindow(entries, clamped, listBudget);
 
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -44,10 +58,12 @@ export function WorkflowHistory({
     <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} height={height}>
       <Box justifyContent="space-between">
         <Text color="cyan" bold>
-          run history
+          runs
         </Text>
         <Text color="gray">
-          {runs.length} run{runs.length === 1 ? "" : "s"} · ↑/↓ select · Enter inspect · Esc back
+          {liveRuns.length > 0 ? `${liveRuns.length} active · ` : ""}
+          {runs.length} recorded · ↑/↓ select · Enter {liveRuns.length > 0 ? "attach/" : ""}inspect
+          · Esc back
         </Text>
       </Box>
       <Box flexDirection="column" flexGrow={1}>
@@ -55,26 +71,75 @@ export function WorkflowHistory({
           <Text color="gray">loading history…</Text>
         ) : error ? (
           <Text color="red">{error}</Text>
-        ) : runs.length === 0 ? (
+        ) : entries.length === 0 ? (
           <Text color="gray">No recorded runs yet. Run a workflow to start building history.</Text>
         ) : (
           <>
             {window.hiddenBefore > 0 ? (
               <Text color="gray">{window.hiddenBefore} earlier hidden ↑</Text>
             ) : null}
-            {window.visible.map((run, offset) => (
-              <HistoryRow
-                key={run.id}
-                run={run}
-                width={innerWidth}
-                selected={window.start + offset === clamped}
-              />
-            ))}
+            {window.visible.map((entry, offset) =>
+              entry.kind === "live" ? (
+                <LiveRunRow
+                  key={entry.live.id}
+                  run={entry.live}
+                  width={innerWidth}
+                  selected={window.start + offset === clamped}
+                />
+              ) : (
+                <HistoryRow
+                  key={entry.run.id}
+                  run={entry.run}
+                  width={innerWidth}
+                  selected={window.start + offset === clamped}
+                />
+              ),
+            )}
             {window.hiddenAfter > 0 ? (
               <Text color="gray">{window.hiddenAfter} later hidden ↓</Text>
             ) : null}
           </>
         )}
+      </Box>
+    </Box>
+  );
+}
+
+function LiveRunRow({
+  run,
+  width,
+  selected,
+}: {
+  run: LiveRunMeta;
+  width: number;
+  selected: boolean;
+}) {
+  const glyph = run.status === "queued" ? "⧗" : "▶";
+  const when = relativeTime(run.startedAt ?? run.createdAt);
+  const badges = [
+    run.status,
+    run.detached ? "detached" : run.source,
+    run.pendingApprovals?.length ? `⏳ approval: ${run.pendingApprovals[0]?.stepId}` : undefined,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <Box flexDirection="column">
+      <Box>
+        <Text color={selected ? "cyan" : "gray"}>{selected ? "▶ " : "  "}</Text>
+        <Text color={run.status === "queued" ? "yellow" : "green"}>{glyph} </Text>
+        <Text color={selected ? "cyan" : "white"} bold={selected}>
+          {run.workflow}
+        </Text>
+        <Text color="gray">
+          {"  "}
+          {when} · {badges} · Enter attaches
+        </Text>
+      </Box>
+      <Box paddingLeft={4}>
+        <Text color="gray" wrap="truncate-end">
+          {truncate(run.input.replace(/\s+/g, " ").trim() || "(no input)", Math.max(20, width - 6))}
+        </Text>
       </Box>
     </Box>
   );

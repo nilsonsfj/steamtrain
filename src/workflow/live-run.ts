@@ -68,8 +68,10 @@ export function createLiveRunPublisher(store: LiveRunStore, runId: string): Live
 
   const scheduleFlush = (): void => {
     if (flushTimer) return;
+    // Deliberately NOT unref'd: buffered events must land on disk even if the
+    // owning process would otherwise be idle (e.g. the engine just parked on
+    // an approval and this flush is the only pending work).
     flushTimer = setTimeout(flush, PUBLISH_FLUSH_MS);
-    flushTimer.unref?.();
   };
 
   const syncPendingApprovals = (): void => {
@@ -313,6 +315,12 @@ export function newLiveRunMeta(fields: {
   };
 }
 
+/**
+ * A control-flow sleep: gates forward progress (queue waits, approval polls),
+ * so its timer must KEEP the event loop alive — an unref'd timer here would
+ * let a process whose only remaining work is this wait (a queued foreground
+ * run, a detached runner parked on an approval) silently exit mid-wait.
+ */
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (signal?.aborted) {
@@ -323,7 +331,6 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
       signal?.removeEventListener("abort", onAbort);
       resolve();
     }, ms);
-    timer.unref?.();
     const onAbort = (): void => {
       clearTimeout(timer);
       resolve();
