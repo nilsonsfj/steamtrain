@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiConfigScope, apiScopeLabel, removeApi, upsertApi } from "../src/apis";
+import {
+  apiConfigScope,
+  apiScopeLabel,
+  removeApi,
+  resolveApiInstance,
+  upsertApi,
+} from "../src/apis";
 import { apiCommand } from "../src/commands/builtins/api";
 import { executeSlashCommand } from "../src/commands/registry";
 import type {
@@ -7,6 +13,7 @@ import type {
   SlashCommandNotice,
   SlashCommandResult,
 } from "../src/commands/types";
+import type { ApiInstanceConfig } from "../src/config/types";
 import { workspaceById } from "../src/workspace";
 import { DEFAULT_WORKSPACE_CONFIG } from "../src/workspace/defaults";
 
@@ -163,6 +170,28 @@ describe("/api command", () => {
     run("/api enable openai", ctx);
     expect(updateUserConfig).toHaveBeenCalledWith({
       apis: [{ id: "openai", provider: "openai", enabled: true }],
+    });
+  });
+
+  it("enabling a gateway built-in writes a minimal entry that still resolves to its endpoint", () => {
+    const updateUserConfig = vi.fn().mockReturnValue({ ok: true });
+    const ctx = makeCtx({
+      updateUserConfig,
+      userConfigPath: "/home/.steamtrain/config.json",
+      userApis: [],
+      projectApis: [],
+    });
+    run("/api enable openrouter", ctx);
+    // The command writes only id/provider/enabled...
+    expect(updateUserConfig).toHaveBeenCalledWith({
+      apis: [{ id: "openrouter", provider: "openai", enabled: true }],
+    });
+    // ...and that minimal entry, once merged, keeps the built-in's endpoint and key env.
+    const written = updateUserConfig.mock.calls[0]![0] as { apis: ApiInstanceConfig[] };
+    expect(resolveApiInstance({ apis: written.apis }, "openrouter")).toMatchObject({
+      enabled: true,
+      baseUrl: "https://openrouter.ai/api/v1",
+      apiKeyEnv: "OPENROUTER_API_KEY",
     });
   });
 

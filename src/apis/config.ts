@@ -32,7 +32,7 @@ export const DEFAULT_API_KEY_ENV: Record<ApiProviderId, string> = {
  * {@link ApiProviderId} (the wire dialect) so several instances can share the
  * `openai` dialect while pointing at different hosts.
  */
-export interface BuiltinApiInstance {
+interface BuiltinApiInstance {
   id: ApiInstanceId;
   /** Wire dialect the endpoint speaks. */
   provider: ApiProviderId;
@@ -45,7 +45,7 @@ export interface BuiltinApiInstance {
   keyless?: boolean;
 }
 
-export const BUILTIN_API_INSTANCES: readonly BuiltinApiInstance[] = [
+const BUILTIN_API_INSTANCES: readonly BuiltinApiInstance[] = [
   { id: "anthropic", provider: "anthropic", label: "anthropic", apiKeyEnv: "ANTHROPIC_API_KEY" },
   { id: "openai", provider: "openai", label: "openai", apiKeyEnv: "OPENAI_API_KEY" },
   {
@@ -117,10 +117,11 @@ function resolvedFromBuiltin(builtin: BuiltinApiInstance): ResolvedApiInstance {
 }
 
 /**
- * Overlay a config entry onto its base instance. Fields the entry omits fall
- * back to the base — so `/api enable openrouter` (an entry with just id +
- * provider + enabled) keeps the built-in's endpoint, key env, and keyless flag
- * rather than silently reverting to the raw provider defaults.
+ * Overlay one `apis` config entry onto its base instance (a built-in, or a
+ * fresh instance for a novel id). Fields the entry omits fall back to the base
+ * rather than resetting to raw provider defaults — so a minimal entry like
+ * `{ id: "openrouter", provider: "openai", enabled: true }` (what `/api enable`
+ * writes) keeps the built-in's endpoint, key env, and keyless flag.
  */
 function applyApiConfig(
   base: ResolvedApiInstance,

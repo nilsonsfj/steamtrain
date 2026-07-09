@@ -149,6 +149,11 @@ describe("apis config validation", () => {
     ).toHaveLength(1);
   });
 
+  it("accepts the keyless flag (for local servers / free gateways)", () => {
+    const parsed = parseApisConfig([{ id: "ollama", provider: "openai", keyless: true }]);
+    expect(parsed).toEqual([{ id: "ollama", provider: "openai", keyless: true }]);
+  });
+
   it("rejects duplicate ids, unknown providers, and unknown fields", () => {
     expect(() =>
       parseApisConfig([
