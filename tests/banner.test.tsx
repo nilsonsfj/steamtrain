@@ -80,4 +80,48 @@ describe("TUI components", () => {
     expect(frame).toContain("openai");
     expect(frame).toContain("no key");
   });
+
+  it("wraps a crowded status bar to two lines and hides the overflow", () => {
+    const doctor = ["opencode", "codex", "amp", "kiro", "gemini", "cursor"].map(
+      (agent) =>
+        ({
+          agent,
+          provider: "claude",
+          status: "ok",
+          binary: agent,
+          message: "ready",
+        }) as DoctorResult,
+    );
+    const apiDoctor = ["anthropic", "openai", "openrouter", "opencode-zen", "groq", "together"].map(
+      (api) => ({
+        api,
+        provider: "openai" as const,
+        status: "key_missing" as const,
+        keyEnv: "KEY",
+        baseUrl: "https://x",
+        message: "no key",
+      }),
+    );
+    const { lastFrame } = render(
+      <StatusBar
+        doctor={doctor}
+        apiDoctor={apiDoctor}
+        configSource="user+project"
+        workspaceLabel="user"
+        running={false}
+      />,
+    );
+    // Strip ANSI, keep only the bordered content rows (drop the top/bottom rules).
+    const rows = (lastFrame() ?? "")
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escapes
+      .replace(/\[[0-9;]*m/g, "")
+      .split("\n")
+      .filter((line) => line.startsWith("│"));
+    // Never more than two status lines — overflow is dropped, not wrapped onto a third.
+    expect(rows.length).toBe(2);
+    // The dropped items are summarized by a "+N" marker rather than silently vanishing.
+    expect(rows.join("\n")).toMatch(/\+\d+/);
+    // Overflow items are hidden entirely, not split across the line boundary.
+    expect(rows.join("\n")).not.toContain("together");
+  });
 });
