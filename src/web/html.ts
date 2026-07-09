@@ -56,6 +56,10 @@ export function renderIndex(revs: PageAssetRevisions): string {
 </header>
 <main>
   <aside id="sidebar">
+    <div id="liveRunsSection" style="display:none">
+      <h2>Active runs</h2>
+      <div id="liveRuns"></div>
+    </div>
     <h2>Workflows <button class="newbtn" id="newWfBtn" title="Create a workflow">&#43; New</button></h2>
     <div id="wflist"></div>
   </aside>

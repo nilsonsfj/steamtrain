@@ -3,22 +3,31 @@ import type { SteamtrainConfig } from "../config";
 import {
   type ApprovalDecision,
   type ApprovalProvider,
+  type LiveRunPublisher,
+  type LiveRunStore,
   type RerunMode,
   type RerunPlan,
   type RunRecord,
   RunRecordBuilder,
+  type RunRecordStatus,
   type StepResult,
   type WorkflowCacheStore,
   type WorkflowEvent,
   type WorkflowHistoryStore,
   type WorkflowSpec,
+  acquireRunSlot,
+  createLiveRunPublisher,
   hashWorkflowSpec,
   isRerunError,
   matchApprovalKey,
+  newLiveRunMeta,
   persistWorkflowStepDone,
   planRerun,
+  resolveMaxParallelRuns,
   resolveWorkflowTimeoutSec,
   timeoutMsFromSec,
+  watchRunCancel,
+  withStoreApprovals,
   workflowCacheKey,
 } from "../workflow";
 
@@ -68,6 +77,8 @@ interface Run {
   input: string;
   params?: Record<string, string | number | boolean>;
   status: RunStatus;
+  /** True while the run is waiting for a shared queue slot (status stays "running"). */
+  queued: boolean;
   ok?: boolean;
   error?: string;
   startedAt: number;
@@ -100,10 +111,14 @@ export interface RunSummary {
   workflow: string;
   input: string;
   status: RunStatus;
+  /** True while the run waits for a shared queue slot. */
+  queued?: boolean;
   ok?: boolean;
   error?: string;
   startedAt: number;
   endedAt?: number;
+  /** Human-approval checkpoints currently awaiting a decision. */
+  pendingApprovals?: { stepId: string; iteration: number }[];
 }
 
 export interface StartRunResult {
@@ -124,6 +139,12 @@ export interface RunManagerOptions {
   maxConcurrent?: number;
   /** Project config — used to resolve per-run workflow wall-clock limits. */
   config: SteamtrainConfig;
+  /**
+   * Optional shared live-run registry. When set, web runs are mirrored into
+   * `.steamtrain/runs/` (so the TUI/CLI can attach), honor the cross-process
+   * run queue (`maxParallelRuns`), and accept cross-process cancel/approval.
+   */
+  liveRuns?: LiveRunStore;
 }
 
 const DEFAULT_RETAIN_MS = 5 * 60_000;
@@ -143,6 +164,7 @@ export class WorkflowRunManager {
   private readonly retainMs: number;
   private readonly maxConcurrent: number;
   private readonly config: SteamtrainConfig;
+  private readonly liveRuns?: LiveRunStore;
   private runningCount = 0;
 
   constructor(options: RunManagerOptions) {
@@ -153,6 +175,7 @@ export class WorkflowRunManager {
     this.retainMs = options.retainMs ?? DEFAULT_RETAIN_MS;
     this.maxConcurrent = options.maxConcurrent ?? 0;
     this.config = options.config;
+    this.liveRuns = options.liveRuns;
   }
 
   /** Validate and launch a run; the event loop runs detached in the background. */
@@ -187,6 +210,7 @@ export class WorkflowRunManager {
       input: text,
       params: opts?.params,
       status: "running",
+      queued: Boolean(this.liveRuns),
       startedAt: Date.now(),
       frames: [],
       terminal: false,
@@ -195,11 +219,8 @@ export class WorkflowRunManager {
       controller: new AbortController(),
       pendingApprovals: new Map(),
     };
-    const workflowTimeoutMs = timeoutMsFromSec(resolveWorkflowTimeoutSec(spec, this.config));
-    if (workflowTimeoutMs > 0) {
-      run.timeoutTimer = setTimeout(() => run.controller.abort(), workflowTimeoutMs);
-      run.timeoutTimer.unref?.();
-    }
+    // The whole-workflow wall-clock timer is armed in drive() once the run
+    // leaves the queue, so time spent waiting for a slot doesn't count.
     this.runs.set(run.id, run);
     this.runningCount += 1;
     void this.drive(run, spec, opts?.fresh ?? false, opts?.seed);
@@ -338,7 +359,54 @@ export class WorkflowRunManager {
     );
     let ok: boolean | undefined;
     let budgetExceeded = false;
+    let publisher: LiveRunPublisher | undefined;
+    let disposeCancelWatch: (() => void) | undefined;
     try {
+      // Mirror the run into the shared live-run registry (cross-UI attach) and
+      // wait for a queue slot so parallel runs don't collide over the cache
+      // and worktrees. Queue progress is surfaced as non-terminal frames.
+      if (this.liveRuns) {
+        await this.liveRuns.create(
+          newLiveRunMeta({
+            id: run.id,
+            workflow: run.workflow,
+            input: run.input,
+            params: run.params,
+            cwd: this.cwd,
+            source: "web",
+          }),
+        );
+        disposeCancelWatch = watchRunCancel(this.liveRuns, run.id, () => run.controller.abort());
+        let lastPosition = -1;
+        const slot = await acquireRunSlot(
+          this.liveRuns,
+          run.id,
+          resolveMaxParallelRuns(this.config),
+          {
+            signal: run.controller.signal,
+            onQueued: (position, running, limit) => {
+              if (position === lastPosition) return;
+              lastPosition = position;
+              this.emit(run, JSON.stringify({ type: "queued", position, running, limit }), false);
+            },
+          },
+        );
+        run.queued = false;
+        if (!slot.ok) {
+          run.status = "canceled";
+          return;
+        }
+        publisher = createLiveRunPublisher(this.liveRuns, run.id);
+      }
+      run.queued = false;
+
+      // Arm the whole-workflow wall-clock timer now that the run is executing.
+      const workflowTimeoutMs = timeoutMsFromSec(resolveWorkflowTimeoutSec(spec, this.config));
+      if (workflowTimeoutMs > 0) {
+        run.timeoutTimer = setTimeout(() => run.controller.abort(), workflowTimeoutMs);
+        run.timeoutTimer.unref?.();
+      }
+
       let cache: Map<string, StepResult>;
       if (fresh) {
         await this.cacheStore.clear(key);
@@ -351,6 +419,9 @@ export class WorkflowRunManager {
         for (const [stepId, result] of seed) cache.set(stepId, result);
         await this.cacheStore.save(key, cache);
       }
+      const approval = this.liveRuns
+        ? withStoreApprovals(this.liveRuns, run.id, this.buildApprovalProvider(run))
+        : this.buildApprovalProvider(run);
       for await (const event of this.host.runWorkflow(
         run.workflow,
         run.input,
@@ -359,9 +430,10 @@ export class WorkflowRunManager {
         this.cwd,
         spec,
         run.params,
-        this.buildApprovalProvider(run),
+        approval,
       )) {
         recorder.handle(event);
+        publisher?.event(event);
         this.emit(run, JSON.stringify({ type: "event", event }), false);
         if (event.kind === "step_done") {
           await persistWorkflowStepDone(
@@ -400,9 +472,32 @@ export class WorkflowRunManager {
       }
     } finally {
       if (run.timeoutTimer) clearTimeout(run.timeoutTimer);
+      run.queued = false;
       run.pendingApprovals.clear();
+      disposeCancelWatch?.();
       this.runningCount = Math.max(0, this.runningCount - 1);
       run.endedAt = Date.now();
+      // Settle the live-run mirror (flushes buffered events, then writes the
+      // terminal meta) before the terminal SSE frame, so cross-UI tailers see
+      // the complete stream. Best-effort — never let it break the run.
+      if (this.liveRuns) {
+        const status: RunRecordStatus = run.status === "running" ? "done" : run.status;
+        try {
+          if (publisher) {
+            await publisher.finish(status, { ok: run.ok, error: run.error });
+          } else {
+            await this.liveRuns.update(run.id, {
+              status,
+              ok: run.ok,
+              error: run.error,
+              endedAt: run.endedAt,
+              pendingApprovals: [],
+            });
+          }
+        } catch {
+          // Mirroring is best-effort.
+        }
+      }
       // The outcome is resolved now; lock out cancellation synchronously before
       // the async history write, so a cancel during that window can't report an
       // already-finished run as cancelable.
@@ -447,14 +542,20 @@ export class WorkflowRunManager {
 }
 
 function toSummary(run: Run): RunSummary {
+  const pendingApprovals = [...run.pendingApprovals.keys()].map((key) => {
+    const sep = key.lastIndexOf(":");
+    return { stepId: key.slice(0, sep), iteration: Number(key.slice(sep + 1)) || 1 };
+  });
   return {
     id: run.id,
     workflow: run.workflow,
     input: run.input,
     status: run.status,
+    queued: run.queued || undefined,
     ok: run.ok,
     error: run.error,
     startedAt: run.startedAt,
     endedAt: run.endedAt,
+    pendingApprovals: pendingApprovals.length > 0 ? pendingApprovals : undefined,
   };
 }

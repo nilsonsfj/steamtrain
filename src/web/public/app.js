@@ -13,7 +13,8 @@
     runState: null,
     rafQueued: false, draftAbort: null, doctor: [], apiDoctor: [],
     stagedOverrides: {},
-    projectConfig: null
+    projectConfig: null,
+    liveRuns: [], liveRunsTimer: null, queuedBanner: false
   };
 
   function h(tag, attrs) {
@@ -62,6 +63,89 @@
     loadMeta();
     loadProjectConfig();
     pollDoctor(0);
+    pollLiveRuns();
+    if (!S.liveRunsTimer) S.liveRunsTimer = setInterval(pollLiveRuns, 5000);
+  }
+
+  // ---- in-flight runs (attach from any UI) ----------------------------------
+  // The live-run registry lists every in-flight run in this project — web-owned,
+  // CLI --detach, or TUI — so any of them can be attached to (replay + live tail).
+  function pollLiveRuns() {
+    api("GET", "/api/runs").then(function (r) {
+      if (r.status !== 200) return; // pre-login or transient; the next poll retries
+      S.liveRuns = (r.body.runs || []).filter(function (run) {
+        return run.status === "running" || run.status === "queued";
+      });
+      renderLiveRuns();
+    }).catch(function () {});
+  }
+
+  function renderLiveRuns() {
+    var section = document.getElementById("liveRunsSection");
+    var box = document.getElementById("liveRuns");
+    if (!section || !box) return;
+    if (!S.liveRuns.length) { section.style.display = "none"; clear(box); return; }
+    section.style.display = "block";
+    clear(box);
+    S.liveRuns.forEach(function (run) {
+      var badges = [];
+      if (run.status === "queued") badges.push(h("span", { class: "badge staged", text: "queued" }));
+      if (run.detached) badges.push(h("span", { class: "badge cached", text: "detached" }));
+      if (run.pendingApprovals && run.pendingApprovals.length) {
+        badges.push(h("span", { class: "badge gate-block", text: "⏳ approval" }));
+      }
+      var isAttached = S.runId === run.id;
+      var row = h("div", { class: "wf liverun" + (isAttached ? " sel" : ""), onClick: function () { attachRun(run); } },
+        h("div", { class: "name" }, run.workflow, h("span", { class: "src", text: run.source || "" })),
+        h("div", { class: "desc", text: truncate(run.input || "", 60) }),
+        h("div", { class: "meta" }, badges.length ? h("span", null, badges[0], badges[1] || null, badges[2] || null) : null,
+          h("span", { text: (isAttached ? "attached · " : "") + relTime(run.startedAt) }))
+      );
+      box.appendChild(row);
+    });
+  }
+
+  function relTime(ts) {
+    var sec = Math.max(0, Math.round((Date.now() - ts) / 1000));
+    if (sec < 60) return sec + "s ago";
+    var min = Math.round(sec / 60);
+    if (min < 60) return min + "m ago";
+    return Math.round(min / 60) + "h ago";
+  }
+
+  /** Attach to an in-flight run: replay its record so far, then tail live. */
+  function attachRun(run) {
+    if (S.runId === run.id && S.es) return; // already attached
+    var known = S.workflows.some(function (w) { return w.name === run.workflow; });
+    var begin = function () {
+      S.runId = run.id;
+      setRunning(true);
+      S.startedAt = run.startedAt || Date.now();
+      startTimer();
+      document.getElementById("statusLine").style.display = "flex";
+      // Replay rebuilds the tree from the event stream itself (workflow_start
+      // resets the folded state), so start from a clean slate.
+      S.runState = SteamtrainReducer.initialWorkflowState;
+      setBanner("Attached to " + (run.detached ? "detached " : "") + "run " + run.id.slice(0, 8) + "… — cancel stops the run itself.", "info");
+      openStream(run.id);
+      render();
+      renderLiveRuns();
+    };
+    if (known) {
+      selectWorkflow(run.workflow, begin);
+    } else {
+      // Run of a workflow that is no longer in the catalog: attach with the
+      // event stream alone (the reducer rebuilds phases from events).
+      if (S.es) { S.es.close(); S.es = null; }
+      stopTimer();
+      S.selected = null; S.source = null;
+      S.spec = { name: run.workflow, phases: [] };
+      document.getElementById("wfTitle").textContent = run.workflow;
+      document.getElementById("wfSub").textContent = "attached run (workflow not in catalog)";
+      document.getElementById("runRow").style.display = "none";
+      renderSidebar();
+      begin();
+    }
   }
 
   function showLoginForm() {
@@ -1027,14 +1111,24 @@
       es.onmessage = function (m) {
         var frame;
         try { frame = JSON.parse(m.data); } catch (e) { return; }
-        if (frame.type === "event") { reduce(frame.event); scheduleRender(); }
+        if (frame.type === "event") {
+          if (S.queuedBanner) { S.queuedBanner = false; setBanner("", ""); }
+          reduce(frame.event); scheduleRender();
+        }
+        else if (frame.type === "queued") {
+          // Waiting for a shared run-queue slot (maxParallelRuns); not terminal.
+          S.queuedBanner = true;
+          setBanner("Queued — position " + frame.position + " (" + frame.running + "/" + frame.limit + " run slots busy)…", "info");
+        }
         else if (frame.type === "status") {
           es.close(); S.es = null; setRunning(false); stopTimer();
+          S.queuedBanner = false;
           if (frame.status === "canceled") setBanner("Run canceled.", "info");
           else if (frame.status === "budget-exceeded") setBanner("Run stopped: cost budget reached. Raise maxCostUsd and re-run to resume.", "err");
           else if (frame.status === "error" || frame.ok === false) setBanner("Run failed" + (frame.error ? ": " + frame.error : "."), "err");
           else setBanner("Run complete.", "ok");
           render();
+          pollLiveRuns();
         }
       };
       es.onerror = function () {
