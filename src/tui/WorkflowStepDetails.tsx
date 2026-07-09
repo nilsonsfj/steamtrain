@@ -219,14 +219,12 @@ function previewLines(
     let isFirstPromptLine = true;
     for (const promptLine of promptLines) {
       const trimmedLine = promptLine.trim();
-      if (trimmedLine) {
-        lines.push({
-          text: isFirstPromptLine
-            ? `prompt: ${truncate(trimmedLine, Math.max(80, width - 20))}`
-            : `  ${truncate(trimmedLine, Math.max(80, width - 20))}`,
-        });
-        isFirstPromptLine = false;
-      }
+      lines.push({
+        text: isFirstPromptLine
+          ? `prompt: ${truncate(trimmedLine || "(blank)", Math.max(80, width - 20))}`
+          : `  ${truncate(trimmedLine || "(blank)", Math.max(80, width - 20))}`,
+      });
+      isFirstPromptLine = false;
     }
   }
 
@@ -287,16 +285,16 @@ function liveLines(phase: PhaseState, step: StepState, width: number): DetailLin
     const prefix = step.status === "error" ? "error" : "output";
     const outputColor = step.status === "error" ? "red" : "white";
     const outputLines = output.split("\n");
-    let pushedOutput = false;
+    let isFirstOutputLine = true;
     for (const outputLine of outputLines) {
       const trimmedLine = outputLine.trim();
       lines.push({
-        text: !pushedOutput
+        text: isFirstOutputLine
           ? `${prefix}: ${truncate(trimmedLine || "(blank)", Math.max(160, width * 7))}`
           : `  ${truncate(trimmedLine || "(blank)", Math.max(160, width * 7))}`,
         color: outputColor,
       });
-      pushedOutput = true;
+      isFirstOutputLine = false;
     }
   } else {
     lines.push({ text: `tail: ${step.activity || statusWord(step.status)}`, color: "gray" });
