@@ -832,7 +832,7 @@ describe("web server", () => {
       apis: { id: string; healthy: boolean; keyPresent: boolean }[];
     };
     const ids = metaBody.apis.map((a) => a.id);
-    expect(ids).toEqual(["anthropic", "openai", "groq"]);
+    expect(ids).toEqual(["anthropic", "openai", "openrouter", "opencode-zen", "groq"]);
     expect(metaBody.apis.find((a) => a.id === "groq")).toMatchObject({ healthy: true });
   });
 
@@ -880,11 +880,29 @@ describe("web server", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { ok: boolean; apis: { id: string }[] };
       expect(body.ok).toBe(true);
-      expect(body.apis.map((a) => a.id)).toEqual(["anthropic", "openai", "groq"]);
+      expect(body.apis.map((a) => a.id)).toEqual([
+        "anthropic",
+        "openai",
+        "openrouter",
+        "opencode-zen",
+        "groq",
+      ]);
 
-      // The save re-ran the API doctor (all key_missing — no keys in env).
-      expect(probed?.map((r) => r.api)).toEqual(["anthropic", "openai", "groq"]);
-      expect(probed?.every((r) => r.status === "key_missing")).toBe(true);
+      // The save re-ran the API doctor. With no keys in env the keyed
+      // instances are key_missing; the keyless opencode-zen gateway is ready
+      // without a network probe.
+      expect(probed?.map((r) => r.api)).toEqual([
+        "anthropic",
+        "openai",
+        "openrouter",
+        "opencode-zen",
+        "groq",
+      ]);
+      const probedById = new Map((probed ?? []).map((r) => [r.api, r.status]));
+      expect(probedById.get("opencode-zen")).toBe("ok");
+      for (const id of ["anthropic", "openai", "openrouter", "groq"]) {
+        expect(probedById.get(id)).toBe("key_missing");
+      }
 
       // And the project file round-trips the entry.
       const onDisk = JSON.parse(readFileSync(configPath, "utf8")) as {

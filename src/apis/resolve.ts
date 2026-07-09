@@ -34,6 +34,8 @@ export type LlmStepApiResolution =
       baseUrl?: string;
       /** Effective per-MTok rates: the step's own, else the instance's. */
       pricing?: LlmPricing;
+      /** Instance serves free models without a key (e.g. opencode-zen). */
+      keyless?: boolean;
     }
   | { ok: false; error: string };
 
@@ -88,6 +90,7 @@ export function resolveLlmStepApi(
     apiKeyEnv: step.apiKeyEnv ?? api.apiKeyEnv,
     baseUrl: step.baseUrl ?? api.baseUrl,
     pricing: step.pricing ?? api.pricing,
+    keyless: api.keyless,
   };
 }
 
@@ -110,7 +113,7 @@ export function workflowLlmApiIssues(
       issues.add(`step '${step.id}': ${resolved.error}`);
       continue;
     }
-    if (!env[resolved.apiKeyEnv]) {
+    if (!resolved.keyless && !env[resolved.apiKeyEnv]) {
       issues.add(
         `api '${resolved.api.id}' needs an API key in the ${resolved.apiKeyEnv} environment variable (used by step '${step.id}')`,
       );

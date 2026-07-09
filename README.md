@@ -91,10 +91,12 @@ JSON, not a morning of babysitting terminals. Bundled examples:
 
 Not every step needs a full coding agent. An `llm` step calls a model's HTTP API
 directly — cheaper, faster, no CLI to install. It works out of the box with
-`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, and you can point it at **any
-OpenAI-compatible endpoint** (a corporate gateway, Groq, etc.) with a few lines
-of config. Great for routing, triage, and synthesis glue between the heavyweight
-agent steps.
+`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, and ships with built-in **OpenRouter**
+and **OpenCode Zen** gateways — just set `"api": "openrouter"` (or point it at
+**any OpenAI-compatible endpoint**: a corporate gateway, Groq, a local Ollama).
+OpenCode Zen even runs its free models **keyless**, so you can try an `llm`
+workflow with no API key at all. Great for routing, triage, and synthesis glue
+between the heavyweight agent steps.
 
 ### Let agents edit safely, then merge back on purpose
 
@@ -421,8 +423,9 @@ Beyond the four built-in agents, you can register additional **agent instances**
 (a provider adapter plus a custom binary/env/args — e.g. a fork) and **API
 instances** (an HTTP endpoint for `llm` steps: dialect, base URL, key env var,
 default model, pricing). Both configure at global or project scope and merge by
-`id`. Built-in `anthropic`/`openai` API instances exist with zero config; point
-them at a gateway or define new ones (Groq, etc.) under `apis`. See
+`id`. Built-in `anthropic`, `openai`, `openrouter`, and `opencode-zen` API
+instances exist with zero config; customize one, point it at a gateway, or
+define new ones (Groq, etc.) under `apis`. See
 [`docs/agent-configuration.md`](docs/agent-configuration.md) and
 [`docs/api-configuration.md`](docs/api-configuration.md).
 
