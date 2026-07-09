@@ -1,7 +1,6 @@
 export { type ApiMeta, buildApiMeta } from "./api-meta";
 export {
   API_PROVIDER_IDS,
-  BUILTIN_API_IDS,
   DEFAULT_API_KEY_ENV,
   defaultApiInstance,
   isApiProviderId,

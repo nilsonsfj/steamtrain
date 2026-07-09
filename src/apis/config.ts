@@ -65,9 +65,6 @@ const BUILTIN_API_INSTANCES: readonly BuiltinApiInstance[] = [
   },
 ];
 
-/** The built-in zero-config instance ids, in display order. */
-export const BUILTIN_API_IDS: readonly ApiInstanceId[] = BUILTIN_API_INSTANCES.map((b) => b.id);
-
 export interface ResolvedApiInstance {
   id: ApiInstanceId;
   provider: ApiProviderId;
