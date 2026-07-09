@@ -1,6 +1,6 @@
 import { Box, Text, useInput } from "ink";
 import { useState } from "react";
-import { API_IDS, apiScopeLabel } from "../apis";
+import { API_PROVIDER_IDS, apiScopeLabel } from "../apis";
 import type { ResolvedApiInstance } from "../apis";
 import type { ApiConfigScope } from "../config/types";
 import type { ApiProviderId } from "../types/events";
@@ -155,7 +155,7 @@ export function ApiManager({
         setForm({ ...form, field: ADD_FIELDS[at + 1]! });
         return;
       }
-      const provider = API_IDS[form.providerIndex]!;
+      const provider = API_PROVIDER_IDS[form.providerIndex]!;
       const baseUrl = form.baseUrl.trim();
       const apiKeyEnv = form.apiKeyEnv.trim();
       const defaultModel = form.defaultModel.trim();
@@ -179,7 +179,7 @@ export function ApiManager({
     }
     if (form.field === "provider" && (key.leftArrow || key.rightArrow)) {
       const delta = key.leftArrow ? -1 : 1;
-      const count = API_IDS.length;
+      const count = API_PROVIDER_IDS.length;
       setForm({ ...form, providerIndex: (form.providerIndex + delta + count) % count });
       return;
     }
@@ -293,7 +293,7 @@ function ApiRow({
 }
 
 function AddForm({ form, canGlobal }: { form: AddFormState; canGlobal: boolean }) {
-  const provider = API_IDS[form.providerIndex] ?? API_IDS[0];
+  const provider = API_PROVIDER_IDS[form.providerIndex] ?? API_PROVIDER_IDS[0];
   const rows: Array<{ field: AddFormState["field"]; label: string; value: string; hint?: string }> =
     [
       { field: "id", label: "id", value: form.id || "…", hint: "instance id (e.g. groq)" },

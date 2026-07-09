@@ -40,9 +40,43 @@ const customConfig: SteamtrainConfig = {
 describe("api instance resolution", () => {
   it("keeps the zero-config built-in apis enabled with conventional key envs", () => {
     const apis = resolveApiInstances();
-    expect(apis.map((api) => api.id)).toEqual(["anthropic", "openai"]);
+    expect(apis.map((api) => api.id)).toEqual([
+      "anthropic",
+      "openai",
+      "openrouter",
+      "opencode-zen",
+    ]);
     expect(apis[0]?.apiKeyEnv).toBe("ANTHROPIC_API_KEY");
     expect(apis[1]?.apiKeyEnv).toBe("OPENAI_API_KEY");
+  });
+
+  it("exposes openai-dialect gateways (openrouter, opencode-zen) with their endpoints", () => {
+    const apis = resolveApiInstances();
+    const openrouter = apis.find((api) => api.id === "openrouter");
+    expect(openrouter).toMatchObject({
+      provider: "openai",
+      apiKeyEnv: "OPENROUTER_API_KEY",
+      baseUrl: "https://openrouter.ai/api/v1",
+    });
+    const zen = apis.find((api) => api.id === "opencode-zen");
+    expect(zen).toMatchObject({
+      provider: "openai",
+      apiKeyEnv: "OPENCODE_API_KEY",
+      baseUrl: "https://opencode.ai/zen/v1",
+      keyless: true,
+    });
+  });
+
+  it("enabling a gateway built-in keeps its endpoint and key env (no revert to openai defaults)", () => {
+    // Mirrors `/api enable openrouter` writing a minimal id+provider+enabled entry.
+    const config: SteamtrainConfig = {
+      apis: [{ id: "openrouter", provider: "openai", enabled: true }],
+    };
+    expect(resolveApiInstance(config, "openrouter")).toMatchObject({
+      baseUrl: "https://openrouter.ai/api/v1",
+      apiKeyEnv: "OPENROUTER_API_KEY",
+      configured: true,
+    });
   });
 
   it("hides disabled apis outside all-instance config views", () => {
@@ -115,6 +149,11 @@ describe("apis config validation", () => {
     ).toHaveLength(1);
   });
 
+  it("accepts the keyless flag (for local servers / free gateways)", () => {
+    const parsed = parseApisConfig([{ id: "ollama", provider: "openai", keyless: true }]);
+    expect(parsed).toEqual([{ id: "ollama", provider: "openai", keyless: true }]);
+  });
+
   it("rejects duplicate ids, unknown providers, and unknown fields", () => {
     expect(() =>
       parseApisConfig([
@@ -183,6 +222,17 @@ describe("llm step api resolution", () => {
     if (resolved.ok) expect(resolved.pricing).toEqual({ inputPerMTok: 1 });
   });
 
+  it("resolves the keyless opencode-zen gateway with its endpoint and no required key", () => {
+    const resolved = resolveLlmStepApi({ api: "opencode-zen", model: "opencode/big-pickle" });
+    expect(resolved).toMatchObject({
+      ok: true,
+      provider: "openai",
+      model: "opencode/big-pickle",
+      baseUrl: "https://opencode.ai/zen/v1",
+      keyless: true,
+    });
+  });
+
   it("configuring the built-in id customizes bare steps of that provider", () => {
     const config: SteamtrainConfig = {
       apis: [{ id: "anthropic", provider: "anthropic", baseUrl: "https://gw.local" }],
@@ -242,6 +292,11 @@ describe("workflow llm api preflight", () => {
     expect(issues[0]).toContain("GROQ_API_KEY");
     expect(issues[1]).toContain("unknown api 'missing'");
     expect(workflowLlmApiIssues(spec, customConfig, { GROQ_API_KEY: "k" })).toHaveLength(1);
+  });
+
+  it("does not flag a keyless gateway (opencode-zen) for a missing key", () => {
+    const spec = llmSpec({ api: "opencode-zen", model: "opencode/big-pickle" });
+    expect(workflowLlmApiIssues(spec, undefined, {})).toHaveLength(0);
   });
 
   it("gates workflow dispatch on llm api readiness", () => {

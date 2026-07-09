@@ -168,7 +168,10 @@ or disjoint, never partially overlapping.
   ("anthropic" or "openai"; inferred from the model name when omitted — claude-*
   means anthropic), "system", "output" (JSON schema), "maxTokens", "effort",
   "apiKeyEnv", "baseUrl" (any OpenAI-compatible endpoint). The API key is read
-  from the environment (ANTHROPIC_API_KEY / OPENAI_API_KEY by default). Use an
+  from the environment (ANTHROPIC_API_KEY / OPENAI_API_KEY by default). Or set
+  "api" to a built-in/configured instance — "anthropic", "openai", "openrouter",
+  or "opencode-zen" (keyless free models) — to inherit its endpoint, key env,
+  and default model. Use an
   llm step instead of an agent-backed consolidator/worker whenever the work is
   "turn one prompt into one completion" with no tool use: judging/classifying a
   verdict for a gate, summarizing or merging earlier text outputs, splitting a

@@ -99,6 +99,27 @@ describe("api doctor", () => {
     expect(errored.message).toContain("500");
   });
 
+  it("reports a keyless gateway ready without a key and without a network probe", async () => {
+    const { fetchFn, calls } = fakeFetch(() => ({ status: 200 }));
+    const zen = resolveApiInstance(undefined, "opencode-zen");
+    if (!zen) throw new Error("opencode-zen built-in missing");
+    const result = await checkApi(zen, { fetchFn, env: {} });
+    expect(result.status).toBe("ok");
+    expect(result.message).toBe("ready (keyless)");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("probes a keyless gateway with the auth header once a key is set", async () => {
+    const { fetchFn, calls } = fakeFetch(() => ({ status: 200 }));
+    const zen = resolveApiInstance(undefined, "opencode-zen");
+    if (!zen) throw new Error("opencode-zen built-in missing");
+    const result = await checkApi(zen, { fetchFn, env: { OPENCODE_API_KEY: "zen-key" } });
+    expect(result.status).toBe("ok");
+    expect(calls[0]?.url).toBe("https://opencode.ai/zen/v1/models");
+    const headers = (calls[0]?.init?.headers as Record<string, string>) ?? {};
+    expect(headers.authorization).toBe("Bearer zen-key");
+  });
+
   it("checks every enabled instance (and skips disabled ones)", async () => {
     const config: SteamtrainConfig = {
       apis: [
@@ -108,7 +129,13 @@ describe("api doctor", () => {
     };
     const { fetchFn } = fakeFetch(() => ({ status: 200 }));
     const results = await runApiDoctor(config, { fetchFn, env: ENV });
-    expect(results.map((r) => r.api)).toEqual(["anthropic", "groq"]);
-    expect(results.every((r) => r.status === "ok")).toBe(true);
+    expect(results.map((r) => r.api)).toEqual(["anthropic", "openrouter", "opencode-zen", "groq"]);
+    const byId = new Map(results.map((r) => [r.api, r]));
+    // Keyed and keyless instances are ready; the gateway without a key is flagged.
+    expect(byId.get("anthropic")?.status).toBe("ok");
+    expect(byId.get("groq")?.status).toBe("ok");
+    expect(byId.get("opencode-zen")?.status).toBe("ok");
+    expect(byId.get("opencode-zen")?.message).toBe("ready (keyless)");
+    expect(byId.get("openrouter")?.status).toBe("key_missing");
   });
 });

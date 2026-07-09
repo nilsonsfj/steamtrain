@@ -74,6 +74,8 @@ export interface ApiInstanceConfig {
   baseUrl?: string;
   /** Env var holding the API key. Defaults to `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` by provider. */
   apiKeyEnv?: string;
+  /** Endpoint serves models without a key (local server, opencode-zen free tier); a key is used if present. */
+  keyless?: boolean;
   /** Model used when a step referencing this instance omits `model`. */
   defaultModel?: string;
   /**
@@ -107,6 +109,7 @@ const apiInstanceSchema = z
     label: nonEmptyString.optional(),
     baseUrl: nonEmptyString.optional(),
     apiKeyEnv: nonEmptyString.optional(),
+    keyless: z.boolean().optional(),
     defaultModel: nonEmptyString.optional(),
     pricing: llmPricingSchema.optional(),
   })

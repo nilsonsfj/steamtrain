@@ -46,6 +46,7 @@ export interface LlmCallRequest {
   effort?: string;
   /** Endpoint override for proxies / OpenAI-compatible providers. */
   baseUrl?: string;
+  /** API key; an empty string means keyless (no auth header sent), for gateways like opencode-zen. */
   apiKey: string;
   /**
    * Ask the endpoint for JSON-only output where the API supports it (OpenAI
@@ -193,7 +194,7 @@ function buildRequestBody(request: LlmCallRequest): {
       url: `${root}/v1/messages`,
       headers: {
         "content-type": "application/json",
-        "x-api-key": request.apiKey,
+        ...(request.apiKey ? { "x-api-key": request.apiKey } : {}),
         "anthropic-version": "2023-06-01",
       },
       body: {
@@ -210,7 +211,7 @@ function buildRequestBody(request: LlmCallRequest): {
     url: `${base}/chat/completions`,
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${request.apiKey}`,
+      ...(request.apiKey ? { authorization: `Bearer ${request.apiKey}` } : {}),
     },
     body: {
       model: request.model,

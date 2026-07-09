@@ -1,5 +1,5 @@
 import {
-  API_IDS,
+  API_PROVIDER_IDS,
   apiConfigScope,
   isApiProviderId,
   resolveApiInstances,
@@ -157,7 +157,7 @@ export const apiCommand: SlashCommand = {
       const [id, provider, baseUrl] = [args[1], args[2], args[3]];
       if (!id || !provider || !isApiProviderId(provider)) {
         return errorNotice(
-          `usage: /api add <id> <${API_IDS.join("|")}> [baseUrl] [--key-env <env>] [--model <model>] [--global|--project]`,
+          `usage: /api add <id> <${API_PROVIDER_IDS.join("|")}> [baseUrl] [--key-env <env>] [--model <model>] [--global|--project]`,
         );
       }
       const scope = scopeArg ?? defaultScope;
@@ -192,7 +192,7 @@ export const apiCommand: SlashCommand = {
       return [];
     }
     if (args[0] === "add") {
-      if (args.length === 3) return API_IDS;
+      if (args.length === 3) return API_PROVIDER_IDS;
       if (args.length >= 4) return ["--key-env", "--model", ...SCOPE_FLAGS];
       return [];
     }

@@ -2193,7 +2193,7 @@ async function executeLlmStep(
     };
   }
   const apiKey = process.env[resolved.apiKeyEnv];
-  if (!apiKey) {
+  if (!apiKey && !resolved.keyless) {
     const message = `llm step requires an API key in the ${resolved.apiKeyEnv} environment variable (api '${resolved.api.id}')`;
     return {
       stepId,
@@ -2208,7 +2208,8 @@ async function executeLlmStep(
     api: resolved.api.id,
     provider: resolved.provider,
     model: resolved.model,
-    apiKey,
+    // Keyless instances (e.g. opencode-zen free models) send no auth header.
+    apiKey: apiKey ?? "",
     baseUrl: resolved.baseUrl,
     pricing: resolved.pricing,
   };

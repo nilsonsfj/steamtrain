@@ -58,10 +58,16 @@ function probeRequest(
     const root = base.replace(/\/v1$/, "");
     return {
       url: `${root}/v1/models`,
-      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      headers: {
+        ...(apiKey ? { "x-api-key": apiKey } : {}),
+        "anthropic-version": "2023-06-01",
+      },
     };
   }
-  return { url: `${base}/models`, headers: { authorization: `Bearer ${apiKey}` } };
+  return {
+    url: `${base}/models`,
+    headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
+  };
 }
 
 /** Check one API instance: key present, then a bounded endpoint probe. */
@@ -84,6 +90,12 @@ export async function checkApi(
 
   const apiKey = env[instance.apiKeyEnv];
   if (!apiKey) {
+    if (instance.keyless) {
+      // A keyless instance is ready without a key; don't ping the third-party
+      // endpoint unsolicited on every save/startup. Setting the key opts into
+      // the auth-validating probe below (and higher rate limits at the gateway).
+      return { ...base, status: "ok", message: "ready (keyless)" };
+    }
     return {
       ...base,
       status: "key_missing",

@@ -14,10 +14,19 @@ default model, and pricing. They can be configured at the same two scopes:
 Config merges as **defaults → global → project**. API entries merge by `id`:
 a project entry with the same id replaces the global entry wholesale.
 
-Two built-in instances exist with zero config, mirroring the built-in agents:
+Four built-in instances exist with zero config, mirroring the built-in agents.
+Two are the raw providers; two are popular OpenAI-compatible gateways preset
+with their endpoint and key env, so you can reference them by id straight away:
 
 - **`anthropic`** — the Anthropic Messages API, key from `ANTHROPIC_API_KEY`
 - **`openai`** — the OpenAI chat-completions wire format, key from `OPENAI_API_KEY`
+- **`openrouter`** — [OpenRouter](https://openrouter.ai) (`https://openrouter.ai/api/v1`),
+  key from `OPENROUTER_API_KEY`; models use the `provider/model` id format
+  (e.g. `openai/gpt-5.2`, `anthropic/claude-sonnet-4.6`)
+- **`opencode-zen`** — [OpenCode Zen](https://opencode.ai/docs/zen/)
+  (`https://opencode.ai/zen/v1`), key from `OPENCODE_API_KEY`. **Keyless**: its
+  free models run with no key at all (e.g. `opencode/big-pickle`); set the key
+  to use paid models and get higher rate limits.
 
 An `apis` entry with one of those ids customizes the built-in (every bare llm
 step of that provider then inherits it); any other id defines a new instance:
@@ -50,6 +59,10 @@ Fields (all optional except `id` and `provider`):
   else the provider's public API.
 - **`apiKeyEnv`** — env var holding the key. The key itself is **never stored
   in config** — only the variable name.
+- **`keyless`** — when true, the endpoint serves models without a key: no auth
+  header is sent and a missing key is not a readiness failure (set by the
+  `opencode-zen` built-in; also useful for a local Ollama/vLLM server). A key is
+  still used if the `apiKeyEnv` variable is set.
 - **`defaultModel`** — used when a step referencing this instance omits `model`.
 - **`pricing`** — per-MTok USD rates applied to steps on this instance that
   don't declare their own, so budgets and cost analytics see exact spend.
