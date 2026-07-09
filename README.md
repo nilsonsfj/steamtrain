@@ -1,30 +1,228 @@
 # steamtrain 🚂
 
-A workflow-first terminal orchestrator that runs coding agents — **Claude Code**
-and **OpenCode** — as managed subprocesses and renders their activity live in a
-rich [Ink](https://github.com/vadimdemedes/ink) TUI.
+**Orchestrate your coding agents like a build pipeline — not a chat window.**
 
-steamtrain spawns the real `claude` and `opencode` CLIs (no stubs), parses their
-streaming JSON through a shared normalization layer, and shows a unified,
-color-coded event stream regardless of which agent produced it.
+steamtrain runs **Claude Code, OpenCode, Codex, and Amp** as managed
+subprocesses and drives them through declarative, parallel **workflows**: fan a
+task out across models, cross-check the results, gate on what passed, and merge
+the verified changes back into your checkout — all streamed live in a terminal
+UI (or a local web UI), with real dollar and token costs on every step.
+
+One task, many agents, in parallel, with a receipt. No copy-pasting between
+terminals.
 
 ---
 
-## Quick start
+## Get started
 
 ```bash
-# 1. install deps (bun is the dev toolchain; npm also works)
-bun install
-
-# 2. run the TUI straight from source (no build step)
-bun src/index.tsx
+git clone https://github.com/nilsonsfj/steamtrain.git
+cd steamtrain
+npm run install:local        # builds, then links `steamtrain` onto your PATH
+steamtrain --version
 ```
 
-Want `steamtrain` on your PATH as a real command? See
-[Install as a system binary](#install-as-a-system-binary).
+`install:local` installs deps (with `bun` if present, else `npm`), builds
+`dist/index.js`, and symlinks a `steamtrain` command into `~/.local/bin` —
+**no sudo**. It prints how to add that dir to your PATH if needed. (Details and
+custom install locations are [below the fold](#install-as-a-system-binary).)
 
-You'll see a steam-train banner, then a preflight **doctor** panel checking that
-`claude` and `opencode` are installed and runnable, then the workflow picker:
+**Now take a lap — no agent, no API key, no credit required.** The bundled
+`tour` workflow is fully agentless: a distributor fans out, command cars run in
+parallel, a `when` condition skips a step, a gate loops the train three times
+around the track, and a consolidator prints the arrival report.
+
+```bash
+steamtrain workflow run tour --input "all aboard"   # $0, ~0.1s
+```
+
+**Wire it to your repo.** `init` checks which agents are ready (with copy-paste
+fixes), detects this repo's real test/lint commands, and writes starter
+workflows built around them to `./steamtrain.json`:
+
+```bash
+steamtrain init
+```
+
+**Then launch the workflow-first TUI:**
+
+```bash
+steamtrain            # the terminal UI
+steamtrain --web-ui   # …or the same engine behind http://127.0.0.1:4317
+```
+
+Prefer not to install anything on your PATH yet? You can run straight from
+source with `bun src/index.tsx` (see [Development](#development)).
+
+---
+
+## Why steamtrain
+
+A tour of what it does and why it's useful — not an exhaustive spec (that's
+[below the fold](#below-the-fold-technical-reference)).
+
+### Run every major coding agent through one interface
+
+steamtrain spawns the real `claude`, `opencode`, `codex`, and `amp` CLIs (no
+stubs) and maps each one's streaming output onto a single normalized event
+model. Whichever agent produced a line — assistant text, a tool call, a result,
+an error — it renders in the same unified, color-coded stream. Mix agents freely
+in one workflow; steamtrain speaks all four.
+
+### Compose work as declarative, parallel workflows
+
+A **workflow** is a sequence of **phases** built from a few standard blocks:
+`distributor` (fan a task into work items), `worker`/`processor` (run an agent,
+optionally once per item), `consolidator` (merge results), and `gate` (branch,
+loop, or stop on a condition). Steps are **dependency-scheduled** — each starts
+the moment its inputs are ready, in parallel with everything unrelated — so
+"draft from three angles, critique each, synthesize the best" is a few lines of
+JSON, not a morning of babysitting terminals. Bundled examples:
+
+| workflow | what it does |
+| --- | --- |
+| `tour` | The $0 agentless demo above — the whole engine, zero credentials. |
+| `multi-plan` | Drafts a plan from two independent angles (claude + opencode), critiques both, synthesizes the strongest merge. |
+| `bug-hunt` | Sweeps a scope for logic / error-handling / security bugs across three models in parallel, cross-checks to drop false positives, gates verified findings, reports. |
+| `review-loop` | Implements, then reviews-and-fixes in a bounded loop until the review says "DONE". |
+| `quick-triage` | Splits a request into concerns and gates on a typed verdict — built entirely on direct-API `llm` steps, no agent CLI needed. |
+
+### Skip the CLIs entirely with direct-API `llm` steps
+
+Not every step needs a full coding agent. An `llm` step calls a model's HTTP API
+directly — cheaper, faster, no CLI to install. It works out of the box with
+`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, and you can point it at **any
+OpenAI-compatible endpoint** (a corporate gateway, Groq, etc.) with a few lines
+of config. Great for routing, triage, and synthesis glue between the heavyweight
+agent steps.
+
+### Let agents edit safely, then merge back on purpose
+
+Every agent step runs in its **own isolated git worktree**, so parallel agents
+never trample each other or your working copy. When a run is done, you decide
+what lands: end the workflow with a declarative `merge` step to harvest edits
+automatically, or review after the fact — `history show <id> --diff` shows what
+each step changed, and `history apply <id>` merges those changes into your
+checkout as uncommitted edits. Apply is pre-checked and all-or-nothing; the merge
+happens in a throwaway staging worktree, so a failure never damages your repo.
+
+### Know exactly what it cost
+
+steamtrain normalizes every agent's usage into one token model (input, output,
+cache read/write, reasoning) and prices it in USD. A live `$cost · N tok` ticker
+runs during the TUI; the workflow view breaks it down per model. Set
+`maxCostUsd` on a workflow (or a fan-out step) and the engine **stops scheduling
+new steps once the cap is hit**, records the run as budget-exceeded, and keeps
+the cache — so raising the cap and re-running just resumes. Afterward,
+`workflow costs` aggregates spend across your history to answer "which step is
+eating the budget?"
+
+### Every run is recorded and repeatable
+
+Each run (TUI, web UI, or CLI) is saved to `.steamtrain/history/` as one JSON
+record — the full phase → step tree with status, output, duration, cost, and
+gate results. Re-running **resumes** from an on-disk cache instead of paying for
+completed steps again. Re-run any past run fresh (`run --from <id>`), or replay
+only what failed (`--retry-failed`).
+
+### Stay in control of unattended runs
+
+Workflows can pause at **human approval checkpoints**. Attended, you approve in
+the UI; unattended, `--approve-all` waves everything through or
+`--on-approval fail|stop` rejects cleanly — so the same workflow is safe to wire
+into CI. Headless runs end with a one-line-per-step **status summary** and an
+honest exit code.
+
+### See it in the terminal or the browser
+
+The **TUI** opens on a workflow picker and streams the phase → step tree live;
+`Enter` runs, `↑/↓` inspects a step's output, `Tab` cycles workspace presets,
+`Esc` cancels. The **web UI** (`--web-ui`) pairs the picker with a vertical
+pipeline visualization — phases stacked top-to-bottom, parallel steps as live
+cards colored by block kind, each streaming output, duration, and cost over SSE —
+backed by the exact same runner, cache, and doctor gating.
+
+### It tells you when something's wrong before you spend a cent
+
+A preflight **doctor** resolves each agent binary on your PATH, runs
+`--version`, and classifies readiness (`ok` / `binary_missing` /
+`not_authenticated` / `unknown_error`). The status bar shows a green/amber/red
+dot per agent, and dispatch is **blocked** for any step whose agent isn't ready —
+with a copy-paste fix.
+
+---
+
+## Below the fold: technical reference
+
+### Workflow CLI
+
+```bash
+steamtrain workflow list
+steamtrain workflow validate [name]
+steamtrain workflow plan <name> --input "…"                     # dry-run: resolve the plan without running
+steamtrain workflow run multi-plan --input "design the cache migration"
+steamtrain workflow run bug-hunt --stdin --json
+steamtrain workflow run multi-plan --input "…" --fresh          # ignore the on-disk cache
+steamtrain workflow cache clear
+
+# Unattended approval handling
+steamtrain workflow run review-loop --input "…" --approve-all
+steamtrain workflow run review-loop --input "…" --on-approval fail
+
+# Inspect past runs (recorded automatically to .steamtrain/history/)
+steamtrain workflow history                    # list recent runs (newest first)
+steamtrain workflow history show <id>          # full phase → step breakdown
+steamtrain workflow history show <id> --diff   # what each step changed (--stat, --step <id>)
+steamtrain workflow history apply <id>         # merge a run's edits into your checkout
+steamtrain workflow history prune <id>         # discard a run's worktrees and branches
+steamtrain workflow history clear [<id>]       # delete one run, or all of them
+
+# Act on a past run (workflow + input come from the record)
+steamtrain workflow run --from <runId>                 # re-run it fresh
+steamtrain workflow run --from <runId> --retry-failed  # re-run only failed/not-run steps
+
+# Cost analytics across history
+steamtrain workflow costs [--workflow <name>] [--json]
+
+# Draft a brand-new workflow from a description (LLM delegation), then save it
+steamtrain workflow create --input "review a PR from three angles then merge findings"
+steamtrain workflow create --input "audit the auth module" --agent claude --model claude-sonnet-4-6 --save
+steamtrain workflow create --input "team release checklist" --name release-check --save --scope project
+```
+
+Global options (TUI and workflow commands):
+
+```
+  -v, --version              Print the steamtrain version and exit
+  -w, --workspace <path>     Load workspace presets from a custom workspace.json
+      --config-file <path>   Load project config from a custom steamtrain.json
+      --web-ui               Serve the browser UI instead of the TUI
+      --port <n>             Web UI port (default 4317)
+      --host <host>          Web UI bind host (default 127.0.0.1)
+      --auth-token <token>   Require this token for web UI access
+```
+
+`init` reports each agent's readiness with copy-paste fixes, detects this repo's
+real test/lint commands, and offers starter workflows written to
+`./steamtrain.json`:
+
+- **`verify`** — every detected check as a parallel `command` step plus a
+  combined report. Agentless, $0, and an honest exit code for CI.
+- **`implement-verified`** — an agent implements the task in an isolated
+  worktree, your test command re-runs against those edits, a gate blocks
+  failures, and a `merge` step applies only verified changes to your checkout.
+  (Offered when an agent is ready and a test command is detected.)
+
+Pass `--yes` to accept all offers. In a non-interactive session (piped stdin,
+CI), `init` lists offers but writes nothing unless `--yes` is given.
+
+More: [`docs/web-ui.md`](docs/web-ui.md),
+[`docs/workflow-creation.md`](docs/workflow-creation.md),
+[`docs/cost-and-budgets.md`](docs/cost-and-budgets.md).
+
+### The TUI
+
+`steamtrain` opens on **workflow** mode with a preflight doctor panel:
 
 ```
 ┌ steamtrain  ● claude ready   ● opencode ready ───────── idle  cfg: steamtrain.json ┐
@@ -36,129 +234,20 @@ You'll see a steam-train banner, then a preflight **doctor** panel checking that
  mode  workflow  plan  implement  review  (Tab to switch)        → workflow: multi-plan
 ┌ ❯ describe the task, then Enter to dispatch ─────────────────────────────────────┐
 └──────────────────────────────────────────────────────────────────────────────────┘
- ↑/↓ pick · Enter run · Tab switch mode · Ctrl+C quit
 ```
 
-**Keys:** `Enter` run · `↑/↓` pick workflow or inspect steps · `Tab` cycle mode ·
-`Esc` cancel/back · `Ctrl+C` quit.
-
-`steamtrain` opens on **workflow** mode. `Tab` cycles through your configured
-workspace presets (defaults: `plan`, `implement`, `review`).
-
-### Zero-credential test drive
-
-You don't need any agent installed (or a cent of credit) to see the engine
-work. The bundled `tour` workflow is fully agentless — a distributor fans out,
-command cars run in parallel, a `when` condition skips a step, a gate loops the
-train three laps around the track, and a consolidator renders the arrival
-report:
-
-```bash
-bun src/index.tsx workflow run tour --input "all aboard"   # $0, ~0.1s
-```
-
-Then let steamtrain set the repo up for real work:
-
-```bash
-bun src/index.tsx init          # or: steamtrain init
-```
-
-`init` reports each agent's readiness with copy-paste fixes, detects this
-repo's real test/lint commands, and offers starter workflows wired to them,
-written to `./steamtrain.json`:
-
-- **`verify`** — every detected check as a parallel `command` step plus a
-  combined report. Agentless, $0, and an honest exit code for CI.
-- **`implement-verified`** — an agent implements the task in an isolated
-  worktree, your actual test command re-runs against those edits (worktree
-  inheritance), a gate blocks failures, and a `merge` step applies only
-  verified changes to your checkout. (Offered when an agent is ready and a
-  test command was detected. The agent is simply the first one the doctor
-  reported ready, with its default model — edit `agent`/`model` in the
-  generated `steamtrain.json` to use a different one.)
-
-Pass `--yes` to accept all offers without prompting. In a non-interactive
-session (piped stdin, CI), `init` lists the offers but writes nothing unless
-`--yes` is given — redirected output alone never mutates your config.
-
-### Web UI
-
-Prefer a browser? Launch the same workflow engine behind a local web UI:
-
-```bash
-steamtrain --web-ui                 # serves http://127.0.0.1:4317
-steamtrain --web-ui --port 8080     # custom port
-steamtrain --web-ui --host 0.0.0.0  # listen on all interfaces
-```
-
-It pairs the workflow picker with a **vertical pipeline visualization**: phases
-stack top-to-bottom, parallel steps render as live cards (colored by block kind),
-each showing status, agent/model, data-flow inputs, a streamed output tail, and
-per-step duration/cost — backed by the same runner, on-disk cache, and doctor
-gating as the TUI and CLI. Runs stream over SSE; cancel a run from the browser.
-See [`docs/web-ui.md`](docs/web-ui.md).
-
-### Workflow CLI
-
-```bash
-steamtrain workflow list
-steamtrain workflow validate [name]
-steamtrain workflow run multi-plan --input "design the cache migration"
-steamtrain workflow run bug-hunt --stdin --json
-steamtrain workflow run multi-plan --input "design the cache migration" --fresh
-steamtrain workflow cache clear
-
-# Inspect past runs (recorded automatically to .steamtrain/history/)
-steamtrain workflow history              # list recent runs (newest first)
-steamtrain workflow history show <id>    # full phase → step breakdown of one run
-steamtrain workflow history clear [<id>] # delete one run, or all of them
-
-# Act on a past run (workflow + input come from the record)
-steamtrain workflow run --from <runId>                 # re-run it fresh
-steamtrain workflow run --from <runId> --retry-failed  # re-run only failed/not-run steps
-
-# Draft a brand-new workflow from a description (LLM delegation), then save it.
-steamtrain workflow create --input "review a PR from three angles then merge findings"
-steamtrain workflow create --input "audit the auth module" --agent claude --model claude-sonnet-4-6 --save
-# Save into the project's ./steamtrain.json so it can be committed and shared.
-steamtrain workflow create --input "team release checklist" --name release-check --save --scope project
-```
-
-Every headless run ends with a **status summary** — one line per step (status,
-duration, gate result, cost) plus run totals — so a CI log shows exactly what
-happened. Agentless workflows (only distributors / consolidators / gates) run
-without any agent installed, which makes them ideal smoke tests.
-
-### Run history
-
-Every workflow run (TUI, web UI, or CLI) is recorded to `.steamtrain/history/`
-as one JSON record — the full phase → step tree with each step's status, output,
-duration, cost, gate result, and any error. The newest 100 runs are kept; older
-records are pruned automatically.
-
-- **TUI:** type `/history` to open the run browser. `↑/↓` pick a run, `Enter`
-  inspect it (the same phase → step view a live run uses), `→` drills into a
-  step's output, `Esc` backs out.
-- **Web UI:** click **⏱ History** in the header to list past runs; click one to
-  see its pipeline, per-step output, and run summary.
-- **CLI:** `steamtrain workflow history` (see above).
-
-See [`docs/workflow-creation.md`](docs/workflow-creation.md) for the creation flow
-(CLI `workflow create` and the TUI `/create-workflow` command).
+**Keys:** `Enter` run · `↑/↓` pick workflow or inspect steps · `Tab` cycle
+workspace preset (`plan`, `implement`, `review`) · `Esc` cancel/back ·
+`Ctrl+C` quit. Type `/history` to open the run browser, `/create-workflow` to
+draft one from a description.
 
 ### Install as a system binary
 
 > **Alpha install.** steamtrain isn't published to a registry yet, so you
 > install it from a checkout. macOS and Linux are supported.
 
-```bash
-git clone https://github.com/nilsonsfj/steamtrain.git
-cd steamtrain
-npm run install:local        # builds, then links `steamtrain` onto your PATH
-steamtrain --version
-```
-
-`install:local` (a thin wrapper over [`scripts/install.sh`](scripts/install.sh)):
+`npm run install:local` is a thin wrapper over
+[`scripts/install.sh`](scripts/install.sh) that:
 
 1. installs dependencies (with `bun` if present, otherwise `npm`) and builds
    `dist/index.js`,
@@ -188,8 +277,7 @@ config:
 npm run uninstall:local
 ```
 
-Prefer the Node toolchain's own linker? `npm run build && npm link` also works
-and puts `steamtrain` on your PATH.
+Prefer the Node toolchain's own linker? `npm run build && npm link` also works.
 
 ### Build a standalone bundle
 
@@ -266,17 +354,20 @@ once on start and `tool_result` once on completion (deduped by call id).
 
 ## Configuration
 
-steamtrain splits configuration across two files:
+steamtrain splits configuration across scopes that merge as
+**defaults → global → project**:
 
 | File | Scope | Contents |
 | ---- | ----- | -------- |
 | `~/.steamtrain/workspace.json` | user (global) | One-shot **workspace presets** — Tab modes like `plan`, `implement`, `review` |
-| `./steamtrain.json` | project (cwd) | Workflows, binary paths, timeouts, concurrency |
+| `~/.steamtrain/config.json` | user (global) | Global agent/API instances, binaries, timeouts |
+| `~/.steamtrain/workflows.json` | user (global) | Your saved workflows |
+| `./steamtrain.json` | project (cwd) | Workflows, agent/API instances, binary paths, timeouts, concurrency |
 
 ### Workspace presets (`~/.steamtrain/workspace.json`)
 
 Built-in defaults live in `src/workspace/defaults.ts` (`plan`, `implement`,
-`review`). Override or extend them in your home directory:
+`review`). Override or extend them:
 
 ```jsonc
 {
@@ -294,13 +385,12 @@ Built-in defaults live in `src/workspace/defaults.ts` (`plan`, `implement`,
 - **`agent`** / **`model`** — same formats as workflow steps (see below).
 - The id `workflow` is reserved for the built-in workflow mode.
 
-Entries merge by `id` onto the built-in defaults (override in place, append new
-ids). A missing or invalid file falls back to built-in workspace defaults with a
-warning in the stream.
+Entries merge by `id` onto the built-in defaults. A missing or invalid file
+falls back to built-in defaults with a warning in the stream.
 
 > **Migration:** older `steamtrain.json` files used a `"tasks"` key for these
 > presets. That key is no longer supported — move them to
-> `~/.steamtrain/workspace.json`. steamtrain warns if `"tasks"` is still present.
+> `~/.steamtrain/workspace.json`.
 
 ### Project config (`steamtrain.json`)
 
@@ -309,21 +399,32 @@ Override any subset in the working directory:
 ```jsonc
 {
   "binaries": { "opencode": "/opt/homebrew/bin/opencode" }, // optional path overrides
-  "stepTimeoutSec": 900,                                    // per-agent subprocess limit in seconds (default 15m = 900)
-  "workflowTimeoutSec": 1800,                               // optional whole-run cap in seconds; omit = (loop-aware) steps × stepTimeoutSec
+  "stepTimeoutSec": 900,                                    // per-agent subprocess limit (default 15m = 900)
+  "workflowTimeoutSec": 1800,                               // optional whole-run cap; omit = (loop-aware) steps × stepTimeoutSec
   "maxConcurrency": 5                                       // parallel steps per run (≤ 16, default 5)
-  // "workflows": { … }                                     // see “Workflows” below
+  // "agents": [ … ]      // extra agent instances — see docs/agent-configuration.md
+  // "apis": [ … ]        // API endpoints for llm steps — see docs/api-configuration.md
+  // "workflows": { … }   // see “Workflows” below
 }
 ```
 
 - **claude** models are aliases/ids like `claude-sonnet-4-6`, `haiku`, `claude-opus-4-8`.
 - **opencode** models are `provider/model` and must be a provider you've
-  authenticated (`opencode auth login`). The shipped config uses
-  `openai/gpt-5.4-mini`; switch to `anthropic/claude-sonnet-4-6` if you add
-  Anthropic credentials to OpenCode.
+  authenticated (`opencode auth login`).
 
 A missing/invalid `steamtrain.json` falls back to built-in defaults (with a
-warning in the stream); only the keys you specify are overridden.
+warning); only the keys you specify are overridden.
+
+### Agent & API instances
+
+Beyond the four built-in agents, you can register additional **agent instances**
+(a provider adapter plus a custom binary/env/args — e.g. a fork) and **API
+instances** (an HTTP endpoint for `llm` steps: dialect, base URL, key env var,
+default model, pricing). Both configure at global or project scope and merge by
+`id`. Built-in `anthropic`/`openai` API instances exist with zero config; point
+them at a gateway or define new ones (Groq, etc.) under `apis`. See
+[`docs/agent-configuration.md`](docs/agent-configuration.md) and
+[`docs/api-configuration.md`](docs/api-configuration.md).
 
 ---
 
@@ -337,26 +438,22 @@ phases still act as barriers for it. Distributors can produce many work items,
 processors can dynamically fan out to one generated agent run per item, and
 later steps can gate or consolidate the aggregate output.
 
-The TUI starts in workflow mode. Pick one with `↑/↓`, type the input, and
-**Enter** to launch. The phase -> step tree streams live; `↑/↓` drills into a
-step's output. `Esc` cancels a run (and, once stopped, backs out to the picker).
 Re-running **resumes**: completed steps replay from `.steamtrain/cache/` (and an
 in-session cache) instead of running again. The cache is keyed by workflow spec,
 input, and cwd — editing a workflow invalidates stale entries automatically.
-Use `steamtrain workflow run … --fresh` to ignore the on-disk cache, or
-`steamtrain workflow cache clear` to delete it.
+Use `--fresh` to ignore the on-disk cache, or `workflow cache clear` to delete it.
 
 Agent steps **auto-retry transient failures** (a crash or transport/spawn error
 before the agent completed a turn) with exponential backoff — on by default,
 configurable via a workflow-level or per-step `retry` policy. A step that ran to
 completion and reported an error is never auto-retried (it may have made changes).
-See [docs/workflow-spec.md](docs/workflow-spec.md#auto-retry-on-transient-failures).
 
 Workflow documentation:
 
 - [`docs/workflow-overview.md`](docs/workflow-overview.md) — mental model, diagrams, execution behavior
 - [`docs/workflow-examples.md`](docs/workflow-examples.md) — patterns and bundled workflow walkthroughs
 - [`docs/workflow-spec.md`](docs/workflow-spec.md) — language reference
+- [`docs/worktree-merge-back.md`](docs/worktree-merge-back.md) — worktree isolation and the `merge` step
 
 ### Bundled workflows
 
@@ -421,8 +518,9 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
 }
 ```
 
-- **Step kinds:** `worker` / `processor`, `distributor`, `consolidator`, and
-  `gate`. Existing steps without `kind` are workers.
+- **Step kinds:** `worker` / `processor`, `distributor`, `consolidator`, `gate`,
+  `llm` (direct-API inference), `command` (run a shell check), and `merge`
+  (harvest worktree edits). Existing steps without `kind` are workers.
 - **Agent-backed fields:** `agent` (`claude` | `opencode` | `codex` | `amp`), `model`, `prompt`,
   plus optional `cwd` (the **target** dir; relative paths resolve against the
   launch cwd), `env` (extra vars), and `extraArgs` (extra CLI flags).
@@ -434,18 +532,18 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
   for every step in all earlier phases.
 - **Conditions:** any step may set `when` (gate-condition schema) to run only
   when it matches — otherwise the step is *skipped* (not failed), skips cascade
-  to dependents, and consolidators treat skipped inputs as absent. See
-  [docs/workflow-spec.md](docs/workflow-spec.md#per-step-conditions-when).
+  to dependents, and consolidators treat skipped inputs as absent.
 - **Prompt templates:** `{{input}}` / `{{args}}` expand to what you typed;
   `{{steps.<id>.output}}`, `{{steps.<id>.items}}`, `{{steps.<id>.ok}}`,
-  `{{steps.<id>.error}}`, and `{{steps.<id>.target}}` expose earlier results.
-- **Limits:** ≤ 16 parallel steps per run and 1000 steps per run. Every step is a
-  full agent run only when it is agent-backed, so costs add up for worker and
-  agent-backed distributor/consolidator blocks.
+  `{{steps.<id>.error}}`, `{{steps.<id>.target}}`, and worktree paths
+  (`{{steps.<id>.worktree.root}}` / `.branch` / `.cwd`) expose earlier results.
+- **Budgets:** set `maxCostUsd` on a workflow (or a `forEach` step) to cap spend
+  — the engine stops scheduling new steps at the cap, records the run as
+  budget-exceeded, and leaves the cache intact so raising the cap resumes it.
+- **Limits:** ≤ 16 parallel steps per run and 1000 steps per run. Only
+  agent-backed steps cost money.
 - **Loops:** a gate can set `loopTo` to jump back to an earlier phase (with an
-  optional `maxIterations`) for bounded "review until clean" cycles — see the
-  bundled `review-loop` workflow and
-  [docs/workflow-creation.md#loops](docs/workflow-creation.md#loops).
+  optional `maxIterations`) for bounded "review until clean" cycles.
 
 ---
 
@@ -473,7 +571,7 @@ for any task whose agent isn't `ok`, with a fix-it message.
 bun install
 bun src/index.tsx     # run the TUI from source
 npm run dev           # same, via tsx (if you prefer not to use bun)
-npm run test          # vitest: line-buffer + both adapter mappers + a TUI smoke test
+npm run test          # vitest: line-buffer + both adapter mappers + workflow + a TUI smoke test
 npm run typecheck     # tsc --noEmit (strict, noUncheckedIndexedAccess)
 npm run lint          # biome
 npm run build         # tsup → dist/
@@ -481,13 +579,12 @@ npm run build         # tsup → dist/
 
 ### Tests
 
-The two highest-risk areas are covered first:
+The highest-risk areas are covered first:
 
 - **`tests/line-buffer.test.ts`** — NDJSON reassembly with events split across
   arbitrary chunk boundaries, CRLF, blank lines, and trailing partials.
 - **`tests/claude-adapter.test.ts`** / **`tests/opencode-adapter.test.ts`** —
-  the raw→normalized mapping for each CLI, using real sample event lines
-  (including the actual `claude` stream-json and the actual `opencode` error event).
+  the raw→normalized mapping for each CLI, using real sample event lines.
 - **`tests/workflow-*.test.ts`** — the workflow layer: the bounded-concurrency
   pool + channel, prompt templating, spec/dependency validation, the reducer that
   builds the live tree, and the engine end-to-end (phase ordering, parallel
