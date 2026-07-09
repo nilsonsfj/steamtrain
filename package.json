@@ -1,6 +1,6 @@
 {
   "name": "steamtrain",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.1",
   "description": "Terminal orchestrator that runs coding agents (Claude Code, OpenCode, Codex, Amp) as managed subprocesses and renders their activity live in an Ink TUI.",
   "license": "MIT",
   "repository": {
@@ -26,6 +26,8 @@
     "dev": "bun scripts/build-reducer.ts && bun src/index.tsx",
     "start": "node dist/index.js",
     "build": "bun scripts/build-reducer.ts && tsup && bun scripts/copy-assets.ts",
+    "install:local": "bash scripts/install.sh",
+    "uninstall:local": "bash scripts/uninstall.sh",
     "typecheck": "tsc --noEmit",
     "pretest": "bun scripts/build-reducer.ts",
     "test": "vitest run",

@@ -82,6 +82,8 @@ export interface GlobalCliOptions {
   host?: string;
   /** Require this token to access the web UI (sets a cookie-based session). */
   authToken?: string;
+  /** Print the version and exit. */
+  version?: boolean;
   error?: string;
 }
 
@@ -94,8 +96,13 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
   let port: number | undefined;
   let host: string | undefined;
   let authToken: string | undefined;
+  let version = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
+    if (arg === "-v" || arg === "--version") {
+      version = true;
+      continue;
+    }
     if (arg === "-w" || arg === "--workspace") {
       const value = args[i + 1];
       if (!value || value.startsWith("-")) {
@@ -156,6 +163,7 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
     port,
     host,
     authToken,
+    version: version || undefined,
   };
 }
 
