@@ -2,7 +2,7 @@ import { appendFile, mkdir, open, readFile, readdir, rm, stat, writeFile } from 
 import { join } from "node:path";
 import type { ApprovalDecision } from "./approval";
 import type { WorkflowEvent } from "./events";
-import { atomicWriteFile, isEnoent } from "./fs-util";
+import { atomicWriteFile, isEnoent, sanitizePathComponent } from "./fs-util";
 import { RunRecordBuilder, type RunRecordStatus } from "./history";
 import type { WorkflowHistoryStore } from "./history-store";
 
@@ -34,11 +34,12 @@ export const DEFAULT_MAX_PARALLEL_RUNS = 2;
 export const LIVE_RUN_TTL_MS = 15 * 60_000;
 
 /**
- * Grace period before a non-terminal entry whose pid is gone is declared
+ * Grace period before a non-terminal entry whose owner looks gone is declared
  * orphaned. Covers the detached-spawn window where the parent has created the
- * meta but the child has not yet written its own pid.
+ * meta (pid -1) but the child has not yet written its own pid — generous
+ * enough for a slow cold start under load.
  */
-export const LIVE_RUN_ORPHAN_GRACE_MS = 15_000;
+export const LIVE_RUN_ORPHAN_GRACE_MS = 30_000;
 
 /**
  * Cap on `step_event` (streamed text/tool) lines persisted per run so a very
@@ -115,6 +116,20 @@ export function isPidAlive(pid: number): boolean {
   }
 }
 
+/**
+ * Whether a run's owning process should be considered alive. The single
+ * source of truth shared by the queue and the orphan sweep, so they can never
+ * disagree: `pid === -1` (a detached child that has not reported in yet)
+ * counts as alive within the spawn grace window, dead after it.
+ */
+export function isLiveRunOwnerAlive(
+  meta: Pick<LiveRunMeta, "pid" | "createdAt">,
+  at: number = Date.now(),
+): boolean {
+  if (meta.pid === -1) return at - meta.createdAt <= LIVE_RUN_ORPHAN_GRACE_MS;
+  return isPidAlive(meta.pid);
+}
+
 export interface LiveRunListOptions {
   /**
    * Mark dead-pid entries orphaned and delete expired terminal entries while
@@ -187,12 +202,12 @@ export function createLiveRunStore(
   const ttlMs = options.ttlMs ?? LIVE_RUN_TTL_MS;
   const now = options.now ?? Date.now;
 
-  const runDir = (id: string): string => join(rootDir, sanitizeId(id));
+  const runDir = (id: string): string => join(rootDir, sanitizePathComponent(id));
   const metaPath = (id: string): string => join(runDir(id), "meta.json");
   const eventsPath = (id: string): string => join(runDir(id), "events.ndjson");
   const cancelPath = (id: string): string => join(runDir(id), "cancel");
   const approvalPath = (id: string, stepId: string, iteration: number): string =>
-    join(runDir(id), "approvals", `${sanitizeId(stepId)}@${iteration}.json`);
+    join(runDir(id), "approvals", `${sanitizePathComponent(stepId)}@${iteration}.json`);
 
   async function get(id: string): Promise<LiveRunMeta | undefined> {
     return readMeta(metaPath(id));
@@ -258,23 +273,21 @@ export function createLiveRunStore(
       if (isEnoent(err)) return [];
       throw err;
     }
+    const reads = await Promise.all(
+      entries.map((name) => readMeta(join(rootDir, name, "meta.json"))),
+    );
     const metas: LiveRunMeta[] = [];
-    for (const name of entries) {
-      const meta = await readMeta(join(rootDir, name, "meta.json"));
+    for (let i = 0; i < entries.length; i++) {
+      const meta = reads[i];
       if (!meta) continue;
       if (sweep && isTerminalLiveRunStatus(meta.status)) {
         const endedAt = meta.endedAt ?? meta.createdAt;
         if (now() - endedAt > ttlMs) {
-          await rm(join(rootDir, name), { recursive: true, force: true }).catch(() => {});
+          await rm(join(rootDir, entries[i]!), { recursive: true, force: true }).catch(() => {});
           continue;
         }
       }
-      if (
-        sweep &&
-        !isTerminalLiveRunStatus(meta.status) &&
-        !isPidAlive(meta.pid) &&
-        now() - meta.createdAt > LIVE_RUN_ORPHAN_GRACE_MS
-      ) {
+      if (sweep && !isTerminalLiveRunStatus(meta.status) && !isLiveRunOwnerAlive(meta, now())) {
         metas.push(await markOrphaned(meta));
         continue;
       }
@@ -316,7 +329,7 @@ export function createLiveRunStore(
       // Terminal meta is written only after the final event flush, so a quiet
       // file + terminal (or missing) meta means the stream is complete.
       if (!meta || isTerminalLiveRunStatus(meta.status)) return;
-      await sleep(pollMs, signal);
+      await liveRunSleep(pollMs, signal);
     }
   }
 
@@ -362,8 +375,25 @@ export function createLiveRunStore(
       try {
         file = await readFile(approvalPath(id, stepId, iteration), "utf8");
       } catch (err) {
-        if (isEnoent(err)) return undefined;
-        throw err;
+        if (!isEnoent(err)) throw err;
+        // Namespacing fallback: the engine hands approval providers the LOCAL
+        // step id, but events (and therefore pendingApprovals, and therefore
+        // external deciders) carry the NAMESPACED id (`parent::child`) when the
+        // checkpoint lives inside a sub-workflow. A decision file written under
+        // the namespaced id must still be found when read by the local id, or
+        // the run would hang forever on an already-decided checkpoint.
+        const namespaced = await findNamespacedDecisionFile(
+          join(runDir(id), "approvals"),
+          stepId,
+          iteration,
+        );
+        if (!namespaced) return undefined;
+        try {
+          file = await readFile(namespaced, "utf8");
+        } catch (readErr) {
+          if (isEnoent(readErr)) return undefined;
+          throw readErr;
+        }
       }
       try {
         const parsed = JSON.parse(file) as Partial<ApprovalDecision>;
@@ -388,9 +418,26 @@ export function createLiveRunStore(
   };
 }
 
-/** Run ids are UUIDs, but be defensive against path traversal (mirrors history-store). */
-function sanitizeId(id: string): string {
-  return id.replace(/[^a-zA-Z0-9._-]/g, "_");
+/**
+ * Find a decision file whose (namespaced) step id ends in `::<stepId>` for the
+ * given iteration. Namespace separators sanitize to `__`, so the match is
+ * "file name ends with `__<sanitized-local-id>@<iteration>.json`".
+ */
+async function findNamespacedDecisionFile(
+  approvalsDir: string,
+  stepId: string,
+  iteration: number,
+): Promise<string | undefined> {
+  let names: string[];
+  try {
+    names = await readdir(approvalsDir);
+  } catch (err) {
+    if (isEnoent(err)) return undefined;
+    throw err;
+  }
+  const suffix = `__${sanitizePathComponent(stepId)}@${iteration}.json`;
+  const match = names.find((name) => name.endsWith(suffix));
+  return match ? join(approvalsDir, match) : undefined;
 }
 
 async function readMeta(path: string): Promise<LiveRunMeta | undefined> {
@@ -497,12 +544,13 @@ async function readFrom(path: string, offset: number): Promise<Buffer> {
 }
 
 /**
- * A control-flow sleep: gates forward progress (tail polls), so its timer must
- * KEEP the event loop alive — an unref'd timer here would let a process whose
- * only remaining work is this wait (a headless attach, a parked detached
- * runner) silently exit mid-wait.
+ * A control-flow sleep: gates forward progress (tail polls, queue waits,
+ * approval polls), so its timer must KEEP the event loop alive — an unref'd
+ * timer here would let a process whose only remaining work is this wait (a
+ * headless attach, a queued foreground run, a parked detached runner)
+ * silently exit mid-wait. Shared with `live-run.ts`.
  */
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+export function liveRunSleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (signal?.aborted) {
       resolve();

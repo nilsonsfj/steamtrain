@@ -482,5 +482,6 @@ export function useWorkflowRunner({
     cancelLiveRun,
     liveRunStoreRef,
     attachedRunIdRef,
+    attachAbortRef,
   };
 }

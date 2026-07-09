@@ -45,6 +45,9 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
 
         if (key.ctrl && input === "c") {
           runner.abortRef.current?.abort();
+          // An /attach tail holds a ref'd polling timer; without aborting it the
+          // process would outlive the unmounted UI until the attached run ends.
+          runner.attachAbortRef.current?.abort();
           exit();
           return;
         }

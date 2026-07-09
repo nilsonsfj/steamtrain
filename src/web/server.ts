@@ -31,6 +31,7 @@ import {
   createWorkflowHistoryStore,
   isAgentBackedStep,
   isTerminalLiveRunStatus,
+  matchPendingApproval,
   parseSessionOverrides,
   planWorkflow,
   resolveInputs,
@@ -1029,12 +1030,7 @@ async function handle(
       // provider polls it (this is how a detached run's checkpoint resolves).
       const meta = await deps.liveRuns.get(runId);
       if (meta && !isTerminalLiveRunStatus(meta.status)) {
-        const stepId = parsed.stepId;
-        const target = (meta.pendingApprovals ?? []).find(
-          (p) =>
-            (p.stepId === stepId || p.stepId.endsWith(`::${stepId}`)) &&
-            (iteration === undefined || p.iteration === iteration),
-        );
+        const target = matchPendingApproval(meta.pendingApprovals ?? [], parsed.stepId, iteration);
         if (target) {
           await deps.liveRuns.writeApprovalDecision(
             runId,

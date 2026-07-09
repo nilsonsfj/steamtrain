@@ -37,6 +37,7 @@ import {
   isRerunError,
   isTerminalLiveRunStatus,
   lintTemplateRefs,
+  matchPendingApproval,
   newLiveRunMeta,
   persistWorkflowStepDone,
   planRerun,
@@ -55,6 +56,7 @@ import {
   workflowCacheKey,
   workflowLlmSteps,
 } from "./workflow";
+import { sanitizePathComponent } from "./workflow/fs-util";
 
 /**
  * The `workflow run / attach / runs / cancel / approve` CLI drivers, plus the
@@ -394,7 +396,7 @@ async function spawnDetachedRun(options: SpawnDetachedRunOptions): Promise<numbe
     }),
   );
 
-  const logFd = openSync(join(store.rootDir, sanitizeRunDirName(runId), "runner.log"), "a");
+  const logFd = openSync(join(store.rootDir, sanitizePathComponent(runId), "runner.log"), "a");
   const childArgs = [
     script,
     ...(options.io.configPath ? ["--config-file", options.io.configPath] : []),
@@ -420,11 +422,6 @@ async function spawnDetachedRun(options: SpawnDetachedRunOptions): Promise<numbe
     out(`  cancel:  steamtrain workflow cancel ${runId}\n`);
   }
   return 0;
-}
-
-/** Mirrors the live-run store's id sanitization (for the runner.log path). */
-function sanitizeRunDirName(id: string): string {
-  return id.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
 /**
@@ -942,9 +939,7 @@ export async function runApproveCommand(
     err(`run '${runId}' has no pending approval checkpoints\n`);
     return 1;
   }
-  let target = stepId
-    ? pending.find((p) => p.stepId === stepId || p.stepId.endsWith(`::${stepId}`))
-    : undefined;
+  let target = stepId ? matchPendingApproval(pending, stepId) : undefined;
   if (!stepId) {
     if (pending.length > 1) {
       err(

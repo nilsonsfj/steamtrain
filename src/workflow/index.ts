@@ -69,6 +69,7 @@ export {
   capApprovalText,
   headlessApprovalProvider,
   matchApprovalKey,
+  matchPendingApproval,
   noProviderApprovalDecision,
 } from "./approval";
 export {

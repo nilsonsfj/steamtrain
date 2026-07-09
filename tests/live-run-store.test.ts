@@ -154,6 +154,23 @@ describe("live-run store", () => {
     expect(await store.readApprovalDecision("run", "gate", 2)).toBeUndefined();
   });
 
+  it("finds a decision written under a namespaced sub-workflow id when read by the local id", async () => {
+    // The engine hands approval providers the LOCAL step id while events (and
+    // external deciders) carry the NAMESPACED `parent::child` id — the read
+    // must bridge the two or a decided checkpoint would hang forever.
+    const store = createLiveRunStore(tempDir());
+    await store.create(meta("run", { status: "running", pid: process.pid }));
+    await store.writeApprovalDecision("run", "review::gate", 2, {
+      approved: true,
+      by: "human:cli",
+    });
+    const decision = await store.readApprovalDecision("run", "gate", 2);
+    expect(decision?.approved).toBe(true);
+    // Wrong iteration or unrelated local id still misses.
+    expect(await store.readApprovalDecision("run", "gate", 1)).toBeUndefined();
+    expect(await store.readApprovalDecision("run", "other", 2)).toBeUndefined();
+  });
+
   it("sweep marks dead-pid runs orphaned and folds them into history", async () => {
     const root = tempDir();
     const historyDir = join(root, "history");
@@ -366,6 +383,37 @@ describe("cancel watcher and approvals", () => {
     const decision = await pending;
     expect(decision.approved).toBe(false);
     expect(decision.by).toBe("human");
+  });
+
+  it("withStoreApprovals settles as canceled on abort even if the local provider hangs", async () => {
+    const store = createLiveRunStore(tempDir());
+    await store.create(meta("run", { status: "running", pid: process.pid }));
+    const never: import("../src/workflow/approval").ApprovalProvider = () => new Promise(() => {});
+    const provider = withStoreApprovals(store, "run", never);
+    const ac = new AbortController();
+    const pending = provider(
+      { stepId: "gate", iteration: 1, phaseId: "p1", onReject: "stop" },
+      ac.signal,
+    );
+    ac.abort();
+    const decision = await pending;
+    expect(decision.approved).toBe(false);
+    expect(decision.by).toBe("auto:canceled");
+  });
+
+  it("withStoreApprovals survives a rejecting local provider (store decision still lands)", async () => {
+    const store = createLiveRunStore(tempDir());
+    await store.create(meta("run", { status: "running", pid: process.pid }));
+    const rejecting: import("../src/workflow/approval").ApprovalProvider = () =>
+      Promise.reject(new Error("boom"));
+    const provider = withStoreApprovals(store, "run", rejecting);
+    const pending = provider(
+      { stepId: "gate", iteration: 1, phaseId: "p1", onReject: "stop" },
+      undefined,
+    );
+    await store.writeApprovalDecision("run", "gate", 1, { approved: true });
+    const decision = await pending;
+    expect(decision.approved).toBe(true);
   });
 
   it("withStoreApprovals lets the local provider win too", async () => {

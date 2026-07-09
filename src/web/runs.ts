@@ -477,6 +477,10 @@ export class WorkflowRunManager {
       disposeCancelWatch?.();
       this.runningCount = Math.max(0, this.runningCount - 1);
       run.endedAt = Date.now();
+      // The outcome is resolved now; lock out cancellation synchronously before
+      // any async persistence below, so a cancel arriving mid-persist can't
+      // report an already-finished run as cancelable.
+      run.settled = true;
       // Settle the live-run mirror (flushes buffered events, then writes the
       // terminal meta) before the terminal SSE frame, so cross-UI tailers see
       // the complete stream. Best-effort — never let it break the run.
@@ -498,10 +502,6 @@ export class WorkflowRunManager {
           // Mirroring is best-effort.
         }
       }
-      // The outcome is resolved now; lock out cancellation synchronously before
-      // the async history write, so a cancel during that window can't report an
-      // already-finished run as cancelable.
-      run.settled = true;
       // Persist before marking terminal: a subscriber that connects during this
       // await must still be registered to receive the terminal status frame.
       await this.persistHistory(run, recorder);

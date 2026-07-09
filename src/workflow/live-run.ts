@@ -8,8 +8,9 @@ import {
   type LiveRunMeta,
   type LiveRunStore,
   MAX_STREAM_EVENTS_PER_RUN,
-  isPidAlive,
+  isLiveRunOwnerAlive,
   isTerminalLiveRunStatus,
+  liveRunSleep as sleep,
 } from "./live-run-store";
 
 /**
@@ -166,13 +167,19 @@ export async function acquireRunSlot(
   options: AcquireRunSlotOptions = {},
 ): Promise<AcquireRunSlotResult> {
   const pollMs = options.pollMs ?? 250;
+  // Sweeping on every poll would rescan (and possibly rewrite) the whole
+  // registry ~4×/s per waiter; sweep only occasionally — the alive-filter
+  // below already keeps dead entries from blocking the queue in between.
+  const SWEEP_EVERY = 20;
+  let polls = 0;
   for (;;) {
     if (options.signal?.aborted || (await store.cancelRequested(runId))) {
       return { ok: false, reason: "canceled" };
     }
-    const runs = await store.list();
+    const runs = await store.list({ sweep: polls % SWEEP_EVERY === 0 });
+    polls += 1;
     const alive = runs.filter(
-      (run) => !isTerminalLiveRunStatus(run.status) && (run.pid === -1 || isPidAlive(run.pid)),
+      (run) => !isTerminalLiveRunStatus(run.status) && isLiveRunOwnerAlive(run),
     );
     const running = alive.filter((run) => run.status === "running").length;
     const queued = alive
@@ -265,25 +272,35 @@ export function withStoreApprovals(
   return (request, signal) =>
     new Promise<ApprovalDecision>((resolve) => {
       let settled = false;
+      const settle = (decision: ApprovalDecision): void => {
+        if (settled) return;
+        settled = true;
+        clearInterval(timer);
+        signal?.removeEventListener("abort", onAbort);
+        resolve(decision);
+      };
+      const onAbort = (): void =>
+        settle({ approved: false, by: "auto:canceled", note: "run canceled before a decision" });
       const timer = setInterval(() => {
         void store
           .readApprovalDecision(runId, request.stepId, request.iteration ?? 1)
           .then((decision) => {
-            if (decision && !settled) {
-              settled = true;
-              clearInterval(timer);
-              resolve({ ...decision, by: decision.by ?? "human" });
-            }
+            if (decision) settle({ ...decision, by: decision.by ?? "human" });
           })
           .catch(() => {});
       }, APPROVAL_POLL_MS);
       timer.unref?.();
-      void Promise.resolve(inner(request, signal)).then((decision) => {
-        if (settled) return;
-        settled = true;
-        clearInterval(timer);
-        resolve(decision);
-      });
+      // A rejecting local provider must not strand the checkpoint (or raise an
+      // unhandled rejection): keep polling the store, and settle as canceled
+      // if the run aborts first.
+      void Promise.resolve(inner(request, signal)).then(settle, () => {});
+      if (signal) {
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
     });
 }
 
@@ -313,28 +330,4 @@ export function newLiveRunMeta(fields: {
     createdAt: Date.now(),
     launch: fields.launch,
   };
-}
-
-/**
- * A control-flow sleep: gates forward progress (queue waits, approval polls),
- * so its timer must KEEP the event loop alive — an unref'd timer here would
- * let a process whose only remaining work is this wait (a queued foreground
- * run, a detached runner parked on an approval) silently exit mid-wait.
- */
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal?.aborted) {
-      resolve();
-      return;
-    }
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      resolve();
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
 }
