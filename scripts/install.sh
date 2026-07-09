@@ -70,7 +70,7 @@ fi
 TARGET="${REPO_ROOT}/dist/index.js"
 if [ ! -f "$TARGET" ]; then
   echo "error: build output not found at ${TARGET}." >&2
-  echo "  run without --no-build, or run 'npm run build' first." >&2
+  echo "  run without --no-build, or run '${PM} run build' first." >&2
   exit 1
 fi
 chmod +x "$TARGET"

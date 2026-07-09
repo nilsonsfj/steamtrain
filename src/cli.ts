@@ -1669,6 +1669,7 @@ Running steamtrain with no command opens the workflow-first TUI.
 Running steamtrain --web-ui opens the same engine behind a local browser UI.
 
 Global options (TUI and workflow commands):
+  -v, --version              Print the steamtrain version and exit
   -w, --workspace <path>     Load workspace presets from a custom workspace.json
       --config-file <path>   Load project config from a custom steamtrain.json
       --web-ui               Serve the browser UI instead of the TUI
