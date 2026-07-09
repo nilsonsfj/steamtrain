@@ -287,25 +287,16 @@ function liveLines(phase: PhaseState, step: StepState, width: number): DetailLin
     const prefix = step.status === "error" ? "error" : "output";
     const outputColor = step.status === "error" ? "red" : "white";
     const outputLines = output.split("\n");
+    let pushedOutput = false;
     for (const outputLine of outputLines) {
       const trimmedLine = outputLine.trim();
-      if (trimmedLine) {
-        const lastLine = lines[lines.length - 1];
-        lines.push({
-          text:
-            !lastLine || lastLine.text.startsWith(prefix)
-              ? `${prefix}: ${truncate(trimmedLine, Math.max(160, width * 7))}`
-              : `  ${truncate(trimmedLine, Math.max(160, width * 7))}`,
-          color: outputColor,
-        });
-      }
-    }
-    const lastOutputLine = lines[lines.length - 1];
-    if (!lastOutputLine || !lastOutputLine.text.startsWith(prefix)) {
       lines.push({
-        text: `${prefix}: (empty)`,
+        text: !pushedOutput
+          ? `${prefix}: ${truncate(trimmedLine || "(blank)", Math.max(160, width * 7))}`
+          : `  ${truncate(trimmedLine || "(blank)", Math.max(160, width * 7))}`,
         color: outputColor,
       });
+      pushedOutput = true;
     }
   } else {
     lines.push({ text: `tail: ${step.activity || statusWord(step.status)}`, color: "gray" });
@@ -325,11 +316,4 @@ function statusColor(status: StepState["status"]): string {
     case "pending":
       return "gray";
   }
-}
-
-function collapseWhitespace(text: string): string {
-  return text
-    .replace(/[^\S\n]+/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
 }
