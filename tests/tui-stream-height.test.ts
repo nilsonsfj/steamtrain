@@ -39,6 +39,16 @@ describe("computeStreamHeight", () => {
     );
   });
 
+  it("shrinks the stream by one row when the status bar shows its API line", () => {
+    // Regression: the status bar's second (API) line adds a row; if it isn't
+    // reserved the total frame overflows the terminal and Ink flickers on
+    // every keypress.
+    expect(computeStreamHeight({ ...base, statusApiLine: true })).toBe(
+      computeStreamHeight(base) - 1,
+    );
+    expect(computeStreamHeight({ ...base, statusApiLine: false })).toBe(computeStreamHeight(base));
+  });
+
   it("reserves rows for a wrapped prompt", () => {
     // prompt width = columns - 6 = 94; length 94 (+1 cursor) → 1 extra line.
     expect(computeStreamHeight({ ...base, promptValueLength: 94 })).toBe(

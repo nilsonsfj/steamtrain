@@ -6,8 +6,11 @@ export function message(err: unknown): string {
 }
 
 /**
- * Rows the fixed chrome around the event stream always occupies: status bar,
- * task-selector legend, the bordered prompt input, and the hint line.
+ * Rows the fixed chrome around the event stream always occupies: the status
+ * bar (one content line, plus its top and bottom border), the task-selector
+ * legend, the bordered prompt input, and the hint line. When the status bar
+ * shows a second line (its API row), that extra row is reserved separately —
+ * see `statusApiLine` below.
  */
 const BASE_RESERVED_ROWS = 9;
 
@@ -34,13 +37,16 @@ export function computeStreamHeight(opts: {
   columns: number;
   promptValueLength: number;
   notice?: string | null;
+  /** The status bar renders a second (API) line, occupying one extra row. */
+  statusApiLine?: boolean;
 }): number {
-  const { rows, columns, promptValueLength, notice } = opts;
+  const { rows, columns, promptValueLength, notice, statusApiLine } = opts;
   // Prompt wrapping: border(2) + padding(2) + prefix("❯ " = 2) = 6 columns overhead.
   const promptAreaWidth = Math.max(1, columns - 6);
   const promptTextLen = promptValueLength + 1; // +1 for cursor
   const promptExtraLines = wrappedLines(promptTextLen, promptAreaWidth) - 1;
   // Notice renders inside a `paddingX={1}` box, so it wraps at columns - 2.
   const noticeLines = notice ? wrappedLines(notice.length, Math.max(1, columns - 2)) : 0;
-  return Math.max(6, rows - BASE_RESERVED_ROWS - promptExtraLines - noticeLines);
+  const statusApiLines = statusApiLine ? 1 : 0;
+  return Math.max(6, rows - BASE_RESERVED_ROWS - promptExtraLines - noticeLines - statusApiLines);
 }

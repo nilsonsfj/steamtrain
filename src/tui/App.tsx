@@ -1123,6 +1123,9 @@ export function App({
     // The red notice line only renders in workflow mode; reserve its height so
     // the frame never overflows the terminal (which flickers on every keypress).
     notice: runner.wfNotice && isWorkflow ? runner.wfNotice : null,
+    // The status bar gains a second line once any API instance is shown; that
+    // extra row must be reserved too, or the frame overflows and flickers.
+    statusApiLine: doctor !== null && (apiDoctor?.length ?? 0) > 0,
   });
 
   const menuOverlayRows = prompt.suggestionMenuOpen
