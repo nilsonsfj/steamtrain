@@ -195,10 +195,15 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
         if (key.tab && !key.shift && !runner.running) {
           const promptInputHandlesTab = isSlashCommandInput(prompt.value) && prompt.promptEditing;
           if (!promptInputHandlesTab) {
-            picker.setWfPreview(null);
-            runner.setWfLaunching(false);
-            runner.setWfStepDetails(null);
-            cur.switchMode((prev) => nextMode(prev, cur.modes));
+            // In workflow preview mode, toggle step detail panel visibility
+            if (cur.mode === "workflow" && picker.wfPreview) {
+              runner.setWfShowStepDetail((prev) => !prev);
+            } else {
+              picker.setWfPreview(null);
+              runner.setWfLaunching(false);
+              runner.setWfStepDetails(null);
+              cur.switchMode((prev) => nextMode(prev, cur.modes));
+            }
           }
           return;
         }

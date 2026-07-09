@@ -19,7 +19,6 @@ describe("WorkflowPreview", () => {
       <WorkflowPreview
         spec={spec}
         source="bundled"
-        input="add workflow preview screen"
         width={100}
         height={30}
         selectedIndex={0}
@@ -29,7 +28,6 @@ describe("WorkflowPreview", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("workflow preview · multi-plan");
     expect(frame).toContain("(bundled)");
-    expect(frame).toContain("add workflow preview screen");
     expect(frame).toContain("planning-lenses");
     expect(frame).toContain("ready to run");
     expect(frame).toContain("fan-out");
@@ -41,7 +39,6 @@ describe("WorkflowPreview", () => {
       <WorkflowPreview
         spec={spec}
         source="bundled"
-        input="scan auth module"
         width={100}
         height={30}
         selectedIndex={1}
@@ -53,13 +50,12 @@ describe("WorkflowPreview", () => {
     expect(frame).toContain("binary_missing");
   });
 
-  it("shows empty input placeholder and clamps selected index", () => {
+  it("clamps selected index and renders step detail", () => {
     const spec = BUNDLED_WORKFLOWS["multi-plan"]!;
     const { lastFrame } = render(
       <WorkflowPreview
         spec={spec}
         source="bundled"
-        input=""
         width={160}
         height={40}
         selectedIndex={999}
@@ -67,7 +63,6 @@ describe("WorkflowPreview", () => {
       />,
     );
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("(none)");
     expect(frame).toMatch(/▶.*synthes/i);
     expect(frame).toContain("synthesize");
     expect(frame).toContain("DeepSeek V4 Flash Free");

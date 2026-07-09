@@ -31,7 +31,6 @@ export { flattenSpecSteps };
 interface WorkflowPreviewProps {
   spec: WorkflowSpec;
   source: WorkflowSourceKind;
-  input: string;
   width: number;
   height: number;
   selectedIndex: number;
@@ -39,6 +38,8 @@ interface WorkflowPreviewProps {
   canResume?: boolean;
   promptEditing?: boolean;
   planResult?: PlanResult | null;
+  showStepDetail?: boolean;
+  showPlanResult?: boolean;
 }
 
 type PreviewRow =
@@ -52,7 +53,6 @@ type PreviewRow =
 export function WorkflowPreview({
   spec,
   source,
-  input,
   width,
   height,
   selectedIndex,
@@ -60,6 +60,8 @@ export function WorkflowPreview({
   canResume = false,
   promptEditing = false,
   planResult = null,
+  showStepDetail = true,
+  showPlanResult = true,
 }: WorkflowPreviewProps) {
   const innerWidth = Math.max(20, width - 4);
   const flat = useMemo(() => flattenSpecSteps(spec), [spec]);
@@ -79,13 +81,13 @@ export function WorkflowPreview({
     (row) => row.kind === "step" && row.entry.flatIndex === clampedIndex,
   );
   const selectedRowIndex = foundIndex >= 0 ? foundIndex : 0;
-  const listBudget = Math.max(1, height - (selected ? 13 : 8));
+  const listBudget = Math.max(1, height - (selected && showStepDetail ? 13 : 8));
+  const detailMaxHeight = Math.max(1, height - listBudget - 4);
   const rowWindow = selectVisibleWindow(rows, selectedRowIndex, listBudget);
   const phaseCount = spec.phases.length;
   const stepCount = flat.length;
   const agents = useMemo(() => distinctAgents(spec), [spec]);
   const blocks = useMemo(() => blockSummary(spec), [spec]);
-  const inputLabel = input.length > 0 ? truncate(input, Math.max(24, innerWidth - 10)) : "(none)";
   const templateWarnings = useMemo(() => lintTemplateRefs(spec), [spec]);
 
   return (
@@ -104,7 +106,7 @@ export function WorkflowPreview({
         <Text color="gray">
           {promptEditing
             ? `↑/↓ history${canResume ? " · Enter resume" : ""} · Esc list`
-            : `↑/↓ · → detail${canResume ? " · Enter resume" : ""} · Ctrl+R run · Ctrl+D plan · Esc`}
+            : `↑/↓ · Tab detail · → step details${canResume ? " · Enter resume" : ""} · Ctrl+R run · Ctrl+D plan · Esc`}
         </Text>
       </Box>
 
@@ -115,12 +117,9 @@ export function WorkflowPreview({
       ) : null}
 
       <Box flexDirection="column" marginBottom={1}>
-        <Text color="white">
-          input: <Text color={input.length > 0 ? "cyan" : "gray"}>{inputLabel}</Text>
-        </Text>
         <Text color="gray">
           {phaseCount} phase{phaseCount === 1 ? "" : "s"} · {stepCount} step
-          {stepCount === 1 ? "" : "s"}
+          {stepCount === 1 ? "" : "s"} · ({source})
           {agents.length > 0 ? ` · agents: ${agents.join(", ")}` : ""}
           {blocks ? ` · ${blocks}` : ""}
         </Text>
@@ -132,9 +131,9 @@ export function WorkflowPreview({
             ⚠ {templateWarnings.length} template warning{templateWarnings.length === 1 ? "" : "s"}
           </Text>
         ) : null}
-        {planResult?.ok ? (
+        {showPlanResult && planResult?.ok ? (
           <PlanResultView plan={planResult} width={innerWidth} />
-        ) : planResult && !planResult.ok ? (
+        ) : showPlanResult && planResult && !planResult.ok ? (
           <Text color="red">plan failed: {planResult.error}</Text>
         ) : null}
       </Box>
@@ -152,7 +151,7 @@ export function WorkflowPreview({
             ) : null}
             {rowWindow.visible.map((row, offset) =>
               row.kind === "phase" ? (
-                <PhaseRow key={`phase-${row.phase.id}`} phase={row.phase} />
+                <PhaseRow key={`phase-${row.phase.id}`} phase={row.phase} width={innerWidth} />
               ) : (
                 <SpecStepRow
                   key={`step-${row.entry.step.id}`}
@@ -171,20 +170,25 @@ export function WorkflowPreview({
         )}
       </Box>
 
-      {selected ? <SpecStepDetail entry={selected} width={innerWidth} /> : null}
+      {showStepDetail && selected ? (
+        <SpecStepDetail entry={selected} width={innerWidth} maxHeight={detailMaxHeight} />
+      ) : null}
     </Box>
   );
 }
 
-function PhaseRow({ phase }: { phase: WorkflowSpec["phases"][number] }) {
+function PhaseRow({ phase, width }: { phase: WorkflowSpec["phases"][number]; width: number }) {
+  const phaseText = `─ ${phase.title}`;
+  const metaText = `  ${phase.id} · ${phase.steps.length} step${phase.steps.length === 1 ? "" : "s"}`;
+  const remainingWidth = Math.max(0, width - phaseText.length - metaText.length);
   return (
     <Box>
       <Text color="cyan" bold>
-        ─ {phase.title}
+        {phaseText}
       </Text>
       <Text color="gray">
-        {"  "}
-        {phase.id} · {phase.steps.length} step{phase.steps.length === 1 ? "" : "s"}
+        {metaText}
+        {" ".repeat(remainingWidth)}
       </Text>
     </Box>
   );
@@ -221,7 +225,11 @@ function SpecStepRow({
   );
 }
 
-function SpecStepDetail({ entry, width }: { entry: FlatSpecStep; width: number }) {
+function SpecStepDetail({
+  entry,
+  width,
+  maxHeight,
+}: { entry: FlatSpecStep; width: number; maxHeight?: number }) {
   const { step, phase } = entry;
   const kind = workflowStepKind(step);
   const lines = specDetailLines(step);
@@ -234,7 +242,14 @@ function SpecStepDetail({ entry, width }: { entry: FlatSpecStep; width: number }
   const runnerColor = isAgentBackedStep(step) ? (AGENT_COLOR[step.agent] ?? "white") : "gray";
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1}>
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor="gray"
+      paddingX={1}
+      overflow="hidden"
+      {...(maxHeight != null ? { height: maxHeight } : {})}
+    >
       <Text color="cyan">
         {step.id} · {kind} · phase {phase.title}
       </Text>
@@ -307,7 +322,7 @@ function PlanResultView({ plan, width }: { plan: PlanResult; width: number }) {
             <Box key={s.stepId} flexDirection="column">
               <Text color="white">
                 {"  "}
-                {s.stepId}: {truncate(s.renderedPrompt!, Math.max(40, width - 12))}
+                {s.stepId}: {truncate(s.renderedPrompt ?? "", Math.max(40, width - 12))}
               </Text>
             </Box>
           ))}
