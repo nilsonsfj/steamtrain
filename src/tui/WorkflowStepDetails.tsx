@@ -215,9 +215,17 @@ function previewLines(
 
   const prompt = promptForStep(step);
   if (prompt) {
-    lines.push({
-      text: `prompt: ${truncate(collapseWhitespace(prompt), Math.max(80, width - 20))}`,
-    });
+    const promptLines = prompt.split("\n");
+    let isFirstPromptLine = true;
+    for (const promptLine of promptLines) {
+      const trimmedLine = promptLine.trim();
+      lines.push({
+        text: isFirstPromptLine
+          ? `prompt: ${truncate(trimmedLine || "(blank)", Math.max(80, width - 20))}`
+          : `  ${truncate(trimmedLine || "(blank)", Math.max(80, width - 20))}`,
+      });
+      isFirstPromptLine = false;
+    }
   }
 
   return lines;
@@ -274,13 +282,20 @@ function liveLines(phase: PhaseState, step: StepState, width: number): DetailLin
 
   const output = (step.result?.output ?? step.text).trim();
   if (output) {
-    lines.push({
-      text: `${step.status === "error" ? "error" : "output"}: ${truncate(
-        collapseWhitespace(output),
-        Math.max(160, width * 7),
-      )}`,
-      color: step.status === "error" ? "red" : "white",
-    });
+    const prefix = step.status === "error" ? "error" : "output";
+    const outputColor = step.status === "error" ? "red" : "white";
+    const outputLines = output.split("\n");
+    let isFirstOutputLine = true;
+    for (const outputLine of outputLines) {
+      const trimmedLine = outputLine.trim();
+      lines.push({
+        text: isFirstOutputLine
+          ? `${prefix}: ${truncate(trimmedLine || "(blank)", Math.max(160, width * 7))}`
+          : `  ${truncate(trimmedLine || "(blank)", Math.max(160, width * 7))}`,
+        color: outputColor,
+      });
+      isFirstOutputLine = false;
+    }
   } else {
     lines.push({ text: `tail: ${step.activity || statusWord(step.status)}`, color: "gray" });
   }
@@ -299,8 +314,4 @@ function statusColor(status: StepState["status"]): string {
     case "pending":
       return "gray";
   }
-}
-
-function collapseWhitespace(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
 }
