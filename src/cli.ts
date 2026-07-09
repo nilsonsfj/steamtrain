@@ -1,39 +1,40 @@
-import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { createAdapter } from "./agents";
-import { refreshAgentCatalogCaches } from "./agents/models";
+import { message, readAll, truncateLine } from "./cli-util";
 import {
   type SteamtrainConfig,
   configDisplayLabel,
   loadConfig,
   saveProjectWorkflow,
 } from "./config";
-import { runDoctor } from "./doctor";
 import { runInitCommand } from "./init";
 import { Orchestrator } from "./orchestrator";
+import {
+  printModelBreakdown,
+  runApproveCommand,
+  runAttachCommand,
+  runCancelCommand,
+  runDetachedRunner,
+  runRunsCommand,
+  runWorkflowCommand,
+} from "./run-cli";
 import { loadSettings } from "./settings";
 import type { AgentInstanceId } from "./types/events";
 import {
-  type ApprovalProvider,
+  DEFAULT_MAX_PARALLEL_RUNS,
   type HarvestResult,
   MergeConflictError,
   type ModelUsage,
-  type RerunMode,
   type RunRecord,
-  RunRecordBuilder,
-  type RunRecordStatus,
   type RunRecordSummary,
-  type StepResult,
   WORKFLOW_CACHE_DIR,
   WORKFLOW_HISTORY_DIR,
-  type WorkflowEvent,
   type WorkflowSpec,
   type WorktreeDiff,
   type WorktreeSource,
   aggregateCosts,
-  aggregateLeavesByModel,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   formatRunTotals,
@@ -42,29 +43,15 @@ import {
   formatUsd,
   generateWorkflow,
   harvestWorktrees,
-  hashWorkflowSpec,
-  headlessApprovalProvider,
-  isRerunError,
-  lintTemplateRefs,
   modelBreakdownForRecord,
-  persistWorkflowStepDone,
-  planRerun,
   planWorkflow,
   pruneWorktree,
-  rerunDowngradeMessage,
   resolveInputs,
   resolveStepTimeoutSec,
-  resolveWorkflowTimeoutSec,
-  resultLeaves,
   saveUserWorkflow,
-  stepMetaFromSpec,
-  timeoutMsFromSec,
-  tokensForResults,
   totalTokens,
   validateWorkflow,
-  workflowAgentIds,
   workflowCacheKey,
-  workflowLlmSteps,
   workflowStepKind,
   worktreeDiff,
   worktreeSourceFromInfo,
@@ -176,20 +163,6 @@ export interface CliIO {
   stderr?: (text: string) => void;
 }
 
-interface RunOptions {
-  input?: string;
-  stdin: boolean;
-  json: boolean;
-  fresh: boolean;
-  from?: string;
-  retryFailed: boolean;
-  params: Record<string, string>;
-  /** `--approve-all`: auto-approve every human checkpoint (unattended). */
-  approveAll: boolean;
-  /** `--on-approval fail|stop`: auto-reject every human checkpoint with this disposition. */
-  onApproval?: "fail" | "stop";
-}
-
 export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
   const out = io.stdout ?? ((text: string) => process.stdout.write(text));
   const err = io.stderr ?? ((text: string) => process.stderr.write(text));
@@ -253,6 +226,18 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
       return runCostsCommand(rest, cwd, out, err);
     case "run":
       return runWorkflowCommand(orchestrator, config, rest, io, out, err);
+    case "attach":
+      return runAttachCommand(rest, cwd, out, err);
+    case "runs":
+    case "ps":
+      return runRunsCommand(rest, cwd, out, err);
+    case "cancel":
+      return runCancelCommand(rest, cwd, out, err);
+    case "approve":
+      return runApproveCommand(rest, cwd, out, err);
+    // Hidden: the re-exec target a `workflow run --detach` child starts as.
+    case "_detached-runner":
+      return runDetachedRunner(orchestrator, config, rest[0], io, out, err);
     case "create":
     case "new":
       return runWorkflowCreateCommand(config, rest, io, out, err, configScope.path);
@@ -921,322 +906,6 @@ async function pruneHistoryWorktrees(
   return 0;
 }
 
-function truncateLine(text: string, max: number): string {
-  const oneLine = text.replace(/\n/g, " ");
-  return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
-}
-
-async function runWorkflowCommand(
-  orchestrator: Orchestrator,
-  config: SteamtrainConfig,
-  args: string[],
-  io: CliIO,
-  out: (text: string) => void,
-  err: (text: string) => void,
-): Promise<number> {
-  // The positional name is optional when re-launching a past run with --from.
-  const positional = args[0] && !args[0].startsWith("--") ? args[0] : undefined;
-  const options = parseRunOptions(positional ? args.slice(1) : args);
-  if (!options) {
-    err(
-      `usage: steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--approve-all | --on-approval fail|stop]
-       steamtrain workflow run --from <runId> [--retry-failed] [--json]
-`,
-    );
-    return 1;
-  }
-
-  const cwd = io.cwd ?? process.cwd();
-  const historyStore = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
-
-  let name = positional;
-  let input = options.input;
-  let seed: Map<string, StepResult> | undefined;
-  let forceFresh = options.fresh;
-
-  if (options.retryFailed && !options.from) {
-    err("--retry-failed only applies with --from <runId>\n");
-    return 1;
-  }
-
-  // --from <runId>: take the workflow + input from a recorded run and decide
-  // whether to seed the cache (retry-failed) or run fresh (re-run).
-  if (options.from) {
-    if (positional) {
-      err("workflow run: pass a workflow name or --from <runId>, not both\n");
-      return 1;
-    }
-    const record = await historyStore.get(options.from);
-    if (!record) {
-      err(`unknown run '${options.from}'\n`);
-      return 1;
-    }
-    name = record.workflow;
-    const mode: RerunMode = options.retryFailed ? "retry-failed" : "rerun";
-    const plan = planRerun(record, mode, orchestrator.listWorkflows()[name], {
-      input: options.input,
-      cwd,
-      params: Object.keys(options.params).length > 0 ? options.params : undefined,
-    });
-    if (isRerunError(plan)) {
-      err(`${plan.error}\n`);
-      return 1;
-    }
-    input = plan.input;
-    if (plan.params) {
-      // Use the plan's resolved params (from the original run or user override).
-      for (const [k, v] of Object.entries(plan.params)) {
-        if (!(k in options.params)) options.params[k] = String(v);
-      }
-    }
-    if (plan.downgraded) {
-      err(`note: ${rerunDowngradeMessage(plan.downgraded)}\n`);
-    }
-    // An explicit --fresh forces a clean run and ignores any seed.
-    forceFresh = options.fresh || mode === "rerun" || Boolean(plan.downgraded);
-    seed = forceFresh ? undefined : plan.seedCache;
-  } else {
-    input = options.input ?? (options.stdin ? await readAll(io.stdin ?? process.stdin) : undefined);
-  }
-
-  if (!name) {
-    err("workflow run requires a workflow name (or --from <runId>)\n");
-    return 1;
-  }
-  if (!input?.trim()) {
-    err("workflow run requires --input <text> or --stdin\n");
-    return 1;
-  }
-
-  const spec = orchestrator.listWorkflows()[name];
-  if (!spec) {
-    err(`unknown workflow '${name}'\n`);
-    return 1;
-  }
-
-  const resolved = resolveInputs(spec, options.params);
-  if (resolved.errors.length > 0) {
-    for (const e of resolved.errors) err(`input error: ${e}\n`);
-    return 1;
-  }
-
-  const templateWarnings = lintTemplateRefs(spec);
-  for (const w of templateWarnings) out(`warn: ${w}\n`);
-
-  // Agentless workflows (only distributors / consolidators / gates) never spawn
-  // a CLI, so skip the doctor + catalog refresh — they would otherwise spawn
-  // real agent binaries just to gate a run that needs none. llm-step workflows
-  // still get the dispatch gate (API instance resolves + key present), which is
-  // purely local and spawns nothing.
-  const usesAgents = workflowAgentIds(spec).length > 0;
-  if (usesAgents) {
-    const doctor = await runDoctor(config);
-    orchestrator.setDoctor(doctor);
-    await refreshAgentCatalogCaches(config, doctor);
-  }
-  if (usesAgents || workflowLlmSteps(spec).length > 0) {
-    const check = orchestrator.canDispatchWorkflow(name);
-    if (!check.ok) {
-      err(`cannot run '${name}': ${check.reason}\n`);
-      return 1;
-    }
-  }
-
-  const store = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
-  const key = workflowCacheKey(name, input.trim(), cwd, spec, resolved.values);
-  const cache = new Map<string, StepResult>();
-  if (forceFresh) {
-    await store.clear(key);
-  } else {
-    const loaded = await store.load(key);
-    for (const [stepId, result] of loaded) cache.set(stepId, result);
-  }
-  if (seed && seed.size > 0) {
-    // Seed the already-succeeded steps and make them the resume baseline so an
-    // interrupted retry can pick up from here too.
-    for (const [stepId, result] of seed) cache.set(stepId, result);
-    await store.save(key, cache);
-  }
-
-  const recorder = new RunRecordBuilder({
-    id: randomUUID(),
-    workflow: name,
-    input: input.trim(),
-    cwd,
-    specHash: hashWorkflowSpec(spec),
-    params: Object.keys(resolved.values).length > 0 ? resolved.values : undefined,
-  });
-  // Wire cancellation so Ctrl+C unwinds the run and records it as "canceled"
-  // (matching the TUI and web drivers) instead of hard-killing the process
-  // before history is written. A second Ctrl+C force-exits.
-  const ac = new AbortController();
-  let interrupts = 0;
-  const onSigint = () => {
-    interrupts += 1;
-    if (interrupts === 1) ac.abort();
-    else process.exit(130);
-  };
-  process.on("SIGINT", onSigint);
-  // Enforce whole-workflow wall-clock timeout.
-  const workflowTimeoutMs = timeoutMsFromSec(
-    resolveWorkflowTimeoutSec(spec, orchestrator.getConfig()),
-  );
-  const timeoutTimer =
-    workflowTimeoutMs > 0 ? setTimeout(() => ac.abort(), workflowTimeoutMs) : undefined;
-  timeoutTimer?.unref?.();
-  let ok = false;
-  let budgetExceeded = false;
-  // Human-approval checkpoints run non-interactively in the headless CLI:
-  // `--approve-all` approves; `--on-approval fail|stop` rejects with that
-  // disposition; with neither flag we auto-reject and stop (the safe default —
-  // don't spend money / mutate a repo without an explicit decision).
-  const approvalProvider: ApprovalProvider = options.approveAll
-    ? headlessApprovalProvider("approve-all")
-    : options.onApproval === "fail"
-      ? headlessApprovalProvider("reject-fail")
-      : headlessApprovalProvider("reject-stop");
-  const workflowCatalog = orchestrator.listWorkflows();
-  if (
-    !options.approveAll &&
-    !options.onApproval &&
-    specHasApprovalCheckpoints(spec, (childName) => workflowCatalog[childName])
-  ) {
-    err(
-      "note: this workflow has approval checkpoints; with no --approve-all / --on-approval they auto-reject and stop the run\n",
-    );
-  }
-  try {
-    for await (const event of orchestrator.runWorkflow(
-      name,
-      input.trim(),
-      ac.signal,
-      cache,
-      cwd,
-      undefined,
-      resolved.values,
-      approvalProvider,
-    )) {
-      recorder.handle(event);
-      if (options.json) out(`${JSON.stringify(event)}\n`);
-      else printHumanEvent(event, out);
-      if (event.kind === "step_done") {
-        await persistWorkflowStepDone(store, key, cache, event.stepId, event.result, event.cached);
-      }
-      if (event.kind === "workflow_done") {
-        ok = event.ok;
-        budgetExceeded = Boolean(event.budgetExceeded);
-        if (!options.json) printRunSummary(event.results, out, stepMetaFromSpec(spec));
-      }
-    }
-    // The engine yields a final workflow_done on abort rather than throwing, so
-    // check the signal first: a canceled run must not be mislabeled done/error.
-    if (ac.signal.aborted) {
-      await saveHistory(historyStore, recorder, "canceled", err);
-      return 130;
-    }
-    await saveHistory(
-      historyStore,
-      recorder,
-      budgetExceeded ? "budget-exceeded" : ok ? "done" : "error",
-      err,
-    );
-  } catch (runErr) {
-    if (ac.signal.aborted) {
-      await saveHistory(historyStore, recorder, "canceled", err);
-      return 130;
-    }
-    await saveHistory(historyStore, recorder, "error", err, message(runErr));
-    throw runErr;
-  } finally {
-    if (timeoutTimer) clearTimeout(timeoutTimer);
-    process.removeListener("SIGINT", onSigint);
-  }
-  return ok ? 0 : 1;
-}
-
-function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
-/** Persist a finished run to history; a write failure only warns, never fails the run. */
-async function saveHistory(
-  historyStore: ReturnType<typeof createWorkflowHistoryStore>,
-  recorder: RunRecordBuilder,
-  status: RunRecordStatus,
-  err: (text: string) => void,
-  error?: string,
-): Promise<void> {
-  try {
-    await historyStore.save(recorder.build({ status, error }));
-  } catch (e) {
-    err(`warning: could not record run history: ${message(e)}\n`);
-  }
-}
-
-/**
- * A compact, end-of-run report: per-step status (with data-flow source for
- * fan-out children), duration, cache/cost, and roll-up totals. This is the CLI
- * analog of the TUI's live status header.
- */
-function printRunSummary(
-  results: StepResult[],
-  out: (text: string) => void,
-  stepMeta?: Map<string, { agent?: string; api?: string; model?: string }>,
-): void {
-  if (results.length === 0) return;
-  out("\nsummary\n");
-  let okCount = 0;
-  let failCount = 0;
-  let totalCost = 0;
-  let totalMs = 0;
-  for (const result of results) {
-    if (result.childResults?.length) continue; // children are listed individually
-    const status = result.ok ? "ok  " : "fail";
-    if (result.ok) okCount += 1;
-    else failCount += 1;
-    const cost = result.costUsd ?? 0;
-    totalCost += cost;
-    totalMs += result.durationMs;
-    const bits = [`${(result.durationMs / 1000).toFixed(1)}s`];
-    if (result.skipped) bits.push("skipped");
-    if (cost > 0) bits.push(`$${cost.toFixed(4)}`);
-    const tokenLine = formatTokenSummary(result.tokens);
-    if (tokenLine) bits.push(tokenLine);
-    if (result.gate) bits.push(result.gate.passed ? "gate:passed" : "gate:blocked");
-    const from = result.item ? ` (item ${result.item.index})` : "";
-    out(`  ${status} ${result.stepId}${from}  ${bits.join(" · ")}\n`);
-  }
-  const grandTokens = tokensForResults(results);
-  const totals = [
-    `${okCount} ok`,
-    failCount > 0 ? `${failCount} failed` : undefined,
-    totalCost > 0 ? `$${totalCost.toFixed(4)}` : undefined,
-    totalTokens(grandTokens) > 0 ? `${formatTokens(totalTokens(grandTokens))} tok` : undefined,
-    `${(totalMs / 1000).toFixed(1)}s total`,
-  ].filter(Boolean);
-  out(`  ── ${totals.join(" · ")}\n`);
-
-  // Per-model breakdown — "which model is eating the budget?".
-  if (stepMeta) {
-    const byModel = aggregateLeavesByModel(resultLeaves(results, stepMeta));
-    printModelBreakdown(byModel, out);
-  }
-}
-
-/** Render the per-model cost/token breakdown shared by the run summary and history show. */
-function printModelBreakdown(byModel: ModelUsage[], out: (text: string) => void): void {
-  const models = byModel.filter((m) => m.costUsd > 0 || totalTokens(m.tokens) > 0);
-  if (models.length === 0) return;
-  out("  by model\n");
-  for (const m of models) {
-    const bits = [`${m.steps} step${m.steps === 1 ? "" : "s"}`];
-    if (m.costUsd > 0) bits.push(formatUsd(m.costUsd));
-    const tokenLine = formatTokenSummary(m.tokens);
-    if (tokenLine) bits.push(tokenLine);
-    out(`    ${m.model}  ${bits.join(" · ")}\n`);
-  }
-}
-
 interface CreateOptions {
   input?: string;
   stdin: boolean;
@@ -1451,149 +1120,6 @@ function parseCacheClearOptions(args: string[]): CacheClearOptions | null {
   return options;
 }
 
-function parseRunOptions(args: string[]): RunOptions | null {
-  const options: RunOptions = {
-    stdin: false,
-    json: false,
-    fresh: false,
-    retryFailed: false,
-    params: {},
-    approveAll: false,
-  };
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === "--input" || arg === "-i") {
-      const value = args[i + 1];
-      if (!value) return null;
-      options.input = value;
-      i += 1;
-    } else if (arg === "--param" || arg === "-p") {
-      const value = args[i + 1];
-      if (!value) return null;
-      const eq = value.indexOf("=");
-      if (eq < 1) return null;
-      const key = value.slice(0, eq);
-      if (key.startsWith("-")) return null;
-      options.params[key] = value.slice(eq + 1);
-      i += 1;
-    } else if (arg === "--from") {
-      const value = args[i + 1];
-      if (!value) return null;
-      options.from = value;
-      i += 1;
-    } else if (arg === "--retry-failed") {
-      options.retryFailed = true;
-    } else if (arg === "--stdin") {
-      options.stdin = true;
-    } else if (arg === "--json") {
-      options.json = true;
-    } else if (arg === "--fresh") {
-      options.fresh = true;
-    } else if (arg === "--approve-all") {
-      options.approveAll = true;
-    } else if (arg === "--on-approval") {
-      const value = args[i + 1];
-      if (value !== "fail" && value !== "stop") return null;
-      options.onApproval = value;
-      i += 1;
-    } else {
-      return null;
-    }
-  }
-  // `--approve-all` and `--on-approval` are mutually exclusive intents.
-  if (options.approveAll && options.onApproval) return null;
-  return options;
-}
-
-function printHumanEvent(event: WorkflowEvent, out: (text: string) => void): void {
-  switch (event.kind) {
-    case "workflow_start":
-      out(
-        `workflow ${event.name} started (${event.phaseCount} phases, ${event.stepCount} steps)\n`,
-      );
-      return;
-    case "phase_start":
-      out(`\nphase ${event.index + 1}: ${event.title}\n`);
-      return;
-    case "step_start":
-      out(`  start ${event.blockKind ?? "worker"} ${event.stepId}\n`);
-      return;
-    case "fan_out":
-      out(
-        `  fan-out ${event.parentStepId} -> ${event.count} item${event.count === 1 ? "" : "s"}\n`,
-      );
-      return;
-    case "step_event":
-      if (event.event.kind === "text_delta" && !event.event.thinking) out(event.event.text);
-      return;
-    case "gate_evaluated":
-      out(
-        `  gate ${event.stepId}: ${event.passed ? "passed" : "blocked"}${
-          event.target ? ` -> ${event.target}` : ""
-        }\n`,
-      );
-      return;
-    case "approval_pending": {
-      const review = event.reviewStepId ? ` (reviewing ${event.reviewStepId})` : "";
-      out(`  ⏳ approval ${event.stepId}${review} — awaiting decision\n`);
-      if (event.message) out(`     ${event.message}\n`);
-      return;
-    }
-    case "approval_resolved": {
-      const who = event.by ? ` by ${event.by}` : "";
-      const note = event.note ? ` — ${event.note}` : "";
-      out(`  ${event.approved ? "✓ approved" : "✗ rejected"} ${event.stepId}${who}${note}\n`);
-      return;
-    }
-    case "step_done":
-      out(
-        `  ${event.result.ok ? "done" : "fail"} ${event.stepId}${event.cached ? " (cached)" : ""}\n`,
-      );
-      return;
-    case "phase_done":
-      out(`phase ${event.phaseId} ${event.ok ? "ok" : "failed"}\n`);
-      return;
-    case "budget_exceeded": {
-      const where = event.scope === "step" && event.stepId ? `step '${event.stepId}'` : "workflow";
-      out(
-        `\n  ⚠ ${where} cost budget ${formatUsd(event.limitUsd)} reached (spent ${formatUsd(event.spentUsd)}) — stopping new steps; resume after raising the cap\n`,
-      );
-      return;
-    }
-    case "workflow_done":
-      out(
-        `\nworkflow ${event.budgetExceeded ? "budget-exceeded" : event.ok ? "done" : "failed"}\n`,
-      );
-      return;
-  }
-}
-
-/**
- * Whether a workflow contains any human-approval checkpoint (approval step or
- * human gate), recursing into named sub-workflows so a checkpoint nested inside
- * a `kind: "workflow"` call still triggers the headless advisory. `resolve`
- * looks up a child spec by name (the orchestrator catalog); `seen` guards
- * against workflows that reference each other cyclically.
- */
-function specHasApprovalCheckpoints(
-  spec: WorkflowSpec,
-  resolve?: (name: string) => WorkflowSpec | undefined,
-  seen: Set<string> = new Set(),
-): boolean {
-  for (const phase of spec.phases) {
-    for (const step of phase.steps) {
-      if (step.kind === "approval") return true;
-      if (step.kind === "gate" && step.condition.human === true) return true;
-      if (step.kind === "workflow" && resolve && !seen.has(step.workflow)) {
-        seen.add(step.workflow);
-        const child = resolve(step.workflow);
-        if (child && specHasApprovalCheckpoints(child, resolve, seen)) return true;
-      }
-    }
-  }
-  return false;
-}
-
 function workflowSummary(spec: WorkflowSpec): string {
   const phaseCount = spec.phases.length;
   const stepCount = spec.phases.reduce((n, phase) => n + phase.steps.length, 0);
@@ -1619,9 +1145,13 @@ Usage:
   steamtrain workflow validate [name]
   steamtrain workflow plan <name> --input <text> [--param key=value ...] [--json]
   steamtrain workflow plan <name> --stdin [--param key=value ...] [--json]
-  steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--approve-all | --on-approval fail|stop]
-  steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh] [--approve-all | --on-approval fail|stop]
-  steamtrain workflow run --from <runId> [--retry-failed] [--param key=value ...] [--input <text>] [--json]
+  steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--detach] [--approve-all | --on-approval fail|stop]
+  steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh] [--detach] [--approve-all | --on-approval fail|stop]
+  steamtrain workflow run --from <runId> [--retry-failed] [--param key=value ...] [--input <text>] [--json] [--detach]
+  steamtrain workflow attach [<runId>] [--json]
+  steamtrain workflow runs [--all] [--json]
+  steamtrain workflow cancel <runId>
+  steamtrain workflow approve <runId> [--step <stepId>] [--reject [--on-reject fail|stop]] [--note <text>]
   steamtrain workflow create --input <description> [--agent <id>] [--model <model>] [--name <name>] [--save] [--scope user|project] [--json]
   steamtrain workflow cache clear [<workflow> --input <text> --param key=value ... | --stdin]
   steamtrain workflow history [list]
@@ -1665,6 +1195,18 @@ Set 'maxCostUsd' on a workflow (or a forEach step) to cap spend: the engine stop
 scheduling new steps once the cap is reached, records the run as budget-exceeded,
 and leaves the cache intact so raising the cap and re-running resumes it.
 
+Detached runs & the run queue: 'workflow run --detach' launches the run under a
+background process that survives this terminal, mirroring live events into
+.steamtrain/runs/. 'workflow runs' lists in-flight runs; 'workflow attach <id>'
+replays the run so far and tails it live (Ctrl+C detaches again — the TUI's
+/attach and the web UI's Active runs list do the same); 'workflow cancel <id>'
+stops it. Approval checkpoints on a detached run wait for a decision from any
+attached UI ('workflow approve <id>', TUI keys, or the web buttons) unless the
+launch passed --approve-all / --on-approval. All runs — CLI, TUI, and web —
+share one queue: at most 'maxParallelRuns' (steamtrain.json, default ${DEFAULT_MAX_PARALLEL_RUNS})
+execute at once and the rest wait, so parallel runs never collide over the
+step cache or git worktrees.
+
 Running steamtrain with no command opens the workflow-first TUI.
 Running steamtrain --web-ui opens the same engine behind a local browser UI.
 
@@ -1677,24 +1219,4 @@ Global options (TUI and workflow commands):
       --host <host>          Web UI bind host (default 127.0.0.1; with --web-ui)
       --auth-token <token>   Require this token for web UI access (with --web-ui)
 `;
-}
-
-const MAX_READ_BYTES = 10 * 1024 * 1024;
-
-function readAll(stream: Readable): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let text = "";
-    let bytes = 0;
-    stream.setEncoding("utf8");
-    stream.on("data", (chunk) => {
-      bytes += Buffer.byteLength(chunk, "utf8");
-      if (bytes > MAX_READ_BYTES) {
-        stream.destroy(new Error(`input exceeds ${MAX_READ_BYTES} byte limit`));
-        return;
-      }
-      text += String(chunk);
-    });
-    stream.on("end", () => resolve(text));
-    stream.on("error", reject);
-  });
 }

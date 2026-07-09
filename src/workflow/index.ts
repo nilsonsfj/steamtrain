@@ -37,6 +37,7 @@ export {
   llmPricingSchema,
   MAX_STEPS,
   MAX_CONCURRENCY,
+  MAX_PARALLEL_RUNS_CEILING,
   MAX_WORKFLOW_NESTING_DEPTH,
 } from "./types";
 export type {
@@ -209,6 +210,37 @@ export {
   type HistoryPhase,
   type HistoryStep,
 } from "./history";
+export {
+  WORKFLOW_RUNS_DIR,
+  DEFAULT_MAX_PARALLEL_RUNS,
+  LIVE_RUN_META_VERSION,
+  LIVE_RUN_TTL_MS,
+  LIVE_RUN_ORPHAN_GRACE_MS,
+  LIVE_RUN_TERMINAL_STATUSES,
+  MAX_STREAM_EVENTS_PER_RUN,
+  createLiveRunStore,
+  isPidAlive,
+  isTerminalLiveRunStatus,
+  type CreateLiveRunStoreOptions,
+  type LiveRunLaunch,
+  type LiveRunListOptions,
+  type LiveRunMeta,
+  type LiveRunSource,
+  type LiveRunStatus,
+  type LiveRunStore,
+} from "./live-run-store";
+export {
+  acquireRunSlot,
+  createLiveRunPublisher,
+  newLiveRunMeta,
+  resolveMaxParallelRuns,
+  storeApprovalProvider,
+  watchRunCancel,
+  withStoreApprovals,
+  type AcquireRunSlotOptions,
+  type AcquireRunSlotResult,
+  type LiveRunPublisher,
+} from "./live-run";
 export {
   WORKFLOW_HISTORY_DIR,
   DEFAULT_HISTORY_LIMIT,
