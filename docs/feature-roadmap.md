@@ -17,7 +17,17 @@ distributor / processor / consolidator / gate blocks, `forEach` fan-out,
 loop-back gates (`loopTo` + bounded iterations), auto-retry on transient
 failures, on-disk step cache + resume, run history with re-run / retry-failed,
 per-step git-worktree isolation, an LLM workflow drafter, and a unified
-TUI / web UI / CLI over one shared authoring core.
+TUI / web UI / CLI over one shared authoring core — plus worktree diff
+review and merge-back (merge step kind, `history apply/prune`, `--diff`),
+human-in-the-loop approval gates (`approval` step kind, `gate` with
+`human` condition, `--approve-all`/`--on-approval`), structured step
+outputs (per-step JSON schemas, `json.<path>` templates, gate `path`
+conditions), `command` step kind, workspace inheritance and artifacts,
+true DAG scheduling with per-step `when` conditions, typed workflow
+inputs, sub-workflows (`kind: "workflow"` step), template reference
+linting (`lintTemplateRefs`), dry-run/plan preview (`planWorkflow`),
+cost budgets (`maxCostUsd`), per-step cost/token tracking, cost analytics
+CLI, and web UI hardening (`--auth-token`, CSRF, login form).
 
 ---
 
@@ -28,94 +38,18 @@ just polish), does it protect the user's time/money/repo, and does it build on
 machinery that already exists (worktrees, history, the shared authoring core)
 so the cost is proportionate.
 
-## 1.1 Worktree diff review and merge-back ✅ Shipped (core)
+## 1.1 Graphical diff panels in TUI/web UI
 
-> **Shipped** — a declarative `merge` step kind (modes `apply` / `branch` /
-> `pr`, `perSource` PRs, `onConflict: fail|ours|theirs|agent` with LLM conflict
-> resolution), worktree template fields
-> (`{{steps.<id>.worktree.root|branch|cwd}}`), and CLI harvesting
-> (`workflow history show <id> --diff [--stat] [--step]`, `history apply`,
-> `history prune`, with applied/pruned status recorded in run history). See
-> [`worktree-merge-back.md`](worktree-merge-back.md). Remaining follow-up:
-> graphical diff panels in the TUI/web UI (the diff primitives are UI-agnostic
-> and ready).
-
-**The gap:** agent steps already run in isolated git worktrees, and the step
-result records the worktree path and branch — but nothing helps the user *use*
-those changes. After an `implement`-style workflow succeeds, the edits are
-stranded in `.git/worktrees/...`; harvesting them means manual `git diff` /
-`cherry-pick` archaeology across N step worktrees.
+> Core merge/diff/apply/prune machinery shipped — see
+> [`worktree-merge-back.md`](worktree-merge-back.md). The diff primitives are
+> UI-agnostic and ready; what remains is the visual layer.
 
 **The feature:**
-- Per-step **diff view** in the TUI, web UI, and CLI (`steamtrain workflow
-  history show <id> --diff <step>`): files changed, +/- stats, full patch.
-- **Apply/merge** actions: apply one step's changes to the main tree, or pick
-  among competing steps' changes (natural fit for multi-agent "two
-  implementations, pick the winner" workflows).
-- Record applied/discarded status in run history; prune worktrees on discard.
+- Graphical diff panels in the TUI and web UI showing per-step file changes,
+  +/- stats, and full patches — consuming the same diff data the CLI's
+  `--diff` flag already produces.
 
-**Why #1:** this is the last mile for every workflow that writes code — today
-the tool orchestrates the work but drops the deliverable on the floor. It also
-compounds the value of everything else on this list (approval gates review a
-diff; CI mode posts a diff).
-
-## 1.2 Human-in-the-loop approval gates
-
-> **Shipped** — an `approval` step kind (and `gate` with
-> `"condition": {"human": true}`) that pauses the run, surfaces the reviewed
-> step's output (and, with 1.1, its worktree diff), and waits for a decision:
-> an interactive `a`/`r` prompt in the TUI, an Approve/Reject card in the web
-> UI (`POST /api/runs/:id/approval`), and `--approve-all` /
-> `--on-approval fail|stop` flags for headless CI. Decisions are recorded in
-> run history; the checkpoint is never cached, so a resumed run re-asks while
-> the cached steps around it replay. See
-> [`workflow-spec.md`](workflow-spec.md#human-in-the-loop-approval-gates).
-
-**The gap:** gates are purely mechanical (`contains` / `matches` / `equals` /
-`ok`). Real-world workflows that spend money or mutate a repo need a "show me
-what you've got before continuing" checkpoint — e.g. approve the synthesized
-plan before the implement phase, or approve verified findings before a fix
-phase runs.
-
-**The feature:** a `"kind": "approval"` step (or `gate` with
-`"condition": {"human": true}`) that pauses the run, surfaces the referenced
-step's output (and, with 1.1, its diff), and waits: interactive prompt in the
-TUI, an Approve/Reject card in the web UI, and `--approve-all` /
-`--on-approval fail|stop` flags for headless CI runs. Approval decisions land
-in run history; a paused run survives process exit via the existing cache/rerun
-machinery (resume = re-run, cached steps replay, gate re-asks).
-
-**Why it matters:** it converts steamtrain from "fire and hope" into something
-people trust with larger, more expensive, more destructive workflows — the
-whole point of a workflow orchestrator.
-
-## 1.3 Structured step outputs (typed data flow)
-
-> **Shipped** — per-step `output` schemas, `{{steps.<id>.json.<path>}}`
-> templates, gate/`when` `path` conditions, and distributor JSON-array
-> fan-out. See
-> [`workflow-spec.md`](workflow-spec.md#structured-step-outputs-output).
-
-**The gap:** every step's output is a text blob; agent-backed distributors
-split on lines; gates can only substring/regex the text. That makes multi-step
-data flow brittle — a reviewer step that emits "no P0 issues found, but P0
-handling looks odd" trips a `contains: "P0"` gate.
-
-**The feature:**
-- Optional per-step `output` JSON schema; the agent is prompted to emit JSON
-  matching it, and the engine parses/validates (with one bounded "fix your
-  JSON" retry).
-- Template access to fields: `{{steps.review.json.verdict}}`,
-  `{{steps.split.json.targets[2]}}`.
-- Gate conditions on fields: `{ "step": "review", "path": "verdict",
-  "equals": "pass" }`.
-- Distributors can fan out over a JSON array instead of line-splitting.
-
-**Why it matters:** every non-trivial workflow eventually needs a reliable
-verdict/list/score to route on. This turns gates and loops from heuristics into
-contracts, and it's the foundation for honest CI pass/fail (1.4).
-
-## 1.4 CI / headless integration (GitHub Action + machine-readable results)
+## 1.2 CI / headless integration (GitHub Action + machine-readable results)
 
 **The gap:** headless runs print a nice status summary, but there's no
 first-class CI story: no exit-code contract documented for gate outcomes, no
@@ -135,34 +69,19 @@ artifact a pipeline can consume, no turnkey way to run `bug-hunt` on every PR.
 leverage distribution channel for the whole tool, and `bug-hunt`-on-every-PR is
 the demo that sells itself.
 
-## 1.5 Cost budgets and cost analytics ✅ Shipped
+## 1.3 Cost analytics UI (live ticker)
 
-**The gap:** steamtrain already tracks per-step and per-run cost, but only
-*reports* it after the fact. A fan-out with `forEach` over 30 items on an Opus
-model, inside a loop-back gate, can quietly burn real money.
+> Core budget enforcement and cost analytics CLI shipped — see
+> [cost-and-budgets.md](./cost-and-budgets.md). Per-step and per-run cost
+> data flows through events.
 
-**The feature (shipped):**
-- `maxCostUsd` at workflow and step (`forEach`) level: the engine stops
-  scheduling new steps when the budget is hit (existing steps finish; run is
-  marked `budget-exceeded`, resumable after raising the cap — the cache makes
-  this cheap, and prior spend from the cache counts toward the cap on resume).
-- A live cost **and token** ticker in the TUI status bar / web header during a
-  run, plus a per-model breakdown line.
-- Full token accounting (input, output, cache read, cache write, reasoning)
-  normalized across all four agents (Claude, OpenCode, Codex, Amp), reported per
-  step, in run totals, and aggregated per model — visible in the TUI, web UI,
-  and CLI.
-- `steamtrain workflow costs [--workflow <name>] [--json]`: aggregate spend and
-  tokens from history by workflow, step, agent, and model — "which step is
-  eating the budget?"
+**The feature:**
+- A live cost **and token** ticker widget in the TUI status bar / web UI
+  header during a run, with a per-model breakdown line — consuming the cost
+  data that already flows through events but currently only renders
+  per-event rather than as a persistent running total.
 
-See [cost-and-budgets.md](./cost-and-budgets.md) for details.
-
-**Why it matters:** cost anxiety is the #1 practical brake on running big
-parallel workflows. A hard cap plus visibility removes the fear that keeps
-`maxConcurrency` at 2.
-
-## 1.6 Per-step tool permissions and sandbox profiles
+## 1.4 Per-step tool permissions and sandbox profiles
 
 **The gap:** every agent step runs with whatever the underlying CLI allows by
 default. A "review" step has the same write powers as an "implement" step;
@@ -181,7 +100,7 @@ scratch clone" and "I'll run this on my actual repo." Worktree isolation
 protects the tree; this protects everything else (shell, network, files
 outside the repo).
 
-## 1.7 Detached runs and a run queue (reattach from any UI)
+## 1.5 Detached runs and a run queue (reattach from any UI)
 
 **The gap:** a run is tied to the TUI/web session that started it. Long
 workflows (15-minute step timeouts × phases) hold a terminal hostage; closing
@@ -202,11 +121,10 @@ actually want to use an orchestrator, and the history store + shared reducer
 mean 80% of the machinery (persist events, fold them into a view) already
 exists.
 
-## 1.8 Notifications on run completion / approval needed
+## 1.6 Notifications on run completion / approval needed
 
-**The gap:** once runs are long (and especially once they're detached, 1.7, or
-waiting on a human, 1.2), the user needs to be pinged rather than poll a
-terminal.
+**The gap:** once runs are long (and especially once they're detached, 1.5, or
+waiting on a human), the user needs to be pinged rather than poll a terminal.
 
 **The feature:** a `notify` config block — terminal bell + OS desktop
 notification out of the box, plus a generic webhook (covers Slack/Discord/
@@ -215,9 +133,10 @@ budget-exceeded, and approval-pending, with workflow name, status line, total
 cost, and a deep link to the web-UI run page.
 
 **Why it matters:** small feature, outsized quality-of-life. It's also the
-glue that makes 1.2 and 1.7 usable rather than just possible.
+glue that makes approval gates and detached runs usable rather than just
+possible.
 
-## 1.9 Workflow sharing: import/export and a community catalog
+## 1.7 Workflow sharing: import/export and a community catalog
 
 **The gap:** workflows live in `steamtrain.json` (project) or the user layer;
 the only way to share one is copy-paste JSON. The bundled catalog (4 workflows)
@@ -236,37 +155,17 @@ recipes (release checklist, dependency-upgrade sweep, incident postmortem,
 docs audit) is what makes new users productive in minutes instead of an
 authoring session. Ecosystem features also compound over time.
 
-## 1.10 Web UI hardening for shared/remote use ✅ Shipped
+## 1.8 Web UI follow-ups
 
-> **Shipped** — `--auth-token <token>` CLI flag enables cookie-based session auth
-> (HttpOnly, SameSite=Strict `__steamtrain_auth` cookie set by `POST /api/auth`),
-> Origin/Referer CSRF validation on all state-changing requests (POST/PUT/DELETE),
-> `Access-Control-Allow-Credentials` with specific origin when auth is enabled on a
-> non-local host, and a client-side login form that appears on 401. Public routes
-> (`/`, `/static/*`) remain accessible without auth.
+> Core auth/CSRF hardening shipped (`--auth-token`, cookie-based session auth,
+> Origin/Referer CSRF validation, login form, public route bypass). Remaining
+> follow-ups:
 
-**Follow-ups (not blockers):**
 - `--insecure-no-auth` opt-out for localhost (suppress the login form on 127.0.0.1)
 - Reverse-proxy + TLS docs for remote deployment
 - Read-only mode for sharing a run view with teammates
 - Basic rate limiting on `POST /api/auth` (or document that the token should be high-entropy for shared deployments)
 - Session expiry mid-run has no auto-re-login flow — the user must start a new run
-
-**The gap:** the web server binds happily to `0.0.0.0` with no authentication;
-anyone who can reach the port can run agents *with the host user's
-credentials and repo write access*. The public-release readiness review
-already flagged the security posture.
-
-**The feature:** a bearer token by default (printed/QR'd at startup, embedded
-in the launch URL), an explicit `--insecure-no-auth` opt-out for localhost,
-CSRF protection on mutating endpoints, and docs for putting it behind a
-reverse proxy with TLS. Optional read-only mode for sharing a run view with
-teammates.
-
-**Why it matters:** the web UI is the natural team surface (watch a run,
-approve a gate from your phone), but it can't be recommended beyond
-`127.0.0.1` until this lands — and it's a prerequisite for 1.7/1.8 deep links
-being safe to share.
 
 ---
 
@@ -276,158 +175,7 @@ Gaps in the workflow language and run experience specifically, with
 comparisons to established orchestrators. Roughly ranked; the first three are
 the ones users will hit within their first week of writing real workflows.
 
-## 2.1 Deterministic command steps (`kind: "command"`) ✅ Shipped
-
-> **Shipped** — a `command` step kind: templated `cmd` run through the platform
-> shell inside the same worktree isolation as agent steps, stdout+stderr
-> captured as `{{steps.x.output}}` (streamed live, tail-truncated at 512 KiB),
-> `ok` = exit 0, `{{steps.x.exitCode}}` for templates, optional structured
-> `output` schema, and the usual `cwd`/`env`/`stepTimeoutSec` fields. See
-> [`workflow-spec.md`](workflow-spec.md#command-deterministic-shell-step).
-
-**The gap:** every executable step is an agent run. There is no way to express
-"run the test suite", "run the linter", or "grep for TODOs" as a cheap,
-deterministic step — today you must ask an LLM to run the command for you,
-which costs money, takes seconds-to-minutes, and can misreport results.
-
-**The feature:** a `command` step kind: `cmd` + optional `cwd`/`env`/
-`timeoutSec`, capturing stdout/stderr as `{{steps.x.output}}` and exposing
-`{{steps.x.exitCode}}` / `ok` for gates. Runs inside the same worktree
-machinery as agent steps. Bundled workflows adopt it — `review-loop` gates on
-`npm test` actually passing instead of an agent claiming "DONE".
-
-**Comparison:** this is the bread and butter of every orchestrator — GitHub
-Actions' `run:`, Airflow's `BashOperator`, n8n's Execute Command node.
-steamtrain is unusual in *not* having it, and it's the single cheapest way to
-make workflows trustworthy: let deterministic tools verify what
-non-deterministic agents produce.
-
-## 2.2 File/artifact handoff between steps ✅ Shipped
-
-> **Shipped** — `workspace: "inherit:<stepId>"` on worker/processor/command
-> steps (the worktree is seeded from the source step's final worktree state;
-> the source is an implicit dependency; chains compose and the merge-back diff
-> base is inherited so merging the tail lands the whole chain), and declared
-> `artifacts` (paths snapshotted into a per-run artifacts directory after
-> success — a missing one fails the step — exposed to templates as
-> `{{steps.<id>.artifacts.<name>}}`). See
-> [`workflow-spec.md`](workflow-spec.md#workspace-inheritance-and-artifacts-file-handoff).
-
-**The gap:** the only thing that flows between steps is **text output**. Each
-agent step gets its *own* worktree snapshotted from the original checkout's
-HEAD + dirty state — so in an implement → review pipeline, the reviewer
-**cannot see the implementer's edits at all**; it reviews prose about the
-changes, not the changes. Loop-back fix iterations have the same blindness.
-
-**The feature:**
-- `workspace: "inherit:<stepId>"` on a step: start its worktree from a
-  dependency's final worktree state instead of the original checkout, giving
-  sequential steps a real shared filesystem lineage (still isolated from the
-  user's tree).
-- Declared **artifacts**: a step lists output paths (`"artifacts":
-  ["report.md", "coverage/"]`); the engine snapshots them into the run record
-  and templates can reference them (`{{steps.build.artifacts.report}}` injects
-  a path the next agent can read).
-
-**Comparison:** GitHub Actions has `upload-artifact`/`download-artifact`
-between jobs precisely because isolated executors need explicit file handoff;
-Temporal passes typed payloads between activities; Dagster's assets make
-outputs first-class. steamtrain's worktree isolation is a strength — this
-keeps it while fixing the "steps are blind to each other's work" hole, and it
-pairs directly with Part 1's diff/merge-back (1.1).
-
-## 2.3 True DAG scheduling and per-step conditions ✅ Shipped
-
-> **Shipped** — steps schedule by `dependsOn` alone (phases are
-> presentation/grouping), and per-step `when` conditions skip steps individually
-> with automatic downstream skip propagation. See commit `8325d1a`.
-
-**The gap:** phases are hard barriers — a step cannot start until *every* step
-in all earlier phases finished, even when its `dependsOn` completed long ago.
-A slow "web review" step blocks an unrelated "api fix" step in the next phase.
-And there is no per-step `if`: conditional behavior requires contorting
-workflows around gate steps with `onFalse: stop/fail`, which can only stop
-*the whole run*, not skip a branch.
-
-**The feature:**
-- Schedule by `dependsOn` alone (phases stay as presentation/grouping and as
-  the default dependency when `dependsOn` is omitted — existing workflows keep
-  their exact behavior).
-- A per-step `when` condition reusing the existing gate-condition schema
-  (`{"step": "triage", "contains": "frontend"}`) so steps can be skipped
-  individually, and downstream consolidators treat skipped inputs as absent
-  rather than failed.
-
-**Comparison:** GitHub Actions runs jobs the moment their `needs` are met and
-gives every step an `if:`; Airflow/Dagster are pure dependency DAGs with
-trigger rules; Temporal expresses conditions in code. The phase model is a
-nice authoring simplification — it just shouldn't also be the scheduler's
-straitjacket.
-
-## 2.4 Named, typed workflow inputs (parameters) ✅ Shipped
-
-> **Shipped** — an `inputs` map on `WorkflowSpec` declares typed parameters
-> (`string`, `number`, `boolean`) with `description`, `default`, and `required`.
-> Templates reference resolved values as `{{inputs.<key>}}`. Users supply
-> values via `--param key=value` on the CLI or `"params": {}` in the web API
-> `POST /api/runs` body. `resolveInputs()` validates and coerces values;
-> `validateWorkflow()` rejects type-mismatched defaults and `required: true`
-> with a default. Params are included in the cache key (deterministic sorted
-> serialization) and stored in `RunRecord` for `--from` reruns. The LLM
-> generation prompt teaches the LLM about inputs. The TUI shows an input form
-> when running a workflow with declared inputs (Tab between fields, y/n toggle
-> for booleans, Enter to submit, Esc to cancel). The web UI renders a params
-> form in the run bar (text/number inputs and boolean selects with descriptions
-> and defaults) and sends collected values to the API. See PR #54 and PR #55.
-
-**The gap:** a workflow takes exactly one anonymous text blob (`{{input}}`).
-A "release checklist" workflow that needs a version, a branch, and a
-dry-run flag has to parse them back out of prose — unreliable, undocumented,
-and unpromptable in the UI.
-
-**The feature:** an `inputs` map on the workflow (`{"version": {"type":
-"string", "required": true}, "dryRun": {"type": "boolean", "default":
-false}}`), referenced as `{{inputs.version}}`; supplied via
-`--param version=1.2.0` on the CLI, a generated form in the web UI's run
-modal, and sequential prompts in the TUI. `workflow validate` checks that
-referenced inputs are declared. `{{input}}` remains as the single free-text
-default so existing workflows are untouched.
-
-**Comparison:** GitHub Actions' `workflow_dispatch.inputs` (typed, with
-defaults and choice enums) is the model to copy; n8n generates run forms from
-declared fields; Temporal workflows take typed arguments. This is also what
-makes shared/imported workflows (1.9) self-documenting: the input schema *is*
-the usage doc.
-
-## 2.5 Sub-workflows and reusable step templates ✅ Shipped
-
-> **Shipped** — a `"kind": "workflow"` step invokes a named child workflow
-> with input templates; the child run renders nested in the step tree, records
-> into run history, and its consolidated output becomes the step output.
-> Recursion depth capped; the ≤1000-step budget applies to the expanded tree.
-> See commit `021c85e`.
-
-**The gap:** workflows can't compose. The `bug-hunt` sweep can't be embedded
-as one stage of a bigger release pipeline; a well-tuned "review step" (agent +
-model + effort + prompt scaffold) must be copy-pasted between workflows and
-drifts apart.
-
-**The feature:**
-- A `"kind": "workflow"` step: `"workflow": "bug-hunt"` + an input template;
-  the child run renders nested in the step tree, records into the same run
-  history, and its consolidated output becomes the step output. Recursion
-  depth capped; the existing ≤1000-step budget applies to the expanded tree.
-- Step templates: a top-level `stepDefaults`/`templates` block that named
-  steps can `extends`, so shared agent/model/effort/prompt scaffolds live in
-  one place.
-
-**Comparison:** GitHub Actions has reusable workflows + composite actions;
-Temporal has child workflows; Airflow has TaskGroups; CrewAI composes crews.
-Composition is what lets a catalog of small, proven workflows scale into big
-pipelines instead of monoliths — it multiplies the value of the community
-catalog (1.9).
-
-## 2.6 Agent session continuity across steps and loop iterations
+## 2.1 Agent session continuity across steps and loop iterations
 
 **The gap:** every step (and every loop iteration) spawns a fresh agent with
 an empty context; all "memory" must be squeezed through prompt templates. In
@@ -450,7 +198,7 @@ context otherwise. steamtrain's clean-room default is the right *default* —
 but it's currently the only option, and the underlying CLIs already support
 resumption.
 
-## 2.7 Matrix fan-out and fan-out controls
+## 2.2 Matrix fan-out and fan-out controls
 
 **The gap:** `forEach` fans out over one distributor's items, once. There's no
 way to say "run this review across {sonnet, opus, gpt-5.4} × {each target
@@ -473,74 +221,39 @@ no "tolerate N failures".
 "same job, many variants." For an LLM orchestrator it's even more valuable:
 cross-model comparison is a core multi-agent pattern, not an edge case.
 
-## 2.8 Template validation and expressions ✅ Shipped
+## 2.3 Template expressions and filters
 
-> **Shipped** — `lintTemplateRefs()` scans every `{{…}}` template reference in
-> prompts, distributor items, gate/when conditions, merge fields, command `cmd`,
-> and workflow `input` templates. References that match steamtrain-specific
-> patterns but point to something invalid (unknown step id, invalid field,
-> undeclared input, wrong context like `{{item}}` outside `forEach` or
-> `{{iteration}}` outside a loop region, wrong step type for the field) produce
-> non-fatal warnings in `ValidationResult.warnings`. Warnings surface in CLI
-> (`workflow validate` and `workflow run`), TUI (yellow warning count in the
-> workflow preview), and web UI (save response `warnings` array + banner).
-> Generic mustache-style placeholders are intentionally ignored. Template
-> filters (`head`, `tail`, `default`, `jsonpath`) are a future follow-up.
-
-**The gap:** unknown placeholders are **left unchanged** — a typo like
-`{{steps.reviw.output}}` ships literally to the agent as line noise, no
-warning, and the run "succeeds". Beyond that, templates are purely
-substitution: no way to truncate a huge output before re-prompting, no
-fallback when a step was skipped, no light conditionals.
+> Template reference linting (`lintTemplateRefs`) shipped — unknown refs,
+> undeclared inputs, wrong-context `{{item}}`/`{{iteration}}` all produce
+> validation warnings. What remains is the filter/expression layer.
 
 **The feature:**
-- **Strict reference validation** in `validateWorkflow` and at save time in
-  both UIs: any `{{steps.<id>…}}` naming an unknown id or field is a warning;
-  `{{inputs.<key>}}` referencing an undeclared input is a warning; `{{item}}`
-  outside `forEach` and `{{iteration}}` outside a loop region are warnings.
 - A tiny filter set — `{{steps.x.output | head:2000}}`, `| tail:50`,
-  `| jsonpath:$.verdict}}` (pairs with 1.3), `| default:"(skipped)"}}` — and
-  nothing more; stop well short of a programming language. **(Future follow-up)**
+  `| jsonpath:$.verdict}}`, `| default:"(skipped)"}}` — and nothing more;
+  stop well short of a programming language. Truncation before re-prompting,
+  fallback when a step was skipped, light conditionals.
 
 **Comparison:** GitHub Actions expressions and Airflow's Jinja show both the
 value and the trap — Jinja-in-YAML gets unreadable fast. The lint half is
-uncontroversial and copies what every mature system does: flag dangling
-references at *validation* time, not mid-run after three phases of paid agent
-work.
+already shipped and uncontroversial; the filters are the follow-up that pairs
+with structured outputs (1.3 in the original numbering).
 
-## 2.9 Dry-run / plan preview with cost estimate ✅ Shipped
+## 2.4 Reusable step templates (`stepDefaults`/`extends`)
 
-> **Shipped** — `planWorkflow()` produces a static analysis of a workflow spec
-> without executing any agents: rendered prompts (with `{{input}}` and
-> `{{inputs.*}}` resolved, `{{steps.*}}` as empty placeholders), step tree with
-> agent/model metadata, forEach expansion counts, loop gate structure,
-> sub-workflow references, gate/when condition descriptions, workspace
-> inheritance, artifacts, and dependency graph. Exposed as `workflow plan` CLI
-> command, `POST /api/workflows/:name/plan` web API endpoint, TUI dry-run
-> preview (Ctrl+D from the workflow preview), and web UI "Plan" button. 25
-> tests covering all step types and template rendering.
+> Sub-workflows (`kind: "workflow"` step) shipped — child workflows compose,
+> render nested in the step tree, and record into run history. What remains
+> is the authoring-sugar half.
 
-**The gap:** `workflow validate` checks the schema, but there's no way to see
-what a run *will do* before spending money: which steps expand from the
-matrix/forEach, what the rendered prompts look like with real input, what the
-worst-case step count and rough cost are. Authoring iteration today means
-paying for a live run per tweak.
+**The feature:**
+- A top-level `stepDefaults`/`templates` block that named steps can
+  `extends`, so shared agent/model/effort/prompt scaffolds live in
+  one place and don't drift between workflows.
 
-**The feature:** `steamtrain workflow run <name> --dry-run` (and a "Preview"
-button in both UIs): render the full expanded step tree with resolved
-agents/models/efforts, show each step's rendered prompt (template placeholders
-that depend on runtime output shown symbolically), and a cost band from
-history (1.5's per-step averages for this workflow) or model list prices.
-Loop gates show their iteration budget.
+**Comparison:** GitHub Actions has composite actions for exactly this —
+shared configuration that multiple steps or workflows reference. This
+multiplies the value of the community catalog (1.7).
 
-**Comparison:** `terraform plan` is the canonical proof that "show me before
-you spend" builds trust; Airflow has `tasks render` for exactly this
-prompt-inspection purpose; GitHub Actions' lack of a good local dry-run (hence
-the third-party `act`) is one of its most-complained-about gaps — an
-opportunity to do better, and cheap since validation + templating + the
-reducer already exist.
-
-## 2.10 Run-inspection and authoring UX upgrades
+## 2.5 Run-inspection and authoring UX upgrades
 
 **The gap:** a bundle of smaller UI gaps that together cap how deeply users
 can work with runs:
@@ -548,9 +261,9 @@ can work with runs:
 - Step output is a streamed tail; there's no **search** across a run's
   outputs, no **export** ("give me this run as one markdown transcript"), no
   copy-step-output shortcut in the TUI.
-- Token counts aren't surfaced (only duration + cost), so there's no signal
-  when a step is nearing context limits — the usual silent killer of long
-  consolidator steps.
+- Token counts are surfaced in the TUI header and per-step details, but
+  there's no signal when a step is nearing context limits — the usual silent
+  killer of long consolidator steps.
 - The web UI has the vertical pipeline; the TUI has no compact **graph/tree
   overview** of phase → step topology before running.
 - Prompt history/drafts exist in the TUI only (the one remaining parity gap
@@ -573,7 +286,7 @@ Shorter list, less rigorously ranked — worth tracking, not necessarily next:
 
 - **Scheduled runs:** `steamtrain workflow schedule <name> --cron "0 7 * * 1"`
   for recurring jobs (dependency-upgrade sweep, weekly docs audit) — natural
-  once detached runs (1.7) exist; compare Airflow's scheduler and GitHub
+  once detached runs (1.5) exist; compare Airflow's scheduler and GitHub
   Actions `on: schedule`.
 - **Workflow testing framework:** a mock-agent mode (scripted step outputs
   from fixtures) so workflow authors can unit-test routing — gates, loops,
@@ -589,7 +302,7 @@ Shorter list, less rigorously ranked — worth tracking, not necessarily next:
   agent ecosystem.
 - **OpenTelemetry traces:** emit one span per run/phase/step (attributes:
   agent, model, cost, tokens, cache-hit) so teams can watch workflow health in
-  their existing observability stack; pairs with CI usage (1.4).
+  their existing observability stack; pairs with CI usage (1.2).
 - **More agent adapters:** the adapter seam is proven (claude, opencode,
   codex, amp already in-tree) — Gemini CLI and other emerging agent CLIs widen
   the cross-model workflows that are steamtrain's signature.
@@ -604,16 +317,14 @@ Shorter list, less rigorously ranked — worth tracking, not necessarily next:
 
 Three tracks can proceed largely in parallel:
 
-- **Trust track (protects users):** 1.5 budgets → 1.6 permissions → 1.10 web
-  hardening. Each is small-to-medium and independent.
-- **Capability track (unlocks use cases):** 1.1 diff/merge → 1.2 approval
-  gates → 1.3 structured outputs → 1.4 CI action, in that order — each builds
-  directly on the previous one.
-- **Language track (workflow authoring power):** 2.8's lint half and 2.1
-  command steps first (small, high leverage), then 2.2 artifacts/worktree
-  inheritance, 2.4 typed inputs, and 2.5 sub-workflows (shipped); 2.6–2.7
-  and 2.9–2.10 follow as demand dictates.
+- **Trust track (protects users):** 1.3 cost ticker → 1.4 permissions → 1.8
+  web follow-ups. Each is small-to-medium and independent.
+- **Capability track (unlocks use cases):** 1.1 graphical diffs → 1.2 CI
+  action — builds directly on the shipped merge/diff machinery.
+- **Language track (workflow authoring power):** 2.3 template filters and 2.4
+  step templates first (small, high leverage), then 2.1 session continuity
+  and 2.2 matrix fan-out; 2.5 run-inspection UX follows as demand dictates.
 
-1.7 detached runs, 1.8 notifications, and 1.9 sharing slot in whenever
-bandwidth allows (1.8 should land with or right after 1.2/1.7; Part 3's
-scheduled runs after 1.7).
+1.5 detached runs, 1.6 notifications, and 1.7 sharing slot in whenever
+bandwidth allows (1.6 should land with or right after 1.5; Part 3's
+scheduled runs after 1.5).
