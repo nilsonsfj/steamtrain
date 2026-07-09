@@ -4,6 +4,7 @@ import { parseGlobalArgs, runCli } from "./cli";
 import { configDisplayLabel, loadConfig } from "./config";
 import { loadSettings } from "./settings";
 import { App } from "./tui/App";
+import { STEAMTRAIN_VERSION } from "./version";
 import { startWebUi } from "./web";
 import { loadWorkflowCatalog } from "./workflow";
 import { loadWorkspaceConfig, workspaceScopeLabel } from "./workspace";
@@ -18,12 +19,16 @@ import { loadWorkspaceConfig, workspaceScopeLabel } from "./workspace";
  * user workflows (~/.steamtrain/workflows.json), workspace presets, then renders the TUI.
  */
 async function main(): Promise<void> {
-  const { args, workspacePath, configPath, webUi, port, host, authToken, error } = parseGlobalArgs(
-    process.argv.slice(2),
-  );
+  const { args, workspacePath, configPath, webUi, port, host, authToken, version, error } =
+    parseGlobalArgs(process.argv.slice(2));
   if (error) {
     process.stderr.write(`${error}\n`);
     process.exitCode = 1;
+    return;
+  }
+
+  if (version) {
+    process.stdout.write(`steamtrain ${STEAMTRAIN_VERSION}\n`);
     return;
   }
 

@@ -20,6 +20,8 @@ npm install
 | `npm run lint` | Check formatting and lint rules (Biome) |
 | `npm run format` | Auto-fix formatting and lint issues |
 | `npm test` | Run the test suite (Vitest) |
+| `npm run install:local` | Build and link `steamtrain` onto your PATH (see the README's "Install as a system binary") |
+| `npm run uninstall:local` | Remove the linked `steamtrain` launcher |
 
 ## Code style
 

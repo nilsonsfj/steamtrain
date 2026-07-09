@@ -20,6 +20,9 @@ bun install
 bun src/index.tsx
 ```
 
+Want `steamtrain` on your PATH as a real command? See
+[Install as a system binary](#install-as-a-system-binary).
+
 You'll see a steam-train banner, then a preflight **doctor** panel checking that
 `claude` and `opencode` are installed and runnable, then the workflow picker:
 
@@ -143,12 +146,57 @@ records are pruned automatically.
 See [`docs/workflow-creation.md`](docs/workflow-creation.md) for the creation flow
 (CLI `workflow create` and the TUI `/create-workflow` command).
 
-### Build a standalone binary
+### Install as a system binary
+
+> **Alpha install.** steamtrain isn't published to a registry yet, so you
+> install it from a checkout. macOS and Linux are supported.
+
+```bash
+git clone https://github.com/nilsonsfj/steamtrain.git
+cd steamtrain
+npm run install:local        # builds, then links `steamtrain` onto your PATH
+steamtrain --version
+```
+
+`install:local` (a thin wrapper over [`scripts/install.sh`](scripts/install.sh)):
+
+1. installs dependencies (with `bun` if present, otherwise `npm`) and builds
+   `dist/index.js`,
+2. symlinks a `steamtrain` command into `~/.local/bin` — **no sudo required** —
+   and prints how to add that directory to your PATH if it isn't already there.
+
+The link points back at `dist/index.js` in this checkout (runtime deps stay in
+its `node_modules`), so **keep the repo where it is**. After a `git pull`, re-run
+`npm run install:local` to rebuild and refresh the linked binary.
+
+**Custom location** (e.g. a shared, already-on-PATH dir):
+
+```bash
+STEAMTRAIN_BIN_DIR=/usr/local/bin bash scripts/install.sh
+```
+
+**Link only** (skip the build if `dist/` is already current):
+
+```bash
+bash scripts/install.sh --no-build
+```
+
+**Uninstall** — removes only the launcher, not your checkout or `~/.steamtrain`
+config:
+
+```bash
+npm run uninstall:local
+```
+
+Prefer the Node toolchain's own linker? `npm run build && npm link` also works
+and puts `steamtrain` on your PATH.
+
+### Build a standalone bundle
 
 ```bash
 bun install
 npm run build          # tsup → dist/index.js (with shebang)
-node dist/index.js     # or: npm link && steamtrain
+node dist/index.js     # run the built entrypoint directly
 ```
 
 ---
