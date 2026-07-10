@@ -24,6 +24,8 @@ export interface UseKeyboardInputParams {
   agentManagerOpen: boolean;
   /** True while the API manager overlay owns the keyboard. */
   apiManagerOpen: boolean;
+  /** True while the in-place step editor overlay owns the keyboard. */
+  stepEditorOpen: boolean;
   /** True while the input form overlay owns the keyboard. */
   inputFormPending: boolean;
   openAgentManager: () => void;
@@ -55,6 +57,8 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
         // overlay (agents via Ctrl+A//agents, APIs via /apis) is open, its own
         // useInput handler owns every other key.
         if (cur.agentManagerOpen || cur.apiManagerOpen) return;
+        // While the step editor is active, its own useInput handler owns keys.
+        if (cur.stepEditorOpen) return;
         // While the input form is active, its own useInput handler owns keys.
         if (cur.inputFormPending) return;
         if (key.ctrl && input === "a") {
