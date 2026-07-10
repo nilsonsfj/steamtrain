@@ -1200,6 +1200,7 @@ function streamExternalRun(runId: string, store: LiveRunStore, res: ServerRespon
 
   const ac = new AbortController();
   res.on("close", () => ac.abort());
+  const heartbeat = startSseHeartbeat(res);
 
   void (async () => {
     try {
@@ -1224,6 +1225,7 @@ function streamExternalRun(runId: string, store: LiveRunStore, res: ServerRespon
         );
       }
     } finally {
+      clearInterval(heartbeat);
       try {
         if (!res.writableEnded) res.end();
       } catch {
@@ -1231,6 +1233,26 @@ function streamExternalRun(runId: string, store: LiveRunStore, res: ServerRespon
       }
     }
   })();
+}
+
+/**
+ * Periodic SSE comment frames so proxies/load balancers with idle timeouts
+ * don't silently sever a long-quiet stream (a run parked on an approval can
+ * be idle for minutes). Returns the timer; callers clear it on stream end.
+ */
+function startSseHeartbeat(
+  res: ServerResponse,
+  intervalMs = 25_000,
+): ReturnType<typeof setInterval> {
+  const timer = setInterval(() => {
+    try {
+      if (!res.writableEnded) res.write(": heartbeat\n\n");
+    } catch {
+      clearInterval(timer);
+    }
+  }, intervalMs);
+  timer.unref?.();
+  return timer;
 }
 
 function streamRun(runId: string, runs: WorkflowRunManager, res: ServerResponse): void {
@@ -1243,9 +1265,13 @@ function streamRun(runId: string, runs: WorkflowRunManager, res: ServerResponse)
   // A first comment line opens the stream promptly for the browser.
   res.write(": open\n\n");
 
+  const heartbeat = startSseHeartbeat(res);
   const write = (payload: string, terminal: boolean): void => {
     res.write(`data: ${payload}\n\n`);
-    if (terminal) res.end();
+    if (terminal) {
+      clearInterval(heartbeat);
+      res.end();
+    }
   };
 
   const unsubscribe = runs.subscribe(runId, write);
@@ -1253,10 +1279,14 @@ function streamRun(runId: string, runs: WorkflowRunManager, res: ServerResponse)
     res.write(
       `data: ${JSON.stringify({ type: "status", status: "error", error: "unknown run" })}\n\n`,
     );
+    clearInterval(heartbeat);
     res.end();
     return;
   }
-  res.on("close", () => unsubscribe());
+  res.on("close", () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
 }
 
 export interface StartWebUiOptions {

@@ -203,6 +203,35 @@ describe("live-run store", () => {
     expect(await store.get("done")).toBeUndefined();
   });
 
+  it("update() on a nonexistent run returns undefined without creating anything", async () => {
+    const store = createLiveRunStore(tempDir());
+    expect(await store.update("missing", { status: "running" })).toBeUndefined();
+    expect(await store.get("missing")).toBeUndefined();
+  });
+
+  it("remove() deletes a run dir and tolerates missing runs", async () => {
+    const store = createLiveRunStore(tempDir());
+    await store.create(meta("gone"));
+    await store.remove("gone");
+    expect(await store.get("gone")).toBeUndefined();
+    await store.remove("gone"); // idempotent
+  });
+
+  it("appendEventLines on a nonexistent run throws (owners create first)", async () => {
+    const store = createLiveRunStore(tempDir());
+    await expect(store.appendEventLines("missing", "{}\n")).rejects.toThrow();
+  });
+
+  it("tailEvents returns immediately when the signal is already aborted", async () => {
+    const store = createLiveRunStore(tempDir());
+    await store.create(meta("run", { status: "running", pid: process.pid }));
+    await store.appendEventLines("run", `${JSON.stringify(stepStart("s1"))}\n`);
+    const ac = new AbortController();
+    ac.abort();
+    const seen = await collect(store.tailEvents("run", { signal: ac.signal, pollMs: 5 }));
+    expect(seen).toEqual([]);
+  });
+
   it("sanitizes hostile run ids away from path traversal", async () => {
     const root = tempDir();
     const store = createLiveRunStore(root);

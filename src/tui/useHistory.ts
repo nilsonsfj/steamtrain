@@ -135,15 +135,17 @@ export function useHistory({
         setWfNotice(plan.error);
         return;
       }
-      setHistory(null);
       if (plan.downgraded) {
         setWfNotice(rerunDowngradeMessage(plan.downgraded));
       }
-      runWorkflow(plan.workflow, plan.input, {
+      const started = runWorkflow(plan.workflow, plan.input, {
         fresh: mode === "rerun" || Boolean(plan.downgraded),
         seed: plan.seedCache,
         params: plan.params,
       });
+      // Only leave the history browser once the run actually launched; a
+      // refused launch (re-entrancy guard, unknown workflow) keeps the view.
+      if (started) setHistory(null);
     },
     [resolveWorkflowSpec, runWorkflow, setWfNotice],
   );

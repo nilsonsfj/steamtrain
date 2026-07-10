@@ -950,7 +950,7 @@ export async function runApproveCommand(
     const arg = args[i];
     if (arg === "--step") {
       stepId = args[++i];
-      if (!stepId) {
+      if (!stepId || stepId.startsWith("--")) {
         err(usage);
         return 1;
       }

@@ -86,7 +86,7 @@ import { workflowListNavigation } from "./prompt-editing";
 import { initialPromptHistoryBrowse } from "./prompt-history";
 import { initialTranscript, transcriptReducer } from "./transcript";
 import { useTerminalSize } from "./useTerminalSize";
-import { computeStreamHeight } from "./util";
+import { computeStreamHeight, message } from "./util";
 import { flattenSteps } from "./workflow-state";
 
 // Custom hooks — each owns a cohesive slice of state.
@@ -1468,10 +1468,6 @@ function historyHintText(history: HistoryUiState): string {
     return `↑/↓ step · → details · r re-run${retryHint} · ←/Esc back to list · Ctrl+C quit`;
   }
   return "↑/↓ select · Enter inspect · Esc close · Ctrl+C quit";
-}
-
-function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 /**
