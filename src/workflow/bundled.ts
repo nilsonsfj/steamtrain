@@ -263,8 +263,9 @@ const reviewLoop: WorkflowSpec = {
           agent: "opencode",
           model: FREE.mimo,
           dependsOn: ["impl"],
+          workspace: "inherit:impl",
           prompt:
-            "Review the current implementation for issues (iteration {{iteration}}). If there are NO remaining issues, reply with the single word DONE. Otherwise list the issues.\n{{steps.impl.output}}",
+            "Review ONLY the changes you can see in this worktree (diff from the base commit). Ignore pre-existing code — focus on issues in the new/changed code. If there are NO issues, reply with the single word DONE. Otherwise list each issue with file:line and a short description.",
         },
       ],
     },
@@ -278,8 +279,9 @@ const reviewLoop: WorkflowSpec = {
           agent: "opencode",
           model: FREE.mimo,
           dependsOn: ["review"],
+          workspace: "inherit:review",
           prompt:
-            "Apply fixes for these review findings, then summarize what changed:\n{{steps.review.output}}",
+            "Fix every issue listed below. Apply the minimal fix for each — don't refactor unrelated code. Summarize what you changed.\n{{steps.review.output}}",
         },
       ],
     },
@@ -300,6 +302,23 @@ const reviewLoop: WorkflowSpec = {
           loopTo: "review",
           maxIterations: 5,
           onFalse: "continue",
+        },
+      ],
+    },
+    {
+      id: "merge",
+      title: "Merge",
+      steps: [
+        {
+          // `from` must point to the TAIL of the inheritance chain only.
+          // fix inherits review which inherits impl, so fix's worktree
+          // already contains the full chain. Including impl would cause
+          // overlapping git merges and content conflicts.
+          id: "merge",
+          kind: "merge",
+          dependsOn: ["loop-gate"],
+          from: ["fix"],
+          mode: "apply",
         },
       ],
     },
