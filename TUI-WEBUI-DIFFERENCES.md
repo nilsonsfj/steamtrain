@@ -14,6 +14,9 @@ Last updated: 2026-06-16 (after the first unification pass in
 Updated 2026-06-28: web client code + reducer bundle now live as real files
 under `src/web/public/` and are served at `/static/*` (no longer embedded in
 `src/web/html.ts`).
+Updated 2026-07-10: the TUI gained an in-place step editor (Ctrl+E in the
+workflow preview → `WorkflowStepEditor`) for agent/model/effort/prompt, on top
+of the existing slash commands.
 
 ---
 

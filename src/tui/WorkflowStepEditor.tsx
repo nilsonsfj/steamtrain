@@ -91,7 +91,7 @@ export function WorkflowStepEditor({
         if (next !== working.agent) apply(agentChangePatch(working, next, config));
       } else if (field === "model") {
         if (!working.agent) return;
-        const opts = modelIds(working.agent, config);
+        const opts = modelIdsForAgent(working.agent, config);
         if (opts.length === 0 || !working.model) return;
         const next = cycleOption(opts, working.model, dir);
         if (next !== working.model) apply(modelChangePatch(working, next, config));
@@ -219,10 +219,6 @@ export function WorkflowStepEditor({
       </Box>
     </Box>
   );
-}
-
-function modelIds(agent: string, config: SteamtrainConfig): string[] {
-  return [...modelIdsForAgent(agent, config)];
 }
 
 function modelLabel(
