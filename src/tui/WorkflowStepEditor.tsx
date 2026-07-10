@@ -113,7 +113,7 @@ export function WorkflowStepEditor({
         return;
       }
       if (key.backspace || key.delete) {
-        apply({ prompt: working.prompt.slice(0, -1) });
+        if (working.prompt.length > 0) apply({ prompt: working.prompt.slice(0, -1) });
         return;
       }
       if (input && !key.ctrl && !key.meta) {
