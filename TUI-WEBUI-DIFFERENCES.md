@@ -14,6 +14,9 @@ Last updated: 2026-06-16 (after the first unification pass in
 Updated 2026-06-28: web client code + reducer bundle now live as real files
 under `src/web/public/` and are served at `/static/*` (no longer embedded in
 `src/web/html.ts`).
+Updated 2026-07-10: the TUI gained an in-place step editor (Ctrl+E in the
+workflow preview → `WorkflowStepEditor`) for agent/model/effort/prompt, on top
+of the existing slash commands.
 
 ---
 
@@ -65,10 +68,11 @@ These two reducers are near-duplicates and are a prime extraction target (see §
 | Resume from on-disk cache | ✅ | ✅ | |
 | Create workflow via LLM draft | ✅ | ✅ | Different draft-target selection (below) |
 | Choose drafting agent/model | ✅ | ✅ | TUI: `/model` + `/effort` on the picker sets a session draft override; Web: per-draft agent/model/effort selects in the create modal |
-| Per-step **agent** override | ✅ | ✅ | |
-| Per-step **model** override | ✅ | ✅ | |
-| Per-step **effort** override | ✅ | ✅ | |
-| Per-step **prompt** editing | ✅ | ✅ | TUI `/prompt <text>`; Web modal |
+| Per-step **agent** override | ✅ | ✅ | TUI: `/agent` **or** the in-place step editor (Ctrl+E in preview, ←/→ to cycle); Web modal |
+| Per-step **model** override | ✅ | ✅ | TUI: `/model` **or** step editor (Ctrl+E); Web modal |
+| Per-step **effort** override | ✅ | ✅ | TUI: `/effort` **or** step editor (Ctrl+E); Web modal |
+| Per-step **prompt** editing | ✅ | ✅ | TUI: `/prompt <text>` **or** step editor (Ctrl+E → Enter on the prompt field); Web modal |
+| In-place step editor | ✅ | ✅ | TUI: Ctrl+E on a selected preview step opens `WorkflowStepEditor` (↑/↓ field · ←/→ change agent/model/effort · Enter edit prompt); stages the same session overrides as the slash commands. Web: per-step configure modal |
 | Edit workflow **name** | ✅ | ✅ | TUI `/rename-workflow <old> <new>`; Web modal |
 | Edit workflow **description** | ✅ | ✅ | TUI `/describe-workflow <name> <desc>`; Web modal |
 | Clone / duplicate a workflow | ✅ | ✅ | Both via `WorkflowAuthor.clone`; TUI `/clone-workflow [--project] <new-name>` |

@@ -77,6 +77,7 @@ import { WorkflowInputForm } from "./WorkflowInputForm";
 import { WorkflowPicker } from "./WorkflowPicker";
 import { WorkflowPreview } from "./WorkflowPreview";
 import { WorkflowStepDetails } from "./WorkflowStepDetails";
+import { WorkflowStepEditor } from "./WorkflowStepEditor";
 import { WorkflowView } from "./WorkflowView";
 import { Banner } from "./banner";
 import { createWorkflowPromptValue } from "./create-workflow-prompt";
@@ -88,6 +89,7 @@ import { initialTranscript, transcriptReducer } from "./transcript";
 import { useTerminalSize } from "./useTerminalSize";
 import { computeStreamHeight, message } from "./util";
 import { flattenSteps } from "./workflow-state";
+import { type StepEditorTarget, stepEditorTarget } from "./workflow-step-editor";
 
 // Custom hooks — each owns a cohesive slice of state.
 import { type HistoryUiState, useHistory } from "./useHistory";
@@ -174,6 +176,7 @@ export function App({
   }>({ userApis, projectApis });
   const [agentManagerOpen, setAgentManagerOpen] = useState(false);
   const [apiManagerOpen, setApiManagerOpen] = useState(false);
+  const [stepEditorOpen, setStepEditorOpen] = useState(false);
   const [apiDoctor, setApiDoctor] = useState<ApiDoctorResult[] | null>(null);
   const [runtimeConfigSource, setRuntimeConfigSource] = useState(configSource);
   const [activeWorkspaceLabel, setActiveWorkspaceLabel] = useState(workspaceLabel);
@@ -521,6 +524,36 @@ export function App({
       stepTimeoutSec: step.stepTimeoutSec,
     };
   }, [picker.wfPreview, previewSelectedStep]);
+
+  // The step currently editable in place (Ctrl+E). Agent-backed steps expose
+  // agent/model/effort/prompt; llm steps expose the prompt. Undefined when the
+  // selected step (or block kind) has nothing editable.
+  const editorTarget = useMemo<StepEditorTarget | undefined>(() => {
+    if (!picker.wfPreview || !previewSelectedStep) return undefined;
+    return stepEditorTarget(picker.wfPreview.name, previewSelectedStep.step);
+  }, [picker.wfPreview, previewSelectedStep]);
+
+  const openStepEditor = useCallback(() => {
+    if (runner.running || mode !== "workflow") return;
+    if (!editorTarget) {
+      runner.setWfNotice("select an agent-backed or llm step to edit (↑/↓), then Ctrl+E");
+      return;
+    }
+    setStepEditorOpen(true);
+  }, [runner.running, runner.setWfNotice, mode, editorTarget]);
+
+  const applyStepEdit = useCallback(
+    (patch: Parameters<typeof picker.patchWorkflowStep>[1]) => {
+      if (editorTarget) picker.patchWorkflowStep(editorTarget.stepId, patch);
+    },
+    [editorTarget, picker.patchWorkflowStep],
+  );
+
+  // Close the editor whenever its target disappears (left preview, switched
+  // workflow, or a running launch tore the preview down).
+  useEffect(() => {
+    if (stepEditorOpen && !editorTarget) setStepEditorOpen(false);
+  }, [stepEditorOpen, editorTarget]);
 
   // ── History hook ─────────────────────────────────────────────────────
   const historyHook = useHistory({
@@ -1163,6 +1196,7 @@ export function App({
     workflowPickerActive,
     agentManagerOpen,
     apiManagerOpen,
+    stepEditorOpen,
     inputFormPending: inputFormPending !== null,
     openAgentManager: () => {
       openAgentManager();
@@ -1248,6 +1282,15 @@ export function App({
           onAdd={handleApiAdd}
           onDelete={handleApiDelete}
           onClose={() => setApiManagerOpen(false)}
+        />
+      ) : stepEditorOpen && editorTarget ? (
+        <WorkflowStepEditor
+          target={editorTarget}
+          config={runtimeConfig}
+          width={columns}
+          height={streamHeight}
+          onApply={applyStepEdit}
+          onClose={() => setStepEditorOpen(false)}
         />
       ) : inputFormPending ? (
         (() => {
@@ -1377,14 +1420,24 @@ export function App({
           onTab={prompt.handleTab}
           onCtrlR={mode === "workflow" && !runner.running ? handleWorkflowFreshRun : undefined}
           onCtrlD={mode === "workflow" && !runner.running ? handlePlan : undefined}
+          onCtrlE={
+            mode === "workflow" && !runner.running && picker.wfPreview ? openStepEditor : undefined
+          }
           onCtrlQ={mode === "workflow" && runner.running ? runner.handleWorkflowCancel : undefined}
           onSuggestionNavigate={prompt.handleSuggestionNavigate}
           onHistoryNavigate={prompt.promptHistoryArrows ? prompt.handleHistoryNavigate : undefined}
-          focus={!historyHook.history && !agentManagerOpen && !apiManagerOpen && !inputFormPending}
+          focus={
+            !historyHook.history &&
+            !agentManagerOpen &&
+            !apiManagerOpen &&
+            !stepEditorOpen &&
+            !inputFormPending
+          }
           editing={
             !historyHook.history &&
             !agentManagerOpen &&
             !apiManagerOpen &&
+            !stepEditorOpen &&
             !inputFormPending &&
             (!workflowListNavigation(mode) || prompt.promptEditing)
           }
@@ -1400,21 +1453,23 @@ export function App({
               ? "agent manager · ↑/↓ select · Enter/Space toggle · a add · d delete · Esc close · Ctrl+C quit"
               : apiManagerOpen
                 ? "api manager · ↑/↓ select · Enter/Space toggle · a add · d delete · Esc close · Ctrl+C quit"
-                : historyHook.history
-                  ? historyHintText(historyHook.history)
-                  : hint(
-                      mode,
-                      runner.wf.started,
-                      runner.wfLaunching,
-                      !!picker.wfPreview,
-                      runner.running,
-                      prompt.suggestionMenuOpen,
-                      runner.wfCanResume,
-                      prompt.promptEditing,
-                      isSlashCommandInput(prompt.value),
-                      !!runner.wfStepDetails,
-                      attachedRun,
-                    )}
+                : stepEditorOpen
+                  ? "step editor · ↑/↓ field · ←/→ change · Enter edit prompt · Esc close · Ctrl+C quit"
+                  : historyHook.history
+                    ? historyHintText(historyHook.history)
+                    : hint(
+                        mode,
+                        runner.wf.started,
+                        runner.wfLaunching,
+                        !!picker.wfPreview,
+                        runner.running,
+                        prompt.suggestionMenuOpen,
+                        runner.wfCanResume,
+                        prompt.promptEditing,
+                        isSlashCommandInput(prompt.value),
+                        !!runner.wfStepDetails,
+                        attachedRun,
+                      )}
           </Text>
         </Box>
       </Box>
@@ -1452,7 +1507,7 @@ function hint(
   }
   if (mode === "workflow") {
     if (wfStepDetails) {
-      return `↑/↓ step · ←/Esc back${resumeHint} · Ctrl+R run · type to edit · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step · ←/Esc back${resumeHint} · Ctrl+E edit · Ctrl+R run · type to edit · /commands · Ctrl+C quit${completeHint}`;
     }
     if (promptEditing) {
       const tabHint = slashInput ? " · Esc unfocus" : " · Esc list";
@@ -1464,7 +1519,7 @@ function hint(
       return `↑/↓ step · Enter details · type to edit · Ctrl+R run · Ctrl+Q cancel · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
     }
     if (wfPreviewing) {
-      return `↑/↓ step · Enter details${resumeHint} · type to edit · Ctrl+R run · Esc back · Tab detail · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step · Enter details${resumeHint} · Ctrl+E edit step · Ctrl+R run · Esc back · Tab detail · /commands · Ctrl+C quit${completeHint}`;
     }
     return `↑/↓ pick · Ctrl+N new · type to edit · Enter preview · Ctrl+R run · Ctrl+J history · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
   }

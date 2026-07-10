@@ -10,6 +10,8 @@ interface PromptInputProps {
   onCtrlR?: () => void;
   /** Ctrl+D handler — plan/dry-run the current workflow. */
   onCtrlD?: () => void;
+  /** Ctrl+E handler — open the in-place step editor for the selected step. */
+  onCtrlE?: () => void;
   onCtrlQ?: () => void;
   onSuggestionNavigate?: (direction: "up" | "down") => void;
   onHistoryNavigate?: (direction: "up" | "down") => boolean;
@@ -42,6 +44,7 @@ export function PromptInput({
   onTab,
   onCtrlR,
   onCtrlD,
+  onCtrlE,
   onCtrlQ,
   onSuggestionNavigate,
   onHistoryNavigate,
@@ -90,6 +93,17 @@ export function PromptInput({
       }
     },
     { isActive: focus && !!onCtrlD && !running },
+  );
+
+  useInput(
+    (input, key) => {
+      if (key.ctrl && input === "e" && onCtrlE) {
+        swallowNextCharRef.current = true;
+        swallowLetterRef.current = "e";
+        onCtrlE();
+      }
+    },
+    { isActive: focus && !!onCtrlE && !running },
   );
 
   useInput(
