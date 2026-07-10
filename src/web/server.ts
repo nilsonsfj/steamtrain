@@ -1267,10 +1267,15 @@ function streamRun(runId: string, runs: WorkflowRunManager, res: ServerResponse)
 
   const heartbeat = startSseHeartbeat(res);
   const write = (payload: string, terminal: boolean): void => {
-    res.write(`data: ${payload}\n\n`);
-    if (terminal) {
+    try {
+      res.write(`data: ${payload}\n\n`);
+      if (terminal) {
+        clearInterval(heartbeat);
+        res.end();
+      }
+    } catch {
+      // Socket destroyed mid-write; the 'close' handler unsubscribes.
       clearInterval(heartbeat);
-      res.end();
     }
   };
 

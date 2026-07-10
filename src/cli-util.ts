@@ -15,9 +15,10 @@ const MAX_READ_BYTES = 10 * 1024 * 1024;
 
 export function readAll(stream: Readable): Promise<string> {
   return new Promise((resolve, reject) => {
-    // A stream that already ended will never emit 'end' again — resolve
-    // immediately instead of hanging forever on listeners that can't fire.
-    if (stream.readableEnded) {
+    // A stream that already ended (or was destroyed) will never emit
+    // 'end'/'error' again — resolve immediately instead of hanging forever on
+    // listeners that can't fire.
+    if (stream.readableEnded || stream.destroyed) {
       resolve("");
       return;
     }
