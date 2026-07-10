@@ -1398,7 +1398,7 @@ function hint(
       return `↑/↓ step · Enter details · type to edit · Ctrl+R run · Ctrl+Q cancel · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
     }
     if (wfPreviewing) {
-      return `↑/↓ step · Enter details${resumeHint} · type to edit · Ctrl+R run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step · Enter details${resumeHint} · type to edit · Ctrl+R run · Esc back · Tab detail · /commands · Ctrl+C quit${completeHint}`;
     }
     return `↑/↓ pick · Ctrl+N new · type to edit · Enter preview · Ctrl+R run · Ctrl+J history · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
   }
