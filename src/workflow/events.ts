@@ -69,6 +69,25 @@ export interface StepStartEvent extends IterationTagged {
 }
 
 /**
+ * A worker/processor/command step's workspace has been allocated and its
+ * process is about to launch. Carries the directory the step actually runs in
+ * and, when the run is inside a git repository, the isolated worktree's
+ * metadata — so live views can show *where* a step is working while it works,
+ * instead of only learning the worktree from the final {@link StepDoneEvent}
+ * result. Emitted between the step's `step_start` and its first `step_event`.
+ */
+export interface StepWorkspaceEvent extends IterationTagged {
+  kind: "step_workspace";
+  phaseId: string;
+  stepId: string;
+  /** Directory the step's subprocess runs in (the worktree cwd when isolated). */
+  cwd: string;
+  /** Isolated git worktree metadata, when the step runs in one. */
+  worktree?: AgentWorktreeInfo;
+  ts: number;
+}
+
+/**
  * A dynamic `forEach` step has resolved its work items and is about to dispatch
  * `count` child runs. Emitted *before* the children's `step_start`s so consumers
  * know the true fan-out cardinality up front — otherwise a run canceled
@@ -228,6 +247,7 @@ export type WorkflowEvent =
   | WorkflowStartEvent
   | PhaseStartEvent
   | StepStartEvent
+  | StepWorkspaceEvent
   | FanOutEvent
   | StepStreamEvent
   | StepRetryEvent

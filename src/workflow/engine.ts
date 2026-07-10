@@ -1443,6 +1443,7 @@ async function executeAgentStep(
       durationMs: Date.now() - workspaceStarted,
     };
   }
+  pushWorkspaceEvent(hooks, ctx, stepId, workspace, stepCwd);
   // Auto-retry is scoped to worker/processor steps (and their fan-out children).
   // Agent-backed distributors/consolidators run exactly once.
   const kind = workflowStepKind(step);
@@ -1598,13 +1599,13 @@ async function enforceStructuredOutput(
   };
 }
 
-function attachWorktreeInfo(
-  result: StepResult,
+/** The lease's worktree metadata, or undefined when the step runs in the plain cwd. */
+function worktreeInfoFromLease(
   workspace: AgentWorkspaceLease,
   originalCwd: string,
-): StepResult {
-  if (!workspace.root || !workspace.branch) return result;
-  const worktree: AgentWorktreeInfo = {
+): AgentWorktreeInfo | undefined {
+  if (!workspace.root || !workspace.branch) return undefined;
+  return {
     originalCwd,
     cwd: workspace.cwd,
     root: workspace.root,
@@ -1612,7 +1613,38 @@ function attachWorktreeInfo(
     baseCommit: workspace.baseCommit,
     linkedIgnoredPaths: workspace.linkedIgnoredPaths,
   };
-  return { ...result, worktree };
+}
+
+function attachWorktreeInfo(
+  result: StepResult,
+  workspace: AgentWorkspaceLease,
+  originalCwd: string,
+): StepResult {
+  const worktree = worktreeInfoFromLease(workspace, originalCwd);
+  return worktree ? { ...result, worktree } : result;
+}
+
+/**
+ * Announce a just-allocated workspace on the event stream (`step_workspace`),
+ * so live views can show the directory/worktree a step is working in while it
+ * runs — the same metadata otherwise only lands on the final result.
+ */
+function pushWorkspaceEvent(
+  hooks: ExecuteHooks,
+  ctx: ExecuteContext,
+  stepId: string,
+  workspace: AgentWorkspaceLease,
+  originalCwd: string,
+): void {
+  hooks.pushWorkflowEvent({
+    kind: "step_workspace",
+    phaseId: hooks.phaseId,
+    stepId,
+    cwd: workspace.cwd,
+    worktree: worktreeInfoFromLease(workspace, originalCwd),
+    iteration: ctx.iteration,
+    ts: Date.now(),
+  });
 }
 
 async function allocateAgentWorkspace(
@@ -1960,6 +1992,7 @@ async function executeCommandStep(
       durationMs: Date.now() - started,
     };
   }
+  pushWorkspaceEvent(hooks, ctx, step.id, workspace, stepCwd);
 
   try {
     const timeoutSec = resolveStepTimeoutSec(
@@ -2519,6 +2552,7 @@ async function executeWorkflowStep(
       case "step_event":
       case "step_retry":
       case "gate_evaluated":
+      case "step_workspace":
         hooks.pushWorkflowEvent({
           ...event,
           phaseId: namespace(event.phaseId),

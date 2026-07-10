@@ -213,6 +213,39 @@ describe("RunRecordBuilder", () => {
     expect(phase.ok).toBe(false);
   });
 
+  it("records the live workspace from step_workspace (a canceled step keeps its worktree)", () => {
+    const builder = new RunRecordBuilder({ id: "r", workflow: "w", input: "", cwd: "/repo" });
+    const worktree = {
+      originalCwd: "/repo",
+      cwd: "/wt/a",
+      root: "/wt/a",
+      branch: "steamtrain/r/a",
+    };
+    builder.handle({ kind: "workflow_start", name: "w", phaseCount: 1, stepCount: 1, ts: 0 });
+    builder.handle({
+      kind: "phase_start",
+      phaseId: "p1",
+      title: "P1",
+      index: 0,
+      stepCount: 1,
+      ts: 0,
+    });
+    builder.handle({ kind: "step_start", phaseId: "p1", stepId: "a", agent: "claude", ts: 0 });
+    builder.handle({
+      kind: "step_workspace",
+      phaseId: "p1",
+      stepId: "a",
+      cwd: "/wt/a",
+      worktree,
+      ts: 1,
+    });
+    // No step_done — the run was canceled mid-step.
+    const record = builder.build({ status: "canceled" });
+    const step = record.phases[0]!.steps[0]!;
+    expect(step.cwd).toBe("/wt/a");
+    expect(step.worktree).toEqual(worktree);
+  });
+
   it("records scheduled-but-unstarted steps as not-run placeholders", () => {
     const builder = new RunRecordBuilder({ id: "r", workflow: "wf", input: "i", cwd: tmpdir() });
     builder.handle({ kind: "workflow_start", name: "wf", phaseCount: 1, stepCount: 3, ts: 1 });

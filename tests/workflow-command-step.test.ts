@@ -285,6 +285,11 @@ describe("command workflow step", () => {
     expect((await readFile(join(worktreeRoot, "artifact.txt"), "utf8")).trim()).toBe("generated");
     await expect(readFile(join(repo, "artifact.txt"))).rejects.toThrow();
     expect(await git(repo, "status", "--porcelain")).toBe("");
+    // The worktree was announced live too (step_workspace), not just recorded
+    // on the final result.
+    const ws = events.find((ev) => ev.kind === "step_workspace");
+    expect(ws?.kind === "step_workspace" && ws.stepId).toBe("write");
+    expect(ws?.kind === "step_workspace" && ws.worktree?.root).toBe(worktreeRoot);
   });
 
   it("is skipped by a false when condition without running", async () => {

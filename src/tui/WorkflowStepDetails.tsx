@@ -1,13 +1,22 @@
 import { basename } from "node:path";
 import { Box, Text } from "ink";
+import { useEffect, useMemo } from "react";
 import { truncate } from "../agents/util";
 import {
   type WorkflowSourceKind,
   type WorkflowSpec,
+  formatElapsed,
   formatTokenSummary,
+  formatUsd,
   isAgentBackedStep,
   workflowStepKind,
 } from "../workflow";
+import {
+  type OutputScroll,
+  selectOutputWindow,
+  staticOutputScroll,
+  wrapOutputLines,
+} from "./output-window";
 import { statusWord } from "./status-word";
 import { AGENT_COLOR, WORKFLOW_SOURCE_COLOR } from "./theme";
 import {
@@ -49,6 +58,18 @@ interface LiveStepDetailsProps {
   selectedIndex: number;
   totalSteps: number;
   elapsedMs: number;
+  /**
+   * Current wall clock for live per-step timers; omit (0) for replayed records,
+   * where running-step elapsed would be meaningless.
+   */
+  now?: number;
+  /** Output-pane scroll state; defaults to a static top-anchored view. */
+  scroll?: OutputScroll;
+  /**
+   * Reports the output pane's wrapped-line total and visible budget after each
+   * render, so the keyboard handler can clamp scroll motions.
+   */
+  onOutputMetrics?: (metrics: { total: number; budget: number }) => void;
 }
 
 type WorkflowStepDetailsProps = PreviewStepDetailsProps | LiveStepDetailsProps;
@@ -113,6 +134,13 @@ function PreviewStepDetails({
   );
 }
 
+/**
+ * Live drill-in: a compact metadata header (status, runner, worktree, timing,
+ * cost) above a scrollable pane showing the step's FULL output. The pane
+ * follows the stream while the step runs; PgUp/PgDn (handled by the keyboard
+ * layer via `onOutputMetrics`) move the window and re-engage follow at the
+ * bottom.
+ */
 function LiveStepDetails({
   state,
   entry,
@@ -120,15 +148,29 @@ function LiveStepDetails({
   selectedIndex,
   totalSteps,
   elapsedMs,
+  now = 0,
+  scroll = staticOutputScroll,
+  onOutputMetrics,
   innerWidth,
 }: LiveStepDetailsProps & { innerWidth: number }) {
-  const lineBudget = Math.max(4, height - 6);
-  const lines = entry
-    ? liveLines(entry.phase, entry.step, innerWidth)
-    : [{ text: "Waiting for the first workflow step to start.", color: "gray" }];
-  const visible = lines.slice(0, lineBudget);
-  const hidden = Math.max(0, lines.length - visible.length);
+  const step = entry?.step;
+  const meta = entry ? liveMetaLines(entry.phase, entry.step, now, innerWidth) : [];
+  const body = step ? (step.result?.output ?? step.text).trim() : "";
+  const outputLines = useMemo(() => wrapOutputLines(body, innerWidth), [body, innerWidth]);
+  // Chrome around the output pane: borders (2), title (1), key hints (1),
+  // metadata lines, output header (1).
+  const budget = Math.max(3, height - 5 - meta.length);
+  const window = selectOutputWindow(outputLines, scroll, budget);
+  useEffect(() => {
+    onOutputMetrics?.({ total: outputLines.length, budget });
+  }, [onOutputMetrics, outputLines.length, budget]);
+
   const status = state.done ? (state.ok ? "done" : "failed") : "running";
+  const stepRunning = step?.status === "running";
+  const position = body
+    ? `lines ${window.start + 1}–${window.end}/${window.total}`
+    : "waiting for output";
+  const followBadge = stepRunning ? (scroll.follow ? " · following" : " · paused ↥") : "";
 
   return (
     <Box
@@ -144,28 +186,46 @@ function LiveStepDetails({
         </Text>
         <Text color="gray">
           {Math.min(selectedIndex + 1, Math.max(1, totalSteps))}/{Math.max(1, totalSteps)} ·{" "}
-          {(elapsedMs / 1000).toFixed(1)}s · {status}
+          {formatElapsed(elapsedMs)} · {status}
         </Text>
       </Box>
       <Text color="gray" wrap="truncate-end">
-        ←/Esc back · ↑/↓ step{state.done ? " · Enter resume · Ctrl+R run" : " · Ctrl+Q cancel"}
+        ←/Esc back · ↑/↓ step · PgUp/PgDn scroll output
+        {state.done ? " · Enter resume · Ctrl+R run" : " · Ctrl+Q cancel"}
       </Text>
-      <Box flexDirection="column" marginTop={1}>
-        {visible.map((line, index) => (
-          <Text
-            key={`${line.text}-${index}`}
-            color={line.color ?? "white"}
-            wrap={line.text.length > innerWidth ? "wrap" : "truncate-end"}
-          >
+      {entry ? (
+        meta.map((line, index) => (
+          <Text key={`${line.text}-${index}`} color={line.color ?? "white"} wrap="truncate-end">
             {line.text}
           </Text>
-        ))}
-        {hidden > 0 ? (
-          <Text color="gray">
-            … {hidden} more detail line{hidden === 1 ? "" : "s"}
+        ))
+      ) : (
+        <Text color="gray">Waiting for the first workflow step to start.</Text>
+      )}
+      {entry ? (
+        <>
+          <Text color="gray" wrap="truncate-end">
+            {`── output · ${position}${followBadge} ${"─".repeat(Math.max(0, innerWidth - position.length - followBadge.length - 12))}`}
           </Text>
-        ) : null}
-      </Box>
+          <Box flexDirection="column" flexGrow={1}>
+            {body ? (
+              window.visible.map((line, index) => (
+                <Text
+                  key={`${window.start + index}-${line.slice(0, 16)}`}
+                  color={step?.status === "error" ? "red" : undefined}
+                  wrap="truncate-end"
+                >
+                  {line.length > 0 ? line : " "}
+                </Text>
+              ))
+            ) : (
+              <Text color="gray">
+                {step ? step.activity || statusWord(step.status) : "no output yet"}
+              </Text>
+            )}
+          </Box>
+        </>
+      ) : null}
     </Box>
   );
 }
@@ -231,28 +291,64 @@ function previewLines(
   return lines;
 }
 
-function liveLines(phase: PhaseState, step: StepState, width: number): DetailLine[] {
+/**
+ * The metadata header above the output pane: identity, status, runner,
+ * workspace/worktree, live timing, cost/tokens, data flow — one row each, so
+ * the remaining height goes to the output itself.
+ */
+function liveMetaLines(
+  phase: PhaseState,
+  step: StepState,
+  now: number,
+  width: number,
+): DetailLine[] {
   const runner =
     step.agent && step.model
       ? formatWorkflowAgentTarget({ agent: step.agent, model: step.model, effort: step.effort })
       : step.blockKind === "llm" && (step.api || step.model)
         ? [step.api, step.model].filter(Boolean).join("/")
         : BLOCK_LABEL[step.blockKind];
+  const attempts = step.result?.attempts ?? step.attempts;
+  const statusBits = [
+    step.status,
+    step.cached ? "cached" : undefined,
+    step.result?.skipped ? "skipped" : undefined,
+    attempts && attempts > 1 ? `${attempts} tries` : undefined,
+  ].filter(Boolean);
+  const iter = phase.iteration && phase.iteration > 1 ? ` · iter ${phase.iteration}` : "";
   const lines: DetailLine[] = [
-    { text: `step: ${step.stepId}`, color: "cyan" },
-    { text: `phase: ${phase.title} (${phase.phaseId})`, color: "gray" },
-    { text: `block: ${BLOCK_LABEL[step.blockKind]} (${step.blockKind})`, color: "magenta" },
     {
-      text: `status: ${step.status}${step.cached ? " · cached" : ""}`,
+      text: `step: ${step.stepId} · ${BLOCK_LABEL[step.blockKind]} · ${statusBits.join(" · ")}`,
       color: statusColor(step.status),
     },
+    { text: `phase: ${phase.title} (${phase.phaseId})${iter}`, color: "gray" },
     {
       text: `runner: ${runner}`,
       color: step.agent ? (AGENT_COLOR[step.agent] ?? "white") : "gray",
     },
   ];
 
-  if (step.cwd) lines.push({ text: `cwd: ${step.cwd} (${basename(step.cwd)})`, color: "gray" });
+  if (step.worktree) {
+    lines.push({
+      text: `worktree: ⎇ ${step.worktree.branch} · ${step.worktree.cwd}`,
+      color: "yellow",
+    });
+  } else if (step.cwd) {
+    lines.push({ text: `cwd: ${step.cwd} (${basename(step.cwd)})`, color: "gray" });
+  }
+
+  const timing = timingLine(step, now);
+  if (timing) lines.push({ text: timing, color: "gray" });
+
+  const spend = [
+    step.result?.costUsd ? `cost ${formatUsd(step.result.costUsd)}` : undefined,
+    formatTokenSummary(step.result?.tokens) || undefined,
+  ].filter(Boolean);
+  if (spend.length > 0) lines.push({ text: spend.join(" · "), color: "gray" });
+
+  if (step.dependsOn && step.dependsOn.length > 0) {
+    lines.push({ text: `inputs: ${step.dependsOn.join(", ")}`, color: "gray" });
+  }
   if (step.item) {
     lines.push({
       text: `item: ${step.item.index} from ${step.item.sourceStepId} - ${truncate(step.item.value, Math.max(24, width - 18))}`,
@@ -260,47 +356,39 @@ function liveLines(phase: PhaseState, step: StepState, width: number): DetailLin
     });
   }
   if (step.gate) {
-    const gateState = step.gate.passed ? "passed" : "blocked";
     lines.push({
-      text: `gate: ${gateState}${step.gate.target ? ` -> ${step.gate.target}` : ""}${
+      text: `gate: ${step.gate.passed ? "passed" : "blocked"}${step.gate.target ? ` -> ${step.gate.target}` : ""}${
         step.gate.onFalse ? ` · onFalse=${step.gate.onFalse}` : ""
       }`,
       color: step.gate.passed ? "green" : "yellow",
     });
   }
-  if (step.result) {
-    lines.push({
-      text: `result: ${step.result.ok ? "ok" : "error"} · ${(step.result.durationMs / 1000).toFixed(1)}s${
-        step.result.costUsd ? ` · $${step.result.costUsd.toFixed(4)}` : ""
-      }`,
-      color: step.result.ok ? "green" : "red",
-    });
-    const tokenLine = formatTokenSummary(step.result.tokens);
-    if (tokenLine) lines.push({ text: `tokens: ${tokenLine}`, color: "gray" });
+  if (step.status === "running" && step.activity) {
+    lines.push({ text: `activity: ${step.activity}`, color: "gray" });
   }
-  if (step.activity) lines.push({ text: `activity: ${step.activity}`, color: "gray" });
-
-  const output = (step.result?.output ?? step.text).trim();
-  if (output) {
-    const prefix = step.status === "error" ? "error" : "output";
-    const outputColor = step.status === "error" ? "red" : "white";
-    const outputLines = output.split("\n");
-    let isFirstOutputLine = true;
-    for (const outputLine of outputLines) {
-      const trimmedLine = outputLine.trim();
-      lines.push({
-        text: isFirstOutputLine
-          ? `${prefix}: ${truncate(trimmedLine || "(blank)", Math.max(160, width * 7))}`
-          : `  ${truncate(trimmedLine || "(blank)", Math.max(160, width * 7))}`,
-        color: outputColor,
-      });
-      isFirstOutputLine = false;
-    }
-  } else {
-    lines.push({ text: `tail: ${step.activity || statusWord(step.status)}`, color: "gray" });
+  if (step.status === "error" && step.result?.error) {
+    lines.push({
+      text: `error: ${truncate(step.result.error, Math.max(24, width - 8))}`,
+      color: "red",
+    });
   }
 
   return lines;
+}
+
+/** "started 14:03:22 · elapsed 12.3s" while running; "took 12.3s" once done. */
+function timingLine(step: StepState, now: number): string | undefined {
+  const startedAt = step.startedAt;
+  const started = startedAt ? new Date(startedAt).toLocaleTimeString() : undefined;
+  if (step.status === "running") {
+    const elapsed = startedAt && now > 0 ? ` · elapsed ${formatElapsed(now - startedAt)}` : "";
+    return started ? `started ${started}${elapsed}` : undefined;
+  }
+  if (step.result) {
+    const took = `took ${formatElapsed(step.result.durationMs)}`;
+    return started ? `started ${started} · ${took}` : took;
+  }
+  return undefined;
 }
 
 function statusColor(status: StepState["status"]): string {

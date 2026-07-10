@@ -17,6 +17,10 @@ under `src/web/public/` and are served at `/static/*` (no longer embedded in
 Updated 2026-07-10: the TUI gained an in-place step editor (Ctrl+E in the
 workflow preview → `WorkflowStepEditor`) for agent/model/effort/prompt, on top
 of the existing slash commands.
+Updated 2026-07-10 (run visibility): both UIs gained a live step drill-in with
+the full scrollable output, per-step live timers, and worktree visibility, fed
+by a new shared `step_workspace` event and `startedAt`/`endedAt`/`worktree`
+fields on the shared reducer's `StepState`.
 
 ---
 
@@ -63,6 +67,8 @@ These two reducers are near-duplicates and are a prime extraction target (see §
 | Browse workflows (bundled/user/project) | ✅ | ✅ | |
 | View pipeline / step details | ✅ | ✅ | Web lays phases out as a vertical pipeline with parallel cards |
 | Run a workflow + live progress | ✅ | ✅ | |
+| Live step drill-in: full scrollable output | ✅ | ✅ | TUI: →/Enter on a step, PgUp/PgDn scroll with follow mode; Web: click a card → drawer with follow-the-stream output pane |
+| Live per-step timers + worktree visibility | ✅ | ✅ | Shared `step_workspace` event + `startedAt` in the reducer; both UIs show the worktree branch/dir and a ticking per-step elapsed |
 | Fresh run (ignore cache) | ✅ | ✅ | |
 | Cancel a run | ✅ | ✅ | |
 | Resume from on-disk cache | ✅ | ✅ | |

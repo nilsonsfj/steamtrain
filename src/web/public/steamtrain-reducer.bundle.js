@@ -206,6 +206,7 @@ var SteamtrainReducer = (() => {
               parentStepId: e.parentStepId,
               item: e.item,
               status: "running",
+              startedAt: e.ts,
               text: "",
               cached: false,
               loopTo: e.loopTo,
@@ -232,6 +233,12 @@ var SteamtrainReducer = (() => {
           e.iteration,
           (s) => applyAgentEvent(s, e.event)
         );
+      case "step_workspace":
+        return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
+          ...s,
+          cwd: e.cwd,
+          worktree: e.worktree ?? s.worktree
+        }));
       case "step_retry":
         return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
           ...s,
@@ -248,7 +255,9 @@ var SteamtrainReducer = (() => {
         return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
           ...s,
           status: e.result.ok ? "done" : "error",
+          endedAt: e.ts,
           result: e.result,
+          worktree: e.result.worktree ?? s.worktree,
           cached: e.cached,
           text: s.text || e.result.output
         }));

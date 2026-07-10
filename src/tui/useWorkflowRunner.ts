@@ -31,6 +31,7 @@ import {
   withStoreApprovals,
   workflowCacheKey,
 } from "../workflow";
+import { type OutputScroll, initialOutputScroll, scrollOutputBy } from "./output-window";
 import { message } from "./util";
 import {
   type WorkflowState,
@@ -38,6 +39,15 @@ import {
   initialWorkflowState,
   workflowReducer,
 } from "./workflow-state";
+
+/** Semantic scroll motions for the drill-in output pane. */
+export type OutputScrollMotion =
+  | "line-up"
+  | "line-down"
+  | "page-up"
+  | "page-down"
+  | "top"
+  | "bottom";
 
 export interface UseWorkflowRunnerParams {
   orchestrator: Orchestrator;
@@ -60,6 +70,13 @@ export function useWorkflowRunner({
   const [wfNotice, setWfNotice] = useState<string | null>(null);
   const [wfShowStepDetail, setWfShowStepDetail] = useState(true);
   const [wfShowPlanResult, setWfShowPlanResult] = useState(true);
+  // Scroll state for the drill-in output pane (live run AND history replay —
+  // only one drill-in is ever on screen). Follows the stream until the reader
+  // scrolls up; scrolling back to the bottom re-engages following.
+  const [wfOutputScroll, setWfOutputScroll] = useState<OutputScroll>(initialOutputScroll);
+  // The pane reports its wrapped-line total + visible budget after each render,
+  // so keyboard motions can clamp without the handler re-measuring the text.
+  const outputMetricsRef = useRef({ total: 0, budget: 1 });
 
   const abortRef = useRef<AbortController | null>(null);
   const activeWorkflowRef = useRef<string | undefined>(undefined);
@@ -100,6 +117,33 @@ export function useWorkflowRunner({
     const timer = setInterval(() => setWfNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [wf.started, wf.done]);
+
+  // A different step (or a fresh drill-in) starts back in follow mode.
+  useEffect(() => {
+    setWfOutputScroll(initialOutputScroll);
+  }, [stepIndex, wfStepDetails]);
+
+  /** Reported by the drill-in output pane after each render (see outputMetricsRef). */
+  const reportOutputMetrics = useCallback((metrics: { total: number; budget: number }): void => {
+    outputMetricsRef.current = metrics;
+  }, []);
+
+  /** Move the drill-in output window (PgUp/PgDn/Shift+arrows). */
+  const scrollOutput = useCallback((motion: OutputScrollMotion): void => {
+    const { total, budget } = outputMetricsRef.current;
+    const page = Math.max(1, budget - 1);
+    const delta =
+      motion === "page-up"
+        ? -page
+        : motion === "page-down"
+          ? page
+          : motion === "line-up"
+            ? -1
+            : motion === "line-down"
+              ? 1
+              : motion;
+    setWfOutputScroll((s) => scrollOutputBy(s, delta, total, budget));
+  }, []);
 
   const runWorkflow = useCallback(
     (
@@ -467,6 +511,10 @@ export function useWorkflowRunner({
     setWfShowStepDetail,
     wfShowPlanResult,
     setWfShowPlanResult,
+    wfOutputScroll,
+    setWfOutputScroll,
+    reportOutputMetrics,
+    scrollOutput,
     stepIndex,
     setStepIndex,
     abortRef,

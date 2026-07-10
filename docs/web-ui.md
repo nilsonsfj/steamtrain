@@ -31,8 +31,16 @@ config page manages both [agent instances](agent-configuration.md) and the
   - the agent · model backing the step;
   - data-flow **inputs** (`dependsOn`) and `forEach` fan-out source;
   - the assigned work item for dynamic `forEach` children;
-  - a streamed **output tail** that grows as the agent emits text;
-  - duration, cost, `cached`, and gate pass/block badges on completion.
+  - the isolated **worktree branch** (`⎇ …`) the step is working in, live from
+    the moment it's allocated;
+  - a streamed, **scrollable output tail** that follows the stream (scroll up to
+    pause, back to the bottom to re-engage);
+  - a live per-step **elapsed timer** while running; duration, cost, `cached`,
+    and gate pass/block badges on completion.
+- **Step drill-in drawer** — click any card for the full picture: runner,
+  worktree branch + directory, start time, live elapsed / final duration, cost,
+  tokens, exit code, data-flow inputs, and the step's FULL output in a
+  scrollable follow-the-stream pane with one-click copy. `Esc` closes it.
 - **Run summary** — a per-step table (status · time · cost · notes) plus run
   totals once the workflow finishes.
 

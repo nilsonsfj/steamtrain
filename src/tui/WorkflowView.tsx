@@ -7,6 +7,7 @@ import {
   addTokensInto,
   aggregateLeavesByModel,
   emptyTokens,
+  formatElapsed,
   formatTokenSummary,
   formatTokens,
   formatUsd,
@@ -31,6 +32,11 @@ interface WorkflowViewProps {
   /** Index into the flattened step list, for drill-in detail. */
   selectedIndex: number;
   elapsedMs: number;
+  /**
+   * Current wall clock for per-step live timers; omit (0) when rendering a
+   * finished record, where a ticking elapsed would be meaningless.
+   */
+  now?: number;
 }
 
 type WorkflowRow =
@@ -54,6 +60,7 @@ export function WorkflowView({
   height,
   selectedIndex,
   elapsedMs,
+  now = 0,
 }: WorkflowViewProps) {
   const innerWidth = Math.max(20, width - 4);
   const flat = useMemo(() => flattenSteps(state), [state]);
@@ -85,7 +92,7 @@ export function WorkflowView({
   }, [state.phases]);
   const foundIndex = rows.findIndex((row) => row.kind === "step" && row.flatIndex === clampedIndex);
   const selectedRowIndex = foundIndex >= 0 ? foundIndex : 0;
-  const listBudget = Math.max(1, height - (selected ? 9 : 4));
+  const listBudget = Math.max(1, height - (selected ? 10 : 4));
   const rowWindow = selectVisibleWindow(rows, selectedRowIndex, listBudget);
 
   const cost = sumCost(state);
@@ -176,6 +183,7 @@ export function WorkflowView({
                   step={row.step}
                   width={innerWidth}
                   selected={rowWindow.start + offset === selectedRowIndex}
+                  now={now}
                 />
               ),
             )}
@@ -188,7 +196,7 @@ export function WorkflowView({
         )}
       </Box>
 
-      {selected ? <Detail step={selected} width={innerWidth} /> : null}
+      {selected ? <Detail step={selected} width={innerWidth} now={now} /> : null}
     </Box>
   );
 }
@@ -265,15 +273,21 @@ function StepRow({
   step,
   width,
   selected,
+  now,
 }: {
   step: StepState;
   width: number;
   selected: boolean;
+  now: number;
 }) {
   const g = STEP_GLYPH[step.status];
   const agentColor = step.agent ? (AGENT_COLOR[step.agent] ?? "white") : "gray";
-  const target = step.cwd ? ` @${basename(step.cwd)}` : "";
-  const right = stepMeta(step);
+  const target = step.worktree
+    ? ` ⎇ ${basename(step.worktree.cwd)}`
+    : step.cwd
+      ? ` @${basename(step.cwd)}`
+      : "";
+  const right = stepMeta(step, now);
   const runner =
     step.agent && step.model
       ? formatWorkflowAgentTarget({ agent: step.agent, model: step.model, effort: step.effort })
@@ -301,15 +315,36 @@ function StepRow({
   );
 }
 
-function Detail({ step, width }: { step: StepState; width: number }) {
+function Detail({ step, width, now }: { step: StepState; width: number; now: number }) {
   const body = (step.result?.output ?? step.text).trim();
-  const preview = body ? truncate(body, 700) : step.activity || statusWord(step.status);
+  // Prefer the freshest signal for a running step: the streaming tail, else the
+  // latest tool activity. The full output lives in the drill-in (→ / Enter).
+  const preview = body
+    ? body.length > 700
+      ? `…${body.slice(-700)}`
+      : body
+    : step.activity || statusWord(step.status);
+  const liveElapsed =
+    step.status === "running" && step.startedAt && now > 0
+      ? formatElapsed(now - step.startedAt)
+      : undefined;
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1}>
       <Text color="cyan">
         {step.stepId} · {step.blockKind} · {step.status}
         {step.cached ? " (cached)" : ""}
+        {liveElapsed ? ` · ⏱ ${liveElapsed}` : ""}
+        {step.result?.costUsd ? ` · ${formatUsd(step.result.costUsd)}` : ""}
       </Text>
+      {step.worktree ? (
+        <Text color="yellow" wrap="truncate-end">
+          ⎇ {step.worktree.branch} · {step.worktree.cwd}
+        </Text>
+      ) : step.cwd ? (
+        <Text color="gray" wrap="truncate-end">
+          @ {step.cwd}
+        </Text>
+      ) : null}
       {step.dependsOn && step.dependsOn.length > 0 ? (
         <Text color="gray">← inputs: {step.dependsOn.join(", ")}</Text>
       ) : null}
@@ -327,7 +362,7 @@ function Detail({ step, width }: { step: StepState; width: number }) {
   );
 }
 
-function stepMeta(step: StepState): string {
+function stepMeta(step: StepState, now: number): string {
   if (step.result?.skipped) return "skipped";
   if (step.gate) {
     const gateState = step.gate.passed ? "passed" : "blocked";
@@ -337,12 +372,19 @@ function stepMeta(step: StepState): string {
     const attempts = step.result.attempts ?? step.attempts;
     const tokenLine = formatTokenSummary(step.result.tokens);
     const bits = [
-      step.cached ? "cached" : `${(step.result.durationMs / 1000).toFixed(1)}s`,
+      step.cached ? "cached" : formatElapsed(step.result.durationMs),
       step.result.costUsd ? `$${step.result.costUsd.toFixed(4)}` : undefined,
       tokenLine || undefined,
       attempts && attempts > 1 ? `${attempts} tries` : undefined,
     ].filter(Boolean);
     return bits.join(" · ");
+  }
+  if (step.status === "running") {
+    // A live ticking clock per running step; the latest tool line rides along.
+    const elapsed =
+      step.startedAt && now > 0 ? `⏱ ${formatElapsed(now - step.startedAt)}` : undefined;
+    const bits = [elapsed, step.activity].filter(Boolean);
+    if (bits.length > 0) return bits.join(" · ");
   }
   if (step.activity) return step.activity;
   return statusWord(step.status);
