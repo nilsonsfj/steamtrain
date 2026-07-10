@@ -154,7 +154,7 @@ function HistoryRow({
   width: number;
   selected: boolean;
 }) {
-  const g = STATUS_GLYPH[run.status];
+  const g = STATUS_GLYPH[run.status] ?? { symbol: "·", color: "gray" };
   const when = relativeTime(run.startedAt);
   const meta = formatRunTotals(run.totals, { durationMs: run.durationMs, tokens: true });
   return (

@@ -226,6 +226,11 @@ export function createLiveRunStore(
    * events into a history record so the run doesn't silently vanish.
    */
   async function markOrphaned(meta: LiveRunMeta): Promise<LiveRunMeta> {
+    // Re-read before writing: the owner may have settled the run between the
+    // sweep's read and now (or the pid was reused) — never clobber a terminal
+    // status with "orphaned".
+    const fresh = await get(meta.id);
+    if (fresh && isTerminalLiveRunStatus(fresh.status)) return fresh;
     const patched =
       (await update(meta.id, {
         status: "error",
@@ -279,12 +284,32 @@ export function createLiveRunStore(
     const metas: LiveRunMeta[] = [];
     for (let i = 0; i < entries.length; i++) {
       const meta = reads[i];
-      if (!meta) continue;
+      if (!meta) {
+        // A dir with no readable meta (crash between mkdir and the meta write,
+        // or stray debris) is invisible to every consumer; clear it out once
+        // it is old enough to rule out an in-progress create.
+        if (sweep) {
+          const dir = join(rootDir, entries[i]!);
+          const age = await stat(dir)
+            .then((info) => now() - info.mtimeMs)
+            .catch(() => 0);
+          if (age > ttlMs) await rm(dir, { recursive: true, force: true }).catch(() => {});
+        }
+        continue;
+      }
       if (sweep && isTerminalLiveRunStatus(meta.status)) {
         const endedAt = meta.endedAt ?? meta.createdAt;
         if (now() - endedAt > ttlMs) {
-          await rm(join(rootDir, entries[i]!), { recursive: true, force: true }).catch(() => {});
-          continue;
+          const removed = await rm(join(rootDir, entries[i]!), {
+            recursive: true,
+            force: true,
+          }).then(
+            () => true,
+            () => false,
+          );
+          // If the delete failed (permissions, open handles), keep the entry
+          // visible rather than leaving an invisible orphan on disk.
+          if (removed) continue;
         }
       }
       if (sweep && !isTerminalLiveRunStatus(meta.status) && !isLiveRunOwnerAlive(meta, now())) {

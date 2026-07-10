@@ -116,8 +116,10 @@ export function createLiveRunPublisher(store: LiveRunStore, runId: string): Live
         const idx = pendingApprovals.findIndex(
           (p) => p.stepId === event.stepId && p.iteration === iteration,
         );
-        if (idx >= 0) pendingApprovals.splice(idx, 1);
-        syncPendingApprovals();
+        if (idx >= 0) {
+          pendingApprovals.splice(idx, 1);
+          syncPendingApprovals();
+        }
       }
       pending.push(`${JSON.stringify(event)}\n`);
       scheduleFlush();

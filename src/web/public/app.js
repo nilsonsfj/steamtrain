@@ -72,7 +72,12 @@
   // CLI --detach, or TUI — so any of them can be attached to (replay + live tail).
   function pollLiveRuns() {
     api("GET", "/api/runs").then(function (r) {
-      if (r.status !== 200) return; // pre-login or transient; the next poll retries
+      if (r.status === 401) {
+        // Session expired: stop polling; a successful login reloads the page.
+        if (S.liveRunsTimer) { clearInterval(S.liveRunsTimer); S.liveRunsTimer = null; }
+        return;
+      }
+      if (r.status !== 200) return; // transient; the next poll retries
       S.liveRuns = (r.body.runs || []).filter(function (run) {
         return run.status === "running" || run.status === "queued";
       });

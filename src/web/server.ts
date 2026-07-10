@@ -1224,7 +1224,11 @@ function streamExternalRun(runId: string, store: LiveRunStore, res: ServerRespon
         );
       }
     } finally {
-      if (!res.writableEnded) res.end();
+      try {
+        if (!res.writableEnded) res.end();
+      } catch {
+        // The socket may already be destroyed; nothing left to clean up.
+      }
     }
   })();
 }

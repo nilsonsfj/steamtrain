@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { openSync } from "node:fs";
+import { closeSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { refreshAgentCatalogCaches } from "./agents/models";
 import type { CliIO } from "./cli";
@@ -323,8 +323,15 @@ export async function runWorkflowCommand(
         if (interrupts === 1) abort();
         else process.exit(130);
       };
+      // SIGTERM (kill, service manager) unwinds gracefully too, so the run is
+      // recorded as canceled instead of vanishing mid-flight.
+      const onSigterm = (): void => abort();
       process.on("SIGINT", onSigint);
-      return () => process.removeListener("SIGINT", onSigint);
+      process.on("SIGTERM", onSigterm);
+      return () => {
+        process.removeListener("SIGINT", onSigint);
+        process.removeListener("SIGTERM", onSigterm);
+      };
     },
   });
 }
@@ -360,12 +367,14 @@ async function spawnDetachedRun(options: SpawnDetachedRunOptions): Promise<numbe
     return 1;
   }
 
-  // Bake cache prep into the store now so the child can simply load it: an
-  // explicit --fresh clears, a --from retry seeds the already-succeeded steps.
-  const cacheStore = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
-  const key = workflowCacheKey(options.name, options.input, cwd, options.spec, options.params);
-  if (options.forceFresh) await cacheStore.clear(key);
+  // Bake --from retry seeds into the store now so the child can simply load
+  // them. An explicit --fresh is passed THROUGH to the child instead of being
+  // applied here: the child clears the cache after it acquires its queue slot,
+  // so a concurrent identical run finishing while this one waits in the queue
+  // cannot repopulate a cache the parent already cleared.
   if (options.seed && options.seed.size > 0 && !options.forceFresh) {
+    const cacheStore = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
+    const key = workflowCacheKey(options.name, options.input, cwd, options.spec, options.params);
     const cache = await cacheStore.load(key);
     for (const [stepId, result] of options.seed) cache.set(stepId, result);
     await cacheStore.save(key, cache);
@@ -389,7 +398,7 @@ async function spawnDetachedRun(options: SpawnDetachedRunOptions): Promise<numbe
         workflow: options.name,
         input: options.input,
         params: options.params,
-        fresh: false,
+        fresh: options.forceFresh || undefined,
         approveAll: options.approveAll || undefined,
         onApproval: options.onApproval,
       },
@@ -412,6 +421,29 @@ async function spawnDetachedRun(options: SpawnDetachedRunOptions): Promise<numbe
     env: process.env,
   });
   child.unref();
+  // Wait for the spawn to actually succeed (or fail) before reporting: a
+  // failed exec (missing/blocked binary) would otherwise leave a zombie
+  // "queued" registry entry and crash the parent with an unhandled 'error'.
+  try {
+    await new Promise<void>((resolve, reject) => {
+      child.once("spawn", resolve);
+      child.once("error", reject);
+    });
+  } catch (spawnErr) {
+    await store
+      .update(runId, {
+        status: "error",
+        ok: false,
+        error: `could not spawn the detached runner: ${message(spawnErr)}`,
+        endedAt: Date.now(),
+      })
+      .catch(() => {});
+    closeSync(logFd);
+    err(`could not spawn the detached runner: ${message(spawnErr)}\n`);
+    return 1;
+  }
+  // The child owns its copy of the log fd; release the parent's.
+  closeSync(logFd);
 
   if (options.json) {
     out(`${JSON.stringify({ ok: true, runId, detached: true })}\n`);
@@ -453,6 +485,25 @@ export async function runDetachedRunner(
     return 1;
   }
   await store.update(runId, { pid: process.pid });
+
+  // Crash safety: this process OWNS the run — an uncaught exception or
+  // unhandled rejection must settle the registry entry as errored instead of
+  // leaving a "running" zombie until the orphan sweep catches it.
+  const onFatal = (fatal: unknown): void => {
+    err(`detached runner crashed: ${message(fatal)}\n`);
+    void store
+      .update(runId, {
+        status: "error",
+        ok: false,
+        error: `detached runner crashed: ${message(fatal)}`,
+        endedAt: Date.now(),
+        pendingApprovals: [],
+      })
+      .catch(() => {})
+      .finally(() => process.exit(1));
+  };
+  process.on("uncaughtException", onFatal);
+  process.on("unhandledRejection", onFatal);
 
   const failEarly = async (reason: string): Promise<number> => {
     err(`${reason}\n`);
