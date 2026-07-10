@@ -61,6 +61,81 @@ describe("workflow UI helpers", () => {
     expect(frame).toContain("earlier row");
     expect(frame).toContain("step-10");
   });
+
+  it("shows a live per-step timer and worktree in the tree view", () => {
+    const state = workflowStateWithSteps(5);
+    const running = state.phases[0]!.steps[3]!;
+    running.startedAt = 1_000;
+    running.worktree = {
+      originalCwd: "/repo",
+      cwd: "/wt/steamtrain/step-3",
+      root: "/wt/steamtrain/step-3",
+      branch: "steamtrain/run/step-3",
+    };
+    const { lastFrame } = render(
+      <WorkflowView
+        state={state}
+        width={110}
+        height={24}
+        selectedIndex={3}
+        elapsedMs={9_500}
+        now={11_000}
+      />,
+    );
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("⏱ 10.0s"); // 11_000 - 1_000 on the running step
+    expect(frame).toContain("⎇ step-3"); // worktree dir on the step row
+    expect(frame).toContain("steamtrain/run/step-3"); // branch in the detail panel
+  });
+
+  it("scrolls the live drill-in output and reports the window position", () => {
+    const state = workflowStateWithSteps(1);
+    const step = state.phases[0]!.steps[0]!;
+    step.status = "running";
+    step.startedAt = 0;
+    step.result = undefined; // still streaming — no final result yet
+    step.text = Array.from({ length: 200 }, (_, i) => `line-${i}`).join("\n");
+
+    const following = render(
+      <WorkflowStepDetails
+        kind="live"
+        state={state}
+        entry={{ phase: state.phases[0]!, step }}
+        width={100}
+        height={24}
+        selectedIndex={0}
+        totalSteps={1}
+        elapsedMs={5_000}
+        now={10_000}
+        scroll={{ offset: 0, follow: true }}
+      />,
+    );
+    const followFrame = following.lastFrame() ?? "";
+    expect(followFrame).toContain("following");
+    expect(followFrame).toContain("line-199"); // pinned to the newest output
+    expect(followFrame).toContain("/200"); // total line count in the header
+
+    const paused = render(
+      <WorkflowStepDetails
+        kind="live"
+        state={state}
+        entry={{ phase: state.phases[0]!, step }}
+        width={100}
+        height={24}
+        selectedIndex={0}
+        totalSteps={1}
+        elapsedMs={5_000}
+        now={10_000}
+        scroll={{ offset: 0, follow: false }}
+      />,
+    );
+    const pausedFrame = paused.lastFrame() ?? "";
+    expect(pausedFrame).toContain("lines 1–"); // anchored at the top
+    expect(pausedFrame).toContain("line-0");
+    expect(pausedFrame).not.toContain("line-199");
+    expect(pausedFrame).toContain("paused");
+  });
 });
 
 function workflowStateWithSteps(count: number): WorkflowState {

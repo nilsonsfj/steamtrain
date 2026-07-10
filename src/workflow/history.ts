@@ -298,6 +298,16 @@ export class RunRecordBuilder {
         });
         break;
       }
+      case "step_workspace": {
+        const step = this.stepOf(event.phaseId, event.stepId, event.iteration);
+        if (!step) break;
+        // Record the live workspace so a run canceled mid-step still shows
+        // where the step was working; step_done overwrites with the result's
+        // authoritative copy when the step finishes.
+        step.cwd = event.cwd;
+        if (event.worktree) step.worktree = event.worktree;
+        break;
+      }
       case "step_event": {
         const step = this.stepOf(event.phaseId, event.stepId, event.iteration);
         if (!step) break;

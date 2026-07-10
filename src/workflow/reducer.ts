@@ -4,7 +4,14 @@ import type { WorkflowEvent } from "./events";
 import type { RunRecord } from "./history";
 import { llmStepApiId } from "./llm";
 import type { WorktreeDiff } from "./merge";
-import type { GateStep, StepResult, WorkflowItem, WorkflowSpec, WorkflowStepKind } from "./types";
+import type {
+  AgentWorktreeInfo,
+  GateStep,
+  StepResult,
+  WorkflowItem,
+  WorkflowSpec,
+  WorkflowStepKind,
+} from "./types";
 
 export type StepStatus = "pending" | "running" | "done" | "error";
 
@@ -60,6 +67,16 @@ export interface StepState {
   parentStepId?: string;
   item?: WorkflowItem;
   status: StepStatus;
+  /** Epoch ms the step started running (its `step_start` timestamp). */
+  startedAt?: number;
+  /** Epoch ms the step finished (its `step_done` timestamp). */
+  endedAt?: number;
+  /**
+   * Isolated git worktree the step is working in. Lands live from the
+   * `step_workspace` event (right after the workspace is allocated), and again
+   * from the final result — so replayed records show it too.
+   */
+  worktree?: AgentWorktreeInfo;
   /** Accumulated non-thinking text, for the tail / drill-in panel. */
   text: string;
   /** Latest tool line, e.g. "⚙ Bash" or "✓ Read". */
@@ -381,6 +398,7 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
             parentStepId: e.parentStepId,
             item: e.item,
             status: "running",
+            startedAt: e.ts,
             text: "",
             cached: false,
             loopTo: e.loopTo,
@@ -409,6 +427,12 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
       return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) =>
         applyAgentEvent(s, e.event),
       );
+    case "step_workspace":
+      return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
+        ...s,
+        cwd: e.cwd,
+        worktree: e.worktree ?? s.worktree,
+      }));
     case "step_retry":
       return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
         ...s,
@@ -425,7 +449,9 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
       return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
         ...s,
         status: e.result.ok ? "done" : "error",
+        endedAt: e.ts,
         result: e.result,
+        worktree: e.result.worktree ?? s.worktree,
         cached: e.cached,
         text: s.text || e.result.output,
       }));

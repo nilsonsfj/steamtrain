@@ -99,6 +99,7 @@ export function renderIndex(revs: PageAssetRevisions): string {
     </div>
   </section>
 </main>
+<aside class="drawer" id="drawer" aria-label="Step details"></aside>
 <div class="modal-overlay" id="overlay"><div class="modal" id="modal"></div></div>
 <script src="${bundleSrc}" defer></script>
 <script src="${appSrc}" defer></script>

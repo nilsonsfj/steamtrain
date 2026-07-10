@@ -303,6 +303,62 @@ describe("runWorkflow", () => {
     });
   });
 
+  it("announces the allocated workspace live via step_workspace", async () => {
+    const agentWorkspace: AgentWorkspaceManager = {
+      async allocate(request) {
+        return {
+          cwd: `/isolated/${request.stepId}`,
+          root: `/isolated/${request.stepId}`,
+          branch: `steamtrain/test/${request.stepId}`,
+          baseCommit: "abc123",
+          dispose: () => {},
+        };
+      },
+    };
+    const { deps } = makeDeps(echo, { agentWorkspace });
+    const spec: WorkflowSpec = {
+      name: "ws-live",
+      phases: [
+        { id: "p1", title: "P1", steps: [{ id: "a", agent: "claude", model: "m", prompt: "x" }] },
+      ],
+    };
+
+    const events = await collect(spec, "hi", deps);
+
+    const kinds = events.map((event) => event.kind);
+    // The workspace announcement lands between the step's start and its done,
+    // so live views learn the worktree while the step is still running.
+    expect(kinds.indexOf("step_workspace")).toBeGreaterThan(kinds.indexOf("step_start"));
+    expect(kinds.indexOf("step_workspace")).toBeLessThan(kinds.indexOf("step_done"));
+    const ws = events.find((event) => event.kind === "step_workspace");
+    expect(ws && ws.kind === "step_workspace" && ws.stepId).toBe("a");
+    expect(ws && ws.kind === "step_workspace" && ws.cwd).toBe("/isolated/a");
+    expect(ws && ws.kind === "step_workspace" && ws.worktree).toEqual({
+      originalCwd: "/base",
+      cwd: "/isolated/a",
+      root: "/isolated/a",
+      branch: "steamtrain/test/a",
+      baseCommit: "abc123",
+      linkedIgnoredPaths: undefined,
+    });
+  });
+
+  it("step_workspace carries the plain cwd (no worktree) outside isolation", async () => {
+    const { deps } = makeDeps(echo, {});
+    const spec: WorkflowSpec = {
+      name: "ws-plain",
+      phases: [
+        { id: "p1", title: "P1", steps: [{ id: "a", agent: "claude", model: "m", prompt: "x" }] },
+      ],
+    };
+
+    const events = await collect(spec, "hi", deps);
+
+    const ws = events.find((event) => event.kind === "step_workspace");
+    expect(ws && ws.kind === "step_workspace" && ws.cwd).toBe("/base");
+    expect(ws && ws.kind === "step_workspace" && ws.worktree).toBeUndefined();
+  });
+
   it("runs forEach children in separate allocated workspaces", async () => {
     const requests: AgentWorkspaceRequest[] = [];
     const agentWorkspace: AgentWorkspaceManager = {

@@ -366,3 +366,75 @@ describe("workflowReducer", () => {
     expect(workflowReducer(seeded, { type: "reset" })).toEqual(initialWorkflowState);
   });
 });
+
+describe("workflowReducer live visibility metadata", () => {
+  const worktree = {
+    originalCwd: "/repo",
+    cwd: "/tmp/worktrees/a-1",
+    root: "/tmp/worktrees/a-1",
+    branch: "steamtrain/run/a-1",
+    baseCommit: "abc123",
+  };
+
+  it("stamps startedAt from step_start and endedAt from step_done", () => {
+    const state = reduceAll([
+      { kind: "workflow_start", name: "w", phaseCount: 1, stepCount: 1, ts: 100 },
+      { kind: "phase_start", phaseId: "p1", title: "P1", index: 0, stepCount: 1, ts: 100 },
+      { kind: "step_start", phaseId: "p1", stepId: "a", agent: AGENT, model: "m", ts: 150 },
+      { kind: "step_done", phaseId: "p1", stepId: "a", result: resultA, cached: false, ts: 1350 },
+    ]);
+    const step = flattenSteps(state)[0]?.step;
+    expect(step?.startedAt).toBe(150);
+    expect(step?.endedAt).toBe(1350);
+  });
+
+  it("folds step_workspace into live cwd + worktree", () => {
+    const state = reduceAll([
+      { kind: "workflow_start", name: "w", phaseCount: 1, stepCount: 1, ts: 0 },
+      { kind: "phase_start", phaseId: "p1", title: "P1", index: 0, stepCount: 1, ts: 0 },
+      { kind: "step_start", phaseId: "p1", stepId: "a", agent: AGENT, model: "m", ts: 0 },
+      {
+        kind: "step_workspace",
+        phaseId: "p1",
+        stepId: "a",
+        cwd: worktree.cwd,
+        worktree,
+        ts: 5,
+      },
+    ]);
+    const step = flattenSteps(state)[0]?.step;
+    expect(step?.status).toBe("running");
+    expect(step?.cwd).toBe(worktree.cwd);
+    expect(step?.worktree).toEqual(worktree);
+  });
+
+  it("keeps the worktree from the final result when no live event arrived", () => {
+    const state = reduceAll([
+      { kind: "workflow_start", name: "w", phaseCount: 1, stepCount: 1, ts: 0 },
+      { kind: "phase_start", phaseId: "p1", title: "P1", index: 0, stepCount: 1, ts: 0 },
+      { kind: "step_start", phaseId: "p1", stepId: "a", agent: AGENT, model: "m", ts: 0 },
+      {
+        kind: "step_done",
+        phaseId: "p1",
+        stepId: "a",
+        result: { ...resultA, worktree },
+        cached: false,
+        ts: 9,
+      },
+    ]);
+    const step = flattenSteps(state)[0]?.step;
+    expect(step?.worktree).toEqual(worktree);
+  });
+
+  it("a plain-cwd step_workspace (no git repo) only updates the cwd", () => {
+    const state = reduceAll([
+      { kind: "workflow_start", name: "w", phaseCount: 1, stepCount: 1, ts: 0 },
+      { kind: "phase_start", phaseId: "p1", title: "P1", index: 0, stepCount: 1, ts: 0 },
+      { kind: "step_start", phaseId: "p1", stepId: "a", agent: AGENT, model: "m", ts: 0 },
+      { kind: "step_workspace", phaseId: "p1", stepId: "a", cwd: "/repo/src", ts: 5 },
+    ]);
+    const step = flattenSteps(state)[0]?.step;
+    expect(step?.cwd).toBe("/repo/src");
+    expect(step?.worktree).toBeUndefined();
+  });
+});

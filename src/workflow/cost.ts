@@ -72,6 +72,19 @@ export function formatUsd(n: number): string {
 }
 
 /**
+ * Compact human elapsed time for live timers: 8300 → "8.3s", 83_000 → "1m 23s",
+ * 4_530_000 → "1h 15m". Sub-minute keeps a decimal so a ticking timer visibly
+ * moves; longer durations drop it — at that scale seconds are the signal.
+ */
+export function formatElapsed(ms: number): string {
+  const sec = Math.max(0, ms) / 1000;
+  if (sec < 60) return `${sec.toFixed(1)}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ${String(Math.floor(sec % 60)).padStart(2, "0")}s`;
+  return `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, "0")}m`;
+}
+
+/**
  * A compact one-line token summary, e.g. "12.3k tok (in 8k · out 3k · cache r
  * 1.3k)". Returns "" when there is nothing to show. Only non-zero categories
  * are listed so the line stays short.

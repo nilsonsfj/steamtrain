@@ -1051,6 +1051,13 @@ export function printHumanEvent(event: WorkflowEvent, out: (text: string) => voi
     case "step_start":
       out(`  start ${event.blockKind ?? "worker"} ${event.stepId}\n`);
       return;
+    case "step_workspace":
+      out(
+        event.worktree
+          ? `  workspace ${event.stepId}: ${event.cwd} (worktree ${event.worktree.branch})\n`
+          : `  workspace ${event.stepId}: ${event.cwd}\n`,
+      );
+      return;
     case "fan_out":
       out(
         `  fan-out ${event.parentStepId} -> ${event.count} item${event.count === 1 ? "" : "s"}\n`,

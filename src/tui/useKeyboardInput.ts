@@ -1,4 +1,4 @@
-import { useApp, useInput } from "ink";
+import { type Key, useApp, useInput } from "ink";
 import { useCallback, useRef } from "react";
 import { isSlashCommandInput } from "../commands";
 import type { Mode } from "./modes";
@@ -31,6 +31,35 @@ export interface UseKeyboardInputParams {
   openAgentManager: () => void;
   focusCreateWorkflowPrompt: (seed: string) => void;
   switchMode: (next: React.SetStateAction<Mode>) => void;
+}
+
+/**
+ * Output-pane scroll keys shared by the live drill-in and the history drill-in:
+ * PgUp/PgDn page, Shift+↑/↓ move one line (plain ↑/↓ keep switching steps).
+ * Returns true when the key was a scroll motion and has been handled.
+ */
+function handleOutputScrollKeys(
+  _input: string,
+  key: Key,
+  runner: ReturnType<typeof useWorkflowRunner>,
+): boolean {
+  if (key.pageUp) {
+    runner.scrollOutput("page-up");
+    return true;
+  }
+  if (key.pageDown) {
+    runner.scrollOutput("page-down");
+    return true;
+  }
+  if (key.shift && key.upArrow) {
+    runner.scrollOutput("line-up");
+    return true;
+  }
+  if (key.shift && key.downArrow) {
+    runner.scrollOutput("line-down");
+    return true;
+  }
+  return false;
 }
 
 export function useKeyboardInput(params: UseKeyboardInputParams) {
@@ -131,6 +160,9 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
           const totalSteps = historyHook.history.recordState
             ? historyHook.history.recordState.phases.reduce((n, p) => n + p.steps.length, 0)
             : 0;
+          // Output-pane scrolling inside the drill-in (shares the live pane's
+          // scroll state — only one drill-in is ever on screen).
+          if (historyHook.history.detail && handleOutputScrollKeys(input, key, runner)) return;
           if (key.leftArrow && historyHook.history.detail) {
             historyHook.setHistory({ ...historyHook.history, detail: false });
           } else if (key.rightArrow && !historyHook.history.detail && totalSteps > 0) {
@@ -255,6 +287,10 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
           !menuOpen &&
           shouldPromptHistoryCaptureDown(prompt.historyBrowse, prompt.promptArrowCtx, prompt.value);
         if (cur.mode === "workflow" && !menuOpen && !historyUp && !historyDown) {
+          // Full-output scrolling inside the live drill-in.
+          if (runner.wfStepDetails === "live" && handleOutputScrollKeys(input, key, runner)) {
+            return;
+          }
           if (key.leftArrow && runner.wfStepDetails) {
             runner.setWfStepDetails(null);
             return;

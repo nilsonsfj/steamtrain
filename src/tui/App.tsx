@@ -83,6 +83,7 @@ import { Banner } from "./banner";
 import { createWorkflowPromptValue } from "./create-workflow-prompt";
 import { formatDraftTarget } from "./draft-model";
 import { type Mode, isWorkflowPickerActive } from "./modes";
+import { type OutputScroll, staticOutputScroll } from "./output-window";
 import { workflowListNavigation } from "./prompt-editing";
 import { initialPromptHistoryBrowse } from "./prompt-history";
 import { initialTranscript, transcriptReducer } from "./transcript";
@@ -766,6 +767,15 @@ export function App({
     }
   }, [mode, picker.wfPreview, runner.showWorkflowView]);
 
+  // ── History drill-in scroll reset ────────────────────────────────────
+  // The history drill-in shares the live pane's output scroll state; a
+  // recorded step starts at the top (nothing is streaming to follow).
+  const historyDetailOpen = historyHook.history?.detail ?? false;
+  const historyStepIndex = historyHook.history?.stepIndex ?? 0;
+  useEffect(() => {
+    if (historyDetailOpen) runner.setWfOutputScroll(staticOutputScroll);
+  }, [historyDetailOpen, historyStepIndex]);
+
   // ── Startup effects ──────────────────────────────────────────────────
   useEffect(() => {
     return () => {
@@ -1306,7 +1316,13 @@ export function App({
           ) : null;
         })()
       ) : historyHook.history ? (
-        <HistoryPanel history={historyHook.history} width={columns} height={streamHeight} />
+        <HistoryPanel
+          history={historyHook.history}
+          width={columns}
+          height={streamHeight}
+          scroll={runner.wfOutputScroll}
+          onOutputMetrics={runner.reportOutputMetrics}
+        />
       ) : isWorkflow ? (
         picker.wfCreate ? (
           <WorkflowCreate state={picker.wfCreate} width={columns} height={streamHeight} />
@@ -1320,6 +1336,9 @@ export function App({
             selectedIndex={runner.stepIndex}
             totalSteps={runner.totalWfSteps}
             elapsedMs={runner.wfElapsedMs}
+            now={runner.wfNow}
+            scroll={runner.wfOutputScroll}
+            onOutputMetrics={runner.reportOutputMetrics}
           />
         ) : runner.wfStepDetails === "preview" &&
           picker.wfPreview &&
@@ -1348,6 +1367,7 @@ export function App({
             width={columns}
             selectedIndex={runner.stepIndex}
             elapsedMs={runner.wfElapsedMs}
+            now={runner.wfNow}
           />
         ) : picker.wfPreview && !picker.preview.spec ? (
           <Box justifyContent="center" alignItems="center" height={streamHeight}>
@@ -1499,7 +1519,7 @@ function hint(
     // An attached run is owned elsewhere: Ctrl+Q only detaches the view.
     const stopHint = attachedRun ? "Ctrl+Q detach · /cancel-run cancel" : "Ctrl+Q cancel";
     if (mode === "workflow" && wfStepDetails) {
-      return `↑/↓ step · ←/Esc back · ${stopHint} · /exit quit · Ctrl+C quit`;
+      return `↑/↓ step · PgUp/PgDn scroll · ←/Esc back · ${stopHint} · /exit quit · Ctrl+C quit`;
     }
     return mode === "workflow"
       ? `${stopHint} · /exit quit · Ctrl+C quit`
@@ -1507,7 +1527,7 @@ function hint(
   }
   if (mode === "workflow") {
     if (wfStepDetails) {
-      return `↑/↓ step · ←/Esc back${resumeHint} · Ctrl+E edit · Ctrl+R run · type to edit · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step · PgUp/PgDn scroll · ←/Esc back${resumeHint} · Ctrl+E edit · Ctrl+R run · type to edit · /commands · Ctrl+C quit${completeHint}`;
     }
     if (promptEditing) {
       const tabHint = slashInput ? " · Esc unfocus" : " · Esc list";
@@ -1530,7 +1550,7 @@ function hint(
 
 function historyHintText(history: HistoryUiState): string {
   if (history.view === "detail") {
-    if (history.detail) return "↑/↓ step · ←/Esc back · Ctrl+C quit";
+    if (history.detail) return "↑/↓ step · PgUp/PgDn scroll · ←/Esc back · Ctrl+C quit";
     const retryHint = (history.record?.totals?.failed ?? 0) > 0 ? " · f retry failed" : "";
     return `↑/↓ step · → details · r re-run${retryHint} · ←/Esc back to list · Ctrl+C quit`;
   }
@@ -1545,10 +1565,14 @@ function HistoryPanel({
   history,
   width,
   height,
+  scroll,
+  onOutputMetrics,
 }: {
   history: HistoryUiState;
   width: number;
   height: number;
+  scroll: OutputScroll;
+  onOutputMetrics: (metrics: { total: number; budget: number }) => void;
 }) {
   if (history.view === "detail" && history.recordState) {
     const state = history.recordState;
@@ -1567,6 +1591,8 @@ function HistoryPanel({
           selectedIndex={clamped}
           totalSteps={total}
           elapsedMs={elapsed}
+          scroll={scroll}
+          onOutputMetrics={onOutputMetrics}
         />
       );
     }

@@ -14,8 +14,40 @@
     rafQueued: false, draftAbort: null, doctor: [], apiDoctor: [],
     stagedOverrides: {},
     projectConfig: null,
-    liveRuns: [], liveRunsTimer: null, queuedBanner: false
+    liveRuns: [], liveRunsTimer: null, queuedBanner: false,
+    // Step drill-in drawer: which step it shows ({phaseId, iteration, stepId}).
+    detail: null,
+    // Per-card tail scroll state keyed by stepKey(): { follow: bool, top: px }.
+    // "follow" sticks the pane to the newest output as it streams; scrolling up
+    // pauses it, scrolling back to the bottom re-engages it.
+    tailScroll: {},
+    // Same follow/position model for the drawer's full-output pane.
+    drawerScroll: { follow: true, top: 0 }
   };
+
+  /** Identity of one step instance across re-renders (loop iterations included). */
+  function stepKey(phase, step) {
+    return phase.phaseId + ":" + (phase.iteration || 1) + ":" + step.stepId;
+  }
+
+  /** Mirrors src/workflow/cost.ts formatElapsed: "8.3s", "1m 23s", "1h 05m". */
+  function fmtElapsed(ms) {
+    var sec = Math.max(0, ms) / 1000;
+    if (sec < 60) return sec.toFixed(1) + "s";
+    var min = Math.floor(sec / 60);
+    if (min < 60) return min + "m " + String(Math.floor(sec % 60)).padStart(2, "0") + "s";
+    return Math.floor(min / 60) + "h " + String(min % 60).padStart(2, "0") + "m";
+  }
+
+  /** Refresh every live ticking timer ("[data-since]") in one cheap pass. */
+  function updateLiveTimers() {
+    var nodes = document.querySelectorAll("[data-since]");
+    var now = Date.now();
+    for (var i = 0; i < nodes.length; i++) {
+      var since = Number(nodes[i].getAttribute("data-since"));
+      if (since > 0) nodes[i].textContent = "⏱ " + fmtElapsed(now - since);
+    }
+  }
 
   function h(tag, attrs) {
     var e = document.createElement(tag);
@@ -131,6 +163,7 @@
       // Replay rebuilds the tree from the event stream itself (workflow_start
       // resets the folded state), so start from a clean slate.
       S.runState = SteamtrainReducer.initialWorkflowState;
+      S.detail = null; S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
       setBanner("Attached to " + (run.detached ? "detached " : "") + "run " + run.id.slice(0, 8) + "… — cancel stops the run itself.", "info");
       openStream(run.id);
       render();
@@ -680,6 +713,7 @@
     if (S.es) { S.es.close(); S.es = null; }
     stopTimer();
     S.selected = name; S.runId = null; S.runState = null;
+    S.detail = null; S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
     renderSidebar();
     document.getElementById("statusLine").style.display = "none";
     setBanner("", "");
@@ -860,7 +894,7 @@
       var cards = h("div", { class: "cards" });
       var isLatest = !p.iteration || p.iteration === (maxIter[p.phaseId] || 1);
       steps.forEach(function (s) {
-        if (isLatest) cards.appendChild(renderCard(s));
+        if (isLatest) cards.appendChild(renderCard(s, p));
         else cards.appendChild(h("div", { class: "card superseded" },
           h("div", { class: "top" },
             h("span", { class: "sid", text: s.stepId }),
@@ -884,6 +918,23 @@
 
     if (S.runState && S.runState.done) renderSummary(canvas);
     updateProgress();
+    applyTailScroll(canvas);
+    renderDetail();
+  }
+
+  /**
+   * Re-apply each tail pane's scroll position after the canvas rebuild:
+   * following panes pin to the newest line, paused ones stay where the reader
+   * left them. Must run after the nodes are in the DOM (scrollHeight is 0
+   * before layout).
+   */
+  function applyTailScroll(canvas) {
+    var tails = canvas.querySelectorAll(".tail[data-key]");
+    for (var i = 0; i < tails.length; i++) {
+      var el = tails[i];
+      var st = S.tailScroll[el.getAttribute("data-key")];
+      el.scrollTop = st && !st.follow ? st.top : el.scrollHeight;
+    }
   }
 
   function legendItem(kind, label) {
@@ -894,8 +945,15 @@
     return { worker: "#6fb1ff", processor: "#9d8cff", distributor: "#ffce6f", consolidator: "#5fe0c6", gate: "#f0a35e", approval: "#ffd166", merge: "#ff9ecb", command: "#b8c4d0", llm: "#62d2f5", workflow: "#7ce38b" }[k] || "#6fb1ff";
   }
 
-  function renderCard(s) {
-    var card = h("div", { class: "card " + s.status });
+  function renderCard(s, p) {
+    var key = stepKey(p, s);
+    var isOpen = S.detail && S.detail.phaseId === p.phaseId &&
+      S.detail.iteration === (p.iteration || 1) && S.detail.stepId === s.stepId;
+    var card = h("div", {
+      class: "card clickable " + s.status + (isOpen ? " open" : ""),
+      title: "Click for full output and step details",
+      onClick: function () { openDetail(p, s); }
+    });
     var kindEl = h("span", { class: "kind " + s.blockKind });
     if (s.status === "running") kindEl.appendChild(h("span", { class: "pulse" }));
     kindEl.appendChild(document.createTextNode(KIND_LABEL[s.blockKind] || s.blockKind));
@@ -911,6 +969,7 @@
     var runnerId = s.agent || s.api;
     if (runnerId) card.appendChild(h("div", { class: "agent", text: runnerId + (s.model ? " \u00b7 " + s.model : "") }));
     else if (s.model) card.appendChild(h("div", { class: "agent", text: s.model }));
+    if (s.worktree) card.appendChild(h("div", { class: "worktree", title: s.worktree.cwd, text: "\u2387 " + s.worktree.branch }));
     if (s.dependsOn && s.dependsOn.length) card.appendChild(h("div", { class: "inputs", text: "inputs: " + s.dependsOn.join(", ") }));
     if (s.forEach) card.appendChild(h("div", { class: "inputs", text: "forEach: " + s.forEach }));
     if (s.loopTo) card.appendChild(h("div", { class: "inputs" },
@@ -921,25 +980,164 @@
 
     if (s.approval) card.appendChild(renderApproval(s));
 
-    var tailText = s.text ? tail(s.text, 600) : "";
+    // Live tail: the full streamed text (display-capped) in a scrollable pane
+    // that follows the stream until the reader scrolls up; scrolling back to
+    // the bottom re-engages following. Position survives re-renders via
+    // S.tailScroll (see applyTailScroll).
+    // 10k chars per card bounds total DOM size with many parallel steps
+    // streaming at once; the drawer shows the untruncated output.
+    var tailText = s.text ? tail(s.text, 10000) : "";
     if (tailText) {
-      var tailEl = h("div", { class: "tail show", text: tailText });
+      var tailEl = h("div", { class: "tail show", "data-key": key, text: tailText });
+      tailEl.addEventListener("scroll", function () {
+        var atBottom = tailEl.scrollTop + tailEl.clientHeight >= tailEl.scrollHeight - 4;
+        S.tailScroll[key] = { follow: atBottom, top: tailEl.scrollTop };
+      });
+      // Selecting/copying tail text must not open the drill-in — but a plain
+      // click (no selection) still does.
+      tailEl.addEventListener("click", function (e) {
+        var sel = window.getSelection();
+        if (sel && String(sel).length > 0) e.stopPropagation();
+      });
       card.appendChild(tailEl);
     }
 
-    if (s.result || s.cached || s.gate) {
-      var metrics = h("div", { class: "metrics" });
-      if (s.result) {
-        metrics.appendChild(h("span", { text: (s.result.durationMs / 1000).toFixed(1) + "s" }));
-        if (s.result.costUsd) metrics.appendChild(h("span", { text: "$" + s.result.costUsd.toFixed(4) }));
-        var tokenLine = fmtTokenSummary(s.result.tokens);
-        if (tokenLine) metrics.appendChild(h("span", { text: tokenLine }));
-      }
-      if (s.cached) metrics.appendChild(h("span", { class: "badge cached", text: "cached" }));
-      if (s.gate) metrics.appendChild(h("span", { class: "badge " + (s.gate.passed ? "gate-pass" : "gate-block"), text: s.gate.passed ? "gate passed" : "gate blocked" }));
-      card.appendChild(metrics);
+    var metrics = h("div", { class: "metrics" });
+    var hasMetrics = false;
+    if (s.status === "running" && s.startedAt) {
+      metrics.appendChild(h("span", { class: "elapsed", "data-since": String(s.startedAt), text: "\u23f1 " + fmtElapsed(Date.now() - s.startedAt) }));
+      hasMetrics = true;
     }
+    if (s.result) {
+      metrics.appendChild(h("span", { text: fmtElapsed(s.result.durationMs) }));
+      if (s.result.costUsd) metrics.appendChild(h("span", { text: "$" + s.result.costUsd.toFixed(4) }));
+      var tokenLine = fmtTokenSummary(s.result.tokens);
+      if (tokenLine) metrics.appendChild(h("span", { text: tokenLine }));
+      hasMetrics = true;
+    }
+    if (s.cached) { metrics.appendChild(h("span", { class: "badge cached", text: "cached" })); hasMetrics = true; }
+    if (s.gate) { metrics.appendChild(h("span", { class: "badge " + (s.gate.passed ? "gate-pass" : "gate-block"), text: s.gate.passed ? "gate passed" : "gate blocked" })); hasMetrics = true; }
+    if (hasMetrics) card.appendChild(metrics);
     return card;
+  }
+
+  // ---- step drill-in drawer ------------------------------------------------
+  function openDetail(p, s) {
+    S.detail = { phaseId: p.phaseId, iteration: p.iteration || 1, stepId: s.stepId };
+    S.drawerScroll = { follow: true, top: 0 };
+    scheduleRender();
+  }
+
+  function closeDetail() {
+    if (!S.detail) return;
+    S.detail = null;
+    scheduleRender();
+  }
+
+  /** Current live data for the drilled-in step, straight from the folded state. */
+  function findDetailStep() {
+    if (!S.detail || !S.runState) return null;
+    var phases = S.runState.phases || [];
+    for (var i = 0; i < phases.length; i++) {
+      var p = phases[i];
+      if (p.phaseId !== S.detail.phaseId || (p.iteration || 1) !== S.detail.iteration) continue;
+      var steps = p.steps || [];
+      for (var j = 0; j < steps.length; j++) {
+        if (steps[j].stepId === S.detail.stepId) return { phase: p, step: steps[j] };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * The right-hand drill-in drawer: full metadata (runner, worktree, timing,
+   * cost, tokens, data flow) and the step's FULL output in a scrollable pane
+   * that follows the stream while the step runs. Re-rendered from the folded
+   * state on every event; the output pane's scroll position survives via
+   * S.drawerScroll.
+   */
+  function renderDetail() {
+    var drawer = document.getElementById("drawer");
+    var found = findDetailStep();
+    if (!found) {
+      drawer.classList.remove("show");
+      clear(drawer);
+      return;
+    }
+    var p = found.phase, s = found.step;
+    clear(drawer);
+    drawer.classList.add("show");
+
+    var kindEl = h("span", { class: "kind " + s.blockKind, text: KIND_LABEL[s.blockKind] || s.blockKind });
+    var attempts = s.attempts || (s.result && s.result.attempts);
+    var stateLabel = s.status + (s.cached ? " · cached" : "") + (s.result && s.result.skipped ? " · skipped" : "") + (attempts && attempts > 1 ? " · " + attempts + " tries" : "");
+    drawer.appendChild(h("div", { class: "drawer-head" },
+      h("span", { class: "sid", text: s.stepId }),
+      kindEl,
+      h("span", { class: "state " + s.status, text: stateLabel }),
+      h("button", { class: "x", title: "Close (Esc)", onClick: closeDetail }, "×")
+    ));
+
+    var meta = h("div", { class: "drawer-meta" });
+    function row(label, value, cls) {
+      if (value == null || value === "") return;
+      var valEl = typeof value === "string"
+        ? h("span", { class: "drawer-value" + (cls ? " " + cls : ""), text: value })
+        : value;
+      meta.appendChild(h("div", { class: "drawer-row" }, h("span", { class: "drawer-label", text: label }), valEl));
+    }
+    row("phase", p.title + (p.iteration && p.iteration > 1 ? " · iteration " + p.iteration : ""));
+    var runnerId = s.agent || s.api;
+    if (runnerId) row("runner", runnerId + (s.model ? " · " + s.model : "") + (s.effort ? " · " + s.effort : ""));
+    else if (s.model) row("runner", s.model);
+    if (s.worktree) {
+      row("worktree", "⎇ " + s.worktree.branch);
+      row("worktree dir", s.worktree.cwd, "mono");
+    } else if (s.cwd) {
+      row("cwd", s.cwd, "mono");
+    }
+    if (s.startedAt) row("started", new Date(s.startedAt).toLocaleTimeString());
+    if (s.status === "running" && s.startedAt) {
+      row("elapsed", h("span", { class: "drawer-value elapsed", "data-since": String(s.startedAt), text: "⏱ " + fmtElapsed(Date.now() - s.startedAt) }));
+    }
+    if (s.result) {
+      row("duration", fmtElapsed(s.result.durationMs));
+      if (s.result.costUsd) row("cost", "$" + s.result.costUsd.toFixed(4));
+      var tokenLine = fmtTokenSummary(s.result.tokens);
+      if (tokenLine) row("tokens", tokenLine);
+      if (s.result.exitCode !== undefined) row("exit code", String(s.result.exitCode));
+    }
+    if (s.dependsOn && s.dependsOn.length) row("inputs", s.dependsOn.join(", "));
+    if (s.item) row("item", "#" + s.item.index + " from " + s.item.sourceStepId + ": " + truncate(s.item.value, 200));
+    if (s.gate) row("gate", (s.gate.passed ? "passed" : "blocked") + (s.gate.target ? " → " + s.gate.target : ""));
+    if (s.status === "running" && s.activity) row("activity", s.activity);
+    if (s.status === "error" && s.result && s.result.error) row("error", s.result.error, "err");
+    drawer.appendChild(meta);
+
+    var body = ((s.result && s.result.output) || s.text || "").trim();
+    var followNote = h("span", {
+      class: "drawer-follow" + (S.drawerScroll.follow ? " on" : ""),
+      text: s.status === "running" ? (S.drawerScroll.follow ? "following" : "paused — scroll to bottom to follow") : ""
+    });
+    var copyBtn = h("button", { class: "btn small", text: "Copy", title: "Copy the full output", onClick: function () {
+      if (navigator.clipboard) navigator.clipboard.writeText(body).catch(function () {});
+    } });
+    drawer.appendChild(h("div", { class: "drawer-outhead" },
+      h("span", { class: "drawer-outlabel", text: "output" + (body ? " · " + body.length.toLocaleString() + " chars" : "") }),
+      followNote,
+      copyBtn
+    ));
+    var pre = h("pre", { class: "drawer-output" + (s.status === "error" ? " err" : "") });
+    pre.textContent = body || (s.activity || "no output yet");
+    pre.addEventListener("scroll", function () {
+      var atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 4;
+      S.drawerScroll = { follow: atBottom, top: pre.scrollTop };
+      followNote.className = "drawer-follow" + (atBottom ? " on" : "");
+      if (s.status === "running") followNote.textContent = atBottom ? "following" : "paused — scroll to bottom to follow";
+    });
+    drawer.appendChild(pre);
+    // Position after layout: follow pins to the newest output.
+    pre.scrollTop = S.drawerScroll.follow ? pre.scrollHeight : S.drawerScroll.top;
   }
 
   function renderApproval(s) {
@@ -1049,10 +1247,12 @@
     }
     var total = steps.length;
     var doneN = steps.filter(function (s) { return s.status === "done" || s.status === "error"; }).length;
+    var runningN = steps.filter(function (s) { return s.status === "running"; }).length;
     var bar = document.getElementById("progressBar");
     var pct = total ? Math.round((doneN / total) * 100) : 0;
     bar.style.width = pct + "%";
-    document.getElementById("progressText").textContent = doneN + " / " + total + " steps";
+    document.getElementById("progressText").textContent =
+      doneN + " / " + total + " steps" + (runningN ? " · " + runningN + " running" : "");
 
     // Live cost/token ticker + budget badge.
     var cost = 0, tokens = emptyTokens();
@@ -1088,6 +1288,7 @@
       }
     }
     S.runState = SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || S.spec);
+    S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
     setBanner("", "");
     document.getElementById("statusLine").style.display = "flex";
     var payload = { workflow: S.selected, input: input, fresh: document.getElementById("freshChk").checked };
@@ -1157,7 +1358,9 @@
   function startTimer() {
     stopTimer();
     S.timer = setInterval(function () {
-      document.getElementById("elapsed").textContent = ((Date.now() - S.startedAt) / 1000).toFixed(1) + "s";
+      document.getElementById("elapsed").textContent = fmtElapsed(Date.now() - S.startedAt);
+      // Tick every per-step live timer (cards + drawer) in the same pass.
+      updateLiveTimers();
     }, 200);
   }
   function stopTimer() { if (S.timer) { clearInterval(S.timer); S.timer = null; } }
@@ -2121,7 +2324,9 @@
     if (e.target === document.getElementById("overlay")) closeModal();
   });
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && document.getElementById("overlay").classList.contains("show")) closeModal();
+    if (e.key !== "Escape") return;
+    if (document.getElementById("overlay").classList.contains("show")) closeModal();
+    else if (S.detail) closeDetail();
   });
 
   loadWorkflows();
