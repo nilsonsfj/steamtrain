@@ -25,11 +25,13 @@ export const staticOutputScroll: OutputScroll = { offset: 0, follow: false };
 export const MAX_OUTPUT_LINES = 5000;
 
 /**
- * Split `text` into display lines hard-wrapped at `width` columns. Keeps blank
- * lines (they carry paragraph structure) and never returns an empty array for
- * non-empty text. Capped at {@link MAX_OUTPUT_LINES}, newest lines win.
+ * Split `text` into display lines hard-wrapped at `width` columns. Keeps
+ * interior blank lines (they carry paragraph structure); empty text wraps to
+ * no lines at all, so an idle pane reports a zero-line window instead of a
+ * phantom "lines 1–1". Capped at {@link MAX_OUTPUT_LINES}, newest lines win.
  */
 export function wrapOutputLines(text: string, width: number): string[] {
+  if (text.length === 0) return [];
   const cols = Math.max(4, width);
   const out: string[] = [];
   for (const raw of text.split("\n")) {

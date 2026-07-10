@@ -984,7 +984,9 @@
     // that follows the stream until the reader scrolls up; scrolling back to
     // the bottom re-engages following. Position survives re-renders via
     // S.tailScroll (see applyTailScroll).
-    var tailText = s.text ? tail(s.text, 20000) : "";
+    // 10k chars per card bounds total DOM size with many parallel steps
+    // streaming at once; the drawer shows the untruncated output.
+    var tailText = s.text ? tail(s.text, 10000) : "";
     if (tailText) {
       var tailEl = h("div", { class: "tail show", "data-key": key, text: tailText });
       tailEl.addEventListener("scroll", function () {

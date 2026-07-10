@@ -13,6 +13,10 @@ describe("wrapOutputLines", () => {
     expect(wrapOutputLines("a\n\nb", 10)).toEqual(["a", "", "b"]);
   });
 
+  it("wraps empty text to no lines (no phantom 'lines 1–1' window)", () => {
+    expect(wrapOutputLines("", 10)).toEqual([]);
+  });
+
   it("hard-wraps long lines at the column budget", () => {
     expect(wrapOutputLines("abcdefghij", 4)).toEqual(["abcd", "efgh", "ij"]);
   });

@@ -115,6 +115,35 @@ describe("workflow (sub-workflow) step", () => {
     expect(workflowOk(events)).toBe(true);
   });
 
+  it("namespaces the child's step_workspace events like other step events", async () => {
+    const cwd = await tempDir();
+    const events = await runToEvents(
+      parentSpec,
+      deps(cwd, {
+        resolveWorkflow: (name) => (name === "child" ? childSpec : undefined),
+        agentWorkspace: {
+          async allocate(request) {
+            return {
+              cwd: `/isolated/${request.stepId}`,
+              root: `/isolated/${request.stepId}`,
+              branch: `steamtrain/test/${request.stepId}`,
+              dispose: () => {},
+            };
+          },
+        },
+      }),
+    );
+    const ws = events.filter((ev) => ev.kind === "step_workspace");
+    // Exactly one workspace announcement bubbles up for the child's agent
+    // step, carrying namespaced ids so it matches the surfaced tree.
+    expect(ws).toHaveLength(1);
+    expect(ws[0]?.kind === "step_workspace" && ws[0].stepId).toBe("call::greet");
+    expect(ws[0]?.kind === "step_workspace" && ws[0].phaseId).toBe("call::only");
+    expect(ws[0]?.kind === "step_workspace" && ws[0].worktree?.branch).toBe(
+      "steamtrain/test/greet",
+    );
+  });
+
   it("rolls up the child's leaf cost onto the parent run without double-counting the workflow step itself", async () => {
     const cwd = await tempDir();
     const events = await runToEvents(

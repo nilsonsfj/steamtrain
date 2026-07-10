@@ -92,7 +92,10 @@ export function WorkflowView({
   }, [state.phases]);
   const foundIndex = rows.findIndex((row) => row.kind === "step" && row.flatIndex === clampedIndex);
   const selectedRowIndex = foundIndex >= 0 ? foundIndex : 0;
-  const listBudget = Math.max(1, height - (selected ? 10 : 4));
+  // Reserve rows for the bottom detail panel only when its conditional lines
+  // actually render, so a plain step doesn't cost the tree a row for nothing.
+  const detailRows = selected ? 9 + (selected.worktree || selected.cwd ? 1 : 0) : 4;
+  const listBudget = Math.max(1, height - detailRows);
   const rowWindow = selectVisibleWindow(rows, selectedRowIndex, listBudget);
 
   const cost = sumCost(state);
