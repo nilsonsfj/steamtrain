@@ -290,9 +290,13 @@ export function createLiveRunStore(
         // it is old enough to rule out an in-progress create.
         if (sweep) {
           const dir = join(rootDir, entries[i]!);
-          const age = await stat(dir)
-            .then((info) => now() - info.mtimeMs)
-            .catch(() => 0);
+          // ENOENT ⇒ the dir vanished concurrently (nothing to do). Any other
+          // stat failure ⇒ treat as expired and still attempt the delete —
+          // otherwise a permissions-broken debris dir would persist forever.
+          const age = await stat(dir).then(
+            (info) => now() - info.mtimeMs,
+            (statErr) => (isEnoent(statErr) ? 0 : Number.POSITIVE_INFINITY),
+          );
           if (age > ttlMs) await rm(dir, { recursive: true, force: true }).catch(() => {});
         }
         continue;
