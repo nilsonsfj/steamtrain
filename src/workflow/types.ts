@@ -669,6 +669,8 @@ export interface StepResult {
 export const MAX_STEPS = 1000;
 /** Hard ceiling on parallel agents; the configured value is clamped to this. */
 export const MAX_CONCURRENCY = 16;
+/** Hard ceiling on `maxParallelRuns` (whole runs executing at once). */
+export const MAX_PARALLEL_RUNS_CEILING = 16;
 /** Default per-loop iteration cap when a loop gate omits `maxIterations`. */
 export const DEFAULT_LOOP_MAX_ITERATIONS = 10;
 /** Hard ceiling on a loop gate's `maxIterations` (runaway backstop). */

@@ -51,6 +51,7 @@ import {
   addTokensInto,
   emptyTokens,
   isAgentBackedStep,
+  isTerminalLiveRunStatus,
   planWorkflow,
   totalTokens,
   workflowCacheKey,
@@ -85,7 +86,7 @@ import { workflowListNavigation } from "./prompt-editing";
 import { initialPromptHistoryBrowse } from "./prompt-history";
 import { initialTranscript, transcriptReducer } from "./transcript";
 import { useTerminalSize } from "./useTerminalSize";
-import { computeStreamHeight } from "./util";
+import { computeStreamHeight, message } from "./util";
 import { flattenSteps } from "./workflow-state";
 
 // Custom hooks — each owns a cohesive slice of state.
@@ -524,11 +525,68 @@ export function App({
   // ── History hook ─────────────────────────────────────────────────────
   const historyHook = useHistory({
     historyStoreRef: runner.historyStoreRef,
+    liveRunStoreRef: runner.liveRunStoreRef,
     mountedRef,
     resolveWorkflowSpec,
     runWorkflow: runner.runWorkflow,
     setWfNotice: runner.setWfNotice,
   });
+
+  // ── Live-run slash-command bridges (/attach, /cancel-run) ────────────
+  // Feedback goes through the workflow notice line: transcript notices only
+  // render in workspace mode, and these commands live in workflow mode.
+  const attachRunCommand = useCallback(
+    async (runId?: string): Promise<SlashCommandResult> => {
+      const store = runner.liveRunStoreRef.current;
+      const active = (await store.list().catch(() => [])).filter(
+        (run) => !isTerminalLiveRunStatus(run.status),
+      );
+      let id = runId;
+      if (!id) {
+        if (active.length === 0) {
+          runner.setWfNotice("no active runs to attach to (see /runs)");
+          return { handled: true, clearInput: true };
+        }
+        if (active.length > 1) {
+          runner.setWfNotice(
+            `multiple active runs — /attach <runId>: ${active
+              .map((run) => `${run.id.slice(0, 8)}… (${run.workflow})`)
+              .join(", ")}`,
+          );
+          return { handled: true, clearInput: true };
+        }
+        id = active[0]!.id;
+      } else {
+        // Allow unambiguous id prefixes (run ids are long UUIDs).
+        const matches = active.filter((run) => run.id === id || run.id.startsWith(id!));
+        if (matches.length === 1) id = matches[0]!.id;
+        else if (matches.length > 1) {
+          runner.setWfNotice(`'${id}' matches ${matches.length} runs — be more specific`);
+          return { handled: true, clearInput: true };
+        }
+      }
+      if (mode !== "workflow") switchMode("workflow");
+      picker.setWfPreview(null);
+      runner.attachRun(id);
+      return { handled: true, clearInput: true };
+    },
+    [
+      runner.liveRunStoreRef,
+      runner.attachRun,
+      runner.setWfNotice,
+      mode,
+      switchMode,
+      picker.setWfPreview,
+    ],
+  );
+
+  const cancelLiveRunCommand = useCallback(
+    async (runId?: string): Promise<SlashCommandResult> => {
+      runner.setWfNotice(await runner.cancelLiveRun(runId));
+      return { handled: true, clearInput: true };
+    },
+    [runner.cancelLiveRun, runner.setWfNotice],
+  );
 
   // ── Slash Context hook ───────────────────────────────────────────────
   // Recompute workflowPickerActive with actual history state.
@@ -584,6 +642,8 @@ export function App({
     updateWorkflowDescription: picker.updateWorkflowDescription,
     userWorkflowNames: picker.userWorkflowNames,
     openHistory: historyHook.openHistory,
+    attachRun: attachRunCommand,
+    cancelLiveRun: cancelLiveRunCommand,
     draftResolution: picker.draftResolution,
     healthyAgents: picker.healthyAgents,
     setDraftOverride: picker.setDraftOverride,
@@ -1141,6 +1201,8 @@ export function App({
       orchestrator.workflowSource(activeWorkflowName))
     : undefined;
 
+  const attachedRun = runner.attachedRunIdRef.current !== null;
+
   return (
     <Box flexDirection="column" width={columns}>
       <StatusBar
@@ -1339,6 +1401,7 @@ export function App({
                       prompt.promptEditing,
                       isSlashCommandInput(prompt.value),
                       !!runner.wfStepDetails,
+                      attachedRun,
                     )}
           </Text>
         </Box>
@@ -1360,16 +1423,19 @@ function hint(
   promptEditing: boolean,
   slashInput: boolean,
   wfStepDetails: boolean,
+  attachedRun = false,
 ): string {
   const completeHint = suggestionMenuOpen ? " · ↑/↓ complete · Tab/Enter pick · Esc cancel" : "";
   const historyHint = " · ↑/↓ history";
   const resumeHint = canResume ? " · Enter resume" : "";
   if (running) {
+    // An attached run is owned elsewhere: Ctrl+Q only detaches the view.
+    const stopHint = attachedRun ? "Ctrl+Q detach · /cancel-run cancel" : "Ctrl+Q cancel";
     if (mode === "workflow" && wfStepDetails) {
-      return "↑/↓ step · ←/Esc back · Ctrl+Q cancel · /exit quit · Ctrl+C quit";
+      return `↑/↓ step · ←/Esc back · ${stopHint} · /exit quit · Ctrl+C quit`;
     }
     return mode === "workflow"
-      ? "Ctrl+Q cancel · /exit quit · Ctrl+C quit"
+      ? `${stopHint} · /exit quit · Ctrl+C quit`
       : "Esc cancel · /exit quit · Ctrl+C quit";
   }
   if (mode === "workflow") {
@@ -1402,10 +1468,6 @@ function historyHintText(history: HistoryUiState): string {
     return `↑/↓ step · → details · r re-run${retryHint} · ←/Esc back to list · Ctrl+C quit`;
   }
   return "↑/↓ select · Enter inspect · Esc close · Ctrl+C quit";
-}
-
-function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 /**
@@ -1454,6 +1516,7 @@ function HistoryPanel({
   return (
     <WorkflowHistory
       runs={history.runs}
+      liveRuns={history.liveRuns}
       selectedIndex={history.index}
       loading={history.loading}
       error={history.error}

@@ -227,6 +227,7 @@ export function mergeConfig(
     apis: mergeInstanceLists(base.apis, override.apis),
     ...mergeTimeoutFields(base, override),
     maxConcurrency: override.maxConcurrency ?? base.maxConcurrency,
+    maxParallelRuns: override.maxParallelRuns ?? base.maxParallelRuns,
     loopMaxIterations: override.loopMaxIterations ?? base.loopMaxIterations,
   };
 

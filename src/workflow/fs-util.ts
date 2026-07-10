@@ -13,6 +13,16 @@ export function isOutside(rel: string): boolean {
   return rel === ".." || rel.startsWith(`..${sep}`) || resolve(rel) === rel;
 }
 
+/**
+ * Restrict an id to filesystem-safe characters for use as a single path
+ * component. Ids are normally UUIDs/step ids, but be defensive against path
+ * traversal. Shared by the history and live-run stores (their on-disk names
+ * must agree so `::` in namespaced step ids always maps to `__`).
+ */
+export function sanitizePathComponent(id: string): string {
+  return id.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
 /** True when an error is a "file/dir does not exist" (ENOENT) failure. */
 export function isEnoent(err: unknown): boolean {
   return Boolean(

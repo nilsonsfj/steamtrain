@@ -140,6 +140,25 @@ export function matchApprovalKey(
 }
 
 /**
+ * Find the pending checkpoint matching a decision request against a list of
+ * pending approvals (the live-run registry's `pendingApprovals`). The list
+ * carries NAMESPACED step ids (from the event stream), while a decider may
+ * pass either form — same matching rule as {@link matchApprovalKey}, for the
+ * list-of-objects shape used by external (cross-process) approvals.
+ */
+export function matchPendingApproval<T extends { stepId: string; iteration: number }>(
+  pending: readonly T[],
+  stepId: string,
+  iteration?: number,
+): T | undefined {
+  return pending.find(
+    (p) =>
+      (p.stepId === stepId || p.stepId.endsWith(`::${stepId}`)) &&
+      (iteration === undefined || p.iteration === iteration),
+  );
+}
+
+/**
  * The automated decision policy for a headless run. `approve-all` approves
  * every checkpoint; `reject-fail` / `reject-stop` reject with that disposition.
  */

@@ -1,8 +1,16 @@
 import { useCallback, useRef, useState } from "react";
-import type { RerunMode, RunRecord, RunRecordSummary, StepResult } from "../workflow";
+import type {
+  LiveRunMeta,
+  LiveRunStore,
+  RerunMode,
+  RunRecord,
+  RunRecordSummary,
+  StepResult,
+} from "../workflow";
 import {
   createWorkflowHistoryStore,
   isRerunError,
+  isTerminalLiveRunStatus,
   planRerun,
   rerunDowngradeMessage,
 } from "../workflow";
@@ -14,6 +22,8 @@ import { workflowStateFromRecord } from "./workflow-state";
 export interface HistoryUiState {
   view: "list" | "detail";
   runs: RunRecordSummary[];
+  /** In-flight (queued/running) runs from the live registry, listed above past runs. */
+  liveRuns: LiveRunMeta[];
   index: number;
   loading: boolean;
   error?: string;
@@ -26,6 +36,8 @@ export interface HistoryUiState {
 
 export interface UseHistoryParams {
   historyStoreRef: React.RefObject<ReturnType<typeof createWorkflowHistoryStore>>;
+  /** Live-run registry, for the in-flight section of the browser. */
+  liveRunStoreRef: React.RefObject<LiveRunStore>;
   mountedRef: React.RefObject<boolean>;
   resolveWorkflowSpec: (name: string) => import("../workflow").WorkflowSpec | undefined;
   runWorkflow: (
@@ -51,6 +63,7 @@ export interface UseHistoryReturn {
 
 export function useHistory({
   historyStoreRef,
+  liveRunStoreRef,
   mountedRef,
   resolveWorkflowSpec,
   runWorkflow,
@@ -62,6 +75,7 @@ export function useHistory({
     setHistory({
       view: "list",
       runs: [],
+      liveRuns: [],
       index: 0,
       loading: true,
       stepIndex: 0,
@@ -69,16 +83,22 @@ export function useHistory({
     });
     void (async () => {
       try {
-        const runs = await historyStoreRef.current!.list();
+        // In-flight runs (queued/running) render above the recorded history;
+        // Enter on one attaches instead of opening a record.
+        const [runs, allLive] = await Promise.all([
+          historyStoreRef.current!.list(),
+          liveRunStoreRef.current!.list().catch(() => []),
+        ]);
+        const liveRuns = allLive.filter((run) => !isTerminalLiveRunStatus(run.status));
         if (!mountedRef.current) return;
-        setHistory((prev) => (prev ? { ...prev, runs, loading: false } : prev));
+        setHistory((prev) => (prev ? { ...prev, runs, liveRuns, loading: false } : prev));
       } catch (err) {
         if (!mountedRef.current) return;
         setHistory((prev) => (prev ? { ...prev, loading: false, error: message(err) } : prev));
       }
     })();
     return { handled: true as const, clearInput: true as const };
-  }, [historyStoreRef, mountedRef]);
+  }, [historyStoreRef, liveRunStoreRef, mountedRef]);
 
   const openHistoryRecord = useCallback(
     (id: string) => {
@@ -115,15 +135,17 @@ export function useHistory({
         setWfNotice(plan.error);
         return;
       }
-      setHistory(null);
       if (plan.downgraded) {
         setWfNotice(rerunDowngradeMessage(plan.downgraded));
       }
-      runWorkflow(plan.workflow, plan.input, {
+      const started = runWorkflow(plan.workflow, plan.input, {
         fresh: mode === "rerun" || Boolean(plan.downgraded),
         seed: plan.seedCache,
         params: plan.params,
       });
+      // Only leave the history browser once the run actually launched; a
+      // refused launch (re-entrancy guard, unknown workflow) keeps the view.
+      if (started) setHistory(null);
     },
     [resolveWorkflowSpec, runWorkflow, setWfNotice],
   );

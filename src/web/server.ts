@@ -14,18 +14,24 @@ import { type ApiDoctorResult, type DoctorResult, runApiDoctor, runDoctor } from
 import { Orchestrator } from "../orchestrator";
 import {
   DEFAULT_STEP_TIMEOUT_SEC,
+  type LiveRunMeta,
+  type LiveRunStore,
   type LoadedWorkflowCatalog,
   WORKFLOW_CACHE_DIR,
   WORKFLOW_HISTORY_DIR,
+  WORKFLOW_RUNS_DIR,
   WorkflowAuthor,
   type WorkflowHistoryStore,
   type WorkflowSessionOverrides,
   type WorkflowSourceKind,
   type WorkflowSpec,
   applyWorkflowSessionOverrides,
+  createLiveRunStore,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   isAgentBackedStep,
+  isTerminalLiveRunStatus,
+  matchPendingApproval,
   parseSessionOverrides,
   planWorkflow,
   resolveInputs,
@@ -129,6 +135,12 @@ export interface WebServerDeps {
   author?: WorkflowAuthor;
   /** Optional run history; when absent, history routes return empty/404. */
   history?: WorkflowHistoryStore;
+  /**
+   * Optional shared live-run registry: lists CLI/TUI-owned in-flight runs
+   * alongside the manager's own, and lets the stream/cancel/approval routes
+   * reach runs owned by other processes.
+   */
+  liveRuns?: LiveRunStore;
   workflowSource?: (name: string) => WorkflowSourceKind | undefined;
   doctor?: () => DoctorResult[];
   doctorError?: () => string | null;
@@ -841,6 +853,48 @@ async function handle(
     return;
   }
 
+  // The in-flight run registry: the manager's own runs merged with runs owned
+  // by other processes (CLI --detach, TUI) from the shared live-run store.
+  if (method === "GET" && path === "/api/runs") {
+    const local = deps.runs.list();
+    const localIds = new Set(local.map((r) => r.id));
+    const external = deps.liveRuns
+      ? (await deps.liveRuns.list()).filter((r) => !localIds.has(r.id))
+      : [];
+    const runs = [
+      ...local.map((r) => ({
+        id: r.id,
+        workflow: r.workflow,
+        input: r.input,
+        status: r.queued ? "queued" : r.status,
+        ok: r.ok,
+        error: r.error,
+        startedAt: r.startedAt,
+        endedAt: r.endedAt,
+        source: "web",
+        detached: false,
+        external: false,
+        pendingApprovals: r.pendingApprovals,
+      })),
+      ...external.map((m) => ({
+        id: m.id,
+        workflow: m.workflow,
+        input: m.input,
+        status: m.status,
+        ok: m.ok,
+        error: m.error,
+        startedAt: m.startedAt ?? m.createdAt,
+        endedAt: m.endedAt,
+        source: m.source,
+        detached: m.detached,
+        external: true,
+        pendingApprovals: m.pendingApprovals,
+      })),
+    ].sort((a, b) => b.startedAt - a.startedAt);
+    sendJson(res, 200, { runs });
+    return;
+  }
+
   if (method === "POST" && path === "/api/runs") {
     const body = await readBody(req);
     let parsed: {
@@ -911,13 +965,25 @@ async function handle(
 
   const streamMatch = path.match(/^\/api\/runs\/([^/]+)\/stream$/);
   if (method === "GET" && streamMatch) {
-    streamRun(streamMatch[1]!, deps.runs, res);
+    const runId = decodeURIComponent(streamMatch[1]!);
+    // Manager-owned runs stream from memory; runs owned by another process
+    // (CLI --detach, TUI) are tailed from the shared live-run store.
+    if (!deps.runs.get(runId) && deps.liveRuns && (await deps.liveRuns.get(runId))) {
+      streamExternalRun(runId, deps.liveRuns, res);
+      return;
+    }
+    streamRun(runId, deps.runs, res);
     return;
   }
 
   const cancelMatch = path.match(/^\/api\/runs\/([^/]+)\/cancel$/);
   if (method === "POST" && cancelMatch) {
-    const ok = deps.runs.cancel(cancelMatch[1]!);
+    const runId = decodeURIComponent(cancelMatch[1]!);
+    let ok = deps.runs.cancel(runId);
+    if (!ok && deps.liveRuns) {
+      // Externally-owned run: drop the cancel marker; its owner polls it.
+      ok = await deps.liveRuns.requestCancel(runId);
+    }
     sendJson(res, ok ? 200 : 404, { canceled: ok });
     return;
   }
@@ -951,17 +1017,31 @@ async function handle(
       parsed.rejectDisposition === "fail" || parsed.rejectDisposition === "stop"
         ? parsed.rejectDisposition
         : undefined;
-    const ok = deps.runs.resolveApproval(
-      approvalMatch[1]!,
-      parsed.stepId,
-      {
-        approved: parsed.approved,
-        by: "human:web",
-        note: typeof parsed.note === "string" ? parsed.note : undefined,
-        rejectDisposition: parsed.approved ? undefined : rejectDisposition,
-      },
-      iteration,
-    );
+    const runId = decodeURIComponent(approvalMatch[1]!);
+    const decision: import("../workflow").ApprovalDecision = {
+      approved: parsed.approved,
+      by: "human:web",
+      note: typeof parsed.note === "string" ? parsed.note : undefined,
+      rejectDisposition: parsed.approved ? undefined : rejectDisposition,
+    };
+    let ok = deps.runs.resolveApproval(runId, parsed.stepId, decision, iteration);
+    if (!ok && deps.liveRuns) {
+      // Externally-owned run: write the decision file; the owner's approval
+      // provider polls it (this is how a detached run's checkpoint resolves).
+      const meta = await deps.liveRuns.get(runId);
+      if (meta && !isTerminalLiveRunStatus(meta.status)) {
+        const target = matchPendingApproval(meta.pendingApprovals ?? [], parsed.stepId, iteration);
+        if (target) {
+          await deps.liveRuns.writeApprovalDecision(
+            runId,
+            target.stepId,
+            target.iteration,
+            decision,
+          );
+          ok = true;
+        }
+      }
+    }
     sendJson(res, ok ? 200 : 404, { resolved: ok });
     return;
   }
@@ -1104,6 +1184,77 @@ async function streamGenerate(
   }
 }
 
+/**
+ * SSE-stream a run owned by another process (CLI --detach, TUI): replay the
+ * recorded events from the live-run store, tail live appends, then close with
+ * a terminal status frame once the run's meta settles.
+ */
+function streamExternalRun(runId: string, store: LiveRunStore, res: ServerResponse): void {
+  res.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    "x-content-type-options": "nosniff",
+    connection: "keep-alive",
+  });
+  res.write(": open\n\n");
+
+  const ac = new AbortController();
+  res.on("close", () => ac.abort());
+  const heartbeat = startSseHeartbeat(res);
+
+  void (async () => {
+    try {
+      for await (const event of store.tailEvents(runId, { signal: ac.signal })) {
+        res.write(`data: ${JSON.stringify({ type: "event", event })}\n\n`);
+      }
+      if (!ac.signal.aborted) {
+        const meta: LiveRunMeta | undefined = await store.get(runId);
+        res.write(
+          `data: ${JSON.stringify({
+            type: "status",
+            status: meta?.status ?? "error",
+            ok: meta?.ok,
+            error: meta?.error ?? (meta ? undefined : "unknown run"),
+          })}\n\n`,
+        );
+      }
+    } catch {
+      if (!ac.signal.aborted && !res.writableEnded) {
+        res.write(
+          `data: ${JSON.stringify({ type: "status", status: "error", error: "stream failed" })}\n\n`,
+        );
+      }
+    } finally {
+      clearInterval(heartbeat);
+      try {
+        if (!res.writableEnded) res.end();
+      } catch {
+        // The socket may already be destroyed; nothing left to clean up.
+      }
+    }
+  })();
+}
+
+/**
+ * Periodic SSE comment frames so proxies/load balancers with idle timeouts
+ * don't silently sever a long-quiet stream (a run parked on an approval can
+ * be idle for minutes). Returns the timer; callers clear it on stream end.
+ */
+function startSseHeartbeat(
+  res: ServerResponse,
+  intervalMs = 25_000,
+): ReturnType<typeof setInterval> {
+  const timer = setInterval(() => {
+    try {
+      if (!res.writableEnded) res.write(": heartbeat\n\n");
+    } catch {
+      clearInterval(timer);
+    }
+  }, intervalMs);
+  timer.unref?.();
+  return timer;
+}
+
 function streamRun(runId: string, runs: WorkflowRunManager, res: ServerResponse): void {
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
@@ -1114,9 +1265,18 @@ function streamRun(runId: string, runs: WorkflowRunManager, res: ServerResponse)
   // A first comment line opens the stream promptly for the browser.
   res.write(": open\n\n");
 
+  const heartbeat = startSseHeartbeat(res);
   const write = (payload: string, terminal: boolean): void => {
-    res.write(`data: ${payload}\n\n`);
-    if (terminal) res.end();
+    try {
+      res.write(`data: ${payload}\n\n`);
+      if (terminal) {
+        clearInterval(heartbeat);
+        res.end();
+      }
+    } catch {
+      // Socket destroyed mid-write; the 'close' handler unsubscribes.
+      clearInterval(heartbeat);
+    }
   };
 
   const unsubscribe = runs.subscribe(runId, write);
@@ -1124,10 +1284,14 @@ function streamRun(runId: string, runs: WorkflowRunManager, res: ServerResponse)
     res.write(
       `data: ${JSON.stringify({ type: "status", status: "error", error: "unknown run" })}\n\n`,
     );
+    clearInterval(heartbeat);
     res.end();
     return;
   }
-  res.on("close", () => unsubscribe());
+  res.on("close", () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
 }
 
 export interface StartWebUiOptions {
@@ -1186,6 +1350,7 @@ export async function startWebUi(
 
   const cacheStore = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
   const historyStore = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
+  const liveRunStore = createLiveRunStore(join(cwd, WORKFLOW_RUNS_DIR), { historyStore });
   maxConcurrentGenerations = options.maxConcurrentGenerations ?? DEFAULT_MAX_CONCURRENT_GENERATIONS;
   const runs = new WorkflowRunManager({
     host: orchestrator,
@@ -1194,6 +1359,7 @@ export async function startWebUi(
     cwd,
     maxConcurrent: options.maxConcurrent ?? 5,
     config: liveConfig,
+    liveRuns: liveRunStore,
   });
   const author = new WorkflowAuthor({
     host: orchestrator,
@@ -1208,6 +1374,7 @@ export async function startWebUi(
     runs,
     author,
     history: historyStore,
+    liveRuns: liveRunStore,
     workflowSource: (name) => orchestrator.workflowSource(name),
     doctor: () => doctorState.results,
     doctorError: () => doctorState.error,

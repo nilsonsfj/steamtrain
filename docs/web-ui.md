@@ -57,8 +57,9 @@ browser ──POST /api/runs──▶ run manager ──▶ Orchestrator.runWork
 | `/api/meta` | GET | agents + APIs, models, efforts, health (for the create form) |
 | `/api/doctor` | GET | current agent health (`doctor`) and llm-API readiness (`apis`) |
 | `/api/runs` | POST | `{ workflow, input, fresh? }` → `{ runId }` |
-| `/api/runs/:id/stream` | GET | Server-Sent Events: each `WorkflowEvent`, then a terminal `status` frame |
-| `/api/runs/:id/cancel` | POST | abort a running workflow |
+| `/api/runs` | GET | in-flight run registry: server-owned runs merged with external (CLI `--detach` / TUI) runs from `.steamtrain/runs/` |
+| `/api/runs/:id/stream` | GET | Server-Sent Events: each `WorkflowEvent` (plus non-terminal `queued` frames), then a terminal `status` frame; tails externally-owned runs from the live-run registry |
+| `/api/runs/:id/cancel` | POST | abort a running workflow (external runs: drops the registry's cancel marker) |
 | `/api/history` | GET | past-run summaries (newest first) |
 | `/api/history/:id` | GET | one past run's full record (phase → step tree) |
 | `/api/history` / `/api/history/:id` | DELETE | clear all runs, or delete one |

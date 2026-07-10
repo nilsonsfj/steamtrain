@@ -45,6 +45,9 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
 
         if (key.ctrl && input === "c") {
           runner.abortRef.current?.abort();
+          // An /attach tail holds a ref'd polling timer; without aborting it the
+          // process would outlive the unmounted UI until the attached run ends.
+          runner.attachAbortRef.current?.abort();
           exit();
           return;
         }
@@ -78,6 +81,9 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
             return;
           }
           if (historyHook.history.view === "list") {
+            // The list shows in-flight runs first, then recorded history.
+            const liveCount = historyHook.history.liveRuns.length;
+            const total = liveCount + historyHook.history.runs.length;
             if (key.upArrow) {
               historyHook.setHistory({
                 ...historyHook.history,
@@ -86,14 +92,21 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
             } else if (key.downArrow) {
               historyHook.setHistory({
                 ...historyHook.history,
-                index: Math.min(
-                  Math.max(0, historyHook.history.runs.length - 1),
-                  historyHook.history.index + 1,
-                ),
+                index: Math.min(Math.max(0, total - 1), historyHook.history.index + 1),
               });
             } else if (key.return) {
-              const run = historyHook.history.runs[historyHook.history.index];
-              if (run) historyHook.openHistoryRecord(run.id);
+              const index = historyHook.history.index;
+              if (index < liveCount) {
+                // Enter on an in-flight run attaches to it live.
+                const live = historyHook.history.liveRuns[index];
+                if (live) {
+                  historyHook.setHistory(null);
+                  runner.attachRun(live.id);
+                }
+              } else {
+                const run = historyHook.history.runs[index - liveCount];
+                if (run) historyHook.openHistoryRecord(run.id);
+              }
             }
             return;
           }

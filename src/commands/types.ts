@@ -98,8 +98,15 @@ export interface SlashCommandContext {
   ) => SlashCommandResult | Promise<SlashCommandResult>;
   /** Names of writable (user + project) workflows, for `/delete-workflow` and `/rename-workflow` completion. */
   userWorkflowNames?: readonly string[];
-  /** Open the past-run history browser (TUI only). */
+  /** Open the run browser: in-flight runs + past-run history (TUI only). */
   openHistory?: () => SlashCommandResult;
+  /**
+   * Attach the live view to an in-flight run (TUI only). With no id, attaches
+   * to the single active run or lists the candidates.
+   */
+  attachRun?: (runId?: string) => SlashCommandResult | Promise<SlashCommandResult>;
+  /** Cancel a live run via the shared registry; no id targets the attached run (TUI only). */
+  cancelLiveRun?: (runId?: string) => SlashCommandResult | Promise<SlashCommandResult>;
   /**
    * Drafting agent/model for `/create-workflow`, set via `/model` in the workflow
    * picker (TUI only). Present only when sitting on the picker (no step target).

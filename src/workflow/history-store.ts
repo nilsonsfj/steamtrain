@@ -1,6 +1,6 @@
 import { readFile, readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { atomicWriteFile, isEnoent } from "./fs-util";
+import { atomicWriteFile, isEnoent, sanitizePathComponent } from "./fs-util";
 import {
   RUN_RECORD_VERSION,
   type RunRecord,
@@ -42,12 +42,7 @@ export function createWorkflowHistoryStore(
 }
 
 function recordFileName(id: string): string {
-  return `${sanitizeId(id)}.json`;
-}
-
-/** Run ids are UUIDs/timestamps, but be defensive against path traversal. */
-function sanitizeId(id: string): string {
-  return id.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `${sanitizePathComponent(id)}.json`;
 }
 
 export async function saveRunRecord(

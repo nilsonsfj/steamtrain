@@ -102,24 +102,13 @@ outside the repo).
 
 ## 1.5 Detached runs and a run queue (reattach from any UI)
 
-**The gap:** a run is tied to the TUI/web session that started it. Long
-workflows (15-minute step timeouts × phases) hold a terminal hostage; closing
-the laptop lid kills the run; you can't kick off two workflows and check back.
-
-**The feature:**
-- `steamtrain workflow run … --detach` → runs under a lightweight daemon (or
-  double-forked process) that keeps writing events to the existing history
-  store.
-- `steamtrain workflow attach <runId>` and TUI `/attach` replay the record so
-  far, then tail live events; the web UI lists in-flight runs alongside
-  history.
-- A simple queue: runs beyond a concurrency limit wait rather than colliding
-  over the cache/worktrees.
-
-**Why it matters:** real workflows are long. Fire-and-return is how people
-actually want to use an orchestrator, and the history store + shared reducer
-mean 80% of the machinery (persist events, fold them into a view) already
-exists.
+> Shipped — see [`detached-runs.md`](detached-runs.md). `workflow run
+> --detach` runs under a background process; `workflow
+> attach/runs/cancel/approve`, TUI `/attach` + the run browser, and the web
+> UI's Active runs panel all attach/cancel/approve any process's runs through
+> the shared `.steamtrain/runs/` registry; `maxParallelRuns` queues excess
+> runs across processes. Remaining follow-up: detaching an *already-started*
+> TUI/web run into a background process (today detach is chosen at launch).
 
 ## 1.6 Notifications on run completion / approval needed
 

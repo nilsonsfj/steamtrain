@@ -9,6 +9,7 @@ import {
   LOOP_MAX_ITERATIONS_CEILING,
   type LlmPricing,
   MAX_CONCURRENCY,
+  MAX_PARALLEL_RUNS_CEILING,
   type WorkflowSpec,
   llmPricingSchema,
   workflowSpecSchema,
@@ -29,6 +30,8 @@ export interface SteamtrainConfig {
   workflows?: Record<string, WorkflowSpec>;
   /** Max steps run in parallel within a workflow phase (clamped to MAX_CONCURRENCY). */
   maxConcurrency?: number;
+  /** Max workflow runs executing at once (whole runs, across processes); excess runs queue. */
+  maxParallelRuns?: number;
   /** Default per-loop iteration cap; a loop gate's own `maxIterations` overrides it. */
   loopMaxIterations?: number;
 }
@@ -164,6 +167,7 @@ export const configFileSchema = z
     ...legacyTimeoutFields,
     workflows: z.record(workflowSpecSchema).optional(),
     maxConcurrency: z.number().int().positive().max(MAX_CONCURRENCY).optional(),
+    maxParallelRuns: z.number().int().min(1).max(MAX_PARALLEL_RUNS_CEILING).optional(),
     loopMaxIterations: z.number().int().min(1).max(LOOP_MAX_ITERATIONS_CEILING).optional(),
   })
   .strict();

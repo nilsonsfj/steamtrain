@@ -2,6 +2,8 @@ import { agentCommand } from "./builtins/agent";
 import { agentsCommand } from "./builtins/agents";
 import { apiCommand } from "./builtins/api";
 import { apisCommand } from "./builtins/apis";
+import { attachCommand } from "./builtins/attach";
+import { cancelRunCommand } from "./builtins/cancel-run";
 import { cloneWorkflowCommand } from "./builtins/clone-workflow";
 import { createWorkflowCommand } from "./builtins/create-workflow";
 import { deleteWorkflowCommand } from "./builtins/delete-workflow";
@@ -12,6 +14,7 @@ import { historyCommand } from "./builtins/history";
 import { modelCommand } from "./builtins/model";
 import { promptCommand } from "./builtins/prompt";
 import { renameWorkflowCommand } from "./builtins/rename-workflow";
+import { runsCommand } from "./builtins/runs";
 import { saveWorkflowsCommand } from "./builtins/save-workflows";
 import { timeoutCommand } from "./builtins/timeout";
 import { versionCommand } from "./builtins/version";
@@ -36,6 +39,9 @@ const BUILTIN_COMMANDS: SlashCommand[] = [
   describeWorkflowCommand,
   timeoutCommand,
   historyCommand,
+  runsCommand,
+  attachCommand,
+  cancelRunCommand,
 ];
 
 /** Mutable registry — append custom commands at runtime to extend the TUI. */
