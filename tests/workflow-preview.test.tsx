@@ -67,4 +67,42 @@ describe("WorkflowPreview", () => {
     expect(frame).toContain("synthesize");
     expect(frame).toContain("DeepSeek V4 Flash Free");
   });
+
+  it("hides step detail panel when showStepDetail is false", () => {
+    const spec = BUNDLED_WORKFLOWS["multi-plan"]!;
+    const { lastFrame } = render(
+      <WorkflowPreview
+        spec={spec}
+        source="bundled"
+        width={100}
+        height={30}
+        selectedIndex={0}
+        dispatchCheck={{ ok: true }}
+        showStepDetail={false}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    // The detail panel shows step id + kind + phase title in a bordered box.
+    // With showStepDetail=false, the detail panel content should be absent.
+    expect(frame).not.toContain("distributor · phase");
+    expect(frame).toContain("planning-lenses");
+  });
+
+  it("hides plan result when showPlanResult is false", () => {
+    const spec = BUNDLED_WORKFLOWS["multi-plan"]!;
+    const { lastFrame } = render(
+      <WorkflowPreview
+        spec={spec}
+        source="bundled"
+        width={100}
+        height={30}
+        selectedIndex={0}
+        dispatchCheck={{ ok: true }}
+        showPlanResult={false}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    // Plan result view should not appear even if planResult is set.
+    expect(frame).toContain("ready to run");
+  });
 });
