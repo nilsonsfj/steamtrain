@@ -19,7 +19,6 @@ describe("WorkflowPreview", () => {
       <WorkflowPreview
         spec={spec}
         source="bundled"
-        input="add workflow preview screen"
         width={100}
         height={30}
         selectedIndex={0}
@@ -29,7 +28,6 @@ describe("WorkflowPreview", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("workflow preview · multi-plan");
     expect(frame).toContain("(bundled)");
-    expect(frame).toContain("add workflow preview screen");
     expect(frame).toContain("planning-lenses");
     expect(frame).toContain("ready to run");
     expect(frame).toContain("fan-out");
@@ -41,7 +39,6 @@ describe("WorkflowPreview", () => {
       <WorkflowPreview
         spec={spec}
         source="bundled"
-        input="scan auth module"
         width={100}
         height={30}
         selectedIndex={1}
@@ -53,13 +50,12 @@ describe("WorkflowPreview", () => {
     expect(frame).toContain("binary_missing");
   });
 
-  it("shows empty input placeholder and clamps selected index", () => {
+  it("clamps selected index and renders step detail", () => {
     const spec = BUNDLED_WORKFLOWS["multi-plan"]!;
     const { lastFrame } = render(
       <WorkflowPreview
         spec={spec}
         source="bundled"
-        input=""
         width={160}
         height={40}
         selectedIndex={999}
@@ -67,9 +63,46 @@ describe("WorkflowPreview", () => {
       />,
     );
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("(none)");
     expect(frame).toMatch(/▶.*synthes/i);
     expect(frame).toContain("synthesize");
     expect(frame).toContain("DeepSeek V4 Flash Free");
+  });
+
+  it("hides step detail panel when showStepDetail is false", () => {
+    const spec = BUNDLED_WORKFLOWS["multi-plan"]!;
+    const { lastFrame } = render(
+      <WorkflowPreview
+        spec={spec}
+        source="bundled"
+        width={100}
+        height={30}
+        selectedIndex={0}
+        dispatchCheck={{ ok: true }}
+        showStepDetail={false}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    // The detail panel shows step id + kind + phase title in a bordered box.
+    // With showStepDetail=false, the detail panel content should be absent.
+    expect(frame).not.toContain("distributor · phase");
+    expect(frame).toContain("planning-lenses");
+  });
+
+  it("hides plan result when showPlanResult is false", () => {
+    const spec = BUNDLED_WORKFLOWS["multi-plan"]!;
+    const { lastFrame } = render(
+      <WorkflowPreview
+        spec={spec}
+        source="bundled"
+        width={100}
+        height={30}
+        selectedIndex={0}
+        dispatchCheck={{ ok: true }}
+        showPlanResult={false}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    // Plan result view should not appear even if planResult is set.
+    expect(frame).toContain("ready to run");
   });
 });

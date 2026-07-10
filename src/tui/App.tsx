@@ -1093,6 +1093,11 @@ export function App({
       runner.setWfNotice("type input in the prompt before planning");
       return;
     }
+    // If plan result is already visible, toggle it off
+    if (planResult && runner.wfShowPlanResult) {
+      runner.setWfShowPlanResult(false);
+      return;
+    }
     // Determine which workflow to plan.
     let name: string | undefined;
     if (picker.wfPreview) {
@@ -1106,6 +1111,7 @@ export function App({
     if (!spec) return;
     const plan = planWorkflow(spec, promptText);
     setPlanResult(plan);
+    runner.setWfShowPlanResult(true);
   }, [
     runner.running,
     mode,
@@ -1113,9 +1119,14 @@ export function App({
     picker.workflowEntries,
     picker.workflowIndex,
     resolveWorkflowSpec,
+    planResult,
+    runner.wfShowPlanResult,
   ]);
 
   // Clear plan result when workflow selection changes.
+  // wfShowPlanResult in the runner hook is intentionally NOT reset here:
+  // the toggle guard checks `planResult && runner.wfShowPlanResult`, so a
+  // null planResult prevents the toggle from firing regardless.
   useEffect(() => {
     setPlanResult(null);
   }, [picker.wfPreview?.name, picker.workflowIndex]);
@@ -1303,7 +1314,6 @@ export function App({
           <WorkflowPreview
             spec={picker.preview.spec}
             source={activeWorkflowSource ?? "bundled"}
-            input={prompt.value.trim() || picker.wfPreview.input}
             width={columns}
             height={streamHeight}
             selectedIndex={runner.stepIndex}
@@ -1311,6 +1321,8 @@ export function App({
             canResume={runner.wfCanResume}
             promptEditing={prompt.promptEditing}
             planResult={planResult}
+            showStepDetail={runner.wfShowStepDetail}
+            showPlanResult={runner.wfShowPlanResult}
           />
         ) : (
           <WorkflowPicker
@@ -1452,7 +1464,7 @@ function hint(
       return `↑/↓ step · Enter details · type to edit · Ctrl+R run · Ctrl+Q cancel · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
     }
     if (wfPreviewing) {
-      return `↑/↓ step · Enter details${resumeHint} · type to edit · Ctrl+R run · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step · Enter details${resumeHint} · type to edit · Ctrl+R run · Esc back · Tab detail · /commands · Ctrl+C quit${completeHint}`;
     }
     return `↑/↓ pick · Ctrl+N new · type to edit · Enter preview · Ctrl+R run · Ctrl+J history · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
   }

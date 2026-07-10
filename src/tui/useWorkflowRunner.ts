@@ -58,6 +58,8 @@ export function useWorkflowRunner({
   const [stepIndex, setStepIndex] = useState(0);
   const [wfCanResume, setWfCanResume] = useState(false);
   const [wfNotice, setWfNotice] = useState<string | null>(null);
+  const [wfShowStepDetail, setWfShowStepDetail] = useState(true);
+  const [wfShowPlanResult, setWfShowPlanResult] = useState(true);
 
   const abortRef = useRef<AbortController | null>(null);
   const activeWorkflowRef = useRef<string | undefined>(undefined);
@@ -461,6 +463,10 @@ export function useWorkflowRunner({
     setWfNotice,
     wfStepDetails,
     setWfStepDetails,
+    wfShowStepDetail,
+    setWfShowStepDetail,
+    wfShowPlanResult,
+    setWfShowPlanResult,
     stepIndex,
     setStepIndex,
     abortRef,
