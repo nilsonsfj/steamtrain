@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { applyWorkflowSessionOverrides } from "../src/workflow/overrides";
 import { planWorkflow } from "../src/workflow/plan";
 import type { WorkflowSpec, WorkflowStep } from "../src/workflow/types";
 
@@ -383,5 +384,140 @@ describe("planWorkflow", () => {
     const result = planWorkflow(s, "");
     expect(result.ok).toBe(true);
     expect(result.steps[0]!.renderedPrompt).toBe("hello");
+  });
+});
+
+describe("planWorkflow with session overrides", () => {
+  function planWithOverrides(
+    base: WorkflowSpec,
+    overrides: Parameters<typeof applyWorkflowSessionOverrides>[1],
+    input = "hello",
+    params?: Record<string, string | number | boolean>,
+  ) {
+    const effective = applyWorkflowSessionOverrides(base, overrides);
+    return planWorkflow(effective, input, params);
+  }
+
+  it("reflects overridden agent and model in plan steps and agents list", () => {
+    const s = spec({
+      phases: [
+        phase("p1", [
+          worker("w1", { agent: "claude", model: "sonnet" }),
+          worker("w2", { agent: "claude", model: "sonnet", prompt: "second" }),
+        ]),
+      ],
+    });
+    const result = planWithOverrides(s, {
+      steps: {
+        w1: { agent: "codex", model: "gpt-5.5" },
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.steps[0]!.agent).toBe("codex");
+    expect(result.steps[0]!.model).toBe("gpt-5.5");
+    expect(result.steps[1]!.agent).toBe("claude");
+    expect(result.steps[1]!.model).toBe("sonnet");
+    expect(result.agents).toEqual(["codex", "claude"]);
+  });
+
+  it("reflects overridden effort in plan steps", () => {
+    const s = spec({
+      phases: [phase("p1", [worker("w1", { effort: "high" })])],
+    });
+    const result = planWithOverrides(s, {
+      steps: { w1: { effort: "low" } },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.steps[0]!.effort).toBe("low");
+  });
+
+  it("reflects overridden prompt in renderedPrompt", () => {
+    const s = spec({
+      phases: [phase("p1", [worker("w1", { prompt: "original {{input}}" })])],
+    });
+    const result = planWithOverrides(
+      s,
+      { steps: { w1: { prompt: "overridden {{input}}" } } },
+      "world",
+    );
+    expect(result.ok).toBe(true);
+    expect(result.steps[0]!.renderedPrompt).toBe("overridden world");
+  });
+
+  it("clears effort when override sets null", () => {
+    const s = spec({
+      phases: [phase("p1", [worker("w1", { effort: "high" })])],
+    });
+    const result = planWithOverrides(s, {
+      steps: { w1: { effort: null as unknown as string | undefined } },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.steps[0]!.effort).toBeUndefined();
+  });
+
+  it("accepts legacy flat step maps (TUI / web staged overrides)", () => {
+    const s = spec({
+      phases: [phase("p1", [worker("w1", { agent: "claude", model: "sonnet" })])],
+    });
+    const result = planWithOverrides(s, {
+      w1: { agent: "opencode", model: "gpt-4" },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.steps[0]!.agent).toBe("opencode");
+    expect(result.steps[0]!.model).toBe("gpt-4");
+    expect(result.agents).toEqual(["opencode"]);
+  });
+
+  it("reflects llm step model/prompt/effort overrides without agent leakage", () => {
+    const s = spec({
+      phases: [
+        phase("p1", [
+          {
+            id: "judge",
+            kind: "llm",
+            model: "claude-opus-4-8",
+            prompt: "old {{input}}",
+            effort: "high",
+          } as unknown as WorkflowStep,
+        ]),
+      ],
+    });
+    const result = planWithOverrides(
+      s,
+      {
+        steps: {
+          judge: {
+            model: "claude-haiku-4-5",
+            prompt: "new {{input}}",
+            effort: "low",
+            agent: "claude",
+          },
+        },
+      },
+      "case",
+    );
+    expect(result.ok).toBe(true);
+    expect(result.llmCallCount).toBe(1);
+    expect(result.agentCallCount).toBe(0);
+    const judge = result.steps[0]!;
+    expect(judge.kind).toBe("llm");
+    expect(judge.model).toBe("claude-haiku-4-5");
+    expect(judge.effort).toBe("low");
+    expect(judge.renderedPrompt).toBe("new case");
+    expect(judge.isAgentBacked).toBe(false);
+  });
+
+  it("ignores overrides for non-agent-backed steps", () => {
+    const s = spec({
+      phases: [phase("p1", [command("c1", "echo hi")])],
+    });
+    const result = planWithOverrides(s, {
+      steps: { c1: { agent: "codex", model: "gpt-5.5", prompt: "ignored" } },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.steps[0]!.kind).toBe("command");
+    expect(result.steps[0]!.agent).toBeUndefined();
+    expect(result.agentCallCount).toBe(0);
+    expect(result.deterministicCount).toBe(1);
   });
 });
