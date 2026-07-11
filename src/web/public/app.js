@@ -128,14 +128,20 @@
       var badges = [];
       if (run.status === "queued") badges.push(h("span", { class: "badge staged", text: "queued" }));
       if (run.detached) badges.push(h("span", { class: "badge cached", text: "detached" }));
+      if (run.paused) badges.push(h("span", { class: "badge paused", text: "⏸ paused" }));
       if (run.pendingApprovals && run.pendingApprovals.length) {
         badges.push(h("span", { class: "badge gate-block", text: "⏳ approval" }));
+      }
+      var badgeWrap = null;
+      if (badges.length) {
+        badgeWrap = h("span", null);
+        badges.forEach(function (b) { badgeWrap.appendChild(b); });
       }
       var isAttached = S.runId === run.id;
       var row = h("div", { class: "wf liverun" + (isAttached ? " sel" : ""), onClick: function () { attachRun(run); } },
         h("div", { class: "name" }, run.workflow, h("span", { class: "src", text: run.source || "" })),
         h("div", { class: "desc", text: truncate(run.input || "", 60) }),
-        h("div", { class: "meta" }, badges.length ? h("span", null, badges[0], badges[1] || null, badges[2] || null) : null,
+        h("div", { class: "meta" }, badgeWrap,
           h("span", { text: (isAttached ? "attached · " : "") + relTime(run.startedAt) }))
       );
       box.appendChild(row);
@@ -160,9 +166,12 @@
       S.startedAt = run.startedAt || Date.now();
       startTimer();
       document.getElementById("statusLine").style.display = "flex";
-      // Replay rebuilds the tree from the event stream itself (workflow_start
-      // resets the folded state), so start from a clean slate.
-      S.runState = SteamtrainReducer.initialWorkflowState;
+      // Replay rebuilds the tree from the event stream (workflow_start keeps
+      // seeded phases). Seeding from the catalog spec (when known) makes
+      // not-yet-started steps visible — and editable while the run is paused.
+      S.runState = known && S.spec
+        ? SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || S.spec)
+        : SteamtrainReducer.initialWorkflowState;
       S.detail = null; S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
       setBanner("Attached to " + (run.detached ? "detached " : "") + "run " + run.id.slice(0, 8) + "… — cancel stops the run itself.", "info");
       openStream(run.id);
@@ -1016,9 +1025,82 @@
       hasMetrics = true;
     }
     if (s.cached) { metrics.appendChild(h("span", { class: "badge cached", text: "cached" })); hasMetrics = true; }
+    if (s.edited) { metrics.appendChild(h("span", { class: "badge edited", text: "✎ edited" })); hasMetrics = true; }
     if (s.gate) { metrics.appendChild(h("span", { class: "badge " + (s.gate.passed ? "gate-pass" : "gate-block"), text: s.gate.passed ? "gate passed" : "gate blocked" })); hasMetrics = true; }
     if (hasMetrics) card.appendChild(metrics);
+
+    // Mid-run steering: while the run is paused, steps that have not started
+    // yet can have their prompt/command rewritten before resuming.
+    if (stepEditableNow(s)) {
+      card.appendChild(h("div", { class: "edit-actions" },
+        h("button", { class: "btn small", text: "✎ Edit step", title: "Rewrite this step before it runs", onClick: function (e) { e.stopPropagation(); openStepEditModal(s); } })
+      ));
+    }
     return card;
+  }
+
+  /** Whether the card's step can take a mid-run edit right now. */
+  function stepEditableNow(s) {
+    if (!S.runId || !S.runState || !S.runState.paused || S.runState.done) return false;
+    if (s.status !== "pending" || s.parentStepId) return false;
+    if (s.blockKind === "command") return true;
+    if (["worker", "processor", "llm", "consolidator", "approval"].indexOf(s.blockKind) >= 0) return true;
+    if (s.blockKind === "distributor" && s.agent) return true;
+    return false;
+  }
+
+  /** The selected workflow's spec step by id (for prefilling the edit modal). */
+  function findSpecStep(stepId) {
+    var spec = effectiveSpec() || S.spec;
+    if (!spec || !spec.phases) return null;
+    for (var i = 0; i < spec.phases.length; i++) {
+      var steps = spec.phases[i].steps || [];
+      for (var j = 0; j < steps.length; j++) {
+        if (steps[j].id === stepId) return steps[j];
+      }
+    }
+    return null;
+  }
+
+  function openStepEditModal(s) {
+    var isCmd = s.blockKind === "command";
+    var specStep = findSpecStep(s.stepId);
+    var edits = (S.runState && S.runState.editedSteps && S.runState.editedSteps[s.stepId]) || {};
+    var current = isCmd
+      ? (edits.cmd != null ? edits.cmd : (specStep && specStep.cmd) || "")
+      : (edits.prompt != null ? edits.prompt : (specStep && specStep.prompt) || "");
+    var ta = h("textarea", { class: "edit-step-text", rows: "12", spellcheck: "false" });
+    ta.value = current;
+    var body = h("div", null,
+      h("div", { class: "hint", text: isCmd
+        ? "Shell command the step will run when the workflow resumes."
+        : "Prompt the step will run with when the workflow resumes ({{...}} templates still apply)." }),
+      ta
+    );
+    var applyBtn = h("button", { class: "btn primary", text: "Apply edit" });
+    var foot = h("div", { class: "mfoot" },
+      h("button", { class: "btn", text: "Cancel", onClick: closeModal }),
+      h("div", { class: "spacer" }),
+      applyBtn
+    );
+    applyBtn.addEventListener("click", function () {
+      var payload = { stepId: s.stepId };
+      payload[isCmd ? "cmd" : "prompt"] = ta.value;
+      applyBtn.disabled = true;
+      apiAuth("POST", "/api/runs/" + S.runId + "/edit-step", payload).then(function (r) {
+        if (r.status === 200) {
+          closeModal();
+          setBanner("Step '" + s.stepId + "' edited — it runs with the new " + (isCmd ? "command" : "prompt") + " after you resume.", "ok");
+        } else if (r.status === 202) {
+          closeModal();
+          setBanner("Edit requested for '" + s.stepId + "' — awaiting the owning process; watch the run to confirm.", "info");
+        } else {
+          applyBtn.disabled = false;
+          setBanner((r.body && r.body.error) || "Edit rejected.", "err");
+        }
+      }).catch(function () { applyBtn.disabled = false; });
+    });
+    openModal(modalShell("Edit step · " + s.stepId, (KIND_LABEL[s.blockKind] || s.blockKind) + " — applies when the step runs", body, foot, true));
   }
 
   // ---- step drill-in drawer ------------------------------------------------
@@ -1251,8 +1333,11 @@
     var bar = document.getElementById("progressBar");
     var pct = total ? Math.round((doneN / total) * 100) : 0;
     bar.style.width = pct + "%";
+    var paused = Boolean(S.runState && S.runState.paused && !S.runState.done);
     document.getElementById("progressText").textContent =
-      doneN + " / " + total + " steps" + (runningN ? " · " + runningN + " running" : "");
+      doneN + " / " + total + " steps" + (runningN ? " · " + runningN + " running" : "") +
+      (paused ? (runningN ? " · ⏸ pausing (" + runningN + " finishing)" : " · ⏸ paused") : "");
+    updatePauseButton();
 
     // Live cost/token ticker + budget badge.
     var cost = 0, tokens = emptyTokens();
@@ -1349,10 +1434,35 @@
     apiAuth("POST", "/api/runs/" + S.runId + "/cancel");
   }
 
+  /** Toggle mid-run pause/resume for the streamed run (own or attached). */
+  function togglePauseRun() {
+    if (!S.runId) return;
+    var paused = Boolean(S.runState && S.runState.paused);
+    var verb = paused ? "resume" : "pause";
+    apiAuth("POST", "/api/runs/" + S.runId + "/" + verb)
+      .then(function (r) {
+        if (r.status >= 400) { setBanner("Could not " + verb + " the run.", "err"); return; }
+        if (!paused) setBanner("Pause requested — in-flight steps finish, nothing new starts. Pending step cards become editable.", "info");
+        else setBanner("", "");
+      })
+      .catch(function () {});
+  }
+
+  /** Keep the pause button's label in sync with the engine-acknowledged state. */
+  function updatePauseButton() {
+    var btn = document.getElementById("pauseBtn");
+    if (!btn) return;
+    var paused = Boolean(S.runState && S.runState.paused);
+    btn.textContent = paused ? "▶ Resume" : "⏸ Pause";
+    btn.className = paused ? "btn primary" : "btn";
+  }
+
   function setRunning(running) {
     document.getElementById("runBtn").style.display = running ? "none" : "block";
+    document.getElementById("pauseBtn").style.display = running ? "block" : "none";
     document.getElementById("cancelBtn").style.display = running ? "block" : "none";
     document.getElementById("input").disabled = running;
+    updatePauseButton();
   }
 
   function startTimer() {
@@ -2309,6 +2419,7 @@
 
   document.getElementById("planBtn").addEventListener("click", startPlan);
   document.getElementById("runBtn").addEventListener("click", startRun);
+  document.getElementById("pauseBtn").addEventListener("click", togglePauseRun);
   document.getElementById("cancelBtn").addEventListener("click", cancelRun);
   document.getElementById("flushBtn").addEventListener("click", flushStaged);
   document.getElementById("input").addEventListener("keydown", function (e) {

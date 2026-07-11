@@ -10,13 +10,17 @@ import {
   type RunRecord,
   RunRecordBuilder,
   type RunRecordStatus,
+  type StepEditPatch,
+  type StepEditResult,
   type StepResult,
   type WorkflowCacheStore,
   type WorkflowEvent,
   type WorkflowHistoryStore,
+  type WorkflowRunControl,
   type WorkflowSpec,
   acquireRunSlot,
   createLiveRunPublisher,
+  createWorkflowRunControl,
   hashWorkflowSpec,
   isRerunError,
   matchApprovalKey,
@@ -27,6 +31,7 @@ import {
   resolveWorkflowTimeoutSec,
   timeoutMsFromSec,
   watchRunCancel,
+  watchRunControl,
   withStoreApprovals,
   workflowCacheKey,
 } from "../workflow";
@@ -50,6 +55,7 @@ export interface WorkflowHost {
     specOverride?: WorkflowSpec,
     inputs?: Record<string, string | number | boolean>,
     approval?: ApprovalProvider,
+    control?: WorkflowRunControl,
   ): AsyncIterable<WorkflowEvent>;
 }
 
@@ -96,6 +102,8 @@ interface Run {
   settled: boolean;
   listeners: Set<RunListener>;
   controller: AbortController;
+  /** Mid-run steering handle (pause / edit pending steps / resume). */
+  control: WorkflowRunControl;
   timeoutTimer?: ReturnType<typeof setTimeout>;
   /**
    * Live approval checkpoints keyed by `<stepId>:<iteration>`. The engine's
@@ -113,6 +121,8 @@ export interface RunSummary {
   status: RunStatus;
   /** True while the run waits for a shared queue slot. */
   queued?: boolean;
+  /** True while a pause is requested for the run (mid-run steering). */
+  paused?: boolean;
   ok?: boolean;
   error?: string;
   startedAt: number;
@@ -217,6 +227,7 @@ export class WorkflowRunManager {
       settled: false,
       listeners: new Set(),
       controller: new AbortController(),
+      control: createWorkflowRunControl(),
       pendingApprovals: new Map(),
     };
     // The whole-workflow wall-clock timer is armed in drive() once the run
@@ -267,6 +278,41 @@ export class WorkflowRunManager {
     if (!run || run.settled) return false;
     run.controller.abort();
     return true;
+  }
+
+  /**
+   * Request pause/resume for a manager-owned run. When the run is mirrored
+   * into the shared live-run store, the desired state is written there FIRST
+   * (the file is the cross-surface source of truth — the owner-side watcher
+   * applies it and any attached CLI/TUI sees it), then applied directly so the
+   * local run reacts without waiting a poll interval. Returns false when the
+   * run is unknown or already settled.
+   */
+  async setRunPaused(runId: string, paused: boolean, by?: string): Promise<boolean> {
+    const run = this.runs.get(runId);
+    if (!run || run.settled) return false;
+    if (this.liveRuns) {
+      await this.liveRuns.writePauseState(runId, { paused, by }).catch(() => {});
+    }
+    if (paused) run.control.pause(by);
+    else run.control.resume(by);
+    return true;
+  }
+
+  /**
+   * Stage a mid-run step edit on a manager-owned run (validated synchronously
+   * by the engine via the run's control). Returns undefined when the run is
+   * unknown or settled — the caller may then try the cross-process path.
+   */
+  editRunStep(
+    runId: string,
+    stepId: string,
+    patch: StepEditPatch,
+    by?: string,
+  ): StepEditResult | undefined {
+    const run = this.runs.get(runId);
+    if (!run || run.settled) return undefined;
+    return run.control.editStep(stepId, patch, by);
   }
 
   /**
@@ -361,6 +407,7 @@ export class WorkflowRunManager {
     let budgetExceeded = false;
     let publisher: LiveRunPublisher | undefined;
     let disposeCancelWatch: (() => void) | undefined;
+    let disposeControlWatch: (() => void) | undefined;
     try {
       // Mirror the run into the shared live-run registry (cross-UI attach) and
       // wait for a queue slot so parallel runs don't collide over the cache
@@ -377,6 +424,9 @@ export class WorkflowRunManager {
           }),
         );
         disposeCancelWatch = watchRunCancel(this.liveRuns, run.id, () => run.controller.abort());
+        // Cross-process steering: apply pause/edit/resume requests written into
+        // the store by the CLI or another UI to this run's control.
+        disposeControlWatch = watchRunControl(this.liveRuns, run.id, run.control);
         let lastPosition = -1;
         const slot = await acquireRunSlot(
           this.liveRuns,
@@ -431,6 +481,7 @@ export class WorkflowRunManager {
         spec,
         run.params,
         approval,
+        run.control,
       )) {
         recorder.handle(event);
         publisher?.event(event);
@@ -444,6 +495,12 @@ export class WorkflowRunManager {
             event.result,
             event.cached,
           );
+        }
+        if (event.kind === "step_edited") {
+          // The engine dropped the edited step's stale entry from the shared
+          // cache map; persist the deletion so a canceled-then-resumed run
+          // can't replay the pre-edit result from disk.
+          await this.cacheStore.save(key, cache);
         }
         if (event.kind === "workflow_done") {
           ok = event.ok;
@@ -475,6 +532,7 @@ export class WorkflowRunManager {
       run.queued = false;
       run.pendingApprovals.clear();
       disposeCancelWatch?.();
+      disposeControlWatch?.();
       this.runningCount = Math.max(0, this.runningCount - 1);
       run.endedAt = Date.now();
       // The outcome is resolved now; lock out cancellation synchronously before
@@ -552,6 +610,7 @@ function toSummary(run: Run): RunSummary {
     input: run.input,
     status: run.status,
     queued: run.queued || undefined,
+    paused: run.control.isPauseRequested() || undefined,
     ok: run.ok,
     error: run.error,
     startedAt: run.startedAt,

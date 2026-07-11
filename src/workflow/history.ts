@@ -1,5 +1,6 @@
 import type { AgentInstanceId, TokenUsage } from "../types/events";
 import type { ApprovalRejectDisposition } from "./approval";
+import type { StepEditPatch } from "./control";
 import { addTokensInto, emptyTokens, formatTokens, totalTokens } from "./cost";
 import type { WorkflowEvent } from "./events";
 import type {
@@ -62,6 +63,24 @@ export interface HistoryStep {
   loopTo?: string;
   /** The gate's own iteration cap, when this step is a loop-back gate. */
   maxIterations?: number;
+  /** True when a mid-run edit (pause → edit → resume) applied to this step. */
+  edited?: boolean;
+}
+
+/**
+ * One mid-run steering action, recorded in order so a steered run stays an
+ * honest, auditable record: when it was paused/resumed and exactly what each
+ * accepted step edit changed.
+ */
+export interface RunIntervention {
+  kind: "paused" | "resumed" | "step-edited";
+  /** The edited step (kind `"step-edited"` only). */
+  stepId?: string;
+  /** The accepted patch (kind `"step-edited"` only). */
+  patch?: StepEditPatch;
+  /** Who acted (e.g. `"human:tui"`, `"human:web"`, `"human:cli"`). */
+  by?: string;
+  ts: number;
 }
 
 export interface HistoryPhase {
@@ -112,6 +131,8 @@ export interface RunRecord {
   budget?: RunBudgetInfo;
   /** What happened to this run's step worktrees after the run (CLI apply/prune). */
   harvest?: RunHarvestInfo;
+  /** Mid-run steering actions (pause/resume/step edits), in order. */
+  interventions?: RunIntervention[];
 }
 
 /** Post-run worktree harvesting status, recorded by `workflow history apply/prune`. */
@@ -225,6 +246,7 @@ export class RunRecordBuilder {
   private phaseIndex = new Map<string, HistoryPhase>();
   private ok = true;
   private budget?: RunBudgetInfo;
+  private interventions: RunIntervention[] = [];
 
   constructor(meta: RunRecordMeta, startedAt: number = Date.now()) {
     this.meta = meta;
@@ -249,6 +271,7 @@ export class RunRecordBuilder {
         this.phaseIndex.clear();
         this.ok = true;
         this.budget = undefined;
+        this.interventions = [];
         break;
       case "phase_start": {
         const phase: HistoryPhase = {
@@ -357,6 +380,7 @@ export class RunRecordBuilder {
         step.result = event.result;
         step.worktree = event.result.worktree;
         step.cached = event.cached;
+        if (event.result.edited) step.edited = true;
         if (!step.text) step.text = capText(event.result.output ?? "");
         // Prefer the authoritative count from the result; fall back to any
         // count accrued from step_retry events.
@@ -382,6 +406,21 @@ export class RunRecordBuilder {
         break;
       case "workflow_done":
         this.ok = event.ok;
+        break;
+      case "run_paused":
+        this.interventions.push({ kind: "paused", by: event.by, ts: event.ts });
+        break;
+      case "run_resumed":
+        this.interventions.push({ kind: "resumed", by: event.by, ts: event.ts });
+        break;
+      case "step_edited":
+        this.interventions.push({
+          kind: "step-edited",
+          stepId: event.stepId,
+          patch: event.patch,
+          by: event.by,
+          ts: event.ts,
+        });
         break;
       case "loop_iteration":
         // Marker only; the phase/step events around the jump already update
@@ -410,6 +449,7 @@ export class RunRecordBuilder {
       totals: computeRunTotals(phases),
       error: opts.error,
       budget: this.budget,
+      interventions: this.interventions.length > 0 ? this.interventions : undefined,
     };
   }
 

@@ -6,7 +6,9 @@ import type {
   ApprovalDecision,
   ApprovalProvider,
   LiveRunPublisher,
+  StepEditPatch,
   StepResult,
+  WorkflowRunControl,
   WorkflowSpec,
 } from "../workflow";
 import { matchApprovalKey } from "../workflow";
@@ -20,6 +22,7 @@ import {
   createLiveRunStore,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
+  createWorkflowRunControl,
   hashWorkflowSpec,
   isTerminalLiveRunStatus,
   newLiveRunMeta,
@@ -28,6 +31,7 @@ import {
   resolveWorkflowTimeoutSec,
   timeoutMsFromSec,
   watchRunCancel,
+  watchRunControl,
   withStoreApprovals,
   workflowCacheKey,
 } from "../workflow";
@@ -100,6 +104,10 @@ export function useWorkflowRunner({
   /** Non-null while /attach is tailing an externally-owned run; aborting detaches. */
   const attachAbortRef = useRef<AbortController | null>(null);
   const attachedRunIdRef = useRef<string | null>(null);
+  /** The live-run id of the run THIS process owns, while one is executing. */
+  const ownRunIdRef = useRef<string | null>(null);
+  /** The owned run's steering control (pause / edit pending steps / resume). */
+  const runControlRef = useRef<WorkflowRunControl | null>(null);
 
   const showWorkflowView = wf.started || wfLaunching;
   const liveFlatSteps = useMemo(() => flattenSteps(wf), [wf]);
@@ -200,6 +208,10 @@ export function useWorkflowRunner({
         let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
         let publisher: LiveRunPublisher | undefined;
         let disposeCancelWatch: (() => void) | undefined;
+        let disposeControlWatch: (() => void) | undefined;
+        const control = createWorkflowRunControl();
+        runControlRef.current = control;
+        ownRunIdRef.current = runId;
         try {
           // Register in the shared live-run registry (cross-UI attach/cancel/
           // approve) and wait for a queue slot so parallel runs never collide
@@ -215,6 +227,9 @@ export function useWorkflowRunner({
             }),
           );
           disposeCancelWatch = watchRunCancel(liveStore, runId, () => ac.abort());
+          // Cross-process steering: pause/edit/resume requests written into the
+          // store by the CLI or the web UI apply to this run's control too.
+          disposeControlWatch = watchRunControl(liveStore, runId, control);
           let lastQueuePosition = -1;
           const slot = await acquireRunSlot(
             liveStore,
@@ -300,10 +315,17 @@ export function useWorkflowRunner({
             // Decisions written into the live-run store by another attached UI
             // (CLI approve / web) settle the checkpoint too — first one wins.
             withStoreApprovals(liveStore, runId, approvalProvider),
+            control,
           )) {
             recorder.handle(event);
             publisher.event(event);
             if (event.kind === "workflow_done") workflowOk = event.ok;
+            if (event.kind === "step_edited") {
+              // The engine dropped the edited step's stale entry from the
+              // shared cache map; persist the deletion so a canceled-then-
+              // resumed run can't replay the pre-edit result from disk.
+              await store.save(key, cache);
+            }
             if (!mountedRef.current) return;
             wfDispatch({ type: "event", event });
             if (event.kind === "step_done") {
@@ -324,6 +346,9 @@ export function useWorkflowRunner({
           if (timeoutTimer) clearTimeout(timeoutTimer);
           approvalResolversRef.current.clear();
           disposeCancelWatch?.();
+          disposeControlWatch?.();
+          runControlRef.current = null;
+          ownRunIdRef.current = null;
           const status = ac.signal.aborted
             ? "canceled"
             : runError || !workflowOk
@@ -365,7 +390,12 @@ export function useWorkflowRunner({
       },
     ) => {
       setWfLaunching(true);
-      wfDispatch({ type: "reset" });
+      // Seed the tree from the spec so not-yet-started steps render as pending
+      // rows (matching the web client) — mid-run editing targets exactly those
+      // steps, so they must be selectable before they start.
+      const seedSpec = resolveWorkflowSpec(name);
+      if (seedSpec) wfDispatch({ type: "seed", spec: seedSpec });
+      else wfDispatch({ type: "reset" });
       setStepIndex(0);
       setWfPreview(null);
       setWfStepDetails(null);
@@ -374,7 +404,7 @@ export function useWorkflowRunner({
         setWfPreview({ name, input: prompt });
       }
     },
-    [runWorkflow],
+    [runWorkflow, resolveWorkflowSpec],
   );
 
   /**
@@ -411,6 +441,11 @@ export function useWorkflowRunner({
           }
           activeWorkflowRef.current = meta.workflow;
           activeWorkflowInputRef.current = meta.input;
+          // Seed pending rows from the local catalog's spec when the workflow
+          // is known, so a paused attached run's pending steps are selectable
+          // (the replayed events update the seeded rows in place).
+          const attachSpec = resolveWorkflowSpec(meta.workflow);
+          if (attachSpec && mountedRef.current) wfDispatch({ type: "seed", spec: attachSpec });
           if (mountedRef.current && meta.status === "queued") {
             setWfNotice(`attached to ${shortId} — queued, waiting for a run slot`);
           }
@@ -440,7 +475,7 @@ export function useWorkflowRunner({
       })();
       return true;
     },
-    [mountedRef],
+    [mountedRef, resolveWorkflowSpec],
   );
 
   /** Ctrl+Q: cancel an owned run, or detach from an attached one (it keeps going). */
@@ -493,6 +528,62 @@ export function useWorkflowRunner({
     [],
   );
 
+  /**
+   * Toggle mid-run pause/resume for the current run (owned or attached).
+   * The desired state is written to the shared live-run store FIRST (the file
+   * is the cross-surface source of truth), then applied directly to an owned
+   * run's control so the pause takes effect without waiting a poll interval.
+   * Returns a notice string, or null when no run is active.
+   */
+  const togglePauseRun = useCallback(async (): Promise<string | null> => {
+    const runId = attachedRunIdRef.current ?? ownRunIdRef.current;
+    if (!runId) return null;
+    const desired = !(runControlRef.current?.isPauseRequested() ?? wf.paused ?? false);
+    await liveRunStoreRef.current
+      .writePauseState(runId, { paused: desired, by: "human:tui" })
+      .catch(() => {});
+    if (!attachedRunIdRef.current && runControlRef.current) {
+      if (desired) runControlRef.current.pause("human:tui");
+      else runControlRef.current.resume("human:tui");
+    }
+    return desired
+      ? "pause requested — in-flight steps finish, nothing new starts (e edits a pending step, p resumes)"
+      : "resume requested";
+  }, [wf.paused]);
+
+  /**
+   * Stage a mid-run edit for a not-yet-started step of the paused run. Owned
+   * runs validate synchronously through the control; attached runs drop a
+   * request into the store and wait briefly for the owner's verdict. Returns
+   * a notice string describing the outcome.
+   */
+  const editRunStep = useCallback(async (stepId: string, patch: StepEditPatch): Promise<string> => {
+    if (runControlRef.current && !attachedRunIdRef.current) {
+      const result = runControlRef.current.editStep(stepId, patch, "human:tui");
+      return result.ok
+        ? `✎ step '${stepId}' edited — applies when it runs (p resumes)`
+        : `edit rejected: ${result.error}`;
+    }
+    const runId = attachedRunIdRef.current;
+    if (!runId) return "no active run to edit";
+    const store = liveRunStoreRef.current;
+    const editId = await store
+      .requestStepEdit(runId, { stepId, patch, by: "human:tui" })
+      .catch(() => undefined);
+    if (!editId) return "could not request the edit (run gone?)";
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const result = await store.readStepEditResult(runId, editId).catch(() => undefined);
+      if (result) {
+        return result.ok
+          ? `✎ step '${stepId}' edited — applies when it runs (p resumes)`
+          : `edit rejected: ${result.error}`;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return "edit requested — no response from the owning process yet";
+  }, []);
+
   return {
     running,
     setRunning,
@@ -534,6 +625,8 @@ export function useWorkflowRunner({
     resolveApproval,
     attachRun,
     cancelLiveRun,
+    togglePauseRun,
+    editRunStep,
     liveRunStoreRef,
     attachedRunIdRef,
     attachAbortRef,

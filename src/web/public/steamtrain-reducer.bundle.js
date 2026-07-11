@@ -115,6 +115,7 @@ var SteamtrainReducer = (() => {
   }
   function workflowReducer(state, action) {
     if (action.type === "reset") return initialWorkflowState;
+    if (action.type === "seed") return workflowStateFromSpec(action.spec);
     const e = action.event;
     switch (e.kind) {
       case "workflow_start":
@@ -132,7 +133,10 @@ var SteamtrainReducer = (() => {
           ok: true,
           loopMarkers: [],
           budget: void 0,
-          pendingApprovals: []
+          pendingApprovals: [],
+          paused: false,
+          pausedBy: void 0,
+          editedSteps: void 0
         };
       case "phase_start": {
         const iter = e.iteration ?? 1;
@@ -210,7 +214,8 @@ var SteamtrainReducer = (() => {
               text: "",
               cached: false,
               loopTo: e.loopTo,
-              maxIterations: e.maxIterations
+              maxIterations: e.maxIterations,
+              edited: state.editedSteps?.[e.stepId] ? true : void 0
             };
             return {
               ...p,
@@ -259,7 +264,8 @@ var SteamtrainReducer = (() => {
           result: e.result,
           worktree: e.result.worktree ?? s.worktree,
           cached: e.cached,
-          text: s.text || e.result.output
+          text: s.text || e.result.output,
+          edited: s.edited || e.result.edited || void 0
         }));
       case "phase_done":
         return {
@@ -279,7 +285,32 @@ var SteamtrainReducer = (() => {
           }
         };
       case "workflow_done":
-        return { ...state, done: true, ok: e.ok, results: e.results };
+        return { ...state, done: true, ok: e.ok, results: e.results, paused: false };
+      case "run_paused":
+        return { ...state, paused: true, pausedBy: e.by };
+      case "run_resumed":
+        return { ...state, paused: false, pausedBy: void 0 };
+      case "step_edited": {
+        const editedSteps = {
+          ...state.editedSteps,
+          [e.stepId]: { ...state.editedSteps?.[e.stepId], ...e.patch }
+        };
+        return {
+          ...state,
+          editedSteps,
+          phases: state.phases.map((p) => ({
+            ...p,
+            steps: p.steps.map(
+              (s) => s.stepId === e.stepId && s.status === "pending" ? {
+                ...s,
+                edited: true,
+                model: e.patch.model ?? s.model,
+                effort: e.patch.effort !== void 0 ? e.patch.effort || void 0 : s.effort
+              } : s
+            )
+          }))
+        };
+      }
       case "loop_iteration": {
         const gatePhaseId = phaseOfStep(state, e.gateStepId);
         if (gatePhaseId) {
