@@ -181,6 +181,87 @@ describe("mid-run steering: pause / edit / resume", () => {
     expect(aDone && aDone.kind === "step_done" ? aDone.cached : undefined).toBe(false);
   });
 
+  it("invalidates cached transitive dependents of an edited step (resumed run)", async () => {
+    const control = createWorkflowRunControl();
+    const { deps, state } = makeDeps(control);
+    // A resumed run: both a and its dependent b replay from the seeded cache.
+    const cache = new Map<string, StepResult>();
+    cache.set("a", { stepId: "a", ok: true, output: "old-a", durationMs: 1 });
+    cache.set("b", { stepId: "b", ok: true, output: "b:old-a", durationMs: 1 });
+    control.pause();
+
+    const events = await drive(
+      chain,
+      deps,
+      (event) => {
+        if (event.kind === "run_paused") {
+          expect(control.editStep("a", { prompt: "FRESH {{input}}" })).toEqual({ ok: true });
+          control.resume();
+        }
+      },
+      { cache },
+    );
+
+    // BOTH steps re-ran: b's cached result was computed from the pre-edit a,
+    // so replaying it would have silently kept the stale output.
+    expect(state.runs.map((r) => r.opts.prompt)).toEqual(["FRESH hi", "b:out:FRESH hi"]);
+    const bDone = events.find((e) => e.kind === "step_done" && e.stepId === "b");
+    expect(bDone && bDone.kind === "step_done" ? bDone.cached : undefined).toBe(false);
+  });
+
+  it("merges repeated edits to the same step (later fields win)", async () => {
+    const control = createWorkflowRunControl();
+    const { deps, state } = makeDeps(control);
+    control.pause();
+    await drive(chain, deps, (event) => {
+      if (event.kind === "run_paused") {
+        expect(control.editStep("a", { prompt: "FIRST", model: "m-1" })).toEqual({ ok: true });
+        expect(control.editStep("a", { prompt: "SECOND" })).toEqual({ ok: true });
+        expect(control.stepEdit("a")).toEqual({ prompt: "SECOND", model: "m-1" });
+        control.resume();
+      }
+    });
+    expect(state.runs[0]?.opts.prompt).toBe("SECOND");
+    expect(state.runs[0]?.opts.model).toBe("m-1");
+  });
+
+  it("drains several parallel in-flight steps before parking paused", async () => {
+    const parallel: WorkflowSpec = {
+      name: "parallel",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            { id: "a", agent: "claude", model: "ma", prompt: "a:{{input}}" },
+            { id: "b", agent: "claude", model: "mb", prompt: "b:{{input}}" },
+          ],
+        },
+        {
+          id: "p2",
+          title: "P2",
+          steps: [{ id: "c", agent: "claude", model: "mc", prompt: "c:{{input}}" }],
+        },
+      ],
+    };
+    const control = createWorkflowRunControl();
+    const { deps, state } = makeDeps(control);
+    let resumed = false;
+
+    await drive(parallel, deps, (event) => {
+      // Pause once both phase-1 steps are dispatched (in flight together).
+      if (event.kind === "step_start" && event.stepId === "b") control.pause();
+      if (event.kind === "run_paused") {
+        // Both in-flight steps completed; nothing from phase 2 started.
+        expect(state.runs.filter((r) => r.opts.prompt.startsWith("c:"))).toHaveLength(0);
+        resumed = true;
+        control.resume();
+      }
+    });
+    expect(resumed).toBe(true);
+    expect(state.runs).toHaveLength(3);
+  });
+
   it("pauses in-flight-safe: a launched step finishes, nothing new starts until resume", async () => {
     const control = createWorkflowRunControl();
     const { deps, state } = makeDeps(control);

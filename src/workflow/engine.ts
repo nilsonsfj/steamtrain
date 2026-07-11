@@ -417,10 +417,41 @@ function stepEditIssue(env: RunEnv, stepId: string, patch: StepEditPatch): strin
 /**
  * Drop the stale cached state of a just-edited step (and its `forEach`
  * children) so the edited version actually executes instead of replaying a
- * result produced by the pre-edit spec. Downstream steps have not run yet
- * (edits only apply to not-yet-started steps), so nothing else invalidates.
+ * result produced by the pre-edit spec.
+ *
+ * Transitive dependents that have NOT started are invalidated too: a resumed
+ * run seeds the cache from disk, so a dependent may hold a cached result
+ * computed from the pre-edit upstream output — replaying it would silently
+ * keep the stale text. Steps that already ran in this run are left alone
+ * (there is no rewind); a not-yet-started dependent simply re-executes
+ * against the edited step's fresh output.
  */
 function invalidateEditedStep(env: RunEnv, stepId: string): void {
+  dropStepEntries(env, stepId);
+  const deps = computeEffectiveDeps(env.spec);
+  const invalidated = new Set([stepId]);
+  // Fixed-point pass: cheap at spec scale, and only runs on a human edit.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [id, stepDeps] of deps) {
+      if (invalidated.has(id)) continue;
+      for (const dep of stepDeps) {
+        if (!invalidated.has(dep)) continue;
+        invalidated.add(id);
+        changed = true;
+        break;
+      }
+    }
+  }
+  for (const id of invalidated) {
+    if (id === stepId || env.startedSteps.has(id)) continue;
+    dropStepEntries(env, id);
+  }
+}
+
+/** Delete one step's cache/results/outputs entries, including `forEach` children. */
+function dropStepEntries(env: RunEnv, stepId: string): void {
   const childPrefix = `${stepId}[`;
   for (const map of [env.cache, env.results]) {
     map.delete(stepId);

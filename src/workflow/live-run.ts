@@ -278,7 +278,14 @@ export function watchRunControl(
       if (disposed) return;
       if (processedEdits.has(edit.editId)) continue;
       processedEdits.add(edit.editId);
-      const result = control.editStep(edit.stepId, edit.patch, edit.by);
+      // Defensive: a throwing edit (engine hook bug) must fail THIS request
+      // with a readable verdict, not kill the poll loop for later requests.
+      let result: ReturnType<WorkflowRunControl["editStep"]>;
+      try {
+        result = control.editStep(edit.stepId, edit.patch, edit.by);
+      } catch (err) {
+        result = { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
       await store.writeStepEditResult(runId, edit.editId, result).catch(() => {});
     }
   };

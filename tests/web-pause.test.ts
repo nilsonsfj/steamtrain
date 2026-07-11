@@ -152,6 +152,35 @@ async function start(server: Server): Promise<string> {
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Wait until the run's SSE stream contains an event of `kind`. Opens a fresh
+ * stream (buffered frames replay), so an event emitted before the call still
+ * resolves — no sleep-and-hope timing.
+ */
+async function waitForEventKind(
+  base: string,
+  runId: string,
+  kind: string,
+  timeoutMs = 5000,
+): Promise<void> {
+  const res = await fetch(`${base}/api/runs/${runId}/stream`);
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const deadline = Date.now() + timeoutMs;
+  try {
+    while (Date.now() < deadline) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      if (buffer.includes(`"kind":"${kind}"`)) return;
+    }
+    throw new Error(`did not observe a ${kind} event in time`);
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+}
+
 async function post(base: string, path: string, body?: unknown) {
   const res = await fetch(`${base}${path}`, {
     method: "POST",
@@ -200,9 +229,11 @@ describe("web mid-run steering endpoints", () => {
     expect(rejected.status).toBe(400);
     expect(String(rejected.body.error)).toMatch(/already started/);
 
-    // Let the in-flight step finish; the run parks paused, then resume it.
+    // Let the in-flight step finish; the run parks paused (observe the
+    // engine's acknowledgment on a second stream — the replayed buffer makes
+    // this deterministic), then resume it.
     state.releaseA();
-    await delay(50);
+    await waitForEventKind(base, runId, "run_paused");
     const resumed = await post(base, `/api/runs/${runId}/resume`);
     expect(resumed).toMatchObject({ status: 200, body: { requested: true, paused: false } });
 
