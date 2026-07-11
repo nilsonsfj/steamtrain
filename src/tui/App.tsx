@@ -53,6 +53,7 @@ import {
   isAgentBackedStep,
   isTerminalLiveRunStatus,
   planWorkflow,
+  resolveInputs,
   totalTokens,
   workflowCacheKey,
 } from "../workflow";
@@ -189,6 +190,7 @@ export function App({
     name: string;
     prompt: string;
     fresh: boolean;
+    action: "run" | "plan";
   } | null>(null);
   const [planResult, setPlanResult] = useState<PlanResult | null>(null);
 
@@ -891,6 +893,7 @@ export function App({
               name: runner.activeWorkflowRef.current,
               prompt: promptText,
               fresh: true,
+              action: "run",
             });
             return true;
           }
@@ -911,7 +914,12 @@ export function App({
         if (fresh) {
           const spec = resolveWorkflowSpec(picker.wfPreview.name);
           if (spec?.inputs && Object.keys(spec.inputs).length > 0) {
-            setInputFormPending({ name: picker.wfPreview.name, prompt: promptText, fresh: true });
+            setInputFormPending({
+              name: picker.wfPreview.name,
+              prompt: promptText,
+              fresh: true,
+              action: "run",
+            });
             return true;
           }
         }
@@ -934,7 +942,12 @@ export function App({
       {
         const spec = resolveWorkflowSpec(entry.name);
         if (spec?.inputs && Object.keys(spec.inputs).length > 0) {
-          setInputFormPending({ name: entry.name, prompt: promptText, fresh: true });
+          setInputFormPending({
+            name: entry.name,
+            prompt: promptText,
+            fresh: true,
+            action: "run",
+          });
           return true;
         }
       }
@@ -1152,7 +1165,14 @@ export function App({
     if (!name) return;
     const spec = resolveWorkflowSpec(name);
     if (!spec) return;
-    const plan = planWorkflow(spec, promptText);
+    // For workflows with inputs, show the input form first (mirrors fresh runs).
+    if (spec.inputs && Object.keys(spec.inputs).length > 0) {
+      setInputFormPending({ name, prompt: promptText, fresh: true, action: "plan" });
+      return;
+    }
+    const resolved = resolveInputs(spec, {});
+    const params = Object.keys(resolved.values).length > 0 ? resolved.values : undefined;
+    const plan = planWorkflow(spec, promptText, params);
     setPlanResult(plan);
     runner.setWfShowPlanResult(true);
   }, [
@@ -1164,6 +1184,7 @@ export function App({
     resolveWorkflowSpec,
     planResult,
     runner.wfShowPlanResult,
+    runner.setWfShowPlanResult,
   ]);
 
   // Clear plan result when workflow selection changes.
@@ -1179,13 +1200,28 @@ export function App({
       const pending = inputFormPending;
       if (!pending) return;
       setInputFormPending(null);
+      if (pending.action === "plan") {
+        const spec = resolveWorkflowSpec(pending.name);
+        if (!spec) return;
+        const plan = planWorkflow(spec, pending.prompt, params);
+        setPlanResult(plan);
+        runner.setWfShowPlanResult(true);
+        return;
+      }
       prompt.updatePromptDraft({ value: "", promptEditing: false });
       runner.launchWorkflow(pending.name, pending.prompt, picker.setWfPreview, {
         fresh: pending.fresh,
         params,
       });
     },
-    [inputFormPending, runner.launchWorkflow, picker.setWfPreview, prompt.updatePromptDraft],
+    [
+      inputFormPending,
+      resolveWorkflowSpec,
+      runner.launchWorkflow,
+      runner.setWfShowPlanResult,
+      picker.setWfPreview,
+      prompt.updatePromptDraft,
+    ],
   );
 
   const handleInputFormCancel = useCallback(() => {
