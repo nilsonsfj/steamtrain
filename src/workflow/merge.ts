@@ -39,6 +39,8 @@ export interface WorktreeSource {
    * target ref is used instead.
    */
   baseCommit?: string;
+  /** Ignored runtime entries symlinked into the worktree (excluded from diffs). */
+  linkedIgnoredPaths?: string[];
 }
 
 export interface DiffFileStat {
@@ -136,8 +138,27 @@ const GIT_IDENT = [
   "commit.gpgsign=false",
 ];
 
+/**
+ * Build `git add -A` args that exclude paths previously symlinked into the
+ * worktree by `linkIgnoredRuntimeEntries`. These paths are symlinks pointing
+ * at the real repo's scaffolding (node_modules, dist, .claude, etc.) — without
+ * exclusion they get staged as new mode-120000 entries because `.gitignore`
+ * directory patterns don't match symlinks.
+ */
+function gitAddArgsWithExcludes(linkedIgnoredPaths?: string[]): string[] {
+  if (!linkedIgnoredPaths?.length) return ["add", "-A", "."];
+  const pathspecs = linkedIgnoredPaths.map((p) => `:!${p}`);
+  return ["add", "-A", ".", "--", ...pathspecs];
+}
+
 export function worktreeSourceFromInfo(stepId: string, info: AgentWorktreeInfo): WorktreeSource {
-  return { stepId, root: info.root, branch: info.branch, baseCommit: info.baseCommit };
+  return {
+    stepId,
+    root: info.root,
+    branch: info.branch,
+    baseCommit: info.baseCommit,
+    linkedIgnoredPaths: info.linkedIgnoredPaths,
+  };
 }
 
 async function assertWorktreeExists(source: WorktreeSource): Promise<void> {
@@ -185,7 +206,13 @@ export async function worktreeDiff(
     // working state over it: `git add -A` from an empty index would miss
     // deletions of files that were never staged.
     await runGit(["read-tree", base], source.root, undefined, opts.signal, env);
-    await runGit(["add", "-A", "."], source.root, undefined, opts.signal, env);
+    await runGit(
+      gitAddArgsWithExcludes(source.linkedIgnoredPaths),
+      source.root,
+      undefined,
+      opts.signal,
+      env,
+    );
     const stats = parseNumstat(
       await gitTextEnv(["diff", "--cached", "--numstat", base], source.root, env, opts.signal),
       await gitTextEnv(["diff", "--cached", "--name-status", base], source.root, env, opts.signal),
@@ -278,7 +305,7 @@ export async function snapshotWorktreeState(
   // which after the snapshot commit would be the snapshot itself — every
   // source would then look unchanged and harvesting would silently no-op.
   const base = await resolveBase(source, "HEAD", signal);
-  await runGit(["add", "-A", "."], source.root, undefined, signal);
+  await runGit(gitAddArgsWithExcludes(source.linkedIgnoredPaths), source.root, undefined, signal);
   const staged = await runGit(["diff", "--cached", "--quiet"], source.root, undefined, signal).then(
     () => false,
     () => true,
