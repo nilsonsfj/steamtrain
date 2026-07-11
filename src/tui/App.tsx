@@ -91,7 +91,7 @@ import { useTerminalSize } from "./useTerminalSize";
 import { computeStreamHeight, message } from "./util";
 import {
   type InputFormPending,
-  planFromInputFormSubmit,
+  resolveInputFormSubmit,
   workflowHasDeclaredInputs,
 } from "./workflow-input-pending";
 import { flattenSteps } from "./workflow-state";
@@ -1197,18 +1197,17 @@ export function App({
       const pending = inputFormPending;
       if (!pending) return;
       setInputFormPending(null);
-      if (pending.action === "plan") {
-        const spec = resolveWorkflowSpec(pending.name);
-        const plan = planFromInputFormSubmit(spec, pending, params);
-        if (!plan) return;
-        setPlanResult(plan);
+      const outcome = resolveInputFormSubmit(pending, resolveWorkflowSpec(pending.name), params);
+      if (outcome.action === "missing-spec") return;
+      if (outcome.action === "plan") {
+        setPlanResult(outcome.plan);
         runner.setWfShowPlanResult(true);
         return;
       }
       prompt.updatePromptDraft({ value: "", promptEditing: false });
-      runner.launchWorkflow(pending.name, pending.prompt, picker.setWfPreview, {
-        fresh: pending.fresh,
-        params,
+      runner.launchWorkflow(outcome.name, outcome.prompt, picker.setWfPreview, {
+        fresh: outcome.fresh,
+        params: outcome.params,
       });
     },
     [

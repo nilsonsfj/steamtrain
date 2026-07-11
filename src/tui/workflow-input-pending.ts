@@ -21,3 +21,34 @@ export function planFromInputFormSubmit(
   if (!spec) return null;
   return planWorkflow(spec, pending.prompt, params);
 }
+
+export type InputFormSubmitResult =
+  | { action: "plan"; plan: PlanResult }
+  | {
+      action: "run";
+      name: string;
+      prompt: string;
+      fresh: boolean;
+      params: Record<string, string | number | boolean>;
+    }
+  | { action: "missing-spec" };
+
+/** Route a submitted input form to either plan generation or workflow launch. */
+export function resolveInputFormSubmit(
+  pending: InputFormPending,
+  spec: WorkflowSpec | undefined,
+  params: Record<string, string | number | boolean>,
+): InputFormSubmitResult {
+  if (pending.action === "plan") {
+    const plan = planFromInputFormSubmit(spec, pending, params);
+    if (!plan) return { action: "missing-spec" };
+    return { action: "plan", plan };
+  }
+  return {
+    action: "run",
+    name: pending.name,
+    prompt: pending.prompt,
+    fresh: pending.fresh,
+    params,
+  };
+}
