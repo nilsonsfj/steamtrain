@@ -270,7 +270,14 @@ describe("worktree merge-back core", () => {
     // contain node_modules paths.
     const snap = await snapshotWorktreeState(source);
     expect(snap.changed).toBe(true);
-    const tree = await git(source.root, "diff-tree", "--no-commit-id", "-r", "--name-only", snap.commit);
+    const tree = await git(
+      source.root,
+      "diff-tree",
+      "--no-commit-id",
+      "-r",
+      "--name-only",
+      snap.commit,
+    );
     expect(tree).not.toContain("node_modules");
 
     // Full harvest apply should not fail trying to write a symlink over a dir.

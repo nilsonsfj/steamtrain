@@ -206,7 +206,13 @@ export async function worktreeDiff(
     // working state over it: `git add -A` from an empty index would miss
     // deletions of files that were never staged.
     await runGit(["read-tree", base], source.root, undefined, opts.signal, env);
-    await runGit(gitAddArgsWithExcludes(source.linkedIgnoredPaths), source.root, undefined, opts.signal, env);
+    await runGit(
+      gitAddArgsWithExcludes(source.linkedIgnoredPaths),
+      source.root,
+      undefined,
+      opts.signal,
+      env,
+    );
     const stats = parseNumstat(
       await gitTextEnv(["diff", "--cached", "--numstat", base], source.root, env, opts.signal),
       await gitTextEnv(["diff", "--cached", "--name-status", base], source.root, env, opts.signal),
