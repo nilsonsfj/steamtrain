@@ -509,9 +509,7 @@ describe("planWorkflow with session overrides", () => {
 
   it("ignores overrides for non-agent-backed steps", () => {
     const s = spec({
-      phases: [
-        phase("p1", [command("c1", "echo hi")]),
-      ],
+      phases: [phase("p1", [command("c1", "echo hi")])],
     });
     const result = planWithOverrides(s, {
       steps: { c1: { agent: "codex", model: "gpt-5.5", prompt: "ignored" } },
