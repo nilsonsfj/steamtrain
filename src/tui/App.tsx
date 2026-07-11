@@ -53,7 +53,6 @@ import {
   isAgentBackedStep,
   isTerminalLiveRunStatus,
   planWorkflow,
-  resolveInputs,
   totalTokens,
   workflowCacheKey,
 } from "../workflow";
@@ -90,6 +89,11 @@ import { initialPromptHistoryBrowse } from "./prompt-history";
 import { initialTranscript, transcriptReducer } from "./transcript";
 import { useTerminalSize } from "./useTerminalSize";
 import { computeStreamHeight, message } from "./util";
+import {
+  type InputFormPending,
+  planFromInputFormSubmit,
+  workflowHasDeclaredInputs,
+} from "./workflow-input-pending";
 import { flattenSteps } from "./workflow-state";
 import { type StepEditorTarget, stepEditorTarget } from "./workflow-step-editor";
 
@@ -186,12 +190,7 @@ export function App({
   const [agentCatalogTick, setAgentCatalogTick] = useState(0);
   const mountedRef = useRef(true);
   const valueRef = useRef("");
-  const [inputFormPending, setInputFormPending] = useState<{
-    name: string;
-    prompt: string;
-    fresh: boolean;
-    action: "run" | "plan";
-  } | null>(null);
+  const [inputFormPending, setInputFormPending] = useState<InputFormPending | null>(null);
   const [planResult, setPlanResult] = useState<PlanResult | null>(null);
 
   const enabledAgentIds = useMemo(
@@ -888,7 +887,7 @@ export function App({
         // For fresh re-runs on workflows with inputs, show the input form first.
         {
           const spec = resolveWorkflowSpec(runner.activeWorkflowRef.current);
-          if (spec?.inputs && Object.keys(spec.inputs).length > 0) {
+          if (spec && workflowHasDeclaredInputs(spec)) {
             setInputFormPending({
               name: runner.activeWorkflowRef.current,
               prompt: promptText,
@@ -913,7 +912,7 @@ export function App({
         // For fresh runs on workflows with inputs, show the input form first.
         if (fresh) {
           const spec = resolveWorkflowSpec(picker.wfPreview.name);
-          if (spec?.inputs && Object.keys(spec.inputs).length > 0) {
+          if (spec && workflowHasDeclaredInputs(spec)) {
             setInputFormPending({
               name: picker.wfPreview.name,
               prompt: promptText,
@@ -941,7 +940,7 @@ export function App({
       // For fresh runs on workflows with inputs, show the input form first.
       {
         const spec = resolveWorkflowSpec(entry.name);
-        if (spec?.inputs && Object.keys(spec.inputs).length > 0) {
+        if (spec && workflowHasDeclaredInputs(spec)) {
           setInputFormPending({
             name: entry.name,
             prompt: promptText,
@@ -1166,13 +1165,11 @@ export function App({
     const spec = resolveWorkflowSpec(name);
     if (!spec) return;
     // For workflows with inputs, show the input form first (mirrors fresh runs).
-    if (spec.inputs && Object.keys(spec.inputs).length > 0) {
-      setInputFormPending({ name, prompt: promptText, fresh: true, action: "plan" });
+    if (workflowHasDeclaredInputs(spec)) {
+      setInputFormPending({ name, prompt: promptText, action: "plan" });
       return;
     }
-    const resolved = resolveInputs(spec, {});
-    const params = Object.keys(resolved.values).length > 0 ? resolved.values : undefined;
-    const plan = planWorkflow(spec, promptText, params);
+    const plan = planWorkflow(spec, promptText);
     setPlanResult(plan);
     runner.setWfShowPlanResult(true);
   }, [
@@ -1202,8 +1199,8 @@ export function App({
       setInputFormPending(null);
       if (pending.action === "plan") {
         const spec = resolveWorkflowSpec(pending.name);
-        if (!spec) return;
-        const plan = planWorkflow(spec, pending.prompt, params);
+        const plan = planFromInputFormSubmit(spec, pending, params);
+        if (!plan) return;
         setPlanResult(plan);
         runner.setWfShowPlanResult(true);
         return;
