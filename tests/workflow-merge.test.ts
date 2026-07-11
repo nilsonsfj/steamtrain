@@ -239,6 +239,46 @@ describe("worktree merge-back core", () => {
     expect(branches).toBe("");
     await expect(worktreeDiff(source)).rejects.toThrow(/no longer exists/);
   });
+
+  it("excludes symlinked ignored paths from diff and snapshot", async () => {
+    const { repo, allocate } = await repoWithManager();
+    // Add .gitignore so git knows to ignore the scaffolding directory.
+    await writeFile(join(repo, ".gitignore"), "node_modules/\n");
+    await git(repo, "add", ".gitignore");
+    await git(repo, "commit", "-m", "add gitignore");
+    // Create the ignored directory on disk (untracked, gitignored) — the
+    // worktree manager should symlink it instead of copying.
+    await mkdir(join(repo, "node_modules", "pkg"), { recursive: true });
+    await writeFile(join(repo, "node_modules", "pkg", "index.js"), "module.exports = {}\n");
+
+    const source = await allocate("feature");
+    // The worktree should have a symlink for node_modules.
+    const stat = await import("node:fs/promises").then((fs) =>
+      fs.lstat(join(source.root, "node_modules")),
+    );
+    expect(stat.isSymbolicLink()).toBe(true);
+
+    // Make a real change.
+    await writeFile(join(source.root, "src", "a.txt"), "edited\n");
+
+    // worktreeDiff should NOT contain node_modules.
+    const diff = await worktreeDiff(source);
+    expect(diff.files.map((f) => f.path)).not.toContain("node_modules/pkg/index.js");
+    expect(diff.files.map((f) => f.path)).toContain("src/a.txt");
+
+    // snapshotWorktreeState should succeed and the snapshot commit should NOT
+    // contain node_modules paths.
+    const snap = await snapshotWorktreeState(source);
+    expect(snap.changed).toBe(true);
+    const tree = await git(source.root, "diff-tree", "--no-commit-id", "-r", "--name-only", snap.commit);
+    expect(tree).not.toContain("node_modules");
+
+    // Full harvest apply should not fail trying to write a symlink over a dir.
+    const result = await harvestWorktrees({ repoRoot: repo, sources: [source], mode: "apply" });
+    expect(result.noChanges).toBe(false);
+    expect(result.files.map((f) => f.path)).toContain("src/a.txt");
+    expect(result.files.map((f) => f.path)).not.toContain("node_modules/pkg/index.js");
+  });
 });
 
 interface RepoHarness {
@@ -280,6 +320,7 @@ async function repoWithManager(): Promise<RepoHarness> {
         root: lease.root,
         branch: lease.branch,
         baseCommit: lease.baseCommit,
+        linkedIgnoredPaths: lease.linkedIgnoredPaths,
       };
     },
   };
