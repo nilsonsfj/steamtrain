@@ -1,5 +1,6 @@
 import type { SteamtrainConfig } from "../config";
 import type { ApprovalDecision, ApprovalProvider } from "./approval";
+import type { WorkflowRunControl } from "./control";
 import type { WorkflowEvent } from "./events";
 import type { RunRecordStatus } from "./history";
 import {
@@ -121,6 +122,15 @@ export function createLiveRunPublisher(store: LiveRunStore, runId: string): Live
           syncPendingApprovals();
         }
       }
+      // Mirror the engine-acknowledged pause state into the meta so run
+      // listings (CLI `workflow runs`, the web Active-runs panel) can badge a
+      // paused run without tailing its event stream.
+      if (event.kind === "run_paused" || event.kind === "run_resumed") {
+        const paused = event.kind === "run_paused";
+        enqueue(async () => {
+          await store.update(runId, { paused });
+        });
+      }
       pending.push(`${JSON.stringify(event)}\n`);
       scheduleFlush();
     },
@@ -133,6 +143,7 @@ export function createLiveRunPublisher(store: LiveRunStore, runId: string): Live
           error: opts.error,
           endedAt: Date.now(),
           pendingApprovals: [],
+          paused: false,
         });
       });
       await chain;
@@ -228,6 +239,57 @@ export function watchRunCancel(
         }
       })
       .catch(() => {});
+  }, pollMs);
+  timer.unref?.();
+  return () => {
+    disposed = true;
+    clearInterval(timer);
+  };
+}
+
+/**
+ * Poll the run's control files (`control/pause.json`, `control/edits/*`) and
+ * steer the run's {@link WorkflowRunControl} to match — the owner-side half of
+ * cross-process pause/edit/resume. Every surface (TUI keypress, web endpoint,
+ * `steamtrain workflow pause|resume|edit-step`) writes the same files, so the
+ * file is the single source of truth and surfaces can never fight each other.
+ * Edit requests are validated by the engine via the control; the outcome is
+ * written back so the requesting surface can report accept/reject.
+ * Returns a dispose function.
+ */
+export function watchRunControl(
+  store: LiveRunStore,
+  runId: string,
+  control: WorkflowRunControl,
+  pollMs = 400,
+): () => void {
+  let disposed = false;
+  let busy = false;
+  const processedEdits = new Set<string>();
+  const poll = async (): Promise<void> => {
+    const pauseState = await store.readPauseState(runId).catch(() => undefined);
+    if (disposed) return;
+    if (pauseState && pauseState.paused !== control.isPauseRequested()) {
+      if (pauseState.paused) control.pause(pauseState.by);
+      else control.resume(pauseState.by);
+    }
+    const edits = await store.listStepEditRequests(runId).catch(() => []);
+    for (const edit of edits) {
+      if (disposed) return;
+      if (processedEdits.has(edit.editId)) continue;
+      processedEdits.add(edit.editId);
+      const result = control.editStep(edit.stepId, edit.patch, edit.by);
+      await store.writeStepEditResult(runId, edit.editId, result).catch(() => {});
+    }
+  };
+  const timer = setInterval(() => {
+    if (busy || disposed) return;
+    busy = true;
+    void poll()
+      .catch(() => {})
+      .finally(() => {
+        busy = false;
+      });
   }, pollMs);
   timer.unref?.();
   return () => {

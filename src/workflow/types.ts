@@ -657,6 +657,13 @@ export interface StepResult {
   /** Loop iteration this result belongs to (1-based); omitted ⇒ 1. */
   iteration?: number;
   /**
+   * True when the step executed with a mid-run edit applied (its prompt/cmd/
+   * model/effort was changed while the run was paused). The `step_edited`
+   * events in the run record carry the patches; this flags the result so UIs
+   * and history badge the steered step.
+   */
+  edited?: boolean;
+  /**
    * When true this result must never be written to the step cache (in-memory
    * or on-disk). Set for human-approval checkpoints so a resumed run always
    * re-asks the decision instead of replaying a stale approval. Purely a

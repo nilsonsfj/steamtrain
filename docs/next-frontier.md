@@ -96,6 +96,21 @@ single biggest practicality unlock: it converts "restart the 40-minute run
 and pray" into a 30-second correction, and it makes iterating on a new
 workflow feel like debugging with a REPL instead of punch cards.
 
+> **Shipped (2026-07-11, pause/edit/resume):** the steering half — **pause** a
+> live run (in-flight steps finish, nothing new schedules; loop workflows
+> pause at the phase boundary), **edit** any step that hasn't started yet
+> (prompt / `cmd` / model / effort, validated by the engine against the live
+> spec, stale cache entries dropped so the edit really runs), and **resume**.
+> Surfaced everywhere: TUI (`p` pause, `e` edit the selected pending step),
+> web UI (Pause/Resume button + per-card "Edit step" while paused), CLI
+> (`workflow pause|resume|edit-step`), and HTTP — all cross-process through
+> the live-run store, so any surface can steer any process's run. Every
+> intervention is recorded (`run_paused`/`run_resumed`/`step_edited` events,
+> an `interventions` list in history, `✎ edited` badges). **Rewind & replay
+> of already-completed steps was deliberately dropped** from the scope — steps
+> that ran keep their results; editing targets only the run's future. See
+> `docs/mid-run-steering.md`.
+
 ## 3. Human-as-a-step: `kind: "human"` + agent clarifying questions
 
 **The gap:** approval gates made the human a binary comparator — approve or

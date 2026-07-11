@@ -58,7 +58,17 @@ export type {
   BudgetExceededEvent,
   ApprovalPendingEvent,
   ApprovalResolvedEvent,
+  RunPausedEvent,
+  RunResumedEvent,
+  StepEditedEvent,
 } from "./events";
+export {
+  createWorkflowRunControl,
+  type RunControlHooks,
+  type StepEditPatch,
+  type StepEditResult,
+  type WorkflowRunControl,
+} from "./control";
 export {
   APPROVAL_OUTPUT_CAP,
   APPROVAL_DIFF_CAP,
@@ -210,6 +220,7 @@ export {
   type RunTotals,
   type RunBudgetInfo,
   type RunHarvestInfo,
+  type RunIntervention,
   type HistoryPhase,
   type HistoryStep,
 } from "./history";
@@ -228,8 +239,10 @@ export {
   type LiveRunLaunch,
   type LiveRunListOptions,
   type LiveRunMeta,
+  type LiveRunPauseState,
   type LiveRunSource,
   type LiveRunStatus,
+  type LiveRunStepEditRequest,
   type LiveRunStore,
 } from "./live-run-store";
 export {
@@ -239,6 +252,7 @@ export {
   resolveMaxParallelRuns,
   storeApprovalProvider,
   watchRunCancel,
+  watchRunControl,
   withStoreApprovals,
   type AcquireRunSlotOptions,
   type AcquireRunSlotResult,

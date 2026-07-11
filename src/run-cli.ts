@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { closeSync, openSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { refreshAgentCatalogCaches } from "./agents/models";
 import type { CliIO } from "./cli";
@@ -16,6 +17,7 @@ import {
   type RerunMode,
   RunRecordBuilder,
   type RunRecordStatus,
+  type StepEditPatch,
   type StepResult,
   WORKFLOW_CACHE_DIR,
   WORKFLOW_HISTORY_DIR,
@@ -29,6 +31,7 @@ import {
   createLiveRunStore,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
+  createWorkflowRunControl,
   formatTokenSummary,
   formatTokens,
   formatUsd,
@@ -52,6 +55,7 @@ import {
   tokensForResults,
   totalTokens,
   watchRunCancel,
+  watchRunControl,
   workflowAgentIds,
   workflowCacheKey,
   workflowLlmSteps,
@@ -635,6 +639,11 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<numbe
   const ac = new AbortController();
   const disposeSignals = options.installSignalHandlers(() => ac.abort());
   const disposeCancelWatch = watchRunCancel(store, runId, () => ac.abort());
+  // Mid-run steering: any attached UI (TUI /pause key, web button, `steamtrain
+  // workflow pause|resume|edit-step`) writes control files; this watcher
+  // applies them to the run.
+  const control = createWorkflowRunControl();
+  const disposeControlWatch = watchRunControl(store, runId, control);
 
   const recorder = new RunRecordBuilder({
     id: runId,
@@ -661,6 +670,7 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<numbe
   if (!slot.ok) {
     disposeSignals();
     disposeCancelWatch();
+    disposeControlWatch();
     await store.update(runId, { status: "canceled", ok: false, endedAt: Date.now() });
     await saveHistory(historyStore, recorder, "canceled", err);
     err("run canceled while queued\n");
@@ -701,6 +711,7 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<numbe
       undefined,
       params,
       options.approval,
+      control,
     )) {
       recorder.handle(event);
       publisher.event(event);
@@ -715,6 +726,12 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<numbe
           event.result,
           event.cached,
         );
+      }
+      if (event.kind === "step_edited") {
+        // The engine dropped the edited step's stale cache entry from the
+        // shared in-memory map; persist the deletion so a canceled-then-resumed
+        // run can't replay the pre-edit result from disk.
+        await cacheStore.save(key, cache);
       }
       if (event.kind === "workflow_done") {
         ok = event.ok;
@@ -745,6 +762,7 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<numbe
     if (timeoutTimer) clearTimeout(timeoutTimer);
     disposeSignals();
     disposeCancelWatch();
+    disposeControlWatch();
   }
 }
 
@@ -888,6 +906,7 @@ function printLiveRunRow(run: LiveRunMeta, out: (text: string) => void): void {
   const started = new Date(run.startedAt ?? run.createdAt).toISOString();
   const flags = [
     run.detached ? "detached" : run.source,
+    run.paused ? "⏸ paused" : undefined,
     run.pendingApprovals?.length
       ? `⏳ approval: ${run.pendingApprovals.map((p) => p.stepId).join(", ")}`
       : undefined,
@@ -919,6 +938,144 @@ export async function runCancelCommand(
     return 1;
   }
   out(`cancel requested for run ${runId}; the owning process stops it shortly\n`);
+  return 0;
+}
+
+// ── workflow pause / resume / edit-step ─────────────────────────────────────
+
+/**
+ * `steamtrain workflow pause <runId>` / `resume <runId>` — write the desired
+ * pause state; the owning process's control watcher applies it. Pausing lets
+ * in-flight steps finish and schedules nothing new; pending steps can then be
+ * edited (`workflow edit-step`) before resuming.
+ */
+export async function runPauseCommand(
+  args: string[],
+  cwd: string,
+  paused: boolean,
+  out: (text: string) => void,
+  err: (text: string) => void,
+): Promise<number> {
+  const verb = paused ? "pause" : "resume";
+  const runId = args[0];
+  if (!runId || runId.startsWith("--") || args.length > 1) {
+    err(`usage: steamtrain workflow ${verb} <runId>\n`);
+    return 1;
+  }
+  const store = createLiveRunStore(join(cwd, WORKFLOW_RUNS_DIR));
+  const requested = await store.writePauseState(runId, { paused, by: "human:cli" });
+  if (!requested) {
+    err(`no active run '${runId}' to ${verb} (see 'steamtrain workflow runs')\n`);
+    return 1;
+  }
+  out(
+    paused
+      ? `pause requested for run ${runId}; in-flight steps finish, nothing new starts\n`
+      : `resume requested for run ${runId}; the run continues shortly\n`,
+  );
+  return 0;
+}
+
+/** How long `workflow edit-step` polls for the owner's accept/reject outcome. */
+const EDIT_RESULT_WAIT_MS = 5_000;
+const EDIT_RESULT_POLL_MS = 200;
+
+/**
+ * `steamtrain workflow edit-step <runId> <stepId> [--prompt <text> |
+ * --prompt-file <path>] [--cmd <text>] [--model <id>] [--effort <level>]` —
+ * stage a mid-run edit for a not-yet-started step of a paused run, then wait
+ * briefly for the owning process to accept or reject it.
+ */
+export async function runEditStepCommand(
+  args: string[],
+  cwd: string,
+  out: (text: string) => void,
+  err: (text: string) => void,
+): Promise<number> {
+  const usage =
+    "usage: steamtrain workflow edit-step <runId> <stepId> [--prompt <text> | --prompt-file <path>] [--cmd <text>] [--model <id>] [--effort <level>]\n";
+  const runId = args[0];
+  const stepId = args[1];
+  if (!runId || runId.startsWith("--") || !stepId || stepId.startsWith("--")) {
+    err(usage);
+    return 1;
+  }
+  const patch: StepEditPatch = {};
+  for (let i = 2; i < args.length; i++) {
+    const arg = args[i];
+    const value = args[i + 1];
+    if (arg === "--prompt" || arg === "--cmd" || arg === "--model" || arg === "--effort") {
+      if (value === undefined) {
+        err(usage);
+        return 1;
+      }
+      i++;
+      if (arg === "--prompt") patch.prompt = value;
+      else if (arg === "--cmd") patch.cmd = value;
+      else if (arg === "--model") patch.model = value;
+      else patch.effort = value;
+    } else if (arg === "--prompt-file") {
+      if (value === undefined) {
+        err(usage);
+        return 1;
+      }
+      i++;
+      try {
+        patch.prompt = await readFile(value, "utf8");
+      } catch (e) {
+        err(`could not read --prompt-file '${value}': ${message(e)}\n`);
+        return 1;
+      }
+    } else {
+      err(usage);
+      return 1;
+    }
+  }
+  if (
+    patch.prompt === undefined &&
+    patch.cmd === undefined &&
+    patch.model === undefined &&
+    patch.effort === undefined
+  ) {
+    err("nothing to change — pass at least one of --prompt/--prompt-file/--cmd/--model/--effort\n");
+    return 1;
+  }
+
+  const store = createLiveRunStore(join(cwd, WORKFLOW_RUNS_DIR));
+  const meta = await store.get(runId);
+  if (!meta || isTerminalLiveRunStatus(meta.status)) {
+    err(`no active run '${runId}' (see 'steamtrain workflow runs')\n`);
+    return 1;
+  }
+  const desired = await store.readPauseState(runId);
+  if (!meta.paused && !desired?.paused) {
+    err(`run '${runId}' is not paused — pause it first: steamtrain workflow pause ${runId}\n`);
+    return 1;
+  }
+
+  const editId = await store.requestStepEdit(runId, { stepId, patch, by: "human:cli" });
+  if (!editId) {
+    err(`no active run '${runId}' (see 'steamtrain workflow runs')\n`);
+    return 1;
+  }
+  const deadline = Date.now() + EDIT_RESULT_WAIT_MS;
+  while (Date.now() < deadline) {
+    const result = await store.readStepEditResult(runId, editId);
+    if (result) {
+      if (result.ok) {
+        out(
+          `✓ edit accepted for step '${stepId}' — it applies when the step runs (resume with 'steamtrain workflow resume ${runId}')\n`,
+        );
+        return 0;
+      }
+      err(`✗ edit rejected: ${result.error}\n`);
+      return 1;
+    }
+    await new Promise((resolve) => setTimeout(resolve, EDIT_RESULT_POLL_MS));
+  }
+  out(
+    `edit requested for step '${stepId}' — no response from the owning process yet; watch the run ('steamtrain workflow attach ${runId}') to confirm\n`,
+  );
   return 0;
 }
 
@@ -1098,6 +1255,19 @@ export function printHumanEvent(event: WorkflowEvent, out: (text: string) => voi
       out(
         `\n  ⚠ ${where} cost budget ${formatUsd(event.limitUsd)} reached (spent ${formatUsd(event.spentUsd)}) — stopping new steps; resume after raising the cap\n`,
       );
+      return;
+    }
+    case "run_paused":
+      out(
+        `\n  ⏸ run paused${event.by ? ` by ${event.by}` : ""} — in-flight steps finish, nothing new starts (edit pending steps with 'workflow edit-step', continue with 'workflow resume')\n`,
+      );
+      return;
+    case "run_resumed":
+      out(`  ▶ run resumed${event.by ? ` by ${event.by}` : ""}\n`);
+      return;
+    case "step_edited": {
+      const fields = Object.keys(event.patch).join(", ");
+      out(`  ✎ step ${event.stepId} edited (${fields})${event.by ? ` by ${event.by}` : ""}\n`);
       return;
     }
     case "workflow_done":

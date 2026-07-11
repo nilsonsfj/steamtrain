@@ -135,6 +135,18 @@ the UI; unattended, `--approve-all` waves everything through or
 into CI. Headless runs end with a one-line-per-step **status summary** and an
 honest exit code.
 
+### Steer a run without restarting it
+
+A live run isn't a batch job you can only watch or kill. **Pause** it
+(in-flight steps finish; nothing new starts), **edit** any step that hasn't
+run yet — fix the prompt you mistyped, swap the model, tweak a `command` —
+then **resume**, and the run continues with your corrections. Works from every
+surface (`p`/`e` in the TUI, Pause + per-card Edit in the web UI,
+`workflow pause|edit-step|resume` in the CLI) on runs owned by any process,
+and every intervention is recorded in the run history, so a steered run is
+still an honest record. See
+[docs/mid-run-steering.md](docs/mid-run-steering.md).
+
 ### Fire it off, come back later
 
 Long workflows shouldn't hold a terminal hostage. `workflow run --detach`
@@ -188,6 +200,11 @@ steamtrain workflow runs                       # in-flight runs across every UI 
 steamtrain workflow attach <runId>             # replay + live tail; Ctrl+C detaches
 steamtrain workflow cancel <runId>             # stop a run owned by any process
 steamtrain workflow approve <runId> [--reject] # decide a parked approval checkpoint
+
+# Mid-run steering (docs/mid-run-steering.md): pause, fix a pending step, resume
+steamtrain workflow pause <runId>              # in-flight steps finish; nothing new starts
+steamtrain workflow edit-step <runId> <stepId> --prompt "corrected prompt"  # or --cmd/--model/--effort
+steamtrain workflow resume <runId>
 
 # Inspect past runs (recorded automatically to .steamtrain/history/)
 steamtrain workflow history                    # list recent runs (newest first)

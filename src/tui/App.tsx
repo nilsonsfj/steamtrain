@@ -55,6 +55,7 @@ import {
   planWorkflow,
   totalTokens,
   workflowCacheKey,
+  workflowStepKind,
 } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId, WorkspaceScope } from "../workspace";
 import {
@@ -76,6 +77,7 @@ import { WorkflowHistory } from "./WorkflowHistory";
 import { WorkflowInputForm } from "./WorkflowInputForm";
 import { WorkflowPicker } from "./WorkflowPicker";
 import { WorkflowPreview } from "./WorkflowPreview";
+import { type RunStepEditorTarget, WorkflowRunStepEditor } from "./WorkflowRunStepEditor";
 import { WorkflowStepDetails } from "./WorkflowStepDetails";
 import { WorkflowStepEditor } from "./WorkflowStepEditor";
 import { WorkflowView } from "./WorkflowView";
@@ -178,6 +180,8 @@ export function App({
   const [agentManagerOpen, setAgentManagerOpen] = useState(false);
   const [apiManagerOpen, setApiManagerOpen] = useState(false);
   const [stepEditorOpen, setStepEditorOpen] = useState(false);
+  /** Non-null while the mid-run (paused) step editor overlay is open. */
+  const [runEditor, setRunEditor] = useState<RunStepEditorTarget | null>(null);
   const [apiDoctor, setApiDoctor] = useState<ApiDoctorResult[] | null>(null);
   const [runtimeConfigSource, setRuntimeConfigSource] = useState(configSource);
   const [activeWorkspaceLabel, setActiveWorkspaceLabel] = useState(workspaceLabel);
@@ -555,6 +559,77 @@ export function App({
   useEffect(() => {
     if (stepEditorOpen && !editorTarget) setStepEditorOpen(false);
   }, [stepEditorOpen, editorTarget]);
+
+  // ── Mid-run (pause → edit → resume) step editor ──────────────────────
+  // `e` on a pending step while the run is paused opens a buffered editor;
+  // Enter stages ONE recorded edit through the run's steering control.
+  const openRunStepEditor = useCallback(() => {
+    if (mode !== "workflow" || !runner.running || !runner.wf.paused) return;
+    const selected = runner.liveSelectedStep;
+    if (!selected || selected.step.status !== "pending" || selected.step.parentStepId) {
+      runner.setWfNotice("select a pending step (↑/↓) to edit while paused");
+      return;
+    }
+    const workflowName = runner.activeWorkflowRef.current;
+    const spec = workflowName ? resolveWorkflowSpec(workflowName) : undefined;
+    const specStep = spec?.phases
+      .flatMap((phase) => phase.steps)
+      .find((step) => step.id === selected.step.stepId);
+    if (!specStep) {
+      runner.setWfNotice(`cannot edit '${selected.step.stepId}': workflow spec not found`);
+      return;
+    }
+    const kind = workflowStepKind(specStep);
+    const promptEditable =
+      kind === "worker" ||
+      kind === "processor" ||
+      kind === "llm" ||
+      kind === "consolidator" ||
+      kind === "approval" ||
+      (kind === "distributor" && isAgentBackedStep(specStep));
+    const field: "prompt" | "cmd" | undefined =
+      kind === "command" ? "cmd" : promptEditable ? "prompt" : undefined;
+    if (!field) {
+      runner.setWfNotice(`step '${selected.step.stepId}' (${kind}) has no editable prompt/command`);
+      return;
+    }
+    const priorEdit = runner.wf.editedSteps?.[selected.step.stepId];
+    const specValue =
+      field === "cmd"
+        ? ((specStep as { cmd?: string }).cmd ?? "")
+        : "prompt" in specStep
+          ? (specStep.prompt ?? "")
+          : "";
+    setRunEditor({
+      stepId: selected.step.stepId,
+      kindLabel: kind,
+      field,
+      initial: (field === "cmd" ? priorEdit?.cmd : priorEdit?.prompt) ?? specValue,
+    });
+  }, [
+    mode,
+    runner.running,
+    runner.wf.paused,
+    runner.wf.editedSteps,
+    runner.liveSelectedStep,
+    runner.activeWorkflowRef,
+    runner.setWfNotice,
+    resolveWorkflowSpec,
+  ]);
+
+  const applyRunStepEdit = useCallback(
+    (value: string) => {
+      if (!runEditor) return;
+      const patch = runEditor.field === "cmd" ? { cmd: value } : { prompt: value };
+      void runner.editRunStep(runEditor.stepId, patch).then((notice) => runner.setWfNotice(notice));
+    },
+    [runEditor, runner.editRunStep, runner.setWfNotice],
+  );
+
+  // The mid-run editor only makes sense while its run is alive and paused.
+  useEffect(() => {
+    if (runEditor && (!runner.running || !runner.wf.paused)) setRunEditor(null);
+  }, [runEditor, runner.running, runner.wf.paused]);
 
   // ── History hook ─────────────────────────────────────────────────────
   const historyHook = useHistory({
@@ -1207,10 +1282,12 @@ export function App({
     agentManagerOpen,
     apiManagerOpen,
     stepEditorOpen,
+    runEditorOpen: runEditor !== null,
     inputFormPending: inputFormPending !== null,
     openAgentManager: () => {
       openAgentManager();
     },
+    openRunStepEditor,
     focusCreateWorkflowPrompt,
     switchMode: (next) => {
       setMode(next);
@@ -1301,6 +1378,14 @@ export function App({
           height={streamHeight}
           onApply={applyStepEdit}
           onClose={() => setStepEditorOpen(false)}
+        />
+      ) : runEditor ? (
+        <WorkflowRunStepEditor
+          target={runEditor}
+          width={columns}
+          height={streamHeight}
+          onApply={applyRunStepEdit}
+          onClose={() => setRunEditor(null)}
         />
       ) : inputFormPending ? (
         (() => {
@@ -1451,6 +1536,7 @@ export function App({
             !agentManagerOpen &&
             !apiManagerOpen &&
             !stepEditorOpen &&
+            !runEditor &&
             !inputFormPending
           }
           editing={
@@ -1458,6 +1544,7 @@ export function App({
             !agentManagerOpen &&
             !apiManagerOpen &&
             !stepEditorOpen &&
+            !runEditor &&
             !inputFormPending &&
             (!workflowListNavigation(mode) || prompt.promptEditing)
           }
@@ -1475,21 +1562,24 @@ export function App({
                 ? "api manager · ↑/↓ select · Enter/Space toggle · a add · d delete · Esc close · Ctrl+C quit"
                 : stepEditorOpen
                   ? "step editor · ↑/↓ field · ←/→ change · Enter edit prompt · Esc close · Ctrl+C quit"
-                  : historyHook.history
-                    ? historyHintText(historyHook.history)
-                    : hint(
-                        mode,
-                        runner.wf.started,
-                        runner.wfLaunching,
-                        !!picker.wfPreview,
-                        runner.running,
-                        prompt.suggestionMenuOpen,
-                        runner.wfCanResume,
-                        prompt.promptEditing,
-                        isSlashCommandInput(prompt.value),
-                        !!runner.wfStepDetails,
-                        attachedRun,
-                      )}
+                  : runEditor
+                    ? "edit paused step · type to edit · Enter apply · Esc cancel · Ctrl+C quit"
+                    : historyHook.history
+                      ? historyHintText(historyHook.history)
+                      : hint(
+                          mode,
+                          runner.wf.started,
+                          runner.wfLaunching,
+                          !!picker.wfPreview,
+                          runner.running,
+                          prompt.suggestionMenuOpen,
+                          runner.wfCanResume,
+                          prompt.promptEditing,
+                          isSlashCommandInput(prompt.value),
+                          !!runner.wfStepDetails,
+                          attachedRun,
+                          Boolean(runner.wf.paused),
+                        )}
           </Text>
         </Box>
       </Box>
@@ -1511,6 +1601,7 @@ function hint(
   slashInput: boolean,
   wfStepDetails: boolean,
   attachedRun = false,
+  wfPaused = false,
 ): string {
   const completeHint = suggestionMenuOpen ? " · ↑/↓ complete · Tab/Enter pick · Esc cancel" : "";
   const historyHint = " · ↑/↓ history";
@@ -1518,11 +1609,12 @@ function hint(
   if (running) {
     // An attached run is owned elsewhere: Ctrl+Q only detaches the view.
     const stopHint = attachedRun ? "Ctrl+Q detach · /cancel-run cancel" : "Ctrl+Q cancel";
+    const pauseHint = wfPaused ? "p resume · ↑/↓ step · e edit pending step" : "p pause";
     if (mode === "workflow" && wfStepDetails) {
-      return `↑/↓ step · PgUp/PgDn scroll · ←/Esc back · ${stopHint} · /exit quit · Ctrl+C quit`;
+      return `↑/↓ step · PgUp/PgDn scroll · ←/Esc back · ${pauseHint} · ${stopHint} · /exit quit · Ctrl+C quit`;
     }
     return mode === "workflow"
-      ? `${stopHint} · /exit quit · Ctrl+C quit`
+      ? `${pauseHint} · ${stopHint} · /exit quit · Ctrl+C quit`
       : "Esc cancel · /exit quit · Ctrl+C quit";
   }
   if (mode === "workflow") {

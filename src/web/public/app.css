@@ -531,6 +531,33 @@ textarea#input:focus {
   font-weight: 600;
   margin-left: 8px;
 }
+.badge.paused {
+  color: var(--gate);
+  border-color: #5e4a1d;
+  font-weight: 600;
+}
+.badge.edited {
+  color: var(--accent);
+  border-color: #1d4a5e;
+}
+.card .edit-actions {
+  margin-top: 8px;
+}
+.edit-step-text {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  box-sizing: border-box;
+  margin-top: 8px;
+}
 .legend {
   max-width: 1100px;
   margin: 0 auto 16px;

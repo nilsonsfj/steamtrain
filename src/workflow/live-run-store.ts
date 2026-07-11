@@ -1,6 +1,8 @@
+import { randomBytes } from "node:crypto";
 import { appendFile, mkdir, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ApprovalDecision } from "./approval";
+import type { StepEditPatch, StepEditResult } from "./control";
 import type { WorkflowEvent } from "./events";
 import { atomicWriteFile, isEnoent, sanitizePathComponent } from "./fs-util";
 import { RunRecordBuilder, type RunRecordStatus } from "./history";
@@ -17,6 +19,8 @@ import type { WorkflowHistoryStore } from "./history-store";
  *   events.ndjson     — one {@link WorkflowEvent} JSON line per event (append-only)
  *   cancel            — marker file; the owning process polls it and aborts
  *   approvals/*.json  — human-approval decisions written by any attached UI
+ *   control/pause.json — desired pause state (last write wins); the owner polls it
+ *   control/edits/*.json — mid-run step-edit requests + the owner's results
  *   runner.log        — stdout/stderr of a detached runner (debugging)
  *
  * Only the process that owns a run writes its meta/events; every other
@@ -90,8 +94,25 @@ export interface LiveRunMeta {
   endedAt?: number;
   /** Human-approval checkpoints currently awaiting a decision. */
   pendingApprovals?: { stepId: string; iteration: number }[];
+  /** True while the run's engine has acknowledged a pause (mirrored from `run_paused`/`run_resumed`). */
+  paused?: boolean;
   /** Launch args for the detached runner (set only for `--detach` runs). */
   launch?: LiveRunLaunch;
+}
+
+/** The desired pause state any attached UI may write (last write wins). */
+export interface LiveRunPauseState {
+  paused: boolean;
+  /** Who asked (e.g. `"human:cli"`). */
+  by?: string;
+}
+
+/** A mid-run step-edit request dropped by an attached UI for the owner to apply. */
+export interface LiveRunStepEditRequest {
+  editId: string;
+  stepId: string;
+  patch: StepEditPatch;
+  by?: string;
 }
 
 export const LIVE_RUN_TERMINAL_STATUSES: readonly LiveRunStatus[] = [
@@ -178,6 +199,29 @@ export interface LiveRunStore {
     stepId: string,
     iteration: number,
   ): Promise<ApprovalDecision | undefined>;
+  /**
+   * Write the desired pause state (any attached UI; last write wins). The
+   * owning process polls it via {@link readPauseState} and steers its run
+   * control to match. Returns false when the run is unknown or terminal.
+   */
+  writePauseState(id: string, state: LiveRunPauseState): Promise<boolean>;
+  /** Read the desired pause state, or undefined when never written. */
+  readPauseState(id: string): Promise<LiveRunPauseState | undefined>;
+  /**
+   * Drop a mid-run step-edit request for the owning process to validate and
+   * apply. Returns the edit id to poll {@link readStepEditResult} with, or
+   * undefined when the run is unknown or terminal.
+   */
+  requestStepEdit(
+    id: string,
+    edit: { stepId: string; patch: StepEditPatch; by?: string },
+  ): Promise<string | undefined>;
+  /** All step-edit requests recorded so far, oldest first (owner polling). */
+  listStepEditRequests(id: string): Promise<LiveRunStepEditRequest[]>;
+  /** Record the owner's accept/reject outcome for an edit request. */
+  writeStepEditResult(id: string, editId: string, result: StepEditResult): Promise<void>;
+  /** Read an edit request's outcome, or undefined while still unprocessed. */
+  readStepEditResult(id: string, editId: string): Promise<StepEditResult | undefined>;
   /** Delete a run's live dir. */
   remove(id: string): Promise<void>;
 }
@@ -208,6 +252,12 @@ export function createLiveRunStore(
   const cancelPath = (id: string): string => join(runDir(id), "cancel");
   const approvalPath = (id: string, stepId: string, iteration: number): string =>
     join(runDir(id), "approvals", `${sanitizePathComponent(stepId)}@${iteration}.json`);
+  const pausePath = (id: string): string => join(runDir(id), "control", "pause.json");
+  const editsDir = (id: string): string => join(runDir(id), "control", "edits");
+  const editPath = (id: string, editId: string): string =>
+    join(editsDir(id), `${sanitizePathComponent(editId)}.json`);
+  const editResultPath = (id: string, editId: string): string =>
+    join(editsDir(id), `${sanitizePathComponent(editId)}.result.json`);
 
   async function get(id: string): Promise<LiveRunMeta | undefined> {
     return readMeta(metaPath(id));
@@ -441,10 +491,124 @@ export function createLiveRunStore(
         return undefined;
       }
     },
+    async writePauseState(id, state) {
+      const meta = await get(id);
+      if (!meta || isTerminalLiveRunStatus(meta.status)) return false;
+      await mkdir(join(runDir(id), "control"), { recursive: true });
+      await atomicWriteFile(
+        pausePath(id),
+        `${JSON.stringify({ paused: state.paused, by: state.by, ts: now() }, null, 2)}\n`,
+      );
+      return true;
+    },
+    async readPauseState(id) {
+      let file: string;
+      try {
+        file = await readFile(pausePath(id), "utf8");
+      } catch (err) {
+        if (isEnoent(err)) return undefined;
+        throw err;
+      }
+      try {
+        const parsed = JSON.parse(file) as Partial<LiveRunPauseState>;
+        if (!parsed || typeof parsed !== "object") return undefined;
+        if (typeof parsed.paused !== "boolean") return undefined;
+        return { paused: parsed.paused, by: typeof parsed.by === "string" ? parsed.by : undefined };
+      } catch {
+        return undefined;
+      }
+    },
+    async requestStepEdit(id, edit) {
+      const meta = await get(id);
+      if (!meta || isTerminalLiveRunStatus(meta.status)) return undefined;
+      // Timestamp prefix keeps directory listing order == request order.
+      const editId = `${now()}-${randomBytes(4).toString("hex")}`;
+      await mkdir(editsDir(id), { recursive: true });
+      await atomicWriteFile(
+        editPath(id, editId),
+        `${JSON.stringify({ stepId: edit.stepId, patch: edit.patch, by: edit.by }, null, 2)}\n`,
+      );
+      return editId;
+    },
+    async listStepEditRequests(id) {
+      let names: string[];
+      try {
+        names = await readdir(editsDir(id));
+      } catch (err) {
+        if (isEnoent(err)) return [];
+        throw err;
+      }
+      const requests: LiveRunStepEditRequest[] = [];
+      for (const name of names.sort()) {
+        if (!name.endsWith(".json") || name.endsWith(".result.json")) continue;
+        const editId = name.slice(0, -".json".length);
+        let file: string;
+        try {
+          file = await readFile(join(editsDir(id), name), "utf8");
+        } catch {
+          continue;
+        }
+        try {
+          const parsed = JSON.parse(file) as {
+            stepId?: unknown;
+            patch?: unknown;
+            by?: unknown;
+          };
+          if (
+            typeof parsed.stepId !== "string" ||
+            !parsed.patch ||
+            typeof parsed.patch !== "object"
+          )
+            continue;
+          requests.push({
+            editId,
+            stepId: parsed.stepId,
+            patch: sanitizeStepEditPatch(parsed.patch as Record<string, unknown>),
+            by: typeof parsed.by === "string" ? parsed.by : undefined,
+          });
+        } catch {
+          // A torn/corrupt request is skipped, not fatal.
+        }
+      }
+      return requests;
+    },
+    async writeStepEditResult(id, editId, result) {
+      await mkdir(editsDir(id), { recursive: true });
+      await atomicWriteFile(editResultPath(id, editId), `${JSON.stringify(result, null, 2)}\n`);
+    },
+    async readStepEditResult(id, editId) {
+      let file: string;
+      try {
+        file = await readFile(editResultPath(id, editId), "utf8");
+      } catch (err) {
+        if (isEnoent(err)) return undefined;
+        throw err;
+      }
+      try {
+        const parsed = JSON.parse(file) as { ok?: unknown; error?: unknown };
+        if (!parsed || typeof parsed !== "object" || typeof parsed.ok !== "boolean")
+          return undefined;
+        return parsed.ok
+          ? { ok: true }
+          : { ok: false, error: typeof parsed.error === "string" ? parsed.error : "edit rejected" };
+      } catch {
+        return undefined;
+      }
+    },
     async remove(id) {
       await rm(runDir(id), { recursive: true, force: true });
     },
   };
+}
+
+/** Keep only the string-valued editable fields of an untrusted patch payload. */
+function sanitizeStepEditPatch(raw: Record<string, unknown>): StepEditPatch {
+  const patch: StepEditPatch = {};
+  if (typeof raw.prompt === "string") patch.prompt = raw.prompt;
+  if (typeof raw.cmd === "string") patch.cmd = raw.cmd;
+  if (typeof raw.model === "string") patch.model = raw.model;
+  if (typeof raw.effort === "string") patch.effort = raw.effort;
+  return patch;
 }
 
 /**
@@ -506,6 +670,7 @@ async function readMeta(path: string): Promise<LiveRunMeta | undefined> {
     createdAt: m.createdAt,
     startedAt: typeof m.startedAt === "number" ? m.startedAt : undefined,
     endedAt: typeof m.endedAt === "number" ? m.endedAt : undefined,
+    paused: typeof m.paused === "boolean" ? m.paused : undefined,
     pendingApprovals: Array.isArray(m.pendingApprovals)
       ? m.pendingApprovals.filter(
           (p): p is { stepId: string; iteration: number } =>

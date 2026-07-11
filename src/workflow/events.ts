@@ -243,6 +243,42 @@ export interface ApprovalResolvedEvent extends IterationTagged {
   ts: number;
 }
 
+/**
+ * The engine acknowledged a pause request and stopped scheduling new steps.
+ * In-flight steps still run to completion; the run stays parked until a
+ * matching {@link RunResumedEvent}. In loop workflows the acknowledgement
+ * lands at the next phase boundary (a phase is the scheduling unit there).
+ */
+export interface RunPausedEvent {
+  kind: "run_paused";
+  /** Who requested the pause (e.g. `"human:tui"`, `"human:web"`). */
+  by?: string;
+  ts: number;
+}
+
+/** A paused run resumed scheduling steps. */
+export interface RunResumedEvent {
+  kind: "run_resumed";
+  /** Who requested the resume. */
+  by?: string;
+  ts: number;
+}
+
+/**
+ * A mid-run edit to a not-yet-started step was accepted while the run was
+ * paused. The patch applies when the step executes; recording it here keeps a
+ * steered run an honest, auditable record.
+ */
+export interface StepEditedEvent {
+  kind: "step_edited";
+  stepId: string;
+  /** The accepted field changes (see `StepEditPatch` in control.ts). */
+  patch: { prompt?: string; cmd?: string; model?: string; effort?: string };
+  /** Who made the edit (e.g. `"human:tui"`, `"human:web"`, `"human:cli"`). */
+  by?: string;
+  ts: number;
+}
+
 export type WorkflowEvent =
   | WorkflowStartEvent
   | PhaseStartEvent
@@ -258,6 +294,9 @@ export type WorkflowEvent =
   | LoopIterationEvent
   | BudgetExceededEvent
   | ApprovalPendingEvent
-  | ApprovalResolvedEvent;
+  | ApprovalResolvedEvent
+  | RunPausedEvent
+  | RunResumedEvent
+  | StepEditedEvent;
 
 export type WorkflowEventKind = WorkflowEvent["kind"];

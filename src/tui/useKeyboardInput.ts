@@ -26,9 +26,13 @@ export interface UseKeyboardInputParams {
   apiManagerOpen: boolean;
   /** True while the in-place step editor overlay owns the keyboard. */
   stepEditorOpen: boolean;
+  /** True while the mid-run (paused) step editor overlay owns the keyboard. */
+  runEditorOpen: boolean;
   /** True while the input form overlay owns the keyboard. */
   inputFormPending: boolean;
   openAgentManager: () => void;
+  /** Open the mid-run editor for the selected pending step (paused runs). */
+  openRunStepEditor: () => void;
   focusCreateWorkflowPrompt: (seed: string) => void;
   switchMode: (next: React.SetStateAction<Mode>) => void;
 }
@@ -88,6 +92,8 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
         if (cur.agentManagerOpen || cur.apiManagerOpen) return;
         // While the step editor is active, its own useInput handler owns keys.
         if (cur.stepEditorOpen) return;
+        // Same for the mid-run (paused) step editor.
+        if (cur.runEditorOpen) return;
         // While the input form is active, its own useInput handler owns keys.
         if (cur.inputFormPending) return;
         if (key.ctrl && input === "a") {
@@ -271,6 +277,27 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
           if (pending && pending.length > 0) {
             const next = pending[0]!;
             runner.resolveApproval(next.stepId, input === "a", next.iteration);
+            return;
+          }
+        }
+        // Mid-run steering: `p` toggles pause/resume on the live run (owned or
+        // attached); while paused, `e` edits the selected pending step.
+        if (
+          cur.mode === "workflow" &&
+          runner.running &&
+          !menuOpen &&
+          !prompt.promptEditing &&
+          !key.ctrl &&
+          !key.meta
+        ) {
+          if (input === "p") {
+            void runner.togglePauseRun().then((notice) => {
+              if (notice) runner.setWfNotice(notice);
+            });
+            return;
+          }
+          if (input === "e" && runner.wf.paused) {
+            cur.openRunStepEditor();
             return;
           }
         }

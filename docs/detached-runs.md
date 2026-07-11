@@ -19,6 +19,9 @@ runs first-class background citizens:
 - **Cross-process cancel & approvals** — `workflow cancel <id>` stops a run
   owned by any process, and a human-approval checkpoint on a detached run can
   be decided from the CLI, TUI, or web.
+- **Cross-process steering** — `workflow pause|resume|edit-step` steer a run
+  owned by any process through the same registry (see
+  [`mid-run-steering.md`](mid-run-steering.md)).
 
 ## The live-run registry
 
@@ -32,6 +35,8 @@ meta.json         status (queued|running|done|error|canceled|budget-exceeded),
 events.ndjson     every WorkflowEvent, one JSON line each (append-only)
 cancel            marker file — any process drops it; the owner polls & aborts
 approvals/*.json  human-approval decisions written by any attached UI
+control/          mid-run steering: pause.json (desired pause state) and
+                  edits/*.json (step-edit requests + owner verdicts)
 runner.log        stdout/stderr of a detached runner (debugging)
 ```
 

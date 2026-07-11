@@ -18,6 +18,7 @@ import {
 } from "./approval";
 import { collectArtifacts } from "./artifacts";
 import { runShellCommand } from "./command";
+import type { StepEditPatch, WorkflowRunControl } from "./control";
 import { addTokens } from "./cost";
 import type { WorkflowEvent } from "./events";
 import { type LlmCallResult, type LlmComplete, type LlmProviderId, callLlm } from "./llm";
@@ -120,6 +121,15 @@ export interface WorkflowDeps {
    * rather than hanging.
    */
   requestApproval?: ApprovalProvider;
+  /**
+   * Mid-run steering handle (pause / edit pending steps / resume). Injected per
+   * run by the driver; the engine binds validation hooks at run start, stops
+   * scheduling new steps while a pause is requested, and applies accepted step
+   * edits when the edited step executes. Omitted ⇒ the run is not steerable.
+   * Deliberately NOT forwarded into `workflow`-step child runs: a sub-run
+   * behaves like one in-flight step, so a pause waits for it to finish.
+   */
+  control?: WorkflowRunControl;
 }
 
 export interface WorkflowRunContext {
@@ -176,6 +186,15 @@ interface RunEnv {
   spent: { costUsd: number };
   /** Latched once a cost budget stops scheduling, so `budget_exceeded` emits once. */
   budgetState: { exceeded: boolean };
+  /**
+   * Step ids that have begun executing (or replaying) in this run. Feeds the
+   * mid-run edit validation — only steps that have not started may be edited.
+   * A loop jump removes the re-run region's ids so its steps become editable
+   * again during a pause between iterations.
+   */
+  startedSteps: Set<string>;
+  /** Tracks the emitted pause state so `run_paused`/`run_resumed` fire once per transition. */
+  pauseState: { acked: boolean };
 }
 
 /** What one step's completion means for its phase and for run control flow. */
@@ -251,11 +270,22 @@ export async function* runWorkflow(
     reserveDynamicSteps,
     spent: { costUsd: costOfCachedResults(cache) },
     budgetState: { exceeded: false },
+    startedSteps: new Set<string>(),
+    pauseState: { acked: false },
   };
+
+  deps.control?.attachRun({
+    stepEditIssue: (stepId, patch) => stepEditIssue(env, stepId, patch),
+    onEditAccepted: (stepId) => invalidateEditedStep(env, stepId),
+  });
 
   const workflowOk = specHasLoopGates(spec)
     ? yield* runPhasedScheduler(env)
     : yield* runDagScheduler(env);
+
+  // Drain any control events accepted in the final scheduling window so every
+  // intervention lands in the record even when the run ends right after it.
+  yield* drainControlEvents(env);
 
   // `allResults` accumulates one entry per step per loop iteration (a body
   // step that ran 3 passes has 3 entries, plus 3 intermediate "not yet
@@ -311,6 +341,106 @@ function maybeWorkflowBudgetEvent(env: RunEnv): WorkflowEvent | undefined {
     spentUsd: env.spent.costUsd,
     ts: Date.now(),
   };
+}
+
+/** Yield any control events (accepted step edits) pending in the run's control. */
+function* drainControlEvents(env: RunEnv): Generator<WorkflowEvent> {
+  if (!env.deps.control) return;
+  for (const event of env.deps.control.takeEvents()) yield event;
+}
+
+/**
+ * Compare the control's requested pause state with what the run last emitted;
+ * on a transition, latch it and return the one-shot `run_paused`/`run_resumed`
+ * event. Returns undefined when nothing changed.
+ */
+function pauseTransitionEvent(env: RunEnv): WorkflowEvent | undefined {
+  const control = env.deps.control;
+  if (!control) return undefined;
+  const requested = control.isPauseRequested();
+  if (requested && !env.pauseState.acked) {
+    env.pauseState.acked = true;
+    return { kind: "run_paused", by: control.pauseRequestedBy(), ts: Date.now() };
+  }
+  if (!requested && env.pauseState.acked) {
+    env.pauseState.acked = false;
+    return { kind: "run_resumed", by: control.resumeRequestedBy(), ts: Date.now() };
+  }
+  return undefined;
+}
+
+/** Step kinds whose `prompt` field a mid-run edit may rewrite. */
+const PROMPT_EDITABLE_KINDS: ReadonlySet<string> = new Set([
+  "worker",
+  "processor",
+  "llm",
+  "consolidator",
+  "approval",
+]);
+
+/**
+ * Validate a mid-run edit against the live spec: the step must exist, must not
+ * have started in this run, and every patched field must exist on its kind.
+ * Returns the human-readable reason the edit is rejected, or undefined when it
+ * is acceptable.
+ */
+function stepEditIssue(env: RunEnv, stepId: string, patch: StepEditPatch): string | undefined {
+  let target: WorkflowStep | undefined;
+  for (const phase of env.spec.phases) {
+    target = phase.steps.find((step) => step.id === stepId);
+    if (target) break;
+  }
+  if (!target) return `unknown step '${stepId}'`;
+  if (env.startedSteps.has(stepId)) {
+    return `step '${stepId}' has already started — only steps that have not run yet can be edited`;
+  }
+  const kind = workflowStepKind(target);
+  const agentBacked = isAgentBackedStep(target);
+  if (patch.prompt !== undefined) {
+    const promptable = PROMPT_EDITABLE_KINDS.has(kind) || (kind === "distributor" && agentBacked);
+    if (!promptable) return `step '${stepId}' (${kind}) has no editable prompt`;
+    if (!patch.prompt.trim()) return "prompt must not be empty";
+  }
+  if (patch.cmd !== undefined) {
+    if (kind !== "command") return `step '${stepId}' (${kind}) has no command to edit`;
+    if (!patch.cmd.trim()) return "cmd must not be empty";
+  }
+  if (patch.model !== undefined || patch.effort !== undefined) {
+    if (!agentBacked && kind !== "llm") {
+      return `step '${stepId}' (${kind}) has no model/effort to edit`;
+    }
+    if (patch.model !== undefined && !patch.model.trim()) return "model must not be empty";
+  }
+  return undefined;
+}
+
+/**
+ * Drop the stale cached state of a just-edited step (and its `forEach`
+ * children) so the edited version actually executes instead of replaying a
+ * result produced by the pre-edit spec. Downstream steps have not run yet
+ * (edits only apply to not-yet-started steps), so nothing else invalidates.
+ */
+function invalidateEditedStep(env: RunEnv, stepId: string): void {
+  const childPrefix = `${stepId}[`;
+  for (const map of [env.cache, env.results]) {
+    map.delete(stepId);
+    for (const key of map.keys()) if (key.startsWith(childPrefix)) map.delete(key);
+  }
+  env.outputs.delete(stepId);
+  for (const key of env.outputs.keys()) if (key.startsWith(childPrefix)) env.outputs.delete(key);
+}
+
+/** A shallow copy of `step` with an accepted mid-run edit applied. */
+function applyStepEdit(step: WorkflowStep, patch: StepEditPatch): WorkflowStep {
+  // The patch was validated against the step's kind when it was accepted
+  // (see stepEditIssue), so assigning through a loose record shape is safe.
+  const edited = { ...step } as WorkflowStep & Record<string, unknown>;
+  if (patch.prompt !== undefined) edited.prompt = patch.prompt;
+  if (patch.cmd !== undefined) edited.cmd = patch.cmd;
+  if (patch.model !== undefined) edited.model = patch.model;
+  // An empty-string effort clears the step's effort (back to the model default).
+  if (patch.effort !== undefined) edited.effort = patch.effort || undefined;
+  return edited;
 }
 
 /** Whether any gate in the spec is a loop-back gate (`loopTo`). */
@@ -396,6 +526,22 @@ async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, b
       break;
     }
 
+    // Mid-run steering: a loop workflow schedules phase-by-phase, so a pause
+    // takes effect here, at the phase boundary — the running phase's steps
+    // finish first. Park until resumed; a cancel unblocks the wait.
+    yield* drainControlEvents(env);
+    const pausedEvent = pauseTransitionEvent(env);
+    if (pausedEvent) yield pausedEvent;
+    if (deps.control) {
+      while (deps.control.isPauseRequested() && !signal?.aborted) {
+        await deps.control.waitForWake(signal);
+        yield* drainControlEvents(env);
+      }
+      if (signal?.aborted) return false;
+      const resumedEvent = pauseTransitionEvent(env);
+      if (resumedEvent) yield resumedEvent;
+    }
+
     const runs = (phaseRunCount.get(pi) ?? 0) + 1;
     phaseRunCount.set(pi, runs);
     const iteration = runs;
@@ -446,7 +592,7 @@ async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, b
       state.iteration += 1;
       const loopToIndex = contended.loopToIndex;
       // invalidate cache + results for the region so the body re-runs
-      invalidateRegion(spec, loopToIndex, pi, cache, results);
+      invalidateRegion(spec, loopToIndex, pi, cache, results, env.startedSteps);
       // The outer loop is restarting a region that may contain other (inner)
       // loop gates; their iteration budgets must restart too, or the inner
       // loop would already be "exhausted" on the outer loop's 2nd+ pass.
@@ -559,6 +705,7 @@ async function* runDagScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, bool
     inFlight.set(node.step.id, task);
   };
 
+  const control = env.deps.control;
   const driver = (async () => {
     const inFlight = new Map<string, Promise<void>>();
     while (true) {
@@ -568,7 +715,16 @@ async function* runDagScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, bool
       // exactly where the budget stopped it.
       const budgetEvent = maybeWorkflowBudgetEvent(env);
       if (budgetEvent) channel.push(budgetEvent);
-      if (!signal?.aborted && !env.budgetState.exceeded) {
+      // Mid-run steering: surface accepted edits, acknowledge pause/resume
+      // transitions, and stop launching new steps while a pause is requested
+      // (in-flight steps drain to completion, exactly like the budget stop).
+      if (control) {
+        for (const event of control.takeEvents()) channel.push(event);
+        const transition = pauseTransitionEvent(env);
+        if (transition) channel.push(transition);
+      }
+      const paused = control?.isPauseRequested() ?? false;
+      if (!signal?.aborted && !env.budgetState.exceeded && !paused) {
         // Launch every ready step, scanning in spec order so ties dispatch
         // deterministically. Steps in phases beyond a halt stay pending
         // forever — the loop below exits once nothing is in flight.
@@ -586,8 +742,20 @@ async function* runDagScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, bool
           launch(node, inFlight);
         }
       }
-      if (inFlight.size === 0) break;
-      await Promise.race(inFlight.values());
+      if (inFlight.size === 0) {
+        // Quiesced while paused with work remaining: park until a resume (or
+        // an accepted edit to surface, or a cancel) wakes the driver.
+        if (paused && pending.length > 0 && !signal?.aborted && !env.budgetState.exceeded) {
+          await control!.waitForWake(signal);
+          continue;
+        }
+        break;
+      }
+      const waiters: Promise<unknown>[] = [...inFlight.values()];
+      // While pausing, also wake on control changes so a resume immediately
+      // relaunches instead of waiting for the next in-flight step to settle.
+      if (control && paused) waiters.push(control.waitForWake(signal));
+      await Promise.race(waiters);
     }
   })().finally(() => channel.close());
 
@@ -743,12 +911,18 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
  * schedulers; never throws.
  */
 async function runSingleStep(
-  step: WorkflowStep,
+  specStep: WorkflowStep,
   phase: WorkflowPhase,
   iteration: number,
   env: RunEnv,
   push: (event: WorkflowEvent) => void,
 ): Promise<StepFlags> {
+  // Mark the step started FIRST (mid-run edits are only accepted for steps
+  // that have not started), then apply any already-accepted edit — both on the
+  // same tick, so an edit can never land between the check and the apply.
+  env.startedSteps.add(specStep.id);
+  const stepEdit = env.deps.control?.stepEdit(specStep.id);
+  const step = stepEdit ? applyStepEdit(specStep, stepEdit) : specStep;
   const { spec, ctx, deps, signal, cache, outputs, results, allResults } = env;
   const agentBacked = isAgentBackedStep(step) ? step : undefined;
   // llm steps have an api/model/effort but no agent; carry them on the events
@@ -952,8 +1126,10 @@ async function runSingleStep(
 
   const { result } = execution;
   result.iteration = iteration;
+  if (stepEdit) result.edited = true;
   for (const child of execution.childResults ?? []) {
     child.iteration = iteration;
+    if (stepEdit) child.edited = true;
     outputs.set(child.stepId, child.output);
     results.set(child.stepId, child);
     allResults.push(child);
@@ -1036,6 +1212,7 @@ function invalidateRegion(
   end: number,
   cache: Map<string, StepResult>,
   results: Map<string, StepResult>,
+  startedSteps?: Set<string>,
 ): void {
   // Collect all step ids in the region and their forEach-child prefixes so we
   // can invalidate in a single pass over each Map instead of scanning all keys
@@ -1057,6 +1234,11 @@ function invalidateRegion(
   };
   for (const key of cache.keys()) if (shouldDelete(key)) cache.delete(key);
   for (const key of results.keys()) if (shouldDelete(key)) results.delete(key);
+  // The region's steps are about to re-run, so they become mid-run-editable
+  // again during a pause between loop iterations.
+  if (startedSteps) {
+    for (const key of startedSteps) if (shouldDelete(key)) startedSteps.delete(key);
+  }
 }
 
 /**
@@ -2498,7 +2680,11 @@ async function executeWorkflowStep(
   for await (const event of runWorkflow(
     childSpec,
     { input: childInput, workflowCallStack: [...stack, step.workflow] },
-    ctx.deps,
+    // The steering control stays with the top-level run: a sub-run is one
+    // in-flight step from the parent's point of view (a pause waits for it),
+    // and forwarding the control would re-bind its edit validation to the
+    // child spec mid-run.
+    { ...ctx.deps, control: undefined },
     ctx.signal,
   )) {
     switch (event.kind) {

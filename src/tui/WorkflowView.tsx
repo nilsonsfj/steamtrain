@@ -134,9 +134,22 @@ export function WorkflowView({
               ? state.ok
                 ? " · done"
                 : " · failed"
-              : " · running"}
+              : state.paused
+                ? runningSteps > 0
+                  ? " · ⏸ pausing"
+                  : " · ⏸ paused"
+                : " · running"}
         </Text>
       </Box>
+      {!state.done && state.paused ? (
+        <Text color="yellow">
+          ⏸ paused{state.pausedBy ? ` by ${state.pausedBy}` : ""}
+          {runningSteps > 0
+            ? ` — ${runningSteps} in-flight step${runningSteps === 1 ? "" : "s"} finishing`
+            : ""}{" "}
+          · ↑/↓ select a pending step · e edit · p resume
+        </Text>
+      ) : null}
       {state.budget ? (
         <Text color="yellow">
           ⚠{" "}
@@ -375,6 +388,7 @@ function stepMeta(step: StepState, now: number): string {
     const attempts = step.result.attempts ?? step.attempts;
     const tokenLine = formatTokenSummary(step.result.tokens);
     const bits = [
+      step.edited ? "✎ edited" : undefined,
       step.cached ? "cached" : formatElapsed(step.result.durationMs),
       step.result.costUsd ? `$${step.result.costUsd.toFixed(4)}` : undefined,
       tokenLine || undefined,
@@ -382,6 +396,7 @@ function stepMeta(step: StepState, now: number): string {
     ].filter(Boolean);
     return bits.join(" · ");
   }
+  if (step.status === "pending" && step.edited) return "✎ edited · pending";
   if (step.status === "running") {
     // A live ticking clock per running step; the latest tool line rides along.
     const elapsed =

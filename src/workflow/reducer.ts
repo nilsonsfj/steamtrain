@@ -1,5 +1,6 @@
 import type { AgentEvent, AgentInstanceId } from "../types/events";
 import type { ApprovalRejectDisposition } from "./approval";
+import type { StepEditPatch } from "./control";
 import type { WorkflowEvent } from "./events";
 import type { RunRecord } from "./history";
 import { llmStepApiId } from "./llm";
@@ -97,6 +98,8 @@ export interface StepState {
   /** The gate's own iteration cap, when this step is a loop-back gate. */
   maxIterations?: number;
   forEach?: string;
+  /** True when a mid-run edit (pause → edit → resume) applies to this step. */
+  edited?: boolean;
 }
 
 export interface PhaseState {
@@ -144,6 +147,15 @@ export interface WorkflowState {
    * render an interactive card for each; entries clear as decisions arrive.
    */
   pendingApprovals?: PendingApproval[];
+  /**
+   * True while the engine has acknowledged a pause (no new steps launch;
+   * in-flight steps drain). Cleared by `run_resumed` and at `workflow_done`.
+   */
+  paused?: boolean;
+  /** Who requested the current pause, when known. */
+  pausedBy?: string;
+  /** Accepted mid-run step edits (latest patch per step id). */
+  editedSteps?: Record<string, StepEditPatch>;
 }
 
 export const initialWorkflowState: WorkflowState = {
@@ -156,7 +168,16 @@ export const initialWorkflowState: WorkflowState = {
   pendingApprovals: [],
 };
 
-export type WorkflowStateAction = { type: "event"; event: WorkflowEvent } | { type: "reset" };
+export type WorkflowStateAction =
+  | { type: "event"; event: WorkflowEvent }
+  | { type: "reset" }
+  /**
+   * Seed the full phase → step tree from the spec (every step pending), so a
+   * live view shows not-yet-started steps too — required for mid-run editing,
+   * which targets exactly those steps. `workflow_start` preserves seeded
+   * phases instead of clearing them.
+   */
+  | { type: "seed"; spec: WorkflowSpec };
 
 /** Flatten the tree to an ordered list of steps (for selection by index). */
 export function flattenSteps(state: WorkflowState): { phase: PhaseState; step: StepState }[] {
@@ -303,6 +324,7 @@ function applyAgentEvent(step: StepState, event: AgentEvent): StepState {
 
 export function workflowReducer(state: WorkflowState, action: WorkflowStateAction): WorkflowState {
   if (action.type === "reset") return initialWorkflowState;
+  if (action.type === "seed") return workflowStateFromSpec(action.spec);
 
   const e = action.event;
   switch (e.kind) {
@@ -322,6 +344,9 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
         loopMarkers: [],
         budget: undefined,
         pendingApprovals: [],
+        paused: false,
+        pausedBy: undefined,
+        editedSteps: undefined,
       };
     case "phase_start": {
       const iter = e.iteration ?? 1;
@@ -403,6 +428,7 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
             cached: false,
             loopTo: e.loopTo,
             maxIterations: e.maxIterations,
+            edited: state.editedSteps?.[e.stepId] ? true : undefined,
           };
 
           return {
@@ -454,6 +480,7 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
         worktree: e.result.worktree ?? s.worktree,
         cached: e.cached,
         text: s.text || e.result.output,
+        edited: s.edited || e.result.edited || undefined,
       }));
     case "phase_done":
       return {
@@ -473,7 +500,38 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
         },
       };
     case "workflow_done":
-      return { ...state, done: true, ok: e.ok, results: e.results };
+      return { ...state, done: true, ok: e.ok, results: e.results, paused: false };
+    case "run_paused":
+      return { ...state, paused: true, pausedBy: e.by };
+    case "run_resumed":
+      return { ...state, paused: false, pausedBy: undefined };
+    case "step_edited": {
+      // Track the accepted patch at run level (the step may not have a
+      // rendered StepState yet — the TUI only materializes steps as they
+      // start), and badge any already-materialized pending instance (the web
+      // client seeds the full tree from the spec).
+      const editedSteps = {
+        ...state.editedSteps,
+        [e.stepId]: { ...state.editedSteps?.[e.stepId], ...e.patch },
+      };
+      return {
+        ...state,
+        editedSteps,
+        phases: state.phases.map((p) => ({
+          ...p,
+          steps: p.steps.map((s) =>
+            s.stepId === e.stepId && s.status === "pending"
+              ? {
+                  ...s,
+                  edited: true,
+                  model: e.patch.model ?? s.model,
+                  effort: e.patch.effort !== undefined ? e.patch.effort || undefined : s.effort,
+                }
+              : s,
+          ),
+        })),
+      };
+    }
     case "loop_iteration": {
       const gatePhaseId = phaseOfStep(state, e.gateStepId);
       if (gatePhaseId) {

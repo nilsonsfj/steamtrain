@@ -17,6 +17,8 @@ import {
   runAttachCommand,
   runCancelCommand,
   runDetachedRunner,
+  runEditStepCommand,
+  runPauseCommand,
   runRunsCommand,
   runWorkflowCommand,
 } from "./run-cli";
@@ -233,6 +235,12 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
       return runRunsCommand(rest, cwd, out, err);
     case "cancel":
       return runCancelCommand(rest, cwd, out, err);
+    case "pause":
+      return runPauseCommand(rest, cwd, true, out, err);
+    case "resume":
+      return runPauseCommand(rest, cwd, false, out, err);
+    case "edit-step":
+      return runEditStepCommand(rest, cwd, out, err);
     case "approve":
       return runApproveCommand(rest, cwd, out, err);
     // Hidden: the re-exec target a `workflow run --detach` child starts as.
@@ -1151,6 +1159,9 @@ Usage:
   steamtrain workflow attach [<runId>] [--json]
   steamtrain workflow runs [--all] [--json]
   steamtrain workflow cancel <runId>
+  steamtrain workflow pause <runId>
+  steamtrain workflow resume <runId>
+  steamtrain workflow edit-step <runId> <stepId> [--prompt <text> | --prompt-file <path>] [--cmd <text>] [--model <id>] [--effort <level>]
   steamtrain workflow approve <runId> [--step <stepId>] [--reject [--on-reject fail|stop]] [--note <text>]
   steamtrain workflow create --input <description> [--agent <id>] [--model <model>] [--name <name>] [--save] [--scope user|project] [--json]
   steamtrain workflow cache clear [<workflow> --input <text> --param key=value ... | --stdin]
@@ -1173,6 +1184,12 @@ and (with --save) writes it so it shows up in the picker and CLI alongside the
 bundled workflows. --scope user (default) writes to ~/.steamtrain/workflows.json;
 --scope project (or --project) writes to the project's ./steamtrain.json so the
 workflow can be committed and shared with the team.
+
+Live runs can be steered mid-flight: 'workflow pause <runId>' lets in-flight
+steps finish and schedules nothing new, 'workflow edit-step' rewrites the
+prompt/cmd/model/effort of any step that has not started yet, and 'workflow
+resume' continues the run with the edits applied. Works on runs owned by any
+process (TUI, web, --detach); every intervention is recorded in run history.
 
 Workflow runs resume from ${WORKFLOW_CACHE_DIR} by default (file name from workflow +
 input + cwd; contents validated with specHash). Pass --fresh to ignore and delete

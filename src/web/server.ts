@@ -44,6 +44,10 @@ import { type PageAssetRevisions, renderIndex } from "./html";
 import { TooManyRuns, type WorkflowHost, WorkflowRunManager } from "./runs";
 
 const DEFAULT_MAX_CONCURRENT_GENERATIONS = 2;
+
+/** How long POST /api/runs/:id/edit-step waits for an external owner's verdict. */
+const EXTERNAL_EDIT_RESULT_WAIT_MS = 2_500;
+const EXTERNAL_EDIT_RESULT_POLL_MS = 150;
 let activeGenerations = 0;
 let maxConcurrentGenerations = DEFAULT_MAX_CONCURRENT_GENERATIONS;
 
@@ -383,6 +387,9 @@ function checkCsrf(
  *   POST   /api/runs                { workflow, input, fresh?, overrides? } -> { runId }
  *   GET    /api/runs/:id/stream     SSE of WorkflowEvents + terminal status
  *   POST   /api/runs/:id/cancel     abort a run
+ *   POST   /api/runs/:id/pause      stop scheduling new steps (in-flight finish)
+ *   POST   /api/runs/:id/resume     continue a paused run
+ *   POST   /api/runs/:id/edit-step  { stepId, prompt?/cmd?/model?/effort? } — edit a pending step while paused
  *   POST   /api/runs/:id/approval   resolve a human-approval checkpoint
  *   POST   /api/overrides/flush     flush staged session overrides -> { saved, skipped, unchanged }
  *   POST   /api/auth                validate token, set session cookie
@@ -867,6 +874,7 @@ async function handle(
         workflow: r.workflow,
         input: r.input,
         status: r.queued ? "queued" : r.status,
+        paused: r.paused,
         ok: r.ok,
         error: r.error,
         startedAt: r.startedAt,
@@ -881,6 +889,7 @@ async function handle(
         workflow: m.workflow,
         input: m.input,
         status: m.status,
+        paused: m.paused || undefined,
         ok: m.ok,
         error: m.error,
         startedAt: m.startedAt ?? m.createdAt,
@@ -985,6 +994,92 @@ async function handle(
       ok = await deps.liveRuns.requestCancel(runId);
     }
     sendJson(res, ok ? 200 : 404, { canceled: ok });
+    return;
+  }
+
+  // Mid-run steering: pause stops scheduling new steps (in-flight ones
+  // finish), resume continues. Works for manager-owned runs and — via the
+  // shared live-run store's control files — runs owned by other processes.
+  const pauseMatch = path.match(/^\/api\/runs\/([^/]+)\/(pause|resume)$/);
+  if (method === "POST" && pauseMatch) {
+    const runId = decodeURIComponent(pauseMatch[1]!);
+    const paused = pauseMatch[2] === "pause";
+    let ok = await deps.runs.setRunPaused(runId, paused, "human:web");
+    if (!ok && deps.liveRuns) {
+      // Externally-owned run: write the desired state; its owner polls it.
+      ok = await deps.liveRuns.writePauseState(runId, { paused, by: "human:web" });
+    }
+    sendJson(res, ok ? 200 : 404, { requested: ok, paused });
+    return;
+  }
+
+  // Mid-run steering: edit a not-yet-started step of a paused run.
+  const editStepMatch = path.match(/^\/api\/runs\/([^/]+)\/edit-step$/);
+  if (method === "POST" && editStepMatch) {
+    const body = await readBody(req);
+    let parsed: {
+      stepId?: unknown;
+      prompt?: unknown;
+      cmd?: unknown;
+      model?: unknown;
+      effort?: unknown;
+    };
+    try {
+      parsed = body ? JSON.parse(body) : {};
+    } catch {
+      sendJson(res, 400, { error: "invalid JSON body" });
+      return;
+    }
+    if (typeof parsed.stepId !== "string" || !parsed.stepId) {
+      sendJson(res, 400, { error: "body must include a string 'stepId'" });
+      return;
+    }
+    const patch: import("../workflow").StepEditPatch = {};
+    if (typeof parsed.prompt === "string") patch.prompt = parsed.prompt;
+    if (typeof parsed.cmd === "string") patch.cmd = parsed.cmd;
+    if (typeof parsed.model === "string") patch.model = parsed.model;
+    if (typeof parsed.effort === "string") patch.effort = parsed.effort;
+    if (Object.keys(patch).length === 0) {
+      sendJson(res, 400, {
+        error: "body must include at least one of 'prompt', 'cmd', 'model', 'effort'",
+      });
+      return;
+    }
+    const runId = decodeURIComponent(editStepMatch[1]!);
+    // Manager-owned run: the engine validates synchronously via the control.
+    const local = deps.runs.editRunStep(runId, parsed.stepId, patch, "human:web");
+    if (local) {
+      if (local.ok) sendJson(res, 200, { applied: true });
+      else sendJson(res, 400, { error: local.error });
+      return;
+    }
+    // Externally-owned run: drop the request file, then poll briefly for the
+    // owner's accept/reject outcome so the UI can report it inline.
+    if (deps.liveRuns) {
+      const meta = await deps.liveRuns.get(runId);
+      if (meta && !isTerminalLiveRunStatus(meta.status)) {
+        const editId = await deps.liveRuns.requestStepEdit(runId, {
+          stepId: parsed.stepId,
+          patch,
+          by: "human:web",
+        });
+        if (editId) {
+          const deadline = Date.now() + EXTERNAL_EDIT_RESULT_WAIT_MS;
+          while (Date.now() < deadline) {
+            const outcome = await deps.liveRuns.readStepEditResult(runId, editId);
+            if (outcome) {
+              if (outcome.ok) sendJson(res, 200, { applied: true });
+              else sendJson(res, 400, { error: outcome.error });
+              return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, EXTERNAL_EDIT_RESULT_POLL_MS));
+          }
+          sendJson(res, 202, { pending: true });
+          return;
+        }
+      }
+    }
+    sendJson(res, 404, { error: `unknown run '${runId}'` });
     return;
   }
 
