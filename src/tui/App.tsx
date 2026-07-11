@@ -89,6 +89,11 @@ import { initialPromptHistoryBrowse } from "./prompt-history";
 import { initialTranscript, transcriptReducer } from "./transcript";
 import { useTerminalSize } from "./useTerminalSize";
 import { computeStreamHeight, message } from "./util";
+import {
+  type InputFormPending,
+  resolveInputFormSubmit,
+  workflowHasDeclaredInputs,
+} from "./workflow-input-pending";
 import { flattenSteps } from "./workflow-state";
 import { type StepEditorTarget, stepEditorTarget } from "./workflow-step-editor";
 
@@ -185,11 +190,7 @@ export function App({
   const [agentCatalogTick, setAgentCatalogTick] = useState(0);
   const mountedRef = useRef(true);
   const valueRef = useRef("");
-  const [inputFormPending, setInputFormPending] = useState<{
-    name: string;
-    prompt: string;
-    fresh: boolean;
-  } | null>(null);
+  const [inputFormPending, setInputFormPending] = useState<InputFormPending | null>(null);
   const [planResult, setPlanResult] = useState<PlanResult | null>(null);
 
   const enabledAgentIds = useMemo(
@@ -886,11 +887,12 @@ export function App({
         // For fresh re-runs on workflows with inputs, show the input form first.
         {
           const spec = resolveWorkflowSpec(runner.activeWorkflowRef.current);
-          if (spec?.inputs && Object.keys(spec.inputs).length > 0) {
+          if (spec && workflowHasDeclaredInputs(spec)) {
             setInputFormPending({
               name: runner.activeWorkflowRef.current,
               prompt: promptText,
               fresh: true,
+              action: "run",
             });
             return true;
           }
@@ -910,8 +912,13 @@ export function App({
         // For fresh runs on workflows with inputs, show the input form first.
         if (fresh) {
           const spec = resolveWorkflowSpec(picker.wfPreview.name);
-          if (spec?.inputs && Object.keys(spec.inputs).length > 0) {
-            setInputFormPending({ name: picker.wfPreview.name, prompt: promptText, fresh: true });
+          if (spec && workflowHasDeclaredInputs(spec)) {
+            setInputFormPending({
+              name: picker.wfPreview.name,
+              prompt: promptText,
+              fresh: true,
+              action: "run",
+            });
             return true;
           }
         }
@@ -933,8 +940,13 @@ export function App({
       // For fresh runs on workflows with inputs, show the input form first.
       {
         const spec = resolveWorkflowSpec(entry.name);
-        if (spec?.inputs && Object.keys(spec.inputs).length > 0) {
-          setInputFormPending({ name: entry.name, prompt: promptText, fresh: true });
+        if (spec && workflowHasDeclaredInputs(spec)) {
+          setInputFormPending({
+            name: entry.name,
+            prompt: promptText,
+            fresh: true,
+            action: "run",
+          });
           return true;
         }
       }
@@ -1152,6 +1164,11 @@ export function App({
     if (!name) return;
     const spec = resolveWorkflowSpec(name);
     if (!spec) return;
+    // For workflows with inputs, show the input form first (mirrors fresh runs).
+    if (workflowHasDeclaredInputs(spec)) {
+      setInputFormPending({ name, prompt: promptText, action: "plan" });
+      return;
+    }
     const plan = planWorkflow(spec, promptText);
     setPlanResult(plan);
     runner.setWfShowPlanResult(true);
@@ -1164,6 +1181,7 @@ export function App({
     resolveWorkflowSpec,
     planResult,
     runner.wfShowPlanResult,
+    runner.setWfShowPlanResult,
   ]);
 
   // Clear plan result when workflow selection changes.
@@ -1179,13 +1197,27 @@ export function App({
       const pending = inputFormPending;
       if (!pending) return;
       setInputFormPending(null);
+      const outcome = resolveInputFormSubmit(pending, resolveWorkflowSpec(pending.name), params);
+      if (outcome.action === "missing-spec") return;
+      if (outcome.action === "plan") {
+        setPlanResult(outcome.plan);
+        runner.setWfShowPlanResult(true);
+        return;
+      }
       prompt.updatePromptDraft({ value: "", promptEditing: false });
-      runner.launchWorkflow(pending.name, pending.prompt, picker.setWfPreview, {
-        fresh: pending.fresh,
-        params,
+      runner.launchWorkflow(outcome.name, outcome.prompt, picker.setWfPreview, {
+        fresh: outcome.fresh,
+        params: outcome.params,
       });
     },
-    [inputFormPending, runner.launchWorkflow, picker.setWfPreview, prompt.updatePromptDraft],
+    [
+      inputFormPending,
+      resolveWorkflowSpec,
+      runner.launchWorkflow,
+      runner.setWfShowPlanResult,
+      picker.setWfPreview,
+      prompt.updatePromptDraft,
+    ],
   );
 
   const handleInputFormCancel = useCallback(() => {
