@@ -354,7 +354,7 @@ review verdict each pass; "loopTo": "review" re-runs review then fix on each cyc
 This is the canonical shape for "run an existing workflow as one stage of a
 larger pipeline". The child workflow is resolved by name from the workflow
 catalog, and its internal steps appear in the run history under the
-`<stepId>::<childStepId>` namespace:
+<stepId>::<childStepId> namespace:
 {
   "name": "release-checks",
   "description": "Run a reusable bug sweep before the release gate.",
