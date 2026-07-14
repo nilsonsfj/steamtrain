@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -80,6 +80,28 @@ describe("repo-wide worktree GC", () => {
     const forced = await gcRepoWorktrees({ repoRoot: repo, records: [], all: true, force: true });
     expect(forced.removed.map((e) => e.branch)).toEqual([worked.branch]);
     expect(await git(repo, "branch", "--list", "steamtrain/*")).toBe("");
+  });
+
+  it("prunes only entries older than the --older-than threshold", async () => {
+    const { repo, allocate } = await makeRepo();
+    const old = await allocate("old", async () => {});
+    const fresh = await allocate("fresh", async () => {});
+    // Without a run record the age heuristic falls back to the worktree
+    // directory's mtime — backdate the old one past the threshold.
+    const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+    await utimes(old.root as string, tenDaysAgo, tenDaysAgo);
+
+    const result = await gcRepoWorktrees({
+      repoRoot: repo,
+      records: [],
+      olderThanMs: 7 * 24 * 60 * 60 * 1000,
+    });
+    expect(result.removed.map((e) => e.branch)).toEqual([old.branch]);
+    expect(result.kept.map((e) => e.branch)).toEqual([fresh.branch]);
+    expect(result.skipped).toHaveLength(0);
+    const branches = await git(repo, "branch", "--list", "steamtrain/*");
+    expect(branches).not.toContain(old.branch);
+    expect(branches).toContain(fresh.branch);
   });
 
   it("treats recorded harvested runs as safe to prune and never touches merged branches", async () => {
