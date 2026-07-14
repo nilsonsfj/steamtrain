@@ -648,7 +648,9 @@ async function runWorktreesCommand(
 ): Promise<number> {
   const usage =
     "usage: steamtrain workflow worktrees [list]\n" +
-    "       steamtrain workflow worktrees prune [--run <worktreeRunId>] [--older-than <days>] [--all] [--force] [--dry-run]\n";
+    "       steamtrain workflow worktrees prune [--run <worktreeRunId>] [--older-than <days>] [--all] [--force] [--dry-run]\n" +
+    "       (--run takes the run segment of the branch name, steamtrain/<worktreeRunId>/…, as shown by 'worktrees list';\n" +
+    "        to prune by history run id use 'workflow history prune <id>')\n";
   const sub = args[0] ?? "list";
   if (sub !== "list" && sub !== "ls" && sub !== "prune") {
     err(usage);

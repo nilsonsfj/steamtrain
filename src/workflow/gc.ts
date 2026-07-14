@@ -358,6 +358,9 @@ export async function gcRepoWorktrees(options: WorktreeGcOptions): Promise<Workt
   const kept: RepoWorktreeEntry[] = [];
 
   for (const entry of entries) {
+    // Selectors widen, they don't compose: `all` targets everything (making
+    // `runId`/`olderThanMs` moot), and the unharvested-work guard below still
+    // applies to whatever was selected.
     const selected =
       options.all ||
       (options.runId !== undefined && entry.runId === options.runId) ||
