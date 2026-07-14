@@ -209,7 +209,15 @@ describe("buildWorkflowGenerationPrompt", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.spec.name).toBe("release-checks");
-      expect(result.spec.phases[0]?.steps[0]?.kind).toBe("workflow");
+      expect(result.spec.phases[0]?.steps[0]).toMatchObject({
+        kind: "workflow",
+        workflow: "bug-hunt",
+      });
+      expect(result.spec.phases[1]?.steps[0]).toMatchObject({
+        kind: "gate",
+        dependsOn: ["bug-sweep"],
+        condition: { step: "bug-sweep", ok: true },
+      });
     }
   });
 });

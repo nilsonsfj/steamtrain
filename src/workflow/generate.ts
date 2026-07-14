@@ -196,7 +196,7 @@ or disjoint, never partially overlapping.
   This step does not use an agent or own a worktree - the child workflow's steps
   handle that internally. Use it to compose a reusable workflow as one stage of
   a larger pipeline. The child workflow is resolved at run time, and cycles or
-  nesting deeper than five workflow steps fail clearly.
+  reaching five nested workflow levels fails clearly.
 
 # File handoff between steps ("workspace" and "artifacts")
 Each worker/processor/command step runs in its OWN isolated worktree snapshotted
