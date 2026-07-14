@@ -198,7 +198,8 @@ export interface RepoWorktreeEntry {
 
 /** Merge deliverables (`steamtrain/merged/*`) are never GC targets. */
 const MERGED_BRANCH_PREFIX = "steamtrain/merged/";
-const STEP_BRANCH_PREFIX = "steamtrain/";
+/** All steamtrain-owned branches; step worktree branches are these minus merged/. */
+const BRANCH_PREFIX = "steamtrain/";
 
 /**
  * Enumerate every steamtrain step worktree/branch in `repoRoot` — including
@@ -214,9 +215,7 @@ export async function listRepoWorktrees(
   )
     .split("\n")
     .map((line) => line.trim())
-    .filter(
-      (name) => name.startsWith(STEP_BRANCH_PREFIX) && !name.startsWith(MERGED_BRANCH_PREFIX),
-    );
+    .filter((name) => name.startsWith(BRANCH_PREFIX) && !name.startsWith(MERGED_BRANCH_PREFIX));
 
   // branch -> registered worktree path, from `git worktree list`.
   const rootByBranch = new Map<string, string>();
@@ -378,6 +377,10 @@ export async function gcRepoWorktrees(options: WorktreeGcOptions): Promise<Workt
       continue;
     }
     if (!options.dryRun) {
+      // Best-effort by design: GC is not a critical path, and each step can
+      // legitimately fail (dir already gone, registration already pruned).
+      // The trailing `git worktree prune` below sweeps any registration a
+      // failed `worktree remove` left behind.
       if (entry.root) {
         await runGit(["worktree", "remove", "--force", entry.root], options.repoRoot).catch(
           () => {},

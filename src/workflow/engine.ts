@@ -3026,6 +3026,8 @@ async function executeMergeStep(
   // harvest succeeded; failures keep the worktrees for post-mortem harvesting.
   const cleaned: string[] = [];
   if (step.cleanup) {
+    // Dedupe by root defensively; the engine allocates a unique worktree per
+    // leaf, so in practice each root maps to exactly one stepId.
     const byRoot = new Map(sources.map((source) => [source.root, source]));
     for (const source of byRoot.values()) {
       if (ctx.signal?.aborted) break;

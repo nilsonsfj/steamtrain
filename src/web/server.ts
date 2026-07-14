@@ -874,10 +874,15 @@ async function handle(
   // machinery the CLI's `workflow history apply/prune` uses.
   const worktreesMatch = path.match(/^\/api\/history\/([^/]+)\/(worktrees|harvest|prune)$/);
   if (worktreesMatch) {
+    if (!deps.history) {
+      sendJson(res, 404, { error: "run history is not available on this server" });
+      return;
+    }
+    const history = deps.history;
     const id = decodeURIComponent(worktreesMatch[1]!);
     const action = worktreesMatch[2]!;
-    const record = await deps.history?.get(id);
-    if (!record || !deps.history) {
+    const record = await history.get(id);
+    if (!record) {
       sendJson(res, 404, { error: `unknown run '${id}'` });
       return;
     }
@@ -935,8 +940,12 @@ async function handle(
         sendJson(res, 400, { error: "onConflict must be ours or theirs" });
         return;
       }
+      if (body.step !== undefined && (typeof body.step !== "string" || !body.step.trim())) {
+        sendJson(res, 400, { error: "step must be a non-empty step id" });
+        return;
+      }
       try {
-        const { result, recordWarning } = await harvestRunWorktrees(deps.history, record, {
+        const { result, recordWarning } = await harvestRunWorktrees(history, record, {
           step: body.step,
           mode: body.mode,
           branchName: body.branch,
@@ -955,7 +964,7 @@ async function handle(
     }
 
     if (action === "prune" && method === "POST") {
-      const { pruned, total, recordWarning } = await pruneRunWorktrees(deps.history, record);
+      const { pruned, total, recordWarning } = await pruneRunWorktrees(history, record);
       sendJson(res, 200, { pruned, total, warning: recordWarning });
       return;
     }

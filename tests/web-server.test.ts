@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -30,6 +31,7 @@ import type { LoadedWorkflowCatalog } from "../src/workflow";
 import { readSse } from "./helpers/read-sse";
 
 const servers: Server[] = [];
+const tempRoots: string[] = [];
 
 afterEach(async () => {
   while (servers.length) {
@@ -37,6 +39,7 @@ afterEach(async () => {
     server.closeAllConnections?.();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+  await Promise.all(tempRoots.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
 function demoSpec(name = "demo"): WorkflowSpec {
@@ -397,6 +400,7 @@ describe("web server", () => {
     const git = async (cwd: string, ...args: string[]) =>
       (await execFileAsync("git", args, { cwd })).stdout.trim();
     const root = mkdtempSync(join(tmpdir(), "steamtrain-web-wt-"));
+    tempRoots.push(root);
     const repo = join(root, "repo");
     mkdirSync(repo, { recursive: true });
     await git(repo, "init", "-b", "main");
