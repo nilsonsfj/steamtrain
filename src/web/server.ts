@@ -964,8 +964,12 @@ async function handle(
     }
 
     if (action === "prune" && method === "POST") {
-      const { pruned, total, recordWarning } = await pruneRunWorktrees(history, record);
-      sendJson(res, 200, { pruned, total, warning: recordWarning });
+      try {
+        const { pruned, total, recordWarning } = await pruneRunWorktrees(history, record);
+        sendJson(res, 200, { pruned, total, warning: recordWarning });
+      } catch (err) {
+        sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
+      }
       return;
     }
   }

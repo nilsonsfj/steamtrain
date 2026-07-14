@@ -783,6 +783,7 @@ function formatAge(ageMs: number): string {
 /** Sort worktrees newest-run-first, grouping a run's entries together. */
 function groupSortedWorktrees(entries: RepoWorktreeEntry[]): RepoWorktreeEntry[] {
   return [...entries].sort((a, b) => {
+    // Ascending ageMs = newest first (smaller age = more recent).
     if (a.runId !== b.runId)
       return (a.ageMs ?? Number.POSITIVE_INFINITY) - (b.ageMs ?? Number.POSITIVE_INFINITY);
     return a.branch.localeCompare(b.branch);
