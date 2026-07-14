@@ -387,8 +387,10 @@ export async function gcRepoWorktrees(options: WorktreeGcOptions): Promise<Workt
     if (!options.dryRun) {
       // Best-effort by design: GC is not a critical path, and each step can
       // legitimately fail (dir already gone, registration already pruned).
-      // The trailing `git worktree prune` below sweeps any registration a
-      // failed `worktree remove` left behind.
+      // Per-command success (cf. pruneWorktree's boolean) is deliberately not
+      // tracked — "removed" means "discarded", and the trailing
+      // `git worktree prune` below sweeps any registration a failed
+      // `worktree remove` left behind.
       if (entry.root) {
         await runGit(["worktree", "remove", "--force", entry.root], options.repoRoot).catch(
           () => {},

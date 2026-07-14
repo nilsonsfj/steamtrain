@@ -3031,6 +3031,10 @@ async function executeMergeStep(
     const byRoot = new Map(sources.map((source) => [source.root, source]));
     for (const source of byRoot.values()) {
       if (ctx.signal?.aborted) break;
+      // The boolean return (did `git worktree remove` itself succeed) is
+      // deliberately ignored: pruneWorktree still rm -rf's the directory and
+      // deletes the branch afterwards, so "cleaned" means "discarded", not
+      // "every git command succeeded".
       await pruneWorktree(source, repoRoot);
       cleaned.push(source.stepId);
     }
