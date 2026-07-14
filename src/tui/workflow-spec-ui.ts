@@ -193,6 +193,7 @@ export function specDetailLines(step: WorkflowStep): string[] {
     lines.push(`onConflict: ${step.onConflict ?? "fail"}`);
     if (step.branch) lines.push(`branch: ${step.branch}`);
     if (step.perSource) lines.push("perSource: true (one branch/PR per source worktree)");
+    if (step.cleanup) lines.push("cleanup: true (prune source worktrees after delivery)");
     if (step.prTitle) lines.push(`prTitle: ${truncate(step.prTitle, 120)}`);
   }
   if (step.kind === "command") {

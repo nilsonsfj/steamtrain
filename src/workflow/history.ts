@@ -137,9 +137,13 @@ export interface RunRecord {
 
 /** Post-run worktree harvesting status, recorded by `workflow history apply/prune`. */
 export interface RunHarvestInfo {
-  /** Steps whose worktree changes were applied to the workspace. */
+  /** Steps whose worktree changes were delivered (applied / branched / PR'd). */
   appliedSteps?: string[];
   appliedAt?: number;
+  /** Branch the merged state was left on, when harvested with mode "branch"/"pr". */
+  branch?: string;
+  /** Pull request opened for the merged state, when harvested with mode "pr". */
+  prUrl?: string;
   /** Set once the run's worktrees/branches were pruned (discarded). */
   prunedAt?: number;
 }

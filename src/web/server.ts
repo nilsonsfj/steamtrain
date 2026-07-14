@@ -17,6 +17,7 @@ import {
   type LiveRunMeta,
   type LiveRunStore,
   type LoadedWorkflowCatalog,
+  MergeConflictError,
   WORKFLOW_CACHE_DIR,
   WORKFLOW_HISTORY_DIR,
   WORKFLOW_RUNS_DIR,
@@ -29,15 +30,20 @@ import {
   createLiveRunStore,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
+  finalRunWorktrees,
+  harvestRunWorktrees,
   isAgentBackedStep,
   isTerminalLiveRunStatus,
   matchPendingApproval,
+  mergeConflictGuidance,
   parseSessionOverrides,
   planWorkflow,
+  pruneRunWorktrees,
   resolveInputs,
   resolveStepTimeoutSec,
   workflowSpecSchema,
   workflowStepKind,
+  worktreeDiff,
 } from "../workflow";
 import type { WorkspaceConfig } from "../workspace";
 import { type PageAssetRevisions, renderIndex } from "./html";
@@ -384,6 +390,9 @@ function checkCsrf(
  *   DELETE /api/history/:id         delete one past run
  *   POST   /api/history/:id/rerun   re-run a past run -> { runId }
  *   POST   /api/history/:id/retry   retry failed steps -> { runId, downgraded? }
+ *   GET    /api/history/:id/worktrees  a run's retained worktrees + diffstat
+ *   POST   /api/history/:id/harvest    merge worktrees (apply/branch/pr) -> { result }
+ *   POST   /api/history/:id/prune      discard a run's worktrees -> { pruned, total }
  *   POST   /api/runs                { workflow, input, fresh?, overrides? } -> { runId }
  *   GET    /api/runs/:id/stream     SSE of WorkflowEvents + terminal status
  *   POST   /api/runs/:id/cancel     abort a run
@@ -858,6 +867,98 @@ async function handle(
       }
     }
     return;
+  }
+
+  // Post-run worktree lifecycle: inspect what a recorded run's step worktrees
+  // changed, harvest them (apply/branch/pr), or discard them — the same shared
+  // machinery the CLI's `workflow history apply/prune` uses.
+  const worktreesMatch = path.match(/^\/api\/history\/([^/]+)\/(worktrees|harvest|prune)$/);
+  if (worktreesMatch) {
+    const id = decodeURIComponent(worktreesMatch[1]!);
+    const action = worktreesMatch[2]!;
+    const record = await deps.history?.get(id);
+    if (!record || !deps.history) {
+      sendJson(res, 404, { error: `unknown run '${id}'` });
+      return;
+    }
+
+    if (action === "worktrees" && method === "GET") {
+      const sources = finalRunWorktrees(record);
+      const items = [];
+      for (const source of sources) {
+        try {
+          const diff = await worktreeDiff(source);
+          items.push({
+            stepId: source.stepId,
+            branch: source.branch,
+            root: source.root,
+            exists: true,
+            files: diff.files,
+            additions: diff.additions,
+            deletions: diff.deletions,
+          });
+        } catch {
+          items.push({
+            stepId: source.stepId,
+            branch: source.branch,
+            root: source.root,
+            exists: false,
+            files: [],
+            additions: 0,
+            deletions: 0,
+          });
+        }
+      }
+      sendJson(res, 200, { harvest: record.harvest ?? null, sources: items });
+      return;
+    }
+
+    if (action === "harvest" && method === "POST") {
+      let body: {
+        step?: string;
+        mode?: "apply" | "branch" | "pr";
+        branch?: string;
+        onConflict?: "ours" | "theirs";
+      };
+      try {
+        const raw = await readBody(req);
+        body = raw ? JSON.parse(raw) : {};
+      } catch {
+        sendJson(res, 400, { error: "invalid JSON body" });
+        return;
+      }
+      if (body.mode !== undefined && !["apply", "branch", "pr"].includes(body.mode)) {
+        sendJson(res, 400, { error: "mode must be apply, branch, or pr" });
+        return;
+      }
+      if (body.onConflict !== undefined && !["ours", "theirs"].includes(body.onConflict)) {
+        sendJson(res, 400, { error: "onConflict must be ours or theirs" });
+        return;
+      }
+      try {
+        const { result, recordWarning } = await harvestRunWorktrees(deps.history, record, {
+          step: body.step,
+          mode: body.mode,
+          branchName: body.branch,
+          onConflict: body.onConflict,
+        });
+        sendJson(res, 200, { result, warning: recordWarning });
+      } catch (err) {
+        const messageText = err instanceof Error ? err.message : String(err);
+        if (err instanceof MergeConflictError) {
+          sendJson(res, 409, { error: messageText, hint: mergeConflictGuidance("history") });
+        } else {
+          sendJson(res, 400, { error: messageText });
+        }
+      }
+      return;
+    }
+
+    if (action === "prune" && method === "POST") {
+      const { pruned, total, recordWarning } = await pruneRunWorktrees(deps.history, record);
+      sendJson(res, 200, { pruned, total, warning: recordWarning });
+      return;
+    }
   }
 
   // The in-flight run registry: the manager's own runs merged with runs owned

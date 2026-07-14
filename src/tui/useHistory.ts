@@ -8,10 +8,15 @@ import type {
   StepResult,
 } from "../workflow";
 import {
+  MergeConflictError,
   createWorkflowHistoryStore,
+  finalRunWorktrees,
+  harvestRunWorktrees,
   isRerunError,
   isTerminalLiveRunStatus,
+  mergeConflictGuidance,
   planRerun,
+  pruneRunWorktrees,
   rerunDowngradeMessage,
 } from "../workflow";
 import { message } from "./util";
@@ -59,6 +64,12 @@ export interface UseHistoryReturn {
   openHistory: () => { handled: true; clearInput: true };
   openHistoryRecord: (id: string) => void;
   rerunFromRecord: (record: RunRecord, mode: RerunMode) => void;
+  /**
+   * Post-run worktree lifecycle from the history detail view: `apply` merges
+   * the run's worktrees into the checkout (uncommitted); `prune` discards
+   * them (double-press to confirm — it deletes unapplied work).
+   */
+  harvestFromRecord: (record: RunRecord, action: "apply" | "prune") => void;
 }
 
 export function useHistory({
@@ -150,5 +161,65 @@ export function useHistory({
     [resolveWorkflowSpec, runWorkflow, setWfNotice],
   );
 
-  return { history, setHistory, openHistory, openHistoryRecord, rerunFromRecord };
+  // Prune deletes unapplied work, so it requires a second press on the same
+  // record within a few seconds; any other action clears the armed state.
+  const pruneConfirmRef = useRef<{ id: string; at: number } | null>(null);
+  const harvestBusyRef = useRef(false);
+
+  const harvestFromRecord = useCallback(
+    (record: RunRecord, action: "apply" | "prune") => {
+      if (harvestBusyRef.current) return;
+      if (finalRunWorktrees(record).length === 0) {
+        setWfNotice(`run '${record.id}' has no step worktrees`);
+        return;
+      }
+      if (action === "prune") {
+        const armed = pruneConfirmRef.current;
+        if (!armed || armed.id !== record.id || Date.now() - armed.at > 5_000) {
+          pruneConfirmRef.current = { id: record.id, at: Date.now() };
+          setWfNotice("press x again to discard this run's worktrees (unapplied changes are lost)");
+          return;
+        }
+        pruneConfirmRef.current = null;
+      }
+      harvestBusyRef.current = true;
+      setWfNotice(
+        action === "apply" ? "merging worktrees into the checkout…" : "pruning worktrees…",
+      );
+      void (async () => {
+        const store = historyStoreRef.current!;
+        try {
+          if (action === "apply") {
+            const { result } = await harvestRunWorktrees(store, record);
+            setWfNotice(
+              result.noChanges
+                ? "no changes to apply"
+                : `applied ${result.mergedSources.join(", ")} (uncommitted): ${result.files.length} file(s) +${result.additions} -${result.deletions}`,
+            );
+          } else {
+            const { pruned, total } = await pruneRunWorktrees(store, record);
+            setWfNotice(`pruned ${pruned}/${total} worktree(s)`);
+          }
+        } catch (err) {
+          setWfNotice(
+            err instanceof MergeConflictError
+              ? `${message(err)} — ${mergeConflictGuidance("history")}`
+              : message(err),
+          );
+        } finally {
+          harvestBusyRef.current = false;
+        }
+      })();
+    },
+    [historyStoreRef, setWfNotice],
+  );
+
+  return {
+    history,
+    setHistory,
+    openHistory,
+    openHistoryRecord,
+    rerunFromRecord,
+    harvestFromRecord,
+  };
 }

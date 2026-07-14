@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -129,6 +129,84 @@ describe("merge workflow step", () => {
     expect(await readFile(join(repo, "feature.txt"), "utf8")).toBe("the feature\n");
     // Landed as uncommitted changes — the user's history is untouched.
     expect(await git(repo, "status", "--porcelain")).toContain("feature.txt");
+  });
+
+  it("cleanup: true prunes the source worktrees and branches after delivery", async () => {
+    const { repo, worktrees } = await makeRepo();
+    const spec: WorkflowSpec = {
+      name: "implement-land-clean",
+      phases: [
+        {
+          id: "impl",
+          title: "Implement",
+          steps: [
+            {
+              id: "implement",
+              agent: "claude",
+              model: "m",
+              prompt: "WRITE feature.txt\nthe feature\n",
+            },
+          ],
+        },
+        {
+          id: "land",
+          title: "Land",
+          steps: [{ id: "land", kind: "merge", dependsOn: ["implement"], cleanup: true }],
+        },
+      ],
+    };
+
+    const events = await runToEvents(spec, repo, worktrees);
+    expect(workflowOk(events)).toBe(true);
+    const results = doneResults(events);
+    const implement = results.get("implement");
+    const land = results.get("land");
+    expect(land?.ok).toBe(true);
+    expect(land?.output).toContain("cleaned up 1 source worktree(s): implement");
+    expect((land?.json as { cleaned: string[] }).cleaned).toEqual(["implement"]);
+    // The delivery happened...
+    expect(await readFile(join(repo, "feature.txt"), "utf8")).toBe("the feature\n");
+    // ...and the source worktree + steamtrain branch no longer exist.
+    const worktree = implement?.worktree;
+    expect(worktree).toBeTruthy();
+    await expect(stat(worktree!.root)).rejects.toThrow();
+    await expect(git(repo, "rev-parse", "--verify", worktree!.branch)).rejects.toThrow();
+  });
+
+  it("keeps source worktrees when a cleanup merge fails on conflicts", async () => {
+    const { repo, worktrees } = await makeRepo();
+    const spec: WorkflowSpec = {
+      name: "conflict-keeps-worktrees",
+      phases: [
+        {
+          id: "impl",
+          title: "Implement",
+          steps: [
+            { id: "a", agent: "claude", model: "m", prompt: "WRITE same.txt\nversion A\n" },
+            { id: "b", agent: "claude", model: "m", prompt: "WRITE same.txt\nversion B\n" },
+          ],
+        },
+        {
+          id: "land",
+          title: "Land",
+          steps: [{ id: "land", kind: "merge", dependsOn: ["a", "b"], cleanup: true }],
+        },
+      ],
+    };
+
+    const events = await runToEvents(spec, repo, worktrees);
+    expect(workflowOk(events)).toBe(false);
+    const results = doneResults(events);
+    const land = results.get("land");
+    expect(land?.ok).toBe(false);
+    // The failure is actionable, and no worktree was cleaned up.
+    expect(land?.error).toContain("hint:");
+    expect(land?.error).toContain("onConflict");
+    for (const id of ["a", "b"] as const) {
+      const worktree = results.get(id)?.worktree;
+      expect(worktree).toBeTruthy();
+      expect((await stat(worktree!.root)).isDirectory()).toBe(true);
+    }
   });
 
   it("merges every fan-out child worktree onto a named branch", async () => {

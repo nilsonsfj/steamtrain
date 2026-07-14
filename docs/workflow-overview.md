@@ -154,6 +154,11 @@ of its worktree.
 Worktrees are retained after the run so agent-created files can be inspected,
 committed, or merged from their `steamtrain/...` branches. Completed agent step
 results include the worktree cwd, root, branch, and linked ignored paths.
+Retention has explicit closure: a `merge` step can prune its sources after a
+successful delivery (`"cleanup": true`), past runs can be harvested or
+discarded from the CLI (`workflow history apply/prune`), the TUI, and the web
+UI, and `workflow worktrees [list|prune]` garbage-collects everything else —
+see [worktree-lifecycle.md](worktree-lifecycle.md).
 
 Isolation also means a later step does **not** see an earlier step's file edits
 by default. When it should — implement → review, implement → run the tests —

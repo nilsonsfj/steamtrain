@@ -169,6 +169,21 @@ export {
   type WorktreeSource,
 } from "./merge";
 export {
+  allRunWorktrees,
+  finalRunWorktrees,
+  gcRepoWorktrees,
+  harvestRunWorktrees,
+  listRepoWorktrees,
+  mergeConflictGuidance,
+  pruneRunWorktrees,
+  type RepoWorktreeEntry,
+  type RunHarvestOutcome,
+  type RunHarvestRequest,
+  type RunPruneOutcome,
+  type WorktreeGcOptions,
+  type WorktreeGcResult,
+} from "./gc";
+export {
   type RetryPolicy,
   type ResolvedRetryPolicy,
   DEFAULT_RETRY,

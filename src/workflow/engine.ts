@@ -21,14 +21,17 @@ import { runShellCommand } from "./command";
 import type { StepEditPatch, WorkflowRunControl } from "./control";
 import { addTokens } from "./cost";
 import type { WorkflowEvent } from "./events";
+import { mergeConflictGuidance } from "./gc";
 import { type LlmCallResult, type LlmComplete, type LlmProviderId, callLlm } from "./llm";
 import {
   type ConflictResolver,
   type HarvestResult,
+  MergeConflictError,
   type WorktreeDiff,
   type WorktreeSource,
   defaultHarvestBranchName,
   harvestWorktrees,
+  pruneWorktree,
   worktreeDiff,
   worktreeSourceFromInfo,
 } from "./merge";
@@ -3007,9 +3010,29 @@ async function executeMergeStep(
       );
     }
   } catch (err) {
-    return fail(err instanceof Error ? err.message : String(err));
+    const base = err instanceof Error ? err.message : String(err);
+    return fail(
+      err instanceof MergeConflictError
+        ? `${base}\nhint: ${mergeConflictGuidance("merge-step")}`
+        : base,
+    );
   }
   if (ctx.signal?.aborted) return fail("cancelled");
+
+  // Lifecycle closure: with `cleanup: true` the delivered result (applied
+  // diff / merged branch / PR) is the durable copy, so the source worktrees
+  // and their steamtrain branches are discarded now instead of accumulating
+  // in $TMPDIR + `git branch` until a manual prune. Only reached when every
+  // harvest succeeded; failures keep the worktrees for post-mortem harvesting.
+  const cleaned: string[] = [];
+  if (step.cleanup) {
+    const byRoot = new Map(sources.map((source) => [source.root, source]));
+    for (const source of byRoot.values()) {
+      if (ctx.signal?.aborted) break;
+      await pruneWorktree(source, repoRoot);
+      cleaned.push(source.stepId);
+    }
+  }
 
   const merged = harvests.flatMap((h) => h.mergedSources);
   const unchanged = harvests.flatMap((h) => h.unchangedSources);
@@ -3050,6 +3073,9 @@ async function executeMergeStep(
   }
   if (unchanged.length > 0 && !noChanges) lines.push(`unchanged: ${unchanged.join(", ")}`);
   if (missingWorktrees.length > 0) lines.push(`no worktree: ${missingWorktrees.join(", ")}`);
+  if (cleaned.length > 0) {
+    lines.push(`cleaned up ${cleaned.length} source worktree(s): ${cleaned.join(", ")}`);
+  }
 
   return {
     result: {
@@ -3068,6 +3094,7 @@ async function executeMergeStep(
         branches,
         prUrls,
         noChanges,
+        cleaned,
       },
       durationMs: Date.now() - started,
       costUsd: conflictCostUsd > 0 ? conflictCostUsd : undefined,
