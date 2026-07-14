@@ -257,8 +257,13 @@ export async function listRepoWorktrees(
 
     let changed = false;
     if (exists && root) {
-      const status = await runGitText(["status", "--porcelain"], root).catch(() => "");
-      changed = status.trim().length > 0;
+      // Fail protective: a worktree whose state can't be read (corrupted
+      // .git file, permissions) may still hold uncommitted work — treat it
+      // as changed so GC skips it rather than eating it.
+      changed = await runGitText(["status", "--porcelain"], root).then(
+        (status) => status.trim().length > 0,
+        () => true,
+      );
     }
     if (!changed) {
       const tip = (
