@@ -190,6 +190,13 @@ or disjoint, never partially overlapping.
   resolves conflict markers). Add a final merge step to any workflow whose agents
   EDIT files (implement/fix/refactor) — without one the edits stay stranded in
   worktrees. Review-only workflows don't need it.
+- "workflow": invoke another named workflow as a child run. Requires "workflow"
+  (the catalog name); optional "input" becomes the child's {{input}} and
+  "outputStep" selects which child step's output becomes this step's output.
+  This step does not use an agent or own a worktree - the child workflow's steps
+  handle that internally. Use it to compose a reusable workflow as one stage of
+  a larger pipeline. The child workflow is resolved at run time, and cycles or
+  nesting deeper than five workflow steps fail clearly.
 
 # File handoff between steps ("workspace" and "artifacts")
 Each worker/processor/command step runs in its OWN isolated worktree snapshotted
@@ -342,6 +349,26 @@ The gate sits AFTER the body it re-runs, and "loopTo" names that earlier phase:
 }
 Note the gate's condition inspects "review" (not "fix") so the loop re-checks the
 review verdict each pass; "loopTo": "review" re-runs review then fix on each cycle.
+
+# Worked example: compose a sub-workflow
+This is the canonical shape for "run an existing workflow as one stage of a
+larger pipeline". The child workflow is resolved by name from the workflow
+catalog, and its internal steps appear in the run history under the
+`<stepId>::<childStepId>` namespace:
+{
+  "name": "release-checks",
+  "description": "Run a reusable bug sweep before the release gate.",
+  "phases": [
+    { "id": "checks", "title": "Checks", "steps": [
+      { "id": "bug-sweep", "kind": "workflow", "workflow": "bug-hunt",
+        "input": "{{input}} - pre-release sweep" }
+    ] },
+    { "id": "gate", "title": "Gate", "steps": [
+      { "id": "clean", "kind": "gate", "dependsOn": ["bug-sweep"],
+        "condition": { "step": "bug-sweep", "ok": true }, "onFalse": "fail" }
+    ] }
+  ]
+}
 
 # Output format (STRICT)
 Output ONLY a single JSON object, no prose, no markdown fences. Use the shape and
