@@ -195,6 +195,31 @@ describe("buildWorkflowGenerationPrompt", () => {
       expect(result.spec.phases.some((p) => p.steps.some((s) => s.kind === "gate"))).toBe(true);
     }
   });
+
+  it("teaches sub-workflow composition with a valid worked example", () => {
+    const prompt = buildWorkflowGenerationPrompt("anything");
+    expect(prompt).toContain('"workflow": invoke another named workflow');
+    expect(prompt).toContain('"kind": "workflow"');
+
+    const example = prompt.slice(
+      prompt.indexOf("# Worked example: compose a sub-workflow"),
+      prompt.indexOf("# Output format"),
+    );
+    const result = extractWorkflowSpec(example);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.spec.name).toBe("release-checks");
+      expect(result.spec.phases[0]?.steps[0]).toMatchObject({
+        kind: "workflow",
+        workflow: "bug-hunt",
+      });
+      expect(result.spec.phases[1]?.steps[0]).toMatchObject({
+        kind: "gate",
+        dependsOn: ["bug-sweep"],
+        condition: { step: "bug-sweep", ok: true },
+      });
+    }
+  });
 });
 
 describe("extractWorkflowSpec", () => {
