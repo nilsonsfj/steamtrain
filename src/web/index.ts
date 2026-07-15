@@ -6,6 +6,7 @@ export {
   createWebServer,
   missingPublicAssets,
   publicAssetsLoaded,
+  resolveWebAuthToken,
   startWebUi,
 } from "./server";
 export {

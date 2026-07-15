@@ -237,6 +237,11 @@ Global options (TUI and workflow commands):
       --port <n>             Web UI port (default 4317)
       --host <host>          Web UI bind host (default 127.0.0.1)
       --auth-token <token>   Require this token for web UI access
+                             (or set STEAMTRAIN_AUTH_TOKEN; non-local binds
+                             auto-generate a token when neither is given)
+      --no-auth              Serve a non-local web UI bind without auth (unsafe)
+      --trust-proxy          Honor X-Forwarded-* headers (only behind a proxy
+                             you run; required for correct https/Secure cookies)
 ```
 
 `init` reports each agent's readiness with copy-paste fixes, detects this repo's

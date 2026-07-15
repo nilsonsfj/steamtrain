@@ -5,7 +5,7 @@ import { configDisplayLabel, loadConfig } from "./config";
 import { loadSettings } from "./settings";
 import { App } from "./tui/App";
 import { STEAMTRAIN_VERSION } from "./version";
-import { startWebUi } from "./web";
+import { resolveWebAuthToken, startWebUi } from "./web";
 import { loadWorkflowCatalog } from "./workflow";
 import { loadWorkspaceConfig, workspaceScopeLabel } from "./workspace";
 
@@ -19,8 +19,19 @@ import { loadWorkspaceConfig, workspaceScopeLabel } from "./workspace";
  * user workflows (~/.steamtrain/workflows.json), workspace presets, then renders the TUI.
  */
 async function main(): Promise<void> {
-  const { args, workspacePath, configPath, webUi, port, host, authToken, version, error } =
-    parseGlobalArgs(process.argv.slice(2));
+  const {
+    args,
+    workspacePath,
+    configPath,
+    webUi,
+    port,
+    host,
+    authToken,
+    noAuth,
+    trustProxy,
+    version,
+    error,
+  } = parseGlobalArgs(process.argv.slice(2));
   if (error) {
     process.stderr.write(`${error}\n`);
     process.exitCode = 1;
@@ -66,6 +77,9 @@ async function main(): Promise<void> {
     if (warning) process.stderr.write(`${warning}\n`);
     if (workspaceWarning) process.stderr.write(`${workspaceWarning}\n`);
     if (workflowCatalog.warning) process.stderr.write(`${workflowCatalog.warning}\n`);
+    // --auth-token wins; STEAMTRAIN_AUTH_TOKEN keeps the secret out of the
+    // process list and shell history; --no-auth explicitly disables both.
+    const envToken = process.env.STEAMTRAIN_AUTH_TOKEN?.trim() || undefined;
     const { server } = await startWebUi({
       config,
       workspaces,
@@ -74,7 +88,9 @@ async function main(): Promise<void> {
       configPath: scope.path,
       port,
       host,
-      authToken,
+      authToken: resolveWebAuthToken({ authToken, envToken, noAuth }),
+      noAuth,
+      trustProxy,
     });
     const shutdown = (): void => {
       server.close(() => process.exit(0));

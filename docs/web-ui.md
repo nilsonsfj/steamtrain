@@ -8,7 +8,9 @@ doctor gating — just laid out as a pipeline you can watch in a browser.
 ```bash
 steamtrain --web-ui                 # http://127.0.0.1:4317
 steamtrain --web-ui --port 8080     # custom port
-steamtrain --web-ui --host 0.0.0.0  # bind all interfaces (e.g. a remote box)
+steamtrain --web-ui --host 0.0.0.0  # bind all interfaces — auth token auto-generated
+steamtrain --web-ui --host 0.0.0.0 --auth-token s3cret   # your own token
+STEAMTRAIN_AUTH_TOKEN=s3cret steamtrain --web-ui --host 0.0.0.0  # token via env
 ```
 
 The server starts listening immediately and prints its URL; agent health and
@@ -75,6 +77,8 @@ browser ──POST /api/runs──▶ run manager ──▶ Orchestrator.runWork
 | `/api/history` / `/api/history/:id` | DELETE | clear all runs, or delete one |
 | `/api/history/:id/rerun` | POST | re-run a past run → `{ runId }` |
 | `/api/history/:id/retry` | POST | retry a past run's failed steps → `{ runId, downgraded? }` |
+| `/api/auth` | POST | `{ token }` → creates a session, sets the auth cookie (when auth is enabled) |
+| `/api/logout` | POST | revokes the presented session and clears the auth cookie |
 
 The client folds the streamed `WorkflowEvent`s into a phase → step tree with the
 same model the TUI uses (`src/tui/workflow-state.ts`), so the visualization stays
@@ -101,11 +105,55 @@ since the run, retry safely falls back to a full re-run (the UI notes this).
 
 ## Scope & security
 
-The server binds to `127.0.0.1` by default and is intended for local use; it has
-no authentication. Only pass `--host 0.0.0.0` on a network you trust, since
-anyone who can reach the port can launch agent runs. Runs are gated by the doctor
-just like the CLI: a workflow whose agents aren't healthy returns a `400` with
-the reason instead of starting.
+The web UI is a **privileged control plane**: whoever reaches it can launch
+agent runs with your credentials, edit and delete workflows, and read run
+history. The server hardens both of its modes accordingly.
+
+**Local mode (the default).** `steamtrain --web-ui` binds `127.0.0.1` and
+needs no token — the frictionless path. It still defends against the two ways
+a hostile *website* can reach a localhost server through your browser:
+
+- **DNS rebinding** — requests whose `Host` header is not a loopback name
+  (`localhost`, `127.0.0.1`, `[::1]`, or the bind host) are rejected with
+  `403`, so a domain rebound to `127.0.0.1` gets nothing.
+- **Drive-by CSRF** — state-changing requests carrying a cross-origin
+  `Origin`/`Referer` are rejected in every mode. Browsers always attach
+  `Origin` to cross-site fetches, while `curl`-style local scripting (which
+  sends neither header) keeps working untouched.
+
+**Exposed mode.** Binding a non-loopback host (`--host 0.0.0.0`, a LAN
+address, …) requires authentication. If you don't pass a token, one is
+auto-generated and printed at startup — an exposed server is never silently
+open. Supply your own with `--auth-token <token>` or the
+`STEAMTRAIN_AUTH_TOKEN` environment variable (which keeps it out of `ps` and
+shell history), or explicitly opt out with `--no-auth` on a network you fully
+trust.
+
+With auth enabled:
+
+- `POST /api/auth` exchanges the token for a **random server-side session**
+  (`HttpOnly`, `SameSite=Strict` cookie, 7-day expiry, revoked by
+  `POST /api/logout` and on process restart). The cookie never encodes the
+  token itself.
+- Failed logins are **rate limited** per client address (10 per minute, then
+  `429`).
+- State-changing requests must carry a same-origin `Origin` or `Referer`.
+- The landing page and `/static/*` assets stay public; every `/api/*` route
+  returns `401` without a session.
+
+**Behind a reverse proxy.** The server speaks plain HTTP; for exposure beyond
+a trusted network put it behind a TLS-terminating proxy and pass
+`--trust-proxy`. `X-Forwarded-*` headers are **client-controllable and ignored
+by default** — a browser can set `X-Forwarded-Host` on a rebound same-origin
+request — so they are honored only under `--trust-proxy`, which you set when
+*you* run the proxy that overwrites them. With it enabled: `X-Forwarded-Proto:
+https` marks the session cookie `Secure`, `X-Forwarded-Host` drives origin
+comparison and lifts the loopback `Host` allowlist, and `X-Forwarded-For`
+identifies the client for login rate limiting. SSE responses always send
+`X-Accel-Buffering: no` so proxies don't buffer the event stream.
+
+Runs are gated by the doctor just like the CLI: a workflow whose agents aren't
+healthy returns a `400` with the reason instead of starting.
 
 See [`workflow-overview.md`](workflow-overview.md) for the execution model and
 [`workflow-spec.md`](workflow-spec.md) for the spec fields surfaced on each card.

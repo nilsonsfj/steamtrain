@@ -100,6 +100,39 @@ describe("parseGlobalArgs", () => {
     });
   });
 
+  it("parses --auth-token and --no-auth", () => {
+    expect(parseGlobalArgs(["--web-ui", "--auth-token", "s3cret"])).toEqual({
+      args: [],
+      webUi: true,
+      authToken: "s3cret",
+    });
+    expect(parseGlobalArgs(["--web-ui", "--host", "0.0.0.0", "--no-auth"])).toEqual({
+      args: [],
+      webUi: true,
+      host: "0.0.0.0",
+      noAuth: true,
+    });
+  });
+
+  it("parses --trust-proxy", () => {
+    expect(
+      parseGlobalArgs(["--web-ui", "--host", "0.0.0.0", "--auth-token", "s", "--trust-proxy"]),
+    ).toEqual({
+      args: [],
+      webUi: true,
+      host: "0.0.0.0",
+      authToken: "s",
+      trustProxy: true,
+    });
+  });
+
+  it("rejects --no-auth combined with --auth-token", () => {
+    expect(parseGlobalArgs(["--web-ui", "--auth-token", "s3cret", "--no-auth"])).toEqual({
+      args: [],
+      error: "--no-auth cannot be combined with --auth-token",
+    });
+  });
+
   it("parses --version and -v", () => {
     expect(parseGlobalArgs(["--version"])).toEqual({ args: [], version: true });
     expect(parseGlobalArgs(["-v"])).toEqual({ args: [], version: true });
