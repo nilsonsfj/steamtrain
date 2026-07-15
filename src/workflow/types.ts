@@ -232,6 +232,14 @@ export interface MergeStep extends WorkflowStepBase {
   branch?: string;
   /** One branch/PR per source worktree instead of one combined merge (branch/pr modes only). */
   perSource?: boolean;
+  /**
+   * Prune the source worktrees and their steamtrain branches after a
+   * successful delivery — the delivered result (applied diff, merged branch,
+   * PR) becomes the single durable copy. Later steps can no longer inherit or
+   * re-merge the cleaned worktrees, and `history apply/show --diff` for them
+   * will report the worktrees as gone.
+   */
+  cleanup?: boolean;
   /** What to do when source worktrees conflict with each other. Default `"fail"`. */
   onConflict?: "fail" | "ours" | "theirs" | "agent";
   /** Merge-commit message template. */
@@ -885,6 +893,7 @@ const workflowMergeStepSchema = z
     mode: z.enum(["apply", "branch", "pr"]).optional(),
     branch: z.string().min(1).optional(),
     perSource: z.boolean().optional(),
+    cleanup: z.boolean().optional(),
     onConflict: z.enum(["fail", "ours", "theirs", "agent"]).optional(),
     commitMessage: z.string().min(1).optional(),
     prTitle: z.string().min(1).optional(),

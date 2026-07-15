@@ -163,6 +163,16 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
             historyHook.rerunFromRecord(historyHook.history.record, "retry-failed");
             return;
           }
+          // Worktree lifecycle: apply the run's worktrees to the checkout, or
+          // prune (discard) them — `x` double-press confirmed in the hook.
+          if (!historyHook.history.detail && input === "a" && historyHook.history.record) {
+            historyHook.harvestFromRecord(historyHook.history.record, "apply");
+            return;
+          }
+          if (!historyHook.history.detail && input === "x" && historyHook.history.record) {
+            historyHook.harvestFromRecord(historyHook.history.record, "prune");
+            return;
+          }
           const totalSteps = historyHook.history.recordState
             ? historyHook.history.recordState.phases.reduce((n, p) => n + p.steps.length, 0)
             : 0;

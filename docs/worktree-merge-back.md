@@ -102,15 +102,28 @@ steamtrain workflow history show <id> --diff            # full per-step patches
 steamtrain workflow history show <id> --diff --stat     # files + counts only
 steamtrain workflow history show <id> --diff --step impl[2]
 steamtrain workflow history apply <id> [--step <stepId>] # merge into checkout
+steamtrain workflow history apply <id> --mode branch [--branch <name>]  # deliver to a branch (or --mode pr)
+steamtrain workflow history apply <id> --onconflict ours|theirs         # deterministic conflict winner
 steamtrain workflow history prune <id>                   # discard worktrees + branches
+steamtrain workflow worktrees                            # repo-wide: list every retained worktree/branch
+steamtrain workflow worktrees prune [--older-than <days>|--run <id>|--all] [--force] [--dry-run]
 ```
 
 `--diff` is non-mutating (it stages the worktree state into a throwaway
 `GIT_INDEX_FILE` to diff against the recorded base commit). `apply` reuses the
-exact same snapshot→stage→apply pipeline with `onConflict: fail`. Both
-`apply` and `prune` record their outcome on the run record (`harvest:` line in
-`history show`), so a run's "was this ever landed / discarded?" status is part
-of its history.
+exact same snapshot→stage→deliver pipeline; conflicts fail with recovery
+guidance unless `--onconflict` picks a winner. Both `apply` and `prune` record
+their outcome on the run record (`harvest:` line in `history show`, including
+the branch/PR for branch/pr deliveries), so a run's "was this ever landed /
+discarded?" status is part of its history.
+
+The same actions are first-class in both UIs (shared `src/workflow/gc.ts`
+helpers): the TUI history detail (`a` apply, `x` prune — double-press
+confirmed) and the web UI's run history "Worktree changes" section (per-step
+diffstat, harvest status, Apply / Merge-to-branch / Prune buttons, and
+conflict-retry buttons on a 409). Repo-wide garbage collection — including
+orphaned worktrees whose run record is gone — is
+[`worktree-lifecycle.md`](worktree-lifecycle.md)'s subject.
 
 ## Interactions with the rest of the engine
 
@@ -127,11 +140,20 @@ of its history.
 - **Doctor:** a merge step with a conflict agent counts toward the workflow's
   agent set, so preflight checks its binary like any agent step.
 
+## Lifecycle closure (shipped 2026-07-14)
+
+The retention model's open ends — worktrees/branches accumulating forever,
+conflict failures with no in-tool recovery, and harvest actions reachable only
+from the CLI — are analyzed and closed in
+[`worktree-lifecycle.md`](worktree-lifecycle.md): `cleanup: true` on the merge
+step, `workflow worktrees list|prune` GC, `history apply`
+`--mode/--branch/--onconflict`, and harvest actions in both UIs.
+
 ## Future work this unlocks
 
 - **Approval gates (roadmap §1.2)** review exactly this diff before the merge
   step delivers it.
-- **TUI/web diff views**: the diff primitives (`worktreeDiff`) are UI-agnostic;
-  surfacing them as panels in both UIs is a rendering task, tracked as
-  follow-up to §1.1.
+- **Web patch view**: the web UI now shows per-step diffstat in run history;
+  a full patch pane can grow on the same `GET /api/history/:id/worktrees`
+  primitives.
 - **CI mode (§1.4)** posts `history show --diff`-style patches on PRs.
