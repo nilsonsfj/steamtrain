@@ -27,6 +27,8 @@ function editDistance(a: string, b: string, cap: number): number {
  * The candidate closest to `input`, or undefined when nothing is plausibly a
  * typo of it. Prefers a unique-feeling prefix match ("hist" → "history"), then
  * small edit distances ("hlep" → "help"). Case-insensitive.
+ *
+ * @example closestMatch("hlep", ["help", "history"]) // → "help"
  */
 export function closestMatch(input: string, candidates: readonly string[]): string | undefined {
   const needle = input.toLowerCase();
