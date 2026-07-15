@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import type { Server } from "node:http";
+import { request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1728,7 +1729,7 @@ describe("web server", () => {
 
 const AUTH_COOKIE = "__steamtrain_auth";
 
-function hashedCookie(token: string): string {
+function hashedToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
@@ -1752,6 +1753,36 @@ function makeAuthServer(
   return { server, runs };
 }
 
+/** Log in and return the `name=value` session-cookie pair for later requests. */
+async function login(base: string, token = "test-secret-token"): Promise<string> {
+  const res = await fetch(`${base}/api/auth`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  expect(res.status).toBe(200);
+  const setCookie = res.headers.get("set-cookie");
+  expect(setCookie).toBeTruthy();
+  return setCookie!.split(";")[0]!;
+}
+
+/** GET with full header control (fetch forbids overriding the Host header). */
+function rawGet(
+  base: string,
+  path: string,
+  headers: Record<string, string>,
+): Promise<{ status: number }> {
+  const url = new URL(base);
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ hostname: url.hostname, port: url.port, path, headers }, (res) => {
+      res.resume();
+      res.on("end", () => resolve({ status: res.statusCode ?? 0 }));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 describe("web server — auth", () => {
   it("returns 401 on API routes when auth-token is set and no cookie present", async () => {
     const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
@@ -1773,7 +1804,7 @@ describe("web server — auth", () => {
     expect(js.status).toBe(200);
   });
 
-  it("POST /api/auth sets cookie on valid token", async () => {
+  it("POST /api/auth issues a random session cookie (not the hashed token)", async () => {
     const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);
     const res = await fetch(`${base}/api/auth`, {
@@ -1782,10 +1813,25 @@ describe("web server — auth", () => {
       body: JSON.stringify({ token: "test-secret-token" }),
     });
     expect(res.status).toBe(200);
-    const setCookie = res.headers.get("set-cookie");
-    expect(setCookie).toContain(`${AUTH_COOKIE}=${hashedCookie("test-secret-token")}`);
+    const setCookie = res.headers.get("set-cookie")!;
+    expect(setCookie).toContain(`${AUTH_COOKIE}=`);
     expect(setCookie).toContain("HttpOnly");
     expect(setCookie).toContain("SameSite=Strict");
+    expect(setCookie).toContain("Max-Age=");
+    expect(setCookie).not.toContain("Secure");
+    const value = setCookie.split(";")[0]!.split("=")[1]!;
+    expect(value).toMatch(/^[0-9a-f]{64}$/);
+    // The session id must not be derivable from the token (the pre-session
+    // scheme used SHA-256(token), a permanent offline-crackable credential).
+    expect(value).not.toBe(hashedToken("test-secret-token"));
+  });
+
+  it("issues a different session id on each login", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const first = await login(base);
+    const second = await login(base);
+    expect(first).not.toBe(second);
   });
 
   it("POST /api/auth returns 401 on invalid token", async () => {
@@ -1799,15 +1845,75 @@ describe("web server — auth", () => {
     expect(res.status).toBe(401);
   });
 
-  it("allows API access with valid cookie", async () => {
+  it("allows API access with a logged-in session cookie", async () => {
     const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);
-    const res = await fetch(`${base}/api/workflows`, {
-      headers: { cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret-token")}` },
-    });
+    const cookie = await login(base);
+    const res = await fetch(`${base}/api/workflows`, { headers: { cookie } });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { workflows: unknown[] };
     expect(body.workflows).toBeDefined();
+  });
+
+  it("rejects a fabricated SHA-256(token) cookie (legacy scheme)", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/workflows`, {
+      headers: { cookie: `${AUTH_COOKIE}=${hashedToken("test-secret-token")}` },
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /api/logout revokes the session", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const cookie = await login(base);
+    const before = await fetch(`${base}/api/workflows`, { headers: { cookie } });
+    expect(before.status).toBe(200);
+    const logout = await fetch(`${base}/api/logout`, {
+      method: "POST",
+      headers: { cookie, origin: base },
+    });
+    expect(logout.status).toBe(200);
+    expect(logout.headers.get("set-cookie")).toContain("Max-Age=0");
+    const after = await fetch(`${base}/api/workflows`, { headers: { cookie } });
+    expect(after.status).toBe(401);
+  });
+
+  it("rate limits failed logins per client", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    for (let i = 0; i < 10; i++) {
+      const res = await fetch(`${base}/api/auth`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: `wrong-${i}` }),
+      });
+      expect(res.status).toBe(401);
+    }
+    // The budget is spent: even the correct token is refused for the window.
+    const limited = await fetch(`${base}/api/auth`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: "test-secret-token" }),
+    });
+    expect(limited.status).toBe(429);
+  });
+
+  it("marks the session cookie Secure behind an https reverse proxy", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/auth`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-forwarded-proto": "https",
+        "x-forwarded-host": "steamtrain.example.com",
+      },
+      body: JSON.stringify({ token: "test-secret-token" }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("set-cookie")).toContain("Secure");
   });
 
   it("POST /api/auth reports auth not required when no authToken configured", async () => {
@@ -1833,17 +1939,97 @@ describe("web server — auth", () => {
   });
 });
 
+describe("web server — host header (DNS rebinding)", () => {
+  function makeOpenServer(bindHost?: string): Server {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const server = createWebServer({ host, runs, workflowSource: () => "bundled", bindHost });
+    servers.push(server);
+    return server;
+  }
+
+  it("rejects non-loopback Host headers on a local bind", async () => {
+    const base = await start(makeOpenServer("127.0.0.1"));
+    const res = await rawGet(base, "/api/workflows", { host: "evil.example.com" });
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects rebound Host headers even for the index page", async () => {
+    const base = await start(makeOpenServer("127.0.0.1"));
+    const res = await rawGet(base, "/", { host: "evil.example.com:4317" });
+    expect(res.status).toBe(403);
+  });
+
+  it("serves loopback Host headers on a local bind", async () => {
+    const base = await start(makeOpenServer("127.0.0.1"));
+    for (const hostHeader of ["localhost:4317", "127.0.0.1", "[::1]:4317"]) {
+      const res = await rawGet(base, "/api/workflows", { host: hostHeader });
+      expect(res.status).toBe(200);
+    }
+  });
+
+  it("treats a missing bindHost as local (test/default wiring)", async () => {
+    const base = await start(makeOpenServer(undefined));
+    const res = await rawGet(base, "/api/workflows", { host: "evil.example.com" });
+    expect(res.status).toBe(403);
+  });
+
+  it("exempts requests relayed by a reverse proxy (X-Forwarded-Host)", async () => {
+    const base = await start(makeOpenServer("127.0.0.1"));
+    const res = await rawGet(base, "/api/workflows", {
+      host: "steamtrain.internal:8080",
+      "x-forwarded-host": "steamtrain.example.com",
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("skips the Host allowlist on non-local binds (auth guards those)", async () => {
+    const base = await start(makeOpenServer("0.0.0.0"));
+    const res = await rawGet(base, "/api/workflows", { host: "steamtrain.example.com" });
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("web server — security headers", () => {
+  it("sends CSP, frame, referrer, and robots headers on the index page", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/`);
+    expect(res.status).toBe(200);
+    const csp = res.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toContain("object-src 'none'");
+    expect(res.headers.get("x-frame-options")).toBe("DENY");
+    expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(res.headers.get("x-robots-tag")).toContain("noindex");
+  });
+
+  it("never sends CORS allow-origin headers", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/workflows`, {
+      headers: { origin: "http://another.example.com" },
+    });
+    expect(res.headers.get("access-control-allow-origin")).toBeNull();
+    expect(res.headers.get("access-control-allow-credentials")).toBeNull();
+  });
+});
+
 describe("web server — CSRF", () => {
   it("rejects POST without Origin/Referer when auth is enabled", async () => {
     const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);
+    const cookie = await login(base);
     // Use a raw fetch that doesn't send Origin (node fetch doesn't send it by default)
     const res = await fetch(`${base}/api/runs`, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret-token")}`,
-      },
+      headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({ workflow: "demo", input: "test" }),
     });
     expect(res.status).toBe(403);
@@ -1854,11 +2040,12 @@ describe("web server — CSRF", () => {
   it("rejects POST with mismatched Origin when auth is enabled", async () => {
     const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);
+    const cookie = await login(base);
     const res = await fetch(`${base}/api/runs`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret-token")}`,
+        cookie,
         origin: "http://evil.example.com",
       },
       body: JSON.stringify({ workflow: "demo", input: "test" }),
@@ -1871,13 +2058,10 @@ describe("web server — CSRF", () => {
   it("allows POST with matching Origin when auth is enabled", async () => {
     const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);
+    const cookie = await login(base);
     const res = await fetch(`${base}/api/runs`, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret-token")}`,
-        origin: base,
-      },
+      headers: { "content-type": "application/json", cookie, origin: base },
       body: JSON.stringify({ workflow: "demo", input: "test" }),
     });
     expect(res.status).toBe(201);
@@ -1886,13 +2070,12 @@ describe("web server — CSRF", () => {
   it("allows GET without Origin when auth is enabled (read-only)", async () => {
     const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);
-    const res = await fetch(`${base}/api/workflows`, {
-      headers: { cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret-token")}` },
-    });
+    const cookie = await login(base);
+    const res = await fetch(`${base}/api/workflows`, { headers: { cookie } });
     expect(res.status).toBe(200);
   });
 
-  it("skips CSRF check when no authToken configured", async () => {
+  it("allows POST without Origin when no authToken configured (curl-style)", async () => {
     const host = new FakeHost(demoSpec(), happyRun);
     const runs = new WorkflowRunManager({
       host,
@@ -1910,6 +2093,72 @@ describe("web server — CSRF", () => {
       body: JSON.stringify({ workflow: "demo", input: "test" }),
     });
     expect(res.status).toBe(201);
+  });
+
+  it("rejects POST with mismatched Origin even without authToken (drive-by CSRF)", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const server = createWebServer({ host, runs, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://evil.example.com" },
+      body: JSON.stringify({ workflow: "demo", input: "test" }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("treats default-port Origins as matching (http://host vs Host: host)", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const server = createWebServer({
+      host,
+      runs,
+      workflowSource: () => "bundled",
+      bindHost: "0.0.0.0",
+    });
+    servers.push(server);
+    const base = await start(server);
+    const url = new URL(base);
+    return new Promise<void>((resolve, reject) => {
+      const req = httpRequest(
+        {
+          hostname: url.hostname,
+          port: url.port,
+          path: "/api/runs",
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            host: "steamtrain.example.com",
+            origin: "http://steamtrain.example.com",
+          },
+        },
+        (res) => {
+          res.resume();
+          res.on("end", () => {
+            try {
+              expect(res.statusCode).toBe(201);
+              resolve();
+            } catch (err) {
+              reject(err);
+            }
+          });
+        },
+      );
+      req.on("error", reject);
+      req.end(JSON.stringify({ workflow: "demo", input: "test" }));
+    });
   });
 
   it("rejects PUT with mismatched Origin when auth is enabled", async () => {
@@ -1935,11 +2184,12 @@ describe("web server — CSRF", () => {
     });
     servers.push(server);
     const base = await start(server);
+    const cookie = await login(base, "test-secret");
     const res = await fetch(`${base}/api/workflows/demo`, {
       method: "PUT",
       headers: {
         "content-type": "application/json",
-        cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret")}`,
+        cookie,
         origin: "http://evil.example.com",
       },
       body: JSON.stringify({ spec: demoSpec() }),
@@ -1970,12 +2220,10 @@ describe("web server — CSRF", () => {
     });
     servers.push(server);
     const base = await start(server);
+    const cookie = await login(base, "test-secret");
     const res = await fetch(`${base}/api/workflows/demo`, {
       method: "DELETE",
-      headers: {
-        cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret")}`,
-        origin: "http://evil.example.com",
-      },
+      headers: { cookie, origin: "http://evil.example.com" },
     });
     expect(res.status).toBe(403);
   });
@@ -1983,29 +2231,23 @@ describe("web server — CSRF", () => {
   it("allows POST with matching Referer (not Origin) when auth is enabled", async () => {
     const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);
+    const cookie = await login(base);
     const res = await fetch(`${base}/api/runs`, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret-token")}`,
-        referer: `${base}/`,
-      },
+      headers: { "content-type": "application/json", cookie, referer: `${base}/` },
       body: JSON.stringify({ workflow: "demo", input: "test" }),
     });
     expect(res.status).toBe(201);
   });
 
   it("returns 401 on SSE stream endpoint without cookie", async () => {
-    const { server, runs } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);
+    const cookie = await login(base);
     // Start a run first so we have a valid runId
     const startRes = await fetch(`${base}/api/runs`, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret-token")}`,
-        origin: base,
-      },
+      headers: { "content-type": "application/json", cookie, origin: base },
       body: JSON.stringify({ workflow: "demo", input: "test" }),
     });
     const { runId } = (await startRes.json()) as { runId: string };
@@ -2048,15 +2290,63 @@ describe("web server — CSRF", () => {
   it("rejects POST with data: Referer when auth is enabled", async () => {
     const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);
+    const cookie = await login(base);
     const res = await fetch(`${base}/api/runs`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        cookie: `${AUTH_COOKIE}=${hashedCookie("test-secret-token")}`,
+        cookie,
         referer: "data:text/html,<script></script>",
       },
       body: JSON.stringify({ workflow: "demo", input: "test" }),
     });
     expect(res.status).toBe(403);
+  });
+});
+
+describe("startWebUi — secure-by-default exposure", () => {
+  async function boot(options: { host: string; noAuth?: boolean; authToken?: string }) {
+    const { startWebUi } = await import("../src/web/server");
+    const cwd = mkdtempSync(join(tmpdir(), "webui-boot-"));
+    tempRoots.push(cwd);
+    const out: string[] = [];
+    const booted = await startWebUi({
+      config: testRunConfig,
+      workspaces: { workspaces: [] },
+      workflowCatalog: { workflows: {}, sources: {} },
+      cwd,
+      port: 0,
+      host: options.host,
+      authToken: options.authToken,
+      noAuth: options.noAuth,
+      stdout: (t) => out.push(t),
+      stderr: (t) => out.push(t),
+    });
+    servers.push(booted.server);
+    return { ...booted, output: () => out.join("") };
+  }
+
+  it("auto-generates and prints an auth token on a non-local bind", async () => {
+    const booted = await boot({ host: "0.0.0.0" });
+    expect(booted.authToken).toMatch(/^[0-9a-f]{32}$/);
+    expect(booted.output()).toContain(booted.authToken!);
+    // The API is actually locked behind it.
+    const res = await fetch(`${booted.url.replace("0.0.0.0", "127.0.0.1")}/api/workflows`);
+    expect(res.status).toBe(401);
+  });
+
+  it("stays tokenless on the default local bind", async () => {
+    const booted = await boot({ host: "127.0.0.1" });
+    expect(booted.authToken).toBeUndefined();
+    const res = await fetch(`${booted.url}/api/workflows`);
+    expect(res.status).toBe(200);
+  });
+
+  it("honors an explicit --no-auth opt-out with a warning", async () => {
+    const booted = await boot({ host: "0.0.0.0", noAuth: true });
+    expect(booted.authToken).toBeUndefined();
+    expect(booted.output()).toContain("--no-auth");
+    const res = await fetch(`${booted.url.replace("0.0.0.0", "127.0.0.1")}/api/workflows`);
+    expect(res.status).toBe(200);
   });
 });

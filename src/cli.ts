@@ -75,6 +75,8 @@ export interface GlobalCliOptions {
   host?: string;
   /** Require this token to access the web UI (sets a cookie-based session). */
   authToken?: string;
+  /** Explicitly serve a non-local web UI bind without authentication. */
+  noAuth?: boolean;
   /** Print the version and exit. */
   version?: boolean;
   error?: string;
@@ -89,6 +91,7 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
   let port: number | undefined;
   let host: string | undefined;
   let authToken: string | undefined;
+  let noAuth = false;
   let version = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
@@ -146,7 +149,14 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
       i += 1;
       continue;
     }
+    if (arg === "--no-auth") {
+      noAuth = true;
+      continue;
+    }
     rest.push(arg);
+  }
+  if (noAuth && authToken) {
+    return { args: [], error: "--no-auth cannot be combined with --auth-token" };
   }
   return {
     args: rest,
@@ -156,6 +166,7 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
     port,
     host,
     authToken,
+    noAuth: noAuth || undefined,
     version: version || undefined,
   };
 }
@@ -1379,6 +1390,9 @@ Global options (TUI and workflow commands):
       --web-ui               Serve the browser UI instead of the TUI
       --port <n>             Web UI port (default 4317; with --web-ui)
       --host <host>          Web UI bind host (default 127.0.0.1; with --web-ui)
-      --auth-token <token>   Require this token for web UI access (with --web-ui)
+      --auth-token <token>   Require this token for web UI access (with --web-ui;
+                             or set STEAMTRAIN_AUTH_TOKEN to keep it out of ps/history)
+      --no-auth              Serve a non-local web UI bind without auth (unsafe;
+                             by default a token is auto-generated and printed)
 `;
 }

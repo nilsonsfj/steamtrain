@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import { homedir } from "node:os";
@@ -159,19 +159,24 @@ export interface WebServerDeps {
   apiDoctor?: () => ApiDoctorResult[];
   setApiDoctor?: (apis: ApiDoctorResult[]) => void;
   configLabel?: string;
-  /** The host address the server is bound to. Used for CORS decisions. */
+  /**
+   * The host address the server is bound to. Local binds get a Host-header
+   * allowlist (DNS-rebinding defense); non-local binds rely on auth instead.
+   */
   bindHost?: string;
   /** Live project config (mutated in place when saved via /api/config). */
   config?: SteamtrainConfig;
   configPath?: string;
   /**
    * When set, all API routes require a valid `__steamtrain_auth` session cookie.
-   * The cookie is set by POST /api/auth with the matching token.
+   * POST /api/auth with the matching token creates a random, server-side
+   * session and sets the cookie; sessions expire after {@link SESSION_TTL_MS}
+   * and die with the process.
    */
   authToken?: string;
 }
 
-function isNonLocalHost(host?: string): boolean {
+export function isNonLocalHost(host?: string): boolean {
   if (!host) return false;
   return host !== "127.0.0.1" && host !== "::1" && host !== "localhost";
 }
@@ -278,14 +283,43 @@ function drainRequestBody(req: IncomingMessage): void {
 
 const AUTH_COOKIE = "__steamtrain_auth";
 
+/** How long a login session stays valid. Sessions also die with the process. */
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** Cap on concurrent sessions; the oldest is evicted past this. */
+const MAX_SESSIONS = 64;
+/** Failed-login budget per client IP inside one window before 429s start. */
+const AUTH_MAX_FAILURES = 10;
+const AUTH_FAILURE_WINDOW_MS = 60_000;
+/** Cap on tracked rate-limit clients (guards the Map against address churn). */
+const MAX_TRACKED_CLIENTS = 4096;
+
+/**
+ * Per-server-instance auth state. Sessions are random 256-bit ids handed out
+ * by POST /api/auth and stored hashed, so neither the on-wire cookie nor the
+ * in-memory table ever contains a reusable long-term credential derived from
+ * the auth token (the pre-hardening cookie was the deterministic
+ * SHA-256(token) — effectively a second permanent password).
+ */
+interface AuthState {
+  /** SHA-256(sessionId) -> expiry epoch ms. */
+  sessions: Map<string, number>;
+  /** client address -> failed-login window. */
+  authFailures: Map<string, { count: number; resetAt: number }>;
+}
+
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-/** Timing-unsafe-safe string comparison. Both strings must be the same length. */
+/**
+ * Constant-time credential comparison. Hashing both sides first fixes the
+ * lengths, so neither content nor length of the expected secret leaks.
+ */
 function timingSafeCompare(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  return timingSafeEqual(
+    createHash("sha256").update(a).digest(),
+    createHash("sha256").update(b).digest(),
+  );
 }
 
 function parseCookies(header: string | undefined): Record<string, string> {
@@ -301,32 +335,142 @@ function parseCookies(header: string | undefined): Record<string, string> {
   return cookies;
 }
 
-function checkAuth(req: IncomingMessage, authToken: string | undefined): boolean {
-  if (!authToken) return true;
-  const cookies = parseCookies(req.headers.cookie);
-  const cookieVal = cookies[AUTH_COOKIE];
+/** Create a session and return its id (the cookie value). */
+function createSession(state: AuthState, now = Date.now()): string {
+  for (const [key, expiresAt] of state.sessions) {
+    if (expiresAt <= now) state.sessions.delete(key);
+  }
+  while (state.sessions.size >= MAX_SESSIONS) {
+    const oldest = state.sessions.keys().next().value;
+    if (oldest === undefined) break;
+    state.sessions.delete(oldest);
+  }
+  const id = randomBytes(32).toString("hex");
+  state.sessions.set(hashToken(id), now + SESSION_TTL_MS);
+  return id;
+}
+
+function checkAuth(req: IncomingMessage, deps: WebServerDeps, state: AuthState): boolean {
+  if (!deps.authToken) return true;
+  const cookieVal = parseCookies(req.headers.cookie)[AUTH_COOKIE];
   if (!cookieVal) return false;
-  // Compare against the hashed token stored in the cookie using
-  // timing-safe comparison to match the login endpoint's approach.
-  return timingSafeCompare(cookieVal, hashToken(authToken));
+  const key = hashToken(cookieVal);
+  const expiresAt = state.sessions.get(key);
+  if (expiresAt === undefined) return false;
+  if (expiresAt <= Date.now()) {
+    state.sessions.delete(key);
+    return false;
+  }
+  return true;
+}
+
+/** True when this client has burned its failed-login budget for the window. */
+function authRateLimited(state: AuthState, client: string, now = Date.now()): boolean {
+  const entry = state.authFailures.get(client);
+  if (!entry || entry.resetAt <= now) return false;
+  return entry.count >= AUTH_MAX_FAILURES;
+}
+
+function recordAuthFailure(state: AuthState, client: string, now = Date.now()): void {
+  const entry = state.authFailures.get(client);
+  if (entry && entry.resetAt > now) {
+    entry.count += 1;
+    return;
+  }
+  if (state.authFailures.size >= MAX_TRACKED_CLIENTS) state.authFailures.clear();
+  state.authFailures.set(client, { count: 1, resetAt: now + AUTH_FAILURE_WINDOW_MS });
 }
 
 /**
- * Build the Set-Cookie header value for the auth session cookie.
- * Uses SHA-256(token) as the cookie value so a leaked cookie does not expose
- * the raw token. Adds Secure when binding to a non-local host.
+ * Whether the request reached us over HTTPS. The server itself only speaks
+ * plain HTTP, so the only https signal is a TLS-terminating reverse proxy's
+ * X-Forwarded-Proto. Drives the cookie Secure flag: keying it off the bind
+ * host (the pre-hardening behavior) silently broke login on plain-HTTP
+ * non-local binds, because browsers drop Secure cookies set over http.
  */
-function authCookie(token: string, bindHost?: string): string {
-  const parts = [`${AUTH_COOKIE}=${hashToken(token)}`, "Path=/", "HttpOnly", "SameSite=Strict"];
-  if (isNonLocalHost(bindHost)) parts.push("Secure");
+function requestIsHttps(req: IncomingMessage): boolean {
+  const proto = req.headers["x-forwarded-proto"];
+  const first = (Array.isArray(proto) ? proto[0] : proto)?.split(",")[0]?.trim().toLowerCase();
+  return first === "https";
+}
+
+/** Build the Set-Cookie header value for a freshly created session. */
+function sessionCookie(sessionId: string, secure: boolean): string {
+  const parts = [
+    `${AUTH_COOKIE}=${sessionId}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Strict",
+    `Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
+  ];
+  if (secure) parts.push("Secure");
   return parts.join("; ");
 }
 
+/** Build the Set-Cookie header value that clears the session cookie. */
+function clearedSessionCookie(): string {
+  return `${AUTH_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`;
+}
+
+/** Split a `host[:port]` header (incl. `[v6]:port`) into lowercase parts. */
+function splitHostPort(header: string): { hostname: string; port: string } | undefined {
+  const value = header.trim().toLowerCase();
+  if (value.startsWith("[")) {
+    const end = value.indexOf("]");
+    if (end === -1) return undefined;
+    const rest = value.slice(end + 1);
+    return { hostname: value.slice(1, end), port: rest.startsWith(":") ? rest.slice(1) : "" };
+  }
+  const colon = value.indexOf(":");
+  if (colon === -1) return { hostname: value, port: "" };
+  return { hostname: value.slice(0, colon), port: value.slice(colon + 1) };
+}
+
+/** Extract the lowercase hostname from a `host[:port]` header (incl. `[v6]`). */
+function hostHeaderName(header: string | undefined): string | undefined {
+  return header ? splitHostPort(header)?.hostname : undefined;
+}
+
+const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1"]);
+
+/** First hop of a possibly comma-joined forwarded header. */
+function firstForwarded(value: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return raw?.split(",")[0]?.trim() || undefined;
+}
+
 /**
- * Validate Origin/Referer on state-changing requests. When auth is enabled,
- * this prevents CSRF: a malicious page on a different origin cannot forge
- * requests because the browser enforces same-origin on Origin/Referer headers
- * and our cookie is SameSite=Strict.
+ * DNS-rebinding defense for the locally-bound, auth-optional mode: a malicious
+ * site can point its own DNS name at 127.0.0.1 and the victim's browser will
+ * happily talk to this server with full same-origin powers — the only tell is
+ * the Host header, which still names the attacker's domain. So on local binds,
+ * only loopback hostnames (and the bind host itself) are served. Requests
+ * relayed by a deliberate reverse proxy (identified by X-Forwarded-Host /
+ * Forwarded, which a browser can never set) are exempt, and non-local binds
+ * rely on mandatory auth instead since their legitimate hostnames are unknowable.
+ *
+ * Returns true if the request may proceed; false means a 403 was sent.
+ */
+function checkHostHeader(req: IncomingMessage, res: ServerResponse, bindHost?: string): boolean {
+  if (isNonLocalHost(bindHost)) return true;
+  if (req.headers["x-forwarded-host"] || req.headers.forwarded) return true;
+  const hostname = hostHeaderName(req.headers.host);
+  if (hostname && (LOCAL_HOSTNAMES.has(hostname) || hostname === hostHeaderName(bindHost))) {
+    return true;
+  }
+  sendJson(res, 403, { error: "invalid host header" });
+  return false;
+}
+
+/**
+ * Cross-origin write protection. State-changing requests carrying an
+ * Origin/Referer that doesn't match the request host are rejected in every
+ * mode — browsers always attach Origin to cross-site fetches (even no-cors
+ * ones), so this blocks drive-by CSRF against the no-auth localhost server
+ * too, where SameSite cookies offer no protection because there are none.
+ * Requests without either header (curl, scripts) are allowed unless auth is
+ * enabled, in which case they are rejected: legitimate browser traffic — the
+ * only traffic that can carry the session cookie — always includes one.
  *
  * Returns true if the request is safe to proceed, false if it was rejected
  * (response already sent).
@@ -337,28 +481,35 @@ function checkCsrf(
   method: string,
   authToken: string | undefined,
 ): boolean {
-  if (!authToken) return true;
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return true;
   const origin = req.headers.origin || req.headers.referer;
   if (!origin) {
-    // No Origin/Referer — reject state-changing requests when auth is enabled.
-    // Legitimate browser requests always include Origin or Referer.
+    if (!authToken) return true;
     sendJson(res, 403, { error: "missing origin header" });
     return false;
   }
   try {
     const originUrl = new URL(origin);
-    const host = req.headers.host;
+    // Behind a reverse proxy the browser's Origin names the public host while
+    // req.headers.host may name the upstream, so prefer X-Forwarded-Host.
+    const host = firstForwarded(req.headers["x-forwarded-host"]) ?? req.headers.host;
     if (!host) {
       sendJson(res, 403, { error: "missing host header" });
       return false;
     }
-    // Normalize port comparison: req.headers.host may omit default ports (80/443)
-    // while originUrl.host always includes them.
-    const hostParts = host.split(":");
-    const hostName = hostParts[0]!;
-    const hostPort = hostParts[1] || (originUrl.protocol === "https:" ? "443" : "80");
-    if (originUrl.hostname !== hostName || originUrl.port !== hostPort) {
+    // Normalize port comparison: the host header may omit default ports
+    // (80/443) while originUrl.port is empty for defaults. IPv6 literals are
+    // bracketed in URLs ("[::1]") but compared bare.
+    const hostSplit = splitHostPort(host);
+    if (!hostSplit) {
+      sendJson(res, 403, { error: "invalid host header" });
+      return false;
+    }
+    const defaultPort = originUrl.protocol === "https:" ? "443" : "80";
+    const hostPort = hostSplit.port || defaultPort;
+    const originHostname = originUrl.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    const originPort = originUrl.port || defaultPort;
+    if (originHostname !== hostSplit.hostname || originPort !== hostPort) {
       sendJson(res, 403, { error: "origin mismatch" });
       return false;
     }
@@ -401,7 +552,8 @@ function checkCsrf(
  *   POST   /api/runs/:id/edit-step  { stepId, prompt?/cmd?/model?/effort? } — edit a pending step while paused
  *   POST   /api/runs/:id/approval   resolve a human-approval checkpoint
  *   POST   /api/overrides/flush     flush staged session overrides -> { saved, skipped, unchanged }
- *   POST   /api/auth                validate token, set session cookie
+ *   POST   /api/auth                validate token, create session, set cookie
+ *   POST   /api/logout              revoke the presented session, clear cookie
  */
 /** API-instance view-model with health folded in from the live api doctor state. */
 function apiMetaFromDeps(
@@ -416,8 +568,9 @@ function apiMetaFromDeps(
 }
 
 export function createWebServer(deps: WebServerDeps): Server {
+  const authState: AuthState = { sessions: new Map(), authFailures: new Map() };
   return createServer((req, res) => {
-    void handle(req, res, deps).catch((err) => {
+    void handle(req, res, deps, authState).catch((err) => {
       if (!res.headersSent) {
         const status = err instanceof PayloadTooLarge ? 413 : 500;
         const error =
@@ -438,43 +591,29 @@ async function handle(
   req: IncomingMessage,
   res: ServerResponse,
   deps: WebServerDeps,
+  authState: AuthState,
 ): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname;
   const method = req.method ?? "GET";
 
-  // CORS headers: when auth is enabled with a non-local host, send specific
-  // origin + credentials instead of wildcard (cookies require it).
-  if (isNonLocalHost(deps.bindHost)) {
-    if (deps.authToken) {
-      const origin = req.headers.origin;
-      if (origin) {
-        try {
-          const originUrl = new URL(origin);
-          if (originUrl.host === req.headers.host) {
-            res.setHeader("Access-Control-Allow-Origin", origin);
-            res.setHeader("Access-Control-Allow-Credentials", "true");
-          }
-        } catch {
-          // Invalid origin — don't set CORS headers.
-        }
-      }
-    } else {
-      res.setHeader("Access-Control-Allow-Origin", "*");
-    }
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    if (method === "OPTIONS") {
-      res.writeHead(204);
-      res.end();
-      return;
-    }
-  }
+  // DNS-rebinding defense: on local binds, only loopback Host headers are served.
+  if (!checkHostHeader(req, res, deps.bindHost)) return;
 
-  // Login endpoint: always accessible, sets the session cookie.
+  // Login endpoint: always accessible (and deliberately ahead of the CSRF
+  // gate so non-browser clients without an Origin header can authenticate);
+  // failed attempts are rate limited per client, and a cross-site login
+  // forgery gains nothing an attacker doesn't already have — it requires the
+  // token itself.
   if (method === "POST" && path === "/api/auth") {
     if (!deps.authToken) {
       sendJson(res, 200, { ok: true, authRequired: false });
+      return;
+    }
+    const client = req.socket.remoteAddress ?? "unknown";
+    if (authRateLimited(authState, client)) {
+      drainRequestBody(req);
+      sendJson(res, 429, { error: "too many login attempts; retry later" });
       return;
     }
     let parsed: { token?: unknown };
@@ -486,28 +625,46 @@ async function handle(
       return;
     }
     if (typeof parsed.token !== "string" || !timingSafeCompare(parsed.token, deps.authToken)) {
+      recordAuthFailure(authState, client);
       sendJson(res, 401, { error: "invalid token" });
       return;
     }
+    const sessionId = createSession(authState);
     res.writeHead(200, {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
       "x-content-type-options": "nosniff",
-      "set-cookie": authCookie(deps.authToken, deps.bindHost),
+      "set-cookie": sessionCookie(sessionId, requestIsHttps(req)),
     });
     res.end(JSON.stringify({ ok: true }));
     return;
   }
 
-  // Auth check: skip for public routes (index, static assets).
+  // Auth check: skip for public routes (index, static assets). Runs before
+  // the CSRF gate so an unauthenticated client gets the 401 that routes the
+  // web UI to its login form.
   const isPublicRoute = path === "/" || path === "/index.html" || path.startsWith("/static/");
-  if (!isPublicRoute && !checkAuth(req, deps.authToken)) {
+  if (!isPublicRoute && !checkAuth(req, deps, authState)) {
     sendJson(res, 401, { error: "authentication required" });
     return;
   }
 
-  // CSRF check on state-changing requests.
+  // Cross-origin write protection (all modes), before any state can change.
   if (!checkCsrf(req, res, method, deps.authToken)) return;
+
+  // Logout: revoke the presented session (if any) and clear the cookie.
+  if (method === "POST" && path === "/api/logout") {
+    const cookieVal = parseCookies(req.headers.cookie)[AUTH_COOKIE];
+    if (cookieVal) authState.sessions.delete(hashToken(cookieVal));
+    res.writeHead(200, {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+      "set-cookie": clearedSessionCookie(),
+    });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
 
   if (method === "GET" && (path === "/" || path === "/index.html")) {
     // The page itself is `no-store` so a fresh release swaps in the new
@@ -518,8 +675,16 @@ async function handle(
       "x-content-type-options": "nosniff",
       // Scripts are now external; only inline `style="..."` attributes remain
       // (marking `style-src 'unsafe-inline'` keeps those painting).
+      // frame-ancestors 'none' (mirrored by X-Frame-Options for older
+      // browsers) blocks clickjacking; base-uri/object-src/form-action close
+      // the remaining injection-amplification vectors.
       "content-security-policy":
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'",
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; " +
+        "base-uri 'none'; form-action 'self'; object-src 'none'",
+      "x-frame-options": "DENY",
+      "referrer-policy": "no-referrer",
+      "x-robots-tag": "noindex, nofollow",
     });
     res.end(renderIndex(PUBLIC_REVISIONS));
     return;
@@ -1353,6 +1518,8 @@ async function streamGenerate(
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache, no-transform",
     "x-content-type-options": "nosniff",
+    // Tells nginx-style reverse proxies not to buffer the event stream.
+    "x-accel-buffering": "no",
     connection: "keep-alive",
   });
   res.write(": open\n\n");
@@ -1403,6 +1570,8 @@ function streamExternalRun(runId: string, store: LiveRunStore, res: ServerRespon
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache, no-transform",
     "x-content-type-options": "nosniff",
+    // Tells nginx-style reverse proxies not to buffer the event stream.
+    "x-accel-buffering": "no",
     connection: "keep-alive",
   });
   res.write(": open\n\n");
@@ -1469,6 +1638,8 @@ function streamRun(runId: string, runs: WorkflowRunManager, res: ServerResponse)
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache, no-transform",
     "x-content-type-options": "nosniff",
+    // Tells nginx-style reverse proxies not to buffer the event stream.
+    "x-accel-buffering": "no",
     connection: "keep-alive",
   });
   // A first comment line opens the stream promptly for the browser.
@@ -1515,6 +1686,12 @@ export interface StartWebUiOptions {
   host?: string;
   /** Require this token to access the web UI (cookie-based session). */
   authToken?: string;
+  /**
+   * Explicitly serve a non-local bind without authentication. Without this,
+   * binding to a non-loopback host with no {@link authToken} auto-generates a
+   * token and prints it, so an exposed server is never silently open.
+   */
+  noAuth?: boolean;
   stdout?: (text: string) => void;
   stderr?: (text: string) => void;
   /** Maximum concurrent workflow runs. 0 = unlimited. */
@@ -1533,12 +1710,22 @@ export const DEFAULT_WEB_HOST = "127.0.0.1";
  */
 export async function startWebUi(
   options: StartWebUiOptions,
-): Promise<{ server: Server; url: string; doctor: DoctorResult[] }> {
+): Promise<{ server: Server; url: string; doctor: DoctorResult[]; authToken?: string }> {
   const out = options.stdout ?? ((t: string) => process.stdout.write(t));
   const err = options.stderr ?? ((t: string) => process.stderr.write(t));
   const cwd = options.cwd ?? process.cwd();
   const port = options.port ?? DEFAULT_WEB_PORT;
   const host = options.host ?? DEFAULT_WEB_HOST;
+
+  // Secure-by-default exposure: a non-local bind must have auth. When the
+  // operator didn't supply a token (and didn't explicitly opt out), generate
+  // one and print it — the frictionless localhost path is unaffected.
+  let authToken = options.authToken;
+  let generatedToken: string | undefined;
+  if (!authToken && !options.noAuth && isNonLocalHost(host)) {
+    generatedToken = randomBytes(16).toString("hex");
+    authToken = generatedToken;
+  }
 
   const liveConfig: SteamtrainConfig = { ...options.config };
   const orchestrator = new Orchestrator(
@@ -1600,7 +1787,7 @@ export async function startWebUi(
     bindHost: host,
     config: liveConfig,
     configPath: options.configPath,
-    authToken: options.authToken,
+    authToken,
   });
 
   // Fail loudly and early when the static web assets are missing instead of
@@ -1628,8 +1815,18 @@ export async function startWebUi(
   const url = `http://${host}:${actualPort}`;
 
   out(`\n🚂 steamtrain web UI running at ${url}\n`);
-  if (options.authToken) {
+  if (generatedToken) {
+    out(
+      `   🔒 non-local bind: auth enabled with an auto-generated token.\n      token: ${generatedToken}\n      (set your own with --auth-token or STEAMTRAIN_AUTH_TOKEN;\n       pass --no-auth to disable — anyone reaching the port can then run agents.)\n`,
+    );
+  } else if (authToken) {
     out("   🔒 auth enabled (--auth-token set); a login prompt will appear in the browser.\n");
+  } else if (isNonLocalHost(host)) {
+    err(
+      "   ⚠️  --no-auth on a non-local bind: anyone who can reach this port can\n" +
+        "      run agents with your credentials and read run history. Prefer\n" +
+        "      --auth-token behind a TLS reverse proxy.\n",
+    );
   }
   out("   open it in your browser; press Ctrl+C to stop.\n");
   out("   checking agent health in the background…\n");
@@ -1665,6 +1862,7 @@ export async function startWebUi(
   return {
     server,
     url,
+    authToken,
     get doctor() {
       return doctorState.results;
     },
