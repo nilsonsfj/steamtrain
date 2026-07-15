@@ -142,10 +142,14 @@ With auth enabled:
   returns `401` without a session.
 
 **Behind a reverse proxy.** The server speaks plain HTTP; for exposure beyond
-a trusted network put it behind a TLS-terminating proxy. Standard forwarding
-headers are honored: `X-Forwarded-Proto: https` marks the session cookie
-`Secure`, `X-Forwarded-Host` is used for origin comparison and exempts proxied
-requests from the loopback `Host` allowlist, and SSE responses send
+a trusted network put it behind a TLS-terminating proxy and pass
+`--trust-proxy`. `X-Forwarded-*` headers are **client-controllable and ignored
+by default** — a browser can set `X-Forwarded-Host` on a rebound same-origin
+request — so they are honored only under `--trust-proxy`, which you set when
+*you* run the proxy that overwrites them. With it enabled: `X-Forwarded-Proto:
+https` marks the session cookie `Secure`, `X-Forwarded-Host` drives origin
+comparison and lifts the loopback `Host` allowlist, and `X-Forwarded-For`
+identifies the client for login rate limiting. SSE responses always send
 `X-Accel-Buffering: no` so proxies don't buffer the event stream.
 
 Runs are gated by the doctor just like the CLI: a workflow whose agents aren't

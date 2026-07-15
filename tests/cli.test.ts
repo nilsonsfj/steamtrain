@@ -114,6 +114,18 @@ describe("parseGlobalArgs", () => {
     });
   });
 
+  it("parses --trust-proxy", () => {
+    expect(
+      parseGlobalArgs(["--web-ui", "--host", "0.0.0.0", "--auth-token", "s", "--trust-proxy"]),
+    ).toEqual({
+      args: [],
+      webUi: true,
+      host: "0.0.0.0",
+      authToken: "s",
+      trustProxy: true,
+    });
+  });
+
   it("rejects --no-auth combined with --auth-token", () => {
     expect(parseGlobalArgs(["--web-ui", "--auth-token", "s3cret", "--no-auth"])).toEqual({
       args: [],

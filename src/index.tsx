@@ -19,8 +19,19 @@ import { loadWorkspaceConfig, workspaceScopeLabel } from "./workspace";
  * user workflows (~/.steamtrain/workflows.json), workspace presets, then renders the TUI.
  */
 async function main(): Promise<void> {
-  const { args, workspacePath, configPath, webUi, port, host, authToken, noAuth, version, error } =
-    parseGlobalArgs(process.argv.slice(2));
+  const {
+    args,
+    workspacePath,
+    configPath,
+    webUi,
+    port,
+    host,
+    authToken,
+    noAuth,
+    trustProxy,
+    version,
+    error,
+  } = parseGlobalArgs(process.argv.slice(2));
   if (error) {
     process.stderr.write(`${error}\n`);
     process.exitCode = 1;
@@ -79,6 +90,7 @@ async function main(): Promise<void> {
       host,
       authToken: noAuth ? undefined : (authToken ?? envToken),
       noAuth,
+      trustProxy,
     });
     const shutdown = (): void => {
       server.close(() => process.exit(0));

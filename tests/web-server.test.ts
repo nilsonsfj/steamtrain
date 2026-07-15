@@ -1900,20 +1900,42 @@ describe("web server — auth", () => {
     expect(limited.status).toBe(429);
   });
 
-  it("marks the session cookie Secure behind an https reverse proxy", async () => {
-    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+  it("marks the session cookie Secure behind an https proxy with --trust-proxy", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const server = createWebServer({
+      host,
+      runs,
+      workflowSource: () => "bundled",
+      authToken: "test-secret-token",
+      trustProxy: true,
+    });
+    servers.push(server);
     const base = await start(server);
     const res = await fetch(`${base}/api/auth`, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-forwarded-proto": "https",
-        "x-forwarded-host": "steamtrain.example.com",
-      },
+      headers: { "content-type": "application/json", "x-forwarded-proto": "https" },
       body: JSON.stringify({ token: "test-secret-token" }),
     });
     expect(res.status).toBe(200);
     expect(res.headers.get("set-cookie")).toContain("Secure");
+  });
+
+  it("ignores X-Forwarded-Proto without --trust-proxy (cookie stays non-Secure)", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/auth`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-proto": "https" },
+      body: JSON.stringify({ token: "test-secret-token" }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("set-cookie")).not.toContain("Secure");
   });
 
   it("POST /api/auth reports auth not required when no authToken configured", async () => {
@@ -1940,7 +1962,7 @@ describe("web server — auth", () => {
 });
 
 describe("web server — host header (DNS rebinding)", () => {
-  function makeOpenServer(bindHost?: string): Server {
+  function makeOpenServer(bindHost?: string, trustProxy = false): Server {
     const host = new FakeHost(demoSpec(), happyRun);
     const runs = new WorkflowRunManager({
       host,
@@ -1948,7 +1970,13 @@ describe("web server — host header (DNS rebinding)", () => {
       cwd: tmpdir(),
       config: testRunConfig,
     });
-    const server = createWebServer({ host, runs, workflowSource: () => "bundled", bindHost });
+    const server = createWebServer({
+      host,
+      runs,
+      workflowSource: () => "bundled",
+      bindHost,
+      trustProxy,
+    });
     servers.push(server);
     return server;
   }
@@ -1979,8 +2007,19 @@ describe("web server — host header (DNS rebinding)", () => {
     expect(res.status).toBe(403);
   });
 
-  it("exempts requests relayed by a reverse proxy (X-Forwarded-Host)", async () => {
+  it("does NOT let a client-set X-Forwarded-Host bypass the allowlist", async () => {
+    // Regression: X-Forwarded-Host is not a forbidden header, so a rebound
+    // same-origin fetch can set it. Without --trust-proxy it must be ignored.
     const base = await start(makeOpenServer("127.0.0.1"));
+    const res = await rawGet(base, "/api/workflows", {
+      host: "evil.example.com",
+      "x-forwarded-host": "127.0.0.1",
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("exempts proxied requests only when --trust-proxy is set", async () => {
+    const base = await start(makeOpenServer("127.0.0.1", true));
     const res = await rawGet(base, "/api/workflows", {
       host: "steamtrain.internal:8080",
       "x-forwarded-host": "steamtrain.example.com",
@@ -2149,6 +2188,57 @@ describe("web server — CSRF", () => {
           res.on("end", () => {
             try {
               expect(res.statusCode).toBe(201);
+              resolve();
+            } catch (err) {
+              reject(err);
+            }
+          });
+        },
+      );
+      req.on("error", reject);
+      req.end(JSON.stringify({ workflow: "demo", input: "test" }));
+    });
+  });
+
+  it("ignores a client-set X-Forwarded-Host when matching Origin (no trust-proxy)", async () => {
+    // The attacker's page sets Origin: its own host AND X-Forwarded-Host: same,
+    // hoping the server compares Origin against the spoofed forwarded host.
+    // Without --trust-proxy the real Host header wins, so it stays a mismatch.
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const server = createWebServer({
+      host,
+      runs,
+      workflowSource: () => "bundled",
+      bindHost: "0.0.0.0",
+    });
+    servers.push(server);
+    const base = await start(server);
+    const url = new URL(base);
+    return new Promise<void>((resolve, reject) => {
+      const req = httpRequest(
+        {
+          hostname: url.hostname,
+          port: url.port,
+          path: "/api/runs",
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            host: `127.0.0.1:${url.port}`,
+            origin: "http://evil.example.com",
+            "x-forwarded-host": "evil.example.com",
+          },
+        },
+        (res) => {
+          res.resume();
+          res.on("end", () => {
+            try {
+              expect(res.statusCode).toBe(403);
               resolve();
             } catch (err) {
               reject(err);

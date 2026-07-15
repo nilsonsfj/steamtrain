@@ -164,6 +164,14 @@ export interface WebServerDeps {
    * allowlist (DNS-rebinding defense); non-local binds rely on auth instead.
    */
   bindHost?: string;
+  /**
+   * The operator has placed a trusted reverse proxy in front of the server.
+   * Only then are `X-Forwarded-*` headers believed: for the cookie Secure
+   * flag, origin comparison, rate-limit client identity, and lifting the
+   * local-bind Host allowlist. Off by default, since those headers are
+   * otherwise fully client-controlled.
+   */
+  trustProxy?: boolean;
   /** Live project config (mutated in place when saved via /api/config). */
   config?: SteamtrainConfig;
   configPath?: string;
@@ -377,18 +385,52 @@ function recordAuthFailure(state: AuthState, client: string, now = Date.now()): 
     entry.count += 1;
     return;
   }
-  if (state.authFailures.size >= MAX_TRACKED_CLIENTS) state.authFailures.clear();
+  // Re-inserting moves the key to the end of the Map's iteration order, so the
+  // eviction sweep below discards the least-recently-touched clients first.
+  state.authFailures.delete(client);
+  if (state.authFailures.size >= MAX_TRACKED_CLIENTS) {
+    // Sweep expired windows, then, if still at the cap, drop oldest entries.
+    // Never wipe wholesale: a full clear would let an attacker who inflates the
+    // map (e.g. spoofed X-Forwarded-For behind a trusted proxy) reset every
+    // other client's — including their own — failure budget on demand.
+    for (const [key, value] of state.authFailures) {
+      if (value.resetAt <= now) state.authFailures.delete(key);
+    }
+    while (state.authFailures.size >= MAX_TRACKED_CLIENTS) {
+      const oldest = state.authFailures.keys().next().value;
+      if (oldest === undefined) break;
+      state.authFailures.delete(oldest);
+    }
+  }
   state.authFailures.set(client, { count: 1, resetAt: now + AUTH_FAILURE_WINDOW_MS });
+}
+
+/**
+ * The address the rate limiter and logs attribute a request to. Behind a
+ * trusted reverse proxy every connection originates from the proxy, so
+ * `req.socket.remoteAddress` would collapse all clients into one shared
+ * bucket; there we use the first X-Forwarded-For hop instead. The header is
+ * honored ONLY when the operator opted into `--trust-proxy`, since it is
+ * otherwise fully client-controlled.
+ */
+function clientAddress(req: IncomingMessage, trustProxy: boolean): string {
+  if (trustProxy) {
+    const forwarded = firstForwarded(req.headers["x-forwarded-for"]);
+    if (forwarded) return forwarded;
+  }
+  return req.socket.remoteAddress ?? "unknown";
 }
 
 /**
  * Whether the request reached us over HTTPS. The server itself only speaks
  * plain HTTP, so the only https signal is a TLS-terminating reverse proxy's
- * X-Forwarded-Proto. Drives the cookie Secure flag: keying it off the bind
- * host (the pre-hardening behavior) silently broke login on plain-HTTP
+ * X-Forwarded-Proto — trusted only under `--trust-proxy`, because a browser
+ * can set that header itself. Drives the cookie Secure flag: keying it off the
+ * bind host (the pre-hardening behavior) silently broke login on plain-HTTP
  * non-local binds, because browsers drop Secure cookies set over http.
  */
-function requestIsHttps(req: IncomingMessage): boolean {
+function requestIsHttps(req: IncomingMessage, trustProxy: boolean): boolean {
+  if (!trustProxy) return false;
   const proto = req.headers["x-forwarded-proto"];
   const first = (Array.isArray(proto) ? proto[0] : proto)?.split(",")[0]?.trim().toLowerCase();
   return first === "https";
@@ -444,16 +486,24 @@ function firstForwarded(value: string | string[] | undefined): string | undefine
  * site can point its own DNS name at 127.0.0.1 and the victim's browser will
  * happily talk to this server with full same-origin powers — the only tell is
  * the Host header, which still names the attacker's domain. So on local binds,
- * only loopback hostnames (and the bind host itself) are served. Requests
- * relayed by a deliberate reverse proxy (identified by X-Forwarded-Host /
- * Forwarded, which a browser can never set) are exempt, and non-local binds
- * rely on mandatory auth instead since their legitimate hostnames are unknowable.
+ * only loopback hostnames (and the bind host itself) are served.
+ *
+ * A reverse proxy is served under `--trust-proxy`, which lifts the allowlist
+ * entirely: the proxy owns hostname validation, and forwarded headers cannot
+ * otherwise be believed. Crucially the *presence* of X-Forwarded-Host is NOT a
+ * proxy signal — it is not a forbidden header, so page JavaScript can set it on
+ * a same-origin rebound fetch to slip past this check. Non-local binds rely on
+ * mandatory auth instead, since their legitimate hostnames are unknowable.
  *
  * Returns true if the request may proceed; false means a 403 was sent.
  */
-function checkHostHeader(req: IncomingMessage, res: ServerResponse, bindHost?: string): boolean {
-  if (isNonLocalHost(bindHost)) return true;
-  if (req.headers["x-forwarded-host"] || req.headers.forwarded) return true;
+function checkHostHeader(
+  req: IncomingMessage,
+  res: ServerResponse,
+  bindHost: string | undefined,
+  trustProxy: boolean,
+): boolean {
+  if (trustProxy || isNonLocalHost(bindHost)) return true;
   const hostname = hostHeaderName(req.headers.host);
   if (hostname && (LOCAL_HOSTNAMES.has(hostname) || hostname === hostHeaderName(bindHost))) {
     return true;
@@ -480,6 +530,7 @@ function checkCsrf(
   res: ServerResponse,
   method: string,
   authToken: string | undefined,
+  trustProxy: boolean,
 ): boolean {
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return true;
   const origin = req.headers.origin || req.headers.referer;
@@ -490,9 +541,13 @@ function checkCsrf(
   }
   try {
     const originUrl = new URL(origin);
-    // Behind a reverse proxy the browser's Origin names the public host while
-    // req.headers.host may name the upstream, so prefer X-Forwarded-Host.
-    const host = firstForwarded(req.headers["x-forwarded-host"]) ?? req.headers.host;
+    // Behind a trusted reverse proxy the browser's Origin names the public host
+    // while req.headers.host may name the upstream, so prefer X-Forwarded-Host.
+    // Untrusted, that header is client-settable and MUST NOT drive the compare —
+    // a rebound same-origin fetch could otherwise spoof a matching host.
+    const host =
+      (trustProxy ? firstForwarded(req.headers["x-forwarded-host"]) : undefined) ??
+      req.headers.host;
     if (!host) {
       sendJson(res, 403, { error: "missing host header" });
       return false;
@@ -597,8 +652,10 @@ async function handle(
   const path = url.pathname;
   const method = req.method ?? "GET";
 
+  const trustProxy = deps.trustProxy ?? false;
+
   // DNS-rebinding defense: on local binds, only loopback Host headers are served.
-  if (!checkHostHeader(req, res, deps.bindHost)) return;
+  if (!checkHostHeader(req, res, deps.bindHost, trustProxy)) return;
 
   // Login endpoint: always accessible (and deliberately ahead of the CSRF
   // gate so non-browser clients without an Origin header can authenticate);
@@ -610,7 +667,7 @@ async function handle(
       sendJson(res, 200, { ok: true, authRequired: false });
       return;
     }
-    const client = req.socket.remoteAddress ?? "unknown";
+    const client = clientAddress(req, trustProxy);
     if (authRateLimited(authState, client)) {
       drainRequestBody(req);
       sendJson(res, 429, { error: "too many login attempts; retry later" });
@@ -634,7 +691,7 @@ async function handle(
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
       "x-content-type-options": "nosniff",
-      "set-cookie": sessionCookie(sessionId, requestIsHttps(req)),
+      "set-cookie": sessionCookie(sessionId, requestIsHttps(req, trustProxy)),
     });
     res.end(JSON.stringify({ ok: true }));
     return;
@@ -650,7 +707,7 @@ async function handle(
   }
 
   // Cross-origin write protection (all modes), before any state can change.
-  if (!checkCsrf(req, res, method, deps.authToken)) return;
+  if (!checkCsrf(req, res, method, deps.authToken, trustProxy)) return;
 
   // Logout: revoke the presented session (if any) and clear the cookie.
   if (method === "POST" && path === "/api/logout") {
@@ -1689,9 +1746,12 @@ export interface StartWebUiOptions {
   /**
    * Explicitly serve a non-local bind without authentication. Without this,
    * binding to a non-loopback host with no {@link authToken} auto-generates a
-   * token and prints it, so an exposed server is never silently open.
+   * token and prints it, so an exposed server is never silently open. When set,
+   * any supplied {@link authToken} is ignored.
    */
   noAuth?: boolean;
+  /** Trust `X-Forwarded-*` headers (only set behind a reverse proxy you run). */
+  trustProxy?: boolean;
   stdout?: (text: string) => void;
   stderr?: (text: string) => void;
   /** Maximum concurrent workflow runs. 0 = unlimited. */
@@ -1720,7 +1780,9 @@ export async function startWebUi(
   // Secure-by-default exposure: a non-local bind must have auth. When the
   // operator didn't supply a token (and didn't explicitly opt out), generate
   // one and print it — the frictionless localhost path is unaffected.
-  let authToken = options.authToken;
+  // --no-auth is authoritative here (the contract this function owns), not just
+  // in the CLI layer: it disables auth even if a token was also passed.
+  let authToken = options.noAuth ? undefined : options.authToken;
   let generatedToken: string | undefined;
   if (!authToken && !options.noAuth && isNonLocalHost(host)) {
     generatedToken = randomBytes(16).toString("hex");
@@ -1788,6 +1850,7 @@ export async function startWebUi(
     config: liveConfig,
     configPath: options.configPath,
     authToken,
+    trustProxy: options.trustProxy,
   });
 
   // Fail loudly and early when the static web assets are missing instead of

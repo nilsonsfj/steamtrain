@@ -77,6 +77,8 @@ export interface GlobalCliOptions {
   authToken?: string;
   /** Explicitly serve a non-local web UI bind without authentication. */
   noAuth?: boolean;
+  /** Trust `X-Forwarded-*` headers (web UI behind a reverse proxy you run). */
+  trustProxy?: boolean;
   /** Print the version and exit. */
   version?: boolean;
   error?: string;
@@ -92,6 +94,7 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
   let host: string | undefined;
   let authToken: string | undefined;
   let noAuth = false;
+  let trustProxy = false;
   let version = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
@@ -153,6 +156,10 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
       noAuth = true;
       continue;
     }
+    if (arg === "--trust-proxy") {
+      trustProxy = true;
+      continue;
+    }
     rest.push(arg);
   }
   if (noAuth && authToken) {
@@ -167,6 +174,7 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
     host,
     authToken,
     noAuth: noAuth || undefined,
+    trustProxy: trustProxy || undefined,
     version: version || undefined,
   };
 }
@@ -1394,5 +1402,7 @@ Global options (TUI and workflow commands):
                              or set STEAMTRAIN_AUTH_TOKEN to keep it out of ps/history)
       --no-auth              Serve a non-local web UI bind without auth (unsafe;
                              by default a token is auto-generated and printed)
+      --trust-proxy          Honor X-Forwarded-* headers (only behind a reverse
+                             proxy you control; needed for correct https cookies)
 `;
 }

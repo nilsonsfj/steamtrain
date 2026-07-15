@@ -240,6 +240,8 @@ Global options (TUI and workflow commands):
                              (or set STEAMTRAIN_AUTH_TOKEN; non-local binds
                              auto-generate a token when neither is given)
       --no-auth              Serve a non-local web UI bind without auth (unsafe)
+      --trust-proxy          Honor X-Forwarded-* headers (only behind a proxy
+                             you run; required for correct https/Secure cookies)
 ```
 
 `init` reports each agent's readiness with copy-paste fixes, detects this repo's
