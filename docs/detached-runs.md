@@ -1,6 +1,6 @@
 # Detached runs & the run queue
 
-Date: 2026-07-09 (roadmap item 1.5)
+Date: 2026-07-09 (roadmap item 1.4)
 
 Long workflows used to hold a terminal hostage: a run was tied to the TUI/web
 session that started it, closing the laptop lid killed it, and two concurrent

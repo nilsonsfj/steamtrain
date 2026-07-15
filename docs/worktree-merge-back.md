@@ -44,8 +44,8 @@ wrong *default*:
   `prUrls`, `noChanges`) that gates and downstream steps can route on — an
   agent's prose can't be trusted for that.
 - Standardization is what lets the TUI/web UI/CLI render merge results
-  uniformly, and what the upcoming approval gates (roadmap §1.2) will hook
-  into: "show me the diff, then continue".
+  uniformly, and what the existing approval gates hook into: "show me the
+  diff, then continue".
 
 So: a deterministic `merge` step kind, with an agent *inside* it for exactly
 the judgment-shaped part (conflict resolution), plus the template escape hatch
