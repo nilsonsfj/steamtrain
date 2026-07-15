@@ -169,29 +169,33 @@ export async function runInitCommand(
     return 0;
   }
 
-  // 4. Write them into the project config (create or merge, never clobber).
+  // 4. Perform every accepted write. One failing write doesn't abandon the
+  // others — each is attempted, reported individually, and any failure turns
+  // into exit 1 so scripts can detect a partial init.
   const written: string[] = [];
+  let failed = false;
   if (accepted.length > 0) {
     const write = await writeStarters(scope.path, accepted);
     if (!write.ok) {
       err(`\ncould not update ${scope.path}: ${write.error}\n`);
-      return 1;
+      failed = true;
+    } else {
+      for (const name of write.skipped) {
+        out(`\n  '${name}' already exists in ${scope.path} — left untouched\n`);
+      }
+      if (write.written.length > 0) {
+        out(`\nwrote ${write.written.map((name) => `'${name}'`).join(", ")} → ${scope.path}\n`);
+      }
+      if (write.written.includes("implement-verified") && firstReady) {
+        // The agent is simply the first one the doctor reported ready — make it
+        // obvious the choice is editable rather than a considered recommendation.
+        out(
+          `  implement-verified uses ${firstReady.agent} (${implementModel}) — the first ready agent;\n` +
+            `  edit its 'agent'/'model' in ${scope.path} to use a different one.\n`,
+        );
+      }
+      written.push(...write.written);
     }
-    for (const name of write.skipped) {
-      out(`\n  '${name}' already exists in ${scope.path} — left untouched\n`);
-    }
-    if (write.written.length > 0) {
-      out(`\nwrote ${write.written.map((name) => `'${name}'`).join(", ")} → ${scope.path}\n`);
-    }
-    if (write.written.includes("implement-verified") && firstReady) {
-      // The agent is simply the first one the doctor reported ready — make it
-      // obvious the choice is editable rather than a considered recommendation.
-      out(
-        `  implement-verified uses ${firstReady.agent} (${implementModel}) — the first ready agent;\n` +
-          `  edit its 'agent'/'model' in ${scope.path} to use a different one.\n`,
-      );
-    }
-    written.push(...write.written);
   }
 
   if (addIgnore && ignoreOffer) {
@@ -200,9 +204,10 @@ export async function runInitCommand(
       out(`\nadded '.steamtrain/' to ${ignoreOffer.path}\n`);
     } else {
       err(`\ncould not update ${ignoreOffer.path}: ${result.error}\n`);
-      if (accepted.length === 0) return 1;
+      failed = true;
     }
   }
+  if (failed) return 1;
   printNextSteps(out, written);
   return 0;
 }

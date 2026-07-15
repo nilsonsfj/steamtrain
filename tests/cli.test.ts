@@ -267,6 +267,27 @@ describe("runCli", () => {
     expect(c.stdout).toContain("plan: tour");
   });
 
+  it("treats flag-looking --input values as text in a --dry-run", async () => {
+    const c = capture();
+    const code = await runCli(
+      ["workflow", "run", "tour", "--input", "--fresh", "--dry-run", "--json"],
+      c.io,
+    );
+
+    expect(code).toBe(0);
+    const parsed = JSON.parse(c.stdout);
+    expect(parsed.ok).toBe(true); // --json survived; input was "--fresh", not eaten
+  });
+
+  it("does not misread an --input value of '--dry-run' as the dry-run flag", async () => {
+    const c = capture();
+    const code = await runCli(["workflow", "run", "tour", "--input", "--dry-run"], c.io);
+
+    expect(code).toBe(0);
+    expect(c.stdout).toContain("workflow done"); // it really ran
+    expect(c.stdout).not.toContain("plan: tour");
+  });
+
   it("accepts --dry-run as alias for plan", async () => {
     const c = capture();
     const code = await runCli(

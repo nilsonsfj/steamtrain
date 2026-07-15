@@ -84,6 +84,16 @@ describe("unknownSlashCommand", () => {
     expect(unknownSlashCommand("/home/user/project is broken")).toBeNull();
   });
 
+  it("lets file-like uppercase names dispatch as prose", () => {
+    expect(unknownSlashCommand("/Dockerfile fix the base image")).toBeNull();
+    expect(unknownSlashCommand("/README explain this")).toBeNull();
+    expect(unknownSlashCommand("/LICENSE check compliance")).toBeNull();
+  });
+
+  it("still flags an uppercase name that is plausibly a typo'd command", () => {
+    expect(unknownSlashCommand("/HELp")?.suggestion).toBe("help");
+  });
+
   it("ignores non-slash input and bare slash", () => {
     expect(unknownSlashCommand("fix the tests")).toBeNull();
     expect(unknownSlashCommand("/")).toBeNull();

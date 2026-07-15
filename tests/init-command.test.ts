@@ -414,6 +414,20 @@ describe("steamtrain init", () => {
       await expect(readFile(join(cwd, ".gitignore"), "utf8")).rejects.toThrow();
     });
 
+    it("still writes an accepted .gitignore entry when the config write fails, and exits 1", async () => {
+      const cwd = await tempDir();
+      await mkdir(join(cwd, ".git"));
+      await writeFile(
+        join(cwd, "package.json"),
+        JSON.stringify({ scripts: { test: "vitest run" } }),
+      );
+      await writeFile(join(cwd, "steamtrain.json"), "{ broken"); // starters write will fail
+      const result = await runInit(cwd, ["--yes"], [doctorResult({})]);
+      expect(result.code).toBe(1);
+      expect(result.err).toContain("could not update");
+      expect(await readFile(join(cwd, ".gitignore"), "utf8")).toContain(".steamtrain/");
+    });
+
     it("honors an interactive 'y' alongside declined starters", async () => {
       const cwd = await tempDir();
       await mkdir(join(cwd, ".git"));

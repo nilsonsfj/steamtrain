@@ -2328,7 +2328,7 @@
     var map = {};
     steps.forEach(function (s) {
       if (!s.result || (s.result.childResults && s.result.childResults.length)) return;
-      var key = s.model && s.agent ? s.agent + "/" + s.model : (s.model || s.agent || "unknown");
+      var key = s.model && s.agent ? s.agent + "/" + s.model : (s.model || s.agent || "(agentless)");
       var e = map[key] || (map[key] = { model: key, costUsd: 0, tokens: emptyTokens(), steps: 0 });
       e.costUsd += s.result.costUsd || 0;
       addTokensInto(e.tokens, s.result.tokens);

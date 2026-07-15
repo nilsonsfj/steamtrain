@@ -1599,7 +1599,8 @@ export function App({
             !apiManagerOpen &&
             !stepEditorOpen &&
             !runEditor &&
-            !inputFormPending
+            !inputFormPending &&
+            !helpOpen
           }
           editing={
             !historyHook.history &&
@@ -1608,6 +1609,7 @@ export function App({
             !stepEditorOpen &&
             !runEditor &&
             !inputFormPending &&
+            !helpOpen &&
             (!workflowListNavigation(mode) || prompt.promptEditing)
           }
           promptEditing={prompt.promptEditing}
@@ -1626,22 +1628,24 @@ export function App({
                   ? "step editor · ↑/↓ field · ←/→ change · Enter edit prompt · Esc close · Ctrl+C quit"
                   : runEditor
                     ? "edit paused step · type to edit · Enter apply · Esc cancel · Ctrl+C quit"
-                    : historyHook.history
-                      ? historyHintText(historyHook.history)
-                      : hint(
-                          mode,
-                          runner.wf.started,
-                          runner.wfLaunching,
-                          !!picker.wfPreview,
-                          runner.running,
-                          prompt.suggestionMenuOpen,
-                          runner.wfCanResume,
-                          prompt.promptEditing,
-                          isSlashCommandInput(prompt.value),
-                          !!runner.wfStepDetails,
-                          attachedRun,
-                          Boolean(runner.wf.paused),
-                        )}
+                    : helpOpen
+                      ? "help · Esc/q close · Ctrl+C quit"
+                      : historyHook.history
+                        ? historyHintText(historyHook.history)
+                        : hint(
+                            mode,
+                            runner.wf.started,
+                            runner.wfLaunching,
+                            !!picker.wfPreview,
+                            runner.running,
+                            prompt.suggestionMenuOpen,
+                            runner.wfCanResume,
+                            prompt.promptEditing,
+                            isSlashCommandInput(prompt.value),
+                            !!runner.wfStepDetails,
+                            attachedRun,
+                            Boolean(runner.wf.paused),
+                          )}
           </Text>
         </Box>
       </Box>

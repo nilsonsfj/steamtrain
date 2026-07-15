@@ -256,19 +256,12 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
       // `run --dry-run` resolves and prints the plan instead of running —
       // same output as `workflow plan`. Run-only execution flags are dropped
       // (a dry run never touches the cache, detaches, or hits an approval).
-      if (rest.includes("--dry-run")) {
-        const runOnly = new Set(["--dry-run", "--fresh", "--detach", "-d", "--approve-all"]);
-        const planArgs: string[] = [];
-        for (let i = 0; i < rest.length; i++) {
-          const arg = rest[i];
-          if (arg === undefined || runOnly.has(arg)) continue;
-          if (arg === "--on-approval") {
-            i += 1;
-            continue;
-          }
-          planArgs.push(arg);
-        }
-        return planCommand(orchestrator, planArgs, io, out, err);
+      // The scan is pair-aware: a value-taking flag's value is copied (or
+      // skipped) verbatim, so an --input that literally equals "--fresh" is
+      // treated as text, never as a flag.
+      const dryRun = splitDryRunArgs(rest);
+      if (dryRun.isDryRun) {
+        return planCommand(orchestrator, dryRun.planArgs, io, out, err);
       }
       return runWorkflowCommand(orchestrator, config, rest, io, out, err);
     }
@@ -352,6 +345,48 @@ interface PlanOptions {
   stdin: boolean;
   params: Record<string, string>;
   json: boolean;
+}
+
+/**
+ * Detect `--dry-run` on a `workflow run` invocation and derive the argument
+ * list for the plan command. Walks flag/value pairs (mirroring
+ * parseRunOptions), so flag-looking *values* — `--input "--dry-run"` — are
+ * copied as text rather than misread as flags. Plan-relevant flags and their
+ * values pass through; run-only execution flags are dropped.
+ */
+export function splitDryRunArgs(args: string[]): { isDryRun: boolean; planArgs: string[] } {
+  const valueTaking = new Set(["--input", "-i", "--param", "-p", "--from", "--on-approval"]);
+  const dropWithValue = new Set(["--on-approval"]);
+  const dropBare = new Set([
+    "--dry-run",
+    "--fresh",
+    "--detach",
+    "-d",
+    "--approve-all",
+    "--retry-failed",
+  ]);
+  let isDryRun = false;
+  const planArgs: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === undefined) continue;
+    if (valueTaking.has(arg)) {
+      const value = args[i + 1];
+      if (!dropWithValue.has(arg)) {
+        planArgs.push(arg);
+        if (value !== undefined) planArgs.push(value);
+      }
+      i += 1;
+      continue;
+    }
+    if (arg === "--dry-run") {
+      isDryRun = true;
+      continue;
+    }
+    if (dropBare.has(arg)) continue;
+    planArgs.push(arg);
+  }
+  return { isDryRun, planArgs };
 }
 
 function parsePlanOptions(args: string[]): PlanOptions | null {
