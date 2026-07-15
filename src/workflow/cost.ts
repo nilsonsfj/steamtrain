@@ -268,7 +268,7 @@ export function aggregateCosts(records: RunRecord[]): CostAnalytics {
       addTokensInto(grand, leaf.tokens);
       modelLeaves.push(leaf);
 
-      const stepKey = `${record.workflow} ${leaf.stepId}`;
+      const stepKey = `${record.workflow}\u0000${leaf.stepId}`;
       const step = byStep.get(stepKey) ?? {
         workflow: record.workflow,
         stepId: leaf.stepId,
