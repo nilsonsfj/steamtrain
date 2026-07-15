@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { refreshAgentCatalogCaches } from "./agents/models";
 import type { CliIO } from "./cli";
-import { message, readAll, truncateLine } from "./cli-util";
+import { message, readAll, truncateLine, unknownWorkflowMessage } from "./cli-util";
 import type { SteamtrainConfig } from "./config";
 import { runDoctor } from "./doctor";
 import type { Orchestrator } from "./orchestrator";
@@ -155,7 +155,7 @@ export async function runWorkflowCommand(
   const options = parseRunOptions(positional ? args.slice(1) : args);
   if (!options) {
     err(
-      `usage: steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--detach] [--approve-all | --on-approval fail|stop]
+      `usage: steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--approve-all | --on-approval fail|stop]
        steamtrain workflow run --from <runId> [--retry-failed] [--json] [--detach]
 `,
     );
@@ -226,7 +226,7 @@ export async function runWorkflowCommand(
 
   const spec = orchestrator.listWorkflows()[name];
   if (!spec) {
-    err(`unknown workflow '${name}'\n`);
+    err(`${unknownWorkflowMessage(name, Object.keys(orchestrator.listWorkflows()))}\n`);
     return 1;
   }
 

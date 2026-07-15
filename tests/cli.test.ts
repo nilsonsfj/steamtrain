@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseGlobalArgs, runCli } from "../src/cli";
+import { parseGlobalArgs, runCli, splitDryRunArgs } from "../src/cli";
 import { BUNDLED_WORKFLOWS } from "../src/workflow/bundled";
 import {
   WORKFLOW_CACHE_DIR,
@@ -165,6 +165,24 @@ describe("runCli", () => {
 
     expect(code).toBe(1);
     expect(c.stderr).toContain("unknown workflow 'missing'");
+    expect(c.stderr).toContain("workflow list");
+  });
+
+  it("suggests the nearest workflow name for a typo", async () => {
+    const c = capture();
+    const code = await runCli(["workflow", "run", "tuor", "--input", "hi"], c.io);
+
+    expect(code).toBe(1);
+    expect(c.stderr).toContain("unknown workflow 'tuor'");
+    expect(c.stderr).toContain("did you mean 'tour'?");
+  });
+
+  it("suggests a prefix completion for a partial workflow name", async () => {
+    const c = capture();
+    const code = await runCli(["workflow", "plan", "bug", "--input", "hi"], c.io);
+
+    expect(code).toBe(1);
+    expect(c.stderr).toContain("did you mean 'bug-hunt'?");
   });
 
   it("plans a bundled workflow with --input", async () => {
@@ -206,6 +224,84 @@ describe("runCli", () => {
 
     expect(code).toBe(1);
     expect(c.stderr).toContain("requires --input");
+  });
+
+  it("shows recorded-run cost context in the plan once history exists", async () => {
+    const c = capture();
+    await runCli(["workflow", "run", "tour", "--input", "all aboard"], c.io);
+    const planned = capture();
+    planned.io.cwd = c.io.cwd; // same repo → same .steamtrain/history
+    const code = await runCli(["workflow", "plan", "tour", "--input", "all aboard"], planned.io);
+
+    expect(code).toBe(0);
+    expect(planned.stdout).toMatch(/history: 1 completed run · avg cost \$\d/);
+
+    const json = capture();
+    json.io.cwd = c.io.cwd;
+    await runCli(["workflow", "plan", "tour", "--input", "all aboard", "--json"], json.io);
+    const parsed = JSON.parse(json.stdout);
+    expect(parsed.history.runs).toBe(1);
+  });
+
+  it("treats run --dry-run as a plan (nothing executes, no history)", async () => {
+    const c = capture();
+    const code = await runCli(
+      ["workflow", "run", "tour", "--input", "all aboard", "--dry-run", "--fresh"],
+      c.io,
+    );
+
+    expect(code).toBe(0);
+    expect(c.stdout).toContain("plan: tour");
+    expect(c.stdout).not.toContain("workflow done");
+    expect(existsSync(join(c.io.cwd, WORKFLOW_HISTORY_DIR))).toBe(false);
+  });
+
+  it("drops --on-approval and its value from a --dry-run", async () => {
+    const c = capture();
+    const code = await runCli(
+      ["workflow", "run", "tour", "--input", "hi", "--dry-run", "--on-approval", "fail"],
+      c.io,
+    );
+
+    expect(code).toBe(0);
+    expect(c.stdout).toContain("plan: tour");
+  });
+
+  it("splitDryRunArgs walks flag/value pairs", () => {
+    expect(splitDryRunArgs(["tour", "--input", "hi", "--dry-run", "--fresh", "--json"])).toEqual({
+      isDryRun: true,
+      planArgs: ["tour", "--input", "hi", "--json"],
+    });
+    // a value that looks like a flag stays a value
+    expect(splitDryRunArgs(["tour", "--input", "--dry-run"])).toEqual({
+      isDryRun: false,
+      planArgs: ["tour", "--input", "--dry-run"],
+    });
+    // --param values that look like flags pass through; --on-approval is dropped with its value
+    expect(
+      splitDryRunArgs(["t", "--param", "k=--detach", "--on-approval", "fail", "--dry-run"]),
+    ).toEqual({ isDryRun: true, planArgs: ["t", "--param", "k=--detach"] });
+  });
+
+  it("treats flag-looking --input values as text in a --dry-run", async () => {
+    const c = capture();
+    const code = await runCli(
+      ["workflow", "run", "tour", "--input", "--fresh", "--dry-run", "--json"],
+      c.io,
+    );
+
+    expect(code).toBe(0);
+    const parsed = JSON.parse(c.stdout);
+    expect(parsed.ok).toBe(true); // --json survived; input was "--fresh", not eaten
+  });
+
+  it("does not misread an --input value of '--dry-run' as the dry-run flag", async () => {
+    const c = capture();
+    const code = await runCli(["workflow", "run", "tour", "--input", "--dry-run"], c.io);
+
+    expect(code).toBe(0);
+    expect(c.stdout).toContain("workflow done"); // it really ran
+    expect(c.stdout).not.toContain("plan: tour");
   });
 
   it("accepts --dry-run as alias for plan", async () => {

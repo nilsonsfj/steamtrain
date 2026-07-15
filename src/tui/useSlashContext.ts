@@ -58,6 +58,7 @@ export interface UseSlashContextParams {
   ) => SlashCommandResult | Promise<SlashCommandResult>;
   userWorkflowNames: readonly string[];
   openHistory: () => SlashCommandResult;
+  openHelp?: () => SlashCommandResult;
   attachRun?: (runId?: string) => SlashCommandResult | Promise<SlashCommandResult>;
   cancelLiveRun?: (runId?: string) => SlashCommandResult | Promise<SlashCommandResult>;
   draftResolution: { target?: DraftTarget; usingOverride: boolean };
@@ -96,6 +97,7 @@ export function useSlashContext(params: UseSlashContextParams) {
     updateWorkflowDescription,
     userWorkflowNames,
     openHistory,
+    openHelp,
     attachRun,
     cancelLiveRun,
     draftResolution,
@@ -136,6 +138,7 @@ export function useSlashContext(params: UseSlashContextParams) {
       updateWorkflowDescription,
       userWorkflowNames,
       openHistory,
+      openHelp,
       attachRun,
       cancelLiveRun,
       draftModel: workflowPickerActive
@@ -179,6 +182,7 @@ export function useSlashContext(params: UseSlashContextParams) {
       updateWorkflowDescription,
       userWorkflowNames,
       openHistory,
+      openHelp,
       attachRun,
       cancelLiveRun,
       draftResolution,

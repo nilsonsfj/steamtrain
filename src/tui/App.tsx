@@ -27,6 +27,7 @@ import {
   isSlashCommandInput,
   listSlashCommands,
   parseSlashInput,
+  unknownSlashCommand,
 } from "../commands";
 import type {
   AgentConfigScope,
@@ -69,6 +70,7 @@ import type { ApiAddRequest, ApiMutationResult } from "./ApiManager";
 import { ApiManager } from "./ApiManager";
 import { CommandSuggestionMenu, suggestionMenuHeight } from "./CommandSuggestionMenu";
 import { EventStream } from "./EventStream";
+import { HelpPanel } from "./HelpPanel";
 import { PromptInput } from "./PromptInput";
 import { StatusBar } from "./StatusBar";
 import { TaskSelector } from "./TaskSelector";
@@ -185,6 +187,8 @@ export function App({
   const [agentManagerOpen, setAgentManagerOpen] = useState(false);
   const [apiManagerOpen, setApiManagerOpen] = useState(false);
   const [stepEditorOpen, setStepEditorOpen] = useState(false);
+  /** True while the /help overlay (keys + commands) is open. */
+  const [helpOpen, setHelpOpen] = useState(false);
   /** Non-null while the mid-run (paused) step editor overlay is open. */
   const [runEditor, setRunEditor] = useState<RunStepEditorTarget | null>(null);
   const [apiDoctor, setApiDoctor] = useState<ApiDoctorResult[] | null>(null);
@@ -358,6 +362,11 @@ export function App({
 
   const openAgentManager = useCallback(() => {
     setAgentManagerOpen(true);
+    return { handled: true as const, clearInput: true };
+  }, []);
+
+  const openHelp = useCallback(() => {
+    setHelpOpen(true);
     return { handled: true as const, clearInput: true };
   }, []);
 
@@ -752,6 +761,7 @@ export function App({
     updateWorkflowDescription: picker.updateWorkflowDescription,
     userWorkflowNames: picker.userWorkflowNames,
     openHistory: historyHook.openHistory,
+    openHelp,
     attachRun: attachRunCommand,
     cancelLiveRun: cancelLiveRunCommand,
     draftResolution: picker.draftResolution,
@@ -1086,6 +1096,22 @@ export function App({
         return;
       }
 
+      // A typo'd /command must never fall through and dispatch as a prompt —
+      // that would silently launch a run. Surface it on the visible notice
+      // line (workflow mode) or the stream (workspace modes) instead. The
+      // input clears like any handled command (↑ recalls it for correction).
+      const unknown = unknownSlashCommand(promptText);
+      if (unknown) {
+        const text = `unknown command /${unknown.name}${
+          unknown.suggestion ? ` — did you mean /${unknown.suggestion}?` : ""
+        } · /help lists commands`;
+        if (mode === "workflow") runner.setWfNotice(text);
+        else dispatch({ type: "notice", level: "error", text });
+        prompt.updatePromptDraft({ value: "", promptEditing: false });
+        prompt.setCommandSuggestions([]);
+        return;
+      }
+
       if (picker.wfCreate && picker.wfCreate.status === "done" && picker.wfCreate.spec) {
         const specName = picker.wfCreate.spec.name;
         picker.setWfCreate(null);
@@ -1316,6 +1342,8 @@ export function App({
     stepEditorOpen,
     runEditorOpen: runEditor !== null,
     inputFormPending: inputFormPending !== null,
+    helpOpen,
+    closeHelp: () => setHelpOpen(false),
     openAgentManager: () => {
       openAgentManager();
     },
@@ -1419,6 +1447,8 @@ export function App({
           onApply={applyRunStepEdit}
           onClose={() => setRunEditor(null)}
         />
+      ) : helpOpen ? (
+        <HelpPanel width={columns} height={streamHeight} />
       ) : inputFormPending ? (
         (() => {
           const inputSpec = resolveWorkflowSpec(inputFormPending.name);
@@ -1569,7 +1599,8 @@ export function App({
             !apiManagerOpen &&
             !stepEditorOpen &&
             !runEditor &&
-            !inputFormPending
+            !inputFormPending &&
+            !helpOpen
           }
           editing={
             !historyHook.history &&
@@ -1578,6 +1609,7 @@ export function App({
             !stepEditorOpen &&
             !runEditor &&
             !inputFormPending &&
+            !helpOpen &&
             (!workflowListNavigation(mode) || prompt.promptEditing)
           }
           promptEditing={prompt.promptEditing}
@@ -1596,22 +1628,24 @@ export function App({
                   ? "step editor · ↑/↓ field · ←/→ change · Enter edit prompt · Esc close · Ctrl+C quit"
                   : runEditor
                     ? "edit paused step · type to edit · Enter apply · Esc cancel · Ctrl+C quit"
-                    : historyHook.history
-                      ? historyHintText(historyHook.history)
-                      : hint(
-                          mode,
-                          runner.wf.started,
-                          runner.wfLaunching,
-                          !!picker.wfPreview,
-                          runner.running,
-                          prompt.suggestionMenuOpen,
-                          runner.wfCanResume,
-                          prompt.promptEditing,
-                          isSlashCommandInput(prompt.value),
-                          !!runner.wfStepDetails,
-                          attachedRun,
-                          Boolean(runner.wf.paused),
-                        )}
+                    : helpOpen
+                      ? "help · Esc/q close · Ctrl+C quit"
+                      : historyHook.history
+                        ? historyHintText(historyHook.history)
+                        : hint(
+                            mode,
+                            runner.wf.started,
+                            runner.wfLaunching,
+                            !!picker.wfPreview,
+                            runner.running,
+                            prompt.suggestionMenuOpen,
+                            runner.wfCanResume,
+                            prompt.promptEditing,
+                            isSlashCommandInput(prompt.value),
+                            !!runner.wfStepDetails,
+                            attachedRun,
+                            Boolean(runner.wf.paused),
+                          )}
           </Text>
         </Box>
       </Box>
@@ -1651,25 +1685,25 @@ function hint(
   }
   if (mode === "workflow") {
     if (wfStepDetails) {
-      return `↑/↓ step · PgUp/PgDn scroll · ←/Esc back${resumeHint} · Ctrl+E edit · Ctrl+R run · type to edit · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step · PgUp/PgDn scroll · ←/Esc back${resumeHint} · Ctrl+E edit · Ctrl+R run · type to edit · /help · Ctrl+C quit${completeHint}`;
     }
     if (promptEditing) {
       const tabHint = slashInput ? " · Esc unfocus" : " · Esc list";
-      const editingHint = `↑/↓ history${resumeHint}${tabHint} · Ctrl+R run · /commands · Ctrl+C quit${completeHint}`;
+      const editingHint = `↑/↓ history${resumeHint}${tabHint} · Ctrl+R run · /help · Ctrl+C quit${completeHint}`;
       if (wfStarted || wfLaunching || wfPreviewing) return editingHint;
-      return `↑/↓ history · Enter preview${tabHint} · Ctrl+R run · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ history · Enter preview${tabHint} · Ctrl+R run · /help · Ctrl+C quit${completeHint}`;
     }
     if (wfStarted || wfLaunching) {
-      return `↑/↓ step · Enter details · type to edit · Ctrl+R run · Ctrl+Q cancel · Esc back · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step · Enter details · type to edit · Ctrl+R run · Ctrl+Q cancel · Esc back · Tab switch mode · /help · Ctrl+C quit${completeHint}`;
     }
     if (wfPreviewing) {
-      return `↑/↓ step · Enter details${resumeHint} · Ctrl+E edit step · Ctrl+R run · Esc back · Tab detail · /commands · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step · Enter details${resumeHint} · Ctrl+E edit step · Ctrl+R run · Esc back · Tab detail · /help · Ctrl+C quit${completeHint}`;
     }
-    return `↑/↓ pick · Ctrl+N new · type to edit · Enter preview · Ctrl+R run · Ctrl+J history · Tab switch mode · /commands · Ctrl+C quit${completeHint}`;
+    return `↑/↓ pick · Ctrl+N new · type to edit · Enter preview · Ctrl+R run · Ctrl+J history · Tab switch mode · /help · Ctrl+C quit${completeHint}`;
   }
   return promptEditing && slashInput
-    ? `Enter dispatch${historyHint} · Esc unfocus · /commands (Tab complete) · Ctrl+C quit${completeHint}`
-    : `Enter dispatch${historyHint} · Tab switch mode · /commands (Tab complete) · Ctrl+C quit${completeHint}`;
+    ? `Enter dispatch${historyHint} · Esc unfocus · /help · Ctrl+C quit${completeHint}`
+    : `Enter dispatch${historyHint} · Tab switch mode · /help · Ctrl+C quit${completeHint}`;
 }
 
 function historyHintText(history: HistoryUiState): string {

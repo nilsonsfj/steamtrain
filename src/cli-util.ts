@@ -1,9 +1,18 @@
 import type { Readable } from "node:stream";
+import { closestMatch } from "./util/did-you-mean";
 
 /** Shared CLI plumbing used by both `cli.ts` (dispatch) and `run-cli.ts` (run driver). */
 
 export function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** "unknown workflow" error with a did-you-mean suggestion + the discovery hint. */
+export function unknownWorkflowMessage(name: string, knownNames: readonly string[]): string {
+  const suggestion = closestMatch(name, knownNames);
+  return `unknown workflow '${name}'${
+    suggestion ? ` — did you mean '${suggestion}'?` : ""
+  } ('steamtrain workflow list' shows what's available)`;
 }
 
 export function truncateLine(text: string, max: number): string {

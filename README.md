@@ -185,7 +185,9 @@ with a copy-paste fix.
 steamtrain workflow list
 steamtrain workflow validate [name]
 steamtrain workflow plan <name> --input "…"                     # dry-run: resolve the plan without running
+                                                                # (includes avg cost/duration from recorded runs)
 steamtrain workflow run multi-plan --input "design the cache migration"
+steamtrain workflow run multi-plan --input "…" --dry-run        # same as plan: print and exit, run nothing
 steamtrain workflow run bug-hunt --stdin --json
 steamtrain workflow run multi-plan --input "…" --fresh          # ignore the on-disk cache
 steamtrain workflow cache clear
@@ -255,6 +257,10 @@ real test/lint commands, and offers starter workflows written to
   failures, and a `merge` step applies only verified changes to your checkout.
   (Offered when an agent is ready and a test command is detected.)
 
+In a git repo, `init` also offers to add `.steamtrain/` to your `.gitignore`
+so run history (which records every step's full output), caches, and live-run
+state never land in commits.
+
 Pass `--yes` to accept all offers. In a non-interactive session (piped stdin,
 CI), `init` lists offers but writes nothing unless `--yes` is given.
 
@@ -280,8 +286,10 @@ More: [`docs/web-ui.md`](docs/web-ui.md),
 
 **Keys:** `Enter` run · `↑/↓` pick workflow or inspect steps · `Tab` cycle
 workspace preset (`plan`, `implement`, `review`) · `Esc` cancel/back ·
-`Ctrl+C` quit. Type `/history` to open the run browser, `/create-workflow` to
-draft one from a description.
+`Ctrl+C` quit. Type `/help` for every key and slash command, `/history` to
+open the run browser, `/create-workflow` to draft one from a description.
+A typo'd `/command` never dispatches as input — you get a
+"did you mean …?" instead of an accidental run.
 
 ### Install as a system binary
 

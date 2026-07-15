@@ -340,3 +340,40 @@ export function planWorkflow(
     maxCostUsd: spec.maxCostUsd,
   };
 }
+
+/**
+ * "What did this workflow cost last time?" — aggregated from recorded runs so
+ * a plan can show real numbers instead of a guess. Only completed (`done`)
+ * runs count: failed or canceled runs under-report what a full run spends.
+ */
+export interface PlanHistoryContext {
+  /** Completed recorded runs of this workflow (any input). */
+  runs: number;
+  avgCostUsd: number;
+  minCostUsd: number;
+  maxCostUsd: number;
+  avgDurationMs: number;
+}
+
+export function planHistoryContext(
+  summaries: readonly {
+    workflow: string;
+    status: string;
+    totals?: { costUsd: number };
+    durationMs: number;
+  }[],
+  workflow: string,
+): PlanHistoryContext | null {
+  const done = summaries.filter((s) => s.workflow === workflow && s.status === "done");
+  if (done.length === 0) return null;
+  const costs = done.map((s) => s.totals?.costUsd ?? 0);
+  const durations = done.map((s) => s.durationMs);
+  const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
+  return {
+    runs: done.length,
+    avgCostUsd: sum(costs) / done.length,
+    minCostUsd: Math.min(...costs),
+    maxCostUsd: Math.max(...costs),
+    avgDurationMs: sum(durations) / done.length,
+  };
+}

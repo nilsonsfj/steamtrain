@@ -46,7 +46,7 @@ import {
   worktreeDiff,
 } from "../workflow";
 import type { WorkspaceConfig } from "../workspace";
-import { type PageAssetRevisions, renderIndex } from "./html";
+import { FAVICON_SVG, type PageAssetRevisions, renderIndex } from "./html";
 import { TooManyRuns, type WorkflowHost, WorkflowRunManager } from "./runs";
 
 const DEFAULT_MAX_CONCURRENT_GENERATIONS = 2;
@@ -707,7 +707,11 @@ async function handle(
   // Auth check: skip for public routes (index, static assets). Runs before
   // the CSRF gate so an unauthenticated client gets the 401 that routes the
   // web UI to its login form.
-  const isPublicRoute = path === "/" || path === "/index.html" || path.startsWith("/static/");
+  const isPublicRoute =
+    path === "/" ||
+    path === "/index.html" ||
+    path === "/favicon.ico" ||
+    path.startsWith("/static/");
   if (!isPublicRoute && !checkAuth(req, deps, authState)) {
     sendJson(res, 401, { error: "authentication required" });
     return;
@@ -751,6 +755,20 @@ async function handle(
       "x-robots-tag": "noindex, nofollow",
     });
     res.end(renderIndex(PUBLIC_REVISIONS));
+    return;
+  }
+
+  // Clients that ignore the inline <link rel="icon"> still request this path;
+  // serve the same SVG instead of 404ing every page load. The content type is
+  // deliberately image/svg+xml rather than image/x-icon: every current
+  // browser renders SVG favicons, and one asset beats maintaining an ICO.
+  if (method === "GET" && path === "/favicon.ico") {
+    res.writeHead(200, {
+      "content-type": "image/svg+xml",
+      "cache-control": "public, max-age=86400",
+      "x-content-type-options": "nosniff",
+    });
+    res.end(FAVICON_SVG);
     return;
   }
 

@@ -1,6 +1,40 @@
 # Public release readiness assessment
 
 Date: 2026-06-16
+Status update: 2026-07-15 — see below; every 2026-06-16 release blocker is resolved.
+
+## Status update (2026-07-15)
+
+Re-audit of the checklist at the bottom of this document:
+
+**Before a public GitHub beta — all done:**
+
+- [x] `LICENSE` (MIT) exists and `package.json` declares `"license": "MIT"`.
+- [x] `npm run lint` passes (biome, enforced in CI).
+- [x] CI runs lint, typecheck, and tests on pushes and PRs
+      (`.github/workflows/ci.yml`).
+- [x] README rewritten: Codex/Amp/Kiro coverage, accurate scripts, accurate
+      architecture tree.
+- [x] `TUI-WEBUI-DIFFERENCES.md` rewritten as a maintained convergence doc;
+      the reducer and authoring cores are now genuinely shared.
+- [x] Web UI threat model: localhost default, token auth for non-local binds
+      (auto-generated unless `--no-auth`), CSRF checks, 1 MiB request-body
+      limit, CSP; documented in `docs/web-ui.md` and `SECURITY.md`.
+- [x] `SECURITY.md` added (reporting channel + threat model).
+
+**Before publishing to npm — done except where noted:**
+
+- [x] Package metadata: `repository`, `bugs`, `homepage`, `keywords`, `license`.
+- [x] `prepack` runs the build, so a publish can't ship without `dist/`.
+- [x] End-user install path documented (`npm run install:local`, no sudo).
+- [x] `CONTRIBUTING.md` added.
+- [ ] `CHANGELOG.md` — deliberately deferred until the first published
+      version; there are no released versions to log yet.
+- [ ] Source maps in the package and dev-toolchain audit findings — accepted
+      for the alpha; revisit at first npm publish.
+
+The remainder of this document is the original 2026-06-16 assessment, kept
+for context.
 
 ## Verdict
 

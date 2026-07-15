@@ -163,15 +163,17 @@ export interface LeafUsage {
 
 /**
  * The display key for a model breakdown row: `<runner>/model`, or `model`, or
- * the bare runner, or "unknown" — where the runner is the agent instance for
- * agent-backed leaves and the API instance for direct-inference `llm` leaves.
+ * the bare runner — where the runner is the agent instance for agent-backed
+ * leaves and the API instance for direct-inference `llm` leaves. Leaves with
+ * neither (command/gate/distributor steps) report "(agentless)" so $0 rows
+ * read as deliberate, not as missing attribution.
  */
 export function modelKey(leaf: { agent?: string; api?: string; model?: string }): string {
   const runner = leaf.agent ?? leaf.api;
   if (leaf.model && runner) return `${runner}/${leaf.model}`;
   if (leaf.model) return leaf.model;
   if (runner) return runner;
-  return "unknown";
+  return "(agentless)";
 }
 
 /** Roll up an arbitrary list of leaf invocations by model, sorted by descending cost. */
@@ -266,7 +268,7 @@ export function aggregateCosts(records: RunRecord[]): CostAnalytics {
       addTokensInto(grand, leaf.tokens);
       modelLeaves.push(leaf);
 
-      const stepKey = `${record.workflow} ${leaf.stepId}`;
+      const stepKey = `${record.workflow}\u0000${leaf.stepId}`;
       const step = byStep.get(stepKey) ?? {
         workflow: record.workflow,
         stepId: leaf.stepId,

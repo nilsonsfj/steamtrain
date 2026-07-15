@@ -100,6 +100,8 @@ export interface SlashCommandContext {
   userWorkflowNames?: readonly string[];
   /** Open the run browser: in-flight runs + past-run history (TUI only). */
   openHistory?: () => SlashCommandResult;
+  /** Open the help overlay: keybindings + slash commands (TUI only). */
+  openHelp?: () => SlashCommandResult;
   /**
    * Attach the live view to an in-flight run (TUI only). With no id, attaches
    * to the single active run or lists the candidates.
