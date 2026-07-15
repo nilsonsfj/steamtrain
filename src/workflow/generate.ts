@@ -187,9 +187,11 @@ or disjoint, never partially overlapping.
   user's checkout), "branch" (left on a local branch), or "pr" (pushed + a GitHub
   PR is opened; "perSource": true opens one PR per parallel source). "onConflict":
   "fail" (default), "ours", "theirs", or "agent" (requires agent+model; the agent
-  resolves conflict markers). Add a final merge step to any workflow whose agents
-  EDIT files (implement/fix/refactor) — without one the edits stay stranded in
-  worktrees. Review-only workflows don't need it.
+  resolves conflict markers). "cleanup": true discards the source worktrees after
+  a successful delivery (the delivered result is the durable copy; only use it on
+  a FINAL merge step no later step references). Add a final merge step to any
+  workflow whose agents EDIT files (implement/fix/refactor) — without one the
+  edits stay stranded in worktrees. Review-only workflows don't need it.
 
 # File handoff between steps ("workspace" and "artifacts")
 Each worker/processor/command step runs in its OWN isolated worktree snapshotted

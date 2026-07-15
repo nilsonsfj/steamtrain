@@ -2089,6 +2089,12 @@
         onClick: function () { rerunHistory(record.id, record.workflow, "retry"); } }) : null
     );
     holder.appendChild(actions);
+    // Worktree lifecycle: what each retained step worktree changed, plus the
+    // Apply / Branch / Prune closure actions (same machinery as the CLI's
+    // `workflow history apply/prune`).
+    var wtSection = h("div", { style: "margin:4px 0 12px" });
+    holder.appendChild(wtSection);
+    renderWorktreeSection(wtSection, record);
     (record.phases || []).forEach(function (p, idx) {
       if (idx > 0) holder.appendChild(h("div", { class: "connector" }));
       var pstat = p.done ? (p.ok ? "done" : "failed") : "";
@@ -2104,6 +2110,99 @@
       phaseEl.appendChild(cards);
       holder.appendChild(phaseEl);
     });
+  }
+
+  /**
+   * The "Worktree changes" block of a run's history detail: per-step diffstat
+   * of the retained worktrees, the recorded harvest status, and the lifecycle
+   * actions — apply to the checkout, merge to a branch, or prune (discard).
+   * A source-vs-source merge conflict (409) surfaces retry buttons with a
+   * deterministic winner instead of a dead end.
+   */
+  function renderWorktreeSection(holder, record, notice) {
+    apiAuth("GET", "/api/history/" + encodeURIComponent(record.id) + "/worktrees").then(function (r) {
+      if (r.status !== 200 || !r.body.sources || !r.body.sources.length) return;
+      var sources = r.body.sources;
+      var harvest = r.body.harvest;
+      clear(holder);
+      holder.appendChild(h("div", { style: "font-size:13px;font-weight:700", text: "Worktree changes" }));
+      var bits = [];
+      if (harvest && harvest.appliedSteps && harvest.appliedSteps.length) bits.push("harvested: " + harvest.appliedSteps.join(", "));
+      if (harvest && harvest.branch) bits.push("on branch " + harvest.branch);
+      if (harvest && harvest.prunedAt) bits.push("worktrees pruned " + fmtTime(harvest.prunedAt));
+      var status = h("div", { style: "color:var(--muted);font-size:12px;margin:2px 0" });
+      if (bits.length) status.textContent = bits.join(" · ");
+      if (harvest && harvest.prUrl) {
+        status.appendChild(h("span", { text: (bits.length ? " · " : "") + "PR: " }));
+        status.appendChild(h("a", { href: harvest.prUrl, target: "_blank", text: harvest.prUrl }));
+      }
+      if (status.textContent || status.childNodes.length) holder.appendChild(status);
+
+      var anyExists = false, anyChanges = false;
+      sources.forEach(function (s) {
+        var line;
+        if (!s.exists) {
+          line = "⎇ " + s.stepId + " — worktree gone (pruned or cleaned up)";
+        } else if (!s.files.length) {
+          line = "⎇ " + s.stepId + " — no changes";
+          anyExists = true;
+        } else {
+          line = "⎇ " + s.stepId + " — " + s.files.length + " file(s) +" + s.additions + " -" + s.deletions;
+          anyExists = true; anyChanges = true;
+        }
+        var row = h("div", { style: "font-size:12px;margin:2px 0", text: line, title: s.branch });
+        holder.appendChild(row);
+        if (s.exists && s.files.length) {
+          var fileList = s.files.slice(0, 8).map(function (f) { return f.status + " " + f.path; }).join(" · ");
+          if (s.files.length > 8) fileList += " …";
+          holder.appendChild(h("div", { style: "color:var(--muted);font-size:11px;margin-left:16px", text: fileList }));
+        }
+      });
+
+      var banner = h("div", { class: "mbanner", style: "margin-top:6px" });
+      if (notice) { banner.className = "mbanner show " + notice.cls; banner.textContent = notice.text; }
+      var buttons = h("div", { style: "display:flex;gap:8px;margin-top:6px;flex-wrap:wrap" });
+      function harvestBtn(label, body, cls) {
+        return h("button", { class: "btn" + (cls ? " " + cls : ""), text: label, onClick: function () {
+          banner.className = "mbanner show info"; banner.textContent = "merging…";
+          apiAuth("POST", "/api/history/" + encodeURIComponent(record.id) + "/harvest", body).then(function (rr) {
+            if (rr.status === 200) {
+              var res = rr.body.result;
+              var text = res.noChanges ? "no changes to merge"
+                : (res.mode === "apply"
+                  ? "applied " + res.mergedSources.join(", ") + " to the checkout (uncommitted): " + res.files.length + " file(s) +" + res.additions + " -" + res.deletions
+                  : "merged " + res.mergedSources.join(", ") + " — " + (res.prUrl ? "PR " + res.prUrl : "branch " + res.branch));
+              renderWorktreeSection(holder, record, { cls: "info", text: text });
+            } else if (rr.status === 409) {
+              banner.className = "mbanner show err";
+              banner.textContent = rr.body.error + " — retry with a deterministic winner:";
+              buttons.appendChild(harvestBtn("Retry: first wins", Object.assign({}, body, { onConflict: "ours" })));
+              buttons.appendChild(harvestBtn("Retry: last wins", Object.assign({}, body, { onConflict: "theirs" })));
+            } else {
+              banner.className = "mbanner show err";
+              banner.textContent = rr.body.error || "harvest failed";
+            }
+          });
+        } });
+      }
+      if (anyChanges) {
+        buttons.appendChild(harvestBtn("Apply to checkout", { mode: "apply" }, "primary"));
+        buttons.appendChild(harvestBtn("Merge to branch", { mode: "branch" }));
+      }
+      if (anyExists && !(harvest && harvest.prunedAt)) {
+        buttons.appendChild(h("button", { class: "btn", text: "Prune worktrees", onClick: function () {
+          if (!window.confirm("Discard this run's worktrees and branches? Unapplied changes are lost.")) return;
+          apiAuth("POST", "/api/history/" + encodeURIComponent(record.id) + "/prune").then(function (rr) {
+            renderWorktreeSection(holder, record, {
+              cls: rr.status === 200 ? "info" : "err",
+              text: rr.status === 200 ? "pruned " + rr.body.pruned + "/" + rr.body.total + " worktree(s)" : (rr.body.error || "prune failed")
+            });
+          });
+        } }));
+      }
+      if (buttons.childNodes.length) holder.appendChild(buttons);
+      holder.appendChild(banner);
+    }).catch(function () {});
   }
 
   // Map a recorded step onto the shape renderCard expects (live step view).

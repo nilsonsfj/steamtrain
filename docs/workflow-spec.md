@@ -382,14 +382,15 @@ except when an agent is asked to resolve conflicts.
 | `mode` | `apply` (default): the merged diff lands in the user's checkout as **uncommitted** working-tree changes (pre-checked and all-or-nothing; the step fails with guidance when local edits conflict). `branch`: the merged state is left on a local branch. `pr`: the branch is pushed to `origin` and a pull request is opened with the `gh` CLI. |
 | `branch` | Branch name template for `branch`/`pr` modes; a unique `steamtrain/merged/…` name is generated when omitted. |
 | `perSource` | One branch/PR **per source worktree** instead of one combined merge — e.g. each parallel `forEach` implementer gets its own PR for human review. Requires `mode` `branch` or `pr`. |
-| `onConflict` | What to do when sources conflict with each other: `fail` (default), `ours`/`theirs` (deterministic, via `git merge -X` — resolves content conflicts only; tree-level conflicts like modify/delete still fail), or `agent` — the configured agent runs inside the staging worktree and resolves the conflict markers. Requires `agent` + `model`. |
+| `cleanup` | `true` prunes the source worktrees and their steamtrain branches after a **successful** delivery — the delivered result (applied diff, merged branch, PR) becomes the single durable copy, and nothing accumulates in `$TMPDIR` or `git branch`. A failed merge always keeps the worktrees for post-mortem harvesting. Don't combine with later steps that `workspace: "inherit:<stepId>"` or template-reference the cleaned worktrees. |
+| `onConflict` | What to do when sources conflict with each other: `fail` (default), `ours`/`theirs` (deterministic, via `git merge -X` — resolves content conflicts only; tree-level conflicts like modify/delete still fail), or `agent` — the configured agent runs inside the staging worktree and resolves the conflict markers. Requires `agent` + `model`. A `fail` failure message names the conflicted files and the recovery options. |
 | `prompt` | Extra guidance appended to the built-in conflict-resolution prompt. |
 | `commitMessage`, `prTitle`, `prBody` | Templates for the merge commit and the PR (all support `{{…}}` placeholders). |
 
 The step's output is a human-readable summary, and its structured result
 (`{{steps.<id>.json.<path>}}`, gate `path` conditions) reports `mode`,
 `merged`, `unchanged`, `files`, `additions`, `deletions`, `conflicts`,
-`branches`, `prUrls`, and `noChanges` — so a downstream gate can, for example,
+`branches`, `prUrls`, `noChanges`, and `cleaned` — so a downstream gate can, for example,
 fail the run when nothing was produced:
 
 ```jsonc
@@ -413,9 +414,14 @@ step the worktree paths via templates:
 
 Past runs can be harvested manually with the same machinery:
 `steamtrain workflow history show <id> --diff [--step <stepId>] [--stat]`,
-`history apply <id> [--step <stepId>]`, and `history prune <id>` (discard the
-run's worktrees and branches). See
-[`worktree-merge-back.md`](worktree-merge-back.md) for the full design.
+`history apply <id> [--step <stepId>] [--mode apply|branch|pr] [--branch <name>]
+[--onconflict ours|theirs]`, and `history prune <id>` (discard the run's
+worktrees and branches) — plus the same actions in the TUI history detail
+(`a` apply, `x` prune) and the web UI's run history ("Worktree changes"
+section). Repo-wide garbage collection of retained worktrees — including
+orphans whose run record is gone — is `steamtrain workflow worktrees
+[list|prune]`. See [`worktree-merge-back.md`](worktree-merge-back.md) and
+[`worktree-lifecycle.md`](worktree-lifecycle.md) for the full design.
 
 ### Command (deterministic shell step)
 

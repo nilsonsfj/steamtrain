@@ -1,9 +1,12 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ApiDoctorResult } from "../src/doctor";
 import { type WorkflowHost, WorkflowRunManager } from "../src/web/runs";
@@ -15,12 +18,20 @@ import type {
   WorkflowHistoryStore,
   WorkflowSpec,
 } from "../src/workflow";
-import { RunRecordBuilder, WorkflowAuthor, createWorkflowHistoryStore } from "../src/workflow";
+import type { HistoryPhase, RunRecord } from "../src/workflow";
+import {
+  RunRecordBuilder,
+  WorkflowAuthor,
+  computeRunTotals,
+  createGitWorktreeManager,
+  createWorkflowHistoryStore,
+} from "../src/workflow";
 import type { AuthoringHost, WorkflowSourceKind } from "../src/workflow";
 import type { LoadedWorkflowCatalog } from "../src/workflow";
 import { readSse } from "./helpers/read-sse";
 
 const servers: Server[] = [];
+const tempRoots: string[] = [];
 
 afterEach(async () => {
   while (servers.length) {
@@ -28,6 +39,7 @@ afterEach(async () => {
     server.closeAllConnections?.();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+  await Promise.all(tempRoots.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
 function demoSpec(name = "demo"): WorkflowSpec {
@@ -381,6 +393,139 @@ describe("web server", () => {
     expect(del.status).toBe(200);
     const after = await fetch(`${base}/api/history`);
     expect(((await after.json()) as { runs: unknown[] }).runs).toHaveLength(0);
+  });
+
+  it("exposes the worktree lifecycle: diffstat, harvest to branch, prune", async () => {
+    const execFileAsync = promisify(execFile);
+    const git = async (cwd: string, ...args: string[]) =>
+      (await execFileAsync("git", args, { cwd })).stdout.trim();
+    const root = mkdtempSync(join(tmpdir(), "steamtrain-web-wt-"));
+    tempRoots.push(root);
+    const repo = join(root, "repo");
+    mkdirSync(repo, { recursive: true });
+    await git(repo, "init", "-b", "main");
+    await git(repo, "config", "user.email", "test@example.com");
+    await git(repo, "config", "user.name", "Test User");
+    writeFileSync(join(repo, "README.md"), "hello\n");
+    await git(repo, "add", ".");
+    await git(repo, "commit", "-m", "initial");
+
+    const manager = createGitWorktreeManager({ baseDir: join(root, "wt"), runId: "web-run" });
+    const lease = await manager.allocate({
+      workflowName: "demo",
+      stepId: "implement",
+      agent: "claude",
+      baseCwd: repo,
+      stepCwd: repo,
+      iteration: 1,
+    });
+    writeFileSync(join(lease.root as string, "feature.txt"), "web work\n");
+
+    const phases: HistoryPhase[] = [
+      {
+        phaseId: "p1",
+        title: "Phase 1",
+        index: 0,
+        stepCount: 1,
+        done: true,
+        ok: true,
+        steps: [
+          {
+            stepId: "implement",
+            blockKind: "worker",
+            agent: "claude",
+            model: "m",
+            status: "done",
+            text: "done",
+            cached: false,
+            worktree: {
+              originalCwd: repo,
+              cwd: lease.cwd,
+              root: lease.root as string,
+              branch: lease.branch as string,
+              baseCommit: lease.baseCommit,
+            },
+          },
+        ],
+      },
+    ];
+    const record: RunRecord = {
+      version: 1,
+      id: "wt-run",
+      workflow: "demo",
+      input: "task",
+      cwd: repo,
+      status: "done",
+      ok: true,
+      startedAt: Date.now() - 1000,
+      endedAt: Date.now(),
+      durationMs: 1000,
+      phases,
+      totals: computeRunTotals(phases),
+    };
+    const historyStore = createWorkflowHistoryStore(join(root, "history"));
+    await historyStore.save(record);
+
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      historyStore,
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const server = createWebServer({
+      host,
+      runs,
+      history: historyStore,
+      workflowSource: () => "bundled",
+    });
+    servers.push(server);
+    const base = await start(server);
+
+    // Diffstat of the retained worktree.
+    const wt = await fetch(`${base}/api/history/wt-run/worktrees`);
+    expect(wt.status).toBe(200);
+    const wtBody = (await wt.json()) as {
+      sources: { stepId: string; exists: boolean; files: { path: string }[] }[];
+    };
+    expect(wtBody.sources).toHaveLength(1);
+    expect(wtBody.sources[0]).toMatchObject({ stepId: "implement", exists: true });
+    expect(wtBody.sources[0]?.files.map((f) => f.path)).toEqual(["feature.txt"]);
+
+    // Unknown run and invalid body are rejected.
+    expect((await fetch(`${base}/api/history/nope/worktrees`)).status).toBe(404);
+    const badMode = await fetch(`${base}/api/history/wt-run/harvest`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "zip" }),
+    });
+    expect(badMode.status).toBe(400);
+
+    // Harvest to a branch; the record picks up the delivery.
+    const harvest = await fetch(`${base}/api/history/wt-run/harvest`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "branch", branch: "steamtrain/merged/web-test" }),
+    });
+    expect(harvest.status).toBe(200);
+    const { result } = (await harvest.json()) as {
+      result: { branch?: string; mergedSources: string[] };
+    };
+    expect(result.branch).toBe("steamtrain/merged/web-test");
+    expect(result.mergedSources).toEqual(["implement"]);
+    expect(await git(repo, "show", "steamtrain/merged/web-test:feature.txt")).toBe("web work");
+    expect((await historyStore.get("wt-run"))?.harvest?.branch).toBe("steamtrain/merged/web-test");
+
+    // Prune discards the worktree; the diffstat then reports it gone.
+    const prune = await fetch(`${base}/api/history/wt-run/prune`, { method: "POST" });
+    expect(prune.status).toBe(200);
+    expect((await prune.json()) as object).toMatchObject({ pruned: 1, total: 1 });
+    const goneBody = (await (await fetch(`${base}/api/history/wt-run/worktrees`)).json()) as {
+      sources: { exists: boolean }[];
+    };
+    expect(goneBody.sources[0]?.exists).toBe(false);
+    expect((await historyStore.get("wt-run"))?.harvest?.prunedAt).toBeTypeOf("number");
   });
 
   it("cancels a running workflow", async () => {

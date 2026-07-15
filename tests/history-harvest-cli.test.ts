@@ -121,6 +121,78 @@ describe("workflow history diff/apply/prune CLI", () => {
     }
   });
 
+  it("applies to a named branch with --mode branch and records the delivery", async () => {
+    const { repo, recordRun } = await makeRepoWithRun();
+    const runId = await recordRun(async (worktree) => {
+      await writeFile(join(worktree, "feature.txt"), "branch delivery\n");
+    });
+
+    const out = await cli(repo, [
+      "workflow",
+      "history",
+      "apply",
+      runId,
+      "--mode",
+      "branch",
+      "--branch",
+      "steamtrain/merged/manual-test",
+    ]);
+    expect(out.code).toBe(0);
+    expect(out.stdout).toContain("left on branch steamtrain/merged/manual-test");
+    // The checkout is untouched (only the history dir is new); the branch holds the merged state.
+    expect(await git(repo, "status", "--porcelain")).not.toContain("feature.txt");
+    expect(await git(repo, "show", "steamtrain/merged/manual-test:feature.txt")).toBe(
+      "branch delivery",
+    );
+
+    const store = createWorkflowHistoryStore(join(repo, WORKFLOW_HISTORY_DIR));
+    const record = await store.get(runId);
+    expect(record?.harvest?.branch).toBe("steamtrain/merged/manual-test");
+    const show = await cli(repo, ["workflow", "history", "show", runId]);
+    expect(show.stdout).toContain("on branch steamtrain/merged/manual-test");
+  });
+
+  it("guides recovery on conflicts and resolves them with --onconflict", async () => {
+    const { repo, recordConflictingRun } = await makeRepoWithRun();
+    const runId = await recordConflictingRun("first version\n", "second version\n");
+
+    const conflicted = await cli(repo, ["workflow", "history", "apply", runId]);
+    expect(conflicted.code).toBe(1);
+    expect(conflicted.stderr).toContain("conflicts");
+    expect(conflicted.stderr).toContain("--onconflict ours|theirs");
+    // A failed harvest leaves the checkout untouched.
+    expect(await git(repo, "status", "--porcelain")).not.toContain("clash.txt");
+
+    const resolved = await cli(repo, [
+      "workflow",
+      "history",
+      "apply",
+      runId,
+      "--onconflict",
+      "theirs",
+    ]);
+    expect(resolved.code).toBe(0);
+    expect(await readFile(join(repo, "clash.txt"), "utf8")).toBe("second version\n");
+  });
+
+  it("rejects invalid apply flags", async () => {
+    const { repo, recordRun } = await makeRepoWithRun();
+    const runId = await recordRun(async () => {});
+    const badMode = await cli(repo, ["workflow", "history", "apply", runId, "--mode", "zip"]);
+    expect(badMode.code).toBe(1);
+    expect(badMode.stderr).toContain("--mode must be");
+    const badConflict = await cli(repo, [
+      "workflow",
+      "history",
+      "apply",
+      runId,
+      "--onconflict",
+      "agent",
+    ]);
+    expect(badConflict.code).toBe(1);
+    expect(badConflict.stderr).toContain("--onconflict must be");
+  });
+
   it("errors usefully for runs without worktrees", async () => {
     const { repo } = await makeRepoWithRun();
     const store = createWorkflowHistoryStore(join(repo, WORKFLOW_HISTORY_DIR));
@@ -170,6 +242,8 @@ interface Harness {
   repo: string;
   /** Simulate a run: allocate a worktree, let `edit` change it, record history. */
   recordRun: (edit: (worktreeRoot: string) => Promise<void>) => Promise<string>;
+  /** Simulate a fan-out run: two steps writing competing content to the same file. */
+  recordConflictingRun: (contentA: string, contentB: string) => Promise<string>;
 }
 
 async function makeRepoWithRun(): Promise<Harness> {
@@ -228,6 +302,59 @@ async function makeRepoWithRun(): Promise<Harness> {
               },
             },
           ],
+        },
+      ];
+      const id = `run-${runCounter}`;
+      const store = createWorkflowHistoryStore(join(repo, WORKFLOW_HISTORY_DIR));
+      await store.save(bareRecord(id, repo, phases));
+      return id;
+    },
+    recordConflictingRun: async (contentA, contentB) => {
+      const manager = createGitWorktreeManager({
+        baseDir: join(root, "worktrees"),
+        runId: `cli-${runCounter++}`,
+      });
+      const steps = [];
+      for (const [stepId, content] of [
+        ["impl-a", contentA],
+        ["impl-b", contentB],
+      ] as const) {
+        const lease = await manager.allocate({
+          workflowName: "demo",
+          stepId,
+          agent: "claude",
+          baseCwd: repo,
+          stepCwd: repo,
+          iteration: 1,
+        });
+        if (!lease.root || !lease.branch) throw new Error("expected worktree lease");
+        await writeFile(join(lease.root, "clash.txt"), content);
+        steps.push({
+          stepId,
+          blockKind: "worker" as const,
+          agent: "claude" as const,
+          model: "m",
+          status: "done" as const,
+          text: "done",
+          cached: false,
+          worktree: {
+            originalCwd: repo,
+            cwd: lease.cwd,
+            root: lease.root,
+            branch: lease.branch,
+            baseCommit: lease.baseCommit,
+          },
+        });
+      }
+      const phases: HistoryPhase[] = [
+        {
+          phaseId: "impl",
+          title: "Implement",
+          index: 0,
+          stepCount: 2,
+          done: true,
+          ok: true,
+          steps,
         },
       ];
       const id = `run-${runCounter}`;

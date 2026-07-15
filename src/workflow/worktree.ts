@@ -141,8 +141,10 @@ class GitWorktreeManager implements AgentWorkspaceManager {
       // implement → review chain carries the whole pipeline's work.
       baseCommit: inherit ? (inherit.baseCommit ?? worktreeHead) : worktreeHead,
       linkedIgnoredPaths,
-      // Worktrees are retained after successful runs so users can inspect,
-      // commit, or merge agent-created files from the recorded branch.
+      // Intentionally a no-op: worktrees are retained after the run so users
+      // can inspect, commit, or merge agent-created files from the recorded
+      // branch. Lifecycle closure is explicit — a merge step's `cleanup`,
+      // `history apply/prune`, or `workflow worktrees prune` (see gc.ts).
       dispose: () => {},
     };
   }

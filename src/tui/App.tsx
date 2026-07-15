@@ -1676,7 +1676,11 @@ function historyHintText(history: HistoryUiState): string {
   if (history.view === "detail") {
     if (history.detail) return "↑/↓ step · PgUp/PgDn scroll · ←/Esc back · Ctrl+C quit";
     const retryHint = (history.record?.totals?.failed ?? 0) > 0 ? " · f retry failed" : "";
-    return `↑/↓ step · → details · r re-run${retryHint} · ←/Esc back to list · Ctrl+C quit`;
+    const hasWorktrees = history.record?.phases.some((phase) =>
+      phase.steps.some((step) => step.worktree),
+    );
+    const worktreeHint = hasWorktrees ? " · a apply · x prune" : "";
+    return `↑/↓ step · → details · r re-run${retryHint}${worktreeHint} · ←/Esc back to list · Ctrl+C quit`;
   }
   return "↑/↓ select · Enter inspect · Esc close · Ctrl+C quit";
 }
