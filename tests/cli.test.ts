@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseGlobalArgs, runCli } from "../src/cli";
+import { parseGlobalArgs, runCli, splitDryRunArgs } from "../src/cli";
 import { BUNDLED_WORKFLOWS } from "../src/workflow/bundled";
 import {
   WORKFLOW_CACHE_DIR,
@@ -265,6 +265,22 @@ describe("runCli", () => {
 
     expect(code).toBe(0);
     expect(c.stdout).toContain("plan: tour");
+  });
+
+  it("splitDryRunArgs walks flag/value pairs", () => {
+    expect(splitDryRunArgs(["tour", "--input", "hi", "--dry-run", "--fresh", "--json"])).toEqual({
+      isDryRun: true,
+      planArgs: ["tour", "--input", "hi", "--json"],
+    });
+    // a value that looks like a flag stays a value
+    expect(splitDryRunArgs(["tour", "--input", "--dry-run"])).toEqual({
+      isDryRun: false,
+      planArgs: ["tour", "--input", "--dry-run"],
+    });
+    // --param values that look like flags pass through; --on-approval is dropped with its value
+    expect(
+      splitDryRunArgs(["t", "--param", "k=--detach", "--on-approval", "fail", "--dry-run"]),
+    ).toEqual({ isDryRun: true, planArgs: ["t", "--param", "k=--detach"] });
   });
 
   it("treats flag-looking --input values as text in a --dry-run", async () => {

@@ -353,6 +353,9 @@ interface PlanOptions {
  * parseRunOptions), so flag-looking *values* — `--input "--dry-run"` — are
  * copied as text rather than misread as flags. Plan-relevant flags and their
  * values pass through; run-only execution flags are dropped.
+ *
+ * Example: `run tour --input --dry-run` runs the workflow with the literal
+ * input "--dry-run"; `run tour --input hi --dry-run` prints the plan.
  */
 export function splitDryRunArgs(args: string[]): { isDryRun: boolean; planArgs: string[] } {
   const valueTaking = new Set(["--input", "-i", "--param", "-p", "--from", "--on-approval"]);

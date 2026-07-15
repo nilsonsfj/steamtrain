@@ -33,7 +33,9 @@ const KEY_HINTS: readonly KeyHint[] = [
 export function HelpPanel({ width, height }: { width: number; height: number }): React.ReactNode {
   const commands = listSlashCommands();
   const keysWidth = Math.max(...KEY_HINTS.map((hint) => hint.keys.length));
-  const nameWidth = Math.max(...commands.map((c) => c.name.length)) + 1;
+  // The registry is mutable; guard the spread so an empty one can't produce
+  // -Infinity pad widths.
+  const nameWidth = commands.length > 0 ? Math.max(...commands.map((c) => c.name.length)) + 1 : 1;
 
   const rows: React.ReactNode[] = [
     <Text key="keys-header" color="gray" bold>

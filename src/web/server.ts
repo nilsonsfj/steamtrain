@@ -759,7 +759,9 @@ async function handle(
   }
 
   // Clients that ignore the inline <link rel="icon"> still request this path;
-  // serve the same SVG instead of 404ing every page load.
+  // serve the same SVG instead of 404ing every page load. The content type is
+  // deliberately image/svg+xml rather than image/x-icon: every current
+  // browser renders SVG favicons, and one asset beats maintaining an ICO.
   if (method === "GET" && path === "/favicon.ico") {
     res.writeHead(200, {
       "content-type": "image/svg+xml",

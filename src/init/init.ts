@@ -231,19 +231,25 @@ function gitignoreOffer(cwd: string): { path: string } | null {
   return { path };
 }
 
-/** True when a `.gitignore` body already ignores the `.steamtrain` directory. */
+/**
+ * True when a `.gitignore` body already ignores the `.steamtrain` directory
+ * via an explicit entry. Deliberately a heuristic: broad globs (`.*`) that
+ * happen to cover it are not detected — the worst case is a redundant offer
+ * the user answers "n" to, never a wrong write.
+ */
 export function ignoresSteamtrainDir(content: string): boolean {
-  return content.split(/\r?\n/).some((raw) => {
-    const line = raw.trim();
-    return (
-      line === ".steamtrain" ||
-      line === ".steamtrain/" ||
-      line === "/.steamtrain" ||
-      line === "/.steamtrain/" ||
-      line === ".steamtrain/**" ||
-      line === "**/.steamtrain/"
-    );
-  });
+  const explicit = new Set([
+    ".steamtrain",
+    ".steamtrain/",
+    "/.steamtrain",
+    "/.steamtrain/",
+    "./.steamtrain",
+    "./.steamtrain/",
+    ".steamtrain/**",
+    "**/.steamtrain",
+    "**/.steamtrain/",
+  ]);
+  return content.split(/\r?\n/).some((raw) => explicit.has(raw.trim()));
 }
 
 async function appendGitignoreEntry(path: string): Promise<{ ok: boolean; error?: string }> {
