@@ -11,7 +11,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ApiDoctorResult } from "../src/doctor";
 import { type WorkflowHost, WorkflowRunManager } from "../src/web/runs";
-import { createWebServer } from "../src/web/server";
+import { createWebServer, resolveWebAuthToken } from "../src/web/server";
 import type {
   StepResult,
   WorkflowCacheStore,
@@ -2438,5 +2438,25 @@ describe("startWebUi — secure-by-default exposure", () => {
     expect(booted.output()).toContain("--no-auth");
     const res = await fetch(`${booted.url.replace("0.0.0.0", "127.0.0.1")}/api/workflows`);
     expect(res.status).toBe(200);
+  });
+});
+
+describe("resolveWebAuthToken", () => {
+  it("prefers an explicit token over the env var", () => {
+    expect(resolveWebAuthToken({ authToken: "flag", envToken: "env" })).toBe("flag");
+  });
+
+  it("falls back to STEAMTRAIN_AUTH_TOKEN when no flag is given", () => {
+    expect(resolveWebAuthToken({ envToken: "env" })).toBe("env");
+  });
+
+  it("returns undefined when neither is set (auto-generation decides later)", () => {
+    expect(resolveWebAuthToken({})).toBeUndefined();
+  });
+
+  it("--no-auth overrides both a flag token and the env var", () => {
+    expect(
+      resolveWebAuthToken({ authToken: "flag", envToken: "env", noAuth: true }),
+    ).toBeUndefined();
   });
 });

@@ -541,6 +541,13 @@ function checkCsrf(
   }
   try {
     const originUrl = new URL(origin);
+    // A non-web-origin Referer (data:, blob:, file:, …) is a valid URL, so it
+    // would otherwise fall through to the host comparison with an empty
+    // hostname. Reject it outright: no such context is ever a same-origin peer.
+    if (originUrl.protocol !== "http:" && originUrl.protocol !== "https:") {
+      sendJson(res, 403, { error: "origin mismatch" });
+      return false;
+    }
     // Behind a trusted reverse proxy the browser's Origin names the public host
     // while req.headers.host may name the upstream, so prefer X-Forwarded-Host.
     // Untrusted, that header is client-settable and MUST NOT drive the compare —
@@ -1762,6 +1769,22 @@ export interface StartWebUiOptions {
 
 export const DEFAULT_WEB_PORT = 4317;
 export const DEFAULT_WEB_HOST = "127.0.0.1";
+
+/**
+ * Resolve the web-UI auth token from its sources, in precedence order:
+ * `--no-auth` wins (disables auth outright), then an explicit `--auth-token`,
+ * then the `STEAMTRAIN_AUTH_TOKEN` env var (which keeps the secret out of the
+ * process list and shell history). Returns undefined when none applies —
+ * `startWebUi` then auto-generates one for non-local binds.
+ */
+export function resolveWebAuthToken(opts: {
+  authToken?: string;
+  envToken?: string;
+  noAuth?: boolean;
+}): string | undefined {
+  if (opts.noAuth) return undefined;
+  return opts.authToken ?? opts.envToken;
+}
 
 /**
  * Boot the full web UI: build an orchestrator over the loaded catalog, run the

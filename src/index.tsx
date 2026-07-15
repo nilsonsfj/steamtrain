@@ -5,7 +5,7 @@ import { configDisplayLabel, loadConfig } from "./config";
 import { loadSettings } from "./settings";
 import { App } from "./tui/App";
 import { STEAMTRAIN_VERSION } from "./version";
-import { startWebUi } from "./web";
+import { resolveWebAuthToken, startWebUi } from "./web";
 import { loadWorkflowCatalog } from "./workflow";
 import { loadWorkspaceConfig, workspaceScopeLabel } from "./workspace";
 
@@ -88,7 +88,7 @@ async function main(): Promise<void> {
       configPath: scope.path,
       port,
       host,
-      authToken: noAuth ? undefined : (authToken ?? envToken),
+      authToken: resolveWebAuthToken({ authToken, envToken, noAuth }),
       noAuth,
       trustProxy,
     });
