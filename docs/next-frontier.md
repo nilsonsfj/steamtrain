@@ -1,6 +1,6 @@
 # steamtrain — the next frontier
 
-Date: 2026-07-07
+Date: 2026-07-15 (partial-ship status refresh)
 
 A second-generation idea set, deliberately **disjoint** from
 [`feature-roadmap.md`](feature-roadmap.md): items here are not on that

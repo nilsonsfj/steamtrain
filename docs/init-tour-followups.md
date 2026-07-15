@@ -55,7 +55,6 @@ the [`dry-run-followups.md`](dry-run-followups.md) precedent.
   past the types at runtime renders `"?"`.
 
 ## Declined, with rationale
-
 - **`not` modifier on the tour's `express-service` `when` condition.** The
   reviewer noted it themselves: the step is *meant* to be skipped, and
   `contains: "express"` with no match is exactly the pedagogical point.
