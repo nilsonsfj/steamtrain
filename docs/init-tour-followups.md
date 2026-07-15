@@ -4,6 +4,8 @@ PR #63 received several review rounds. This file records what was applied,
 what was declined (and why), and what is deferred as future work — following
 the [`dry-run-followups.md`](dry-run-followups.md) precedent.
 
+**Open work** is only under [Deferred / out of scope](#deferred--out-of-scope-for-the-onboarding-pr) below.
+
 ## Applied across review rounds
 
 - **Line-buffered prompting.** The original `askYesNo` resolved one answer per
@@ -53,6 +55,7 @@ the [`dry-run-followups.md`](dry-run-followups.md) precedent.
   past the types at runtime renders `"?"`.
 
 ## Declined, with rationale
+
 - **`not` modifier on the tour's `express-service` `when` condition.** The
   reviewer noted it themselves: the step is *meant* to be skipped, and
   `contains: "express"` with no match is exactly the pedagogical point.

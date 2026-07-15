@@ -151,9 +151,7 @@ step, `workflow worktrees list|prune` GC, `history apply`
 
 ## Future work this unlocks
 
-- **Approval gates (roadmap §1.2)** review exactly this diff before the merge
-  step delivers it.
-- **Web patch view**: the web UI now shows per-step diffstat in run history;
-  a full patch pane can grow on the same `GET /api/history/:id/worktrees`
-  primitives.
-- **CI mode (§1.4)** posts `history show --diff`-style patches on PRs.
+- **Full patch viewer in the UIs (roadmap §1.1):** diffstat and harvest
+  actions shipped in both UIs; inline unified diffs can grow on the same
+  `GET /api/history/:id/worktrees` primitives.
+- **CI mode (roadmap §1.2):** posts `history show --diff`-style patches on PRs.

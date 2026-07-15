@@ -152,7 +152,7 @@ approval can be granted from any surface for any run.
 
 ## Follow-ups (tracked, out of scope here)
 
-- Notifications on completion/approval-needed (roadmap 1.6) — the natural
+- Notifications on completion/approval-needed (roadmap 1.5) — the natural
   companion; all the hooks (terminal meta, pending-approval state) exist.
 - Scheduled runs (`workflow schedule --cron`) — Part 3 of the roadmap,
   unblocked by the detached runner.

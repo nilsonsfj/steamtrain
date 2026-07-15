@@ -82,7 +82,8 @@ browser ──POST /api/runs──▶ run manager ──▶ Orchestrator.runWork
 | `/api/logout` | POST | revokes the presented session and clears the auth cookie |
 
 The client folds the streamed `WorkflowEvent`s into a phase → step tree with the
-same model the TUI uses (`src/tui/workflow-state.ts`), so the visualization stays
+shared `workflowReducer` (`src/workflow/reducer.ts`), bundled for the browser
+as `/static/steamtrain-reducer.bundle.js`, so the visualization stays
 faithful to the engine's real behavior. Step results are persisted to the same
 `.steamtrain/cache` directory, so a canceled web run resumes from where it left
 off on the next launch — exactly like the TUI. Transient agent failures

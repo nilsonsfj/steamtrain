@@ -22,7 +22,7 @@ Deep dives:
 ## Planning
 
 - [`feature-roadmap.md`](feature-roadmap.md) — prioritized roadmap of next features and improvements
-- [`next-frontier.md`](next-frontier.md) — second-generation ideas beyond the roadmap: live run steering, right-sized primitives, workflows that learn
+- [`next-frontier.md`](next-frontier.md) — second-generation ideas beyond the roadmap (several partially shipped; see inline status)
 
 ## Project
 

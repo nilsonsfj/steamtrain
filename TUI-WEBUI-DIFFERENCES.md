@@ -9,7 +9,9 @@ This is a working document. The end state we're aiming for: a single
 "workflow session / authoring" core that the TUI and the web server both drive,
 with each layer owning only presentation + input handling.
 
-Last updated: 2026-06-16 (after the first unification pass in
+Last updated: 2026-07-15.
+
+Updated 2026-06-16 (after the first unification pass in
 `feat/unify-workflow-authoring`: the authoring core is now shared).
 Updated 2026-06-28: web client code + reducer bundle now live as real files
 under `src/web/public/` and are served at `/static/*` (no longer embedded in
@@ -21,6 +23,8 @@ Updated 2026-07-10 (run visibility): both UIs gained a live step drill-in with
 the full scrollable output, per-step live timers, and worktree visibility, fed
 by a new shared `step_workspace` event and `startedAt`/`endedAt`/`worktree`
 fields on the shared reducer's `StepState`.
+Updated 2026-07-14 (worktree lifecycle): both UIs gained post-run worktree
+harvest (apply/prune from history) with diffstat.
 Updated 2026-07-15: the web run input gained ↑/↓ prompt-history recall
 (localStorage-backed, recorded on Run/Plan) — closing the last documented
 feature gap in §4. The TUI gained `/help` (keys + command list overlay) and an
@@ -52,14 +56,9 @@ right and should expand:
 and is now the single authoring core both frontends drive — see §5.
 
 Both UIs also fold the **same `WorkflowEvent` stream** into a phase→step render
-model — independently:
-
-- TUI: `src/tui/workflow-state.ts` (`workflowReducer`)
-- Web: the shared `workflowReducer` shipped to the browser as the static
-  `/static/steamtrain-reducer.bundle.js` (built by `scripts/build-reducer.ts`
-  from `src/web/reducer.ts`) and folded in page script `src/web/public/app.js`
-
-These two reducers are near-duplicates and are a prime extraction target (see §5).
+model via the shared `workflowReducer` in `src/workflow/reducer.ts` (the TUI
+imports it through `src/tui/workflow-state.ts`; the web bundles it as
+`/static/steamtrain-reducer.bundle.js`).
 
 ---
 
@@ -140,8 +139,7 @@ Status after `feat/unify-workflow-authoring`:
    source of truth for folding `WorkflowEvent`s. It is shared natively by the
    TUI and compiled via a build-time esbuild step (`scripts/build-reducer.ts`)
    into `src/web/public/steamtrain-reducer.bundle.js`, served at
-   `/static/steamtrain-reducer.bundle.js` for the browser UI. This eliminates the
-   near-duplicate implementations.
+   `/static/steamtrain-reducer.bundle.js` for the browser UI.
 
 2. ✅ **Authoring logic unified.** `WorkflowAuthor` moved to
    `src/workflow/authoring.ts` and is the single authoring core. The web server
@@ -172,24 +170,16 @@ Status after `feat/unify-workflow-authoring`:
 
 ---
 
-## 6. Remaining convergence work
+## 6. Convergence status
 
-Done in `feat/unify-workflow-authoring`: §5.2, §5.5, §5.6, plus clone/delete in
-the TUI and the staged-flush seam (§5.3). What's left:
+Unification is complete. `src/tui` and `src/web` are pure rendering + input
+layers; all workflow logic (load, edit, draft, validate, persist, stage
+overrides, run, fold events) lives in shared modules under `src/workflow` (+
+orchestrator).
 
-1. ✅ **Extract the `WorkflowEvent` reducer** into a shared, UI-agnostic module and
-   bundle it for the browser (now built into `src/web/public/steamtrain-reducer.bundle.js`
-   and served at `/static/steamtrain-reducer.bundle.js`; previously embedded in
-   `html.ts`) so the web UI uses the same fold as the TUI (§5.1). Done!
-2. ✅ **Render the full edit surface in the TUI** — per-step prompt editing and
-   name/description editing (the core already persists them) (§4 / §5.4). Done!
-3. ✅ **Add a staged mode to the web** — "try without saving" + an explicit flush
-   button with saved/skipped/unchanged reporting, using `previewWithOverrides` /
-   `flushSessionOverrides` (§4). Done!
-4. ✅ **TUI draft-target picker** — let the TUI choose agent/model/effort for the
-   LLM draft using the shared `agentMeta()` instead of auto-picking (§3). Done!
-
-End state reached: `src/tui` and `src/web` are now pure rendering + input layers.
-All workflow logic (load, edit, draft, validate, persist, stage overrides, run,
-fold events) lives in shared modules under `src/workflow` (+ orchestrator). Both
-the authoring half and the run-fold (reducer) half are unified.
+Feature parity for the documented authoring/run surface is closed (prompt
+history on the web shipped 2026-07-15; drafts remain a soft gap — web restores
+the unsent draft only while browsing history). The only remaining
+**architectural** divergence is the override model: the TUI stages overrides;
+the web persists immediately, though the staged seam (`previewWithOverrides` /
+`flushSessionOverrides`) exists if the web ever wants a non-destructive mode.

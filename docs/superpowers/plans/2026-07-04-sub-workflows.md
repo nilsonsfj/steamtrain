@@ -1235,8 +1235,7 @@ git commit -m "docs: document the workflow (sub-workflow) step"
 
 ## Post-plan follow-ups (not part of this plan, tracked for later)
 
-- `stepDefaults`/`extends` step templates (the other half of roadmap 2.5) — separate design.
-- `generate.ts`'s LLM authoring meta-prompt does not yet teach the model about the `workflow` step kind — an author using the LLM drafter won't get one generated. Worth a small follow-up (one bullet + one worked example, mirroring the existing per-kind sections) once real usage patterns exist.
+- `stepDefaults`/`extends` step templates (the other half of roadmap 2.4) — separate design.
 - The shared budget counter idea from the design doc's "Step budget decision" follow-up, if the independent-per-level 1000-step ceiling ever proves insufficient in practice.
 - `workflowAgentIds` (used by `canDispatchWorkflowSpec` for pre-flight agent-health gating) does not look inside an invoked child workflow, so a workflow step's child agents aren't health-checked before dispatch the way a top-level workflow's are — the child's own agent-resolution failure surfaces at run time instead (as a normal `agentBacked` step failure inside the child run). Acceptable given decision 4, but worth a one-line mention if a doctor/dispatch-gating enhancement is ever scoped.
 - A `workflow` step's translated child events always carry the *child* run's own `iteration` field, not the parent spec's current loop iteration. If a `workflow` step sits inside a loop-back gate's body (`runPhasedScheduler`) and that loop re-runs multiple times, every pass's namespaced nested steps will show the child's own iteration (typically always 1) instead of being attributed to the parent's 1st/2nd/3rd… pass. This is a live-view/history display limitation, not a cost or correctness bug — worth fixing if nested `workflow` steps inside loop bodies become a common pattern.
