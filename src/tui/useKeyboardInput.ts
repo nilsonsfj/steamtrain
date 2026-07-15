@@ -30,6 +30,9 @@ export interface UseKeyboardInputParams {
   runEditorOpen: boolean;
   /** True while the input form overlay owns the keyboard. */
   inputFormPending: boolean;
+  /** True while the /help overlay owns the keyboard. */
+  helpOpen: boolean;
+  closeHelp: () => void;
   openAgentManager: () => void;
   /** Open the mid-run editor for the selected pending step (paused runs). */
   openRunStepEditor: () => void;
@@ -96,6 +99,14 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
         if (cur.runEditorOpen) return;
         // While the input form is active, its own useInput handler owns keys.
         if (cur.inputFormPending) return;
+        // The /help overlay is read-only: any dismiss key closes it, and it
+        // swallows everything else so a stray key can't mutate hidden state.
+        if (cur.helpOpen) {
+          if (key.escape || key.return || input === "q" || input === "h" || input === "?") {
+            cur.closeHelp();
+          }
+          return;
+        }
         if (key.ctrl && input === "a") {
           cur.openAgentManager();
           return;

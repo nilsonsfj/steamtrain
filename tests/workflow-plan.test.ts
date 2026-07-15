@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyWorkflowSessionOverrides } from "../src/workflow/overrides";
-import { planWorkflow } from "../src/workflow/plan";
+import { planHistoryContext, planWorkflow } from "../src/workflow/plan";
 import type { WorkflowSpec, WorkflowStep } from "../src/workflow/types";
 
 function spec(overrides: Partial<WorkflowSpec> & { phases: WorkflowSpec["phases"] }): WorkflowSpec {
@@ -519,5 +519,44 @@ describe("planWorkflow with session overrides", () => {
     expect(result.steps[0]!.agent).toBeUndefined();
     expect(result.agentCallCount).toBe(0);
     expect(result.deterministicCount).toBe(1);
+  });
+});
+
+describe("planHistoryContext", () => {
+  const summary = (workflow: string, status: string, costUsd: number, durationMs: number) => ({
+    workflow,
+    status,
+    totals: { costUsd },
+    durationMs,
+  });
+
+  it("aggregates completed runs of the named workflow", () => {
+    const ctx = planHistoryContext(
+      [
+        summary("bug-hunt", "done", 0.1, 60_000),
+        summary("bug-hunt", "done", 0.5, 120_000),
+        summary("bug-hunt", "error", 9.9, 5_000), // incomplete runs under-report; excluded
+        summary("tour", "done", 0, 100), // other workflow; excluded
+      ],
+      "bug-hunt",
+    );
+    expect(ctx).toEqual({
+      runs: 2,
+      avgCostUsd: 0.3,
+      minCostUsd: 0.1,
+      maxCostUsd: 0.5,
+      avgDurationMs: 90_000,
+    });
+  });
+
+  it("returns null with no completed runs", () => {
+    expect(planHistoryContext([], "bug-hunt")).toBeNull();
+    expect(planHistoryContext([summary("bug-hunt", "canceled", 1, 1)], "bug-hunt")).toBeNull();
+  });
+
+  it("tolerates records without totals", () => {
+    const ctx = planHistoryContext([{ workflow: "w", status: "done", durationMs: 1000 }], "w");
+    expect(ctx?.avgCostUsd).toBe(0);
+    expect(ctx?.runs).toBe(1);
   });
 });

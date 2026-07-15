@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { defaultModelForAgent } from "../agents/models";
 import type { CliIO } from "../cli";
@@ -100,7 +101,11 @@ export async function runInitCommand(
     });
   }
 
-  if (offers.length === 0) {
+  // Runs write history/cache/live-run state under `.steamtrain/` in this repo
+  // — full step outputs included. Offer to keep that out of commits.
+  const ignoreOffer = gitignoreOffer(cwd);
+
+  if (offers.length === 0 && !ignoreOffer) {
     out("\nnothing to add yet — no checks detected and no ready agent.\n");
     printNextSteps(out, []);
     return 0;
@@ -118,58 +123,134 @@ export async function runInitCommand(
       : "decline-all";
 
   const accepted: WorkflowSpec[] = [];
-  out("\nstarter workflows\n");
   const reader = mode === "ask" ? createPromptReader(stdin, out) : undefined;
-  for (const offer of offers) {
-    const validation = validateWorkflow(offer.spec);
-    if (!validation.ok) {
-      err(`  skipping '${offer.spec.name}': generated spec is invalid (${validation.error})\n`);
-      continue;
+  if (offers.length > 0) {
+    out("\nstarter workflows\n");
+    for (const offer of offers) {
+      const validation = validateWorkflow(offer.spec);
+      if (!validation.ok) {
+        err(`  skipping '${offer.spec.name}': generated spec is invalid (${validation.error})\n`);
+        continue;
+      }
+      if (mode === "accept-all") {
+        out(`  + ${offer.spec.name} — ${offer.why}\n`);
+        accepted.push(offer.spec);
+      } else if (mode === "decline-all") {
+        out(`  · ${offer.spec.name} — ${offer.why}\n`);
+      } else if (reader) {
+        const add = await reader.ask(`  add '${offer.spec.name}' (${offer.why})? [Y/n] `);
+        if (add) accepted.push(offer.spec);
+      }
     }
+  }
+
+  let addIgnore = false;
+  if (ignoreOffer) {
+    const why = "run history, caches, and live-run state stay out of commits";
+    out("\nhousekeeping\n");
     if (mode === "accept-all") {
-      out(`  + ${offer.spec.name} — ${offer.why}\n`);
-      accepted.push(offer.spec);
+      out(`  + .gitignore — add '.steamtrain/' (${why})\n`);
+      addIgnore = true;
     } else if (mode === "decline-all") {
-      out(`  · ${offer.spec.name} — ${offer.why}\n`);
+      out(`  · .gitignore — would add '.steamtrain/' (${why})\n`);
     } else if (reader) {
-      const add = await reader.ask(`  add '${offer.spec.name}' (${offer.why})? [Y/n] `);
-      if (add) accepted.push(offer.spec);
+      addIgnore = await reader.ask(`  add '.steamtrain/' to .gitignore (${why})? [Y/n] `);
     }
   }
   reader?.dispose();
   if (mode === "decline-all") {
     out("\n  non-interactive session without --yes — nothing written.\n");
-    out("  re-run with --yes to add the starters above.\n");
+    out("  re-run with --yes to add the offers above.\n");
   }
 
-  if (accepted.length === 0) {
-    if (mode !== "decline-all") out("\nno starters added.\n");
+  if (accepted.length === 0 && !addIgnore) {
+    if (mode !== "decline-all") out("\nnothing added.\n");
     printNextSteps(out, []);
     return 0;
   }
 
   // 4. Write them into the project config (create or merge, never clobber).
-  const write = await writeStarters(scope.path, accepted);
-  if (!write.ok) {
-    err(`\ncould not update ${scope.path}: ${write.error}\n`);
-    return 1;
+  const written: string[] = [];
+  if (accepted.length > 0) {
+    const write = await writeStarters(scope.path, accepted);
+    if (!write.ok) {
+      err(`\ncould not update ${scope.path}: ${write.error}\n`);
+      return 1;
+    }
+    for (const name of write.skipped) {
+      out(`\n  '${name}' already exists in ${scope.path} — left untouched\n`);
+    }
+    if (write.written.length > 0) {
+      out(`\nwrote ${write.written.map((name) => `'${name}'`).join(", ")} → ${scope.path}\n`);
+    }
+    if (write.written.includes("implement-verified") && firstReady) {
+      // The agent is simply the first one the doctor reported ready — make it
+      // obvious the choice is editable rather than a considered recommendation.
+      out(
+        `  implement-verified uses ${firstReady.agent} (${implementModel}) — the first ready agent;\n` +
+          `  edit its 'agent'/'model' in ${scope.path} to use a different one.\n`,
+      );
+    }
+    written.push(...write.written);
   }
-  for (const name of write.skipped) {
-    out(`\n  '${name}' already exists in ${scope.path} — left untouched\n`);
+
+  if (addIgnore && ignoreOffer) {
+    const result = await appendGitignoreEntry(ignoreOffer.path);
+    if (result.ok) {
+      out(`\nadded '.steamtrain/' to ${ignoreOffer.path}\n`);
+    } else {
+      err(`\ncould not update ${ignoreOffer.path}: ${result.error}\n`);
+      if (accepted.length === 0) return 1;
+    }
   }
-  if (write.written.length > 0) {
-    out(`\nwrote ${write.written.map((name) => `'${name}'`).join(", ")} → ${scope.path}\n`);
-  }
-  if (write.written.includes("implement-verified") && firstReady) {
-    // The agent is simply the first one the doctor reported ready — make it
-    // obvious the choice is editable rather than a considered recommendation.
-    out(
-      `  implement-verified uses ${firstReady.agent} (${implementModel}) — the first ready agent;\n` +
-        `  edit its 'agent'/'model' in ${scope.path} to use a different one.\n`,
-    );
-  }
-  printNextSteps(out, write.written);
+  printNextSteps(out, written);
   return 0;
+}
+
+/**
+ * Offer a `.gitignore` entry for `.steamtrain/` when this is a git repo whose
+ * ignore file doesn't already cover it. Run history contains every step's full
+ * output — committing it by accident is the kind of leak nobody notices until
+ * it's pushed.
+ */
+function gitignoreOffer(cwd: string): { path: string } | null {
+  if (!existsSync(join(cwd, ".git"))) return null;
+  const path = join(cwd, ".gitignore");
+  if (existsSync(path)) {
+    try {
+      if (ignoresSteamtrainDir(readFileSync(path, "utf8"))) return null;
+    } catch {
+      return null; // unreadable ignore file — leave it alone
+    }
+  }
+  return { path };
+}
+
+/** True when a `.gitignore` body already ignores the `.steamtrain` directory. */
+export function ignoresSteamtrainDir(content: string): boolean {
+  return content.split(/\r?\n/).some((raw) => {
+    const line = raw.trim();
+    return (
+      line === ".steamtrain" ||
+      line === ".steamtrain/" ||
+      line === "/.steamtrain" ||
+      line === "/.steamtrain/" ||
+      line === ".steamtrain/**" ||
+      line === "**/.steamtrain/"
+    );
+  });
+}
+
+async function appendGitignoreEntry(path: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
+    const separator = existing.length === 0 || existing.endsWith("\n") ? "" : "\n";
+    const block = `${separator}# steamtrain run history, cache, and live-run state\n.steamtrain/\n`;
+    await atomicWriteFile(path, existing + block);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 function parseInitOptions(args: string[]): InitOptions | null {
@@ -254,7 +335,12 @@ function printNextSteps(out: (text: string) => void, written: string[]): void {
     out('  steamtrain workflow run implement-verified --input "<task>"\n');
   }
   out("  steamtrain                                          # open the TUI\n");
-  out("  docs/workflow-overview.md                           # how workflows fit together\n");
+  // A full URL, not a repo-relative path: init usually runs in the user's own
+  // repo, where docs/workflow-overview.md doesn't exist.
+  out(
+    "  https://github.com/nilsonsfj/steamtrain/blob/main/docs/workflow-overview.md\n" +
+      "                                                      # how workflows fit together\n",
+  );
 }
 
 interface WriteResult {

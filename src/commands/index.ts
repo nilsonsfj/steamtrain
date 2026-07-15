@@ -9,6 +9,7 @@ export {
   isRegisteredSlashCommand,
   listSlashCommands,
   registerSlashCommand,
+  unknownSlashCommand,
 } from "./registry";
 export type {
   ParsedSlashInput,

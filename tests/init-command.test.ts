@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -301,7 +301,7 @@ describe("steamtrain init", () => {
       { doctor: async () => [doctorResult({})], interactive: true },
     );
     expect(code).toBe(0);
-    expect(out).toContain("no starters added");
+    expect(out).toContain("nothing added");
     await expect(readFile(join(cwd, "steamtrain.json"), "utf8")).rejects.toThrow();
   });
 
@@ -313,7 +313,7 @@ describe("steamtrain init", () => {
     stdin.destroy(); // stdin goes away before any answer arrives
     const result = await runPromise;
     expect(result.code).toBe(0);
-    expect(result.out).toContain("no starters added");
+    expect(result.out).toContain("nothing added");
     await expect(readFile(join(cwd, "steamtrain.json"), "utf8")).rejects.toThrow();
   });
 
@@ -326,5 +326,121 @@ describe("steamtrain init", () => {
     expect(result.code).toBe(1);
     expect(result.err).toContain("'workflows' is not an object");
     expect(await readFile(join(cwd, "steamtrain.json"), "utf8")).toBe(broken); // untouched
+  });
+
+  describe(".gitignore housekeeping", () => {
+    it("offers and appends '.steamtrain/' in a git repo with --yes", async () => {
+      const cwd = await tempDir();
+      await mkdir(join(cwd, ".git"));
+      await writeFile(join(cwd, ".gitignore"), "node_modules/\n");
+      const result = await runInit(cwd, ["--yes"], []);
+      expect(result.code).toBe(0);
+      expect(result.out).toContain("housekeeping");
+      expect(result.out).toContain("added '.steamtrain/'");
+      const gitignore = await readFile(join(cwd, ".gitignore"), "utf8");
+      expect(gitignore).toContain("node_modules/\n");
+      expect(gitignore).toContain(".steamtrain/\n");
+    });
+
+    it("creates .gitignore when the repo has none", async () => {
+      const cwd = await tempDir();
+      await mkdir(join(cwd, ".git"));
+      const result = await runInit(cwd, ["--yes"], []);
+      expect(result.code).toBe(0);
+      const gitignore = await readFile(join(cwd, ".gitignore"), "utf8");
+      expect(gitignore).toContain(".steamtrain/");
+    });
+
+    it("adds a newline before appending to a file without a trailing one", async () => {
+      const cwd = await tempDir();
+      await mkdir(join(cwd, ".git"));
+      await writeFile(join(cwd, ".gitignore"), "dist"); // no trailing newline
+      const result = await runInit(cwd, ["--yes"], []);
+      expect(result.code).toBe(0);
+      const gitignore = await readFile(join(cwd, ".gitignore"), "utf8");
+      expect(gitignore.startsWith("dist\n")).toBe(true);
+      expect(gitignore).toContain("\n.steamtrain/\n");
+    });
+
+    it("skips the offer when .steamtrain is already ignored", async () => {
+      const cwd = await tempDir();
+      await mkdir(join(cwd, ".git"));
+      const existing = "# mine\n.steamtrain/\n";
+      await writeFile(join(cwd, ".gitignore"), existing);
+      const result = await runInit(cwd, ["--yes"], []);
+      expect(result.code).toBe(0);
+      expect(result.out).not.toContain("housekeeping");
+      expect(await readFile(join(cwd, ".gitignore"), "utf8")).toBe(existing);
+    });
+
+    it("skips the offer outside a git repo", async () => {
+      const cwd = await tempDir();
+      const result = await runInit(cwd, ["--yes"], []);
+      expect(result.code).toBe(0);
+      expect(result.out).not.toContain("housekeeping");
+      await expect(readFile(join(cwd, ".gitignore"), "utf8")).rejects.toThrow();
+    });
+
+    it("lists but does not write in a non-interactive session without --yes", async () => {
+      const cwd = await tempDir();
+      await mkdir(join(cwd, ".git"));
+      const result = await runInit(cwd, [], []);
+      expect(result.code).toBe(0);
+      expect(result.out).toContain("would add '.steamtrain/'");
+      expect(result.out).toContain("nothing written");
+      await expect(readFile(join(cwd, ".gitignore"), "utf8")).rejects.toThrow();
+    });
+
+    it("honors an interactive 'n'", async () => {
+      const cwd = await tempDir();
+      await mkdir(join(cwd, ".git"));
+      const stdin = new PassThrough();
+      let out = "";
+      const code = await runInitCommand(
+        [],
+        {
+          cwd,
+          stdin,
+          stdout: (text) => {
+            out += text;
+            if (text.includes("add '.steamtrain/'")) stdin.write("n\n");
+          },
+          stderr: () => {},
+        },
+        { doctor: async () => [], interactive: true },
+      );
+      expect(code).toBe(0);
+      expect(out).toContain("nothing added");
+      await expect(readFile(join(cwd, ".gitignore"), "utf8")).rejects.toThrow();
+    });
+
+    it("honors an interactive 'y' alongside declined starters", async () => {
+      const cwd = await tempDir();
+      await mkdir(join(cwd, ".git"));
+      await writeFile(
+        join(cwd, "package.json"),
+        JSON.stringify({ scripts: { test: "vitest run" } }),
+      );
+      const stdin = new PassThrough();
+      let out = "";
+      const code = await runInitCommand(
+        [],
+        {
+          cwd,
+          stdin,
+          stdout: (text) => {
+            out += text;
+            if (text.includes("add 'verify'")) stdin.write("n\n");
+            if (text.includes("add '.steamtrain/'")) stdin.write("y\n");
+          },
+          stderr: () => {},
+        },
+        { doctor: async () => [], interactive: true },
+      );
+      expect(code).toBe(0);
+      expect(out).toContain("added '.steamtrain/'");
+      await expect(readFile(join(cwd, "steamtrain.json"), "utf8")).rejects.toThrow();
+      expect(await readFile(join(cwd, ".gitignore"), "utf8")).toContain(".steamtrain/");
+    });
   });
 });

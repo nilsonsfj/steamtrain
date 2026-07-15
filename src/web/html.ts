@@ -19,6 +19,12 @@
  * as a vertical pipeline with parallel step cards, live text tails, data-flow
  * inputs, and per-step status/duration/cost.
  */
+/**
+ * The 🚂 tab icon, inlined as an SVG data URI (and served at /favicon.ico for
+ * clients that ignore the link tag) so every page load stops 404ing the icon.
+ */
+export const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y="0.9em" font-size="90">\u{1F682}</text></svg>`;
+
 export interface PageAssetRevisions {
   /** Hash of `src/web/public/steamtrain-reducer.bundle.js`. */
   bundle: string;
@@ -44,6 +50,7 @@ export function renderIndex(revs: PageAssetRevisions): string {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>steamtrain</title>
+<link rel="icon" href="data:image/svg+xml,${encodeURIComponent(FAVICON_SVG)}" />
 <link rel="stylesheet" href="${cssHref}" />
 </head>
 <body>
@@ -75,7 +82,7 @@ export function renderIndex(revs: PageAssetRevisions): string {
         <button class="btn small danger" id="deleteBtn" style="display:none">&#128465; Delete</button>
       </div>
       <div class="row" id="runRow" style="display:none">
-        <textarea id="input" placeholder="Describe the input for this run..."></textarea>
+        <textarea id="input" placeholder="Describe the input for this run... (&#8593; recalls previous inputs)"></textarea>
         <div id="paramsForm" class="params-form" style="display:none"></div>
         <div class="btnstack">
           <button class="btn" id="planBtn">Plan</button>

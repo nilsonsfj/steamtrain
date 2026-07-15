@@ -21,6 +21,11 @@ Updated 2026-07-10 (run visibility): both UIs gained a live step drill-in with
 the full scrollable output, per-step live timers, and worktree visibility, fed
 by a new shared `step_workspace` event and `startedAt`/`endedAt`/`worktree`
 fields on the shared reducer's `StepState`.
+Updated 2026-07-15: the web run input gained ↑/↓ prompt-history recall
+(localStorage-backed, recorded on Run/Plan) — closing the last documented
+feature gap in §4. The TUI gained `/help` (keys + command list overlay) and an
+unknown-slash-command guard; both are TUI-only by design (the web UI is
+button-driven and has no command line).
 
 ---
 
@@ -95,7 +100,8 @@ These two reducers are near-duplicates and are a prime extraction target (see §
 | Post-run worktree harvest (apply/prune from history) | ✅ | ✅ | Shared `src/workflow/gc.ts` (`harvestRunWorktrees`/`pruneRunWorktrees`); TUI `a`/`x` in history detail, web "Worktree changes" section (diffstat + Apply/Branch/Prune + conflict-retry), CLI `workflow history apply/prune` + `workflow worktrees` GC |
 | Re-run / retry-failed a past run | ✅ | ✅ | Shared `planRerun`/`seedCacheFromRecord` (`src/workflow/rerun.ts`); TUI `r`/`f` in history detail, web Re-run/Retry buttons, CLI `workflow run --from <id> [--retry-failed]` |
 | Auto-retry transient failures | ✅ | ✅ | Shared engine (`src/workflow/retry.ts`); workflow/per-step `retry` policy, `step_retry` event surfaced as `↻ retry n/N` in both UIs, attempts recorded in history |
-| Prompt history / drafts | ✅ | ❌ | TUI-only (`prompt-history`, `prompt-draft`) |
+| Prompt history | ✅ | ✅ | TUI: `prompt-history` (per-mode, ↑/↓); Web: run-input ↑/↓ recall backed by localStorage, recorded on Run/Plan |
+| Prompt drafts (per-mode unsent drafts) | ✅ | ⚠️ | TUI `prompt-draft` restores unsent input per mode; the web keeps the unsent draft only while browsing history (↓ restores it) |
 | Workspaces (non-workflow dispatch) | ✅ | ❌ | Out of scope for unification (for now) |
 
 ---
@@ -120,7 +126,9 @@ for them yet):
 
 1. ~~**Staged session overrides**~~ — Done. Web now has "Try without saving" in the configure modal, staged override state, and "Flush to disk" button with saved/skipped/unchanged reporting.
 2. ~~**`/save-workflows`-style flush**~~ — Done. `POST /api/overrides/flush` calls the shared `flushSessionOverrides` and returns the report.
-3. **Prompt history & drafts** — part of the run experience the web lacks.
+3. ~~**Prompt history & drafts**~~ — Done (2026-07-15). The web run input
+   records every Run/Plan submission to localStorage and recalls with ↑/↓;
+   ↓ past the newest entry restores the unsent draft.
 
 ---
 

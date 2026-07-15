@@ -1358,10 +1358,63 @@
     }
   }
 
+  // ---- prompt history (run-input ↑/↓ recall, mirroring the TUI) -------------
+  var PROMPT_HISTORY_KEY = "steamtrain.promptHistory.v1";
+  var PROMPT_HISTORY_MAX = 50;
+  // Non-null while the input is showing a recalled entry: { index, draft }.
+  var promptBrowse = null;
+
+  function loadPromptHistory() {
+    try {
+      var parsed = JSON.parse(localStorage.getItem(PROMPT_HISTORY_KEY) || "[]");
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(function (item) { return typeof item === "string"; });
+    } catch (e) { return []; }
+  }
+
+  function recordPromptHistory(input) {
+    var text = String(input || "").trim();
+    if (!text) return;
+    try {
+      var list = loadPromptHistory().filter(function (item) { return item !== text; });
+      list.unshift(text);
+      localStorage.setItem(PROMPT_HISTORY_KEY, JSON.stringify(list.slice(0, PROMPT_HISTORY_MAX)));
+    } catch (e) { /* storage blocked or full — history is best-effort */ }
+  }
+
+  /**
+   * ↑ recalls older inputs, ↓ walks back toward (and finally restores) the
+   * unsent draft. ↑ only captures the key when the caret is at the start of
+   * the textarea (or it's empty), so arrows still navigate multi-line text.
+   * Returns true when the key was consumed.
+   */
+  function handlePromptHistoryKey(el, older) {
+    var history = loadPromptHistory();
+    if (history.length === 0) return false;
+    if (promptBrowse === null) {
+      if (!older) return false;
+      var caretAtStart = el.selectionStart === 0 && el.selectionEnd === 0;
+      if (el.value !== "" && !caretAtStart) return false;
+      promptBrowse = { index: -1, draft: el.value };
+    }
+    var next = promptBrowse.index + (older ? 1 : -1);
+    if (next >= history.length) return true; // already at the oldest entry
+    if (next < 0) {
+      el.value = promptBrowse.draft;
+      promptBrowse = null;
+      return true;
+    }
+    promptBrowse.index = next;
+    el.value = history[next];
+    el.setSelectionRange(el.value.length, el.value.length);
+    return true;
+  }
+
   // ---- running -------------------------------------------------------------
   function startRun() {
     var input = document.getElementById("input").value;
     if (!input.trim()) { setBanner("enter some input first", "info"); return; }
+    recordPromptHistory(input);
     // Validate param fields before submission
     var container = document.getElementById("paramsForm");
     if (container.style.display !== "none") {
@@ -2396,6 +2449,7 @@
   function startPlan() {
     var input = document.getElementById("input").value;
     if (!input.trim()) { setBanner("enter some input first", "info"); return; }
+    recordPromptHistory(input);
     var payload = { input: input };
     var params = collectParams();
     if (params) payload.params = params;
@@ -2522,8 +2576,13 @@
   document.getElementById("cancelBtn").addEventListener("click", cancelRun);
   document.getElementById("flushBtn").addEventListener("click", flushStaged);
   document.getElementById("input").addEventListener("keydown", function (e) {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") startRun();
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { startRun(); return; }
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      if (handlePromptHistoryKey(e.target, e.key === "ArrowUp")) e.preventDefault();
+    }
   });
+  // Typing while browsing history turns the recalled entry into the new draft.
+  document.getElementById("input").addEventListener("input", function () { promptBrowse = null; });
   document.getElementById("newWfBtn").addEventListener("click", openCreate);
   document.getElementById("historyBtn").addEventListener("click", openHistory);
   document.getElementById("configBtn").addEventListener("click", openConfigModal);

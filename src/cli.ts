@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { createAdapter } from "./agents";
-import { message, readAll, truncateLine } from "./cli-util";
+import { message, readAll, truncateLine, unknownWorkflowMessage } from "./cli-util";
 import {
   type SteamtrainConfig,
   configDisplayLabel,
@@ -51,6 +51,7 @@ import {
   listRepoWorktrees,
   mergeConflictGuidance,
   modelBreakdownForRecord,
+  planHistoryContext,
   planWorkflow,
   pruneRunWorktrees,
   resolveInputs,
@@ -251,8 +252,26 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
     case "costs":
     case "cost":
       return runCostsCommand(rest, cwd, out, err);
-    case "run":
+    case "run": {
+      // `run --dry-run` resolves and prints the plan instead of running —
+      // same output as `workflow plan`. Run-only execution flags are dropped
+      // (a dry run never touches the cache, detaches, or hits an approval).
+      if (rest.includes("--dry-run")) {
+        const runOnly = new Set(["--dry-run", "--fresh", "--detach", "-d", "--approve-all"]);
+        const planArgs: string[] = [];
+        for (let i = 0; i < rest.length; i++) {
+          const arg = rest[i];
+          if (arg === undefined || runOnly.has(arg)) continue;
+          if (arg === "--on-approval") {
+            i += 1;
+            continue;
+          }
+          planArgs.push(arg);
+        }
+        return planCommand(orchestrator, planArgs, io, out, err);
+      }
       return runWorkflowCommand(orchestrator, config, rest, io, out, err);
+    }
     case "attach":
       return runAttachCommand(rest, cwd, out, err);
     case "runs":
@@ -308,7 +327,7 @@ function validateWorkflows(
 
   for (const [workflowName, spec] of entries) {
     if (!spec) {
-      err(`unknown workflow '${workflowName}'\n`);
+      err(`${unknownWorkflowMessage(workflowName, Object.keys(workflows))}\n`);
       return 1;
     }
     const result = validateWorkflow(spec);
@@ -391,7 +410,7 @@ async function planCommand(
 
   const spec = orchestrator.listWorkflows()[name];
   if (!spec) {
-    err(`unknown workflow '${name}'\n`);
+    err(`${unknownWorkflowMessage(name, Object.keys(orchestrator.listWorkflows()))}\n`);
     return 1;
   }
 
@@ -403,8 +422,16 @@ async function planCommand(
 
   const plan = planWorkflow(spec, input.trim(), resolved.values);
 
+  // Recorded runs give the plan real numbers ("this cost $0.30 last time")
+  // instead of a guess; a missing/empty history simply omits the line.
+  const cwd = io.cwd ?? process.cwd();
+  const history = await createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR))
+    .list()
+    .then((summaries) => planHistoryContext(summaries, name))
+    .catch(() => null);
+
   if (options.json) {
-    out(`${JSON.stringify(plan, null, 2)}\n`);
+    out(`${JSON.stringify(history ? { ...plan, history } : plan, null, 2)}\n`);
     return plan.ok ? 0 : 1;
   }
 
@@ -430,6 +457,13 @@ async function planCommand(
   if (plan.agents.length > 0) out(`  agents: ${plan.agents.join(", ")}\n`);
   if (plan.apis.length > 0) out(`  apis: ${plan.apis.join(", ")}\n`);
   if (plan.maxCostUsd !== undefined) out(`  budget: $${plan.maxCostUsd.toFixed(2)}\n`);
+  if (history) {
+    out(
+      `  history: ${history.runs} completed run${history.runs === 1 ? "" : "s"} · avg cost ${formatUsd(history.avgCostUsd)}` +
+        `${history.runs > 1 ? ` (range ${formatUsd(history.minCostUsd)}–${formatUsd(history.maxCostUsd)})` : ""}` +
+        ` · avg duration ${(history.avgDurationMs / 1000).toFixed(1)}s\n`,
+    );
+  }
 
   // forEach expansion.
   for (const fe of plan.forEachSteps) {
@@ -514,7 +548,7 @@ async function runCacheCommand(
 
   const spec = orchestrator.listWorkflows()[options.workflow];
   if (!spec) {
-    err(`unknown workflow '${options.workflow}'\n`);
+    err(`${unknownWorkflowMessage(options.workflow, Object.keys(orchestrator.listWorkflows()))}\n`);
     return 1;
   }
 
@@ -1308,8 +1342,8 @@ Usage:
   steamtrain workflow validate [name]
   steamtrain workflow plan <name> --input <text> [--param key=value ...] [--json]
   steamtrain workflow plan <name> --stdin [--param key=value ...] [--json]
-  steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--detach] [--approve-all | --on-approval fail|stop]
-  steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh] [--detach] [--approve-all | --on-approval fail|stop]
+  steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--approve-all | --on-approval fail|stop]
+  steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--approve-all | --on-approval fail|stop]
   steamtrain workflow run --from <runId> [--retry-failed] [--param key=value ...] [--input <text>] [--json] [--detach]
   steamtrain workflow attach [<runId>] [--json]
   steamtrain workflow runs [--all] [--json]

@@ -1,3 +1,4 @@
+import { closestMatch } from "../util/did-you-mean";
 import { agentCommand } from "./builtins/agent";
 import { agentsCommand } from "./builtins/agents";
 import { apiCommand } from "./builtins/api";
@@ -10,6 +11,7 @@ import { deleteWorkflowCommand } from "./builtins/delete-workflow";
 import { describeWorkflowCommand } from "./builtins/describe-workflow";
 import { effortCommand } from "./builtins/effort";
 import { exitCommand } from "./builtins/exit";
+import { helpCommand } from "./builtins/help";
 import { historyCommand } from "./builtins/history";
 import { modelCommand } from "./builtins/model";
 import { promptCommand } from "./builtins/prompt";
@@ -22,6 +24,7 @@ import { parseSlashInput, slashCommandArgs } from "./parse";
 import type { SlashCommand, SlashCommandContext, SlashCommandResult } from "./types";
 
 const BUILTIN_COMMANDS: SlashCommand[] = [
+  helpCommand,
   exitCommand,
   versionCommand,
   modelCommand,
@@ -68,6 +71,30 @@ export function isRegisteredSlashCommand(raw: string): boolean {
   return registry.some((c) => c.name === parsed.command);
 }
 
+/** Bare command-name shape: `/hlep` is a typo'd command; `/path/to/file` is prose. */
+const COMMAND_NAME_RE = /^[a-zA-Z][a-zA-Z0-9-]*$/;
+
+/**
+ * Non-null when the input looks like a slash command but matches no registered
+ * command. Callers must surface this as an error instead of falling through to
+ * normal dispatch — a typo'd /command must never launch a run.
+ */
+export function unknownSlashCommand(raw: string): { name: string; suggestion?: string } | null {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("/")) return null;
+  const parsed = parseSlashInput(trimmed);
+  if (!parsed || parsed.command.length === 0) return null;
+  if (!COMMAND_NAME_RE.test(parsed.command)) return null;
+  if (registry.some((c) => c.name === parsed.command)) return null;
+  return {
+    name: parsed.command,
+    suggestion: closestMatch(
+      parsed.command,
+      registry.map((c) => c.name),
+    ),
+  };
+}
+
 export function executeSlashCommand(
   raw: string,
   ctx: SlashCommandContext,
@@ -85,7 +112,7 @@ export function executeSlashCommand(
       notices: [
         {
           level: "info",
-          text: `commands: ${registry.map((c) => `/${c.name}`).join(", ")} (Tab to complete)`,
+          text: `commands: ${registry.map((c) => `/${c.name}`).join(", ")} (Tab to complete · /help for keys)`,
         },
       ],
     };

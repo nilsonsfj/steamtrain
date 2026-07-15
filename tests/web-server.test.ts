@@ -220,6 +220,19 @@ describe("web server", () => {
     expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
   });
 
+  it("serves a favicon (inline link tag + /favicon.ico route, no auth required)", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+
+    const html = await (await fetch(`${base}/`)).text();
+    expect(html).toContain('<link rel="icon" href="data:image/svg+xml,');
+
+    const icon = await fetch(`${base}/favicon.ico`);
+    expect(icon.status).toBe(200);
+    expect(icon.headers.get("content-type")).toBe("image/svg+xml");
+    expect(await icon.text()).toContain("<svg");
+  });
+
   it("serves static app.js and app.css with immutable caching headers", async () => {
     const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);

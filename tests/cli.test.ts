@@ -165,6 +165,24 @@ describe("runCli", () => {
 
     expect(code).toBe(1);
     expect(c.stderr).toContain("unknown workflow 'missing'");
+    expect(c.stderr).toContain("workflow list");
+  });
+
+  it("suggests the nearest workflow name for a typo", async () => {
+    const c = capture();
+    const code = await runCli(["workflow", "run", "tuor", "--input", "hi"], c.io);
+
+    expect(code).toBe(1);
+    expect(c.stderr).toContain("unknown workflow 'tuor'");
+    expect(c.stderr).toContain("did you mean 'tour'?");
+  });
+
+  it("suggests a prefix completion for a partial workflow name", async () => {
+    const c = capture();
+    const code = await runCli(["workflow", "plan", "bug", "--input", "hi"], c.io);
+
+    expect(code).toBe(1);
+    expect(c.stderr).toContain("did you mean 'bug-hunt'?");
   });
 
   it("plans a bundled workflow with --input", async () => {
@@ -206,6 +224,47 @@ describe("runCli", () => {
 
     expect(code).toBe(1);
     expect(c.stderr).toContain("requires --input");
+  });
+
+  it("shows recorded-run cost context in the plan once history exists", async () => {
+    const c = capture();
+    await runCli(["workflow", "run", "tour", "--input", "all aboard"], c.io);
+    const planned = capture();
+    planned.io.cwd = c.io.cwd; // same repo → same .steamtrain/history
+    const code = await runCli(["workflow", "plan", "tour", "--input", "all aboard"], planned.io);
+
+    expect(code).toBe(0);
+    expect(planned.stdout).toMatch(/history: 1 completed run · avg cost \$\d/);
+
+    const json = capture();
+    json.io.cwd = c.io.cwd;
+    await runCli(["workflow", "plan", "tour", "--input", "all aboard", "--json"], json.io);
+    const parsed = JSON.parse(json.stdout);
+    expect(parsed.history.runs).toBe(1);
+  });
+
+  it("treats run --dry-run as a plan (nothing executes, no history)", async () => {
+    const c = capture();
+    const code = await runCli(
+      ["workflow", "run", "tour", "--input", "all aboard", "--dry-run", "--fresh"],
+      c.io,
+    );
+
+    expect(code).toBe(0);
+    expect(c.stdout).toContain("plan: tour");
+    expect(c.stdout).not.toContain("workflow done");
+    expect(existsSync(join(c.io.cwd, WORKFLOW_HISTORY_DIR))).toBe(false);
+  });
+
+  it("drops --on-approval and its value from a --dry-run", async () => {
+    const c = capture();
+    const code = await runCli(
+      ["workflow", "run", "tour", "--input", "hi", "--dry-run", "--on-approval", "fail"],
+      c.io,
+    );
+
+    expect(code).toBe(0);
+    expect(c.stdout).toContain("plan: tour");
   });
 
   it("accepts --dry-run as alias for plan", async () => {

@@ -24,7 +24,8 @@ config page manages both [agent instances](agent-configuration.md) and the
 - **Sidebar** — every workflow (bundled / user / project), tagged by source, with
   a one-line block summary (`fan-out · worker · merge …`).
 - **Run bar** — the selected workflow's title/description, an input box
-  (`Cmd/Ctrl+Enter` to launch), a `fresh` toggle (ignore the resume cache), a
+  (`Cmd/Ctrl+Enter` to launch; `↑`/`↓` recall previous Run/Plan inputs, stored
+  in the browser's localStorage), a `fresh` toggle (ignore the resume cache), a
   live elapsed timer, and a step-progress bar.
 - **Pipeline canvas** — phases stack vertically (they run sequentially); within a
   phase, steps render as parallel **cards**. Each card is color-coded by block

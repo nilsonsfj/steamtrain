@@ -18,6 +18,16 @@ import { loadWorkspaceConfig, workspaceScopeLabel } from "./workspace";
  * With no args, loads project config (defaults + optional steamtrain.json),
  * user workflows (~/.steamtrain/workflows.json), workspace presets, then renders the TUI.
  */
+// `steamtrain workflow list | head` closes stdout early; without a handler
+// the resulting EPIPE is an unhandled 'error' event that crashes with a stack
+// trace. Downstream closing the pipe is normal — end quietly like other CLIs.
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code === "EPIPE") process.exit(0);
+    throw error;
+  });
+}
+
 async function main(): Promise<void> {
   const {
     args,
