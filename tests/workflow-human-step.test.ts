@@ -343,6 +343,16 @@ describe("human step engine", () => {
   });
 });
 
+describe("capHumanInputText", () => {
+  it("passes short text through and truncates long text with a marker", async () => {
+    const { capHumanInputText } = await import("../src/workflow/human-input");
+    expect(capHumanInputText("short", 100)).toBe("short");
+    const capped = capHumanInputText("x".repeat(150), 100);
+    expect(capped.startsWith("x".repeat(100))).toBe(true);
+    expect(capped).toContain("[truncated 50 chars]");
+  });
+});
+
 describe("human input value validation", () => {
   it("accepts exact choice text and 1-based indexes", () => {
     expect(validateHumanInputValue("blue", { choices: ["blue", "green"] })).toMatchObject({

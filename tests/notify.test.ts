@@ -150,6 +150,22 @@ describe("notifyWorkflowEvent", () => {
     expect(out[3]!.url).toBe("http://localhost:4600/#run-r");
   });
 
+  it("labels agent questions distinctly from human-step asks", () => {
+    const out = collectNotifications([
+      {
+        kind: "human_input_pending",
+        phaseId: "p",
+        stepId: "impl",
+        attempt: 1,
+        prompt: "which auth flow?",
+        origin: "agent-question",
+        ts: 1,
+      },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.detail).toBe("agent question at 'impl': which auth flow?");
+  });
+
   it("maps a failed run to run-failed and ignores stream chatter", () => {
     const out = collectNotifications([
       {

@@ -45,7 +45,7 @@ function stepAutonomy(step: WorkflowStep): WorkflowAutonomy {
     return "interactive";
   }
   if (step.kind === "approval") return "approvals";
-  if (step.kind === "gate" && step.condition.human === true) return "approvals";
+  if (step.kind === "gate" && step.condition?.human === true) return "approvals";
   return "autonomous";
 }
 

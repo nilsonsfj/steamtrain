@@ -80,11 +80,15 @@ describe("workflowAutonomy", () => {
     expect(workflowAutonomy(a, (name) => (name === "b" ? b : a))).toBe("autonomous");
   });
 
-  it("labels are defined for every level", () => {
+  it("labels and badges are the exact strings every surface renders", () => {
+    expect(autonomyLabel("autonomous")).toBe("fully autonomous");
+    expect(autonomyLabel("approvals")).toBe("needs approvals");
+    expect(autonomyLabel("interactive")).toBe("needs human input");
+    expect(autonomyBadge("autonomous")).toBe("▸ autonomous");
+    expect(autonomyBadge("approvals")).toBe("✋ approvals");
+    expect(autonomyBadge("interactive")).toBe("✎ interactive");
     for (const level of ["autonomous", "approvals", "interactive"] as const) {
-      expect(autonomyLabel(level)).toBeTruthy();
-      expect(autonomyBadge(level)).toBeTruthy();
-      expect(autonomyDescription(level)).toBeTruthy();
+      expect(autonomyDescription(level).length).toBeGreaterThan(20);
     }
   });
 });
