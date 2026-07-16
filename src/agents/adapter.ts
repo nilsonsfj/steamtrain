@@ -16,6 +16,13 @@ export interface AgentRunOptions {
   extraArgs?: string[];
   /** Configured instance id to stamp on normalized events. Defaults to provider id. */
   agentId?: AgentInstanceId;
+  /**
+   * Resume a previously recorded CLI session (captured from `session_start`)
+   * instead of starting fresh, so the new prompt continues that conversation.
+   * Honored only by adapters that declare {@link AgentAdapter.supportsResume};
+   * others ignore it (callers must compose a self-contained prompt for them).
+   */
+  resumeSessionId?: string;
 }
 
 /**
@@ -26,6 +33,11 @@ export interface AgentAdapter {
   readonly id: AgentId;
   readonly binary: string;
   readonly defaultModel: string;
+  /**
+   * True when {@link AgentRunOptions.resumeSessionId} is honored (the CLI can
+   * continue a recorded session). Absent/false ⇒ resume requests are ignored.
+   */
+  readonly supportsResume?: boolean;
   run(opts: AgentRunOptions): AsyncIterable<AgentEvent>;
 }
 

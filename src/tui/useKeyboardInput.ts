@@ -28,6 +28,8 @@ export interface UseKeyboardInputParams {
   stepEditorOpen: boolean;
   /** True while the mid-run (paused) step editor overlay owns the keyboard. */
   runEditorOpen: boolean;
+  /** True while the human-input answer box overlay owns the keyboard. */
+  answerInputOpen: boolean;
   /** True while the input form overlay owns the keyboard. */
   inputFormPending: boolean;
   /** True while the /help overlay owns the keyboard. */
@@ -36,6 +38,8 @@ export interface UseKeyboardInputParams {
   openAgentManager: () => void;
   /** Open the mid-run editor for the selected pending step (paused runs). */
   openRunStepEditor: () => void;
+  /** Open the answer box for the run's oldest pending human-input request. */
+  openAnswerInput: () => void;
   focusCreateWorkflowPrompt: (seed: string) => void;
   switchMode: (next: React.SetStateAction<Mode>) => void;
 }
@@ -97,6 +101,8 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
         if (cur.stepEditorOpen) return;
         // Same for the mid-run (paused) step editor.
         if (cur.runEditorOpen) return;
+        // Same for the human-input answer box.
+        if (cur.answerInputOpen) return;
         // While the input form is active, its own useInput handler owns keys.
         if (cur.inputFormPending) return;
         // The /help overlay is read-only: any dismiss key closes it, and it
@@ -298,6 +304,12 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
           if (pending && pending.length > 0) {
             const next = pending[0]!;
             runner.resolveApproval(next.stepId, input === "a", next.iteration);
+            return;
+          }
+          // With no approval pending, `a` answers the oldest pending
+          // human-input request (human step / agent question) instead.
+          if (input === "a" && runner.wf.pendingInputs && runner.wf.pendingInputs.length > 0) {
+            cur.openAnswerInput();
             return;
           }
         }

@@ -233,6 +233,8 @@ export class ClaudeCodeAdapter implements AgentAdapter {
   readonly id: AgentId = AGENT;
   readonly binary: string;
   readonly defaultModel = "claude-sonnet-5";
+  /** `claude --resume <sessionId>` continues a recorded session headlessly. */
+  readonly supportsResume = true;
 
   constructor(binary = "claude") {
     this.binary = binary;
@@ -248,6 +250,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       "--model",
       opts.model,
       ...(opts.effort ? ["--effort", opts.effort] : []),
+      ...(opts.resumeSessionId ? ["--resume", opts.resumeSessionId] : []),
       ...(opts.extraArgs ?? []),
     ];
     return runAgentProcess({

@@ -123,6 +123,14 @@ cost, and a deep link to the web-UI run page.
 glue that makes approval gates and detached runs usable rather than just
 possible.
 
+> **Shipped:** the `notify` config block — `bell` (terminal BEL), `desktop`
+> (`notify-send` / `osascript`), `webhook` (JSON POST), with an `events`
+> allowlist over run-completed / run-failed / budget-exceeded /
+> approval-pending / input-pending. Fired by whichever process owns the run
+> (CLI, TUI, web server; web notifications deep-link to the run page), never
+> by attached viewers. See
+> [`human-in-the-loop.md`](human-in-the-loop.md#notifications-notify).
+
 ## 1.6 Workflow sharing: import/export and a community catalog
 
 **The gap:** workflows live in `steamtrain.json` (project) or the user layer;

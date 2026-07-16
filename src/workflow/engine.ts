@@ -22,6 +22,18 @@ import type { StepEditPatch, WorkflowRunControl } from "./control";
 import { addTokens } from "./cost";
 import type { WorkflowEvent } from "./events";
 import { mergeConflictGuidance } from "./gc";
+import {
+  HUMAN_INPUT_MAX_ATTEMPTS,
+  HUMAN_INPUT_PROMPT_CAP,
+  HUMAN_INPUT_VALUE_CAP,
+  type HumanInputOrigin,
+  type HumanInputProvider,
+  type HumanInputRequest,
+  type HumanInputResponse,
+  capHumanInputText,
+  noProviderHumanInputResponse,
+  validateHumanInputValue,
+} from "./human-input";
 import { type LlmCallResult, type LlmComplete, type LlmProviderId, callLlm } from "./llm";
 import {
   type ConflictResolver,
@@ -55,6 +67,7 @@ import {
   DEFAULT_LOOP_MAX_ITERATIONS,
   type GateCondition,
   type GateStep,
+  type HumanStep,
   type LlmPricing,
   type LlmStep,
   MAX_CONCURRENCY,
@@ -124,6 +137,15 @@ export interface WorkflowDeps {
    * rather than hanging.
    */
   requestApproval?: ApprovalProvider;
+  /**
+   * Resolves a pending human-input request (a `human` step, or a `canAsk`
+   * agent step's clarifying question). Injected per surface: the TUI resolves
+   * from an inline answer box, the web UI on a `POST /api/runs/:id/input`, the
+   * headless CLI immediately from `--human <stepId>=<value>` values. Omitted ⇒
+   * the engine cancels every request with guidance (see
+   * {@link noProviderHumanInputResponse}) rather than hanging.
+   */
+  requestHumanInput?: HumanInputProvider;
   /**
    * Mid-run steering handle (pause / edit pending steps / resume). Injected per
    * run by the driver; the engine binds validation hooks at run start, stops
@@ -379,6 +401,7 @@ const PROMPT_EDITABLE_KINDS: ReadonlySet<string> = new Set([
   "llm",
   "consolidator",
   "approval",
+  "human",
 ]);
 
 /**
@@ -1440,6 +1463,10 @@ async function executeStep(
     return executeApproval(step, ctx, hooks);
   }
 
+  if (kind === "human" && step.kind === "human") {
+    return { result: await executeHumanStep(step, ctx, hooks) };
+  }
+
   if (kind === "gate" && step.kind === "gate") {
     if (step.condition.human) return executeApproval(step, ctx, hooks);
     const started = Date.now();
@@ -1498,22 +1525,28 @@ async function runAgentAttempt(
   item: WorkflowItem | undefined,
   prompt: string,
   stepCwd: string,
+  resumeSessionId?: string,
 ): Promise<{ result: StepResult; retryable: boolean }> {
   const started = Date.now();
   let finalText = "";
   let streamedText = "";
   let costUsd: number | undefined;
   let tokens: TokenUsage | undefined;
+  let sessionId: string | undefined;
   let errored = false;
   let errorMessage: string | undefined;
   let sawResult = false;
   let sawToolUse = false;
 
   try {
-    for await (const event of adapterRun(step, ctx, stepCwd, prompt)) {
+    for await (const event of adapterRun(step, ctx, stepCwd, prompt, resumeSessionId)) {
       hooks.pushAgentEvent(stepId, event);
       if (event.kind === "text_delta") {
         if (!event.thinking) streamedText += event.text;
+      } else if (event.kind === "session_start") {
+        // Captured for session continuity: `canAsk` answers resume this
+        // session, and `workflow takeover` drops a human into it.
+        if (event.sessionId) sessionId = event.sessionId;
       } else if (event.kind === "tool_use" || event.kind === "tool_result") {
         // The agent invoked a tool — assume it may have caused a side effect.
         sawToolUse = true;
@@ -1572,6 +1605,7 @@ async function runAgentAttempt(
       durationMs: Date.now() - started,
       costUsd,
       tokens,
+      sessionId,
     },
     // Transient + side-effect-free: errored, not cancelled, and the agent neither
     // completed a turn (`result`) nor invoked a tool (`tool_use`/`tool_result`),
@@ -1585,6 +1619,7 @@ function adapterRun(
   ctx: ExecuteContext,
   stepCwd: string,
   prompt: string,
+  resumeSessionId?: string,
 ): AsyncIterable<AgentEvent> {
   const instance = resolveAgentInstance(ctx.deps.agentConfig, step.agent);
   if (!instance) throw new Error(`agent '${step.agent}' is disabled or not configured`);
@@ -1606,7 +1641,16 @@ function adapterRun(
     agentId: instance.id,
     timeoutMs: timeoutMsFromSec(timeoutSec),
     signal: ctx.signal,
+    resumeSessionId,
   });
+}
+
+/** Whether a step's configured adapter can resume a recorded session natively. */
+function adapterSupportsResume(step: AgentBackedWorkflowStep, ctx: ExecuteContext): boolean {
+  const instance = resolveAgentInstance(ctx.deps.agentConfig, step.agent);
+  if (!instance) return false;
+  const adapter = ctx.deps.createAdapter(instance.provider, instance.binary);
+  return adapter.supportsResume === true;
 }
 
 /** Sleep `ms`, resolving early if the signal aborts. */
@@ -1642,7 +1686,15 @@ async function executeAgentStep(
     iteration: ctx.iteration,
   });
   const outputSchema = step.output;
-  const prompt = outputSchema ? withStructuredOutputInstructions(rendered, outputSchema) : rendered;
+  const kindForAsk = workflowStepKind(step);
+  const canAsk =
+    (kindForAsk === "worker" || kindForAsk === "processor") &&
+    "canAsk" in step &&
+    step.canAsk === true;
+  const withSchema = outputSchema
+    ? withStructuredOutputInstructions(rendered, outputSchema)
+    : rendered;
+  const prompt = canAsk ? withSchema + AGENT_QUESTION_PROTOCOL : withSchema;
   const stepCwd = step.cwd ? resolvePath(ctx.deps.cwd, step.cwd) : ctx.deps.cwd;
   const workspaceStarted = Date.now();
   let workspace: AgentWorkspaceLease;
@@ -1709,6 +1761,22 @@ async function executeAgentStep(
           { ...result, attempts: attempt, durationMs: Date.now() - firstStarted },
           workspace,
           stepCwd,
+        );
+      }
+    }
+    if (canAsk && result.ok) {
+      const question = parseAgentQuestion(result.output);
+      if (question) {
+        result = await continueAfterAgentQuestion(
+          step,
+          ctx,
+          hooks,
+          stepId,
+          item,
+          result,
+          question,
+          workspace.cwd,
+          prompt,
         );
       }
     }
@@ -1813,6 +1881,82 @@ async function enforceStructuredOutput(
     },
     attempt: attempt + 1,
   };
+}
+
+/**
+ * Handle a `canAsk` step's clarifying question: surface it through the shared
+ * human-input channel, then continue the agent with the answer — resuming its
+ * recorded session where the adapter supports it (the agent keeps every bit of
+ * context it built up), otherwise re-running with the original prompt plus the
+ * Q&A appended (self-contained, works for every adapter). Costs and tokens of
+ * both turns are summed; the exchange is recorded on `result.questions`.
+ *
+ * Bounded to ONE question per step: a continuation that asks again fails the
+ * step rather than looping a pipeline into a conversation.
+ */
+async function continueAfterAgentQuestion(
+  step: AgentBackedWorkflowStep,
+  ctx: ExecuteContext,
+  hooks: ExecuteHooks,
+  stepId: string,
+  item: WorkflowItem | undefined,
+  result: StepResult,
+  question: string,
+  workspaceCwd: string,
+  originalPrompt: string,
+): Promise<StepResult> {
+  const ask = await askHuman(ctx, hooks, {
+    stepId,
+    prompt: question,
+    origin: "agent-question",
+  });
+  if (!ask.ok) {
+    return {
+      ...result,
+      ok: false,
+      error: `clarifying question unanswered: ${ask.error}`,
+      questions: [{ question, answer: "", by: undefined }],
+    };
+  }
+
+  const resumable = Boolean(result.sessionId) && adapterSupportsResume(step, ctx);
+  const continuationPrompt = resumable
+    ? `Answer to your question: ${ask.output}\n\nContinue and complete the original task. Do not ask further questions.`
+    : `${originalPrompt}\n\nYou previously asked:\nQUESTION: ${question}\nAnswer: ${ask.output}\n\nContinue and complete the task. Do not ask further questions.`;
+  const continuation = await runAgentAttempt(
+    step,
+    ctx,
+    hooks,
+    stepId,
+    item,
+    continuationPrompt,
+    workspaceCwd,
+    resumable ? result.sessionId : undefined,
+  );
+
+  const costUsd =
+    result.costUsd === undefined && continuation.result.costUsd === undefined
+      ? undefined
+      : (result.costUsd ?? 0) + (continuation.result.costUsd ?? 0);
+  const tokens =
+    result.tokens || continuation.result.tokens
+      ? addTokens(result.tokens, continuation.result.tokens)
+      : undefined;
+  const questions = [{ question, answer: ask.output, by: ask.by }];
+  const merged: StepResult = {
+    ...continuation.result,
+    costUsd,
+    tokens,
+    questions,
+    sessionId: continuation.result.sessionId ?? result.sessionId,
+    durationMs: result.durationMs + continuation.result.durationMs,
+  };
+  if (merged.ok && parseAgentQuestion(merged.output)) {
+    const message =
+      "the agent asked a second clarifying question — canAsk allows one per step (split the step, or enrich its prompt/context)";
+    return { ...merged, ok: false, error: message };
+  }
+  return merged;
 }
 
 /** The lease's worktree metadata, or undefined when the step runs in the plain cwd. */
@@ -2796,6 +2940,17 @@ async function executeWorkflowStep(
           stepId: namespace(event.stepId),
         });
         break;
+      // Human-input requests (human steps / canAsk questions) must surface at
+      // the parent level like approvals do, or a nested ask would block the
+      // child run with no UI able to discover or answer it.
+      case "human_input_pending":
+      case "human_input_resolved":
+        hooks.pushWorkflowEvent({
+          ...event,
+          phaseId: namespace(event.phaseId),
+          stepId: namespace(event.stepId),
+        });
+        break;
       case "fan_out":
         hooks.pushWorkflowEvent({
           ...event,
@@ -3466,6 +3621,242 @@ function requestApprovalWithAbort(
       },
     );
   });
+}
+
+// ── human input (`human` steps + `canAsk` clarifying questions) ─────────────
+
+/** A canceled-mid-wait response: no value will arrive. */
+function canceledHumanInputResponse(): HumanInputResponse {
+  return { canceled: true, by: "auto:canceled", reason: "run canceled before an answer" };
+}
+
+/**
+ * Await the human-input provider, but settle as canceled if `signal` aborts
+ * first — so a cancel during a pending question unblocks the run instead of
+ * hanging on a UI that will never answer. Mirrors
+ * {@link requestApprovalWithAbort}.
+ */
+function requestHumanInputWithAbort(
+  provider: HumanInputProvider,
+  request: HumanInputRequest,
+  signal?: AbortSignal,
+): Promise<HumanInputResponse> {
+  if (!signal) return provider(request);
+  if (signal.aborted) return Promise.resolve(canceledHumanInputResponse());
+  return new Promise<HumanInputResponse>((resolve, reject) => {
+    let settled = false;
+    const onAbort = (): void => {
+      if (settled) return;
+      settled = true;
+      resolve(canceledHumanInputResponse());
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    provider(request, signal).then(
+      (response) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        resolve(response);
+      },
+      (err) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
+interface AskHumanSpec {
+  stepId: string;
+  /** Rendered instructions / question (uncapped; capped here for transport). */
+  prompt: string;
+  choices?: string[];
+  outputSchema?: JsonSchema;
+  origin: HumanInputOrigin;
+}
+
+type AskHumanOutcome =
+  | { ok: true; output: string; json?: unknown; by?: string }
+  | { ok: false; error: string };
+
+/**
+ * The shared ask loop behind `human` steps and `canAsk` clarifying questions:
+ * emit `human_input_pending`, await the injected provider (racing the abort
+ * signal), validate the answer against the step's contract, and re-ask (up to
+ * {@link HUMAN_INPUT_MAX_ATTEMPTS}, with `retryError` explaining the
+ * rejection) when it doesn't fit. Each re-ask supersedes the previous pending
+ * event for the same step+iteration; a matching `human_input_resolved` is
+ * emitted exactly once — when an answer is accepted, or when the ask ends
+ * without one (canceled, or attempts exhausted).
+ */
+async function askHuman(
+  ctx: ExecuteContext,
+  hooks: ExecuteHooks,
+  spec: AskHumanSpec,
+): Promise<AskHumanOutcome> {
+  const prompt = capHumanInputText(spec.prompt, HUMAN_INPUT_PROMPT_CAP);
+  const resolvedBase = {
+    kind: "human_input_resolved" as const,
+    phaseId: hooks.phaseId,
+    stepId: spec.stepId,
+    origin: spec.origin,
+    iteration: ctx.iteration,
+  };
+  let retryError: string | undefined;
+  let lastBy: string | undefined;
+  for (let attempt = 1; attempt <= HUMAN_INPUT_MAX_ATTEMPTS; attempt++) {
+    const request: HumanInputRequest = {
+      stepId: spec.stepId,
+      phaseId: hooks.phaseId,
+      iteration: ctx.iteration,
+      attempt,
+      prompt,
+      choices: spec.choices,
+      outputSchema: spec.outputSchema,
+      origin: spec.origin,
+      retryError,
+    };
+    hooks.pushWorkflowEvent({
+      kind: "human_input_pending",
+      phaseId: hooks.phaseId,
+      stepId: spec.stepId,
+      attempt,
+      prompt,
+      choices: spec.choices,
+      outputSchema: spec.outputSchema,
+      origin: spec.origin,
+      retryError,
+      iteration: ctx.iteration,
+      ts: Date.now(),
+    });
+
+    const provider = ctx.deps.requestHumanInput;
+    let response: HumanInputResponse;
+    if (provider) {
+      try {
+        response = await requestHumanInputWithAbort(provider, request, ctx.signal);
+      } catch (err) {
+        // A provider that rejects must not crash the run: treat it as canceled
+        // so the step still emits human_input_resolved and settles cleanly.
+        response = {
+          canceled: true,
+          by: "auto:provider-error",
+          reason: `human-input provider failed: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    } else {
+      response = noProviderHumanInputResponse(request);
+    }
+
+    if (response.canceled) {
+      hooks.pushWorkflowEvent({ ...resolvedBase, canceled: true, by: response.by, ts: Date.now() });
+      return { ok: false, error: response.reason ?? "human input canceled" };
+    }
+    lastBy = response.by;
+    const validation = validateHumanInputValue(response.value, {
+      choices: spec.choices,
+      outputSchema: spec.outputSchema,
+    });
+    if (validation.ok) {
+      hooks.pushWorkflowEvent({
+        ...resolvedBase,
+        value: capHumanInputText(validation.output, HUMAN_INPUT_VALUE_CAP),
+        by: response.by,
+        ts: Date.now(),
+      });
+      return { ok: true, output: validation.output, json: validation.json, by: response.by };
+    }
+    retryError = validation.error;
+  }
+  hooks.pushWorkflowEvent({ ...resolvedBase, canceled: true, by: lastBy, ts: Date.now() });
+  return {
+    ok: false,
+    error: `no acceptable answer after ${HUMAN_INPUT_MAX_ATTEMPTS} attempts: ${retryError}`,
+  };
+}
+
+/**
+ * Execute a `human` step: render the prompt (and choices), ask through the
+ * injected provider, validate, and return the accepted value as the step's
+ * result. Accepted answers ARE cached (unlike approval decisions) — they are
+ * data, so a resumed run replays them instead of re-asking.
+ */
+async function executeHumanStep(
+  step: HumanStep,
+  ctx: ExecuteContext,
+  hooks: ExecuteHooks,
+): Promise<StepResult> {
+  const started = Date.now();
+  const templateContext = {
+    input: ctx.input,
+    inputs: ctx.inputs,
+    outputs: ctx.outputs,
+    results: ctx.results,
+    iteration: ctx.iteration,
+  };
+  const prompt = renderPrompt(step.prompt, templateContext);
+  let choices: string[] | undefined;
+  if (step.choices) {
+    choices = step.choices.map((choice) => renderPrompt(choice, templateContext).trim());
+    if (choices.some((choice) => !choice)) {
+      const message = `human step '${step.id}' has a choice that rendered empty`;
+      return {
+        stepId: step.id,
+        ok: false,
+        output: message,
+        error: message,
+        durationMs: Date.now() - started,
+      };
+    }
+  }
+  const ask = await askHuman(ctx, hooks, {
+    stepId: step.id,
+    prompt,
+    choices,
+    outputSchema: step.output,
+    origin: "human-step",
+  });
+  if (!ask.ok) {
+    return {
+      stepId: step.id,
+      ok: false,
+      output: ask.error,
+      error: ask.error,
+      durationMs: Date.now() - started,
+    };
+  }
+  return {
+    stepId: step.id,
+    ok: true,
+    output: ask.output,
+    json: ask.json,
+    suppliedBy: ask.by,
+    durationMs: Date.now() - started,
+  };
+}
+
+/**
+ * The protocol line appended to a `canAsk` step's prompt. Kept terse and
+ * unambiguous: exactly one question, on a final marker line, only when
+ * genuinely blocked — so the escape hatch can't turn a pipeline into a chat.
+ */
+export const AGENT_QUESTION_PROTOCOL =
+  "\n\nIf — and only if — you are blocked on a single question you cannot resolve from the repository or the task itself, end your reply with one final line of the form:\nQUESTION: <your one question>\nOtherwise, complete the task without asking.";
+
+/**
+ * Extract a trailing clarifying question from an agent's final output: the
+ * LAST line starting with `QUESTION:` plus everything after it (a question may
+ * wrap). Returns undefined when the agent didn't ask.
+ */
+export function parseAgentQuestion(output: string): string | undefined {
+  const marker = /^QUESTION:[ \t]*(\S[\s\S]*)$/m;
+  const index = output.lastIndexOf("\nQUESTION:");
+  const from = index >= 0 ? output.slice(index + 1) : output;
+  const match = marker.exec(from);
+  const question = match?.[1]?.trim();
+  return question || undefined;
 }
 
 function evaluateGate(

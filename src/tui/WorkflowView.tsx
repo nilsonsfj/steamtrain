@@ -19,6 +19,7 @@ import { selectVisibleWindow } from "./workflow-list-window";
 import { BLOCK_LABEL, formatWorkflowAgentTarget } from "./workflow-spec-ui";
 import {
   type PendingApproval,
+  type PendingHumanInput,
   type PhaseState,
   type StepState,
   type WorkflowState,
@@ -175,6 +176,12 @@ export function WorkflowView({
         <ApprovalPrompt approval={state.pendingApprovals[0]!} width={innerWidth} />
       ) : null}
 
+      {(!state.pendingApprovals || state.pendingApprovals.length === 0) &&
+      state.pendingInputs &&
+      state.pendingInputs.length > 0 ? (
+        <HumanInputPrompt pending={state.pendingInputs[0]!} width={innerWidth} />
+      ) : null}
+
       <Box flexDirection="column" flexGrow={1}>
         {state.phases.length === 0 ? (
           <Text color="gray">starting workflow…</Text>
@@ -253,6 +260,33 @@ function ApprovalPrompt({ approval, width }: { approval: PendingApproval; width:
       <Text color="cyan">
         press <Text bold>a</Text> to approve · <Text bold>r</Text> to reject (rejection will{" "}
         {disposition})
+      </Text>
+    </Box>
+  );
+}
+
+/** Prominent banner for the human-input request the run is waiting on. */
+function HumanInputPrompt({ pending, width }: { pending: PendingHumanInput; width: number }) {
+  const originLabel = pending.origin === "agent-question" ? "agent question" : "input needed";
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1}>
+      <Text color="magenta" bold>
+        ✎ {originLabel} · {pending.stepId}
+        {pending.attempt > 1 ? ` (attempt ${pending.attempt})` : ""}
+      </Text>
+      {pending.retryError ? (
+        <Text color="red" wrap="wrap">
+          previous answer rejected: {pending.retryError}
+        </Text>
+      ) : null}
+      <Box width={width}>
+        <Text wrap="wrap">{truncate(pending.prompt.trim(), 500)}</Text>
+      </Box>
+      {pending.choices && pending.choices.length > 0 ? (
+        <Text color="gray">{pending.choices.map((c, i) => `${i + 1}) ${c}`).join("  ")}</Text>
+      ) : null}
+      <Text color="cyan">
+        press <Text bold>a</Text> to answer
       </Text>
     </Box>
   );

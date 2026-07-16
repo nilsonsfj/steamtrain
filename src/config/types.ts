@@ -5,6 +5,7 @@ import type {
   ApiInstanceId,
   ApiProviderId,
 } from "../types/events";
+import type { NotifyConfig } from "../workflow/notify";
 import {
   LOOP_MAX_ITERATIONS_CEILING,
   type LlmPricing,
@@ -34,6 +35,12 @@ export interface SteamtrainConfig {
   maxParallelRuns?: number;
   /** Default per-loop iteration cap; a loop gate's own `maxIterations` overrides it. */
   loopMaxIterations?: number;
+  /**
+   * Run notifications: terminal bell / OS desktop notification / webhook,
+   * fired on run completion, failure, budget-exceeded, and human-in-the-loop
+   * waits (approval-pending, input-pending). See `src/workflow/notify.ts`.
+   */
+  notify?: NotifyConfig;
 }
 
 export interface AgentInstanceConfig {
@@ -169,6 +176,26 @@ export const configFileSchema = z
     maxConcurrency: z.number().int().positive().max(MAX_CONCURRENCY).optional(),
     maxParallelRuns: z.number().int().min(1).max(MAX_PARALLEL_RUNS_CEILING).optional(),
     loopMaxIterations: z.number().int().min(1).max(LOOP_MAX_ITERATIONS_CEILING).optional(),
+    notify: z
+      .object({
+        bell: z.boolean().optional(),
+        desktop: z.boolean().optional(),
+        webhook: z.string().url().optional(),
+        events: z
+          .array(
+            z.enum([
+              "run-completed",
+              "run-failed",
+              "budget-exceeded",
+              "approval-pending",
+              "input-pending",
+            ]),
+          )
+          .min(1)
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

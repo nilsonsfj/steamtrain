@@ -74,6 +74,7 @@ import { HelpPanel } from "./HelpPanel";
 import { PromptInput } from "./PromptInput";
 import { StatusBar } from "./StatusBar";
 import { TaskSelector } from "./TaskSelector";
+import { WorkflowAnswerInput } from "./WorkflowAnswerInput";
 import { WorkflowCreate } from "./WorkflowCreate";
 import { WorkflowHistory } from "./WorkflowHistory";
 import { WorkflowInputForm } from "./WorkflowInputForm";
@@ -98,7 +99,7 @@ import {
   resolveInputFormSubmit,
   workflowHasDeclaredInputs,
 } from "./workflow-input-pending";
-import { flattenSteps } from "./workflow-state";
+import { type PendingHumanInput, flattenSteps } from "./workflow-state";
 import { type StepEditorTarget, stepEditorTarget } from "./workflow-step-editor";
 
 // Custom hooks — each owns a cohesive slice of state.
@@ -191,6 +192,8 @@ export function App({
   const [helpOpen, setHelpOpen] = useState(false);
   /** Non-null while the mid-run (paused) step editor overlay is open. */
   const [runEditor, setRunEditor] = useState<RunStepEditorTarget | null>(null);
+  /** Non-null while the human-input answer box is open (which request it answers). */
+  const [answerTarget, setAnswerTarget] = useState<PendingHumanInput | null>(null);
   const [apiDoctor, setApiDoctor] = useState<ApiDoctorResult[] | null>(null);
   const [runtimeConfigSource, setRuntimeConfigSource] = useState(configSource);
   const [activeWorkspaceLabel, setActiveWorkspaceLabel] = useState(workspaceLabel);
@@ -640,6 +643,38 @@ export function App({
   useEffect(() => {
     if (runEditor && (!runner.running || !runner.wf.paused)) setRunEditor(null);
   }, [runEditor, runner.running, runner.wf.paused]);
+
+  // ── Human-input answer box (`a` while a run is waiting on an answer) ──
+  const openAnswerInput = useCallback(() => {
+    if (mode !== "workflow" || !runner.running) return;
+    const pending = runner.wf.pendingInputs?.[0];
+    if (!pending) return;
+    setAnswerTarget(pending);
+  }, [mode, runner.running, runner.wf.pendingInputs]);
+
+  const submitAnswer = useCallback(
+    (value: string) => {
+      if (!answerTarget) return;
+      runner.answerHumanInput(answerTarget.stepId, value, answerTarget.iteration);
+    },
+    [answerTarget, runner.answerHumanInput],
+  );
+
+  // Track the live pending list: when the request resolves (or is superseded
+  // by a re-ask with a validation error), refresh or close the box so it never
+  // shows a stale ask.
+  useEffect(() => {
+    if (!answerTarget) return;
+    if (!runner.running) {
+      setAnswerTarget(null);
+      return;
+    }
+    const current = runner.wf.pendingInputs?.find(
+      (p) => p.stepId === answerTarget.stepId && p.iteration === answerTarget.iteration,
+    );
+    if (!current) setAnswerTarget(null);
+    else if (current !== answerTarget) setAnswerTarget(current);
+  }, [answerTarget, runner.running, runner.wf.pendingInputs]);
 
   // ── History hook ─────────────────────────────────────────────────────
   const historyHook = useHistory({
@@ -1341,6 +1376,7 @@ export function App({
     apiManagerOpen,
     stepEditorOpen,
     runEditorOpen: runEditor !== null,
+    answerInputOpen: answerTarget !== null,
     inputFormPending: inputFormPending !== null,
     helpOpen,
     closeHelp: () => setHelpOpen(false),
@@ -1348,6 +1384,7 @@ export function App({
       openAgentManager();
     },
     openRunStepEditor,
+    openAnswerInput,
     focusCreateWorkflowPrompt,
     switchMode: (next) => {
       setMode(next);
@@ -1447,6 +1484,14 @@ export function App({
           onApply={applyRunStepEdit}
           onClose={() => setRunEditor(null)}
         />
+      ) : answerTarget ? (
+        <WorkflowAnswerInput
+          pending={answerTarget}
+          width={columns}
+          height={streamHeight}
+          onAnswer={submitAnswer}
+          onClose={() => setAnswerTarget(null)}
+        />
       ) : helpOpen ? (
         <HelpPanel width={columns} height={streamHeight} />
       ) : inputFormPending ? (
@@ -1533,6 +1578,7 @@ export function App({
             planResult={planResult}
             showStepDetail={runner.wfShowStepDetail}
             showPlanResult={runner.wfShowPlanResult}
+            resolveWorkflow={resolveWorkflowSpec}
           />
         ) : (
           <WorkflowPicker

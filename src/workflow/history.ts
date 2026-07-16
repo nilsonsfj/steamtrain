@@ -54,6 +54,25 @@ export interface HistoryStep {
     reviewStepId?: string;
     onReject?: ApprovalRejectDisposition;
   };
+  /**
+   * Human-input outcome, when this step is a `human` step or a `canAsk` agent
+   * step that asked a clarifying question. Records the ask and who answered,
+   * so the history viewer shows the exchange. The `outputSchema` is
+   * deliberately NOT recorded: replayed records are terminal (no form to
+   * render), and the schema lives in the spec.
+   */
+  humanInput?: {
+    prompt?: string;
+    choices?: string[];
+    origin?: "human-step" | "agent-question";
+    /** The ask attempt the record settled on (>1 ⇒ earlier answers were rejected). */
+    attempt?: number;
+    /** Why the previous attempt's answer was rejected, when the last ask was a re-ask. */
+    retryError?: string;
+    value?: string;
+    by?: string;
+    canceled?: boolean;
+  };
   cached: boolean;
   /** Total attempts this step took (auto-retry); omitted/1 means it ran once. */
   attempts?: number;
@@ -73,14 +92,25 @@ export interface HistoryStep {
  * accepted step edit changed.
  */
 export interface RunIntervention {
-  kind: "paused" | "resumed" | "step-edited";
-  /** The edited step (kind `"step-edited"` only). */
+  kind: "paused" | "resumed" | "step-edited" | "takeover";
+  /** The affected step (kinds `"step-edited"` and `"takeover"`). */
   stepId?: string;
   /** The accepted patch (kind `"step-edited"` only). */
   patch?: StepEditPatch;
   /** Who acted (e.g. `"human:tui"`, `"human:web"`, `"human:cli"`). */
   by?: string;
   ts: number;
+  /** Interactive-takeover details (kind `"takeover"` only). */
+  takeover?: {
+    /** The recorded agent session that was resumed, when one existed. */
+    sessionId?: string;
+    /** True when the session was resumed (vs. a fresh interactive session). */
+    resumed?: boolean;
+    /** When the interactive session ended. */
+    endedAt?: number;
+    /** The interactive CLI's exit code, when it exited normally. */
+    exitCode?: number;
+  };
 }
 
 export interface HistoryPhase {
@@ -374,6 +404,30 @@ export class RunRecordBuilder {
           approved: event.approved,
           by: event.by,
           note: event.note,
+        };
+        break;
+      }
+      case "human_input_pending": {
+        const step = this.stepOf(event.phaseId, event.stepId, event.iteration);
+        if (!step) break;
+        step.humanInput = {
+          ...step.humanInput,
+          prompt: event.prompt,
+          choices: event.choices,
+          origin: event.origin,
+          attempt: event.attempt,
+          retryError: event.retryError,
+        };
+        break;
+      }
+      case "human_input_resolved": {
+        const step = this.stepOf(event.phaseId, event.stepId, event.iteration);
+        if (!step) break;
+        step.humanInput = {
+          ...step.humanInput,
+          value: event.value,
+          by: event.by,
+          canceled: event.canceled,
         };
         break;
       }

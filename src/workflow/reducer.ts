@@ -54,6 +54,48 @@ export interface PendingApproval {
   onReject?: ApprovalRejectDisposition;
 }
 
+/**
+ * Human-input state attached to a `human` step (or a `canAsk` agent step whose
+ * question is in flight). Mirrors the `human_input_pending` /
+ * `human_input_resolved` events so a UI can render the ask and its answer from
+ * the folded tree alone.
+ */
+export interface StepHumanInputState {
+  /** True while the run waits for an answer. */
+  pending: boolean;
+  /** Rendered instructions / the agent's question (capped). */
+  prompt?: string;
+  /** Pick-one choices, when declared. */
+  choices?: string[];
+  /** JSON schema the reply must satisfy, when declared. */
+  outputSchema?: Record<string, unknown>;
+  /** Spec-declared `human` step vs. an agent's clarifying question. */
+  origin?: "human-step" | "agent-question";
+  /** 1-based ask attempt; >1 means the previous answer was rejected. */
+  attempt?: number;
+  /** Why the previous attempt's answer was rejected. */
+  retryError?: string;
+  /** The accepted value (capped), once resolved. */
+  value?: string;
+  /** Who answered. */
+  by?: string;
+  /** True when the ask ended without an accepted answer. */
+  canceled?: boolean;
+}
+
+/** An input request the run is currently waiting on, awaiting a human answer. */
+export interface PendingHumanInput {
+  phaseId: string;
+  stepId: string;
+  iteration: number;
+  attempt: number;
+  prompt: string;
+  choices?: string[];
+  outputSchema?: Record<string, unknown>;
+  origin: "human-step" | "agent-question";
+  retryError?: string;
+}
+
 export interface StepState {
   stepId: string;
   blockKind: WorkflowStepKind;
@@ -90,6 +132,12 @@ export interface StepState {
    * decision; `approved`/`by`/`note` land once it resolves.
    */
   approval?: StepApprovalState;
+  /**
+   * Human-input state, when this step is a `human` step or a `canAsk` agent
+   * step whose clarifying question is (or was) in flight. `pending` is true
+   * while the run waits for an answer; `value`/`by` land once it resolves.
+   */
+  humanInput?: StepHumanInputState;
   cached: boolean;
   /** Total attempts so far when the step is auto-retrying a transient failure. */
   attempts?: number;
@@ -148,6 +196,12 @@ export interface WorkflowState {
    */
   pendingApprovals?: PendingApproval[];
   /**
+   * Input requests the run is currently waiting on (human steps / agent
+   * questions). UIs render an answer form for each; entries clear (or are
+   * superseded by a re-ask) as answers arrive.
+   */
+  pendingInputs?: PendingHumanInput[];
+  /**
    * True while the engine has acknowledged a pause (no new steps launch;
    * in-flight steps drain). Cleared by `run_resumed` and at `workflow_done`.
    */
@@ -166,6 +220,7 @@ export const initialWorkflowState: WorkflowState = {
   ok: true,
   loopMarkers: [],
   pendingApprovals: [],
+  pendingInputs: [],
 };
 
 export type WorkflowStateAction =
@@ -256,9 +311,10 @@ export function workflowStateFromRecord(record: RunRecord): WorkflowState {
         ...step,
         status: parseStepStatus(step.status),
         blockKind: step.blockKind,
-        // HistoryStep.approval omits the live-only `pending` flag; a replayed
-        // record is always terminal, so pending is false.
+        // HistoryStep.approval/humanInput omit the live-only `pending` flag; a
+        // replayed record is always terminal, so pending is false.
         approval: step.approval ? { pending: false, ...step.approval } : undefined,
+        humanInput: step.humanInput ? { pending: false, ...step.humanInput } : undefined,
       })),
     })),
     results,
@@ -344,6 +400,7 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
         loopMarkers: [],
         budget: undefined,
         pendingApprovals: [],
+        pendingInputs: [],
         paused: false,
         pausedBy: undefined,
         editedSteps: undefined,
@@ -610,6 +667,57 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
       return {
         ...withStep,
         pendingApprovals: (withStep.pendingApprovals ?? []).filter(
+          (p) => !(p.stepId === e.stepId && p.iteration === (e.iteration ?? 1)),
+        ),
+      };
+    }
+    case "human_input_pending": {
+      const withStep = updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
+        ...s,
+        activity:
+          e.origin === "agent-question" ? "✎ agent asked a question" : "✎ awaiting human input",
+        humanInput: {
+          pending: true,
+          prompt: e.prompt,
+          choices: e.choices,
+          outputSchema: e.outputSchema,
+          origin: e.origin,
+          attempt: e.attempt,
+          retryError: e.retryError,
+        },
+      }));
+      const pending: PendingHumanInput = {
+        phaseId: e.phaseId,
+        stepId: e.stepId,
+        iteration: e.iteration ?? 1,
+        attempt: e.attempt,
+        prompt: e.prompt,
+        choices: e.choices,
+        outputSchema: e.outputSchema,
+        origin: e.origin,
+        retryError: e.retryError,
+      };
+      // A re-ask (attempt > 1) supersedes the same step's previous entry.
+      const others = (withStep.pendingInputs ?? []).filter(
+        (p) => !(p.stepId === e.stepId && p.iteration === (e.iteration ?? 1)),
+      );
+      return { ...withStep, pendingInputs: [...others, pending] };
+    }
+    case "human_input_resolved": {
+      const withStep = updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
+        ...s,
+        activity: e.canceled ? "input canceled" : "answered",
+        humanInput: {
+          ...(s.humanInput ?? { pending: false }),
+          pending: false,
+          value: e.value,
+          by: e.by,
+          canceled: e.canceled,
+        },
+      }));
+      return {
+        ...withStep,
+        pendingInputs: (withStep.pendingInputs ?? []).filter(
           (p) => !(p.stepId === e.stepId && p.iteration === (e.iteration ?? 1)),
         ),
       };

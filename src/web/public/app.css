@@ -436,6 +436,9 @@ textarea#input:focus {
 .kind.approval {
   background: #ffd166;
 }
+.kind.human {
+  background: #f5a3ff;
+}
 .kind.merge {
   background: #ff9ecb;
 }
@@ -986,6 +989,9 @@ select.sel.invalid {
 .estep.approval {
   border-left-color: #ffd166;
 }
+.estep.human {
+  border-left-color: #f5a3ff;
+}
 .estep.merge {
   border-left-color: #ff9ecb;
 }
@@ -1247,6 +1253,122 @@ select.sel.invalid {
 }
 .approval.rejected .approval-decision {
   color: var(--error);
+}
+
+/* ---- human input (human steps + agent clarifying questions) ------------- */
+.human-input {
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  font-size: 12px;
+  cursor: default;
+}
+.human-input.pending {
+  border-color: #b06fd0;
+  background: #1e1424;
+}
+.human-input.answered {
+  border-color: var(--done);
+}
+.human-input.canceled {
+  border-color: var(--error);
+}
+.human-input-origin {
+  color: #d9a6f0;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 4px;
+}
+.human-input-prompt {
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+}
+.human-input-error {
+  color: var(--error);
+  font-size: 11px;
+  margin: 4px 0 6px;
+}
+.human-input-text {
+  width: 100%;
+  resize: vertical;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.human-input-text:focus {
+  outline: none;
+  border-color: #b06fd0;
+}
+.human-input-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.human-input-choices .btn.choice {
+  height: auto;
+  min-height: 30px;
+  padding: 5px 14px;
+  font-size: 12px;
+  white-space: normal;
+  text-align: left;
+}
+.human-input-choices .btn.choice:hover {
+  border-color: #b06fd0;
+  background: #2a1a33;
+}
+.human-input-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.human-input-actions .btn.approve {
+  color: #eafffb;
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  height: 30px;
+  padding: 0 14px;
+  font-size: 12px;
+}
+.human-input-actions .btn.approve:hover {
+  background: #25867d;
+}
+.human-input-decision {
+  font-weight: 600;
+}
+.human-input.answered .human-input-decision {
+  color: var(--done);
+}
+.human-input.canceled .human-input-decision {
+  color: var(--error);
+}
+.badge.input-wait {
+  color: #d9a6f0;
+  border-color: #4a2a5e;
+  font-weight: 600;
+}
+
+/* ---- autonomy labels (workflow list) ------------------------------------- */
+.badge.autonomy-auto {
+  color: var(--done);
+  border-color: #1f6f33;
+  margin-left: 8px;
+}
+.badge.autonomy-approvals {
+  color: var(--gate);
+  border-color: #5e4a1d;
+  margin-left: 8px;
+}
+.badge.autonomy-interactive {
+  color: #d9a6f0;
+  border-color: #4a2a5e;
+  margin-left: 8px;
 }
 
 /* ---- step drill-in: clickable cards + right-hand drawer ------------------ */

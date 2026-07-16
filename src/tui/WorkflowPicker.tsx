@@ -1,5 +1,7 @@
 import { Box, Text } from "ink";
 import type { WorkflowCatalogEntry } from "../workflow";
+import { autonomyBadge, workflowAutonomy } from "../workflow";
+import { AUTONOMY_COLOR } from "./theme";
 import { WORKFLOW_SOURCE_COLOR } from "./theme";
 import { selectVisibleWindow } from "./workflow-list-window";
 import { blockSummary } from "./workflow-spec-ui";
@@ -59,6 +61,12 @@ export function WorkflowPicker({
               const blocks = blockSummary(spec);
               const phases = spec.phases.length;
               const steps = spec.phases.reduce((n, p) => n + p.steps.length, 0);
+              // Autonomy potential: what this workflow will need from a human,
+              // visible before launch. Resolves sub-workflows via the catalog.
+              const autonomy = workflowAutonomy(
+                spec,
+                (child) => workflows.find((entry) => entry.name === child)?.spec,
+              );
               return (
                 <Box key={name} flexDirection="column" marginTop={offset === 0 ? 0 : 1}>
                   <Box>
@@ -67,6 +75,7 @@ export function WorkflowPicker({
                       {name}
                     </Text>
                     <Text color={WORKFLOW_SOURCE_COLOR[source]}> {source}</Text>
+                    <Text color={AUTONOMY_COLOR[autonomy]}> {autonomyBadge(autonomy)}</Text>
                     <Text color="gray">
                       {"  "}
                       {phases} phase{phases === 1 ? "" : "s"} · {steps} step

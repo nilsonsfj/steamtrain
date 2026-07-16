@@ -96,7 +96,7 @@ execution behavior. **Examples:** [`workflow-examples.md`](workflow-examples.md)
 | field | required | meaning |
 | --- | --- | --- |
 | `id` | yes | Unique across the whole workflow. |
-| `kind` | no | One of `worker`, `processor`, `distributor`, `consolidator`, `gate`, `approval`, `merge`, `command`, `llm`, `workflow`. Missing means `worker`. |
+| `kind` | no | One of `worker`, `processor`, `distributor`, `consolidator`, `gate`, `approval`, `human`, `merge`, `command`, `llm`, `workflow`. Missing means `worker`. |
 | `dependsOn` | no | Step ids from earlier phases only. Same-phase and forward dependencies are invalid. Steps are scheduled by these dependencies; omitting `dependsOn` makes the step wait for every step in all earlier phases. |
 | `when` | no | Per-step condition (same schema as a gate condition). When false the step is skipped, not failed. See [Per-step conditions](#per-step-conditions-when). |
 
@@ -113,6 +113,8 @@ Optional fields: `cwd`, `env`, `extraArgs`, `effort`, `forEach`, `retry`,
 `maxCostUsd` (per-step USD budget for `forEach` fan-outs — see
 [Cost budgets](./cost-and-budgets.md)),
 `output` (see [Structured step outputs](#structured-step-outputs-output)),
+`canAsk` (let the agent ask ONE clarifying question mid-step instead of
+guessing — see [Human in the loop](./human-in-the-loop.md#agent-clarifying-questions-canask)),
 `workspace` / `artifacts` (see
 [Workspace inheritance and artifacts](#workspace-inheritance-and-artifacts-file-handoff)).
 
@@ -354,6 +356,59 @@ uses. Later-phase steps never start until the checkpoint is decided.
 > while a checkpoint waits — a very slow decision can trip it and cancel the
 > run. For long-lived interactive approvals, raise `workflowTimeoutSec`; a
 > cancelled run resumes from cache (re-asking the checkpoint) after restarting.
+
+### Human (human-in-the-loop data step)
+
+Where an `approval` step asks for **consent** (approve/reject), a `human` step
+asks for **data**: its output is typed by a person, not produced by an agent.
+Paste the incident timeline, choose one of three proposed designs, supply the
+credential name the pipeline can't guess — downstream steps consume
+`{{steps.<id>.output}}` (and `{{steps.<id>.json.<path>}}` with an `output`
+schema) exactly like any other step's result.
+
+```jsonc
+{
+  "id": "design-choice",
+  "kind": "human",
+  "dependsOn": ["propose"],
+  "prompt": "Three designs were proposed:\n{{steps.propose.output}}\n\nWhich should be implemented?",
+  "choices": ["conservative", "balanced", "aggressive"]
+}
+```
+
+| field | meaning |
+| --- | --- |
+| `prompt` | Required. The question/instructions shown to the human. Templated — it may interpolate earlier step outputs. |
+| `choices` | Optional pick-one list (each entry templated). The answer must be one of the choices, or a 1-based number (`"2"` picks the second). Mutually exclusive with `output`. |
+| `output` | Optional JSON schema the reply must match; the parsed value lands on the step's `json` for `{{steps.<id>.json.<path>}}` templates and gate `path` conditions. Mutually exclusive with `choices`. |
+
+Free-form (neither `choices` nor `output`): any non-blank text is accepted.
+An invalid answer (wrong choice, schema mismatch) is **re-asked** up to 3
+times with the validation error shown; after that the step fails.
+
+**Who answers.** The same surfaces that decide approvals:
+
+- **TUI** — a highlighted card shows the ask; press `a` to open the answer box
+  (number keys pick a choice instantly).
+- **Web UI** — an inline form (choice buttons / textarea / JSON editor);
+  submitting posts to `POST /api/runs/:id/input` with `{ stepId, value,
+  iteration? }`.
+- **Headless CLI** — supply answers up front with
+  `--human <stepId>=<value|@file>` (repeatable); a step with no supplied value
+  fails fast with guidance instead of hanging CI.
+- **Detached runs** — the run parks until any attached UI answers:
+  `steamtrain workflow answer <runId> [--step <stepId>] --value <text>`
+  (run it without `--value` to see what is being asked).
+
+Unlike approval decisions, accepted answers **are cached** — they are data, so
+a resumed run replays them instead of re-asking (`--fresh` re-asks). Every
+exchange is recorded in run history (`humanInput` on the step, `suppliedBy` on
+the result).
+
+A workflow containing `human` steps (or `canAsk` agent steps) is labeled
+**✎ interactive** wherever workflows are listed — see
+[Human in the loop](./human-in-the-loop.md) for the full autonomy-label story,
+agent clarifying questions, notifications, and interactive takeover.
 
 ### Merge (worktree merge-back)
 
@@ -963,6 +1018,9 @@ steamtrain workflow list
 steamtrain workflow validate [name]
 steamtrain workflow run <name> --input "task text"
 steamtrain workflow run <name> --stdin --json
+steamtrain workflow run <name> --input "task" --human <stepId>=<value|@file>
+steamtrain workflow answer <runId> [--step <stepId>] [--value <text> | --file <path>]
+steamtrain workflow takeover <runId> <stepId>
 ```
 
 Running `steamtrain` with no arguments opens the workflow-first TUI.
@@ -971,4 +1029,5 @@ Running `steamtrain` with no arguments opens the workflow-first TUI.
 
 - [`workflow-overview.md`](workflow-overview.md) — diagrams, dynamic fan-out, gates, resume/cache, pitfalls
 - [`workflow-examples.md`](workflow-examples.md) — bundled workflow walkthroughs and authoring patterns
+- [`human-in-the-loop.md`](human-in-the-loop.md) — autonomy labels, human steps, agent questions, takeover, notifications
 - [`README.md`](README.md) — documentation index

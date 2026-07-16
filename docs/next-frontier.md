@@ -141,6 +141,20 @@ instead of confidently diverging — and no workflow tool in the comparison set
 (Actions, Airflow, Temporal, n8n) can offer it, because their steps can't
 formulate questions. It's steamtrain-native differentiation.
 
+> **Shipped:** both halves. `"kind": "human"` — templated `prompt`, pick-one
+> `choices` (1-based number answers accepted), `output` schema with engine-side
+> validation and bounded re-asks, answers cached (data, not consent) and
+> recorded in history — answered from the TUI answer box (`a`), a web form
+> (`POST /api/runs/:id/input`), headless `--human <stepId>=<value|@file>`
+> (fail-fast when missing), or `steamtrain workflow answer` against a detached
+> run's shared registry. And **agent clarifying questions** via `canAsk: true`
+> on worker/processor steps: a `QUESTION:` protocol line, the same human-input
+> channel, session-resume continuation on claude (composed-prompt fallback
+> elsewhere), bounded to one question per step, with the exchange recorded on
+> the step result. Workflows carrying either are labeled **✎ interactive** in
+> every list/preview surface. See
+> [`human-in-the-loop.md`](human-in-the-loop.md).
+
 ## 4. Interactive takeover: drop into a step's session
 
 **The gap:** a step gets 90% of the way there and stalls, or a run finishes
@@ -162,6 +176,16 @@ recorded in run history.
 work through workflows at all — you're never trapped behind the abstraction.
 (Distinct from roadmap 2.6, which chains sessions *between steps*; this hands
 a session to a *person*.)
+
+> **Shipped:** `steamtrain workflow takeover <runId> <stepId>` — agent steps
+> now record their CLI session ids; takeover launches the agent's interactive
+> CLI inside the step's still-live worktree, resuming the recorded session on
+> claude (fresh interactive session with a clear note on other providers),
+> records the takeover as a history intervention on exit, and hands the
+> worktree's final state to the existing `history show --diff` / `history
+> apply` machinery. Targets recorded (finished) runs; the TUI step detail and
+> the web step drawer surface the ready-to-copy command on eligible steps.
+> See [`human-in-the-loop.md`](human-in-the-loop.md#interactive-takeover-workflow-takeover).
 
 ## 5. Declarative context packs
 

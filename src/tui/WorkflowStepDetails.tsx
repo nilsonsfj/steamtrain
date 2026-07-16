@@ -363,6 +363,34 @@ function liveMetaLines(
       color: step.gate.passed ? "green" : "yellow",
     });
   }
+  if (step.humanInput?.value) {
+    const who = step.humanInput.by ? ` by ${step.humanInput.by}` : "";
+    lines.push({
+      text: `answered${who}: ${truncate(step.humanInput.value, Math.max(24, width - 16))}`,
+      color: "magenta",
+    });
+  }
+  for (const qa of step.result?.questions ?? []) {
+    lines.push({
+      text: `agent asked: ${truncate(qa.question, Math.max(24, width - 16))}`,
+      color: "magenta",
+    });
+    lines.push({
+      text: `answer${qa.by ? ` (${qa.by})` : ""}: ${truncate(qa.answer, Math.max(24, width - 16))}`,
+      color: "magenta",
+    });
+  }
+  if (step.result?.suppliedBy) {
+    lines.push({ text: `supplied by: ${step.result.suppliedBy}`, color: "gray" });
+  }
+  // Interactive takeover: a finished agent step with a recorded session can be
+  // resumed by a human — surface the command right where the step is inspected.
+  if (step.agent && step.result?.sessionId && (step.status === "done" || step.status === "error")) {
+    lines.push({
+      text: `take over (after the run ends): steamtrain workflow takeover <runId> ${step.stepId}`,
+      color: "cyan",
+    });
+  }
   if (step.status === "running" && step.activity) {
     lines.push({ text: `activity: ${step.activity}`, color: "gray" });
   }

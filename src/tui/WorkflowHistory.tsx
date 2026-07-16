@@ -120,6 +120,7 @@ function LiveRunRow({
     run.status,
     run.detached ? "detached" : run.source,
     run.pendingApprovals?.length ? `⏳ approval: ${run.pendingApprovals[0]?.stepId}` : undefined,
+    run.pendingInputs?.length ? `✎ input: ${run.pendingInputs[0]?.stepId}` : undefined,
   ]
     .filter(Boolean)
     .join(" · ");

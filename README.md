@@ -135,6 +135,19 @@ the UI; unattended, `--approve-all` waves everything through or
 into CI. Headless runs end with a one-line-per-step **status summary** and an
 honest exit code.
 
+### Put a human in the loop — deliberately
+
+Beyond consent, a run can ask for **data**: a `human` step's output is typed
+by a person (free text, pick-one choices, or schema-validated JSON), and a
+`canAsk: true` agent step may pause to ask **one clarifying question** instead
+of guessing — answered from any surface, resuming the agent's session with
+full context. Every workflow wears an **autonomy label** (`▸ autonomous`,
+`✋ approvals`, `✎ interactive`) in every list and preview, so you know what a
+run will need from you before launching it; a `notify` config block (bell /
+desktop / webhook) pings you when one is waiting. And when a step needs hands,
+`workflow takeover` drops you into its recorded agent session inside its
+worktree. See [docs/human-in-the-loop.md](docs/human-in-the-loop.md).
+
 ### Steer a run without restarting it
 
 A live run isn't a batch job you can only watch or kill. **Pause** it
@@ -195,6 +208,11 @@ steamtrain workflow cache clear
 # Unattended approval handling
 steamtrain workflow run review-loop --input "…" --approve-all
 steamtrain workflow run review-loop --input "…" --on-approval fail
+
+# Human-in-the-loop input (docs/human-in-the-loop.md)
+steamtrain workflow run incident-review --input "…" --human timeline=@notes.txt
+steamtrain workflow answer <runId> [--step <stepId>] --value "…"  # answer a parked human step / agent question
+steamtrain workflow takeover <runId> <stepId>  # resume a step's agent session interactively in its worktree
 
 # Detached runs & the run queue (docs/detached-runs.md)
 steamtrain workflow run bug-hunt --input "…" --detach   # fire and return; survives this terminal

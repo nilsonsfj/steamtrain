@@ -3,8 +3,12 @@ import type { SteamtrainConfig } from "../config";
 import {
   type ApprovalDecision,
   type ApprovalProvider,
+  type HumanInputProvider,
+  type HumanInputResponse,
   type LiveRunPublisher,
   type LiveRunStore,
+  type Notifier,
+  type NotifyConfig,
   type RerunMode,
   type RerunPlan,
   type RunRecord,
@@ -20,11 +24,13 @@ import {
   type WorkflowSpec,
   acquireRunSlot,
   createLiveRunPublisher,
+  createNotifier,
   createWorkflowRunControl,
   hashWorkflowSpec,
   isRerunError,
   matchApprovalKey,
   newLiveRunMeta,
+  notifyWorkflowEvent,
   persistWorkflowStepDone,
   planRerun,
   resolveMaxParallelRuns,
@@ -33,6 +39,7 @@ import {
   watchRunCancel,
   watchRunControl,
   withStoreApprovals,
+  withStoreHumanInputs,
   workflowCacheKey,
 } from "../workflow";
 
@@ -56,6 +63,7 @@ export interface WorkflowHost {
     inputs?: Record<string, string | number | boolean>,
     approval?: ApprovalProvider,
     control?: WorkflowRunControl,
+    humanInput?: HumanInputProvider,
   ): AsyncIterable<WorkflowEvent>;
 }
 
@@ -112,6 +120,13 @@ interface Run {
    * to settle it. Cleared as decisions arrive and when the run ends.
    */
   pendingApprovals: Map<string, (decision: ApprovalDecision) => void>;
+  /**
+   * Live human-input requests keyed by `<stepId>:<iteration>` — the same
+   * resolver pattern as approvals, settled by `POST /api/runs/:id/input` via
+   * {@link WorkflowRunManager.resolveHumanInput}. A re-ask (rejected answer)
+   * re-registers under the same key, superseding the old resolver.
+   */
+  pendingInputs: Map<string, (response: HumanInputResponse) => void>;
 }
 
 export interface RunSummary {
@@ -129,6 +144,8 @@ export interface RunSummary {
   endedAt?: number;
   /** Human-approval checkpoints currently awaiting a decision. */
   pendingApprovals?: { stepId: string; iteration: number }[];
+  /** Human-input requests currently awaiting an answer. */
+  pendingInputs?: { stepId: string; iteration: number }[];
 }
 
 export interface StartRunResult {
@@ -155,6 +172,10 @@ export interface RunManagerOptions {
    * run queue (`maxParallelRuns`), and accept cross-process cancel/approval.
    */
   liveRuns?: LiveRunStore;
+  /** Run-notification channels (`notify` config); omitted ⇒ no notifications. */
+  notify?: NotifyConfig;
+  /** Base URL for notification deep links to run pages (e.g. `http://localhost:4600`). */
+  publicBaseUrl?: string;
 }
 
 const DEFAULT_RETAIN_MS = 5 * 60_000;
@@ -175,6 +196,8 @@ export class WorkflowRunManager {
   private readonly maxConcurrent: number;
   private readonly config: SteamtrainConfig;
   private readonly liveRuns?: LiveRunStore;
+  private readonly notifier: Notifier;
+  private readonly publicBaseUrl?: string;
   private runningCount = 0;
 
   constructor(options: RunManagerOptions) {
@@ -186,6 +209,8 @@ export class WorkflowRunManager {
     this.maxConcurrent = options.maxConcurrent ?? 0;
     this.config = options.config;
     this.liveRuns = options.liveRuns;
+    this.notifier = createNotifier(options.notify ?? options.config.notify);
+    this.publicBaseUrl = options.publicBaseUrl;
   }
 
   /** Validate and launch a run; the event loop runs detached in the background. */
@@ -229,6 +254,7 @@ export class WorkflowRunManager {
       controller: new AbortController(),
       control: createWorkflowRunControl(),
       pendingApprovals: new Map(),
+      pendingInputs: new Map(),
     };
     // The whole-workflow wall-clock timer is armed in drive() once the run
     // leaves the queue, so time spent waiting for a slot doesn't count.
@@ -369,6 +395,58 @@ export class WorkflowRunManager {
     return true;
   }
 
+  /**
+   * Build the run's human-input provider: each pending request registers a
+   * resolver keyed by `<stepId>:<iteration>` and blocks until a
+   * `POST /api/runs/:id/input` calls {@link resolveHumanInput} — or the run's
+   * abort signal fires. A re-ask after a rejected answer re-registers under
+   * the same key (the old resolver was already consumed by the first answer).
+   */
+  private buildHumanInputProvider(run: Run): HumanInputProvider {
+    return (request, signal) =>
+      new Promise<HumanInputResponse>((resolve) => {
+        const key = `${request.stepId}:${request.iteration}`;
+        const settle = (response: HumanInputResponse): void => {
+          if (run.pendingInputs.get(key) !== settle) return;
+          run.pendingInputs.delete(key);
+          signal?.removeEventListener("abort", onAbort);
+          resolve(response);
+        };
+        const onAbort = (): void =>
+          settle({ canceled: true, by: "auto:canceled", reason: "run canceled before an answer" });
+        run.pendingInputs.set(key, settle);
+        if (signal) {
+          if (signal.aborted) {
+            onAbort();
+            return;
+          }
+          signal.addEventListener("abort", onAbort, { once: true });
+        }
+      });
+  }
+
+  /**
+   * Settle a pending human-input request from an HTTP request. `iteration`
+   * targets a specific pass; omitted resolves the single pending request for
+   * `stepId` (at most one per step is ever pending, as with approvals).
+   * Returns false when the run or request is unknown.
+   */
+  resolveHumanInput(
+    runId: string,
+    stepId: string,
+    response: HumanInputResponse,
+    iteration?: number,
+  ): boolean {
+    const run = this.runs.get(runId);
+    if (!run) return false;
+    const key = matchApprovalKey(run.pendingInputs.keys(), stepId, iteration);
+    if (!key) return false;
+    const settle = run.pendingInputs.get(key);
+    if (!settle) return false;
+    settle(response);
+    return true;
+  }
+
   get(runId: string): RunSummary | undefined {
     const run = this.runs.get(runId);
     return run ? toSummary(run) : undefined;
@@ -472,6 +550,14 @@ export class WorkflowRunManager {
       const approval = this.liveRuns
         ? withStoreApprovals(this.liveRuns, run.id, this.buildApprovalProvider(run))
         : this.buildApprovalProvider(run);
+      const humanInput = this.liveRuns
+        ? withStoreHumanInputs(this.liveRuns, run.id, this.buildHumanInputProvider(run))
+        : this.buildHumanInputProvider(run);
+      const notifyMeta = {
+        workflow: run.workflow,
+        runId: run.id,
+        url: this.publicBaseUrl ? `${this.publicBaseUrl}/#run-${run.id}` : undefined,
+      };
       for await (const event of this.host.runWorkflow(
         run.workflow,
         run.input,
@@ -482,9 +568,11 @@ export class WorkflowRunManager {
         run.params,
         approval,
         run.control,
+        humanInput,
       )) {
         recorder.handle(event);
         publisher?.event(event);
+        notifyWorkflowEvent(this.notifier, notifyMeta, event);
         this.emit(run, JSON.stringify({ type: "event", event }), false);
         if (event.kind === "step_done") {
           await persistWorkflowStepDone(
@@ -531,6 +619,7 @@ export class WorkflowRunManager {
       if (run.timeoutTimer) clearTimeout(run.timeoutTimer);
       run.queued = false;
       run.pendingApprovals.clear();
+      run.pendingInputs.clear();
       disposeCancelWatch?.();
       disposeControlWatch?.();
       this.runningCount = Math.max(0, this.runningCount - 1);
@@ -600,10 +689,12 @@ export class WorkflowRunManager {
 }
 
 function toSummary(run: Run): RunSummary {
-  const pendingApprovals = [...run.pendingApprovals.keys()].map((key) => {
+  const splitKey = (key: string): { stepId: string; iteration: number } => {
     const sep = key.lastIndexOf(":");
     return { stepId: key.slice(0, sep), iteration: Number(key.slice(sep + 1)) || 1 };
-  });
+  };
+  const pendingApprovals = [...run.pendingApprovals.keys()].map(splitKey);
+  const pendingInputs = [...run.pendingInputs.keys()].map(splitKey);
   return {
     id: run.id,
     workflow: run.workflow,
@@ -616,5 +707,6 @@ function toSummary(run: Run): RunSummary {
     startedAt: run.startedAt,
     endedAt: run.endedAt,
     pendingApprovals: pendingApprovals.length > 0 ? pendingApprovals : undefined,
+    pendingInputs: pendingInputs.length > 0 ? pendingInputs : undefined,
   };
 }
