@@ -182,9 +182,32 @@ export interface WebServerDeps {
    * When set, all API routes require a valid `__steamtrain_auth` session cookie.
    * POST /api/auth with the matching token creates a random, server-side
    * session and sets the cookie; sessions expire after {@link SESSION_TTL_MS}
-   * and die with the process.
+   * and die with the process. Full-capability sessions unless {@link readOnly}
+   * is also set.
    */
   authToken?: string;
+  /**
+   * Optional second credential. POST /api/auth with this token creates a
+   * **read-only** session: GET routes and logout work; every state-changing
+   * route returns 403. Intended for sharing a run view with teammates without
+   * handing them the full control-plane token. Auth is required when either
+   * this or {@link authToken} is set.
+   */
+  readToken?: string;
+  /**
+   * Force every session (and the no-auth localhost path) into read-only
+   * capability. Useful for a dedicated share bind: even the full auth token
+   * yields a viewer session. Mutating routes always 403.
+   */
+  readOnly?: boolean;
+}
+
+/** What a session (or the no-auth process) is allowed to do. */
+export type SessionCapability = "full" | "read";
+
+/** True when the server requires a login session for `/api/*` routes. */
+export function webAuthRequired(deps: Pick<WebServerDeps, "authToken" | "readToken">): boolean {
+  return Boolean(deps.authToken || deps.readToken);
 }
 
 export function isNonLocalHost(host?: string): boolean {
@@ -308,6 +331,11 @@ const AUTH_FAILURE_WINDOW_MS = 60_000;
 /** Cap on tracked rate-limit clients (guards the Map against address churn). */
 const MAX_TRACKED_CLIENTS = 4096;
 
+interface SessionRecord {
+  expiresAt: number;
+  capability: SessionCapability;
+}
+
 /**
  * Per-server-instance auth state. Sessions are random 256-bit ids handed out
  * by POST /api/auth and stored hashed, so neither the on-wire cookie nor the
@@ -316,8 +344,8 @@ const MAX_TRACKED_CLIENTS = 4096;
  * SHA-256(token) — effectively a second permanent password).
  */
 interface AuthState {
-  /** SHA-256(sessionId) -> expiry epoch ms. */
-  sessions: Map<string, number>;
+  /** SHA-256(sessionId) -> session record. */
+  sessions: Map<string, SessionRecord>;
   /** client address -> failed-login window. */
   authFailures: Map<string, { count: number; resetAt: number }>;
 }
@@ -351,9 +379,9 @@ function parseCookies(header: string | undefined): Record<string, string> {
 }
 
 /** Create a session and return its id (the cookie value). */
-function createSession(state: AuthState, now = Date.now()): string {
-  for (const [key, expiresAt] of state.sessions) {
-    if (expiresAt <= now) state.sessions.delete(key);
+function createSession(state: AuthState, capability: SessionCapability, now = Date.now()): string {
+  for (const [key, session] of state.sessions) {
+    if (session.expiresAt <= now) state.sessions.delete(key);
   }
   while (state.sessions.size >= MAX_SESSIONS) {
     const oldest = state.sessions.keys().next().value;
@@ -361,22 +389,48 @@ function createSession(state: AuthState, now = Date.now()): string {
     state.sessions.delete(oldest);
   }
   const id = randomBytes(32).toString("hex");
-  state.sessions.set(hashToken(id), now + SESSION_TTL_MS);
+  state.sessions.set(hashToken(id), { expiresAt: now + SESSION_TTL_MS, capability });
   return id;
 }
 
-function checkAuth(req: IncomingMessage, deps: WebServerDeps, state: AuthState): boolean {
-  if (!deps.authToken) return true;
-  const cookieVal = parseCookies(req.headers.cookie)[AUTH_COOKIE];
-  if (!cookieVal) return false;
-  const key = hashToken(cookieVal);
-  const expiresAt = state.sessions.get(key);
-  if (expiresAt === undefined) return false;
-  if (expiresAt <= Date.now()) {
-    state.sessions.delete(key);
-    return false;
+/**
+ * Look up the presented session. Returns undefined when auth is required and
+ * the cookie is missing/invalid/expired. When auth is not required, returns a
+ * synthetic capability (read when {@link WebServerDeps.readOnly}, else full).
+ */
+function resolveSession(
+  req: IncomingMessage,
+  deps: WebServerDeps,
+  state: AuthState,
+): { capability: SessionCapability } | undefined {
+  if (!webAuthRequired(deps)) {
+    return { capability: deps.readOnly ? "read" : "full" };
   }
-  return true;
+  const cookieVal = parseCookies(req.headers.cookie)[AUTH_COOKIE];
+  if (!cookieVal) return undefined;
+  const key = hashToken(cookieVal);
+  const session = state.sessions.get(key);
+  if (session === undefined) return undefined;
+  if (session.expiresAt <= Date.now()) {
+    state.sessions.delete(key);
+    return undefined;
+  }
+  // --read-only on the process wins even if the session was minted as full
+  // before the flag was flipped (sessions die with the process anyway).
+  const capability: SessionCapability = deps.readOnly ? "read" : session.capability;
+  return { capability };
+}
+
+/**
+ * State-changing routes a read-only session may not call. Logout is allowed
+ * so viewers can end their own session; auth is handled before this gate.
+ * Plan is blocked too — sharing a run *view* does not include dry-run / spend
+ * preview against the live catalog.
+ */
+export function isMutatingApiRequest(method: string, path: string): boolean {
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;
+  if (method === "POST" && (path === "/api/logout" || path === "/api/auth")) return false;
+  return method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
 }
 
 /** True when this client has burned its failed-login budget for the window. */
@@ -536,13 +590,13 @@ function checkCsrf(
   req: IncomingMessage,
   res: ServerResponse,
   method: string,
-  authToken: string | undefined,
+  authRequired: boolean,
   trustProxy: boolean,
 ): boolean {
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return true;
   const origin = req.headers.origin || req.headers.referer;
   if (!origin) {
-    if (!authToken) return true;
+    if (!authRequired) return true;
     sendJson(res, 403, { error: "missing origin header" });
     return false;
   }
@@ -622,6 +676,7 @@ function checkCsrf(
  *   POST   /api/runs/:id/approval   resolve a human-approval checkpoint
  *   POST   /api/runs/:id/input      answer a human-input request (human step / agent question)
  *   POST   /api/overrides/flush     flush staged session overrides -> { saved, skipped, unchanged }
+ *   GET    /api/session             current auth/capability (for the SPA chrome)
  *   POST   /api/auth                validate token, create session, set cookie
  *   POST   /api/logout              revoke the presented session, clear cookie
  */
@@ -676,10 +731,15 @@ async function handle(
   // gate so non-browser clients without an Origin header can authenticate);
   // failed attempts are rate limited per client, and a cross-site login
   // forgery gains nothing an attacker doesn't already have — it requires the
-  // token itself.
+  // token itself. Either the full auth token or the read token is accepted.
   if (method === "POST" && path === "/api/auth") {
-    if (!deps.authToken) {
-      sendJson(res, 200, { ok: true, authRequired: false });
+    if (!webAuthRequired(deps)) {
+      sendJson(res, 200, {
+        ok: true,
+        authRequired: false,
+        capability: deps.readOnly ? "read" : "full",
+        readOnly: Boolean(deps.readOnly),
+      });
       return;
     }
     const client = clientAddress(req, trustProxy);
@@ -696,19 +756,36 @@ async function handle(
       sendJson(res, 400, { error: "invalid JSON body" });
       return;
     }
-    if (typeof parsed.token !== "string" || !timingSafeCompare(parsed.token, deps.authToken)) {
+    if (typeof parsed.token !== "string") {
       recordAuthFailure(authState, client);
       sendJson(res, 401, { error: "invalid token" });
       return;
     }
-    const sessionId = createSession(authState);
+    let capability: SessionCapability | undefined;
+    if (deps.authToken && timingSafeCompare(parsed.token, deps.authToken)) {
+      capability = deps.readOnly ? "read" : "full";
+    } else if (deps.readToken && timingSafeCompare(parsed.token, deps.readToken)) {
+      capability = "read";
+    }
+    if (!capability) {
+      recordAuthFailure(authState, client);
+      sendJson(res, 401, { error: "invalid token" });
+      return;
+    }
+    const sessionId = createSession(authState, capability);
     res.writeHead(200, {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
       "x-content-type-options": "nosniff",
       "set-cookie": sessionCookie(sessionId, requestIsHttps(req, trustProxy)),
     });
-    res.end(JSON.stringify({ ok: true }));
+    res.end(
+      JSON.stringify({
+        ok: true,
+        capability,
+        readOnly: capability === "read",
+      }),
+    );
     return;
   }
 
@@ -720,15 +797,17 @@ async function handle(
     path === "/index.html" ||
     path === "/favicon.ico" ||
     path.startsWith("/static/");
-  if (!isPublicRoute && !checkAuth(req, deps, authState)) {
+  const session = isPublicRoute ? undefined : resolveSession(req, deps, authState);
+  if (!isPublicRoute && webAuthRequired(deps) && !session) {
     sendJson(res, 401, { error: "authentication required" });
     return;
   }
 
   // Cross-origin write protection (all modes), before any state can change.
-  if (!checkCsrf(req, res, method, deps.authToken, trustProxy)) return;
+  if (!checkCsrf(req, res, method, webAuthRequired(deps), trustProxy)) return;
 
   // Logout: revoke the presented session (if any) and clear the cookie.
+  // Allowed for read-only sessions so viewers can end their own session.
   if (method === "POST" && path === "/api/logout") {
     const cookieVal = parseCookies(req.headers.cookie)[AUTH_COOKIE];
     if (cookieVal) authState.sessions.delete(hashToken(cookieVal));
@@ -739,6 +818,27 @@ async function handle(
       "set-cookie": clearedSessionCookie(),
     });
     res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  // Capability gate: read-only sessions (and --read-only processes) may only
+  // read. Applied after logout so ending a session never 403s.
+  const capability: SessionCapability = session?.capability ?? (deps.readOnly ? "read" : "full");
+  if (capability === "read" && isMutatingApiRequest(method, path)) {
+    sendJson(res, 403, {
+      error: "read-only session",
+      capability: "read",
+    });
+    return;
+  }
+
+  // Session probe for the SPA chrome (badge, hide Run / authoring buttons).
+  if (method === "GET" && path === "/api/session") {
+    sendJson(res, 200, {
+      authRequired: webAuthRequired(deps),
+      capability,
+      readOnly: capability === "read",
+    });
     return;
   }
 
@@ -1823,10 +1923,20 @@ export interface StartWebUiOptions {
   /** Require this token to access the web UI (cookie-based session). */
   authToken?: string;
   /**
+   * Second credential that mints read-only sessions. Can coexist with
+   * {@link authToken} so operators keep a full token and share a viewer one.
+   */
+  readToken?: string;
+  /**
+   * Force every session (and the no-auth localhost path) into read-only
+   * capability — a dedicated share bind.
+   */
+  readOnly?: boolean;
+  /**
    * Explicitly serve a non-local bind without authentication. Without this,
-   * binding to a non-loopback host with no {@link authToken} auto-generates a
-   * token and prints it, so an exposed server is never silently open. When set,
-   * any supplied {@link authToken} is ignored.
+   * binding to a non-loopback host with no {@link authToken}/{@link readToken}
+   * auto-generates a token and prints it, so an exposed server is never
+   * silently open. When set, any supplied tokens are ignored.
    */
   noAuth?: boolean;
   /** Trust `X-Forwarded-*` headers (only set behind a reverse proxy you run). */
@@ -1859,13 +1969,32 @@ export function resolveWebAuthToken(opts: {
 }
 
 /**
+ * Resolve the web-UI read-only token: `--no-auth` wins, then `--read-token`,
+ * then `STEAMTRAIN_READ_TOKEN`. Independent of the full auth token so an
+ * operator can hand teammates a viewer credential without sharing control.
+ */
+export function resolveWebReadToken(opts: {
+  readToken?: string;
+  envToken?: string;
+  noAuth?: boolean;
+}): string | undefined {
+  if (opts.noAuth) return undefined;
+  return opts.readToken ?? opts.envToken;
+}
+
+/**
  * Boot the full web UI: build an orchestrator over the loaded catalog, run the
  * doctor once (so the picker shows agent health and runs are gated exactly like
  * the CLI), then serve until the process is stopped.
  */
-export async function startWebUi(
-  options: StartWebUiOptions,
-): Promise<{ server: Server; url: string; doctor: DoctorResult[]; authToken?: string }> {
+export async function startWebUi(options: StartWebUiOptions): Promise<{
+  server: Server;
+  url: string;
+  doctor: DoctorResult[];
+  authToken?: string;
+  readToken?: string;
+  readOnly?: boolean;
+}> {
   const out = options.stdout ?? ((t: string) => process.stdout.write(t));
   const err = options.stderr ?? ((t: string) => process.stderr.write(t));
   const cwd = options.cwd ?? process.cwd();
@@ -1878,10 +2007,21 @@ export async function startWebUi(
   // --no-auth is authoritative here (the contract this function owns), not just
   // in the CLI layer: it disables auth even if a token was also passed.
   let authToken = options.noAuth ? undefined : options.authToken;
+  let readToken = options.noAuth ? undefined : options.readToken;
+  const readOnly = Boolean(options.readOnly) && !options.noAuth;
   let generatedToken: string | undefined;
-  if (!authToken && !options.noAuth && isNonLocalHost(host)) {
+  let generatedKind: "full" | "read" | undefined;
+  if (!authToken && !readToken && !options.noAuth && isNonLocalHost(host)) {
     generatedToken = randomBytes(16).toString("hex");
-    authToken = generatedToken;
+    // A --read-only share bind auto-generates a *read* token so the printed
+    // credential matches the process capability.
+    if (readOnly) {
+      readToken = generatedToken;
+      generatedKind = "read";
+    } else {
+      authToken = generatedToken;
+      generatedKind = "full";
+    }
   }
 
   const liveConfig: SteamtrainConfig = { ...options.config };
@@ -1947,6 +2087,8 @@ export async function startWebUi(
     config: liveConfig,
     configPath: options.configPath,
     authToken,
+    readToken,
+    readOnly: readOnly || undefined,
     trustProxy: options.trustProxy,
   });
 
@@ -1976,11 +2118,23 @@ export async function startWebUi(
 
   out(`\n🚂 steamtrain web UI running at ${url}\n`);
   if (generatedToken) {
+    const kindLabel = generatedKind === "read" ? "read-only" : "full";
+    out(`   🔒 non-local bind: auth enabled with an auto-generated ${kindLabel} token.
+      token: ${generatedToken}
+      (set your own with --auth-token / --read-token or STEAMTRAIN_AUTH_TOKEN /
+       STEAMTRAIN_READ_TOKEN; pass --no-auth to disable — anyone reaching the
+       port can then run agents.)
+`);
+  } else if (authToken || readToken) {
+    const parts: string[] = [];
+    if (authToken) parts.push(readOnly ? "auth-token→read-only" : "auth-token→full");
+    if (readToken) parts.push("read-token→read-only");
+    out(`   🔒 auth enabled (${parts.join(", ")}); a login prompt will appear in the browser.\n`);
+  } else if (readOnly) {
     out(
-      `   🔒 non-local bind: auth enabled with an auto-generated token.\n      token: ${generatedToken}\n      (set your own with --auth-token or STEAMTRAIN_AUTH_TOKEN;\n       pass --no-auth to disable — anyone reaching the port can then run agents.)\n`,
+      "   👁  read-only mode (no auth): viewers can browse workflows and runs; every\n" +
+        "      state-changing API returns 403. Prefer --read-token on a shared bind.\n",
     );
-  } else if (authToken) {
-    out("   🔒 auth enabled (--auth-token set); a login prompt will appear in the browser.\n");
   } else if (isNonLocalHost(host)) {
     err(
       "   ⚠️  --no-auth on a non-local bind: anyone who can reach this port can\n" +
@@ -2023,6 +2177,8 @@ export async function startWebUi(
     server,
     url,
     authToken,
+    readToken,
+    readOnly: readOnly || undefined,
     get doctor() {
       return doctorState.results;
     },

@@ -11,7 +11,12 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ApiDoctorResult } from "../src/doctor";
 import { type WorkflowHost, WorkflowRunManager } from "../src/web/runs";
-import { createWebServer, resolveWebAuthToken } from "../src/web/server";
+import {
+  createWebServer,
+  isMutatingApiRequest,
+  resolveWebAuthToken,
+  resolveWebReadToken,
+} from "../src/web/server";
 import type {
   StepResult,
   WorkflowCacheStore,
@@ -1748,8 +1753,14 @@ function hashedToken(token: string): string {
 
 function makeAuthServer(
   host: WorkflowHost,
-  authToken = "test-secret-token",
+  options:
+    | { authToken?: string; readToken?: string; readOnly?: boolean }
+    | string = "test-secret-token",
 ): { server: Server; runs: WorkflowRunManager } {
+  const opts =
+    typeof options === "string"
+      ? { authToken: options }
+      : { authToken: "test-secret-token", ...options };
   const runs = new WorkflowRunManager({
     host,
     cacheStore: createInMemoryStore(),
@@ -1760,7 +1771,9 @@ function makeAuthServer(
     host,
     runs,
     workflowSource: () => "bundled",
-    authToken,
+    authToken: opts.authToken,
+    readToken: opts.readToken,
+    readOnly: opts.readOnly,
   });
   servers.push(server);
   return { server, runs };
@@ -1777,6 +1790,22 @@ async function login(base: string, token = "test-secret-token"): Promise<string>
   const setCookie = res.headers.get("set-cookie");
   expect(setCookie).toBeTruthy();
   return setCookie!.split(";")[0]!;
+}
+
+async function loginSession(
+  base: string,
+  token = "test-secret-token",
+): Promise<{ cookie: string; capability: string }> {
+  const res = await fetch(`${base}/api/auth`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  expect(res.status).toBe(200);
+  const setCookie = res.headers.get("set-cookie");
+  expect(setCookie).toBeTruthy();
+  const body = (await res.json()) as { capability: string };
+  return { cookie: setCookie!.split(";")[0]!, capability: body.capability };
 }
 
 /** GET with full header control (fetch forbids overriding the Host header). */
@@ -1968,9 +1997,168 @@ describe("web server — auth", () => {
       body: JSON.stringify({ token: "anything" }),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean; authRequired: boolean };
+    const body = (await res.json()) as {
+      ok: boolean;
+      authRequired: boolean;
+      capability: string;
+      readOnly: boolean;
+    };
     expect(body.ok).toBe(true);
     expect(body.authRequired).toBe(false);
+    expect(body.capability).toBe("full");
+    expect(body.readOnly).toBe(false);
+  });
+});
+
+describe("web server — read-only capability", () => {
+  it("isMutatingApiRequest classifies writes and allows logout", () => {
+    expect(isMutatingApiRequest("GET", "/api/workflows")).toBe(false);
+    expect(isMutatingApiRequest("POST", "/api/logout")).toBe(false);
+    expect(isMutatingApiRequest("POST", "/api/auth")).toBe(false);
+    expect(isMutatingApiRequest("POST", "/api/runs")).toBe(true);
+    expect(isMutatingApiRequest("PUT", "/api/config")).toBe(true);
+    expect(isMutatingApiRequest("DELETE", "/api/history")).toBe(true);
+    expect(isMutatingApiRequest("POST", "/api/workflows/demo/plan")).toBe(true);
+  });
+
+  it("mints a read session from --read-token and blocks mutating APIs", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun), {
+      authToken: "full-secret",
+      readToken: "viewer-secret",
+    });
+    const base = await start(server);
+    const session = await loginSession(base, "viewer-secret");
+    expect(session.capability).toBe("read");
+
+    const workflows = await fetch(`${base}/api/workflows`, {
+      headers: { cookie: session.cookie },
+    });
+    expect(workflows.status).toBe(200);
+
+    const sessionProbe = await fetch(`${base}/api/session`, {
+      headers: { cookie: session.cookie },
+    });
+    expect(sessionProbe.status).toBe(200);
+    expect(await sessionProbe.json()).toEqual({
+      authRequired: true,
+      capability: "read",
+      readOnly: true,
+    });
+
+    const run = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+        origin: base,
+      },
+      body: JSON.stringify({ workflow: "demo", input: "x" }),
+    });
+    expect(run.status).toBe(403);
+    expect(await run.json()).toEqual({ error: "read-only session", capability: "read" });
+
+    const plan = await fetch(`${base}/api/workflows/demo/plan`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+        origin: base,
+      },
+      body: JSON.stringify({ input: "x" }),
+    });
+    expect(plan.status).toBe(403);
+
+    const logout = await fetch(`${base}/api/logout`, {
+      method: "POST",
+      headers: { cookie: session.cookie, origin: base },
+    });
+    expect(logout.status).toBe(200);
+  });
+
+  it("mints a full session from --auth-token when --read-only is off", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun), {
+      authToken: "full-secret",
+      readToken: "viewer-secret",
+    });
+    const base = await start(server);
+    const session = await loginSession(base, "full-secret");
+    expect(session.capability).toBe("full");
+    const probe = await fetch(`${base}/api/session`, {
+      headers: { cookie: session.cookie },
+    });
+    expect(await probe.json()).toEqual({
+      authRequired: true,
+      capability: "full",
+      readOnly: false,
+    });
+  });
+
+  it("downgrades --auth-token sessions when --read-only is set", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun), {
+      authToken: "full-secret",
+      readOnly: true,
+    });
+    const base = await start(server);
+    const session = await loginSession(base, "full-secret");
+    expect(session.capability).toBe("read");
+    const cancel = await fetch(`${base}/api/runs/anything/cancel`, {
+      method: "POST",
+      headers: { cookie: session.cookie, origin: base },
+    });
+    expect(cancel.status).toBe(403);
+  });
+
+  it("enforces read-only on localhost with no auth when --read-only is set", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const server = createWebServer({
+      host,
+      runs,
+      workflowSource: () => "bundled",
+      readOnly: true,
+    });
+    servers.push(server);
+    const base = await start(server);
+
+    const get = await fetch(`${base}/api/workflows`);
+    expect(get.status).toBe(200);
+
+    const probe = await fetch(`${base}/api/session`);
+    expect(await probe.json()).toEqual({
+      authRequired: false,
+      capability: "read",
+      readOnly: true,
+    });
+
+    const post = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({ workflow: "demo", input: "x" }),
+    });
+    expect(post.status).toBe(403);
+  });
+
+  it("requires a session when only --read-token is configured", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun), {
+      authToken: undefined,
+      readToken: "viewer-only",
+    });
+    const base = await start(server);
+    expect((await fetch(`${base}/api/workflows`)).status).toBe(401);
+    const session = await loginSession(base, "viewer-only");
+    expect(session.capability).toBe("read");
+    expect(
+      (
+        await fetch(`${base}/api/workflows`, {
+          headers: { cookie: session.cookie },
+        })
+      ).status,
+    ).toBe(200);
   });
 });
 
@@ -2408,7 +2596,13 @@ describe("web server — CSRF", () => {
 });
 
 describe("startWebUi — secure-by-default exposure", () => {
-  async function boot(options: { host: string; noAuth?: boolean; authToken?: string }) {
+  async function boot(options: {
+    host: string;
+    noAuth?: boolean;
+    authToken?: string;
+    readToken?: string;
+    readOnly?: boolean;
+  }) {
     const { startWebUi } = await import("../src/web/server");
     const cwd = mkdtempSync(join(tmpdir(), "webui-boot-"));
     tempRoots.push(cwd);
@@ -2421,6 +2615,8 @@ describe("startWebUi — secure-by-default exposure", () => {
       port: 0,
       host: options.host,
       authToken: options.authToken,
+      readToken: options.readToken,
+      readOnly: options.readOnly,
       noAuth: options.noAuth,
       stdout: (t) => out.push(t),
       stderr: (t) => out.push(t),
@@ -2436,6 +2632,24 @@ describe("startWebUi — secure-by-default exposure", () => {
     // The API is actually locked behind it.
     const res = await fetch(`${booted.url.replace("0.0.0.0", "127.0.0.1")}/api/workflows`);
     expect(res.status).toBe(401);
+  });
+
+  it("auto-generates a read token on a non-local --read-only bind", async () => {
+    const booted = await boot({ host: "0.0.0.0", readOnly: true });
+    expect(booted.authToken).toBeUndefined();
+    expect(booted.readToken).toMatch(/^[0-9a-f]{32}$/);
+    expect(booted.readOnly).toBe(true);
+    expect(booted.output()).toContain("read-only");
+    expect(booted.output()).toContain(booted.readToken!);
+    const base = booted.url.replace("0.0.0.0", "127.0.0.1");
+    expect((await fetch(`${base}/api/workflows`)).status).toBe(401);
+    const cookie = await login(base, booted.readToken!);
+    const probe = await fetch(`${base}/api/session`, { headers: { cookie } });
+    expect(await probe.json()).toEqual({
+      authRequired: true,
+      capability: "read",
+      readOnly: true,
+    });
   });
 
   it("stays tokenless on the default local bind", async () => {
@@ -2470,6 +2684,18 @@ describe("resolveWebAuthToken", () => {
   it("--no-auth overrides both a flag token and the env var", () => {
     expect(
       resolveWebAuthToken({ authToken: "flag", envToken: "env", noAuth: true }),
+    ).toBeUndefined();
+  });
+});
+
+describe("resolveWebReadToken", () => {
+  it("prefers an explicit token over the env var", () => {
+    expect(resolveWebReadToken({ readToken: "flag", envToken: "env" })).toBe("flag");
+  });
+
+  it("--no-auth clears the read token", () => {
+    expect(
+      resolveWebReadToken({ readToken: "flag", envToken: "env", noAuth: true }),
     ).toBeUndefined();
   });
 });

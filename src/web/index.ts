@@ -1,13 +1,17 @@
 export {
   type WebServerDeps,
   type StartWebUiOptions,
+  type SessionCapability,
   DEFAULT_WEB_HOST,
   DEFAULT_WEB_PORT,
   createWebServer,
+  isMutatingApiRequest,
   missingPublicAssets,
   publicAssetsLoaded,
   resolveWebAuthToken,
+  resolveWebReadToken,
   startWebUi,
+  webAuthRequired,
 } from "./server";
 export {
   type RunManagerOptions,

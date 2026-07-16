@@ -81,6 +81,10 @@ export interface GlobalCliOptions {
   host?: string;
   /** Require this token to access the web UI (sets a cookie-based session). */
   authToken?: string;
+  /** Second credential that mints read-only web UI sessions. */
+  readToken?: string;
+  /** Force every web UI session into read-only capability. */
+  readOnly?: boolean;
   /** Explicitly serve a non-local web UI bind without authentication. */
   noAuth?: boolean;
   /** Trust `X-Forwarded-*` headers (web UI behind a reverse proxy you run). */
@@ -99,6 +103,8 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
   let port: number | undefined;
   let host: string | undefined;
   let authToken: string | undefined;
+  let readToken: string | undefined;
+  let readOnly = false;
   let noAuth = false;
   let trustProxy = false;
   let version = false;
@@ -158,6 +164,19 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
       i += 1;
       continue;
     }
+    if (arg === "--read-token") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("-")) {
+        return { args: [], error: "--read-token requires a value" };
+      }
+      readToken = value;
+      i += 1;
+      continue;
+    }
+    if (arg === "--read-only") {
+      readOnly = true;
+      continue;
+    }
     if (arg === "--no-auth") {
       noAuth = true;
       continue;
@@ -171,6 +190,18 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
   if (noAuth && authToken) {
     return { args: [], error: "--no-auth cannot be combined with --auth-token" };
   }
+  if (noAuth && readToken) {
+    return { args: [], error: "--no-auth cannot be combined with --read-token" };
+  }
+  if (noAuth && readOnly) {
+    return { args: [], error: "--no-auth cannot be combined with --read-only" };
+  }
+  if (authToken && readToken && authToken === readToken) {
+    return {
+      args: [],
+      error: "--auth-token and --read-token must be different values",
+    };
+  }
   return {
     args: rest,
     workspacePath,
@@ -179,6 +210,8 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
     port,
     host,
     authToken,
+    readToken,
+    readOnly: readOnly || undefined,
     noAuth: noAuth || undefined,
     trustProxy: trustProxy || undefined,
     version: version || undefined,
@@ -1488,6 +1521,12 @@ Global options (TUI and workflow commands):
       --host <host>          Web UI bind host (default 127.0.0.1; with --web-ui)
       --auth-token <token>   Require this token for web UI access (with --web-ui;
                              or set STEAMTRAIN_AUTH_TOKEN to keep it out of ps/history)
+      --read-token <token>   Second web UI credential that mints a read-only
+                             session (view workflows/runs; no launches or edits;
+                             or set STEAMTRAIN_READ_TOKEN)
+      --read-only            Force every web UI session into read-only capability
+                             (dedicated share bind; pairs with --auth-token or
+                             --read-token, or alone on localhost)
       --no-auth              Serve a non-local web UI bind without auth (unsafe;
                              by default a token is auto-generated and printed)
       --trust-proxy          Honor X-Forwarded-* headers (only behind a reverse

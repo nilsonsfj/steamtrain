@@ -156,10 +156,16 @@ authoring session. Ecosystem features also compound over time.
 > session auth, Origin/Referer CSRF validation, login form, localhost bind
 > without auth, `--no-auth` opt-out for trusted networks, login rate limiting,
 > reverse-proxy + `--trust-proxy` guidance in [`web-ui.md`](web-ui.md).
+>
+> **Shipped:** read-only / share mode — `--read-token` /
+> `STEAMTRAIN_READ_TOKEN` mints viewer sessions (GET + logout only; every other
+> write returns `403`); `--read-only` forces every session (and the no-auth
+> localhost path) into viewer capability; `GET /api/session` and the login
+> response expose `capability` so the SPA hides Run / authoring / harvest /
+> approval / input controls. See [`web-ui.md`](web-ui.md#scope--security).
 
 **Remaining follow-ups:**
 
-- Read-only mode for sharing a run view with teammates
 - Session expiry mid-run has no auto-re-login flow — the user must start a new run
 
 ---

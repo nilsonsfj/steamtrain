@@ -133,6 +133,41 @@ describe("parseGlobalArgs", () => {
     });
   });
 
+  it("parses --read-token and --read-only", () => {
+    expect(parseGlobalArgs(["--web-ui", "--read-token", "viewer", "--read-only"])).toEqual({
+      args: [],
+      webUi: true,
+      readToken: "viewer",
+      readOnly: true,
+    });
+    expect(parseGlobalArgs(["--web-ui", "--auth-token", "full", "--read-token", "viewer"])).toEqual(
+      {
+        args: [],
+        webUi: true,
+        authToken: "full",
+        readToken: "viewer",
+      },
+    );
+  });
+
+  it("rejects --no-auth with --read-token or --read-only", () => {
+    expect(parseGlobalArgs(["--web-ui", "--read-token", "v", "--no-auth"])).toEqual({
+      args: [],
+      error: "--no-auth cannot be combined with --read-token",
+    });
+    expect(parseGlobalArgs(["--web-ui", "--read-only", "--no-auth"])).toEqual({
+      args: [],
+      error: "--no-auth cannot be combined with --read-only",
+    });
+  });
+
+  it("rejects identical --auth-token and --read-token values", () => {
+    expect(parseGlobalArgs(["--web-ui", "--auth-token", "same", "--read-token", "same"])).toEqual({
+      args: [],
+      error: "--auth-token and --read-token must be different values",
+    });
+  });
+
   it("parses --version and -v", () => {
     expect(parseGlobalArgs(["--version"])).toEqual({ args: [], version: true });
     expect(parseGlobalArgs(["-v"])).toEqual({ args: [], version: true });
