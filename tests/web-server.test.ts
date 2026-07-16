@@ -2716,6 +2716,26 @@ describe("startWebUi — secure-by-default exposure", () => {
     });
   });
 
+  it("reports auth-token→read-only when --read-only pairs with --auth-token", async () => {
+    const booted = await boot({
+      host: "0.0.0.0",
+      authToken: "my-secret",
+      readOnly: true,
+    });
+    expect(booted.authToken).toBe("my-secret");
+    expect(booted.readToken).toBeUndefined();
+    expect(booted.readOnly).toBe(true);
+    expect(booted.output()).toContain("auth-token→read-only");
+    const base = booted.url.replace("0.0.0.0", "127.0.0.1");
+    const cookie = await login(base, "my-secret");
+    const probe = await fetch(`${base}/api/session`, { headers: { cookie } });
+    expect(await probe.json()).toEqual({
+      authRequired: true,
+      capability: "read",
+      readOnly: true,
+    });
+  });
+
   it("stays tokenless on the default local bind", async () => {
     const booted = await boot({ host: "127.0.0.1" });
     expect(booted.authToken).toBeUndefined();

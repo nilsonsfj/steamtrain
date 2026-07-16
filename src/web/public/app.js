@@ -1691,7 +1691,9 @@
     document.getElementById("runBtn").style.display = (running || ro) ? "none" : "block";
     document.getElementById("pauseBtn").style.display = (running && !ro) ? "block" : "none";
     document.getElementById("cancelBtn").style.display = (running && !ro) ? "block" : "none";
-    document.getElementById("planBtn").style.display = (running || ro) ? "none" : "block";
+    // Plan is a pre-launch dry-run; only hide it for read-only sessions (do not
+    // couple it to running — that was not the pre-existing behavior).
+    document.getElementById("planBtn").style.display = ro ? "none" : "block";
     document.getElementById("input").disabled = running || ro;
     updatePauseButton();
   }

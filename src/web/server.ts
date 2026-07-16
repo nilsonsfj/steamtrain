@@ -434,7 +434,8 @@ export function isForbiddenForReadSession(method: string, path: string): boolean
   if (method === "GET" && path === "/api/config") return true;
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;
   if (method === "POST" && (path === "/api/logout" || path === "/api/auth")) return false;
-  return method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
+  // Treat every other write (and exotic methods) as forbidden for viewers.
+  return true;
 }
 
 /** @deprecated Prefer {@link isForbiddenForReadSession}; kept as a narrow alias. */
