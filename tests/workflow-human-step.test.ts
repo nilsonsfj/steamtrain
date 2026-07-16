@@ -188,6 +188,29 @@ describe("human step engine", () => {
     const events = await collect(humanSpec, makeDeps(provider), { cache });
     expect(asks).toBe(1); // replayed, not re-asked
     expect(findDone(events, "context")?.cached).toBe(true);
+    // A fresh run (cleared cache — what --fresh does) re-asks.
+    const freshEvents = await collect(humanSpec, makeDeps(provider), {
+      cache: new Map<string, StepResult>(),
+    });
+    expect(asks).toBe(2);
+    expect(findDone(freshEvents, "context")?.cached).toBe(false);
+  });
+
+  it("treats a throwing provider as a canceled ask (never crashes the run)", async () => {
+    const provider: HumanInputProvider = async () => {
+      throw new Error("UI exploded");
+    };
+    const events = await collect(humanSpec, makeDeps(provider));
+    const done = findDone(events, "context");
+    expect(done?.result.ok).toBe(false);
+    expect(done?.result.error).toContain("human-input provider failed: UI exploded");
+    const resolved = events.find((e) => e.kind === "human_input_resolved");
+    expect(resolved).toMatchObject({ canceled: true, by: "auto:provider-error" });
+    // The run still settles cleanly with a workflow_done.
+    const workflowDone = events.find((e) => e.kind === "workflow_done") as
+      | (WorkflowEvent & { kind: "workflow_done" })
+      | undefined;
+    expect(workflowDone?.ok).toBe(false);
   });
 
   it("fails the step with guidance when no provider is configured", async () => {

@@ -37,7 +37,11 @@ function maxAutonomy(a: WorkflowAutonomy, b: WorkflowAutonomy): WorkflowAutonomy
 
 function stepAutonomy(step: WorkflowStep): WorkflowAutonomy {
   if (step.kind === "human") return "interactive";
-  if ((step.kind === "worker" || step.kind === "processor" || !step.kind) && step.canAsk) {
+  if (
+    (step.kind === "worker" || step.kind === "processor" || !step.kind) &&
+    "canAsk" in step &&
+    step.canAsk === true
+  ) {
     return "interactive";
   }
   if (step.kind === "approval") return "approvals";

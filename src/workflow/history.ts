@@ -57,12 +57,18 @@ export interface HistoryStep {
   /**
    * Human-input outcome, when this step is a `human` step or a `canAsk` agent
    * step that asked a clarifying question. Records the ask and who answered,
-   * so the history viewer shows the exchange.
+   * so the history viewer shows the exchange. The `outputSchema` is
+   * deliberately NOT recorded: replayed records are terminal (no form to
+   * render), and the schema lives in the spec.
    */
   humanInput?: {
     prompt?: string;
     choices?: string[];
     origin?: "human-step" | "agent-question";
+    /** The ask attempt the record settled on (>1 ⇒ earlier answers were rejected). */
+    attempt?: number;
+    /** Why the previous attempt's answer was rejected, when the last ask was a re-ask. */
+    retryError?: string;
     value?: string;
     by?: string;
     canceled?: boolean;
@@ -409,6 +415,8 @@ export class RunRecordBuilder {
           prompt: event.prompt,
           choices: event.choices,
           origin: event.origin,
+          attempt: event.attempt,
+          retryError: event.retryError,
         };
         break;
       }
