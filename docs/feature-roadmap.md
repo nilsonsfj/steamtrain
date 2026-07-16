@@ -1,6 +1,6 @@
 # steamtrain — feature roadmap
 
-Date: 2026-07-02
+Date: 2026-07-15 (pending-work refresh)
 
 A prioritized roadmap of next features and improvements, in three parts:
 
@@ -19,6 +19,8 @@ failures, on-disk step cache + resume, run history with re-run / retry-failed,
 per-step git-worktree isolation, an LLM workflow drafter, and a unified
 TUI / web UI / CLI over one shared authoring core — plus worktree diff
 review and merge-back (merge step kind, `history apply/prune`, `--diff`),
+worktree lifecycle closure (`cleanup: true`, `workflow worktrees` GC, harvest
+actions in both UIs — see [`worktree-lifecycle.md`](worktree-lifecycle.md)),
 human-in-the-loop approval gates (`approval` step kind, `gate` with
 `human` condition, `--approve-all`/`--on-approval`), structured step
 outputs (per-step JSON schemas, `json.<path>` templates, gate `path`
@@ -27,7 +29,12 @@ true DAG scheduling with per-step `when` conditions, typed workflow
 inputs, sub-workflows (`kind: "workflow"` step), template reference
 linting (`lintTemplateRefs`), dry-run/plan preview (`planWorkflow`),
 cost budgets (`maxCostUsd`), per-step cost/token tracking, cost analytics
-CLI, and web UI hardening (`--auth-token`, CSRF, login form).
+CLI, live cost/token ticker in the TUI status bar and web header,
+mid-run steering (pause / edit pending steps / resume — see
+[`mid-run-steering.md`](mid-run-steering.md)), and web UI security
+hardening (`--auth-token`, cookie session auth, CSRF validation, login
+rate limiting, `--no-auth` opt-out, reverse-proxy guidance — see
+[`web-ui.md`](web-ui.md)).
 
 ---
 
@@ -40,14 +47,15 @@ so the cost is proportionate.
 
 ## 1.1 Graphical diff panels in TUI/web UI
 
-> Core merge/diff/apply/prune machinery shipped — see
-> [`worktree-merge-back.md`](worktree-merge-back.md). The diff primitives are
-> UI-agnostic and ready; what remains is the visual layer.
+> Partially shipped. Per-step **diffstat** and worktree harvest actions are in
+> both UIs via `GET /api/history/:id/worktrees` (web "Worktree changes" section;
+> TUI history detail). CLI `history show --diff` and `workflow history apply`
+> remain the full-patch surfaces. See [`worktree-lifecycle.md`](worktree-lifecycle.md)
+> and [`worktree-merge-back.md`](worktree-merge-back.md).
 
-**The feature:**
-- Graphical diff panels in the TUI and web UI showing per-step file changes,
-  +/- stats, and full patches — consuming the same diff data the CLI's
-  `--diff` flag already produces.
+**What remains:**
+- Graphical **full patch** panes in the TUI and web UI — +/- stats are there;
+  inline unified diffs consuming the same data as `history show --diff` are not.
 
 ## 1.2 CI / headless integration (GitHub Action + machine-readable results)
 
@@ -69,19 +77,7 @@ artifact a pipeline can consume, no turnkey way to run `bug-hunt` on every PR.
 leverage distribution channel for the whole tool, and `bug-hunt`-on-every-PR is
 the demo that sells itself.
 
-## 1.3 Cost analytics UI (live ticker)
-
-> Core budget enforcement and cost analytics CLI shipped — see
-> [cost-and-budgets.md](./cost-and-budgets.md). Per-step and per-run cost
-> data flows through events.
-
-**The feature:**
-- A live cost **and token** ticker widget in the TUI status bar / web UI
-  header during a run, with a per-model breakdown line — consuming the cost
-  data that already flows through events but currently only renders
-  per-event rather than as a persistent running total.
-
-## 1.4 Per-step tool permissions and sandbox profiles
+## 1.3 Per-step tool permissions and sandbox profiles
 
 **The gap:** every agent step runs with whatever the underlying CLI allows by
 default. A "review" step has the same write powers as an "implement" step;
@@ -100,19 +96,21 @@ scratch clone" and "I'll run this on my actual repo." Worktree isolation
 protects the tree; this protects everything else (shell, network, files
 outside the repo).
 
-## 1.5 Detached runs and a run queue (reattach from any UI)
+## 1.4 Detached runs and a run queue (reattach from any UI)
 
 > Shipped — see [`detached-runs.md`](detached-runs.md). `workflow run
 > --detach` runs under a background process; `workflow
 > attach/runs/cancel/approve`, TUI `/attach` + the run browser, and the web
 > UI's Active runs panel all attach/cancel/approve any process's runs through
 > the shared `.steamtrain/runs/` registry; `maxParallelRuns` queues excess
-> runs across processes. Remaining follow-up: detaching an *already-started*
-> TUI/web run into a background process (today detach is chosen at launch).
+> runs across processes.
 
-## 1.6 Notifications on run completion / approval needed
+**Remaining follow-up:** detaching an *already-started* TUI/web run into a
+background process (today detach is chosen at launch).
 
-**The gap:** once runs are long (and especially once they're detached, 1.5, or
+## 1.5 Notifications on run completion / approval needed
+
+**The gap:** once runs are long (and especially once they're detached, 1.4, or
 waiting on a human), the user needs to be pinged rather than poll a terminal.
 
 **The feature:** a `notify` config block — terminal bell + OS desktop
@@ -125,7 +123,7 @@ cost, and a deep link to the web-UI run page.
 glue that makes approval gates and detached runs usable rather than just
 possible.
 
-## 1.7 Workflow sharing: import/export and a community catalog
+## 1.6 Workflow sharing: import/export and a community catalog
 
 **The gap:** workflows live in `steamtrain.json` (project) or the user layer;
 the only way to share one is copy-paste JSON. The bundled catalog (4 workflows)
@@ -144,16 +142,16 @@ recipes (release checklist, dependency-upgrade sweep, incident postmortem,
 docs audit) is what makes new users productive in minutes instead of an
 authoring session. Ecosystem features also compound over time.
 
-## 1.8 Web UI follow-ups
+## 1.7 Web UI follow-ups
 
-> Core auth/CSRF hardening shipped (`--auth-token`, cookie-based session auth,
-> Origin/Referer CSRF validation, login form, public route bypass). Remaining
-> follow-ups:
+> Core auth/CSRF hardening shipped (PR #82): `--auth-token`, cookie-based
+> session auth, Origin/Referer CSRF validation, login form, localhost bind
+> without auth, `--no-auth` opt-out for trusted networks, login rate limiting,
+> reverse-proxy + `--trust-proxy` guidance in [`web-ui.md`](web-ui.md).
 
-- `--insecure-no-auth` opt-out for localhost (suppress the login form on 127.0.0.1)
-- Reverse-proxy + TLS docs for remote deployment
+**Remaining follow-ups:**
+
 - Read-only mode for sharing a run view with teammates
-- Basic rate limiting on `POST /api/auth` (or document that the token should be high-entropy for shared deployments)
 - Session expiry mid-run has no auto-re-login flow — the user must start a new run
 
 ---
@@ -225,7 +223,7 @@ cross-model comparison is a core multi-agent pattern, not an edge case.
 **Comparison:** GitHub Actions expressions and Airflow's Jinja show both the
 value and the trap — Jinja-in-YAML gets unreadable fast. The lint half is
 already shipped and uncontroversial; the filters are the follow-up that pairs
-with structured outputs (1.3 in the original numbering).
+with structured outputs.
 
 ## 2.4 Reusable step templates (`stepDefaults`/`extends`)
 
@@ -240,7 +238,7 @@ with structured outputs (1.3 in the original numbering).
 
 **Comparison:** GitHub Actions has composite actions for exactly this —
 shared configuration that multiple steps or workflows reference. This
-multiplies the value of the community catalog (1.7).
+multiplies the value of the community catalog (1.6).
 
 ## 2.5 Run-inspection and authoring UX upgrades
 
@@ -248,15 +246,17 @@ multiplies the value of the community catalog (1.7).
 can work with runs:
 
 - Step output is a streamed tail; there's no **search** across a run's
-  outputs, no **export** ("give me this run as one markdown transcript"), no
-  copy-step-output shortcut in the TUI.
+  outputs, no **export** ("give me this run as one markdown transcript"). The
+  web step drawer has one-click **copy**; the TUI has no copy-step-output
+  shortcut yet.
 - Token counts are surfaced in the TUI header and per-step details, but
   there's no signal when a step is nearing context limits — the usual silent
   killer of long consolidator steps.
-- The web UI has the vertical pipeline; the TUI has no compact **graph/tree
-  overview** of phase → step topology before running.
-- Prompt history/drafts exist in the TUI only (the one remaining parity gap
-  in the unification doc).
+- The web UI has the vertical pipeline; the TUI has a workflow **preview**
+  (phase → step list) but no compact graph/tree topology view.
+- Prompt history is in both UIs (TUI per-mode history; web localStorage-backed
+  ↑/↓ on the run input). Per-mode unsent drafts remain TUI-stronger (web
+  restores the draft only while browsing history).
 - Authoring is JSON-or-LLM; a middle tier — a form-based step editor in the
   web UI (add phase, add step, pick kind/agent/model from the existing meta
   view-model) — would cover the "I just want to tweak one step" case without
@@ -275,7 +275,7 @@ Shorter list, less rigorously ranked — worth tracking, not necessarily next:
 
 - **Scheduled runs:** `steamtrain workflow schedule <name> --cron "0 7 * * 1"`
   for recurring jobs (dependency-upgrade sweep, weekly docs audit) — natural
-  once detached runs (1.5) exist; compare Airflow's scheduler and GitHub
+  once detached runs (1.4) exist; compare Airflow's scheduler and GitHub
   Actions `on: schedule`.
 - **Workflow testing framework:** a mock-agent mode (scripted step outputs
   from fixtures) so workflow authors can unit-test routing — gates, loops,
@@ -306,14 +306,14 @@ Shorter list, less rigorously ranked — worth tracking, not necessarily next:
 
 Three tracks can proceed largely in parallel:
 
-- **Trust track (protects users):** 1.3 cost ticker → 1.4 permissions → 1.8
-  web follow-ups. Each is small-to-medium and independent.
-- **Capability track (unlocks use cases):** 1.1 graphical diffs → 1.2 CI
+- **Trust track (protects users):** 1.3 permissions → 1.7 web follow-ups.
+  Each is small-to-medium and independent.
+- **Capability track (unlocks use cases):** 1.1 full graphical diffs → 1.2 CI
   action — builds directly on the shipped merge/diff machinery.
 - **Language track (workflow authoring power):** 2.3 template filters and 2.4
   step templates first (small, high leverage), then 2.1 session continuity
   and 2.2 matrix fan-out; 2.5 run-inspection UX follows as demand dictates.
 
-1.5 detached runs, 1.6 notifications, and 1.7 sharing slot in whenever
-bandwidth allows (1.6 should land with or right after 1.5; Part 3's
-scheduled runs after 1.5).
+1.4 detached runs, 1.5 notifications, and 1.6 sharing slot in whenever
+bandwidth allows (1.5 should land with or right after 1.4; Part 3's
+scheduled runs after 1.4).

@@ -44,8 +44,8 @@ wrong *default*:
   `prUrls`, `noChanges`) that gates and downstream steps can route on — an
   agent's prose can't be trusted for that.
 - Standardization is what lets the TUI/web UI/CLI render merge results
-  uniformly, and what the upcoming approval gates (roadmap §1.2) will hook
-  into: "show me the diff, then continue".
+  uniformly, and what the existing approval gates hook into: "show me the
+  diff, then continue".
 
 So: a deterministic `merge` step kind, with an agent *inside* it for exactly
 the judgment-shaped part (conflict resolution), plus the template escape hatch
@@ -151,9 +151,7 @@ step, `workflow worktrees list|prune` GC, `history apply`
 
 ## Future work this unlocks
 
-- **Approval gates (roadmap §1.2)** review exactly this diff before the merge
-  step delivers it.
-- **Web patch view**: the web UI now shows per-step diffstat in run history;
-  a full patch pane can grow on the same `GET /api/history/:id/worktrees`
-  primitives.
-- **CI mode (§1.4)** posts `history show --diff`-style patches on PRs.
+- **Full patch viewer in the UIs (roadmap §1.1):** diffstat and harvest
+  actions shipped in both UIs; inline unified diffs can grow on the same
+  `GET /api/history/:id/worktrees` primitives.
+- **CI mode (roadmap §1.2):** posts `history show --diff`-style patches on PRs.

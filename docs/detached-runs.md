@@ -1,6 +1,6 @@
 # Detached runs & the run queue
 
-Date: 2026-07-09 (roadmap item 1.5)
+Date: 2026-07-09 (roadmap item 1.4)
 
 Long workflows used to hold a terminal hostage: a run was tied to the TUI/web
 session that started it, closing the laptop lid killed it, and two concurrent
@@ -152,7 +152,7 @@ approval can be granted from any surface for any run.
 
 ## Follow-ups (tracked, out of scope here)
 
-- Notifications on completion/approval-needed (roadmap 1.6) — the natural
+- Notifications on completion/approval-needed (roadmap 1.5) — the natural
   companion; all the hooks (terminal meta, pending-approval state) exist.
 - Scheduled runs (`workflow schedule --cron`) — Part 3 of the roadmap,
   unblocked by the detached runner.

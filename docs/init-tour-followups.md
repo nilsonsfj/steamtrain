@@ -4,6 +4,8 @@ PR #63 received several review rounds. This file records what was applied,
 what was declined (and why), and what is deferred as future work — following
 the [`dry-run-followups.md`](dry-run-followups.md) precedent.
 
+**Open work** is only under [Deferred / out of scope](#deferred--out-of-scope-for-the-onboarding-pr) below.
+
 ## Applied across review rounds
 
 - **Line-buffered prompting.** The original `askYesNo` resolved one answer per

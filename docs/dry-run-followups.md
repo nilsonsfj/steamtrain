@@ -1,12 +1,18 @@
 # dry-run / plan preview — follow-ups
 
-## Shipped (PR #59)
-- `planWorkflow()` core function
-- CLI `workflow plan` command
-- Web API `POST /api/workflows/:name/plan`
-- Web UI "Plan" button
-- TUI Ctrl+D dry-run preview
-- 25 tests
+## Shipped
+
+- `planWorkflow()` core function, CLI `workflow plan`, web API
+  `POST /api/workflows/:name/plan`, web UI Plan button, TUI Ctrl+D preview
+  (PR #59)
+- TUI input-parameter support: workflows with declared `inputs` route through
+  the shared input form before planning; resolved params are passed to
+  `planWorkflow` (PR #78)
+- `planWorkflow` session-overrides test coverage (agent/model/effort/prompt)
+  (PR #79)
+- `steamtrain workflow dry-run <name>` as an alias for `workflow plan`
+- `workflow run <name> … --dry-run` prints the plan and exits (PR #84)
+- Historical cost estimation at run level via `planHistoryContext` (PR #84)
 
 ## Follow-up dispositions (updated 2026-07-15 — all items closed)
 

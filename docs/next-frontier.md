@@ -1,17 +1,19 @@
 # steamtrain — the next frontier
 
-Date: 2026-07-07
+Date: 2026-07-15 (partial-ship status refresh)
 
 A second-generation idea set, deliberately **disjoint** from
-[`feature-roadmap.md`](feature-roadmap.md): nothing here is shipped, and
-nothing here appears in that roadmap (parts 1–3), the dry-run follow-ups, or
-the release-readiness checklist. Where an item is adjacent to a roadmap entry,
-the difference is called out explicitly.
+[`feature-roadmap.md`](feature-roadmap.md): items here are not on that
+roadmap (parts 1–3), the dry-run follow-ups, or the release-readiness
+checklist. Several entries below are **partially or fully shipped** — those
+are marked inline. Where an item is adjacent to a roadmap entry, the
+difference is called out explicitly.
 
-The organizing observation: everything shipped and everything on the existing
-roadmap treats a workflow run as a **batch job** — you author it, fire it, and
-inspect the wreckage or the trophy afterward. World-class orchestration of
-*agents* (as opposed to containers or shell scripts) needs three more pillars:
+The organizing observation: most shipped work and most of the existing
+roadmap still treat a workflow run as a **batch job** — you author it, fire
+it, and inspect the wreckage or the trophy afterward. World-class
+orchestration of *agents* (as opposed to containers or shell scripts) needs
+three more pillars:
 
 1. **The run as a live collaboration** — steer, answer, take over, rewind
    (items 1–4).
