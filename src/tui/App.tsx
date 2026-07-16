@@ -1578,6 +1578,7 @@ export function App({
             planResult={planResult}
             showStepDetail={runner.wfShowStepDetail}
             showPlanResult={runner.wfShowPlanResult}
+            resolveWorkflow={resolveWorkflowSpec}
           />
         ) : (
           <WorkflowPicker

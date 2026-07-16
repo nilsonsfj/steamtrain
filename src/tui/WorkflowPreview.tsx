@@ -42,6 +42,12 @@ interface WorkflowPreviewProps {
   planResult?: PlanResult | null;
   showStepDetail?: boolean;
   showPlanResult?: boolean;
+  /**
+   * Catalog lookup for `kind: "workflow"` steps, so the autonomy badge
+   * reflects checkpoints nested inside sub-workflows (matching the picker,
+   * CLI list/plan, and web cards). Omitted ⇒ own steps only.
+   */
+  resolveWorkflow?: (name: string) => WorkflowSpec | undefined;
 }
 
 type PreviewRow =
@@ -64,6 +70,7 @@ export function WorkflowPreview({
   planResult = null,
   showStepDetail = true,
   showPlanResult = true,
+  resolveWorkflow,
 }: WorkflowPreviewProps) {
   const innerWidth = Math.max(20, width - 4);
   const flat = useMemo(() => flattenSpecSteps(spec), [spec]);
@@ -90,7 +97,7 @@ export function WorkflowPreview({
   const stepCount = flat.length;
   const agents = useMemo(() => distinctAgents(spec), [spec]);
   const blocks = useMemo(() => blockSummary(spec), [spec]);
-  const autonomy = useMemo(() => workflowAutonomy(spec), [spec]);
+  const autonomy = useMemo(() => workflowAutonomy(spec, resolveWorkflow), [spec, resolveWorkflow]);
   const templateWarnings = useMemo(() => lintTemplateRefs(spec), [spec]);
 
   return (

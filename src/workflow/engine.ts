@@ -2940,6 +2940,17 @@ async function executeWorkflowStep(
           stepId: namespace(event.stepId),
         });
         break;
+      // Human-input requests (human steps / canAsk questions) must surface at
+      // the parent level like approvals do, or a nested ask would block the
+      // child run with no UI able to discover or answer it.
+      case "human_input_pending":
+      case "human_input_resolved":
+        hooks.pushWorkflowEvent({
+          ...event,
+          phaseId: namespace(event.phaseId),
+          stepId: namespace(event.stepId),
+        });
+        break;
       case "fan_out":
         hooks.pushWorkflowEvent({
           ...event,

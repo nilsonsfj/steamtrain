@@ -448,6 +448,46 @@ describe("human input reducer + history", () => {
   });
 });
 
+describe("human step inside a sub-workflow", () => {
+  it("surfaces the nested ask under a namespaced id and answers it", async () => {
+    const child: WorkflowSpec = {
+      name: "child",
+      phases: [
+        { id: "cp", title: "CP", steps: [{ id: "ask", kind: "human", prompt: "child asks?" }] },
+      ],
+    };
+    const parent: WorkflowSpec = {
+      name: "parent",
+      phases: [
+        { id: "p", title: "P", steps: [{ id: "call", kind: "workflow", workflow: "child" }] },
+      ],
+    };
+    const requests: HumanInputRequest[] = [];
+    const provider: HumanInputProvider = async (req) => {
+      requests.push(req);
+      return { value: "nested answer", by: "human:test" };
+    };
+    const deps: WorkflowDeps = {
+      ...makeDeps(provider),
+      resolveWorkflow: (name) => (name === "child" ? child : undefined),
+    };
+    const events = await collect(parent, deps);
+
+    // The provider sees the child's LOCAL id (matching approval semantics)…
+    expect(requests[0]!.stepId).toBe("ask");
+    // …while the surfaced events carry the NAMESPACED id, so every UI can
+    // render and answer the nested ask.
+    const pending = events.find((e) => e.kind === "human_input_pending");
+    const resolved = events.find((e) => e.kind === "human_input_resolved");
+    expect(pending).toMatchObject({ stepId: "call::ask", phaseId: "call::cp" });
+    expect(resolved).toMatchObject({ stepId: "call::ask", value: "nested answer" });
+
+    expect(findDone(events, "call::ask")?.result.output).toBe("nested answer");
+    expect(findDone(events, "call")?.result.ok).toBe(true);
+    expect(findDone(events, "call")?.result.output).toBe("nested answer");
+  });
+});
+
 describe("matchPendingInput", () => {
   it("matches local and namespaced step ids", () => {
     const pending = [{ stepId: "parent::ask", iteration: 1, attempt: 1 }];
