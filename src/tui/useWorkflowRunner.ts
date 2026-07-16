@@ -5,13 +5,15 @@ import type { Orchestrator } from "../orchestrator";
 import type {
   ApprovalDecision,
   ApprovalProvider,
+  HumanInputProvider,
+  HumanInputResponse,
   LiveRunPublisher,
   StepEditPatch,
   StepResult,
   WorkflowRunControl,
   WorkflowSpec,
 } from "../workflow";
-import { matchApprovalKey } from "../workflow";
+import { matchApprovalKey, matchPendingInput } from "../workflow";
 import {
   RunRecordBuilder,
   WORKFLOW_CACHE_DIR,
@@ -20,12 +22,14 @@ import {
   acquireRunSlot,
   createLiveRunPublisher,
   createLiveRunStore,
+  createNotifier,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   createWorkflowRunControl,
   hashWorkflowSpec,
   isTerminalLiveRunStatus,
   newLiveRunMeta,
+  notifyWorkflowEvent,
   persistWorkflowStepDone,
   resolveMaxParallelRuns,
   resolveWorkflowTimeoutSec,
@@ -33,6 +37,7 @@ import {
   watchRunCancel,
   watchRunControl,
   withStoreApprovals,
+  withStoreHumanInputs,
   workflowCacheKey,
 } from "../workflow";
 import { type OutputScroll, initialOutputScroll, scrollOutputBy } from "./output-window";
@@ -89,6 +94,10 @@ export function useWorkflowRunner({
   // Live approval checkpoints keyed by `<stepId>:<iteration>`: the injected
   // provider registers a resolver here and blocks until a keypress resolves it.
   const approvalResolversRef = useRef<Map<string, (decision: ApprovalDecision) => void>>(new Map());
+  // Live human-input requests keyed the same way; the answer box resolves them.
+  const humanInputResolversRef = useRef<Map<string, (response: HumanInputResponse) => void>>(
+    new Map(),
+  );
   const cacheStoreRef = useRef(createWorkflowCacheStore(join(process.cwd(), WORKFLOW_CACHE_DIR)));
   const historyStoreRef = useRef(
     createWorkflowHistoryStore(join(process.cwd(), WORKFLOW_HISTORY_DIR)),
@@ -304,6 +313,32 @@ export function useWorkflowRunner({
                 signal.addEventListener("abort", onAbort, { once: true });
               }
             });
+          const humanInputProvider: HumanInputProvider = (request, signal) =>
+            new Promise<HumanInputResponse>((resolve) => {
+              const mapKey = `${request.stepId}:${request.iteration}`;
+              const settle = (response: HumanInputResponse): void => {
+                if (humanInputResolversRef.current.get(mapKey) !== settle) return;
+                humanInputResolversRef.current.delete(mapKey);
+                signal?.removeEventListener("abort", onAbort);
+                resolve(response);
+              };
+              const onAbort = (): void =>
+                settle({ canceled: true, by: "auto:canceled", reason: "run canceled" });
+              // A re-ask (rejected answer) re-registers under the same key; the
+              // old resolver was already consumed by the first answer.
+              humanInputResolversRef.current.set(mapKey, settle);
+              if (signal) {
+                if (signal.aborted) {
+                  onAbort();
+                  return;
+                }
+                signal.addEventListener("abort", onAbort, { once: true });
+              }
+            });
+          // Run notifications (bell / desktop / webhook) — this process owns
+          // the run, so it is the one that pings.
+          const notifier = createNotifier(orchestrator.getConfig().notify);
+          const notifyMeta = { workflow: name, runId };
           for await (const event of orchestrator.runWorkflow(
             name,
             input,
@@ -316,9 +351,11 @@ export function useWorkflowRunner({
             // (CLI approve / web) settle the checkpoint too — first one wins.
             withStoreApprovals(liveStore, runId, approvalProvider),
             control,
+            withStoreHumanInputs(liveStore, runId, humanInputProvider),
           )) {
             recorder.handle(event);
             publisher.event(event);
+            notifyWorkflowEvent(notifier, notifyMeta, event);
             if (event.kind === "workflow_done") workflowOk = event.ok;
             if (event.kind === "step_edited") {
               // The engine dropped the edited step's stale entry from the
@@ -345,6 +382,7 @@ export function useWorkflowRunner({
         } finally {
           if (timeoutTimer) clearTimeout(timeoutTimer);
           approvalResolversRef.current.clear();
+          humanInputResolversRef.current.clear();
           disposeCancelWatch?.();
           disposeControlWatch?.();
           runControlRef.current = null;
@@ -529,6 +567,42 @@ export function useWorkflowRunner({
   );
 
   /**
+   * Answer the run's pending human-input request (invoked when the answer box
+   * submits). Owned runs settle the registered resolver directly; attached
+   * (externally-owned) runs write the answer into the shared registry, keyed
+   * to the pending request's attempt so a re-ask can't consume a stale answer.
+   */
+  const answerHumanInput = useCallback(
+    (stepId: string, value: string, iteration?: number): void => {
+      if (attachedRunIdRef.current) {
+        const runId = attachedRunIdRef.current;
+        void liveRunStoreRef.current
+          .get(runId)
+          .then((meta) => {
+            const target = matchPendingInput(meta?.pendingInputs ?? [], stepId, iteration);
+            if (!target) return;
+            return liveRunStoreRef.current.writeHumanInputResponse(
+              runId,
+              target.stepId,
+              target.iteration,
+              target.attempt,
+              { value, by: "human:tui" },
+            );
+          })
+          .catch(() => {});
+        return;
+      }
+      const resolvers = humanInputResolversRef.current;
+      const mapKey = matchApprovalKey(resolvers.keys(), stepId, iteration);
+      if (!mapKey) return;
+      const settle = resolvers.get(mapKey);
+      if (!settle) return;
+      settle({ value, by: "human:tui" });
+    },
+    [],
+  );
+
+  /**
    * Toggle mid-run pause/resume for the current run (owned or attached).
    * The desired state is written to the shared live-run store FIRST (the file
    * is the cross-surface source of truth), then applied directly to an owned
@@ -623,6 +697,7 @@ export function useWorkflowRunner({
     launchWorkflow,
     handleWorkflowCancel,
     resolveApproval,
+    answerHumanInput,
     attachRun,
     cancelLiveRun,
     togglePauseRun,

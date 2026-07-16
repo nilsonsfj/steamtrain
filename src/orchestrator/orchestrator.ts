@@ -22,7 +22,7 @@ import {
   validateWorkflow,
   workflowAgentIds,
 } from "../workflow";
-import type { ApprovalProvider, WorkflowRunControl } from "../workflow";
+import type { ApprovalProvider, HumanInputProvider, WorkflowRunControl } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 import { workspaceById } from "../workspace";
 
@@ -209,6 +209,7 @@ export class Orchestrator {
     inputs?: Record<string, string | number | boolean>,
     approval?: ApprovalProvider,
     control?: WorkflowRunControl,
+    humanInput?: HumanInputProvider,
   ): AsyncIterable<WorkflowEvent> {
     const spec = specOverride ?? this.listWorkflows()[name];
     if (!spec) throw new Error(`unknown workflow '${name}'`);
@@ -227,6 +228,7 @@ export class Orchestrator {
         loopMaxIterations: this.config.loopMaxIterations,
         resolveWorkflow: (name) => this.workflowCatalog[name],
         requestApproval: approval,
+        requestHumanInput: humanInput,
         control,
       },
       signal,

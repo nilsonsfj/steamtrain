@@ -11,6 +11,7 @@ import { runDoctor } from "./doctor";
 import type { Orchestrator } from "./orchestrator";
 import {
   type ApprovalProvider,
+  type HumanInputProvider,
   type LiveRunMeta,
   type LiveRunSource,
   type ModelUsage,
@@ -29,21 +30,28 @@ import {
   aggregateLeavesByModel,
   createLiveRunPublisher,
   createLiveRunStore,
+  createNotifier,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   createWorkflowRunControl,
+  formatTakeoverCommand,
   formatTokenSummary,
   formatTokens,
   formatUsd,
   hashWorkflowSpec,
   headlessApprovalProvider,
+  headlessHumanInputProvider,
   isRerunError,
   isTerminalLiveRunStatus,
   lintTemplateRefs,
   matchPendingApproval,
+  matchPendingInput,
   newLiveRunMeta,
+  notifyWorkflowEvent,
   persistWorkflowStepDone,
   planRerun,
+  planTakeover,
+  recordTakeover,
   rerunDowngradeMessage,
   resolveInputs,
   resolveMaxParallelRuns,
@@ -51,12 +59,14 @@ import {
   resultLeaves,
   stepMetaFromSpec,
   storeApprovalProvider,
+  storeHumanInputProvider,
   timeoutMsFromSec,
   tokensForResults,
   totalTokens,
   watchRunCancel,
   watchRunControl,
   workflowAgentIds,
+  workflowAutonomy,
   workflowCacheKey,
   workflowLlmSteps,
 } from "./workflow";
@@ -81,6 +91,8 @@ export interface RunOptions {
   approveAll: boolean;
   /** `--on-approval fail|stop`: auto-reject every human checkpoint with this disposition. */
   onApproval?: "fail" | "stop";
+  /** `--human <stepId>=<value|@file>`: pre-supplied answers for human steps / agent questions. */
+  human: Record<string, string>;
   /** `--detach`: run under a background process; attach later from any UI. */
   detach: boolean;
 }
@@ -93,6 +105,7 @@ export function parseRunOptions(args: string[]): RunOptions | null {
     retryFailed: false,
     params: {},
     approveAll: false,
+    human: {},
     detach: false,
   };
   for (let i = 0; i < args.length; i++) {
@@ -126,6 +139,15 @@ export function parseRunOptions(args: string[]): RunOptions | null {
       options.fresh = true;
     } else if (arg === "--detach" || arg === "-d") {
       options.detach = true;
+    } else if (arg === "--human") {
+      const value = args[i + 1];
+      if (!value) return null;
+      const eq = value.indexOf("=");
+      if (eq < 1) return null;
+      const key = value.slice(0, eq);
+      if (key.startsWith("-")) return null;
+      options.human[key] = value.slice(eq + 1);
+      i += 1;
     } else if (arg === "--approve-all") {
       options.approveAll = true;
     } else if (arg === "--on-approval") {
@@ -155,7 +177,7 @@ export async function runWorkflowCommand(
   const options = parseRunOptions(positional ? args.slice(1) : args);
   if (!options) {
     err(
-      `usage: steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--approve-all | --on-approval fail|stop]
+      `usage: steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...]
        steamtrain workflow run --from <runId> [--retry-failed] [--json] [--detach]
 `,
     );
@@ -261,6 +283,22 @@ export async function runWorkflowCommand(
   const trimmedInput = input.trim();
   const params = Object.keys(resolved.values).length > 0 ? resolved.values : undefined;
 
+  // Resolve `--human <stepId>=@file` values up front so a bad path fails the
+  // launch, not the step, and a detached child gets plain baked values.
+  const humanValues: Record<string, string> = {};
+  for (const [stepId, raw] of Object.entries(options.human)) {
+    if (raw.startsWith("@")) {
+      try {
+        humanValues[stepId] = await readFile(raw.slice(1), "utf8");
+      } catch (e) {
+        err(`could not read --human ${stepId}=@${raw.slice(1)}: ${message(e)}\n`);
+        return 1;
+      }
+    } else {
+      humanValues[stepId] = raw;
+    }
+  }
+
   if (options.detach) {
     return spawnDetachedRun({
       spec,
@@ -271,6 +309,7 @@ export async function runWorkflowCommand(
       seed,
       approveAll: options.approveAll,
       onApproval: options.onApproval,
+      humanInputs: Object.keys(humanValues).length > 0 ? humanValues : undefined,
       json: options.json,
       cwd,
       io,
@@ -289,6 +328,7 @@ export async function runWorkflowCommand(
       ? headlessApprovalProvider("reject-fail")
       : headlessApprovalProvider("reject-stop");
   const workflowCatalog = orchestrator.listWorkflows();
+  const autonomy = workflowAutonomy(spec, (childName) => workflowCatalog[childName]);
   if (
     !options.approveAll &&
     !options.onApproval &&
@@ -296,6 +336,14 @@ export async function runWorkflowCommand(
   ) {
     err(
       "note: this workflow has approval checkpoints; with no --approve-all / --on-approval they auto-reject and stop the run (or use --detach, which waits for a decision from any attached UI)\n",
+    );
+  }
+  // Human steps / agent questions run headlessly from pre-supplied answers;
+  // an unanswered one fails fast with guidance rather than hanging CI.
+  const humanInputProvider = headlessHumanInputProvider(humanValues);
+  if (autonomy === "interactive" && Object.keys(humanValues).length === 0) {
+    err(
+      "note: this workflow needs human input mid-run; supply answers with --human <stepId>=<value|@file>, or use --detach and answer from any attached UI ('steamtrain workflow answer')\n",
     );
   }
 
@@ -317,6 +365,7 @@ export async function runWorkflowCommand(
     detached: false,
     registerLiveRun: true,
     approval: approvalProvider,
+    humanInput: humanInputProvider,
     json: options.json,
     out,
     err,
@@ -349,6 +398,7 @@ interface SpawnDetachedRunOptions {
   seed?: Map<string, StepResult>;
   approveAll: boolean;
   onApproval?: "fail" | "stop";
+  humanInputs?: Record<string, string>;
   json: boolean;
   cwd: string;
   io: CliIO;
@@ -405,6 +455,7 @@ async function spawnDetachedRun(options: SpawnDetachedRunOptions): Promise<numbe
         fresh: options.forceFresh || undefined,
         approveAll: options.approveAll || undefined,
         onApproval: options.onApproval,
+        humanInputs: options.humanInputs,
       },
     }),
   );
@@ -558,6 +609,22 @@ export async function runDetachedRunner(
           // attached UI (CLI approve / TUI / web) — that's the point of detach.
           storeApprovalProvider(store, runId);
 
+  // Pre-supplied `--human` answers resolve immediately; anything else parks
+  // until an attached UI answers (`steamtrain workflow answer` / TUI / web).
+  const presupplied = launch.humanInputs ?? {};
+  const presuppliedProvider = headlessHumanInputProvider(presupplied);
+  const storeProvider = storeHumanInputProvider(store, runId);
+  const humanInput: HumanInputProvider = async (request, signal) => {
+    // Only attempt 1 consults the pre-supplied value: a re-ask means that
+    // value was rejected, so waiting for a fresh interactive answer is the
+    // only path that can still succeed.
+    if (request.attempt === 1) {
+      const canned = await presuppliedProvider(request, signal);
+      if (!canned.canceled) return canned;
+    }
+    return storeProvider(request, signal);
+  };
+
   return driveWorkflowRun({
     orchestrator,
     config,
@@ -572,6 +639,7 @@ export async function runDetachedRunner(
     detached: true,
     registerLiveRun: false,
     approval,
+    humanInput,
     json: false,
     out,
     err,
@@ -603,6 +671,7 @@ interface DriveWorkflowRunOptions {
   /** Create the live-run entry here (foreground); detached parents pre-create it. */
   registerLiveRun: boolean;
   approval: ApprovalProvider;
+  humanInput: HumanInputProvider;
   json: boolean;
   out: (text: string) => void;
   err: (text: string) => void;
@@ -699,6 +768,10 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<numbe
   timeoutTimer?.unref?.();
 
   const publisher = createLiveRunPublisher(store, runId);
+  // Run notifications (bell / desktop / webhook) per the `notify` config —
+  // this process owns the run, so it is the one that pings.
+  const notifier = createNotifier(config.notify);
+  const notifyMeta = { workflow: name, runId };
   let ok = false;
   let budgetExceeded = false;
   try {
@@ -712,9 +785,11 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<numbe
       params,
       options.approval,
       control,
+      options.humanInput,
     )) {
       recorder.handle(event);
       publisher.event(event);
+      notifyWorkflowEvent(notifier, notifyMeta, event);
       if (options.json) out(`${JSON.stringify(event)}\n`);
       else printHumanEvent(event, out);
       if (event.kind === "step_done") {
@@ -828,6 +903,13 @@ export async function runAttachCommand(
           .join(", ")} — decide with 'steamtrain workflow approve ${meta.id}'\n`,
       );
     }
+    if (meta.pendingInputs?.length) {
+      out(
+        `✎ waiting for input: ${meta.pendingInputs
+          .map((p) => p.stepId)
+          .join(", ")} — answer with 'steamtrain workflow answer ${meta.id}'\n`,
+      );
+    }
   }
 
   const ac = new AbortController();
@@ -843,6 +925,11 @@ export async function runAttachCommand(
       else printHumanEvent(event, out);
       if (!json && event.kind === "approval_pending") {
         out(`     decide with: steamtrain workflow approve ${runId} --step ${event.stepId}\n`);
+      }
+      if (!json && event.kind === "human_input_pending") {
+        out(
+          `     answer with: steamtrain workflow answer ${runId} --step ${event.stepId} --value <text>\n`,
+        );
       }
     }
   } finally {
@@ -909,6 +996,9 @@ function printLiveRunRow(run: LiveRunMeta, out: (text: string) => void): void {
     run.paused ? "⏸ paused" : undefined,
     run.pendingApprovals?.length
       ? `⏳ approval: ${run.pendingApprovals.map((p) => p.stepId).join(", ")}`
+      : undefined,
+    run.pendingInputs?.length
+      ? `✎ input: ${run.pendingInputs.map((p) => p.stepId).join(", ")}`
       : undefined,
   ]
     .filter(Boolean)
@@ -1178,6 +1268,204 @@ export async function runApproveCommand(
   return 0;
 }
 
+// ── workflow answer ──────────────────────────────────────────────────────────
+
+/**
+ * `steamtrain workflow answer <runId> [--step <stepId>] [--value <text> |
+ * --file <path>]` — answer a pending human-input request (a `human` step or an
+ * agent's clarifying question) on a live (typically detached) run. With no
+ * pending step named and exactly one pending, it targets that one; with no
+ * value it prints what's being asked so the user can decide.
+ */
+export async function runAnswerCommand(
+  args: string[],
+  cwd: string,
+  out: (text: string) => void,
+  err: (text: string) => void,
+): Promise<number> {
+  const usage =
+    "usage: steamtrain workflow answer <runId> [--step <stepId>] [--value <text> | --file <path>]\n";
+  const runId = args[0];
+  if (!runId || runId.startsWith("--")) {
+    err(usage);
+    return 1;
+  }
+  let stepId: string | undefined;
+  let value: string | undefined;
+  for (let i = 1; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--step") {
+      stepId = args[++i];
+      if (!stepId || stepId.startsWith("--")) {
+        err(usage);
+        return 1;
+      }
+    } else if (arg === "--value") {
+      value = args[++i];
+      if (value === undefined) {
+        err(usage);
+        return 1;
+      }
+    } else if (arg === "--file") {
+      const path = args[++i];
+      if (!path || path.startsWith("--")) {
+        err(usage);
+        return 1;
+      }
+      try {
+        value = await readFile(path, "utf8");
+      } catch (e) {
+        err(`could not read --file '${path}': ${message(e)}\n`);
+        return 1;
+      }
+    } else {
+      err(usage);
+      return 1;
+    }
+  }
+
+  const store = createLiveRunStore(join(cwd, WORKFLOW_RUNS_DIR));
+  const meta = await store.get(runId);
+  if (!meta || isTerminalLiveRunStatus(meta.status)) {
+    err(`no active run '${runId}' (see 'steamtrain workflow runs')\n`);
+    return 1;
+  }
+  const pending = meta.pendingInputs ?? [];
+  if (pending.length === 0) {
+    err(`run '${runId}' has no pending human-input requests\n`);
+    return 1;
+  }
+  let target = stepId ? matchPendingInput(pending, stepId) : undefined;
+  if (!stepId) {
+    if (pending.length > 1) {
+      err(
+        `run '${runId}' has ${pending.length} pending requests — pass --step <stepId>: ${pending
+          .map((p) => p.stepId)
+          .join(", ")}\n`,
+      );
+      return 1;
+    }
+    target = pending[0];
+  }
+  if (!target) {
+    err(
+      `no pending request '${stepId}' on run '${runId}' (pending: ${pending.map((p) => p.stepId).join(", ")})\n`,
+    );
+    return 1;
+  }
+
+  if (value === undefined) {
+    // No value: show what's being asked, so `answer <runId>` doubles as "what
+    // does this run want from me?".
+    out(`run ${runId} is waiting on '${target.stepId}':\n`);
+    if (target.prompt) out(`  ${target.prompt}\n`);
+    if (target.choices?.length) {
+      target.choices.forEach((choice, i) => out(`    ${i + 1}) ${choice}\n`));
+    }
+    out(
+      `answer with: steamtrain workflow answer ${runId} --step ${target.stepId} --value <text>\n`,
+    );
+    return 1;
+  }
+
+  await store.writeHumanInputResponse(runId, target.stepId, target.iteration, target.attempt, {
+    value,
+    by: "human:cli",
+  });
+  out(`✎ answered '${target.stepId}' on run ${runId}; the run picks it up shortly\n`);
+  return 0;
+}
+
+// ── workflow takeover ────────────────────────────────────────────────────────
+
+/**
+ * `steamtrain workflow takeover <runId> <stepId>` — drop into a recorded
+ * step's agent session interactively, inside its still-live worktree. The
+ * human finishes the job by hand with the agent's full context; on exit the
+ * takeover is recorded in run history, and the worktree's final state flows
+ * into the existing harvest machinery (`history show --diff` / `history
+ * apply`).
+ */
+export async function runTakeoverCommand(
+  config: SteamtrainConfig,
+  args: string[],
+  cwd: string,
+  out: (text: string) => void,
+  err: (text: string) => void,
+  spawnFn: typeof spawn = spawn,
+): Promise<number> {
+  const runId = args[0];
+  const stepId = args[1];
+  if (!runId || runId.startsWith("--") || !stepId || stepId.startsWith("--") || args.length > 2) {
+    err("usage: steamtrain workflow takeover <runId> <stepId>\n");
+    return 1;
+  }
+  const historyStore = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
+  const record = await historyStore.get(runId);
+  if (!record) {
+    const liveStore = createLiveRunStore(join(cwd, WORKFLOW_RUNS_DIR));
+    const live = await liveStore.get(runId);
+    if (live && !isTerminalLiveRunStatus(live.status)) {
+      err(
+        `run '${runId}' is still ${live.status} — takeover targets finished runs; cancel it first ('steamtrain workflow cancel ${runId}') or wait for it to settle\n`,
+      );
+      return 1;
+    }
+    err(`unknown run '${runId}' (see 'steamtrain workflow history')\n`);
+    return 1;
+  }
+
+  const planned = planTakeover(record, stepId, config);
+  if (!planned.ok) {
+    err(`${planned.error}\n`);
+    return 1;
+  }
+  const { plan } = planned;
+  for (const note of plan.notes) out(`note: ${note}\n`);
+  out(
+    `taking over step '${plan.stepId}' (${plan.agent})${plan.resumed ? " — resuming its recorded session" : ""}\n`,
+  );
+  out(`  workspace: ${plan.cwd}\n`);
+  out(`  launching: ${formatTakeoverCommand(plan)}\n\n`);
+
+  const startedAt = Date.now();
+  const exitCode = await new Promise<number | undefined>((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawnFn(plan.binary, plan.args, {
+        cwd: plan.cwd,
+        stdio: "inherit",
+        env: { ...process.env, ...plan.env },
+      });
+    } catch (e) {
+      err(`could not launch '${plan.binary}': ${message(e)}\n`);
+      resolve(undefined);
+      return;
+    }
+    child.once("error", (e) => {
+      err(`could not launch '${plan.binary}': ${message(e)}\n`);
+      resolve(undefined);
+    });
+    child.once("exit", (code) => resolve(code ?? undefined));
+  });
+  if (exitCode === undefined) return 1;
+
+  await recordTakeover(historyStore, runId, {
+    stepId: plan.stepId,
+    sessionId: plan.sessionId,
+    resumed: plan.resumed,
+    by: "human:cli",
+    startedAt,
+    endedAt: Date.now(),
+    exitCode,
+  }).catch(() => false);
+
+  out(`\ntakeover of '${plan.stepId}' ended (exit ${exitCode}); recorded in run history\n`);
+  out(`  review what changed:  steamtrain workflow history show ${runId} --diff\n`);
+  out(`  land the changes:     steamtrain workflow history apply ${runId}\n`);
+  return exitCode === 0 ? 0 : exitCode;
+}
+
 // ── shared printing ──────────────────────────────────────────────────────────
 
 /** Persist a finished run to history; a write failure only warns, never fails the run. */
@@ -1240,6 +1528,28 @@ export function printHumanEvent(event: WorkflowEvent, out: (text: string) => voi
       const who = event.by ? ` by ${event.by}` : "";
       const note = event.note ? ` — ${event.note}` : "";
       out(`  ${event.approved ? "✓ approved" : "✗ rejected"} ${event.stepId}${who}${note}\n`);
+      return;
+    }
+    case "human_input_pending": {
+      const kindLabel = event.origin === "agent-question" ? "agent question" : "input needed";
+      const retry = event.attempt > 1 ? ` (attempt ${event.attempt})` : "";
+      out(`  ✎ ${kindLabel} ${event.stepId}${retry} — awaiting answer\n`);
+      if (event.retryError) out(`     previous answer rejected: ${event.retryError}\n`);
+      out(`     ${truncateLine(event.prompt.split("\n")[0] ?? "", 160)}\n`);
+      if (event.choices?.length) {
+        event.choices.forEach((choice, i) => out(`       ${i + 1}) ${choice}\n`));
+      }
+      return;
+    }
+    case "human_input_resolved": {
+      const who = event.by ? ` by ${event.by}` : "";
+      if (event.canceled) {
+        out(`  ✎ ${event.stepId} input canceled${who}\n`);
+      } else {
+        out(
+          `  ✎ ${event.stepId} answered${who}: ${truncateLine(event.value?.split("\n")[0] ?? "", 120)}\n`,
+        );
+      }
       return;
     }
     case "step_done":

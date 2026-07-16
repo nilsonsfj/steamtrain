@@ -3,10 +3,12 @@ import type { ApprovalDecision, ApprovalProvider } from "./approval";
 import type { WorkflowRunControl } from "./control";
 import type { WorkflowEvent } from "./events";
 import type { RunRecordStatus } from "./history";
+import type { HumanInputProvider, HumanInputResponse } from "./human-input";
 import {
   DEFAULT_MAX_PARALLEL_RUNS,
   LIVE_RUN_META_VERSION,
   type LiveRunMeta,
+  type LiveRunPendingInput,
   type LiveRunStore,
   MAX_STREAM_EVENTS_PER_RUN,
   isLiveRunOwnerAlive,
@@ -52,6 +54,7 @@ export function createLiveRunPublisher(store: LiveRunStore, runId: string): Live
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
   let chain: Promise<void> = Promise.resolve();
   const pendingApprovals: { stepId: string; iteration: number }[] = [];
+  const pendingInputs: LiveRunPendingInput[] = [];
 
   const enqueue = (task: () => Promise<void>): void => {
     chain = chain.then(task).catch(() => {});
@@ -80,6 +83,13 @@ export function createLiveRunPublisher(store: LiveRunStore, runId: string): Live
     const snapshot = pendingApprovals.map((p) => ({ ...p }));
     enqueue(async () => {
       await store.update(runId, { pendingApprovals: snapshot });
+    });
+  };
+
+  const syncPendingInputs = (): void => {
+    const snapshot = pendingInputs.map((p) => ({ ...p }));
+    enqueue(async () => {
+      await store.update(runId, { pendingInputs: snapshot });
     });
   };
 
@@ -122,6 +132,34 @@ export function createLiveRunPublisher(store: LiveRunStore, runId: string): Live
           syncPendingApprovals();
         }
       }
+      if (event.kind === "human_input_pending") {
+        const iteration = event.iteration ?? 1;
+        // A re-ask (attempt > 1) supersedes the same step's previous entry.
+        const idx = pendingInputs.findIndex(
+          (p) => p.stepId === event.stepId && p.iteration === iteration,
+        );
+        const entry: LiveRunPendingInput = {
+          stepId: event.stepId,
+          iteration,
+          attempt: event.attempt,
+          origin: event.origin,
+          prompt: event.prompt.length > 200 ? `${event.prompt.slice(0, 200)}…` : event.prompt,
+          choices: event.choices,
+        };
+        if (idx >= 0) pendingInputs[idx] = entry;
+        else pendingInputs.push(entry);
+        syncPendingInputs();
+      }
+      if (event.kind === "human_input_resolved") {
+        const iteration = event.iteration ?? 1;
+        const idx = pendingInputs.findIndex(
+          (p) => p.stepId === event.stepId && p.iteration === iteration,
+        );
+        if (idx >= 0) {
+          pendingInputs.splice(idx, 1);
+          syncPendingInputs();
+        }
+      }
       // Mirror the engine-acknowledged pause state into the meta so run
       // listings (CLI `workflow runs`, the web Active-runs panel) can badge a
       // paused run without tailing its event stream.
@@ -143,6 +181,7 @@ export function createLiveRunPublisher(store: LiveRunStore, runId: string): Live
           error: opts.error,
           endedAt: Date.now(),
           pendingApprovals: [],
+          pendingInputs: [],
           paused: false,
         });
       });
@@ -364,6 +403,75 @@ export function withStoreApprovals(
       // A rejecting local provider must not strand the checkpoint (or raise an
       // unhandled rejection): keep polling the store, and settle as canceled
       // if the run aborts first.
+      void Promise.resolve(inner(request, signal)).then(settle, () => {});
+      if (signal) {
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+    });
+}
+
+/**
+ * A human-input provider that waits for an answer file in the live-run store —
+ * how a *detached* run's human step (or agent question) gets answered: any
+ * attached UI (`steamtrain workflow answer`, TUI, web) writes the response;
+ * the runner picks it up. Answers are attempt-scoped, so a re-ask after a
+ * rejected answer waits for a fresh file instead of re-reading the bad one.
+ */
+export function storeHumanInputProvider(store: LiveRunStore, runId: string): HumanInputProvider {
+  return async (request, signal) => {
+    for (;;) {
+      if (signal?.aborted) {
+        return { canceled: true, by: "auto:canceled", reason: "run canceled before an answer" };
+      }
+      const response = await store
+        .readHumanInputResponse(runId, request.stepId, request.iteration, request.attempt)
+        .catch(() => undefined);
+      if (response) {
+        return response.canceled ? response : { ...response, by: response.by ?? "human" };
+      }
+      await sleep(APPROVAL_POLL_MS, signal);
+    }
+  };
+}
+
+/**
+ * Wrap a driver's own (interactive) human-input provider so an answer written
+ * into the live-run store by *another* attached UI also settles the request —
+ * first answer wins. The input-side analog of {@link withStoreApprovals}.
+ */
+export function withStoreHumanInputs(
+  store: LiveRunStore,
+  runId: string,
+  inner: HumanInputProvider,
+): HumanInputProvider {
+  return (request, signal) =>
+    new Promise<HumanInputResponse>((resolve) => {
+      let settled = false;
+      const settle = (response: HumanInputResponse): void => {
+        if (settled) return;
+        settled = true;
+        clearInterval(timer);
+        signal?.removeEventListener("abort", onAbort);
+        resolve(response);
+      };
+      const onAbort = (): void =>
+        settle({ canceled: true, by: "auto:canceled", reason: "run canceled before an answer" });
+      const timer = setInterval(() => {
+        void store
+          .readHumanInputResponse(runId, request.stepId, request.iteration, request.attempt)
+          .then((response) => {
+            if (!response) return;
+            settle(response.canceled ? response : { ...response, by: response.by ?? "human" });
+          })
+          .catch(() => {});
+      }, APPROVAL_POLL_MS);
+      timer.unref?.();
+      // A rejecting local provider must not strand the request: keep polling
+      // the store, and settle as canceled if the run aborts first.
       void Promise.resolve(inner(request, signal)).then(settle, () => {});
       if (signal) {
         if (signal.aborted) {

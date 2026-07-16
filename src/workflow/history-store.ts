@@ -187,6 +187,7 @@ function validateRecord(file: string): RunRecord | undefined {
     input: typeof r.input === "string" ? r.input : "",
     cwd: typeof r.cwd === "string" ? r.cwd : "",
     specHash: typeof r.specHash === "string" ? r.specHash : undefined,
+    params: r.params && typeof r.params === "object" ? r.params : undefined,
     status: r.status,
     ok: Boolean(r.ok),
     startedAt: r.startedAt,
@@ -197,5 +198,6 @@ function validateRecord(file: string): RunRecord | undefined {
     error: typeof r.error === "string" ? r.error : undefined,
     budget: r.budget && typeof r.budget === "object" ? r.budget : undefined,
     harvest: r.harvest && typeof r.harvest === "object" ? r.harvest : undefined,
+    interventions: Array.isArray(r.interventions) ? r.interventions : undefined,
   };
 }

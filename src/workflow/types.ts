@@ -32,6 +32,7 @@ export type WorkflowStepKind =
   | "consolidator"
   | "gate"
   | "approval"
+  | "human"
   | "merge"
   | "command"
   | "llm"
@@ -132,6 +133,20 @@ export interface WorkerStep extends WorkflowStepBase, AgentRunFields, WorkspaceF
    * Syntax: `steps.<id>.items` (or `<id>.items`).
    */
   forEach?: string;
+  /**
+   * Opt-in agent clarifying questions: the engine tells the agent it may end
+   * its reply with a single `QUESTION: …` line instead of guessing when it is
+   * genuinely blocked. When it does, the step pauses, the question surfaces
+   * through the same human-input channel as `human` steps (TUI card, web form,
+   * `--human <stepId>=<answer>` headless, `workflow answer` for detached
+   * runs), and the agent continues with the answer — resuming its recorded
+   * session where the adapter supports it (claude), otherwise re-running with
+   * the question and answer appended to the original prompt. Bounded to one
+   * question per step (per attempt chain), so a chatty agent can't turn a
+   * pipeline into a conversation. Marks the workflow "interactive" for
+   * autonomy labeling.
+   */
+  canAsk?: boolean;
   /** Per-step auto-retry policy for transient failures (overrides the workflow default). */
   retry?: RetryPolicy;
   /**
@@ -504,12 +519,47 @@ export interface ApprovalStep extends WorkflowStepBase {
   onReject?: "fail" | "stop";
 }
 
+/**
+ * Human-as-a-step (next-frontier §3): a step whose output a *person* supplies.
+ * Where an `approval` step asks for consent (approve/reject), a `human` step
+ * asks for *data* — paste the incident timeline, choose one of three proposed
+ * designs, answer the question the pipeline can't answer itself. Downstream
+ * steps consume `{{steps.<id>.output}}` (and `{{steps.<id>.json.<path>}}`
+ * with an `output` schema) exactly like any other step's result.
+ *
+ * The rendered `prompt` (which may interpolate earlier step outputs) is shown
+ * to the human. `choices` renders as pick-one; an `output` schema demands a
+ * JSON reply validated against it; with neither, any non-blank text is
+ * accepted. `choices` and `output` are mutually exclusive.
+ *
+ * Headless runs supply values up front via `--human <stepId>=<value|@file>`
+ * (or fail fast with guidance); detached runs park until any attached UI
+ * answers (`steamtrain workflow answer`). Accepted answers are cached — they
+ * are data, so a resumed run replays them instead of re-asking.
+ *
+ * A workflow containing human steps is labeled "interactive" wherever
+ * workflows are listed, so the autonomy cost is visible before launch.
+ */
+export interface HumanStep extends WorkflowStepBase {
+  kind: "human";
+  /** Instructions / the question shown to the human. Templated. */
+  prompt: string;
+  /** Pick-one choices (each templated). Mutually exclusive with `output`. */
+  choices?: string[];
+  /**
+   * JSON schema (subset; see `structured.ts`) the reply must match; the parsed
+   * value lands on `StepResult.json`. Mutually exclusive with `choices`.
+   */
+  output?: JsonSchema;
+}
+
 export type WorkflowStep =
   | WorkerStep
   | DistributorStep
   | ConsolidatorStep
   | GateStep
   | ApprovalStep
+  | HumanStep
   | MergeStep
   | CommandStep
   | LlmStep
@@ -656,6 +706,21 @@ export interface StepResult {
   model?: string;
   /** Total attempts this step took (auto-retry); omitted/1 means it ran once. */
   attempts?: number;
+  /**
+   * Agent CLI session id captured from the step's final attempt (from the
+   * adapter's `session_start` event). Enables session continuation: `canAsk`
+   * answers resume the same conversation, and `workflow takeover` drops a
+   * human into it interactively.
+   */
+  sessionId?: string;
+  /**
+   * Clarifying question exchanges for a `canAsk` step: the agent asked, a
+   * human answered, the step continued. Recorded so a steered step stays an
+   * auditable record and UIs can badge it.
+   */
+  questions?: { question: string; answer: string; by?: string }[];
+  /** Who supplied a `human` step's value (e.g. `"human:web"`, `"headless:--human"`). */
+  suppliedBy?: string;
   /** Subprocess exit code, for `command` steps (`{{steps.<id>.exitCode}}`). */
   exitCode?: number;
   /** Declared artifacts snapshotted after the step succeeded. */
@@ -816,6 +881,7 @@ const workflowWorkerStepSchema = z.object({
   forEach: z.string().min(1).optional(),
   retry: retryPolicySchema.optional(),
   maxCostUsd: z.number().positive().optional(),
+  canAsk: z.boolean().optional(),
   ...agentRunShape,
   ...workspaceShape,
 });
@@ -884,6 +950,25 @@ const workflowApprovalStepSchema = z.object({
   target: z.string().min(1).optional(),
   onReject: z.enum(["fail", "stop"]).optional(),
 });
+
+const workflowHumanStepSchema = z
+  .object({
+    ...baseStepShape,
+    kind: z.literal("human"),
+    prompt: z.string().min(1),
+    choices: z.array(z.string().min(1)).min(1).optional(),
+    output: outputJsonSchema.optional(),
+  })
+  .superRefine((step, ctx) => {
+    // A pick-one and a JSON form at once is ambiguous — the reply can't be
+    // both one of the choices and schema-shaped JSON.
+    if (step.choices && step.output) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "human step choices and output are mutually exclusive",
+      });
+    }
+  });
 
 const workflowMergeStepSchema = z
   .object({
@@ -1013,6 +1098,7 @@ const workflowCallStepSchema = z.object({
 const workflowStepSchema = z.union([
   workflowGateStepSchema,
   workflowApprovalStepSchema,
+  workflowHumanStepSchema,
   workflowDistributorStepSchema,
   workflowConsolidatorStepSchema,
   workflowMergeStepSchema,

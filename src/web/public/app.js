@@ -5,7 +5,13 @@
   
 
 
-  var KIND_LABEL = { worker: "worker", processor: "process", distributor: "fan-out", consolidator: "merge", gate: "gate", approval: "approval", merge: "merge-back", command: "command", llm: "llm", workflow: "sub-workflow" };
+  var KIND_LABEL = { worker: "worker", processor: "process", distributor: "fan-out", consolidator: "merge", gate: "gate", approval: "approval", human: "human", merge: "merge-back", command: "command", llm: "llm", workflow: "sub-workflow" };
+  // Autonomy labels: what a workflow will need from a human, visible BEFORE launch.
+  var AUTONOMY_META = {
+    autonomous: { badge: "▸ autonomous", cls: "autonomy-auto", title: "Runs unattended end-to-end — no human involvement declared." },
+    approvals: { badge: "✋ approvals", cls: "autonomy-approvals", title: "Pauses at approval checkpoints — a human must approve or reject to continue." },
+    interactive: { badge: "✎ interactive", cls: "autonomy-interactive", title: "Asks a human for input mid-run — answers or choices are required to finish." }
+  };
   var S = {
     workflows: [], selected: null, source: null, spec: null, agents: [], apis: [],
     runId: null, es: null,
@@ -131,6 +137,9 @@
       if (run.paused) badges.push(h("span", { class: "badge paused", text: "⏸ paused" }));
       if (run.pendingApprovals && run.pendingApprovals.length) {
         badges.push(h("span", { class: "badge gate-block", text: "⏳ approval" }));
+      }
+      if (run.pendingInputs && run.pendingInputs.length) {
+        badges.push(h("span", { class: "badge input-wait", text: "✎ input needed" }));
       }
       var badgeWrap = null;
       if (badges.length) {
@@ -709,8 +718,11 @@
       var kinds = Object.keys(w.kinds || {}).map(function (k) { return (KIND_LABEL[k] || k) + ":" + w.kinds[k]; }).join(" \u00b7 ");
       var meta = w.phaseCount + " phase" + (w.phaseCount === 1 ? "" : "s") + " \u00b7 " + w.stepCount + " step" + (w.stepCount === 1 ? "" : "s");
       var isStaged = workflowHasStaged(S.stagedOverrides[w.name]);
+      var autonomy = AUTONOMY_META[w.autonomy] || AUTONOMY_META.autonomous;
       var card = h("div", { class: "wf" + (S.selected === w.name ? " sel" : ""), onClick: function () { selectWorkflow(w.name); } },
-        h("div", { class: "name" }, w.name, h("span", { class: "src", text: w.source }), isStaged ? h("span", { class: "badge staged", text: "staged" }) : null),
+        h("div", { class: "name" }, w.name, h("span", { class: "src", text: w.source }),
+          h("span", { class: "badge " + autonomy.cls, text: autonomy.badge, title: autonomy.title }),
+          isStaged ? h("span", { class: "badge staged", text: "staged" }) : null),
         w.description ? h("div", { class: "desc", text: w.description }) : null,
         h("div", { class: "meta", text: meta + (kinds ? " \u00b7 " + kinds : "") })
       );
@@ -876,7 +888,7 @@
 
     canvas.appendChild(h("div", { class: "legend" },
       legendItem("worker", "worker"), legendItem("processor", "process"),
-      legendItem("distributor", "fan-out"), legendItem("consolidator", "merge"), legendItem("gate", "gate"), legendItem("approval", "approval"), legendItem("merge", "merge-back"), legendItem("command", "command"), legendItem("llm", "llm"), legendItem("workflow", "sub-workflow")
+      legendItem("distributor", "fan-out"), legendItem("consolidator", "merge"), legendItem("gate", "gate"), legendItem("approval", "approval"), legendItem("human", "human"), legendItem("merge", "merge-back"), legendItem("command", "command"), legendItem("llm", "llm"), legendItem("workflow", "sub-workflow")
     ));
 
     var maxIter = {};
@@ -951,7 +963,7 @@
     return h("span", null, i, label);
   }
   function kindColor(k) {
-    return { worker: "#6fb1ff", processor: "#9d8cff", distributor: "#ffce6f", consolidator: "#5fe0c6", gate: "#f0a35e", approval: "#ffd166", merge: "#ff9ecb", command: "#b8c4d0", llm: "#62d2f5", workflow: "#7ce38b" }[k] || "#6fb1ff";
+    return { worker: "#6fb1ff", processor: "#9d8cff", distributor: "#ffce6f", consolidator: "#5fe0c6", gate: "#f0a35e", approval: "#ffd166", human: "#f5a3ff", merge: "#ff9ecb", command: "#b8c4d0", llm: "#62d2f5", workflow: "#7ce38b" }[k] || "#6fb1ff";
   }
 
   function renderCard(s, p) {
@@ -988,6 +1000,7 @@
     if (s.activity) card.appendChild(h("div", { class: "activity", text: s.activity }));
 
     if (s.approval) card.appendChild(renderApproval(s));
+    if (s.humanInput) card.appendChild(renderHumanInput(s));
 
     // Live tail: the full streamed text (display-capped) in a scrollable pane
     // that follows the stream until the reader scrolls up; scrolling back to
@@ -1192,8 +1205,27 @@
     if (s.dependsOn && s.dependsOn.length) row("inputs", s.dependsOn.join(", "));
     if (s.item) row("item", "#" + s.item.index + " from " + s.item.sourceStepId + ": " + truncate(s.item.value, 200));
     if (s.gate) row("gate", (s.gate.passed ? "passed" : "blocked") + (s.gate.target ? " → " + s.gate.target : ""));
+    if (s.result && s.result.questions && s.result.questions.length) {
+      s.result.questions.forEach(function (qa) {
+        row("agent asked", qa.question);
+        row("answered", qa.answer + (qa.by ? " (" + qa.by + ")" : ""));
+      });
+    }
+    if (s.result && s.result.suppliedBy) row("supplied by", s.result.suppliedBy);
+    if (s.result && s.result.sessionId) row("session", s.result.sessionId, "mono");
     if (s.status === "running" && s.activity) row("activity", s.activity);
     if (s.status === "error" && s.result && s.result.error) row("error", s.result.error, "err");
+    // Interactive takeover: once the step is finished and left a worktree +
+    // recorded session, a human can drop into that session from a terminal.
+    if (s.status !== "running" && s.status !== "pending" && s.agent && s.result && s.result.sessionId && S.runId) {
+      var takeoverCmd = "steamtrain workflow takeover " + S.runId + " " + s.stepId;
+      row("take over", h("span", { class: "drawer-value mono" },
+        h("code", { text: takeoverCmd }),
+        h("button", { class: "btn small", text: "Copy", title: "Copy the takeover command — it resumes this step's agent session interactively in its worktree", onClick: function () {
+          if (navigator.clipboard) navigator.clipboard.writeText(takeoverCmd).catch(function () {});
+        } })
+      ));
+    }
     drawer.appendChild(meta);
 
     var body = ((s.result && s.result.output) || s.text || "").trim();
@@ -1244,6 +1276,83 @@
       box.appendChild(h("div", { class: "approval-decision", text: (a.approved ? "\u2713 approved" : "\u2717 rejected") + who + (a.note ? " \u2014 " + a.note : "") }));
     }
     return box;
+  }
+
+  /**
+   * A pending human-input request (a `human` step or an agent's clarifying
+   * question) rendered as an answer form: pick-one buttons when the step
+   * declares choices, a JSON textarea (with a local parse check) when it
+   * declares an output schema, a plain textarea otherwise. A rejected answer
+   * re-renders with the engine's validation error.
+   */
+  function renderHumanInput(s) {
+    var q = s.humanInput;
+    var box = h("div", { class: "human-input" + (q.pending ? " pending" : (q.canceled ? " canceled" : " answered")) });
+    var label = q.origin === "agent-question" ? "agent question" : "input needed";
+    box.appendChild(h("div", { class: "human-input-origin", text: label }));
+    if (q.prompt) box.appendChild(h("div", { class: "human-input-prompt", text: q.prompt }));
+    if (q.retryError) box.appendChild(h("div", { class: "human-input-error", text: "previous answer rejected: " + q.retryError }));
+    if (!q.pending) {
+      if (q.canceled) {
+        box.appendChild(h("div", { class: "human-input-decision", text: "✗ no answer" + (q.by ? " (" + q.by + ")" : "") }));
+      } else {
+        box.appendChild(h("div", { class: "human-input-decision", text: "✓ answered" + (q.by ? " by " + q.by : "") + (q.value ? ": " + truncate(q.value, 200) : "") }));
+      }
+      return box;
+    }
+    // Stop card-level click-through so typing/clicking in the form never
+    // opens the drill-in drawer.
+    box.addEventListener("click", function (e) { e.stopPropagation(); });
+    if (q.choices && q.choices.length) {
+      var choiceWrap = h("div", { class: "human-input-choices" });
+      q.choices.forEach(function (choice) {
+        choiceWrap.appendChild(h("button", { class: "btn choice", text: choice, onClick: function () { submitHumanInput(s.stepId, choice); } }));
+      });
+      box.appendChild(choiceWrap);
+      return box;
+    }
+    var isJson = Boolean(q.outputSchema);
+    var ta = h("textarea", {
+      class: "human-input-text",
+      rows: isJson ? "5" : "3",
+      placeholder: isJson ? "JSON matching the step's output schema…" : "Type your answer…",
+      spellcheck: "false"
+    });
+    var hintText = isJson ? "This step expects JSON (validated against its schema)." : "";
+    var errEl = h("div", { class: "human-input-error", style: "display:none" });
+    var send = h("button", { class: "btn approve", text: "Answer", onClick: function () {
+      var value = ta.value;
+      if (!value.trim()) { errEl.textContent = "answer must not be empty"; errEl.style.display = "block"; return; }
+      if (isJson) {
+        // Cheap local guard: malformed JSON never even reaches the engine's
+        // re-ask loop. Schema validation stays server-side (single source).
+        try { JSON.parse(value); } catch (e) { errEl.textContent = "not valid JSON: " + e.message; errEl.style.display = "block"; return; }
+      }
+      errEl.style.display = "none";
+      submitHumanInput(s.stepId, value);
+    } });
+    // Enter submits a single-line answer; Shift+Enter makes a newline.
+    ta.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey && !isJson) { e.preventDefault(); send.click(); }
+    });
+    box.appendChild(ta);
+    if (hintText) box.appendChild(h("div", { class: "hint", text: hintText }));
+    box.appendChild(errEl);
+    box.appendChild(h("div", { class: "human-input-actions" }, send));
+    return box;
+  }
+
+  function submitHumanInput(stepId, value) {
+    if (!S.runId) return;
+    var body = { stepId: stepId, value: value };
+    var pending = (S.runState && S.runState.pendingInputs) || [];
+    var match = pending.find(function (p) { return p.stepId === stepId; });
+    if (match && typeof match.iteration === "number") body.iteration = match.iteration;
+    apiAuth("POST", "/api/runs/" + S.runId + "/input", body)
+      .then(function (r) {
+        if (r && r.status && r.status >= 400) setBanner("Could not record the answer.", "err");
+      })
+      .catch(function () {});
   }
 
   function resolveApproval(stepId, approved) {
@@ -1966,7 +2075,9 @@
           ? "api: " + ((st.provider || (st.model && st.model.indexOf("claude") === 0 ? "anthropic" : "openai")) + "/" + (st.model || ""))
           : kind === "workflow"
             ? "invokes workflow: " + (st.workflow || "") + (st.outputStep ? " · outputStep: " + st.outputStep : "")
-            : (st.items ? "distributes " + st.items.length + " item(s)" : "passthrough merge (no agent)");
+            : kind === "human"
+              ? "asks a human: " + truncate(st.prompt || "", 120) + (st.choices && st.choices.length ? " · " + st.choices.length + " choice(s)" : "")
+              : (st.items ? "distributes " + st.items.length + " item(s)" : "passthrough merge (no agent)");
       card.appendChild(h("div", { class: "ro", text: note }));
       return card;
     }
@@ -2267,6 +2378,8 @@
       result: st.result, cached: st.cached, attempts: st.attempts,
       gate: st.gate ? { passed: st.gate.passed, target: st.gate.target } : null,
       approval: st.approval || null,
+      // Replayed records are terminal, so a recorded ask is never pending.
+      humanInput: st.humanInput ? Object.assign({ pending: false }, st.humanInput) : null,
       loopTo: st.loopTo, maxIterations: st.maxIterations
     };
   }

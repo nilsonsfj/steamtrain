@@ -8,6 +8,7 @@ export {
   type GateCondition,
   type GateStep,
   type ApprovalStep,
+  type HumanStep,
   type LlmPricing,
   type LlmStep,
   type MergeStep,
@@ -43,6 +44,8 @@ export {
 export type {
   WorkflowEvent,
   WorkflowEventKind,
+  HumanInputPendingEvent,
+  HumanInputResolvedEvent,
   IterationTagged,
   WorkflowStartEvent,
   PhaseStartEvent,
@@ -84,6 +87,48 @@ export {
   noProviderApprovalDecision,
 } from "./approval";
 export {
+  HUMAN_INPUT_MAX_ATTEMPTS,
+  HUMAN_INPUT_PROMPT_CAP,
+  HUMAN_INPUT_VALUE_CAP,
+  type HumanInputOrigin,
+  type HumanInputProvider,
+  type HumanInputRequest,
+  type HumanInputResponse,
+  type HumanInputValidation,
+  capHumanInputText,
+  headlessHumanInputProvider,
+  matchPendingInput,
+  noProviderHumanInputResponse,
+  validateHumanInputValue,
+} from "./human-input";
+export {
+  type WorkflowAutonomy,
+  autonomyBadge,
+  autonomyDescription,
+  autonomyLabel,
+  workflowAutonomy,
+} from "./autonomy";
+export {
+  NOTIFY_EVENT_KINDS,
+  type CreateNotifierOptions,
+  type Notifier,
+  type NotifyConfig,
+  type NotifyEvent,
+  type NotifyEventKind,
+  type NotifyRunMeta,
+  createNotifier,
+  notifyWorkflowEvent,
+} from "./notify";
+export {
+  type PlanTakeoverOptions,
+  type TakeoverPlan,
+  type TakeoverPlanResult,
+  findRecordedStep,
+  formatTakeoverCommand,
+  planTakeover,
+  recordTakeover,
+} from "./takeover";
+export {
   TOKEN_KEYS,
   TOKEN_LABELS,
   type TokenKey,
@@ -111,7 +156,13 @@ export {
   tokensForResults,
   costForResults,
 } from "./cost";
-export { runWorkflow, type WorkflowDeps, type WorkflowRunContext } from "./engine";
+export {
+  AGENT_QUESTION_PROTOCOL,
+  parseAgentQuestion,
+  runWorkflow,
+  type WorkflowDeps,
+  type WorkflowRunContext,
+} from "./engine";
 export {
   DEFAULT_ANTHROPIC_MAX_TOKENS,
   callLlm,
@@ -261,6 +312,7 @@ export {
   type LiveRunListOptions,
   type LiveRunMeta,
   type LiveRunPauseState,
+  type LiveRunPendingInput,
   type LiveRunSource,
   type LiveRunStatus,
   type LiveRunStepEditRequest,
@@ -272,9 +324,11 @@ export {
   newLiveRunMeta,
   resolveMaxParallelRuns,
   storeApprovalProvider,
+  storeHumanInputProvider,
   watchRunCancel,
   watchRunControl,
   withStoreApprovals,
+  withStoreHumanInputs,
   type AcquireRunSlotOptions,
   type AcquireRunSlotResult,
   type LiveRunPublisher,
@@ -356,7 +410,9 @@ export {
   type StepStatus,
   type StepState,
   type StepApprovalState,
+  type StepHumanInputState,
   type PendingApproval,
+  type PendingHumanInput,
   type PhaseState,
   type LoopMarker,
   type BudgetState,

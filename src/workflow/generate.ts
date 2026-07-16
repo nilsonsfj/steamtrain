@@ -199,6 +199,25 @@ or disjoint, never partially overlapping.
   handle that internally. Use it to compose a reusable workflow as one stage of
   a larger pipeline. The child workflow is resolved at run time, and cycles or
   reaching five nested workflow levels fails clearly.
+- "approval": human-in-the-loop CONSENT checkpoint. The run pauses, shows the
+  reviewed step's output/diff, and waits for a human to approve or reject.
+  Optional "step" (the reviewed step; defaults to a sole dependsOn), "prompt"
+  (instructions for the reviewer), "onReject" ("fail" default, or "stop").
+  Use it before consequential actions (merging edits, opening a PR).
+- "human": human-in-the-loop DATA step — its output is typed by a person, not
+  an agent. Requires "prompt" (the question/instructions, templated; it may
+  interpolate earlier outputs). Optional "choices": ["a", "b", ...] renders as
+  pick-one; optional "output" JSON schema demands a validated JSON reply
+  (choices and output are mutually exclusive). Downstream steps consume
+  {{steps.<id>.output}} like any other step. Use it when the pipeline needs
+  information only a person has (pick a design, paste an incident timeline).
+  IMPORTANT: only add approval/human steps when the request explicitly wants a
+  human in the loop — they make the workflow non-autonomous (it parks until a
+  person responds), which is surfaced as an autonomy label in every UI.
+A worker/processor may set "canAsk": true to let the agent ask ONE clarifying
+question mid-step (answered by a human through the same channel) instead of
+guessing. Reserve it for steps whose input is likely ambiguous; it also makes
+the workflow non-autonomous.
 
 # File handoff between steps ("workspace" and "artifacts")
 Each worker/processor/command step runs in its OWN isolated worktree snapshotted

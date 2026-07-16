@@ -58,6 +58,13 @@ export const WORKFLOW_SOURCE_COLOR = {
   project: "yellow",
 } as const;
 
+/** Ink color for workflow autonomy badges (picker and preview). */
+export const AUTONOMY_COLOR = {
+  autonomous: "green",
+  approvals: "yellow",
+  interactive: "magenta",
+} as const;
+
 /** Solid backdrop for the slash-command completion popup (overlays content above the prompt). */
 export const SUGGESTION_MENU_BG = "#1a1a1a";
 export const SUGGESTION_MENU_ACTIVE_BG = "#2a2a2a";

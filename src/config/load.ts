@@ -229,6 +229,7 @@ export function mergeConfig(
     maxConcurrency: override.maxConcurrency ?? base.maxConcurrency,
     maxParallelRuns: override.maxParallelRuns ?? base.maxParallelRuns,
     loopMaxIterations: override.loopMaxIterations ?? base.loopMaxIterations,
+    notify: override.notify ?? base.notify,
   };
 
   const { workflows, warning } = mergeWorkflowMap({}, {}, override.workflows, "project");

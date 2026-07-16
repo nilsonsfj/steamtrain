@@ -7,6 +7,7 @@ import type { WorkflowEvent } from "./events";
 import { atomicWriteFile, isEnoent, sanitizePathComponent } from "./fs-util";
 import { RunRecordBuilder, type RunRecordStatus } from "./history";
 import type { WorkflowHistoryStore } from "./history-store";
+import type { HumanInputOrigin, HumanInputResponse } from "./human-input";
 
 /**
  * The live-run store: an on-disk registry of in-flight (and just-finished)
@@ -19,6 +20,7 @@ import type { WorkflowHistoryStore } from "./history-store";
  *   events.ndjson     — one {@link WorkflowEvent} JSON line per event (append-only)
  *   cancel            — marker file; the owning process polls it and aborts
  *   approvals/*.json  — human-approval decisions written by any attached UI
+ *   inputs/*.json     — human-input answers written by any attached UI
  *   control/pause.json — desired pause state (last write wins); the owner polls it
  *   control/edits/*.json — mid-run step-edit requests + the owner's results
  *   runner.log        — stdout/stderr of a detached runner (debugging)
@@ -70,6 +72,22 @@ export interface LiveRunLaunch {
   /** Headless approval policy for the detached runner (absent ⇒ wait for a human decision). */
   approveAll?: boolean;
   onApproval?: "fail" | "stop";
+  /** Pre-supplied `--human <stepId>=<value>` answers (absent ⇒ wait for a human answer). */
+  humanInputs?: Record<string, string>;
+}
+
+/** One human-input request a live run is waiting on, mirrored into its meta. */
+export interface LiveRunPendingInput {
+  stepId: string;
+  iteration: number;
+  /** 1-based ask attempt; answers target a specific attempt. */
+  attempt: number;
+  /** Spec-declared `human` step vs. an agent's clarifying question. */
+  origin?: HumanInputOrigin;
+  /** First ~200 chars of the ask, so list views can show what's wanted. */
+  prompt?: string;
+  /** Pick-one choices, when declared. */
+  choices?: string[];
 }
 
 export interface LiveRunMeta {
@@ -94,6 +112,8 @@ export interface LiveRunMeta {
   endedAt?: number;
   /** Human-approval checkpoints currently awaiting a decision. */
   pendingApprovals?: { stepId: string; iteration: number }[];
+  /** Human-input requests (human steps / agent questions) currently awaiting an answer. */
+  pendingInputs?: LiveRunPendingInput[];
   /** True while the run's engine has acknowledged a pause (mirrored from `run_paused`/`run_resumed`). */
   paused?: boolean;
   /** Launch args for the detached runner (set only for `--detach` runs). */
@@ -200,6 +220,25 @@ export interface LiveRunStore {
     iteration: number,
   ): Promise<ApprovalDecision | undefined>;
   /**
+   * Record a human-input answer for a pending request. Answers are attempt-
+   * scoped: a re-ask (rejected answer) waits for a NEW file, so a stale bad
+   * answer can't satisfy it.
+   */
+  writeHumanInputResponse(
+    id: string,
+    stepId: string,
+    iteration: number,
+    attempt: number,
+    response: HumanInputResponse,
+  ): Promise<void>;
+  /** Read a recorded human-input answer, or undefined when none yet. */
+  readHumanInputResponse(
+    id: string,
+    stepId: string,
+    iteration: number,
+    attempt: number,
+  ): Promise<HumanInputResponse | undefined>;
+  /**
    * Write the desired pause state (any attached UI; last write wins). The
    * owning process polls it via {@link readPauseState} and steers its run
    * control to match. Returns false when the run is unknown or terminal.
@@ -252,6 +291,8 @@ export function createLiveRunStore(
   const cancelPath = (id: string): string => join(runDir(id), "cancel");
   const approvalPath = (id: string, stepId: string, iteration: number): string =>
     join(runDir(id), "approvals", `${sanitizePathComponent(stepId)}@${iteration}.json`);
+  const inputPath = (id: string, stepId: string, iteration: number, attempt: number): string =>
+    join(runDir(id), "inputs", `${sanitizePathComponent(stepId)}@${iteration}-${attempt}.json`);
   const pausePath = (id: string): string => join(runDir(id), "control", "pause.json");
   const editsDir = (id: string): string => join(runDir(id), "control", "edits");
   const editPath = (id: string, editId: string): string =>
@@ -288,6 +329,7 @@ export function createLiveRunStore(
         error: "runner process exited before the run finished",
         endedAt: now(),
         pendingApprovals: [],
+        pendingInputs: [],
       })) ?? meta;
     if (options.historyStore) {
       try {
@@ -461,10 +503,9 @@ export function createLiveRunStore(
         // checkpoint lives inside a sub-workflow. A decision file written under
         // the namespaced id must still be found when read by the local id, or
         // the run would hang forever on an already-decided checkpoint.
-        const namespaced = await findNamespacedDecisionFile(
+        const namespaced = await findNamespacedFile(
           join(runDir(id), "approvals"),
-          stepId,
-          iteration,
+          `__${sanitizePathComponent(stepId)}@${iteration}.json`,
         );
         if (!namespaced) return undefined;
         try {
@@ -487,6 +528,56 @@ export function createLiveRunStore(
               ? parsed.rejectDisposition
               : undefined,
         };
+      } catch {
+        return undefined;
+      }
+    },
+    async writeHumanInputResponse(id, stepId, iteration, attempt, response) {
+      await mkdir(join(runDir(id), "inputs"), { recursive: true });
+      await atomicWriteFile(
+        inputPath(id, stepId, iteration, attempt),
+        `${JSON.stringify(response, null, 2)}\n`,
+      );
+    },
+    async readHumanInputResponse(id, stepId, iteration, attempt) {
+      let file: string;
+      try {
+        file = await readFile(inputPath(id, stepId, iteration, attempt), "utf8");
+      } catch (err) {
+        if (!isEnoent(err)) throw err;
+        // Same namespacing fallback as approvals: an answer written under the
+        // NAMESPACED id (`parent::child`, from the event stream) must still be
+        // found when the engine reads by the LOCAL id.
+        const namespaced = await findNamespacedFile(
+          join(runDir(id), "inputs"),
+          `__${sanitizePathComponent(stepId)}@${iteration}-${attempt}.json`,
+        );
+        if (!namespaced) return undefined;
+        try {
+          file = await readFile(namespaced, "utf8");
+        } catch (readErr) {
+          if (isEnoent(readErr)) return undefined;
+          throw readErr;
+        }
+      }
+      try {
+        const parsed = JSON.parse(file) as {
+          value?: unknown;
+          canceled?: unknown;
+          by?: unknown;
+          reason?: unknown;
+        };
+        if (typeof parsed !== "object" || parsed === null) return undefined;
+        const by = typeof parsed.by === "string" ? parsed.by : undefined;
+        if (parsed.canceled === true) {
+          return {
+            canceled: true,
+            by,
+            reason: typeof parsed.reason === "string" ? parsed.reason : undefined,
+          };
+        }
+        if (typeof parsed.value !== "string") return undefined;
+        return { value: parsed.value, by };
       } catch {
         return undefined;
       }
@@ -612,25 +703,20 @@ function sanitizeStepEditPatch(raw: Record<string, unknown>): StepEditPatch {
 }
 
 /**
- * Find a decision file whose (namespaced) step id ends in `::<stepId>` for the
- * given iteration. Namespace separators sanitize to `__`, so the match is
- * "file name ends with `__<sanitized-local-id>@<iteration>.json`".
+ * Find a response file whose (namespaced) step id ends in `::<stepId>`.
+ * Namespace separators sanitize to `__`, so the match is "file name ends with
+ * `__<sanitized-local-id>@<suffix>`". Shared by approvals and human inputs.
  */
-async function findNamespacedDecisionFile(
-  approvalsDir: string,
-  stepId: string,
-  iteration: number,
-): Promise<string | undefined> {
+async function findNamespacedFile(dir: string, suffix: string): Promise<string | undefined> {
   let names: string[];
   try {
-    names = await readdir(approvalsDir);
+    names = await readdir(dir);
   } catch (err) {
     if (isEnoent(err)) return undefined;
     throw err;
   }
-  const suffix = `__${sanitizePathComponent(stepId)}@${iteration}.json`;
   const match = names.find((name) => name.endsWith(suffix));
-  return match ? join(approvalsDir, match) : undefined;
+  return match ? join(dir, match) : undefined;
 }
 
 async function readMeta(path: string): Promise<LiveRunMeta | undefined> {
@@ -677,6 +763,15 @@ async function readMeta(path: string): Promise<LiveRunMeta | undefined> {
             Boolean(p) &&
             typeof (p as { stepId?: unknown }).stepId === "string" &&
             typeof (p as { iteration?: unknown }).iteration === "number",
+        )
+      : undefined,
+    pendingInputs: Array.isArray(m.pendingInputs)
+      ? m.pendingInputs.filter(
+          (p): p is LiveRunPendingInput =>
+            Boolean(p) &&
+            typeof (p as { stepId?: unknown }).stepId === "string" &&
+            typeof (p as { iteration?: unknown }).iteration === "number" &&
+            typeof (p as { attempt?: unknown }).attempt === "number",
         )
       : undefined,
     launch: m.launch && typeof m.launch === "object" ? m.launch : undefined,

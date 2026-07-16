@@ -6,11 +6,13 @@ import {
   type PlanResult,
   type WorkflowSourceKind,
   type WorkflowSpec,
+  autonomyBadge,
   isAgentBackedStep,
   lintTemplateRefs,
+  workflowAutonomy,
   workflowStepKind,
 } from "../workflow";
-import { AGENT_COLOR, WORKFLOW_SOURCE_COLOR } from "./theme";
+import { AGENT_COLOR, AUTONOMY_COLOR, WORKFLOW_SOURCE_COLOR } from "./theme";
 import { selectVisibleWindow } from "./workflow-list-window";
 import {
   BLOCK_LABEL,
@@ -88,6 +90,7 @@ export function WorkflowPreview({
   const stepCount = flat.length;
   const agents = useMemo(() => distinctAgents(spec), [spec]);
   const blocks = useMemo(() => blockSummary(spec), [spec]);
+  const autonomy = useMemo(() => workflowAutonomy(spec), [spec]);
   const templateWarnings = useMemo(() => lintTemplateRefs(spec), [spec]);
 
   return (
@@ -119,7 +122,8 @@ export function WorkflowPreview({
       <Box flexDirection="column" marginBottom={1}>
         <Text color="gray">
           {phaseCount} phase{phaseCount === 1 ? "" : "s"} · {stepCount} step
-          {stepCount === 1 ? "" : "s"} · ({source})
+          {stepCount === 1 ? "" : "s"} · ({source}) ·{" "}
+          <Text color={AUTONOMY_COLOR[autonomy]}>{autonomyBadge(autonomy)}</Text>
           {agents.length > 0 ? ` · agents: ${agents.join(", ")}` : ""}
           {blocks ? ` · ${blocks}` : ""}
         </Text>

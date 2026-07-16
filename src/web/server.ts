@@ -22,6 +22,7 @@ import {
   WORKFLOW_HISTORY_DIR,
   WORKFLOW_RUNS_DIR,
   WorkflowAuthor,
+  type WorkflowAutonomy,
   type WorkflowHistoryStore,
   type WorkflowSessionOverrides,
   type WorkflowSourceKind,
@@ -35,12 +36,14 @@ import {
   isAgentBackedStep,
   isTerminalLiveRunStatus,
   matchPendingApproval,
+  matchPendingInput,
   mergeConflictGuidance,
   parseSessionOverrides,
   planWorkflow,
   pruneRunWorktrees,
   resolveInputs,
   resolveStepTimeoutSec,
+  workflowAutonomy,
   workflowSpecSchema,
   workflowStepKind,
   worktreeDiff,
@@ -197,12 +200,15 @@ interface WorkflowListItem {
   stepCount: number;
   kinds: Record<string, number>;
   agents: string[];
+  /** Autonomy potential: runs unattended, needs approvals, or needs input. */
+  autonomy: WorkflowAutonomy;
 }
 
 function summarizeWorkflow(
   name: string,
   spec: WorkflowSpec,
   source: WorkflowSourceKind | undefined,
+  resolve?: (child: string) => WorkflowSpec | undefined,
 ): WorkflowListItem {
   const kinds: Record<string, number> = {};
   const agents = new Set<string>();
@@ -223,6 +229,7 @@ function summarizeWorkflow(
     stepCount,
     kinds,
     agents: [...agents],
+    autonomy: workflowAutonomy(spec, resolve),
   };
 }
 
@@ -613,6 +620,7 @@ function checkCsrf(
  *   POST   /api/runs/:id/resume     continue a paused run
  *   POST   /api/runs/:id/edit-step  { stepId, prompt?/cmd?/model?/effort? } — edit a pending step while paused
  *   POST   /api/runs/:id/approval   resolve a human-approval checkpoint
+ *   POST   /api/runs/:id/input      answer a human-input request (human step / agent question)
  *   POST   /api/overrides/flush     flush staged session overrides -> { saved, skipped, unchanged }
  *   POST   /api/auth                validate token, create session, set cookie
  *   POST   /api/logout              revoke the presented session, clear cookie
@@ -793,7 +801,9 @@ async function handle(
   if (method === "GET" && path === "/api/workflows") {
     const all = deps.host.listWorkflows();
     const items = Object.entries(all)
-      .map(([name, spec]) => summarizeWorkflow(name, spec, deps.workflowSource?.(name)))
+      .map(([name, spec]) =>
+        summarizeWorkflow(name, spec, deps.workflowSource?.(name), (child) => all[child]),
+      )
       .sort((a, b) => a.name.localeCompare(b.name));
     sendJson(res, 200, { workflows: items, configLabel: deps.configLabel });
     return;
@@ -1502,6 +1512,50 @@ async function handle(
     return;
   }
 
+  const inputMatch = path.match(/^\/api\/runs\/([^/]+)\/input$/);
+  if (method === "POST" && inputMatch) {
+    const body = await readBody(req);
+    let parsed: { stepId?: unknown; iteration?: unknown; value?: unknown };
+    try {
+      parsed = body ? JSON.parse(body) : {};
+    } catch {
+      sendJson(res, 400, { error: "invalid JSON body" });
+      return;
+    }
+    if (typeof parsed.stepId !== "string" || !parsed.stepId) {
+      sendJson(res, 400, { error: "body must include a string 'stepId'" });
+      return;
+    }
+    if (typeof parsed.value !== "string" || !parsed.value.trim()) {
+      sendJson(res, 400, { error: "body must include a non-empty string 'value'" });
+      return;
+    }
+    const iteration = typeof parsed.iteration === "number" ? parsed.iteration : undefined;
+    const runId = decodeURIComponent(inputMatch[1]!);
+    const response = { value: parsed.value, by: "human:web" };
+    let ok = deps.runs.resolveHumanInput(runId, parsed.stepId, response, iteration);
+    if (!ok && deps.liveRuns) {
+      // Externally-owned run: write the answer file; the owner's human-input
+      // provider polls it (this is how a detached run's question gets answered).
+      const meta = await deps.liveRuns.get(runId);
+      if (meta && !isTerminalLiveRunStatus(meta.status)) {
+        const target = matchPendingInput(meta.pendingInputs ?? [], parsed.stepId, iteration);
+        if (target) {
+          await deps.liveRuns.writeHumanInputResponse(
+            runId,
+            target.stepId,
+            target.iteration,
+            target.attempt,
+            response,
+          );
+          ok = true;
+        }
+      }
+    }
+    sendJson(res, ok ? 200 : 404, { resolved: ok });
+    return;
+  }
+
   if (method === "POST" && path === "/api/overrides/flush") {
     if (!deps.author) {
       sendJson(res, 501, { error: "workflow authoring is not enabled" });
@@ -1859,6 +1913,8 @@ export async function startWebUi(
     maxConcurrent: options.maxConcurrent ?? 5,
     config: liveConfig,
     liveRuns: liveRunStore,
+    // Notification deep links point at this server's own run pages.
+    publicBaseUrl: `http://${host === "0.0.0.0" || host === "::" ? "localhost" : host}:${port}`,
   });
   const author = new WorkflowAuthor({
     host: orchestrator,

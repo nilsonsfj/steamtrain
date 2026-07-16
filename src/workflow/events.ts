@@ -244,6 +244,51 @@ export interface ApprovalResolvedEvent extends IterationTagged {
 }
 
 /**
+ * A `human` step — or a `canAsk` agent step that emitted a clarifying
+ * question — has paused and is waiting for a person to answer. Carries
+ * everything a UI needs to render the ask: the rendered prompt/question,
+ * pick-one `choices` when declared, and the `outputSchema` when the reply
+ * must be JSON. Emitted right before the engine awaits the injected
+ * human-input provider; a matching {@link HumanInputResolvedEvent} follows.
+ * A rejected answer (wrong choice, schema mismatch) re-emits this event with
+ * `attempt` incremented and `retryError` explaining what to fix.
+ */
+export interface HumanInputPendingEvent extends IterationTagged {
+  kind: "human_input_pending";
+  phaseId: string;
+  stepId: string;
+  /** 1-based ask attempt; >1 means the previous answer was rejected. */
+  attempt: number;
+  /** Rendered instructions / the agent's question (capped for transport). */
+  prompt: string;
+  /** Pick-one choices, when the step declares them. */
+  choices?: string[];
+  /** JSON schema the reply must satisfy, when the step declares `output`. */
+  outputSchema?: Record<string, unknown>;
+  /** Whether this is a spec-declared `human` step or an agent's question. */
+  origin: "human-step" | "agent-question";
+  /** Why the previous attempt's answer was rejected (attempt > 1 only). */
+  retryError?: string;
+  ts: number;
+}
+
+/** A pending human-input request was answered (or canceled). */
+export interface HumanInputResolvedEvent extends IterationTagged {
+  kind: "human_input_resolved";
+  phaseId: string;
+  stepId: string;
+  /** The accepted value (capped for transport); absent when canceled. */
+  value?: string;
+  /** Who answered (e.g. `"human:web"`, `"headless:--human"`). */
+  by?: string;
+  /** True when no value arrived (run canceled, headless without a value). */
+  canceled?: boolean;
+  /** Whether this answered a `human` step or an agent's question. */
+  origin: "human-step" | "agent-question";
+  ts: number;
+}
+
+/**
  * The engine acknowledged a pause request and stopped scheduling new steps.
  * In-flight steps still run to completion; the run stays parked until a
  * matching {@link RunResumedEvent}. In loop workflows the acknowledgement
@@ -295,6 +340,8 @@ export type WorkflowEvent =
   | BudgetExceededEvent
   | ApprovalPendingEvent
   | ApprovalResolvedEvent
+  | HumanInputPendingEvent
+  | HumanInputResolvedEvent
   | RunPausedEvent
   | RunResumedEvent
   | StepEditedEvent;

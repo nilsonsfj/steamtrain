@@ -44,7 +44,8 @@ var SteamtrainReducer = (() => {
     done: false,
     ok: true,
     loopMarkers: [],
-    pendingApprovals: []
+    pendingApprovals: [],
+    pendingInputs: []
   };
   function workflowStateFromSpec(spec) {
     return {
@@ -134,6 +135,7 @@ var SteamtrainReducer = (() => {
           loopMarkers: [],
           budget: void 0,
           pendingApprovals: [],
+          pendingInputs: [],
           paused: false,
           pausedBy: void 0,
           editedSteps: void 0
@@ -389,6 +391,55 @@ var SteamtrainReducer = (() => {
         return {
           ...withStep,
           pendingApprovals: (withStep.pendingApprovals ?? []).filter(
+            (p) => !(p.stepId === e.stepId && p.iteration === (e.iteration ?? 1))
+          )
+        };
+      }
+      case "human_input_pending": {
+        const withStep = updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
+          ...s,
+          activity: e.origin === "agent-question" ? "\u270E agent asked a question" : "\u270E awaiting human input",
+          humanInput: {
+            pending: true,
+            prompt: e.prompt,
+            choices: e.choices,
+            outputSchema: e.outputSchema,
+            origin: e.origin,
+            attempt: e.attempt,
+            retryError: e.retryError
+          }
+        }));
+        const pending = {
+          phaseId: e.phaseId,
+          stepId: e.stepId,
+          iteration: e.iteration ?? 1,
+          attempt: e.attempt,
+          prompt: e.prompt,
+          choices: e.choices,
+          outputSchema: e.outputSchema,
+          origin: e.origin,
+          retryError: e.retryError
+        };
+        const others = (withStep.pendingInputs ?? []).filter(
+          (p) => !(p.stepId === e.stepId && p.iteration === (e.iteration ?? 1))
+        );
+        return { ...withStep, pendingInputs: [...others, pending] };
+      }
+      case "human_input_resolved": {
+        const withStep = updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
+          ...s,
+          activity: e.canceled ? "input canceled" : "answered",
+          humanInput: {
+            ...s.humanInput ?? { pending: false },
+            pending: false,
+            value: e.value,
+            by: e.by,
+            canceled: e.canceled
+          }
+        }));
+        return {
+          ...withStep,
+          pendingInputs: (withStep.pendingInputs ?? []).filter(
             (p) => !(p.stepId === e.stepId && p.iteration === (e.iteration ?? 1))
           )
         };

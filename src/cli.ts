@@ -13,6 +13,7 @@ import { runInitCommand } from "./init";
 import { Orchestrator } from "./orchestrator";
 import {
   printModelBreakdown,
+  runAnswerCommand,
   runApproveCommand,
   runAttachCommand,
   runCancelCommand,
@@ -20,6 +21,7 @@ import {
   runEditStepCommand,
   runPauseCommand,
   runRunsCommand,
+  runTakeoverCommand,
   runWorkflowCommand,
 } from "./run-cli";
 import { loadSettings } from "./settings";
@@ -38,6 +40,8 @@ import {
   type WorktreeDiff,
   type WorktreeSource,
   aggregateCosts,
+  autonomyBadge,
+  autonomyDescription,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   finalRunWorktrees,
@@ -59,6 +63,7 @@ import {
   saveUserWorkflow,
   totalTokens,
   validateWorkflow,
+  workflowAutonomy,
   workflowCacheKey,
   workflowStepKind,
   worktreeDiff,
@@ -280,6 +285,10 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
       return runEditStepCommand(rest, cwd, out, err);
     case "approve":
       return runApproveCommand(rest, cwd, out, err);
+    case "answer":
+      return runAnswerCommand(rest, cwd, out, err);
+    case "takeover":
+      return runTakeoverCommand(config, rest, cwd, out, err);
     // Hidden: the re-exec target a `workflow run --detach` child starts as.
     case "_detached-runner":
       return runDetachedRunner(orchestrator, config, rest[0], io, out, err);
@@ -302,9 +311,11 @@ function printWorkflowList(
   source: string,
   out: (text: string) => void,
 ): void {
+  const byName = new Map(workflows.map((entry) => [entry.name, entry.spec]));
   out(`workflows (${source})\n`);
   for (const { name, spec, source: workflowSource } of workflows) {
-    out(`- ${name} [${workflowSource}]  ${workflowSummary(spec)}\n`);
+    const autonomy = workflowAutonomy(spec, (child) => byName.get(child));
+    out(`- ${name} [${workflowSource}]  ${autonomyBadge(autonomy)} · ${workflowSummary(spec)}\n`);
     if (spec.description) out(`  ${spec.description}\n`);
   }
 }
@@ -492,6 +503,9 @@ async function planCommand(
   out(
     `  ${plan.agentCallCount} agent call${plan.agentCallCount === 1 ? "" : "s"} · ${plan.llmCallCount} llm call${plan.llmCallCount === 1 ? "" : "s"} · ${plan.deterministicCount} deterministic step${plan.deterministicCount === 1 ? "" : "s"}\n`,
   );
+  const catalog = orchestrator.listWorkflows();
+  const autonomy = workflowAutonomy(spec, (child) => catalog[child]);
+  out(`  autonomy: ${autonomyBadge(autonomy)} — ${autonomyDescription(autonomy)}\n`);
   if (plan.agents.length > 0) out(`  agents: ${plan.agents.join(", ")}\n`);
   if (plan.apis.length > 0) out(`  apis: ${plan.apis.join(", ")}\n`);
   if (plan.maxCostUsd !== undefined) out(`  budget: $${plan.maxCostUsd.toFixed(2)}\n`);
@@ -1380,8 +1394,8 @@ Usage:
   steamtrain workflow validate [name]
   steamtrain workflow plan <name> --input <text> [--param key=value ...] [--json]
   steamtrain workflow plan <name> --stdin [--param key=value ...] [--json]
-  steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--approve-all | --on-approval fail|stop]
-  steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--approve-all | --on-approval fail|stop]
+  steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...]
+  steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...]
   steamtrain workflow run --from <runId> [--retry-failed] [--param key=value ...] [--input <text>] [--json] [--detach]
   steamtrain workflow attach [<runId>] [--json]
   steamtrain workflow runs [--all] [--json]
@@ -1390,6 +1404,8 @@ Usage:
   steamtrain workflow resume <runId>
   steamtrain workflow edit-step <runId> <stepId> [--prompt <text> | --prompt-file <path>] [--cmd <text>] [--model <id>] [--effort <level>]
   steamtrain workflow approve <runId> [--step <stepId>] [--reject [--on-reject fail|stop]] [--note <text>]
+  steamtrain workflow answer <runId> [--step <stepId>] [--value <text> | --file <path>]
+  steamtrain workflow takeover <runId> <stepId>
   steamtrain workflow create --input <description> [--agent <id>] [--model <model>] [--name <name>] [--save] [--scope user|project] [--json]
   steamtrain workflow cache clear [<workflow> --input <text> --param key=value ... | --stdin]
   steamtrain workflow history [list]
