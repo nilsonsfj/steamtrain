@@ -132,6 +132,10 @@
       }
       loadWorkflows();
     }).catch(function () {
+      // Fail closed: if we cannot learn the capability, assume read-only so
+      // we never flash Run / authoring chrome for a viewer session.
+      S.capability = "read";
+      applyCapabilityChrome();
       loadWorkflows();
     });
   }
@@ -297,6 +301,7 @@
   }
 
   function openConfigModal() {
+    if (isReadOnly()) { setBanner("This session is read-only — viewing only.", "info"); return; }
     if (!S.projectConfig) { setBanner("project config is not available", "info"); return; }
     var stepMin = Math.round((S.projectConfig.stepTimeoutSec || 900) / 60);
     var wfMin = S.projectConfig.workflowTimeoutSec
@@ -1582,6 +1587,7 @@
 
   // ---- running -------------------------------------------------------------
   function startRun() {
+    if (isReadOnly()) { setBanner("This session is read-only — viewing only.", "info"); return; }
     var input = document.getElementById("input").value;
     if (!input.trim()) { setBanner("enter some input first", "info"); return; }
     recordPromptHistory(input);
@@ -1653,13 +1659,13 @@
   }
 
   function cancelRun() {
-    if (!S.runId) return;
+    if (isReadOnly() || !S.runId) return;
     apiAuth("POST", "/api/runs/" + S.runId + "/cancel");
   }
 
   /** Toggle mid-run pause/resume for the streamed run (own or attached). */
   function togglePauseRun() {
-    if (!S.runId) return;
+    if (isReadOnly() || !S.runId) return;
     var paused = Boolean(S.runState && S.runState.paused);
     var verb = paused ? "resume" : "pause";
     apiAuth("POST", "/api/runs/" + S.runId + "/" + verb)
@@ -1847,6 +1853,7 @@
 
   // ---- create (LLM-drafted) -----------------------------------------------
   function openCreate() {
+    if (isReadOnly()) { setBanner("This session is read-only — viewing only.", "info"); return; }
     if (!S.agents.length) { setBanner("agent catalog still loading; try again in a moment", "info"); return; }
     var a0 = preferredAgent();
     var agentSel = selectEl(agentOptions(), a0.id, function () { onCreateAgent(); });
@@ -2191,6 +2198,7 @@
   }
 
   function doDelete() {
+    if (isReadOnly()) return;
     if (!S.selected || (S.source !== "user" && S.source !== "project")) return;
     var fileLabel = S.source === "project" ? "the project steamtrain.json" : "your user workflows file";
     if (!window.confirm("Delete workflow \"" + S.selected + "\"? This removes it from " + fileLabel + ".")) return;
@@ -2589,7 +2597,7 @@
 
   var flushInFlight = false;
   function flushStaged() {
-    if (!hasAnyStaged() || flushInFlight) return;
+    if (isReadOnly() || !hasAnyStaged() || flushInFlight) return;
     flushInFlight = true;
     var flushBtn = document.getElementById("flushBtn");
     if (flushBtn) { flushBtn.disabled = true; flushBtn.textContent = "Flushing\u2026"; }
@@ -2627,6 +2635,7 @@
 
   // ---- plan (dry-run) -------------------------------------------------------
   function startPlan() {
+    if (isReadOnly()) { setBanner("This session is read-only — viewing only.", "info"); return; }
     var input = document.getElementById("input").value;
     if (!input.trim()) { setBanner("enter some input first", "info"); return; }
     recordPromptHistory(input);

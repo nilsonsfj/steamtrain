@@ -21,11 +21,11 @@ Key properties and expectations:
   `127.0.0.1`. Binding to any non-local host requires an auth token
   (`--auth-token` / `STEAMTRAIN_AUTH_TOKEN`; one is auto-generated when
   neither is given) unless you explicitly pass `--no-auth`, which is unsafe
-  outside a trusted network. A separate `--read-token` /
+  outside a trusted network.   a separate `--read-token` /
   `STEAMTRAIN_READ_TOKEN` (or process-wide `--read-only`) can mint viewer
-  sessions that cannot launch runs or edit config, but those sessions still
-  see full step outputs and history - treat a read token like access to this
-  project's run artifacts. Requests are CSRF-checked, bodies are
+  sessions that cannot launch runs, edit config, or fetch `GET /api/config`
+  (agent env/extraArgs), but those sessions still see full step outputs and
+  history - treat a read token like access to this project's run artifacts. Requests are CSRF-checked, bodies are
   size-limited, and responses carry a restrictive CSP. There is no TLS —
   put a reverse proxy (with `--trust-proxy`) in front for anything beyond
   localhost.

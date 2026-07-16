@@ -136,13 +136,15 @@ trust.
 
 **Read-only / share mode.** A second credential, `--read-token` (or
 `STEAMTRAIN_READ_TOKEN`), mints a **viewer session**: every `GET` works
-(workflows, history, live attach + SSE), and `POST /api/logout` still ends the
-session, but every other state-changing route returns `403 read-only session`.
+for workflows, history, live attach + SSE (and `POST /api/logout` still ends
+the session), but every other state-changing route — and `GET /api/config`
+(which embeds agent `env` / `extraArgs`) — returns `403 read-only session`.
 Keep the full `--auth-token` for yourself and hand teammates the read token.
 `--read-only` forces *every* session (including ones minted from the full auth
 token, and the no-auth localhost path) into viewer capability — useful for a
 dedicated share bind. On a non-local `--read-only` bind with no tokens, the
-auto-generated credential is a read token.
+auto-generated credential is a read token. The full and read tokens must be
+different values (including after env resolution).
 
 With auth enabled:
 

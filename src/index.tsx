@@ -93,6 +93,15 @@ async function main(): Promise<void> {
     // the process list and shell history; --no-auth explicitly disables both.
     const envToken = process.env.STEAMTRAIN_AUTH_TOKEN?.trim() || undefined;
     const envReadToken = process.env.STEAMTRAIN_READ_TOKEN?.trim() || undefined;
+    const resolvedAuth = resolveWebAuthToken({ authToken, envToken, noAuth });
+    const resolvedRead = resolveWebReadToken({ readToken, envToken: envReadToken, noAuth });
+    if (resolvedAuth && resolvedRead && resolvedAuth === resolvedRead) {
+      process.stderr.write(
+        "--auth-token and --read-token must be different values (including after STEAMTRAIN_AUTH_TOKEN / STEAMTRAIN_READ_TOKEN resolution)\n",
+      );
+      process.exitCode = 1;
+      return;
+    }
     const { server } = await startWebUi({
       config,
       workspaces,
@@ -101,8 +110,8 @@ async function main(): Promise<void> {
       configPath: scope.path,
       port,
       host,
-      authToken: resolveWebAuthToken({ authToken, envToken, noAuth }),
-      readToken: resolveWebReadToken({ readToken, envToken: envReadToken, noAuth }),
+      authToken: resolvedAuth,
+      readToken: resolvedRead,
       readOnly,
       noAuth,
       trustProxy,

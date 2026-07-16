@@ -13,6 +13,7 @@ import type { ApiDoctorResult } from "../src/doctor";
 import { type WorkflowHost, WorkflowRunManager } from "../src/web/runs";
 import {
   createWebServer,
+  isForbiddenForReadSession,
   isMutatingApiRequest,
   resolveWebAuthToken,
   resolveWebReadToken,
@@ -2011,14 +2012,20 @@ describe("web server — auth", () => {
 });
 
 describe("web server — read-only capability", () => {
-  it("isMutatingApiRequest classifies writes and allows logout", () => {
-    expect(isMutatingApiRequest("GET", "/api/workflows")).toBe(false);
-    expect(isMutatingApiRequest("POST", "/api/logout")).toBe(false);
-    expect(isMutatingApiRequest("POST", "/api/auth")).toBe(false);
+  it("isForbiddenForReadSession classifies writes, logout, and config GET", () => {
+    expect(isForbiddenForReadSession("GET", "/api/workflows")).toBe(false);
+    expect(isForbiddenForReadSession("GET", "/api/config")).toBe(true);
+    expect(isForbiddenForReadSession("POST", "/api/logout")).toBe(false);
+    expect(isForbiddenForReadSession("POST", "/api/auth")).toBe(false);
+    expect(isForbiddenForReadSession("POST", "/api/runs")).toBe(true);
+    expect(isForbiddenForReadSession("PUT", "/api/config")).toBe(true);
+    expect(isForbiddenForReadSession("DELETE", "/api/history")).toBe(true);
+    expect(isForbiddenForReadSession("POST", "/api/workflows/demo/plan")).toBe(true);
+  });
+
+  it("isMutatingApiRequest stays a write-only classifier (config GET excluded)", () => {
+    expect(isMutatingApiRequest("GET", "/api/config")).toBe(false);
     expect(isMutatingApiRequest("POST", "/api/runs")).toBe(true);
-    expect(isMutatingApiRequest("PUT", "/api/config")).toBe(true);
-    expect(isMutatingApiRequest("DELETE", "/api/history")).toBe(true);
-    expect(isMutatingApiRequest("POST", "/api/workflows/demo/plan")).toBe(true);
   });
 
   it("mints a read session from --read-token and blocks mutating APIs", async () => {
@@ -2073,6 +2080,63 @@ describe("web server — read-only capability", () => {
       headers: { cookie: session.cookie, origin: base },
     });
     expect(logout.status).toBe(200);
+  });
+
+  it("blocks control-plane writes and GET /api/config for read sessions", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun), {
+      authToken: "full-secret",
+      readToken: "viewer-secret",
+    });
+    const base = await start(server);
+    const { cookie } = await loginSession(base, "viewer-secret");
+    const headers = { cookie, origin: base, "content-type": "application/json" };
+
+    const cases: Array<{ method: string; path: string; body?: string }> = [
+      { method: "GET", path: "/api/config" },
+      { method: "PUT", path: "/api/config", body: "{}" },
+      { method: "POST", path: "/api/runs/x/cancel" },
+      { method: "POST", path: "/api/runs/x/pause" },
+      { method: "POST", path: "/api/runs/x/resume" },
+      { method: "POST", path: "/api/runs/x/edit-step", body: '{"stepId":"a"}' },
+      { method: "POST", path: "/api/runs/x/approval", body: '{"stepId":"a","approved":true}' },
+      { method: "POST", path: "/api/runs/x/input", body: '{"stepId":"a","value":"y"}' },
+      { method: "DELETE", path: "/api/history" },
+      { method: "DELETE", path: "/api/history/x" },
+      { method: "POST", path: "/api/history/x/rerun" },
+      { method: "POST", path: "/api/history/x/retry" },
+      { method: "POST", path: "/api/history/x/harvest", body: '{"mode":"apply"}' },
+      { method: "POST", path: "/api/history/x/prune" },
+      { method: "POST", path: "/api/overrides/flush" },
+      { method: "PUT", path: "/api/workflows/demo", body: "{}" },
+      { method: "DELETE", path: "/api/workflows/demo" },
+    ];
+    for (const c of cases) {
+      const res = await fetch(`${base}${c.path}`, {
+        method: c.method,
+        headers,
+        body: c.body,
+      });
+      expect(res.status, `${c.method} ${c.path}`).toBe(403);
+      expect(await res.json()).toEqual({ error: "read-only session", capability: "read" });
+    }
+  });
+
+  it("requires Origin on writes when only --read-token is configured (CSRF)", async () => {
+    const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun), {
+      authToken: undefined,
+      readToken: "viewer-only",
+    });
+    const base = await start(server);
+    const cookie = await login(base, "viewer-only");
+    // Even though the capability gate would 403 this write, CSRF must fire first
+    // for missing Origin when auth is required via read-token alone.
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ workflow: "demo", input: "x" }),
+    });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "missing origin header" });
   });
 
   it("mints a full session from --auth-token when --read-only is off", async () => {
@@ -2697,5 +2761,25 @@ describe("resolveWebReadToken", () => {
     expect(
       resolveWebReadToken({ readToken: "flag", envToken: "env", noAuth: true }),
     ).toBeUndefined();
+  });
+});
+
+describe("startWebUi — equal auth/read tokens", () => {
+  it("rejects identical auth and read tokens after resolution", async () => {
+    const { startWebUi } = await import("../src/web/server");
+    const cwd = mkdtempSync(join(tmpdir(), "webui-same-token-"));
+    tempRoots.push(cwd);
+    await expect(
+      startWebUi({
+        config: testRunConfig,
+        workspaces: { workspaces: [] },
+        workflowCatalog: { workflows: {}, sources: {} },
+        cwd,
+        port: 0,
+        host: "127.0.0.1",
+        authToken: "same-secret",
+        readToken: "same-secret",
+      }),
+    ).rejects.toThrow(/must be different values/);
   });
 });

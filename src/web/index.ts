@@ -5,6 +5,7 @@ export {
   DEFAULT_WEB_HOST,
   DEFAULT_WEB_PORT,
   createWebServer,
+  isForbiddenForReadSession,
   isMutatingApiRequest,
   missingPublicAssets,
   publicAssetsLoaded,

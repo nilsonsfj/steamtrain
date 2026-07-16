@@ -426,11 +426,20 @@ function resolveSession(
  * so viewers can end their own session; auth is handled before this gate.
  * Plan is blocked too — sharing a run *view* does not include dry-run / spend
  * preview against the live catalog.
+ *
+ * Also blocks GET /api/config: that payload includes agent `env` / `extraArgs`
+ * / binary paths (includeConfig), which is control-plane detail, not a run view.
  */
-export function isMutatingApiRequest(method: string, path: string): boolean {
+export function isForbiddenForReadSession(method: string, path: string): boolean {
+  if (method === "GET" && path === "/api/config") return true;
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;
   if (method === "POST" && (path === "/api/logout" || path === "/api/auth")) return false;
   return method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
+}
+
+/** @deprecated Prefer {@link isForbiddenForReadSession}; kept as a narrow alias. */
+export function isMutatingApiRequest(method: string, path: string): boolean {
+  return isForbiddenForReadSession(method, path) && !(method === "GET" && path === "/api/config");
 }
 
 /** True when this client has burned its failed-login budget for the window. */
@@ -822,9 +831,10 @@ async function handle(
   }
 
   // Capability gate: read-only sessions (and --read-only processes) may only
-  // read. Applied after logout so ending a session never 403s.
+  // read run/workflow views. Applied after logout so ending a session never 403s.
+  // GET /api/config is also blocked — it embeds agent env/extraArgs.
   const capability: SessionCapability = session?.capability ?? (deps.readOnly ? "read" : "full");
-  if (capability === "read" && isMutatingApiRequest(method, path)) {
+  if (capability === "read" && isForbiddenForReadSession(method, path)) {
     sendJson(res, 403, {
       error: "read-only session",
       capability: "read",
@@ -2009,6 +2019,14 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
   let authToken = options.noAuth ? undefined : options.authToken;
   let readToken = options.noAuth ? undefined : options.readToken;
   const readOnly = Boolean(options.readOnly) && !options.noAuth;
+  // Catch equal secrets after env/flag resolution — the CLI only compares the
+  // raw flags, so STEAMTRAIN_AUTH_TOKEN=x + --read-token x would otherwise mint
+  // a full session from the "shared" credential (auth is checked first).
+  if (authToken && readToken && authToken === readToken) {
+    throw new Error(
+      "--auth-token and --read-token must be different values (including after STEAMTRAIN_AUTH_TOKEN / STEAMTRAIN_READ_TOKEN resolution)",
+    );
+  }
   let generatedToken: string | undefined;
   let generatedKind: "full" | "read" | undefined;
   if (!authToken && !readToken && !options.noAuth && isNonLocalHost(host)) {
