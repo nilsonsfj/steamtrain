@@ -531,6 +531,7 @@ export function App({
   const stationBootstrapped = useRef(false);
   useEffect(() => {
     if (stationBootstrapped.current) return;
+    if (picker.workflowEntries.length === 0) return;
     stationBootstrapped.current = true;
     let cancelled = false;
     void (async () => {
@@ -547,9 +548,23 @@ export function App({
     return () => {
       cancelled = true;
     };
-    // Intentionally once-on-mount: first impression only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [picker.workflowEntries]);
+
+  // Drop Station chrome once the user leaves the tour preview / picker.
+  useEffect(() => {
+    if (!stationLanding) return;
+    const onTour =
+      picker.wfPreview?.name === TOUR_WORKFLOW_NAME ||
+      (!picker.wfPreview &&
+        picker.workflowEntries[picker.workflowIndex]?.name === TOUR_WORKFLOW_NAME);
+    if (!onTour || runner.wf.started) setStationLanding(false);
+  }, [
+    stationLanding,
+    picker.wfPreview,
+    picker.workflowIndex,
+    picker.workflowEntries,
+    runner.wf.started,
+  ]);
 
   const previewSelectedStep =
     picker.preview.flatSteps.length > 0
@@ -1422,6 +1437,7 @@ export function App({
       prompt.setSuggestionIndex(0);
       prompt.bumpCursorToEnd();
     },
+    clearStationLanding: () => setStationLanding(false),
   });
 
   // ── Render ───────────────────────────────────────────────────────────

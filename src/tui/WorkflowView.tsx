@@ -158,11 +158,11 @@ export function WorkflowView({
     return Math.min(w, 12);
   }, [flat]);
 
-  // ── Fixed-height accounting ──────────────────────────────────────────
+  // Fixed-height accounting ──────────────────────────────────────────
   const showPaused = !state.done && Boolean(state.paused);
   const showBudget = Boolean(state.budget);
   const roomy = height >= 24;
-  const narrationCount =
+  let narrationCount =
     !state.done && narration.length > 0 && roomy ? Math.min(3, narration.length) : 0;
   const cardWidth = Math.max(16, innerWidth - 4);
   const approval = state.pendingApprovals?.[0];
@@ -226,6 +226,10 @@ export function WorkflowView({
   if (layout.cramped && showCard) {
     showCard = false;
     showCompactAttention = true;
+    layout = plan();
+  }
+  if (layout.cramped && narrationCount > 0) {
+    narrationCount = 0;
     layout = plan();
   }
   if (layout.cramped && showTree) {

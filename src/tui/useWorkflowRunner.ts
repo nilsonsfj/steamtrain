@@ -135,7 +135,15 @@ export function useWorkflowRunner({
     liveFlatSteps.length > 0
       ? liveFlatSteps[Math.min(stepIndex, liveFlatSteps.length - 1)]
       : undefined;
-  const wfElapsedMs = wf.startedAt ? Math.max(0, (wf.done ? Date.now() : wfNow) - wf.startedAt) : 0;
+  // Freeze wall-clock at completion so the Arrival receipt doesn't keep ticking.
+  const endedAtRef = useRef<number | null>(null);
+  if (wf.done && wf.startedAt && endedAtRef.current === null) {
+    endedAtRef.current = Date.now();
+  }
+  if (!wf.started) endedAtRef.current = null;
+  const wfElapsedMs = wf.startedAt
+    ? Math.max(0, (wf.done ? (endedAtRef.current ?? Date.now()) : wfNow) - wf.startedAt)
+    : 0;
 
   // Elapsed timer for running workflows.
   useEffect(() => {
@@ -684,11 +692,26 @@ export function useWorkflowRunner({
     return "edit requested — no response from the owning process yet";
   }, []);
 
+  const resetRunner = useCallback(() => {
+    wfDispatch({ type: "reset" });
+    setNarration([]);
+    setShowArrival(true);
+    setStepIndex(0);
+    setWfFollowSelection(true);
+    setWfLaunching(false);
+    setWfNotice(null);
+    setWfStepDetails(null);
+    activeWorkflowRef.current = undefined;
+    activeWorkflowInputRef.current = undefined;
+    workflowCacheRef.current = new Map();
+  }, []);
+
   return {
     running,
     setRunning,
     wf,
     wfDispatch,
+    resetRunner,
     wfLaunching,
     setWfLaunching,
     wfCanResume,

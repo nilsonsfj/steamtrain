@@ -38,7 +38,9 @@
     // Station landing: first-open hero for the tour.
     stationLanding: false,
     // Collapse the phase tree under the Arrival Report after completion.
-    arrivalInspect: false
+    arrivalInspect: false,
+    // Wall-clock end of the last run (frozen for the Arrival receipt).
+    endedAt: 0
   };
 
   var SELECTION_KEY = "steamtrain.lastWorkflow";
@@ -212,6 +214,17 @@
       });
     });
     return !needsCreds;
+  }
+
+  var NEXT_CANDIDATES = ["multi-plan", "quick-triage", "bug-hunt", "target-sweep"];
+  function pickNextWorkflow() {
+    for (var i = 0; i < NEXT_CANDIDATES.length; i++) {
+      var name = NEXT_CANDIDATES[i];
+      if (name !== S.selected && S.workflows.some(function (w) { return w.name === name; })) {
+        return name;
+      }
+    }
+    return undefined;
   }
 
   // ---- in-flight runs (attach from any UI) ----------------------------------
@@ -874,7 +887,8 @@
     stopTimer();
     S.selected = name; S.runId = null; S.runState = null;
     S.detail = null; S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
-    S.narration = []; S.arrivalInspect = false;
+    S.narration = []; S.arrivalInspect = false; S.endedAt = 0;
+    if (name !== TOUR_NAME) S.stationLanding = false;
     try { localStorage.setItem(SELECTION_KEY, name); } catch (e) {}
     renderSidebar();
     document.getElementById("statusLine").style.display = "none";
@@ -1097,8 +1111,11 @@
   function renderArrival(canvas) {
     if (!S.runState || !S.runState.done || !SteamtrainReducer.buildArrivalReport) return false;
     var report = SteamtrainReducer.buildArrivalReport(S.runState, {
-      elapsedMs: S.startedAt ? (Date.now() - S.startedAt) : 0,
-      credentialFree: isCredentialFreeSpec(S.spec)
+      elapsedMs: S.startedAt
+        ? ((S.endedAt || Date.now()) - S.startedAt)
+        : 0,
+      credentialFree: isCredentialFreeSpec(S.spec),
+      nextWorkflow: pickNextWorkflow()
     });
     if (!report) return false;
     var wrap = h("div", { class: "arrival" });
@@ -1113,6 +1130,7 @@
     wrap.appendChild(h("pre", { class: "arrival-hero", text: report.hero }));
     var dest = h("div", { class: "arrival-destinations" });
     report.destinations.forEach(function (d) {
+      if (d.id === "again" && isReadOnly()) return;
       dest.appendChild(h("button", {
         class: "btn" + (d.id === "again" ? " primary" : ""),
         text: d.label,
@@ -1819,6 +1837,8 @@
     S.runState = SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || S.spec);
     S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
     S.narration = []; S.arrivalInspect = false;
+    if (S.selected === TOUR_NAME) S.stationLanding = false;
+    S.endedAt = 0;
     setBanner("", "");
     document.getElementById("statusLine").style.display = "flex";
     var payload = { workflow: S.selected, input: input, fresh: document.getElementById("freshChk").checked };
@@ -1859,6 +1879,7 @@
         else if (frame.type === "status") {
           es.close(); S.es = null; setRunning(false); stopTimer();
           S.queuedBanner = false;
+          S.endedAt = Date.now();
           if (frame.status === "canceled") setBanner("Run canceled.", "info");
           else if (frame.status === "budget-exceeded") setBanner("Run stopped: cost budget reached. Raise maxCostUsd and re-run to resume.", "err");
           else if (frame.status === "error" || frame.ok === false) setBanner("Run failed" + (frame.error ? ": " + frame.error : "."), "err");

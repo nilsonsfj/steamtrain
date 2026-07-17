@@ -49,7 +49,7 @@ export interface ArrivalReport {
   destinations: ArrivalDestination[];
 }
 
-const DEFAULT_NEXT = "multi-plan";
+const DEFAULT_NEXT_CANDIDATES = ["multi-plan", "quick-triage", "bug-hunt", "target-sweep"];
 
 /**
  * Build the Arrival Report from a finished (or finishing) workflow state.
@@ -63,6 +63,10 @@ export function buildArrivalReport(
   opts: {
     elapsedMs?: number;
     nextWorkflow?: string;
+    /** Candidate workflows for the "Try …" destination, in preference order. */
+    nextCandidates?: string[];
+    /** When set, only advertise a next workflow that is present in this set. */
+    availableWorkflows?: ReadonlySet<string>;
     /** When true, advertise the $0 agentless receipt even if cost fields are absent. */
     credentialFree?: boolean;
   } = {},
@@ -92,12 +96,19 @@ export function buildArrivalReport(
   const agentless =
     opts.credentialFree === true || (costUsd === 0 && tokens === 0 && failCount === 0);
 
-  const next = opts.nextWorkflow ?? DEFAULT_NEXT;
-  const destinations: ArrivalDestination[] = [
-    { id: "again", label: "Run again", key: "r" },
-    { id: "next", label: `Try ${next}`, workflow: next, key: "n" },
-    { id: "history", label: "View history", key: "h" },
-  ];
+  const nextCandidates = opts.nextCandidates ?? DEFAULT_NEXT_CANDIDATES;
+  const current = state.name;
+  const next =
+    opts.nextWorkflow ??
+    nextCandidates.find(
+      (name) => name !== current && (!opts.availableWorkflows || opts.availableWorkflows.has(name)),
+    );
+
+  const destinations: ArrivalDestination[] = [{ id: "again", label: "Run again", key: "r" }];
+  if (next) {
+    destinations.push({ id: "next", label: `Try ${next}`, workflow: next, key: "n" });
+  }
+  destinations.push({ id: "history", label: "View history", key: "h" });
 
   return {
     hero,
@@ -164,12 +175,12 @@ function leafResults(state: WorkflowState): ArrivalStepResult[] {
 function fallbackHero(state: WorkflowState): string {
   if (state.ok) {
     return state.name
-      ? `Train '${state.name}' arrived. No consolidator report was produced — inspect the cars below.`
-      : "Train arrived. No consolidator report was produced — inspect the cars below.";
+      ? `Train '${state.name}' arrived, but no consolidator report was produced — press i to inspect the cars.`
+      : "Train arrived, but no consolidator report was produced — press i to inspect the cars.";
   }
   return state.name
-    ? `Train '${state.name}' stopped short. Inspect the cars below for the stall.`
-    : "Train stopped short. Inspect the cars below for the stall.";
+    ? `Train '${state.name}' stopped short — press i to inspect the cars for the stall.`
+    : "Train stopped short — press i to inspect the cars for the stall.";
 }
 
 function tokenTotal(t: ArrivalStepResult["tokens"] | undefined): number {

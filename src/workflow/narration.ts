@@ -70,6 +70,11 @@ export function narrateEvent(ev: WorkflowEvent): NarrationLine | null {
 export function appendNarration(lines: NarrationLine[], ev: WorkflowEvent): NarrationLine[] {
   const next = narrateEvent(ev);
   if (!next) return lines;
+  // Tie-break identical timestamps so React keys stay unique on cache hits.
+  const last = lines[lines.length - 1];
+  if (last && last.id === next.id) {
+    next.id = `${next.id}-${lines.length}`;
+  }
   const out =
     lines.length >= NARRATION_CAP ? lines.slice(lines.length - NARRATION_CAP + 1) : [...lines];
   out.push(next);
@@ -156,12 +161,12 @@ function stepStartCopy(ev: {
 }): string {
   const kind = ev.blockKind;
   if (kind === "gate") return `Signal '${ev.stepId}' is watching.`;
-  if (kind === "distributor") return `Distributor '${ev.stepId}' is sorting the consist.`;
+  if (kind === "distributor") return `Distributor '${ev.stepId}' is fanning out work.`;
   if (kind === "consolidator") return `Conductor '${ev.stepId}' is writing the report.`;
   if (kind === "approval") return `Checkpoint '${ev.stepId}' awaits a decision.`;
   if (kind === "human") return `Conductor needs an answer at '${ev.stepId}'.`;
   if (kind === "command") return `Car '${ev.stepId}' left the station.`;
-  if (kind === "llm") return `Car '${ev.stepId}' called the line.`;
+  if (kind === "llm") return `Car '${ev.stepId}' called the model.`;
   if (ev.agent) return `Car '${ev.stepId}' (${ev.agent}) is underway.`;
   return `Car '${ev.stepId}' is underway.`;
 }
@@ -185,7 +190,7 @@ function gateCopy(ev: {
   if (ev.passed) return `Signal '${ev.stepId}' cleared.`;
   // Loop-backs use onFalse: "continue" — the train holds for another lap.
   if (ev.onFalse === "continue") return `Signal '${ev.stepId}' held the train for another lap.`;
-  return `Signal '${ev.stepId}' held the train.`;
+  return `Signal '${ev.stepId}' diverted the train.`;
 }
 
 /** Strip leading "Phase N —" / ordinal noise; keep the station title. */

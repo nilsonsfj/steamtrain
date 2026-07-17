@@ -515,6 +515,10 @@ var SteamtrainReducer = (() => {
   function appendNarration(lines, ev) {
     const next = narrateEvent(ev);
     if (!next) return lines;
+    const last = lines[lines.length - 1];
+    if (last && last.id === next.id) {
+      next.id = `${next.id}-${lines.length}`;
+    }
     const out = lines.length >= NARRATION_CAP ? lines.slice(lines.length - NARRATION_CAP + 1) : [...lines];
     out.push(next);
     return out;
@@ -585,12 +589,12 @@ var SteamtrainReducer = (() => {
   function stepStartCopy(ev) {
     const kind = ev.blockKind;
     if (kind === "gate") return `Signal '${ev.stepId}' is watching.`;
-    if (kind === "distributor") return `Distributor '${ev.stepId}' is sorting the consist.`;
+    if (kind === "distributor") return `Distributor '${ev.stepId}' is fanning out work.`;
     if (kind === "consolidator") return `Conductor '${ev.stepId}' is writing the report.`;
     if (kind === "approval") return `Checkpoint '${ev.stepId}' awaits a decision.`;
     if (kind === "human") return `Conductor needs an answer at '${ev.stepId}'.`;
     if (kind === "command") return `Car '${ev.stepId}' left the station.`;
-    if (kind === "llm") return `Car '${ev.stepId}' called the line.`;
+    if (kind === "llm") return `Car '${ev.stepId}' called the model.`;
     if (ev.agent) return `Car '${ev.stepId}' (${ev.agent}) is underway.`;
     return `Car '${ev.stepId}' is underway.`;
   }
@@ -603,7 +607,7 @@ var SteamtrainReducer = (() => {
   function gateCopy(ev) {
     if (ev.passed) return `Signal '${ev.stepId}' cleared.`;
     if (ev.onFalse === "continue") return `Signal '${ev.stepId}' held the train for another lap.`;
-    return `Signal '${ev.stepId}' held the train.`;
+    return `Signal '${ev.stepId}' diverted the train.`;
   }
   function stationName(title) {
     const cleaned = title.replace(/^\s*\d+\s*[.:)—-]\s*/, "").trim();
@@ -622,7 +626,7 @@ var SteamtrainReducer = (() => {
   }
 
   // src/workflow/arrival-report.ts
-  var DEFAULT_NEXT = "multi-plan";
+  var DEFAULT_NEXT_CANDIDATES = ["multi-plan", "quick-triage", "bug-hunt", "target-sweep"];
   function buildArrivalReport(state, opts = {}) {
     if (!state.done) return null;
     const flat = flattenSteps(state);
@@ -644,12 +648,14 @@ var SteamtrainReducer = (() => {
     const heroStep = findArrivalStep(flat.map((f) => f.step));
     const hero = (heroStep?.result?.output ?? heroStep?.text ?? "").trim() || fallbackHero(state);
     const agentless = opts.credentialFree === true || costUsd === 0 && tokens === 0 && failCount === 0;
-    const next = opts.nextWorkflow ?? DEFAULT_NEXT;
-    const destinations = [
-      { id: "again", label: "Run again", key: "r" },
-      { id: "next", label: `Try ${next}`, workflow: next, key: "n" },
-      { id: "history", label: "View history", key: "h" }
-    ];
+    const nextCandidates = opts.nextCandidates ?? DEFAULT_NEXT_CANDIDATES;
+    const current = state.name;
+    const next = opts.nextWorkflow ?? nextCandidates.find((name) => name !== current && (!opts.availableWorkflows || opts.availableWorkflows.has(name)));
+    const destinations = [{ id: "again", label: "Run again", key: "r" }];
+    if (next) {
+      destinations.push({ id: "next", label: `Try ${next}`, workflow: next, key: "n" });
+    }
+    destinations.push({ id: "history", label: "View history", key: "h" });
     return {
       hero,
       heroStepId: heroStep?.stepId,
@@ -702,9 +708,9 @@ var SteamtrainReducer = (() => {
   }
   function fallbackHero(state) {
     if (state.ok) {
-      return state.name ? `Train '${state.name}' arrived. No consolidator report was produced \u2014 inspect the cars below.` : "Train arrived. No consolidator report was produced \u2014 inspect the cars below.";
+      return state.name ? `Train '${state.name}' arrived, but no consolidator report was produced \u2014 press i to inspect the cars.` : "Train arrived, but no consolidator report was produced \u2014 press i to inspect the cars.";
     }
-    return state.name ? `Train '${state.name}' stopped short. Inspect the cars below for the stall.` : "Train stopped short. Inspect the cars below for the stall.";
+    return state.name ? `Train '${state.name}' stopped short \u2014 press i to inspect the cars for the stall.` : "Train stopped short \u2014 press i to inspect the cars for the stall.";
   }
   function tokenTotal(t) {
     if (!t) return 0;

@@ -42,6 +42,8 @@ export interface UseKeyboardInputParams {
   openAnswerInput: () => void;
   focusCreateWorkflowPrompt: (seed: string) => void;
   switchMode: (next: React.SetStateAction<Mode>) => void;
+  /** Drop the Station first-run chrome after the user leaves the platform. */
+  clearStationLanding?: () => void;
 }
 
 /**
@@ -247,15 +249,7 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
               return;
             }
             if (runner.wf.started || runner.wfLaunching) {
-              runner.wfDispatch({ type: "reset" });
-              runner.setStepIndex(0);
-              runner.setWfFollowSelection(true);
-              runner.setWfLaunching(false);
-              runner.setShowArrival(true);
-              runner.activeWorkflowRef.current = undefined;
-              runner.activeWorkflowInputRef.current = undefined;
-              runner.workflowCacheRef.current = new Map();
-              runner.setWfNotice(null);
+              runner.resetRunner();
             }
           }
           return;
@@ -361,6 +355,7 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
             const name = runner.activeWorkflowRef.current;
             const prior = runner.activeWorkflowInputRef.current ?? "";
             if (name) {
+              cur.clearStationLanding?.();
               runner.launchWorkflow(name, prior || "all aboard", picker.setWfPreview, {
                 fresh: true,
               });
@@ -368,17 +363,18 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
             return;
           }
           if (input === "n") {
-            const next = picker.workflowEntries.find((e) => e.name === "multi-plan");
-            if (next) {
-              runner.wfDispatch({ type: "reset" });
-              runner.setShowArrival(true);
-              runner.activeWorkflowRef.current = undefined;
-              picker.setWorkflowIndex(
-                picker.workflowEntries.findIndex((e) => e.name === next.name),
-              );
-              picker.setWfPreview({ name: next.name, input: "" });
-              runner.setStepIndex(0);
+            const candidates = ["multi-plan", "quick-triage", "bug-hunt", "target-sweep"];
+            const next = candidates
+              .map((name) => picker.workflowEntries.find((e) => e.name === name))
+              .find(Boolean);
+            if (!next) {
+              runner.setWfNotice("no next workflow available in the catalog");
+              return;
             }
+            runner.resetRunner();
+            cur.clearStationLanding?.();
+            picker.setWorkflowIndex(picker.workflowEntries.findIndex((e) => e.name === next.name));
+            picker.setWfPreview({ name: next.name, input: "" });
             return;
           }
         }
