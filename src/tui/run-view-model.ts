@@ -79,7 +79,9 @@ export function progressBarSegments(progress: RunProgress, width: number): BarSe
   }
   // Give every non-empty category a visible cell, taking from the largest
   // donor until stable. Converges: with width ≥ non-empty categories, some
-  // donor with ≥ 2 cells exists whenever any non-empty category sits at 0.
+  // donor with ≥ 2 cells exists whenever any non-empty category sits at 0
+  // (cells sum to width ≥ category count), and each pass fixes at least one
+  // zero-category — so the loop runs at most `nonEmpty.length` passes.
   let changed = true;
   while (changed) {
     changed = false;
@@ -149,6 +151,7 @@ export function planViewLayout(input: ViewLayoutInput): ViewLayout {
  * current selection. Drives selection auto-follow (until the user navigates).
  */
 export function pickFollowIndex(flat: readonly { step: StepState }[], fallback: number): number {
+  if (flat.length === 0) return fallback;
   const running = flat.findIndex((f) => f.step.status === "running");
   if (running >= 0) return running;
   for (let i = flat.length - 1; i >= 0; i -= 1) {
