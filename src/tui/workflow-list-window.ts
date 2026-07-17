@@ -29,6 +29,23 @@ export function selectVisibleWindow<T>(
     window = computeWindow(items, selected, itemBudget);
   }
 
+  // Tiny-budget guard: with budget ≤ 2 and rows hidden on both sides, the loop
+  // above settles on one item plus two markers — over budget. The budget
+  // contract wins over marker completeness (an overflowing frame corrupts the
+  // whole TUI): suppress markers, smaller hidden count first, until it fits.
+  let markerRows = (window.hiddenBefore > 0 ? 1 : 0) + (window.hiddenAfter > 0 ? 1 : 0);
+  while (window.visible.length + markerRows > totalBudget && markerRows > 0) {
+    if (
+      window.hiddenBefore > 0 &&
+      (window.hiddenAfter === 0 || window.hiddenBefore <= window.hiddenAfter)
+    ) {
+      window = { ...window, hiddenBefore: 0 };
+    } else {
+      window = { ...window, hiddenAfter: 0 };
+    }
+    markerRows -= 1;
+  }
+
   return window;
 }
 

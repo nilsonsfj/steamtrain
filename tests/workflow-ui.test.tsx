@@ -18,6 +18,16 @@ describe("workflow UI helpers", () => {
     ).toBeLessThanOrEqual(4);
   });
 
+  it("honors the budget even when rows are hidden on both sides of a tiny window", () => {
+    const items = Array.from({ length: 41 }, (_, i) => `row-${i}`);
+    for (const budget of [1, 2, 3]) {
+      const window = selectVisibleWindow(items, 20, budget);
+      const markers = (window.hiddenBefore > 0 ? 1 : 0) + (window.hiddenAfter > 0 ? 1 : 0);
+      expect(window.visible.length + markers).toBeLessThanOrEqual(budget);
+      expect(window.visible).toContain("row-20");
+    }
+  });
+
   it("renders a preview step details screen", () => {
     const spec = BUNDLED_WORKFLOWS["target-sweep"]!;
     const entry = {
@@ -174,7 +184,7 @@ describe("workflow UI helpers", () => {
         onReject: "fail",
       },
     ];
-    for (const height of [12, 16, 24, 30]) {
+    for (const height of [6, 8, 12, 16, 24, 30]) {
       const { lastFrame } = render(
         <WorkflowView state={state} width={90} height={height} selectedIndex={3} elapsedMs={500} />,
       );
