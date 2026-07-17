@@ -136,6 +136,70 @@ describe("workflow UI helpers", () => {
     expect(pausedFrame).not.toContain("line-199");
     expect(pausedFrame).toContain("paused");
   });
+  it("shows a segmented progress bar with step tallies", () => {
+    const state = workflowStateWithSteps(10);
+    const { lastFrame } = render(
+      <WorkflowView state={state} width={100} height={20} selectedIndex={0} elapsedMs={2500} />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("█"); // done cells
+    expect(frame).toContain("░"); // pending cells
+    expect(frame).toContain("3/10 steps");
+    expect(frame).toContain("1 running");
+  });
+
+  it("does not duplicate the block label for non-agent steps", () => {
+    const state = workflowStateWithSteps(2);
+    const gateStep = state.phases[0]!.steps[1]!;
+    gateStep.blockKind = "gate";
+    gateStep.agent = undefined;
+    gateStep.model = undefined;
+    gateStep.status = "done";
+    gateStep.gate = { passed: true };
+    const { lastFrame } = render(
+      <WorkflowView state={state} width={100} height={20} selectedIndex={0} elapsedMs={1000} />,
+    );
+    expect(lastFrame() ?? "").not.toMatch(/gate\s+gate/);
+  });
+
+  it("never overflows its fixed height, even with an approval card open", () => {
+    const state = workflowStateWithSteps(12);
+    state.pendingApprovals = [
+      {
+        phaseId: "phase",
+        stepId: "step-3",
+        iteration: 1,
+        message: "review this output carefully ".repeat(20),
+        output: Array.from({ length: 40 }, (_, i) => `reviewed line ${i}`).join("\n"),
+        onReject: "fail",
+      },
+    ];
+    for (const height of [12, 16, 24, 30]) {
+      const { lastFrame } = render(
+        <WorkflowView state={state} width={90} height={height} selectedIndex={3} elapsedMs={500} />,
+      );
+      const lines = (lastFrame() ?? "").split("\n");
+      expect(lines.length).toBeLessThanOrEqual(height);
+    }
+  });
+
+  it("marks earlier iterations of a looped phase as superseded", () => {
+    const first = workflowStateWithSteps(2);
+    const secondPass = {
+      ...first.phases[0]!,
+      iteration: 2,
+      steps: first.phases[0]!.steps.map((s) => ({ ...s })),
+    };
+    first.phases[0]!.iteration = 1;
+    first.phases = [first.phases[0]!, secondPass];
+    const { lastFrame } = render(
+      <WorkflowView state={first} width={100} height={24} selectedIndex={0} elapsedMs={1000} />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("superseded");
+    expect(frame).toContain("iter 1/2");
+    expect(frame).toContain("iter 2/2");
+  });
 });
 
 function workflowStateWithSteps(count: number): WorkflowState {
