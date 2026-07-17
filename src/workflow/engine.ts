@@ -1070,6 +1070,10 @@ async function runSingleStep(
   // from a conversation that no longer exists — re-run it against the new one.
   let cached = cachedHit;
   const lineageSrc = sessionSourceId(step);
+  // Self-continuation (`continue:<ownId>`) is exempt: its "source" is its own
+  // previous pass, so there is no external session to go stale against — and
+  // inside a loop region `invalidateRegion` already drops the entry wholesale
+  // before a superseded pass could replay.
   if (cached && lineageSrc && lineageSrc !== step.id) {
     // The source has settled (it is an effective dependency), so env.sessions
     // already reflects what this step would resume if it ran now.
@@ -1727,6 +1731,10 @@ function resolveSessionResume(
     }
   }
   if (sourceId === step.id) {
+    // Self form: the adapter-support check above already ran, so a
+    // non-resumable adapter fails loudly on the FIRST iteration rather than
+    // silently running every pass fresh. An absent session here is just the
+    // first pass of the loop — start fresh by construction.
     return { ok: true, sessionId: ctx.sessions.get(step.id) };
   }
   const sessionId = ctx.sessions.get(sourceId);

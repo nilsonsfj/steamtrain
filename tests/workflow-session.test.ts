@@ -458,6 +458,68 @@ describe("session continuity engine", () => {
     expect(last?.result.resumedSessionId).toBe("s2");
   });
 
+  it("fails a self-continuing step loudly on iteration 1 when the adapter cannot resume", async () => {
+    const calls: AgentRunOptions[] = [];
+    const deps: WorkflowDeps = {
+      createAdapter: scriptedAdapter(() => ({ text: "DONE", sessionId: "s" }), calls, false),
+      maxConcurrency: 2,
+      cwd: "/base",
+    };
+    const events = await collect(selfLoopSpec(), deps);
+    const done = findDone(events, "fixer");
+    expect(done?.result.ok).toBe(false);
+    expect(done?.result.error).toContain("cannot resume recorded sessions");
+    // Fails before spawning — not silently fresh on every pass.
+    expect(calls).toHaveLength(0);
+  });
+
+  it("the structured-output fix turn resumes the step's own session", async () => {
+    const calls: AgentRunOptions[] = [];
+    const spec: WorkflowSpec = {
+      name: "structured",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            {
+              id: "judge",
+              agent: "claude",
+              model: "m",
+              prompt: "judge it",
+              output: {
+                type: "object",
+                properties: { verdict: { type: "string" } },
+                required: ["verdict"],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const deps: WorkflowDeps = {
+      createAdapter: scriptedAdapter(
+        (_opts, call) =>
+          call === 0
+            ? { text: "not json at all", sessionId: "ses-main" }
+            : { text: '{"verdict":"pass"}', sessionId: "ses-fix" },
+        calls,
+      ),
+      maxConcurrency: 2,
+      cwd: "/base",
+    };
+    const events = await collect(spec, deps);
+
+    expect(calls).toHaveLength(2);
+    // The fix turn continues the conversation that produced the invalid reply.
+    expect(calls[1]!.resumeSessionId).toBe("ses-main");
+    const done = findDone(events, "judge");
+    expect(done?.result.ok).toBe(true);
+    expect(done?.result.json).toEqual({ verdict: "pass" });
+    // The latest session (the fix turn's) is what a later continue: resumes.
+    expect(done?.result.sessionId).toBe("ses-fix");
+  });
+
   it("resumes from a cached source result (cross-run resume)", async () => {
     const calls: AgentRunOptions[] = [];
     const cache = new Map<string, StepResult>([
