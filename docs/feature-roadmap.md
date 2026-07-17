@@ -193,6 +193,12 @@ the session lineage so resume stays correct; steps without the field keep
 today's clean-room behavior (which is often what you want for independent
 critique).
 
+> **Shipped:** `"session": "continue:<stepId>"` on worker/processor steps
+> (including the self form for loop fixers), with adapter resume for
+> claude/opencode/codex, session ids + lineage (`resumedSessionId`) in run
+> history and the step cache, and lineage-checked cache replay. See
+> [Session continuity](workflow-spec.md#session-continuity-session).
+
 **Comparison:** LangGraph's checkpointed threads and CrewAI/AutoGen's shared
 conversation memory exist precisely because multi-step agent pipelines bleed
 context otherwise. steamtrain's clean-room default is the right *default* —

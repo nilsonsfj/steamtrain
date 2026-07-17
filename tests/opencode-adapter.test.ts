@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createOpenCodeMapper } from "../src/agents/opencode";
+import {
+  OpenCodeAdapter,
+  buildOpenCodeRunArgs,
+  createOpenCodeMapper,
+} from "../src/agents/opencode";
 import type { AgentEvent } from "../src/types/events";
 
 /**
@@ -129,5 +133,38 @@ describe("opencode mapper (stateful, one mapper per run)", () => {
       expect.objectContaining({ kind: "unknown", rawType: "server.connected" }),
     ]);
     expect(() => m({})).not.toThrow();
+  });
+});
+
+describe("buildOpenCodeRunArgs", () => {
+  it("includes model, variant, and extra args", () => {
+    expect(
+      buildOpenCodeRunArgs({
+        prompt: "hello",
+        model: "opencode/gpt-5.5",
+        effort: "high",
+        extraArgs: ["--share"],
+      }),
+    ).toEqual([
+      "run",
+      "--format",
+      "json",
+      "--model",
+      "opencode/gpt-5.5",
+      "--variant",
+      "high",
+      "--share",
+    ]);
+  });
+
+  it("continues a recorded session via --session", () => {
+    expect(
+      buildOpenCodeRunArgs({
+        prompt: "go on",
+        model: "opencode/gpt-5.5",
+        resumeSessionId: "ses_42",
+      }),
+    ).toEqual(["run", "--format", "json", "--model", "opencode/gpt-5.5", "--session", "ses_42"]);
+    expect(new OpenCodeAdapter().supportsResume).toBe(true);
   });
 });

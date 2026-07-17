@@ -129,6 +129,34 @@ export interface WorkspaceFields {
 export interface WorkerStep extends WorkflowStepBase, AgentRunFields, WorkspaceFields {
   kind?: "worker" | "processor";
   /**
+   * `"continue:<stepId>"` — opt-in agent session continuity: resume the named
+   * earlier step's recorded agent CLI session (claude `--resume`, opencode
+   * `--session`, codex `exec resume`) instead of starting a clean-room
+   * conversation, so this step inherits everything the source conversation
+   * already established (files read, decisions made, unstated context).
+   *
+   * The source becomes an implicit dependency (scheduled after it, skipped
+   * when it was skipped, failed when it failed) and must be an agent-backed
+   * step on the SAME agent instance in an earlier phase — sessions belong to
+   * one CLI. Neither side may be a `forEach` fan-out (a parent has one session
+   * per child; children resuming one session concurrently would corrupt it).
+   *
+   * `"continue:<ownId>"` (self) is the loop form: each `loopTo` iteration
+   * resumes the session this step recorded on the previous pass — the
+   * canonical "same fixer, every iteration" pattern. The first iteration has
+   * no prior session and starts fresh. Self-continuation requires the step to
+   * be inside a loop region.
+   *
+   * The step FAILS (rather than silently degrading to a fresh session) when
+   * the configured agent's adapter cannot resume sessions or the source
+   * recorded no session id — prompts written for a continued conversation
+   * make no sense in an empty one. Steps without this field keep today's
+   * clean-room behavior. Recorded session lineage is validated on cache
+   * replay: a cached result that resumed a session the source no longer has
+   * re-runs instead of replaying stale output.
+   */
+  session?: string;
+  /**
    * Dynamically fan this worker/processor out over prior distributor items.
    * Syntax: `steps.<id>.items` (or `<id>.items`).
    */
@@ -709,10 +737,19 @@ export interface StepResult {
   /**
    * Agent CLI session id captured from the step's final attempt (from the
    * adapter's `session_start` event). Enables session continuation: `canAsk`
-   * answers resume the same conversation, and `workflow takeover` drops a
-   * human into it interactively.
+   * answers resume the same conversation, `session: "continue:<stepId>"`
+   * steps chain onto it, and `workflow takeover` drops a human into it
+   * interactively.
    */
   sessionId?: string;
+  /**
+   * The session id a `session: "continue:<stepId>"` step actually resumed —
+   * its lineage. Persisted with the cached result so a replay can verify the
+   * source still carries the same session; a mismatch (the source re-ran and
+   * recorded a fresh session) invalidates the cached entry instead of
+   * replaying output produced from a conversation that no longer exists.
+   */
+  resumedSessionId?: string;
   /**
    * Clarifying question exchanges for a `canAsk` step: the agent asked, a
    * human answered, the step continued. Recorded so a steered step stays an
@@ -879,6 +916,10 @@ const workflowWorkerStepSchema = z.object({
   ...baseStepShape,
   kind: z.enum(["worker", "processor"]).optional(),
   forEach: z.string().min(1).optional(),
+  session: z
+    .string()
+    .regex(/^continue:.+$/, 'session must be "continue:<stepId>"')
+    .optional(),
   retry: retryPolicySchema.optional(),
   maxCostUsd: z.number().positive().optional(),
   canAsk: z.boolean().optional(),
@@ -1181,6 +1222,13 @@ export function workspaceSourceId(step: WorkflowStep): string | undefined {
   return /^inherit:(.+)$/.exec(workspace)?.[1];
 }
 
+/** The step id a `session: "continue:<stepId>"` field names, if any. */
+export function sessionSourceId(step: WorkflowStep): string | undefined {
+  const session = "session" in step ? step.session : undefined;
+  if (!session) return undefined;
+  return /^continue:(.+)$/.exec(session)?.[1];
+}
+
 /**
  * Template name an artifact path is referenced by: the last path segment minus
  * a trailing extension (`report.md` → `report`, `coverage/` → `coverage`,
@@ -1319,14 +1367,18 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
 
   const stepsById = new Map<string, WorkflowStep>();
   const allIds = new Set<string>();
-  for (const phase of spec.phases) {
+  const stepPhaseIndex = new Map<string, number>();
+  spec.phases.forEach((phase, pi) => {
     for (const step of phase.steps) {
       allIds.add(step.id);
       stepsById.set(step.id, step);
+      stepPhaseIndex.set(step.id, pi);
     }
-  }
+  });
 
   let maxPossibleSteps = spec.phases.reduce((n, p) => n + p.steps.length, 0);
+  /** Steps whose `session` names themselves; validated against loop regions below. */
+  const selfSessionSteps: string[] = [];
   const earlierIds = new Set<string>();
   for (const phase of spec.phases) {
     for (const step of phase.steps) {
@@ -1412,6 +1464,48 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
         }
         if (sourceStep.kind === "distributor") {
           maxPossibleSteps += sourceStep.items?.length ?? 0;
+        }
+      }
+      const sessionSrc = sessionSourceId(step);
+      if (sessionSrc) {
+        if ("forEach" in step && step.forEach) {
+          return {
+            ok: false,
+            error: `step '${step.id}' cannot combine session with forEach (every fan-out child would resume the same session concurrently)`,
+          };
+        }
+        if (sessionSrc === step.id) {
+          // Self-continuation ("resume my own previous loop iteration") is
+          // checked against loop regions below, once they are computed.
+          selfSessionSteps.push(step.id);
+        } else {
+          if (!earlierIds.has(sessionSrc)) {
+            return {
+              ok: false,
+              error: allIds.has(sessionSrc)
+                ? `step '${step.id}' session continues '${sessionSrc}', which is not in an earlier phase`
+                : `step '${step.id}' session continues unknown step '${sessionSrc}'`,
+            };
+          }
+          const sourceStep = stepsById.get(sessionSrc);
+          if (!sourceStep || !isAgentBackedStep(sourceStep)) {
+            return {
+              ok: false,
+              error: `step '${step.id}' session continues '${sessionSrc}', which is not an agent-backed step (only agent steps record sessions)`,
+            };
+          }
+          if ("forEach" in sourceStep && sourceStep.forEach) {
+            return {
+              ok: false,
+              error: `step '${step.id}' session continues fan-out step '${sessionSrc}', which records one session per item (continue a non-forEach step, or a consolidator of the fan-out)`,
+            };
+          }
+          if (isAgentBackedStep(step) && sourceStep.agent !== step.agent) {
+            return {
+              ok: false,
+              error: `step '${step.id}' (agent '${step.agent}') session continues '${sessionSrc}' (agent '${sourceStep.agent}') — a session can only be continued on the same agent instance`,
+            };
+          }
         }
       }
       const wsSource = workspaceSourceId(step);
@@ -1502,6 +1596,21 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
         end: pi,
         maxIterations: step.maxIterations ?? loopMaxIterations ?? DEFAULT_LOOP_MAX_ITERATIONS,
       });
+    }
+  }
+
+  // A self-continuation only ever finds a previous session when a loop gate
+  // re-runs the step's phase — outside a loop region it would silently start
+  // fresh on every run, which is never what the author meant.
+  for (const stepId of selfSessionSteps) {
+    const pi = stepPhaseIndex.get(stepId);
+    const inLoop =
+      pi !== undefined && regions.some((region) => region.start <= pi && pi <= region.end);
+    if (!inLoop) {
+      return {
+        ok: false,
+        error: `step '${stepId}' session "continue:${stepId}" (self) requires the step to be inside a loop region (a later gate's loopTo range) — outside a loop there is no previous iteration to continue`,
+      };
     }
   }
 

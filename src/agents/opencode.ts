@@ -250,27 +250,39 @@ function opencodeTokens(tokens: OpenCodeTokens | undefined): TokenUsage | undefi
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/**
+ * CLI args for one `opencode run`.
+ * NOTE: `--format json` (NOT `--command`, which suppresses JSON output).
+ * `--session <sessionId>` continues the named recorded session instead of
+ * starting a fresh one.
+ */
+export function buildOpenCodeRunArgs(opts: AgentRunOptions): string[] {
+  return [
+    "run",
+    "--format",
+    "json",
+    "--model",
+    opts.model,
+    ...(opts.effort ? ["--variant", opts.effort] : []),
+    ...(opts.resumeSessionId ? ["--session", opts.resumeSessionId] : []),
+    ...(opts.extraArgs ?? []),
+  ];
+}
+
 /** Runs the real `opencode` CLI in JSON event mode. */
 export class OpenCodeAdapter implements AgentAdapter {
   readonly id: AgentId = AGENT;
   readonly binary: string;
   readonly defaultModel = "opencode/mimo-v2.5-free";
+  /** `opencode run --session <sessionId>` continues a recorded session headlessly. */
+  readonly supportsResume = true;
 
   constructor(binary = "opencode") {
     this.binary = binary;
   }
 
   run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
-    // NOTE: `--format json` (NOT `--command`, which suppresses JSON output).
-    const args = [
-      "run",
-      "--format",
-      "json",
-      "--model",
-      opts.model,
-      ...(opts.effort ? ["--variant", opts.effort] : []),
-      ...(opts.extraArgs ?? []),
-    ];
+    const args = buildOpenCodeRunArgs(opts);
     return runAgentProcess({
       id: this.id,
       binary: this.binary,

@@ -424,6 +424,9 @@ function codexTokens(
 export function buildCodexExecArgs(opts: AgentRunOptions): string[] {
   return [
     "exec",
+    // `codex exec resume <sessionId>` continues a recorded session (the
+    // `thread_id` from `thread.started`); the remaining flags apply unchanged.
+    ...(opts.resumeSessionId ? ["resume", opts.resumeSessionId] : []),
     "--json",
     "--sandbox",
     "workspace-write",
@@ -442,6 +445,8 @@ export class CodexAdapter implements AgentAdapter {
   readonly id: AgentId = AGENT;
   readonly binary: string;
   readonly defaultModel = "gpt-5.5";
+  /** `codex exec resume <sessionId>` continues a recorded session headlessly. */
+  readonly supportsResume = true;
 
   constructor(binary = "codex") {
     this.binary = binary;

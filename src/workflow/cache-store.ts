@@ -224,6 +224,11 @@ function validateStepResult(stepId: string, value: unknown): StepResult | undefi
     error: typeof r.error === "string" ? r.error : undefined,
     costUsd: typeof r.costUsd === "number" ? r.costUsd : undefined,
     attempts: typeof r.attempts === "number" ? r.attempts : undefined,
+    // Session continuity: a replayed source must still expose its recorded
+    // session for `continue:` steps, and a replayed continuer must expose its
+    // lineage for the staleness check.
+    sessionId: typeof r.sessionId === "string" ? r.sessionId : undefined,
+    resumedSessionId: typeof r.resumedSessionId === "string" ? r.resumedSessionId : undefined,
     iteration: typeof r.iteration === "number" ? r.iteration : undefined,
     items: Array.isArray(r.items)
       ? r.items.filter((i): i is string => typeof i === "string")

@@ -116,7 +116,9 @@ Optional fields: `cwd`, `env`, `extraArgs`, `effort`, `forEach`, `retry`,
 `canAsk` (let the agent ask ONE clarifying question mid-step instead of
 guessing — see [Human in the loop](./human-in-the-loop.md#agent-clarifying-questions-canask)),
 `workspace` / `artifacts` (see
-[Workspace inheritance and artifacts](#workspace-inheritance-and-artifacts-file-handoff)).
+[Workspace inheritance and artifacts](#workspace-inheritance-and-artifacts-file-handoff)),
+`session` (continue an earlier step's agent conversation — see
+[Session continuity](#session-continuity-session)).
 
 If the resolved `cwd` is inside a git repository, the agent subprocess runs from
 a matching path in its own git worktree. The worktree starts at the current
@@ -783,6 +785,85 @@ parent records none (consolidate first if you need a single artifact). Artifact 
 relative and stay inside the step's cwd; use artifacts when a step's real
 product is a file, rather than pasting large content through text outputs.
 
+## Session continuity (`session`)
+
+By default every step (and every loop iteration) spawns a **fresh** agent with
+an empty context — all "memory" between steps travels through prompt
+templates. A worker/processor may instead opt in to continuing an earlier
+step's actual agent conversation:
+
+```jsonc
+"session": "continue:<stepId>"
+```
+
+The step's prompt is then delivered into the source step's recorded CLI
+session (`claude --resume <sessionId>`, `opencode run --session <sessionId>`,
+`codex exec resume <sessionId>`), so the agent keeps everything the source
+conversation already established — files it read, decisions it made, context
+it never wrote down. Steps without the field keep today's clean-room behavior,
+which is often what you want for independent critique.
+
+```jsonc
+{ "id": "plan", "steps": [
+  { "id": "planner", "agent": "claude", "model": "claude-opus-4-8",
+    "prompt": "Plan how to implement: {{input}}. Do not write code yet." }
+] },
+{ "id": "build", "steps": [
+  { "id": "implement", "agent": "claude", "model": "claude-sonnet-4-6",
+    "session": "continue:planner",
+    "prompt": "Now implement the plan you just wrote." }
+] }
+```
+
+The **self form** is the loop pattern — a fixer that keeps its own
+conversation across `loopTo` iterations instead of re-reading the repo from
+scratch each pass:
+
+```jsonc
+{ "id": "fix", "steps": [
+  { "id": "fixer", "agent": "claude", "model": "claude-sonnet-4-6",
+    "session": "continue:fixer",
+    "workspace": "inherit:fixer",
+    "prompt": "Fix the review issues (iteration {{iteration}}):\n{{steps.review.output}}" }
+] }
+```
+
+The first iteration has no previous session and starts fresh; every later
+iteration resumes the session the previous pass recorded.
+
+Semantics:
+
+- The source becomes an **implicit dependency**: the continuing step is
+  scheduled after it, is skipped when it was skipped, and fails when it
+  failed.
+- The source must be an **agent-backed step on the same agent instance** in an
+  earlier phase — sessions belong to one CLI and one account. Model and
+  `effort` may differ (plan on a big model, implement on a fast one).
+- Neither side may be a `forEach` fan-out: a fan-out parent records one
+  session per child, and parallel children resuming one session would corrupt
+  it. Self-continuation (`continue:<ownId>`) additionally requires the step to
+  sit inside a loop region.
+- The step **fails loudly** — rather than silently degrading to an empty
+  conversation — when the agent's adapter cannot resume sessions (`claude`,
+  `opencode`, and `codex` can; `amp` and `kiro` currently cannot) or when the
+  source recorded no session id. Prompts written for a continued conversation
+  are meaningless in a fresh one.
+- Session ids land in run history and in the step cache: `sessionId` is what
+  the step recorded, `resumedSessionId` is the lineage it continued. On a
+  resumed run a cached source replays with its recorded session, and the
+  continuing step's cached result is replayed **only while its lineage still
+  matches** — if the source re-ran and recorded a fresh session, the continuer
+  re-runs against it instead of replaying stale output.
+- Chains compose: `implement` continues `planner`, `review` continues
+  `implement` — each link resumes the latest session of the previous one, so
+  the whole chain is one growing conversation.
+- Session continuity is about **conversation** state, not files: combine it
+  with `workspace: "inherit:<stepId>"` when the continuing step must also see
+  the source's file edits. Note that agent CLIs store sessions on the machine
+  that ran them (some key them by working directory), so whether a session is
+  resumable from a different worktree path is ultimately the CLI's call — the
+  step fails with the CLI's own error if it is not.
+
 ## Per-step conditions (`when`)
 
 Any step may carry a `when` condition using the gate-condition schema. It is
@@ -977,6 +1058,10 @@ catches steamtrain-specific references that will silently render as empty.
   the child enforces its own independent 1000-step budget.
 - `workspace` must be `"inherit:<stepId>"`; the source must be a
   worker/processor/command step in an earlier phase, without `forEach`.
+- `session` must be `"continue:<stepId>"`; the source must be an agent-backed
+  step on the same agent instance in an earlier phase, and neither side may
+  use `forEach`. `"continue:<ownId>"` (self) requires the step to be inside a
+  loop region.
 - `artifacts` entries must be relative paths that stay inside the step's cwd,
   with unique template names per step.
 

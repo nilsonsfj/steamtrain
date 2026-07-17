@@ -415,4 +415,22 @@ describe("buildCodexExecArgs", () => {
       "gpt-5.5",
     ]);
   });
+
+  it("continues a recorded session via `exec resume <sessionId>`", () => {
+    expect(
+      buildCodexExecArgs({ prompt: "go on", model: "gpt-5.5", resumeSessionId: "thread-42" }),
+    ).toEqual([
+      "exec",
+      "resume",
+      "thread-42",
+      "--json",
+      "--sandbox",
+      "workspace-write",
+      "-c",
+      'approval_policy="never"',
+      "--skip-git-repo-check",
+      "--model",
+      "gpt-5.5",
+    ]);
+  });
 });
