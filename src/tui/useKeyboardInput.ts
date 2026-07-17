@@ -249,6 +249,7 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
             if (runner.wf.started || runner.wfLaunching) {
               runner.wfDispatch({ type: "reset" });
               runner.setStepIndex(0);
+              runner.setWfFollowSelection(true);
               runner.setWfLaunching(false);
               runner.activeWorkflowRef.current = undefined;
               runner.activeWorkflowInputRef.current = undefined;
@@ -367,6 +368,8 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
           }
           if (key.upArrow) {
             if (runner.wf.started || runner.wfLaunching) {
+              // Manual navigation takes over from selection auto-follow.
+              runner.setWfFollowSelection(false);
               runner.setStepIndex((i) => Math.max(0, i - 1));
             } else if (picker.wfPreview) {
               runner.setStepIndex((i) => Math.max(0, i - 1));
@@ -382,6 +385,8 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
           }
           if (key.downArrow) {
             if (runner.wf.started || runner.wfLaunching) {
+              // Manual navigation takes over from selection auto-follow.
+              runner.setWfFollowSelection(false);
               runner.setStepIndex((i) => Math.min(Math.max(0, runner.totalWfSteps - 1), i + 1));
             } else if (picker.wfPreview) {
               runner.setStepIndex((i) =>
