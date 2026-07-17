@@ -82,6 +82,7 @@ export function renderIndex(revs: PageAssetRevisions): string {
         <button class="btn small warn" id="flushBtn" style="display:none">&#128190; Flush to disk</button>
         <button class="btn small danger" id="deleteBtn" style="display:none">&#128465; Delete</button>
       </div>
+      <div class="reroute-row" id="blockedRow" style="display:none"></div>
       <div class="row" id="runRow" style="display:none">
         <textarea id="input" placeholder="Describe the input for this run... (&#8593; recalls previous inputs)"></textarea>
         <div id="paramsForm" class="params-form" style="display:none"></div>

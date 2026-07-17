@@ -402,8 +402,16 @@ interface PlanOptions {
  * input "--dry-run"; `run tour --input hi --dry-run` prints the plan.
  */
 export function splitDryRunArgs(args: string[]): { isDryRun: boolean; planArgs: string[] } {
-  const valueTaking = new Set(["--input", "-i", "--param", "-p", "--from", "--on-approval"]);
-  const dropWithValue = new Set(["--on-approval"]);
+  const valueTaking = new Set([
+    "--input",
+    "-i",
+    "--param",
+    "-p",
+    "--from",
+    "--on-approval",
+    "--agent",
+  ]);
+  const dropWithValue = new Set(["--on-approval", "--agent"]);
   const dropBare = new Set([
     "--dry-run",
     "--fresh",
@@ -1427,8 +1435,8 @@ Usage:
   steamtrain workflow validate [name]
   steamtrain workflow plan <name> --input <text> [--param key=value ...] [--json]
   steamtrain workflow plan <name> --stdin [--param key=value ...] [--json]
-  steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...]
-  steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...]
+  steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...]
+  steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...]
   steamtrain workflow run --from <runId> [--retry-failed] [--param key=value ...] [--input <text>] [--json] [--detach]
   steamtrain workflow attach [<runId>] [--json]
   steamtrain workflow runs [--all] [--json]

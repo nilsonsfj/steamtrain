@@ -28,12 +28,14 @@ import {
   type WorkflowSpec,
   acquireRunSlot,
   aggregateLeavesByModel,
+  applyWorkflowStepOverrides,
   createLiveRunPublisher,
   createLiveRunStore,
   createNotifier,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   createWorkflowRunControl,
+  formatReroutePlan,
   formatTakeoverCommand,
   formatTokenSummary,
   formatTokens,
@@ -95,6 +97,8 @@ export interface RunOptions {
   human: Record<string, string>;
   /** `--detach`: run under a background process; attach later from any UI. */
   detach: boolean;
+  /** `--agent <id>`: re-route steps whose pinned agent is not ready to this agent (this run only). */
+  agent?: string;
 }
 
 export function parseRunOptions(args: string[]): RunOptions | null {
@@ -139,6 +143,11 @@ export function parseRunOptions(args: string[]): RunOptions | null {
       options.fresh = true;
     } else if (arg === "--detach" || arg === "-d") {
       options.detach = true;
+    } else if (arg === "--agent") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("-")) return null;
+      options.agent = value;
+      i += 1;
     } else if (arg === "--human") {
       const value = args[i + 1];
       if (!value) return null;
@@ -177,7 +186,7 @@ export async function runWorkflowCommand(
   const options = parseRunOptions(positional ? args.slice(1) : args);
   if (!options) {
     err(
-      `usage: steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...]
+      `usage: steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...]
        steamtrain workflow run --from <runId> [--retry-failed] [--json] [--detach]
 `,
     );
@@ -246,7 +255,7 @@ export async function runWorkflowCommand(
     return 1;
   }
 
-  const spec = orchestrator.listWorkflows()[name];
+  let spec = orchestrator.listWorkflows()[name];
   if (!spec) {
     err(`${unknownWorkflowMessage(name, Object.keys(orchestrator.listWorkflows()))}\n`);
     return 1;
@@ -272,10 +281,39 @@ export async function runWorkflowCommand(
     orchestrator.setDoctor(doctor);
     await refreshAgentCatalogCaches(config, doctor);
   }
+  // --agent <id>: re-route steps whose pinned agent is not ready onto the
+  // requested (ready) agent, for this run only. The workflow on disk is
+  // untouched. A detached child re-plans from the same target (see launch
+  // metadata), so the parent applies it here too to keep cache keys aligned.
+  if (options.agent) {
+    if (!usesAgents) {
+      err(`--agent: workflow '${name}' has no agent-backed steps to re-route\n`);
+      return 1;
+    }
+    const reroute = orchestrator.planWorkflowReroute(spec, { target: options.agent });
+    if (!reroute.ok) {
+      if (reroute.error) {
+        err(`--agent ${options.agent}: ${reroute.error}\n`);
+        return 1;
+      }
+      out("note: every agent this workflow uses is ready — nothing to re-route\n");
+    } else {
+      spec = applyWorkflowStepOverrides(spec, reroute.plan.overrides);
+      out(`${formatReroutePlan(reroute.plan)} — this run only\n`);
+    }
+  }
   if (usesAgents || workflowLlmSteps(spec).length > 0) {
-    const check = orchestrator.canDispatchWorkflow(name);
+    const check = orchestrator.canDispatchWorkflowSpec(spec);
     if (!check.ok) {
       err(`cannot run '${name}': ${check.reason}\n`);
+      if (!options.agent) {
+        const reroute = orchestrator.planWorkflowReroute(spec);
+        if (reroute.ok) {
+          err(
+            `hint: ${formatReroutePlan(reroute.plan)} — re-run with --agent ${reroute.plan.target}\n`,
+          );
+        }
+      }
       return 1;
     }
   }
@@ -310,6 +348,7 @@ export async function runWorkflowCommand(
       approveAll: options.approveAll,
       onApproval: options.onApproval,
       humanInputs: Object.keys(humanValues).length > 0 ? humanValues : undefined,
+      rerouteAgent: options.agent,
       json: options.json,
       cwd,
       io,
@@ -399,6 +438,8 @@ interface SpawnDetachedRunOptions {
   approveAll: boolean;
   onApproval?: "fail" | "stop";
   humanInputs?: Record<string, string>;
+  /** `--agent <id>`: the detached child re-plans the re-route from this target. */
+  rerouteAgent?: string;
   json: boolean;
   cwd: string;
   io: CliIO;
@@ -456,6 +497,7 @@ async function spawnDetachedRun(options: SpawnDetachedRunOptions): Promise<numbe
         approveAll: options.approveAll || undefined,
         onApproval: options.onApproval,
         humanInputs: options.humanInputs,
+        rerouteAgent: options.rerouteAgent,
       },
     }),
   );
@@ -585,7 +627,7 @@ export async function runDetachedRunner(
   };
 
   const launch = meta.launch;
-  const spec = orchestrator.listWorkflows()[launch.workflow];
+  let spec = orchestrator.listWorkflows()[launch.workflow];
   if (!spec) return failEarly(`unknown workflow '${launch.workflow}'`);
 
   const usesAgents = workflowAgentIds(spec).length > 0;
@@ -594,8 +636,20 @@ export async function runDetachedRunner(
     orchestrator.setDoctor(doctor);
     await refreshAgentCatalogCaches(config, doctor);
   }
+  // Re-plan the parent's `--agent` re-route against current health (the plan
+  // is deterministic for an explicit target, keeping cache keys aligned).
+  if (launch.rerouteAgent && usesAgents) {
+    const reroute = orchestrator.planWorkflowReroute(spec, { target: launch.rerouteAgent });
+    if (!reroute.ok && reroute.error) {
+      return failEarly(`--agent ${launch.rerouteAgent}: ${reroute.error}`);
+    }
+    if (reroute.ok) {
+      spec = applyWorkflowStepOverrides(spec, reroute.plan.overrides);
+      out(`${formatReroutePlan(reroute.plan)} — this run only\n`);
+    }
+  }
   if (usesAgents || workflowLlmSteps(spec).length > 0) {
-    const check = orchestrator.canDispatchWorkflow(launch.workflow);
+    const check = orchestrator.canDispatchWorkflowSpec(spec);
     if (!check.ok) return failEarly(`cannot run '${launch.workflow}': ${check.reason}`);
   }
 

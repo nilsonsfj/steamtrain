@@ -27,8 +27,12 @@ interface PromptInputProps {
   cursorResetKey?: number;
 }
 
-/** ink-text-input still emits the letter on Ctrl+R / Ctrl+Q; drop that lone insert. */
-function isSpuriousCtrlLetterInsert(prev: string, next: string, letter: string): boolean {
+/**
+ * ink-text-input still emits the letter on Ctrl+R / Ctrl+Q (and on bare-letter
+ * hotkeys consumed by the app-level handler); detect that lone insert so the
+ * caller can drop it.
+ */
+export function isSpuriousLetterInsert(prev: string, next: string, letter: string): boolean {
   if (next.length !== prev.length + 1) return false;
   let i = 0;
   while (i < prev.length && prev[i] === next[i]) i += 1;
@@ -63,7 +67,7 @@ export function PromptInput({
 
   const handleChange = (next: string) => {
     const letter = swallowLetterRef.current;
-    if (swallowNextCharRef.current && letter && isSpuriousCtrlLetterInsert(value, next, letter)) {
+    if (swallowNextCharRef.current && letter && isSpuriousLetterInsert(value, next, letter)) {
       swallowNextCharRef.current = false;
       swallowLetterRef.current = null;
       return;

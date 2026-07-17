@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { modelsForAgent } from "../agents";
 import {
   type SlashCommandContext,
@@ -12,6 +12,7 @@ import type { WorkflowStepSelection } from "../commands/types";
 import type { SteamtrainSettings } from "../settings";
 import { DEFAULT_PROMPT_HISTORY_LIMIT } from "../settings";
 import type { WorkspaceEntry } from "../workspace";
+import { isSpuriousLetterInsert } from "./PromptInput";
 import type { Mode } from "./modes";
 import { isWorkspaceMode } from "./modes";
 import {
@@ -57,6 +58,8 @@ export interface UsePromptReturn {
   promptArrowCtx: PromptArrowContext;
   updatePromptDraft: (patch: Partial<typeof initialPromptTabState>) => void;
   handleValueChange: (next: string) => void;
+  /** Mark the next single-character insert of `letter` as a hotkey leak to drop. */
+  swallowNextInsert: (letter: string) => void;
   handleTab: () => void;
   handleHistoryNavigate: (direction: "up" | "down") => boolean;
   handleSuggestionNavigate: (direction: "up" | "down") => void;
@@ -112,8 +115,22 @@ export function usePrompt({
     bumpCursorToEnd();
   }, [historyBrowse, updatePromptDraft, bumpCursorToEnd]);
 
+  // Bare-letter hotkeys (the Arrival receipt's r/n/h/i) are consumed by the
+  // app-level useInput handler, but ink still delivers the same keystroke to
+  // the prompt's TextInput — there is no propagation stop between useInput
+  // hooks. The hotkey handler flags the letter here so the resulting
+  // one-character insert is dropped instead of polluting the draft (the same
+  // trick PromptInput plays for Ctrl-chord letters).
+  const swallowInsertRef = useRef<string | null>(null);
+  const swallowNextInsert = useCallback((letter: string) => {
+    swallowInsertRef.current = letter;
+  }, []);
+
   const handleValueChange = useCallback(
     (next: string) => {
+      const swallow = swallowInsertRef.current;
+      swallowInsertRef.current = null;
+      if (swallow && isSpuriousLetterInsert(value, next, swallow)) return;
       updatePromptDraft({
         value: next,
         promptEditing: true,
@@ -122,7 +139,7 @@ export function usePrompt({
       setCommandSuggestions([]);
       setSuggestionIndex(0);
     },
-    [updatePromptDraft],
+    [value, updatePromptDraft],
   );
 
   const recordPromptHistory = useCallback(
@@ -301,6 +318,7 @@ export function usePrompt({
     promptArrowCtx,
     updatePromptDraft,
     handleValueChange,
+    swallowNextInsert,
     handleTab,
     handleHistoryNavigate,
     handleSuggestionNavigate,

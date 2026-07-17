@@ -93,7 +93,7 @@ class FakeHost implements WorkflowHost {
   listWorkflows(): Record<string, WorkflowSpec> {
     return { [this.spec.name]: this.spec };
   }
-  canDispatchWorkflowSpec(): { ok: true } | { ok: false; reason: string } {
+  canDispatchWorkflowSpec(_spec: WorkflowSpec): { ok: true } | { ok: false; reason: string } {
     return this.dispatchable ? { ok: true } : { ok: false, reason: "agent is down" };
   }
   runWorkflow(name: string, input: string, signal?: AbortSignal): AsyncIterable<WorkflowEvent> {
@@ -311,6 +311,75 @@ describe("web server", () => {
       kinds: { worker: 1 },
       agents: ["opencode"],
     });
+  });
+
+  it("annotates blocked workflows with the re-route offer", async () => {
+    // Host whose dispatch gate fails but that can plan a re-route to claude.
+    class ReroutableHost extends FakeHost {
+      lastSpecOverride: WorkflowSpec | undefined;
+      constructor(spec: WorkflowSpec) {
+        super(spec, happyRun, false);
+      }
+      override canDispatchWorkflowSpec(spec: WorkflowSpec):
+        | {
+            ok: true;
+          }
+        | { ok: false; reason: string } {
+        // The re-routed spec (agent switched to claude) passes the gate.
+        const agent = (spec.phases[0]?.steps[0] as { agent?: string } | undefined)?.agent;
+        return agent === "claude"
+          ? { ok: true }
+          : { ok: false, reason: "opencode is binary_missing" };
+      }
+      planWorkflowReroute() {
+        return {
+          ok: true as const,
+          plan: {
+            target: "claude",
+            targetModel: "claude-sonnet-5",
+            targetModelName: "Claude Sonnet 5",
+            blockedAgents: ["opencode"],
+            stepIds: ["s1"],
+            overrides: { s1: { agent: "claude", model: "claude-sonnet-5", effort: undefined } },
+          },
+        };
+      }
+      override runWorkflow(
+        name: string,
+        input: string,
+        signal?: AbortSignal,
+        _cache?: Map<string, StepResult>,
+        _cwd?: string,
+        specOverride?: WorkflowSpec,
+      ): AsyncIterable<WorkflowEvent> {
+        this.lastSpecOverride = specOverride;
+        return happyRun(input);
+      }
+    }
+    const host = new ReroutableHost(demoSpec());
+    const { server } = makeServer(host);
+    const base = await start(server);
+
+    const list = await fetch(`${base}/api/workflows`);
+    const body = (await list.json()) as { workflows: Record<string, unknown>[] };
+    expect(body.workflows[0]).toMatchObject({
+      name: "demo",
+      blocked: "opencode is binary_missing",
+      reroute: { agent: "claude", model: "claude-sonnet-5", steps: 1 },
+    });
+
+    // reroute: true applies the plan's overrides so the gate passes.
+    const run = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "demo", input: "x", reroute: true }),
+    });
+    expect(run.status).toBe(201);
+    const step = host.lastSpecOverride?.phases[0]?.steps[0] as
+      | { agent?: string; model?: string }
+      | undefined;
+    expect(step?.agent).toBe("claude");
+    expect(step?.model).toBe("claude-sonnet-5");
   });
 
   it("returns a full spec and 404s unknown workflows", async () => {

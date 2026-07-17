@@ -9,6 +9,8 @@ import {
   type LiveRunStore,
   type Notifier,
   type NotifyConfig,
+  type PlanRerouteOptions,
+  type PlanRerouteResult,
   type RerunMode,
   type RerunPlan,
   type RunRecord,
@@ -53,6 +55,8 @@ const MAX_FRAMES_PER_RUN = 5000;
 export interface WorkflowHost {
   listWorkflows(): Record<string, WorkflowSpec>;
   canDispatchWorkflowSpec(spec: WorkflowSpec): { ok: true } | { ok: false; reason: string };
+  /** Plan a per-run re-route of blocked agent steps onto a ready agent (see Orchestrator). */
+  planWorkflowReroute?(spec: WorkflowSpec, options?: PlanRerouteOptions): PlanRerouteResult;
   runWorkflow(
     name: string,
     input: string,

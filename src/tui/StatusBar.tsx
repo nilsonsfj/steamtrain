@@ -135,6 +135,29 @@ export function StatusBar({
     );
   }
 
+  // Signal-first: lead with what works. Agents that are simply not installed
+  // (binary_missing) collapse into one calm summary instead of a wall of red
+  // chips — "missing" is the normal state for CLIs the user doesn't use, while
+  // auth/error states on installed agents stay loud because they're actionable.
+  // Same rule for APIs: an unset key is normal (their style is already gray),
+  // so key_missing collapses; auth/offline/error chips stay.
+  const visibleAgents = doctor.filter((d) => d.status !== "binary_missing");
+  const missingAgents = doctor.length - visibleAgents.length;
+  const agentSummary =
+    missingAgents > 0 && visibleAgents.length > 0
+      ? `${missingAgents} not installed`
+      : missingAgents > 0
+        ? "no agents installed — Ctrl+A to add"
+        : "";
+  const visibleApis = (apiDoctor ?? []).filter((d) => d.status !== "key_missing");
+  const missingApis = (apiDoctor ?? []).length - visibleApis.length;
+  const apiSummary =
+    missingApis > 0 && visibleApis.length > 0
+      ? `${missingApis} without keys`
+      : missingApis > 0
+        ? "◇ no API keys set"
+        : "";
+
   // Inner content width = terminal minus the round border (1 each side) and
   // paddingX (1 each side). The agent line shares its row with the prefix and
   // the right-hand group; the API line is indented under the prefix. The
@@ -144,19 +167,23 @@ export function StatusBar({
   const rightStable = `  cfg: ${shorten(configSource)}  ws: ${shorten(workspaceLabel)}`;
   const statusReserve = running ? 34 : 6;
 
-  const agents = doctor.map((result) => ({
+  const agents = visibleAgents.map((result) => ({
     result,
     width: chipWidth(result.agent, STATUS_STYLE[result.status].label),
   }));
-  const apis = (apiDoctor ?? []).map((result) => ({
+  const apis = visibleApis.map((result) => ({
     result,
     width: chipWidth(result.api, API_STATUS_STYLE[result.status].label),
   }));
 
-  const agentBudget = inner - PREFIX.length - rightStable.length - statusReserve - 1;
-  const apiBudget = inner - PREFIX.length;
+  const agentSummaryReserve = agentSummary ? agentSummary.length + SEP_WIDTH + 2 : 0;
+  const apiSummaryReserve = apiSummary ? apiSummary.length + SEP_WIDTH + 2 : 0;
+  const agentBudget =
+    inner - PREFIX.length - rightStable.length - statusReserve - 1 - agentSummaryReserve;
+  const apiBudget = inner - PREFIX.length - apiSummaryReserve;
   const packedAgents = packLine(agents, agentBudget);
   const packedApis = packLine(apis, apiBudget);
+  const showApiLine = apis.length > 0 || apiSummary.length > 0;
 
   return (
     <Box borderStyle="round" borderColor="gray" paddingX={1} flexDirection="column">
@@ -174,10 +201,16 @@ export function StatusBar({
           {packedAgents.hidden > 0 ? (
             <OverflowMarker hidden={packedAgents.hidden} leading={packedAgents.shown.length > 0} />
           ) : null}
+          {agentSummary ? (
+            <Text color={packedAgents.shown.length > 0 ? "gray" : "yellow"}>
+              {packedAgents.shown.length > 0 || packedAgents.hidden > 0 ? `${SEP}· ` : ""}
+              {agentSummary}
+            </Text>
+          ) : null}
         </Box>
         {rightGroup}
       </Box>
-      {apis.length > 0 ? (
+      {showApiLine ? (
         <Box paddingLeft={PREFIX.length}>
           {packedApis.shown.map((chip, i) => (
             <Box key={chip.result.api}>
@@ -187,6 +220,12 @@ export function StatusBar({
           ))}
           {packedApis.hidden > 0 ? (
             <OverflowMarker hidden={packedApis.hidden} leading={packedApis.shown.length > 0} />
+          ) : null}
+          {apiSummary ? (
+            <Text color="gray">
+              {packedApis.shown.length > 0 || packedApis.hidden > 0 ? `${SEP}· ` : ""}
+              {apiSummary}
+            </Text>
           ) : null}
         </Box>
       ) : null}

@@ -15,6 +15,7 @@ import {
   type WorkflowSourceKind,
   type WorkflowSpec,
   createGitWorktreeManager,
+  planAgentReroute,
   resolveStepTimeoutSec,
   resolveWorkflowTimeoutSec,
   runWorkflow,
@@ -22,6 +23,7 @@ import {
   validateWorkflow,
   workflowAgentIds,
 } from "../workflow";
+import type { PlanRerouteOptions, PlanRerouteResult } from "../workflow";
 import type { ApprovalProvider, HumanInputProvider, WorkflowRunControl } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 import { workspaceById } from "../workspace";
@@ -193,6 +195,21 @@ export class Orchestrator {
       return { ok: false, reason: llmIssues[0] as string };
     }
     return { ok: true };
+  }
+
+  /**
+   * Plan a per-run re-route of the spec's blocked agent steps onto a ready
+   * agent (see {@link planAgentReroute}). `{ ok: false }` with no error means
+   * nothing is blocked; an error means blocked steps exist but no ready agent
+   * (or the requested target is unusable).
+   */
+  planWorkflowReroute(spec: WorkflowSpec, options?: PlanRerouteOptions): PlanRerouteResult {
+    return planAgentReroute(
+      spec,
+      this.config,
+      (agent) => this.agentHealth(agent)?.status === "ok",
+      options,
+    );
   }
 
   /**

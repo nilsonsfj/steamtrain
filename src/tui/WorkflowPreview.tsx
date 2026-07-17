@@ -4,9 +4,11 @@ import { truncate } from "../agents/util";
 import type { DispatchCheck } from "../orchestrator";
 import {
   type PlanResult,
+  type ReroutePlan,
   type WorkflowSourceKind,
   type WorkflowSpec,
   autonomyBadge,
+  formatReroutePlan,
   isAgentBackedStep,
   lintTemplateRefs,
   workflowAutonomy,
@@ -37,6 +39,8 @@ interface WorkflowPreviewProps {
   height: number;
   selectedIndex: number;
   dispatchCheck: DispatchCheck;
+  /** Present when the blocked steps can be re-routed to a ready agent (`/reroute`). */
+  reroutePlan?: ReroutePlan;
   canResume?: boolean;
   promptEditing?: boolean;
   planResult?: PlanResult | null;
@@ -65,6 +69,7 @@ export function WorkflowPreview({
   height,
   selectedIndex,
   dispatchCheck,
+  reroutePlan,
   canResume = false,
   promptEditing = false,
   planResult = null,
@@ -137,6 +142,11 @@ export function WorkflowPreview({
         <Text color={dispatchCheck.ok ? "green" : "yellow"}>
           {dispatchCheck.ok ? "ready to run" : `blocked: ${dispatchCheck.reason}`}
         </Text>
+        {!dispatchCheck.ok && reroutePlan ? (
+          <Text color="cyan">
+            ↷ /reroute — {formatReroutePlan(reroutePlan)} (this session only)
+          </Text>
+        ) : null}
         {templateWarnings.length > 0 ? (
           <Text color="yellow">
             ⚠ {templateWarnings.length} template warning{templateWarnings.length === 1 ? "" : "s"}

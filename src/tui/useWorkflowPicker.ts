@@ -11,7 +11,7 @@ import type {
   WorkflowSpec,
   WorkflowStepOverrides,
 } from "../workflow";
-import { isAgentBackedStep, workflowCatalogEntries } from "../workflow";
+import { formatReroutePlan, isAgentBackedStep, workflowCatalogEntries } from "../workflow";
 import type { WorkspaceEntry } from "../workspace";
 import type { WorkflowCreateState } from "./WorkflowCreate";
 import type { DraftTarget } from "./draft-model";
@@ -128,6 +128,71 @@ export function useWorkflowPicker({
   const previewDispatchCheck = previewSpec
     ? orchestrator.canDispatchWorkflowSpec(previewSpec)
     : null;
+  // When the preview is blocked on a missing/unhealthy agent, offer a one-shot
+  // per-session re-route onto a ready agent (surfaced in the header + /reroute).
+  const previewReroutePlan = useMemo(() => {
+    if (!previewSpec || !previewDispatchCheck || previewDispatchCheck.ok) return undefined;
+    const reroute = orchestrator.planWorkflowReroute(previewSpec);
+    return reroute.ok ? reroute.plan : undefined;
+    // `doctor` feeds orchestrator.setDoctor; recompute when health lands.
+  }, [previewSpec, previewDispatchCheck, orchestrator, doctor]);
+
+  /**
+   * Stage a re-route of every blocked agent step in the selected (or
+   * previewed) workflow onto a ready agent, as session step overrides — the
+   * same staging path as Ctrl+E / `/agent`, nothing touches disk unless the
+   * user later runs `/save-workflows`.
+   */
+  const rerouteWorkflow = useCallback(() => {
+    const name = wfPreview?.name ?? selectedWorkflowName;
+    if (!name) {
+      return {
+        handled: true as const,
+        clearInput: true,
+        notices: [{ level: "warn" as const, text: "no workflow selected to re-route" }],
+      };
+    }
+    const spec = resolveWorkflowSpec(name);
+    if (!spec) {
+      return {
+        handled: true as const,
+        clearInput: true,
+        notices: [{ level: "error" as const, text: `unknown workflow '${name}'` }],
+      };
+    }
+    const reroute = orchestrator.planWorkflowReroute(spec);
+    if (!reroute.ok) {
+      return {
+        handled: true as const,
+        clearInput: true,
+        notices: [
+          {
+            level: reroute.error ? ("error" as const) : ("info" as const),
+            text:
+              reroute.error ?? `nothing to re-route in '${name}' — every agent it uses is ready`,
+          },
+        ],
+      };
+    }
+    const planned = reroute.plan;
+    setWfStepOverrides((prev) => {
+      const forWorkflow = { ...(prev[name] ?? {}) };
+      for (const [stepId, patch] of Object.entries(planned.overrides)) {
+        forWorkflow[stepId] = { ...(forWorkflow[stepId] ?? {}), ...patch };
+      }
+      return { ...prev, [name]: forWorkflow };
+    });
+    return {
+      handled: true as const,
+      clearInput: true,
+      notices: [
+        {
+          level: "info" as const,
+          text: `${formatReroutePlan(planned)} — staged for this session (Ctrl+R to run)`,
+        },
+      ],
+    };
+  }, [wfPreview, selectedWorkflowName, resolveWorkflowSpec, orchestrator, setWfStepOverrides]);
 
   const cloneWorkflow = useCallback(
     async (newName: string, scope: WorkflowScope = "user") => {
@@ -461,11 +526,13 @@ export function useWorkflowPicker({
     updateWorkflowDescription,
     saveWorkflows,
     createWorkflow,
+    rerouteWorkflow,
     preview: {
       spec: previewSpec,
       flatSteps: previewFlatSteps,
       stepCount: previewStepCount,
       dispatchCheck: previewDispatchCheck,
+      reroutePlan: previewReroutePlan,
     },
   };
 }

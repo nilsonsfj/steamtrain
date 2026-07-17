@@ -834,6 +834,7 @@ export function App({
     openApiManager,
     workflowPickerActive,
     saveWorkflows: picker.saveWorkflows,
+    rerouteWorkflow: picker.rerouteWorkflow,
     createWorkflow: picker.createWorkflow,
     cloneWorkflow: picker.cloneWorkflow,
     deleteWorkflow: picker.deleteWorkflow,
@@ -1627,6 +1628,7 @@ export function App({
             height={streamHeight}
             selectedIndex={runner.stepIndex}
             dispatchCheck={picker.preview.dispatchCheck}
+            reroutePlan={picker.preview.reroutePlan}
             canResume={runner.wfCanResume}
             promptEditing={prompt.promptEditing}
             planResult={planResult}
