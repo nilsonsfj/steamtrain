@@ -172,6 +172,14 @@ handed to later prompts as `{{steps.<id>.artifacts.report}}`. See the
 Directories outside git repositories keep the previous behavior and run in the
 resolved `cwd`.
 
+Isolation applies to *conversations* too: every step spawns a fresh agent with
+an empty context. When a step should instead continue an earlier step's actual
+conversation — an implementer inheriting the planning session, a loop fixer
+resuming itself each iteration — give it `"session": "continue:<stepId>"`
+(the source becomes an implicit dependency, and the agent CLI must support
+resuming; claude, opencode, and codex do). See the
+[workflow spec](workflow-spec.md#session-continuity-session).
+
 ---
 
 ## Building blocks

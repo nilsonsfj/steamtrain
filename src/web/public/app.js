@@ -1271,6 +1271,7 @@
     }
     if (s.result && s.result.suppliedBy) row("supplied by", s.result.suppliedBy);
     if (s.result && s.result.sessionId) row("session", s.result.sessionId, "mono");
+    if (s.result && s.result.resumedSessionId) row("continued session", s.result.resumedSessionId, "mono");
     if (s.status === "running" && s.activity) row("activity", s.activity);
     if (s.status === "error" && s.result && s.result.error) row("error", s.result.error, "err");
     // Interactive takeover: once the step is finished and left a worktree +

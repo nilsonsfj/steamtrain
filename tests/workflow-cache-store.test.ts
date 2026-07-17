@@ -459,6 +459,22 @@ describe("workflow cache resume", () => {
   });
 });
 
+describe("workflow cache session lineage", () => {
+  it("round-trips sessionId and resumedSessionId", async () => {
+    const rootDir = tempDir();
+    const key = workflowCacheKey("two-step", "input", "/cwd", twoStepSpec);
+    const cache = new Map<string, StepResult>([
+      ["first", { ...sampleResult("first"), sessionId: "ses-a" }],
+      ["second", { ...sampleResult("second"), sessionId: "ses-b", resumedSessionId: "ses-a" }],
+    ]);
+    await saveWorkflowCache(rootDir, key, cache);
+    const loaded = await loadWorkflowCache(rootDir, key);
+    expect(loaded.get("first")?.sessionId).toBe("ses-a");
+    expect(loaded.get("second")?.sessionId).toBe("ses-b");
+    expect(loaded.get("second")?.resumedSessionId).toBe("ses-a");
+  });
+});
+
 function existsSync(path: string): boolean {
   try {
     readFileSync(path);

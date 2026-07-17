@@ -83,6 +83,7 @@ import {
   type WorkflowStep,
   isAgentBackedStep,
   parseForEachSource,
+  sessionSourceId,
   validateWorkflow,
   workflowStepKind,
   workspaceSourceId,
@@ -197,6 +198,15 @@ interface RunEnv {
   outputs: Map<string, string>;
   results: Map<string, StepResult>;
   allResults: StepResult[];
+  /**
+   * Latest agent CLI session id each step recorded, feeding
+   * `session: "continue:<stepId>"` resolution. Deliberately NOT cleared by a
+   * loop jump's `invalidateRegion` (unlike `results`): a self-continuing step
+   * reads its own previous iteration's session from here. Entries are
+   * overwritten — or removed, when a re-run recorded no session — as each
+   * step's result lands, so a source that re-ran fresh is never resumed stale.
+   */
+  sessions: Map<string, string>;
   limit: number;
   /** Resolved per-run artifact snapshot directory. */
   artifactsDir: string;
@@ -257,9 +267,11 @@ export async function* runWorkflow(
   const cache = ctx.cache ?? new Map<string, StepResult>();
   const outputs = new Map<string, string>();
   const results = new Map<string, StepResult>();
+  const sessions = new Map<string, string>();
   for (const [id, res] of cache) {
     outputs.set(id, res.output);
     results.set(id, res);
+    if (res.sessionId) sessions.set(id, res.sessionId);
   }
 
   const limit = Math.min(Math.max(1, deps.maxConcurrency), MAX_CONCURRENCY);
@@ -287,6 +299,7 @@ export async function* runWorkflow(
     outputs,
     results,
     allResults: [],
+    sessions,
     limit,
     artifactsDir:
       deps.artifactsDir ??
@@ -474,6 +487,18 @@ function invalidateEditedStep(env: RunEnv, stepId: string): void {
     if (id === stepId || env.startedSteps.has(id)) continue;
     dropStepEntries(env, id);
   }
+}
+
+/**
+ * Track the latest agent session a step's result carries: set on a recorded
+ * session, removed when a (re)executed or replayed result recorded none — a
+ * later `continue:` of that step must not resume a session from a superseded
+ * pass. Only called for results that actually executed or replayed; skipped
+ * and dependency-failed placeholders leave the last real session in place.
+ */
+function recordStepSession(sessions: Map<string, string>, result: StepResult): void {
+  if (result.sessionId) sessions.set(result.stepId, result.sessionId);
+  else sessions.delete(result.stepId);
 }
 
 /** Delete one step's cache/results/outputs entries, including `forEach` children. */
@@ -938,6 +963,10 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
       }
       // Inheriting a workspace means waiting for the source's worktree.
       addEarlier(workspaceSourceId(step));
+      // Continuing a session means waiting for the source's recorded session.
+      // A self-reference (`continue:<ownId>`, the loop form) is ignored here
+      // by construction: addEarlier only admits ids from earlier phases.
+      addEarlier(sessionSourceId(step));
       if (step.kind === "merge") {
         for (const ref of step.from ?? []) addEarlier(ref);
         renderableTexts.push(step.branch, step.commitMessage, step.prTitle, step.prBody);
@@ -1034,8 +1063,25 @@ async function runSingleStep(
     return { notOk: true, stop };
   }
 
-  // Cache hit → replay without spawning (resume).
-  const cached = cachedHit;
+  // Cache hit → replay without spawning (resume). A session-continuing step's
+  // cached result is only replayable when its recorded lineage still matches
+  // the source's CURRENT session: if the source re-ran (or its own cache was
+  // dropped) and recorded a different session, this step's cached output came
+  // from a conversation that no longer exists — re-run it against the new one.
+  let cached = cachedHit;
+  const lineageSrc = sessionSourceId(step);
+  // Self-continuation (`continue:<ownId>`) is exempt: its "source" is its own
+  // previous pass, so there is no external session to go stale against — and
+  // inside a loop region `invalidateRegion` already drops the entry wholesale
+  // before a superseded pass could replay.
+  if (cached && lineageSrc && lineageSrc !== step.id) {
+    // The source has settled (it is an effective dependency), so env.sessions
+    // already reflects what this step would resume if it ran now.
+    if (cached.resumedSessionId !== env.sessions.get(lineageSrc)) {
+      cache.delete(step.id);
+      cached = undefined;
+    }
+  }
   if (cached) {
     for (const child of cached.childResults ?? []) {
       outputs.set(child.stepId, child.output);
@@ -1069,6 +1115,7 @@ async function runSingleStep(
     }
     outputs.set(step.id, cached.output);
     results.set(step.id, cached);
+    recordStepSession(env.sessions, cached);
     allResults.push(cached);
     let notOk = false;
     let stop = false;
@@ -1142,6 +1189,7 @@ async function runSingleStep(
       outputs,
       results,
       cache,
+      sessions: env.sessions,
       reserveDynamicSteps: env.reserveDynamicSteps,
       deps,
       signal,
@@ -1196,6 +1244,7 @@ async function runSingleStep(
   }
   outputs.set(step.id, result.output);
   results.set(step.id, result);
+  recordStepSession(env.sessions, result);
   // Approval checkpoints are never cached (`noCache`): a resumed run must
   // re-ask the decision instead of replaying a stale approval.
   if (result.ok && !result.noCache) cache.set(step.id, result);
@@ -1326,6 +1375,8 @@ interface ExecuteContext {
   outputs: Map<string, string>;
   results: Map<string, StepResult>;
   cache: Map<string, StepResult>;
+  /** Latest recorded agent session id per step (see {@link RunEnv.sessions}). */
+  sessions: Map<string, string>;
   reserveDynamicSteps: (count: number) => boolean;
   deps: WorkflowDeps;
   signal?: AbortSignal;
@@ -1653,6 +1704,49 @@ function adapterSupportsResume(step: AgentBackedWorkflowStep, ctx: ExecuteContex
   return adapter.supportsResume === true;
 }
 
+/**
+ * Resolve a step's `session: "continue:<stepId>"` to the session id the agent
+ * should resume. Fails LOUDLY (instead of silently starting a clean-room
+ * session) when the adapter cannot resume or the source recorded no session —
+ * a prompt written for a continued conversation is meaningless in an empty
+ * one. The self form (`continue:<ownId>`, the loop pattern) is the exception:
+ * its first iteration has no previous session by construction and starts
+ * fresh. A missing agent instance falls through to the run path, whose
+ * "disabled or not configured" error is the clearer diagnosis.
+ */
+function resolveSessionResume(
+  step: AgentBackedWorkflowStep,
+  ctx: ExecuteContext,
+): { ok: true; sessionId?: string } | { ok: false; error: string } {
+  const sourceId = sessionSourceId(step);
+  if (!sourceId) return { ok: true };
+  const instance = resolveAgentInstance(ctx.deps.agentConfig, step.agent);
+  if (instance) {
+    const adapter = ctx.deps.createAdapter(instance.provider, instance.binary);
+    if (adapter.supportsResume !== true) {
+      return {
+        ok: false,
+        error: `step declares session "continue:${sourceId}" but agent '${step.agent}' (provider '${instance.provider}') cannot resume recorded sessions`,
+      };
+    }
+  }
+  if (sourceId === step.id) {
+    // Self form: the adapter-support check above already ran, so a
+    // non-resumable adapter fails loudly on the FIRST iteration rather than
+    // silently running every pass fresh. An absent session here is just the
+    // first pass of the loop — start fresh by construction.
+    return { ok: true, sessionId: ctx.sessions.get(step.id) };
+  }
+  const sessionId = ctx.sessions.get(sourceId);
+  if (!sessionId) {
+    return {
+      ok: false,
+      error: `session source '${sourceId}' recorded no agent session id to continue (the agent may not have reported one)`,
+    };
+  }
+  return { ok: true, sessionId };
+}
+
 /** Sleep `ms`, resolving early if the signal aborts. */
 function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (ms <= 0) return Promise.resolve();
@@ -1696,6 +1790,17 @@ async function executeAgentStep(
     : rendered;
   const prompt = canAsk ? withSchema + AGENT_QUESTION_PROTOCOL : withSchema;
   const stepCwd = step.cwd ? resolvePath(ctx.deps.cwd, step.cwd) : ctx.deps.cwd;
+  const resume = resolveSessionResume(step, ctx);
+  if (!resume.ok) {
+    return {
+      stepId,
+      ok: false,
+      output: resume.error,
+      item,
+      error: resume.error,
+      durationMs: 0,
+    };
+  }
   const workspaceStarted = Date.now();
   let workspace: AgentWorkspaceLease;
   try {
@@ -1737,6 +1842,7 @@ async function executeAgentStep(
         item,
         prompt,
         workspace.cwd,
+        resume.sessionId,
       );
       result = attemptOutcome.result;
       const isLastAttempt = attempt >= policy.maxAttempts;
@@ -1795,6 +1901,9 @@ async function executeAgentStep(
       result = fixed.result;
       attempt = fixed.attempt;
     }
+    // Record the resumed lineage on the result so cache replays can verify the
+    // source still carries this session (see the staleness check in runSingleStep).
+    if (resume.sessionId !== undefined) result = { ...result, resumedSessionId: resume.sessionId };
     result = await applyDeclaredArtifacts(step, ctx, stepId, workspace.cwd, result);
     const finalResult = attachWorktreeInfo(result, workspace, stepCwd);
     // After a retry, report true wall-clock for the whole step (all attempts
@@ -1844,6 +1953,13 @@ async function enforceStructuredOutput(
     iteration: ctx.iteration,
     ts: Date.now(),
   });
+  // Resume the step's own just-recorded session where the adapter supports it,
+  // so the fix turn keeps the agent's context AND the step's session lineage
+  // stays one conversation (a later `continue:` of this step resumes a session
+  // that actually did the work, not a context-free JSON-fixup). The fix prompt
+  // is self-contained either way, so non-resumable adapters lose nothing.
+  const fixResume =
+    result.sessionId && adapterSupportsResume(step, ctx) ? result.sessionId : undefined;
   const fix = await runAgentAttempt(
     step,
     ctx,
@@ -1852,6 +1968,7 @@ async function enforceStructuredOutput(
     item,
     structuredOutputFixPrompt(outputSchema, result.output, parsed.error),
     workspaceCwd,
+    fixResume,
   );
   const costUsd =
     result.costUsd === undefined && fix.result.costUsd === undefined
@@ -1864,9 +1981,12 @@ async function enforceStructuredOutput(
   const reparsed = fix.result.ok
     ? parseStructuredOutput(fix.result.output, outputSchema)
     : undefined;
+  // Like the canAsk continuation: keep the last known session when the fix
+  // attempt reported none, so takeover/session-continuation still find one.
+  const sessionId = fix.result.sessionId ?? result.sessionId;
   if (reparsed?.ok) {
     return {
-      result: { ...fix.result, json: reparsed.value, costUsd, tokens },
+      result: { ...fix.result, json: reparsed.value, costUsd, tokens, sessionId },
       attempt: attempt + 1,
     };
   }
@@ -1878,6 +1998,7 @@ async function enforceStructuredOutput(
       error: `structured output retry failed: ${reason}`,
       costUsd,
       tokens,
+      sessionId,
     },
     attempt: attempt + 1,
   };
@@ -3297,13 +3418,15 @@ function findFailedDependency(
 ): string | undefined {
   const mergeSources =
     step.kind === "merge" ? new Set(step.from ?? step.dependsOn ?? []) : undefined;
-  // A workspace-inherit source is an implicit dependency: a step cannot start
-  // from the worktree of a step that failed.
-  const wsSource = workspaceSourceId(step);
-  const deps =
-    wsSource && !step.dependsOn?.includes(wsSource)
-      ? [...(step.dependsOn ?? []), wsSource]
-      : (step.dependsOn ?? []);
+  // Workspace-inherit and session-continue sources are implicit dependencies:
+  // a step can neither start from the worktree nor resume the session of a
+  // step that failed. (`continue:<ownId>` self-references are not deps.)
+  const deps = [...(step.dependsOn ?? [])];
+  for (const implicitDep of [workspaceSourceId(step), sessionSourceId(step)]) {
+    if (implicitDep && implicitDep !== step.id && !deps.includes(implicitDep)) {
+      deps.push(implicitDep);
+    }
+  }
   for (const dep of deps) {
     const result = results.get(dep);
     if (!result || result.ok) continue;
@@ -3388,6 +3511,10 @@ function findSkipReason(step: WorkflowStep, ctx: GateEvalContext): string | unde
   const wsSource = workspaceSourceId(step);
   if (wsSource && ctx.results.get(wsSource)?.skipped) {
     return `workspace source '${wsSource}' was skipped`;
+  }
+  const sessionSrc = sessionSourceId(step);
+  if (sessionSrc && sessionSrc !== step.id && ctx.results.get(sessionSrc)?.skipped) {
+    return `session source '${sessionSrc}' was skipped`;
   }
   if (step.when && !evaluateGate(step.when, ctx).passed) {
     return "when condition not met";

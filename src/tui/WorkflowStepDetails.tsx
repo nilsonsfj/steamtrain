@@ -383,6 +383,11 @@ function liveMetaLines(
   if (step.result?.suppliedBy) {
     lines.push({ text: `supplied by: ${step.result.suppliedBy}`, color: "gray" });
   }
+  // Session continuity: this step resumed an earlier step's recorded agent
+  // session (`session: "continue:<stepId>"`) — show the lineage.
+  if (step.result?.resumedSessionId) {
+    lines.push({ text: `continued session: ${step.result.resumedSessionId}`, color: "gray" });
+  }
   // Interactive takeover: a finished agent step with a recorded session can be
   // resumed by a human — surface the command right where the step is inspected.
   if (step.agent && step.result?.sessionId && (step.status === "done" || step.status === "error")) {

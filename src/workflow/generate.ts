@@ -240,6 +240,23 @@ on the aggregate parent. Use artifacts when a
 step's real product is a file a later step should read, rather than pasting
 huge content through text outputs.
 
+# Session continuity ("session")
+A worker/processor may set "session": "continue:<stepId>" to CONTINUE that
+earlier step's agent conversation instead of starting a clean-room one — the
+agent keeps everything the source session established (files read, decisions
+made). Natural fits: a plan step followed by an implement step that inherits
+the planning conversation, and a loop fixer continuing ITSELF
+("session": "continue:<ownId>") so each iteration resumes the previous pass
+instead of re-reading the repo. The source must be an agent-backed step on the
+SAME agent in an earlier phase; neither side may use forEach; each source may
+be continued by at most ONE step (chain continuations linearly);
+self-continuation requires the step to be inside a loop region. The step fails when the agent's
+CLI cannot resume sessions (claude/opencode/codex can). Session continuity
+shares CONVERSATION state, not files — pair it with "workspace" inheritance
+when the step must also see the source's edits. Default to fresh sessions for
+independent critique; use continuation only when inheriting context is the
+point.
+
 # Per-step conditions ("when")
 Any step may carry a "when" condition (same shape as a gate condition), e.g.
   { "id": "fix-frontend", "when": { "step": "triage", "contains": "frontend" }, ... }

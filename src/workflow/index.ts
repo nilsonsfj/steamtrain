@@ -31,6 +31,7 @@ export {
   workflowStepKind,
   parseForEachSource,
   workspaceSourceId,
+  sessionSourceId,
   artifactName,
   isAgentBackedStep,
   workflowAgentIds,
