@@ -41,6 +41,7 @@ import {
   workflowCacheKey,
 } from "../workflow";
 import { type OutputScroll, initialOutputScroll, scrollOutputBy } from "./output-window";
+import { pickFollowIndex } from "./run-view-model";
 import { message } from "./util";
 import {
   type WorkflowState,
@@ -79,6 +80,10 @@ export function useWorkflowRunner({
   const [wfNotice, setWfNotice] = useState<string | null>(null);
   const [wfShowStepDetail, setWfShowStepDetail] = useState(true);
   const [wfShowPlanResult, setWfShowPlanResult] = useState(true);
+  // Selection auto-follow: while a run streams, keep the selected step (and
+  // its detail pane) on the live action. Any manual ↑/↓ hands control to the
+  // user; a new launch/attach re-engages following.
+  const [wfFollowSelection, setWfFollowSelection] = useState(true);
   // Scroll state for the drill-in output pane (live run AND history replay —
   // only one drill-in is ever on screen). Follows the stream until the reader
   // scrolls up; scrolling back to the bottom re-engages following.
@@ -139,6 +144,14 @@ export function useWorkflowRunner({
   useEffect(() => {
     setWfOutputScroll(initialOutputScroll);
   }, [stepIndex, wfStepDetails]);
+
+  // Selection auto-follow: as events stream in, keep the selection on the
+  // first running step (else the newest finished one) until the user takes
+  // over with ↑/↓.
+  useEffect(() => {
+    if (!wfFollowSelection || !running || liveFlatSteps.length === 0) return;
+    setStepIndex((current) => pickFollowIndex(liveFlatSteps, current));
+  }, [wfFollowSelection, running, liveFlatSteps]);
 
   /** Reported by the drill-in output pane after each render (see outputMetricsRef). */
   const reportOutputMetrics = useCallback((metrics: { total: number; budget: number }): void => {
@@ -435,6 +448,7 @@ export function useWorkflowRunner({
       if (seedSpec) wfDispatch({ type: "seed", spec: seedSpec });
       else wfDispatch({ type: "reset" });
       setStepIndex(0);
+      setWfFollowSelection(true);
       setWfPreview(null);
       setWfStepDetails(null);
       if (!runWorkflow(name, prompt, opts)) {
@@ -461,6 +475,7 @@ export function useWorkflowRunner({
       setWfLaunching(true);
       wfDispatch({ type: "reset" });
       setStepIndex(0);
+      setWfFollowSelection(true);
       setWfStepDetails(null);
       const ac = new AbortController();
       attachAbortRef.current = ac;
@@ -676,6 +691,8 @@ export function useWorkflowRunner({
     setWfShowStepDetail,
     wfShowPlanResult,
     setWfShowPlanResult,
+    wfFollowSelection,
+    setWfFollowSelection,
     wfOutputScroll,
     setWfOutputScroll,
     reportOutputMetrics,

@@ -1,4 +1,5 @@
 import type { ApiDoctorStatus, DoctorStatus } from "../doctor";
+import type { WorkflowStepKind } from "../workflow";
 
 /** Color + glyph for each agent-readiness status in the top status bar. */
 export const STATUS_STYLE: Record<DoctorStatus, { color: string; symbol: string; label: string }> =
@@ -43,6 +44,31 @@ export const EVENT_STYLE = {
   notice_warn: { color: "yellow", symbol: "»" },
   notice_error: { color: "red", symbol: "»" },
 } as const;
+
+/**
+ * Per-block-kind accent colors, mirroring the web UI's card legend palette so
+ * the two run views share one visual language (chalk degrades the hex values
+ * gracefully on non-truecolor terminals).
+ */
+export const BLOCK_COLOR: Record<WorkflowStepKind, string> = {
+  worker: "#6fb1ff",
+  processor: "#9d8cff",
+  distributor: "#ffce6f",
+  consolidator: "#5fe0c6",
+  gate: "#f0a35e",
+  approval: "#ffd166",
+  human: "#f5a3ff",
+  merge: "#ff9ecb",
+  command: "#b8c4d0",
+  llm: "#62d2f5",
+  workflow: "#7ce38b",
+};
+
+/** Braille spinner frames for live running indicators (~10 fps look at 120ms). */
+export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
+
+/** Static stand-in for the spinner when nothing is animating (replayed records). */
+export const SPINNER_STATIC = "⟳";
 
 export const AGENT_COLOR: Record<string, string> = {
   claude: "magenta",
