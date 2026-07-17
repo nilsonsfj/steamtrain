@@ -248,8 +248,9 @@ made). Natural fits: a plan step followed by an implement step that inherits
 the planning conversation, and a loop fixer continuing ITSELF
 ("session": "continue:<ownId>") so each iteration resumes the previous pass
 instead of re-reading the repo. The source must be an agent-backed step on the
-SAME agent in an earlier phase; neither side may use forEach; self-continuation
-requires the step to be inside a loop region. The step fails when the agent's
+SAME agent in an earlier phase; neither side may use forEach; each source may
+be continued by at most ONE step (chain continuations linearly);
+self-continuation requires the step to be inside a loop region. The step fails when the agent's
 CLI cannot resume sessions (claude/opencode/codex can). Session continuity
 shares CONVERSATION state, not files — pair it with "workspace" inheritance
 when the step must also see the source's edits. Default to fresh sessions for

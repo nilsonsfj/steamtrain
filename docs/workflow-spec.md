@@ -841,7 +841,10 @@ Semantics:
   `effort` may differ (plan on a big model, implement on a fast one).
 - Neither side may be a `forEach` fan-out: a fan-out parent records one
   session per child, and parallel children resuming one session would corrupt
-  it. Self-continuation (`continue:<ownId>`) additionally requires the step to
+  it. For the same reason a session can be continued by **at most one step**
+  — two continuers of the same source could run concurrently and race on one
+  recorded session; chain them instead (continue the previous continuer).
+  Self-continuation (`continue:<ownId>`) additionally requires the step to
   sit inside a loop region.
 - The step **fails loudly** — rather than silently degrading to an empty
   conversation — when the agent's adapter cannot resume sessions (`claude`,
@@ -1059,9 +1062,9 @@ catches steamtrain-specific references that will silently render as empty.
 - `workspace` must be `"inherit:<stepId>"`; the source must be a
   worker/processor/command step in an earlier phase, without `forEach`.
 - `session` must be `"continue:<stepId>"`; the source must be an agent-backed
-  step on the same agent instance in an earlier phase, and neither side may
-  use `forEach`. `"continue:<ownId>"` (self) requires the step to be inside a
-  loop region.
+  step on the same agent instance in an earlier phase, neither side may use
+  `forEach`, and each source may be continued by at most one step.
+  `"continue:<ownId>"` (self) requires the step to be inside a loop region.
 - `artifacts` entries must be relative paths that stay inside the step's cwd,
   with unique template names per step.
 

@@ -245,6 +245,50 @@ describe("session validation", () => {
     expect(result.error).toContain("fan-out step 'work'");
   });
 
+  it("rejects two steps continuing the same source session", () => {
+    const spec: WorkflowSpec = {
+      name: "double-continue",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "plan", agent: "claude", model: "m", prompt: "plan" }],
+        },
+        {
+          id: "p2",
+          title: "P2",
+          steps: [
+            { id: "implA", agent: "claude", model: "m", prompt: "a", session: "continue:plan" },
+            { id: "implB", agent: "claude", model: "m", prompt: "b", session: "continue:plan" },
+          ],
+        },
+      ],
+    };
+    const result = validateWorkflow(spec);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("both continue session 'plan'");
+  });
+
+  it("accepts a linear chain of continuations", () => {
+    const spec: WorkflowSpec = {
+      name: "chain-3",
+      phases: [
+        { id: "p1", title: "P1", steps: [{ id: "a", agent: "claude", model: "m", prompt: "a" }] },
+        {
+          id: "p2",
+          title: "P2",
+          steps: [{ id: "b", agent: "claude", model: "m", prompt: "b", session: "continue:a" }],
+        },
+        {
+          id: "p3",
+          title: "P3",
+          steps: [{ id: "c", agent: "claude", model: "m", prompt: "c", session: "continue:b" }],
+        },
+      ],
+    };
+    expect(validateWorkflow(spec).ok).toBe(true);
+  });
+
   it("accepts self-continuation inside a loop region", () => {
     expect(validateWorkflow(selfLoopSpec()).ok).toBe(true);
   });

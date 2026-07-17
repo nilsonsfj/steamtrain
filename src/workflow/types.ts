@@ -139,7 +139,9 @@ export interface WorkerStep extends WorkflowStepBase, AgentRunFields, WorkspaceF
    * when it was skipped, failed when it failed) and must be an agent-backed
    * step on the SAME agent instance in an earlier phase — sessions belong to
    * one CLI. Neither side may be a `forEach` fan-out (a parent has one session
-   * per child; children resuming one session concurrently would corrupt it).
+   * per child; children resuming one session concurrently would corrupt it),
+   * and each source may be continued by at most one step — sibling continuers
+   * could race on one recorded session; chain them linearly instead.
    *
    * `"continue:<ownId>"` (self) is the loop form: each `loopTo` iteration
    * resumes the session this step recorded on the previous pass — the
@@ -1379,6 +1381,8 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
   let maxPossibleSteps = spec.phases.reduce((n, p) => n + p.steps.length, 0);
   /** Steps whose `session` names themselves; validated against loop regions below. */
   const selfSessionSteps: string[] = [];
+  /** source step id → the step already continuing it (one continuer per source). */
+  const sessionContinuedBy = new Map<string, string>();
   const earlierIds = new Set<string>();
   for (const phase of spec.phases) {
     for (const step of phase.steps) {
@@ -1506,6 +1510,18 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
               error: `step '${step.id}' (agent '${step.agent}') session continues '${sessionSrc}' (agent '${sourceStep.agent}') — a session can only be continued on the same agent instance`,
             };
           }
+          // One continuer per source: two steps resuming the same recorded
+          // session could run concurrently (they need not depend on each
+          // other) and corrupt it — the same hazard the forEach rules block.
+          // Chains stay linear: continue the PREVIOUS link, not the root.
+          const existing = sessionContinuedBy.get(sessionSrc);
+          if (existing) {
+            return {
+              ok: false,
+              error: `steps '${existing}' and '${step.id}' both continue session '${sessionSrc}' — a session can be continued by at most one step (chain them instead: continue the previous continuer)`,
+            };
+          }
+          sessionContinuedBy.set(sessionSrc, step.id);
         }
       }
       const wsSource = workspaceSourceId(step);
