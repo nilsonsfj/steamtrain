@@ -650,7 +650,9 @@ var SteamtrainReducer = (() => {
     const agentless = opts.credentialFree === true || costUsd === 0 && tokens === 0 && failCount === 0;
     const nextCandidates = opts.nextCandidates ?? DEFAULT_NEXT_CANDIDATES;
     const current = state.name;
-    const next = opts.nextWorkflow ?? nextCandidates.find((name) => name !== current && (!opts.availableWorkflows || opts.availableWorkflows.has(name)));
+    const next = opts.nextWorkflow ?? nextCandidates.find(
+      (name) => name !== current && (!opts.availableWorkflows || opts.availableWorkflows.has(name))
+    );
     const destinations = [{ id: "again", label: "Run again", key: "r" }];
     if (next) {
       destinations.push({ id: "next", label: `Try ${next}`, workflow: next, key: "n" });

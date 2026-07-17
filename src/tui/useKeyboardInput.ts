@@ -1,6 +1,7 @@
 import { type Key, useApp, useInput } from "ink";
 import { useCallback, useRef } from "react";
 import { isSlashCommandInput } from "../commands";
+import { ARRIVAL_NEXT_CANDIDATES } from "../workflow";
 import type { Mode } from "./modes";
 import { nextMode } from "./modes";
 import { shouldPromptHistoryCaptureDown, shouldPromptHistoryCaptureUp } from "./prompt-history";
@@ -352,7 +353,10 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
             return;
           }
           if (input === "r") {
-            const name = runner.activeWorkflowRef.current;
+            const name =
+              runner.activeWorkflowRef.current ??
+              picker.wfPreview?.name ??
+              picker.workflowEntries[picker.workflowIndex]?.name;
             const prior = runner.activeWorkflowInputRef.current ?? "";
             if (name) {
               cur.clearStationLanding?.();
@@ -363,10 +367,9 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
             return;
           }
           if (input === "n") {
-            const candidates = ["multi-plan", "quick-triage", "bug-hunt", "target-sweep"];
-            const next = candidates
-              .map((name) => picker.workflowEntries.find((e) => e.name === name))
-              .find(Boolean);
+            const next = ARRIVAL_NEXT_CANDIDATES.map((name) =>
+              picker.workflowEntries.find((e) => e.name === name),
+            ).find(Boolean);
             if (!next) {
               runner.setWfNotice("no next workflow available in the catalog");
               return;

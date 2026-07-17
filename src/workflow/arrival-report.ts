@@ -51,6 +51,9 @@ export interface ArrivalReport {
 
 const DEFAULT_NEXT_CANDIDATES = ["multi-plan", "quick-triage", "bug-hunt", "target-sweep"];
 
+/** Preference order for the Arrival "Try …" destination. */
+export const ARRIVAL_NEXT_CANDIDATES = DEFAULT_NEXT_CANDIDATES;
+
 /**
  * Build the Arrival Report from a finished (or finishing) workflow state.
  * Returns null when the run has not completed.

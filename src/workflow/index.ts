@@ -444,6 +444,7 @@ export {
   type ArrivalReceipt,
   type ArrivalDestination,
   type ArrivalReport,
+  ARRIVAL_NEXT_CANDIDATES,
   buildArrivalReport,
   findArrivalStep,
   formatArrivalReceipt,

@@ -19,6 +19,10 @@ export const TOUR_WORKFLOW_NAME = "tour";
 /**
  * Walk a spec without importing the heavy zod-backed helpers in `types.ts`
  * (those pull the whole schema module into the browser reducer bundle).
+ *
+ * Note: `kind: "workflow"` (sub-workflow) is treated as credential-free here —
+ * we cannot see inside the child without the catalog. Callers that need a
+ * hard guarantee should resolve children first.
  */
 function stepNeedsAgentCli(step: SpecStep): boolean {
   if (step.kind === "worker" || step.kind === "processor") return true;

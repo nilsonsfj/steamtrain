@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  ARRIVAL_NEXT_CANDIDATES,
   TOUR_WORKFLOW_NAME,
   type WorkflowEvent,
   type WorkflowState,
   appendNarration,
   buildArrivalReport,
+  findArrivalStep,
   formatArrivalReceipt,
   initialWorkflowIndex,
+  isAgentlessWorkflow,
   isCredentialFreeWorkflow,
   narrateEvent,
   narrateFromState,
@@ -33,8 +36,11 @@ describe("first-run / Station landing", () => {
 
   it("marks the tour as credential-free", () => {
     expect(isCredentialFreeWorkflow(BUNDLED_WORKFLOWS.tour!)).toBe(true);
+    expect(isAgentlessWorkflow(BUNDLED_WORKFLOWS.tour!)).toBe(true);
     expect(isCredentialFreeWorkflow(BUNDLED_WORKFLOWS["bug-hunt"]!)).toBe(false);
+    expect(isAgentlessWorkflow(BUNDLED_WORKFLOWS["bug-hunt"]!)).toBe(false);
     expect(isCredentialFreeWorkflow(BUNDLED_WORKFLOWS["quick-triage"]!)).toBe(false);
+    expect(isAgentlessWorkflow(BUNDLED_WORKFLOWS["quick-triage"]!)).toBe(true);
   });
 });
 
@@ -184,6 +190,42 @@ describe("arrival report", () => {
     expect(formatArrivalReceipt(report!.receipt)).toContain("$0");
     expect(report!.destinations).toHaveLength(3);
     expect(report!.destinations[0]?.id).toBe("again");
+    expect(ARRIVAL_NEXT_CANDIDATES[0]).toBe("multi-plan");
+  });
+
+  it("prefers the consolidator when picking the arrival hero step", () => {
+    const state = workflowStateFromSpec(BUNDLED_WORKFLOWS.tour!);
+    const steps = state.phases.flatMap((p) =>
+      p.steps.map((s) =>
+        s.stepId === "conductor"
+          ? {
+              ...s,
+              status: "done" as const,
+              text: "report",
+              result: {
+                stepId: "conductor",
+                ok: true,
+                output: "report",
+                durationMs: 1,
+              },
+            }
+          : s.stepId === "car-parallel"
+            ? {
+                ...s,
+                status: "done" as const,
+                text: "parallel",
+                result: {
+                  stepId: "car-parallel",
+                  ok: true,
+                  output: "parallel",
+                  durationMs: 1,
+                },
+              }
+            : s,
+      ),
+    );
+    const hero = findArrivalStep(steps);
+    expect(hero?.stepId).toBe("conductor");
   });
 
   it("reconstructs narration from folded state", () => {

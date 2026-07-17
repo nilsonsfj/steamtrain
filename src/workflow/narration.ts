@@ -44,6 +44,8 @@ export function narrateEvent(ev: WorkflowEvent): NarrationLine | null {
     case "step_done":
       return line(ev, stepDoneCopy(ev), { phaseId: ev.phaseId, stepId: ev.stepId });
     case "phase_done":
+      // phase_done carries only phaseId (no title) — keep the id, which matches
+      // the station labels users already saw on phase_start.
       return line(ev, ev.ok ? `Left ${ev.phaseId}.` : `Held at ${ev.phaseId}.`, {
         phaseId: ev.phaseId,
       });
