@@ -8,12 +8,13 @@ import type {
   HumanInputProvider,
   HumanInputResponse,
   LiveRunPublisher,
+  NarrationLine,
   StepEditPatch,
   StepResult,
   WorkflowRunControl,
   WorkflowSpec,
 } from "../workflow";
-import { matchApprovalKey, matchPendingInput } from "../workflow";
+import { appendNarration, matchApprovalKey, matchPendingInput } from "../workflow";
 import {
   RunRecordBuilder,
   WORKFLOW_CACHE_DIR,
@@ -80,6 +81,10 @@ export function useWorkflowRunner({
   const [wfNotice, setWfNotice] = useState<string | null>(null);
   const [wfShowStepDetail, setWfShowStepDetail] = useState(true);
   const [wfShowPlanResult, setWfShowPlanResult] = useState(true);
+  /** Live conductor narration — pure projection of WorkflowEvents. */
+  const [narration, setNarration] = useState<NarrationLine[]>([]);
+  /** After arrival, prefer the receipt surface until the user inspects cars. */
+  const [showArrival, setShowArrival] = useState(true);
   // Selection auto-follow: while a run streams, keep the selected step (and
   // its detail pane) on the live action. Any manual ↑/↓ hands control to the
   // user; a new launch/attach re-engages following.
@@ -130,7 +135,15 @@ export function useWorkflowRunner({
     liveFlatSteps.length > 0
       ? liveFlatSteps[Math.min(stepIndex, liveFlatSteps.length - 1)]
       : undefined;
-  const wfElapsedMs = wf.startedAt ? Math.max(0, (wf.done ? Date.now() : wfNow) - wf.startedAt) : 0;
+  // Freeze wall-clock at completion so the Arrival receipt doesn't keep ticking.
+  const endedAtRef = useRef<number | null>(null);
+  if (wf.done && wf.startedAt && endedAtRef.current === null) {
+    endedAtRef.current = Date.now();
+  }
+  if (!wf.started) endedAtRef.current = null;
+  const wfElapsedMs = wf.startedAt
+    ? Math.max(0, (wf.done ? (endedAtRef.current ?? Date.now()) : wfNow) - wf.startedAt)
+    : 0;
 
   // Elapsed timer for running workflows.
   useEffect(() => {
@@ -378,6 +391,7 @@ export function useWorkflowRunner({
             }
             if (!mountedRef.current) return;
             wfDispatch({ type: "event", event });
+            setNarration((prev) => appendNarration(prev, event));
             if (event.kind === "step_done") {
               await persistWorkflowStepDone(
                 store,
@@ -447,6 +461,8 @@ export function useWorkflowRunner({
       const seedSpec = resolveWorkflowSpec(name);
       if (seedSpec) wfDispatch({ type: "seed", spec: seedSpec });
       else wfDispatch({ type: "reset" });
+      setNarration([]);
+      setShowArrival(true);
       setStepIndex(0);
       setWfFollowSelection(true);
       setWfPreview(null);
@@ -474,6 +490,8 @@ export function useWorkflowRunner({
       setRunning(true);
       setWfLaunching(true);
       wfDispatch({ type: "reset" });
+      setNarration([]);
+      setShowArrival(true);
       setStepIndex(0);
       setWfFollowSelection(true);
       setWfStepDetails(null);
@@ -505,6 +523,7 @@ export function useWorkflowRunner({
           for await (const event of liveStore.tailEvents(runId, { signal: ac.signal })) {
             if (!mountedRef.current) return;
             wfDispatch({ type: "event", event });
+            setNarration((prev) => appendNarration(prev, event));
           }
           if (!mountedRef.current) return;
           if (ac.signal.aborted) {
@@ -673,11 +692,26 @@ export function useWorkflowRunner({
     return "edit requested — no response from the owning process yet";
   }, []);
 
+  const resetRunner = useCallback(() => {
+    wfDispatch({ type: "reset" });
+    setNarration([]);
+    setShowArrival(true);
+    setStepIndex(0);
+    setWfFollowSelection(true);
+    setWfLaunching(false);
+    setWfNotice(null);
+    setWfStepDetails(null);
+    activeWorkflowRef.current = undefined;
+    activeWorkflowInputRef.current = undefined;
+    workflowCacheRef.current = new Map();
+  }, []);
+
   return {
     running,
     setRunning,
     wf,
     wfDispatch,
+    resetRunner,
     wfLaunching,
     setWfLaunching,
     wfCanResume,
@@ -691,6 +725,9 @@ export function useWorkflowRunner({
     setWfShowStepDetail,
     wfShowPlanResult,
     setWfShowPlanResult,
+    narration,
+    showArrival,
+    setShowArrival,
     wfFollowSelection,
     setWfFollowSelection,
     wfOutputScroll,

@@ -16,6 +16,11 @@ interface StatusBarProps {
   runCostUsd?: number;
   /** Live total tokens for the active run. */
   runTokens?: number;
+  /**
+   * Soft health mode for credential-free workflows (e.g. tour): hide the red
+   * agent/API chip wall and show a calm "ready to ride" pill instead.
+   */
+  softHealth?: boolean;
 }
 
 /** Cells between adjacent chips on a line. */
@@ -72,6 +77,7 @@ export function StatusBar({
   running,
   runCostUsd,
   runTokens,
+  softHealth = false,
 }: StatusBarProps) {
   const { spinnerFrame, elapsedSeconds } = useWorkIndicator(running);
   const { columns } = useTerminalSize();
@@ -108,6 +114,21 @@ export function StatusBar({
             {PREFIX}
           </Text>
           <Text color="gray">running preflight…</Text>
+        </Box>
+        {rightGroup}
+      </Box>
+    );
+  }
+
+  if (softHealth) {
+    return (
+      <Box borderStyle="round" borderColor="gray" paddingX={1} justifyContent="space-between">
+        <Box>
+          <Text bold color="cyan">
+            {PREFIX}
+          </Text>
+          <Text color="green">● ready to ride</Text>
+          <Text color="gray"> · no agents required</Text>
         </Box>
         {rightGroup}
       </Box>

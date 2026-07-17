@@ -46,15 +46,19 @@ import {
   type AuthoringHost,
   type LoadedWorkflowCatalog,
   type PlanResult,
+  TOUR_WORKFLOW_NAME,
   WorkflowAuthor,
   type WorkflowSourceKind,
   type WorkflowStepOverrides,
   addTokensInto,
   emptyTokens,
   isAgentBackedStep,
+  isCredentialFreeWorkflow,
   isTerminalLiveRunStatus,
   planWorkflow,
+  shouldOfferStationLanding,
   totalTokens,
+  tourWorkflowIndex,
   workflowCacheKey,
   workflowStepKind,
 } from "../workflow";
@@ -520,6 +524,47 @@ export function App({
     setWfStepOverrides,
     resolveWorkflowSpec,
   });
+
+  // Station landing: on a true first open (no run history), land on the tour
+  // and open its preview so the primary CTA is one keystroke away.
+  const [stationLanding, setStationLanding] = useState(false);
+  const stationBootstrapped = useRef(false);
+  useEffect(() => {
+    if (stationBootstrapped.current) return;
+    if (picker.workflowEntries.length === 0) return;
+    stationBootstrapped.current = true;
+    let cancelled = false;
+    void (async () => {
+      const history = await runner.historyStoreRef.current.list(1).catch(() => []);
+      if (cancelled) return;
+      if (!shouldOfferStationLanding({ hasRunHistory: history.length > 0 })) return;
+      const idx = tourWorkflowIndex(picker.workflowEntries);
+      if (idx < 0) return;
+      setStationLanding(true);
+      picker.setWorkflowIndex(idx);
+      picker.setWfPreview({ name: TOUR_WORKFLOW_NAME, input: "all aboard" });
+      runner.setStepIndex(0);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [picker.workflowEntries]);
+
+  // Drop Station chrome once the user leaves the tour preview / picker.
+  useEffect(() => {
+    if (!stationLanding) return;
+    const onTour =
+      picker.wfPreview?.name === TOUR_WORKFLOW_NAME ||
+      (!picker.wfPreview &&
+        picker.workflowEntries[picker.workflowIndex]?.name === TOUR_WORKFLOW_NAME);
+    if (!onTour || runner.wf.started) setStationLanding(false);
+  }, [
+    stationLanding,
+    picker.wfPreview,
+    picker.workflowIndex,
+    picker.workflowEntries,
+    runner.wf.started,
+  ]);
 
   const previewSelectedStep =
     picker.preview.flatSteps.length > 0
@@ -1392,6 +1437,7 @@ export function App({
       prompt.setSuggestionIndex(0);
       prompt.bumpCursorToEnd();
     },
+    clearStationLanding: () => setStationLanding(false),
   });
 
   // ── Render ───────────────────────────────────────────────────────────
@@ -1429,6 +1475,10 @@ export function App({
     ? (picker.workflowEntries.find((entry) => entry.name === activeWorkflowName)?.source ??
       orchestrator.workflowSource(activeWorkflowName))
     : undefined;
+  const activeWorkflowSpec = activeWorkflowName
+    ? resolveWorkflowSpec(activeWorkflowName)
+    : undefined;
+  const softHealth = Boolean(activeWorkflowSpec && isCredentialFreeWorkflow(activeWorkflowSpec));
 
   const attachedRun = runner.attachedRunIdRef.current !== null;
 
@@ -1442,6 +1492,7 @@ export function App({
         running={runner.running}
         runCostUsd={runCostUsd}
         runTokens={runTokens}
+        softHealth={softHealth}
       />
       {agentManagerOpen ? (
         <AgentManager
@@ -1560,6 +1611,9 @@ export function App({
             selectedIndex={runner.stepIndex}
             elapsedMs={runner.wfElapsedMs}
             now={runner.wfNow}
+            narration={runner.narration}
+            showArrival={runner.showArrival}
+            credentialFree={softHealth}
           />
         ) : picker.wfPreview && !picker.preview.spec ? (
           <Box justifyContent="center" alignItems="center" height={streamHeight}>
@@ -1585,6 +1639,7 @@ export function App({
             workflows={picker.workflowEntries}
             selectedIndex={picker.workflowIndex}
             height={streamHeight}
+            stationLanding={stationLanding}
             draftLabel={
               picker.draftResolution.target
                 ? `${formatDraftTarget(picker.draftResolution.target, config)}${

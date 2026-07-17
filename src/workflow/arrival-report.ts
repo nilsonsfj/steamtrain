@@ -1,0 +1,203 @@
+import type { StepState, WorkflowState } from "./reducer";
+import { flattenSteps } from "./reducer";
+
+/** Minimal result fields needed for the receipt (avoids importing types.ts). */
+interface ArrivalStepResult {
+  stepId: string;
+  ok: boolean;
+  skipped?: boolean;
+  output?: string;
+  durationMs?: number;
+  costUsd?: number;
+  tokens?: {
+    input?: number;
+    output?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+    reasoning?: number;
+  };
+  childResults?: ArrivalStepResult[];
+}
+
+export interface ArrivalReceipt {
+  ok: boolean;
+  durationMs: number;
+  okCount: number;
+  failCount: number;
+  skipCount: number;
+  costUsd: number;
+  tokens: number;
+  /** True when the run spent $0 and used no tokens (tour / command-only). */
+  agentless: boolean;
+}
+
+export interface ArrivalDestination {
+  id: string;
+  label: string;
+  /** Workflow to select, when this destination launches another ride. */
+  workflow?: string;
+  /** Key binding hint for the TUI. */
+  key?: string;
+}
+
+export interface ArrivalReport {
+  /** Consolidator (or last meaningful step) output — the artifact. */
+  hero: string;
+  /** Step that produced the hero, when known. */
+  heroStepId?: string;
+  receipt: ArrivalReceipt;
+  destinations: ArrivalDestination[];
+}
+
+const DEFAULT_NEXT_CANDIDATES = ["multi-plan", "quick-triage", "bug-hunt", "target-sweep"];
+
+/** Preference order for the Arrival "Try …" destination. */
+export const ARRIVAL_NEXT_CANDIDATES = DEFAULT_NEXT_CANDIDATES;
+
+/**
+ * Build the Arrival Report from a finished (or finishing) workflow state.
+ * Returns null when the run has not completed.
+ *
+ * Kept free of `cost.ts` / `history.ts` imports so the browser reducer bundle
+ * does not pull the analytics graph.
+ */
+export function buildArrivalReport(
+  state: WorkflowState,
+  opts: {
+    elapsedMs?: number;
+    nextWorkflow?: string;
+    /** Candidate workflows for the "Try …" destination, in preference order. */
+    nextCandidates?: string[];
+    /** When set, only advertise a next workflow that is present in this set. */
+    availableWorkflows?: ReadonlySet<string>;
+    /** When true, advertise the $0 agentless receipt even if cost fields are absent. */
+    credentialFree?: boolean;
+  } = {},
+): ArrivalReport | null {
+  if (!state.done) return null;
+
+  const flat = flattenSteps(state);
+  const leaves = leafResults(state);
+  let okCount = 0;
+  let failCount = 0;
+  let skipCount = 0;
+  let costUsd = 0;
+  let tokens = 0;
+  let durationMs = 0;
+  for (const result of leaves) {
+    if (result.skipped) skipCount += 1;
+    else if (result.ok) okCount += 1;
+    else failCount += 1;
+    costUsd += result.costUsd ?? 0;
+    tokens += tokenTotal(result.tokens);
+    durationMs += result.durationMs ?? 0;
+  }
+
+  const heroStep = findArrivalStep(flat.map((f) => f.step));
+  const hero = (heroStep?.result?.output ?? heroStep?.text ?? "").trim() || fallbackHero(state);
+
+  // Prefer an explicit credentialFree flag (tour). The $0/0-token heuristic is
+  // a best-effort fallback — a cancelled agent run that never billed can look
+  // the same, which is rare on the Arrival surface.
+  const agentless =
+    opts.credentialFree === true || (costUsd === 0 && tokens === 0 && failCount === 0);
+
+  const nextCandidates = opts.nextCandidates ?? DEFAULT_NEXT_CANDIDATES;
+  const current = state.name;
+  const next =
+    opts.nextWorkflow ??
+    nextCandidates.find(
+      (name) => name !== current && (!opts.availableWorkflows || opts.availableWorkflows.has(name)),
+    );
+
+  const destinations: ArrivalDestination[] = [{ id: "again", label: "Run again", key: "r" }];
+  if (next) {
+    destinations.push({ id: "next", label: `Try ${next}`, workflow: next, key: "n" });
+  }
+  destinations.push({ id: "history", label: "View history", key: "h" });
+
+  return {
+    hero,
+    heroStepId: heroStep?.stepId,
+    receipt: {
+      ok: Boolean(state.ok),
+      durationMs: opts.elapsedMs && opts.elapsedMs > 0 ? opts.elapsedMs : durationMs,
+      okCount,
+      failCount,
+      skipCount,
+      costUsd,
+      tokens,
+      agentless,
+    },
+    destinations,
+  };
+}
+
+/** Prefer the latest successful consolidator; else the last successful leaf with output. */
+export function findArrivalStep(steps: StepState[]): StepState | undefined {
+  const consolidators = steps.filter(
+    (s) => s.blockKind === "consolidator" && s.status === "done" && s.result?.ok !== false,
+  );
+  if (consolidators.length > 0) return consolidators[consolidators.length - 1];
+
+  const withOutput = [...steps]
+    .reverse()
+    .find(
+      (s) =>
+        (s.status === "done" || s.status === "error") &&
+        (s.result?.output ?? s.text).trim().length > 0 &&
+        !s.result?.skipped,
+    );
+  return withOutput;
+}
+
+/** One-line receipt for compact UI chrome. */
+export function formatArrivalReceipt(receipt: ArrivalReceipt): string {
+  const parts: string[] = [];
+  parts.push(`${(receipt.durationMs / 1000).toFixed(1)}s`);
+  parts.push(`${receipt.okCount} ok`);
+  if (receipt.failCount) parts.push(`${receipt.failCount} failed`);
+  if (receipt.skipCount) parts.push(`${receipt.skipCount} skipped`);
+  if (receipt.agentless) parts.push("$0 · agentless");
+  else {
+    if (receipt.costUsd > 0) parts.push(`$${receipt.costUsd.toFixed(4)}`);
+    if (receipt.tokens > 0) parts.push(`${compactTokens(receipt.tokens)} tok`);
+  }
+  return parts.join(" · ");
+}
+
+function leafResults(state: WorkflowState): ArrivalStepResult[] {
+  const fromResults = (state.results ?? []).filter((r) => !r.childResults?.length);
+  if (fromResults.length > 0) return fromResults;
+  const out: ArrivalStepResult[] = [];
+  for (const phase of state.phases) {
+    for (const step of phase.steps) {
+      if (step.result) out.push(step.result);
+    }
+  }
+  return out.filter((r) => !r.childResults?.length);
+}
+
+function fallbackHero(state: WorkflowState): string {
+  if (state.ok) {
+    return state.name
+      ? `Train '${state.name}' arrived, but no consolidator report was produced — press i to inspect the cars.`
+      : "Train arrived, but no consolidator report was produced — press i to inspect the cars.";
+  }
+  return state.name
+    ? `Train '${state.name}' stopped short — press i to inspect the cars for the stall.`
+    : "Train stopped short — press i to inspect the cars for the stall.";
+}
+
+function tokenTotal(t: ArrivalStepResult["tokens"] | undefined): number {
+  if (!t) return 0;
+  return (
+    (t.input ?? 0) + (t.output ?? 0) + (t.cacheRead ?? 0) + (t.cacheWrite ?? 0) + (t.reasoning ?? 0)
+  );
+}
+
+function compactTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}

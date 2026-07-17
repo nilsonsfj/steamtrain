@@ -309,6 +309,124 @@ textarea#input:focus {
   text-align: center;
   margin-top: 70px;
 }
+.station-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.station-hero {
+  max-width: 1100px;
+  margin: 0 auto 22px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(52, 211, 196, 0.08), transparent 55%), var(--panel);
+}
+.station-premise {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text);
+  margin-bottom: 14px;
+}
+.station-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.wf.station {
+  border-color: rgba(52, 211, 196, 0.45);
+  background: rgba(52, 211, 196, 0.06);
+}
+.badge.start-here {
+  color: #0b1f1c;
+  background: var(--accent);
+  border-color: var(--accent);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+.narration {
+  max-width: 1100px;
+  margin: 0 auto 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.narration-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+}
+.narration-line {
+  font-size: 13px;
+  color: var(--text);
+  padding: 3px 0;
+}
+.narration-line.clickable {
+  cursor: pointer;
+}
+.narration-line.clickable:hover {
+  color: var(--accent);
+}
+.narration-verb {
+  color: var(--accent);
+  margin-right: 4px;
+}
+.arrival {
+  max-width: 1100px;
+  margin: 0 auto 18px;
+  padding: 20px 22px;
+  border: 1px solid rgba(63, 185, 80, 0.35);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(63, 185, 80, 0.08), transparent 40%), var(--panel);
+}
+.arrival-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.arrival-step {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 14px;
+}
+.arrival-receipt {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 14px;
+}
+.arrival-hero {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: #0a0d12;
+  border: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  max-height: 420px;
+  overflow: auto;
+}
+.arrival-destinations {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.arrival-inspect {
+  margin-top: 4px;
+}
 .phase {
   position: relative;
   margin: 0 auto 8px;

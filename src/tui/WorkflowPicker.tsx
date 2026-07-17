@@ -1,6 +1,6 @@
 import { Box, Text } from "ink";
 import type { WorkflowCatalogEntry } from "../workflow";
-import { autonomyBadge, workflowAutonomy } from "../workflow";
+import { TOUR_WORKFLOW_NAME, autonomyBadge, workflowAutonomy } from "../workflow";
 import { AUTONOMY_COLOR } from "./theme";
 import { WORKFLOW_SOURCE_COLOR } from "./theme";
 import { selectVisibleWindow } from "./workflow-list-window";
@@ -12,6 +12,8 @@ interface WorkflowPickerProps {
   height: number;
   /** Effective drafting agent · model for /create-workflow (right-aligned in the header). */
   draftLabel?: string;
+  /** Station landing: first-open hint that the tour is the door. */
+  stationLanding?: boolean;
 }
 
 /**
@@ -24,10 +26,11 @@ export function WorkflowPicker({
   selectedIndex,
   height,
   draftLabel,
+  stationLanding = false,
 }: WorkflowPickerProps) {
   // The synthetic "create" row sits one past the last workflow.
   const createRowActive = selectedIndex === workflows.length;
-  const listBudget = Math.max(1, height - 3);
+  const listBudget = Math.max(1, height - (stationLanding ? 5 : 3));
   const window = selectVisibleWindow(workflows, selectedIndex, listBudget);
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} height={height}>
@@ -44,6 +47,16 @@ export function WorkflowPicker({
         </Box>
         <Text color="gray">↑/↓ select · Ctrl+N new · Ctrl+R run</Text>
       </Box>
+      {stationLanding ? (
+        <Box flexDirection="column">
+          <Text color="white">
+            Orchestrate coding agents like a train — parallel work, one receipt.
+          </Text>
+          <Text color="green">
+            Start here: select <Text bold>tour</Text> · Enter preview · Ctrl+R ride ($0)
+          </Text>
+        </Box>
+      ) : null}
       <Box flexDirection="column" flexGrow={1}>
         {workflows.length === 0 ? (
           <Text color="gray">No workflows yet — create your first one:</Text>
@@ -58,6 +71,7 @@ export function WorkflowPicker({
             {window.visible.map(({ name, spec, source }, offset) => {
               const i = window.start + offset;
               const active = i === selectedIndex;
+              const isTour = name === TOUR_WORKFLOW_NAME;
               const blocks = blockSummary(spec);
               const phases = spec.phases.length;
               const steps = spec.phases.reduce((n, p) => n + p.steps.length, 0);
@@ -67,23 +81,41 @@ export function WorkflowPicker({
                 spec,
                 (child) => workflows.find((entry) => entry.name === child)?.spec,
               );
+              const meta =
+                isTour && stationLanding
+                  ? "zero-cost guided ride · no agents"
+                  : `${phases} phase${phases === 1 ? "" : "s"} · ${steps} step${
+                      steps === 1 ? "" : "s"
+                    }`;
               return (
                 <Box key={name} flexDirection="column" marginTop={offset === 0 ? 0 : 1}>
                   <Box>
                     <Text color={active ? "cyan" : "gray"}>{active ? "▶ " : "  "}</Text>
-                    <Text color={active ? "cyan" : "white"} bold={active}>
+                    <Text
+                      color={active ? "cyan" : isTour ? "green" : "white"}
+                      bold={active || isTour}
+                    >
                       {name}
                     </Text>
-                    <Text color={WORKFLOW_SOURCE_COLOR[source]}> {source}</Text>
-                    <Text color={AUTONOMY_COLOR[autonomy]}> {autonomyBadge(autonomy)}</Text>
+                    {isTour && stationLanding ? (
+                      <Text color="green"> ← start here</Text>
+                    ) : (
+                      <>
+                        <Text color={WORKFLOW_SOURCE_COLOR[source]}> {source}</Text>
+                        <Text color={AUTONOMY_COLOR[autonomy]}> {autonomyBadge(autonomy)}</Text>
+                      </>
+                    )}
                     <Text color="gray">
                       {"  "}
-                      {phases} phase{phases === 1 ? "" : "s"} · {steps} step
-                      {steps === 1 ? "" : "s"}
+                      {meta}
                     </Text>
                   </Box>
                   <Box paddingLeft={2}>
-                    <Text color="magenta">{blocks}</Text>
+                    <Text color="magenta" wrap="truncate-end">
+                      {isTour && stationLanding
+                        ? "distributor · command cars · gate · arrival"
+                        : blocks}
+                    </Text>
                   </Box>
                   {spec.description ? (
                     <Box paddingLeft={2}>

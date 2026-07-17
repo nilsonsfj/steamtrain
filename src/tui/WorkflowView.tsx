@@ -4,14 +4,17 @@ import { useMemo } from "react";
 import { truncate } from "../agents/util";
 import {
   type ModelUsage,
+  type NarrationLine,
   addTokensInto,
   aggregateLeavesByModel,
+  buildArrivalReport,
   emptyTokens,
   formatElapsed,
   formatTokens,
   formatUsd,
   totalTokens,
 } from "../workflow";
+import { ArrivalReportView } from "./ArrivalReport";
 import { wrapOutputLines } from "./output-window";
 import {
   type RunProgress,
@@ -47,6 +50,12 @@ interface WorkflowViewProps {
    * finished record, where a ticking elapsed would be meaningless.
    */
   now?: number;
+  /** Live conductor narration lines (newest last). */
+  narration?: NarrationLine[];
+  /** Prefer the Arrival Report surface when the run is done. */
+  showArrival?: boolean;
+  /** True when this run needed no agent CLI and no LLM API key. */
+  credentialFree?: boolean;
 }
 
 type WorkflowRow =
@@ -86,9 +95,17 @@ export function WorkflowView({
   selectedIndex,
   elapsedMs,
   now = 0,
+  narration = [],
+  showArrival = true,
+  credentialFree = false,
 }: WorkflowViewProps) {
   const innerWidth = Math.max(20, width - 4);
   const flat = useMemo(() => flattenSteps(state), [state]);
+  const arrival = useMemo(
+    () => (state.done ? buildArrivalReport(state, { elapsedMs, credentialFree }) : null),
+    [state, elapsedMs, credentialFree],
+  );
+  const preferArrival = Boolean(arrival && showArrival);
   const clampedIndex = Math.min(selectedIndex, Math.max(0, flat.length - 1));
   const selected = flat[clampedIndex];
   const rows = useMemo<WorkflowRow[]>(() => {
@@ -141,10 +158,12 @@ export function WorkflowView({
     return Math.min(w, 12);
   }, [flat]);
 
-  // ── Fixed-height accounting ──────────────────────────────────────────
+  // Fixed-height accounting ──────────────────────────────────────────
   const showPaused = !state.done && Boolean(state.paused);
   const showBudget = Boolean(state.budget);
   const roomy = height >= 24;
+  let narrationCount =
+    !state.done && narration.length > 0 && roomy ? Math.min(3, narration.length) : 0;
   const cardWidth = Math.max(16, innerWidth - 4);
   const approval = state.pendingApprovals?.[0];
   const pendingInput = !approval ? state.pendingInputs?.[0] : undefined;
@@ -184,7 +203,8 @@ export function WorkflowView({
   const plan = () =>
     planViewLayout({
       height,
-      fixedLines: 2 + (showModels ? 1 : 0) + noticeLines() + (showCompactAttention ? 1 : 0),
+      fixedLines:
+        2 + narrationCount + (showModels ? 1 : 0) + noticeLines() + (showCompactAttention ? 1 : 0),
       minimumListLines: showTree ? 1 : 0,
       cardLines: showCard ? (approvalCard?.lineCount ?? inputCard?.lineCount ?? 0) : 0,
       detailFixedLines: showDetail ? 1 + detailContext.length : 0,
@@ -208,6 +228,10 @@ export function WorkflowView({
     showCompactAttention = true;
     layout = plan();
   }
+  if (layout.cramped && narrationCount > 0) {
+    narrationCount = 0;
+    layout = plan();
+  }
   if (layout.cramped && showTree) {
     showTree = false;
     layout = plan();
@@ -216,6 +240,12 @@ export function WorkflowView({
   const foundIndex = rows.findIndex((row) => row.kind === "step" && row.flatIndex === clampedIndex);
   const selectedRowIndex = foundIndex >= 0 ? foundIndex : 0;
   const rowWindow = selectVisibleWindow(rows, selectedRowIndex, layout.listBudget);
+
+  if (preferArrival && arrival) {
+    return <ArrivalReportView report={arrival} width={width} height={height} />;
+  }
+
+  const narrationVisible = narrationCount > 0 ? narration.slice(-narrationCount) : [];
 
   return (
     <Box
@@ -251,6 +281,11 @@ export function WorkflowView({
         </Text>
       </Box>
       <ProgressLine progress={progress} cost={cost} tokens={tokens} width={innerWidth} />
+      {narrationVisible.map((line) => (
+        <Text key={line.id} color="gray" wrap="truncate-end">
+          <Text color="cyan">▸</Text> {line.text}
+        </Text>
+      ))}
       {showModels ? (
         <Text color="gray" dimColor wrap="truncate-end">
           {byModel

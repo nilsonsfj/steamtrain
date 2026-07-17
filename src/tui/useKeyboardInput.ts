@@ -1,6 +1,7 @@
 import { type Key, useApp, useInput } from "ink";
 import { useCallback, useRef } from "react";
 import { isSlashCommandInput } from "../commands";
+import { ARRIVAL_NEXT_CANDIDATES } from "../workflow";
 import type { Mode } from "./modes";
 import { nextMode } from "./modes";
 import { shouldPromptHistoryCaptureDown, shouldPromptHistoryCaptureUp } from "./prompt-history";
@@ -42,6 +43,8 @@ export interface UseKeyboardInputParams {
   openAnswerInput: () => void;
   focusCreateWorkflowPrompt: (seed: string) => void;
   switchMode: (next: React.SetStateAction<Mode>) => void;
+  /** Drop the Station first-run chrome after the user leaves the platform. */
+  clearStationLanding?: () => void;
 }
 
 /**
@@ -247,14 +250,7 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
               return;
             }
             if (runner.wf.started || runner.wfLaunching) {
-              runner.wfDispatch({ type: "reset" });
-              runner.setStepIndex(0);
-              runner.setWfFollowSelection(true);
-              runner.setWfLaunching(false);
-              runner.activeWorkflowRef.current = undefined;
-              runner.activeWorkflowInputRef.current = undefined;
-              runner.workflowCacheRef.current = new Map();
-              runner.setWfNotice(null);
+              runner.resetRunner();
             }
           }
           return;
@@ -332,6 +328,56 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
           }
           if (input === "e" && runner.wf.paused) {
             cur.openRunStepEditor();
+            return;
+          }
+        }
+        // Arrival Report: r = run again, n = try next workflow, h = history,
+        // i = inspect the car tree. Only while the receipt surface is up.
+        if (
+          cur.mode === "workflow" &&
+          !runner.running &&
+          runner.showWorkflowView &&
+          runner.wf.done &&
+          runner.showArrival &&
+          !menuOpen &&
+          !prompt.promptEditing &&
+          !key.ctrl &&
+          !key.meta
+        ) {
+          if (input === "i") {
+            runner.setShowArrival(false);
+            return;
+          }
+          if (input === "h") {
+            historyHook.openHistory();
+            return;
+          }
+          if (input === "r") {
+            const name =
+              runner.activeWorkflowRef.current ??
+              picker.wfPreview?.name ??
+              picker.workflowEntries[picker.workflowIndex]?.name;
+            const prior = runner.activeWorkflowInputRef.current ?? "";
+            if (name) {
+              cur.clearStationLanding?.();
+              runner.launchWorkflow(name, prior || "all aboard", picker.setWfPreview, {
+                fresh: true,
+              });
+            }
+            return;
+          }
+          if (input === "n") {
+            const next = ARRIVAL_NEXT_CANDIDATES.map((name) =>
+              picker.workflowEntries.find((e) => e.name === name),
+            ).find(Boolean);
+            if (!next) {
+              runner.setWfNotice("no next workflow available in the catalog");
+              return;
+            }
+            runner.resetRunner();
+            cur.clearStationLanding?.();
+            picker.setWorkflowIndex(picker.workflowEntries.findIndex((e) => e.name === next.name));
+            picker.setWfPreview({ name: next.name, input: "" });
             return;
           }
         }
