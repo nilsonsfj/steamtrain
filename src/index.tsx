@@ -5,7 +5,7 @@ import { configDisplayLabel, loadConfig } from "./config";
 import { loadSettings } from "./settings";
 import { App } from "./tui/App";
 import { STEAMTRAIN_VERSION } from "./version";
-import { resolveWebAuthToken, startWebUi } from "./web";
+import { resolveWebAuthToken, resolveWebReadToken, startWebUi } from "./web";
 import { loadWorkflowCatalog } from "./workflow";
 import { loadWorkspaceConfig, workspaceScopeLabel } from "./workspace";
 
@@ -37,6 +37,8 @@ async function main(): Promise<void> {
     port,
     host,
     authToken,
+    readToken,
+    readOnly,
     noAuth,
     trustProxy,
     version,
@@ -87,9 +89,19 @@ async function main(): Promise<void> {
     if (warning) process.stderr.write(`${warning}\n`);
     if (workspaceWarning) process.stderr.write(`${workspaceWarning}\n`);
     if (workflowCatalog.warning) process.stderr.write(`${workflowCatalog.warning}\n`);
-    // --auth-token wins; STEAMTRAIN_AUTH_TOKEN keeps the secret out of the
-    // process list and shell history; --no-auth explicitly disables both.
+    // --auth-token / --read-token win; STEAMTRAIN_*_TOKEN keeps secrets out of
+    // the process list and shell history; --no-auth explicitly disables both.
     const envToken = process.env.STEAMTRAIN_AUTH_TOKEN?.trim() || undefined;
+    const envReadToken = process.env.STEAMTRAIN_READ_TOKEN?.trim() || undefined;
+    const resolvedAuth = resolveWebAuthToken({ authToken, envToken, noAuth });
+    const resolvedRead = resolveWebReadToken({ readToken, envToken: envReadToken, noAuth });
+    if (resolvedAuth && resolvedRead && resolvedAuth === resolvedRead) {
+      process.stderr.write(
+        "--auth-token and --read-token must be different values (including after STEAMTRAIN_AUTH_TOKEN / STEAMTRAIN_READ_TOKEN resolution)\n",
+      );
+      process.exitCode = 1;
+      return;
+    }
     const { server } = await startWebUi({
       config,
       workspaces,
@@ -98,7 +110,9 @@ async function main(): Promise<void> {
       configPath: scope.path,
       port,
       host,
-      authToken: resolveWebAuthToken({ authToken, envToken, noAuth }),
+      authToken: resolvedAuth,
+      readToken: resolvedRead,
+      readOnly,
       noAuth,
       trustProxy,
     });

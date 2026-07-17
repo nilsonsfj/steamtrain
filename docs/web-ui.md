@@ -9,8 +9,10 @@ doctor gating — just laid out as a pipeline you can watch in a browser.
 steamtrain --web-ui                 # http://127.0.0.1:4317
 steamtrain --web-ui --port 8080     # custom port
 steamtrain --web-ui --host 0.0.0.0  # bind all interfaces — auth token auto-generated
-steamtrain --web-ui --host 0.0.0.0 --auth-token s3cret   # your own token
+steamtrain --web-ui --host 0.0.0.0 --auth-token s3cret   # your own full token
+steamtrain --web-ui --host 0.0.0.0 --auth-token s3cret --read-token view-only
 STEAMTRAIN_AUTH_TOKEN=s3cret steamtrain --web-ui --host 0.0.0.0  # token via env
+steamtrain --web-ui --read-only     # localhost share: view workflows/runs, no writes
 ```
 
 The server starts listening immediately and prints its URL; agent health and
@@ -78,7 +80,8 @@ browser ──POST /api/runs──▶ run manager ──▶ Orchestrator.runWork
 | `/api/history` / `/api/history/:id` | DELETE | clear all runs, or delete one |
 | `/api/history/:id/rerun` | POST | re-run a past run → `{ runId }` |
 | `/api/history/:id/retry` | POST | retry a past run's failed steps → `{ runId, downgraded? }` |
-| `/api/auth` | POST | `{ token }` → creates a session, sets the auth cookie (when auth is enabled) |
+| `/api/auth` | POST | `{ token }` → creates a session, sets the auth cookie (when auth is enabled); returns `{ capability: "full"|"read" }` |
+| `/api/session` | GET | `{ authRequired, capability, readOnly }` — SPA chrome / capability probe |
 | `/api/logout` | POST | revokes the presented session and clears the auth cookie |
 
 The client folds the streamed `WorkflowEvent`s into a phase → step tree with the
@@ -131,17 +134,33 @@ open. Supply your own with `--auth-token <token>` or the
 shell history), or explicitly opt out with `--no-auth` on a network you fully
 trust.
 
+**Read-only / share mode.** A second credential, `--read-token` (or
+`STEAMTRAIN_READ_TOKEN`), mints a **viewer session**: every `GET` works
+for workflows, history, live attach + SSE (and `POST /api/logout` still ends
+the session), but every other state-changing route — and `GET /api/config`
+(which embeds agent `env` / `extraArgs`) — returns `403 read-only session`.
+Keep the full `--auth-token` for yourself and hand teammates the read token.
+`--read-only` forces *every* session (including ones minted from the full auth
+token, and the no-auth localhost path) into viewer capability — useful for a
+dedicated share bind. On a non-local `--read-only` bind with no tokens, the
+auto-generated credential is a read token. The full and read tokens must be
+different values (including after env resolution).
+
 With auth enabled:
 
 - `POST /api/auth` exchanges the token for a **random server-side session**
   (`HttpOnly`, `SameSite=Strict` cookie, 7-day expiry, revoked by
   `POST /api/logout` and on process restart). The cookie never encodes the
-  token itself.
+  token itself. The response includes `capability: "full" | "read"` so the
+  SPA can hide Run / authoring / harvest / approval controls.
 - Failed logins are **rate limited** per client address (10 per minute, then
   `429`).
 - State-changing requests must carry a same-origin `Origin` or `Referer`.
 - The landing page and `/static/*` assets stay public; every `/api/*` route
   returns `401` without a session.
+- A read-only session still sees **full step outputs and run history** — treat
+  the read token like access to this project's run artifacts, not a public
+  internet share.
 
 **Behind a reverse proxy.** The server speaks plain HTTP; for exposure beyond
 a trusted network put it behind a TLS-terminating proxy and pass

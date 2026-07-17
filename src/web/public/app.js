@@ -28,8 +28,35 @@
     // pauses it, scrolling back to the bottom re-engages it.
     tailScroll: {},
     // Same follow/position model for the drawer's full-output pane.
-    drawerScroll: { follow: true, top: 0 }
+    drawerScroll: { follow: true, top: 0 },
+    // Session capability from GET /api/session (or login). "read" hides every
+    // mutate control; the server also 403s those routes as a hard backstop.
+    capability: "full"
   };
+
+  function isReadOnly() { return S.capability === "read"; }
+
+  /** Hide authoring / run-control chrome when the session is read-only. */
+  function applyCapabilityChrome() {
+    var ro = isReadOnly();
+    var badge = document.getElementById("modeBadge");
+    if (badge) badge.style.display = ro ? "inline-flex" : "";
+    var hideIds = ["configBtn", "newWfBtn", "editBtn", "cloneBtn", "flushBtn", "deleteBtn", "planBtn", "runBtn"];
+    hideIds.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.style.display = ro ? "none" : "";
+    });
+    var fresh = document.getElementById("freshChk");
+    if (fresh && fresh.parentElement) fresh.parentElement.style.display = ro ? "none" : "";
+    // Run input is for launching; viewers still pick workflows from the sidebar
+    // to inspect the pipeline, so hide the whole run row in read-only.
+    if (ro) {
+      var runRow = document.getElementById("runRow");
+      if (runRow) runRow.style.display = "none";
+      var actions = document.getElementById("wfActions");
+      if (actions) actions.style.display = "none";
+    }
+  }
 
   /** Identity of one step instance across re-renders (loop iterations included). */
   function stepKey(phase, step) {
@@ -86,11 +113,33 @@
   function apiAuth(method, path, body) {
     return api(method, path, body).then(function (r) {
       if (r.status === 401) { showLoginForm(); throw new Error("auth required"); }
+      if (r.status === 403 && r.body && r.body.error === "read-only session") {
+        S.capability = "read";
+        applyCapabilityChrome();
+        setBanner("This session is read-only — viewing only.", "info");
+      }
       return r;
     });
   }
 
   // ---- workflow catalog ----------------------------------------------------
+  function loadSessionThenCatalog() {
+    api("GET", "/api/session").then(function (r) {
+      if (r.status === 401) { showLoginForm(); return; }
+      if (r.status === 200 && r.body) {
+        S.capability = r.body.capability === "read" ? "read" : "full";
+        applyCapabilityChrome();
+      }
+      loadWorkflows();
+    }).catch(function () {
+      // Fail closed: if we cannot learn the capability, assume read-only so
+      // we never flash Run / authoring chrome for a viewer session.
+      S.capability = "read";
+      applyCapabilityChrome();
+      loadWorkflows();
+    });
+  }
+
   function loadWorkflows() {
     api("GET", "/api/workflows").then(function (r) {
       if (r.status === 401) { showLoginForm(); return; }
@@ -99,7 +148,7 @@
       renderSidebar();
     });
     loadMeta();
-    loadProjectConfig();
+    if (!isReadOnly()) loadProjectConfig();
     pollDoctor(0);
     pollLiveRuns();
     if (!S.liveRunsTimer) S.liveRunsTimer = setInterval(pollLiveRuns, 5000);
@@ -182,7 +231,11 @@
         ? SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || S.spec)
         : SteamtrainReducer.initialWorkflowState;
       S.detail = null; S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
-      setBanner("Attached to " + (run.detached ? "detached " : "") + "run " + run.id.slice(0, 8) + "… — cancel stops the run itself.", "info");
+      setBanner(
+        "Attached to " + (run.detached ? "detached " : "") + "run " + run.id.slice(0, 8) + "…" +
+          (isReadOnly() ? " (read-only view)." : " — cancel stops the run itself."),
+        "info"
+      );
       openStream(run.id);
       render();
       renderLiveRuns();
@@ -209,8 +262,9 @@
     clear(main);
     var msg = h("div", { class: "empty" },
       h("p", { text: "This server requires a token to access." }),
+      h("p", { class: "ro", text: "Use the full auth token for control, or a read token to view runs only." }),
       h("div", { class: "login-form" },
-        h("input", { type: "password", id: "loginToken", class: "txt", placeholder: "Enter auth token", autocomplete: "off" }),
+        h("input", { type: "password", id: "loginToken", class: "txt", placeholder: "Enter auth or read token", autocomplete: "off" }),
         h("button", { class: "btn primary", id: "loginBtn", text: "Log in" })
       ),
       h("p", { class: "login-error", id: "loginError" })
@@ -247,6 +301,7 @@
   }
 
   function openConfigModal() {
+    if (isReadOnly()) { setBanner("This session is read-only — viewing only.", "info"); return; }
     if (!S.projectConfig) { setBanner("project config is not available", "info"); return; }
     var stepMin = Math.round((S.projectConfig.stepTimeoutSec || 900) / 60);
     var wfMin = S.projectConfig.workflowTimeoutSec
@@ -744,7 +799,7 @@
       S.source = r.body.source;
       document.getElementById("wfTitle").textContent = r.body.spec.name;
       document.getElementById("wfSub").textContent = r.body.spec.description || "";
-      document.getElementById("runRow").style.display = "flex";
+      document.getElementById("runRow").style.display = isReadOnly() ? "none" : "flex";
       renderSourceLine();
       renderParamsForm(r.body.spec);
       S.runState = SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || r.body.spec);
@@ -785,9 +840,12 @@
     line.appendChild(h("span", { class: "src", text: S.source || "unknown" }));
     var counts = S.spec ? S.spec.phases.length + " phase" + (S.spec.phases.length === 1 ? "" : "s") : "";
     if (counts) line.appendChild(h("span", { text: counts }));
-    if (S.source !== "user" && S.source !== "project") line.appendChild(h("span", { text: "\u00b7 configuring saves a user copy" }));
-    document.getElementById("wfActions").style.display = "flex";
-    document.getElementById("deleteBtn").style.display = (S.source === "user" || S.source === "project") ? "block" : "none";
+    if (!isReadOnly() && S.source !== "user" && S.source !== "project") {
+      line.appendChild(h("span", { text: "\u00b7 configuring saves a user copy" }));
+    }
+    document.getElementById("wfActions").style.display = isReadOnly() ? "none" : "flex";
+    document.getElementById("deleteBtn").style.display =
+      (!isReadOnly() && (S.source === "user" || S.source === "project")) ? "block" : "none";
   }
 
   function renderParamsForm(spec) {
@@ -1044,7 +1102,7 @@
 
     // Mid-run steering: while the run is paused, steps that have not started
     // yet can have their prompt/command rewritten before resuming.
-    if (stepEditableNow(s)) {
+    if (stepEditableNow(s) && !isReadOnly()) {
       card.appendChild(h("div", { class: "edit-actions" },
         h("button", { class: "btn small", text: "✎ Edit step", title: "Rewrite this step before it runs", onClick: function (e) { e.stopPropagation(); openStepEditModal(s); } })
       ));
@@ -1266,11 +1324,15 @@
           " \u00b7 +" + a.diff.additions + " -" + a.diff.deletions }));
     }
     if (a.pending) {
-      var buttons = h("div", { class: "approval-actions" },
-        h("button", { class: "btn approve", text: "Approve", onClick: function () { resolveApproval(s.stepId, true); } }),
-        h("button", { class: "btn reject", text: "Reject", onClick: function () { resolveApproval(s.stepId, false); } })
-      );
-      box.appendChild(buttons);
+      if (isReadOnly()) {
+        box.appendChild(h("div", { class: "approval-decision", text: "⏳ waiting for approval (read-only view)" }));
+      } else {
+        var buttons = h("div", { class: "approval-actions" },
+          h("button", { class: "btn approve", text: "Approve", onClick: function () { resolveApproval(s.stepId, true); } }),
+          h("button", { class: "btn reject", text: "Reject", onClick: function () { resolveApproval(s.stepId, false); } })
+        );
+        box.appendChild(buttons);
+      }
     } else {
       var who = a.by ? " (" + a.by + ")" : "";
       box.appendChild(h("div", { class: "approval-decision", text: (a.approved ? "\u2713 approved" : "\u2717 rejected") + who + (a.note ? " \u2014 " + a.note : "") }));
@@ -1298,6 +1360,10 @@
       } else {
         box.appendChild(h("div", { class: "human-input-decision", text: "✓ answered" + (q.by ? " by " + q.by : "") + (q.value ? ": " + truncate(q.value, 200) : "") }));
       }
+      return box;
+    }
+    if (isReadOnly()) {
+      box.appendChild(h("div", { class: "human-input-decision", text: "✎ waiting for input (read-only view)" }));
       return box;
     }
     // Stop card-level click-through so typing/clicking in the form never
@@ -1521,6 +1587,7 @@
 
   // ---- running -------------------------------------------------------------
   function startRun() {
+    if (isReadOnly()) { setBanner("This session is read-only — viewing only.", "info"); return; }
     var input = document.getElementById("input").value;
     if (!input.trim()) { setBanner("enter some input first", "info"); return; }
     recordPromptHistory(input);
@@ -1592,13 +1659,13 @@
   }
 
   function cancelRun() {
-    if (!S.runId) return;
+    if (isReadOnly() || !S.runId) return;
     apiAuth("POST", "/api/runs/" + S.runId + "/cancel");
   }
 
   /** Toggle mid-run pause/resume for the streamed run (own or attached). */
   function togglePauseRun() {
-    if (!S.runId) return;
+    if (isReadOnly() || !S.runId) return;
     var paused = Boolean(S.runState && S.runState.paused);
     var verb = paused ? "resume" : "pause";
     apiAuth("POST", "/api/runs/" + S.runId + "/" + verb)
@@ -1620,10 +1687,14 @@
   }
 
   function setRunning(running) {
-    document.getElementById("runBtn").style.display = running ? "none" : "block";
-    document.getElementById("pauseBtn").style.display = running ? "block" : "none";
-    document.getElementById("cancelBtn").style.display = running ? "block" : "none";
-    document.getElementById("input").disabled = running;
+    var ro = isReadOnly();
+    document.getElementById("runBtn").style.display = (running || ro) ? "none" : "block";
+    document.getElementById("pauseBtn").style.display = (running && !ro) ? "block" : "none";
+    document.getElementById("cancelBtn").style.display = (running && !ro) ? "block" : "none";
+    // Plan is a pre-launch dry-run; only hide it for read-only sessions (do not
+    // couple it to running — that was not the pre-existing behavior).
+    document.getElementById("planBtn").style.display = ro ? "none" : "block";
+    document.getElementById("input").disabled = running || ro;
     updatePauseButton();
   }
 
@@ -1784,6 +1855,7 @@
 
   // ---- create (LLM-drafted) -----------------------------------------------
   function openCreate() {
+    if (isReadOnly()) { setBanner("This session is read-only — viewing only.", "info"); return; }
     if (!S.agents.length) { setBanner("agent catalog still loading; try again in a moment", "info"); return; }
     var a0 = preferredAgent();
     var agentSel = selectEl(agentOptions(), a0.id, function () { onCreateAgent(); });
@@ -2128,6 +2200,7 @@
   }
 
   function doDelete() {
+    if (isReadOnly()) return;
     if (!S.selected || (S.source !== "user" && S.source !== "project")) return;
     var fileLabel = S.source === "project" ? "the project steamtrain.json" : "your user workflows file";
     if (!window.confirm("Delete workflow \"" + S.selected + "\"? This removes it from " + fileLabel + ".")) return;
@@ -2166,11 +2239,12 @@
   // ---- run history ---------------------------------------------------------
   function openHistory() {
     var holder = h("div", null, h("div", { class: "ro", text: "Loading run history\u2026" }));
-    var foot = h("div", { class: "mfoot" },
-      h("button", { class: "btn danger small", text: "Clear all", onClick: clearHistory }),
-      h("div", { class: "spacer" }),
-      h("button", { class: "btn", text: "Close", onClick: closeModal })
-    );
+    var footChildren = [h("div", { class: "spacer" }), h("button", { class: "btn", text: "Close", onClick: closeModal })];
+    if (!isReadOnly()) {
+      footChildren.unshift(h("button", { class: "btn danger small", text: "Clear all", onClick: clearHistory }));
+    }
+    var foot = h("div", { class: "mfoot" });
+    footChildren.forEach(function (c) { foot.appendChild(c); });
     openModal(modalShell("Run history", "Past workflow runs recorded on disk.", holder, foot, true));
     reopenHistoryList(holder);
   }
@@ -2246,13 +2320,15 @@
       holder.appendChild(hmt);
     }
     var canRetry = record.totals && record.totals.failed > 0;
-    var actions = h("div", { class: "run-actions", style: "display:flex;gap:8px;margin:4px 0 12px" },
-      h("button", { class: "btn primary", text: "Re-run",
-        onClick: function () { rerunHistory(record.id, record.workflow, "rerun"); } }),
-      canRetry ? h("button", { class: "btn", text: "Retry failed",
-        onClick: function () { rerunHistory(record.id, record.workflow, "retry"); } }) : null
-    );
-    holder.appendChild(actions);
+    if (!isReadOnly()) {
+      var actions = h("div", { class: "run-actions", style: "display:flex;gap:8px;margin:4px 0 12px" },
+        h("button", { class: "btn primary", text: "Re-run",
+          onClick: function () { rerunHistory(record.id, record.workflow, "rerun"); } }),
+        canRetry ? h("button", { class: "btn", text: "Retry failed",
+          onClick: function () { rerunHistory(record.id, record.workflow, "retry"); } }) : null
+      );
+      holder.appendChild(actions);
+    }
     // Worktree lifecycle: what each retained step worktree changed, plus the
     // Apply / Branch / Prune closure actions (same machinery as the CLI's
     // `workflow history apply/prune`).
@@ -2325,6 +2401,8 @@
 
       var banner = h("div", { class: "mbanner", style: "margin-top:6px" });
       if (notice) { banner.className = "mbanner show " + notice.cls; banner.textContent = notice.text; }
+      holder.appendChild(banner);
+      if (isReadOnly()) return;
       var buttons = h("div", { style: "display:flex;gap:8px;margin-top:6px;flex-wrap:wrap" });
       function harvestBtn(label, body, cls) {
         return h("button", { class: "btn" + (cls ? " " + cls : ""), text: label, onClick: function () {
@@ -2365,7 +2443,6 @@
         } }));
       }
       if (buttons.childNodes.length) holder.appendChild(buttons);
-      holder.appendChild(banner);
     }).catch(function () {});
   }
 
@@ -2522,7 +2599,7 @@
 
   var flushInFlight = false;
   function flushStaged() {
-    if (!hasAnyStaged() || flushInFlight) return;
+    if (isReadOnly() || !hasAnyStaged() || flushInFlight) return;
     flushInFlight = true;
     var flushBtn = document.getElementById("flushBtn");
     if (flushBtn) { flushBtn.disabled = true; flushBtn.textContent = "Flushing\u2026"; }
@@ -2560,6 +2637,7 @@
 
   // ---- plan (dry-run) -------------------------------------------------------
   function startPlan() {
+    if (isReadOnly()) { setBanner("This session is read-only — viewing only.", "info"); return; }
     var input = document.getElementById("input").value;
     if (!input.trim()) { setBanner("enter some input first", "info"); return; }
     recordPromptHistory(input);
@@ -2711,5 +2789,5 @@
     else if (S.detail) closeDetail();
   });
 
-  loadWorkflows();
+  loadSessionThenCatalog();
 })();

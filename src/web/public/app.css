@@ -50,6 +50,19 @@ header .config {
   color: var(--muted);
   font-size: 12px;
 }
+header .mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #c9dff7;
+  background: rgba(111, 177, 255, 0.14);
+  border: 1px solid rgba(111, 177, 255, 0.35);
+}
 header .health {
   margin-left: auto;
   display: flex;
