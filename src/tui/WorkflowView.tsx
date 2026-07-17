@@ -18,6 +18,7 @@ import {
   planViewLayout,
   progressBarSegments,
   runStatus,
+  stepWaitKind,
   summarizeRun,
 } from "./run-view-model";
 import { statusWord } from "./status-word";
@@ -65,6 +66,7 @@ const BAR_STYLE = {
   done: { char: "█", color: "green" },
   failed: { char: "█", color: "red" },
   running: { char: "▓", color: "yellow" },
+  waiting: { char: "▒", color: "yellow" },
   pending: { char: "░", color: "gray" },
 } as const;
 
@@ -150,18 +152,40 @@ export function WorkflowView({
   const inputCard = pendingInput ? buildInputCard(pendingInput, cardWidth, roomy) : undefined;
 
   const detailContext = selected ? buildDetailContext(selected.step, innerWidth) : [];
-  const desiredPreview = !selected ? 0 : height >= 28 ? 6 : height >= 22 ? 5 : height >= 16 ? 3 : 2;
+  const preferredPreview = !selected
+    ? 0
+    : height >= 28
+      ? 6
+      : height >= 22
+        ? 5
+        : height >= 16
+          ? 3
+          : 2;
+  // Reserve only rows the detail panel can actually render. Empty output still
+  // has one status/activity row; any spare capacity belongs to the tree.
+  const detailBody = selected ? (selected.step.result?.output ?? selected.step.text).trim() : "";
+  const detailContentLines = selected
+    ? Math.max(1, wrapOutputLines(detailBody, innerWidth).length)
+    : 0;
+  const desiredPreview = Math.min(preferredPreview, detailContentLines);
   // Degradation ladder for very short terminals: an overflowing frame corrupts
-  // the whole TUI, so when even the fixed sections don't fit, drop the detail
-  // panel, then the model-breakdown line, then the attention card — in that
-  // order — until the layout fits.
+  // the whole TUI. Drop the detail panel, then model breakdown, compact paired
+  // notices, and finally replace the full attention card with a one-line action
+  // hint. If all mandatory controls consume the six-row minimum, the tree is
+  // the final section to yield.
   let showModels = byModel.length > 0;
   let showDetail = Boolean(selected);
   let showCard = Boolean(approvalCard ?? inputCard);
+  let showCompactAttention = false;
+  let combineNotices = false;
+  let showTree = true;
+  const noticeLines = () =>
+    combineNotices && showPaused && showBudget ? 1 : (showPaused ? 1 : 0) + (showBudget ? 1 : 0);
   const plan = () =>
     planViewLayout({
       height,
-      fixedLines: 2 + (showModels ? 1 : 0) + (showPaused ? 1 : 0) + (showBudget ? 1 : 0),
+      fixedLines: 2 + (showModels ? 1 : 0) + noticeLines() + (showCompactAttention ? 1 : 0),
+      minimumListLines: showTree ? 1 : 0,
       cardLines: showCard ? (approvalCard?.lineCount ?? inputCard?.lineCount ?? 0) : 0,
       detailFixedLines: showDetail ? 1 + detailContext.length : 0,
       desiredPreviewLines: showDetail ? desiredPreview : 0,
@@ -175,8 +199,17 @@ export function WorkflowView({
     showModels = false;
     layout = plan();
   }
+  if (layout.cramped && showPaused && showBudget) {
+    combineNotices = true;
+    layout = plan();
+  }
   if (layout.cramped && showCard) {
     showCard = false;
+    showCompactAttention = true;
+    layout = plan();
+  }
+  if (layout.cramped && showTree) {
+    showTree = false;
     layout = plan();
   }
 
@@ -196,7 +229,15 @@ export function WorkflowView({
       <Box justifyContent="space-between">
         <Text wrap="truncate-end">
           <Text color={status.color}>
-            {state.done ? (state.ok ? "✓" : "✗") : showPaused ? "⏸" : spinner}{" "}
+            {state.done
+              ? state.ok
+                ? "✓"
+                : "✗"
+              : showPaused
+                ? "⏸"
+                : progress.waiting > 0 && progress.running === 0
+                  ? "?"
+                  : spinner}{" "}
           </Text>
           <Text color="cyan" bold>
             workflow{state.name ? ` · ${state.name}` : ""}
@@ -220,23 +261,46 @@ export function WorkflowView({
             .join("  ")}
         </Text>
       ) : null}
-      {showPaused ? (
+      {combineNotices && showPaused && state.budget ? (
         <Text color="yellow" wrap="truncate-end">
-          ⏸ paused{state.pausedBy ? ` by ${state.pausedBy}` : ""}
-          {progress.running > 0
-            ? ` — ${progress.running} in-flight step${progress.running === 1 ? "" : "s"} finishing`
-            : ""}{" "}
-          · ↑/↓ select a pending step · e edit · p resume
+          ⏸ paused · ⚠{" "}
+          {state.budget.scope === "step" ? `step '${state.budget.stepId}'` : "workflow"} budget{" "}
+          {formatUsd(state.budget.limitUsd)} reached · raise cap, then p resume
         </Text>
-      ) : null}
-      {state.budget ? (
-        <Text color="yellow" wrap="truncate-end">
-          ⚠{" "}
-          {state.budget.scope === "step" && state.budget.stepId
-            ? `step '${state.budget.stepId}'`
-            : "workflow"}{" "}
-          cost budget {formatUsd(state.budget.limitUsd)} reached (spent{" "}
-          {formatUsd(state.budget.spentUsd)}) — resume after raising the cap
+      ) : (
+        <>
+          {showPaused ? (
+            <Text color="yellow" wrap="truncate-end">
+              ⏸ paused{state.pausedBy ? ` by ${state.pausedBy}` : ""}
+              {progress.running > 0
+                ? ` — ${progress.running} in-flight step${progress.running === 1 ? "" : "s"} finishing`
+                : ""}{" "}
+              · ↑/↓ select a pending step · e edit · p resume
+            </Text>
+          ) : null}
+          {state.budget ? (
+            <Text color="yellow" wrap="truncate-end">
+              ⚠{" "}
+              {state.budget.scope === "step" && state.budget.stepId
+                ? `step '${state.budget.stepId}'`
+                : "workflow"}{" "}
+              cost budget {formatUsd(state.budget.limitUsd)} reached (spent{" "}
+              {formatUsd(state.budget.spentUsd)}) — resume after raising the cap
+            </Text>
+          ) : null}
+        </>
+      )}
+
+      {showCompactAttention ? (
+        <Text color={approvalCard ? "yellow" : "magenta"} wrap="truncate-end">
+          {approvalCard
+            ? `a approve · r reject · ⏳ ${approvalCard.title}`
+            : `a answer · ✎ ${inputCard?.title ?? "input needed"}`}
+          {(state.pendingApprovals?.length ?? 0) + (state.pendingInputs?.length ?? 0) > 1
+            ? ` · +${
+                (state.pendingApprovals?.length ?? 0) + (state.pendingInputs?.length ?? 0) - 1
+              } waiting`
+            : ""}
         </Text>
       ) : null}
 
@@ -246,49 +310,52 @@ export function WorkflowView({
         <AttentionCard card={inputCard} borderColor="magenta" />
       ) : null}
 
-      <Box flexDirection="column" flexGrow={1}>
-        {rows.length === 0 ? (
-          <Text color="gray">{spinner} starting workflow…</Text>
-        ) : (
-          <>
-            {rowWindow.hiddenBefore > 0 ? (
-              <Text color="gray" dimColor>
-                {"  "}↑ {rowWindow.hiddenBefore} earlier row
-                {rowWindow.hiddenBefore === 1 ? "" : "s"}
-              </Text>
-            ) : null}
-            {rowWindow.visible.map((row, offset) =>
-              row.kind === "phase" ? (
-                <PhaseHeader
-                  key={`phase-${row.phase.phaseId}-${row.phase.iteration ?? 1}`}
-                  phase={row.phase}
-                  maxIteration={maxIterByPhase.get(row.phase.phaseId) ?? 1}
-                  width={innerWidth}
-                  spinner={spinner}
-                />
-              ) : (
-                <StepRow
-                  key={`step-${row.phase.phaseId}-${row.phase.iteration ?? 1}-${row.step.stepId}`}
-                  step={row.step}
-                  idColWidth={idColWidth}
-                  kindColWidth={kindColWidth}
-                  selected={rowWindow.start + offset === selectedRowIndex}
-                  superseded={
-                    (row.phase.iteration ?? 1) < (maxIterByPhase.get(row.phase.phaseId) ?? 1)
-                  }
-                  now={now}
-                  spinner={spinner}
-                />
-              ),
-            )}
-            {rowWindow.hiddenAfter > 0 ? (
-              <Text color="gray" dimColor>
-                {"  "}↓ {rowWindow.hiddenAfter} later row{rowWindow.hiddenAfter === 1 ? "" : "s"}
-              </Text>
-            ) : null}
-          </>
-        )}
-      </Box>
+      {showTree ? (
+        <Box flexDirection="column" flexGrow={1}>
+          {rows.length === 0 ? (
+            <Text color="gray">{spinner} starting workflow…</Text>
+          ) : (
+            <>
+              {rowWindow.hiddenBefore > 0 ? (
+                <Text color="gray" dimColor>
+                  {"  "}↑ {rowWindow.hiddenBefore} earlier row
+                  {rowWindow.hiddenBefore === 1 ? "" : "s"}
+                </Text>
+              ) : null}
+              {rowWindow.visible.map((row, offset) =>
+                row.kind === "phase" ? (
+                  <PhaseHeader
+                    key={`phase-${row.phase.phaseId}-${row.phase.iteration ?? 1}`}
+                    phase={row.phase}
+                    maxIteration={maxIterByPhase.get(row.phase.phaseId) ?? 1}
+                    width={innerWidth}
+                    spinner={spinner}
+                  />
+                ) : (
+                  <StepRow
+                    key={`step-${row.phase.phaseId}-${row.phase.iteration ?? 1}-${row.step.stepId}`}
+                    step={row.step}
+                    idColWidth={idColWidth}
+                    kindColWidth={kindColWidth}
+                    selected={rowWindow.start + offset === selectedRowIndex}
+                    superseded={
+                      (row.phase.iteration ?? 1) < (maxIterByPhase.get(row.phase.phaseId) ?? 1)
+                    }
+                    now={now}
+                    spinner={spinner}
+                  />
+                ),
+              )}
+              {rowWindow.hiddenAfter > 0 ? (
+                <Text color="gray" dimColor>
+                  {"  "}↓ {rowWindow.hiddenAfter} later row
+                  {rowWindow.hiddenAfter === 1 ? "" : "s"}
+                </Text>
+              ) : null}
+            </>
+          )}
+        </Box>
+      ) : null}
 
       {showDetail && selected ? (
         <DetailPanel
@@ -337,6 +404,7 @@ function ProgressLine({
         {doneSteps}/{progress.total} steps
       </Text>
       {progress.running > 0 ? <Text color="yellow"> · {progress.running} running</Text> : null}
+      {progress.waiting > 0 ? <Text color="yellow"> · {progress.waiting} waiting</Text> : null}
       {progress.failed > 0 ? <Text color="red"> · {progress.failed} failed</Text> : null}
       {progress.cached > 0 ? (
         <Text color="gray" dimColor>
@@ -481,7 +549,8 @@ function PhaseHeader({
   spinner: string;
 }) {
   const done = phase.steps.filter((s) => s.status === "done" || s.status === "error").length;
-  const running = phase.steps.some((s) => s.status === "running");
+  const waiting = phase.steps.some((s) => stepWaitKind(s) !== undefined);
+  const running = phase.steps.some((s) => s.status === "running" && stepWaitKind(s) === undefined);
   const superseded = (phase.iteration ?? 1) < maxIteration;
   const color = superseded
     ? "gray"
@@ -489,10 +558,12 @@ function PhaseHeader({
       ? phase.ok
         ? "green"
         : "red"
-      : running
-        ? "cyan"
-        : "gray";
-  const glyph = phase.done ? (phase.ok ? "✓" : "✗") : running ? spinner : "·";
+      : waiting
+        ? "yellow"
+        : running
+          ? "cyan"
+          : "gray";
+  const glyph = phase.done ? (phase.ok ? "✓" : "✗") : waiting ? "?" : running ? spinner : "·";
   const iter = phase.iteration ?? 1;
   const iterBadge = maxIteration > 1 ? ` · iter ${iter}/${maxIteration}` : "";
   const supersededBadge = superseded ? " · superseded" : "";
@@ -543,8 +614,12 @@ function StepRow({
   now: number;
   spinner: string;
 }) {
-  const glyph =
-    step.status === "running" ? { symbol: spinner, color: "yellow" } : STEP_GLYPH[step.status];
+  const waitKind = stepWaitKind(step);
+  const glyph = waitKind
+    ? { symbol: "?", color: "yellow" }
+    : step.status === "running"
+      ? { symbol: spinner, color: "yellow" }
+      : STEP_GLYPH[step.status];
   const agentColor = step.agent ? (AGENT_COLOR[step.agent] ?? "white") : "gray";
   const kindLabel = BLOCK_LABEL[step.blockKind];
   // The compact `agent/model-id · effort` form (matching the web cards) — the
@@ -642,12 +717,20 @@ function DetailPanel({
   const body = (step.result?.output ?? step.text).trim();
   const wrapped = useMemo(() => wrapOutputLines(body, width), [body, width]);
   const visible = previewLines > 0 ? wrapped.slice(-previewLines) : [];
+  const waitKind = stepWaitKind(step);
+  const displayStatus =
+    waitKind === "approval"
+      ? "waiting for approval"
+      : waitKind === "input"
+        ? "waiting for input"
+        : statusWord(step.status);
   const liveElapsed =
-    step.status === "running" && step.startedAt && now > 0
+    step.status === "running" && !waitKind && step.startedAt && now > 0
       ? formatElapsed(now - step.startedAt)
       : undefined;
-  const statusColor =
-    step.status === "done"
+  const statusColor = waitKind
+    ? "yellow"
+    : step.status === "done"
       ? "green"
       : step.status === "error"
         ? "red"
@@ -657,7 +740,7 @@ function DetailPanel({
   // No glyphs here: the trailing rule fill assumes every char is one column
   // wide, and symbols like ⏱ render double-width in many terminals.
   const bits = [
-    statusWord(step.status),
+    displayStatus,
     step.cached ? "cached" : undefined,
     liveElapsed,
     step.result && !step.cached ? formatElapsed(step.result.durationMs) : undefined,
@@ -698,7 +781,7 @@ function DetailPanel({
           ))
         ) : (
           <Text color="gray" dimColor wrap="truncate-end">
-            {step.activity || statusWord(step.status)}
+            {step.activity || displayStatus}
           </Text>
         )
       ) : null}
@@ -725,6 +808,9 @@ function stepMeta(step: StepState, now: number): string {
     return bits.join(" · ");
   }
   if (step.status === "pending" && step.edited) return "✎ edited · pending";
+  const waitKind = stepWaitKind(step);
+  if (waitKind === "approval") return "waiting for approval";
+  if (waitKind === "input") return "waiting for input";
   if (step.status === "running") {
     // A live ticking clock per running step; the latest tool line rides along.
     const elapsed =

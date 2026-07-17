@@ -6,12 +6,22 @@
 
 import type { StepState, WorkflowState } from "./workflow-state";
 
+/** Why a reducer-level running step is currently blocked on the user. */
+export type StepWaitKind = "approval" | "input";
+
+export function stepWaitKind(step: StepState): StepWaitKind | undefined {
+  if (step.approval?.pending) return "approval";
+  if (step.humanInput?.pending) return "input";
+  return undefined;
+}
+
 /** Step tallies the header, progress bar, and summary lines are built from. */
 export interface RunProgress {
   total: number;
   doneOk: number;
   failed: number;
   running: number;
+  waiting: number;
   pending: number;
   cached: number;
 }
@@ -22,12 +32,14 @@ export function summarizeRun(flat: readonly { step: StepState }[]): RunProgress 
     doneOk: 0,
     failed: 0,
     running: 0,
+    waiting: 0,
     pending: 0,
     cached: 0,
   };
   for (const { step } of flat) {
     if (step.status === "done") p.doneOk += 1;
     else if (step.status === "error") p.failed += 1;
+    else if (stepWaitKind(step)) p.waiting += 1;
     else if (step.status === "running") p.running += 1;
     else p.pending += 1;
     if (step.cached) p.cached += 1;
@@ -37,12 +49,12 @@ export function summarizeRun(flat: readonly { step: StepState }[]): RunProgress 
 
 /** One colored run of cells in the progress bar. */
 export interface BarSegment {
-  kind: "done" | "failed" | "running" | "pending";
+  kind: "done" | "failed" | "running" | "waiting" | "pending";
   cells: number;
 }
 
 /**
- * Allocate exactly `width` bar cells across the four step states, proportional
+ * Allocate exactly `width` bar cells across the five display states, proportional
  * to their counts. Cumulative rounding guarantees the cells sum to `width`; a
  * non-zero category is guaranteed at least one cell (a single failure must
  * never round away) by stealing from the largest allocation. When `width` is
@@ -54,13 +66,14 @@ export function progressBarSegments(progress: RunProgress, width: number): BarSe
     { kind: "done" as const, count: progress.doneOk },
     { kind: "failed" as const, count: progress.failed },
     { kind: "running" as const, count: progress.running },
+    { kind: "waiting" as const, count: progress.waiting },
     { kind: "pending" as const, count: progress.pending },
   ];
   if (width <= 0) return [];
   if (progress.total === 0) return [{ kind: "pending", cells: width }];
   const nonEmpty = kinds.map((k, index) => ({ ...k, index })).filter((k) => k.count > 0);
   if (width < nonEmpty.length) {
-    const cells = [0, 0, 0, 0];
+    const cells = kinds.map(() => 0);
     for (const winner of [...nonEmpty].sort((a, b) => b.count - a.count).slice(0, width)) {
       cells[winner.index] = 1;
     }
@@ -108,6 +121,8 @@ export interface ViewLayoutInput {
   height: number;
   /** Single-line sections above the tree (header, progress, notices, …). */
   fixedLines: number;
+  /** Minimum phase/step-tree rows. Set to 0 only for the final compact fallback. */
+  minimumListLines?: number;
   /** Lines an attention card (approval / human input) occupies, or 0. */
   cardLines: number;
   /** Detail-panel lines that always render when a step is selected (rule + meta). */
@@ -117,7 +132,7 @@ export interface ViewLayoutInput {
 }
 
 export interface ViewLayout {
-  /** Rows available to the phase/step tree (≥ 1). */
+  /** Rows available to the phase/step tree (normally ≥ 1; 0 in the final compact fallback). */
   listBudget: number;
   /** Output-preview lines the detail panel may render. */
   previewLines: number;
@@ -131,29 +146,36 @@ const MIN_LIST_ROWS = 4;
 /**
  * Split the fixed component height between the step tree and the detail
  * preview. The preview shrinks first (down to zero) to keep the tree usable;
- * the tree never reports less than one row.
+ * the tree normally keeps one row, but callers may explicitly allow zero for
+ * a final compact fallback that preserves blocking controls instead.
  */
 export function planViewLayout(input: ViewLayoutInput): ViewLayout {
   const inner = input.height - 2; // top + bottom border
+  const minimumListLines = Math.max(0, input.minimumListLines ?? 1);
   const available = inner - input.fixedLines - input.cardLines - input.detailFixedLines;
   const preview = Math.max(0, Math.min(input.desiredPreviewLines, available - MIN_LIST_ROWS));
-  const listBudget = Math.max(1, available - preview);
+  const listBudget = Math.max(minimumListLines, available - preview);
   return {
     listBudget,
     previewLines: preview,
-    cramped: available - preview < 1,
+    cramped: available - preview < minimumListLines,
   };
 }
 
 /**
  * The step the view should keep in focus while a run streams: the first
- * running step, else the last step that has progressed past pending, else the
- * current selection. Drives selection auto-follow (until the user navigates).
+ * running step that is not waiting on the user, else the first user-blocked
+ * step, else the last step that has progressed past pending, else the current
+ * selection. Drives selection auto-follow (until the user navigates).
  */
 export function pickFollowIndex(flat: readonly { step: StepState }[], fallback: number): number {
   if (flat.length === 0) return fallback;
-  const running = flat.findIndex((f) => f.step.status === "running");
+  const running = flat.findIndex(
+    (f) => f.step.status === "running" && stepWaitKind(f.step) === undefined,
+  );
   if (running >= 0) return running;
+  const waiting = flat.findIndex((f) => stepWaitKind(f.step) !== undefined);
+  if (waiting >= 0) return waiting;
   for (let i = flat.length - 1; i >= 0; i -= 1) {
     if (flat[i]!.step.status !== "pending") return i;
   }

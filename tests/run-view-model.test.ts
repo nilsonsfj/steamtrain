@@ -22,7 +22,16 @@ function step(status: StepState["status"], cached = false): { step: StepState } 
 }
 
 function progressOf(over: Partial<RunProgress>): RunProgress {
-  return { total: 0, doneOk: 0, failed: 0, running: 0, pending: 0, cached: 0, ...over };
+  return {
+    total: 0,
+    doneOk: 0,
+    failed: 0,
+    running: 0,
+    waiting: 0,
+    pending: 0,
+    cached: 0,
+    ...over,
+  };
 }
 
 describe("summarizeRun", () => {
@@ -40,8 +49,25 @@ describe("summarizeRun", () => {
       doneOk: 2,
       failed: 1,
       running: 1,
+      waiting: 0,
       pending: 2,
       cached: 1,
+    });
+  });
+  it("tallies user-blocked steps as waiting rather than running", () => {
+    const approval = step("running");
+    approval.step.approval = { pending: true };
+    const input = step("running");
+    input.step.humanInput = { pending: true };
+
+    expect(summarizeRun([approval, input, step("running")])).toEqual({
+      total: 3,
+      doneOk: 0,
+      failed: 0,
+      running: 1,
+      waiting: 2,
+      pending: 0,
+      cached: 0,
     });
   });
 });
@@ -83,15 +109,15 @@ describe("progressBarSegments", () => {
   });
 
   it("keeps every non-empty category visible across widths and distributions", () => {
-    for (let width = 4; width <= 30; width += 1) {
+    for (let width = 5; width <= 30; width += 1) {
       for (const p of [
-        progressOf({ total: 100, doneOk: 97, failed: 1, running: 1, pending: 1 }),
-        progressOf({ total: 50, doneOk: 1, failed: 1, running: 1, pending: 47 }),
-        progressOf({ total: 8, doneOk: 2, failed: 2, running: 2, pending: 2 }),
+        progressOf({ total: 100, doneOk: 96, failed: 1, running: 1, waiting: 1, pending: 1 }),
+        progressOf({ total: 50, doneOk: 1, failed: 1, running: 1, waiting: 1, pending: 46 }),
+        progressOf({ total: 10, doneOk: 2, failed: 2, running: 2, waiting: 2, pending: 2 }),
       ]) {
         const segments = progressBarSegments(p, width);
         expect(segments.reduce((n, segment) => n + segment.cells, 0)).toBe(width);
-        for (const kind of ["done", "failed", "running", "pending"] as const) {
+        for (const kind of ["done", "failed", "running", "waiting", "pending"] as const) {
           const count =
             kind === "done"
               ? p.doneOk
@@ -99,7 +125,9 @@ describe("progressBarSegments", () => {
                 ? p.failed
                 : kind === "running"
                   ? p.running
-                  : p.pending;
+                  : kind === "waiting"
+                    ? p.waiting
+                    : p.pending;
           if (count > 0) {
             expect(segments.find((segment) => segment.kind === kind)?.cells).toBeGreaterThan(0);
           }
@@ -148,6 +176,17 @@ describe("planViewLayout", () => {
     expect(layout.listBudget).toBeGreaterThanOrEqual(1);
     expect(layout.cramped).toBe(true);
   });
+  it("allows the final compact fallback to yield the tree entirely", () => {
+    const layout = planViewLayout({
+      height: 6,
+      fixedLines: 4,
+      minimumListLines: 0,
+      cardLines: 0,
+      detailFixedLines: 0,
+      desiredPreviewLines: 0,
+    });
+    expect(layout).toEqual({ listBudget: 0, previewLines: 0, cramped: false });
+  });
 });
 
 describe("pickFollowIndex", () => {
@@ -164,6 +203,21 @@ describe("pickFollowIndex", () => {
   it("keeps the current selection when every step is pending", () => {
     const flat = [step("pending"), step("pending")];
     expect(pickFollowIndex(flat, 1)).toBe(1);
+  });
+  it("prefers active work over a user-blocked running step", () => {
+    const waiting = step("running");
+    waiting.step.approval = { pending: true };
+    expect(pickFollowIndex([waiting, step("running")], 0)).toBe(1);
+  });
+
+  it("targets a user-blocked step when no active work is running", () => {
+    const waiting = step("running");
+    waiting.step.humanInput = { pending: true };
+    expect(pickFollowIndex([step("done"), waiting, step("pending")], 0)).toBe(1);
+  });
+
+  it("returns the fallback for an empty list", () => {
+    expect(pickFollowIndex([], 5)).toBe(5);
   });
 });
 

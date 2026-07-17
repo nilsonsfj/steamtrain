@@ -193,6 +193,114 @@ describe("workflow UI helpers", () => {
     }
   });
 
+  it("keeps blocking action hints visible in compact layouts", () => {
+    const approvalState = workflowStateWithSteps(4);
+    approvalState.phases[0]!.steps[3]!.approval = { pending: true };
+    approvalState.pendingApprovals = [
+      {
+        phaseId: "phase",
+        stepId: "step-3",
+        iteration: 1,
+        message: "review the result",
+        onReject: "fail",
+      },
+    ];
+    const approval = render(
+      <WorkflowView
+        state={approvalState}
+        width={40}
+        height={6}
+        selectedIndex={3}
+        elapsedMs={500}
+        now={1_000}
+      />,
+    );
+    const approvalFrame = approval.lastFrame() ?? "";
+    expect(approvalFrame).toContain("a approve");
+    expect(approvalFrame).toContain("r reject");
+    expect(approvalFrame.split("\n").length).toBeLessThanOrEqual(6);
+
+    const inputState = workflowStateWithSteps(4);
+    inputState.phases[0]!.steps[3]!.humanInput = { pending: true };
+    inputState.pendingInputs = [
+      {
+        phaseId: "phase",
+        stepId: "step-3",
+        iteration: 1,
+        attempt: 1,
+        prompt: "which target?",
+        origin: "human-step",
+      },
+    ];
+    const input = render(
+      <WorkflowView
+        state={inputState}
+        width={40}
+        height={6}
+        selectedIndex={3}
+        elapsedMs={500}
+        now={1_000}
+      />,
+    );
+    const inputFrame = input.lastFrame() ?? "";
+    expect(inputFrame).toContain("a answer");
+    expect(inputFrame.split("\n").length).toBeLessThanOrEqual(6);
+  });
+
+  it("returns unused detail-preview rows to the workflow tree", () => {
+    const state = workflowStateWithSteps(12);
+    for (const step of state.phases[0]!.steps) {
+      step.status = "pending";
+      step.text = "";
+      step.result = undefined;
+    }
+    const { lastFrame } = render(
+      <WorkflowView state={state} width={100} height={22} selectedIndex={0} elapsedMs={500} />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("step-11");
+    expect(frame).not.toContain("later row");
+  });
+
+  it("compacts simultaneous pause and budget notices without clipping the header", () => {
+    const state = workflowStateWithSteps(4);
+    state.paused = true;
+    state.pausedBy = "human:tui";
+    state.budget = { scope: "workflow", limitUsd: 1, spentUsd: 1.25 };
+    const { lastFrame } = render(
+      <WorkflowView state={state} width={100} height={6} selectedIndex={3} elapsedMs={500} />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("workflow · big-run");
+    expect(frame).toContain("paused · ⚠ workflow budget");
+    expect(frame.split("\n").length).toBeLessThanOrEqual(6);
+  });
+
+  it("presents user-blocked steps as waiting instead of running", () => {
+    const state = workflowStateWithSteps(4);
+    const blocked = state.phases[0]!.steps[3]!;
+    blocked.approval = { pending: true };
+    blocked.startedAt = 1_000;
+    state.pendingApprovals = [
+      { phaseId: "phase", stepId: "step-3", iteration: 1, onReject: "fail" },
+    ];
+    const { lastFrame } = render(
+      <WorkflowView
+        state={state}
+        width={100}
+        height={20}
+        selectedIndex={3}
+        elapsedMs={500}
+        now={11_000}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("1 waiting");
+    expect(frame).toContain("waiting for approval");
+    expect(frame).not.toContain("1 running");
+    expect(frame).not.toContain("⏱ 10.0s");
+  });
+
   it("marks earlier iterations of a looped phase as superseded", () => {
     const first = workflowStateWithSteps(2);
     const secondPass = {
