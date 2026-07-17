@@ -22,6 +22,7 @@ var SteamtrainReducer = (() => {
   // src/web/reducer.ts
   var reducer_exports = {};
   __export(reducer_exports, {
+    ARRIVAL_NEXT_CANDIDATES: () => ARRIVAL_NEXT_CANDIDATES,
     NARRATION_CAP: () => NARRATION_CAP,
     TOUR_WORKFLOW_NAME: () => TOUR_WORKFLOW_NAME,
     appendNarration: () => appendNarration,
@@ -627,6 +628,7 @@ var SteamtrainReducer = (() => {
 
   // src/workflow/arrival-report.ts
   var DEFAULT_NEXT_CANDIDATES = ["multi-plan", "quick-triage", "bug-hunt", "target-sweep"];
+  var ARRIVAL_NEXT_CANDIDATES = DEFAULT_NEXT_CANDIDATES;
   function buildArrivalReport(state, opts = {}) {
     if (!state.done) return null;
     const flat = flattenSteps(state);

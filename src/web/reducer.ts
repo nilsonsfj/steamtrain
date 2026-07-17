@@ -13,6 +13,7 @@ export {
   buildArrivalReport,
   findArrivalStep,
   formatArrivalReceipt,
+  ARRIVAL_NEXT_CANDIDATES,
 } from "../workflow/arrival-report";
 export {
   TOUR_WORKFLOW_NAME,

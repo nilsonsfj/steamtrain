@@ -216,7 +216,8 @@
     return !needsCreds;
   }
 
-  var NEXT_CANDIDATES = ["multi-plan", "quick-triage", "bug-hunt", "target-sweep"];
+  var NEXT_CANDIDATES = (SteamtrainReducer.ARRIVAL_NEXT_CANDIDATES) ||
+    ["multi-plan", "quick-triage", "bug-hunt", "target-sweep"];
   function pickNextWorkflow() {
     for (var i = 0; i < NEXT_CANDIDATES.length; i++) {
       var name = NEXT_CANDIDATES[i];
@@ -1059,7 +1060,9 @@
         h("button", {
           class: "btn small",
           text: "Choose another workflow",
+          disabled: isReadOnly() ? true : undefined,
           onClick: function () {
+            if (isReadOnly()) return;
             S.stationLanding = false;
             renderSidebar();
             var other = S.workflows.find(function (w) { return w.name !== TOUR_NAME; });

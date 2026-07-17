@@ -96,6 +96,9 @@ export function buildArrivalReport(
   const heroStep = findArrivalStep(flat.map((f) => f.step));
   const hero = (heroStep?.result?.output ?? heroStep?.text ?? "").trim() || fallbackHero(state);
 
+  // Prefer an explicit credentialFree flag (tour). The $0/0-token heuristic is
+  // a best-effort fallback — a cancelled agent run that never billed can look
+  // the same, which is rare on the Arrival surface.
   const agentless =
     opts.credentialFree === true || (costUsd === 0 && tokens === 0 && failCount === 0);
 
