@@ -358,7 +358,11 @@ interface AttentionCardModel {
   /** Bounded, pre-wrapped body lines (each renders as exactly one row). */
   body: { text: string; color?: string; dim?: boolean }[];
   hint: { pre: string; key1: string; mid: string; key2?: string; post: string };
-  /** Total rows including the card's own border. */
+  /**
+   * Total rows including the card's own border. MUST equal exactly what
+   * `AttentionCard` renders — border (2) + title (1) + body + hint (1) — the
+   * layout budget trusts this number, and drift overflows the frame.
+   */
   lineCount: number;
 }
 
@@ -493,7 +497,11 @@ function PhaseHeader({
   const iterBadge = maxIteration > 1 ? ` · iter ${iter}/${maxIteration}` : "";
   const supersededBadge = superseded ? " · superseded" : "";
   const counts = ` ${done}/${phase.stepCount} ${glyph} `;
-  // Fill the rest of the row with a dim rule so phases read as sections.
+  // Fill the rest of the row with a dim rule so phases read as sections. Every
+  // glyph used here (braille spinner, ✓, ✗, ·) measures one column in
+  // string-width — Ink's own measure — so the fill math is exact; if a terminal
+  // ever rendered one wide, the outer truncate-end clips the surplus without
+  // costing an extra line.
   const printed =
     2 + phase.title.length + iterBadge.length + supersededBadge.length + 2 + counts.length;
   const fill = Math.max(0, width - printed);
