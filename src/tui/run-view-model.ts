@@ -45,7 +45,9 @@ export interface BarSegment {
  * Allocate exactly `width` bar cells across the four step states, proportional
  * to their counts. Cumulative rounding guarantees the cells sum to `width`; a
  * non-zero category is guaranteed at least one cell (a single failure must
- * never round away) by stealing from the largest allocation.
+ * never round away) by stealing from the largest allocation. When `width` is
+ * smaller than the number of non-empty categories that guarantee is impossible;
+ * the largest categories then get one cell each.
  */
 export function progressBarSegments(progress: RunProgress, width: number): BarSegment[] {
   const kinds = [
@@ -56,6 +58,16 @@ export function progressBarSegments(progress: RunProgress, width: number): BarSe
   ];
   if (width <= 0) return [];
   if (progress.total === 0) return [{ kind: "pending", cells: width }];
+  const nonEmpty = kinds.map((k, index) => ({ ...k, index })).filter((k) => k.count > 0);
+  if (width < nonEmpty.length) {
+    const cells = [0, 0, 0, 0];
+    for (const winner of [...nonEmpty].sort((a, b) => b.count - a.count).slice(0, width)) {
+      cells[winner.index] = 1;
+    }
+    return kinds
+      .map((k, i) => ({ kind: k.kind, cells: cells[i]! }))
+      .filter((segment) => segment.cells > 0);
+  }
   const cells: number[] = [];
   let cum = 0;
   let allocated = 0;
@@ -65,16 +77,22 @@ export function progressBarSegments(progress: RunProgress, width: number): BarSe
     cells.push(upto - allocated);
     allocated = upto;
   }
-  // Give every non-empty category a visible cell, taking from the largest.
-  for (let i = 0; i < kinds.length; i += 1) {
-    if (kinds[i]!.count > 0 && cells[i] === 0) {
+  // Give every non-empty category a visible cell, taking from the largest
+  // donor until stable. Converges: with width ≥ non-empty categories, some
+  // donor with ≥ 2 cells exists whenever any non-empty category sits at 0.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const { index } of nonEmpty) {
+      if (cells[index] !== 0) continue;
       let biggest = 0;
       for (let j = 1; j < cells.length; j += 1) {
         if (cells[j]! > cells[biggest]!) biggest = j;
       }
       if (cells[biggest]! > 1) {
         cells[biggest] = cells[biggest]! - 1;
-        cells[i] = 1;
+        cells[index] = 1;
+        changed = true;
       }
     }
   }

@@ -140,7 +140,6 @@ export function WorkflowView({
   }, [flat]);
 
   // ── Fixed-height accounting ──────────────────────────────────────────
-  const showModels = byModel.length > 0;
   const showPaused = !state.done && Boolean(state.paused);
   const showBudget = Boolean(state.budget);
   const roomy = height >= 24;
@@ -149,18 +148,37 @@ export function WorkflowView({
   const pendingInput = !approval ? state.pendingInputs?.[0] : undefined;
   const approvalCard = approval ? buildApprovalCard(approval, cardWidth, roomy) : undefined;
   const inputCard = pendingInput ? buildInputCard(pendingInput, cardWidth, roomy) : undefined;
-  const cardLines = approvalCard?.lineCount ?? inputCard?.lineCount ?? 0;
 
   const detailContext = selected ? buildDetailContext(selected.step, innerWidth) : [];
-  const detailFixedLines = selected ? 1 + detailContext.length : 0;
   const desiredPreview = !selected ? 0 : height >= 28 ? 6 : height >= 22 ? 5 : height >= 16 ? 3 : 2;
-  const layout = planViewLayout({
-    height,
-    fixedLines: 2 + (showModels ? 1 : 0) + (showPaused ? 1 : 0) + (showBudget ? 1 : 0),
-    cardLines,
-    detailFixedLines,
-    desiredPreviewLines: desiredPreview,
-  });
+  // Degradation ladder for very short terminals: an overflowing frame corrupts
+  // the whole TUI, so when even the fixed sections don't fit, drop the detail
+  // panel, then the model-breakdown line, then the attention card — in that
+  // order — until the layout fits.
+  let showModels = byModel.length > 0;
+  let showDetail = Boolean(selected);
+  let showCard = Boolean(approvalCard ?? inputCard);
+  const plan = () =>
+    planViewLayout({
+      height,
+      fixedLines: 2 + (showModels ? 1 : 0) + (showPaused ? 1 : 0) + (showBudget ? 1 : 0),
+      cardLines: showCard ? (approvalCard?.lineCount ?? inputCard?.lineCount ?? 0) : 0,
+      detailFixedLines: showDetail ? 1 + detailContext.length : 0,
+      desiredPreviewLines: showDetail ? desiredPreview : 0,
+    });
+  let layout = plan();
+  if (layout.cramped && showDetail) {
+    showDetail = false;
+    layout = plan();
+  }
+  if (layout.cramped && showModels) {
+    showModels = false;
+    layout = plan();
+  }
+  if (layout.cramped && showCard) {
+    showCard = false;
+    layout = plan();
+  }
 
   const foundIndex = rows.findIndex((row) => row.kind === "step" && row.flatIndex === clampedIndex);
   const selectedRowIndex = foundIndex >= 0 ? foundIndex : 0;
@@ -222,9 +240,9 @@ export function WorkflowView({
         </Text>
       ) : null}
 
-      {approvalCard ? (
+      {showCard && approvalCard ? (
         <AttentionCard card={approvalCard} borderColor="yellow" />
-      ) : inputCard ? (
+      ) : showCard && inputCard ? (
         <AttentionCard card={inputCard} borderColor="magenta" />
       ) : null}
 
@@ -272,7 +290,7 @@ export function WorkflowView({
         )}
       </Box>
 
-      {selected ? (
+      {showDetail && selected ? (
         <DetailPanel
           step={selected.step}
           context={detailContext}
@@ -530,7 +548,9 @@ function StepRow({
       : step.blockKind === "llm" && (step.api || step.model)
         ? [step.api, step.model].filter(Boolean).join("/")
         : "";
-  const id = `${step.parentStepId ? "↳ " : ""}${step.stepId}`;
+  // Truncate to the column cap so an over-long id can't push its own row's
+  // columns out of alignment with the rest of the tree.
+  const id = truncate(`${step.parentStepId ? "↳ " : ""}${step.stepId}`, idColWidth);
   const target = step.worktree
     ? ` ⎇ ${basename(step.worktree.cwd)}`
     : step.cwd
@@ -561,7 +581,7 @@ function StepRow({
         {item}
       </Text>
       {meta ? (
-        <Text color="gray" dimColor>
+        <Text color="gray" dimColor={superseded}>
           {"  "}
           {meta}
         </Text>
@@ -669,7 +689,7 @@ function DetailPanel({
             </Text>
           ))
         ) : (
-          <Text color="gray" dimColor>
+          <Text color="gray" dimColor wrap="truncate-end">
             {step.activity || statusWord(step.status)}
           </Text>
         )

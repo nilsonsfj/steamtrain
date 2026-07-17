@@ -70,6 +70,43 @@ describe("progressBarSegments", () => {
   it("returns nothing for a zero-width bar", () => {
     expect(progressBarSegments(progressOf({ total: 3, doneOk: 3 }), 0)).toEqual([]);
   });
+
+  it("gives the largest categories the cells when the bar is narrower than the category count", () => {
+    const segments = progressBarSegments(
+      progressOf({ total: 10, doneOk: 5, failed: 1, running: 3, pending: 1 }),
+      2,
+    );
+    expect(segments).toEqual([
+      { kind: "done", cells: 1 },
+      { kind: "running", cells: 1 },
+    ]);
+  });
+
+  it("keeps every non-empty category visible across widths and distributions", () => {
+    for (let width = 4; width <= 30; width += 1) {
+      for (const p of [
+        progressOf({ total: 100, doneOk: 97, failed: 1, running: 1, pending: 1 }),
+        progressOf({ total: 50, doneOk: 1, failed: 1, running: 1, pending: 47 }),
+        progressOf({ total: 8, doneOk: 2, failed: 2, running: 2, pending: 2 }),
+      ]) {
+        const segments = progressBarSegments(p, width);
+        expect(segments.reduce((n, segment) => n + segment.cells, 0)).toBe(width);
+        for (const kind of ["done", "failed", "running", "pending"] as const) {
+          const count =
+            kind === "done"
+              ? p.doneOk
+              : kind === "failed"
+                ? p.failed
+                : kind === "running"
+                  ? p.running
+                  : p.pending;
+          if (count > 0) {
+            expect(segments.find((segment) => segment.kind === kind)?.cells).toBeGreaterThan(0);
+          }
+        }
+      }
+    }
+  });
 });
 
 describe("planViewLayout", () => {
