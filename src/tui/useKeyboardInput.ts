@@ -251,6 +251,7 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
               runner.setStepIndex(0);
               runner.setWfFollowSelection(true);
               runner.setWfLaunching(false);
+              runner.setShowArrival(true);
               runner.activeWorkflowRef.current = undefined;
               runner.activeWorkflowInputRef.current = undefined;
               runner.workflowCacheRef.current = new Map();
@@ -332,6 +333,52 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
           }
           if (input === "e" && runner.wf.paused) {
             cur.openRunStepEditor();
+            return;
+          }
+        }
+        // Arrival Report: r = run again, n = try next workflow, h = history,
+        // i = inspect the car tree. Only while the receipt surface is up.
+        if (
+          cur.mode === "workflow" &&
+          !runner.running &&
+          runner.showWorkflowView &&
+          runner.wf.done &&
+          runner.showArrival &&
+          !menuOpen &&
+          !prompt.promptEditing &&
+          !key.ctrl &&
+          !key.meta
+        ) {
+          if (input === "i") {
+            runner.setShowArrival(false);
+            return;
+          }
+          if (input === "h") {
+            historyHook.openHistory();
+            return;
+          }
+          if (input === "r") {
+            const name = runner.activeWorkflowRef.current;
+            const prior = runner.activeWorkflowInputRef.current ?? "";
+            if (name) {
+              runner.launchWorkflow(name, prior || "all aboard", picker.setWfPreview, {
+                fresh: true,
+              });
+            }
+            return;
+          }
+          if (input === "n") {
+            const next = picker.workflowEntries.find((e) => e.name === "multi-plan");
+            if (next) {
+              runner.wfDispatch({ type: "reset" });
+              runner.setShowArrival(true);
+              runner.activeWorkflowRef.current = undefined;
+              picker.setWorkflowIndex(
+                picker.workflowEntries.findIndex((e) => e.name === next.name),
+              );
+              picker.setWfPreview({ name: next.name, input: "" });
+              runner.setStepIndex(0);
+            }
             return;
           }
         }

@@ -425,3 +425,26 @@ export {
   workflowStateFromRecord,
   workflowReducer,
 } from "./reducer";
+export {
+  TOUR_WORKFLOW_NAME,
+  isAgentlessWorkflow,
+  isCredentialFreeWorkflow,
+  shouldOfferStationLanding,
+  tourWorkflowIndex,
+  initialWorkflowIndex,
+} from "./first-run";
+export {
+  type NarrationLine,
+  NARRATION_CAP,
+  narrateEvent,
+  appendNarration,
+  narrateFromState,
+} from "./narration";
+export {
+  type ArrivalReceipt,
+  type ArrivalDestination,
+  type ArrivalReport,
+  buildArrivalReport,
+  findArrivalStep,
+  formatArrivalReceipt,
+} from "./arrival-report";

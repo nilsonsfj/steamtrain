@@ -22,7 +22,19 @@ var SteamtrainReducer = (() => {
   // src/web/reducer.ts
   var reducer_exports = {};
   __export(reducer_exports, {
+    NARRATION_CAP: () => NARRATION_CAP,
+    TOUR_WORKFLOW_NAME: () => TOUR_WORKFLOW_NAME,
+    appendNarration: () => appendNarration,
+    buildArrivalReport: () => buildArrivalReport,
+    findArrivalStep: () => findArrivalStep,
+    formatArrivalReceipt: () => formatArrivalReceipt,
+    initialWorkflowIndex: () => initialWorkflowIndex,
     initialWorkflowState: () => initialWorkflowState,
+    isAgentlessWorkflow: () => isAgentlessWorkflow,
+    isCredentialFreeWorkflow: () => isCredentialFreeWorkflow,
+    narrateEvent: () => narrateEvent,
+    narrateFromState: () => narrateFromState,
+    shouldOfferStationLanding: () => shouldOfferStationLanding,
     workflowReducer: () => workflowReducer,
     workflowStateFromSpec: () => workflowStateFromSpec
   });
@@ -47,6 +59,13 @@ var SteamtrainReducer = (() => {
     pendingApprovals: [],
     pendingInputs: []
   };
+  function flattenSteps(state) {
+    const out = [];
+    for (const phase of state.phases) {
+      for (const step of phase.steps) out.push({ phase, step });
+    }
+    return out;
+  }
   function workflowStateFromSpec(spec) {
     return {
       name: spec.name,
@@ -450,6 +469,295 @@ var SteamtrainReducer = (() => {
         return state;
       }
     }
+  }
+
+  // src/workflow/narration.ts
+  var NARRATION_CAP = 40;
+  function narrateEvent(ev) {
+    switch (ev.kind) {
+      case "workflow_start":
+        return line(
+          ev,
+          `All aboard \u2014 ${ev.name} departed with ${ev.stepCount} car${ev.stepCount === 1 ? "" : "s"}.`
+        );
+      case "phase_start":
+        return line(ev, `Arrived at ${stationName(ev.title)}.`, { phaseId: ev.phaseId });
+      case "step_start":
+        return line(ev, stepStartCopy(ev), { phaseId: ev.phaseId, stepId: ev.stepId });
+      case "fan_out":
+        return line(
+          ev,
+          `${ev.count} car${ev.count === 1 ? "" : "s"} branched from '${ev.parentStepId}'.`,
+          { phaseId: ev.phaseId, stepId: ev.parentStepId }
+        );
+      case "gate_evaluated":
+        return line(ev, gateCopy(ev), { phaseId: ev.phaseId, stepId: ev.stepId });
+      case "step_done":
+        return line(ev, stepDoneCopy(ev), { phaseId: ev.phaseId, stepId: ev.stepId });
+      case "phase_done":
+        return line(ev, ev.ok ? `Left ${ev.phaseId}.` : `Held at ${ev.phaseId}.`, {
+          phaseId: ev.phaseId
+        });
+      case "workflow_done":
+        return line(
+          ev,
+          ev.ok ? "End of the line \u2014 arrival report ready." : ev.budgetExceeded ? "Stopped \u2014 cost budget reached." : "Stopped short of the destination."
+        );
+      case "step_retry":
+        return line(ev, `Car '${ev.stepId}' will try again (${ev.attempt}/${ev.maxAttempts}).`, {
+          phaseId: ev.phaseId,
+          stepId: ev.stepId
+        });
+      default:
+        return null;
+    }
+  }
+  function appendNarration(lines, ev) {
+    const next = narrateEvent(ev);
+    if (!next) return lines;
+    const out = lines.length >= NARRATION_CAP ? lines.slice(lines.length - NARRATION_CAP + 1) : [...lines];
+    out.push(next);
+    return out;
+  }
+  function narrateFromState(state) {
+    const lines = [];
+    if (state.started && state.name) {
+      const stepCount = state.phases.reduce((n, p) => n + p.steps.length, 0);
+      lines.push({
+        id: `workflow_start-${state.name}`,
+        text: `All aboard \u2014 ${state.name} departed with ${stepCount} car${stepCount === 1 ? "" : "s"}.`,
+        ts: 0
+      });
+    }
+    for (const phase of state.phases) {
+      lines.push({
+        id: `phase_start-${phase.phaseId}-${phase.iteration ?? 1}`,
+        text: `Arrived at ${stationName(phase.title)}.`,
+        ts: 0,
+        phaseId: phase.phaseId
+      });
+      for (const step of phase.steps) {
+        const done = narrateStepFromState(phase, step);
+        if (done) lines.push(done);
+      }
+    }
+    if (state.done) {
+      lines.push({
+        id: `workflow_done-${state.ok ? "ok" : "fail"}`,
+        text: state.ok ? "End of the line \u2014 arrival report ready." : state.budget ? "Stopped \u2014 cost budget reached." : "Stopped short of the destination.",
+        ts: 0
+      });
+    }
+    return lines.slice(-NARRATION_CAP);
+  }
+  function narrateStepFromState(phase, step) {
+    if (step.status === "pending") return null;
+    if (step.status === "running") {
+      return {
+        id: `step_start-${phase.phaseId}-${step.stepId}`,
+        text: stepStartCopy({
+          stepId: step.stepId,
+          blockKind: step.blockKind,
+          agent: step.agent
+        }),
+        ts: step.startedAt ?? 0,
+        phaseId: phase.phaseId,
+        stepId: step.stepId
+      };
+    }
+    return {
+      id: `step_done-${phase.phaseId}-${step.stepId}`,
+      text: stepDoneCopy({
+        stepId: step.stepId,
+        result: step.result ?? {
+          stepId: step.stepId,
+          ok: step.status === "done",
+          output: step.text,
+          durationMs: 0
+        },
+        cached: step.cached
+      }),
+      ts: step.endedAt ?? 0,
+      phaseId: phase.phaseId,
+      stepId: step.stepId
+    };
+  }
+  function stepStartCopy(ev) {
+    const kind = ev.blockKind;
+    if (kind === "gate") return `Signal '${ev.stepId}' is watching.`;
+    if (kind === "distributor") return `Distributor '${ev.stepId}' is sorting the consist.`;
+    if (kind === "consolidator") return `Conductor '${ev.stepId}' is writing the report.`;
+    if (kind === "approval") return `Checkpoint '${ev.stepId}' awaits a decision.`;
+    if (kind === "human") return `Conductor needs an answer at '${ev.stepId}'.`;
+    if (kind === "command") return `Car '${ev.stepId}' left the station.`;
+    if (kind === "llm") return `Car '${ev.stepId}' called the line.`;
+    if (ev.agent) return `Car '${ev.stepId}' (${ev.agent}) is underway.`;
+    return `Car '${ev.stepId}' is underway.`;
+  }
+  function stepDoneCopy(ev) {
+    if (ev.result.skipped) return `Car '${ev.stepId}' was uncoupled (skipped).`;
+    if (!ev.result.ok) return `Car '${ev.stepId}' stalled.`;
+    if (ev.cached) return `Car '${ev.stepId}' arrived (from cache).`;
+    return `Car '${ev.stepId}' arrived.`;
+  }
+  function gateCopy(ev) {
+    if (ev.passed) return `Signal '${ev.stepId}' cleared.`;
+    if (ev.onFalse === "continue") return `Signal '${ev.stepId}' held the train for another lap.`;
+    return `Signal '${ev.stepId}' held the train.`;
+  }
+  function stationName(title) {
+    const cleaned = title.replace(/^\s*\d+\s*[.:)—-]\s*/, "").trim();
+    return cleaned || title;
+  }
+  function line(ev, text, ids = {}) {
+    const phaseId = ids.phaseId ?? ev.phaseId;
+    const stepId = ids.stepId ?? ev.stepId;
+    return {
+      id: `${ev.kind}-${phaseId ?? ""}-${stepId ?? ""}-${ev.ts}`,
+      text,
+      ts: ev.ts,
+      phaseId,
+      stepId
+    };
+  }
+
+  // src/workflow/arrival-report.ts
+  var DEFAULT_NEXT = "multi-plan";
+  function buildArrivalReport(state, opts = {}) {
+    if (!state.done) return null;
+    const flat = flattenSteps(state);
+    const leaves = leafResults(state);
+    let okCount = 0;
+    let failCount = 0;
+    let skipCount = 0;
+    let costUsd = 0;
+    let tokens = 0;
+    let durationMs = 0;
+    for (const result of leaves) {
+      if (result.skipped) skipCount += 1;
+      else if (result.ok) okCount += 1;
+      else failCount += 1;
+      costUsd += result.costUsd ?? 0;
+      tokens += tokenTotal(result.tokens);
+      durationMs += result.durationMs ?? 0;
+    }
+    const heroStep = findArrivalStep(flat.map((f) => f.step));
+    const hero = (heroStep?.result?.output ?? heroStep?.text ?? "").trim() || fallbackHero(state);
+    const agentless = opts.credentialFree === true || costUsd === 0 && tokens === 0 && failCount === 0;
+    const next = opts.nextWorkflow ?? DEFAULT_NEXT;
+    const destinations = [
+      { id: "again", label: "Run again", key: "r" },
+      { id: "next", label: `Try ${next}`, workflow: next, key: "n" },
+      { id: "history", label: "View history", key: "h" }
+    ];
+    return {
+      hero,
+      heroStepId: heroStep?.stepId,
+      receipt: {
+        ok: Boolean(state.ok),
+        durationMs: opts.elapsedMs && opts.elapsedMs > 0 ? opts.elapsedMs : durationMs,
+        okCount,
+        failCount,
+        skipCount,
+        costUsd,
+        tokens,
+        agentless
+      },
+      destinations
+    };
+  }
+  function findArrivalStep(steps) {
+    const consolidators = steps.filter(
+      (s) => s.blockKind === "consolidator" && s.status === "done" && s.result?.ok !== false
+    );
+    if (consolidators.length > 0) return consolidators[consolidators.length - 1];
+    const withOutput = [...steps].reverse().find(
+      (s) => (s.status === "done" || s.status === "error") && (s.result?.output ?? s.text).trim().length > 0 && !s.result?.skipped
+    );
+    return withOutput;
+  }
+  function formatArrivalReceipt(receipt) {
+    const parts = [];
+    parts.push(`${(receipt.durationMs / 1e3).toFixed(1)}s`);
+    parts.push(`${receipt.okCount} ok`);
+    if (receipt.failCount) parts.push(`${receipt.failCount} failed`);
+    if (receipt.skipCount) parts.push(`${receipt.skipCount} skipped`);
+    if (receipt.agentless) parts.push("$0 \xB7 agentless");
+    else {
+      if (receipt.costUsd > 0) parts.push(`$${receipt.costUsd.toFixed(4)}`);
+      if (receipt.tokens > 0) parts.push(`${compactTokens(receipt.tokens)} tok`);
+    }
+    return parts.join(" \xB7 ");
+  }
+  function leafResults(state) {
+    const fromResults = (state.results ?? []).filter((r) => !r.childResults?.length);
+    if (fromResults.length > 0) return fromResults;
+    const out = [];
+    for (const phase of state.phases) {
+      for (const step of phase.steps) {
+        if (step.result) out.push(step.result);
+      }
+    }
+    return out.filter((r) => !r.childResults?.length);
+  }
+  function fallbackHero(state) {
+    if (state.ok) {
+      return state.name ? `Train '${state.name}' arrived. No consolidator report was produced \u2014 inspect the cars below.` : "Train arrived. No consolidator report was produced \u2014 inspect the cars below.";
+    }
+    return state.name ? `Train '${state.name}' stopped short. Inspect the cars below for the stall.` : "Train stopped short. Inspect the cars below for the stall.";
+  }
+  function tokenTotal(t) {
+    if (!t) return 0;
+    return (t.input ?? 0) + (t.output ?? 0) + (t.cacheRead ?? 0) + (t.cacheWrite ?? 0) + (t.reasoning ?? 0);
+  }
+  function compactTokens(n) {
+    if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+    if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
+    return String(n);
+  }
+
+  // src/workflow/first-run.ts
+  var TOUR_WORKFLOW_NAME = "tour";
+  function stepNeedsAgentCli(step) {
+    if (step.kind === "worker" || step.kind === "processor") return true;
+    if ((step.kind === "distributor" || step.kind === "consolidator") && step.agent) return true;
+    return false;
+  }
+  function isAgentlessWorkflow(spec) {
+    for (const phase of spec.phases) {
+      for (const step of phase.steps) {
+        if (stepNeedsAgentCli(step)) return false;
+      }
+    }
+    return true;
+  }
+  function isCredentialFreeWorkflow(spec) {
+    for (const phase of spec.phases) {
+      for (const step of phase.steps) {
+        if (stepNeedsAgentCli(step) || step.kind === "llm") return false;
+      }
+    }
+    return true;
+  }
+  function shouldOfferStationLanding(opts) {
+    if (opts.hasRunHistory) return false;
+    if (opts.rememberedSelection) return false;
+    return true;
+  }
+  function tourWorkflowIndex(entries) {
+    return entries.findIndex((entry) => entry.name === TOUR_WORKFLOW_NAME);
+  }
+  function initialWorkflowIndex(entries, opts = { preferTour: false }) {
+    if (entries.length === 0) return 0;
+    if (opts.rememberedName) {
+      const remembered = entries.findIndex((entry) => entry.name === opts.rememberedName);
+      if (remembered >= 0) return remembered;
+    }
+    if (opts.preferTour) {
+      const tour = tourWorkflowIndex(entries);
+      if (tour >= 0) return tour;
+    }
+    return 0;
   }
   return __toCommonJS(reducer_exports);
 })();

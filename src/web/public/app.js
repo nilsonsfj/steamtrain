@@ -31,8 +31,18 @@
     drawerScroll: { follow: true, top: 0 },
     // Session capability from GET /api/session (or login). "read" hides every
     // mutate control; the server also 403s those routes as a hard backstop.
-    capability: "full"
+    capability: "full",
+    // Conductor narration (UI-only projection of WorkflowEvents).
+    narration: [],
+    narrationOn: localStorage.getItem("steamtrain.narration") !== "off",
+    // Station landing: first-open hero for the tour.
+    stationLanding: false,
+    // Collapse the phase tree under the Arrival Report after completion.
+    arrivalInspect: false
   };
+
+  var SELECTION_KEY = "steamtrain.lastWorkflow";
+  var TOUR_NAME = (SteamtrainReducer.TOUR_WORKFLOW_NAME) || "tour";
 
   function isReadOnly() { return S.capability === "read"; }
 
@@ -146,12 +156,62 @@
       S.workflows = r.body.workflows || [];
       if (r.body.configLabel) document.getElementById("config").textContent = r.body.configLabel;
       renderSidebar();
+      bootstrapStationLanding();
     });
     loadMeta();
     if (!isReadOnly()) loadProjectConfig();
     pollDoctor(0);
     pollLiveRuns();
     if (!S.liveRunsTimer) S.liveRunsTimer = setInterval(pollLiveRuns, 5000);
+  }
+
+  /** First impression: auto-select tour when the user has never ridden. */
+  function bootstrapStationLanding() {
+    if (S.selected) return;
+    var remembered = null;
+    try { remembered = localStorage.getItem(SELECTION_KEY); } catch (e) {}
+    api("GET", "/api/history").then(function (r) {
+      var hasHistory = r.status === 200 && (r.body.runs || []).length > 0;
+      var preferTour = SteamtrainReducer.shouldOfferStationLanding
+        ? SteamtrainReducer.shouldOfferStationLanding({
+            hasRunHistory: hasHistory,
+            rememberedSelection: remembered
+          })
+        : (!hasHistory && !remembered);
+      if (preferTour && S.workflows.some(function (w) { return w.name === TOUR_NAME; })) {
+        S.stationLanding = true;
+        selectWorkflow(TOUR_NAME, function () {
+          var input = document.getElementById("input");
+          if (input && !input.value) input.value = "all aboard";
+        });
+        return;
+      }
+      if (remembered && S.workflows.some(function (w) { return w.name === remembered; })) {
+        selectWorkflow(remembered);
+        return;
+      }
+      // Soft default: still open the tour when present so the empty state dies.
+      if (S.workflows.some(function (w) { return w.name === TOUR_NAME; })) {
+        selectWorkflow(TOUR_NAME);
+      }
+    }).catch(function () {
+      if (S.workflows.some(function (w) { return w.name === TOUR_NAME; })) selectWorkflow(TOUR_NAME);
+    });
+  }
+
+  function isCredentialFreeSpec(spec) {
+    if (!spec) return false;
+    if (SteamtrainReducer.isCredentialFreeWorkflow) {
+      return SteamtrainReducer.isCredentialFreeWorkflow(spec);
+    }
+    var needsCreds = false;
+    (spec.phases || []).forEach(function (p) {
+      (p.steps || []).forEach(function (s) {
+        if (s.kind === "worker" || s.kind === "processor" || s.kind === "llm") needsCreds = true;
+        if ((s.kind === "distributor" || s.kind === "consolidator") && s.agent) needsCreds = true;
+      });
+    });
+    return !needsCreds;
   }
 
   // ---- in-flight runs (attach from any UI) ----------------------------------
@@ -751,6 +811,13 @@
   function renderHealth(list, apis, err) {
     var box = document.getElementById("health");
     clear(box);
+    if (isCredentialFreeSpec(S.spec)) {
+      box.appendChild(h("span", {
+        class: "chip ok",
+        title: "This workflow needs no agent CLI and no API key."
+      }, h("span", { class: "dot" }), "ready to ride · no agents required"));
+      return;
+    }
     // An agent-doctor failure replaces the agent chips with one error chip,
     // but the API probes are independent — always render their chips too.
     if (err) {
@@ -769,17 +836,34 @@
   function renderSidebar() {
     var box = document.getElementById("wflist");
     clear(box);
-    S.workflows.forEach(function (w) {
+    // Pin tour to the top on Station landing so the door is obvious.
+    var list = S.workflows.slice();
+    if (S.stationLanding) {
+      list.sort(function (a, b) {
+        if (a.name === TOUR_NAME) return -1;
+        if (b.name === TOUR_NAME) return 1;
+        return 0;
+      });
+    }
+    list.forEach(function (w) {
       var kinds = Object.keys(w.kinds || {}).map(function (k) { return (KIND_LABEL[k] || k) + ":" + w.kinds[k]; }).join(" \u00b7 ");
       var meta = w.phaseCount + " phase" + (w.phaseCount === 1 ? "" : "s") + " \u00b7 " + w.stepCount + " step" + (w.stepCount === 1 ? "" : "s");
       var isStaged = workflowHasStaged(S.stagedOverrides[w.name]);
       var autonomy = AUTONOMY_META[w.autonomy] || AUTONOMY_META.autonomous;
-      var card = h("div", { class: "wf" + (S.selected === w.name ? " sel" : ""), onClick: function () { selectWorkflow(w.name); } },
-        h("div", { class: "name" }, w.name, h("span", { class: "src", text: w.source }),
+      var isTour = w.name === TOUR_NAME;
+      var card = h("div", {
+        class: "wf" + (S.selected === w.name ? " sel" : "") + (isTour && S.stationLanding ? " station" : ""),
+        onClick: function () { selectWorkflow(w.name); }
+      },
+        h("div", { class: "name" }, w.name,
+          isTour && S.stationLanding ? h("span", { class: "badge start-here", text: "start here" }) : null,
+          h("span", { class: "src", text: w.source }),
           h("span", { class: "badge " + autonomy.cls, text: autonomy.badge, title: autonomy.title }),
           isStaged ? h("span", { class: "badge staged", text: "staged" }) : null),
         w.description ? h("div", { class: "desc", text: w.description }) : null,
-        h("div", { class: "meta", text: meta + (kinds ? " \u00b7 " + kinds : "") })
+        h("div", { class: "meta", text: isTour && S.stationLanding
+          ? "zero-cost guided ride \u00b7 no agents"
+          : (meta + (kinds ? " \u00b7 " + kinds : "")) })
       );
       box.appendChild(card);
     });
@@ -790,6 +874,8 @@
     stopTimer();
     S.selected = name; S.runId = null; S.runState = null;
     S.detail = null; S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
+    S.narration = []; S.arrivalInspect = false;
+    try { localStorage.setItem(SELECTION_KEY, name); } catch (e) {}
     renderSidebar();
     document.getElementById("statusLine").style.display = "none";
     setBanner("", "");
@@ -803,6 +889,7 @@
       renderSourceLine();
       renderParamsForm(r.body.spec);
       S.runState = SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || r.body.spec);
+      renderHealth(S.doctor || [], S.apiDoctor || [], null);
       render();
       renderStagedIndicator();
       if (after) after();
@@ -930,6 +1017,9 @@
       S.runState = SteamtrainReducer.initialWorkflowState;
     }
     S.runState = SteamtrainReducer.workflowReducer(S.runState, { type: "event", event: ev });
+    if (SteamtrainReducer.appendNarration) {
+      S.narration = SteamtrainReducer.appendNarration(S.narration || [], ev);
+    }
   }
 
   // ---- rendering -----------------------------------------------------------
@@ -939,10 +1029,135 @@
     requestAnimationFrame(function () { S.rafQueued = false; render(); });
   }
 
+  function renderStationHero(canvas) {
+    var band = h("div", { class: "station-hero" },
+      h("div", { class: "station-premise", text: "Orchestrate coding agents like a train — parallel work, one receipt." }),
+      h("div", { class: "station-actions" },
+        isReadOnly() ? null : h("button", {
+          class: "btn primary",
+          text: "Take the tour \u2192",
+          onClick: function () {
+            var input = document.getElementById("input");
+            if (input && !input.value.trim()) input.value = "all aboard";
+            startRun();
+          }
+        }),
+        h("button", {
+          class: "btn small",
+          text: "Choose another workflow",
+          onClick: function () {
+            S.stationLanding = false;
+            renderSidebar();
+            var other = S.workflows.find(function (w) { return w.name !== TOUR_NAME; });
+            if (other) selectWorkflow(other.name);
+          }
+        })
+      )
+    );
+    canvas.appendChild(band);
+  }
+
+  function renderNarration(canvas) {
+    if (!S.narrationOn || !S.narration || !S.narration.length) return;
+    if (!(S.runState && S.runState.started)) return;
+    if (S.runState.done && !S.arrivalInspect) return;
+    var box = h("div", { class: "narration" });
+    box.appendChild(h("div", { class: "narration-head" },
+      h("span", { text: "Conductor" }),
+      h("button", {
+        class: "btn small",
+        text: "Hide",
+        onClick: function () {
+          S.narrationOn = false;
+          try { localStorage.setItem("steamtrain.narration", "off"); } catch (e) {}
+          render();
+        }
+      })
+    ));
+    S.narration.slice(-8).reverse().forEach(function (line) {
+      box.appendChild(h("div", {
+        class: "narration-line" + (line.stepId ? " clickable" : ""),
+        onClick: line.stepId ? function () {
+          var phases = (S.runState && S.runState.phases) || [];
+          for (var i = 0; i < phases.length; i++) {
+            var p = phases[i];
+            for (var j = 0; j < (p.steps || []).length; j++) {
+              if (p.steps[j].stepId === line.stepId) {
+                openDetail(p, p.steps[j]);
+                return;
+              }
+            }
+          }
+        } : undefined
+      }, h("span", { class: "narration-verb", text: "\u25B8" }), " " + line.text));
+    });
+    canvas.appendChild(box);
+  }
+
+  function renderArrival(canvas) {
+    if (!S.runState || !S.runState.done || !SteamtrainReducer.buildArrivalReport) return false;
+    var report = SteamtrainReducer.buildArrivalReport(S.runState, {
+      elapsedMs: S.startedAt ? (Date.now() - S.startedAt) : 0,
+      credentialFree: isCredentialFreeSpec(S.spec)
+    });
+    if (!report) return false;
+    var wrap = h("div", { class: "arrival" });
+    wrap.appendChild(h("div", { class: "arrival-title" },
+      report.receipt.ok ? "\uD83D\uDE82 Arrival" : "Stopped short",
+      report.heroStepId ? h("span", { class: "arrival-step", text: " \u00b7 " + report.heroStepId }) : null
+    ));
+    wrap.appendChild(h("div", {
+      class: "arrival-receipt",
+      text: SteamtrainReducer.formatArrivalReceipt(report.receipt)
+    }));
+    wrap.appendChild(h("pre", { class: "arrival-hero", text: report.hero }));
+    var dest = h("div", { class: "arrival-destinations" });
+    report.destinations.forEach(function (d) {
+      dest.appendChild(h("button", {
+        class: "btn" + (d.id === "again" ? " primary" : ""),
+        text: d.label,
+        onClick: function () {
+          if (d.id === "again") startRun();
+          else if (d.id === "history") openHistory();
+          else if (d.workflow) selectWorkflow(d.workflow);
+        }
+      }));
+    });
+    wrap.appendChild(dest);
+    wrap.appendChild(h("button", {
+      class: "btn small arrival-inspect",
+      text: S.arrivalInspect ? "Hide car tree" : "Inspect cars",
+      onClick: function () { S.arrivalInspect = !S.arrivalInspect; render(); }
+    }));
+    canvas.appendChild(wrap);
+    return true;
+  }
+
   function render() {
     var canvas = document.getElementById("canvas");
     clear(canvas);
-    if (!S.spec) { canvas.appendChild(h("div", { class: "empty", text: "No workflow selected." })); return; }
+    if (!S.spec) {
+      canvas.appendChild(h("div", { class: "empty station-empty" },
+        h("div", { class: "station-premise", text: "Orchestrate coding agents like a train — parallel work, one receipt." }),
+        h("div", { text: "Boarding the tour\u2026" })
+      ));
+      return;
+    }
+
+    var showStation = S.selected === TOUR_NAME && !(S.runState && S.runState.started);
+    if (showStation) renderStationHero(canvas);
+
+    var showingArrival = false;
+    if (S.runState && S.runState.done) {
+      showingArrival = renderArrival(canvas);
+    }
+
+    if (showingArrival && !S.arrivalInspect) {
+      updateProgress();
+      return;
+    }
+
+    renderNarration(canvas);
 
     canvas.appendChild(h("div", { class: "legend" },
       legendItem("worker", "worker"), legendItem("processor", "process"),
@@ -958,7 +1173,6 @@
     phases.forEach(function (p, idx) {
       if (idx > 0) canvas.appendChild(h("div", { class: "connector" }));
       var piter = p.iteration || 1;
-      var done = p.done ? { ok: p.ok } : null;
       var steps = p.steps || [];
       var running = steps.some(function (s) { return s.status === "running"; });
       var pstat = p.done ? (p.ok ? "done" : "failed") : (running ? "running" : (S.runState && S.runState.started ? "" : "pending"));
@@ -995,7 +1209,7 @@
       });
     });
 
-    if (S.runState && S.runState.done) renderSummary(canvas);
+    if (S.runState && S.runState.done && S.arrivalInspect) renderSummary(canvas);
     updateProgress();
     applyTailScroll(canvas);
     renderDetail();
@@ -1604,6 +1818,7 @@
     }
     S.runState = SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || S.spec);
     S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
+    S.narration = []; S.arrivalInspect = false;
     setBanner("", "");
     document.getElementById("statusLine").style.display = "flex";
     var payload = { workflow: S.selected, input: input, fresh: document.getElementById("freshChk").checked };
