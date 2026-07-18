@@ -81,6 +81,12 @@ import { sanitizePathComponent } from "./workflow/fs-util";
  * in one place.
  */
 
+/** POSIX-safe single-quote for a copy-paste command hint. */
+function shellQuote(value: string): string {
+  if (value.length > 0 && /^[A-Za-z0-9_./-]+$/.test(value)) return value;
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 export interface RunOptions {
   input?: string;
   stdin: boolean;
@@ -309,9 +315,13 @@ export async function runWorkflowCommand(
       if (!options.agent) {
         const reroute = orchestrator.planWorkflowReroute(spec);
         if (reroute.ok) {
-          err(
-            `hint: ${formatReroutePlan(reroute.plan)} — re-run with --agent ${reroute.plan.target}\n`,
-          );
+          // Emit the full runnable command so it's genuinely copy-paste-able
+          // (the doctor's install hints are; this should match).
+          const rerun = `steamtrain workflow run ${name} --input ${shellQuote(
+            input?.trim() ?? "",
+          )} --agent ${reroute.plan.target}`;
+          err(`hint: ${formatReroutePlan(reroute.plan)}\n`);
+          err(`      re-run with: ${rerun}\n`);
         }
       }
       return 1;

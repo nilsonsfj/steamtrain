@@ -1460,7 +1460,17 @@ async function handle(
       }
     }
     // reroute: true — retarget steps whose pinned agent is not ready onto a
-    // ready agent, for this run only (the stored workflow is untouched).
+    // ready agent, for this run only (the stored workflow is untouched). The
+    // applied plan (if any) is echoed in the 201 so the client only announces
+    // a re-route that actually happened — the catalog annotation the client
+    // acts on can be stale relative to staged overrides.
+    let appliedReroute: {
+      agent: string;
+      model: string;
+      modelName: string;
+      steps: number;
+      blockedAgents: string[];
+    } | null = null;
     if (parsed.reroute === true && deps.host.planWorkflowReroute) {
       const base = specOverride ?? deps.host.listWorkflows()[parsed.workflow];
       if (base) {
@@ -1471,6 +1481,13 @@ async function handle(
         }
         if (reroute.ok) {
           specOverride = applyWorkflowStepOverrides(base, reroute.plan.overrides);
+          appliedReroute = {
+            agent: reroute.plan.target,
+            model: reroute.plan.targetModel,
+            modelName: reroute.plan.targetModelName,
+            steps: reroute.plan.stepIds.length,
+            blockedAgents: reroute.plan.blockedAgents,
+          };
         }
       }
     }
@@ -1496,7 +1513,7 @@ async function handle(
         sendJson(res, 400, { error: result.error });
         return;
       }
-      sendJson(res, 201, { runId: result.runId });
+      sendJson(res, 201, { runId: result.runId, reroute: appliedReroute ?? undefined });
     } catch (err) {
       if (err instanceof TooManyRuns) {
         sendJson(res, 503, { error: err.message });

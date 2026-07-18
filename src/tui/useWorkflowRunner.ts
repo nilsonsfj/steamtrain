@@ -217,7 +217,7 @@ export function useWorkflowRunner({
         const reroute = orchestrator.planWorkflowReroute(spec);
         setWfNotice(
           `cannot run '${name}': ${check.reason}${
-            reroute.ok ? ` · /reroute runs it with ${reroute.plan.target} instead` : ""
+            reroute.ok ? ` · /reroute to run on ${reroute.plan.target} instead` : ""
           }`,
         );
         return false;

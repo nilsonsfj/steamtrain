@@ -368,13 +368,20 @@ describe("web server", () => {
       reroute: { agent: "claude", model: "claude-sonnet-5", steps: 1 },
     });
 
-    // reroute: true applies the plan's overrides so the gate passes.
+    // reroute: true applies the plan's overrides so the gate passes, and the
+    // 201 echoes the actually-applied re-route (the client announces on this,
+    // not the possibly-stale catalog annotation).
     const run = await fetch(`${base}/api/runs`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ workflow: "demo", input: "x", reroute: true }),
     });
     expect(run.status).toBe(201);
+    const runBody = (await run.json()) as {
+      runId: string;
+      reroute?: { agent: string; steps: number };
+    };
+    expect(runBody.reroute).toMatchObject({ agent: "claude", steps: 1 });
     const step = host.lastSpecOverride?.phases[0]?.steps[0] as
       | { agent?: string; model?: string }
       | undefined;

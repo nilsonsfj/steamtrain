@@ -143,9 +143,7 @@ export function WorkflowPreview({
           {dispatchCheck.ok ? "ready to run" : `blocked: ${dispatchCheck.reason}`}
         </Text>
         {!dispatchCheck.ok && reroutePlan ? (
-          <Text color="cyan">
-            ↷ /reroute — {formatReroutePlan(reroutePlan)} (this session only)
-          </Text>
+          <Text color="cyan">↷ /reroute — {formatReroutePlan(reroutePlan)}</Text>
         ) : null}
         {templateWarnings.length > 0 ? (
           <Text color="yellow">

@@ -188,6 +188,15 @@ A preflight **doctor** resolves each agent binary on your PATH, runs
 dot per agent, and dispatch is **blocked** for any step whose agent isn't ready —
 with a copy-paste fix.
 
+**Or just run with what you have.** When a workflow is blocked only because a
+pinned agent isn't installed, you don't have to install it: re-route the
+blocked steps onto a ready agent for that run. On the CLI, `workflow run
+<name> --agent <id>` (the blocked error also prints the exact re-run command);
+in the TUI, `/reroute` on the blocked preview; in the web UI, the sidebar shows
+`↷ via <agent>` and **Run** re-routes automatically. Only the blocked steps
+move, only for that run — `llm` steps and steps already on a ready agent are
+left untouched, and the workflow on disk is unchanged.
+
 ---
 
 ## Below the fold: technical reference
@@ -203,6 +212,8 @@ steamtrain workflow run multi-plan --input "design the cache migration"
 steamtrain workflow run multi-plan --input "…" --dry-run        # same as plan: print and exit, run nothing
 steamtrain workflow run bug-hunt --stdin --json
 steamtrain workflow run multi-plan --input "…" --fresh          # ignore the on-disk cache
+steamtrain workflow run bug-hunt --input "…" --agent claude     # re-route steps whose pinned agent isn't ready (this run only)
+steamtrain workflow plan bug-hunt --input "…" --agent claude    # preview that re-routed run without running it
 steamtrain workflow cache clear
 
 # Unattended approval handling
@@ -629,7 +640,10 @@ At startup, before any dispatch, steamtrain checks each agent:
    from exit code + stderr.
 
 The status bar shows a green/amber/red dot per agent, and **dispatch is blocked**
-for any task whose agent isn't `ok`, with a fix-it message.
+for any task whose agent isn't `ok`, with a fix-it message. When the only thing
+missing is an uninstalled agent, you can re-route the blocked steps onto a ready
+one instead of installing it — `--agent <id>` on the CLI, `/reroute` in the TUI,
+or the web UI's `↷ via <agent>` Run (see "run with what you have" above).
 
 > `claude --version` returns success even when logged out, so the doctor can show
 > claude as `ready` while a dispatch later surfaces "Not logged in" as an `error`

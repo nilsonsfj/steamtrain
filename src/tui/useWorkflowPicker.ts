@@ -188,7 +188,9 @@ export function useWorkflowPicker({
       notices: [
         {
           level: "info" as const,
-          text: `${formatReroutePlan(planned)} — staged for this session (Ctrl+R to run)`,
+          // Truthful about scope: like any staged step edit, this lives in the
+          // session until run, and /save-workflows would write it to disk.
+          text: `${formatReroutePlan(planned)} — staged (Ctrl+R to run · /save-workflows would persist it)`,
         },
       ],
     };

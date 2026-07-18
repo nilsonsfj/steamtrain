@@ -1927,8 +1927,10 @@
     apiAuth("POST", "/api/runs", payload)
       .then(function (r) {
         if (r.status !== 201) { setBanner(r.body.error || "could not start run", "err"); return; }
-        if (rerouted && listItem.reroute) {
-          var rr = listItem.reroute;
+        // Announce a re-route only when the server actually applied one — the
+        // catalog annotation we act on can be stale relative to staged edits.
+        var rr = r.body.reroute;
+        if (rr) {
           setBanner("Re-routed " + rr.steps + " step" + (rr.steps === 1 ? "" : "s") + " (" +
             rr.blockedAgents.join(", ") + ") to " + rr.agent + " · " + (rr.modelName || rr.model) +
             " for this ride.", "info");

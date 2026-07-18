@@ -2,7 +2,7 @@ import type { SlashCommand } from "../types";
 
 export const rerouteCommand: SlashCommand = {
   name: "reroute",
-  description: "Re-route steps whose agent is not ready to a ready agent (this session only)",
+  description: "Re-route steps whose agent is not ready to a ready agent (staged; Ctrl+R to run)",
   usage: "/reroute",
   execute(args, ctx) {
     if (args.length > 0) {

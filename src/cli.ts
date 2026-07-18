@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { createAdapter } from "./agents";
+import { refreshAgentCatalogCaches } from "./agents/models";
 import { message, readAll, truncateLine, unknownWorkflowMessage } from "./cli-util";
 import {
   type SteamtrainConfig,
@@ -9,6 +10,7 @@ import {
   loadConfig,
   saveProjectWorkflow,
 } from "./config";
+import { runDoctor } from "./doctor";
 import { runInitCommand } from "./init";
 import { Orchestrator } from "./orchestrator";
 import {
@@ -40,11 +42,13 @@ import {
   type WorktreeDiff,
   type WorktreeSource,
   aggregateCosts,
+  applyWorkflowStepOverrides,
   autonomyBadge,
   autonomyDescription,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   finalRunWorktrees,
+  formatReroutePlan,
   formatRunTotals,
   formatTokenSummary,
   formatTokens,
@@ -63,6 +67,7 @@ import {
   saveUserWorkflow,
   totalTokens,
   validateWorkflow,
+  workflowAgentIds,
   workflowAutonomy,
   workflowCacheKey,
   workflowStepKind,
@@ -389,6 +394,8 @@ interface PlanOptions {
   stdin: boolean;
   params: Record<string, string>;
   json: boolean;
+  /** `--agent <id>`: preview the workflow as re-routed onto this ready agent. */
+  agent?: string;
 }
 
 /**
@@ -411,7 +418,10 @@ export function splitDryRunArgs(args: string[]): { isDryRun: boolean; planArgs: 
     "--on-approval",
     "--agent",
   ]);
-  const dropWithValue = new Set(["--on-approval", "--agent"]);
+  // --agent passes THROUGH to the plan so the dry-run preview reflects the
+  // re-route it would apply (otherwise the plan would lie, showing the blocked
+  // agent). --on-approval is run-only and dropped.
+  const dropWithValue = new Set(["--on-approval"]);
   const dropBare = new Set([
     "--dry-run",
     "--fresh",
@@ -466,6 +476,11 @@ function parsePlanOptions(args: string[]): PlanOptions | null {
       options.stdin = true;
     } else if (arg === "--json") {
       options.json = true;
+    } else if (arg === "--agent") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("-")) return null;
+      options.agent = value;
+      i += 1;
     } else {
       return null;
     }
@@ -484,8 +499,8 @@ async function planCommand(
   const options = parsePlanOptions(name ? args.slice(1) : args);
   if (!options || !name) {
     err(
-      `usage: steamtrain workflow plan <name> --input <text> [--param key=value ...] [--json]
-       steamtrain workflow plan <name> --stdin [--param key=value ...] [--json]
+      `usage: steamtrain workflow plan <name> --input <text> [--param key=value ...] [--agent <id>] [--json]
+       steamtrain workflow plan <name> --stdin [--param key=value ...] [--agent <id>] [--json]
 `,
     );
     return 1;
@@ -498,7 +513,7 @@ async function planCommand(
     return 1;
   }
 
-  const spec = orchestrator.listWorkflows()[name];
+  let spec = orchestrator.listWorkflows()[name];
   if (!spec) {
     err(`${unknownWorkflowMessage(name, Object.keys(orchestrator.listWorkflows()))}\n`);
     return 1;
@@ -507,6 +522,31 @@ async function planCommand(
   const resolved = resolveInputs(spec, options.params);
   if (resolved.errors.length > 0) {
     for (const e of resolved.errors) err(`input error: ${e}\n`);
+    return 1;
+  }
+
+  // --agent <id>: preview the workflow as the real run would execute it — with
+  // blocked agent steps re-routed onto the requested ready agent. Runs the
+  // doctor (only here, when --agent is present) so the target's readiness is
+  // checked exactly as a real run would; the base plan stays fully offline.
+  if (options.agent && workflowAgentIds(spec).length > 0) {
+    const config = orchestrator.getConfig();
+    const doctor = await runDoctor(config);
+    orchestrator.setDoctor(doctor);
+    await refreshAgentCatalogCaches(config, doctor);
+    const reroute = orchestrator.planWorkflowReroute(spec, { target: options.agent });
+    if (!reroute.ok) {
+      if (reroute.error) {
+        err(`--agent ${options.agent}: ${reroute.error}\n`);
+        return 1;
+      }
+      out("note: every agent this workflow uses is ready — nothing to re-route\n");
+    } else {
+      spec = applyWorkflowStepOverrides(spec, reroute.plan.overrides);
+      out(`${formatReroutePlan(reroute.plan)} — this run only\n`);
+    }
+  } else if (options.agent) {
+    err(`--agent: workflow '${name}' has no agent-backed steps to re-route\n`);
     return 1;
   }
 
@@ -1433,8 +1473,8 @@ Usage:
   steamtrain init [--yes]
   steamtrain workflow list
   steamtrain workflow validate [name]
-  steamtrain workflow plan <name> --input <text> [--param key=value ...] [--json]
-  steamtrain workflow plan <name> --stdin [--param key=value ...] [--json]
+  steamtrain workflow plan <name> --input <text> [--param key=value ...] [--agent <id>] [--json]
+  steamtrain workflow plan <name> --stdin [--param key=value ...] [--agent <id>] [--json]
   steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...]
   steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...]
   steamtrain workflow run --from <runId> [--retry-failed] [--param key=value ...] [--input <text>] [--json] [--detach]
