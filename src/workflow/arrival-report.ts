@@ -99,6 +99,7 @@ export function buildArrivalReport(
   // Prefer an explicit credentialFree flag (tour). The $0/0-token heuristic is
   // a best-effort fallback — a cancelled agent run that never billed can look
   // the same, which is rare on the Arrival surface.
+  // Invariant: agentless implies costUsd === 0 && tokens === 0.
   const agentless =
     opts.credentialFree === true || (costUsd === 0 && tokens === 0 && failCount === 0);
 
@@ -198,7 +199,11 @@ export function arrivalReceiptCards(receipt: ArrivalReceipt): Array<{
         : "no tokens billed";
   return [
     { id: "ran", label: "What ran", value: ranParts.join(" · ") },
-    { id: "cost", label: "What it cost", value: `${cost} · ${(receipt.durationMs / 1000).toFixed(1)}s` },
+    {
+      id: "cost",
+      label: "What it cost",
+      value: `${cost} · ${(receipt.durationMs / 1000).toFixed(1)}s`,
+    },
     { id: "produced", label: "What it produced", value: produced },
   ];
 }

@@ -54,7 +54,7 @@ export function WorkflowPicker({
           </Text>
           <Text color="cyan">Parallel agents. One receipt. Start with the free tour.</Text>
           <Text color="green">
-            → select <Text bold>tour</Text> · Enter preview · Ctrl+R ride ($0 · ~1s)
+            → <Text bold>tour</Text> selected · Enter preview · Ctrl+R ride ($0 · ~1s)
           </Text>
         </Box>
       ) : null}

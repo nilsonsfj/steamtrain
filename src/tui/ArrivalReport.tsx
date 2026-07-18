@@ -1,9 +1,5 @@
 import { Box, Text } from "ink";
-import {
-  type ArrivalReport,
-  arrivalReceiptCards,
-  formatArrivalHeadline,
-} from "../workflow";
+import { type ArrivalReport, arrivalReceiptCards, formatArrivalHeadline } from "../workflow";
 import { wrapOutputLines } from "./output-window";
 
 interface ArrivalReportViewProps {
@@ -33,8 +29,8 @@ export function ArrivalReportView({
   const cards = arrivalReceiptCards(report.receipt);
   const titleColor = report.receipt.ok ? "green" : "red";
 
-  // Fixed chrome: border(2) + headline(1) + cards(1) + hint(1) + destinations(1).
-  const chrome = 6;
+  // Fixed chrome: border(2) + headline row with hint(1) + cards(1) + destinations(1).
+  const chrome = 5;
   const bodyBudget = Math.max(1, height - chrome);
   const heroLines = wrapOutputLines(report.hero, inner).slice(0, bodyBudget);
 

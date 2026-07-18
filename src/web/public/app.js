@@ -1130,39 +1130,43 @@
     var accent = h("span", { class: "accent", text: "steam" });
     logo.appendChild(accent);
     logo.appendChild(document.createTextNode("train"));
-    var band = h("div", { class: "station-hero" },
+    var band = h("div", { class: "station-hero" + (S.stationLanding ? "" : " compact") },
       h("div", { class: "station-brand" }, logo),
       h("div", {
         class: "station-premise",
         text: "Parallel agents. One receipt."
       }),
-      h("div", {
-        class: "station-sub",
-        text: "Take the free tour — no agents, no API key, ~1 second."
-      }),
+      S.stationLanding
+        ? h("div", {
+            class: "station-sub",
+            text: "Take the free tour — no agents, no API key, ~1 second."
+          })
+        : null,
       h("div", { class: "station-actions" },
         isReadOnly() ? null : h("button", {
           class: "btn primary station-cta",
-          text: "Take the tour \u2192",
+          text: S.stationLanding ? "Take the tour \u2192" : "Ride the tour \u2192",
           onClick: function () {
             var input = document.getElementById("input");
             if (input && !input.value.trim()) input.value = "all aboard";
             startRun();
           }
         }),
-        h("button", {
-          class: "btn small station-secondary",
-          text: "I have a workflow",
-          disabled: isReadOnly() ? true : undefined,
-          onClick: function () {
-            if (isReadOnly()) return;
-            S.stationLanding = false;
-            syncStationMode();
-            renderSidebar();
-            var other = S.workflows.find(function (w) { return w.name !== TOUR_NAME; });
-            if (other) selectWorkflow(other.name);
-          }
-        })
+        S.stationLanding
+          ? h("button", {
+              class: "btn small station-secondary",
+              text: "I have a workflow",
+              disabled: isReadOnly() ? true : undefined,
+              onClick: function () {
+                if (isReadOnly()) return;
+                S.stationLanding = false;
+                syncStationMode();
+                renderSidebar();
+                var other = S.workflows.find(function (w) { return w.name !== TOUR_NAME; });
+                if (other) selectWorkflow(other.name);
+              }
+            })
+          : null
       )
     );
     canvas.appendChild(band);
@@ -1173,7 +1177,8 @@
       S.stationLanding &&
       S.selected === TOUR_NAME &&
       !(S.runState && S.runState.started);
-    document.body.dataset.mode = on ? "station" : "";
+    if (on) document.body.dataset.mode = "station";
+    else delete document.body.dataset.mode;
   }
 
   function renderNarration(canvas) {
@@ -1432,12 +1437,12 @@
       }
     });
     wrap.appendChild(help);
-    if (S.legendExpanded) {
+    if (S.legendExpanded && keys.length > 0) {
       var full = h("div", { class: "legend-full" });
       ALL_LEGEND_KINDS.forEach(function (pair) {
-        full.appendChild(legendItem(pair[0], pair[1]));
+        if (!present[pair[0]]) full.appendChild(legendItem(pair[0], pair[1]));
       });
-      wrap.appendChild(full);
+      if (full.childNodes.length) wrap.appendChild(full);
     }
     canvas.appendChild(wrap);
   }
@@ -1459,19 +1464,27 @@
         segments.push(s);
       });
     });
-    var track = h("div", { class: "track", title: "Live pipeline track" });
+    var track = h("div", {
+      class: "track",
+      role: "list",
+      title: "Live pipeline track",
+      "aria-label": "Live pipeline track"
+    });
     segments.forEach(function (s, idx) {
       var status = s.status || "pending";
       if (s.result && s.result.skipped) status = "skipped";
+      var kind = s.blockKind || "step";
       var seg = h("div", {
         class: "track-seg " + status,
+        role: "listitem",
         title: s.stepId + " · " + status,
-        style: "background:" + (status === "pending" ? "transparent" : kindColor(s.blockKind)) +
-          ";border-color:" + kindColor(s.blockKind)
+        "aria-label": s.stepId + ": " + status + " (" + (KIND_LABEL[kind] || kind) + ")",
+        style: "background:" + (status === "pending" ? "transparent" : kindColor(kind)) +
+          ";border-color:" + kindColor(kind)
       });
       if (idx < segments.length - 1) {
         track.appendChild(seg);
-        track.appendChild(h("div", { class: "track-join" }));
+        track.appendChild(h("div", { class: "track-join", "aria-hidden": "true" }));
       } else {
         track.appendChild(seg);
       }

@@ -243,12 +243,7 @@ export function WorkflowView({
 
   if (preferArrival && arrival) {
     return (
-      <ArrivalReportView
-        report={arrival}
-        width={width}
-        height={height}
-        workflowName={state.name}
-      />
+      <ArrivalReportView report={arrival} width={width} height={height} workflowName={state.name} />
     );
   }
 

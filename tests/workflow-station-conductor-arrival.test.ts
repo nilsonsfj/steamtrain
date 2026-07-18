@@ -233,6 +233,44 @@ describe("arrival report", () => {
     expect(hero?.stepId).toBe("conductor");
   });
 
+  it("formats headlines and receipt cards for success, failure, and billed runs", () => {
+    const base = {
+      durationMs: 12400,
+      okCount: 3,
+      failCount: 0,
+      skipCount: 0,
+      costUsd: 0,
+      tokens: 0,
+      agentless: true,
+      ok: true,
+    };
+    expect(formatArrivalHeadline(base, "tour")).toBe("Tour complete · $0 · 12.4s");
+    expect(formatArrivalHeadline(base, null)).toBe("Run complete · $0 · 12.4s");
+    expect(
+      formatArrivalHeadline(
+        { ...base, ok: false, failCount: 2, agentless: false, costUsd: 1.2345, tokens: 1500 },
+        "bug-hunt",
+      ),
+    ).toBe("bug-hunt stopped · $1.2345 · 12.4s · 2 failed");
+
+    const freeCards = arrivalReceiptCards(base);
+    expect(freeCards.map((c) => c.id)).toEqual(["ran", "cost", "produced"]);
+    expect(freeCards[1]?.value).toContain("$0 · no agents");
+    expect(freeCards[2]?.value).toBe("engine demo");
+
+    const billed = arrivalReceiptCards({
+      ...base,
+      agentless: false,
+      costUsd: 0.42,
+      tokens: 2500,
+      failCount: 1,
+      skipCount: 1,
+    });
+    expect(billed[0]?.value).toContain("1 failed");
+    expect(billed[1]?.value).toContain("$0.4200");
+    expect(billed[2]?.value).toBe("2.5k tokens");
+  });
+
   it("reconstructs narration from folded state", () => {
     const state = workflowReducer(workflowStateFromSpec(BUNDLED_WORKFLOWS.tour!), {
       type: "event",

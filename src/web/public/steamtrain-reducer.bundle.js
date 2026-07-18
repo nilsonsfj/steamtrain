@@ -713,7 +713,11 @@ var SteamtrainReducer = (() => {
     const produced = receipt.tokens > 0 ? `${compactTokens(receipt.tokens)} tokens` : receipt.agentless ? "engine demo" : "no tokens billed";
     return [
       { id: "ran", label: "What ran", value: ranParts.join(" \xB7 ") },
-      { id: "cost", label: "What it cost", value: `${cost} \xB7 ${(receipt.durationMs / 1e3).toFixed(1)}s` },
+      {
+        id: "cost",
+        label: "What it cost",
+        value: `${cost} \xB7 ${(receipt.durationMs / 1e3).toFixed(1)}s`
+      },
       { id: "produced", label: "What it produced", value: produced }
     ];
   }
