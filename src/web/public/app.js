@@ -198,7 +198,9 @@
           })
         : (!hasHistory && !remembered);
       if (preferTour && S.workflows.some(function (w) { return w.name === TOUR_NAME; })) {
-        S.stationLanding = true;
+        // Read-only sessions can browse but cannot ride — skip station chrome
+        // so other workflows stay visible and the canvas is not a dead end.
+        if (!isReadOnly()) S.stationLanding = true;
         selectWorkflow(TOUR_NAME, function () {
           var input = document.getElementById("input");
           if (input && !input.value) input.value = "all aboard";
@@ -1156,9 +1158,7 @@
           ? h("button", {
               class: "btn small station-secondary",
               text: "I have a workflow",
-              disabled: isReadOnly() ? true : undefined,
               onClick: function () {
-                if (isReadOnly()) return;
                 S.stationLanding = false;
                 syncStationMode();
                 renderSidebar();

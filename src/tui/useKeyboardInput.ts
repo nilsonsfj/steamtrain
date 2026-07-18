@@ -388,8 +388,12 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
             return;
           }
           if (input === "n") {
+            const current =
+              picker.wfPreview?.name ??
+              (runner.wf.started ? runner.wf.name : undefined) ??
+              picker.workflowEntries[picker.workflowIndex]?.name;
             const next = ARRIVAL_NEXT_CANDIDATES.map((name) =>
-              picker.workflowEntries.find((e) => e.name === name),
+              picker.workflowEntries.find((e) => e.name === name && e.name !== current),
             ).find(Boolean);
             if (!next) {
               runner.setWfNotice("no next workflow available in the catalog");
