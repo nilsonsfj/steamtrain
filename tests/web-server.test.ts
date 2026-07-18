@@ -379,14 +379,56 @@ describe("web server", () => {
     expect(run.status).toBe(201);
     const runBody = (await run.json()) as {
       runId: string;
-      reroute?: { agent: string; steps: number };
+      reroute?: { agent: string; model: string; modelName: string; steps: number };
     };
-    expect(runBody.reroute).toMatchObject({ agent: "claude", steps: 1 });
+    expect(runBody.reroute).toMatchObject({
+      agent: "claude",
+      model: "claude-sonnet-5",
+      modelName: "Claude Sonnet 5",
+      steps: 1,
+    });
     const step = host.lastSpecOverride?.phases[0]?.steps[0] as
       | { agent?: string; model?: string }
       | undefined;
     expect(step?.agent).toBe("claude");
     expect(step?.model).toBe("claude-sonnet-5");
+  });
+
+  it("does not advertise a re-route that would not make the workflow dispatchable", async () => {
+    // A workflow blocked for a reason the re-route can't fix (e.g. a missing
+    // agent AND an llm step's missing key): the planner still returns a plan,
+    // but the re-routed spec is still undispatchable, so the catalog must mark
+    // it `blocked` WITHOUT offering a one-click re-route that can only fail.
+    class DoubleBlockedHost extends FakeHost {
+      constructor(spec: WorkflowSpec) {
+        super(spec, happyRun, false);
+      }
+      override canDispatchWorkflowSpec(): { ok: true } | { ok: false; reason: string } {
+        // Never dispatchable — even after the re-route is applied.
+        return { ok: false, reason: "opencode is binary_missing; anthropic key missing" };
+      }
+      planWorkflowReroute() {
+        return {
+          ok: true as const,
+          plan: {
+            target: "claude",
+            targetModel: "claude-sonnet-5",
+            targetModelName: "Claude Sonnet 5",
+            blockedAgents: ["opencode"],
+            stepIds: ["s1"],
+            overrides: { s1: { agent: "claude", model: "claude-sonnet-5", effort: undefined } },
+          },
+        };
+      }
+    }
+    const { server } = makeServer(new DoubleBlockedHost(demoSpec()));
+    const base = await start(server);
+    const list = await fetch(`${base}/api/workflows`);
+    const body = (await list.json()) as {
+      workflows: Array<{ name: string; blocked?: string; reroute?: unknown }>;
+    };
+    expect(body.workflows[0]?.blocked).toContain("binary_missing");
+    expect(body.workflows[0]?.reroute).toBeUndefined();
   });
 
   it("returns a full spec and 404s unknown workflows", async () => {

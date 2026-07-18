@@ -939,14 +939,21 @@ async function handle(
           if (!check.ok) {
             item.blocked = check.reason;
             const reroute = deps.host.planWorkflowReroute?.(spec);
+            // Only advertise the re-route if it actually makes the workflow
+            // dispatchable. A workflow blocked for two reasons (missing agent
+            // AND, say, an llm step's missing API key) would otherwise offer a
+            // one-click re-route that can only fail at run time.
             if (reroute?.ok) {
-              item.reroute = {
-                agent: reroute.plan.target,
-                model: reroute.plan.targetModel,
-                modelName: reroute.plan.targetModelName,
-                steps: reroute.plan.stepIds.length,
-                blockedAgents: reroute.plan.blockedAgents,
-              };
+              const rerouted = applyWorkflowStepOverrides(spec, reroute.plan.overrides);
+              if (deps.host.canDispatchWorkflowSpec(rerouted).ok) {
+                item.reroute = {
+                  agent: reroute.plan.target,
+                  model: reroute.plan.targetModel,
+                  modelName: reroute.plan.targetModelName,
+                  steps: reroute.plan.stepIds.length,
+                  blockedAgents: reroute.plan.blockedAgents,
+                };
+              }
             }
           }
         }

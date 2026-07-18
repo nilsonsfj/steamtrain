@@ -862,10 +862,16 @@
       S.apiDoctor = apis;
       renderHealth(list, apis, err);
       applyHealth();
-      // First agent-health arrival: the catalog's blocked/re-route annotations
-      // were skipped server-side while health was unknown — fetch them now.
-      if (list.length && !S.doctorSeen) {
-        S.doctorSeen = true;
+      // The catalog's blocked/re-route annotations are computed server-side
+      // from agent + API health, so re-fetch them whenever that health changes
+      // — the initial arrival AND after a config save flips an agent's status
+      // (a one-shot latch would leave a stale "blocked"/"via X" until reload).
+      var healthSig = JSON.stringify([
+        list.map(function (d) { return d.agent + ":" + d.status; }),
+        apis.map(function (d) { return d.api + ":" + d.status; })
+      ]);
+      if ((list.length || apis.length) && healthSig !== S.healthSig) {
+        S.healthSig = healthSig;
         refreshWorkflowList();
       }
       // Keep polling until BOTH probe sets have landed: the agent doctor
