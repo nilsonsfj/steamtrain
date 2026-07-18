@@ -1204,10 +1204,37 @@
       report.receipt.ok ? "\uD83D\uDE82 Arrival" : "Stopped short",
       report.heroStepId ? h("span", { class: "arrival-step", text: " \u00b7 " + report.heroStepId }) : null
     ));
-    wrap.appendChild(h("div", {
-      class: "arrival-receipt",
-      text: SteamtrainReducer.formatArrivalReceipt(report.receipt)
-    }));
+
+    // Enhanced metrics: animated counter tiles instead of flat text
+    var metrics = h("div", { class: "arrival-metrics" });
+    var dur = report.receipt.durationMs / 1000;
+    var durLabel = dur < 60 ? dur.toFixed(1) + "s" : Math.floor(dur / 60) + "m " + Math.floor(dur % 60) + "s";
+    metrics.appendChild(arrivalMetric(durLabel, "duration", ""));
+    metrics.appendChild(arrivalMetric(String(report.receipt.okCount), "passed", "ok"));
+    if (report.receipt.failCount) metrics.appendChild(arrivalMetric(String(report.receipt.failCount), "failed", "err"));
+    if (report.receipt.skipCount) metrics.appendChild(arrivalMetric(String(report.receipt.skipCount), "skipped", ""));
+    if (report.receipt.agentless) {
+      metrics.appendChild(arrivalMetric("$0", "cost", "cost"));
+    } else {
+      if (report.receipt.costUsd > 0) metrics.appendChild(arrivalMetric("$" + report.receipt.costUsd.toFixed(4), "cost", "cost"));
+      if (report.receipt.tokens > 0) metrics.appendChild(arrivalMetric(compactTok(report.receipt.tokens), "tokens", ""));
+    }
+    wrap.appendChild(metrics);
+
+    // Status grid: one colored dot per step (skip if no steps)
+    var statusGrid = h("div", { class: "arrival-status-grid" });
+    var phases = S.runState.phases || [];
+    phases.forEach(function (p) {
+      (p.steps || []).forEach(function (s) {
+        var cls = "arrival-dot";
+        if (s.result && s.result.skipped) cls += " skip";
+        else if (s.status === "done") cls += " ok";
+        else if (s.status === "error") cls += " fail";
+        statusGrid.appendChild(h("div", { class: cls, title: s.stepId }));
+      });
+    });
+    if (statusGrid.childNodes.length > 0) wrap.appendChild(statusGrid);
+
     wrap.appendChild(h("pre", { class: "arrival-hero", text: report.hero }));
     var dest = h("div", { class: "arrival-destinations" });
     report.destinations.forEach(function (d) {
@@ -1229,7 +1256,54 @@
       onClick: function () { S.arrivalInspect = !S.arrivalInspect; render(); }
     }));
     canvas.appendChild(wrap);
+    // Animate counters after DOM insertion
+    animateArrivalCounters(wrap);
     return true;
+  }
+
+  function arrivalMetric(value, label, cls) {
+    return h("div", { class: "arrival-metric" },
+      h("div", { class: "arrival-metric-value" + (cls ? " " + cls : ""), text: value }),
+      h("div", { class: "arrival-metric-label", text: label })
+    );
+  }
+
+  function compactTok(n) {
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+    if (n >= 1000) return (n / 1000).toFixed(1) + "k";
+    return String(n);
+  }
+
+  /** Animate numeric values in arrival metrics from 0 to their target. */
+  function animateArrivalCounters(wrap) {
+    // Respect user's motion preference — skip JS animation entirely
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    var metrics = wrap.querySelectorAll(".arrival-metric-value");
+    for (var i = 0; i < metrics.length; i++) {
+      (function (el) {
+        var text = el.textContent || "";
+        var match = text.match(/^(\$?)([\d.]+)(.*)$/);
+        if (!match) return; // non-numeric (e.g. "$0" or label-only)
+        var prefix = match[1];
+        var target = parseFloat(match[2]);
+        var suffix = match[3];
+        if (isNaN(target) || target === 0) return;
+        var startTime = performance.now();
+        var duration = 600;
+        var decimals = match[2].indexOf(".") >= 0 ? (match[2].split(".")[1] || "").length : 0;
+        function step(now) {
+          var elapsed = now - startTime;
+          var progress = Math.min(elapsed / duration, 1);
+          // Ease-out cubic
+          var eased = 1 - Math.pow(1 - progress, 3);
+          var current = target * eased;
+          el.textContent = prefix + current.toFixed(decimals) + suffix;
+          if (progress < 1) requestAnimationFrame(step);
+        }
+        el.textContent = prefix + "0" + suffix;
+        requestAnimationFrame(step);
+      })(metrics[i]);
+    }
   }
 
   function render() {
@@ -1270,7 +1344,20 @@
     });
 
     phases.forEach(function (p, idx) {
-      if (idx > 0) canvas.appendChild(h("div", { class: "connector" }));
+      if (idx > 0) {
+        // Determine connector state from preceding and current phase
+        var prevPhase = phases[idx - 1];
+        var prevDone = prevPhase && prevPhase.done;
+        var prevOk = prevPhase && prevPhase.ok;
+        var curRunning = (p.steps || []).some(function (s) { return s.status === "running"; });
+        var curDone = p.done;
+        var connCls = "connector";
+        if (prevDone && prevOk && curRunning) connCls += " active";
+        else if (prevDone && prevOk && curDone) connCls += " done";
+        else if (prevDone && !prevOk) connCls += " err";
+        else if (S.runState && S.runState.started && prevDone) connCls += " active";
+        canvas.appendChild(h("div", { class: connCls }));
+      }
       var piter = p.iteration || 1;
       var steps = p.steps || [];
       var running = steps.some(function (s) { return s.status === "running"; });

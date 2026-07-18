@@ -466,10 +466,13 @@ textarea#input:focus {
   color: var(--muted);
 }
 .connector {
-  width: 2px;
-  height: 18px;
+  width: 3px;
+  height: 22px;
   background: var(--border);
   margin: 0 auto;
+  border-radius: 2px;
+  position: relative;
+  transition: background 0.3s;
 }
 .loop-marker {
   display: flex;
@@ -1692,4 +1695,445 @@ select.sel.invalid {
 }
 .drawer-output.err {
   color: var(--error);
+}
+
+/* =========================================================================
+   IMPROVEMENT B: Rich Card Status Micro-animations
+   Adds visual life to step cards: shimmer when streaming, entrance slide,
+   checkmark on completion, shake on error. All GPU-composited (transform +
+   opacity), gated behind prefers-reduced-motion for accessibility.
+   ========================================================================= */
+
+/* Shimmer gradient sweep on actively running cards */
+@keyframes cardShimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Subtle entrance when a card first renders */
+@keyframes cardEntrance {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Checkmark scale-in on completion */
+@keyframes checkScale {
+  0% {
+    opacity: 0;
+    transform: scale(0);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Error shake */
+@keyframes cardShake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  15% {
+    transform: translateX(-4px);
+  }
+  30% {
+    transform: translateX(4px);
+  }
+  45% {
+    transform: translateX(-3px);
+  }
+  60% {
+    transform: translateX(3px);
+  }
+  75% {
+    transform: translateX(-2px);
+  }
+  90% {
+    transform: translateX(1px);
+  }
+}
+
+/* Subtle glow pulse for the running card border */
+@keyframes runGlow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px rgba(74, 163, 255, 0.18);
+  }
+  50% {
+    box-shadow: 0 0 8px 2px rgba(74, 163, 255, 0.12), 0 0 0 1px rgba(74, 163, 255, 0.25);
+  }
+}
+
+/* Apply entrance animation to all cards (one-shot on DOM insertion) */
+.card {
+  animation: cardEntrance 0.3s ease-out forwards;
+}
+
+/* Stagger entrance for multiple cards (up to 8) */
+.cards .card:nth-child(1) {
+  animation-delay: 0ms;
+}
+.cards .card:nth-child(2) {
+  animation-delay: 60ms;
+}
+.cards .card:nth-child(3) {
+  animation-delay: 120ms;
+}
+.cards .card:nth-child(4) {
+  animation-delay: 180ms;
+}
+.cards .card:nth-child(5) {
+  animation-delay: 240ms;
+}
+.cards .card:nth-child(6) {
+  animation-delay: 300ms;
+}
+.cards .card:nth-child(7) {
+  animation-delay: 360ms;
+}
+.cards .card:nth-child(8) {
+  animation-delay: 420ms;
+}
+
+/* Running state: shimmer gradient + glow (overrides entrance) */
+.card.running {
+  background: linear-gradient(
+    90deg,
+    var(--panel) 0%,
+    rgba(74, 163, 255, 0.04) 25%,
+    rgba(74, 163, 255, 0.08) 50%,
+    rgba(74, 163, 255, 0.04) 75%,
+    var(--panel) 100%
+  );
+  background-size: 200% 100%;
+  animation: cardShimmer 2.4s ease-in-out infinite, runGlow 2s ease-in-out infinite;
+}
+
+/* Done state: completion indicator */
+.card.done {
+  position: relative;
+  animation: none;
+}
+.card.done::after {
+  content: "\2713";
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--done);
+  background: rgba(63, 185, 80, 0.12);
+  border: 1px solid rgba(63, 185, 80, 0.3);
+  border-radius: 50%;
+  animation: checkScale 0.35s ease-out both;
+}
+
+/* Error state: shake (one-shot, does not repeat on re-render because
+   the animation name is the same — browser deduplicates) */
+.card.error {
+  animation: cardShake 0.4s ease-out forwards;
+}
+
+/* =========================================================================
+   IMPROVEMENT A: Animated Phase Connectors
+   The connectors between phases become animated rails with flowing dots when
+   a run is active, showing data moving between stations. Static when idle.
+   ========================================================================= */
+
+@keyframes flowDown {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 0 18px;
+  }
+}
+
+@keyframes connectorGlow {
+  0%,
+  100% {
+    opacity: 0.5;
+    box-shadow: none;
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 6px 1px rgba(52, 211, 196, 0.3);
+  }
+}
+
+/* Active connector: animated flowing dots (when a run is in progress) */
+.connector.active {
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--accent) 0px,
+    var(--accent) 3px,
+    transparent 3px,
+    transparent 6px
+  );
+  background-size: 3px 6px;
+  animation: flowDown 0.6s linear infinite;
+  box-shadow: 0 0 4px rgba(52, 211, 196, 0.2);
+}
+
+/* Completed connector: solid accent, no animation */
+.connector.done {
+  background: var(--accent-dim);
+  width: 3px;
+}
+
+/* Error connector: red tint */
+.connector.err {
+  background: rgba(248, 81, 73, 0.4);
+}
+
+/* =========================================================================
+   IMPROVEMENT C: Enhanced Arrival Report
+   Animated counters, a visual status grid, and polished destination buttons
+   for a satisfying completion experience.
+   ========================================================================= */
+
+@keyframes arrivalFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes counterReveal {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes dotPop {
+  0% {
+    transform: scale(0);
+  }
+  60% {
+    transform: scale(1.3);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Arrival report entrance */
+.arrival {
+  animation: arrivalFadeIn 0.5s ease-out both;
+}
+
+/* Receipt metrics: animated counter containers */
+.arrival-metrics {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin: 14px 0 18px;
+}
+.arrival-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  animation: counterReveal 0.4s ease-out both;
+}
+.arrival-metric:nth-child(1) {
+  animation-delay: 0.1s;
+}
+.arrival-metric:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.arrival-metric:nth-child(3) {
+  animation-delay: 0.3s;
+}
+.arrival-metric:nth-child(4) {
+  animation-delay: 0.4s;
+}
+.arrival-metric:nth-child(5) {
+  animation-delay: 0.5s;
+}
+.arrival-metric-value {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  line-height: 1.2;
+}
+.arrival-metric-value.ok {
+  color: var(--done);
+}
+.arrival-metric-value.err {
+  color: var(--error);
+}
+.arrival-metric-value.cost {
+  color: var(--accent);
+}
+.arrival-metric-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+/* Status grid: one dot per step showing pass/fail/skip */
+.arrival-status-grid {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin: 10px 0 16px;
+  padding: 10px 12px;
+  background: rgba(14, 17, 22, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.arrival-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--pending);
+  animation: dotPop 0.3s ease-out both;
+}
+.arrival-dot.ok {
+  background: var(--done);
+}
+.arrival-dot.fail {
+  background: var(--error);
+}
+.arrival-dot.skip {
+  background: var(--gate);
+}
+/* Stagger dot animations (up to 20) */
+.arrival-dot:nth-child(1) {
+  animation-delay: 0.05s;
+}
+.arrival-dot:nth-child(2) {
+  animation-delay: 0.08s;
+}
+.arrival-dot:nth-child(3) {
+  animation-delay: 0.11s;
+}
+.arrival-dot:nth-child(4) {
+  animation-delay: 0.14s;
+}
+.arrival-dot:nth-child(5) {
+  animation-delay: 0.17s;
+}
+.arrival-dot:nth-child(6) {
+  animation-delay: 0.20s;
+}
+.arrival-dot:nth-child(7) {
+  animation-delay: 0.23s;
+}
+.arrival-dot:nth-child(8) {
+  animation-delay: 0.26s;
+}
+.arrival-dot:nth-child(9) {
+  animation-delay: 0.29s;
+}
+.arrival-dot:nth-child(10) {
+  animation-delay: 0.32s;
+}
+.arrival-dot:nth-child(11) {
+  animation-delay: 0.35s;
+}
+.arrival-dot:nth-child(12) {
+  animation-delay: 0.38s;
+}
+.arrival-dot:nth-child(13) {
+  animation-delay: 0.41s;
+}
+.arrival-dot:nth-child(14) {
+  animation-delay: 0.44s;
+}
+.arrival-dot:nth-child(15) {
+  animation-delay: 0.47s;
+}
+.arrival-dot:nth-child(16) {
+  animation-delay: 0.50s;
+}
+.arrival-dot:nth-child(17) {
+  animation-delay: 0.53s;
+}
+.arrival-dot:nth-child(18) {
+  animation-delay: 0.56s;
+}
+.arrival-dot:nth-child(19) {
+  animation-delay: 0.59s;
+}
+.arrival-dot:nth-child(20) {
+  animation-delay: 0.62s;
+}
+.arrival-dot:nth-child(n + 21) {
+  animation-delay: 0.65s;
+}
+
+/* Polished destination buttons */
+.arrival-destinations .btn {
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.arrival-destinations .btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.arrival-destinations .btn:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+.arrival-destinations .btn.primary {
+  background: linear-gradient(135deg, var(--accent-dim), #1a8a7f);
+  border-color: var(--accent);
+}
+.arrival-destinations .btn.primary:hover {
+  background: linear-gradient(135deg, #25867d, #1c9d91);
+}
+
+/* =========================================================================
+   Accessibility: Respect prefers-reduced-motion
+   ========================================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .card.running,
+  .card.done,
+  .card.done::after,
+  .card.error,
+  .connector.active,
+  .arrival,
+  .arrival-metric,
+  .arrival-dot {
+    animation: none !important;
+  }
+  .card.running {
+    background: var(--panel);
+  }
+  .arrival-destinations .btn:hover {
+    transform: none;
+  }
 }
