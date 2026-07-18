@@ -1359,6 +1359,7 @@
         var connCls = "connector";
         if (prevDone && prevOk && curRunning) connCls += " active";
         else if (prevDone && prevOk && curDone) connCls += " done";
+        else if (prevDone && !prevOk && curDone && p.ok) connCls += " done";
         else if (prevDone && !prevOk) connCls += " err";
         else if (S.runState && S.runState.started && prevDone) connCls += " active";
         canvas.appendChild(h("div", { class: connCls }));
