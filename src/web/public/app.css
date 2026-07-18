@@ -1810,9 +1810,6 @@ select:focus-visible,
   header .mode-badge {
     order: 1;
   }
-  #historyBtn {
-    margin-left: auto !important;
-  }
   .runbar .title {
     font-size: 16px;
   }

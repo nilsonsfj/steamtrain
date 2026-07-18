@@ -1573,7 +1573,7 @@
   function openDetail(p, s, invoker) {
     S.detailFocusGeneration += 1;
     S.detail = { phaseId: p.phaseId, iteration: p.iteration || 1, stepId: s.stepId };
-    S.detailInvoker = invoker && invoker.getAttribute
+    S.detailInvoker = invoker && typeof invoker.getAttribute === "function"
       ? invoker.getAttribute("data-detail-invoker")
       : null;
     S.detailFallback = "details:" + stepKey(p, s);
