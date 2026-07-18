@@ -40,7 +40,10 @@
     // Collapse the phase tree under the Arrival Report after completion.
     arrivalInspect: false,
     // Wall-clock end of the last run (frozen for the Arrival receipt).
-    endedAt: 0
+    endedAt: 0,
+    // Whether the arrival report has already played its entrance animations
+    // this run (suppresses replay on "Inspect cars" toggle re-renders).
+    arrivalAnimated: false
   };
 
   var SELECTION_KEY = "steamtrain.lastWorkflow";
@@ -965,7 +968,7 @@
     stopTimer();
     S.selected = name; S.runId = null; S.runState = null;
     S.detail = null; S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
-    S.narration = []; S.arrivalInspect = false; S.endedAt = 0;
+    S.narration = []; S.arrivalInspect = false; S.arrivalAnimated = false; S.endedAt = 0;
     if (name !== TOUR_NAME) S.stationLanding = false;
     try { localStorage.setItem(SELECTION_KEY, name); } catch (e) {}
     renderSidebar();
@@ -1199,7 +1202,9 @@
       nextWorkflow: pickNextWorkflow()
     });
     if (!report) return false;
-    var wrap = h("div", { class: "arrival" });
+    var firstArrival = !S.arrivalAnimated;
+    S.arrivalAnimated = true;
+    var wrap = h("div", { class: "arrival" + (firstArrival ? "" : " no-animate") });
     wrap.appendChild(h("div", { class: "arrival-title" },
       report.receipt.ok ? "\uD83D\uDE82 Arrival" : "Stopped short",
       report.heroStepId ? h("span", { class: "arrival-step", text: " \u00b7 " + report.heroStepId }) : null
@@ -1256,8 +1261,8 @@
       onClick: function () { S.arrivalInspect = !S.arrivalInspect; render(); }
     }));
     canvas.appendChild(wrap);
-    // Animate counters after DOM insertion
-    animateArrivalCounters(wrap);
+    // Animate counters only on first arrival render (not on "Inspect cars" toggle)
+    if (firstArrival) animateArrivalCounters(wrap);
     return true;
   }
 
@@ -1362,7 +1367,15 @@
         else if (prevDone && !prevOk && curDone && p.ok) connCls += " done";
         else if (prevDone && !prevOk) connCls += " err";
         else if (S.runState && S.runState.started && prevDone) connCls += " active";
-        canvas.appendChild(h("div", { class: connCls }));
+        var connEl = h("div", { class: connCls });
+        // Seed the flowDown animation offset from wall clock so the dot pattern
+        // stays visually continuous across DOM rebuilds (render() does a full
+        // clear + rebuild on every SSE event during a live run).
+        if (connCls.indexOf("active") >= 0) {
+          var offsetMs = Date.now() % 600; // 600ms = flowDown duration
+          connEl.style.animationDelay = "-" + offsetMs + "ms";
+        }
+        canvas.appendChild(connEl);
       }
       var piter = p.iteration || 1;
       var steps = p.steps || [];
@@ -2010,7 +2023,7 @@
     }
     S.runState = SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || S.spec);
     S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
-    S.narration = []; S.arrivalInspect = false;
+    S.narration = []; S.arrivalInspect = false; S.arrivalAnimated = false;
     if (S.selected === TOUR_NAME) S.stationLanding = false;
     S.endedAt = 0;
     setBanner("", "");
