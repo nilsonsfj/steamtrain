@@ -30,7 +30,7 @@ export function WorkflowPicker({
 }: WorkflowPickerProps) {
   // The synthetic "create" row sits one past the last workflow.
   const createRowActive = selectedIndex === workflows.length;
-  const listBudget = Math.max(1, height - (stationLanding ? 5 : 3));
+  const listBudget = Math.max(1, height - (stationLanding ? 6 : 3));
   const window = selectVisibleWindow(workflows, selectedIndex, listBudget);
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} height={height}>
@@ -49,11 +49,12 @@ export function WorkflowPicker({
       </Box>
       {stationLanding ? (
         <Box flexDirection="column">
-          <Text color="white">
-            Orchestrate coding agents like a train — parallel work, one receipt.
+          <Text color="white" bold>
+            steamtrain
           </Text>
+          <Text color="cyan">Parallel agents. One receipt. Start with the free tour.</Text>
           <Text color="green">
-            Start here: select <Text bold>tour</Text> · Enter preview · Ctrl+R ride ($0)
+            → <Text bold>tour</Text> selected · Enter preview · Ctrl+R ride ($0 · ~1s)
           </Text>
         </Box>
       ) : null}

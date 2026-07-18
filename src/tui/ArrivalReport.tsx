@@ -1,32 +1,35 @@
 import { Box, Text } from "ink";
-import { type ArrivalReport, formatArrivalReceipt } from "../workflow";
+import { type ArrivalReport, arrivalReceiptCards, formatArrivalHeadline } from "../workflow";
 import { wrapOutputLines } from "./output-window";
 
 interface ArrivalReportViewProps {
   report: ArrivalReport;
   width: number;
   height: number;
+  /** Workflow name for the climax headline. */
+  workflowName?: string | null;
   /** When true, show destination key hints (TUI interactive). */
   showKeys?: boolean;
 }
 
 /**
- * The Arrival Report: consolidator output as the hero, a monospace receipt
- * strip, and at most three next-destination actions. Replaces the live tree
- * when a run completes — the tree remains reachable via Esc / inspect.
+ * The Arrival Report: climax headline, three receipt facts, consolidator
+ * output as the body, and plain-language next actions. Replaces the live tree
+ * when a run completes — the tree remains reachable via Esc / i.
  */
 export function ArrivalReportView({
   report,
   width,
   height,
+  workflowName,
   showKeys = true,
 }: ArrivalReportViewProps) {
   const inner = Math.max(20, width - 4);
-  const receipt = formatArrivalReceipt(report.receipt);
-  const title = report.receipt.ok ? "Arrival" : "Stopped short";
+  const headline = formatArrivalHeadline(report.receipt, workflowName);
+  const cards = arrivalReceiptCards(report.receipt);
   const titleColor = report.receipt.ok ? "green" : "red";
 
-  // Fixed chrome: border(2) + title(1) + receipt(1) + destinations(1).
+  // Fixed chrome: border(2) + headline row with hint(1) + cards(1) + destinations(1).
   const chrome = 5;
   const bodyBudget = Math.max(1, height - chrome);
   const heroLines = wrapOutputLines(report.hero, inner).slice(0, bodyBudget);
@@ -42,12 +45,18 @@ export function ArrivalReportView({
     >
       <Box justifyContent="space-between">
         <Text color={titleColor} bold>
-          🚂 {title}
-          {report.heroStepId ? ` · ${report.heroStepId}` : ""}
+          {headline}
         </Text>
-        <Text color="gray">i inspect cars · Esc back</Text>
+        <Text color="gray">i details · Esc back</Text>
       </Box>
-      <Text color="gray">{receipt}</Text>
+      <Box>
+        {cards.map((card, i) => (
+          <Text key={card.id} color="gray">
+            {i > 0 ? "  ·  " : ""}
+            <Text color="white">{card.label}</Text> {card.value}
+          </Text>
+        ))}
+      </Box>
       <Box flexDirection="column" flexGrow={1}>
         {heroLines.map((line, lineNo) => (
           // Lines are a stable top-to-bottom slice of wrapped output; index is the identity.

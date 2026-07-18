@@ -83,7 +83,7 @@ export function useWorkflowRunner({
   const [wfShowPlanResult, setWfShowPlanResult] = useState(true);
   /** Live conductor narration — pure projection of WorkflowEvents. */
   const [narration, setNarration] = useState<NarrationLine[]>([]);
-  /** After arrival, prefer the receipt surface until the user inspects cars. */
+  /** After arrival, prefer the receipt surface until the user opens step details. */
   const [showArrival, setShowArrival] = useState(true);
   // Selection auto-follow: while a run streams, keep the selected step (and
   // its detail pane) on the live action. Any manual ↑/↓ hands control to the
