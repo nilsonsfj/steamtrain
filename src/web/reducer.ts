@@ -12,7 +12,9 @@ export {
 export {
   buildArrivalReport,
   findArrivalStep,
+  formatArrivalHeadline,
   formatArrivalReceipt,
+  arrivalReceiptCards,
   ARRIVAL_NEXT_CANDIDATES,
 } from "../workflow/arrival-report";
 export {

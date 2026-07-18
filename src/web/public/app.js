@@ -37,6 +37,8 @@
     narrationOn: localStorage.getItem("steamtrain.narration") !== "off",
     // Station landing: first-open hero for the tour.
     stationLanding: false,
+    // Expand the full step-kind legend via "?".
+    legendExpanded: false,
     // Collapse the phase tree under the Arrival Report after completion.
     arrivalInspect: false,
     // Wall-clock end of the last run (frozen for the Arrival receipt).
@@ -1123,11 +1125,24 @@
   }
 
   function renderStationHero(canvas) {
+    var logo = h("div", { class: "station-logo" });
+    logo.appendChild(document.createTextNode("\uD83D\uDE82 "));
+    var accent = h("span", { class: "accent", text: "steam" });
+    logo.appendChild(accent);
+    logo.appendChild(document.createTextNode("train"));
     var band = h("div", { class: "station-hero" },
-      h("div", { class: "station-premise", text: "Orchestrate coding agents like a train — parallel work, one receipt." }),
+      h("div", { class: "station-brand" }, logo),
+      h("div", {
+        class: "station-premise",
+        text: "Parallel agents. One receipt."
+      }),
+      h("div", {
+        class: "station-sub",
+        text: "Take the free tour — no agents, no API key, ~1 second."
+      }),
       h("div", { class: "station-actions" },
         isReadOnly() ? null : h("button", {
-          class: "btn primary",
+          class: "btn primary station-cta",
           text: "Take the tour \u2192",
           onClick: function () {
             var input = document.getElementById("input");
@@ -1136,12 +1151,13 @@
           }
         }),
         h("button", {
-          class: "btn small",
-          text: "Choose another workflow",
+          class: "btn small station-secondary",
+          text: "I have a workflow",
           disabled: isReadOnly() ? true : undefined,
           onClick: function () {
             if (isReadOnly()) return;
             S.stationLanding = false;
+            syncStationMode();
             renderSidebar();
             var other = S.workflows.find(function (w) { return w.name !== TOUR_NAME; });
             if (other) selectWorkflow(other.name);
@@ -1150,6 +1166,14 @@
       )
     );
     canvas.appendChild(band);
+  }
+
+  function syncStationMode() {
+    var on =
+      S.stationLanding &&
+      S.selected === TOUR_NAME &&
+      !(S.runState && S.runState.started);
+    document.body.dataset.mode = on ? "station" : "";
   }
 
   function renderNarration(canvas) {
@@ -1199,15 +1223,29 @@
       nextWorkflow: pickNextWorkflow()
     });
     if (!report) return false;
-    var wrap = h("div", { class: "arrival" });
-    wrap.appendChild(h("div", { class: "arrival-title" },
-      report.receipt.ok ? "\uD83D\uDE82 Arrival" : "Stopped short",
-      report.heroStepId ? h("span", { class: "arrival-step", text: " \u00b7 " + report.heroStepId }) : null
-    ));
-    wrap.appendChild(h("div", {
-      class: "arrival-receipt",
-      text: SteamtrainReducer.formatArrivalReceipt(report.receipt)
-    }));
+    var headline = SteamtrainReducer.formatArrivalHeadline
+      ? SteamtrainReducer.formatArrivalHeadline(report.receipt, S.runState.name || S.selected)
+      : (report.receipt.ok ? "Arrival" : "Stopped short");
+    var cards = SteamtrainReducer.arrivalReceiptCards
+      ? SteamtrainReducer.arrivalReceiptCards(report.receipt)
+      : [];
+    var wrap = h("div", { class: "arrival" + (report.receipt.ok ? " ok" : " failed") });
+    wrap.appendChild(h("div", { class: "arrival-title", text: headline }));
+    if (cards.length) {
+      var grid = h("div", { class: "arrival-cards" });
+      cards.forEach(function (c) {
+        grid.appendChild(h("div", { class: "arrival-card" },
+          h("div", { class: "arrival-card-label", text: c.label }),
+          h("div", { class: "arrival-card-value", text: c.value })
+        ));
+      });
+      wrap.appendChild(grid);
+    } else {
+      wrap.appendChild(h("div", {
+        class: "arrival-receipt",
+        text: SteamtrainReducer.formatArrivalReceipt(report.receipt)
+      }));
+    }
     wrap.appendChild(h("pre", { class: "arrival-hero", text: report.hero }));
     var dest = h("div", { class: "arrival-destinations" });
     report.destinations.forEach(function (d) {
@@ -1225,7 +1263,7 @@
     wrap.appendChild(dest);
     wrap.appendChild(h("button", {
       class: "btn small arrival-inspect",
-      text: S.arrivalInspect ? "Hide car tree" : "Inspect cars",
+      text: S.arrivalInspect ? "Hide step details" : "Show step details",
       onClick: function () { S.arrivalInspect = !S.arrivalInspect; render(); }
     }));
     canvas.appendChild(wrap);
@@ -1235,16 +1273,25 @@
   function render() {
     var canvas = document.getElementById("canvas");
     clear(canvas);
+    syncStationMode();
     if (!S.spec) {
       canvas.appendChild(h("div", { class: "empty station-empty" },
-        h("div", { class: "station-premise", text: "Orchestrate coding agents like a train — parallel work, one receipt." }),
+        h("div", { class: "station-premise", text: "Parallel agents. One receipt." }),
         h("div", { text: "Boarding the tour\u2026" })
       ));
       return;
     }
 
-    var showStation = S.selected === TOUR_NAME && !(S.runState && S.runState.started);
-    if (showStation) renderStationHero(canvas);
+    // First-run station: hero only — one composition, no pipeline noise.
+    if (S.stationLanding && S.selected === TOUR_NAME && !(S.runState && S.runState.started)) {
+      renderStationHero(canvas);
+      updateProgress();
+      return;
+    }
+    // Returning to tour (not first-run): keep a compact boarding banner above the pipeline.
+    if (S.selected === TOUR_NAME && !(S.runState && S.runState.started)) {
+      renderStationHero(canvas);
+    }
 
     var showingArrival = false;
     if (S.runState && S.runState.done) {
@@ -1257,11 +1304,7 @@
     }
 
     renderNarration(canvas);
-
-    canvas.appendChild(h("div", { class: "legend" },
-      legendItem("worker", "worker"), legendItem("processor", "process"),
-      legendItem("distributor", "fan-out"), legendItem("consolidator", "merge"), legendItem("gate", "gate"), legendItem("approval", "approval"), legendItem("human", "human"), legendItem("merge", "merge-back"), legendItem("command", "command"), legendItem("llm", "llm"), legendItem("workflow", "sub-workflow")
-    ));
+    renderLegendOrTrack(canvas);
 
     var maxIter = {};
     var phases = S.runState ? S.runState.phases : [];
@@ -1335,6 +1378,105 @@
   }
   function kindColor(k) {
     return { worker: "#6fb1ff", processor: "#9d8cff", distributor: "#ffce6f", consolidator: "#5fe0c6", gate: "#f0a35e", approval: "#ffd166", human: "#f5a3ff", merge: "#ff9ecb", command: "#b8c4d0", llm: "#62d2f5", workflow: "#7ce38b" }[k] || "#6fb1ff";
+  }
+
+  var ALL_LEGEND_KINDS = [
+    ["worker", "worker"], ["processor", "process"], ["distributor", "fan-out"],
+    ["consolidator", "merge"], ["gate", "gate"], ["approval", "approval"],
+    ["human", "human"], ["merge", "merge-back"], ["command", "command"],
+    ["llm", "llm"], ["workflow", "sub-workflow"]
+  ];
+
+  /** Kinds present in the selected workflow (spec or live phases). */
+  function kindsInCurrentWorkflow() {
+    var set = {};
+    if (S.spec && S.spec.phases) {
+      S.spec.phases.forEach(function (p) {
+        (p.steps || []).forEach(function (s) {
+          if (s.kind) set[s.kind] = true;
+        });
+      });
+    }
+    if (S.runState && S.runState.phases) {
+      S.runState.phases.forEach(function (p) {
+        (p.steps || []).forEach(function (s) {
+          if (s.blockKind) set[s.blockKind] = true;
+        });
+      });
+    }
+    return set;
+  }
+
+  function renderLegendOrTrack(canvas) {
+    var running = S.runState && S.runState.started && !S.runState.done;
+    if (running) {
+      canvas.appendChild(renderTrackStrip());
+      return;
+    }
+    var present = kindsInCurrentWorkflow();
+    var keys = Object.keys(present);
+    var wrap = h("div", { class: "legend" });
+    ALL_LEGEND_KINDS.forEach(function (pair) {
+      if (keys.length === 0 || present[pair[0]]) {
+        wrap.appendChild(legendItem(pair[0], pair[1]));
+      }
+    });
+    var help = h("button", {
+      class: "btn small legend-help",
+      text: "?",
+      title: "Show all step kinds",
+      onClick: function (e) {
+        e.stopPropagation();
+        S.legendExpanded = !S.legendExpanded;
+        render();
+      }
+    });
+    wrap.appendChild(help);
+    if (S.legendExpanded) {
+      var full = h("div", { class: "legend-full" });
+      ALL_LEGEND_KINDS.forEach(function (pair) {
+        full.appendChild(legendItem(pair[0], pair[1]));
+      });
+      wrap.appendChild(full);
+    }
+    canvas.appendChild(wrap);
+  }
+
+  /** Horizontal track: one segment per leaf step in the live run. */
+  function renderTrackStrip() {
+    var segments = [];
+    var maxIter = {};
+    var phases = (S.runState && S.runState.phases) || [];
+    phases.forEach(function (p) {
+      if (p.iteration && (!maxIter[p.phaseId] || p.iteration > maxIter[p.phaseId])) {
+        maxIter[p.phaseId] = p.iteration;
+      }
+    });
+    phases.forEach(function (p) {
+      var isLatest = !p.iteration || p.iteration === (maxIter[p.phaseId] || 1);
+      if (!isLatest) return;
+      (p.steps || []).forEach(function (s) {
+        segments.push(s);
+      });
+    });
+    var track = h("div", { class: "track", title: "Live pipeline track" });
+    segments.forEach(function (s, idx) {
+      var status = s.status || "pending";
+      if (s.result && s.result.skipped) status = "skipped";
+      var seg = h("div", {
+        class: "track-seg " + status,
+        title: s.stepId + " · " + status,
+        style: "background:" + (status === "pending" ? "transparent" : kindColor(s.blockKind)) +
+          ";border-color:" + kindColor(s.blockKind)
+      });
+      if (idx < segments.length - 1) {
+        track.appendChild(seg);
+        track.appendChild(h("div", { class: "track-join" }));
+      } else {
+        track.appendChild(seg);
+      }
+    });
+    return track;
   }
 
   function renderCard(s, p) {

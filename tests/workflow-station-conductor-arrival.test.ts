@@ -5,8 +5,10 @@ import {
   type WorkflowEvent,
   type WorkflowState,
   appendNarration,
+  arrivalReceiptCards,
   buildArrivalReport,
   findArrivalStep,
+  formatArrivalHeadline,
   formatArrivalReceipt,
   initialWorkflowIndex,
   isAgentlessWorkflow,
@@ -188,8 +190,11 @@ describe("arrival report", () => {
     expect(report!.hero).toContain("END OF THE LINE");
     expect(report!.receipt.agentless).toBe(true);
     expect(formatArrivalReceipt(report!.receipt)).toContain("$0");
+    expect(formatArrivalHeadline(report!.receipt, "tour")).toBe("Tour complete · $0 · 0.7s");
+    expect(arrivalReceiptCards(report!.receipt)).toHaveLength(3);
     expect(report!.destinations).toHaveLength(3);
-    expect(report!.destinations[0]?.id).toBe("again");
+    expect(report!.destinations[0]).toMatchObject({ id: "again", label: "Ride again" });
+    expect(report!.destinations[2]).toMatchObject({ id: "history", label: "See past runs" });
     expect(ARRIVAL_NEXT_CANDIDATES[0]).toBe("multi-plan");
   });
 
