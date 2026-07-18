@@ -302,10 +302,13 @@ export async function runWorkflowCommand(
         err(`--agent ${options.agent}: ${reroute.error}\n`);
         return 1;
       }
-      out("note: every agent this workflow uses is ready — nothing to re-route\n");
+      // Notes go to stderr under --json so stdout stays parseable JSON.
+      (options.json ? err : out)(
+        "note: every agent this workflow uses is ready — nothing to re-route\n",
+      );
     } else {
       spec = applyWorkflowStepOverrides(spec, reroute.plan.overrides);
-      out(`${formatReroutePlan(reroute.plan)} — this run only\n`);
+      (options.json ? err : out)(`${formatReroutePlan(reroute.plan)} — this run only\n`);
     }
   }
   if (usesAgents || workflowLlmSteps(spec).length > 0) {
@@ -316,10 +319,15 @@ export async function runWorkflowCommand(
         const reroute = orchestrator.planWorkflowReroute(spec);
         if (reroute.ok) {
           // Emit the full runnable command so it's genuinely copy-paste-able
-          // (the doctor's install hints are; this should match).
+          // (the doctor's install hints are; this should match) — including any
+          // --param values the original invocation supplied, so a workflow with
+          // required declared inputs doesn't fail input resolution on re-run.
+          const paramArgs = Object.entries(options.params)
+            .map(([k, v]) => ` --param ${shellQuote(`${k}=${v}`)}`)
+            .join("");
           const rerun = `steamtrain workflow run ${name} --input ${shellQuote(
             input?.trim() ?? "",
-          )} --agent ${reroute.plan.target}`;
+          )}${paramArgs} --agent ${reroute.plan.target}`;
           err(`hint: ${formatReroutePlan(reroute.plan)}\n`);
           err(`      re-run with: ${rerun}\n`);
         }
@@ -845,7 +853,11 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<numbe
       ac.signal,
       cache,
       cwd,
-      undefined,
+      // Pass the resolved spec (which carries any `--agent` re-route) so the
+      // engine runs exactly what preflight and the cache key were computed
+      // against — without this the engine re-resolves the original catalog
+      // workflow and a re-route would silently not take effect.
+      spec,
       params,
       options.approval,
       control,

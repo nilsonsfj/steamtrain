@@ -529,6 +529,8 @@ async function planCommand(
   // blocked agent steps re-routed onto the requested ready agent. Runs the
   // doctor (only here, when --agent is present) so the target's readiness is
   // checked exactly as a real run would; the base plan stays fully offline.
+  let rerouteInfo: { agent: string; model: string; steps: number; blockedAgents: string[] } | null =
+    null;
   if (options.agent && workflowAgentIds(spec).length > 0) {
     const config = orchestrator.getConfig();
     const doctor = await runDoctor(config);
@@ -540,10 +542,20 @@ async function planCommand(
         err(`--agent ${options.agent}: ${reroute.error}\n`);
         return 1;
       }
-      out("note: every agent this workflow uses is ready — nothing to re-route\n");
+      // Human-readable notes go to stderr under --json so stdout stays
+      // parseable JSON for scripts; the re-route is surfaced in the JSON below.
+      (options.json ? err : out)(
+        "note: every agent this workflow uses is ready — nothing to re-route\n",
+      );
     } else {
       spec = applyWorkflowStepOverrides(spec, reroute.plan.overrides);
-      out(`${formatReroutePlan(reroute.plan)} — this run only\n`);
+      rerouteInfo = {
+        agent: reroute.plan.target,
+        model: reroute.plan.targetModel,
+        steps: reroute.plan.stepIds.length,
+        blockedAgents: reroute.plan.blockedAgents,
+      };
+      (options.json ? err : out)(`${formatReroutePlan(reroute.plan)} — this run only\n`);
     }
   } else if (options.agent) {
     err(`--agent: workflow '${name}' has no agent-backed steps to re-route\n`);
@@ -561,7 +573,12 @@ async function planCommand(
     .catch(() => null);
 
   if (options.json) {
-    out(`${JSON.stringify(history ? { ...plan, history } : plan, null, 2)}\n`);
+    const payload = {
+      ...plan,
+      ...(history ? { history } : {}),
+      ...(rerouteInfo ? { reroute: rerouteInfo } : {}),
+    };
+    out(`${JSON.stringify(payload, null, 2)}\n`);
     return plan.ok ? 0 : 1;
   }
 
