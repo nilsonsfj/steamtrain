@@ -1915,3 +1915,141 @@ select.sel.invalid {
 .drawer-output.err {
   color: var(--error);
 }
+
+/* ---- decision-grade preflight + keyboard access ------------------------- */
+.plan-history {
+  color: var(--accent);
+  font-size: 13px;
+  margin-top: 4px;
+}
+.card-details {
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 7px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.card-details:hover {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---- narrow-screen control plane ---------------------------------------- */
+@media (max-width: 900px) {
+  body {
+    height: auto;
+    min-height: 100vh;
+    overflow: auto;
+  }
+  header {
+    flex-wrap: wrap;
+    padding: 10px 12px;
+  }
+  header .health {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+  }
+  main {
+    flex-direction: column;
+    min-height: 0;
+    overflow: visible;
+  }
+  aside#sidebar {
+    width: 100%;
+    max-height: 34vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 10px;
+  }
+  section.work {
+    min-height: 62vh;
+  }
+  .runbar {
+    padding: 12px;
+  }
+  .runbar .row {
+    flex-wrap: wrap;
+  }
+  textarea#input {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+  .btnstack {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .btnstack .btn {
+    flex: 1 1 120px;
+    min-height: 38px;
+  }
+  .canvas {
+    min-height: 48vh;
+    padding: 16px 12px 40px;
+  }
+  .cards {
+    flex-direction: column;
+  }
+  .card {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+  .drawer {
+    width: 100vw;
+    max-width: none;
+    border-left: 0;
+    padding: max(14px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+      max(14px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  }
+  .modal-overlay {
+    padding: 12px;
+  }
+  .modal {
+    max-height: calc(100vh - 24px);
+  }
+}
+
+@media (max-width: 520px) {
+  header .config {
+    width: 100%;
+    order: 2;
+  }
+  header .mode-badge {
+    order: 1;
+  }
+  .runbar .title {
+    font-size: 16px;
+  }
+  .wfactions {
+    gap: 6px;
+  }
+  .wfactions .btn {
+    flex: 1 1 120px;
+  }
+  .drawer-row {
+    flex-direction: column;
+    gap: 1px;
+  }
+  .drawer-label {
+    min-width: 0;
+  }
+  .arrival,
+  .station-hero {
+    padding: 16px;
+  }
+}

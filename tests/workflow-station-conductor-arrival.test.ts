@@ -95,6 +95,75 @@ describe("conductor narration", () => {
     ).toBeNull();
   });
 
+  it("keeps the loop iteration on clickable step lines", () => {
+    const result = {
+      stepId: "inspect",
+      ok: true,
+      output: "done",
+      durationMs: 1,
+    };
+    let lines: ReturnType<typeof appendNarration> = [];
+    lines = appendNarration(lines, {
+      kind: "step_done",
+      phaseId: "check",
+      stepId: "inspect",
+      iteration: 1,
+      result,
+      cached: false,
+      ts: 10,
+    });
+    lines = appendNarration(lines, {
+      kind: "step_done",
+      phaseId: "check",
+      stepId: "inspect",
+      iteration: 2,
+      result,
+      cached: false,
+      ts: 10,
+    });
+
+    expect(lines.map((line) => line.iteration)).toEqual([1, 2]);
+    expect(new Set(lines.map((line) => line.id)).size).toBe(2);
+  });
+
+  it("deduplicates non-adjacent narration lines with the same base id", () => {
+    let lines: ReturnType<typeof appendNarration> = [];
+    lines = appendNarration(lines, {
+      kind: "step_retry",
+      phaseId: "check",
+      stepId: "inspect",
+      iteration: 1,
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 100,
+      reason: "transient failure",
+      ts: 10,
+    });
+    lines = appendNarration(lines, {
+      kind: "phase_start",
+      phaseId: "report",
+      title: "Report",
+      index: 1,
+      stepCount: 1,
+      ts: 11,
+    });
+    lines = appendNarration(lines, {
+      kind: "step_retry",
+      phaseId: "check",
+      stepId: "inspect",
+      iteration: 1,
+      attempt: 2,
+      maxAttempts: 3,
+      delayMs: 200,
+      reason: "transient failure",
+      ts: 10,
+    });
+
+    const ids = lines.map((line) => line.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids[2]).toBe(`${ids[0]}-2`);
+  });
+
   it("caps the live ticker", () => {
     let lines: ReturnType<typeof appendNarration> = [];
     for (let i = 0; i < 50; i++) {

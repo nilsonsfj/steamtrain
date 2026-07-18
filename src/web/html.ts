@@ -104,12 +104,12 @@ export function renderIndex(revs: PageAssetRevisions): string {
       </div>
       <div class="banner" id="banner"></div>
     </div>
-    <div class="canvas" id="canvas">
+    <div class="canvas" id="canvas" tabindex="-1" aria-label="Workflow workspace">
       <div class="empty">No workflow selected.</div>
     </div>
   </section>
 </main>
-<aside class="drawer" id="drawer" aria-label="Step details"></aside>
+<aside class="drawer" id="drawer" role="dialog" aria-label="Step details" aria-hidden="true" tabindex="-1"></aside>
 <div class="modal-overlay" id="overlay"><div class="modal" id="modal"></div></div>
 <script src="${bundleSrc}" defer></script>
 <script src="${appSrc}" defer></script>

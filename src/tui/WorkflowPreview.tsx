@@ -8,7 +8,9 @@ import {
   type WorkflowSourceKind,
   type WorkflowSpec,
   autonomyBadge,
+  formatElapsed,
   formatReroutePlan,
+  formatUsd,
   isAgentBackedStep,
   lintTemplateRefs,
   workflowAutonomy,
@@ -95,7 +97,8 @@ export function WorkflowPreview({
     (row) => row.kind === "step" && row.entry.flatIndex === clampedIndex,
   );
   const selectedRowIndex = foundIndex >= 0 ? foundIndex : 0;
-  const listBudget = Math.max(1, height - (selected && showStepDetail ? 13 : 8));
+  const planHistoryRows = showPlanResult && planResult?.ok && planResult.history ? 1 : 0;
+  const listBudget = Math.max(1, height - (selected && showStepDetail ? 13 : 8) - planHistoryRows);
   const detailMaxHeight = Math.max(1, height - listBudget - 4);
   const rowWindow = selectVisibleWindow(rows, selectedRowIndex, listBudget);
   const phaseCount = spec.phases.length;
@@ -305,6 +308,17 @@ function PlanResultView({ plan, width }: { plan: PlanResult; width: number }) {
       {plan.apis.length > 0 ? <Text color="gray">apis: {plan.apis.join(", ")}</Text> : null}
       {plan.maxCostUsd !== undefined ? (
         <Text color="gray">budget: ${plan.maxCostUsd.toFixed(2)}</Text>
+      ) : null}
+      {plan.history ? (
+        <Text color="gray" wrap="truncate-end">
+          observed across {plan.history.runs} completed run{plan.history.runs === 1 ? "" : "s"}: avg{" "}
+          {formatUsd(plan.history.avgCostUsd)}
+          {plan.history.runs > 1
+            ? ` (${formatUsd(plan.history.minCostUsd)}–${formatUsd(plan.history.maxCostUsd)})`
+            : ""}
+          {" · "}
+          {formatElapsed(plan.history.avgDurationMs)}
+        </Text>
       ) : null}
       {plan.forEachSteps.length > 0 || plan.forEachDynamicSteps.length > 0 ? (
         <Box flexDirection="column" marginTop={1}>
