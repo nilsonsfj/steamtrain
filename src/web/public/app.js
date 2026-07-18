@@ -1270,6 +1270,7 @@
 
   function compactTok(n) {
     if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+    if (n >= 999950) return "1.0M"; // avoids "1000.0k" at the boundary
     if (n >= 1000) return (n / 1000).toFixed(1) + "k";
     return String(n);
   }
@@ -1309,6 +1310,10 @@
   function render() {
     var canvas = document.getElementById("canvas");
     clear(canvas);
+    // Toggle run-active class to suppress entrance animations during live streaming
+    var isRunning = S.runState && S.runState.started && !S.runState.done;
+    if (isRunning) canvas.classList.add("run-active");
+    else canvas.classList.remove("run-active");
     if (!S.spec) {
       canvas.appendChild(h("div", { class: "empty station-empty" },
         h("div", { class: "station-premise", text: "Orchestrate coding agents like a train — parallel work, one receipt." }),

@@ -1778,9 +1778,23 @@ select.sel.invalid {
   }
 }
 
-/* Apply entrance animation to all cards (one-shot on DOM insertion) */
+/* Apply entrance animation to cards only on first paint (before run starts).
+   Once a run is streaming events, render() rebuilds the DOM frequently — so
+   animations must not replay. The .run-active class on .canvas disables
+   entrance/shake replays while streaming is active. */
 .card {
   animation: cardEntrance 0.3s ease-out forwards;
+}
+
+/* During a live run, suppress entrance and one-shot animations */
+.canvas.run-active .card {
+  animation: none;
+}
+.canvas.run-active .card.error {
+  animation: cardShake 0.4s ease-out forwards;
+}
+.canvas.run-active .card.running {
+  animation: cardShimmer 2.4s ease-in-out infinite, runGlow 2s ease-in-out infinite;
 }
 
 /* Stagger entrance for multiple cards (up to 8) */
@@ -1865,18 +1879,6 @@ select.sel.invalid {
   }
   100% {
     background-position: 0 18px;
-  }
-}
-
-@keyframes connectorGlow {
-  0%,
-  100% {
-    opacity: 0.5;
-    box-shadow: none;
-  }
-  50% {
-    opacity: 1;
-    box-shadow: 0 0 6px 1px rgba(52, 211, 196, 0.3);
   }
 }
 
@@ -2107,11 +2109,11 @@ select.sel.invalid {
   box-shadow: none;
 }
 .arrival-destinations .btn.primary {
-  background: linear-gradient(135deg, var(--accent-dim), #1a8a7f);
+  background: linear-gradient(135deg, var(--accent-dim), var(--accent-dim));
   border-color: var(--accent);
 }
 .arrival-destinations .btn.primary:hover {
-  background: linear-gradient(135deg, #25867d, #1c9d91);
+  background: linear-gradient(135deg, #25867d, var(--accent-dim));
 }
 
 /* =========================================================================
@@ -2124,6 +2126,8 @@ select.sel.invalid {
   .card.done,
   .card.done::after,
   .card.error,
+  .canvas.run-active .card.running,
+  .canvas.run-active .card.error,
   .connector.active,
   .arrival,
   .arrival-metric,
