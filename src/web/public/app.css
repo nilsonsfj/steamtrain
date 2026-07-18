@@ -1893,7 +1893,6 @@ select.sel.invalid {
 /* Completed connector: solid accent, no animation */
 .connector.done {
   background: var(--accent-dim);
-  width: 3px;
 }
 
 /* Error connector: red tint */
@@ -2107,7 +2106,7 @@ select.sel.invalid {
   border-color: var(--accent);
 }
 .arrival-destinations .btn.primary:hover {
-  background: linear-gradient(135deg, #25867d, var(--accent-dim));
+  background: #25867d;
 }
 
 /* =========================================================================
