@@ -516,9 +516,9 @@ var SteamtrainReducer = (() => {
   function appendNarration(lines, ev) {
     const next = narrateEvent(ev);
     if (!next) return lines;
-    const last = lines[lines.length - 1];
-    if (last && last.id === next.id) {
-      next.id = `${next.id}-${lines.length}`;
+    let suffix = lines.length;
+    while (lines.some((line2) => line2.id === next.id)) {
+      next.id = `${next.id}-${suffix++}`;
     }
     const out = lines.length >= NARRATION_CAP ? lines.slice(lines.length - NARRATION_CAP + 1) : [...lines];
     out.push(next);

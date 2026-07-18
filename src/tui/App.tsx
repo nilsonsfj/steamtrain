@@ -55,6 +55,7 @@ import {
   isAgentBackedStep,
   isCredentialFreeWorkflow,
   isTerminalLiveRunStatus,
+  planHistoryContext,
   planWorkflow,
   shouldOfferStationLanding,
   totalTokens,
@@ -207,6 +208,9 @@ export function App({
   const valueRef = useRef("");
   const [inputFormPending, setInputFormPending] = useState<InputFormPending | null>(null);
   const [planResult, setPlanResult] = useState<PlanResult | null>(null);
+  // Guards the asynchronous history lookup so a late answer can never replace
+  // a plan for a newer workflow or input.
+  const planRequestRef = useRef(0);
 
   const enabledAgentIds = useMemo(
     () => new Set(resolveAgentInstances(runtimeConfig).map((agent) => agent.id)),
@@ -1323,6 +1327,28 @@ export function App({
       prompt.updatePromptDraft({ value: "", promptEditing: false });
   }, [prompt.recordPromptHistory, handleWorkflowRun, prompt.updatePromptDraft]);
 
+  // A plan is useful immediately, so render static topology synchronously and
+  // enrich it with locally observed history when that lightweight read settles.
+  // The request id prevents an old lookup from replacing a newer preview.
+  const showPlan = useCallback(
+    (name: string, plan: PlanResult) => {
+      const requestId = ++planRequestRef.current;
+      setPlanResult(plan);
+      runner.setWfShowPlanResult(true);
+      void runner.historyStoreRef.current
+        .list()
+        .then((summaries) => {
+          if (!mountedRef.current || requestId !== planRequestRef.current) return;
+          const history = planHistoryContext(summaries, name);
+          if (history) setPlanResult({ ...plan, history });
+        })
+        .catch(() => {
+          // The static plan remains trustworthy if history is unavailable.
+        });
+    },
+    [runner.historyStoreRef, runner.setWfShowPlanResult],
+  );
+
   const handlePlan = useCallback(() => {
     if (runner.running || mode !== "workflow") return;
     const promptText = valueRef.current.trim();
@@ -1352,8 +1378,7 @@ export function App({
       return;
     }
     const plan = planWorkflow(spec, promptText);
-    setPlanResult(plan);
-    runner.setWfShowPlanResult(true);
+    showPlan(name, plan);
   }, [
     runner.running,
     mode,
@@ -1364,6 +1389,7 @@ export function App({
     planResult,
     runner.wfShowPlanResult,
     runner.setWfShowPlanResult,
+    showPlan,
   ]);
 
   // Clear plan result when workflow selection changes.
@@ -1371,6 +1397,7 @@ export function App({
   // the toggle guard checks `planResult && runner.wfShowPlanResult`, so a
   // null planResult prevents the toggle from firing regardless.
   useEffect(() => {
+    planRequestRef.current += 1;
     setPlanResult(null);
   }, [picker.wfPreview?.name, picker.workflowIndex]);
 
@@ -1382,8 +1409,7 @@ export function App({
       const outcome = resolveInputFormSubmit(pending, resolveWorkflowSpec(pending.name), params);
       if (outcome.action === "missing-spec") return;
       if (outcome.action === "plan") {
-        setPlanResult(outcome.plan);
-        runner.setWfShowPlanResult(true);
+        showPlan(pending.name, outcome.plan);
         return;
       }
       prompt.updatePromptDraft({ value: "", promptEditing: false });
@@ -1396,9 +1422,9 @@ export function App({
       inputFormPending,
       resolveWorkflowSpec,
       runner.launchWorkflow,
-      runner.setWfShowPlanResult,
       picker.setWfPreview,
       prompt.updatePromptDraft,
+      showPlan,
     ],
   );
 

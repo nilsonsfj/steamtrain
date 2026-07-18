@@ -40,7 +40,17 @@
     // Collapse the phase tree under the Arrival Report after completion.
     arrivalInspect: false,
     // Wall-clock end of the last run (frozen for the Arrival receipt).
-    endedAt: 0
+    endedAt: 0,
+    // Focus origins make overlays feel like part of one intentional control
+    // surface rather than a collection of disconnected DOM fragments.
+    modalInvoker: null,
+    // A stable data attribute, rather than a transient node, lets detail focus
+    // return to the matching control after the live canvas is rebuilt.
+    detailInvoker: null,
+    detailFallback: null,
+    detailFocusPending: false,
+    detailFocusGeneration: 0,
+    planRequest: 0
   };
 
   var SELECTION_KEY = "steamtrain.lastWorkflow";
@@ -75,6 +85,18 @@
   /** Identity of one step instance across re-renders (loop iterations included). */
   function stepKey(phase, step) {
     return phase.phaseId + ":" + (phase.iteration || 1) + ":" + step.stepId;
+  }
+
+  function restoreDetailInvoker(key) {
+    if (!key) return false;
+    var targets = document.querySelectorAll("[data-detail-invoker]");
+    for (var i = 0; i < targets.length; i++) {
+      if (targets[i].getAttribute("data-detail-invoker") === key) {
+        targets[i].focus();
+        return true;
+      }
+    }
+    return false;
   }
 
   /** Mirrors src/workflow/cost.ts formatElapsed: "8.3s", "1m 23s", "1h 05m". */
@@ -115,6 +137,14 @@
     return e;
   }
   function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+  function isInteractiveTarget(target) {
+    return target instanceof Element && Boolean(target.closest("button, input, textarea, select, a"));
+  }
+  function activateWithKeyboard(event, action) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    action();
+  }
   function api(method, path, body) {
     return fetch(path, {
       method: method,
@@ -285,7 +315,17 @@
         badges.forEach(function (b) { badgeWrap.appendChild(b); });
       }
       var isAttached = S.runId === run.id;
-      var row = h("div", { class: "wf liverun" + (isAttached ? " sel" : ""), onClick: function () { attachRun(run); } },
+      var row = h("div", {
+        class: "wf liverun" + (isAttached ? " sel" : ""),
+        role: "button",
+        tabindex: "0",
+        "aria-current": isAttached ? "true" : null,
+        "aria-label": "Attach to " + run.workflow + " run",
+        onClick: function () { attachRun(run); },
+        onKeydown: function (event) {
+          activateWithKeyboard(event, function () { attachRun(run); });
+        }
+      },
         h("div", { class: "name" }, run.workflow, h("span", { class: "src", text: run.source || "" })),
         h("div", { class: "desc", text: truncate(run.input || "", 60) }),
         h("div", { class: "meta" }, badgeWrap,
@@ -939,7 +979,14 @@
       var isTour = w.name === TOUR_NAME;
       var card = h("div", {
         class: "wf" + (S.selected === w.name ? " sel" : "") + (isTour && S.stationLanding ? " station" : ""),
-        onClick: function () { selectWorkflow(w.name); }
+        role: "button",
+        tabindex: "0",
+        "aria-current": S.selected === w.name ? "true" : null,
+        "aria-label": "Open workflow " + w.name,
+        onClick: function () { selectWorkflow(w.name); },
+        onKeydown: function (event) {
+          activateWithKeyboard(event, function () { selectWorkflow(w.name); });
+        }
       },
         h("div", { class: "name" }, w.name,
           isTour && S.stationLanding ? h("span", { class: "badge start-here", text: "start here" }) : null,
@@ -961,10 +1008,14 @@
   }
 
   function selectWorkflow(name, after) {
+    // Ignore any plan response that was initiated for the previously selected
+    // workflow while its asynchronous history lookup was still running.
+    S.planRequest += 1;
     if (S.es) { S.es.close(); S.es = null; }
     stopTimer();
     S.selected = name; S.runId = null; S.runState = null;
-    S.detail = null; S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
+    S.detail = null; S.detailInvoker = null; S.detailFallback = null; S.detailFocusPending = false; S.detailFocusGeneration += 1;
+    S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
     S.narration = []; S.arrivalInspect = false; S.endedAt = 0;
     if (name !== TOUR_NAME) S.stationLanding = false;
     try { localStorage.setItem(SELECTION_KEY, name); } catch (e) {}
@@ -1152,6 +1203,19 @@
     canvas.appendChild(band);
   }
 
+  function openNarrationStep(stepId, invoker) {
+    var phases = (S.runState && S.runState.phases) || [];
+    for (var i = 0; i < phases.length; i++) {
+      var p = phases[i];
+      for (var j = 0; j < (p.steps || []).length; j++) {
+        if (p.steps[j].stepId === stepId) {
+          openDetail(p, p.steps[j], invoker);
+          return;
+        }
+      }
+    }
+  }
+
   function renderNarration(canvas) {
     if (!S.narrationOn || !S.narration || !S.narration.length) return;
     if (!(S.runState && S.runState.started)) return;
@@ -1172,17 +1236,17 @@
     S.narration.slice(-8).reverse().forEach(function (line) {
       box.appendChild(h("div", {
         class: "narration-line" + (line.stepId ? " clickable" : ""),
-        onClick: line.stepId ? function () {
-          var phases = (S.runState && S.runState.phases) || [];
-          for (var i = 0; i < phases.length; i++) {
-            var p = phases[i];
-            for (var j = 0; j < (p.steps || []).length; j++) {
-              if (p.steps[j].stepId === line.stepId) {
-                openDetail(p, p.steps[j]);
-                return;
-              }
-            }
-          }
+        role: line.stepId ? "button" : null,
+        tabindex: line.stepId ? "0" : null,
+        "data-detail-invoker": line.stepId ? "narration:" + line.id : null,
+        "aria-label": line.stepId ? "Open details for step " + line.stepId : null,
+        onClick: line.stepId ? function (event) {
+          openNarrationStep(line.stepId, event.currentTarget);
+        } : undefined,
+        onKeydown: line.stepId ? function (event) {
+          activateWithKeyboard(event, function () {
+            openNarrationStep(line.stepId, event.currentTarget);
+          });
         } : undefined
       }, h("span", { class: "narration-verb", text: "\u25B8" }), " " + line.text));
     });
@@ -1338,13 +1402,18 @@
   }
 
   function renderCard(s, p) {
-    var key = stepKey(p, s);
-    var isOpen = S.detail && S.detail.phaseId === p.phaseId &&
+    // Historical cards have no live phase instance; only live cards need a
+    // phase-qualified tail-scroll key.
+    var key = p ? stepKey(p, s) : s.stepId;
+    var isOpen = p && S.detail && S.detail.phaseId === p.phaseId &&
       S.detail.iteration === (p.iteration || 1) && S.detail.stepId === s.stepId;
     var card = h("div", {
       class: "card clickable " + s.status + (isOpen ? " open" : ""),
-      title: "Click for full output and step details",
-      onClick: function () { openDetail(p, s); }
+      title: p ? "Click to inspect this step; use Details for keyboard access" : undefined,
+      onClick: function (event) {
+        if (!p || isInteractiveTarget(event.target)) return;
+        openDetail(p, s, event.currentTarget);
+      }
     });
     var kindEl = h("span", { class: "kind " + s.blockKind });
     if (s.status === "running") kindEl.appendChild(h("span", { class: "pulse" }));
@@ -1353,11 +1422,24 @@
     var stateLabel = s.status === "pending" ? "pending" : s.status;
     if (s.result && s.result.skipped) stateLabel = "skipped";
     if (attempts && attempts > 1) stateLabel += " \u00b7 " + attempts + " tries";
-    card.appendChild(h("div", { class: "top" },
+    var top = h("div", { class: "top" },
       h("span", { class: "sid", text: s.stepId }),
       kindEl,
       h("span", { class: "state " + s.status, text: stateLabel })
-    ));
+    );
+    if (p) {
+      top.appendChild(h("button", {
+        class: "card-details",
+        text: "Details",
+        "data-detail-invoker": "details:" + key,
+        "aria-label": "Open details for step " + s.stepId,
+        onClick: function (event) {
+          event.stopPropagation();
+          openDetail(p, s, event.currentTarget);
+        }
+      }));
+    }
+    card.appendChild(top);
     var runnerId = s.agent || s.api;
     if (runnerId) card.appendChild(h("div", { class: "agent", text: runnerId + (s.model ? " \u00b7 " + s.model : "") }));
     else if (s.model) card.appendChild(h("div", { class: "agent", text: s.model }));
@@ -1488,8 +1570,14 @@
   }
 
   // ---- step drill-in drawer ------------------------------------------------
-  function openDetail(p, s) {
+  function openDetail(p, s, invoker) {
+    S.detailFocusGeneration += 1;
     S.detail = { phaseId: p.phaseId, iteration: p.iteration || 1, stepId: s.stepId };
+    S.detailInvoker = invoker && invoker.getAttribute
+      ? invoker.getAttribute("data-detail-invoker")
+      : null;
+    S.detailFallback = "details:" + stepKey(p, s);
+    S.detailFocusPending = true;
     S.drawerScroll = { follow: true, top: 0 };
     scheduleRender();
   }
@@ -1497,7 +1585,20 @@
   function closeDetail() {
     if (!S.detail) return;
     S.detail = null;
+    S.detailFocusPending = false;
+    var invoker = S.detailInvoker;
+    var fallback = S.detailFallback;
+    var focusGeneration = ++S.detailFocusGeneration;
+    S.detailInvoker = null;
+    S.detailFallback = null;
     scheduleRender();
+    // The triggering control is replaced by every canvas render. Restore
+    // focus from its stable data attribute after that replacement is present,
+    // unless another drawer was opened before this frame ran.
+    requestAnimationFrame(function () {
+      if (focusGeneration !== S.detailFocusGeneration || S.detail) return;
+      if (!restoreDetailInvoker(invoker)) restoreDetailInvoker(fallback);
+    });
   }
 
   /** Current live data for the drilled-in step, straight from the folded state. */
@@ -1527,22 +1628,40 @@
     var found = findDetailStep();
     if (!found) {
       drawer.classList.remove("show");
+      drawer.setAttribute("aria-hidden", "true");
       clear(drawer);
       return;
     }
     var p = found.phase, s = found.step;
+    // Streaming updates rebuild this drawer. Preserve focus on an equivalent
+    // replacement control instead of dropping keyboard users onto the page.
+    var focusedDrawerControl = drawer.contains(document.activeElement)
+      ? document.activeElement.getAttribute("data-drawer-focus")
+      : null;
     clear(drawer);
     drawer.classList.add("show");
+    drawer.setAttribute("aria-hidden", "false");
 
     var kindEl = h("span", { class: "kind " + s.blockKind, text: KIND_LABEL[s.blockKind] || s.blockKind });
     var attempts = s.attempts || (s.result && s.result.attempts);
     var stateLabel = s.status + (s.cached ? " · cached" : "") + (s.result && s.result.skipped ? " · skipped" : "") + (attempts && attempts > 1 ? " · " + attempts + " tries" : "");
+    var closeButton = h("button", {
+      class: "x",
+      "data-drawer-focus": "close",
+      title: "Close step details (Esc)",
+      "aria-label": "Close step details",
+      onClick: closeDetail
+    }, "×");
     drawer.appendChild(h("div", { class: "drawer-head" },
       h("span", { class: "sid", text: s.stepId }),
       kindEl,
       h("span", { class: "state " + s.status, text: stateLabel }),
-      h("button", { class: "x", title: "Close (Esc)", onClick: closeDetail }, "×")
+      closeButton
     ));
+    if (S.detailFocusPending || focusedDrawerControl === "close") {
+      S.detailFocusPending = false;
+      closeButton.focus();
+    }
 
     var meta = h("div", { class: "drawer-meta" });
     function row(label, value, cls) {
@@ -1605,7 +1724,10 @@
       class: "drawer-follow" + (S.drawerScroll.follow ? " on" : ""),
       text: s.status === "running" ? (S.drawerScroll.follow ? "following" : "paused — scroll to bottom to follow") : ""
     });
-    var copyBtn = h("button", { class: "btn small", text: "Copy", title: "Copy the full output", onClick: function () {
+    var copyBtn = h("button", {
+      class: "btn small",
+      "data-drawer-focus": "copy",
+      text: "Copy", title: "Copy the full output", onClick: function () {
       if (navigator.clipboard) navigator.clipboard.writeText(body).catch(function () {});
     } });
     drawer.appendChild(h("div", { class: "drawer-outhead" },
@@ -1613,6 +1735,7 @@
       followNote,
       copyBtn
     ));
+    if (focusedDrawerControl === "copy") copyBtn.focus();
     var pre = h("pre", { class: "drawer-output" + (s.status === "error" ? " err" : "") });
     pre.textContent = body || (s.activity || "no output yet");
     pre.addEventListener("scroll", function () {
@@ -1915,6 +2038,8 @@
         return;
       }
     }
+    // A pending history-enriched plan must never replace the live run canvas.
+    S.planRequest += 1;
     S.runState = SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || S.spec);
     S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
     S.narration = []; S.arrivalInspect = false;
@@ -2046,24 +2171,60 @@
   }
 
   // ---- authoring: modal scaffolding ---------------------------------------
+  function modalFocusables() {
+    var modal = document.getElementById("modal");
+    return Array.prototype.slice.call(modal.querySelectorAll(
+      "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"
+    )).filter(function (el) { return el.offsetParent !== null; });
+  }
+  function focusModal() {
+    var modal = document.getElementById("modal");
+    var initial = modal.querySelector(".mbody input:not([disabled]), .mbody textarea:not([disabled]), .mbody select:not([disabled])") || modalFocusables()[0] || modal;
+    initial.focus();
+  }
+  function trapModalFocus(event) {
+    var focusables = modalFocusables();
+    var modal = document.getElementById("modal");
+    if (!focusables.length) {
+      event.preventDefault();
+      modal.focus();
+      return;
+    }
+    var first = focusables[0], last = focusables[focusables.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
   function openModal(node) {
+    S.modalInvoker = document.activeElement;
     var modal = document.getElementById("modal");
     clear(modal);
     modal.appendChild(node);
     document.getElementById("overlay").classList.add("show");
+    setTimeout(focusModal, 0);
   }
   function closeModal() {
     if (S.draftAbort) { try { S.draftAbort.abort(); } catch (e) {} S.draftAbort = null; }
     document.getElementById("overlay").classList.remove("show");
     clear(document.getElementById("modal"));
+    var invoker = S.modalInvoker;
+    S.modalInvoker = null;
+    if (invoker && document.contains(invoker)) {
+      setTimeout(function () { invoker.focus(); }, 0);
+    }
   }
   function modalShell(title, sub, bodyNode, footNode, wide) {
-    var x = h("button", { class: "x", title: "Close", onClick: closeModal }, "\u00d7");
+    var titleId = "modalTitle";
+    var x = h("button", { class: "x", title: "Close dialog (Esc)", "aria-label": "Close dialog", onClick: closeModal }, "\u00d7");
     var head = h("div", { class: "mhead" },
-      h("div", null, h("div", { class: "mtitle", text: title }), sub ? h("div", { class: "msub", text: sub }) : null),
+      h("div", null, h("div", { class: "mtitle", id: titleId, text: title }), sub ? h("div", { class: "msub", text: sub }) : null),
       x
     );
-    var shell = h("div", { class: "modal" + (wide ? " wide" : "") }, head, h("div", { class: "mbody" }, bodyNode), footNode);
+    var shell = h("div", { class: "modal" + (wide ? " wide" : ""), role: "dialog", "aria-modal": "true", "aria-labelledby": titleId, tabindex: "-1" }, head, h("div", { class: "mbody" }, bodyNode), footNode);
     return shell;
   }
   function field(label, control, hint, className, withValidation) {
@@ -2596,7 +2757,18 @@
     var list = h("div", { class: "hruns" });
     runs.forEach(function (run) {
       var meta = fmtTotals(run.totals, { durationMs: run.durationMs || 0, tokens: true });
-      var row = h("div", { class: "hrun " + run.status, onClick: (function (id) { return function () { openHistoryRun(holder, id); }; })(run.id) },
+      var row = h("div", {
+        class: "hrun " + run.status,
+        role: "button",
+        tabindex: "0",
+        "aria-label": "Open recorded " + run.workflow + " run",
+        onClick: (function (id) { return function () { openHistoryRun(holder, id); }; })(run.id),
+        onKeydown: (function (id) {
+          return function (event) {
+            activateWithKeyboard(event, function () { openHistoryRun(holder, id); });
+          };
+        })(run.id)
+      },
         h("div", { class: "hr-top" },
           h("span", { class: "hr-name", text: run.workflow }),
           h("span", { class: "hr-status", text: run.status }),
@@ -2971,26 +3143,31 @@
     var input = document.getElementById("input").value;
     if (!input.trim()) { setBanner("enter some input first", "info"); return; }
     recordPromptHistory(input);
+    var workflowName = S.selected;
+    var requestId = ++S.planRequest;
     var payload = { input: input };
     var params = collectParams();
     if (params) payload.params = params;
-    if (workflowHasStaged(S.stagedOverrides[S.selected])) payload.overrides = S.stagedOverrides[S.selected];
+    if (workflowHasStaged(S.stagedOverrides[workflowName])) payload.overrides = S.stagedOverrides[workflowName];
     setBanner("Planning\u2026", "info");
-    api("POST", "/api/workflows/" + encodeURIComponent(S.selected) + "/plan", payload)
+    api("POST", "/api/workflows/" + encodeURIComponent(workflowName) + "/plan", payload)
       .then(function (r) {
+        // History enrichment makes plan requests asynchronous. Do not let a
+        // stale response replace the canvas for another workflow (or a newer plan).
+        if (requestId !== S.planRequest || workflowName !== S.selected) return;
         if (r.status !== 200) { setBanner(r.body.error || "plan failed", "err"); return; }
-        renderPlanResult(r.body);
+        renderPlanResult(r.body, workflowName);
       });
   }
 
-  function renderPlanResult(plan) {
+  function renderPlanResult(plan, workflowName) {
     setBanner("", "");
     var canvas = document.getElementById("canvas");
     clear(canvas);
 
     // Summary header.
     var summary = h("div", { class: "plan-summary" });
-    summary.appendChild(h("div", { class: "plan-title", text: "Plan: " + S.selected }));
+    summary.appendChild(h("div", { class: "plan-title", text: "Plan: " + workflowName }));
     summary.appendChild(h("div", { class: "plan-stats",
       text: plan.phaseCount + " phase" + (plan.phaseCount === 1 ? "" : "s") + " \u00b7 " +
             plan.staticStepCount + " step" + (plan.staticStepCount === 1 ? "" : "s") + " \u00b7 " +
@@ -3006,6 +3183,17 @@
     }
     if (plan.maxCostUsd !== undefined) {
       summary.appendChild(h("div", { class: "plan-budget", text: "budget: $" + plan.maxCostUsd.toFixed(2) }));
+    }
+    if (plan.history) {
+      var history = plan.history;
+      var range = history.runs > 1
+        ? " (range $" + history.minCostUsd.toFixed(4) + "–$" + history.maxCostUsd.toFixed(4) + ")"
+        : "";
+      summary.appendChild(h("div", {
+        class: "plan-history",
+        text: "Observed across " + history.runs + " completed run" + (history.runs === 1 ? "" : "s") +
+          ": avg $" + history.avgCostUsd.toFixed(4) + range + " · avg " + fmtElapsed(history.avgDurationMs)
+      }));
     }
     canvas.appendChild(summary);
 
@@ -3114,9 +3302,20 @@
     if (e.target === document.getElementById("overlay")) closeModal();
   });
   document.addEventListener("keydown", function (e) {
-    if (e.key !== "Escape") return;
-    if (document.getElementById("overlay").classList.contains("show")) closeModal();
-    else if (S.detail) closeDetail();
+    var overlayOpen = document.getElementById("overlay").classList.contains("show");
+    if (overlayOpen) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeModal();
+      } else if (e.key === "Tab") {
+        trapModalFocus(e);
+      }
+      return;
+    }
+    if (e.key === "Escape" && S.detail) {
+      e.preventDefault();
+      closeDetail();
+    }
   });
 
   loadSessionThenCatalog();

@@ -95,6 +95,8 @@ export interface PlanResult {
   apis: string[];
   /** Workflow-level maxCostUsd, if set. */
   maxCostUsd?: number;
+  /** Observed spend and duration from completed runs of this workflow, when available. */
+  history?: PlanHistoryContext;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

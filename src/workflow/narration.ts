@@ -72,10 +72,11 @@ export function narrateEvent(ev: WorkflowEvent): NarrationLine | null {
 export function appendNarration(lines: NarrationLine[], ev: WorkflowEvent): NarrationLine[] {
   const next = narrateEvent(ev);
   if (!next) return lines;
-  // Tie-break identical timestamps so React keys stay unique on cache hits.
-  const last = lines[lines.length - 1];
-  if (last && last.id === next.id) {
-    next.id = `${next.id}-${lines.length}`;
+  // Keep every visible line addressable: loop/retry events can legitimately
+  // produce the same base id even when they are not adjacent.
+  let suffix = lines.length;
+  while (lines.some((line) => line.id === next.id)) {
+    next.id = `${next.id}-${suffix++}`;
   }
   const out =
     lines.length >= NARRATION_CAP ? lines.slice(lines.length - NARRATION_CAP + 1) : [...lines];

@@ -40,6 +40,7 @@ import {
   matchPendingInput,
   mergeConflictGuidance,
   parseSessionOverrides,
+  planHistoryContext,
   planWorkflow,
   pruneRunWorktrees,
   resolveInputs,
@@ -1209,7 +1210,15 @@ async function handle(
       params = Object.keys(resolved.values).length > 0 ? resolved.values : undefined;
     }
     const plan = planWorkflow(effectiveSpec, parsed.input.trim(), params);
-    sendJson(res, plan.ok ? 200 : 422, plan);
+    // The static topology explains what will execute; completed local runs add
+    // observed cost and duration so the launch decision is grounded in evidence,
+    // not an invented estimate. Missing or unreadable history intentionally
+    // leaves the plan unchanged.
+    const history = await deps.history
+      ?.list()
+      .then((summaries) => planHistoryContext(summaries, name))
+      .catch(() => null);
+    sendJson(res, plan.ok ? 200 : 422, { ...plan, ...(history ? { history } : {}) });
     return;
   }
 
