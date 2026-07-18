@@ -1479,8 +1479,9 @@
         role: "listitem",
         title: s.stepId + " · " + status,
         "aria-label": s.stepId + ": " + status + " (" + (KIND_LABEL[kind] || kind) + ")",
-        style: "background:" + (status === "pending" ? "transparent" : kindColor(kind)) +
-          ";border-color:" + kindColor(kind)
+        style: status === "pending"
+          ? "background:transparent;border-color:var(--border)"
+          : "background:" + kindColor(kind) + ";border-color:" + kindColor(kind)
       });
       if (idx < segments.length - 1) {
         track.appendChild(seg);

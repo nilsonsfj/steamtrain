@@ -199,11 +199,7 @@ export function arrivalReceiptCards(receipt: ArrivalReceipt): Array<{
         : "no tokens billed";
   return [
     { id: "ran", label: "What ran", value: ranParts.join(" · ") },
-    {
-      id: "cost",
-      label: "What it cost",
-      value: `${cost} · ${(receipt.durationMs / 1000).toFixed(1)}s`,
-    },
+    { id: "cost", label: "What it cost", value: cost },
     { id: "produced", label: "What it produced", value: produced },
   ];
 }

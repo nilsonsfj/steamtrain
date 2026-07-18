@@ -256,6 +256,7 @@ describe("arrival report", () => {
     const freeCards = arrivalReceiptCards(base);
     expect(freeCards.map((c) => c.id)).toEqual(["ran", "cost", "produced"]);
     expect(freeCards[1]?.value).toContain("$0 · no agents");
+    expect(freeCards[1]?.value).not.toContain("12.4s");
     expect(freeCards[2]?.value).toBe("engine demo");
 
     const billed = arrivalReceiptCards({
@@ -267,7 +268,7 @@ describe("arrival report", () => {
       skipCount: 1,
     });
     expect(billed[0]?.value).toContain("1 failed");
-    expect(billed[1]?.value).toContain("$0.4200");
+    expect(billed[1]?.value).toBe("$0.4200");
     expect(billed[2]?.value).toBe("2.5k tokens");
   });
 
