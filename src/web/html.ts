@@ -104,7 +104,7 @@ export function renderIndex(revs: PageAssetRevisions): string {
       </div>
       <div class="banner" id="banner"></div>
     </div>
-    <div class="canvas" id="canvas">
+    <div class="canvas" id="canvas" tabindex="-1" aria-label="Workflow workspace">
       <div class="empty">No workflow selected.</div>
     </div>
   </section>

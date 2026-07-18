@@ -541,7 +541,8 @@ var SteamtrainReducer = (() => {
         id: `phase_start-${phase.phaseId}-${phase.iteration ?? 1}`,
         text: `Arrived at ${stationName(phase.title)}.`,
         ts: 0,
-        phaseId: phase.phaseId
+        phaseId: phase.phaseId,
+        iteration: phase.iteration ?? 1
       });
       for (const step of phase.steps) {
         const done = narrateStepFromState(phase, step);
@@ -569,7 +570,8 @@ var SteamtrainReducer = (() => {
         }),
         ts: step.startedAt ?? 0,
         phaseId: phase.phaseId,
-        stepId: step.stepId
+        stepId: step.stepId,
+        iteration: phase.iteration ?? 1
       };
     }
     return {
@@ -586,7 +588,8 @@ var SteamtrainReducer = (() => {
       }),
       ts: step.endedAt ?? 0,
       phaseId: phase.phaseId,
-      stepId: step.stepId
+      stepId: step.stepId,
+      iteration: phase.iteration ?? 1
     };
   }
   function stepStartCopy(ev) {
@@ -619,12 +622,14 @@ var SteamtrainReducer = (() => {
   function line(ev, text, ids = {}) {
     const phaseId = ids.phaseId ?? ev.phaseId;
     const stepId = ids.stepId ?? ev.stepId;
+    const iteration = ev.iteration ?? 1;
     return {
-      id: `${ev.kind}-${phaseId ?? ""}-${stepId ?? ""}-${ev.ts}`,
+      id: `${ev.kind}-${phaseId ?? ""}-${iteration}-${stepId ?? ""}-${ev.ts}`,
       text,
       ts: ev.ts,
       phaseId,
-      stepId
+      stepId,
+      iteration
     };
   }
 

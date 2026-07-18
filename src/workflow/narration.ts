@@ -6,13 +6,15 @@ import type { PhaseState, StepState, WorkflowState } from "./reducer";
  * turning narration off must not hide any run state.
  */
 export interface NarrationLine {
-  /** Stable id for list keys / dedupe (event kind + step/phase + ts). */
+  /** Stable id for list keys / dedupe (event kind + phase/iteration + step + ts). */
   id: string;
   /** Past-tense, one-clause copy. */
   text: string;
   ts: number;
   stepId?: string;
   phaseId?: string;
+  /** Loop iteration of the referenced phase; omitted implies the first pass. */
+  iteration?: number;
 }
 
 /** Max lines kept in the live ticker (UI may show fewer). */
@@ -104,6 +106,7 @@ export function narrateFromState(state: WorkflowState): NarrationLine[] {
       text: `Arrived at ${stationName(phase.title)}.`,
       ts: 0,
       phaseId: phase.phaseId,
+      iteration: phase.iteration ?? 1,
     });
     for (const step of phase.steps) {
       const done = narrateStepFromState(phase, step);
@@ -137,6 +140,7 @@ function narrateStepFromState(phase: PhaseState, step: StepState): NarrationLine
       ts: step.startedAt ?? 0,
       phaseId: phase.phaseId,
       stepId: step.stepId,
+      iteration: phase.iteration ?? 1,
     };
   }
   return {
@@ -154,6 +158,7 @@ function narrateStepFromState(phase: PhaseState, step: StepState): NarrationLine
     ts: step.endedAt ?? 0,
     phaseId: phase.phaseId,
     stepId: step.stepId,
+    iteration: phase.iteration ?? 1,
   };
 }
 
@@ -203,17 +208,19 @@ function stationName(title: string): string {
 }
 
 function line(
-  ev: { kind: string; ts: number; stepId?: string; phaseId?: string },
+  ev: { kind: string; ts: number; stepId?: string; phaseId?: string; iteration?: number },
   text: string,
   ids: { phaseId?: string; stepId?: string } = {},
 ): NarrationLine {
   const phaseId = ids.phaseId ?? ev.phaseId;
   const stepId = ids.stepId ?? ev.stepId;
+  const iteration = ev.iteration ?? 1;
   return {
-    id: `${ev.kind}-${phaseId ?? ""}-${stepId ?? ""}-${ev.ts}`,
+    id: `${ev.kind}-${phaseId ?? ""}-${iteration}-${stepId ?? ""}-${ev.ts}`,
     text,
     ts: ev.ts,
     phaseId,
     stepId,
+    iteration,
   };
 }

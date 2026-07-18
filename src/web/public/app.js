@@ -103,6 +103,13 @@
     return false;
   }
 
+  function focusDetailFallback() {
+    var canvas = document.getElementById("canvas");
+    if (!canvas) return false;
+    canvas.focus();
+    return true;
+  }
+
   /** Mirrors src/workflow/cost.ts formatElapsed: "8.3s", "1m 23s", "1h 05m". */
   function fmtElapsed(ms) {
     var sec = Math.max(0, ms) / 1000;
@@ -1225,12 +1232,16 @@
     canvas.appendChild(band);
   }
 
-  function openNarrationStep(stepId, invoker) {
+  function openNarrationStep(line, invoker) {
+    if (!line || !line.stepId) return;
     var phases = (S.runState && S.runState.phases) || [];
+    var iteration = line.iteration || 1;
     for (var i = 0; i < phases.length; i++) {
       var p = phases[i];
+      if (line.phaseId && p.phaseId !== line.phaseId) continue;
+      if ((p.iteration || 1) !== iteration) continue;
       for (var j = 0; j < (p.steps || []).length; j++) {
-        if (p.steps[j].stepId === stepId) {
+        if (p.steps[j].stepId === line.stepId) {
           openDetail(p, p.steps[j], invoker);
           return;
         }
@@ -1272,11 +1283,11 @@
         "data-detail-invoker": line.stepId ? "narration:" + line.id : null,
         "aria-label": line.stepId ? "Open details for step " + line.stepId : null,
         onClick: line.stepId ? function (event) {
-          openNarrationStep(line.stepId, event.currentTarget);
+          openNarrationStep(line, event.currentTarget);
         } : undefined,
         onKeydown: line.stepId ? function (event) {
           activateWithKeyboard(event, function () {
-            openNarrationStep(line.stepId, event.currentTarget);
+            openNarrationStep(line, event.currentTarget);
           });
         } : undefined
       }, h("span", { class: "narration-verb", text: "\u25B8" }), " " + line.text));
@@ -1759,7 +1770,7 @@
     // unless another drawer was opened before this frame ran.
     requestAnimationFrame(function () {
       if (focusGeneration !== S.detailFocusGeneration || S.detail) return;
-      if (!restoreDetailInvoker(invoker)) restoreDetailInvoker(fallback);
+      if (!restoreDetailInvoker(invoker) && !restoreDetailInvoker(fallback)) focusDetailFallback();
     });
   }
 
