@@ -191,7 +191,11 @@ describe("arrival report", () => {
     expect(report!.receipt.agentless).toBe(true);
     expect(formatArrivalReceipt(report!.receipt)).toContain("$0");
     expect(formatArrivalHeadline(report!.receipt, "tour")).toBe("Tour complete · $0 · 0.7s");
-    expect(arrivalReceiptCards(report!.receipt)).toHaveLength(3);
+    const cards = arrivalReceiptCards(report!.receipt);
+    expect(cards.map((c) => c.id)).toEqual(["ran", "cost", "produced"]);
+    expect(cards[0]?.label).toBe("What ran");
+    expect(cards[1]?.value).toContain("$0 · no agents");
+    expect(cards[2]?.value).toBe("engine demo");
     expect(report!.destinations).toHaveLength(3);
     expect(report!.destinations[0]).toMatchObject({ id: "again", label: "Ride again" });
     expect(report!.destinations[2]).toMatchObject({ id: "history", label: "See past runs" });

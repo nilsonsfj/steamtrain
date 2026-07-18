@@ -160,6 +160,7 @@ export function findArrivalStep(steps: StepState[]): StepState | undefined {
 /**
  * Plain-English climax headline for both UIs.
  * Examples: `Tour complete · $0 · 0.7s` / `bug-hunt stopped · 1 failed · 12.4s`
+ * Empty or missing workflowName falls back to `Run …`.
  */
 export function formatArrivalHeadline(
   receipt: ArrivalReceipt,

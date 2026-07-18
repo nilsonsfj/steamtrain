@@ -41,6 +41,8 @@
     legendExpanded: false,
     // Collapse the phase tree under the Arrival Report after completion.
     arrivalInspect: false,
+    // Play the Arrival entrance animation once per completed run.
+    arrivalEnter: false,
     // Wall-clock end of the last run (frozen for the Arrival receipt).
     endedAt: 0
   };
@@ -969,7 +971,7 @@
     stopTimer();
     S.selected = name; S.runId = null; S.runState = null;
     S.detail = null; S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
-    S.narration = []; S.arrivalInspect = false; S.endedAt = 0;
+    S.narration = []; S.arrivalInspect = false; S.arrivalEnter = false; S.endedAt = 0;
     if (name !== TOUR_NAME) S.stationLanding = false;
     try { localStorage.setItem(SELECTION_KEY, name); } catch (e) {}
     renderSidebar();
@@ -1234,7 +1236,11 @@
     var cards = SteamtrainReducer.arrivalReceiptCards
       ? SteamtrainReducer.arrivalReceiptCards(report.receipt)
       : [];
-    var wrap = h("div", { class: "arrival" + (report.receipt.ok ? " ok" : " failed") });
+    var enter = S.arrivalEnter;
+    if (enter) S.arrivalEnter = false;
+    var wrap = h("div", {
+      class: "arrival" + (report.receipt.ok ? " ok" : " failed") + (enter ? " enter" : "")
+    });
     wrap.appendChild(h("div", { class: "arrival-title", text: headline }));
     if (cards.length) {
       var grid = h("div", { class: "arrival-cards" });
@@ -2073,7 +2079,7 @@
     }
     S.runState = SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || S.spec);
     S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
-    S.narration = []; S.arrivalInspect = false;
+    S.narration = []; S.arrivalInspect = false; S.arrivalEnter = false;
     if (S.selected === TOUR_NAME) S.stationLanding = false;
     S.endedAt = 0;
     setBanner("", "");
@@ -2129,6 +2135,7 @@
           es.close(); S.es = null; setRunning(false); stopTimer();
           S.queuedBanner = false;
           S.endedAt = Date.now();
+          S.arrivalEnter = true;
           if (frame.status === "canceled") setBanner("Run canceled.", "info");
           else if (frame.status === "budget-exceeded") setBanner("Run stopped: cost budget reached. Raise maxCostUsd and re-run to resume.", "err");
           else if (frame.status === "error" || frame.ok === false) setBanner("Run failed" + (frame.error ? ": " + frame.error : "."), "err");

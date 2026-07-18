@@ -481,6 +481,8 @@ body[data-mode="station"] .station-hero {
   border-radius: 14px;
   background: radial-gradient(ellipse 70% 50% at 10% 0%, rgba(63, 185, 80, 0.16), transparent 55%),
     linear-gradient(180deg, rgba(63, 185, 80, 0.06), transparent 45%), var(--panel);
+}
+.arrival.enter {
   animation: arrival-in 480ms ease-out;
 }
 .arrival.failed {
