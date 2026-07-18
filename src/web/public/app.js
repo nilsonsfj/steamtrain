@@ -1332,6 +1332,19 @@
         text: SteamtrainReducer.formatArrivalReceipt(report.receipt)
       }));
     }
+    // Status grid: one colored dot per step
+    var statusGrid = h("div", { class: "arrival-status-grid" });
+    var arrPhases = S.runState.phases || [];
+    arrPhases.forEach(function (p) {
+      (p.steps || []).forEach(function (s) {
+        var cls = "arrival-dot";
+        if (s.result && s.result.skipped) cls += " skip";
+        else if (s.status === "done") cls += " ok";
+        else if (s.status === "error") cls += " fail";
+        statusGrid.appendChild(h("div", { class: cls, title: s.stepId }));
+      });
+    });
+    if (statusGrid.childNodes.length > 0) wrap.appendChild(statusGrid);
     wrap.appendChild(h("pre", { class: "arrival-hero", text: report.hero }));
     var dest = h("div", { class: "arrival-destinations" });
     report.destinations.forEach(function (d) {
@@ -1399,7 +1412,24 @@
     });
 
     phases.forEach(function (p, idx) {
-      if (idx > 0) canvas.appendChild(h("div", { class: "connector" }));
+      if (idx > 0) {
+        var prevPhase = phases[idx - 1];
+        var prevDone = prevPhase && prevPhase.done;
+        var prevOk = prevPhase && prevPhase.ok;
+        var curRunning = (p.steps || []).some(function (s) { return s.status === "running"; });
+        var curDone = p.done;
+        var connCls = "connector";
+        if (prevDone && prevOk && curRunning) connCls += " active";
+        else if (prevDone && prevOk && curDone) connCls += " done";
+        else if (prevDone && !prevOk && curDone && p.ok) connCls += " done";
+        else if (prevDone && !prevOk) connCls += " err";
+        else if (S.runState && S.runState.started && prevDone) connCls += " active";
+        var connEl = h("div", { class: connCls });
+        if (connCls.indexOf("active") >= 0) {
+          connEl.style.animationDelay = "-" + (Date.now() % 600) + "ms";
+        }
+        canvas.appendChild(connEl);
+      }
       var piter = p.iteration || 1;
       var steps = p.steps || [];
       var running = steps.some(function (s) { return s.status === "running"; });
