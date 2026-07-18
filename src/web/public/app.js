@@ -52,7 +52,9 @@
   function applyCapabilityChrome() {
     var ro = isReadOnly();
     var badge = document.getElementById("modeBadge");
-    if (badge) badge.style.display = ro ? "inline-flex" : "";
+    // "none", not "" — clearing the inline style would reveal the badge (its
+    // markup default is display:none) and label every full session read-only.
+    if (badge) badge.style.display = ro ? "inline-flex" : "none";
     var hideIds = ["configBtn", "newWfBtn", "editBtn", "cloneBtn", "flushBtn", "deleteBtn", "planBtn", "runBtn"];
     hideIds.forEach(function (id) {
       var el = document.getElementById(id);
@@ -165,6 +167,19 @@
     pollDoctor(0);
     pollLiveRuns();
     if (!S.liveRunsTimer) S.liveRunsTimer = setInterval(pollLiveRuns, 5000);
+  }
+
+  /**
+   * Refetch only the catalog list (blocked/re-route annotations depend on
+   * agent health, which lands after first paint) and repaint what shows it.
+   */
+  function refreshWorkflowList() {
+    api("GET", "/api/workflows").then(function (r) {
+      if (r.status !== 200) return;
+      S.workflows = r.body.workflows || [];
+      renderSidebar();
+      renderBlockedRow();
+    }).catch(function () {});
   }
 
   /** First impression: auto-select tour when the user has never ridden. */
@@ -776,6 +791,51 @@
       });
     }
   }
+  /** Catalog list item (with blocked/reroute annotations) for a workflow name. */
+  function wfListItem(name) {
+    for (var i = 0; i < S.workflows.length; i++) if (S.workflows[i].name === name) return S.workflows[i];
+    return null;
+  }
+
+  /**
+   * The blocked/re-route strip for the selected workflow. When the pinned
+   * agent is not ready but another agent is, Run stays live and re-routes the
+   * blocked steps for that ride only — the strip says so before the click.
+   */
+  function renderBlockedRow() {
+    var row = document.getElementById("blockedRow");
+    if (!row) return;
+    clear(row);
+    var item = S.selected ? wfListItem(S.selected) : null;
+    var runBtn = document.getElementById("runBtn");
+    var planBtn = document.getElementById("planBtn");
+    if (!item || !item.blocked || isReadOnly()) {
+      row.style.display = "none";
+      if (runBtn) runBtn.disabled = false;
+      if (planBtn) planBtn.disabled = false;
+      return;
+    }
+    row.style.display = "flex";
+    if (item.reroute) {
+      var rr = item.reroute;
+      var steps = rr.steps === 1 ? "1 step" : rr.steps + " steps";
+      row.className = "reroute-row info";
+      row.appendChild(h("span", { class: "reroute-icon", text: "↷" }));
+      row.appendChild(h("span", {},
+        h("b", {}, "Needs " + rr.blockedAgents.join(", ") + " (not ready). "),
+        "Run re-routes " + steps + " to " + rr.agent + " · " + (rr.modelName || rr.model) +
+        " for this ride only — the workflow itself is unchanged."));
+      if (runBtn) runBtn.disabled = false;
+      if (planBtn) planBtn.disabled = false;
+    } else {
+      row.className = "reroute-row err";
+      row.appendChild(h("span", { class: "reroute-icon", text: "⚠" }));
+      row.appendChild(h("span", { text: item.blocked }));
+      if (runBtn) runBtn.disabled = true;
+      if (planBtn) planBtn.disabled = true;
+    }
+  }
+
   function agentById(id) {
     for (var i = 0; i < S.agents.length; i++) if (S.agents[i].id === id) return S.agents[i];
     return null;
@@ -802,6 +862,18 @@
       S.apiDoctor = apis;
       renderHealth(list, apis, err);
       applyHealth();
+      // The catalog's blocked/re-route annotations are computed server-side
+      // from agent + API health, so re-fetch them whenever that health changes
+      // — the initial arrival AND after a config save flips an agent's status
+      // (a one-shot latch would leave a stale "blocked"/"via X" until reload).
+      var healthSig = JSON.stringify([
+        list.map(function (d) { return d.agent + ":" + d.status; }),
+        apis.map(function (d) { return d.api + ":" + d.status; })
+      ]);
+      if ((list.length || apis.length) && healthSig !== S.healthSig) {
+        S.healthSig = healthSig;
+        refreshWorkflowList();
+      }
       // Keep polling until BOTH probe sets have landed: the agent doctor
       // (local --version checks) usually resolves before the API doctor
       // (a network probe), and stopping early would leave the API chips blank.
@@ -873,7 +945,12 @@
           isTour && S.stationLanding ? h("span", { class: "badge start-here", text: "start here" }) : null,
           h("span", { class: "src", text: w.source }),
           h("span", { class: "badge " + autonomy.cls, text: autonomy.badge, title: autonomy.title }),
-          isStaged ? h("span", { class: "badge staged", text: "staged" }) : null),
+          isStaged ? h("span", { class: "badge staged", text: "staged" }) : null,
+          w.blocked ? h("span", {
+            class: "badge " + (w.reroute ? "reroute" : "blocked"),
+            text: w.reroute ? "↷ via " + w.reroute.agent : "blocked",
+            title: w.blocked
+          }) : null),
         w.description ? h("div", { class: "desc", text: w.description }) : null,
         h("div", { class: "meta", text: isTour && S.stationLanding
           ? "zero-cost guided ride \u00b7 no agents"
@@ -902,6 +979,7 @@
       document.getElementById("wfSub").textContent = r.body.spec.description || "";
       document.getElementById("runRow").style.display = isReadOnly() ? "none" : "flex";
       renderSourceLine();
+      renderBlockedRow();
       renderParamsForm(r.body.spec);
       S.runState = SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || r.body.spec);
       renderHealth(S.doctor || [], S.apiDoctor || [], null);
@@ -1848,9 +1926,21 @@
     var params = collectParams();
     if (params) payload.params = params;
     if (workflowHasStaged(S.stagedOverrides[S.selected])) payload.overrides = S.stagedOverrides[S.selected];
+    // Blocked-but-re-routable workflow: run with what's ready, this ride only.
+    var listItem = wfListItem(S.selected);
+    var rerouted = Boolean(listItem && listItem.blocked && listItem.reroute);
+    if (rerouted) payload.reroute = true;
     apiAuth("POST", "/api/runs", payload)
       .then(function (r) {
         if (r.status !== 201) { setBanner(r.body.error || "could not start run", "err"); return; }
+        // Announce a re-route only when the server actually applied one — the
+        // catalog annotation we act on can be stale relative to staged edits.
+        var rr = r.body.reroute;
+        if (rr) {
+          setBanner("Re-routed " + rr.steps + " step" + (rr.steps === 1 ? "" : "s") + " (" +
+            rr.blockedAgents.join(", ") + ") to " + rr.agent + " · " + (rr.modelName || rr.model) +
+            " for this ride.", "info");
+        }
         S.runId = r.body.runId;
         setRunning(true);
         S.startedAt = Date.now();

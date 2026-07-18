@@ -12,7 +12,7 @@ describe("TUI components", () => {
     expect(frame).toContain("(O)");
   });
 
-  it("renders per-agent doctor status in the status bar", () => {
+  it("leads with ready agents and collapses not-installed ones into a summary", () => {
     const doctor: DoctorResult[] = [
       { agent: "claude", provider: "claude", status: "ok", binary: "claude", message: "ready" },
       {
@@ -29,6 +29,13 @@ describe("TUI components", () => {
         binary: "codex",
         message: "not authenticated",
       },
+      {
+        agent: "amp",
+        provider: "amp",
+        status: "binary_missing",
+        binary: "amp",
+        message: "'amp' not found on PATH",
+      },
     ];
     const { lastFrame } = render(
       <StatusBar
@@ -42,12 +49,40 @@ describe("TUI components", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("claude");
     expect(frame).toContain("ready");
-    expect(frame).toContain("opencode");
+    // Auth problems on installed agents stay visible — they're actionable.
     expect(frame).toContain("codex");
-    expect(frame).toContain("missing");
+    // Not-installed agents collapse into one calm summary, chips gone.
+    expect(frame).not.toContain("opencode");
+    expect(frame).not.toContain("missing");
+    expect(frame).toContain("2 not installed");
   });
 
-  it("renders api readiness after the agents", () => {
+  it("shows a setup nudge when no agent is installed at all", () => {
+    const doctor: DoctorResult[] = ["claude", "opencode"].map(
+      (agent) =>
+        ({
+          agent,
+          provider: "claude",
+          status: "binary_missing",
+          binary: agent,
+          message: "not found",
+        }) as DoctorResult,
+    );
+    const { lastFrame } = render(
+      <StatusBar
+        doctor={doctor}
+        apiDoctor={null}
+        configSource="defaults"
+        workspaceLabel="user"
+        running={false}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("no agents installed — Ctrl+A to add");
+    expect(frame).not.toContain("claude");
+  });
+
+  it("renders ready APIs and collapses unset keys into a summary", () => {
     const { lastFrame } = render(
       <StatusBar
         doctor={[]}
@@ -77,8 +112,9 @@ describe("TUI components", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("anthropic");
     expect(frame).toContain("ready");
-    expect(frame).toContain("openai");
-    expect(frame).toContain("no key");
+    // Unset keys are the normal state — collapsed, not itemized.
+    expect(frame).not.toContain("openai");
+    expect(frame).toContain("1 without keys");
   });
 
   it("splits agents and APIs onto their own lines and hides the overflow", () => {
@@ -96,10 +132,10 @@ describe("TUI components", () => {
       (api) => ({
         api,
         provider: "openai" as const,
-        status: "key_missing" as const,
+        status: "ok" as const,
         keyEnv: "KEY",
         baseUrl: "https://x",
-        message: "no key",
+        message: "ready",
       }),
     );
     const { lastFrame } = render(
@@ -113,8 +149,7 @@ describe("TUI components", () => {
     );
     // Strip ANSI, keep only the bordered content rows (drop the top/bottom rules).
     const rows = (lastFrame() ?? "")
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escapes
-      .replace(/\[[0-9;]*m/g, "")
+      .replace(/\[[0-9;]*m/g, "")
       .split("\n")
       .filter((line) => line.startsWith("│"));
     // Exactly two status lines: one for agents, one for APIs.

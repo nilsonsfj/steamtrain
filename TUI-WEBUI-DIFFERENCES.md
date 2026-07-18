@@ -92,6 +92,7 @@ imports it through `src/tui/workflow-state.ts`; the web bundles it as
 | Explicit "save session changes" step | ✅ | ✅ | TUI `/save-workflows` → shared flush; web "Flush to disk" button calls `POST /api/overrides/flush` |
 | Skip/unchanged reporting on save | ✅ | ✅ | `flushSessionOverrides`/`saveSessionWorkflowsToUser` returns saved/skipped/unchanged; both TUI and web surface the report |
 | Agent health display | ✅ | ✅ | TUI doctor panel; web health chips |
+| Re-route blocked steps to a ready agent | ✅ | ✅ | Shared `planAgentReroute` / `Orchestrator.planWorkflowReroute` (`src/workflow/reroute.ts`); TUI `/reroute` (stages session overrides) + blocked-preview hint, web sidebar `↷ via <agent>` badge + run strip + `reroute: true` on `POST /api/runs`, CLI `workflow run/plan --agent <id>` + blocked-run hint |
 | API health display (llm steps) | ✅ | ✅ | Shared `runApiDoctor`; TUI status bar `◆` entries, web health chips + `GET /api/doctor` `apis` |
 | Manage agent instances | ✅ | ✅ | TUI `/agent` + `/agents` manager (Ctrl+A); web project-config modal |
 | Manage API instances (llm steps) | ✅ | ✅ | Shared `src/apis` core; TUI `/api` + `/apis` manager; web project-config modal APIs section |

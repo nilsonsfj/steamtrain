@@ -77,6 +77,11 @@ export interface SlashCommandContext {
   openApiManager?: () => SlashCommandResult;
   /** Persist session workflow overrides to the user workflows file. */
   saveWorkflows?: () => SlashCommandResult | Promise<SlashCommandResult>;
+  /**
+   * Stage a session re-route of the selected workflow's blocked agent steps
+   * onto a ready agent (TUI only; see `planAgentReroute`).
+   */
+  rerouteWorkflow?: () => SlashCommandResult;
   /** Start LLM-delegated generation of a new workflow from a description (TUI only). */
   createWorkflow?: (description: string, scope?: WorkflowScope) => SlashCommandResult;
   /** Save the selected workflow under a new name (user or project copy) (TUI only). */

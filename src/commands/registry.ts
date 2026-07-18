@@ -16,6 +16,7 @@ import { historyCommand } from "./builtins/history";
 import { modelCommand } from "./builtins/model";
 import { promptCommand } from "./builtins/prompt";
 import { renameWorkflowCommand } from "./builtins/rename-workflow";
+import { rerouteCommand } from "./builtins/reroute";
 import { runsCommand } from "./builtins/runs";
 import { saveWorkflowsCommand } from "./builtins/save-workflows";
 import { timeoutCommand } from "./builtins/timeout";
@@ -34,6 +35,7 @@ const BUILTIN_COMMANDS: SlashCommand[] = [
   apiCommand,
   apisCommand,
   promptCommand,
+  rerouteCommand,
   saveWorkflowsCommand,
   createWorkflowCommand,
   cloneWorkflowCommand,

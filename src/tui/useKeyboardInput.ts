@@ -80,6 +80,13 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
   const paramsRef = useRef(params);
   paramsRef.current = params;
 
+  // Arrival-receipt `r` (run again) is a bare letter on a surface that also
+  // says "type to edit" — and a fresh run can spend real tokens. Require a
+  // second press within this window so a stray first keystroke of a typed
+  // word ("refactor …") can't launch a paid run.
+  const rerunConfirmAtRef = useRef(0);
+  const RERUN_CONFIRM_WINDOW_MS = 3000;
+
   const { exit } = useApp();
 
   useInput(
@@ -344,6 +351,12 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
           !key.ctrl &&
           !key.meta
         ) {
+          // Consumed hotkey letters still reach the prompt's TextInput (ink
+          // has no propagation stop between useInput hooks) — flag the insert
+          // as spurious so it doesn't pollute the draft.
+          if (input === "i" || input === "h" || input === "r" || input === "n") {
+            prompt.swallowNextInsert(input);
+          }
           if (input === "i") {
             runner.setShowArrival(false);
             return;
@@ -359,6 +372,14 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
               picker.workflowEntries[picker.workflowIndex]?.name;
             const prior = runner.activeWorkflowInputRef.current ?? "";
             if (name) {
+              const now = Date.now();
+              if (now - rerunConfirmAtRef.current > RERUN_CONFIRM_WINDOW_MS) {
+                rerunConfirmAtRef.current = now;
+                runner.setWfNotice(`press r again to run '${name}' again (a fresh ride)`);
+                return;
+              }
+              rerunConfirmAtRef.current = 0;
+              runner.setWfNotice(null);
               cur.clearStationLanding?.();
               runner.launchWorkflow(name, prior || "all aboard", picker.setWfPreview, {
                 fresh: true,

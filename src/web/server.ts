@@ -28,6 +28,7 @@ import {
   type WorkflowSourceKind,
   type WorkflowSpec,
   applyWorkflowSessionOverrides,
+  applyWorkflowStepOverrides,
   createLiveRunStore,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
@@ -225,6 +226,17 @@ interface WorkflowListItem {
   agents: string[];
   /** Autonomy potential: runs unattended, needs approvals, or needs input. */
   autonomy: WorkflowAutonomy;
+  /** Dispatch-gate failure reason (absent when runnable or health is still unknown). */
+  blocked?: string;
+  /** Present when the blocked steps can be re-routed to a ready agent for a run. */
+  reroute?: {
+    agent: string;
+    model: string;
+    modelName: string;
+    /** How many steps the re-route would retarget. */
+    steps: number;
+    blockedAgents: string[];
+  };
 }
 
 function summarizeWorkflow(
@@ -911,10 +923,42 @@ async function handle(
 
   if (method === "GET" && path === "/api/workflows") {
     const all = deps.host.listWorkflows();
+    // Annotate runnability only once agent health is known, so the catalog
+    // never flashes "blocked" while the background doctor is still probing.
+    const doctorReady = (deps.doctor?.() ?? []).length > 0;
     const items = Object.entries(all)
-      .map(([name, spec]) =>
-        summarizeWorkflow(name, spec, deps.workflowSource?.(name), (child) => all[child]),
-      )
+      .map(([name, spec]) => {
+        const item = summarizeWorkflow(
+          name,
+          spec,
+          deps.workflowSource?.(name),
+          (child) => all[child],
+        );
+        if (doctorReady && item.agents.length > 0) {
+          const check = deps.host.canDispatchWorkflowSpec(spec);
+          if (!check.ok) {
+            item.blocked = check.reason;
+            const reroute = deps.host.planWorkflowReroute?.(spec);
+            // Only advertise the re-route if it actually makes the workflow
+            // dispatchable. A workflow blocked for two reasons (missing agent
+            // AND, say, an llm step's missing API key) would otherwise offer a
+            // one-click re-route that can only fail at run time.
+            if (reroute?.ok) {
+              const rerouted = applyWorkflowStepOverrides(spec, reroute.plan.overrides);
+              if (deps.host.canDispatchWorkflowSpec(rerouted).ok) {
+                item.reroute = {
+                  agent: reroute.plan.target,
+                  model: reroute.plan.targetModel,
+                  modelName: reroute.plan.targetModelName,
+                  steps: reroute.plan.stepIds.length,
+                  blockedAgents: reroute.plan.blockedAgents,
+                };
+              }
+            }
+          }
+        }
+        return item;
+      })
       .sort((a, b) => a.name.localeCompare(b.name));
     sendJson(res, 200, { workflows: items, configLabel: deps.configLabel });
     return;
@@ -1394,6 +1438,7 @@ async function handle(
       fresh?: unknown;
       overrides?: unknown;
       params?: unknown;
+      reroute?: unknown;
     };
     try {
       parsed = body ? JSON.parse(body) : {};
@@ -1421,6 +1466,41 @@ async function handle(
         specOverride = applyWorkflowSessionOverrides(base, parsedOverrides.overrides);
       }
     }
+    // reroute: true — retarget steps whose pinned agent is not ready onto a
+    // ready agent, for this run only (the stored workflow is untouched). When
+    // both `overrides` and `reroute` are sent, the re-route is planned on top
+    // of the already-applied session overrides (above), so it respects prior
+    // per-step edits rather than reverting them. The applied plan (if any) is
+    // echoed in the 201 so the client only announces a re-route that actually
+    // happened — the catalog annotation the client acts on can be stale
+    // relative to staged overrides.
+    let appliedReroute: {
+      agent: string;
+      model: string;
+      modelName: string;
+      steps: number;
+      blockedAgents: string[];
+    } | null = null;
+    if (parsed.reroute === true && deps.host.planWorkflowReroute) {
+      const base = specOverride ?? deps.host.listWorkflows()[parsed.workflow];
+      if (base) {
+        const reroute = deps.host.planWorkflowReroute(base);
+        if (!reroute.ok && reroute.error) {
+          sendJson(res, 400, { error: reroute.error });
+          return;
+        }
+        if (reroute.ok) {
+          specOverride = applyWorkflowStepOverrides(base, reroute.plan.overrides);
+          appliedReroute = {
+            agent: reroute.plan.target,
+            model: reroute.plan.targetModel,
+            modelName: reroute.plan.targetModelName,
+            steps: reroute.plan.stepIds.length,
+            blockedAgents: reroute.plan.blockedAgents,
+          };
+        }
+      }
+    }
     let params: Record<string, string | number | boolean> | undefined;
     if (parsed.params && typeof parsed.params === "object" && !Array.isArray(parsed.params)) {
       const spec = specOverride ?? deps.host.listWorkflows()[parsed.workflow];
@@ -1443,7 +1523,7 @@ async function handle(
         sendJson(res, 400, { error: result.error });
         return;
       }
-      sendJson(res, 201, { runId: result.runId });
+      sendJson(res, 201, { runId: result.runId, reroute: appliedReroute ?? undefined });
     } catch (err) {
       if (err instanceof TooManyRuns) {
         sendJson(res, 503, { error: err.message });

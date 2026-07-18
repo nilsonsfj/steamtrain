@@ -398,6 +398,13 @@ export {
   type DeleteUserWorkflowResult,
 } from "./catalog";
 export {
+  type PlanRerouteOptions,
+  type PlanRerouteResult,
+  type ReroutePlan,
+  formatReroutePlan,
+  planAgentReroute,
+} from "./reroute";
+export {
   type RerunMode,
   type RerunPlan,
   type RerunError,

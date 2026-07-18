@@ -45,6 +45,7 @@ export interface UseSlashContextParams {
   openApiManager?: () => SlashCommandResult;
   workflowPickerActive: boolean;
   saveWorkflows: () => Promise<SlashCommandResult>;
+  rerouteWorkflow?: () => SlashCommandResult;
   createWorkflow: (description: string, scope?: WorkflowScope) => SlashCommandResult;
   cloneWorkflow: (newName: string, scope?: WorkflowScope) => Promise<SlashCommandResult>;
   deleteWorkflow: (name: string) => Promise<SlashCommandResult>;
@@ -90,6 +91,7 @@ export function useSlashContext(params: UseSlashContextParams) {
     openApiManager,
     workflowPickerActive,
     saveWorkflows,
+    rerouteWorkflow,
     createWorkflow,
     cloneWorkflow,
     deleteWorkflow,
@@ -131,6 +133,7 @@ export function useSlashContext(params: UseSlashContextParams) {
       openAgentManager,
       openApiManager,
       saveWorkflows,
+      rerouteWorkflow,
       createWorkflow,
       cloneWorkflow,
       deleteWorkflow,
@@ -175,6 +178,7 @@ export function useSlashContext(params: UseSlashContextParams) {
       openApiManager,
       workflowPickerActive,
       saveWorkflows,
+      rerouteWorkflow,
       createWorkflow,
       cloneWorkflow,
       deleteWorkflow,

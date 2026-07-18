@@ -135,6 +135,7 @@ aside h2 {
   display: flex;
   align-items: center;
   gap: 7px;
+  flex-wrap: wrap;
 }
 .wf .src {
   font-size: 10px;
@@ -664,6 +665,38 @@ textarea#input:focus {
   border-color: #5e4a1d;
   font-weight: 600;
   margin-left: 8px;
+}
+.badge.reroute {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+  margin-left: 8px;
+}
+.badge.blocked {
+  color: var(--error);
+  border-color: #6e2a26;
+  margin-left: 8px;
+}
+.reroute-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--accent-dim);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+.reroute-row.err {
+  border-color: #6e2a26;
+  color: var(--error);
+}
+.reroute-row .reroute-icon {
+  color: var(--accent);
+  font-weight: 700;
+}
+.reroute-row.err .reroute-icon {
+  color: var(--error);
 }
 .badge.paused {
   color: var(--gate);

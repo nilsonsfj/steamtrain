@@ -316,6 +316,12 @@ describe("runCli", () => {
     expect(
       splitDryRunArgs(["t", "--param", "k=--detach", "--on-approval", "fail", "--dry-run"]),
     ).toEqual({ isDryRun: true, planArgs: ["t", "--param", "k=--detach"] });
+    // --agent passes THROUGH to the plan so the dry-run preview reflects the
+    // re-route the real run would apply (it would otherwise show the blocked agent).
+    expect(splitDryRunArgs(["t", "--input", "hi", "--agent", "claude", "--dry-run"])).toEqual({
+      isDryRun: true,
+      planArgs: ["t", "--input", "hi", "--agent", "claude"],
+    });
   });
 
   it("treats flag-looking --input values as text in a --dry-run", async () => {

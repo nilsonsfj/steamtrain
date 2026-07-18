@@ -74,6 +74,8 @@ export interface LiveRunLaunch {
   onApproval?: "fail" | "stop";
   /** Pre-supplied `--human <stepId>=<value>` answers (absent ⇒ wait for a human answer). */
   humanInputs?: Record<string, string>;
+  /** `--agent <id>`: re-route blocked agent steps to this agent (re-planned by the runner). */
+  rerouteAgent?: string;
 }
 
 /** One human-input request a live run is waiting on, mirrored into its meta. */
