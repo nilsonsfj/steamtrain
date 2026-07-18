@@ -559,7 +559,7 @@ var SteamtrainReducer = (() => {
     if (step.status === "pending") return null;
     if (step.status === "running") {
       return {
-        id: `step_start-${phase.phaseId}-${step.stepId}`,
+        id: `step_start-${phase.phaseId}-${phase.iteration ?? 1}-${step.stepId}`,
         text: stepStartCopy({
           stepId: step.stepId,
           blockKind: step.blockKind,
@@ -571,7 +571,7 @@ var SteamtrainReducer = (() => {
       };
     }
     return {
-      id: `step_done-${phase.phaseId}-${step.stepId}`,
+      id: `step_done-${phase.phaseId}-${phase.iteration ?? 1}-${step.stepId}`,
       text: stepDoneCopy({
         stepId: step.stepId,
         result: step.result ?? {
