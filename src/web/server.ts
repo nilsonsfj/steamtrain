@@ -1467,10 +1467,13 @@ async function handle(
       }
     }
     // reroute: true — retarget steps whose pinned agent is not ready onto a
-    // ready agent, for this run only (the stored workflow is untouched). The
-    // applied plan (if any) is echoed in the 201 so the client only announces
-    // a re-route that actually happened — the catalog annotation the client
-    // acts on can be stale relative to staged overrides.
+    // ready agent, for this run only (the stored workflow is untouched). When
+    // both `overrides` and `reroute` are sent, the re-route is planned on top
+    // of the already-applied session overrides (above), so it respects prior
+    // per-step edits rather than reverting them. The applied plan (if any) is
+    // echoed in the 201 so the client only announces a re-route that actually
+    // happened — the catalog annotation the client acts on can be stale
+    // relative to staged overrides.
     let appliedReroute: {
       agent: string;
       model: string;

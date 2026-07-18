@@ -65,7 +65,9 @@ export function planAgentReroute(
 ): PlanRerouteResult {
   const enabledIds = resolveAgentInstances(config).map((agent) => agent.id);
   const enabled = new Set<string>(enabledIds);
-  const stepIsBlocked = (agent: AgentInstanceId) => !enabled.has(agent) || !isReady(agent);
+  // A step's agent is usable when it is configured/enabled AND doctor-ready —
+  // exactly the conditions canDispatchWorkflowSpec gates on.
+  const agentUsable = (agent: AgentInstanceId) => enabled.has(agent) && isReady(agent);
 
   const blockedStepIds: string[] = [];
   const blockedAgents: AgentInstanceId[] = [];
@@ -73,7 +75,7 @@ export function planAgentReroute(
   for (const phase of spec.phases) {
     for (const step of phase.steps) {
       if (!isAgentBackedStep(step)) continue;
-      if (stepIsBlocked(step.agent)) {
+      if (!agentUsable(step.agent)) {
         blockedStepIds.push(step.id);
         if (!blockedAgents.includes(step.agent)) blockedAgents.push(step.agent);
       } else if (!usedReadyAgents.includes(step.agent)) {
