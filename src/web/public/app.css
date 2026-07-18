@@ -2102,7 +2102,7 @@ select.sel.invalid {
   box-shadow: none;
 }
 .arrival-destinations .btn.primary {
-  background: linear-gradient(135deg, var(--accent-dim), var(--accent-dim));
+  background: var(--accent-dim);
   border-color: var(--accent);
 }
 .arrival-destinations .btn.primary:hover {
