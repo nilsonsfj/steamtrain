@@ -26,8 +26,10 @@ var SteamtrainReducer = (() => {
     NARRATION_CAP: () => NARRATION_CAP,
     TOUR_WORKFLOW_NAME: () => TOUR_WORKFLOW_NAME,
     appendNarration: () => appendNarration,
+    arrivalReceiptCards: () => arrivalReceiptCards,
     buildArrivalReport: () => buildArrivalReport,
     findArrivalStep: () => findArrivalStep,
+    formatArrivalHeadline: () => formatArrivalHeadline,
     formatArrivalReceipt: () => formatArrivalReceipt,
     initialWorkflowIndex: () => initialWorkflowIndex,
     initialWorkflowState: () => initialWorkflowState,
@@ -655,11 +657,16 @@ var SteamtrainReducer = (() => {
     const next = opts.nextWorkflow ?? nextCandidates.find(
       (name) => name !== current && (!opts.availableWorkflows || opts.availableWorkflows.has(name))
     );
-    const destinations = [{ id: "again", label: "Run again", key: "r" }];
+    const destinations = [{ id: "again", label: "Ride again", key: "r" }];
     if (next) {
-      destinations.push({ id: "next", label: `Try ${next}`, workflow: next, key: "n" });
+      destinations.push({
+        id: "next",
+        label: `Try ${next}`,
+        workflow: next,
+        key: "n"
+      });
     }
-    destinations.push({ id: "history", label: "View history", key: "h" });
+    destinations.push({ id: "history", label: "See past runs", key: "h" });
     return {
       hero,
       heroStepId: heroStep?.stepId,
@@ -686,13 +693,37 @@ var SteamtrainReducer = (() => {
     );
     return withOutput;
   }
+  function formatArrivalHeadline(receipt, workflowName) {
+    const name = (workflowName ?? "").trim();
+    const subject = name === "tour" ? "Tour" : name || "Run";
+    const outcome = receipt.ok ? "complete" : "stopped";
+    const parts = [`${subject} ${outcome}`];
+    if (receipt.agentless) parts.push("$0");
+    else if (receipt.costUsd > 0) parts.push(`$${receipt.costUsd.toFixed(4)}`);
+    else parts.push("$0");
+    parts.push(`${(receipt.durationMs / 1e3).toFixed(1)}s`);
+    if (receipt.failCount > 0) parts.push(`${receipt.failCount} failed`);
+    return parts.join(" \xB7 ");
+  }
+  function arrivalReceiptCards(receipt) {
+    const ranParts = [`${receipt.okCount} ok`];
+    if (receipt.failCount) ranParts.push(`${receipt.failCount} failed`);
+    if (receipt.skipCount) ranParts.push(`${receipt.skipCount} skipped`);
+    const cost = receipt.agentless ? "$0 \xB7 no agents" : receipt.costUsd > 0 ? `$${receipt.costUsd.toFixed(4)}` : "$0";
+    const produced = receipt.tokens > 0 ? `${compactTokens(receipt.tokens)} tokens` : receipt.agentless ? "engine demo" : "no tokens billed";
+    return [
+      { id: "ran", label: "What ran", value: ranParts.join(" \xB7 ") },
+      { id: "cost", label: "What it cost", value: cost },
+      { id: "produced", label: "What it produced", value: produced }
+    ];
+  }
   function formatArrivalReceipt(receipt) {
     const parts = [];
     parts.push(`${(receipt.durationMs / 1e3).toFixed(1)}s`);
     parts.push(`${receipt.okCount} ok`);
     if (receipt.failCount) parts.push(`${receipt.failCount} failed`);
     if (receipt.skipCount) parts.push(`${receipt.skipCount} skipped`);
-    if (receipt.agentless) parts.push("$0 \xB7 agentless");
+    if (receipt.agentless) parts.push("$0 \xB7 no agents");
     else {
       if (receipt.costUsd > 0) parts.push(`$${receipt.costUsd.toFixed(4)}`);
       if (receipt.tokens > 0) parts.push(`${compactTokens(receipt.tokens)} tok`);
@@ -712,9 +743,9 @@ var SteamtrainReducer = (() => {
   }
   function fallbackHero(state) {
     if (state.ok) {
-      return state.name ? `Train '${state.name}' arrived, but no consolidator report was produced \u2014 press i to inspect the cars.` : "Train arrived, but no consolidator report was produced \u2014 press i to inspect the cars.";
+      return state.name ? `Workflow '${state.name}' finished, but no consolidator report was produced. Press i to show step details.` : "Workflow finished, but no consolidator report was produced. Press i to show step details.";
     }
-    return state.name ? `Train '${state.name}' stopped short \u2014 press i to inspect the cars for the stall.` : "Train stopped short \u2014 press i to inspect the cars for the stall.";
+    return state.name ? `Workflow '${state.name}' stopped short. Press i to show step details and find the stall.` : "Workflow stopped short. Press i to show step details and find the stall.";
   }
   function tokenTotal(t) {
     if (!t) return 0;

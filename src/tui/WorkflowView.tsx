@@ -242,7 +242,9 @@ export function WorkflowView({
   const rowWindow = selectVisibleWindow(rows, selectedRowIndex, layout.listBudget);
 
   if (preferArrival && arrival) {
-    return <ArrivalReportView report={arrival} width={width} height={height} />;
+    return (
+      <ArrivalReportView report={arrival} width={width} height={height} workflowName={state.name} />
+    );
   }
 
   const narrationVisible = narrationCount > 0 ? narration.slice(-narrationCount) : [];

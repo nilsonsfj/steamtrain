@@ -99,6 +99,7 @@ export function buildArrivalReport(
   // Prefer an explicit credentialFree flag (tour). The $0/0-token heuristic is
   // a best-effort fallback — a cancelled agent run that never billed can look
   // the same, which is rare on the Arrival surface.
+  // Invariant: agentless implies costUsd === 0 && tokens === 0.
   const agentless =
     opts.credentialFree === true || (costUsd === 0 && tokens === 0 && failCount === 0);
 
@@ -110,11 +111,16 @@ export function buildArrivalReport(
       (name) => name !== current && (!opts.availableWorkflows || opts.availableWorkflows.has(name)),
     );
 
-  const destinations: ArrivalDestination[] = [{ id: "again", label: "Run again", key: "r" }];
+  const destinations: ArrivalDestination[] = [{ id: "again", label: "Ride again", key: "r" }];
   if (next) {
-    destinations.push({ id: "next", label: `Try ${next}`, workflow: next, key: "n" });
+    destinations.push({
+      id: "next",
+      label: `Try ${next}`,
+      workflow: next,
+      key: "n",
+    });
   }
-  destinations.push({ id: "history", label: "View history", key: "h" });
+  destinations.push({ id: "history", label: "See past runs", key: "h" });
 
   return {
     hero,
@@ -151,6 +157,54 @@ export function findArrivalStep(steps: StepState[]): StepState | undefined {
   return withOutput;
 }
 
+/**
+ * Plain-English climax headline for both UIs.
+ * Examples: `Tour complete · $0 · 0.7s` / `bug-hunt stopped · 1 failed · 12.4s`
+ * Empty or missing workflowName falls back to `Run …`.
+ */
+export function formatArrivalHeadline(
+  receipt: ArrivalReceipt,
+  workflowName?: string | null,
+): string {
+  const name = (workflowName ?? "").trim();
+  const subject = name === "tour" ? "Tour" : name || "Run";
+  const outcome = receipt.ok ? "complete" : "stopped";
+  const parts: string[] = [`${subject} ${outcome}`];
+  if (receipt.agentless) parts.push("$0");
+  else if (receipt.costUsd > 0) parts.push(`$${receipt.costUsd.toFixed(4)}`);
+  else parts.push("$0");
+  parts.push(`${(receipt.durationMs / 1000).toFixed(1)}s`);
+  if (receipt.failCount > 0) parts.push(`${receipt.failCount} failed`);
+  return parts.join(" · ");
+}
+
+/** Structured receipt facts for card layouts (what ran / cost / produced). */
+export function arrivalReceiptCards(receipt: ArrivalReceipt): Array<{
+  id: "ran" | "cost" | "produced";
+  label: string;
+  value: string;
+}> {
+  const ranParts = [`${receipt.okCount} ok`];
+  if (receipt.failCount) ranParts.push(`${receipt.failCount} failed`);
+  if (receipt.skipCount) ranParts.push(`${receipt.skipCount} skipped`);
+  const cost = receipt.agentless
+    ? "$0 · no agents"
+    : receipt.costUsd > 0
+      ? `$${receipt.costUsd.toFixed(4)}`
+      : "$0";
+  const produced =
+    receipt.tokens > 0
+      ? `${compactTokens(receipt.tokens)} tokens`
+      : receipt.agentless
+        ? "engine demo"
+        : "no tokens billed";
+  return [
+    { id: "ran", label: "What ran", value: ranParts.join(" · ") },
+    { id: "cost", label: "What it cost", value: cost },
+    { id: "produced", label: "What it produced", value: produced },
+  ];
+}
+
 /** One-line receipt for compact UI chrome. */
 export function formatArrivalReceipt(receipt: ArrivalReceipt): string {
   const parts: string[] = [];
@@ -158,7 +212,7 @@ export function formatArrivalReceipt(receipt: ArrivalReceipt): string {
   parts.push(`${receipt.okCount} ok`);
   if (receipt.failCount) parts.push(`${receipt.failCount} failed`);
   if (receipt.skipCount) parts.push(`${receipt.skipCount} skipped`);
-  if (receipt.agentless) parts.push("$0 · agentless");
+  if (receipt.agentless) parts.push("$0 · no agents");
   else {
     if (receipt.costUsd > 0) parts.push(`$${receipt.costUsd.toFixed(4)}`);
     if (receipt.tokens > 0) parts.push(`${compactTokens(receipt.tokens)} tok`);
@@ -181,12 +235,12 @@ function leafResults(state: WorkflowState): ArrivalStepResult[] {
 function fallbackHero(state: WorkflowState): string {
   if (state.ok) {
     return state.name
-      ? `Train '${state.name}' arrived, but no consolidator report was produced — press i to inspect the cars.`
-      : "Train arrived, but no consolidator report was produced — press i to inspect the cars.";
+      ? `Workflow '${state.name}' finished, but no consolidator report was produced. Press i to show step details.`
+      : "Workflow finished, but no consolidator report was produced. Press i to show step details.";
   }
   return state.name
-    ? `Train '${state.name}' stopped short — press i to inspect the cars for the stall.`
-    : "Train stopped short — press i to inspect the cars for the stall.";
+    ? `Workflow '${state.name}' stopped short. Press i to show step details and find the stall.`
+    : "Workflow stopped short. Press i to show step details and find the stall.";
 }
 
 function tokenTotal(t: ArrivalStepResult["tokens"] | undefined): number {

@@ -452,7 +452,9 @@ export {
   type ArrivalDestination,
   type ArrivalReport,
   ARRIVAL_NEXT_CANDIDATES,
+  arrivalReceiptCards,
   buildArrivalReport,
   findArrivalStep,
+  formatArrivalHeadline,
   formatArrivalReceipt,
 } from "./arrival-report";
