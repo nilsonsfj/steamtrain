@@ -27,13 +27,15 @@ steamtrain --version
 **no sudo**. It prints how to add that dir to your PATH if needed. (Details and
 custom install locations are [below the fold](#install-as-a-system-binary).)
 
-**Now take a lap — no agent, no API key, no credit required.** The bundled
-`tour` workflow is fully agentless: a distributor fans out, command cars run in
-parallel, a `when` condition skips a step, a gate loops the train three times
-around the track, and a consolidator prints the arrival report.
+**Now take a lap — no agent, no API key, no credit required.** Launch the
+web UI (`steamtrain --web-ui`) and take the free tour from the Station, or run
+the bundled agentless `tour` from the CLI: a distributor fans out, command
+cars run in parallel, a `when` condition skips a step, a gate loops the train
+three times around the track, and a consolidator prints the arrival report.
 
 ```bash
-steamtrain workflow run tour --input "all aboard"   # $0, ~0.1s
+steamtrain --web-ui                                 # Station → tour in the browser
+steamtrain workflow run tour --input "all aboard"   # $0, ~0.1s from the CLI
 ```
 
 **Wire it to your repo.** `init` checks which agents are ready (with copy-paste

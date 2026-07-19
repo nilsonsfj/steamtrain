@@ -20,10 +20,11 @@
  * inputs, and per-step status/duration/cost.
  */
 /**
- * The 🚂 tab icon, inlined as an SVG data URI (and served at /favicon.ico for
- * clients that ignore the link tag) so every page load stops 404ing the icon.
+ * Designed locomotive mark for the tab icon (replaces the emoji glyph so the
+ * brand reads as a product, not a placeholder). Kept in sync visually with the
+ * `.brand-mark` CSS in `app.css`.
  */
-export const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y="0.9em" font-size="90">\u{1F682}</text></svg>`;
+export const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="7" fill="#0e1116"/><path d="M6.5 22.5h18.2c1 0 1.8-.7 1.8-1.7V14.2c0-1.1-.9-2-2-2h-9.1L13.2 9.5H8.4c-.9 0-1.6.7-1.6 1.6v11.4z" fill="#1c6f68"/><path d="M8.5 13.2h4.2l1.4 2.2H24c.5 0 .8.3.8.8v5.6c0 .3-.2.5-.5.5H8.5v-9.1z" fill="#34d3c4"/><rect x="9.7" y="14.5" width="2.5" height="1.9" rx=".3" fill="#0e1116" opacity=".55"/><path d="M18.2 10.6c0-1.1.5-2.1.9-2.7.1-.2.5-.1.5.2 0 .7-.1 1.3-.1 2 0 .3.2.5.5.4.8-.4 1.4-1.2 1.6-2 .1-.2.4-.2.4 0 .1 1-.5 2.2-1.4 2.9-.4.3-.9.5-1.5.5h-.9v-1.3z" fill="#8eeae0"/><circle cx="11.6" cy="23.8" r="2.4" fill="#0e1116" stroke="#34d3c4" stroke-width="1.2"/><circle cx="11.6" cy="23.8" r=".85" fill="#34d3c4"/><circle cx="20.4" cy="23.8" r="2.4" fill="#0e1116" stroke="#34d3c4" stroke-width="1.2"/><circle cx="20.4" cy="23.8" r=".85" fill="#34d3c4"/><path d="M6.5 22.5h19" stroke="#d29922" stroke-width="1" stroke-linecap="round" opacity=".75"/></svg>`;
 
 export interface PageAssetRevisions {
   /** Hash of `src/web/public/steamtrain-reducer.bundle.js`. */
@@ -49,13 +50,15 @@ export function renderIndex(revs: PageAssetRevisions): string {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<meta name="theme-color" content="#0a0d12" />
 <title>steamtrain</title>
 <link rel="icon" href="data:image/svg+xml,${encodeURIComponent(FAVICON_SVG)}" />
 <link rel="stylesheet" href="${cssHref}" />
 </head>
 <body>
 <header>
-  <div class="logo">&#128642; <span class="accent">steam</span>train</div>
+  <div class="logo"><span class="brand-mark" aria-hidden="true"></span><span class="accent">steam</span>train</div>
   <div class="config" id="config"></div>
   <span class="mode-badge" id="modeBadge" style="display:none" title="This session can view workflows and runs but cannot launch, edit, approve, or change config.">&#128065; read-only</span>
   <button class="newbtn" id="configBtn" title="Project agent and timeout settings">&#9881; Config</button>

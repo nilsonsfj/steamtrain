@@ -45,6 +45,7 @@ export function ArrivalReportView({
     >
       <Box justifyContent="space-between">
         <Text color={titleColor} bold>
+          {report.receipt.ok ? "End of the line · " : "Stopped short · "}
           {headline}
         </Text>
         <Text color="gray">i details · Esc back</Text>

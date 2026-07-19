@@ -1187,40 +1187,54 @@
   }
 
   function renderStationHero(canvas) {
+    var landing = !!S.stationLanding;
+    if (landing) {
+      canvas.appendChild(h("div", { class: "station-atmosphere", "aria-hidden": "true" },
+        h("div", { class: "glow-a" }),
+        h("div", { class: "glow-b" }),
+        h("div", { class: "steam" }),
+        h("div", { class: "tracks" })
+      ));
+    }
+
     var logo = h("div", { class: "station-logo" });
-    logo.appendChild(document.createTextNode("\uD83D\uDE82 "));
+    logo.appendChild(h("span", { class: "brand-mark", "aria-hidden": "true" }));
     var accent = h("span", { class: "accent", text: "steam" });
     logo.appendChild(accent);
     logo.appendChild(document.createTextNode("train"));
-    var band = h("div", { class: "station-hero" + (S.stationLanding ? "" : " compact") },
+
+    var band = h("div", { class: "station-hero" + (landing ? "" : " compact") },
       h("div", { class: "station-brand" }, logo),
+      landing
+        ? h("div", { class: "station-eyebrow", text: "Platform 1 \u00b7 free tour" })
+        : null,
       h("div", {
         class: "station-premise",
         text: "Parallel agents. One receipt."
       }),
-      S.stationLanding
+      landing
         ? h("div", {
             class: "station-sub",
-            text: "Take the free tour — no agents, no API key, ~1 second."
+            text: "Take the free tour - no agents, no API key, about one second."
           })
         : null,
       h("div", { class: "station-actions" },
         isReadOnly() ? null : h("button", {
           class: "btn primary station-cta",
-          text: S.stationLanding ? "Take the tour \u2192" : "Ride the tour \u2192",
+          text: landing ? "Take the tour \u2192" : "Ride the tour \u2192",
           onClick: function () {
             var input = document.getElementById("input");
             if (input && !input.value.trim()) input.value = "all aboard";
             startRun();
           }
         }),
-        S.stationLanding
+        landing
           ? h("button", {
               class: "btn small station-secondary",
               text: "I have a workflow",
               onClick: function () {
                 S.stationLanding = false;
-                syncStationMode();
+                syncBodyMode();
                 renderSidebar();
                 var other = S.workflows.find(function (w) { return w.name !== TOUR_NAME; });
                 if (other) selectWorkflow(other.name);
@@ -1249,14 +1263,24 @@
     }
   }
 
-  function syncStationMode() {
-    var on =
-      S.stationLanding &&
-      S.selected === TOUR_NAME &&
-      !(S.runState && S.runState.started);
-    if (on) document.body.dataset.mode = "station";
+  function syncBodyMode() {
+    var boarding = !S.spec && (!S.selected || S.stationLanding);
+    var stationOn =
+      boarding ||
+      (S.stationLanding &&
+        S.selected === TOUR_NAME &&
+        !(S.runState && S.runState.started));
+    var arrivalOn =
+      !stationOn &&
+      S.runState &&
+      S.runState.done &&
+      !S.arrivalInspect;
+    if (stationOn) document.body.dataset.mode = "station";
+    else if (arrivalOn) document.body.dataset.mode = "arrival";
     else delete document.body.dataset.mode;
   }
+  // Back-compat alias for any call sites that still use the old name.
+  function syncStationMode() { syncBodyMode(); }
 
   function renderNarration(canvas) {
     if (!S.narrationOn || !S.narration || !S.narration.length) return;
@@ -1264,7 +1288,7 @@
     if (S.runState.done && !S.arrivalInspect) return;
     var box = h("div", { class: "narration" });
     box.appendChild(h("div", { class: "narration-head" },
-      h("span", { text: "Conductor" }),
+      h("span", { class: "conductor-mark", text: "Conductor" }),
       h("button", {
         class: "btn small",
         text: "Hide",
@@ -1275,9 +1299,9 @@
         }
       })
     ));
-    S.narration.slice(-8).reverse().forEach(function (line) {
+    S.narration.slice(-8).reverse().forEach(function (line, idx) {
       box.appendChild(h("div", {
-        class: "narration-line" + (line.stepId ? " clickable" : ""),
+        class: "narration-line" + (idx === 0 ? " fresh" : "") + (line.stepId ? " clickable" : ""),
         role: line.stepId ? "button" : null,
         tabindex: line.stepId ? "0" : null,
         "data-detail-invoker": line.stepId ? "narration:" + line.id : null,
@@ -1316,6 +1340,10 @@
     var wrap = h("div", {
       class: "arrival" + (report.receipt.ok ? " ok" : " failed") + (enter ? " enter" : "")
     });
+    wrap.appendChild(h("div", {
+      class: "arrival-kicker",
+      text: report.receipt.ok ? "End of the line" : "Stopped short"
+    }));
     wrap.appendChild(h("div", { class: "arrival-title", text: headline }));
     if (cards.length) {
       var grid = h("div", { class: "arrival-cards" });
@@ -1345,7 +1373,18 @@
       });
     });
     if (statusGrid.childNodes.length > 0) wrap.appendChild(statusGrid);
-    wrap.appendChild(h("pre", { class: "arrival-hero", text: report.hero }));
+
+    // Artifact: lead line as display text, remainder as the scrollable report.
+    var heroText = report.hero || "";
+    var heroLines = heroText.split("\n");
+    var lead = (heroLines[0] || "").trim();
+    var rest = heroLines.slice(1).join("\n").replace(/^\n+/, "").trim();
+    var artifact = h("div", { class: "arrival-artifact" },
+      h("div", { class: "arrival-artifact-label", text: "Arrival report" }),
+      lead ? h("div", { class: "arrival-artifact-lead", text: lead }) : null,
+      rest ? h("pre", { class: "arrival-hero", text: rest }) : null
+    );
+    wrap.appendChild(artifact);
     var dest = h("div", { class: "arrival-destinations" });
     report.destinations.forEach(function (d) {
       if (d.id === "again" && isReadOnly()) return;
@@ -1372,11 +1411,22 @@
   function render() {
     var canvas = document.getElementById("canvas");
     clear(canvas);
-    syncStationMode();
+    syncBodyMode();
     if (!S.spec) {
+      canvas.appendChild(h("div", { class: "station-atmosphere", "aria-hidden": "true" },
+        h("div", { class: "glow-a" }),
+        h("div", { class: "glow-b" }),
+        h("div", { class: "steam" }),
+        h("div", { class: "tracks" })
+      ));
       canvas.appendChild(h("div", { class: "empty station-empty" },
+        h("div", { class: "station-logo" },
+          h("span", { class: "brand-mark", "aria-hidden": "true" }),
+          h("span", { class: "accent", text: "steam" }),
+          "train"
+        ),
         h("div", { class: "station-premise", text: "Parallel agents. One receipt." }),
-        h("div", { text: "Boarding the tour\u2026" })
+        h("div", { class: "boarding-pulse", text: "Boarding the tour\u2026" })
       ));
       return;
     }
