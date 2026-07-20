@@ -116,11 +116,8 @@ describe("cursor mapper", () => {
   it("never throws on malformed or empty objects", () => {
     expect(() => createCursorMapper()({})).not.toThrow();
     expect(() => createCursorMapper()(null)).not.toThrow();
-    expect(createCursorMapper()({})).toEqual([
-      expect.objectContaining({ kind: "unknown" }),
-    ]);
+    expect(createCursorMapper()({})).toEqual([expect.objectContaining({ kind: "unknown" })]);
   });
-});
 
   it("passes unknown types through", () => {
     expect(map(SAMPLES.unknown)).toEqual([
