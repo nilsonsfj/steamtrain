@@ -2952,7 +2952,11 @@
   function closeModal() {
     if (S.draftAbort) { try { S.draftAbort.abort(); } catch (e) {} S.draftAbort = null; }
     stopHistoryPoll();
+    // Closing the history browser should drop a stale #run- hash so a refresh
+    // does not immediately reopen the modal.
+    if (Hist && Hist.holder) clearRunDeepLink();
     Hist.holder = null;
+    Hist.view = "list";
     document.getElementById("overlay").classList.remove("show");
     clear(document.getElementById("modal"));
     var invoker = S.modalInvoker;
@@ -3551,10 +3555,12 @@
     };
     var holder = h("div", { class: "hist-root" }, h("div", { class: "ro hist-loading", text: "Loading run history\u2026" }));
     Hist.holder = holder;
-    var footChildren = [h("div", { class: "spacer" }), h("button", { class: "btn", text: "Close", onClick: function () { stopHistoryPoll(); closeModal(); } })];
-    if (!isReadOnly()) {
-      footChildren.unshift(h("button", { class: "btn danger small", text: "Clear all", onClick: clearHistory }));
-    }
+    var footChildren = [
+      h("button", { class: "btn danger small", text: "Clear all", onClick: clearHistory, style: isReadOnly() ? "display:none" : "" }),
+      h("div", { class: "spacer" }),
+      h("button", { class: "btn", text: "Close", onClick: function () { stopHistoryPoll(); closeModal(); } })
+    ];
+    if (isReadOnly()) footChildren.shift();
     var foot = h("div", { class: "mfoot" });
     footChildren.forEach(function (c) { foot.appendChild(c); });
     var shell = modalShell("Runs", "Live rides and recorded arrivals - inspect, re-run, harvest.", holder, foot, true);
@@ -3616,6 +3622,7 @@
   function reopenHistoryList(holder) {
     Hist.view = "list";
     Hist.holder = holder;
+    clearRunDeepLink();
     clear(holder);
     holder.appendChild(h("div", { class: "ro hist-loading", text: "Loading\u2026" }));
     refreshHistoryData(holder);
@@ -3805,6 +3812,7 @@
       return;
     }
     Hist.view = "detail";
+    setRunDeepLink(id);
     clear(holder);
     holder.appendChild(h("div", { class: "ro hist-loading", text: "Loading run\u2026" }));
     var req = ++Hist.request;

@@ -2640,11 +2640,14 @@ select.sel.invalid {
 .hrun:hover,
 .hrun:focus-visible,
 .hrun.sel {
-  background: linear-gradient(135deg, rgba(52, 211, 196, 0.1), transparent 45%), #1c2733;
-  border-color: var(--accent-dim);
+  background: linear-gradient(135deg, rgba(52, 211, 196, 0.12), transparent 45%), #1c2733;
+  border-color: var(--accent);
   outline: none;
   transform: translateY(-1px);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 0 0 1px rgba(52, 211, 196, 0.35), 0 10px 26px rgba(0, 0, 0, 0.28);
+}
+.hrun.sel .hr-name {
+  color: var(--accent-bright);
 }
 .hrun.live {
   border-left-color: var(--running);
