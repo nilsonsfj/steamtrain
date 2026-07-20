@@ -37,6 +37,8 @@
     narrationOn: localStorage.getItem("steamtrain.narration") !== "off",
     // Station landing: first-open hero for the tour.
     stationLanding: false,
+    // Narration line id that already played the one-shot "fresh" entrance.
+    narrationFreshPlayed: null,
     // Expand the full step-kind legend via "?".
     legendExpanded: false,
     // Collapse the phase tree under the Arrival Report after completion.
@@ -1030,6 +1032,7 @@
     S.detail = null; S.detailInvoker = null; S.detailFallback = null; S.detailFocusPending = false; S.detailFocusGeneration += 1;
     S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
     S.narration = []; S.arrivalInspect = false; S.arrivalEnter = false; S.endedAt = 0;
+    S.narrationFreshPlayed = null;
     if (name !== TOUR_NAME) S.stationLanding = false;
     try { localStorage.setItem(SELECTION_KEY, name); } catch (e) {}
     renderSidebar();
@@ -1300,8 +1303,12 @@
       })
     ));
     S.narration.slice(-8).reverse().forEach(function (line, idx) {
+      // One-shot entrance: only the newest line, and only the first paint of that id.
+      // Rebuilding the canvas on every SSE tick must not restart the animation.
+      var playFresh = idx === 0 && line.id && line.id !== S.narrationFreshPlayed;
+      if (playFresh) S.narrationFreshPlayed = line.id;
       box.appendChild(h("div", {
-        class: "narration-line" + (idx === 0 ? " fresh" : "") + (line.stepId ? " clickable" : ""),
+        class: "narration-line" + (playFresh ? " fresh" : "") + (line.stepId ? " clickable" : ""),
         role: line.stepId ? "button" : null,
         tabindex: line.stepId ? "0" : null,
         "data-detail-invoker": line.stepId ? "narration:" + line.id : null,
@@ -2298,10 +2305,16 @@
     S.runState = SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || S.spec);
     S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
     S.narration = []; S.arrivalInspect = false; S.arrivalEnter = false;
+    S.narrationFreshPlayed = null;
+    // Leave Station immediately so ops chrome (and banners) are visible while
+    // the POST is in flight — and if it fails, the user is not trapped on a
+    // full-bleed boarding surface with a hidden error.
     if (S.selected === TOUR_NAME) S.stationLanding = false;
     S.endedAt = 0;
     setBanner("", "");
     document.getElementById("statusLine").style.display = "flex";
+    syncBodyMode();
+    render();
     var payload = { workflow: S.selected, input: input, fresh: document.getElementById("freshChk").checked };
     var params = collectParams();
     if (params) payload.params = params;
@@ -2312,7 +2325,12 @@
     if (rerouted) payload.reroute = true;
     apiAuth("POST", "/api/runs", payload)
       .then(function (r) {
-        if (r.status !== 201) { setBanner(r.body.error || "could not start run", "err"); return; }
+        if (r.status !== 201) {
+          setBanner(r.body.error || "could not start run", "err");
+          setRunning(false);
+          render();
+          return;
+        }
         // Announce a re-route only when the server actually applied one — the
         // catalog annotation we act on can be stale relative to staged edits.
         var rr = r.body.reroute;
@@ -2326,6 +2344,11 @@
         S.startedAt = Date.now();
         startTimer();
         openStream(S.runId);
+        render();
+      })
+      .catch(function () {
+        setBanner("could not start run: network error", "err");
+        setRunning(false);
         render();
       });
   }
