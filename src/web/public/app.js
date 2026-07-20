@@ -1049,6 +1049,7 @@
       S.stationCtaFocused = false;
       endTourDeparture();
     }
+    document.body.classList.remove("arrival-failed");
     try { localStorage.setItem(SELECTION_KEY, name); } catch (e) {}
     renderSidebar();
     document.getElementById("statusLine").style.display = "none";
@@ -1280,7 +1281,7 @@
         landing
           ? h("button", {
               class: "btn small station-secondary",
-              text: hasOther ? "I have a workflow" : "Browse the yard",
+              text: hasOther ? "I have a workflow" : "See the pipeline",
               onClick: function () {
                 S.stationLanding = false;
                 syncBodyMode();
@@ -1289,7 +1290,7 @@
                 if (other) selectWorkflow(other.name);
                 else {
                   // No other workflow yet: leave full-bleed Station but keep the
-                  // tour selected so the pipeline/boarding strip is the yard.
+                  // tour selected so the compact strip + pipeline is visible.
                   selectWorkflow(TOUR_NAME);
                 }
               }
@@ -1465,16 +1466,18 @@
     if (wait > 0) {
       S.arrivalHoldTimer = setTimeout(function () {
         S.arrivalHoldTimer = null;
-        endTourDeparture();
+        // Set arrivalEnter before clearing departing so syncBodyMode never
+        // sees a frame with neither ride nor arrival armed.
         S.arrivalEnter = true;
+        endTourDeparture();
         render();
       }, wait);
       // Keep ride stage painted until the hold ends.
       render();
       return;
     }
-    endTourDeparture();
     S.arrivalEnter = true;
+    endTourDeparture();
     render();
   }
 
