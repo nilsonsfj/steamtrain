@@ -248,5 +248,7 @@ function staticModelName(agent: AgentInstanceId, model: string): string | undefi
       return AMP_MODELS.find((entry) => entry.id === model)?.name;
     case "kiro":
       return KIRO_MODELS.find((entry) => entry.id === model)?.name;
+    case "cursor":
+      return undefined;
   }
 }

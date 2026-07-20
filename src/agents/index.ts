@@ -81,5 +81,7 @@ export function createAdapter(id: AgentProviderId, binary?: string): AgentAdapte
       return new AmpAdapter(binary);
     case "kiro":
       return new KiroCliAdapter(binary);
+    case "cursor":
+      throw new Error("cursor adapter not wired yet");
   }
 }

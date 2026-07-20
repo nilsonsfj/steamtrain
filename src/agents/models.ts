@@ -23,7 +23,14 @@ import {
 } from "./opencode-variants";
 
 /** All built-in agent providers steamtrain can dispatch to. */
-export const AGENT_IDS: readonly AgentProviderId[] = ["claude", "opencode", "codex", "amp", "kiro"];
+export const AGENT_IDS: readonly AgentProviderId[] = [
+  "claude",
+  "opencode",
+  "codex",
+  "amp",
+  "kiro",
+  "cursor",
+];
 
 export function isAgentProviderId(value: string): value is AgentProviderId {
   return (AGENT_IDS as readonly string[]).includes(value);
@@ -71,6 +78,8 @@ export function modelsForProvider(provider: AgentProviderId): readonly AgentMode
       return AMP_MODELS;
     case "kiro":
       return KIRO_MODELS;
+    case "cursor":
+      return [];
   }
 }
 
@@ -116,6 +125,9 @@ const PROVIDER_ADAPTERS: Record<AgentProviderId, () => AgentAdapter> = {
   opencode: () => new OpenCodeAdapter(),
   amp: () => new AmpAdapter(),
   kiro: () => new KiroCliAdapter(),
+  cursor: () => {
+    throw new Error("cursor adapter not wired yet");
+  },
 };
 
 /** Default model when switching to an agent without an explicit model. */
