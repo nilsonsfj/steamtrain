@@ -41,6 +41,12 @@
     stationCtaFocused: false,
     // Tour ride arc: atmospheric chrome between Station leave and Arrival.
     tourRiding: false,
+    // True while the tour departure beat must stay on the Conductor stage.
+    departing: false,
+    // Wall-clock when the tour left the Station (for a minimum ride beat).
+    departAt: 0,
+    // Hold Arrival until the departure beat finishes on fast tours.
+    arrivalHoldTimer: null,
     // Narration line id that already played the one-shot "fresh" entrance.
     narrationFreshPlayed: null,
     // Expand the full step-kind legend via "?".
@@ -1041,6 +1047,7 @@
       S.stationLanding = false;
       S.tourRiding = false;
       S.stationCtaFocused = false;
+      endTourDeparture();
     }
     try { localStorage.setItem(SELECTION_KEY, name); } catch (e) {}
     renderSidebar();
@@ -1327,7 +1334,8 @@
       !stationOn &&
       S.runState &&
       S.runState.done &&
-      !S.arrivalInspect;
+      !S.arrivalInspect &&
+      !S.departing;
     // Tour ride: keep the atmospheric yard (no sidebar / run form) while the
     // thin header + status line stay available for errors and cancel.
     var rideOn =
@@ -1335,7 +1343,7 @@
       !arrivalOn &&
       S.tourRiding &&
       S.selected === TOUR_NAME &&
-      !(S.runState && S.runState.done);
+      (S.departing || !(S.runState && S.runState.done));
     if (stationOn) document.body.dataset.mode = "station";
     else if (rideOn) document.body.dataset.mode = "ride";
     else if (arrivalOn) document.body.dataset.mode = "arrival";
@@ -1388,6 +1396,86 @@
       }, h("span", { class: "narration-verb", text: "\u25B8" }), " " + line.text));
     });
     canvas.appendChild(box);
+  }
+
+  /** Full-bleed Conductor presence for the tour ride (pipeline stays off-stage). */
+  function renderConductorStage(canvas) {
+    renderStationAtmosphere(canvas);
+    var latest = (S.narration && S.narration.length)
+      ? S.narration[S.narration.length - 1].text
+      : "All aboard \u2014 doors closing.";
+    var track = h("div", { class: "conductor-stage-track", "aria-hidden": "true" });
+    track.appendChild(h("span"));
+    var stage = h("div", { class: "conductor-stage" },
+      h("div", { class: "conductor-stage-kicker", text: "Conductor" }),
+      h("div", {
+        class: "conductor-stage-line",
+        text: latest
+      }),
+      h("div", {
+        class: "conductor-stage-sub",
+        text: S.runState && S.runState.done
+          ? "Approaching the platform\u2026"
+          : "Watching the cars leave the yard\u2026"
+      }),
+      track
+    );
+    canvas.appendChild(stage);
+  }
+
+  function tourDepartRemaining() {
+    if (!S.departing || !S.departAt) return 0;
+    return Math.max(0, 2200 - (Date.now() - S.departAt));
+  }
+
+  function beginTourDeparture() {
+    S.stationLanding = false;
+    S.stationCtaFocused = false;
+    S.tourRiding = true;
+    S.departing = true;
+    S.departAt = Date.now();
+    if (S.arrivalHoldTimer) {
+      clearTimeout(S.arrivalHoldTimer);
+      S.arrivalHoldTimer = null;
+    }
+    // Seed the Conductor line immediately so the stage is never blank.
+    if (!S.narration || !S.narration.length) {
+      S.narration = [{
+        id: "depart-seed",
+        text: "All aboard \u2014 doors closing.",
+        ts: Date.now()
+      }];
+    }
+  }
+
+  function endTourDeparture() {
+    S.departing = false;
+    if (S.arrivalHoldTimer) {
+      clearTimeout(S.arrivalHoldTimer);
+      S.arrivalHoldTimer = null;
+    }
+  }
+
+  function revealArrivalWhenReady() {
+    if (S.arrivalHoldTimer) {
+      clearTimeout(S.arrivalHoldTimer);
+      S.arrivalHoldTimer = null;
+    }
+    var wait = (S.selected === TOUR_NAME && S.tourRiding) ? tourDepartRemaining() : 0;
+    if (wait > 0) {
+      S.arrivalHoldTimer = setTimeout(function () {
+        S.arrivalHoldTimer = null;
+        endTourDeparture();
+        S.arrivalEnter = true;
+        render();
+      }, wait);
+      // Keep ride stage painted until the hold ends.
+      render();
+      return;
+    }
+    endTourDeparture();
+    S.arrivalEnter = true;
+    render();
   }
 
   function renderArrival(canvas) {
@@ -1511,13 +1599,26 @@
       updateProgress();
       return;
     }
+
+    // Tour ride stage: Conductor owns the yard until Arrival is ready.
+    if (
+      S.tourRiding &&
+      S.selected === TOUR_NAME &&
+      (S.departing || (S.runState && !S.runState.done)) &&
+      !S.arrivalInspect
+    ) {
+      renderConductorStage(canvas);
+      updateProgress();
+      return;
+    }
+
     // Returning to tour (not first-run): keep a compact boarding banner above the pipeline.
-    if (S.selected === TOUR_NAME && !(S.runState && S.runState.started)) {
+    if (S.selected === TOUR_NAME && !(S.runState && S.runState.started) && !S.departing) {
       renderStationHero(canvas);
     }
 
     var showingArrival = false;
-    if (S.runState && S.runState.done) {
+    if (S.runState && S.runState.done && !S.departing) {
       if (!S.arrivalInspect) renderStationAtmosphere(canvas);
       showingArrival = renderArrival(canvas);
     }
@@ -1525,10 +1626,6 @@
     if (showingArrival && !S.arrivalInspect) {
       updateProgress();
       return;
-    }
-
-    if (document.body.dataset.mode === "ride") {
-      renderStationAtmosphere(canvas);
     }
 
     renderNarration(canvas);
@@ -2379,9 +2476,7 @@
     // Leave full-bleed Station for ride mode: thin chrome stays so banners and
     // cancel remain reachable while the POST is in flight / if it fails.
     if (S.selected === TOUR_NAME) {
-      S.stationLanding = false;
-      S.stationCtaFocused = false;
-      S.tourRiding = true;
+      beginTourDeparture();
     }
     S.endedAt = 0;
     setBanner("", "");
@@ -2403,6 +2498,7 @@
           setRunning(false);
           // Escape ride chrome so the error (and sidebar) stay reachable.
           S.tourRiding = false;
+          endTourDeparture();
           syncBodyMode();
           render();
           return;
@@ -2426,6 +2522,7 @@
         setBanner("could not start run: network error", "err");
         setRunning(false);
         S.tourRiding = false;
+        endTourDeparture();
         syncBodyMode();
         render();
       });
@@ -2454,12 +2551,21 @@
           es.close(); S.es = null; setRunning(false); stopTimer();
           S.queuedBanner = false;
           S.endedAt = Date.now();
-          S.arrivalEnter = true;
           if (frame.status === "canceled") setBanner("Run canceled.", "info");
           else if (frame.status === "budget-exceeded") setBanner("Run stopped: cost budget reached. Raise maxCostUsd and re-run to resume.", "err");
           else if (frame.status === "error" || frame.ok === false) setBanner("Run failed" + (frame.error ? ": " + frame.error : "."), "err");
           else setBanner("Run complete.", "ok");
-          render();
+          // Tour: hold the Conductor stage for a minimum beat before Arrival.
+          if (S.selected === TOUR_NAME && S.tourRiding && frame.status !== "canceled" && frame.status !== "error" && frame.ok !== false) {
+            revealArrivalWhenReady();
+          }           else {
+            S.arrivalEnter = true;
+            if (frame.status === "canceled" || frame.status === "error" || frame.ok === false) {
+              S.tourRiding = false;
+              endTourDeparture();
+            }
+            render();
+          }
           pollLiveRuns();
         }
       };

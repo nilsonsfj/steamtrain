@@ -48,7 +48,13 @@ export function WorkflowPicker({
         <Text color="gray">↑/↓ select · Ctrl+N new · Ctrl+R run</Text>
       </Box>
       {stationLanding ? (
-        <Box flexDirection="column" marginBottom={1} borderStyle="single" borderColor="cyan" paddingX={1}>
+        <Box
+          flexDirection="column"
+          marginBottom={1}
+          borderStyle="single"
+          borderColor="cyan"
+          paddingX={1}
+        >
           <Text color="cyan" bold>
             steamtrain
           </Text>

@@ -497,15 +497,15 @@ textarea#input:focus {
   outline-offset: 3px;
 }
 .station-secondary {
-  color: #c5d0dc;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(138, 152, 168, 0.35);
+  color: #d5dee8;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(180, 196, 210, 0.42);
   padding: 10px 14px;
 }
 .station-secondary:hover {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(138, 152, 168, 0.55);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(200, 214, 226, 0.65);
 }
 
 /* Atmospheric layers: a place, not glow soup */
@@ -585,11 +585,23 @@ textarea#input:focus {
   position: absolute;
   right: max(2%, calc(8% - 20px));
   bottom: 16%;
-  width: min(42vw, 380px);
+  width: min(46vw, 420px);
   height: auto;
-  opacity: 0.22;
+  opacity: 0.38;
   filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.45));
   animation: engine-idle 5.5s ease-in-out infinite;
+}
+body[data-mode="arrival"] .station-atmosphere .engine,
+body[data-mode="arrival"] .station-atmosphere .signal {
+  display: none;
+}
+body[data-mode="arrival"] .station-atmosphere .glow-a {
+  background: radial-gradient(circle, rgba(63, 185, 80, 0.22), transparent 68%);
+}
+body[data-mode="arrival"] .station-atmosphere .steam,
+body[data-mode="arrival"] .station-atmosphere .steam-b,
+body[data-mode="arrival"] .station-atmosphere .steam-c {
+  background: radial-gradient(circle, rgba(86, 211, 100, 0.22), transparent 70%);
 }
 .station-atmosphere .signal {
   position: absolute;
@@ -787,6 +799,97 @@ body[data-mode="ride"] .track {
   opacity: 0.72;
 }
 
+/* Conductor stage: the ride itself for short tours */
+.conductor-stage {
+  position: relative;
+  z-index: 1;
+  max-width: 760px;
+  width: min(760px, 100%);
+  margin: 0 auto;
+  text-align: left;
+  padding: 8px 0 24px;
+  animation: station-rise 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.conductor-stage-kicker {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent-bright);
+  margin-bottom: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.conductor-stage-kicker::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 5px rgba(52, 211, 196, 0.2);
+  animation: conductor-live 1.6s ease-in-out infinite;
+}
+.conductor-stage-line {
+  font-family: var(--font-display);
+  font-size: clamp(32px, 5.2vw, 48px);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.12;
+  color: var(--text);
+  text-wrap: balance;
+  min-height: 2.5em;
+  animation: line-fresh 480ms ease-out;
+  text-shadow: 0 0 40px rgba(52, 211, 196, 0.12);
+}
+.conductor-stage-sub {
+  margin-top: 22px;
+  font-size: 15px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+.conductor-stage-track {
+  margin-top: 28px;
+  height: 3px;
+  width: min(280px, 50%);
+  border-radius: 999px;
+  background: rgba(42, 51, 64, 0.9);
+  overflow: hidden;
+}
+.conductor-stage-track > span {
+  display: block;
+  height: 100%;
+  width: 40%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: conductor-track 1.4s ease-in-out infinite;
+}
+@keyframes conductor-track {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+body[data-mode="ride"] .canvas {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 28px 72px;
+}
+/* Quiet the ops strip during departure so Conductor stays the focus. */
+body[data-mode="ride"] .runbar .status-line {
+  opacity: 0.45;
+}
+body[data-mode="ride"] .runbar .row {
+  opacity: 0.55;
+}
+body[data-mode="ride"] .runbar .banner.ok,
+body[data-mode="ride"] .runbar .banner.info {
+  display: none;
+}
+
 /* Compact boarding strip when returning to the tour (ops chrome stays). */
 .station-hero.compact {
   max-width: 1100px;
@@ -935,24 +1038,21 @@ body[data-mode="ride"] .track {
 .arrival {
   position: relative;
   z-index: 1;
-  max-width: 720px;
-  width: min(720px, 100%);
+  max-width: 780px;
+  width: min(780px, 100%);
   margin: 28px auto 18px;
-  padding: 36px 36px 30px;
-  border: 1px solid rgba(63, 185, 80, 0.35);
-  border-radius: 16px;
-  background: radial-gradient(ellipse 70% 50% at 10% 0%, rgba(63, 185, 80, 0.18), transparent 55%),
-    radial-gradient(ellipse 40% 30% at 95% 80%, rgba(52, 211, 196, 0.08), transparent 50%),
-    linear-gradient(180deg, rgba(63, 185, 80, 0.07), transparent 45%), var(--panel);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  padding: 8px 4px 12px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .arrival.enter {
   animation: arrival-in 720ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .arrival.failed {
-  border-color: rgba(248, 81, 73, 0.4);
-  background: radial-gradient(ellipse 70% 50% at 10% 0%, rgba(248, 81, 73, 0.14), transparent 55%),
-    linear-gradient(180deg, rgba(248, 81, 73, 0.06), transparent 45%), var(--panel);
+  border: none;
+  background: transparent;
 }
 @keyframes arrival-in {
   0% {
@@ -982,10 +1082,12 @@ body[data-mode="ride"] .track {
 }
 .arrival-title {
   font-family: var(--font-display);
-  font-size: clamp(26px, 4vw, 36px);
+  font-size: clamp(28px, 4.4vw, 40px);
   font-weight: 700;
   letter-spacing: -0.035em;
-  margin-bottom: 20px;
+  margin-bottom: 22px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(63, 185, 80, 0.22);
   line-height: 1.15;
   text-wrap: balance;
   animation: station-rise 560ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both;
@@ -995,6 +1097,7 @@ body[data-mode="ride"] .track {
 }
 .arrival.failed .arrival-title {
   color: #f85149;
+  border-bottom-color: rgba(248, 81, 73, 0.28);
 }
 .arrival-step {
   color: var(--muted);
@@ -1011,8 +1114,12 @@ body[data-mode="ride"] .track {
 .arrival-card {
   padding: 14px 14px 12px;
   border-radius: 10px;
-  border: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(63, 185, 80, 0.22);
+  background: rgba(8, 14, 12, 0.72);
+}
+.arrival.failed .arrival-card {
+  border-color: rgba(248, 81, 73, 0.28);
+  background: rgba(18, 10, 10, 0.72);
 }
 .arrival-card-label {
   font-size: 11px;
@@ -1096,19 +1203,19 @@ body[data-mode="ride"] .track {
   gap: 8px;
   flex-wrap: wrap;
   margin: 10px 0 16px;
-  padding: 10px 12px;
-  background: rgba(14, 17, 22, 0.6);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 .arrival-car {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px 4px 6px;
+  gap: 7px;
+  padding: 6px 10px 6px 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(42, 51, 64, 0.9);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(42, 51, 64, 0.95);
   animation: dotPop 0.3s ease-out both;
 }
 .arrival-dot {
@@ -2881,6 +2988,10 @@ select:focus-visible,
   .arrival-destinations,
   .narration,
   .narration-line.fresh,
+  .conductor-stage,
+  .conductor-stage-line,
+  .conductor-stage-kicker::before,
+  .conductor-stage-track > span,
   .station-atmosphere .glow-a,
   .station-atmosphere .glow-b,
   .station-atmosphere .rails,
