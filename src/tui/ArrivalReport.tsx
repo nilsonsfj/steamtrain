@@ -29,10 +29,11 @@ export function ArrivalReportView({
   const cards = arrivalReceiptCards(report.receipt);
   const titleColor = report.receipt.ok ? "green" : "red";
 
-  // Fixed chrome: border(2) + headline row with hint(1) + cards(1) + destinations(1).
-  const chrome = 5;
+  // Fixed chrome: border(2) + kicker/hint(1) + headline(1) + cards(1) + destinations(1).
+  const chrome = 6;
   const bodyBudget = Math.max(1, height - chrome);
   const heroLines = wrapOutputLines(report.hero, inner).slice(0, bodyBudget);
+  const kicker = report.receipt.ok ? "End of the line" : "Stopped short";
 
   return (
     <Box
@@ -44,12 +45,12 @@ export function ArrivalReportView({
       height={height}
     >
       <Box justifyContent="space-between">
-        <Text color={titleColor} bold>
-          {report.receipt.ok ? "End of the line · " : "Stopped short · "}
-          {headline}
-        </Text>
+        <Text color={titleColor}>{kicker}</Text>
         <Text color="gray">i details · Esc back</Text>
       </Box>
+      <Text color={titleColor} bold>
+        {headline}
+      </Text>
       <Box>
         {cards.map((card, i) => (
           <Text key={card.id} color="gray">
