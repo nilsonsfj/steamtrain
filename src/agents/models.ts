@@ -13,7 +13,7 @@ import {
   refreshCodexVariantCache,
 } from "./codex-variants";
 import { resolveAgentInstance } from "./config";
-import { createCursorAdapterStub } from "./cursor";
+import { CursorAgentAdapter } from "./cursor";
 import { KIRO_MODELS, KiroCliAdapter } from "./kiro";
 import { OPENCODE_MODELS, OpenCodeAdapter } from "./opencode";
 import {
@@ -125,7 +125,7 @@ const PROVIDER_ADAPTERS: Record<AgentProviderId, () => AgentAdapter> = {
   opencode: () => new OpenCodeAdapter(),
   amp: () => new AmpAdapter(),
   kiro: () => new KiroCliAdapter(),
-  cursor: () => createCursorAdapterStub(),
+  cursor: () => new CursorAgentAdapter(),
 };
 
 /** Default model when switching to an agent without an explicit model. */

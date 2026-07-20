@@ -1,6 +1,6 @@
-import type { AgentAdapter } from "./adapter";
 import type {
   AgentEvent,
+  AgentId,
   AgentInstanceId,
   EventMapper,
   TokenUsage,
@@ -14,9 +14,45 @@ import {
   cursorSystemInit,
   cursorToolCall,
 } from "../types/raw-cursor";
+import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
+import type { AgentModel } from "./agent-model";
 import { stringifyContent } from "./util";
 
 const AGENT: AgentInstanceId = "cursor";
+
+/** Known Cursor Agent CLI models (used by `/model` and autocomplete). */
+export const CURSOR_MODELS: readonly AgentModel[] = [
+  { id: "auto", name: "Auto (default)" },
+  { id: "composer-2.5", name: "Composer 2.5" },
+  { id: "composer-2.5-fast", name: "Composer 2.5 Fast" },
+  { id: "cursor-grok-4.5-high", name: "Cursor Grok 4.5" },
+  { id: "claude-opus-4-8-thinking-high", name: "Claude Opus 4.8 Thinking High" },
+  { id: "claude-sonnet-5-high", name: "Claude Sonnet 5 High" },
+  { id: "gpt-5.5-high", name: "GPT 5.5 High" },
+  { id: "gpt-5.2", name: "GPT 5.2" },
+];
+
+export function resolveCursorModel(model: string, effort?: string): string {
+  if (!effort) return model;
+  if (/\[.*effort=/.test(model)) return model;
+  return `${model}[effort=${effort}]`;
+}
+
+export function buildCursorRunArgs(opts: AgentRunOptions): string[] {
+  return [
+    "--print",
+    "--output-format",
+    "stream-json",
+    "--stream-partial-output",
+    "--force",
+    "--trust",
+    "--model",
+    resolveCursorModel(opts.model, opts.effort),
+    ...(opts.resumeSessionId ? ["--resume", opts.resumeSessionId] : []),
+    ...(opts.extraArgs ?? []),
+    opts.prompt,
+  ];
+}
 
 function cursorTokens(usage: CursorUsage | undefined): TokenUsage | undefined {
   if (!usage) return undefined;
@@ -173,13 +209,24 @@ export function createCursorMapper(agent: AgentInstanceId = AGENT): EventMapper 
   };
 }
 
-/** Placeholder until Task 2/4 wires CursorAgentAdapter; safe for metadata lookups. */
-export function createCursorAdapterStub(binary = "agent"): AgentAdapter {
-  return {
-    id: "cursor",
-    binary,
-    defaultModel: "composer-2.5",
-    supportsResume: true,
-    async *run() {},
-  };
+export class CursorAgentAdapter implements AgentAdapter {
+  readonly id: AgentId = "cursor";
+  readonly binary: string;
+  readonly defaultModel = "composer-2.5";
+  readonly supportsResume = true;
+
+  constructor(binary = "agent") {
+    this.binary = binary;
+  }
+
+  run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
+    return runAgentProcess({
+      id: this.id,
+      binary: this.binary,
+      args: buildCursorRunArgs(opts),
+      opts,
+      map: createCursorMapper(opts.agentId ?? this.id),
+      // prompt is on argv; do not pass stdin prompt
+    });
+  }
 }

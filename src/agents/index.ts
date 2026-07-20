@@ -4,7 +4,7 @@ import { AmpAdapter } from "./amp";
 import { ClaudeCodeAdapter } from "./claude";
 import { CodexAdapter } from "./codex";
 import { KiroCliAdapter } from "./kiro";
-import { createCursorAdapterStub } from "./cursor";
+import { CursorAgentAdapter } from "./cursor";
 import { OpenCodeAdapter } from "./opencode";
 
 export type { AgentAdapter, AgentRunOptions } from "./adapter";
@@ -83,6 +83,6 @@ export function createAdapter(id: AgentProviderId, binary?: string): AgentAdapte
     case "kiro":
       return new KiroCliAdapter(binary);
     case "cursor":
-      return createCursorAdapterStub(binary);
+      return new CursorAgentAdapter(binary);
   }
 }

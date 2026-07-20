@@ -95,3 +95,60 @@ describe("cursor mapper", () => {
     ]);
   });
 });
+
+import { buildCursorRunArgs, resolveCursorModel, CURSOR_MODELS } from "../src/agents/cursor";
+
+describe("cursor argv", () => {
+  it("includes print/stream-json/partial/force/trust/model and trailing prompt", () => {
+    expect(
+      buildCursorRunArgs({ prompt: "hello", model: "composer-2.5" }),
+    ).toEqual([
+      "--print",
+      "--output-format",
+      "stream-json",
+      "--stream-partial-output",
+      "--force",
+      "--trust",
+      "--model",
+      "composer-2.5",
+      "hello",
+    ]);
+  });
+
+  it("adds --resume before extraArgs and prompt", () => {
+    expect(
+      buildCursorRunArgs({
+        prompt: "more",
+        model: "auto",
+        resumeSessionId: "sess-9",
+        extraArgs: ["--approve-mcps"],
+      }),
+    ).toEqual([
+      "--print",
+      "--output-format",
+      "stream-json",
+      "--stream-partial-output",
+      "--force",
+      "--trust",
+      "--model",
+      "auto",
+      "--resume",
+      "sess-9",
+      "--approve-mcps",
+      "more",
+    ]);
+  });
+
+  it("appends [effort=…] unless model already has effort=", () => {
+    expect(resolveCursorModel("composer-2.5", "high")).toBe("composer-2.5[effort=high]");
+    expect(resolveCursorModel("claude-opus-4-8[effort=low]", "high")).toBe(
+      "claude-opus-4-8[effort=low]",
+    );
+  });
+
+  it("ships a static catalog including auto and composer-2.5", () => {
+    const ids = CURSOR_MODELS.map((m) => m.id);
+    expect(ids).toContain("auto");
+    expect(ids).toContain("composer-2.5");
+  });
+});
