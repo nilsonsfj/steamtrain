@@ -875,11 +875,15 @@ async function handle(
       "x-content-type-options": "nosniff",
       // Scripts are now external; only inline `style="..."` attributes remain
       // (marking `style-src 'unsafe-inline'` keeps those painting).
+      // Google Fonts: stylesheet from fonts.googleapis.com, files from
+      // fonts.gstatic.com — required for Space Grotesk / IBM Plex to paint.
       // frame-ancestors 'none' (mirrored by X-Frame-Options for older
       // browsers) blocks clickjacking; base-uri/object-src/form-action close
       // the remaining injection-amplification vectors.
       "content-security-policy":
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+        "default-src 'self'; script-src 'self'; " +
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+        "font-src 'self' https://fonts.gstatic.com; " +
         "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; " +
         "base-uri 'none'; form-action 'self'; object-src 'none'",
       "x-frame-options": "DENY",

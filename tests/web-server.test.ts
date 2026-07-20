@@ -220,10 +220,14 @@ describe("web server", () => {
     // The inline bundle must not be served on the page anymore.
     expect(html).not.toContain("BEGIN_REDUCER_BUNDLE");
     // Scripts: 'unsafe-inline' removed so we rely on external static assets
-    // shipped under script-src 'self'.
+    // shipped under script-src 'self'. Display fonts load from Google Fonts.
     const csp = res.headers.get("content-security-policy") ?? "";
     expect(csp).toContain("script-src 'self'");
     expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
+    expect(csp).toContain("https://fonts.googleapis.com");
+    expect(csp).toContain("font-src 'self' https://fonts.gstatic.com");
+    expect(html).toContain("fonts.googleapis.com/css2");
+    expect(html).toContain("Space+Grotesk");
   });
 
   it("serves a favicon (inline link tag + /favicon.ico route, no auth required)", async () => {
