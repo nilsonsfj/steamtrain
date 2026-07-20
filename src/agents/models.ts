@@ -231,7 +231,7 @@ export function effortsForModel(
     case "kiro":
       return claudeEfforts(model);
     case "cursor":
-      return /\[.*effort=/.test(model) ? [] : ["low", "medium", "high", "xhigh"];
+      return /\[[^\]]*effort=/.test(model) ? [] : ["low", "medium", "high", "xhigh"];
     default:
       return [];
   }
