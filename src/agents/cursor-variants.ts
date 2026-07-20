@@ -175,6 +175,11 @@ export function listCursorCachedAgentModels(): readonly AgentModel[] {
     .map(([id, info]) => ({ id, name: info.name }));
 }
 
+/** @internal Test helper — inject a model cache without spawning the Cursor CLI. */
+export function setCursorVariantCacheForTests(models: Map<string, CursorModelInfo>): void {
+  store.models = models;
+}
+
 /** @internal Test helper — clear the in-memory variant cache. */
 export function clearCursorVariantCacheForTests(): void {
   store.clear();

@@ -13,7 +13,12 @@ import {
   refreshCodexVariantCache,
 } from "./codex-variants";
 import { resolveAgentInstance } from "./config";
-import { CursorAgentAdapter } from "./cursor";
+import { CURSOR_MODELS, CursorAgentAdapter } from "./cursor";
+import {
+  getCursorModelName,
+  listCursorCachedAgentModels,
+  refreshCursorVariantCache,
+} from "./cursor-variants";
 import { KIRO_MODELS, KiroCliAdapter } from "./kiro";
 import { OPENCODE_MODELS, OpenCodeAdapter } from "./opencode";
 import {
@@ -30,6 +35,7 @@ export const AGENT_IDS: readonly AgentProviderId[] = [
   "codex",
   "amp",
   "kiro",
+  "cursor",
 ];
 
 export function isAgentProviderId(value: string): value is AgentProviderId {
@@ -65,6 +71,16 @@ function codexModelsWithLiveNames(): readonly AgentModel[] {
   }));
 }
 
+function cursorModelsWithLiveNames(): readonly AgentModel[] {
+  const cached = listCursorCachedAgentModels();
+  if (cached.length > 0) return cached;
+
+  return CURSOR_MODELS.map((model) => ({
+    id: model.id,
+    name: getCursorModelName(model.id) ?? model.name,
+  }));
+}
+
 /** Model catalog for an agent provider (id + human-readable name). */
 export function modelsForProvider(provider: AgentProviderId): readonly AgentModel[] {
   switch (provider) {
@@ -79,7 +95,7 @@ export function modelsForProvider(provider: AgentProviderId): readonly AgentMode
     case "kiro":
       return KIRO_MODELS;
     case "cursor":
-      return [];
+      return cursorModelsWithLiveNames();
   }
 }
 
@@ -111,6 +127,7 @@ export function modelNameForAgent(
   if (fromCatalog) return fromCatalog.name;
   if (provider === "opencode") return getOpencodeModelName(modelId) ?? modelId;
   if (provider === "codex") return getCodexModelName(modelId) ?? modelId;
+  if (provider === "cursor") return getCursorModelName(modelId) ?? modelId;
   return modelId;
 }
 
@@ -213,6 +230,8 @@ export function effortsForModel(
       return ampEfforts(model);
     case "kiro":
       return claudeEfforts(model);
+    case "cursor":
+      return /\[.*effort=/.test(model) ? [] : ["low", "medium", "high", "xhigh"];
     default:
       return [];
   }
@@ -281,8 +300,20 @@ export async function refreshAgentCatalogCaches(
     if (await refreshCodexVariantCache(binary)) refreshed = true;
   }
 
+  const cursor = doctor.find((d) => d.provider === "cursor" && d.status === "ok");
+  if (cursor?.status === "ok") {
+    const binary =
+      resolveAgentInstance(config, cursor.agent)?.binary ?? cursor.binaryPath ?? "agent";
+    if (await refreshCursorVariantCache(binary)) refreshed = true;
+  }
+
   return refreshed;
 }
 
-export { formatModelOption, refreshCodexVariantCache, refreshOpencodeVariantCache };
+export {
+  formatModelOption,
+  refreshCodexVariantCache,
+  refreshCursorVariantCache,
+  refreshOpencodeVariantCache,
+};
 export type { AgentModel };
