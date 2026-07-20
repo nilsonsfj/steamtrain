@@ -24,3 +24,4 @@ export {
   shouldOfferStationLanding,
   initialWorkflowIndex,
 } from "../workflow/first-run";
+export { parseRunDeepLink, runDeepLink } from "./run-deep-link";

@@ -21,6 +21,7 @@
     stagedOverrides: {},
     projectConfig: null,
     liveRuns: [], liveRunsTimer: null, queuedBanner: false,
+    deepLinkRequest: 0,
     // Step drill-in drawer: which step it shows ({phaseId, iteration, stepId}).
     detail: null,
     // Per-card tail scroll state keyed by stepKey(): { follow: bool, top: px }.
@@ -213,7 +214,11 @@
       S.workflows = r.body.workflows || [];
       if (r.body.configLabel) document.getElementById("config").textContent = r.body.configLabel;
       renderSidebar();
-      bootstrapStationLanding();
+      var deepLinkId = SteamtrainReducer.parseRunDeepLink
+        ? SteamtrainReducer.parseRunDeepLink(window.location.hash)
+        : null;
+      if (deepLinkId) openRunDeepLink(deepLinkId);
+      else bootstrapStationLanding();
     });
     loadMeta();
     if (!isReadOnly()) loadProjectConfig();
@@ -316,6 +321,42 @@
     }).catch(function () {});
   }
 
+  function setRunDeepLink(runId) {
+    var hash = SteamtrainReducer.runDeepLink
+      ? SteamtrainReducer.runDeepLink(runId)
+      : "#run-" + runId;
+    if (window.location.hash === hash) return;
+    window.history.replaceState(null, "", window.location.pathname + window.location.search + hash);
+  }
+
+  function currentRunDeepLink() {
+    return SteamtrainReducer.parseRunDeepLink
+      ? SteamtrainReducer.parseRunDeepLink(window.location.hash)
+      : null;
+  }
+
+  function openRunDeepLink(runId) {
+    var request = ++S.deepLinkRequest;
+    api("GET", "/api/runs").then(function (r) {
+      if (request !== S.deepLinkRequest || currentRunDeepLink() !== runId) return;
+      if (r.status === 401) { showLoginForm(); return; }
+      if (r.status !== 200) {
+        setBanner("Could not open run " + runId.slice(0, 8) + "… — try refreshing.", "err");
+        return;
+      }
+      var run = (r.body.runs || []).find(function (candidate) { return candidate.id === runId; });
+      if (run && (run.status === "running" || run.status === "queued")) {
+        attachRun(run);
+        return;
+      }
+      openHistory(runId);
+    }).catch(function () {
+      if (request === S.deepLinkRequest && currentRunDeepLink() === runId) {
+        setBanner("Could not open run " + runId.slice(0, 8) + "… — network error.", "err");
+      }
+    });
+  }
+
   function renderLiveRuns() {
     var section = document.getElementById("liveRunsSection");
     var box = document.getElementById("liveRuns");
@@ -370,10 +411,14 @@
 
   /** Attach to an in-flight run: replay its record so far, then tail live. */
   function attachRun(run) {
-    if (S.runId === run.id && S.es) return; // already attached
+    if (S.runId === run.id && S.es) {
+      setRunDeepLink(run.id);
+      return;
+    }
     var known = S.workflows.some(function (w) { return w.name === run.workflow; });
     var begin = function () {
       S.runId = run.id;
+      setRunDeepLink(run.id);
       setRunning(true);
       S.startedAt = run.startedAt || Date.now();
       startTimer();
@@ -1086,6 +1131,7 @@
       selectWorkflow(workflow, function () {
         if (downgraded) setBanner("Workflow changed since this run \u2014 doing a full re-run.", "info");
         S.runId = runId;
+        setRunDeepLink(runId);
         setRunning(true);
         S.startedAt = Date.now();
         startTimer();
@@ -2515,6 +2561,7 @@
             " for this ride.", "info");
         }
         S.runId = r.body.runId;
+        setRunDeepLink(S.runId);
         setRunning(true);
         S.startedAt = Date.now();
         startTimer();
@@ -3194,7 +3241,7 @@
   }
 
   // ---- run history ---------------------------------------------------------
-  function openHistory() {
+  function openHistory(runId) {
     var holder = h("div", null, h("div", { class: "ro", text: "Loading run history\u2026" }));
     var footChildren = [h("div", { class: "spacer" }), h("button", { class: "btn", text: "Close", onClick: closeModal })];
     if (!isReadOnly()) {
@@ -3203,7 +3250,8 @@
     var foot = h("div", { class: "mfoot" });
     footChildren.forEach(function (c) { foot.appendChild(c); });
     openModal(modalShell("Run history", "Past workflow runs recorded on disk.", holder, foot, true));
-    reopenHistoryList(holder);
+    if (runId) openHistoryRun(holder, runId);
+    else reopenHistoryList(holder);
   }
 
   function reopenHistoryList(holder) {
@@ -3782,6 +3830,11 @@
       e.preventDefault();
       closeDetail();
     }
+  });
+
+  window.addEventListener("hashchange", function () {
+    var runId = currentRunDeepLink();
+    if (runId) openRunDeepLink(runId);
   });
 
   loadSessionThenCatalog();
