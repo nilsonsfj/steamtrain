@@ -2951,6 +2951,8 @@
   }
   function closeModal() {
     if (S.draftAbort) { try { S.draftAbort.abort(); } catch (e) {} S.draftAbort = null; }
+    stopHistoryPoll();
+    Hist.holder = null;
     document.getElementById("overlay").classList.remove("show");
     clear(document.getElementById("modal"));
     var invoker = S.modalInvoker;
@@ -3470,90 +3472,411 @@
   }
 
   // ---- run history ---------------------------------------------------------
+  // History browser state (lives for the life of the open modal).
+  var Hist = {
+    holder: null,
+    runs: [],
+    liveRuns: [],
+    query: "",
+    status: "all",
+    selected: 0,
+    pollTimer: null,
+    request: 0,
+    view: "list" // "list" | "detail"
+  };
+
+  /** Only a non-empty string is a deep-link run id - never a DOM Event. */
+  function normalizeHistoryRunId(runId) {
+    return typeof runId === "string" && runId.length > 0 ? runId : undefined;
+  }
+
+  function historyStatusLabel(status) {
+    if (status === "error") return "failed";
+    if (status === "budget-exceeded") return "budget";
+    return status || "";
+  }
+
+  function matchesHistoryQuery(query, fields) {
+    var q = (query || "").trim().toLowerCase();
+    if (!q) return true;
+    var hay = [fields.workflow, fields.input, fields.id, fields.status]
+      .filter(Boolean).join("\n").toLowerCase();
+    return hay.indexOf(q) !== -1;
+  }
+
+  function buildHistoryEntries() {
+    var out = [];
+    var q = Hist.query;
+    var status = Hist.status;
+    if (status === "all" || status === "live") {
+      (Hist.liveRuns || []).forEach(function (run) {
+        if (!matchesHistoryQuery(q, {
+          workflow: run.workflow, input: run.input, id: run.id, status: run.status
+        })) return;
+        out.push({ kind: "live", id: run.id, run: run });
+      });
+    }
+    if (status !== "live") {
+      (Hist.runs || []).forEach(function (run) {
+        if (status !== "all" && run.status !== status) return;
+        if (!matchesHistoryQuery(q, {
+          workflow: run.workflow, input: run.input, id: run.id, status: run.status
+        })) return;
+        out.push({ kind: "record", id: run.id, run: run });
+      });
+    }
+    return out;
+  }
+
+  function stopHistoryPoll() {
+    if (!Hist || !Hist.pollTimer) return;
+    clearInterval(Hist.pollTimer);
+    Hist.pollTimer = null;
+  }
+
   function openHistory(runId) {
-    var holder = h("div", null, h("div", { class: "ro", text: "Loading run history\u2026" }));
-    var footChildren = [h("div", { class: "spacer" }), h("button", { class: "btn", text: "Close", onClick: closeModal })];
+    var id = normalizeHistoryRunId(runId);
+    stopHistoryPoll();
+    Hist = {
+      holder: null,
+      runs: [],
+      liveRuns: S.liveRuns ? S.liveRuns.slice() : [],
+      query: "",
+      status: "all",
+      selected: 0,
+      pollTimer: null,
+      request: 0,
+      fingerprint: "",
+      view: id ? "detail" : "list"
+    };
+    var holder = h("div", { class: "hist-root" }, h("div", { class: "ro hist-loading", text: "Loading run history\u2026" }));
+    Hist.holder = holder;
+    var footChildren = [h("div", { class: "spacer" }), h("button", { class: "btn", text: "Close", onClick: function () { stopHistoryPoll(); closeModal(); } })];
     if (!isReadOnly()) {
       footChildren.unshift(h("button", { class: "btn danger small", text: "Clear all", onClick: clearHistory }));
     }
     var foot = h("div", { class: "mfoot" });
     footChildren.forEach(function (c) { foot.appendChild(c); });
-    openModal(modalShell("Run history", "Past workflow runs recorded on disk.", holder, foot, true));
-    if (runId) openHistoryRun(holder, runId);
+    var shell = modalShell("Runs", "Live rides and recorded arrivals - inspect, re-run, harvest.", holder, foot, true);
+
+    shell.classList.add("history-modal");
+    openModal(shell);
+    if (id) openHistoryRun(holder, id);
     else reopenHistoryList(holder);
+    Hist.pollTimer = setInterval(function () {
+      if (Hist.view !== "list" || !Hist.holder) return;
+      refreshHistoryData(Hist.holder, { silent: true });
+    }, 2500);
+  }
+
+  function refreshHistoryData(holder, opts) {
+    opts = opts || {};
+    var req = ++Hist.request;
+    return Promise.all([
+      apiAuth("GET", "/api/history"),
+      api("GET", "/api/runs").catch(function () { return { status: 0, body: {} }; })
+    ]).then(function (results) {
+      if (req !== Hist.request || Hist.holder !== holder) return;
+      var histRes = results[0];
+      var liveRes = results[1];
+      if (histRes.status === 401) { showLoginForm(); return; }
+      var nextRuns = (histRes.body && histRes.body.runs) || [];
+      var nextLive = [];
+      if (liveRes && liveRes.status === 200) {
+        nextLive = (liveRes.body.runs || []).filter(function (run) {
+          return run.status === "running" || run.status === "queued";
+        });
+        S.liveRuns = nextLive.slice();
+        renderLiveRuns();
+      }
+      var fingerprint = historyListFingerprint(nextRuns, nextLive);
+      var changed = fingerprint !== Hist.fingerprint;
+      Hist.runs = nextRuns;
+      Hist.liveRuns = nextLive;
+      Hist.fingerprint = fingerprint;
+      if (!opts.silent || (Hist.view === "list" && changed)) renderHistoryList(holder);
+    }).catch(function () {
+      if (req !== Hist.request || Hist.holder !== holder) return;
+      if (!opts.silent) {
+        clear(holder);
+        holder.appendChild(h("div", { class: "mbanner show err", text: "Could not load run history - check the connection and try again." }));
+        holder.appendChild(h("button", { class: "btn", text: "Retry", onClick: function () { reopenHistoryList(holder); } }));
+      }
+    });
+  }
+
+  function historyListFingerprint(runs, liveRuns) {
+    var live = (liveRuns || []).map(function (r) {
+      return [r.id, r.status, (r.pendingApprovals || []).length, (r.pendingInputs || []).length].join(":");
+    }).join("|");
+    var past = (runs || []).map(function (r) { return r.id + ":" + r.status; }).join("|");
+    return live + "#" + past;
   }
 
   function reopenHistoryList(holder) {
+    Hist.view = "list";
+    Hist.holder = holder;
     clear(holder);
-    holder.appendChild(h("div", { class: "ro", text: "Loading\u2026" }));
-    apiAuth("GET", "/api/history").then(function (r) {
-      renderHistoryList(holder, (r.body && r.body.runs) || []);
-    });
+    holder.appendChild(h("div", { class: "ro hist-loading", text: "Loading\u2026" }));
+    refreshHistoryData(holder);
   }
 
-  function renderHistoryList(holder, runs) {
+  function renderHistoryToolbar(holder) {
+    var toolbar = h("div", { class: "hist-toolbar" });
+    var search = h("input", {
+      class: "txt hist-search",
+      type: "search",
+      placeholder: "Search workflow, input, or run id\u2026",
+      value: Hist.query,
+      "aria-label": "Filter runs"
+    });
+    search.addEventListener("input", function () {
+      Hist.query = search.value || "";
+      Hist.selected = 0;
+      renderHistoryList(holder);
+    });
+    toolbar.appendChild(search);
+
+    var chips = h("div", { class: "hist-chips", role: "tablist", "aria-label": "Filter by status" });
+    var counts = { done: 0, error: 0, canceled: 0, "budget-exceeded": 0 };
+    (Hist.runs || []).forEach(function (r) { if (counts[r.status] != null) counts[r.status]++; });
+    var chipDefs = [
+      { id: "all", label: "All", count: (Hist.liveRuns || []).length + (Hist.runs || []).length },
+      { id: "live", label: "Live", count: (Hist.liveRuns || []).length },
+      { id: "done", label: "Done", count: counts.done },
+      { id: "error", label: "Failed", count: counts.error },
+      { id: "canceled", label: "Canceled", count: counts.canceled },
+      { id: "budget-exceeded", label: "Budget", count: counts["budget-exceeded"] }
+    ];
+    chipDefs.forEach(function (chip) {
+      if (chip.id !== "all" && chip.id !== "live" && chip.count === 0 && Hist.status !== chip.id) return;
+      var btn = h("button", {
+        class: "hist-chip" + (Hist.status === chip.id ? " active" : ""),
+        type: "button",
+        role: "tab",
+        "aria-selected": Hist.status === chip.id ? "true" : "false",
+        text: chip.label + (chip.count ? " " + chip.count : "")
+      });
+      btn.addEventListener("click", function () {
+        Hist.status = chip.id;
+        Hist.selected = 0;
+        renderHistoryList(holder);
+      });
+      chips.appendChild(btn);
+    });
+    toolbar.appendChild(chips);
+    return toolbar;
+  }
+
+  function renderHistoryList(holder) {
+    Hist.view = "list";
+    var prevSearch = holder.querySelector(".hist-search");
+    var keepSearchFocus = Boolean(
+      prevSearch && document.activeElement === prevSearch
+    );
+    var caret = keepSearchFocus ? (prevSearch.selectionStart || Hist.query.length) : 0;
     clear(holder);
-    if (!runs.length) {
-      holder.appendChild(h("div", { class: "ro", text: "No recorded runs yet. Run a workflow to start building history." }));
+    holder.appendChild(renderHistoryToolbar(holder));
+
+    var entries = buildHistoryEntries();
+    if (Hist.selected >= entries.length) Hist.selected = Math.max(0, entries.length - 1);
+
+    if (!Hist.runs.length && !Hist.liveRuns.length) {
+      holder.appendChild(h("div", { class: "hist-empty" },
+        h("div", { class: "hist-empty-title", text: "No runs yet" }),
+        h("div", { class: "hist-empty-body", text: "Launch a workflow and it will appear here - live while it rides, then as a recorded arrival you can inspect, re-run, or harvest." })
+      ));
+      restoreHistorySearchFocus(holder, keepSearchFocus, caret);
       return;
     }
-    var list = h("div", { class: "hruns" });
-    runs.forEach(function (run) {
-      var meta = fmtTotals(run.totals, { durationMs: run.durationMs || 0, tokens: true });
-      var row = h("div", {
-        class: "hrun " + run.status,
-        role: "button",
-        tabindex: "0",
-        "aria-label": "Open recorded " + run.workflow + " run",
-        onClick: (function (id) { return function () { openHistoryRun(holder, id); }; })(run.id),
-        onKeydown: (function (id) {
-          return function (event) {
-            activateWithKeyboard(event, function () { openHistoryRun(holder, id); });
-          };
-        })(run.id)
-      },
-        h("div", { class: "hr-top" },
-          h("span", { class: "hr-name", text: run.workflow }),
-          h("span", { class: "hr-status", text: run.status }),
-          h("span", { class: "hr-meta", text: fmtTime(run.startedAt) + " \u00b7 " + meta })
-        ),
-        h("div", { class: "hr-input", text: truncate(((run.input || "").replace(/\s+/g, " ").trim()) || "(no input)", 160) })
-      );
-      list.appendChild(row);
+    if (!entries.length) {
+      holder.appendChild(h("div", { class: "hist-empty" },
+        h("div", { class: "hist-empty-title", text: "No runs match" }),
+        h("div", { class: "hist-empty-body", text: "Try a different search or status chip." }),
+        h("button", { class: "btn small", text: "Clear filters", onClick: function () {
+          Hist.query = ""; Hist.status = "all"; Hist.selected = 0; renderHistoryList(holder);
+        } })
+      ));
+      restoreHistorySearchFocus(holder, keepSearchFocus, caret);
+      return;
+    }
+
+    var list = h("div", { class: "hruns", role: "listbox", "aria-label": "Workflow runs" });
+    var seenLive = false;
+    var seenRecord = false;
+    var liveCount = entries.filter(function (e) { return e.kind === "live"; }).length;
+    var recordCount = entries.length - liveCount;
+
+    entries.forEach(function (entry, idx) {
+      if (entry.kind === "live" && !seenLive) {
+        list.appendChild(h("div", { class: "hist-section", text: "On the rails · " + liveCount }));
+        seenLive = true;
+      }
+      if (entry.kind === "record" && !seenRecord) {
+        list.appendChild(h("div", { class: "hist-section", text: "Arrived · " + recordCount }));
+        seenRecord = true;
+      }
+      list.appendChild(entry.kind === "live"
+        ? renderLiveHistoryRow(holder, entry.run, idx)
+        : renderRecordHistoryRow(holder, entry.run, idx));
     });
     holder.appendChild(list);
+
+    var hint = h("div", { class: "hist-hint", text: "\u2191\u2193 select · Enter open · / focus search · Esc close" });
+    holder.appendChild(hint);
+    restoreHistorySearchFocus(holder, keepSearchFocus, caret);
+  }
+
+  function restoreHistorySearchFocus(holder, keep, caret) {
+    if (!keep) return;
+    var searchEl = holder.querySelector(".hist-search");
+    if (!searchEl) return;
+    searchEl.focus();
+    try { searchEl.setSelectionRange(caret, caret); } catch (e) {}
+  }
+
+  function renderLiveHistoryRow(holder, run, idx) {
+    var badges = [];
+    badges.push(h("span", { class: "hr-status live", text: run.status }));
+    if (run.detached) badges.push(h("span", { class: "hr-pill", text: "detached" }));
+    if (run.pendingApprovals && run.pendingApprovals.length) badges.push(h("span", { class: "hr-pill warn", text: "approval" }));
+    if (run.pendingInputs && run.pendingInputs.length) badges.push(h("span", { class: "hr-pill warn", text: "input" }));
+    var badgeWrap = h("span", { class: "hr-badges" });
+    badges.forEach(function (b) { badgeWrap.appendChild(b); });
+    var selected = idx === Hist.selected;
+    var row = h("div", {
+      class: "hrun live" + (selected ? " sel" : ""),
+      role: "option",
+      tabindex: "0",
+      "aria-selected": selected ? "true" : "false",
+      "aria-label": "Attach to live " + run.workflow + " run",
+      "data-hist-idx": String(idx),
+      onClick: function () { attachFromHistory(run); },
+      onKeydown: function (event) {
+        activateWithKeyboard(event, function () { attachFromHistory(run); });
+      }
+    },
+      h("div", { class: "hr-top" },
+        h("span", { class: "hr-glyph live", text: run.status === "queued" ? "\u29D7" : "\u25B6" }),
+        h("span", { class: "hr-name", text: run.workflow }),
+        badgeWrap,
+        h("span", { class: "hr-meta", text: relTime(run.startedAt || run.createdAt) + " \u00b7 Enter attaches" })
+      ),
+      h("div", { class: "hr-input", text: truncate(((run.input || "").replace(/\s+/g, " ").trim()) || "(no input)", 160) })
+    );
+    return row;
+  }
+
+  function renderRecordHistoryRow(holder, run, idx) {
+    var meta = fmtTotals(run.totals, { durationMs: run.durationMs || 0, tokens: true });
+    var selected = idx === Hist.selected;
+    var row = h("div", {
+      class: "hrun " + run.status + (selected ? " sel" : ""),
+      role: "option",
+      tabindex: "0",
+      "aria-selected": selected ? "true" : "false",
+      "aria-label": "Open recorded " + run.workflow + " run",
+      "data-hist-idx": String(idx),
+      onClick: function () { openHistoryRun(holder, run.id); },
+      onKeydown: function (event) {
+        activateWithKeyboard(event, function () { openHistoryRun(holder, run.id); });
+      }
+    },
+      h("div", { class: "hr-top" },
+        h("span", { class: "hr-glyph", text: run.status === "done" ? "\u2713" : run.status === "error" ? "\u2717" : run.status === "canceled" ? "\u2298" : "$" }),
+        h("span", { class: "hr-name", text: run.workflow }),
+        h("span", { class: "hr-status", text: historyStatusLabel(run.status) }),
+        h("span", { class: "hr-meta", text: relTime(run.startedAt) + " \u00b7 " + meta })
+      ),
+      h("div", { class: "hr-input", text: truncate(((run.input || "").replace(/\s+/g, " ").trim()) || "(no input)", 160) })
+    );
+    return row;
+  }
+
+  function attachFromHistory(run) {
+    stopHistoryPoll();
+    closeModal();
+    attachRun(run);
   }
 
   function openHistoryRun(holder, id) {
+    if (!normalizeHistoryRunId(id)) {
+      reopenHistoryList(holder);
+      return;
+    }
+    Hist.view = "detail";
+    clear(holder);
+    holder.appendChild(h("div", { class: "ro hist-loading", text: "Loading run\u2026" }));
+    var req = ++Hist.request;
     apiAuth("GET", "/api/history/" + encodeURIComponent(id)).then(function (r) {
+      if (req !== Hist.request || Hist.holder !== holder) return;
       if (r.status !== 200 || !r.body.record) {
-        renderHistoryList(holder, []);
         holder.insertBefore(h("div", { class: "mbanner show err", text: "Could not load that run." }), holder.firstChild);
+        // Recover: still show the real list instead of an empty wipe.
+        refreshHistoryData(holder);
         return;
       }
       renderHistoryDetail(holder, r.body.record);
+    }).catch(function () {
+      if (req !== Hist.request || Hist.holder !== holder) return;
+      clear(holder);
+      holder.appendChild(h("div", { class: "mbanner show err", text: "Could not load that run - network error." }));
+      holder.appendChild(h("button", { class: "btn", text: "Back to runs", onClick: function () { reopenHistoryList(holder); } }));
     });
   }
 
   function renderHistoryDetail(holder, record) {
+    Hist.view = "detail";
     clear(holder);
-    holder.appendChild(h("span", { class: "hback", text: "\u2190 back to runs", onClick: function () { reopenHistoryList(holder); } }));
-    holder.appendChild(h("div", { class: "title", style: "font-size:16px;font-weight:700", text: record.workflow }));
-    holder.appendChild(h("div", { class: "sub", style: "color:var(--muted);font-size:12px;margin-top:2px",
-      text: record.status + " \u00b7 " + fmtTime(record.startedAt) + " \u00b7 "
-        + ((record.durationMs || 0) / 1000).toFixed(1) + "s \u00b7 " + fmtTotals(record.totals, { cached: true, tokens: true }) }));
-    if (record.input) holder.appendChild(h("div", { class: "hr-input", style: "margin:8px 0 12px", text: "input: " + record.input }));
+
+    var back = h("button", { class: "hback", type: "button", text: "\u2190 back to runs", onClick: function () { reopenHistoryList(holder); } });
+    holder.appendChild(back);
+
+    var statusCls = "hist-hero " + record.status;
+    var hero = h("div", { class: statusCls },
+      h("div", { class: "hist-hero-top" },
+        h("span", { class: "hist-hero-glyph", text: record.status === "done" ? "\u2713" : record.status === "error" ? "\u2717" : record.status === "canceled" ? "\u2298" : "$" }),
+        h("div", { class: "hist-hero-titles" },
+          h("div", { class: "hist-hero-name", text: record.workflow }),
+          h("div", { class: "hist-hero-sub", text: historyStatusLabel(record.status) + " \u00b7 " + fmtTime(record.startedAt) + " \u00b7 "
+            + ((record.durationMs || 0) / 1000).toFixed(1) + "s \u00b7 " + fmtTotals(record.totals, { cached: true, tokens: true }) })
+        ),
+        h("button", {
+          class: "btn small hist-copy",
+          type: "button",
+          text: "Copy id",
+          title: record.id,
+          onClick: function () {
+            var text = record.id;
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text).then(function () {
+                setBanner("Copied run id " + text.slice(0, 8) + "\u2026", "ok");
+              }).catch(function () {});
+            }
+          }
+        })
+      )
+    );
+    holder.appendChild(hero);
+
+    if (record.input) {
+      holder.appendChild(h("div", { class: "hist-input-block" },
+        h("div", { class: "hist-input-label", text: "Input" }),
+        h("div", { class: "hist-input-body", text: record.input })
+      ));
+    }
     if (record.budget) {
       var bScope = record.budget.scope === "step" && record.budget.stepId ? "step '" + record.budget.stepId + "'" : "workflow";
       holder.appendChild(h("div", { class: "mbanner show err", text: bScope + " cost budget $" + record.budget.limitUsd.toFixed(4) + " reached (spent $" + record.budget.spentUsd.toFixed(4) + ") \u2014 resumable after raising the cap" }));
     }
     if (record.error) holder.appendChild(h("div", { class: "mbanner show err", text: record.error }));
+
     // Per-model breakdown from the recorded tree.
     var histSteps = [];
     (record.phases || []).forEach(function (p) { (p.steps || []).forEach(function (s) { histSteps.push(s); }); });
     var histByModel = aggregateByModel(histSteps);
     if (histByModel.length) {
-      var hmt = h("table", { style: "margin:4px 0 12px" });
+      var hmt = h("table", { class: "hist-model-table" });
       hmt.appendChild(h("tr", null, h("th", { text: "model" }), h("th", { text: "steps" }), h("th", { text: "cost" }), h("th", { text: "tokens" })));
       histByModel.forEach(function (m) {
         hmt.appendChild(h("tr", null,
@@ -3564,22 +3887,28 @@
       });
       holder.appendChild(hmt);
     }
+
     var canRetry = record.totals && record.totals.failed > 0;
+    var actions = h("div", { class: "run-actions hist-actions" });
     if (!isReadOnly()) {
-      var actions = h("div", { class: "run-actions", style: "display:flex;gap:8px;margin:4px 0 12px" },
-        h("button", { class: "btn primary", text: "Re-run",
-          onClick: function () { rerunHistory(record.id, record.workflow, "rerun"); } }),
-        canRetry ? h("button", { class: "btn", text: "Retry failed",
-          onClick: function () { rerunHistory(record.id, record.workflow, "retry"); } }) : null
-      );
-      holder.appendChild(actions);
+      actions.appendChild(h("button", { class: "btn primary", text: "Re-run",
+        onClick: function () { stopHistoryPoll(); rerunHistory(record.id, record.workflow, "rerun"); } }));
+      if (canRetry) {
+        actions.appendChild(h("button", { class: "btn", text: "Retry failed",
+          onClick: function () { stopHistoryPoll(); rerunHistory(record.id, record.workflow, "retry"); } }));
+      }
+      actions.appendChild(h("button", { class: "btn danger small", text: "Delete",
+        onClick: function () { deleteHistoryRun(holder, record); } }));
     }
+    if (actions.childNodes.length) holder.appendChild(actions);
+
     // Worktree lifecycle: what each retained step worktree changed, plus the
     // Apply / Branch / Prune closure actions (same machinery as the CLI's
     // `workflow history apply/prune`).
-    var wtSection = h("div", { style: "margin:4px 0 12px" });
+    var wtSection = h("div", { class: "hist-worktrees" });
     holder.appendChild(wtSection);
     renderWorktreeSection(wtSection, record);
+
     (record.phases || []).forEach(function (p, idx) {
       if (idx > 0) holder.appendChild(h("div", { class: "connector" }));
       var pstat = p.done ? (p.ok ? "done" : "failed") : "";
@@ -3597,6 +3926,18 @@
     });
   }
 
+  function deleteHistoryRun(holder, record) {
+    if (!window.confirm("Delete recorded run " + record.id.slice(0, 8) + "\u2026 of \u201c" + record.workflow + "\u201d? This cannot be undone.")) return;
+    apiAuth("DELETE", "/api/history/" + encodeURIComponent(record.id)).then(function (r) {
+      if (r.status === 200 || r.status === 204) {
+        setBanner("Deleted run " + record.id.slice(0, 8) + "\u2026", "ok");
+        reopenHistoryList(holder);
+      } else {
+        setBanner((r.body && r.body.error) || "delete failed", "err");
+      }
+    });
+  }
+
   /**
    * The "Worktree changes" block of a run's history detail: per-step diffstat
    * of the retained worktrees, the recorded harvest status, and the lifecycle
@@ -3610,12 +3951,12 @@
       var sources = r.body.sources;
       var harvest = r.body.harvest;
       clear(holder);
-      holder.appendChild(h("div", { style: "font-size:13px;font-weight:700", text: "Worktree changes" }));
+      holder.appendChild(h("div", { class: "hist-wt-title", text: "Worktree changes" }));
       var bits = [];
       if (harvest && harvest.appliedSteps && harvest.appliedSteps.length) bits.push("harvested: " + harvest.appliedSteps.join(", "));
       if (harvest && harvest.branch) bits.push("on branch " + harvest.branch);
       if (harvest && harvest.prunedAt) bits.push("worktrees pruned " + fmtTime(harvest.prunedAt));
-      var status = h("div", { style: "color:var(--muted);font-size:12px;margin:2px 0" });
+      var status = h("div", { class: "hist-wt-status" });
       if (bits.length) status.textContent = bits.join(" · ");
       if (harvest && harvest.prUrl) {
         status.appendChild(h("span", { text: (bits.length ? " · " : "") + "PR: " }));
@@ -3635,12 +3976,12 @@
           line = "⎇ " + s.stepId + " — " + s.files.length + " file(s) +" + s.additions + " -" + s.deletions;
           anyExists = true; anyChanges = true;
         }
-        var row = h("div", { style: "font-size:12px;margin:2px 0", text: line, title: s.branch });
+        var row = h("div", { class: "hist-wt-line", text: line, title: s.branch });
         holder.appendChild(row);
         if (s.exists && s.files.length) {
           var fileList = s.files.slice(0, 8).map(function (f) { return f.status + " " + f.path; }).join(" · ");
           if (s.files.length > 8) fileList += " …";
-          holder.appendChild(h("div", { style: "color:var(--muted);font-size:11px;margin-left:16px", text: fileList }));
+          holder.appendChild(h("div", { class: "hist-wt-files", text: fileList }));
         }
       });
 
@@ -3648,7 +3989,7 @@
       if (notice) { banner.className = "mbanner show " + notice.cls; banner.textContent = notice.text; }
       holder.appendChild(banner);
       if (isReadOnly()) return;
-      var buttons = h("div", { style: "display:flex;gap:8px;margin-top:6px;flex-wrap:wrap" });
+      var buttons = h("div", { class: "hist-wt-actions" });
       function harvestBtn(label, body, cls) {
         return h("button", { class: "btn" + (cls ? " " + cls : ""), text: label, onClick: function () {
           banner.className = "mbanner show info"; banner.textContent = "merging…";
@@ -3708,7 +4049,60 @@
 
   function clearHistory() {
     if (!window.confirm("Clear all recorded runs? This deletes the on-disk history.")) return;
-    apiAuth("DELETE", "/api/history").then(function () { closeModal(); });
+    apiAuth("DELETE", "/api/history").then(function () {
+      stopHistoryPoll();
+      closeModal();
+      setBanner("Cleared run history.", "ok");
+    });
+  }
+
+  /** Keyboard navigation inside the history modal list. */
+  function handleHistoryListKey(e) {
+    if (!Hist.holder || Hist.view !== "list") return false;
+    if (e.target && e.target.classList && e.target.classList.contains("hist-search")) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter") {
+        // Let arrows move selection even from the search box.
+      } else {
+        return false;
+      }
+    }
+    var entries = buildHistoryEntries();
+    if (!entries.length) return false;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      Hist.selected = Math.min(entries.length - 1, Hist.selected + 1);
+      renderHistoryList(Hist.holder);
+      focusHistoryRow();
+      return true;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      Hist.selected = Math.max(0, Hist.selected - 1);
+      renderHistoryList(Hist.holder);
+      focusHistoryRow();
+      return true;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      var entry = entries[Hist.selected];
+      if (!entry) return true;
+      if (entry.kind === "live") attachFromHistory(entry.run);
+      else openHistoryRun(Hist.holder, entry.id);
+      return true;
+    }
+    if (e.key === "/" && !(e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA"))) {
+      e.preventDefault();
+      var search = Hist.holder.querySelector(".hist-search");
+      if (search) search.focus();
+      return true;
+    }
+    return false;
+  }
+
+  function focusHistoryRow() {
+    if (!Hist.holder) return;
+    var row = Hist.holder.querySelector('.hrun[data-hist-idx="' + Hist.selected + '"]');
+    if (row) row.focus();
   }
 
   function fmtTime(ts) { try { return new Date(ts).toLocaleString(); } catch (e) { return ""; } }
@@ -4036,7 +4430,7 @@
   // Typing while browsing history turns the recalled entry into the new draft.
   document.getElementById("input").addEventListener("input", function () { promptBrowse = null; });
   document.getElementById("newWfBtn").addEventListener("click", openCreate);
-  document.getElementById("historyBtn").addEventListener("click", openHistory);
+  document.getElementById("historyBtn").addEventListener("click", function () { openHistory(); });
   document.getElementById("configBtn").addEventListener("click", openConfigModal);
   document.getElementById("editBtn").addEventListener("click", function () { openEditor(false); });
   document.getElementById("cloneBtn").addEventListener("click", function () { openEditor(true); });
@@ -4049,7 +4443,10 @@
     if (overlayOpen) {
       if (e.key === "Escape") {
         e.preventDefault();
+        stopHistoryPoll();
         closeModal();
+      } else if (handleHistoryListKey(e)) {
+        return;
       } else if (e.key === "Tab") {
         trapModalFocus(e);
       }

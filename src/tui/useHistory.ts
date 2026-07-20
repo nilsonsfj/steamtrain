@@ -1,5 +1,6 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  HistoryStatusFilter,
   LiveRunMeta,
   LiveRunStore,
   RerunMode,
@@ -9,12 +10,14 @@ import type {
 } from "../workflow";
 import {
   MergeConflictError,
+  buildHistoryBrowserEntries,
   createWorkflowHistoryStore,
   finalRunWorktrees,
   harvestRunWorktrees,
   isRerunError,
   isTerminalLiveRunStatus,
   mergeConflictGuidance,
+  nextHistoryStatusFilter,
   planRerun,
   pruneRunWorktrees,
   rerunDowngradeMessage,
@@ -29,6 +32,7 @@ export interface HistoryUiState {
   runs: RunRecordSummary[];
   /** In-flight (queued/running) runs from the live registry, listed above past runs. */
   liveRuns: LiveRunMeta[];
+  /** Selection index across the *filtered* entry list. */
   index: number;
   loading: boolean;
   error?: string;
@@ -37,6 +41,11 @@ export interface HistoryUiState {
   stepIndex: number;
   /** Whether the per-step drill-in panel is open in the detail view. */
   detail: boolean;
+  /** Free-text filter across workflow / input / id / status. */
+  query: string;
+  /** True while `/` filter mode is capturing printable keys. */
+  filtering: boolean;
+  statusFilter: HistoryStatusFilter;
 }
 
 export interface UseHistoryParams {
@@ -70,7 +79,24 @@ export interface UseHistoryReturn {
    * them (double-press to confirm — it deletes unapplied work).
    */
   harvestFromRecord: (record: RunRecord, action: "apply" | "prune") => void;
+  /** Delete one recorded run (double-press to confirm). */
+  deleteHistoryRecord: (record: { id: string }) => void;
+  /** Refresh list contents without leaving the browser. */
+  refreshHistoryList: () => void;
 }
+
+const emptyHistory = (): HistoryUiState => ({
+  view: "list",
+  runs: [],
+  liveRuns: [],
+  index: 0,
+  loading: true,
+  stepIndex: 0,
+  detail: false,
+  query: "",
+  filtering: false,
+  statusFilter: "all",
+});
 
 export function useHistory({
   historyStoreRef,
@@ -82,34 +108,62 @@ export function useHistory({
 }: UseHistoryParams): UseHistoryReturn {
   const [history, setHistory] = useState<HistoryUiState | null>(null);
 
-  const openHistory = useCallback(() => {
-    setHistory({
-      view: "list",
-      runs: [],
-      liveRuns: [],
-      index: 0,
-      loading: true,
-      stepIndex: 0,
-      detail: false,
-    });
-    void (async () => {
+  const loadList = useCallback(
+    async (opts?: { silent?: boolean }) => {
       try {
-        // In-flight runs (queued/running) render above the recorded history;
-        // Enter on one attaches instead of opening a record.
+        if (!opts?.silent) {
+          setHistory((prev) => (prev ? { ...prev, loading: true, error: undefined } : prev));
+        }
         const [runs, allLive] = await Promise.all([
           historyStoreRef.current!.list(),
           liveRunStoreRef.current!.list().catch(() => []),
         ]);
         const liveRuns = allLive.filter((run) => !isTerminalLiveRunStatus(run.status));
         if (!mountedRef.current) return;
-        setHistory((prev) => (prev ? { ...prev, runs, liveRuns, loading: false } : prev));
+        setHistory((prev) => {
+          if (!prev) return prev;
+          const entries = buildHistoryBrowserEntries({
+            runs,
+            liveRuns,
+            query: prev.query,
+            statusFilter: prev.statusFilter,
+          });
+          return {
+            ...prev,
+            runs,
+            liveRuns,
+            loading: false,
+            error: undefined,
+            index: Math.min(prev.index, Math.max(0, entries.length - 1)),
+          };
+        });
       } catch (err) {
         if (!mountedRef.current) return;
         setHistory((prev) => (prev ? { ...prev, loading: false, error: message(err) } : prev));
       }
-    })();
+    },
+    [historyStoreRef, liveRunStoreRef, mountedRef],
+  );
+
+  const openHistory = useCallback(() => {
+    setHistory(emptyHistory());
+    void loadList();
     return { handled: true as const, clearInput: true as const };
-  }, [historyStoreRef, liveRunStoreRef, mountedRef]);
+  }, [loadList]);
+
+  const refreshHistoryList = useCallback(() => {
+    void loadList({ silent: true });
+  }, [loadList]);
+
+  // Keep the live section fresh while the list is open (new attaches, settles).
+  const listOpen = history !== null && history.view === "list";
+  useEffect(() => {
+    if (!listOpen) return;
+    const id = setInterval(() => {
+      void loadList({ silent: true });
+    }, 2_500);
+    return () => clearInterval(id);
+  }, [listOpen, loadList]);
 
   const openHistoryRecord = useCallback(
     (id: string) => {
@@ -119,6 +173,7 @@ export function useHistory({
           if (!mountedRef.current) return;
           if (!record) {
             setWfNotice(`history record '${id}' is missing or corrupt`);
+            void loadList({ silent: true });
             return;
           }
           setHistory((prev) =>
@@ -126,6 +181,7 @@ export function useHistory({
               ? {
                   ...prev,
                   view: "detail",
+                  filtering: false,
                   record,
                   recordState: workflowStateFromRecord(record),
                   stepIndex: 0,
@@ -140,7 +196,7 @@ export function useHistory({
         }
       })();
     },
-    [historyStoreRef, mountedRef, setWfNotice],
+    [historyStoreRef, loadList, mountedRef, setWfNotice],
   );
 
   const rerunFromRecord = useCallback(
@@ -167,9 +223,9 @@ export function useHistory({
     [resolveWorkflowSpec, runWorkflow, setWfNotice],
   );
 
-  // Prune deletes unapplied work, so it requires a second press on the same
-  // record within a few seconds; any other action clears the armed state.
+  // Prune / delete require a second press on the same record within a few seconds.
   const pruneConfirmRef = useRef<{ id: string; at: number } | null>(null);
+  const deleteConfirmRef = useRef<{ id: string; at: number } | null>(null);
   const harvestBusyRef = useRef(false);
 
   const harvestFromRecord = useCallback(
@@ -220,6 +276,41 @@ export function useHistory({
     [historyStoreRef, setWfNotice],
   );
 
+  const deleteHistoryRecord = useCallback(
+    (record: { id: string }) => {
+      const armed = deleteConfirmRef.current;
+      if (!armed || armed.id !== record.id || Date.now() - armed.at > 5_000) {
+        deleteConfirmRef.current = { id: record.id, at: Date.now() };
+        setWfNotice("press d again to delete this recorded run from history");
+        return;
+      }
+      deleteConfirmRef.current = null;
+      void (async () => {
+        try {
+          await historyStoreRef.current!.remove(record.id);
+          if (!mountedRef.current) return;
+          setWfNotice(`deleted run ${record.id.slice(0, 8)}…`);
+          setHistory((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  view: "list",
+                  record: undefined,
+                  recordState: undefined,
+                  detail: false,
+                  stepIndex: 0,
+                }
+              : prev,
+          );
+          void loadList({ silent: true });
+        } catch (err) {
+          if (mountedRef.current) setWfNotice(`could not delete run: ${message(err)}`);
+        }
+      })();
+    },
+    [historyStoreRef, loadList, mountedRef, setWfNotice],
+  );
+
   return {
     history,
     setHistory,
@@ -227,5 +318,38 @@ export function useHistory({
     openHistoryRecord,
     rerunFromRecord,
     harvestFromRecord,
+    deleteHistoryRecord,
+    refreshHistoryList,
+  };
+}
+
+/** Cycle the status chip and clamp the selection into the new filtered list. */
+export function applyHistoryStatusCycle(prev: HistoryUiState): HistoryUiState {
+  const statusFilter = nextHistoryStatusFilter(prev.statusFilter);
+  const entries = buildHistoryBrowserEntries({
+    runs: prev.runs,
+    liveRuns: prev.liveRuns,
+    query: prev.query,
+    statusFilter,
+  });
+  return {
+    ...prev,
+    statusFilter,
+    index: Math.min(prev.index, Math.max(0, entries.length - 1)),
+  };
+}
+
+/** Update the free-text query and keep selection on a valid filtered row. */
+export function applyHistoryQuery(prev: HistoryUiState, query: string): HistoryUiState {
+  const entries = buildHistoryBrowserEntries({
+    runs: prev.runs,
+    liveRuns: prev.liveRuns,
+    query,
+    statusFilter: prev.statusFilter,
+  });
+  return {
+    ...prev,
+    query,
+    index: Math.min(prev.index, Math.max(0, entries.length - 1)),
   };
 }

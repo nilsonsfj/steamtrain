@@ -7,7 +7,9 @@ import { nextMode } from "./modes";
 import { shouldPromptHistoryCaptureDown, shouldPromptHistoryCaptureUp } from "./prompt-history";
 import { shouldDismissSuggestionMenu, shouldSuppressWorkflowNavigation } from "./slash-completion";
 
+import { buildHistoryBrowserEntries } from "../workflow";
 import type { useHistory } from "./useHistory";
+import { applyHistoryQuery, applyHistoryStatusCycle } from "./useHistory";
 // Import hooks to use their ReturnType
 import type { usePrompt } from "./usePrompt";
 import type { useWorkflowPicker } from "./useWorkflowPicker";
@@ -130,96 +132,157 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
         }
         // The history browser is a modal overlay: while open it owns all keys.
         if (historyHook.history) {
-          if (key.escape || (key.leftArrow && historyHook.history.view === "list")) {
-            if (historyHook.history.view === "detail") {
-              if (historyHook.history.detail) {
-                historyHook.setHistory({ ...historyHook.history, detail: false });
+          const hist = historyHook.history;
+
+          // Filter mode: capture printable keys into the query.
+          if (hist.view === "list" && hist.filtering) {
+            if (key.escape || key.return) {
+              historyHook.setHistory({ ...hist, filtering: false });
+              return;
+            }
+            if (key.backspace || key.delete) {
+              historyHook.setHistory(
+                applyHistoryQuery(hist, hist.query.slice(0, Math.max(0, hist.query.length - 1))),
+              );
+              return;
+            }
+            if (
+              input &&
+              !key.ctrl &&
+              !key.meta &&
+              input !== "\t" &&
+              !key.upArrow &&
+              !key.downArrow
+            ) {
+              // Ignore pure control sequences; allow letters, digits, punctuation, spaces.
+              if ([...input].every((ch) => ch >= " " && ch !== "\x7f")) {
+                historyHook.setHistory(applyHistoryQuery(hist, hist.query + input));
+              }
+              return;
+            }
+            // ↑/↓ still navigate while filtering.
+          }
+
+          if (key.escape || (key.leftArrow && hist.view === "list" && !hist.filtering)) {
+            if (hist.view === "detail") {
+              if (hist.detail) {
+                historyHook.setHistory({ ...hist, detail: false });
               } else {
                 historyHook.setHistory({
-                  ...historyHook.history,
+                  ...hist,
                   view: "list",
                   record: undefined,
                   recordState: undefined,
                 });
               }
+            } else if (hist.filtering || hist.query) {
+              historyHook.setHistory({ ...hist, filtering: false, query: "", index: 0 });
             } else {
               historyHook.setHistory(null);
             }
             return;
           }
-          if (historyHook.history.view === "list") {
-            // The list shows in-flight runs first, then recorded history.
-            const liveCount = historyHook.history.liveRuns.length;
-            const total = liveCount + historyHook.history.runs.length;
+
+          if (hist.view === "list") {
+            if (!hist.filtering && input === "/") {
+              historyHook.setHistory({ ...hist, filtering: true });
+              return;
+            }
+            if (!hist.filtering && input === "t") {
+              historyHook.setHistory(applyHistoryStatusCycle(hist));
+              return;
+            }
+            if (!hist.filtering && input === "d") {
+              const entries = buildHistoryBrowserEntries({
+                runs: hist.runs,
+                liveRuns: hist.liveRuns,
+                query: hist.query,
+                statusFilter: hist.statusFilter,
+              });
+              const selected = entries[hist.index];
+              if (selected?.kind === "record" && selected.run) {
+                historyHook.deleteHistoryRecord(selected.run);
+              }
+              return;
+            }
+
+            const entries = buildHistoryBrowserEntries({
+              runs: hist.runs,
+              liveRuns: hist.liveRuns,
+              query: hist.query,
+              statusFilter: hist.statusFilter,
+            });
+            const total = entries.length;
             if (key.upArrow) {
               historyHook.setHistory({
-                ...historyHook.history,
-                index: Math.max(0, historyHook.history.index - 1),
+                ...hist,
+                index: Math.max(0, hist.index - 1),
               });
             } else if (key.downArrow) {
               historyHook.setHistory({
-                ...historyHook.history,
-                index: Math.min(Math.max(0, total - 1), historyHook.history.index + 1),
+                ...hist,
+                index: Math.min(Math.max(0, total - 1), hist.index + 1),
               });
             } else if (key.return) {
-              const index = historyHook.history.index;
-              if (index < liveCount) {
-                // Enter on an in-flight run attaches to it live.
-                const live = historyHook.history.liveRuns[index];
-                if (live) {
-                  historyHook.setHistory(null);
-                  runner.attachRun(live.id);
-                }
-              } else {
-                const run = historyHook.history.runs[index - liveCount];
-                if (run) historyHook.openHistoryRecord(run.id);
+              const selected = entries[hist.index];
+              if (!selected) return;
+              if (selected.kind === "live" && selected.live) {
+                historyHook.setHistory(null);
+                runner.attachRun(selected.live.id);
+              } else if (selected.kind === "record") {
+                historyHook.openHistoryRecord(selected.id);
               }
             }
             return;
           }
+
           // Detail view: re-run / retry-failed, navigate steps, toggle drill-in.
-          if (!historyHook.history.detail && input === "r" && historyHook.history.record) {
-            historyHook.rerunFromRecord(historyHook.history.record, "rerun");
+          if (!hist.detail && input === "r" && hist.record) {
+            historyHook.rerunFromRecord(hist.record, "rerun");
             return;
           }
           if (
-            !historyHook.history.detail &&
+            !hist.detail &&
             input === "f" &&
-            historyHook.history.record &&
-            (historyHook.history.record.totals?.failed ?? 0) > 0
+            hist.record &&
+            (hist.record.totals?.failed ?? 0) > 0
           ) {
-            historyHook.rerunFromRecord(historyHook.history.record, "retry-failed");
+            historyHook.rerunFromRecord(hist.record, "retry-failed");
+            return;
+          }
+          if (!hist.detail && input === "d" && hist.record) {
+            historyHook.deleteHistoryRecord(hist.record);
             return;
           }
           // Worktree lifecycle: apply the run's worktrees to the checkout, or
           // prune (discard) them — `x` double-press confirmed in the hook.
-          if (!historyHook.history.detail && input === "a" && historyHook.history.record) {
-            historyHook.harvestFromRecord(historyHook.history.record, "apply");
+          if (!hist.detail && input === "a" && hist.record) {
+            historyHook.harvestFromRecord(hist.record, "apply");
             return;
           }
-          if (!historyHook.history.detail && input === "x" && historyHook.history.record) {
-            historyHook.harvestFromRecord(historyHook.history.record, "prune");
+          if (!hist.detail && input === "x" && hist.record) {
+            historyHook.harvestFromRecord(hist.record, "prune");
             return;
           }
-          const totalSteps = historyHook.history.recordState
-            ? historyHook.history.recordState.phases.reduce((n, p) => n + p.steps.length, 0)
+          const totalSteps = hist.recordState
+            ? hist.recordState.phases.reduce((n, p) => n + p.steps.length, 0)
             : 0;
           // Output-pane scrolling inside the drill-in (shares the live pane's
           // scroll state — only one drill-in is ever on screen).
-          if (historyHook.history.detail && handleOutputScrollKeys(input, key, runner)) return;
-          if (key.leftArrow && historyHook.history.detail) {
-            historyHook.setHistory({ ...historyHook.history, detail: false });
-          } else if (key.rightArrow && !historyHook.history.detail && totalSteps > 0) {
-            historyHook.setHistory({ ...historyHook.history, detail: true });
+          if (hist.detail && handleOutputScrollKeys(input, key, runner)) return;
+          if (key.leftArrow && hist.detail) {
+            historyHook.setHistory({ ...hist, detail: false });
+          } else if (key.rightArrow && !hist.detail && totalSteps > 0) {
+            historyHook.setHistory({ ...hist, detail: true });
           } else if (key.upArrow) {
             historyHook.setHistory({
-              ...historyHook.history,
-              stepIndex: Math.max(0, historyHook.history.stepIndex - 1),
+              ...hist,
+              stepIndex: Math.max(0, hist.stepIndex - 1),
             });
           } else if (key.downArrow) {
             historyHook.setHistory({
-              ...historyHook.history,
-              stepIndex: Math.min(Math.max(0, totalSteps - 1), historyHook.history.stepIndex + 1),
+              ...hist,
+              stepIndex: Math.min(Math.max(0, totalSteps - 1), hist.stepIndex + 1),
             });
           }
           return;

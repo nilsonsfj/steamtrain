@@ -21,7 +21,7 @@ const KEY_HINTS: readonly KeyHint[] = [
   { keys: "Ctrl+D", action: "dry-run: preview the resolved plan without running" },
   { keys: "Ctrl+E", action: "edit the selected preview step (agent/model/effort/prompt)" },
   { keys: "Ctrl+N", action: "create a new workflow from a description" },
-  { keys: "Ctrl+J", action: "open run history (also /history)" },
+  { keys: "Ctrl+J", action: "open runs browser (also /history · / filter · t status)" },
   { keys: "Ctrl+A", action: "open the agent manager (also /agents; /apis for APIs)" },
   { keys: "p", action: "pause/resume the live run · e edits a pending step while paused" },
   { keys: "a / r", action: "approve / reject a pending human checkpoint" },

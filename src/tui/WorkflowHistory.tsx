@@ -1,17 +1,32 @@
 import { Box, Text } from "ink";
 import { useEffect, useState } from "react";
 import { truncate } from "../agents/util";
-import { type LiveRunMeta, type RunRecordSummary, formatRunTotals } from "../workflow";
+import {
+  type HistoryBrowserEntry,
+  type HistoryStatusFilter,
+  type LiveRunMeta,
+  type RunRecord,
+  type RunRecordSummary,
+  buildHistoryBrowserEntries,
+  formatRelativeTime,
+  formatRunTotals,
+  historyStatusLabel,
+} from "../workflow";
 import { selectVisibleWindow } from "./workflow-list-window";
 
 interface WorkflowHistoryProps {
   runs: RunRecordSummary[];
   /** In-flight (queued/running) runs listed above past runs; Enter attaches. */
   liveRuns: LiveRunMeta[];
-  /** Selection index across live runs first, then past runs. */
+  /** Selection index across the *filtered* entry list. */
   selectedIndex: number;
   loading: boolean;
   error?: string;
+  /** Free-text filter across workflow / input / id / status. */
+  query: string;
+  /** Whether the filter line is capturing keystrokes. */
+  filtering: boolean;
+  statusFilter: HistoryStatusFilter;
   width: number;
   height: number;
 }
@@ -23,12 +38,14 @@ const STATUS_GLYPH: Record<RunRecordSummary["status"], { symbol: string; color: 
   "budget-exceeded": { symbol: "$", color: "yellow" },
 };
 
-/** One selectable row in the browser: a live run or a recorded one. */
-type HistoryEntry = { kind: "live"; live: LiveRunMeta } | { kind: "record"; run: RunRecordSummary };
+type RenderRow =
+  | { kind: "section"; label: string; count: number }
+  | { kind: "entry"; entry: HistoryBrowserEntry; index: number };
 
 /**
  * A browser for workflow runs: in-flight runs (attachable) above recorded
- * history. ↑/↓ select, Enter attaches (live) or inspects (past), Esc closes.
+ * history, with search + status chips. ↑/↓ select, Enter attaches (live) or
+ * inspects (past), `/` filters, `t` cycles status, Esc closes.
  */
 export function WorkflowHistory({
   runs,
@@ -36,35 +53,63 @@ export function WorkflowHistory({
   selectedIndex,
   loading,
   error,
+  query,
+  filtering,
+  statusFilter,
   width,
   height,
 }: WorkflowHistoryProps) {
   const innerWidth = Math.max(20, width - 4);
-  const entries: HistoryEntry[] = [
-    ...liveRuns.map((live): HistoryEntry => ({ kind: "live", live })),
-    ...runs.map((run): HistoryEntry => ({ kind: "record", run })),
-  ];
+  const entries = buildHistoryBrowserEntries({ runs, liveRuns, query, statusFilter });
   const clamped = Math.min(selectedIndex, Math.max(0, entries.length - 1));
-  const listBudget = Math.max(1, height - 3);
-  const window = selectVisibleWindow(entries, clamped, listBudget);
+  const rows = buildRenderRows(entries);
+  // Header (title) + filter line + footer hint ≈ 3 rows reserved.
+  const listBudget = Math.max(1, height - 4);
+  const window = selectVisibleWindow(rows, indexOfSelectedRow(rows, clamped), listBudget);
 
   const [, setTick] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 30_000);
+    const id = setInterval(() => setTick((t) => t + 1), 15_000);
     return () => clearInterval(id);
   }, []);
 
+  const filterHint =
+    statusFilter === "all"
+      ? "all"
+      : statusFilter === "live"
+        ? "live"
+        : historyStatusLabel(statusFilter);
+
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} height={height}>
+    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1} height={height}>
       <Box justifyContent="space-between">
         <Text color="cyan" bold>
           runs
         </Text>
         <Text color="gray">
           {liveRuns.length > 0 ? `${liveRuns.length} active · ` : ""}
-          {runs.length} recorded · ↑/↓ select · Enter {liveRuns.length > 0 ? "attach/" : ""}inspect
-          · Esc back
+          {runs.length} recorded
+          {entries.length !== liveRuns.length + runs.length ? ` · ${entries.length} shown` : ""}
+          {" · "}
+          ↑/↓ · Enter {liveRuns.length > 0 ? "attach/" : ""}inspect · Esc
         </Text>
+      </Box>
+      <Box>
+        <Text color={filtering ? "cyan" : "gray"}>
+          {filtering ? "filter › " : "/ filter · t status · "}
+        </Text>
+        {filtering ? (
+          <Text color="white">
+            {query}
+            <Text color="cyan">█</Text>
+          </Text>
+        ) : (
+          <Text color="gray">
+            {query ? `“${truncate(query, Math.max(12, innerWidth - 36))}”` : "type to search"}
+            {" · chip: "}
+            <Text color="cyan">{filterHint}</Text>
+          </Text>
+        )}
       </Box>
       <Box flexDirection="column" flexGrow={1}>
         {loading ? (
@@ -72,28 +117,39 @@ export function WorkflowHistory({
         ) : error ? (
           <Text color="red">{error}</Text>
         ) : entries.length === 0 ? (
-          <Text color="gray">No recorded runs yet. Run a workflow to start building history.</Text>
+          <EmptyHistory
+            query={query}
+            statusFilter={statusFilter}
+            hasAny={runs.length + liveRuns.length > 0}
+          />
         ) : (
           <>
             {window.hiddenBefore > 0 ? (
               <Text color="gray">{window.hiddenBefore} earlier hidden ↑</Text>
             ) : null}
-            {window.visible.map((entry, offset) =>
-              entry.kind === "live" ? (
+            {window.visible.map((row) =>
+              row.kind === "section" ? (
+                <Box key={`section-${row.label}`}>
+                  <Text color="gray" dimColor>
+                    ── {row.label} ({row.count}){" "}
+                    {"─".repeat(Math.max(0, Math.min(24, innerWidth - row.label.length - 10)))}
+                  </Text>
+                </Box>
+              ) : row.entry.kind === "live" && row.entry.live ? (
                 <LiveRunRow
-                  key={entry.live.id}
-                  run={entry.live}
+                  key={row.entry.id}
+                  run={row.entry.live}
                   width={innerWidth}
-                  selected={window.start + offset === clamped}
+                  selected={row.index === clamped}
                 />
-              ) : (
+              ) : row.entry.run ? (
                 <HistoryRow
-                  key={entry.run.id}
-                  run={entry.run}
+                  key={row.entry.id}
+                  run={row.entry.run}
                   width={innerWidth}
-                  selected={window.start + offset === clamped}
+                  selected={row.index === clamped}
                 />
-              ),
+              ) : null,
             )}
             {window.hiddenAfter > 0 ? (
               <Text color="gray">{window.hiddenAfter} later hidden ↓</Text>
@@ -103,6 +159,118 @@ export function WorkflowHistory({
       </Box>
     </Box>
   );
+}
+
+/** Compact status banner shown above the replayed WorkflowView in detail mode. */
+export function HistoryDetailBanner({
+  record,
+  width,
+}: {
+  record: RunRecord;
+  width: number;
+}) {
+  const g = STATUS_GLYPH[record.status] ?? { symbol: "·", color: "gray" };
+  const when = formatRelativeTime(record.startedAt);
+  const meta = formatRunTotals(record.totals, { durationMs: record.durationMs, tokens: true });
+  const input = truncate(
+    record.input.replace(/\s+/g, " ").trim() || "(no input)",
+    Math.max(24, width - 8),
+  );
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={g.color === "green" ? "green" : g.color === "red" ? "red" : "yellow"}
+      paddingX={1}
+      marginBottom={0}
+    >
+      <Box>
+        <Text color={g.color}>{g.symbol} </Text>
+        <Text bold color="white">
+          {record.workflow}
+        </Text>
+        <Text color="gray">
+          {"  "}
+          {historyStatusLabel(record.status)} · {when} · {meta}
+        </Text>
+      </Box>
+      <Box>
+        <Text color="gray">input </Text>
+        <Text color="white">{input}</Text>
+      </Box>
+      <Box>
+        <Text color="gray">
+          id {record.id.slice(0, 8)}… · r re-run
+          {(record.totals?.failed ?? 0) > 0 ? " · f retry failed" : ""}
+          {" · d delete · ← back"}
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
+function EmptyHistory({
+  query,
+  statusFilter,
+  hasAny,
+}: {
+  query: string;
+  statusFilter: HistoryStatusFilter;
+  hasAny: boolean;
+}) {
+  if (!hasAny) {
+    return (
+      <Box flexDirection="column" marginTop={1}>
+        <Text color="cyan" bold>
+          No runs yet
+        </Text>
+        <Text color="gray">Launch a workflow and it will show up here - live while it rides,</Text>
+        <Text color="gray">then as a recorded arrival you can inspect, re-run, or harvest.</Text>
+      </Box>
+    );
+  }
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text color="yellow">No runs match this filter.</Text>
+      <Text color="gray">
+        {query ? `query “${query}”` : "no query"}
+        {" · "}
+        chip {statusFilter}
+        {" · Esc / clear filter to widen"}
+      </Text>
+    </Box>
+  );
+}
+
+function buildRenderRows(entries: HistoryBrowserEntry[]): RenderRow[] {
+  const rows: RenderRow[] = [];
+  let liveCount = 0;
+  let recordCount = 0;
+  for (const entry of entries) {
+    if (entry.kind === "live") liveCount += 1;
+    else recordCount += 1;
+  }
+  let seenLive = false;
+  let seenRecord = false;
+  let index = 0;
+  for (const entry of entries) {
+    if (entry.kind === "live" && !seenLive) {
+      rows.push({ kind: "section", label: "on the rails", count: liveCount });
+      seenLive = true;
+    }
+    if (entry.kind === "record" && !seenRecord) {
+      rows.push({ kind: "section", label: "arrived", count: recordCount });
+      seenRecord = true;
+    }
+    rows.push({ kind: "entry", entry, index });
+    index += 1;
+  }
+  return rows;
+}
+
+function indexOfSelectedRow(rows: RenderRow[], selectedIndex: number): number {
+  const found = rows.findIndex((row) => row.kind === "entry" && row.index === selectedIndex);
+  return found >= 0 ? found : 0;
 }
 
 function LiveRunRow({
@@ -115,7 +283,7 @@ function LiveRunRow({
   selected: boolean;
 }) {
   const glyph = run.status === "queued" ? "⧗" : "▶";
-  const when = relativeTime(run.startedAt ?? run.createdAt);
+  const when = formatRelativeTime(run.startedAt ?? run.createdAt);
   const badges = [
     run.status,
     run.detached ? "detached" : run.source,
@@ -134,11 +302,12 @@ function LiveRunRow({
         </Text>
         <Text color="gray">
           {"  "}
-          {when} · {badges} · Enter attaches
+          {when} · {badges}
+          {selected ? " · Enter attaches" : ""}
         </Text>
       </Box>
       <Box paddingLeft={4}>
-        <Text color="gray" wrap="truncate-end">
+        <Text color={selected ? "white" : "gray"} wrap="truncate-end">
           {truncate(run.input.replace(/\s+/g, " ").trim() || "(no input)", Math.max(20, width - 6))}
         </Text>
       </Box>
@@ -156,8 +325,9 @@ function HistoryRow({
   selected: boolean;
 }) {
   const g = STATUS_GLYPH[run.status] ?? { symbol: "·", color: "gray" };
-  const when = relativeTime(run.startedAt);
+  const when = formatRelativeTime(run.startedAt);
   const meta = formatRunTotals(run.totals, { durationMs: run.durationMs, tokens: true });
+  const status = historyStatusLabel(run.status);
   return (
     <Box flexDirection="column">
       <Box>
@@ -166,29 +336,17 @@ function HistoryRow({
         <Text color={selected ? "cyan" : "white"} bold={selected}>
           {run.workflow}
         </Text>
+        <Text color={g.color}> {status}</Text>
         <Text color="gray">
           {"  "}
           {when} · {meta}
         </Text>
       </Box>
       <Box paddingLeft={4}>
-        <Text color="gray" wrap="truncate-end">
+        <Text color={selected ? "white" : "gray"} wrap="truncate-end">
           {truncate(run.input.replace(/\s+/g, " ").trim() || "(no input)", Math.max(20, width - 6))}
         </Text>
       </Box>
     </Box>
   );
-}
-
-function relativeTime(ts: number): string {
-  const diff = Date.now() - ts;
-  const sec = Math.round(diff / 1000);
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.round(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.round(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.round(hr / 24);
-  if (day < 7) return `${day}d ago`;
-  return new Date(ts).toISOString().slice(0, 10);
 }

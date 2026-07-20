@@ -89,7 +89,7 @@ import { StatusBar } from "./StatusBar";
 import { TaskSelector } from "./TaskSelector";
 import { WorkflowAnswerInput } from "./WorkflowAnswerInput";
 import { WorkflowCreate } from "./WorkflowCreate";
-import { WorkflowHistory } from "./WorkflowHistory";
+import { HistoryDetailBanner, WorkflowHistory } from "./WorkflowHistory";
 import { WorkflowInputForm } from "./WorkflowInputForm";
 import { WorkflowPicker } from "./WorkflowPicker";
 import { WorkflowPreview } from "./WorkflowPreview";
@@ -1883,9 +1883,12 @@ function historyHintText(history: HistoryUiState): string {
       phase.steps.some((step) => step.worktree),
     );
     const worktreeHint = hasWorktrees ? " · a apply · x prune" : "";
-    return `↑/↓ step · → details · r re-run${retryHint}${worktreeHint} · ←/Esc back to list · Ctrl+C quit`;
+    return `↑/↓ step · → details · r re-run${retryHint}${worktreeHint} · d delete · ←/Esc back to list · Ctrl+C quit`;
   }
-  return "↑/↓ select · Enter inspect · Esc close · Ctrl+C quit";
+  if (history.filtering) {
+    return "filter mode · type to search · Enter/Esc done · ↑/↓ select · Ctrl+C quit";
+  }
+  return "↑/↓ select · Enter inspect · / filter · t status · d delete · Esc close · Ctrl+C quit";
 }
 
 /**
@@ -1927,14 +1930,19 @@ function HistoryPanel({
         />
       );
     }
+    const bannerHeight = 5;
+    const viewHeight = Math.max(6, height - bannerHeight);
     return (
-      <WorkflowView
-        state={state}
-        height={height}
-        width={width}
-        selectedIndex={clamped}
-        elapsedMs={elapsed}
-      />
+      <Box flexDirection="column" height={height}>
+        {history.record ? <HistoryDetailBanner record={history.record} width={width} /> : null}
+        <WorkflowView
+          state={state}
+          height={viewHeight}
+          width={width}
+          selectedIndex={clamped}
+          elapsedMs={elapsed}
+        />
+      </Box>
     );
   }
   return (
@@ -1944,6 +1952,9 @@ function HistoryPanel({
       selectedIndex={history.index}
       loading={history.loading}
       error={history.error}
+      query={history.query}
+      filtering={history.filtering}
+      statusFilter={history.statusFilter}
       width={width}
       height={height}
     />
