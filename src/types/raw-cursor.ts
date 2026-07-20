@@ -54,8 +54,14 @@ export const cursorFunctionTool = z
 
 export const cursorToolCallPayload = z
   .object({
-    readToolCall: z.object({ args: z.unknown().optional(), result: z.unknown().optional() }).passthrough().optional(),
-    writeToolCall: z.object({ args: z.unknown().optional(), result: z.unknown().optional() }).passthrough().optional(),
+    readToolCall: z
+      .object({ args: z.unknown().optional(), result: z.unknown().optional() })
+      .passthrough()
+      .optional(),
+    writeToolCall: z
+      .object({ args: z.unknown().optional(), result: z.unknown().optional() })
+      .passthrough()
+      .optional(),
     function: cursorFunctionTool.optional(),
   })
   .passthrough();

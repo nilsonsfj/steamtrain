@@ -3,8 +3,8 @@ import type { AgentAdapter } from "./adapter";
 import { AmpAdapter } from "./amp";
 import { ClaudeCodeAdapter } from "./claude";
 import { CodexAdapter } from "./codex";
-import { KiroCliAdapter } from "./kiro";
 import { CursorAgentAdapter } from "./cursor";
+import { KiroCliAdapter } from "./kiro";
 import { OpenCodeAdapter } from "./opencode";
 
 export type { AgentAdapter, AgentRunOptions } from "./adapter";

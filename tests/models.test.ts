@@ -226,12 +226,7 @@ describe("cursor models", () => {
   });
 
   it("supports bracket efforts for cursor when model has no effort=", () => {
-    expect(effortsForModel("cursor", "composer-2.5")).toEqual([
-      "low",
-      "medium",
-      "high",
-      "xhigh",
-    ]);
+    expect(effortsForModel("cursor", "composer-2.5")).toEqual(["low", "medium", "high", "xhigh"]);
     expect(effortsForModel("cursor", "composer-2.5[effort=high]")).toEqual([]);
   });
 });

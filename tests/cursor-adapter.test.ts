@@ -4,17 +4,28 @@ import type { AgentEvent } from "../src/types/events";
 
 const SAMPLES = {
   init: '{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/tmp","session_id":"sess-c1","model":"Composer 2.5","permissionMode":"default"}',
-  userEcho: '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]},"session_id":"sess-c1"}',
-  assistantDelta: '{"type":"assistant","timestamp_ms":1000,"message":{"role":"assistant","content":[{"type":"text","text":"Hel"}]},"session_id":"sess-c1"}',
-  assistantDelta2: '{"type":"assistant","timestamp_ms":1001,"message":{"role":"assistant","content":[{"type":"text","text":"lo"}]},"session_id":"sess-c1"}',
-  assistantFlushBeforeTool: '{"type":"assistant","timestamp_ms":1002,"model_call_id":"mc1","message":{"role":"assistant","content":[{"type":"text","text":"Hello"}]},"session_id":"sess-c1"}',
-  assistantFinalFlush: '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello"}]},"session_id":"sess-c1"}',
-  toolStartedRead: '{"type":"tool_call","subtype":"started","call_id":"c1","tool_call":{"readToolCall":{"args":{"path":"README.md"}}},"session_id":"sess-c1"}',
-  toolCompletedRead: '{"type":"tool_call","subtype":"completed","call_id":"c1","tool_call":{"readToolCall":{"args":{"path":"README.md"},"result":{"success":{"content":"# Hi","totalLines":1}}}},"session_id":"sess-c1"}',
-  toolStartedWrite: '{"type":"tool_call","subtype":"started","call_id":"c2","tool_call":{"writeToolCall":{"args":{"path":"out.txt","fileText":"x"}}},"session_id":"sess-c1"}',
-  toolStartedFn: '{"type":"tool_call","subtype":"started","call_id":"c3","tool_call":{"function":{"name":"Shell","arguments":"{\\"command\\":\\"ls\\"}"}},"session_id":"sess-c1"}',
-  resultSuccess: '{"type":"result","subtype":"success","duration_ms":1234,"duration_api_ms":1234,"is_error":false,"result":"Hello","session_id":"sess-c1"}',
-  resultError: '{"type":"result","subtype":"error","duration_ms":100,"is_error":true,"result":"fail","session_id":"sess-c1"}',
+  userEcho:
+    '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]},"session_id":"sess-c1"}',
+  assistantDelta:
+    '{"type":"assistant","timestamp_ms":1000,"message":{"role":"assistant","content":[{"type":"text","text":"Hel"}]},"session_id":"sess-c1"}',
+  assistantDelta2:
+    '{"type":"assistant","timestamp_ms":1001,"message":{"role":"assistant","content":[{"type":"text","text":"lo"}]},"session_id":"sess-c1"}',
+  assistantFlushBeforeTool:
+    '{"type":"assistant","timestamp_ms":1002,"model_call_id":"mc1","message":{"role":"assistant","content":[{"type":"text","text":"Hello"}]},"session_id":"sess-c1"}',
+  assistantFinalFlush:
+    '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello"}]},"session_id":"sess-c1"}',
+  toolStartedRead:
+    '{"type":"tool_call","subtype":"started","call_id":"c1","tool_call":{"readToolCall":{"args":{"path":"README.md"}}},"session_id":"sess-c1"}',
+  toolCompletedRead:
+    '{"type":"tool_call","subtype":"completed","call_id":"c1","tool_call":{"readToolCall":{"args":{"path":"README.md"},"result":{"success":{"content":"# Hi","totalLines":1}}}},"session_id":"sess-c1"}',
+  toolStartedWrite:
+    '{"type":"tool_call","subtype":"started","call_id":"c2","tool_call":{"writeToolCall":{"args":{"path":"out.txt","fileText":"x"}}},"session_id":"sess-c1"}',
+  toolStartedFn:
+    '{"type":"tool_call","subtype":"started","call_id":"c3","tool_call":{"function":{"name":"Shell","arguments":"{\\"command\\":\\"ls\\"}"}},"session_id":"sess-c1"}',
+  resultSuccess:
+    '{"type":"result","subtype":"success","duration_ms":1234,"duration_api_ms":1234,"is_error":false,"result":"Hello","session_id":"sess-c1"}',
+  resultError:
+    '{"type":"result","subtype":"error","duration_ms":100,"is_error":true,"result":"fail","session_id":"sess-c1"}',
   unknown: '{"type":"thinking","text":"nope"}',
 } as const;
 
@@ -96,13 +107,11 @@ describe("cursor mapper", () => {
   });
 });
 
-import { buildCursorRunArgs, resolveCursorModel, CURSOR_MODELS } from "../src/agents/cursor";
+import { CURSOR_MODELS, buildCursorRunArgs, resolveCursorModel } from "../src/agents/cursor";
 
 describe("cursor argv", () => {
   it("includes print/stream-json/partial/force/trust/model and trailing prompt", () => {
-    expect(
-      buildCursorRunArgs({ prompt: "hello", model: "composer-2.5" }),
-    ).toEqual([
+    expect(buildCursorRunArgs({ prompt: "hello", model: "composer-2.5" })).toEqual([
       "--print",
       "--output-format",
       "stream-json",
