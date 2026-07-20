@@ -32,6 +32,7 @@ import type { WorkflowHistoryStore } from "./history-store";
 /** Providers whose interactive CLI can resume a recorded session, with the flag shape. */
 const INTERACTIVE_RESUME_ARGS: Partial<Record<AgentProviderId, (sessionId: string) => string[]>> = {
   claude: (sessionId) => ["--resume", sessionId],
+  // Cursor Agent CLI uses the same `--resume <chatId>` flag interactively and headlessly.
   cursor: (sessionId) => ["--resume", sessionId],
 };
 

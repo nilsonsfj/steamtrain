@@ -34,7 +34,8 @@ export const CURSOR_MODELS: readonly AgentModel[] = [
 
 export function resolveCursorModel(model: string, effort?: string): string {
   if (!effort) return model;
-  if (/\[.*effort=/.test(model)) return model;
+  // Parameterized model ids already carry effort= inside `[…]` brackets.
+  if (/\[[^\]]*effort=/.test(model)) return model;
   return `${model}[effort=${effort}]`;
 }
 
@@ -234,13 +235,15 @@ export class CursorAgentAdapter implements AgentAdapter {
   }
 
   run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
+    // Cursor's headless CLI takes the prompt as a trailing positional arg
+    // (`agent -p … "prompt"`). Unlike claude/codex/opencode, do not also pipe
+    // stdin — that would leave the prompt empty or duplicated.
     return runAgentProcess({
       id: this.id,
       binary: this.binary,
       args: buildCursorRunArgs(opts),
       opts,
       map: createCursorMapper(opts.agentId ?? this.id),
-      // prompt is on argv; do not pass stdin prompt
     });
   }
 }

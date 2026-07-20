@@ -229,4 +229,9 @@ describe("cursor models", () => {
     expect(effortsForModel("cursor", "composer-2.5")).toEqual(["low", "medium", "high", "xhigh"]);
     expect(effortsForModel("cursor", "composer-2.5[effort=high]")).toEqual([]);
   });
+
+  it("keeps effort when switching cursor models only if still supported", () => {
+    expect(effortForModelChange("cursor", "composer-2.5", "high")).toBe("high");
+    expect(effortForModelChange("cursor", "composer-2.5[effort=high]", "high")).toBeUndefined();
+  });
 });
