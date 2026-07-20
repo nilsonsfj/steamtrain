@@ -52,4 +52,13 @@ describe("resolveBinarySync", () => {
   it("returns undefined for a missing absolute path", () => {
     expect(resolveBinarySync("/tmp/steamtrain-definitely-missing-binary")).toBeUndefined();
   });
+
+  it("rejects null bytes and newlines in the binary name", () => {
+    expect(resolveBinarySync("foo\0bar")).toBeUndefined();
+    expect(resolveBinarySync("foo\nbar")).toBeUndefined();
+  });
+
+  it("resolves a bare name that exists on PATH", () => {
+    expect(resolveBinarySync("node")).toBeTruthy();
+  });
 });

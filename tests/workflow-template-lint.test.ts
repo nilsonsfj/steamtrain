@@ -474,6 +474,12 @@ describe("lintTemplateRefs", () => {
       expect(warnings[0]).toContain("interpolated into the shell unsanitized");
     });
 
+    it("warns when a command cmd embeds {{args}} (input alias)", () => {
+      const s = spec([phase("p1", [command("run", { cmd: "echo {{args}}" })])]);
+      const warnings = lintTemplateRefs(s);
+      expect(warnings).toEqual([expect.stringContaining("{{args}}")]);
+    });
+
     it("does not warn for a static command", () => {
       const s = spec([phase("p1", [command("run", { cmd: "npm test" })])]);
       expect(lintTemplateRefs(s)).toEqual([]);
