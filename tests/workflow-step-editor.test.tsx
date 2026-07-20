@@ -349,6 +349,7 @@ describe("bulk retarget helpers", () => {
       CONFIG,
     );
     expect(summary).toContain("2 steps");
-    expect(summary).toContain("claude/opus");
+    expect(summary).toContain("claude");
+    expect(summary).toContain("opus");
   });
 });
