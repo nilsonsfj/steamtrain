@@ -85,7 +85,7 @@ browser ──POST /api/runs──▶ run manager ──▶ Orchestrator.runWork
 | `/api/meta` | GET | agents + APIs, models, efforts, health (for the create form) |
 | `/api/doctor` | GET | current agent health (`doctor`) and llm-API readiness (`apis`) |
 | `/api/runs` | POST | `{ workflow, input, fresh? }` → `{ runId }` |
-| `/api/runs` | GET | in-flight run registry: server-owned runs merged with external (CLI `--detach` / TUI) runs from `.steamtrain/runs/` |
+| `/api/runs` | GET | in-flight run registry: server-owned runs merged with external (CLI `--detach` / TUI) runs from `.steamtrain/runs/`, including queued/paused state and pending approval/input summaries |
 | `/api/runs/:id/stream` | GET | Server-Sent Events: each `WorkflowEvent` (plus non-terminal `queued` frames), then a terminal `status` frame; tails externally-owned runs from the live-run registry |
 | `/api/runs/:id/cancel` | POST | abort a running workflow (external runs: drops the registry's cancel marker) |
 | `/api/runs/:id/pause` / `/api/runs/:id/resume` | POST | mid-run steering: stop scheduling new steps / continue (external runs: via the registry's control files) |

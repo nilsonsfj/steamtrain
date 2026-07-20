@@ -4,10 +4,12 @@ Thanks for your interest in contributing! Here's how to get started.
 
 ## Setup
 
+The development toolchain requires [Bun 1+](https://bun.sh) and Node.js 20+.
+
 ```bash
 git clone https://github.com/nilsonsfj/steamtrain.git
 cd steamtrain
-npm install
+bun install --frozen-lockfile
 ```
 
 ## Development commands
@@ -34,10 +36,10 @@ npm install
 
 1. Create a feature branch from `main`
 2. Make your changes
-3. Run `npm run lint && npm run typecheck && npm test` to verify
+3. Run `npm run lint && npm run typecheck && npm test && npm run build` to verify
 4. Submit a pull request with a clear description of the change
 
-CI runs on every push and pull request to `main` (lint, typecheck, test via Bun). OpenCode also posts automated PR reviews and responds to `/opencode` or `/oc` comments when the `OPENCODE_API_KEY` repository secret is configured (same setup as [camelo](https://github.com/nilsonsfj/camelo)).
+CI runs on every push and pull request to `main` (lint, typecheck, test, and a production build via Bun). OpenCode also posts automated PR reviews and responds to `/opencode` or `/oc` comments when the `OPENCODE_API_KEY` repository secret is configured (same setup as [camelo](https://github.com/nilsonsfj/camelo)).
 
 ## Architecture overview
 

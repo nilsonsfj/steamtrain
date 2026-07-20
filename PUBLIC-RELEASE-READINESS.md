@@ -20,7 +20,7 @@ Recommended readiness level:
 | Area | Status |
 | --- | --- |
 | MIT `LICENSE` + `"license": "MIT"` in `package.json` | Done |
-| CI (`.github/workflows/ci.yml`: lint, typecheck, test on Bun) | Done |
+| CI (`.github/workflows/ci.yml`: lint, typecheck, test, build on Bun) | Done |
 | `prepack` runs build before `npm pack` / publish | Done |
 | Package metadata (`repository`, `bugs`, `homepage`, `keywords`) | Done |
 | `CONTRIBUTING.md` with setup and check commands | Done |

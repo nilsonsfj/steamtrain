@@ -1422,6 +1422,7 @@ async function handle(
         detached: false,
         external: false,
         pendingApprovals: r.pendingApprovals,
+        pendingInputs: r.pendingInputs,
       })),
       ...external.map((m) => ({
         id: m.id,
@@ -1437,6 +1438,7 @@ async function handle(
         detached: m.detached,
         external: true,
         pendingApprovals: m.pendingApprovals,
+        pendingInputs: m.pendingInputs,
       })),
     ].sort((a, b) => b.startedAt - a.startedAt);
     sendJson(res, 200, { runs });

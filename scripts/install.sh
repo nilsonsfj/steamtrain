@@ -38,39 +38,50 @@ info()  { printf '\033[1;36m›\033[0m %s\n' "$1"; }
 warn()  { printf '\033[1;33m!\033[0m %s\n' "$1" >&2; }
 ok()    { printf '\033[1;32m✓\033[0m %s\n' "$1"; }
 
-# --- pick a package manager: bun (dev toolchain) preferred, npm as fallback ---
-if command -v bun >/dev/null 2>&1; then
-  PM=bun
-elif command -v npm >/dev/null 2>&1; then
-  PM=npm
-else
-  echo "error: need either 'bun' or 'npm' on PATH to build steamtrain." >&2
-  echo "  install bun:  https://bun.sh   (or Node.js >=20, which ships npm)" >&2
-  exit 1
-fi
+# --- verify the required toolchain -------------------------------------------
+require_major() {
+  local executable="$1"
+  local minimum="$2"
+  local purpose="$3"
+  local install_hint="${4:-}"
+  if ! command -v "$executable" >/dev/null 2>&1; then
+    echo "error: '${executable}' (>=${minimum}) is required ${purpose} but was not found." >&2
+    if [ -n "$install_hint" ]; then echo "  ${install_hint}" >&2; fi
+    exit 1
+  fi
 
-if ! command -v node >/dev/null 2>&1; then
-  echo "error: 'node' (>=20) is required to run steamtrain but was not found." >&2
-  exit 1
+  local raw_version
+  if ! raw_version="$("$executable" --version 2>/dev/null)"; then
+    echo "error: could not determine '${executable}' version." >&2
+    exit 1
+  fi
+  local version="${raw_version#v}"
+  local major="${version%%.*}"
+  if [[ ! "$major" =~ ^[0-9]+$ ]] || (( major < minimum )); then
+    echo "error: '${executable}' >=${minimum} is required ${purpose}; found ${raw_version}." >&2
+    if [ -n "$install_hint" ]; then echo "  ${install_hint}" >&2; fi
+    exit 1
+  fi
+}
+
+require_major node 20 "to run steamtrain"
+if [ "$DO_BUILD" -eq 1 ]; then
+  require_major bun 1 "to build steamtrain" "install bun:  https://bun.sh"
 fi
 
 # --- build --------------------------------------------------------------------
 if [ "$DO_BUILD" -eq 1 ]; then
-  info "Installing dependencies with ${PM}…"
-  if [ "$PM" = "bun" ]; then
-    (cd "$REPO_ROOT" && bun install)
-  else
-    (cd "$REPO_ROOT" && npm install)
-  fi
+  info "Installing dependencies with bun…"
+  (cd "$REPO_ROOT" && bun install)
 
   info "Building steamtrain…"
-  (cd "$REPO_ROOT" && "$PM" run build)
+  (cd "$REPO_ROOT" && bun run build)
 fi
 
 TARGET="${REPO_ROOT}/dist/index.js"
 if [ ! -f "$TARGET" ]; then
   echo "error: build output not found at ${TARGET}." >&2
-  echo "  run without --no-build, or run '${PM} run build' first." >&2
+  echo "  run without --no-build, or run 'bun run build' first." >&2
   exit 1
 fi
 chmod +x "$TARGET"

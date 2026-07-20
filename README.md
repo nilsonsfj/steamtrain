@@ -15,6 +15,8 @@ terminals.
 
 ## Get started
 
+**Prerequisites:** [Bun 1+](https://bun.sh) for the development/build toolchain and Node.js 20+ to run the bundled CLI.
+
 ```bash
 git clone https://github.com/nilsonsfj/steamtrain.git
 cd steamtrain
@@ -22,10 +24,10 @@ npm run install:local        # builds, then links `steamtrain` onto your PATH
 steamtrain --version
 ```
 
-`install:local` installs deps (with `bun` if present, else `npm`), builds
-`dist/index.js`, and symlinks a `steamtrain` command into `~/.local/bin` —
-**no sudo**. It prints how to add that dir to your PATH if needed. (Details and
-custom install locations are [below the fold](#install-as-a-system-binary).)
+`install:local` installs dependencies with Bun, builds `dist/index.js`, and
+symlinks a `steamtrain` command into `~/.local/bin` — **no sudo**. It prints how
+to add that dir to your PATH if needed. (Details and custom install locations
+are [below the fold](#install-as-a-system-binary).)
 
 **Now take a lap — no agent, no API key, no credit required.** Launch the
 web UI (`steamtrain --web-ui`) and take the free tour from the Station, or run
@@ -333,7 +335,7 @@ A typo'd `/command` never dispatches as input — you get a
 `npm run install:local` is a thin wrapper over
 [`scripts/install.sh`](scripts/install.sh) that:
 
-1. installs dependencies (with `bun` if present, otherwise `npm`) and builds
+1. verifies Bun 1+ and Node.js 20+, installs dependencies with Bun, and builds
    `dist/index.js`,
 2. symlinks a `steamtrain` command into `~/.local/bin` — **no sudo required** —
    and prints how to add that directory to your PATH if it isn't already there.
@@ -348,7 +350,8 @@ its `node_modules`), so **keep the repo where it is**. After a `git pull`, re-ru
 STEAMTRAIN_BIN_DIR=/usr/local/bin bash scripts/install.sh
 ```
 
-**Link only** (skip the build if `dist/` is already current):
+**Link only** (skip dependency installation and the build if `dist/` is already
+current; only Node.js is required for this mode):
 
 ```bash
 bash scripts/install.sh --no-build
@@ -361,7 +364,7 @@ config:
 npm run uninstall:local
 ```
 
-Prefer the Node toolchain's own linker? `npm run build && npm link` also works.
+Prefer the Node toolchain's own linker? With Bun installed, `npm run build && npm link` also works.
 
 ### Build a standalone bundle
 
@@ -657,9 +660,9 @@ or the web UI's `↷ via <agent>` Run (see "run with what you have" above).
 
 ```bash
 bun install
-bun src/index.tsx     # run the TUI from source
-npm run dev           # same, via tsx (if you prefer not to use bun)
-npm run test          # vitest: line-buffer + both adapter mappers + workflow + a TUI smoke test
+bun src/index.tsx     # run the TUI directly from source
+npm run dev           # regenerate browser assets, then run the TUI with Bun
+npm test              # regenerate browser assets, then run the full Vitest suite
 npm run typecheck     # tsc --noEmit (strict, noUncheckedIndexedAccess)
 npm run lint          # biome
 npm run build         # tsup → dist/
