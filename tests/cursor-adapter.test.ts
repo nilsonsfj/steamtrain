@@ -25,7 +25,7 @@ const SAMPLES = {
   resultSuccess:
     '{"type":"result","subtype":"success","duration_ms":1234,"duration_api_ms":1234,"is_error":false,"result":"Hello","session_id":"sess-c1"}',
   resultError:
-    '{"type":"result","subtype":"error","duration_ms":100,"is_error":true,"result":"fail","session_id":"sess-c1"}',
+    '{"type":"result","subtype":"error","duration_ms":100,"is_error":true,"error":"Authentication failed","result":"fail","session_id":"sess-c1"}',
   unknown: '{"type":"thinking","text":"nope"}',
 } as const;
 
@@ -108,7 +108,11 @@ describe("cursor mapper", () => {
     ]);
     const errorEvents = map(SAMPLES.resultError);
     expect(errorEvents).toEqual([
-      expect.objectContaining({ kind: "error", agent: "cursor", message: "fail" }),
+      expect.objectContaining({
+        kind: "error",
+        agent: "cursor",
+        message: "Authentication failed",
+      }),
       expect.objectContaining({ kind: "result", isError: true }),
     ]);
   });
