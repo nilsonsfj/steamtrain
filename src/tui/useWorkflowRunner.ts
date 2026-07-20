@@ -666,6 +666,7 @@ export function useWorkflowRunner({
     const runId = attachedRunIdRef.current ?? ownRunIdRef.current;
     if (!runId) return null;
     const desired = !(runControlRef.current?.isPauseRequested() ?? wf.paused ?? false);
+    const attached = Boolean(attachedRunIdRef.current);
     const wrote = await liveRunStoreRef.current
       .writePauseState(runId, { paused: desired, by: "human:tui" })
       .catch((err) => {
@@ -674,14 +675,20 @@ export function useWorkflowRunner({
         }
         return false;
       });
-    if (!wrote) {
+    // Owned runs: the in-process control is authoritative — still apply locally
+    // even if the shared mirror write fails. Attached runs only have the store.
+    if (!attached && runControlRef.current) {
+      if (desired) runControlRef.current.pause("human:tui");
+      else runControlRef.current.resume("human:tui");
+    } else if (!wrote) {
       return desired
         ? "pause request failed — the run was not paused"
         : "resume request failed — the run was not resumed";
     }
-    if (!attachedRunIdRef.current && runControlRef.current) {
-      if (desired) runControlRef.current.pause("human:tui");
-      else runControlRef.current.resume("human:tui");
+    if (!wrote && !attached) {
+      return desired
+        ? "pause applied locally — shared pause write failed (see notice)"
+        : "resume applied locally — shared pause write failed (see notice)";
     }
     return desired
       ? "pause requested — in-flight steps finish, nothing new starts (e edits a pending step, p resumes)"

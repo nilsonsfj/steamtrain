@@ -142,6 +142,8 @@ function extractRefs(text: string | undefined): string[] {
     // Only flag references that look like steamtrain-specific patterns.
     // Generic mustache templates (e.g. {{name}}) are left alone.
     if (
+      expr === "input" ||
+      expr === "args" ||
       expr.startsWith("steps.") ||
       expr.startsWith("inputs.") ||
       expr === "item" ||
