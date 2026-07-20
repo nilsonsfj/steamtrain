@@ -86,13 +86,14 @@ export const cursorUsage = z
   })
   .passthrough();
 
-/** `{"type":"result", subtype?, is_error?, result?, duration_ms?, usage?, ...}` */
+/** `{"type":"result", subtype?, is_error?, result?, error?, duration_ms?, usage?, ...}` */
 export const cursorResult = z
   .object({
     type: z.literal("result"),
     subtype: z.string().optional(),
     is_error: z.boolean().optional(),
     result: z.string().optional(),
+    error: z.string().optional(),
     duration_ms: z.number().optional(),
     total_cost_usd: z.number().optional(),
     usage: cursorUsage.optional(),

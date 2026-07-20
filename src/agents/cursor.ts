@@ -209,7 +209,7 @@ export function createCursorMapper(agent: AgentInstanceId = AGENT): EventMapper 
             kind: "error",
             agent,
             ts,
-            message: r.data.result ?? r.data.subtype ?? "cursor result error",
+            message: r.data.error ?? r.data.subtype ?? r.data.result ?? "cursor result error",
             code: null,
           });
         }
