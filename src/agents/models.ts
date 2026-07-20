@@ -13,6 +13,7 @@ import {
   refreshCodexVariantCache,
 } from "./codex-variants";
 import { resolveAgentInstance } from "./config";
+import { createCursorAdapterStub } from "./cursor";
 import { KIRO_MODELS, KiroCliAdapter } from "./kiro";
 import { OPENCODE_MODELS, OpenCodeAdapter } from "./opencode";
 import {
@@ -29,7 +30,6 @@ export const AGENT_IDS: readonly AgentProviderId[] = [
   "codex",
   "amp",
   "kiro",
-  "cursor",
 ];
 
 export function isAgentProviderId(value: string): value is AgentProviderId {
@@ -125,9 +125,7 @@ const PROVIDER_ADAPTERS: Record<AgentProviderId, () => AgentAdapter> = {
   opencode: () => new OpenCodeAdapter(),
   amp: () => new AmpAdapter(),
   kiro: () => new KiroCliAdapter(),
-  cursor: () => {
-    throw new Error("cursor adapter not wired yet");
-  },
+  cursor: () => createCursorAdapterStub(),
 };
 
 /** Default model when switching to an agent without an explicit model. */

@@ -7,7 +7,6 @@ const AGENT_PROVIDER_IDS: readonly AgentProviderId[] = [
   "codex",
   "amp",
   "kiro",
-  "cursor",
 ];
 
 export const DEFAULT_AGENT_BINARY: Record<AgentProviderId, string> = {

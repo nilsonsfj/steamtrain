@@ -1,3 +1,4 @@
+import type { AgentAdapter } from "./adapter";
 import type {
   AgentEvent,
   AgentInstanceId,
@@ -169,5 +170,16 @@ export function createCursorMapper(agent: AgentInstanceId = AGENT): EventMapper 
       default:
         return [{ kind: "unknown", agent, ts, rawType: env.data.type, raw }];
     }
+  };
+}
+
+/** Placeholder until Task 2/4 wires CursorAgentAdapter; safe for metadata lookups. */
+export function createCursorAdapterStub(binary = "agent"): AgentAdapter {
+  return {
+    id: "cursor",
+    binary,
+    defaultModel: "composer-2.5",
+    supportsResume: true,
+    async *run() {},
   };
 }
