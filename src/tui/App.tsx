@@ -35,7 +35,15 @@ import type {
   ConfigScopeKind,
   SteamtrainConfig,
 } from "../config";
-import { configDisplayLabel, loadConfig, saveUserConfig, userConfigPath } from "../config";
+import {
+  configDisplayLabel,
+  isAllowedApiBaseUrl,
+  isValidApiKeyEnvName,
+  loadConfig,
+  resolveBinarySync,
+  saveUserConfig,
+  userConfigPath,
+} from "../config";
 import { saveProjectConfig } from "../config/project-config";
 import type { AgentInstanceConfig, ApiInstanceConfig } from "../config/types";
 import type { UserConfigPatch } from "../config/user-config";
@@ -344,6 +352,12 @@ export function App({
     (request: AgentAddRequest): AgentMutationResult => {
       const scope = canGlobalConfig ? request.scope : "project";
       const rawList = scope === "user" ? agentLayers.userAgents : agentLayers.projectAgents;
+      if (request.binary && !resolveBinarySync(request.binary)) {
+        return {
+          ok: false,
+          error: `binary '${request.binary}' not found or not executable (absolute path or name on PATH)`,
+        };
+      }
       const entry: AgentInstanceConfig = {
         id: request.id,
         provider: request.provider,
@@ -432,6 +446,18 @@ export function App({
     (request: ApiAddRequest): ApiMutationResult => {
       const scope = canGlobalConfig ? request.scope : "project";
       const rawList = scope === "user" ? apiLayers.userApis : apiLayers.projectApis;
+      if (request.baseUrl && !isAllowedApiBaseUrl(request.baseUrl)) {
+        return {
+          ok: false,
+          error: `baseUrl must be an http or https URL (got '${request.baseUrl}')`,
+        };
+      }
+      if (request.apiKeyEnv && !isValidApiKeyEnvName(request.apiKeyEnv)) {
+        return {
+          ok: false,
+          error: "apiKeyEnv must be an uppercase env var name (e.g. ANTHROPIC_API_KEY)",
+        };
+      }
       const entry: ApiInstanceConfig = {
         id: request.id,
         provider: request.provider,
@@ -683,7 +709,10 @@ export function App({
     (value: string) => {
       if (!runEditor) return;
       const patch = runEditor.field === "cmd" ? { cmd: value } : { prompt: value };
-      void runner.editRunStep(runEditor.stepId, patch).then((notice) => runner.setWfNotice(notice));
+      void runner
+        .editRunStep(runEditor.stepId, patch)
+        .then((notice) => runner.setWfNotice(notice))
+        .catch((err) => runner.setWfNotice(`edit failed: ${message(err)}`));
     },
     [runEditor, runner.editRunStep, runner.setWfNotice],
   );
@@ -914,9 +943,14 @@ export function App({
 
     const key = workflowCacheKey(picker.wfPreview.name, trimmed, process.cwd(), spec);
     let active = true;
-    void runner.cacheStoreRef.current.load(key).then((cache) => {
-      if (active) runner.setWfCanResume(cache.size > 0);
-    });
+    void runner.cacheStoreRef.current
+      .load(key)
+      .then((cache) => {
+        if (active) runner.setWfCanResume(cache.size > 0);
+      })
+      .catch(() => {
+        if (active) runner.setWfCanResume(false);
+      });
     return () => {
       active = false;
     };
@@ -951,6 +985,9 @@ export function App({
   useEffect(() => {
     return () => {
       mountedRef.current = false;
+      runner.abortRef.current?.abort();
+      runner.attachAbortRef.current?.abort();
+      picker.createAbortRef.current?.abort();
     };
   }, []);
 
@@ -1273,6 +1310,9 @@ export function App({
         level: "info",
         text: `dispatch '${formatEntryLabel(entry)}' → ${formatAgentTarget(entry)}`,
       });
+      // Workspace agent sessions stream into the transcript only — they do not
+      // write RunRecord history (that model is workflow-shaped: phases, harvest,
+      // interventions). Persistence here would need a separate session log.
       runner.setRunning(true);
       const ac = new AbortController();
       runner.abortRef.current = ac;

@@ -100,6 +100,7 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
           // An /attach tail holds a ref'd polling timer; without aborting it the
           // process would outlive the unmounted UI until the attached run ends.
           runner.attachAbortRef.current?.abort();
+          picker.createAbortRef.current?.abort();
           exit();
           return;
         }

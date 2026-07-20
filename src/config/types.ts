@@ -117,6 +117,9 @@ const apiInstanceSchema = z
     provider: apiProviderId,
     enabled: z.boolean().optional(),
     label: nonEmptyString.optional(),
+    // baseUrl / apiKeyEnv stay loosely typed at load so a single bad entry
+    // cannot discard the whole config file; interactive add paths validate
+    // via isAllowedApiBaseUrl / isValidApiKeyEnvName.
     baseUrl: nonEmptyString.optional(),
     apiKeyEnv: nonEmptyString.optional(),
     keyless: z.boolean().optional(),

@@ -1,5 +1,6 @@
 import { Box, Text, useInput } from "ink";
 import { useState } from "react";
+import { MAX_PROMPT_CHARS } from "../config";
 
 /** What the mid-run editor is editing: one pending step's prompt or command. */
 export interface RunStepEditorTarget {
@@ -52,7 +53,7 @@ export function WorkflowRunStepEditor({
       return;
     }
     if (input && !key.ctrl && !key.meta) {
-      setValue((prev) => prev + input);
+      setValue((prev) => (prev.length >= MAX_PROMPT_CHARS ? prev : prev + input));
     }
   });
 

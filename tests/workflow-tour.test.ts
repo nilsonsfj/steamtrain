@@ -58,7 +58,12 @@ describe("bundled tour workflow", () => {
     const result = validateWorkflow(tour);
     expect(result.error).toBeUndefined();
     expect(result.ok).toBe(true);
-    expect(result.warnings ?? []).toEqual([]);
+    // Command steps that embed template data into the shell emit a non-fatal
+    // security warning (see SECURITY.md); the tour intentionally fans out via
+    // a templated shell cmd.
+    expect(result.warnings ?? []).toEqual([
+      expect.stringContaining("interpolated into the shell unsanitized"),
+    ]);
     expect(workflowAgentIds(tour)).toEqual([]);
   });
 

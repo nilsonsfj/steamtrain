@@ -6,6 +6,7 @@ import {
   resolveAgentInstances,
   upsertAgent,
 } from "../../agents";
+import { resolveBinarySync } from "../../config";
 import type { AgentConfigScope, AgentInstanceConfig } from "../../config/types";
 import { isWorkspaceMode } from "../../tui/modes";
 import type { SlashCommand, SlashCommandContext, SlashCommandResult } from "../types";
@@ -148,6 +149,11 @@ export const agentCommand: SlashCommand = {
       }
       const scope = scopeArg ?? defaultScope;
       const rawList = scope === "user" ? layers.userAgents : layers.projectAgents;
+      if (binary && !resolveBinarySync(binary)) {
+        return errorNotice(
+          `binary '${binary}' not found or not executable (absolute path or name on PATH)`,
+        );
+      }
       const entry: AgentInstanceConfig = {
         id,
         provider,

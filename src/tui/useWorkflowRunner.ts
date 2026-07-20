@@ -428,13 +428,19 @@ export function useWorkflowRunner({
           // cross-UI tailers see the complete stream. Best-effort.
           try {
             await publisher?.finish(status, { ok: status === "done", error: runError });
-          } catch {
-            // Mirroring is best-effort.
+          } catch (err) {
+            // Mirroring is best-effort; surface a soft warning so the gap is visible.
+            if (mountedRef.current) {
+              setWfNotice(`warning: live-run mirror finish failed: ${message(err)}`);
+            }
           }
           try {
             await historyStoreRef.current.save(recorder.build({ status, error: runError }));
-          } catch {
+          } catch (err) {
             // History is best-effort; a failed write must not break the run.
+            if (mountedRef.current) {
+              setWfNotice(`warning: run history could not be saved: ${message(err)}`);
+            }
           }
           if (mountedRef.current) {
             setRunning(false);
@@ -592,7 +598,11 @@ export function useWorkflowRunner({
             approved,
             by: "human:tui",
           })
-          .catch(() => {});
+          .catch((err) => {
+            if (mountedRef.current) {
+              setWfNotice(`approval write failed: ${message(err)}`);
+            }
+          });
         return;
       }
       const resolvers = approvalResolversRef.current;
@@ -628,7 +638,11 @@ export function useWorkflowRunner({
               { value, by: "human:tui" },
             );
           })
-          .catch(() => {});
+          .catch((err) => {
+            if (mountedRef.current) {
+              setWfNotice(`human-input write failed: ${message(err)}`);
+            }
+          });
         return;
       }
       const resolvers = humanInputResolversRef.current;
@@ -652,12 +666,29 @@ export function useWorkflowRunner({
     const runId = attachedRunIdRef.current ?? ownRunIdRef.current;
     if (!runId) return null;
     const desired = !(runControlRef.current?.isPauseRequested() ?? wf.paused ?? false);
-    await liveRunStoreRef.current
+    const attached = Boolean(attachedRunIdRef.current);
+    const wrote = await liveRunStoreRef.current
       .writePauseState(runId, { paused: desired, by: "human:tui" })
-      .catch(() => {});
-    if (!attachedRunIdRef.current && runControlRef.current) {
+      .catch((err) => {
+        if (mountedRef.current) {
+          setWfNotice(`pause write failed: ${message(err)}`);
+        }
+        return false;
+      });
+    // Owned runs: the in-process control is authoritative — still apply locally
+    // even if the shared mirror write fails. Attached runs only have the store.
+    if (!attached && runControlRef.current) {
       if (desired) runControlRef.current.pause("human:tui");
       else runControlRef.current.resume("human:tui");
+      if (!wrote) {
+        return desired
+          ? "pause applied locally — shared pause write failed (see notice)"
+          : "resume applied locally — shared pause write failed (see notice)";
+      }
+    } else if (!wrote) {
+      return desired
+        ? "pause request failed — the run was not paused"
+        : "resume request failed — the run was not resumed";
     }
     return desired
       ? "pause requested — in-flight steps finish, nothing new starts (e edits a pending step, p resumes)"

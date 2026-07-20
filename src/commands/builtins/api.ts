@@ -5,6 +5,7 @@ import {
   resolveApiInstances,
   upsertApi,
 } from "../../apis";
+import { isAllowedApiBaseUrl, isValidApiKeyEnvName } from "../../config";
 import type { ApiConfigScope, ApiInstanceConfig } from "../../config/types";
 import type { SlashCommand, SlashCommandContext, SlashCommandResult } from "../types";
 
@@ -162,6 +163,12 @@ export const apiCommand: SlashCommand = {
       }
       const scope = scopeArg ?? defaultScope;
       const rawList = scope === "user" ? layers.userApis : layers.projectApis;
+      if (baseUrl && !isAllowedApiBaseUrl(baseUrl)) {
+        return errorNotice(`baseUrl must be an http or https URL (got '${baseUrl}')`);
+      }
+      if (flags.apiKeyEnv && !isValidApiKeyEnvName(flags.apiKeyEnv)) {
+        return errorNotice("apiKeyEnv must be an uppercase env var name (e.g. ANTHROPIC_API_KEY)");
+      }
       const entry: ApiInstanceConfig = {
         id,
         provider,

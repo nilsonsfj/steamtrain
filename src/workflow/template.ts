@@ -142,6 +142,8 @@ function extractRefs(text: string | undefined): string[] {
     // Only flag references that look like steamtrain-specific patterns.
     // Generic mustache templates (e.g. {{name}}) are left alone.
     if (
+      expr === "input" ||
+      expr === "args" || // alias for {{input}} in renderPrompt
       expr.startsWith("steps.") ||
       expr.startsWith("inputs.") ||
       expr === "item" ||
@@ -370,6 +372,36 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
             warnings.push(`step '${step.id}' uses invalid template reference '{{${ref}}}'`);
           }
         }
+      }
+    }
+  }
+
+  // Command steps run through the platform shell with templates expanded raw —
+  // flag embeddings of workflow input / step output so authors treat them like
+  // a Makefile (see SECURITY.md).
+  for (const phase of spec.phases) {
+    for (const step of phase.steps) {
+      if (
+        workflowStepKind(step) !== "command" ||
+        !("cmd" in step) ||
+        typeof step.cmd !== "string"
+      ) {
+        continue;
+      }
+      const cmdRefs = extractRefs(step.cmd);
+      const risky = cmdRefs.filter(
+        (ref) =>
+          ref === "input" ||
+          ref === "args" ||
+          ref.startsWith("inputs.") ||
+          ref.startsWith("steps.") ||
+          ref === "item" ||
+          ref.startsWith("item."),
+      );
+      if (risky.length > 0) {
+        warnings.push(
+          `step '${step.id}' is a command step whose cmd embeds template data ({{${risky[0]}}}); values are interpolated into the shell unsanitized — review like a Makefile`,
+        );
       }
     }
   }

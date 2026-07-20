@@ -1,3 +1,4 @@
+import { MAX_PROMPT_CHARS } from "../../config";
 import type { SlashCommand } from "../types";
 import { hasWorkflowStepTarget, workflowStepUnavailableNotice } from "../workflow-step-target";
 
@@ -28,6 +29,18 @@ export const promptCommand: SlashCommand = {
     }
 
     const newPrompt = args.join(" ");
+    if (newPrompt.length > MAX_PROMPT_CHARS) {
+      return {
+        handled: true,
+        clearInput: false,
+        notices: [
+          {
+            level: "error",
+            text: `prompt too long (${newPrompt.length} chars; max ${MAX_PROMPT_CHARS})`,
+          },
+        ],
+      };
+    }
     update(step.stepId, { prompt: newPrompt });
     return {
       handled: true,

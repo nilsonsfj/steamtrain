@@ -36,6 +36,11 @@ Key properties and expectations:
 - **Workflow specs execute commands.** A `steamtrain.json` from an
   untrusted source can run arbitrary shell via `command` steps and arbitrary
   agent prompts with your credentials. Review project configs like you would
-  review a Makefile.
+  review a Makefile.   Template expansions in `cmd` (e.g. `{{input}}`,
+  `{{steps.*.output}}`) are interpolated into the shell unsanitized; the
+  template linter warns at validate/create time when a command step embeds
+  those refs.
 - **Agent subprocesses are spawned without shell interpolation**, and config
-  files are schema-validated (zod) at load time.
+  files are schema-validated (zod) at load time. API `baseUrl` values must be
+  `http:`/`https:`; `apiKeyEnv` must be an uppercase env-var name; agent
+  `binary` paths are checked for executability when added via the TUI/CLI.

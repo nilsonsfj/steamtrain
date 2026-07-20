@@ -454,4 +454,35 @@ describe("lintTemplateRefs", () => {
       expect(lintTemplateRefs(s)).toEqual([]);
     });
   });
+
+  describe("command step shell-template warnings", () => {
+    it("warns when a command cmd embeds workflow input or step output", () => {
+      const s = spec([
+        phase("p1", [worker("a")]),
+        phase("p2", [command("run", { cmd: "echo {{input}} && cat {{steps.a.output}}" })]),
+      ]);
+      const warnings = lintTemplateRefs(s);
+      expect(warnings.some((w) => w.includes("interpolated into the shell unsanitized"))).toBe(
+        true,
+      );
+    });
+
+    it("warns when a command cmd embeds only {{input}}", () => {
+      const s = spec([phase("p1", [command("run", { cmd: "echo {{input}}" })])]);
+      const warnings = lintTemplateRefs(s);
+      expect(warnings).toEqual([expect.stringContaining("{{input}}")]);
+      expect(warnings[0]).toContain("interpolated into the shell unsanitized");
+    });
+
+    it("warns when a command cmd embeds {{args}} (input alias)", () => {
+      const s = spec([phase("p1", [command("run", { cmd: "echo {{args}}" })])]);
+      const warnings = lintTemplateRefs(s);
+      expect(warnings).toEqual([expect.stringContaining("{{args}}")]);
+    });
+
+    it("does not warn for a static command", () => {
+      const s = spec([phase("p1", [command("run", { cmd: "npm test" })])]);
+      expect(lintTemplateRefs(s)).toEqual([]);
+    });
+  });
 });
