@@ -627,8 +627,9 @@ body[data-mode="ride"][data-departing="true"] .station-atmosphere .signal,
 }
 body[data-mode="ride"][data-departing="true"] .station-atmosphere .rails,
 .station-atmosphere.departing .rails {
-  animation: rails-rush 0.55s linear infinite;
-  opacity: 0.85;
+  background-size: 54px 100%, 100% 100%;
+  animation: rails-rush 0.45s linear infinite;
+  opacity: 0.9;
 }
 body[data-mode="arrival"] .station-atmosphere .engine,
 body[data-mode="arrival"] .station-atmosphere .signal {

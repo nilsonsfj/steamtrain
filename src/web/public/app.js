@@ -1615,6 +1615,13 @@
     }
   }
 
+  function completeTourRide() {
+    // Arrival owns the hall — drop ride flags so inspect cannot revive Conductor stage.
+    S.arrivalEnter = true;
+    S.tourRiding = false;
+    endTourDeparture();
+  }
+
   function revealArrivalWhenReady() {
     if (S.arrivalHoldTimer) {
       clearTimeout(S.arrivalHoldTimer);
@@ -1626,16 +1633,14 @@
         S.arrivalHoldTimer = null;
         // Set arrivalEnter before clearing departing so syncBodyMode never
         // sees a frame with neither ride nor arrival armed.
-        S.arrivalEnter = true;
-        endTourDeparture();
+        completeTourRide();
         render();
       }, wait);
       // Keep ride stage painted until the hold ends.
       render();
       return;
     }
-    S.arrivalEnter = true;
-    endTourDeparture();
+    completeTourRide();
     render();
   }
 
