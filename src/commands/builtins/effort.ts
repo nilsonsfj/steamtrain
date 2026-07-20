@@ -1,14 +1,19 @@
 import { effortsForModel, supportsEffort } from "../../agents";
 import { isWorkspaceMode } from "../../tui/modes";
+import { buildBulkEffortPatches, listRetargetableSteps } from "../../tui/workflow-step-editor";
 import { completeDraftEffortArgs, executeDraftEffortCommand } from "../draft-effort-target";
 import type { SlashCommand, SlashCommandContext, SlashCommandResult } from "../types";
-import { hasWorkflowStepTarget, workflowStepUnavailableNotice } from "../workflow-step-target";
+import {
+  hasWorkflowStepTarget,
+  takeAllFlag,
+  workflowStepUnavailableNotice,
+} from "../workflow-step-target";
 
 export const effortCommand: SlashCommand = {
   name: "effort",
   description:
     "Set or list reasoning effort for the current workspace tab, workflow step, or draft target",
-  usage: "/effort [level|clear]",
+  usage: "/effort [level|clear] [--all]",
   execute(args, ctx) {
     if (hasWorkflowStepTarget(ctx)) {
       return executeWorkflowEffortCommand(args, ctx);
@@ -124,9 +129,10 @@ function executeWorkflowEffortCommand(
 ): SlashCommandResult {
   const step = ctx.workflowStep!;
   const update = ctx.updateWorkflowStep!;
+  const { args: bare, all } = takeAllFlag(args);
 
   const efforts = effortsForModel(step.agent, step.model, ctx.config);
-  if (args.length === 0) {
+  if (bare.length === 0) {
     const current = step.effort ?? "default";
     if (!supportsEffort(step.agent, step.model, ctx.config)) {
       return {
@@ -146,14 +152,35 @@ function executeWorkflowEffortCommand(
       notices: [
         {
           level: "info",
-          text: `effort for ${step.model} on step '${step.stepId}': ${efforts.join(", ")} (current: ${current})`,
+          text: `effort for ${step.model} on step '${step.stepId}': ${efforts.join(", ")} (current: ${current})${ctx.workflowSpec ? " · append --all to apply where supported" : ""}`,
         },
       ],
     };
   }
 
-  const next = args[0]!;
+  const next = bare[0]!;
   if (next === "clear") {
+    if (all && ctx.workflowSpec) {
+      const steps = listRetargetableSteps(ctx.workflowSpec);
+      const patches = buildBulkEffortPatches(steps, undefined, ctx.config);
+      for (const [stepId, patch] of Object.entries(patches)) {
+        update(stepId, patch);
+      }
+      const count = Object.keys(patches).length;
+      return {
+        handled: true,
+        clearInput: true,
+        notices: [
+          {
+            level: "info",
+            text:
+              count === 0
+                ? "every agent step already uses the model default effort"
+                : `effort cleared on ${count} step(s) · /save-workflows to persist`,
+          },
+        ],
+      };
+    }
     update(step.stepId, { effort: undefined });
     return {
       handled: true,
@@ -190,6 +217,28 @@ function executeWorkflowEffortCommand(
     };
   }
 
+  if (all && ctx.workflowSpec) {
+    const steps = listRetargetableSteps(ctx.workflowSpec);
+    const patches = buildBulkEffortPatches(steps, next, ctx.config);
+    for (const [stepId, patch] of Object.entries(patches)) {
+      update(stepId, patch);
+    }
+    const count = Object.keys(patches).length;
+    return {
+      handled: true,
+      clearInput: true,
+      notices: [
+        {
+          level: "info",
+          text:
+            count === 0
+              ? `every compatible step already on effort ${next}`
+              : `effort set to ${next} on ${count} step(s) · /save-workflows to persist`,
+        },
+      ],
+    };
+  }
+
   update(step.stepId, { effort: next });
   return {
     handled: true,
@@ -200,7 +249,10 @@ function executeWorkflowEffortCommand(
 
 function completeWorkflowEffortArgs(args: string[], ctx: SlashCommandContext): readonly string[] {
   const step = ctx.workflowStep;
-  if (!step || args.length > 1) return [];
+  if (!step) return [];
+  const { args: bare } = takeAllFlag(args);
+  if (bare.length > 1) return [];
+  if (args.length === 2 && args[0] && !args[0].startsWith("-")) return ["--all"];
   const efforts = effortsForModel(step.agent, step.model, ctx.config);
   if (efforts.length === 0) return ["clear"];
   return [...efforts, "clear"];

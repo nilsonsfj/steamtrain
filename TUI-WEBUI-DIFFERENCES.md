@@ -9,7 +9,14 @@ This is a working document. The end state we're aiming for: a single
 "workflow session / authoring" core that the TUI and the web server both drive,
 with each layer owning only presentation + input handling.
 
-Last updated: 2026-07-15.
+Updated 2026-07-20: both UIs gained bulk step retargeting — Web Configure has
+a "Retarget all agent steps" bar plus per-step "Use for all"; TUI Ctrl+E
+accepts `A` to apply the current agent/model/effort to every agent-backed
+step, and `/set-all <agent> [model] [effort]` (plus `/agent|/model|/effort
+… --all`) stages the same overrides. Mid-run editors now expose model/effort
+alongside prompt/cmd.
+
+Last updated: 2026-07-20.
 
 Updated 2026-06-16 (after the first unification pass in
 `feat/unify-workflow-authoring`: the authoring core is now shared).

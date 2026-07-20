@@ -2,10 +2,16 @@ import {
   defaultModelForAgent,
   effortForModelChange,
   effortsForModel,
+  modelIdsForAgent,
   resolveAgentInstances,
 } from "../agents";
 import type { SteamtrainConfig } from "../config";
-import { type WorkflowStep, isAgentBackedStep, workflowStepKind } from "../workflow";
+import {
+  type WorkflowSpec,
+  type WorkflowStep,
+  isAgentBackedStep,
+  workflowStepKind,
+} from "../workflow";
 import { promptForStep } from "./workflow-spec-ui";
 
 /**
@@ -13,6 +19,10 @@ import { promptForStep } from "./workflow-spec-ui";
  * and its tests. Editing here stages *session overrides* through the same
  * `patchWorkflowStep` path the `/agent`, `/model`, `/effort`, and `/prompt`
  * slash commands use — nothing is written to disk until `/save-workflows`.
+ *
+ * Bulk retarget helpers (`listRetargetableSteps`, `buildBulkRetargetPatches`, …)
+ * power "apply this agent/model to every agent-backed step" in both the TUI
+ * (`A` in the step editor, `/set-all`) and the Web Configure modal.
  */
 
 /** The subset of a step the editor reads and mutates. */
@@ -37,6 +47,15 @@ export interface StepEditorPatch {
   model?: string;
   effort?: string;
   prompt?: string;
+}
+
+/** One agent-backed step that can take a bulk agent/model/effort retarget. */
+export interface RetargetableStep {
+  stepId: string;
+  kindLabel: string;
+  agent: string;
+  model: string;
+  effort?: string;
 }
 
 export type EditorField = "agent" | "model" | "effort" | "prompt";
@@ -142,4 +161,135 @@ export function modelChangePatch(
 /** Patch produced by selecting `nextEffort` (or the "(default)" sentinel). */
 export function effortChangePatch(nextEffort: string): StepEditorPatch {
   return { effort: nextEffort === EDITOR_EFFORT_NONE ? undefined : nextEffort };
+}
+
+/** Every agent-backed step in a workflow spec, in phase order. */
+export function listRetargetableSteps(spec: WorkflowSpec): RetargetableStep[] {
+  const out: RetargetableStep[] = [];
+  for (const phase of spec.phases) {
+    for (const step of phase.steps) {
+      if (!isAgentBackedStep(step)) continue;
+      out.push({
+        stepId: step.id,
+        kindLabel: workflowStepKind(step),
+        agent: step.agent,
+        model: step.model,
+        effort: step.effort,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Desired agent/model/effort triad for a bulk retarget. `model` omitted ⇒ the
+ * agent's default; `effort` omitted ⇒ clear to the model default (undefined).
+ * Pass `effort: null` explicitly when the caller wants to leave each step's
+ * existing effort alone only if still valid for the new model — use
+ * {@link buildBulkRetargetPatches} which always revalidates.
+ */
+export interface BulkRetargetDesire {
+  agent: string;
+  /** When omitted, each step gets the agent's default model. */
+  model?: string;
+  /**
+   * Desired effort. `undefined` clears to the model default; omit the key to
+   * clear. Callers that want "keep when valid" should pass the effort and let
+   * {@link effortForModelChange} decide.
+   */
+  effort?: string;
+}
+
+/**
+ * Build per-step patches that retarget every listed step onto `desire`.
+ * Steps already matching the triad produce no entry (so the caller can skip
+ * no-ops). Effort is always revalidated against the destination model.
+ */
+export function buildBulkRetargetPatches(
+  steps: readonly RetargetableStep[],
+  desire: BulkRetargetDesire,
+  config?: SteamtrainConfig,
+): Record<string, StepEditorPatch> {
+  const patches: Record<string, StepEditorPatch> = {};
+  const nextModel = desire.model ?? defaultModelForAgent(desire.agent, config);
+  const nextEffort = effortForModelChange(desire.agent, nextModel, desire.effort, config);
+
+  for (const step of steps) {
+    const sameAgent = step.agent === desire.agent;
+    const sameModel = step.model === nextModel;
+    const sameEffort = (step.effort ?? undefined) === (nextEffort ?? undefined);
+    if (sameAgent && sameModel && sameEffort) continue;
+    patches[step.stepId] = {
+      agent: desire.agent,
+      model: nextModel,
+      effort: nextEffort,
+    };
+  }
+  return patches;
+}
+
+/**
+ * Build patches that change only the model (and revalidated effort) on steps
+ * that already use `agent`. Steps on other agents are skipped — switching the
+ * agent is {@link buildBulkRetargetPatches}'s job.
+ */
+export function buildBulkModelPatches(
+  steps: readonly RetargetableStep[],
+  agent: string,
+  nextModel: string,
+  config?: SteamtrainConfig,
+): Record<string, StepEditorPatch> {
+  const patches: Record<string, StepEditorPatch> = {};
+  for (const step of steps) {
+    if (step.agent !== agent) continue;
+    const nextEffort = effortForModelChange(agent, nextModel, step.effort, config);
+    if (step.model === nextModel && (step.effort ?? undefined) === (nextEffort ?? undefined)) {
+      continue;
+    }
+    patches[step.stepId] = { model: nextModel, effort: nextEffort };
+  }
+  return patches;
+}
+
+/**
+ * Build patches that set (or clear) effort on steps whose agent/model already
+ * support `nextEffort`. Unsupported steps are skipped.
+ */
+export function buildBulkEffortPatches(
+  steps: readonly RetargetableStep[],
+  nextEffort: string | undefined,
+  config?: SteamtrainConfig,
+): Record<string, StepEditorPatch> {
+  const patches: Record<string, StepEditorPatch> = {};
+  for (const step of steps) {
+    const supported = effortsForModel(step.agent, step.model, config);
+    if (nextEffort !== undefined && !supported.includes(nextEffort)) continue;
+    if ((step.effort ?? undefined) === (nextEffort ?? undefined)) continue;
+    patches[step.stepId] = { effort: nextEffort };
+  }
+  return patches;
+}
+
+/** Resolve a model id against an agent's catalog; falls back to the default. */
+export function resolveRetargetModel(
+  agent: string,
+  model: string | undefined,
+  config?: SteamtrainConfig,
+): string {
+  if (model && modelIdsForAgent(agent, config).includes(model)) return model;
+  return defaultModelForAgent(agent, config);
+}
+
+/** Human summary for a bulk apply notice ("3 steps → claude/sonnet"). */
+export function summarizeBulkRetarget(
+  patches: Record<string, StepEditorPatch>,
+  desire: BulkRetargetDesire,
+  config?: SteamtrainConfig,
+): string {
+  const count = Object.keys(patches).length;
+  if (count === 0) return "every agent step already matches";
+  const model = desire.model ?? defaultModelForAgent(desire.agent, config);
+  const effortNote = desire.effort ? ` · ${desire.effort}` : "";
+  const noun = count === 1 ? "step" : "steps";
+  return `${count} ${noun} → ${desire.agent}/${model}${effortNote}`;
 }
