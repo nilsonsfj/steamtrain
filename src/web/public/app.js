@@ -37,6 +37,10 @@
     narrationOn: localStorage.getItem("steamtrain.narration") !== "off",
     // Station landing: first-open hero for the tour.
     stationLanding: false,
+    // Focus the Station CTA once per landing session.
+    stationCtaFocused: false,
+    // Tour ride arc: atmospheric chrome between Station leave and Arrival.
+    tourRiding: false,
     // Narration line id that already played the one-shot "fresh" entrance.
     narrationFreshPlayed: null,
     // Expand the full step-kind legend via "?".
@@ -1033,7 +1037,11 @@
     S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
     S.narration = []; S.arrivalInspect = false; S.arrivalEnter = false; S.endedAt = 0;
     S.narrationFreshPlayed = null;
-    if (name !== TOUR_NAME) S.stationLanding = false;
+    if (name !== TOUR_NAME) {
+      S.stationLanding = false;
+      S.tourRiding = false;
+      S.stationCtaFocused = false;
+    }
     try { localStorage.setItem(SELECTION_KEY, name); } catch (e) {}
     renderSidebar();
     document.getElementById("statusLine").style.display = "none";
@@ -1189,22 +1197,61 @@
     requestAnimationFrame(function () { S.rafQueued = false; render(); });
   }
 
+  function renderStationAtmosphere(canvas) {
+    var engine = h("div", { class: "engine", "aria-hidden": "true" });
+    engine.innerHTML =
+      '<svg viewBox="0 0 380 160" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+      '<path d="M28 118h268c14 0 26-10 26-24V72c0-16-13-29-29-29H168l-28-28H62c-12 0-22 10-22 22v81z" fill="#1c6f68"/>' +
+      '<path d="M48 58h62l22 28h158c8 0 14 6 14 14v42c0 5-4 9-9 9H48V58z" fill="#34d3c4"/>' +
+      '<rect x="62" y="72" width="28" height="18" rx="3" fill="#0e1116" opacity=".55"/>' +
+      '<rect x="102" y="72" width="28" height="18" rx="3" fill="#0e1116" opacity=".4"/>' +
+      '<path d="M214 38c0-16 8-30 14-38 2-3 8-2 8 2 0 10-2 18-2 28 0 5 3 8 8 6 12-6 22-18 26-30 1-3 6-3 6 0 2 16-8 34-22 44-6 5-14 8-22 8h-16V38z" fill="#8eeae0"/>' +
+      '<circle cx="92" cy="128" r="22" fill="#0e1116" stroke="#34d3c4" stroke-width="4"/>' +
+      '<circle cx="92" cy="128" r="8" fill="#34d3c4"/>' +
+      '<circle cx="168" cy="128" r="22" fill="#0e1116" stroke="#34d3c4" stroke-width="4"/>' +
+      '<circle cx="168" cy="128" r="8" fill="#34d3c4"/>' +
+      '<circle cx="244" cy="128" r="18" fill="#0e1116" stroke="#34d3c4" stroke-width="3.5"/>' +
+      '<circle cx="244" cy="128" r="6" fill="#34d3c4"/>' +
+      '<path d="M28 118h290" stroke="#d29922" stroke-width="3" stroke-linecap="round" opacity=".75"/>' +
+      '<rect x="300" y="78" width="42" height="28" rx="4" fill="#1c6f68"/>' +
+      '<path d="M312 78v-16h18v16" stroke="#8eeae0" stroke-width="3" fill="none"/>' +
+      "</svg>";
+    canvas.appendChild(h("div", { class: "station-atmosphere", "aria-hidden": "true" },
+      h("div", { class: "glow-a" }),
+      h("div", { class: "glow-b" }),
+      h("div", { class: "steam" }),
+      h("div", { class: "steam-b" }),
+      h("div", { class: "steam-c" }),
+      h("div", { class: "rails" }),
+      h("div", { class: "platform" }),
+      h("div", { class: "signal" }),
+      engine
+    ));
+  }
+
   function renderStationHero(canvas) {
     var landing = !!S.stationLanding;
-    if (landing) {
-      canvas.appendChild(h("div", { class: "station-atmosphere", "aria-hidden": "true" },
-        h("div", { class: "glow-a" }),
-        h("div", { class: "glow-b" }),
-        h("div", { class: "steam" }),
-        h("div", { class: "tracks" })
-      ));
-    }
+    if (landing) renderStationAtmosphere(canvas);
 
     var logo = h("div", { class: "station-logo" });
     logo.appendChild(h("span", { class: "brand-mark", "aria-hidden": "true" }));
     var accent = h("span", { class: "accent", text: "steam" });
     logo.appendChild(accent);
     logo.appendChild(document.createTextNode("train"));
+
+    var hasOther = S.workflows.some(function (w) { return w.name !== TOUR_NAME; });
+    var cta = null;
+    if (!isReadOnly()) {
+      cta = h("button", {
+        class: "btn primary station-cta",
+        text: landing ? "Take the tour \u2192" : "Ride the tour \u2192",
+        onClick: function () {
+          var input = document.getElementById("input");
+          if (input && !input.value.trim()) input.value = "all aboard";
+          startRun();
+        }
+      });
+    }
 
     var band = h("div", { class: "station-hero" + (landing ? "" : " compact") },
       h("div", { class: "station-brand" }, logo),
@@ -1218,35 +1265,38 @@
       landing
         ? h("div", {
             class: "station-sub",
-            text: "Take the free tour - no agents, no API key, about one second."
+            text: "Take the free tour \u00b7 no agents, no API key, about one second."
           })
         : null,
       h("div", { class: "station-actions" },
-        isReadOnly() ? null : h("button", {
-          class: "btn primary station-cta",
-          text: landing ? "Take the tour \u2192" : "Ride the tour \u2192",
-          onClick: function () {
-            var input = document.getElementById("input");
-            if (input && !input.value.trim()) input.value = "all aboard";
-            startRun();
-          }
-        }),
+        cta,
         landing
           ? h("button", {
               class: "btn small station-secondary",
-              text: "I have a workflow",
+              text: hasOther ? "I have a workflow" : "Browse the yard",
               onClick: function () {
                 S.stationLanding = false;
                 syncBodyMode();
                 renderSidebar();
                 var other = S.workflows.find(function (w) { return w.name !== TOUR_NAME; });
                 if (other) selectWorkflow(other.name);
+                else {
+                  // No other workflow yet: leave full-bleed Station but keep the
+                  // tour selected so the pipeline/boarding strip is the yard.
+                  selectWorkflow(TOUR_NAME);
+                }
               }
             })
           : null
       )
     );
     canvas.appendChild(band);
+    if (landing && cta && !S.stationCtaFocused) {
+      S.stationCtaFocused = true;
+      requestAnimationFrame(function () {
+        try { cta.focus({ preventScroll: true }); } catch (e) { cta.focus(); }
+      });
+    }
   }
 
   function openNarrationStep(line, invoker) {
@@ -1278,9 +1328,23 @@
       S.runState &&
       S.runState.done &&
       !S.arrivalInspect;
+    // Tour ride: keep the atmospheric yard (no sidebar / run form) while the
+    // thin header + status line stay available for errors and cancel.
+    var rideOn =
+      !stationOn &&
+      !arrivalOn &&
+      S.tourRiding &&
+      S.selected === TOUR_NAME &&
+      !(S.runState && S.runState.done);
     if (stationOn) document.body.dataset.mode = "station";
+    else if (rideOn) document.body.dataset.mode = "ride";
     else if (arrivalOn) document.body.dataset.mode = "arrival";
     else delete document.body.dataset.mode;
+    if (arrivalOn && S.runState && S.runState.ok === false) {
+      document.body.classList.add("arrival-failed");
+    } else {
+      document.body.classList.remove("arrival-failed");
+    }
   }
   // Back-compat alias for any call sites that still use the old name.
   function syncStationMode() { syncBodyMode(); }
@@ -1367,16 +1431,22 @@
         text: SteamtrainReducer.formatArrivalReceipt(report.receipt)
       }));
     }
-    // Status grid: one colored dot per step
+    // Status grid: labeled cars (pass / fail / skip) at a glance
     var statusGrid = h("div", { class: "arrival-status-grid" });
     var arrPhases = S.runState.phases || [];
     arrPhases.forEach(function (p) {
       (p.steps || []).forEach(function (s) {
-        var cls = "arrival-dot";
+        var cls = "arrival-car";
         if (s.result && s.result.skipped) cls += " skip";
         else if (s.status === "done") cls += " ok";
         else if (s.status === "error") cls += " fail";
-        statusGrid.appendChild(h("div", { class: cls, title: s.stepId }));
+        statusGrid.appendChild(h("div", {
+          class: cls,
+          title: s.stepId
+        },
+          h("span", { class: "arrival-dot", "aria-hidden": "true" }),
+          h("span", { class: "arrival-car-label", text: s.stepId })
+        ));
       });
     });
     if (statusGrid.childNodes.length > 0) wrap.appendChild(statusGrid);
@@ -1422,12 +1492,7 @@
     clear(canvas);
     syncBodyMode();
     if (!S.spec) {
-      canvas.appendChild(h("div", { class: "station-atmosphere", "aria-hidden": "true" },
-        h("div", { class: "glow-a" }),
-        h("div", { class: "glow-b" }),
-        h("div", { class: "steam" }),
-        h("div", { class: "tracks" })
-      ));
+      renderStationAtmosphere(canvas);
       canvas.appendChild(h("div", { class: "empty station-empty" },
         h("div", { class: "station-logo" },
           h("span", { class: "brand-mark", "aria-hidden": "true" }),
@@ -1435,7 +1500,7 @@
           "train"
         ),
         h("div", { class: "station-premise", text: "Parallel agents. One receipt." }),
-        h("div", { class: "boarding-pulse", text: "Boarding the tour\u2026" })
+        h("div", { class: "boarding-pulse", text: "Boarding\u2026" })
       ));
       return;
     }
@@ -1453,12 +1518,17 @@
 
     var showingArrival = false;
     if (S.runState && S.runState.done) {
+      if (!S.arrivalInspect) renderStationAtmosphere(canvas);
       showingArrival = renderArrival(canvas);
     }
 
     if (showingArrival && !S.arrivalInspect) {
       updateProgress();
       return;
+    }
+
+    if (document.body.dataset.mode === "ride") {
+      renderStationAtmosphere(canvas);
     }
 
     renderNarration(canvas);
@@ -2306,10 +2376,13 @@
     S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
     S.narration = []; S.arrivalInspect = false; S.arrivalEnter = false;
     S.narrationFreshPlayed = null;
-    // Leave Station immediately so ops chrome (and banners) are visible while
-    // the POST is in flight — and if it fails, the user is not trapped on a
-    // full-bleed boarding surface with a hidden error.
-    if (S.selected === TOUR_NAME) S.stationLanding = false;
+    // Leave full-bleed Station for ride mode: thin chrome stays so banners and
+    // cancel remain reachable while the POST is in flight / if it fails.
+    if (S.selected === TOUR_NAME) {
+      S.stationLanding = false;
+      S.stationCtaFocused = false;
+      S.tourRiding = true;
+    }
     S.endedAt = 0;
     setBanner("", "");
     document.getElementById("statusLine").style.display = "flex";
@@ -2328,6 +2401,9 @@
         if (r.status !== 201) {
           setBanner(r.body.error || "could not start run", "err");
           setRunning(false);
+          // Escape ride chrome so the error (and sidebar) stay reachable.
+          S.tourRiding = false;
+          syncBodyMode();
           render();
           return;
         }
@@ -2349,6 +2425,8 @@
       .catch(function () {
         setBanner("could not start run: network error", "err");
         setRunning(false);
+        S.tourRiding = false;
+        syncBodyMode();
         render();
       });
   }

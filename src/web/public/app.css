@@ -14,8 +14,8 @@
   --pending: #5a6675;
   --gate: #d29922;
   --brass: #c9a227;
-  --font-display: "Avenir Next", "Futura", "Gill Sans", "Trebuchet MS", "Segoe UI", sans-serif;
-  --font-ui: "IBM Plex Sans", "Helvetica Neue", "Segoe UI", "Avenir Next", sans-serif;
+  --font-display: "Space Grotesk", "Avenir Next", "Futura", "Gill Sans", sans-serif;
+  --font-ui: "IBM Plex Sans", "Helvetica Neue", "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", "SF Mono", "Menlo", "Consolas", monospace;
 }
 * {
@@ -384,12 +384,33 @@ textarea#input:focus {
   background: transparent;
   box-shadow: none;
   text-align: left;
-  animation: station-in 560ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-@keyframes station-in {
+.station-hero .station-brand,
+.station-hero .station-eyebrow,
+.station-hero .station-premise,
+.station-hero .station-sub,
+.station-hero .station-actions {
+  animation: station-rise 640ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.station-hero .station-brand {
+  animation-delay: 40ms;
+}
+.station-hero .station-eyebrow {
+  animation-delay: 120ms;
+}
+.station-hero .station-premise {
+  animation-delay: 200ms;
+}
+.station-hero .station-sub {
+  animation-delay: 280ms;
+}
+.station-hero .station-actions {
+  animation-delay: 380ms;
+}
+@keyframes station-rise {
   from {
     opacity: 0;
-    transform: translateY(18px);
+    transform: translateY(16px);
   }
   to {
     opacity: 1;
@@ -407,9 +428,9 @@ textarea#input:focus {
   align-items: center;
   gap: 10px;
   font-family: var(--font-display);
-  font-size: clamp(32px, 5vw, 44px);
+  font-size: clamp(34px, 5.5vw, 48px);
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
   color: var(--text);
   line-height: 1;
 }
@@ -426,17 +447,18 @@ textarea#input:focus {
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--accent-bright);
-  opacity: 0.85;
+  opacity: 0.9;
   margin-bottom: 14px;
 }
 .station-premise {
   font-family: var(--font-display);
-  font-size: clamp(28px, 4.5vw, 40px);
+  font-size: clamp(30px, 4.8vw, 44px);
   font-weight: 700;
-  letter-spacing: -0.03em;
-  line-height: 1.12;
+  letter-spacing: -0.035em;
+  line-height: 1.1;
   color: var(--text);
   margin-bottom: 14px;
+  text-wrap: balance;
 }
 .station-sub {
   font-size: 16px;
@@ -470,6 +492,10 @@ textarea#input:focus {
 .station-cta:active {
   transform: translateY(0);
 }
+.station-cta:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 3px;
+}
 .station-secondary {
   color: #c5d0dc;
   background: rgba(255, 255, 255, 0.03);
@@ -482,7 +508,7 @@ textarea#input:focus {
   border-color: rgba(138, 152, 168, 0.55);
 }
 
-/* Atmospheric layers behind Station / Arrival only */
+/* Atmospheric layers: a place, not glow soup */
 .station-atmosphere {
   position: absolute;
   inset: 0;
@@ -501,7 +527,7 @@ textarea#input:focus {
   height: min(80vw, 820px);
   top: -22%;
   left: -14%;
-  background: radial-gradient(circle, rgba(52, 211, 196, 0.32), transparent 68%);
+  background: radial-gradient(circle, rgba(52, 211, 196, 0.28), transparent 68%);
   animation: glow-drift 14s ease-in-out infinite alternate;
 }
 .station-atmosphere .glow-b {
@@ -509,43 +535,112 @@ textarea#input:focus {
   height: min(60vw, 580px);
   right: -10%;
   bottom: -12%;
-  background: radial-gradient(circle, rgba(201, 162, 39, 0.16), transparent 70%);
+  background: radial-gradient(circle, rgba(201, 162, 39, 0.14), transparent 70%);
   animation: glow-drift 18s ease-in-out infinite alternate-reverse;
 }
-.station-atmosphere .tracks {
+.station-atmosphere .platform {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 22%;
+  background: linear-gradient(180deg, transparent 0%, rgba(8, 10, 14, 0.55) 28%, #07090d 100%);
+  border-top: 1px solid rgba(201, 162, 39, 0.28);
+  box-shadow: 0 -1px 0 rgba(52, 211, 196, 0.08);
+}
+.station-atmosphere .platform::after {
+  content: "";
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  top: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(201, 162, 39, 0.55), transparent);
+}
+.station-atmosphere .rails {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 18%;
-  height: 48px;
-  opacity: 0.5;
+  height: 52px;
+  opacity: 0.55;
   background: repeating-linear-gradient(
       90deg,
-      transparent 0 28px,
-      rgba(52, 211, 196, 0.28) 28px 30px,
-      transparent 30px 58px
+      transparent 0 26px,
+      rgba(52, 211, 196, 0.32) 26px 28px,
+      transparent 28px 54px
     ),
     linear-gradient(
       180deg,
-      transparent 0 18px,
-      rgba(180, 196, 210, 0.45) 18px 19px,
-      transparent 19px 28px,
-      rgba(180, 196, 210, 0.35) 28px 29px,
-      transparent 29px
+      transparent 0 16px,
+      rgba(180, 196, 210, 0.5) 16px 17px,
+      transparent 17px 30px,
+      rgba(180, 196, 210, 0.38) 30px 31px,
+      transparent 31px
     );
-  mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
-  animation: track-pulse 3.6s ease-in-out infinite;
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  animation: rails-pulse 3.6s ease-in-out infinite;
+}
+.station-atmosphere .engine {
+  position: absolute;
+  right: max(2%, calc(8% - 20px));
+  bottom: 16%;
+  width: min(42vw, 380px);
+  height: auto;
+  opacity: 0.22;
+  filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.45));
+  animation: engine-idle 5.5s ease-in-out infinite;
+}
+.station-atmosphere .signal {
+  position: absolute;
+  left: 10%;
+  bottom: 26%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(52, 211, 196, 0.18), 0 0 18px rgba(52, 211, 196, 0.55);
+  animation: signal-blink 2.8s ease-in-out infinite;
+}
+.station-atmosphere .signal::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 10px;
+  width: 2px;
+  height: 42px;
+  background: linear-gradient(180deg, rgba(138, 152, 168, 0.55), transparent);
+}
+.station-atmosphere .steam,
+.station-atmosphere .steam-b,
+.station-atmosphere .steam-c {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(142, 234, 224, 0.3), transparent 70%);
+  filter: blur(18px);
 }
 .station-atmosphere .steam {
-  position: absolute;
   width: 140px;
   height: 140px;
-  left: 12%;
-  top: 22%;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(142, 234, 224, 0.28), transparent 70%);
-  filter: blur(18px);
+  left: 14%;
+  top: 24%;
   animation: steam-rise 7s ease-in-out infinite;
+}
+.station-atmosphere .steam-b {
+  width: 90px;
+  height: 90px;
+  right: 28%;
+  top: 30%;
+  opacity: 0.7;
+  animation: steam-rise 9s ease-in-out 1.2s infinite;
+}
+.station-atmosphere .steam-c {
+  width: 70px;
+  height: 70px;
+  right: 18%;
+  bottom: 38%;
+  opacity: 0.55;
+  animation: steam-rise 8s ease-in-out 2.4s infinite;
 }
 @keyframes glow-drift {
   from {
@@ -555,13 +650,13 @@ textarea#input:focus {
     transform: translate(3%, 4%) scale(1.06);
   }
 }
-@keyframes track-pulse {
+@keyframes rails-pulse {
   0%,
   100% {
-    opacity: 0.28;
+    opacity: 0.32;
   }
   50% {
-    opacity: 0.58;
+    opacity: 0.62;
   }
 }
 @keyframes steam-rise {
@@ -576,6 +671,27 @@ textarea#input:focus {
   100% {
     transform: translateY(-40px) scale(1.3);
     opacity: 0.05;
+  }
+}
+@keyframes engine-idle {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(-6px);
+  }
+}
+@keyframes signal-blink {
+  0%,
+  100% {
+    opacity: 0.55;
+    box-shadow: 0 0 0 3px rgba(52, 211, 196, 0.12), 0 0 12px rgba(52, 211, 196, 0.35);
+  }
+  45%,
+  55% {
+    opacity: 1;
+    box-shadow: 0 0 0 4px rgba(52, 211, 196, 0.22), 0 0 22px rgba(52, 211, 196, 0.65);
   }
 }
 
@@ -606,20 +722,90 @@ body[data-mode="station"] .station-hero {
   margin: 0;
   width: 100%;
 }
+
+/* Ride mode: keep the atmospheric yard; thin chrome for status/errors. */
+body[data-mode="ride"] aside#sidebar {
+  display: none !important;
+}
+body[data-mode="ride"] header {
+  padding: 8px 16px;
+  background: rgba(12, 16, 22, 0.92);
+  backdrop-filter: blur(8px);
+}
+body[data-mode="ride"] header .config,
+body[data-mode="ride"] header .newbtn,
+body[data-mode="ride"] header .health,
+body[data-mode="ride"] header .mode-badge {
+  display: none !important;
+}
+body[data-mode="ride"] .runbar .title,
+body[data-mode="ride"] .runbar .sub,
+body[data-mode="ride"] .runbar .srcline,
+body[data-mode="ride"] .runbar .wfactions,
+body[data-mode="ride"] .runbar .reroute-row {
+  display: none !important;
+}
+body[data-mode="ride"] .runbar .row {
+  display: flex !important;
+  align-items: center;
+  gap: 12px;
+  margin-top: 0;
+}
+body[data-mode="ride"] .runbar .row textarea,
+body[data-mode="ride"] .runbar .row .params-form,
+body[data-mode="ride"] .runbar .row #planBtn,
+body[data-mode="ride"] .runbar .row #runBtn {
+  display: none !important;
+}
+body[data-mode="ride"] .runbar {
+  padding: 10px 18px 12px;
+  background: transparent;
+  border-bottom-color: rgba(42, 51, 64, 0.55);
+}
+body[data-mode="ride"] .canvas {
+  position: relative;
+  background: radial-gradient(ellipse 80% 50% at 50% -5%, rgba(52, 211, 196, 0.08), transparent 55%),
+    linear-gradient(180deg, #0b0f14 0%, var(--bg) 40%, #080a0e 100%);
+}
+body[data-mode="ride"] .narration {
+  max-width: 720px;
+  margin: 28px auto 22px;
+  padding: 18px 20px 16px;
+  border-color: rgba(52, 211, 196, 0.32);
+  background: linear-gradient(135deg, rgba(52, 211, 196, 0.1), transparent 45%),
+    rgba(18, 24, 31, 0.92);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+}
+body[data-mode="ride"] .narration-line.fresh {
+  font-family: var(--font-display);
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+body[data-mode="ride"] .phase,
+body[data-mode="ride"] .legend,
+body[data-mode="ride"] .track {
+  opacity: 0.72;
+}
+
 /* Compact boarding strip when returning to the tour (ops chrome stays). */
 .station-hero.compact {
   max-width: 1100px;
   margin: 0 auto 18px;
-  padding: 18px 20px;
-  border: 1px solid rgba(52, 211, 196, 0.22);
-  border-radius: 12px;
-  background: radial-gradient(ellipse 80% 60% at 10% 0%, rgba(52, 211, 196, 0.1), transparent 55%),
-    var(--panel);
+  padding: 16px 0 14px;
+  border: none;
+  border-bottom: 1px solid rgba(52, 211, 196, 0.18);
+  border-radius: 0;
+  background: transparent;
   box-shadow: none;
   animation: none;
 }
+.station-hero.compact .station-brand,
+.station-hero.compact .station-premise,
+.station-hero.compact .station-actions {
+  animation: none;
+}
 .station-hero.compact .station-brand {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .station-hero.compact .station-logo {
   font-size: 18px;
@@ -750,8 +936,9 @@ body[data-mode="station"] .station-hero {
   position: relative;
   z-index: 1;
   max-width: 720px;
+  width: min(720px, 100%);
   margin: 28px auto 18px;
-  padding: 32px 34px 28px;
+  padding: 36px 36px 30px;
   border: 1px solid rgba(63, 185, 80, 0.35);
   border-radius: 16px;
   background: radial-gradient(ellipse 70% 50% at 10% 0%, rgba(63, 185, 80, 0.18), transparent 55%),
@@ -760,7 +947,7 @@ body[data-mode="station"] .station-hero {
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
 }
 .arrival.enter {
-  animation: arrival-in 640ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: arrival-in 720ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .arrival.failed {
   border-color: rgba(248, 81, 73, 0.4);
@@ -770,11 +957,11 @@ body[data-mode="station"] .station-hero {
 @keyframes arrival-in {
   0% {
     opacity: 0;
-    transform: translateY(16px) scale(0.98);
+    transform: translateY(18px) scale(0.98);
   }
-  60% {
+  55% {
     opacity: 1;
-    transform: translateY(-4px) scale(1.01);
+    transform: translateY(-5px) scale(1.012);
   }
   100% {
     opacity: 1;
@@ -788,17 +975,20 @@ body[data-mode="station"] .station-hero {
   text-transform: uppercase;
   color: var(--done);
   margin-bottom: 10px;
+  animation: station-rise 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .arrival.failed .arrival-kicker {
   color: var(--error);
 }
 .arrival-title {
   font-family: var(--font-display);
-  font-size: clamp(24px, 3.5vw, 32px);
+  font-size: clamp(26px, 4vw, 36px);
   font-weight: 700;
-  letter-spacing: -0.03em;
-  margin-bottom: 18px;
-  line-height: 1.2;
+  letter-spacing: -0.035em;
+  margin-bottom: 20px;
+  line-height: 1.15;
+  text-wrap: balance;
+  animation: station-rise 560ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both;
 }
 .arrival.ok .arrival-title {
   color: #56d364;
@@ -816,6 +1006,7 @@ body[data-mode="station"] .station-hero {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 18px;
+  animation: station-rise 560ms cubic-bezier(0.22, 1, 0.36, 1) 140ms both;
 }
 .arrival-card {
   padding: 14px 14px 12px;
@@ -888,20 +1079,21 @@ body[data-mode="station"] .station-hero {
   gap: 10px;
   flex-wrap: wrap;
   margin: 4px 0 18px;
+  animation: station-rise 560ms cubic-bezier(0.22, 1, 0.36, 1) 220ms both;
 }
 .arrival-destinations .btn.primary {
   font-family: var(--font-display);
   font-weight: 700;
-  padding: 10px 18px;
+  padding: 12px 20px;
 }
 .arrival-inspect {
   margin-top: 4px;
   opacity: 0.8;
 }
-/* Status grid: one dot per step showing pass/fail/skip at a glance */
+/* Status grid: labeled cars at a glance */
 .arrival-status-grid {
   display: flex;
-  gap: 5px;
+  gap: 8px;
   flex-wrap: wrap;
   margin: 10px 0 16px;
   padding: 10px 12px;
@@ -909,60 +1101,131 @@ body[data-mode="station"] .station-hero {
   border: 1px solid var(--border);
   border-radius: 8px;
 }
-.arrival-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--pending);
+.arrival-car {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(42, 51, 64, 0.9);
   animation: dotPop 0.3s ease-out both;
 }
-.arrival-dot.ok {
+.arrival-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--pending);
+  flex: none;
+}
+.arrival-car-label {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+  max-width: 9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.arrival-car.ok .arrival-dot {
   background: var(--done);
 }
-.arrival-dot.fail {
+.arrival-car.fail .arrival-dot {
   background: var(--error);
 }
-.arrival-dot.skip {
+.arrival-car.skip .arrival-dot {
   background: var(--gate);
 }
-.arrival-dot:nth-child(1) {
+.arrival-car.ok .arrival-car-label {
+  color: #b7d7bc;
+}
+.arrival-car.fail .arrival-car-label {
+  color: #f0b4b1;
+}
+.arrival-car.skip .arrival-car-label {
+  color: #d6c08a;
+}
+.arrival-car:nth-child(1) {
   animation-delay: 0.05s;
 }
-.arrival-dot:nth-child(2) {
+.arrival-car:nth-child(2) {
   animation-delay: 0.08s;
 }
-.arrival-dot:nth-child(3) {
+.arrival-car:nth-child(3) {
   animation-delay: 0.11s;
 }
-.arrival-dot:nth-child(4) {
+.arrival-car:nth-child(4) {
   animation-delay: 0.14s;
 }
-.arrival-dot:nth-child(5) {
+.arrival-car:nth-child(5) {
   animation-delay: 0.17s;
 }
-.arrival-dot:nth-child(6) {
+.arrival-car:nth-child(6) {
   animation-delay: 0.20s;
 }
-.arrival-dot:nth-child(7) {
+.arrival-car:nth-child(7) {
   animation-delay: 0.23s;
 }
-.arrival-dot:nth-child(8) {
+.arrival-car:nth-child(8) {
   animation-delay: 0.26s;
 }
-.arrival-dot:nth-child(9) {
+.arrival-car:nth-child(9) {
   animation-delay: 0.29s;
 }
-.arrival-dot:nth-child(10) {
+.arrival-car:nth-child(10) {
   animation-delay: 0.32s;
 }
-.arrival-dot:nth-child(n + 11) {
+.arrival-car:nth-child(n + 11) {
   animation-delay: 0.35s;
 }
 
-/* Arrival mode: soft atmospheric wash without hiding ops chrome */
+/* Arrival mode: own the hall the way Station owns the platform. */
+body[data-mode="arrival"] header,
+body[data-mode="arrival"] aside#sidebar,
+body[data-mode="arrival"] .runbar .title,
+body[data-mode="arrival"] .runbar .sub,
+body[data-mode="arrival"] .runbar .srcline,
+body[data-mode="arrival"] .runbar .wfactions,
+body[data-mode="arrival"] .runbar .reroute-row,
+body[data-mode="arrival"] .runbar .row,
+body[data-mode="arrival"] .runbar .status-line {
+  display: none !important;
+}
+body[data-mode="arrival"] .runbar {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+body[data-mode="arrival"] .runbar .banner:empty,
+body[data-mode="arrival"] .runbar .banner.ok,
+body[data-mode="arrival"] .runbar .banner.info {
+  display: none;
+}
+body[data-mode="arrival"] main {
+  display: block;
+}
+body[data-mode="arrival"] section.work {
+  height: 100vh;
+}
 body[data-mode="arrival"] .canvas {
-  background: radial-gradient(ellipse 80% 50% at 50% 0%, rgba(63, 185, 80, 0.07), transparent 55%),
-    var(--bg);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  padding: 40px 24px 56px;
+  background: radial-gradient(ellipse 80% 55% at 50% -8%, rgba(63, 185, 80, 0.12), transparent 55%),
+    radial-gradient(ellipse 45% 35% at 90% 85%, rgba(52, 211, 196, 0.06), transparent 50%),
+    linear-gradient(180deg, #0b120e 0%, var(--bg) 42%, #080a0e 100%);
+}
+body[data-mode="arrival"] .arrival {
+  margin: 0;
+  width: 100%;
+}
+body[data-mode="arrival"].arrival-failed .canvas {
+  background: radial-gradient(ellipse 80% 55% at 50% -8%, rgba(248, 81, 73, 0.1), transparent 55%),
+    linear-gradient(180deg, #140c0c 0%, var(--bg) 42%, #080a0e 100%);
 }
 
 @media (max-width: 720px) {
@@ -978,10 +1241,17 @@ body[data-mode="arrival"] .canvas {
   .station-sub {
     font-size: 15px;
   }
-  body[data-mode="station"] .canvas {
+  .station-atmosphere .engine {
+    width: min(58vw, 240px);
+    opacity: 0.16;
+    right: -2%;
+  }
+  body[data-mode="station"] .canvas,
+  body[data-mode="arrival"] .canvas {
     padding: 32px 20px 48px;
     align-items: flex-start;
-    padding-top: 12vh;
+    padding-top: 10vh;
+    justify-content: flex-start;
   }
 }
 .phase {
@@ -2599,13 +2869,26 @@ select:focus-visible,
   .connector.active,
   .arrival.enter,
   .arrival-dot,
-  .station-hero,
+  .arrival-car,
+  .station-hero .station-brand,
+  .station-hero .station-eyebrow,
+  .station-hero .station-premise,
+  .station-hero .station-sub,
+  .station-hero .station-actions,
+  .arrival-kicker,
+  .arrival-title,
+  .arrival-cards,
+  .arrival-destinations,
   .narration,
   .narration-line.fresh,
   .station-atmosphere .glow-a,
   .station-atmosphere .glow-b,
-  .station-atmosphere .tracks,
+  .station-atmosphere .rails,
   .station-atmosphere .steam,
+  .station-atmosphere .steam-b,
+  .station-atmosphere .steam-c,
+  .station-atmosphere .engine,
+  .station-atmosphere .signal,
   .boarding-pulse,
   .narration-head .conductor-mark::before {
     animation: none !important;

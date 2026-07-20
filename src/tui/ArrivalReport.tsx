@@ -33,19 +33,21 @@ export function ArrivalReportView({
   const chrome = 6;
   const bodyBudget = Math.max(1, height - chrome);
   const heroLines = wrapOutputLines(report.hero, inner).slice(0, bodyBudget);
-  const kicker = report.receipt.ok ? "End of the line" : "Stopped short";
+  const kicker = report.receipt.ok ? "End of the line · Arrival" : "Stopped short";
 
   return (
     <Box
       flexDirection="column"
-      borderStyle="round"
+      borderStyle="double"
       borderColor={titleColor}
       paddingX={1}
       width={width}
       height={height}
     >
       <Box justifyContent="space-between">
-        <Text color={titleColor}>{kicker}</Text>
+        <Text color={titleColor} bold>
+          {kicker}
+        </Text>
         <Text color="gray">i details · Esc back</Text>
       </Box>
       <Text color={titleColor} bold>
