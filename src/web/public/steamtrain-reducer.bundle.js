@@ -816,7 +816,7 @@ var SteamtrainReducer = (() => {
     return match[1].toLowerCase();
   }
   function runDeepLink(runId) {
-    return `#run-${runId}`;
+    return `#run-${runId.toLowerCase()}`;
   }
   return __toCommonJS(reducer_exports);
 })();
