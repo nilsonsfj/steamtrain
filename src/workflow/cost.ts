@@ -77,7 +77,8 @@ export function formatUsd(n: number): string {
  * moves; longer durations drop it — at that scale seconds are the signal.
  */
 export function formatElapsed(ms: number): string {
-  const sec = Math.max(0, ms) / 1000;
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const sec = ms / 1000;
   if (sec < 60) return `${sec.toFixed(1)}s`;
   const min = Math.floor(sec / 60);
   if (min < 60) return `${min}m ${String(Math.floor(sec % 60)).padStart(2, "0")}s`;

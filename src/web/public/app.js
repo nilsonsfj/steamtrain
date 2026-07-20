@@ -131,7 +131,8 @@
 
   /** Mirrors src/workflow/cost.ts formatElapsed: "8.3s", "1m 23s", "1h 05m". */
   function fmtElapsed(ms) {
-    var sec = Math.max(0, ms) / 1000;
+    if (typeof ms !== "number" || !isFinite(ms) || ms < 0) return "";
+    var sec = ms / 1000;
     if (sec < 60) return sec.toFixed(1) + "s";
     var min = Math.floor(sec / 60);
     if (min < 60) return min + "m " + String(Math.floor(sec % 60)).padStart(2, "0") + "s";
@@ -2189,7 +2190,8 @@
       hasMetrics = true;
     }
     if (s.result) {
-      metrics.appendChild(h("span", { text: fmtElapsed(s.result.durationMs) }));
+      var elapsedLabel = fmtElapsed(s.result.durationMs);
+      if (elapsedLabel) metrics.appendChild(h("span", { text: elapsedLabel }));
       if (s.result.costUsd) metrics.appendChild(h("span", { text: "$" + s.result.costUsd.toFixed(4) }));
       var tokenLine = fmtTokenSummary(s.result.tokens);
       if (tokenLine) metrics.appendChild(h("span", { text: tokenLine }));
@@ -2391,7 +2393,9 @@
       row("elapsed", h("span", { class: "drawer-value elapsed", "data-since": String(s.startedAt), text: "⏱ " + fmtElapsed(Date.now() - s.startedAt) }));
     }
     if (s.result) {
-      row("duration", fmtElapsed(s.result.durationMs));
+      if (typeof s.result.durationMs === "number" && isFinite(s.result.durationMs)) {
+        row("duration", fmtElapsed(s.result.durationMs));
+      }
       if (s.result.costUsd) row("cost", "$" + s.result.costUsd.toFixed(4));
       var tokenLine = fmtTokenSummary(s.result.tokens);
       if (tokenLine) row("tokens", tokenLine);
