@@ -1374,17 +1374,7 @@
     });
     if (statusGrid.childNodes.length > 0) wrap.appendChild(statusGrid);
 
-    // Artifact: lead line as display text, remainder as the scrollable report.
-    var heroText = report.hero || "";
-    var heroLines = heroText.split("\n");
-    var lead = (heroLines[0] || "").trim();
-    var rest = heroLines.slice(1).join("\n").replace(/^\n+/, "").trim();
-    var artifact = h("div", { class: "arrival-artifact" },
-      h("div", { class: "arrival-artifact-label", text: "Arrival report" }),
-      lead ? h("div", { class: "arrival-artifact-lead", text: lead }) : null,
-      rest ? h("pre", { class: "arrival-hero", text: rest }) : null
-    );
-    wrap.appendChild(artifact);
+    // Destinations before the artifact so next actions stay in the first viewport.
     var dest = h("div", { class: "arrival-destinations" });
     report.destinations.forEach(function (d) {
       if (d.id === "again" && isReadOnly()) return;
@@ -1399,6 +1389,18 @@
       }));
     });
     wrap.appendChild(dest);
+
+    // Artifact: lead line as display text, remainder as the scrollable report.
+    var heroText = report.hero || "";
+    var heroLines = heroText.split("\n");
+    var lead = (heroLines[0] || "").trim().replace(/^\uD83D\uDE82\s*/, "");
+    var rest = heroLines.slice(1).join("\n").replace(/^\n+/, "").trim();
+    var artifact = h("div", { class: "arrival-artifact" },
+      h("div", { class: "arrival-artifact-label", text: "Arrival report" }),
+      lead ? h("div", { class: "arrival-artifact-lead", text: lead }) : null,
+      rest ? h("pre", { class: "arrival-hero", text: rest }) : null
+    );
+    wrap.appendChild(artifact);
     wrap.appendChild(h("button", {
       class: "btn small arrival-inspect",
       text: S.arrivalInspect ? "Hide step details" : "Show step details",
