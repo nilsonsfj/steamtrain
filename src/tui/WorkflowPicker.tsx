@@ -51,13 +51,14 @@ export function WorkflowPicker({
         <Box
           flexDirection="column"
           marginBottom={1}
-          borderStyle="single"
+          borderStyle="double"
           borderColor="cyan"
           paddingX={1}
         >
           <Text color="cyan" bold>
             steamtrain
           </Text>
+          <Text color="gray">agent orchestrator on rails</Text>
           <Text color="white" bold>
             Parallel agents. One receipt.
           </Text>

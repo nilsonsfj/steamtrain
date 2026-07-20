@@ -40,6 +40,8 @@
     stationLanding: false,
     // Focus the Station CTA once per landing session.
     stationCtaFocused: false,
+    // Focus the Arrival primary CTA once per completed ride.
+    arrivalCtaFocused: false,
     // Tour ride arc: atmospheric chrome between Station leave and Arrival.
     tourRiding: false,
     // True while the tour departure beat must stay on the Conductor stage.
@@ -50,6 +52,10 @@
     arrivalHoldTimer: null,
     // Narration line id that already played the one-shot "fresh" entrance.
     narrationFreshPlayed: null,
+    // Conductor stage line id that already played its one-shot entrance.
+    conductorLinePlayed: null,
+    // Last aria-live announcement (avoid re-speaking the same text).
+    announceText: "",
     // Expand the full step-kind legend via "?".
     legendExpanded: false,
     // Collapse the phase tree under the Arrival Report after completion.
@@ -293,14 +299,52 @@
 
   var NEXT_CANDIDATES = (SteamtrainReducer.ARRIVAL_NEXT_CANDIDATES) ||
     ["multi-plan", "quick-triage", "bug-hunt", "target-sweep"];
+
+  /** Plain-language car names for Arrival / yard chrome (tour ids first). */
+  var TOUR_CAR_LABELS = {
+    "car-fanout": "Fan-out",
+    "car-parallel": "Parallel",
+    "car-isolation": "Isolation",
+    "express-service": "Express",
+    "lap": "Lap counter",
+    "loop-signal": "Loop gate",
+    "conductor": "Arrival report"
+  };
+
+  function friendlyStepLabel(stepId) {
+    if (!stepId) return "car";
+    if (TOUR_CAR_LABELS[stepId]) return TOUR_CAR_LABELS[stepId];
+    return String(stepId).replace(/[-_]+/g, " ");
+  }
+
+  function workflowNeedsCredentials(name) {
+    var entry = S.workflows.find(function (w) { return w.name === name; });
+    if (!entry) return true;
+    var kinds = entry.kinds || {};
+    // Agent CLIs or direct-API llm steps need credentials / binaries.
+    return Boolean(kinds.worker || kinds.processor || kinds.llm);
+  }
+
   function pickNextWorkflow() {
+    var available = [];
     for (var i = 0; i < NEXT_CANDIDATES.length; i++) {
       var name = NEXT_CANDIDATES[i];
       if (name !== S.selected && S.workflows.some(function (w) { return w.name === name; })) {
-        return name;
+        available.push(name);
       }
     }
-    return undefined;
+    // Prefer a credential-free next ride when one exists; otherwise keep order.
+    for (var j = 0; j < available.length; j++) {
+      if (!workflowNeedsCredentials(available[j])) return available[j];
+    }
+    return available[0];
+  }
+
+  function announce(text) {
+    if (!text || text === S.announceText) return;
+    S.announceText = text;
+    var el = document.getElementById("announcer");
+    if (el) el.textContent = text;
   }
 
   // ---- in-flight runs (attach from any UI) ----------------------------------
@@ -1098,6 +1142,8 @@
       S.stationLanding = false;
       S.tourRiding = false;
       S.stationCtaFocused = false;
+      S.arrivalCtaFocused = false;
+      S.conductorLinePlayed = null;
       endTourDeparture();
     }
     document.body.classList.remove("arrival-failed");
@@ -1276,16 +1322,20 @@
       '<rect x="300" y="78" width="42" height="28" rx="4" fill="#1c6f68"/>' +
       '<path d="M312 78v-16h18v16" stroke="#8eeae0" stroke-width="3" fill="none"/>' +
       "</svg>";
-    canvas.appendChild(h("div", { class: "station-atmosphere", "aria-hidden": "true" },
+    var atmClass = "station-atmosphere";
+    if (S.departing) atmClass += " departing";
+    else if (document.body.dataset.mode === "ride") atmClass += " riding";
+    // Steam is anchored to the stack (right side of the engine), not floating orbs.
+    canvas.appendChild(h("div", { class: atmClass, "aria-hidden": "true" },
       h("div", { class: "glow-a" }),
       h("div", { class: "glow-b" }),
-      h("div", { class: "steam" }),
-      h("div", { class: "steam-b" }),
-      h("div", { class: "steam-c" }),
       h("div", { class: "rails" }),
       h("div", { class: "platform" }),
       h("div", { class: "signal" }),
-      engine
+      engine,
+      h("div", { class: "steam stack" }),
+      h("div", { class: "steam-b stack" }),
+      h("div", { class: "steam-c stack" })
     ));
   }
 
@@ -1314,7 +1364,12 @@
     }
 
     var band = h("div", { class: "station-hero" + (landing ? "" : " compact") },
-      h("div", { class: "station-brand" }, logo),
+      h("div", { class: "station-brand" },
+        logo,
+        landing
+          ? h("div", { class: "station-tagline", text: "agent orchestrator on rails" })
+          : null
+      ),
       landing
         ? h("div", { class: "station-eyebrow", text: "Platform 1 \u00b7 free tour" })
         : null,
@@ -1356,6 +1411,7 @@
       requestAnimationFrame(function () {
         try { cta.focus({ preventScroll: true }); } catch (e) { cta.focus(); }
       });
+      announce("steamtrain Station. Take the free tour.");
     }
   }
 
@@ -1401,6 +1457,8 @@
     else if (rideOn) document.body.dataset.mode = "ride";
     else if (arrivalOn) document.body.dataset.mode = "arrival";
     else delete document.body.dataset.mode;
+    if (rideOn && S.departing) document.body.dataset.departing = "true";
+    else delete document.body.dataset.departing;
     if (arrivalOn && S.runState && S.runState.ok === false) {
       document.body.classList.add("arrival-failed");
     } else {
@@ -1451,42 +1509,141 @@
     canvas.appendChild(box);
   }
 
-  /** Full-bleed Conductor presence for the tour ride (pipeline stays off-stage). */
+  /** Collect cars for the yard track: live run state, else ghost cars from the spec.
+   *  Loop iterations collapse to one plaque per stepId (latest status wins). */
+  function collectYardCars() {
+    var cars = [];
+    var byId = {};
+    function upsert(car) {
+      var prev = byId[car.id];
+      if (!prev) {
+        byId[car.id] = car;
+        cars.push(car);
+        return;
+      }
+      // Prefer running > error > done/skip > pending when collapsing loops.
+      var rank = { running: 4, error: 3, done: 2, pending: 1 };
+      var nextRank = rank[car.status] || 0;
+      var prevRank = rank[prev.status] || 0;
+      if (car.skipped) nextRank = Math.max(nextRank, 2);
+      if (nextRank >= prevRank) {
+        prev.status = car.status;
+        prev.skipped = car.skipped;
+        prev.kind = car.kind || prev.kind;
+        prev.phaseTitle = car.phaseTitle || prev.phaseTitle;
+      }
+    }
+    if (S.runState && S.runState.phases && S.runState.phases.length) {
+      S.runState.phases.forEach(function (p) {
+        (p.steps || []).forEach(function (s) {
+          upsert({
+            id: s.stepId,
+            kind: s.blockKind,
+            status: s.status || "pending",
+            skipped: !!(s.result && s.result.skipped),
+            phaseTitle: p.title || p.phaseId
+          });
+        });
+      });
+      return cars;
+    }
+    (S.spec && S.spec.phases || []).forEach(function (p) {
+      (p.steps || []).forEach(function (s) {
+        upsert({
+          id: s.id,
+          kind: s.kind,
+          status: "pending",
+          skipped: false,
+          phaseTitle: p.title || p.id
+        });
+      });
+    });
+    return cars;
+  }
+
+  function renderYardTrack(parent) {
+    var cars = collectYardCars();
+    if (!cars.length) return;
+    var yard = h("div", {
+      class: "yard-track",
+      role: "list",
+      "aria-label": "Cars on the track"
+    });
+    cars.forEach(function (c, i) {
+      var cls = "yard-car " + (c.status || "pending");
+      if (c.skipped) cls += " skip";
+      if (c.status === "running") cls += " live";
+      yard.appendChild(h("div", {
+        class: cls,
+        role: "listitem",
+        style: "animation-delay:" + (i * 55) + "ms",
+        title: (c.phaseTitle ? c.phaseTitle + " · " : "") + c.id
+      },
+        h("span", { class: "yard-car-kind", text: KIND_LABEL[c.kind] || c.kind || "car" }),
+        h("span", { class: "yard-car-name", text: friendlyStepLabel(c.id) })
+      ));
+    });
+    parent.appendChild(yard);
+  }
+
+  /** Full-bleed Conductor presence with live yard cars under the headline. */
   function renderConductorStage(canvas) {
     renderStationAtmosphere(canvas);
     var latest = (S.narration && S.narration.length)
-      ? S.narration[S.narration.length - 1].text
-      : "All aboard \u2014 doors closing.";
-    var track = h("div", { class: "conductor-stage-track", "aria-hidden": "true" });
-    track.appendChild(h("span"));
+      ? S.narration[S.narration.length - 1]
+      : { id: "depart-seed", text: "All aboard \u2014 doors closing." };
+    var lineText = latest.text || "All aboard \u2014 doors closing.";
+    var lineId = latest.id || lineText;
+    var playFresh = lineId && lineId !== S.conductorLinePlayed;
+    if (playFresh) S.conductorLinePlayed = lineId;
+
+    var doneCount = 0;
+    var totalCount = 0;
+    collectYardCars().forEach(function (c) {
+      totalCount += 1;
+      if (c.skipped || c.status === "done" || c.status === "error") doneCount += 1;
+    });
+    var sub = S.runState && S.runState.done
+      ? "Approaching the platform\u2026"
+      : (totalCount
+          ? (doneCount + " of " + totalCount + " cars clear of the yard")
+          : "Watching the cars leave the yard\u2026");
+
     var stage = h("div", { class: "conductor-stage" },
       h("div", { class: "conductor-stage-kicker", text: "Conductor" }),
       h("div", {
-        class: "conductor-stage-line",
-        text: latest
+        class: "conductor-stage-line" + (playFresh ? " fresh" : ""),
+        text: lineText
       }),
-      h("div", {
-        class: "conductor-stage-sub",
-        text: S.runState && S.runState.done
-          ? "Approaching the platform\u2026"
-          : "Watching the cars leave the yard\u2026"
-      }),
-      track
+      h("div", { class: "conductor-stage-sub", text: sub })
     );
+    renderYardTrack(stage);
+    // Keep a short recent log so the ride feels like a sequence, not a freeze-frame.
+    if (S.narration && S.narration.length > 1) {
+      var trail = h("div", { class: "conductor-trail", "aria-hidden": "true" });
+      S.narration.slice(-4, -1).reverse().forEach(function (line) {
+        trail.appendChild(h("div", { class: "conductor-trail-line", text: line.text }));
+      });
+      stage.appendChild(trail);
+    }
     canvas.appendChild(stage);
+    if (playFresh) announce("Conductor: " + lineText);
   }
 
   function tourDepartRemaining() {
     if (!S.departing || !S.departAt) return 0;
-    return Math.max(0, 2200 - (Date.now() - S.departAt));
+    // Long enough to feel the engine leave and the first cars move.
+    return Math.max(0, 3200 - (Date.now() - S.departAt));
   }
 
   function beginTourDeparture() {
     S.stationLanding = false;
     S.stationCtaFocused = false;
+    S.arrivalCtaFocused = false;
     S.tourRiding = true;
     S.departing = true;
     S.departAt = Date.now();
+    S.conductorLinePlayed = null;
     if (S.arrivalHoldTimer) {
       clearTimeout(S.arrivalHoldTimer);
       S.arrivalHoldTimer = null;
@@ -1499,6 +1656,7 @@
         ts: Date.now()
       }];
     }
+    announce("Tour departing. Conductor on the platform.");
   }
 
   function endTourDeparture() {
@@ -1507,6 +1665,13 @@
       clearTimeout(S.arrivalHoldTimer);
       S.arrivalHoldTimer = null;
     }
+  }
+
+  function completeTourRide() {
+    // Arrival owns the hall — drop ride flags so inspect cannot revive Conductor stage.
+    S.arrivalEnter = true;
+    S.tourRiding = false;
+    endTourDeparture();
   }
 
   function revealArrivalWhenReady() {
@@ -1520,17 +1685,33 @@
         S.arrivalHoldTimer = null;
         // Set arrivalEnter before clearing departing so syncBodyMode never
         // sees a frame with neither ride nor arrival armed.
-        S.arrivalEnter = true;
-        endTourDeparture();
+        completeTourRide();
         render();
       }, wait);
       // Keep ride stage painted until the hold ends.
       render();
       return;
     }
-    S.arrivalEnter = true;
-    endTourDeparture();
+    completeTourRide();
     render();
+  }
+
+  /** Split consolidator prose into a lead + titled sections when present. */
+  function parseArrivalSections(body) {
+    var text = (body || "").trim();
+    if (!text) return [];
+    var parts = text.split(/\n(?=---\s+)/);
+    if (parts.length < 2) return [];
+    var sections = [];
+    parts.forEach(function (chunk) {
+      var m = chunk.match(/^---\s*(.+?)\s*---\s*\n?([\s\S]*)$/);
+      if (m) {
+        sections.push({ title: m[1].trim(), body: (m[2] || "").trim() });
+      } else if (chunk.trim()) {
+        sections.push({ title: "", body: chunk.trim() });
+      }
+    });
+    return sections.length > 1 ? sections : [];
   }
 
   function renderArrival(canvas) {
@@ -1574,52 +1755,83 @@
         text: SteamtrainReducer.formatArrivalReceipt(report.receipt)
       }));
     }
-    // Status grid: labeled cars (pass / fail / skip) at a glance
-    var statusGrid = h("div", { class: "arrival-status-grid" });
-    var arrPhases = S.runState.phases || [];
-    arrPhases.forEach(function (p) {
+    // Status grid: human-labeled cars (pass / fail / skip) at a glance.
+    // Collapse loop iterations so each car appears once on the climax.
+    var statusGrid = h("div", { class: "arrival-status-grid", "aria-label": "Cars that rode" });
+    var arrivalCarOrder = [];
+    var arrivalCarLatest = {};
+    (S.runState.phases || []).forEach(function (p) {
       (p.steps || []).forEach(function (s) {
-        var cls = "arrival-car";
-        if (s.result && s.result.skipped) cls += " skip";
-        else if (s.status === "done") cls += " ok";
-        else if (s.status === "error") cls += " fail";
-        statusGrid.appendChild(h("div", {
-          class: cls,
-          title: s.stepId
-        },
-          h("span", { class: "arrival-dot", "aria-hidden": "true" }),
-          h("span", { class: "arrival-car-label", text: s.stepId })
-        ));
+        if (!arrivalCarLatest[s.stepId]) arrivalCarOrder.push(s.stepId);
+        arrivalCarLatest[s.stepId] = s;
       });
+    });
+    arrivalCarOrder.forEach(function (id) {
+      var s = arrivalCarLatest[id];
+      var cls = "arrival-car";
+      if (s.result && s.result.skipped) cls += " skip";
+      else if (s.status === "done") cls += " ok";
+      else if (s.status === "error") cls += " fail";
+      var kind = KIND_LABEL[s.blockKind] || s.blockKind || "car";
+      statusGrid.appendChild(h("div", {
+        class: cls,
+        title: s.stepId + " · " + kind
+      },
+        h("span", { class: "arrival-dot", "aria-hidden": "true" }),
+        h("span", { class: "arrival-car-kind", text: kind }),
+        h("span", { class: "arrival-car-label", text: friendlyStepLabel(s.stepId) })
+      ));
     });
     if (statusGrid.childNodes.length > 0) wrap.appendChild(statusGrid);
 
     // Destinations before the artifact so next actions stay in the first viewport.
     var dest = h("div", { class: "arrival-destinations" });
+    var primaryBtn = null;
     report.destinations.forEach(function (d) {
       if (d.id === "again" && isReadOnly()) return;
-      dest.appendChild(h("button", {
+      var label = d.label;
+      var title = null;
+      if (d.workflow && workflowNeedsCredentials(d.workflow)) {
+        label = d.label + " \u00b7 needs an agent";
+        title = "This workflow needs an agent CLI or API key.";
+      }
+      var btn = h("button", {
         class: "btn" + (d.id === "again" ? " primary" : ""),
-        text: d.label,
+        text: label,
+        title: title,
         onClick: function () {
           if (d.id === "again") startRun();
           else if (d.id === "history") openHistory();
           else if (d.workflow) selectWorkflow(d.workflow);
         }
-      }));
+      });
+      if (d.id === "again") primaryBtn = btn;
+      dest.appendChild(btn);
     });
     wrap.appendChild(dest);
 
-    // Artifact: lead line as display text, remainder as the scrollable report.
+    // Artifact: lead line as display text; car sections when the consolidator used --- markers.
     var heroText = report.hero || "";
     var heroLines = heroText.split("\n");
     var lead = (heroLines[0] || "").trim().replace(/^\uD83D\uDE82\s*/, "");
     var rest = heroLines.slice(1).join("\n").replace(/^\n+/, "").trim();
+    var sections = parseArrivalSections(rest);
     var artifact = h("div", { class: "arrival-artifact" },
       h("div", { class: "arrival-artifact-label", text: "Arrival report" }),
-      lead ? h("div", { class: "arrival-artifact-lead", text: lead }) : null,
-      rest ? h("pre", { class: "arrival-hero", text: rest }) : null
+      lead ? h("div", { class: "arrival-artifact-lead", text: lead }) : null
     );
+    if (sections.length) {
+      var body = h("div", { class: "arrival-sections" });
+      sections.forEach(function (sec) {
+        var block = h("div", { class: "arrival-section" });
+        if (sec.title) block.appendChild(h("div", { class: "arrival-section-title", text: sec.title }));
+        if (sec.body) block.appendChild(h("div", { class: "arrival-section-body", text: sec.body }));
+        body.appendChild(block);
+      });
+      artifact.appendChild(body);
+    } else if (rest) {
+      artifact.appendChild(h("div", { class: "arrival-hero-prose", text: rest }));
+    }
     wrap.appendChild(artifact);
     wrap.appendChild(h("button", {
       class: "btn small arrival-inspect",
@@ -1627,6 +1839,15 @@
       onClick: function () { S.arrivalInspect = !S.arrivalInspect; render(); }
     }));
     canvas.appendChild(wrap);
+    if (enter) {
+      announce(headline);
+      if (primaryBtn && !S.arrivalCtaFocused && !isReadOnly()) {
+        S.arrivalCtaFocused = true;
+        requestAnimationFrame(function () {
+          try { primaryBtn.focus({ preventScroll: true }); } catch (e) { primaryBtn.focus(); }
+        });
+      }
+    }
     return true;
   }
 
@@ -2528,6 +2749,8 @@
     S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
     S.narration = []; S.arrivalInspect = false; S.arrivalEnter = false;
     S.narrationFreshPlayed = null;
+    S.conductorLinePlayed = null;
+    S.arrivalCtaFocused = false;
     // Leave full-bleed Station for ride mode: thin chrome stays so banners and
     // cancel remain reachable while the POST is in flight / if it fails.
     if (S.selected === TOUR_NAME) {

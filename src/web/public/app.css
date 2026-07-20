@@ -395,8 +395,12 @@ textarea#input:focus {
 .station-hero .station-brand {
   animation-delay: 40ms;
 }
-.station-hero .station-eyebrow {
+.station-hero .station-tagline {
+  animation: station-rise 640ms cubic-bezier(0.22, 1, 0.36, 1) both;
   animation-delay: 120ms;
+}
+.station-hero .station-eyebrow {
+  animation-delay: 160ms;
 }
 .station-hero .station-premise {
   animation-delay: 200ms;
@@ -419,27 +423,37 @@ textarea#input:focus {
 }
 .station-brand {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 28px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 30px;
 }
 .station-logo {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   font-family: var(--font-display);
-  font-size: clamp(34px, 5.5vw, 48px);
+  font-size: clamp(48px, 8vw, 72px);
   font-weight: 700;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.04em;
   color: var(--text);
-  line-height: 1;
+  line-height: 0.95;
 }
 .station-logo .brand-mark {
-  width: 1.15em;
-  height: 1.15em;
+  width: 1.05em;
+  height: 1.05em;
 }
 .station-logo .accent {
   color: var(--accent);
+}
+.station-tagline {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(142, 234, 224, 0.78);
+  margin-top: 2px;
 }
 .station-eyebrow {
   font-size: 11px;
@@ -448,20 +462,21 @@ textarea#input:focus {
   text-transform: uppercase;
   color: var(--accent-bright);
   opacity: 0.9;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 .station-premise {
   font-family: var(--font-display);
-  font-size: clamp(30px, 4.8vw, 44px);
-  font-weight: 700;
-  letter-spacing: -0.035em;
-  line-height: 1.1;
-  color: var(--text);
-  margin-bottom: 14px;
+  font-size: clamp(22px, 3.4vw, 30px);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+  color: #d5dee8;
+  margin-bottom: 12px;
   text-wrap: balance;
+  max-width: 18em;
 }
 .station-sub {
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1.5;
   color: var(--muted);
   margin-bottom: 32px;
@@ -587,9 +602,34 @@ textarea#input:focus {
   bottom: 16%;
   width: min(46vw, 420px);
   height: auto;
-  opacity: 0.38;
+  opacity: 0.55;
   filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.45));
   animation: engine-idle 5.5s ease-in-out infinite;
+  z-index: 2;
+}
+body[data-mode="station"] .station-atmosphere .engine {
+  opacity: 0.78;
+  animation: engine-arrive 900ms cubic-bezier(0.22, 1, 0.36, 1) both, engine-idle 5.5s ease-in-out
+    900ms infinite;
+}
+body[data-mode="ride"] .station-atmosphere .engine {
+  opacity: 0.62;
+}
+body[data-mode="ride"][data-departing="true"] .station-atmosphere .engine,
+.station-atmosphere.departing .engine {
+  animation: engine-depart 2.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+body[data-mode="ride"][data-departing="true"] .station-atmosphere .signal,
+.station-atmosphere.departing .signal {
+  background: #56d364;
+  box-shadow: 0 0 0 3px rgba(86, 211, 100, 0.22), 0 0 22px rgba(86, 211, 100, 0.55);
+  animation: signal-clear 2.4s ease-in-out infinite;
+}
+body[data-mode="ride"][data-departing="true"] .station-atmosphere .rails,
+.station-atmosphere.departing .rails {
+  background-size: 54px 100%, 100% 100%;
+  animation: rails-rush 0.45s linear infinite;
+  opacity: 0.9;
 }
 body[data-mode="arrival"] .station-atmosphere .engine,
 body[data-mode="arrival"] .station-atmosphere .signal {
@@ -631,26 +671,32 @@ body[data-mode="arrival"] .station-atmosphere .steam-c {
   background: radial-gradient(circle, rgba(142, 234, 224, 0.3), transparent 70%);
   filter: blur(18px);
 }
+.station-atmosphere .steam.stack,
+.station-atmosphere .steam-b.stack,
+.station-atmosphere .steam-c.stack {
+  right: max(8%, calc(14% + 40px));
+  left: auto;
+  bottom: auto;
+}
 .station-atmosphere .steam {
-  width: 140px;
-  height: 140px;
-  left: 14%;
-  top: 24%;
+  width: 120px;
+  height: 120px;
+  top: 42%;
   animation: steam-rise 7s ease-in-out infinite;
 }
 .station-atmosphere .steam-b {
-  width: 90px;
-  height: 90px;
-  right: 28%;
-  top: 30%;
+  width: 80px;
+  height: 80px;
+  top: 36%;
+  right: max(14%, calc(20% + 20px));
   opacity: 0.7;
   animation: steam-rise 9s ease-in-out 1.2s infinite;
 }
 .station-atmosphere .steam-c {
-  width: 70px;
-  height: 70px;
-  right: 18%;
-  bottom: 38%;
+  width: 64px;
+  height: 64px;
+  top: 48%;
+  right: max(4%, calc(10% + 10px));
   opacity: 0.55;
   animation: steam-rise 8s ease-in-out 2.4s infinite;
 }
@@ -692,6 +738,47 @@ body[data-mode="arrival"] .station-atmosphere .steam-c {
   }
   50% {
     transform: translateX(-6px);
+  }
+}
+@keyframes engine-arrive {
+  from {
+    opacity: 0;
+    transform: translateX(48px);
+  }
+  to {
+    opacity: 0.78;
+    transform: translateX(0);
+  }
+}
+@keyframes engine-depart {
+  0% {
+    transform: translateX(0);
+    opacity: 0.62;
+  }
+  55% {
+    transform: translateX(-18vw);
+    opacity: 0.5;
+  }
+  100% {
+    transform: translateX(-52vw);
+    opacity: 0;
+  }
+}
+@keyframes rails-rush {
+  0% {
+    background-position: 0 0, 0 0;
+  }
+  100% {
+    background-position: 54px 0, 0 0;
+  }
+}
+@keyframes signal-clear {
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
   }
 }
 @keyframes signal-blink {
@@ -832,62 +919,125 @@ body[data-mode="ride"] .track {
 }
 .conductor-stage-line {
   font-family: var(--font-display);
-  font-size: clamp(32px, 5.2vw, 48px);
+  font-size: clamp(28px, 4.6vw, 44px);
   font-weight: 700;
   letter-spacing: -0.035em;
   line-height: 1.12;
   color: var(--text);
   text-wrap: balance;
-  min-height: 2.5em;
-  animation: line-fresh 480ms ease-out;
+  min-height: 2.4em;
   text-shadow: 0 0 40px rgba(52, 211, 196, 0.12);
 }
+.conductor-stage-line.fresh {
+  animation: line-fresh 480ms ease-out;
+}
 .conductor-stage-sub {
-  margin-top: 22px;
+  margin-top: 18px;
   font-size: 15px;
   color: var(--muted);
   letter-spacing: 0.02em;
 }
-.conductor-stage-track {
+.yard-track {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 28px;
-  height: 3px;
-  width: min(280px, 50%);
-  border-radius: 999px;
-  background: rgba(42, 51, 64, 0.9);
+  padding: 14px 0 4px;
+  border-top: 1px solid rgba(52, 211, 196, 0.18);
+}
+.yard-car {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 88px;
+  max-width: 132px;
+  padding: 8px 10px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(42, 51, 64, 0.95);
+  background: rgba(8, 12, 16, 0.72);
+  animation: yard-car-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.yard-car.pending {
+  opacity: 0.55;
+}
+.yard-car.running,
+.yard-car.live {
+  border-color: rgba(74, 163, 255, 0.55);
+  box-shadow: 0 0 0 1px rgba(74, 163, 255, 0.18);
+  opacity: 1;
+}
+.yard-car.done {
+  border-color: rgba(63, 185, 80, 0.4);
+  opacity: 1;
+}
+.yard-car.error {
+  border-color: rgba(248, 81, 73, 0.45);
+}
+.yard-car.skip {
+  border-color: rgba(210, 153, 34, 0.4);
+  opacity: 0.7;
+}
+.yard-car-kind {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-bright);
+}
+.yard-car-name {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
-.conductor-stage-track > span {
-  display: block;
-  height: 100%;
-  width: 40%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  animation: conductor-track 1.4s ease-in-out infinite;
+.conductor-trail {
+  margin-top: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  opacity: 0.55;
 }
-@keyframes conductor-track {
-  0% {
-    transform: translateX(-120%);
+.conductor-trail-line {
+  font-size: 13px;
+  color: var(--muted);
+  padding-left: 12px;
+  border-left: 2px solid rgba(52, 211, 196, 0.28);
+}
+@keyframes yard-car-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
   }
-  100% {
-    transform: translateX(320%);
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 body[data-mode="ride"] .canvas {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 48px 28px 72px;
+  padding: 36px 28px 64px;
 }
 /* Quiet the ops strip during departure so Conductor stays the focus. */
 body[data-mode="ride"] .runbar .status-line {
-  opacity: 0.45;
+  display: none !important;
 }
 body[data-mode="ride"] .runbar .row {
-  opacity: 0.55;
+  opacity: 0.7;
+  justify-content: flex-end;
 }
 body[data-mode="ride"] .runbar .banner.ok,
 body[data-mode="ride"] .runbar .banner.info {
   display: none;
+}
+body[data-mode="ride"] .runbar .title,
+body[data-mode="ride"] .runbar .sub {
+  display: none !important;
 }
 
 /* Compact boarding strip when returning to the tour (ops chrome stays). */
@@ -1158,12 +1308,12 @@ body[data-mode="ride"] .runbar .banner.info {
 }
 .arrival-artifact-lead {
   font-family: var(--font-display);
-  font-size: 16px;
+  font-size: clamp(18px, 2.4vw, 22px);
   font-weight: 700;
-  letter-spacing: -0.01em;
-  line-height: 1.35;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
   color: var(--text);
-  padding: 10px 16px 12px;
+  padding: 12px 18px 14px;
   border-bottom: 1px solid rgba(42, 51, 64, 0.8);
 }
 .arrival-hero {
@@ -1180,6 +1330,48 @@ body[data-mode="ride"] .runbar .banner.info {
   color: #b7c2ce;
   max-height: 180px;
   overflow: auto;
+}
+.arrival-hero-prose {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  padding: 14px 18px 16px;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.55;
+  color: #c5d0db;
+  max-height: 220px;
+  overflow: auto;
+}
+.arrival-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 260px;
+  overflow: auto;
+}
+.arrival-section {
+  padding: 12px 18px 14px;
+  border-bottom: 1px solid rgba(42, 51, 64, 0.65);
+}
+.arrival-section:last-child {
+  border-bottom: none;
+}
+.arrival-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-bright);
+  margin-bottom: 6px;
+}
+.arrival-section-body {
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #c5d0db;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .arrival-destinations {
   display: flex;
@@ -1212,8 +1404,8 @@ body[data-mode="ride"] .runbar .banner.info {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 6px 10px 6px 8px;
-  border-radius: 999px;
+  padding: 7px 12px 7px 9px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(42, 51, 64, 0.95);
   animation: dotPop 0.3s ease-out both;
@@ -1225,11 +1417,20 @@ body[data-mode="ride"] .runbar .banner.info {
   background: var(--pending);
   flex: none;
 }
-.arrival-car-label {
-  font-size: 11px;
+.arrival-car-kind {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--muted);
-  letter-spacing: 0.01em;
-  max-width: 9em;
+}
+.arrival-car-label {
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: -0.01em;
+  max-width: 11em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2990,8 +3191,9 @@ select:focus-visible,
   .narration-line.fresh,
   .conductor-stage,
   .conductor-stage-line,
+  .conductor-stage-line.fresh,
   .conductor-stage-kicker::before,
-  .conductor-stage-track > span,
+  .yard-car,
   .station-atmosphere .glow-a,
   .station-atmosphere .glow-b,
   .station-atmosphere .rails,
@@ -3000,9 +3202,16 @@ select:focus-visible,
   .station-atmosphere .steam-c,
   .station-atmosphere .engine,
   .station-atmosphere .signal,
+  .station-hero .station-tagline,
   .boarding-pulse,
   .narration-head .conductor-mark::before {
     animation: none !important;
+  }
+  body[data-mode="station"] .station-atmosphere .engine,
+  body[data-mode="ride"][data-departing="true"] .station-atmosphere .engine,
+  .station-atmosphere.departing .engine {
+    opacity: 0.7;
+    transform: none;
   }
   .card.running {
     background: var(--panel);
@@ -3011,4 +3220,21 @@ select:focus-visible,
   .station-cta:hover {
     transform: none;
   }
+}
+
+/* Screen-reader live region for Conductor / Arrival beats */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.arrival-destinations .btn.primary:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 3px;
 }
