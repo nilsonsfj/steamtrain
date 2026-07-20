@@ -7,5 +7,5 @@ export function parseRunDeepLink(hash: string): string | null {
 }
 
 export function runDeepLink(runId: string): string {
-  return `#run-${runId}`;
+  return `#run-${runId.toLowerCase()}`;
 }

@@ -329,6 +329,11 @@
     window.history.replaceState(null, "", window.location.pathname + window.location.search + hash);
   }
 
+  function clearRunDeepLink() {
+    if (!currentRunDeepLink()) return;
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  }
+
   function currentRunDeepLink() {
     return SteamtrainReducer.parseRunDeepLink
       ? SteamtrainReducer.parseRunDeepLink(window.location.hash)
@@ -440,7 +445,7 @@
       renderLiveRuns();
     };
     if (known) {
-      selectWorkflow(run.workflow, begin);
+      selectWorkflow(run.workflow, begin, { preserveRunDeepLink: true });
     } else {
       // Run of a workflow that is no longer in the catalog: attach with the
       // event stream alone (the reducer rebuilds phases from events).
@@ -1077,7 +1082,8 @@
     });
   }
 
-  function selectWorkflow(name, after) {
+  function selectWorkflow(name, after, options) {
+    if (!(options && options.preserveRunDeepLink) && currentRunDeepLink()) clearRunDeepLink();
     // Ignore any plan response that was initiated for the previously selected
     // workflow while its asynchronous history lookup was still running.
     S.planRequest += 1;

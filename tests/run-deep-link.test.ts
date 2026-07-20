@@ -10,6 +10,11 @@ describe("run deep links", () => {
 
   it("normalizes an uppercase UUID", () => {
     expect(parseRunDeepLink(`#RUN-${runId.toUpperCase()}`)).toBe(runId);
+    expect(runDeepLink(runId.toUpperCase())).toBe(`#run-${runId}`);
+  });
+
+  it("trims whitespace around a run hash", () => {
+    expect(parseRunDeepLink(`  #run-${runId}  `)).toBe(runId);
   });
 
   it("ignores unrelated hashes", () => {
