@@ -213,10 +213,10 @@ describe("/agent scope handling", () => {
       projectAgents: [],
     });
 
-    const result = run("/agent add mimocode opencode mimocode", ctx);
+    const result = run("/agent add mimocode opencode node", ctx);
     expect(result).toMatchObject({ handled: true });
     expect(updateUserConfig).toHaveBeenCalledWith({
-      agents: [{ id: "mimocode", provider: "opencode", enabled: true, binary: "mimocode" }],
+      agents: [{ id: "mimocode", provider: "opencode", enabled: true, binary: "node" }],
     });
     expect(updateConfig).not.toHaveBeenCalled();
     expect((result as { notices?: { text: string }[] }).notices?.[0]?.text).toMatch(/global/);

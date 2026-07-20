@@ -55,6 +55,12 @@ export function useWorkflowPicker({
   const pendingSelectRef = useRef<string | null>(null);
   const createAbortRef = useRef<AbortController | null>(null);
 
+  useEffect(() => {
+    return () => {
+      createAbortRef.current?.abort();
+    };
+  }, []);
+
   const workflowEntries = useMemo<WorkflowCatalogEntry[]>(
     () => workflowCatalogEntries(runtimeCatalog),
     [runtimeCatalog],

@@ -111,14 +111,31 @@ const instanceIdSchema = z
   .string()
   .min(1)
   .regex(/^[A-Za-z0-9_.-]+$/, "must contain only letters, numbers, '.', '_', or '-'");
+const apiBaseUrlSchema = z
+  .string()
+  .refine((s) => s.trim().length > 0, "must not be empty or whitespace")
+  .refine((s) => {
+    try {
+      const url = new URL(s);
+      return url.protocol === "http:" || url.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }, "must be an http or https URL");
+const apiKeyEnvSchema = z
+  .string()
+  .regex(
+    /^[A-Z_][A-Z0-9_]*$/,
+    "must be an uppercase environment variable name (e.g. ANTHROPIC_API_KEY)",
+  );
 const apiInstanceSchema = z
   .object({
     id: instanceIdSchema,
     provider: apiProviderId,
     enabled: z.boolean().optional(),
     label: nonEmptyString.optional(),
-    baseUrl: nonEmptyString.optional(),
-    apiKeyEnv: nonEmptyString.optional(),
+    baseUrl: apiBaseUrlSchema.optional(),
+    apiKeyEnv: apiKeyEnvSchema.optional(),
     keyless: z.boolean().optional(),
     defaultModel: nonEmptyString.optional(),
     pricing: llmPricingSchema.optional(),

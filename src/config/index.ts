@@ -45,3 +45,9 @@ export {
   userConfigExists,
   userConfigPath,
 } from "./user-config";
+export {
+  MAX_PROMPT_CHARS,
+  isAllowedApiBaseUrl,
+  isValidApiKeyEnvName,
+  resolveBinarySync,
+} from "./validate";

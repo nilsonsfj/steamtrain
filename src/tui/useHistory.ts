@@ -116,7 +116,11 @@ export function useHistory({
       void (async () => {
         try {
           const record = await historyStoreRef.current!.get(id);
-          if (!mountedRef.current || !record) return;
+          if (!mountedRef.current) return;
+          if (!record) {
+            setWfNotice(`history record '${id}' is missing or corrupt`);
+            return;
+          }
           setHistory((prev) =>
             prev
               ? {
@@ -129,12 +133,14 @@ export function useHistory({
                 }
               : prev,
           );
-        } catch {
-          // A missing/corrupt record just leaves the list view in place.
+        } catch (err) {
+          if (mountedRef.current) {
+            setWfNotice(`could not open history record: ${message(err)}`);
+          }
         }
       })();
     },
-    [historyStoreRef, mountedRef],
+    [historyStoreRef, mountedRef, setWfNotice],
   );
 
   const rerunFromRecord = useCallback(

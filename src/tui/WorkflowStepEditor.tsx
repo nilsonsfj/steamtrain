@@ -2,7 +2,7 @@ import { Box, Text, useInput } from "ink";
 import { useCallback, useMemo, useState } from "react";
 import { modelIdsForAgent, modelNameForAgent } from "../agents";
 import { truncate } from "../agents/util";
-import type { SteamtrainConfig } from "../config";
+import { MAX_PROMPT_CHARS, type SteamtrainConfig } from "../config";
 import { AGENT_COLOR } from "./theme";
 import {
   EDITOR_EFFORT_NONE,
@@ -117,6 +117,7 @@ export function WorkflowStepEditor({
         return;
       }
       if (input && !key.ctrl && !key.meta) {
+        if (working.prompt.length >= MAX_PROMPT_CHARS) return;
         apply({ prompt: working.prompt + input });
       }
       return;
