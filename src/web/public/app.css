@@ -2515,34 +2515,39 @@ select.sel.invalid {
   border-radius: 5px;
   padding: 0 5px;
 }
+.estep .eh .eh-spacer {
+  flex: 1;
+}
 .estep .ro {
   color: var(--muted);
   font-size: 12px;
 }
-.estep-controls {
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  margin-bottom: 8px;
+.estep.estep-flash {
+  animation: estepFlash .7s ease;
 }
-.estep-controls > .row2 {
-  flex: 1;
-  margin-bottom: 0;
+@keyframes estepFlash {
+  0% {
+    background: #1e3a4a;
+    border-color: #3d7aaa;
+  }
+  100% {
+    background: var(--panel-2);
+    border-color: var(--border);
+  }
 }
-.btn.small.ghost.use-for-all {
+.btn.small.use-for-all {
   flex-shrink: 0;
   white-space: nowrap;
   font-size: 11px;
-  padding: 6px 10px;
-  background: transparent;
-  border: 1px dashed var(--border);
-  color: var(--muted);
-  margin-bottom: 2px;
-}
-.btn.small.ghost.use-for-all:hover {
-  color: #d7e6f5;
-  border-color: #4a7aaa;
+  padding: 4px 9px;
   background: #152230;
+  border: 1px solid #2a4a66;
+  color: #9ec8e8;
+}
+.btn.small.use-for-all:hover {
+  color: #e8f1fa;
+  border-color: #4a7aaa;
+  background: #1a3044;
 }
 
 /* Retarget-all bar in Configure modal */
@@ -2610,13 +2615,6 @@ select.sel.invalid {
 @media (max-width: 720px) {
   .bulk-retarget-row {
     grid-template-columns: 1fr;
-  }
-  .estep-controls {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .btn.small.ghost.use-for-all {
-    align-self: flex-start;
   }
 }
 /* ---- run history ---- */

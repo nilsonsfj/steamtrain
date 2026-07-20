@@ -3322,9 +3322,7 @@
         var agentChanged = r.agentSel.value !== agent;
         if (agentChanged) {
           r.agentSel.value = agent;
-          var a = agentById(agent);
           fillOptions(r.modelSel, modelOptionsWith(agent, model), model);
-          // Re-render effort for this step after agent/model change.
           if (r.renderEffort) r.renderEffort();
         } else {
           r.modelSel.value = model;
@@ -3334,13 +3332,20 @@
           var has = Array.prototype.some.call(r.effortSel.options, function (o) { return o.value === effort; });
           r.effortSel.value = has ? effort : "";
         }
+        if (r.card) {
+          r.card.classList.remove("estep-flash");
+          // Force reflow so the animation can re-trigger on repeated applies.
+          void r.card.offsetWidth;
+          r.card.classList.add("estep-flash");
+        }
         changed++;
       });
       bulkFlash.className = "bulk-flash show";
       bulkFlash.textContent = changed
-        ? "Retargeted " + changed + " step" + (changed === 1 ? "" : "s") + " → " + agent + "/" + model + (effort ? " · " + effort : "")
+        ? "Retargeted " + changed + " step" + (changed === 1 ? "" : "s") + " \u2192 " + agent + " \u00b7 " + model + (effort ? " \u00b7 " + effort : "")
         : "No agent steps to retarget";
       mbanner(banner, "", "");
+      try { bulkBar.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) { /* ignore */ }
     }
     bulkApplyBtn.addEventListener("click", applyBulkRetarget);
 
@@ -3505,13 +3510,12 @@
   function stepEditor(st, refs, opts) {
     opts = opts || {};
     var kind = st.kind || "worker";
-    var card = h("div", { class: "estep " + kind },
-      h("div", { class: "eh" },
-        h("span", { class: "esid", text: st.id }),
-        h("span", { class: "ek", text: kind }),
-        st.dependsOn && st.dependsOn.length ? h("span", { class: "ro", text: "\u2190 " + st.dependsOn.join(", ") }) : null
-      )
+    var header = h("div", { class: "eh" },
+      h("span", { class: "esid", text: st.id }),
+      h("span", { class: "ek", text: kind }),
+      st.dependsOn && st.dependsOn.length ? h("span", { class: "ro", text: "\u2190 " + st.dependsOn.join(", ") }) : null
     );
+    var card = h("div", { class: "estep " + kind }, header);
     if (st.workspace || (st.artifacts && st.artifacts.length)) {
       var wsBits = [];
       if (st.workspace) wsBits.push("workspace: " + st.workspace);
@@ -3523,7 +3527,7 @@
       var llmNote = "api: " + ((st.provider || (st.model && st.model.indexOf("claude") === 0 ? "anthropic" : "openai")) + "/" + (st.model || ""));
       card.appendChild(h("div", { class: "ro", text: llmNote }));
       var llmPrompt = h("textarea", { class: "ta", text: st.prompt || "" });
-      refs[st.id] = { promptTa: llmPrompt };
+      refs[st.id] = { promptTa: llmPrompt, card: card };
       card.appendChild(field("Prompt", llmPrompt));
       return card;
     }
@@ -3567,7 +3571,7 @@
     modelSel.addEventListener("change", renderEffort);
 
     var useAllBtn = h("button", {
-      class: "btn small ghost use-for-all",
+      class: "btn small use-for-all",
       text: "Use for all \u2192",
       type: "button",
       title: "Apply this step's agent, model, and effort to every agent-backed step"
@@ -3579,6 +3583,8 @@
         opts.onUseForAll(agentSel.value, modelSel.value, refs[st.id].effortSel ? refs[st.id].effortSel.value : "");
       }
     });
+    header.appendChild(h("span", { class: "eh-spacer" }));
+    header.appendChild(useAllBtn);
 
     refs[st.id] = {
       agentSel: agentSel,
@@ -3586,14 +3592,11 @@
       effortSel: null,
       promptTa: promptTa,
       stepTimeoutInput: stepTimeoutInput,
-      renderEffort: renderEffort
+      renderEffort: renderEffort,
+      card: card
     };
-    var headRow = h("div", { class: "estep-controls" },
-      h("div", { class: "row2" },
-        field("Agent", agentSel), field("Model", modelSel), effortField),
-      useAllBtn
-    );
-    card.appendChild(headRow);
+    card.appendChild(h("div", { class: "row2" },
+      field("Agent", agentSel), field("Model", modelSel), effortField));
     card.appendChild(field("Step timeout (min)", stepTimeoutInput, "Per-agent subprocess limit for this step."));
     card.appendChild(field("Prompt", promptTa));
     renderEffort();

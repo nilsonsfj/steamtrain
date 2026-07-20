@@ -291,5 +291,5 @@ export function summarizeBulkRetarget(
   const model = desire.model ?? defaultModelForAgent(desire.agent, config);
   const effortNote = desire.effort ? ` · ${desire.effort}` : "";
   const noun = count === 1 ? "step" : "steps";
-  return `${count} ${noun} → ${desire.agent}/${model}${effortNote}`;
+  return `${count} ${noun} → ${desire.agent} · ${model}${effortNote}`;
 }
