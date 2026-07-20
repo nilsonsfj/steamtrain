@@ -23,6 +23,21 @@ config page manages both [agent instances](agent-configuration.md) and the
 
 ## What it shows
 
+### First ride: Station → Conductor → Arrival
+
+On a true first open (no run history, no remembered workflow) the web UI lands
+on the **Station** — a full-bleed boarding surface with the brand, the premise
+("Parallel agents. One receipt."), and a single primary CTA to take the free
+`tour`. Ops chrome (sidebar, run bar, health chips) stays hidden until you
+ride or choose "I have a workflow."
+
+During the run, the **Conductor** narrates the ride in plain English above the
+live pipeline. When the workflow finishes, **Arrival** replaces the tree with a
+receipt climax: headline, three fact cards, status dots, and the consolidator
+report — then destinations like "Ride again" and "Try multi-plan."
+
+### Day-to-day ops chrome
+
 - **Sidebar** — every workflow (bundled / user / project), tagged by source, with
   a one-line block summary (`fan-out · worker · merge …`).
 - **Run bar** — the selected workflow's title/description, an input box

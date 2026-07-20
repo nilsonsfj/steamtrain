@@ -48,13 +48,16 @@ export function WorkflowPicker({
         <Text color="gray">↑/↓ select · Ctrl+N new · Ctrl+R run</Text>
       </Box>
       {stationLanding ? (
-        <Box flexDirection="column">
-          <Text color="white" bold>
+        <Box flexDirection="column" marginBottom={1}>
+          <Text color="cyan" bold>
             steamtrain
           </Text>
-          <Text color="cyan">Parallel agents. One receipt. Start with the free tour.</Text>
+          <Text color="white" bold>
+            Parallel agents. One receipt.
+          </Text>
+          <Text color="gray">Free tour - no agents, no API key, about one second.</Text>
           <Text color="green">
-            → <Text bold>tour</Text> selected · Enter preview · Ctrl+R ride ($0 · ~1s)
+            → <Text bold>tour</Text> selected · Enter preview · Ctrl+R ride ($0)
           </Text>
         </Box>
       ) : null}

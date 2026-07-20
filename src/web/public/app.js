@@ -37,6 +37,8 @@
     narrationOn: localStorage.getItem("steamtrain.narration") !== "off",
     // Station landing: first-open hero for the tour.
     stationLanding: false,
+    // Narration line id that already played the one-shot "fresh" entrance.
+    narrationFreshPlayed: null,
     // Expand the full step-kind legend via "?".
     legendExpanded: false,
     // Collapse the phase tree under the Arrival Report after completion.
@@ -1030,6 +1032,7 @@
     S.detail = null; S.detailInvoker = null; S.detailFallback = null; S.detailFocusPending = false; S.detailFocusGeneration += 1;
     S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
     S.narration = []; S.arrivalInspect = false; S.arrivalEnter = false; S.endedAt = 0;
+    S.narrationFreshPlayed = null;
     if (name !== TOUR_NAME) S.stationLanding = false;
     try { localStorage.setItem(SELECTION_KEY, name); } catch (e) {}
     renderSidebar();
@@ -1187,40 +1190,54 @@
   }
 
   function renderStationHero(canvas) {
+    var landing = !!S.stationLanding;
+    if (landing) {
+      canvas.appendChild(h("div", { class: "station-atmosphere", "aria-hidden": "true" },
+        h("div", { class: "glow-a" }),
+        h("div", { class: "glow-b" }),
+        h("div", { class: "steam" }),
+        h("div", { class: "tracks" })
+      ));
+    }
+
     var logo = h("div", { class: "station-logo" });
-    logo.appendChild(document.createTextNode("\uD83D\uDE82 "));
+    logo.appendChild(h("span", { class: "brand-mark", "aria-hidden": "true" }));
     var accent = h("span", { class: "accent", text: "steam" });
     logo.appendChild(accent);
     logo.appendChild(document.createTextNode("train"));
-    var band = h("div", { class: "station-hero" + (S.stationLanding ? "" : " compact") },
+
+    var band = h("div", { class: "station-hero" + (landing ? "" : " compact") },
       h("div", { class: "station-brand" }, logo),
+      landing
+        ? h("div", { class: "station-eyebrow", text: "Platform 1 \u00b7 free tour" })
+        : null,
       h("div", {
         class: "station-premise",
         text: "Parallel agents. One receipt."
       }),
-      S.stationLanding
+      landing
         ? h("div", {
             class: "station-sub",
-            text: "Take the free tour — no agents, no API key, ~1 second."
+            text: "Take the free tour - no agents, no API key, about one second."
           })
         : null,
       h("div", { class: "station-actions" },
         isReadOnly() ? null : h("button", {
           class: "btn primary station-cta",
-          text: S.stationLanding ? "Take the tour \u2192" : "Ride the tour \u2192",
+          text: landing ? "Take the tour \u2192" : "Ride the tour \u2192",
           onClick: function () {
             var input = document.getElementById("input");
             if (input && !input.value.trim()) input.value = "all aboard";
             startRun();
           }
         }),
-        S.stationLanding
+        landing
           ? h("button", {
               class: "btn small station-secondary",
               text: "I have a workflow",
               onClick: function () {
                 S.stationLanding = false;
-                syncStationMode();
+                syncBodyMode();
                 renderSidebar();
                 var other = S.workflows.find(function (w) { return w.name !== TOUR_NAME; });
                 if (other) selectWorkflow(other.name);
@@ -1249,14 +1266,24 @@
     }
   }
 
-  function syncStationMode() {
-    var on =
-      S.stationLanding &&
-      S.selected === TOUR_NAME &&
-      !(S.runState && S.runState.started);
-    if (on) document.body.dataset.mode = "station";
+  function syncBodyMode() {
+    var boarding = !S.spec && (!S.selected || S.stationLanding);
+    var stationOn =
+      boarding ||
+      (S.stationLanding &&
+        S.selected === TOUR_NAME &&
+        !(S.runState && S.runState.started));
+    var arrivalOn =
+      !stationOn &&
+      S.runState &&
+      S.runState.done &&
+      !S.arrivalInspect;
+    if (stationOn) document.body.dataset.mode = "station";
+    else if (arrivalOn) document.body.dataset.mode = "arrival";
     else delete document.body.dataset.mode;
   }
+  // Back-compat alias for any call sites that still use the old name.
+  function syncStationMode() { syncBodyMode(); }
 
   function renderNarration(canvas) {
     if (!S.narrationOn || !S.narration || !S.narration.length) return;
@@ -1264,7 +1291,7 @@
     if (S.runState.done && !S.arrivalInspect) return;
     var box = h("div", { class: "narration" });
     box.appendChild(h("div", { class: "narration-head" },
-      h("span", { text: "Conductor" }),
+      h("span", { class: "conductor-mark", text: "Conductor" }),
       h("button", {
         class: "btn small",
         text: "Hide",
@@ -1275,9 +1302,13 @@
         }
       })
     ));
-    S.narration.slice(-8).reverse().forEach(function (line) {
+    S.narration.slice(-8).reverse().forEach(function (line, idx) {
+      // One-shot entrance: only the newest line, and only the first paint of that id.
+      // Rebuilding the canvas on every SSE tick must not restart the animation.
+      var playFresh = idx === 0 && line.id && line.id !== S.narrationFreshPlayed;
+      if (playFresh) S.narrationFreshPlayed = line.id;
       box.appendChild(h("div", {
-        class: "narration-line" + (line.stepId ? " clickable" : ""),
+        class: "narration-line" + (playFresh ? " fresh" : "") + (line.stepId ? " clickable" : ""),
         role: line.stepId ? "button" : null,
         tabindex: line.stepId ? "0" : null,
         "data-detail-invoker": line.stepId ? "narration:" + line.id : null,
@@ -1316,6 +1347,10 @@
     var wrap = h("div", {
       class: "arrival" + (report.receipt.ok ? " ok" : " failed") + (enter ? " enter" : "")
     });
+    wrap.appendChild(h("div", {
+      class: "arrival-kicker",
+      text: report.receipt.ok ? "End of the line" : "Stopped short"
+    }));
     wrap.appendChild(h("div", { class: "arrival-title", text: headline }));
     if (cards.length) {
       var grid = h("div", { class: "arrival-cards" });
@@ -1345,7 +1380,8 @@
       });
     });
     if (statusGrid.childNodes.length > 0) wrap.appendChild(statusGrid);
-    wrap.appendChild(h("pre", { class: "arrival-hero", text: report.hero }));
+
+    // Destinations before the artifact so next actions stay in the first viewport.
     var dest = h("div", { class: "arrival-destinations" });
     report.destinations.forEach(function (d) {
       if (d.id === "again" && isReadOnly()) return;
@@ -1360,6 +1396,18 @@
       }));
     });
     wrap.appendChild(dest);
+
+    // Artifact: lead line as display text, remainder as the scrollable report.
+    var heroText = report.hero || "";
+    var heroLines = heroText.split("\n");
+    var lead = (heroLines[0] || "").trim().replace(/^\uD83D\uDE82\s*/, "");
+    var rest = heroLines.slice(1).join("\n").replace(/^\n+/, "").trim();
+    var artifact = h("div", { class: "arrival-artifact" },
+      h("div", { class: "arrival-artifact-label", text: "Arrival report" }),
+      lead ? h("div", { class: "arrival-artifact-lead", text: lead }) : null,
+      rest ? h("pre", { class: "arrival-hero", text: rest }) : null
+    );
+    wrap.appendChild(artifact);
     wrap.appendChild(h("button", {
       class: "btn small arrival-inspect",
       text: S.arrivalInspect ? "Hide step details" : "Show step details",
@@ -1372,11 +1420,22 @@
   function render() {
     var canvas = document.getElementById("canvas");
     clear(canvas);
-    syncStationMode();
+    syncBodyMode();
     if (!S.spec) {
+      canvas.appendChild(h("div", { class: "station-atmosphere", "aria-hidden": "true" },
+        h("div", { class: "glow-a" }),
+        h("div", { class: "glow-b" }),
+        h("div", { class: "steam" }),
+        h("div", { class: "tracks" })
+      ));
       canvas.appendChild(h("div", { class: "empty station-empty" },
+        h("div", { class: "station-logo" },
+          h("span", { class: "brand-mark", "aria-hidden": "true" }),
+          h("span", { class: "accent", text: "steam" }),
+          "train"
+        ),
         h("div", { class: "station-premise", text: "Parallel agents. One receipt." }),
-        h("div", { text: "Boarding the tour\u2026" })
+        h("div", { class: "boarding-pulse", text: "Boarding the tour\u2026" })
       ));
       return;
     }
@@ -2246,10 +2305,16 @@
     S.runState = SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || S.spec);
     S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
     S.narration = []; S.arrivalInspect = false; S.arrivalEnter = false;
+    S.narrationFreshPlayed = null;
+    // Leave Station immediately so ops chrome (and banners) are visible while
+    // the POST is in flight — and if it fails, the user is not trapped on a
+    // full-bleed boarding surface with a hidden error.
     if (S.selected === TOUR_NAME) S.stationLanding = false;
     S.endedAt = 0;
     setBanner("", "");
     document.getElementById("statusLine").style.display = "flex";
+    syncBodyMode();
+    render();
     var payload = { workflow: S.selected, input: input, fresh: document.getElementById("freshChk").checked };
     var params = collectParams();
     if (params) payload.params = params;
@@ -2260,7 +2325,12 @@
     if (rerouted) payload.reroute = true;
     apiAuth("POST", "/api/runs", payload)
       .then(function (r) {
-        if (r.status !== 201) { setBanner(r.body.error || "could not start run", "err"); return; }
+        if (r.status !== 201) {
+          setBanner(r.body.error || "could not start run", "err");
+          setRunning(false);
+          render();
+          return;
+        }
         // Announce a re-route only when the server actually applied one — the
         // catalog annotation we act on can be stale relative to staged edits.
         var rr = r.body.reroute;
@@ -2274,6 +2344,11 @@
         S.startedAt = Date.now();
         startTimer();
         openStream(S.runId);
+        render();
+      })
+      .catch(function () {
+        setBanner("could not start run: network error", "err");
+        setRunning(false);
         render();
       });
   }
