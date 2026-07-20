@@ -106,8 +106,21 @@ describe("cursor mapper", () => {
         subtype: "success",
       }),
     ]);
-    expect(map(SAMPLES.resultError)[0]).toMatchObject({ kind: "result", isError: true });
+    const errorEvents = map(SAMPLES.resultError);
+    expect(errorEvents).toEqual([
+      expect.objectContaining({ kind: "error", agent: "cursor", message: "fail" }),
+      expect.objectContaining({ kind: "result", isError: true }),
+    ]);
   });
+
+  it("never throws on malformed or empty objects", () => {
+    expect(() => createCursorMapper()({})).not.toThrow();
+    expect(() => createCursorMapper()(null)).not.toThrow();
+    expect(createCursorMapper()({})).toEqual([
+      expect.objectContaining({ kind: "unknown" }),
+    ]);
+  });
+});
 
   it("passes unknown types through", () => {
     expect(map(SAMPLES.unknown)).toEqual([

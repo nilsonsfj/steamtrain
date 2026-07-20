@@ -203,19 +203,28 @@ export function createCursorMapper(agent: AgentInstanceId = AGENT): EventMapper 
       case "result": {
         const r = cursorResult.safeParse(raw);
         if (!r.success) return [{ kind: "unknown", agent, ts, rawType: "result", raw }];
-        return [
-          {
-            kind: "result",
+        const out: AgentEvent[] = [];
+        if (r.data.is_error) {
+          out.push({
+            kind: "error",
             agent,
             ts,
-            isError: r.data.is_error ?? false,
-            text: r.data.result,
-            subtype: r.data.subtype,
-            durationMs: r.data.duration_ms,
-            costUsd: r.data.total_cost_usd,
-            tokens: cursorTokens(r.data.usage),
-          },
-        ];
+            message: r.data.result ?? r.data.subtype ?? "cursor result error",
+            code: null,
+          });
+        }
+        out.push({
+          kind: "result",
+          agent,
+          ts,
+          isError: r.data.is_error ?? false,
+          text: r.data.result,
+          subtype: r.data.subtype,
+          durationMs: r.data.duration_ms,
+          costUsd: r.data.total_cost_usd,
+          tokens: cursorTokens(r.data.usage),
+        });
+        return out;
       }
 
       default:
