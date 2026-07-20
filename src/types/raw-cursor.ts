@@ -49,6 +49,7 @@ export const cursorFunctionTool = z
   .object({
     name: z.string().optional(),
     arguments: z.string().optional(),
+    result: z.unknown().optional(),
   })
   .passthrough();
 

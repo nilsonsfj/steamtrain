@@ -581,7 +581,9 @@
           { value: "claude", label: "claude" },
           { value: "opencode", label: "opencode" },
           { value: "codex", label: "codex" },
-          { value: "amp", label: "amp" }
+          { value: "amp", label: "amp" },
+          { value: "kiro", label: "kiro" },
+          { value: "cursor", label: "cursor" }
         ], a.provider || "claude");
         var binary = h("input", { class: "txt", placeholder: "default binary", value: a.binary || "" });
         var env = h("textarea", { class: "ta mini", placeholder: "env JSON", rows: "2" });

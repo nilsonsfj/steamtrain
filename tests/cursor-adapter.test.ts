@@ -74,6 +74,7 @@ describe("cursor mapper", () => {
         kind: "tool_result",
         id: "c1",
         name: "read",
+        isError: false,
       }),
     ]);
     expect(map(SAMPLES.toolStartedWrite)[0]).toMatchObject({
@@ -85,6 +86,14 @@ describe("cursor mapper", () => {
       name: "Shell",
       input: { command: "ls" },
     });
+  });
+
+  it("flags tool_result isError when the payload has error", () => {
+    const line =
+      '{"type":"tool_call","subtype":"completed","call_id":"c9","tool_call":{"readToolCall":{"args":{"path":"x"},"result":{"error":{"message":"missing"}}}},"session_id":"sess-c1"}';
+    expect(map(line)).toEqual([
+      expect.objectContaining({ kind: "tool_result", id: "c9", name: "read", isError: true }),
+    ]);
   });
 
   it("maps result success and error", () => {

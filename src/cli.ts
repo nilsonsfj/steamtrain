@@ -1393,7 +1393,7 @@ function parseCreateOptions(args: string[]): CreateOptions | null {
       options.input = value;
     } else if (arg === "--agent") {
       const value = args[++i];
-      if (value !== "claude" && value !== "opencode" && value !== "codex" && value !== "amp")
+      if (value !== "claude" && value !== "opencode" && value !== "codex" && value !== "amp" && value !== "kiro" && value !== "cursor")
         return null;
       options.agent = value;
     } else if (arg === "--model") {

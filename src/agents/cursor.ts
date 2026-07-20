@@ -65,6 +65,13 @@ function cursorTokens(usage: CursorUsage | undefined): TokenUsage | undefined {
   return Object.keys(tokens).length > 0 ? tokens : undefined;
 }
 
+function toolResultIsError(result: unknown): boolean | undefined {
+  if (!result || typeof result !== "object") return undefined;
+  if ("error" in result) return true;
+  if ("success" in result) return false;
+  return undefined;
+}
+
 function extractToolInfo(
   toolCall: CursorToolCallPayload | undefined,
 ): { name: string; input?: unknown; result?: unknown } | undefined {
@@ -95,8 +102,14 @@ function extractToolInfo(
       } catch {
         input = { arguments: toolCall.function.arguments };
       }
+    } else if (toolCall.function.arguments !== undefined) {
+      input = toolCall.function.arguments;
     }
-    return { name, input };
+    return {
+      name,
+      input,
+      result: toolCall.function.result,
+    };
   }
 
   return undefined;
@@ -178,6 +191,7 @@ export function createCursorMapper(agent: AgentInstanceId = AGENT): EventMapper 
               id: parsed.data.call_id,
               name: info.name,
               output: stringifyContent(info.result),
+              isError: toolResultIsError(info.result),
             },
           ];
         }
