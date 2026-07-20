@@ -117,6 +117,7 @@ export function renderIndex(revs: PageAssetRevisions): string {
 </main>
 <aside class="drawer" id="drawer" role="dialog" aria-label="Step details" aria-hidden="true" tabindex="-1"></aside>
 <div class="modal-overlay" id="overlay"><div class="modal" id="modal"></div></div>
+<div id="announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 <script src="${bundleSrc}" defer></script>
 <script src="${appSrc}" defer></script>
 </body>

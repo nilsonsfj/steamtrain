@@ -228,6 +228,8 @@ describe("web server", () => {
     expect(csp).toContain("font-src 'self' https://fonts.gstatic.com");
     expect(html).toContain("fonts.googleapis.com/css2");
     expect(html).toContain("Space+Grotesk");
+    expect(html).toContain('id="announcer"');
+    expect(html).toContain('aria-live="polite"');
   });
 
   it("serves a favicon (inline link tag + /favicon.ico route, no auth required)", async () => {
@@ -254,6 +256,9 @@ describe("web server", () => {
     expect(js.headers.get("x-content-type-options")).toBe("nosniff");
     const jsText = await js.text();
     expect(jsText).toContain("SteamtrainReducer");
+    expect(jsText).toContain("renderYardTrack");
+    expect(jsText).toContain("friendlyStepLabel");
+    expect(jsText).toContain("agent orchestrator on rails");
     expect(jsText).not.toContain("BEGIN_REDUCER_BUNDLE");
 
     const css = await fetch(`${base}/static/app.css`);
@@ -262,6 +267,10 @@ describe("web server", () => {
     expect(css.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
     const cssText = await css.text();
     expect(cssText).toContain("--accent");
+    expect(cssText).toContain(".yard-track");
+    expect(cssText).toContain("engine-depart");
+    expect(cssText).toContain(".station-tagline");
+    expect(cssText).toContain(".arrival-section");
 
     const bundle = await fetch(`${base}/static/steamtrain-reducer.bundle.js`);
     expect(bundle.status).toBe(200);
