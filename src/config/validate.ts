@@ -30,10 +30,11 @@ export const MAX_PROMPT_CHARS = 100_000;
  * Mirrors {@link resolveBinary} in the doctor for save-time validation.
  */
 export function resolveBinarySync(name: string): string | undefined {
-  if (!name.trim()) return undefined;
-  if (name.includes("\0") || /[\r\n]/.test(name)) return undefined;
-  if (name.includes("/") || isAbsolute(name)) {
-    return isExecutableSync(name) ? name : undefined;
+  const trimmed = name.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.includes("\0") || /[\r\n]/.test(trimmed)) return undefined;
+  if (trimmed.includes("/") || isAbsolute(trimmed)) {
+    return isExecutableSync(trimmed) ? trimmed : undefined;
   }
   const pathEnv = process.env.PATH ?? "";
   const exts =
@@ -41,7 +42,7 @@ export function resolveBinarySync(name: string): string | undefined {
   for (const dir of pathEnv.split(delimiter)) {
     if (!dir) continue;
     for (const ext of exts) {
-      const candidate = join(dir, name + ext);
+      const candidate = join(dir, trimmed + ext);
       if (isExecutableSync(candidate)) return candidate;
     }
   }

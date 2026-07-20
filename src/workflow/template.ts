@@ -143,7 +143,7 @@ function extractRefs(text: string | undefined): string[] {
     // Generic mustache templates (e.g. {{name}}) are left alone.
     if (
       expr === "input" ||
-      expr === "args" ||
+      expr === "args" || // alias for {{input}} in renderPrompt
       expr.startsWith("steps.") ||
       expr.startsWith("inputs.") ||
       expr === "item" ||

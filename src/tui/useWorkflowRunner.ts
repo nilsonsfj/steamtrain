@@ -680,15 +680,15 @@ export function useWorkflowRunner({
     if (!attached && runControlRef.current) {
       if (desired) runControlRef.current.pause("human:tui");
       else runControlRef.current.resume("human:tui");
+      if (!wrote) {
+        return desired
+          ? "pause applied locally — shared pause write failed (see notice)"
+          : "resume applied locally — shared pause write failed (see notice)";
+      }
     } else if (!wrote) {
       return desired
         ? "pause request failed — the run was not paused"
         : "resume request failed — the run was not resumed";
-    }
-    if (!wrote && !attached) {
-      return desired
-        ? "pause applied locally — shared pause write failed (see notice)"
-        : "resume applied locally — shared pause write failed (see notice)";
     }
     return desired
       ? "pause requested — in-flight steps finish, nothing new starts (e edits a pending step, p resumes)"
