@@ -5,6 +5,7 @@ import {
   type ApprovalProvider,
   type HumanInputProvider,
   type HumanInputResponse,
+  type LiveRunPendingInput,
   type LiveRunPublisher,
   type LiveRunStore,
   type Notifier,
@@ -130,7 +131,12 @@ interface Run {
    * {@link WorkflowRunManager.resolveHumanInput}. A re-ask (rejected answer)
    * re-registers under the same key, superseding the old resolver.
    */
-  pendingInputs: Map<string, (response: HumanInputResponse) => void>;
+  pendingInputs: Map<string, PendingInputRegistration>;
+}
+
+interface PendingInputRegistration {
+  summary: LiveRunPendingInput;
+  settle: (response: HumanInputResponse) => void;
 }
 
 export interface RunSummary {
@@ -149,7 +155,7 @@ export interface RunSummary {
   /** Human-approval checkpoints currently awaiting a decision. */
   pendingApprovals?: { stepId: string; iteration: number }[];
   /** Human-input requests currently awaiting an answer. */
-  pendingInputs?: { stepId: string; iteration: number }[];
+  pendingInputs?: LiveRunPendingInput[];
 }
 
 export interface StartRunResult {
@@ -411,14 +417,25 @@ export class WorkflowRunManager {
       new Promise<HumanInputResponse>((resolve) => {
         const key = `${request.stepId}:${request.iteration}`;
         const settle = (response: HumanInputResponse): void => {
-          if (run.pendingInputs.get(key) !== settle) return;
+          if (run.pendingInputs.get(key)?.settle !== settle) return;
           run.pendingInputs.delete(key);
           signal?.removeEventListener("abort", onAbort);
           resolve(response);
         };
         const onAbort = (): void =>
           settle({ canceled: true, by: "auto:canceled", reason: "run canceled before an answer" });
-        run.pendingInputs.set(key, settle);
+        run.pendingInputs.set(key, {
+          summary: {
+            stepId: request.stepId,
+            iteration: request.iteration,
+            attempt: request.attempt,
+            origin: request.origin,
+            prompt:
+              request.prompt.length > 200 ? `${request.prompt.slice(0, 200)}…` : request.prompt,
+            choices: request.choices,
+          },
+          settle,
+        });
         if (signal) {
           if (signal.aborted) {
             onAbort();
@@ -445,9 +462,9 @@ export class WorkflowRunManager {
     if (!run) return false;
     const key = matchApprovalKey(run.pendingInputs.keys(), stepId, iteration);
     if (!key) return false;
-    const settle = run.pendingInputs.get(key);
-    if (!settle) return false;
-    settle(response);
+    const pending = run.pendingInputs.get(key);
+    if (!pending) return false;
+    pending.settle(response);
     return true;
   }
 
@@ -647,6 +664,7 @@ export class WorkflowRunManager {
               error: run.error,
               endedAt: run.endedAt,
               pendingApprovals: [],
+              pendingInputs: [],
             });
           }
         } catch {
@@ -698,7 +716,7 @@ function toSummary(run: Run): RunSummary {
     return { stepId: key.slice(0, sep), iteration: Number(key.slice(sep + 1)) || 1 };
   };
   const pendingApprovals = [...run.pendingApprovals.keys()].map(splitKey);
-  const pendingInputs = [...run.pendingInputs.keys()].map(splitKey);
+  const pendingInputs = [...run.pendingInputs.values()].map(({ summary }) => ({ ...summary }));
   return {
     id: run.id,
     workflow: run.workflow,

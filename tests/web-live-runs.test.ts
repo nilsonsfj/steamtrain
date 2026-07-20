@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { type WorkflowHost, WorkflowRunManager } from "../src/web/runs";
 import { createWebServer } from "../src/web/server";
 import type { StepResult, WorkflowCacheStore, WorkflowEvent, WorkflowSpec } from "../src/workflow";
-import { createLiveRunStore, newLiveRunMeta } from "../src/workflow";
+import { createLiveRunPublisher, createLiveRunStore, newLiveRunMeta } from "../src/workflow";
 import { readSse } from "./helpers/read-sse";
 
 const servers: Server[] = [];
@@ -162,17 +162,42 @@ describe("web live-run integration", () => {
       source: "cli-detached",
       detached: true,
     });
-    await liveRuns.create({ ...meta, status: "running", startedAt: Date.now() });
+    await liveRuns.create({
+      ...meta,
+      status: "running",
+      startedAt: Date.now(),
+      pendingInputs: [
+        {
+          stepId: "clarify",
+          iteration: 1,
+          attempt: 2,
+          origin: "agent-question",
+          prompt: "Which environment?",
+          choices: ["staging", "production"],
+        },
+      ],
+    });
     await liveRuns.appendEventLines(
       "ext-run",
       `${JSON.stringify({ kind: "workflow_start", name: "other", phaseCount: 1, stepCount: 1, ts: Date.now() })}\n`,
     );
 
     const list = (await (await fetch(`${base}/api/runs`)).json()) as {
-      runs: { id: string; external: boolean; detached: boolean; status: string }[];
+      runs: {
+        id: string;
+        external: boolean;
+        detached: boolean;
+        status: string;
+        pendingInputs?: { stepId: string; attempt: number; prompt?: string }[];
+      }[];
     };
     const entry = list.runs.find((r) => r.id === "ext-run");
-    expect(entry).toMatchObject({ external: true, detached: true, status: "running" });
+    expect(entry).toMatchObject({
+      external: true,
+      detached: true,
+      status: "running",
+      pendingInputs: [{ stepId: "clarify", attempt: 2, prompt: "Which environment?" }],
+    });
 
     // Cancel drops the marker for the external owner to pick up.
     const cancel = await fetch(`${base}/api/runs/ext-run/cancel`, { method: "POST" });
@@ -180,7 +205,12 @@ describe("web live-run integration", () => {
     expect(await liveRuns.cancelRequested("ext-run")).toBe(true);
 
     // Streaming replays the recorded events, then ends on terminal meta.
-    await liveRuns.update("ext-run", { status: "canceled", endedAt: Date.now() });
+    const publisher = createLiveRunPublisher(liveRuns, "ext-run");
+    await publisher.finish("canceled", { ok: false });
+    const settledList = (await (await fetch(`${base}/api/runs`)).json()) as {
+      runs: { id: string; pendingInputs?: unknown[] }[];
+    };
+    expect(settledList.runs.find((r) => r.id === "ext-run")?.pendingInputs).toEqual([]);
     const frames = await readSse(`${base}/api/runs/ext-run/stream`);
     expect(frames.some((f) => f.type === "event")).toBe(true);
     const status = frames.find((f) => f.type === "status");

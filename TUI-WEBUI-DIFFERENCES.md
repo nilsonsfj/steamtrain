@@ -126,9 +126,10 @@ for them yet):
 
 1. ~~**Staged session overrides**~~ — Done. Web now has "Try without saving" in the configure modal, staged override state, and "Flush to disk" button with saved/skipped/unchanged reporting.
 2. ~~**`/save-workflows`-style flush**~~ — Done. `POST /api/overrides/flush` calls the shared `flushSessionOverrides` and returns the report.
-3. ~~**Prompt history & drafts**~~ — Done (2026-07-15). The web run input
-   records every Run/Plan submission to localStorage and recalls with ↑/↓;
-   ↓ past the newest entry restores the unsent draft.
+3. ~~**Prompt history**~~ — Done (2026-07-15). The web run input records
+   every Run/Plan submission to localStorage and recalls with ↑/↓.
+4. **Per-mode prompt drafts** — Soft gap. The TUI persists one unsent draft per
+   mode; the web restores the current unsent text only while traversing history.
 
 ---
 
@@ -149,11 +150,11 @@ Status after `feat/unify-workflow-authoring`:
    `createWorkflow`, `saveWorkflows`, and preview resolution all route through
    it; `/clone-workflow` and `/delete-workflow` are thin wrappers over it.
 
-3. ⚠️ **Override vs. edit model.** The core now exposes both:
+3. ✅ **Override vs. edit model.** The core exposes both:
    `previewWithOverrides` (staged, non-destructive) and `flushSessionOverrides`
-   (commit with saved/skipped/unchanged), plus `save`/`clone` (immediate). The
-   TUI uses the staged path; the web uses immediate. The seam exists for the web
-   to add a staged mode.
+   (commit with saved/skipped/unchanged), plus `save`/`clone` (immediate). Both
+   the TUI and web UI expose staged session overrides and an explicit flush;
+   direct save/clone actions remain immediate by design.
 
 4. ✅ **Capability surface.** The core exposes the full edit surface
    (prompt/name/description via `save`, clone, delete). The TUI now renders
@@ -178,9 +179,9 @@ layers; all workflow logic (load, edit, draft, validate, persist, stage
 overrides, run, fold events) lives in shared modules under `src/workflow` (+
 orchestrator).
 
-Feature parity for the documented authoring/run surface is closed (prompt
-history on the web shipped 2026-07-15; drafts remain a soft gap — web restores
-the unsent draft only while browsing history). The only remaining
-**architectural** divergence is the override model: the TUI stages overrides;
-the web persists immediately, though the staged seam (`previewWithOverrides` /
-`flushSessionOverrides`) exists if the web ever wants a non-destructive mode.
+Core authoring and run capabilities are unified. Prompt history on the web
+shipped 2026-07-15; one soft UX gap remains because the web restores the current
+unsent text only while traversing history instead of persisting a draft per mode.
+The override model is shared: both UIs can stage non-destructive session
+overrides and explicitly flush them, while direct save/clone actions persist
+immediately by design.

@@ -169,6 +169,43 @@ describe("web human-input endpoint", () => {
     expect(startRes.status).toBe(201);
     const { runId } = (await startRes.json()) as { runId: string };
 
+    let listedPending:
+      | {
+          stepId: string;
+          iteration: number;
+          attempt: number;
+          origin?: string;
+          prompt?: string;
+          choices?: string[];
+        }[]
+      | undefined;
+    for (let i = 0; i < 250 && !listedPending; i++) {
+      const list = (await (await fetch(`${base}/api/runs`)).json()) as {
+        runs: {
+          id: string;
+          pendingInputs?: {
+            stepId: string;
+            iteration: number;
+            attempt: number;
+            origin?: string;
+            prompt?: string;
+            choices?: string[];
+          }[];
+        }[];
+      };
+      listedPending = list.runs.find((run) => run.id === runId)?.pendingInputs;
+      if (!listedPending) await delay(20);
+    }
+    expect(listedPending).toEqual([
+      {
+        stepId: "ask",
+        iteration: 1,
+        attempt: 1,
+        origin: "human-step",
+        prompt: "what color?",
+      },
+    ]);
+
     const streamRes = await fetch(`${base}/api/runs/${runId}/stream`);
     const framesP = readSseFromResponse(streamRes);
 
@@ -193,6 +230,11 @@ describe("web human-input endpoint", () => {
     const done = frames.find((f) => f.type === "status");
     expect(pending).toBeDefined();
     expect(done).toMatchObject({ status: "done", ok: true });
+
+    const settledList = (await (await fetch(`${base}/api/runs`)).json()) as {
+      runs: { id: string; pendingInputs?: unknown[] }[];
+    };
+    expect(settledList.runs.find((run) => run.id === runId)?.pendingInputs).toBeUndefined();
   });
 
   it("rejects a blank value and unknown runs", async () => {
