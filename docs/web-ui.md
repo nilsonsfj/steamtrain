@@ -92,7 +92,8 @@ browser ──POST /api/runs──▶ run manager ──▶ Orchestrator.runWork
 | `/api/workflows/:name` | PUT | save a created/edited spec (`scope: user\|project`) |
 | `/api/workflows/:name` | DELETE | delete a user or project workflow |
 | `/api/meta` | GET | agents + APIs, models, efforts, health (for the create form) |
-| `/api/doctor` | GET | current agent health (`doctor`) and llm-API readiness (`apis`) |
+| `/api/doctor` | GET | current agent health (`doctor`) and llm-API readiness (`apis`) — the last snapshot (fixed at startup + config save) |
+| `/api/doctor` | POST | re-run the probes now (setup panel Recheck): re-resolve every agent binary + re-probe every API, persist, and return the fresh `{ doctor, apis }` |
 | `/api/runs` | POST | `{ workflow, input, fresh? }` → `{ runId }` |
 | `/api/runs` | GET | in-flight run registry: server-owned runs merged with external (CLI `--detach` / TUI) runs from `.steamtrain/runs/`, including queued/paused state and pending approval/input summaries |
 | `/api/runs/:id/stream` | GET | Server-Sent Events: each `WorkflowEvent` (plus non-terminal `queued` frames), then a terminal `status` frame; tails externally-owned runs from the live-run registry |

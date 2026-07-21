@@ -1243,8 +1243,12 @@
    */
   function openSetupPanel(focusId) {
     var body = h("div", { class: "setup" });
-    var recheckBtn = h("button", { class: "btn", type: "button", text: "Recheck" });
-    var footChildren = [recheckBtn];
+    // Recheck re-runs the probes server-side (POST), so a viewer session — which
+    // can't POST — doesn't get a button that would only 403.
+    var recheckBtn = isReadOnly()
+      ? null
+      : h("button", { class: "btn", type: "button", text: "Recheck" });
+    var footChildren = recheckBtn ? [recheckBtn] : [];
     if (!isReadOnly()) {
       footChildren.push(h("button", {
         class: "btn", type: "button", text: "Edit config →",
@@ -1334,22 +1338,28 @@
       return String(a.agent || a.api).localeCompare(String(b.agent || b.api));
     }
 
-    recheckBtn.addEventListener("click", function () {
-      recheckBtn.disabled = true;
-      recheckBtn.textContent = "Rechecking…";
-      apiAuth("GET", "/api/doctor").then(function (r) {
-        if (r.status === 200) {
-          S.doctor = r.body.doctor || [];
-          S.apiDoctor = r.body.apis || [];
-          renderHealth(S.doctor, S.apiDoctor, r.body.doctorError || null);
-          applyHealth();
-        }
-      }).catch(function () {}).then(function () {
-        recheckBtn.disabled = false;
-        recheckBtn.textContent = "Recheck";
-        renderBody();
+    if (recheckBtn) {
+      recheckBtn.addEventListener("click", function () {
+        recheckBtn.disabled = true;
+        recheckBtn.textContent = "Rechecking…";
+        // POST actually re-runs the doctors on the server (resolves binaries,
+        // re-probes endpoints) — a just-installed CLI or fresh login shows up
+        // without a restart. GET would only re-read the startup snapshot.
+        apiAuth("POST", "/api/doctor").then(function (r) {
+          if (r.status === 200) {
+            S.doctor = r.body.doctor || [];
+            S.apiDoctor = r.body.apis || [];
+            renderHealth(S.doctor, S.apiDoctor, r.body.doctorError || null);
+            applyHealth();
+            refreshWorkflowList();
+          }
+        }).catch(function () {}).then(function () {
+          recheckBtn.disabled = false;
+          recheckBtn.textContent = "Recheck";
+          renderBody();
+        });
       });
-    });
+    }
 
     renderBody();
     openModal(modalShell("Agent & API setup",
