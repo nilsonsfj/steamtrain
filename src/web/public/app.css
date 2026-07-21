@@ -315,8 +315,7 @@ section.work {
   padding: 14px 14px 12px;
   border: 1px solid rgba(53, 67, 84, 0.95);
   border-radius: var(--radius-lg);
-  background:
-    linear-gradient(180deg, rgba(28, 38, 50, 0.72) 0%, rgba(16, 22, 30, 0.88) 100%);
+  background: linear-gradient(180deg, rgba(28, 38, 50, 0.72) 0%, rgba(16, 22, 30, 0.88) 100%);
   box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 .run-compose-label {
