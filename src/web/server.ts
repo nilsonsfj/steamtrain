@@ -9,14 +9,14 @@ import { refreshAgentCatalogCaches } from "../agents/models";
 import { buildApiMeta } from "../apis";
 import type { AgentInstanceConfig, ApiInstanceConfig, SteamtrainConfig } from "../config";
 import {
-  defaultInstanceScope,
   loadConfig,
   parseAgentsConfig,
   parseApisConfig,
-  resolveInstanceScope,
+  parseScopedInstancePayload,
   saveUserConfig,
   tagAgentsWithScope,
   tagApisWithScope,
+  userConfigExists,
 } from "../config";
 import { saveProjectConfig } from "../config/project-config";
 import { type ApiDoctorResult, type DoctorResult, runApiDoctor, runDoctor } from "../doctor";
@@ -1084,25 +1084,14 @@ async function handle(
 
     if (hasAgents) {
       try {
-        const raw = parsed.agents;
-        if (!Array.isArray(raw)) throw new Error("agents must be an array");
-        // Partition before parseAgentsConfig: that helper enforces unique ids
-        // *within one file*, but the editor may legitimately send the same id
-        // in both user and project scopes (project shadows user).
-        const scopedRaw: { scope: "user" | "project"; entry: unknown }[] = raw.map((item) => {
-          if (!item || typeof item !== "object" || Array.isArray(item)) {
-            return { scope: defaultInstanceScope(canGlobal), entry: item };
-          }
-          const { scope: rawScope, ...rest } = item as Record<string, unknown>;
-          return {
-            scope: resolveInstanceScope(rawScope, canGlobal),
-            entry: rest,
-          };
-        });
-        const userRaw = scopedRaw.filter((s) => s.scope === "user").map((s) => s.entry);
-        const projectRaw = scopedRaw.filter((s) => s.scope === "project").map((s) => s.entry);
-        userAgents = parseAgentsConfig(userRaw);
-        projectAgents = parseAgentsConfig(projectRaw);
+        const partitioned = parseScopedInstancePayload(
+          parsed.agents,
+          canGlobal,
+          parseAgentsConfig,
+          "agents",
+        );
+        userAgents = partitioned.user;
+        projectAgents = partitioned.project;
         projectPatch.agents = projectAgents;
       } catch (err) {
         sendJson(res, 400, {
@@ -1114,22 +1103,14 @@ async function handle(
 
     if (hasApis) {
       try {
-        const raw = parsed.apis;
-        if (!Array.isArray(raw)) throw new Error("apis must be an array");
-        const scopedRaw: { scope: "user" | "project"; entry: unknown }[] = raw.map((item) => {
-          if (!item || typeof item !== "object" || Array.isArray(item)) {
-            return { scope: defaultInstanceScope(canGlobal), entry: item };
-          }
-          const { scope: rawScope, ...rest } = item as Record<string, unknown>;
-          return {
-            scope: resolveInstanceScope(rawScope, canGlobal),
-            entry: rest,
-          };
-        });
-        const userRaw = scopedRaw.filter((s) => s.scope === "user").map((s) => s.entry);
-        const projectRaw = scopedRaw.filter((s) => s.scope === "project").map((s) => s.entry);
-        userApis = parseApisConfig(userRaw);
-        projectApis = parseApisConfig(projectRaw);
+        const partitioned = parseScopedInstancePayload(
+          parsed.apis,
+          canGlobal,
+          parseApisConfig,
+          "apis",
+        );
+        userApis = partitioned.user;
+        projectApis = partitioned.project;
         projectPatch.apis = projectApis;
       } catch (err) {
         sendJson(res, 400, {
@@ -1141,14 +1122,25 @@ async function handle(
 
     // Agents/APIs default to the user/global file; timeouts stay project-scoped
     // (matching `/timeout` and team-shared steamtrain.json conventions).
-    if (canGlobal && (userAgents !== undefined || userApis !== undefined)) {
+    if (canGlobal && deps.userConfigPath && (userAgents !== undefined || userApis !== undefined)) {
       const userPatch: { agents?: AgentInstanceConfig[]; apis?: ApiInstanceConfig[] } = {};
       if (userAgents !== undefined) userPatch.agents = userAgents;
       if (userApis !== undefined) userPatch.apis = userApis;
-      const savedUser = saveUserConfig(userPatch, deps.userConfigPath);
-      if (!savedUser.ok) {
-        sendJson(res, 400, { error: savedUser.error ?? "failed to save user config" });
-        return;
+      // Skip creating a brand-new user file solely to write empty arrays. Still
+      // write empties when the file (or in-memory layers) already had entries so
+      // deletes stick.
+      const hasUserContent =
+        (userAgents?.length ?? 0) > 0 ||
+        (userApis?.length ?? 0) > 0 ||
+        (deps.configLayers?.userAgents?.length ?? 0) > 0 ||
+        (deps.configLayers?.userApis?.length ?? 0) > 0 ||
+        userConfigExists(deps.userConfigPath);
+      if (hasUserContent) {
+        const savedUser = saveUserConfig(userPatch, deps.userConfigPath);
+        if (!savedUser.ok) {
+          sendJson(res, 400, { error: savedUser.error ?? "failed to save user config" });
+          return;
+        }
       }
     }
 

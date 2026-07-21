@@ -1271,11 +1271,15 @@ describe("web server", () => {
       canGlobal: boolean;
       agents: { id: string; scope: string }[];
       apis: { id: string; scope: string }[];
+      agentCatalog?: { id: string }[];
+      apiCatalog?: { id: string }[];
     };
     expect(body.ok).toBe(true);
     expect(body.canGlobal).toBe(true);
     expect(body.agents).toEqual([expect.objectContaining({ id: "mimocode", scope: "user" })]);
     expect(body.apis).toEqual([expect.objectContaining({ id: "groq", scope: "user" })]);
+    expect(body.agentCatalog?.some((a) => a.id === "mimocode")).toBe(true);
+    expect(body.apiCatalog?.some((a) => a.id === "groq")).toBe(true);
 
     const userDisk = JSON.parse(readFileSync(userConfigPath, "utf8")) as {
       agents: unknown[];
@@ -1396,8 +1400,8 @@ describe("web server", () => {
     expect(JSON.parse(readFileSync(configPath, "utf8"))).toMatchObject({
       agents: [{ id: "team-bot", provider: "claude" }],
     });
-    // User file is written with an empty agents list (full replace per scope).
-    expect(JSON.parse(readFileSync(userConfigPath, "utf8"))).toMatchObject({ agents: [] });
+    // Empty user wipe is skipped when the global file does not exist yet.
+    expect(() => readFileSync(userConfigPath, "utf8")).toThrow();
   });
 
   it("returns doctorError field when doctor fails (M35)", async () => {

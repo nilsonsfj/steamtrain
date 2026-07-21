@@ -52,6 +52,7 @@ export {
   type ScopedAgentInstance,
   type ScopedApiInstance,
   defaultInstanceScope,
+  parseScopedInstancePayload,
   partitionAgentsByScope,
   partitionApisByScope,
   resolveInstanceScope,

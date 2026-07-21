@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   defaultInstanceScope,
+  parseScopedInstancePayload,
   partitionAgentsByScope,
   partitionApisByScope,
   resolveInstanceScope,
@@ -77,5 +78,20 @@ describe("scoped instance helpers", () => {
         projectApis: [],
       }),
     ).toEqual([{ id: "groq", provider: "openai", scope: "user" }]);
+  });
+
+  it("parseScopedInstancePayload validates each scope separately", () => {
+    const identity = (entries: unknown) => entries as { id: string }[];
+    const result = parseScopedInstancePayload(
+      [
+        { id: "claude", scope: "user" },
+        { id: "claude", scope: "project" },
+      ],
+      true,
+      identity,
+      "agents",
+    );
+    expect(result.user).toEqual([{ id: "claude" }]);
+    expect(result.project).toEqual([{ id: "claude" }]);
   });
 });

@@ -42,6 +42,33 @@ function stripScope<T extends { scope?: AgentConfigScope }>(entry: T): Omit<T, "
 }
 
 /**
+ * Split a raw JSON array (each item may carry `scope`) into per-file lists,
+ * then validate each list with `parse`. Partitioning runs first so the same
+ * id can exist in both scopes — parsers enforce uniqueness *within* one file.
+ */
+export function parseScopedInstancePayload<T>(
+  raw: unknown,
+  canGlobal: boolean,
+  parse: (entries: unknown) => T[],
+  kind: "agents" | "apis",
+): { user: T[]; project: T[] } {
+  if (!Array.isArray(raw)) throw new Error(`${kind} must be an array`);
+  const userRaw: unknown[] = [];
+  const projectRaw: unknown[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      const scope = defaultInstanceScope(canGlobal);
+      (scope === "user" ? userRaw : projectRaw).push(item);
+      continue;
+    }
+    const { scope: rawScope, ...rest } = item as Record<string, unknown>;
+    const scope = resolveInstanceScope(rawScope, canGlobal);
+    (scope === "user" ? userRaw : projectRaw).push(rest);
+  }
+  return { user: parse(userRaw), project: parse(projectRaw) };
+}
+
+/**
  * Partition scoped agent entries into the arrays that belong in each config
  * file. Last entry wins on duplicate ids within a scope. When `canGlobal` is
  * false, every entry lands in `project` (the only writable file).
