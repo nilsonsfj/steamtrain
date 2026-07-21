@@ -263,13 +263,15 @@ export async function* runAntigravityProcess(
         if (recovered) {
           sessionId = sessionId ?? recovered.conversationId;
           text = recovered.text;
+          // session_start (if any) then any buffered lines, then recovered text.
           yield* emitSession();
           yield* flushPendingDeltas();
           yield { kind: "text_delta", agent: id, ts, text: `${text}\n` };
         }
       }
 
-      // Prefer session_start before any buffered text_delta / result.
+      // Prefer session_start before any remaining buffered text_delta / result.
+      // emitSession / flushPendingDeltas are no-ops when already drained above.
       yield* emitSession();
       yield* flushPendingDeltas();
 

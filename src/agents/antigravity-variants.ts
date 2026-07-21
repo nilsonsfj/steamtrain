@@ -66,6 +66,8 @@ export function parseAntigravityModelsOutput(output: string): Map<string, Antigr
     // Model labels look like "Gemini 3.1 Pro (High)" / "Claude Opus 4.6 (Thinking)".
     if (!/^[A-Za-z0-9]/.test(trimmed)) continue;
     if (trimmed.length > 120) continue;
+    // Heuristic: bare status chrome without an effort suffix is not a model id.
+    // Real agy labels today always use Title Case product names, not "server"/"listening".
     if (/\b(error|failed|listening|starting|server)\b/i.test(trimmed) && !/\(/.test(trimmed)) {
       continue;
     }
@@ -107,7 +109,8 @@ function fetchAntigravityModels(binary: string): Promise<string> {
       stdout += chunk;
     });
     child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
+      // Cap noisy glog; models usually land on stdout.
+      if (stderr.length < 20_000) stderr += chunk;
     });
     child.on("error", (err) => {
       clearTimeout(timer);
