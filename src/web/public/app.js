@@ -557,7 +557,9 @@
 
   function openConfigModal() {
     if (isReadOnly()) { setBanner("This session is read-only — viewing only.", "info"); return; }
-    if (!S.projectConfig) { setBanner("project config is not available", "info"); return; }
+    if (!S.projectConfig) { setBanner("config is not available", "info"); return; }
+    var canGlobal = S.projectConfig.canGlobal !== false;
+    var defaultScope = canGlobal ? "user" : "project";
     var stepMin = Math.round((S.projectConfig.stepTimeoutSec || 900) / 60);
     var wfMin = S.projectConfig.workflowTimeoutSec
       ? Math.round(S.projectConfig.workflowTimeoutSec / 60)
@@ -568,13 +570,22 @@
     var banner = h("div", { class: "mbanner" });
     var agentRows = [];
     var agentList = h("div", { class: "agentcfg" });
+    function instanceScopeOptions() {
+      if (!canGlobal) {
+        return [{ value: "project", label: "config file" }];
+      }
+      return [
+        { value: "user", label: "Global (~/.steamtrain/config.json)" },
+        { value: "project", label: "Project (./steamtrain.json)" }
+      ];
+    }
     function renderAgentConfigRows() {
       clear(agentList);
       agentRows = [];
       var agents = S.projectConfig.agents || [];
       if (!agents.length) {
         agentList.appendChild(h("div", { class: "empty-state" },
-          h("p", { text: "No agents configured yet. Add an agent below to get started." })
+          h("p", { text: "No agents configured yet. Add an agent below — new entries save to global config by default." })
         ));
         return;
       }
@@ -599,7 +610,8 @@
         var extraArgs = h("textarea", { class: "ta mini", placeholder: "[]", rows: "2" });
         extraArgs.value = JSON.stringify(a.extraArgs || []);
         var defaultModel = buildModelSelect(a);
-        var row = { enabled: enabled, id: id, label: label, provider: provider, binary: binary, env: env, extraArgs: extraArgs, defaultModel: defaultModel };
+        var scope = selectEl(instanceScopeOptions(), a.scope === "project" ? "project" : defaultScope);
+        var row = { enabled: enabled, id: id, label: label, provider: provider, binary: binary, env: env, extraArgs: extraArgs, defaultModel: defaultModel, scope: scope };
         agentRows.push(row);
 
         // Health dot
@@ -608,15 +620,17 @@
 
         // Provider tag (synced with select)
         var providerTag = h("span", { class: "provider-tag", text: a.provider || "claude" });
+        var scopeTag = h("span", { class: "provider-tag", text: scope.value === "project" ? "project" : "global" });
 
         // Delete button
         var deleteBtn = h("button", { class: "agent-delete", title: "Remove agent", text: "\u00d7" });
         deleteBtn.addEventListener("click", function () {
-          var label = id.value.trim() || originalId;
-          if (!window.confirm("Remove agent \"" + label + "\"? This removes it from the project config.")) return;
-          var agents = S.projectConfig.agents || [];
-          var i = agents.findIndex(function (x) { return x.id === originalId; });
-          if (i >= 0) agents.splice(i, 1);
+          var labelText = id.value.trim() || originalId;
+          if (!window.confirm("Remove agent \"" + labelText + "\" from config?")) return;
+          var list = S.projectConfig.agents || [];
+          var i = list.findIndex(function (x) { return x.id === originalId && (x.scope || defaultScope) === (a.scope || defaultScope); });
+          if (i < 0) i = list.findIndex(function (x) { return x.id === originalId; });
+          if (i >= 0) list.splice(i, 1);
           renderAgentConfigRows();
         });
 
@@ -625,6 +639,7 @@
         var header = h("div", { class: "agentrow-header" },
           h("label", null, enabled, idLabel),
           providerTag,
+          scopeTag,
           healthDot,
           deleteBtn
         );
@@ -649,12 +664,18 @@
           }
           row.defaultModel = newDefaultModel;
         });
+        scope.addEventListener("change", function () {
+          scopeTag.textContent = scope.value === "project" ? "project" : "global";
+        });
 
         // Build row DOM (field() with 5th arg enables inline validation error display)
         var rowEl = h("div", { class: "agentrow" + (enabled.checked ? "" : " disabled") },
           header,
           field("ID", id, null, null, true),
           field("Provider", provider),
+          field("Scope", scope, canGlobal
+            ? "Global is the default (every project). Project writes to ./steamtrain.json."
+            : "Running with a custom --config file; there is no separate global layer."),
           field("Label", label),
           field("Binary", binary),
           field("Env", env, "JSON object, merged into process env.", null, true),
@@ -667,8 +688,11 @@
         addBlurValidation(id, function () {
           var v = id.value.trim();
           if (!v) return "Agent ID is required";
-          var dup = agentRows.filter(function (r) { return r !== row; }).some(function (r) { return r.id.value.trim() === v; });
-          if (dup) return "Duplicate agent ID";
+          var scopeVal = scope.value;
+          var dup = agentRows.filter(function (r) { return r !== row; }).some(function (r) {
+            return r.id.value.trim() === v && r.scope.value === scopeVal;
+          });
+          if (dup) return "Duplicate agent ID in this scope";
           return null;
         });
         addBlurValidation(env, function () {
@@ -704,7 +728,8 @@
         id: agentId,
         provider: provider,
         enabled: true,
-        binary: binary
+        binary: binary,
+        scope: defaultScope
       }]);
       renderAgentConfigRows();
     }
@@ -719,7 +744,7 @@
       var apis = S.projectConfig.apis || [];
       if (!apis.length) {
         apiList.appendChild(h("div", { class: "empty-state" },
-          h("p", { text: "No APIs configured. llm steps use the built-in anthropic/openai instances; add one to point at a proxy or another provider." })
+          h("p", { text: "No APIs configured. llm steps use the built-in anthropic/openai instances; add one to point at a proxy or another provider. New entries save to global config by default." })
         ));
         return;
       }
@@ -738,20 +763,23 @@
         var defaultModel = h("input", { class: "txt", placeholder: "used when a step omits model", value: a.defaultModel || "" });
         var pricing = h("textarea", { class: "ta mini", placeholder: '{"inputPerMTok": 5, "outputPerMTok": 25}', rows: "2" });
         pricing.value = a.pricing ? JSON.stringify(a.pricing) : "";
-        var row = { enabled: enabled, id: id, label: label, provider: provider, baseUrl: baseUrl, apiKeyEnv: apiKeyEnv, defaultModel: defaultModel, pricing: pricing };
+        var scope = selectEl(instanceScopeOptions(), a.scope === "project" ? "project" : defaultScope);
+        var row = { enabled: enabled, id: id, label: label, provider: provider, baseUrl: baseUrl, apiKeyEnv: apiKeyEnv, defaultModel: defaultModel, pricing: pricing, scope: scope };
         apiRows.push(row);
 
         var healthy = meta ? meta.healthy : null;
         var healthDot = h("span", { class: "health-dot " + (healthy === true ? "ok" : healthy === false ? "err" : "unknown") });
         var providerTag = h("span", { class: "provider-tag", text: a.provider || "anthropic" });
+        var scopeTag = h("span", { class: "provider-tag", text: scope.value === "project" ? "project" : "global" });
 
         var deleteBtn = h("button", { class: "agent-delete", title: "Remove API", text: "×" });
         deleteBtn.addEventListener("click", function () {
           var name = id.value.trim() || originalId;
-          if (!window.confirm("Remove API \"" + name + "\"? This removes it from the project config.")) return;
-          var apis = S.projectConfig.apis || [];
-          var i = apis.findIndex(function (x) { return x.id === originalId; });
-          if (i >= 0) apis.splice(i, 1);
+          if (!window.confirm("Remove API \"" + name + "\" from config?")) return;
+          var list = S.projectConfig.apis || [];
+          var i = list.findIndex(function (x) { return x.id === originalId && (x.scope || defaultScope) === (a.scope || defaultScope); });
+          if (i < 0) i = list.findIndex(function (x) { return x.id === originalId; });
+          if (i >= 0) list.splice(i, 1);
           renderApiConfigRows();
         });
 
@@ -759,6 +787,7 @@
         var header = h("div", { class: "agentrow-header" },
           h("label", null, enabled, idLabel),
           providerTag,
+          scopeTag,
           healthDot,
           deleteBtn
         );
@@ -772,11 +801,17 @@
           providerTag.textContent = provider.value;
           apiKeyEnv.placeholder = provider.value === "openai" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
         });
+        scope.addEventListener("change", function () {
+          scopeTag.textContent = scope.value === "project" ? "project" : "global";
+        });
 
         var rowEl = h("div", { class: "agentrow" + (enabled.checked ? "" : " disabled") },
           header,
           field("ID", id, null, null, true),
           field("Provider", provider, "API dialect: Anthropic Messages, or OpenAI chat-completions (Groq, Together, Ollama, vLLM, proxies)."),
+          field("Scope", scope, canGlobal
+            ? "Global is the default (every project). Project writes to ./steamtrain.json."
+            : "Running with a custom --config file; there is no separate global layer."),
           field("Label", label),
           field("Base URL", baseUrl, "Endpoint override for proxies and compatible providers."),
           field("Key env var", apiKeyEnv, "Environment variable the API key is read from (the key itself is never stored)."),
@@ -788,8 +823,11 @@
         addBlurValidation(id, function () {
           var v = id.value.trim();
           if (!v) return "API ID is required";
-          var dup = apiRows.filter(function (r) { return r !== row; }).some(function (r) { return r.id.value.trim() === v; });
-          if (dup) return "Duplicate API ID";
+          var scopeVal = scope.value;
+          var dup = apiRows.filter(function (r) { return r !== row; }).some(function (r) {
+            return r.id.value.trim() === v && r.scope.value === scopeVal;
+          });
+          if (dup) return "Duplicate API ID in this scope";
           return null;
         });
         addBlurValidation(pricing, function () {
@@ -806,26 +844,26 @@
       var apis = S.projectConfig.apis || [];
       var n = 2;
       while (apis.some(function (a) { return a.id === apiId; })) apiId = "new-api-" + n++;
-      S.projectConfig.apis = apis.concat([{ id: apiId, provider: "anthropic", enabled: true }]);
+      S.projectConfig.apis = apis.concat([{ id: apiId, provider: "anthropic", enabled: true, scope: defaultScope }]);
       renderApiConfigRows();
     }
     renderApiConfigRows();
     var body = h("div", null,
       banner,
-      field("Step timeout (minutes)", stepInput, "Per-agent subprocess limit (default 15)."),
-      field("Workflow timeout (minutes)", wfInput, "Whole-run limit. Leave empty or check auto to use steps × step timeout."),
+      field("Step timeout (minutes)", stepInput, "Per-agent subprocess limit (default 15). Saved to ./steamtrain.json."),
+      field("Workflow timeout (minutes)", wfInput, "Whole-run limit. Leave empty or check auto to use steps × step timeout. Saved to ./steamtrain.json."),
       h("label", { style: "display:flex;gap:6px;align-items:center;margin-top:8px" },
         autoChk, h("span", { text: "Auto workflow timeout (steps × step)" })),
       h("hr"),
       h("div", { class: "field" },
         h("label", { text: "Agents" }),
-        h("div", { class: "help", text: "Only enabled agents appear in pickers and health outside this page." }),
+        h("div", { class: "help", text: "Only enabled agents appear in pickers and health outside this page. New agents default to global (~/.steamtrain/config.json)." }),
         agentList,
         h("button", { class: "btn small", text: "+ Add agent", onClick: addAgentRow })),
       h("hr"),
       h("div", { class: "field" },
         h("label", { text: "APIs (direct llm steps)" }),
-        h("div", { class: "help", text: "Endpoint instances llm steps call via api: <id>. Only enabled APIs accept runs; health probes the endpoint with the configured key." }),
+        h("div", { class: "help", text: "Endpoint instances llm steps call via api: <id>. New APIs default to global config, same as agents." }),
         apiList,
         h("button", { class: "btn small", text: "+ Add API", onClick: addApiRow }))
     );
@@ -855,20 +893,23 @@
         saveBtn.disabled = false;
         if (r.status === 200 && r.body.ok) {
           S.projectConfig = Object.assign({}, S.projectConfig, r.body);
-          // Keep all agents/apis (including disabled) so health dots and the
-          // config modal can look them up. Callers that only want enabled
-          // entries (agentOptions, preferredAgent) filter at their call site.
-          S.agents = r.body.agents || [];
-          S.apis = r.body.apis || [];
+          // Catalog (pickers/health) stays on the full meta lists; configured
+          // rows for this modal live in r.body.agents / r.body.apis.
+          if (r.body.agentCatalog) S.agents = r.body.agentCatalog;
+          if (r.body.apiCatalog) S.apis = r.body.apiCatalog;
           closeModal();
           pollDoctor(0);
-          setBanner("project config saved", "info");
+          setBanner("config saved", "info");
         } else {
           mbanner(banner, (r.body && r.body.error) || "save failed", "err");
         }
       });
     });
-    openModal(modalShell("Project config", "Applies to ./steamtrain.json", body,
+    openModal(modalShell("Config",
+      canGlobal
+        ? "Agents & APIs default to ~/.steamtrain/config.json · timeouts to ./steamtrain.json"
+        : "Applies to the loaded config file",
+      body,
       h("div", { class: "mfoot" },
         h("button", { class: "btn", text: "Cancel", onClick: closeModal }),
         h("div", { class: "spacer" }),
@@ -876,12 +917,14 @@
   }
 
   function collectAgentConfigRows(rows) {
-    var ids = {};
+    var keys = {};
     return rows.map(function (row) {
       var id = row.id.value.trim();
       if (!id) throw new Error("agent id is required");
-      if (ids[id]) throw new Error("duplicate agent id: " + id);
-      ids[id] = true;
+      var scope = row.scope ? row.scope.value : "user";
+      var key = scope + ":" + id;
+      if (keys[key]) throw new Error("duplicate agent id in " + scope + " scope: " + id);
+      keys[key] = true;
       var envText = row.env.value.trim();
       var env;
       if (envText) {
@@ -904,18 +947,21 @@
         binary: row.binary.value.trim() || undefined,
         env: env,
         extraArgs: args,
-        defaultModel: row.defaultModel.value.trim() || undefined
+        defaultModel: row.defaultModel.value.trim() || undefined,
+        scope: scope
       };
     });
   }
 
   function collectApiConfigRows(rows) {
-    var ids = {};
+    var keys = {};
     return rows.map(function (row) {
       var id = row.id.value.trim();
       if (!id) throw new Error("api id is required");
-      if (ids[id]) throw new Error("duplicate api id: " + id);
-      ids[id] = true;
+      var scope = row.scope ? row.scope.value : "user";
+      var key = scope + ":" + id;
+      if (keys[key]) throw new Error("duplicate api id in " + scope + " scope: " + id);
+      keys[key] = true;
       var pricingText = row.pricing.value.trim();
       var pricing;
       if (pricingText) {
@@ -930,7 +976,8 @@
         baseUrl: row.baseUrl.value.trim() || undefined,
         apiKeyEnv: row.apiKeyEnv.value.trim() || undefined,
         defaultModel: row.defaultModel.value.trim() || undefined,
-        pricing: pricing
+        pricing: pricing,
+        scope: scope
       };
     });
   }

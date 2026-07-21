@@ -20,6 +20,10 @@ llm-API readiness are probed in the background and the header's health chips
 fill in once they land (the page never blocks on the doctor). The project
 config page manages both [agent instances](agent-configuration.md) and the
 [API instances](api-configuration.md) direct-inference `llm` steps call.
+Agent and API edits default to **global** scope (`~/.steamtrain/config.json`),
+matching the TUI `/agent` / `/api` commands; each row can opt into project
+scope (`./steamtrain.json`). Timeouts on that page still write to the project
+file.
 
 ## What it shows
 

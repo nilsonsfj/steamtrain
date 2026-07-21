@@ -1158,6 +1158,7 @@ describe("web server", () => {
         runs,
         config,
         configPath,
+        // No userConfigPath → custom/--config mode: entries land in the project file.
         apiDoctor: () => probed ?? [],
         setApiDoctor: (results) => {
           probed = results;
@@ -1174,9 +1175,20 @@ describe("web server", () => {
         }),
       });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { ok: boolean; apis: { id: string }[] };
+      const body = (await res.json()) as {
+        ok: boolean;
+        apis: { id: string; scope?: string }[];
+        apiCatalog: { id: string }[];
+      };
       expect(body.ok).toBe(true);
-      expect(body.apis.map((a) => a.id)).toEqual([
+      expect(body.apis).toEqual([
+        expect.objectContaining({
+          id: "groq",
+          provider: "openai",
+          scope: "project",
+        }),
+      ]);
+      expect(body.apiCatalog.map((a) => a.id)).toEqual([
         "anthropic",
         "openai",
         "openrouter",
@@ -1212,6 +1224,184 @@ describe("web server", () => {
         if (value !== undefined) process.env[name] = value;
       }
     }
+  });
+
+  it("PUT /api/config defaults agents and apis to the user/global file", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const dir = mkdtempSync(join(tmpdir(), "st-cfg-scope-"));
+    tempRoots.push(dir);
+    const configPath = join(dir, "steamtrain.json");
+    const userConfigPath = join(dir, "user-config.json");
+    writeFileSync(configPath, "{}\n");
+    const config: Record<string, unknown> = {};
+    const configLayers = {
+      userAgents: [] as import("../src/config").AgentInstanceConfig[],
+      projectAgents: [] as import("../src/config").AgentInstanceConfig[],
+      userApis: [] as import("../src/config").ApiInstanceConfig[],
+      projectApis: [] as import("../src/config").ApiInstanceConfig[],
+    };
+    const server = createWebServer({
+      host,
+      runs,
+      config,
+      configPath,
+      userConfigPath,
+      configLayers,
+    });
+    servers.push(server);
+    const base = await start(server);
+
+    const res = await fetch(`${base}/api/config`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        agents: [{ id: "mimocode", provider: "opencode" }],
+        apis: [{ id: "groq", provider: "openai", apiKeyEnv: "GROQ_API_KEY" }],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      canGlobal: boolean;
+      agents: { id: string; scope: string }[];
+      apis: { id: string; scope: string }[];
+      agentCatalog?: { id: string }[];
+      apiCatalog?: { id: string }[];
+    };
+    expect(body.ok).toBe(true);
+    expect(body.canGlobal).toBe(true);
+    expect(body.agents).toEqual([expect.objectContaining({ id: "mimocode", scope: "user" })]);
+    expect(body.apis).toEqual([expect.objectContaining({ id: "groq", scope: "user" })]);
+    expect(body.agentCatalog?.some((a) => a.id === "mimocode")).toBe(true);
+    expect(body.apiCatalog?.some((a) => a.id === "groq")).toBe(true);
+
+    const userDisk = JSON.parse(readFileSync(userConfigPath, "utf8")) as {
+      agents: unknown[];
+      apis: unknown[];
+    };
+    expect(userDisk.agents).toEqual([{ id: "mimocode", provider: "opencode" }]);
+    expect(userDisk.apis).toEqual([{ id: "groq", provider: "openai", apiKeyEnv: "GROQ_API_KEY" }]);
+
+    const projectDisk = JSON.parse(readFileSync(configPath, "utf8")) as {
+      agents?: unknown[];
+      apis?: unknown[];
+    };
+    // Project file is wiped of instance entries (empty arrays) so deletes stick;
+    // it must not receive the new global defaults.
+    expect(projectDisk.agents ?? []).toEqual([]);
+    expect(projectDisk.apis ?? []).toEqual([]);
+  });
+
+  it("PUT /api/config allows the same agent id in both user and project scopes", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const dir = mkdtempSync(join(tmpdir(), "st-cfg-dup-"));
+    tempRoots.push(dir);
+    const configPath = join(dir, "steamtrain.json");
+    const userConfigPath = join(dir, "user-config.json");
+    writeFileSync(configPath, "{}\n");
+    const config: Record<string, unknown> = {};
+    const configLayers = {
+      userAgents: [] as import("../src/config").AgentInstanceConfig[],
+      projectAgents: [] as import("../src/config").AgentInstanceConfig[],
+      userApis: [] as import("../src/config").ApiInstanceConfig[],
+      projectApis: [] as import("../src/config").ApiInstanceConfig[],
+    };
+    const server = createWebServer({
+      host,
+      runs,
+      config,
+      configPath,
+      userConfigPath,
+      configLayers,
+    });
+    servers.push(server);
+    const base = await start(server);
+
+    const res = await fetch(`${base}/api/config`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        agents: [
+          { id: "claude", provider: "claude", enabled: true, scope: "user" },
+          { id: "claude", provider: "claude", enabled: false, scope: "project" },
+        ],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      agents: { id: string; scope: string; enabled?: boolean }[];
+    };
+    expect(body.agents).toEqual([
+      expect.objectContaining({ id: "claude", scope: "user", enabled: true }),
+      expect.objectContaining({ id: "claude", scope: "project", enabled: false }),
+    ]);
+    expect(JSON.parse(readFileSync(userConfigPath, "utf8"))).toMatchObject({
+      agents: [{ id: "claude", provider: "claude", enabled: true }],
+    });
+    expect(JSON.parse(readFileSync(configPath, "utf8"))).toMatchObject({
+      agents: [{ id: "claude", provider: "claude", enabled: false }],
+    });
+  });
+
+  it("PUT /api/config honors explicit project scope for agents", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const dir = mkdtempSync(join(tmpdir(), "st-cfg-proj-"));
+    tempRoots.push(dir);
+    const configPath = join(dir, "steamtrain.json");
+    const userConfigPath = join(dir, "user-config.json");
+    writeFileSync(configPath, "{}\n");
+    const config: Record<string, unknown> = {};
+    const configLayers = {
+      userAgents: [] as import("../src/config").AgentInstanceConfig[],
+      projectAgents: [] as import("../src/config").AgentInstanceConfig[],
+      userApis: [] as import("../src/config").ApiInstanceConfig[],
+      projectApis: [] as import("../src/config").ApiInstanceConfig[],
+    };
+    const server = createWebServer({
+      host,
+      runs,
+      config,
+      configPath,
+      userConfigPath,
+      configLayers,
+    });
+    servers.push(server);
+    const base = await start(server);
+
+    const res = await fetch(`${base}/api/config`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        agents: [{ id: "team-bot", provider: "claude", scope: "project" }],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { agents: { id: string; scope: string }[] };
+    expect(body.agents).toEqual([expect.objectContaining({ id: "team-bot", scope: "project" })]);
+
+    expect(JSON.parse(readFileSync(configPath, "utf8"))).toMatchObject({
+      agents: [{ id: "team-bot", provider: "claude" }],
+    });
+    // Empty user wipe is skipped when the global file does not exist yet.
+    expect(() => readFileSync(userConfigPath, "utf8")).toThrow();
   });
 
   it("returns doctorError field when doctor fails (M35)", async () => {
