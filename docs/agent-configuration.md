@@ -72,15 +72,30 @@ Press **Ctrl+A** from any screen (or run `/agents`) to open the agent manager:
 - `↑/↓` select · `Enter`/`Space` enable/disable
 - `a` add — a small form for id, provider, optional binary, and scope
 - `d` delete a configured entry (built-in defaults can only be disabled)
+- `r` recheck — re-run the preflight doctor (pick up a just-installed CLI or a
+  fresh login without restarting)
 - `Esc` close
 
-Each row shows the agent's scope (`global`, `project`, or `builtin`), enabled
-state, provider, binary, and default model.
+Each row shows the agent's **live readiness** (`ready`, `needs sign-in`, `not
+installed`, `error`) with its version when ready, plus scope (`global`,
+`project`, or `builtin`), enabled state, provider, and binary. Selecting an
+agent that isn't ready shows its fix inline — the install or login command —
+so getting set up never means leaving the manager to hunt for the command. The
+header carries a one-line readiness summary (`3/5 ready · 1 sign-in`).
 
 ## Web UI
 
+Every agent's live readiness is a **health chip** in the header. Click any chip
+(green or red) to open the **Agent & API setup** panel: the browser analog of
+`steamtrain init`'s readiness table — each agent and API with its status,
+version/binary, and, for anything not ready, the exact fix with a one-click
+**Copy**. **Recheck** re-runs the doctors in place; **Edit config →** jumps to
+the config editor. Agents that simply aren't installed collapse into one quiet
+chip instead of a wall of red, so the header stays calm on a fresh machine.
+
 The config page (gear icon) edits configured agents with a per-row **scope**
-selector. New agents default to **global** (`~/.steamtrain/config.json`),
-matching `/agent add` and the TUI manager. Choose **project** to write into
+selector, and links back to the setup panel via **Check readiness & fixes →**.
+New agents default to **global** (`~/.steamtrain/config.json`), matching
+`/agent add` and the TUI manager. Choose **project** to write into
 `./steamtrain.json` instead. Timeouts on the same page still save to the
 project file.

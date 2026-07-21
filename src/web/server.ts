@@ -174,6 +174,15 @@ export interface WebServerDeps {
   /** Live API-instance readiness (direct-inference llm steps), like `doctor` for agents. */
   apiDoctor?: () => ApiDoctorResult[];
   setApiDoctor?: (apis: ApiDoctorResult[]) => void;
+  /**
+   * Re-run the agent doctor on demand (POST /api/doctor — the setup panel's
+   * Recheck). The implementation persists the fresh results (updates the live
+   * snapshot + orchestrator + catalog caches) and returns them. When absent,
+   * the route falls back to `runDoctor(config)` + `setDoctor`.
+   */
+  reprobeDoctor?: () => Promise<DoctorResult[]>;
+  /** Re-run the API readiness probes on demand; persists and returns them. */
+  reprobeApiDoctor?: () => Promise<ApiDoctorResult[]>;
   configLabel?: string;
   /**
    * The host address the server is bound to. Local binds get a Host-header
@@ -1372,6 +1381,44 @@ async function handle(
     return;
   }
 
+  // POST re-runs the probes (the setup panel's Recheck): resolve every agent
+  // binary and re-probe every API afresh, so a just-installed CLI or a new
+  // login is reflected without restarting the server — matching the TUI's `r`.
+  // (GET only reads the last snapshot, which is fixed at startup + config save.)
+  if (method === "POST" && path === "/api/doctor") {
+    let results: DoctorResult[];
+    let apis: ApiDoctorResult[];
+    try {
+      if (deps.reprobeDoctor) {
+        results = await deps.reprobeDoctor();
+      } else if (deps.config) {
+        results = await runDoctor(deps.config);
+        deps.setDoctor?.(results);
+      } else {
+        results = deps.doctor?.() ?? [];
+      }
+    } catch (e) {
+      sendJson(res, 500, { error: e instanceof Error ? e.message : String(e) });
+      return;
+    }
+    try {
+      if (deps.reprobeApiDoctor) {
+        apis = await deps.reprobeApiDoctor();
+      } else if (deps.config) {
+        apis = await runApiDoctor(deps.config);
+        deps.setApiDoctor?.(apis);
+      } else {
+        apis = deps.apiDoctor?.() ?? [];
+      }
+    } catch {
+      // API probes are independent — keep the fresh agent results even if the
+      // network probe fails; fall back to the last known API snapshot.
+      apis = deps.apiDoctor?.() ?? [];
+    }
+    sendJson(res, 200, { doctor: results, apis });
+    return;
+  }
+
   if (path === "/api/history") {
     if (method === "GET") {
       const runs = deps.history ? await deps.history.list() : [];
@@ -2333,6 +2380,10 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
     apis: [] as ApiDoctorResult[],
     error: null as string | null,
   };
+  // Single-flight latches so overlapping on-demand rechecks coalesce (see the
+  // reprobe hooks below) instead of spawning redundant concurrent probe rounds.
+  let reprobeDoctorInFlight: Promise<DoctorResult[]> | null = null;
+  let reprobeApiInFlight: Promise<ApiDoctorResult[]> | null = null;
 
   const cacheStore = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
   const historyStore = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
@@ -2374,6 +2425,43 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
     apiDoctor: () => doctorState.apis,
     setApiDoctor: (apis) => {
       doctorState.apis = apis;
+    },
+    // On-demand re-probe for the setup panel's Recheck: same work the startup
+    // and config-save paths do (resolve binaries, refresh catalog annotations),
+    // persisted into the live snapshot so subsequent GETs see it too. Each is
+    // single-flighted: overlapping rechecks (a double-click, or a recheck racing
+    // a config-save) coalesce onto the in-flight probe instead of spawning a
+    // second `--version` storm and letting the slower write clobber the newer.
+    reprobeDoctor: () => {
+      if (!reprobeDoctorInFlight) {
+        reprobeDoctorInFlight = (async () => {
+          try {
+            const results = await runDoctor(liveConfig);
+            doctorState.results = results;
+            doctorState.error = null;
+            orchestrator.setDoctor(results);
+            await refreshAgentCatalogCaches(liveConfig, results);
+            return results;
+          } finally {
+            reprobeDoctorInFlight = null;
+          }
+        })();
+      }
+      return reprobeDoctorInFlight;
+    },
+    reprobeApiDoctor: () => {
+      if (!reprobeApiInFlight) {
+        reprobeApiInFlight = (async () => {
+          try {
+            const apis = await runApiDoctor(liveConfig);
+            doctorState.apis = apis;
+            return apis;
+          } finally {
+            reprobeApiInFlight = null;
+          }
+        })();
+      }
+      return reprobeApiInFlight;
     },
     configLabel: options.configLabel,
     bindHost: host,

@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ApiDoctorResult } from "../src/doctor";
+import type { ApiDoctorResult, DoctorResult } from "../src/doctor";
 import { type WorkflowHost, WorkflowRunManager } from "../src/web/runs";
 import {
   createWebServer,
@@ -1130,6 +1130,65 @@ describe("web server", () => {
     const ids = metaBody.apis.map((a) => a.id);
     expect(ids).toEqual(["anthropic", "openai", "openrouter", "opencode-zen", "groq"]);
     expect(metaBody.apis.find((a) => a.id === "groq")).toMatchObject({ healthy: true });
+  });
+
+  it("POST /api/doctor re-runs the probes (Recheck), unlike GET which reads the snapshot", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    // GET reads this fixed snapshot; POST must invoke the reprobe hooks and
+    // return their fresh results instead (the just-installed / just-signed-in
+    // case the setup panel's Recheck exists for).
+    const snapshotAgent: DoctorResult = {
+      agent: "claude",
+      provider: "claude",
+      status: "binary_missing",
+      binary: "claude",
+      message: "'claude' not found on PATH",
+    };
+    const freshAgent: DoctorResult = {
+      agent: "claude",
+      provider: "claude",
+      status: "ok",
+      binary: "claude",
+      version: "1.2.3",
+      message: "ready",
+    };
+    let reprobedAgents = 0;
+    let reprobedApis = 0;
+    const server = createWebServer({
+      host,
+      runs,
+      doctor: () => [snapshotAgent],
+      apiDoctor: () => [],
+      reprobeDoctor: async () => {
+        reprobedAgents += 1;
+        return [freshAgent];
+      },
+      reprobeApiDoctor: async () => {
+        reprobedApis += 1;
+        return [];
+      },
+    });
+    servers.push(server);
+    const base = await start(server);
+
+    const getBody = (await (await fetch(`${base}/api/doctor`)).json()) as {
+      doctor: DoctorResult[];
+    };
+    expect(getBody.doctor[0]).toMatchObject({ agent: "claude", status: "binary_missing" });
+    expect(reprobedAgents).toBe(0);
+
+    const postRes = await fetch(`${base}/api/doctor`, { method: "POST" });
+    expect(postRes.status).toBe(200);
+    const postBody = (await postRes.json()) as { doctor: DoctorResult[]; apis: unknown[] };
+    expect(postBody.doctor[0]).toMatchObject({ agent: "claude", status: "ok", version: "1.2.3" });
+    expect(reprobedAgents).toBe(1);
+    expect(reprobedApis).toBe(1);
   });
 
   it("PUT /api/config saves apis into the project file and re-probes readiness", async () => {
