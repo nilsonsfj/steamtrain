@@ -796,6 +796,10 @@ const mainlineStream: WorkflowSpec = {
       title: "Stream summary",
       steps: [
         {
+          // Depends on stream-issues even though that step only runs in the
+          // "live" issue-timing flow: consolidators treat a skipped
+          // dependency as absent (not failed), so in the default "end" flow
+          // the summary renders exactly the same minus the issues section.
           id: "summary",
           kind: "consolidator",
           dependsOn: ["review-gate", "stream-issues"],
