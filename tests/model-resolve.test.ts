@@ -271,4 +271,38 @@ describe("resolveWorkflowBindings", () => {
     expect(step.agent).not.toBe("claude");
     expect(result.resolutions[0]?.primary.familyId).toBe("claude-opus-4.8");
   });
+
+  it("keeps session-continue pairs on the same resolved agent", () => {
+    const spec: WorkflowSpec = {
+      name: "session-sticky",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "design", model: "opus 4.8", prompt: "design" }],
+        },
+        {
+          id: "p2",
+          title: "P2",
+          steps: [
+            {
+              id: "refine",
+              model: "opus 4.8",
+              session: "continue:design",
+              prompt: "refine",
+            },
+          ],
+        },
+      ],
+    };
+    const result = resolveWorkflowBindings(spec, {
+      config: DEFAULT_CONFIG,
+      isReady: () => true,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const a = result.spec.phases[0]!.steps[0] as { agent: string };
+    const b = result.spec.phases[1]!.steps[0] as { agent: string };
+    expect(a.agent).toBe(b.agent);
+  });
 });

@@ -75,20 +75,33 @@ export function resolveWorkflowBindings(
   const preservePinned = options.preservePinned !== false;
   const resolutions: StepBindingResolution[] = [];
   const phases: WorkflowSpec["phases"] = [];
+  /** Sticky agent preference for session-continue chains within this pass. */
+  const resolvedAgentByStep = new Map<string, AgentInstanceId>();
 
   for (const phase of spec.phases) {
     const steps: WorkflowStep[] = [];
     for (const step of phase.steps) {
       if (!stepNeedsResolve(step, preservePinned, options.isReady)) {
         steps.push(step);
+        if (isAgentBackedStep(step) && typeof step.agent === "string") {
+          resolvedAgentByStep.set(step.id, step.agent);
+        }
         continue;
       }
-      const request = bindingRequestFromStep(step as AgentBackedWorkflowStep);
       const backed = step as AgentBackedWorkflowStep;
+      const sessionSrc =
+        "session" in backed && typeof backed.session === "string"
+          ? /^continue:(.+)$/.exec(backed.session)?.[1]
+          : undefined;
+      const sticky =
+        (sessionSrc && resolvedAgentByStep.get(sessionSrc)) ||
+        (typeof backed.agent === "string" ? backed.agent : undefined);
+
+      const request = bindingRequestFromStep(backed);
       const resolved = resolveModelBinding(request, {
         config: options.config,
         isReady: options.isReady,
-        preferAgent: typeof backed.agent === "string" ? backed.agent : undefined,
+        preferAgent: sticky,
       });
       if (!resolved.ok) {
         return {
@@ -104,7 +117,9 @@ export function resolveWorkflowBindings(
         candidates: resolved.candidates,
         summary: resolved.summary,
       });
-      steps.push(applyBinding(step, resolved.primary));
+      const next = applyBinding(step, resolved.primary);
+      steps.push(next);
+      resolvedAgentByStep.set(step.id, resolved.primary.agent);
     }
     phases.push({ ...phase, steps });
   }
