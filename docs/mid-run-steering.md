@@ -61,14 +61,15 @@ step's result is flagged. A steered run is still an honest record.
 ## Using it
 
 **TUI** — during a live run press `p` to pause (press again to resume). While
-paused, pick a pending step with `↑/↓` and press `e` to open the editor; type
-the new prompt/command, `Enter` applies it as one recorded edit, `Esc`
-discards.
+paused, pick a pending step with `↑/↓` and press `e` to open the editor; edit
+the prompt/command and (for agent-backed steps) cycle model/effort with ←/→,
+`Enter` applies the whole patch as one recorded edit, `Esc` discards.
 
 **Web UI** — the run bar gains a **⏸ Pause / ▶ Resume** button next to
 Cancel. While paused, pending step cards show an **✎ Edit step** button that
-opens the prompt/command editor. Works for the page's own runs and for
-attached runs owned by other processes.
+opens the prompt/command editor, plus model/effort selects for agent-backed
+steps. Works for the page's own runs and for attached runs owned by other
+processes.
 
 **CLI** — works on any live run in the project, whoever owns it (TUI, web,
 `--detach`):

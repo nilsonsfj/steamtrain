@@ -11,7 +11,7 @@ import type { AgentConfigScope, AgentInstanceConfig } from "../../config/types";
 import { isWorkspaceMode } from "../../tui/modes";
 import type { SlashCommand, SlashCommandContext, SlashCommandResult } from "../types";
 import {
-  completeWorkflowAgentArgs,
+  completeWorkflowAgentArgsWithAll,
   executeWorkflowAgentCommand,
   hasWorkflowStepTarget,
   workflowStepUnavailableNotice,
@@ -64,7 +64,7 @@ export const agentCommand: SlashCommand = {
   name: "agent",
   description: "Set, list, enable, disable, or add configured agents",
   usage:
-    "/agent [id] · /agent list · /agent enable|disable <id> [--global|--project] · /agent add <id> <provider> [binary] [--global|--project]",
+    "/agent [id] [--all] · /agent list · /agent enable|disable <id> [--global|--project] · /agent add <id> <provider> [binary] [--global|--project]",
   execute(rawArgs, ctx) {
     const { args, scope: scopeArg } = extractScopeFlag(rawArgs);
     const configuredAgents = resolveAgentInstances(ctx.config, { includeDisabled: true });
@@ -234,8 +234,7 @@ export const agentCommand: SlashCommand = {
       return [];
     }
     if (hasWorkflowStepTarget(ctx)) {
-      if (args.length > 1) return [];
-      return completeWorkflowAgentArgs(ctx);
+      return completeWorkflowAgentArgsWithAll(args, ctx);
     }
     if (!isWorkspaceMode(ctx.mode)) return [];
     if (!ctx.workspaceMap.get(ctx.mode)) return [];

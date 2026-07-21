@@ -2250,13 +2250,41 @@
     var current = isCmd
       ? (edits.cmd != null ? edits.cmd : (specStep && specStep.cmd) || "")
       : (edits.prompt != null ? edits.prompt : (specStep && specStep.prompt) || "");
-    var ta = h("textarea", { class: "edit-step-text", rows: "12", spellcheck: "false" });
+    var ta = h("textarea", { class: "edit-step-text", rows: "10", spellcheck: "false" });
     ta.value = current;
+
+    var agentBacked = !!(specStep && specStep.agent);
+    var modelSel = null;
+    var effortField = h("div", { class: "field" });
+    var modelRow = null;
+    if (agentBacked && !isCmd) {
+      var agent = specStep.agent;
+      var curModel = edits.model != null ? edits.model : specStep.model;
+      var curEffort = edits.effort != null ? edits.effort : (specStep.effort || "");
+      modelSel = selectEl(modelOptionsWith(agent, curModel), curModel);
+      function renderMidEffort() {
+        clear(effortField);
+        var opts = effortOptions(agent, modelSel.value, curEffort);
+        if (opts.length <= 1) { effortField._sel = null; return; }
+        effortField.appendChild(h("label", { text: "Effort" }));
+        var es = selectEl(opts, curEffort || "");
+        effortField.appendChild(es);
+        effortField._sel = es;
+      }
+      modelSel.addEventListener("change", renderMidEffort);
+      renderMidEffort();
+      modelRow = h("div", { class: "row2" },
+        field("Model", modelSel, "Applies when this step runs (agent stays " + agent + ")."),
+        effortField
+      );
+    }
+
     var body = h("div", null,
       h("div", { class: "hint", text: isCmd
         ? "Shell command the step will run when the workflow resumes."
         : "Prompt the step will run with when the workflow resumes ({{...}} templates still apply)." }),
-      ta
+      ta,
+      modelRow
     );
     var applyBtn = h("button", { class: "btn primary", text: "Apply edit" });
     var foot = h("div", { class: "mfoot" },
@@ -2267,11 +2295,16 @@
     applyBtn.addEventListener("click", function () {
       var payload = { stepId: s.stepId };
       payload[isCmd ? "cmd" : "prompt"] = ta.value;
+      if (modelSel) {
+        payload.model = modelSel.value;
+        var ef = effortField._sel ? effortField._sel.value : "";
+        if (ef) payload.effort = ef;
+      }
       applyBtn.disabled = true;
       apiAuth("POST", "/api/runs/" + S.runId + "/edit-step", payload).then(function (r) {
         if (r.status === 200) {
           closeModal();
-          setBanner("Step '" + s.stepId + "' edited — it runs with the new " + (isCmd ? "command" : "prompt") + " after you resume.", "ok");
+          setBanner("Step '" + s.stepId + "' edited — it runs with the new values after you resume.", "ok");
         } else if (r.status === 202) {
           closeModal();
           setBanner("Edit requested for '" + s.stepId + "' — awaiting the owning process; watch the run to confirm.", "info");
@@ -3233,6 +3266,13 @@
     var k = st.kind || "worker";
     return k === "worker" || k === "processor";
   }
+  function countAgentSteps(spec) {
+    var n = 0;
+    (spec.phases || []).forEach(function (p) {
+      (p.steps || []).forEach(function (st) { if (isAgentStep(st)) n++; });
+    });
+    return n;
+  }
   function openEditor(clone) {
     if (!S.spec) return;
     if (!S.agents.length) { setBanner("agent catalog still loading; try again in a moment", "info"); return; }
@@ -3249,12 +3289,118 @@
     var scopeSel = selectEl(scopeOptions(), "user");
     var banner = h("div", { class: "mbanner" });
     var refs = {};
+    var agentStepCount = countAgentSteps(spec);
 
-    var phasesWrap = h("div", null);
+    // ── Retarget-all bar: one agent/model/effort → every agent-backed step ──
+    var bulkFlash = h("div", { class: "bulk-flash" });
+    var bulkAgent = preferredAgent();
+    var bulkAgentSel = selectEl(agentOptionsWith(bulkAgent ? bulkAgent.id : ""), bulkAgent ? bulkAgent.id : "");
+    var bulkModelSel = selectEl(
+      modelOptionsWith(bulkAgentSel.value, bulkAgent ? bulkAgent.defaultModel : ""),
+      bulkAgent ? bulkAgent.defaultModel : ""
+    );
+    var bulkEffortField = h("div", { class: "field bulk-effort" });
+    var bulkApplyBtn = h("button", {
+      class: "btn primary bulk-apply",
+      text: agentStepCount > 0 ? "Apply to all " + agentStepCount + " steps" : "No agent steps",
+      type: "button"
+    });
+    if (agentStepCount === 0) bulkApplyBtn.disabled = true;
+
+    function renderBulkEffort() {
+      clear(bulkEffortField);
+      var opts = effortOptions(bulkAgentSel.value, bulkModelSel.value);
+      bulkEffortField.appendChild(h("label", { text: "Effort" }));
+      if (opts.length <= 1) {
+        bulkEffortField.appendChild(h("div", { class: "ro", text: "default only" }));
+        bulkEffortField._sel = null;
+        return;
+      }
+      var es = selectEl(opts, "");
+      bulkEffortField.appendChild(es);
+      bulkEffortField._sel = es;
+    }
+    bulkAgentSel.addEventListener("change", function () {
+      var a = agentById(bulkAgentSel.value);
+      fillOptions(bulkModelSel, modelOptions(bulkAgentSel.value), a ? a.defaultModel : null);
+      renderBulkEffort();
+    });
+    bulkModelSel.addEventListener("change", renderBulkEffort);
+    renderBulkEffort();
+
+    function applyBulkRetarget() {
+      var agent = bulkAgentSel.value;
+      var model = bulkModelSel.value;
+      var effort = bulkEffortField._sel ? bulkEffortField._sel.value : "";
+      if (!agent || !model) { mbanner(banner, "pick an agent and model first", "info"); return; }
+      var changed = 0;
+      Object.keys(refs).forEach(function (id) {
+        var r = refs[id];
+        if (!r || !r.agentSel) return;
+        var agentChanged = r.agentSel.value !== agent;
+        if (agentChanged) {
+          r.agentSel.value = agent;
+          fillOptions(r.modelSel, modelOptionsWith(agent, model), model);
+          if (r.renderEffort) r.renderEffort();
+        } else {
+          r.modelSel.value = model;
+          if (r.renderEffort) r.renderEffort();
+        }
+        if (r.effortSel) {
+          // Empty bulk effort = model default. Unlike TUI buildBulkRetargetPatches
+          // (which revalidates via effortForModelChange), the Web path clears the
+          // select when the chosen effort is not in this step's options.
+          var has = Array.prototype.some.call(r.effortSel.options, function (o) { return o.value === effort; });
+          r.effortSel.value = has ? effort : "";
+        }
+        if (r.card) {
+          r.card.classList.remove("estep-flash");
+          // Force reflow so the animation can re-trigger on repeated applies.
+          void r.card.offsetWidth;
+          r.card.classList.add("estep-flash");
+        }
+        changed++;
+      });
+      bulkFlash.className = "bulk-flash show";
+      bulkFlash.textContent = changed
+        ? "Retargeted " + changed + " step" + (changed === 1 ? "" : "s") + " \u2192 " + agent + " \u00b7 " + model + (effort ? " \u00b7 " + effort : "")
+        : "No agent steps to retarget";
+      mbanner(banner, "", "");
+      try { bulkBar.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) { /* ignore */ }
+    }
+    bulkApplyBtn.addEventListener("click", applyBulkRetarget);
+
+    var bulkBar = h("div", { class: "bulk-retarget" },
+      h("div", { class: "bulk-retarget-head" },
+        h("div", { class: "bulk-retarget-title", text: "Retarget all agent steps" }),
+        h("div", { class: "bulk-retarget-sub", text: "Set every worker / processor / agent-backed step to one agent and model in a single click." })
+      ),
+      h("div", { class: "bulk-retarget-row" },
+        field("Agent", bulkAgentSel),
+        field("Model", bulkModelSel),
+        bulkEffortField,
+        h("div", { class: "bulk-retarget-action" }, bulkApplyBtn)
+      ),
+      bulkFlash
+    );
+
+    var phasesWrap = h("div", { class: "ephases" });
     spec.phases.forEach(function (p) {
       var pe = h("div", { class: "ephase" }, h("div", { class: "et", text: (p.title || p.id) }));
       p.steps.forEach(function (st) {
-        pe.appendChild(stepEditor(st, refs));
+        pe.appendChild(stepEditor(st, refs, {
+          onUseForAll: function (agent, model, effort) {
+            bulkAgentSel.value = agent;
+            var a = agentById(agent);
+            fillOptions(bulkModelSel, modelOptionsWith(agent, model), model || (a && a.defaultModel));
+            renderBulkEffort();
+            if (bulkEffortField._sel && effort != null) {
+              var has = Array.prototype.some.call(bulkEffortField._sel.options, function (o) { return o.value === (effort || ""); });
+              if (has) bulkEffortField._sel.value = effort || "";
+            }
+            applyBulkRetarget();
+          }
+        }));
       });
       phasesWrap.appendChild(pe);
     });
@@ -3270,6 +3416,7 @@
         field("Workflow timeout (min)", wfRunInput, "Whole-run limit. Empty = steps × step timeout.")
       ),
       creating ? field("Save to", scopeSel, "Project = ./steamtrain.json (committable, shared).") : null,
+      agentStepCount > 0 ? bulkBar : null,
       phasesWrap
     );
 
@@ -3301,15 +3448,17 @@
         p.steps.forEach(function (st) {
           var r = refs[st.id];
           if (!r) return;
-          st.agent = r.agentSel.value;
-          st.model = r.modelSel.value;
-          var ef = r.effortSel ? r.effortSel.value : "";
-          if (ef) st.effort = ef; else delete st.effort;
-          st.prompt = r.promptTa.value;
+          if (r.agentSel) {
+            st.agent = r.agentSel.value;
+            st.model = r.modelSel.value;
+            var ef = r.effortSel ? r.effortSel.value : "";
+            if (ef) st.effort = ef; else delete st.effort;
+          }
+          if (r.promptTa) st.prompt = r.promptTa.value;
           if (r.stepTimeoutInput && r.stepTimeoutInput.value.trim()) {
             var stepSec = Number(r.stepTimeoutInput.value) * 60;
             if (stepSec > 0) st.stepTimeoutSec = stepSec; else delete st.stepTimeoutSec;
-          } else delete st.stepTimeoutSec;
+          } else if (r.stepTimeoutInput) delete st.stepTimeoutSec;
         });
       });
       saveBtn.disabled = true; saveBtn.textContent = "Saving…";
@@ -3342,15 +3491,17 @@
             var r = refs[st.id];
             if (!r) return;
             var patch = {};
-            patch.agent = r.agentSel.value;
-            patch.model = r.modelSel.value;
-            var ef = r.effortSel ? r.effortSel.value : "";
-            patch.effort = ef || null;
-            patch.prompt = r.promptTa.value;
+            if (r.agentSel) {
+              patch.agent = r.agentSel.value;
+              patch.model = r.modelSel.value;
+              var ef = r.effortSel ? r.effortSel.value : "";
+              patch.effort = ef || null;
+            }
+            if (r.promptTa) patch.prompt = r.promptTa.value;
             if (r.stepTimeoutInput && r.stepTimeoutInput.value.trim()) {
               var stepSec = Number(r.stepTimeoutInput.value) * 60;
               patch.stepTimeoutSec = stepSec > 0 ? stepSec : null;
-            } else patch.stepTimeoutSec = null;
+            } else if (r.stepTimeoutInput) patch.stepTimeoutSec = null;
             if (Object.keys(patch).length > 0) overrides.steps[st.id] = patch;
           });
         });
@@ -3371,31 +3522,41 @@
     }
 
     openModal(modalShell(creating ? "Clone workflow" : "Configure " + spec.name,
-      "Set the agent, model, effort, and prompt for each step.", body, foot, true));
+      agentStepCount > 0
+        ? "Retarget every agent step at once, or tune agent, model, effort, and prompt per step."
+        : "Set the agent, model, effort, and prompt for each step.",
+      body, foot, true));
   }
 
-  function stepEditor(st, refs) {
+  function stepEditor(st, refs, opts) {
+    opts = opts || {};
     var kind = st.kind || "worker";
-    var card = h("div", { class: "estep " + kind },
-      h("div", { class: "eh" },
-        h("span", { class: "esid", text: st.id }),
-        h("span", { class: "ek", text: kind }),
-        st.dependsOn && st.dependsOn.length ? h("span", { class: "ro", text: "\u2190 " + st.dependsOn.join(", ") }) : null
-      )
+    var header = h("div", { class: "eh" },
+      h("span", { class: "esid", text: st.id }),
+      h("span", { class: "ek", text: kind }),
+      st.dependsOn && st.dependsOn.length ? h("span", { class: "ro", text: "\u2190 " + st.dependsOn.join(", ") }) : null
     );
+    var card = h("div", { class: "estep " + kind }, header);
     if (st.workspace || (st.artifacts && st.artifacts.length)) {
       var wsBits = [];
       if (st.workspace) wsBits.push("workspace: " + st.workspace);
       if (st.artifacts && st.artifacts.length) wsBits.push("artifacts: " + st.artifacts.join(", "));
       card.appendChild(h("div", { class: "ro", text: wsBits.join(" \u00b7 ") }));
     }
+    // llm steps: editable prompt (model stays API-bound / read-only note).
+    if (kind === "llm") {
+      var llmNote = "api: " + ((st.provider || (st.model && st.model.indexOf("claude") === 0 ? "anthropic" : "openai")) + "/" + (st.model || ""));
+      card.appendChild(h("div", { class: "ro", text: llmNote }));
+      var llmPrompt = h("textarea", { class: "ta", text: st.prompt || "" });
+      refs[st.id] = { promptTa: llmPrompt, card: card };
+      card.appendChild(field("Prompt", llmPrompt));
+      return card;
+    }
     if (!isAgentStep(st)) {
       var note = kind === "gate"
         ? "gate: " + describeGate(st)
         : kind === "command"
           ? "$ " + (st.cmd || "")
-          : kind === "llm"
-          ? "api: " + ((st.provider || (st.model && st.model.indexOf("claude") === 0 ? "anthropic" : "openai")) + "/" + (st.model || ""))
           : kind === "workflow"
             ? "invokes workflow: " + (st.workflow || "") + (st.outputStep ? " · outputStep: " + st.outputStep : "")
             : kind === "human"
@@ -3419,7 +3580,7 @@
       var opts = effortOptions(agentSel.value, modelSel.value, st.effort);
       if (opts.length <= 1) { refs[st.id].effortSel = null; return; }
       effortField.appendChild(h("label", { text: "Effort" }));
-      var es = selectEl(opts, st.effort || "");
+      var es = selectEl(opts, (refs[st.id].effortSel && refs[st.id].effortSel.value) || st.effort || "");
       effortField.appendChild(es);
       refs[st.id].effortSel = es;
     }
@@ -3430,7 +3591,31 @@
     });
     modelSel.addEventListener("change", renderEffort);
 
-    refs[st.id] = { agentSel: agentSel, modelSel: modelSel, effortSel: null, promptTa: promptTa, stepTimeoutInput: stepTimeoutInput };
+    var useAllBtn = h("button", {
+      class: "btn small use-for-all",
+      text: "Use for all \u2192",
+      type: "button",
+      title: "Apply this step's agent, model, and effort to every agent-backed step"
+    });
+    useAllBtn.addEventListener("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof opts.onUseForAll === "function") {
+        opts.onUseForAll(agentSel.value, modelSel.value, refs[st.id].effortSel ? refs[st.id].effortSel.value : "");
+      }
+    });
+    header.appendChild(h("span", { class: "eh-spacer" }));
+    header.appendChild(useAllBtn);
+
+    refs[st.id] = {
+      agentSel: agentSel,
+      modelSel: modelSel,
+      effortSel: null,
+      promptTa: promptTa,
+      stepTimeoutInput: stepTimeoutInput,
+      renderEffort: renderEffort,
+      card: card
+    };
     card.appendChild(h("div", { class: "row2" },
       field("Agent", agentSel), field("Model", modelSel), effortField));
     card.appendChild(field("Step timeout (min)", stepTimeoutInput, "Per-agent subprocess limit for this step."));

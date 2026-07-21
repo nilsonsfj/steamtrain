@@ -124,6 +124,36 @@ export function useWorkflowPicker({
     [wfPreview, setWfStepOverrides],
   );
 
+  /** Stage the same (or per-step) patches onto many steps in one state update. */
+  const patchWorkflowSteps = useCallback(
+    (
+      patches: Record<
+        string,
+        Partial<
+          Pick<WorkspaceEntry, "agent" | "model" | "effort"> & {
+            prompt?: string;
+            stepTimeoutSec?: number;
+            cwd?: string;
+            env?: Record<string, string>;
+            extraArgs?: string[];
+          }
+        >
+      >,
+    ) => {
+      if (!wfPreview) return;
+      const entries = Object.entries(patches);
+      if (entries.length === 0) return;
+      setWfStepOverrides((prev) => {
+        const current = { ...(prev[wfPreview.name] ?? {}) };
+        for (const [stepId, patch] of entries) {
+          current[stepId] = { ...(current[stepId] ?? {}), ...patch };
+        }
+        return { ...prev, [wfPreview.name]: current };
+      });
+    },
+    [wfPreview, setWfStepOverrides],
+  );
+
   // Preview derivations.
   const previewSpec = wfPreview ? resolveWorkflowSpec(wfPreview.name) : undefined;
   const previewFlatSteps = useMemo(
@@ -528,6 +558,7 @@ export function useWorkflowPicker({
     healthyAgents,
     draftResolution,
     patchWorkflowStep,
+    patchWorkflowSteps,
     cloneWorkflow,
     deleteWorkflow,
     renameWorkflow,
