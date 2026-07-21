@@ -29,6 +29,7 @@ const DRAFT_AGENT_ORDER: readonly AgentProviderId[] = [
   "amp",
   "kiro",
   "cursor",
+  "antigravity",
 ];
 
 const draftOrderCache = new WeakMap<SteamtrainConfig, AgentInstanceId[]>();

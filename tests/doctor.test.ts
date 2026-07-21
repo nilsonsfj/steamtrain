@@ -51,6 +51,20 @@ describe("checkAgent cursor", () => {
   });
 });
 
+describe("checkAgent antigravity", () => {
+  it("reports missing binary with an install hint", async () => {
+    const result = await checkAgent("antigravity", "__steamtrain_missing_agy__", {
+      provider: "antigravity",
+    });
+    expect(result).toMatchObject({
+      agent: "antigravity",
+      status: "binary_missing",
+      binary: "__steamtrain_missing_agy__",
+    });
+    expect(result.detail).toContain("antigravity.google/cli/install.sh");
+  });
+});
+
 describe("checkAgent ok", () => {
   it("reports ok status for a reachable binary", async () => {
     const result = await checkAgent("claude", "node", { provider: "claude" });

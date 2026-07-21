@@ -15,11 +15,12 @@ import type { WorkflowHistoryStore } from "./history-store";
  * `steamtrain workflow takeover <runId> <stepId>` plans and launches the
  * agent's *interactive* CLI (no `--print`) in the step's worktree, resuming
  * the step's recorded session where the provider supports it (claude:
- * `--resume <sessionId>`; other providers launch a fresh interactive session
- * in the same worktree, clearly noted). When the human exits, the takeover is
- * recorded in run history as an intervention, and the worktree's final state
- * flows into the existing merge/diff machinery — `history show --diff` and
- * `history apply` see exactly what the human left behind.
+ * `--resume <sessionId>`; cursor: `--resume <sessionId>`; antigravity:
+ * `--conversation <sessionId>`; other providers launch a fresh interactive
+ * session in the same worktree, clearly noted). When the human exits, the
+ * takeover is recorded in run history as an intervention, and the worktree's
+ * final state flows into the existing merge/diff machinery — `history show
+ * --diff` and `history apply` see exactly what the human left behind.
  *
  * Takeover targets *recorded* runs (finished: done / error / canceled). A
  * live run's steps are still owned by the engine — pause or cancel it first.
@@ -34,6 +35,8 @@ const INTERACTIVE_RESUME_ARGS: Partial<Record<AgentProviderId, (sessionId: strin
   claude: (sessionId) => ["--resume", sessionId],
   // Cursor Agent CLI uses the same `--resume <chatId>` flag interactively and headlessly.
   cursor: (sessionId) => ["--resume", sessionId],
+  // Antigravity CLI resumes by conversation id (interactive and headless).
+  antigravity: (sessionId) => ["--conversation", sessionId],
 };
 
 export interface TakeoverPlan {

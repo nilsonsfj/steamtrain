@@ -1399,7 +1399,8 @@ function parseCreateOptions(args: string[]): CreateOptions | null {
         value !== "codex" &&
         value !== "amp" &&
         value !== "kiro" &&
-        value !== "cursor"
+        value !== "cursor" &&
+        value !== "antigravity"
       )
         return null;
       options.agent = value;

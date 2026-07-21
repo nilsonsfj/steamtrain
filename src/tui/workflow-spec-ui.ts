@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import {
   AMP_MODELS,
+  ANTIGRAVITY_MODELS,
   CLAUDE_MODELS,
   CODEX_MODELS,
   CURSOR_MODELS,
@@ -251,5 +252,7 @@ function staticModelName(agent: AgentInstanceId, model: string): string | undefi
       return KIRO_MODELS.find((entry) => entry.id === model)?.name;
     case "cursor":
       return CURSOR_MODELS.find((entry) => entry.id === model)?.name;
+    case "antigravity":
+      return ANTIGRAVITY_MODELS.find((entry) => entry.id === model)?.name;
   }
 }

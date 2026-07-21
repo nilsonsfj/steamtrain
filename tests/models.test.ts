@@ -235,3 +235,25 @@ describe("cursor models", () => {
     expect(effortForModelChange("cursor", "composer-2.5[effort=high]", "high")).toBeUndefined();
   });
 });
+
+describe("antigravity models", () => {
+  it("exposes antigravity models with Gemini 3.1 Pro (High) as the default", () => {
+    expect(modelIdsForAgent("antigravity")).toContain("Gemini 3.1 Pro (High)");
+    expect(defaultModelForAgent("antigravity")).toBe("Gemini 3.1 Pro (High)");
+  });
+
+  it("supports effort remapping only when the model has no parenthetical suffix", () => {
+    expect(effortsForModel("antigravity", "Gemini 3.1 Pro")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "thinking",
+    ]);
+    expect(effortsForModel("antigravity", "Gemini 3.1 Pro (High)")).toEqual([]);
+  });
+
+  it("keeps effort when switching antigravity models only if still supported", () => {
+    expect(effortForModelChange("antigravity", "Gemini 3.1 Pro", "high")).toBe("high");
+    expect(effortForModelChange("antigravity", "Gemini 3.1 Pro (High)", "high")).toBeUndefined();
+  });
+});

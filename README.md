@@ -67,8 +67,8 @@ A tour of what it does and why it's useful — not an exhaustive spec (that's
 
 ### Run every major coding agent through one interface
 
-steamtrain spawns the real `claude`, `opencode`, `codex`, `agent` (Cursor), and
-`amp` CLIs (no stubs) and maps each one's streaming output onto a single
+steamtrain spawns the real `claude`, `opencode`, `codex`, `agent` (Cursor), `agy`
+(Antigravity), and `amp` CLIs (no stubs) and maps each one's streaming output onto a single
 normalized event model. Whichever agent produced a line — assistant text, a
 tool call, a result, an error — it renders in the same unified, color-coded
 stream. Mix agents freely in one workflow; steamtrain speaks all five.
@@ -609,7 +609,7 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
 - **Step kinds:** `worker` / `processor`, `distributor`, `consolidator`, `gate`,
   `llm` (direct-API inference), `command` (run a shell check), and `merge`
   (harvest worktree edits). Existing steps without `kind` are workers.
-- **Agent-backed fields:** `agent` (`claude` | `opencode` | `codex` | `cursor` | `amp`), `model`, `prompt`,
+- **Agent-backed fields:** `agent` (`claude` | `opencode` | `codex` | `cursor` | `antigravity` | `amp` | `kiro`), `model`, `prompt`,
   plus optional `cwd` (the **target** dir; relative paths resolve against the
   launch cwd), `env` (extra vars), and `extraArgs` (extra CLI flags).
 - **Dynamic fan-out:** add `forEach: "steps.<id>.items"` to a worker/processor

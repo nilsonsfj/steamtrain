@@ -858,6 +858,7 @@ Semantics:
 | `opencode` | `opencode run --session <sessionId>` | fresh session in worktree |
 | `codex` | `codex exec resume <sessionId>` | fresh session in worktree |
 | `cursor` | `agent --resume <sessionId>` | `--resume <sessionId>` |
+| `antigravity` | `agy --conversation <sessionId>` | `--conversation <sessionId>` |
 | `amp`, `kiro` | not supported | fresh session in worktree |
 - Session ids land in run history and in the step cache: `sessionId` is what
   the step recorded, `resumedSessionId` is the lineage it continued. On a
