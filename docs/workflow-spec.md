@@ -798,7 +798,8 @@ step's actual agent conversation:
 
 The step's prompt is then delivered into the source step's recorded CLI
 session (`claude --resume <sessionId>`, `opencode run --session <sessionId>`,
-`codex exec resume <sessionId>`, `agent --resume <sessionId>`), so the agent
+`codex exec resume <sessionId>`, `agent --resume <sessionId>`,
+`agy --conversation <sessionId>`), so the agent
 keeps everything the source conversation already established — files it read,
 decisions it made, context it never wrote down. Steps without the field keep
 today's clean-room behavior, which is often what you want for independent
@@ -858,6 +859,7 @@ Semantics:
 | `opencode` | `opencode run --session <sessionId>` | fresh session in worktree |
 | `codex` | `codex exec resume <sessionId>` | fresh session in worktree |
 | `cursor` | `agent --resume <sessionId>` | `--resume <sessionId>` |
+| `antigravity` | `agy --conversation <sessionId>` | `--conversation <sessionId>` |
 | `amp`, `kiro` | not supported | fresh session in worktree |
 - Session ids land in run history and in the step cache: `sessionId` is what
   the step recorded, `resumedSessionId` is the lineage it continued. On a

@@ -1,0 +1,457 @@
+import { describe, expect, it } from "vitest";
+import {
+  ANTIGRAVITY_MODELS,
+  AntigravityAdapter,
+  buildAntigravityRunArgs,
+  extractAntigravityConversationId,
+  formatAntigravityPrintTimeout,
+  resolveAntigravityModel,
+  runAntigravityProcess,
+} from "../src/agents/antigravity";
+import {
+  parseAntigravityPlannerResponse,
+  recoverAntigravityTranscriptText,
+} from "../src/agents/antigravity-transcript";
+
+describe("buildAntigravityRunArgs", () => {
+  it("puts --print and the prompt last, with headless safety flags", () => {
+    expect(
+      buildAntigravityRunArgs({
+        prompt: "hello world",
+        model: "Gemini 3.1 Pro (High)",
+      }),
+    ).toEqual([
+      "--model",
+      "Gemini 3.1 Pro (High)",
+      "--dangerously-skip-permissions",
+      "--mode",
+      "accept-edits",
+      "--print",
+      "hello world",
+    ]);
+  });
+
+  it("includes resume, print-timeout, and extraArgs before --print", () => {
+    expect(
+      buildAntigravityRunArgs({
+        prompt: "continue",
+        model: "Gemini 3.5 Flash (Low)",
+        resumeSessionId: "conv-123",
+        timeoutMs: 90_000,
+        extraArgs: ["--sandbox", "--add-dir", "/tmp/extra"],
+      }),
+    ).toEqual([
+      "--model",
+      "Gemini 3.5 Flash (Low)",
+      "--dangerously-skip-permissions",
+      "--mode",
+      "accept-edits",
+      "--conversation",
+      "conv-123",
+      "--print-timeout",
+      "90s",
+      "--sandbox",
+      "--add-dir",
+      "/tmp/extra",
+      "--print",
+      "continue",
+    ]);
+  });
+});
+
+describe("resolveAntigravityModel", () => {
+  it("appends effort suffix when model has none", () => {
+    expect(resolveAntigravityModel("Gemini 3.1 Pro", "high")).toBe("Gemini 3.1 Pro (High)");
+    expect(resolveAntigravityModel("Gemini 3.5 Flash", "low")).toBe("Gemini 3.5 Flash (Low)");
+    expect(resolveAntigravityModel("Claude Sonnet 4.6", "thinking")).toBe(
+      "Claude Sonnet 4.6 (Thinking)",
+    );
+  });
+
+  it("leaves models that already have a parenthetical suffix alone", () => {
+    expect(resolveAntigravityModel("Gemini 3.1 Pro (High)", "low")).toBe("Gemini 3.1 Pro (High)");
+  });
+
+  it("ignores unknown effort labels", () => {
+    expect(resolveAntigravityModel("Gemini 3.1 Pro", "mystery")).toBe("Gemini 3.1 Pro");
+  });
+});
+
+describe("formatAntigravityPrintTimeout", () => {
+  it("formats milliseconds as whole seconds", () => {
+    expect(formatAntigravityPrintTimeout(1000)).toBe("1s");
+    expect(formatAntigravityPrintTimeout(90_000)).toBe("90s");
+    expect(formatAntigravityPrintTimeout(1500)).toBe("2s");
+  });
+
+  it("returns undefined for missing/non-positive timeouts", () => {
+    expect(formatAntigravityPrintTimeout(undefined)).toBeUndefined();
+    expect(formatAntigravityPrintTimeout(0)).toBeUndefined();
+  });
+});
+
+describe("extractAntigravityConversationId", () => {
+  it("parses common stderr patterns", () => {
+    expect(extractAntigravityConversationId("Created conversation abc-123-def")).toBe(
+      "abc-123-def",
+    );
+    expect(
+      extractAntigravityConversationId(
+        "Print mode: conversation=9f926293-5fd5-48ca-b3d6-2111119c9b7a, sending message",
+      ),
+    ).toBe("9f926293-5fd5-48ca-b3d6-2111119c9b7a");
+    expect(
+      extractAntigravityConversationId(
+        "Stream completed for 1858e0e0-832e-469a-8f82-51d0f56a954f, clearing ResponsePending",
+      ),
+    ).toBe("1858e0e0-832e-469a-8f82-51d0f56a954f");
+    expect(
+      extractAntigravityConversationId(
+        "Stream goroutine exited for deadbeef-1234-5678-9abc-def012345678, sending completion signal",
+      ),
+    ).toBe("deadbeef-1234-5678-9abc-def012345678");
+  });
+
+  it("returns undefined when no id is present", () => {
+    expect(extractAntigravityConversationId("no conversation here")).toBeUndefined();
+  });
+});
+
+describe("transcript recovery helpers", () => {
+  it("extracts the last PLANNER_RESPONSE content", () => {
+    const jsonl = [
+      JSON.stringify({
+        source: "USER",
+        type: "USER_INPUT",
+        content: "hi",
+      }),
+      JSON.stringify({
+        source: "MODEL",
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        content: "first",
+      }),
+      JSON.stringify({
+        source: "MODEL",
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        content: "final answer",
+      }),
+    ].join("\n");
+    expect(parseAntigravityPlannerResponse(jsonl)).toBe("final answer");
+  });
+
+  it("returns undefined for empty or unrelated transcripts", () => {
+    expect(parseAntigravityPlannerResponse("")).toBeUndefined();
+    expect(
+      parseAntigravityPlannerResponse(
+        JSON.stringify({ source: "MODEL", type: "THINKING", content: "hmm" }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("recovers text from an injected last_conversations map + transcript", () => {
+    const conversationId = "conv-recover-1";
+    const text = recoverAntigravityTranscriptText({
+      cwd: "/tmp/demo",
+      lastConversations: { "/tmp/demo": conversationId },
+      readTranscript: (id) =>
+        id === conversationId
+          ? `${JSON.stringify({
+              source: "MODEL",
+              type: "PLANNER_RESPONSE",
+              content: "from transcript",
+            })}\n`
+          : undefined,
+    });
+    expect(text).toEqual({ conversationId, text: "from transcript" });
+  });
+
+  it("prefers an explicit conversationId over the cwd last_conversations map", () => {
+    const recovered = recoverAntigravityTranscriptText({
+      cwd: "/tmp/demo",
+      conversationId: "known-id",
+      lastConversations: { "/tmp/demo": "stale-other-id" },
+      readTranscript: (id) =>
+        id === "known-id"
+          ? `${JSON.stringify({
+              source: "MODEL",
+              type: "PLANNER_RESPONSE",
+              content: "known transcript",
+            })}\n`
+          : id === "stale-other-id"
+            ? `${JSON.stringify({
+                source: "MODEL",
+                type: "PLANNER_RESPONSE",
+                content: "wrong transcript",
+              })}\n`
+            : undefined,
+    });
+    expect(recovered).toEqual({ conversationId: "known-id", text: "known transcript" });
+  });
+});
+
+describe("runAntigravityProcess", () => {
+  async function collect(
+    events: AsyncIterable<import("../src/types/events").AgentEvent>,
+  ): Promise<import("../src/types/events").AgentEvent[]> {
+    const out: import("../src/types/events").AgentEvent[] = [];
+    for await (const event of events) out.push(event);
+    return out;
+  }
+
+  it("keeps stdin closed and streams stderr session + stdout text", async () => {
+    let seenOpts: import("../src/agents/spawn").ProcessRunOptions | undefined;
+    const events = await collect(
+      runAntigravityProcess({
+        id: "antigravity",
+        binary: "agy",
+        args: buildAntigravityRunArgs({
+          prompt: "hi",
+          model: "Gemini 3.5 Flash (Low)",
+        }),
+        opts: {
+          prompt: "hi",
+          model: "Gemini 3.5 Flash (Low)",
+          cwd: "/tmp/demo",
+        },
+        runLines: async function* (opts) {
+          seenOpts = opts;
+          yield {
+            kind: "stderr",
+            text: "Created conversation abc-111-def",
+          };
+          yield { kind: "line", line: "hello" };
+          yield {
+            kind: "exit",
+            code: 0,
+            signal: null,
+            timedOut: false,
+            stderr: "Created conversation abc-111-def",
+            sawStdout: true,
+          };
+        },
+      }),
+    );
+
+    expect(seenOpts?.prompt).toBeUndefined();
+    expect(events.map((e) => e.kind)).toEqual(["session_start", "text_delta", "result"]);
+    expect(events[0]).toMatchObject({
+      kind: "session_start",
+      sessionId: "abc-111-def",
+      model: "Gemini 3.5 Flash (Low)",
+    });
+    expect(events[1]).toMatchObject({ kind: "text_delta", text: "hello\n" });
+    expect(events[2]).toMatchObject({ kind: "result", text: "hello", isError: false });
+  });
+
+  it("recovers empty stdout using the known conversation id, not a stale cwd mapping", async () => {
+    const recoverCalls: Array<{ cwd: string; conversationId?: string }> = [];
+    const events = await collect(
+      runAntigravityProcess({
+        id: "antigravity",
+        binary: "agy",
+        args: [],
+        opts: {
+          prompt: "hi",
+          model: "Gemini 3.1 Pro (High)",
+          cwd: "/tmp/demo",
+          resumeSessionId: "resume-id",
+        },
+        runLines: async function* () {
+          yield {
+            kind: "exit",
+            code: 0,
+            signal: null,
+            timedOut: false,
+            stderr: "",
+            sawStdout: false,
+          };
+        },
+        recoverTranscript: (options) => {
+          recoverCalls.push({
+            cwd: options.cwd,
+            conversationId: options.conversationId,
+          });
+          return { conversationId: "resume-id", text: "from known id" };
+        },
+        lastConversationForCwd: () => "stale-cwd-id",
+      }),
+    );
+
+    expect(recoverCalls).toEqual([{ cwd: "/tmp/demo", conversationId: "resume-id" }]);
+    expect(events.map((e) => e.kind)).toEqual(["session_start", "text_delta", "result"]);
+    expect(events[0]).toMatchObject({ kind: "session_start", sessionId: "resume-id" });
+    expect(events[2]).toMatchObject({ kind: "result", text: "from known id" });
+  });
+
+  it("emits session_start even when empty-output recovery fails", async () => {
+    const events = await collect(
+      runAntigravityProcess({
+        id: "antigravity",
+        binary: "agy",
+        args: [],
+        opts: {
+          prompt: "hi",
+          model: "Gemini 3.1 Pro (High)",
+          cwd: "/tmp/demo",
+        },
+        runLines: async function* () {
+          yield {
+            kind: "stderr",
+            text: "Stream completed for 1858e0e0-832e-469a-8f82-51d0f56a954f, clearing ResponsePending",
+          };
+          yield {
+            kind: "exit",
+            code: 0,
+            signal: null,
+            timedOut: false,
+            stderr:
+              "Stream completed for 1858e0e0-832e-469a-8f82-51d0f56a954f, clearing ResponsePending",
+            sawStdout: false,
+          };
+        },
+        recoverTranscript: () => undefined,
+      }),
+    );
+
+    expect(events.map((e) => e.kind)).toEqual(["session_start", "error"]);
+    expect(events[0]).toMatchObject({
+      kind: "session_start",
+      sessionId: "1858e0e0-832e-469a-8f82-51d0f56a954f",
+    });
+    expect(events[1]).toMatchObject({
+      kind: "error",
+      message: expect.stringContaining("produced no output"),
+    });
+  });
+
+  it("falls back to last_conversations when stderr has no id but stdout succeeded", async () => {
+    const events = await collect(
+      runAntigravityProcess({
+        id: "antigravity",
+        binary: "agy",
+        args: [],
+        opts: {
+          prompt: "hi",
+          model: "Gemini 3.1 Pro (High)",
+          cwd: "/tmp/demo",
+        },
+        runLines: async function* () {
+          yield { kind: "line", line: "pong" };
+          yield {
+            kind: "exit",
+            code: 0,
+            signal: null,
+            timedOut: false,
+            stderr: "",
+            sawStdout: true,
+          };
+        },
+        lastConversationForCwd: (path) => (path === "/tmp/demo" ? "from-cache" : undefined),
+      }),
+    );
+
+    expect(events.map((e) => e.kind)).toEqual(["session_start", "text_delta", "result"]);
+    expect(events[0]).toMatchObject({ kind: "session_start", sessionId: "from-cache" });
+    expect(events[1]).toMatchObject({ kind: "text_delta", text: "pong\n" });
+  });
+
+  it("reports spawn failure, timeout, and non-zero exit", async () => {
+    const spawnEvents = await collect(
+      runAntigravityProcess({
+        id: "antigravity",
+        binary: "agy",
+        args: [],
+        opts: { prompt: "hi", model: "Gemini 3.1 Pro (High)", cwd: "/tmp/demo" },
+        lastConversationForCwd: () => undefined,
+        runLines: async function* () {
+          yield {
+            kind: "exit",
+            code: null,
+            signal: null,
+            timedOut: false,
+            stderr: "",
+            sawStdout: false,
+            spawnError: "ENOENT",
+          };
+        },
+      }),
+    );
+    expect(spawnEvents).toEqual([
+      expect.objectContaining({
+        kind: "error",
+        message: "failed to start 'agy': ENOENT",
+      }),
+    ]);
+
+    const timeoutEvents = await collect(
+      runAntigravityProcess({
+        id: "antigravity",
+        binary: "agy",
+        args: [],
+        opts: {
+          prompt: "hi",
+          model: "Gemini 3.1 Pro (High)",
+          timeoutMs: 5000,
+          cwd: "/tmp/demo",
+        },
+        lastConversationForCwd: () => undefined,
+        runLines: async function* () {
+          yield {
+            kind: "exit",
+            code: null,
+            signal: "SIGTERM",
+            timedOut: true,
+            stderr: "",
+            sawStdout: false,
+          };
+        },
+      }),
+    );
+    expect(timeoutEvents).toEqual([
+      expect.objectContaining({
+        kind: "error",
+        message: "'agy' timed out after 5s",
+      }),
+    ]);
+
+    const exitEvents = await collect(
+      runAntigravityProcess({
+        id: "antigravity",
+        binary: "agy",
+        args: [],
+        opts: { prompt: "hi", model: "Gemini 3.1 Pro (High)", cwd: "/tmp/demo" },
+        lastConversationForCwd: () => undefined,
+        runLines: async function* () {
+          yield {
+            kind: "exit",
+            code: 2,
+            signal: null,
+            timedOut: false,
+            stderr: "auth failed\nmore detail",
+            sawStdout: false,
+          };
+        },
+      }),
+    );
+    expect(exitEvents).toEqual([
+      expect.objectContaining({
+        kind: "error",
+        message: "'agy' exited with code 2: auth failed",
+        code: 2,
+      }),
+    ]);
+  });
+});
+
+describe("AntigravityAdapter metadata", () => {
+  it("exposes provider identity and resume support", () => {
+    const adapter = new AntigravityAdapter();
+    expect(adapter.id).toBe("antigravity");
+    expect(adapter.binary).toBe("agy");
+    expect(adapter.defaultModel).toBe("Gemini 3.1 Pro (High)");
+    expect(adapter.supportsResume).toBe(true);
+    expect(ANTIGRAVITY_MODELS.some((m) => m.id === adapter.defaultModel)).toBe(true);
+  });
+});

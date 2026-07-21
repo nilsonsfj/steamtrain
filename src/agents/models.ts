@@ -4,6 +4,12 @@ import type { AgentInstanceId, AgentProviderId } from "../types/events";
 import type { AgentAdapter } from "./adapter";
 import { type AgentModel, formatModelOption } from "./agent-model";
 import { AMP_MODELS, AmpAdapter } from "./amp";
+import { ANTIGRAVITY_MODELS, AntigravityAdapter } from "./antigravity";
+import {
+  getAntigravityModelName,
+  listAntigravityCachedAgentModels,
+  refreshAntigravityVariantCache,
+} from "./antigravity-variants";
 import { CLAUDE_MODELS, ClaudeCodeAdapter } from "./claude";
 import { CODEX_MODELS, CodexAdapter } from "./codex";
 import {
@@ -36,6 +42,7 @@ export const AGENT_IDS: readonly AgentProviderId[] = [
   "amp",
   "kiro",
   "cursor",
+  "antigravity",
 ];
 
 export function isAgentProviderId(value: string): value is AgentProviderId {
@@ -81,6 +88,16 @@ function cursorModelsWithLiveNames(): readonly AgentModel[] {
   }));
 }
 
+function antigravityModelsWithLiveNames(): readonly AgentModel[] {
+  const cached = listAntigravityCachedAgentModels();
+  if (cached.length > 0) return cached;
+
+  return ANTIGRAVITY_MODELS.map((model) => ({
+    id: model.id,
+    name: getAntigravityModelName(model.id) ?? model.name,
+  }));
+}
+
 /** Model catalog for an agent provider (id + human-readable name). */
 export function modelsForProvider(provider: AgentProviderId): readonly AgentModel[] {
   switch (provider) {
@@ -96,6 +113,8 @@ export function modelsForProvider(provider: AgentProviderId): readonly AgentMode
       return KIRO_MODELS;
     case "cursor":
       return cursorModelsWithLiveNames();
+    case "antigravity":
+      return antigravityModelsWithLiveNames();
   }
 }
 
@@ -128,6 +147,7 @@ export function modelNameForAgent(
   if (provider === "opencode") return getOpencodeModelName(modelId) ?? modelId;
   if (provider === "codex") return getCodexModelName(modelId) ?? modelId;
   if (provider === "cursor") return getCursorModelName(modelId) ?? modelId;
+  if (provider === "antigravity") return getAntigravityModelName(modelId) ?? modelId;
   return modelId;
 }
 
@@ -143,6 +163,7 @@ const PROVIDER_ADAPTERS: Record<AgentProviderId, () => AgentAdapter> = {
   amp: () => new AmpAdapter(),
   kiro: () => new KiroCliAdapter(),
   cursor: () => new CursorAgentAdapter(),
+  antigravity: () => new AntigravityAdapter(),
 };
 
 /** Default model when switching to an agent without an explicit model. */
@@ -232,6 +253,11 @@ export function effortsForModel(
       return claudeEfforts(model);
     case "cursor":
       return /\[[^\]]*effort=/.test(model) ? [] : ["low", "medium", "high", "xhigh"];
+    case "antigravity":
+      // Effort is baked into display labels like "Gemini 3.1 Pro (High)".
+      return /\((Low|Medium|High|Thinking)\)\s*$/i.test(model)
+        ? []
+        : ["low", "medium", "high", "thinking"];
     default:
       return [];
   }
@@ -307,11 +333,19 @@ export async function refreshAgentCatalogCaches(
     if (await refreshCursorVariantCache(binary)) refreshed = true;
   }
 
+  const antigravity = doctor.find((d) => d.provider === "antigravity" && d.status === "ok");
+  if (antigravity?.status === "ok") {
+    const binary =
+      resolveAgentInstance(config, antigravity.agent)?.binary ?? antigravity.binaryPath ?? "agy";
+    if (await refreshAntigravityVariantCache(binary)) refreshed = true;
+  }
+
   return refreshed;
 }
 
 export {
   formatModelOption,
+  refreshAntigravityVariantCache,
   refreshCodexVariantCache,
   refreshCursorVariantCache,
   refreshOpencodeVariantCache,

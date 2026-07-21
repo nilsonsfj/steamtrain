@@ -601,7 +601,8 @@
           { value: "codex", label: "codex" },
           { value: "amp", label: "amp" },
           { value: "kiro", label: "kiro" },
-          { value: "cursor", label: "cursor" }
+          { value: "cursor", label: "cursor" },
+          { value: "antigravity", label: "antigravity" }
         ], a.provider || "claude");
         var binary = h("input", { class: "txt", placeholder: "default binary", value: a.binary || "" });
         var env = h("textarea", { class: "ta mini", placeholder: "env JSON", rows: "2" });

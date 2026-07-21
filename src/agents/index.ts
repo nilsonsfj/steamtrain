@@ -1,6 +1,7 @@
 import type { AgentProviderId } from "../types/events";
 import type { AgentAdapter } from "./adapter";
 import { AmpAdapter } from "./amp";
+import { AntigravityAdapter } from "./antigravity";
 import { ClaudeCodeAdapter } from "./claude";
 import { CodexAdapter } from "./codex";
 import { CursorAgentAdapter } from "./cursor";
@@ -27,6 +28,15 @@ export {
   createCursorMapper,
 } from "./cursor";
 export {
+  AntigravityAdapter,
+  ANTIGRAVITY_MODELS,
+  buildAntigravityRunArgs,
+  extractAntigravityConversationId,
+  formatAntigravityPrintTimeout,
+  resolveAntigravityModel,
+  runAntigravityProcess,
+} from "./antigravity";
+export {
   DEFAULT_AGENT_BINARY,
   defaultAgentInstance,
   resolveAgentInstance,
@@ -48,6 +58,7 @@ export {
   modelNameForAgent,
   modelsForAgent,
   refreshAgentCatalogCaches,
+  refreshAntigravityVariantCache,
   refreshCodexVariantCache,
   refreshCursorVariantCache,
   refreshOpencodeVariantCache,
@@ -63,6 +74,11 @@ export {
   parseCursorListModels,
   setCursorVariantCacheForTests,
 } from "./cursor-variants";
+export {
+  clearAntigravityVariantCacheForTests,
+  parseAntigravityModelsOutput,
+  setAntigravityVariantCacheForTests,
+} from "./antigravity-variants";
 export { fallbackCodexEfforts } from "./codex-efforts-fallback";
 export {
   clearOpencodeVariantCacheForTests,
@@ -96,5 +112,7 @@ export function createAdapter(id: AgentProviderId, binary?: string): AgentAdapte
       return new KiroCliAdapter(binary);
     case "cursor":
       return new CursorAgentAdapter(binary);
+    case "antigravity":
+      return new AntigravityAdapter(binary);
   }
 }
