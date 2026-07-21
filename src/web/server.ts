@@ -7,10 +7,20 @@ import { fileURLToPath } from "node:url";
 import { buildAgentMeta } from "../agents/agent-meta";
 import { refreshAgentCatalogCaches } from "../agents/models";
 import { buildApiMeta } from "../apis";
-import type { SteamtrainConfig } from "../config";
-import { parseAgentsConfig, parseApisConfig } from "../config";
+import type { AgentInstanceConfig, ApiInstanceConfig, SteamtrainConfig } from "../config";
+import {
+  loadConfig,
+  parseAgentsConfig,
+  parseApisConfig,
+  parseScopedInstancePayload,
+  saveUserConfig,
+  tagAgentsWithScope,
+  tagApisWithScope,
+  userConfigExists,
+} from "../config";
 import { saveProjectConfig } from "../config/project-config";
 import { type ApiDoctorResult, type DoctorResult, runApiDoctor, runDoctor } from "../doctor";
+
 import { Orchestrator } from "../orchestrator";
 import {
   DEFAULT_STEP_TIMEOUT_SEC,
@@ -180,6 +190,26 @@ export interface WebServerDeps {
   /** Live project config (mutated in place when saved via /api/config). */
   config?: SteamtrainConfig;
   configPath?: string;
+  /**
+   * Global `~/.steamtrain/config.json` path. Absent when running with a custom
+   * `--config` file (no global layer). Agents/APIs default to this scope.
+   */
+  userConfigPath?: string;
+  /**
+   * Raw per-scope agent/API layers for the config editor. Mutated in place
+   * after scoped saves so subsequent GET/PUT rounds see the latest entries.
+   */
+  configLayers?: {
+    userAgents?: AgentInstanceConfig[];
+    projectAgents?: AgentInstanceConfig[];
+    userApis?: ApiInstanceConfig[];
+    projectApis?: ApiInstanceConfig[];
+  };
+  /**
+   * Reload defaults → user → project into {@link config} + {@link configLayers}
+   * after a scoped save. Required so the live orchestrator sees merged state.
+   */
+  reloadConfig?: () => void;
   /**
    * When set, all API routes require a valid `__steamtrain_auth` session cookie.
    * POST /api/auth with the matching token creates a random, server-side
@@ -984,18 +1014,27 @@ async function handle(
       sendJson(res, 404, { error: "config is not available" });
       return;
     }
+    const canGlobal = Boolean(deps.userConfigPath);
+    const layers = deps.configLayers ?? {};
     const stepTimeoutSec = resolveStepTimeoutSec(undefined, undefined, cfg);
     sendJson(res, 200, {
       stepTimeoutSec,
       workflowTimeoutSec: cfg.workflowTimeoutSec,
       defaultStepTimeoutSec: DEFAULT_STEP_TIMEOUT_SEC,
       configPath: deps.configPath,
-      agents: buildAgentMeta(
+      userConfigPath: deps.userConfigPath,
+      canGlobal,
+      // Configured entries only (not unconfigured builtins), tagged with the
+      // file they live in. New rows in the editor default to user/global.
+      agents: tagAgentsWithScope(layers),
+      apis: tagApisWithScope(layers),
+      // Full catalogs for health dots / model pickers in the config modal.
+      agentCatalog: buildAgentMeta(
         cfg,
         (agent) => (deps.doctor?.() ?? []).some((d) => d.agent === agent && d.status === "ok"),
         { includeDisabled: true, includeConfig: true },
       ),
-      apis: apiMetaFromDeps(deps, { includeDisabled: true, includeConfig: true }),
+      apiCatalog: apiMetaFromDeps(deps, { includeDisabled: true, includeConfig: true }),
     });
     return;
   }
@@ -1031,15 +1070,29 @@ async function handle(
       });
       return;
     }
-    const patch: Partial<
-      Pick<SteamtrainConfig, "stepTimeoutSec" | "workflowTimeoutSec" | "agents" | "apis">
-    > = {};
-    if (hasStep) patch.stepTimeoutSec = parsed.stepTimeoutSec as number;
-    if (clearWf) patch.workflowTimeoutSec = undefined;
-    else if (hasWf) patch.workflowTimeoutSec = parsed.workflowTimeoutSec as number;
+
+    const canGlobal = Boolean(deps.userConfigPath);
+    const projectPatch: Parameters<typeof saveProjectConfig>[0] = {};
+    if (hasStep) projectPatch.stepTimeoutSec = parsed.stepTimeoutSec as number;
+    if (clearWf) projectPatch.workflowTimeoutSec = undefined;
+    else if (hasWf) projectPatch.workflowTimeoutSec = parsed.workflowTimeoutSec as number;
+
+    let userAgents: AgentInstanceConfig[] | undefined;
+    let projectAgents: AgentInstanceConfig[] | undefined;
+    let userApis: ApiInstanceConfig[] | undefined;
+    let projectApis: ApiInstanceConfig[] | undefined;
+
     if (hasAgents) {
       try {
-        patch.agents = parseAgentsConfig(parsed.agents);
+        const partitioned = parseScopedInstancePayload(
+          parsed.agents,
+          canGlobal,
+          parseAgentsConfig,
+          "agents",
+        );
+        userAgents = partitioned.user;
+        projectAgents = partitioned.project;
+        projectPatch.agents = projectAgents;
       } catch (err) {
         sendJson(res, 400, {
           error: err instanceof Error ? err.message : "invalid agents",
@@ -1047,9 +1100,18 @@ async function handle(
         return;
       }
     }
+
     if (hasApis) {
       try {
-        patch.apis = parseApisConfig(parsed.apis);
+        const partitioned = parseScopedInstancePayload(
+          parsed.apis,
+          canGlobal,
+          parseApisConfig,
+          "apis",
+        );
+        userApis = partitioned.user;
+        projectApis = partitioned.project;
+        projectPatch.apis = projectApis;
       } catch (err) {
         sendJson(res, 400, {
           error: err instanceof Error ? err.message : "invalid apis",
@@ -1057,12 +1119,73 @@ async function handle(
         return;
       }
     }
-    const saved = saveProjectConfig(patch, deps.configPath);
-    if (!saved.ok || !saved.config) {
-      sendJson(res, 400, { error: saved.error ?? "save failed" });
-      return;
+
+    // Agents/APIs default to the user/global file; timeouts stay project-scoped
+    // (matching `/timeout` and team-shared steamtrain.json conventions).
+    if (canGlobal && deps.userConfigPath && (userAgents !== undefined || userApis !== undefined)) {
+      const userPatch: { agents?: AgentInstanceConfig[]; apis?: ApiInstanceConfig[] } = {};
+      if (userAgents !== undefined) userPatch.agents = userAgents;
+      if (userApis !== undefined) userPatch.apis = userApis;
+      // Skip creating a brand-new user file solely to write empty arrays. Still
+      // write empties when the file (or in-memory layers) already had entries so
+      // deletes stick.
+      const hasUserContent =
+        (userAgents?.length ?? 0) > 0 ||
+        (userApis?.length ?? 0) > 0 ||
+        (deps.configLayers?.userAgents?.length ?? 0) > 0 ||
+        (deps.configLayers?.userApis?.length ?? 0) > 0 ||
+        userConfigExists(deps.userConfigPath);
+      if (hasUserContent) {
+        const savedUser = saveUserConfig(userPatch, deps.userConfigPath);
+        if (!savedUser.ok) {
+          sendJson(res, 400, { error: savedUser.error ?? "failed to save user config" });
+          return;
+        }
+      }
     }
-    Object.assign(deps.config, saved.config);
+
+    const needsProjectWrite =
+      hasStep || hasWf || clearWf || projectAgents !== undefined || projectApis !== undefined;
+    if (needsProjectWrite) {
+      const saved = saveProjectConfig(projectPatch, deps.configPath);
+      if (!saved.ok || !saved.config) {
+        sendJson(res, 400, { error: saved.error ?? "save failed" });
+        return;
+      }
+      if (!deps.reloadConfig) Object.assign(deps.config, saved.config);
+    }
+
+    if (deps.reloadConfig) {
+      deps.reloadConfig();
+    } else {
+      // Keep layers + merged live config in sync when the caller didn't supply
+      // a full reload (unit tests often omit reloadConfig).
+      if (!deps.configLayers) {
+        deps.configLayers = {
+          userAgents: undefined,
+          projectAgents: deps.config.agents ? [...deps.config.agents] : undefined,
+          userApis: undefined,
+          projectApis: deps.config.apis ? [...deps.config.apis] : undefined,
+        };
+      }
+      if (userAgents !== undefined) deps.configLayers.userAgents = userAgents;
+      if (projectAgents !== undefined) deps.configLayers.projectAgents = projectAgents;
+      if (userApis !== undefined) deps.configLayers.userApis = userApis;
+      if (projectApis !== undefined) deps.configLayers.projectApis = projectApis;
+      if (hasAgents) {
+        deps.config.agents = [
+          ...(deps.configLayers.userAgents ?? []),
+          ...(deps.configLayers.projectAgents ?? []),
+        ];
+      }
+      if (hasApis) {
+        deps.config.apis = [
+          ...(deps.configLayers.userApis ?? []),
+          ...(deps.configLayers.projectApis ?? []),
+        ];
+      }
+    }
+
     if (hasAgents) {
       try {
         const results = await runDoctor(deps.config);
@@ -1079,16 +1202,23 @@ async function handle(
         // The regular doctor polling endpoint will report the previous state if refresh fails.
       }
     }
+
+    const layers = deps.configLayers ?? {};
     sendJson(res, 200, {
       ok: true,
       stepTimeoutSec: resolveStepTimeoutSec(undefined, undefined, deps.config),
       workflowTimeoutSec: deps.config.workflowTimeoutSec,
-      agents: buildAgentMeta(
+      configPath: deps.configPath,
+      userConfigPath: deps.userConfigPath,
+      canGlobal,
+      agents: tagAgentsWithScope(layers),
+      apis: tagApisWithScope(layers),
+      agentCatalog: buildAgentMeta(
         deps.config,
         (agent) => (deps.doctor?.() ?? []).some((d) => d.agent === agent && d.status === "ok"),
         { includeDisabled: true, includeConfig: true },
       ),
-      apis: apiMetaFromDeps(deps, { includeDisabled: true, includeConfig: true }),
+      apiCatalog: apiMetaFromDeps(deps, { includeDisabled: true, includeConfig: true }),
     });
     return;
   }
@@ -2022,8 +2152,27 @@ export interface StartWebUiOptions {
   workflowCatalog: LoadedWorkflowCatalog;
   configLabel?: string;
   cwd?: string;
+  home?: string;
   /** Resolved project `steamtrain.json` path for project-scope authoring. */
   configPath?: string;
+  /**
+   * Global `~/.steamtrain/config.json` path. Omit when a custom `--config`
+   * file is in use (no global layer to read or write).
+   */
+  userConfigPath?: string;
+  /** Raw agent entries from the global config file. */
+  userAgents?: AgentInstanceConfig[];
+  /** Raw agent entries from the project (or custom) config file. */
+  projectAgents?: AgentInstanceConfig[];
+  /** Raw API entries from the global config file. */
+  userApis?: ApiInstanceConfig[];
+  /** Raw API entries from the project (or custom) config file. */
+  projectApis?: ApiInstanceConfig[];
+  /**
+   * True when `configPath` is a custom `--config` file (loads alone, no user
+   * layer). Affects reload after scoped saves.
+   */
+  customConfig?: boolean;
   port?: number;
   host?: string;
   /** Require this token to access the web UI (cookie-based session). */
@@ -2139,6 +2288,30 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
   }
 
   const liveConfig: SteamtrainConfig = { ...options.config };
+  const liveLayers = {
+    userAgents: options.userAgents ? [...options.userAgents] : undefined,
+    projectAgents: options.projectAgents ? [...options.projectAgents] : undefined,
+    userApis: options.userApis ? [...options.userApis] : undefined,
+    projectApis: options.projectApis ? [...options.projectApis] : undefined,
+  };
+  const home = options.home ?? homedir();
+  const reloadLiveConfig = (): void => {
+    const loaded = loadConfig(
+      options.customConfig && options.configPath
+        ? { customPath: options.configPath, home }
+        : { cwd, home },
+    );
+    // Replace in place so Orchestrator / author closures keep the same object.
+    for (const key of Object.keys(liveConfig)) {
+      delete (liveConfig as Record<string, unknown>)[key];
+    }
+    Object.assign(liveConfig, loaded.config);
+    liveLayers.userAgents = loaded.userAgents ? [...loaded.userAgents] : undefined;
+    liveLayers.projectAgents = loaded.projectAgents ? [...loaded.projectAgents] : undefined;
+    liveLayers.userApis = loaded.userApis ? [...loaded.userApis] : undefined;
+    liveLayers.projectApis = loaded.projectApis ? [...loaded.projectApis] : undefined;
+  };
+
   const orchestrator = new Orchestrator(
     liveConfig,
     options.workspaces,
@@ -2173,7 +2346,7 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
   const author = new WorkflowAuthor({
     host: orchestrator,
     config: liveConfig,
-    home: homedir(),
+    home,
     cwd,
     projectConfigPath: options.configPath,
     projectWorkflows: options.config.workflows,
@@ -2200,6 +2373,9 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
     bindHost: host,
     config: liveConfig,
     configPath: options.configPath,
+    userConfigPath: options.userConfigPath,
+    configLayers: liveLayers,
+    reloadConfig: reloadLiveConfig,
     authToken,
     readToken,
     readOnly: readOnly || undefined,

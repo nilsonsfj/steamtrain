@@ -101,8 +101,8 @@ imports it through `src/tui/workflow-state.ts`; the web bundles it as
 | Agent health display | ✅ | ✅ | TUI doctor panel; web health chips |
 | Re-route blocked steps to a ready agent | ✅ | ✅ | Shared `planAgentReroute` / `Orchestrator.planWorkflowReroute` (`src/workflow/reroute.ts`); TUI `/reroute` (stages session overrides) + blocked-preview hint, web sidebar `↷ via <agent>` badge + run strip + `reroute: true` on `POST /api/runs`, CLI `workflow run/plan --agent <id>` + blocked-run hint |
 | API health display (llm steps) | ✅ | ✅ | Shared `runApiDoctor`; TUI status bar `◆` entries, web health chips + `GET /api/doctor` `apis` |
-| Manage agent instances | ✅ | ✅ | TUI `/agent` + `/agents` manager (Ctrl+A); web project-config modal |
-| Manage API instances (llm steps) | ✅ | ✅ | Shared `src/apis` core; TUI `/api` + `/apis` manager; web project-config modal APIs section |
+| Manage agent instances | ✅ | ✅ | TUI `/agent` + `/agents` manager (Ctrl+A); web config modal (agents/APIs default to global/`user` scope, per-row project override) |
+| Manage API instances (llm steps) | ✅ | ✅ | Shared `src/apis` core; TUI `/api` + `/apis` manager; web config modal APIs section (same scope model as agents) |
 | Run history (inspect past runs) | ✅ | ✅ | Shared `RunRecordBuilder` + `WorkflowHistoryStore` (`.steamtrain/history`); TUI `/history`, web ⏱ History, CLI `workflow history` |
 | Post-run worktree harvest (apply/prune from history) | ✅ | ✅ | Shared `src/workflow/gc.ts` (`harvestRunWorktrees`/`pruneRunWorktrees`); TUI `a`/`x` in history detail, web "Worktree changes" section (diffstat + Apply/Branch/Prune + conflict-retry), CLI `workflow history apply/prune` + `workflow worktrees` GC |
 | Re-run / retry-failed a past run | ✅ | ✅ | Shared `planRerun`/`seedCacheFromRecord` (`src/workflow/rerun.ts`); TUI `r`/`f` in history detail, web Re-run/Retry buttons, CLI `workflow run --from <id> [--retry-failed]` |

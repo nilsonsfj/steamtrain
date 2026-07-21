@@ -3,6 +3,7 @@ export {
   type ConfigFile,
   type UserConfigFile,
   type AgentConfigScope,
+  type AgentInstanceConfig,
   type ApiConfigScope,
   type ApiInstanceConfig,
   configFileSchema,
@@ -45,6 +46,19 @@ export {
   userConfigExists,
   userConfigPath,
 } from "./user-config";
+export {
+  type PartitionedAgents,
+  type PartitionedApis,
+  type ScopedAgentInstance,
+  type ScopedApiInstance,
+  defaultInstanceScope,
+  parseScopedInstancePayload,
+  partitionAgentsByScope,
+  partitionApisByScope,
+  resolveInstanceScope,
+  tagAgentsWithScope,
+  tagApisWithScope,
+} from "./scoped-instances";
 export {
   MAX_PROMPT_CHARS,
   isAllowedApiBaseUrl,
