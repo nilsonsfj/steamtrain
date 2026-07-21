@@ -43,6 +43,7 @@ export const BLOCK_LABEL: Record<ReturnType<typeof workflowStepKind>, string> = 
   command: "command",
   llm: "llm",
   workflow: "sub-workflow",
+  issues: "issues",
 };
 
 /** Cumulative flat step index at the start of each phase. */
@@ -114,6 +115,7 @@ export function formatLlmTarget(step: LlmStep): string {
 export function formatGateCondition(condition: GateCondition): string {
   const parts: string[] = [];
   if (condition.step) parts.push(`step=${condition.step}`);
+  if (condition.value !== undefined) parts.push(`value=${condition.value}`);
   if (condition.ok !== undefined) parts.push(`ok=${condition.ok}`);
   if (condition.contains !== undefined)
     parts.push(`contains=${JSON.stringify(condition.contains)}`);
@@ -152,6 +154,11 @@ export function specStepRowMeta(step: WorkflowStep): string {
   if (step.kind === "workflow") {
     bits.push(`workflow: ${step.workflow}`);
     if (step.outputStep) bits.push(`outputStep: ${step.outputStep}`);
+    if (step.worktreeStep) bits.push(`worktreeStep: ${step.worktreeStep}`);
+  }
+  if (step.kind === "issues") {
+    bits.push(`mode: ${step.mode ?? "report"}`);
+    if (step.from?.length) bits.push(`from: ${step.from.join(", ")}`);
   }
   return bits.join(" · ");
 }
@@ -227,6 +234,23 @@ export function specDetailLines(step: WorkflowStep): string[] {
     lines.push(`workflow: ${step.workflow}`);
     if (step.input) lines.push(`input: ${truncate(step.input, 200)}`);
     if (step.outputStep) lines.push(`outputStep: ${step.outputStep}`);
+    if (step.worktreeStep) lines.push(`worktreeStep: ${step.worktreeStep}`);
+    if (step.params && Object.keys(step.params).length > 0) {
+      lines.push(
+        `params: ${Object.entries(step.params)
+          .map(([k, v]) => `${k}=${truncate(v, 60)}`)
+          .join(", ")}`,
+      );
+    }
+  }
+  if (step.kind === "issues") {
+    lines.push(`mode: ${step.mode ?? "report"}`);
+    if (step.from?.length) lines.push(`from: ${step.from.join(", ")}`);
+    lines.push(`findingsPath: ${step.findingsPath ?? "findings"}`);
+    if (step.titlePrefix) lines.push(`titlePrefix: ${step.titlePrefix}`);
+    if (step.labels?.length) lines.push(`labels: ${step.labels.join(", ")}`);
+    if (step.repo) lines.push(`repo: ${step.repo}`);
+    lines.push(`limit: ${step.limit ?? 20}`);
   }
   return lines;
 }

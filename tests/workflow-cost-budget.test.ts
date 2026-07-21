@@ -16,6 +16,7 @@ import {
   formatTokens,
   resultLeaves,
   runWorkflow,
+  stepMetaFromSpec,
   tokensForResults,
   totalTokens,
 } from "../src/workflow";
@@ -273,6 +274,56 @@ describe("live summary helpers do not double-count fan-out children", () => {
     ];
     const byModel = aggregateLeavesByModel(resultLeaves(withPlaceholder, stepMeta));
     expect(byModel.find((m) => m.model === "claude/opus")).toMatchObject({ steps: 1 });
+  });
+});
+
+describe("cost attribution for a templated model (carry-over fix)", () => {
+  /**
+   * `model: "{{inputs.coderModel}}"` (building block 5) renders at execution
+   * time; before this fix only `llm` steps recorded the rendered model on
+   * `StepResult.model`, so `resultLeaves` fell back to the spec's raw
+   * (unrendered) template string via `stepMetaFromSpec` and a cost breakdown
+   * would show the literal `{{inputs.coderModel}}` text instead of what
+   * actually ran and was billed.
+   */
+  it("attributes a templated worker's spend to the RENDERED model, not the raw template", async () => {
+    const spec: WorkflowSpec = {
+      name: "templated-model",
+      inputs: { coderModel: { type: "string", default: "sonnet" } },
+      phases: [
+        {
+          id: "p1",
+          title: "p1",
+          steps: [{ id: "a", agent: "claude", model: "{{inputs.coderModel}}", prompt: "x" }],
+        },
+      ],
+    };
+    const deps = makeBillingDeps({ sonnet: { cost: 0.02, tokens: { input: 10 } } });
+    const events = await (async () => {
+      const out: WorkflowEvent[] = [];
+      for await (const ev of runWorkflow(
+        spec,
+        { input: "go", inputs: { coderModel: "sonnet" } },
+        deps,
+      )) {
+        out.push(ev);
+      }
+      return out;
+    })();
+    const done = events.find((e) => e.kind === "step_done" && e.stepId === "a");
+    const result = done && done.kind === "step_done" ? done.result : undefined;
+
+    // The recorded result carries the rendered model, not the template text.
+    expect(result?.model).toBe("sonnet");
+
+    // stepMetaFromSpec (built from the raw spec) would still report the
+    // template string; resultLeaves must prefer result.model over it.
+    const stepMeta = stepMetaFromSpec(spec);
+    expect(stepMeta.get("a")?.model).toBe("{{inputs.coderModel}}");
+    const byModel = aggregateLeavesByModel(resultLeaves([result as StepResult], stepMeta));
+    expect(byModel).toHaveLength(1);
+    expect(byModel[0]?.model).toBe("claude/sonnet");
+    expect(byModel[0]?.costUsd).toBeCloseTo(0.02, 5);
   });
 });
 

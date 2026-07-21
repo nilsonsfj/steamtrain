@@ -34,6 +34,16 @@ import {
   noProviderHumanInputResponse,
   validateHumanInputValue,
 } from "./human-input";
+import {
+  GH_GUIDANCE,
+  ISSUES_MODES,
+  buildFindingsReport,
+  buildIssueBody,
+  collectFindings,
+  createGithubIssue,
+  dedupeFindings,
+  findExistingIssue,
+} from "./issues";
 import { type LlmCallResult, type LlmComplete, type LlmProviderId, callLlm } from "./llm";
 import {
   type ConflictResolver,
@@ -68,6 +78,7 @@ import {
   type GateCondition,
   type GateStep,
   type HumanStep,
+  type IssuesStep,
   type LlmPricing,
   type LlmStep,
   MAX_CONCURRENCY,
@@ -83,12 +94,19 @@ import {
   type WorkflowStep,
   isAgentBackedStep,
   parseForEachSource,
+  resolveInputs,
   sessionSourceId,
   validateWorkflow,
   workflowStepKind,
+  workspaceRef,
   workspaceSourceId,
 } from "./types";
-import { type AgentWorkspaceLease, type AgentWorkspaceManager, runGitText } from "./worktree";
+import {
+  type AgentWorkspaceLease,
+  type AgentWorkspaceManager,
+  type AgentWorkspaceRequest,
+  runGitText,
+} from "./worktree";
 
 /**
  * Everything the engine needs from the outside world. `createAdapter` is
@@ -950,12 +968,18 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
       for (const condition of conditions) {
         if (!condition) continue;
         addEarlier(condition.step);
-        renderableTexts.push(condition.contains, condition.equals, condition.matches);
+        renderableTexts.push(
+          condition.value,
+          condition.contains,
+          condition.equals,
+          condition.matches,
+        );
       }
       if (
         (step.kind === "worker" ||
           step.kind === "processor" ||
           step.kind === "llm" ||
+          step.kind === "workflow" ||
           !step.kind) &&
         step.forEach
       ) {
@@ -971,11 +995,20 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
         for (const ref of step.from ?? []) addEarlier(ref);
         renderableTexts.push(step.branch, step.commitMessage, step.prTitle, step.prBody);
       }
+      if (step.kind === "issues") {
+        for (const ref of step.from ?? []) addEarlier(ref);
+        renderableTexts.push(step.mode, step.titlePrefix);
+      }
       if ("prompt" in step) renderableTexts.push(step.prompt);
       if (step.kind === "llm") renderableTexts.push(step.system);
       if (step.kind === "command") renderableTexts.push(step.cmd);
-      if (step.kind === "workflow") renderableTexts.push(step.input);
+      if (step.kind === "workflow") {
+        renderableTexts.push(step.input);
+        if (step.params) renderableTexts.push(...Object.values(step.params));
+      }
       if (step.kind === "distributor" && step.items) renderableTexts.push(...step.items);
+      if ("model" in step && typeof step.model === "string") renderableTexts.push(step.model);
+      if ("effort" in step && typeof step.effort === "string") renderableTexts.push(step.effort);
       for (const text of renderableTexts) {
         for (const ref of templateStepRefs(text)) addEarlier(ref);
       }
@@ -1021,11 +1054,38 @@ async function runSingleStep(
   // it (what actually ran and was billed) over a fresh resolution — the
   // configured instance's endpoint or defaultModel may have changed since.
   const cachedHit = cache.get(step.id);
-  const llmApi = llm && !cachedHit?.api ? resolveLlmStepApi(llm, deps.agentConfig) : undefined;
+  // Building block 5: `model`/`effort` may be templated; render them here for
+  // DISPLAY only (best-effort — no `item` at this top-level, non-forEach
+  // position). The actual execution functions (`executeAgentStep` /
+  // `executeLlmStep`) independently render again and fail the step loudly on
+  // an empty model, so a render mismatch here is never load-bearing.
+  const displayRenderCtx = {
+    input: ctx.input,
+    inputs: ctx.inputs,
+    outputs,
+    results,
+    iteration,
+  };
+  const agentDisplayModel = agentBacked
+    ? renderPrompt(agentBacked.model, displayRenderCtx)
+    : undefined;
+  const agentDisplayEffort =
+    agentBacked?.effort !== undefined
+      ? renderPrompt(agentBacked.effort, displayRenderCtx)
+      : undefined;
+  const llmDisplayModel =
+    llm?.model !== undefined ? renderPrompt(llm.model, displayRenderCtx) : llm?.model;
+  const llmForApi = llm ? { ...llm, model: llmDisplayModel } : undefined;
+  const llmApi =
+    llmForApi && !cachedHit?.api ? resolveLlmStepApi(llmForApi, deps.agentConfig) : undefined;
   const llmApiId = llm
     ? (cachedHit?.api ?? (llmApi?.ok ? llmApi.api.id : llmStepApiId(llm)))
     : undefined;
-  const llmModel = llm ? (cachedHit?.model ?? (llmApi?.ok ? llmApi.model : llm.model)) : undefined;
+  const llmModel = llm
+    ? (cachedHit?.model ?? (llmApi?.ok ? llmApi.model : llmDisplayModel))
+    : undefined;
+  const llmDisplayEffort =
+    llm?.effort !== undefined ? renderPrompt(llm.effort, displayRenderCtx) : undefined;
   push({
     kind: "step_start",
     phaseId: phase.id,
@@ -1033,8 +1093,8 @@ async function runSingleStep(
     blockKind: workflowStepKind(step),
     agent: agentBacked?.agent,
     api: llmApiId,
-    model: agentBacked?.model ?? llmModel,
-    effort: agentBacked?.effort ?? llm?.effort,
+    model: agentBacked ? agentDisplayModel : llmModel,
+    effort: agentBacked ? agentDisplayEffort : llmDisplayEffort,
     cwd: "cwd" in step ? step.cwd : undefined,
     dependsOn: step.dependsOn,
     iteration,
@@ -1501,6 +1561,10 @@ async function executeStep(
     return executeMergeStep(step, ctx, hooks);
   }
 
+  if (kind === "issues" && step.kind === "issues") {
+    return { result: await executeIssuesStep(step, ctx) };
+  }
+
   if (kind === "command" && step.kind === "command") {
     return { result: await executeCommandStep(step, ctx, hooks) };
   }
@@ -1657,6 +1721,16 @@ async function runAgentAttempt(
       costUsd,
       tokens,
       sessionId,
+      // Carry-over fix: record the RENDERED model that actually ran (`step`
+      // here already carries block 5's templated-then-rendered value — see
+      // `executeAgentStep`'s `step` reassignment and the merge conflict
+      // resolver's synthetic step) so cost analytics (`cost.ts`'s
+      // `resultLeaves`/`recordLeaves`) attribute spend to what was billed
+      // instead of falling back to the raw `{{inputs.*}}` spec string. `llm`
+      // steps already set this on their own result path; this is the
+      // worker/processor/agent-backed-distributor/consolidator/merge-conflict
+      // counterpart.
+      model: step.model,
     },
     // Transient + side-effect-free: errored, not cancelled, and the agent neither
     // completed a turn (`result`) nor invoked a tool (`tool_use`/`tool_result`),
@@ -1764,13 +1838,64 @@ function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/**
+ * Render a step's `model`/`effort` templates (building block 5) against its
+ * full execution context (inputs, step outputs, item, iteration). A `model`
+ * that renders to empty/whitespace fails loudly — the step never silently
+ * launches a default. `effort` is optional: an empty render is treated as "not
+ * set" rather than an error.
+ */
+function renderModelEffort(
+  step: { model: string; effort?: string },
+  ctx: ExecuteContext,
+  item: WorkflowItem | undefined,
+): { ok: true; model: string; effort?: string } | { ok: false; error: string } {
+  const renderCtx = {
+    input: ctx.input,
+    inputs: ctx.inputs,
+    outputs: ctx.outputs,
+    results: ctx.results,
+    item,
+    iteration: ctx.iteration,
+  };
+  const model = renderPrompt(step.model, renderCtx);
+  if (model.trim() === "") {
+    return {
+      ok: false,
+      error: `step model template '${step.model}' rendered empty (a model that renders empty never silently launches a default)`,
+    };
+  }
+  const effort = step.effort !== undefined ? renderPrompt(step.effort, renderCtx) : undefined;
+  return { ok: true, model, effort: effort && effort.trim() !== "" ? effort : undefined };
+}
+
 async function executeAgentStep(
-  step: AgentBackedWorkflowStep,
+  rawStep: AgentBackedWorkflowStep,
   ctx: ExecuteContext,
   hooks: ExecuteHooks,
   stepId: string,
   item?: WorkflowItem,
 ): Promise<StepResult> {
+  const modelEffort = renderModelEffort(rawStep, ctx, item);
+  if (!modelEffort.ok) {
+    return {
+      stepId,
+      ok: false,
+      output: modelEffort.error,
+      item,
+      error: modelEffort.error,
+      durationMs: 0,
+    };
+  }
+  // Building block 5: `model`/`effort` render through the standard template
+  // pipeline at execution time, so every downstream use in this function
+  // (agent spawn args, retries, structured-output fix, `canAsk` continuation)
+  // sees the RENDERED value.
+  const step: AgentBackedWorkflowStep = {
+    ...rawStep,
+    model: modelEffort.model,
+    effort: modelEffort.effort,
+  };
   const rendered = renderPrompt(step.prompt, {
     input: ctx.input,
     inputs: ctx.inputs,
@@ -2144,39 +2269,61 @@ async function allocateAgentWorkspace(
     stepCwd,
     iteration: ctx.iteration,
     item,
-    inheritFrom: resolveInheritedWorkspace(step, ctx),
+    ...resolveWorkspaceSource(step, ctx),
     signal: ctx.signal,
   });
 }
 
 /**
- * Resolve a step's `workspace: "inherit:<stepId>"` to the source step's
- * recorded worktree. Undefined when the step doesn't inherit — or when the
+ * Resolve a step's `workspace: "inherit:<stepId>"` / `"attach:<stepId>"` into
+ * the `AgentWorkspaceRequest` fields the workspace manager needs — `undefined`
+ * fields (`{}`) when the step doesn't reference a workspace, or when the
  * source ran in the plain cwd (no git repo / no isolation manager), in which
- * case this step runs there too and already sees the source's files.
+ * case this step runs there too and already sees the source's files (both
+ * modes degrade identically: the worktree they'd share doesn't exist).
  * Throws when the source's worktrees are ambiguous or absent; the callers'
  * allocation error handling turns that into a failed step.
  */
-function resolveInheritedWorkspace(
+function resolveWorkspaceSource(
   step: WorkflowStep,
   ctx: ExecuteContext,
-): { stepId: string; root: string; baseCommit?: string } | undefined {
-  const sourceId = workspaceSourceId(step);
-  if (!sourceId) return undefined;
-  const source = ctx.results.get(sourceId);
+): Pick<AgentWorkspaceRequest, "inheritFrom" | "attachTo"> {
+  const ref = workspaceRef(step);
+  if (!ref) return {};
+  const source = ctx.results.get(ref.sourceId);
   if (!source) {
-    throw new Error(`workspace inherit source '${sourceId}' has not produced a result`);
+    throw new Error(`workspace ${ref.mode} source '${ref.sourceId}' has not produced a result`);
   }
-  if (source.childResults?.length) {
+  // A step that carries its OWN `result.worktree` at the top level (a
+  // worker/processor/command step, or a `mode: "worktree"` merge step, or a
+  // non-forEach `workflow` step with `worktreeStep`) is a single worktree even
+  // when it ALSO carries `childResults` (a `workflow` step's own nested
+  // steps) — only bail out on "fanned out into N worktrees" when there is no
+  // single surfaced worktree to use. Mirrors the same leaf-preference guard in
+  // `executeMergeStep`.
+  if (!source.worktree && source.childResults?.length) {
     throw new Error(
-      `workspace inherit source '${sourceId}' fanned out into ${source.childResults.length} worktrees; merge them first`,
+      `workspace ${ref.mode} source '${ref.sourceId}' fanned out into ${source.childResults.length} worktrees; merge them first`,
     );
   }
-  if (!source.worktree) return undefined;
+  if (!source.worktree) return {};
+  if (ref.mode === "inherit") {
+    return {
+      inheritFrom: {
+        stepId: ref.sourceId,
+        root: source.worktree.root,
+        baseCommit: source.worktree.baseCommit,
+      },
+    };
+  }
   return {
-    stepId: sourceId,
-    root: source.worktree.root,
-    baseCommit: source.worktree.baseCommit,
+    attachTo: {
+      stepId: ref.sourceId,
+      root: source.worktree.root,
+      branch: source.worktree.branch,
+      baseCommit: source.worktree.baseCommit,
+      linkedIgnoredPaths: source.worktree.linkedIgnoredPaths,
+    },
   };
 }
 
@@ -2232,12 +2379,29 @@ async function executeForEachStep(
   const maxCostUsd = step.maxCostUsd;
   const childAgent = isAgentBackedStep(step) ? step.agent : undefined;
   const childCwd = "cwd" in step ? step.cwd : undefined;
-  // llm fan-outs: the effective api/model for child step_start events (a step
-  // may inherit its model from the configured instance's defaultModel).
-  const llmApi = step.kind === "llm" ? resolveLlmStepApi(step, ctx.deps.agentConfig) : undefined;
-  const childApi =
-    step.kind === "llm" ? (llmApi?.ok ? llmApi.api.id : llmStepApiId(step)) : undefined;
-  const childModel = llmApi?.ok ? llmApi.model : step.model;
+  // Building block 5: `model` may be templated on `{{item}}`, so the effective
+  // api/model for a child's `step_start` display is resolved PER CHILD, not
+  // once for the whole fan-out. The actual execution (`executeAgentStep` /
+  // `executeLlmStep`) independently renders again with its own item — this is
+  // display-only, a best-effort preview shown before the child actually runs.
+  const childDisplay = (item: WorkflowItem): { api?: string; model?: string } => {
+    const renderCtx = {
+      input: ctx.input,
+      inputs: ctx.inputs,
+      outputs: ctx.outputs,
+      results: ctx.results,
+      item,
+      iteration: ctx.iteration,
+    };
+    const renderedModel =
+      step.model !== undefined ? renderPrompt(step.model, renderCtx) : step.model;
+    if (step.kind !== "llm") return { model: renderedModel };
+    const llmApi = resolveLlmStepApi({ ...step, model: renderedModel }, ctx.deps.agentConfig);
+    return {
+      api: llmApi.ok ? llmApi.api.id : llmStepApiId(step),
+      model: llmApi.ok ? llmApi.model : renderedModel,
+    };
+  };
   const runChild = (childId: string, item: WorkflowItem): Promise<StepResult> =>
     step.kind === "llm"
       ? executeLlmStep(step, ctx, hooks, childId, item)
@@ -2266,6 +2430,12 @@ async function executeForEachStep(
         durationMs: Date.now() - started,
       },
     };
+  }
+  // Defensive: a skipped source normally cascades in findSkipReason before
+  // this executor runs; if one slips through (skipped ⇒ ok with empty
+  // output), skip here too rather than "succeeding" with zero children.
+  if (source.skipped) {
+    return { result: skippedStepResult(step.id) };
   }
 
   const values = source.items ?? splitItemsFromOutput(source.output);
@@ -2350,14 +2520,15 @@ async function executeForEachStep(
       // A cached child replays a completed call: attribute it to the api/model
       // recorded on its result rather than a fresh (possibly drifted) resolution.
       const cached = ctx.cache.get(stepId);
+      const display = childDisplay(item);
       hooks.pushWorkflowEvent({
         kind: "step_start",
         phaseId: hooks.phaseId,
         stepId,
         blockKind: workflowStepKind(step),
         agent: childAgent,
-        api: step.kind === "llm" ? (cached?.api ?? childApi) : undefined,
-        model: step.kind === "llm" ? (cached?.model ?? childModel) : childModel,
+        api: step.kind === "llm" ? (cached?.api ?? display.api) : undefined,
+        model: cached?.model ?? display.model,
         effort: step.effort,
         cwd: childCwd,
         dependsOn: step.dependsOn,
@@ -2419,8 +2590,13 @@ async function executeForEachStep(
       error,
       durationMs: Date.now() - started,
       // Stamp llm parents like their children, so a resumed fan-out's parent
-      // step_start replays with the api/model that actually ran.
-      ...(step.kind === "llm" ? { api: childApi, model: childModel } : {}),
+      // step_start replays with an api/model that actually ran. Under a
+      // per-item templated model different children may resolve differently;
+      // the first item's resolution is a representative display value only
+      // (each child's OWN step_start/result carries its actual rendered model).
+      ...(step.kind === "llm" && values.length > 0
+        ? childDisplay({ sourceStepId, index: 0, value: values[0] as string })
+        : {}),
     },
     childResults,
   };
@@ -2459,7 +2635,7 @@ async function executeCommandStep(
           baseCwd: ctx.deps.cwd,
           stepCwd,
           iteration: ctx.iteration,
-          inheritFrom: resolveInheritedWorkspace(step, ctx),
+          ...resolveWorkspaceSource(step, ctx),
           signal: ctx.signal,
         })
       : { cwd: stepCwd, dispose: () => {} };
@@ -2675,7 +2851,7 @@ async function runLlmAttempt(
  * stateless and side-effect-free, so retry is always safe.
  */
 async function executeLlmStep(
-  step: LlmStep,
+  rawStep: LlmStep,
   ctx: ExecuteContext,
   hooks: ExecuteHooks,
   stepId: string,
@@ -2690,6 +2866,24 @@ async function executeLlmStep(
     item,
     iteration: ctx.iteration,
   };
+  // Building block 5: an explicit `model`/`effort` renders through the
+  // standard template pipeline before resolution, so the configured api's
+  // pricing/defaultModel lookup, `step_start`, and the recorded result all see
+  // the rendered value. A step that omits `model` (relying on the api's
+  // `defaultModel`) has nothing to render.
+  let step = rawStep;
+  if (rawStep.model !== undefined) {
+    const renderedModel = renderPrompt(rawStep.model, renderCtx);
+    if (renderedModel.trim() === "") {
+      const message = `llm step model template '${rawStep.model}' rendered empty (a model that renders empty never silently launches a default)`;
+      return { stepId, ok: false, output: message, item, error: message, durationMs: 0 };
+    }
+    step = { ...rawStep, model: renderedModel };
+  }
+  if (rawStep.effort !== undefined) {
+    const renderedEffort = renderPrompt(rawStep.effort, renderCtx);
+    step = { ...step, effort: renderedEffort.trim() !== "" ? renderedEffort : undefined };
+  }
   const rendered = renderPrompt(step.prompt, renderCtx);
   const system = step.system ? renderPrompt(step.system, renderCtx) : undefined;
   const outputSchema = step.output;
@@ -2899,26 +3093,191 @@ function lastStepId(spec: WorkflowSpec): string | undefined {
 /**
  * Execute a `workflow` step: recursively run another named workflow (resolved
  * via `ctx.deps.resolveWorkflow`) and fold its event stream into this run's
- * own, under the namespace `<thisStepId>::<childId>` for both phase and step
- * ids. The child's leaf step results become this step's `childResults` —
- * exactly the shape a `forEach` fan-out parent already produces — so the
- * existing cost/token summation (`runSingleStep`) and run-history flattening
- * (`computeRunTotals`, which already skips any step whose result carries
- * `childResults`) apply completely unmodified. Cycle/depth-guarded via
- * `ctx.workflowCallStack`; never itself allocates a worktree (no agent, no
- * `WorkspaceFields`) — the child's own steps handle that internally.
+ * own, under the namespace `<execStepId>::<childId>` for both phase and step
+ * ids (`execStepId` is `step.id`, or `step.id[i]` for a `forEach` fan-out
+ * child — see {@link executeWorkflowForEachStep}). The child's leaf step
+ * results become this step's `childResults` — exactly the shape a `forEach`
+ * fan-out parent already produces — so the existing cost/token summation
+ * (`runSingleStep`) and run-history flattening (`computeRunTotals`, which
+ * already skips any step whose result carries `childResults`) apply
+ * completely unmodified. Cycle/depth-guarded via `ctx.workflowCallStack`;
+ * never itself allocates a worktree (no agent, no `WorkspaceFields`) — the
+ * child's own steps (or `worktreeStep`) handle that internally.
  */
 async function executeWorkflowStep(
   step: WorkflowCallStep,
   ctx: ExecuteContext,
   hooks: ExecuteHooks,
 ): Promise<ExecutionOutcome> {
+  if (step.forEach) return executeWorkflowForEachStep(step, ctx, hooks);
+  return executeWorkflowCallOnce(step, ctx, hooks, step.id, undefined);
+}
+
+/**
+ * Building block 3: fan a `workflow` call step out over an earlier
+ * distributor/llm-splitter's items — one whole child RUN per item, mirroring
+ * {@link executeForEachStep}'s worker/llm fan-out (same `fan_out` event,
+ * `<stepId>[i]` child ids, concurrency/budget mechanics). Each generated
+ * child's own nested steps fold in under `<stepId>[i]::<childStepId>`, so two
+ * items' inner steps never collide.
+ */
+async function executeWorkflowForEachStep(
+  step: WorkflowCallStep,
+  ctx: ExecuteContext,
+  hooks: ExecuteHooks,
+): Promise<ExecutionOutcome> {
+  const started = Date.now();
+  const sourceStepId = parseForEachSource(step.forEach ?? "");
+  const source = sourceStepId ? ctx.results.get(sourceStepId) : undefined;
+
+  if (!sourceStepId || !source) {
+    return {
+      result: {
+        stepId: step.id,
+        ok: false,
+        output: `forEach source '${step.forEach}' is unavailable`,
+        error: `forEach source '${step.forEach}' is unavailable`,
+        durationMs: Date.now() - started,
+      },
+    };
+  }
+  if (!source.ok) {
+    return {
+      result: {
+        stepId: step.id,
+        ok: false,
+        output: `forEach source '${sourceStepId}' failed`,
+        error: `forEach source '${sourceStepId}' failed`,
+        durationMs: Date.now() - started,
+      },
+    };
+  }
+  // Defensive: a skipped source normally cascades in findSkipReason before
+  // this executor runs; if one slips through (skipped ⇒ ok with empty
+  // output), skip here too rather than "succeeding" with zero children.
+  if (source.skipped) {
+    return { result: skippedStepResult(step.id) };
+  }
+
+  const values = source.items ?? splitItemsFromOutput(source.output);
+  if (!ctx.reserveDynamicSteps(values.length)) {
+    return {
+      result: {
+        stepId: step.id,
+        ok: false,
+        output: `forEach would expand '${step.id}' by ${values.length} child steps beyond the workflow step budget`,
+        error: `forEach would exceed max workflow steps (${MAX_STEPS})`,
+        durationMs: Date.now() - started,
+      },
+    };
+  }
+
+  hooks.pushWorkflowEvent({
+    kind: "fan_out",
+    phaseId: hooks.phaseId,
+    parentStepId: step.id,
+    count: values.length,
+    iteration: ctx.iteration,
+    ts: Date.now(),
+  });
+
+  const childResults: StepResult[] = values.map((_value, index) => ({
+    stepId: `${step.id}[${index}]`,
+    ok: false,
+    output: "child failed before producing a result",
+    durationMs: 0,
+  }));
+  const limit = Math.min(Math.max(1, ctx.deps.maxConcurrency), MAX_CONCURRENCY);
+  await runPool(
+    values.map((value, index) => ({
+      value,
+      item: { sourceStepId, index, value },
+      stepId: `${step.id}[${index}]`,
+    })),
+    limit,
+    async ({ item, stepId: childId }) => {
+      const cached = ctx.cache.get(childId);
+      hooks.pushWorkflowEvent({
+        kind: "step_start",
+        phaseId: hooks.phaseId,
+        stepId: childId,
+        blockKind: "workflow",
+        dependsOn: step.dependsOn,
+        parentStepId: step.id,
+        item,
+        iteration: ctx.iteration,
+        ts: Date.now(),
+      });
+
+      const result = cached
+        ? { ...cached, stepId: childId, parentStepId: step.id, item, iteration: ctx.iteration }
+        : {
+            ...(await executeWorkflowCallOnce(step, ctx, hooks, childId, item)).result,
+            stepId: childId,
+            parentStepId: step.id,
+            item,
+            iteration: ctx.iteration,
+          };
+
+      ctx.outputs.set(childId, result.output);
+      ctx.results.set(childId, result);
+      if (result.ok) ctx.cache.set(childId, result);
+      childResults[item.index] = result;
+
+      hooks.pushWorkflowEvent({
+        kind: "step_done",
+        phaseId: hooks.phaseId,
+        stepId: childId,
+        result,
+        cached: Boolean(cached),
+        iteration: ctx.iteration,
+        ts: Date.now(),
+      });
+    },
+    ctx.signal,
+  );
+
+  const ok = childResults.length === values.length && childResults.every((child) => child.ok);
+  const output = childResults
+    .map((child) => `--- ${child.stepId} (${child.item?.value ?? "item"}) ---\n${child.output}`)
+    .join("\n\n");
+  const error = ok ? undefined : "one or more fan-out items failed";
+
+  return {
+    result: {
+      stepId: step.id,
+      ok,
+      output,
+      items: values,
+      childResults,
+      error,
+      durationMs: Date.now() - started,
+    },
+    childResults,
+  };
+}
+
+/**
+ * Run a `workflow` call step ONCE — the shared body behind both the plain
+ * (non-`forEach`) case and each `forEach` fan-out child. `execStepId` is the
+ * id THIS invocation runs under (`step.id`, or `step.id[i]` for a fan-out
+ * child); the child run's own steps namespace under `<execStepId>::<childId>`.
+ * `item` (when set) is available to `input`/`params` templates as `{{item}}`.
+ */
+async function executeWorkflowCallOnce(
+  step: WorkflowCallStep,
+  ctx: ExecuteContext,
+  hooks: ExecuteHooks,
+  execStepId: string,
+  item: WorkflowItem | undefined,
+): Promise<ExecutionOutcome> {
   const started = Date.now();
   const fail = (message: string): ExecutionOutcome => ({
     result: {
-      stepId: step.id,
+      stepId: execStepId,
       ok: false,
       output: message,
+      item,
       error: message,
       durationMs: Date.now() - started,
     },
@@ -2951,17 +3310,35 @@ async function executeWorkflowStep(
     );
   }
 
-  const childInput = step.input
-    ? renderPrompt(step.input, {
-        input: ctx.input,
-        inputs: ctx.inputs,
-        outputs: ctx.outputs,
-        results: ctx.results,
-        iteration: ctx.iteration,
-      })
-    : ctx.input;
+  const renderCtx = {
+    input: ctx.input,
+    inputs: ctx.inputs,
+    outputs: ctx.outputs,
+    results: ctx.results,
+    item,
+    iteration: ctx.iteration,
+  };
+  const childInput = step.input ? renderPrompt(step.input, renderCtx) : ctx.input;
 
-  const namespace = (id: string): string => `${step.id}::${id}`;
+  // Building block 3 (params): each value renders against the parent's
+  // template context (including `{{item}}` under forEach), then the rendered
+  // params are validated against the CHILD spec's own declared `inputs` via
+  // the same `resolveInputs` the CLI/web `--param` path uses — unknown-param
+  // and missing-required errors surface with the child's own error text.
+  let childInputs: Record<string, string | number | boolean> | undefined;
+  if (step.params) {
+    const renderedParams: Record<string, string> = {};
+    for (const [key, template] of Object.entries(step.params)) {
+      renderedParams[key] = renderPrompt(template, renderCtx);
+    }
+    const resolved = resolveInputs(childSpec, renderedParams);
+    if (resolved.errors.length > 0) {
+      return fail(`workflow '${step.workflow}' params invalid: ${resolved.errors.join("; ")}`);
+    }
+    childInputs = resolved.values;
+  }
+
+  const namespace = (id: string): string => `${execStepId}::${id}`;
   const childResults: StepResult[] = [];
   const rawResults = new Map<string, StepResult>();
   let childOk = false;
@@ -2978,7 +3355,7 @@ async function executeWorkflowStep(
   // "Post-plan follow-ups").
   for await (const event of runWorkflow(
     childSpec,
-    { input: childInput, workflowCallStack: [...stack, step.workflow] },
+    { input: childInput, inputs: childInputs, workflowCallStack: [...stack, step.workflow] },
     // The steering control stays with the top-level run: a sub-run is one
     // in-flight step from the parent's point of view (a pause waits for it),
     // and forwarding the control would re-bind its edit validation to the
@@ -3001,7 +3378,7 @@ async function executeWorkflowStep(
           ...event,
           phaseId: namespace(event.phaseId),
           stepId: namespace(event.stepId),
-          parentStepId: event.parentStepId ? namespace(event.parentStepId) : step.id,
+          parentStepId: event.parentStepId ? namespace(event.parentStepId) : execStepId,
           dependsOn: event.dependsOn?.map(namespace),
           loopTo: event.loopTo ? namespace(event.loopTo) : undefined,
         });
@@ -3023,7 +3400,9 @@ async function executeWorkflowStep(
         const namespaced: StepResult = {
           ...event.result,
           stepId: namespace(event.result.stepId),
-          parentStepId: event.result.parentStepId ? namespace(event.result.parentStepId) : step.id,
+          parentStepId: event.result.parentStepId
+            ? namespace(event.result.parentStepId)
+            : execStepId,
         };
         childResults.push(namespaced);
         hooks.pushWorkflowEvent({
@@ -3109,15 +3488,40 @@ async function executeWorkflowStep(
     );
   }
 
+  // Building block 3 (worktreeStep): the named child step's recorded worktree
+  // surfaces as THIS step's own `result.worktree` — like `outputStep`,
+  // resolved at run time since the child spec isn't available at
+  // spec-validate time. An unknown child step id, or one that recorded no
+  // worktree, fails the step with a clear error rather than silently omitting
+  // the worktree (a downstream `attach:`/`merge` step would otherwise fail
+  // later with a much less obvious message).
+  let worktree: AgentWorktreeInfo | undefined;
+  if (step.worktreeStep) {
+    const worktreeResult = rawResults.get(step.worktreeStep);
+    if (!worktreeResult) {
+      return fail(
+        `worktreeStep '${step.worktreeStep}' did not produce a result in workflow '${step.workflow}'`,
+      );
+    }
+    if (!worktreeResult.worktree) {
+      return fail(
+        `worktreeStep '${step.worktreeStep}' in workflow '${step.workflow}' recorded no worktree (only worker, processor, and command steps — or a merge step with mode "worktree", or a workflow step with worktreeStep — record one)`,
+      );
+    }
+    worktree = worktreeResult.worktree;
+  }
+
   return {
     result: {
-      stepId: step.id,
+      stepId: execStepId,
       ok: childOk,
       output: outputResult.output,
       json: outputResult.json,
+      item,
       error: childOk ? undefined : `sub-workflow '${step.workflow}' did not complete successfully`,
       durationMs: Date.now() - started,
       childResults,
+      worktree,
     },
     childResults,
   };
@@ -3171,8 +3575,18 @@ async function executeMergeStep(
     // Judge fan-out sources leaf by leaf, not by the parent's ok flag: a
     // parent is not-ok when ANY child failed or never ran (budget), but
     // skipped/not-run children are simply absent from the merge — only a
-    // child that actually failed poisons it and fails the step.
-    const leaves = result.childResults?.length ? result.childResults : [result];
+    // child that actually failed poisons it and fails the step. A step that
+    // carries its OWN `result.worktree` at the top level (a worker/processor/
+    // command step, or a `mode: "worktree"` merge step) is a leaf by itself
+    // even when it also carries `childResults` (guard for a future building
+    // block where a `workflow` call step surfaces a `worktreeStep` result
+    // alongside its own `childResults`) — descending into children there
+    // would miss the surfaced worktree entirely.
+    const leaves = result.worktree
+      ? [result]
+      : result.childResults?.length
+        ? result.childResults
+        : [result];
     for (const leaf of leaves) {
       if (leaf.skipped || leaf.notRun) continue;
       if (!leaf.ok) return fail(`merge source '${leaf.stepId}' failed; nothing was merged`);
@@ -3180,10 +3594,30 @@ async function executeMergeStep(
       else missingWorktrees.push(leaf.stepId);
     }
   }
+  // Dedupe by worktree root, keeping the FIRST label: an `attach:` chain (or
+  // an `inherit:` chain) shares one underlying worktree across several step
+  // ids, so naming several of them in `from` would otherwise harvest and
+  // "merge" the same worktree into itself more than once.
+  const dedupedLabels: string[] = [];
+  {
+    const seenRoots = new Map<string, string>();
+    const deduped: WorktreeSource[] = [];
+    for (const source of sources) {
+      const existing = seenRoots.get(source.root);
+      if (existing) {
+        dedupedLabels.push(source.stepId);
+        continue;
+      }
+      seenRoots.set(source.root, source.stepId);
+      deduped.push(source);
+    }
+    sources.length = 0;
+    sources.push(...deduped);
+  }
   if (sources.length === 0) {
     return fail(
       missingWorktrees.length > 0
-        ? `merge step '${step.id}': no worktrees recorded for ${missingWorktrees.join(", ")} (only worker/processor/command steps get worktrees, and only inside a git repository; gate/llm/consolidator steps never produce one)`
+        ? `merge step '${step.id}': no worktrees recorded for ${missingWorktrees.join(", ")} (only worker/processor/command steps and mode:"worktree" merge steps get worktrees, and only inside a git repository; gate/llm/consolidator/apply/branch/pr-merge steps never produce one)`
         : `merge step '${step.id}' has no source worktrees to merge`,
     );
   }
@@ -3201,12 +3635,23 @@ async function executeMergeStep(
           iteration: ctx.iteration,
         });
 
+  // Building block 5: the conflict-resolution agent's `model`/`effort` render
+  // through the standard template pipeline, like every other agent-backed
+  // step. The schema guarantees `model` is set whenever `onConflict` is
+  // "agent" (workflowMergeStepSchema's superRefine); an empty render fails the
+  // step up front rather than lazily inside the resolver.
+  const conflictModel = onConflict === "agent" ? render(step.model) : undefined;
+  if (onConflict === "agent" && (!conflictModel || conflictModel.trim() === "")) {
+    return fail(
+      `merge step '${step.id}' conflict-resolution model template '${step.model}' rendered empty (a model that renders empty never silently launches a default)`,
+    );
+  }
+  const conflictEffort = onConflict === "agent" ? render(step.effort) : undefined;
+
   const resolver: ConflictResolver | undefined =
     onConflict === "agent"
       ? async ({ stagingRoot, stepId: sourceStepId, files }) => {
           // Synthetic one-shot step for the conflict-resolution turn. The
-          // schema guarantees agent+model whenever onConflict is "agent"
-          // (workflowMergeStepSchema's superRefine), hence the casts. The
           // `kind: "processor"` label only describes the attempt to event
           // consumers — runAgentAttempt reads agent/model/effort/env/
           // extraArgs/stepTimeoutSec plus the prompt argument and never
@@ -3215,8 +3660,8 @@ async function executeMergeStep(
             id: step.id,
             kind: "processor",
             agent: step.agent as AgentInstanceId,
-            model: step.model as string,
-            effort: step.effort,
+            model: conflictModel as string,
+            effort: conflictEffort,
             env: step.env,
             extraArgs: step.extraArgs,
             stepTimeoutSec: step.stepTimeoutSec,
@@ -3244,6 +3689,18 @@ async function executeMergeStep(
         }
       : undefined;
   const strategyOption = onConflict === "ours" || onConflict === "theirs" ? onConflict : undefined;
+
+  // `mode: "worktree"` reserves its staging directory/branch from the SAME
+  // workspace manager (and therefore the same base dir / run id / naming
+  // convention) ordinary step worktrees use, so the kept result lives where
+  // the existing prune/GC tooling expects step worktrees to live. Undefined
+  // when there's no workspace manager, or it's not git-backed (outside a
+  // repo) — `harvestWorktrees` already requires a git repo for ANY mode, so
+  // that degradation can't actually happen here; the `?.` is defensive.
+  const keepAt =
+    mode === "worktree"
+      ? await ctx.deps.agentWorkspace?.reserveKeptDir?.(step.id, repoRoot, ctx.signal)
+      : undefined;
 
   const harvests: HarvestResult[] = [];
   try {
@@ -3275,12 +3732,15 @@ async function executeMergeStep(
           mode,
           // `||`, not `??`: a branch template that renders to "" (e.g. an
           // empty step output) must still fall back to a generated name.
+          // `keepAt.branch` (worktree mode) wins over both when set —
+          // harvestWorktrees itself already prefers it.
           branchName: render(step.branch) || defaultHarvestBranchName(step.id),
           commitMessage: render(step.commitMessage),
           prTitle: render(step.prTitle),
           prBody: render(step.prBody),
           strategyOption,
           resolveConflicts: resolver,
+          keepAt,
           signal: ctx.signal,
         }),
       );
@@ -3337,7 +3797,9 @@ async function executeMergeStep(
         ? `applied to ${repoRoot} (uncommitted)`
         : mode === "branch"
           ? `left on branch ${branches.join(", ")}`
-          : `opened PR ${prUrls.join(", ")}`;
+          : mode === "worktree"
+            ? `kept in worktree ${harvests[0]?.worktreeRoot ?? "?"} on branch ${branches.join(", ")}`
+            : `opened PR ${prUrls.join(", ")}`;
     lines.push(
       `merged ${merged.length} worktree(s): ${fileCount} file(s) +${additions} -${deletions} — ${target}`,
     );
@@ -3358,14 +3820,34 @@ async function executeMergeStep(
   if (cleaned.length > 0) {
     lines.push(`cleaned up ${cleaned.length} source worktree(s): ${cleaned.join(", ")}`);
   }
+  if (dedupedLabels.length > 0) {
+    lines.push(
+      `deduped ${dedupedLabels.length} source(s) sharing an already-merged worktree: ${dedupedLabels.join(", ")}`,
+    );
+  }
+
+  const worktreeResult: AgentWorktreeInfo | undefined =
+    mode === "worktree" && harvests[0]?.worktreeRoot
+      ? {
+          originalCwd: harvests[0].worktreeRoot,
+          cwd: harvests[0].worktreeRoot,
+          root: harvests[0].worktreeRoot,
+          branch: harvests[0].branch ?? "",
+          baseCommit: harvests[0].worktreeBaseCommit,
+        }
+      : undefined;
 
   return {
     result: {
       stepId: step.id,
       ok: true,
       output: lines.join("\n"),
+      worktree: worktreeResult,
       json: {
         mode,
+        worktree: worktreeResult
+          ? { root: worktreeResult.root, branch: worktreeResult.branch }
+          : undefined,
         merged,
         unchanged,
         missingWorktrees,
@@ -3382,6 +3864,131 @@ async function executeMergeStep(
       costUsd: conflictCostUsd > 0 ? conflictCostUsd : undefined,
       tokens: conflictTokens,
     },
+  };
+}
+
+const DEFAULT_ISSUES_LIMIT = 20;
+
+/**
+ * Execute an `issues` step (building block 6): collect out-of-scope findings
+ * from `from` (default `dependsOn`) sources, dedupe, and either render a
+ * report (`mode: "report"`, zero side effects) or file GitHub issues
+ * (`mode: "github"`, via `gh`). See {@link IssuesStep} for the full contract;
+ * the collection/dedupe/render/gh primitives live in `issues.ts`.
+ */
+async function executeIssuesStep(step: IssuesStep, ctx: ExecuteContext): Promise<StepResult> {
+  const started = Date.now();
+  const fail = (message: string): StepResult => ({
+    stepId: step.id,
+    ok: false,
+    output: message,
+    error: message,
+    durationMs: Date.now() - started,
+  });
+
+  const render = (text: string | undefined): string | undefined =>
+    text === undefined
+      ? undefined
+      : renderPrompt(text, {
+          input: ctx.input,
+          inputs: ctx.inputs,
+          outputs: ctx.outputs,
+          results: ctx.results,
+          iteration: ctx.iteration,
+        });
+
+  // `mode` is templated (building block 6 mirrors block 5's model/effort
+  // rendering) so one spec can switch between "report" and "github" via
+  // `{{inputs.*}}`; validated AFTER rendering since the literal spec value may
+  // just be a placeholder.
+  const renderedMode = render(step.mode) || "report";
+  if (!ISSUES_MODES.has(renderedMode)) {
+    return fail(
+      `issues step '${step.id}' mode template '${step.mode ?? "report"}' rendered '${renderedMode}', which is not "report" or "github"`,
+    );
+  }
+
+  const sourceIds = step.from ?? step.dependsOn ?? [];
+  const collected = collectFindings(sourceIds, ctx.results, step.findingsPath ?? "findings");
+  if (!collected.ok) return fail(`issues step '${step.id}': ${collected.error}`);
+  const findings = dedupeFindings(collected.findings);
+  const dedupedCount = collected.findings.length - findings.length;
+
+  if (renderedMode === "report") {
+    const output = buildFindingsReport(findings, collected.malformed);
+    return {
+      stepId: step.id,
+      ok: true,
+      output,
+      json: { findings, created: [], skippedExisting: [] },
+      durationMs: Date.now() - started,
+    };
+  }
+
+  // mode: "github" — side-effectful, so the result is never cached (mirrors
+  // approval steps): a resumed run must re-check/re-file rather than replay a
+  // stale created/skippedExisting list that no longer matches GitHub's state.
+  const titlePrefix = render(step.titlePrefix) ?? "";
+  const limit = step.limit ?? DEFAULT_ISSUES_LIMIT;
+  const cwd = ctx.deps.cwd;
+  const toCreate = findings.slice(0, limit);
+  const truncated = findings.length - toCreate.length;
+
+  const created: { title: string; url: string }[] = [];
+  const skippedExisting: { title: string }[] = [];
+  const failures: { title: string; error: string }[] = [];
+
+  for (const finding of toCreate) {
+    if (ctx.signal?.aborted) return fail("cancelled");
+    const issueTitle = `${titlePrefix}${finding.title}`;
+    try {
+      const existing = await findExistingIssue(issueTitle, cwd, step.repo, ctx.signal);
+      if (existing) {
+        skippedExisting.push({ title: issueTitle });
+        continue;
+      }
+      const url = await createGithubIssue({
+        title: issueTitle,
+        body: buildIssueBody(finding, ctx.workflowName),
+        labels: step.labels,
+        repo: step.repo,
+        cwd,
+        signal: ctx.signal,
+      });
+      created.push({ title: issueTitle, url });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      failures.push({ title: issueTitle, error: message });
+    }
+  }
+
+  const lines: string[] = [
+    `filed ${created.length} issue(s), skipped ${skippedExisting.length} existing, ${findings.length} finding(s) total`,
+  ];
+  for (const c of created) lines.push(`  created: ${c.title} -> ${c.url}`);
+  for (const s of skippedExisting) lines.push(`  already exists: ${s.title}`);
+  if (dedupedCount > 0) lines.push(`deduped ${dedupedCount} repeat finding(s)`);
+  if (collected.malformed > 0) {
+    lines.push(`${collected.malformed} malformed finding item(s) were skipped`);
+  }
+  if (truncated > 0) {
+    lines.push(`truncated ${truncated} finding(s) beyond limit ${limit}`);
+  }
+  if (failures.length > 0) {
+    lines.push(`${failures.length} issue(s) failed to file:`);
+    for (const f of failures) lines.push(`  ${f.title}: ${f.error}`);
+    lines.push(`hint: ${GH_GUIDANCE}`);
+  }
+
+  const ok = failures.length === 0;
+  return {
+    stepId: step.id,
+    ok,
+    output: lines.join("\n"),
+    error: ok ? undefined : `${failures.length} issue(s) failed to file (see output)`,
+    json: { findings, created, skippedExisting },
+    durationMs: Date.now() - started,
+    noCache: true,
   };
 }
 
@@ -3416,8 +4023,13 @@ function findFailedDependency(
   step: WorkflowStep,
   results: Map<string, StepResult>,
 ): string | undefined {
+  // `issues` steps collect findings leaf-by-leaf exactly like merge collects
+  // worktrees (see `collectFindings`), so they get the same partial-fan-out
+  // exemption below.
   const mergeSources =
-    step.kind === "merge" ? new Set(step.from ?? step.dependsOn ?? []) : undefined;
+    step.kind === "merge" || step.kind === "issues"
+      ? new Set(step.from ?? step.dependsOn ?? [])
+      : undefined;
   // Workspace-inherit and session-continue sources are implicit dependencies:
   // a step can neither start from the worktree nor resume the session of a
   // step that failed. (`continue:<ownId>` self-references are not deps.)
@@ -3488,21 +4100,34 @@ function dependencyFailedResult(stepId: string, dependencyId: string): StepResul
  */
 function findSkipReason(step: WorkflowStep, ctx: GateEvalContext): string | undefined {
   const kind = workflowStepKind(step);
-  // A merge step's sources are `from ?? dependsOn` (matching
-  // executeMergeStep); like a consolidator it treats skipped sources as
-  // absent and only skips when ALL of them were. When `from` is set, any
-  // extra `dependsOn` entries are ordering-only and don't cascade skips.
+  // A merge (or issues) step's sources are `from ?? dependsOn` (matching
+  // executeMergeStep / collectFindings); like a consolidator it treats
+  // skipped sources as absent and only skips when ALL of them were. When
+  // `from` is set, any extra `dependsOn` entries are ordering-only and don't
+  // cascade skips.
   const dependsOn =
-    step.kind === "merge" ? (step.from ?? step.dependsOn ?? []) : (step.dependsOn ?? []);
+    step.kind === "merge" || step.kind === "issues"
+      ? (step.from ?? step.dependsOn ?? [])
+      : (step.dependsOn ?? []);
   const skippedDeps = dependsOn.filter((dep) => ctx.results.get(dep)?.skipped);
-  if (kind === "consolidator" || kind === "merge") {
+  if (kind === "consolidator" || kind === "merge" || kind === "issues") {
     if (dependsOn.length > 0 && skippedDeps.length === dependsOn.length) {
       return "all dependencies were skipped";
     }
   } else if (skippedDeps.length > 0) {
     return `dependency '${skippedDeps[0]}' was skipped`;
   }
-  if ((step.kind === "worker" || step.kind === "processor" || !step.kind) && step.forEach) {
+  // Every kind that can fan out (worker/processor/llm/workflow) cascades a
+  // skipped forEach source the same way: no items to fan over means the step
+  // is skipped, not silently run with zero children.
+  if (
+    (step.kind === "worker" ||
+      step.kind === "processor" ||
+      step.kind === "llm" ||
+      step.kind === "workflow" ||
+      !step.kind) &&
+    step.forEach
+  ) {
     const sourceStepId = parseForEachSource(step.forEach);
     if (sourceStepId && ctx.results.get(sourceStepId)?.skipped) {
       return `forEach source '${sourceStepId}' was skipped`;
@@ -3991,14 +4616,26 @@ function evaluateGate(
   ctx: GateEvalContext,
 ): { passed: boolean; message?: string } {
   const subject = condition.step ? ctx.results.get(condition.step) : undefined;
+  // `value` tests a rendered template expression instead of a step's output or
+  // the run input; schema validation guarantees it is never combined with
+  // `step`/`path` (see `gateConditionSchema`'s superRefine).
   // `path` narrows the inspected text to one field of the step's parsed
   // structured output; a missing field (or a step without parsed JSON)
   // evaluates as empty text, so text conditions fail rather than match prose.
-  const text = condition.step
-    ? condition.path !== undefined
-      ? jsonFieldText(jsonPathGet(subject?.json, condition.path))
-      : (subject?.output ?? ctx.outputs.get(condition.step) ?? "")
-    : ctx.input;
+  const text =
+    condition.value !== undefined
+      ? renderPrompt(condition.value, {
+          input: ctx.input,
+          inputs: ctx.inputs,
+          outputs: ctx.outputs,
+          results: ctx.results,
+          iteration: ctx.iteration,
+        })
+      : condition.step
+        ? condition.path !== undefined
+          ? jsonFieldText(jsonPathGet(subject?.json, condition.path))
+          : (subject?.output ?? ctx.outputs.get(condition.step) ?? "")
+        : ctx.input;
   let passed = true;
   let message: string | undefined;
 

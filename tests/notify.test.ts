@@ -58,7 +58,7 @@ describe("createNotifier", () => {
     );
     expect(notifier.wants("run-completed")).toBe(true);
     notifier.notify(event);
-    expect(bells).toEqual([""]);
+    expect(bells).toEqual(["\u0007"]);
     expect(spawns[0]).toMatchObject({ binary: "notify-send" });
     expect(spawns[0]!.args[0]).toContain("bug-hunt");
     expect(posts[0]!.url).toBe("https://hooks.example/x");

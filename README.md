@@ -90,6 +90,24 @@ JSON, not a morning of babysitting terminals. Bundled examples:
 | `bug-hunt` | Sweeps a scope for logic / error-handling / security bugs across three models in parallel, cross-checks to drop false positives, gates verified findings, reports. |
 | `review-loop` | Implements, then reviews-and-fixes in a bounded loop until the review says "DONE". |
 | `quick-triage` | Splits a request into concerns and gates on a typed verdict — built entirely on direct-API `llm` steps, no agent CLI needed. |
+| `mainline` | Plans independent execution streams, implements+reviews+fixes+tests each in parallel worktrees, merges them, reviews the merge, opens a PR, files every out-of-scope finding as an issue. See [docs/mainline-pipeline.md](docs/mainline-pipeline.md). |
+| `mainline-stream` | The per-stream unit `mainline` fans out to a plain implement→review→fix→test loop; also runs standalone. |
+
+### One prompt in, one reviewed PR out
+
+`mainline` is the pipeline you reach for when a task is too big for one
+agent call but you still want ONE reviewed pull request out the other end,
+not a pile of half-finished branches to babysit. A planner splits your
+prompt into independent streams; each stream is implemented and
+review/fix/test-looped **in its own worktree, in parallel**; an agent merges
+the streams; the merged result gets one more review/fix/test pass; a PR
+opens. Every out-of-scope bug anyone noticed along the way — implementer,
+reviewer, planner — gets filed as a GitHub issue instead of silently
+dropped or scope-creeping the task. Model tiers are `--param`s, not forks of
+the spec: run it keyless on free models to see the shape, then point
+`coderModel`/`reviewerModel`/`plannerModel` at whatever your budget allows.
+See [docs/mainline-pipeline.md](docs/mainline-pipeline.md) for the full
+walkthrough and a premium/balanced/budget model-tier table.
 
 ### Skip the CLIs entirely with direct-API `llm` steps
 
@@ -553,6 +571,8 @@ Workflow documentation:
 | `target-sweep` | Distributes a request into target areas, dynamically creates one processor run per item, then consolidates the generated outputs. |
 | `review-loop` | Implements, then reviews and fixes in a bounded loop-back gate until the review reports "DONE" (or the iteration cap is hit). |
 | `quick-triage` | Splits a request into concerns, assesses each in parallel, and gates on a typed verdict — built entirely on direct-API `llm` steps: no agent CLI needed, just `ANTHROPIC_API_KEY`. |
+| `mainline` | Plans independent execution streams, fans each out to `mainline-stream` in its own worktree, merges via `mode: "worktree"` with agent conflict resolution, runs one final review/fix/test loop on the merge, opens a PR (or leaves a branch), and files out-of-scope findings as GitHub issues (or a report). See [docs/mainline-pipeline.md](docs/mainline-pipeline.md). |
+| `mainline-stream` | The per-stream pipeline `mainline` fans out to: implement in a worktree, then loop review → fix → test (via `workspace: "attach:"`, so each iteration sees the previous one's fixes) until clean. Standalone-runnable. |
 
 ### Defining your own
 

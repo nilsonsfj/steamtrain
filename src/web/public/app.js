@@ -5,7 +5,7 @@
   
 
 
-  var KIND_LABEL = { worker: "worker", processor: "process", distributor: "fan-out", consolidator: "merge", gate: "gate", approval: "approval", human: "human", merge: "merge-back", command: "command", llm: "llm", workflow: "sub-workflow" };
+  var KIND_LABEL = { worker: "worker", processor: "process", distributor: "fan-out", consolidator: "merge", gate: "gate", approval: "approval", human: "human", merge: "merge-back", command: "command", llm: "llm", workflow: "sub-workflow", issues: "issues" };
   // Autonomy labels: what a workflow will need from a human, visible BEFORE launch.
   var AUTONOMY_META = {
     autonomous: { badge: "▸ autonomous", cls: "autonomy-auto", title: "Runs unattended end-to-end — no human involvement declared." },
@@ -2052,14 +2052,14 @@
     return h("span", null, i, label);
   }
   function kindColor(k) {
-    return { worker: "#6fb1ff", processor: "#9d8cff", distributor: "#ffce6f", consolidator: "#5fe0c6", gate: "#f0a35e", approval: "#ffd166", human: "#f5a3ff", merge: "#ff9ecb", command: "#b8c4d0", llm: "#62d2f5", workflow: "#7ce38b" }[k] || "#6fb1ff";
+    return { worker: "#6fb1ff", processor: "#9d8cff", distributor: "#ffce6f", consolidator: "#5fe0c6", gate: "#f0a35e", approval: "#ffd166", human: "#f5a3ff", merge: "#ff9ecb", command: "#b8c4d0", llm: "#62d2f5", workflow: "#7ce38b", issues: "#c9e07a" }[k] || "#6fb1ff";
   }
 
   var ALL_LEGEND_KINDS = [
     ["worker", "worker"], ["processor", "process"], ["distributor", "fan-out"],
     ["consolidator", "merge"], ["gate", "gate"], ["approval", "approval"],
     ["human", "human"], ["merge", "merge-back"], ["command", "command"],
-    ["llm", "llm"], ["workflow", "sub-workflow"]
+    ["llm", "llm"], ["workflow", "sub-workflow"], ["issues", "issues"]
   ];
 
   /** Kinds present in the selected workflow (spec or live phases). */
@@ -3606,7 +3606,7 @@
         : kind === "command"
           ? "$ " + (st.cmd || "")
           : kind === "workflow"
-            ? "invokes workflow: " + (st.workflow || "") + (st.outputStep ? " · outputStep: " + st.outputStep : "")
+            ? "invokes workflow: " + (st.workflow || "") + (st.outputStep ? " · outputStep: " + st.outputStep : "") + (st.forEach ? " · forEach: " + st.forEach : "") + (st.worktreeStep ? " · worktreeStep: " + st.worktreeStep : "")
             : kind === "human"
               ? "asks a human: " + truncate(st.prompt || "", 120) + (st.choices && st.choices.length ? " · " + st.choices.length + " choice(s)" : "")
               : (st.items ? "distributes " + st.items.length + " item(s)" : "passthrough merge (no agent)");
@@ -3676,6 +3676,7 @@
     var c = st.condition || {};
     var parts = [];
     if (c.step) parts.push("step " + c.step);
+    if (c.value != null) parts.push("value " + c.value);
     if (c.ok != null) parts.push(c.ok ? "ok" : "not ok");
     if (c.contains) parts.push('contains "' + c.contains + '"');
     if (c.matches) parts.push("matches /" + c.matches + "/");
@@ -4654,7 +4655,7 @@
         if (s.gateCondition) card.appendChild(h("div", { class: "inputs", text: "condition: " + s.gateCondition + (s.gateOnFalse ? " \u00b7 onFalse: " + s.gateOnFalse : "") }));
         if (s.workflowName) card.appendChild(h("div", { class: "inputs", text: "workflow: " + s.workflowName }));
         if (s.mergeMode) card.appendChild(h("div", { class: "inputs", text: "mode: " + s.mergeMode }));
-        if (s.workspaceSource) card.appendChild(h("div", { class: "inputs", text: "inherit: " + s.workspaceSource }));
+        if (s.workspaceSource) card.appendChild(h("div", { class: "inputs", text: (s.workspaceMode || "inherit") + ": " + s.workspaceSource }));
         if (s.artifacts) card.appendChild(h("div", { class: "inputs", text: "artifacts: " + s.artifacts.join(", ") }));
         if (s.renderedPrompt) {
           var lines = s.renderedPrompt.split("\n");

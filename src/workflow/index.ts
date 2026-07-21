@@ -9,6 +9,7 @@ export {
   type GateStep,
   type ApprovalStep,
   type HumanStep,
+  type IssuesStep,
   type LlmPricing,
   type LlmStep,
   type MergeStep,
@@ -209,6 +210,7 @@ export {
   defaultHarvestBranchName,
   harvestWorktrees,
   pruneWorktree,
+  runCommand,
   snapshotWorktreeState,
   worktreeDiff,
   worktreeSourceFromInfo,
@@ -458,6 +460,18 @@ export {
   appendNarration,
   narrateFromState,
 } from "./narration";
+export {
+  GH_GUIDANCE,
+  type CollectedFinding,
+  type CollectFindingsOutcome,
+  buildFindingsReport,
+  buildIssueBody,
+  collectFindings,
+  createGithubIssue,
+  dedupeFindings,
+  findExistingIssue,
+  sortBySeverity,
+} from "./issues";
 export {
   type ArrivalReceipt,
   type ArrivalDestination,

@@ -36,7 +36,8 @@ export type WorkflowStepKind =
   | "merge"
   | "command"
   | "llm"
-  | "workflow";
+  | "workflow"
+  | "issues";
 
 export interface WorkflowStepBase {
   /** Unique across the whole workflow; referenced by `dependsOn` and templates. */
@@ -102,15 +103,38 @@ export interface WorkspaceFields {
    * an implement → review → test pipeline where each step actually sees the
    * previous step's edits, while the user's checkout stays untouched.
    *
-   * The source becomes an implicit dependency: this step is scheduled after it,
-   * skips when it was skipped, and fails when it failed. The source must be a
-   * worker/processor/command step without `forEach` (a fan-out parent has many
-   * worktrees — merge them first). Outside a git repository steps share the
-   * plain cwd, so inheritance is trivially satisfied.
+   * `"attach:<stepId>"` — run this step INSIDE the named earlier step's own
+   * worktree instead: no copy, no new branch. Where `inherit` forks a new
+   * worktree from the source's state (so a later edit in the forked copy never
+   * reaches the source or any sibling that also inherited from it), `attach`
+   * shares the ONE worktree, so a chain of attachers actually converges — the
+   * canonical shape for an implement → review → fix → test loop where fix's
+   * edits must be visible to the next review. `result.worktree` records the
+   * SAME root/branch/baseCommit as the source (and the source's
+   * `linkedIgnoredPaths`), so templates, `history show --diff`, and `merge`
+   * all see it as if this step WAS the source, worktree-wise.
    *
-   * Merging an inherited worktree lands the whole chain's changes: its diff
-   * base stays the original base commit, so it includes the inherited edits
-   * plus this step's own.
+   * Either way the source becomes an implicit dependency: this step is
+   * scheduled after it, skips when it was skipped, and fails when it failed.
+   * The source must be a worker/processor/command step without `forEach` (a
+   * fan-out parent has many worktrees — merge them first) or a `merge` step
+   * with `mode: "worktree"` (attaching to an `apply`/`branch`/`pr` merge is
+   * rejected — those deliver, they don't leave a worktree). Outside a git
+   * repository steps share the plain cwd, so inheritance/attachment is
+   * trivially satisfied.
+   *
+   * `attach` additionally requires STRICT ordering: every step attaching to
+   * the same underlying worktree (directly, or transitively through a chain
+   * of attachers) must, in spec order, be reachable from the previous one via
+   * `dependsOn` (counting implicit workspace/session/forEach deps) — two
+   * steps must never run concurrently in one worktree. Validation rejects
+   * unordered co-attachers by name. A step with `workspace: "attach:…"` may
+   * not itself have `forEach` (fan-out children would race in the one
+   * worktree).
+   *
+   * Merging an inherited or attached worktree lands the whole chain's
+   * changes: its diff base stays the original base commit, so it includes the
+   * upstream edits plus this step's own.
    */
   workspace?: string;
   /**
@@ -259,6 +283,16 @@ export interface ConsolidatorStep extends WorkflowStepBase {
  *    the `gh` CLI (`prTitle` / `prBody` templates). With `perSource: true`,
  *    each source worktree gets its own branch + PR — the "one PR per parallel
  *    agent, reviewed by a human" operating model.
+ *  - `"worktree"`: merge into a KEPT staging worktree (same base directory /
+ *    naming convention as ordinary step worktrees, so it survives like any
+ *    other and is found by the usual prune/GC paths) instead of delivering
+ *    anywhere — nothing lands in the user's checkout. The step's own
+ *    `result.worktree` records it (`root`, `branch`, `baseCommit` = the
+ *    pre-merge target HEAD), so a later step can `workspace: "attach:<this
+ *    step>"` (or `inherit:`) to keep working on the merged state, and a
+ *    LATER merge step can list this one (or anything attached to it) in
+ *    `from` to harvest it like any agent step's worktree. `perSource` is
+ *    rejected with this mode (one kept worktree is the point).
  *
  * Conflicts BETWEEN sources (two agents touched the same lines) follow
  * `onConflict`: `"fail"` (default), `"ours"` / `"theirs"` (first-merged wins /
@@ -272,7 +306,7 @@ export interface MergeStep extends WorkflowStepBase {
   /** Steps whose worktrees to merge; defaults to `dependsOn`. */
   from?: string[];
   /** Where the merged changes land (see kind docs). Default `"apply"`. */
-  mode?: "apply" | "branch" | "pr";
+  mode?: "apply" | "branch" | "pr" | "worktree";
   /** Branch name template for branch/pr modes; generated when omitted. */
   branch?: string;
   /** One branch/PR per source worktree instead of one combined merge (branch/pr modes only). */
@@ -301,6 +335,77 @@ export interface MergeStep extends WorkflowStepBase {
   env?: Record<string, string>;
   extraArgs?: string[];
   stepTimeoutSec?: number;
+}
+
+/**
+ * Building block 6 — documents out-of-scope findings as GitHub issues or as a
+ * report. Agentless, costless, worktree-free: it reads structured `json`
+ * findings arrays that earlier steps already declared via an `output` schema,
+ * so it participates in any workflow without a dedicated "findings" step kind
+ * upstream.
+ *
+ * **Collection**: walks each `from` source (default `dependsOn`), descending
+ * ONE level into `childResults` leaves (fan-out children, sub-workflow
+ * surfaces) — mirroring {@link MergeStep}'s leaf judgment exactly: a
+ * skipped/not-run leaf contributes nothing, a failed leaf fails the whole
+ * step (a partial findings report from a failed pipeline would be
+ * misleading), and a step carrying its own top-level `childResults` alongside
+ * a `worktree`/`json` is still treated as one leaf (guards the same future
+ * shape `executeMergeStep` guards). From each surviving leaf, `json` is read
+ * at `findingsPath` (default `"findings"`); a leaf with no structured output,
+ * or nothing at that path, contributes nothing — that's the common case (a
+ * clean run has no findings), not an error.
+ *
+ * **Finding shape**: the array at `findingsPath` may contain plain strings
+ * (treated as titles) or objects (`title` required; `body`, `severity`,
+ * `file`, `line` optional). An object with no usable string `title` is
+ * malformed — counted and reported, not fatal.
+ *
+ * **Dedupe**: case-insensitive normalized `title` + `file` fingerprint across
+ * every source, so the same pre-existing bug spotted by two streams files
+ * once.
+ *
+ * **`mode: "report"`** (default, zero side effects): a severity-ordered
+ * markdown report (critical > high > medium > low > unknown, unrecognized
+ * severities sorted last but shown verbatim); `json` =
+ * `{ findings, created: [], skippedExisting: [] }`.
+ *
+ * **`mode: "github"`** (side-effectful): creates one issue per finding (up to
+ * `limit`) via `gh issue create` — title = `titlePrefix` + the finding title,
+ * body = the finding body plus a provenance block (workflow, source step,
+ * `file:line`, severity), `--label` per entry in `labels`, `-R repo` when
+ * set. Before creating, checks for an existing issue with the same
+ * (case-insensitive, exact-normalized) title via `gh issue list --search`
+ * (state all) and records a match in `skippedExisting` instead of creating a
+ * duplicate. `gh` missing from PATH, or a `gh` failure (commonly missing
+ * auth), fails the step with copy-paste guidance. `gh` runs from the run's
+ * base cwd. The result carries `noCache: true` — like an approval checkpoint,
+ * a resumed run must re-run it rather than replay a stale "created" list that
+ * no longer matches GitHub's state.
+ *
+ * `mode` and `titlePrefix` are templates (rendered with the step's standard
+ * context); `mode` is validated ∈ `{"report", "github"}` AFTER rendering, so
+ * one spec can switch modes via `{{inputs.issueMode}}`.
+ *
+ * No agent, no worktree: never a `workspace: "inherit:"/"attach:"` source, and
+ * autonomy-neutral (it never pauses for a human).
+ */
+export interface IssuesStep extends WorkflowStepBase {
+  kind: "issues";
+  /** Steps whose findings to collect; defaults to `dependsOn`. */
+  from?: string[];
+  /** JSON path into each source's `json` where the findings array lives. Default `"findings"`. */
+  findingsPath?: string;
+  /** `"report"` (default, safe) or `"github"` (creates issues). Template, validated after rendering. */
+  mode?: string;
+  /** Prepended to each created issue's title (github mode). Template. */
+  titlePrefix?: string;
+  /** `--label` flags applied to every created issue (github mode). */
+  labels?: string[];
+  /** `-R owner/name` target repo for `gh` (github mode); omitted ⇒ the run's cwd repo. */
+  repo?: string;
+  /** Max issues created before truncating (github mode). Default 20. */
+  limit?: number;
 }
 
 /**
@@ -360,7 +465,11 @@ export interface WorkflowCallStep extends WorkflowStepBase {
   kind: "workflow";
   /** Name of the workflow to invoke (resolved via `WorkflowDeps.resolveWorkflow` at run time). */
   workflow: string;
-  /** Template rendered to become the child run's `{{input}}`. Omitted ⇒ this run's own `{{input}}` passes through unchanged. */
+  /**
+   * Template rendered to become the child run's `{{input}}`. Omitted ⇒ this
+   * run's own `{{input}}` passes through unchanged. Inside `forEach`, `{{item}}`
+   * is available alongside the parent's own template context.
+   */
   input?: string;
   /**
    * Id of the child step whose `output`/`json` surface as this step's own
@@ -375,6 +484,43 @@ export interface WorkflowCallStep extends WorkflowStepBase {
    * result" error).
    */
   outputStep?: string;
+  /**
+   * Dynamically fan this workflow call out over prior distributor/llm-splitter
+   * items — one whole child run per item, mirroring worker/llm `forEach`.
+   * Syntax: `steps.<id>.items` (or `<id>.items`). Each generated child run's
+   * own steps fold in under `<stepId>[i]::<childStepId>` (extending the plain
+   * `<stepId>::<childStepId>` namespace with the per-item fan-out suffix so two
+   * items' inner steps never collide), and `{{item}}` / `{{item.index}}` are
+   * available in `input` and `params` templates. The parent result's
+   * `childResults` holds one entry per item (each itself carrying its own
+   * nested `childResults`); the parent is `ok` only when every item's child run
+   * completed successfully — see {@link WorkerStep.forEach} for the shared
+   * fan-out semantics (concurrency, budget, cache/resume).
+   */
+  forEach?: string;
+  /**
+   * Templated values passed as the child run's declared input parameters. Each
+   * value is rendered with the parent's template context (including `{{item}}`
+   * under `forEach`), then validated against the child spec's own `inputs` via
+   * `resolveInputs` — unknown-param and missing-required errors surface
+   * exactly like CLI `--param` errors and fail this step with the child's own
+   * error text.
+   */
+  params?: Record<string, string>;
+  /**
+   * Id of a child step whose recorded worktree surfaces as THIS step's own
+   * `result.worktree` — the sub-workflow analog of a worker/processor/command
+   * step's own worktree. Resolved at run time (like `outputStep`); an unknown
+   * child step id, or a child step that recorded no worktree, fails this step
+   * with a clear error. Under `forEach`, each generated child's result carries
+   * its own surfaced worktree, so a `merge` step whose `from` names the
+   * fan-out parent harvests one worktree per item. A `workflow` step WITH
+   * `worktreeStep` and WITHOUT `forEach` is a valid `workspace:
+   * "inherit:<stepId>"` / `"attach:<stepId>"` source (see
+   * {@link WorkspaceFields.workspace}) and a valid `merge` `from` source,
+   * exactly like a worker/processor/command step.
+   */
+  worktreeStep?: string;
 }
 
 /**
@@ -488,6 +634,15 @@ export interface GateCondition {
    * `step`, and the step must declare an `output` schema to have parsed JSON.
    */
   path?: string;
+  /**
+   * A templated text expression tested by the same `contains`/`matches`/
+   * `equals` predicates, instead of a step output or the run input. Rendered
+   * with the standard template context (inputs, step outputs, iteration) at
+   * evaluation time. The canonical use is input-driven routing: `{ value:
+   * "{{inputs.issueTiming}}", equals: "live" }`. Mutually exclusive with
+   * `step`, `ok`, `path`, and `human`.
+   */
+  value?: string;
   /** Text condition against the referenced output (or input). */
   contains?: string;
   /** Regular expression condition against the referenced output (or input). */
@@ -593,7 +748,8 @@ export type WorkflowStep =
   | MergeStep
   | CommandStep
   | LlmStep
-  | WorkflowCallStep;
+  | WorkflowCallStep
+  | IssuesStep;
 
 export interface WorkflowPhase {
   id: string;
@@ -732,7 +888,14 @@ export interface StepResult {
    * even if the configured instance's endpoint or defaultModel changed since.
    */
   api?: ApiInstanceId;
-  /** Effective model the `llm` step called; see {@link StepResult.api}. */
+  /**
+   * Effective (rendered) model the step actually ran with. Set by `llm`
+   * steps (see {@link StepResult.api}) AND by agent-backed steps
+   * (worker/processor, agent-backed distributor/consolidator, merge
+   * conflict-resolution agents) so a templated `model: "{{inputs.*}}"` is
+   * attributed by its rendered value everywhere cost is broken down by model
+   * (`cost.ts`'s `resultLeaves`/`recordLeaves`), not by the raw template text.
+   */
   model?: string;
   /** Total attempts this step took (auto-retry); omitted/1 means it ran once. */
   attempts?: number;
@@ -808,6 +971,7 @@ const gateConditionSchema = z
     human: z.boolean().optional(),
     ok: z.boolean().optional(),
     path: z.string().min(1).optional(),
+    value: z.string().optional(),
     contains: z.string().optional(),
     matches: z.string().optional(),
     equals: z.string().optional(),
@@ -820,16 +984,41 @@ const gateConditionSchema = z
       const mechanical =
         condition.ok !== undefined ||
         condition.path !== undefined ||
+        condition.value !== undefined ||
         condition.contains !== undefined ||
         condition.matches !== undefined ||
         condition.equals !== undefined;
       if (mechanical) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "gate condition human cannot be combined with ok/path/contains/matches/equals",
+          message:
+            "gate condition human cannot be combined with ok/path/value/contains/matches/equals",
         });
       }
       return;
+    }
+    // A `value` condition tests a rendered template expression instead of a
+    // step's output/ok state or the run input, so it is mutually exclusive
+    // with the fields that pick THOSE subjects.
+    if (condition.value !== undefined) {
+      if (condition.step !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "gate condition value cannot be combined with step",
+        });
+      }
+      if (condition.ok !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "gate condition value cannot be combined with ok",
+        });
+      }
+      if (condition.path !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "gate condition value cannot be combined with path",
+        });
+      }
     }
     if (
       condition.ok === undefined &&
@@ -894,7 +1083,7 @@ const optionalAgentRunShape = {
 const workspaceShape = {
   workspace: z
     .string()
-    .regex(/^inherit:.+$/, 'workspace must be "inherit:<stepId>"')
+    .regex(/^(inherit|attach):.+$/, 'workspace must be "inherit:<stepId>" or "attach:<stepId>"')
     .optional(),
   artifacts: z.array(z.string().min(1)).min(1).optional(),
 };
@@ -1018,7 +1207,7 @@ const workflowMergeStepSchema = z
     ...baseStepShape,
     kind: z.literal("merge"),
     from: z.array(z.string().min(1)).min(1).optional(),
-    mode: z.enum(["apply", "branch", "pr"]).optional(),
+    mode: z.enum(["apply", "branch", "pr", "worktree"]).optional(),
     branch: z.string().min(1).optional(),
     perSource: z.boolean().optional(),
     cleanup: z.boolean().optional(),
@@ -1054,6 +1243,15 @@ const workflowMergeStepSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'merge step with perSource requires mode "branch" or "pr"',
+      });
+    }
+    // "worktree" mode's whole point is ONE kept staging worktree; perSource
+    // would need one staging worktree per source, defeating it.
+    if (step.perSource && step.mode === "worktree") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'merge step with perSource cannot use mode "worktree" (one kept worktree is the point)',
       });
     }
     if ((step.agent || step.model) && !(step.agent && step.model)) {
@@ -1136,7 +1334,31 @@ const workflowCallStepSchema = z.object({
   workflow: z.string().min(1),
   input: z.string().min(1).optional(),
   outputStep: z.string().min(1).optional(),
+  forEach: z.string().min(1).optional(),
+  params: z.record(z.string()).optional(),
+  worktreeStep: z.string().min(1).optional(),
 });
+
+const workflowIssuesStepSchema = z
+  .object({
+    ...baseStepShape,
+    kind: z.literal("issues"),
+    from: z.array(z.string().min(1)).min(1).optional(),
+    findingsPath: z.string().min(1).optional(),
+    mode: z.string().min(1).optional(),
+    titlePrefix: z.string().min(1).optional(),
+    labels: z.array(z.string().min(1)).optional(),
+    repo: z.string().min(1).optional(),
+    limit: z.number().int().positive().optional(),
+  })
+  .superRefine((step, ctx) => {
+    if (!step.from?.length && !step.dependsOn?.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "issues step requires from or dependsOn (the steps whose findings to collect)",
+      });
+    }
+  });
 
 const workflowStepSchema = z.union([
   workflowGateStepSchema,
@@ -1148,6 +1370,7 @@ const workflowStepSchema = z.union([
   workflowCommandStepSchema,
   workflowLlmStepSchema,
   workflowCallStepSchema,
+  workflowIssuesStepSchema,
   workflowWorkerStepSchema,
 ]);
 
@@ -1217,11 +1440,34 @@ export function workflowStepKind(step: WorkflowStep): WorkflowStepKind {
 
 export type AgentBackedWorkflowStep = WorkflowStep & AgentRunFields;
 
-/** The step id a `workspace: "inherit:<stepId>"` field names, if any. */
-export function workspaceSourceId(step: WorkflowStep): string | undefined {
+/** A step's parsed `workspace` field: which mode, and which step it names. */
+export interface WorkspaceRef {
+  mode: "inherit" | "attach";
+  sourceId: string;
+}
+
+/**
+ * Parse a step's `workspace` field (`"inherit:<stepId>"` or
+ * `"attach:<stepId>"`) into its mode and source step id, or undefined when
+ * the step has no `workspace` field. See {@link WorkspaceFields.workspace}
+ * for the semantic difference between the two modes.
+ */
+export function workspaceRef(step: WorkflowStep): WorkspaceRef | undefined {
   const workspace = "workspace" in step ? step.workspace : undefined;
   if (!workspace) return undefined;
-  return /^inherit:(.+)$/.exec(workspace)?.[1];
+  const match = /^(inherit|attach):(.+)$/.exec(workspace);
+  if (!match) return undefined;
+  return { mode: match[1] as "inherit" | "attach", sourceId: match[2] as string };
+}
+
+/**
+ * The step id a `workspace: "inherit:<stepId>"` OR `"attach:<stepId>"` field
+ * names, if any — mode-agnostic, for call sites that only care WHICH step is
+ * the implicit dependency (scheduling, skip/fail cascade, template lint), not
+ * how its worktree is used. Use {@link workspaceRef} where the mode matters.
+ */
+export function workspaceSourceId(step: WorkflowStep): string | undefined {
+  return workspaceRef(step)?.sourceId;
 }
 
 /** The step id a `session: "continue:<stepId>"` field names, if any. */
@@ -1424,6 +1670,18 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
           }
         }
       }
+      if (step.kind === "issues") {
+        for (const ref of step.from ?? []) {
+          if (!earlierIds.has(ref)) {
+            return {
+              ok: false,
+              error: allIds.has(ref)
+                ? `issues step '${step.id}' from references '${ref}', which is not in an earlier phase`
+                : `issues step '${step.id}' from references unknown step '${ref}'`,
+            };
+          }
+        }
+      }
       if (step.when?.step && !earlierIds.has(step.when.step)) {
         return {
           ok: false,
@@ -1436,6 +1694,7 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
         (step.kind === "worker" ||
           step.kind === "processor" ||
           step.kind === "llm" ||
+          step.kind === "workflow" ||
           !step.kind) &&
         step.forEach
       ) {
@@ -1524,28 +1783,50 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
           sessionContinuedBy.set(sessionSrc, step.id);
         }
       }
-      const wsSource = workspaceSourceId(step);
-      if (wsSource) {
+      const wsRef = workspaceRef(step);
+      if (wsRef) {
+        const wsSource = wsRef.sourceId;
+        const verb = wsRef.mode === "attach" ? "attaches to" : "inherits";
         if (!earlierIds.has(wsSource)) {
           return {
             ok: false,
             error: allIds.has(wsSource)
-              ? `step '${step.id}' workspace inherits '${wsSource}', which is not in an earlier phase`
-              : `step '${step.id}' workspace inherits unknown step '${wsSource}'`,
+              ? `step '${step.id}' workspace ${verb} '${wsSource}', which is not in an earlier phase`
+              : `step '${step.id}' workspace ${verb} unknown step '${wsSource}'`,
           };
         }
         const sourceStep = stepsById.get(wsSource);
         const sourceKind = sourceStep ? workflowStepKind(sourceStep) : undefined;
-        if (sourceKind !== "worker" && sourceKind !== "processor" && sourceKind !== "command") {
+        const isWorktreeStep =
+          sourceKind === "worker" || sourceKind === "processor" || sourceKind === "command";
+        // A `merge` step only leaves a worktree behind in `mode: "worktree"` —
+        // apply/branch/pr deliver the merge and leave nothing to inherit or
+        // attach to. A `workflow` call step WITH `worktreeStep` and WITHOUT
+        // `forEach` surfaces a named child step's worktree as its own, so it
+        // is eligible too — a fan-out `workflow` step has one worktree per
+        // item, same hazard as a fan-out worker/processor/command step.
+        const isWorktreeMerge =
+          sourceKind === "merge" && (sourceStep as MergeStep).mode === "worktree";
+        const isWorktreeWorkflow =
+          sourceKind === "workflow" &&
+          Boolean((sourceStep as WorkflowCallStep).worktreeStep) &&
+          !(sourceStep as WorkflowCallStep).forEach;
+        if (!isWorktreeStep && !isWorktreeMerge && !isWorktreeWorkflow) {
           return {
             ok: false,
-            error: `step '${step.id}' workspace inherits '${wsSource}', which is a ${sourceKind} step (only worker, processor, and command steps leave a worktree to inherit)`,
+            error: `step '${step.id}' workspace ${verb} '${wsSource}', which is a ${sourceKind} step (only worker, processor, and command steps — or a merge step with mode "worktree", or a workflow step with worktreeStep — leave a worktree to inherit or attach)`,
           };
         }
-        if (sourceStep && "forEach" in sourceStep && sourceStep.forEach) {
+        if (isWorktreeStep && sourceStep && "forEach" in sourceStep && sourceStep.forEach) {
           return {
             ok: false,
-            error: `step '${step.id}' workspace inherits fan-out step '${wsSource}', which has one worktree per item (merge them first, or inherit a non-forEach step)`,
+            error: `step '${step.id}' workspace ${verb} fan-out step '${wsSource}', which has one worktree per item (merge them first, or ${wsRef.mode} a non-forEach step)`,
+          };
+        }
+        if (wsRef.mode === "attach" && "forEach" in step && step.forEach) {
+          return {
+            ok: false,
+            error: `step '${step.id}' cannot combine workspace attach with forEach (fan-out children would race in one worktree — merge or drop the forEach)`,
           };
         }
       }
@@ -1574,6 +1855,91 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
     // Promote this phase's ids only after the whole phase is checked, so two
     // steps in the same phase can't depend on each other.
     for (const step of phase.steps) earlierIds.add(step.id);
+  }
+
+  // ---- Attach ordering validation ----
+  // Two steps must never run concurrently in the same worktree, so every step
+  // attaching to a given worktree must, in spec order, be strictly reachable
+  // from the previous attacher (the first is reachable from the source by
+  // construction — the source is always an implicit dependency). Reachability
+  // is computed over `dependsOn` plus the SAME implicit deps the scheduler
+  // adds (workspace/session/forEach sources; see `computeDependencies` in
+  // engine.ts) — a lighter, validation-only mirror of that graph.
+  {
+    const immediateDeps = new Map<string, Set<string>>();
+    for (const phase of spec.phases) {
+      for (const step of phase.steps) {
+        const set = new Set<string>(step.dependsOn ?? []);
+        const wsSrc = workspaceSourceId(step);
+        if (wsSrc) set.add(wsSrc);
+        const sessSrc = sessionSourceId(step);
+        if (sessSrc && sessSrc !== step.id) set.add(sessSrc);
+        if ("forEach" in step && step.forEach) {
+          const feSrc = parseForEachSource(step.forEach);
+          if (feSrc) set.add(feSrc);
+        }
+        if (step.kind === "merge") {
+          for (const ref of step.from ?? []) set.add(ref);
+        }
+        immediateDeps.set(step.id, set);
+      }
+    }
+
+    // Is `toId` a (transitive) dependency of `fromId`?
+    const reachable = (fromId: string, toId: string): boolean => {
+      const seen = new Set<string>();
+      const stack = [fromId];
+      while (stack.length > 0) {
+        const cur = stack.pop() as string;
+        if (cur === toId) return true;
+        if (seen.has(cur)) continue;
+        seen.add(cur);
+        for (const dep of immediateDeps.get(cur) ?? []) stack.push(dep);
+      }
+      return false;
+    };
+
+    // Follow a chain of `attach:`s to the ultimate non-attach worktree owner
+    // (a worker/processor/command step, or a `mode: "worktree"` merge step).
+    // Two steps attaching to different LINKS of the same chain still share
+    // one worktree, so they must be grouped and ordered together.
+    const ultimateOwner = (stepId: string): string => {
+      const visited = new Set<string>();
+      let current = stepId;
+      while (!visited.has(current)) {
+        visited.add(current);
+        const s = stepsById.get(current);
+        const ref = s ? workspaceRef(s) : undefined;
+        if (ref?.mode !== "attach") return current;
+        current = ref.sourceId;
+      }
+      return current; // defensive: a cycle shouldn't be reachable given phase ordering
+    };
+
+    const attachersByOwner = new Map<string, string[]>();
+    for (const phase of spec.phases) {
+      for (const step of phase.steps) {
+        const ref = workspaceRef(step);
+        if (ref?.mode !== "attach") continue;
+        const owner = ultimateOwner(ref.sourceId);
+        const list = attachersByOwner.get(owner) ?? [];
+        list.push(step.id);
+        attachersByOwner.set(owner, list);
+      }
+    }
+
+    for (const [owner, attachers] of attachersByOwner) {
+      for (let i = 1; i < attachers.length; i++) {
+        const prev = attachers[i - 1] as string;
+        const cur = attachers[i] as string;
+        if (!reachable(cur, prev)) {
+          return {
+            ok: false,
+            error: `steps '${prev}' and '${cur}' both attach to the worktree owned by '${owner}' but are not ordered — add 'dependsOn: ["${prev}"]' to '${cur}' (or reorder the phases) so they never run concurrently in the same worktree`,
+          };
+        }
+      }
+    }
   }
 
   // ---- Loop (loopTo) validation ----
