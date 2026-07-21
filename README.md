@@ -2,7 +2,7 @@
 
 **Orchestrate your coding agents like a build pipeline — not a chat window.**
 
-steamtrain runs **Claude Code, OpenCode, Codex, and Amp** as managed
+steamtrain runs **Claude Code, OpenCode, Codex, Cursor, and Amp** as managed
 subprocesses and drives them through declarative, parallel **workflows**: fan a
 task out across models, cross-check the results, gate on what passed, and merge
 the verified changes back into your checkout — all streamed live in a terminal
@@ -67,11 +67,11 @@ A tour of what it does and why it's useful — not an exhaustive spec (that's
 
 ### Run every major coding agent through one interface
 
-steamtrain spawns the real `claude`, `opencode`, `codex`, and `amp` CLIs (no
-stubs) and maps each one's streaming output onto a single normalized event
-model. Whichever agent produced a line — assistant text, a tool call, a result,
-an error — it renders in the same unified, color-coded stream. Mix agents freely
-in one workflow; steamtrain speaks all four.
+steamtrain spawns the real `claude`, `opencode`, `codex`, `agent` (Cursor), and
+`amp` CLIs (no stubs) and maps each one's streaming output onto a single
+normalized event model. Whichever agent produced a line — assistant text, a
+tool call, a result, an error — it renders in the same unified, color-coded
+stream. Mix agents freely in one workflow; steamtrain speaks all five.
 
 ### Compose work as declarative, parallel workflows
 
@@ -504,7 +504,7 @@ warning); only the keys you specify are overridden.
 
 ### Agent & API instances
 
-Beyond the four built-in agents, you can register additional **agent instances**
+Beyond the five built-in agents, you can register additional **agent instances**
 (a provider adapter plus a custom binary/env/args — e.g. a fork) and **API
 instances** (an HTTP endpoint for `llm` steps: dialect, base URL, key env var,
 default model, pricing). Both configure at global or project scope and merge by
@@ -609,7 +609,7 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
 - **Step kinds:** `worker` / `processor`, `distributor`, `consolidator`, `gate`,
   `llm` (direct-API inference), `command` (run a shell check), and `merge`
   (harvest worktree edits). Existing steps without `kind` are workers.
-- **Agent-backed fields:** `agent` (`claude` | `opencode` | `codex` | `amp`), `model`, `prompt`,
+- **Agent-backed fields:** `agent` (`claude` | `opencode` | `codex` | `cursor` | `amp`), `model`, `prompt`,
   plus optional `cwd` (the **target** dir; relative paths resolve against the
   launch cwd), `env` (extra vars), and `extraArgs` (extra CLI flags).
 - **Dynamic fan-out:** add `forEach: "steps.<id>.items"` to a worker/processor

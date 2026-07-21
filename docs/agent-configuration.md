@@ -24,7 +24,7 @@ The global file accepts the same keys as `steamtrain.json` except `workflows`
 }
 ```
 
-Valid providers: `claude`, `opencode`, `codex`, `amp`. An instance reuses its
+Valid providers: `claude`, `opencode`, `codex`, `cursor`, `amp`. An instance reuses its
 provider's adapter; `binary` is only needed when the executable name differs
 from the provider (e.g. a fork).
 
