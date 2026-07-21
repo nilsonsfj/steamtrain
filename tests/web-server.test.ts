@@ -1294,6 +1294,63 @@ describe("web server", () => {
     expect(projectDisk.apis ?? []).toEqual([]);
   });
 
+  it("PUT /api/config allows the same agent id in both user and project scopes", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const dir = mkdtempSync(join(tmpdir(), "st-cfg-dup-"));
+    tempRoots.push(dir);
+    const configPath = join(dir, "steamtrain.json");
+    const userConfigPath = join(dir, "user-config.json");
+    writeFileSync(configPath, "{}\n");
+    const config: Record<string, unknown> = {};
+    const configLayers = {
+      userAgents: [] as import("../src/config").AgentInstanceConfig[],
+      projectAgents: [] as import("../src/config").AgentInstanceConfig[],
+      userApis: [] as import("../src/config").ApiInstanceConfig[],
+      projectApis: [] as import("../src/config").ApiInstanceConfig[],
+    };
+    const server = createWebServer({
+      host,
+      runs,
+      config,
+      configPath,
+      userConfigPath,
+      configLayers,
+    });
+    servers.push(server);
+    const base = await start(server);
+
+    const res = await fetch(`${base}/api/config`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        agents: [
+          { id: "claude", provider: "claude", enabled: true, scope: "user" },
+          { id: "claude", provider: "claude", enabled: false, scope: "project" },
+        ],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      agents: { id: string; scope: string; enabled?: boolean }[];
+    };
+    expect(body.agents).toEqual([
+      expect.objectContaining({ id: "claude", scope: "user", enabled: true }),
+      expect.objectContaining({ id: "claude", scope: "project", enabled: false }),
+    ]);
+    expect(JSON.parse(readFileSync(userConfigPath, "utf8"))).toMatchObject({
+      agents: [{ id: "claude", provider: "claude", enabled: true }],
+    });
+    expect(JSON.parse(readFileSync(configPath, "utf8"))).toMatchObject({
+      agents: [{ id: "claude", provider: "claude", enabled: false }],
+    });
+  });
+
   it("PUT /api/config honors explicit project scope for agents", async () => {
     const host = new FakeHost(demoSpec(), happyRun);
     const runs = new WorkflowRunManager({

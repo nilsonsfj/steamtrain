@@ -9,11 +9,11 @@ import { refreshAgentCatalogCaches } from "../agents/models";
 import { buildApiMeta } from "../apis";
 import type { AgentInstanceConfig, ApiInstanceConfig, SteamtrainConfig } from "../config";
 import {
+  defaultInstanceScope,
   loadConfig,
   parseAgentsConfig,
   parseApisConfig,
-  partitionAgentsByScope,
-  partitionApisByScope,
+  resolveInstanceScope,
   saveUserConfig,
   tagAgentsWithScope,
   tagApisWithScope,
@@ -1086,26 +1086,23 @@ async function handle(
       try {
         const raw = parsed.agents;
         if (!Array.isArray(raw)) throw new Error("agents must be an array");
-        const scopes = raw.map((item) =>
-          item && typeof item === "object" && !Array.isArray(item)
-            ? (item as { scope?: unknown }).scope
-            : undefined,
-        );
-        const withoutScope = raw.map((item) => {
-          if (!item || typeof item !== "object" || Array.isArray(item)) return item;
-          const { scope: _scope, ...rest } = item as Record<string, unknown>;
-          return rest;
+        // Partition before parseAgentsConfig: that helper enforces unique ids
+        // *within one file*, but the editor may legitimately send the same id
+        // in both user and project scopes (project shadows user).
+        const scopedRaw: { scope: "user" | "project"; entry: unknown }[] = raw.map((item) => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) {
+            return { scope: defaultInstanceScope(canGlobal), entry: item };
+          }
+          const { scope: rawScope, ...rest } = item as Record<string, unknown>;
+          return {
+            scope: resolveInstanceScope(rawScope, canGlobal),
+            entry: rest,
+          };
         });
-        const cleaned = parseAgentsConfig(withoutScope);
-        const partitioned = partitionAgentsByScope(
-          cleaned.map((agent, i) => ({
-            ...agent,
-            scope: scopes[i] as "user" | "project" | undefined,
-          })),
-          canGlobal,
-        );
-        userAgents = partitioned.user;
-        projectAgents = partitioned.project;
+        const userRaw = scopedRaw.filter((s) => s.scope === "user").map((s) => s.entry);
+        const projectRaw = scopedRaw.filter((s) => s.scope === "project").map((s) => s.entry);
+        userAgents = parseAgentsConfig(userRaw);
+        projectAgents = parseAgentsConfig(projectRaw);
         projectPatch.agents = projectAgents;
       } catch (err) {
         sendJson(res, 400, {
@@ -1119,26 +1116,20 @@ async function handle(
       try {
         const raw = parsed.apis;
         if (!Array.isArray(raw)) throw new Error("apis must be an array");
-        const scopes = raw.map((item) =>
-          item && typeof item === "object" && !Array.isArray(item)
-            ? (item as { scope?: unknown }).scope
-            : undefined,
-        );
-        const withoutScope = raw.map((item) => {
-          if (!item || typeof item !== "object" || Array.isArray(item)) return item;
-          const { scope: _scope, ...rest } = item as Record<string, unknown>;
-          return rest;
+        const scopedRaw: { scope: "user" | "project"; entry: unknown }[] = raw.map((item) => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) {
+            return { scope: defaultInstanceScope(canGlobal), entry: item };
+          }
+          const { scope: rawScope, ...rest } = item as Record<string, unknown>;
+          return {
+            scope: resolveInstanceScope(rawScope, canGlobal),
+            entry: rest,
+          };
         });
-        const cleaned = parseApisConfig(withoutScope);
-        const partitioned = partitionApisByScope(
-          cleaned.map((api, i) => ({
-            ...api,
-            scope: scopes[i] as "user" | "project" | undefined,
-          })),
-          canGlobal,
-        );
-        userApis = partitioned.user;
-        projectApis = partitioned.project;
+        const userRaw = scopedRaw.filter((s) => s.scope === "user").map((s) => s.entry);
+        const projectRaw = scopedRaw.filter((s) => s.scope === "project").map((s) => s.entry);
+        userApis = parseApisConfig(userRaw);
+        projectApis = parseApisConfig(projectRaw);
         projectPatch.apis = projectApis;
       } catch (err) {
         sendJson(res, 400, {
