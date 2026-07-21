@@ -64,8 +64,10 @@ export function renderIndex(revs: PageAssetRevisions): string {
   <div class="logo"><span class="brand-mark" aria-hidden="true"></span><span class="accent">steam</span>train</div>
   <div class="config" id="config"></div>
   <span class="mode-badge" id="modeBadge" style="display:none" title="This session can view workflows and runs but cannot launch, edit, approve, or change config.">&#128065; read-only</span>
-  <button class="newbtn" id="configBtn" title="Project agent and timeout settings">&#9881; Config</button>
-  <button class="newbtn" id="historyBtn" style="margin-left:auto" title="Browse live and past runs">&#9201; Runs</button>
+  <nav class="header-actions" aria-label="App">
+    <button class="newbtn" id="configBtn" title="Project agent and timeout settings">&#9881; Config</button>
+    <button class="newbtn" id="historyBtn" title="Browse live and past runs">&#9201; Runs</button>
+  </nav>
   <div class="health" id="health"></div>
 </header>
 <main>
