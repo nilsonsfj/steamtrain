@@ -63,6 +63,10 @@ export interface RunKiroProcessParams {
  *
  * kiro-cli prints the final assistant response to stdout (no stream-json).
  * We stream lines as text_delta and emit a result when the process exits 0.
+ *
+ * No `session_start`: headless mode does not expose a session id on stdout or
+ * stderr (unlike agy, which surfaces a conversation id). Resume / takeover that
+ * depend on a recorded session therefore cannot chain onto a kiro headless run.
  */
 export async function* runKiroProcess(params: RunKiroProcessParams): AsyncGenerator<AgentEvent> {
   const { binary, args, opts } = params;
@@ -151,6 +155,8 @@ export async function* runKiroProcess(params: RunKiroProcessParams): AsyncGenera
         isError: false,
         text,
         durationMs: Date.now() - startedAt,
+        // Headless chat prints plain text only — no token usage / cost on
+        // stdout (same limitation as antigravity print mode).
       };
     }
   }
