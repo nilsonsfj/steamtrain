@@ -1,29 +1,17 @@
-import type {
-  AgentEvent,
-  AgentId,
-  AgentInstanceId,
-  EventMapper,
-  TokenUsage,
-} from "../types/events";
-import {
-  type KiroUsage,
-  kiroAssistant,
-  kiroEnvelope,
-  kiroResult,
-  kiroSystemInit,
-  kiroUser,
-} from "../types/raw-kiro";
-import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
+import type { AgentEvent, AgentId } from "../types/events";
+import { type AgentAdapter, type AgentRunOptions } from "./adapter";
 import type { AgentModel } from "./agent-model";
-import { humanizeAssistantError, stringifyContent } from "./util";
+import { type ProcessLine, type ProcessRunOptions, runProcessLines } from "./spawn";
+import { firstLine } from "./util";
 
 const AGENT: AgentId = "kiro";
 
 /**
- * Known Kiro models. Kiro runs on Anthropic Claude models, so it supports the
- * same aliases and full model IDs as Claude Code.
+ * Known Kiro models. Catalog may lag the live CLI (`kiro-cli chat --list-models`);
+ * `auto` is always available. Claude aliases match common Kiro Pro model names.
  */
 export const KIRO_MODELS: readonly AgentModel[] = [
+  { id: "auto", name: "Auto" },
   { id: "sonnet", name: "Sonnet (latest)" },
   { id: "opus", name: "Opus (latest)" },
   { id: "haiku", name: "Haiku (latest)" },
@@ -33,157 +21,143 @@ export const KIRO_MODELS: readonly AgentModel[] = [
 ];
 
 /**
- * Build a mapper for one kiro run.
+ * Build headless argv for Amazon Kiro CLI (`kiro-cli`).
  *
- * kiro emits a Claude Code-compatible **message-level** stream JSON format -- it
- * does NOT stream partial `stream_event` deltas -- so, like the amp mapper,
- * this one surfaces text directly from the full `assistant` message blocks:
+ * Real contract (see https://kiro.dev/docs/cli/headless/):
+ *   kiro-cli chat --no-interactive --trust-all-tools --model MODEL [PROMPT]
  *
- *  - `system/init`            -> session_start (model from the init payload)
- *  - `assistant` text/think   -> text_delta (the message is the only text we get)
- *  - `assistant` tool_use     -> tool_use
- *  - `assistant.error`        -> error
- *  - `user` tool_result       -> tool_result
- *  - `result`                 -> result; plus an `error` event when the turn
- *                               failed with a message so it surfaces
- *  - anything else            -> unknown passthrough
- *
- * Stateless across lines, so it is also a pure function over each raw line.
- */
-export function createKiroMapper(agent: AgentInstanceId = AGENT): EventMapper {
-  return (raw: unknown): AgentEvent[] => {
-    const ts = Date.now();
-    const env = kiroEnvelope.safeParse(raw);
-    if (!env.success) return [{ kind: "unknown", agent, ts, raw }];
-
-    switch (env.data.type) {
-      case "system": {
-        const init = kiroSystemInit.safeParse(raw);
-        if (init.success) {
-          return [
-            {
-              kind: "session_start",
-              agent,
-              ts,
-              sessionId: init.data.session_id,
-              model: init.data.model,
-              tools: init.data.tools,
-            },
-          ];
-        }
-        return [];
-      }
-
-      case "assistant": {
-        const parsed = kiroAssistant.safeParse(raw);
-        if (!parsed.success) return [{ kind: "unknown", agent, ts, rawType: "assistant", raw }];
-        const out: AgentEvent[] = [];
-        if (parsed.data.error) {
-          out.push({ kind: "error", agent, ts, message: humanizeAssistantError(parsed.data) });
-        }
-        for (const block of parsed.data.message.content ?? []) {
-          if (block.type === "text" && typeof block.text === "string" && block.text) {
-            out.push({ kind: "text_delta", agent, ts, text: block.text });
-          } else if (
-            block.type === "thinking" &&
-            typeof block.thinking === "string" &&
-            block.thinking
-          ) {
-            out.push({ kind: "text_delta", agent, ts, text: block.thinking, thinking: true });
-          } else if (block.type === "tool_use" && block.name) {
-            out.push({
-              kind: "tool_use",
-              agent,
-              ts,
-              id: block.id,
-              name: block.name,
-              input: block.input,
-            });
-          }
-        }
-        return out;
-      }
-
-      case "user": {
-        const parsed = kiroUser.safeParse(raw);
-        if (!parsed.success) return [];
-        const out: AgentEvent[] = [];
-        for (const block of parsed.data.message.content ?? []) {
-          if (block.type === "tool_result") {
-            out.push({
-              kind: "tool_result",
-              agent,
-              ts,
-              id: block.tool_use_id ?? block.id,
-              output: stringifyContent(block.content),
-              isError: block.is_error,
-            });
-          }
-        }
-        return out;
-      }
-
-      case "result": {
-        const r = kiroResult.safeParse(raw);
-        if (!r.success) return [{ kind: "unknown", agent, ts, rawType: "result", raw }];
-        const out: AgentEvent[] = [];
-        if (r.data.is_error && r.data.error) {
-          out.push({ kind: "error", agent, ts, message: r.data.error, code: null });
-        }
-        out.push({
-          kind: "result",
-          agent,
-          ts,
-          isError: r.data.is_error ?? false,
-          text: r.data.result,
-          subtype: r.data.subtype,
-          durationMs: r.data.duration_ms,
-          costUsd: r.data.total_cost_usd,
-          tokens: kiroTokens(r.data.usage),
-        });
-        return out;
-      }
-
-      default:
-        return [{ kind: "unknown", agent, ts, rawType: env.data.type, raw }];
-    }
-  };
-}
-
-/** Map Kiro's Anthropic-shaped usage onto the normalized {@link TokenUsage}. */
-function kiroTokens(usage: KiroUsage | undefined): TokenUsage | undefined {
-  if (!usage) return undefined;
-  const tokens: TokenUsage = {};
-  if (usage.input_tokens !== undefined) tokens.input = usage.input_tokens;
-  if (usage.output_tokens !== undefined) tokens.output = usage.output_tokens;
-  if (usage.cache_read_input_tokens !== undefined) tokens.cacheRead = usage.cache_read_input_tokens;
-  if (usage.cache_creation_input_tokens !== undefined)
-    tokens.cacheWrite = usage.cache_creation_input_tokens;
-  return Object.keys(tokens).length > 0 ? tokens : undefined;
-}
-
-/**
- * Build the `kiro` argv for one print-mode run.
- *
- * kiro uses `--print --output-format stream-json --verbose --model MODEL`
- * plus optional `--effort EFFORT` and any extra args. The prompt is written
- * to stdin (like Claude Code). kiro emits message-level JSON (not partial
- * stream_event deltas), so thinking content is included in the full message.
+ * There is no Claude-style `--print` / `--output-format stream-json` — those
+ * flags are rejected (`unexpected argument '--print'`). Prompt is a positional
+ * argument (stdin stays closed unless the caller pipes extra context).
  */
 export function buildKiroExecArgs(opts: AgentRunOptions): string[] {
+  // No session resume yet: headless mode does not expose a session id, and
+  // this adapter does not set supportsResume (see docs/workflow-spec.md).
   return [
-    "--print",
-    "--output-format",
-    "stream-json",
-    "--verbose",
+    "chat",
+    "--no-interactive",
+    "--trust-all-tools",
+    "--wrap",
+    "never",
     "--model",
     opts.model,
     ...(opts.effort ? ["--effort", opts.effort] : []),
     ...(opts.extraArgs ?? []),
+    opts.prompt,
   ];
 }
 
-/** Runs the real `kiro` CLI in print mode with streaming JSON output. */
+export interface RunKiroProcessParams {
+  id: AgentId;
+  binary: string;
+  args: string[];
+  opts: AgentRunOptions;
+  /** @internal Test seam — defaults to {@link runProcessLines}. */
+  runLines?: (opts: ProcessRunOptions) => AsyncIterable<ProcessLine>;
+}
+
+/**
+ * Plain-text driver for Kiro headless chat.
+ *
+ * kiro-cli prints the final assistant response to stdout (no stream-json).
+ * We stream lines as text_delta and emit a result when the process exits 0.
+ */
+export async function* runKiroProcess(params: RunKiroProcessParams): AsyncGenerator<AgentEvent> {
+  const { binary, args, opts } = params;
+  const id = opts.agentId ?? params.id;
+  const startedAt = Date.now();
+  const textParts: string[] = [];
+  let sawStdout = false;
+  const runLines = params.runLines ?? runProcessLines;
+
+  const processOpts: ProcessRunOptions = {
+    binary,
+    args,
+    cwd: opts.cwd,
+    env: opts.env,
+    timeoutMs: opts.timeoutMs,
+    signal: opts.signal,
+    // Prompt is an argv token — leave stdin closed.
+  };
+
+  for await (const item of runLines(processOpts)) {
+    if (item.kind === "line") {
+      sawStdout = true;
+      textParts.push(item.line);
+      yield { kind: "text_delta", agent: id, ts: Date.now(), text: `${item.line}\n` };
+      continue;
+    }
+
+    if (item.kind === "stderr") {
+      continue;
+    }
+
+    if (item.kind === "exit") {
+      const ts = Date.now();
+      const stderr = item.stderr.trim();
+      const stderrTail = stderr ? `: ${firstLine(stderr)}` : "";
+      if (item.sawStdout) sawStdout = true;
+
+      if (item.spawnError) {
+        yield {
+          kind: "error",
+          agent: id,
+          ts,
+          message: `failed to start '${binary}': ${item.spawnError}`,
+          stderr: stderr || undefined,
+          code: item.code,
+        };
+        return;
+      }
+      if (item.timedOut) {
+        yield {
+          kind: "error",
+          agent: id,
+          ts,
+          message: `'${binary}' timed out after ${opts.timeoutMs! / 1000}s`,
+          stderr: stderr || undefined,
+          code: item.code,
+        };
+        return;
+      }
+      if ((item.code ?? 0) !== 0) {
+        yield {
+          kind: "error",
+          agent: id,
+          ts,
+          message: `'${binary}' exited with code ${item.code}${stderrTail}`,
+          stderr: stderr || undefined,
+          code: item.code,
+        };
+        return;
+      }
+
+      const text = textParts.join("\n").trim();
+      if (!text && !sawStdout) {
+        yield {
+          kind: "error",
+          agent: id,
+          ts,
+          message: `'${binary}' produced no output${stderrTail}`,
+          stderr: stderr || undefined,
+          code: item.code,
+        };
+        return;
+      }
+
+      yield {
+        kind: "result",
+        agent: id,
+        ts,
+        isError: false,
+        text,
+        durationMs: Date.now() - startedAt,
+      };
+    }
+  }
+}
+
+/** Runs the real `kiro-cli` in headless chat mode with plain-text stdout. */
 export class KiroCliAdapter implements AgentAdapter {
   readonly id: AgentId = AGENT;
   readonly binary: string;
@@ -194,14 +168,11 @@ export class KiroCliAdapter implements AgentAdapter {
   }
 
   run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
-    const args = buildKiroExecArgs(opts);
-    return runAgentProcess({
+    return runKiroProcess({
       id: this.id,
       binary: this.binary,
-      args,
+      args: buildKiroExecArgs(opts),
       opts,
-      map: createKiroMapper(opts.agentId ?? this.id),
-      prompt: opts.prompt,
     });
   }
 }

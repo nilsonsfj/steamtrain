@@ -33,7 +33,8 @@ describe("checkAgent kiro", () => {
       status: "binary_missing",
       binary: "__steamtrain_missing_kiro__",
     });
-    expect(result.detail).toContain("npm i -g @anthropic-ai/kiro-cli");
+    expect(result.detail).toContain("cli.kiro.dev");
+    expect(result.detail).not.toContain("@anthropic-ai/kiro-cli");
   });
 });
 

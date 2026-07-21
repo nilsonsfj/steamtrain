@@ -1,181 +1,227 @@
 import { describe, expect, it } from "vitest";
-import { buildKiroExecArgs, createKiroMapper } from "../src/agents/kiro";
+import { buildKiroExecArgs, runKiroProcess } from "../src/agents/kiro";
 import type { AgentEvent } from "../src/types/events";
 
 /**
- * Sample lines from `kiro --print --output-format stream-json --verbose`.
- * kiro emits Claude Code-compatible message-level stream JSON (like amp).
+ * Real headless contract (kiro-cli 2.x):
+ *   kiro-cli chat --no-interactive --trust-all-tools --model MODEL [--effort E] PROMPT
+ *
+ * Output is plain text on stdout — there is no Claude-style `--print` /
+ * `--output-format stream-json` (those flags are rejected by the CLI).
  */
-const SAMPLES = {
-  init: '{"type":"system","subtype":"init","session_id":"sess-001","model":"sonnet","tools":["Read","Write","Bash"]}',
-  userEcho:
-    '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"say PONG"}]},"session_id":"sess-001"}',
-  assistantText:
-    '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"PONG"}]},"session_id":"sess-001"}',
-  assistantThinking:
-    '{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"The user wants PONG"}]},"session_id":"sess-001"}',
-  assistantToolUse:
-    '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]},"session_id":"sess-001"}',
-  userToolResult:
-    '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"file1\\nfile2","is_error":false}]}}',
-  resultSuccess:
-    '{"type":"result","subtype":"success","is_error":false,"duration_ms":2100,"result":"PONG","total_cost_usd":0.0045,"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":20}}',
-  resultError:
-    '{"type":"result","subtype":"error_during_execution","duration_ms":500,"is_error":true,"error":"Authentication failed. Please run kiro and authenticate.","session_id":"sess-001"}',
-  status: '{"type":"system","subtype":"status","status":"thinking","session_id":"sess-001"}',
-  unknown: '{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}',
-} as const;
-
-function map(line: string): AgentEvent[] {
-  return createKiroMapper()(JSON.parse(line));
-}
-
-describe("kiro mapper", () => {
-  it("maps system/init to session_start with session_id, model and tools", () => {
-    const [event, ...rest] = map(SAMPLES.init);
-    expect(rest).toHaveLength(0);
-    expect(event).toMatchObject({
-      kind: "session_start",
-      agent: "kiro",
-      sessionId: "sess-001",
-      model: "sonnet",
-      tools: ["Read", "Write", "Bash"],
-    });
-  });
-
-  it("emits text straight from assistant text blocks (no partial deltas)", () => {
-    expect(map(SAMPLES.assistantText)).toEqual([
-      expect.objectContaining({ kind: "text_delta", agent: "kiro", text: "PONG" }),
-    ]);
-  });
-
-  it("maps assistant thinking blocks to thinking-flagged text deltas", () => {
-    expect(map(SAMPLES.assistantThinking)).toEqual([
-      expect.objectContaining({
-        kind: "text_delta",
-        text: "The user wants PONG",
-        thinking: true,
-      }),
-    ]);
-  });
-
-  it("emits tool_use from an assistant tool_use block", () => {
-    expect(map(SAMPLES.assistantToolUse)).toEqual([
-      expect.objectContaining({
-        kind: "tool_use",
-        id: "toolu_1",
-        name: "Bash",
-        input: { command: "ls" },
-      }),
-    ]);
-  });
-
-  it("emits tool_result from a user tool_result block", () => {
-    expect(map(SAMPLES.userToolResult)).toEqual([
-      expect.objectContaining({
-        kind: "tool_result",
-        id: "toolu_1",
-        output: "file1\nfile2",
-        isError: false,
-      }),
-    ]);
-  });
-
-  it("treats the echoed user prompt as a no-op (no tool_result)", () => {
-    expect(map(SAMPLES.userEcho)).toEqual([]);
-  });
-
-  it("maps a successful result with text, duration, cost and tokens", () => {
-    const events = map(SAMPLES.resultSuccess);
-    expect(events).toEqual([
-      expect.objectContaining({
-        kind: "result",
-        isError: false,
-        text: "PONG",
-        subtype: "success",
-        durationMs: 2100,
-        costUsd: 0.0045,
-        tokens: { input: 100, output: 50, cacheRead: 20 },
-      }),
-    ]);
-  });
-
-  it("surfaces a failed result's message as an error", () => {
-    const events = map(SAMPLES.resultError);
-    const error = events.find((e) => e.kind === "error");
-    expect(error).toMatchObject({ kind: "error", agent: "kiro" });
-    expect((error as { message: string }).message).toContain("Authentication failed");
-    expect(events.some((e) => e.kind === "result" && e.isError === true)).toBe(true);
-  });
-
-  it("ignores system status events", () => {
-    expect(map(SAMPLES.status)).toEqual([]);
-  });
-
-  it("passes through unrecognized top-level types as unknown", () => {
-    expect(map(SAMPLES.unknown)).toEqual([
-      expect.objectContaining({ kind: "unknown", rawType: "content_block_delta" }),
-    ]);
-  });
-
-  it("never throws on malformed/empty objects", () => {
-    expect(() => createKiroMapper()({})).not.toThrow();
-    expect(createKiroMapper()({ type: "assistant" })).toEqual([
-      expect.objectContaining({ kind: "unknown" }),
-    ]);
-  });
-});
 
 describe("buildKiroExecArgs", () => {
-  it("builds standard args for print mode with stream-json", () => {
+  it("builds headless chat argv with prompt last (no --print)", () => {
     const args = buildKiroExecArgs({ prompt: "do a thing", model: "sonnet" });
     expect(args).toEqual([
-      "--print",
-      "--output-format",
-      "stream-json",
-      "--verbose",
+      "chat",
+      "--no-interactive",
+      "--trust-all-tools",
+      "--wrap",
+      "never",
       "--model",
       "sonnet",
+      "do a thing",
     ]);
+    expect(args).not.toContain("--print");
+    expect(args).not.toContain("stream-json");
   });
 
   it("appends --effort when provided", () => {
     const args = buildKiroExecArgs({ prompt: "go", model: "opus", effort: "high" });
     expect(args).toEqual([
-      "--print",
-      "--output-format",
-      "stream-json",
-      "--verbose",
+      "chat",
+      "--no-interactive",
+      "--trust-all-tools",
+      "--wrap",
+      "never",
       "--model",
       "opus",
       "--effort",
       "high",
+      "go",
     ]);
   });
 
-  it("appends extraArgs after effort", () => {
+  it("appends extraArgs before the prompt (resume not wired yet)", () => {
     const args = buildKiroExecArgs({
-      prompt: "go",
+      prompt: "continue",
       model: "sonnet",
       effort: "max",
-      extraArgs: ["--no-tool", "Bash"],
+      resumeSessionId: "sess-abc",
+      extraArgs: ["--agent", "reviewer"],
     });
     expect(args).toEqual([
-      "--print",
-      "--output-format",
-      "stream-json",
-      "--verbose",
+      "chat",
+      "--no-interactive",
+      "--trust-all-tools",
+      "--wrap",
+      "never",
       "--model",
       "sonnet",
       "--effort",
       "max",
-      "--no-tool",
-      "Bash",
+      "--agent",
+      "reviewer",
+      "continue",
     ]);
+    expect(args).not.toContain("--resume-id");
   });
 
   it("omits --effort when not provided", () => {
     const args = buildKiroExecArgs({ prompt: "go", model: "haiku" });
     expect(args).not.toContain("--effort");
+  });
+});
+
+describe("runKiroProcess", () => {
+  async function collect(iter: AsyncIterable<AgentEvent>): Promise<AgentEvent[]> {
+    const out: AgentEvent[] = [];
+    for await (const event of iter) out.push(event);
+    return out;
+  }
+
+  it("keeps stdin closed and streams stdout lines as text_delta + result", async () => {
+    let seenOpts: import("../src/agents/spawn").ProcessRunOptions | undefined;
+    const events = await collect(
+      runKiroProcess({
+        id: "kiro",
+        binary: "kiro-cli",
+        args: buildKiroExecArgs({ prompt: "hi", model: "sonnet" }),
+        opts: { prompt: "hi", model: "sonnet", cwd: "/tmp/demo" },
+        runLines: async function* (opts) {
+          seenOpts = opts;
+          yield { kind: "line", line: "hello" };
+          yield { kind: "line", line: "world" };
+          yield {
+            kind: "exit",
+            code: 0,
+            signal: null,
+            timedOut: false,
+            stderr: "",
+            sawStdout: true,
+          };
+        },
+      }),
+    );
+
+    // Prompt is an argv token — stdin must stay closed (open stdin can hang
+    // non-interactive chat when nothing is piped).
+    expect(seenOpts?.prompt).toBeUndefined();
+    expect(events.map((e) => e.kind)).toEqual(["text_delta", "text_delta", "result"]);
+    expect(events[0]).toMatchObject({ kind: "text_delta", agent: "kiro", text: "hello\n" });
+    expect(events[1]).toMatchObject({ kind: "text_delta", text: "world\n" });
+    expect(events[2]).toMatchObject({
+      kind: "result",
+      text: "hello\nworld",
+      isError: false,
+    });
+  });
+
+  it("reports spawn failure, timeout, and non-zero exit", async () => {
+    const spawnEvents = await collect(
+      runKiroProcess({
+        id: "kiro",
+        binary: "kiro-cli",
+        args: [],
+        opts: { prompt: "hi", model: "sonnet" },
+        runLines: async function* () {
+          yield {
+            kind: "exit",
+            code: null,
+            signal: null,
+            timedOut: false,
+            stderr: "",
+            sawStdout: false,
+            spawnError: "ENOENT",
+          };
+        },
+      }),
+    );
+    expect(spawnEvents).toEqual([
+      expect.objectContaining({
+        kind: "error",
+        message: "failed to start 'kiro-cli': ENOENT",
+      }),
+    ]);
+
+    const timeoutEvents = await collect(
+      runKiroProcess({
+        id: "kiro",
+        binary: "kiro-cli",
+        args: [],
+        opts: { prompt: "hi", model: "sonnet", timeoutMs: 5000 },
+        runLines: async function* () {
+          yield {
+            kind: "exit",
+            code: null,
+            signal: null,
+            timedOut: true,
+            stderr: "",
+            sawStdout: false,
+          };
+        },
+      }),
+    );
+    expect(timeoutEvents).toEqual([
+      expect.objectContaining({
+        kind: "error",
+        message: "'kiro-cli' timed out after 5s",
+      }),
+    ]);
+
+    const exitEvents = await collect(
+      runKiroProcess({
+        id: "kiro",
+        binary: "kiro-cli",
+        args: [],
+        opts: { prompt: "hi", model: "sonnet" },
+        runLines: async function* () {
+          yield {
+            kind: "exit",
+            code: 2,
+            signal: null,
+            timedOut: false,
+            stderr: "error: unexpected argument '--print' found",
+            sawStdout: false,
+          };
+        },
+      }),
+    );
+    expect(exitEvents).toEqual([
+      expect.objectContaining({
+        kind: "error",
+        message: expect.stringContaining("exited with code 2"),
+        code: 2,
+      }),
+    ]);
+    expect((exitEvents[0] as { message: string }).message).toContain("unexpected argument '--print'");
+  });
+
+  it("errors when stdout is empty on success", async () => {
+    const events = await collect(
+      runKiroProcess({
+        id: "kiro",
+        binary: "kiro-cli",
+        args: [],
+        opts: { prompt: "hi", model: "sonnet" },
+        runLines: async function* () {
+          yield {
+            kind: "exit",
+            code: 0,
+            signal: null,
+            timedOut: false,
+            stderr: "",
+            sawStdout: false,
+          };
+        },
+      }),
+    );
+    expect(events).toEqual([
+      expect.objectContaining({
+        kind: "error",
+        message: expect.stringContaining("produced no output"),
+      }),
+    ]);
   });
 });

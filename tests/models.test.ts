@@ -45,6 +45,7 @@ describe("amp modes", () => {
 describe("kiro models", () => {
   it("exposes kiro models with sonnet as the default", () => {
     expect(modelIdsForAgent("kiro")).toEqual([
+      "auto",
       "sonnet",
       "opus",
       "haiku",
@@ -55,6 +56,7 @@ describe("kiro models", () => {
     expect(defaultModelForAgent("kiro")).toBe("sonnet");
     expect(modelNameForAgent("kiro", "sonnet")).toBe("Sonnet (latest)");
     expect(modelNameForAgent("kiro", "claude-sonnet-5")).toBe("Claude Sonnet 5");
+    expect(modelNameForAgent("kiro", "auto")).toBe("Auto");
   });
 
   it("reuses claude efforts for kiro models", () => {
