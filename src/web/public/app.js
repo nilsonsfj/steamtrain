@@ -1508,16 +1508,48 @@
       (!isReadOnly() && (S.source === "user" || S.source === "project")) ? "block" : "none";
   }
 
+  function setParamsExpanded(expanded) {
+    var panel = document.getElementById("paramsPanel");
+    var toggle = document.getElementById("paramsToggle");
+    if (!panel || !toggle) return;
+    if (expanded) panel.classList.remove("collapsed");
+    else panel.classList.add("collapsed");
+    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+  }
+
+  function updateParamsMeta(count) {
+    var meta = document.getElementById("paramsMeta");
+    if (!meta) return;
+    if (!count) {
+      meta.textContent = "";
+      return;
+    }
+    meta.textContent = count === 1
+      ? "1 variable · defaults"
+      : count + " variables · defaults";
+  }
+
   function renderParamsForm(spec) {
+    var panel = document.getElementById("paramsPanel");
     var container = document.getElementById("paramsForm");
     clear(container);
     var inputs = spec && spec.inputs;
-    if (!inputs || Object.keys(inputs).length === 0) {
-      container.style.display = "none";
+    var keys = inputs ? Object.keys(inputs) : [];
+    if (!panel || !container || keys.length === 0) {
+      if (panel) {
+        panel.style.display = "none";
+        panel.hidden = true;
+        panel.classList.add("collapsed");
+      }
+      updateParamsMeta(0);
       return;
     }
-    container.style.display = "grid";
-    Object.keys(inputs).forEach(function (key) {
+    panel.style.display = "";
+    panel.hidden = false;
+    // Keep variables tucked away so the pipeline stays the star; one click opens.
+    setParamsExpanded(false);
+    updateParamsMeta(keys.length);
+    keys.forEach(function (key) {
       var inp = inputs[key];
       var type = inp.type || "string";
       var required = inp.required === true || (inp.required !== false && inp.default === undefined);
@@ -1570,8 +1602,9 @@
   }
 
   function collectParams() {
+    var panel = document.getElementById("paramsPanel");
     var container = document.getElementById("paramsForm");
-    if (container.style.display === "none") return undefined;
+    if (!panel || !container || panel.hidden || panel.style.display === "none") return undefined;
     var fields = container.querySelectorAll("[data-param-key]");
     if (fields.length === 0) return undefined;
     var params = {};
@@ -3070,11 +3103,13 @@
     var input = document.getElementById("input").value;
     if (!input.trim()) { setBanner("enter some input first", "info"); return; }
     recordPromptHistory(input);
-    // Validate param fields before submission
+    // Validate param fields before submission (even when the panel is collapsed).
+    var panel = document.getElementById("paramsPanel");
     var container = document.getElementById("paramsForm");
-    if (container.style.display !== "none") {
+    if (panel && container && !panel.hidden && panel.style.display !== "none") {
       var invalidFields = container.querySelectorAll(".invalid");
       if (invalidFields.length > 0) {
+        setParamsExpanded(true);
         setBanner("fix parameter errors before running", "err");
         invalidFields[0].focus();
         return;
@@ -4995,6 +5030,11 @@
   document.getElementById("pauseBtn").addEventListener("click", togglePauseRun);
   document.getElementById("cancelBtn").addEventListener("click", cancelRun);
   document.getElementById("flushBtn").addEventListener("click", flushStaged);
+  document.getElementById("paramsToggle").addEventListener("click", function () {
+    var panel = document.getElementById("paramsPanel");
+    if (!panel || panel.hidden) return;
+    setParamsExpanded(panel.classList.contains("collapsed"));
+  });
   document.getElementById("input").addEventListener("keydown", function (e) {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { startRun(); return; }
     if (e.key === "ArrowUp" || e.key === "ArrowDown") {

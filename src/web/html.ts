@@ -99,7 +99,14 @@ export function renderIndex(revs: PageAssetRevisions): string {
         <div class="run-compose">
           <label class="run-compose-label" for="input">Describe</label>
           <textarea id="input" placeholder="What should this run do? (&#8593; recalls previous inputs)"></textarea>
-          <div id="paramsForm" class="params-form" style="display:none"></div>
+          <div id="paramsPanel" class="params-panel collapsed" style="display:none" hidden>
+            <button type="button" class="params-toggle" id="paramsToggle" aria-expanded="false" aria-controls="paramsForm">
+              <span class="params-toggle-chevron" aria-hidden="true"></span>
+              <span class="params-toggle-label">Variables</span>
+              <span class="params-toggle-meta" id="paramsMeta"></span>
+            </button>
+            <div id="paramsForm" class="params-form" role="region" aria-label="Workflow variables"></div>
+          </div>
         </div>
         <div class="btnstack">
           <button class="btn" id="planBtn">Plan</button>
