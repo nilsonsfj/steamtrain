@@ -1137,6 +1137,11 @@ const mainline: WorkflowSpec = {
       title: "Arrival report",
       steps: [
         {
+          // Depends on BOTH delivery alternatives and the conditionally-run
+          // file-issues step: consolidators treat skipped dependencies as
+          // absent (their section simply vanishes), so exactly one delivery
+          // line renders — see the deliver-branch comment above for the
+          // when-condition semantics.
           id: "arrival",
           kind: "consolidator",
           dependsOn: [
