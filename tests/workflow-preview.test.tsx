@@ -200,6 +200,32 @@ describe("WorkflowPreview", () => {
     expect(frame).toContain("ready to run");
     expect(frame.split("\n").length).toBeLessThanOrEqual(28);
   });
+
+  it("hard-slices overlong tokens when the terminal is very narrow", () => {
+    const description =
+      "Uses {{inputs.repositoryUrl}} plus {{inputs.extremelyLongWorkflowTokenName}} for routing.";
+    const spec = {
+      ...BUNDLED_WORKFLOWS["multi-plan"]!,
+      name: "narrow-wrap",
+      description,
+    };
+    const { lastFrame } = render(
+      <WorkflowPreview
+        spec={spec}
+        source="user"
+        width={30}
+        height={24}
+        selectedIndex={0}
+        dispatchCheck={{ ok: true }}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("workflow preview");
+    expect(frame).toContain("ready to run");
+    expect(frame).toMatch(/repositoryUrl|extremelyLong/);
+    expect(frame).not.toContain("ready to runworker");
+    expect(frame.split("\n").length).toBeLessThanOrEqual(24);
+  });
 });
 
 describe("preview input resolution", () => {

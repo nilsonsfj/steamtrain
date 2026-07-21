@@ -359,8 +359,9 @@ function SpecStepDetail({
   const promptRows = Math.max(0, available - visibleLines.length);
   const showPrompt = Boolean(prompt) && promptRows >= 2;
   const promptBodyBudget = showPrompt ? promptRows - 1 : 0;
+  const promptText = prompt?.trim() ?? "";
   const promptLines = showPrompt
-    ? clipWrappedLines(wrapTextLines(prompt!.trim(), Math.max(4, width - 2)), promptBodyBudget)
+    ? clipWrappedLines(wrapTextLines(promptText, Math.max(4, width - 2)), promptBodyBudget)
     : [];
 
   return (
@@ -380,8 +381,9 @@ function SpecStepDetail({
           runner: {runner}
         </Text>
       ) : null}
-      {visibleLines.map((line) => (
-        <Text key={line} color="gray" wrap="truncate-end">
+      {visibleLines.map((line, lineNo) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: wrap order is the identity
+        <Text key={lineNo} color="gray" wrap="truncate-end">
           {line}
         </Text>
       ))}
