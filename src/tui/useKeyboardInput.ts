@@ -176,7 +176,10 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
                 });
               }
             } else if (hist.filtering || hist.query) {
-              historyHook.setHistory({ ...hist, filtering: false, query: "", index: 0 });
+              historyHook.setHistory({
+                ...applyHistoryQuery(hist, ""),
+                filtering: false,
+              });
             } else {
               historyHook.setHistory(null);
             }

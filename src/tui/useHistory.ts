@@ -290,18 +290,26 @@ export function useHistory({
           await historyStoreRef.current!.remove(record.id);
           if (!mountedRef.current) return;
           setWfNotice(`deleted run ${record.id.slice(0, 8)}…`);
-          setHistory((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  view: "list",
-                  record: undefined,
-                  recordState: undefined,
-                  detail: false,
-                  stepIndex: 0,
-                }
-              : prev,
-          );
+          setHistory((prev) => {
+            if (!prev) return prev;
+            const runs = prev.runs.filter((run) => run.id !== record.id);
+            const entries = buildHistoryBrowserEntries({
+              runs,
+              liveRuns: prev.liveRuns,
+              query: prev.query,
+              statusFilter: prev.statusFilter,
+            });
+            return {
+              ...prev,
+              view: "list",
+              runs,
+              record: undefined,
+              recordState: undefined,
+              detail: false,
+              stepIndex: 0,
+              index: Math.min(prev.index, Math.max(0, entries.length - 1)),
+            };
+          });
           void loadList({ silent: true });
         } catch (err) {
           if (mountedRef.current) setWfNotice(`could not delete run: ${message(err)}`);

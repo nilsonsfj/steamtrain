@@ -135,5 +135,33 @@ describe("countHistoryByStatus / nextHistoryStatusFilter / labels / relative tim
     expect(formatRelativeTime(now - 5 * 60_000, now)).toBe("5m ago");
     expect(formatRelativeTime(now - 3 * 3_600_000, now)).toBe("3h ago");
     expect(formatRelativeTime(now - 3 * 86_400_000, now)).toBe("3d ago");
+    expect(formatRelativeTime(0, now)).toBe("unknown");
+    expect(formatRelativeTime(Number.NaN, now)).toBe("unknown");
+  });
+
+  it("handles empty inputs and live-only filters", () => {
+    expect(buildHistoryBrowserEntries({ runs: [], liveRuns: [] })).toEqual([]);
+    expect(
+      buildHistoryBrowserEntries({
+        runs: [recorded("ok")],
+        liveRuns: [],
+        statusFilter: "live",
+      }),
+    ).toEqual([]);
+    expect(matchesHistoryQuery(".", { workflow: "tour", input: "hi" })).toBe(false);
+    expect(matchesHistoryQuery(".", { workflow: "a.b" })).toBe(true);
+  });
+
+  it("cycles every status filter chip", () => {
+    let current: "all" | "live" | "done" | "error" | "canceled" | "budget-exceeded" = "all";
+    const seen = new Set<string>();
+    for (let i = 0; i < 6; i += 1) {
+      seen.add(current);
+      current = nextHistoryStatusFilter(current);
+    }
+    expect([...seen].sort()).toEqual(
+      ["all", "budget-exceeded", "canceled", "done", "error", "live"].sort(),
+    );
+    expect(current).toBe("all");
   });
 });

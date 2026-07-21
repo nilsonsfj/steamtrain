@@ -3503,7 +3503,7 @@
   function historyStatusLabel(status) {
     if (status === "error") return "failed";
     if (status === "budget-exceeded") return "budget";
-    return status || "";
+    return status ? String(status) : "";
   }
 
   function matchesHistoryQuery(query, fields) {

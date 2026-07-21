@@ -32,7 +32,7 @@ export function nextHistoryStatusFilter(current: HistoryStatusFilter): HistorySt
 
 /** Compact relative time for list rows ("12s ago", "3h ago", "2026-07-18"). */
 export function formatRelativeTime(ts: number, now: number = Date.now()): string {
-  if (!Number.isFinite(ts) || ts <= 0) return "";
+  if (!Number.isFinite(ts) || ts <= 0) return "unknown";
   const diff = Math.max(0, now - ts);
   const sec = Math.round(diff / 1000);
   if (sec < 60) return `${sec}s ago`;
@@ -45,7 +45,7 @@ export function formatRelativeTime(ts: number, now: number = Date.now()): string
   try {
     return new Date(ts).toISOString().slice(0, 10);
   } catch {
-    return "";
+    return "unknown";
   }
 }
 
@@ -61,7 +61,7 @@ export function historyStatusLabel(status: RunRecordStatus | string): string {
     case "budget-exceeded":
       return "budget";
     default:
-      return String(status);
+      return status ? String(status) : "";
   }
 }
 
