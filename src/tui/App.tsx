@@ -54,6 +54,7 @@ import {
   type AuthoringHost,
   type LoadedWorkflowCatalog,
   type PlanResult,
+  type StepEditPatch,
   TOUR_WORKFLOW_NAME,
   WorkflowAuthor,
   type WorkflowSourceKind,
@@ -113,7 +114,11 @@ import {
   workflowHasDeclaredInputs,
 } from "./workflow-input-pending";
 import { type PendingHumanInput, flattenSteps } from "./workflow-state";
-import { type StepEditorTarget, stepEditorTarget } from "./workflow-step-editor";
+import {
+  type StepEditorTarget,
+  listRetargetableSteps,
+  stepEditorTarget,
+} from "./workflow-step-editor";
 
 // Custom hooks — each owns a cohesive slice of state.
 import { type HistoryUiState, useHistory } from "./useHistory";
@@ -642,6 +647,19 @@ export function App({
     [editorTarget, picker.patchWorkflowStep],
   );
 
+  const applyStepEditAll = useCallback(
+    (patches: Record<string, Parameters<typeof picker.patchWorkflowStep>[1]>, summary: string) => {
+      picker.patchWorkflowSteps(patches);
+      runner.setWfNotice(`✎ ${summary} · /save-workflows to persist`);
+    },
+    [picker.patchWorkflowSteps, runner.setWfNotice],
+  );
+
+  const editorSiblings = useMemo(() => {
+    if (!picker.preview.spec) return [];
+    return listRetargetableSteps(picker.preview.spec);
+  }, [picker.preview.spec]);
+
   // Close the editor whenever its target disappears (left preview, switched
   // workflow, or a running launch tore the preview down).
   useEffect(() => {
@@ -688,12 +706,28 @@ export function App({
         : "prompt" in specStep
           ? (specStep.prompt ?? "")
           : "";
-    setRunEditor({
-      stepId: selected.step.stepId,
-      kindLabel: kind,
-      field,
-      initial: (field === "cmd" ? priorEdit?.cmd : priorEdit?.prompt) ?? specValue,
-    });
+    // Model/effort cycling needs an agent catalog — only agent-backed steps.
+    // llm model mid-run remains available via CLI/API.
+    if (isAgentBackedStep(specStep)) {
+      setRunEditor({
+        stepId: selected.step.stepId,
+        kindLabel: kind,
+        field,
+        initial: (field === "cmd" ? priorEdit?.cmd : priorEdit?.prompt) ?? specValue,
+        modelEditable: true,
+        agent: specStep.agent,
+        model: priorEdit?.model ?? specStep.model,
+        effort: priorEdit?.effort ?? specStep.effort,
+      });
+    } else {
+      setRunEditor({
+        stepId: selected.step.stepId,
+        kindLabel: kind,
+        field,
+        initial: (field === "cmd" ? priorEdit?.cmd : priorEdit?.prompt) ?? specValue,
+        modelEditable: false,
+      });
+    }
   }, [
     mode,
     runner.running,
@@ -706,9 +740,8 @@ export function App({
   ]);
 
   const applyRunStepEdit = useCallback(
-    (value: string) => {
+    (patch: StepEditPatch) => {
       if (!runEditor) return;
-      const patch = runEditor.field === "cmd" ? { cmd: value } : { prompt: value };
       void runner
         .editRunStep(runEditor.stepId, patch)
         .then((notice) => runner.setWfNotice(notice))
@@ -1591,12 +1624,15 @@ export function App({
           config={runtimeConfig}
           width={columns}
           height={streamHeight}
+          siblings={editorSiblings}
           onApply={applyStepEdit}
+          onApplyAll={applyStepEditAll}
           onClose={() => setStepEditorOpen(false)}
         />
       ) : runEditor ? (
         <WorkflowRunStepEditor
           target={runEditor}
+          config={runtimeConfig}
           width={columns}
           height={streamHeight}
           onApply={applyRunStepEdit}
@@ -1866,7 +1902,7 @@ function hint(
       return `↑/↓ step · Enter details · type to edit · Ctrl+R run · Ctrl+Q cancel · Esc back · Tab switch mode · /help · Ctrl+C quit${completeHint}`;
     }
     if (wfPreviewing) {
-      return `↑/↓ step · Enter details${resumeHint} · Ctrl+E edit step · Ctrl+R run · Esc back · Tab detail · /help · Ctrl+C quit${completeHint}`;
+      return `↑/↓ step · Enter details${resumeHint} · Ctrl+E edit step · /set-all retarget · Ctrl+R run · Esc back · Tab detail · /help · Ctrl+C quit${completeHint}`;
     }
     return `↑/↓ pick · Ctrl+N new · type to edit · Enter preview · Ctrl+R run · Ctrl+J history · Tab switch mode · /help · Ctrl+C quit${completeHint}`;
   }

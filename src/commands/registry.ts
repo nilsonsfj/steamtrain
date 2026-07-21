@@ -19,6 +19,7 @@ import { renameWorkflowCommand } from "./builtins/rename-workflow";
 import { rerouteCommand } from "./builtins/reroute";
 import { runsCommand } from "./builtins/runs";
 import { saveWorkflowsCommand } from "./builtins/save-workflows";
+import { setAllCommand } from "./builtins/set-all";
 import { timeoutCommand } from "./builtins/timeout";
 import { versionCommand } from "./builtins/version";
 import { parseSlashInput, slashCommandArgs } from "./parse";
@@ -35,6 +36,7 @@ const BUILTIN_COMMANDS: SlashCommand[] = [
   apiCommand,
   apisCommand,
   promptCommand,
+  setAllCommand,
   rerouteCommand,
   saveWorkflowsCommand,
   createWorkflowCommand,

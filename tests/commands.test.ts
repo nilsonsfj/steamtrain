@@ -14,6 +14,7 @@ import {
   registerSlashCommand,
 } from "../src/commands/registry";
 import type { SlashCommandContext, SlashCommandResult } from "../src/commands/types";
+import { takeAllFlag } from "../src/commands/workflow-step-target";
 import { workspaceById } from "../src/workspace";
 import { DEFAULT_WORKSPACE_CONFIG } from "../src/workspace/defaults";
 
@@ -706,6 +707,177 @@ describe("/effort on workflow steps", () => {
     );
     expect(result).toMatchObject({ handled: true });
     expect(result.handled && result.notices?.[0]?.text).toContain("effort for");
+  });
+});
+
+const BULK_SPEC = {
+  name: "bulk-demo",
+  phases: [
+    {
+      id: "p1",
+      title: "Phase 1",
+      steps: [
+        {
+          id: "plan",
+          kind: "worker" as const,
+          agent: "claude",
+          model: "sonnet",
+          prompt: "plan it",
+        },
+        {
+          id: "build",
+          kind: "worker" as const,
+          agent: "codex",
+          model: "gpt-5.4",
+          prompt: "build it",
+        },
+      ],
+    },
+  ],
+} as const;
+
+describe("/set-all and --all retarget", () => {
+  it("lists set-all among registered commands", () => {
+    expect(listSlashCommands().some((c) => c.name === "set-all")).toBe(true);
+  });
+
+  it("takeAllFlag accepts --all in any position", () => {
+    expect(takeAllFlag(["--all", "clear"])).toEqual({ args: ["clear"], all: true });
+    expect(takeAllFlag(["clear", "--all"])).toEqual({ args: ["clear"], all: true });
+    expect(takeAllFlag(["-a", "high"])).toEqual({ args: ["high"], all: true });
+    expect(takeAllFlag(["high"])).toEqual({ args: ["high"], all: false });
+  });
+
+  it("/effort --all clear treats --all before the level", () => {
+    const updateWorkflowStep = vi.fn();
+    const spec = {
+      name: "bulk-demo",
+      phases: [
+        {
+          id: "p1",
+          title: "Phase 1",
+          steps: [
+            {
+              id: "plan",
+              kind: "worker" as const,
+              agent: "claude",
+              model: "sonnet",
+              prompt: "plan it",
+              effort: "high",
+            },
+            {
+              id: "build",
+              kind: "worker" as const,
+              agent: "claude",
+              model: "sonnet",
+              prompt: "build it",
+              effort: "medium",
+            },
+          ],
+        },
+      ],
+    };
+    const result = executeSlashCommand(
+      "/effort --all clear",
+      makeCtx({
+        mode: "workflow",
+        workflowSpec: spec as unknown as import("../src/workflow").WorkflowSpec,
+        updateWorkflowStep,
+        workflowStep: {
+          workflowName: "bulk-demo",
+          stepId: "plan",
+          agent: "claude",
+          model: "sonnet",
+          effort: "high",
+        },
+      }),
+    );
+    expect(result.handled).toBe(true);
+    expect(updateWorkflowStep.mock.calls.length).toBeGreaterThan(0);
+    for (const call of updateWorkflowStep.mock.calls) {
+      expect(call[1]).toEqual({ effort: undefined });
+    }
+    expect(result.handled && result.notices?.[0]?.text).toMatch(/cleared|effort/);
+  });
+
+  it("/set-all retargets every agent-backed step", () => {
+    const updateWorkflowStep = vi.fn();
+    const result = executeSlashCommand(
+      "/set-all claude sonnet",
+      makeCtx({
+        mode: "workflow",
+        workflowSpec: BULK_SPEC as unknown as import("../src/workflow").WorkflowSpec,
+        updateWorkflowStep,
+        workflowStep: {
+          workflowName: "bulk-demo",
+          stepId: "plan",
+          agent: "claude",
+          model: "sonnet",
+        },
+      }),
+    );
+    expect(result.handled).toBe(true);
+    expect(updateWorkflowStep).toHaveBeenCalledWith(
+      "build",
+      expect.objectContaining({ agent: "claude", model: "sonnet" }),
+    );
+    // plan already matches — may or may not be patched depending on effort
+    const ids = updateWorkflowStep.mock.calls.map((c) => c[0]);
+    expect(ids).toContain("build");
+    expect(result.handled && result.notices?.[0]?.text).toMatch(/retargeted|already/);
+  });
+
+  it("/agent <id> --all retargets every agent step", () => {
+    const updateWorkflowStep = vi.fn();
+    const result = executeSlashCommand(
+      "/agent claude --all",
+      makeCtx({
+        mode: "workflow",
+        workflowSpec: BULK_SPEC as unknown as import("../src/workflow").WorkflowSpec,
+        updateWorkflowStep,
+        workflowStep: {
+          workflowName: "bulk-demo",
+          stepId: "plan",
+          agent: "claude",
+          model: "sonnet",
+        },
+      }),
+    );
+    expect(result.handled).toBe(true);
+    expect(updateWorkflowStep.mock.calls.length).toBeGreaterThan(0);
+    expect(updateWorkflowStep).toHaveBeenCalledWith(
+      "build",
+      expect.objectContaining({ agent: "claude" }),
+    );
+  });
+
+  it("/model <id> --all only updates steps on the same agent", () => {
+    const updateWorkflowStep = vi.fn();
+    const next = modelIdsForAgent("claude").find((id) => id !== "sonnet") ?? "claude-opus-4-8";
+    const result = executeSlashCommand(
+      `/model ${next} --all`,
+      makeCtx({
+        mode: "workflow",
+        workflowSpec: BULK_SPEC as unknown as import("../src/workflow").WorkflowSpec,
+        updateWorkflowStep,
+        workflowStep: {
+          workflowName: "bulk-demo",
+          stepId: "plan",
+          agent: "claude",
+          model: "sonnet",
+        },
+      }),
+    );
+    expect(result.handled).toBe(true);
+    const ids = updateWorkflowStep.mock.calls.map((c) => c[0]);
+    expect(ids).toContain("plan");
+    expect(ids).not.toContain("build");
+  });
+
+  it("/set-all without a preview warns", () => {
+    const result = executeSlashCommand("/set-all claude", makeCtx({ mode: "workflow" }));
+    expect(result.handled).toBe(true);
+    expect(result.handled && result.notices?.[0]?.level).toBe("warn");
   });
 });
 

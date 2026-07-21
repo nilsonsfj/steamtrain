@@ -9,7 +9,7 @@ import { isWorkspaceMode } from "../../tui/modes";
 import { completeDraftModelArgs, executeDraftModelCommand } from "../draft-model-target";
 import type { SlashCommand } from "../types";
 import {
-  completeWorkflowModelArgs,
+  completeWorkflowModelArgsWithAll,
   executeWorkflowModelCommand,
   hasWorkflowStepTarget,
   workflowStepUnavailableNotice,
@@ -19,7 +19,7 @@ export const modelCommand: SlashCommand = {
   name: "model",
   description:
     "Set or list models for the current workspace tab, workflow step, or workflow drafting",
-  usage: "/model [model-id]",
+  usage: "/model [model-id] [--all]",
   execute(args, ctx) {
     if (hasWorkflowStepTarget(ctx)) {
       return executeWorkflowModelCommand(args, ctx);
@@ -89,8 +89,7 @@ export const modelCommand: SlashCommand = {
   },
   complete(args, ctx) {
     if (hasWorkflowStepTarget(ctx)) {
-      if (args.length > 1) return [];
-      return completeWorkflowModelArgs(ctx);
+      return completeWorkflowModelArgsWithAll(args, ctx);
     }
     if (!isWorkspaceMode(ctx.mode)) {
       if (ctx.draftModel && args.length <= 1) return completeDraftModelArgs(ctx.draftModel);
