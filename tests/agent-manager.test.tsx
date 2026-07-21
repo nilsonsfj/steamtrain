@@ -160,4 +160,48 @@ describe("AgentManager", () => {
     await type(stdin, ESC);
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("shows readiness per row and the fix for the selected not-ready agent", () => {
+    const { lastFrame } = renderManager({
+      doctor: [
+        {
+          agent: "claude",
+          provider: "claude",
+          status: "binary_missing",
+          binary: "claude",
+          message: "'claude' not found on PATH",
+          detail:
+            "Install Claude Code (npm i -g @anthropic-ai/claude-code) and ensure `claude` is on PATH.",
+          fixCommand: "npm i -g @anthropic-ai/claude-code",
+        },
+        {
+          agent: "mimocode",
+          provider: "opencode",
+          status: "ok",
+          binary: "mimocode",
+          version: "opencode 1.2.3",
+          message: "ready",
+        },
+      ],
+      onRecheck: vi.fn(),
+    });
+    const frame = plain(lastFrame());
+    // Per-row readiness labels + version for the healthy one.
+    expect(frame).toContain("not installed");
+    expect(frame).toMatch(/mimocode\s+ready/);
+    expect(frame).toContain("v=opencode 1.2.3");
+    // The selected (claude) agent's fix and copyable command.
+    expect(frame).toContain("fix claude:");
+    expect(frame).toContain("$ npm i -g @anthropic-ai/claude-code");
+    // Readiness summary + recheck hint in the header.
+    expect(frame).toContain("1/2 ready");
+    expect(frame).toContain("r recheck");
+  });
+
+  it("re-runs the doctor on 'r'", async () => {
+    const onRecheck = vi.fn();
+    const { stdin } = renderManager({ onRecheck });
+    await type(stdin, "r");
+    expect(onRecheck).toHaveBeenCalled();
+  });
 });

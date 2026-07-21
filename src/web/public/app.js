@@ -12,6 +12,26 @@
     approvals: { badge: "✋ approvals", cls: "autonomy-approvals", title: "Pauses at approval checkpoints — a human must approve or reject to continue." },
     interactive: { badge: "✎ interactive", cls: "autonomy-interactive", title: "Asks a human for input mid-run — answers or choices are required to finish." }
   };
+  // Doctor status → how the setup panel and health chips read it. `loud` states
+  // are the user's to fix now (red/amber); `calm` states are the normal resting
+  // state for a CLI the user simply doesn't use (an uninstalled agent, an unset
+  // key), so the header collapses them into one quiet chip instead of a wall of
+  // red — mirroring the TUI status bar.
+  var AGENT_HEALTH_META = {
+    ok: { label: "ready", chip: "ok", loud: false, verb: "Ready" },
+    not_authenticated: { label: "needs sign-in", chip: "bad", loud: true, verb: "Sign in" },
+    unknown_error: { label: "error", chip: "bad", loud: true, verb: "Error" },
+    binary_missing: { label: "not installed", chip: "calm", loud: false, verb: "Install" }
+  };
+  var API_HEALTH_META = {
+    ok: { label: "ready", chip: "ok", loud: false, verb: "Ready" },
+    not_authenticated: { label: "key rejected", chip: "bad", loud: true, verb: "Fix key" },
+    unreachable: { label: "unreachable", chip: "bad", loud: true, verb: "Reachability" },
+    unknown_error: { label: "error", chip: "bad", loud: true, verb: "Error" },
+    key_missing: { label: "no key set", chip: "calm", loud: false, verb: "Set key" }
+  };
+  function agentHealthMeta(status) { return AGENT_HEALTH_META[status] || AGENT_HEALTH_META.unknown_error; }
+  function apiHealthMeta(status) { return API_HEALTH_META[status] || API_HEALTH_META.unknown_error; }
   var S = {
     workflows: [], selected: null, source: null, spec: null, agents: [], apis: [],
     modelClasses: [], modelFamilies: [],
@@ -849,16 +869,20 @@
       renderApiConfigRows();
     }
     renderApiConfigRows();
+    // Configure edits the instances (add a fork, override a binary, set env);
+    // the setup panel shows live health and the fix for anything not ready. Lead
+    // with the agents — the modal's main job — and cross-link to setup up top.
+    var setupLink = h("button", {
+      class: "btn small", type: "button", text: "Check readiness & fixes →",
+      title: "See each agent/API's live status and how to fix what isn't ready",
+      onClick: function () { closeModal(); openSetupPanel(); }
+    });
     var body = h("div", null,
       banner,
-      field("Step timeout (minutes)", stepInput, "Per-agent subprocess limit (default 15). Saved to ./steamtrain.json."),
-      field("Workflow timeout (minutes)", wfInput, "Whole-run limit. Leave empty or check auto to use steps × step timeout. Saved to ./steamtrain.json."),
-      h("label", { style: "display:flex;gap:6px;align-items:center;margin-top:8px" },
-        autoChk, h("span", { text: "Auto workflow timeout (steps × step)" })),
-      h("hr"),
+      h("div", { class: "config-toplink" }, setupLink),
       h("div", { class: "field" },
         h("label", { text: "Agents" }),
-        h("div", { class: "help", text: "Only enabled agents appear in pickers and health outside this page. New agents default to global (~/.steamtrain/config.json)." }),
+        h("div", { class: "help", text: "Coding-agent CLIs steamtrain drives. Only enabled agents appear in pickers and health outside this page. New agents default to global (~/.steamtrain/config.json)." }),
         agentList,
         h("button", { class: "btn small", text: "+ Add agent", onClick: addAgentRow })),
       h("hr"),
@@ -866,7 +890,12 @@
         h("label", { text: "APIs (direct llm steps)" }),
         h("div", { class: "help", text: "Endpoint instances llm steps call via api: <id>. New APIs default to global config, same as agents." }),
         apiList,
-        h("button", { class: "btn small", text: "+ Add API", onClick: addApiRow }))
+        h("button", { class: "btn small", text: "+ Add API", onClick: addApiRow })),
+      h("hr"),
+      field("Step timeout (minutes)", stepInput, "Per-agent subprocess limit (default 15). Saved to ./steamtrain.json."),
+      field("Workflow timeout (minutes)", wfInput, "Whole-run limit. Leave empty or check auto to use steps × step timeout. Saved to ./steamtrain.json."),
+      h("label", { style: "display:flex;gap:6px;align-items:center;margin-top:8px" },
+        autoChk, h("span", { text: "Auto workflow timeout (steps × step)" }))
     );
     var saveBtn = h("button", { class: "btn primary", text: "Save" });
   saveBtn.addEventListener("click", function () {
@@ -1072,7 +1101,7 @@
 
   // Health probes run in the background on the server; poll a few times until
   // they land so the chips appear without a manual reload.
-  function pollDoctor(attempt) {
+  function pollDoctor(attempt, onUpdate) {
     apiAuth("GET", "/api/doctor").then(function (r) {
       var list = r.body.doctor || [];
       var apis = r.body.apis || [];
@@ -1081,6 +1110,8 @@
       S.apiDoctor = apis;
       renderHealth(list, apis, err);
       applyHealth();
+      // Repaint any open surface that depends on live health (the setup panel).
+      if (onUpdate) { try { onUpdate(); } catch (e) {} }
       // The catalog's blocked/re-route annotations are computed server-side
       // from agent + API health, so re-fetch them whenever that health changes
       // — the initial arrival AND after a config save flips an agent's status
@@ -1100,17 +1131,18 @@
       // waiting for the API probes in that case.
       var agentsPending = !list.length && !err;
       var apisPending = !apis.length;
-      if ((agentsPending || apisPending) && attempt < 12) setTimeout(function () { pollDoctor(attempt + 1); }, 1500);
+      if ((agentsPending || apisPending) && attempt < 12) setTimeout(function () { pollDoctor(attempt + 1, onUpdate); }, 1500);
     });
   }
 
-  // "no key" is a warning chip, not an error: an unset key is the normal state
-  // for a provider the user simply doesn't use, unlike a rejected key or an
-  // unreachable endpoint.
-  function apiChipClass(status) {
-    if (status === "ok") return "ok";
-    if (status === "key_missing") return "warn";
-    return "bad";
+  /** A health chip that opens the setup panel (focused on `focusId` when given). */
+  function healthChip(cls, label, title, focusId) {
+    return h("button", {
+      class: "chip chip-btn " + cls,
+      type: "button",
+      title: title + " · click for setup",
+      onClick: function () { openSetupPanel(focusId); }
+    }, h("span", { class: "dot" }), label);
   }
 
   function renderHealth(list, apis, err) {
@@ -1126,16 +1158,223 @@
     // An agent-doctor failure replaces the agent chips with one error chip,
     // but the API probes are independent — always render their chips too.
     if (err) {
-      box.appendChild(h("span", { class: "chip bad" }, h("span", { class: "dot" }), "doctor: " + err));
+      box.appendChild(healthChip("bad", "doctor: " + err, "The agent doctor failed to run"));
     } else {
+      // Loud states (needs sign-in / error) each get their own chip so they
+      // stay actionable; the calm "not installed" state — normal for a CLI you
+      // don't use — collapses into one quiet chip to avoid a wall of red.
+      var calm = [];
       list.forEach(function (d) {
-        var cls = d.status === "ok" ? "ok" : (d.status === "warn" ? "warn" : "bad");
-        box.appendChild(h("span", { class: "chip " + cls, title: d.message || "" }, h("span", { class: "dot" }), d.agent));
+        var meta = agentHealthMeta(d.status);
+        if (meta.loud || d.status === "ok") {
+          var detail = d.detail ? " · " + d.detail : "";
+          box.appendChild(healthChip(meta.chip, d.agent, d.agent + ": " + (d.message || meta.label) + detail, d.agent));
+        } else {
+          calm.push(d);
+        }
+      });
+      if (calm.length) {
+        box.appendChild(healthChip("calm", calm.length + " not installed",
+          calm.map(function (d) { return d.agent; }).join(", ") + " — not on PATH (fine if you don't use them)"));
+      }
+    }
+    var apiCalm = [];
+    apis.forEach(function (d) {
+      var meta = apiHealthMeta(d.status);
+      if (meta.loud || d.status === "ok") {
+        var detail = d.detail ? " · " + d.detail : "";
+        box.appendChild(healthChip(meta.chip, d.api, d.api + ": " + (d.message || meta.label) + detail, "api:" + d.api));
+      } else {
+        apiCalm.push(d);
+      }
+    });
+    if (apiCalm.length) {
+      box.appendChild(healthChip("calm", "◇ " + apiCalm.length + " without keys",
+        apiCalm.map(function (d) { return d.api; }).join(", ") + " — no API key set (llm steps skip them)"));
+    }
+  }
+
+  /** Copy `text`, then flash the button's label so the click has a visible result. */
+  function copyFix(text, btn, codeEl) {
+    function flash() {
+      btn.textContent = "Copied";
+      btn.classList.add("copied");
+      setTimeout(function () { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 1400);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(flash).catch(function () { fallbackCopy(text, codeEl, flash); });
+      return;
+    }
+    fallbackCopy(text, codeEl, flash);
+  }
+
+  /**
+   * Copy without the async clipboard API (insecure context, or a browser that
+   * rejects the write): try execCommand on a scratch textarea, and if even that
+   * fails, select the visible command so the user can copy it by hand.
+   */
+  function fallbackCopy(text, codeEl, onOk) {
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      var ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      if (ok) { onOk(); return; }
+    } catch (e) {}
+    if (codeEl) {
+      var range = document.createRange();
+      range.selectNodeContents(codeEl);
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  }
+
+  /**
+   * The agent & API setup panel: the web analog of `steamtrain init`'s readiness
+   * table. Every agent and API endpoint, its live status, and — for anything not
+   * ready — the exact fix with a one-click copy, plus a Recheck that re-runs the
+   * doctors in place. Opened by clicking any header health chip.
+   */
+  function openSetupPanel(focusId) {
+    var body = h("div", { class: "setup" });
+    // Recheck re-runs the probes server-side (POST), so a viewer session — which
+    // can't POST — doesn't get a button that would only 403.
+    var recheckBtn = isReadOnly()
+      ? null
+      : h("button", { class: "btn", type: "button", text: "Recheck" });
+    var footChildren = recheckBtn ? [recheckBtn] : [];
+    if (!isReadOnly()) {
+      footChildren.push(h("button", {
+        class: "btn", type: "button", text: "Edit config →",
+        title: "Add or edit agent/API instances, binaries, and timeouts",
+        onClick: function () { closeModal(); openConfigModal(); }
+      }));
+    }
+    footChildren.push(h("div", { class: "spacer" }));
+    footChildren.push(h("button", { class: "btn primary", type: "button", text: "Done", onClick: closeModal }));
+    var foot = h("div", { class: "mfoot" });
+    footChildren.forEach(function (c) { foot.appendChild(c); });
+
+    function statusRow(kind, name, provider, meta, status, extra, detail, fixCommand, id) {
+      var head = h("div", { class: "setup-rowhead" },
+        h("span", { class: "health-dot " + (status === "ok" ? "ok" : meta.loud ? "err" : "unknown") }),
+        h("span", { class: "setup-name", text: name }),
+        provider && provider !== name ? h("span", { class: "provider-tag", text: provider }) : null,
+        h("span", { class: "setup-status " + (status === "ok" ? "ok" : meta.loud ? "err" : "calm"), text: meta.label }),
+        extra ? h("span", { class: "setup-extra", text: extra }) : null
+      );
+      var children = [head];
+      if (status !== "ok" && detail) {
+        var fix = h("div", { class: "setup-fix" }, h("span", { class: "setup-fixtext", text: detail }));
+        if (fixCommand) {
+          var copyBtn = h("button", { class: "btn small", type: "button", text: "Copy" });
+          var codeEl = h("code", { text: fixCommand });
+          copyBtn.addEventListener("click", function () { copyFix(fixCommand, copyBtn, codeEl); });
+          fix.appendChild(h("div", { class: "setup-cmd" }, codeEl, copyBtn));
+        }
+        children.push(fix);
+      }
+      var row = h("div", { class: "setup-row" + (id === focusId ? " focus" : "") });
+      children.forEach(function (c) { row.appendChild(c); });
+      if (id) row.setAttribute("data-setup-id", id);
+      return row;
+    }
+
+    function renderBody() {
+      clear(body);
+      var doctor = S.doctor || [];
+      var apiDoctor = S.apiDoctor || [];
+      if (!doctor.length && !apiDoctor.length) {
+        body.appendChild(h("div", { class: "setup-checking" }, "Checking agents and API endpoints…"));
+        return;
+      }
+      var agentsReady = doctor.filter(function (d) { return d.status === "ok"; }).length;
+      var apisReady = apiDoctor.filter(function (d) { return d.status === "ok"; }).length;
+      body.appendChild(h("div", { class: "setup-summary", text:
+        agentsReady + " of " + doctor.length + " agents ready" +
+        (apiDoctor.length ? " · " + apisReady + " of " + apiDoctor.length + " API endpoints ready" : "") }));
+
+      body.appendChild(h("div", { class: "setup-sechead" }, "Agents"));
+      body.appendChild(h("div", { class: "setup-secnote", text:
+        "Coding-agent CLIs steamtrain drives. Install and sign in to the ones you want; the rest can stay unavailable." }));
+      var agentWrap = h("div", { class: "setup-list" });
+      doctor.slice().sort(setupSort).forEach(function (d) {
+        var meta = agentHealthMeta(d.status);
+        var extra = d.status === "ok" ? (d.version || "ready") : (d.binaryPath || d.binary || "");
+        agentWrap.appendChild(statusRow("agent", d.agent, d.provider, meta, d.status, extra, d.detail, d.fixCommand, d.agent));
+      });
+      body.appendChild(agentWrap);
+
+      body.appendChild(h("div", { class: "setup-sechead" }, "API endpoints (llm steps)"));
+      body.appendChild(h("div", { class: "setup-secnote", text:
+        "Direct-inference endpoints llm steps call. Keyless gateways are ready as-is; set a key to enable the others." }));
+      var apiWrap = h("div", { class: "setup-list" });
+      if (!apiDoctor.length) {
+        apiWrap.appendChild(h("div", { class: "setup-secnote", text: "No API endpoints probed yet." }));
+      }
+      apiDoctor.slice().sort(setupSort).forEach(function (d) {
+        var meta = apiHealthMeta(d.status);
+        var extra = d.status === "ok" ? (d.message || "ready") : (d.baseUrl || "");
+        apiWrap.appendChild(statusRow("api", d.api, d.provider, meta, d.status, extra, d.detail, d.fixCommand, "api:" + d.api));
+      });
+      body.appendChild(apiWrap);
+
+      if (focusId) {
+        var target = body.querySelector('[data-setup-id="' + cssEscape(focusId) + '"]');
+        if (target && target.scrollIntoView) setTimeout(function () { target.scrollIntoView({ block: "nearest" }); }, 0);
+      }
+    }
+
+    // Not-ready first, then by name, so the things needing attention lead.
+    function setupSort(a, b) {
+      var ak = a.status === "ok" ? 1 : 0, bk = b.status === "ok" ? 1 : 0;
+      if (ak !== bk) return ak - bk;
+      return String(a.agent || a.api).localeCompare(String(b.agent || b.api));
+    }
+
+    if (recheckBtn) {
+      recheckBtn.addEventListener("click", function () {
+        recheckBtn.disabled = true;
+        recheckBtn.textContent = "Rechecking…";
+        // POST actually re-runs the doctors on the server (resolves binaries,
+        // re-probes endpoints) — a just-installed CLI or fresh login shows up
+        // without a restart. GET would only re-read the startup snapshot.
+        apiAuth("POST", "/api/doctor").then(function (r) {
+          if (r.status === 200) {
+            S.doctor = r.body.doctor || [];
+            S.apiDoctor = r.body.apis || [];
+            renderHealth(S.doctor, S.apiDoctor, r.body.doctorError || null);
+            applyHealth();
+            refreshWorkflowList();
+          }
+        }).catch(function () {}).then(function () {
+          recheckBtn.disabled = false;
+          recheckBtn.textContent = "Recheck";
+          renderBody();
+        });
       });
     }
-    apis.forEach(function (d) {
-      box.appendChild(h("span", { class: "chip " + apiChipClass(d.status), title: d.message || "" }, h("span", { class: "dot" }), d.api));
-    });
+
+    renderBody();
+    openModal(modalShell("Agent & API setup",
+      "Get each one ready — install, sign in, done. Health refreshes as you go.",
+      body, foot, true));
+    // Health may still be landing on first open; keep the panel live until it does.
+    if (!(S.doctor || []).length && !(S.apiDoctor || []).length) {
+      pollDoctor(0, renderBody);
+    }
+  }
+
+  /** Minimal CSS.escape shim for our ids (ascii ids: agent names, "api:<id>"). */
+  function cssEscape(value) {
+    if (window.CSS && window.CSS.escape) return window.CSS.escape(value);
+    return String(value).replace(/[^a-zA-Z0-9_-]/g, function (c) { return "\\" + c; });
   }
 
   function renderSidebar() {

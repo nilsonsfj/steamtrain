@@ -78,7 +78,7 @@ describe("TUI components", () => {
       />,
     );
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("no agents installed — Ctrl+A to add");
+    expect(frame).toContain("no agents installed — Ctrl+A to set up");
     expect(frame).not.toContain("claude");
   });
 

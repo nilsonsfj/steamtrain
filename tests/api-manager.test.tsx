@@ -148,4 +148,46 @@ describe("ApiManager", () => {
     await type(stdin, ESC);
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("shows readiness per row and the fix for the selected not-ready api", () => {
+    const { lastFrame } = renderManager({
+      apiDoctor: [
+        {
+          api: "anthropic",
+          provider: "anthropic",
+          status: "key_missing",
+          keyEnv: "ANTHROPIC_API_KEY",
+          baseUrl: "https://api.anthropic.com",
+          message: "ANTHROPIC_API_KEY not set",
+          detail:
+            "Set ANTHROPIC_API_KEY (or point apiKeyEnv at another variable) to enable llm steps on 'anthropic'.",
+          fixCommand: "export ANTHROPIC_API_KEY=…",
+        },
+        {
+          api: "groq",
+          provider: "openai",
+          status: "ok",
+          keyEnv: "GROQ_API_KEY",
+          baseUrl: "https://g.local",
+          message: "ready",
+        },
+      ],
+      onRecheck: vi.fn(),
+    });
+    const frame = plain(lastFrame());
+    expect(frame).toContain("no key");
+    expect(frame).toMatch(/groq\s+ready/);
+    // The selected (anthropic) instance's fix and copyable command.
+    expect(frame).toContain("fix anthropic:");
+    expect(frame).toContain("$ export ANTHROPIC_API_KEY=…");
+    expect(frame).toContain("1/2 ready");
+    expect(frame).toContain("r recheck");
+  });
+
+  it("re-runs the probes on 'r'", async () => {
+    const onRecheck = vi.fn();
+    const { stdin } = renderManager({ onRecheck });
+    await type(stdin, "r");
+    expect(onRecheck).toHaveBeenCalled();
+  });
 });

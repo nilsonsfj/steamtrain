@@ -17,7 +17,12 @@ steamtrain --web-ui --read-only     # localhost share: view workflows/runs, no w
 
 The server starts listening immediately and prints its URL; agent health and
 llm-API readiness are probed in the background and the header's health chips
-fill in once they land (the page never blocks on the doctor). The project
+fill in once they land (the page never blocks on the doctor). Every chip is a
+button: click one to open the **Agent & API setup** panel, which lists each
+agent and endpoint with its status and — for anything not ready — the exact
+fix with a one-click copy and a Recheck button (the browser analog of
+`steamtrain init`'s readiness table). Agents that aren't installed collapse
+into one quiet chip so the header stays calm on a fresh machine. The project
 config page manages both [agent instances](agent-configuration.md) and the
 [API instances](api-configuration.md) direct-inference `llm` steps call.
 Agent and API edits default to **global** scope (`~/.steamtrain/config.json`),
@@ -87,7 +92,8 @@ browser ──POST /api/runs──▶ run manager ──▶ Orchestrator.runWork
 | `/api/workflows/:name` | PUT | save a created/edited spec (`scope: user\|project`) |
 | `/api/workflows/:name` | DELETE | delete a user or project workflow |
 | `/api/meta` | GET | agents + APIs, models, efforts, health (for the create form) |
-| `/api/doctor` | GET | current agent health (`doctor`) and llm-API readiness (`apis`) |
+| `/api/doctor` | GET | current agent health (`doctor`) and llm-API readiness (`apis`) — the last snapshot (fixed at startup + config save) |
+| `/api/doctor` | POST | re-run the probes now (setup panel Recheck): re-resolve every agent binary + re-probe every API, persist, and return the fresh `{ doctor, apis }` |
 | `/api/runs` | POST | `{ workflow, input, fresh? }` → `{ runId }` |
 | `/api/runs` | GET | in-flight run registry: server-owned runs merged with external (CLI `--detach` / TUI) runs from `.steamtrain/runs/`, including queued/paused state and pending approval/input summaries |
 | `/api/runs/:id/stream` | GET | Server-Sent Events: each `WorkflowEvent` (plus non-terminal `queued` frames), then a terminal `status` frame; tails externally-owned runs from the live-run registry |

@@ -147,7 +147,7 @@ export function StatusBar({
     missingAgents > 0 && visibleAgents.length > 0
       ? `${missingAgents} not installed`
       : missingAgents > 0
-        ? "no agents installed — Ctrl+A to add"
+        ? "no agents installed — Ctrl+A to set up"
         : "";
   const visibleApis = (apiDoctor ?? []).filter((d) => d.status !== "key_missing");
   const missingApis = (apiDoctor ?? []).length - visibleApis.length;

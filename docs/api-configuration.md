@@ -125,13 +125,25 @@ Run `/apis` from any screen to open the API manager:
 - `↑/↓` select · `Enter`/`Space` enable/disable
 - `a` add — a small form for id, provider, optional base URL / key env / default model, and scope
 - `d` delete a configured entry (built-in defaults can only be disabled)
+- `r` recheck — re-run the readiness probes (pick up a key you just exported
+  without restarting)
 - `Esc` close
 
-Each row shows the instance's scope (`global`, `project`, or `builtin`),
+Each row shows the instance's **live readiness** (`ready`, `no key`, `key
+rejected`, `offline`, `error`), scope (`global`, `project`, or `builtin`),
 enabled state, provider, key env var (and whether it is set), endpoint, and
-default model.
+default model. Selecting an instance that isn't ready shows its fix inline (for
+a missing key, the `export <ENV>=…` scaffold). The header carries a one-line
+readiness summary.
 
 ## Web UI
+
+API endpoints appear as **health chips** in the header alongside the agents.
+Click any chip to open the **Agent & API setup** panel (see
+[agent configuration](agent-configuration.md#web-ui)), which lists every
+endpoint with its status and, for anything not ready, the fix with a one-click
+**Copy** — plus a **Recheck** that re-probes in place. Endpoints without a key
+collapse into one quiet chip rather than shouting.
 
 The config page (gear icon) has an **APIs** section mirroring the agents
 section: add/remove instances, toggle enabled, pick **global** (default) or

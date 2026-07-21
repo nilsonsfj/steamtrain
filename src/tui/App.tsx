@@ -1087,6 +1087,27 @@ export function App({
     };
   }, [runtimeConfig]);
 
+  // On-demand preflight re-run (the agent/API managers' `r` key): re-resolve
+  // every agent binary and re-probe every API so the setup surface reflects a
+  // just-installed CLI or a fresh login without restarting steamtrain.
+  const recheckDoctor = useCallback(() => {
+    runDoctor(runtimeConfig)
+      .then((results) => {
+        setDoctor(results);
+        void refreshAgentCatalogCaches(runtimeConfig, results).then((ok) => {
+          if (ok) setAgentCatalogTick((n) => n + 1);
+        });
+      })
+      .catch((err) => {
+        dispatch({ type: "notice", level: "error", text: `preflight failed: ${message(err)}` });
+      });
+    runApiDoctor(runtimeConfig)
+      .then(setApiDoctor)
+      .catch((err) => {
+        dispatch({ type: "notice", level: "error", text: `api preflight failed: ${message(err)}` });
+      });
+  }, [runtimeConfig]);
+
   // ── Cross-cutting callbacks ──────────────────────────────────────────
   const focusCreateWorkflowPrompt = useCallback(
     (seed = "") => {
@@ -1600,11 +1621,13 @@ export function App({
           agents={resolveAgentInstances(runtimeConfig, { includeDisabled: true })}
           scopes={agentScopes}
           canGlobal={canGlobalConfig}
+          doctor={doctor}
           width={columns}
           height={streamHeight}
           onToggle={handleAgentToggle}
           onAdd={handleAgentAdd}
           onDelete={handleAgentDelete}
+          onRecheck={recheckDoctor}
           onClose={() => setAgentManagerOpen(false)}
         />
       ) : apiManagerOpen ? (
@@ -1612,11 +1635,13 @@ export function App({
           apis={resolveApiInstances(runtimeConfig, { includeDisabled: true })}
           scopes={apiScopes}
           canGlobal={canGlobalConfig}
+          apiDoctor={apiDoctor}
           width={columns}
           height={streamHeight}
           onToggle={handleApiToggle}
           onAdd={handleApiAdd}
           onDelete={handleApiDelete}
+          onRecheck={recheckDoctor}
           onClose={() => setApiManagerOpen(false)}
         />
       ) : stepEditorOpen && editorTarget ? (
