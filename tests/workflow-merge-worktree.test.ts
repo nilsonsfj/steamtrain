@@ -347,12 +347,12 @@ describe("engine-owned .steamtrain state exclusion", () => {
               // Each step also mutates ITS copy of the state dir — if the dir
               // leaked into the worktree, the two sides would now differ from
               // each other and from the base, forcing a conflict.
-              cmd: 'echo alpha > a.txt && mkdir -p .steamtrain/cache && echo \'{"seed":2}\' > .steamtrain/cache/entry.json',
+              cmd: "echo alpha > a.txt && mkdir -p .steamtrain/cache && echo '{\"seed\":2}' > .steamtrain/cache/entry.json",
             },
             {
               id: "b",
               kind: "command",
-              cmd: 'echo beta > b.txt && mkdir -p .steamtrain/cache && echo \'{"seed":3}\' > .steamtrain/cache/entry.json',
+              cmd: "echo beta > b.txt && mkdir -p .steamtrain/cache && echo '{\"seed\":3}' > .steamtrain/cache/entry.json",
             },
           ],
         },
@@ -366,9 +366,14 @@ describe("engine-owned .steamtrain state exclusion", () => {
       ],
     };
     expect(validateWorkflow(spec).ok).toBe(true);
-    const events = await runToEvents(spec, repo, worktrees, agentlessDeps(repo, {
-      agentWorkspace: createGitWorktreeManager({ baseDir: worktrees, runId: "state-excl-test" }),
-    }));
+    const events = await runToEvents(
+      spec,
+      repo,
+      worktrees,
+      agentlessDeps(repo, {
+        agentWorkspace: createGitWorktreeManager({ baseDir: worktrees, runId: "state-excl-test" }),
+      }),
+    );
     const results = doneResults(events);
     expect(results.get("merge")?.error).toBeUndefined();
     expect(workflowOk(events)).toBe(true);
