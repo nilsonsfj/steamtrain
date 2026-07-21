@@ -23,6 +23,14 @@ describe("TUI components", () => {
     expect(frame).toContain("project ready");
   });
 
+  it("renders the banner art without a project prop", () => {
+    const { lastFrame } = render(<Banner />);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("orchestrator");
+    expect(frame).toContain("(O)");
+    expect(frame).not.toContain("project ready");
+  });
+
   it("leads with ready agents and collapses not-installed ones into a summary", () => {
     const doctor: DoctorResult[] = [
       { agent: "claude", provider: "claude", status: "ok", binary: "claude", message: "ready" },

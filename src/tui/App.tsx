@@ -50,6 +50,7 @@ import type { UserConfigPatch } from "../config/user-config";
 import { type ApiDoctorResult, type DoctorResult, runApiDoctor, runDoctor } from "../doctor";
 import { Orchestrator } from "../orchestrator";
 import type { ProjectIdentity } from "../project";
+import { resolveProjectIdentity } from "../project";
 import type { SteamtrainSettings } from "../settings";
 import {
   type AuthoringHost,
@@ -222,6 +223,7 @@ export function App({
   const [apiDoctor, setApiDoctor] = useState<ApiDoctorResult[] | null>(null);
   const [runtimeConfigSource, setRuntimeConfigSource] = useState(configSource);
   const [activeWorkspaceLabel, setActiveWorkspaceLabel] = useState(workspaceLabel);
+  const [runtimeProject, setRuntimeProject] = useState(project);
   const [transcript, dispatch] = useReducer(transcriptReducer, initialTranscript);
   const [agentCatalogTick, setAgentCatalogTick] = useState(0);
   const mountedRef = useRef(true);
@@ -278,9 +280,11 @@ export function App({
   // Re-read the full config stack (defaults → global → project) after a save
   // so the merged view, raw per-scope agent layers, and the status-bar cfg
   // label stay consistent (a first save may create a previously absent file).
+  // Always honor `cwd` (from `--project-dir`) so reloads never fall back to
+  // the launch directory when the operator is working in another checkout.
   const reloadConfig = useCallback(() => {
     const loaded = loadConfig(
-      configKind === "custom" && configPath ? { customPath: configPath } : {},
+      configKind === "custom" && configPath ? { customPath: configPath, cwd } : { cwd },
     );
     setRuntimeConfig(loaded.config);
     setAgentLayers({ userAgents: loaded.userAgents, projectAgents: loaded.projectAgents });
@@ -291,7 +295,10 @@ export function App({
         hasUserConfig: loaded.user?.exists,
       }),
     );
-  }, [configKind, configPath, hasUserSettings]);
+    setRuntimeProject(
+      resolveProjectIdentity(cwd, { home: homedir(), configName: loaded.config.name }),
+    );
+  }, [configKind, configPath, cwd, hasUserSettings]);
 
   const updateConfig = useCallback(
     (patch: Parameters<typeof saveProjectConfig>[0]) => {
@@ -1576,7 +1583,7 @@ export function App({
   if (phase === "banner") {
     return (
       <Box flexDirection="column">
-        <Banner project={project} />
+        <Banner project={runtimeProject} />
         <Text color="gray"> starting up — running preflight checks…</Text>
       </Box>
     );
@@ -1619,7 +1626,7 @@ export function App({
       <StatusBar
         doctor={doctor}
         apiDoctor={apiDoctor}
-        project={project}
+        project={runtimeProject}
         configSource={runtimeConfigSource}
         workspaceLabel={activeWorkspaceLabel}
         running={runner.running}

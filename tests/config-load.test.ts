@@ -95,4 +95,29 @@ describe("configDisplayLabel", () => {
     const loaded = loadConfig({ customPath: custom, home });
     expect(configDisplayLabel(loaded.scope, { home })).toBe("~/.steamtrain/team.json");
   });
+
+  it("loads steamtrain.json from an explicit cwd (honors --project-dir reloads)", () => {
+    // Regression: TUI reloadConfig must pass cwd so a --project-dir session
+    // never re-reads the launch directory after Agent Manager / /config saves.
+    const launch = mkdtempSync(join(tmpdir(), "steamtrain-launch-"));
+    const project = mkdtempSync(join(tmpdir(), "steamtrain-project-"));
+    writeFileSync(
+      join(launch, CONFIG_FILENAME),
+      JSON.stringify({ name: "from-launch", stepTimeoutSec: 11 }),
+    );
+    writeFileSync(
+      join(project, CONFIG_FILENAME),
+      JSON.stringify({ name: "from-project", stepTimeoutSec: 77 }),
+    );
+    const previous = process.cwd();
+    try {
+      process.chdir(launch);
+      const loaded = loadConfig({ cwd: project });
+      expect(loaded.config.name).toBe("from-project");
+      expect(loaded.config.stepTimeoutSec).toBe(77);
+      expect(loaded.scope.path).toBe(join(project, CONFIG_FILENAME));
+    } finally {
+      process.chdir(previous);
+    }
+  });
 });

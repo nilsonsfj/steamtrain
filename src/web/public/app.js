@@ -248,6 +248,8 @@
       nameEl.textContent = project.name;
       pathEl.textContent = project.displayPath || project.cwd || "";
       root.title = project.cwd || project.displayPath || project.name;
+      root.setAttribute("aria-label", "Project " + project.name + " at " + (project.displayPath || project.cwd || ""));
+      root.setAttribute("role", "status");
       root.hidden = false;
     }
     try {
