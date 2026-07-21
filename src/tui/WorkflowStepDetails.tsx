@@ -261,9 +261,10 @@ function previewLines(
       text: `runner: ${formatWorkflowAgentTarget({
         agent: step.agent,
         model: step.model,
+        modelClass: step.modelClass,
         effort: step.effort,
       })}`,
-      color: AGENT_COLOR[step.agent] ?? "white",
+      color: step.agent ? (AGENT_COLOR[step.agent] ?? "white") : "cyan",
     });
   } else if (step.kind === "llm") {
     lines.push({ text: `runner: ${formatLlmTarget(step)}`, color: "cyan" });

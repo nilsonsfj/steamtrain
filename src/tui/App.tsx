@@ -614,6 +614,7 @@ export function App({
       stepId: step.id,
       agent: step.agent,
       model: step.model,
+      modelClass: step.modelClass,
       prompt: step.prompt,
       effort: step.effort,
       cwd: step.cwd,

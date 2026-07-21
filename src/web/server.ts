@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildAgentMeta } from "../agents/agent-meta";
+import { listModelClasses, listModelFamilyMeta } from "../agents/model-resolve";
 import { refreshAgentCatalogCaches } from "../agents/models";
 import { buildApiMeta } from "../apis";
 import type { AgentInstanceConfig, ApiInstanceConfig, SteamtrainConfig } from "../config";
@@ -284,7 +285,7 @@ function summarizeWorkflow(
       stepCount += 1;
       const kind = workflowStepKind(step);
       kinds[kind] = (kinds[kind] ?? 0) + 1;
-      if (isAgentBackedStep(step)) agents.add(step.agent);
+      if (isAgentBackedStep(step) && step.agent) agents.add(step.agent);
     }
   }
   return {
@@ -1001,10 +1002,15 @@ async function handle(
 
   if (method === "GET" && path === "/api/meta") {
     if (!deps.author) {
-      sendJson(res, 200, { agents: [], apis: [] });
+      sendJson(res, 200, { agents: [], apis: [], modelClasses: [], modelFamilies: [] });
       return;
     }
-    sendJson(res, 200, { agents: deps.author.agentMeta(), apis: apiMetaFromDeps(deps) });
+    sendJson(res, 200, {
+      agents: deps.author.agentMeta(),
+      apis: apiMetaFromDeps(deps),
+      modelClasses: listModelClasses(deps.config),
+      modelFamilies: listModelFamilyMeta(),
+    });
     return;
   }
 

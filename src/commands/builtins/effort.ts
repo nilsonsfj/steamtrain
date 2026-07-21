@@ -131,6 +131,19 @@ function executeWorkflowEffortCommand(
   const update = ctx.updateWorkflowStep!;
   const { args: bare, all } = takeAllFlag(args);
 
+  if (!step.agent || !step.model) {
+    return {
+      handled: true,
+      clearInput: true,
+      notices: [
+        {
+          level: "warn",
+          text: `step '${step.stepId}' uses model-only/class binding — pin an agent with /agent before setting effort`,
+        },
+      ],
+    };
+  }
+
   const efforts = effortsForModel(step.agent, step.model, ctx.config);
   if (bare.length === 0) {
     const current = step.effort ?? "default";
@@ -262,7 +275,8 @@ function completeWorkflowEffortArgs(args: string[], ctx: SlashCommandContext): r
   ) {
     return ["--all"];
   }
-  const efforts = effortsForModel(step.agent, step.model, ctx.config);
+  const efforts =
+    step.agent && step.model ? effortsForModel(step.agent, step.model, ctx.config) : [];
   if (efforts.length === 0) return ["clear"];
   return [...efforts, "clear"];
 }

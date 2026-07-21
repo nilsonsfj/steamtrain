@@ -1,4 +1,5 @@
 import { defaultModelForAgent, modelNameForAgent, resolveAgentInstances } from "../agents";
+import { bindingRequestFromStep, resolveModelBinding } from "../agents/model-resolve";
 import type { SteamtrainConfig } from "../config";
 import type { AgentInstanceId } from "../types/events";
 import type { WorkflowStepOverrides } from "./overrides";
@@ -13,15 +14,19 @@ import { isAgentBackedStep } from "./types";
  * - Only steps whose own agent is blocked are re-routed. Steps already pinned
  *   to a ready agent keep their agent and model, so a mixed-agent workflow
  *   keeps as much of its cross-model diversity as possible.
+ * - Model-only / modelClass steps are resolved onto a ready offering rather
+ *   than treated as blocked (they never pinned a dead agent).
+ * - When remapping a blocked pinned agent, prefer an equivalent model on the
+ *   target agent (same family) over dumping to the target's default model.
  * - `llm` steps are never touched — they call an API directly and need no
  *   agent CLI, so a missing agent binary cannot block them.
  * - The plan is meant to be applied per run (session overrides / spec
  *   overrides), never persisted into the workflow definition.
  */
 export interface ReroutePlan {
-  /** Ready agent every blocked step is re-routed to. */
+  /** Ready agent every blocked step is re-routed to (when a single target wins). */
   target: AgentInstanceId;
-  /** The target agent's default model (each re-routed step runs on it). */
+  /** The target agent's default model (fallback when family remap is unavailable). */
   targetModel: string;
   /** Display name for {@link targetModel}. */
   targetModelName: string;
@@ -29,8 +34,10 @@ export interface ReroutePlan {
   blockedAgents: AgentInstanceId[];
   /** Ids of the steps being re-routed, in spec order. */
   stepIds: string[];
-  /** Per-step overrides implementing the re-route (agent + default model, effort reset). */
+  /** Per-step overrides implementing the re-route (agent + model, effort reset). */
   overrides: WorkflowStepOverrides;
+  /** True when at least one step kept its model family on the new agent. */
+  preservedFamily?: boolean;
 }
 
 export interface PlanRerouteOptions {
@@ -55,7 +62,8 @@ export type PlanRerouteResult =
  *
  * Target selection is deterministic: an explicitly requested target wins,
  * else a ready agent the spec already uses (preserving intent), else the
- * first ready agent in config order.
+ * first ready agent in config order. Per-step overrides prefer a same-family
+ * model on the target when the binding registry knows one.
  */
 export function planAgentReroute(
   spec: WorkflowSpec,
@@ -65,8 +73,6 @@ export function planAgentReroute(
 ): PlanRerouteResult {
   const enabledIds = resolveAgentInstances(config).map((agent) => agent.id);
   const enabled = new Set<string>(enabledIds);
-  // A step's agent is usable when it is configured/enabled AND doctor-ready —
-  // exactly the conditions canDispatchWorkflowSpec gates on.
   const agentUsable = (agent: AgentInstanceId) => enabled.has(agent) && isReady(agent);
 
   const blockedStepIds: string[] = [];
@@ -75,6 +81,8 @@ export function planAgentReroute(
   for (const phase of spec.phases) {
     for (const step of phase.steps) {
       if (!isAgentBackedStep(step)) continue;
+      // Model-only / class steps resolve onto a ready agent — not "blocked".
+      if (typeof step.agent !== "string") continue;
       if (!agentUsable(step.agent)) {
         blockedStepIds.push(step.id);
         if (!blockedAgents.includes(step.agent)) blockedAgents.push(step.agent);
@@ -108,10 +116,52 @@ export function planAgentReroute(
 
   const targetModel = defaultModelForAgent(target, config);
   const overrides: WorkflowStepOverrides = {};
-  for (const stepId of blockedStepIds) {
-    // effort is explicitly cleared — levels are model-specific and must not
-    // leak across a model change (same rule as the `/agent` step command).
-    overrides[stepId] = { agent: target, model: targetModel, effort: undefined };
+  let preservedFamily = false;
+
+  for (const phase of spec.phases) {
+    for (const step of phase.steps) {
+      if (!blockedStepIds.includes(step.id)) continue;
+      if (!isAgentBackedStep(step)) continue;
+
+      // Try to keep the step's model family on the target agent.
+      const request = bindingRequestFromStep(step);
+      const remapped = resolveModelBinding(
+        {
+          ...request,
+          // Force consideration of the chosen target first.
+          agent: target,
+        },
+        {
+          config,
+          isReady,
+          preferAgent: target,
+        },
+      );
+
+      if (remapped.ok && remapped.primary.agent === target) {
+        overrides[step.id] = {
+          agent: target,
+          model: remapped.primary.model,
+          effort: undefined,
+        };
+        if (remapped.primary.familyId) preservedFamily = true;
+        continue;
+      }
+
+      // Fall back: any ready offering of the same family, else target default.
+      const familyRemap = resolveModelBinding(request, { config, isReady, preferAgent: target });
+      if (familyRemap.ok) {
+        overrides[step.id] = {
+          agent: familyRemap.primary.agent,
+          model: familyRemap.primary.model,
+          effort: undefined,
+        };
+        if (familyRemap.primary.familyId) preservedFamily = true;
+        continue;
+      }
+
+      overrides[step.id] = { agent: target, model: targetModel, effort: undefined };
+    }
   }
 
   return {
@@ -123,6 +173,7 @@ export function planAgentReroute(
       blockedAgents,
       stepIds: blockedStepIds,
       overrides,
+      preservedFamily,
     },
   };
 }
@@ -130,5 +181,6 @@ export function planAgentReroute(
 /** One-line human description of a plan, e.g. "re-route 3 steps (opencode) to claude · Claude Sonnet 5". */
 export function formatReroutePlan(plan: ReroutePlan): string {
   const steps = plan.stepIds.length === 1 ? "1 step" : `${plan.stepIds.length} steps`;
-  return `re-route ${steps} (${plan.blockedAgents.join(", ")}) to ${plan.target} · ${plan.targetModelName}`;
+  const keep = plan.preservedFamily ? " (keeping model families where possible)" : "";
+  return `re-route ${steps} (${plan.blockedAgents.join(", ")}) to ${plan.target} · ${plan.targetModelName}${keep}`;
 }

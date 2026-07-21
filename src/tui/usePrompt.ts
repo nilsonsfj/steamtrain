@@ -272,7 +272,7 @@ export function usePrompt({
         }
         return map.size > 0 ? map : undefined;
       }
-      if (previewStepSelection) {
+      if (previewStepSelection?.agent) {
         void agentCatalogTick;
         const map = new Map<string, string>();
         for (const model of modelsForAgent(previewStepSelection.agent, slashCtx.config)) {

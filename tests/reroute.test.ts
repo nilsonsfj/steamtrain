@@ -62,17 +62,48 @@ describe("planAgentReroute", () => {
     expect(result.plan.target).toBe("claude");
   });
 
-  it("applies as step overrides: agent + default model, effort cleared", () => {
+  it("applies as step overrides: prefers same-family model on the target when possible", () => {
     const result = planAgentReroute(spec, DEFAULT_CONFIG, ready(["claude"]));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const next = applyWorkflowStepOverrides(spec, result.plan.overrides);
     const scan = next.phases[0]!.steps[0] as { agent: string; model: string; effort?: string };
     expect(scan.agent).toBe("claude");
+    // mimo-v2.5-free has no Claude offering — falls back to the target default.
     expect(scan.model).toBe(result.plan.targetModel);
     expect(scan.effort).toBeUndefined();
     // Untouched: the already-ready claude step keeps its own model.
     expect(next.phases[1]!.steps[1]).toMatchObject({ agent: "claude", model: "claude-sonnet-5" });
+  });
+
+  it("preserves model family when re-routing a shared model onto another agent", () => {
+    const shared: WorkflowSpec = {
+      name: "shared",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            {
+              id: "review",
+              agent: "opencode",
+              model: "opencode/claude-opus-4-8",
+              prompt: "review",
+              effort: "high",
+            },
+          ],
+        },
+      ],
+    };
+    const result = planAgentReroute(shared, DEFAULT_CONFIG, ready(["claude"]));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const next = applyWorkflowStepOverrides(shared, result.plan.overrides);
+    const step = next.phases[0]!.steps[0] as { agent: string; model: string; effort?: string };
+    expect(step.agent).toBe("claude");
+    expect(step.model).toBe("claude-opus-4-8");
+    expect(step.effort).toBeUndefined();
+    expect(result.plan.preservedFamily).toBe(true);
   });
 
   it("returns { ok: false } without error when nothing is blocked", () => {

@@ -64,9 +64,29 @@ export interface WorkflowItem {
 }
 
 export interface AgentRunFields {
-  agent: AgentInstanceId;
-  /** Model string in the agent's own format (claude: `claude-…`, opencode: `provider/model`, codex: plain slug). */
-  model: string;
+  /**
+   * Agent instance to spawn. Optional when `model` or `modelClass` is set —
+   * steamtrain then picks the best ready agent that can provide that model
+   * (preferring the model's reference agent).
+   */
+  agent?: AgentInstanceId;
+  /**
+   * Model string — either an agent-native id (`claude-opus-4-8`,
+   * `opencode/claude-opus-4-8`) or a cross-agent alias (`opus 4.8`).
+   * Optional when `modelClass` is set.
+   */
+  model?: string;
+  /**
+   * Role-based model class (`thinker` | `implementer` | `simple` | `balanced`).
+   * Resolved to a concrete family then to a ready agent+model at run time.
+   */
+  modelClass?: "thinker" | "implementer" | "simple" | "balanced";
+  /**
+   * Ordered failover model queries tried when the primary binding's agent
+   * becomes unavailable (or when a transient provider failure triggers
+   * model failover on retry). Each entry accepts the same forms as `model`.
+   */
+  fallbackModels?: string[];
   /** Prompt template; may reference `{{input}}` and `{{steps.<id>.output}}`. */
   prompt: string;
   /** Target working directory (absolute, or relative to the run's base cwd). */
@@ -201,6 +221,8 @@ export interface DistributorStep extends WorkflowStepBase {
    */
   agent?: AgentInstanceId;
   model?: string;
+  modelClass?: "thinker" | "implementer" | "simple" | "balanced";
+  fallbackModels?: string[];
   prompt?: string;
   cwd?: string;
   env?: Record<string, string>;
@@ -227,6 +249,8 @@ export interface ConsolidatorStep extends WorkflowStepBase {
    */
   agent?: AgentInstanceId;
   model?: string;
+  modelClass?: "thinker" | "implementer" | "simple" | "balanced";
+  fallbackModels?: string[];
   prompt?: string;
   cwd?: string;
   env?: Record<string, string>;
@@ -295,6 +319,8 @@ export interface MergeStep extends WorkflowStepBase {
   /** Conflict-resolution agent (`onConflict: "agent"`). */
   agent?: AgentInstanceId;
   model?: string;
+  modelClass?: "thinker" | "implementer" | "simple" | "balanced";
+  fallbackModels?: string[];
   effort?: string;
   /** Extra guidance appended to the built-in conflict-resolution prompt. */
   prompt?: string;
@@ -866,8 +892,10 @@ const baseStepShape = {
 const outputJsonSchema = z.record(z.unknown());
 
 const agentRunShape = {
-  agent: agentId,
-  model: z.string().min(1),
+  agent: agentId.optional(),
+  model: z.string().min(1).optional(),
+  modelClass: z.enum(["thinker", "implementer", "simple", "balanced"]).optional(),
+  fallbackModels: z.array(z.string().min(1)).min(1).optional(),
   prompt: z.string().min(1),
   cwd: z.string().min(1).optional(),
   env: z.record(z.string()).optional(),
@@ -881,6 +909,8 @@ const agentRunShape = {
 const optionalAgentRunShape = {
   agent: agentId.optional(),
   model: z.string().min(1).optional(),
+  modelClass: z.enum(["thinker", "implementer", "simple", "balanced"]).optional(),
+  fallbackModels: z.array(z.string().min(1)).min(1).optional(),
   prompt: z.string().min(1).optional(),
   cwd: z.string().min(1).optional(),
   env: z.record(z.string()).optional(),
@@ -890,6 +920,41 @@ const optionalAgentRunShape = {
   stepTimeoutMs: z.number().positive().optional(),
   output: outputJsonSchema.optional(),
 };
+
+/** Shared binding rule: agent+model, model-only, modelClass-only, or agent+modelClass. */
+function refineAgentBinding(
+  step: {
+    agent?: string;
+    model?: string;
+    modelClass?: string;
+    prompt?: string;
+  },
+  ctx: z.RefinementCtx,
+  options: { requirePrompt: boolean; label: string },
+): void {
+  const hasAgent = Boolean(step.agent);
+  const hasModel = Boolean(step.model);
+  const hasClass = Boolean(step.modelClass);
+  if (!hasAgent && !hasModel && !hasClass) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `${options.label} requires agent+model, model, or modelClass`,
+    });
+    return;
+  }
+  if (hasAgent && !hasModel && !hasClass) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `${options.label} with agent requires model or modelClass`,
+    });
+  }
+  if (options.requirePrompt && !step.prompt) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `${options.label} requires prompt`,
+    });
+  }
+}
 
 const workspaceShape = {
   workspace: z
@@ -914,20 +979,24 @@ const retryPolicySchema = z.object({
   jitter: z.boolean().optional(),
 });
 
-const workflowWorkerStepSchema = z.object({
-  ...baseStepShape,
-  kind: z.enum(["worker", "processor"]).optional(),
-  forEach: z.string().min(1).optional(),
-  session: z
-    .string()
-    .regex(/^continue:.+$/, 'session must be "continue:<stepId>"')
-    .optional(),
-  retry: retryPolicySchema.optional(),
-  maxCostUsd: z.number().positive().optional(),
-  canAsk: z.boolean().optional(),
-  ...agentRunShape,
-  ...workspaceShape,
-});
+const workflowWorkerStepSchema = z
+  .object({
+    ...baseStepShape,
+    kind: z.enum(["worker", "processor"]).optional(),
+    forEach: z.string().min(1).optional(),
+    session: z
+      .string()
+      .regex(/^continue:.+$/, 'session must be "continue:<stepId>"')
+      .optional(),
+    retry: retryPolicySchema.optional(),
+    maxCostUsd: z.number().positive().optional(),
+    canAsk: z.boolean().optional(),
+    ...agentRunShape,
+    ...workspaceShape,
+  })
+  .superRefine((step, ctx) => {
+    refineAgentBinding(step, ctx, { requirePrompt: true, label: "worker step" });
+  });
 
 const workflowDistributorStepSchema = z
   .object({
@@ -939,17 +1008,22 @@ const workflowDistributorStepSchema = z
     ...optionalAgentRunShape,
   })
   .superRefine((step, ctx) => {
-    if (step.itemsPath && !(step.agent && step.output)) {
+    if (step.itemsPath && !((step.agent || step.model || step.modelClass) && step.output)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "distributor itemsPath requires an agent-backed step with an output schema",
       });
     }
     if (step.items) return;
-    if (step.agent && step.model && step.prompt) return;
+    const hasBinding = Boolean(step.agent || step.model || step.modelClass);
+    if (hasBinding) {
+      refineAgentBinding(step, ctx, { requirePrompt: true, label: "distributor step" });
+      return;
+    }
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "distributor step requires either non-empty items or agent/model/prompt",
+      message:
+        "distributor step requires either non-empty items or an agent binding (agent+model, model, or modelClass) with prompt",
     });
   });
 
@@ -961,11 +1035,9 @@ const workflowConsolidatorStepSchema = z
     ...optionalAgentRunShape,
   })
   .superRefine((step, ctx) => {
-    if ((step.agent || step.model) && !(step.agent && step.model && step.prompt)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "agent-backed consolidator requires agent, model, and prompt together",
-      });
+    const hasBinding = Boolean(step.agent || step.model || step.modelClass);
+    if (hasBinding) {
+      refineAgentBinding(step, ctx, { requirePrompt: true, label: "agent-backed consolidator" });
     }
     if (!step.dependsOn?.length) {
       ctx.addIssue({
@@ -1028,6 +1100,8 @@ const workflowMergeStepSchema = z
     prBody: z.string().min(1).optional(),
     agent: agentId.optional(),
     model: z.string().min(1).optional(),
+    modelClass: z.enum(["thinker", "implementer", "simple", "balanced"]).optional(),
+    fallbackModels: z.array(z.string().min(1)).min(1).optional(),
     effort: z.string().min(1).optional(),
     prompt: z.string().min(1).optional(),
     env: z.record(z.string()).optional(),
@@ -1041,10 +1115,15 @@ const workflowMergeStepSchema = z
         message: "merge step requires from or dependsOn (the steps whose worktrees to merge)",
       });
     }
-    if (step.onConflict === "agent" && !(step.agent && step.model)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'merge step with onConflict "agent" requires agent and model',
+    if (step.onConflict === "agent") {
+      refineAgentBinding(step, ctx, {
+        requirePrompt: false,
+        label: 'merge step with onConflict "agent"',
+      });
+    } else if (step.agent || step.model || step.modelClass) {
+      refineAgentBinding(step, ctx, {
+        requirePrompt: false,
+        label: "merge step conflict agent",
       });
     }
     // Applying source diffs one at a time to the same checkout can't be
@@ -1054,12 +1133,6 @@ const workflowMergeStepSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'merge step with perSource requires mode "branch" or "pr"',
-      });
-    }
-    if ((step.agent || step.model) && !(step.agent && step.model)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "merge step conflict agent requires agent and model together",
       });
     }
   });
@@ -1274,23 +1347,75 @@ export function parseForEachSource(source: string): string | undefined {
 }
 
 /**
- * Whether a step has an `agent` field set. Returns true for worker, processor,
- * agent-backed distributor, and agent-backed consolidator steps. Gate steps
- * never have an agent field.
+ * Whether a step will spawn an agent CLI. True for workers/processors and for
+ * distributor/consolidator/merge steps that declare an agent binding — either
+ * an explicit `agent`, a `model` / `modelClass` (resolved at run time), or both.
+ * Gate / llm / command / human steps are never agent-backed.
  */
 export function isAgentBackedStep(step: WorkflowStep): step is AgentBackedWorkflowStep {
-  return "agent" in step && typeof step.agent === "string";
+  const kind = workflowStepKind(step);
+  if (
+    kind === "gate" ||
+    kind === "approval" ||
+    kind === "human" ||
+    kind === "command" ||
+    kind === "llm" ||
+    kind === "workflow"
+  ) {
+    return false;
+  }
+  if (kind === "merge") {
+    const merge = step as MergeStep;
+    return (
+      merge.onConflict === "agent" ||
+      typeof merge.agent === "string" ||
+      typeof merge.model === "string" ||
+      typeof merge.modelClass === "string"
+    );
+  }
+  if (kind === "distributor" || kind === "consolidator") {
+    const block = step as DistributorStep | ConsolidatorStep;
+    return (
+      typeof block.agent === "string" ||
+      typeof block.model === "string" ||
+      typeof block.modelClass === "string"
+    );
+  }
+  // worker / processor
+  const worker = step as WorkerStep;
+  return (
+    typeof worker.agent === "string" ||
+    typeof worker.model === "string" ||
+    typeof worker.modelClass === "string"
+  );
 }
 
-/** Distinct agent ids a workflow's steps will spawn (empty for agentless flows). */
+/**
+ * Distinct agent ids a workflow's steps will spawn. Model-only / class-only
+ * steps are omitted here (their agent is chosen at resolve time); use
+ * {@link workflowNeedsAgentResolution} / dispatch-time resolution to gate them.
+ */
 export function workflowAgentIds(spec: WorkflowSpec): AgentInstanceId[] {
   const set = new Set<AgentInstanceId>();
   for (const phase of spec.phases) {
     for (const step of phase.steps) {
-      if (isAgentBackedStep(step)) set.add(step.agent);
+      if (isAgentBackedStep(step) && typeof step.agent === "string") set.add(step.agent);
     }
   }
   return [...set];
+}
+
+/** True when any agent-backed step omits a concrete agent (model/class binding). */
+export function workflowNeedsAgentResolution(spec: WorkflowSpec): boolean {
+  for (const phase of spec.phases) {
+    for (const step of phase.steps) {
+      if (!isAgentBackedStep(step)) continue;
+      if (typeof step.agent !== "string") return true;
+      if (typeof step.modelClass === "string") return true;
+      if (step.fallbackModels && step.fallbackModels.length > 0) return true;
+    }
+  }
+  return false;
 }
 
 /** All direct-inference `llm` steps in a spec (empty when none). */
@@ -1504,7 +1629,12 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
               error: `step '${step.id}' session continues fan-out step '${sessionSrc}', which records one session per item (continue a non-forEach step, or a consolidator of the fan-out)`,
             };
           }
-          if (isAgentBackedStep(step) && sourceStep.agent !== step.agent) {
+          if (
+            isAgentBackedStep(step) &&
+            typeof step.agent === "string" &&
+            typeof sourceStep.agent === "string" &&
+            sourceStep.agent !== step.agent
+          ) {
             return {
               ok: false,
               error: `step '${step.id}' (agent '${step.agent}') session continues '${sessionSrc}' (agent '${sourceStep.agent}') — a session can only be continued on the same agent instance`,

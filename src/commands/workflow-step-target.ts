@@ -130,11 +130,28 @@ export function executeWorkflowModelCommand(
   const update = ctx.updateWorkflowStep!;
   const { args: bare, all } = takeAllFlag(args);
 
+  if (!step.agent) {
+    return {
+      handled: true,
+      clearInput: true,
+      notices: [
+        {
+          level: "warn",
+          text: `step '${step.stepId}' has no pinned agent — use /agent <id> first, or keep the model-only binding`,
+        },
+      ],
+    };
+  }
+
   const models = modelsForAgent(step.agent, ctx.config);
   const modelIds = modelIdsForAgent(step.agent, ctx.config);
   if (bare.length === 0) {
-    const currentName = modelNameForAgent(step.agent, step.model, ctx.config);
-    const currentLabel = currentName === step.model ? step.model : `${currentName} (${step.model})`;
+    const currentModel = step.model ?? "(unresolved)";
+    const currentName = step.model
+      ? modelNameForAgent(step.agent, step.model, ctx.config)
+      : currentModel;
+    const currentLabel =
+      currentName === currentModel ? currentModel : `${currentName} (${currentModel})`;
     return {
       handled: true,
       clearInput: true,
@@ -201,7 +218,7 @@ export function executeWorkflowModelCommand(
 
 export function completeWorkflowModelArgs(ctx: SlashCommandContext): readonly string[] {
   const step = ctx.workflowStep;
-  if (!step) return [];
+  if (!step?.agent) return [];
   return modelIdsForAgent(step.agent, ctx.config);
 }
 

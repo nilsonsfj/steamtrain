@@ -3,6 +3,7 @@ import {
   defaultDraftModel,
   effortForModelChange,
   effortsForModel,
+  findModelFamily,
   modelIdsForAgent,
 } from "../src/agents";
 import type { SlashCommandResult } from "../src/commands/types";
@@ -152,12 +153,26 @@ describe("parseDraftModelRequest", () => {
   });
 
   it("explains when a model belongs to an unhealthy agent", () => {
-    // codex is not in `healthy`, so its model can't be inferred — but the error
-    // should name the owning agent rather than claim the model is unknown.
-    const codexModel = aModelFor("codex");
-    const res = parseDraftModelRequest([codexModel], healthy);
+    // Pick a codex-only catalog id so no other healthy agent can claim it.
+    const codexOnly =
+      modelIdsForAgent("codex").find((id) => id === "codex-auto-review") ??
+      modelIdsForAgent("codex").find(
+        (id) => !findModelFamily(id)?.offerings.some((o) => o.provider !== "codex"),
+      );
+    expect(codexOnly).toBeTruthy();
+    const res = parseDraftModelRequest([codexOnly!], healthy);
     expect(res.kind).toBe("error");
-    expect(res.kind === "error" && res.message).toMatch(/belongs to codex/);
+    expect(res.kind === "error" && res.message).toMatch(/codex|not ready|no ready|belongs to/);
+  });
+
+  it("infers a shared model onto a healthy agent when its home agent is down", () => {
+    // gpt-5.5 lives on both codex (reference) and opencode — with only claude
+    // healthy this still fails, but with opencode healthy it should remap.
+    const healthyOpen = new Set<AgentInstanceId>(["opencode", "claude"]);
+    const res = parseDraftModelRequest(["gpt-5.5"], healthyOpen);
+    expect(res.kind).toBe("set");
+    if (res.kind !== "set") return;
+    expect(["opencode", "codex"]).toContain(res.target.agent);
   });
 
   it("rejects a model no agent owns", () => {

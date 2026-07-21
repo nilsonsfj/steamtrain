@@ -38,6 +38,7 @@ export interface StepEditorTarget {
   hasPrompt: boolean;
   agent?: string;
   model?: string;
+  modelClass?: string;
   effort?: string;
   prompt: string;
 }
@@ -46,6 +47,7 @@ export interface StepEditorTarget {
 export interface StepEditorPatch {
   agent?: string;
   model?: string;
+  modelClass?: string;
   effort?: string;
   prompt?: string;
 }
@@ -54,8 +56,9 @@ export interface StepEditorPatch {
 export interface RetargetableStep {
   stepId: string;
   kindLabel: string;
-  agent: string;
-  model: string;
+  agent?: string;
+  model?: string;
+  modelClass?: string;
   effort?: string;
 }
 
@@ -82,6 +85,7 @@ export function stepEditorTarget(
     hasPrompt,
     agent: agentBacked ? step.agent : undefined,
     model: agentBacked ? step.model : undefined,
+    modelClass: agentBacked ? step.modelClass : undefined,
     effort: agentBacked ? step.effort : undefined,
     prompt: promptForStep(step) ?? "",
   };
@@ -93,10 +97,14 @@ export function editorFieldsFor(
   config?: SteamtrainConfig,
 ): EditorField[] {
   const fields: EditorField[] = [];
-  if (target.agentBacked && target.agent) {
+  if (target.agentBacked) {
     fields.push("agent");
     fields.push("model");
-    if (target.model && effortsForModel(target.agent, target.model, config).length > 0) {
+    if (
+      target.agent &&
+      target.model &&
+      effortsForModel(target.agent, target.model, config).length > 0
+    ) {
       fields.push("effort");
     }
   }
@@ -175,6 +183,7 @@ export function listRetargetableSteps(spec: WorkflowSpec): RetargetableStep[] {
         kindLabel: workflowStepKind(step),
         agent: step.agent,
         model: step.model,
+        modelClass: step.modelClass,
         effort: step.effort,
       });
     }
@@ -263,6 +272,7 @@ export function buildBulkEffortPatches(
 ): Record<string, StepEditorPatch> {
   const patches: Record<string, StepEditorPatch> = {};
   for (const step of steps) {
+    if (!step.agent || !step.model) continue;
     const supported = effortsForModel(step.agent, step.model, config);
     if (nextEffort !== undefined && !supported.includes(nextEffort)) continue;
     if ((step.effort ?? undefined) === (nextEffort ?? undefined)) continue;

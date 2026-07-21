@@ -1,9 +1,11 @@
 import {
   defaultDraftModel,
   effortsForModel,
+  findModelFamily,
   modelIdsForAgent,
   modelNameForAgent,
   resolveAgentInstances,
+  resolveModelBinding,
   supportsEffort,
 } from "../agents";
 import type { SteamtrainConfig } from "../config/types";
@@ -149,14 +151,25 @@ export function parseDraftModelRequest(
     return { kind: "set", target: { agent: first, model } };
   }
 
-  // `<model-id>` — find the healthy agent that owns it (preference order).
-  for (const agent of draftAgentOrder(config)) {
-    if (healthy.has(agent) && modelIdsForAgent(agent, config).includes(first)) {
-      return { kind: "set", target: { agent, model: first } };
+  // `<model-id>` — resolve via the shared model-binding registry (family
+  // aliases, reference-agent preference, catalog matches).
+  {
+    const resolved = resolveModelBinding(
+      { model: first },
+      {
+        config,
+        isReady: (agent) => healthy.has(agent),
+      },
+    );
+    if (resolved.ok) {
+      return {
+        kind: "set",
+        target: { agent: resolved.primary.agent, model: resolved.primary.model },
+      };
     }
   }
 
-  // Not owned by any healthy agent — give the most useful reason we can.
+  // Not runnable on any healthy agent — prefer naming the would-be owner.
   const owner = draftAgentOrder(config).find((agent) =>
     modelIdsForAgent(agent, config).includes(first),
   );
@@ -164,6 +177,14 @@ export function parseDraftModelRequest(
     return {
       kind: "error",
       message: `model '${first}' belongs to ${owner}, which isn't healthy (check the doctor panel)`,
+    };
+  }
+  const family = findModelFamily(first);
+  if (family) {
+    const providers = family.offerings.map((o) => o.provider).join(", ");
+    return {
+      kind: "error",
+      message: `no healthy agent can provide '${first}' (offered by: ${providers}); ${healthyHint(healthy)}`,
     };
   }
   return {

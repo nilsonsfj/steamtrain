@@ -14,6 +14,7 @@
   };
   var S = {
     workflows: [], selected: null, source: null, spec: null, agents: [], apis: [],
+    modelClasses: [], modelFamilies: [],
     runId: null, es: null,
     startedAt: 0, timer: null,
     runState: null,
@@ -987,6 +988,8 @@
     apiAuth("GET", "/api/meta").then(function (r) {
       S.agents = (r.body && r.body.agents) || [];
       S.apis = (r.body && r.body.apis) || [];
+      S.modelClasses = (r.body && r.body.modelClasses) || [];
+      S.modelFamilies = (r.body && r.body.modelFamilies) || [];
       applyHealth();
     });
   }
@@ -3310,9 +3313,50 @@
 
   // ---- configure / clone ---------------------------------------------------
   function isAgentStep(st) {
-    if (st.agent) return true;
+    if (st.kind === "llm" || st.kind === "gate" || st.kind === "approval" ||
+        st.kind === "human" || st.kind === "command" || st.kind === "workflow") {
+      return false;
+    }
+    if (st.agent || st.model || st.modelClass) return true;
     var k = st.kind || "worker";
     return k === "worker" || k === "processor";
+  }
+  function modelClassOptions(current) {
+    var opts = [{ value: "", label: "(none — use model)" }].concat(
+      (S.modelClasses || []).map(function (c) {
+        return { value: c.id, label: c.name + " — " + (c.description || c.id) };
+      })
+    );
+    if (current && !opts.some(function (o) { return o.value === current; })) {
+      opts.push({ value: current, label: current });
+    }
+    return opts;
+  }
+  function familyModelOptions(current) {
+    // Cross-agent model picker: family aliases + native ids for auto binding.
+    var seen = {};
+    var opts = [];
+    function add(value, label) {
+      if (!value || seen[value]) return;
+      seen[value] = true;
+      opts.push({ value: value, label: label || value });
+    }
+    (S.modelFamilies || []).forEach(function (f) {
+      add(f.id, f.name + " (" + f.id + ")");
+      (f.aliases || []).slice(0, 3).forEach(function (a) { add(a, f.name + " · " + a); });
+    });
+    S.agents.forEach(function (a) {
+      (a.models || []).forEach(function (m) { add(m.id, m.name + " · " + a.id); });
+    });
+    if (current && !seen[current]) opts.unshift({ value: current, label: current + " (current)" });
+    return opts;
+  }
+  function agentOptionsWithAuto(current) {
+    var opts = [{ value: "", label: "Auto (pick ready agent for model)" }].concat(agentOptions());
+    if (current && current !== "" && !opts.some(function (o) { return o.value === current; })) {
+      opts.splice(1, 0, { value: current, label: current + " (current unavailable)" });
+    }
+    return opts;
   }
   function countAgentSteps(spec) {
     var n = 0;
@@ -3497,8 +3541,9 @@
           var r = refs[st.id];
           if (!r) return;
           if (r.agentSel) {
-            st.agent = r.agentSel.value;
-            st.model = r.modelSel.value;
+            if (r.agentSel.value) st.agent = r.agentSel.value; else delete st.agent;
+            if (r.modelSel && r.modelSel.value) st.model = r.modelSel.value; else delete st.model;
+            if (r.classSel && r.classSel.value) st.modelClass = r.classSel.value; else delete st.modelClass;
             var ef = r.effortSel ? r.effortSel.value : "";
             if (ef) st.effort = ef; else delete st.effort;
           }
@@ -3540,8 +3585,9 @@
             if (!r) return;
             var patch = {};
             if (r.agentSel) {
-              patch.agent = r.agentSel.value;
-              patch.model = r.modelSel.value;
+              patch.agent = r.agentSel.value || null;
+              patch.model = (r.modelSel && r.modelSel.value) || null;
+              patch.modelClass = (r.classSel && r.classSel.value) || null;
               var ef = r.effortSel ? r.effortSel.value : "";
               patch.effort = ef || null;
             }
@@ -3571,8 +3617,8 @@
 
     openModal(modalShell(creating ? "Clone workflow" : "Configure " + spec.name,
       agentStepCount > 0
-        ? "Retarget every agent step at once, or tune agent, model, effort, and prompt per step."
-        : "Set the agent, model, effort, and prompt for each step.",
+        ? "Retarget every agent step at once, or tune agent / model / model class / effort / prompt per step. Leave Agent on Auto to bind by model."
+        : "Set the agent, model, model class, effort, and prompt for each step.",
       body, foot, true));
   }
 
@@ -3613,18 +3659,38 @@
       card.appendChild(h("div", { class: "ro", text: note }));
       return card;
     }
-    var agent = st.agent || preferredAgent().id;
-    var agentSel = selectEl(agentOptionsWith(agent), agent);
-    var modelSel = selectEl(modelOptionsWith(agent, st.model), st.model);
+    var agent = st.agent || "";
+    var agentSel = selectEl(agentOptionsWithAuto(agent), agent);
+    var classSel = selectEl(modelClassOptions(st.modelClass || ""), st.modelClass || "");
+    var modelSel = selectEl(
+      agent ? modelOptionsWith(agent, st.model) : familyModelOptions(st.model),
+      st.model || ""
+    );
     var effortField = h("div", { class: "field" });
     var stepTimeoutInput = h("input", {
       class: "txt", type: "number", min: "1", placeholder: "workflow default",
       value: st.stepTimeoutSec ? String(Math.round(st.stepTimeoutSec / 60)) : ""
     });
     var promptTa = h("textarea", { class: "ta", text: st.prompt || "" });
+    var bindHint = h("div", { class: "ro", text: "" });
+
+    function refreshBindHint() {
+      var bits = [];
+      if (!agentSel.value && (modelSel.value || classSel.value)) {
+        bits.push("Auto-binds at run time to the best ready agent for " +
+          (classSel.value ? "class '" + classSel.value + "'" : "'" + modelSel.value + "'") +
+          " (reference agent preferred).");
+      }
+      if (classSel.value && modelSel.value) {
+        bits.push("modelClass wins when both are set only if model is cleared — prefer one.");
+      }
+      bindHint.textContent = bits.join(" ");
+      bindHint.style.display = bits.length ? "" : "none";
+    }
 
     function renderEffort() {
       clear(effortField);
+      if (!agentSel.value || !modelSel.value) { refs[st.id].effortSel = null; return; }
       var opts = effortOptions(agentSel.value, modelSel.value, st.effort);
       if (opts.length <= 1) { refs[st.id].effortSel = null; return; }
       effortField.appendChild(h("label", { text: "Effort" }));
@@ -3633,11 +3699,17 @@
       refs[st.id].effortSel = es;
     }
     agentSel.addEventListener("change", function () {
-      var a = agentById(agentSel.value);
-      fillOptions(modelSel, modelOptions(agentSel.value), a ? a.defaultModel : null);
+      if (agentSel.value) {
+        var a = agentById(agentSel.value);
+        fillOptions(modelSel, modelOptionsWith(agentSel.value, modelSel.value), a ? (modelSel.value || a.defaultModel) : modelSel.value);
+      } else {
+        fillOptions(modelSel, familyModelOptions(modelSel.value), modelSel.value);
+      }
       renderEffort();
+      refreshBindHint();
     });
-    modelSel.addEventListener("change", renderEffort);
+    modelSel.addEventListener("change", function () { renderEffort(); refreshBindHint(); });
+    classSel.addEventListener("change", refreshBindHint);
 
     var useAllBtn = h("button", {
       class: "btn small use-for-all",
@@ -3658,6 +3730,7 @@
     refs[st.id] = {
       agentSel: agentSel,
       modelSel: modelSel,
+      classSel: classSel,
       effortSel: null,
       promptTa: promptTa,
       stepTimeoutInput: stepTimeoutInput,
@@ -3666,9 +3739,12 @@
     };
     card.appendChild(h("div", { class: "row2" },
       field("Agent", agentSel), field("Model", modelSel), effortField));
+    card.appendChild(field("Model class", classSel, "Optional role class (thinker / implementer / simple / balanced). Leave empty to pin a concrete model."));
+    card.appendChild(bindHint);
     card.appendChild(field("Step timeout (min)", stepTimeoutInput, "Per-agent subprocess limit for this step."));
     card.appendChild(field("Prompt", promptTa));
     renderEffort();
+    refreshBindHint();
     return card;
   }
 

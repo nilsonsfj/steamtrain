@@ -35,6 +35,7 @@ export {
   artifactName,
   isAgentBackedStep,
   workflowAgentIds,
+  workflowNeedsAgentResolution,
   workflowLlmSteps,
   llmPricingSchema,
   MAX_STEPS,
@@ -415,6 +416,13 @@ export {
   formatReroutePlan,
   planAgentReroute,
 } from "./reroute";
+export {
+  type ResolveWorkflowBindingsOptions,
+  type ResolveWorkflowBindingsResult,
+  type StepBindingResolution,
+  resolveStepFailoverChain,
+  resolveWorkflowBindings,
+} from "./resolve-bindings";
 export {
   type RerunMode,
   type RerunPlan,

@@ -34,6 +34,25 @@ read, and global agent operations are unavailable.
 The endpoints that direct-inference `llm` steps call are configured the same
 way, under `apis` — see [API configuration](api-configuration.md).
 
+## Model classes
+
+Workflows may bind steps with `modelClass` (`thinker`, `implementer`, `simple`,
+`balanced`) instead of a concrete model. Override the preferred families in
+config:
+
+```json
+{
+  "modelClasses": {
+    "implementer": {
+      "preferred": ["composer-2.5", "claude-sonnet-5", "gpt-5.3-codex"]
+    }
+  }
+}
+```
+
+See [Model binding](model-binding.md) for aliases, reference agents, and
+runtime failover.
+
 ## Slash commands
 
 ```

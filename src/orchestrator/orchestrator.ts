@@ -17,6 +17,7 @@ import {
   createGitWorktreeManager,
   planAgentReroute,
   resolveStepTimeoutSec,
+  resolveWorkflowBindings,
   resolveWorkflowTimeoutSec,
   runWorkflow,
   timeoutMsFromSec,
@@ -173,7 +174,24 @@ export class Orchestrator {
     const valid = validateWorkflow(spec, this.config.loopMaxIterations);
     if (!valid.ok) return { ok: false, reason: `invalid workflow '${spec.name}': ${valid.error}` };
 
-    for (const agent of workflowAgentIds(spec)) {
+    const isReady = (agent: AgentInstanceId): boolean => {
+      const instance = resolveAgentInstance(this.config, agent);
+      if (!instance) return false;
+      const health = this.agentHealth(agent);
+      return health?.status === "ok";
+    };
+
+    // Materialize model-only / modelClass / fallback bindings (and remap
+    // unhealthy pinned agents onto equivalent offerings) before the doctor gate.
+    const bound = resolveWorkflowBindings(spec, { config: this.config, isReady });
+    if (!bound.ok) {
+      return {
+        ok: false,
+        reason: bound.stepId ? `${bound.error}` : bound.error,
+      };
+    }
+
+    for (const agent of workflowAgentIds(bound.spec)) {
       const instance = resolveAgentInstance(this.config, agent);
       if (!instance) {
         return { ok: false, reason: `${agent} is disabled or not configured` };

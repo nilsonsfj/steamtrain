@@ -107,9 +107,18 @@ execution behavior. **Examples:** [`workflow-examples.md`](workflow-examples.md)
 Runs one agent against one prompt. `processor` is an alias for `worker`.
 Existing no-`kind` steps are treated as workers.
 
-Required fields: `agent`, `model`, `prompt`.
+Required fields: `prompt`, plus a **model binding** in one of these forms:
 
-Optional fields: `cwd`, `env`, `extraArgs`, `effort`, `forEach`, `retry`,
+| Binding | Example | What happens |
+| --- | --- | --- |
+| `agent` + `model` | `"agent": "claude", "model": "claude-opus-4-8"` | Classic pin — runs exactly that pair. |
+| `model` only | `"model": "opus 4.8"` | Picks the best ready agent that provides that model (reference agent preferred). |
+| `modelClass` | `"modelClass": "implementer"` | Picks a family for the role class, then a ready agent. |
+| `agent` + `modelClass` | `"agent": "codex", "modelClass": "thinker"` | Resolves the class onto that agent's catalog. |
+
+Optional fields: `fallbackModels` (ordered failover queries tried when the
+primary agent is unavailable or a transient provider failure triggers model
+failover on retry), `cwd`, `env`, `extraArgs`, `effort`, `forEach`, `retry`,
 `maxCostUsd` (per-step USD budget for `forEach` fan-outs — see
 [Cost budgets](./cost-and-budgets.md)),
 `output` (see [Structured step outputs](#structured-step-outputs-output)),
@@ -120,6 +129,9 @@ guessing — see [Human in the loop](./human-in-the-loop.md#agent-clarifying-que
 `session` (continue an earlier step's agent conversation — see
 [Session continuity](#session-continuity-session)).
 
+See [Model binding](./model-binding.md) for aliases, reference agents, model
+classes, and runtime failover.
+
 If the resolved `cwd` is inside a git repository, the agent subprocess runs from
 a matching path in its own git worktree. The worktree starts at the current
 `HEAD` and includes a snapshot of tracked dirty changes plus untracked
@@ -127,6 +139,30 @@ non-ignored files. Ignored runtime entries are linked into the worktree, and the
 step result records the worktree cwd, root, branch, and linked ignored paths so
 agent-created changes can be inspected or merged later. Non-git directories run
 directly in the resolved `cwd`.
+
+```jsonc
+{
+  "id": "review-api",
+  "kind": "processor",
+  "model": "opus 4.8",
+  "fallbackModels": ["sonnet 5", "composer-2.5"],
+  "cwd": "../api",
+  "prompt": "Review {{input}}"
+}
+```
+
+Or bind by role class so the workflow stays portable across machines:
+
+```jsonc
+{
+  "id": "implement",
+  "kind": "worker",
+  "modelClass": "implementer",
+  "prompt": "Implement {{input}}"
+}
+```
+
+Classic agent+model pins still work:
 
 ```jsonc
 {

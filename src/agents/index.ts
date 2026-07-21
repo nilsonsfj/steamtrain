@@ -65,6 +65,43 @@ export {
   supportsEffort,
 } from "./models";
 export {
+  type ModelClassId,
+  type ModelClassDefinition,
+  MODEL_CLASS_IDS,
+  candidateFamiliesForClass,
+  isModelClassId,
+  modelClassById,
+  modelClasses,
+} from "./model-classes";
+export {
+  type ModelFamily,
+  type ModelFamilyId,
+  type ModelOffering,
+  AGENT_PREFERENCE_ORDER,
+  clearModelFamilyCacheForTests,
+  compactModelQuery,
+  familiesForClass,
+  familyForProviderModel,
+  findDirectCatalogMatches,
+  findModelFamily,
+  modelFamilies,
+  modelFamilyById,
+  nativeModelForProvider,
+  normalizeModelQuery,
+} from "./model-identity";
+export {
+  type ModelBindingRequest,
+  type ResolveModelBindingResult,
+  type ResolvedModelCandidate,
+  bindingRequestFromStep,
+  describeModelClass,
+  listModelClasses,
+  listModelFamilyMeta,
+  materializeStepBinding,
+  needsModelResolution,
+  resolveModelBinding,
+} from "./model-resolve";
+export {
   clearCodexVariantCacheForTests,
   parseCodexDebugModels,
   setCodexVariantCacheForTests,
