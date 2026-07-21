@@ -4,6 +4,8 @@ export {
   resolveBinary,
   checkAgent,
   runDoctor,
+  killDoctorVersionChecks,
+  doctorVersionCheckPids,
 } from "./doctor";
 export {
   type ApiDoctorStatus,
