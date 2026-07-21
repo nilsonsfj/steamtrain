@@ -3,6 +3,7 @@ import type { AgentAdapter } from "./adapter";
 import { AmpAdapter } from "./amp";
 import { ClaudeCodeAdapter } from "./claude";
 import { CodexAdapter } from "./codex";
+import { CursorAgentAdapter } from "./cursor";
 import { KiroCliAdapter } from "./kiro";
 import { OpenCodeAdapter } from "./opencode";
 
@@ -19,6 +20,12 @@ export {
 export { AmpAdapter, AMP_MODELS, buildAmpExecArgs, createAmpMapper } from "./amp";
 export { ClaudeCodeAdapter, CLAUDE_MODELS, createClaudeMapper } from "./claude";
 export { CodexAdapter, CODEX_MODELS, buildCodexExecArgs, createCodexMapper } from "./codex";
+export {
+  CursorAgentAdapter,
+  CURSOR_MODELS,
+  buildCursorRunArgs,
+  createCursorMapper,
+} from "./cursor";
 export {
   DEFAULT_AGENT_BINARY,
   defaultAgentInstance,
@@ -42,6 +49,7 @@ export {
   modelsForAgent,
   refreshAgentCatalogCaches,
   refreshCodexVariantCache,
+  refreshCursorVariantCache,
   refreshOpencodeVariantCache,
   supportsEffort,
 } from "./models";
@@ -50,6 +58,11 @@ export {
   parseCodexDebugModels,
   setCodexVariantCacheForTests,
 } from "./codex-variants";
+export {
+  clearCursorVariantCacheForTests,
+  parseCursorListModels,
+  setCursorVariantCacheForTests,
+} from "./cursor-variants";
 export { fallbackCodexEfforts } from "./codex-efforts-fallback";
 export {
   clearOpencodeVariantCacheForTests,
@@ -81,5 +94,7 @@ export function createAdapter(id: AgentProviderId, binary?: string): AgentAdapte
       return new AmpAdapter(binary);
     case "kiro":
       return new KiroCliAdapter(binary);
+    case "cursor":
+      return new CursorAgentAdapter(binary);
   }
 }

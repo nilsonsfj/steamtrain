@@ -7,6 +7,7 @@ const AGENT_PROVIDER_IDS: readonly AgentProviderId[] = [
   "codex",
   "amp",
   "kiro",
+  "cursor",
 ];
 
 export const DEFAULT_AGENT_BINARY: Record<AgentProviderId, string> = {
@@ -15,6 +16,7 @@ export const DEFAULT_AGENT_BINARY: Record<AgentProviderId, string> = {
   codex: "codex",
   amp: "amp",
   kiro: "kiro-cli",
+  cursor: "agent",
 };
 
 export interface ResolvedAgentInstance {

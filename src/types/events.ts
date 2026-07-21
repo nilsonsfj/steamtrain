@@ -6,7 +6,7 @@
  * shapes, so adding a new agent never touches the UI.
  */
 
-export type AgentProviderId = "claude" | "opencode" | "codex" | "amp" | "kiro";
+export type AgentProviderId = "claude" | "opencode" | "codex" | "amp" | "kiro" | "cursor";
 
 /** Built-in provider identity used by adapters and binary config. */
 export type AgentId = AgentProviderId;
