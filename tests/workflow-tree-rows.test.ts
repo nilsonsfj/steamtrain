@@ -111,4 +111,10 @@ describe("findTreeRowIndex", () => {
       );
     }
   });
+
+  it("returns -1 when the flat index is not present", () => {
+    const phase = phaseWithFanOut(3, 0);
+    const rows = buildWorkflowTreeRows([phase], 0);
+    expect(findTreeRowIndex(rows, 999)).toBe(-1);
+  });
 });

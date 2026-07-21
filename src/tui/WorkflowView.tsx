@@ -232,7 +232,7 @@ export function WorkflowView({
     layout = plan();
   }
 
-  const selectedRowIndex = findTreeRowIndex(rows, clampedIndex);
+  const selectedRowIndex = Math.max(0, findTreeRowIndex(rows, clampedIndex));
   const rowWindow = selectVisibleWindow(rows, selectedRowIndex, layout.listBudget);
 
   if (preferArrival && arrival) {
@@ -647,9 +647,9 @@ function CollapsedFanoutRow({
   idColWidth: number;
   kindColWidth: number;
 }) {
-  // Keep column alignment with StepRow: glyph + id + kind, then a calm summary
-  // so a 30-way pending fan-out reads as one row instead of a wall.
-  const id = truncate(`↳ ${row.firstStepId}…${row.lastStepId}`, Math.max(idColWidth, 18));
+  // Same id/kind column widths as StepRow so the tree stays aligned when a
+  // pending fan-out collapses into one summary.
+  const id = truncate(`↳ ${row.firstStepId}…${row.lastStepId}`, idColWidth);
   const kindLabel = BLOCK_LABEL.worker;
   return (
     <Text wrap="truncate-end">
@@ -658,7 +658,7 @@ function CollapsedFanoutRow({
         ·{" "}
       </Text>
       <Text color="gray" dimColor>
-        {id.padEnd(Math.max(idColWidth, 18))}{" "}
+        {id.padEnd(idColWidth)}{" "}
       </Text>
       <Text color={BLOCK_COLOR.worker} dimColor>
         {kindLabel.padEnd(kindColWidth)}

@@ -32,7 +32,10 @@ const KEY_HINTS: readonly KeyHint[] = [
   },
   { keys: "a / r", action: "approve / reject a pending human checkpoint" },
   { keys: "a", action: "answer a pending human-input request (human step / agent question)" },
-  { keys: "PgUp/PgDn", action: "page the step list · scroll a step's output in drill-in" },
+  {
+    keys: "PgUp/PgDn",
+    action: "page the step list · scroll output in drill-in (Shift+↑/↓ one line)",
+  },
   { keys: "Esc", action: "back / cancel · Ctrl+Q cancels (or detaches an attached run)" },
   { keys: "Ctrl+C", action: "quit" },
 ];

@@ -134,6 +134,7 @@ export function buildWorkflowTreeRows(
 /**
  * Map a flat step index onto a row index in the (possibly collapsed) tree.
  * Collapsed summaries that cover the selection count as that step's row.
+ * Returns -1 when nothing matches (caller should fall back).
  */
 export function findTreeRowIndex(rows: readonly WorkflowTreeRow[], flatIndex: number): number {
   for (let i = 0; i < rows.length; i += 1) {
@@ -147,7 +148,7 @@ export function findTreeRowIndex(rows: readonly WorkflowTreeRow[], flatIndex: nu
       return i;
     }
   }
-  return 0;
+  return -1;
 }
 
 function pushCollapsed(
