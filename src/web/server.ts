@@ -2380,6 +2380,10 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
     apis: [] as ApiDoctorResult[],
     error: null as string | null,
   };
+  // Single-flight latches so overlapping on-demand rechecks coalesce (see the
+  // reprobe hooks below) instead of spawning redundant concurrent probe rounds.
+  let reprobeDoctorInFlight: Promise<DoctorResult[]> | null = null;
+  let reprobeApiInFlight: Promise<ApiDoctorResult[]> | null = null;
 
   const cacheStore = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
   const historyStore = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
@@ -2424,19 +2428,40 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
     },
     // On-demand re-probe for the setup panel's Recheck: same work the startup
     // and config-save paths do (resolve binaries, refresh catalog annotations),
-    // persisted into the live snapshot so subsequent GETs see it too.
-    reprobeDoctor: async () => {
-      const results = await runDoctor(liveConfig);
-      doctorState.results = results;
-      doctorState.error = null;
-      orchestrator.setDoctor(results);
-      await refreshAgentCatalogCaches(liveConfig, results);
-      return results;
+    // persisted into the live snapshot so subsequent GETs see it too. Each is
+    // single-flighted: overlapping rechecks (a double-click, or a recheck racing
+    // a config-save) coalesce onto the in-flight probe instead of spawning a
+    // second `--version` storm and letting the slower write clobber the newer.
+    reprobeDoctor: () => {
+      if (!reprobeDoctorInFlight) {
+        reprobeDoctorInFlight = (async () => {
+          try {
+            const results = await runDoctor(liveConfig);
+            doctorState.results = results;
+            doctorState.error = null;
+            orchestrator.setDoctor(results);
+            await refreshAgentCatalogCaches(liveConfig, results);
+            return results;
+          } finally {
+            reprobeDoctorInFlight = null;
+          }
+        })();
+      }
+      return reprobeDoctorInFlight;
     },
-    reprobeApiDoctor: async () => {
-      const apis = await runApiDoctor(liveConfig);
-      doctorState.apis = apis;
-      return apis;
+    reprobeApiDoctor: () => {
+      if (!reprobeApiInFlight) {
+        reprobeApiInFlight = (async () => {
+          try {
+            const apis = await runApiDoctor(liveConfig);
+            doctorState.apis = apis;
+            return apis;
+          } finally {
+            reprobeApiInFlight = null;
+          }
+        })();
+      }
+      return reprobeApiInFlight;
     },
     configLabel: options.configLabel,
     bindHost: host,
