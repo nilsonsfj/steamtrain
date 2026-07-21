@@ -21,6 +21,7 @@ describe("buildKiroExecArgs", () => {
       "never",
       "--model",
       "sonnet",
+      "--",
       "do a thing",
     ]);
     expect(args).not.toContain("--print");
@@ -39,13 +40,14 @@ describe("buildKiroExecArgs", () => {
       "opus",
       "--effort",
       "high",
+      "--",
       "go",
     ]);
   });
 
-  it("appends extraArgs before the prompt (resume not wired yet)", () => {
+  it("appends extraArgs before -- / prompt (resume not wired yet)", () => {
     const args = buildKiroExecArgs({
-      prompt: "continue",
+      prompt: "--looks-like-flag",
       model: "sonnet",
       effort: "max",
       resumeSessionId: "sess-abc",
@@ -63,7 +65,8 @@ describe("buildKiroExecArgs", () => {
       "max",
       "--agent",
       "reviewer",
-      "continue",
+      "--",
+      "--looks-like-flag",
     ]);
     expect(args).not.toContain("--resume-id");
   });
@@ -198,8 +201,8 @@ describe("runKiroProcess", () => {
     expect((exitEvents[0] as { message: string }).message).toContain("unexpected argument '--print'");
   });
 
-  it("errors when stdout is empty on success", async () => {
-    const events = await collect(
+  it("errors when stdout is empty or whitespace-only on success", async () => {
+    const empty = await collect(
       runKiroProcess({
         id: "kiro",
         binary: "kiro-cli",
@@ -217,11 +220,37 @@ describe("runKiroProcess", () => {
         },
       }),
     );
-    expect(events).toEqual([
+    expect(empty).toEqual([
       expect.objectContaining({
         kind: "error",
         message: expect.stringContaining("produced no output"),
       }),
     ]);
+
+    const whitespaceOnly = await collect(
+      runKiroProcess({
+        id: "kiro",
+        binary: "kiro-cli",
+        args: [],
+        opts: { prompt: "hi", model: "sonnet" },
+        runLines: async function* () {
+          yield { kind: "line", line: "" };
+          yield { kind: "line", line: "   " };
+          yield {
+            kind: "exit",
+            code: 0,
+            signal: null,
+            timedOut: false,
+            stderr: "",
+            sawStdout: true,
+          };
+        },
+      }),
+    );
+    expect(whitespaceOnly.some((e) => e.kind === "text_delta")).toBe(true);
+    expect(whitespaceOnly.at(-1)).toMatchObject({
+      kind: "error",
+      message: expect.stringContaining("produced no output"),
+    });
   });
 });

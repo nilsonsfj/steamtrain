@@ -33,6 +33,7 @@ export const KIRO_MODELS: readonly AgentModel[] = [
 export function buildKiroExecArgs(opts: AgentRunOptions): string[] {
   // No session resume yet: headless mode does not expose a session id, and
   // this adapter does not set supportsResume (see docs/workflow-spec.md).
+  // `--` keeps prompts that start with `-` from being parsed as CLI flags.
   return [
     "chat",
     "--no-interactive",
@@ -43,6 +44,7 @@ export function buildKiroExecArgs(opts: AgentRunOptions): string[] {
     opts.model,
     ...(opts.effort ? ["--effort", opts.effort] : []),
     ...(opts.extraArgs ?? []),
+    "--",
     opts.prompt,
   ];
 }
@@ -67,7 +69,6 @@ export async function* runKiroProcess(params: RunKiroProcessParams): AsyncGenera
   const id = opts.agentId ?? params.id;
   const startedAt = Date.now();
   const textParts: string[] = [];
-  let sawStdout = false;
   const runLines = params.runLines ?? runProcessLines;
 
   const processOpts: ProcessRunOptions = {
@@ -82,7 +83,6 @@ export async function* runKiroProcess(params: RunKiroProcessParams): AsyncGenera
 
   for await (const item of runLines(processOpts)) {
     if (item.kind === "line") {
-      sawStdout = true;
       textParts.push(item.line);
       yield { kind: "text_delta", agent: id, ts: Date.now(), text: `${item.line}\n` };
       continue;
@@ -96,7 +96,6 @@ export async function* runKiroProcess(params: RunKiroProcessParams): AsyncGenera
       const ts = Date.now();
       const stderr = item.stderr.trim();
       const stderrTail = stderr ? `: ${firstLine(stderr)}` : "";
-      if (item.sawStdout) sawStdout = true;
 
       if (item.spawnError) {
         yield {
@@ -133,7 +132,7 @@ export async function* runKiroProcess(params: RunKiroProcessParams): AsyncGenera
       }
 
       const text = textParts.join("\n").trim();
-      if (!text && !sawStdout) {
+      if (!text) {
         yield {
           kind: "error",
           agent: id,
