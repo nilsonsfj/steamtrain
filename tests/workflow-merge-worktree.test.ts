@@ -472,4 +472,61 @@ describe("mutually exclusive when-gated delivery (mainline's deliver-pr / delive
     expect(report).toContain("delivery/branch-alt");
     expect(report).not.toContain("pr-alt");
   });
+
+  it('runs only the pr alternative on the default deliver input ("pr")', async () => {
+    const { repo, worktrees } = await makeRepo();
+    const spec: WorkflowSpec = {
+      name: "delivery-choice-default",
+      inputs: { deliver: { default: "pr" } },
+      phases: [
+        {
+          id: "work",
+          title: "Work",
+          steps: [{ id: "work", kind: "command", cmd: "echo done > out.txt" }],
+        },
+        {
+          id: "deliver",
+          title: "Deliver",
+          steps: [
+            {
+              id: "deliver-pr",
+              kind: "merge",
+              dependsOn: ["work"],
+              from: ["work"],
+              mode: "branch",
+              branch: "delivery/pr-alt",
+              when: { value: "{{inputs.deliver}}", equals: "pr" },
+            },
+            {
+              id: "deliver-branch",
+              kind: "merge",
+              dependsOn: ["work"],
+              from: ["work"],
+              mode: "branch",
+              branch: "delivery/branch-alt",
+              when: { value: "{{inputs.deliver}}", equals: "pr", not: true },
+            },
+          ],
+        },
+      ],
+    };
+    expect(validateWorkflow(spec).ok).toBe(true);
+    // No inputs supplied: the declared default ("pr") applies.
+    const events = await runToEvents(
+      spec,
+      repo,
+      worktrees,
+      agentlessDeps(repo, {
+        agentWorkspace: createGitWorktreeManager({ baseDir: worktrees, runId: "delivery-default" }),
+      }),
+      { deliver: "pr" },
+    );
+    const results = doneResults(events);
+    expect(workflowOk(events)).toBe(true);
+    expect(results.get("deliver-branch")?.skipped).toBe(true);
+    expect(results.get("deliver-pr")?.ok).toBe(true);
+    expect(results.get("deliver-pr")?.skipped).toBeUndefined();
+    expect(await git(repo, "rev-parse", "--verify", "delivery/pr-alt")).toBeTruthy();
+    await expect(git(repo, "rev-parse", "--verify", "delivery/branch-alt")).rejects.toThrow();
+  });
 });
