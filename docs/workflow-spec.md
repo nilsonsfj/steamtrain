@@ -798,10 +798,11 @@ step's actual agent conversation:
 
 The step's prompt is then delivered into the source step's recorded CLI
 session (`claude --resume <sessionId>`, `opencode run --session <sessionId>`,
-`codex exec resume <sessionId>`), so the agent keeps everything the source
-conversation already established — files it read, decisions it made, context
-it never wrote down. Steps without the field keep today's clean-room behavior,
-which is often what you want for independent critique.
+`codex exec resume <sessionId>`, `agent --resume <sessionId>`), so the agent
+keeps everything the source conversation already established — files it read,
+decisions it made, context it never wrote down. Steps without the field keep
+today's clean-room behavior, which is often what you want for independent
+critique.
 
 ```jsonc
 { "id": "plan", "steps": [
@@ -847,10 +848,17 @@ Semantics:
   Self-continuation (`continue:<ownId>`) additionally requires the step to
   sit inside a loop region.
 - The step **fails loudly** — rather than silently degrading to an empty
-  conversation — when the agent's adapter cannot resume sessions (`claude`,
-  `opencode`, and `codex` can; `amp` and `kiro` currently cannot) or when the
-  source recorded no session id. Prompts written for a continued conversation
-  are meaningless in a fresh one.
+  conversation — when the agent's adapter cannot resume sessions (see the
+  resume table below) or when the source recorded no session id. Prompts written
+  for a continued conversation are meaningless in a fresh one.
+
+| provider | headless `session: continue:…` | interactive takeover |
+| --- | --- | --- |
+| `claude` | `claude --resume <sessionId>` | `--resume <sessionId>` |
+| `opencode` | `opencode run --session <sessionId>` | fresh session in worktree |
+| `codex` | `codex exec resume <sessionId>` | fresh session in worktree |
+| `cursor` | `agent --resume <sessionId>` | `--resume <sessionId>` |
+| `amp`, `kiro` | not supported | fresh session in worktree |
 - Session ids land in run history and in the step cache: `sessionId` is what
   the step recorded, `resumedSessionId` is the lineage it continued. On a
   resumed run a cached source replays with its recorded session, and the

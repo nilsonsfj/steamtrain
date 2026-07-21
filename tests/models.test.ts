@@ -217,3 +217,21 @@ describe("effortForModelChange", () => {
     expect(effortForModelChange("claude", "claude-haiku-4-5", "high")).toBeUndefined();
   });
 });
+
+describe("cursor models", () => {
+  it("exposes cursor models with composer-2.5 as the default", () => {
+    expect(modelIdsForAgent("cursor")).toContain("composer-2.5");
+    expect(modelIdsForAgent("cursor")).toContain("auto");
+    expect(defaultModelForAgent("cursor")).toBe("composer-2.5");
+  });
+
+  it("supports bracket efforts for cursor when model has no effort=", () => {
+    expect(effortsForModel("cursor", "composer-2.5")).toEqual(["low", "medium", "high", "xhigh"]);
+    expect(effortsForModel("cursor", "composer-2.5[effort=high]")).toEqual([]);
+  });
+
+  it("keeps effort when switching cursor models only if still supported", () => {
+    expect(effortForModelChange("cursor", "composer-2.5", "high")).toBe("high");
+    expect(effortForModelChange("cursor", "composer-2.5[effort=high]", "high")).toBeUndefined();
+  });
+});

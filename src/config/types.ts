@@ -105,7 +105,7 @@ const legacyTimeoutFields = {
 const nonEmptyString = z
   .string()
   .refine((s) => s.trim().length > 0, "must not be empty or whitespace");
-const agentProviderId = z.enum(["claude", "opencode", "codex", "amp", "kiro"]);
+const agentProviderId = z.enum(["claude", "opencode", "codex", "amp", "kiro", "cursor"]);
 const apiProviderId = z.enum(["anthropic", "openai"]);
 const instanceIdSchema = z
   .string()
@@ -167,6 +167,7 @@ export const configFileSchema = z
         codex: nonEmptyString.optional(),
         amp: nonEmptyString.optional(),
         kiro: nonEmptyString.optional(),
+        cursor: nonEmptyString.optional(),
       })
       .partial()
       .optional(),

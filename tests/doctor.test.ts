@@ -37,6 +37,20 @@ describe("checkAgent kiro", () => {
   });
 });
 
+describe("checkAgent cursor", () => {
+  it("reports missing binary with an install hint", async () => {
+    const result = await checkAgent("cursor", "__steamtrain_missing_cursor__", {
+      provider: "cursor",
+    });
+    expect(result).toMatchObject({
+      agent: "cursor",
+      status: "binary_missing",
+      binary: "__steamtrain_missing_cursor__",
+    });
+    expect(result.detail).toContain("cursor.com/install");
+  });
+});
+
 describe("checkAgent ok", () => {
   it("reports ok status for a reachable binary", async () => {
     const result = await checkAgent("claude", "node", { provider: "claude" });

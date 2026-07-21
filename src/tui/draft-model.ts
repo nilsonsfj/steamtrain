@@ -8,7 +8,7 @@ import {
 } from "../agents";
 import type { SteamtrainConfig } from "../config/types";
 import type { DoctorResult } from "../doctor";
-import type { AgentInstanceId } from "../types/events";
+import type { AgentInstanceId, AgentProviderId } from "../types/events";
 
 /** Agent + model (+ optional effort) used to draft (LLM-author) a new workflow. */
 export interface DraftTarget {
@@ -22,7 +22,14 @@ export interface DraftTarget {
  * models, no paid credentials), then Claude, then Codex. Shared by the auto
  * resolver and the single-token model lookup so both agree on precedence.
  */
-const DRAFT_AGENT_ORDER = ["opencode", "claude", "codex", "amp", "kiro"] as const;
+const DRAFT_AGENT_ORDER: readonly AgentProviderId[] = [
+  "opencode",
+  "claude",
+  "codex",
+  "amp",
+  "kiro",
+  "cursor",
+];
 
 const draftOrderCache = new WeakMap<SteamtrainConfig, AgentInstanceId[]>();
 
