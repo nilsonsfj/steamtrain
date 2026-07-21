@@ -603,6 +603,7 @@ var SteamtrainReducer = (() => {
     if (kind === "human") return `Conductor needs an answer at '${ev.stepId}'.`;
     if (kind === "command") return `Car '${ev.stepId}' left the station.`;
     if (kind === "llm") return `Car '${ev.stepId}' called the model.`;
+    if (kind === "issues") return `Reporter '${ev.stepId}' is filing findings.`;
     if (ev.agent) return `Car '${ev.stepId}' (${ev.agent}) is underway.`;
     return `Car '${ev.stepId}' is underway.`;
   }

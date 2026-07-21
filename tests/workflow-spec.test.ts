@@ -432,4 +432,120 @@ describe("workflow (sub-workflow) step", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain("workflow");
   });
+
+  it("accepts forEach/params/worktreeStep fields", () => {
+    const spec: WorkflowSpec = {
+      name: "parent",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "source", kind: "distributor", items: ["a", "b"] }],
+        },
+        {
+          id: "p2",
+          title: "P2",
+          steps: [
+            {
+              id: "call",
+              kind: "workflow",
+              workflow: "child",
+              forEach: "steps.source.items",
+              params: { coderModel: "{{item}}" },
+              worktreeStep: "impl",
+              dependsOn: ["source"],
+            } as never,
+          ],
+        },
+      ],
+    };
+    const result = validateWorkflow(spec);
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects a forEach referencing a non-distributor/llm source", () => {
+    const spec: WorkflowSpec = {
+      name: "parent",
+      phases: [
+        { id: "p1", title: "P1", steps: [{ id: "cmd", kind: "command", cmd: "true" }] },
+        {
+          id: "p2",
+          title: "P2",
+          steps: [
+            {
+              id: "call",
+              kind: "workflow",
+              workflow: "child",
+              forEach: "steps.cmd.items",
+              dependsOn: ["cmd"],
+            } as never,
+          ],
+        },
+      ],
+    };
+    const result = validateWorkflow(spec);
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/must be a distributor/);
+  });
+
+  it("accepts a non-forEach workflow step with worktreeStep as a workspace source", () => {
+    const spec: WorkflowSpec = {
+      name: "parent",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            {
+              id: "call",
+              kind: "workflow",
+              workflow: "child",
+              worktreeStep: "impl",
+            } as never,
+          ],
+        },
+        {
+          id: "p2",
+          title: "P2",
+          steps: [{ id: "next", kind: "command", cmd: "echo hi", workspace: "attach:call" }],
+        },
+      ],
+    };
+    const result = validateWorkflow(spec);
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects a forEach workflow step with worktreeStep as a workspace source (one worktree per item)", () => {
+    const spec: WorkflowSpec = {
+      name: "parent",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "source", kind: "distributor", items: ["a", "b"] }],
+        },
+        {
+          id: "p2",
+          title: "P2",
+          steps: [
+            {
+              id: "call",
+              kind: "workflow",
+              workflow: "child",
+              forEach: "steps.source.items",
+              worktreeStep: "impl",
+              dependsOn: ["source"],
+            } as never,
+          ],
+        },
+        {
+          id: "p3",
+          title: "P3",
+          steps: [{ id: "next", kind: "command", cmd: "echo hi", workspace: "attach:call" }],
+        },
+      ],
+    };
+    const result = validateWorkflow(spec);
+    expect(result.ok).toBe(false);
+  });
 });

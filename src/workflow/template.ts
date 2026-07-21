@@ -19,7 +19,13 @@
  */
 
 import { jsonFieldText, jsonPathGet } from "./structured";
-import type { GateCondition, WorkflowItem, WorkflowSpec, WorkflowStep } from "./types";
+import type {
+  GateCondition,
+  WorkflowCallStep,
+  WorkflowItem,
+  WorkflowSpec,
+  WorkflowStep,
+} from "./types";
 import { workflowStepKind } from "./types";
 
 export interface TemplateContext {
@@ -131,7 +137,17 @@ function hasArtifacts(step: WorkflowStep): boolean {
 
 function hasWorkspace(step: WorkflowStep): boolean {
   const kind = workflowStepKind(step);
-  return kind === "worker" || kind === "processor" || kind === "command";
+  if (kind === "worker" || kind === "processor" || kind === "command") return true;
+  // A merge step only leaves a worktree behind in `mode: "worktree"` —
+  // apply/branch/pr deliver the merge and record no worktree.
+  if (kind === "merge" && (step as { mode?: string }).mode === "worktree") return true;
+  // A `workflow` call step with `worktreeStep` (and no `forEach`) surfaces a
+  // named child step's worktree as its own — see `WorkflowCallStep.worktreeStep`.
+  if (kind === "workflow") {
+    const ws = step as WorkflowCallStep;
+    return Boolean(ws.worktreeStep) && !ws.forEach;
+  }
+  return false;
 }
 
 function extractRefs(text: string | undefined): string[] {
@@ -161,6 +177,7 @@ function extractRefs(text: string | undefined): string[] {
 /** Scan condition text fields for template refs. `condition.step` is intentionally skipped — it's a plain step id, not a template string. */
 function scanConditionRefs(condition: GateCondition | undefined, refs: string[]): void {
   if (!condition) return;
+  if (condition.value) refs.push(...extractRefs(condition.value));
   if (condition.contains) refs.push(...extractRefs(condition.contains));
   if (condition.equals) refs.push(...extractRefs(condition.equals));
   if (condition.matches) refs.push(...extractRefs(condition.matches));
@@ -194,9 +211,25 @@ function stepRefs(step: WorkflowStep): string[] {
   if (kind === "command" && "cmd" in step && typeof step.cmd === "string") {
     refs.push(...extractRefs(step.cmd));
   }
+  if (kind === "issues") {
+    const is = step as { mode?: string; titlePrefix?: string };
+    if (is.mode) refs.push(...extractRefs(is.mode));
+    if (is.titlePrefix) refs.push(...extractRefs(is.titlePrefix));
+  }
   if (kind === "workflow" && "input" in step && typeof step.input === "string") {
     refs.push(...extractRefs(step.input));
   }
+  if (kind === "workflow") {
+    const ws = step as WorkflowCallStep;
+    if (ws.params) {
+      for (const value of Object.values(ws.params)) refs.push(...extractRefs(value));
+    }
+  }
+  // Templated model/effort (building block 5): scan like any other renderable
+  // field so unknown step refs / undeclared inputs surface at spec-validate
+  // time instead of silently rendering empty at run time.
+  if ("model" in step && typeof step.model === "string") refs.push(...extractRefs(step.model));
+  if ("effort" in step && typeof step.effort === "string") refs.push(...extractRefs(step.effort));
 
   return refs;
 }
@@ -246,6 +279,7 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
         (step.kind === "worker" ||
           step.kind === "processor" ||
           step.kind === "llm" ||
+          step.kind === "workflow" ||
           !step.kind) &&
         "forEach" in step &&
         step.forEach
@@ -329,7 +363,7 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
             const refStep = findStep(spec, refId);
             if (refStep && !hasWorkspace(refStep)) {
               warnings.push(
-                `step '${step.id}' references '${refId}.worktree.${worktreeMatch[2]}' but '${refId}' does not have workspace isolation (only worker, processor, and command steps have worktrees)`,
+                `step '${step.id}' references '${refId}.worktree.${worktreeMatch[2]}' but '${refId}' does not have workspace isolation (only worker, processor, and command steps — or a merge step with mode "worktree" — have worktrees)`,
               );
             }
           }

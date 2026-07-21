@@ -66,6 +66,14 @@ checkout is only ever touched by a pre-checked, all-or-nothing `git apply`.
     landed or explicitly discarded;
   - `steamtrain/merged/*` branches are deliverables, never GC targets;
   - `--dry-run` previews; fully-pruned recorded runs get `prunedAt` stamped.
+  - `workspace: "attach:<stepId>"` steps don't allocate a worktree of their
+    own — they run inside the source step's, so GC only ever sees ONE entry
+    per attach group (the source's), not one per attacher. A `mode:
+    "worktree"` merge step DOES allocate its own kept worktree (same base
+    directory and naming convention as any other step's), so it shows up as
+    its own discoverable GC entry — dirty state / unreachable branch commits
+    protect it exactly like an agent step's worktree until it's harvested or
+    explicitly pruned.
 
 ### 2. Merge failure was a dead end
 

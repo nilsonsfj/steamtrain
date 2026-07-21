@@ -44,6 +44,9 @@ function stepNeedsResolve(
   if (!isAgentBackedStep(step)) return false;
   if (typeof step.modelClass === "string") return true;
   if (step.fallbackModels && step.fallbackModels.length > 0) return true;
+  // Templated `model` values (building block 5) must render at execution time
+  // before family resolution. Leave them as-authored here.
+  if (typeof step.model === "string" && /\{\{[^{}]+\}\}/.test(step.model)) return false;
   if (typeof step.agent !== "string") return true;
   if (typeof step.model !== "string") return true;
   if (!preservePinned) return true;

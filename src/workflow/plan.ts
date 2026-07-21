@@ -62,8 +62,10 @@ export interface PlanStep {
   workflowName?: string;
   /** Merge mode for merge steps. */
   mergeMode?: string;
-  /** Workspace inheritance source. */
+  /** Workspace inherit/attach source. */
   workspaceSource?: string;
+  /** Whether `workspaceSource` is an `inherit` or `attach` reference. */
+  workspaceMode?: "inherit" | "attach";
   /** Declared artifact paths. */
   artifacts?: string[];
 }
@@ -140,6 +142,8 @@ function stepIsDeterministic(step: WorkflowStep): boolean {
   if (kind === "consolidator" && !isAgentBackedStep(step)) return true;
   if (kind === "distributor" && !isAgentBackedStep(step)) return true;
   if (kind === "merge") return true;
+  // Agentless, costless, no LLM in the loop — same category as command/merge.
+  if (kind === "issues") return true;
   // workflow steps invoke child workflows which may contain agent-backed steps,
   // so they are NOT deterministic — treat them as delegated.
   return false;
@@ -275,9 +279,13 @@ export function planWorkflow(
 
       // Workspace source.
       let workspaceSource: string | undefined;
+      let workspaceMode: "inherit" | "attach" | undefined;
       if ("workspace" in step && typeof step.workspace === "string") {
-        const m = /^inherit:(.+)$/.exec(step.workspace);
-        if (m) workspaceSource = m[1];
+        const m = /^(inherit|attach):(.+)$/.exec(step.workspace);
+        if (m) {
+          workspaceMode = m[1] as "inherit" | "attach";
+          workspaceSource = m[2];
+        }
       }
 
       // Artifacts.
@@ -324,6 +332,7 @@ export function planWorkflow(
         workflowName: kind === "workflow" ? (step as { workflow?: string }).workflow : undefined,
         mergeMode,
         workspaceSource,
+        workspaceMode,
         artifacts,
       });
     }

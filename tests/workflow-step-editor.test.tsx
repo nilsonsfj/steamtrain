@@ -19,9 +19,9 @@ import {
 } from "../src/tui/workflow-step-editor";
 import type { WorkflowStep } from "../src/workflow";
 
-const ESC = "";
-const RIGHT = "[C";
-const DOWN = "[B";
+const ESC = "\u001b";
+const RIGHT = "\u001b[C";
+const DOWN = "\u001b[B";
 const CR = "\r";
 
 const CONFIG: SteamtrainConfig = {};

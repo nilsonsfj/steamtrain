@@ -263,7 +263,15 @@ const reviewLoop: WorkflowSpec = {
           agent: "opencode",
           model: FREE.mimo,
           dependsOn: ["impl"],
-          workspace: "inherit:impl",
+          // `attach` (not `inherit`) — review runs INSIDE impl's own worktree
+          // rather than a copy of it. This is what makes the loop converge:
+          // with `inherit`, every iteration's review step forks a FRESH copy
+          // of impl's original (pre-fix) state, so iteration 2's review would
+          // never see iteration 1's fix — the loop could run forever without
+          // ever observing progress. With `attach`, review/fix/the next
+          // review all share the one worktree, so each pass sees the previous
+          // pass's edits.
+          workspace: "attach:impl",
           prompt:
             "Review ONLY the changes you can see in this worktree (diff from the base commit). Ignore pre-existing code — focus on issues in the new/changed code. If there are NO issues, reply with the single word DONE. Otherwise list each issue with file:line and a short description.",
         },
@@ -279,7 +287,11 @@ const reviewLoop: WorkflowSpec = {
           agent: "opencode",
           model: FREE.mimo,
           dependsOn: ["review"],
-          workspace: "inherit:review",
+          // Also attach:impl (not attach:review / inherit:review) — impl is
+          // the one worktree the whole loop shares. fix's dependsOn on review
+          // still orders it after review; attach only says which worktree to
+          // run inside.
+          workspace: "attach:impl",
           prompt:
             "Fix every issue listed below. Apply the minimal fix for each — don't refactor unrelated code. Summarize what you changed.\n{{steps.review.output}}",
         },
@@ -310,10 +322,10 @@ const reviewLoop: WorkflowSpec = {
       title: "Merge",
       steps: [
         {
-          // `from` must point to the TAIL of the inheritance chain only.
-          // fix inherits review which inherits impl, so fix's worktree
-          // already contains the full chain. Including impl would cause
-          // overlapping git merges and content conflicts.
+          // review and fix both attach:impl, so all three share ONE
+          // worktree (impl's). `from` can name any of them — merge dedupes
+          // sources by worktree root — but naming the tail (fix) reads as
+          // "the final state of the shared worktree".
           id: "merge",
           kind: "merge",
           dependsOn: ["loop-gate"],
@@ -545,6 +557,617 @@ const quickTriage: WorkflowSpec = {
   ],
 };
 
+/**
+ * The per-stream pipeline: implement a charter in its own worktree, then
+ * loop review → fix → test until the reviewer is clean AND the tests pass.
+ * Also useful standalone — run it directly with `{{input}}` as a plain task
+ * description.
+ *
+ * All steps `attach` to `implement`'s worktree (never `inherit`), so every
+ * iteration of the loop actually sees the previous iteration's fixes — see
+ * the `review-loop` comments above for why that matters.
+ *
+ * `reviewerEffort` defaults to `""`: an empty rendered `effort` is treated as
+ * "omit the flag" (building block 5), not a failure — only an empty rendered
+ * `model` fails the step. So callers on agents/models with no effort concept
+ * can leave it blank.
+ *
+ * `testCmd` defaults to `"true"` — the POSIX no-op that exits 0 — so the
+ * workflow validates and runs keyless out of the box with no test suite
+ * wired up; real users override it with `--param testCmd="npm test"` (or
+ * whatever the repo uses).
+ *
+ * The `test` step's `cmd` embeds `{{inputs.testCmd}}`, which the template
+ * linter flags as a command step interpolating template data into the shell
+ * (see `lintTemplateRefs` in template.ts). That warning exists to catch
+ * *unintended* input reaching a shell; here it's the entire point of the
+ * step — running the user's own declared test command is not meaningfully
+ * different from `init`'s generated test-check steps (`src/init/starters.ts`),
+ * which embed the same detected command as a literal. The bundled-workflow
+ * validation test (`tests/bundled-workflows.test.ts`) accepts this one
+ * expected warning by name rather than requiring zero warnings for this spec.
+ */
+const mainlineStream: WorkflowSpec = {
+  name: "mainline-stream",
+  description:
+    "Implement a charter in its own worktree, then loop review → fix → test until clean. The per-stream unit of the mainline pipeline; also useful standalone.",
+  inputs: {
+    coderModel: {
+      description: "Agent model that implements the charter and applies review fixes.",
+      default: FREE.mimo,
+    },
+    reviewerModel: {
+      description: "Agent model that reviews the diff each loop iteration.",
+      default: FREE.nemotronUltra,
+    },
+    reviewerEffort: {
+      description: "Reasoning effort/variant for the reviewer model. Empty omits the flag.",
+      default: "",
+    },
+    testCmd: {
+      description: "Shell command that must exit 0 for the loop to converge.",
+      default: "true",
+    },
+    issueTiming: {
+      description: 'File out-of-scope findings "live" (as this stream finishes) or at "end".',
+      default: "end",
+    },
+    issueMode: {
+      description: 'Findings become a "report" (safe default) or "github" issues.',
+      default: "report",
+    },
+  },
+  phases: [
+    {
+      id: "implement",
+      title: "Implement the stream charter",
+      steps: [
+        {
+          id: "implement",
+          kind: "worker",
+          agent: "opencode",
+          model: "{{inputs.coderModel}}",
+          prompt:
+            "Implement ONLY this stream's charter. Stay strictly inside its scope — if you notice a broken or wrong pre-existing behavior OUTSIDE the charter, do NOT fix it: record it as a finding instead and leave the code alone.\n\n" +
+            "Charter:\n{{input}}\n\n" +
+            'End your reply with JSON matching: { "summary": "what you implemented, in a few sentences", "findings": [{ "title": "...", "body": "...", "severity": "low"|"medium"|"high", "file": "path/to/file" }] } — findings are ONLY pre-existing, out-of-scope problems you noticed; use an empty array when there are none.',
+          output: {
+            type: "object",
+            required: ["summary", "findings"],
+            properties: {
+              summary: { type: "string" },
+              findings: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["title"],
+                  properties: {
+                    title: { type: "string" },
+                    body: { type: "string" },
+                    severity: { type: "string", enum: ["low", "medium", "high"] },
+                    file: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      ],
+    },
+    {
+      id: "review",
+      title: "Review the stream's diff",
+      steps: [
+        {
+          id: "review",
+          kind: "worker",
+          agent: "opencode",
+          model: "{{inputs.reviewerModel}}",
+          effort: "{{inputs.reviewerEffort}}",
+          dependsOn: ["implement"],
+          workspace: "attach:implement",
+          prompt:
+            "Review the diff from the base commit in this worktree — the NEW code from this stream's implementation (and any prior fix pass). `issues` are problems in that new code that MUST be fixed before this stream is done. `findings` are DIFFERENT: pre-existing, out-of-scope problems you noticed but that are not this stream's to fix — list every one still relevant, even ones you (or the implementer) reported before, since your findings list replaces the previous iteration's, it does not add to it.\n\n" +
+            'End your reply with JSON matching: { "verdict": "clean"|"issues", "issues": [{ "title": "...", "detail": "...", "file": "path/to/file" }], "findings": [{ "title": "...", "body": "...", "severity": "low"|"medium"|"high", "file": "path/to/file" }] } — verdict is "clean" ONLY when issues is empty.',
+          output: {
+            type: "object",
+            required: ["verdict", "issues", "findings"],
+            properties: {
+              verdict: { type: "string", enum: ["clean", "issues"] },
+              issues: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["title"],
+                  properties: {
+                    title: { type: "string" },
+                    detail: { type: "string" },
+                    file: { type: "string" },
+                  },
+                },
+              },
+              findings: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["title"],
+                  properties: {
+                    title: { type: "string" },
+                    body: { type: "string" },
+                    severity: { type: "string", enum: ["low", "medium", "high"] },
+                    file: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      ],
+    },
+    {
+      id: "fix",
+      title: "Fix the listed issues",
+      steps: [
+        {
+          id: "fix",
+          kind: "worker",
+          agent: "opencode",
+          model: "{{inputs.coderModel}}",
+          dependsOn: ["review"],
+          workspace: "attach:implement",
+          prompt:
+            'Apply exactly the issues listed below — the minimal fix for each, no unrelated refactors. If the verdict was "clean" (no issues), reply with the single word NO-OP and change nothing.\n\n{{steps.review.output}}',
+        },
+      ],
+    },
+    {
+      id: "test",
+      title: "Run the test command",
+      steps: [
+        {
+          id: "test",
+          kind: "command",
+          dependsOn: ["fix"],
+          workspace: "attach:implement",
+          cmd: "{{inputs.testCmd}}",
+        },
+      ],
+    },
+    {
+      id: "gate-test",
+      title: "Converged? — tests pass",
+      steps: [
+        {
+          // Checked first: if tests fail, there is no point re-reviewing —
+          // loop back to review (which will re-review whatever fix produces
+          // next). onFalse "continue" (not "fail"): a bounded loop must not
+          // fail the whole stream just because it hit the iteration cap —
+          // the merge still lands the best-effort work, and the summary
+          // step reports the unconverged state honestly rather than hiding
+          // it behind a hard failure.
+          id: "test-gate",
+          kind: "gate",
+          dependsOn: ["test"],
+          condition: { step: "test", ok: true },
+          loopTo: "review",
+          maxIterations: 4,
+          onFalse: "continue",
+        },
+      ],
+    },
+    {
+      id: "gate-review",
+      title: "Converged? — review clean",
+      steps: [
+        {
+          // A separate (later) phase from gate-test, but it loops to the
+          // SAME target ("review") — the regions coincide rather than
+          // partially overlap, which is the "properly nested" case
+          // validation allows. Checked second: only once tests pass do we
+          // ask whether the reviewer is satisfied.
+          id: "review-gate",
+          kind: "gate",
+          dependsOn: ["test-gate"],
+          condition: { step: "review", path: "verdict", equals: "clean" },
+          loopTo: "review",
+          maxIterations: 4,
+          onFalse: "continue",
+        },
+      ],
+    },
+    {
+      id: "stream-issues",
+      title: "File live findings (optional)",
+      steps: [
+        {
+          id: "stream-issues",
+          kind: "issues",
+          dependsOn: ["review-gate"],
+          when: { value: "{{inputs.issueTiming}}", equals: "live" },
+          from: ["implement", "review"],
+          findingsPath: "findings",
+          mode: "{{inputs.issueMode}}",
+          titlePrefix: "[mainline]",
+        },
+      ],
+    },
+    {
+      id: "summarize",
+      title: "Stream summary",
+      steps: [
+        {
+          // Depends on stream-issues even though that step only runs in the
+          // "live" issue-timing flow: consolidators treat a skipped
+          // dependency as absent (not failed), so in the default "end" flow
+          // the summary renders exactly the same minus the issues section.
+          id: "summary",
+          kind: "consolidator",
+          dependsOn: ["review-gate", "stream-issues"],
+          prompt:
+            "Stream complete.\n\nCharter:\n{{input}}\n\nFinal verdict: {{steps.review.json.verdict}}\nTest exit code: {{steps.test.exitCode}}\n\nImplementation summary:\n{{steps.implement.json.summary}}\n\nOut-of-scope findings noticed along the way:\n{{steps.review.json.findings}}",
+        },
+      ],
+    },
+  ],
+};
+
+/**
+ * The full pipeline: a high-intelligence planner splits the incoming prompt
+ * into independent execution streams, each stream runs `mainline-stream` in
+ * parallel worktrees, an LLM-assisted merge integrates them, the merged
+ * result goes through one more review/fix/test loop, and a PR is opened —
+ * with every out-of-scope finding filed as a GitHub issue (or a report).
+ *
+ * Defaults use OpenCode Zen free-tier models throughout so the whole
+ * pipeline validates and runs keyless; see docs/mainline-pipeline.md for the
+ * premium/balanced/budget model-tier tables to override with `--param`.
+ */
+const mainline: WorkflowSpec = {
+  name: "mainline",
+  description:
+    "One prompt in, one reviewed PR out: plan parallel streams, implement+review+fix+test each in its own worktree, merge, review the merge, open a PR, and file every out-of-scope finding as an issue.",
+  inputs: {
+    plannerModel: {
+      description: "Agent model that splits the prompt into independent streams.",
+      default: FREE.deepseekFlash,
+    },
+    plannerEffort: {
+      description: "Reasoning effort/variant for the planner model. Empty omits the flag.",
+      default: "",
+    },
+    coderModel: {
+      description: "Agent model that implements each stream and the final fixes.",
+      default: FREE.mimo,
+    },
+    reviewerModel: {
+      description: "Agent model that reviews each stream and the final merge.",
+      default: FREE.nemotronUltra,
+    },
+    reviewerEffort: {
+      description: "Reasoning effort/variant for the reviewer model. Empty omits the flag.",
+      default: "",
+    },
+    mergeModel: {
+      description: "Agent model that resolves merge conflicts between streams, if any arise.",
+      default: FREE.northMini,
+    },
+    maxStreams: {
+      type: "number",
+      description: "Upper bound on how many independent streams the planner may create.",
+      default: 3,
+    },
+    testCmd: {
+      description: "Shell command that must exit 0 for a loop to converge.",
+      default: "true",
+    },
+    issueTiming: {
+      description: 'File out-of-scope findings "live" (per-stream) or batched at "end".',
+      default: "end",
+    },
+    issueMode: {
+      description: 'Findings become a "report" (safe default) or "github" issues.',
+      default: "report",
+    },
+    deliver: {
+      description: 'Land the final result as a "pr" (default) or leave it on a local "branch".',
+      default: "pr",
+    },
+  },
+  phases: [
+    {
+      id: "plan",
+      title: "Plan independent streams",
+      steps: [
+        {
+          id: "plan",
+          kind: "distributor",
+          agent: "opencode",
+          model: "{{inputs.plannerModel}}",
+          effort: "{{inputs.plannerEffort}}",
+          itemsPath: "streams",
+          prompt:
+            "Explore this repository first (read the relevant files) before deciding how to split the work.\n\n" +
+            "Split the task below into AT MOST {{inputs.maxStreams}} genuinely INDEPENDENT execution streams — each one a self-contained, parallelizable chunk of work with MINIMAL file overlap with the others. File overlap between streams becomes a merge conflict later, so prefer FEWER, cleanly-separated streams over many overlapping ones; a task that doesn't decompose cleanly should be ONE stream.\n\n" +
+            "Each stream's implementer will see ONLY that stream's charter text — no other context. Write each charter to be fully self-contained: the relevant file paths, the exact change, and clear acceptance criteria.\n\n" +
+            "Task: {{input}}\n\n" +
+            'End your reply with JSON matching: { "streams": [{ "title": "short stream title", "charter": "the full self-contained charter text" }], "findings": [{ "title": "...", "body": "...", "severity": "low"|"medium"|"high", "file": "path/to/file" }] } — findings are pre-existing problems noticed while exploring, not part of any stream.',
+          output: {
+            type: "object",
+            required: ["streams", "findings"],
+            properties: {
+              streams: {
+                type: "array",
+                minItems: 1,
+                // Structural ceiling on fan-out, independent of the prompt's
+                // soft "AT MOST {{inputs.maxStreams}}" instruction: schema
+                // bounds are static, so this is the absolute cap a planner
+                // that ignores its instructions can reach — the structured-
+                // output validator rejects a longer list (one bounded fix
+                // retry) instead of fanning out unbounded work.
+                maxItems: 8,
+                items: {
+                  type: "object",
+                  required: ["title", "charter"],
+                  properties: {
+                    title: { type: "string" },
+                    charter: { type: "string" },
+                  },
+                },
+              },
+              findings: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["title"],
+                  properties: {
+                    title: { type: "string" },
+                    body: { type: "string" },
+                    severity: { type: "string", enum: ["low", "medium", "high"] },
+                    file: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      ],
+    },
+    {
+      id: "streams",
+      title: "Run each stream's pipeline in parallel",
+      steps: [
+        {
+          id: "streams",
+          kind: "workflow",
+          dependsOn: ["plan"],
+          workflow: "mainline-stream",
+          forEach: "steps.plan.items",
+          input: "{{item}}",
+          params: {
+            coderModel: "{{inputs.coderModel}}",
+            reviewerModel: "{{inputs.reviewerModel}}",
+            reviewerEffort: "{{inputs.reviewerEffort}}",
+            testCmd: "{{inputs.testCmd}}",
+            issueTiming: "{{inputs.issueTiming}}",
+            issueMode: "{{inputs.issueMode}}",
+          },
+          outputStep: "review",
+          worktreeStep: "implement",
+        },
+      ],
+    },
+    {
+      id: "integrate",
+      title: "Merge the streams into a staging worktree",
+      steps: [
+        {
+          id: "integrate",
+          kind: "merge",
+          dependsOn: ["streams"],
+          from: ["streams"],
+          mode: "worktree",
+          onConflict: "agent",
+          agent: "opencode",
+          model: "{{inputs.mergeModel}}",
+          commitMessage: "mainline: integrate streams for {{input}}",
+        },
+      ],
+    },
+    {
+      id: "final-review",
+      title: "Review the merged result",
+      steps: [
+        {
+          id: "final-review",
+          kind: "worker",
+          agent: "opencode",
+          model: "{{inputs.reviewerModel}}",
+          effort: "{{inputs.reviewerEffort}}",
+          dependsOn: ["integrate"],
+          workspace: "attach:integrate",
+          prompt:
+            "Review the FULL diff from the base commit in this worktree — the merged result of every stream. Pay special attention to the SEAMS between streams: places where two streams' changes interact, duplicate work, or contradict each other, which no single stream's own review could have caught.\n\n" +
+            "`issues` are problems in this merged code that MUST be fixed. `findings` are pre-existing, out-of-scope problems — list every one still relevant (your findings list replaces the previous iteration's).\n\n" +
+            'End your reply with JSON matching: { "verdict": "clean"|"issues", "issues": [{ "title": "...", "detail": "...", "file": "path/to/file" }], "findings": [{ "title": "...", "body": "...", "severity": "low"|"medium"|"high", "file": "path/to/file" }] } — verdict is "clean" ONLY when issues is empty.',
+          output: {
+            type: "object",
+            required: ["verdict", "issues", "findings"],
+            properties: {
+              verdict: { type: "string", enum: ["clean", "issues"] },
+              issues: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["title"],
+                  properties: {
+                    title: { type: "string" },
+                    detail: { type: "string" },
+                    file: { type: "string" },
+                  },
+                },
+              },
+              findings: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["title"],
+                  properties: {
+                    title: { type: "string" },
+                    body: { type: "string" },
+                    severity: { type: "string", enum: ["low", "medium", "high"] },
+                    file: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      ],
+    },
+    {
+      id: "final-fix",
+      title: "Fix the merged result's issues",
+      steps: [
+        {
+          id: "final-fix",
+          kind: "worker",
+          agent: "opencode",
+          model: "{{inputs.coderModel}}",
+          dependsOn: ["final-review"],
+          workspace: "attach:integrate",
+          prompt:
+            'Apply exactly the issues listed below — the minimal fix for each. If the verdict was "clean" (no issues), reply with the single word NO-OP and change nothing.\n\n{{steps.final-review.output}}',
+        },
+      ],
+    },
+    {
+      id: "final-test",
+      title: "Run the test command on the merged result",
+      steps: [
+        {
+          id: "final-test",
+          kind: "command",
+          dependsOn: ["final-fix"],
+          workspace: "attach:integrate",
+          cmd: "{{inputs.testCmd}}",
+        },
+      ],
+    },
+    {
+      id: "final-gate-test",
+      title: "Converged? — final tests pass",
+      steps: [
+        {
+          id: "final-test-gate",
+          kind: "gate",
+          dependsOn: ["final-test"],
+          condition: { step: "final-test", ok: true },
+          loopTo: "final-review",
+          maxIterations: 4,
+          onFalse: "continue",
+        },
+      ],
+    },
+    {
+      id: "final-gate-review",
+      title: "Converged? — final review clean",
+      steps: [
+        {
+          id: "final-review-gate",
+          kind: "gate",
+          dependsOn: ["final-test-gate"],
+          condition: { step: "final-review", path: "verdict", equals: "clean" },
+          loopTo: "final-review",
+          maxIterations: 4,
+          onFalse: "continue",
+        },
+      ],
+    },
+    {
+      id: "deliver",
+      title: "Deliver the final result",
+      steps: [
+        {
+          id: "deliver-pr",
+          kind: "merge",
+          dependsOn: ["final-review-gate"],
+          from: ["final-fix"],
+          mode: "pr",
+          when: { value: "{{inputs.deliver}}", equals: "pr" },
+          prTitle: "mainline: {{input}}",
+          prBody:
+            "Automated by the `mainline` workflow.\n\nTask:\n{{input}}\n\nStreams:\n{{steps.plan.items}}\n\nFinal review verdict: {{steps.final-review.json.verdict}}",
+        },
+        {
+          // deliver-pr and deliver-branch are mutually exclusive alternatives:
+          // their `when` conditions test the same rendered input with opposite
+          // polarity, so exactly one runs and the other is SKIPPED (ok, empty
+          // output). The arrival consolidator depends on both — consolidators
+          // treat skipped dependencies as absent, so whichever alternative was
+          // skipped simply vanishes from the report.
+          //
+          // Negated equality (not-"pr") rather than equals-"branch" is a
+          // deliberate safety choice, not an oversight: with a positive match
+          // on both sides, a typo'd deliver value ("Branch", "b") would skip
+          // BOTH alternatives and silently deliver nothing after the whole
+          // pipeline ran. With negation, anything that isn't exactly "pr"
+          // still lands the work on a branch — the run's output is never lost
+          // to an input typo.
+          id: "deliver-branch",
+          kind: "merge",
+          dependsOn: ["final-review-gate"],
+          from: ["final-fix"],
+          mode: "branch",
+          when: { value: "{{inputs.deliver}}", equals: "pr", not: true },
+        },
+        {
+          id: "file-issues",
+          kind: "issues",
+          dependsOn: ["final-review-gate"],
+          when: { value: "{{inputs.issueTiming}}", equals: "end" },
+          from: ["plan", "streams", "final-review"],
+          findingsPath: "findings",
+          mode: "{{inputs.issueMode}}",
+          titlePrefix: "[mainline]",
+        },
+      ],
+    },
+    {
+      id: "arrival",
+      title: "Arrival report",
+      steps: [
+        {
+          // Depends on BOTH delivery alternatives and the conditionally-run
+          // file-issues step: consolidators treat skipped dependencies as
+          // absent (their section simply vanishes), so exactly one delivery
+          // line renders — see the deliver-branch comment above for the
+          // when-condition semantics.
+          id: "arrival",
+          kind: "consolidator",
+          dependsOn: [
+            "plan",
+            "streams",
+            "integrate",
+            "final-review",
+            "final-test",
+            "deliver-pr",
+            "deliver-branch",
+            "file-issues",
+          ],
+          prompt:
+            "mainline pipeline complete.\n\nTask:\n{{input}}\n\n" +
+            "Streams planned:\n{{steps.plan.items}}\n\n" +
+            "Integration: {{steps.integrate.output}}\n\n" +
+            "Final review verdict: {{steps.final-review.json.verdict}}\n" +
+            "Final test exit code: {{steps.final-test.exitCode}}\n\n" +
+            "Delivery: {{steps.deliver-pr.output}}{{steps.deliver-branch.output}}\n\n" +
+            "Issues filed: {{steps.file-issues.output}}",
+        },
+      ],
+    },
+  ],
+};
+
 /** name → spec. Merged under any user `workflows` from steamtrain.json. */
 export const BUNDLED_WORKFLOWS: Record<string, WorkflowSpec> = {
   [tour.name]: tour,
@@ -553,4 +1176,6 @@ export const BUNDLED_WORKFLOWS: Record<string, WorkflowSpec> = {
   [targetSweep.name]: targetSweep,
   [reviewLoop.name]: reviewLoop,
   [quickTriage.name]: quickTriage,
+  [mainlineStream.name]: mainlineStream,
+  [mainline.name]: mainline,
 };
