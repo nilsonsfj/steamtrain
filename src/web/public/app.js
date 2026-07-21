@@ -259,7 +259,9 @@
     api("GET", "/api/workflows").then(function (r) {
       if (r.status === 401) { showLoginForm(); return; }
       S.workflows = r.body.workflows || [];
-      if (r.body.configLabel) document.getElementById("config").textContent = r.body.configLabel;
+      if (r.body.configLabel) {
+        document.getElementById("config").textContent = "cfg · " + r.body.configLabel;
+      }
       if (r.body.project) applyProjectChrome(r.body.project);
       renderSidebar();
       var deepLinkId = SteamtrainReducer.parseRunDeepLink
