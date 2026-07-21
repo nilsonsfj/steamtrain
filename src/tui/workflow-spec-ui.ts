@@ -19,8 +19,50 @@ import {
   type WorkflowStep,
   isAgentBackedStep,
   llmStepApiId,
+  renderPrompt,
+  resolveInputs,
   workflowStepKind,
 } from "../workflow";
+
+/** Values used to resolve `{{inputs.*}}` / `{{input}}` for TUI preview chrome. */
+export interface PreviewRenderContext {
+  input?: string;
+  inputs?: Record<string, string | number | boolean>;
+}
+
+/**
+ * Resolve declared workflow inputs (defaults applied) for pre-run preview.
+ * Does not require the user to have filled the input form yet.
+ */
+export function previewInputValues(
+  spec: WorkflowSpec,
+  params: Record<string, string> = {},
+): Record<string, string | number | boolean> {
+  return resolveInputs(spec, params).values;
+}
+
+/**
+ * Best-effort template render for preview display. Step/item refs that cannot
+ * be known pre-run are left untouched by `renderPrompt`.
+ */
+export function previewRender(template: string, ctx: PreviewRenderContext = {}): string {
+  if (!template.includes("{{")) return template;
+  return renderPrompt(template, {
+    input: ctx.input ?? "",
+    inputs: ctx.inputs,
+    outputs: new Map(),
+  });
+}
+
+/** Like `previewRender`, but maps empty results to `undefined` for optional fields. */
+export function previewRenderOptional(
+  template: string | undefined,
+  ctx: PreviewRenderContext = {},
+): string | undefined {
+  if (template === undefined) return undefined;
+  const rendered = previewRender(template, ctx);
+  return rendered.length > 0 ? rendered : undefined;
+}
 
 export interface FlatSpecStep {
   phase: WorkflowPhase;
@@ -91,31 +133,34 @@ export function distinctAgents(spec: WorkflowSpec): string[] {
   return [...set];
 }
 
-export function formatWorkflowAgentTarget(target: {
-  agent?: AgentInstanceId;
-  model?: string;
-  modelClass?: string;
-  effort?: string;
-}): string {
-  if (!target.agent && target.modelClass && !target.model) {
-    return `auto · class:${target.modelClass}${target.effort ? ` · ${target.effort}` : ""}`;
+export function formatWorkflowAgentTarget(
+  target: {
+    agent?: AgentInstanceId;
+    model?: string;
+    modelClass?: string;
+    effort?: string;
+  },
+  ctx: PreviewRenderContext = {},
+): string {
+  const model = previewRenderOptional(target.model, ctx) ?? target.model;
+  const modelClass = previewRenderOptional(target.modelClass, ctx) ?? target.modelClass;
+  const effort = previewRenderOptional(target.effort, ctx);
+  if (!target.agent && modelClass && !model) {
+    return `auto · class:${modelClass}${effort ? ` · ${effort}` : ""}`;
   }
-  if (!target.agent && target.model) {
-    return `auto · ${target.model}${target.effort ? ` · ${target.effort}` : ""}`;
+  if (!target.agent && model) {
+    return `auto · ${model}${effort ? ` · ${effort}` : ""}`;
   }
-  if (!target.agent || !target.model) {
-    const parts = [
-      target.agent ?? "auto",
-      target.model ?? (target.modelClass ? `class:${target.modelClass}` : "?"),
-    ];
-    return parts.join("/") + (target.effort ? ` · ${target.effort}` : "");
+  if (!target.agent || !model) {
+    const parts = [target.agent ?? "auto", model ?? (modelClass ? `class:${modelClass}` : "?")];
+    return parts.join("/") + (effort ? ` · ${effort}` : "");
   }
   const formatted = formatAgentTarget({
     agent: target.agent,
-    model: target.model,
-    effort: target.effort,
+    model,
+    effort,
   });
-  const staticName = staticModelName(target.agent, target.model);
+  const staticName = staticModelName(target.agent, model);
   return staticName && !formatted.includes(staticName) ? `${formatted} · ${staticName}` : formatted;
 }
 
@@ -125,9 +170,10 @@ export function formatWorkflowAgentTarget(target: {
  * names one — a step inheriting the instance's `defaultModel` shows just the
  * api id.
  */
-export function formatLlmTarget(step: LlmStep): string {
+export function formatLlmTarget(step: LlmStep, ctx: PreviewRenderContext = {}): string {
   const api = llmStepApiId(step);
-  return step.model ? `${api}/${step.model}` : api;
+  const model = previewRenderOptional(step.model, ctx) ?? step.model;
+  return model ? `${api}/${model}` : api;
 }
 
 export function formatGateCondition(condition: GateCondition): string {
@@ -153,19 +199,20 @@ export function formatGateLoop(step: WorkflowStep): string {
   return `↺ phase:${step.loopTo}${max}`;
 }
 
-export function specStepRowMeta(step: WorkflowStep): string {
+export function specStepRowMeta(step: WorkflowStep, ctx: PreviewRenderContext = {}): string {
   const bits: string[] = [];
   if (step.dependsOn?.length) bits.push(`deps: ${step.dependsOn.join(", ")}`);
   if ("forEach" in step && step.forEach) bits.push(`forEach: ${step.forEach}`);
   if ("workspace" in step && step.workspace) bits.push(`workspace: ${step.workspace}`);
   if ("cwd" in step && step.cwd) bits.push(`cwd: ${basename(step.cwd)}`);
   if (step.kind === "distributor" && step.items?.length) bits.push(`${step.items.length} items`);
-  if (step.kind === "command") bits.push(`$ ${truncate(step.cmd, 60)}`);
-  if (step.kind === "llm") bits.push(`api: ${formatLlmTarget(step)}`);
+  if (step.kind === "command") bits.push(`$ ${truncate(previewRender(step.cmd, ctx), 60)}`);
+  if (step.kind === "llm") bits.push(`api: ${formatLlmTarget(step, ctx)}`);
   if (step.kind === "gate") bits.push(formatGateCondition(step.condition));
   if (step.kind === "gate" && step.loopTo) bits.push(formatGateLoop(step));
   if (step.kind === "merge") {
-    bits.push(`mode: ${step.mode ?? "apply"}`);
+    const mode = previewRenderOptional(step.mode, ctx) ?? step.mode ?? "apply";
+    bits.push(`mode: ${mode}`);
     if (step.from?.length) bits.push(`from: ${step.from.join(", ")}`);
     if (step.onConflict && step.onConflict !== "fail") bits.push(`onConflict: ${step.onConflict}`);
   }
@@ -175,13 +222,14 @@ export function specStepRowMeta(step: WorkflowStep): string {
     if (step.worktreeStep) bits.push(`worktreeStep: ${step.worktreeStep}`);
   }
   if (step.kind === "issues") {
-    bits.push(`mode: ${step.mode ?? "report"}`);
+    const mode = previewRenderOptional(step.mode, ctx) ?? step.mode ?? "report";
+    bits.push(`mode: ${mode}`);
     if (step.from?.length) bits.push(`from: ${step.from.join(", ")}`);
   }
   return bits.join(" · ");
 }
 
-export function specDetailLines(step: WorkflowStep): string[] {
+export function specDetailLines(step: WorkflowStep, ctx: PreviewRenderContext = {}): string[] {
   const lines: string[] = [];
   if (step.dependsOn?.length) lines.push(`dependsOn: ${step.dependsOn.join(", ")}`);
   if ("forEach" in step && step.forEach) lines.push(`forEach: ${step.forEach}`);
@@ -193,22 +241,23 @@ export function specDetailLines(step: WorkflowStep): string[] {
   if ("env" in step && step.env && Object.keys(step.env).length > 0) {
     lines.push(
       `env: ${Object.entries(step.env)
-        .map(([k, v]) => `${k}=${v}`)
+        .map(([k, v]) => `${k}=${previewRender(String(v), ctx)}`)
         .join(", ")}`,
     );
   }
   if ("extraArgs" in step && step.extraArgs?.length) {
-    lines.push(`extraArgs: ${step.extraArgs.join(" ")}`);
+    lines.push(`extraArgs: ${step.extraArgs.map((arg) => previewRender(arg, ctx)).join(" ")}`);
   }
   if ("effort" in step && step.effort) {
-    lines.push(`effort: ${step.effort}`);
+    const effort = previewRenderOptional(step.effort, ctx);
+    if (effort) lines.push(`effort: ${effort}`);
   }
   if (step.kind === "distributor") {
     if (step.separator) lines.push(`separator: ${JSON.stringify(step.separator)}`);
     if (step.items?.length) {
       lines.push(`items (${step.items.length}):`);
       for (const [i, item] of step.items.entries()) {
-        lines.push(`  [${i}] ${truncate(item, 120)}`);
+        lines.push(`  [${i}] ${truncate(previewRender(item, ctx), 120)}`);
       }
     }
   }
@@ -216,20 +265,21 @@ export function specDetailLines(step: WorkflowStep): string[] {
     lines.push(`separator: ${JSON.stringify(step.separator)}`);
   }
   if (step.kind === "merge") {
-    lines.push(`mode: ${step.mode ?? "apply"}`);
+    const mode = previewRenderOptional(step.mode, ctx) ?? step.mode ?? "apply";
+    lines.push(`mode: ${mode}`);
     if (step.from?.length) lines.push(`from: ${step.from.join(", ")}`);
     lines.push(`onConflict: ${step.onConflict ?? "fail"}`);
-    if (step.branch) lines.push(`branch: ${step.branch}`);
+    if (step.branch) lines.push(`branch: ${previewRender(step.branch, ctx)}`);
     if (step.perSource) lines.push("perSource: true (one branch/PR per source worktree)");
     if (step.cleanup) lines.push("cleanup: true (prune source worktrees after delivery)");
-    if (step.prTitle) lines.push(`prTitle: ${truncate(step.prTitle, 120)}`);
+    if (step.prTitle) lines.push(`prTitle: ${truncate(previewRender(step.prTitle, ctx), 120)}`);
   }
   if (step.kind === "command") {
-    lines.push(`cmd: ${truncate(step.cmd, 200)}`);
+    lines.push(`cmd: ${truncate(previewRender(step.cmd, ctx), 200)}`);
   }
   if (step.kind === "llm") {
-    lines.push(`api: ${formatLlmTarget(step)} (direct inference, no agent CLI)`);
-    if (step.system) lines.push(`system: ${truncate(step.system, 200)}`);
+    lines.push(`api: ${formatLlmTarget(step, ctx)} (direct inference, no agent CLI)`);
+    if (step.system) lines.push(`system: ${truncate(previewRender(step.system, ctx), 200)}`);
     if (step.maxTokens !== undefined) lines.push(`maxTokens: ${step.maxTokens}`);
     if (step.temperature !== undefined) lines.push(`temperature: ${step.temperature}`);
     if (step.apiKeyEnv) lines.push(`apiKeyEnv: ${step.apiKeyEnv}`);
@@ -250,19 +300,20 @@ export function specDetailLines(step: WorkflowStep): string[] {
   }
   if (step.kind === "workflow") {
     lines.push(`workflow: ${step.workflow}`);
-    if (step.input) lines.push(`input: ${truncate(step.input, 200)}`);
+    if (step.input) lines.push(`input: ${truncate(previewRender(step.input, ctx), 200)}`);
     if (step.outputStep) lines.push(`outputStep: ${step.outputStep}`);
     if (step.worktreeStep) lines.push(`worktreeStep: ${step.worktreeStep}`);
     if (step.params && Object.keys(step.params).length > 0) {
       lines.push(
         `params: ${Object.entries(step.params)
-          .map(([k, v]) => `${k}=${truncate(v, 60)}`)
+          .map(([k, v]) => `${k}=${truncate(previewRender(v, ctx), 60)}`)
           .join(", ")}`,
       );
     }
   }
   if (step.kind === "issues") {
-    lines.push(`mode: ${step.mode ?? "report"}`);
+    const mode = previewRenderOptional(step.mode, ctx) ?? step.mode ?? "report";
+    lines.push(`mode: ${mode}`);
     if (step.from?.length) lines.push(`from: ${step.from.join(", ")}`);
     lines.push(`findingsPath: ${step.findingsPath ?? "findings"}`);
     if (step.titlePrefix) lines.push(`titlePrefix: ${step.titlePrefix}`);
@@ -273,9 +324,12 @@ export function specDetailLines(step: WorkflowStep): string[] {
   return lines;
 }
 
-export function promptForStep(step: WorkflowStep): string | undefined {
+export function promptForStep(
+  step: WorkflowStep,
+  ctx: PreviewRenderContext = {},
+): string | undefined {
   if ("prompt" in step && typeof step.prompt === "string" && step.prompt.length > 0) {
-    return step.prompt;
+    return previewRender(step.prompt, ctx);
   }
   return undefined;
 }

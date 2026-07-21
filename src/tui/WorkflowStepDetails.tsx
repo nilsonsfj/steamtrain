@@ -24,6 +24,7 @@ import {
   type FlatSpecStep,
   formatLlmTarget,
   formatWorkflowAgentTarget,
+  previewInputValues,
   promptForStep,
   specDetailLines,
 } from "./workflow-spec-ui";
@@ -99,8 +100,9 @@ function PreviewStepDetails({
   innerWidth,
 }: PreviewStepDetailsProps & { innerWidth: number }) {
   const lineBudget = Math.max(4, height - 6);
+  const renderCtx = useMemo(() => ({ input, inputs: previewInputValues(spec) }), [input, spec]);
   const lines = entry
-    ? previewLines(entry, input, dispatchOk, dispatchReason, canResume, innerWidth)
+    ? previewLines(entry, renderCtx, dispatchOk, dispatchReason, canResume, innerWidth)
     : [{ text: "No step selected.", color: "gray" }];
   const visible = lines.slice(0, lineBudget);
   const hidden = Math.max(0, lines.length - visible.length);
@@ -232,7 +234,7 @@ function LiveStepDetails({
 
 function previewLines(
   entry: FlatSpecStep,
-  input: string,
+  renderCtx: { input?: string; inputs?: Record<string, string | number | boolean> },
   dispatchOk: boolean,
   dispatchReason: string | undefined,
   canResume: boolean,
@@ -240,6 +242,7 @@ function previewLines(
 ): DetailLine[] {
   const { phase, step } = entry;
   const kind = workflowStepKind(step);
+  const input = renderCtx.input ?? "";
   const lines: DetailLine[] = [
     { text: `step: ${step.id}`, color: "cyan" },
     { text: `phase: ${phase.title} (${phase.id})`, color: "gray" },
@@ -258,23 +261,26 @@ function previewLines(
 
   if (isAgentBackedStep(step)) {
     lines.push({
-      text: `runner: ${formatWorkflowAgentTarget({
-        agent: step.agent,
-        model: step.model,
-        modelClass: step.modelClass,
-        effort: step.effort,
-      })}`,
+      text: `runner: ${formatWorkflowAgentTarget(
+        {
+          agent: step.agent,
+          model: step.model,
+          modelClass: step.modelClass,
+          effort: step.effort,
+        },
+        renderCtx,
+      )}`,
       color: step.agent ? (AGENT_COLOR[step.agent] ?? "white") : "cyan",
     });
   } else if (step.kind === "llm") {
-    lines.push({ text: `runner: ${formatLlmTarget(step)}`, color: "cyan" });
+    lines.push({ text: `runner: ${formatLlmTarget(step, renderCtx)}`, color: "cyan" });
   }
 
-  for (const line of specDetailLines(step)) {
+  for (const line of specDetailLines(step, renderCtx)) {
     lines.push({ text: line, color: "gray" });
   }
 
-  const prompt = promptForStep(step);
+  const prompt = promptForStep(step, renderCtx);
   if (prompt) {
     const promptLines = prompt.split("\n");
     let isFirstPromptLine = true;

@@ -1,7 +1,12 @@
 import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
 import { WorkflowPreview } from "../src/tui/WorkflowPreview";
-import { flattenSpecSteps } from "../src/tui/workflow-spec-ui";
+import {
+  flattenSpecSteps,
+  formatWorkflowAgentTarget,
+  previewInputValues,
+  specDetailLines,
+} from "../src/tui/workflow-spec-ui";
 import { BUNDLED_WORKFLOWS } from "../src/workflow";
 
 describe("WorkflowPreview", () => {
@@ -104,5 +109,53 @@ describe("WorkflowPreview", () => {
     const frame = lastFrame() ?? "";
     // Plan result view should not appear even if planResult is set.
     expect(frame).toContain("ready to run");
+  });
+
+  it("resolves input defaults and does not corrupt the mainline preview frame", () => {
+    const spec = BUNDLED_WORKFLOWS.mainline!;
+    const { lastFrame } = render(
+      <WorkflowPreview
+        spec={spec}
+        source="bundled"
+        width={100}
+        height={30}
+        selectedIndex={0}
+        dispatchCheck={{ ok: true }}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("workflow preview · mainline");
+    expect(frame).toContain("ready to run");
+    // Defaults are applied for display (not raw {{inputs.*}} placeholders).
+    expect(frame).toContain("deepseek-v4-flash-free");
+    expect(frame).not.toContain("{{inputs.");
+    // Classic Ink wrap-overlap artifacts from the broken preview.
+    expect(frame).not.toContain("rModel}}");
+    expect(frame).not.toContain("ready to runworker");
+    expect(frame).not.toContain("merge-backintegrat");
+    expect(frame).toMatch(/plan · distributor · phase/);
+    expect(frame).toMatch(/runner:/);
+  });
+});
+
+describe("preview input resolution", () => {
+  it("formats agent targets with declared defaults and omits empty effort", () => {
+    const spec = BUNDLED_WORKFLOWS.mainline!;
+    const inputs = previewInputValues(spec);
+    const plan = spec.phases[0]!.steps[0]!;
+    const runner = formatWorkflowAgentTarget(
+      {
+        agent: "agent" in plan ? plan.agent : undefined,
+        model: "model" in plan ? plan.model : undefined,
+        effort: "effort" in plan ? plan.effort : undefined,
+      },
+      { inputs },
+    );
+    expect(runner).toContain("deepseek-v4-flash-free");
+    expect(runner).not.toContain("{{inputs.");
+    expect(runner).not.toMatch(/·\s*$/);
+    expect(specDetailLines(plan, { inputs }).some((line) => line.startsWith("effort:"))).toBe(
+      false,
+    );
   });
 });
