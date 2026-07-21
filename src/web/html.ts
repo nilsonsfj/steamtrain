@@ -119,6 +119,7 @@ export function renderIndex(revs: PageAssetRevisions): string {
           <button class="btn" id="planBtn">Plan</button>
           <button class="btn primary" id="runBtn">Run &#9654;</button>
           <button class="btn" id="pauseBtn" style="display:none" title="Finish in-flight steps, schedule nothing new; pending steps become editable">&#9208; Pause</button>
+          <button class="btn" id="detachBtn" style="display:none" title="Hand this run to a background process — it keeps running if you close this page">&#9992; Detach</button>
           <button class="btn danger" id="cancelBtn" style="display:none">Cancel</button>
         </div>
       </div>

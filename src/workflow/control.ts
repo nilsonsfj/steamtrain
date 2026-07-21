@@ -53,6 +53,15 @@ export interface WorkflowRunControl {
   resume(by?: string): void;
   /** Whether a pause is currently requested (not necessarily acknowledged yet). */
   isPauseRequested(): boolean;
+  /**
+   * Whether the engine has drained to a standstill while paused — every
+   * in-flight step has finished and nothing new is scheduled, so the run is
+   * parked. This is the signal a driver waits for before handing a paused run
+   * off to a background process (mid-run detach): once idle, no step is
+   * executing, so aborting the local engine cannot kill live work. Cleared the
+   * moment scheduling resumes.
+   */
+  isIdle(): boolean;
   /** Who asked for the current pause / the latest resume. */
   pauseRequestedBy(): string | undefined;
   resumeRequestedBy(): string | undefined;
@@ -68,6 +77,12 @@ export interface WorkflowRunControl {
   stepEdits(): ReadonlyMap<string, StepEditPatch>;
 
   // ── engine-facing ──────────────────────────────────────────────────────
+  /**
+   * The engine calls this each time its scheduler parks with no in-flight
+   * steps because a pause is in effect. Latches {@link isIdle} true until the
+   * next resume; drivers poll `isIdle` to know a paused run has fully quiesced.
+   */
+  notifyIdle(): void;
   /** Bind run-scoped validation/invalidation hooks (once per run start). */
   attachRun(hooks: RunControlHooks): void;
   /** Drain events (accepted `step_edited`s) for the engine to emit in-stream. */
@@ -80,6 +95,9 @@ export function createWorkflowRunControl(): WorkflowRunControl {
   let pauseRequested = false;
   let pausedBy: string | undefined;
   let resumedBy: string | undefined;
+  // Latched true once the engine parks with nothing in flight while paused;
+  // any resume (or a fresh pause that will schedule again) clears it.
+  let idle = false;
   let hooks: RunControlHooks | undefined;
   const edits = new Map<string, StepEditPatch>();
   const pendingEvents: StepEditedEvent[] = [];
@@ -101,10 +119,16 @@ export function createWorkflowRunControl(): WorkflowRunControl {
     resume(by) {
       if (!pauseRequested) return;
       pauseRequested = false;
+      // Scheduling is about to continue, so the run is no longer quiesced.
+      idle = false;
       resumedBy = by;
       wake();
     },
     isPauseRequested: () => pauseRequested,
+    isIdle: () => idle,
+    notifyIdle() {
+      idle = true;
+    },
     pauseRequestedBy: () => pausedBy,
     resumeRequestedBy: () => resumedBy,
     editStep(stepId, patch, by) {

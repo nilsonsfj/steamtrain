@@ -3,8 +3,10 @@ import type { SteamtrainConfig } from "../config";
 import {
   type ApprovalDecision,
   type ApprovalProvider,
+  type DetachedRunnerIo,
   type HumanInputProvider,
   type HumanInputResponse,
+  type LiveRunLaunch,
   type LiveRunPendingInput,
   type LiveRunPublisher,
   type LiveRunStore,
@@ -29,6 +31,7 @@ import {
   createLiveRunPublisher,
   createNotifier,
   createWorkflowRunControl,
+  handoffRunToDetached,
   hashWorkflowSpec,
   isRerunError,
   matchApprovalKey,
@@ -132,6 +135,24 @@ interface Run {
    * re-registers under the same key, superseding the old resolver.
    */
   pendingInputs: Map<string, PendingInputRegistration>;
+  /**
+   * The exact spec this run is executing (session overrides / reroute applied),
+   * so a mid-run detach can carry it to the background process and keep the
+   * cache key aligned. Set once the run leaves the queue.
+   */
+  spec?: WorkflowSpec;
+  /**
+   * Set when a mid-run detach has been requested: the run is being handed off to
+   * a background process under the same id. `launch` is what the detached runner
+   * replays the remaining steps from.
+   */
+  handoff?: { launch: LiveRunLaunch };
+  /**
+   * Latched once the run has quiesced and its engine was aborted specifically to
+   * hand it off — the signal `drive()`'s finally uses to spawn the detached
+   * runner instead of recording a terminal outcome.
+   */
+  handoffCommitted?: boolean;
 }
 
 interface PendingInputRegistration {
@@ -186,6 +207,11 @@ export interface RunManagerOptions {
   notify?: NotifyConfig;
   /** Base URL for notification deep links to run pages (e.g. `http://localhost:4600`). */
   publicBaseUrl?: string;
+  /**
+   * How to point a detached background runner (mid-run detach) at the same
+   * project/config this server runs against. `projectDir` defaults to `cwd`.
+   */
+  detachIo?: DetachedRunnerIo;
 }
 
 const DEFAULT_RETAIN_MS = 5 * 60_000;
@@ -208,6 +234,7 @@ export class WorkflowRunManager {
   private readonly liveRuns?: LiveRunStore;
   private readonly notifier: Notifier;
   private readonly publicBaseUrl?: string;
+  private readonly detachIo?: DetachedRunnerIo;
   private runningCount = 0;
 
   constructor(options: RunManagerOptions) {
@@ -221,6 +248,7 @@ export class WorkflowRunManager {
     this.liveRuns = options.liveRuns;
     this.notifier = createNotifier(options.notify ?? options.config.notify);
     this.publicBaseUrl = options.publicBaseUrl;
+    this.detachIo = options.detachIo;
   }
 
   /** Validate and launch a run; the event loop runs detached in the background. */
@@ -332,6 +360,110 @@ export class WorkflowRunManager {
     }
     if (paused) run.control.pause(by);
     else run.control.resume(by);
+    return true;
+  }
+
+  /**
+   * Detach a manager-owned run into a fresh background process under the same
+   * id, so the browser (or the whole web server) can close without stopping the
+   * workflow — the mid-run analog of launching with `--detach`. Pauses the run
+   * so in-flight steps finish and persist to the step cache, then, once the
+   * engine has quiesced (or the run is parked on a human decision, where nothing
+   * is computing), aborts the local engine; `drive()`'s finally spawns the
+   * detached runner. Subscribers learn of the switch through a `detached` SSE
+   * frame and reconnect to the now-external run.
+   *
+   * Returns `{ ok:false, error }` when the run can't be handed off (unknown,
+   * finished, still queued, or no shared registry); a re-issued detach on an
+   * already-detaching run is a no-op success.
+   */
+  detach(runId: string): { ok: boolean; error?: string } {
+    if (!this.liveRuns) {
+      return { ok: false, error: "detach needs the shared live-run registry" };
+    }
+    const run = this.runs.get(runId);
+    if (!run || run.settled) return { ok: false, error: "no active run to detach" };
+    if (run.queued) {
+      return { ok: false, error: "the run is still queued — cancel it or wait for it to start" };
+    }
+    if (run.handoff) return { ok: true };
+    run.handoff = {
+      launch: {
+        workflow: run.workflow,
+        input: run.input,
+        params: run.params,
+        fresh: false,
+      },
+    };
+    // Quiesce: pause; in-flight steps finish and cache, nothing new starts.
+    run.control.pause("human:web");
+    void this.liveRuns.writePauseState(runId, { paused: true, by: "human:web" }).catch(() => {});
+    this.emit(run, JSON.stringify({ type: "detaching" }), false);
+    void this.awaitQuiesceThenAbort(run);
+    return { ok: true };
+  }
+
+  /**
+   * Poll a detaching run until its engine parks with nothing executing (or it is
+   * waiting on a human decision, which does no compute), then commit the handoff
+   * by aborting the engine. If the run finishes on its own first, the handoff is
+   * abandoned and `drive()` records it normally.
+   */
+  private async awaitQuiesceThenAbort(run: Run): Promise<void> {
+    const humanParked = (): boolean => run.pendingApprovals.size > 0 || run.pendingInputs.size > 0;
+    for (;;) {
+      if (run.settled || run.controller.signal.aborted) {
+        run.handoff = undefined;
+        return;
+      }
+      if (run.control.isIdle() || humanParked()) break;
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+    run.handoffCommitted = true;
+    run.controller.abort();
+  }
+
+  /**
+   * Spawn the detached runner for a quiesced, handed-off run and tell
+   * subscribers to reconnect to it. Returns true when the run is now an
+   * independent background process (the manager drops it); false when the spawn
+   * failed and the caller should record a normal terminal outcome.
+   */
+  private async finishHandoff(run: Run, publisher?: LiveRunPublisher): Promise<boolean> {
+    if (!this.liveRuns || !run.handoff) return false;
+    // The quiescing pause emitted a `run_paused` into the mirrored stream; the
+    // detached child's fresh engine won't emit a matching resume, so balance it
+    // here — the run really is about to continue in the background.
+    publisher?.event({ kind: "run_resumed", by: "detach", ts: Date.now() });
+    // Land every event recorded so far before the detached child appends to the
+    // same stream.
+    await publisher?.flush().catch(() => {});
+    const spawned = await handoffRunToDetached({
+      store: this.liveRuns,
+      runId: run.id,
+      cwd: this.cwd,
+      projectDir: this.detachIo?.projectDir ?? this.cwd,
+      configPath: this.detachIo?.configPath,
+      workspacePath: this.detachIo?.workspacePath,
+      // Carry the exact running spec so the background process continues with
+      // the same overrides and reuses the cached completed steps.
+      launch: { ...run.handoff.launch, spec: run.spec },
+    }).catch((err) => ({
+      ok: false as const,
+      error: err instanceof Error ? err.message : String(err),
+    }));
+    if (!spawned.ok) {
+      run.status = "error";
+      run.error = `detach failed: ${spawned.error}`;
+      return false;
+    }
+    // The run is now owned by an independent process. A terminal `detached`
+    // frame tells subscribers to reconnect (the stream route tails the external
+    // run once it's gone from the manager).
+    run.terminal = true;
+    this.emit(run, JSON.stringify({ type: "detached", runId: run.id, pid: spawned.pid }), true);
+    run.listeners.clear();
+    this.runs.delete(run.id);
     return true;
   }
 
@@ -490,6 +622,9 @@ export class WorkflowRunManager {
     fresh: boolean,
     seed?: Map<string, StepResult>,
   ): Promise<void> {
+    // Remember the exact spec (session overrides applied) so a mid-run detach
+    // carries it to the background process and the cache key stays aligned.
+    run.spec = spec;
     const key = workflowCacheKey(run.workflow, run.input, this.cwd, spec, run.params);
     const recorder = new RunRecordBuilder(
       {
@@ -591,6 +726,10 @@ export class WorkflowRunManager {
         run.control,
         humanInput,
       )) {
+        // Mid-run detach committed: stop recording, mirroring, and emitting
+        // events — the detached child owns the run's record and stream from
+        // here. Draining the iterator lets the aborted engine unwind cleanly.
+        if (run.handoffCommitted) continue;
         recorder.handle(event);
         publisher?.event(event);
         notifyWorkflowEvent(this.notifier, notifyMeta, event);
@@ -649,10 +788,20 @@ export class WorkflowRunManager {
       // any async persistence below, so a cancel arriving mid-persist can't
       // report an already-finished run as cancelable.
       run.settled = true;
+
+      // Mid-run detach: hand the quiesced run off to a background process under
+      // the same id instead of ending it. `ok === undefined` means the run was
+      // aborted mid-flight for the handoff (its workflow_done was skipped), not
+      // completed on its own. On success the manager drops the run and
+      // subscribers reconnect to the now-external run; on failure fall through
+      // to a normal (error) terminal.
+      const handedOff =
+        Boolean(run.handoff && run.handoffCommitted && ok === undefined) &&
+        (await this.finishHandoff(run, publisher));
       // Settle the live-run mirror (flushes buffered events, then writes the
       // terminal meta) before the terminal SSE frame, so cross-UI tailers see
       // the complete stream. Best-effort — never let it break the run.
-      if (this.liveRuns) {
+      if (!handedOff && this.liveRuns) {
         const status: RunRecordStatus = run.status === "running" ? "done" : run.status;
         try {
           if (publisher) {
@@ -671,22 +820,28 @@ export class WorkflowRunManager {
           // Mirroring is best-effort.
         }
       }
-      // Persist before marking terminal: a subscriber that connects during this
-      // await must still be registered to receive the terminal status frame.
-      await this.persistHistory(run, recorder);
-      run.terminal = true;
-      this.emit(
-        run,
-        JSON.stringify({
-          type: "status",
-          status: run.status,
-          ok: run.ok,
-          error: run.error,
-        }),
-        true,
-      );
-      run.listeners.clear();
-      this.scheduleGc(run.id);
+      // A handed-off run is now owned by the detached child (finishHandoff
+      // already told subscribers to reconnect and dropped it from the manager),
+      // so skip the terminal history + status frame for it.
+      if (!handedOff) {
+        // Persist before marking terminal: a subscriber that connects during
+        // this await must still be registered to receive the terminal status
+        // frame.
+        await this.persistHistory(run, recorder);
+        run.terminal = true;
+        this.emit(
+          run,
+          JSON.stringify({
+            type: "status",
+            status: run.status,
+            ok: run.ok,
+            error: run.error,
+          }),
+          true,
+        );
+        run.listeners.clear();
+        this.scheduleGc(run.id);
+      }
     }
   }
 

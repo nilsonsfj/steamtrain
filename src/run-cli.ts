@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { closeSync, openSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { refreshAgentCatalogCaches } from "./agents/models";
@@ -59,6 +58,7 @@ import {
   resolveMaxParallelRuns,
   resolveWorkflowTimeoutSec,
   resultLeaves,
+  spawnDetachedRunner,
   stepMetaFromSpec,
   storeApprovalProvider,
   storeHumanInputProvider,
@@ -72,7 +72,6 @@ import {
   workflowCacheKey,
   workflowLlmSteps,
 } from "./workflow";
-import { sanitizePathComponent } from "./workflow/fs-util";
 
 /**
  * The `workflow run / attach / runs / cancel / approve` CLI drivers, plus the
@@ -520,46 +519,29 @@ async function spawnDetachedRun(options: SpawnDetachedRunOptions): Promise<numbe
     }),
   );
 
-  const logFd = openSync(join(store.rootDir, sanitizePathComponent(runId), "runner.log"), "a");
-  const childArgs = [
-    script,
-    ...(options.io.cwd ? ["--project-dir", options.io.cwd] : []),
-    ...(options.io.configPath ? ["--config-file", options.io.configPath] : []),
-    ...(options.io.workspacePath ? ["--workspace", options.io.workspacePath] : []),
-    "workflow",
-    "_detached-runner",
+  // Re-exec this CLI as the detached child that owns the run. A failed exec
+  // (missing/blocked binary) settles the registry entry as errored rather than
+  // leaving a zombie "queued" entry.
+  const spawned = await spawnDetachedRunner({
+    store,
     runId,
-  ];
-  const child = spawn(process.execPath, childArgs, {
     cwd,
-    detached: true,
-    stdio: ["ignore", logFd, logFd],
-    env: process.env,
+    projectDir: options.io.cwd,
+    configPath: options.io.configPath,
+    workspacePath: options.io.workspacePath,
   });
-  child.unref();
-  // Wait for the spawn to actually succeed (or fail) before reporting: a
-  // failed exec (missing/blocked binary) would otherwise leave a zombie
-  // "queued" registry entry and crash the parent with an unhandled 'error'.
-  try {
-    await new Promise<void>((resolve, reject) => {
-      child.once("spawn", resolve);
-      child.once("error", reject);
-    });
-  } catch (spawnErr) {
+  if (!spawned.ok) {
     await store
       .update(runId, {
         status: "error",
         ok: false,
-        error: `could not spawn the detached runner: ${message(spawnErr)}`,
+        error: `could not spawn the detached runner: ${spawned.error}`,
         endedAt: Date.now(),
       })
       .catch(() => {});
-    closeSync(logFd);
-    err(`could not spawn the detached runner: ${message(spawnErr)}\n`);
+    err(`could not spawn the detached runner: ${spawned.error}\n`);
     return 1;
   }
-  // The child owns its copy of the log fd; release the parent's.
-  closeSync(logFd);
 
   if (options.json) {
     out(`${JSON.stringify({ ok: true, runId, detached: true })}\n`);
@@ -646,7 +628,12 @@ export async function runDetachedRunner(
   };
 
   const launch = meta.launch;
-  let spec = orchestrator.listWorkflows()[launch.workflow];
+  // A mid-run detach (TUI/web handoff) carries the exact resolved spec it was
+  // running, so the background process continues with the same per-session
+  // overrides and cache key. A `--detach`-at-launch run has no spec here and
+  // resolves the workflow from the catalog (re-planning any `--agent` re-route).
+  const carriedSpec = launch.spec;
+  let spec = carriedSpec ?? orchestrator.listWorkflows()[launch.workflow];
   if (!spec) return failEarly(`unknown workflow '${launch.workflow}'`);
 
   const usesAgents = workflowAgentIds(spec).length > 0;
@@ -656,8 +643,9 @@ export async function runDetachedRunner(
     await refreshAgentCatalogCaches(config, doctor);
   }
   // Re-plan the parent's `--agent` re-route against current health (the plan
-  // is deterministic for an explicit target, keeping cache keys aligned).
-  if (launch.rerouteAgent && usesAgents) {
+  // is deterministic for an explicit target, keeping cache keys aligned). A
+  // carried spec already has any re-route baked in, so skip the re-plan.
+  if (launch.rerouteAgent && usesAgents && !carriedSpec) {
     const reroute = orchestrator.planWorkflowReroute(spec, { target: launch.rerouteAgent });
     if (!reroute.ok && reroute.error) {
       return failEarly(`--agent ${launch.rerouteAgent}: ${reroute.error}`);

@@ -519,6 +519,10 @@
     var known = S.workflows.some(function (w) { return w.name === run.workflow; });
     var begin = function () {
       S.runId = run.id;
+      // Only a web-owned, in-process run can be handed off from here; a run
+      // owned by another process (CLI/TUI, or already detached) is independent.
+      S.runExternal = Boolean(run.external);
+      S.runDetached = Boolean(run.detached);
       setRunDeepLink(run.id);
       setRunning(true);
       S.startedAt = run.startedAt || Date.now();
@@ -3148,6 +3152,9 @@
     }
     // A pending history-enriched plan must never replace the live run canvas.
     S.planRequest += 1;
+    // A freshly launched run is web-owned and in-process, so it can be detached.
+    S.runExternal = false;
+    S.runDetached = false;
     S.runState = SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || S.spec);
     S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
     S.narration = []; S.arrivalInspect = false; S.arrivalEnter = false;
@@ -3229,6 +3236,22 @@
           S.queuedBanner = true;
           setBanner("Queued — position " + frame.position + " (" + frame.running + "/" + frame.limit + " run slots busy)…", "info");
         }
+        else if (frame.type === "detaching") {
+          // Mid-run detach requested: in-flight steps are finishing before the
+          // handoff. Not terminal — the `detached` frame follows.
+          setBanner("✈ Detaching — finishing in-flight work, then handing this run to a background process…", "info");
+        }
+        else if (frame.type === "detached") {
+          // The run is now an independent background process under the same id.
+          // Reconnect to it (as an external run) so we keep tailing it live.
+          es.close(); S.es = null;
+          S.runExternal = true;
+          S.runDetached = true;
+          setRunning(true);
+          setBanner("✈ Detached — this run now runs in a background process" + (frame.pid ? " (pid " + frame.pid + ")" : "") + "; it keeps going if you close this page.", "ok");
+          openStream(frame.runId || S.runId);
+          pollLiveRuns();
+        }
         else if (frame.type === "status") {
           es.close(); S.es = null; setRunning(false); stopTimer();
           S.queuedBanner = false;
@@ -3263,6 +3286,43 @@
     apiAuth("POST", "/api/runs/" + S.runId + "/cancel");
   }
 
+  /**
+   * Hand the streamed (web-owned) run off to a background process so this page
+   * can close without stopping it. The switch to the now-independent run is
+   * driven by the `detached` SSE frame (see openStream); here we just request
+   * it and reflect "detaching" while in-flight steps finish.
+   */
+  function detachRun() {
+    if (isReadOnly() || !S.runId || S.runExternal || S.runDetached) return;
+    var btn = document.getElementById("detachBtn");
+    if (btn) btn.disabled = true;
+    setBanner("✈ Detaching — finishing in-flight work, then handing this run to a background process…", "info");
+    apiAuth("POST", "/api/runs/" + S.runId + "/detach")
+      .then(function (r) {
+        if (r.status >= 400) {
+          if (btn) btn.disabled = false;
+          setBanner("Could not detach the run" + (r.body && r.body.error ? ": " + r.body.error : "."), "err");
+        }
+      })
+      .catch(function () {
+        if (btn) btn.disabled = false;
+        setBanner("Could not detach the run: network error.", "err");
+      });
+  }
+
+  /**
+   * The Detach button only applies to a web-owned, in-process run: an already
+   * external/detached run is independent, and read-only sessions can't steer.
+   */
+  function updateDetachButton() {
+    var btn = document.getElementById("detachBtn");
+    if (!btn) return;
+    var running = Boolean(S.runId) && !(S.runState && S.runState.done);
+    var show = running && !isReadOnly() && !S.runExternal && !S.runDetached;
+    btn.style.display = show ? "block" : "none";
+    if (show) btn.disabled = false;
+  }
+
   /** Toggle mid-run pause/resume for the streamed run (own or attached). */
   function togglePauseRun() {
     if (isReadOnly() || !S.runId) return;
@@ -3290,7 +3350,10 @@
     var ro = isReadOnly();
     document.getElementById("runBtn").style.display = (running || ro) ? "none" : "block";
     document.getElementById("pauseBtn").style.display = (running && !ro) ? "block" : "none";
+    document.getElementById("detachBtn").style.display =
+      (running && !ro && !S.runExternal && !S.runDetached) ? "block" : "none";
     document.getElementById("cancelBtn").style.display = (running && !ro) ? "block" : "none";
+    updateDetachButton();
     // Plan is a pre-launch dry-run; only hide it for read-only sessions (do not
     // couple it to running — that was not the pre-existing behavior).
     document.getElementById("planBtn").style.display = ro ? "none" : "block";
@@ -5059,6 +5122,7 @@
   document.getElementById("planBtn").addEventListener("click", startPlan);
   document.getElementById("runBtn").addEventListener("click", startRun);
   document.getElementById("pauseBtn").addEventListener("click", togglePauseRun);
+  document.getElementById("detachBtn").addEventListener("click", detachRun);
   document.getElementById("cancelBtn").addEventListener("click", cancelRun);
   document.getElementById("flushBtn").addEventListener("click", flushStaged);
   document.getElementById("paramsToggle").addEventListener("click", function () {

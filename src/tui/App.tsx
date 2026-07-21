@@ -546,6 +546,10 @@ export function App({
     resolveWorkflowSpec,
     mountedRef,
     cwd,
+    // A detached background runner resolves config from `--project-dir` (same
+    // user + project layers); only pass an explicit config file when the TUI
+    // was launched with a custom one, so the child matches it exactly.
+    detachConfigPath: configKind === "custom" ? configPath : undefined,
   });
 
   // Live cost/token ticker for the status bar, summed from the running tree.
@@ -1926,11 +1930,13 @@ function hint(
     // An attached run is owned elsewhere: Ctrl+Q only detaches the view.
     const stopHint = attachedRun ? "Ctrl+Q detach · /cancel-run cancel" : "Ctrl+Q cancel";
     const pauseHint = wfPaused ? "p resume · ↑/↓ step · e edit pending step" : "p pause";
+    // Own in-process runs can be handed off to a background process with `d`.
+    const detachHint = attachedRun ? "" : " · d detach";
     if (mode === "workflow" && wfStepDetails) {
-      return `↑/↓ step · PgUp/PgDn scroll · ←/Esc back · ${pauseHint} · ${stopHint} · /exit quit · Ctrl+C quit`;
+      return `↑/↓ step · PgUp/PgDn scroll · ←/Esc back · ${pauseHint} · ${stopHint}${detachHint} · /exit quit · Ctrl+C quit`;
     }
     return mode === "workflow"
-      ? `↑/↓ step · ${pauseHint} · ${stopHint} · /exit quit · Ctrl+C quit`
+      ? `↑/↓ step · ${pauseHint} · ${stopHint}${detachHint} · /exit quit · Ctrl+C quit`
       : "Esc cancel · /exit quit · Ctrl+C quit";
   }
   if (mode === "workflow") {

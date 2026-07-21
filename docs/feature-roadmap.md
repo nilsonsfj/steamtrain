@@ -105,8 +105,11 @@ outside the repo).
 > the shared `.steamtrain/runs/` registry; `maxParallelRuns` queues excess
 > runs across processes.
 
-**Remaining follow-up:** detaching an *already-started* TUI/web run into a
-background process (today detach is chosen at launch).
+**Follow-up shipped:** detaching an *already-started* TUI/web run into a
+background process — TUI `d`, web **Detach**, `POST /api/runs/:id/detach`. The
+run quiesces (in-flight steps finish and cache), then hands off under the same
+id and keeps running after the UI closes. See
+[`detached-runs.md`](detached-runs.md#detaching-a-running-run).
 
 ## 1.5 Notifications on run completion / approval needed
 

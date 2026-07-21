@@ -34,6 +34,13 @@ export function resolveMaxParallelRuns(config?: SteamtrainConfig): number {
 export interface LiveRunPublisher {
   /** Mirror one workflow event into the run's events.ndjson (buffered). */
   event(event: WorkflowEvent): void;
+  /**
+   * Flush buffered events to disk and wait for the write chain to drain, WITHOUT
+   * writing a terminal meta. Used when handing a run off to a detached process:
+   * every event recorded so far must land before the new owner starts appending,
+   * but the run is not finished.
+   */
+  flush(): Promise<void>;
   /** Flush buffered events, then write the terminal meta. */
   finish(status: RunRecordStatus, opts?: { ok?: boolean; error?: string }): Promise<void>;
 }
@@ -171,6 +178,10 @@ export function createLiveRunPublisher(store: LiveRunStore, runId: string): Live
       }
       pending.push(`${JSON.stringify(event)}\n`);
       scheduleFlush();
+    },
+    async flush() {
+      flush();
+      await chain;
     },
     async finish(status, opts = {}) {
       flush();
