@@ -894,6 +894,13 @@ const mainline: WorkflowSpec = {
               streams: {
                 type: "array",
                 minItems: 1,
+                // Structural ceiling on fan-out, independent of the prompt's
+                // soft "AT MOST {{inputs.maxStreams}}" instruction: schema
+                // bounds are static, so this is the absolute cap a planner
+                // that ignores its instructions can reach — the structured-
+                // output validator rejects a longer list (one bounded fix
+                // retry) instead of fanning out unbounded work.
+                maxItems: 8,
                 items: {
                   type: "object",
                   required: ["title", "charter"],
@@ -1094,6 +1101,14 @@ const mainline: WorkflowSpec = {
           // output). The arrival consolidator depends on both — consolidators
           // treat skipped dependencies as absent, so whichever alternative was
           // skipped simply vanishes from the report.
+          //
+          // Negated equality (not-"pr") rather than equals-"branch" is a
+          // deliberate safety choice, not an oversight: with a positive match
+          // on both sides, a typo'd deliver value ("Branch", "b") would skip
+          // BOTH alternatives and silently deliver nothing after the whole
+          // pipeline ran. With negation, anything that isn't exactly "pr"
+          // still lands the work on a branch — the run's output is never lost
+          // to an input typo.
           id: "deliver-branch",
           kind: "merge",
           dependsOn: ["final-review-gate"],

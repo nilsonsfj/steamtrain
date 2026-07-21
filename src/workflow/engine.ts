@@ -36,6 +36,7 @@ import {
 } from "./human-input";
 import {
   GH_GUIDANCE,
+  ISSUES_MODES,
   buildFindingsReport,
   buildIssueBody,
   collectFindings,
@@ -3854,7 +3855,6 @@ async function executeMergeStep(
   };
 }
 
-const ISSUES_MODES = new Set(["report", "github"]);
 const DEFAULT_ISSUES_LIMIT = 20;
 
 /**

@@ -189,6 +189,14 @@ export function buildIssueBody(finding: CollectedFinding, workflowName: string):
   return parts.join("\n");
 }
 
+/**
+ * The valid rendered values of an issues step's templated `mode` field. The
+ * engine renders `mode` at execution time (so an input can switch it) and
+ * validates the result against this set — a typo'd render fails loudly
+ * instead of silently defaulting.
+ */
+export const ISSUES_MODES: ReadonlySet<string> = new Set(["report", "github"]);
+
 /** Copy-paste guidance appended to `gh` failures (missing binary or auth). */
 export const GH_GUIDANCE =
   'install the GitHub CLI (https://cli.github.com) and run `gh auth login`, or switch this step to mode "report" to avoid the gh dependency';
