@@ -334,6 +334,9 @@ interface ModelPricing {
 
 const CODEX_MODEL_PRICES: Record<string, ModelPricing> = {
   // Published rates from https://developers.openai.com/api/docs/pricing
+  "gpt-5.6-sol": { input: 5.0, cached: 0.5, output: 30.0 },
+  "gpt-5.6-terra": { input: 2.5, cached: 0.25, output: 15.0 },
+  "gpt-5.6-luna": { input: 1.0, cached: 0.1, output: 6.0 },
   "gpt-5.5": { input: 5.0, cached: 0.5, output: 30.0 },
   "gpt-5.4": { input: 2.5, cached: 0.25, output: 15.0 },
   "gpt-5.4-mini": { input: 0.75, cached: 0.075, output: 4.5 },

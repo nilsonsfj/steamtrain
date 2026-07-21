@@ -254,8 +254,9 @@ export function effortsForModel(
     case "cursor":
       return /\[[^\]]*effort=/.test(model) ? [] : ["low", "medium", "high", "xhigh"];
     case "antigravity":
-      // Effort is baked into display labels like "Gemini 3.1 Pro (High)".
-      return /\((Low|Medium|High|Thinking)\)\s*$/i.test(model)
+      // Effort is baked into slug suffixes (`-high`) or legacy `(High)` labels.
+      return /-(low|medium|high|thinking|minimal)$/i.test(model) ||
+        /\((Low|Medium|High|Thinking|Minimal)\)\s*$/i.test(model)
         ? []
         : ["low", "medium", "high", "thinking"];
     default:

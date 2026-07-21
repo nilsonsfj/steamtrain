@@ -18,11 +18,11 @@ describe("buildAntigravityRunArgs", () => {
     expect(
       buildAntigravityRunArgs({
         prompt: "hello world",
-        model: "Gemini 3.1 Pro (High)",
+        model: "gemini-3.6-flash-high",
       }),
     ).toEqual([
       "--model",
-      "Gemini 3.1 Pro (High)",
+      "gemini-3.6-flash-high",
       "--dangerously-skip-permissions",
       "--mode",
       "accept-edits",
@@ -35,14 +35,14 @@ describe("buildAntigravityRunArgs", () => {
     expect(
       buildAntigravityRunArgs({
         prompt: "continue",
-        model: "Gemini 3.5 Flash (Low)",
+        model: "gemini-3.5-flash-low",
         resumeSessionId: "conv-123",
         timeoutMs: 90_000,
         extraArgs: ["--sandbox", "--add-dir", "/tmp/extra"],
       }),
     ).toEqual([
       "--model",
-      "Gemini 3.5 Flash (Low)",
+      "gemini-3.5-flash-low",
       "--dangerously-skip-permissions",
       "--mode",
       "accept-edits",
@@ -57,23 +57,75 @@ describe("buildAntigravityRunArgs", () => {
       "continue",
     ]);
   });
+
+  it("rewrites legacy display labels to current slug ids", () => {
+    expect(
+      buildAntigravityRunArgs({
+        prompt: "hello world",
+        model: "Gemini 3.1 Pro (High)",
+      }),
+    ).toEqual([
+      "--model",
+      "gemini-3.1-pro-high",
+      "--dangerously-skip-permissions",
+      "--mode",
+      "accept-edits",
+      "--print",
+      "hello world",
+    ]);
+  });
 });
 
 describe("resolveAntigravityModel", () => {
-  it("appends effort suffix when model has none", () => {
-    expect(resolveAntigravityModel("Gemini 3.1 Pro", "high")).toBe("Gemini 3.1 Pro (High)");
-    expect(resolveAntigravityModel("Gemini 3.5 Flash", "low")).toBe("Gemini 3.5 Flash (Low)");
+  it("appends slug effort suffix when model has none", () => {
+    expect(resolveAntigravityModel("gemini-3.1-pro", "high")).toBe("gemini-3.1-pro-high");
+    expect(resolveAntigravityModel("gemini-3.5-flash", "low")).toBe("gemini-3.5-flash-low");
+    expect(resolveAntigravityModel("gemini-3.6-flash", "medium")).toBe("gemini-3.6-flash-medium");
+  });
+
+  it("rewrites legacy display labels and applies effort as a slug suffix", () => {
+    expect(resolveAntigravityModel("Gemini 3.1 Pro", "high")).toBe("gemini-3.1-pro-high");
+    expect(resolveAntigravityModel("Gemini 3.5 Flash", "low")).toBe("gemini-3.5-flash-low");
     expect(resolveAntigravityModel("Claude Sonnet 4.6", "thinking")).toBe(
-      "Claude Sonnet 4.6 (Thinking)",
+      "claude-sonnet-4-6-thinking",
     );
   });
 
-  it("leaves models that already have a parenthetical suffix alone", () => {
-    expect(resolveAntigravityModel("Gemini 3.1 Pro (High)", "low")).toBe("Gemini 3.1 Pro (High)");
+  it("leaves models that already have an effort suffix alone", () => {
+    expect(resolveAntigravityModel("gemini-3.1-pro-high", "low")).toBe("gemini-3.1-pro-high");
+    expect(resolveAntigravityModel("Gemini 3.1 Pro (High)", "low")).toBe("gemini-3.1-pro-high");
+  });
+
+  it("never double-appends paren effort onto a slug that already has -high", () => {
+    // Regression: babysit fan-out failed with
+    // `--model "gemini-3.6-flash-high (High)"` when effort=high was also set.
+    expect(resolveAntigravityModel("gemini-3.6-flash-high", "high")).toBe("gemini-3.6-flash-high");
+    expect(resolveAntigravityModel("gemini-3.6-flash-high", "High")).toBe("gemini-3.6-flash-high");
+    expect(
+      buildAntigravityRunArgs({
+        prompt: "x",
+        model: "gemini-3.6-flash-high",
+        effort: "high",
+      }),
+    ).toContain("gemini-3.6-flash-high");
+    expect(
+      buildAntigravityRunArgs({
+        prompt: "x",
+        model: "gemini-3.6-flash-high",
+        effort: "high",
+      }),
+    ).not.toContain("gemini-3.6-flash-high (High)");
+  });
+
+  it("repairs already-glued slug + paren hybrids", () => {
+    expect(resolveAntigravityModel("gemini-3.6-flash-high (High)")).toBe("gemini-3.6-flash-high");
+    expect(resolveAntigravityModel("gemini-3.6-flash-high (High)", "high")).toBe(
+      "gemini-3.6-flash-high",
+    );
   });
 
   it("ignores unknown effort labels", () => {
-    expect(resolveAntigravityModel("Gemini 3.1 Pro", "mystery")).toBe("Gemini 3.1 Pro");
+    expect(resolveAntigravityModel("gemini-3.1-pro", "mystery")).toBe("gemini-3.1-pro");
   });
 });
 
@@ -239,7 +291,7 @@ describe("runAntigravityProcess", () => {
     expect(events[0]).toMatchObject({
       kind: "session_start",
       sessionId: "abc-111-def",
-      model: "Gemini 3.5 Flash (Low)",
+      model: "gemini-3.5-flash-low",
     });
     expect(events[1]).toMatchObject({ kind: "text_delta", text: "hello\n" });
     expect(events[2]).toMatchObject({ kind: "result", text: "hello", isError: false });
@@ -450,7 +502,7 @@ describe("AntigravityAdapter metadata", () => {
     const adapter = new AntigravityAdapter();
     expect(adapter.id).toBe("antigravity");
     expect(adapter.binary).toBe("agy");
-    expect(adapter.defaultModel).toBe("Gemini 3.1 Pro (High)");
+    expect(adapter.defaultModel).toBe("gemini-3.6-flash-high");
     expect(adapter.supportsResume).toBe(true);
     expect(ANTIGRAVITY_MODELS.some((m) => m.id === adapter.defaultModel)).toBe(true);
   });
