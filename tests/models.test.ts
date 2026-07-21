@@ -239,24 +239,25 @@ describe("cursor models", () => {
 });
 
 describe("antigravity models", () => {
-  it("exposes antigravity models with Gemini 3.1 Pro (High) as the default", () => {
-    expect(modelIdsForAgent("antigravity")).toContain("Gemini 3.1 Pro (High)");
-    expect(modelIdsForAgent("antigravity")).toContain("Gemini 3.1 Pro");
-    expect(defaultModelForAgent("antigravity")).toBe("Gemini 3.1 Pro (High)");
+  it("exposes antigravity models with Gemini 3.6 Flash (High) as the default", () => {
+    expect(modelIdsForAgent("antigravity")).toContain("gemini-3.6-flash-high");
+    expect(modelIdsForAgent("antigravity")).toContain("gemini-3.6-flash");
+    expect(defaultModelForAgent("antigravity")).toBe("gemini-3.6-flash-high");
   });
 
-  it("supports effort remapping only when the model has no parenthetical suffix", () => {
-    expect(effortsForModel("antigravity", "Gemini 3.1 Pro")).toEqual([
+  it("supports effort remapping only when the model has no effort suffix", () => {
+    expect(effortsForModel("antigravity", "gemini-3.6-flash")).toEqual([
       "low",
       "medium",
       "high",
       "thinking",
     ]);
+    expect(effortsForModel("antigravity", "gemini-3.6-flash-high")).toEqual([]);
     expect(effortsForModel("antigravity", "Gemini 3.1 Pro (High)")).toEqual([]);
   });
 
   it("keeps effort when switching antigravity models only if still supported", () => {
-    expect(effortForModelChange("antigravity", "Gemini 3.1 Pro", "high")).toBe("high");
-    expect(effortForModelChange("antigravity", "Gemini 3.1 Pro (High)", "high")).toBeUndefined();
+    expect(effortForModelChange("antigravity", "gemini-3.6-flash", "high")).toBe("high");
+    expect(effortForModelChange("antigravity", "gemini-3.6-flash-high", "high")).toBeUndefined();
   });
 });

@@ -26,11 +26,21 @@ export const CURSOR_MODELS: readonly AgentModel[] = [
   { id: "composer-2.5", name: "Composer 2.5" },
   { id: "composer-2.5-fast", name: "Composer 2.5 Fast" },
   { id: "cursor-grok-4.5-high", name: "Cursor Grok 4.5" },
+  { id: "claude-fable-5-thinking-high", name: "Claude Fable 5 Thinking High" },
   { id: "claude-opus-4-8-thinking-high", name: "Claude Opus 4.8 Thinking High" },
   { id: "claude-sonnet-5-high", name: "Claude Sonnet 5 High" },
-  { id: "gpt-5.5-high", name: "GPT 5.5 High" },
   { id: "gpt-5.6-sol", name: "GPT 5.6 Sol" },
+  { id: "gpt-5.6-terra", name: "GPT 5.6 Terra" },
+  { id: "gpt-5.6-luna", name: "GPT 5.6 Luna" },
+  { id: "gpt-5.5-high", name: "GPT 5.5 High" },
+  { id: "gpt-5.4-high", name: "GPT 5.4 High" },
+  { id: "gpt-5.3-codex", name: "GPT 5.3 Codex" },
   { id: "gpt-5.2", name: "GPT 5.2" },
+  { id: "gemini-3.6-flash-high", name: "Gemini 3.6 Flash High" },
+  { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash" },
+  { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro" },
+  { id: "glm-5.2-high", name: "GLM 5.2 High" },
+  { id: "kimi-k2.7-code", name: "Kimi K2.7 Code" },
 ];
 
 export function resolveCursorModel(model: string, effort?: string): string {

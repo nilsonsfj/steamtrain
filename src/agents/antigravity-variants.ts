@@ -48,9 +48,34 @@ class AntigravityVariantCacheStore {
 
 const store = new AntigravityVariantCacheStore();
 
+/** Pretty name for a slug id; display labels pass through unchanged. */
+function antigravityModelDisplayName(id: string): string {
+  if (/\s/.test(id) || /[()]/.test(id)) return id;
+  const effort = /-(low|medium|high|thinking|minimal)$/i.exec(id);
+  const base = effort ? id.slice(0, effort.index) : id;
+  const effortLabel = effort?.[1]
+    ? effort[1].charAt(0).toUpperCase() + effort[1].slice(1).toLowerCase()
+    : undefined;
+  const titled = base
+    .split("-")
+    .map((part) => {
+      if (/^\d/.test(part)) return part.toUpperCase();
+      if (part === "gpt") return "GPT";
+      if (part === "oss") return "OSS";
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(" ")
+    // Keep GPT-OSS as a compound token.
+    .replace(/\bGPT OSS\b/g, "GPT-OSS")
+    // Claude version segments: "Claude Opus 4 6" → "Claude Opus 4.6"
+    .replace(/\b(Claude (?:Opus|Sonnet|Haiku)) (\d+) (\d+)\b/g, "$1 $2.$3");
+  return effortLabel ? `${titled} (${effortLabel})` : titled;
+}
+
 /**
  * Parse `agy models` text output into model id metadata.
- * Model ids are the display labels themselves (e.g. "Gemini 3.1 Pro (High)").
+ * Current agy prints slug ids (`gemini-3.6-flash-high`); older builds printed
+ * display labels (`Gemini 3.1 Pro (High)`). Both are accepted.
  */
 export function parseAntigravityModelsOutput(output: string): Map<string, AntigravityModelInfo> {
   const result = new Map<string, AntigravityModelInfo>();
@@ -63,15 +88,21 @@ export function parseAntigravityModelsOutput(output: string): Map<string, Antigr
     if (/^Usage of agy:/i.test(trimmed)) continue;
     if (/^Available subcommands:/i.test(trimmed)) continue;
     if (trimmed.startsWith("-") || trimmed.startsWith("--")) continue;
-    // Model labels look like "Gemini 3.1 Pro (High)" / "Claude Opus 4.6 (Thinking)".
     if (!/^[A-Za-z0-9]/.test(trimmed)) continue;
     if (trimmed.length > 120) continue;
-    // Heuristic: bare status chrome without an effort suffix is not a model id.
-    // Real agy labels today always use Title Case product names, not "server"/"listening".
-    if (/\b(error|failed|listening|starting|server)\b/i.test(trimmed) && !/\(/.test(trimmed)) {
+    // Heuristic: bare status chrome is not a model id (unless it looks like a
+    // Title Case label with an effort parenthetical, or a kebab slug).
+    const looksLikeSlug = /^[a-z0-9]+(?:[.-][a-z0-9]+)+$/i.test(trimmed);
+    const looksLikeLabel = /\s/.test(trimmed) || /\(/.test(trimmed);
+    if (!looksLikeSlug && !looksLikeLabel) continue;
+    if (
+      /\b(error|failed|listening|starting|server)\b/i.test(trimmed) &&
+      !looksLikeSlug &&
+      !/\(/.test(trimmed)
+    ) {
       continue;
     }
-    result.set(trimmed, { name: trimmed });
+    result.set(trimmed, { name: antigravityModelDisplayName(trimmed) });
   }
   return result;
 }

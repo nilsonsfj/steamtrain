@@ -12,50 +12,117 @@ import { firstLine } from "./util";
 /**
  * Known Antigravity CLI models (used by `/model` and autocomplete).
  *
- * agy does not accept slug aliases (`gemini-3-pro` is rejected). Model ids
- * are the display labels from `agy models`, including spaces / parentheses.
+ * As of agy 1.1.x, `agy models` returns slug ids (`gemini-3.6-flash-high`).
  * Base names (no effort suffix) are included so steamtrain's effort picker
- * can append `(Low|Medium|High|Thinking)` via {@link resolveAntigravityModel}.
+ * can append `-low|-medium|-high|-thinking` via {@link resolveAntigravityModel}.
+ * Legacy display labels (`Gemini 3.1 Pro (High)`) still resolve to slugs.
  */
 export const ANTIGRAVITY_MODELS: readonly AgentModel[] = [
-  { id: "Gemini 3.1 Pro", name: "Gemini 3.1 Pro" },
-  { id: "Gemini 3.1 Pro (High)", name: "Gemini 3.1 Pro (High)" },
-  { id: "Gemini 3.1 Pro (Low)", name: "Gemini 3.1 Pro (Low)" },
-  { id: "Gemini 3.5 Flash", name: "Gemini 3.5 Flash" },
-  { id: "Gemini 3.5 Flash (High)", name: "Gemini 3.5 Flash (High)" },
-  { id: "Gemini 3.5 Flash (Medium)", name: "Gemini 3.5 Flash (Medium)" },
-  { id: "Gemini 3.5 Flash (Low)", name: "Gemini 3.5 Flash (Low)" },
-  { id: "Claude Sonnet 4.6", name: "Claude Sonnet 4.6" },
-  { id: "Claude Sonnet 4.6 (Thinking)", name: "Claude Sonnet 4.6 (Thinking)" },
-  { id: "Claude Opus 4.6", name: "Claude Opus 4.6" },
-  { id: "Claude Opus 4.6 (Thinking)", name: "Claude Opus 4.6 (Thinking)" },
-  { id: "GPT-OSS 120B", name: "GPT-OSS 120B" },
-  { id: "GPT-OSS 120B (Medium)", name: "GPT-OSS 120B (Medium)" },
+  { id: "gemini-3.6-flash", name: "Gemini 3.6 Flash" },
+  { id: "gemini-3.6-flash-high", name: "Gemini 3.6 Flash (High)" },
+  { id: "gemini-3.6-flash-medium", name: "Gemini 3.6 Flash (Medium)" },
+  { id: "gemini-3.6-flash-low", name: "Gemini 3.6 Flash (Low)" },
+  { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash" },
+  { id: "gemini-3.5-flash-high", name: "Gemini 3.5 Flash (High)" },
+  { id: "gemini-3.5-flash-medium", name: "Gemini 3.5 Flash (Medium)" },
+  { id: "gemini-3.5-flash-low", name: "Gemini 3.5 Flash (Low)" },
+  { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro" },
+  { id: "gemini-3.1-pro-high", name: "Gemini 3.1 Pro (High)" },
+  { id: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low)" },
+  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+  { id: "claude-sonnet-4-6-thinking", name: "Claude Sonnet 4.6 (Thinking)" },
+  { id: "claude-opus-4-6", name: "Claude Opus 4.6" },
+  { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)" },
+  { id: "gpt-oss-120b", name: "GPT-OSS 120B" },
+  { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)" },
 ];
+
+/** Legacy display labels from older agy builds → current slug ids. */
+const LEGACY_DISPLAY_TO_SLUG: Readonly<Record<string, string>> = {
+  "Gemini 3.6 Flash": "gemini-3.6-flash",
+  "Gemini 3.6 Flash (High)": "gemini-3.6-flash-high",
+  "Gemini 3.6 Flash (Medium)": "gemini-3.6-flash-medium",
+  "Gemini 3.6 Flash (Low)": "gemini-3.6-flash-low",
+  "Gemini 3.5 Flash": "gemini-3.5-flash",
+  "Gemini 3.5 Flash (High)": "gemini-3.5-flash-high",
+  "Gemini 3.5 Flash (Medium)": "gemini-3.5-flash-medium",
+  "Gemini 3.5 Flash (Low)": "gemini-3.5-flash-low",
+  "Gemini 3.1 Pro": "gemini-3.1-pro",
+  "Gemini 3.1 Pro (High)": "gemini-3.1-pro-high",
+  "Gemini 3.1 Pro (Low)": "gemini-3.1-pro-low",
+  "Claude Sonnet 4.6": "claude-sonnet-4-6",
+  "Claude Sonnet 4.6 (Thinking)": "claude-sonnet-4-6-thinking",
+  "Claude Opus 4.6": "claude-opus-4-6",
+  "Claude Opus 4.6 (Thinking)": "claude-opus-4-6-thinking",
+  "GPT-OSS 120B": "gpt-oss-120b",
+  "GPT-OSS 120B (Medium)": "gpt-oss-120b-medium",
+};
+
+const SLUG_EFFORT_SUFFIX: Record<string, string> = {
+  low: "low",
+  medium: "medium",
+  high: "high",
+  thinking: "thinking",
+  minimal: "minimal",
+  // Accepted as aliases when remapping efforts from other providers.
+  xhigh: "thinking",
+  max: "thinking",
+};
 
 const EFFORT_LABELS: Record<string, string> = {
   low: "Low",
   medium: "Medium",
   high: "High",
   thinking: "Thinking",
-  // Accepted as aliases when remapping efforts from other providers.
+  minimal: "Minimal",
   xhigh: "Thinking",
   max: "Thinking",
 };
 
-const HAS_EFFORT_SUFFIX = /\((Low|Medium|High|Thinking)\)\s*$/i;
+const HAS_PAREN_EFFORT_SUFFIX = /\((Low|Medium|High|Thinking|Minimal)\)\s*$/i;
+const HAS_SLUG_EFFORT_SUFFIX = /-(low|medium|high|thinking|minimal)$/i;
+/** Slug id that already encodes effort, with a mistaken paren glued on. */
+const SLUG_WITH_GLUED_PAREN =
+  /^([a-z0-9]+(?:[.-][a-z0-9]+)*-(?:low|medium|high|thinking|minimal))\s+\((?:Low|Medium|High|Thinking|Minimal)\)$/i;
+const LOOKS_LIKE_SLUG = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/i;
+
+function normalizeAntigravityModelId(model: string): string {
+  const trimmed = model.trim();
+  // Repair "gemini-3.6-flash-high (High)" from older double-append bugs.
+  const glued = SLUG_WITH_GLUED_PAREN.exec(trimmed);
+  if (glued?.[1]) return glued[1].toLowerCase();
+
+  const direct = LEGACY_DISPLAY_TO_SLUG[trimmed];
+  if (direct) return direct;
+  const lower = trimmed.toLowerCase();
+  for (const [label, slug] of Object.entries(LEGACY_DISPLAY_TO_SLUG)) {
+    if (label.toLowerCase() === lower) return slug;
+  }
+  return trimmed;
+}
 
 /**
- * Antigravity models encode effort in the display label
- * (`Gemini 3.1 Pro (High)`). When steamtrain's separate `effort` field is set
- * and the model has no parenthetical suffix, append one.
+ * Normalize to current agy slug ids and optionally append an effort suffix.
+ *
+ * Effort is baked into the slug (`gemini-3.6-flash-high`). Never append a
+ * parenthetical `(High)` onto a kebab slug - that produces invalid ids like
+ * `gemini-3.6-flash-high (High)`. Legacy display labels are rewritten to slugs.
  */
 export function resolveAntigravityModel(model: string, effort?: string): string {
-  if (!effort) return model;
-  if (HAS_EFFORT_SUFFIX.test(model)) return model;
-  const label = EFFORT_LABELS[effort.toLowerCase()];
-  if (!label) return model;
-  return `${model} (${label})`;
+  const resolved = normalizeAntigravityModelId(model);
+  if (!effort) return resolved;
+  if (HAS_SLUG_EFFORT_SUFFIX.test(resolved) || HAS_PAREN_EFFORT_SUFFIX.test(resolved)) {
+    return resolved;
+  }
+  const suffix = SLUG_EFFORT_SUFFIX[effort.toLowerCase()];
+  if (!suffix) return resolved;
+  // Only unknown Title Case display labels use the legacy paren form.
+  // Any kebab slug gets `-${suffix}` - never ` (High)`.
+  if (!LOOKS_LIKE_SLUG.test(resolved) && /\s/.test(resolved)) {
+    const label = EFFORT_LABELS[effort.toLowerCase()];
+    return label ? `${resolved} (${label})` : resolved;
+  }
+  return `${resolved}-${suffix}`;
 }
 
 /** Format steamtrain timeoutMs as a Go duration string for `--print-timeout`. */
@@ -304,8 +371,8 @@ export async function* runAntigravityProcess(
 export class AntigravityAdapter implements AgentAdapter {
   readonly id: AgentId = "antigravity";
   readonly binary: string;
-  /** Prefer High effort out of the box; users can switch to the base id + effort. */
-  readonly defaultModel = "Gemini 3.1 Pro (High)";
+  /** Prefer Gemini 3.6 Flash at High effort; users can switch to the base id + effort. */
+  readonly defaultModel = "gemini-3.6-flash-high";
   readonly supportsResume = true;
 
   constructor(binary = "agy") {

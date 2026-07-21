@@ -71,8 +71,8 @@ set `effort` explicitly:
 | `deep-reviewer` | High-stakes code / design review | Opus 4.8, GPT-5.6 Sol, Fable 5, GPT-5.5, … | `high` → `xhigh` |
 | `reviewer` | PR and code review (frontier + value tier) | Opus 4.8, DeepSeek V4 Pro, Qwen 3.7 Max, … | `high` → `medium` |
 | `implementer` | Build, refactor, fix | Sonnet 5, Composer 2.5, GPT-5.5, GPT-5.3 Codex, … | (model default) |
-| `simple` | Triage, format, low-stakes chores | Haiku 4.5, MiMo free, GPT-5.4 Mini, Amp Rush, … | (model default) |
-| `balanced` | General-purpose default | Sonnet 5, GPT-5.5, GPT-5.4, Composer 2.5, Amp Smart, … | (model default) |
+| `simple` | Triage, format, low-stakes chores | Haiku 4.5, MiMo free, Flash-Lite, GPT-5.6 Luna, … | (model default) |
+| `balanced` | General-purpose default | Sonnet 5, GPT-5.5, GPT-5.6 Terra, Composer 2.5, Gemini 3.6 Flash, … | (model default) |
 
 Override preferred families (and optionally `preferredEfforts`) in config:
 
