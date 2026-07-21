@@ -660,3 +660,55 @@ describe("workflow (sub-workflow) step: params", () => {
     expect(results.get("call[1]::work")?.output).toBe("out:beta/1");
   });
 });
+
+describe("forEach skip cascade for workflow (and llm) fan-outs", () => {
+  afterEach(async () => {
+    await Promise.all(tempRoots.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  // Regression: findSkipReason's forEach cascade only covered worker/processor
+  // kinds, so a workflow (or llm) fan-out whose source was skipped reached the
+  // executor and "succeeded" with zero children instead of being skipped.
+  it("skips a workflow forEach step when its distributor source was skipped", async () => {
+    const cwd = await tempDir();
+    const spec: WorkflowSpec = {
+      name: "skip-cascade",
+      phases: [
+        {
+          id: "seed",
+          title: "Seed",
+          steps: [
+            {
+              id: "targets",
+              kind: "distributor",
+              items: ["one", "two"],
+              // Never true: the run input is "task".
+              when: { contains: "never-matches" },
+            },
+          ],
+        },
+        {
+          id: "fan",
+          title: "Fan",
+          steps: [
+            {
+              id: "fan",
+              kind: "workflow",
+              workflow: "child",
+              forEach: "steps.targets.items",
+              input: "{{item}}",
+            },
+          ],
+        },
+      ],
+    };
+    expect(validateWorkflow(spec).ok).toBe(true);
+    const events = await runToEvents(spec, deps(cwd, { resolveWorkflow: () => childSpec }));
+    const results = doneResults(events);
+    expect(workflowOk(events)).toBe(true);
+    const fan = results.get("fan");
+    expect(fan?.skipped).toBe(true);
+    expect(fan?.ok).toBe(true);
+    expect(fan?.childResults ?? []).toHaveLength(0);
+  });
+});

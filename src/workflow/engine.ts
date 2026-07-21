@@ -2431,6 +2431,12 @@ async function executeForEachStep(
       },
     };
   }
+  // Defensive: a skipped source normally cascades in findSkipReason before
+  // this executor runs; if one slips through (skipped ⇒ ok with empty
+  // output), skip here too rather than "succeeding" with zero children.
+  if (source.skipped) {
+    return { result: skippedStepResult(step.id) };
+  }
 
   const values = source.items ?? splitItemsFromOutput(source.output);
   if (!ctx.reserveDynamicSteps(values.length)) {
@@ -3145,6 +3151,12 @@ async function executeWorkflowForEachStep(
         durationMs: Date.now() - started,
       },
     };
+  }
+  // Defensive: a skipped source normally cascades in findSkipReason before
+  // this executor runs; if one slips through (skipped ⇒ ok with empty
+  // output), skip here too rather than "succeeding" with zero children.
+  if (source.skipped) {
+    return { result: skippedStepResult(step.id) };
   }
 
   const values = source.items ?? splitItemsFromOutput(source.output);
@@ -4105,7 +4117,17 @@ function findSkipReason(step: WorkflowStep, ctx: GateEvalContext): string | unde
   } else if (skippedDeps.length > 0) {
     return `dependency '${skippedDeps[0]}' was skipped`;
   }
-  if ((step.kind === "worker" || step.kind === "processor" || !step.kind) && step.forEach) {
+  // Every kind that can fan out (worker/processor/llm/workflow) cascades a
+  // skipped forEach source the same way: no items to fan over means the step
+  // is skipped, not silently run with zero children.
+  if (
+    (step.kind === "worker" ||
+      step.kind === "processor" ||
+      step.kind === "llm" ||
+      step.kind === "workflow" ||
+      !step.kind) &&
+    step.forEach
+  ) {
     const sourceStepId = parseForEachSource(step.forEach);
     if (sourceStepId && ctx.results.get(sourceStepId)?.skipped) {
       return `forEach source '${sourceStepId}' was skipped`;
