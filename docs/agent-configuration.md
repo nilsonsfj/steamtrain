@@ -57,3 +57,11 @@ Press **Ctrl+A** from any screen (or run `/agents`) to open the agent manager:
 
 Each row shows the agent's scope (`global`, `project`, or `builtin`), enabled
 state, provider, binary, and default model.
+
+## Web UI
+
+The config page (gear icon) edits configured agents with a per-row **scope**
+selector. New agents default to **global** (`~/.steamtrain/config.json`),
+matching `/agent add` and the TUI manager. Choose **project** to write into
+`./steamtrain.json` instead. Timeouts on the same page still save to the
+project file.

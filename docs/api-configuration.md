@@ -133,10 +133,11 @@ default model.
 
 ## Web UI
 
-The project-config page (gear icon) has an **APIs** section mirroring the
-agents section: add/remove instances, toggle enabled, and edit provider, base
-URL, key env var, default model, and pricing. Saving writes
-`./steamtrain.json` and re-probes readiness immediately.
+The config page (gear icon) has an **APIs** section mirroring the agents
+section: add/remove instances, toggle enabled, pick **global** (default) or
+**project** scope, and edit provider, base URL, key env var, default model,
+and pricing. Saving writes each row to its chosen file and re-probes readiness
+immediately.
 
 Running with `--config <file>` loads that file alone — the global layer is not
 read, and global API operations are unavailable (same as agents).
