@@ -139,6 +139,18 @@ describe("resolveAntigravityModel", () => {
     expect(resolveAntigravityModel("gemini-3.6-flash-high (High)", "high")).toBe(
       "gemini-3.6-flash-high",
     );
+    expect(resolveAntigravityModel("gemini-3.5-flash-medium (Medium)")).toBe(
+      "gemini-3.5-flash-medium",
+    );
+    expect(resolveAntigravityModel("gemini-3.5-flash-low (Low)")).toBe("gemini-3.5-flash-low");
+    expect(resolveAntigravityModel("claude-opus-4-6-thinking (Thinking)")).toBe(
+      "claude-opus-4-6-thinking",
+    );
+  });
+
+  it("accepts case-insensitive legacy display labels", () => {
+    expect(resolveAntigravityModel("gemini 3.1 pro (high)")).toBe("gemini-3.1-pro-high");
+    expect(resolveAntigravityModel("GEMINI 3.6 FLASH", "high")).toBe("gemini-3.6-flash-high");
   });
 
   it("ignores unknown effort labels", () => {

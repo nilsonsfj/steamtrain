@@ -12,6 +12,7 @@ Curated static refresh (existing architecture). Live CLI/API refresh remains the
 
 - Antigravity static ids migrate to live slug form (`gemini-3.6-flash-high`, …). Display labels remain accepted as aliases for workflow compatibility.
 - Antigravity default model: `gemini-3.6-flash-high`.
+- Never emit hybrid ids like `gemini-3.6-flash-high (High)`; repair already-glued hybrids at resolve time.
 - Cursor static list expands to current notables without dumping every `*-fast` / effort variant.
 - Codex gains GPT-5.6 Sol/Terra/Luna `$/MTok` rates; Claude/Cursor/OpenCode keep CLI-reported cost; no new Antigravity USD estimator.
 - `gemini flash` alias moves to `gemini-3.6-flash`; `gemini-3.5-flash-lite` added for cheap/simple class preference.

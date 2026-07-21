@@ -366,6 +366,19 @@ describe("codex mapper (stateful, one mapper per run)", () => {
     expect(cost).toBeCloseTo(expected, 8);
   });
 
+  it("uses correct rates for gpt-5.6-terra including cached input", () => {
+    const m = createCodexMapper();
+    const result = m(
+      JSON.parse(
+        '{"type":"turn.completed","model":"gpt-5.6-terra","usage":{"input_tokens":2000,"cached_input_tokens":500,"output_tokens":100}}',
+      ),
+    );
+    const cost = (result[0] as { costUsd: number }).costUsd;
+    // gpt-5.6-terra rates: input=$2.50/M, cached=$0.25/M, output=$15.00/M
+    const expected = (1500 * 2.5 + 500 * 0.25 + 100 * 15.0) / 1_000_000;
+    expect(cost).toBeCloseTo(expected, 8);
+  });
+
   it("uses correct rates for gpt-5.1-codex-mini (mini-tier)", () => {
     const m = createCodexMapper();
     const result = m(

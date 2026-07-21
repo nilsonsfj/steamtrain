@@ -20,28 +20,29 @@
 
 **Files:** `src/agents/antigravity.ts`, `src/agents/antigravity-variants.ts`, `tests/antigravity-*.test.ts`, `tests/models.test.ts`
 
-- [ ] Update `ANTIGRAVITY_MODELS` to live slugs; default `gemini-3.6-flash-high`
-- [ ] Map effort onto `-high`/`-medium`/`-low` (and legacy `(High)` labels)
-- [ ] Parse slug lines from `agy models`
-- [ ] Update tests
+- [x] Update `ANTIGRAVITY_MODELS` to live slugs; default `gemini-3.6-flash-high`
+- [x] Map effort onto `-high`/`-medium`/`-low` (and legacy `(High)` labels)
+- [x] Parse slug lines from `agy models`
+- [x] Update tests
+- [x] Prevent / repair hybrid ids like `gemini-3.6-flash-high (High)`
 
 ### Task 2: OpenCode + Cursor catalogs
 
 **Files:** `src/agents/opencode.ts`, `src/agents/cursor.ts`
 
-- [ ] Add Zen/Go model gaps from live APIs
-- [ ] Expand Cursor curated notables
+- [x] Add Zen/Go model gaps from live APIs
+- [x] Expand Cursor curated notables
 
 ### Task 3: Codex pricing
 
 **Files:** `src/agents/codex.ts`, `tests/codex-adapter.test.ts`
 
-- [ ] Add Sol/Terra/Luna rates; cover with a pricing test
+- [x] Add Sol/Terra/Luna rates; cover with a pricing test
 
 ### Task 4: Identity + classes + docs
 
 **Files:** `src/agents/model-identity.ts`, `src/agents/model-classes.ts`, `docs/model-binding.md`, related resolve tests
 
-- [ ] Add `gemini-3.6-flash`, `gemini-3.5-flash-lite` families
-- [ ] Retarget aliases/class prefs
-- [ ] Run `npm test` / typecheck for touched areas
+- [x] Add `gemini-3.6-flash`, `gemini-3.5-flash-lite` families
+- [x] Retarget aliases/class prefs
+- [x] Run `npm test` / typecheck for touched areas
