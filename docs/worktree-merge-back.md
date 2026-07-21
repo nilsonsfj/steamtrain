@@ -140,6 +140,26 @@ orphaned worktrees whose run record is gone — is
 - **Doctor:** a merge step with a conflict agent counts toward the workflow's
   agent set, so preflight checks its binary like any agent step.
 
+## Staged integration (`mode: "worktree"`) and `attach:`
+
+Two later additions extend this mechanism to "merge, then keep working on
+the result" pipelines (the shape behind the bundled `mainline` workflow):
+
+- **`mode: "worktree"`** delivers the merge into a KEPT staging worktree
+  instead of the checkout/a branch/a PR — same allocation and retention path
+  as any other step's worktree, so it's found by `history show/apply/prune`
+  and `workflow worktrees` like any other. A later step reaches it with
+  `workspace: "attach:<mergeStepId>"` (or `inherit:`), and a LATER merge step
+  can list it (or anything attached to it) in `from` — sources are deduped
+  by worktree root first, so the harvest logic above runs unmodified.
+- **`workspace: "attach:<stepId>"`** is the sibling of `inherit` used to keep
+  a review/fix loop converging on ONE shared worktree instead of forking a
+  copy per iteration (see [`workflow-spec.md`](workflow-spec.md#workspace-attachstepid)).
+  Every step attached to the same source records the SAME `root`/`branch`/
+  `baseCommit`, so `from` naming any one of them is equivalent — this is what
+  lets the bundled `review-loop` and `mainline-stream` merge steps point at
+  the tail of an attach chain without special-casing it.
+
 ## Lifecycle closure (shipped 2026-07-14)
 
 The retention model's open ends — worktrees/branches accumulating forever,

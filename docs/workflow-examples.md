@@ -18,6 +18,7 @@ model and diagrams, see [`workflow-overview.md`](workflow-overview.md).
 | cross-check + gate + report | consolidator + gate + consolidator | `bug-hunt` |
 | audit many repos/services | distributor + `forEach` + gate | README `audit` example |
 | compose another workflow as one stage | `workflow` step | `release` |
+| plan → parallel streams → staged merge → PR | `workflow` forEach + merge `mode: "worktree"` + `attach:` | `mainline` |
 
 ---
 
@@ -423,6 +424,61 @@ new spec.
 stream folds into this run's own history rather than appearing as a separate
 run. The gate then routes on `bug-sweep`'s own `ok`, exactly as it would for
 any other step.
+
+## Pattern 10: plan → parallel sub-pipeline streams → staged merge → PR
+
+Use when the task is too big for one pass but decomposes into independent
+chunks, each of which needs its OWN implement→review→fix→test loop, and the
+combined result needs one more review pass before delivery. This is the
+bundled `mainline` workflow's shape — a `workflow` call step with `forEach`
+running a whole child pipeline per stream, `merge` in `mode: "worktree"` to
+stage the combined result, then `workspace: "attach:"` to keep working on it.
+
+```jsonc
+{
+  "name": "plan-and-integrate",
+  "phases": [
+    { "id": "plan", "steps": [
+      { "id": "plan", "kind": "distributor", "agent": "opencode", "model": "…",
+        "itemsPath": "streams",
+        "prompt": "Split into independent streams…",
+        "output": { "type": "object", "required": ["streams"],
+          "properties": { "streams": { "type": "array",
+            "items": { "type": "object", "required": ["title", "charter"],
+              "properties": { "title": { "type": "string" }, "charter": { "type": "string" } } } } } } }
+    ] },
+    { "id": "streams", "steps": [
+      { "id": "streams", "kind": "workflow", "workflow": "mainline-stream",
+        "dependsOn": ["plan"], "forEach": "steps.plan.items", "input": "{{item}}",
+        "outputStep": "review", "worktreeStep": "implement" }
+    ] },
+    { "id": "integrate", "steps": [
+      { "id": "integrate", "kind": "merge", "from": ["streams"],
+        "mode": "worktree", "onConflict": "agent", "agent": "opencode", "model": "…" }
+    ] },
+    { "id": "final-review", "steps": [
+      { "id": "final-review", "agent": "opencode", "model": "…",
+        "dependsOn": ["integrate"], "workspace": "attach:integrate",
+        "prompt": "Review the full merged diff from base." }
+    ] },
+    { "id": "deliver", "steps": [
+      { "id": "deliver", "kind": "merge", "from": ["integrate"], "mode": "pr",
+        "dependsOn": ["final-review"],
+        "prTitle": "{{input}}", "prBody": "Streams: {{steps.plan.items}}" }
+    ] }
+  ]
+}
+```
+
+`streams` fans out one whole `mainline-stream` run per planned item; each
+child's `worktreeStep: "implement"` makes the fan-out parent surface one
+worktree per stream, so `integrate`'s `from: ["streams"]` harvests all of
+them. `mode: "worktree"` keeps the merge result as a worktree instead of
+delivering it, so `final-review` can `attach:integrate` and inspect (and, in
+the full `mainline` workflow, fix) the COMBINED diff before the real
+delivery merge. See [`mainline-pipeline.md`](mainline-pipeline.md) for the
+full bundled version — planning, per-stream loops, the final loop, PR
+delivery, and issue filing all wired together.
 
 ---
 

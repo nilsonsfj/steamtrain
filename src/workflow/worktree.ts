@@ -4,7 +4,7 @@ import { copyFile, lstat, mkdir, readlink, realpath, symlink } from "node:fs/pro
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { AgentInstanceId } from "../types/events";
-import { isOutside } from "./fs-util";
+import { isOutside, isSteamtrainStatePath } from "./fs-util";
 import type { WorkflowItem } from "./types";
 
 export interface AgentWorkspaceRequest {
@@ -306,6 +306,11 @@ async function copyWorkingTreeState(
   );
   for (const rel of splitNul(untracked)) {
     throwIfAborted(signal);
+    // Engine-owned run state (history/cache) never rides along into a fresh
+    // worktree: in a repo that doesn't gitignore `.steamtrain`, copying it
+    // gives every parallel worktree a different snapshot of the cache, which
+    // a merge-back would then try to reconcile as if it were the agent's work.
+    if (isSteamtrainStatePath(rel)) continue;
     await copyUntrackedPath(join(repoRoot, rel), join(worktreeRoot, rel));
   }
 
@@ -327,6 +332,9 @@ async function linkIgnoredRuntimeEntries(
   const linkRoots = new Set<string>();
   for (const rel of splitNul(ignored)) {
     throwIfAborted(signal);
+    // Never symlink the engine's own run state into a worktree: an agent
+    // step could then edit the real run's history/cache through the link.
+    if (isSteamtrainStatePath(rel)) continue;
     const root = await ignoredLinkRoot(rel, worktreeRoot);
     if (root) linkRoots.add(root);
   }

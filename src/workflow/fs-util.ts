@@ -23,6 +23,26 @@ export function sanitizePathComponent(id: string): string {
   return id.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
+/**
+ * The engine's run-state directory at the workflow cwd (history, cache — see
+ * `WORKFLOW_HISTORY_DIR` / `WORKFLOW_CACHE_DIR`). Worktree snapshotting and
+ * merge-back harvesting treat it as engine-owned runtime state: it is never
+ * copied into a fresh worktree and never staged by a harvest, whether or not
+ * the repo gitignores it. Without this, parallel worktrees each carry a
+ * slightly different copy of the cache and every multi-source merge hits a
+ * spurious add/add conflict on state files.
+ */
+export const STEAMTRAIN_STATE_DIR = ".steamtrain";
+
+/** True when `rel` (a git-style `/`-separated relative path) is the state dir or inside it. */
+export function isSteamtrainStatePath(rel: string): boolean {
+  return (
+    rel === STEAMTRAIN_STATE_DIR ||
+    rel.startsWith(`${STEAMTRAIN_STATE_DIR}/`) ||
+    rel.startsWith(`${STEAMTRAIN_STATE_DIR}\\`)
+  );
+}
+
 /** True when an error is a "file/dir does not exist" (ENOENT) failure. */
 export function isEnoent(err: unknown): boolean {
   return Boolean(

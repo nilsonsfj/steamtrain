@@ -184,8 +184,17 @@ or disjoint, never partially overlapping.
 - "merge": land the FILE CHANGES of earlier agent steps (each runs in an isolated
   git worktree) back into the user's repository. Requires dependsOn (or "from":
   ["stepId", ...]). "mode": "apply" (default; changes land uncommitted in the
-  user's checkout), "branch" (left on a local branch), or "pr" (pushed + a GitHub
-  PR is opened; "perSource": true opens one PR per parallel source). "onConflict":
+  user's checkout), "branch" (left on a local branch), "pr" (pushed + a GitHub
+  PR is opened; "perSource": true opens one PR per parallel source), or
+  "worktree" (merges into a KEPT staging worktree instead of delivering
+  anywhere — nothing lands in the user's checkout. Use this for STAGED
+  INTEGRATION: merge N parallel streams, then keep working on the combined
+  result — e.g. one more review/fix/test loop on the WHOLE merge before a
+  real delivery. A later step reaches the merged worktree with "workspace":
+  "attach:<mergeStepId>" or "inherit:<mergeStepId>"; a LATER merge step may
+  list this one — or anything attached to it — in "from" to harvest it, same
+  as any agent step's worktree. "perSource" is invalid with this mode.).
+  "onConflict":
   "fail" (default), "ours", "theirs", or "agent" (requires agent+model; the agent
   resolves conflict markers). "cleanup": true discards the source worktrees after
   a successful delivery (the delivered result is the durable copy; only use it on
@@ -199,6 +208,17 @@ or disjoint, never partially overlapping.
   handle that internally. Use it to compose a reusable workflow as one stage of
   a larger pipeline. The child workflow is resolved at run time, and cycles or
   reaching five nested workflow levels fails clearly.
+  For a PARALLEL SUB-PIPELINE FAN-OUT (e.g. "plan independent streams, run a
+  whole implement→review→fix pipeline per stream in parallel"), add:
+  "forEach": "steps.<distributorId>.items" (one whole child RUN per item, in
+  parallel, exactly like worker forEach — {{item}} is available in "input" and
+  "params"); "params": { "key": "{{...}}" } (templated values passed as the
+  child's own declared "inputs", validated the same way --param is); and
+  "worktreeStep": "<childStepId>" (the named child step's worktree surfaces as
+  THIS step's own worktree — required if a later "merge" or "workspace: attach/
+  inherit" step needs to reach into what the sub-workflow produced; under
+  forEach this gives the fan-out parent one surfaced worktree per item, so a
+  merge step's "from" naming the fan-out step harvests every stream).
 - "approval": human-in-the-loop CONSENT checkpoint. The run pauses, shows the
   reviewed step's output/diff, and waits for a human to approve or reject.
   Optional "step" (the reviewed step; defaults to a sole dependsOn), "prompt"
@@ -214,6 +234,23 @@ or disjoint, never partially overlapping.
   IMPORTANT: only add approval/human steps when the request explicitly wants a
   human in the loop — they make the workflow non-autonomous (it parks until a
   person responds), which is surfaced as an autonomy label in every UI.
+- "issues": document out-of-scope findings — as a report or as GitHub issues.
+  Requires nothing (defaults "from" to dependsOn); usually set "from": [ids...]
+  (steps to collect findings from), "findingsPath" (JSON path into each
+  source's "json" where the findings array lives; default "findings"), "mode"
+  ("report" default — zero side effects, safe; or "github" — creates issues via
+  the gh CLI, checking for and skipping duplicates by title), "titlePrefix",
+  "labels" (only set these if the target repo is known to already have them —
+  gh fails on an unknown label), "limit" (max issues created, github mode,
+  default 20). "mode" is a template, so it can switch via {{inputs.<key>}}.
+  For findings to exist, some earlier agent-backed step must declare an
+  "output" schema with a findings array — e.g.
+  { "type": "array", "items": { "type": "object", "required": ["title"],
+  "properties": { "title": {"type":"string"}, "body": {"type":"string"},
+  "severity": {"type":"string","enum":["low","medium","high"]},
+  "file": {"type":"string"} } } } — and its prompt must instruct the agent to
+  report OUT-OF-SCOPE problems there instead of fixing them. No agent, no
+  worktree, no cost; never a "workspace" source.
 A worker/processor may set "canAsk": true to let the agent ask ONE clarifying
 question mid-step (answered by a human through the same channel) instead of
 guessing. Reserve it for steps whose input is likely ambiguous; it also makes
@@ -230,6 +267,21 @@ an earlier phase (not a forEach fan-out; merge those first). Chains compose:
 review inherits implement, test inherits review. Merging an inherited worktree
 lands the whole chain's changes, so point the final merge step at the LAST step
 of a chain, not every link.
+For a REVIEW/FIX LOOP specifically, prefer "workspace": "attach:<stepId>" over
+"inherit:<stepId>". "inherit" COPIES the source's worktree into a fresh one —
+inside a "loopTo" loop this means each pass forks a copy of the source's
+ORIGINAL state, so iteration 2's review would never see iteration 1's fix and
+the loop can never observably converge. "attach" instead runs INSIDE the
+source's own worktree (no copy) — every step attached to the same source, plus
+the source itself, share ONE worktree, so a review→fix→review loop actually
+sees each pass's edits. Rule of thumb: use "attach" for a review/fix/test loop
+that must converge on real state; use "inherit" when forked, independent
+copies are the point (e.g. speculative parallel branches). "attach" sources are
+the same worker/processor/command step as "inherit", PLUS a "merge" step with
+"mode": "worktree", PLUS a "workflow" step with "worktreeStep" and no forEach.
+Every step attaching to the same source must form a strict dependsOn chain (no
+two attachers may run concurrently in one worktree) — this is exactly the
+natural order of a review→fix→test loop, so it falls out for free.
 A worker/processor/command step may also declare "artifacts": ["report.md",
 "coverage/"] — paths (relative to its cwd) it promises to produce. They are
 snapshotted after the step succeeds (a missing one FAILS the step) and later
@@ -256,6 +308,14 @@ shares CONVERSATION state, not files — pair it with "workspace" inheritance
 when the step must also see the source's edits. Default to fresh sessions for
 independent critique; use continuation only when inheriting context is the
 point.
+
+# Routing on a workflow input directly (gate/when "value")
+A gate condition (and per-step "when") may test a TEMPLATE EXPRESSION instead
+of a step's output: { "value": "{{inputs.deliver}}", "equals": "pr" }. This is
+the way to route purely on an input parameter, with no step involved — e.g.
+gate an optional final phase behind a flag, or skip a step based on which mode
+the user picked: { "when": { "value": "{{inputs.issueTiming}}", "equals":
+"live" }, ... }. "value" is mutually exclusive with "step"/"ok"/"path"/"human".
 
 # Per-step conditions ("when")
 Any step may carry a "when" condition (same shape as a gate condition), e.g.
@@ -313,7 +373,8 @@ parameters — define them in the spec's "inputs" map and users pass --param key
 {{steps.<id>.json}} / {{steps.<id>.json.<path>}} (structured output fields),
 {{steps.<id>.artifacts.<name>}} (the snapshot path of a declared artifact),
 {{steps.<id>.worktree.root}} / {{steps.<id>.worktree.branch}} (an agent step's
-isolated git worktree, for custom integration steps), {{item}},
+isolated git worktree, for custom integration steps — also valid on a "mode":
+"worktree" merge step and a "workflow" step with "worktreeStep"), {{item}},
 {{item.index}}, {{item.sourceStepId}}, {{iteration}}.
 
 IMPORTANT: validate that every {{steps.<id>...}} reference uses a step id that
@@ -327,6 +388,14 @@ agent "opencode" with models like "opencode/mimo-v2.5-free",
 "opencode/deepseek-v4-flash-free", "opencode/nemotron-3-ultra-free",
 "opencode/north-mini-code-free".
 Every agent-backed step MUST set agent, model, and a non-empty prompt.
+"model" and "effort" are TEMPLATES, rendered at run time — this is how ONE
+spec serves several cost/quality tiers via declared "inputs" instead of
+forking the workflow: "model": "{{inputs.coderModel}}" with an "inputs" entry
+declaring a sensible free-model default. ("agent" itself must stay a plain
+static string — never templated.) A "model" that renders empty FAILS the
+step; an "effort" that renders empty is fine (it just omits the flag) — so
+give a "reviewerEffort"-style input a default of "" when you're not sure the
+chosen agent/model supports effort/variant.
 
 # Worked example: parallel backlog implement, then consolidate
 This is the canonical shape for "split a backlog into tasks, do them in parallel,
@@ -371,11 +440,13 @@ The gate sits AFTER the body it re-runs, and "loopTo" names that earlier phase:
     { "id": "review", "title": "Review", "steps": [
       { "id": "review", "kind": "worker", "agent": "opencode",
         "model": "opencode/mimo-v2.5-free", "dependsOn": ["impl"],
+        "workspace": "attach:impl",
         "prompt": "Review the implementation (pass {{iteration}}). If there are NO remaining issues, reply with the single word DONE. Otherwise list the issues.\\n{{steps.impl.output}}" }
     ] },
     { "id": "fix", "title": "Fix", "steps": [
       { "id": "fix", "kind": "worker", "agent": "opencode",
         "model": "opencode/mimo-v2.5-free", "dependsOn": ["review"],
+        "workspace": "attach:impl",
         "prompt": "Apply fixes for these review findings:\\n{{steps.review.output}}" }
     ] },
     { "id": "gate", "title": "Converged?", "steps": [

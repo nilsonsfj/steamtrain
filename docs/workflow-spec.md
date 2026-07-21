@@ -120,6 +120,24 @@ guessing — see [Human in the loop](./human-in-the-loop.md#agent-clarifying-que
 `session` (continue an earlier step's agent conversation — see
 [Session continuity](#session-continuity-session)).
 
+`model` and `effort` are **templates**, rendered at execution time with the
+step's full context (`{{inputs.*}}`, `{{steps.*}}`, `{{item}}`, `{{iteration}}`)
+— this is what lets one spec serve several cost tiers via `--param`
+(`model: "{{inputs.coderModel}}"`) instead of forking the workflow per tier.
+`agent` itself stays a static, non-templated field on purpose: doctor
+preflight and autonomy labeling need to know which CLI a step launches
+without running the workflow. A `model` that renders to an empty string
+**fails the step** with a clear error rather than silently launching
+whatever the agent's own default is; an empty rendered `effort`, by
+contrast, is treated as "omit the flag" — useful for a tier whose agent has
+no effort/variant concept. Everything downstream (cache keys, cost/pricing
+lookup, `step_start` events, recorded results, `doctor` variant checks) sees
+the **rendered** value. The same templating applies to `model`/`effort` on
+distributor/consolidator splitters and mergers, and to a merge step's
+`onConflict: "agent"` resolver. See
+[docs/mainline-pipeline.md](mainline-pipeline.md) for a worked example with a
+premium/balanced/budget model-tier table.
+
 If the resolved `cwd` is inside a git repository, the agent subprocess runs from
 a matching path in its own git worktree. The worktree starts at the current
 `HEAD` and includes a snapshot of tracked dirty changes plus untracked
@@ -253,9 +271,10 @@ Gate condition fields are combined with logical AND:
 | field | meaning |
 | --- | --- |
 | `step` | Inspect this earlier step. If omitted, inspect workflow input text. |
-| `human` | Pause for a human Approve/Reject decision instead of a mechanical test (see [Human-in-the-loop approval gates](#human-in-the-loop-approval-gates)). Mutually exclusive with `ok`/`path`/`contains`/`matches`/`equals`. |
+| `human` | Pause for a human Approve/Reject decision instead of a mechanical test (see [Human-in-the-loop approval gates](#human-in-the-loop-approval-gates)). Mutually exclusive with `ok`/`path`/`value`/`contains`/`matches`/`equals`. |
 | `ok` | Require the referenced step's success state. |
 | `path` | Inspect one field of the step's structured output (e.g. `verdict`, `issues[0].severity`) instead of its full text. Requires `step`; the step should declare an `output` schema. Missing fields evaluate as empty text. |
+| `value` | A templated text expression, evaluated at gate time and tested by `contains`/`matches`/`equals` instead of a step output or the run input. The canonical use is routing on a workflow input directly: `{ "value": "{{inputs.issueTiming}}", "equals": "live" }`. Mutually exclusive with `step`/`ok`/`path`/`human`. Works anywhere a `GateCondition` works — gates AND per-step `when` (see [Per-step conditions](#per-step-conditions-when)). |
 | `contains` | Require output/input text to contain this rendered string. |
 | `matches` | Require output/input text to match this rendered regular expression. |
 | `equals` | Require output/input text to equal this rendered string. |
@@ -272,6 +291,20 @@ gate:
   "dependsOn": ["review"],
   "condition": { "step": "review", "path": "verdict", "equals": "pass" },
   "onFalse": "fail"
+}
+```
+
+`value` conditions are the way to route purely on an **input parameter**, with
+no step involved at all — e.g. gating an optional phase behind a flag, or (as
+a per-step `when`) skipping a step entirely based on which mode the user
+picked:
+
+```jsonc
+{
+  "id": "stream-issues",
+  "kind": "issues",
+  "when": { "value": "{{inputs.issueTiming}}", "equals": "live" },
+  "from": ["implement", "review"]
 }
 ```
 
@@ -436,7 +469,7 @@ except when an agent is asked to resolve conflicts.
 | field | meaning |
 | --- | --- |
 | `from` | Step ids whose worktrees to merge. Defaults to `dependsOn`. A `forEach` fan-out parent contributes every child worktree. Sources whose worktrees have no changes are skipped. |
-| `mode` | `apply` (default): the merged diff lands in the user's checkout as **uncommitted** working-tree changes (pre-checked and all-or-nothing; the step fails with guidance when local edits conflict). `branch`: the merged state is left on a local branch. `pr`: the branch is pushed to `origin` and a pull request is opened with the `gh` CLI. |
+| `mode` | `apply` (default): the merged diff lands in the user's checkout as **uncommitted** working-tree changes (pre-checked and all-or-nothing; the step fails with guidance when local edits conflict). `branch`: the merged state is left on a local branch. `pr`: the branch is pushed to `origin` and a pull request is opened with the `gh` CLI. `worktree`: nothing is delivered anywhere — the merge lands in a **kept** staging worktree instead (see below). |
 | `branch` | Branch name template for `branch`/`pr` modes; a unique `steamtrain/merged/…` name is generated when omitted. |
 | `perSource` | One branch/PR **per source worktree** instead of one combined merge — e.g. each parallel `forEach` implementer gets its own PR for human review. Requires `mode` `branch` or `pr`. |
 | `cleanup` | `true` prunes the source worktrees and their steamtrain branches after a **successful** delivery — the delivered result (applied diff, merged branch, PR) becomes the single durable copy, and nothing accumulates in `$TMPDIR` or `git branch`. A failed merge always keeps the worktrees for post-mortem harvesting. Don't combine with later steps that `workspace: "inherit:<stepId>"` or template-reference the cleaned worktrees. |
@@ -459,6 +492,40 @@ fail the run when nothing was produced:
   "onFalse": "fail"
 }
 ```
+
+**`mode: "worktree"` — merge, then keep working on the result.** The
+`apply`/`branch`/`pr` modes all *deliver* the merge somewhere final. `worktree`
+mode instead merges the sources into a fresh, **kept** staging worktree (same
+base directory and naming convention as any other step worktree, so it's
+found by the usual prune/GC paths — nothing lands in a tmpdir that vanishes,
+and nothing touches the user's checkout). The step's own `result.worktree`
+records it (`root`, `branch` — a generated `steamtrain/<runId>/…` name, or the
+`branch` field — and `baseCommit`, the pre-merge target `HEAD`), exactly like
+a worker step's worktree. This is what makes a **staged integration** pattern
+possible: fan out N parallel streams, merge them into one worktree, then run
+one more review/fix/test loop on the *combined* result before delivering:
+
+```jsonc
+{ "id": "integrate", "steps": [
+  { "id": "integrate", "kind": "merge", "from": ["streams"],
+    "mode": "worktree", "onConflict": "agent",
+    "agent": "opencode", "model": "{{inputs.mergeModel}}" }
+] },
+{ "id": "final-review", "steps": [
+  { "id": "final-review", "agent": "opencode", "model": "{{inputs.reviewerModel}}",
+    "workspace": "attach:integrate",
+    "prompt": "Review the full merged diff from base." }
+] }
+```
+
+A later step can `workspace: "inherit:integrate"` / `"attach:integrate"` to
+keep working on the merged state, and a **later** `merge` step may list
+`integrate` (or anything attached to it) in `from` to harvest it like any
+agent step's worktree — sources are deduped by worktree root, so naming
+`integrate` and a step attached to it in the same `from` array double-counts
+nothing. `perSource` is rejected with `mode: "worktree"` (one kept worktree
+is the point); `cleanup` still only prunes the *source* worktrees that were
+merged IN, not the kept result.
 
 Conflicts with the *user's checkout* are deliberately out of scope for
 `apply`: the merged diff is checked first and the step fails cleanly (use
@@ -539,6 +606,72 @@ A typical trustworthy fix loop:
     "loopTo": "fix", "maxIterations": 5, "onFalse": "fail" }
 ] }
 ```
+
+### Issues (findings → GitHub issues or a report)
+
+Documents **out-of-scope findings** that agent steps noticed along the way but
+weren't theirs to fix — the "file it as an issue instead of scope-creeping the
+current task" channel. No agent, no worktree, no cost; autonomy-neutral (it
+never pauses for a human).
+
+```jsonc
+{
+  "id": "file-issues",
+  "kind": "issues",
+  "from": ["plan", "streams", "final-review"],   // default: dependsOn
+  "findingsPath": "findings",                    // path into each source's json
+  "mode": "report",                              // "report" | "github" (both templates)
+  "titlePrefix": "[mainline]",
+  "labels": ["from-steamtrain"],
+  "repo": "owner/name",                          // optional, gh -R
+  "limit": 20                                    // max issues created, github mode
+}
+```
+
+**The findings channel.** Any step that declares an `output` schema with a
+findings array participates — nothing special registers it, the `issues` step
+just reads it. For each `from` source (descending one level into
+`childResults` leaves — `forEach` fan-out children and sub-workflow surfaces —
+skipping skipped/not-run leaves; a **failed** source fails the step, mirroring
+`merge` semantics), it reads `json` at `findingsPath` and accepts items that
+are objects (`title` required; `body`, `severity`, `file`, `line` optional) or
+plain strings (treated as titles). A source with no structured output, or
+nothing at that path, contributes nothing — a clean run has zero findings,
+not an error. Findings are deduped case-insensitively across all sources by
+normalized `title` + `file`.
+
+| field | meaning |
+| --- | --- |
+| `from` | Step ids to collect findings from. Defaults to `dependsOn`. |
+| `findingsPath` | JSON path into each source's `json` where the findings array lives. Default `"findings"`. |
+| `mode` | `"report"` (default, zero side effects) or `"github"` (creates issues via `gh`). Template, rendered then validated ∈ `{report, github}` — one spec can switch modes via `{{inputs.issueMode}}`. |
+| `titlePrefix` | Prepended to each created issue's title (github mode). Template. |
+| `labels` | `--label` flags applied to every created issue (github mode). Omit if the target repo doesn't already have these labels — `gh issue create` fails on an unknown label. |
+| `repo` | `-R owner/name` target for `gh` (github mode); omitted uses the run's cwd repo. |
+| `limit` | Max issues created before truncating (github mode). Default 20. |
+
+**`mode: "report"`**: the output is a severity-ordered markdown report;
+`json` is `{ findings, created: [], skippedExisting: [] }`. This is the safe
+default — always available, no `gh` needed, nothing created anywhere.
+
+**`mode: "github"`**: creates one issue per finding with `gh issue create`
+(title = `titlePrefix` + title; body = the finding body plus provenance —
+workflow/run/source step, `file:line`, severity; `--label` per label, `-R
+repo` when set). Before creating, it checks for an existing issue with the
+same title (`gh issue list --search`, all states) and skips duplicates,
+recording them in `skippedExisting` — reruns of the same workflow don't spam
+duplicate issues. Missing `gh`, or a `gh` auth failure, fails the step with
+copy-paste setup guidance. Creation stops at `limit` and reports the
+truncation; `json.created` is `[{ title, url }]`. `gh` runs from the run's
+base cwd (or `repo`). The result is marked `noCache: true` like an approval
+checkpoint — side-effectful, so a resumed run re-runs it rather than
+replaying a stale "created" list.
+
+**Two timing patterns**, both used by the bundled `mainline`/`mainline-stream`
+workflows: batch-at-end (one `issues` step in the parent's final phase,
+gated `when: { value: "{{inputs.issueTiming}}", equals: "end" }`) or
+as-it-goes (an `issues` step inside each per-stream child workflow, gated on
+`equals: "live"`) — see [mainline-pipeline.md](mainline-pipeline.md).
 
 ### Llm (direct API inference)
 
@@ -693,6 +826,51 @@ directly by its namespaced id, e.g. `{{steps.bug-sweep::report.output}}` —
 this works with no special syntax, and (like any other `{{steps.<id>…}}`
 reference) creates an implicit scheduling dependency on the `bug-sweep` step.
 
+Three more fields make a `workflow` call behave like a first-class,
+fan-out-and-worktree-capable step:
+
+- **`forEach: "steps.<id>.items"`** — run the child workflow once **per item**
+  of an earlier distributor/llm splitter, in parallel under
+  `maxConcurrency`, exactly like worker/llm `forEach`: one generated child run
+  per item (`<stepId>[i]`), `{{item}}` available in `input` and `params`
+  templates, and the parent result aggregates `childResults` (ok only when
+  every item's child run succeeded).
+- **`params: Record<string, string>`** — templated values passed as the
+  child run's own declared `inputs` (rendered with the parent's context,
+  including `{{item}}` under `forEach`, then validated via the child's own
+  `resolveInputs` — unknown-param and missing-required errors surface
+  exactly like CLI `--param` errors and fail this step).
+- **`worktreeStep: "<childStepId>"`** — the named child step's recorded
+  worktree surfaces as THIS step's own `result.worktree`, the sub-workflow
+  analog of a worker step's own worktree. A `workflow` step with
+  `worktreeStep` and no `forEach` is a valid `workspace: "inherit:<id>"` /
+  `"attach:<id>"` source and a valid `merge` `from` source, exactly like a
+  worker/processor/command step. Under `forEach`, each generated child
+  carries its own surfaced worktree, so a `merge` step whose `from` names the
+  fan-out **parent** harvests one worktree per item.
+
+Together these turn a `workflow` call into a **parallel sub-pipeline fan-out**
+— the building block behind the bundled `mainline` workflow, which runs
+`mainline-stream` once per planned execution stream:
+
+```jsonc
+{
+  "id": "streams",
+  "kind": "workflow",
+  "workflow": "mainline-stream",
+  "dependsOn": ["plan"],
+  "forEach": "steps.plan.items",
+  "input": "{{item}}",
+  "params": { "coderModel": "{{inputs.coderModel}}" },
+  "outputStep": "review",
+  "worktreeStep": "implement"
+}
+```
+
+A `merge` step later doing `"from": ["streams"]` harvests one worktree per
+planned stream, because `streams` fans out and each generated child surfaces
+its own `worktreeStep` worktree.
+
 The child run enforces its own independent 1000-step budget (`MAX_STEPS`) —
 it is not combined with the parent's. `MAX_WORKFLOW_NESTING_DEPTH` is 5, but
 because the root spec's own name is folded into the cycle/depth-tracking
@@ -751,6 +929,65 @@ Semantics:
 - On a resumed run the source may replay from cache; its recorded worktree is
   reused (worktrees are retained). If it was pruned (`history prune`), the
   inheriting step fails with a clear error — re-run without the stale cache.
+
+### `workspace: "attach:<stepId>"`
+
+Where `inherit` **copies** the source step's worktree state into a fresh
+worktree (a new branch, forked from the source), `attach` runs this step
+**inside the source step's own worktree** — no copy, no new branch, no fork
+point to drift from. This is the loop-safe choice for a review/fix pipeline:
+
+```jsonc
+{ "id": "implement", "steps": [
+  { "id": "impl", "agent": "opencode", "model": "…", "prompt": "Implement: {{input}}" }
+] },
+{ "id": "review", "steps": [
+  { "id": "review", "agent": "opencode", "model": "…", "dependsOn": ["impl"],
+    "workspace": "attach:impl",
+    "prompt": "Review the diff from base. Reply DONE if clean." }
+] },
+{ "id": "fix", "steps": [
+  { "id": "fix", "agent": "opencode", "model": "…", "dependsOn": ["review"],
+    "workspace": "attach:impl",
+    "prompt": "Fix: {{steps.review.output}}" }
+] },
+{ "id": "gate", "steps": [
+  { "id": "loop-gate", "kind": "gate", "dependsOn": ["fix"],
+    "condition": { "step": "review", "contains": "DONE" },
+    "loopTo": "review", "maxIterations": 5 }
+] }
+```
+
+With `inherit:impl` on `review`, **every loop iteration forks a fresh copy of
+impl's ORIGINAL state** — iteration 2's review would never see iteration 1's
+fix, so the loop could burn its whole iteration cap without ever observing
+progress. With `attach:impl`, `review`, `fix`, and the next `review` all run
+inside the ONE worktree impl owns, so each pass genuinely sees the previous
+pass's edits — the loop converges on real state. (The bundled `review-loop`
+workflow uses exactly this pattern; see `src/workflow/bundled.ts`.)
+
+Semantics, on top of everything `inherit` does (implicit dependency, cache/
+resume, degradation outside a git repo):
+
+- Valid sources: a worker/processor/command step without `forEach`; a `merge`
+  step with `mode: "worktree"`; or a `workflow` call step with `worktreeStep`
+  and no `forEach`.
+- The attached step's lease IS the source's recorded worktree — same `root`,
+  `branch`, `baseCommit` — with `cwd` re-rooted the same way `inherit`
+  re-roots it. `result.worktree` records that same info, so templates,
+  `history show --diff`, and `merge` all see it.
+- **Ordering is enforced at validate time**: two steps must never run
+  concurrently inside one worktree, so every step attaching to the same
+  source (in spec order) must form a strict `dependsOn` chain — each attacher
+  reachable from the previous one (and the first from the source). A
+  violation is a validation error naming both steps. Loops need no extra
+  rule (their iterations are already sequential).
+- A `merge` step's `from` can name **any** member of an attach group — merges
+  dedupe sources by worktree root, so `from: ["fix"]` and `from: ["impl"]`
+  harvest the identical (shared) worktree.
+- `inherit` still has its place: forked copies ARE the point for speculative
+  branches that should NOT see each other's edits. `attach` is specifically
+  for "these steps are really one continuous unit of work on one worktree."
 
 ### `artifacts: ["report.md", "coverage/"]`
 
@@ -1127,5 +1364,6 @@ Running `steamtrain` with no arguments opens the workflow-first TUI.
 
 - [`workflow-overview.md`](workflow-overview.md) — diagrams, dynamic fan-out, gates, resume/cache, pitfalls
 - [`workflow-examples.md`](workflow-examples.md) — bundled workflow walkthroughs and authoring patterns
+- [`mainline-pipeline.md`](mainline-pipeline.md) — the `mainline`/`mainline-stream` use-case guide: plan → parallel streams → reviewed merge → PR + filed issues
 - [`human-in-the-loop.md`](human-in-the-loop.md) — autonomy labels, human steps, agent questions, takeover, notifications
 - [`README.md`](README.md) — documentation index

@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { rm, stat, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { STEAMTRAIN_STATE_DIR } from "./fs-util";
 import type { AgentWorktreeInfo } from "./types";
 import { runGit, runGitText, withRepoWorktreeLock } from "./worktree";
 
@@ -164,10 +165,18 @@ const GIT_IDENT = [
  * at the real repo's scaffolding (node_modules, dist, .claude, etc.) — without
  * exclusion they get staged as new mode-120000 entries because `.gitignore`
  * directory patterns don't match symlinks.
+ *
+ * `.steamtrain` (the run-state dir: history, cache) is ALWAYS excluded, even
+ * when the repo doesn't gitignore it: it is engine-owned runtime state, and in
+ * an un-ignored repo each parallel worktree accumulates a slightly different
+ * copy — harvesting those turns every multi-source merge into a spurious
+ * add/add conflict on cache files. State never belongs in a merge-back.
  */
 function gitAddArgsWithExcludes(linkedIgnoredPaths?: string[]): string[] {
-  if (!linkedIgnoredPaths?.length) return ["add", "-A", "."];
-  const pathspecs = linkedIgnoredPaths.map((p) => `:!${p}`);
+  const pathspecs = [
+    `:!${STEAMTRAIN_STATE_DIR}`,
+    ...(linkedIgnoredPaths ?? []).map((p) => `:!${p}`),
+  ];
   return ["add", "-A", ".", "--", ...pathspecs];
 }
 

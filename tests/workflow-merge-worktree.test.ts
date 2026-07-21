@@ -317,3 +317,68 @@ describe("merge mode worktree engine behavior", () => {
     expect(content).toContain("more");
   });
 });
+
+describe("engine-owned .steamtrain state exclusion", () => {
+  afterEach(async () => {
+    await Promise.all(tempRoots.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  // Regression: in a repo that does NOT gitignore `.steamtrain`, the run's own
+  // history/cache written at the base cwd was copied into each parallel
+  // worktree as untracked files and then harvested — so merging two parallel
+  // steps hit spurious add/add conflicts on cache files. The state dir is
+  // engine-owned and must never enter worktree copies or merge-backs.
+  it("parallel worktrees merge cleanly despite un-ignored .steamtrain state at the base", async () => {
+    const { repo, worktrees } = await makeRepo();
+    // Simulate pre-existing (and divergent-looking) run state at the base cwd.
+    await mkdir(join(repo, ".steamtrain", "cache"), { recursive: true });
+    await writeFile(join(repo, ".steamtrain", "cache", "entry.json"), '{"seed":1}');
+
+    const spec: WorkflowSpec = {
+      name: "state-exclusion",
+      phases: [
+        {
+          id: "work",
+          title: "Work",
+          steps: [
+            {
+              id: "a",
+              kind: "command",
+              // Each step also mutates ITS copy of the state dir — if the dir
+              // leaked into the worktree, the two sides would now differ from
+              // each other and from the base, forcing a conflict.
+              cmd: 'echo alpha > a.txt && mkdir -p .steamtrain/cache && echo \'{"seed":2}\' > .steamtrain/cache/entry.json',
+            },
+            {
+              id: "b",
+              kind: "command",
+              cmd: 'echo beta > b.txt && mkdir -p .steamtrain/cache && echo \'{"seed":3}\' > .steamtrain/cache/entry.json',
+            },
+          ],
+        },
+        {
+          id: "merge",
+          title: "Merge",
+          steps: [
+            { id: "merge", kind: "merge", dependsOn: ["a", "b"], from: ["a", "b"], mode: "branch" },
+          ],
+        },
+      ],
+    };
+    expect(validateWorkflow(spec).ok).toBe(true);
+    const events = await runToEvents(spec, repo, worktrees, agentlessDeps(repo, {
+      agentWorkspace: createGitWorktreeManager({ baseDir: worktrees, runId: "state-excl-test" }),
+    }));
+    const results = doneResults(events);
+    expect(results.get("merge")?.error).toBeUndefined();
+    expect(workflowOk(events)).toBe(true);
+    const merged = results.get("merge");
+    expect(merged?.ok).toBe(true);
+    // Both real files merged; no state files in the harvested diff.
+    const files = (merged?.json as { files?: { path: string }[] })?.files ?? [];
+    const paths = files.map((f) => f.path);
+    expect(paths).toContain("a.txt");
+    expect(paths).toContain("b.txt");
+    expect(paths.some((p) => p.startsWith(".steamtrain"))).toBe(false);
+  });
+});

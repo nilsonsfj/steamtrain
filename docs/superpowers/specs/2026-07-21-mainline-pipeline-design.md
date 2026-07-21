@@ -1,6 +1,6 @@
 # Mainline pipeline — plan → parallel streams → reviewed merge → PR (+ issues)
 
-Status: implementing
+Status: implemented
 Date: 2026-07-21
 
 ## The use-case
