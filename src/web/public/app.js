@@ -1217,7 +1217,7 @@
       S.source = r.body.source;
       document.getElementById("wfTitle").textContent = r.body.spec.name;
       document.getElementById("wfSub").textContent = r.body.spec.description || "";
-      document.getElementById("runRow").style.display = isReadOnly() ? "none" : "flex";
+      document.getElementById("runRow").style.display = isReadOnly() ? "none" : "grid";
       renderSourceLine();
       renderBlockedRow();
       renderParamsForm(r.body.spec);
@@ -1277,7 +1277,7 @@
       container.style.display = "none";
       return;
     }
-    container.style.display = "flex";
+    container.style.display = "grid";
     Object.keys(inputs).forEach(function (key) {
       var inp = inputs[key];
       var type = inp.type || "string";
