@@ -71,7 +71,7 @@ steamtrain spawns the real `claude`, `opencode`, `codex`, `agent` (Cursor), `agy
 (Antigravity), and `amp` CLIs (no stubs) and maps each one's streaming output onto a single
 normalized event model. Whichever agent produced a line — assistant text, a
 tool call, a result, an error — it renders in the same unified, color-coded
-stream. Mix agents freely in one workflow; steamtrain speaks all five.
+stream. Mix agents freely in one workflow; steamtrain speaks all of them.
 
 ### Compose work as declarative, parallel workflows
 

@@ -6,6 +6,7 @@ import {
   extractAntigravityConversationId,
   formatAntigravityPrintTimeout,
   resolveAntigravityModel,
+  runAntigravityProcess,
 } from "../src/agents/antigravity";
 import {
   parseAntigravityPlannerResponse,
@@ -104,6 +105,11 @@ describe("extractAntigravityConversationId", () => {
         "Stream completed for 1858e0e0-832e-469a-8f82-51d0f56a954f, clearing ResponsePending",
       ),
     ).toBe("1858e0e0-832e-469a-8f82-51d0f56a954f");
+    expect(
+      extractAntigravityConversationId(
+        "Stream goroutine exited for deadbeef-1234-5678-9abc-def012345678, sending completion signal",
+      ),
+    ).toBe("deadbeef-1234-5678-9abc-def012345678");
   });
 
   it("returns undefined when no id is present", () => {
@@ -159,6 +165,195 @@ describe("transcript recovery helpers", () => {
           : undefined,
     });
     expect(text).toEqual({ conversationId, text: "from transcript" });
+  });
+
+  it("prefers an explicit conversationId over the cwd last_conversations map", () => {
+    const recovered = recoverAntigravityTranscriptText({
+      cwd: "/tmp/demo",
+      conversationId: "known-id",
+      lastConversations: { "/tmp/demo": "stale-other-id" },
+      readTranscript: (id) =>
+        id === "known-id"
+          ? `${JSON.stringify({
+              source: "MODEL",
+              type: "PLANNER_RESPONSE",
+              content: "known transcript",
+            })}\n`
+          : id === "stale-other-id"
+            ? `${JSON.stringify({
+                source: "MODEL",
+                type: "PLANNER_RESPONSE",
+                content: "wrong transcript",
+              })}\n`
+            : undefined,
+    });
+    expect(recovered).toEqual({ conversationId: "known-id", text: "known transcript" });
+  });
+});
+
+describe("runAntigravityProcess", () => {
+  async function collect(
+    events: AsyncIterable<import("../src/types/events").AgentEvent>,
+  ): Promise<import("../src/types/events").AgentEvent[]> {
+    const out: import("../src/types/events").AgentEvent[] = [];
+    for await (const event of events) out.push(event);
+    return out;
+  }
+
+  it("keeps stdin closed and streams stderr session + stdout text", async () => {
+    let seenOpts: import("../src/agents/spawn").ProcessRunOptions | undefined;
+    const events = await collect(
+      runAntigravityProcess({
+        id: "antigravity",
+        binary: "agy",
+        args: buildAntigravityRunArgs({
+          prompt: "hi",
+          model: "Gemini 3.5 Flash (Low)",
+        }),
+        opts: {
+          prompt: "hi",
+          model: "Gemini 3.5 Flash (Low)",
+          cwd: "/tmp/demo",
+        },
+        runLines: async function* (opts) {
+          seenOpts = opts;
+          yield {
+            kind: "stderr",
+            text: "Created conversation abc-111-def",
+          };
+          yield { kind: "line", line: "hello" };
+          yield {
+            kind: "exit",
+            code: 0,
+            signal: null,
+            timedOut: false,
+            stderr: "Created conversation abc-111-def",
+            sawStdout: true,
+          };
+        },
+      }),
+    );
+
+    expect(seenOpts?.prompt).toBeUndefined();
+    expect(events.map((e) => e.kind)).toEqual(["session_start", "text_delta", "result"]);
+    expect(events[0]).toMatchObject({
+      kind: "session_start",
+      sessionId: "abc-111-def",
+      model: "Gemini 3.5 Flash (Low)",
+    });
+    expect(events[1]).toMatchObject({ kind: "text_delta", text: "hello\n" });
+    expect(events[2]).toMatchObject({ kind: "result", text: "hello", isError: false });
+  });
+
+  it("recovers empty stdout using the known conversation id, not a stale cwd mapping", async () => {
+    const recoverCalls: Array<{ cwd: string; conversationId?: string }> = [];
+    const events = await collect(
+      runAntigravityProcess({
+        id: "antigravity",
+        binary: "agy",
+        args: [],
+        opts: {
+          prompt: "hi",
+          model: "Gemini 3.1 Pro (High)",
+          cwd: "/tmp/demo",
+          resumeSessionId: "resume-id",
+        },
+        runLines: async function* () {
+          yield {
+            kind: "exit",
+            code: 0,
+            signal: null,
+            timedOut: false,
+            stderr: "",
+            sawStdout: false,
+          };
+        },
+        recoverTranscript: (options) => {
+          recoverCalls.push({
+            cwd: options.cwd,
+            conversationId: options.conversationId,
+          });
+          return { conversationId: "resume-id", text: "from known id" };
+        },
+        lastConversationForCwd: () => "stale-cwd-id",
+      }),
+    );
+
+    expect(recoverCalls).toEqual([{ cwd: "/tmp/demo", conversationId: "resume-id" }]);
+    expect(events.map((e) => e.kind)).toEqual(["session_start", "text_delta", "result"]);
+    expect(events[0]).toMatchObject({ kind: "session_start", sessionId: "resume-id" });
+    expect(events[2]).toMatchObject({ kind: "result", text: "from known id" });
+  });
+
+  it("emits session_start even when empty-output recovery fails", async () => {
+    const events = await collect(
+      runAntigravityProcess({
+        id: "antigravity",
+        binary: "agy",
+        args: [],
+        opts: {
+          prompt: "hi",
+          model: "Gemini 3.1 Pro (High)",
+          cwd: "/tmp/demo",
+        },
+        runLines: async function* () {
+          yield {
+            kind: "stderr",
+            text: "Stream completed for 1858e0e0-832e-469a-8f82-51d0f56a954f, clearing ResponsePending",
+          };
+          yield {
+            kind: "exit",
+            code: 0,
+            signal: null,
+            timedOut: false,
+            stderr:
+              "Stream completed for 1858e0e0-832e-469a-8f82-51d0f56a954f, clearing ResponsePending",
+            sawStdout: false,
+          };
+        },
+        recoverTranscript: () => undefined,
+      }),
+    );
+
+    expect(events.map((e) => e.kind)).toEqual(["session_start", "error"]);
+    expect(events[0]).toMatchObject({
+      kind: "session_start",
+      sessionId: "1858e0e0-832e-469a-8f82-51d0f56a954f",
+    });
+    expect(events[1]).toMatchObject({
+      kind: "error",
+      message: expect.stringContaining("produced no output"),
+    });
+  });
+
+  it("falls back to last_conversations when stderr has no id but stdout succeeded", async () => {
+    const events = await collect(
+      runAntigravityProcess({
+        id: "antigravity",
+        binary: "agy",
+        args: [],
+        opts: {
+          prompt: "hi",
+          model: "Gemini 3.1 Pro (High)",
+          cwd: "/tmp/demo",
+        },
+        runLines: async function* () {
+          yield { kind: "line", line: "pong" };
+          yield {
+            kind: "exit",
+            code: 0,
+            signal: null,
+            timedOut: false,
+            stderr: "",
+            sawStdout: true,
+          };
+        },
+        lastConversationForCwd: (path) => (path === "/tmp/demo" ? "from-cache" : undefined),
+      }),
+    );
+
+    expect(events.map((e) => e.kind)).toEqual(["text_delta", "session_start", "result"]);
+    expect(events[1]).toMatchObject({ kind: "session_start", sessionId: "from-cache" });
   });
 });
 

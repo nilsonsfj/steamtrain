@@ -1,8 +1,12 @@
 import type { AgentEvent, AgentId } from "../types/events";
 import { type AgentAdapter, type AgentRunOptions } from "./adapter";
 import type { AgentModel } from "./agent-model";
-import { recoverAntigravityTranscriptText } from "./antigravity-transcript";
-import { runProcessLines } from "./spawn";
+import {
+  type RecoverAntigravityTranscriptOptions,
+  lastAntigravityConversationForCwd,
+  recoverAntigravityTranscriptText,
+} from "./antigravity-transcript";
+import { type ProcessLine, type ProcessRunOptions, runProcessLines } from "./spawn";
 import { firstLine } from "./util";
 
 /** Known Antigravity CLI models (used by `/model` and autocomplete). */
@@ -86,6 +90,21 @@ export function extractAntigravityConversationId(text: string): string | undefin
   return undefined;
 }
 
+export interface RunAntigravityProcessParams {
+  id: AgentId;
+  binary: string;
+  args: string[];
+  opts: AgentRunOptions;
+  /** @internal Test seam — defaults to {@link runProcessLines}. */
+  runLines?: (opts: ProcessRunOptions) => AsyncIterable<ProcessLine>;
+  /** @internal Test seam — defaults to {@link recoverAntigravityTranscriptText}. */
+  recoverTranscript?: (
+    options: RecoverAntigravityTranscriptOptions,
+  ) => ReturnType<typeof recoverAntigravityTranscriptText>;
+  /** @internal Test seam — defaults to {@link lastAntigravityConversationForCwd}. */
+  lastConversationForCwd?: (cwd: string) => string | undefined;
+}
+
 /**
  * Plain-text driver for Antigravity print mode.
  *
@@ -93,12 +112,9 @@ export function extractAntigravityConversationId(text: string): string | undefin
  * session ids from stderr, and fall back to the on-disk transcript when stdout
  * is empty (known non-TTY drop).
  */
-export async function* runAntigravityProcess(params: {
-  id: AgentId;
-  binary: string;
-  args: string[];
-  opts: AgentRunOptions;
-}): AsyncGenerator<AgentEvent> {
+export async function* runAntigravityProcess(
+  params: RunAntigravityProcessParams,
+): AsyncGenerator<AgentEvent> {
   const { binary, args, opts } = params;
   const id = opts.agentId ?? params.id;
   const startedAt = Date.now();
@@ -107,6 +123,11 @@ export async function* runAntigravityProcess(params: {
   const textParts: string[] = [];
   let sawStdout = false;
   let sawError = false;
+  const cwd = opts.cwd ?? process.cwd();
+  const runLines = params.runLines ?? runProcessLines;
+  const recoverTranscript = params.recoverTranscript ?? recoverAntigravityTranscriptText;
+  const lastConversationForCwd =
+    params.lastConversationForCwd ?? ((path: string) => lastAntigravityConversationForCwd(path));
 
   const emitSession = function* (): Generator<AgentEvent> {
     if (emittedSession || !sessionId) return;
@@ -120,7 +141,7 @@ export async function* runAntigravityProcess(params: {
     };
   };
 
-  for await (const item of runProcessLines({
+  const processOpts: ProcessRunOptions = {
     binary,
     args,
     cwd: opts.cwd,
@@ -128,7 +149,9 @@ export async function* runAntigravityProcess(params: {
     timeoutMs: opts.timeoutMs,
     signal: opts.signal,
     // Intentionally omit prompt — stdin must stay closed for agy print mode.
-  })) {
+  };
+
+  for await (const item of runLines(processOpts)) {
     if (item.kind === "stderr") {
       const found = extractAntigravityConversationId(item.text);
       if (found && !sessionId) {
@@ -155,9 +178,13 @@ export async function* runAntigravityProcess(params: {
         const fromStderr = extractAntigravityConversationId(item.stderr);
         if (fromStderr) sessionId = fromStderr;
       }
+      if (!sessionId) {
+        sessionId = lastConversationForCwd(cwd);
+      }
 
       if (item.spawnError) {
         sawError = true;
+        yield* emitSession();
         yield {
           kind: "error",
           agent: id,
@@ -170,6 +197,7 @@ export async function* runAntigravityProcess(params: {
       }
       if (item.timedOut) {
         sawError = true;
+        yield* emitSession();
         yield {
           kind: "error",
           agent: id,
@@ -182,6 +210,7 @@ export async function* runAntigravityProcess(params: {
       }
       if ((item.code ?? 0) !== 0) {
         sawError = true;
+        yield* emitSession();
         yield {
           kind: "error",
           agent: id,
@@ -195,18 +224,20 @@ export async function* runAntigravityProcess(params: {
 
       let text = textParts.join("\n").trim();
       if (!text || !sawStdout) {
-        const recovered = recoverAntigravityTranscriptText({
-          cwd: opts.cwd ?? process.cwd(),
+        const recovered = recoverTranscript({
+          cwd,
+          conversationId: sessionId,
         });
         if (recovered) {
-          if (!sessionId) sessionId = recovered.conversationId;
+          sessionId = sessionId ?? recovered.conversationId;
           text = recovered.text;
           yield* emitSession();
           yield { kind: "text_delta", agent: id, ts, text: `${text}\n` };
         }
-      } else {
-        yield* emitSession();
       }
+
+      // Always surface a discovered session id, even when output recovery fails.
+      yield* emitSession();
 
       if (!text && !sawError) {
         yield {
@@ -220,7 +251,6 @@ export async function* runAntigravityProcess(params: {
         return;
       }
 
-      yield* emitSession();
       yield {
         kind: "result",
         agent: id,

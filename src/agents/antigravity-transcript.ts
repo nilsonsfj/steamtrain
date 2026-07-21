@@ -9,6 +9,12 @@ export interface AntigravityTranscriptRecovery {
 
 export interface RecoverAntigravityTranscriptOptions {
   cwd: string;
+  /**
+   * Prefer this conversation id when recovering (from `--conversation`,
+   * stderr parse, or resume). Falls back to last_conversations[cwd] only
+   * when unset — never overrides a known id with a newer cwd mapping.
+   */
+  conversationId?: string;
   /** Override for tests — parsed last_conversations.json contents. */
   lastConversations?: Record<string, string>;
   /** Override for tests — returns transcript.jsonl body for a conversation id. */
@@ -82,16 +88,34 @@ function readTranscriptFile(appDataDir: string, conversationId: string): string 
   }
 }
 
+/** Look up the last conversation id recorded for a workspace cwd. */
+export function lastAntigravityConversationForCwd(
+  cwd: string,
+  options: {
+    lastConversations?: Record<string, string>;
+    appDataDir?: string;
+  } = {},
+): string | undefined {
+  const appDataDir = options.appDataDir ?? antigravityAppDataDir();
+  const last = options.lastConversations ?? readLastConversations(appDataDir);
+  return last[cwd];
+}
+
 /**
  * Recover print-mode output when stdout was dropped (known agy non-TTY issue)
- * by reading the on-disk transcript for the cwd's last conversation.
+ * by reading the on-disk transcript for a known conversation id, falling back
+ * to the cwd's last conversation only when no id is known.
  */
 export function recoverAntigravityTranscriptText(
   options: RecoverAntigravityTranscriptOptions,
 ): AntigravityTranscriptRecovery | undefined {
   const appDataDir = options.appDataDir ?? antigravityAppDataDir();
-  const last = options.lastConversations ?? readLastConversations(appDataDir);
-  const conversationId = last[options.cwd];
+  const conversationId =
+    options.conversationId ||
+    lastAntigravityConversationForCwd(options.cwd, {
+      lastConversations: options.lastConversations,
+      appDataDir,
+    });
   if (!conversationId) return undefined;
 
   const jsonl =
