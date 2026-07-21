@@ -298,6 +298,17 @@ export {
   type HistoryStep,
 } from "./history";
 export {
+  HISTORY_STATUS_FILTERS,
+  buildHistoryBrowserEntries,
+  formatRelativeTime,
+  historyStatusLabel,
+  matchesHistoryQuery,
+  nextHistoryStatusFilter,
+  normalizeHistoryRunId,
+  type HistoryBrowserEntry,
+  type HistoryStatusFilter,
+} from "./history-browser";
+export {
   WORKFLOW_RUNS_DIR,
   DEFAULT_MAX_PARALLEL_RUNS,
   LIVE_RUN_META_VERSION,

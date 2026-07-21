@@ -24,7 +24,7 @@ const KEY_HINTS: readonly KeyHint[] = [
     action: "edit the selected preview step (agent/model/effort/prompt; A = apply to all)",
   },
   { keys: "Ctrl+N", action: "create a new workflow from a description" },
-  { keys: "Ctrl+J", action: "open run history (also /history)" },
+  { keys: "Ctrl+J", action: "open runs browser (also /history · / filter · t status)" },
   { keys: "Ctrl+A", action: "open the agent manager (also /agents; /apis for APIs)" },
   {
     keys: "p",
