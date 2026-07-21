@@ -181,6 +181,9 @@ export function createLiveRunPublisher(store: LiveRunStore, runId: string): Live
     },
     async flush() {
       flush();
+      // `chain` serializes every enqueued write — event-line appends AND the
+      // meta updates from syncPendingApprovals/syncPendingInputs/pause — so
+      // awaiting it drains the whole mirror to disk, not just buffered events.
       await chain;
     },
     async finish(status, opts = {}) {

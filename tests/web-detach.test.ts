@@ -255,6 +255,92 @@ describe("web run manager mid-run detach", () => {
     });
   });
 
+  it("hands off a run parked on a human approval (nothing computing)", async () => {
+    // A host that reaches an approval checkpoint and parks awaiting the
+    // provider — the natural "step away while it waits for me" moment.
+    const approvalSpec: WorkflowSpec = {
+      name: "approve-demo",
+      phases: [
+        { id: "p1", title: "Approve", steps: [{ id: "chk", kind: "approval", prompt: "ok?" }] },
+      ],
+    };
+    const host: WorkflowHost = {
+      listWorkflows: () => ({ [approvalSpec.name]: approvalSpec }),
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      runWorkflow(_n, _i, signal, _c, _cwd, _s, _in, approval) {
+        return (async function* () {
+          const ts = () => Date.now();
+          yield {
+            kind: "workflow_start",
+            name: "approve-demo",
+            phaseCount: 1,
+            stepCount: 1,
+            ts: ts(),
+          };
+          yield {
+            kind: "step_start",
+            phaseId: "p1",
+            stepId: "chk",
+            blockKind: "approval",
+            ts: ts(),
+          };
+          yield {
+            kind: "approval_pending",
+            phaseId: "p1",
+            stepId: "chk",
+            message: "ok?",
+            onReject: "fail",
+            iteration: 1,
+            ts: ts(),
+          };
+          // Parks here until a decision arrives — or the abort signal fires on
+          // detach, which settles it as canceled.
+          const decision = approval
+            ? await approval(
+                { stepId: "chk", phaseId: "p1", iteration: 1, onReject: "fail" },
+                signal,
+              )
+            : { approved: false };
+          yield {
+            kind: "approval_resolved",
+            phaseId: "p1",
+            stepId: "chk",
+            approved: decision.approved,
+            iteration: 1,
+            ts: ts(),
+          };
+          yield { kind: "workflow_done", ok: decision.approved, results: [], ts: ts() };
+        })();
+      },
+    };
+
+    const manager = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: root,
+      config: { stepTimeoutSec: 60, workflowTimeoutSec: 3600 },
+      liveRuns,
+      detachIo: { projectDir: root },
+    });
+    const runId = manager.start("approve-demo", "go").runId as string;
+
+    // Wait until the run is parked on the approval checkpoint.
+    for (let i = 0; i < 200 && !manager.get(runId)?.pendingApprovals?.length; i++) await delay(10);
+    expect(manager.get(runId)?.pendingApprovals).toHaveLength(1);
+
+    // Detach: an approval does no compute, so the run hands off immediately
+    // (no releasing an in-flight step needed).
+    expect(manager.detach(runId)).toEqual({ ok: true });
+    for (let i = 0; i < 200 && manager.get(runId); i++) await delay(10);
+    expect(manager.get(runId)).toBeUndefined();
+
+    const meta = await liveRuns.get(runId);
+    expect(meta).toMatchObject({ source: "cli-detached", detached: true, status: "queued" });
+    // The pending approval is cleared for the new owner — the detached child
+    // re-asks via the store provider, so no stale decision is inherited.
+    expect(meta?.pendingApprovals ?? []).toHaveLength(0);
+  });
+
   it("refuses to detach an unknown or already-finished run", async () => {
     const { host } = makeEngineHost();
     const manager = new WorkflowRunManager({

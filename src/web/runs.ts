@@ -637,6 +637,11 @@ export class WorkflowRunManager {
       },
       run.startedAt,
     );
+    // Three states, distinguished in the finally: `undefined` means no
+    // workflow_done was consumed — the engine was aborted mid-flight to hand
+    // the run off (its terminal event is skipped once handoffCommitted); a
+    // boolean means the run reached workflow_done (true done, false error/
+    // budget). The handoff path keys off `ok === undefined`.
     let ok: boolean | undefined;
     let budgetExceeded = false;
     let publisher: LiveRunPublisher | undefined;
