@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { constants, access } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
 import { DEFAULT_AGENT_BINARY, resolveAgentInstances } from "../agents/config";
@@ -25,6 +25,58 @@ export interface DoctorResult {
 const VERSION_TIMEOUT_MS = 8000;
 const AUTH_PATTERN =
   /not logged in|unauthor|authenticat|please run.*login|login required|no api key|api key not|set .*_api_key/i;
+
+/**
+ * In-flight `--version` probes. Agent CLIs (especially Bun-based ones like
+ * `amp`) can burn a full core while starting; if steamtrain exits mid-probe
+ * without reaping them, they are reparented to PID 1 and keep spinning.
+ */
+const liveVersionChecks = new Set<ChildProcess>();
+let exitHandlerInstalled = false;
+
+function ensureExitHandler(): void {
+  if (exitHandlerInstalled) return;
+  exitHandlerInstalled = true;
+  // `exit` is sync-only and fires for process.exit / natural shutdown / fatal
+  // signals that terminate the process — the window where orphans otherwise leak.
+  process.on("exit", () => {
+    killDoctorVersionChecks();
+  });
+}
+
+/** PIDs of in-flight doctor `--version` probes (test/diagnostics). */
+export function doctorVersionCheckPids(): number[] {
+  const pids: number[] = [];
+  for (const child of liveVersionChecks) {
+    if (typeof child.pid === "number") pids.push(child.pid);
+  }
+  return pids;
+}
+
+/** Reap every outstanding doctor `--version` child (and its process group). */
+export function killDoctorVersionChecks(): void {
+  for (const child of [...liveVersionChecks]) {
+    killVersionChild(child);
+  }
+}
+
+function killVersionChild(child: ChildProcess): void {
+  try {
+    if (process.platform !== "win32" && typeof child.pid === "number") {
+      try {
+        // Negative PID = process group. Matches workflow/command.ts so a CLI
+        // that forks helpers during `--version` cannot outlive the probe.
+        process.kill(-child.pid, "SIGKILL");
+        return;
+      } catch {
+        // Not a group leader / already gone — fall through to direct kill.
+      }
+    }
+    child.kill("SIGKILL");
+  } catch {
+    // already gone
+  }
+}
 
 /** Resolve a command to an absolute, executable path by scanning PATH. */
 export async function resolveBinary(name: string): Promise<string | undefined> {
@@ -69,42 +121,50 @@ function runVersion(binaryPath: string, env?: Record<string, string>): Promise<V
       timedOut: false,
     });
   }
+  ensureExitHandler();
   return new Promise((resolve) => {
+    // Own process group on Unix so timeout/exit kills reach any helpers the
+    // CLI forks (amp is a Bun binary that can spin up workers during startup).
     const child = spawn(binaryPath, ["--version"], {
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, ...env },
+      detached: process.platform !== "win32",
     });
+    liveVersionChecks.add(child);
     let stdout = "";
     let stderr = "";
     let timedOut = false;
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (c: string) => {
+    let settled = false;
+    const settle = (result: VersionRun): void => {
+      if (settled) return;
+      settled = true;
+      liveVersionChecks.delete(child);
+      clearTimeout(timer);
+      resolve(result);
+    };
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (c: string) => {
       if (stdout.length < 10_000) stdout += c;
     });
-    child.stderr.on("data", (c: string) => {
+    child.stderr?.on("data", (c: string) => {
       if (stderr.length < 10_000) stderr += c;
     });
     const timer = setTimeout(() => {
       timedOut = true;
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // already gone
-      }
+      killVersionChild(child);
     }, VERSION_TIMEOUT_MS);
-    timer.unref?.();
+    // Do not unref: an unref'd timer is dropped on process.exit before the
+    // `exit` handler runs in some runtimes, leaving the child unreaped. The
+    // child handle already keeps the loop alive for the probe's lifetime.
     child.on("error", (err) => {
-      clearTimeout(timer);
-      resolve({ code: null, stdout, stderr: `${stderr}${err.message}`, timedOut });
+      settle({ code: null, stdout, stderr: `${stderr}${err.message}`, timedOut });
     });
     child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code, stdout, stderr, timedOut });
+      settle({ code, stdout, stderr, timedOut });
     });
   });
 }
-
 /** Check one agent: resolve its binary, run `--version`, classify readiness. */
 export async function checkAgent(
   agent: AgentInstanceId,
