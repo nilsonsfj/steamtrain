@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { render } from "ink";
 import { parseGlobalArgs, runCli } from "./cli";
 import { configDisplayLabel, loadConfig } from "./config";
+import { resolveProjectDir, resolveProjectIdentity } from "./project";
 import { loadSettings } from "./settings";
 import { App } from "./tui/App";
 import { STEAMTRAIN_VERSION } from "./version";
@@ -17,6 +18,10 @@ import { loadWorkspaceConfig, workspaceScopeLabel } from "./workspace";
  *
  * With no args, loads project config (defaults + optional steamtrain.json),
  * user workflows (~/.steamtrain/workflows.json), workspace presets, then renders the TUI.
+ *
+ * Pass `--project-dir <path>` (alias `--cwd`) to operate on another directory
+ * as if steamtrain were launched from there — config, `.steamtrain/` state,
+ * and agent cwd all follow that path.
  */
 // `steamtrain workflow list | head` closes stdout early; without a handler
 // the resulting EPIPE is an unhandled 'error' event that crashes with a stack
@@ -33,6 +38,7 @@ async function main(): Promise<void> {
     args,
     workspacePath,
     configPath,
+    projectDir,
     webUi,
     port,
     host,
@@ -55,17 +61,27 @@ async function main(): Promise<void> {
     return;
   }
 
+  const projectResolved = resolveProjectDir(projectDir ?? process.cwd());
+  if (!projectResolved.ok) {
+    process.stderr.write(`${projectResolved.error}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  const cwd = projectResolved.cwd;
+
   if (args.length > 0) {
-    process.exitCode = await runCli(args, { workspacePath, configPath });
+    process.exitCode = await runCli(args, { cwd, workspacePath, configPath });
     return;
   }
 
   const home = homedir();
   const { config, scope, user, userAgents, projectAgents, userApis, projectApis, warning } =
     loadConfig({
+      cwd,
       customPath: configPath,
       home,
     });
+  const project = resolveProjectIdentity(cwd, { home, configName: config.name });
   const { settings, hasUserFile, warning: settingsWarning } = loadSettings(home);
   const configLabel = configDisplayLabel(scope, {
     hasUserSettings: hasUserFile,
@@ -77,6 +93,7 @@ async function main(): Promise<void> {
     scope: workspaceScope,
     warning: workspaceWarning,
   } = loadWorkspaceConfig({
+    cwd,
     customPath: workspacePath,
     home,
   });
@@ -107,6 +124,8 @@ async function main(): Promise<void> {
       workspaces,
       workflowCatalog,
       configLabel,
+      project,
+      cwd,
       configPath: scope.path,
       userConfigPath: scope.kind === "custom" ? undefined : user?.path,
       userAgents,
@@ -142,6 +161,8 @@ async function main(): Promise<void> {
       configSource={configLabel}
       configPath={scope.path}
       configKind={scope.kind}
+      cwd={cwd}
+      project={project}
       userAgents={userAgents}
       projectAgents={projectAgents}
       userApis={userApis}

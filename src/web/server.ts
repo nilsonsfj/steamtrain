@@ -23,6 +23,8 @@ import { saveProjectConfig } from "../config/project-config";
 import { type ApiDoctorResult, type DoctorResult, runApiDoctor, runDoctor } from "../doctor";
 
 import { Orchestrator } from "../orchestrator";
+import type { ProjectIdentity } from "../project";
+import { resolveProjectIdentity } from "../project";
 import {
   DEFAULT_STEP_TIMEOUT_SEC,
   type LiveRunMeta,
@@ -184,6 +186,8 @@ export interface WebServerDeps {
   /** Re-run the API readiness probes on demand; persists and returns them. */
   reprobeApiDoctor?: () => Promise<ApiDoctorResult[]>;
   configLabel?: string;
+  /** Current project identity for chrome (name + directory). */
+  project?: ProjectIdentity;
   /**
    * The host address the server is bound to. Local binds get a Host-header
    * allowlist (DNS-rebinding defense); non-local binds rely on auth instead.
@@ -902,6 +906,7 @@ async function handle(
       authRequired: webAuthRequired(deps),
       capability,
       readOnly: capability === "read",
+      project: deps.project,
     });
     return;
   }
@@ -1005,7 +1010,11 @@ async function handle(
         return item;
       })
       .sort((a, b) => a.name.localeCompare(b.name));
-    sendJson(res, 200, { workflows: items, configLabel: deps.configLabel });
+    sendJson(res, 200, {
+      workflows: items,
+      configLabel: deps.configLabel,
+      project: deps.project,
+    });
     return;
   }
 
@@ -2204,6 +2213,8 @@ export interface StartWebUiOptions {
   workspaces: WorkspaceConfig;
   workflowCatalog: LoadedWorkflowCatalog;
   configLabel?: string;
+  /** Pre-resolved project identity; when omitted, derived from `cwd`. */
+  project?: ProjectIdentity;
   cwd?: string;
   home?: string;
   /** Resolved project `steamtrain.json` path for project-scope authoring. */
@@ -2306,6 +2317,9 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
   const out = options.stdout ?? ((t: string) => process.stdout.write(t));
   const err = options.stderr ?? ((t: string) => process.stderr.write(t));
   const cwd = options.cwd ?? process.cwd();
+  const home = options.home ?? homedir();
+  const project =
+    options.project ?? resolveProjectIdentity(cwd, { home, configName: options.config.name });
   const port = options.port ?? DEFAULT_WEB_PORT;
   const host = options.host ?? DEFAULT_WEB_HOST;
 
@@ -2347,7 +2361,6 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
     userApis: options.userApis ? [...options.userApis] : undefined,
     projectApis: options.projectApis ? [...options.projectApis] : undefined,
   };
-  const home = options.home ?? homedir();
   const reloadLiveConfig = (): void => {
     const loaded = loadConfig(
       options.customConfig && options.configPath
@@ -2464,6 +2477,7 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
       return reprobeApiInFlight;
     },
     configLabel: options.configLabel,
+    project,
     bindHost: host,
     config: liveConfig,
     configPath: options.configPath,
@@ -2501,6 +2515,7 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
   const url = `http://${host}:${actualPort}`;
 
   out(`\n🚂 steamtrain web UI running at ${url}\n`);
+  out(`   ◈  project  ${project.name}  ·  ${project.displayPath}\n`);
   if (generatedToken) {
     const kindLabel = generatedKind === "read" ? "read-only" : "full";
     out(`   🔒 non-local bind: auth enabled with an auto-generated ${kindLabel} token.

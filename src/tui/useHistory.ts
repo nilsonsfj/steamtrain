@@ -65,6 +65,8 @@ export interface UseHistoryParams {
     },
   ) => boolean;
   setWfNotice: (notice: string | null) => void;
+  /** Absolute project directory (honors `--project-dir`). */
+  cwd: string;
 }
 
 export interface UseHistoryReturn {
@@ -105,6 +107,7 @@ export function useHistory({
   resolveWorkflowSpec,
   runWorkflow,
   setWfNotice,
+  cwd,
 }: UseHistoryParams): UseHistoryReturn {
   const [history, setHistory] = useState<HistoryUiState | null>(null);
 
@@ -202,7 +205,7 @@ export function useHistory({
   const rerunFromRecord = useCallback(
     (record: RunRecord, mode: RerunMode) => {
       const plan = planRerun(record, mode, resolveWorkflowSpec(record.workflow), {
-        cwd: process.cwd(),
+        cwd,
       });
       if (isRerunError(plan)) {
         setWfNotice(plan.error);
@@ -220,7 +223,7 @@ export function useHistory({
       // refused launch (re-entrancy guard, unknown workflow) keeps the view.
       if (started) setHistory(null);
     },
-    [resolveWorkflowSpec, runWorkflow, setWfNotice],
+    [resolveWorkflowSpec, runWorkflow, setWfNotice, cwd],
   );
 
   // Prune / delete require a second press on the same record within a few seconds.

@@ -49,6 +49,7 @@ import type { AgentInstanceConfig, ApiInstanceConfig } from "../config/types";
 import type { UserConfigPatch } from "../config/user-config";
 import { type ApiDoctorResult, type DoctorResult, runApiDoctor, runDoctor } from "../doctor";
 import { Orchestrator } from "../orchestrator";
+import type { ProjectIdentity } from "../project";
 import type { SteamtrainSettings } from "../settings";
 import {
   type AuthoringHost,
@@ -138,6 +139,10 @@ export { migrateSessionOverrides, updatePreviewOnRename };
 interface AppProps {
   config: SteamtrainConfig;
   configSource: string;
+  /** Absolute project directory (honors `--project-dir`). */
+  cwd: string;
+  /** Display identity for the project (name + path). */
+  project: ProjectIdentity;
   /** Resolved project `steamtrain.json` path for project-scope authoring. */
   configPath?: string;
   /** `custom` when a `--config` file is loaded alone (no global layer). */
@@ -169,6 +174,8 @@ const EMPTY_DOCTOR: DoctorResult[] = [];
 export function App({
   config,
   configSource,
+  cwd,
+  project,
   configPath,
   configKind = "project",
   userAgents,
@@ -512,11 +519,11 @@ export function App({
         host: authoringHost,
         config: runtimeConfig,
         home: homedir(),
-        cwd: process.cwd(),
+        cwd,
         projectConfigPath: configPath,
         projectWorkflows: runtimeConfig.workflows,
       }),
-    [authoringHost, runtimeConfig, configPath],
+    [authoringHost, runtimeConfig, configPath, cwd],
   );
 
   const [wfStepOverrides, setWfStepOverrides] = useState<Record<string, WorkflowStepOverrides>>({});
@@ -531,6 +538,7 @@ export function App({
     orchestrator,
     resolveWorkflowSpec,
     mountedRef,
+    cwd,
   });
 
   // Live cost/token ticker for the status bar, summed from the running tree.
@@ -796,6 +804,7 @@ export function App({
     resolveWorkflowSpec,
     runWorkflow: runner.runWorkflow,
     setWfNotice: runner.setWfNotice,
+    cwd,
   });
 
   // ── Live-run slash-command bridges (/attach, /cancel-run) ────────────
@@ -975,7 +984,7 @@ export function App({
       return;
     }
 
-    const key = workflowCacheKey(picker.wfPreview.name, trimmed, process.cwd(), spec);
+    const key = workflowCacheKey(picker.wfPreview.name, trimmed, cwd, spec);
     let active = true;
     void runner.cacheStoreRef.current
       .load(key)
@@ -996,6 +1005,7 @@ export function App({
     picker.wfPreview,
     prompt.value,
     resolveWorkflowSpec,
+    cwd,
   ]);
 
   // ── Step index reset effect ──────────────────────────────────────────
@@ -1566,7 +1576,7 @@ export function App({
   if (phase === "banner") {
     return (
       <Box flexDirection="column">
-        <Banner />
+        <Banner project={project} />
         <Text color="gray"> starting up — running preflight checks…</Text>
       </Box>
     );
@@ -1609,6 +1619,7 @@ export function App({
       <StatusBar
         doctor={doctor}
         apiDoctor={apiDoctor}
+        project={project}
         configSource={runtimeConfigSource}
         workspaceLabel={activeWorkspaceLabel}
         running={runner.running}

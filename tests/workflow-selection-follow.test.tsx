@@ -40,6 +40,7 @@ function SelectionFollowHarness({ onRunner }: { onRunner: (runner: Runner) => vo
     orchestrator: {} as Orchestrator,
     resolveWorkflowSpec: () => SPEC,
     mountedRef,
+    cwd: "/tmp/steamtrain-selection-follow",
   });
 
   useEffect(() => {

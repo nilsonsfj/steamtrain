@@ -1,5 +1,7 @@
 import { Box, Text } from "ink";
 import type { ApiDoctorResult, DoctorResult } from "../doctor";
+import type { ProjectIdentity } from "../project";
+import { formatProjectLabel } from "../project";
 import { formatTokens, formatUsd } from "../workflow";
 import { API_STATUS_STYLE, STATUS_STYLE } from "./theme";
 import { useTerminalSize } from "./useTerminalSize";
@@ -9,7 +11,13 @@ interface StatusBarProps {
   doctor: DoctorResult[] | null;
   /** Direct-inference API readiness, shown on its own line below the agents (null while probing). */
   apiDoctor: ApiDoctorResult[] | null;
+  /** Current project identity — name + directory, always visible. */
+  project: ProjectIdentity;
   configSource: string;
+  /**
+   * Agent-preset workspace scope label (`user` / `project` / custom path).
+   * Renamed in chrome to `presets:` so it is not mistaken for the project dir.
+   */
   workspaceLabel: string;
   running: boolean;
   /** Live spend for the active run, shown as a cost ticker while running. */
@@ -72,6 +80,7 @@ function OverflowMarker({ hidden, leading }: { hidden: number; leading: boolean 
 export function StatusBar({
   doctor,
   apiDoctor,
+  project,
   configSource,
   workspaceLabel,
   running,
@@ -82,6 +91,7 @@ export function StatusBar({
   const { spinnerFrame, elapsedSeconds } = useWorkIndicator(running);
   const { columns } = useTerminalSize();
   const showTicker = running && ((runCostUsd ?? 0) > 0 || (runTokens ?? 0) > 0);
+  const projectBits = formatProjectLabel(project, Math.max(24, Math.min(48, columns - 36)));
 
   const rightGroup = (
     <Box>
@@ -106,31 +116,54 @@ export function StatusBar({
     </Box>
   );
 
+  const projectStrip = (
+    <Box>
+      <Text color="cyan">◈ </Text>
+      <Text bold color="white">
+        {projectBits.primary}
+      </Text>
+      {projectBits.secondary ? (
+        <Text color="gray">
+          {"  "}
+          {projectBits.secondary}
+        </Text>
+      ) : null}
+    </Box>
+  );
+
   if (doctor === null) {
     return (
-      <Box borderStyle="round" borderColor="gray" paddingX={1} justifyContent="space-between">
-        <Box>
-          <Text bold color="cyan">
-            {PREFIX}
-          </Text>
-          <Text color="gray">running preflight…</Text>
+      <Box flexDirection="column">
+        <Box borderStyle="round" borderColor="gray" paddingX={1} justifyContent="space-between">
+          <Box>
+            <Text bold color="cyan">
+              {PREFIX}
+            </Text>
+            <Text color="gray">running preflight…</Text>
+          </Box>
+          {rightGroup}
         </Box>
-        {rightGroup}
+        <Box paddingX={1} marginTop={0}>
+          {projectStrip}
+        </Box>
       </Box>
     );
   }
 
   if (softHealth) {
     return (
-      <Box borderStyle="round" borderColor="gray" paddingX={1} justifyContent="space-between">
-        <Box>
-          <Text bold color="cyan">
-            {PREFIX}
-          </Text>
-          <Text color="green">● ready to ride</Text>
-          <Text color="gray"> · no agents required</Text>
+      <Box flexDirection="column">
+        <Box borderStyle="round" borderColor="gray" paddingX={1} justifyContent="space-between">
+          <Box>
+            <Text bold color="cyan">
+              {PREFIX}
+            </Text>
+            <Text color="green">● ready to ride</Text>
+            <Text color="gray"> · no agents required</Text>
+          </Box>
+          {rightGroup}
         </Box>
-        {rightGroup}
+        <Box paddingX={1}>{projectStrip}</Box>
       </Box>
     );
   }
@@ -186,49 +219,57 @@ export function StatusBar({
   const showApiLine = apis.length > 0 || apiSummary.length > 0;
 
   return (
-    <Box borderStyle="round" borderColor="gray" paddingX={1} flexDirection="column">
-      <Box justifyContent="space-between">
-        <Box>
-          <Text bold color="cyan">
-            {PREFIX}
-          </Text>
-          {packedAgents.shown.map((chip, i) => (
-            <Box key={chip.result.agent}>
-              {i > 0 ? <Text color="gray">{SEP}</Text> : null}
-              <AgentStatus result={chip.result} />
-            </Box>
-          ))}
-          {packedAgents.hidden > 0 ? (
-            <OverflowMarker hidden={packedAgents.hidden} leading={packedAgents.shown.length > 0} />
-          ) : null}
-          {agentSummary ? (
-            <Text color={packedAgents.shown.length > 0 ? "gray" : "yellow"}>
-              {packedAgents.shown.length > 0 || packedAgents.hidden > 0 ? `${SEP}· ` : ""}
-              {agentSummary}
+    <Box flexDirection="column">
+      <Box borderStyle="round" borderColor="gray" paddingX={1} flexDirection="column">
+        <Box justifyContent="space-between">
+          <Box>
+            <Text bold color="cyan">
+              {PREFIX}
             </Text>
-          ) : null}
+            {packedAgents.shown.map((chip, i) => (
+              <Box key={chip.result.agent}>
+                {i > 0 ? <Text color="gray">{SEP}</Text> : null}
+                <AgentStatus result={chip.result} />
+              </Box>
+            ))}
+            {packedAgents.hidden > 0 ? (
+              <OverflowMarker
+                hidden={packedAgents.hidden}
+                leading={packedAgents.shown.length > 0}
+              />
+            ) : null}
+            {agentSummary ? (
+              <Text color={packedAgents.shown.length > 0 ? "gray" : "yellow"}>
+                {packedAgents.shown.length > 0 || packedAgents.hidden > 0 ? `${SEP}· ` : ""}
+                {agentSummary}
+              </Text>
+            ) : null}
+          </Box>
+          {rightGroup}
         </Box>
-        {rightGroup}
+        {showApiLine ? (
+          <Box paddingLeft={PREFIX.length}>
+            {packedApis.shown.map((chip, i) => (
+              <Box key={chip.result.api}>
+                {i > 0 ? <Text color="gray">{SEP}</Text> : null}
+                <ApiStatus result={chip.result} />
+              </Box>
+            ))}
+            {packedApis.hidden > 0 ? (
+              <OverflowMarker hidden={packedApis.hidden} leading={packedApis.shown.length > 0} />
+            ) : null}
+            {apiSummary ? (
+              <Text color="gray">
+                {packedApis.shown.length > 0 || packedApis.hidden > 0 ? `${SEP}· ` : ""}
+                {apiSummary}
+              </Text>
+            ) : null}
+          </Box>
+        ) : null}
       </Box>
-      {showApiLine ? (
-        <Box paddingLeft={PREFIX.length}>
-          {packedApis.shown.map((chip, i) => (
-            <Box key={chip.result.api}>
-              {i > 0 ? <Text color="gray">{SEP}</Text> : null}
-              <ApiStatus result={chip.result} />
-            </Box>
-          ))}
-          {packedApis.hidden > 0 ? (
-            <OverflowMarker hidden={packedApis.hidden} leading={packedApis.shown.length > 0} />
-          ) : null}
-          {apiSummary ? (
-            <Text color="gray">
-              {packedApis.shown.length > 0 || packedApis.hidden > 0 ? `${SEP}· ` : ""}
-              {apiSummary}
-            </Text>
-          ) : null}
-        </Box>
-      ) : null}
+      <Box paddingX={1} marginBottom={0}>
+        {projectStrip}
+      </Box>
     </Box>
   );
 }

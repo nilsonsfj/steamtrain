@@ -13,6 +13,8 @@ import {
 import { runDoctor } from "./doctor";
 import { runInitCommand } from "./init";
 import { Orchestrator } from "./orchestrator";
+import type { ProjectIdentity } from "./project";
+import { resolveProjectIdentity } from "./project";
 import {
   printModelBreakdown,
   runAnswerCommand,
@@ -80,6 +82,12 @@ export interface GlobalCliOptions {
   args: string[];
   workspacePath?: string;
   configPath?: string;
+  /**
+   * Alternate project directory (`--project-dir` / `--cwd`). When set, config,
+   * `.steamtrain/` state, and agent cwd all resolve against this path instead
+   * of the process launch directory. Distinct from `--project` (config scope).
+   */
+  projectDir?: string;
   /** Launch the browser-based UI instead of the TUI. */
   webUi?: boolean;
   port?: number;
@@ -104,6 +112,7 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
   const rest: string[] = [];
   let workspacePath: string | undefined;
   let configPath: string | undefined;
+  let projectDir: string | undefined;
   let webUi = false;
   let port: number | undefined;
   let host: string | undefined;
@@ -134,6 +143,15 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
         return { args: [], error: `${arg} requires a path argument` };
       }
       configPath = value;
+      i += 1;
+      continue;
+    }
+    if (arg === "--project-dir" || arg === "--cwd") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("-")) {
+        return { args: [], error: `${arg} requires a path argument` };
+      }
+      projectDir = value;
       i += 1;
       continue;
     }
@@ -211,6 +229,7 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
     args: rest,
     workspacePath,
     configPath,
+    projectDir,
     webUi: webUi || undefined,
     port,
     host,
@@ -275,11 +294,12 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
   });
   if (workflowCatalog.warning) err(`${workflowCatalog.warning}\n`);
   const orchestrator = new Orchestrator(config, workspaces, [], workflowCatalog);
+  const project = resolveProjectIdentity(cwd, { configName: config.name });
 
   switch (command ?? "list") {
     case "list":
     case "ls":
-      printWorkflowList(workflowCatalogEntries(workflowCatalog), configLabel, out);
+      printWorkflowList(workflowCatalogEntries(workflowCatalog), configLabel, project, out);
       return 0;
     case "validate":
       return validateWorkflows(orchestrator.listWorkflows(), rest[0], out, err);
@@ -347,9 +367,11 @@ function normalizeArgs(args: string[]): string[] {
 function printWorkflowList(
   workflows: { name: string; spec: WorkflowSpec; source: string }[],
   source: string,
+  project: ProjectIdentity,
   out: (text: string) => void,
 ): void {
   const byName = new Map(workflows.map((entry) => [entry.name, entry.spec]));
+  out(`project  ${project.name}  ·  ${project.displayPath}\n`);
   out(`workflows (${source})\n`);
   for (const { name, spec, source: workflowSource } of workflows) {
     const autonomy = workflowAutonomy(spec, (child) => byName.get(child));
@@ -1582,8 +1604,14 @@ Running steamtrain --web-ui opens the same engine behind a local browser UI.
 
 Global options (TUI and workflow commands):
   -v, --version              Print the steamtrain version and exit
+      --project-dir <path>   Operate on this project directory instead of cwd
+                             (alias: --cwd). Loads <dir>/steamtrain.json, writes
+                             .steamtrain/ state there, and runs agents as if
+                             launched from that directory. Distinct from
+                             --project (config scope: user vs project file).
   -w, --workspace <path>     Load workspace presets from a custom workspace.json
       --config-file <path>   Load project config from a custom steamtrain.json
+                             (state and agents still use --project-dir / cwd)
       --web-ui               Serve the browser UI instead of the TUI
       --port <n>             Web UI port (default 4317; with --web-ui)
       --host <host>          Web UI bind host (default 127.0.0.1; with --web-ui)

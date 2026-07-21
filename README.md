@@ -284,8 +284,13 @@ Global options (TUI and workflow commands):
 
 ```
   -v, --version              Print the steamtrain version and exit
+      --project-dir <path>   Operate on this project directory instead of cwd
+                             (alias: --cwd). Loads <dir>/steamtrain.json, writes
+                             .steamtrain/ state there, and runs agents as if
+                             launched from that directory.
   -w, --workspace <path>     Load workspace presets from a custom workspace.json
       --config-file <path>   Load project config from a custom steamtrain.json
+                             (state and agents still use --project-dir / cwd)
       --web-ui               Serve the browser UI instead of the TUI
       --port <n>             Web UI port (default 4317)
       --host <host>          Web UI bind host (default 127.0.0.1)
@@ -300,6 +305,11 @@ Global options (TUI and workflow commands):
                              you run; required for correct https/Secure cookies)
 ```
 
+The TUI status bar and web header always show the current project name and
+directory, so you can tell at a glance which checkout steamtrain (and its
+agents) are operating on. Set an optional `"name"` in `steamtrain.json` to
+override the display name (otherwise package.json `name`, then the folder
+basename).
 `init` reports each agent's readiness with copy-paste fixes, detects this repo's
 real test/lint commands, and offers starter workflows written to
 `./steamtrain.json`:

@@ -41,6 +41,7 @@
     rafQueued: false, draftAbort: null, doctor: [], apiDoctor: [],
     stagedOverrides: {},
     projectConfig: null,
+    project: null,
     liveRuns: [], liveRunsTimer: null, queuedBanner: false,
     deepLinkRequest: 0,
     // Step drill-in drawer: which step it shows ({phaseId, iteration, stepId}).
@@ -224,6 +225,7 @@
       if (r.status === 401) { showLoginForm(); return; }
       if (r.status === 200 && r.body) {
         S.capability = r.body.capability === "read" ? "read" : "full";
+        if (r.body.project) applyProjectChrome(r.body.project);
         applyCapabilityChrome();
       }
       loadWorkflows();
@@ -236,11 +238,29 @@
     });
   }
 
+  function applyProjectChrome(project) {
+    if (!project || !project.name) return;
+    S.project = project;
+    var root = document.getElementById("project");
+    var nameEl = document.getElementById("projectName");
+    var pathEl = document.getElementById("projectPath");
+    if (root && nameEl && pathEl) {
+      nameEl.textContent = project.name;
+      pathEl.textContent = project.displayPath || project.cwd || "";
+      root.title = project.cwd || project.displayPath || project.name;
+      root.hidden = false;
+    }
+    try {
+      document.title = "steamtrain · " + project.name;
+    } catch (e) {}
+  }
+
   function loadWorkflows() {
     api("GET", "/api/workflows").then(function (r) {
       if (r.status === 401) { showLoginForm(); return; }
       S.workflows = r.body.workflows || [];
       if (r.body.configLabel) document.getElementById("config").textContent = r.body.configLabel;
+      if (r.body.project) applyProjectChrome(r.body.project);
       renderSidebar();
       var deepLinkId = SteamtrainReducer.parseRunDeepLink
         ? SteamtrainReducer.parseRunDeepLink(window.location.hash)
@@ -1671,6 +1691,13 @@
       ),
       landing
         ? h("div", { class: "station-eyebrow", text: "Platform 1 \u00b7 free tour" })
+        : null,
+      S.project
+        ? h("div", { class: "station-project", title: S.project.cwd || "" },
+            h("span", { class: "station-project-mark", text: "\u25C8" }),
+            h("span", { class: "station-project-name", text: S.project.name }),
+            h("span", { class: "station-project-path", text: S.project.displayPath || S.project.cwd || "" })
+          )
         : null,
       h("div", {
         class: "station-premise",

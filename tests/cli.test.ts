@@ -83,6 +83,25 @@ describe("parseGlobalArgs", () => {
     });
   });
 
+  it("extracts --project-dir / --cwd before subcommands", () => {
+    expect(parseGlobalArgs(["--project-dir", "/tmp/app", "workflow", "list"])).toEqual({
+      args: ["workflow", "list"],
+      projectDir: "/tmp/app",
+    });
+    expect(parseGlobalArgs(["--cwd", "../other", "workflow", "list"])).toEqual({
+      args: ["workflow", "list"],
+      projectDir: "../other",
+    });
+    expect(parseGlobalArgs(["--project-dir"])).toEqual({
+      args: [],
+      error: "--project-dir requires a path argument",
+    });
+    expect(parseGlobalArgs(["--cwd", "--web-ui"])).toEqual({
+      args: [],
+      error: "--cwd requires a path argument",
+    });
+  });
+
   it("parses --web-ui with optional --port and --host", () => {
     expect(parseGlobalArgs(["--web-ui"])).toEqual({ args: [], webUi: true });
     expect(parseGlobalArgs(["--web-ui", "--port", "8080", "--host", "0.0.0.0"])).toEqual({
@@ -172,6 +191,14 @@ describe("parseGlobalArgs", () => {
     expect(parseGlobalArgs(["--version"])).toEqual({ args: [], version: true });
     expect(parseGlobalArgs(["-v"])).toEqual({ args: [], version: true });
   });
+
+  it("documents --project-dir in help", async () => {
+    const c = capture();
+    const code = await runCli(["help"], c.io);
+    expect(code).toBe(0);
+    expect(c.stdout).toContain("--project-dir");
+    expect(c.stdout).toContain("--cwd");
+  });
 });
 
 describe("runCli", () => {
@@ -180,9 +207,21 @@ describe("runCli", () => {
     const code = await runCli(["workflows"], c.io);
 
     expect(code).toBe(0);
+    expect(c.stdout).toContain("project ");
     expect(c.stdout).toContain("workflows");
     expect(c.stdout).toContain("multi-plan");
     expect(c.stdout).toContain("distributor");
+  });
+
+  it("lists workflows against --project-dir state root via io.cwd", async () => {
+    const c = capture();
+    writeFileSync(
+      join(c.io.cwd!, "steamtrain.json"),
+      JSON.stringify({ name: "alt-project", stepTimeoutSec: 60 }),
+    );
+    const code = await runCli(["workflow", "list"], c.io);
+    expect(code).toBe(0);
+    expect(c.stdout).toContain("alt-project");
   });
 
   it("validates bundled workflows", async () => {
