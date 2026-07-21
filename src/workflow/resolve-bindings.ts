@@ -52,13 +52,16 @@ function stepNeedsResolve(
   return false;
 }
 
-function applyBinding(step: WorkflowStep, primary: ResolvedModelCandidate): WorkflowStep {
-  const next = {
+function applyBinding(
+  step: AgentBackedWorkflowStep,
+  primary: ResolvedModelCandidate,
+): AgentBackedWorkflowStep {
+  const next: AgentBackedWorkflowStep = {
     ...step,
     agent: primary.agent,
     model: primary.model,
-  } as WorkflowStep & { effort?: string };
-  if (primary.effort && !(step as { effort?: string }).effort) {
+  };
+  if (primary.effort && !step.effort) {
     next.effort = primary.effort;
   }
   return next;
@@ -121,7 +124,7 @@ export function resolveWorkflowBindings(
         candidates: resolved.candidates,
         summary: resolved.summary,
       });
-      const next = applyBinding(step, resolved.primary);
+      const next = applyBinding(backed, resolved.primary);
       steps.push(next);
       resolvedAgentByStep.set(step.id, resolved.primary.agent);
     }

@@ -71,7 +71,8 @@ describe("planAgentReroute", () => {
     expect(scan.agent).toBe("claude");
     // mimo-v2.5-free has no Claude offering — falls back to the target default.
     expect(scan.model).toBe(result.plan.targetModel);
-    expect(scan.effort).toBeUndefined();
+    // Target default (Sonnet 5) still supports high — preserve it.
+    expect(scan.effort).toBe("high");
     // Untouched: the already-ready claude step keeps its own model.
     expect(next.phases[1]!.steps[1]).toMatchObject({ agent: "claude", model: "claude-sonnet-5" });
   });
@@ -102,7 +103,8 @@ describe("planAgentReroute", () => {
     const step = next.phases[0]!.steps[0] as { agent: string; model: string; effort?: string };
     expect(step.agent).toBe("claude");
     expect(step.model).toBe("claude-opus-4-8");
-    expect(step.effort).toBeUndefined();
+    // Same family on Claude still supports high — keep it.
+    expect(step.effort).toBe("high");
     expect(result.plan.preservedFamily).toBe(true);
   });
 

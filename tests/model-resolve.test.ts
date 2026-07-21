@@ -6,6 +6,7 @@ import {
   findModelFamily,
   nativeModelForProvider,
   normalizeModelQuery,
+  resolveEffortForBinding,
   resolveModelBinding,
 } from "../src/agents";
 import { DEFAULT_CONFIG } from "../src/config/defaults";
@@ -18,6 +19,14 @@ describe("normalizeModelQuery", () => {
     expect(normalizeModelQuery("claude-opus-4-8")).toBe("claude-opus-4-8");
     expect(normalizeModelQuery("opencode/claude-opus-4-8")).toBe("opencode-claude-opus-4-8");
     expect(compactModelQuery("Opus 4.8")).toBe("opus48");
+  });
+
+  it("handles empty and punctuation-only input without throwing", () => {
+    expect(normalizeModelQuery("")).toBe("");
+    expect(normalizeModelQuery("   ")).toBe("");
+    expect(normalizeModelQuery("!!!")).toBe("!!!");
+    expect(compactModelQuery("!!!")).toBe("!!!");
+    expect(() => findModelFamily("!!!")).not.toThrow();
   });
 });
 
@@ -149,6 +158,26 @@ describe("resolveModelBinding", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.primary.effort).toBe("low");
+  });
+
+  it("resolveEffortForBinding walks preferredEfforts against supported levels", () => {
+    const effort = resolveEffortForBinding({
+      agent: "claude",
+      model: "claude-fable-5",
+      modelClass: "ultrathinker",
+      config: DEFAULT_CONFIG,
+    });
+    expect(effort).toBe("xhigh");
+
+    const unsupportedExplicit = resolveEffortForBinding({
+      agent: "claude",
+      model: "claude-haiku-4-5",
+      modelClass: "ultrathinker",
+      explicitEffort: "xhigh",
+      config: DEFAULT_CONFIG,
+    });
+    // Explicit effort is returned as-authored; support gating happens at remap.
+    expect(unsupportedExplicit).toBe("xhigh");
   });
 
   it("resolves modelClass 'simple' preferring a cheap/fast family", () => {

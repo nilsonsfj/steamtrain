@@ -226,14 +226,8 @@ function offeringsToCandidates(
     const sorted = sortAgentsByPreference(instances, opts.preferAgent);
     for (const inst of sorted) {
       if (!opts.isReady(inst.id)) continue;
-      // Allow unknown/custom model ids when the step pinned them on an agent;
-      // for auto offerings, require the native id to be in the catalog OR be
-      // the exact offering id from the family registry.
-      const catalog = modelIdsForAgent(inst.id, opts.config);
-      if (catalog.length > 0 && !catalog.includes(offering.modelId)) {
-        // Still accept registry offerings even if live catalog hasn't refreshed.
-        // catalog.includes is best-effort; registry is authoritative here.
-      }
+      // Registry offerings are authoritative even when a live catalog refresh
+      // has not listed the id yet.
       pushUnique(
         out,
         seen,
@@ -566,11 +560,7 @@ export function resolveModelBinding(
   };
 }
 
-function MODEL_CLASS_IDS_JOINED(): string {
-  return MODEL_CLASS_IDS.join(", ");
-}
-
-const MODEL_CLASS_HINT = MODEL_CLASS_IDS_JOINED();
+const MODEL_CLASS_HINT = MODEL_CLASS_IDS.join(", ");
 
 /**
  * Whether a step request needs runtime resolution (missing agent, uses a

@@ -1,4 +1,9 @@
-import { defaultModelForAgent, modelNameForAgent, resolveAgentInstances } from "../agents";
+import {
+  defaultModelForAgent,
+  effortForModelChange,
+  modelNameForAgent,
+  resolveAgentInstances,
+} from "../agents";
 import { bindingRequestFromStep, resolveModelBinding } from "../agents/model-resolve";
 import type { SteamtrainConfig } from "../config";
 import type { AgentInstanceId } from "../types/events";
@@ -34,7 +39,10 @@ export interface ReroutePlan {
   blockedAgents: AgentInstanceId[];
   /** Ids of the steps being re-routed, in spec order. */
   stepIds: string[];
-  /** Per-step overrides implementing the re-route (agent + model, effort reset). */
+  /**
+   * Per-step overrides implementing the re-route (agent + model). Effort is
+   * kept when the remapped model supports it; otherwise cleared.
+   */
   overrides: WorkflowStepOverrides;
   /** True when at least one step kept its model family on the new agent. */
   preservedFamily?: boolean;
@@ -123,12 +131,13 @@ export function planAgentReroute(
       if (!blockedStepIds.includes(step.id)) continue;
       if (!isAgentBackedStep(step)) continue;
 
-      // Try to keep the step's model family on the target agent.
+      // Prefer keeping the step's model family, forcing the chosen target first.
+      // resolveModelBinding already relaxes onto other ready offerings when the
+      // target cannot provide the family — no second full resolve needed.
       const request = bindingRequestFromStep(step);
       const remapped = resolveModelBinding(
         {
           ...request,
-          // Force consideration of the chosen target first.
           agent: target,
         },
         {
@@ -138,29 +147,28 @@ export function planAgentReroute(
         },
       );
 
-      if (remapped.ok && remapped.primary.agent === target) {
+      if (remapped.ok) {
+        const agent = remapped.primary.agent;
+        const model = remapped.primary.model;
         overrides[step.id] = {
-          agent: target,
-          model: remapped.primary.model,
-          effort: undefined,
+          agent,
+          model,
+          effort: effortForModelChange(
+            agent,
+            model,
+            step.effort ?? remapped.primary.effort,
+            config,
+          ),
         };
         if (remapped.primary.familyId) preservedFamily = true;
         continue;
       }
 
-      // Fall back: any ready offering of the same family, else target default.
-      const familyRemap = resolveModelBinding(request, { config, isReady, preferAgent: target });
-      if (familyRemap.ok) {
-        overrides[step.id] = {
-          agent: familyRemap.primary.agent,
-          model: familyRemap.primary.model,
-          effort: undefined,
-        };
-        if (familyRemap.primary.familyId) preservedFamily = true;
-        continue;
-      }
-
-      overrides[step.id] = { agent: target, model: targetModel, effort: undefined };
+      overrides[step.id] = {
+        agent: target,
+        model: targetModel,
+        effort: effortForModelChange(target, targetModel, step.effort, config),
+      };
     }
   }
 

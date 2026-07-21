@@ -920,20 +920,20 @@ const baseStepShape = {
 /** A JSON Schema object for structured step output (subset; see structured.ts). */
 const outputJsonSchema = z.record(z.unknown());
 
+const modelClassSchema = z.enum([
+  "thinker",
+  "ultrathinker",
+  "implementer",
+  "reviewer",
+  "deep-reviewer",
+  "simple",
+  "balanced",
+]);
+
 const agentRunShape = {
   agent: agentId.optional(),
   model: z.string().min(1).optional(),
-  modelClass: z
-    .enum([
-      "thinker",
-      "ultrathinker",
-      "implementer",
-      "reviewer",
-      "deep-reviewer",
-      "simple",
-      "balanced",
-    ])
-    .optional(),
+  modelClass: modelClassSchema.optional(),
   fallbackModels: z.array(z.string().min(1)).min(1).optional(),
   prompt: z.string().min(1),
   cwd: z.string().min(1).optional(),
@@ -948,17 +948,7 @@ const agentRunShape = {
 const optionalAgentRunShape = {
   agent: agentId.optional(),
   model: z.string().min(1).optional(),
-  modelClass: z
-    .enum([
-      "thinker",
-      "ultrathinker",
-      "implementer",
-      "reviewer",
-      "deep-reviewer",
-      "simple",
-      "balanced",
-    ])
-    .optional(),
+  modelClass: modelClassSchema.optional(),
   fallbackModels: z.array(z.string().min(1)).min(1).optional(),
   prompt: z.string().min(1).optional(),
   cwd: z.string().min(1).optional(),
@@ -1149,17 +1139,7 @@ const workflowMergeStepSchema = z
     prBody: z.string().min(1).optional(),
     agent: agentId.optional(),
     model: z.string().min(1).optional(),
-    modelClass: z
-      .enum([
-        "thinker",
-        "ultrathinker",
-        "implementer",
-        "reviewer",
-        "deep-reviewer",
-        "simple",
-        "balanced",
-      ])
-      .optional(),
+    modelClass: modelClassSchema.optional(),
     fallbackModels: z.array(z.string().min(1)).min(1).optional(),
     effort: z.string().min(1).optional(),
     prompt: z.string().min(1).optional(),
