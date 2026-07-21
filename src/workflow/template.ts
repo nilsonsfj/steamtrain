@@ -211,6 +211,11 @@ function stepRefs(step: WorkflowStep): string[] {
   if (kind === "command" && "cmd" in step && typeof step.cmd === "string") {
     refs.push(...extractRefs(step.cmd));
   }
+  if (kind === "issues") {
+    const is = step as { mode?: string; titlePrefix?: string };
+    if (is.mode) refs.push(...extractRefs(is.mode));
+    if (is.titlePrefix) refs.push(...extractRefs(is.titlePrefix));
+  }
   if (kind === "workflow" && "input" in step && typeof step.input === "string") {
     refs.push(...extractRefs(step.input));
   }

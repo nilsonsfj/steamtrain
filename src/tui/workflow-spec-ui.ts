@@ -43,6 +43,7 @@ export const BLOCK_LABEL: Record<ReturnType<typeof workflowStepKind>, string> = 
   command: "command",
   llm: "llm",
   workflow: "sub-workflow",
+  issues: "issues",
 };
 
 /** Cumulative flat step index at the start of each phase. */
@@ -155,6 +156,10 @@ export function specStepRowMeta(step: WorkflowStep): string {
     if (step.outputStep) bits.push(`outputStep: ${step.outputStep}`);
     if (step.worktreeStep) bits.push(`worktreeStep: ${step.worktreeStep}`);
   }
+  if (step.kind === "issues") {
+    bits.push(`mode: ${step.mode ?? "report"}`);
+    if (step.from?.length) bits.push(`from: ${step.from.join(", ")}`);
+  }
   return bits.join(" · ");
 }
 
@@ -237,6 +242,15 @@ export function specDetailLines(step: WorkflowStep): string[] {
           .join(", ")}`,
       );
     }
+  }
+  if (step.kind === "issues") {
+    lines.push(`mode: ${step.mode ?? "report"}`);
+    if (step.from?.length) lines.push(`from: ${step.from.join(", ")}`);
+    lines.push(`findingsPath: ${step.findingsPath ?? "findings"}`);
+    if (step.titlePrefix) lines.push(`titlePrefix: ${step.titlePrefix}`);
+    if (step.labels?.length) lines.push(`labels: ${step.labels.join(", ")}`);
+    if (step.repo) lines.push(`repo: ${step.repo}`);
+    lines.push(`limit: ${step.limit ?? 20}`);
   }
   return lines;
 }

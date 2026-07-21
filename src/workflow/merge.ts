@@ -616,7 +616,14 @@ export async function pruneWorktree(source: WorktreeSource, repoRoot: string): P
   return removed;
 }
 
-function runCommand(
+/**
+ * Spawn `binary args` in `cwd` and resolve with combined stdout; rejects with
+ * a helpful "not installed" message on ENOENT, or `binary args failed: …` with
+ * captured stderr on a non-zero exit. Shared by the `gh pr create` call above
+ * and the `issues` step's `gh issue list`/`gh issue create` calls (`issues.ts`)
+ * so external-CLI spawning stays in one place.
+ */
+export function runCommand(
   binary: string,
   args: string[],
   cwd: string,

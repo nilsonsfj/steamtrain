@@ -62,6 +62,7 @@ export const BLOCK_COLOR: Record<WorkflowStepKind, string> = {
   command: "#b8c4d0",
   llm: "#62d2f5",
   workflow: "#7ce38b",
+  issues: "#c9e07a",
 };
 
 /** Braille spinner frames for live running indicators (~10 fps look at 120ms). */

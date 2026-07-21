@@ -5,7 +5,7 @@
   
 
 
-  var KIND_LABEL = { worker: "worker", processor: "process", distributor: "fan-out", consolidator: "merge", gate: "gate", approval: "approval", human: "human", merge: "merge-back", command: "command", llm: "llm", workflow: "sub-workflow" };
+  var KIND_LABEL = { worker: "worker", processor: "process", distributor: "fan-out", consolidator: "merge", gate: "gate", approval: "approval", human: "human", merge: "merge-back", command: "command", llm: "llm", workflow: "sub-workflow", issues: "issues" };
   // Autonomy labels: what a workflow will need from a human, visible BEFORE launch.
   var AUTONOMY_META = {
     autonomous: { badge: "▸ autonomous", cls: "autonomy-auto", title: "Runs unattended end-to-end — no human involvement declared." },
@@ -2052,14 +2052,14 @@
     return h("span", null, i, label);
   }
   function kindColor(k) {
-    return { worker: "#6fb1ff", processor: "#9d8cff", distributor: "#ffce6f", consolidator: "#5fe0c6", gate: "#f0a35e", approval: "#ffd166", human: "#f5a3ff", merge: "#ff9ecb", command: "#b8c4d0", llm: "#62d2f5", workflow: "#7ce38b" }[k] || "#6fb1ff";
+    return { worker: "#6fb1ff", processor: "#9d8cff", distributor: "#ffce6f", consolidator: "#5fe0c6", gate: "#f0a35e", approval: "#ffd166", human: "#f5a3ff", merge: "#ff9ecb", command: "#b8c4d0", llm: "#62d2f5", workflow: "#7ce38b", issues: "#c9e07a" }[k] || "#6fb1ff";
   }
 
   var ALL_LEGEND_KINDS = [
     ["worker", "worker"], ["processor", "process"], ["distributor", "fan-out"],
     ["consolidator", "merge"], ["gate", "gate"], ["approval", "approval"],
     ["human", "human"], ["merge", "merge-back"], ["command", "command"],
-    ["llm", "llm"], ["workflow", "sub-workflow"]
+    ["llm", "llm"], ["workflow", "sub-workflow"], ["issues", "issues"]
   ];
 
   /** Kinds present in the selected workflow (spec or live phases). */

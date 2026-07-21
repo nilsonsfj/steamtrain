@@ -140,6 +140,8 @@ function stepIsDeterministic(step: WorkflowStep): boolean {
   if (kind === "consolidator" && !isAgentBackedStep(step)) return true;
   if (kind === "distributor" && !isAgentBackedStep(step)) return true;
   if (kind === "merge") return true;
+  // Agentless, costless, no LLM in the loop — same category as command/merge.
+  if (kind === "issues") return true;
   // workflow steps invoke child workflows which may contain agent-backed steps,
   // so they are NOT deterministic — treat them as delegated.
   return false;

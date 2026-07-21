@@ -34,6 +34,15 @@ import {
   noProviderHumanInputResponse,
   validateHumanInputValue,
 } from "./human-input";
+import {
+  GH_GUIDANCE,
+  buildFindingsReport,
+  buildIssueBody,
+  collectFindings,
+  createGithubIssue,
+  dedupeFindings,
+  findExistingIssue,
+} from "./issues";
 import { type LlmCallResult, type LlmComplete, type LlmProviderId, callLlm } from "./llm";
 import {
   type ConflictResolver,
@@ -68,6 +77,7 @@ import {
   type GateCondition,
   type GateStep,
   type HumanStep,
+  type IssuesStep,
   type LlmPricing,
   type LlmStep,
   MAX_CONCURRENCY,
@@ -984,6 +994,10 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
         for (const ref of step.from ?? []) addEarlier(ref);
         renderableTexts.push(step.branch, step.commitMessage, step.prTitle, step.prBody);
       }
+      if (step.kind === "issues") {
+        for (const ref of step.from ?? []) addEarlier(ref);
+        renderableTexts.push(step.mode, step.titlePrefix);
+      }
       if ("prompt" in step) renderableTexts.push(step.prompt);
       if (step.kind === "llm") renderableTexts.push(step.system);
       if (step.kind === "command") renderableTexts.push(step.cmd);
@@ -1546,6 +1560,10 @@ async function executeStep(
     return executeMergeStep(step, ctx, hooks);
   }
 
+  if (kind === "issues" && step.kind === "issues") {
+    return { result: await executeIssuesStep(step, ctx) };
+  }
+
   if (kind === "command" && step.kind === "command") {
     return { result: await executeCommandStep(step, ctx, hooks) };
   }
@@ -1702,6 +1720,16 @@ async function runAgentAttempt(
       costUsd,
       tokens,
       sessionId,
+      // Carry-over fix: record the RENDERED model that actually ran (`step`
+      // here already carries block 5's templated-then-rendered value — see
+      // `executeAgentStep`'s `step` reassignment and the merge conflict
+      // resolver's synthetic step) so cost analytics (`cost.ts`'s
+      // `resultLeaves`/`recordLeaves`) attribute spend to what was billed
+      // instead of falling back to the raw `{{inputs.*}}` spec string. `llm`
+      // steps already set this on their own result path; this is the
+      // worker/processor/agent-backed-distributor/consolidator/merge-conflict
+      // counterpart.
+      model: step.model,
     },
     // Transient + side-effect-free: errored, not cancelled, and the agent neither
     // completed a turn (`result`) nor invoked a tool (`tool_use`/`tool_result`),
@@ -3826,6 +3854,132 @@ async function executeMergeStep(
   };
 }
 
+const ISSUES_MODES = new Set(["report", "github"]);
+const DEFAULT_ISSUES_LIMIT = 20;
+
+/**
+ * Execute an `issues` step (building block 6): collect out-of-scope findings
+ * from `from` (default `dependsOn`) sources, dedupe, and either render a
+ * report (`mode: "report"`, zero side effects) or file GitHub issues
+ * (`mode: "github"`, via `gh`). See {@link IssuesStep} for the full contract;
+ * the collection/dedupe/render/gh primitives live in `issues.ts`.
+ */
+async function executeIssuesStep(step: IssuesStep, ctx: ExecuteContext): Promise<StepResult> {
+  const started = Date.now();
+  const fail = (message: string): StepResult => ({
+    stepId: step.id,
+    ok: false,
+    output: message,
+    error: message,
+    durationMs: Date.now() - started,
+  });
+
+  const render = (text: string | undefined): string | undefined =>
+    text === undefined
+      ? undefined
+      : renderPrompt(text, {
+          input: ctx.input,
+          inputs: ctx.inputs,
+          outputs: ctx.outputs,
+          results: ctx.results,
+          iteration: ctx.iteration,
+        });
+
+  // `mode` is templated (building block 6 mirrors block 5's model/effort
+  // rendering) so one spec can switch between "report" and "github" via
+  // `{{inputs.*}}`; validated AFTER rendering since the literal spec value may
+  // just be a placeholder.
+  const renderedMode = render(step.mode) || "report";
+  if (!ISSUES_MODES.has(renderedMode)) {
+    return fail(
+      `issues step '${step.id}' mode template '${step.mode ?? "report"}' rendered '${renderedMode}', which is not "report" or "github"`,
+    );
+  }
+
+  const sourceIds = step.from ?? step.dependsOn ?? [];
+  const collected = collectFindings(sourceIds, ctx.results, step.findingsPath ?? "findings");
+  if (!collected.ok) return fail(`issues step '${step.id}': ${collected.error}`);
+  const findings = dedupeFindings(collected.findings);
+  const dedupedCount = collected.findings.length - findings.length;
+
+  if (renderedMode === "report") {
+    const output = buildFindingsReport(findings, collected.malformed);
+    return {
+      stepId: step.id,
+      ok: true,
+      output,
+      json: { findings, created: [], skippedExisting: [] },
+      durationMs: Date.now() - started,
+    };
+  }
+
+  // mode: "github" — side-effectful, so the result is never cached (mirrors
+  // approval steps): a resumed run must re-check/re-file rather than replay a
+  // stale created/skippedExisting list that no longer matches GitHub's state.
+  const titlePrefix = render(step.titlePrefix) ?? "";
+  const limit = step.limit ?? DEFAULT_ISSUES_LIMIT;
+  const cwd = ctx.deps.cwd;
+  const toCreate = findings.slice(0, limit);
+  const truncated = findings.length - toCreate.length;
+
+  const created: { title: string; url: string }[] = [];
+  const skippedExisting: { title: string }[] = [];
+  const failures: { title: string; error: string }[] = [];
+
+  for (const finding of toCreate) {
+    if (ctx.signal?.aborted) return fail("cancelled");
+    const issueTitle = `${titlePrefix}${finding.title}`;
+    try {
+      const existing = await findExistingIssue(issueTitle, cwd, step.repo, ctx.signal);
+      if (existing) {
+        skippedExisting.push({ title: issueTitle });
+        continue;
+      }
+      const url = await createGithubIssue({
+        title: issueTitle,
+        body: buildIssueBody(finding, ctx.workflowName),
+        labels: step.labels,
+        repo: step.repo,
+        cwd,
+        signal: ctx.signal,
+      });
+      created.push({ title: issueTitle, url });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      failures.push({ title: issueTitle, error: message });
+    }
+  }
+
+  const lines: string[] = [
+    `filed ${created.length} issue(s), skipped ${skippedExisting.length} existing, ${findings.length} finding(s) total`,
+  ];
+  for (const c of created) lines.push(`  created: ${c.title} -> ${c.url}`);
+  for (const s of skippedExisting) lines.push(`  already exists: ${s.title}`);
+  if (dedupedCount > 0) lines.push(`deduped ${dedupedCount} repeat finding(s)`);
+  if (collected.malformed > 0) {
+    lines.push(`${collected.malformed} malformed finding item(s) were skipped`);
+  }
+  if (truncated > 0) {
+    lines.push(`truncated ${truncated} finding(s) beyond limit ${limit}`);
+  }
+  if (failures.length > 0) {
+    lines.push(`${failures.length} issue(s) failed to file:`);
+    for (const f of failures) lines.push(`  ${f.title}: ${f.error}`);
+    lines.push(`hint: ${GH_GUIDANCE}`);
+  }
+
+  const ok = failures.length === 0;
+  return {
+    stepId: step.id,
+    ok,
+    output: lines.join("\n"),
+    error: ok ? undefined : `${failures.length} issue(s) failed to file (see output)`,
+    json: { findings, created, skippedExisting },
+    durationMs: Date.now() - started,
+    noCache: true,
+  };
+}
+
 /** The built-in prompt for the conflict-resolution agent (LLM-driven merges). */
 function conflictResolutionPrompt(
   sourceStepId: string,
@@ -3857,8 +4011,13 @@ function findFailedDependency(
   step: WorkflowStep,
   results: Map<string, StepResult>,
 ): string | undefined {
+  // `issues` steps collect findings leaf-by-leaf exactly like merge collects
+  // worktrees (see `collectFindings`), so they get the same partial-fan-out
+  // exemption below.
   const mergeSources =
-    step.kind === "merge" ? new Set(step.from ?? step.dependsOn ?? []) : undefined;
+    step.kind === "merge" || step.kind === "issues"
+      ? new Set(step.from ?? step.dependsOn ?? [])
+      : undefined;
   // Workspace-inherit and session-continue sources are implicit dependencies:
   // a step can neither start from the worktree nor resume the session of a
   // step that failed. (`continue:<ownId>` self-references are not deps.)
@@ -3929,14 +4088,17 @@ function dependencyFailedResult(stepId: string, dependencyId: string): StepResul
  */
 function findSkipReason(step: WorkflowStep, ctx: GateEvalContext): string | undefined {
   const kind = workflowStepKind(step);
-  // A merge step's sources are `from ?? dependsOn` (matching
-  // executeMergeStep); like a consolidator it treats skipped sources as
-  // absent and only skips when ALL of them were. When `from` is set, any
-  // extra `dependsOn` entries are ordering-only and don't cascade skips.
+  // A merge (or issues) step's sources are `from ?? dependsOn` (matching
+  // executeMergeStep / collectFindings); like a consolidator it treats
+  // skipped sources as absent and only skips when ALL of them were. When
+  // `from` is set, any extra `dependsOn` entries are ordering-only and don't
+  // cascade skips.
   const dependsOn =
-    step.kind === "merge" ? (step.from ?? step.dependsOn ?? []) : (step.dependsOn ?? []);
+    step.kind === "merge" || step.kind === "issues"
+      ? (step.from ?? step.dependsOn ?? [])
+      : (step.dependsOn ?? []);
   const skippedDeps = dependsOn.filter((dep) => ctx.results.get(dep)?.skipped);
-  if (kind === "consolidator" || kind === "merge") {
+  if (kind === "consolidator" || kind === "merge" || kind === "issues") {
     if (dependsOn.length > 0 && skippedDeps.length === dependsOn.length) {
       return "all dependencies were skipped";
     }

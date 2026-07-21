@@ -36,7 +36,8 @@ export type WorkflowStepKind =
   | "merge"
   | "command"
   | "llm"
-  | "workflow";
+  | "workflow"
+  | "issues";
 
 export interface WorkflowStepBase {
   /** Unique across the whole workflow; referenced by `dependsOn` and templates. */
@@ -334,6 +335,77 @@ export interface MergeStep extends WorkflowStepBase {
   env?: Record<string, string>;
   extraArgs?: string[];
   stepTimeoutSec?: number;
+}
+
+/**
+ * Building block 6 — documents out-of-scope findings as GitHub issues or as a
+ * report. Agentless, costless, worktree-free: it reads structured `json`
+ * findings arrays that earlier steps already declared via an `output` schema,
+ * so it participates in any workflow without a dedicated "findings" step kind
+ * upstream.
+ *
+ * **Collection**: walks each `from` source (default `dependsOn`), descending
+ * ONE level into `childResults` leaves (fan-out children, sub-workflow
+ * surfaces) — mirroring {@link MergeStep}'s leaf judgment exactly: a
+ * skipped/not-run leaf contributes nothing, a failed leaf fails the whole
+ * step (a partial findings report from a failed pipeline would be
+ * misleading), and a step carrying its own top-level `childResults` alongside
+ * a `worktree`/`json` is still treated as one leaf (guards the same future
+ * shape `executeMergeStep` guards). From each surviving leaf, `json` is read
+ * at `findingsPath` (default `"findings"`); a leaf with no structured output,
+ * or nothing at that path, contributes nothing — that's the common case (a
+ * clean run has no findings), not an error.
+ *
+ * **Finding shape**: the array at `findingsPath` may contain plain strings
+ * (treated as titles) or objects (`title` required; `body`, `severity`,
+ * `file`, `line` optional). An object with no usable string `title` is
+ * malformed — counted and reported, not fatal.
+ *
+ * **Dedupe**: case-insensitive normalized `title` + `file` fingerprint across
+ * every source, so the same pre-existing bug spotted by two streams files
+ * once.
+ *
+ * **`mode: "report"`** (default, zero side effects): a severity-ordered
+ * markdown report (critical > high > medium > low > unknown, unrecognized
+ * severities sorted last but shown verbatim); `json` =
+ * `{ findings, created: [], skippedExisting: [] }`.
+ *
+ * **`mode: "github"`** (side-effectful): creates one issue per finding (up to
+ * `limit`) via `gh issue create` — title = `titlePrefix` + the finding title,
+ * body = the finding body plus a provenance block (workflow, source step,
+ * `file:line`, severity), `--label` per entry in `labels`, `-R repo` when
+ * set. Before creating, checks for an existing issue with the same
+ * (case-insensitive, exact-normalized) title via `gh issue list --search`
+ * (state all) and records a match in `skippedExisting` instead of creating a
+ * duplicate. `gh` missing from PATH, or a `gh` failure (commonly missing
+ * auth), fails the step with copy-paste guidance. `gh` runs from the run's
+ * base cwd. The result carries `noCache: true` — like an approval checkpoint,
+ * a resumed run must re-run it rather than replay a stale "created" list that
+ * no longer matches GitHub's state.
+ *
+ * `mode` and `titlePrefix` are templates (rendered with the step's standard
+ * context); `mode` is validated ∈ `{"report", "github"}` AFTER rendering, so
+ * one spec can switch modes via `{{inputs.issueMode}}`.
+ *
+ * No agent, no worktree: never a `workspace: "inherit:"/"attach:"` source, and
+ * autonomy-neutral (it never pauses for a human).
+ */
+export interface IssuesStep extends WorkflowStepBase {
+  kind: "issues";
+  /** Steps whose findings to collect; defaults to `dependsOn`. */
+  from?: string[];
+  /** JSON path into each source's `json` where the findings array lives. Default `"findings"`. */
+  findingsPath?: string;
+  /** `"report"` (default, safe) or `"github"` (creates issues). Template, validated after rendering. */
+  mode?: string;
+  /** Prepended to each created issue's title (github mode). Template. */
+  titlePrefix?: string;
+  /** `--label` flags applied to every created issue (github mode). */
+  labels?: string[];
+  /** `-R owner/name` target repo for `gh` (github mode); omitted ⇒ the run's cwd repo. */
+  repo?: string;
+  /** Max issues created before truncating (github mode). Default 20. */
+  limit?: number;
 }
 
 /**
@@ -676,7 +748,8 @@ export type WorkflowStep =
   | MergeStep
   | CommandStep
   | LlmStep
-  | WorkflowCallStep;
+  | WorkflowCallStep
+  | IssuesStep;
 
 export interface WorkflowPhase {
   id: string;
@@ -815,7 +888,14 @@ export interface StepResult {
    * even if the configured instance's endpoint or defaultModel changed since.
    */
   api?: ApiInstanceId;
-  /** Effective model the `llm` step called; see {@link StepResult.api}. */
+  /**
+   * Effective (rendered) model the step actually ran with. Set by `llm`
+   * steps (see {@link StepResult.api}) AND by agent-backed steps
+   * (worker/processor, agent-backed distributor/consolidator, merge
+   * conflict-resolution agents) so a templated `model: "{{inputs.*}}"` is
+   * attributed by its rendered value everywhere cost is broken down by model
+   * (`cost.ts`'s `resultLeaves`/`recordLeaves`), not by the raw template text.
+   */
   model?: string;
   /** Total attempts this step took (auto-retry); omitted/1 means it ran once. */
   attempts?: number;
@@ -1259,6 +1339,27 @@ const workflowCallStepSchema = z.object({
   worktreeStep: z.string().min(1).optional(),
 });
 
+const workflowIssuesStepSchema = z
+  .object({
+    ...baseStepShape,
+    kind: z.literal("issues"),
+    from: z.array(z.string().min(1)).min(1).optional(),
+    findingsPath: z.string().min(1).optional(),
+    mode: z.string().min(1).optional(),
+    titlePrefix: z.string().min(1).optional(),
+    labels: z.array(z.string().min(1)).optional(),
+    repo: z.string().min(1).optional(),
+    limit: z.number().int().positive().optional(),
+  })
+  .superRefine((step, ctx) => {
+    if (!step.from?.length && !step.dependsOn?.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "issues step requires from or dependsOn (the steps whose findings to collect)",
+      });
+    }
+  });
+
 const workflowStepSchema = z.union([
   workflowGateStepSchema,
   workflowApprovalStepSchema,
@@ -1269,6 +1370,7 @@ const workflowStepSchema = z.union([
   workflowCommandStepSchema,
   workflowLlmStepSchema,
   workflowCallStepSchema,
+  workflowIssuesStepSchema,
   workflowWorkerStepSchema,
 ]);
 
@@ -1564,6 +1666,18 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
               error: allIds.has(ref)
                 ? `merge step '${step.id}' from references '${ref}', which is not in an earlier phase`
                 : `merge step '${step.id}' from references unknown step '${ref}'`,
+            };
+          }
+        }
+      }
+      if (step.kind === "issues") {
+        for (const ref of step.from ?? []) {
+          if (!earlierIds.has(ref)) {
+            return {
+              ok: false,
+              error: allIds.has(ref)
+                ? `issues step '${step.id}' from references '${ref}', which is not in an earlier phase`
+                : `issues step '${step.id}' from references unknown step '${ref}'`,
             };
           }
         }
