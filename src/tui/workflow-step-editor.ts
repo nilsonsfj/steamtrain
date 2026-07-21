@@ -3,6 +3,7 @@ import {
   effortForModelChange,
   effortsForModel,
   modelIdsForAgent,
+  modelNameForAgent,
   resolveAgentInstances,
 } from "../agents";
 import type { SteamtrainConfig } from "../config";
@@ -292,4 +293,15 @@ export function summarizeBulkRetarget(
   const effortNote = desire.effort ? ` · ${desire.effort}` : "";
   const noun = count === 1 ? "step" : "steps";
   return `${count} ${noun} → ${desire.agent} · ${model}${effortNote}`;
+}
+
+/** Display label for an agent model id (name + id when they differ). */
+export function modelLabel(
+  agent: string | undefined,
+  model: string | undefined,
+  config?: SteamtrainConfig,
+): string {
+  if (!agent || !model) return model ?? "(none)";
+  const name = modelNameForAgent(agent, model, config);
+  return name === model ? model : `${name} (${model})`;
 }

@@ -15,14 +15,18 @@ import {
 } from "../tui/workflow-step-editor";
 import type { SlashCommandContext, SlashCommandResult } from "./types";
 
-/** True when the last arg is the bulk flag (`--all` / `-a`). */
+/** Strip `--all` / `-a` from anywhere in the args (order-independent). */
 export function takeAllFlag(args: string[]): { args: string[]; all: boolean } {
-  if (args.length === 0) return { args, all: false };
-  const last = args[args.length - 1];
-  if (last === "--all" || last === "-a") {
-    return { args: args.slice(0, -1), all: true };
+  let all = false;
+  const out: string[] = [];
+  for (const arg of args) {
+    if (arg === "--all" || arg === "-a") {
+      all = true;
+      continue;
+    }
+    out.push(arg);
   }
-  return { args, all: false };
+  return { args: out, all };
 }
 
 export function hasWorkflowStepTarget(ctx: SlashCommandContext): boolean {

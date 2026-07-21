@@ -3331,6 +3331,9 @@
           if (r.renderEffort) r.renderEffort();
         }
         if (r.effortSel) {
+          // Empty bulk effort = model default. Unlike TUI buildBulkRetargetPatches
+          // (which revalidates via effortForModelChange), the Web path clears the
+          // select when the chosen effort is not in this step's options.
           var has = Array.prototype.some.call(r.effortSel.options, function (o) { return o.value === effort; });
           r.effortSel.value = has ? effort : "";
         }

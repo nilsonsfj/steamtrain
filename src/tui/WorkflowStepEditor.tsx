@@ -1,6 +1,6 @@
 import { Box, Text, useInput } from "ink";
 import { useCallback, useMemo, useState } from "react";
-import { modelIdsForAgent, modelNameForAgent } from "../agents";
+import { modelIdsForAgent } from "../agents";
 import { truncate } from "../agents/util";
 import { MAX_PROMPT_CHARS, type SteamtrainConfig } from "../config";
 import { AGENT_COLOR } from "./theme";
@@ -18,6 +18,7 @@ import {
   effortChangePatch,
   effortOptions,
   modelChangePatch,
+  modelLabel,
   summarizeBulkRetarget,
 } from "./workflow-step-editor";
 
@@ -315,16 +316,6 @@ function fieldOptionHint(
     return n > 1 ? `(${n} levels)` : undefined;
   }
   return undefined;
-}
-
-function modelLabel(
-  agent: string | undefined,
-  model: string | undefined,
-  config: SteamtrainConfig,
-): string {
-  if (!agent || !model) return model ?? "(none)";
-  const name = modelNameForAgent(agent, model, config);
-  return name === model ? model : `${name} (${model})`;
 }
 
 function promptPreview(prompt: string, width: number): string {

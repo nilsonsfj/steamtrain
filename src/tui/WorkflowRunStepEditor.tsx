@@ -1,6 +1,6 @@
 import { Box, Text, useInput } from "ink";
 import { useCallback, useMemo, useState } from "react";
-import { modelIdsForAgent, modelNameForAgent } from "../agents";
+import { modelIdsForAgent } from "../agents";
 import { truncate } from "../agents/util";
 import { MAX_PROMPT_CHARS, type SteamtrainConfig } from "../config";
 import type { StepEditPatch } from "../workflow";
@@ -9,6 +9,7 @@ import {
   cycleOption,
   effortOptions,
   modelChangePatch,
+  modelLabel,
 } from "./workflow-step-editor";
 
 /**
@@ -297,14 +298,4 @@ export function WorkflowRunStepEditor({
       </Box>
     </Box>
   );
-}
-
-function modelLabel(
-  agent: string | undefined,
-  model: string | undefined,
-  config: SteamtrainConfig,
-): string {
-  if (!agent || !model) return model ?? "(none)";
-  const name = modelNameForAgent(agent, model, config);
-  return name === model ? model : `${name} (${model})`;
 }

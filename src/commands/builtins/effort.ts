@@ -252,7 +252,16 @@ function completeWorkflowEffortArgs(args: string[], ctx: SlashCommandContext): r
   if (!step) return [];
   const { args: bare } = takeAllFlag(args);
   if (bare.length > 1) return [];
-  if (args.length === 2 && args[0] && !args[0].startsWith("-")) return ["--all"];
+  // After stripping --all, a single bare value means suggest appending --all.
+  if (
+    bare.length === 1 &&
+    bare[0] &&
+    !bare[0].startsWith("-") &&
+    !args.includes("--all") &&
+    !args.includes("-a")
+  ) {
+    return ["--all"];
+  }
   const efforts = effortsForModel(step.agent, step.model, ctx.config);
   if (efforts.length === 0) return ["clear"];
   return [...efforts, "clear"];
