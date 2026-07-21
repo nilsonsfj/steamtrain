@@ -18,8 +18,9 @@ describe("computeStreamHeight", () => {
   const base = { rows: 40, columns: 100, promptValueLength: 0 };
 
   it("reserves the fixed chrome rows", () => {
-    // rows - BASE_RESERVED_ROWS(9) with no prompt wrap and no notice.
-    expect(computeStreamHeight(base)).toBe(31);
+    // rows - BASE_RESERVED_ROWS(10) with no prompt wrap and no notice.
+    // Includes the always-on project identity strip under the status bar.
+    expect(computeStreamHeight(base)).toBe(30);
   });
 
   it("shrinks the stream by one row when a short notice is showing", () => {

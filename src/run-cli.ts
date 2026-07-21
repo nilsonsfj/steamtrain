@@ -523,6 +523,7 @@ async function spawnDetachedRun(options: SpawnDetachedRunOptions): Promise<numbe
   const logFd = openSync(join(store.rootDir, sanitizePathComponent(runId), "runner.log"), "a");
   const childArgs = [
     script,
+    ...(options.io.cwd ? ["--project-dir", options.io.cwd] : []),
     ...(options.io.configPath ? ["--config-file", options.io.configPath] : []),
     ...(options.io.workspacePath ? ["--workspace", options.io.workspacePath] : []),
     "workflow",

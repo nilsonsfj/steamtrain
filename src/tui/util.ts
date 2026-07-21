@@ -7,12 +7,12 @@ export function message(err: unknown): string {
 
 /**
  * Rows the fixed chrome around the event stream always occupies: the status
- * bar (one content line, plus its top and bottom border), the task-selector
- * legend, the bordered prompt input, and the hint line. When the status bar
- * shows a second line (its API row), that extra row is reserved separately —
- * see `statusApiLine` below.
+ * bar (one content line, plus its top and bottom border), the project identity
+ * strip beneath it, the task-selector legend, the bordered prompt input, and
+ * the hint line. When the status bar shows a second line (its API row), that
+ * extra row is reserved separately — see `statusApiLine` below.
  */
-const BASE_RESERVED_ROWS = 9;
+const BASE_RESERVED_ROWS = 10;
 
 /**
  * How many terminal rows a run of text occupies once wrapped into `width`

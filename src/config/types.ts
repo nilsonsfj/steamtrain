@@ -17,6 +17,12 @@ import {
 } from "../workflow/types";
 
 export interface SteamtrainConfig {
+  /**
+   * Optional display name for this project. Shown in the TUI status bar and
+   * web header. When omitted, steamtrain falls back to package.json `name`,
+   * then the directory basename.
+   */
+  name?: string;
   /** Optional per-agent binary path/name overrides. */
   binaries?: Partial<Record<AgentProviderId, string>>;
   /** Optional runnable agent instances. Omitted means all built-in agents are enabled. */
@@ -223,6 +229,11 @@ const modelClassesSchema = z
 /** Schema for a (partial) steamtrain.json — every section is optional and merged onto defaults. */
 export const configFileSchema = z
   .object({
+    name: z
+      .string()
+      .max(80)
+      .refine((s) => s.trim().length > 0, "must not be empty or whitespace")
+      .optional(),
     binaries: z
       .object({
         claude: nonEmptyString.optional(),
@@ -276,6 +287,7 @@ export type ConfigFile = z.infer<typeof configFileSchema>;
  * and the legacy timeout keys (which predate the global file).
  */
 export const userConfigFileSchema = configFileSchema.omit({
+  name: true,
   workflows: true,
   timeoutMs: true,
   stepTimeoutMs: true,

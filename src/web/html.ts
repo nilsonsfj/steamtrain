@@ -62,6 +62,13 @@ export function renderIndex(revs: PageAssetRevisions): string {
 <body>
 <header>
   <div class="logo"><span class="brand-mark" aria-hidden="true"></span><span class="accent">steam</span>train</div>
+  <div class="project" id="project" hidden>
+    <span class="project-mark" aria-hidden="true">◈</span>
+    <span class="project-copy">
+      <span class="project-name" id="projectName"></span>
+      <span class="project-path" id="projectPath"></span>
+    </span>
+  </div>
   <div class="config" id="config"></div>
   <span class="mode-badge" id="modeBadge" style="display:none" title="This session can view workflows and runs but cannot launch, edit, approve, or change config.">&#128065; read-only</span>
   <div class="header-actions" role="group" aria-label="Actions">

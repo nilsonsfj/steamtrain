@@ -192,6 +192,12 @@ function makeServer(host: WorkflowHost): { server: Server; runs: WorkflowRunMana
       },
     ],
     configLabel: "test config",
+    project: {
+      cwd: "/tmp/demo-project",
+      name: "demo-project",
+      displayPath: "/tmp/demo-project",
+      nameSource: "directory" as const,
+    },
   });
   servers.push(server);
   return { server, runs };
@@ -213,6 +219,9 @@ describe("web server", () => {
     expect(html).toContain("steam");
     expect(html).toContain('id="wflist"');
     expect(html).toContain('id="runBtn"');
+    expect(html).toContain('id="project"');
+    expect(html).toContain('id="projectName"');
+    expect(html).toContain('id="projectPath"');
     // The page now references external static assets rather than inlining them.
     expect(html).toContain('<link rel="stylesheet" href="/static/app.css?v=');
     expect(html).toContain('<script src="/static/steamtrain-reducer.bundle.js?v=');
@@ -312,9 +321,14 @@ describe("web server", () => {
     const res = await fetch(`${base}/api/workflows`);
     const body = (await res.json()) as {
       configLabel: string;
+      project: { name: string; cwd: string; displayPath: string };
       workflows: Record<string, unknown>[];
     };
     expect(body.configLabel).toBe("test config");
+    expect(body.project).toMatchObject({
+      name: "demo-project",
+      cwd: "/tmp/demo-project",
+    });
     expect(body.workflows).toHaveLength(1);
     expect(body.workflows[0]).toMatchObject({
       name: "demo",
@@ -323,6 +337,19 @@ describe("web server", () => {
       stepCount: 1,
       kinds: { worker: 1 },
       agents: ["opencode"],
+    });
+  });
+
+  it("exposes project identity on /api/session", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/session`);
+    const body = (await res.json()) as {
+      project: { name: string; cwd: string };
+    };
+    expect(body.project).toMatchObject({
+      name: "demo-project",
+      cwd: "/tmp/demo-project",
     });
   });
 
@@ -3089,10 +3116,14 @@ describe("startWebUi — secure-by-default exposure", () => {
     expect((await fetch(`${base}/api/workflows`)).status).toBe(401);
     const cookie = await login(base, booted.readToken!);
     const probe = await fetch(`${base}/api/session`, { headers: { cookie } });
-    expect(await probe.json()).toEqual({
+    expect(await probe.json()).toMatchObject({
       authRequired: true,
       capability: "read",
       readOnly: true,
+      project: expect.objectContaining({
+        name: expect.any(String),
+        cwd: expect.any(String),
+      }),
     });
   });
 
@@ -3109,10 +3140,14 @@ describe("startWebUi — secure-by-default exposure", () => {
     const base = booted.url.replace("0.0.0.0", "127.0.0.1");
     const cookie = await login(base, "my-secret");
     const probe = await fetch(`${base}/api/session`, { headers: { cookie } });
-    expect(await probe.json()).toEqual({
+    expect(await probe.json()).toMatchObject({
       authRequired: true,
       capability: "read",
       readOnly: true,
+      project: expect.objectContaining({
+        name: expect.any(String),
+        cwd: expect.any(String),
+      }),
     });
   });
 

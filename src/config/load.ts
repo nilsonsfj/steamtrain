@@ -223,6 +223,7 @@ export function mergeConfig(
   override: ConfigFile,
 ): { config: SteamtrainConfig; warnings: string[] } {
   const merged: SteamtrainConfig = {
+    name: override.name ?? base.name,
     binaries: { ...base.binaries, ...override.binaries },
     agents: mergeAgentLists(base.agents, override.agents),
     apis: mergeInstanceLists(base.apis, override.apis),

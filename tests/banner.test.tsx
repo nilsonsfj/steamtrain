@@ -1,15 +1,34 @@
 import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
 import type { DoctorResult } from "../src/doctor";
+import type { ProjectIdentity } from "../src/project";
 import { StatusBar } from "../src/tui/StatusBar";
 import { Banner } from "../src/tui/banner";
 
+const DEMO_PROJECT: ProjectIdentity = {
+  cwd: "/home/dev/code/demo",
+  name: "demo",
+  displayPath: "~/code/demo",
+  nameSource: "directory",
+};
+
 describe("TUI components", () => {
-  it("renders the startup banner art", () => {
+  it("renders the startup banner art with project identity", () => {
+    const { lastFrame } = render(<Banner project={DEMO_PROJECT} />);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("orchestrator");
+    expect(frame).toContain("(O)");
+    expect(frame).toContain("demo");
+    expect(frame).toContain("~/code/demo");
+    expect(frame).toContain("project ready");
+  });
+
+  it("renders the banner art without a project prop", () => {
     const { lastFrame } = render(<Banner />);
     const frame = lastFrame() ?? "";
     expect(frame).toContain("orchestrator");
     expect(frame).toContain("(O)");
+    expect(frame).not.toContain("project ready");
   });
 
   it("leads with ready agents and collapses not-installed ones into a summary", () => {
@@ -41,6 +60,7 @@ describe("TUI components", () => {
       <StatusBar
         doctor={doctor}
         apiDoctor={null}
+        project={DEMO_PROJECT}
         configSource="defaults"
         workspaceLabel="user"
         running={false}
@@ -55,6 +75,10 @@ describe("TUI components", () => {
     expect(frame).not.toContain("opencode");
     expect(frame).not.toContain("missing");
     expect(frame).toContain("2 not installed");
+    // Project identity is always on screen.
+    expect(frame).toContain("demo");
+    expect(frame).toContain("~/code/demo");
+    expect(frame).toContain("ws:");
   });
 
   it("shows a setup nudge when no agent is installed at all", () => {
@@ -72,6 +96,7 @@ describe("TUI components", () => {
       <StatusBar
         doctor={doctor}
         apiDoctor={null}
+        project={DEMO_PROJECT}
         configSource="defaults"
         workspaceLabel="user"
         running={false}
@@ -104,6 +129,7 @@ describe("TUI components", () => {
             message: "OPENAI_API_KEY not set",
           },
         ]}
+        project={DEMO_PROJECT}
         configSource="defaults"
         workspaceLabel="user"
         running={false}
@@ -142,6 +168,7 @@ describe("TUI components", () => {
       <StatusBar
         doctor={doctor}
         apiDoctor={apiDoctor}
+        project={DEMO_PROJECT}
         configSource="user+project"
         workspaceLabel="user"
         running={false}

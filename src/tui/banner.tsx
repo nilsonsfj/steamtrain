@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Box, Text } from "ink";
+import type { ProjectIdentity } from "../project";
 
 /**
  * The banner art lives in `banner.txt` (the editable source of truth). We read
@@ -37,7 +38,7 @@ function loadBannerArt(): string {
   return cachedBanner;
 }
 
-export function Banner() {
+export function Banner({ project }: { project?: ProjectIdentity }) {
   const lines = loadBannerArt().replace(/^\n/, "").replace(/\n+$/, "").split("\n");
   return (
     <Box flexDirection="column" marginBottom={1}>
@@ -51,6 +52,18 @@ export function Banner() {
           {line.length === 0 ? " " : line}
         </Text>
       ))}
+      {project ? (
+        <Box marginTop={1} flexDirection="column">
+          <Text>
+            <Text color="cyan">◈ </Text>
+            <Text bold color="white">
+              {project.name}
+            </Text>
+            <Text color="gray"> {project.displayPath}</Text>
+          </Text>
+          <Text color="gray">project ready · agents will run here</Text>
+        </Box>
+      ) : null}
     </Box>
   );
 }

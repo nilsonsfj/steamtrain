@@ -64,12 +64,15 @@ export interface UseWorkflowRunnerParams {
   orchestrator: Orchestrator;
   resolveWorkflowSpec: (name: string) => WorkflowSpec | undefined;
   mountedRef: React.RefObject<boolean>;
+  /** Absolute project directory (honors `--project-dir`). */
+  cwd: string;
 }
 
 export function useWorkflowRunner({
   orchestrator,
   resolveWorkflowSpec,
   mountedRef,
+  cwd,
 }: UseWorkflowRunnerParams) {
   const [running, setRunning] = useState(false);
   const [wf, wfDispatch] = useReducer(workflowReducer, initialWorkflowState);
@@ -108,15 +111,13 @@ export function useWorkflowRunner({
   const humanInputResolversRef = useRef<Map<string, (response: HumanInputResponse) => void>>(
     new Map(),
   );
-  const cacheStoreRef = useRef(createWorkflowCacheStore(join(process.cwd(), WORKFLOW_CACHE_DIR)));
-  const historyStoreRef = useRef(
-    createWorkflowHistoryStore(join(process.cwd(), WORKFLOW_HISTORY_DIR)),
-  );
+  const cacheStoreRef = useRef(createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR)));
+  const historyStoreRef = useRef(createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR)));
   // Shared live-run registry: TUI runs are mirrored here (so the CLI/web can
   // attach, cancel, and approve them), honor the cross-process run queue, and
   // /attach tails runs owned by other processes from it.
   const liveRunStoreRef = useRef(
-    createLiveRunStore(join(process.cwd(), WORKFLOW_RUNS_DIR), {
+    createLiveRunStore(join(cwd, WORKFLOW_RUNS_DIR), {
       historyStore: historyStoreRef.current,
     }),
   );
@@ -232,7 +233,6 @@ export function useWorkflowRunner({
       void (async () => {
         const store = cacheStoreRef.current;
         const liveStore = liveRunStoreRef.current;
-        const cwd = process.cwd();
         const key = workflowCacheKey(name, input, cwd, spec, opts?.params);
         const runId = randomUUID();
         const recorder = new RunRecordBuilder({
@@ -451,7 +451,7 @@ export function useWorkflowRunner({
       })();
       return true;
     },
-    [orchestrator, resolveWorkflowSpec, mountedRef],
+    [orchestrator, resolveWorkflowSpec, mountedRef, cwd],
   );
 
   const launchWorkflow = useCallback(
