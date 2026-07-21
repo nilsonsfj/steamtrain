@@ -74,6 +74,23 @@ describe("buildAntigravityRunArgs", () => {
       "hello world",
     ]);
   });
+
+  it("rewrites base legacy display labels with effort to slug form", () => {
+    expect(
+      buildAntigravityRunArgs({
+        prompt: "hello world",
+        model: "Gemini 3.1 Pro",
+        effort: "high",
+      }),
+    ).toContain("gemini-3.1-pro-high");
+    expect(
+      buildAntigravityRunArgs({
+        prompt: "hello world",
+        model: "Gemini 3.1 Pro",
+        effort: "high",
+      }),
+    ).not.toContain("(High)");
+  });
 });
 
 describe("resolveAntigravityModel", () => {

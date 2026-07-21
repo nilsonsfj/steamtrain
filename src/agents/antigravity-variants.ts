@@ -59,12 +59,14 @@ function antigravityModelDisplayName(id: string): string {
   const titled = base
     .split("-")
     .map((part) => {
-      if (/^\d/.test(part)) return part;
+      if (/^\d/.test(part)) return part.toUpperCase();
       if (part === "gpt") return "GPT";
       if (part === "oss") return "OSS";
       return part.charAt(0).toUpperCase() + part.slice(1);
     })
     .join(" ")
+    // Keep GPT-OSS as a compound token.
+    .replace(/\bGPT OSS\b/g, "GPT-OSS")
     // Claude version segments: "Claude Opus 4 6" → "Claude Opus 4.6"
     .replace(/\b(Claude (?:Opus|Sonnet|Haiku)) (\d+) (\d+)\b/g, "$1 $2.$3");
   return effortLabel ? `${titled} (${effortLabel})` : titled;

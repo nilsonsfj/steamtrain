@@ -194,6 +194,7 @@ describe("resolveModelBinding", () => {
     clearModelFamilyCacheForTests();
     expect(findModelFamily("gpt-5.6-sol")?.id).toBe("gpt-5.6-sol");
     expect(findModelFamily("gemini flash")?.id).toBe("gemini-3.6-flash");
+    expect(findModelFamily("gemini flash lite")?.id).toBe("gemini-3.5-flash-lite");
     expect(findModelFamily("kimi k3")?.id).toBe("kimi-k3");
     expect(findModelFamily("deepseek pro")?.id).toBe("deepseek-v4-pro");
     expect(findModelFamily("qwen 3.7 max")?.id).toBe("qwen-3.7-max");

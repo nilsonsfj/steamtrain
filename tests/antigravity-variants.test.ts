@@ -50,6 +50,17 @@ Claude Sonnet 4.6 (Thinking)
       "Claude Sonnet 4.6 (Thinking)",
     ]);
   });
+
+  it("humanizes gpt-oss and claude slug display names", () => {
+    const models = parseAntigravityModelsOutput(`
+gpt-oss-120b-medium
+claude-opus-4-6-thinking
+`);
+    expect(models.get("gpt-oss-120b-medium")).toEqual({ name: "GPT-OSS 120B (Medium)" });
+    expect(models.get("claude-opus-4-6-thinking")).toEqual({
+      name: "Claude Opus 4.6 (Thinking)",
+    });
+  });
 });
 
 describe("antigravity variant cache", () => {
