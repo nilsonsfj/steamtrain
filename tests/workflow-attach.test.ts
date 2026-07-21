@@ -478,3 +478,169 @@ describe("workspace attach engine behavior", () => {
     expect(land?.output).toContain("deduped");
   });
 });
+
+describe("workflow call step worktreeStep (building block 3)", () => {
+  afterEach(async () => {
+    await Promise.all(tempRoots.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  const childSpec: WorkflowSpec = spec([
+    {
+      id: "only",
+      title: "Only",
+      steps: [{ id: "impl", kind: "command", cmd: "echo alpha > a.txt" }],
+    },
+  ]);
+
+  it("surfaces the named child step's worktree as the workflow step's own result.worktree", async () => {
+    const root = await tempDir();
+    const repo = await initRepo(root);
+    const events = await runToEvents(
+      spec([
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "call", kind: "workflow", workflow: "stream", worktreeStep: "impl" }],
+        },
+      ]),
+      gitDeps(repo, root, { resolveWorkflow: () => childSpec }),
+    );
+    expect(workflowOk(events)).toBe(true);
+    const results = doneResults(events);
+    const call = results.get("call");
+    const impl = results.get("call::impl");
+    expect(call?.worktree?.root).toBe(impl?.worktree?.root);
+    expect(call?.worktree?.branch).toBe(impl?.worktree?.branch);
+  });
+
+  it("lets a later step attach to a workflow call step's surfaced worktree end to end", async () => {
+    const root = await tempDir();
+    const repo = await initRepo(root);
+    const events = await runToEvents(
+      spec([
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "call", kind: "workflow", workflow: "stream", worktreeStep: "impl" }],
+        },
+        {
+          id: "p2",
+          title: "P2",
+          steps: [{ id: "check", kind: "command", workspace: "attach:call", cmd: "cat a.txt" }],
+        },
+      ]),
+      gitDeps(repo, root, { resolveWorkflow: () => childSpec }),
+    );
+    expect(workflowOk(events)).toBe(true);
+    expect(doneResults(events).get("check")?.output).toContain("alpha");
+  });
+
+  it("fails with a clear error when worktreeStep names a step that recorded no worktree", async () => {
+    const root = await tempDir();
+    const repo = await initRepo(root);
+    const noWorktreeChild: WorkflowSpec = spec([
+      { id: "only", title: "Only", steps: [{ id: "d", kind: "distributor", items: ["x"] }] },
+    ]);
+    const events = await runToEvents(
+      spec([
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "call", kind: "workflow", workflow: "stream", worktreeStep: "d" }],
+        },
+      ]),
+      gitDeps(repo, root, { resolveWorkflow: () => noWorktreeChild }),
+    );
+    const call = doneResults(events).get("call");
+    expect(call?.ok).toBe(false);
+    expect(call?.error).toContain("recorded no worktree");
+  });
+
+  it("fails with a clear error when worktreeStep names an unknown child step id", async () => {
+    const root = await tempDir();
+    const repo = await initRepo(root);
+    const events = await runToEvents(
+      spec([
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "call", kind: "workflow", workflow: "stream", worktreeStep: "nope" }],
+        },
+      ]),
+      gitDeps(repo, root, { resolveWorkflow: () => childSpec }),
+    );
+    const call = doneResults(events).get("call");
+    expect(call?.ok).toBe(false);
+    expect(call?.error).toContain("worktreeStep 'nope'");
+  });
+
+  it("harvests a workflow call step's surfaced worktree in a merge step's from", async () => {
+    const root = await tempDir();
+    const repo = await initRepo(root);
+    const events = await runToEvents(
+      spec([
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "call", kind: "workflow", workflow: "stream", worktreeStep: "impl" }],
+        },
+        {
+          id: "p2",
+          title: "P2",
+          steps: [{ id: "land", kind: "merge", from: ["call"], mode: "apply" }],
+        },
+      ]),
+      gitDeps(repo, root, { resolveWorkflow: () => childSpec }),
+    );
+    expect(workflowOk(events)).toBe(true);
+    const land = doneResults(events).get("land");
+    expect(land?.ok).toBe(true);
+    expect(await git(repo, "status", "--porcelain")).toContain("a.txt");
+  });
+
+  it("harvests one worktree per forEach item through a merge step", async () => {
+    const root = await tempDir();
+    const repo = await initRepo(root);
+    const perItemChild: WorkflowSpec = spec([
+      {
+        id: "only",
+        title: "Only",
+        steps: [{ id: "impl", kind: "command", cmd: "echo {{input}} > {{input}}.txt" }],
+      },
+    ]);
+    const events = await runToEvents(
+      spec([
+        {
+          id: "split",
+          title: "Split",
+          steps: [{ id: "split", kind: "distributor", items: ["one", "two"] }],
+        },
+        {
+          id: "streams",
+          title: "Streams",
+          steps: [
+            {
+              id: "call",
+              kind: "workflow",
+              workflow: "stream",
+              forEach: "steps.split.items",
+              input: "{{item}}",
+              worktreeStep: "impl",
+              dependsOn: ["split"],
+            },
+          ],
+        },
+        {
+          id: "merged",
+          title: "Merged",
+          steps: [{ id: "land", kind: "merge", from: ["call"], mode: "apply" }],
+        },
+      ]),
+      gitDeps(repo, root, { resolveWorkflow: () => perItemChild }),
+    );
+    expect(workflowOk(events)).toBe(true);
+    const status = await git(repo, "status", "--porcelain");
+    expect(status).toContain("one.txt");
+    expect(status).toContain("two.txt");
+  });
+});

@@ -19,7 +19,13 @@
  */
 
 import { jsonFieldText, jsonPathGet } from "./structured";
-import type { GateCondition, WorkflowItem, WorkflowSpec, WorkflowStep } from "./types";
+import type {
+  GateCondition,
+  WorkflowCallStep,
+  WorkflowItem,
+  WorkflowSpec,
+  WorkflowStep,
+} from "./types";
 import { workflowStepKind } from "./types";
 
 export interface TemplateContext {
@@ -134,7 +140,14 @@ function hasWorkspace(step: WorkflowStep): boolean {
   if (kind === "worker" || kind === "processor" || kind === "command") return true;
   // A merge step only leaves a worktree behind in `mode: "worktree"` —
   // apply/branch/pr deliver the merge and record no worktree.
-  return kind === "merge" && (step as { mode?: string }).mode === "worktree";
+  if (kind === "merge" && (step as { mode?: string }).mode === "worktree") return true;
+  // A `workflow` call step with `worktreeStep` (and no `forEach`) surfaces a
+  // named child step's worktree as its own — see `WorkflowCallStep.worktreeStep`.
+  if (kind === "workflow") {
+    const ws = step as WorkflowCallStep;
+    return Boolean(ws.worktreeStep) && !ws.forEach;
+  }
+  return false;
 }
 
 function extractRefs(text: string | undefined): string[] {
@@ -164,6 +177,7 @@ function extractRefs(text: string | undefined): string[] {
 /** Scan condition text fields for template refs. `condition.step` is intentionally skipped — it's a plain step id, not a template string. */
 function scanConditionRefs(condition: GateCondition | undefined, refs: string[]): void {
   if (!condition) return;
+  if (condition.value) refs.push(...extractRefs(condition.value));
   if (condition.contains) refs.push(...extractRefs(condition.contains));
   if (condition.equals) refs.push(...extractRefs(condition.equals));
   if (condition.matches) refs.push(...extractRefs(condition.matches));
@@ -200,6 +214,17 @@ function stepRefs(step: WorkflowStep): string[] {
   if (kind === "workflow" && "input" in step && typeof step.input === "string") {
     refs.push(...extractRefs(step.input));
   }
+  if (kind === "workflow") {
+    const ws = step as WorkflowCallStep;
+    if (ws.params) {
+      for (const value of Object.values(ws.params)) refs.push(...extractRefs(value));
+    }
+  }
+  // Templated model/effort (building block 5): scan like any other renderable
+  // field so unknown step refs / undeclared inputs surface at spec-validate
+  // time instead of silently rendering empty at run time.
+  if ("model" in step && typeof step.model === "string") refs.push(...extractRefs(step.model));
+  if ("effort" in step && typeof step.effort === "string") refs.push(...extractRefs(step.effort));
 
   return refs;
 }
@@ -249,6 +274,7 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
         (step.kind === "worker" ||
           step.kind === "processor" ||
           step.kind === "llm" ||
+          step.kind === "workflow" ||
           !step.kind) &&
         "forEach" in step &&
         step.forEach

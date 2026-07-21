@@ -393,7 +393,11 @@ export interface WorkflowCallStep extends WorkflowStepBase {
   kind: "workflow";
   /** Name of the workflow to invoke (resolved via `WorkflowDeps.resolveWorkflow` at run time). */
   workflow: string;
-  /** Template rendered to become the child run's `{{input}}`. Omitted ⇒ this run's own `{{input}}` passes through unchanged. */
+  /**
+   * Template rendered to become the child run's `{{input}}`. Omitted ⇒ this
+   * run's own `{{input}}` passes through unchanged. Inside `forEach`, `{{item}}`
+   * is available alongside the parent's own template context.
+   */
   input?: string;
   /**
    * Id of the child step whose `output`/`json` surface as this step's own
@@ -408,6 +412,43 @@ export interface WorkflowCallStep extends WorkflowStepBase {
    * result" error).
    */
   outputStep?: string;
+  /**
+   * Dynamically fan this workflow call out over prior distributor/llm-splitter
+   * items — one whole child run per item, mirroring worker/llm `forEach`.
+   * Syntax: `steps.<id>.items` (or `<id>.items`). Each generated child run's
+   * own steps fold in under `<stepId>[i]::<childStepId>` (extending the plain
+   * `<stepId>::<childStepId>` namespace with the per-item fan-out suffix so two
+   * items' inner steps never collide), and `{{item}}` / `{{item.index}}` are
+   * available in `input` and `params` templates. The parent result's
+   * `childResults` holds one entry per item (each itself carrying its own
+   * nested `childResults`); the parent is `ok` only when every item's child run
+   * completed successfully — see {@link WorkerStep.forEach} for the shared
+   * fan-out semantics (concurrency, budget, cache/resume).
+   */
+  forEach?: string;
+  /**
+   * Templated values passed as the child run's declared input parameters. Each
+   * value is rendered with the parent's template context (including `{{item}}`
+   * under `forEach`), then validated against the child spec's own `inputs` via
+   * `resolveInputs` — unknown-param and missing-required errors surface
+   * exactly like CLI `--param` errors and fail this step with the child's own
+   * error text.
+   */
+  params?: Record<string, string>;
+  /**
+   * Id of a child step whose recorded worktree surfaces as THIS step's own
+   * `result.worktree` — the sub-workflow analog of a worker/processor/command
+   * step's own worktree. Resolved at run time (like `outputStep`); an unknown
+   * child step id, or a child step that recorded no worktree, fails this step
+   * with a clear error. Under `forEach`, each generated child's result carries
+   * its own surfaced worktree, so a `merge` step whose `from` names the
+   * fan-out parent harvests one worktree per item. A `workflow` step WITH
+   * `worktreeStep` and WITHOUT `forEach` is a valid `workspace:
+   * "inherit:<stepId>"` / `"attach:<stepId>"` source (see
+   * {@link WorkspaceFields.workspace}) and a valid `merge` `from` source,
+   * exactly like a worker/processor/command step.
+   */
+  worktreeStep?: string;
 }
 
 /**
@@ -521,6 +562,15 @@ export interface GateCondition {
    * `step`, and the step must declare an `output` schema to have parsed JSON.
    */
   path?: string;
+  /**
+   * A templated text expression tested by the same `contains`/`matches`/
+   * `equals` predicates, instead of a step output or the run input. Rendered
+   * with the standard template context (inputs, step outputs, iteration) at
+   * evaluation time. The canonical use is input-driven routing: `{ value:
+   * "{{inputs.issueTiming}}", equals: "live" }`. Mutually exclusive with
+   * `step`, `ok`, `path`, and `human`.
+   */
+  value?: string;
   /** Text condition against the referenced output (or input). */
   contains?: string;
   /** Regular expression condition against the referenced output (or input). */
@@ -841,6 +891,7 @@ const gateConditionSchema = z
     human: z.boolean().optional(),
     ok: z.boolean().optional(),
     path: z.string().min(1).optional(),
+    value: z.string().optional(),
     contains: z.string().optional(),
     matches: z.string().optional(),
     equals: z.string().optional(),
@@ -853,16 +904,41 @@ const gateConditionSchema = z
       const mechanical =
         condition.ok !== undefined ||
         condition.path !== undefined ||
+        condition.value !== undefined ||
         condition.contains !== undefined ||
         condition.matches !== undefined ||
         condition.equals !== undefined;
       if (mechanical) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "gate condition human cannot be combined with ok/path/contains/matches/equals",
+          message:
+            "gate condition human cannot be combined with ok/path/value/contains/matches/equals",
         });
       }
       return;
+    }
+    // A `value` condition tests a rendered template expression instead of a
+    // step's output/ok state or the run input, so it is mutually exclusive
+    // with the fields that pick THOSE subjects.
+    if (condition.value !== undefined) {
+      if (condition.step !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "gate condition value cannot be combined with step",
+        });
+      }
+      if (condition.ok !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "gate condition value cannot be combined with ok",
+        });
+      }
+      if (condition.path !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "gate condition value cannot be combined with path",
+        });
+      }
     }
     if (
       condition.ok === undefined &&
@@ -1178,6 +1254,9 @@ const workflowCallStepSchema = z.object({
   workflow: z.string().min(1),
   input: z.string().min(1).optional(),
   outputStep: z.string().min(1).optional(),
+  forEach: z.string().min(1).optional(),
+  params: z.record(z.string()).optional(),
+  worktreeStep: z.string().min(1).optional(),
 });
 
 const workflowStepSchema = z.union([
@@ -1501,6 +1580,7 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
         (step.kind === "worker" ||
           step.kind === "processor" ||
           step.kind === "llm" ||
+          step.kind === "workflow" ||
           !step.kind) &&
         step.forEach
       ) {
@@ -1607,15 +1687,20 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
           sourceKind === "worker" || sourceKind === "processor" || sourceKind === "command";
         // A `merge` step only leaves a worktree behind in `mode: "worktree"` —
         // apply/branch/pr deliver the merge and leave nothing to inherit or
-        // attach to. A `workflow` call step is not yet an eligible source (its
-        // own worktree surfacing is a later building block); this leaves the
-        // seam for it.
+        // attach to. A `workflow` call step WITH `worktreeStep` and WITHOUT
+        // `forEach` surfaces a named child step's worktree as its own, so it
+        // is eligible too — a fan-out `workflow` step has one worktree per
+        // item, same hazard as a fan-out worker/processor/command step.
         const isWorktreeMerge =
           sourceKind === "merge" && (sourceStep as MergeStep).mode === "worktree";
-        if (!isWorktreeStep && !isWorktreeMerge) {
+        const isWorktreeWorkflow =
+          sourceKind === "workflow" &&
+          Boolean((sourceStep as WorkflowCallStep).worktreeStep) &&
+          !(sourceStep as WorkflowCallStep).forEach;
+        if (!isWorktreeStep && !isWorktreeMerge && !isWorktreeWorkflow) {
           return {
             ok: false,
-            error: `step '${step.id}' workspace ${verb} '${wsSource}', which is a ${sourceKind} step (only worker, processor, and command steps — or a merge step with mode "worktree" — leave a worktree to inherit or attach)`,
+            error: `step '${step.id}' workspace ${verb} '${wsSource}', which is a ${sourceKind} step (only worker, processor, and command steps — or a merge step with mode "worktree", or a workflow step with worktreeStep — leave a worktree to inherit or attach)`,
           };
         }
         if (isWorktreeStep && sourceStep && "forEach" in sourceStep && sourceStep.forEach) {

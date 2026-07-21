@@ -3606,7 +3606,7 @@
         : kind === "command"
           ? "$ " + (st.cmd || "")
           : kind === "workflow"
-            ? "invokes workflow: " + (st.workflow || "") + (st.outputStep ? " · outputStep: " + st.outputStep : "")
+            ? "invokes workflow: " + (st.workflow || "") + (st.outputStep ? " · outputStep: " + st.outputStep : "") + (st.forEach ? " · forEach: " + st.forEach : "") + (st.worktreeStep ? " · worktreeStep: " + st.worktreeStep : "")
             : kind === "human"
               ? "asks a human: " + truncate(st.prompt || "", 120) + (st.choices && st.choices.length ? " · " + st.choices.length + " choice(s)" : "")
               : (st.items ? "distributes " + st.items.length + " item(s)" : "passthrough merge (no agent)");
@@ -3676,6 +3676,7 @@
     var c = st.condition || {};
     var parts = [];
     if (c.step) parts.push("step " + c.step);
+    if (c.value != null) parts.push("value " + c.value);
     if (c.ok != null) parts.push(c.ok ? "ok" : "not ok");
     if (c.contains) parts.push('contains "' + c.contains + '"');
     if (c.matches) parts.push("matches /" + c.matches + "/");

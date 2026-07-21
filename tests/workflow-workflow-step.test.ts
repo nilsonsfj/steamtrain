@@ -10,6 +10,7 @@ import {
   type WorkflowEvent,
   type WorkflowSpec,
   runWorkflow,
+  validateWorkflow,
 } from "../src/workflow";
 
 const tempRoots: string[] = [];
@@ -435,5 +436,227 @@ describe("workflow (sub-workflow) step", () => {
     expect(upDoneIndex).toBeGreaterThanOrEqual(0);
     expect(callStartIndex).toBeGreaterThan(upDoneIndex);
     expect(workflowOk(events)).toBe(true);
+  });
+});
+
+describe("workflow (sub-workflow) step: forEach fan-out", () => {
+  afterEach(async () => {
+    await Promise.all(tempRoots.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  const forEachSpec: WorkflowSpec = {
+    name: "parent-foreach",
+    phases: [
+      {
+        id: "split",
+        title: "Split",
+        steps: [{ id: "split", kind: "distributor", items: ["one", "two"] }],
+      },
+      {
+        id: "streams",
+        title: "Streams",
+        steps: [
+          {
+            id: "call",
+            kind: "workflow",
+            workflow: "child",
+            forEach: "steps.split.items",
+            input: "{{item}}-{{item.index}}",
+            dependsOn: ["split"],
+          },
+        ],
+      },
+    ],
+  };
+
+  it("runs one child workflow per distributor item, namespaced per item", async () => {
+    const cwd = await tempDir();
+    const events = await runToEvents(
+      forEachSpec,
+      deps(cwd, { resolveWorkflow: (name) => (name === "child" ? childSpec : undefined) }),
+    );
+    expect(workflowOk(events)).toBe(true);
+    const results = doneResults(events);
+    // Fan-out children are namespaced `call[i]`, and their own nested steps
+    // fold in under `call[i]::<childStepId>` so the two items never collide.
+    expect(results.get("call[0]::greet")?.output).toBe("out:hi one-0");
+    expect(results.get("call[1]::greet")?.output).toBe("out:hi two-1");
+    const parent = results.get("call");
+    expect(parent?.ok).toBe(true);
+    expect(parent?.childResults?.length).toBe(2);
+    expect(parent?.childResults?.[0]?.stepId).toBe("call[0]");
+    expect(parent?.childResults?.[1]?.stepId).toBe("call[1]");
+    const fanOut = events.find((ev) => ev.kind === "fan_out");
+    expect(fanOut).toMatchObject({ kind: "fan_out", parentStepId: "call", count: 2 });
+  });
+
+  it("fails the parent when one item's child run fails, while the other item still completes", async () => {
+    const cwd = await tempDir();
+    const failingChild: WorkflowSpec = {
+      name: "child-fail",
+      phases: [
+        {
+          id: "only",
+          title: "Only",
+          steps: [{ id: "work", agent: "claude", model: "m", prompt: "{{input}}" }],
+        },
+      ],
+    };
+    const events = await runToEvents(
+      forEachSpec,
+      deps(cwd, {
+        resolveWorkflow: () => failingChild,
+        createAdapter: () =>
+          ({
+            id: "claude" as AgentId,
+            binary: "fake",
+            defaultModel: "test",
+            run(opts: AgentRunOptions) {
+              return (async function* () {
+                if (opts.prompt.includes("one")) {
+                  yield {
+                    kind: "result",
+                    agent: "claude" as AgentId,
+                    ts: 0,
+                    isError: true,
+                    text: "boom",
+                  } satisfies AgentEvent;
+                } else {
+                  yield {
+                    kind: "result",
+                    agent: "claude" as AgentId,
+                    ts: 0,
+                    isError: false,
+                    text: `ok:${opts.prompt}`,
+                  } satisfies AgentEvent;
+                }
+              })();
+            },
+          }) as AgentAdapter,
+      }),
+    );
+    const results = doneResults(events);
+    expect(results.get("call[0]")?.ok).toBe(false);
+    expect(results.get("call[1]")?.ok).toBe(true);
+    expect(results.get("call[1]::work")?.output).toBe("ok:two-1");
+    expect(results.get("call")?.ok).toBe(false);
+    expect(workflowOk(events)).toBe(false);
+  });
+
+  it("counts static distributor items toward the workflow step budget like worker fan-outs", () => {
+    const spec: WorkflowSpec = {
+      ...forEachSpec,
+      name: "parent-foreach-budget",
+    };
+    const result = validateWorkflow(spec);
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe("workflow (sub-workflow) step: params", () => {
+  afterEach(async () => {
+    await Promise.all(tempRoots.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  const childWithInputs: WorkflowSpec = {
+    name: "child-inputs",
+    inputs: {
+      coderModel: { required: true },
+      retries: { type: "number", default: 1 },
+    },
+    phases: [
+      {
+        id: "only",
+        title: "Only",
+        steps: [
+          {
+            id: "work",
+            agent: "claude",
+            model: "m",
+            prompt: "{{inputs.coderModel}}/{{inputs.retries}}",
+          },
+        ],
+      },
+    ],
+  };
+
+  it("renders params against the parent's context and passes them through as the child's declared inputs", async () => {
+    const cwd = await tempDir();
+    const spec: WorkflowSpec = {
+      name: "parent-params",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            {
+              id: "call",
+              kind: "workflow",
+              workflow: "child-inputs",
+              params: { coderModel: "{{input}}-model" },
+            },
+          ],
+        },
+      ],
+    };
+    const events = await runToEvents(
+      spec,
+      deps(cwd, { resolveWorkflow: () => childWithInputs }),
+      "go",
+    );
+    expect(workflowOk(events)).toBe(true);
+    const results = doneResults(events);
+    expect(results.get("call::work")?.output).toBe("out:go-model/1");
+  });
+
+  it("fails the step with the child's own error text when a required param is missing", async () => {
+    const cwd = await tempDir();
+    const spec: WorkflowSpec = {
+      name: "parent-params-missing",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "call", kind: "workflow", workflow: "child-inputs", params: {} }],
+        },
+      ],
+    };
+    const events = await runToEvents(spec, deps(cwd, { resolveWorkflow: () => childWithInputs }));
+    const results = doneResults(events);
+    expect(results.get("call")?.ok).toBe(false);
+    expect(results.get("call")?.error).toContain("missing required input 'coderModel'");
+  });
+
+  it("makes {{item}} available in params under forEach", async () => {
+    const cwd = await tempDir();
+    const spec: WorkflowSpec = {
+      name: "parent-params-foreach",
+      phases: [
+        {
+          id: "split",
+          title: "Split",
+          steps: [{ id: "split", kind: "distributor", items: ["alpha", "beta"] }],
+        },
+        {
+          id: "streams",
+          title: "Streams",
+          steps: [
+            {
+              id: "call",
+              kind: "workflow",
+              workflow: "child-inputs",
+              forEach: "steps.split.items",
+              params: { coderModel: "{{item}}" },
+              dependsOn: ["split"],
+            },
+          ],
+        },
+      ],
+    };
+    const events = await runToEvents(spec, deps(cwd, { resolveWorkflow: () => childWithInputs }));
+    expect(workflowOk(events)).toBe(true);
+    const results = doneResults(events);
+    expect(results.get("call[0]::work")?.output).toBe("out:alpha/1");
+    expect(results.get("call[1]::work")?.output).toBe("out:beta/1");
   });
 });
