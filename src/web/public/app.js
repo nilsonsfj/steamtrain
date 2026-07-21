@@ -2207,7 +2207,8 @@
     card.appendChild(top);
     var runnerId = s.agent || s.api;
     if (runnerId) card.appendChild(h("div", { class: "agent", text: runnerId + (s.model ? " \u00b7 " + s.model : "") }));
-    else if (s.model) card.appendChild(h("div", { class: "agent", text: s.model }));
+    else if (s.modelClass) card.appendChild(h("div", { class: "agent", text: "auto \u00b7 class:" + s.modelClass + (s.model ? " \u00b7 " + s.model : "") }));
+    else if (s.model) card.appendChild(h("div", { class: "agent", text: "auto \u00b7 " + s.model }));
     if (s.worktree) card.appendChild(h("div", { class: "worktree", title: s.worktree.cwd, text: "\u2387 " + s.worktree.branch }));
     if (s.dependsOn && s.dependsOn.length) card.appendChild(h("div", { class: "inputs", text: "inputs: " + s.dependsOn.join(", ") }));
     if (s.forEach) card.appendChild(h("div", { class: "inputs", text: "forEach: " + s.forEach }));
