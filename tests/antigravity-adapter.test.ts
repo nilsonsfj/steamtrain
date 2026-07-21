@@ -352,8 +352,96 @@ describe("runAntigravityProcess", () => {
       }),
     );
 
-    expect(events.map((e) => e.kind)).toEqual(["text_delta", "session_start", "result"]);
-    expect(events[1]).toMatchObject({ kind: "session_start", sessionId: "from-cache" });
+    expect(events.map((e) => e.kind)).toEqual(["session_start", "text_delta", "result"]);
+    expect(events[0]).toMatchObject({ kind: "session_start", sessionId: "from-cache" });
+    expect(events[1]).toMatchObject({ kind: "text_delta", text: "pong\n" });
+  });
+
+  it("reports spawn failure, timeout, and non-zero exit", async () => {
+    const spawnEvents = await collect(
+      runAntigravityProcess({
+        id: "antigravity",
+        binary: "agy",
+        args: [],
+        opts: { prompt: "hi", model: "Gemini 3.1 Pro (High)", cwd: "/tmp/demo" },
+        lastConversationForCwd: () => undefined,
+        runLines: async function* () {
+          yield {
+            kind: "exit",
+            code: null,
+            signal: null,
+            timedOut: false,
+            stderr: "",
+            sawStdout: false,
+            spawnError: "ENOENT",
+          };
+        },
+      }),
+    );
+    expect(spawnEvents).toEqual([
+      expect.objectContaining({
+        kind: "error",
+        message: "failed to start 'agy': ENOENT",
+      }),
+    ]);
+
+    const timeoutEvents = await collect(
+      runAntigravityProcess({
+        id: "antigravity",
+        binary: "agy",
+        args: [],
+        opts: {
+          prompt: "hi",
+          model: "Gemini 3.1 Pro (High)",
+          timeoutMs: 5000,
+          cwd: "/tmp/demo",
+        },
+        lastConversationForCwd: () => undefined,
+        runLines: async function* () {
+          yield {
+            kind: "exit",
+            code: null,
+            signal: "SIGTERM",
+            timedOut: true,
+            stderr: "",
+            sawStdout: false,
+          };
+        },
+      }),
+    );
+    expect(timeoutEvents).toEqual([
+      expect.objectContaining({
+        kind: "error",
+        message: "'agy' timed out after 5s",
+      }),
+    ]);
+
+    const exitEvents = await collect(
+      runAntigravityProcess({
+        id: "antigravity",
+        binary: "agy",
+        args: [],
+        opts: { prompt: "hi", model: "Gemini 3.1 Pro (High)", cwd: "/tmp/demo" },
+        lastConversationForCwd: () => undefined,
+        runLines: async function* () {
+          yield {
+            kind: "exit",
+            code: 2,
+            signal: null,
+            timedOut: false,
+            stderr: "auth failed\nmore detail",
+            sawStdout: false,
+          };
+        },
+      }),
+    );
+    expect(exitEvents).toEqual([
+      expect.objectContaining({
+        kind: "error",
+        message: "'agy' exited with code 2: auth failed",
+        code: 2,
+      }),
+    ]);
   });
 });
 

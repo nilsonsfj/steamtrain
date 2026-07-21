@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
-import { createAdapter } from "./agents";
+import { createAdapter, isAgentProviderId } from "./agents";
 import { refreshAgentCatalogCaches } from "./agents/models";
 import { message, readAll, truncateLine, unknownWorkflowMessage } from "./cli-util";
 import {
@@ -1393,16 +1393,7 @@ function parseCreateOptions(args: string[]): CreateOptions | null {
       options.input = value;
     } else if (arg === "--agent") {
       const value = args[++i];
-      if (
-        value !== "claude" &&
-        value !== "opencode" &&
-        value !== "codex" &&
-        value !== "amp" &&
-        value !== "kiro" &&
-        value !== "cursor" &&
-        value !== "antigravity"
-      )
-        return null;
+      if (!value || !isAgentProviderId(value)) return null;
       options.agent = value;
     } else if (arg === "--model") {
       const value = args[++i];

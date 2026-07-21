@@ -25,6 +25,7 @@ const EFFORT_LABELS: Record<string, string> = {
   low: "Low",
   medium: "Medium",
   high: "High",
+  // agy only exposes a Thinking tier for the highest Claude-style efforts.
   thinking: "Thinking",
   xhigh: "Thinking",
   max: "Thinking",
@@ -121,6 +122,7 @@ export async function* runAntigravityProcess(
   let sessionId = opts.resumeSessionId;
   let emittedSession = false;
   const textParts: string[] = [];
+  const pendingDeltas: string[] = [];
   let sawStdout = false;
   let sawError = false;
   const cwd = opts.cwd ?? process.cwd();
@@ -141,6 +143,13 @@ export async function* runAntigravityProcess(
     };
   };
 
+  const flushPendingDeltas = function* (): Generator<AgentEvent> {
+    while (pendingDeltas.length > 0) {
+      const line = pendingDeltas.shift() as string;
+      yield { kind: "text_delta", agent: id, ts: Date.now(), text: `${line}\n` };
+    }
+  };
+
   const processOpts: ProcessRunOptions = {
     binary,
     args,
@@ -157,15 +166,22 @@ export async function* runAntigravityProcess(
       if (found && !sessionId) {
         sessionId = found;
         yield* emitSession();
+        yield* flushPendingDeltas();
       }
       continue;
     }
 
     if (item.kind === "line") {
       sawStdout = true;
-      if (!emittedSession && sessionId) yield* emitSession();
       textParts.push(item.line);
-      yield { kind: "text_delta", agent: id, ts: Date.now(), text: `${item.line}\n` };
+      if (emittedSession || sessionId) {
+        if (!emittedSession) yield* emitSession();
+        yield* flushPendingDeltas();
+        yield { kind: "text_delta", agent: id, ts: Date.now(), text: `${item.line}\n` };
+      } else {
+        // Hold text until session_start so event order matches other adapters.
+        pendingDeltas.push(item.line);
+      }
       continue;
     }
 
@@ -173,6 +189,7 @@ export async function* runAntigravityProcess(
       const ts = Date.now();
       const stderr = item.stderr.trim();
       const stderrTail = stderr ? `: ${firstLine(stderr)}` : "";
+      if (item.sawStdout) sawStdout = true;
 
       if (!sessionId) {
         const fromStderr = extractAntigravityConversationId(item.stderr);
@@ -185,6 +202,7 @@ export async function* runAntigravityProcess(
       if (item.spawnError) {
         sawError = true;
         yield* emitSession();
+        yield* flushPendingDeltas();
         yield {
           kind: "error",
           agent: id,
@@ -198,6 +216,7 @@ export async function* runAntigravityProcess(
       if (item.timedOut) {
         sawError = true;
         yield* emitSession();
+        yield* flushPendingDeltas();
         yield {
           kind: "error",
           agent: id,
@@ -211,6 +230,7 @@ export async function* runAntigravityProcess(
       if ((item.code ?? 0) !== 0) {
         sawError = true;
         yield* emitSession();
+        yield* flushPendingDeltas();
         yield {
           kind: "error",
           agent: id,
@@ -232,12 +252,14 @@ export async function* runAntigravityProcess(
           sessionId = sessionId ?? recovered.conversationId;
           text = recovered.text;
           yield* emitSession();
+          yield* flushPendingDeltas();
           yield { kind: "text_delta", agent: id, ts, text: `${text}\n` };
         }
       }
 
-      // Always surface a discovered session id, even when output recovery fails.
+      // Prefer session_start before any buffered text_delta / result.
       yield* emitSession();
+      yield* flushPendingDeltas();
 
       if (!text && !sawError) {
         yield {
