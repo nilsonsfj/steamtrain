@@ -2474,7 +2474,8 @@
     row("phase", p.title + (p.iteration && p.iteration > 1 ? " · iteration " + p.iteration : ""));
     var runnerId = s.agent || s.api;
     if (runnerId) row("runner", runnerId + (s.model ? " · " + s.model : "") + (s.effort ? " · " + s.effort : ""));
-    else if (s.model) row("runner", s.model);
+    else if (s.modelClass) row("runner", "auto · class:" + s.modelClass + (s.model ? " · " + s.model : ""));
+    else if (s.model) row("runner", "auto · " + s.model);
     if (s.worktree) {
       row("worktree", "⎇ " + s.worktree.branch);
       row("worktree dir", s.worktree.cwd, "mono");
@@ -4721,7 +4722,8 @@
           kindEl
         ));
         if (s.agent) card.appendChild(h("div", { class: "agent", text: s.agent + (s.model ? " \u00b7 " + s.model : "") }));
-        else if (s.llmApi || s.model) card.appendChild(h("div", { class: "agent", text: s.llmApi ? s.llmApi + (s.model ? "/" + s.model : "") : s.model }));
+        else if (s.modelClass) card.appendChild(h("div", { class: "agent", text: "auto \u00b7 class:" + s.modelClass + (s.model ? " \u00b7 " + s.model : "") }));
+        else if (s.llmApi || s.model) card.appendChild(h("div", { class: "agent", text: s.llmApi ? s.llmApi + (s.model ? "/" + s.model : "") : "auto \u00b7 " + s.model }));
         if (s.dependsOn && s.dependsOn.length) card.appendChild(h("div", { class: "inputs", text: "depends: " + s.dependsOn.join(", ") }));
         if (s.forEachSource) card.appendChild(h("div", { class: "inputs", text: "forEach: " + s.forEachSource + (s.forEachCount ? " (" + s.forEachCount + " items)" : s.forEachDynamic ? " (dynamic)" : "") }));
         if (s.loopTo) card.appendChild(h("div", { class: "inputs" },

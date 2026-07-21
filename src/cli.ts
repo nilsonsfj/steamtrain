@@ -639,7 +639,10 @@ async function planCommand(
   for (const step of plan.steps) {
     const tags: string[] = [];
     if (step.isAgentBacked) {
-      tags.push(step.model ? `${step.agent}/${step.model}` : (step.agent ?? "agent"));
+      if (step.agent && step.model) tags.push(`${step.agent}/${step.model}`);
+      else if (step.modelClass) tags.push(`auto/class:${step.modelClass}`);
+      else if (step.model) tags.push(`auto/${step.model}`);
+      else tags.push(step.agent ?? "agent");
     }
     if (step.kind === "llm") {
       tags.push(step.model ? `${step.llmApi ?? "llm"}/${step.model}` : (step.llmApi ?? "llm"));
