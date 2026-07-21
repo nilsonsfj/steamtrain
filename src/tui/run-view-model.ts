@@ -144,20 +144,36 @@ export interface ViewLayout {
 const MIN_LIST_ROWS = 4;
 
 /**
+ * Cap the phase/step tree so a tall terminal with a large fan-out cannot turn
+ * the viewport into a wall of pending rows. Surplus height returns to the
+ * detail preview (or sits as slack under overflow:hidden), matching the
+ * balanced split WorkflowPreview already uses.
+ */
+const MAX_LIST_FRACTION = 0.55;
+
+/**
  * Split the fixed component height between the step tree and the detail
  * preview. The preview shrinks first (down to zero) to keep the tree usable;
  * the tree normally keeps one row, but callers may explicitly allow zero for
  * a final compact fallback that preserves blocking controls instead.
+ *
+ * On tall terminals the tree is also capped at {@link MAX_LIST_FRACTION} of
+ * the inner height so scrolling markers stay meaningful and the detail panel
+ * retains a usable share.
  */
 export function planViewLayout(input: ViewLayoutInput): ViewLayout {
   const inner = input.height - 2; // top + bottom border
   const minimumListLines = Math.max(0, input.minimumListLines ?? 1);
   const available = inner - input.fixedLines - input.cardLines - input.detailFixedLines;
   const preview = Math.max(0, Math.min(input.desiredPreviewLines, available - MIN_LIST_ROWS));
-  const listBudget = Math.max(minimumListLines, available - preview);
+  const listCap = Math.max(minimumListLines, Math.floor(inner * MAX_LIST_FRACTION));
+  const listBudget = Math.max(minimumListLines, Math.min(listCap, available - preview));
+  // Any rows the tree cannot take (because of the cap) go back to the preview
+  // so the detail panel grows instead of leaving a dead gap above the footer.
+  const previewLines = Math.max(preview, available - listBudget);
   return {
     listBudget,
-    previewLines: preview,
+    previewLines,
     cramped: available - preview < minimumListLines,
   };
 }

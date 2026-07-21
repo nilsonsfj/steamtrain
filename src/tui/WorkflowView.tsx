@@ -37,6 +37,11 @@ import {
   type WorkflowState,
   flattenSteps,
 } from "./workflow-state";
+import {
+  type WorkflowTreeRow,
+  buildWorkflowTreeRows,
+  findTreeRowIndex,
+} from "./workflow-tree-rows";
 
 interface WorkflowViewProps {
   state: WorkflowState;
@@ -57,10 +62,6 @@ interface WorkflowViewProps {
   /** True when this run needed no agent CLI and no LLM API key. */
   credentialFree?: boolean;
 }
-
-type WorkflowRow =
-  | { kind: "phase"; phase: PhaseState }
-  | { kind: "step"; phase: PhaseState; step: StepState; flatIndex: number };
 
 const STEP_GLYPH: Record<
   Exclude<StepState["status"], "running">,
@@ -108,18 +109,12 @@ export function WorkflowView({
   const preferArrival = Boolean(arrival && showArrival);
   const clampedIndex = Math.min(selectedIndex, Math.max(0, flat.length - 1));
   const selected = flat[clampedIndex];
-  const rows = useMemo<WorkflowRow[]>(() => {
-    const out: WorkflowRow[] = [];
-    let flatIndex = 0;
-    for (const phase of state.phases) {
-      out.push({ kind: "phase", phase });
-      for (const step of phase.steps) {
-        out.push({ kind: "step", phase, step, flatIndex });
-        flatIndex += 1;
-      }
-    }
-    return out;
-  }, [state.phases]);
+  // Collapse long pending fan-out runs so a 30-way distributor cannot monopolize
+  // the viewport; the selected step always stays expanded for ↑/↓ navigation.
+  const rows = useMemo<WorkflowTreeRow[]>(
+    () => buildWorkflowTreeRows(state.phases, clampedIndex),
+    [state.phases, clampedIndex],
+  );
   // Highest iteration seen per phase id: the latest pass renders normally, and
   // earlier passes are dimmed as superseded — the badge on every instance
   // ("iter 1/N") still shows how many passes ran.
@@ -237,8 +232,7 @@ export function WorkflowView({
     layout = plan();
   }
 
-  const foundIndex = rows.findIndex((row) => row.kind === "step" && row.flatIndex === clampedIndex);
-  const selectedRowIndex = foundIndex >= 0 ? foundIndex : 0;
+  const selectedRowIndex = findTreeRowIndex(rows, clampedIndex);
   const rowWindow = selectVisibleWindow(rows, selectedRowIndex, layout.listBudget);
 
   if (preferArrival && arrival) {
@@ -257,6 +251,7 @@ export function WorkflowView({
       paddingX={1}
       width={width}
       height={height}
+      overflow="hidden"
     >
       <Box justifyContent="space-between">
         <Text wrap="truncate-end">
@@ -348,13 +343,13 @@ export function WorkflowView({
       ) : null}
 
       {showTree ? (
-        <Box flexDirection="column" flexGrow={1}>
+        <Box flexDirection="column" height={layout.listBudget} flexShrink={0} overflow="hidden">
           {rows.length === 0 ? (
             <Text color="gray">{spinner} starting workflow…</Text>
           ) : (
             <>
               {rowWindow.hiddenBefore > 0 ? (
-                <Text color="gray" dimColor>
+                <Text color="gray" dimColor wrap="truncate-end">
                   {"  "}↑ {rowWindow.hiddenBefore} earlier row
                   {rowWindow.hiddenBefore === 1 ? "" : "s"}
                 </Text>
@@ -367,6 +362,13 @@ export function WorkflowView({
                     maxIteration={maxIterByPhase.get(row.phase.phaseId) ?? 1}
                     width={innerWidth}
                     spinner={spinner}
+                  />
+                ) : row.kind === "collapsed" ? (
+                  <CollapsedFanoutRow
+                    key={`collapsed-${row.phase.phaseId}-${row.phase.iteration ?? 1}-${row.parentStepId}-${row.fromFlatIndex}`}
+                    row={row}
+                    idColWidth={idColWidth}
+                    kindColWidth={kindColWidth}
                   />
                 ) : (
                   <StepRow
@@ -384,7 +386,7 @@ export function WorkflowView({
                 ),
               )}
               {rowWindow.hiddenAfter > 0 ? (
-                <Text color="gray" dimColor>
+                <Text color="gray" dimColor wrap="truncate-end">
                   {"  "}↓ {rowWindow.hiddenAfter} later row
                   {rowWindow.hiddenAfter === 1 ? "" : "s"}
                 </Text>
@@ -395,13 +397,15 @@ export function WorkflowView({
       ) : null}
 
       {showDetail && selected ? (
-        <DetailPanel
-          step={selected.step}
-          context={detailContext}
-          previewLines={layout.previewLines}
-          width={innerWidth}
-          now={now}
-        />
+        <Box flexDirection="column" flexGrow={1} flexShrink={0} overflow="hidden">
+          <DetailPanel
+            step={selected.step}
+            context={detailContext}
+            previewLines={layout.previewLines}
+            width={innerWidth}
+            now={now}
+          />
+        </Box>
       ) : null}
     </Box>
   );
@@ -634,6 +638,39 @@ function PhaseHeader({
   );
 }
 
+function CollapsedFanoutRow({
+  row,
+  idColWidth,
+  kindColWidth,
+}: {
+  row: Extract<WorkflowTreeRow, { kind: "collapsed" }>;
+  idColWidth: number;
+  kindColWidth: number;
+}) {
+  // Keep column alignment with StepRow: glyph + id + kind, then a calm summary
+  // so a 30-way pending fan-out reads as one row instead of a wall.
+  const id = truncate(`↳ ${row.firstStepId}…${row.lastStepId}`, Math.max(idColWidth, 18));
+  const kindLabel = BLOCK_LABEL.worker;
+  return (
+    <Text wrap="truncate-end">
+      <Text color="gray">{"   "}</Text>
+      <Text color="gray" dimColor>
+        ·{" "}
+      </Text>
+      <Text color="gray" dimColor>
+        {id.padEnd(Math.max(idColWidth, 18))}{" "}
+      </Text>
+      <Text color={BLOCK_COLOR.worker} dimColor>
+        {kindLabel.padEnd(kindColWidth)}
+      </Text>
+      <Text color="gray" dimColor>
+        {"  "}
+        {row.count} pending
+      </Text>
+    </Text>
+  );
+}
+
 function StepRow({
   step,
   idColWidth,
@@ -849,9 +886,10 @@ function stepMeta(step: StepState, now: number): string {
   if (waitKind === "approval") return "waiting for approval";
   if (waitKind === "input") return "waiting for input";
   if (step.status === "running") {
-    // A live ticking clock per running step; the latest tool line rides along.
+    // ASCII elapsed prefix: ⏱ is double-width in many terminals and would wrap
+    // the row past the fixed viewport (Ink then corrupts the frame).
     const elapsed =
-      step.startedAt && now > 0 ? `⏱ ${formatElapsed(now - step.startedAt)}` : undefined;
+      step.startedAt && now > 0 ? `${formatElapsed(now - step.startedAt)}` : undefined;
     const bits = [elapsed, step.activity].filter(Boolean);
     if (bits.length > 0) return bits.join(" · ");
   }

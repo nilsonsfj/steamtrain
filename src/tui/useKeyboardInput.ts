@@ -540,6 +540,22 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
             }
             return;
           }
+          // Page the live step list when the drill-in is closed (PgUp/PgDn inside
+          // the drill-in already scroll output via handleOutputScrollKeys above).
+          if (
+            (key.pageUp || key.pageDown) &&
+            (runner.wf.started || runner.wfLaunching) &&
+            !runner.wfStepDetails
+          ) {
+            const page = 10;
+            runner.setWfFollowSelection(false);
+            runner.setStepIndex((i) =>
+              key.pageUp
+                ? Math.max(0, i - page)
+                : Math.min(Math.max(0, runner.totalWfSteps - 1), i + page),
+            );
+            return;
+          }
         }
       },
       [exit],
