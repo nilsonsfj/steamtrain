@@ -86,9 +86,15 @@ import {
   sessionSourceId,
   validateWorkflow,
   workflowStepKind,
+  workspaceRef,
   workspaceSourceId,
 } from "./types";
-import { type AgentWorkspaceLease, type AgentWorkspaceManager, runGitText } from "./worktree";
+import {
+  type AgentWorkspaceLease,
+  type AgentWorkspaceManager,
+  type AgentWorkspaceRequest,
+  runGitText,
+} from "./worktree";
 
 /**
  * Everything the engine needs from the outside world. `createAdapter` is
@@ -2144,39 +2150,54 @@ async function allocateAgentWorkspace(
     stepCwd,
     iteration: ctx.iteration,
     item,
-    inheritFrom: resolveInheritedWorkspace(step, ctx),
+    ...resolveWorkspaceSource(step, ctx),
     signal: ctx.signal,
   });
 }
 
 /**
- * Resolve a step's `workspace: "inherit:<stepId>"` to the source step's
- * recorded worktree. Undefined when the step doesn't inherit — or when the
+ * Resolve a step's `workspace: "inherit:<stepId>"` / `"attach:<stepId>"` into
+ * the `AgentWorkspaceRequest` fields the workspace manager needs — `undefined`
+ * fields (`{}`) when the step doesn't reference a workspace, or when the
  * source ran in the plain cwd (no git repo / no isolation manager), in which
- * case this step runs there too and already sees the source's files.
+ * case this step runs there too and already sees the source's files (both
+ * modes degrade identically: the worktree they'd share doesn't exist).
  * Throws when the source's worktrees are ambiguous or absent; the callers'
  * allocation error handling turns that into a failed step.
  */
-function resolveInheritedWorkspace(
+function resolveWorkspaceSource(
   step: WorkflowStep,
   ctx: ExecuteContext,
-): { stepId: string; root: string; baseCommit?: string } | undefined {
-  const sourceId = workspaceSourceId(step);
-  if (!sourceId) return undefined;
-  const source = ctx.results.get(sourceId);
+): Pick<AgentWorkspaceRequest, "inheritFrom" | "attachTo"> {
+  const ref = workspaceRef(step);
+  if (!ref) return {};
+  const source = ctx.results.get(ref.sourceId);
   if (!source) {
-    throw new Error(`workspace inherit source '${sourceId}' has not produced a result`);
+    throw new Error(`workspace ${ref.mode} source '${ref.sourceId}' has not produced a result`);
   }
   if (source.childResults?.length) {
     throw new Error(
-      `workspace inherit source '${sourceId}' fanned out into ${source.childResults.length} worktrees; merge them first`,
+      `workspace ${ref.mode} source '${ref.sourceId}' fanned out into ${source.childResults.length} worktrees; merge them first`,
     );
   }
-  if (!source.worktree) return undefined;
+  if (!source.worktree) return {};
+  if (ref.mode === "inherit") {
+    return {
+      inheritFrom: {
+        stepId: ref.sourceId,
+        root: source.worktree.root,
+        baseCommit: source.worktree.baseCommit,
+      },
+    };
+  }
   return {
-    stepId: sourceId,
-    root: source.worktree.root,
-    baseCommit: source.worktree.baseCommit,
+    attachTo: {
+      stepId: ref.sourceId,
+      root: source.worktree.root,
+      branch: source.worktree.branch,
+      baseCommit: source.worktree.baseCommit,
+      linkedIgnoredPaths: source.worktree.linkedIgnoredPaths,
+    },
   };
 }
 
@@ -2459,7 +2480,7 @@ async function executeCommandStep(
           baseCwd: ctx.deps.cwd,
           stepCwd,
           iteration: ctx.iteration,
-          inheritFrom: resolveInheritedWorkspace(step, ctx),
+          ...resolveWorkspaceSource(step, ctx),
           signal: ctx.signal,
         })
       : { cwd: stepCwd, dispose: () => {} };
@@ -3171,8 +3192,18 @@ async function executeMergeStep(
     // Judge fan-out sources leaf by leaf, not by the parent's ok flag: a
     // parent is not-ok when ANY child failed or never ran (budget), but
     // skipped/not-run children are simply absent from the merge — only a
-    // child that actually failed poisons it and fails the step.
-    const leaves = result.childResults?.length ? result.childResults : [result];
+    // child that actually failed poisons it and fails the step. A step that
+    // carries its OWN `result.worktree` at the top level (a worker/processor/
+    // command step, or a `mode: "worktree"` merge step) is a leaf by itself
+    // even when it also carries `childResults` (guard for a future building
+    // block where a `workflow` call step surfaces a `worktreeStep` result
+    // alongside its own `childResults`) — descending into children there
+    // would miss the surfaced worktree entirely.
+    const leaves = result.worktree
+      ? [result]
+      : result.childResults?.length
+        ? result.childResults
+        : [result];
     for (const leaf of leaves) {
       if (leaf.skipped || leaf.notRun) continue;
       if (!leaf.ok) return fail(`merge source '${leaf.stepId}' failed; nothing was merged`);
@@ -3180,10 +3211,30 @@ async function executeMergeStep(
       else missingWorktrees.push(leaf.stepId);
     }
   }
+  // Dedupe by worktree root, keeping the FIRST label: an `attach:` chain (or
+  // an `inherit:` chain) shares one underlying worktree across several step
+  // ids, so naming several of them in `from` would otherwise harvest and
+  // "merge" the same worktree into itself more than once.
+  const dedupedLabels: string[] = [];
+  {
+    const seenRoots = new Map<string, string>();
+    const deduped: WorktreeSource[] = [];
+    for (const source of sources) {
+      const existing = seenRoots.get(source.root);
+      if (existing) {
+        dedupedLabels.push(source.stepId);
+        continue;
+      }
+      seenRoots.set(source.root, source.stepId);
+      deduped.push(source);
+    }
+    sources.length = 0;
+    sources.push(...deduped);
+  }
   if (sources.length === 0) {
     return fail(
       missingWorktrees.length > 0
-        ? `merge step '${step.id}': no worktrees recorded for ${missingWorktrees.join(", ")} (only worker/processor/command steps get worktrees, and only inside a git repository; gate/llm/consolidator steps never produce one)`
+        ? `merge step '${step.id}': no worktrees recorded for ${missingWorktrees.join(", ")} (only worker/processor/command steps and mode:"worktree" merge steps get worktrees, and only inside a git repository; gate/llm/consolidator/apply/branch/pr-merge steps never produce one)`
         : `merge step '${step.id}' has no source worktrees to merge`,
     );
   }
@@ -3245,6 +3296,18 @@ async function executeMergeStep(
       : undefined;
   const strategyOption = onConflict === "ours" || onConflict === "theirs" ? onConflict : undefined;
 
+  // `mode: "worktree"` reserves its staging directory/branch from the SAME
+  // workspace manager (and therefore the same base dir / run id / naming
+  // convention) ordinary step worktrees use, so the kept result lives where
+  // the existing prune/GC tooling expects step worktrees to live. Undefined
+  // when there's no workspace manager, or it's not git-backed (outside a
+  // repo) — `harvestWorktrees` already requires a git repo for ANY mode, so
+  // that degradation can't actually happen here; the `?.` is defensive.
+  const keepAt =
+    mode === "worktree"
+      ? await ctx.deps.agentWorkspace?.reserveKeptDir?.(step.id, repoRoot, ctx.signal)
+      : undefined;
+
   const harvests: HarvestResult[] = [];
   try {
     if (step.perSource) {
@@ -3275,12 +3338,15 @@ async function executeMergeStep(
           mode,
           // `||`, not `??`: a branch template that renders to "" (e.g. an
           // empty step output) must still fall back to a generated name.
+          // `keepAt.branch` (worktree mode) wins over both when set —
+          // harvestWorktrees itself already prefers it.
           branchName: render(step.branch) || defaultHarvestBranchName(step.id),
           commitMessage: render(step.commitMessage),
           prTitle: render(step.prTitle),
           prBody: render(step.prBody),
           strategyOption,
           resolveConflicts: resolver,
+          keepAt,
           signal: ctx.signal,
         }),
       );
@@ -3337,7 +3403,9 @@ async function executeMergeStep(
         ? `applied to ${repoRoot} (uncommitted)`
         : mode === "branch"
           ? `left on branch ${branches.join(", ")}`
-          : `opened PR ${prUrls.join(", ")}`;
+          : mode === "worktree"
+            ? `kept in worktree ${harvests[0]?.worktreeRoot ?? "?"} on branch ${branches.join(", ")}`
+            : `opened PR ${prUrls.join(", ")}`;
     lines.push(
       `merged ${merged.length} worktree(s): ${fileCount} file(s) +${additions} -${deletions} — ${target}`,
     );
@@ -3358,14 +3426,34 @@ async function executeMergeStep(
   if (cleaned.length > 0) {
     lines.push(`cleaned up ${cleaned.length} source worktree(s): ${cleaned.join(", ")}`);
   }
+  if (dedupedLabels.length > 0) {
+    lines.push(
+      `deduped ${dedupedLabels.length} source(s) sharing an already-merged worktree: ${dedupedLabels.join(", ")}`,
+    );
+  }
+
+  const worktreeResult: AgentWorktreeInfo | undefined =
+    mode === "worktree" && harvests[0]?.worktreeRoot
+      ? {
+          originalCwd: harvests[0].worktreeRoot,
+          cwd: harvests[0].worktreeRoot,
+          root: harvests[0].worktreeRoot,
+          branch: harvests[0].branch ?? "",
+          baseCommit: harvests[0].worktreeBaseCommit,
+        }
+      : undefined;
 
   return {
     result: {
       stepId: step.id,
       ok: true,
       output: lines.join("\n"),
+      worktree: worktreeResult,
       json: {
         mode,
+        worktree: worktreeResult
+          ? { root: worktreeResult.root, branch: worktreeResult.branch }
+          : undefined,
         merged,
         unchanged,
         missingWorktrees,

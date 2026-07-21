@@ -85,8 +85,8 @@ export interface HarvestRequest {
   /** Root of the repository the changes should land in. */
   repoRoot: string;
   sources: WorktreeSource[];
-  mode: "apply" | "branch" | "pr";
-  /** Branch to leave the merged state on (branch/pr modes); generated when omitted. */
+  mode: "apply" | "branch" | "pr" | "worktree";
+  /** Branch to leave the merged state on (branch/pr/worktree modes); generated when omitted. */
   branchName?: string;
   commitMessage?: string;
   prTitle?: string;
@@ -95,6 +95,19 @@ export interface HarvestRequest {
   strategyOption?: "ours" | "theirs";
   /** Called for conflicts when no deterministic strategy is set. */
   resolveConflicts?: ConflictResolver;
+  /**
+   * `mode: "worktree"` only: merge into this pre-reserved directory/branch
+   * (typically from `AgentWorkspaceManager.reserveKeptDir`) instead of a
+   * throwaway one under the OS tmpdir, and — on success — leave BOTH the
+   * worktree directory and the branch in place (normally only `branch`/`pr`
+   * modes keep the branch, and even then the staging directory itself is
+   * always discarded). On failure the reserved worktree is still cleaned up
+   * like the tmpdir case. Omitted ⇒ falls back to a throwaway tmpdir
+   * location that IS still kept afterward (best-effort; prefer passing this
+   * so the result lives where step worktrees normally live and is found by
+   * the usual prune/GC paths).
+   */
+  keepAt?: { dir: string; branch: string };
   signal?: AbortSignal;
 }
 
@@ -108,10 +121,17 @@ export interface HarvestResult {
   additions: number;
   deletions: number;
   conflicts: ConflictRecord[];
-  /** The branch holding the merged state (branch/pr modes). */
+  /** The branch holding the merged state (branch/pr/worktree modes). */
   branch?: string;
   /** The created pull request URL (pr mode). */
   prUrl?: string;
+  /**
+   * `mode: "worktree"` only: the kept staging worktree's directory and the
+   * pre-merge target HEAD it branched from (the recorded `baseCommit` for a
+   * later `workspace: "attach:…"`/`inherit:` or merge `from` source).
+   */
+  worktreeRoot?: string;
+  worktreeBaseCommit?: string;
   /** True when no source had any changes; delivery was skipped. */
   noChanges: boolean;
 }
@@ -379,10 +399,17 @@ export async function harvestWorktrees(request: HarvestRequest): Promise<Harvest
   };
   if (snapshots.length === 0) return empty;
 
-  const branch = request.branchName ?? defaultHarvestBranchName(snapshots[0]!.source.stepId);
-  const stagingDir = join(tmpdir(), `steamtrain-merge-${randomSuffix()}`);
+  const branch =
+    request.keepAt?.branch ??
+    request.branchName ??
+    defaultHarvestBranchName(snapshots[0]!.source.stepId);
+  const stagingDir = request.keepAt?.dir ?? join(tmpdir(), `steamtrain-merge-${randomSuffix()}`);
   const conflicts: ConflictRecord[] = [];
   let keepBranch = false;
+  // `mode: "worktree"`'s whole point is a durable, on-disk staging worktree —
+  // unlike branch/pr (which keep only the branch ref and discard the checked-
+  // out directory), a successful worktree-mode harvest keeps BOTH.
+  let keepStagingDir = false;
   try {
     await withRepoWorktreeLock(repoRoot, signal, () =>
       runGit(
@@ -419,6 +446,12 @@ export async function harvestWorktrees(request: HarvestRequest): Promise<Harvest
     }
     keepBranch = true;
     result.branch = branch;
+    if (mode === "worktree") {
+      keepStagingDir = true;
+      result.worktreeRoot = stagingDir;
+      result.worktreeBaseCommit = targetHead;
+      return result;
+    }
     if (mode === "pr") {
       // Base the PR on the branch the merge targeted: without --base, gh
       // defaults to the remote's default branch, so a run from a feature
@@ -437,8 +470,10 @@ export async function harvestWorktrees(request: HarvestRequest): Promise<Harvest
     }
     return result;
   } finally {
-    await runGit(["worktree", "remove", "--force", stagingDir], repoRoot).catch(() => {});
-    await rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+    if (!keepStagingDir) {
+      await runGit(["worktree", "remove", "--force", stagingDir], repoRoot).catch(() => {});
+      await rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+    }
     if (!keepBranch) await runGit(["branch", "-D", branch], repoRoot).catch(() => {});
   }
 }

@@ -651,7 +651,8 @@ async function planCommand(
     if (step.gateCondition) tags.push(`gate: ${step.gateCondition}`);
     if (step.workflowName) tags.push(`workflow: ${step.workflowName}`);
     if (step.mergeMode) tags.push(`merge: ${step.mergeMode}`);
-    if (step.workspaceSource) tags.push(`inherit: ${step.workspaceSource}`);
+    if (step.workspaceSource)
+      tags.push(`${step.workspaceMode ?? "inherit"}: ${step.workspaceSource}`);
     if (step.artifacts) tags.push(`artifacts: ${step.artifacts.join(", ")}`);
 
     const tagStr = tags.length > 0 ? `  (${tags.join("; ")})` : "";

@@ -26,6 +26,23 @@ export interface AgentWorkspaceRequest {
    * new worktree lands the whole chain's changes.
    */
   inheritFrom?: { stepId: string; root: string; baseCommit?: string };
+  /**
+   * Attach to a prior step's worktree instead of allocating a new one: no
+   * `git worktree add`, no copy — the lease's `cwd` is this request's
+   * `stepCwd` re-rooted into `attachTo.root` (same relative-path logic
+   * `inheritFrom`/plain allocation uses), and `root`/`branch`/`baseCommit`
+   * are carried over verbatim so the caller's `result.worktree` reads exactly
+   * like the source's own. Mutually exclusive with `inheritFrom`. Throws when
+   * `attachTo.root` no longer exists on disk (pruned/cleaned up) — same
+   * failure shape as a missing `inheritFrom` source.
+   */
+  attachTo?: {
+    stepId: string;
+    root: string;
+    branch: string;
+    baseCommit?: string;
+    linkedIgnoredPaths?: string[];
+  };
   signal?: AbortSignal;
 }
 
@@ -45,6 +62,21 @@ export interface AgentWorkspaceLease {
 
 export interface AgentWorkspaceManager {
   allocate: (request: AgentWorkspaceRequest) => Promise<AgentWorkspaceLease>;
+  /**
+   * Reserve a directory + branch name for a KEPT (non-ephemeral) worktree
+   * that the CALLER will create itself (via plain `git worktree add`) —
+   * used by merge `mode: "worktree"` so its staging worktree lands under the
+   * same base directory / run id / naming convention as ordinary step
+   * worktrees (not a tmpdir that vanishes), and is found by the existing
+   * prune/GC paths. `repoCwd` locates the repo the same way `allocate` does;
+   * returns undefined outside a git repository (mirrors `allocate`'s plain-
+   * cwd degradation — the caller then falls back to a throwaway location).
+   */
+  reserveKeptDir?: (
+    label: string,
+    repoCwd: string,
+    signal?: AbortSignal,
+  ) => Promise<{ dir: string; branch: string } | undefined>;
 }
 
 export interface GitWorktreeManagerOptions {
@@ -77,6 +109,8 @@ class GitWorktreeManager implements AgentWorkspaceManager {
 
   async allocate(request: AgentWorkspaceRequest): Promise<AgentWorkspaceLease> {
     throwIfAborted(request.signal);
+    if (request.attachTo) return this.attachLease(request);
+
     const repo = await discoverGitRepo(request.stepCwd, request.signal);
     if (!repo) return originalCwdLease(request.stepCwd);
 
@@ -147,6 +181,57 @@ class GitWorktreeManager implements AgentWorkspaceManager {
       // `history apply/prune`, or `workflow worktrees prune` (see gc.ts).
       dispose: () => {},
     };
+  }
+
+  /**
+   * `attach:<stepId>` support: no `git worktree add`, no state copy — just
+   * re-root this request's `stepCwd` into the already-existing `attachTo.root`
+   * using the SAME relative-path logic the main `allocate` path uses for
+   * `inherit`, and carry the source's root/branch/baseCommit over verbatim.
+   */
+  private async attachLease(request: AgentWorkspaceRequest): Promise<AgentWorkspaceLease> {
+    const attach = request.attachTo as NonNullable<AgentWorkspaceRequest["attachTo"]>;
+    const exists = await lstat(attach.root).then(
+      (st) => st.isDirectory(),
+      () => false,
+    );
+    if (!exists) {
+      throw new Error(
+        `cannot attach to workspace of step '${attach.stepId}': its worktree no longer exists at ${attach.root} (pruned or cleaned up?)`,
+      );
+    }
+    let cwd = attach.root;
+    const repo = await discoverGitRepo(request.stepCwd, request.signal);
+    if (repo) {
+      const stepCwd = await canonicalPath(request.stepCwd);
+      const relativeStepCwd = relative(repo.root, stepCwd);
+      if (relativeStepCwd && !isOutside(relativeStepCwd)) {
+        cwd = join(attach.root, relativeStepCwd);
+      }
+    }
+    return {
+      cwd,
+      root: attach.root,
+      branch: attach.branch,
+      baseCommit: attach.baseCommit,
+      linkedIgnoredPaths: attach.linkedIgnoredPaths,
+      dispose: () => {},
+    };
+  }
+
+  async reserveKeptDir(
+    label: string,
+    repoCwd: string,
+    signal?: AbortSignal,
+  ): Promise<{ dir: string; branch: string } | undefined> {
+    const repo = await discoverGitRepo(repoCwd, signal);
+    if (!repo) return undefined;
+    const repoDir = `${safeRefPart(basename(repo.root))}-${shortHash(repo.root)}`;
+    const stepPart = safeRefPart(label);
+    const unique = randomId();
+    const dir = join(this.baseDir, repoDir, this.runId, `${stepPart}-${unique}`);
+    const branch = `steamtrain/${this.runId}/${stepPart}-${unique}`;
+    return { dir, branch };
   }
 
   private inRepoQueue<T>(

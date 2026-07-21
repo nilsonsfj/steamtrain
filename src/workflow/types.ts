@@ -102,15 +102,38 @@ export interface WorkspaceFields {
    * an implement → review → test pipeline where each step actually sees the
    * previous step's edits, while the user's checkout stays untouched.
    *
-   * The source becomes an implicit dependency: this step is scheduled after it,
-   * skips when it was skipped, and fails when it failed. The source must be a
-   * worker/processor/command step without `forEach` (a fan-out parent has many
-   * worktrees — merge them first). Outside a git repository steps share the
-   * plain cwd, so inheritance is trivially satisfied.
+   * `"attach:<stepId>"` — run this step INSIDE the named earlier step's own
+   * worktree instead: no copy, no new branch. Where `inherit` forks a new
+   * worktree from the source's state (so a later edit in the forked copy never
+   * reaches the source or any sibling that also inherited from it), `attach`
+   * shares the ONE worktree, so a chain of attachers actually converges — the
+   * canonical shape for an implement → review → fix → test loop where fix's
+   * edits must be visible to the next review. `result.worktree` records the
+   * SAME root/branch/baseCommit as the source (and the source's
+   * `linkedIgnoredPaths`), so templates, `history show --diff`, and `merge`
+   * all see it as if this step WAS the source, worktree-wise.
    *
-   * Merging an inherited worktree lands the whole chain's changes: its diff
-   * base stays the original base commit, so it includes the inherited edits
-   * plus this step's own.
+   * Either way the source becomes an implicit dependency: this step is
+   * scheduled after it, skips when it was skipped, and fails when it failed.
+   * The source must be a worker/processor/command step without `forEach` (a
+   * fan-out parent has many worktrees — merge them first) or a `merge` step
+   * with `mode: "worktree"` (attaching to an `apply`/`branch`/`pr` merge is
+   * rejected — those deliver, they don't leave a worktree). Outside a git
+   * repository steps share the plain cwd, so inheritance/attachment is
+   * trivially satisfied.
+   *
+   * `attach` additionally requires STRICT ordering: every step attaching to
+   * the same underlying worktree (directly, or transitively through a chain
+   * of attachers) must, in spec order, be reachable from the previous one via
+   * `dependsOn` (counting implicit workspace/session/forEach deps) — two
+   * steps must never run concurrently in one worktree. Validation rejects
+   * unordered co-attachers by name. A step with `workspace: "attach:…"` may
+   * not itself have `forEach` (fan-out children would race in the one
+   * worktree).
+   *
+   * Merging an inherited or attached worktree lands the whole chain's
+   * changes: its diff base stays the original base commit, so it includes the
+   * upstream edits plus this step's own.
    */
   workspace?: string;
   /**
@@ -259,6 +282,16 @@ export interface ConsolidatorStep extends WorkflowStepBase {
  *    the `gh` CLI (`prTitle` / `prBody` templates). With `perSource: true`,
  *    each source worktree gets its own branch + PR — the "one PR per parallel
  *    agent, reviewed by a human" operating model.
+ *  - `"worktree"`: merge into a KEPT staging worktree (same base directory /
+ *    naming convention as ordinary step worktrees, so it survives like any
+ *    other and is found by the usual prune/GC paths) instead of delivering
+ *    anywhere — nothing lands in the user's checkout. The step's own
+ *    `result.worktree` records it (`root`, `branch`, `baseCommit` = the
+ *    pre-merge target HEAD), so a later step can `workspace: "attach:<this
+ *    step>"` (or `inherit:`) to keep working on the merged state, and a
+ *    LATER merge step can list this one (or anything attached to it) in
+ *    `from` to harvest it like any agent step's worktree. `perSource` is
+ *    rejected with this mode (one kept worktree is the point).
  *
  * Conflicts BETWEEN sources (two agents touched the same lines) follow
  * `onConflict`: `"fail"` (default), `"ours"` / `"theirs"` (first-merged wins /
@@ -272,7 +305,7 @@ export interface MergeStep extends WorkflowStepBase {
   /** Steps whose worktrees to merge; defaults to `dependsOn`. */
   from?: string[];
   /** Where the merged changes land (see kind docs). Default `"apply"`. */
-  mode?: "apply" | "branch" | "pr";
+  mode?: "apply" | "branch" | "pr" | "worktree";
   /** Branch name template for branch/pr modes; generated when omitted. */
   branch?: string;
   /** One branch/PR per source worktree instead of one combined merge (branch/pr modes only). */
@@ -894,7 +927,7 @@ const optionalAgentRunShape = {
 const workspaceShape = {
   workspace: z
     .string()
-    .regex(/^inherit:.+$/, 'workspace must be "inherit:<stepId>"')
+    .regex(/^(inherit|attach):.+$/, 'workspace must be "inherit:<stepId>" or "attach:<stepId>"')
     .optional(),
   artifacts: z.array(z.string().min(1)).min(1).optional(),
 };
@@ -1018,7 +1051,7 @@ const workflowMergeStepSchema = z
     ...baseStepShape,
     kind: z.literal("merge"),
     from: z.array(z.string().min(1)).min(1).optional(),
-    mode: z.enum(["apply", "branch", "pr"]).optional(),
+    mode: z.enum(["apply", "branch", "pr", "worktree"]).optional(),
     branch: z.string().min(1).optional(),
     perSource: z.boolean().optional(),
     cleanup: z.boolean().optional(),
@@ -1054,6 +1087,15 @@ const workflowMergeStepSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'merge step with perSource requires mode "branch" or "pr"',
+      });
+    }
+    // "worktree" mode's whole point is ONE kept staging worktree; perSource
+    // would need one staging worktree per source, defeating it.
+    if (step.perSource && step.mode === "worktree") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'merge step with perSource cannot use mode "worktree" (one kept worktree is the point)',
       });
     }
     if ((step.agent || step.model) && !(step.agent && step.model)) {
@@ -1217,11 +1259,34 @@ export function workflowStepKind(step: WorkflowStep): WorkflowStepKind {
 
 export type AgentBackedWorkflowStep = WorkflowStep & AgentRunFields;
 
-/** The step id a `workspace: "inherit:<stepId>"` field names, if any. */
-export function workspaceSourceId(step: WorkflowStep): string | undefined {
+/** A step's parsed `workspace` field: which mode, and which step it names. */
+export interface WorkspaceRef {
+  mode: "inherit" | "attach";
+  sourceId: string;
+}
+
+/**
+ * Parse a step's `workspace` field (`"inherit:<stepId>"` or
+ * `"attach:<stepId>"`) into its mode and source step id, or undefined when
+ * the step has no `workspace` field. See {@link WorkspaceFields.workspace}
+ * for the semantic difference between the two modes.
+ */
+export function workspaceRef(step: WorkflowStep): WorkspaceRef | undefined {
   const workspace = "workspace" in step ? step.workspace : undefined;
   if (!workspace) return undefined;
-  return /^inherit:(.+)$/.exec(workspace)?.[1];
+  const match = /^(inherit|attach):(.+)$/.exec(workspace);
+  if (!match) return undefined;
+  return { mode: match[1] as "inherit" | "attach", sourceId: match[2] as string };
+}
+
+/**
+ * The step id a `workspace: "inherit:<stepId>"` OR `"attach:<stepId>"` field
+ * names, if any — mode-agnostic, for call sites that only care WHICH step is
+ * the implicit dependency (scheduling, skip/fail cascade, template lint), not
+ * how its worktree is used. Use {@link workspaceRef} where the mode matters.
+ */
+export function workspaceSourceId(step: WorkflowStep): string | undefined {
+  return workspaceRef(step)?.sourceId;
 }
 
 /** The step id a `session: "continue:<stepId>"` field names, if any. */
@@ -1524,28 +1589,45 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
           sessionContinuedBy.set(sessionSrc, step.id);
         }
       }
-      const wsSource = workspaceSourceId(step);
-      if (wsSource) {
+      const wsRef = workspaceRef(step);
+      if (wsRef) {
+        const wsSource = wsRef.sourceId;
+        const verb = wsRef.mode === "attach" ? "attaches to" : "inherits";
         if (!earlierIds.has(wsSource)) {
           return {
             ok: false,
             error: allIds.has(wsSource)
-              ? `step '${step.id}' workspace inherits '${wsSource}', which is not in an earlier phase`
-              : `step '${step.id}' workspace inherits unknown step '${wsSource}'`,
+              ? `step '${step.id}' workspace ${verb} '${wsSource}', which is not in an earlier phase`
+              : `step '${step.id}' workspace ${verb} unknown step '${wsSource}'`,
           };
         }
         const sourceStep = stepsById.get(wsSource);
         const sourceKind = sourceStep ? workflowStepKind(sourceStep) : undefined;
-        if (sourceKind !== "worker" && sourceKind !== "processor" && sourceKind !== "command") {
+        const isWorktreeStep =
+          sourceKind === "worker" || sourceKind === "processor" || sourceKind === "command";
+        // A `merge` step only leaves a worktree behind in `mode: "worktree"` —
+        // apply/branch/pr deliver the merge and leave nothing to inherit or
+        // attach to. A `workflow` call step is not yet an eligible source (its
+        // own worktree surfacing is a later building block); this leaves the
+        // seam for it.
+        const isWorktreeMerge =
+          sourceKind === "merge" && (sourceStep as MergeStep).mode === "worktree";
+        if (!isWorktreeStep && !isWorktreeMerge) {
           return {
             ok: false,
-            error: `step '${step.id}' workspace inherits '${wsSource}', which is a ${sourceKind} step (only worker, processor, and command steps leave a worktree to inherit)`,
+            error: `step '${step.id}' workspace ${verb} '${wsSource}', which is a ${sourceKind} step (only worker, processor, and command steps — or a merge step with mode "worktree" — leave a worktree to inherit or attach)`,
           };
         }
-        if (sourceStep && "forEach" in sourceStep && sourceStep.forEach) {
+        if (isWorktreeStep && sourceStep && "forEach" in sourceStep && sourceStep.forEach) {
           return {
             ok: false,
-            error: `step '${step.id}' workspace inherits fan-out step '${wsSource}', which has one worktree per item (merge them first, or inherit a non-forEach step)`,
+            error: `step '${step.id}' workspace ${verb} fan-out step '${wsSource}', which has one worktree per item (merge them first, or ${wsRef.mode} a non-forEach step)`,
+          };
+        }
+        if (wsRef.mode === "attach" && "forEach" in step && step.forEach) {
+          return {
+            ok: false,
+            error: `step '${step.id}' cannot combine workspace attach with forEach (fan-out children would race in one worktree — merge or drop the forEach)`,
           };
         }
       }
@@ -1574,6 +1656,91 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
     // Promote this phase's ids only after the whole phase is checked, so two
     // steps in the same phase can't depend on each other.
     for (const step of phase.steps) earlierIds.add(step.id);
+  }
+
+  // ---- Attach ordering validation ----
+  // Two steps must never run concurrently in the same worktree, so every step
+  // attaching to a given worktree must, in spec order, be strictly reachable
+  // from the previous attacher (the first is reachable from the source by
+  // construction — the source is always an implicit dependency). Reachability
+  // is computed over `dependsOn` plus the SAME implicit deps the scheduler
+  // adds (workspace/session/forEach sources; see `computeDependencies` in
+  // engine.ts) — a lighter, validation-only mirror of that graph.
+  {
+    const immediateDeps = new Map<string, Set<string>>();
+    for (const phase of spec.phases) {
+      for (const step of phase.steps) {
+        const set = new Set<string>(step.dependsOn ?? []);
+        const wsSrc = workspaceSourceId(step);
+        if (wsSrc) set.add(wsSrc);
+        const sessSrc = sessionSourceId(step);
+        if (sessSrc && sessSrc !== step.id) set.add(sessSrc);
+        if ("forEach" in step && step.forEach) {
+          const feSrc = parseForEachSource(step.forEach);
+          if (feSrc) set.add(feSrc);
+        }
+        if (step.kind === "merge") {
+          for (const ref of step.from ?? []) set.add(ref);
+        }
+        immediateDeps.set(step.id, set);
+      }
+    }
+
+    // Is `toId` a (transitive) dependency of `fromId`?
+    const reachable = (fromId: string, toId: string): boolean => {
+      const seen = new Set<string>();
+      const stack = [fromId];
+      while (stack.length > 0) {
+        const cur = stack.pop() as string;
+        if (cur === toId) return true;
+        if (seen.has(cur)) continue;
+        seen.add(cur);
+        for (const dep of immediateDeps.get(cur) ?? []) stack.push(dep);
+      }
+      return false;
+    };
+
+    // Follow a chain of `attach:`s to the ultimate non-attach worktree owner
+    // (a worker/processor/command step, or a `mode: "worktree"` merge step).
+    // Two steps attaching to different LINKS of the same chain still share
+    // one worktree, so they must be grouped and ordered together.
+    const ultimateOwner = (stepId: string): string => {
+      const visited = new Set<string>();
+      let current = stepId;
+      while (!visited.has(current)) {
+        visited.add(current);
+        const s = stepsById.get(current);
+        const ref = s ? workspaceRef(s) : undefined;
+        if (ref?.mode !== "attach") return current;
+        current = ref.sourceId;
+      }
+      return current; // defensive: a cycle shouldn't be reachable given phase ordering
+    };
+
+    const attachersByOwner = new Map<string, string[]>();
+    for (const phase of spec.phases) {
+      for (const step of phase.steps) {
+        const ref = workspaceRef(step);
+        if (ref?.mode !== "attach") continue;
+        const owner = ultimateOwner(ref.sourceId);
+        const list = attachersByOwner.get(owner) ?? [];
+        list.push(step.id);
+        attachersByOwner.set(owner, list);
+      }
+    }
+
+    for (const [owner, attachers] of attachersByOwner) {
+      for (let i = 1; i < attachers.length; i++) {
+        const prev = attachers[i - 1] as string;
+        const cur = attachers[i] as string;
+        if (!reachable(cur, prev)) {
+          return {
+            ok: false,
+            error: `steps '${prev}' and '${cur}' both attach to the worktree owned by '${owner}' but are not ordered — add 'dependsOn: ["${prev}"]' to '${cur}' (or reorder the phases) so they never run concurrently in the same worktree`,
+          };
+        }
+      }
+    }
   }
 
   // ---- Loop (loopTo) validation ----

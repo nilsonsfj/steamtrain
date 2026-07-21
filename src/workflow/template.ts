@@ -131,7 +131,10 @@ function hasArtifacts(step: WorkflowStep): boolean {
 
 function hasWorkspace(step: WorkflowStep): boolean {
   const kind = workflowStepKind(step);
-  return kind === "worker" || kind === "processor" || kind === "command";
+  if (kind === "worker" || kind === "processor" || kind === "command") return true;
+  // A merge step only leaves a worktree behind in `mode: "worktree"` —
+  // apply/branch/pr deliver the merge and record no worktree.
+  return kind === "merge" && (step as { mode?: string }).mode === "worktree";
 }
 
 function extractRefs(text: string | undefined): string[] {
@@ -329,7 +332,7 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
             const refStep = findStep(spec, refId);
             if (refStep && !hasWorkspace(refStep)) {
               warnings.push(
-                `step '${step.id}' references '${refId}.worktree.${worktreeMatch[2]}' but '${refId}' does not have workspace isolation (only worker, processor, and command steps have worktrees)`,
+                `step '${step.id}' references '${refId}.worktree.${worktreeMatch[2]}' but '${refId}' does not have workspace isolation (only worker, processor, and command steps — or a merge step with mode "worktree" — have worktrees)`,
               );
             }
           }
