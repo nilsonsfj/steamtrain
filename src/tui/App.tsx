@@ -1734,6 +1734,7 @@ export function App({
             reroutePlan={picker.preview.reroutePlan}
             canResume={runner.wfCanResume}
             promptEditing={prompt.promptEditing}
+            input={prompt.value.trim() || picker.wfPreview.input}
             planResult={planResult}
             showStepDetail={runner.wfShowStepDetail}
             showPlanResult={runner.wfShowPlanResult}
