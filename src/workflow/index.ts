@@ -300,7 +300,6 @@ export {
 export {
   HISTORY_STATUS_FILTERS,
   buildHistoryBrowserEntries,
-  countHistoryByStatus,
   formatRelativeTime,
   historyStatusLabel,
   matchesHistoryQuery,

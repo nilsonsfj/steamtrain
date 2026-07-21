@@ -1,7 +1,7 @@
 import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
-import { WorkflowHistory } from "../src/tui/WorkflowHistory";
-import type { LiveRunMeta, RunRecordSummary } from "../src/workflow";
+import { HistoryDetailBanner, WorkflowHistory } from "../src/tui/WorkflowHistory";
+import type { LiveRunMeta, RunRecord, RunRecordSummary } from "../src/workflow";
 import { emptyTokens, newLiveRunMeta } from "../src/workflow";
 
 function liveRun(id: string, overrides: Partial<LiveRunMeta> = {}): LiveRunMeta {
@@ -114,5 +114,52 @@ describe("WorkflowHistory live-run section", () => {
     );
     expect(lastFrame()).toContain("filter ›");
     expect(lastFrame()).toContain("tour");
+  });
+});
+
+describe("HistoryDetailBanner", () => {
+  function fullRecord(overrides: Partial<RunRecord> = {}): RunRecord {
+    return {
+      ...recorded("banner-1"),
+      phases: [],
+      ...overrides,
+    };
+  }
+
+  it("renders status, relative time, totals, and input for a done run", () => {
+    const { lastFrame } = render(<HistoryDetailBanner record={fullRecord()} width={100} />);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("tour");
+    expect(frame).toContain("done");
+    expect(frame).toContain("all aboard");
+    expect(frame).toContain("re-run");
+  });
+
+  it("renders failed status and retry hint when steps failed", () => {
+    const { lastFrame } = render(
+      <HistoryDetailBanner
+        width={100}
+        record={fullRecord({
+          status: "error",
+          ok: false,
+          workflow: "debug",
+          input: "find the bug",
+          totals: {
+            steps: 3,
+            ok: 2,
+            failed: 1,
+            cached: 0,
+            costUsd: 0.1,
+            tokens: emptyTokens(),
+            durationMs: 10_000,
+          },
+        })}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("debug");
+    expect(frame).toContain("failed");
+    expect(frame).toContain("retry failed");
+    expect(frame).toContain("find the bug");
   });
 });

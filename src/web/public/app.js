@@ -452,11 +452,17 @@
   }
 
   function relTime(ts) {
+    // Mirror formatRelativeTime() in history-browser.ts (web page isn't bundled).
+    if (typeof ts !== "number" || !isFinite(ts) || ts <= 0) return "unknown";
     var sec = Math.max(0, Math.round((Date.now() - ts) / 1000));
     if (sec < 60) return sec + "s ago";
     var min = Math.round(sec / 60);
     if (min < 60) return min + "m ago";
-    return Math.round(min / 60) + "h ago";
+    var hr = Math.round(min / 60);
+    if (hr < 24) return hr + "h ago";
+    var day = Math.round(hr / 24);
+    if (day < 7) return day + "d ago";
+    try { return new Date(ts).toISOString().slice(0, 10); } catch (e) { return "unknown"; }
   }
 
   /** Attach to an in-flight run: replay its record so far, then tail live. */
@@ -3495,7 +3501,9 @@
     view: "list" // "list" | "detail"
   };
 
-  /** Only a non-empty string is a deep-link run id - never a DOM Event. */
+  /** Only a non-empty string is a deep-link run id - never a DOM Event.
+   *  Mirrors normalizeHistoryRunId / helpers in history-browser.ts - this page
+   *  script is not bundled, so the TS source of truth is copied, not imported. */
   function normalizeHistoryRunId(runId) {
     return typeof runId === "string" && runId.length > 0 ? runId : undefined;
   }
