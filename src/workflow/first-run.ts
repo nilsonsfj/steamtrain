@@ -2,6 +2,8 @@
 interface SpecStep {
   kind?: string;
   agent?: string;
+  model?: string;
+  modelClass?: string;
 }
 
 interface SpecPhase {
@@ -25,8 +27,16 @@ export const TOUR_WORKFLOW_NAME = "tour";
  * hard guarantee should resolve children first.
  */
 function stepNeedsAgentCli(step: SpecStep): boolean {
-  if (step.kind === "worker" || step.kind === "processor") return true;
-  if ((step.kind === "distributor" || step.kind === "consolidator") && step.agent) return true;
+  if (step.kind === "worker" || step.kind === "processor" || !step.kind) {
+    // Workers always spawn an agent — even model-only / modelClass bindings.
+    return true;
+  }
+  if (step.kind === "distributor" || step.kind === "consolidator") {
+    return Boolean(step.agent || step.model || step.modelClass);
+  }
+  if (step.kind === "merge") {
+    return Boolean(step.agent || step.model || step.modelClass);
+  }
   return false;
 }
 

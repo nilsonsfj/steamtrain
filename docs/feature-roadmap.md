@@ -301,10 +301,10 @@ Shorter list, less rigorously ranked — worth tracking, not necessarily next:
   from fixtures) so workflow authors can unit-test routing — gates, loops,
   `forEach` — without spending tokens; snapshot-test rendered prompts. The
   engine already supports agentless smoke runs; this generalizes it.
-- **Model failover:** per-step `fallbackModel` (or agent-level chains) so a
-  provider outage or hard rate-limit degrades to a sibling model instead of
-  failing the run — complements auto-retry, which today can only re-try the
-  same model.
+- **Model failover:** per-step `fallbackModels` (and automatic same-family
+  remapping) so a provider outage or hard rate-limit degrades to a sibling
+  agent/model instead of failing the run — see [`model-binding.md`](model-binding.md).
+  Complements auto-retry, which can also walk the failover chain between attempts.
 - **MCP server mode:** `steamtrain mcp serve` exposing each workflow as an MCP
   tool, so Claude Code (or any MCP client) can *invoke* steamtrain workflows —
   inverting the current relationship and slotting steamtrain into the growing

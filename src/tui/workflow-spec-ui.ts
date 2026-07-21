@@ -85,18 +85,36 @@ export function distinctAgents(spec: WorkflowSpec): string[] {
   const set = new Set<string>();
   for (const phase of spec.phases) {
     for (const step of phase.steps) {
-      if (isAgentBackedStep(step)) set.add(step.agent);
+      if (isAgentBackedStep(step) && typeof step.agent === "string") set.add(step.agent);
     }
   }
   return [...set];
 }
 
 export function formatWorkflowAgentTarget(target: {
-  agent: AgentInstanceId;
-  model: string;
+  agent?: AgentInstanceId;
+  model?: string;
+  modelClass?: string;
   effort?: string;
 }): string {
-  const formatted = formatAgentTarget(target);
+  if (!target.agent && target.modelClass && !target.model) {
+    return `auto · class:${target.modelClass}${target.effort ? ` · ${target.effort}` : ""}`;
+  }
+  if (!target.agent && target.model) {
+    return `auto · ${target.model}${target.effort ? ` · ${target.effort}` : ""}`;
+  }
+  if (!target.agent || !target.model) {
+    const parts = [
+      target.agent ?? "auto",
+      target.model ?? (target.modelClass ? `class:${target.modelClass}` : "?"),
+    ];
+    return parts.join("/") + (target.effort ? ` · ${target.effort}` : "");
+  }
+  const formatted = formatAgentTarget({
+    agent: target.agent,
+    model: target.model,
+    effort: target.effort,
+  });
   const staticName = staticModelName(target.agent, target.model);
   return staticName && !formatted.includes(staticName) ? `${formatted} · ${staticName}` : formatted;
 }

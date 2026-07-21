@@ -13,6 +13,8 @@ export type WorkflowSessionOverrides = {
 const AGENT_FIELD_KEYS = new Set<keyof AgentRunFields>([
   "agent",
   "model",
+  "modelClass",
+  "fallbackModels",
   "prompt",
   "cwd",
   "env",

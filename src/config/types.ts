@@ -23,6 +23,13 @@ export interface SteamtrainConfig {
   agents?: AgentInstanceConfig[];
   /** Optional LLM API endpoint instances for `llm` steps. Omitted means the built-in providers are enabled. */
   apis?: ApiInstanceConfig[];
+  /**
+   * Optional overrides for built-in model classes (`thinker`, `ultrathinker`,
+   * `implementer`, `reviewer`, `deep-reviewer`, `simple`, `balanced`).
+   * Workflows may pin `modelClass` instead of a concrete model; resolution
+   * walks each class's preferred family list.
+   */
+  modelClasses?: ModelClassesConfig;
   /** Per-agent subprocess wall-clock limit in seconds (workspace dispatches and workflow steps). */
   stepTimeoutSec?: number;
   /** Whole-workflow wall-clock abort limit in seconds. Omitted → stepCount × stepTimeoutSec. */
@@ -42,6 +49,32 @@ export interface SteamtrainConfig {
    */
   notify?: NotifyConfig;
 }
+
+/** Per-class override for {@link SteamtrainConfig.modelClasses}. */
+export interface ModelClassConfigOverride {
+  /** Replace the preferred family id list for this class. */
+  preferred?: string[];
+  /** Replace preferred effort ladder for this class. */
+  preferredEfforts?: string[];
+  /** Optional display name override. */
+  name?: string;
+  /** Optional description override. */
+  description?: string;
+}
+
+/** Config-layer overrides for built-in model classes. */
+export type ModelClassesConfig = Partial<
+  Record<
+    | "thinker"
+    | "ultrathinker"
+    | "implementer"
+    | "reviewer"
+    | "deep-reviewer"
+    | "simple"
+    | "balanced",
+    ModelClassConfigOverride
+  >
+>;
 
 export interface AgentInstanceConfig {
   /** Instance id referenced by workspaces and workflow steps. */
@@ -165,6 +198,28 @@ const agentInstanceSchema = z
   })
   .strict();
 
+const modelClassOverrideSchema = z
+  .object({
+    preferred: z.array(z.string().min(1)).min(1).optional(),
+    preferredEfforts: z.array(z.string().min(1)).min(1).optional(),
+    name: nonEmptyString.optional(),
+    description: nonEmptyString.optional(),
+  })
+  .strict();
+
+const modelClassesSchema = z
+  .object({
+    thinker: modelClassOverrideSchema.optional(),
+    ultrathinker: modelClassOverrideSchema.optional(),
+    implementer: modelClassOverrideSchema.optional(),
+    reviewer: modelClassOverrideSchema.optional(),
+    "deep-reviewer": modelClassOverrideSchema.optional(),
+    simple: modelClassOverrideSchema.optional(),
+    balanced: modelClassOverrideSchema.optional(),
+  })
+  .strict()
+  .optional();
+
 /** Schema for a (partial) steamtrain.json — every section is optional and merged onto defaults. */
 export const configFileSchema = z
   .object({
@@ -182,6 +237,7 @@ export const configFileSchema = z
       .optional(),
     agents: z.array(agentInstanceSchema).superRefine(uniqueIds("agent")).optional(),
     apis: z.array(apiInstanceSchema).superRefine(uniqueIds("api")).optional(),
+    modelClasses: modelClassesSchema,
     stepTimeoutSec: z.number().positive().optional(),
     workflowTimeoutSec: z.number().positive().optional(),
     ...legacyTimeoutFields,

@@ -10,8 +10,9 @@ import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace"
 export interface WorkflowStepSelection {
   workflowName: string;
   stepId: string;
-  agent: AgentInstanceId;
-  model: string;
+  agent?: AgentInstanceId;
+  model?: string;
+  modelClass?: string;
   prompt?: string;
   effort?: string;
   cwd?: string;

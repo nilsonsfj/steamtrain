@@ -768,8 +768,15 @@ var SteamtrainReducer = (() => {
   // src/workflow/first-run.ts
   var TOUR_WORKFLOW_NAME = "tour";
   function stepNeedsAgentCli(step) {
-    if (step.kind === "worker" || step.kind === "processor") return true;
-    if ((step.kind === "distributor" || step.kind === "consolidator") && step.agent) return true;
+    if (step.kind === "worker" || step.kind === "processor" || !step.kind) {
+      return true;
+    }
+    if (step.kind === "distributor" || step.kind === "consolidator") {
+      return Boolean(step.agent || step.model || step.modelClass);
+    }
+    if (step.kind === "merge") {
+      return Boolean(step.agent || step.model || step.modelClass);
+    }
     return false;
   }
   function isAgentlessWorkflow(spec) {

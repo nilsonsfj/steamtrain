@@ -629,8 +629,15 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
 - **Step kinds:** `worker` / `processor`, `distributor`, `consolidator`, `gate`,
   `llm` (direct-API inference), `command` (run a shell check), and `merge`
   (harvest worktree edits). Existing steps without `kind` are workers.
-- **Agent-backed fields:** `agent` (`claude` | `opencode` | `codex` | `cursor` | `antigravity` | `amp` | `kiro`), `model`, `prompt`,
-  plus optional `cwd` (the **target** dir; relative paths resolve against the
+- **Agent-backed fields:** a **model binding** plus `prompt`. Bind with
+  `agent` + `model` (classic pin), `model` alone (auto-picks the best ready
+  agent — reference preferred), or `modelClass`
+  (`thinker` | `ultrathinker` | `implementer` | `reviewer` | `deep-reviewer` |
+  `simple` | `balanced`). Optional
+  `fallbackModels` lists failover queries. See
+  [`docs/model-binding.md`](docs/model-binding.md). Agents:
+  `claude` | `opencode` | `codex` | `cursor` | `antigravity` | `amp` | `kiro`.
+  Also optional: `cwd` (the **target** dir; relative paths resolve against the
   launch cwd), `env` (extra vars), and `extraArgs` (extra CLI flags).
 - **Dynamic fan-out:** add `forEach: "steps.<id>.items"` to a worker/processor
   to create one generated child agent run per distributor item. Use `{{item}}`,

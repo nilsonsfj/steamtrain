@@ -583,7 +583,8 @@ describe("merge step validation", () => {
     };
     const result = validateWorkflow(bad);
     expect(result.ok).toBe(false);
-    expect(result.error).toContain('onConflict "agent" requires agent and model');
+    expect(result.error).toContain('onConflict "agent" requires');
+    expect(result.error).toMatch(/agent\+model|model, or modelClass/);
   });
 });
 

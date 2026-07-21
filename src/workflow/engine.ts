@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join as joinPath, resolve as resolvePath } from "node:path";
-import { resolveAgentInstance } from "../agents";
+import { effortForModelChange, resolveAgentInstance } from "../agents";
 import type { AgentAdapter } from "../agents";
+import type { ResolvedModelCandidate } from "../agents/model-resolve";
 import { llmStepApiId, resolveLlmStepApi } from "../apis/resolve";
 import type { SteamtrainConfig } from "../config/types";
 import type { AgentEvent, AgentInstanceId, AgentProviderId, TokenUsage } from "../types/events";
@@ -58,6 +59,11 @@ import {
   worktreeSourceFromInfo,
 } from "./merge";
 import { createChannel, runPool } from "./pool";
+import {
+  type StepBindingResolution,
+  resolveStepFailoverChain,
+  resolveWorkflowBindings,
+} from "./resolve-bindings";
 import { type RetryPolicy, backoffDelayMs, resolveRetryPolicy } from "./retry";
 import {
   type JsonSchema,
@@ -248,6 +254,12 @@ interface RunEnv {
   startedSteps: Set<string>;
   /** Tracks the emitted pause state so `run_paused`/`run_resumed` fire once per transition. */
   pauseState: { acked: boolean };
+  /**
+   * Per-step model binding resolutions from run start (model-only / class /
+   * failover chains). Used by the retry loop to switch agents after a
+   * transient provider failure.
+   */
+  bindingResolutions: StepBindingResolution[];
 }
 
 /** What one step's completion means for its phase and for run control flow. */
@@ -282,6 +294,16 @@ export async function* runWorkflow(
   const valid = validateWorkflow(spec, deps.loopMaxIterations);
   if (!valid.ok) throw new Error(`invalid workflow '${spec.name}': ${valid.error}`);
 
+  // Materialize model-only / modelClass bindings onto concrete agent+model pairs
+  // before scheduling. Dispatch already gated readiness; here we only require
+  // the instance to be enabled/configured.
+  const bound = resolveWorkflowBindings(spec, {
+    config: deps.agentConfig,
+    isReady: (agent) => Boolean(resolveAgentInstance(deps.agentConfig, agent)),
+  });
+  if (!bound.ok) throw new Error(`cannot resolve model bindings: ${bound.error}`);
+  const runnableSpec = bound.spec;
+
   const cache = ctx.cache ?? new Map<string, StepResult>();
   const outputs = new Map<string, string>();
   const results = new Map<string, StepResult>();
@@ -293,7 +315,7 @@ export async function* runWorkflow(
   }
 
   const limit = Math.min(Math.max(1, deps.maxConcurrency), MAX_CONCURRENCY);
-  const totalSteps = spec.phases.reduce((n, p) => n + p.steps.length, 0);
+  const totalSteps = runnableSpec.phases.reduce((n, p) => n + p.steps.length, 0);
   const budget = { generated: countCachedDynamicSteps(cache) };
   const reserveDynamicSteps = (count: number): boolean => {
     if (budget.generated + count > MAX_STEPS - totalSteps) return false;
@@ -302,14 +324,14 @@ export async function* runWorkflow(
   };
   yield {
     kind: "workflow_start",
-    name: spec.name,
-    phaseCount: spec.phases.length,
+    name: runnableSpec.name,
+    phaseCount: runnableSpec.phases.length,
     stepCount: totalSteps,
     ts: Date.now(),
   };
 
   const env: RunEnv = {
-    spec,
+    spec: runnableSpec,
     ctx,
     deps,
     signal,
@@ -328,6 +350,7 @@ export async function* runWorkflow(
     budgetState: { exceeded: false },
     startedSteps: new Set<string>(),
     pauseState: { acked: false },
+    bindingResolutions: bound.resolutions,
   };
 
   deps.control?.attachRun({
@@ -335,7 +358,7 @@ export async function* runWorkflow(
     onEditAccepted: (stepId) => invalidateEditedStep(env, stepId),
   });
 
-  const workflowOk = specHasLoopGates(spec)
+  const workflowOk = specHasLoopGates(runnableSpec)
     ? yield* runPhasedScheduler(env)
     : yield* runDagScheduler(env);
 
@@ -1066,9 +1089,10 @@ async function runSingleStep(
     results,
     iteration,
   };
-  const agentDisplayModel = agentBacked
-    ? renderPrompt(agentBacked.model, displayRenderCtx)
-    : undefined;
+  const agentDisplayModel =
+    agentBacked?.model !== undefined
+      ? renderPrompt(agentBacked.model, displayRenderCtx)
+      : undefined;
   const agentDisplayEffort =
     agentBacked?.effort !== undefined
       ? renderPrompt(agentBacked.effort, displayRenderCtx)
@@ -1259,6 +1283,7 @@ async function runSingleStep(
       stepTimeoutDefault: spec.stepTimeoutSec,
       iteration,
       workflowCallStack: ctx.workflowCallStack ?? [],
+      bindingResolutions: env.bindingResolutions,
     },
     {
       pushAgentEvent: (stepId, event) => {
@@ -1451,6 +1476,8 @@ interface ExecuteContext {
   iteration: number;
   /** Names of workflows already on the call stack (see `WorkflowRunContext.workflowCallStack`). Always an array (never undefined) once inside `executeStep`. */
   workflowCallStack: string[];
+  /** Failover candidates captured at run start for model-resolved steps. */
+  bindingResolutions: StepBindingResolution[];
 }
 
 interface ExecutionOutcome {
@@ -1746,6 +1773,11 @@ function adapterRun(
   prompt: string,
   resumeSessionId?: string,
 ): AsyncIterable<AgentEvent> {
+  if (!step.agent || !step.model) {
+    throw new Error(
+      `step '${step.id}' has no concrete agent/model binding (resolve modelClass or model first)`,
+    );
+  }
   const instance = resolveAgentInstance(ctx.deps.agentConfig, step.agent);
   if (!instance) throw new Error(`agent '${step.agent}' is disabled or not configured`);
   const adapter = ctx.deps.createAdapter(instance.provider, instance.binary);
@@ -1772,6 +1804,7 @@ function adapterRun(
 
 /** Whether a step's configured adapter can resume a recorded session natively. */
 function adapterSupportsResume(step: AgentBackedWorkflowStep, ctx: ExecuteContext): boolean {
+  if (!step.agent) return false;
   const instance = resolveAgentInstance(ctx.deps.agentConfig, step.agent);
   if (!instance) return false;
   const adapter = ctx.deps.createAdapter(instance.provider, instance.binary);
@@ -1794,6 +1827,12 @@ function resolveSessionResume(
 ): { ok: true; sessionId?: string } | { ok: false; error: string } {
   const sourceId = sessionSourceId(step);
   if (!sourceId) return { ok: true };
+  if (!step.agent) {
+    return {
+      ok: false,
+      error: `step declares session "continue:${sourceId}" but has no concrete agent binding yet`,
+    };
+  }
   const instance = resolveAgentInstance(ctx.deps.agentConfig, step.agent);
   if (instance) {
     const adapter = ctx.deps.createAdapter(instance.provider, instance.binary);
@@ -1876,7 +1915,15 @@ async function executeAgentStep(
   stepId: string,
   item?: WorkflowItem,
 ): Promise<StepResult> {
-  const modelEffort = renderModelEffort(rawStep, ctx, item);
+  if (!rawStep.model) {
+    const message = `step '${stepId}' has no model (resolve modelClass or model first)`;
+    return { stepId, ok: false, output: message, item, error: message, durationMs: 0 };
+  }
+  const modelEffort = renderModelEffort(
+    { model: rawStep.model, effort: rawStep.effort },
+    ctx,
+    item,
+  );
   if (!modelEffort.ok) {
     return {
       stepId,
@@ -1955,23 +2002,57 @@ async function executeAgentStep(
 
   const firstStarted = Date.now();
   let attempt = 0;
+  let activeStep: AgentBackedWorkflowStep = step;
+  // Failover chain: prefer the resolution captured at run start (preserves
+  // authoring-time model/class intent), else recompute from the live step.
+  const prior = ctx.bindingResolutions.find((r) => r.stepId === step.id);
+  let failover: ResolvedModelCandidate[] = prior?.candidates ?? [];
+  if (failover.length === 0) {
+    const live = resolveStepFailoverChain(step, {
+      config: ctx.deps.agentConfig,
+      isReady: (agent) => Boolean(resolveAgentInstance(ctx.deps.agentConfig, agent)),
+    });
+    if (live.ok) failover = live.candidates;
+  }
+  let failoverIndex = Math.max(
+    0,
+    failover.findIndex((c) => c.agent === step.agent && c.model === step.model),
+  );
+
   try {
     let result: StepResult;
     while (true) {
       attempt += 1;
       const attemptOutcome = await runAgentAttempt(
-        step,
+        activeStep,
         ctx,
         hooks,
         stepId,
         item,
         prompt,
         workspace.cwd,
-        resume.sessionId,
+        // Session resume only makes sense on the originally pinned agent.
+        activeStep.agent === step.agent ? resume.sessionId : undefined,
       );
       result = attemptOutcome.result;
       const isLastAttempt = attempt >= policy.maxAttempts;
       if (result.ok || !attemptOutcome.retryable || isLastAttempt || ctx.signal?.aborted) break;
+
+      // Prefer switching to the next model/agent offering before re-trying the
+      // same binding — provider outages and auth flakes often survive same-agent retries.
+      let reason = result.error ?? "transient failure";
+      if (failoverIndex + 1 < failover.length) {
+        failoverIndex += 1;
+        const next = failover[failoverIndex]!;
+        activeStep = {
+          ...activeStep,
+          agent: next.agent,
+          model: next.model,
+          effort: next.effort ?? effortForModelChange(next.agent, next.model, activeStep.effort),
+        };
+        reason = `${reason} · failing over to ${next.agent}/${next.model}`;
+      }
+
       const delayMs = backoffDelayMs(policy, attempt);
       hooks.pushWorkflowEvent({
         kind: "step_retry",
@@ -1980,7 +2061,7 @@ async function executeAgentStep(
         attempt,
         maxAttempts: policy.maxAttempts,
         delayMs,
-        reason: result.error ?? "transient failure",
+        reason,
         iteration: ctx.iteration,
         ts: Date.now(),
       });
@@ -2261,6 +2342,9 @@ async function allocateAgentWorkspace(
   stepCwd: string,
 ): Promise<AgentWorkspaceLease> {
   if (!ctx.deps.agentWorkspace) return { cwd: stepCwd, dispose: () => {} };
+  if (!step.agent) {
+    throw new Error(`step '${stepId}' has no concrete agent binding for workspace allocation`);
+  }
   return ctx.deps.agentWorkspace.allocate({
     workflowName: ctx.workflowName,
     stepId,

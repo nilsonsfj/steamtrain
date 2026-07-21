@@ -29,6 +29,8 @@ export interface PlanStep {
   kind: WorkflowStepKind;
   agent?: string;
   model?: string;
+  /** Role class when the step binds by class instead of (or alongside) a model. */
+  modelClass?: string;
   /** API instance a direct-inference `llm` step calls (explicit `api`, else the built-in provider). */
   llmApi?: string;
   /** Resolved API dialect for direct-inference `llm` steps. */
@@ -292,7 +294,9 @@ export function planWorkflow(
         artifacts = [...step.artifacts];
       }
 
-      if (agentBacked) agentSet.add(step.agent);
+      if (agentBacked) {
+        if (typeof step.agent === "string") agentSet.add(step.agent);
+      }
       if (step.kind === "llm") apiSet.add(llmStepApiId(step));
 
       steps.push({
@@ -301,8 +305,9 @@ export function planWorkflow(
         phaseTitle: phase.title,
         phaseIndex: pi,
         kind,
-        agent: agentBacked ? step.agent : undefined,
+        agent: agentBacked && typeof step.agent === "string" ? step.agent : undefined,
         model: agentBacked || kind === "llm" ? (step as { model?: string }).model : undefined,
+        modelClass: agentBacked ? (step as { modelClass?: string }).modelClass : undefined,
         llmApi: step.kind === "llm" ? llmStepApiId(step) : undefined,
         // A step that names neither provider nor model inherits the dialect
         // from its configured api instance at run time; the static plan then

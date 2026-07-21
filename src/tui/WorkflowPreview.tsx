@@ -226,9 +226,18 @@ function SpecStepRow({
   width: number;
 }) {
   const kind = workflowStepKind(step);
-  const agentColor = isAgentBackedStep(step) ? (AGENT_COLOR[step.agent] ?? "white") : "gray";
+  const agentColor = isAgentBackedStep(step)
+    ? step.agent
+      ? (AGENT_COLOR[step.agent] ?? "white")
+      : "cyan"
+    : "gray";
   const runner = isAgentBackedStep(step)
-    ? formatWorkflowAgentTarget({ agent: step.agent, model: step.model, effort: step.effort })
+    ? formatWorkflowAgentTarget({
+        agent: step.agent,
+        model: step.model,
+        modelClass: step.modelClass,
+        effort: step.effort,
+      })
     : step.kind === "llm"
       ? formatLlmTarget(step)
       : BLOCK_LABEL[kind];
@@ -257,11 +266,20 @@ function SpecStepDetail({
   const lines = specDetailLines(step);
   const prompt = promptForStep(step);
   const runner = isAgentBackedStep(step)
-    ? formatWorkflowAgentTarget({ agent: step.agent, model: step.model, effort: step.effort })
+    ? formatWorkflowAgentTarget({
+        agent: step.agent,
+        model: step.model,
+        modelClass: step.modelClass,
+        effort: step.effort,
+      })
     : step.kind === "llm"
       ? formatLlmTarget(step)
       : undefined;
-  const runnerColor = isAgentBackedStep(step) ? (AGENT_COLOR[step.agent] ?? "white") : "gray";
+  const runnerColor = isAgentBackedStep(step)
+    ? step.agent
+      ? (AGENT_COLOR[step.agent] ?? "white")
+      : "cyan"
+    : "gray";
 
   return (
     <Box

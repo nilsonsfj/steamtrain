@@ -9,6 +9,7 @@ import {
   type AgentInstanceConfig,
   type ApiInstanceConfig,
   type ConfigFile,
+  type ModelClassesConfig,
   type SteamtrainConfig,
   type UserConfigFile,
   configFileSchema,
@@ -225,6 +226,7 @@ export function mergeConfig(
     binaries: { ...base.binaries, ...override.binaries },
     agents: mergeAgentLists(base.agents, override.agents),
     apis: mergeInstanceLists(base.apis, override.apis),
+    modelClasses: mergeModelClasses(base.modelClasses, override.modelClasses),
     ...mergeTimeoutFields(base, override),
     maxConcurrency: override.maxConcurrency ?? base.maxConcurrency,
     maxParallelRuns: override.maxParallelRuns ?? base.maxParallelRuns,
@@ -258,4 +260,25 @@ export function mergeAgentLists(
   override: AgentInstanceConfig[] | undefined,
 ): AgentInstanceConfig[] | undefined {
   return mergeInstanceLists(base, override);
+}
+
+/** Deep-merge model class overrides (project replaces per-class fields). */
+export function mergeModelClasses(
+  base: ModelClassesConfig | undefined,
+  override: ModelClassesConfig | undefined,
+): ModelClassesConfig | undefined {
+  if (!base && !override) return undefined;
+  if (!override) return base;
+  if (!base) return override;
+  const keys = new Set([...Object.keys(base), ...Object.keys(override)] as Array<
+    keyof ModelClassesConfig
+  >);
+  const out: ModelClassesConfig = {};
+  for (const key of keys) {
+    const b = base[key];
+    const o = override[key];
+    if (!b && !o) continue;
+    out[key] = { ...b, ...o };
+  }
+  return out;
 }

@@ -29,6 +29,7 @@ export const CURSOR_MODELS: readonly AgentModel[] = [
   { id: "claude-opus-4-8-thinking-high", name: "Claude Opus 4.8 Thinking High" },
   { id: "claude-sonnet-5-high", name: "Claude Sonnet 5 High" },
   { id: "gpt-5.5-high", name: "GPT 5.5 High" },
+  { id: "gpt-5.6-sol", name: "GPT 5.6 Sol" },
   { id: "gpt-5.2", name: "GPT 5.2" },
 ];
 
