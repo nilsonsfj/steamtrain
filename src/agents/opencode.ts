@@ -20,6 +20,9 @@ const AGENT: AgentId = "opencode";
 /** Known OpenCode models (provider/model; used by `/model` and autocomplete). */
 export const OPENCODE_MODELS: readonly AgentModel[] = [
   // OpenCode Zen (https://opencode.ai/zen/v1/models)
+  { id: "opencode/gpt-5.6-sol", name: "GPT 5.6 Sol" },
+  { id: "opencode/gpt-5.6-terra", name: "GPT 5.6 Terra" },
+  { id: "opencode/gpt-5.6-luna", name: "GPT 5.6 Luna" },
   { id: "opencode/gpt-5.4-mini", name: "GPT 5.4 Mini" },
   { id: "opencode/gpt-5.4", name: "GPT 5.4" },
   { id: "opencode/gpt-5.4-pro", name: "GPT 5.4 Pro" },
@@ -52,12 +55,14 @@ export const OPENCODE_MODELS: readonly AgentModel[] = [
   { id: "opencode/grok-build-0.1", name: "Grok Build 0.1" },
   { id: "opencode/glm-5.1", name: "GLM 5.1" },
   { id: "opencode/glm-5", name: "GLM 5" },
+  { id: "opencode/kimi-k2.7-code", name: "Kimi K2.7 Code" },
   { id: "opencode/kimi-k2.6", name: "Kimi K2.6" },
   { id: "opencode/kimi-k2.5", name: "Kimi K2.5" },
   { id: "opencode/minimax-m2.7", name: "MiniMax M2.7" },
   { id: "opencode/minimax-m2.5", name: "MiniMax M2.5" },
   { id: "opencode/qwen3.6-plus", name: "Qwen 3.6 Plus" },
   { id: "opencode/qwen3.5-plus", name: "Qwen 3.5 Plus" },
+  { id: "opencode/deepseek-v4-pro", name: "DeepSeek V4 Pro" },
   { id: "opencode/deepseek-v4-flash", name: "DeepSeek V4 Flash" },
   { id: "opencode/big-pickle", name: "Big Pickle" },
   { id: "opencode/deepseek-v4-flash-free", name: "DeepSeek V4 Flash Free" },
@@ -65,10 +70,12 @@ export const OPENCODE_MODELS: readonly AgentModel[] = [
   { id: "opencode/nemotron-3-ultra-free", name: "Nemotron 3 Ultra Free" },
   { id: "opencode/north-mini-code-free", name: "North Mini Code Free" },
   // OpenCode Go (https://opencode.ai/zen/go/v1/models)
+  { id: "opencode-go/kimi-k3", name: "Kimi K3" },
   { id: "opencode-go/deepseek-v4-flash", name: "DeepSeek V4 Flash" },
   { id: "opencode-go/deepseek-v4-pro", name: "DeepSeek V4 Pro" },
   { id: "opencode-go/glm-5.1", name: "GLM 5.1" },
   { id: "opencode-go/glm-5", name: "GLM 5" },
+  { id: "opencode-go/kimi-k2.7-code", name: "Kimi K2.7 Code" },
   { id: "opencode-go/kimi-k2.6", name: "Kimi K2.6" },
   { id: "opencode-go/kimi-k2.5", name: "Kimi K2.5" },
   { id: "opencode-go/mimo-v2.5", name: "MiMo V2.5" },

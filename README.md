@@ -612,7 +612,8 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
 - **Agent-backed fields:** a **model binding** plus `prompt`. Bind with
   `agent` + `model` (classic pin), `model` alone (auto-picks the best ready
   agent — reference preferred), or `modelClass`
-  (`thinker` | `implementer` | `simple` | `balanced`). Optional
+  (`thinker` | `ultrathinker` | `implementer` | `reviewer` | `deep-reviewer` |
+  `simple` | `balanced`). Optional
   `fallbackModels` lists failover queries. See
   [`docs/model-binding.md`](docs/model-binding.md). Agents:
   `claude` | `opencode` | `codex` | `cursor` | `antigravity` | `amp` | `kiro`.

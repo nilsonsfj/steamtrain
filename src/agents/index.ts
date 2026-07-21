@@ -100,6 +100,7 @@ export {
   materializeStepBinding,
   needsModelResolution,
   resolveModelBinding,
+  resolveEffortForBinding,
 } from "./model-resolve";
 export {
   clearCodexVariantCacheForTests,

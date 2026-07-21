@@ -113,7 +113,7 @@ Required fields: `prompt`, plus a **model binding** in one of these forms:
 | --- | --- | --- |
 | `agent` + `model` | `"agent": "claude", "model": "claude-opus-4-8"` | Classic pin — runs exactly that pair. |
 | `model` only | `"model": "opus 4.8"` | Picks the best ready agent that provides that model (reference agent preferred). |
-| `modelClass` | `"modelClass": "implementer"` | Picks a family for the role class, then a ready agent. |
+| `modelClass` | `"modelClass": "implementer"` | Picks a family for the role class, then a ready agent. Classes: `thinker`, `ultrathinker`, `implementer`, `reviewer`, `deep-reviewer`, `simple`, `balanced`. |
 | `agent` + `modelClass` | `"agent": "codex", "modelClass": "thinker"` | Resolves the class onto that agent's catalog. |
 
 Optional fields: `fallbackModels` (ordered failover queries tried when the

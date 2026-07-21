@@ -53,11 +53,15 @@ function stepNeedsResolve(
 }
 
 function applyBinding(step: WorkflowStep, primary: ResolvedModelCandidate): WorkflowStep {
-  return {
+  const next = {
     ...step,
     agent: primary.agent,
     model: primary.model,
-  } as WorkflowStep;
+  } as WorkflowStep & { effort?: string };
+  if (primary.effort && !(step as { effort?: string }).effort) {
+    next.effort = primary.effort;
+  }
+  return next;
 }
 
 /**

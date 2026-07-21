@@ -61,16 +61,20 @@ When several agents offer the same family, resolution order is:
 ## Model classes
 
 Role classes let a step say *what the work is like* instead of which weights to
-load:
+load. Some classes also prefer a high reasoning effort when the step does not
+set `effort` explicitly:
 
-| Class | Intent | Default preference (first available wins) |
-| --- | --- | --- |
-| `thinker` | Hard design, diagnosis, deep review | Fable 5, Opus 4.8, Mythos 5, GPT-5.5 Pro, … |
-| `implementer` | Build, refactor, fix | Sonnet 5, Composer 2.5, GPT-5.5, GPT-5.3 Codex, … |
-| `simple` | Triage, format, low-stakes chores | Haiku 4.5, MiMo free, GPT-5.4 Mini, Amp Rush, … |
-| `balanced` | General-purpose default | Sonnet 5, GPT-5.5, GPT-5.4, Composer 2.5, Amp Smart, … |
+| Class | Intent | Default preference (first available wins) | Preferred effort |
+| --- | --- | --- | --- |
+| `thinker` | Hard design, diagnosis, deep analysis | Fable 5, Opus 4.8, Mythos 5, GPT-5.6 Sol, … | (model default) |
+| `ultrathinker` | Maximum-effort frontier reasoning | Fable 5, GPT-5.6 Sol, Kimi K3, Opus 4.8, … | `xhigh` → `high` |
+| `deep-reviewer` | High-stakes code / design review | Opus 4.8, GPT-5.6 Sol, Fable 5, GPT-5.5, … | `high` → `xhigh` |
+| `reviewer` | PR and code review (frontier + value tier) | Opus 4.8, DeepSeek V4 Pro, Qwen 3.7 Max, … | `high` → `medium` |
+| `implementer` | Build, refactor, fix | Sonnet 5, Composer 2.5, GPT-5.5, GPT-5.3 Codex, … | (model default) |
+| `simple` | Triage, format, low-stakes chores | Haiku 4.5, MiMo free, GPT-5.4 Mini, Amp Rush, … | (model default) |
+| `balanced` | General-purpose default | Sonnet 5, GPT-5.5, GPT-5.4, Composer 2.5, Amp Smart, … | (model default) |
 
-Override preferred families in config:
+Override preferred families (and optionally `preferredEfforts`) in config:
 
 ```jsonc
 {
@@ -78,10 +82,13 @@ Override preferred families in config:
     "implementer": {
       "preferred": ["composer-2.5", "claude-sonnet-5", "gpt-5.3-codex"]
     },
+    "ultrathinker": {
+      "preferredEfforts": ["xhigh", "high", "max"]
+    },
     "thinker": {
       "name": "Deep thinker",
       "description": "Reserved for architecture and incident review.",
-      "preferred": ["claude-opus-4.8", "gpt-5.5-pro"]
+      "preferred": ["claude-opus-4.8", "gpt-5.6-sol"]
     }
   }
 }

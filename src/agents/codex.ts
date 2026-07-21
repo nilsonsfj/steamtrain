@@ -14,6 +14,9 @@ const AGENT: AgentId = "codex";
 
 /** Known Codex models (plain slugs; used by `/model` and autocomplete). */
 export const CODEX_MODELS: readonly AgentModel[] = [
+  { id: "gpt-5.6-sol", name: "GPT-5.6 Sol" },
+  { id: "gpt-5.6-terra", name: "GPT-5.6 Terra" },
+  { id: "gpt-5.6-luna", name: "GPT-5.6 Luna" },
   { id: "gpt-5.5", name: "GPT-5.5" },
   { id: "gpt-5.4", name: "GPT-5.4" },
   { id: "gpt-5.4-mini", name: "GPT-5.4 Mini" },

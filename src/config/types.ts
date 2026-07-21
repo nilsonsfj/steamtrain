@@ -24,9 +24,10 @@ export interface SteamtrainConfig {
   /** Optional LLM API endpoint instances for `llm` steps. Omitted means the built-in providers are enabled. */
   apis?: ApiInstanceConfig[];
   /**
-   * Optional overrides for built-in model classes (`thinker`, `implementer`,
-   * `simple`, `balanced`). Workflows may pin `modelClass` instead of a concrete
-   * model; resolution walks each class's preferred family list.
+   * Optional overrides for built-in model classes (`thinker`, `ultrathinker`,
+   * `implementer`, `reviewer`, `deep-reviewer`, `simple`, `balanced`).
+   * Workflows may pin `modelClass` instead of a concrete model; resolution
+   * walks each class's preferred family list.
    */
   modelClasses?: ModelClassesConfig;
   /** Per-agent subprocess wall-clock limit in seconds (workspace dispatches and workflow steps). */
@@ -53,6 +54,8 @@ export interface SteamtrainConfig {
 export interface ModelClassConfigOverride {
   /** Replace the preferred family id list for this class. */
   preferred?: string[];
+  /** Replace preferred effort ladder for this class. */
+  preferredEfforts?: string[];
   /** Optional display name override. */
   name?: string;
   /** Optional description override. */
@@ -61,7 +64,16 @@ export interface ModelClassConfigOverride {
 
 /** Config-layer overrides for built-in model classes. */
 export type ModelClassesConfig = Partial<
-  Record<"thinker" | "implementer" | "simple" | "balanced", ModelClassConfigOverride>
+  Record<
+    | "thinker"
+    | "ultrathinker"
+    | "implementer"
+    | "reviewer"
+    | "deep-reviewer"
+    | "simple"
+    | "balanced",
+    ModelClassConfigOverride
+  >
 >;
 
 export interface AgentInstanceConfig {
@@ -189,6 +201,7 @@ const agentInstanceSchema = z
 const modelClassOverrideSchema = z
   .object({
     preferred: z.array(z.string().min(1)).min(1).optional(),
+    preferredEfforts: z.array(z.string().min(1)).min(1).optional(),
     name: nonEmptyString.optional(),
     description: nonEmptyString.optional(),
   })
@@ -197,7 +210,10 @@ const modelClassOverrideSchema = z
 const modelClassesSchema = z
   .object({
     thinker: modelClassOverrideSchema.optional(),
+    ultrathinker: modelClassOverrideSchema.optional(),
     implementer: modelClassOverrideSchema.optional(),
+    reviewer: modelClassOverrideSchema.optional(),
+    "deep-reviewer": modelClassOverrideSchema.optional(),
     simple: modelClassOverrideSchema.optional(),
     balanced: modelClassOverrideSchema.optional(),
   })

@@ -36,9 +36,9 @@ way, under `apis` — see [API configuration](api-configuration.md).
 
 ## Model classes
 
-Workflows may bind steps with `modelClass` (`thinker`, `implementer`, `simple`,
-`balanced`) instead of a concrete model. Override the preferred families in
-config:
+Workflows may bind steps with `modelClass` (`thinker`, `ultrathinker`,
+`implementer`, `reviewer`, `deep-reviewer`, `simple`, `balanced`) instead of a
+concrete model. Override the preferred families in config:
 
 ```json
 {

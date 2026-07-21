@@ -77,10 +77,18 @@ export interface AgentRunFields {
    */
   model?: string;
   /**
-   * Role-based model class (`thinker` | `implementer` | `simple` | `balanced`).
+   * Role-based model class (`thinker` | `ultrathinker` | `implementer` |
+   * `reviewer` | `deep-reviewer` | `simple` | `balanced`).
    * Resolved to a concrete family then to a ready agent+model at run time.
    */
-  modelClass?: "thinker" | "implementer" | "simple" | "balanced";
+  modelClass?:
+    | "thinker"
+    | "ultrathinker"
+    | "implementer"
+    | "reviewer"
+    | "deep-reviewer"
+    | "simple"
+    | "balanced";
   /**
    * Ordered failover model queries tried when the primary binding's agent
    * becomes unavailable (or when a transient provider failure triggers
@@ -221,7 +229,14 @@ export interface DistributorStep extends WorkflowStepBase {
    */
   agent?: AgentInstanceId;
   model?: string;
-  modelClass?: "thinker" | "implementer" | "simple" | "balanced";
+  modelClass?:
+    | "thinker"
+    | "ultrathinker"
+    | "implementer"
+    | "reviewer"
+    | "deep-reviewer"
+    | "simple"
+    | "balanced";
   fallbackModels?: string[];
   prompt?: string;
   cwd?: string;
@@ -249,7 +264,14 @@ export interface ConsolidatorStep extends WorkflowStepBase {
    */
   agent?: AgentInstanceId;
   model?: string;
-  modelClass?: "thinker" | "implementer" | "simple" | "balanced";
+  modelClass?:
+    | "thinker"
+    | "ultrathinker"
+    | "implementer"
+    | "reviewer"
+    | "deep-reviewer"
+    | "simple"
+    | "balanced";
   fallbackModels?: string[];
   prompt?: string;
   cwd?: string;
@@ -319,7 +341,14 @@ export interface MergeStep extends WorkflowStepBase {
   /** Conflict-resolution agent (`onConflict: "agent"`). */
   agent?: AgentInstanceId;
   model?: string;
-  modelClass?: "thinker" | "implementer" | "simple" | "balanced";
+  modelClass?:
+    | "thinker"
+    | "ultrathinker"
+    | "implementer"
+    | "reviewer"
+    | "deep-reviewer"
+    | "simple"
+    | "balanced";
   fallbackModels?: string[];
   effort?: string;
   /** Extra guidance appended to the built-in conflict-resolution prompt. */
@@ -894,7 +923,17 @@ const outputJsonSchema = z.record(z.unknown());
 const agentRunShape = {
   agent: agentId.optional(),
   model: z.string().min(1).optional(),
-  modelClass: z.enum(["thinker", "implementer", "simple", "balanced"]).optional(),
+  modelClass: z
+    .enum([
+      "thinker",
+      "ultrathinker",
+      "implementer",
+      "reviewer",
+      "deep-reviewer",
+      "simple",
+      "balanced",
+    ])
+    .optional(),
   fallbackModels: z.array(z.string().min(1)).min(1).optional(),
   prompt: z.string().min(1),
   cwd: z.string().min(1).optional(),
@@ -909,7 +948,17 @@ const agentRunShape = {
 const optionalAgentRunShape = {
   agent: agentId.optional(),
   model: z.string().min(1).optional(),
-  modelClass: z.enum(["thinker", "implementer", "simple", "balanced"]).optional(),
+  modelClass: z
+    .enum([
+      "thinker",
+      "ultrathinker",
+      "implementer",
+      "reviewer",
+      "deep-reviewer",
+      "simple",
+      "balanced",
+    ])
+    .optional(),
   fallbackModels: z.array(z.string().min(1)).min(1).optional(),
   prompt: z.string().min(1).optional(),
   cwd: z.string().min(1).optional(),
@@ -1100,7 +1149,17 @@ const workflowMergeStepSchema = z
     prBody: z.string().min(1).optional(),
     agent: agentId.optional(),
     model: z.string().min(1).optional(),
-    modelClass: z.enum(["thinker", "implementer", "simple", "balanced"]).optional(),
+    modelClass: z
+      .enum([
+        "thinker",
+        "ultrathinker",
+        "implementer",
+        "reviewer",
+        "deep-reviewer",
+        "simple",
+        "balanced",
+      ])
+      .optional(),
     fallbackModels: z.array(z.string().min(1)).min(1).optional(),
     effort: z.string().min(1).optional(),
     prompt: z.string().min(1).optional(),

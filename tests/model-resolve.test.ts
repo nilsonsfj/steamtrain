@@ -92,9 +92,63 @@ describe("resolveModelBinding", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.primary.modelClass).toBe("thinker");
-    expect(["claude-fable-5", "claude-opus-4.8", "claude-mythos-5"]).toContain(
+    expect(["claude-fable-5", "claude-opus-4.8", "claude-mythos-5", "gpt-5.6-sol"]).toContain(
       result.primary.familyId,
     );
+  });
+
+  it("resolves modelClass 'ultrathinker' with high/xhigh effort", () => {
+    const result = resolveModelBinding(
+      { modelClass: "ultrathinker" },
+      { config: DEFAULT_CONFIG, isReady: allReady },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.primary.modelClass).toBe("ultrathinker");
+    expect(["claude-fable-5", "gpt-5.6-sol", "kimi-k3", "claude-opus-4.8"]).toContain(
+      result.primary.familyId,
+    );
+    expect(result.primary.effort).toBeTruthy();
+    expect(["xhigh", "high"]).toContain(result.primary.effort);
+  });
+
+  it("resolves modelClass 'deep-reviewer' preferring Opus / Sol with high effort", () => {
+    const result = resolveModelBinding(
+      { modelClass: "deep-reviewer" },
+      { config: DEFAULT_CONFIG, isReady: allReady },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.primary.modelClass).toBe("deep-reviewer");
+    expect(["claude-opus-4.8", "gpt-5.6-sol", "claude-fable-5"]).toContain(result.primary.familyId);
+    expect(result.primary.effort).toBe("high");
+  });
+
+  it("resolves modelClass 'reviewer' onto a review-oriented family", () => {
+    const result = resolveModelBinding(
+      { modelClass: "reviewer" },
+      { config: DEFAULT_CONFIG, isReady: allReady },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.primary.modelClass).toBe("reviewer");
+    expect([
+      "claude-opus-4.8",
+      "deepseek-v4-pro",
+      "qwen-3.7-max",
+      "gpt-5.6-sol",
+      "codex-auto-review",
+    ]).toContain(result.primary.familyId);
+  });
+
+  it("honors explicit effort over class preferredEfforts", () => {
+    const result = resolveModelBinding(
+      { modelClass: "ultrathinker", effort: "low" },
+      { config: DEFAULT_CONFIG, isReady: allReady },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.primary.effort).toBe("low");
   });
 
   it("resolves modelClass 'simple' preferring a cheap/fast family", () => {
@@ -105,6 +159,14 @@ describe("resolveModelBinding", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.primary.modelClass).toBe("simple");
+  });
+
+  it("matches GPT-5.6 Sol and Kimi K3 family aliases", () => {
+    clearModelFamilyCacheForTests();
+    expect(findModelFamily("gpt-5.6-sol")?.id).toBe("gpt-5.6-sol");
+    expect(findModelFamily("kimi k3")?.id).toBe("kimi-k3");
+    expect(findModelFamily("deepseek pro")?.id).toBe("deepseek-v4-pro");
+    expect(findModelFamily("qwen 3.7 max")?.id).toBe("qwen-3.7-max");
   });
 
   it("honors an explicit agent pin when translating a family alias", () => {
@@ -180,6 +242,22 @@ describe("workflow schema: model-only and modelClass", () => {
     expect(valid.ok).toBe(true);
   });
 
+  it("accepts ultrathinker / reviewer / deep-reviewer classes", () => {
+    for (const modelClass of ["ultrathinker", "reviewer", "deep-reviewer"] as const) {
+      const spec: WorkflowSpec = {
+        name: `class-${modelClass}`,
+        phases: [
+          {
+            id: "p1",
+            title: "P1",
+            steps: [{ id: "w", modelClass, prompt: "review carefully" }],
+          },
+        ],
+      };
+      expect(validateWorkflow(spec).ok).toBe(true);
+    }
+  });
+
   it("rejects a worker with only agent (no model or class)", () => {
     const spec = {
       name: "agent-only",
@@ -248,6 +326,33 @@ describe("resolveWorkflowBindings", () => {
     expect(b.model).toBeTruthy();
     expect(c).toEqual({ agent: "claude", model: "claude-sonnet-5", prompt: "c", id: "c" });
     expect(result.resolutions.map((r) => r.stepId).sort()).toEqual(["a", "b"]);
+  });
+
+  it("applies ultrathinker preferred effort onto the materialized step", () => {
+    const spec: WorkflowSpec = {
+      name: "ultra",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "w", modelClass: "ultrathinker", prompt: "think hard" }],
+        },
+      ],
+    };
+    const result = resolveWorkflowBindings(spec, {
+      config: DEFAULT_CONFIG,
+      isReady: () => true,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const step = result.spec.phases[0]!.steps[0] as {
+      agent: string;
+      model: string;
+      effort?: string;
+    };
+    expect(step.agent).toBeTruthy();
+    expect(step.model).toBeTruthy();
+    expect(["xhigh", "high"]).toContain(step.effort);
   });
 
   it("remaps an unhealthy pinned agent onto a same-family offering", () => {

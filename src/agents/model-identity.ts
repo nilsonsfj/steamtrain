@@ -9,13 +9,23 @@ import { modelsForProvider } from "./models";
 export type ModelFamilyId = string;
 
 /** Built-in role classes workflows may pin instead of a concrete model. */
-export type ModelClassId = "thinker" | "implementer" | "simple" | "balanced";
+export type ModelClassId =
+  | "thinker"
+  | "implementer"
+  | "simple"
+  | "balanced"
+  | "ultrathinker"
+  | "reviewer"
+  | "deep-reviewer";
 
 export const MODEL_CLASS_IDS: readonly ModelClassId[] = [
   "thinker",
   "implementer",
   "simple",
   "balanced",
+  "ultrathinker",
+  "reviewer",
+  "deep-reviewer",
 ] as const;
 
 export function isModelClassId(value: string): value is ModelClassId {
@@ -92,7 +102,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     aliases: ["fable", "fable 5", "claude fable 5", "claude-fable-5"],
     reference: { provider: "claude", modelId: "claude-fable-5" },
     also: { claude: ["fable", "fable[1m]", "claude-fable-5[1m]"] },
-    classes: ["thinker", "implementer"],
+    classes: ["ultrathinker", "thinker", "deep-reviewer", "implementer"],
   },
   {
     id: "claude-opus-4.8",
@@ -113,7 +123,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
       kiro: ["opus", "claude-opus-4-8"],
       cursor: ["claude-opus-4-8-thinking-high"],
     },
-    classes: ["thinker"],
+    classes: ["deep-reviewer", "reviewer", "thinker"],
   },
   {
     id: "claude-opus-4.7",
@@ -218,6 +228,33 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
 
   // ── GPT / Codex ──────────────────────────────────────────────────────
   {
+    id: "gpt-5.6-sol",
+    name: "GPT-5.6 Sol",
+    aliases: ["gpt 5.6 sol", "gpt-5.6-sol", "gpt5.6sol", "gpt-5.6"],
+    reference: { provider: "codex", modelId: "gpt-5.6-sol" },
+    also: {
+      opencode: ["opencode/gpt-5.6-sol"],
+      cursor: ["gpt-5.6-sol"],
+    },
+    classes: ["ultrathinker", "deep-reviewer", "thinker", "reviewer"],
+  },
+  {
+    id: "gpt-5.6-terra",
+    name: "GPT-5.6 Terra",
+    aliases: ["gpt 5.6 terra", "gpt-5.6-terra", "gpt5.6terra"],
+    reference: { provider: "codex", modelId: "gpt-5.6-terra" },
+    also: { opencode: ["opencode/gpt-5.6-terra"] },
+    classes: ["implementer", "balanced", "reviewer"],
+  },
+  {
+    id: "gpt-5.6-luna",
+    name: "GPT-5.6 Luna",
+    aliases: ["gpt 5.6 luna", "gpt-5.6-luna", "gpt5.6luna"],
+    reference: { provider: "codex", modelId: "gpt-5.6-luna" },
+    also: { opencode: ["opencode/gpt-5.6-luna"] },
+    classes: ["thinker", "balanced"],
+  },
+  {
     id: "gpt-5.5",
     name: "GPT-5.5",
     aliases: ["gpt 5.5", "gpt-5.5", "gpt5.5"],
@@ -226,7 +263,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
       opencode: ["opencode/gpt-5.5"],
       cursor: ["gpt-5.5-high"],
     },
-    classes: ["thinker", "implementer", "balanced"],
+    classes: ["thinker", "implementer", "balanced", "deep-reviewer"],
   },
   {
     id: "gpt-5.5-pro",
@@ -414,6 +451,52 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     aliases: ["amp rush", "rush"],
     reference: { provider: "amp", modelId: "rush" },
     classes: ["simple"],
+  },
+
+  // ── Kimi / DeepSeek / Qwen ───────────────────────────────────────────
+  {
+    id: "kimi-k3",
+    name: "Kimi K3",
+    aliases: ["kimi k3", "kimi-k3", "kimik3"],
+    reference: { provider: "opencode", modelId: "opencode-go/kimi-k3" },
+    also: { opencode: ["opencode/kimi-k3"] },
+    classes: ["ultrathinker", "thinker"],
+  },
+  {
+    id: "kimi-k2.7-code",
+    name: "Kimi K2.7 Code",
+    aliases: ["kimi k2.7 code", "kimi-k2.7-code", "kimi-k2.7"],
+    reference: { provider: "opencode", modelId: "opencode/kimi-k2.7-code" },
+    also: { opencode: ["opencode-go/kimi-k2.7-code"] },
+    classes: ["implementer", "reviewer"],
+  },
+  {
+    id: "deepseek-v4-pro",
+    name: "DeepSeek V4 Pro",
+    aliases: [
+      "deepseek pro",
+      "deepseek v4 pro",
+      "deepseek-v4-pro",
+      "opencode/deepseek-v4-pro",
+      "opencode-go/deepseek-v4-pro",
+    ],
+    reference: { provider: "opencode", modelId: "opencode/deepseek-v4-pro" },
+    also: { opencode: ["opencode-go/deepseek-v4-pro"] },
+    classes: ["reviewer", "implementer", "balanced"],
+  },
+  {
+    id: "qwen-3.7-max",
+    name: "Qwen 3.7 Max",
+    aliases: ["qwen 3.7 max", "qwen3.7-max", "qwen-3.7-max", "opencode-go/qwen3.7-max"],
+    reference: { provider: "opencode", modelId: "opencode-go/qwen3.7-max" },
+    classes: ["reviewer", "implementer", "balanced"],
+  },
+  {
+    id: "codex-auto-review",
+    name: "Codex Auto Review",
+    aliases: ["codex auto review", "codex-auto-review", "auto-review"],
+    reference: { provider: "codex", modelId: "codex-auto-review" },
+    classes: ["reviewer"],
   },
 
   // ── OpenCode free / specialty ────────────────────────────────────────

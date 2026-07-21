@@ -3741,7 +3741,7 @@
     };
     card.appendChild(h("div", { class: "row2" },
       field("Agent", agentSel), field("Model", modelSel), effortField));
-    card.appendChild(field("Model class", classSel, "Optional role class (thinker / implementer / simple / balanced). Leave empty to pin a concrete model."));
+    card.appendChild(field("Model class", classSel, "Optional role class (thinker / ultrathinker / implementer / reviewer / deep-reviewer / simple / balanced). Leave empty to pin a concrete model."));
     card.appendChild(bindHint);
     card.appendChild(field("Step timeout (min)", stepTimeoutInput, "Per-agent subprocess limit for this step."));
     card.appendChild(field("Prompt", promptTa));

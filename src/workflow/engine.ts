@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join as joinPath, resolve as resolvePath } from "node:path";
-import { resolveAgentInstance } from "../agents";
+import { effortForModelChange, resolveAgentInstance } from "../agents";
 import type { AgentAdapter } from "../agents";
 import type { ResolvedModelCandidate } from "../agents/model-resolve";
 import { llmStepApiId, resolveLlmStepApi } from "../apis/resolve";
@@ -1914,7 +1914,7 @@ async function executeAgentStep(
           ...activeStep,
           agent: next.agent,
           model: next.model,
-          effort: undefined,
+          effort: next.effort ?? effortForModelChange(next.agent, next.model, activeStep.effort),
         };
         reason = `${reason} · failing over to ${next.agent}/${next.model}`;
       }

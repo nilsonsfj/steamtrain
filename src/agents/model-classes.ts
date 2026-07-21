@@ -19,6 +19,12 @@ export interface ModelClassDefinition {
    * picks the first family that has a ready agent offering.
    */
   preferred: readonly ModelFamilyId[];
+  /**
+   * Effort levels preferred for this class, tried in order against the
+   * resolved agent+model's supported efforts. Applied only when the step
+   * does not set `effort` explicitly.
+   */
+  preferredEfforts?: readonly string[];
 }
 
 const BUILTIN_MODEL_CLASSES: readonly ModelClassDefinition[] = [
@@ -30,6 +36,7 @@ const BUILTIN_MODEL_CLASSES: readonly ModelClassDefinition[] = [
       "claude-fable-5",
       "claude-opus-4.8",
       "claude-mythos-5",
+      "gpt-5.6-sol",
       "gpt-5.5-pro",
       "gpt-5.5",
       "claude-opus-4.7",
@@ -38,6 +45,55 @@ const BUILTIN_MODEL_CLASSES: readonly ModelClassDefinition[] = [
       "amp-deep",
       "claude-opus-4.6",
     ],
+  },
+  {
+    id: "ultrathinker",
+    name: "Ultrathinker",
+    description:
+      "Maximum-effort frontier reasoning (Fable, GPT-5.6 Sol, Kimi K3) for the hardest problems.",
+    preferred: [
+      "claude-fable-5",
+      "gpt-5.6-sol",
+      "kimi-k3",
+      "claude-opus-4.8",
+      "gpt-5.5-pro",
+      "gpt-5.5",
+      "claude-mythos-5",
+      "gemini-3.1-pro",
+    ],
+    preferredEfforts: ["xhigh", "high"],
+  },
+  {
+    id: "deep-reviewer",
+    name: "Deep reviewer",
+    description:
+      "High-effort code and design review with frontier models (Opus 4.8, GPT-5.6 Sol, Fable).",
+    preferred: [
+      "claude-opus-4.8",
+      "gpt-5.6-sol",
+      "claude-fable-5",
+      "gpt-5.5",
+      "gemini-3.1-pro",
+      "claude-opus-4.7",
+    ],
+    preferredEfforts: ["high", "xhigh"],
+  },
+  {
+    id: "reviewer",
+    name: "Reviewer",
+    description:
+      "PR and code review workhorses spanning frontier and cost-efficient options (Opus, DeepSeek Pro, Qwen 3.7 Max).",
+    preferred: [
+      "claude-opus-4.8",
+      "deepseek-v4-pro",
+      "qwen-3.7-max",
+      "gpt-5.6-sol",
+      "codex-auto-review",
+      "claude-sonnet-4.6",
+      "kimi-k2.7-code",
+      "gpt-5.5",
+    ],
+    preferredEfforts: ["high", "medium"],
   },
   {
     id: "implementer",
@@ -92,6 +148,8 @@ const BUILTIN_MODEL_CLASSES: readonly ModelClassDefinition[] = [
 export interface ModelClassConfigOverride {
   /** Replace the preferred family list for a built-in class. */
   preferred?: ModelFamilyId[];
+  /** Replace preferred effort ladder for a built-in class. */
+  preferredEfforts?: string[];
   /** Optional display name override. */
   name?: string;
   /** Optional description override. */
@@ -112,6 +170,10 @@ function applyOverride(
     description: override.description ?? base.description,
     preferred:
       override.preferred && override.preferred.length > 0 ? override.preferred : base.preferred,
+    preferredEfforts:
+      override.preferredEfforts && override.preferredEfforts.length > 0
+        ? override.preferredEfforts
+        : base.preferredEfforts,
   };
 }
 

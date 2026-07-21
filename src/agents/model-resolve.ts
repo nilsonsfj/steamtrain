@@ -2,6 +2,7 @@ import type { SteamtrainConfig } from "../config/types";
 import type { AgentInstanceId, AgentProviderId } from "../types/events";
 import { resolveAgentInstance, resolveAgentInstances } from "./config";
 import {
+  MODEL_CLASS_IDS,
   type ModelClassId,
   candidateFamiliesForClass,
   isModelClassId,
@@ -18,7 +19,7 @@ import {
   nativeModelForProvider,
   normalizeModelQuery,
 } from "./model-identity";
-import { modelIdsForAgent, modelNameForAgent } from "./models";
+import { effortsForModel, modelIdsForAgent, modelNameForAgent } from "./models";
 
 /** How a step asked to be bound before resolution. */
 export type ModelBindingRequest = {
@@ -27,6 +28,8 @@ export type ModelBindingRequest = {
   modelClass?: string;
   /** Extra model queries to try if the primary binding cannot run. */
   fallbackModels?: string[];
+  /** Explicit effort from the step; wins over class preferredEfforts. */
+  effort?: string;
 };
 
 /** One concrete agent+model candidate, ready to spawn. */
@@ -41,6 +44,8 @@ export interface ResolvedModelCandidate {
   familyName?: string;
   /** Matched model class when the request used one. */
   modelClass?: ModelClassId;
+  /** Effort to apply (explicit step effort or class preferredEfforts). */
+  effort?: string;
   /** True when this candidate uses the family's reference agent. */
   reference: boolean;
   /** Why this candidate is in the chain. */
@@ -134,6 +139,7 @@ function makeCandidate(opts: {
   config?: SteamtrainConfig;
   family?: ModelFamily;
   modelClass?: ModelClassId;
+  effort?: string;
   reference: boolean;
   reason: ResolvedModelCandidate["reason"];
 }): ResolvedModelCandidate {
@@ -145,9 +151,49 @@ function makeCandidate(opts: {
     familyId: opts.family?.id,
     familyName: opts.family?.name,
     modelClass: opts.modelClass,
+    effort: opts.effort,
     reference: opts.reference,
     reason: opts.reason,
   };
+}
+
+/**
+ * Pick the best effort for a resolved binding: explicit step effort wins;
+ * otherwise walk the class preferredEfforts ladder against supported levels.
+ */
+export function resolveEffortForBinding(opts: {
+  agent: AgentInstanceId;
+  model: string;
+  modelClass?: ModelClassId;
+  explicitEffort?: string;
+  config?: SteamtrainConfig;
+}): string | undefined {
+  if (opts.explicitEffort) return opts.explicitEffort;
+  if (!opts.modelClass) return undefined;
+  const def = modelClassById(opts.modelClass, opts.config);
+  const preferred = def?.preferredEfforts;
+  if (!preferred || preferred.length === 0) return undefined;
+  const supported = effortsForModel(opts.agent, opts.model, opts.config);
+  for (const effort of preferred) {
+    if (supported.includes(effort)) return effort;
+  }
+  return undefined;
+}
+
+function withResolvedEffort(
+  candidate: ResolvedModelCandidate,
+  request: ModelBindingRequest,
+  config?: SteamtrainConfig,
+): ResolvedModelCandidate {
+  const effort = resolveEffortForBinding({
+    agent: candidate.agent,
+    model: candidate.model,
+    modelClass: candidate.modelClass ?? (request.modelClass as ModelClassId | undefined),
+    explicitEffort: request.effort,
+    config,
+  });
+  if (!effort) return candidate;
+  return { ...candidate, effort };
 }
 
 function offeringsToCandidates(
@@ -510,20 +556,21 @@ export function resolveModelBinding(
     }
   }
 
-  const primary = ready[0]!;
+  const primary = withResolvedEffort(ready[0]!, request, config);
+  const withEffort = ready.map((c) => withResolvedEffort(c, request, config));
   return {
     ok: true,
     primary,
-    candidates: ready,
+    candidates: withEffort,
     summary: formatSummary(primary, request),
   };
 }
 
-const MODEL_CLASS_HINT = MODEL_CLASS_IDS_JOINED();
-
 function MODEL_CLASS_IDS_JOINED(): string {
-  return ["thinker", "implementer", "simple", "balanced"].join(", ");
+  return MODEL_CLASS_IDS.join(", ");
 }
+
+const MODEL_CLASS_HINT = MODEL_CLASS_IDS_JOINED();
 
 /**
  * Whether a step request needs runtime resolution (missing agent, uses a
@@ -549,12 +596,14 @@ export function bindingRequestFromStep(step: {
   model?: string;
   modelClass?: string;
   fallbackModels?: string[];
+  effort?: string;
 }): ModelBindingRequest {
   return {
     agent: step.agent,
     model: step.model,
     modelClass: step.modelClass,
     fallbackModels: step.fallbackModels,
+    effort: step.effort,
   };
 }
 
@@ -575,13 +624,17 @@ export function materializeStepBinding<T extends ModelBindingRequest>(
   | { ok: false; error: string } {
   const resolved = resolveModelBinding(bindingRequestFromStep(step), options);
   if (!resolved.ok) return resolved;
+  const next = {
+    ...step,
+    agent: resolved.primary.agent,
+    model: resolved.primary.model,
+  } as T & { agent: AgentInstanceId; model: string; effort?: string };
+  if (resolved.primary.effort && !step.effort) {
+    next.effort = resolved.primary.effort;
+  }
   return {
     ok: true,
-    step: {
-      ...step,
-      agent: resolved.primary.agent,
-      model: resolved.primary.model,
-    },
+    step: next,
     summary: resolved.summary,
     candidates: resolved.candidates,
   };
@@ -596,6 +649,7 @@ export function describeModelClass(id: string, config?: SteamtrainConfig) {
     name: def.name,
     description: def.description,
     preferred: [...def.preferred],
+    preferredEfforts: def.preferredEfforts ? [...def.preferredEfforts] : [],
     families: candidateFamiliesForClass(def.id, config).map((family) => ({
       id: family.id,
       name: family.name,
@@ -610,9 +664,9 @@ export function describeModelClass(id: string, config?: SteamtrainConfig) {
 
 /** List all model classes for API / UI. */
 export function listModelClasses(config?: SteamtrainConfig) {
-  return (["thinker", "implementer", "simple", "balanced"] as const)
-    .map((id) => describeModelClass(id, config))
-    .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
+  return MODEL_CLASS_IDS.map((id) => describeModelClass(id, config)).filter(
+    (entry): entry is NonNullable<typeof entry> => entry !== undefined,
+  );
 }
 
 /** List families (compact) for API / UI meta. */
