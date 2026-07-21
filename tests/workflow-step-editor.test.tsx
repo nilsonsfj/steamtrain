@@ -373,7 +373,7 @@ describe("bulk retarget helpers", () => {
       { stepId: "b", kindLabel: "worker", agent: "claude", model: "haiku", effort: undefined },
     ];
     const patches = buildBulkEffortPatches(steps, "high", CONFIG);
-    // sonnet typically supports effort; haiku may not — only include supported steps.
+    // sonnet typically supports effort; haiku may not - only include supported steps.
     for (const [id, patch] of Object.entries(patches)) {
       expect(patch).toEqual({ effort: "high" });
       expect(id).toBe("a");

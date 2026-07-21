@@ -58,22 +58,24 @@ export interface ModelFamily {
  * toward comparable tokens.
  */
 export function normalizeModelQuery(raw: string): string {
-  return raw
-    .trim()
-    .toLowerCase()
-    // Strip Claude context-window suffix (`claude-opus-4-8[1m]`) before the
-    // general bracket scrub below, which would otherwise leave a stray `1m`.
-    .replace(/\[1m\]$/i, "")
-    .replace(/\([^)]*\)/g, " ")
-    .replace(/thinking[-_]?high/g, " ")
-    .replace(/[\[\]]/g, " ")
-    .replace(/[_/·]+/g, "-")
-    .replace(/\.+/g, ".")
-    .replace(/\s+/g, " ")
-    .replace(/\s*-\s*/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .trim();
+  return (
+    raw
+      .trim()
+      .toLowerCase()
+      // Strip Claude context-window suffix (`claude-opus-4-8[1m]`) before the
+      // general bracket scrub below, which would otherwise leave a stray `1m`.
+      .replace(/\[1m\]$/i, "")
+      .replace(/\([^)]*\)/g, " ")
+      .replace(/thinking[-_]?high/g, " ")
+      .replace(/[\[\]]/g, " ")
+      .replace(/[_/·]+/g, "-")
+      .replace(/\.+/g, ".")
+      .replace(/\s+/g, " ")
+      .replace(/\s*-\s*/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .trim()
+  );
 }
 
 /** Compact form with spaces removed (`opus 4.8` → `opus4.8`). */
