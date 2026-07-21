@@ -51,7 +51,7 @@ export function renderIndex(revs: PageAssetRevisions): string {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="color-scheme" content="dark" />
-<meta name="theme-color" content="#0a0d12" />
+<meta name="theme-color" content="#080b10" />
 <title>steamtrain</title>
 <link rel="icon" href="data:image/svg+xml,${encodeURIComponent(FAVICON_SVG)}" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -81,19 +81,26 @@ export function renderIndex(revs: PageAssetRevisions): string {
   </aside>
   <section class="work">
     <div class="runbar">
-      <div class="title" id="wfTitle">Select a workflow</div>
-      <div class="sub" id="wfSub">Pick a workflow on the left to view its pipeline and run it.</div>
-      <div class="srcline" id="srcLine" style="display:none"></div>
-      <div class="wfactions" id="wfActions" style="display:none">
-        <button class="btn small" id="editBtn">&#9998; Configure</button>
-        <button class="btn small" id="cloneBtn">&#10697; Clone</button>
-        <button class="btn small warn" id="flushBtn" style="display:none">&#128190; Flush to disk</button>
-        <button class="btn small danger" id="deleteBtn" style="display:none">&#128465; Delete</button>
+      <div class="runbar-head">
+        <div class="runbar-copy">
+          <div class="title" id="wfTitle">Select a workflow</div>
+          <div class="sub" id="wfSub">Pick a workflow on the left to view its pipeline and run it.</div>
+          <div class="srcline" id="srcLine" style="display:none"></div>
+        </div>
+        <div class="wfactions" id="wfActions" style="display:none">
+          <button class="btn small" id="editBtn">&#9998; Configure</button>
+          <button class="btn small" id="cloneBtn">&#10697; Clone</button>
+          <button class="btn small warn" id="flushBtn" style="display:none">&#128190; Flush to disk</button>
+          <button class="btn small danger" id="deleteBtn" style="display:none">&#128465; Delete</button>
+        </div>
       </div>
       <div class="reroute-row" id="blockedRow" style="display:none"></div>
       <div class="row" id="runRow" style="display:none">
-        <textarea id="input" placeholder="Describe the input for this run... (&#8593; recalls previous inputs)"></textarea>
-        <div id="paramsForm" class="params-form" style="display:none"></div>
+        <div class="run-compose">
+          <label class="run-compose-label" for="input">Describe</label>
+          <textarea id="input" placeholder="What should this run do? (&#8593; recalls previous inputs)"></textarea>
+          <div id="paramsForm" class="params-form" style="display:none"></div>
+        </div>
         <div class="btnstack">
           <button class="btn" id="planBtn">Plan</button>
           <button class="btn primary" id="runBtn">Run &#9654;</button>
