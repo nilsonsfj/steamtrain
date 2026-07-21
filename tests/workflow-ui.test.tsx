@@ -94,9 +94,74 @@ describe("workflow UI helpers", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("⏱ 10.0s"); // 11_000 - 1_000 on the running step
+    expect(frame).toContain("10.0s"); // 11_000 - 1_000 on the running step
+    expect(frame).not.toContain("⏱"); // double-width glyph would wrap the row
     expect(frame).toContain("⎇ step-3"); // worktree dir on the step row
     expect(frame).toContain("steamtrain/run/step-3"); // branch in the detail panel
+  });
+
+  it("collapses long pending fan-out runs and keeps the frame within height", () => {
+    const parent: StepState = {
+      stepId: "babysit",
+      blockKind: "distributor",
+      status: "done",
+      text: "",
+      result: { stepId: "babysit", ok: true, output: "ok", durationMs: 100 },
+      cached: false,
+    };
+    const children: StepState[] = Array.from({ length: 29 }, (_, i) => ({
+      stepId: `babysit[${i}]`,
+      parentStepId: "babysit",
+      blockKind: "worker",
+      agent: "claude",
+      model: "opus",
+      status: i < 5 ? "running" : "pending",
+      text: i < 5 ? "streaming…" : "",
+      startedAt: i < 5 ? 1_000 : undefined,
+      activity: i < 5 ? "bash · working" : undefined,
+      cached: false,
+    }));
+    const steps = [parent, ...children];
+    const state: WorkflowState = {
+      name: "babysit-all-prs",
+      startedAt: 0,
+      phases: [
+        {
+          phaseId: "phase",
+          title: "Babysit each PR",
+          index: 0,
+          stepCount: steps.length,
+          steps,
+          done: false,
+          ok: true,
+        },
+      ],
+      results: [],
+      started: true,
+      done: false,
+      ok: true,
+    };
+    const height = 36;
+    const { lastFrame } = render(
+      <WorkflowView
+        state={state}
+        width={120}
+        height={height}
+        selectedIndex={1}
+        elapsedMs={31_800}
+        now={32_800}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    const lines = frame.split("\n");
+    expect(lines.length).toBeLessThanOrEqual(height);
+    expect(frame).toContain("pending");
+    // Individual mid-fan-out pending ids should be collapsed away.
+    expect(frame).not.toContain("babysit[20]");
+    expect(frame).toMatch(/\d+ pending/);
+    // Detail panel stays present (not pushed off-screen by the tree).
+    expect(frame).toContain("babysit[0]");
+    expect(frame).toMatch(/──/);
   });
 
   it("scrolls the live drill-in output and reports the window position", () => {
@@ -247,7 +312,7 @@ describe("workflow UI helpers", () => {
     expect(inputFrame.split("\n").length).toBeLessThanOrEqual(6);
   });
 
-  it("returns unused detail-preview rows to the workflow tree", () => {
+  it("keeps the step tree capped so detail retains space on tall frames", () => {
     const state = workflowStateWithSteps(12);
     for (const step of state.phases[0]!.steps) {
       step.status = "pending";
@@ -258,8 +323,13 @@ describe("workflow UI helpers", () => {
       <WorkflowView state={state} width={100} height={22} selectedIndex={0} elapsedMs={500} />,
     );
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("step-11");
-    expect(frame).not.toContain("later row");
+    const lines = frame.split("\n");
+    expect(lines.length).toBeLessThanOrEqual(22);
+    // Tree is windowed rather than allowed to consume the whole frame.
+    expect(frame).toContain("later row");
+    expect(frame).toContain("step-0");
+    // Detail panel remains visible beneath the windowed tree.
+    expect(frame).toMatch(/──/);
   });
 
   it("compacts simultaneous pause and budget notices without clipping the header", () => {

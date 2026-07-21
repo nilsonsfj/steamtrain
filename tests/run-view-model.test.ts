@@ -146,9 +146,10 @@ describe("planViewLayout", () => {
       detailFixedLines: 2,
       desiredPreviewLines: 6,
     });
-    // 30 - 2 border - 3 fixed - 2 detail = 23 available; 6 preview → 17 rows.
-    expect(layout.previewLines).toBe(6);
-    expect(layout.listBudget).toBe(17);
+    // 30 - 2 border → inner 28; available 23 after fixed/detail.
+    // Tree caps at floor(28 * 0.55) = 15; leftover returns to preview.
+    expect(layout.listBudget).toBe(15);
+    expect(layout.previewLines).toBe(8);
     expect(layout.cramped).toBe(false);
   });
 
@@ -186,6 +187,21 @@ describe("planViewLayout", () => {
       desiredPreviewLines: 0,
     });
     expect(layout).toEqual({ listBudget: 0, previewLines: 0, cramped: false });
+  });
+
+  it("caps the tree on tall terminals so the detail panel keeps a usable share", () => {
+    const layout = planViewLayout({
+      height: 40,
+      fixedLines: 2,
+      cardLines: 0,
+      detailFixedLines: 1,
+      desiredPreviewLines: 1,
+    });
+    // Without a cap the tree would take ~35 rows; with the 55% cap it stays
+    // bounded and surplus height returns to the detail preview.
+    expect(layout.listBudget).toBeLessThanOrEqual(Math.floor(38 * 0.55));
+    expect(layout.previewLines).toBeGreaterThan(1);
+    expect(layout.listBudget + layout.previewLines).toBe(40 - 2 - 2 - 1);
   });
 });
 

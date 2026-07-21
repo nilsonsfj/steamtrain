@@ -1930,7 +1930,7 @@ function hint(
       return `↑/↓ step · PgUp/PgDn scroll · ←/Esc back · ${pauseHint} · ${stopHint} · /exit quit · Ctrl+C quit`;
     }
     return mode === "workflow"
-      ? `${pauseHint} · ${stopHint} · /exit quit · Ctrl+C quit`
+      ? `↑/↓ step · ${pauseHint} · ${stopHint} · /exit quit · Ctrl+C quit`
       : "Esc cancel · /exit quit · Ctrl+C quit";
   }
   if (mode === "workflow") {
