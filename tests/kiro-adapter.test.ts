@@ -198,7 +198,9 @@ describe("runKiroProcess", () => {
         code: 2,
       }),
     ]);
-    expect((exitEvents[0] as { message: string }).message).toContain("unexpected argument '--print'");
+    expect((exitEvents[0] as { message: string }).message).toContain(
+      "unexpected argument '--print'",
+    );
   });
 
   it("errors when stdout is empty or whitespace-only on success", async () => {
