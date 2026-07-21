@@ -151,11 +151,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     reference: { provider: "claude", modelId: "claude-opus-4-6" },
     also: {
       opencode: ["opencode/claude-opus-4-6"],
-      antigravity: [
-        "claude-opus-4-6-thinking",
-        "Claude Opus 4.6",
-        "Claude Opus 4.6 (Thinking)",
-      ],
+      antigravity: ["claude-opus-4-6-thinking", "Claude Opus 4.6", "Claude Opus 4.6 (Thinking)"],
     },
     classes: ["thinker"],
   },
@@ -194,11 +190,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     also: {
       claude: ["claude-sonnet-4-6[1m]"],
       opencode: ["opencode/claude-sonnet-4-6"],
-      antigravity: [
-        "claude-sonnet-4-6",
-        "Claude Sonnet 4.6",
-        "Claude Sonnet 4.6 (Thinking)",
-      ],
+      antigravity: ["claude-sonnet-4-6", "Claude Sonnet 4.6", "Claude Sonnet 4.6 (Thinking)"],
     },
     classes: ["implementer", "balanced"],
   },
@@ -384,13 +376,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
   {
     id: "gemini-3.6-flash",
     name: "Gemini 3.6 Flash",
-    aliases: [
-      "gemini 3.6 flash",
-      "gemini-3.6-flash",
-      "gemini flash",
-      "gemini 3.6",
-      "gemini-3.6",
-    ],
+    aliases: ["gemini 3.6 flash", "gemini-3.6-flash", "gemini flash", "gemini 3.6", "gemini-3.6"],
     reference: { provider: "antigravity", modelId: "gemini-3.6-flash" },
     also: {
       antigravity: [
