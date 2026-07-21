@@ -151,7 +151,12 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     reference: { provider: "claude", modelId: "claude-opus-4-6" },
     also: {
       opencode: ["opencode/claude-opus-4-6"],
-      antigravity: ["claude-opus-4-6-thinking", "Claude Opus 4.6", "Claude Opus 4.6 (Thinking)"],
+      antigravity: [
+        "claude-opus-4-6",
+        "claude-opus-4-6-thinking",
+        "Claude Opus 4.6",
+        "Claude Opus 4.6 (Thinking)",
+      ],
     },
     classes: ["thinker"],
   },
@@ -190,7 +195,12 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     also: {
       claude: ["claude-sonnet-4-6[1m]"],
       opencode: ["opencode/claude-sonnet-4-6"],
-      antigravity: ["claude-sonnet-4-6", "Claude Sonnet 4.6", "Claude Sonnet 4.6 (Thinking)"],
+      antigravity: [
+        "claude-sonnet-4-6",
+        "claude-sonnet-4-6-thinking",
+        "Claude Sonnet 4.6",
+        "Claude Sonnet 4.6 (Thinking)",
+      ],
     },
     classes: ["implementer", "balanced"],
   },
