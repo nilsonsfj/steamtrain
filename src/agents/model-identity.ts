@@ -61,6 +61,8 @@ export function normalizeModelQuery(raw: string): string {
   return raw
     .trim()
     .toLowerCase()
+    // Strip Claude context-window suffix (`claude-opus-4-8[1m]`) before the
+    // general bracket scrub below, which would otherwise leave a stray `1m`.
     .replace(/\[1m\]$/i, "")
     .replace(/\([^)]*\)/g, " ")
     .replace(/thinking[-_]?high/g, " ")

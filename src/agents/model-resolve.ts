@@ -357,6 +357,10 @@ function candidatesForClass(
 
 function formatSummary(primary: ResolvedModelCandidate, request: ModelBindingRequest): string {
   const via = primary.reference ? `${primary.agent} (reference)` : primary.agent;
+  // More-specific agent+class before bare class (order matters).
+  if (request.agent && request.modelClass && !request.model) {
+    return `class '${request.modelClass}' → ${primary.modelName} on ${primary.agent}`;
+  }
   if (request.modelClass && !request.model) {
     const label = primary.familyName ?? primary.modelName;
     return `class '${request.modelClass}' → ${label} via ${via}`;
@@ -364,9 +368,6 @@ function formatSummary(primary: ResolvedModelCandidate, request: ModelBindingReq
   if (!request.agent && request.model) {
     const label = primary.familyName ?? primary.modelName;
     return `${label} via ${via}`;
-  }
-  if (request.agent && request.modelClass && !request.model) {
-    return `class '${request.modelClass}' → ${primary.modelName} on ${primary.agent}`;
   }
   return `${primary.agent} · ${primary.modelName}`;
 }
