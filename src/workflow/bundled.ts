@@ -1088,6 +1088,12 @@ const mainline: WorkflowSpec = {
             "Automated by the `mainline` workflow.\n\nTask:\n{{input}}\n\nStreams:\n{{steps.plan.items}}\n\nFinal review verdict: {{steps.final-review.json.verdict}}",
         },
         {
+          // deliver-pr and deliver-branch are mutually exclusive alternatives:
+          // their `when` conditions test the same rendered input with opposite
+          // polarity, so exactly one runs and the other is SKIPPED (ok, empty
+          // output). The arrival consolidator depends on both — consolidators
+          // treat skipped dependencies as absent, so whichever alternative was
+          // skipped simply vanishes from the report.
           id: "deliver-branch",
           kind: "merge",
           dependsOn: ["final-review-gate"],

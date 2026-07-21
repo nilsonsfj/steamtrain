@@ -60,6 +60,7 @@ async function runToEvents(
   repo: string,
   worktreeBase: string,
   overAdapter?: Partial<WorkflowDeps>,
+  inputs?: Record<string, string>,
 ): Promise<WorkflowEvent[]> {
   const deps: WorkflowDeps = {
     createAdapter: fileWritingAdapter(),
@@ -69,7 +70,7 @@ async function runToEvents(
     ...overAdapter,
   };
   const events: WorkflowEvent[] = [];
-  for await (const ev of runWorkflow(spec, { input: "task" }, deps)) events.push(ev);
+  for await (const ev of runWorkflow(spec, { input: "task", inputs }, deps)) events.push(ev);
   return events;
 }
 
@@ -385,5 +386,90 @@ describe("engine-owned .steamtrain state exclusion", () => {
     expect(paths).toContain("a.txt");
     expect(paths).toContain("b.txt");
     expect(paths.some((p) => p.startsWith(".steamtrain"))).toBe(false);
+  });
+});
+
+describe("mutually exclusive when-gated delivery (mainline's deliver-pr / deliver-branch pattern)", () => {
+  afterEach(async () => {
+    await Promise.all(tempRoots.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  // Runtime proof of the bundled mainline's delivery phase: two merge steps
+  // whose `when` conditions test the same rendered input with opposite
+  // polarity. Exactly one runs; the skipped alternative is absent (ok +
+  // skipped), and a consolidator depending on both treats it as absent.
+  it('runs only the branch alternative when the deliver input is not "pr"', async () => {
+    const { repo, worktrees } = await makeRepo();
+    const spec: WorkflowSpec = {
+      name: "delivery-choice",
+      inputs: { deliver: { default: "pr" } },
+      phases: [
+        {
+          id: "work",
+          title: "Work",
+          steps: [{ id: "work", kind: "command", cmd: "echo done > out.txt" }],
+        },
+        {
+          id: "deliver",
+          title: "Deliver",
+          steps: [
+            {
+              id: "deliver-pr",
+              kind: "merge",
+              dependsOn: ["work"],
+              from: ["work"],
+              mode: "branch",
+              branch: "delivery/pr-alt",
+              when: { value: "{{inputs.deliver}}", equals: "pr" },
+            },
+            {
+              id: "deliver-branch",
+              kind: "merge",
+              dependsOn: ["work"],
+              from: ["work"],
+              mode: "branch",
+              branch: "delivery/branch-alt",
+              when: { value: "{{inputs.deliver}}", equals: "pr", not: true },
+            },
+          ],
+        },
+        {
+          id: "arrive",
+          title: "Arrive",
+          steps: [
+            {
+              id: "report",
+              kind: "consolidator",
+              dependsOn: ["deliver-pr", "deliver-branch"],
+              prompt: "PR: {{steps.deliver-pr.output}} BRANCH: {{steps.deliver-branch.output}}",
+            },
+          ],
+        },
+      ],
+    };
+    expect(validateWorkflow(spec).ok).toBe(true);
+    const events = await runToEvents(
+      spec,
+      repo,
+      worktrees,
+      agentlessDeps(repo, {
+        agentWorkspace: createGitWorktreeManager({ baseDir: worktrees, runId: "delivery-test" }),
+        // resolved inputs for the run
+      }),
+      { deliver: "branch" },
+    );
+    const results = doneResults(events);
+    expect(workflowOk(events)).toBe(true);
+    expect(results.get("deliver-pr")?.skipped).toBe(true);
+    expect(results.get("deliver-branch")?.ok).toBe(true);
+    expect(results.get("deliver-branch")?.skipped).toBeUndefined();
+    // The delivered branch exists and carries the work; the skipped
+    // alternative created nothing.
+    expect(await git(repo, "rev-parse", "--verify", "delivery/branch-alt")).toBeTruthy();
+    await expect(git(repo, "rev-parse", "--verify", "delivery/pr-alt")).rejects.toThrow();
+    // The consolidator saw the skipped step as absent (empty), not failed.
+    const report = results.get("report")?.output ?? "";
+    expect(report).toContain("delivery/branch-alt");
+    expect(report).not.toContain("pr-alt");
   });
 });
