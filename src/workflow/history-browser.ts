@@ -156,20 +156,3 @@ export function buildHistoryBrowserEntries(opts: {
 
   return [...live, ...recorded];
 }
-
-/** Count how many recorded runs match each status chip (for filter badges). */
-export function countHistoryByStatus(
-  runs: readonly RunRecordSummary[],
-): Record<RunRecordStatus, number> & { total: number } {
-  const counts = {
-    total: runs.length,
-    done: 0,
-    error: 0,
-    canceled: 0,
-    "budget-exceeded": 0,
-  };
-  for (const run of runs) {
-    if (run.status in counts) counts[run.status] += 1;
-  }
-  return counts;
-}

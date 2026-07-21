@@ -3,7 +3,6 @@ import type { LiveRunMeta, RunRecordSummary } from "../src/workflow";
 import { emptyTokens, newLiveRunMeta } from "../src/workflow";
 import {
   buildHistoryBrowserEntries,
-  countHistoryByStatus,
   formatRelativeTime,
   historyStatusLabel,
   matchesHistoryQuery,
@@ -108,25 +107,13 @@ describe("buildHistoryBrowserEntries", () => {
   });
 });
 
-describe("countHistoryByStatus / nextHistoryStatusFilter / labels / relative time", () => {
-  it("counts recorded statuses and cycles the filter chip", () => {
-    const counts = countHistoryByStatus([
-      recorded("a", { status: "done" }),
-      recorded("b", { status: "error", ok: false }),
-      recorded("c", { status: "error", ok: false }),
-      recorded("d", { status: "canceled", ok: false }),
-    ]);
-    expect(counts).toEqual({
-      total: 4,
-      done: 1,
-      error: 2,
-      canceled: 1,
-      "budget-exceeded": 0,
-    });
+describe("nextHistoryStatusFilter / labels / relative time", () => {
+  it("cycles the filter chip and labels statuses", () => {
     expect(nextHistoryStatusFilter("all")).toBe("live");
     expect(nextHistoryStatusFilter("budget-exceeded")).toBe("all");
     expect(historyStatusLabel("error")).toBe("failed");
     expect(historyStatusLabel("budget-exceeded")).toBe("budget");
+    expect(historyStatusLabel("")).toBe("");
   });
 
   it("formats relative timestamps", () => {
