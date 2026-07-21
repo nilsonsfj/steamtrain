@@ -33,6 +33,9 @@ import {
   specStepRowMeta,
 } from "./workflow-spec-ui";
 
+/** Cap description wrap so chrome cannot starve the step tree. */
+const DESCRIPTION_MAX_LINES = 3;
+
 export type { FlatSpecStep };
 export { flattenSpecSteps };
 
@@ -110,6 +113,13 @@ export function WorkflowPreview({
     () => ({ input, inputs: previewInputValues(spec) }),
     [input, spec],
   );
+  // Pre-wrap description into a fixed row budget so Ink never soft-wraps past
+  // chromeLines (that overflow is what used to bleed into the step tree).
+  const descriptionLines = useMemo(() => {
+    const raw = spec.description?.trim();
+    if (!raw) return [] as string[];
+    return clipWrappedLines(wrapTextLines(raw, innerWidth), DESCRIPTION_MAX_LINES);
+  }, [spec.description, innerWidth]);
 
   const showPlan =
     showPlanResult && planResult != null ? 1 + (planResult.ok && planResult.history ? 1 : 0) : 0;
@@ -117,7 +127,7 @@ export function WorkflowPreview({
   // tree (or vice versa) enough to force Ink wrap-overlap corruption.
   const chromeLines =
     1 + // title
-    (spec.description ? 1 : 0) +
+    descriptionLines.length +
     1 + // phase/step summary
     1 + // ready / blocked
     (!dispatchCheck.ok && reroutePlan ? 1 : 0) +
@@ -157,11 +167,12 @@ export function WorkflowPreview({
         </Box>
       </Box>
 
-      {spec.description ? (
-        <Text color="gray" wrap="truncate-end">
-          {spec.description}
+      {descriptionLines.map((line, lineNo) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: wrap order is the identity
+        <Text key={lineNo} color="gray" wrap="truncate-end">
+          {line || " "}
         </Text>
-      ) : null}
+      ))}
 
       <Box flexDirection="column" marginBottom={1}>
         <Text color="gray" wrap="truncate-end">
@@ -334,20 +345,23 @@ function SpecStepDetail({
     : "gray";
 
   // Stay inside the reserved height: border (2) + header + optional runner +
-  // detail lines + optional prompt label/body. Prefer truncating the prompt
-  // body over letting wrap bleed into sibling lines.
+  // detail lines + optional prompt label/body. Pre-wrap the prompt into the
+  // leftover rows so long prompts fill empty panel space instead of sitting
+  // on a single truncated line.
   const border = 2;
   const headerLines = 1 + (runner ? 1 : 0);
-  const promptReserve = prompt ? 2 : 0;
-  const bodyBudget = Math.max(
-    0,
-    (maxHeight ?? Number.POSITIVE_INFINITY) - border - headerLines - promptReserve,
-  );
+  const available = Math.max(0, (maxHeight ?? Number.POSITIVE_INFINITY) - border - headerLines);
+  // Reserve at least label + one body row when a prompt exists; give the rest
+  // to structured detail lines first, then expand the prompt into leftovers.
+  const promptMin = prompt ? 2 : 0;
+  const bodyBudget = Math.max(0, available - promptMin);
   const visibleLines = lines.slice(0, Math.max(0, bodyBudget));
-  const promptBudget = Math.max(
-    0,
-    (maxHeight ?? Number.POSITIVE_INFINITY) - border - headerLines - visibleLines.length - 1,
-  );
+  const promptRows = Math.max(0, available - visibleLines.length);
+  const showPrompt = Boolean(prompt) && promptRows >= 2;
+  const promptBodyBudget = showPrompt ? promptRows - 1 : 0;
+  const promptLines = showPrompt
+    ? clipWrappedLines(wrapTextLines(prompt!.trim(), Math.max(4, width - 2)), promptBodyBudget)
+    : [];
 
   return (
     <Box
@@ -371,18 +385,71 @@ function SpecStepDetail({
           {line}
         </Text>
       ))}
-      {prompt && promptBudget > 0 ? (
+      {showPrompt ? (
         <>
           <Text color="gray" wrap="truncate-end">
             prompt:
           </Text>
-          <Text wrap="truncate-end">
-            {truncate(prompt.replace(/\s+/g, " ").trim(), Math.max(24, width - 2))}
-          </Text>
+          {promptLines.map((line, lineNo) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: wrap order is the identity
+            <Text key={lineNo} wrap="truncate-end">
+              {line || " "}
+            </Text>
+          ))}
         </>
       ) : null}
     </Box>
   );
+}
+
+/**
+ * Take the first `maxLines` wrapped rows. When content is clipped, mark the
+ * last visible row with an ellipsis so the truncation is obvious.
+ */
+function clipWrappedLines(lines: string[], maxLines: number): string[] {
+  if (maxLines <= 0 || lines.length === 0) return [];
+  if (lines.length <= maxLines) return lines;
+  const visible = lines.slice(0, maxLines);
+  const last = visible[maxLines - 1] ?? "";
+  visible[maxLines - 1] = `${last.slice(0, Math.max(0, last.length - 1))}…`;
+  return visible;
+}
+
+/**
+ * Soft-wrap `text` at word boundaries into fixed-width rows. Falls back to hard
+ * slices for tokens longer than `width`. Preserves explicit newlines as row
+ * breaks so multi-line prompts keep paragraph structure.
+ */
+function wrapTextLines(text: string, width: number): string[] {
+  const cols = Math.max(4, width);
+  const out: string[] = [];
+  for (const raw of text.split("\n")) {
+    const paragraph = raw.replace(/\t/g, " ").replace(/ +/g, " ").trim();
+    if (paragraph.length === 0) {
+      if (raw.length > 0) out.push("");
+      continue;
+    }
+    let current = "";
+    for (const word of paragraph.split(" ")) {
+      if (word.length > cols) {
+        if (current) {
+          out.push(current);
+          current = "";
+        }
+        for (let i = 0; i < word.length; i += cols) out.push(word.slice(i, i + cols));
+        continue;
+      }
+      const next = current ? `${current} ${word}` : word;
+      if (next.length <= cols) {
+        current = next;
+      } else {
+        out.push(current);
+        current = word;
+      }
+    }
+    if (current) out.push(current);
+  }
+  return out;
 }
 
 function PlanResultView({ plan, width }: { plan: PlanResult; width: number }) {

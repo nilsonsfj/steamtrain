@@ -136,6 +136,70 @@ describe("WorkflowPreview", () => {
     expect(frame).toMatch(/plan · distributor · phase/);
     expect(frame).toMatch(/runner:/);
   });
+
+  it("wraps a long workflow description across multiple chrome rows", () => {
+    const description =
+      "List every open GitHub PR for the current project and, for each one in parallel, rebase onto main, address or document review comments, resolve conflicts, wait for a fresh review, loop until the PR is mergeable or stuck, then write a summary report.";
+    const spec = {
+      ...BUNDLED_WORKFLOWS["multi-plan"]!,
+      name: "babysit-all-prs",
+      description,
+    };
+    const { lastFrame } = render(
+      <WorkflowPreview
+        spec={spec}
+        source="user"
+        width={100}
+        height={28}
+        selectedIndex={0}
+        dispatchCheck={{ ok: true }}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("workflow preview · babysit-all-prs");
+    expect(frame).toContain("List every open GitHub PR");
+    // Soft-wrapped across chrome rows (not a single truncated ellipsis line).
+    expect(frame).toContain("rebase onto");
+    expect(frame).toMatch(/main,/);
+    expect(frame).toContain("fresh review");
+    expect(frame).toContain("ready to run");
+    expect(frame).not.toContain("ready to runworker");
+    expect(frame.split("\n").length).toBeLessThanOrEqual(28);
+  });
+
+  it("fills the detail panel with a wrapped long prompt instead of one truncated line", () => {
+    const prompt =
+      "You are in a checkout of the current project. List all OPEN pull requests on GitHub using the gh CLI, e.g. 'gh pr list --state open --json number,headRefName --limit 200'. Output ONE line per PR with the number and branch name. Do not include closed or draft PRs.";
+    const base = BUNDLED_WORKFLOWS["multi-plan"]!;
+    const firstPhase = base.phases[0]!;
+    const firstStep = { ...firstPhase.steps[0]!, id: "prs", prompt };
+    const spec = {
+      ...base,
+      name: "babysit-all-prs",
+      description: "Short description.",
+      phases: [
+        { ...firstPhase, steps: [firstStep, ...firstPhase.steps.slice(1)] },
+        ...base.phases.slice(1),
+      ],
+    };
+    const { lastFrame } = render(
+      <WorkflowPreview
+        spec={spec}
+        source="user"
+        width={100}
+        height={28}
+        selectedIndex={0}
+        dispatchCheck={{ ok: true }}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("prompt:");
+    expect(frame).toContain("You are in a checkout of the current project");
+    // Second wrapped prompt row should appear (not only a single truncated line).
+    expect(frame).toMatch(/gh CLI|gh pr list|--json number/);
+    expect(frame).toContain("ready to run");
+    expect(frame.split("\n").length).toBeLessThanOrEqual(28);
+  });
 });
 
 describe("preview input resolution", () => {
