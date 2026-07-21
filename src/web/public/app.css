@@ -1666,6 +1666,7 @@ body[data-mode="arrival"] .runbar .sub,
 body[data-mode="arrival"] .runbar .srcline,
 body[data-mode="arrival"] .runbar .wfactions,
 body[data-mode="arrival"] .runbar .runbar-head,
+body[data-mode="arrival"] .runbar .reroute-row,
 body[data-mode="arrival"] .runbar .row,
 body[data-mode="arrival"] .runbar .status-line {
   display: none !important;
