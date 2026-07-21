@@ -239,6 +239,7 @@ describe("cursor models", () => {
 describe("antigravity models", () => {
   it("exposes antigravity models with Gemini 3.1 Pro (High) as the default", () => {
     expect(modelIdsForAgent("antigravity")).toContain("Gemini 3.1 Pro (High)");
+    expect(modelIdsForAgent("antigravity")).toContain("Gemini 3.1 Pro");
     expect(defaultModelForAgent("antigravity")).toBe("Gemini 3.1 Pro (High)");
   });
 

@@ -22,7 +22,7 @@ Add first-class steamtrain support for Google's Antigravity CLI (`agy`) as provi
 | Session id source | Parse stderr (`Created conversation …`, `conversation=…`, `Stream completed for …`); fallback `cache/last_conversations.json` keyed by cwd |
 | Empty stdout recovery | Read `brain/<id>/.system_generated/logs/transcript.jsonl` last `PLANNER_RESPONSE` when stdout is empty but a conversation id is known |
 | Effort | When set and model has no `(Low\|Medium\|High\|Thinking)` suffix, append ` (<Label>)` |
-| Model catalog | Static list + live refresh from `agy models` |
+| Model catalog | Static list (base + common effort suffixes) + live refresh from `agy models`. Display labels are the real ids - agy rejects slug aliases like `gemini-3-pro`. |
 | Interactive takeover | `agy --conversation <sessionId>` |
 | Auth hints | Interactive Google sign-in via `agy`, or `GEMINI_API_KEY` / `ANTIGRAVITY_API_KEY` |
 | Install hint | `curl -fsSL https://antigravity.google/cli/install.sh \| bash` |

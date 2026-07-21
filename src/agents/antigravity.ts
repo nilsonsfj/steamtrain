@@ -9,15 +9,27 @@ import {
 import { type ProcessLine, type ProcessRunOptions, runProcessLines } from "./spawn";
 import { firstLine } from "./util";
 
-/** Known Antigravity CLI models (used by `/model` and autocomplete). */
+/**
+ * Known Antigravity CLI models (used by `/model` and autocomplete).
+ *
+ * agy does not accept slug aliases (`gemini-3-pro` is rejected). Model ids
+ * are the display labels from `agy models`, including spaces / parentheses.
+ * Base names (no effort suffix) are included so steamtrain's effort picker
+ * can append `(Low|Medium|High|Thinking)` via {@link resolveAntigravityModel}.
+ */
 export const ANTIGRAVITY_MODELS: readonly AgentModel[] = [
+  { id: "Gemini 3.1 Pro", name: "Gemini 3.1 Pro" },
   { id: "Gemini 3.1 Pro (High)", name: "Gemini 3.1 Pro (High)" },
   { id: "Gemini 3.1 Pro (Low)", name: "Gemini 3.1 Pro (Low)" },
+  { id: "Gemini 3.5 Flash", name: "Gemini 3.5 Flash" },
   { id: "Gemini 3.5 Flash (High)", name: "Gemini 3.5 Flash (High)" },
   { id: "Gemini 3.5 Flash (Medium)", name: "Gemini 3.5 Flash (Medium)" },
   { id: "Gemini 3.5 Flash (Low)", name: "Gemini 3.5 Flash (Low)" },
+  { id: "Claude Sonnet 4.6", name: "Claude Sonnet 4.6" },
   { id: "Claude Sonnet 4.6 (Thinking)", name: "Claude Sonnet 4.6 (Thinking)" },
+  { id: "Claude Opus 4.6", name: "Claude Opus 4.6" },
   { id: "Claude Opus 4.6 (Thinking)", name: "Claude Opus 4.6 (Thinking)" },
+  { id: "GPT-OSS 120B", name: "GPT-OSS 120B" },
   { id: "GPT-OSS 120B (Medium)", name: "GPT-OSS 120B (Medium)" },
 ];
 
@@ -25,8 +37,8 @@ const EFFORT_LABELS: Record<string, string> = {
   low: "Low",
   medium: "Medium",
   high: "High",
-  // agy only exposes a Thinking tier for the highest Claude-style efforts.
   thinking: "Thinking",
+  // Accepted as aliases when remapping efforts from other providers.
   xhigh: "Thinking",
   max: "Thinking",
 };
@@ -280,6 +292,8 @@ export async function* runAntigravityProcess(
         isError: false,
         text,
         durationMs: Date.now() - startedAt,
+        // agy print mode does not report token usage / cost on stdout or in
+        // transcript PLANNER_RESPONSE lines (as of 1.1.x).
       };
     }
   }
@@ -288,6 +302,7 @@ export async function* runAntigravityProcess(
 export class AntigravityAdapter implements AgentAdapter {
   readonly id: AgentId = "antigravity";
   readonly binary: string;
+  /** Prefer High effort out of the box; users can switch to the base id + effort. */
   readonly defaultModel = "Gemini 3.1 Pro (High)";
   readonly supportsResume = true;
 
