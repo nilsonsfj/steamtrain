@@ -205,6 +205,8 @@ function installHint(agent: AgentProviderId): string {
       return "Install Kiro CLI (npm i -g @anthropic-ai/kiro-cli) and ensure `kiro-cli` is on PATH.";
     case "cursor":
       return "Install Cursor Agent CLI (curl https://cursor.com/install -fsS | bash) and ensure `agent` is on PATH.";
+    case "antigravity":
+      return "Install Antigravity CLI (curl -fsSL https://antigravity.google/cli/install.sh | bash) and ensure `agy` is on PATH.";
   }
 }
 
@@ -222,5 +224,7 @@ function authHint(agent: AgentProviderId): string {
       return "Run `kiro-cli` and authenticate, or set ANTHROPIC_API_KEY.";
     case "cursor":
       return "Run `agent login`, or set CURSOR_API_KEY.";
+    case "antigravity":
+      return "Run `agy` and complete Google sign-in, or set GEMINI_API_KEY / ANTIGRAVITY_API_KEY.";
   }
 }
