@@ -32,6 +32,12 @@ export interface ApiDoctorResult {
   message: string;
   /** Actionable fix-it hint when not ok. */
   detail?: string;
+  /**
+   * A copyable shell command that resolves `detail` when one exists — for
+   * `key_missing`, the `export <ENV>=…` scaffold. Structured (not scraped from
+   * `detail`) so the TUI and web setup panel can offer a one-click copy.
+   */
+  fixCommand?: string;
 }
 
 const PROBE_TIMEOUT_MS = 5000;
@@ -101,6 +107,7 @@ export async function checkApi(
       status: "key_missing",
       message: `${instance.apiKeyEnv} not set`,
       detail: `Set ${instance.apiKeyEnv} (or point apiKeyEnv at another variable) to enable llm steps on '${instance.id}'.`,
+      fixCommand: `export ${instance.apiKeyEnv}=…`,
     };
   }
 

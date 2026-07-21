@@ -43,6 +43,7 @@ describe("checkAgent codex", () => {
       binary: "__steamtrain_missing_codex__",
     });
     expect(result.detail).toContain("npm i -g @openai/codex");
+    expect(result.fixCommand).toBe("npm i -g @openai/codex");
   });
 });
 
@@ -109,6 +110,25 @@ describe("checkAgent ok", () => {
     });
     expect(result.version).toBeDefined();
     expect(result.message).toBe("ready");
+    expect(result.fixCommand).toBeUndefined();
+  });
+});
+
+describe("checkAgent auth", () => {
+  it("surfaces a copyable login command when the CLI reports not-authenticated", async () => {
+    // A shim that exits non-zero and prints an auth-shaped error, so the doctor
+    // classifies it as not_authenticated and attaches the provider's login fix.
+    const dir = join(tmpdir(), `steamtrain-doctor-auth-${process.pid}-${Date.now()}`);
+    mkdirSync(dir, { recursive: true });
+    const shim = join(dir, "logged-out.mjs");
+    writeFileSync(
+      shim,
+      "#!/usr/bin/env node\nconsole.error('Not logged in. Please run login.');\nprocess.exit(1);\n",
+      { mode: 0o755 },
+    );
+    const result = await checkAgent("opencode", shim, { provider: "opencode" });
+    expect(result.status).toBe("not_authenticated");
+    expect(result.fixCommand).toBe("opencode auth login");
   });
 });
 

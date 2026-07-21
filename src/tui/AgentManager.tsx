@@ -1,10 +1,20 @@
 import { Box, Text, useInput } from "ink";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { AGENT_IDS, agentScopeLabel } from "../agents";
 import type { ResolvedAgentInstance } from "../agents";
 import type { AgentConfigScope, AgentInstanceConfig } from "../config/types";
+import type { DoctorResult, DoctorStatus } from "../doctor";
 import type { AgentProviderId } from "../types/events";
+import { STATUS_STYLE } from "./theme";
 import { selectVisibleWindow } from "./workflow-list-window";
+
+/** Fuller readiness labels for the manager (the status bar uses terse ones). */
+const HEALTH_LABEL: Record<DoctorStatus, string> = {
+  ok: "ready",
+  binary_missing: "not installed",
+  not_authenticated: "needs sign-in",
+  unknown_error: "error",
+};
 
 export interface AgentMutationResult {
   ok: boolean;
@@ -27,11 +37,15 @@ interface AgentManagerProps {
   scopes: ReadonlyMap<string, AgentConfigScope>;
   /** False when running with a custom --config file (no global layer). */
   canGlobal: boolean;
+  /** Live readiness per agent; null while the first preflight is still running. */
+  doctor?: DoctorResult[] | null;
   width: number;
   height: number;
   onToggle: (id: string) => AgentMutationResult;
   onAdd: (request: AgentAddRequest) => AgentMutationResult;
   onDelete: (id: string) => AgentMutationResult;
+  /** Re-run the preflight doctor for the current agents (bound to `r`). */
+  onRecheck?: () => void;
   onClose: () => void;
 }
 
@@ -56,11 +70,13 @@ export function AgentManager({
   agents,
   scopes,
   canGlobal,
+  doctor,
   width,
   height,
   onToggle,
   onAdd,
   onDelete,
+  onRecheck,
   onClose,
 }: AgentManagerProps) {
   const [index, setIndex] = useState(0);
@@ -70,6 +86,18 @@ export function AgentManager({
 
   const clamped = Math.min(index, Math.max(0, agents.length - 1));
   const selected = agents[clamped];
+
+  const healthById = useMemo(() => {
+    const map = new Map<string, DoctorResult>();
+    for (const result of doctor ?? []) map.set(result.agent, result);
+    return map;
+  }, [doctor]);
+  // The fix panel is for the selected agent when its preflight isn't ok.
+  const selectedHealth = selected ? healthById.get(selected.id) : undefined;
+  const fix =
+    selectedHealth && selectedHealth.status !== "ok" && selectedHealth.detail
+      ? { detail: selectedHealth.detail, command: selectedHealth.fixCommand }
+      : null;
 
   useInput((input, key) => {
     if (form) {
@@ -100,6 +128,11 @@ export function AgentManager({
     }
     if ((key.return || input === " ") && selected) {
       setMessage(toMessage(onToggle(selected.id)));
+      return;
+    }
+    if (input === "r" && onRecheck) {
+      onRecheck();
+      setMessage({ level: "info", text: "rechecking agent readiness…" });
       return;
     }
     if (input === "a") {
@@ -185,21 +218,34 @@ export function AgentManager({
     }
   }
 
-  const listBudget = Math.max(1, height - (message ? 5 : 4));
+  const fixHeight = form ? 0 : fix ? (fix.command ? 2 : 1) : 0;
+  const listBudget = Math.max(1, height - 4 - (message ? 1 : 0) - fixHeight);
   const window = selectVisibleWindow(agents, clamped, listBudget);
+  const readySummary = summarizeReadiness(doctor);
+  const closeHint = onRecheck
+    ? "↑/↓ select · Enter toggle · a add · d delete · r recheck · Esc close"
+    : "↑/↓ select · Enter/Space toggle · a add · d delete · Esc close";
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} height={height}>
       <Box justifyContent="space-between">
-        <Text color="cyan" bold>
-          agents
-        </Text>
+        <Box>
+          <Text color="cyan" bold>
+            agents
+          </Text>
+          {readySummary ? (
+            <Text color="gray">
+              {"  "}
+              {readySummary}
+            </Text>
+          ) : null}
+        </Box>
         <Text color="gray">
           {form
             ? "↑/↓ field · ←/→ choose · Enter next/save · Esc cancel"
             : confirmDelete
               ? `delete '${confirmDelete}'? y/n`
-              : "↑/↓ select · Enter/Space toggle · a add · d delete · Esc close"}
+              : closeHint}
         </Text>
       </Box>
       {form ? (
@@ -214,6 +260,7 @@ export function AgentManager({
               key={agent.id}
               agent={agent}
               scope={scopes.get(agent.id)}
+              health={agent.enabled ? healthById.get(agent.id) : undefined}
               selected={window.start + offset === clamped}
               width={Math.max(20, width - 4)}
             />
@@ -223,6 +270,19 @@ export function AgentManager({
           ) : null}
         </Box>
       )}
+      {fix && selected ? (
+        <Box flexDirection="column">
+          <Text color="yellow" wrap="truncate-end">
+            fix {selected.id}: {fix.detail}
+          </Text>
+          {fix.command ? (
+            <Text color="cyan">
+              {"  $ "}
+              {fix.command}
+            </Text>
+          ) : null}
+        </Box>
+      ) : null}
       {message ? (
         <Text color={message.level === "error" ? "red" : "green"} wrap="truncate-end">
           {message.text}
@@ -232,14 +292,38 @@ export function AgentManager({
   );
 }
 
+/** Compact per-problem words for the header summary (rows show the full label). */
+const SHORT_HEALTH_LABEL: Record<DoctorStatus, string> = {
+  ok: "ready",
+  binary_missing: "missing",
+  not_authenticated: "sign-in",
+  unknown_error: "error",
+};
+
+/** "3/5 ready · 1 sign-in · 1 missing" — null while preflight runs. */
+function summarizeReadiness(doctor: DoctorResult[] | null | undefined): string | null {
+  if (!doctor || doctor.length === 0) return doctor === null ? "checking…" : null;
+  const counts = new Map<DoctorStatus, number>();
+  for (const result of doctor) counts.set(result.status, (counts.get(result.status) ?? 0) + 1);
+  const parts = [`${counts.get("ok") ?? 0}/${doctor.length} ready`];
+  const problems: DoctorStatus[] = ["not_authenticated", "unknown_error", "binary_missing"];
+  for (const status of problems) {
+    const n = counts.get(status);
+    if (n) parts.push(`${n} ${SHORT_HEALTH_LABEL[status]}`);
+  }
+  return parts.join(" · ");
+}
+
 function AgentRow({
   agent,
   scope,
+  health,
   selected,
   width,
 }: {
   agent: ResolvedAgentInstance;
   scope: AgentConfigScope | undefined;
+  health: DoctorResult | undefined;
   selected: boolean;
   width: number;
 }) {
@@ -247,6 +331,7 @@ function AgentRow({
   const provider = agent.provider === agent.id ? "" : ` provider=${agent.provider}`;
   const binary = agent.binary ? ` binary=${agent.binary}` : "";
   const model = agent.defaultModel ? ` model=${agent.defaultModel}` : "";
+  const version = health?.status === "ok" && health.version ? ` v=${health.version}` : "";
   return (
     <Box>
       <Text color={selected ? "cyan" : "gray"}>{selected ? "▶ " : "  "}</Text>
@@ -254,6 +339,9 @@ function AgentRow({
       <Text color={selected ? "cyan" : "white"} bold={selected}>
         {agent.id}
       </Text>
+      {health ? (
+        <Text color={STATUS_STYLE[health.status].color}> {HEALTH_LABEL[health.status]}</Text>
+      ) : null}
       <Text color="gray" wrap="truncate-end">
         {"  "}
         {agentScopeLabel(scope)}
@@ -261,6 +349,7 @@ function AgentRow({
         {provider}
         {binary}
         {model}
+        {version}
       </Text>
     </Box>
   );

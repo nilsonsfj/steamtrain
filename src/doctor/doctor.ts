@@ -20,6 +20,13 @@ export interface DoctorResult {
   message: string;
   /** Actionable fix-it hint when not ok. */
   detail?: string;
+  /**
+   * The single shell command that resolves `detail`, ready for a one-click
+   * copy in the UIs (install command, or the CLI's login command). Kept as
+   * structured data rather than scraped from `detail`'s prose so both the TUI
+   * and the web setup panel can offer a reliable "copy the fix" button.
+   */
+  fixCommand?: string;
 }
 
 const VERSION_TIMEOUT_MS = 8000;
@@ -174,6 +181,7 @@ export async function checkAgent(
   const provider = options.provider;
   const binaryPath = await resolveBinary(binary);
   if (!binaryPath) {
+    const fix = installHint(provider);
     return {
       agent,
       provider,
@@ -181,7 +189,8 @@ export async function checkAgent(
       status: "binary_missing",
       binary,
       message: `'${binary}' not found on PATH`,
-      detail: installHint(provider),
+      detail: fix.detail,
+      fixCommand: fix.command,
     };
   }
 
@@ -214,6 +223,7 @@ export async function checkAgent(
   }
 
   if (AUTH_PATTERN.test(combined)) {
+    const fix = authHint(provider);
     return {
       agent,
       provider,
@@ -222,7 +232,8 @@ export async function checkAgent(
       binary,
       binaryPath,
       message: "not authenticated",
-      detail: authHint(provider),
+      detail: fix.detail,
+      fixCommand: fix.command,
     };
   }
 
@@ -251,40 +262,95 @@ export function runDoctor(config: SteamtrainConfig): Promise<DoctorResult[]> {
   );
 }
 
-function installHint(agent: AgentProviderId): string {
+/** Prose fix plus the single shell command that resolves it (for one-click copy). */
+interface FixHint {
+  detail: string;
+  command?: string;
+}
+
+function installHint(agent: AgentProviderId): FixHint {
   switch (agent) {
     case "claude":
-      return "Install Claude Code (npm i -g @anthropic-ai/claude-code) and ensure `claude` is on PATH.";
+      return {
+        detail:
+          "Install Claude Code (npm i -g @anthropic-ai/claude-code) and ensure `claude` is on PATH.",
+        command: "npm i -g @anthropic-ai/claude-code",
+      };
     case "opencode":
-      return "Install OpenCode (brew install sst/tap/opencode, or npm i -g opencode-ai) and ensure `opencode` is on PATH.";
+      return {
+        detail:
+          "Install OpenCode (brew install sst/tap/opencode, or npm i -g opencode-ai) and ensure `opencode` is on PATH.",
+        command: "npm i -g opencode-ai",
+      };
     case "codex":
-      return "Install Codex (npm i -g @openai/codex) and ensure `codex` is on PATH.";
+      return {
+        detail: "Install Codex (npm i -g @openai/codex) and ensure `codex` is on PATH.",
+        command: "npm i -g @openai/codex",
+      };
     case "amp":
-      return "Install Amp (npm i -g @sourcegraph/amp) and ensure `amp` is on PATH.";
+      return {
+        detail: "Install Amp (npm i -g @sourcegraph/amp) and ensure `amp` is on PATH.",
+        command: "npm i -g @sourcegraph/amp",
+      };
     case "kiro":
-      return "Install Kiro CLI (curl -fsSL https://cli.kiro.dev/install | bash) and ensure `kiro-cli` is on PATH.";
+      return {
+        detail:
+          "Install Kiro CLI (curl -fsSL https://cli.kiro.dev/install | bash) and ensure `kiro-cli` is on PATH.",
+        command: "curl -fsSL https://cli.kiro.dev/install | bash",
+      };
     case "cursor":
-      return "Install Cursor Agent CLI (curl https://cursor.com/install -fsS | bash) and ensure `agent` is on PATH.";
+      return {
+        detail:
+          "Install Cursor Agent CLI (curl https://cursor.com/install -fsS | bash) and ensure `agent` is on PATH.",
+        command: "curl https://cursor.com/install -fsS | bash",
+      };
     case "antigravity":
-      return "Install Antigravity CLI (curl -fsSL https://antigravity.google/cli/install.sh | bash) and ensure `agy` is on PATH.";
+      return {
+        detail:
+          "Install Antigravity CLI (curl -fsSL https://antigravity.google/cli/install.sh | bash) and ensure `agy` is on PATH.",
+        command: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+      };
   }
 }
 
-function authHint(agent: AgentProviderId): string {
+function authHint(agent: AgentProviderId): FixHint {
   switch (agent) {
     case "claude":
-      return "Run `claude` and `/login` (subscription) or set ANTHROPIC_API_KEY.";
+      return {
+        detail: "Run `claude` and `/login` (subscription) or set ANTHROPIC_API_KEY.",
+        command: "claude",
+      };
     case "opencode":
-      return "Run `opencode auth login` for the provider you want to use.";
+      return {
+        detail: "Run `opencode auth login` for the provider you want to use.",
+        command: "opencode auth login",
+      };
     case "codex":
-      return "Run `codex login` (ChatGPT) or set CODEX_API_KEY for `codex exec`.";
+      return {
+        detail: "Run `codex login` (ChatGPT) or set CODEX_API_KEY for `codex exec`.",
+        command: "codex login",
+      };
     case "amp":
-      return "Run `amp login`, or set AMP_API_KEY for non-interactive use (execute mode needs paid credits).";
+      return {
+        detail:
+          "Run `amp login`, or set AMP_API_KEY for non-interactive use (execute mode needs paid credits).",
+        command: "amp login",
+      };
     case "kiro":
-      return "Run `kiro-cli login`, or set KIRO_API_KEY for non-interactive use.";
+      return {
+        detail: "Run `kiro-cli login`, or set KIRO_API_KEY for non-interactive use.",
+        command: "kiro-cli login",
+      };
     case "cursor":
-      return "Run `agent login`, or set CURSOR_API_KEY.";
+      return {
+        detail: "Run `agent login`, or set CURSOR_API_KEY.",
+        command: "agent login",
+      };
     case "antigravity":
-      return "Run `agy` and complete Google sign-in, or set GEMINI_API_KEY / ANTIGRAVITY_API_KEY.";
+      return {
+        detail:
+          "Run `agy` and complete Google sign-in, or set GEMINI_API_KEY / ANTIGRAVITY_API_KEY.",
+        command: "agy",
+      };
   }
 }

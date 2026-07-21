@@ -9,6 +9,16 @@ This is a working document. The end state we're aiming for: a single
 "workflow session / authoring" core that the TUI and the web server both drive,
 with each layer owning only presentation + input handling.
 
+Updated 2026-07-21: agent/API **setup** reached parity and became actionable in
+both UIs. The doctor now attaches a structured `fixCommand` (install / login /
+`export <ENV>=…`) to each not-ready result. TUI: the `/agents` (Ctrl+A) and
+`/apis` managers show per-row readiness + version, an inline fix for the
+selected not-ready entry, a readiness summary, and `r` to recheck. Web: header
+health chips are buttons that open a new **Agent & API setup** panel (each
+agent/endpoint's status + fix + one-click copy + Recheck + Edit-config link);
+`binary_missing` / `key_missing` collapse into one quiet chip instead of a wall
+of red; the config modal leads with agents and links to the setup panel.
+
 Updated 2026-07-20: both UIs gained bulk step retargeting — Web Configure has
 a "Retarget all agent steps" bar plus per-step "Use for all"; TUI Ctrl+E
 accepts `A` to apply the current agent/model/effort to every agent-backed
@@ -16,7 +26,7 @@ step, and `/set-all <agent> [model] [effort]` (plus `/agent|/model|/effort
 … --all`) stages the same overrides. Mid-run editors now expose model/effort
 alongside prompt/cmd.
 
-Last updated: 2026-07-20.
+Last updated: 2026-07-21.
 
 Updated 2026-06-16 (after the first unification pass in
 `feat/unify-workflow-authoring`: the authoring core is now shared).
@@ -98,7 +108,8 @@ imports it through `src/tui/workflow-state.ts`; the web bundles it as
 | Stage overrides *without* persisting | ✅ | ✅ | TUI session overrides (now flushed via `WorkflowAuthor.flushSessionOverrides`); web "Try without saving" stores session overrides |
 | Explicit "save session changes" step | ✅ | ✅ | TUI `/save-workflows` → shared flush; web "Flush to disk" button calls `POST /api/overrides/flush` |
 | Skip/unchanged reporting on save | ✅ | ✅ | `flushSessionOverrides`/`saveSessionWorkflowsToUser` returns saved/skipped/unchanged; both TUI and web surface the report |
-| Agent health display | ✅ | ✅ | TUI doctor panel; web health chips |
+| Agent health display | ✅ | ✅ | TUI doctor panel + per-row readiness in the agent manager; web health chips |
+| Actionable readiness fixes + recheck | ✅ | ✅ | Both surface the install/login fix (structured `fixCommand` on doctor results) and re-run the doctor on demand. TUI: fix line + `r` recheck in the agent/API managers. Web: the **Agent & API setup** panel (opened from any health chip) with per-entry fix + one-click copy + Recheck; calm states (`binary_missing` / `key_missing`) collapse into a quiet summary chip in both UIs |
 | Re-route blocked steps to a ready agent | ✅ | ✅ | Shared `planAgentReroute` / `Orchestrator.planWorkflowReroute` (`src/workflow/reroute.ts`); TUI `/reroute` (stages session overrides) + blocked-preview hint, web sidebar `↷ via <agent>` badge + run strip + `reroute: true` on `POST /api/runs`, CLI `workflow run/plan --agent <id>` + blocked-run hint |
 | API health display (llm steps) | ✅ | ✅ | Shared `runApiDoctor`; TUI status bar `◆` entries, web health chips + `GET /api/doctor` `apis` |
 | Manage agent instances | ✅ | ✅ | TUI `/agent` + `/agents` manager (Ctrl+A); web config modal (agents/APIs default to global/`user` scope, per-row project override) |

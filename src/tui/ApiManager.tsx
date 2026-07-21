@@ -1,10 +1,21 @@
 import { Box, Text, useInput } from "ink";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { API_PROVIDER_IDS, apiScopeLabel } from "../apis";
 import type { ResolvedApiInstance } from "../apis";
 import type { ApiConfigScope } from "../config/types";
+import type { ApiDoctorResult, ApiDoctorStatus } from "../doctor";
 import type { ApiProviderId } from "../types/events";
+import { API_STATUS_STYLE } from "./theme";
 import { selectVisibleWindow } from "./workflow-list-window";
+
+/** Fuller readiness labels for the manager (the status bar uses terse ones). */
+const HEALTH_LABEL: Record<ApiDoctorStatus, string> = {
+  ok: "ready",
+  key_missing: "no key",
+  not_authenticated: "key rejected",
+  unreachable: "unreachable",
+  unknown_error: "error",
+};
 
 export interface ApiMutationResult {
   ok: boolean;
@@ -29,11 +40,15 @@ interface ApiManagerProps {
   scopes: ReadonlyMap<string, ApiConfigScope>;
   /** False when running with a custom --config file (no global layer). */
   canGlobal: boolean;
+  /** Live readiness per API instance; null while the first probe is running. */
+  apiDoctor?: ApiDoctorResult[] | null;
   width: number;
   height: number;
   onToggle: (id: string) => ApiMutationResult;
   onAdd: (request: ApiAddRequest) => ApiMutationResult;
   onDelete: (id: string) => ApiMutationResult;
+  /** Re-run the API readiness probes for the current instances (bound to `r`). */
+  onRecheck?: () => void;
   onClose: () => void;
 }
 
@@ -68,11 +83,13 @@ export function ApiManager({
   apis,
   scopes,
   canGlobal,
+  apiDoctor,
   width,
   height,
   onToggle,
   onAdd,
   onDelete,
+  onRecheck,
   onClose,
 }: ApiManagerProps) {
   const [index, setIndex] = useState(0);
@@ -82,6 +99,17 @@ export function ApiManager({
 
   const clamped = Math.min(index, Math.max(0, apis.length - 1));
   const selected = apis[clamped];
+
+  const healthById = useMemo(() => {
+    const map = new Map<string, ApiDoctorResult>();
+    for (const result of apiDoctor ?? []) map.set(result.api, result);
+    return map;
+  }, [apiDoctor]);
+  const selectedHealth = selected ? healthById.get(selected.id) : undefined;
+  const fix =
+    selectedHealth && selectedHealth.status !== "ok" && selectedHealth.detail
+      ? { detail: selectedHealth.detail, command: selectedHealth.fixCommand }
+      : null;
 
   useInput((input, key) => {
     if (form) {
@@ -112,6 +140,11 @@ export function ApiManager({
     }
     if ((key.return || input === " ") && selected) {
       setMessage(toMessage(onToggle(selected.id)));
+      return;
+    }
+    if (input === "r" && onRecheck) {
+      onRecheck();
+      setMessage({ level: "info", text: "rechecking API readiness…" });
       return;
     }
     if (input === "a") {
@@ -208,21 +241,34 @@ export function ApiManager({
     }
   }
 
-  const listBudget = Math.max(1, height - (message ? 5 : 4));
+  const fixHeight = form ? 0 : fix ? (fix.command ? 2 : 1) : 0;
+  const listBudget = Math.max(1, height - 4 - (message ? 1 : 0) - fixHeight);
   const window = selectVisibleWindow(apis, clamped, listBudget);
+  const readySummary = summarizeReadiness(apiDoctor);
+  const closeHint = onRecheck
+    ? "↑/↓ select · Enter toggle · a add · d delete · r recheck · Esc close"
+    : "↑/↓ select · Enter/Space toggle · a add · d delete · Esc close";
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} height={height}>
       <Box justifyContent="space-between">
-        <Text color="cyan" bold>
-          apis
-        </Text>
+        <Box>
+          <Text color="cyan" bold>
+            apis
+          </Text>
+          {readySummary ? (
+            <Text color="gray">
+              {"  "}
+              {readySummary}
+            </Text>
+          ) : null}
+        </Box>
         <Text color="gray">
           {form
             ? "↑/↓ field · ←/→ choose · Enter next/save · Esc cancel"
             : confirmDelete
               ? `delete '${confirmDelete}'? y/n`
-              : "↑/↓ select · Enter/Space toggle · a add · d delete · Esc close"}
+              : closeHint}
         </Text>
       </Box>
       {form ? (
@@ -237,6 +283,7 @@ export function ApiManager({
               key={api.id}
               api={api}
               scope={scopes.get(api.id)}
+              health={api.enabled ? healthById.get(api.id) : undefined}
               selected={window.start + offset === clamped}
               width={Math.max(20, width - 4)}
             />
@@ -246,6 +293,19 @@ export function ApiManager({
           ) : null}
         </Box>
       )}
+      {fix && selected ? (
+        <Box flexDirection="column">
+          <Text color="yellow" wrap="truncate-end">
+            fix {selected.id}: {fix.detail}
+          </Text>
+          {fix.command ? (
+            <Text color="cyan">
+              {"  $ "}
+              {fix.command}
+            </Text>
+          ) : null}
+        </Box>
+      ) : null}
       {message ? (
         <Text color={message.level === "error" ? "red" : "green"} wrap="truncate-end">
           {message.text}
@@ -255,14 +315,44 @@ export function ApiManager({
   );
 }
 
+/** Compact per-problem words for the header summary (rows show the full label). */
+const SHORT_HEALTH_LABEL: Record<ApiDoctorStatus, string> = {
+  ok: "ready",
+  key_missing: "no key",
+  not_authenticated: "rejected",
+  unreachable: "offline",
+  unknown_error: "error",
+};
+
+/** "2/4 ready · 1 no key" — null while the first probe is still running. */
+function summarizeReadiness(apiDoctor: ApiDoctorResult[] | null | undefined): string | null {
+  if (!apiDoctor || apiDoctor.length === 0) return apiDoctor === null ? "checking…" : null;
+  const counts = new Map<ApiDoctorStatus, number>();
+  for (const result of apiDoctor) counts.set(result.status, (counts.get(result.status) ?? 0) + 1);
+  const parts = [`${counts.get("ok") ?? 0}/${apiDoctor.length} ready`];
+  const problems: ApiDoctorStatus[] = [
+    "not_authenticated",
+    "unreachable",
+    "unknown_error",
+    "key_missing",
+  ];
+  for (const status of problems) {
+    const n = counts.get(status);
+    if (n) parts.push(`${n} ${SHORT_HEALTH_LABEL[status]}`);
+  }
+  return parts.join(" · ");
+}
+
 function ApiRow({
   api,
   scope,
+  health,
   selected,
   width: _width,
 }: {
   api: ResolvedApiInstance;
   scope: ApiConfigScope | undefined;
+  health: ApiDoctorResult | undefined;
   selected: boolean;
   width: number;
 }) {
@@ -279,6 +369,9 @@ function ApiRow({
       <Text color={selected ? "cyan" : "white"} bold={selected}>
         {api.id}
       </Text>
+      {health ? (
+        <Text color={API_STATUS_STYLE[health.status].color}> {HEALTH_LABEL[health.status]}</Text>
+      ) : null}
       <Text color="gray" wrap="truncate-end">
         {"  "}
         {apiScopeLabel(scope)}

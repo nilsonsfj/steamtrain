@@ -17,7 +17,12 @@ steamtrain --web-ui --read-only     # localhost share: view workflows/runs, no w
 
 The server starts listening immediately and prints its URL; agent health and
 llm-API readiness are probed in the background and the header's health chips
-fill in once they land (the page never blocks on the doctor). The project
+fill in once they land (the page never blocks on the doctor). Every chip is a
+button: click one to open the **Agent & API setup** panel, which lists each
+agent and endpoint with its status and — for anything not ready — the exact
+fix with a one-click copy and a Recheck button (the browser analog of
+`steamtrain init`'s readiness table). Agents that aren't installed collapse
+into one quiet chip so the header stays calm on a fresh machine. The project
 config page manages both [agent instances](agent-configuration.md) and the
 [API instances](api-configuration.md) direct-inference `llm` steps call.
 Agent and API edits default to **global** scope (`~/.steamtrain/config.json`),
