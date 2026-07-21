@@ -43,7 +43,7 @@ export {
   resolveAgentInstances,
   type ResolvedAgentInstance,
 } from "./config";
-export { KiroCliAdapter, KIRO_MODELS, buildKiroExecArgs, createKiroMapper } from "./kiro";
+export { KiroCliAdapter, KIRO_MODELS, buildKiroExecArgs, runKiroProcess } from "./kiro";
 export {
   AGENT_IDS,
   agentProviderFor,
