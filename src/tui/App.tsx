@@ -645,7 +645,7 @@ export function App({
     return () => {
       cancelled = true;
     };
-  }, [picker.workflowEntries, picker.pickerNav]);
+  }, [picker.workflowEntries]);
 
   // Drop Station chrome once the user leaves the tour preview / picker.
   useEffect(() => {

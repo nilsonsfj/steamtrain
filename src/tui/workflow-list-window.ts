@@ -120,8 +120,7 @@ export function selectVisibleWindowWeighted<T>(
   while (cost > totalBudget && end - start > 1) {
     if (selected > start && (selected >= end - 1 || start - selected <= end - 1 - selected)) {
       start += 1;
-      if (hiddenBefore === 0 && start > 0) hiddenBefore = start;
-      else if (hiddenBefore > 0) hiddenBefore = start;
+      if (start > 0) hiddenBefore = start;
     } else if (end - 1 > selected) {
       end -= 1;
       hiddenAfter = items.length - end;

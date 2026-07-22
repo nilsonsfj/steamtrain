@@ -206,6 +206,7 @@ export function useWorkflowPicker({
     return true;
   }, [pickerNav, workflowIndex, collapsedFolders, workflowEntries, pinTourFirst]);
 
+  // Explicit open/close counterpart to toggleSelectedFolder (← collapses, → expands).
   const setFolderCollapsed = useCallback(
     (source: WorkflowSourceKind, collapsed: boolean) => {
       if (collapsedFolders[source] === collapsed) return;

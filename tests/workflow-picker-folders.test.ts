@@ -96,6 +96,11 @@ describe("workflow picker folders", () => {
       nav.findIndex((row) => row.kind === "workflow" && row.entry.name === "delta"),
     );
     expect(nav[indexOfWorkflowOrFallback(nav, null)]?.kind).toBe("workflow");
+    // Unknown names fall back to the first workflow row (not create / header).
+    expect(nav[indexOfWorkflowOrFallback(nav, "ghost")]?.kind).toBe("workflow");
+    expect(indexOfWorkflowOrFallback(nav, "ghost")).toBe(
+      nav.findIndex((row) => row.kind === "workflow"),
+    );
   });
 
   it("sizes workflow rows by whether they have a description", () => {
