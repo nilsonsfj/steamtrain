@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { sanitizePathComponent } from "./fs-util";
+import type { LiveRunPublisher } from "./live-run";
 import type { LiveRunLaunch, LiveRunStore } from "./live-run-store";
 
 /**
@@ -159,4 +160,36 @@ export async function handoffRunToDetached(
       .catch(() => {});
   }
   return result;
+}
+
+export interface CompleteQuiescedHandoffOptions extends HandoffRunOptions {
+  /**
+   * The live-run publisher mirroring this run's event stream, if any. Only its
+   * `event`/`flush` methods are used — the terminal `finish` is deliberately
+   * skipped because the detached child owns the run's record from here on.
+   */
+  publisher?: Pick<LiveRunPublisher, "event" | "flush">;
+}
+
+/**
+ * Finish a mid-run detach for a run that has ALREADY been quiesced (paused with
+ * no step executing) and whose engine has been aborted for handoff. Both the
+ * TUI (`useWorkflowRunner`) and web (`WorkflowRunManager`) detach paths funnel
+ * through here so the "balance the pause, land the stream, hand off" sequence
+ * lives in one place and can't drift between the two surfaces; they differ only
+ * in how they report the {@link SpawnDetachedRunnerResult} to their UI.
+ *
+ * The quiescing pause pushed a `run_paused` into the mirrored stream, but the
+ * detached child's fresh engine won't emit a matching resume — so emit a
+ * synthetic `run_resumed` to balance it (the run really is about to continue in
+ * the background). Then flush every buffered event to disk so the child appends
+ * after them, and hand the run off under the same id.
+ */
+export async function completeQuiescedHandoff(
+  options: CompleteQuiescedHandoffOptions,
+): Promise<SpawnDetachedRunnerResult> {
+  const { publisher, ...handoff } = options;
+  publisher?.event({ kind: "run_resumed", by: "detach", ts: Date.now() });
+  await publisher?.flush().catch(() => {});
+  return handoffRunToDetached(handoff);
 }

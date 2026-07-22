@@ -21,13 +21,13 @@ import {
   WORKFLOW_HISTORY_DIR,
   WORKFLOW_RUNS_DIR,
   acquireRunSlot,
+  completeQuiescedHandoff,
   createLiveRunPublisher,
   createLiveRunStore,
   createNotifier,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   createWorkflowRunControl,
-  handoffRunToDetached,
   hashWorkflowSpec,
   isTerminalLiveRunStatus,
   newLiveRunMeta,
@@ -477,16 +477,13 @@ export function useWorkflowRunner({
           let handedOff = false;
           if (handingOff && handoff) {
             handoffRef.current = null;
-            // The quiescing pause emitted a `run_paused` into the mirrored
-            // stream; the detached child's fresh engine won't emit a matching
-            // resume, so balance it here — the run really is about to continue.
-            publisher?.event({ kind: "run_resumed", by: "detach", ts: Date.now() });
-            // Flush events buffered before the handoff so they land before the
-            // detached child starts appending to the same stream.
-            await publisher?.flush().catch(() => {});
-            let spawned: Awaited<ReturnType<typeof handoffRunToDetached>>;
+            let spawned: Awaited<ReturnType<typeof completeQuiescedHandoff>>;
             try {
-              spawned = await handoffRunToDetached({
+              // Balance the quiescing pause (run_resumed), flush the mirror, and
+              // hand off — all in the shared helper so this stays in lockstep
+              // with the web path.
+              spawned = await completeQuiescedHandoff({
+                publisher,
                 store: liveStore,
                 runId,
                 cwd,
@@ -518,7 +515,7 @@ export function useWorkflowRunner({
                 attachRunRef.current?.(runId);
               }
             } else {
-              // Handoff failed: handoffRunToDetached already settled the live
+              // Handoff failed: completeQuiescedHandoff already settled the live
               // meta as errored. Record history so the partial run isn't lost.
               try {
                 await historyStoreRef.current.save(

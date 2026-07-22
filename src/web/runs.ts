@@ -28,10 +28,10 @@ import {
   type WorkflowRunControl,
   type WorkflowSpec,
   acquireRunSlot,
+  completeQuiescedHandoff,
   createLiveRunPublisher,
   createNotifier,
   createWorkflowRunControl,
-  handoffRunToDetached,
   hashWorkflowSpec,
   isRerunError,
   matchApprovalKey,
@@ -431,14 +431,8 @@ export class WorkflowRunManager {
    */
   private async finishHandoff(run: Run, publisher?: LiveRunPublisher): Promise<boolean> {
     if (!this.liveRuns || !run.handoff) return false;
-    // The quiescing pause emitted a `run_paused` into the mirrored stream; the
-    // detached child's fresh engine won't emit a matching resume, so balance it
-    // here — the run really is about to continue in the background.
-    publisher?.event({ kind: "run_resumed", by: "detach", ts: Date.now() });
-    // Land every event recorded so far before the detached child appends to the
-    // same stream.
-    await publisher?.flush().catch(() => {});
-    const spawned = await handoffRunToDetached({
+    const spawned = await completeQuiescedHandoff({
+      publisher,
       store: this.liveRuns,
       runId: run.id,
       cwd: this.cwd,
