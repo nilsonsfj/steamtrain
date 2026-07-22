@@ -184,8 +184,21 @@ function stripContextSuffix(model: string): string {
   return model.replace(/\[1m\]$/, "");
 }
 
+/**
+ * Claude-specific: map Kiro dotted version ids (`claude-opus-4.8`) onto the
+ * dash form used by Claude effort tables (`claude-opus-4-8`). Non-Claude ids
+ * (e.g. `gpt-5.6-sol`) are left unchanged. Current catalogs use single-digit
+ * version components (`4.8`, `4.5`); multi-digit minors still normalize
+ * correctly via successive digit matches (`4.10` → `4-10`).
+ */
+function normalizeClaudeVersionId(model: string): string {
+  const stripped = stripContextSuffix(model);
+  if (!stripped.startsWith("claude-")) return stripped;
+  return stripped.replace(/(\d)\.(\d)/g, "$1-$2");
+}
+
 function claudeEfforts(model: string): readonly string[] {
-  const m = stripContextSuffix(model);
+  const m = normalizeClaudeVersionId(model);
 
   if (m === "opus" || m === "best" || m === "opusplan") {
     return CLAUDE_OPUS_48_47_EFFORTS;

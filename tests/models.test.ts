@@ -43,33 +43,59 @@ describe("amp modes", () => {
 });
 
 describe("kiro models", () => {
-  it("exposes kiro models with sonnet as the default", () => {
+  it("exposes kiro-cli native model ids with claude-sonnet-5 as the default", () => {
     expect(modelIdsForAgent("kiro")).toEqual([
       "auto",
-      "sonnet",
-      "opus",
-      "haiku",
       "claude-sonnet-5",
-      "claude-opus-4-8",
-      "claude-haiku-4-5",
+      "claude-opus-4.8",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "claude-opus-4.7",
+      "claude-opus-4.6",
+      "claude-sonnet-4.6",
+      "claude-opus-4.5",
+      "claude-sonnet-4.5",
+      "claude-sonnet-4",
+      "claude-haiku-4.5",
+      "deepseek-3.2",
+      "minimax-m2.5",
+      "minimax-m2.1",
+      "glm-5",
+      "qwen3-coder-next",
     ]);
-    expect(defaultModelForAgent("kiro")).toBe("sonnet");
-    expect(modelNameForAgent("kiro", "sonnet")).toBe("Sonnet (latest)");
+    expect(defaultModelForAgent("kiro")).toBe("claude-sonnet-5");
     expect(modelNameForAgent("kiro", "claude-sonnet-5")).toBe("Claude Sonnet 5");
+    expect(modelNameForAgent("kiro", "claude-haiku-4.5")).toBe("Claude Haiku 4.5");
     expect(modelNameForAgent("kiro", "auto")).toBe("Auto");
+    // Claude short aliases are not valid kiro-cli model ids.
+    expect(modelIdsForAgent("kiro")).not.toContain("haiku");
+    expect(modelIdsForAgent("kiro")).not.toContain("sonnet");
+    expect(modelIdsForAgent("kiro")).not.toContain("opus");
+    expect(modelIdsForAgent("kiro")).not.toContain("claude-haiku-4-5");
   });
 
-  it("reuses claude efforts for kiro models", () => {
-    expect(effortsForModel("kiro", "sonnet")).toEqual(["low", "medium", "high", "max"]);
-    expect(effortsForModel("kiro", "opus")).toEqual(["low", "medium", "high", "xhigh", "max"]);
-    expect(effortsForModel("kiro", "haiku")).toEqual([]);
-    expect(supportsEffort("kiro", "sonnet")).toBe(true);
-    expect(supportsEffort("kiro", "haiku")).toBe(false);
+  it("reuses claude efforts for dotted kiro model ids", () => {
+    expect(effortsForModel("kiro", "claude-sonnet-5")).toEqual(["low", "medium", "high", "max"]);
+    expect(effortsForModel("kiro", "claude-opus-4.8")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+    expect(effortsForModel("kiro", "claude-haiku-4.5")).toEqual([]);
+    expect(effortsForModel("kiro", "claude-sonnet-4")).toEqual([]);
+    // Non-Claude Kiro models must not pick up Claude effort tables.
+    expect(effortsForModel("kiro", "gpt-5.6-sol")).toEqual([]);
+    expect(effortsForModel("kiro", "auto")).toEqual([]);
+    expect(supportsEffort("kiro", "claude-sonnet-5")).toBe(true);
+    expect(supportsEffort("kiro", "claude-haiku-4.5")).toBe(false);
   });
 
   it("keeps effort when switching kiro models only if supported", () => {
-    expect(effortForModelChange("kiro", "sonnet", "high")).toBe("high");
-    expect(effortForModelChange("kiro", "haiku", "high")).toBeUndefined();
+    expect(effortForModelChange("kiro", "claude-sonnet-5", "high")).toBe("high");
+    expect(effortForModelChange("kiro", "claude-haiku-4.5", "high")).toBeUndefined();
   });
 });
 
@@ -155,7 +181,7 @@ describe("model names", () => {
     expect(defaultModelForAgent("codex")).toBe("gpt-5.5");
     expect(defaultModelForAgent("opencode")).toBe("opencode/mimo-v2.5-free");
     expect(defaultModelForAgent("amp")).toBe("smart");
-    expect(defaultModelForAgent("kiro")).toBe("sonnet");
+    expect(defaultModelForAgent("kiro")).toBe("claude-sonnet-5");
   });
 
   it("falls back to the static OpenCode catalog when cache is empty", () => {
