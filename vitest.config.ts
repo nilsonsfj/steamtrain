@@ -4,8 +4,11 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
-    testTimeout: 10_000,
-    hookTimeout: 10_000,
+    // Git worktree / merge suites routinely need >10s under parallel CI load
+    // (spawn + multiple worktree add/remove). Keep hooks in sync so setup
+    // fixtures do not time out first.
+    testTimeout: 60_000,
+    hookTimeout: 60_000,
     coverage: {
       provider: "v8",
     },
