@@ -301,6 +301,8 @@ export async function* runAntigravityProcess(
           agent: id,
           ts,
           message: `'${binary}' timed out after ${opts.timeoutMs! / 1000}s`,
+          category: "transient",
+          timedOut: true,
           stderr: stderr || undefined,
           code: item.code,
         };

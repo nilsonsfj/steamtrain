@@ -18,7 +18,8 @@ type Outcome =
   | { kind: "quota-result"; message?: string }
   | { kind: "rate-limit-result"; message?: string }
   | { kind: "result-error"; message?: string }
-  | { kind: "tool-then-quota"; message?: string };
+  | { kind: "tool-then-quota"; message?: string }
+  | { kind: "tool-then-timeout"; message?: string };
 
 function modelScriptedDeps(
   script: Record<string, Outcome[]>,
@@ -105,6 +106,18 @@ function modelScriptedDeps(
           kind: "result",
           text: message,
           isError: true,
+          agent: id,
+          ts: Date.now(),
+        };
+        return;
+      }
+      if (outcome.kind === "tool-then-timeout") {
+        yield { kind: "tool_use", name: "Bash", agent: id, ts: Date.now() };
+        yield {
+          kind: "error",
+          message: outcome.message ?? `'${id}' timed out after 30s`,
+          category: "transient",
+          timedOut: true,
           agent: id,
           ts: Date.now(),
         };
@@ -312,6 +325,46 @@ describe("mid-flight model failover on capacity errors", () => {
     const { ok } = await drain(spec, deps);
     expect(ok).toBe(false);
     expect(calls).toHaveLength(1);
+  });
+
+  it("fails over after a process timeout even when tools already ran", async () => {
+    const calls: Array<{ agent: string; model: string }> = [];
+    const deps = modelScriptedDeps(
+      {
+        "claude::primary-model": [{ kind: "tool-then-timeout" }],
+        "claude::claude-sonnet-5": [{ kind: "ok", text: "recovered-after-timeout" }],
+      },
+      calls,
+    );
+    const spec: WorkflowSpec = {
+      name: "timeout-after-tools",
+      description: "d",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            {
+              id: "a",
+              kind: "worker",
+              agent: "claude",
+              model: "primary-model",
+              fallbackModels: ["claude-sonnet-5"],
+              prompt: "do work",
+              retry: fastRetry,
+              modelFailover: { failoverDelayMs: 1 },
+            },
+          ],
+        },
+      ],
+    };
+    const { ok, cache } = await drain(spec, deps);
+    expect(ok).toBe(true);
+    expect(calls.map((c) => `${c.agent}/${c.model}`)).toEqual([
+      "claude/primary-model",
+      "claude/claude-sonnet-5",
+    ]);
+    expect(cache.get("a")?.output).toBe("recovered-after-timeout");
   });
 
   it("honors allowAfterToolUse for capacity failover", async () => {

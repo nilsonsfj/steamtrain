@@ -133,6 +133,8 @@ export async function* runKiroProcess(params: RunKiroProcessParams): AsyncGenera
           message: `'${binary}' timed out after ${opts.timeoutMs! / 1000}s`,
           stderr: stderr || undefined,
           code: item.code,
+          category: "transient",
+          timedOut: true,
         };
         return;
       }

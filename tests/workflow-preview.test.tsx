@@ -70,7 +70,7 @@ describe("WorkflowPreview", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toMatch(/▶.*synthes/i);
     expect(frame).toContain("synthesize");
-    expect(frame).toContain("DeepSeek V4 Flash Free");
+    expect(frame).toContain("MiMo Auto");
   });
 
   it("hides step detail panel when showStepDetail is false", () => {
@@ -127,7 +127,7 @@ describe("WorkflowPreview", () => {
     expect(frame).toContain("workflow preview · mainline");
     expect(frame).toContain("ready to run");
     // Defaults are applied for display (not raw {{inputs.*}} placeholders).
-    expect(frame).toContain("deepseek-v4-flash-free");
+    expect(frame).toContain("mimo-auto");
     expect(frame).not.toContain("{{inputs.");
     // Classic Ink wrap-overlap artifacts from the broken preview.
     expect(frame).not.toContain("rModel}}");
@@ -241,7 +241,7 @@ describe("preview input resolution", () => {
       },
       { inputs },
     );
-    expect(runner).toContain("deepseek-v4-flash-free");
+    expect(runner).toContain("mimo-auto");
     expect(runner).not.toContain("{{inputs.");
     expect(runner).not.toMatch(/·\s*$/);
     expect(specDetailLines(plan, { inputs }).some((line) => line.startsWith("effort:"))).toBe(

@@ -6,22 +6,27 @@ import type { WorkflowSpec } from "./types";
  * of models) that fan out, then an independent model cross-checks the results
  * before they converge into one answer.
  *
- * Agent-backed steps default to OpenCode Zen free-tier models (`opencode/…-free`)
- * so bundled workflows run without paid provider credentials. Steps run in the
- * session cwd by default — to target other repos/dirs, add a per-step `cwd`
- * (and optional `env` / `extraArgs`), e.g.:
+ * Agent-backed steps default to free-tier models so bundled workflows run
+ * without paid provider credentials. Prefer first-class `mimo/mimo-auto` for
+ * tool-heavy steps: OpenCode Zen's `opencode/deepseek-v4-flash-free` is known
+ * to hang on multi-turn tool loops (DeepSeek `reasoning_content` replay).
+ * Steps run in the session cwd by default — to target other repos/dirs, add a
+ * per-step `cwd` (and optional `env` / `extraArgs`), e.g.:
  *
- *   { id: "scan-api", agent: "opencode", model: "opencode/deepseek-v4-flash-free",
+ *   { id: "scan-api", model: "mimo/mimo-auto",
  *     cwd: "../api-service", env: { FOO: "bar" }, extraArgs: ["--add-dir", "."],
  *     prompt: "Audit {{input}} in this repo" }
  */
 
-/** OpenCode Zen free models — see https://opencode.ai/zen/v1/models */
+/** Free models used by bundled workflows (OpenCode Zen + MiMo Auto). */
 const FREE = {
   nemotronUltra: "opencode/nemotron-3-ultra-free",
-  deepseekFlash: "opencode/deepseek-v4-flash-free",
-  mimo: "opencode/mimo-v2.5-free",
+  mimoZen: "opencode/mimo-v2.5-free",
+  /** First-class MiMo CLI free channel — reliable default for agent tool use. */
+  mimoAuto: "mimo/mimo-auto",
   northMini: "opencode/north-mini-code-free",
+  // Intentionally omit opencode/deepseek-v4-flash-free: it hangs on multi-turn
+  // tool loops (DeepSeek reasoning_content replay) and was timing out babysit.
 } as const;
 
 const multiPlan: WorkflowSpec = {
@@ -60,7 +65,7 @@ const multiPlan: WorkflowSpec = {
           id: "draft-pragmatic",
           kind: "worker",
           agent: "opencode",
-          model: FREE.mimo,
+          model: FREE.mimoZen,
           dependsOn: ["planning-lenses"],
           prompt:
             "Draft a concise, step-by-step implementation plan for the task below. Optimize for speed of delivery and pragmatism; call out the riskiest assumptions.\n\nPlanning lenses:\n{{steps.planning-lenses.items}}\n\nTask: {{input}}",
@@ -89,8 +94,8 @@ const multiPlan: WorkflowSpec = {
         {
           id: "synthesize",
           kind: "consolidator",
-          agent: "opencode",
-          model: FREE.deepseekFlash,
+          agent: "mimo",
+          model: FREE.mimoAuto,
           dependsOn: ["draft-correctness", "draft-pragmatic", "critique"],
           prompt:
             "Using the two drafts and the critique below, produce a single, final implementation plan that takes the strongest parts of each and addresses the critique. Output only the final plan.\n\nTask: {{input}}\n\n--- PLAN A ---\n{{steps.draft-correctness.output}}\n\n--- PLAN B ---\n{{steps.draft-pragmatic.output}}\n\n--- CRITIQUE ---\n{{steps.critique.output}}",
@@ -112,8 +117,8 @@ const bugHunt: WorkflowSpec = {
         {
           id: "scan-logic",
           kind: "worker",
-          agent: "opencode",
-          model: FREE.deepseekFlash,
+          agent: "mimo",
+          model: FREE.mimoAuto,
           prompt:
             "Hunt for logic and edge-case bugs in the scope below: off-by-one errors, incorrect conditionals, unhandled cases, race conditions. For each finding give file:line, why it's a bug, and a fix. Scope: {{input}}",
         },
@@ -121,7 +126,7 @@ const bugHunt: WorkflowSpec = {
           id: "scan-errors",
           kind: "worker",
           agent: "opencode",
-          model: FREE.mimo,
+          model: FREE.mimoZen,
           prompt:
             "Hunt for error-handling and resource bugs in the scope below: swallowed errors, missing awaits, leaked handles/processes, unchecked failures. For each finding give file:line, the risk, and a fix. Scope: {{input}}",
         },
@@ -171,8 +176,8 @@ const bugHunt: WorkflowSpec = {
         {
           id: "report",
           kind: "consolidator",
-          agent: "opencode",
-          model: FREE.deepseekFlash,
+          agent: "mimo",
+          model: FREE.mimoAuto,
           dependsOn: ["cross-check", "findings-ready"],
           prompt:
             "Turn the verified findings below into a prioritized report (highest-severity first). For each: a one-line summary, file:line, severity, and the recommended fix. Output only the report.\n\n{{steps.cross-check.output}}",
@@ -209,8 +214,8 @@ const targetSweep: WorkflowSpec = {
         {
           id: "sweep-each",
           kind: "processor",
-          agent: "opencode",
-          model: FREE.deepseekFlash,
+          agent: "mimo",
+          model: FREE.mimoAuto,
           dependsOn: ["targets"],
           forEach: "steps.targets.items",
           prompt:
@@ -226,7 +231,7 @@ const targetSweep: WorkflowSpec = {
           id: "report",
           kind: "consolidator",
           agent: "opencode",
-          model: FREE.mimo,
+          model: FREE.mimoZen,
           dependsOn: ["sweep-each"],
           prompt:
             "Merge the per-target analyses below into one prioritized report. Deduplicate overlap and keep concrete action items.\n\n{{steps.sweep-each.output}}",
@@ -248,7 +253,7 @@ const reviewLoop: WorkflowSpec = {
           id: "impl",
           kind: "worker",
           agent: "opencode",
-          model: FREE.mimo,
+          model: FREE.mimoZen,
           prompt: "Implement the task fully:\n{{input}}",
         },
       ],
@@ -261,7 +266,7 @@ const reviewLoop: WorkflowSpec = {
           id: "review",
           kind: "worker",
           agent: "opencode",
-          model: FREE.mimo,
+          model: FREE.mimoZen,
           dependsOn: ["impl"],
           // `attach` (not `inherit`) — review runs INSIDE impl's own worktree
           // rather than a copy of it. This is what makes the loop converge:
@@ -285,7 +290,7 @@ const reviewLoop: WorkflowSpec = {
           id: "fix",
           kind: "worker",
           agent: "opencode",
-          model: FREE.mimo,
+          model: FREE.mimoZen,
           dependsOn: ["review"],
           // Also attach:impl (not attach:review / inherit:review) — impl is
           // the one worktree the whole loop shares. fix's dependsOn on review
@@ -595,14 +600,14 @@ const mainlineStream: WorkflowSpec = {
     coderModel: {
       type: "model",
       description: "Agent model that implements the charter and applies review fixes.",
-      default: FREE.mimo,
-      fallbackModels: [FREE.deepseekFlash, FREE.northMini],
+      default: FREE.mimoAuto,
+      fallbackModels: [FREE.mimoZen, FREE.northMini],
     },
     reviewerModel: {
       type: "model",
       description: "Agent model that reviews the diff each loop iteration.",
       default: FREE.nemotronUltra,
-      fallbackModels: [FREE.deepseekFlash, FREE.mimo],
+      fallbackModels: [FREE.mimoAuto, FREE.mimoZen],
     },
     reviewerEffort: {
       description: "Reasoning effort/variant for the reviewer model. Empty omits the flag.",
@@ -633,7 +638,6 @@ const mainlineStream: WorkflowSpec = {
         {
           id: "implement",
           kind: "worker",
-          agent: "opencode",
           model: "{{inputs.coderModel}}",
           prompt:
             "Implement ONLY this stream's charter. Stay strictly inside its scope — if you notice a broken or wrong pre-existing behavior OUTSIDE the charter, do NOT fix it: record it as a finding instead and leave the code alone.\n\n" +
@@ -669,7 +673,6 @@ const mainlineStream: WorkflowSpec = {
         {
           id: "review",
           kind: "worker",
-          agent: "opencode",
           model: "{{inputs.reviewerModel}}",
           effort: "{{inputs.reviewerEffort}}",
           dependsOn: ["implement"],
@@ -719,7 +722,6 @@ const mainlineStream: WorkflowSpec = {
         {
           id: "fix",
           kind: "worker",
-          agent: "opencode",
           model: "{{inputs.coderModel}}",
           dependsOn: ["review"],
           workspace: "attach:implement",
@@ -838,8 +840,8 @@ const mainline: WorkflowSpec = {
     plannerModel: {
       type: "model",
       description: "Agent model that splits the prompt into independent streams.",
-      default: FREE.deepseekFlash,
-      fallbackModels: [FREE.mimo, FREE.northMini],
+      default: FREE.mimoAuto,
+      fallbackModels: [FREE.mimoZen, FREE.northMini],
     },
     plannerEffort: {
       description: "Reasoning effort/variant for the planner model. Empty omits the flag.",
@@ -848,14 +850,14 @@ const mainline: WorkflowSpec = {
     coderModel: {
       type: "model",
       description: "Agent model that implements each stream and the final fixes.",
-      default: FREE.mimo,
-      fallbackModels: [FREE.deepseekFlash, FREE.northMini],
+      default: FREE.mimoAuto,
+      fallbackModels: [FREE.mimoZen, FREE.northMini],
     },
     reviewerModel: {
       type: "model",
       description: "Agent model that reviews each stream and the final merge.",
       default: FREE.nemotronUltra,
-      fallbackModels: [FREE.deepseekFlash, FREE.mimo],
+      fallbackModels: [FREE.mimoAuto, FREE.mimoZen],
     },
     reviewerEffort: {
       description: "Reasoning effort/variant for the reviewer model. Empty omits the flag.",
@@ -865,7 +867,7 @@ const mainline: WorkflowSpec = {
       type: "model",
       description: "Agent model that resolves merge conflicts between streams, if any arise.",
       default: FREE.northMini,
-      fallbackModels: [FREE.mimo, FREE.deepseekFlash],
+      fallbackModels: [FREE.mimoAuto, FREE.mimoZen],
     },
     maxStreams: {
       type: "number",
@@ -903,7 +905,6 @@ const mainline: WorkflowSpec = {
         {
           id: "plan",
           kind: "distributor",
-          agent: "opencode",
           model: "{{inputs.plannerModel}}",
           effort: "{{inputs.plannerEffort}}",
           itemsPath: "streams",
@@ -989,7 +990,6 @@ const mainline: WorkflowSpec = {
           from: ["streams"],
           mode: "worktree",
           onConflict: "agent",
-          agent: "opencode",
           model: "{{inputs.mergeModel}}",
           commitMessage: "mainline: integrate streams for {{input}}",
         },
@@ -1002,7 +1002,6 @@ const mainline: WorkflowSpec = {
         {
           id: "final-review",
           kind: "worker",
-          agent: "opencode",
           model: "{{inputs.reviewerModel}}",
           effort: "{{inputs.reviewerEffort}}",
           dependsOn: ["integrate"],
@@ -1053,7 +1052,6 @@ const mainline: WorkflowSpec = {
         {
           id: "final-fix",
           kind: "worker",
-          agent: "opencode",
           model: "{{inputs.coderModel}}",
           dependsOn: ["final-review"],
           workspace: "attach:integrate",
@@ -1210,8 +1208,8 @@ const babysitPr: WorkflowSpec = {
     babysitterModel: {
       type: "model",
       description: "Agent model that prepares the PR (does not merge).",
-      default: FREE.deepseekFlash,
-      fallbackModels: [FREE.mimo, FREE.northMini],
+      default: FREE.mimoAuto,
+      fallbackModels: [FREE.mimoZen, FREE.northMini],
     },
     checksTimeoutSec: {
       type: "number",
@@ -1240,7 +1238,8 @@ const babysitPr: WorkflowSpec = {
         {
           id: "prepare",
           kind: "processor",
-          agent: "opencode",
+          // Model-only: babysitterModel may be mimo/* or opencode/* — agent
+          // follows the rendered model family at execute time.
           model: "{{inputs.babysitterModel}}",
           // Conflict resolution + CI fixes routinely exceed the 15m default;
           // match the land-step budget so prepare is not cut mid-push.
@@ -1308,8 +1307,8 @@ const babysitAllPrs: WorkflowSpec = {
     babysitterModel: {
       type: "model",
       description: "Agent model that lists PRs and prepares each one (does not merge).",
-      default: FREE.deepseekFlash,
-      fallbackModels: [FREE.mimo, FREE.northMini],
+      default: FREE.mimoAuto,
+      fallbackModels: [FREE.mimoZen, FREE.northMini],
     },
     checksTimeoutSec: {
       type: "number",
@@ -1338,7 +1337,7 @@ const babysitAllPrs: WorkflowSpec = {
         {
           id: "list-prs",
           kind: "distributor",
-          agent: "opencode",
+          // Model-only so {{inputs.babysitterModel}} can select mimo or opencode.
           model: "{{inputs.babysitterModel}}",
           itemsPath: "prs",
           prompt:
