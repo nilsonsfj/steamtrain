@@ -19,6 +19,7 @@ model and diagrams, see [`workflow-overview.md`](workflow-overview.md).
 | audit many repos/services | distributor + `forEach` + gate | README `audit` example |
 | compose another workflow as one stage | `workflow` step | `release` |
 | plan → parallel streams → staged merge → PR | `workflow` forEach + merge `mode: "worktree"` + `attach:` | `mainline` |
+| babysit open PRs without racing external CI | `workflow` forEach + `workflow pr merge-when-ready` | `babysit-all-prs` / `babysit-pr` |
 
 ---
 
@@ -513,6 +514,27 @@ It is also a useful smoke test for a new install or a CI environment: it runs
 with zero credentials and exits non-zero only if the engine itself is broken.
 Read its spec in `src/workflow/bundled.ts` — every block it rides is a pattern
 from this document, in agentless form.
+
+### Babysitting open PRs without racing external CI
+
+Agents that merge as soon as GitHub says `mergeable` will delete the head
+branch while non-required checks (remote review bots especially) are still
+queued. Those jobs then fail with `fatal: couldn't find remote ref <branch>`.
+
+The bundled `babysit-all-prs` / `babysit-pr` workflows split the work:
+
+1. An agent **prepares** each PR (rebase, address comments, push) and is
+   forbidden from merging or deleting the remote branch.
+2. A deterministic command step runs
+   `steamtrain workflow pr merge-when-ready <pr>`, which polls
+   `statusCheckRollup` until every check is terminal (treating an empty
+   rollup right after a push as "not registered yet"), then merges.
+
+```bash
+steamtrain workflow run babysit-all-prs --input "land open PRs"
+steamtrain workflow pr wait-checks 123
+steamtrain workflow pr merge-when-ready 123 --strategy squash
+```
 
 ### TUI
 

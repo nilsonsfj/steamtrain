@@ -201,6 +201,19 @@ or disjoint, never partially overlapping.
   a FINAL merge step no later step references). Add a final merge step to any
   workflow whose agents EDIT files (implement/fix/refactor) — without one the
   edits stay stranded in worktrees. Review-only workflows don't need it.
+  IMPORTANT — landing an EXISTING GitHub PR is NOT the merge step. The merge
+  step only OPENS a PR (mode "pr"); it never runs \`gh pr merge\` or deletes a
+  remote head branch. When a workflow babysits / lands open PRs:
+  1. Let the agent prepare (rebase, address comments, push) but FORBID merge
+     and remote branch deletion in the prompt.
+  2. Land with a command step calling
+     \`steamtrain workflow pr merge-when-ready <pr>\` (or \`wait-checks\` then
+     merge). That waits for EVERY statusCheckRollup entry — including
+     non-required external review bots — and only then merges + deletes the
+     branch. GitHub's "mergeable" flag alone is NOT enough; merging while a
+     remote review is still queued makes it fail with
+     "couldn't find remote ref". Prefer the bundled \`babysit-pr\` /
+     \`babysit-all-prs\` pattern over letting an agent run \`gh pr merge\` itself.
 - "workflow": invoke another named workflow as a child run. Requires "workflow"
   (the catalog name); optional "input" becomes the child's {{input}} and
   "outputStep" selects which child step's output becomes this step's output.
