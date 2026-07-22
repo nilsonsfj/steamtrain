@@ -33,7 +33,7 @@ an agent hits quota, rate limits, or other configured failures — see
 [Model binding](model-binding.md#configuring-mid-flight-model-failover). Workflow
 and per-step `modelFailover` override it.
 
-Valid providers: `claude`, `opencode`, `codex`, `cursor`, `antigravity`, `amp`, `kiro`. An instance reuses its
+Valid providers: `claude`, `opencode`, `codex`, `cursor`, `antigravity`, `amp`, `kiro`, `mimo`. An instance reuses its
 provider's adapter; `binary` is only needed when the executable name differs
 from the provider (e.g. a fork).
 

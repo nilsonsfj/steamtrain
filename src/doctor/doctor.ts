@@ -298,6 +298,11 @@ function installHint(agent: AgentProviderId): FixHint {
           "Install Kiro CLI (curl -fsSL https://cli.kiro.dev/install | bash) and ensure `kiro-cli` is on PATH.",
         command: "curl -fsSL https://cli.kiro.dev/install | bash",
       };
+    case "mimo":
+      return {
+        detail: "Install Mimo (npm i -g mimo-ai) and ensure `mimo` is on PATH.",
+        command: "npm i -g mimo-ai",
+      };
     case "cursor":
       return {
         detail:
@@ -340,6 +345,11 @@ function authHint(agent: AgentProviderId): FixHint {
       return {
         detail: "Run `kiro-cli login`, or set KIRO_API_KEY for non-interactive use.",
         command: "kiro-cli login",
+      };
+    case "mimo":
+      return {
+        detail: "Run `mimo auth login` for the provider you want to use.",
+        command: "mimo auth login",
       };
     case "cursor":
       return {

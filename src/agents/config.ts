@@ -7,6 +7,7 @@ const AGENT_PROVIDER_IDS: readonly AgentProviderId[] = [
   "codex",
   "amp",
   "kiro",
+  "mimo",
   "cursor",
   "antigravity",
 ];
@@ -17,6 +18,7 @@ export const DEFAULT_AGENT_BINARY: Record<AgentProviderId, string> = {
   codex: "codex",
   amp: "amp",
   kiro: "kiro-cli",
+  mimo: "mimo",
   cursor: "agent",
   antigravity: "agy",
 };

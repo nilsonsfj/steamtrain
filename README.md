@@ -656,7 +656,7 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
   [`docs/model-binding.md`](docs/model-binding.md) and
   [`docs/workflow-spec.md#workflow-inputs`](docs/workflow-spec.md#workflow-inputs).
   Agents:
-  `claude` | `opencode` | `codex` | `cursor` | `antigravity` | `amp` | `kiro`.
+  `claude` | `opencode` | `codex` | `cursor` | `antigravity` | `amp` | `kiro` | `mimo`.
   Also optional: `cwd` (the **target** dir; relative paths resolve against the
   launch cwd), `env` (extra vars), and `extraArgs` (extra CLI flags).
 - **Dynamic fan-out:** add `forEach: "steps.<id>.items"` to a worker/processor

@@ -99,6 +99,33 @@ describe("kiro models", () => {
   });
 });
 
+describe("mimo models", () => {
+  it("mirrors the OpenCode catalog with mimo/mimo-go prefixes and a free default", () => {
+    expect(modelIdsForAgent("mimo")).toEqual(
+      OPENCODE_MODELS.map((model) =>
+        model.id.startsWith("opencode-go/")
+          ? `mimo-go/${model.id.slice("opencode-go/".length)}`
+          : `mimo/${model.id.slice("opencode/".length)}`,
+      ),
+    );
+    expect(defaultModelForAgent("mimo")).toBe("mimo/mimo-v2.5-free");
+    expect(modelNameForAgent("mimo", "mimo/claude-sonnet-5")).toBe("Claude Sonnet 5");
+  });
+
+  it("reuses opencode effort heuristics", () => {
+    expect(effortsForModel("mimo", "mimo/claude-sonnet-5")).toEqual(["high", "max"]);
+    expect(effortsForModel("mimo", "mimo/gpt-5.5")).toEqual([
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+    expect(supportsEffort("mimo", "mimo/claude-sonnet-5")).toBe(true);
+  });
+});
+
 describe("model names", () => {
   beforeEach(() => {
     clearCodexVariantCacheForTests();
@@ -182,6 +209,7 @@ describe("model names", () => {
     expect(defaultModelForAgent("opencode")).toBe("opencode/mimo-v2.5-free");
     expect(defaultModelForAgent("amp")).toBe("smart");
     expect(defaultModelForAgent("kiro")).toBe("claude-sonnet-5");
+    expect(defaultModelForAgent("mimo")).toBe("mimo/mimo-v2.5-free");
   });
 
   it("falls back to the static OpenCode catalog when cache is empty", () => {
