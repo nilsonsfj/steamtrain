@@ -1,7 +1,7 @@
 import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
 import { WorkflowPicker } from "../src/tui/WorkflowPicker";
-import { DEFAULT_FOLDER_COLLAPSE } from "../src/tui/workflow-picker-model";
+import { DEFAULT_FOLDER_COLLAPSE, buildWorkflowPickerNav } from "../src/tui/workflow-picker-model";
 import { BUNDLED_WORKFLOWS } from "../src/workflow";
 import type { WorkflowCatalogEntry } from "../src/workflow";
 
@@ -29,11 +29,28 @@ const mixed: WorkflowCatalogEntry[] = [
   entry("delta-user", "user"),
 ];
 
+function renderPicker(
+  workflows: WorkflowCatalogEntry[],
+  selectedIndex: number,
+  height: number,
+  collapsed = DEFAULT_FOLDER_COLLAPSE,
+  stationLanding = false,
+) {
+  const nav = buildWorkflowPickerNav(workflows, collapsed, { pinTourFirst: stationLanding });
+  return render(
+    <WorkflowPicker
+      workflows={workflows}
+      nav={nav}
+      selectedIndex={selectedIndex}
+      height={height}
+      stationLanding={stationLanding}
+    />,
+  );
+}
+
 describe("WorkflowPicker create affordance", () => {
   it("always renders a selectable create row after the workflows", () => {
-    const { lastFrame } = render(
-      <WorkflowPicker workflows={mixed} selectedIndex={1} height={40} />,
-    );
+    const { lastFrame } = renderPicker(mixed, 1, 40);
     const frame = lastFrame() ?? "";
     expect(frame).toContain("gamma-project");
     expect(frame).toContain("+ Create a new workflow…");
@@ -43,32 +60,26 @@ describe("WorkflowPicker create affordance", () => {
   it("highlights the create row when it is selected (last nav index)", () => {
     // project header, gamma, user header, beta, delta, bundled header, alpha, create
     const createIndex = 7;
-    const { lastFrame } = render(
-      <WorkflowPicker workflows={mixed} selectedIndex={createIndex} height={40} />,
-    );
+    const { lastFrame } = renderPicker(mixed, createIndex, 40);
     const frame = lastFrame() ?? "";
     expect(frame).toMatch(/▶\s+\+ Create a new workflow…/);
   });
 
   it("does not mark the create row when a workflow is selected", () => {
-    const { lastFrame } = render(
-      <WorkflowPicker workflows={mixed} selectedIndex={1} height={40} />,
-    );
+    const { lastFrame } = renderPicker(mixed, 1, 40);
     const frame = lastFrame() ?? "";
     expect(frame).not.toMatch(/▶\s+\+ Create a new workflow…/);
   });
 
   it("shows a call-to-action and the create row when there are no workflows", () => {
-    const { lastFrame } = render(<WorkflowPicker workflows={[]} selectedIndex={0} height={24} />);
+    const { lastFrame } = renderPicker([], 0, 24);
     const frame = lastFrame() ?? "";
     expect(frame).toContain("No workflows yet");
     expect(frame).toMatch(/▶\s+\+ Create a new workflow…/);
   });
 
   it("advertises folder and paging hints in the header", () => {
-    const { lastFrame } = render(
-      <WorkflowPicker workflows={mixed} selectedIndex={1} height={40} />,
-    );
+    const { lastFrame } = renderPicker(mixed, 1, 40);
     expect(lastFrame() ?? "").toContain("folders");
     expect(lastFrame() ?? "").toContain("PgUp/PgDn");
   });
@@ -76,29 +87,23 @@ describe("WorkflowPicker create affordance", () => {
 
 describe("WorkflowPicker folders and spacing", () => {
   it("renders collapsible folder headers for each source present", () => {
-    const { lastFrame } = render(
-      <WorkflowPicker workflows={mixed} selectedIndex={1} height={40} />,
-    );
+    const { lastFrame } = renderPicker(mixed, 1, 40);
     const frame = lastFrame() ?? "";
     expect(frame).toContain("project");
     expect(frame).toContain("user");
     expect(frame).toContain("bundled");
-    expect(frame).toMatch(/▼\s+project/);
-    expect(frame).toMatch(/▼\s+user/);
-    expect(frame).toMatch(/▼\s+bundled/);
+    expect(frame).toMatch(/▾\s+project/);
+    expect(frame).toMatch(/▾\s+user/);
+    expect(frame).toMatch(/▾\s+bundled/);
   });
 
   it("hides workflows inside a collapsed folder", () => {
-    const { lastFrame } = render(
-      <WorkflowPicker
-        workflows={mixed}
-        selectedIndex={0}
-        height={40}
-        collapsedFolders={{ ...DEFAULT_FOLDER_COLLAPSE, user: true }}
-      />,
-    );
+    const { lastFrame } = renderPicker(mixed, 0, 40, {
+      ...DEFAULT_FOLDER_COLLAPSE,
+      user: true,
+    });
     const frame = lastFrame() ?? "";
-    expect(frame).toMatch(/▶\s+user/);
+    expect(frame).toMatch(/▸\s+user/);
     expect(frame).toContain("folded");
     expect(frame).not.toContain("beta-user");
     expect(frame).not.toContain("delta-user");
@@ -107,12 +112,10 @@ describe("WorkflowPicker folders and spacing", () => {
   });
 
   it("keeps exactly one blank line between consecutive list entries", () => {
-    const { lastFrame } = render(
-      <WorkflowPicker workflows={mixed} selectedIndex={1} height={40} />,
-    );
+    const { lastFrame } = renderPicker(mixed, 1, 40);
     const lines = (lastFrame() ?? "").split("\n").map(contentLine);
     // Find the project header line and the workflow under it; ensure a single blank between.
-    const projectIdx = lines.findIndex((line) => /▼\s+project/.test(line));
+    const projectIdx = lines.findIndex((line) => /▾\s+project/.test(line));
     expect(projectIdx).toBeGreaterThanOrEqual(0);
     const gammaIdx = lines.findIndex((line) => line.includes("gamma-project"));
     expect(gammaIdx).toBeGreaterThan(projectIdx);
@@ -132,12 +135,43 @@ describe("WorkflowPicker folders and spacing", () => {
     const many: WorkflowCatalogEntry[] = Array.from({ length: 20 }, (_, i) =>
       entry(`wf-${String(i).padStart(2, "0")}`, i % 2 === 0 ? "bundled" : "user", `desc ${i}`),
     );
-    const { lastFrame } = render(
-      <WorkflowPicker workflows={many} selectedIndex={12} height={16} />,
-    );
+    const { lastFrame } = renderPicker(many, 12, 16);
     const frame = lastFrame() ?? "";
     expect(frame).toMatch(/[↑↓]/);
     expect(frame).toContain("hidden");
+  });
+
+  it("keeps station landing nav order in sync with the selection index", () => {
+    const withTour: WorkflowCatalogEntry[] = [
+      entry("zebra", "bundled", "later"),
+      entry("tour", "bundled", "the door"),
+      entry("alpha-user", "user", "user wf"),
+    ];
+    // Mirror the hook: pinTourFirst when station landing is on.
+    const nav = buildWorkflowPickerNav(withTour, DEFAULT_FOLDER_COLLAPSE, {
+      pinTourFirst: true,
+    });
+    const tourIdx = nav.findIndex((row) => row.kind === "workflow" && row.entry.name === "tour");
+    expect(tourIdx).toBeGreaterThanOrEqual(0);
+    // Tour should be the first workflow inside bundled (right after the bundled header).
+    const bundledHeader = nav.findIndex((row) => row.kind === "header" && row.source === "bundled");
+    expect(nav[bundledHeader + 1]).toMatchObject({
+      kind: "workflow",
+      entry: { name: "tour" },
+    });
+
+    const { lastFrame } = render(
+      <WorkflowPicker
+        workflows={withTour}
+        nav={nav}
+        selectedIndex={tourIdx}
+        height={40}
+        stationLanding
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toMatch(/▶\s+tour/);
+    expect(frame).toContain("start here");
   });
 });
 

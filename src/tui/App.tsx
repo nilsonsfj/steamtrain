@@ -594,6 +594,10 @@ export function App({
     return { runCostUsd: cost, runTokens: totalTokens(tokens) };
   }, [runner.wf]);
 
+  // Station landing must feed pinTourFirst into the picker nav so render and
+  // selection share one row order (tour pinned inside bundled).
+  const [stationLanding, setStationLanding] = useState(false);
+
   const picker = useWorkflowPicker({
     mode,
     doctor,
@@ -606,11 +610,11 @@ export function App({
     wfStepOverrides,
     setWfStepOverrides,
     resolveWorkflowSpec,
+    pinTourFirst: stationLanding,
   });
 
   // Station landing: on a true first open (no run history), land on the tour
   // and open its preview so the primary CTA is one keystroke away.
-  const [stationLanding, setStationLanding] = useState(false);
   const stationBootstrapped = useRef(false);
   useEffect(() => {
     if (stationBootstrapped.current) return;
@@ -621,12 +625,11 @@ export function App({
       const history = await runner.historyStoreRef.current.list(1).catch(() => []);
       if (cancelled) return;
       if (!shouldOfferStationLanding({ hasRunHistory: history.length > 0 })) return;
-      const idx = picker.pickerNav.findIndex(
-        (row) => row.kind === "workflow" && row.entry.name === TOUR_WORKFLOW_NAME,
-      );
-      if (idx < 0) return;
+      if (!picker.workflowEntries.some((entry) => entry.name === TOUR_WORKFLOW_NAME)) return;
+      // Queue the tour by name, then flip Station on so pinTourFirst rebuilds
+      // the nav and the pending-select effect lands on the pinned row.
+      picker.pendingSelectRef.current = TOUR_WORKFLOW_NAME;
       setStationLanding(true);
-      picker.setWorkflowIndex(idx);
       picker.setWfPreview({ name: TOUR_WORKFLOW_NAME, input: "all aboard" });
       runner.setStepIndex(0);
     })();
@@ -1833,9 +1836,9 @@ export function App({
         ) : (
           <WorkflowPicker
             workflows={picker.workflowEntries}
+            nav={picker.pickerNav}
             selectedIndex={picker.workflowIndex}
             height={streamHeight}
-            collapsedFolders={picker.collapsedFolders}
             stationLanding={stationLanding}
             draftLabel={
               picker.draftResolution.target

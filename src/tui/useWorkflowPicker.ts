@@ -44,6 +44,8 @@ export interface UseWorkflowPickerParams {
   wfStepOverrides: Record<string, WorkflowStepOverrides>;
   setWfStepOverrides: React.Dispatch<React.SetStateAction<Record<string, WorkflowStepOverrides>>>;
   resolveWorkflowSpec: (name: string) => WorkflowSpec | undefined;
+  /** Station landing pins the tour to the top of the bundled folder. */
+  pinTourFirst?: boolean;
 }
 
 export function useWorkflowPicker({
@@ -58,6 +60,7 @@ export function useWorkflowPicker({
   wfStepOverrides,
   setWfStepOverrides,
   resolveWorkflowSpec,
+  pinTourFirst = false,
 }: UseWorkflowPickerParams) {
   const [workflowIndex, setWorkflowIndex] = useState(0);
   const [collapsedFolders, setCollapsedFolders] =
@@ -69,6 +72,12 @@ export function useWorkflowPicker({
   const pendingSelectRef = useRef<string | null>(null);
   const createAbortRef = useRef<AbortController | null>(null);
   const seededSelectionRef = useRef(false);
+  const selectionIdentityRef = useRef<
+    | { kind: "workflow"; name: string }
+    | { kind: "header"; source: WorkflowSourceKind }
+    | { kind: "create" }
+    | null
+  >(null);
 
   useEffect(() => {
     return () => {
@@ -82,8 +91,8 @@ export function useWorkflowPicker({
   );
 
   const pickerNav = useMemo(
-    () => buildWorkflowPickerNav(workflowEntries, collapsedFolders),
-    [workflowEntries, collapsedFolders],
+    () => buildWorkflowPickerNav(workflowEntries, collapsedFolders, { pinTourFirst }),
+    [workflowEntries, collapsedFolders, pinTourFirst],
   );
 
   const selectedNav = pickerNav[Math.min(workflowIndex, Math.max(0, pickerNav.length - 1))];
@@ -99,32 +108,46 @@ export function useWorkflowPicker({
     [workflowEntries],
   );
 
+  // Remember what the user had selected so nav rebuilds (pinTourFirst, collapse,
+  // catalog edits) can re-resolve by identity instead of a stale numeric index.
+  useEffect(() => {
+    const row = pickerNav[Math.min(workflowIndex, Math.max(0, pickerNav.length - 1))];
+    if (row?.kind === "workflow") {
+      selectionIdentityRef.current = { kind: "workflow", name: row.entry.name };
+    } else if (row?.kind === "header") {
+      selectionIdentityRef.current = { kind: "header", source: row.source };
+    } else if (row?.kind === "create") {
+      selectionIdentityRef.current = { kind: "create" };
+    }
+  }, [pickerNav, workflowIndex]);
+
   const toggleSelectedFolder = useCallback(() => {
     const row = pickerNav[workflowIndex];
     if (row?.kind !== "header") return false;
     const prevNav = pickerNav;
     const nextCollapsed = toggleFolderCollapse(collapsedFolders, row.source);
-    const nextNav = buildWorkflowPickerNav(workflowEntries, nextCollapsed);
+    const nextNav = buildWorkflowPickerNav(workflowEntries, nextCollapsed, { pinTourFirst });
     setCollapsedFolders(nextCollapsed);
     setWorkflowIndex(remapPickerIndexAfterCollapse(prevNav, nextNav, workflowIndex));
     return true;
-  }, [pickerNav, workflowIndex, collapsedFolders, workflowEntries]);
+  }, [pickerNav, workflowIndex, collapsedFolders, workflowEntries, pinTourFirst]);
 
   const setFolderCollapsed = useCallback(
     (source: WorkflowSourceKind, collapsed: boolean) => {
       if (collapsedFolders[source] === collapsed) return;
       const prevNav = pickerNav;
       const nextCollapsed = { ...collapsedFolders, [source]: collapsed };
-      const nextNav = buildWorkflowPickerNav(workflowEntries, nextCollapsed);
+      const nextNav = buildWorkflowPickerNav(workflowEntries, nextCollapsed, { pinTourFirst });
       setCollapsedFolders(nextCollapsed);
       setWorkflowIndex(remapPickerIndexAfterCollapse(prevNav, nextNav, workflowIndex));
     },
-    [collapsedFolders, pickerNav, workflowEntries, workflowIndex],
+    [collapsedFolders, pickerNav, workflowEntries, workflowIndex, pinTourFirst],
   );
 
   // Keep the picker selection in range and honor a queued post-write selection.
   // On first catalog paint, prefer the first workflow over a folder header so
-  // Enter/Ctrl+R do something useful immediately.
+  // Enter/Ctrl+R do something useful immediately. When the nav order changes
+  // (Station pinTourFirst, collapse), re-resolve by the remembered identity.
   useEffect(() => {
     const pending = pendingSelectRef.current;
     if (pending) {
@@ -142,8 +165,42 @@ export function useWorkflowPicker({
       setWorkflowIndex(indexOfWorkflowOrFallback(pickerNav, null));
       return;
     }
+
+    const identity = selectionIdentityRef.current;
+    if (identity?.kind === "workflow") {
+      const idx = pickerNav.findIndex(
+        (row) => row.kind === "workflow" && row.entry.name === identity.name,
+      );
+      if (idx >= 0) {
+        setWorkflowIndex(idx);
+        return;
+      }
+      // Folded away: land on that workflow's folder header when present.
+      const entry = workflowEntries.find((item) => item.name === identity.name);
+      if (entry) {
+        const headerIdx = pickerNav.findIndex(
+          (row) => row.kind === "header" && row.source === entry.source,
+        );
+        if (headerIdx >= 0) {
+          setWorkflowIndex(headerIdx);
+          return;
+        }
+      }
+    } else if (identity?.kind === "header") {
+      const idx = pickerNav.findIndex(
+        (row) => row.kind === "header" && row.source === identity.source,
+      );
+      if (idx >= 0) {
+        setWorkflowIndex(idx);
+        return;
+      }
+    } else if (identity?.kind === "create") {
+      setWorkflowIndex(Math.max(0, pickerNav.length - 1));
+      return;
+    }
+
     setWorkflowIndex((i) => Math.min(i, Math.max(0, pickerNav.length - 1)));
-  }, [pickerNav]);
+  }, [pickerNav, workflowEntries]);
 
   const config = orchestrator.getConfig();
   const healthyAgents = useMemo(() => healthyAgentSet(doctor), [doctor]);

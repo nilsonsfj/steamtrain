@@ -106,6 +106,33 @@ describe("workflow picker folders", () => {
     expect(workflowPickerRowHeight(bareRow)).toBe(2);
     expect(without.kind).toBe("workflow");
   });
+
+  it("pins tour first inside bundled when requested", () => {
+    const entries = [entry("zebra", "bundled"), entry("tour", "bundled"), entry("alpha", "user")];
+    const nav = buildWorkflowPickerNav(entries, DEFAULT_FOLDER_COLLAPSE, { pinTourFirst: true });
+    const bundledHeader = nav.findIndex((row) => row.kind === "header" && row.source === "bundled");
+    expect(nav[bundledHeader + 1]).toMatchObject({
+      kind: "workflow",
+      entry: { name: "tour" },
+    });
+  });
+
+  it("keeps the same workflow identity when pinTourFirst reorders the nav", () => {
+    const entries = [entry("zebra", "bundled"), entry("tour", "bundled"), entry("alpha", "user")];
+    const unpinned = buildWorkflowPickerNav(entries, DEFAULT_FOLDER_COLLAPSE, {
+      pinTourFirst: false,
+    });
+    const pinned = buildWorkflowPickerNav(entries, DEFAULT_FOLDER_COLLAPSE, { pinTourFirst: true });
+    const tourUnpinned = unpinned.findIndex(
+      (row) => row.kind === "workflow" && row.entry.name === "tour",
+    );
+    const remapped = remapPickerIndexAfterCollapse(unpinned, pinned, tourUnpinned);
+    expect(pinned[remapped]).toMatchObject({
+      kind: "workflow",
+      entry: { name: "tour" },
+    });
+    expect(remapped).not.toBe(tourUnpinned);
+  });
 });
 
 describe("weighted visible window", () => {

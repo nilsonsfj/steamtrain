@@ -5,19 +5,18 @@ import { AUTONOMY_COLOR, WORKFLOW_SOURCE_COLOR } from "./theme";
 import { LIST_ITEM_SPACER, selectVisibleWindowWeighted } from "./workflow-list-window";
 import {
   WORKFLOW_FOLDER_TITLE,
-  type WorkflowFolderCollapseState,
   type WorkflowPickerNavItem,
-  buildWorkflowPickerNav,
   workflowPickerRowHeight,
 } from "./workflow-picker-model";
 import { blockSummary } from "./workflow-spec-ui";
 
 interface WorkflowPickerProps {
   workflows: WorkflowCatalogEntry[];
-  /** Index into the navigable row list (headers + workflows + create). */
+  /** Pre-built navigable rows from useWorkflowPicker (single source of truth). */
+  nav: WorkflowPickerNavItem[];
+  /** Index into `nav` (headers + workflows + create). */
   selectedIndex: number;
   height: number;
-  collapsedFolders?: WorkflowFolderCollapseState;
   /** Effective drafting agent · model for /create-workflow (right-aligned in the header). */
   draftLabel?: string;
   /** Station landing: first-open hint that the tour is the door. */
@@ -31,18 +30,15 @@ interface WorkflowPickerProps {
  */
 export function WorkflowPicker({
   workflows,
+  nav,
   selectedIndex,
   height,
-  collapsedFolders,
   draftLabel,
   stationLanding = false,
 }: WorkflowPickerProps) {
-  const nav = buildWorkflowPickerNav(workflows, collapsedFolders, {
-    pinTourFirst: stationLanding,
-  });
-  const createIndex = nav.length - 1;
-  const createRowActive = selectedIndex === createIndex;
-  const scrollRows = nav.slice(0, -1); // everything except the pinned create row
+  const createIndex = Math.max(0, nav.length - 1);
+  const createRowActive = selectedIndex === createIndex && nav[createIndex]?.kind === "create";
+  const scrollRows = nav[createIndex]?.kind === "create" ? nav.slice(0, -1) : nav;
 
   // height includes the round border (2). Title is 1; station hero is a double
   // bordered card (~7 content) + marginBottom; create is pinned below the window.
@@ -169,7 +165,7 @@ function FolderHeader({
   row: Extract<WorkflowPickerNavItem, { kind: "header" }>;
   active: boolean;
 }) {
-  const chevron = row.collapsed ? "▶" : "▼";
+  const chevron = row.collapsed ? "▸" : "▾";
   const color = active ? "cyan" : WORKFLOW_SOURCE_COLOR[row.source];
   return (
     <Box>
@@ -269,6 +265,6 @@ function describeHidden(rows: readonly WorkflowPickerNavItem[], from: number, to
 
 /** Exported for tests that assert folder chrome without mounting the full app. */
 export function folderLabel(source: WorkflowSourceKind, count: number, collapsed: boolean): string {
-  const chevron = collapsed ? "▶" : "▼";
+  const chevron = collapsed ? "▸" : "▾";
   return `${chevron} ${WORKFLOW_FOLDER_TITLE[source]}  ${count} workflow${count === 1 ? "" : "s"}`;
 }

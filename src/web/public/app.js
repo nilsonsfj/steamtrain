@@ -1467,21 +1467,28 @@
     var groups = groupWorkflowsBySource(list);
     groups.forEach(function (group) {
       var collapsed = !!S.folderCollapse[group.source];
+      var containsSelected = group.entries.some(function (w) { return w.name === S.selected; });
       var folder = h("div", {
-        class: "wf-folder" + (collapsed ? " collapsed" : "") + " src-" + group.source
+        class: "wf-folder" + (collapsed ? " collapsed" : "") +
+          (containsSelected ? " has-sel" : "") + " src-" + group.source
       });
       var head = h("button", {
-        class: "wf-folder-head",
+        class: "wf-folder-head" + (collapsed && containsSelected ? " has-sel" : ""),
         type: "button",
         "aria-expanded": collapsed ? "false" : "true",
         "aria-controls": "wf-folder-body-" + group.source,
+        title: collapsed && containsSelected
+          ? "Selected workflow is inside this folder — click to expand"
+          : undefined,
         onClick: function () { toggleWorkflowFolder(group.source); }
       },
-        h("span", { class: "wf-folder-chevron", text: collapsed ? "▶" : "▼" }),
+        h("span", { class: "wf-folder-chevron", text: collapsed ? "▸" : "▾" }),
         h("span", { class: "wf-folder-title", text: group.source }),
         h("span", {
           class: "wf-folder-count",
-          text: group.entries.length + " workflow" + (group.entries.length === 1 ? "" : "s")
+          text: collapsed && containsSelected && S.selected
+            ? "contains " + S.selected
+            : group.entries.length + " workflow" + (group.entries.length === 1 ? "" : "s")
         })
       );
       folder.appendChild(head);
