@@ -462,4 +462,41 @@ describe("mid-flight model failover on capacity errors", () => {
     // Prefer-next-model fail-fast: do not burn maxAttempts on the same binding.
     expect(calls).toHaveLength(1);
   });
+
+  it("still prefers failover on classic transport errors when fallbacks exist", async () => {
+    const calls: Array<{ agent: string; model: string }> = [];
+    const deps = modelScriptedDeps(
+      {
+        "claude::primary-model": [{ kind: "error", message: "transport boom" }],
+        "claude::claude-sonnet-5": [{ kind: "ok", text: "after-transport" }],
+      },
+      calls,
+    );
+    const spec: WorkflowSpec = {
+      name: "transport-failover",
+      description: "d",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            {
+              id: "a",
+              kind: "worker",
+              agent: "claude",
+              model: "primary-model",
+              fallbackModels: ["claude-sonnet-5"],
+              prompt: "do work",
+              retry: fastRetry,
+              modelFailover: { failoverDelayMs: 1 },
+            },
+          ],
+        },
+      ],
+    };
+    const { ok, cache } = await drain(spec, deps);
+    expect(ok).toBe(true);
+    expect(calls.map((c) => c.model)).toEqual(["primary-model", "claude-sonnet-5"]);
+    expect(cache.get("a")?.output).toBe("after-transport");
+  });
 });

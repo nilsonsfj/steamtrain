@@ -171,14 +171,24 @@ export function shouldAdvanceFailover(
   opts: {
     kind: AgentFailureKind;
     hasNextCandidate: boolean;
+    /**
+     * Clean transport failure (error/throw, no result, no tools). Unclassified
+     * classic failures are treated as `transient` for trigger matching so we
+     * keep preferring a model switch over same-binding retries.
+     */
+    classicRetryable?: boolean;
   },
 ): boolean {
   if (!policy.enabled || !opts.hasNextCandidate) return false;
-  if (!failoverTriggerMatches(policy, opts.kind)) return false;
-  if (isCapacityFailure(opts.kind) && policy.preferNextModel) return true;
-  // Transient / auth: still prefer switching when a next candidate exists —
-  // provider outages often survive same-agent retries.
-  return opts.kind === "transient" || opts.kind === "auth" || opts.kind === "unknown";
+  const kind =
+    opts.classicRetryable && (opts.kind === "unknown" || opts.kind === "transient")
+      ? "transient"
+      : opts.kind;
+  if (!failoverTriggerMatches(policy, kind)) return false;
+  if (isCapacityFailure(kind) && policy.preferNextModel) return true;
+  // Transient / auth / classic transport: prefer switching when a next
+  // candidate exists — provider outages often survive same-agent retries.
+  return kind === "transient" || kind === "auth" || opts.classicRetryable === true;
 }
 
 /**

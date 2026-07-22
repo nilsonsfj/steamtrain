@@ -110,6 +110,16 @@ describe("shouldAdvanceFailover / fail-fast", () => {
     expect(shouldAdvanceFailover(policy, { kind: "quota", hasNextCandidate: true })).toBe(true);
   });
 
+  it("treats classic unclassified transport failures as transient for advancement", () => {
+    expect(
+      shouldAdvanceFailover(policy, {
+        kind: "unknown",
+        hasNextCandidate: true,
+        classicRetryable: true,
+      }),
+    ).toBe(true);
+  });
+
   it("does not advance when disabled or no candidate", () => {
     expect(
       shouldAdvanceFailover(resolveModelFailoverPolicy({ enabled: false }), {

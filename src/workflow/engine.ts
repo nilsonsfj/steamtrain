@@ -2124,6 +2124,7 @@ async function executeAgentStep(
       const advance = shouldAdvanceFailover(failoverPolicy, {
         kind: attemptOutcome.failureKind,
         hasNextCandidate,
+        classicRetryable: attemptOutcome.classicRetryable,
       });
 
       // Capacity / configured triggers with no next candidate and no classic
