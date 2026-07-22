@@ -132,11 +132,51 @@ describe("evaluatePullRequestChecks", () => {
     }
   });
 
+  it("ignores CANCELLED checks from superseded workflow runs", () => {
+    const evaluation = evaluatePullRequestChecks(
+      snap({
+        checks: [
+          { name: "ci", state: "SUCCESS" },
+          { name: "ci", state: "CANCELLED" },
+          { name: "lint", state: "CANCELLED" },
+        ],
+      }),
+    );
+    expect(evaluation).toMatchObject({ ready: true, ok: true });
+  });
+
   it("reports already-merged PRs as ready", () => {
     expect(evaluatePullRequestChecks(snap({ state: "merged", checks: [] }))).toMatchObject({
       ready: true,
       ok: true,
     });
+  });
+
+  it("refuses an empty-check PR that is still CONFLICTING after the grace window", () => {
+    // Regression: babysit land treated "no checks after grace" as ready and
+    // then `gh pr merge` failed with "not mergeable". Conflicts must fail
+    // closed before we attempt to land.
+    const evaluation = evaluatePullRequestChecks(
+      snap({
+        checks: [],
+        mergeable: "CONFLICTING",
+        headCommittedAt: new Date(1_000_000).toISOString(),
+      }),
+      { nowMs: 1_000_000 + 120_000, emptyGraceMs: 90_000 },
+    );
+    expect(evaluation).toMatchObject({ ready: true, ok: false });
+    expect(evaluation.detail).toMatch(/conflict/i);
+  });
+
+  it("stays pending while mergeable is UNKNOWN even when checks are green", () => {
+    const evaluation = evaluatePullRequestChecks(
+      snap({
+        checks: [{ name: "ci", state: "SUCCESS" }],
+        mergeable: "UNKNOWN",
+      }),
+    );
+    expect(evaluation).toMatchObject({ ready: false, reason: "pending" });
+    expect(evaluation.detail).toMatch(/UNKNOWN/i);
   });
 });
 
