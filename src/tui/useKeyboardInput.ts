@@ -47,6 +47,8 @@ export interface UseKeyboardInputParams {
   switchMode: (next: React.SetStateAction<Mode>) => void;
   /** Drop the Station first-run chrome after the user leaves the platform. */
   clearStationLanding?: () => void;
+  /** Mark a controller-free quit so the CLI may terminate stray background handles. */
+  onIdleQuit?: () => void;
 }
 
 /**
@@ -104,6 +106,13 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
           runner.abortRef.current?.abort();
           // An /attach tail holds a ref'd polling timer; without aborting it the
           // process would outlive the unmounted UI until the attached run ends.
+          if (
+            !runner.abortRef.current &&
+            !runner.attachAbortRef.current &&
+            !picker.createAbortRef.current
+          ) {
+            cur.onIdleQuit?.();
+          }
           runner.attachAbortRef.current?.abort();
           picker.createAbortRef.current?.abort();
           exit();

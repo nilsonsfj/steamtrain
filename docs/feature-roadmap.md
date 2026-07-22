@@ -107,8 +107,8 @@ outside the repo).
 
 **Follow-up shipped:** detaching an *already-started* TUI/web run into a
 background process — TUI `d`, web **Detach**, `POST /api/runs/:id/detach`. The
-run quiesces (in-flight steps finish and cache), then hands off under the same
-id and keeps running after the UI closes. See
+local engine stops immediately, then hands off under the same id; completed
+steps stay cached and interrupted work restarts in the background. See
 [`detached-runs.md`](detached-runs.md#detaching-a-running-run).
 
 ## 1.5 Notifications on run completion / approval needed

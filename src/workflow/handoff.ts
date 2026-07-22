@@ -108,10 +108,10 @@ export interface HandoffRunOptions extends DetachedRunnerIo {
 /**
  * Hand an already-running, in-process run off to a fresh detached background
  * process **under the same run id**, so the launching UI can close without
- * stopping the workflow. The caller MUST have quiesced the run first (paused it
- * and confirmed no step is executing) so the completed steps are all on disk in
- * the step cache — the detached runner replays those from cache and continues
- * the remainder.
+ * stopping the workflow. The caller MUST have committed the ownership transfer,
+ * aborted the local engine, and waited for its event loop to unwind before
+ * calling this function. Completed steps are already on disk in the step cache;
+ * an interrupted step has no cache entry and the detached runner replays it.
  *
  * Rewrites the run's meta to look like a freshly-queued `cli-detached` run
  * (clearing the old owner's pid, pause, and pending human checkpoints, and
@@ -162,7 +162,7 @@ export async function handoffRunToDetached(
   return result;
 }
 
-export interface CompleteQuiescedHandoffOptions extends HandoffRunOptions {
+export interface CompleteHandoffOptions extends HandoffRunOptions {
   /**
    * The live-run publisher mirroring this run's event stream, if any. Only its
    * `event`/`flush` methods are used — the terminal `finish` is deliberately
@@ -172,24 +172,19 @@ export interface CompleteQuiescedHandoffOptions extends HandoffRunOptions {
 }
 
 /**
- * Finish a mid-run detach for a run that has ALREADY been quiesced (paused with
- * no step executing) and whose engine has been aborted for handoff. Both the
- * TUI (`useWorkflowRunner`) and web (`WorkflowRunManager`) detach paths funnel
- * through here so the "balance the pause, land the stream, hand off" sequence
- * lives in one place and can't drift between the two surfaces; they differ only
- * in how they report the {@link SpawnDetachedRunnerResult} to their UI.
+ * Finish a committed mid-run detach after the local engine has been aborted.
+ * Both the TUI (`useWorkflowRunner`) and web (`WorkflowRunManager`) paths funnel
+ * through here so the "land the stream, hand off" sequence lives in one place
+ * and can't drift between the two surfaces. Callers abort local work
+ * immediately before entering this helper.
  *
- * The quiescing pause pushed a `run_paused` into the mirrored stream, but the
- * detached child's fresh engine won't emit a matching resume — so emit a
- * synthetic `run_resumed` to balance it (the run really is about to continue in
- * the background). Then flush every buffered event to disk so the child appends
- * after them, and hand the run off under the same id.
+ * Flush every buffered event to disk so the child appends after them, then hand
+ * the run off under the same id.
  */
-export async function completeQuiescedHandoff(
-  options: CompleteQuiescedHandoffOptions,
+export async function completeHandoff(
+  options: CompleteHandoffOptions,
 ): Promise<SpawnDetachedRunnerResult> {
   const { publisher, ...handoff } = options;
-  publisher?.event({ kind: "run_resumed", by: "detach", ts: Date.now() });
   await publisher?.flush().catch(() => {});
   return handoffRunToDetached(handoff);
 }
