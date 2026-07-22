@@ -365,8 +365,19 @@ describe("web run manager mid-run detach", () => {
     const runId = manager.start("detach-demo", "hi").runId as string;
     for (let i = 0; i < 100 && state.prompts.length === 0; i++) await delay(10);
 
-    // First call commits the handoff; a second call while it's still settling
-    // must not re-trigger the abort/spawn machinery — just report success.
+    const frames: { type?: string }[] = [];
+    manager.subscribe(runId, (payload) => {
+      try {
+        frames.push(JSON.parse(payload));
+      } catch {
+        /* ignore */
+      }
+    });
+
+    // First call commits the handoff (emitting one "detaching" frame); a
+    // second call while it's still settling must short-circuit before that
+    // emit and must not re-trigger the abort/spawn machinery — just report
+    // success, with no second "detaching"/"detached" frame reaching subscribers.
     expect(manager.detach(runId)).toEqual({ ok: true });
     expect(manager.detach(runId)).toEqual({ ok: true });
     state.releaseA();
@@ -376,6 +387,8 @@ describe("web run manager mid-run detach", () => {
     // Exactly one background child was spawned, not two.
     const meta = await liveRuns.get(runId);
     expect(meta).toMatchObject({ source: "cli-detached", status: "queued" });
+    expect(frames.filter((f) => f.type === "detaching")).toHaveLength(1);
+    expect(frames.filter((f) => f.type === "detached")).toHaveLength(1);
   });
 
   it("refuses to detach an unknown or already-finished run", async () => {
