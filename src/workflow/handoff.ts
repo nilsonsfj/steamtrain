@@ -162,7 +162,7 @@ export async function handoffRunToDetached(
   return result;
 }
 
-export interface CompleteQuiescedHandoffOptions extends HandoffRunOptions {
+export interface CompleteHandoffOptions extends HandoffRunOptions {
   /**
    * The live-run publisher mirroring this run's event stream, if any. Only its
    * `event`/`flush` methods are used — the terminal `finish` is deliberately
@@ -175,15 +175,14 @@ export interface CompleteQuiescedHandoffOptions extends HandoffRunOptions {
  * Finish a committed mid-run detach after the local engine has been aborted.
  * Both the TUI (`useWorkflowRunner`) and web (`WorkflowRunManager`) paths funnel
  * through here so the "land the stream, hand off" sequence lives in one place
- * and can't drift between the two surfaces. The historical function name is
- * retained for API compatibility; callers now abort immediately rather than
- * pausing to quiesce.
+ * and can't drift between the two surfaces. Callers abort local work
+ * immediately before entering this helper.
  *
  * Flush every buffered event to disk so the child appends after them, then hand
  * the run off under the same id.
  */
-export async function completeQuiescedHandoff(
-  options: CompleteQuiescedHandoffOptions,
+export async function completeHandoff(
+  options: CompleteHandoffOptions,
 ): Promise<SpawnDetachedRunnerResult> {
   const { publisher, ...handoff } = options;
   await publisher?.flush().catch(() => {});

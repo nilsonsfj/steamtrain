@@ -21,7 +21,7 @@ import {
   WORKFLOW_HISTORY_DIR,
   WORKFLOW_RUNS_DIR,
   acquireRunSlot,
-  completeQuiescedHandoff,
+  completeHandoff,
   createLiveRunPublisher,
   createLiveRunStore,
   createNotifier,
@@ -486,11 +486,11 @@ export function useWorkflowRunner({
           let handedOff = false;
           if (handingOff && handoff) {
             handoffRef.current = null;
-            let spawned: Awaited<ReturnType<typeof completeQuiescedHandoff>>;
+            let spawned: Awaited<ReturnType<typeof completeHandoff>>;
             try {
               // Flush the mirror and hand off in the shared helper so this
               // stays in lockstep with the web path.
-              spawned = await completeQuiescedHandoff({
+              spawned = await completeHandoff({
                 publisher,
                 store: liveStore,
                 runId,
@@ -524,7 +524,7 @@ export function useWorkflowRunner({
                 attachRunRef.current?.(runId);
               }
             } else {
-              // Handoff failed: completeQuiescedHandoff already settled the live
+              // Handoff failed: completeHandoff already settled the live
               // meta as errored. Record history so the partial run isn't lost.
               try {
                 await historyStoreRef.current.save(

@@ -28,7 +28,7 @@ import {
   type WorkflowRunControl,
   type WorkflowSpec,
   acquireRunSlot,
-  completeQuiescedHandoff,
+  completeHandoff,
   createLiveRunPublisher,
   createNotifier,
   createWorkflowRunControl,
@@ -411,7 +411,7 @@ export class WorkflowRunManager {
    */
   private async finishHandoff(run: Run, publisher?: LiveRunPublisher): Promise<boolean> {
     if (!this.liveRuns || !run.handoff) return false;
-    const spawned = await completeQuiescedHandoff({
+    const spawned = await completeHandoff({
       publisher,
       store: this.liveRuns,
       runId: run.id,
