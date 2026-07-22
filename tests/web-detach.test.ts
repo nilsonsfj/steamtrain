@@ -352,6 +352,45 @@ describe("web run manager mid-run detach", () => {
     expect(meta?.pendingApprovals ?? []).toHaveLength(0);
   });
 
+  it("a re-issued detach on an already-detaching run is an idempotent no-op", async () => {
+    const { host, state } = makeEngineHost();
+    const manager = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: root,
+      config: { stepTimeoutSec: 60, workflowTimeoutSec: 3600 },
+      liveRuns,
+      detachIo: { projectDir: root },
+    });
+    const runId = manager.start("detach-demo", "hi").runId as string;
+    for (let i = 0; i < 100 && state.prompts.length === 0; i++) await delay(10);
+
+    const frames: { type?: string }[] = [];
+    manager.subscribe(runId, (payload) => {
+      try {
+        frames.push(JSON.parse(payload));
+      } catch {
+        /* ignore */
+      }
+    });
+
+    // First call commits the handoff (emitting one "detaching" frame); a
+    // second call while it's still settling must short-circuit before that
+    // emit and must not re-trigger the abort/spawn machinery — just report
+    // success, with no second "detaching"/"detached" frame reaching subscribers.
+    expect(manager.detach(runId)).toEqual({ ok: true });
+    expect(manager.detach(runId)).toEqual({ ok: true });
+    state.releaseA();
+
+    for (let i = 0; i < 200 && manager.get(runId); i++) await delay(10);
+    expect(manager.get(runId)).toBeUndefined();
+    // Exactly one background child was spawned, not two.
+    const meta = await liveRuns.get(runId);
+    expect(meta).toMatchObject({ source: "cli-detached", status: "queued" });
+    expect(frames.filter((f) => f.type === "detaching")).toHaveLength(1);
+    expect(frames.filter((f) => f.type === "detached")).toHaveLength(1);
+  });
+
   it("refuses to detach an unknown or already-finished run", async () => {
     const { host } = makeEngineHost();
     const manager = new WorkflowRunManager({
@@ -363,6 +402,56 @@ describe("web run manager mid-run detach", () => {
       detachIo: { projectDir: root },
     });
     expect(manager.detach("nope")).toMatchObject({ ok: false });
+  });
+
+  it("records an error terminal outcome when the background spawn fails", async () => {
+    const { host, state } = makeEngineHost();
+    const manager = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: root,
+      config: { stepTimeoutSec: 60, workflowTimeoutSec: 3600 },
+      liveRuns,
+      detachIo: { projectDir: root },
+    });
+    const runId = manager.start("detach-demo", "hi").runId as string;
+    for (let i = 0; i < 100 && state.prompts.length === 0; i++) await delay(10);
+
+    const frames: { type?: string; status?: string; error?: string }[] = [];
+    manager.subscribe(runId, (payload) => {
+      try {
+        frames.push(JSON.parse(payload));
+      } catch {
+        /* ignore */
+      }
+    });
+
+    // No entry script ⇒ spawnDetachedRunner can't build a command line, so
+    // finishHandoff's spawn fails and the manager must fall back to a normal
+    // (error) terminal instead of silently dropping the run.
+    process.argv[1] = "";
+    expect(manager.detach(runId)).toEqual({ ok: true });
+    state.releaseA();
+
+    for (let i = 0; i < 200 && manager.get(runId)?.status !== "error"; i++) await delay(10);
+    // The run is NOT silently dropped from the manager on a failed handoff.
+    expect(manager.get(runId)).toMatchObject({ status: "error" });
+
+    // A terminal status frame (not "detached") reached subscribers.
+    for (let i = 0; i < 200 && !frames.some((f) => f.type === "status"); i++) await delay(10);
+    const status = frames.find((f) => f.type === "status");
+    expect(status).toMatchObject({ status: "error" });
+    expect(String(status?.error)).toMatch(/detach failed/);
+    expect(frames.some((f) => f.type === "detached")).toBe(false);
+
+    // The live-run registry also reflects the failure, not a phantom "queued".
+    // (handoffRunToDetached's own "could not detach the run: …" write lands
+    // first; drive()'s finally then settles the mirror through the publisher,
+    // which is the write that wins — same "detach failed: …" message as the
+    // SSE frame.)
+    const meta = await liveRuns.get(runId);
+    expect(meta?.status).toBe("error");
+    expect(String(meta?.error)).toMatch(/detach failed/);
   });
 });
 
