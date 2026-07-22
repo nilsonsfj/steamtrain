@@ -267,6 +267,8 @@ describe("workflow UI helpers", () => {
       expect(babysitIndexes[i]).toBe(babysitIndexes[i - 1]! + 1);
     }
     for (const index of babysitIndexes) {
+      // `lines` are ANSI-stripped; content here is ASCII so `.length` matches
+      // terminal columns (including the left/right border glyphs).
       expect(lines[index]!.length).toBeLessThanOrEqual(width);
       // Runner kept on the left of the flexible zone (not crushed to "antigravi…").
       expect(lines[index]).toContain("antigravity/gemini-3.6");

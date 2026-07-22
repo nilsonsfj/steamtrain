@@ -12,6 +12,10 @@ export function message(err: unknown): string {
  * appending an ellipsis when anything is dropped. Used to pre-fit TUI rows so
  * Ink never soft-wraps them past a fixed frame (wrap overflow bleeds borders
  * onto the next line and flickers the whole screen).
+ *
+ * Iterates by JS code point. Zero-width joiners / combining marks that
+ * `string-width` folds into a preceding emoji may leave a dangling ZWJ if a
+ * cut falls mid-cluster; callers pass plain step/activity text, not ZWJ emoji.
  */
 export function truncateToWidth(text: string, max: number): string {
   if (max <= 0) return "";

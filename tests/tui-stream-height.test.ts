@@ -5,6 +5,7 @@ import { computeStreamHeight, truncateToWidth, wrappedLines } from "../src/tui/u
 describe("truncateToWidth", () => {
   it("leaves short text alone", () => {
     expect(truncateToWidth("hello", 10)).toBe("hello");
+    expect(truncateToWidth("", 10)).toBe("");
   });
 
   it("ellipsizes to the column budget", () => {

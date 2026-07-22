@@ -632,13 +632,10 @@ function PhaseHeader({
   const iterBadge = maxIteration > 1 ? ` · iter ${iter}/${maxIteration}` : "";
   const supersededBadge = superseded ? " · superseded" : "";
   const counts = ` ${done}/${phase.stepCount} ${glyph} `;
-  // Fill the rest of the row with a dim rule so phases read as sections. Every
-  // glyph used here (braille spinner, ✓, ✗, ·) measures one column in
-  // string-width — Ink's own measure — so the fill math is exact; if a terminal
-  // ever rendered one wide, the outer truncate-end clips the surplus without
-  // costing an extra line.
-  const printed =
-    2 + phase.title.length + iterBadge.length + supersededBadge.length + 2 + counts.length;
+  // Fill the rest of the row with a dim rule so phases read as sections.
+  // Measure with string-width (Ink's own column count) so a wide title char
+  // cannot oversize the fill; outer truncate-end still clips any surplus.
+  const printed = stringWidth(`─ ${phase.title}${iterBadge}${supersededBadge} ─${counts}`);
   const fill = Math.max(0, width - printed);
   return (
     <Text wrap="truncate-end">
@@ -855,8 +852,8 @@ function DetailPanel({
         : step.status === "running"
           ? "yellow"
           : "gray";
-  // No glyphs here: the trailing rule fill assumes every char is one column
-  // wide, and symbols like ⏱ render double-width in many terminals.
+  // Trailing rule fill uses string-width so a wide step id cannot oversize
+  // the dash run; outer truncate-end still clips any surplus.
   const bits = [
     displayStatus,
     step.cached ? "cached" : undefined,
@@ -866,7 +863,7 @@ function DetailPanel({
     wrapped.length > previewLines && previewLines > 0 ? `${wrapped.length} lines` : undefined,
   ].filter((bit): bit is string => Boolean(bit));
   const label = ` ${step.stepId} · ${BLOCK_LABEL[step.blockKind]} · ${bits.join(" · ")} `;
-  const fill = Math.max(0, width - label.length - 2);
+  const fill = Math.max(0, width - stringWidth(label) - 2);
   return (
     <Box flexDirection="column">
       <Text wrap="truncate-end">
