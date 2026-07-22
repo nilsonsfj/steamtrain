@@ -20,9 +20,18 @@ The global file accepts the same keys as `steamtrain.json` except `workflows`
     { "id": "mimocode", "provider": "opencode", "binary": "mimocode" }
   ],
   "binaries": { "claude": "/usr/local/bin/claude" },
-  "stepTimeoutSec": 600
+  "stepTimeoutSec": 600,
+  "modelFailover": {
+    "on": ["quota", "rate_limit", "transient"],
+    "failoverDelayMs": 250
+  }
 }
 ```
+
+`modelFailover` is the project/user default for mid-flight model re-routing when
+an agent hits quota, rate limits, or other configured failures — see
+[Model binding](model-binding.md#configuring-mid-flight-model-failover). Workflow
+and per-step `modelFailover` override it.
 
 Valid providers: `claude`, `opencode`, `codex`, `cursor`, `antigravity`, `amp`, `kiro`. An instance reuses its
 provider's adapter; `binary` is only needed when the executable name differs

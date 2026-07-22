@@ -98,17 +98,69 @@ Project `steamtrain.json` merges over `~/.steamtrain/config.json` per class.
 
 ## Runtime failover
 
-Two layers:
+Three layers:
 
 1. **Dispatch remap** - if a pinned agent is unhealthy but the step's model
    (or class) has another ready offering, the run binds to that offering
    automatically. `/reroute` also preserves model families when retargeting.
-2. **Retry failover** - on a transient agent failure, the engine walks the
-   candidate chain (`fallbackModels` included) and retries on the next
-   agent/model instead of only re-trying the same pair.
+2. **Retry failover** - on a transient agent failure (transport error before
+   any tool use), the engine walks the candidate chain (`fallbackModels`
+   included) and retries on the next agent/model instead of only re-trying the
+   same pair.
+3. **Capacity failover** - when a provider reports **quota / billing
+   exhaustion** or a **rate limit** (often as a completed error turn rather
+   than a transport crash), the engine classifies the failure and walks the
+   same candidate chain mid-flight so a quota run-out does not ruin the
+   workflow. Same-model retries are skipped for quota (they cannot recover);
+   rate limits without a next candidate still use normal backoff retries.
 
 Resolved bindings are materialised for the run; they are **not** written back
 into the workflow file. Authoring keeps the portable form.
+
+### Configuring mid-flight model failover
+
+`modelFailover` is optional at three layers (each field resolves independently:
+per-step → workflow → project/user `steamtrain.json` → built-in defaults):
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `true` | Walk the failover chain on matching failures. |
+| `on` | `["quota", "rate_limit", "transient"]` | Failure kinds that trigger a model switch. Also accepts `"auth"` or `"any"`. |
+| `onCapacityResult` | `true` | Treat completed error turns that look like quota/rate-limit as failover-eligible (providers often surface exhaustion this way). |
+| `allowAfterToolUse` | `false` | Allow failover after a tool ran (opt-in; the worktree may already have edits). |
+| `preferNextModel` | `true` | On quota, skip re-trying the same binding and jump to the next candidate. |
+| `failoverDelayMs` | `250` | Short pause before a switched attempt (same-binding retries still use `retry`). |
+
+Workflow-level `fallbackModels` are appended to every agent-backed step's
+chain (after the step's own list), so you can declare a shared safety net once:
+
+```jsonc
+{
+  "name": "ship",
+  "fallbackModels": ["sonnet 5", "composer-2.5", "gpt-5.3-codex"],
+  "modelFailover": {
+    "on": ["quota", "rate_limit", "transient"],
+    "failoverDelayMs": 100
+  },
+  "phases": [
+    {
+      "id": "build",
+      "title": "Build",
+      "steps": [
+        {
+          "id": "implement",
+          "modelClass": "implementer",
+          "prompt": "Implement {{input}}"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Project / user config may set the same `modelFailover` object as a default for
+every workflow. UIs surface a failover as a `step_retry` with a `failover`
+payload (from → to agent/model) and update the live step target accordingly.
 
 ## Examples
 

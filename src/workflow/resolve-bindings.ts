@@ -34,16 +34,49 @@ export interface ResolveWorkflowBindingsOptions {
    * Default true.
    */
   preservePinned?: boolean;
+  /**
+   * Workflow-level `fallbackModels` appended after each step's own list.
+   * When set, even pinned steps get a resolution so mid-flight failover can
+   * walk the chain.
+   */
+  workflowFallbackModels?: string[];
+}
+
+/**
+ * Merge step-level and workflow-level fallback model queries.
+ * Step entries win on collision; dedup is case-insensitive on the trimmed
+ * string (model aliases like `Sonnet 5` / `sonnet 5` collapse) while the
+ * first-seen spelling is preserved for the resolver.
+ */
+export function mergeFallbackModels(
+  stepFallbacks: string[] | undefined,
+  workflowFallbacks: string[] | undefined,
+): string[] | undefined {
+  if (!workflowFallbacks || workflowFallbacks.length === 0) return stepFallbacks;
+  if (!stepFallbacks || stepFallbacks.length === 0) return [...workflowFallbacks];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of [...stepFallbacks, ...workflowFallbacks]) {
+    // Case-insensitive dedup: model queries are matched that way by the
+    // family/catalog resolver. Keep the first spelling (step before workflow).
+    const key = entry.trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(entry);
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 function stepNeedsResolve(
   step: WorkflowStep,
   preservePinned: boolean,
   isReady?: (agent: AgentInstanceId) => boolean,
+  workflowFallbackModels?: string[],
 ): boolean {
   if (!isAgentBackedStep(step)) return false;
   if (typeof step.modelClass === "string") return true;
   if (step.fallbackModels && step.fallbackModels.length > 0) return true;
+  if (workflowFallbackModels && workflowFallbackModels.length > 0) return true;
   // Templated `model` values (building block 5) must render at execution time
   // before family resolution. Leave them as-authored here.
   if (typeof step.model === "string" && /\{\{[^{}]+\}\}/.test(step.model)) return false;
@@ -70,6 +103,16 @@ function applyBinding(
   return next;
 }
 
+function bindingRequestForStep(
+  step: AgentBackedWorkflowStep,
+  workflowFallbackModels?: string[],
+): ModelBindingRequest {
+  const request = bindingRequestFromStep(step);
+  const merged = mergeFallbackModels(request.fallbackModels, workflowFallbackModels);
+  if (merged === request.fallbackModels) return request;
+  return { ...request, fallbackModels: merged };
+}
+
 /**
  * Materialize every agent-backed step that uses model-only / modelClass /
  * fallback bindings into concrete `agent` + `model` pairs. Pinned
@@ -83,6 +126,7 @@ export function resolveWorkflowBindings(
   options: ResolveWorkflowBindingsOptions = {},
 ): ResolveWorkflowBindingsResult {
   const preservePinned = options.preservePinned !== false;
+  const workflowFallbackModels = options.workflowFallbackModels ?? spec.fallbackModels;
   const resolutions: StepBindingResolution[] = [];
   const phases: WorkflowSpec["phases"] = [];
   /** Sticky agent preference for session-continue chains within this pass. */
@@ -91,7 +135,7 @@ export function resolveWorkflowBindings(
   for (const phase of spec.phases) {
     const steps: WorkflowStep[] = [];
     for (const step of phase.steps) {
-      if (!stepNeedsResolve(step, preservePinned, options.isReady)) {
+      if (!stepNeedsResolve(step, preservePinned, options.isReady, workflowFallbackModels)) {
         steps.push(step);
         if (isAgentBackedStep(step) && typeof step.agent === "string") {
           resolvedAgentByStep.set(step.id, step.agent);
@@ -107,7 +151,7 @@ export function resolveWorkflowBindings(
         (sessionSrc && resolvedAgentByStep.get(sessionSrc)) ||
         (typeof backed.agent === "string" ? backed.agent : undefined);
 
-      const request = bindingRequestFromStep(backed);
+      const request = bindingRequestForStep(backed, workflowFallbackModels);
       const resolved = resolveModelBinding(request, {
         config: options.config,
         isReady: options.isReady,
@@ -154,7 +198,10 @@ export function resolveStepFailoverChain(
   if (!isAgentBackedStep(step)) {
     return { ok: false, error: "step is not agent-backed" };
   }
-  const request = bindingRequestFromStep(step as AgentBackedWorkflowStep);
+  const request = bindingRequestForStep(
+    step as AgentBackedWorkflowStep,
+    options.workflowFallbackModels,
+  );
   const resolved = resolveModelBinding(request, {
     config: options.config,
     isReady: options.isReady,

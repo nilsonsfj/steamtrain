@@ -103,6 +103,14 @@ export {
   resolveEffortForBinding,
 } from "./model-resolve";
 export {
+  type AgentFailureKind,
+  type CapacityFailureKind,
+  classifyAgentFailure,
+  describeFailureKind,
+  isCapacityFailure,
+  isDefaultFailoverTrigger,
+} from "./failure-classify";
+export {
   clearCodexVariantCacheForTests,
   parseCodexDebugModels,
   setCodexVariantCacheForTests,

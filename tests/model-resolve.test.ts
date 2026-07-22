@@ -324,6 +324,50 @@ describe("workflow schema: model-only and modelClass", () => {
     };
     expect(validateWorkflow(spec).ok).toBe(true);
   });
+
+  it("accepts modelFailover and workflow-level fallbackModels", () => {
+    const spec: WorkflowSpec = {
+      name: "with-failover-policy",
+      fallbackModels: ["sonnet 5", "haiku"],
+      modelFailover: {
+        enabled: true,
+        on: ["quota", "rate_limit"],
+        onCapacityResult: true,
+        preferNextModel: true,
+        failoverDelayMs: 100,
+      },
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            {
+              id: "w",
+              modelClass: "implementer",
+              modelFailover: { allowAfterToolUse: false },
+              prompt: "implement",
+            },
+          ],
+        },
+      ],
+    };
+    expect(validateWorkflow(spec).ok).toBe(true);
+  });
+
+  it("rejects an empty modelFailover.on list", () => {
+    const spec = {
+      name: "bad-failover",
+      modelFailover: { on: [] },
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "w", model: "opus 4.8", prompt: "hi" }],
+        },
+      ],
+    };
+    expect(validateWorkflow(spec as WorkflowSpec).ok).toBe(false);
+  });
 });
 
 describe("resolveWorkflowBindings", () => {

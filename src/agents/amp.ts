@@ -15,6 +15,7 @@ import {
 } from "../types/raw-amp";
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
+import { classifyAgentFailure } from "./failure-classify";
 import { humanizeAssistantError, stringifyContent } from "./util";
 
 const AGENT: AgentId = "amp";
@@ -130,7 +131,15 @@ export function createAmpMapper(agent: AgentInstanceId = AGENT): EventMapper {
         // A failed turn carries a human message in `error` (e.g. no credits).
         // Emit it as an error so it surfaces and retry treats the run as failed.
         if (r.data.is_error && r.data.error) {
-          out.push({ kind: "error", agent, ts, message: r.data.error, code: null });
+          const category = classifyAgentFailure(r.data.error);
+          out.push({
+            kind: "error",
+            agent,
+            ts,
+            message: r.data.error,
+            code: null,
+            category: category === "unknown" ? undefined : category,
+          });
         }
         out.push({
           kind: "result",

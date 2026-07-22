@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { AgentInstanceId, ApiInstanceId, TokenUsage } from "../types/events";
+import type { ModelFailoverPolicy } from "./model-failover";
 import type { RetryPolicy } from "./retry";
 import type { JsonSchema } from "./structured";
 // Circular import is safe: template.ts imports types from this module, and this
@@ -96,6 +97,12 @@ export interface AgentRunFields {
    * model failover on retry). Each entry accepts the same forms as `model`.
    */
   fallbackModels?: string[];
+  /**
+   * Per-step mid-flight model failover policy (overrides the workflow /
+   * project `modelFailover` default). Controls whether quota / rate-limit /
+   * transient failures walk `fallbackModels` instead of ruining the run.
+   */
+  modelFailover?: ModelFailoverPolicy;
   /** Prompt template; may reference `{{input}}` and `{{steps.<id>.output}}`. */
   prompt: string;
   /** Target working directory (absolute, or relative to the run's base cwd). */
@@ -846,6 +853,19 @@ export interface WorkflowSpec {
   phases: WorkflowPhase[];
   /** Default auto-retry policy applied to every agent step (per-step `retry` overrides). */
   retry?: RetryPolicy;
+  /**
+   * Default mid-flight model failover policy for agent steps (per-step
+   * `modelFailover` overrides). Project/user config `modelFailover` is the
+   * next fallback. See {@link ModelFailoverPolicy}.
+   */
+  modelFailover?: ModelFailoverPolicy;
+  /**
+   * Default ordered failover model queries appended to every agent-backed
+   * step's candidate chain (after the step's own `fallbackModels`). Lets a
+   * workflow declare "if quota runs out, try these" once instead of on every
+   * step.
+   */
+  fallbackModels?: string[];
   /** Default per-agent subprocess timeout for agent-backed steps (per-step `stepTimeoutSec` overrides). */
   stepTimeoutSec?: number;
   /** Whole-workflow wall-clock abort limit in seconds. Omitted → stepCount × stepTimeoutSec. */
@@ -1207,6 +1227,19 @@ const retryPolicySchema = z.object({
   jitter: z.boolean().optional(),
 });
 
+const modelFailoverTriggerSchema = z.enum(["quota", "rate_limit", "transient", "auth", "any"]);
+
+const modelFailoverPolicySchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    on: z.array(modelFailoverTriggerSchema).min(1).optional(),
+    onCapacityResult: z.boolean().optional(),
+    allowAfterToolUse: z.boolean().optional(),
+    preferNextModel: z.boolean().optional(),
+    failoverDelayMs: z.number().int().min(0).max(60000).optional(),
+  })
+  .strict();
+
 const workflowWorkerStepSchema = z
   .object({
     ...baseStepShape,
@@ -1217,6 +1250,7 @@ const workflowWorkerStepSchema = z
       .regex(/^continue:.+$/, 'session must be "continue:<stepId>"')
       .optional(),
     retry: retryPolicySchema.optional(),
+    modelFailover: modelFailoverPolicySchema.optional(),
     maxCostUsd: z.number().positive().optional(),
     canAsk: z.boolean().optional(),
     ...agentRunShape,
@@ -1504,6 +1538,8 @@ export const workflowSpecSchema = z
     inputs: z.record(workflowInputSpecSchema).optional(),
     phases: z.array(workflowPhaseSchema).min(1),
     retry: retryPolicySchema.optional(),
+    modelFailover: modelFailoverPolicySchema.optional(),
+    fallbackModels: z.array(z.string().min(1)).min(1).optional(),
     stepTimeoutSec: z.number().positive().optional(),
     workflowTimeoutSec: z.number().positive().optional(),
     stepTimeoutMs: z.number().positive().optional(),

@@ -517,11 +517,22 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
         worktree: e.worktree ?? s.worktree,
       }));
     case "step_retry":
-      return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
-        ...s,
-        attempts: e.attempt + 1,
-        activity: `↻ retrying ${e.attempt + 1}/${e.maxAttempts} (${Math.round(e.delayMs)}ms)`,
-      }));
+      return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => {
+        const nextAgent = e.failover?.toAgent ?? s.agent;
+        const nextModel = e.failover?.toModel ?? s.model;
+        const nextEffort = e.failover?.toEffort ?? s.effort;
+        const activity = e.failover
+          ? `↻ failover → ${e.failover.toAgent}/${e.failover.toModel} (${e.attempt + 1}/${e.maxAttempts})`
+          : `↻ retrying ${e.attempt + 1}/${e.maxAttempts} (${Math.round(e.delayMs)}ms)`;
+        return {
+          ...s,
+          attempts: e.attempt + 1,
+          agent: nextAgent,
+          model: nextModel,
+          effort: nextEffort,
+          activity,
+        };
+      });
     case "gate_evaluated":
       return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
         ...s,

@@ -4,6 +4,8 @@ export type {
   AgentProviderId,
   AgentEvent,
   AgentEventKind,
+  AgentFailureKind,
+  AgentFailureCategory,
   BaseEvent,
   EventMapper,
   SessionStartEvent,

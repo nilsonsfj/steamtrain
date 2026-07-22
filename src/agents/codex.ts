@@ -8,6 +8,7 @@ import type {
 import { type CodexThreadItem, codexEnvelope, codexEvent } from "../types/raw-codex";
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
+import { classifyAgentFailure } from "./failure-classify";
 import { stringifyContent } from "./util";
 
 const AGENT: AgentId = "codex";
@@ -280,7 +281,14 @@ export function createCodexMapper(agent: AgentInstanceId = AGENT): EventMapper {
         const message = errorMessage(e.error);
         const durationMs = turnStartedAt !== undefined ? ts - turnStartedAt : undefined;
         turnStartedAt = undefined;
-        out.push({ kind: "error", agent, ts, message });
+        const category = classifyAgentFailure(message);
+        out.push({
+          kind: "error",
+          agent,
+          ts,
+          message,
+          category: category === "unknown" ? undefined : category,
+        });
         out.push({
           kind: "result",
           agent,
@@ -296,7 +304,15 @@ export function createCodexMapper(agent: AgentInstanceId = AGENT): EventMapper {
       }
 
       case "error": {
-        out.push({ kind: "error", agent, ts, message: errorMessage(e.error) });
+        const message = errorMessage(e.error);
+        const category = classifyAgentFailure(message);
+        out.push({
+          kind: "error",
+          agent,
+          ts,
+          message,
+          category: category === "unknown" ? undefined : category,
+        });
         return out;
       }
 

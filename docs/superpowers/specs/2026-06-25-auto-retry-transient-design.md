@@ -117,7 +117,15 @@ A first-class workflow event and an additive history field.
 
 ## Out of scope (YAGNI)
 
-- Per-error-class policies (different backoff for rate-limit vs network).
-- Result-text sniffing to retry completed-but-errored turns.
+- Per-error-class policies (different backoff curves for rate-limit vs network).
 - Retrying non-agent steps.
 - Cross-run retry budgets or circuit breakers.
+
+## Later: capacity failover (implemented)
+
+Mid-flight model re-routing for quota / rate-limit failures that arrive as
+completed error turns is implemented separately via `modelFailover` +
+`fallbackModels` — see `docs/model-binding.md` and `src/workflow/model-failover.ts`.
+That path intentionally sniffs capacity messages (and optional adapter
+`category` tags) so a quota run-out can walk the failover chain without treating
+ordinary logic `result.isError` failures as retryable.

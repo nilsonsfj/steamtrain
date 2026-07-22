@@ -3,6 +3,11 @@ import { tmpdir } from "node:os";
 import { join as joinPath, resolve as resolvePath } from "node:path";
 import { effortForModelChange, resolveAgentInstance } from "../agents";
 import type { AgentAdapter } from "../agents";
+import {
+  type AgentFailureKind,
+  classifyAgentFailure,
+  describeFailureKind,
+} from "../agents/failure-classify";
 import type { ResolvedModelCandidate } from "../agents/model-resolve";
 import { llmStepApiId, resolveLlmStepApi } from "../apis/resolve";
 import type { SteamtrainConfig } from "../config/types";
@@ -22,6 +27,7 @@ import { runShellCommand } from "./command";
 import type { StepEditPatch, WorkflowRunControl } from "./control";
 import { addTokens } from "./cost";
 import type { WorkflowEvent } from "./events";
+import type { StepRetryEvent } from "./events";
 import { mergeConflictGuidance } from "./gc";
 import {
   HUMAN_INPUT_MAX_ATTEMPTS,
@@ -58,6 +64,14 @@ import {
   worktreeDiff,
   worktreeSourceFromInfo,
 } from "./merge";
+import {
+  type ModelFailoverPolicy,
+  type ResolvedModelFailoverPolicy,
+  isFailoverEligibleFailure,
+  resolveModelFailoverPolicy,
+  shouldAdvanceFailover,
+  shouldFailFastWithoutCandidate,
+} from "./model-failover";
 import { createChannel, runPool } from "./pool";
 import {
   type StepBindingResolution,
@@ -1287,6 +1301,9 @@ async function runSingleStep(
       workflowName: spec.name,
       artifactsDir: env.artifactsDir,
       retryDefault: spec.retry,
+      modelFailoverWorkflow: spec.modelFailover,
+      modelFailoverConfig: deps.agentConfig?.modelFailover,
+      workflowFallbackModels: spec.fallbackModels,
       stepTimeoutDefault: spec.stepTimeoutSec,
       iteration,
       workflowCallStack: ctx.workflowCallStack ?? [],
@@ -1477,6 +1494,12 @@ interface ExecuteContext {
   artifactsDir: string;
   /** Workflow-level auto-retry default; per-step `retry` overrides it. */
   retryDefault?: RetryPolicy;
+  /** Workflow-level mid-flight model failover (per-step `modelFailover` overrides). */
+  modelFailoverWorkflow?: ModelFailoverPolicy;
+  /** Project/user config mid-flight model failover (lowest priority layer). */
+  modelFailoverConfig?: ModelFailoverPolicy;
+  /** Workflow-level fallback model queries appended to every agent step's chain. */
+  workflowFallbackModels?: string[];
   /** Workflow-level per-step timeout default in seconds; per-step `stepTimeoutSec` overrides it. */
   stepTimeoutDefault?: number;
   /** Loop iteration this step is executing under (1-based). */
@@ -1655,16 +1678,20 @@ async function executeStep(
 
 /**
  * One agent invocation. Returns its result plus whether the failure (if any) is
- * a *retryable transient*: a transport-level `error` event or a thrown exception
- * where the agent did **no observable work** — it neither completed a turn (no
- * `result` event) nor invoked any tool (no `tool_use`). A completed `result`
- * (even `isError`) is never retryable, and — conservatively — neither is any
- * attempt in which the agent started using tools, because a tool call may have
- * had side effects (a commit, a file write, an API call) even if the agent later
- * crashed before reporting a result. Cancellation is never retryable. This errs
- * on the side of safety: we only retry failures that almost certainly changed
- * nothing (spawn failures, immediate transport/rate-limit errors before any
- * tool ran).
+ * eligible for auto-retry / mid-flight model failover.
+ *
+ * Classic *retryable transient*: a transport-level `error` event or a thrown
+ * exception where the agent did **no observable work** — it neither completed a
+ * turn (no `result` event) nor invoked any tool (no `tool_use`). Cancellation
+ * is never retryable.
+ *
+ * *Capacity failover*: quota / rate-limit / billing exhaustion often arrives as
+ * a completed `result` with `isError` (Amp "no credits", Codex `turn.failed`,
+ * Claude result errors). Those are never same-binding "transient" retries, but
+ * under {@link ModelFailoverPolicy.onCapacityResult} they are eligible to walk
+ * the failover chain so a quota run-out does not ruin the workflow. Tool use
+ * still blocks unless `allowAfterToolUse` is set — a tool may have had side
+ * effects.
  */
 async function runAgentAttempt(
   step: AgentBackedWorkflowStep,
@@ -1674,8 +1701,15 @@ async function runAgentAttempt(
   item: WorkflowItem | undefined,
   prompt: string,
   stepCwd: string,
-  resumeSessionId?: string,
-): Promise<{ result: StepResult; retryable: boolean }> {
+  resumeSessionId: string | undefined,
+  failoverPolicy: ResolvedModelFailoverPolicy,
+): Promise<{
+  result: StepResult;
+  /** Continue the retry/failover loop for this failure. */
+  retryable: boolean;
+  failureKind: AgentFailureKind;
+  classicRetryable: boolean;
+}> {
   const started = Date.now();
   let finalText = "";
   let streamedText = "";
@@ -1684,6 +1718,8 @@ async function runAgentAttempt(
   let sessionId: string | undefined;
   let errored = false;
   let errorMessage: string | undefined;
+  let errorStderr: string | undefined;
+  let failureHint: AgentFailureKind | undefined;
   let sawResult = false;
   let sawToolUse = false;
 
@@ -1715,6 +1751,8 @@ async function runAgentAttempt(
       } else if (event.kind === "error") {
         errored = true;
         errorMessage ??= event.message;
+        errorStderr ??= event.stderr;
+        if (event.category) failureHint = event.category;
       } else if (event.kind === "unknown") {
         // An adapter downgrades an envelope it can't parse to `unknown` rather
         // than dropping it (e.g. a malformed/future-shaped tool_use or assistant
@@ -1744,6 +1782,18 @@ async function runAgentAttempt(
     ? finalText || streamedText
     : errorMessage || finalText || streamedText || (cancelled ? "cancelled" : "");
 
+  const classicRetryable = errored && !cancelled && !sawResult && !sawToolUse;
+  const failureKind = ok
+    ? ("unknown" as const)
+    : classifyAgentFailure(errorMessage, { stderr: errorStderr, hint: failureHint });
+  const retryable = isFailoverEligibleFailure(failoverPolicy, {
+    kind: failureKind,
+    cancelled,
+    sawResult,
+    sawToolUse,
+    classicRetryable,
+  });
+
   return {
     result: {
       stepId,
@@ -1766,10 +1816,9 @@ async function runAgentAttempt(
       // counterpart.
       model: step.model,
     },
-    // Transient + side-effect-free: errored, not cancelled, and the agent neither
-    // completed a turn (`result`) nor invoked a tool (`tool_use`/`tool_result`),
-    // including unparsed `unknown` envelopes tagged as such.
-    retryable: errored && !cancelled && !sawResult && !sawToolUse,
+    retryable,
+    failureKind,
+    classicRetryable,
   };
 }
 
@@ -2006,6 +2055,13 @@ async function executeAgentStep(
     stepRetry,
     retryEligible ? ctx.retryDefault : { maxAttempts: 1 },
   );
+  const stepFailover =
+    retryEligible && "modelFailover" in step
+      ? (step.modelFailover as ModelFailoverPolicy | undefined)
+      : undefined;
+  const failoverPolicy = retryEligible
+    ? resolveModelFailoverPolicy(stepFailover, ctx.modelFailoverWorkflow, ctx.modelFailoverConfig)
+    : resolveModelFailoverPolicy({ enabled: false, on: ["quota"] });
 
   const firstStarted = Date.now();
   let attempt = 0;
@@ -2018,6 +2074,7 @@ async function executeAgentStep(
     const live = resolveStepFailoverChain(step, {
       config: ctx.deps.agentConfig,
       isReady: (agent) => Boolean(resolveAgentInstance(ctx.deps.agentConfig, agent)),
+      workflowFallbackModels: ctx.workflowFallbackModels,
     });
     if (live.ok) failover = live.candidates;
   }
@@ -2025,6 +2082,20 @@ async function executeAgentStep(
     0,
     failover.findIndex((c) => c.agent === step.agent && c.model === step.model),
   );
+  // Extend the attempt budget only when the author declared explicit
+  // fallbackModels (step or workflow) — automatic same-family remaps must not
+  // inflate retries for plain pinned steps. When fallbacks *are* declared,
+  // cap the extension at the *resolved* chain length so unresolved queries
+  // cannot burn same-binding attempts after the real candidate list ends,
+  // while still leaving room for family remaps that sit between declared
+  // fallbacks in the resolved order.
+  const hasExplicitFallbacks =
+    (step.fallbackModels?.length ?? 0) > 0 || (ctx.workflowFallbackModels?.length ?? 0) > 0;
+  const remainingInChain = Math.max(1, failover.length - failoverIndex);
+  const attemptBudget =
+    failoverPolicy.enabled && hasExplicitFallbacks && remainingInChain > 1
+      ? Math.max(policy.maxAttempts, remainingInChain)
+      : policy.maxAttempts;
 
   try {
     let result: StepResult;
@@ -2040,35 +2111,72 @@ async function executeAgentStep(
         workspace.cwd,
         // Session resume only makes sense on the originally pinned agent.
         activeStep.agent === step.agent ? resume.sessionId : undefined,
+        failoverPolicy,
       );
       result = attemptOutcome.result;
-      const isLastAttempt = attempt >= policy.maxAttempts;
-      if (result.ok || !attemptOutcome.retryable || isLastAttempt || ctx.signal?.aborted) break;
+      const isLastAttempt = attempt >= attemptBudget;
+      if (result.ok || !attemptOutcome.retryable || ctx.signal?.aborted) break;
+
+      const hasNextCandidate = failoverIndex + 1 < failover.length;
+      if (
+        shouldFailFastWithoutCandidate(failoverPolicy, attemptOutcome.failureKind, hasNextCandidate)
+      ) {
+        // Quota exhausted and nowhere else to go — don't burn remaining
+        // attempts on the same model.
+        break;
+      }
+
+      const advance = shouldAdvanceFailover(failoverPolicy, {
+        kind: attemptOutcome.failureKind,
+        hasNextCandidate,
+        classicRetryable: attemptOutcome.classicRetryable,
+      });
+
+      // Capacity / configured triggers with no next candidate and no classic
+      // same-binding retry left: stop. Rate limits without a next model still
+      // get same-binding backoff retries via classicRetryable / remaining attempts.
+      if (!advance && !attemptOutcome.classicRetryable) break;
+      if (isLastAttempt) break;
 
       // Prefer switching to the next model/agent offering before re-trying the
-      // same binding — provider outages and auth flakes often survive same-agent retries.
+      // same binding — provider outages and quota flakes often survive same-agent retries.
       let reason = result.error ?? "transient failure";
-      if (failoverIndex + 1 < failover.length) {
+      let failoverMeta: StepRetryEvent["failover"];
+      if (advance && hasNextCandidate) {
+        const fromAgent = activeStep.agent ?? "unknown";
+        const fromModel = activeStep.model ?? "unknown";
         failoverIndex += 1;
         const next = failover[failoverIndex]!;
+        const toEffort =
+          next.effort ?? effortForModelChange(next.agent, next.model, activeStep.effort);
         activeStep = {
           ...activeStep,
           agent: next.agent,
           model: next.model,
-          effort: next.effort ?? effortForModelChange(next.agent, next.model, activeStep.effort),
+          effort: toEffort,
         };
-        reason = `${reason} · failing over to ${next.agent}/${next.model}`;
+        const kindLabel = describeFailureKind(attemptOutcome.failureKind);
+        reason = `${kindLabel}: ${reason} · failing over to ${next.agent}/${next.model}`;
+        failoverMeta = {
+          fromAgent,
+          fromModel,
+          toAgent: next.agent,
+          toModel: next.model,
+          toEffort,
+          failureKind: attemptOutcome.failureKind,
+        };
       }
 
-      const delayMs = backoffDelayMs(policy, attempt);
+      const delayMs = advance ? failoverPolicy.failoverDelayMs : backoffDelayMs(policy, attempt);
       hooks.pushWorkflowEvent({
         kind: "step_retry",
         phaseId: hooks.phaseId,
         stepId,
         attempt,
-        maxAttempts: policy.maxAttempts,
+        maxAttempts: attemptBudget,
         delayMs,
         reason,
+        failover: failoverMeta,
         iteration: ctx.iteration,
         ts: Date.now(),
       });
@@ -2182,6 +2290,7 @@ async function enforceStructuredOutput(
     structuredOutputFixPrompt(outputSchema, result.output, parsed.error),
     workspaceCwd,
     fixResume,
+    resolveModelFailoverPolicy({ enabled: false }),
   );
   const costUsd =
     result.costUsd === undefined && fix.result.costUsd === undefined
@@ -2266,6 +2375,7 @@ async function continueAfterAgentQuestion(
     continuationPrompt,
     workspaceCwd,
     resumable ? result.sessionId : undefined,
+    resolveModelFailoverPolicy({ enabled: false }),
   );
 
   const costUsd =
@@ -3767,6 +3877,8 @@ async function executeMergeStep(
             undefined,
             prompt,
             stagingRoot,
+            undefined,
+            resolveModelFailoverPolicy({ enabled: false }),
           );
           conflictCostUsd += attempt.result.costUsd ?? 0;
           if (attempt.result.tokens) {

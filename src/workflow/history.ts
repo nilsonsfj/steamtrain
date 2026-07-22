@@ -378,6 +378,14 @@ export class RunRecordBuilder {
         if (!step) break;
         // The failed attempt just completed; the next one is about to start.
         step.attempts = event.attempt + 1;
+        // Failover updates the live binding here. `step_done` does not carry
+        // agent/model — by the final attempt these fields already reflect the
+        // model that actually ran (or the original, when no failover occurred).
+        if (event.failover) {
+          step.agent = event.failover.toAgent;
+          step.model = event.failover.toModel;
+          if (event.failover.toEffort !== undefined) step.effort = event.failover.toEffort;
+        }
         break;
       }
       case "gate_evaluated": {

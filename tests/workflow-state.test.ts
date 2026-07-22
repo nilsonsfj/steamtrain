@@ -156,6 +156,43 @@ describe("workflowReducer", () => {
     expect(step?.activity).toBe("↻ retrying 2/3 (1000ms)");
   });
 
+  it("updates agent/model on step_retry failover and shows a failover activity", () => {
+    const state = reduceAll([
+      { kind: "workflow_start", name: "w", phaseCount: 1, stepCount: 1, ts: 0 },
+      { kind: "phase_start", phaseId: "p1", title: "P1", index: 0, stepCount: 1, ts: 0 },
+      {
+        kind: "step_start",
+        phaseId: "p1",
+        stepId: "a",
+        agent: AGENT,
+        model: "claude-opus-4-8",
+        ts: 0,
+      },
+      {
+        kind: "step_retry",
+        phaseId: "p1",
+        stepId: "a",
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 250,
+        reason: "quota / billing exhausted · failing over to claude/claude-sonnet-5",
+        failover: {
+          fromAgent: AGENT,
+          fromModel: "claude-opus-4-8",
+          toAgent: AGENT,
+          toModel: "claude-sonnet-5",
+          failureKind: "quota",
+        },
+        ts: 0,
+      },
+    ]);
+    const step = flattenSteps(state)[0]?.step;
+    expect(step?.attempts).toBe(2);
+    expect(step?.model).toBe("claude-sonnet-5");
+    expect(step?.agent).toBe(AGENT);
+    expect(step?.activity).toBe("↻ failover → claude/claude-sonnet-5 (2/3)");
+  });
+
   it("tracks generated fan-out child steps", () => {
     const child: StepResult = {
       stepId: "work[0]",

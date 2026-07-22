@@ -18,6 +18,7 @@ import {
 } from "../types/raw-claude";
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
+import { classifyAgentFailure } from "./failure-classify";
 import { humanizeAssistantError, stringifyContent } from "./util";
 
 const AGENT: AgentId = "claude";
@@ -124,7 +125,15 @@ export function createClaudeMapper(agent: AgentInstanceId = AGENT): EventMapper 
         if (!parsed.success) return [{ kind: "unknown", agent, ts, rawType: "assistant", raw }];
         const out: AgentEvent[] = [];
         if (parsed.data.error) {
-          out.push({ kind: "error", agent, ts, message: humanizeAssistantError(parsed.data) });
+          const message = humanizeAssistantError(parsed.data);
+          const category = classifyAgentFailure(message);
+          out.push({
+            kind: "error",
+            agent,
+            ts,
+            message,
+            category: category === "unknown" ? undefined : category,
+          });
         }
         for (const block of parsed.data.message.content ?? []) {
           if (block.type === "tool_use" && block.name) {

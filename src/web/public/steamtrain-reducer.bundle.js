@@ -271,11 +271,20 @@ var SteamtrainReducer = (() => {
           worktree: e.worktree ?? s.worktree
         }));
       case "step_retry":
-        return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
-          ...s,
-          attempts: e.attempt + 1,
-          activity: `\u21BB retrying ${e.attempt + 1}/${e.maxAttempts} (${Math.round(e.delayMs)}ms)`
-        }));
+        return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => {
+          const nextAgent = e.failover?.toAgent ?? s.agent;
+          const nextModel = e.failover?.toModel ?? s.model;
+          const nextEffort = e.failover?.toEffort ?? s.effort;
+          const activity = e.failover ? `\u21BB failover \u2192 ${e.failover.toAgent}/${e.failover.toModel} (${e.attempt + 1}/${e.maxAttempts})` : `\u21BB retrying ${e.attempt + 1}/${e.maxAttempts} (${Math.round(e.delayMs)}ms)`;
+          return {
+            ...s,
+            attempts: e.attempt + 1,
+            agent: nextAgent,
+            model: nextModel,
+            effort: nextEffort,
+            activity
+          };
+        });
       case "gate_evaluated":
         return updateStep(state, e.phaseId, e.stepId, e.iteration, (s) => ({
           ...s,
@@ -509,10 +518,14 @@ var SteamtrainReducer = (() => {
           ev.ok ? "End of the line \u2014 arrival report ready." : ev.budgetExceeded ? "Stopped \u2014 cost budget reached." : "Stopped short of the destination."
         );
       case "step_retry":
-        return line(ev, `Car '${ev.stepId}' will try again (${ev.attempt}/${ev.maxAttempts}).`, {
-          phaseId: ev.phaseId,
-          stepId: ev.stepId
-        });
+        return line(
+          ev,
+          ev.failover ? `Car '${ev.stepId}' failing over ${ev.failover.fromAgent}/${ev.failover.fromModel} \u2192 ${ev.failover.toAgent}/${ev.failover.toModel} (${ev.failover.failureKind}).` : `Car '${ev.stepId}' will try again (${ev.attempt}/${ev.maxAttempts}).`,
+          {
+            phaseId: ev.phaseId,
+            stepId: ev.stepId
+          }
+        );
       default:
         return null;
     }
