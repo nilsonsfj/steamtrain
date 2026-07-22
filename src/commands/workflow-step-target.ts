@@ -83,7 +83,7 @@ export function executeWorkflowAgentCommand(
   }
 
   if (all && ctx.workflowSpec) {
-    const steps = listRetargetableSteps(ctx.workflowSpec);
+    const steps = listRetargetableSteps(ctx.workflowSpec, ctx.resolveWorkflow);
     const model = defaultModelForAgent(next, ctx.config);
     const desire = { agent: next, model };
     const patches = buildBulkRetargetPatches(steps, desire, ctx.config);
@@ -179,7 +179,7 @@ export function executeWorkflowModelCommand(
   }
 
   if (all && ctx.workflowSpec) {
-    const steps = listRetargetableSteps(ctx.workflowSpec);
+    const steps = listRetargetableSteps(ctx.workflowSpec, ctx.resolveWorkflow);
     const patches = buildBulkModelPatches(steps, step.agent, next, ctx.config);
     for (const [stepId, patch] of Object.entries(patches)) {
       update(stepId, patch);

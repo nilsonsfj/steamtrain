@@ -8,8 +8,10 @@ import {
 } from "../agents";
 import type { SteamtrainConfig } from "../config";
 import {
+  MAX_WORKFLOW_NESTING_DEPTH,
   type WorkflowSpec,
   type WorkflowStep,
+  applyWorkflowStepOverrides,
   isAgentBackedStep,
   workflowStepKind,
 } from "../workflow";
@@ -60,6 +62,17 @@ export interface RetargetableStep {
   model?: string;
   modelClass?: string;
   effort?: string;
+  /**
+   * `0` for a step in the spec itself, `1+` for a step reached through one or
+   * more sub-workflow (`workflow`) call steps. The `stepId` of a nested step is
+   * `::`-namespaced (`<workflowStepId>::<childStepId>`), which is exactly the
+   * override-map key that retargets it — so a bulk patch built from this list
+   * cascades straight into the sub-workflow. Absent ⇒ treat as `0` (a top-level
+   * step); `listRetargetableSteps` always sets it explicitly.
+   */
+  depth?: number;
+  /** The `workflow` step id this step is reached through (undefined at depth 0). */
+  viaWorkflowStep?: string;
 }
 
 export type EditorField = "agent" | "model" | "effort" | "prompt";
@@ -172,20 +185,67 @@ export function effortChangePatch(nextEffort: string): StepEditorPatch {
   return { effort: nextEffort === EDITOR_EFFORT_NONE ? undefined : nextEffort };
 }
 
-/** Every agent-backed step in a workflow spec, in phase order. */
-export function listRetargetableSteps(spec: WorkflowSpec): RetargetableStep[] {
+/**
+ * Every agent-backed step that a bulk retarget can reach, in phase order —
+ * including steps hidden inside sub-workflows when a catalog `resolve` is
+ * supplied.
+ *
+ * A `workflow` call step is not itself agent-backed, but the steps INSIDE the
+ * workflow it invokes are. With `resolve`, this walks into each resolvable
+ * sub-workflow (after layering the call step's own `overrides`, so the reported
+ * agent/model/effort reflect any cascade already staged) and emits its
+ * agent-backed steps under `::`-namespaced ids. That namespaced id is exactly
+ * the override-map key that retargets the nested step, so `/set-all` and the
+ * bulk-retarget helpers cascade into sub-workflows instead of stopping at the
+ * boundary. Without `resolve` the behavior is unchanged (own steps only) — the
+ * legacy single-arg call sites keep working.
+ *
+ * Cyclic references are guarded via `seen`; the depth cap mirrors the engine's
+ * `MAX_WORKFLOW_NESTING_DEPTH` so a recursive catalog can't blow the stack.
+ */
+export function listRetargetableSteps(
+  spec: WorkflowSpec,
+  resolve?: (name: string) => WorkflowSpec | undefined,
+  opts: { prefix?: string; depth?: number; seen?: ReadonlySet<string> } = {},
+): RetargetableStep[] {
+  const prefix = opts.prefix ?? "";
+  const depth = opts.depth ?? 0;
+  const seen = opts.seen ?? new Set<string>();
   const out: RetargetableStep[] = [];
   for (const phase of spec.phases) {
     for (const step of phase.steps) {
-      if (!isAgentBackedStep(step)) continue;
-      out.push({
-        stepId: step.id,
-        kindLabel: workflowStepKind(step),
-        agent: step.agent,
-        model: step.model,
-        modelClass: step.modelClass,
-        effort: step.effort,
-      });
+      if (isAgentBackedStep(step)) {
+        out.push({
+          stepId: `${prefix}${step.id}`,
+          kindLabel: workflowStepKind(step),
+          agent: step.agent,
+          model: step.model,
+          modelClass: step.modelClass,
+          effort: step.effort,
+          depth,
+          viaWorkflowStep: depth > 0 ? prefix.split("::").filter(Boolean).pop() : undefined,
+        });
+        continue;
+      }
+      if (
+        step.kind === "workflow" &&
+        resolve &&
+        depth < MAX_WORKFLOW_NESTING_DEPTH &&
+        !seen.has(step.workflow)
+      ) {
+        const base = resolve(step.workflow);
+        if (!base) continue;
+        // Reflect any cascade already staged on this call step so the listed
+        // targets are the effective ones a fresh set-all should diff against.
+        const child = step.overrides ? applyWorkflowStepOverrides(base, step.overrides) : base;
+        out.push(
+          ...listRetargetableSteps(child, resolve, {
+            prefix: `${prefix}${step.id}::`,
+            depth: depth + 1,
+            seen: new Set([...seen, step.workflow]),
+          }),
+        );
+      }
     }
   }
   return out;

@@ -105,6 +105,8 @@ export interface StepState {
   model?: string;
   effort?: string;
   cwd?: string;
+  /** For a `workflow` (sub-workflow) step, the name of the workflow it invokes. */
+  workflow?: string;
   /** Earlier steps whose outputs feed this step. */
   dependsOn?: string[];
   parentStepId?: string;
@@ -266,6 +268,7 @@ export function workflowStateFromSpec(spec: WorkflowSpec): WorkflowState {
         model: "model" in st ? st.model : undefined,
         effort: "effort" in st ? st.effort : undefined,
         cwd: "cwd" in st ? st.cwd : undefined,
+        workflow: st.kind === "workflow" ? st.workflow : undefined,
         dependsOn: st.dependsOn,
         status: "pending",
         text: "",

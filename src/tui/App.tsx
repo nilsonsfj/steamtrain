@@ -570,6 +570,15 @@ export function App({
     [author, wfStepOverrides],
   );
 
+  // Base (catalog) resolver — no session overrides applied. Sub-workflow
+  // cascades (`/set-all`, `--all`) resolve children through this and layer the
+  // parent call step's own `overrides` themselves, so applying session
+  // overrides here would double-count.
+  const baseResolveWorkflow = useCallback(
+    (name: string) => orchestrator.listWorkflows()[name],
+    [orchestrator],
+  );
+
   // ── Workflow Runner hook ─────────────────────────────────────────────
   const runner = useWorkflowRunner({
     orchestrator,
@@ -938,6 +947,7 @@ export function App({
     patchWorkflowStep: picker.patchWorkflowStep,
     previewStepSelection,
     workflowSpec: picker.preview.spec,
+    resolveWorkflow: baseResolveWorkflow,
     config: runtimeConfig,
     configPath,
     updateConfig,

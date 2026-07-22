@@ -112,7 +112,7 @@ export function executeSetAllCommand(args: string[], ctx: SlashCommandContext): 
     }
   }
 
-  const steps = listRetargetableSteps(ctx.workflowSpec);
+  const steps = listRetargetableSteps(ctx.workflowSpec, ctx.resolveWorkflow);
   if (steps.length === 0) {
     return {
       handled: true,
@@ -125,6 +125,7 @@ export function executeSetAllCommand(args: string[], ctx: SlashCommandContext): 
       ],
     };
   }
+  const nestedCount = steps.filter((s) => (s.depth ?? 0) > 0).length;
 
   const desire = {
     agent: nextAgent,
@@ -143,6 +144,10 @@ export function executeSetAllCommand(args: string[], ctx: SlashCommandContext): 
   })();
   const summary = summarizeBulkRetarget(patches, desire, ctx.config);
   const unchanged = Object.keys(patches).length === 0;
+  const nestedNote =
+    nestedCount > 0
+      ? ` (incl. ${nestedCount} sub-workflow step${nestedCount === 1 ? "" : "s"})`
+      : "";
   return {
     handled: true,
     clearInput: true,
@@ -150,8 +155,8 @@ export function executeSetAllCommand(args: string[], ctx: SlashCommandContext): 
       {
         level: "info",
         text: unchanged
-          ? `all ${steps.length} agent step(s) already on ${nextAgent}/${modelLabel}`
-          : `retargeted ${summary} · /save-workflows to persist`,
+          ? `all ${steps.length} agent step(s)${nestedNote} already on ${nextAgent}/${modelLabel}`
+          : `retargeted ${summary}${nestedNote} · /save-workflows to persist`,
       },
     ],
   };

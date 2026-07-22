@@ -959,6 +959,32 @@ fan-out-and-worktree-capable step:
   carries its own surfaced worktree, so a `merge` step whose `from` names the
   fan-out **parent** harvests one worktree per item.
 
+One more field lets the parent's model/agent choices reach INTO the child:
+
+- **`overrides: Record<string, patch>`** — per-child-step agent-field patches
+  (`agent` / `model` / `modelClass` / `effort` / `prompt` / `cwd` / `env` /
+  `extraArgs` / `stepTimeoutSec`, a field set to `null` removing it) layered
+  onto the resolved child spec **at this call site only** — the child workflow
+  on disk (which many parents may share) is never mutated. A key is a child
+  step id, or a `::`-namespaced path (`<childWorkflowStepId>::<deeperStepId>`,
+  recursively) to reach a step inside a nested sub-workflow. This is what makes
+  `/set-all`, `--all`, and the config UIs' bulk/per-step retargeting cascade
+  into a sub-workflow instead of stopping at its boundary. Both TUI and web
+  visualize the effective (override-applied) target of every child step, and
+  mark the overridden ones.
+
+  ```jsonc
+  {
+    "id": "bug-sweep",
+    "kind": "workflow",
+    "workflow": "bug-hunt",
+    "overrides": {
+      "triage": { "agent": "claude", "model": "opus" },
+      "verify::deep-check": { "model": "gpt-5" }   // two workflows deep
+    }
+  }
+  ```
+
 Together these turn a `workflow` call into a **parallel sub-pipeline fan-out**
 — the building block behind the bundled `mainline` workflow, which runs
 `mainline-stream` once per planned execution stream:

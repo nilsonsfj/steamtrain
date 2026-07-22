@@ -134,8 +134,16 @@ export function WorkflowPreview({
     (templateWarnings.length > 0 ? 1 : 0) +
     showPlan +
     1; // spacer after the meta block (marginBottom)
+  // A sub-workflow step's detail panel unfolds the whole child pipeline, so it
+  // earns more room than a leaf step's few fields — up to ~45% of the height,
+  // capped so the step tree above it never collapses.
+  const selectedIsSubWorkflow = selected?.step.kind === "workflow" && resolveWorkflow !== undefined;
+  const detailCap = selectedIsSubWorkflow ? 16 : 9;
+  const detailFraction = selectedIsSubWorkflow ? 0.45 : 0.35;
   const detailDesired =
-    selected && showStepDetail ? Math.min(9, Math.max(4, Math.floor((height - 2) * 0.35))) : 0;
+    selected && showStepDetail
+      ? Math.min(detailCap, Math.max(4, Math.floor((height - 2) * detailFraction)))
+      : 0;
   const listBudget = Math.max(1, height - 2 - chromeLines - detailDesired);
   const detailMaxHeight = Math.max(0, height - 2 - chromeLines - listBudget);
   const rowWindow = selectVisibleWindow(rows, selectedRowIndex, listBudget);
@@ -224,6 +232,7 @@ export function WorkflowPreview({
                   step={row.entry.step}
                   selected={rowWindow.start + offset === selectedRowIndex}
                   renderCtx={renderCtx}
+                  resolveWorkflow={resolveWorkflow}
                 />
               ),
             )}
@@ -242,6 +251,7 @@ export function WorkflowPreview({
           width={innerWidth}
           maxHeight={detailMaxHeight}
           renderCtx={renderCtx}
+          resolveWorkflow={resolveWorkflow}
         />
       ) : null}
     </Box>
@@ -269,10 +279,12 @@ function SpecStepRow({
   step,
   selected,
   renderCtx,
+  resolveWorkflow,
 }: {
   step: FlatSpecStep["step"];
   selected: boolean;
   renderCtx: PreviewRenderContext;
+  resolveWorkflow?: (name: string) => WorkflowSpec | undefined;
 }) {
   const kind = workflowStepKind(step);
   const agentColor = isAgentBackedStep(step)
@@ -293,7 +305,7 @@ function SpecStepRow({
     : step.kind === "llm"
       ? formatLlmTarget(step, renderCtx)
       : BLOCK_LABEL[kind];
-  const meta = specStepRowMeta(step, renderCtx);
+  const meta = specStepRowMeta(step, renderCtx, resolveWorkflow);
   // Single truncate-end Text: independent sibling Text nodes with separate
   // truncate budgets were overflowing into neighboring rows (Ink wrap overlap).
   return (
@@ -315,15 +327,17 @@ function SpecStepDetail({
   width,
   maxHeight,
   renderCtx,
+  resolveWorkflow,
 }: {
   entry: FlatSpecStep;
   width: number;
   maxHeight?: number;
   renderCtx: PreviewRenderContext;
+  resolveWorkflow?: (name: string) => WorkflowSpec | undefined;
 }) {
   const { step, phase } = entry;
   const kind = workflowStepKind(step);
-  const lines = specDetailLines(step, renderCtx);
+  const lines = specDetailLines(step, renderCtx, resolveWorkflow);
   const prompt = promptForStep(step, renderCtx);
   const runner = isAgentBackedStep(step)
     ? formatWorkflowAgentTarget(

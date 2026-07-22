@@ -116,6 +116,13 @@ export {
   workflowAutonomy,
 } from "./autonomy";
 export {
+  type SubWorkflowStepView,
+  type SubWorkflowView,
+  describeSubWorkflow,
+  formatSubWorkflowTarget,
+  subWorkflowRollup,
+} from "./sub-workflow-view";
+export {
   NOTIFY_EVENT_KINDS,
   type CreateNotifierOptions,
   type Notifier,
@@ -390,6 +397,8 @@ export {
   normalizeSessionOverrides,
   parseSessionOverrides,
   sessionOverridesEmpty,
+  splitSubWorkflowKey,
+  SUBWORKFLOW_STEP_SEPARATOR,
   type ParseSessionOverridesResult,
   type WorkflowSessionOverrides,
   type WorkflowStepOverrides,

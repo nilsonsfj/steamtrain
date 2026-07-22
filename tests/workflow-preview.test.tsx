@@ -248,4 +248,29 @@ describe("preview input resolution", () => {
       false,
     );
   });
+
+  it("unfolds a sub-workflow step's contents when a resolver is supplied", () => {
+    const spec = BUNDLED_WORKFLOWS.mainline!;
+    // The `streams` sub-workflow call step lives in the second phase.
+    const flat = flattenSpecSteps(spec);
+    const idx = flat.findIndex((e) => e.step.kind === "workflow");
+    expect(idx).toBeGreaterThanOrEqual(0);
+    const { lastFrame } = render(
+      <WorkflowPreview
+        spec={spec}
+        source="bundled"
+        width={160}
+        height={44}
+        selectedIndex={idx}
+        dispatchCheck={{ ok: true }}
+        resolveWorkflow={(name) => BUNDLED_WORKFLOWS[name]}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    // Row rollup names the child + its step count.
+    expect(frame).toContain("mainline-stream");
+    // Detail panel unfolds the child's own steps + a "contains N steps" rollup.
+    expect(frame).toContain("contains");
+    expect(frame).toContain("implement");
+  });
 });
