@@ -5,6 +5,7 @@ import type { ResolvedApiInstance } from "../apis";
 import type { ApiConfigScope } from "../config/types";
 import type { ApiDoctorResult, ApiDoctorStatus } from "../doctor";
 import type { ApiProviderId } from "../types/events";
+import { shouldAcceptTextInput } from "./text-input-filter";
 import { API_STATUS_STYLE } from "./theme";
 import { selectVisibleWindow } from "./workflow-list-window";
 
@@ -235,7 +236,7 @@ export function ApiManager({
         setForm({ ...form, [fieldKey]: form[fieldKey].slice(0, -1) });
         return;
       }
-      if (input && !key.ctrl && !key.meta && !key.tab) {
+      if (shouldAcceptTextInput(input, key) && !key.tab) {
         setForm({ ...form, [fieldKey]: form[fieldKey] + input });
       }
     }

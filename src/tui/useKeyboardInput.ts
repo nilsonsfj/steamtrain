@@ -6,6 +6,7 @@ import type { Mode } from "./modes";
 import { nextMode } from "./modes";
 import { shouldPromptHistoryCaptureDown, shouldPromptHistoryCaptureUp } from "./prompt-history";
 import { shouldDismissSuggestionMenu, shouldSuppressWorkflowNavigation } from "./slash-completion";
+import { shouldAcceptTextInput } from "./text-input-filter";
 
 import { buildHistoryBrowserEntries } from "../workflow";
 import type { useHistory } from "./useHistory";
@@ -159,17 +160,12 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
               return;
             }
             if (
-              input &&
-              !key.ctrl &&
-              !key.meta &&
+              shouldAcceptTextInput(input, key) &&
               input !== "\t" &&
               !key.upArrow &&
               !key.downArrow
             ) {
-              // Ignore pure control sequences; allow letters, digits, punctuation, spaces.
-              if ([...input].every((ch) => ch >= " " && ch !== "\x7f")) {
-                historyHook.setHistory(applyHistoryQuery(hist, hist.query + input));
-              }
+              historyHook.setHistory(applyHistoryQuery(hist, hist.query + input));
               return;
             }
             // ↑/↓ still navigate while filtering.

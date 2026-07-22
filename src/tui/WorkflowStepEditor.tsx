@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from "react";
 import { modelIdsForAgent } from "../agents";
 import { truncate } from "../agents/util";
 import { MAX_PROMPT_CHARS, type SteamtrainConfig } from "../config";
+import { shouldAcceptTextInput } from "./text-input-filter";
 import { AGENT_COLOR } from "./theme";
 import {
   EDITOR_EFFORT_NONE,
@@ -160,7 +161,7 @@ export function WorkflowStepEditor({
         if (working.prompt.length > 0) apply({ prompt: working.prompt.slice(0, -1) });
         return;
       }
-      if (input && !key.ctrl && !key.meta) {
+      if (shouldAcceptTextInput(input, key)) {
         if (working.prompt.length >= MAX_PROMPT_CHARS) return;
         apply({ prompt: working.prompt + input });
       }
