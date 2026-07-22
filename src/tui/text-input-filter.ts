@@ -13,8 +13,6 @@ export function isEscapeSequenceRemnant(text: string): boolean {
   if (/^\[\d+(?:;\d+)*u$/.test(text)) return true;
   // Other CSI with numeric params + letter/~ final (unparsed modified keys).
   if (/^\[[0-9;]+[A-Za-z~]$/.test(text)) return true;
-  // Truncated CSI parameter string with no final byte yet.
-  if (/^\[[0-9;?]+$/.test(text)) return true;
   // SS3 leftovers (F-keys are usually named; belt-and-suspenders).
   if (/^O[A-Za-z]$/.test(text)) return true;
   return false;
@@ -46,8 +44,8 @@ export function shouldAcceptTextInput(
 }
 
 /**
- * True when an onChange from ink-text-input (or similar) only inserted an
- * escape-sequence remnant or control characters and should be ignored.
+ * True when an onChange from a text field only inserted an escape-sequence
+ * remnant or control characters and should be ignored.
  */
 export function shouldRejectTextInputChange(prev: string, next: string): boolean {
   const inserted = insertedChunk(prev, next);
@@ -57,7 +55,10 @@ export function shouldRejectTextInputChange(prev: string, next: string): boolean
   return false;
 }
 
-/** Single-hunk insert between `prev` and `next`, or null if not a pure insert. */
+/**
+ * Single-hunk insert between `prev` and `next`, or null when the edit is not a
+ * pure insertion (deletions / replacements return null so callers passthrough).
+ */
 export function insertedChunk(prev: string, next: string): string | null {
   if (next.length <= prev.length) return null;
   let prefix = 0;

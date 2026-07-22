@@ -17,8 +17,9 @@ describe("isEscapeSequenceRemnant", () => {
     expect(isEscapeSequenceRemnant("[96;3u")).toBe(true);
   });
 
-  it("flags truncated CSI parameter strings", () => {
-    expect(isEscapeSequenceRemnant("[27;3")).toBe(true);
+  it("does not flag truncated bracket text that a user might paste", () => {
+    expect(isEscapeSequenceRemnant("[27;3")).toBe(false);
+    expect(isEscapeSequenceRemnant("[27")).toBe(false);
   });
 
   it("does not flag ordinary typing or pastes", () => {
