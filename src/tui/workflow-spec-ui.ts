@@ -15,15 +15,22 @@ import type { AgentInstanceId } from "../types/events";
 import {
   type GateCondition,
   type LlmStep,
+  type SubWorkflowView,
   type WorkflowPhase,
   type WorkflowSpec,
   type WorkflowStep,
+  describeSubWorkflow,
+  formatSubWorkflowTarget,
   isAgentBackedStep,
   llmStepApiId,
   renderPrompt,
   resolveInputs,
+  subWorkflowRollup,
   workflowStepKind,
 } from "../workflow";
+
+/** Resolver for `kind: "workflow"` steps, threaded into row/detail rendering. */
+export type ResolveWorkflow = (name: string) => WorkflowSpec | undefined;
 
 /** Values used to resolve `{{inputs.*}}` / `{{input}}` for TUI preview chrome. */
 export interface PreviewRenderContext {
@@ -200,7 +207,11 @@ export function formatGateLoop(step: WorkflowStep): string {
   return `↺ phase:${step.loopTo}${max}`;
 }
 
-export function specStepRowMeta(step: WorkflowStep, ctx: PreviewRenderContext = {}): string {
+export function specStepRowMeta(
+  step: WorkflowStep,
+  ctx: PreviewRenderContext = {},
+  resolve?: ResolveWorkflow,
+): string {
   const bits: string[] = [];
   if (step.dependsOn?.length) bits.push(`deps: ${step.dependsOn.join(", ")}`);
   if ("forEach" in step && step.forEach) bits.push(`forEach: ${step.forEach}`);
@@ -218,9 +229,15 @@ export function specStepRowMeta(step: WorkflowStep, ctx: PreviewRenderContext = 
     if (step.onConflict && step.onConflict !== "fail") bits.push(`onConflict: ${step.onConflict}`);
   }
   if (step.kind === "workflow") {
-    bits.push(`workflow: ${step.workflow}`);
-    if (step.outputStep) bits.push(`outputStep: ${step.outputStep}`);
-    if (step.worktreeStep) bits.push(`worktreeStep: ${step.worktreeStep}`);
+    // With a resolver, show the run-time rollup (models that actually run,
+    // step count, override marker) rather than just the bare name — this is
+    // the at-a-glance insight the sub-workflow row was missing.
+    bits.push(resolve ? subWorkflowRollup(describeSubWorkflow(step, resolve)) : step.workflow);
+    if (step.forEach) {
+      /* forEach already pushed above */
+    }
+    if (step.outputStep) bits.push(`out: ${step.outputStep}`);
+    if (step.worktreeStep) bits.push(`worktree: ${step.worktreeStep}`);
   }
   if (step.kind === "issues") {
     const mode = previewRenderOptional(step.mode, ctx) ?? step.mode ?? "report";
@@ -230,7 +247,11 @@ export function specStepRowMeta(step: WorkflowStep, ctx: PreviewRenderContext = 
   return bits.join(" · ");
 }
 
-export function specDetailLines(step: WorkflowStep, ctx: PreviewRenderContext = {}): string[] {
+export function specDetailLines(
+  step: WorkflowStep,
+  ctx: PreviewRenderContext = {},
+  resolve?: ResolveWorkflow,
+): string[] {
   const lines: string[] = [];
   if (step.dependsOn?.length) lines.push(`dependsOn: ${step.dependsOn.join(", ")}`);
   if ("forEach" in step && step.forEach) lines.push(`forEach: ${step.forEach}`);
@@ -311,6 +332,10 @@ export function specDetailLines(step: WorkflowStep, ctx: PreviewRenderContext = 
           .join(", ")}`,
       );
     }
+    // The heart of the sub-workflow insight fix: when the child workflow can be
+    // resolved, unfold what actually runs inside it — its steps, the models
+    // that will run each one (overrides applied), and the autonomy it drags in.
+    if (resolve) lines.push(...subWorkflowDetailLines(describeSubWorkflow(step, resolve), ctx));
   }
   if (step.kind === "issues") {
     const mode = previewRenderOptional(step.mode, ctx) ?? step.mode ?? "report";
@@ -321,6 +346,46 @@ export function specDetailLines(step: WorkflowStep, ctx: PreviewRenderContext = 
     if (step.labels?.length) lines.push(`labels: ${step.labels.join(", ")}`);
     if (step.repo) lines.push(`repo: ${step.repo}`);
     lines.push(`limit: ${step.limit ?? 20}`);
+  }
+  return lines;
+}
+
+/**
+ * Detail-panel breakdown of a resolved sub-workflow: a header rollup line, then
+ * one indented line per child step showing its kind, effective run target
+ * (model that will actually run), and an override marker (`*`). Nested
+ * sub-workflows indent further. Returns `[]` when the child couldn't be
+ * resolved (the row rollup already says so).
+ */
+export function subWorkflowDetailLines(
+  view: SubWorkflowView,
+  _ctx: PreviewRenderContext = {},
+): string[] {
+  if (!view.resolved) {
+    return view.cyclic
+      ? ["contains: (cyclic reference — see its own listing)"]
+      : ["contains: (workflow not resolvable here — see its own listing)"];
+  }
+  const lines: string[] = [];
+  const rollup = [
+    `contains ${view.stepCount} step${view.stepCount === 1 ? "" : "s"}`,
+    `${view.phaseCount} phase${view.phaseCount === 1 ? "" : "s"}`,
+  ];
+  if (view.agents.length > 0) rollup.push(`agents: ${view.agents.join(", ")}`);
+  rollup.push(`autonomy: ${view.autonomy}`);
+  if (view.overrideCount > 0) {
+    rollup.push(`${view.overrideCount} override${view.overrideCount === 1 ? "" : "s"} *`);
+  }
+  lines.push(rollup.join(" · "));
+  for (const s of view.steps) {
+    const indent = "  ".repeat(s.depth);
+    const target = s.agentBacked
+      ? (formatSubWorkflowTarget(s) ?? "auto")
+      : s.kind === "workflow"
+        ? `→ ${s.workflow}`
+        : BLOCK_LABEL[s.kind];
+    const mark = s.overridden ? " *" : "";
+    lines.push(`${indent}${BLOCK_LABEL[s.kind]} ${s.id}  ${target}${mark}`);
   }
   return lines;
 }

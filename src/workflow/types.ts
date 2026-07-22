@@ -3,6 +3,12 @@ import type { AgentInstanceId, ApiInstanceId, TokenUsage } from "../types/events
 import { type WorkflowInputType, isStringLikeInputType, workflowInputType } from "./input-params";
 import type { ModelFailoverPolicy } from "./model-failover";
 import type { RetryPolicy } from "./retry";
+import {
+  type AgentBackedWorkflowStep,
+  MAX_WORKFLOW_NESTING_DEPTH,
+  isAgentBackedStep,
+  workflowStepKind,
+} from "./step-kind";
 import type { JsonSchema } from "./structured";
 // Circular import is safe: template.ts imports types from this module, and this
 // module imports lintTemplateRefs from template.ts. Both modules are fully
@@ -587,6 +593,50 @@ export interface WorkflowCallStep extends WorkflowStepBase {
    * exactly like a worker/processor/command step.
    */
   worktreeStep?: string;
+  /**
+   * Per-child-step agent-field overrides applied to the resolved child spec at
+   * run time — the mechanism by which the parent's model/agent/effort choices
+   * (`/set-all`, per-step retargeting, the config modal) reach INTO a
+   * sub-workflow instead of stopping at its boundary. The child workflow spec
+   * on disk is never mutated (it may be shared by many parents); these patches
+   * are layered on top only for this call site.
+   *
+   * Keys are child step ids. A key MAY be `::`-namespaced to reach a step
+   * inside a nested sub-workflow of the child (`<childWorkflowStepId>::<deeperStepId>`,
+   * recursively) — the same namespacing the run history and live view already
+   * use, so a target selected in a flattened tree round-trips to exactly the
+   * step it names. Values are the same partial agent-field patches
+   * (`agent`/`model`/`modelClass`/`effort`/`prompt`/…) session overrides carry
+   * elsewhere; a value of `null` for a field removes it.
+   *
+   * Applied via the namespace-aware `applyWorkflowStepOverrides` in
+   * `executeWorkflowCallOnce` (see engine.ts): plain keys patch the child's own
+   * steps; namespaced keys are routed onto the matching child `workflow` step's
+   * own `overrides`, so a single flat map cascades to arbitrary depth.
+   */
+  overrides?: Record<string, AgentFieldOverridePatch>;
+}
+
+/**
+ * A partial agent-field patch where each field may also be `null` to mean
+ * "remove this field" (vs. `undefined`/absent, which means "leave unchanged").
+ * This is the value shape of both session overrides and a sub-workflow call
+ * step's {@link WorkflowCallStep.overrides}. The key set is exactly the
+ * retargetable agent fields (no `modelFailover`/`output`, which are not part of
+ * the override surface), mirroring `workflowCallOverridePatchSchema`.
+ */
+export interface AgentFieldOverridePatch {
+  agent?: AgentRunFields["agent"];
+  model?: string | null;
+  modelClass?: AgentRunFields["modelClass"] | null;
+  fallbackModels?: string[] | null;
+  prompt?: string | null;
+  effort?: string | null;
+  cwd?: string | null;
+  env?: Record<string, string> | null;
+  extraArgs?: string[] | null;
+  stepTimeoutSec?: number | null;
+  stepTimeoutMs?: number | null;
 }
 
 /**
@@ -1064,8 +1114,10 @@ export const MAX_PARALLEL_RUNS_CEILING = 16;
 export const DEFAULT_LOOP_MAX_ITERATIONS = 10;
 /** Hard ceiling on a loop gate's `maxIterations` (runaway backstop). */
 export const LOOP_MAX_ITERATIONS_CEILING = 100;
-/** Hard ceiling on nested `workflow` step call-stack depth (cycle/blast-radius backstop). */
-export const MAX_WORKFLOW_NESTING_DEPTH = 5;
+// `MAX_WORKFLOW_NESTING_DEPTH`, `workflowStepKind`, `isAgentBackedStep`, and the
+// `AgentBackedWorkflowStep` type live in the zod-free `./step-kind` leaf module
+// (so the browser reducer bundle can use them without shipping zod) and are
+// re-exported below for existing `from "./types"` / `from "../workflow"` importers.
 
 const agentId = z
   .string()
@@ -1533,6 +1585,29 @@ const workflowLlmStepSchema = z
     }
   });
 
+/**
+ * Partial agent-field patch layered onto a sub-workflow's child step at run
+ * time (see {@link WorkflowCallStep.overrides}). Every field is optional; a
+ * field set to `null` removes it from the child step. The key set mirrors the
+ * session-override agent fields — nothing here spawns structure, it only
+ * retargets an existing step.
+ */
+const workflowCallOverridePatchSchema = z
+  .object({
+    agent: agentId.optional(),
+    model: z.string().min(1).nullable().optional(),
+    modelClass: modelClassSchema.nullable().optional(),
+    fallbackModels: z.array(z.string().min(1)).min(1).nullable().optional(),
+    prompt: z.string().min(1).nullable().optional(),
+    effort: z.string().min(1).nullable().optional(),
+    cwd: z.string().min(1).nullable().optional(),
+    env: z.record(z.string()).nullable().optional(),
+    extraArgs: z.array(z.string()).nullable().optional(),
+    stepTimeoutSec: z.number().positive().nullable().optional(),
+    stepTimeoutMs: z.number().positive().nullable().optional(),
+  })
+  .strict();
+
 const workflowCallStepSchema = z.object({
   ...baseStepShape,
   kind: z.literal("workflow"),
@@ -1542,6 +1617,7 @@ const workflowCallStepSchema = z.object({
   forEach: z.string().min(1).optional(),
   params: z.record(z.string()).optional(),
   worktreeStep: z.string().min(1).optional(),
+  overrides: z.record(workflowCallOverridePatchSchema).optional(),
 });
 
 const workflowIssuesStepSchema = z
@@ -1641,12 +1717,6 @@ export interface ValidationResult {
   warnings?: string[];
 }
 
-export function workflowStepKind(step: WorkflowStep): WorkflowStepKind {
-  return step.kind ?? "worker";
-}
-
-export type AgentBackedWorkflowStep = WorkflowStep & AgentRunFields;
-
 /** A step's parsed `workspace` field: which mode, and which step it names. */
 export interface WorkspaceRef {
   mode: "inherit" | "attach";
@@ -1726,49 +1796,16 @@ export function parseForEachSource(source: string): string | undefined {
   return shorthand?.[1];
 }
 
-/**
- * Whether a step will spawn an agent CLI. True for workers/processors and for
- * distributor/consolidator/merge steps that declare an agent binding — either
- * an explicit `agent`, a `model` / `modelClass` (resolved at run time), or both.
- * Gate / llm / command / human steps are never agent-backed.
- */
-export function isAgentBackedStep(step: WorkflowStep): step is AgentBackedWorkflowStep {
-  const kind = workflowStepKind(step);
-  if (
-    kind === "gate" ||
-    kind === "approval" ||
-    kind === "human" ||
-    kind === "command" ||
-    kind === "llm" ||
-    kind === "workflow"
-  ) {
-    return false;
-  }
-  if (kind === "merge") {
-    const merge = step as MergeStep;
-    return (
-      merge.onConflict === "agent" ||
-      typeof merge.agent === "string" ||
-      typeof merge.model === "string" ||
-      typeof merge.modelClass === "string"
-    );
-  }
-  if (kind === "distributor" || kind === "consolidator") {
-    const block = step as DistributorStep | ConsolidatorStep;
-    return (
-      typeof block.agent === "string" ||
-      typeof block.model === "string" ||
-      typeof block.modelClass === "string"
-    );
-  }
-  // worker / processor
-  const worker = step as WorkerStep;
-  return (
-    typeof worker.agent === "string" ||
-    typeof worker.model === "string" ||
-    typeof worker.modelClass === "string"
-  );
-}
+// `isAgentBackedStep`, `workflowStepKind`, `AgentBackedWorkflowStep`, and
+// `MAX_WORKFLOW_NESTING_DEPTH` are defined in the zod-free `./step-kind` module
+// (imported at the top of this file) and re-exported here for existing
+// `from "./types"` importers — see the note near the constants above.
+export {
+  MAX_WORKFLOW_NESTING_DEPTH,
+  workflowStepKind,
+  isAgentBackedStep,
+  type AgentBackedWorkflowStep,
+};
 
 /**
  * Distinct agent ids a workflow's steps will spawn. Model-only / class-only

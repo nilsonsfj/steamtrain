@@ -481,6 +481,41 @@ describe("web server", () => {
     expect(missing.status).toBe(404);
   });
 
+  it("includes resolved child specs for a workflow with sub-workflow steps", async () => {
+    const child: WorkflowSpec = {
+      name: "child",
+      phases: [
+        {
+          id: "c",
+          title: "C",
+          steps: [{ id: "work", agent: "opencode", model: "m", prompt: "w" }],
+        },
+      ],
+    };
+    const parent: WorkflowSpec = {
+      name: "parent",
+      phases: [
+        {
+          id: "p",
+          title: "P",
+          steps: [{ id: "call", kind: "workflow", workflow: "child" }],
+        },
+      ],
+    };
+    const host: WorkflowHost = {
+      listWorkflows: () => ({ parent, child }),
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      runWorkflow: () => (async function* () {})(),
+    };
+    const { server } = makeServer(host);
+    const base = await start(server);
+    const res = await fetch(`${base}/api/workflows/parent`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { children?: Record<string, WorkflowSpec> };
+    expect(body.children).toBeDefined();
+    expect(body.children?.child?.name).toBe("child");
+  });
+
   it("rejects runs for unknown or undispatchable workflows", async () => {
     const { server } = makeServer(new FakeHost(demoSpec(), happyRun, false));
     const base = await start(server);

@@ -30,6 +30,7 @@ import {
   type LiveRunMeta,
   type LiveRunStore,
   type LoadedWorkflowCatalog,
+  MAX_WORKFLOW_NESTING_DEPTH,
   MergeConflictError,
   WORKFLOW_CACHE_DIR,
   WORKFLOW_HISTORY_DIR,
@@ -311,6 +312,33 @@ function summarizeWorkflow(
     agents: [...agents],
     autonomy: workflowAutonomy(spec, resolve),
   };
+}
+
+/**
+ * Collect the base specs of every sub-workflow a spec invokes, transitively.
+ * Cycle-guarded via `seen`; depth-bounded by the same nesting cap the engine
+ * enforces. The result keys by workflow name (base catalog specs — the browser
+ * layers the call step's own `overrides` client-side, exactly like the engine).
+ */
+function collectChildWorkflows(
+  spec: WorkflowSpec,
+  resolve: (name: string) => WorkflowSpec | undefined,
+  out: Record<string, WorkflowSpec> = {},
+  seen: Set<string> = new Set(),
+  depth = 0,
+): Record<string, WorkflowSpec> {
+  if (depth >= MAX_WORKFLOW_NESTING_DEPTH) return out;
+  for (const phase of spec.phases) {
+    for (const step of phase.steps) {
+      if (step.kind !== "workflow" || seen.has(step.workflow)) continue;
+      seen.add(step.workflow);
+      const child = resolve(step.workflow);
+      if (!child) continue;
+      out[step.workflow] = child;
+      collectChildWorkflows(child, resolve, out, seen, depth + 1);
+    }
+  }
+  return out;
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -1269,12 +1297,22 @@ async function handle(
     }
 
     if (method === "GET") {
-      const spec = deps.host.listWorkflows()[name];
+      const catalog = deps.host.listWorkflows();
+      const spec = catalog[name];
       if (!spec) {
         sendJson(res, 404, { error: `unknown workflow '${name}'` });
         return;
       }
-      sendJson(res, 200, { name, source: deps.workflowSource?.(name) ?? "unknown", spec });
+      // Ship the base specs of every sub-workflow this one invokes (transitively)
+      // so the browser can visualize what's inside each `workflow` step and
+      // retarget its steps — the same insight + control the TUI now has.
+      const children = collectChildWorkflows(spec, (child) => catalog[child]);
+      sendJson(res, 200, {
+        name,
+        source: deps.workflowSource?.(name) ?? "unknown",
+        spec,
+        children,
+      });
       return;
     }
 

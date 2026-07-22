@@ -24,13 +24,18 @@ var SteamtrainReducer = (() => {
   __export(reducer_exports, {
     ARRIVAL_NEXT_CANDIDATES: () => ARRIVAL_NEXT_CANDIDATES,
     NARRATION_CAP: () => NARRATION_CAP,
+    SUBWORKFLOW_STEP_SEPARATOR: () => SUBWORKFLOW_STEP_SEPARATOR,
     TOUR_WORKFLOW_NAME: () => TOUR_WORKFLOW_NAME,
     appendNarration: () => appendNarration,
+    applyWorkflowSessionOverrides: () => applyWorkflowSessionOverrides,
+    applyWorkflowStepOverrides: () => applyWorkflowStepOverrides,
     arrivalReceiptCards: () => arrivalReceiptCards,
     buildArrivalReport: () => buildArrivalReport,
+    describeSubWorkflow: () => describeSubWorkflow,
     findArrivalStep: () => findArrivalStep,
     formatArrivalHeadline: () => formatArrivalHeadline,
     formatArrivalReceipt: () => formatArrivalReceipt,
+    formatSubWorkflowTarget: () => formatSubWorkflowTarget,
     initialWorkflowIndex: () => initialWorkflowIndex,
     initialWorkflowState: () => initialWorkflowState,
     isAgentlessWorkflow: () => isAgentlessWorkflow,
@@ -39,7 +44,10 @@ var SteamtrainReducer = (() => {
     narrateFromState: () => narrateFromState,
     parseRunDeepLink: () => parseRunDeepLink,
     runDeepLink: () => runDeepLink,
+    sessionOverridesEmpty: () => sessionOverridesEmpty,
     shouldOfferStationLanding: () => shouldOfferStationLanding,
+    splitSubWorkflowKey: () => splitSubWorkflowKey,
+    subWorkflowRollup: () => subWorkflowRollup,
     workflowReducer: () => workflowReducer,
     workflowStateFromSpec: () => workflowStateFromSpec
   });
@@ -90,6 +98,7 @@ var SteamtrainReducer = (() => {
           model: "model" in st ? st.model : void 0,
           effort: "effort" in st ? st.effort : void 0,
           cwd: "cwd" in st ? st.cwd : void 0,
+          workflow: st.kind === "workflow" ? st.workflow : void 0,
           dependsOn: st.dependsOn,
           status: "pending",
           text: "",
@@ -838,6 +847,344 @@ var SteamtrainReducer = (() => {
   }
   function runDeepLink(runId) {
     return `#run-${runId.toLowerCase()}`;
+  }
+
+  // src/workflow/step-kind.ts
+  var MAX_WORKFLOW_NESTING_DEPTH = 5;
+  function workflowStepKind(step) {
+    return step.kind ?? "worker";
+  }
+  function isAgentBackedStep(step) {
+    const kind = workflowStepKind(step);
+    if (kind === "gate" || kind === "approval" || kind === "human" || kind === "command" || kind === "llm" || kind === "workflow") {
+      return false;
+    }
+    if (kind === "merge") {
+      const merge = step;
+      return merge.onConflict === "agent" || typeof merge.agent === "string" || typeof merge.model === "string" || typeof merge.modelClass === "string";
+    }
+    if (kind === "distributor" || kind === "consolidator") {
+      const block = step;
+      return typeof block.agent === "string" || typeof block.model === "string" || typeof block.modelClass === "string";
+    }
+    const worker = step;
+    return typeof worker.agent === "string" || typeof worker.model === "string" || typeof worker.modelClass === "string";
+  }
+
+  // src/workflow/overrides.ts
+  var AGENT_FIELD_KEYS = /* @__PURE__ */ new Set([
+    "agent",
+    "model",
+    "modelClass",
+    "fallbackModels",
+    "modelFailover",
+    "prompt",
+    "cwd",
+    "env",
+    "extraArgs",
+    "effort",
+    "stepTimeoutSec",
+    "stepTimeoutMs"
+  ]);
+  var LLM_FIELD_KEYS = /* @__PURE__ */ new Set([
+    "model",
+    "prompt",
+    "effort",
+    "stepTimeoutSec"
+  ]);
+  var LEGACY_WF_KEY_PREFIX = "__wf_";
+  function isWorkflowTimeoutValue(value) {
+    return value === null || typeof value === "number";
+  }
+  function isStructuredSessionOverridesPayload(record) {
+    if ("stepTimeoutSec" in record && isWorkflowTimeoutValue(record.stepTimeoutSec) || "workflowTimeoutSec" in record && isWorkflowTimeoutValue(record.workflowTimeoutSec)) {
+      return true;
+    }
+    if (!("steps" in record)) return false;
+    const steps = record.steps;
+    if (typeof steps !== "object" || steps === null || Array.isArray(steps)) return false;
+    const stepEntries = Object.entries(steps);
+    if (stepEntries.length === 0) return true;
+    return stepEntries.every(
+      ([, patch]) => patch !== null && typeof patch === "object" && !Array.isArray(patch)
+    );
+  }
+  function applyAgentPatch(step, patch) {
+    const next = { ...step };
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null) delete next[key];
+      else next[key] = value;
+    }
+    return next;
+  }
+  function sessionOverridesEmpty(overrides) {
+    if (!overrides) return true;
+    const hasSteps = overrides.steps && Object.keys(overrides.steps).length > 0;
+    const hasWorkflowFields = overrides.stepTimeoutSec !== void 0 || overrides.workflowTimeoutSec !== void 0;
+    return !hasSteps && !hasWorkflowFields;
+  }
+  function normalizeSessionOverrides(input) {
+    if (!input || typeof input !== "object" || Array.isArray(input)) return void 0;
+    for (const key of Object.keys(input)) {
+      if (key.startsWith(LEGACY_WF_KEY_PREFIX)) {
+        throw new Error(`legacy override key '${key}' is not supported; use structured overrides`);
+      }
+    }
+    const record = input;
+    if (isStructuredSessionOverridesPayload(record)) {
+      return input;
+    }
+    return { steps: input };
+  }
+  function applyWorkflowSessionOverrides(spec, overrides) {
+    const normalized = normalizeSessionOverrides(overrides);
+    if (!normalized || sessionOverridesEmpty(normalized)) return spec;
+    let next = applyWorkflowStepOverrides(spec, normalized.steps);
+    if (normalized.stepTimeoutSec === null) {
+      const { stepTimeoutSec: _removed, ...rest } = next;
+      next = rest;
+    } else if (normalized.stepTimeoutSec !== void 0) {
+      next = { ...next, stepTimeoutSec: normalized.stepTimeoutSec };
+    }
+    if (normalized.workflowTimeoutSec === null) {
+      const { workflowTimeoutSec: _removed, ...rest } = next;
+      next = rest;
+    } else if (normalized.workflowTimeoutSec !== void 0) {
+      next = { ...next, workflowTimeoutSec: normalized.workflowTimeoutSec };
+    }
+    return next;
+  }
+  var SUBWORKFLOW_STEP_SEPARATOR = "::";
+  function splitSubWorkflowKey(key) {
+    const idx = key.indexOf(SUBWORKFLOW_STEP_SEPARATOR);
+    if (idx < 0) return { head: key };
+    return {
+      head: key.slice(0, idx),
+      rest: key.slice(idx + SUBWORKFLOW_STEP_SEPARATOR.length)
+    };
+  }
+  function partitionOverrideKeys(overrides) {
+    const own = {};
+    const nested = /* @__PURE__ */ new Map();
+    for (const [key, patch] of Object.entries(overrides)) {
+      const { head, rest } = splitSubWorkflowKey(key);
+      if (rest === void 0) {
+        own[key] = patch;
+        continue;
+      }
+      let group = nested.get(head);
+      if (!group) {
+        group = {};
+        nested.set(head, group);
+      }
+      group[rest] = patch;
+    }
+    return { own, nested };
+  }
+  function applyWorkflowStepOverrides(spec, overrides) {
+    if (!overrides || Object.keys(overrides).length === 0) return spec;
+    const { own, nested } = partitionOverrideKeys(overrides);
+    return {
+      ...spec,
+      phases: spec.phases.map((phase) => ({
+        ...phase,
+        steps: phase.steps.map((step) => {
+          const kind = workflowStepKind(step);
+          if (kind === "workflow" && nested.has(step.id)) {
+            const merged = {
+              ...step.overrides ?? {}
+            };
+            for (const [childKey, patch2] of Object.entries(nested.get(step.id))) {
+              merged[childKey] = { ...merged[childKey] ?? {}, ...patch2 };
+            }
+            const withNested = { ...step, overrides: merged };
+            const ownPatch = own[step.id];
+            return ownPatch ? applyAgentPatch(withNested, ownPatch) : withNested;
+          }
+          const patch = own[step.id];
+          if (!patch) return step;
+          if (kind === "llm") {
+            const safePatch = {};
+            for (const key of LLM_FIELD_KEYS) {
+              if (key in patch) {
+                safePatch[key] = patch[key];
+              }
+            }
+            return applyAgentPatch(step, safePatch);
+          }
+          if (!isAgentBackedStep(step)) return step;
+          if (kind === "distributor" || kind === "consolidator" || kind === "merge") {
+            const safePatch = {};
+            for (const key of AGENT_FIELD_KEYS) {
+              if (key in patch) {
+                safePatch[key] = patch[key];
+              }
+            }
+            return applyAgentPatch(step, safePatch);
+          }
+          return applyAgentPatch(step, patch);
+        })
+      }))
+    };
+  }
+
+  // src/workflow/autonomy.ts
+  var AUTONOMY_RANK = {
+    autonomous: 0,
+    approvals: 1,
+    interactive: 2
+  };
+  function maxAutonomy(a, b) {
+    return AUTONOMY_RANK[b] > AUTONOMY_RANK[a] ? b : a;
+  }
+  function stepAutonomy(step) {
+    if (step.kind === "human") return "interactive";
+    if ((step.kind === "worker" || step.kind === "processor" || !step.kind) && "canAsk" in step && step.canAsk === true) {
+      return "interactive";
+    }
+    if (step.kind === "approval") return "approvals";
+    if (step.kind === "gate" && step.condition?.human === true) return "approvals";
+    return "autonomous";
+  }
+  function workflowAutonomy(spec, resolve, seen = /* @__PURE__ */ new Set()) {
+    let level = "autonomous";
+    for (const phase of spec.phases) {
+      for (const step of phase.steps) {
+        level = maxAutonomy(level, stepAutonomy(step));
+        if (level === "interactive") return level;
+        if (step.kind === "workflow" && resolve && !seen.has(step.workflow)) {
+          seen.add(step.workflow);
+          const child = resolve(step.workflow);
+          if (child) level = maxAutonomy(level, workflowAutonomy(child, resolve, seen));
+          if (level === "interactive") return level;
+        }
+      }
+    }
+    return level;
+  }
+
+  // src/workflow/sub-workflow-view.ts
+  function formatSubWorkflowTarget(step) {
+    if (step.agent && step.model) return `${step.agent}/${step.model}`;
+    if (step.agent) return step.agent;
+    if (step.model) return step.model;
+    if (step.modelClass) return `class:${step.modelClass}`;
+    return void 0;
+  }
+  function targetFieldsEqual(a, b) {
+    const fa = a;
+    const fb = b;
+    return fa.agent === fb.agent && fa.model === fb.model && fa.modelClass === fb.modelClass && fa.effort === fb.effort;
+  }
+  function collectSteps(base, effective, resolve, prefix, depth, seen, out) {
+    base.phases.forEach((basePhase, pi) => {
+      const effPhase = effective.phases[pi];
+      basePhase.steps.forEach((baseStep, si) => {
+        const step = effPhase?.steps[si] ?? baseStep;
+        const kind = workflowStepKind(step);
+        const path = `${prefix}${step.id}`;
+        const agentBacked = isAgentBackedStep(step);
+        out.push({
+          path,
+          id: step.id,
+          kind,
+          depth,
+          agentBacked,
+          agent: agentBacked ? step.agent : void 0,
+          model: agentBacked ? step.model : void 0,
+          modelClass: agentBacked ? step.modelClass : void 0,
+          effort: agentBacked ? step.effort : void 0,
+          overridden: !targetFieldsEqual(baseStep, step),
+          base: agentBacked ? {
+            agent: baseStep.agent,
+            model: baseStep.model,
+            modelClass: baseStep.modelClass,
+            effort: baseStep.effort
+          } : void 0,
+          workflow: step.kind === "workflow" ? step.workflow : void 0
+        });
+        if (step.kind === "workflow" && resolve && depth < MAX_WORKFLOW_NESTING_DEPTH && !seen.has(step.workflow)) {
+          const childBase = resolve(step.workflow);
+          if (!childBase) return;
+          const childEffective = step.overrides ? applyWorkflowStepOverrides(childBase, step.overrides) : childBase;
+          collectSteps(
+            childBase,
+            childEffective,
+            resolve,
+            `${path}::`,
+            depth + 1,
+            /* @__PURE__ */ new Set([...seen, step.workflow]),
+            out
+          );
+        }
+      });
+    });
+  }
+  function describeSubWorkflow(step, resolve, seen = /* @__PURE__ */ new Set()) {
+    const shell = {
+      workflow: step.workflow,
+      resolved: false,
+      cyclic: seen.has(step.workflow),
+      phaseCount: 0,
+      stepCount: 0,
+      agentStepCount: 0,
+      agents: [],
+      targets: [],
+      autonomy: "autonomous",
+      overrideCount: 0,
+      input: step.input,
+      params: step.params,
+      steps: []
+    };
+    if (!resolve || shell.cyclic) return shell;
+    const base = resolve(step.workflow);
+    if (!base) return shell;
+    const effective = step.overrides ? applyWorkflowStepOverrides(base, step.overrides) : base;
+    const steps = [];
+    collectSteps(base, effective, resolve, "", 1, /* @__PURE__ */ new Set([...seen, step.workflow]), steps);
+    const agents = /* @__PURE__ */ new Set();
+    const targets = /* @__PURE__ */ new Set();
+    let agentStepCount = 0;
+    let overrideCount = 0;
+    for (const s of steps) {
+      if (s.agentBacked) {
+        agentStepCount += 1;
+        if (s.agent) agents.add(s.agent);
+        const t = formatSubWorkflowTarget(s);
+        if (t) targets.add(t);
+      }
+      if (s.overridden) overrideCount += 1;
+    }
+    return {
+      workflow: step.workflow,
+      resolved: true,
+      cyclic: false,
+      phaseCount: base.phases.length,
+      stepCount: base.phases.reduce((n, p) => n + p.steps.length, 0),
+      agentStepCount,
+      agents: [...agents],
+      targets: [...targets],
+      autonomy: workflowAutonomy(effective, resolve),
+      overrideCount,
+      input: step.input,
+      params: step.params,
+      steps
+    };
+  }
+  function subWorkflowRollup(view) {
+    if (!view.resolved) {
+      return view.cyclic ? `\u21BB ${view.workflow} (cyclic)` : `\u2192 ${view.workflow} (unresolved)`;
+    }
+    const bits = [`\u2192 ${view.workflow}`];
+    bits.push(`${view.stepCount} step${view.stepCount === 1 ? "" : "s"}`);
+    if (view.targets.length > 0) {
+      const shown = view.targets.slice(0, 3).join(", ");
+      bits.push(view.targets.length > 3 ? `${shown}, +${view.targets.length - 3}` : shown);
+    }
+    if (view.overrideCount > 0) {
+      bits.push(`${view.overrideCount} override${view.overrideCount === 1 ? "" : "s"}`);
+    }
+    return bits.join(" \xB7 ");
   }
   return __toCommonJS(reducer_exports);
 })();

@@ -711,4 +711,165 @@ describe("forEach skip cascade for workflow (and llm) fan-outs", () => {
     expect(fan?.ok).toBe(true);
     expect(fan?.childResults ?? []).toHaveLength(0);
   });
+
+  describe("overrides cascade into the child run", () => {
+    // A recording deps: capture the (provider, model, effort) each agent step
+    // actually ran with, so a test can assert the parent's overrides reached
+    // the child's steps.
+    function recordingDeps(cwd: string, over: Partial<WorkflowDeps> = {}) {
+      const calls: { model: string; effort?: string; provider: string }[] = [];
+      const d = deps(cwd, {
+        createAdapter: ((provider: string) => ({
+          id: provider,
+          binary: "fake",
+          defaultModel: "test",
+          run(opts: AgentRunOptions) {
+            calls.push({ provider, model: opts.model, effort: opts.effort });
+            return (async function* () {
+              yield {
+                kind: "result",
+                agent: provider,
+                ts: 0,
+                isError: false,
+                text: `out:${provider}/${opts.model}`,
+                costUsd: 0.01,
+              } satisfies AgentEvent;
+            })();
+          },
+        })) as WorkflowDeps["createAdapter"],
+        ...over,
+      });
+      return { deps: d, calls };
+    }
+
+    it("applies a direct per-child-step override to the child run", async () => {
+      const cwd = await tempDir();
+      const spec: WorkflowSpec = {
+        name: "parent",
+        phases: [
+          {
+            id: "p1",
+            title: "P1",
+            steps: [
+              {
+                id: "call",
+                kind: "workflow",
+                workflow: "child",
+                overrides: { greet: { agent: "codex", model: "gpt-5", effort: "high" } },
+              },
+            ],
+          },
+        ],
+      };
+      const { deps: d, calls } = recordingDeps(cwd, {
+        resolveWorkflow: (name) => (name === "child" ? childSpec : undefined),
+      });
+      const events = await runToEvents(spec, d);
+      expect(workflowOk(events)).toBe(true);
+      // The child's own default is claude/m; the override retargets it.
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toMatchObject({ provider: "codex", model: "gpt-5", effort: "high" });
+      const results = doneResults(events);
+      expect(results.get("call::greet")?.output).toBe("out:codex/gpt-5");
+    });
+
+    it("does not mutate the shared child spec (a second parent keeps the default)", async () => {
+      const cwd = await tempDir();
+      const shared: WorkflowSpec = {
+        name: "child",
+        phases: [
+          {
+            id: "only",
+            title: "Only",
+            steps: [{ id: "greet", agent: "claude", model: "m", prompt: "hi {{input}}" }],
+          },
+        ],
+      };
+      const overridden: WorkflowSpec = {
+        name: "p",
+        phases: [
+          {
+            id: "p1",
+            title: "P1",
+            steps: [
+              {
+                id: "a",
+                kind: "workflow",
+                workflow: "child",
+                overrides: { greet: { agent: "codex", model: "gpt-5" } },
+              },
+            ],
+          },
+          {
+            id: "p2",
+            title: "P2",
+            steps: [{ id: "b", kind: "workflow", workflow: "child", dependsOn: ["a"] }],
+          },
+        ],
+      };
+      const { deps: d, calls } = recordingDeps(cwd, {
+        resolveWorkflow: (name) => (name === "child" ? shared : undefined),
+      });
+      const events = await runToEvents(overridden, d);
+      expect(workflowOk(events)).toBe(true);
+      // First call retargeted, second call uses the untouched child default.
+      const models = calls.map((c) => `${c.provider}/${c.model}`).sort();
+      expect(models).toEqual(["claude/m", "codex/gpt-5"]);
+      // The catalog spec object itself is unchanged.
+      expect(shared.phases[0]!.steps[0]).toMatchObject({ agent: "claude", model: "m" });
+    });
+
+    it("cascades a namespaced override two workflows deep", async () => {
+      const cwd = await tempDir();
+      const grandchild: WorkflowSpec = {
+        name: "grandchild",
+        phases: [
+          {
+            id: "g",
+            title: "G",
+            steps: [{ id: "work", agent: "claude", model: "m", prompt: "gc {{input}}" }],
+          },
+        ],
+      };
+      const middle: WorkflowSpec = {
+        name: "middle",
+        phases: [
+          {
+            id: "m",
+            title: "M",
+            steps: [{ id: "inner", kind: "workflow", workflow: "grandchild" }],
+          },
+        ],
+      };
+      const top: WorkflowSpec = {
+        name: "top",
+        phases: [
+          {
+            id: "t",
+            title: "T",
+            steps: [
+              {
+                id: "call",
+                kind: "workflow",
+                workflow: "middle",
+                // Reach the grandchild's `work` step through middle's `inner`
+                // call step, via the `::` namespace.
+                overrides: { "inner::work": { agent: "codex", model: "gpt-5" } },
+              },
+            ],
+          },
+        ],
+      };
+      const catalog: Record<string, WorkflowSpec> = { grandchild, middle, top };
+      const { deps: d, calls } = recordingDeps(cwd, {
+        resolveWorkflow: (name) => catalog[name],
+      });
+      const events = await runToEvents(top, d);
+      expect(workflowOk(events)).toBe(true);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toMatchObject({ provider: "codex", model: "gpt-5" });
+      const results = doneResults(events);
+      expect(results.get("call::inner::work")?.output).toBe("out:codex/gpt-5");
+    });
+  });
 });
