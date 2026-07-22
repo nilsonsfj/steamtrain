@@ -108,18 +108,84 @@ export function useWorkflowPicker({
     [workflowEntries],
   );
 
-  // Remember what the user had selected so nav rebuilds (pinTourFirst, collapse,
-  // catalog edits) can re-resolve by identity instead of a stale numeric index.
+  // Keep selection coherent across nav rebuilds (Station pinTourFirst, collapse,
+  // catalog edits) and remember identity after the user moves the highlight.
+  // When pickerNav changes, remap from the *previous* identity first — never
+  // re-read identity from the stale numeric index against the new nav.
+  const prevNavRef = useRef(pickerNav);
   useEffect(() => {
-    const row = pickerNav[Math.min(workflowIndex, Math.max(0, pickerNav.length - 1))];
-    if (row?.kind === "workflow") {
-      selectionIdentityRef.current = { kind: "workflow", name: row.entry.name };
-    } else if (row?.kind === "header") {
-      selectionIdentityRef.current = { kind: "header", source: row.source };
-    } else if (row?.kind === "create") {
-      selectionIdentityRef.current = { kind: "create" };
+    const navChanged = prevNavRef.current !== pickerNav;
+    prevNavRef.current = pickerNav;
+
+    const applyIdentity = (index: number) => {
+      const row = pickerNav[Math.min(index, Math.max(0, pickerNav.length - 1))];
+      if (row?.kind === "workflow") {
+        selectionIdentityRef.current = { kind: "workflow", name: row.entry.name };
+      } else if (row?.kind === "header") {
+        selectionIdentityRef.current = { kind: "header", source: row.source };
+      } else if (row?.kind === "create") {
+        selectionIdentityRef.current = { kind: "create" };
+      }
+    };
+
+    const pending = pendingSelectRef.current;
+    if (pending) {
+      const idx = indexOfWorkflowOrFallback(pickerNav, pending);
+      const row = pickerNav[idx];
+      if (row?.kind === "workflow" && row.entry.name === pending) {
+        pendingSelectRef.current = null;
+        seededSelectionRef.current = true;
+        applyIdentity(idx);
+        setWorkflowIndex(idx);
+        return;
+      }
     }
-  }, [pickerNav, workflowIndex]);
+
+    if (!seededSelectionRef.current && pickerNav.some((row) => row.kind === "workflow")) {
+      seededSelectionRef.current = true;
+      const idx = indexOfWorkflowOrFallback(pickerNav, null);
+      applyIdentity(idx);
+      setWorkflowIndex(idx);
+      return;
+    }
+
+    if (navChanged) {
+      const identity = selectionIdentityRef.current;
+      let nextIndex = Math.min(workflowIndex, Math.max(0, pickerNav.length - 1));
+
+      if (identity?.kind === "workflow") {
+        const idx = pickerNav.findIndex(
+          (row) => row.kind === "workflow" && row.entry.name === identity.name,
+        );
+        if (idx >= 0) {
+          nextIndex = idx;
+        } else {
+          const entry = workflowEntries.find((item) => item.name === identity.name);
+          if (entry) {
+            const headerIdx = pickerNav.findIndex(
+              (row) => row.kind === "header" && row.source === entry.source,
+            );
+            if (headerIdx >= 0) nextIndex = headerIdx;
+          }
+        }
+      } else if (identity?.kind === "header") {
+        const idx = pickerNav.findIndex(
+          (row) => row.kind === "header" && row.source === identity.source,
+        );
+        if (idx >= 0) nextIndex = idx;
+      } else if (identity?.kind === "create") {
+        nextIndex = Math.max(0, pickerNav.length - 1);
+      }
+
+      applyIdentity(nextIndex);
+      setWorkflowIndex(nextIndex);
+      return;
+    }
+
+    // Nav stable: the user moved the highlight — refresh identity from selection.
+    applyIdentity(workflowIndex);
+    setWorkflowIndex((i) => Math.min(i, Math.max(0, pickerNav.length - 1)));
+  }, [pickerNav, workflowEntries, workflowIndex]);
 
   const toggleSelectedFolder = useCallback(() => {
     const row = pickerNav[workflowIndex];
@@ -143,64 +209,6 @@ export function useWorkflowPicker({
     },
     [collapsedFolders, pickerNav, workflowEntries, workflowIndex, pinTourFirst],
   );
-
-  // Keep the picker selection in range and honor a queued post-write selection.
-  // On first catalog paint, prefer the first workflow over a folder header so
-  // Enter/Ctrl+R do something useful immediately. When the nav order changes
-  // (Station pinTourFirst, collapse), re-resolve by the remembered identity.
-  useEffect(() => {
-    const pending = pendingSelectRef.current;
-    if (pending) {
-      const idx = indexOfWorkflowOrFallback(pickerNav, pending);
-      const row = pickerNav[idx];
-      if (row?.kind === "workflow" && row.entry.name === pending) {
-        pendingSelectRef.current = null;
-        seededSelectionRef.current = true;
-        setWorkflowIndex(idx);
-        return;
-      }
-    }
-    if (!seededSelectionRef.current && pickerNav.some((row) => row.kind === "workflow")) {
-      seededSelectionRef.current = true;
-      setWorkflowIndex(indexOfWorkflowOrFallback(pickerNav, null));
-      return;
-    }
-
-    const identity = selectionIdentityRef.current;
-    if (identity?.kind === "workflow") {
-      const idx = pickerNav.findIndex(
-        (row) => row.kind === "workflow" && row.entry.name === identity.name,
-      );
-      if (idx >= 0) {
-        setWorkflowIndex(idx);
-        return;
-      }
-      // Folded away: land on that workflow's folder header when present.
-      const entry = workflowEntries.find((item) => item.name === identity.name);
-      if (entry) {
-        const headerIdx = pickerNav.findIndex(
-          (row) => row.kind === "header" && row.source === entry.source,
-        );
-        if (headerIdx >= 0) {
-          setWorkflowIndex(headerIdx);
-          return;
-        }
-      }
-    } else if (identity?.kind === "header") {
-      const idx = pickerNav.findIndex(
-        (row) => row.kind === "header" && row.source === identity.source,
-      );
-      if (idx >= 0) {
-        setWorkflowIndex(idx);
-        return;
-      }
-    } else if (identity?.kind === "create") {
-      setWorkflowIndex(Math.max(0, pickerNav.length - 1));
-      return;
-    }
-
-    setWorkflowIndex((i) => Math.min(i, Math.max(0, pickerNav.length - 1)));
-  }, [pickerNav, workflowEntries]);
 
   const config = orchestrator.getConfig();
   const healthyAgents = useMemo(() => healthyAgentSet(doctor), [doctor]);
