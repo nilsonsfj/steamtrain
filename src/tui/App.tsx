@@ -1283,6 +1283,9 @@ export function App({
             if (result.exit) {
               // Same confirm gate as Ctrl+C: an owned run must be confirmed twice.
               if (!runner.requestQuit()) return;
+              runner.abortRef.current?.abort();
+              runner.attachAbortRef.current?.abort();
+              picker.createAbortRef.current?.abort();
               exit();
             }
           }

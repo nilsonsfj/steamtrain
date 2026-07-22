@@ -111,4 +111,37 @@ describe("workflow quit/cancel confirmation", () => {
     expect(runner!.wfNotice).toBeNull();
     view.unmount();
   });
+
+  it("switching between quit and cancel re-arms instead of confirming", async () => {
+    let runner: Runner | undefined;
+    const view = render(
+      <ConfirmHarness
+        onRunner={(next) => {
+          runner = next;
+        }}
+      />,
+    );
+    await tick();
+    const ac = new AbortController();
+    runner!.abortRef.current = ac;
+
+    expect(runner!.requestQuit()).toBe(false);
+    await tick();
+    expect(runner!.wfNotice).toBe(QUIT_CONFIRM_NOTICE);
+
+    // Ctrl+Q after an armed quit must not cancel yet — it re-arms cancel.
+    runner!.handleWorkflowCancel();
+    await tick();
+    expect(runner!.wfNotice).toBe(CANCEL_CONFIRM_NOTICE);
+    expect(ac.signal.aborted).toBe(false);
+
+    // A subsequent quit press re-arms quit rather than confirming the old arm.
+    expect(runner!.requestQuit()).toBe(false);
+    await tick();
+    expect(runner!.wfNotice).toBe(QUIT_CONFIRM_NOTICE);
+    expect(ac.signal.aborted).toBe(false);
+
+    expect(runner!.requestQuit()).toBe(true);
+    view.unmount();
+  });
 });
