@@ -1280,7 +1280,14 @@ export function App({
             for (const notice of result.notices ?? []) {
               dispatch({ type: "notice", level: notice.level, text: notice.text });
             }
-            if (result.exit) exit();
+            if (result.exit) {
+              // Same confirm gate as Ctrl+C: an owned run must be confirmed twice.
+              if (!runner.requestQuit()) return;
+              runner.abortRef.current?.abort();
+              runner.attachAbortRef.current?.abort();
+              picker.createAbortRef.current?.abort();
+              exit();
+            }
           }
         };
 
@@ -1928,16 +1935,19 @@ function hint(
   const resumeHint = canResume ? " · Enter resume" : "";
   if (running) {
     // An attached run is owned elsewhere: Ctrl+Q only detaches the view.
-    const stopHint = attachedRun ? "Ctrl+Q detach · /cancel-run cancel" : "Ctrl+Q cancel";
+    // Owned runs require a second Ctrl+Q / Ctrl+C|/exit to confirm cancel/quit.
+    const stopHint = attachedRun
+      ? "Ctrl+Q detach · /cancel-run cancel"
+      : "Ctrl+Q cancel (confirm) · Ctrl+C|/exit quit (confirm)";
     const pauseHint = wfPaused ? "p resume · ↑/↓ step · e edit pending step" : "p pause";
     // Own in-process runs can be handed off to a background process with `d`.
     const detachHint = attachedRun ? "" : " · d detach";
     if (mode === "workflow" && wfStepDetails) {
-      return `↑/↓ step · PgUp/PgDn scroll · ←/Esc back · ${pauseHint} · ${stopHint}${detachHint} · /exit quit · Ctrl+C quit`;
+      return `↑/↓ step · PgUp/PgDn scroll · ←/Esc back · ${pauseHint} · ${stopHint}${detachHint}`;
     }
     return mode === "workflow"
-      ? `↑/↓ step · ${pauseHint} · ${stopHint}${detachHint} · /exit quit · Ctrl+C quit`
-      : "Esc cancel · /exit quit · Ctrl+C quit";
+      ? `↑/↓ step · ${pauseHint} · ${stopHint}${detachHint}`
+      : "Esc cancel · /exit quit (confirm) · Ctrl+C quit (confirm)";
   }
   if (mode === "workflow") {
     if (wfStepDetails) {

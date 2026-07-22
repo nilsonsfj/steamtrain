@@ -98,6 +98,9 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
         const { prompt, picker, runner, historyHook } = cur;
 
         if (key.ctrl && input === "c") {
+          // Ink is rendered with exitOnCtrlC: false so this handler owns quit.
+          // An owned (non-detached) run needs a second press / /exit to confirm.
+          if (!runner.requestQuit()) return;
           runner.abortRef.current?.abort();
           // An /attach tail holds a ref'd polling timer; without aborting it the
           // process would outlive the unmounted UI until the attached run ends.

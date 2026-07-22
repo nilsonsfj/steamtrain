@@ -42,6 +42,12 @@ import {
   withStoreHumanInputs,
   workflowCacheKey,
 } from "../workflow";
+import {
+  CANCEL_CONFIRM_NOTICE,
+  type ConfirmArm,
+  QUIT_CONFIRM_NOTICE,
+  armOrConfirm,
+} from "./confirm-action";
 import { type OutputScroll, initialOutputScroll, scrollOutputBy } from "./output-window";
 import { pickFollowIndex } from "./run-view-model";
 import { message } from "./util";
@@ -141,6 +147,12 @@ export function useWorkflowRunner({
   const attachRunRef = useRef<((runId: string) => boolean) | null>(null);
   /** The live-run id of the run THIS process owns, while one is executing. */
   const ownRunIdRef = useRef<string | null>(null);
+  /**
+   * Double-press arm for quit (Ctrl+C / /exit) and cancel (Ctrl+Q) while this
+   * TUI owns a non-detached run. Attached tails skip confirmation — leaving
+   * them does not cancel the run.
+   */
+  const destructiveConfirmRef = useRef<ConfirmArm | null>(null);
   /** The owned run's steering control (pause / edit pending steps / resume). */
   const runControlRef = useRef<WorkflowRunControl | null>(null);
   /**
@@ -506,6 +518,7 @@ export function useWorkflowRunner({
               setWfLaunching(false);
             }
             abortRef.current = null;
+            destructiveConfirmRef.current = null;
             if (spawned.ok) {
               if (mountedRef.current) {
                 setWfNotice(
@@ -556,6 +569,7 @@ export function useWorkflowRunner({
               setRunning(false);
               setWfLaunching(false);
               abortRef.current = null;
+              destructiveConfirmRef.current = null;
             }
           }
         }
@@ -675,13 +689,40 @@ export function useWorkflowRunner({
   // handed off to a background process (mid-run detach).
   attachRunRef.current = attachRun;
 
-  /** Ctrl+Q: cancel an owned run, or detach from an attached one (it keeps going). */
+  /**
+   * Ask to quit the TUI. Returns true when quit should proceed. While an owned
+   * (non-detached) run is active, the first call only arms a notice — call again
+   * within the confirm window to proceed. Attached / idle sessions quit immediately.
+   */
+  const requestQuit = useCallback((): boolean => {
+    if (!abortRef.current) {
+      destructiveConfirmRef.current = null;
+      return true;
+    }
+    const result = armOrConfirm(destructiveConfirmRef.current, "quit");
+    destructiveConfirmRef.current = result.next;
+    if (!result.confirmed) {
+      setWfNotice(QUIT_CONFIRM_NOTICE);
+      return false;
+    }
+    return true;
+  }, []);
+
+  /** Ctrl+Q: cancel an owned run (confirm), or detach from an attached one (immediate). */
   const handleWorkflowCancel = useCallback(() => {
     if (attachAbortRef.current) {
+      destructiveConfirmRef.current = null;
       attachAbortRef.current.abort();
       return;
     }
-    abortRef.current?.abort();
+    if (!abortRef.current) return;
+    const result = armOrConfirm(destructiveConfirmRef.current, "cancel");
+    destructiveConfirmRef.current = result.next;
+    if (!result.confirmed) {
+      setWfNotice(CANCEL_CONFIRM_NOTICE);
+      return;
+    }
+    abortRef.current.abort();
   }, []);
 
   /**
@@ -957,6 +998,7 @@ export function useWorkflowRunner({
     totalWfSteps,
     runWorkflow,
     launchWorkflow,
+    requestQuit,
     handleWorkflowCancel,
     resolveApproval,
     answerHumanInput,
