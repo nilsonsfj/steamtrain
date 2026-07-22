@@ -27,6 +27,12 @@ import {
 } from "./cursor-variants";
 import { KIRO_MODELS, KiroCliAdapter } from "./kiro";
 import { MIMO_MODELS, MimoAdapter } from "./mimo";
+import {
+  getMimoEfforts,
+  getMimoModelName,
+  listMimoCachedAgentModels,
+  refreshMimoVariantCache,
+} from "./mimo-variants";
 import { OPENCODE_MODELS, OpenCodeAdapter } from "./opencode";
 import {
   getOpencodeEfforts,
@@ -100,6 +106,16 @@ function antigravityModelsWithLiveNames(): readonly AgentModel[] {
   }));
 }
 
+function mimoModelsWithLiveNames(): readonly AgentModel[] {
+  const cached = listMimoCachedAgentModels();
+  if (cached.length > 0) return cached;
+
+  return MIMO_MODELS.map((model) => ({
+    id: model.id,
+    name: getMimoModelName(model.id) ?? model.name,
+  }));
+}
+
 /** Model catalog for an agent provider (id + human-readable name). */
 export function modelsForProvider(provider: AgentProviderId): readonly AgentModel[] {
   switch (provider) {
@@ -114,7 +130,7 @@ export function modelsForProvider(provider: AgentProviderId): readonly AgentMode
     case "kiro":
       return KIRO_MODELS;
     case "mimo":
-      return MIMO_MODELS;
+      return mimoModelsWithLiveNames();
     case "cursor":
       return cursorModelsWithLiveNames();
     case "antigravity":
@@ -150,6 +166,7 @@ export function modelNameForAgent(
   if (fromCatalog) return fromCatalog.name;
   if (provider === "opencode") return getOpencodeModelName(modelId) ?? modelId;
   if (provider === "codex") return getCodexModelName(modelId) ?? modelId;
+  if (provider === "mimo") return getMimoModelName(modelId) ?? modelId;
   if (provider === "cursor") return getCursorModelName(modelId) ?? modelId;
   if (provider === "antigravity") return getAntigravityModelName(modelId) ?? modelId;
   return modelId;
@@ -270,7 +287,7 @@ export function effortsForModel(
     case "kiro":
       return claudeEfforts(model);
     case "mimo":
-      return getOpencodeEfforts(model);
+      return getMimoEfforts(model);
     case "cursor":
       return /\[[^\]]*effort=/.test(model) ? [] : ["low", "medium", "high", "xhigh"];
     case "antigravity":
@@ -361,6 +378,12 @@ export async function refreshAgentCatalogCaches(
     if (await refreshAntigravityVariantCache(binary)) refreshed = true;
   }
 
+  const mimo = doctor.find((d) => d.provider === "mimo" && d.status === "ok");
+  if (mimo?.status === "ok") {
+    const binary = resolveAgentInstance(config, mimo.agent)?.binary ?? mimo.binaryPath ?? "mimo";
+    if (await refreshMimoVariantCache(binary)) refreshed = true;
+  }
+
   return refreshed;
 }
 
@@ -369,6 +392,7 @@ export {
   refreshAntigravityVariantCache,
   refreshCodexVariantCache,
   refreshCursorVariantCache,
+  refreshMimoVariantCache,
   refreshOpencodeVariantCache,
 };
 export type { AgentModel };

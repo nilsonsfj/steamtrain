@@ -80,8 +80,8 @@ describe("checkAgent mimo", () => {
       status: "binary_missing",
       binary: "__steamtrain_missing_mimo__",
     });
-    expect(result.detail).toContain("npm i -g mimo-ai");
-    expect(result.fixCommand).toBe("npm i -g mimo-ai");
+    expect(result.detail).toContain("npm i -g @mimo-ai/cli");
+    expect(result.fixCommand).toBe("npm i -g @mimo-ai/cli");
   });
 });
 

@@ -63,6 +63,7 @@ export {
   refreshAntigravityVariantCache,
   refreshCodexVariantCache,
   refreshCursorVariantCache,
+  refreshMimoVariantCache,
   refreshOpencodeVariantCache,
   supportsEffort,
 } from "./models";
@@ -134,6 +135,11 @@ export {
   setOpencodeVariantCacheForTests,
 } from "./opencode-variants";
 export { fallbackOpencodeEfforts } from "./opencode-efforts-fallback";
+export {
+  clearMimoVariantCacheForTests,
+  setMimoVariantCacheForTests,
+} from "./mimo-variants";
+export { fallbackMimoEfforts } from "./mimo-efforts-fallback";
 export { OpenCodeAdapter, OPENCODE_MODELS, createOpenCodeMapper } from "./opencode";
 export {
   type AgentLayers,

@@ -1,22 +1,58 @@
 import { describe, expect, it } from "vitest";
 import { MIMO_MODELS, MimoAdapter, createMimoMapper } from "../src/agents/mimo";
-import { OPENCODE_MODELS } from "../src/agents/opencode";
+import { fallbackMimoEfforts } from "../src/agents/mimo-efforts-fallback";
+import { parseOpencodeModelsVerbose } from "../src/agents/opencode-variants";
 
 /**
- * Mimo is an OpenCode fork: same `run --format json` protocol under a
- * different binary/branding, so it reuses createOpenCodeMapper /
- * buildOpenCodeRunArgs verbatim (see tests/opencode-adapter.test.ts for
- * protocol-level coverage). These tests only cover mimo-specific wiring.
+ * Mimo is an OpenCode fork for protocol only (`run --format json`). Its model
+ * catalog is Xiaomi's, not a renamed OpenCode Zen/Go list.
  */
 
 describe("MIMO_MODELS", () => {
-  it("mirrors the OpenCode catalog with the provider prefix swapped", () => {
-    expect(MIMO_MODELS).toHaveLength(OPENCODE_MODELS.length);
-    expect(MIMO_MODELS.find((m) => m.id === "mimo/claude-sonnet-5")).toMatchObject({
-      name: "Claude Sonnet 5",
+  it("ships the Xiaomi MiMo Code catalog with MiMo Auto as the free default", () => {
+    expect(MIMO_MODELS.map((m) => m.id)).toEqual([
+      "mimo/mimo-auto",
+      "xiaomi/mimo-v2.5",
+      "xiaomi/mimo-v2.5-pro",
+      "xiaomi/mimo-v2.5-pro-ultraspeed",
+    ]);
+    expect(MIMO_MODELS.find((m) => m.id === "mimo/mimo-auto")).toMatchObject({
+      name: "MiMo Auto",
     });
-    expect(MIMO_MODELS.find((m) => m.id === "mimo-go/kimi-k3")).toMatchObject({ name: "Kimi K3" });
+    expect(MIMO_MODELS.some((m) => m.id.startsWith("mimo-go/"))).toBe(false);
     expect(MIMO_MODELS.some((m) => m.id.startsWith("opencode"))).toBe(false);
+    expect(MIMO_MODELS.some((m) => m.id.includes("claude") || m.id.includes("gpt"))).toBe(false);
+  });
+});
+
+describe("fallbackMimoEfforts", () => {
+  it("exposes low/medium/high for built-in MiMo models", () => {
+    expect(fallbackMimoEfforts("mimo/mimo-auto")).toEqual(["low", "medium", "high"]);
+    expect(fallbackMimoEfforts("xiaomi/mimo-v2.5-pro")).toEqual(["low", "medium", "high"]);
+    expect(fallbackMimoEfforts("openai/gpt-5")).toEqual([]);
+  });
+});
+
+describe("parseOpencodeModelsVerbose (mimo-compatible)", () => {
+  it("parses mimo models --verbose blocks", () => {
+    const output = [
+      "mimo/mimo-auto",
+      "{",
+      '  "name": "MiMo Auto",',
+      '  "variants": { "low": {}, "medium": {}, "high": {} }',
+      "}",
+      "xiaomi/mimo-v2.5-pro",
+      "{",
+      '  "name": "MiMo-V2.5-Pro",',
+      '  "variants": { "high": {} }',
+      "}",
+    ].join("\n");
+    const parsed = parseOpencodeModelsVerbose(output);
+    expect(parsed.get("mimo/mimo-auto")).toEqual({
+      name: "MiMo Auto",
+      efforts: ["high", "low", "medium"],
+    });
+    expect(parsed.get("xiaomi/mimo-v2.5-pro")?.name).toBe("MiMo-V2.5-Pro");
   });
 });
 
@@ -31,11 +67,11 @@ describe("createMimoMapper", () => {
 });
 
 describe("MimoAdapter", () => {
-  it("defaults to the mimo binary and a free default model", () => {
+  it("defaults to the mimo binary and MiMo Auto", () => {
     const adapter = new MimoAdapter();
     expect(adapter.id).toBe("mimo");
     expect(adapter.binary).toBe("mimo");
-    expect(adapter.defaultModel).toBe("mimo/mimo-v2.5-free");
+    expect(adapter.defaultModel).toBe("mimo/mimo-auto");
     expect(adapter.supportsResume).toBe(true);
   });
 

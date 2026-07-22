@@ -4,6 +4,10 @@ import {
   setCodexVariantCacheForTests,
 } from "../src/agents/codex-variants";
 import {
+  clearMimoVariantCacheForTests,
+  setMimoVariantCacheForTests,
+} from "../src/agents/mimo-variants";
+import {
   defaultModelForAgent,
   effortForModelChange,
   effortsForModel,
@@ -100,29 +104,22 @@ describe("kiro models", () => {
 });
 
 describe("mimo models", () => {
-  it("mirrors the OpenCode catalog with mimo/mimo-go prefixes and a free default", () => {
-    expect(modelIdsForAgent("mimo")).toEqual(
-      OPENCODE_MODELS.map((model) =>
-        model.id.startsWith("opencode-go/")
-          ? `mimo-go/${model.id.slice("opencode-go/".length)}`
-          : `mimo/${model.id.slice("opencode/".length)}`,
-      ),
-    );
-    expect(defaultModelForAgent("mimo")).toBe("mimo/mimo-v2.5-free");
-    expect(modelNameForAgent("mimo", "mimo/claude-sonnet-5")).toBe("Claude Sonnet 5");
+  it("exposes the Xiaomi MiMo Code catalog with MiMo Auto as the free default", () => {
+    expect(modelIdsForAgent("mimo")).toEqual([
+      "mimo/mimo-auto",
+      "xiaomi/mimo-v2.5",
+      "xiaomi/mimo-v2.5-pro",
+      "xiaomi/mimo-v2.5-pro-ultraspeed",
+    ]);
+    expect(defaultModelForAgent("mimo")).toBe("mimo/mimo-auto");
+    expect(modelNameForAgent("mimo", "mimo/mimo-auto")).toBe("MiMo Auto");
+    expect(modelNameForAgent("mimo", "xiaomi/mimo-v2.5-pro")).toBe("MiMo-V2.5-Pro");
   });
 
-  it("reuses opencode effort heuristics", () => {
-    expect(effortsForModel("mimo", "mimo/claude-sonnet-5")).toEqual(["high", "max"]);
-    expect(effortsForModel("mimo", "mimo/gpt-5.5")).toEqual([
-      "none",
-      "minimal",
-      "low",
-      "medium",
-      "high",
-      "xhigh",
-    ]);
-    expect(supportsEffort("mimo", "mimo/claude-sonnet-5")).toBe(true);
+  it("exposes low/medium/high efforts for built-in MiMo models", () => {
+    expect(effortsForModel("mimo", "mimo/mimo-auto")).toEqual(["low", "medium", "high"]);
+    expect(effortsForModel("mimo", "xiaomi/mimo-v2.5")).toEqual(["low", "medium", "high"]);
+    expect(supportsEffort("mimo", "mimo/mimo-auto")).toBe(true);
   });
 });
 
@@ -130,10 +127,12 @@ describe("model names", () => {
   beforeEach(() => {
     clearCodexVariantCacheForTests();
     clearOpencodeVariantCacheForTests();
+    clearMimoVariantCacheForTests();
   });
   afterAll(() => {
     clearCodexVariantCacheForTests();
     clearOpencodeVariantCacheForTests();
+    clearMimoVariantCacheForTests();
   });
 
   it("returns hardcoded Claude display names", () => {
@@ -209,7 +208,21 @@ describe("model names", () => {
     expect(defaultModelForAgent("opencode")).toBe("opencode/mimo-v2.5-free");
     expect(defaultModelForAgent("amp")).toBe("smart");
     expect(defaultModelForAgent("kiro")).toBe("claude-sonnet-5");
-    expect(defaultModelForAgent("mimo")).toBe("mimo/mimo-v2.5-free");
+    expect(defaultModelForAgent("mimo")).toBe("mimo/mimo-auto");
+  });
+
+  it("uses only the live MiMo catalog when cache is loaded", () => {
+    setMimoVariantCacheForTests(
+      new Map([
+        ["mimo/mimo-auto", { name: "MiMo Auto", efforts: ["low", "medium", "high"] }],
+        ["xiaomi/mimo-v2.5-pro", { name: "MiMo-V2.5-Pro (live)", efforts: ["high"] }],
+      ]),
+    );
+    expect(modelIdsForAgent("mimo")).toEqual(["mimo/mimo-auto", "xiaomi/mimo-v2.5-pro"]);
+    expect(modelNameForAgent("mimo", "xiaomi/mimo-v2.5-pro")).toBe("MiMo-V2.5-Pro (live)");
+    expect(effortsForModel("mimo", "xiaomi/mimo-v2.5-pro")).toEqual(["high"]);
+    expect(defaultModelForAgent("mimo")).toBe("mimo/mimo-auto");
+    clearMimoVariantCacheForTests();
   });
 
   it("falls back to the static OpenCode catalog when cache is empty", () => {

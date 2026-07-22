@@ -108,7 +108,6 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     also: {
       claude: ["fable", "fable[1m]", "claude-fable-5[1m]"],
       opencode: ["opencode/claude-fable-5"],
-      mimo: ["mimo/claude-fable-5"],
       cursor: ["claude-fable-5-thinking-high"],
     },
     classes: ["ultrathinker", "thinker", "deep-reviewer", "implementer"],
@@ -129,7 +128,6 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     also: {
       claude: ["opus", "opus[1m]", "claude-opus-4-8[1m]"],
       opencode: ["opencode/claude-opus-4-8"],
-      mimo: ["mimo/claude-opus-4-8"],
       // Kiro uses dotted version ids (`claude-opus-4.8`), not Claude dashes
       // or short aliases (`opus` / `haiku`).
       kiro: ["claude-opus-4.8"],
@@ -145,7 +143,6 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     also: {
       claude: ["claude-opus-4-7[1m]"],
       opencode: ["opencode/claude-opus-4-7"],
-      mimo: ["mimo/claude-opus-4-7"],
       kiro: ["claude-opus-4.7"],
     },
     classes: ["thinker"],
@@ -157,7 +154,6 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     reference: { provider: "claude", modelId: "claude-opus-4-6" },
     also: {
       opencode: ["opencode/claude-opus-4-6"],
-      mimo: ["mimo/claude-opus-4-6"],
       kiro: ["claude-opus-4.6"],
       antigravity: [
         "claude-opus-4-6",
@@ -175,7 +171,6 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     reference: { provider: "claude", modelId: "claude-opus-4-5" },
     also: {
       opencode: ["opencode/claude-opus-4-5"],
-      mimo: ["mimo/claude-opus-4-5"],
       kiro: ["claude-opus-4.5"],
     },
     classes: ["thinker"],
@@ -188,7 +183,6 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     also: {
       claude: ["sonnet", "sonnet[1m]", "claude-sonnet-5[1m]"],
       opencode: ["opencode/claude-sonnet-5"],
-      mimo: ["mimo/claude-sonnet-5"],
       kiro: ["claude-sonnet-5"],
       cursor: ["claude-sonnet-5-high"],
     },
@@ -208,7 +202,6 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     also: {
       claude: ["claude-sonnet-4-6[1m]"],
       opencode: ["opencode/claude-sonnet-4-6"],
-      mimo: ["mimo/claude-sonnet-4-6"],
       kiro: ["claude-sonnet-4.6"],
       antigravity: [
         "claude-sonnet-4-6",
@@ -232,7 +225,6 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     reference: { provider: "claude", modelId: "claude-sonnet-4-5" },
     also: {
       opencode: ["opencode/claude-sonnet-4-5"],
-      mimo: ["mimo/claude-sonnet-4-5"],
       kiro: ["claude-sonnet-4.5"],
     },
     classes: ["implementer", "balanced"],
@@ -252,7 +244,6 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     also: {
       claude: ["haiku", "claude-haiku-4-5-20251001"],
       opencode: ["opencode/claude-haiku-4-5"],
-      mimo: ["mimo/claude-haiku-4-5"],
       kiro: ["claude-haiku-4.5"],
     },
     classes: ["simple"],
@@ -273,7 +264,6 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     reference: { provider: "codex", modelId: "gpt-5.6-sol" },
     also: {
       opencode: ["opencode/gpt-5.6-sol"],
-      mimo: ["mimo/gpt-5.6-sol"],
       cursor: ["gpt-5.6-sol"],
       kiro: ["gpt-5.6-sol"],
     },
@@ -286,7 +276,6 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     reference: { provider: "codex", modelId: "gpt-5.6-terra" },
     also: {
       opencode: ["opencode/gpt-5.6-terra"],
-      mimo: ["mimo/gpt-5.6-terra"],
       cursor: ["gpt-5.6-terra"],
       kiro: ["gpt-5.6-terra"],
     },
@@ -299,7 +288,6 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     reference: { provider: "codex", modelId: "gpt-5.6-luna" },
     also: {
       opencode: ["opencode/gpt-5.6-luna"],
-      mimo: ["mimo/gpt-5.6-luna"],
       cursor: ["gpt-5.6-luna"],
       kiro: ["gpt-5.6-luna"],
     },
@@ -312,7 +300,6 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     reference: { provider: "codex", modelId: "gpt-5.5" },
     also: {
       opencode: ["opencode/gpt-5.5"],
-      mimo: ["mimo/gpt-5.5"],
       cursor: ["gpt-5.5-high"],
     },
     classes: ["thinker", "implementer", "balanced", "deep-reviewer"],
@@ -329,7 +316,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     name: "GPT-5.4",
     aliases: ["gpt 5.4", "gpt-5.4", "gpt5.4"],
     reference: { provider: "codex", modelId: "gpt-5.4" },
-    also: { opencode: ["opencode/gpt-5.4"], mimo: ["mimo/gpt-5.4"] },
+    also: { opencode: ["opencode/gpt-5.4"] },
     classes: ["implementer", "balanced"],
   },
   {
@@ -337,7 +324,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     name: "GPT-5.4 Mini",
     aliases: ["gpt 5.4 mini", "gpt-5.4-mini", "gpt5.4mini"],
     reference: { provider: "codex", modelId: "gpt-5.4-mini" },
-    also: { opencode: ["opencode/gpt-5.4-mini"], mimo: ["mimo/gpt-5.4-mini"] },
+    also: { opencode: ["opencode/gpt-5.4-mini"] },
     classes: ["simple", "balanced"],
   },
   {
@@ -352,7 +339,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     name: "GPT-5.3 Codex",
     aliases: ["gpt 5.3 codex", "gpt-5.3-codex", "codex 5.3", "5.3-codex"],
     reference: { provider: "codex", modelId: "gpt-5.3-codex" },
-    also: { opencode: ["opencode/gpt-5.3-codex"], mimo: ["mimo/gpt-5.3-codex"] },
+    also: { opencode: ["opencode/gpt-5.3-codex"] },
     classes: ["implementer"],
   },
   {
@@ -360,7 +347,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     name: "GPT-5.3 Codex Spark",
     aliases: ["gpt-5.3-codex-spark", "codex spark", "5.3-codex-spark"],
     reference: { provider: "codex", modelId: "gpt-5.3-codex-spark" },
-    also: { opencode: ["opencode/gpt-5.3-codex-spark"], mimo: ["mimo/gpt-5.3-codex-spark"] },
+    also: { opencode: ["opencode/gpt-5.3-codex-spark"] },
     classes: ["implementer", "simple"],
   },
   {
@@ -370,7 +357,6 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     reference: { provider: "codex", modelId: "gpt-5.2" },
     also: {
       opencode: ["opencode/gpt-5.2"],
-      mimo: ["mimo/gpt-5.2"],
       cursor: ["gpt-5.2"],
     },
     classes: ["balanced", "implementer"],
@@ -380,7 +366,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     name: "GPT-5.2 Codex",
     aliases: ["gpt-5.2-codex", "codex 5.2"],
     reference: { provider: "codex", modelId: "gpt-5.2-codex" },
-    also: { opencode: ["opencode/gpt-5.2-codex"], mimo: ["mimo/gpt-5.2-codex"] },
+    also: { opencode: ["opencode/gpt-5.2-codex"] },
     classes: ["implementer"],
   },
   {
@@ -388,7 +374,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     name: "GPT-5.1",
     aliases: ["gpt 5.1", "gpt-5.1", "gpt5.1"],
     reference: { provider: "codex", modelId: "gpt-5.1" },
-    also: { opencode: ["opencode/gpt-5.1"], mimo: ["mimo/gpt-5.1"] },
+    also: { opencode: ["opencode/gpt-5.1"] },
     classes: ["balanced"],
   },
   {
@@ -396,7 +382,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     name: "GPT-5.1 Codex",
     aliases: ["gpt-5.1-codex", "codex 5.1"],
     reference: { provider: "codex", modelId: "gpt-5.1-codex" },
-    also: { opencode: ["opencode/gpt-5.1-codex"], mimo: ["mimo/gpt-5.1-codex"] },
+    also: { opencode: ["opencode/gpt-5.1-codex"] },
     classes: ["implementer"],
   },
   {
@@ -404,7 +390,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     name: "GPT-5",
     aliases: ["gpt 5", "gpt-5", "gpt5"],
     reference: { provider: "codex", modelId: "gpt-5" },
-    also: { opencode: ["opencode/gpt-5"], mimo: ["mimo/gpt-5"] },
+    also: { opencode: ["opencode/gpt-5"] },
     classes: ["balanced"],
   },
   {
@@ -412,7 +398,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     name: "GPT-5 Codex",
     aliases: ["gpt-5-codex", "codex 5"],
     reference: { provider: "codex", modelId: "gpt-5-codex" },
-    also: { opencode: ["opencode/gpt-5-codex"], mimo: ["mimo/gpt-5-codex"] },
+    also: { opencode: ["opencode/gpt-5-codex"] },
     classes: ["implementer"],
   },
 
@@ -433,7 +419,6 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
         "Gemini 3.6 Flash (Low)",
       ],
       opencode: ["opencode/gemini-3.6-flash"],
-      mimo: ["mimo/gemini-3.6-flash"],
       cursor: [
         "gemini-3.6-flash-high",
         "gemini-3.6-flash-medium",
@@ -459,7 +444,6 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
         "Gemini 3.5 Flash (Low)",
       ],
       opencode: ["opencode/gemini-3.5-flash"],
-      mimo: ["mimo/gemini-3.5-flash"],
       cursor: ["gemini-3.5-flash"],
     },
     classes: ["simple", "balanced"],
@@ -490,7 +474,6 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
         "Gemini 3.1 Pro (Low)",
       ],
       opencode: ["opencode/gemini-3.1-pro"],
-      mimo: ["mimo/gemini-3.1-pro"],
       cursor: ["gemini-3.1-pro"],
     },
     classes: ["thinker", "balanced"],
@@ -565,7 +548,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     name: "Kimi K3",
     aliases: ["kimi k3", "kimi-k3", "kimik3"],
     reference: { provider: "opencode", modelId: "opencode-go/kimi-k3" },
-    also: { opencode: ["opencode/kimi-k3"], mimo: ["mimo/kimi-k3"] },
+    also: { opencode: ["opencode/kimi-k3"] },
     classes: ["ultrathinker", "thinker"],
   },
   {
@@ -573,7 +556,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     name: "Kimi K2.7 Code",
     aliases: ["kimi k2.7 code", "kimi-k2.7-code", "kimi-k2.7"],
     reference: { provider: "opencode", modelId: "opencode/kimi-k2.7-code" },
-    also: { opencode: ["opencode-go/kimi-k2.7-code"], mimo: ["mimo-go/kimi-k2.7-code"] },
+    also: { opencode: ["opencode-go/kimi-k2.7-code"] },
     classes: ["implementer", "reviewer"],
   },
   {
@@ -587,7 +570,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
       "opencode-go/deepseek-v4-pro",
     ],
     reference: { provider: "opencode", modelId: "opencode/deepseek-v4-pro" },
-    also: { opencode: ["opencode-go/deepseek-v4-pro"], mimo: ["mimo-go/deepseek-v4-pro"] },
+    also: { opencode: ["opencode-go/deepseek-v4-pro"] },
     classes: ["reviewer", "implementer", "balanced"],
   },
   {
@@ -605,13 +588,44 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     classes: ["reviewer"],
   },
 
+  // ── MiMo Code (Xiaomi CLI) ───────────────────────────────────────────
+  {
+    id: "mimo-auto",
+    name: "MiMo Auto",
+    aliases: ["mimo auto", "mimo-auto", "mimo/mimo-auto", "auto mimo"],
+    reference: { provider: "mimo", modelId: "mimo/mimo-auto" },
+    classes: ["simple", "balanced", "implementer"],
+  },
+  {
+    id: "mimo-v2.5",
+    name: "MiMo-V2.5",
+    aliases: ["mimo v2.5", "mimo-v2.5", "xiaomi/mimo-v2.5"],
+    reference: { provider: "mimo", modelId: "xiaomi/mimo-v2.5" },
+    also: { opencode: ["opencode-go/mimo-v2.5"] },
+    classes: ["balanced", "implementer", "reviewer"],
+  },
+  {
+    id: "mimo-v2.5-pro",
+    name: "MiMo-V2.5-Pro",
+    aliases: ["mimo v2.5 pro", "mimo-v2.5-pro", "xiaomi/mimo-v2.5-pro", "mimo/mimo-v2.5-pro"],
+    reference: { provider: "mimo", modelId: "xiaomi/mimo-v2.5-pro" },
+    also: { opencode: ["opencode-go/mimo-v2.5-pro"] },
+    classes: ["thinker", "implementer", "reviewer", "balanced"],
+  },
+  {
+    id: "mimo-v2.5-pro-ultraspeed",
+    name: "MiMo-V2.5-Pro-UltraSpeed",
+    aliases: ["mimo ultraspeed", "mimo-v2.5-pro-ultraspeed", "xiaomi/mimo-v2.5-pro-ultraspeed"],
+    reference: { provider: "mimo", modelId: "xiaomi/mimo-v2.5-pro-ultraspeed" },
+    classes: ["thinker", "implementer"],
+  },
+
   // ── OpenCode free / specialty ────────────────────────────────────────
   {
     id: "mimo-v2.5-free",
     name: "MiMo V2.5 Free",
-    aliases: ["mimo", "mimo free", "mimo-v2.5-free", "opencode/mimo-v2.5-free"],
+    aliases: ["mimo free", "mimo-v2.5-free", "opencode/mimo-v2.5-free"],
     reference: { provider: "opencode", modelId: "opencode/mimo-v2.5-free" },
-    also: { mimo: ["mimo/mimo-v2.5-free"] },
     classes: ["simple", "balanced"],
   },
   {
