@@ -40,8 +40,11 @@ const KEY_HINTS: readonly KeyHint[] = [
     keys: "PgUp/PgDn",
     action: "page the step list · scroll output in drill-in (Shift+↑/↓ one line)",
   },
-  { keys: "Esc", action: "back / cancel · Ctrl+Q cancels (or detaches an attached run)" },
-  { keys: "Ctrl+C", action: "quit" },
+  {
+    keys: "Esc",
+    action: "back / cancel · Ctrl+Q cancels after confirm (or detaches an attached run)",
+  },
+  { keys: "Ctrl+C", action: "quit · confirm again while a non-detached run is active" },
 ];
 
 export function HelpPanel({ width, height }: { width: number; height: number }): React.ReactNode {

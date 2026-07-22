@@ -177,6 +177,8 @@ async function main(): Promise<void> {
       workspaceLabel={workspaceScopeLabel(workspaceScope, home)}
       workspaceWarning={workspaceWarning}
     />,
+    // Own Ctrl+C so we can confirm before quitting an owned (non-detached) run.
+    { exitOnCtrlC: false },
   );
   void app.waitUntilExit();
 }
