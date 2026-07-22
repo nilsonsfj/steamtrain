@@ -6,6 +6,7 @@ import { ClaudeCodeAdapter } from "./claude";
 import { CodexAdapter } from "./codex";
 import { CursorAgentAdapter } from "./cursor";
 import { KiroCliAdapter } from "./kiro";
+import { MimoAdapter } from "./mimo";
 import { OpenCodeAdapter } from "./opencode";
 
 export type { AgentAdapter, AgentRunOptions } from "./adapter";
@@ -44,6 +45,7 @@ export {
   type ResolvedAgentInstance,
 } from "./config";
 export { KiroCliAdapter, KIRO_MODELS, buildKiroExecArgs, runKiroProcess } from "./kiro";
+export { MimoAdapter, MIMO_MODELS, createMimoMapper } from "./mimo";
 export {
   AGENT_IDS,
   agentProviderFor,
@@ -156,6 +158,8 @@ export function createAdapter(id: AgentProviderId, binary?: string): AgentAdapte
       return new AmpAdapter(binary);
     case "kiro":
       return new KiroCliAdapter(binary);
+    case "mimo":
+      return new MimoAdapter(binary);
     case "cursor":
       return new CursorAgentAdapter(binary);
     case "antigravity":

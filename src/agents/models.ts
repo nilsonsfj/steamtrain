@@ -26,6 +26,7 @@ import {
   refreshCursorVariantCache,
 } from "./cursor-variants";
 import { KIRO_MODELS, KiroCliAdapter } from "./kiro";
+import { MIMO_MODELS, MimoAdapter } from "./mimo";
 import { OPENCODE_MODELS, OpenCodeAdapter } from "./opencode";
 import {
   getOpencodeEfforts,
@@ -41,6 +42,7 @@ export const AGENT_IDS: readonly AgentProviderId[] = [
   "codex",
   "amp",
   "kiro",
+  "mimo",
   "cursor",
   "antigravity",
 ];
@@ -111,6 +113,8 @@ export function modelsForProvider(provider: AgentProviderId): readonly AgentMode
       return AMP_MODELS;
     case "kiro":
       return KIRO_MODELS;
+    case "mimo":
+      return MIMO_MODELS;
     case "cursor":
       return cursorModelsWithLiveNames();
     case "antigravity":
@@ -162,6 +166,7 @@ const PROVIDER_ADAPTERS: Record<AgentProviderId, () => AgentAdapter> = {
   opencode: () => new OpenCodeAdapter(),
   amp: () => new AmpAdapter(),
   kiro: () => new KiroCliAdapter(),
+  mimo: () => new MimoAdapter(),
   cursor: () => new CursorAgentAdapter(),
   antigravity: () => new AntigravityAdapter(),
 };
@@ -264,6 +269,8 @@ export function effortsForModel(
       return ampEfforts(model);
     case "kiro":
       return claudeEfforts(model);
+    case "mimo":
+      return getOpencodeEfforts(model);
     case "cursor":
       return /\[[^\]]*effort=/.test(model) ? [] : ["low", "medium", "high", "xhigh"];
     case "antigravity":

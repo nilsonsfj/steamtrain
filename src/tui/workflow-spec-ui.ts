@@ -6,6 +6,7 @@ import {
   CODEX_MODELS,
   CURSOR_MODELS,
   KIRO_MODELS,
+  MIMO_MODELS,
   OPENCODE_MODELS,
   formatAgentTarget,
 } from "../agents";
@@ -346,6 +347,8 @@ function staticModelName(agent: AgentInstanceId, model: string): string | undefi
       return AMP_MODELS.find((entry) => entry.id === model)?.name;
     case "kiro":
       return KIRO_MODELS.find((entry) => entry.id === model)?.name;
+    case "mimo":
+      return MIMO_MODELS.find((entry) => entry.id === model)?.name;
     case "cursor":
       return CURSOR_MODELS.find((entry) => entry.id === model)?.name;
     case "antigravity":

@@ -72,6 +72,19 @@ describe("checkAgent kiro", () => {
   });
 });
 
+describe("checkAgent mimo", () => {
+  it("reports missing binary with an install hint", async () => {
+    const result = await checkAgent("mimo", "__steamtrain_missing_mimo__", { provider: "mimo" });
+    expect(result).toMatchObject({
+      agent: "mimo",
+      status: "binary_missing",
+      binary: "__steamtrain_missing_mimo__",
+    });
+    expect(result.detail).toContain("npm i -g mimo-ai");
+    expect(result.fixCommand).toBe("npm i -g mimo-ai");
+  });
+});
+
 describe("checkAgent cursor", () => {
   it("reports missing binary with an install hint", async () => {
     const result = await checkAgent("cursor", "__steamtrain_missing_cursor__", {
