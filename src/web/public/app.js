@@ -99,7 +99,54 @@
   };
 
   var SELECTION_KEY = "steamtrain.lastWorkflow";
+  var FOLDER_COLLAPSE_KEY = "steamtrain.workflowFolders";
+  var WORKFLOW_FOLDER_ORDER = ["project", "user", "bundled"];
   var TOUR_NAME = (SteamtrainReducer.TOUR_WORKFLOW_NAME) || "tour";
+
+  function loadFolderCollapse() {
+    try {
+      var raw = JSON.parse(localStorage.getItem(FOLDER_COLLAPSE_KEY) || "{}");
+      return {
+        project: !!raw.project,
+        user: !!raw.user,
+        bundled: !!raw.bundled
+      };
+    } catch (e) {
+      return { project: false, user: false, bundled: false };
+    }
+  }
+
+  function saveFolderCollapse(state) {
+    try { localStorage.setItem(FOLDER_COLLAPSE_KEY, JSON.stringify(state)); } catch (e) {}
+  }
+
+  S.folderCollapse = loadFolderCollapse();
+
+  function groupWorkflowsBySource(list) {
+    var buckets = { project: [], user: [], bundled: [] };
+    list.forEach(function (w) {
+      var key = buckets[w.source] ? w.source : "bundled";
+      buckets[key].push(w);
+    });
+    return WORKFLOW_FOLDER_ORDER.filter(function (source) {
+      return buckets[source].length > 0;
+    }).map(function (source) {
+      return { source: source, entries: buckets[source] };
+    });
+  }
+
+  function toggleWorkflowFolder(source) {
+    S.folderCollapse[source] = !S.folderCollapse[source];
+    saveFolderCollapse(S.folderCollapse);
+    renderSidebar();
+    // Keep the selected card on-screen after a fold/unfold.
+    if (S.selected) {
+      var sel = document.querySelector('#wflist .wf.sel');
+      if (sel && typeof sel.scrollIntoView === "function") {
+        sel.scrollIntoView({ block: "nearest" });
+      }
+    }
+  }
 
   function isReadOnly() { return S.capability === "read"; }
 
@@ -1408,7 +1455,7 @@
   function renderSidebar() {
     var box = document.getElementById("wflist");
     clear(box);
-    // Pin tour to the top on Station landing so the door is obvious.
+    // Pin tour to the top of its folder on Station landing so the door is obvious.
     var list = S.workflows.slice();
     if (S.stationLanding) {
       list.sort(function (a, b) {
@@ -1417,40 +1464,73 @@
         return 0;
       });
     }
-    list.forEach(function (w) {
-      var kinds = Object.keys(w.kinds || {}).map(function (k) { return (KIND_LABEL[k] || k) + ":" + w.kinds[k]; }).join(" \u00b7 ");
-      var meta = w.phaseCount + " phase" + (w.phaseCount === 1 ? "" : "s") + " \u00b7 " + w.stepCount + " step" + (w.stepCount === 1 ? "" : "s");
-      var isStaged = workflowHasStaged(S.stagedOverrides[w.name]);
-      var autonomy = AUTONOMY_META[w.autonomy] || AUTONOMY_META.autonomous;
-      var isTour = w.name === TOUR_NAME;
-      var card = h("div", {
-        class: "wf" + (S.selected === w.name ? " sel" : "") + (isTour && S.stationLanding ? " station" : ""),
-        role: "button",
-        tabindex: "0",
-        "aria-current": S.selected === w.name ? "true" : null,
-        "aria-label": "Open workflow " + w.name,
-        onClick: function () { selectWorkflow(w.name); },
-        onKeydown: function (event) {
-          activateWithKeyboard(event, function () { selectWorkflow(w.name); });
-        }
+    var groups = groupWorkflowsBySource(list);
+    groups.forEach(function (group) {
+      var collapsed = !!S.folderCollapse[group.source];
+      var folder = h("div", {
+        class: "wf-folder" + (collapsed ? " collapsed" : "") + " src-" + group.source
+      });
+      var head = h("button", {
+        class: "wf-folder-head",
+        type: "button",
+        "aria-expanded": collapsed ? "false" : "true",
+        "aria-controls": "wf-folder-body-" + group.source,
+        onClick: function () { toggleWorkflowFolder(group.source); }
       },
-        h("div", { class: "name" }, w.name,
-          isTour && S.stationLanding ? h("span", { class: "badge start-here", text: "start here" }) : null,
-          h("span", { class: "src", text: w.source }),
-          h("span", { class: "badge " + autonomy.cls, text: autonomy.badge, title: autonomy.title }),
-          isStaged ? h("span", { class: "badge staged", text: "staged" }) : null,
-          w.blocked ? h("span", {
-            class: "badge " + (w.reroute ? "reroute" : "blocked"),
-            text: w.reroute ? "↷ via " + w.reroute.agent : "blocked",
-            title: w.blocked
-          }) : null),
-        w.description ? h("div", { class: "desc", text: w.description }) : null,
-        h("div", { class: "meta", text: isTour && S.stationLanding
-          ? "zero-cost guided ride \u00b7 no agents"
-          : (meta + (kinds ? " \u00b7 " + kinds : "")) })
+        h("span", { class: "wf-folder-chevron", text: collapsed ? "▶" : "▼" }),
+        h("span", { class: "wf-folder-title", text: group.source }),
+        h("span", {
+          class: "wf-folder-count",
+          text: group.entries.length + " workflow" + (group.entries.length === 1 ? "" : "s")
+        })
       );
-      box.appendChild(card);
+      folder.appendChild(head);
+      var body = h("div", {
+        class: "wf-folder-body",
+        id: "wf-folder-body-" + group.source,
+        hidden: collapsed ? "true" : null
+      });
+      if (!collapsed) {
+        group.entries.forEach(function (w) {
+          body.appendChild(renderWorkflowCard(w));
+        });
+      }
+      folder.appendChild(body);
+      box.appendChild(folder);
     });
+  }
+
+  function renderWorkflowCard(w) {
+    var kinds = Object.keys(w.kinds || {}).map(function (k) { return (KIND_LABEL[k] || k) + ":" + w.kinds[k]; }).join(" \u00b7 ");
+    var meta = w.phaseCount + " phase" + (w.phaseCount === 1 ? "" : "s") + " \u00b7 " + w.stepCount + " step" + (w.stepCount === 1 ? "" : "s");
+    var isStaged = workflowHasStaged(S.stagedOverrides[w.name]);
+    var autonomy = AUTONOMY_META[w.autonomy] || AUTONOMY_META.autonomous;
+    var isTour = w.name === TOUR_NAME;
+    return h("div", {
+      class: "wf" + (S.selected === w.name ? " sel" : "") + (isTour && S.stationLanding ? " station" : ""),
+      role: "button",
+      tabindex: "0",
+      "aria-current": S.selected === w.name ? "true" : null,
+      "aria-label": "Open workflow " + w.name,
+      onClick: function () { selectWorkflow(w.name); },
+      onKeydown: function (event) {
+        activateWithKeyboard(event, function () { selectWorkflow(w.name); });
+      }
+    },
+      h("div", { class: "name" }, w.name,
+        isTour && S.stationLanding ? h("span", { class: "badge start-here", text: "start here" }) : null,
+        h("span", { class: "badge " + autonomy.cls, text: autonomy.badge, title: autonomy.title }),
+        isStaged ? h("span", { class: "badge staged", text: "staged" }) : null,
+        w.blocked ? h("span", {
+          class: "badge " + (w.reroute ? "reroute" : "blocked"),
+          text: w.reroute ? "↷ via " + w.reroute.agent : "blocked",
+          title: w.blocked
+        }) : null),
+      w.description ? h("div", { class: "desc", text: w.description }) : null,
+      h("div", { class: "meta", text: isTour && S.stationLanding
+        ? "zero-cost guided ride \u00b7 no agents"
+        : (meta + (kinds ? " \u00b7 " + kinds : "")) })
+    );
   }
 
   function selectWorkflow(name, after, options) {
@@ -1475,6 +1555,12 @@
     }
     document.body.classList.remove("arrival-failed");
     try { localStorage.setItem(SELECTION_KEY, name); } catch (e) {}
+    // Reveal the selected workflow if its folder was folded shut.
+    var entry = S.workflows.find(function (w) { return w.name === name; });
+    if (entry && entry.source && S.folderCollapse[entry.source]) {
+      S.folderCollapse[entry.source] = false;
+      saveFolderCollapse(S.folderCollapse);
+    }
     renderSidebar();
     document.getElementById("statusLine").style.display = "none";
     setBanner("", "");

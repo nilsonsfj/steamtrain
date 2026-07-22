@@ -453,7 +453,7 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
             const name =
               runner.activeWorkflowRef.current ??
               picker.wfPreview?.name ??
-              picker.workflowEntries[picker.workflowIndex]?.name;
+              picker.selectedWorkflowName;
             const prior = runner.activeWorkflowInputRef.current ?? "";
             if (name) {
               const now = Date.now();
@@ -475,7 +475,7 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
             const current =
               picker.wfPreview?.name ??
               (runner.wf.started ? runner.wf.name : undefined) ??
-              picker.workflowEntries[picker.workflowIndex]?.name;
+              picker.selectedWorkflowName;
             const next = ARRIVAL_NEXT_CANDIDATES.map((name) =>
               picker.workflowEntries.find((e) => e.name === name && e.name !== current),
             ).find(Boolean);
@@ -485,7 +485,10 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
             }
             runner.resetRunner();
             cur.clearStationLanding?.();
-            picker.setWorkflowIndex(picker.workflowEntries.findIndex((e) => e.name === next.name));
+            const nextIdx = picker.pickerNav.findIndex(
+              (row) => row.kind === "workflow" && row.entry.name === next.name,
+            );
+            if (nextIdx >= 0) picker.setWorkflowIndex(nextIdx);
             picker.setWfPreview({ name: next.name, input: "" });
             return;
           }
@@ -548,12 +551,33 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
                 Math.min(Math.max(0, picker.preview.stepCount - 1), i + 1),
               );
             } else {
-              const next = Math.min(picker.workflowEntries.length, picker.workflowIndex + 1);
+              const next = Math.min(
+                Math.max(0, picker.pickerNav.length - 1),
+                picker.workflowIndex + 1,
+              );
               if (next !== picker.workflowIndex) {
                 runner.setStepIndex(0);
                 runner.setWfStepDetails(null);
               }
               picker.setWorkflowIndex(next);
+            }
+            return;
+          }
+          // Folder collapse/expand on the picker (← collapses, → expands, mirrors
+          // the folder chevron). Enter also toggles via the submit handler.
+          if (
+            (key.leftArrow || key.rightArrow) &&
+            !runner.wf.started &&
+            !runner.wfLaunching &&
+            !picker.wfPreview &&
+            !runner.wfStepDetails &&
+            !prompt.promptEditing &&
+            picker.onHeaderRow
+          ) {
+            const row = picker.pickerNav[picker.workflowIndex];
+            if (row?.kind === "header") {
+              if (key.leftArrow) picker.setFolderCollapsed(row.source, true);
+              else picker.setFolderCollapsed(row.source, false);
             }
             return;
           }
@@ -571,6 +595,25 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
                 ? Math.max(0, i - page)
                 : Math.min(Math.max(0, runner.totalWfSteps - 1), i + page),
             );
+            return;
+          }
+          // Page the workflow picker list when idle.
+          if (
+            (key.pageUp || key.pageDown) &&
+            !runner.wf.started &&
+            !runner.wfLaunching &&
+            !picker.wfPreview &&
+            !runner.wfStepDetails
+          ) {
+            const page = Math.max(3, Math.min(8, picker.pickerNav.length - 1));
+            const next = key.pageUp
+              ? Math.max(0, picker.workflowIndex - page)
+              : Math.min(Math.max(0, picker.pickerNav.length - 1), picker.workflowIndex + page);
+            if (next !== picker.workflowIndex) {
+              runner.setStepIndex(0);
+              runner.setWfStepDetails(null);
+            }
+            picker.setWorkflowIndex(next);
             return;
           }
         }

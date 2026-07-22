@@ -8,16 +8,28 @@ import type {
   WorkflowAuthor,
   WorkflowCatalogEntry,
   WorkflowScope,
+  WorkflowSourceKind,
   WorkflowSpec,
   WorkflowStepOverrides,
 } from "../workflow";
-import { formatReroutePlan, isAgentBackedStep, workflowCatalogEntries } from "../workflow";
+import { formatReroutePlan, workflowCatalogEntries } from "../workflow";
 import type { WorkspaceEntry } from "../workspace";
 import type { WorkflowCreateState } from "./WorkflowCreate";
 import type { DraftTarget } from "./draft-model";
 import { healthyAgentSet, resolveDraftTarget } from "./draft-model";
 import type { Mode } from "./modes";
 import type { TranscriptAction } from "./transcript";
+import {
+  DEFAULT_FOLDER_COLLAPSE,
+  type WorkflowFolderCollapseState,
+  buildWorkflowPickerNav,
+  indexOfWorkflowOrFallback,
+  isCreateNavIndex,
+  isHeaderNavIndex,
+  remapPickerIndexAfterCollapse,
+  selectedWorkflowFromNav,
+  toggleFolderCollapse,
+} from "./workflow-picker-model";
 import { flattenSpecSteps } from "./workflow-spec-ui";
 
 export interface UseWorkflowPickerParams {
@@ -48,12 +60,15 @@ export function useWorkflowPicker({
   resolveWorkflowSpec,
 }: UseWorkflowPickerParams) {
   const [workflowIndex, setWorkflowIndex] = useState(0);
+  const [collapsedFolders, setCollapsedFolders] =
+    useState<WorkflowFolderCollapseState>(DEFAULT_FOLDER_COLLAPSE);
   const [wfPreview, setWfPreview] = useState<{ name: string; input: string } | null>(null);
   const [wfCreate, setWfCreate] = useState<WorkflowCreateState | null>(null);
   const [draftOverride, setDraftOverride] = useState<DraftTarget | null>(null);
   const [catalogVersion, setCatalogVersion] = useState(0);
   const pendingSelectRef = useRef<string | null>(null);
   const createAbortRef = useRef<AbortController | null>(null);
+  const seededSelectionRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -66,10 +81,16 @@ export function useWorkflowPicker({
     [runtimeCatalog],
   );
 
-  const onCreateRow = workflowIndex >= workflowEntries.length;
-  const selectedWorkflowName = onCreateRow
-    ? undefined
-    : workflowEntries[Math.min(workflowIndex, Math.max(0, workflowEntries.length - 1))]?.name;
+  const pickerNav = useMemo(
+    () => buildWorkflowPickerNav(workflowEntries, collapsedFolders),
+    [workflowEntries, collapsedFolders],
+  );
+
+  const selectedNav = pickerNav[Math.min(workflowIndex, Math.max(0, pickerNav.length - 1))];
+  const onCreateRow = isCreateNavIndex(pickerNav, workflowIndex);
+  const onHeaderRow = isHeaderNavIndex(pickerNav, workflowIndex);
+  const selectedWorkflowEntry = selectedWorkflowFromNav(pickerNav, workflowIndex);
+  const selectedWorkflowName = selectedWorkflowEntry?.name;
   const userWorkflowNames = useMemo(
     () =>
       workflowEntries
@@ -78,19 +99,51 @@ export function useWorkflowPicker({
     [workflowEntries],
   );
 
+  const toggleSelectedFolder = useCallback(() => {
+    const row = pickerNav[workflowIndex];
+    if (row?.kind !== "header") return false;
+    const prevNav = pickerNav;
+    const nextCollapsed = toggleFolderCollapse(collapsedFolders, row.source);
+    const nextNav = buildWorkflowPickerNav(workflowEntries, nextCollapsed);
+    setCollapsedFolders(nextCollapsed);
+    setWorkflowIndex(remapPickerIndexAfterCollapse(prevNav, nextNav, workflowIndex));
+    return true;
+  }, [pickerNav, workflowIndex, collapsedFolders, workflowEntries]);
+
+  const setFolderCollapsed = useCallback(
+    (source: WorkflowSourceKind, collapsed: boolean) => {
+      if (collapsedFolders[source] === collapsed) return;
+      const prevNav = pickerNav;
+      const nextCollapsed = { ...collapsedFolders, [source]: collapsed };
+      const nextNav = buildWorkflowPickerNav(workflowEntries, nextCollapsed);
+      setCollapsedFolders(nextCollapsed);
+      setWorkflowIndex(remapPickerIndexAfterCollapse(prevNav, nextNav, workflowIndex));
+    },
+    [collapsedFolders, pickerNav, workflowEntries, workflowIndex],
+  );
+
   // Keep the picker selection in range and honor a queued post-write selection.
+  // On first catalog paint, prefer the first workflow over a folder header so
+  // Enter/Ctrl+R do something useful immediately.
   useEffect(() => {
     const pending = pendingSelectRef.current;
     if (pending) {
-      const idx = workflowEntries.findIndex((entry) => entry.name === pending);
-      if (idx >= 0) {
+      const idx = indexOfWorkflowOrFallback(pickerNav, pending);
+      const row = pickerNav[idx];
+      if (row?.kind === "workflow" && row.entry.name === pending) {
         pendingSelectRef.current = null;
+        seededSelectionRef.current = true;
         setWorkflowIndex(idx);
         return;
       }
     }
-    setWorkflowIndex((i) => Math.min(i, workflowEntries.length));
-  }, [workflowEntries]);
+    if (!seededSelectionRef.current && pickerNav.some((row) => row.kind === "workflow")) {
+      seededSelectionRef.current = true;
+      setWorkflowIndex(indexOfWorkflowOrFallback(pickerNav, null));
+      return;
+    }
+    setWorkflowIndex((i) => Math.min(i, Math.max(0, pickerNav.length - 1)));
+  }, [pickerNav]);
 
   const config = orchestrator.getConfig();
   const healthyAgents = useMemo(() => healthyAgentSet(doctor), [doctor]);
@@ -543,6 +596,10 @@ export function useWorkflowPicker({
   return {
     workflowIndex,
     setWorkflowIndex,
+    collapsedFolders,
+    setCollapsedFolders,
+    toggleSelectedFolder,
+    setFolderCollapsed,
     wfPreview,
     setWfPreview,
     wfCreate,
@@ -552,8 +609,12 @@ export function useWorkflowPicker({
     pendingSelectRef,
     createAbortRef,
     workflowEntries,
+    pickerNav,
+    selectedNav,
     onCreateRow,
+    onHeaderRow,
     selectedWorkflowName,
+    selectedWorkflowEntry,
     userWorkflowNames,
     healthyAgents,
     draftResolution,
