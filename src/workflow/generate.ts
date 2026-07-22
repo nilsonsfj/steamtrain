@@ -426,11 +426,13 @@ Every agent-backed step MUST set model (or modelClass) and a non-empty prompt.
 "model" and "effort" are TEMPLATES, rendered at run time — this is how ONE
 spec serves several cost/quality tiers via declared "inputs" instead of
 forking the workflow: "model": "{{inputs.coderModel}}" with an "inputs" entry
-declaring a sensible free-model default. ("agent" itself must stay a plain
-static string — never templated.) A "model" that renders empty FAILS the
-step; an "effort" that renders empty is fine (it just omits the flag) — so
-give a "reviewerEffort"-style input a default of "" when you're not sure the
-chosen agent/model supports effort/variant.
+declaring a sensible free-model default. Prefer model-only bindings for
+model-typed inputs (omit `agent` and let the engine pick the family). When
+you do set `agent`, keep it a plain static string — never templated. A
+"model" that renders empty FAILS the step; an "effort" that renders empty is
+fine (it just omits the flag) — so give a "reviewerEffort"-style input a
+default of "" when you're not sure the chosen agent/model supports
+effort/variant.
 
 # Worked example: parallel backlog implement, then consolidate
 This is the canonical shape for "split a backlog into tasks, do them in parallel,
