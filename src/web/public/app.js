@@ -1583,17 +1583,59 @@
       var required = inp.required === true || (inp.required !== false && inp.default === undefined);
       var defaultStr = inp.default !== undefined ? String(inp.default) : "";
       var labelText = key;
-      var typeHint = type === "boolean" ? " (y/n)" : type === "number" ? " (number)" : "";
+      var typeHint =
+        type === "boolean" ? " (y/n)" :
+        type === "number" ? " (number)" :
+        type === "model" ? " (model)" :
+        type === "agent" ? " (agent)" :
+        type === "enum" ? " (enum)" : "";
       var hint = inp.description || "";
       if (defaultStr) hint = hint ? hint + " \u00b7 default: " + defaultStr : "default: " + defaultStr;
+      if (type === "model" && inp.fallbackModels && inp.fallbackModels.length) {
+        hint = (hint ? hint + " \u00b7 " : "") + "fallback: " + inp.fallbackModels.join(" \u2192 ");
+      }
 
       var control;
+      var choices = Array.isArray(inp.choices) ? inp.choices.slice() : null;
       if (type === "boolean") {
         control = selectEl([
           { value: "", label: "(not set)" },
           { value: "true", label: "yes" },
           { value: "false", label: "no" }
         ], defaultStr === "true" ? "true" : defaultStr === "false" ? "false" : "");
+      } else if (type === "enum" || (choices && choices.length && (type === "string" || type === "agent"))) {
+        var enumOpts = [{ value: "", label: required ? "(required)" : "(not set)" }].concat(
+          choices.map(function (c) { return { value: c, label: c }; })
+        );
+        if (defaultStr && !choices.some(function (c) { return c === defaultStr; })) {
+          enumOpts.push({ value: defaultStr, label: defaultStr + " (default)" });
+        }
+        control = selectEl(enumOpts, defaultStr);
+      } else if (type === "agent") {
+        var agentOpts = [{ value: "", label: required ? "(required)" : "(not set)" }].concat(agentOptions());
+        if (defaultStr && !agentOpts.some(function (o) { return o.value === defaultStr; })) {
+          agentOpts.splice(1, 0, { value: defaultStr, label: defaultStr + " (default)" });
+        }
+        control = selectEl(agentOpts, defaultStr);
+      } else if (type === "model") {
+        // Combobox: free-text with catalog datalist so aliases / native ids both work.
+        var listId = "param-models-" + key.replace(/[^a-zA-Z0-9_-]/g, "_");
+        control = h("input", {
+          class: "txt",
+          type: "text",
+          list: listId,
+          placeholder: defaultStr || (required ? "model id or alias" : "optional model"),
+          value: defaultStr
+        });
+        var datalist = h("datalist", { id: listId });
+        var modelOpts = choices && choices.length
+          ? choices.map(function (c) { return { value: c, label: c }; })
+          : familyModelOptions(defaultStr);
+        modelOpts.forEach(function (o) {
+          datalist.appendChild(h("option", { value: o.value }, o.label));
+        });
+        // Attach datalist after the control wrapper below.
+        control._paramDatalist = datalist;
       } else {
         control = h("input", {
           class: "txt",
@@ -1603,6 +1645,8 @@
         });
       }
       control.setAttribute("data-param-key", key);
+      control.setAttribute("data-param-type", type);
+      if (choices && choices.length) control._paramChoices = choices;
 
       var labelEl = h("label", { text: labelText });
       if (required) {
@@ -1614,19 +1658,62 @@
       }
       var errEl = h("div", { class: "field-error" });
       var wrapper = h("div", { class: "field" }, labelEl, control,
+        control._paramDatalist || null,
         hint ? h("div", { class: "hint", text: hint }) : null, errEl);
       container.appendChild(wrapper);
 
-      if (required || type === "number") {
-        control._fieldError = errEl;
+      control._fieldError = errEl;
+      if (required || type === "number" || type === "enum" || (choices && choices.length)) {
         addBlurValidation(control, function () {
           var val = control.value;
           if (required && (!val || (typeof val === "string" && !val.trim()))) return key + " is required";
           if (type === "number" && val && isNaN(Number(val))) return key + " must be a number";
+          if (choices && choices.length && val && choices.indexOf(val) < 0) {
+            return key + " must be one of: " + choices.join(", ");
+          }
           return null;
         });
       }
     });
+  }
+
+  function validateParamsForm() {
+    var panel = document.getElementById("paramsPanel");
+    var container = document.getElementById("paramsForm");
+    if (!panel || !container || panel.hidden || panel.style.display === "none") return true;
+    var fields = container.querySelectorAll("[data-param-key]");
+    var firstInvalid = null;
+    for (var i = 0; i < fields.length; i++) {
+      var el = fields[i];
+      var key = el.getAttribute("data-param-key");
+      var type = el.getAttribute("data-param-type") || "string";
+      var required = el.closest(".field") && el.closest(".field").querySelector(".param-required");
+      var val = el.value;
+      var msg = null;
+      if (required && (!val || (typeof val === "string" && !val.trim()))) {
+        msg = key + " is required";
+      } else if (type === "number" && val && isNaN(Number(val))) {
+        msg = key + " must be a number";
+      } else if (el._paramChoices && el._paramChoices.length && val && el._paramChoices.indexOf(val) < 0) {
+        msg = key + " must be one of: " + el._paramChoices.join(", ");
+      }
+      var errEl = el._fieldError;
+      if (msg) {
+        el.classList.add("invalid");
+        if (errEl) { errEl.textContent = msg; errEl.classList.add("show"); }
+        if (!firstInvalid) firstInvalid = el;
+      } else {
+        el.classList.remove("invalid");
+        if (errEl) { errEl.textContent = ""; errEl.classList.remove("show"); }
+      }
+    }
+    if (firstInvalid) {
+      setParamsExpanded(true);
+      setBanner("fix parameter errors before running", "err");
+      try { firstInvalid.focus(); } catch (_) {}
+      return false;
+    }
+    return true;
   }
 
   function collectParams() {
@@ -3139,17 +3226,7 @@
     if (!input.trim()) { setBanner("enter some input first", "info"); return; }
     recordPromptHistory(input);
     // Validate param fields before submission (even when the panel is collapsed).
-    var panel = document.getElementById("paramsPanel");
-    var container = document.getElementById("paramsForm");
-    if (panel && container && !panel.hidden && panel.style.display !== "none") {
-      var invalidFields = container.querySelectorAll(".invalid");
-      if (invalidFields.length > 0) {
-        setParamsExpanded(true);
-        setBanner("fix parameter errors before running", "err");
-        invalidFields[0].focus();
-        return;
-      }
-    }
+    if (!validateParamsForm()) return;
     // A pending history-enriched plan must never replace the live run canvas.
     S.planRequest += 1;
     // A freshly launched run is web-owned and in-process, so it can be detached.
@@ -4982,6 +5059,7 @@
     var input = document.getElementById("input").value;
     if (!input.trim()) { setBanner("enter some input first", "info"); return; }
     recordPromptHistory(input);
+    if (!validateParamsForm()) return;
     var workflowName = S.selected;
     var requestId = ++S.planRequest;
     var payload = { input: input };

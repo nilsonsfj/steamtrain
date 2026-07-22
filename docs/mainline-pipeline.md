@@ -95,9 +95,11 @@ stream, the merge, the final loop, and the delivered PR link.
 
 `mainline` and `mainline-stream` template every `model`/`effort` field
 (`{{inputs.coderModel}}`, etc.) — one spec, several cost/quality tiers, no
-forking. Substitute your own gateway's model ids in each agent's own format
-(`opencode/...`, `claude-...`, plain codex slugs, …); the ones below are
-illustrative.
+forking. Those params are `type: "model"` with declared `fallbackModels`, so
+the TUI/web Variables form offers catalog autocomplete and a quota hit mid-run
+walks the safety net instead of failing the step. Substitute your own
+gateway's model ids in each agent's own format (`opencode/...`, `claude-...`,
+plain codex slugs, …); the ones below are illustrative.
 
 | tier | planner | coder (per stream) | reviewer |
 | --- | --- | --- | --- |

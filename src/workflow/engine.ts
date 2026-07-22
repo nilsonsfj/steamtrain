@@ -41,6 +41,7 @@ import {
   noProviderHumanInputResponse,
   validateHumanInputValue,
 } from "./human-input";
+import { fallbackModelsFromInputRefs, mergeFallbackModelLists } from "./input-params";
 import {
   GH_GUIDANCE,
   ISSUES_MODES,
@@ -108,6 +109,7 @@ import {
   type StepResult,
   type WorkerStep,
   type WorkflowCallStep,
+  type WorkflowInputSpec,
   type WorkflowItem,
   type WorkflowPhase,
   type WorkflowSpec,
@@ -1304,6 +1306,7 @@ async function runSingleStep(
       modelFailoverWorkflow: spec.modelFailover,
       modelFailoverConfig: deps.agentConfig?.modelFailover,
       workflowFallbackModels: spec.fallbackModels,
+      workflowInputs: spec.inputs,
       stepTimeoutDefault: spec.stepTimeoutSec,
       iteration,
       workflowCallStack: ctx.workflowCallStack ?? [],
@@ -1500,6 +1503,11 @@ interface ExecuteContext {
   modelFailoverConfig?: ModelFailoverPolicy;
   /** Workflow-level fallback model queries appended to every agent step's chain. */
   workflowFallbackModels?: string[];
+  /**
+   * Declared workflow `inputs` — used to inherit `fallbackModels` from
+   * model-typed parameters referenced by a step's `model` template.
+   */
+  workflowInputs?: Record<string, WorkflowInputSpec>;
   /** Workflow-level per-step timeout default in seconds; per-step `stepTimeoutSec` overrides it. */
   stepTimeoutDefault?: number;
   /** Loop iteration this step is executing under (1-based). */
@@ -2066,12 +2074,25 @@ async function executeAgentStep(
   const firstStarted = Date.now();
   let attempt = 0;
   let activeStep: AgentBackedWorkflowStep = step;
+  // Inherit failover models declared on model-typed inputs referenced by the
+  // *unrendered* model template (`rawStep.model`). The rendered `step.model`
+  // is a concrete id and no longer carries `{{inputs.*}}` refs.
+  const inputFallbacks = fallbackModelsFromInputRefs(ctx.workflowInputs, rawStep.model);
+  const effectiveStepFallbacks = mergeFallbackModelLists(inputFallbacks, rawStep.fallbackModels);
+  const failoverStep: AgentBackedWorkflowStep = {
+    ...step,
+    fallbackModels: effectiveStepFallbacks,
+  };
   // Failover chain: prefer the resolution captured at run start (preserves
   // authoring-time model/class intent), else recompute from the live step.
+  // For templated models the start-of-run pass leaves the step as-authored,
+  // so we always recompute when input/step fallbacks are present.
   const prior = ctx.bindingResolutions.find((r) => r.stepId === step.id);
   let failover: ResolvedModelCandidate[] = prior?.candidates ?? [];
-  if (failover.length === 0) {
-    const live = resolveStepFailoverChain(step, {
+  // Recompute when start-of-run left no chain, or when model-typed inputs
+  // contribute fallbacks that were not available until after template render.
+  if (failover.length === 0 || (inputFallbacks?.length ?? 0) > 0) {
+    const live = resolveStepFailoverChain(failoverStep, {
       config: ctx.deps.agentConfig,
       isReady: (agent) => Boolean(resolveAgentInstance(ctx.deps.agentConfig, agent)),
       workflowFallbackModels: ctx.workflowFallbackModels,
@@ -2083,14 +2104,14 @@ async function executeAgentStep(
     failover.findIndex((c) => c.agent === step.agent && c.model === step.model),
   );
   // Extend the attempt budget only when the author declared explicit
-  // fallbackModels (step or workflow) — automatic same-family remaps must not
-  // inflate retries for plain pinned steps. When fallbacks *are* declared,
-  // cap the extension at the *resolved* chain length so unresolved queries
-  // cannot burn same-binding attempts after the real candidate list ends,
-  // while still leaving room for family remaps that sit between declared
-  // fallbacks in the resolved order.
+  // fallbackModels (input, step, or workflow) — automatic same-family remaps
+  // must not inflate retries for plain pinned steps. When fallbacks *are*
+  // declared, cap the extension at the *resolved* chain length so unresolved
+  // queries cannot burn same-binding attempts after the real candidate list
+  // ends, while still leaving room for family remaps that sit between
+  // declared fallbacks in the resolved order.
   const hasExplicitFallbacks =
-    (step.fallbackModels?.length ?? 0) > 0 || (ctx.workflowFallbackModels?.length ?? 0) > 0;
+    (effectiveStepFallbacks?.length ?? 0) > 0 || (ctx.workflowFallbackModels?.length ?? 0) > 0;
   const remainingInChain = Math.max(1, failover.length - failoverIndex);
   const attemptBudget =
     failoverPolicy.enabled && hasExplicitFallbacks && remainingInChain > 1

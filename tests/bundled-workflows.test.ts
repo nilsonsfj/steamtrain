@@ -84,4 +84,24 @@ describe("bundled workflows", () => {
       expect(result.warnings![0]).toMatch(EXPECTED_CMD_WARNING);
     }
   });
+
+  it("declare model-typed inputs with catalog fallbackModels", () => {
+    const known = new Set(OPENCODE_MODELS.map((m) => m.id));
+    for (const name of ["mainline", "mainline-stream"]) {
+      const spec = BUNDLED_WORKFLOWS[name]!;
+      const modelInputs = Object.entries(spec.inputs ?? {}).filter(
+        ([, inp]) => inp.type === "model",
+      );
+      expect(modelInputs.length, `${name} should declare model inputs`).toBeGreaterThan(0);
+      for (const [key, inp] of modelInputs) {
+        expect(inp.fallbackModels?.length, `${name}.${key} fallbackModels`).toBeGreaterThan(0);
+        for (const fb of inp.fallbackModels ?? []) {
+          expect(known.has(fb), `${name}.${key} fallback ${fb}`).toBe(true);
+        }
+        if (typeof inp.default === "string") {
+          expect(known.has(inp.default), `${name}.${key} default ${inp.default}`).toBe(true);
+        }
+      }
+    }
+  });
 });

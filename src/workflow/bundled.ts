@@ -593,12 +593,16 @@ const mainlineStream: WorkflowSpec = {
     "Implement a charter in its own worktree, then loop review → fix → test until clean. The per-stream unit of the mainline pipeline; also useful standalone.",
   inputs: {
     coderModel: {
+      type: "model",
       description: "Agent model that implements the charter and applies review fixes.",
       default: FREE.mimo,
+      fallbackModels: [FREE.deepseekFlash, FREE.northMini],
     },
     reviewerModel: {
+      type: "model",
       description: "Agent model that reviews the diff each loop iteration.",
       default: FREE.nemotronUltra,
+      fallbackModels: [FREE.deepseekFlash, FREE.mimo],
     },
     reviewerEffort: {
       description: "Reasoning effort/variant for the reviewer model. Empty omits the flag.",
@@ -609,11 +613,15 @@ const mainlineStream: WorkflowSpec = {
       default: "true",
     },
     issueTiming: {
+      type: "enum",
       description: 'File out-of-scope findings "live" (as this stream finishes) or at "end".',
+      choices: ["live", "end"],
       default: "end",
     },
     issueMode: {
+      type: "enum",
       description: 'Findings become a "report" (safe default) or "github" issues.',
+      choices: ["report", "github"],
       default: "report",
     },
   },
@@ -828,28 +836,36 @@ const mainline: WorkflowSpec = {
     "One prompt in, one reviewed PR out: plan parallel streams, implement+review+fix+test each in its own worktree, merge, review the merge, open a PR, and file every out-of-scope finding as an issue.",
   inputs: {
     plannerModel: {
+      type: "model",
       description: "Agent model that splits the prompt into independent streams.",
       default: FREE.deepseekFlash,
+      fallbackModels: [FREE.mimo, FREE.northMini],
     },
     plannerEffort: {
       description: "Reasoning effort/variant for the planner model. Empty omits the flag.",
       default: "",
     },
     coderModel: {
+      type: "model",
       description: "Agent model that implements each stream and the final fixes.",
       default: FREE.mimo,
+      fallbackModels: [FREE.deepseekFlash, FREE.northMini],
     },
     reviewerModel: {
+      type: "model",
       description: "Agent model that reviews each stream and the final merge.",
       default: FREE.nemotronUltra,
+      fallbackModels: [FREE.deepseekFlash, FREE.mimo],
     },
     reviewerEffort: {
       description: "Reasoning effort/variant for the reviewer model. Empty omits the flag.",
       default: "",
     },
     mergeModel: {
+      type: "model",
       description: "Agent model that resolves merge conflicts between streams, if any arise.",
       default: FREE.northMini,
+      fallbackModels: [FREE.mimo, FREE.deepseekFlash],
     },
     maxStreams: {
       type: "number",
@@ -861,15 +877,21 @@ const mainline: WorkflowSpec = {
       default: "true",
     },
     issueTiming: {
+      type: "enum",
       description: 'File out-of-scope findings "live" (per-stream) or batched at "end".',
+      choices: ["live", "end"],
       default: "end",
     },
     issueMode: {
+      type: "enum",
       description: 'Findings become a "report" (safe default) or "github" issues.',
+      choices: ["report", "github"],
       default: "report",
     },
     deliver: {
+      type: "enum",
       description: 'Land the final result as a "pr" (default) or leave it on a local "branch".',
+      choices: ["pr", "branch"],
       default: "pr",
     },
   },

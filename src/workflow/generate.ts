@@ -351,18 +351,36 @@ phase count modest.
 
 # Workflow inputs (parameters)
 A workflow may declare named inputs in an "inputs" map. Each key becomes a
-{{inputs.<key>}} template variable. Users supply values via --param key=value.
-Input types: "string" (default), "number", "boolean". Set "default" to make an
-input optional; without it the user must provide a value. Use inputs to make
-workflows reusable — e.g. a "repo" input instead of hardcoding a repo name in
-every prompt.
+{{inputs.<key>}} template variable. Users supply values via --param key=value
+(or the TUI / web Variables form).
+
+Input types:
+- "string" (default), "number", "boolean" — classic typed params
+- "model" — agent model id or friendly alias; UIs offer catalog autocomplete.
+  Optional "fallbackModels": ["other-model", …] declares a quota / rate-limit
+  safety net. Any step with "model": "{{inputs.<key>}}" inherits those
+  fallbacks automatically so a depleted primary does not ruin the run.
+- "agent" — configured agent instance id; UIs offer the agent picker.
+- "enum" — one of "choices" (required for this type). Optional "choices" also
+  constrains string/model/agent params.
+
+Set "default" to make an input optional; without it the user must provide a
+value. Use inputs to make workflows reusable — e.g. a "repo" input instead of
+hardcoding a repo name in every prompt.
 
 Example:
   "inputs": {
     "repo": { "type": "string", "description": "target repository" },
-    "maxIterations": { "type": "number", "default": 3 }
+    "maxIterations": { "type": "number", "default": 3 },
+    "coderModel": {
+      "type": "model",
+      "default": "opencode/mimo-v2.5-free",
+      "fallbackModels": ["opencode/deepseek-v4-flash-free", "opencode/north-mini-code-free"]
+    },
+    "issueTiming": { "type": "enum", "choices": ["live", "end"], "default": "end" }
   }
 Then reference in prompts: "Analyze {{inputs.repo}} with up to {{inputs.maxIterations}} passes"
+And pin a step model: "model": "{{inputs.coderModel}}"
 
 # Templates available in prompts/items
 {{input}} / {{args}} (the user's task), {{inputs.<key>}} (declared workflow input

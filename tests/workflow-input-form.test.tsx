@@ -377,4 +377,84 @@ describe("WorkflowInputForm", () => {
     // Should still have focus indicator
     expect(frame).toContain("▶");
   });
+
+  it("labels model and enum fields and shows fallback hint", async () => {
+    const spec = makeSpec({
+      coderModel: {
+        type: "model",
+        description: "Primary coder",
+        default: "mimo",
+        fallbackModels: ["flash", "north"],
+      },
+      timing: {
+        type: "enum",
+        choices: ["live", "end"],
+        default: "end",
+      },
+    });
+    const { stdin, lastFrame } = render(
+      <WorkflowInputForm
+        spec={spec}
+        width={100}
+        height={24}
+        modelSuggestions={["mimo", "flash", "north", "opus 4.8"]}
+        agentSuggestions={["claude", "opencode"]}
+        onSubmit={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    await tick();
+    let frame = lastFrame() ?? "";
+    expect(frame).toContain("(model)");
+    expect(frame).toContain("(enum)");
+    expect(frame).toContain("fallback: flash → north");
+    // Move focus to the enum field to surface its choices.
+    stdin.write("\t");
+    await tick();
+    frame = lastFrame() ?? "";
+    expect(frame).toContain("1:live");
+    expect(frame).toContain("2:end");
+  });
+
+  it("submits a filled boolean with Enter without re-entering edit mode", async () => {
+    const onSubmit = vi.fn();
+    const spec = makeSpec({
+      flag: { type: "boolean", default: true },
+    });
+    const { stdin } = render(
+      <WorkflowInputForm
+        spec={spec}
+        width={80}
+        height={20}
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />,
+    );
+    await tick();
+    stdin.write("\r");
+    await tick();
+    expect(onSubmit).toHaveBeenCalledWith({ flag: true });
+  });
+
+  it("cycles string inputs that declare choices", async () => {
+    const onSubmit = vi.fn();
+    const spec = makeSpec({
+      mode: { type: "string", choices: ["report", "github"], default: "report" },
+    });
+    const { stdin } = render(
+      <WorkflowInputForm
+        spec={spec}
+        width={80}
+        height={20}
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />,
+    );
+    await tick();
+    stdin.write("\u001b[C"); // right arrow
+    await tick();
+    stdin.write("\r");
+    await tick();
+    expect(onSubmit).toHaveBeenCalledWith({ mode: "github" });
+  });
 });

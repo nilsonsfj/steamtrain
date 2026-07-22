@@ -132,7 +132,14 @@ per-step → workflow → project/user `steamtrain.json` → built-in defaults):
 | `failoverDelayMs` | `250` | Short pause before a switched attempt (same-binding retries still use `retry`). |
 
 Workflow-level `fallbackModels` are appended to every agent-backed step's
-chain (after the step's own list), so you can declare a shared safety net once:
+chain (after the step's own list), so you can declare a shared safety net once.
+
+**Per-input fallbacks:** when a step uses `model: "{{inputs.coderModel}}"` and
+that input is `type: "model"` with its own `fallbackModels`, those entries are
+prepended to the chain (before step / workflow lists). That keeps the safety
+net next to the parameter the user actually picks — changing the primary at
+run time does not strand the run without alternatives. See
+[Workflow inputs](./workflow-spec.md#workflow-inputs).
 
 ```jsonc
 {
