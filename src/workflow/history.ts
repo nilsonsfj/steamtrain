@@ -378,6 +378,11 @@ export class RunRecordBuilder {
         if (!step) break;
         // The failed attempt just completed; the next one is about to start.
         step.attempts = event.attempt + 1;
+        if (event.failover) {
+          step.agent = event.failover.toAgent;
+          step.model = event.failover.toModel;
+          if (event.failover.toEffort !== undefined) step.effort = event.failover.toEffort;
+        }
         break;
       }
       case "gate_evaluated": {

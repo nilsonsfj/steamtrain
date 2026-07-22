@@ -239,6 +239,17 @@ export {
   type WorktreeGcResult,
 } from "./gc";
 export {
+  type ModelFailoverPolicy,
+  type ModelFailoverTrigger,
+  type ResolvedModelFailoverPolicy,
+  DEFAULT_MODEL_FAILOVER,
+  resolveModelFailoverPolicy,
+  failoverTriggerMatches,
+  isFailoverEligibleFailure,
+  shouldAdvanceFailover,
+  shouldFailFastWithoutCandidate,
+} from "./model-failover";
+export {
   type RetryPolicy,
   type ResolvedRetryPolicy,
   DEFAULT_RETRY,

@@ -15,6 +15,7 @@ const AGENT_FIELD_KEYS = new Set<keyof AgentRunFields>([
   "model",
   "modelClass",
   "fallbackModels",
+  "modelFailover",
   "prompt",
   "cwd",
   "env",

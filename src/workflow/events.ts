@@ -128,6 +128,10 @@ export interface StepDoneEvent extends IterationTagged {
  * is about to back off and try again. Emitted *after* the failed attempt and
  * *before* the backoff sleep. `attempt` is the 1-based attempt that just failed;
  * `delayMs` is the upcoming wait.
+ *
+ * When the engine walks the model failover chain (quota / rate-limit / …),
+ * `failover` carries the from→to binding so UIs can update the live step
+ * target instead of only showing a generic "retrying…" activity line.
  */
 export interface StepRetryEvent extends IterationTagged {
   kind: "step_retry";
@@ -137,6 +141,19 @@ export interface StepRetryEvent extends IterationTagged {
   maxAttempts: number;
   delayMs: number;
   reason: string;
+  /**
+   * Present when this retry switches agent and/or model. UIs should update the
+   * live step's `agent`/`model`/`effort` from `to*` fields.
+   */
+  failover?: {
+    fromAgent: string;
+    fromModel: string;
+    toAgent: string;
+    toModel: string;
+    toEffort?: string;
+    /** Classified failure that triggered the switch (quota, rate_limit, …). */
+    failureKind: string;
+  };
   ts: number;
 }
 

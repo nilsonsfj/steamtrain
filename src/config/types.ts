@@ -5,6 +5,7 @@ import type {
   ApiInstanceId,
   ApiProviderId,
 } from "../types/events";
+import type { ModelFailoverPolicy } from "../workflow/model-failover";
 import type { NotifyConfig } from "../workflow/notify";
 import {
   LOOP_MAX_ITERATIONS_CEILING,
@@ -54,6 +55,14 @@ export interface SteamtrainConfig {
    * waits (approval-pending, input-pending). See `src/workflow/notify.ts`.
    */
   notify?: NotifyConfig;
+  /**
+   * Default mid-flight model failover policy for agent steps. Workflow and
+   * per-step `modelFailover` override this. When an agent hits quota /
+   * rate-limit / transient failures, steamtrain walks `fallbackModels` (and
+   * same-family remaps) so the run is not ruined by a single provider's
+   * budget. See `docs/model-binding.md`.
+   */
+  modelFailover?: ModelFailoverPolicy;
 }
 
 /** Per-class override for {@link SteamtrainConfig.modelClasses}. */
@@ -273,6 +282,20 @@ export const configFileSchema = z
           )
           .min(1)
           .optional(),
+      })
+      .strict()
+      .optional(),
+    modelFailover: z
+      .object({
+        enabled: z.boolean().optional(),
+        on: z
+          .array(z.enum(["quota", "rate_limit", "transient", "auth", "any"]))
+          .min(1)
+          .optional(),
+        onCapacityResult: z.boolean().optional(),
+        allowAfterToolUse: z.boolean().optional(),
+        preferNextModel: z.boolean().optional(),
+        failoverDelayMs: z.number().int().min(0).max(60000).optional(),
       })
       .strict()
       .optional(),

@@ -61,10 +61,16 @@ export function narrateEvent(ev: WorkflowEvent): NarrationLine | null {
             : "Stopped short of the destination.",
       );
     case "step_retry":
-      return line(ev, `Car '${ev.stepId}' will try again (${ev.attempt}/${ev.maxAttempts}).`, {
-        phaseId: ev.phaseId,
-        stepId: ev.stepId,
-      });
+      return line(
+        ev,
+        ev.failover
+          ? `Car '${ev.stepId}' failing over ${ev.failover.fromAgent}/${ev.failover.fromModel} → ${ev.failover.toAgent}/${ev.failover.toModel} (${ev.failover.failureKind}).`
+          : `Car '${ev.stepId}' will try again (${ev.attempt}/${ev.maxAttempts}).`,
+        {
+          phaseId: ev.phaseId,
+          stepId: ev.stepId,
+        },
+      );
     default:
       return null;
   }

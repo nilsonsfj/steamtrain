@@ -108,12 +108,29 @@ export interface ResultEvent extends BaseEvent {
   tokens?: TokenUsage;
 }
 
+/**
+ * Optional adapter hint for how the engine should treat this failure.
+ * When omitted, the engine classifies from `message` / `stderr` heuristics.
+ */
+export type AgentFailureCategory =
+  | "quota"
+  | "rate_limit"
+  | "auth"
+  | "transient"
+  | "permanent"
+  | "unknown";
+
 /** A process- or protocol-level failure (non-zero exit, timeout, auth, ...). */
 export interface ErrorEvent extends BaseEvent {
   kind: "error";
   message: string;
   stderr?: string;
   code?: number | null;
+  /**
+   * Optional classification hint from the adapter (e.g. Amp "no credits" →
+   * `quota`). The engine falls back to message heuristics when unset.
+   */
+  category?: AgentFailureCategory;
 }
 
 /**

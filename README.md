@@ -648,7 +648,8 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
   agent — reference preferred), or `modelClass`
   (`thinker` | `ultrathinker` | `implementer` | `reviewer` | `deep-reviewer` |
   `simple` | `balanced`). Optional
-  `fallbackModels` lists failover queries. See
+  `fallbackModels` lists failover queries; optional `modelFailover` configures
+  mid-flight re-routing on quota / rate-limit errors. See
   [`docs/model-binding.md`](docs/model-binding.md). Agents:
   `claude` | `opencode` | `codex` | `cursor` | `antigravity` | `amp` | `kiro`.
   Also optional: `cwd` (the **target** dir; relative paths resolve against the

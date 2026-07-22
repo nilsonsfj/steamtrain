@@ -81,6 +81,8 @@ execution behavior. **Examples:** [`workflow-examples.md`](workflow-examples.md)
 | `description` | no | Human-readable picker/list text. |
 | `phases` | yes | Ordered list of workflow phases. |
 | `retry` | no | Default auto-retry policy for every agent worker/processor step. See [Auto-retry](#auto-retry-on-transient-failures). |
+| `modelFailover` | no | Default mid-flight model failover policy (quota / rate-limit re-routing). See [Model binding](./model-binding.md#configuring-mid-flight-model-failover). |
+| `fallbackModels` | no | Default failover model queries appended to every agent-backed step's candidate chain. |
 | `maxCostUsd` | no | Whole-workflow USD budget. The engine stops scheduling new steps once the run's cost reaches it; the run ends `budget-exceeded` and is resumable after raising the cap. See [Cost budgets](./cost-and-budgets.md). |
 
 ## Phase fields
@@ -117,8 +119,11 @@ Required fields: `prompt`, plus a **model binding** in one of these forms:
 | `agent` + `modelClass` | `"agent": "codex", "modelClass": "thinker"` | Resolves the class onto that agent's catalog. |
 
 Optional fields: `fallbackModels` (ordered failover queries tried when the
-primary agent is unavailable or a transient provider failure triggers model
-failover on retry), `cwd`, `env`, `extraArgs`, `effort`, `forEach`, `retry`,
+primary agent is unavailable or a capacity / transient provider failure
+triggers mid-flight model failover on retry), `modelFailover` (per-step policy
+for quota / rate-limit re-routing — see
+[Model binding](./model-binding.md#configuring-mid-flight-model-failover)),
+`cwd`, `env`, `extraArgs`, `effort`, `forEach`, `retry`,
 `maxCostUsd` (per-step USD budget for `forEach` fan-outs — see
 [Cost budgets](./cost-and-budgets.md)),
 `output` (see [Structured step outputs](#structured-step-outputs-output)),
@@ -1235,12 +1240,19 @@ on by default.
 A failure is retried only when the agent **did no observable work** — a
 transport/spawn error or a crash that happened *before the agent completed a turn
 and before it invoked any tool*. A step is **never** auto-retried if it ran to
-completion and reported an error (`isError`), or if it had already started using
-tools when it failed — either case may have made changes (commits, edits, API
-calls). Cancellations, gates, distributors, and consolidators are never
+completion and reported an ordinary logic error (`isError`), or if it had already
+started using tools when it failed — either case may have made changes (commits,
+edits, API calls). Cancellations, gates, distributors, and consolidators are never
 auto-retried. This is deliberately conservative: in practice it retries spawn
-failures and immediate transport/rate-limit errors, not failures that occur once
-the agent is underway.
+failures and immediate transport errors, not failures that occur once the agent
+is underway.
+
+**Capacity exception (mid-flight model failover):** quota / billing exhaustion
+and rate-limit failures are often reported as a completed error turn. Those are
+still eligible to **walk the model failover chain** (`fallbackModels`, same-family
+remaps, workflow-level fallbacks) under `modelFailover` (enabled by default) so a
+quota run-out does not ruin the workflow. Same-model retries are skipped for
+quota; see [Model binding](./model-binding.md#runtime-failover).
 
 Set a default for the whole workflow with the top-level `retry` field, and/or
 override it per step. Every field is optional; unset fields fall back through the
