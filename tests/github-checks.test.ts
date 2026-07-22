@@ -3,6 +3,7 @@ import {
   type PullRequestCheckSnapshot,
   evaluatePullRequestChecks,
   mergePullRequestWhenReady,
+  normalizeCheckState,
   parsePullRequestRef,
   parseStatusCheckRollup,
   resolveSteamtrainCliInvocation,
@@ -20,6 +21,20 @@ function snap(
     ...over,
   };
 }
+
+describe("normalizeCheckState", () => {
+  it("trims, uppercases, and maps hyphens to underscores", () => {
+    expect(normalizeCheckState(" in-progress ")).toBe("IN_PROGRESS");
+    expect(normalizeCheckState("timed_out")).toBe("TIMED_OUT");
+    expect(normalizeCheckState("success")).toBe("SUCCESS");
+  });
+
+  it("maps unknown / empty values to UNKNOWN", () => {
+    expect(normalizeCheckState(undefined)).toBe("UNKNOWN");
+    expect(normalizeCheckState("")).toBe("UNKNOWN");
+    expect(normalizeCheckState("not-a-real-state")).toBe("UNKNOWN");
+  });
+});
 
 describe("parsePullRequestRef", () => {
   it("accepts numbers, URLs, and number\\nbranch fixture lines", () => {
