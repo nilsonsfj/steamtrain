@@ -169,11 +169,12 @@ export function WorkflowInputForm({
       if (!field) return;
 
       const choices = choicesForField(field, modelSuggestions, agentSuggestions);
+      const hasExplicitChoices = Boolean(field.spec.choices && field.spec.choices.length > 0);
       const isChoiceField =
         field.type === "boolean" ||
         field.type === "enum" ||
-        (field.type === "agent" && choices.length > 0) ||
-        (field.type === "model" && field.spec.choices && field.spec.choices.length > 0);
+        hasExplicitChoices ||
+        (field.type === "agent" && choices.length > 0);
 
       if (editing && field.type === "boolean") {
         if (input === "y" || input === "1") {
@@ -185,17 +186,16 @@ export function WorkflowInputForm({
         } else if (key.backspace || key.delete) {
           updateFocused("");
           setEditing(false);
+        } else if (key.return && field.value) {
+          setEditing(false);
+          handleSubmit();
         }
         return;
       }
 
       if (key.tab && !key.shift) {
         // Tab completes model/agent free-text; otherwise advances field.
-        if (
-          !editing &&
-          (field.type === "model" || field.type === "agent") &&
-          !(field.spec.choices && field.spec.choices.length > 0)
-        ) {
+        if (!editing && (field.type === "model" || field.type === "agent") && !hasExplicitChoices) {
           const pool = field.type === "model" ? modelSuggestions : agentSuggestions;
           const matches = filterSuggestions(pool, field.value);
           if (matches.length === 1 && matches[0] !== field.value) {
@@ -239,7 +239,12 @@ export function WorkflowInputForm({
 
       if (key.return) {
         if (field.type === "boolean") {
-          setEditing(true);
+          // Empty → enter y/n edit; already set → submit the form.
+          if (!field.value) {
+            setEditing(true);
+            return;
+          }
+          handleSubmit();
           return;
         }
         if (isChoiceField && !field.value && choices.length > 0) {
@@ -250,8 +255,8 @@ export function WorkflowInputForm({
         return;
       }
 
-      if (isChoiceField && field.type !== "model") {
-        // For enum/agent with choices: typing a digit picks 1-based index
+      if (isChoiceField) {
+        // Constrained pickers: typing a digit picks 1-based index.
         if (/^[1-9]$/.test(input)) {
           const idx = Number(input) - 1;
           if (choices[idx] !== undefined) updateFocused(choices[idx]!);
@@ -315,11 +320,13 @@ export function WorkflowInputForm({
         <Text color="gray">
           {editing
             ? "y/n toggle · Backspace clear · Esc cancel"
-            : focused?.type === "model" || focused?.type === "agent"
-              ? "Tab complete · ←→ cycle · Enter submit · Esc cancel"
-              : focused?.type === "enum"
-                ? "←→ cycle · 1-9 pick · Enter submit · Esc cancel"
-                : "Tab field · Enter edit/submit · Esc cancel"}
+            : focused?.type === "enum" || (focused?.spec.choices && focused.spec.choices.length > 0)
+              ? "←→ cycle · 1-9 pick · Enter submit · Esc cancel"
+              : focused?.type === "model" || focused?.type === "agent"
+                ? "Tab complete · Enter submit · Esc cancel"
+                : focused?.type === "boolean"
+                  ? "Enter edit empty / submit set · Esc cancel"
+                  : "Tab field · Enter edit/submit · Esc cancel"}
         </Text>
       </Box>
 
@@ -335,6 +342,7 @@ export function WorkflowInputForm({
             field.spec.default !== undefined ? `default: ${String(field.spec.default)}` : "";
           const hint = typeHint(field.type);
           const fieldChoices = choicesForField(field, modelSuggestions, agentSuggestions);
+          const fieldHasChoices = Boolean(field.spec.choices && field.spec.choices.length > 0);
 
           return (
             <Box key={field.key} flexDirection="column" marginBottom={1}>
@@ -367,6 +375,7 @@ export function WorkflowInputForm({
                     )}
                   </Text>
                 ) : field.type === "enum" ||
+                  fieldHasChoices ||
                   (field.type === "agent" && field.spec.choices?.length) ? (
                   <Text color={isFocused ? "cyan" : "white"}>
                     {field.value ? (
