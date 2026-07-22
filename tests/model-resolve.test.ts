@@ -3,6 +3,7 @@ import {
   AGENT_PREFERENCE_ORDER,
   clearModelFamilyCacheForTests,
   compactModelQuery,
+  familyForProviderModel,
   findModelFamily,
   nativeModelForProvider,
   normalizeModelQuery,
@@ -65,6 +66,19 @@ describe("nativeModelForProvider", () => {
     expect(nativeModelForProvider("kiro", "opus")).toBe("claude-opus-4.8");
     expect(nativeModelForProvider("kiro", "claude-haiku-4-5")).toBe("claude-haiku-4.5");
     expect(nativeModelForProvider("kiro", "claude-opus-4-8")).toBe("claude-opus-4.8");
+  });
+
+  it("maps Claude/GPT aliases onto mimo's opencode-fork prefixed ids", () => {
+    clearModelFamilyCacheForTests();
+    expect(nativeModelForProvider("mimo", "sonnet")).toBe("mimo/claude-sonnet-5");
+    expect(nativeModelForProvider("mimo", "opus 4.8")).toBe("mimo/claude-opus-4-8");
+    expect(nativeModelForProvider("mimo", "gpt-5.5")).toBe("mimo/gpt-5.5");
+  });
+
+  it("resolves the mimo-v2.5-free default model back to its family", () => {
+    clearModelFamilyCacheForTests();
+    expect(nativeModelForProvider("mimo", "mimo-v2.5-free")).toBe("mimo/mimo-v2.5-free");
+    expect(familyForProviderModel("mimo", "mimo/mimo-v2.5-free")?.id).toBe("mimo-v2.5-free");
   });
 });
 

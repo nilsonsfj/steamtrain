@@ -611,6 +611,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     name: "MiMo V2.5 Free",
     aliases: ["mimo", "mimo free", "mimo-v2.5-free", "opencode/mimo-v2.5-free"],
     reference: { provider: "opencode", modelId: "opencode/mimo-v2.5-free" },
+    also: { mimo: ["mimo/mimo-v2.5-free"] },
     classes: ["simple", "balanced"],
   },
   {
