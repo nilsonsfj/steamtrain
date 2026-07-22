@@ -377,4 +377,65 @@ describe("WorkflowInputForm", () => {
     // Should still have focus indicator
     expect(frame).toContain("▶");
   });
+
+  it("labels model and enum fields and shows fallback hint", async () => {
+    const spec = makeSpec({
+      coderModel: {
+        type: "model",
+        description: "Primary coder",
+        default: "mimo",
+        fallbackModels: ["flash", "north"],
+      },
+      timing: {
+        type: "enum",
+        choices: ["live", "end"],
+        default: "end",
+      },
+    });
+    const { stdin, lastFrame } = render(
+      <WorkflowInputForm
+        spec={spec}
+        width={100}
+        height={24}
+        modelSuggestions={["mimo", "flash", "north", "opus 4.8"]}
+        agentSuggestions={["claude", "opencode"]}
+        onSubmit={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    await tick();
+    let frame = lastFrame() ?? "";
+    expect(frame).toContain("(model)");
+    expect(frame).toContain("(enum)");
+    expect(frame).toContain("fallback: flash → north");
+    // Move focus to the enum field to surface its choices.
+    stdin.write("\t");
+    await tick();
+    frame = lastFrame() ?? "";
+    expect(frame).toContain("1:live");
+    expect(frame).toContain("2:end");
+  });
+
+  it("Tab-completes model suggestions", async () => {
+    const onSubmit = vi.fn();
+    const spec = makeSpec({
+      coderModel: { type: "model" },
+    });
+    const { stdin } = render(
+      <WorkflowInputForm
+        spec={spec}
+        width={80}
+        height={20}
+        modelSuggestions={["opencode/mimo-v2.5-free", "opencode/deepseek-v4-flash-free"]}
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />,
+    );
+    await type(stdin, "opencode/m");
+    await type(stdin, "\t");
+    await type(stdin, "\r");
+    expect(onSubmit).toHaveBeenCalledWith({
+      coderModel: "opencode/mimo-v2.5-free",
+    });
+  });
 });

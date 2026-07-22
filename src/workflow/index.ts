@@ -25,7 +25,11 @@ export {
   type StepResult,
   type ValidationResult,
   type WorkflowInputSpec,
+  type WorkflowInputType,
   type ResolvedInputs,
+  WORKFLOW_INPUT_TYPES,
+  workflowInputType,
+  isStringLikeInputType,
   workflowSpecSchema,
   validateWorkflow,
   resolveInputs,
@@ -443,9 +447,16 @@ export {
   type ResolveWorkflowBindingsOptions,
   type ResolveWorkflowBindingsResult,
   type StepBindingResolution,
+  mergeFallbackModels,
   resolveStepFailoverChain,
   resolveWorkflowBindings,
 } from "./resolve-bindings";
+export {
+  effectiveFallbackModelsForStep,
+  fallbackModelsFromInputRefs,
+  inputKeysReferencedInTemplate,
+  mergeFallbackModelLists,
+} from "./input-params";
 export {
   type RerunMode,
   type RerunPlan,

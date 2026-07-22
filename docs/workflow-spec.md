@@ -79,11 +79,73 @@ execution behavior. **Examples:** [`workflow-examples.md`](workflow-examples.md)
 | --- | --- | --- |
 | `name` | no in `steamtrain.json` | Launch name. The map key is injected as `name`. |
 | `description` | no | Human-readable picker/list text. |
+| `inputs` | no | Named typed parameters (`{{inputs.<key>}}`). See [Workflow inputs](#workflow-inputs). |
 | `phases` | yes | Ordered list of workflow phases. |
 | `retry` | no | Default auto-retry policy for every agent worker/processor step. See [Auto-retry](#auto-retry-on-transient-failures). |
 | `modelFailover` | no | Default mid-flight model failover policy (quota / rate-limit re-routing). See [Model binding](./model-binding.md#configuring-mid-flight-model-failover). |
 | `fallbackModels` | no | Default failover model queries appended to every agent-backed step's candidate chain. |
 | `maxCostUsd` | no | Whole-workflow USD budget. The engine stops scheduling new steps once the run's cost reaches it; the run ends `budget-exceeded` and is resumable after raising the cap. See [Cost budgets](./cost-and-budgets.md). |
+
+## Workflow inputs
+
+Named parameters make one workflow serve many runs. Declare them under
+`inputs`; users supply values with `--param key=value`, the TUI form, or the
+web Variables panel. Templates read them as `{{inputs.<key>}}`.
+
+| field | required | meaning |
+| --- | --- | --- |
+| `type` | no | `"string"` (default), `"number"`, `"boolean"`, `"model"`, `"agent"`, or `"enum"`. |
+| `description` | no | Help text shown in UIs. |
+| `default` | no | Value when the user omits the param (makes the input optional). |
+| `required` | no | Force a value. Defaults to `true` when there is no `default`, else `false`. |
+| `choices` | for `enum` | Allowed values. Also optional on `string` / `model` / `agent` to constrain the picker. |
+| `fallbackModels` | no | Only on `type: "model"`. Ordered failover queries inherited by every step whose `model` template references this input. |
+
+### Model and agent parameters
+
+`type: "model"` and `type: "agent"` are what unlock catalog autocomplete in the
+TUI (Tab) and web Variables form (datalist / select). Pair a model input with
+`fallbackModels` so quota exhaustion mid-run walks a safety net instead of
+failing the step:
+
+```jsonc
+{
+  "inputs": {
+    "coderModel": {
+      "type": "model",
+      "default": "opencode/mimo-v2.5-free",
+      "fallbackModels": [
+        "opencode/deepseek-v4-flash-free",
+        "opencode/north-mini-code-free"
+      ]
+    },
+    "issueTiming": {
+      "type": "enum",
+      "choices": ["live", "end"],
+      "default": "end"
+    }
+  },
+  "phases": [
+    {
+      "id": "build",
+      "title": "Build",
+      "steps": [
+        {
+          "id": "implement",
+          "agent": "opencode",
+          "model": "{{inputs.coderModel}}",
+          "prompt": "Implement {{input}}"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Failover precedence for a step: **input `fallbackModels`** (from referenced
+model params) → **step `fallbackModels`** → **workflow `fallbackModels`**.
+See [Model binding](./model-binding.md#configuring-mid-flight-model-failover)
+for the mid-flight policy knobs (`modelFailover`).
 
 ## Phase fields
 

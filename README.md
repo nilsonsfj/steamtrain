@@ -649,8 +649,13 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
   (`thinker` | `ultrathinker` | `implementer` | `reviewer` | `deep-reviewer` |
   `simple` | `balanced`). Optional
   `fallbackModels` lists failover queries; optional `modelFailover` configures
-  mid-flight re-routing on quota / rate-limit errors. See
-  [`docs/model-binding.md`](docs/model-binding.md). Agents:
+  mid-flight re-routing on quota / rate-limit errors. Workflow `inputs` may use
+  `type: "model"` / `"agent"` / `"enum"` for catalog autocomplete, and a
+  model input's own `fallbackModels` are inherited by steps that reference it
+  via `{{inputs.<key>}}`. See
+  [`docs/model-binding.md`](docs/model-binding.md) and
+  [`docs/workflow-spec.md#workflow-inputs`](docs/workflow-spec.md#workflow-inputs).
+  Agents:
   `claude` | `opencode` | `codex` | `cursor` | `antigravity` | `amp` | `kiro`.
   Also optional: `cwd` (the **target** dir; relative paths resolve against the
   launch cwd), `env` (extra vars), and `extraArgs` (extra CLI flags).

@@ -589,4 +589,67 @@ describe("mid-flight model failover on capacity errors", () => {
     expect(calls.map((c) => c.model)).toContain("claude-haiku-4-5");
     expect(cache.get("a")?.output).toBe("haiku-ok");
   });
+
+  it("inherits fallbackModels from a model-typed input referenced by {{inputs.*}}", async () => {
+    const calls: Array<{ agent: string; model: string }> = [];
+    const deps = modelScriptedDeps(
+      {
+        "claude::primary-from-input": [{ kind: "quota-result" }],
+        "claude::claude-sonnet-5": [{ kind: "ok", text: "from-input-fallback" }],
+      },
+      calls,
+    );
+    const spec: WorkflowSpec = {
+      name: "failover-input-param",
+      description: "d",
+      inputs: {
+        coderModel: {
+          type: "model",
+          default: "primary-from-input",
+          fallbackModels: ["claude-sonnet-5"],
+        },
+      },
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            {
+              id: "a",
+              kind: "worker",
+              agent: "claude",
+              model: "{{inputs.coderModel}}",
+              prompt: "do work",
+              retry: fastRetry,
+              modelFailover: { failoverDelayMs: 1 },
+            },
+          ],
+        },
+      ],
+    };
+    const events: WorkflowEvent[] = [];
+    let ok: boolean | undefined;
+    const cache = new Map<string, StepResult>();
+    for await (const ev of runWorkflow(
+      spec,
+      { input: "in", inputs: { coderModel: "primary-from-input" }, cache },
+      deps,
+    )) {
+      events.push(ev);
+      if (ev.kind === "workflow_done") ok = ev.ok;
+    }
+    expect(ok).toBe(true);
+    expect(calls.map((c) => `${c.agent}/${c.model}`)).toEqual([
+      "claude/primary-from-input",
+      "claude/claude-sonnet-5",
+    ]);
+    expect(cache.get("a")?.output).toBe("from-input-fallback");
+    const retry = events.find((e) => e.kind === "step_retry");
+    expect(retry?.kind).toBe("step_retry");
+    if (retry?.kind === "step_retry") {
+      expect(retry.failover?.fromModel).toBe("primary-from-input");
+      expect(retry.failover?.toModel).toBe("claude-sonnet-5");
+      expect(retry.failover?.failureKind).toBe("quota");
+    }
+  });
 });

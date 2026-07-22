@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { AgentInstanceId, ApiInstanceId, TokenUsage } from "../types/events";
+import { type WorkflowInputType, isStringLikeInputType, workflowInputType } from "./input-params";
 import type { ModelFailoverPolicy } from "./model-failover";
 import type { RetryPolicy } from "./retry";
 import type { JsonSchema } from "./structured";
@@ -7,6 +8,9 @@ import type { JsonSchema } from "./structured";
 // module imports lintTemplateRefs from template.ts. Both modules are fully
 // initialized before any cross-referenced function is called at runtime.
 import { lintTemplateRefs } from "./template";
+
+export type { WorkflowInputType } from "./input-params";
+export { WORKFLOW_INPUT_TYPES, workflowInputType, isStringLikeInputType } from "./input-params";
 
 /**
  * The declarative workflow model. A `WorkflowSpec` is a sequence of phases.
@@ -824,10 +828,22 @@ export interface WorkflowPhase {
  * Declares a named input parameter for a workflow. Users supply values via
  * `--param key=value` (CLI) or the input form (TUI/web). Templates reference
  * the resolved value as `{{inputs.key}}`.
+ *
+ * Typed parameters unlock richer UIs: `model` and `agent` get catalog
+ * autocomplete, `enum` renders as a fixed picker. A `model` input may also
+ * declare `fallbackModels` so steps that use `model: "{{inputs.<key>}}"`
+ * automatically inherit a quota / rate-limit failover chain — the run keeps
+ * going when the primary model is exhausted.
  */
 export interface WorkflowInputSpec {
-  /** Expected type (default `"string"`). */
-  type?: "string" | "number" | "boolean";
+  /**
+   * Expected type (default `"string"`).
+   * - `string` / `number` / `boolean` — classic typed params
+   * - `model` — agent model id or friendly alias; UIs offer catalog autocomplete
+   * - `agent` — configured agent instance id; UIs offer the agent picker
+   * - `enum` — one of `choices` (required when type is `enum`)
+   */
+  type?: WorkflowInputType;
   /** Human-readable description shown in UIs and help text. */
   description?: string;
   /** Default value when the user omits this input. */
@@ -837,6 +853,22 @@ export interface WorkflowInputSpec {
    * is omitted, `false` when `default` is set.
    */
   required?: boolean;
+  /**
+   * Constrained set of allowed values. Required when `type` is `"enum"`.
+   * Optional for `"string"` / `"model"` / `"agent"` to restrict the picker
+   * (and reject other values at resolve time).
+   */
+  choices?: string[];
+  /**
+   * Ordered failover model queries used when a step's `model` template
+   * references this input (`model: "{{inputs.<key>}}"`). On quota /
+   * rate-limit / transient failures the engine walks these before the step's
+   * and workflow's own `fallbackModels`, so picking a different primary at
+   * run time does not strand the run without a safety net.
+   *
+   * Only valid when `type` is `"model"`.
+   */
+  fallbackModels?: string[];
 }
 
 export interface WorkflowSpec {
@@ -1212,12 +1244,39 @@ const workspaceShape = {
   artifacts: z.array(z.string().min(1)).min(1).optional(),
 };
 
-const workflowInputSpecSchema = z.object({
-  type: z.enum(["string", "number", "boolean"]).optional(),
-  description: z.string().optional(),
-  default: z.union([z.string(), z.number(), z.boolean()]).optional(),
-  required: z.boolean().optional(),
-});
+const workflowInputSpecSchema = z
+  .object({
+    type: z.enum(["string", "number", "boolean", "model", "agent", "enum"]).optional(),
+    description: z.string().optional(),
+    default: z.union([z.string(), z.number(), z.boolean()]).optional(),
+    required: z.boolean().optional(),
+    choices: z.array(z.string().min(1)).min(1).optional(),
+    fallbackModels: z.array(z.string().min(1)).min(1).optional(),
+  })
+  .superRefine((input, ctx) => {
+    const type = input.type ?? "string";
+    if (type === "enum" && (!input.choices || input.choices.length === 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'input type "enum" requires a non-empty choices array',
+        path: ["choices"],
+      });
+    }
+    if (input.fallbackModels && type !== "model") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'fallbackModels is only valid on inputs with type "model"',
+        path: ["fallbackModels"],
+      });
+    }
+    if (input.choices && (type === "number" || type === "boolean")) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `choices is not valid on inputs with type "${type}"`,
+        path: ["choices"],
+      });
+    }
+  });
 
 const retryPolicySchema = z.object({
   maxAttempts: z.number().int().min(1).max(10).optional(),
@@ -1783,7 +1842,25 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
           error: `input name '${name}' is not a valid identifier (use letters, digits, underscores, hyphens; must start with a letter or underscore)`,
         };
       }
-      const inputType = input.type ?? "string";
+      const inputType = workflowInputType(input);
+      if (inputType === "enum" && (!input.choices || input.choices.length === 0)) {
+        return {
+          ok: false,
+          error: `input '${name}' declares type "enum" but has no choices`,
+        };
+      }
+      if (input.fallbackModels && inputType !== "model") {
+        return {
+          ok: false,
+          error: `input '${name}' declares fallbackModels but type is "${inputType}" (only type "model" may declare fallbackModels)`,
+        };
+      }
+      if (input.choices && (inputType === "number" || inputType === "boolean")) {
+        return {
+          ok: false,
+          error: `input '${name}' declares choices but type is "${inputType}"`,
+        };
+      }
       if (input.default !== undefined) {
         if (inputType === "number" && typeof input.default !== "number") {
           return {
@@ -1797,10 +1874,21 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
             error: `input '${name}' declares type "boolean" but default is not a boolean`,
           };
         }
-        if (inputType === "string" && typeof input.default !== "string") {
+        if (isStringLikeInputType(inputType) && typeof input.default !== "string") {
           return {
             ok: false,
-            error: `input '${name}' declares type "string" but default is not a string`,
+            error: `input '${name}' declares type "${inputType}" but default is not a string`,
+          };
+        }
+        if (
+          input.choices &&
+          input.choices.length > 0 &&
+          typeof input.default === "string" &&
+          !input.choices.includes(input.default)
+        ) {
+          return {
+            ok: false,
+            error: `input '${name}' default '${input.default}' is not one of choices [${input.choices.join(", ")}]`,
           };
         }
       }
@@ -2275,9 +2363,10 @@ export function resolveInputs(spec: WorkflowSpec, params: Record<string, string>
 
   for (const [name, input] of Object.entries(specInputs)) {
     const raw = params[name];
-    const inputType = input.type ?? "string";
+    const inputType = workflowInputType(input);
     const hasDefault = input.default !== undefined;
     const required = input.required ?? !hasDefault;
+    const choices = input.choices;
 
     if (raw === undefined || raw === "") {
       if (hasDefault) {
@@ -2308,6 +2397,15 @@ export function resolveInputs(spec: WorkflowSpec, params: Record<string, string>
         errors.push(`input '${name}' expects a boolean (true/false), got '${raw}'`);
       }
     } else {
+      // string | model | agent | enum — all store as string
+      if (inputType === "enum" && (!choices || choices.length === 0)) {
+        errors.push(`input '${name}' declares type "enum" but has no choices`);
+        continue;
+      }
+      if (choices && choices.length > 0 && !choices.includes(raw)) {
+        errors.push(`input '${name}' expects one of [${choices.join(", ")}], got '${raw}'`);
+        continue;
+      }
       values[name] = raw;
     }
   }
