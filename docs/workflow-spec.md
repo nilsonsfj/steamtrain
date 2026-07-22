@@ -692,6 +692,13 @@ Semantics:
   (snapshotting your dirty state), so a command that writes files never touches
   your checkout — and a later `merge` step can harvest what it wrote. The
   worktree is recorded on the result like any agent step's.
+- Every command step receives `STEAMTRAIN_CLI` in its environment, pointing at
+  the live steamtrain entrypoint (`bun src/index.tsx` / `node dist/index.js` /
+  the installed bin). Use it to call helpers like
+  `${STEAMTRAIN_CLI:-steamtrain} workflow pr merge-when-ready "{{inputs.pr}}"`
+  so babysit-style land steps wait for every GitHub status check (including
+  non-required external reviews) before merging and deleting the remote head
+  branch. See `workflow pr --help` and the bundled `babysit-pr` workflow.
 
 A typical trustworthy fix loop:
 

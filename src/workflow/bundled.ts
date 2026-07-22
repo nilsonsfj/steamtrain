@@ -1190,6 +1190,210 @@ const mainline: WorkflowSpec = {
   ],
 };
 
+/**
+ * Per-PR babysit pipeline invoked by `babysit-all-prs`. The agent prepares the
+ * PR (rebase, address comments, push) but is FORBIDDEN from merging or deleting
+ * the remote branch — a deterministic `merge-when-ready` command step waits for
+ * EVERY GitHub status check (including non-required external review bots) and
+ * only then merges. That closes the race where a remote review dies with
+ * `fatal: couldn't find remote ref <branch>` because the head was deleted while
+ * it was still queued.
+ */
+const babysitPr: WorkflowSpec = {
+  name: "babysit-pr",
+  description:
+    "Prepare one open GitHub PR (rebase, review comments, conflicts), wait for every CI/status check including external reviews, then merge only when green.",
+  inputs: {
+    pr: {
+      description: "PR number, URL, head branch, or a 'number\\nbranch' line.",
+    },
+    babysitterModel: {
+      type: "model",
+      description: "Agent model that prepares the PR (does not merge).",
+      default: FREE.deepseekFlash,
+      fallbackModels: [FREE.mimo, FREE.northMini],
+    },
+    checksTimeoutSec: {
+      type: "number",
+      description: "Max seconds to wait for all PR status checks before giving up.",
+      default: 1800,
+    },
+    land: {
+      type: "enum",
+      description:
+        'After checks are green: "merge" the PR (default), or "report" readiness without merging.',
+      choices: ["merge", "report"],
+      default: "merge",
+    },
+    mergeStrategy: {
+      type: "enum",
+      description: "gh pr merge strategy used when land=merge.",
+      choices: ["squash", "merge", "rebase"],
+      default: "squash",
+    },
+  },
+  phases: [
+    {
+      id: "prepare",
+      title: "Prepare the PR (do not land)",
+      steps: [
+        {
+          id: "prepare",
+          kind: "processor",
+          agent: "opencode",
+          model: "{{inputs.babysitterModel}}",
+          prompt:
+            "You are babysitting GitHub pull request {{inputs.pr}} in this repository.\n\n" +
+            "Goals (in order):\n" +
+            "1. Inspect the PR with the gh CLI (`gh pr view`, `gh pr diff`, `gh api` for review comments / threads).\n" +
+            "2. Rebase or update onto the base branch when behind; resolve conflicts.\n" +
+            "3. Address or clearly document every unresolved review comment / CI failure you can fix in-scope. Push commits to the PR head branch.\n" +
+            "4. Leave a short summary of what you did and what (if anything) is still blocking.\n\n" +
+            "HARD RULES — a later deterministic step lands the PR:\n" +
+            "- Do NOT run `gh pr merge`, enable auto-merge, or otherwise merge the PR.\n" +
+            "- Do NOT delete the remote head branch (`git push --delete`, `gh pr merge --delete-branch`, repo branch cleanup).\n" +
+            "- Do NOT close the PR.\n" +
+            "Merging while CI or an external automated review is still queued deletes the remote ref those jobs need and makes them fail with 'couldn't find remote ref'. Waiting and landing is handled for you.\n\n" +
+            "GitHub's 'mergeable' flag is NOT sufficient readiness — pending non-required checks (remote review bots especially) still need the branch.",
+        },
+      ],
+    },
+    {
+      id: "land",
+      title: "Wait for every check, then land",
+      steps: [
+        {
+          id: "wait-or-merge",
+          kind: "command",
+          dependsOn: ["prepare"],
+          // Longer than checksTimeoutSec default (1800) so the step wall-clock
+          // does not kill the waiter first. Cmd templates are intentional —
+          // same class of warning as mainline's {{inputs.testCmd}}.
+          stepTimeoutSec: 2400,
+          // STEAMTRAIN_CLI is injected by the engine so this works under
+          // `bun src/index.tsx` without a global install. Fallback to PATH.
+          when: { value: "{{inputs.land}}", equals: "merge" },
+          cmd:
+            '${STEAMTRAIN_CLI:-steamtrain} workflow pr merge-when-ready "{{inputs.pr}}" ' +
+            "--timeout-sec {{inputs.checksTimeoutSec}} --strategy {{inputs.mergeStrategy}}",
+        },
+        {
+          id: "wait-only",
+          kind: "command",
+          dependsOn: ["prepare"],
+          stepTimeoutSec: 2400,
+          when: { value: "{{inputs.land}}", equals: "report" },
+          cmd:
+            '${STEAMTRAIN_CLI:-steamtrain} workflow pr wait-checks "{{inputs.pr}}" ' +
+            "--timeout-sec {{inputs.checksTimeoutSec}}",
+        },
+      ],
+    },
+  ],
+};
+
+/**
+ * Fan out `babysit-pr` across every open PR. Listing is agent-driven (gh CLI);
+ * landing is not — see `babysit-pr` for the wait-then-merge contract.
+ */
+const babysitAllPrs: WorkflowSpec = {
+  name: "babysit-all-prs",
+  description:
+    "List every open GitHub PR and, for each one in parallel, rebase/fix review comments, wait for every CI and external review check to finish, then merge only when green.",
+  inputs: {
+    babysitterModel: {
+      type: "model",
+      description: "Agent model that lists PRs and prepares each one (does not merge).",
+      default: FREE.deepseekFlash,
+      fallbackModels: [FREE.mimo, FREE.northMini],
+    },
+    checksTimeoutSec: {
+      type: "number",
+      description: "Per-PR max seconds to wait for all status checks.",
+      default: 1800,
+    },
+    land: {
+      type: "enum",
+      description:
+        'After checks are green: "merge" each PR (default), or "report" readiness without merging.',
+      choices: ["merge", "report"],
+      default: "merge",
+    },
+    mergeStrategy: {
+      type: "enum",
+      description: "gh pr merge strategy used when land=merge.",
+      choices: ["squash", "merge", "rebase"],
+      default: "squash",
+    },
+  },
+  phases: [
+    {
+      id: "list",
+      title: "List open pull requests",
+      steps: [
+        {
+          id: "list-prs",
+          kind: "distributor",
+          agent: "opencode",
+          model: "{{inputs.babysitterModel}}",
+          itemsPath: "prs",
+          prompt:
+            "You are in a checkout of the current project. List all OPEN (non-draft) pull requests on GitHub using the gh CLI, e.g. " +
+            "`gh pr list --state open --json number,headRefName,isDraft --limit 200`.\n\n" +
+            "Skip drafts. Do not merge, close, or modify any PR.\n\n" +
+            'End your reply with JSON matching: { "prs": ["123", "456"] } — each entry a PR number as a string. Use an empty array when there are no open non-draft PRs.',
+          output: {
+            type: "object",
+            required: ["prs"],
+            properties: {
+              prs: {
+                type: "array",
+                items: { type: "string" },
+              },
+            },
+          },
+        },
+      ],
+    },
+    {
+      id: "babysit",
+      title: "Babysit each PR",
+      steps: [
+        {
+          id: "babysit",
+          kind: "workflow",
+          workflow: "babysit-pr",
+          dependsOn: ["list-prs"],
+          forEach: "steps.list-prs.items",
+          input: "babysit PR {{item}}",
+          params: {
+            pr: "{{item}}",
+            babysitterModel: "{{inputs.babysitterModel}}",
+            checksTimeoutSec: "{{inputs.checksTimeoutSec}}",
+            land: "{{inputs.land}}",
+            mergeStrategy: "{{inputs.mergeStrategy}}",
+          },
+        },
+      ],
+    },
+    {
+      id: "summary",
+      title: "Summarize",
+      steps: [
+        {
+          id: "report",
+          kind: "consolidator",
+          dependsOn: ["babysit"],
+          prompt:
+            "Babysit-all-PRs run complete.\n\n" +
+            "Open PRs considered:\n{{steps.list-prs.items}}\n\n" +
+            "Per-PR results:\n{{steps.babysit.output}}",
+        },
+      ],
+    },
+  ],
+};
+
 /** name → spec. Merged under any user `workflows` from steamtrain.json. */
 export const BUNDLED_WORKFLOWS: Record<string, WorkflowSpec> = {
   [tour.name]: tour,
@@ -1200,4 +1404,6 @@ export const BUNDLED_WORKFLOWS: Record<string, WorkflowSpec> = {
   [quickTriage.name]: quickTriage,
   [mainlineStream.name]: mainlineStream,
   [mainline.name]: mainline,
+  [babysitPr.name]: babysitPr,
+  [babysitAllPrs.name]: babysitAllPrs,
 };

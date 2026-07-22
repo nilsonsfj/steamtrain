@@ -69,11 +69,13 @@ describe("bundled workflows", () => {
   // `{{inputs.testCmd}}` in `cmd` on purpose — running the user's declared
   // test command IS the step's job (mirrors `init`'s generated test-check
   // steps, which embed the same detected command as a literal; see the doc
-  // comment above `mainlineStream` in bundled.ts). Every OTHER bundled
-  // workflow, and every other step in these two, must validate with zero
-  // warnings.
-  const EXPECTED_CMD_WARNING =
+  // comment above `mainlineStream` in bundled.ts). `babysit-pr` similarly
+  // embeds PR/land inputs into `workflow pr …` command steps on purpose.
+  // Every OTHER bundled workflow must validate with zero warnings.
+  const EXPECTED_TESTCMD_WARNING =
     /is a command step whose cmd embeds template data \(\{\{inputs\.testCmd\}\}\)/;
+  const EXPECTED_BABYSIT_WARNING =
+    /is a command step whose cmd embeds template data \(\{\{inputs\.(pr|checksTimeoutSec|mergeStrategy)\}\}\)/;
 
   it("mainline and mainline-stream validate with only the declared testCmd warning", () => {
     for (const name of ["mainline", "mainline-stream"]) {
@@ -81,13 +83,35 @@ describe("bundled workflows", () => {
       const result = validateWorkflow(spec);
       expect(result.ok, `${name}: ${result.error ?? ""}`).toBe(true);
       expect(result.warnings, `${name} warnings`).toHaveLength(1);
-      expect(result.warnings![0]).toMatch(EXPECTED_CMD_WARNING);
+      expect(result.warnings![0]).toMatch(EXPECTED_TESTCMD_WARNING);
+    }
+  });
+
+  it("babysit-pr validates with only the declared land-command template warnings", () => {
+    const spec = BUNDLED_WORKFLOWS["babysit-pr"]!;
+    const result = validateWorkflow(spec);
+    expect(result.ok, `babysit-pr: ${result.error ?? ""}`).toBe(true);
+    expect(result.warnings?.length, "babysit-pr warnings").toBe(2);
+    for (const warning of result.warnings ?? []) {
+      expect(warning).toMatch(EXPECTED_BABYSIT_WARNING);
+    }
+  });
+
+  it("babysit-all-prs and remaining bundled workflows validate cleanly", () => {
+    // tour / mainline* / babysit-pr intentionally embed templates in command
+    // cmds (flagged by lintTemplateRefs). Everything else must stay clean.
+    const expectedWarnings = new Set(["tour", "mainline", "mainline-stream", "babysit-pr"]);
+    for (const [name, spec] of Object.entries(BUNDLED_WORKFLOWS)) {
+      if (expectedWarnings.has(name)) continue;
+      const result = validateWorkflow(spec);
+      expect(result.ok, `${name}: ${result.error ?? ""}`).toBe(true);
+      expect(result.warnings ?? [], `${name} warnings`).toEqual([]);
     }
   });
 
   it("declare model-typed inputs with catalog fallbackModels", () => {
     const known = new Set(OPENCODE_MODELS.map((m) => m.id));
-    for (const name of ["mainline", "mainline-stream"]) {
+    for (const name of ["mainline", "mainline-stream", "babysit-pr", "babysit-all-prs"]) {
       const spec = BUNDLED_WORKFLOWS[name]!;
       const modelInputs = Object.entries(spec.inputs ?? {}).filter(
         ([, inp]) => inp.type === "model",

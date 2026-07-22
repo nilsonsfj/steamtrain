@@ -76,6 +76,7 @@ import {
   worktreeDiff,
 } from "./workflow";
 import { loadWorkflowCatalog, workflowCatalogEntries } from "./workflow";
+import { runPrCommand } from "./workflow/pr-cli";
 import { loadWorkspaceConfig } from "./workspace";
 
 export interface GlobalCliOptions {
@@ -312,6 +313,8 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
       return runHistoryCommand(rest, cwd, out, err);
     case "worktrees":
       return runWorktreesCommand(rest, cwd, out, err);
+    case "pr":
+      return runPrCommand(rest, io, out, err);
     case "costs":
     case "cost":
       return runCostsCommand(rest, cwd, out, err);
@@ -1538,6 +1541,8 @@ Usage:
   steamtrain workflow history clear [<id>]
   steamtrain workflow worktrees [list]
   steamtrain workflow worktrees prune [--run <id>] [--older-than <days>] [--all] [--force] [--dry-run]
+  steamtrain workflow pr wait-checks <pr> [--timeout-sec <n>] [--poll-sec <n>] [--empty-grace-sec <n>] [--json]
+  steamtrain workflow pr merge-when-ready <pr> [--timeout-sec <n>] [--strategy squash|merge|rebase] [--keep-branch] [--json]
   steamtrain workflow costs [--workflow <name>] [--json]
 
 init checks agent readiness (with copy-paste fixes), detects this repo's real
@@ -1581,7 +1586,10 @@ prune' garbage-collects them — stale entries by default, wider with
 --older-than/--run/--all; unharvested work is protected unless --force. To
 harvest changes automatically instead, end the workflow with a "merge" step
 (optionally with "cleanup": true to discard source worktrees after delivery;
-see docs/workflow-spec.md).
+see docs/workflow-spec.md). To land an EXISTING open GitHub PR after CI and
+external reviews finish, use 'workflow pr wait-checks' / 'workflow pr
+merge-when-ready' (or the bundled babysit-pr / babysit-all-prs workflows) —
+never let an agent merge while status checks are still pending.
 
 Set 'maxCostUsd' on a workflow (or a forEach step) to cap spend: the engine stops
 scheduling new steps once the cap is reached, records the run as budget-exceeded,

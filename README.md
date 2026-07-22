@@ -587,6 +587,8 @@ Workflow documentation:
 | `quick-triage` | Splits a request into concerns, assesses each in parallel, and gates on a typed verdict — built entirely on direct-API `llm` steps: no agent CLI needed, just `ANTHROPIC_API_KEY`. |
 | `mainline` | Plans independent execution streams, fans each out to `mainline-stream` in its own worktree, merges via `mode: "worktree"` with agent conflict resolution, runs one final review/fix/test loop on the merge, opens a PR (or leaves a branch), and files out-of-scope findings as GitHub issues (or a report). See [docs/mainline-pipeline.md](docs/mainline-pipeline.md). |
 | `mainline-stream` | The per-stream pipeline `mainline` fans out to: implement in a worktree, then loop review → fix → test (via `workspace: "attach:"`, so each iteration sees the previous one's fixes) until clean. Standalone-runnable. |
+| `babysit-pr` | Prepare one open GitHub PR (rebase, review comments), then deterministically wait for every CI/status check - including non-required external reviews - and merge only when green. Agents never merge or delete the remote branch. |
+| `babysit-all-prs` | List every open PR and fan each out to `babysit-pr` in parallel, then summarize. |
 
 ### Defining your own
 

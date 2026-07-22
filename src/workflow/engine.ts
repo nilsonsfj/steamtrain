@@ -29,6 +29,7 @@ import { addTokens } from "./cost";
 import type { WorkflowEvent } from "./events";
 import type { StepRetryEvent } from "./events";
 import { mergeConflictGuidance } from "./gc";
+import { resolveSteamtrainCliInvocation } from "./github-checks";
 import {
   HUMAN_INPUT_MAX_ATTEMPTS,
   HUMAN_INPUT_PROMPT_CAP,
@@ -2881,7 +2882,12 @@ async function executeCommandStep(
     );
     const run = await runShellCommand(cmd, {
       cwd: workspace.cwd,
-      env: step.env,
+      env: {
+        // So bundled babysit command steps can re-invoke this process without
+        // requiring a global `steamtrain` install (`bun src/index.tsx` / node dist).
+        STEAMTRAIN_CLI: resolveSteamtrainCliInvocation(),
+        ...step.env,
+      },
       timeoutMs: timeoutMsFromSec(timeoutSec),
       signal: ctx.signal,
       onChunk: (text) => {
