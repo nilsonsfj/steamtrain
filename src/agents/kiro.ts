@@ -7,17 +7,30 @@ import { firstLine } from "./util";
 const AGENT: AgentId = "kiro";
 
 /**
- * Known Kiro models. Catalog may lag the live CLI (`kiro-cli chat --list-models`);
- * `auto` is always available. Claude aliases match common Kiro Pro model names.
+ * Known Kiro models. Ids must match `kiro-cli chat --list-models` exactly —
+ * Kiro rejects Claude-style short aliases (`haiku` / `sonnet` / `opus`) and
+ * dash-versioned ids (`claude-haiku-4-5`); it expects dotted forms
+ * (`claude-haiku-4.5`). Catalog may still lag the live CLI.
  */
 export const KIRO_MODELS: readonly AgentModel[] = [
   { id: "auto", name: "Auto" },
-  { id: "sonnet", name: "Sonnet (latest)" },
-  { id: "opus", name: "Opus (latest)" },
-  { id: "haiku", name: "Haiku (latest)" },
   { id: "claude-sonnet-5", name: "Claude Sonnet 5" },
-  { id: "claude-opus-4-8", name: "Claude Opus 4.8" },
-  { id: "claude-haiku-4-5", name: "Claude Haiku 4.5" },
+  { id: "claude-opus-4.8", name: "Claude Opus 4.8" },
+  { id: "gpt-5.6-sol", name: "GPT-5.6 Sol" },
+  { id: "gpt-5.6-terra", name: "GPT-5.6 Terra" },
+  { id: "gpt-5.6-luna", name: "GPT-5.6 Luna" },
+  { id: "claude-opus-4.7", name: "Claude Opus 4.7" },
+  { id: "claude-opus-4.6", name: "Claude Opus 4.6" },
+  { id: "claude-sonnet-4.6", name: "Claude Sonnet 4.6" },
+  { id: "claude-opus-4.5", name: "Claude Opus 4.5" },
+  { id: "claude-sonnet-4.5", name: "Claude Sonnet 4.5" },
+  { id: "claude-sonnet-4", name: "Claude Sonnet 4" },
+  { id: "claude-haiku-4.5", name: "Claude Haiku 4.5" },
+  { id: "deepseek-3.2", name: "DeepSeek 3.2" },
+  { id: "minimax-m2.5", name: "MiniMax M2.5" },
+  { id: "minimax-m2.1", name: "MiniMax M2.1" },
+  { id: "glm-5", name: "GLM-5" },
+  { id: "qwen3-coder-next", name: "Qwen3 Coder Next" },
 ];
 
 /**
@@ -166,7 +179,7 @@ export async function* runKiroProcess(params: RunKiroProcessParams): AsyncGenera
 export class KiroCliAdapter implements AgentAdapter {
   readonly id: AgentId = AGENT;
   readonly binary: string;
-  readonly defaultModel = "sonnet";
+  readonly defaultModel = "claude-sonnet-5";
 
   constructor(binary = "kiro-cli") {
     this.binary = binary;

@@ -184,8 +184,17 @@ function stripContextSuffix(model: string): string {
   return model.replace(/\[1m\]$/, "");
 }
 
+/**
+ * Normalize Claude-family version separators so Kiro's dotted ids
+ * (`claude-opus-4.8`) share effort tables with Claude's dash ids
+ * (`claude-opus-4-8`).
+ */
+function normalizeClaudeVersionId(model: string): string {
+  return stripContextSuffix(model).replace(/(\d)\.(\d)/g, "$1-$2");
+}
+
 function claudeEfforts(model: string): readonly string[] {
-  const m = stripContextSuffix(model);
+  const m = normalizeClaudeVersionId(model);
 
   if (m === "opus" || m === "best" || m === "opusplan") {
     return CLAUDE_OPUS_48_47_EFFORTS;

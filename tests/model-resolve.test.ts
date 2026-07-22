@@ -57,6 +57,15 @@ describe("nativeModelForProvider", () => {
     expect(nativeModelForProvider("opencode", "opus 4.8")).toBe("opencode/claude-opus-4-8");
     expect(nativeModelForProvider("codex", "gpt 5.5")).toBe("gpt-5.5");
   });
+
+  it("maps Claude aliases onto kiro-cli dotted ids (not short aliases)", () => {
+    clearModelFamilyCacheForTests();
+    expect(nativeModelForProvider("kiro", "haiku")).toBe("claude-haiku-4.5");
+    expect(nativeModelForProvider("kiro", "sonnet")).toBe("claude-sonnet-5");
+    expect(nativeModelForProvider("kiro", "opus")).toBe("claude-opus-4.8");
+    expect(nativeModelForProvider("kiro", "claude-haiku-4-5")).toBe("claude-haiku-4.5");
+    expect(nativeModelForProvider("kiro", "claude-opus-4-8")).toBe("claude-opus-4.8");
+  });
 });
 
 describe("resolveModelBinding", () => {

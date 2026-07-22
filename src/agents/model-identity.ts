@@ -128,7 +128,9 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     also: {
       claude: ["opus", "opus[1m]", "claude-opus-4-8[1m]"],
       opencode: ["opencode/claude-opus-4-8"],
-      kiro: ["opus", "claude-opus-4-8"],
+      // Kiro uses dotted version ids (`claude-opus-4.8`), not Claude dashes
+      // or short aliases (`opus` / `haiku`).
+      kiro: ["claude-opus-4.8"],
       cursor: ["claude-opus-4-8-thinking-high"],
     },
     classes: ["deep-reviewer", "reviewer", "thinker"],
@@ -141,6 +143,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     also: {
       claude: ["claude-opus-4-7[1m]"],
       opencode: ["opencode/claude-opus-4-7"],
+      kiro: ["claude-opus-4.7"],
     },
     classes: ["thinker"],
   },
@@ -151,6 +154,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     reference: { provider: "claude", modelId: "claude-opus-4-6" },
     also: {
       opencode: ["opencode/claude-opus-4-6"],
+      kiro: ["claude-opus-4.6"],
       antigravity: [
         "claude-opus-4-6",
         "claude-opus-4-6-thinking",
@@ -165,7 +169,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     name: "Claude Opus 4.5",
     aliases: ["opus 4.5", "opus-4.5", "claude opus 4.5", "claude-opus-4-5", "claude-opus-4.5"],
     reference: { provider: "claude", modelId: "claude-opus-4-5" },
-    also: { opencode: ["opencode/claude-opus-4-5"] },
+    also: { opencode: ["opencode/claude-opus-4-5"], kiro: ["claude-opus-4.5"] },
     classes: ["thinker"],
   },
   {
@@ -176,7 +180,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     also: {
       claude: ["sonnet", "sonnet[1m]", "claude-sonnet-5[1m]"],
       opencode: ["opencode/claude-sonnet-5"],
-      kiro: ["sonnet", "claude-sonnet-5"],
+      kiro: ["claude-sonnet-5"],
       cursor: ["claude-sonnet-5-high"],
     },
     classes: ["implementer", "balanced"],
@@ -195,6 +199,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     also: {
       claude: ["claude-sonnet-4-6[1m]"],
       opencode: ["opencode/claude-sonnet-4-6"],
+      kiro: ["claude-sonnet-4.6"],
       antigravity: [
         "claude-sonnet-4-6",
         "claude-sonnet-4-6-thinking",
@@ -215,7 +220,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
       "claude-sonnet-4.5",
     ],
     reference: { provider: "claude", modelId: "claude-sonnet-4-5" },
-    also: { opencode: ["opencode/claude-sonnet-4-5"] },
+    also: { opencode: ["opencode/claude-sonnet-4-5"], kiro: ["claude-sonnet-4.5"] },
     classes: ["implementer", "balanced"],
   },
   {
@@ -233,7 +238,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     also: {
       claude: ["haiku", "claude-haiku-4-5-20251001"],
       opencode: ["opencode/claude-haiku-4-5"],
-      kiro: ["haiku", "claude-haiku-4-5"],
+      kiro: ["claude-haiku-4.5"],
     },
     classes: ["simple"],
   },
@@ -254,6 +259,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     also: {
       opencode: ["opencode/gpt-5.6-sol"],
       cursor: ["gpt-5.6-sol"],
+      kiro: ["gpt-5.6-sol"],
     },
     classes: ["ultrathinker", "deep-reviewer", "thinker", "reviewer"],
   },
@@ -262,7 +268,11 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     name: "GPT-5.6 Terra",
     aliases: ["gpt 5.6 terra", "gpt-5.6-terra", "gpt5.6terra"],
     reference: { provider: "codex", modelId: "gpt-5.6-terra" },
-    also: { opencode: ["opencode/gpt-5.6-terra"], cursor: ["gpt-5.6-terra"] },
+    also: {
+      opencode: ["opencode/gpt-5.6-terra"],
+      cursor: ["gpt-5.6-terra"],
+      kiro: ["gpt-5.6-terra"],
+    },
     classes: ["implementer", "balanced", "reviewer"],
   },
   {
@@ -270,7 +280,11 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     name: "GPT-5.6 Luna",
     aliases: ["gpt 5.6 luna", "gpt-5.6-luna", "gpt5.6luna"],
     reference: { provider: "codex", modelId: "gpt-5.6-luna" },
-    also: { opencode: ["opencode/gpt-5.6-luna"], cursor: ["gpt-5.6-luna"] },
+    also: {
+      opencode: ["opencode/gpt-5.6-luna"],
+      cursor: ["gpt-5.6-luna"],
+      kiro: ["gpt-5.6-luna"],
+    },
     classes: ["thinker", "balanced", "simple"],
   },
   {

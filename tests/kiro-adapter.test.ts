@@ -12,7 +12,7 @@ import type { AgentEvent } from "../src/types/events";
 
 describe("buildKiroExecArgs", () => {
   it("builds headless chat argv with prompt last (no --print)", () => {
-    const args = buildKiroExecArgs({ prompt: "do a thing", model: "sonnet" });
+    const args = buildKiroExecArgs({ prompt: "do a thing", model: "claude-sonnet-5" });
     expect(args).toEqual([
       "chat",
       "--no-interactive",
@@ -20,7 +20,7 @@ describe("buildKiroExecArgs", () => {
       "--wrap",
       "never",
       "--model",
-      "sonnet",
+      "claude-sonnet-5",
       "--",
       "do a thing",
     ]);
@@ -29,7 +29,11 @@ describe("buildKiroExecArgs", () => {
   });
 
   it("appends --effort when provided", () => {
-    const args = buildKiroExecArgs({ prompt: "go", model: "opus", effort: "high" });
+    const args = buildKiroExecArgs({
+      prompt: "go",
+      model: "claude-opus-4.8",
+      effort: "high",
+    });
     expect(args).toEqual([
       "chat",
       "--no-interactive",
@@ -37,7 +41,7 @@ describe("buildKiroExecArgs", () => {
       "--wrap",
       "never",
       "--model",
-      "opus",
+      "claude-opus-4.8",
       "--effort",
       "high",
       "--",
@@ -48,7 +52,7 @@ describe("buildKiroExecArgs", () => {
   it("appends extraArgs before -- / prompt (resume not wired yet)", () => {
     const args = buildKiroExecArgs({
       prompt: "--looks-like-flag",
-      model: "sonnet",
+      model: "claude-sonnet-5",
       effort: "max",
       resumeSessionId: "sess-abc",
       extraArgs: ["--agent", "reviewer"],
@@ -60,7 +64,7 @@ describe("buildKiroExecArgs", () => {
       "--wrap",
       "never",
       "--model",
-      "sonnet",
+      "claude-sonnet-5",
       "--effort",
       "max",
       "--agent",
@@ -72,7 +76,7 @@ describe("buildKiroExecArgs", () => {
   });
 
   it("omits --effort when not provided", () => {
-    const args = buildKiroExecArgs({ prompt: "go", model: "haiku" });
+    const args = buildKiroExecArgs({ prompt: "go", model: "claude-haiku-4.5" });
     expect(args).not.toContain("--effort");
   });
 });
@@ -90,8 +94,8 @@ describe("runKiroProcess", () => {
       runKiroProcess({
         id: "kiro",
         binary: "kiro-cli",
-        args: buildKiroExecArgs({ prompt: "hi", model: "sonnet" }),
-        opts: { prompt: "hi", model: "sonnet", cwd: "/tmp/demo" },
+        args: buildKiroExecArgs({ prompt: "hi", model: "claude-sonnet-5" }),
+        opts: { prompt: "hi", model: "claude-sonnet-5", cwd: "/tmp/demo" },
         runLines: async function* (opts) {
           seenOpts = opts;
           yield { kind: "line", line: "hello" };
@@ -127,7 +131,7 @@ describe("runKiroProcess", () => {
         id: "kiro",
         binary: "kiro-cli",
         args: [],
-        opts: { prompt: "hi", model: "sonnet" },
+        opts: { prompt: "hi", model: "claude-sonnet-5" },
         runLines: async function* () {
           yield {
             kind: "exit",
@@ -153,7 +157,7 @@ describe("runKiroProcess", () => {
         id: "kiro",
         binary: "kiro-cli",
         args: [],
-        opts: { prompt: "hi", model: "sonnet", timeoutMs: 5000 },
+        opts: { prompt: "hi", model: "claude-sonnet-5", timeoutMs: 5000 },
         runLines: async function* () {
           yield {
             kind: "exit",
@@ -178,7 +182,7 @@ describe("runKiroProcess", () => {
         id: "kiro",
         binary: "kiro-cli",
         args: [],
-        opts: { prompt: "hi", model: "sonnet" },
+        opts: { prompt: "hi", model: "claude-sonnet-5" },
         runLines: async function* () {
           yield {
             kind: "exit",
@@ -209,7 +213,7 @@ describe("runKiroProcess", () => {
         id: "kiro",
         binary: "kiro-cli",
         args: [],
-        opts: { prompt: "hi", model: "sonnet" },
+        opts: { prompt: "hi", model: "claude-sonnet-5" },
         runLines: async function* () {
           yield {
             kind: "exit",
@@ -234,7 +238,7 @@ describe("runKiroProcess", () => {
         id: "kiro",
         binary: "kiro-cli",
         args: [],
-        opts: { prompt: "hi", model: "sonnet" },
+        opts: { prompt: "hi", model: "claude-sonnet-5" },
         runLines: async function* () {
           yield { kind: "line", line: "" };
           yield { kind: "line", line: "   " };
