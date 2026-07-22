@@ -31,11 +31,11 @@ describe("runProcessLines signal handling", () => {
     await consumer;
     const elapsed = Date.now() - start;
 
-    // Generator exits via `killed` check — clean return, no hang.
+    // Generator exits promptly after abort and still yields an exit summary.
     expect(elapsed).toBeLessThan(2000);
   });
 
-  it("generator exits via killed flag without yielding exit event", async () => {
+  it("yields an exit event when AbortSignal fires so adapters can fail the step", async () => {
     const ac = new AbortController();
     const gen = runProcessLines({
       binary: "node",
@@ -52,13 +52,17 @@ describe("runProcessLines signal handling", () => {
     ac.abort();
     await consumer;
 
-    // The generator returned via `killed` flag — no exit event yielded.
-    expect(items.filter((i) => i.kind === "exit")).toHaveLength(0);
+    const exits = items.filter((i) => i.kind === "exit") as Extract<
+      ProcessLine,
+      { kind: "exit" }
+    >[];
+    expect(exits).toHaveLength(1);
+    expect(exits[0]!.timedOut).toBe(false);
   });
 
-  it("pre-aborted signal kills child and generator exits immediately", async () => {
+  it("pre-aborted signal yields an exit event immediately", async () => {
     // When the signal is already aborted at spawn time, startKill() fires
-    // before the generator loop starts. The generator exits via `killed`.
+    // before the generator loop starts — still surface an exit summary.
     const ac = new AbortController();
     ac.abort();
     const gen = runProcessLines({
@@ -67,8 +71,12 @@ describe("runProcessLines signal handling", () => {
       signal: ac.signal,
     });
     const items = await drain(gen);
-    // Generator exits via killed flag — no exit event.
-    expect(items.filter((i) => i.kind === "exit")).toHaveLength(0);
+    const exits = items.filter((i) => i.kind === "exit") as Extract<
+      ProcessLine,
+      { kind: "exit" }
+    >[];
+    expect(exits).toHaveLength(1);
+    expect(exits[0]!.timedOut).toBe(false);
   });
 
   it("completes promptly when the child exits on its own", async () => {
@@ -108,8 +116,26 @@ describe("runProcessLines signal handling", () => {
     await drain(gen);
     const elapsed = Date.now() - start;
 
-    // Generator exits via killed flag — prompt, no hang.
+    // Prompt exit after kill, with a timedOut exit event for adapters.
     expect(elapsed).toBeLessThan(2000);
+  });
+
+  it("yields a timedOut exit event when the timeout fires", async () => {
+    // Regression: without this exit event, runAgentProcess never emits an
+    // error and agent steps that hit stepTimeoutSec are recorded as ok:true
+    // (babysit prepare then proceeds to merge-when-ready on unfinished work).
+    const gen = runProcessLines({
+      binary: "node",
+      args: ["-e", "setTimeout(() => {}, 60_000)"],
+      timeoutMs: 100,
+    });
+    const items = await drain(gen);
+    const exits = items.filter((i) => i.kind === "exit") as Extract<
+      ProcessLine,
+      { kind: "exit" }
+    >[];
+    expect(exits).toHaveLength(1);
+    expect(exits[0]!.timedOut).toBe(true);
   });
 
   it("reports stderr from the child", async () => {

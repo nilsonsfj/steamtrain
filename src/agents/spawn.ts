@@ -172,7 +172,28 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
         if (item.kind === "exit") return;
       }
       if (finished) return;
-      if (killed) return; // kill initiated — exit so finally can clean up
+      if (killed) {
+        // Kill was initiated (timeout or AbortSignal). Surface an exit summary
+        // immediately so adapters can mark the step failed — do NOT wait for
+        // the OS `close` event, which can hang on stubborn children. Without
+        // this exit event, runAgentProcess never emits a timeout error and
+        // agent steps that hit stepTimeoutSec are wrongly recorded as ok:true.
+        if (!settled) {
+          settled = true;
+          const remainder = outBuffer.flush();
+          if (remainder && remainder.length > 0) yield { kind: "line", line: remainder };
+          yield {
+            kind: "exit",
+            code: null,
+            signal: "SIGTERM",
+            timedOut,
+            stderr: stderrAll,
+            sawStdout,
+            spawnError,
+          };
+        }
+        return;
+      }
       await waitForItem();
     }
   } finally {

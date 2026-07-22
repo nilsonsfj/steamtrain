@@ -42,12 +42,20 @@ export interface CheckRollupEntry {
   source?: string;
 }
 
+export type PullRequestMergeable = "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
+
 export interface PullRequestCheckSnapshot {
   /** PR number. */
   number: number;
   /** open | closed | merged (derived from state + mergedAt). */
   state: "open" | "closed" | "merged";
   headRefName: string;
+  /**
+   * GitHub's mergeability computation. UNKNOWN while GitHub is still
+   * calculating; CONFLICTING means the PR cannot land cleanly even if checks
+   * are green / absent.
+   */
+  mergeable?: PullRequestMergeable;
   /** ISO timestamp of the tip commit on the PR head, when known. */
   headCommittedAt?: string;
   checks: CheckRollupEntry[];
@@ -82,7 +90,6 @@ const IN_FLIGHT = new Set<CheckRollupState>([
 const FAILURE_LIKE = new Set<CheckRollupState>([
   "FAILURE",
   "ERROR",
-  "CANCELLED",
   "TIMED_OUT",
   "ACTION_REQUIRED",
   "STARTUP_FAILURE",
@@ -123,6 +130,9 @@ export function normalizeCheckState(raw: unknown): CheckRollupState {
  * Empty rollup + recent head commit → not ready (`awaiting_registration`).
  * That closes the race where a bot merges in the few seconds between push and
  * the external review check appearing in the rollup.
+ *
+ * Mergeability is checked too: CONFLICTING fails closed (even with no checks),
+ * and UNKNOWN keeps us pending so we do not race GitHub's mergeability calc.
  */
 export function evaluatePullRequestChecks(
   snapshot: PullRequestCheckSnapshot,
@@ -140,9 +150,21 @@ export function evaluatePullRequestChecks(
     };
   }
 
+  if (snapshot.mergeable === "CONFLICTING") {
+    return {
+      ready: true,
+      ok: false,
+      detail: `PR #${snapshot.number} has merge conflicts with the base branch - rebase/update the head before landing`,
+      failed: [],
+    };
+  }
+
   const now = opts.nowMs ?? Date.now();
   const graceMs = opts.emptyGraceMs ?? DEFAULT_EMPTY_GRACE_MS;
-  const checks = snapshot.checks;
+  // CANCELLED entries are almost always superseded runs (new push cancelled the
+  // previous workflow). Ignoring them avoids failing closed on stale cancels
+  // while still honoring live FAILURE / pending checks.
+  const checks = snapshot.checks.filter((c) => c.state !== "CANCELLED");
 
   if (checks.length === 0) {
     const committedAtMs = snapshot.headCommittedAt
@@ -157,6 +179,13 @@ export function evaluatePullRequestChecks(
         detail:
           `PR #${snapshot.number} has no checks in the rollup yet ` +
           `(waiting up to ${remainSec}s for CI / external review to register)`,
+      };
+    }
+    if (snapshot.mergeable === "UNKNOWN") {
+      return {
+        ready: false,
+        reason: "pending",
+        detail: `PR #${snapshot.number} has no status checks yet and mergeability is still UNKNOWN`,
       };
     }
     return {
@@ -192,6 +221,14 @@ export function evaluatePullRequestChecks(
     };
   }
 
+  if (snapshot.mergeable === "UNKNOWN") {
+    return {
+      ready: false,
+      reason: "pending",
+      detail: `PR #${snapshot.number} checks are green but mergeability is still UNKNOWN`,
+    };
+  }
+
   return {
     ready: true,
     ok: true,
@@ -218,8 +255,18 @@ interface GhPrViewJson {
   state?: string;
   mergedAt?: string | null;
   headRefName?: string;
+  mergeable?: string | null;
   statusCheckRollup?: unknown;
   commits?: unknown;
+}
+
+function normalizeMergeable(raw: unknown): PullRequestMergeable | undefined {
+  if (typeof raw !== "string" || !raw.trim()) return undefined;
+  const upper = raw.trim().toUpperCase();
+  if (upper === "MERGEABLE" || upper === "CONFLICTING" || upper === "UNKNOWN") {
+    return upper;
+  }
+  return "UNKNOWN";
 }
 
 /** Fetch a PR check snapshot via `gh pr view --json …`. */
@@ -236,7 +283,7 @@ export async function fetchPullRequestCheckSnapshot(
       "view",
       selector,
       "--json",
-      "number,state,mergedAt,headRefName,statusCheckRollup,commits",
+      "number,state,mergedAt,headRefName,mergeable,statusCheckRollup,commits",
     ],
     cwd,
     signal,
@@ -263,6 +310,7 @@ export async function fetchPullRequestCheckSnapshot(
     number,
     state,
     headRefName: typeof parsed.headRefName === "string" ? parsed.headRefName : "",
+    mergeable: normalizeMergeable(parsed.mergeable),
     headCommittedAt: latestCommitTimestamp(parsed.commits),
     checks: parseStatusCheckRollup(parsed.statusCheckRollup),
   };

@@ -1242,13 +1242,17 @@ const babysitPr: WorkflowSpec = {
           kind: "processor",
           agent: "opencode",
           model: "{{inputs.babysitterModel}}",
+          // Conflict resolution + CI fixes routinely exceed the 15m default;
+          // match the land-step budget so prepare is not cut mid-push.
+          stepTimeoutSec: 2400,
           prompt:
             "You are babysitting GitHub pull request {{inputs.pr}} in this repository.\n\n" +
             "Goals (in order):\n" +
             "1. Inspect the PR with the gh CLI (`gh pr view`, `gh pr diff`, `gh api` for review comments / threads).\n" +
-            "2. Rebase or update onto the base branch when behind; resolve conflicts.\n" +
-            "3. Address or clearly document every unresolved review comment / CI failure you can fix in-scope. Push commits to the PR head branch.\n" +
-            "4. Leave a short summary of what you did and what (if anything) is still blocking.\n\n" +
+            "2. Check out the PR head (`gh pr checkout {{inputs.pr}}`) - you are in an isolated worktree, so you MUST push every fix to the remote PR head branch.\n" +
+            "3. Rebase or update onto the base branch when behind; resolve conflicts.\n" +
+            "4. Address or clearly document every unresolved review comment / CI failure you can fix in-scope. Push commits to the PR head branch and verify `gh pr view {{inputs.pr}} --json mergeable` is MERGEABLE.\n" +
+            "5. Leave a short summary of what you did and what (if anything) is still blocking.\n\n" +
             "HARD RULES — a later deterministic step lands the PR:\n" +
             "- Do NOT run `gh pr merge`, enable auto-merge, or otherwise merge the PR.\n" +
             "- Do NOT delete the remote head branch (`git push --delete`, `gh pr merge --delete-branch`, repo branch cleanup).\n" +
@@ -1383,7 +1387,10 @@ const babysitAllPrs: WorkflowSpec = {
         {
           id: "report",
           kind: "consolidator",
-          dependsOn: ["babysit"],
+          // Depend on list-prs (not babysit) so a partial fan-out failure still
+          // produces a summary. Template refs to babysit keep scheduling order
+          // via computeEffectiveDeps without cascading the failure.
+          dependsOn: ["list-prs"],
           prompt:
             "Babysit-all-PRs run complete.\n\n" +
             "Open PRs considered:\n{{steps.list-prs.items}}\n\n" +
