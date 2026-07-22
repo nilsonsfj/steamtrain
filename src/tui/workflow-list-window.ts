@@ -17,6 +17,11 @@ export const LIST_ITEM_SPACER = 1;
 /**
  * Pick a bounded window that keeps the selected row visible. The budget includes
  * optional hidden-row markers, so callers can render without overflowing.
+ *
+ * Unit-height lists (workflow tree, history, managers) render rows back-to-back
+ * with no blank spacer, so this path must not charge {@link LIST_ITEM_SPACER} —
+ * otherwise the fixed-height host box under-fills and shows a dead gap under
+ * "↓ N later rows" while more rows could still fit.
  */
 export function selectVisibleWindow<T>(
   items: readonly T[],
@@ -27,18 +32,21 @@ export function selectVisibleWindow<T>(
     items.map((data) => ({ data, height: 1 })),
     selectedIndex,
     budget,
+    0,
   );
 }
 
 /**
- * Variable-height windowing: each item contributes its content height, plus a
- * one-row spacer between consecutive visible items. Markers cost one row each.
- * Keeps the selection on-screen and grows outward until the budget is full.
+ * Variable-height windowing: each item contributes its content height, plus an
+ * optional spacer between consecutive visible items (default
+ * {@link LIST_ITEM_SPACER}, used by the workflow picker). Markers cost one row
+ * each. Keeps the selection on-screen and grows outward until the budget is full.
  */
 export function selectVisibleWindowWeighted<T>(
   items: readonly WeightedItem<T>[],
   selectedIndex: number,
   budget: number,
+  itemSpacer: number = LIST_ITEM_SPACER,
 ): VisibleWindow<T> {
   if (items.length === 0 || budget <= 0) {
     return { visible: [], start: 0, hiddenBefore: 0, hiddenAfter: 0 };
@@ -46,6 +54,7 @@ export function selectVisibleWindowWeighted<T>(
 
   const selected = Math.min(Math.max(0, selectedIndex), items.length - 1);
   const totalBudget = Math.max(1, budget);
+  const spacer = Math.max(0, itemSpacer);
 
   // Grow from the selection outward, preferring the side with more remaining
   // items when both fit, otherwise the side that still fits.
@@ -56,7 +65,7 @@ export function selectVisibleWindowWeighted<T>(
     let cost = (hideBefore ? 1 : 0) + (hideAfter ? 1 : 0);
     for (let i = from; i < to; i += 1) {
       cost += items[i]!.height;
-      if (i > from) cost += LIST_ITEM_SPACER;
+      if (i > from) cost += spacer;
     }
     return cost;
   };

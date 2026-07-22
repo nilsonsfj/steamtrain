@@ -160,12 +160,15 @@ describe("workflow picker folders", () => {
 });
 
 describe("weighted visible window", () => {
-  it("keeps unit-weight behavior within budget (legacy callers)", () => {
+  it("keeps unit-weight behavior within budget without phantom spacers", () => {
     const window = selectVisibleWindow(["a", "b", "c", "d", "e", "f"], 4, 4);
     expect(window.visible).toContain("e");
-    expect(
-      window.visible.length + (window.hiddenBefore > 0 ? 1 : 0) + (window.hiddenAfter > 0 ? 1 : 0),
-    ).toBeLessThanOrEqual(4);
+    const used =
+      window.visible.length + (window.hiddenBefore > 0 ? 1 : 0) + (window.hiddenAfter > 0 ? 1 : 0);
+    expect(used).toBeLessThanOrEqual(4);
+    // Unit-height lists do not render blank gaps, so the window must pack
+    // rows tightly (3 rows + 1 marker for budget 4 with hidden sides).
+    expect(used).toBe(4);
   });
 
   it("accounts for multi-line item heights so the frame does not overflow", () => {
