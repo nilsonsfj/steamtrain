@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { closeSync, openSync } from "node:fs";
+import { appendFileSync, closeSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { sanitizePathComponent } from "./fs-util";
 import type { LiveRunPublisher } from "./live-run";
@@ -189,7 +189,20 @@ export async function completeQuiescedHandoff(
   options: CompleteQuiescedHandoffOptions,
 ): Promise<SpawnDetachedRunnerResult> {
   const { publisher, ...handoff } = options;
+  // #region agent log
+  appendFileSync(
+    "/opt/cursor/logs/debug.log",
+    `${JSON.stringify({ hypothesisId: "E", location: "src/workflow/handoff.ts:completeQuiescedHandoff", message: "handoff started", data: { hasPublisher: Boolean(publisher) }, timestamp: Date.now() })}\n`,
+  );
+  // #endregion
   publisher?.event({ kind: "run_resumed", by: "detach", ts: Date.now() });
   await publisher?.flush().catch(() => {});
-  return handoffRunToDetached(handoff);
+  const result = await handoffRunToDetached(handoff);
+  // #region agent log
+  appendFileSync(
+    "/opt/cursor/logs/debug.log",
+    `${JSON.stringify({ hypothesisId: "E", location: "src/workflow/handoff.ts:completeQuiescedHandoff:return", message: "handoff finished", data: { ok: result.ok, pid: result.ok ? result.pid : null }, timestamp: Date.now() })}\n`,
+  );
+  // #endregion
+  return result;
 }

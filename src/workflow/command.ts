@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { appendFileSync } from "node:fs";
 
 /**
  * Subprocess plumbing for `command` workflow steps: run one shell command,
@@ -105,6 +106,12 @@ export async function runShellCommand(
 
     const onAbort = (): void => {
       cancelled = true;
+      // #region agent log
+      appendFileSync(
+        "/opt/cursor/logs/debug.log",
+        `${JSON.stringify({ hypothesisId: "C", location: "src/workflow/command.ts:onAbort", message: "command received abort", data: { pid: child.pid ?? null, settled }, timestamp: Date.now() })}\n`,
+      );
+      // #endregion
       terminate();
     };
     opts.signal?.addEventListener("abort", onAbort, { once: true });
@@ -126,6 +133,12 @@ export async function runShellCommand(
     const finish = (exitCode: number | undefined): void => {
       if (settled) return;
       settled = true;
+      // #region agent log
+      appendFileSync(
+        "/opt/cursor/logs/debug.log",
+        `${JSON.stringify({ hypothesisId: "A,C", location: "src/workflow/command.ts:finish", message: "command settled", data: { pid: child.pid ?? null, exitCode: exitCode ?? null, timedOut, cancelled, spawnError: Boolean(spawnError) }, timestamp: Date.now() })}\n`,
+      );
+      // #endregion
       if (timer) clearTimeout(timer);
       // Clear the pending SIGKILL escalation so it can't fire after the
       // process already exited (PID/PGID-reuse window).
