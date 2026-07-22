@@ -27,8 +27,11 @@ const AGENT_FIELD_KEYS = new Set<keyof AgentRunFields>([
 
 /**
  * The agent-field subset that also exists on a direct-API `llm` step. Other
- * agent fields (`agent`, `cwd`, `env`, `extraArgs`) must never be patched onto
- * an llm step — adding an `agent` field would make it read as agent-backed.
+ * agent fields (`agent`, `cwd`, `env`, `extraArgs`, `fallbackModels`,
+ * `modelFailover`) must never be patched onto an llm step — adding an `agent`
+ * field would make it read as agent-backed, and mid-flight model failover is
+ * agent-adapter-only (`llm` steps use `callLlm` with their own HTTP retry
+ * path; see engine `retryEligible` for worker/processor).
  */
 const LLM_FIELD_KEYS = new Set<keyof AgentRunFields>([
   "model",

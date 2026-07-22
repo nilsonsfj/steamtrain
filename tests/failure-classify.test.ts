@@ -17,6 +17,18 @@ describe("classifyAgentFailure", () => {
     expect(classifyAgentFailure("insufficient_quota")).toBe("quota");
     expect(classifyAgentFailure("RESOURCE_EXHAUSTED: Budget exhausted")).toBe("quota");
     expect(classifyAgentFailure("monthly limit reached")).toBe("quota");
+    expect(classifyAgentFailure("billing limit exceeded for this project")).toBe("quota");
+    expect(classifyAgentFailure("billing error: account suspended")).toBe("quota");
+  });
+
+  it("does not treat unrelated billing wording as quota", () => {
+    expect(classifyAgentFailure("billing address is required")).toBe("unknown");
+    expect(classifyAgentFailure("update your billing address")).toBe("unknown");
+  });
+
+  it("prefers quota when a message matches both rate-limit and quota patterns", () => {
+    // Quota patterns are checked first — exhaustion is the stronger signal.
+    expect(classifyAgentFailure("rate limit exceeded: quota exhausted")).toBe("quota");
   });
 
   it("detects rate limit messages", () => {

@@ -36,7 +36,7 @@ const QUOTA_PATTERNS: RegExp[] = [
   /\bpaid credits?\b/i,
   /\bcredit(?:s)?\s+(?:exhausted|depleted|insufficient|balance)\b/i,
   /\badd credits?\b/i,
-  /\bbilling\b/i,
+  /\bbilling\s+(?:error|issue|exceeded|required|problem|limit)\b/i,
   /\bpayment (?:required|failed|due)\b/i,
   /\busage limit\b/i,
   /\b(?:spend|monthly|daily|weekly)\s+limit\b/i,

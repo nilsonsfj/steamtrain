@@ -499,4 +499,94 @@ describe("mid-flight model failover on capacity errors", () => {
     expect(calls.map((c) => c.model)).toEqual(["primary-model", "claude-sonnet-5"]);
     expect(cache.get("a")?.output).toBe("after-transport");
   });
+
+  it("does not inflate attempt budget past the resolved failover chain", async () => {
+    // Many declared fallbacks that do not resolve must not extend same-binding
+    // retries beyond maxAttempts once the chain is only the primary.
+    const calls: Array<{ agent: string; model: string }> = [];
+    const deps = modelScriptedDeps(
+      {
+        "claude::primary-model": [
+          { kind: "error", message: "transport boom" },
+          { kind: "error", message: "transport boom" },
+          { kind: "error", message: "transport boom" },
+          { kind: "error", message: "transport boom" },
+          { kind: "error", message: "transport boom" },
+        ],
+      },
+      calls,
+    );
+    const spec: WorkflowSpec = {
+      name: "budget-cap",
+      description: "d",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            {
+              id: "a",
+              kind: "worker",
+              agent: "claude",
+              model: "primary-model",
+              fallbackModels: [
+                "not-a-real-model-aaa",
+                "not-a-real-model-bbb",
+                "not-a-real-model-ccc",
+                "not-a-real-model-ddd",
+              ],
+              prompt: "do work",
+              retry: { maxAttempts: 2, initialDelayMs: 1, factor: 1, jitter: false },
+              modelFailover: { failoverDelayMs: 1 },
+            },
+          ],
+        },
+      ],
+    };
+    const { ok } = await drain(spec, deps);
+    expect(ok).toBe(false);
+    expect(calls).toHaveLength(2); // capped at maxAttempts, not 1+4 declared
+  });
+
+  it("extends the budget enough to walk a short maxAttempts across resolved fallbacks", async () => {
+    const calls: Array<{ agent: string; model: string }> = [];
+    const deps = modelScriptedDeps(
+      {
+        "claude::primary-model": [{ kind: "quota-result" }],
+        // Family remaps of haiku may appear before the reference id; keep them failing.
+        "claude::claude-haiku-4-5-20251001": [{ kind: "quota-result" }],
+        "claude::haiku": [{ kind: "quota-result" }],
+        "claude::claude-haiku-4-5": [{ kind: "ok", text: "haiku-ok" }],
+      },
+      calls,
+    );
+    const spec: WorkflowSpec = {
+      name: "walk-chain",
+      description: "d",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            {
+              id: "a",
+              kind: "worker",
+              agent: "claude",
+              model: "primary-model",
+              fallbackModels: ["claude-haiku-4-5"],
+              prompt: "do work",
+              // Without budget extension, maxAttempts:1 would never leave primary.
+              retry: { maxAttempts: 1, initialDelayMs: 1, factor: 1, jitter: false },
+              modelFailover: { failoverDelayMs: 1 },
+            },
+          ],
+        },
+      ],
+    };
+    const { ok, cache } = await drain(spec, deps);
+    expect(ok).toBe(true);
+    expect(calls.length).toBeGreaterThan(1);
+    expect(calls.map((c) => c.model)).toContain("claude-haiku-4-5");
+    expect(cache.get("a")?.output).toBe("haiku-ok");
+  });
 });

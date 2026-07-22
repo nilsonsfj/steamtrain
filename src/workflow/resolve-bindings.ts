@@ -42,7 +42,13 @@ export interface ResolveWorkflowBindingsOptions {
   workflowFallbackModels?: string[];
 }
 
-function mergeFallbackModels(
+/**
+ * Merge step-level and workflow-level fallback model queries.
+ * Step entries win on collision; dedup is case-insensitive on the trimmed
+ * string (model aliases like `Sonnet 5` / `sonnet 5` collapse) while the
+ * first-seen spelling is preserved for the resolver.
+ */
+export function mergeFallbackModels(
   stepFallbacks: string[] | undefined,
   workflowFallbacks: string[] | undefined,
 ): string[] | undefined {
@@ -51,6 +57,8 @@ function mergeFallbackModels(
   const seen = new Set<string>();
   const out: string[] = [];
   for (const entry of [...stepFallbacks, ...workflowFallbacks]) {
+    // Case-insensitive dedup: model queries are matched that way by the
+    // family/catalog resolver. Keep the first spelling (step before workflow).
     const key = entry.trim().toLowerCase();
     if (!key || seen.has(key)) continue;
     seen.add(key);

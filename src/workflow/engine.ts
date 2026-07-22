@@ -2082,14 +2082,19 @@ async function executeAgentStep(
     0,
     failover.findIndex((c) => c.agent === step.agent && c.model === step.model),
   );
-  // Keep the author's retry budget as the hard cap. When they also declared
-  // explicit fallbackModels (step or workflow), extend the budget so a short
-  // maxAttempts cannot strand later fallbacks after an early quota failure.
+  // Extend the attempt budget only when the author declared explicit
+  // fallbackModels (step or workflow) — automatic same-family remaps must not
+  // inflate retries for plain pinned steps. When fallbacks *are* declared,
+  // cap the extension at the *resolved* chain length so unresolved queries
+  // cannot burn same-binding attempts after the real candidate list ends,
+  // while still leaving room for family remaps that sit between declared
+  // fallbacks in the resolved order.
   const explicitFallbackCount =
     (step.fallbackModels?.length ?? 0) + (ctx.workflowFallbackModels?.length ?? 0);
+  const remainingInChain = Math.max(1, failover.length - failoverIndex);
   const attemptBudget =
-    failoverPolicy.enabled && explicitFallbackCount > 0
-      ? Math.max(policy.maxAttempts, 1 + explicitFallbackCount)
+    failoverPolicy.enabled && explicitFallbackCount > 0 && remainingInChain > 1
+      ? Math.max(policy.maxAttempts, remainingInChain)
       : policy.maxAttempts;
 
   try {

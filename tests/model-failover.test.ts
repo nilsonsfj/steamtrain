@@ -120,6 +120,26 @@ describe("shouldAdvanceFailover / fail-fast", () => {
     ).toBe(true);
   });
 
+  it("does not advance capacity failures when preferNextModel is false", () => {
+    expect(
+      shouldAdvanceFailover(resolveModelFailoverPolicy({ preferNextModel: false }), {
+        kind: "quota",
+        hasNextCandidate: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not advance bare unknown without classicRetryable (even with on: any)", () => {
+    // `"any"` lets unknown past the trigger gate, but unknown is not a
+    // switch-worthy kind unless it was a clean classic transport failure.
+    expect(
+      shouldAdvanceFailover(resolveModelFailoverPolicy({ on: ["any"] }), {
+        kind: "unknown",
+        hasNextCandidate: true,
+      }),
+    ).toBe(false);
+  });
+
   it("does not advance when disabled or no candidate", () => {
     expect(
       shouldAdvanceFailover(resolveModelFailoverPolicy({ enabled: false }), {

@@ -180,15 +180,14 @@ export function shouldAdvanceFailover(
   },
 ): boolean {
   if (!policy.enabled || !opts.hasNextCandidate) return false;
-  const kind =
-    opts.classicRetryable && (opts.kind === "unknown" || opts.kind === "transient")
-      ? "transient"
-      : opts.kind;
+  // Remap unclassified classic transport → transient before trigger matching.
+  // (`"unknown"` never matches `on` unless the author set `"any"`; classic
+  // transport should still prefer a model switch under the default policy.)
+  const kind = opts.classicRetryable && opts.kind === "unknown" ? "transient" : opts.kind;
   if (!failoverTriggerMatches(policy, kind)) return false;
-  if (isCapacityFailure(kind) && policy.preferNextModel) return true;
-  // Transient / auth / classic transport: prefer switching when a next
-  // candidate exists — provider outages often survive same-agent retries.
-  return kind === "transient" || kind === "auth" || opts.classicRetryable === true;
+  if (isCapacityFailure(kind)) return policy.preferNextModel;
+  // Transient / auth: prefer switching when a next candidate exists.
+  return kind === "transient" || kind === "auth";
 }
 
 /**
