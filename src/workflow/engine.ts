@@ -1731,6 +1731,7 @@ async function runAgentAttempt(
   let failureHint: AgentFailureKind | undefined;
   let sawResult = false;
   let sawToolUse = false;
+  let processTimedOut = false;
 
   try {
     for await (const event of adapterRun(step, ctx, stepCwd, prompt, resumeSessionId)) {
@@ -1762,6 +1763,7 @@ async function runAgentAttempt(
         errorMessage ??= event.message;
         errorStderr ??= event.stderr;
         if (event.category) failureHint = event.category;
+        if (event.timedOut) processTimedOut = true;
       } else if (event.kind === "unknown") {
         // An adapter downgrades an envelope it can't parse to `unknown` rather
         // than dropping it (e.g. a malformed/future-shaped tool_use or assistant
@@ -1801,6 +1803,7 @@ async function runAgentAttempt(
     sawResult,
     sawToolUse,
     classicRetryable,
+    processTimedOut,
   });
 
   return {
@@ -2087,12 +2090,15 @@ async function executeAgentStep(
   // Failover chain: prefer the resolution captured at run start (preserves
   // authoring-time model/class intent), else recompute from the live step.
   // For templated models the start-of-run pass leaves the step as-authored,
-  // so we always recompute when input/step fallbacks are present.
+  // so we always recompute when input/step fallbacks are present — or when
+  // the step still lacks a concrete agent after model render (model-only /
+  // cross-family input pick).
   const prior = ctx.bindingResolutions.find((r) => r.stepId === step.id);
   let failover: ResolvedModelCandidate[] = prior?.candidates ?? [];
-  // Recompute when start-of-run left no chain, or when model-typed inputs
-  // contribute fallbacks that were not available until after template render.
-  if (failover.length === 0 || (inputFallbacks?.length ?? 0) > 0) {
+  // Recompute when start-of-run left no chain, when model-typed inputs
+  // contribute fallbacks that were not available until after template render,
+  // or when the rendered model still has no agent to spawn.
+  if (failover.length === 0 || (inputFallbacks?.length ?? 0) > 0 || !step.agent) {
     const live = resolveStepFailoverChain(failoverStep, {
       config: ctx.deps.agentConfig,
       isReady: (agent) => Boolean(resolveAgentInstance(ctx.deps.agentConfig, agent)),
@@ -2100,10 +2106,27 @@ async function executeAgentStep(
     });
     if (live.ok) failover = live.candidates;
   }
-  let failoverIndex = Math.max(
-    0,
-    failover.findIndex((c) => c.agent === step.agent && c.model === step.model),
-  );
+  // Align the first attempt with a runnable candidate. Templated model inputs
+  // (and mismatched agent pins like `agent: opencode` + `model: mimo/mimo-auto`)
+  // must not spawn the authored agent/model pair when the resolver already
+  // picked a different primary — otherwise we burn the first attempt on a
+  // non-runnable binding and skip the correct candidate at index 0 on advance.
+  let failoverIndex = 0;
+  if (failover.length > 0) {
+    const exact = failover.findIndex((c) => c.agent === step.agent && c.model === step.model);
+    if (exact >= 0) {
+      failoverIndex = exact;
+    } else {
+      const primary = failover[0]!;
+      activeStep = {
+        ...step,
+        agent: primary.agent,
+        model: primary.model,
+        ...(primary.effort && !step.effort ? { effort: primary.effort } : {}),
+      };
+      failoverIndex = 0;
+    }
+  }
   // Extend the attempt budget only when the author declared explicit
   // fallbackModels (input, step, or workflow) — automatic same-family remaps
   // must not inflate retries for plain pinned steps. When fallbacks *are*

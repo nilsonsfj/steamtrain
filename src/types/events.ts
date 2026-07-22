@@ -139,6 +139,12 @@ export interface ErrorEvent extends BaseEvent {
    * `quota`). The engine falls back to message heuristics when unset.
    */
   category?: AgentFailureKind;
+  /**
+   * True when the adapter killed the child for a wall-clock (or idle) timeout.
+   * The engine uses this to allow mid-flight model failover even after tool
+   * use - the process is dead, and declared `fallbackModels` should recover.
+   */
+  timedOut?: boolean;
 }
 
 /**

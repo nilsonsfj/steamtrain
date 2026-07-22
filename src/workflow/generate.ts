@@ -388,7 +388,7 @@ Example:
     "coderModel": {
       "type": "model",
       "default": "opencode/mimo-v2.5-free",
-      "fallbackModels": ["opencode/deepseek-v4-flash-free", "opencode/north-mini-code-free"]
+      "fallbackModels": ["mimo/mimo-auto", "opencode/north-mini-code-free"]
     },
     "issueTiming": { "type": "enum", "choices": ["live", "end"], "default": "end" }
   }

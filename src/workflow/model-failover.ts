@@ -127,9 +127,12 @@ export function failoverTriggerMatches(
  *
  * - Classic transient (no result, no tools) → always eligible for retry when
  *   the retry policy still has attempts.
+ * - Process wall-clock / idle timeouts → eligible even after tool use when
+ *   the kind matches `on` (default includes `transient`). The child is dead;
+ *   declared `fallbackModels` should recover instead of failing the step.
  * - Capacity reported as a completed error result → eligible when
  *   `onCapacityResult` and the kind is a configured trigger.
- * - Tool use blocks unless `allowAfterToolUse`.
+ * - Other failures after tool use block unless `allowAfterToolUse`.
  */
 export function isFailoverEligibleFailure(
   policy: ResolvedModelFailoverPolicy,
@@ -140,10 +143,19 @@ export function isFailoverEligibleFailure(
     sawToolUse: boolean;
     /** Classic transport retryable (error/throw, no result, no tools). */
     classicRetryable: boolean;
+    /**
+     * Adapter killed the agent subprocess for a wall-clock (or idle) timeout.
+     * Timeouts bypass the post-tool-use gate so mid-flight failover can walk
+     * `fallbackModels` after a hung provider (e.g. OpenCode DeepSeek free).
+     */
+    processTimedOut?: boolean;
   },
 ): boolean {
   if (opts.cancelled) return false;
-  if (opts.sawToolUse && !policy.allowAfterToolUse) return false;
+  // Tool use normally blocks failover (possible side effects), but a timed-out
+  // process is already dead — continuing on the next candidate is safer than
+  // failing the whole step when the author declared fallbacks.
+  if (opts.sawToolUse && !policy.allowAfterToolUse && !opts.processTimedOut) return false;
 
   // Clean transport failures remain retryable regardless of failover config —
   // failover itself is gated separately by {@link shouldAdvanceFailover}.
@@ -153,6 +165,7 @@ export function isFailoverEligibleFailure(
   // turn.failed, Claude result.is_error with a quota message, …).
   if (!policy.enabled) return false;
   if (!failoverTriggerMatches(policy, opts.kind)) return false;
+  if (opts.processTimedOut) return true;
   if (!opts.sawResult) {
     // Errored without a result but not classicRetryable ⇒ tools blocked us
     // above, or cancellation. Nothing left to do.
