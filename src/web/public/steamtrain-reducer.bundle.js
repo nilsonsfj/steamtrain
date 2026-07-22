@@ -1071,10 +1071,18 @@ var SteamtrainReducer = (() => {
     if (step.modelClass) return `class:${step.modelClass}`;
     return void 0;
   }
+  function stepTarget(step) {
+    return {
+      agent: "agent" in step ? step.agent : void 0,
+      model: "model" in step ? step.model : void 0,
+      modelClass: "modelClass" in step ? step.modelClass : void 0,
+      effort: "effort" in step ? step.effort : void 0
+    };
+  }
   function targetFieldsEqual(a, b) {
-    const fa = a;
-    const fb = b;
-    return fa.agent === fb.agent && fa.model === fb.model && fa.modelClass === fb.modelClass && fa.effort === fb.effort;
+    const ta = stepTarget(a);
+    const tb = stepTarget(b);
+    return ta.agent === tb.agent && ta.model === tb.model && ta.modelClass === tb.modelClass && ta.effort === tb.effort;
   }
   function collectSteps(base, effective, resolve, prefix, depth, seen, out) {
     base.phases.forEach((basePhase, pi) => {
@@ -1095,12 +1103,7 @@ var SteamtrainReducer = (() => {
           modelClass: agentBacked ? step.modelClass : void 0,
           effort: agentBacked ? step.effort : void 0,
           overridden: !targetFieldsEqual(baseStep, step),
-          base: agentBacked ? {
-            agent: baseStep.agent,
-            model: baseStep.model,
-            modelClass: baseStep.modelClass,
-            effort: baseStep.effort
-          } : void 0,
+          base: agentBacked ? stepTarget(baseStep) : void 0,
           workflow: step.kind === "workflow" ? step.workflow : void 0
         });
         if (step.kind === "workflow" && resolve && depth < MAX_WORKFLOW_NESTING_DEPTH && !seen.has(step.workflow)) {

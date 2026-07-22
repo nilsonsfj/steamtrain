@@ -4081,23 +4081,12 @@
       if (wfRunInput.value.trim() && wfRunSec > 0) spec.workflowTimeoutSec = wfRunSec; else delete spec.workflowTimeoutSec;
       spec.phases.forEach(function (p) {
         p.steps.forEach(function (st) {
-          var r = refs[st.id];
-          if (!r) return;
-          if (r.agentSel) {
-            if (r.agentSel.value) st.agent = r.agentSel.value; else delete st.agent;
-            if (r.modelSel && r.modelSel.value) st.model = r.modelSel.value; else delete st.model;
-            if (r.classSel && r.classSel.value) st.modelClass = r.classSel.value; else delete st.modelClass;
-            var ef = r.effortSel ? r.effortSel.value : "";
-            if (ef) st.effort = ef; else delete st.effort;
-          }
-          if (r.promptTa) st.prompt = r.promptTa.value;
-          if (r.stepTimeoutInput && r.stepTimeoutInput.value.trim()) {
-            var stepSec = Number(r.stepTimeoutInput.value) * 60;
-            if (stepSec > 0) st.stepTimeoutSec = stepSec; else delete st.stepTimeoutSec;
-          } else if (r.stepTimeoutInput) delete st.stepTimeoutSec;
           // Persist nested sub-workflow retargets onto this call step's own
           // `overrides` — only the ones that differ from the child's default, so
           // the saved spec stays minimal and the shared child spec is untouched.
+          // This runs BEFORE the `refs[st.id]` guard below: a `workflow` step is
+          // not agent-backed, so it has no `refs` entry of its own, but it still
+          // carries nested overrides to persist.
           if (st.kind === "workflow") {
             var ov = {};
             nestedList.forEach(function (n) {
@@ -4113,6 +4102,20 @@
             });
             if (Object.keys(ov).length) st.overrides = ov; else delete st.overrides;
           }
+          var r = refs[st.id];
+          if (!r) return;
+          if (r.agentSel) {
+            if (r.agentSel.value) st.agent = r.agentSel.value; else delete st.agent;
+            if (r.modelSel && r.modelSel.value) st.model = r.modelSel.value; else delete st.model;
+            if (r.classSel && r.classSel.value) st.modelClass = r.classSel.value; else delete st.modelClass;
+            var ef = r.effortSel ? r.effortSel.value : "";
+            if (ef) st.effort = ef; else delete st.effort;
+          }
+          if (r.promptTa) st.prompt = r.promptTa.value;
+          if (r.stepTimeoutInput && r.stepTimeoutInput.value.trim()) {
+            var stepSec = Number(r.stepTimeoutInput.value) * 60;
+            if (stepSec > 0) st.stepTimeoutSec = stepSec; else delete st.stepTimeoutSec;
+          } else if (r.stepTimeoutInput) delete st.stepTimeoutSec;
         });
       });
       saveBtn.disabled = true; saveBtn.textContent = "Saving…";

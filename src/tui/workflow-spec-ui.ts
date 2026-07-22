@@ -233,9 +233,6 @@ export function specStepRowMeta(
     // step count, override marker) rather than just the bare name — this is
     // the at-a-glance insight the sub-workflow row was missing.
     bits.push(resolve ? subWorkflowRollup(describeSubWorkflow(step, resolve)) : step.workflow);
-    if (step.forEach) {
-      /* forEach already pushed above */
-    }
     if (step.outputStep) bits.push(`out: ${step.outputStep}`);
     if (step.worktreeStep) bits.push(`worktree: ${step.worktreeStep}`);
   }

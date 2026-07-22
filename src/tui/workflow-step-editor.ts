@@ -8,6 +8,7 @@ import {
 } from "../agents";
 import type { SteamtrainConfig } from "../config";
 import {
+  MAX_WORKFLOW_NESTING_DEPTH,
   type WorkflowSpec,
   type WorkflowStep,
   applyWorkflowStepOverrides,
@@ -226,7 +227,12 @@ export function listRetargetableSteps(
         });
         continue;
       }
-      if (step.kind === "workflow" && resolve && depth < 5 && !seen.has(step.workflow)) {
+      if (
+        step.kind === "workflow" &&
+        resolve &&
+        depth < MAX_WORKFLOW_NESTING_DEPTH &&
+        !seen.has(step.workflow)
+      ) {
         const base = resolve(step.workflow);
         if (!base) continue;
         // Reflect any cascade already staged on this call step so the listed

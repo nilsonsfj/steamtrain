@@ -516,6 +516,43 @@ describe("web server", () => {
     expect(body.children?.child?.name).toBe("child");
   });
 
+  it("resolves child specs transitively (parent → child → grandchild)", async () => {
+    const grandchild: WorkflowSpec = {
+      name: "grandchild",
+      phases: [
+        {
+          id: "g",
+          title: "G",
+          steps: [{ id: "deep", agent: "opencode", model: "m", prompt: "d" }],
+        },
+      ],
+    };
+    const child: WorkflowSpec = {
+      name: "child",
+      phases: [
+        { id: "c", title: "C", steps: [{ id: "inner", kind: "workflow", workflow: "grandchild" }] },
+      ],
+    };
+    const parent: WorkflowSpec = {
+      name: "parent",
+      phases: [
+        { id: "p", title: "P", steps: [{ id: "call", kind: "workflow", workflow: "child" }] },
+      ],
+    };
+    const host: WorkflowHost = {
+      listWorkflows: () => ({ parent, child, grandchild }),
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      runWorkflow: () => (async function* () {})(),
+    };
+    const { server } = makeServer(host);
+    const base = await start(server);
+    const res = await fetch(`${base}/api/workflows/parent`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { children?: Record<string, WorkflowSpec> };
+    // Both the direct child AND the transitively-referenced grandchild ship.
+    expect(Object.keys(body.children ?? {}).sort()).toEqual(["child", "grandchild"]);
+  });
+
   it("rejects runs for unknown or undispatchable workflows", async () => {
     const { server } = makeServer(new FakeHost(demoSpec(), happyRun, false));
     const base = await start(server);

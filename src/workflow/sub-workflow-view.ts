@@ -84,14 +84,29 @@ export function formatSubWorkflowTarget(step: {
   return undefined;
 }
 
+/** The agent/model/effort target of a step, read type-safely across the union. */
+function stepTarget(step: WorkflowStep): {
+  agent?: string;
+  model?: string;
+  modelClass?: string;
+  effort?: string;
+} {
+  return {
+    agent: "agent" in step ? step.agent : undefined,
+    model: "model" in step ? step.model : undefined,
+    modelClass: "modelClass" in step ? step.modelClass : undefined,
+    effort: "effort" in step ? step.effort : undefined,
+  };
+}
+
 function targetFieldsEqual(a: WorkflowStep, b: WorkflowStep): boolean {
-  const fa = a as unknown as Record<string, unknown>;
-  const fb = b as unknown as Record<string, unknown>;
+  const ta = stepTarget(a);
+  const tb = stepTarget(b);
   return (
-    fa.agent === fb.agent &&
-    fa.model === fb.model &&
-    fa.modelClass === fb.modelClass &&
-    fa.effort === fb.effort
+    ta.agent === tb.agent &&
+    ta.model === tb.model &&
+    ta.modelClass === tb.modelClass &&
+    ta.effort === tb.effort
   );
 }
 
@@ -128,14 +143,7 @@ function collectSteps(
         modelClass: agentBacked ? step.modelClass : undefined,
         effort: agentBacked ? step.effort : undefined,
         overridden: !targetFieldsEqual(baseStep, step),
-        base: agentBacked
-          ? {
-              agent: (baseStep as { agent?: string }).agent,
-              model: (baseStep as { model?: string }).model,
-              modelClass: (baseStep as { modelClass?: string }).modelClass,
-              effort: (baseStep as { effort?: string }).effort,
-            }
-          : undefined,
+        base: agentBacked ? stepTarget(baseStep) : undefined,
         workflow: step.kind === "workflow" ? step.workflow : undefined,
       });
       if (

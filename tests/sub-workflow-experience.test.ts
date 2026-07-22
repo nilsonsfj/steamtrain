@@ -272,4 +272,41 @@ describe("workflow-call schema — overrides", () => {
     };
     expect(workflowSpecSchema.safeParse(spec).success).toBe(false);
   });
+
+  it("accepts every session-override agent field, so a staged override round-trips on save", () => {
+    // Mirrors AGENT_FIELD_KEYS: a nested override staged from the UI (which the
+    // session-override validator accepts) must also pass the strict spec schema
+    // once routed onto a workflow step's `overrides`, or save-after-stage fails.
+    const spec = {
+      name: "w",
+      phases: [
+        {
+          id: "p",
+          title: "P",
+          steps: [
+            {
+              id: "call",
+              kind: "workflow",
+              workflow: "child",
+              overrides: {
+                build: {
+                  agent: "claude",
+                  model: "opus",
+                  modelClass: "thinker",
+                  fallbackModels: ["sonnet"],
+                  modelFailover: { enabled: true },
+                  effort: "high",
+                  cwd: "sub",
+                  env: { KEY: "v" },
+                  extraArgs: ["--flag"],
+                  stepTimeoutSec: 120,
+                },
+              },
+            },
+          ],
+        },
+      ],
+    };
+    expect(workflowSpecSchema.safeParse(spec).success).toBe(true);
+  });
 });

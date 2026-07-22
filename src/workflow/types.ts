@@ -621,15 +621,18 @@ export interface WorkflowCallStep extends WorkflowStepBase {
  * A partial agent-field patch where each field may also be `null` to mean
  * "remove this field" (vs. `undefined`/absent, which means "leave unchanged").
  * This is the value shape of both session overrides and a sub-workflow call
- * step's {@link WorkflowCallStep.overrides}. The key set is exactly the
- * retargetable agent fields (no `modelFailover`/`output`, which are not part of
- * the override surface), mirroring `workflowCallOverridePatchSchema`.
+ * step's {@link WorkflowCallStep.overrides}. The key set mirrors the
+ * session-override agent fields (`AGENT_FIELD_KEYS`) and
+ * `workflowCallOverridePatchSchema` — everything an agent step can be
+ * retargeted on, but not `output` (a structured-output schema, never an
+ * override).
  */
 export interface AgentFieldOverridePatch {
   agent?: AgentRunFields["agent"];
   model?: string | null;
   modelClass?: AgentRunFields["modelClass"] | null;
   fallbackModels?: string[] | null;
+  modelFailover?: AgentRunFields["modelFailover"] | null;
   prompt?: string | null;
   effort?: string | null;
   cwd?: string | null;
@@ -1598,6 +1601,7 @@ const workflowCallOverridePatchSchema = z
     model: z.string().min(1).nullable().optional(),
     modelClass: modelClassSchema.nullable().optional(),
     fallbackModels: z.array(z.string().min(1)).min(1).nullable().optional(),
+    modelFailover: modelFailoverPolicySchema.nullable().optional(),
     prompt: z.string().min(1).nullable().optional(),
     effort: z.string().min(1).nullable().optional(),
     cwd: z.string().min(1).nullable().optional(),
