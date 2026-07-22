@@ -4,6 +4,7 @@ import { modelIdsForAgent } from "../agents";
 import { truncate } from "../agents/util";
 import { MAX_PROMPT_CHARS, type SteamtrainConfig } from "../config";
 import type { StepEditPatch } from "../workflow";
+import { shouldAcceptTextInput } from "./text-input-filter";
 import {
   EDITOR_EFFORT_NONE,
   cycleOption,
@@ -129,7 +130,7 @@ export function WorkflowRunStepEditor({
         setValue((prev) => prev.slice(0, -1));
         return;
       }
-      if (input && !key.ctrl && !key.meta) {
+      if (shouldAcceptTextInput(input, key)) {
         setValue((prev) => (prev.length >= MAX_PROMPT_CHARS ? prev : prev + input));
       }
       return;
@@ -159,7 +160,7 @@ export function WorkflowRunStepEditor({
         setValue((prev) => prev.slice(0, -1));
         return;
       }
-      if (input && !key.ctrl && !key.meta) {
+      if (shouldAcceptTextInput(input, key)) {
         setEditingText(true);
         setValue((prev) => (prev.length >= MAX_PROMPT_CHARS ? prev : prev + input));
       }

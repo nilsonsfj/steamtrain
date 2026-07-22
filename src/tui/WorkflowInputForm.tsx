@@ -2,6 +2,7 @@ import { Box, Text, useInput } from "ink";
 import { useCallback, useMemo, useState } from "react";
 import type { WorkflowInputSpec, WorkflowInputType, WorkflowSpec } from "../workflow";
 import { resolveInputs, workflowInputType } from "../workflow";
+import { shouldAcceptTextInput } from "./text-input-filter";
 
 interface Field {
   key: string;
@@ -277,7 +278,7 @@ export function WorkflowInputForm({
         updateFocused(nextVal, pool.length ? filterSuggestions(pool, nextVal).slice(0, 8) : []);
         return;
       }
-      if (input && !key.ctrl && !key.meta) {
+      if (shouldAcceptTextInput(input, key)) {
         if (field.type === "number" && !/[\d.\-eE+]/.test(input)) return;
         const nextVal = field.value + input;
         const pool =

@@ -5,6 +5,7 @@ import type { ResolvedAgentInstance } from "../agents";
 import type { AgentConfigScope, AgentInstanceConfig } from "../config/types";
 import type { DoctorResult, DoctorStatus } from "../doctor";
 import type { AgentProviderId } from "../types/events";
+import { shouldAcceptTextInput } from "./text-input-filter";
 import { STATUS_STYLE } from "./theme";
 import { selectVisibleWindow } from "./workflow-list-window";
 
@@ -212,7 +213,7 @@ export function AgentManager({
         setForm({ ...form, [fieldKey]: form[fieldKey].slice(0, -1) });
         return;
       }
-      if (input && !key.ctrl && !key.meta && !key.tab) {
+      if (shouldAcceptTextInput(input, key) && !key.tab) {
         setForm({ ...form, [fieldKey]: form[fieldKey] + input });
       }
     }

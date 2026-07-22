@@ -1,6 +1,6 @@
 import { Box, Text, useInput } from "ink";
-import TextInput from "ink-text-input";
-import { useRef } from "react";
+import { PromptTextInput } from "./PromptTextInput";
+import { shouldRejectTextInputChange } from "./text-input-filter";
 
 interface PromptInputProps {
   value: string;
@@ -28,9 +28,8 @@ interface PromptInputProps {
 }
 
 /**
- * ink-text-input still emits the letter on Ctrl+R / Ctrl+Q (and on bare-letter
- * hotkeys consumed by the app-level handler); detect that lone insert so the
- * caller can drop it.
+ * Detect a lone hotkey letter insert so callers can drop leaks from app-level
+ * useInput handlers (ink has no propagation stop between hooks).
  */
 export function isSpuriousLetterInsert(prev: string, next: string, letter: string): boolean {
   if (next.length !== prev.length + 1) return false;
@@ -62,61 +61,37 @@ export function PromptInput({
 }: PromptInputProps) {
   const slashInput = value.trimStart().startsWith("/");
   const menuOpen = (suggestions?.length ?? 0) > 1;
-  const swallowNextCharRef = useRef(false);
-  const swallowLetterRef = useRef<string | null>(null);
 
   const handleChange = (next: string) => {
-    const letter = swallowLetterRef.current;
-    if (swallowNextCharRef.current && letter && isSpuriousLetterInsert(value, next, letter)) {
-      swallowNextCharRef.current = false;
-      swallowLetterRef.current = null;
-      return;
-    }
-    swallowNextCharRef.current = false;
-    swallowLetterRef.current = null;
+    // Defense in depth: drop CSI leftovers if any path still forwards them.
+    if (shouldRejectTextInputChange(value, next)) return;
     onChange(next);
   };
 
   useInput(
     (input, key) => {
-      if (key.ctrl && input === "r" && onCtrlR) {
-        swallowNextCharRef.current = true;
-        swallowLetterRef.current = "r";
-        onCtrlR();
-      }
+      if (key.ctrl && input === "r" && onCtrlR) onCtrlR();
     },
     { isActive: focus && !!onCtrlR && !running },
   );
 
   useInput(
     (input, key) => {
-      if (key.ctrl && input === "d" && onCtrlD) {
-        swallowNextCharRef.current = true;
-        swallowLetterRef.current = "d";
-        onCtrlD();
-      }
+      if (key.ctrl && input === "d" && onCtrlD) onCtrlD();
     },
     { isActive: focus && !!onCtrlD && !running },
   );
 
   useInput(
     (input, key) => {
-      if (key.ctrl && input === "e" && onCtrlE) {
-        swallowNextCharRef.current = true;
-        swallowLetterRef.current = "e";
-        onCtrlE();
-      }
+      if (key.ctrl && input === "e" && onCtrlE) onCtrlE();
     },
     { isActive: focus && !!onCtrlE && !running },
   );
 
   useInput(
     (input, key) => {
-      if (key.ctrl && input === "q" && onCtrlQ) {
-        swallowNextCharRef.current = true;
-        swallowLetterRef.current = "q";
-        onCtrlQ();
-      }
+      if (key.ctrl && input === "q" && onCtrlQ) onCtrlQ();
     },
     { isActive: focus && !!onCtrlQ },
   );
@@ -160,7 +135,7 @@ export function PromptInput({
         <Text color={running ? "yellow" : "cyan"} bold>
           {running ? "… " : "❯ "}
         </Text>
-        <TextInput
+        <PromptTextInput
           key={cursorResetKey}
           value={value}
           onChange={handleChange}
