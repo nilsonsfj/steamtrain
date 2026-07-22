@@ -415,7 +415,6 @@ export function WorkflowView({
           <DetailPanel
             step={selected.step}
             context={detailContext}
-            contextSlots={MAX_DETAIL_CONTEXT_LINES}
             previewLines={layout.previewLines}
             width={innerWidth}
             now={now}
@@ -836,15 +835,12 @@ function buildDetailContext(step: StepState, width: number): { text: string; col
 function DetailPanel({
   step,
   context,
-  contextSlots,
   previewLines,
   width,
   now,
 }: {
   step: StepState;
   context: { text: string; color: string }[];
-  /** Reserved context rows (pads when the step has fewer). */
-  contextSlots: number;
   previewLines: number;
   width: number;
   now: number;
@@ -884,12 +880,12 @@ function DetailPanel({
   ].filter((bit): bit is string => Boolean(bit));
   const label = ` ${step.stepId} · ${BLOCK_LABEL[step.blockKind]} · ${bits.join(" · ")} `;
   const fill = Math.max(0, width - stringWidth(label) - 2);
+  // Fallback for the "no output yet" branch below (previewLines > 0, empty body).
   const emptyPreview = truncateToWidth(sanitizeActivity(step.activity) ?? displayStatus, width);
-  // Parent pins height to 1 + contextSlots + previewLines; under-fill is fine
-  // (overflow:hidden absorbs slack). Do not invent pad rows — they reintroduce
-  // layout churn and trip noArrayIndexKey for no benefit.
+  // Parent Box pins height to detailFixedBudget + previewLines; under-fill is
+  // fine (overflow:hidden absorbs slack when context/output are short).
   return (
-    <Box flexDirection="column" height={1 + contextSlots + previewLines} overflow="hidden">
+    <Box flexDirection="column">
       <Text wrap="truncate-end">
         <Text color="gray" dimColor>
           {"──"}
