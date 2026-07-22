@@ -94,7 +94,7 @@ imports it through `src/tui/workflow-state.ts`; the web bundles it as
 | Cancel a run | ✅ | ✅ | |
 | Attach to any in-flight run (cross-process) | ✅ | ✅ | Shared `.steamtrain/runs/` registry; TUI `/attach` + run browser, web Active runs panel |
 | Pause / edit / resume a live run | ✅ | ✅ | TUI `p`/`e`, web Pause + step-edit modal; cross-process via control files (`mid-run-steering.md`) |
-| Detach a running run into the background | ✅ | ✅ | TUI `d`, web **Detach**, `POST /api/runs/:id/detach`; quiesce-then-hand-off under the same id so the run survives closing the UI (`detached-runs.md`) |
+| Detach a running run into the background | ✅ | ✅ | TUI `d`, web **Detach**, `POST /api/runs/:id/detach`; abort-and-hand-off under the same id so detach is immediate and the run survives closing the UI (`detached-runs.md`) |
 | Resume from on-disk cache | ✅ | ✅ | |
 | Create workflow via LLM draft | ✅ | ✅ | Different draft-target selection (below) |
 | Choose drafting agent/model | ✅ | ✅ | TUI: `/model` + `/effort` on the picker sets a session draft override; Web: per-draft agent/model/effort selects in the create modal |

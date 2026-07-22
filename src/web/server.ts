@@ -1790,7 +1790,7 @@ async function handle(
     const runId = decodeURIComponent(detachMatch[1]!);
     const result = deps.runs.detach(runId);
     // 202: the handoff is under way; the run's SSE stream reports a `detached`
-    // frame once the child is spawned (in-flight steps finish first).
+    // frame once local work stops and the background child is spawned.
     sendJson(res, result.ok ? 202 : 404, result.ok ? { detaching: true } : { error: result.error });
     return;
   }

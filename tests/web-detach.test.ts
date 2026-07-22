@@ -21,10 +21,10 @@ import {
 } from "../src/workflow";
 
 /**
- * Mid-run detach from the web run manager: pause → quiesce → hand the run off to
- * a background process under the same id, drop it from the manager, and tell
- * subscribers to reconnect. The detached child is a no-op script here — we are
- * verifying the manager's handoff, not the real `_detached-runner`.
+ * Mid-run detach from the web run manager: abort local work, hand the run off
+ * to a background process under the same id, drop it from the manager, and
+ * tell subscribers to reconnect. The detached child is a no-op script here —
+ * we are verifying the manager's handoff, not the real `_detached-runner`.
  */
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
