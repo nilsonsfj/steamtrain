@@ -130,6 +130,14 @@ export function useWorkflowPicker({
 
     const pending = pendingSelectRef.current;
     if (pending) {
+      // If the target lives in a folded folder, open it first and keep the
+      // pending name so the next nav rebuild can land on the workflow row
+      // (mirrors the Web sidebar auto-expand on select).
+      const pendingEntry = workflowEntries.find((entry) => entry.name === pending);
+      if (pendingEntry && collapsedFolders[pendingEntry.source]) {
+        setCollapsedFolders((prev) => ({ ...prev, [pendingEntry.source]: false }));
+        return;
+      }
       const idx = indexOfWorkflowOrFallback(pickerNav, pending);
       const row = pickerNav[idx];
       if (row?.kind === "workflow" && row.entry.name === pending) {
@@ -185,7 +193,7 @@ export function useWorkflowPicker({
     // Nav stable: the user moved the highlight — refresh identity from selection.
     applyIdentity(workflowIndex);
     setWorkflowIndex((i) => Math.min(i, Math.max(0, pickerNav.length - 1)));
-  }, [pickerNav, workflowEntries, workflowIndex]);
+  }, [pickerNav, workflowEntries, workflowIndex, collapsedFolders]);
 
   const toggleSelectedFolder = useCallback(() => {
     const row = pickerNav[workflowIndex];

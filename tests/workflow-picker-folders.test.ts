@@ -33,6 +33,11 @@ describe("workflow picker folders", () => {
     entry("delta", "user", "user two"),
   ];
 
+  it("returns only the create row for an empty catalog", () => {
+    expect(groupWorkflowEntriesBySource([])).toEqual([]);
+    expect(buildWorkflowPickerNav([])).toEqual([{ kind: "create" }]);
+  });
+
   it("groups by source with project → user → bundled order", () => {
     const groups = groupWorkflowEntriesBySource(catalog);
     expect(groups.map((g) => g.source)).toEqual(["project", "user", "bundled"]);
@@ -132,6 +137,20 @@ describe("workflow picker folders", () => {
       entry: { name: "tour" },
     });
     expect(remapped).not.toBe(tourUnpinned);
+  });
+
+  it("exposes a workflow again after expanding its folded folder", () => {
+    const collapsed = buildWorkflowPickerNav(catalog, {
+      ...DEFAULT_FOLDER_COLLAPSE,
+      user: true,
+    });
+    expect(collapsed.some((row) => row.kind === "workflow" && row.entry.name === "beta")).toBe(
+      false,
+    );
+    const expanded = buildWorkflowPickerNav(catalog, DEFAULT_FOLDER_COLLAPSE);
+    expect(indexOfWorkflowOrFallback(expanded, "beta")).toBe(
+      expanded.findIndex((row) => row.kind === "workflow" && row.entry.name === "beta"),
+    );
   });
 });
 
