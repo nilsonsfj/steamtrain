@@ -1,18 +1,19 @@
 import { describe, expect, it } from "vitest";
+import { MIMO_MODELS } from "../src/agents/mimo";
 import { OPENCODE_MODELS } from "../src/agents/opencode";
 import { BUNDLED_WORKFLOWS } from "../src/workflow/bundled";
 import { validateWorkflow } from "../src/workflow/types";
 import type { WorkflowStep } from "../src/workflow/types";
 
 /** Every (agent, model) pair an agent-backed step in a bundled workflow uses. */
-function agentTargets(): { workflow: string; step: string; agent: string; model: string }[] {
-  const targets: { workflow: string; step: string; agent: string; model: string }[] = [];
+function agentTargets(): { workflow: string; step: string; agent?: string; model: string }[] {
+  const targets: { workflow: string; step: string; agent?: string; model: string }[] = [];
   for (const [workflow, spec] of Object.entries(BUNDLED_WORKFLOWS)) {
     for (const phase of spec.phases) {
       for (const step of phase.steps as WorkflowStep[]) {
         const agent = "agent" in step ? step.agent : undefined;
         const model = "model" in step ? step.model : undefined;
-        if (agent && model) targets.push({ workflow, step: step.id, agent, model });
+        if (model) targets.push({ workflow, step: step.id, agent, model });
       }
     }
   }
@@ -33,22 +34,45 @@ function resolveTemplatedModel(spec: (typeof BUNDLED_WORKFLOWS)[string], model: 
   return typeof def === "string" ? def : model;
 }
 
+const KNOWN_FREE_MODELS = new Set([
+  ...OPENCODE_MODELS.map((m) => m.id),
+  ...MIMO_MODELS.map((m) => m.id),
+]);
+
 describe("bundled workflows", () => {
   // Guards against the failure where bundled workflows referenced OpenCode free
   // models (qwen3.6-plus-free, minimax-m3-free) that OpenCode later removed,
-  // so the steps died with "Model not found". A bundled opencode step must name
-  // a model in our known catalog (or template to a default that does).
-  it("only reference opencode models in the known catalog", () => {
-    const known = new Set(OPENCODE_MODELS.map((m) => m.id));
+  // so the steps died with "Model not found". A bundled opencode/mimo step must
+  // name a model in our known catalogs (or template to a default that does).
+  it("only reference known free-model catalog ids", () => {
     const unknown = agentTargets()
-      .filter((t) => t.agent === "opencode")
       .map((t) => ({
         ...t,
         resolved: resolveTemplatedModel(BUNDLED_WORKFLOWS[t.workflow]!, t.model),
       }))
-      .filter((t) => !known.has(t.resolved))
+      .filter((t) => {
+        const provider =
+          t.agent ??
+          (t.resolved.startsWith("opencode/") || t.resolved.startsWith("opencode-go/")
+            ? "opencode"
+            : t.resolved.startsWith("mimo/") || t.resolved.startsWith("xiaomi/")
+              ? "mimo"
+              : undefined);
+        return provider === "opencode" || provider === "mimo";
+      })
+      .filter((t) => !KNOWN_FREE_MODELS.has(t.resolved))
       .map((t) => `${t.workflow}/${t.step} → ${t.model} (resolved: ${t.resolved})`);
     expect(unknown).toEqual([]);
+  });
+
+  it("prefer mimo auto over deepseek-v4-flash-free for babysit defaults", () => {
+    for (const name of ["babysit-pr", "babysit-all-prs"]) {
+      const def = BUNDLED_WORKFLOWS[name]!.inputs?.babysitterModel?.default;
+      expect(def, name).toBe("mimo/mimo-auto");
+      expect(BUNDLED_WORKFLOWS[name]!.inputs?.babysitterModel?.fallbackModels).not.toContain(
+        "opencode/deepseek-v4-flash-free",
+      );
+    }
   });
 
   it("give each parallel agent step in a phase a distinct model", () => {
@@ -110,7 +134,6 @@ describe("bundled workflows", () => {
   });
 
   it("declare model-typed inputs with catalog fallbackModels", () => {
-    const known = new Set(OPENCODE_MODELS.map((m) => m.id));
     for (const name of ["mainline", "mainline-stream", "babysit-pr", "babysit-all-prs"]) {
       const spec = BUNDLED_WORKFLOWS[name]!;
       const modelInputs = Object.entries(spec.inputs ?? {}).filter(
@@ -120,10 +143,12 @@ describe("bundled workflows", () => {
       for (const [key, inp] of modelInputs) {
         expect(inp.fallbackModels?.length, `${name}.${key} fallbackModels`).toBeGreaterThan(0);
         for (const fb of inp.fallbackModels ?? []) {
-          expect(known.has(fb), `${name}.${key} fallback ${fb}`).toBe(true);
+          expect(KNOWN_FREE_MODELS.has(fb), `${name}.${key} fallback ${fb}`).toBe(true);
         }
         if (typeof inp.default === "string") {
-          expect(known.has(inp.default), `${name}.${key} default ${inp.default}`).toBe(true);
+          expect(KNOWN_FREE_MODELS.has(inp.default), `${name}.${key} default ${inp.default}`).toBe(
+            true,
+          );
         }
       }
     }

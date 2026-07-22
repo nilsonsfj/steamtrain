@@ -90,6 +90,19 @@ describe("failover eligibility", () => {
     ).toBe(true);
   });
 
+  it("allows process timeouts after tool use so fallbackModels can recover", () => {
+    expect(
+      isFailoverEligibleFailure(policy, {
+        kind: "transient",
+        cancelled: false,
+        sawResult: false,
+        sawToolUse: true,
+        classicRetryable: false,
+        processTimedOut: true,
+      }),
+    ).toBe(true);
+  });
+
   it("never retries cancellations", () => {
     expect(
       isFailoverEligibleFailure(policy, {
