@@ -99,8 +99,12 @@ approval can be granted from any surface for any run.
   or a disambiguation list). Unambiguous id prefixes are accepted.
 - The run browser (`Ctrl+J`, `/runs`, `/history`) lists in-flight runs above
   recorded history; `Enter` on one attaches.
-- While attached, `Ctrl+Q` **detaches** (the run keeps going);
-  `/cancel-run [runId]` cancels the attached (or named) run.
+- **`d` detaches a run you started here** into a background process (see
+  [Detaching a running run](#detaching-a-running-run)) — the run survives
+  closing or relaunching the TUI; the view re-attaches so you keep watching it.
+- While attached to a run owned by another process, `Ctrl+Q` **detaches the
+  view** (the run keeps going); `/cancel-run [runId]` cancels the attached (or
+  named) run.
 - TUI-started runs are mirrored to the registry and honor the queue — the
   notice line shows `queued — position N` while waiting.
 
@@ -109,11 +113,60 @@ approval can be granted from any surface for any run.
 - An **Active runs** sidebar panel lists every queued/running run in the
   project (web-, CLI-, or TUI-owned) with queued/detached/approval badges;
   clicking one attaches: the pipeline view replays the record and tails live.
+- A **Detach** button on a run you started here hands it off to a background
+  process (see [Detaching a running run](#detaching-a-running-run)); the page
+  reconnects to the now-independent run, so it keeps going if you close the tab.
 - Cancel and Approve/Reject buttons work on attached external runs (the server
   falls back to the registry's marker/decision files).
 - `GET /api/runs` returns the merged registry;
   `GET /api/runs/:id/stream` tails externally-owned runs over SSE; a
   non-terminal `{"type":"queued","position":…}` frame reports queue waits.
+  `POST /api/runs/:id/detach` starts a mid-run handoff; the run's stream then
+  emits a non-terminal `{"type":"detaching"}` frame while in-flight steps
+  finish and a `{"type":"detached","pid":…}` frame once the background process
+  owns it (the client reconnects to the external run on that frame).
+
+## Detaching a running run
+
+`--detach` is chosen at launch, but a run you *already* started in the TUI or
+web UI can be handed off to a background process mid-flight — so you can close
+(or relaunch) the UI without stopping it. The run keeps its id; the completed
+steps are preserved; the remaining steps finish in the background.
+
+The handoff is a **quiesce-then-hand-off**, so no work is lost:
+
+1. The run is **paused** — in-flight steps run to completion and land in the
+   step cache; nothing new is scheduled.
+2. The driver waits until the engine has **quiesced** (`control.isIdle()` — no
+   step executing) or the run is parked on a human decision (an approval /
+   input does no compute). While it waits, the UI shows *"finishing in-flight
+   work…"*. A run parked on a human checkpoint hands off immediately; a run
+   with a long agent step in flight hands off once that step reaches its next
+   cached checkpoint (`step_done`).
+3. The local engine is aborted and the run's registry entry is **re-armed for a
+   detached owner** — `source: cli-detached`, back to `queued`, pid cleared,
+   pause cleared, with a `launch` block — then a background child is spawned
+   (`workflow _detached-runner <runId>`, exactly the `--detach` path). It
+   acquires a run slot, replays the cache (completed steps come back instantly),
+   and continues the rest.
+4. The launching UI **re-attaches** to the now-detached run, so you keep
+   watching it live; closing the UI now leaves it running.
+
+Because the completed steps are cached and the approval/human-input results are
+never cached (they always re-ask on resume), the background process picks up
+exactly where the foreground left off. The paused-to-quiesce transition is
+balanced by a synthetic `run_resumed` in the mirrored stream so a fresh
+attach doesn't render the live run as stuck-paused.
+
+- **TUI:** press **`d`** while a run you own is on screen (the status bar shows
+  `d detach`). Detaching a run that's already owned by another process is a
+  no-op — it already survives the TUI.
+- **Web:** click **Detach** on a run you started in this session. Attached
+  external runs (already independent) don't show the button.
+
+Only the process that owns a run can detach it (the engine runs in-memory);
+this is a UI/CLI action, not a cross-process one — from another terminal you
+cancel or steer the run, you don't hand it off.
 
 ## The queue (`maxParallelRuns`)
 
@@ -156,6 +209,9 @@ approval can be granted from any surface for any run.
   companion; all the hooks (terminal meta, pending-approval state) exist.
 - Scheduled runs (`workflow schedule --cron`) — Part 3 of the roadmap,
   unblocked by the detached runner.
-- TUI/web "detach a run I started here into a background process" — today
-  detach is chosen at launch (`--detach`); in-process runs still end with
-  their owning process (they are attachable and cancelable while it lives).
+
+## Done since
+
+- TUI/web "detach a run I started here into a background process" — shipped;
+  see [Detaching a running run](#detaching-a-running-run). Detach is no longer
+  only a launch-time choice.

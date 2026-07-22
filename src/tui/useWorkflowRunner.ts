@@ -21,6 +21,7 @@ import {
   WORKFLOW_HISTORY_DIR,
   WORKFLOW_RUNS_DIR,
   acquireRunSlot,
+  completeQuiescedHandoff,
   createLiveRunPublisher,
   createLiveRunStore,
   createNotifier,
@@ -66,6 +67,13 @@ export interface UseWorkflowRunnerParams {
   mountedRef: React.RefObject<boolean>;
   /** Absolute project directory (honors `--project-dir`). */
   cwd: string;
+  /**
+   * A custom `steamtrain.json` path (only when launched with `--config-file`),
+   * passed through to a detached background runner so a mid-run detach keeps the
+   * exact config the TUI ran with. Omitted for the default project config, where
+   * `--project-dir` resolution already picks up the same user + project layers.
+   */
+  detachConfigPath?: string;
 }
 
 export function useWorkflowRunner({
@@ -73,6 +81,7 @@ export function useWorkflowRunner({
   resolveWorkflowSpec,
   mountedRef,
   cwd,
+  detachConfigPath,
 }: UseWorkflowRunnerParams) {
   const [running, setRunning] = useState(false);
   const [wf, wfDispatch] = useReducer(workflowReducer, initialWorkflowState);
@@ -103,6 +112,10 @@ export function useWorkflowRunner({
   const abortRef = useRef<AbortController | null>(null);
   const activeWorkflowRef = useRef<string | undefined>(undefined);
   const activeWorkflowInputRef = useRef<string | undefined>(undefined);
+  /** Params the owned run was launched with, so a detach can reproduce it. */
+  const activeParamsRef = useRef<Record<string, string | number | boolean> | undefined>(undefined);
+  /** The exact spec the owned run is executing, so a detach carries it verbatim. */
+  const activeSpecRef = useRef<WorkflowSpec | undefined>(undefined);
   const workflowCacheRef = useRef<Map<string, StepResult>>(new Map());
   // Live approval checkpoints keyed by `<stepId>:<iteration>`: the injected
   // provider registers a resolver here and blocks until a keypress resolves it.
@@ -124,10 +137,28 @@ export function useWorkflowRunner({
   /** Non-null while /attach is tailing an externally-owned run; aborting detaches. */
   const attachAbortRef = useRef<AbortController | null>(null);
   const attachedRunIdRef = useRef<string | null>(null);
+  /** Latest `attachRun`, so the owning run loop can re-attach after a detach. */
+  const attachRunRef = useRef<((runId: string) => boolean) | null>(null);
   /** The live-run id of the run THIS process owns, while one is executing. */
   const ownRunIdRef = useRef<string | null>(null);
   /** The owned run's steering control (pause / edit pending steps / resume). */
   const runControlRef = useRef<WorkflowRunControl | null>(null);
+  /**
+   * Non-null while a mid-run detach is in progress: the owning run loop reads it
+   * to skip terminal history/mirroring and hand the run off to a background
+   * process instead. `quiesced` flips true once the engine has parked (no step
+   * executing), the moment it is safe to abort the local engine.
+   */
+  const handoffRef = useRef<{
+    runId: string;
+    quiesced: boolean;
+    launch: {
+      workflow: string;
+      input: string;
+      params?: Record<string, string | number | boolean>;
+      spec?: WorkflowSpec;
+    };
+  } | null>(null);
 
   const showWorkflowView = wf.started || wfLaunching;
   const liveFlatSteps = useMemo(() => flattenSteps(wf), [wf]);
@@ -226,6 +257,9 @@ export function useWorkflowRunner({
       setWfNotice(null);
       activeWorkflowRef.current = name;
       activeWorkflowInputRef.current = input;
+      activeParamsRef.current = opts?.params;
+      activeSpecRef.current = spec;
+      handoffRef.current = null;
       setRunning(true);
       const ac = new AbortController();
       abortRef.current = ac;
@@ -384,6 +418,13 @@ export function useWorkflowRunner({
             control,
             withStoreHumanInputs(liveStore, runId, humanInputProvider),
           )) {
+            // Mid-run detach: once the run has quiesced and we're handing it off
+            // to a background process, stop feeding events into the local view,
+            // the history recorder, and the live-run mirror — the detached child
+            // owns the run's record and event stream from here (it replays the
+            // cache and continues). Draining the iterator lets the aborted engine
+            // unwind cleanly.
+            if (handoffRef.current?.quiesced) continue;
             recorder.handle(event);
             publisher.event(event);
             notifyWorkflowEvent(notifier, notifyMeta, event);
@@ -419,33 +460,103 @@ export function useWorkflowRunner({
           disposeControlWatch?.();
           runControlRef.current = null;
           ownRunIdRef.current = null;
-          const status = ac.signal.aborted
-            ? "canceled"
-            : runError || !workflowOk
-              ? "error"
-              : "done";
-          // Settle the live-run mirror (flush events, then terminal meta) so
-          // cross-UI tailers see the complete stream. Best-effort.
-          try {
-            await publisher?.finish(status, { ok: status === "done", error: runError });
-          } catch (err) {
-            // Mirroring is best-effort; surface a soft warning so the gap is visible.
-            if (mountedRef.current) {
-              setWfNotice(`warning: live-run mirror finish failed: ${message(err)}`);
+
+          // Mid-run detach: a quiesced run whose engine we deliberately aborted
+          // is handed off to a fresh background process under the same id — it
+          // keeps running after this TUI closes. When it succeeds, skip the
+          // terminal history and mirror finish (the detached child owns the
+          // record now) and re-attach so the user keeps watching it live.
+          const handoff = handoffRef.current;
+          const handingOff = Boolean(
+            handoff &&
+              handoff.runId === runId &&
+              handoff.quiesced &&
+              ac.signal.aborted &&
+              !runError,
+          );
+          let handedOff = false;
+          if (handingOff && handoff) {
+            handoffRef.current = null;
+            let spawned: Awaited<ReturnType<typeof completeQuiescedHandoff>>;
+            try {
+              // Balance the quiescing pause (run_resumed), flush the mirror, and
+              // hand off — all in the shared helper so this stays in lockstep
+              // with the web path.
+              spawned = await completeQuiescedHandoff({
+                publisher,
+                store: liveStore,
+                runId,
+                cwd,
+                projectDir: cwd,
+                configPath: detachConfigPath,
+                launch: {
+                  workflow: handoff.launch.workflow,
+                  input: handoff.launch.input,
+                  params: handoff.launch.params,
+                  spec: handoff.launch.spec,
+                  fresh: false,
+                },
+              });
+            } catch (err) {
+              spawned = { ok: false, error: message(err) };
             }
-          }
-          try {
-            await historyStoreRef.current.save(recorder.build({ status, error: runError }));
-          } catch (err) {
-            // History is best-effort; a failed write must not break the run.
+            handedOff = spawned.ok;
             if (mountedRef.current) {
-              setWfNotice(`warning: run history could not be saved: ${message(err)}`);
+              setRunning(false);
+              setWfLaunching(false);
             }
-          }
-          if (mountedRef.current) {
-            setRunning(false);
-            setWfLaunching(false);
             abortRef.current = null;
+            if (spawned.ok) {
+              if (mountedRef.current) {
+                setWfNotice(
+                  `✈ detached — this run now continues in a background process (pid ${spawned.pid}); closing the TUI won't stop it`,
+                );
+                // Keep watching it live: re-attach to the now-detached run.
+                attachRunRef.current?.(runId);
+              }
+            } else {
+              // Handoff failed: completeQuiescedHandoff already settled the live
+              // meta as errored. Record history so the partial run isn't lost.
+              try {
+                await historyStoreRef.current.save(
+                  recorder.build({ status: "error", error: `detach failed: ${spawned.error}` }),
+                );
+              } catch {
+                // History is best-effort.
+              }
+              if (mountedRef.current) setWfNotice(`detach failed: ${spawned.error}`);
+            }
+          }
+
+          if (!handedOff) {
+            const status = ac.signal.aborted
+              ? "canceled"
+              : runError || !workflowOk
+                ? "error"
+                : "done";
+            // Settle the live-run mirror (flush events, then terminal meta) so
+            // cross-UI tailers see the complete stream. Best-effort.
+            try {
+              await publisher?.finish(status, { ok: status === "done", error: runError });
+            } catch (err) {
+              // Mirroring is best-effort; surface a soft warning so the gap is visible.
+              if (mountedRef.current) {
+                setWfNotice(`warning: live-run mirror finish failed: ${message(err)}`);
+              }
+            }
+            try {
+              await historyStoreRef.current.save(recorder.build({ status, error: runError }));
+            } catch (err) {
+              // History is best-effort; a failed write must not break the run.
+              if (mountedRef.current) {
+                setWfNotice(`warning: run history could not be saved: ${message(err)}`);
+              }
+            }
+            if (mountedRef.current) {
+              setRunning(false);
+              setWfLaunching(false);
+              abortRef.current = null;
+            }
           }
         }
       })();
@@ -560,6 +671,9 @@ export function useWorkflowRunner({
     },
     [mountedRef, resolveWorkflowSpec],
   );
+  // Keep a live handle so the owning run loop can re-attach to a run it just
+  // handed off to a background process (mid-run detach).
+  attachRunRef.current = attachRun;
 
   /** Ctrl+Q: cancel an owned run, or detach from an attached one (it keeps going). */
   const handleWorkflowCancel = useCallback(() => {
@@ -728,6 +842,64 @@ export function useWorkflowRunner({
     return "edit requested — no response from the owning process yet";
   }, []);
 
+  /**
+   * Detach the owned, in-process run into a background process so the TUI can
+   * be closed (or relaunched) without stopping the workflow. Pauses the run so
+   * in-flight steps finish and persist to the cache, waits for the engine to
+   * quiesce (or for the run to be parked on a human decision, where nothing is
+   * computing), then the owning run loop hands it off under the same id and
+   * re-attaches. Returns a notice, or null once the handoff is under way (the
+   * run loop posts the confirming notice).
+   */
+  const detachRun = useCallback(async (): Promise<string | null> => {
+    if (attachedRunIdRef.current) {
+      return "this run is owned by another process — it already survives the TUI (/cancel-run stops it)";
+    }
+    const runId = ownRunIdRef.current;
+    const control = runControlRef.current;
+    const ac = abortRef.current;
+    const workflow = activeWorkflowRef.current;
+    const input = activeWorkflowInputRef.current;
+    if (!runId || !control || !ac || workflow === undefined || input === undefined) {
+      return "no active run to detach";
+    }
+    if (handoffRef.current) return "already detaching…";
+    if (ac.signal.aborted) return "the run is already stopping";
+
+    handoffRef.current = {
+      runId,
+      quiesced: false,
+      launch: { workflow, input, params: activeParamsRef.current, spec: activeSpecRef.current },
+    };
+    // Quiesce: pause so in-flight steps finish and cache, then hand off once
+    // nothing is executing. Mirror the pause so any other attached UI reflects it.
+    control.pause("human:tui");
+    void liveRunStoreRef.current
+      .writePauseState(runId, { paused: true, by: "human:tui" })
+      .catch(() => {});
+    if (mountedRef.current) {
+      setWfNotice(
+        "✈ detaching — finishing in-flight work, then handing this run to a background process…",
+      );
+    }
+
+    const humanParked = (): boolean =>
+      approvalResolversRef.current.size > 0 || humanInputResolversRef.current.size > 0;
+    for (;;) {
+      // The run finished or was canceled before we could hand it off.
+      if (ownRunIdRef.current !== runId || ac.signal.aborted) {
+        if (handoffRef.current?.runId === runId) handoffRef.current = null;
+        return "detach canceled — the run already finished or was stopped";
+      }
+      if (control.isIdle() || humanParked()) break;
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+    if (handoffRef.current?.runId === runId) handoffRef.current.quiesced = true;
+    // Stop the local engine; its run loop performs the handoff and re-attaches.
+    ac.abort();
+    return null;
+  }, [mountedRef]);
+
   const resetRunner = useCallback(() => {
     wfDispatch({ type: "reset" });
     setNarration([]);
@@ -789,6 +961,7 @@ export function useWorkflowRunner({
     resolveApproval,
     answerHumanInput,
     attachRun,
+    detachRun,
     cancelLiveRun,
     togglePauseRun,
     editRunStep,

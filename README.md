@@ -187,9 +187,13 @@ still an honest record. See
 Long workflows shouldn't hold a terminal hostage. `workflow run --detach`
 executes under a background process that survives your session; **attach from
 any UI** — CLI (`workflow attach`), TUI (`/attach`), or the web UI's Active
-runs panel — to replay the record so far and tail it live. A shared
-**run queue** (`maxParallelRuns`) keeps concurrent runs from colliding over
-the cache and worktrees, and cancel/approve work cross-process: decide a
+runs panel — to replay the record so far and tail it live. Already started a
+run in the TUI or web UI and need to step away? **Detach it mid-flight** —
+press `d` in the TUI or click **Detach** in the web UI: the run finishes its
+in-flight steps, hands off to a background process under the same id, and keeps
+going after you close the UI (the view re-attaches so you keep watching). A
+shared **run queue** (`maxParallelRuns`) keeps concurrent runs from colliding
+over the cache and worktrees, and cancel/approve work cross-process: decide a
 detached run's approval checkpoint from whichever surface is handy. See
 [docs/detached-runs.md](docs/detached-runs.md).
 

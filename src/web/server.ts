@@ -739,6 +739,7 @@ function checkCsrf(
  *   POST   /api/runs/:id/cancel     abort a run
  *   POST   /api/runs/:id/pause      stop scheduling new steps (in-flight finish)
  *   POST   /api/runs/:id/resume     continue a paused run
+ *   POST   /api/runs/:id/detach     hand a running run off to a background process
  *   POST   /api/runs/:id/edit-step  { stepId, prompt?/cmd?/model?/effort? } — edit a pending step while paused
  *   POST   /api/runs/:id/approval   resolve a human-approval checkpoint
  *   POST   /api/runs/:id/input      answer a human-input request (human step / agent question)
@@ -1782,6 +1783,18 @@ async function handle(
     return;
   }
 
+  // Mid-run detach: hand a manager-owned run off to a background process under
+  // the same id, so the browser (or the server) can close without stopping it.
+  const detachMatch = path.match(/^\/api\/runs\/([^/]+)\/detach$/);
+  if (method === "POST" && detachMatch) {
+    const runId = decodeURIComponent(detachMatch[1]!);
+    const result = deps.runs.detach(runId);
+    // 202: the handoff is under way; the run's SSE stream reports a `detached`
+    // frame once the child is spawned (in-flight steps finish first).
+    sendJson(res, result.ok ? 202 : 404, result.ok ? { detaching: true } : { error: result.error });
+    return;
+  }
+
   // Mid-run steering: edit a not-yet-started step of a paused run.
   const editStepMatch = path.match(/^\/api\/runs\/([^/]+)\/edit-step$/);
   if (method === "POST" && editStepMatch) {
@@ -2412,6 +2425,13 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
     liveRuns: liveRunStore,
     // Notification deep links point at this server's own run pages.
     publicBaseUrl: `http://${host === "0.0.0.0" || host === "::" ? "localhost" : host}:${port}`,
+    // Point a detached background runner (mid-run detach) at the same project.
+    // A config file is only forwarded when it's a custom `--config` (otherwise
+    // `--project-dir` resolution already picks up the same user + project layers).
+    detachIo: {
+      projectDir: cwd,
+      configPath: options.customConfig ? options.configPath : undefined,
+    },
   });
   const author = new WorkflowAuthor({
     host: orchestrator,

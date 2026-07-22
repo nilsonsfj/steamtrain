@@ -349,6 +349,16 @@ export {
   type LiveRunPublisher,
 } from "./live-run";
 export {
+  completeQuiescedHandoff,
+  handoffRunToDetached,
+  spawnDetachedRunner,
+  type CompleteQuiescedHandoffOptions,
+  type DetachedRunnerIo,
+  type HandoffRunOptions,
+  type SpawnDetachedRunnerOptions,
+  type SpawnDetachedRunnerResult,
+} from "./handoff";
+export {
   WORKFLOW_HISTORY_DIR,
   DEFAULT_HISTORY_LIMIT,
   createWorkflowHistoryStore,

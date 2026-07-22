@@ -404,6 +404,15 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
             cur.openRunStepEditor();
             return;
           }
+          // `d` detaches an owned in-process run into a background process so the
+          // TUI can be closed (or relaunched) without stopping it. detachRun
+          // reports back when the run is already independent (attached).
+          if (input === "d") {
+            void runner.detachRun().then((notice) => {
+              if (notice) runner.setWfNotice(notice);
+            });
+            return;
+          }
         }
         // Arrival Report: r = run again, n = try next workflow, h = history,
         // i = show step details under the Arrival Report. Only while the receipt is up.

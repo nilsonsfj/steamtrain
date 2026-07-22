@@ -33,6 +33,10 @@ const KEY_HINTS: readonly KeyHint[] = [
   { keys: "a / r", action: "approve / reject a pending human checkpoint" },
   { keys: "a", action: "answer a pending human-input request (human step / agent question)" },
   {
+    keys: "d",
+    action: "detach the live run into a background process (keeps running if you close the TUI)",
+  },
+  {
     keys: "PgUp/PgDn",
     action: "page the step list · scroll output in drill-in (Shift+↑/↓ one line)",
   },

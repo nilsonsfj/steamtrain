@@ -656,6 +656,10 @@ async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, b
     const pausedEvent = pauseTransitionEvent(env);
     if (pausedEvent) yield pausedEvent;
     if (deps.control) {
+      // The previous phase's steps have all finished before a loop workflow
+      // reaches this boundary, so a pause here means the run is fully quiesced:
+      // signal the standstill for a driver mid-detach.
+      if (deps.control.isPauseRequested()) deps.control.notifyIdle();
       while (deps.control.isPauseRequested() && !signal?.aborted) {
         await deps.control.waitForWake(signal);
         yield* drainControlEvents(env);
@@ -867,8 +871,11 @@ async function* runDagScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, bool
       }
       if (inFlight.size === 0) {
         // Quiesced while paused with work remaining: park until a resume (or
-        // an accepted edit to surface, or a cancel) wakes the driver.
+        // an accepted edit to surface, or a cancel) wakes the driver. Signal
+        // the standstill so a driver mid-detach knows no step is executing and
+        // it can safely hand the run off to a background process.
         if (paused && pending.length > 0 && !signal?.aborted && !env.budgetState.exceeded) {
+          control!.notifyIdle();
           await control!.waitForWake(signal);
           continue;
         }

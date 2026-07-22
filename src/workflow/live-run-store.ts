@@ -8,6 +8,7 @@ import { atomicWriteFile, isEnoent, sanitizePathComponent } from "./fs-util";
 import { RunRecordBuilder, type RunRecordStatus } from "./history";
 import type { WorkflowHistoryStore } from "./history-store";
 import type { HumanInputOrigin, HumanInputResponse } from "./human-input";
+import type { WorkflowSpec } from "./types";
 
 /**
  * The live-run store: an on-disk registry of in-flight (and just-finished)
@@ -76,6 +77,15 @@ export interface LiveRunLaunch {
   humanInputs?: Record<string, string>;
   /** `--agent <id>`: re-route blocked agent steps to this agent (re-planned by the runner). */
   rerouteAgent?: string;
+  /**
+   * The exact resolved spec the run was executing, when it differs from the
+   * catalog workflow — set by a mid-run detach so the background process
+   * continues with the same per-session overrides (reroute, per-step model /
+   * prompt edits) the run was using, keeping the cache key (and therefore the
+   * completed steps) aligned. Absent ⇒ the runner resolves `workflow` from the
+   * catalog (the `--detach`-at-launch path, which has no session overrides).
+   */
+  spec?: WorkflowSpec;
 }
 
 /** One human-input request a live run is waiting on, mirrored into its meta. */
