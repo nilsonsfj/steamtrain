@@ -159,8 +159,9 @@ export function useWorkflowRunner({
   /**
    * Non-null while a mid-run detach is in progress: the owning run loop reads it
    * to skip terminal history/mirroring and hand the run off to a background
-   * process instead. `quiesced` flips true once the engine has parked (no step
-   * executing), the moment it is safe to abort the local engine.
+   * process instead. `quiesced` is the ownership-commit latch: once true, the
+   * local event loop stops recording and drains after its abort while the
+   * detached owner prepares to replay any interrupted, uncached step.
    */
   const handoffRef = useRef<{
     runId: string;
@@ -431,8 +432,8 @@ export function useWorkflowRunner({
             control,
             withStoreHumanInputs(liveStore, runId, humanInputProvider),
           )) {
-            // Mid-run detach: once the run has quiesced and we're handing it off
-            // to a background process, stop feeding events into the local view,
+            // Mid-run detach: once ownership transfer is committed, stop
+            // feeding events into the local view,
             // the history recorder, and the live-run mirror — the detached child
             // owns the run's record and event stream from here (it replays the
             // cache and continues). Draining the iterator lets the aborted engine
@@ -474,8 +475,8 @@ export function useWorkflowRunner({
           runControlRef.current = null;
           ownRunIdRef.current = null;
 
-          // Mid-run detach: a quiesced run whose engine we deliberately aborted
-          // is handed off to a fresh background process under the same id — it
+          // Mid-run detach: a committed run whose engine we deliberately
+          // aborted is handed off to a fresh background process under the same id — it
           // keeps running after this TUI closes. When it succeeds, skip the
           // terminal history and mirror finish (the detached child owns the
           // record now) and re-attach so the user keeps watching it live.
@@ -487,20 +488,15 @@ export function useWorkflowRunner({
           );
           // #endregion
           const handingOff = Boolean(
-            handoff &&
-              handoff.runId === runId &&
-              handoff.quiesced &&
-              ac.signal.aborted &&
-              !runError,
+            handoff && handoff.runId === runId && handoff.quiesced && ac.signal.aborted,
           );
           let handedOff = false;
           if (handingOff && handoff) {
             handoffRef.current = null;
             let spawned: Awaited<ReturnType<typeof completeQuiescedHandoff>>;
             try {
-              // Balance the quiescing pause (run_resumed), flush the mirror, and
-              // hand off — all in the shared helper so this stays in lockstep
-              // with the web path.
+              // Flush the mirror and hand off in the shared helper so this
+              // stays in lockstep with the web path.
               spawned = await completeQuiescedHandoff({
                 publisher,
                 store: liveStore,
@@ -898,12 +894,11 @@ export function useWorkflowRunner({
 
   /**
    * Detach the owned, in-process run into a background process so the TUI can
-   * be closed (or relaunched) without stopping the workflow. Pauses the run so
-   * in-flight steps finish and persist to the cache, waits for the engine to
-   * quiesce (or for the run to be parked on a human decision, where nothing is
-   * computing), then the owning run loop hands it off under the same id and
-   * re-attaches. Returns a notice, or null once the handoff is under way (the
-   * run loop posts the confirming notice).
+   * be closed (or relaunched) without stopping the workflow. Ownership is
+   * committed synchronously, then the local engine is aborted immediately.
+   * Completed steps remain cached; an interrupted step is replayed by the
+   * detached owner under the same run id. Returns a notice, or null once the
+   * handoff is under way (the run loop posts the confirming notice).
    */
   const detachRun = useCallback(async (): Promise<string | null> => {
     if (attachedRunIdRef.current) {
@@ -928,40 +923,26 @@ export function useWorkflowRunner({
 
     handoffRef.current = {
       runId,
-      quiesced: false,
+      quiesced: true,
       launch: { workflow, input, params: activeParamsRef.current, spec: activeSpecRef.current },
     };
-    // Quiesce: pause so in-flight steps finish and cache, then hand off once
-    // nothing is executing. Mirror the pause so any other attached UI reflects it.
-    control.pause("human:tui");
-    void liveRunStoreRef.current
-      .writePauseState(runId, { paused: true, by: "human:tui" })
-      .catch(() => {});
     if (mountedRef.current) {
       setWfNotice(
-        "✈ detaching — finishing in-flight work, then handing this run to a background process…",
+        "✈ detaching — stopping local work and handing this run to a background process…",
       );
     }
 
     const humanParked = (): boolean =>
       approvalResolversRef.current.size > 0 || humanInputResolversRef.current.size > 0;
-    for (;;) {
-      // The run finished or was canceled before we could hand it off.
-      if (ownRunIdRef.current !== runId || ac.signal.aborted) {
-        if (handoffRef.current?.runId === runId) handoffRef.current = null;
-        return "detach canceled — the run already finished or was stopped";
-      }
-      if (control.isIdle() || humanParked()) break;
-      await new Promise((resolve) => setTimeout(resolve, 120));
-    }
     // #region agent log
     appendFileSync(
       "/opt/cursor/logs/debug.log",
       `${JSON.stringify({ hypothesisId: "A,B,C", location: "src/tui/useWorkflowRunner.ts:detachRun:quiesced", message: "detach wait ended", data: { ownerMatches: ownRunIdRef.current === runId, aborted: ac.signal.aborted, idle: control.isIdle(), humanParked: humanParked() }, timestamp: Date.now() })}\n`,
     );
     // #endregion
-    if (handoffRef.current?.runId === runId) handoffRef.current.quiesced = true;
-    // Stop the local engine; its run loop performs the handoff and re-attaches.
+    // Stop the local engine immediately; its run loop performs the handoff and
+    // re-attaches after abort cleanup. The commit latch above wins races with a
+    // final workflow event or an abort-time exception.
     ac.abort();
     return null;
   }, [mountedRef]);

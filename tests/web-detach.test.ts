@@ -68,13 +68,13 @@ const chainSpec: WorkflowSpec = {
 
 function makeEngineHost(): {
   host: WorkflowHost;
-  state: { prompts: string[]; releaseA: () => void };
+  state: { prompts: string[]; releaseA: () => void; abortSeen: boolean };
 } {
   let release: () => void = () => {};
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const state = { prompts: [] as string[], releaseA: () => release() };
+  const state = { prompts: [] as string[], releaseA: () => release(), abortSeen: false };
   const createAdapter = (id: AgentId): AgentAdapter => ({
     id,
     binary: "fake",
@@ -82,7 +82,16 @@ function makeEngineHost(): {
     run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
       return (async function* () {
         state.prompts.push(opts.prompt);
-        if (opts.model === "ma") await gate;
+        if (opts.model === "ma") {
+          opts.signal?.addEventListener(
+            "abort",
+            () => {
+              state.abortSeen = true;
+            },
+            { once: true },
+          );
+          await gate;
+        }
         yield { kind: "session_start", agent: "claude", ts: 0 } as AgentEvent;
         yield {
           kind: "result",
@@ -171,9 +180,11 @@ describe("web run manager mid-run detach", () => {
     for (let i = 0; i < 100 && state.prompts.length === 0; i++) await delay(10);
     expect(state.prompts).toEqual(["hi"]);
 
-    // Request the detach, then let "a" finish so the run quiesces (paused with
-    // "b" pending) and the manager commits the handoff.
+    // Detach commits ownership and aborts local in-flight work synchronously;
+    // this deliberately uncooperative fake is then released so drive() can
+    // finish draining and spawn the detached owner.
     expect(manager.detach(runId)).toEqual({ ok: true });
+    expect(state.abortSeen).toBe(true);
     state.releaseA();
 
     // The run leaves the manager once the handoff completes.
@@ -203,12 +214,12 @@ describe("web run manager mid-run detach", () => {
     // No terminal status frame was emitted — the run did not end, it moved.
     expect(frames.some((f) => f.type === "status")).toBe(false);
 
-    // Step "a"'s completed result is on disk in the shared stream so the child
-    // (and any reconnecting UI) can replay it.
+    // The interrupted step is deliberately not recorded as completed; the real
+    // detached child replays it because no successful cache entry exists.
     const events = await liveRuns.readEvents(runId);
-    expect(events.some((e) => e.kind === "step_done" && e.stepId === "a")).toBe(true);
-    // The quiescing pause was balanced by a resume so a replay isn't stuck paused.
-    expect(events.some((e) => e.kind === "run_resumed")).toBe(true);
+    expect(events.some((e) => e.kind === "step_done" && e.stepId === "a")).toBe(false);
+    // Immediate detach no longer injects a synthetic pause/resume pair.
+    expect(events.some((e) => e.kind === "run_paused" || e.kind === "run_resumed")).toBe(false);
   });
 
   it("carries a per-session spec override into the handoff (cache stays aligned)", async () => {

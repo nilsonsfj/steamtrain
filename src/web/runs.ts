@@ -148,9 +148,9 @@ interface Run {
    */
   handoff?: { launch: LiveRunLaunch };
   /**
-   * Latched once the run has quiesced and its engine was aborted specifically to
-   * hand it off — the signal `drive()`'s finally uses to spawn the detached
-   * runner instead of recording a terminal outcome.
+   * Latched before the engine is aborted specifically for handoff — the signal
+   * `drive()`'s finally uses to spawn the detached runner instead of recording
+   * a terminal outcome.
    */
   handoffCommitted?: boolean;
 }
@@ -366,12 +366,12 @@ export class WorkflowRunManager {
   /**
    * Detach a manager-owned run into a fresh background process under the same
    * id, so the browser (or the whole web server) can close without stopping the
-   * workflow — the mid-run analog of launching with `--detach`. Pauses the run
-   * so in-flight steps finish and persist to the step cache, then, once the
-   * engine has quiesced (or the run is parked on a human decision, where nothing
-   * is computing), aborts the local engine; `drive()`'s finally spawns the
-   * detached runner. Subscribers learn of the switch through a `detached` SSE
-   * frame and reconnect to the now-external run.
+   * workflow — the mid-run analog of launching with `--detach`. Ownership is
+   * committed synchronously and the local engine is aborted immediately;
+   * completed steps stay cached and an interrupted step is replayed by the
+   * detached owner. `drive()`'s finally spawns the detached runner. Subscribers
+   * learn of the switch through a `detached` SSE frame and reconnect to the
+   * now-external run.
    *
    * Returns `{ ok:false, error }` when the run can't be handed off (unknown,
    * finished, still queued, or no shared registry); a re-issued detach on an
@@ -395,36 +395,16 @@ export class WorkflowRunManager {
         fresh: false,
       },
     };
-    // Quiesce: pause; in-flight steps finish and cache, nothing new starts.
-    run.control.pause("human:web");
-    void this.liveRuns.writePauseState(runId, { paused: true, by: "human:web" }).catch(() => {});
     this.emit(run, JSON.stringify({ type: "detaching" }), false);
-    void this.awaitQuiesceThenAbort(run);
+    // Commit before aborting so a final event or abort-time exception cannot
+    // race the run into its normal terminal path.
+    run.handoffCommitted = true;
+    run.controller.abort();
     return { ok: true };
   }
 
   /**
-   * Poll a detaching run until its engine parks with nothing executing (or it is
-   * waiting on a human decision, which does no compute), then commit the handoff
-   * by aborting the engine. If the run finishes on its own first, the handoff is
-   * abandoned and `drive()` records it normally.
-   */
-  private async awaitQuiesceThenAbort(run: Run): Promise<void> {
-    const humanParked = (): boolean => run.pendingApprovals.size > 0 || run.pendingInputs.size > 0;
-    for (;;) {
-      if (run.settled || run.controller.signal.aborted) {
-        run.handoff = undefined;
-        return;
-      }
-      if (run.control.isIdle() || humanParked()) break;
-      await new Promise((resolve) => setTimeout(resolve, 120));
-    }
-    run.handoffCommitted = true;
-    run.controller.abort();
-  }
-
-  /**
-   * Spawn the detached runner for a quiesced, handed-off run and tell
+   * Spawn the detached runner for a committed, handed-off run and tell
    * subscribers to reconnect to it. Returns true when the run is now an
    * independent background process (the manager drops it); false when the spawn
    * failed and the caller should record a normal terminal outcome.
@@ -788,12 +768,11 @@ export class WorkflowRunManager {
       // report an already-finished run as cancelable.
       run.settled = true;
 
-      // Mid-run detach: hand the quiesced run off to a background process under
-      // the same id instead of ending it. `ok === undefined` means the run was
-      // aborted mid-flight for the handoff (its workflow_done was skipped), not
-      // completed on its own. On success the manager drops the run and
-      // subscribers reconnect to the now-external run; on failure fall through
-      // to a normal (error) terminal.
+      // Mid-run detach: hand the committed run off to a background process under
+      // the same id instead of ending it. Events after the commit were skipped,
+      // so `ok` remains undefined even when abort makes the engine emit a final
+      // workflow_done. On success the manager drops the run and subscribers
+      // reconnect; on failure fall through to a normal (error) terminal.
       const handedOff =
         Boolean(run.handoff && run.handoffCommitted && ok === undefined) &&
         (await this.finishHandoff(run, publisher));
