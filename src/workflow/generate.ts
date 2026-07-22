@@ -414,11 +414,15 @@ exists in the workflow, every {{inputs.<key>}} references a declared input, and
 silently render as empty text at runtime and will produce validation warnings.
 
 # Agents & models
-Prefer free models so the workflow runs without paid credentials:
-agent "opencode" with models like "opencode/mimo-v2.5-free",
-"opencode/deepseek-v4-flash-free", "opencode/nemotron-3-ultra-free",
+Prefer free models so the workflow runs without paid credentials.
+Prefer first-class agent "mimo" with model "mimo/mimo-auto" for tool-heavy
+steps (OpenCode Zen's "opencode/deepseek-v4-flash-free" hangs on multi-turn
+tool loops). Other free options: agent "opencode" with
+"opencode/mimo-v2.5-free", "opencode/nemotron-3-ultra-free",
 "opencode/north-mini-code-free".
-Every agent-backed step MUST set agent, model, and a non-empty prompt.
+Model-only bindings are allowed (omit agent) when "model" is a concrete id or
+"{{inputs.<modelKey>}}" — the engine picks the matching agent family.
+Every agent-backed step MUST set model (or modelClass) and a non-empty prompt.
 "model" and "effort" are TEMPLATES, rendered at run time — this is how ONE
 spec serves several cost/quality tiers via declared "inputs" instead of
 forking the workflow: "model": "{{inputs.coderModel}}" with an "inputs" entry

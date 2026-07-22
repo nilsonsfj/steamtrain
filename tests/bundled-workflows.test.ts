@@ -50,8 +50,17 @@ describe("bundled workflows", () => {
         ...t,
         resolved: resolveTemplatedModel(BUNDLED_WORKFLOWS[t.workflow]!, t.model),
       }))
+      .filter((t) => {
+        const provider =
+          t.agent ??
+          (t.resolved.startsWith("opencode/") || t.resolved.startsWith("opencode-go/")
+            ? "opencode"
+            : t.resolved.startsWith("mimo/") || t.resolved.startsWith("xiaomi/")
+              ? "mimo"
+              : undefined);
+        return provider === "opencode" || provider === "mimo";
+      })
       .filter((t) => !KNOWN_FREE_MODELS.has(t.resolved))
-      .filter((t) => t.agent === "opencode" || t.agent === "mimo" || t.agent === undefined)
       .map((t) => `${t.workflow}/${t.step} → ${t.model} (resolved: ${t.resolved})`);
     expect(unknown).toEqual([]);
   });

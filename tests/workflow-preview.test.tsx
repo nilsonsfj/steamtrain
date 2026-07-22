@@ -70,7 +70,7 @@ describe("WorkflowPreview", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toMatch(/▶.*synthes/i);
     expect(frame).toContain("synthesize");
-    expect(frame).toContain("DeepSeek V4 Flash Free");
+    expect(frame).toContain("MiMo Auto");
   });
 
   it("hides step detail panel when showStepDetail is false", () => {
