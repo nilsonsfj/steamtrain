@@ -18,8 +18,10 @@ import {
 import { ArrivalReportView } from "./ArrivalReport";
 import { wrapOutputLines } from "./output-window";
 import {
+  MAX_DETAIL_CONTEXT_LINES,
   type RunProgress,
   planViewLayout,
+  preferredPreviewLines,
   progressBarSegments,
   runStatus,
   stepWaitKind,
@@ -167,23 +169,17 @@ export function WorkflowView({
   const approvalCard = approval ? buildApprovalCard(approval, cardWidth, roomy) : undefined;
   const inputCard = pendingInput ? buildInputCard(pendingInput, cardWidth, roomy) : undefined;
 
-  const detailContext = selected ? buildDetailContext(selected.step, innerWidth) : [];
-  const preferredPreview = !selected
-    ? 0
-    : height >= 28
-      ? 6
-      : height >= 22
-        ? 5
-        : height >= 16
-          ? 3
-          : 2;
-  // Reserve only rows the detail panel can actually render. Empty output still
-  // has one status/activity row; any spare capacity belongs to the tree.
-  const detailBody = selected ? (selected.step.result?.output ?? selected.step.text).trim() : "";
-  const detailContentLines = selected
-    ? Math.max(1, wrapOutputLines(detailBody, innerWidth).length)
-    : 0;
-  const desiredPreview = Math.min(preferredPreview, detailContentLines);
+  // Cap context so follow hops between sparse and rich steps cannot change the
+  // detail fixed-line count (each ±1 steals a tree row and flickers Ink).
+  const detailContext = selected
+    ? buildDetailContext(selected.step, innerWidth).slice(0, MAX_DETAIL_CONTEXT_LINES)
+    : [];
+  // Keep the preview demand stable across auto-follow hops. Shrinking it to the
+  // selected step's current output length used to give the tree ±3–5 rows every
+  // time follow jumped from a streaming step to a fresh empty one — Ink then
+  // full-redraws the frame (looks like flicker that intensifies as steps finish).
+  // Empty/short output just under-fills the pinned detail pane.
+  const desiredPreview = preferredPreviewLines(height, Boolean(selected));
   // Degradation ladder for very short terminals: an overflowing frame corrupts
   // the whole TUI. Drop the detail panel, then model breakdown, compact paired
   // notices, and finally replace the full attention card with a one-line action
@@ -197,6 +193,9 @@ export function WorkflowView({
   let showTree = true;
   const noticeLines = () =>
     combineNotices && showPaused && showBudget ? 1 : (showPaused ? 1 : 0) + (showBudget ? 1 : 0);
+  // Always reserve the max context slots while the detail panel is up so a
+  // worktree/item line appearing mid-step cannot rebudget the tree.
+  const detailFixedBudget = 1 + MAX_DETAIL_CONTEXT_LINES;
   const plan = () =>
     planViewLayout({
       height,
@@ -204,7 +203,7 @@ export function WorkflowView({
         2 + narrationCount + (showModels ? 1 : 0) + noticeLines() + (showCompactAttention ? 1 : 0),
       minimumListLines: showTree ? 1 : 0,
       cardLines: showCard ? (approvalCard?.lineCount ?? inputCard?.lineCount ?? 0) : 0,
-      detailFixedLines: showDetail ? 1 + detailContext.length : 0,
+      detailFixedLines: showDetail ? detailFixedBudget : 0,
       desiredPreviewLines: showDetail ? desiredPreview : 0,
     });
   let layout = plan();
@@ -236,6 +235,7 @@ export function WorkflowView({
 
   const selectedRowIndex = Math.max(0, findTreeRowIndex(rows, clampedIndex));
   const rowWindow = selectVisibleWindow(rows, selectedRowIndex, layout.listBudget);
+  const detailHeight = showDetail ? detailFixedBudget + layout.previewLines : 0;
 
   if (preferArrival && arrival) {
     return (
@@ -405,10 +405,17 @@ export function WorkflowView({
       ) : null}
 
       {showDetail && selected ? (
-        <Box flexDirection="column" flexGrow={1} flexShrink={0} overflow="hidden">
+        <Box
+          flexDirection="column"
+          width={innerWidth}
+          height={detailHeight}
+          flexShrink={0}
+          overflow="hidden"
+        >
           <DetailPanel
             step={selected.step}
             context={detailContext}
+            contextSlots={MAX_DETAIL_CONTEXT_LINES}
             previewLines={layout.previewLines}
             width={innerWidth}
             now={now}
@@ -803,15 +810,22 @@ function buildDetailContext(step: StepState, width: number): { text: string; col
   if (step.dependsOn && step.dependsOn.length > 0)
     flow.push(`inputs: ${step.dependsOn.join(", ")}`);
   if (step.item) {
-    flow.push(
-      `item ${step.item.index} from ${step.item.sourceStepId}: ${truncate(step.item.value, Math.max(16, width - 40))}`,
+    // Flatten newlines before width-fit: character truncate alone still lets a
+    // multiline item value soft-wrap and overflow the pinned detail budget.
+    const itemValue = truncateToWidth(
+      step.item.value.replace(/[\r\n\t]+/g, " "),
+      Math.max(16, width - 40),
     );
+    flow.push(`item ${step.item.index} from ${step.item.sourceStepId}: ${itemValue}`);
   }
   if (flow.length > 0) lines.push({ text: `← ${flow.join(" · ")}`, color: "gray" });
   if (step.status === "error" && step.result?.error) {
     lines.push({ text: `✗ ${step.result.error}`, color: "red" });
   }
-  return lines;
+  return lines.map((line) => ({
+    ...line,
+    text: truncateToWidth(line.text, width),
+  }));
 }
 
 /**
@@ -822,12 +836,15 @@ function buildDetailContext(step: StepState, width: number): { text: string; col
 function DetailPanel({
   step,
   context,
+  contextSlots,
   previewLines,
   width,
   now,
 }: {
   step: StepState;
   context: { text: string; color: string }[];
+  /** Reserved context rows (pads when the step has fewer). */
+  contextSlots: number;
   previewLines: number;
   width: number;
   now: number;
@@ -867,8 +884,12 @@ function DetailPanel({
   ].filter((bit): bit is string => Boolean(bit));
   const label = ` ${step.stepId} · ${BLOCK_LABEL[step.blockKind]} · ${bits.join(" · ")} `;
   const fill = Math.max(0, width - stringWidth(label) - 2);
+  const emptyPreview = truncateToWidth(sanitizeActivity(step.activity) ?? displayStatus, width);
+  // Parent pins height to 1 + contextSlots + previewLines; under-fill is fine
+  // (overflow:hidden absorbs slack). Do not invent pad rows — they reintroduce
+  // layout churn and trip noArrayIndexKey for no benefit.
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" height={1 + contextSlots + previewLines} overflow="hidden">
       <Text wrap="truncate-end">
         <Text color="gray" dimColor>
           {"──"}
@@ -899,7 +920,7 @@ function DetailPanel({
           ))
         ) : (
           <Text color="gray" dimColor wrap="truncate-end">
-            {step.activity || displayStatus}
+            {emptyPreview}
           </Text>
         )
       ) : null}

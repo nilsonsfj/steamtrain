@@ -152,6 +152,26 @@ const MIN_LIST_ROWS = 4;
 const MAX_LIST_FRACTION = 0.55;
 
 /**
+ * Max context rows under the detail rule (cwd/worktree, data-flow, error).
+ * WorkflowView always reserves this many while the panel is visible so follow
+ * hops cannot rebudget the tree when a richer step gains these lines.
+ */
+export const MAX_DETAIL_CONTEXT_LINES = 3;
+
+/**
+ * Preferred detail-output preview rows for a given view height. Kept stable
+ * (not shrunk to the selected step's current output length) so auto-follow
+ * hops do not oscillate the tree budget.
+ */
+export function preferredPreviewLines(height: number, hasSelection: boolean): number {
+  if (!hasSelection) return 0;
+  if (height >= 28) return 6;
+  if (height >= 22) return 5;
+  if (height >= 16) return 3;
+  return 2;
+}
+
+/**
  * Split the fixed component height between the step tree and the detail
  * preview. The preview shrinks first (down to zero) to keep the tree usable;
  * the tree normally keeps one row, but callers may explicitly allow zero for
