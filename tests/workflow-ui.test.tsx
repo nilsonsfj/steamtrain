@@ -18,6 +18,21 @@ describe("workflow UI helpers", () => {
     ).toBeLessThanOrEqual(4);
   });
 
+  it("fills the unit-height budget without charging phantom spacers", () => {
+    // WorkflowView / Preview / History render rows back-to-back. Charging a
+    // blank spacer per gap (as the picker does) would leave a dead gap under
+    // "↓ N later rows" inside the fixed-height tree box.
+    const items = Array.from({ length: 20 }, (_, i) => `row-${i}`);
+    const budget = 10;
+    const window = selectVisibleWindow(items, 0, budget);
+    const markers = (window.hiddenBefore > 0 ? 1 : 0) + (window.hiddenAfter > 0 ? 1 : 0);
+    expect(window.visible.length + markers).toBe(budget);
+    expect(window.hiddenAfter).toBe(20 - window.visible.length);
+    // With no spacers, a top-anchored window of budget 10 shows 9 rows + marker.
+    expect(window.visible).toHaveLength(9);
+    expect(window.hiddenAfter).toBe(11);
+  });
+
   it("honors the budget even when rows are hidden on both sides of a tiny window", () => {
     const items = Array.from({ length: 41 }, (_, i) => `row-${i}`);
     for (const budget of [1, 2, 3]) {
@@ -439,6 +454,10 @@ describe("workflow UI helpers", () => {
     // Tree is windowed rather than allowed to consume the whole frame.
     expect(frame).toContain("later row");
     expect(frame).toContain("step-0");
+    // Unit-height packing: with the 55% tree cap on height 22 the list budget
+    // is ~9 rows. Charging phantom spacers would show only ~4–5 step ids.
+    const stepRows = (frame.match(/step-\d+/g) ?? []).filter((id, i, all) => all.indexOf(id) === i);
+    expect(stepRows.length).toBeGreaterThanOrEqual(7);
     // Detail panel remains visible beneath the windowed tree.
     expect(frame).toMatch(/──/);
   });
