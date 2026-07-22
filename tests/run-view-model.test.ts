@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_DETAIL_CONTEXT_LINES,
   type RunProgress,
   pickFollowIndex,
   planViewLayout,
+  preferredPreviewLines,
   progressBarSegments,
   runStatus,
   summarizeRun,
@@ -202,6 +204,48 @@ describe("planViewLayout", () => {
     expect(layout.listBudget).toBeLessThanOrEqual(Math.floor(38 * 0.55));
     expect(layout.previewLines).toBeGreaterThan(1);
     expect(layout.listBudget + layout.previewLines).toBe(40 - 2 - 2 - 1);
+  });
+
+  it("keeps listBudget stable when preview demand does not track live output length", () => {
+    // Prefer the height-based preview demand always so empty vs streaming
+    // follow targets produce identical budgets (the old Math.min(preferred,
+    // contentLines) path oscillated the tree as steps finished).
+    for (const height of [16, 20, 22, 24, 28, 36]) {
+      const preferred = preferredPreviewLines(height, true);
+      const fixed = {
+        height,
+        fixedLines: 2,
+        cardLines: 0,
+        detailFixedLines: 1 + MAX_DETAIL_CONTEXT_LINES,
+      };
+      expect(planViewLayout({ ...fixed, desiredPreviewLines: preferred })).toEqual(
+        planViewLayout({ ...fixed, desiredPreviewLines: preferred }),
+      );
+    }
+    // On a mid-height viewport the legacy "shrink to 1 line of empty output"
+    // demand still differs from the stable preferred demand (tree breathes).
+    const mid = {
+      height: 22,
+      fixedLines: 2,
+      cardLines: 0,
+      detailFixedLines: 1 + MAX_DETAIL_CONTEXT_LINES,
+    };
+    const stable = planViewLayout({
+      ...mid,
+      desiredPreviewLines: preferredPreviewLines(22, true),
+    });
+    const legacyEmpty = planViewLayout({ ...mid, desiredPreviewLines: 1 });
+    expect(legacyEmpty.listBudget).toBeGreaterThan(stable.listBudget);
+  });
+});
+
+describe("preferredPreviewLines", () => {
+  it("returns zero without a selection and steps up with height", () => {
+    expect(preferredPreviewLines(40, false)).toBe(0);
+    expect(preferredPreviewLines(14, true)).toBe(2);
+    expect(preferredPreviewLines(16, true)).toBe(3);
+    expect(preferredPreviewLines(22, true)).toBe(5);
+    expect(preferredPreviewLines(28, true)).toBe(6);
   });
 });
 

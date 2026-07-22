@@ -68,17 +68,21 @@ describe("nativeModelForProvider", () => {
     expect(nativeModelForProvider("kiro", "claude-opus-4-8")).toBe("claude-opus-4.8");
   });
 
-  it("maps Claude/GPT aliases onto mimo's opencode-fork prefixed ids", () => {
+  it("maps aliases onto mimo's Xiaomi catalog ids", () => {
     clearModelFamilyCacheForTests();
-    expect(nativeModelForProvider("mimo", "sonnet")).toBe("mimo/claude-sonnet-5");
-    expect(nativeModelForProvider("mimo", "opus 4.8")).toBe("mimo/claude-opus-4-8");
-    expect(nativeModelForProvider("mimo", "gpt-5.5")).toBe("mimo/gpt-5.5");
+    expect(nativeModelForProvider("mimo", "mimo auto")).toBe("mimo/mimo-auto");
+    expect(nativeModelForProvider("mimo", "mimo-v2.5-pro")).toBe("xiaomi/mimo-v2.5-pro");
+    expect(nativeModelForProvider("mimo", "mimo-v2.5")).toBe("xiaomi/mimo-v2.5");
+    // Claude/GPT aliases are not offered on the mimo agent.
+    expect(nativeModelForProvider("mimo", "sonnet")).toBeUndefined();
+    expect(nativeModelForProvider("mimo", "gpt-5.5")).toBeUndefined();
   });
 
-  it("resolves the mimo-v2.5-free default model back to its family", () => {
+  it("resolves the MiMo Auto default model back to its family", () => {
     clearModelFamilyCacheForTests();
-    expect(nativeModelForProvider("mimo", "mimo-v2.5-free")).toBe("mimo/mimo-v2.5-free");
-    expect(familyForProviderModel("mimo", "mimo/mimo-v2.5-free")?.id).toBe("mimo-v2.5-free");
+    expect(nativeModelForProvider("mimo", "mimo-auto")).toBe("mimo/mimo-auto");
+    expect(familyForProviderModel("mimo", "mimo/mimo-auto")?.id).toBe("mimo-auto");
+    expect(familyForProviderModel("mimo", "xiaomi/mimo-v2.5-pro")?.id).toBe("mimo-v2.5-pro");
   });
 });
 

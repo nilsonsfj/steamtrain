@@ -300,8 +300,8 @@ function installHint(agent: AgentProviderId): FixHint {
       };
     case "mimo":
       return {
-        detail: "Install Mimo (npm i -g mimo-ai) and ensure `mimo` is on PATH.",
-        command: "npm i -g mimo-ai",
+        detail: "Install MiMo Code (npm i -g @mimo-ai/cli) and ensure `mimo` is on PATH.",
+        command: "npm i -g @mimo-ai/cli",
       };
     case "cursor":
       return {

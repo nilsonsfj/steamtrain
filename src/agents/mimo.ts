@@ -2,22 +2,27 @@ import type { AgentEvent, AgentId, AgentInstanceId, EventMapper } from "../types
 import type { AgentAdapter, AgentRunOptions } from "./adapter";
 import { runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
-import { OPENCODE_MODELS, buildOpenCodeRunArgs, createOpenCodeMapper } from "./opencode";
+import { buildOpenCodeRunArgs, createOpenCodeMapper } from "./opencode";
 
 const AGENT: AgentId = "mimo";
 
 /**
- * Mimo is an OpenCode fork: same `run --format json` CLI and event protocol
- * under a different binary/branding, so its model catalog mirrors OpenCode's
- * verbatim with the provider prefix swapped (`opencode/x` -> `mimo/x`,
- * `opencode-go/x` -> `mimo-go/x`).
+ * Known MiMo Code models (`mimo models`). Protocol matches OpenCode
+ * (`run --format json`), but the catalog is Xiaomi's — not a renamed
+ * OpenCode Zen/Go list. Live installs refresh via `mimo models --verbose`.
+ *
+ * Verified against @mimo-ai/cli 0.1.7:
+ *   mimo/mimo-auto                  — MiMo Auto (free channel)
+ *   xiaomi/mimo-v2.5                — platform MiMo-V2.5
+ *   xiaomi/mimo-v2.5-pro            — platform MiMo-V2.5-Pro
+ *   xiaomi/mimo-v2.5-pro-ultraspeed — platform UltraSpeed SKU
  */
-export const MIMO_MODELS: readonly AgentModel[] = OPENCODE_MODELS.map((model) => ({
-  id: model.id.startsWith("opencode-go/")
-    ? `mimo-go/${model.id.slice("opencode-go/".length)}`
-    : `mimo/${model.id.slice("opencode/".length)}`,
-  name: model.name,
-}));
+export const MIMO_MODELS: readonly AgentModel[] = [
+  { id: "mimo/mimo-auto", name: "MiMo Auto" },
+  { id: "xiaomi/mimo-v2.5", name: "MiMo-V2.5" },
+  { id: "xiaomi/mimo-v2.5-pro", name: "MiMo-V2.5-Pro" },
+  { id: "xiaomi/mimo-v2.5-pro-ultraspeed", name: "MiMo-V2.5-Pro-UltraSpeed" },
+];
 
 export function createMimoMapper(agent: AgentInstanceId = AGENT): EventMapper {
   return createOpenCodeMapper(agent);
@@ -27,7 +32,8 @@ export function createMimoMapper(agent: AgentInstanceId = AGENT): EventMapper {
 export class MimoAdapter implements AgentAdapter {
   readonly id: AgentId = AGENT;
   readonly binary: string;
-  readonly defaultModel = "mimo/mimo-v2.5-free";
+  /** Free anonymous channel; zero config on first launch. */
+  readonly defaultModel = "mimo/mimo-auto";
   readonly supportsResume = true;
 
   constructor(binary = "mimo") {

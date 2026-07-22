@@ -499,6 +499,159 @@ describe("workflow UI helpers", () => {
     expect(frame).toContain("iter 1/2");
     expect(frame).toContain("iter 2/2");
   });
+
+  it("keeps the frame height stable across auto-follow hops as steps finish", () => {
+    // Reproduces the mid-run flicker: follow jumps from a streaming step with
+    // rich context/output to the next empty running step. Layout must not
+    // rebudget the tree (Ink full-redraws when the frame breathes).
+    const parent: StepState = {
+      stepId: "babysit",
+      blockKind: "distributor",
+      status: "done",
+      text: "",
+      result: {
+        stepId: "babysit",
+        ok: true,
+        output: "ok",
+        durationMs: 100,
+        costUsd: 0.01,
+        tokens: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+      },
+      cached: false,
+    };
+    const makeChild = (i: number, status: StepState["status"], rich: boolean): StepState => ({
+      stepId: `babysit[${i}]`,
+      parentStepId: "babysit",
+      blockKind: "worker",
+      agent: "claude",
+      model: "opus",
+      status,
+      text: rich
+        ? Array.from({ length: 12 }, (_, line) => `stream line ${line} for child ${i}`).join("\n")
+        : "",
+      startedAt: status === "running" ? 1_000 : undefined,
+      activity: status === "running" ? "⚙ Bash\nworking" : undefined,
+      cached: false,
+      worktree: rich
+        ? {
+            originalCwd: "/repo",
+            cwd: `/tmp/wt-babysit-${i}`,
+            root: "/tmp",
+            branch: `steamtrain/run/babysit-${i}`,
+          }
+        : undefined,
+      item: {
+        sourceStepId: "babysit",
+        index: i,
+        value: rich
+          ? `https://github.com/example/repo/pull/${4200 + i}\nextra\nlines`
+          : `item-${i}`,
+      },
+      result:
+        status === "done"
+          ? {
+              stepId: `babysit[${i}]`,
+              ok: true,
+              output: Array.from({ length: 12 }, (_, line) => `done line ${line}`).join("\n"),
+              durationMs: 5_000,
+              costUsd: 0.02,
+              tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0 },
+            }
+          : undefined,
+    });
+
+    const height = 24;
+    const width = 100;
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escapes
+    const strip = (f: string) => f.split("\n").map((line) => line.replace(/\u001b\[[0-9;]*m/g, ""));
+    const detailRuleIndex = (lines: string[]) =>
+      lines.findIndex((line) => /──/.test(line) && /babysit\[\d+]/.test(line));
+
+    const frames: string[][] = [];
+    // Seed one finished child with cost so the models line is present for every
+    // hop; then follow streaming→empty→streaming on later children.
+    const sequences: { steps: StepState[]; selectedIndex: number }[] = [
+      {
+        steps: [
+          parent,
+          makeChild(0, "done", true),
+          makeChild(1, "running", true),
+          makeChild(2, "pending", false),
+        ],
+        selectedIndex: 2,
+      },
+      {
+        steps: [
+          parent,
+          makeChild(0, "done", true),
+          makeChild(1, "done", true),
+          makeChild(2, "running", false),
+        ],
+        selectedIndex: 3,
+      },
+      {
+        steps: [
+          parent,
+          makeChild(0, "done", true),
+          makeChild(1, "done", true),
+          makeChild(2, "running", true),
+        ],
+        selectedIndex: 3,
+      },
+    ];
+
+    for (const { steps, selectedIndex } of sequences) {
+      const state: WorkflowState = {
+        name: "babysit-all-prs",
+        startedAt: 0,
+        phases: [
+          {
+            phaseId: "phase",
+            title: "Babysit each PR",
+            index: 0,
+            stepCount: steps.length,
+            steps,
+            done: false,
+            ok: true,
+          },
+        ],
+        results: [],
+        started: true,
+        done: false,
+        ok: true,
+      };
+      const { lastFrame } = render(
+        <WorkflowView
+          state={state}
+          width={width}
+          height={height}
+          selectedIndex={selectedIndex}
+          elapsedMs={30_000}
+          now={31_000}
+        />,
+      );
+      frames.push(strip(lastFrame() ?? ""));
+    }
+
+    for (const lines of frames) {
+      expect(lines.length).toBeLessThanOrEqual(height);
+      expect(lines[0]).toMatch(/^╭/);
+      expect(lines[lines.length - 1]).toMatch(/╯$/);
+    }
+
+    // Detail panel top rule stays pinned at the same row — the tree budget
+    // must not breathe when follow hops from rich output to an empty step.
+    const ruleIndexes = frames.map(detailRuleIndex);
+    expect(ruleIndexes.every((i) => i > 0)).toBe(true);
+    expect(new Set(ruleIndexes).size).toBe(1);
+
+    // Multiline item values must not inject soft-wrap rows under the detail rule.
+    const mid = frames[1]!;
+    const ruleIndex = ruleIndexes[1]!;
+    for (let i = ruleIndex; i < Math.min(mid.length - 1, ruleIndex + 6); i++) {
+      expect(mid[i]!.length).toBeLessThanOrEqual(width);
+    }
+  });
 });
 
 function workflowStateWithSteps(count: number): WorkflowState {

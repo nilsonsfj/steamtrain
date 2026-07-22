@@ -1,6 +1,7 @@
 import { Box, Text, useInput } from "ink";
 import { useState } from "react";
 import type { PendingHumanInput } from "../workflow";
+import { shouldAcceptTextInput } from "./text-input-filter";
 
 interface WorkflowAnswerInputProps {
   pending: PendingHumanInput;
@@ -57,7 +58,7 @@ export function WorkflowAnswerInput({
       setValue((prev) => prev.slice(0, -1));
       return;
     }
-    if (input && !key.ctrl && !key.meta) {
+    if (shouldAcceptTextInput(input, key)) {
       setValue((prev) => prev + input);
     }
   });
