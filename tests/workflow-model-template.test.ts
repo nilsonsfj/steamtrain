@@ -158,6 +158,178 @@ describe("templated model/effort on agent-backed steps", () => {
     const events = await runToEvents(edited, agentDeps(runs), { coderModel: "grok-5" });
     expect(runs[0]?.opts.model).toBe("grok-5");
   });
+
+  it("rematerializes model-only steps before workspace allocation", async () => {
+    const runs: RunRecord[] = [];
+    const allocatedAgents: string[] = [];
+    const createAdapter = (id: AgentId): AgentAdapter => ({
+      id,
+      binary: "fake",
+      defaultModel: "test",
+      run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
+        return (async function* () {
+          runs.push({ opts });
+          yield {
+            kind: "result",
+            agent: id,
+            ts: 0,
+            isError: false,
+            text: `out:${opts.model}`,
+          } satisfies AgentEvent;
+        })();
+      },
+    });
+    const deps: WorkflowDeps = {
+      createAdapter,
+      maxConcurrency: 4,
+      cwd: process.cwd(),
+      agentWorkspace: {
+        async allocate(request) {
+          if (!request.agent) throw new Error("no concrete agent binding for workspace allocation");
+          allocatedAgents.push(request.agent);
+          return { cwd: process.cwd(), dispose: async () => {} };
+        },
+      },
+    };
+    const spec: WorkflowSpec = {
+      name: "model-only-workspace",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            {
+              id: "prepare",
+              kind: "processor",
+              model: "mimo/mimo-auto",
+              prompt: "go",
+            },
+          ],
+        },
+      ],
+    };
+    const events = await runToEvents(spec, deps);
+    const result = doneResults(events).get("prepare");
+    expect(result?.ok).toBe(true);
+    expect(allocatedAgents).toEqual(["mimo"]);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.opts.model).toBe("mimo/mimo-auto");
+    expect(runs[0]?.opts.agentId).toBe("mimo");
+  });
+
+  it("rematerializes templated model-only inputs before workspace allocation", async () => {
+    const runs: RunRecord[] = [];
+    const allocatedAgents: string[] = [];
+    const createAdapter = (id: AgentId): AgentAdapter => ({
+      id,
+      binary: "fake",
+      defaultModel: "test",
+      run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
+        return (async function* () {
+          runs.push({ opts });
+          yield {
+            kind: "result",
+            agent: id,
+            ts: 0,
+            isError: false,
+            text: `out:${opts.model}`,
+          } satisfies AgentEvent;
+        })();
+      },
+    });
+    const deps: WorkflowDeps = {
+      createAdapter,
+      maxConcurrency: 4,
+      cwd: process.cwd(),
+      agentWorkspace: {
+        async allocate(request) {
+          if (!request.agent) throw new Error("no concrete agent binding for workspace allocation");
+          allocatedAgents.push(request.agent);
+          return { cwd: process.cwd(), dispose: async () => {} };
+        },
+      },
+    };
+    const spec: WorkflowSpec = {
+      name: "templated-model-only-workspace",
+      inputs: {
+        babysitterModel: { type: "model", default: "mimo/mimo-auto" },
+      },
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            {
+              id: "prepare",
+              kind: "processor",
+              model: "{{inputs.babysitterModel}}",
+              prompt: "go",
+            },
+          ],
+        },
+      ],
+    };
+    const events = await runToEvents(spec, deps, { babysitterModel: "mimo/mimo-auto" });
+    const result = doneResults(events).get("prepare");
+    expect(result?.ok).toBe(true);
+    expect(allocatedAgents).toEqual(["mimo"]);
+    expect(runs[0]?.opts.agentId).toBe("mimo");
+  });
+
+  it("rematerializes a mismatched agent pin onto the model family before spawn", async () => {
+    const runs: RunRecord[] = [];
+    const createAdapter = (id: AgentId): AgentAdapter => ({
+      id,
+      binary: "fake",
+      defaultModel: "test",
+      run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
+        return (async function* () {
+          runs.push({ opts });
+          yield {
+            kind: "result",
+            agent: id,
+            ts: 0,
+            isError: false,
+            text: "ok",
+          } satisfies AgentEvent;
+        })();
+      },
+    });
+    const deps: WorkflowDeps = {
+      createAdapter,
+      maxConcurrency: 4,
+      cwd: process.cwd(),
+      agentConfig: {
+        agents: [
+          { id: "opencode", provider: "opencode", enabled: true },
+          { id: "mimo", provider: "mimo", enabled: true },
+        ],
+      },
+    };
+    const spec: WorkflowSpec = {
+      name: "mismatched-pin",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            {
+              id: "work",
+              kind: "worker",
+              agent: "opencode",
+              model: "mimo/mimo-auto",
+              prompt: "go",
+            },
+          ],
+        },
+      ],
+    };
+    const events = await runToEvents(spec, deps);
+    expect(doneResults(events).get("work")?.ok).toBe(true);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.opts.agentId).toBe("mimo");
+    expect(runs[0]?.opts.model).toBe("mimo/mimo-auto");
+  });
 });
 
 describe("templated model on llm steps", () => {

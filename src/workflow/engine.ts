@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join as joinPath, resolve as resolvePath } from "node:path";
-import { effortForModelChange, resolveAgentInstance } from "../agents";
+import { effortForModelChange, materializeStepBinding, resolveAgentInstance } from "../agents";
 import type { AgentAdapter } from "../agents";
 import {
   type AgentFailureKind,
@@ -2006,11 +2006,60 @@ async function executeAgentStep(
   // pipeline at execution time, so every downstream use in this function
   // (agent spawn args, retries, structured-output fix, `canAsk` continuation)
   // sees the RENDERED value.
-  const step: AgentBackedWorkflowStep = {
+  let step: AgentBackedWorkflowStep = {
     ...rawStep,
     model: modelEffort.model,
     effort: modelEffort.effort,
   };
+
+  // Rematerialize agent+model BEFORE session resume / workspace allocation.
+  // Model-only and mismatched pins (e.g. authored `agent: opencode` + rendered
+  // `mimo/mimo-auto`) must resolve to a runnable agent first — both of those
+  // paths require `step.agent`.
+  const inputFallbacks = fallbackModelsFromInputRefs(ctx.workflowInputs, rawStep.model);
+  const effectiveStepFallbacks = mergeFallbackModelLists(inputFallbacks, rawStep.fallbackModels);
+  const failoverStep: AgentBackedWorkflowStep = {
+    ...step,
+    fallbackModels: effectiveStepFallbacks,
+  };
+  const prior = ctx.bindingResolutions.find((r) => r.stepId === step.id);
+  let failover: ResolvedModelCandidate[] = prior?.candidates ?? [];
+  if (failover.length === 0 || (inputFallbacks?.length ?? 0) > 0 || !step.agent) {
+    const live = resolveStepFailoverChain(failoverStep, {
+      config: ctx.deps.agentConfig,
+      isReady: (agent) => Boolean(resolveAgentInstance(ctx.deps.agentConfig, agent)),
+      workflowFallbackModels: ctx.workflowFallbackModels,
+    });
+    if (live.ok) failover = live.candidates;
+  }
+  let failoverIndex = 0;
+  if (failover.length > 0) {
+    const exact = failover.findIndex((c) => c.agent === step.agent && c.model === step.model);
+    if (exact >= 0) {
+      failoverIndex = exact;
+      const matched = failover[exact]!;
+      step = {
+        ...step,
+        agent: matched.agent,
+        model: matched.model,
+        ...(matched.effort && !step.effort ? { effort: matched.effort } : {}),
+      };
+    } else {
+      const primary = failover[0]!;
+      step = {
+        ...step,
+        agent: primary.agent,
+        model: primary.model,
+        ...(primary.effort && !step.effort ? { effort: primary.effort } : {}),
+      };
+      failoverIndex = 0;
+    }
+  }
+  if (!step.agent || !step.model) {
+    const message = `step '${stepId}' has no concrete agent/model binding after model resolution`;
+    return { stepId, ok: false, output: message, item, error: message, durationMs: 0 };
+  }
+
   const rendered = renderPrompt(step.prompt, {
     input: ctx.input,
     inputs: ctx.inputs,
@@ -2078,55 +2127,6 @@ async function executeAgentStep(
   const firstStarted = Date.now();
   let attempt = 0;
   let activeStep: AgentBackedWorkflowStep = step;
-  // Inherit failover models declared on model-typed inputs referenced by the
-  // *unrendered* model template (`rawStep.model`). The rendered `step.model`
-  // is a concrete id and no longer carries `{{inputs.*}}` refs.
-  const inputFallbacks = fallbackModelsFromInputRefs(ctx.workflowInputs, rawStep.model);
-  const effectiveStepFallbacks = mergeFallbackModelLists(inputFallbacks, rawStep.fallbackModels);
-  const failoverStep: AgentBackedWorkflowStep = {
-    ...step,
-    fallbackModels: effectiveStepFallbacks,
-  };
-  // Failover chain: prefer the resolution captured at run start (preserves
-  // authoring-time model/class intent), else recompute from the live step.
-  // For templated models the start-of-run pass leaves the step as-authored,
-  // so we always recompute when input/step fallbacks are present — or when
-  // the step still lacks a concrete agent after model render (model-only /
-  // cross-family input pick).
-  const prior = ctx.bindingResolutions.find((r) => r.stepId === step.id);
-  let failover: ResolvedModelCandidate[] = prior?.candidates ?? [];
-  // Recompute when start-of-run left no chain, when model-typed inputs
-  // contribute fallbacks that were not available until after template render,
-  // or when the rendered model still has no agent to spawn.
-  if (failover.length === 0 || (inputFallbacks?.length ?? 0) > 0 || !step.agent) {
-    const live = resolveStepFailoverChain(failoverStep, {
-      config: ctx.deps.agentConfig,
-      isReady: (agent) => Boolean(resolveAgentInstance(ctx.deps.agentConfig, agent)),
-      workflowFallbackModels: ctx.workflowFallbackModels,
-    });
-    if (live.ok) failover = live.candidates;
-  }
-  // Align the first attempt with a runnable candidate. Templated model inputs
-  // (and mismatched agent pins like `agent: opencode` + `model: mimo/mimo-auto`)
-  // must not spawn the authored agent/model pair when the resolver already
-  // picked a different primary — otherwise we burn the first attempt on a
-  // non-runnable binding and skip the correct candidate at index 0 on advance.
-  let failoverIndex = 0;
-  if (failover.length > 0) {
-    const exact = failover.findIndex((c) => c.agent === step.agent && c.model === step.model);
-    if (exact >= 0) {
-      failoverIndex = exact;
-    } else {
-      const primary = failover[0]!;
-      activeStep = {
-        ...step,
-        agent: primary.agent,
-        model: primary.model,
-        ...(primary.effort && !step.effort ? { effort: primary.effort } : {}),
-      };
-      failoverIndex = 0;
-    }
-  }
   // Extend the attempt budget only when the author declared explicit
   // fallbackModels (input, step, or workflow) — automatic same-family remaps
   // must not inflate retries for plain pinned steps. When fallbacks *are*
@@ -3907,12 +3907,29 @@ async function executeMergeStep(
           // consumers — runAgentAttempt reads agent/model/effort/env/
           // extraArgs/stepTimeoutSec plus the prompt argument and never
           // dispatches on kind (this does NOT go through executeStep).
+          // Materialize model-only merge bindings (e.g. mainline integrate)
+          // onto a concrete agent before spawning.
+          const binding = materializeStepBinding(
+            {
+              agent: step.agent,
+              model: conflictModel as string,
+              effort: conflictEffort,
+              modelClass: step.modelClass,
+            },
+            {
+              config: ctx.deps.agentConfig,
+              isReady: (agent) => Boolean(resolveAgentInstance(ctx.deps.agentConfig, agent)),
+            },
+          );
+          if (!binding.ok) {
+            throw new Error(`conflict-resolution binding failed: ${binding.error}`);
+          }
           const synthetic: AgentBackedWorkflowStep = {
             id: step.id,
             kind: "processor",
-            agent: step.agent as AgentInstanceId,
-            model: conflictModel as string,
-            effort: conflictEffort,
+            agent: binding.step.agent,
+            model: binding.step.model,
+            effort: binding.step.effort,
             env: step.env,
             extraArgs: step.extraArgs,
             stepTimeoutSec: step.stepTimeoutSec,
