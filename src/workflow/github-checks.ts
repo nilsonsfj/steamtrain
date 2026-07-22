@@ -79,8 +79,6 @@ const IN_FLIGHT = new Set<CheckRollupState>([
   "UNKNOWN",
 ]);
 
-const SUCCESS_LIKE = new Set<CheckRollupState>(["SUCCESS", "NEUTRAL", "SKIPPED"]);
-
 const FAILURE_LIKE = new Set<CheckRollupState>([
   "FAILURE",
   "ERROR",
@@ -180,7 +178,10 @@ export function evaluatePullRequestChecks(
     };
   }
 
-  const pending = checks.filter((c) => IN_FLIGHT.has(c.state) || !SUCCESS_LIKE.has(c.state));
+  // FAILURE_LIKE already returned above. Remaining states are either still
+  // in flight (including UNKNOWN from normalizeCheckState) or success-like
+  // (SUCCESS / NEUTRAL / SKIPPED).
+  const pending = checks.filter((c) => IN_FLIGHT.has(c.state));
   if (pending.length > 0) {
     return {
       ready: false,
@@ -300,9 +301,13 @@ export function parseStatusCheckRollup(raw: unknown): CheckRollupEntry[] {
       (typeof obj.workflowName === "string" && obj.workflowName) ||
       "check";
     // Check runs use conclusion when complete; status while in flight.
-    // Status contexts use state.
+    // Status contexts use state. checkSuite.status is a nested fallback.
+    const checkSuiteStatus =
+      obj.checkSuite && typeof obj.checkSuite === "object"
+        ? (obj.checkSuite as { status?: unknown }).status
+        : undefined;
     const state = normalizeCheckState(
-      obj.conclusion ?? obj.state ?? obj.status ?? (obj.checkSuite as { status?: unknown })?.status,
+      obj.conclusion ?? obj.state ?? obj.status ?? checkSuiteStatus,
     );
     const source =
       typeof obj.workflowName === "string"

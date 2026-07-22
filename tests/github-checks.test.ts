@@ -46,6 +46,17 @@ describe("parseStatusCheckRollup", () => {
       ["remote-review", "QUEUED"],
     ]);
   });
+
+  it("normalizes nested checkSuite status and ignores non-object suites", () => {
+    const entries = parseStatusCheckRollup([
+      { name: "suite-check", checkSuite: { status: "IN_PROGRESS" } },
+      { name: "bad-suite", checkSuite: "not-an-object", conclusion: "SUCCESS" },
+    ]);
+    expect(entries.map((e) => [e.name, e.state])).toEqual([
+      ["suite-check", "IN_PROGRESS"],
+      ["bad-suite", "SUCCESS"],
+    ]);
+  });
 });
 
 describe("evaluatePullRequestChecks", () => {
