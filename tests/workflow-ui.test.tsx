@@ -164,6 +164,115 @@ describe("workflow UI helpers", () => {
     expect(frame).toMatch(/──/);
   });
 
+  it("keeps long fan-out step rows on a single line so borders do not ghost-wrap", () => {
+    const parent: StepState = {
+      stepId: "babysit",
+      blockKind: "distributor",
+      status: "done",
+      text: "",
+      result: { stepId: "babysit", ok: true, output: "listed", durationMs: 22_100 },
+      cached: false,
+    };
+    const children: StepState[] = Array.from({ length: 5 }, (_, i) => ({
+      stepId: `babysit[${i}]`,
+      parentStepId: "babysit",
+      blockKind: "processor",
+      agent: "antigravity",
+      model: "gemini-3.6-flash-high",
+      effort: "high",
+      status: "running",
+      text: "streaming",
+      startedAt: 1_000,
+      activity: "bash · reading files and applying review comments",
+      cached: false,
+      worktree: {
+        originalCwd: "/repo",
+        cwd: `/var/folders/47/zydwtfn52c3ffpp4l2xl__zm0000gn/T/steamtrain-wt-babysit-${i}`,
+        root: "/tmp/wt",
+        branch: "claude/hopeful-shannon-lx8lxp",
+      },
+      item: {
+        sourceStepId: "babysit",
+        index: i,
+        value: `https://github.com/example/repo/pull/${4200 + i}`,
+      },
+    }));
+    const summary: StepState = {
+      stepId: "summary",
+      blockKind: "consolidator",
+      agent: "antigravity",
+      model: "gemini-3.6-flash-high",
+      status: "pending",
+      text: "",
+      cached: false,
+    };
+    const state: WorkflowState = {
+      name: "babysit-all-prs",
+      startedAt: 0,
+      phases: [
+        {
+          phaseId: "babysit-phase",
+          title: "Babysit each PR",
+          index: 0,
+          stepCount: 1 + children.length,
+          steps: [parent, ...children],
+          done: false,
+          ok: true,
+        },
+        {
+          phaseId: "summary-phase",
+          title: "Summary",
+          index: 1,
+          stepCount: 1,
+          steps: [summary],
+          done: false,
+          ok: true,
+        },
+      ],
+      results: [],
+      started: true,
+      done: false,
+      ok: true,
+    };
+    const width = 100;
+    const height = 28;
+    const { lastFrame } = render(
+      <WorkflowView
+        state={state}
+        width={width}
+        height={height}
+        selectedIndex={1}
+        elapsedMs={68_000}
+        now={45_800}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escapes
+    const lines = frame.split("\n").map((line) => line.replace(/\u001b\[[0-9;]*m/g, ""));
+    expect(lines.length).toBeLessThanOrEqual(height);
+    // Header stays visible (overflow wraps used to push it off-screen).
+    expect(frame).toContain("workflow · babysit-all-prs");
+    expect(frame).toContain("babysit[0]");
+    expect(frame).toContain("babysit[4]");
+    expect(frame).toContain("Summary");
+    expect(lines[0]).toMatch(/^╭/);
+    expect(lines[lines.length - 1]).toMatch(/╯$/);
+    // Each babysit child occupies exactly one content line, with no blank
+    // wrap-continuation rows between them (the pre-fix failure mode).
+    const babysitIndexes = lines
+      .map((line, i) => (/↳\s*babysit\[\d+]/.test(line) ? i : -1))
+      .filter((i) => i >= 0);
+    expect(babysitIndexes).toHaveLength(5);
+    for (let i = 1; i < babysitIndexes.length; i++) {
+      expect(babysitIndexes[i]).toBe(babysitIndexes[i - 1]! + 1);
+    }
+    for (const index of babysitIndexes) {
+      expect(lines[index]!.length).toBeLessThanOrEqual(width);
+      // Runner kept on the left of the flexible zone (not crushed to "antigravi…").
+      expect(lines[index]).toContain("antigravity/gemini-3.6");
+    }
+  });
+
   it("scrolls the live drill-in output and reports the window position", () => {
     const state = workflowStateWithSteps(1);
     const step = state.phases[0]!.steps[0]!;
@@ -342,7 +451,7 @@ describe("workflow UI helpers", () => {
     );
     const frame = lastFrame() ?? "";
     expect(frame).toContain("workflow · big-run");
-    expect(frame).toContain("paused · ⚠ workflow budget");
+    expect(frame).toContain("paused · workflow budget");
     expect(frame.split("\n").length).toBeLessThanOrEqual(6);
   });
 

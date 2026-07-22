@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import { Box, Text } from "ink";
 import { useMemo } from "react";
+import stringWidth from "string-width";
 import { truncate } from "../agents/util";
 import {
   type ModelUsage,
@@ -27,6 +28,7 @@ import {
 import { statusWord } from "./status-word";
 import { AGENT_COLOR, BLOCK_COLOR } from "./theme";
 import { useSpinner } from "./useSpinner";
+import { truncateToWidth } from "./util";
 import { selectVisibleWindow } from "./workflow-list-window";
 import { BLOCK_LABEL } from "./workflow-spec-ui";
 import {
@@ -261,7 +263,7 @@ export function WorkflowView({
                 ? "✓"
                 : "✗"
               : showPaused
-                ? "⏸"
+                ? "="
                 : progress.waiting > 0 && progress.running === 0
                   ? "?"
                   : spinner}{" "}
@@ -295,15 +297,14 @@ export function WorkflowView({
       ) : null}
       {combineNotices && showPaused && state.budget ? (
         <Text color="yellow" wrap="truncate-end">
-          ⏸ paused · ⚠{" "}
-          {state.budget.scope === "step" ? `step '${state.budget.stepId}'` : "workflow"} budget{" "}
-          {formatUsd(state.budget.limitUsd)} reached · raise cap, then p resume
+          paused · {state.budget.scope === "step" ? `step '${state.budget.stepId}'` : "workflow"}{" "}
+          budget {formatUsd(state.budget.limitUsd)} reached · raise cap, then p resume
         </Text>
       ) : (
         <>
           {showPaused ? (
             <Text color="yellow" wrap="truncate-end">
-              ⏸ paused{state.pausedBy ? ` by ${state.pausedBy}` : ""}
+              paused{state.pausedBy ? ` by ${state.pausedBy}` : ""}
               {progress.running > 0
                 ? ` — ${progress.running} in-flight step${progress.running === 1 ? "" : "s"} finishing`
                 : ""}{" "}
@@ -312,7 +313,6 @@ export function WorkflowView({
           ) : null}
           {state.budget ? (
             <Text color="yellow" wrap="truncate-end">
-              ⚠{" "}
               {state.budget.scope === "step" && state.budget.stepId
                 ? `step '${state.budget.stepId}'`
                 : "workflow"}{" "}
@@ -326,7 +326,7 @@ export function WorkflowView({
       {showCompactAttention ? (
         <Text color={approvalCard ? "yellow" : "magenta"} wrap="truncate-end">
           {approvalCard
-            ? `a approve · r reject · ⏳ ${approvalCard.title}`
+            ? `a approve · r reject · ${approvalCard.title}`
             : `a answer · ✎ ${inputCard?.title ?? "input needed"}`}
           {(state.pendingApprovals?.length ?? 0) + (state.pendingInputs?.length ?? 0) > 1
             ? ` · +${
@@ -337,13 +337,19 @@ export function WorkflowView({
       ) : null}
 
       {showCard && approvalCard ? (
-        <AttentionCard card={approvalCard} borderColor="yellow" />
+        <AttentionCard card={approvalCard} borderColor="yellow" width={innerWidth} />
       ) : showCard && inputCard ? (
-        <AttentionCard card={inputCard} borderColor="magenta" />
+        <AttentionCard card={inputCard} borderColor="magenta" width={innerWidth} />
       ) : null}
 
       {showTree ? (
-        <Box flexDirection="column" height={layout.listBudget} flexShrink={0} overflow="hidden">
+        <Box
+          flexDirection="column"
+          width={innerWidth}
+          height={layout.listBudget}
+          flexShrink={0}
+          overflow="hidden"
+        >
           {rows.length === 0 ? (
             <Text color="gray">{spinner} starting workflow…</Text>
           ) : (
@@ -369,6 +375,7 @@ export function WorkflowView({
                     row={row}
                     idColWidth={idColWidth}
                     kindColWidth={kindColWidth}
+                    width={innerWidth}
                   />
                 ) : (
                   <StepRow
@@ -376,6 +383,7 @@ export function WorkflowView({
                     step={row.step}
                     idColWidth={idColWidth}
                     kindColWidth={kindColWidth}
+                    width={innerWidth}
                     selected={rowWindow.start + offset === selectedRowIndex}
                     superseded={
                       (row.phase.iteration ?? 1) < (maxIterByPhase.get(row.phase.phaseId) ?? 1)
@@ -507,7 +515,7 @@ function buildApprovalCard(
     title: `approval required · ${approval.stepId}${
       approval.reviewStepId ? ` (reviewing ${approval.reviewStepId})` : ""
     }`,
-    titleGlyph: "⏳",
+    titleGlyph: "?",
     color: "yellow",
     body,
     hint: {
@@ -551,9 +559,24 @@ function buildInputCard(
   };
 }
 
-function AttentionCard({ card, borderColor }: { card: AttentionCardModel; borderColor: string }) {
+function AttentionCard({
+  card,
+  borderColor,
+  width,
+}: {
+  card: AttentionCardModel;
+  borderColor: string;
+  width: number;
+}) {
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={borderColor} paddingX={1}>
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={borderColor}
+      paddingX={1}
+      width={width}
+      overflow="hidden"
+    >
       <Text color={card.color} bold wrap="truncate-end">
         {card.titleGlyph} {card.title}
       </Text>
@@ -642,15 +665,22 @@ function CollapsedFanoutRow({
   row,
   idColWidth,
   kindColWidth,
+  width,
 }: {
   row: Extract<WorkflowTreeRow, { kind: "collapsed" }>;
   idColWidth: number;
   kindColWidth: number;
+  width: number;
 }) {
   // Same id/kind column widths as StepRow so the tree stays aligned when a
   // pending fan-out collapses into one summary.
   const id = truncate(`↳ ${row.firstStepId}…${row.lastStepId}`, idColWidth);
   const kindLabel = BLOCK_LABEL.worker;
+  const prefix = `   · ${id.padEnd(idColWidth)} ${kindLabel.padEnd(kindColWidth)}`;
+  const pending = truncateToWidth(
+    `  ${row.count} pending`,
+    Math.max(0, width - stringWidth(prefix)),
+  );
   return (
     <Text wrap="truncate-end">
       <Text color="gray">{"   "}</Text>
@@ -663,10 +693,11 @@ function CollapsedFanoutRow({
       <Text color={BLOCK_COLOR.worker} dimColor>
         {kindLabel.padEnd(kindColWidth)}
       </Text>
-      <Text color="gray" dimColor>
-        {"  "}
-        {row.count} pending
-      </Text>
+      {pending ? (
+        <Text color="gray" dimColor>
+          {pending}
+        </Text>
+      ) : null}
     </Text>
   );
 }
@@ -675,6 +706,7 @@ function StepRow({
   step,
   idColWidth,
   kindColWidth,
+  width,
   selected,
   superseded,
   now,
@@ -683,6 +715,8 @@ function StepRow({
   step: StepState;
   idColWidth: number;
   kindColWidth: number;
+  /** Inner content width of the tree (border/padding already subtracted). */
+  width: number;
   selected: boolean;
   superseded: boolean;
   now: number;
@@ -715,32 +749,42 @@ function StepRow({
       : "";
   const item = step.item ? ` item ${step.item.index}: ${truncate(step.item.value, 24)}` : "";
   const meta = stepMeta(step, now);
+  const marker = selected ? " ❯ " : "   ";
+  const glyphPart = `${glyph.symbol} `;
+  const idPart = `${id.padEnd(idColWidth)} `;
+  const kindPart = kindLabel.padEnd(kindColWidth);
+  const prefix = `${marker}${glyphPart}${idPart}${kindPart}`;
+  // Pre-fit the flexible tail with string-width so each row stays one terminal
+  // line. Prefer left content (runner / worktree / item); trail meta into
+  // whatever columns remain. Ink truncate-end alone still wraps when Yoga
+  // measures unconstrained content width, painting ghost border glyphs
+  // between fan-out children and pushing the header off-screen.
+  let room = Math.max(0, width - stringWidth(prefix));
+  const midRaw = `${runner ? `  ${runner}` : ""}${target}${item}`;
+  const midPart = midRaw ? truncateToWidth(midRaw, room) : "";
+  room = Math.max(0, room - stringWidth(midPart));
+  const metaRaw = meta ? `  ${meta}` : "";
+  const metaPart = metaRaw ? truncateToWidth(metaRaw, room) : "";
   return (
     <Text wrap="truncate-end">
-      <Text color="cyan">{selected ? " ❯ " : "   "}</Text>
+      <Text color="cyan">{marker}</Text>
       <Text color={glyph.color} dimColor={superseded}>
-        {glyph.symbol}{" "}
+        {glyphPart}
       </Text>
       <Text color="white" bold={selected} dimColor={superseded}>
-        {id.padEnd(idColWidth)}{" "}
+        {idPart}
       </Text>
       <Text color={BLOCK_COLOR[step.blockKind]} dimColor={superseded}>
-        {kindLabel.padEnd(kindColWidth)}
+        {kindPart}
       </Text>
-      {runner ? (
-        <Text color={agentColor} dimColor={superseded}>
-          {"  "}
-          {runner}
+      {midPart ? (
+        <Text color={runner ? agentColor : "gray"} dimColor={superseded}>
+          {midPart}
         </Text>
       ) : null}
-      <Text color="gray" dimColor={superseded}>
-        {target}
-        {item}
-      </Text>
-      {meta ? (
+      {metaPart ? (
         <Text color="gray" dimColor={superseded}>
-          {"  "}
-          {meta}
+          {metaPart}
         </Text>
       ) : null}
     </Text>

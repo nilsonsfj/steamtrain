@@ -1,6 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import { computeStreamHeight, wrappedLines } from "../src/tui/util";
+import { computeStreamHeight, truncateToWidth, wrappedLines } from "../src/tui/util";
+
+describe("truncateToWidth", () => {
+  it("leaves short text alone", () => {
+    expect(truncateToWidth("hello", 10)).toBe("hello");
+  });
+
+  it("ellipsizes to the column budget", () => {
+    expect(truncateToWidth("abcdefghij", 5)).toBe("abcd…");
+    expect(truncateToWidth("abcdef", 1)).toBe("…");
+    expect(truncateToWidth("abcdef", 0)).toBe("");
+  });
+
+  it("counts wide glyphs as two columns", () => {
+    // ⏸ is string-width 2; with max 3 only the glyph + ellipsis fit.
+    expect(truncateToWidth("⏸ paused", 3)).toBe("⏸…");
+  });
+});
 
 describe("wrappedLines", () => {
   it("returns at least one row for short/empty content", () => {

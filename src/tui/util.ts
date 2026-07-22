@@ -1,8 +1,28 @@
+import stringWidth from "string-width";
+
 /**
  * Extracts the message from an error object, falling back to string coercion.
  */
 export function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Truncate `text` to at most `max` terminal columns (Ink / string-width),
+ * appending an ellipsis when anything is dropped. Used to pre-fit TUI rows so
+ * Ink never soft-wraps them past a fixed frame (wrap overflow bleeds borders
+ * onto the next line and flickers the whole screen).
+ */
+export function truncateToWidth(text: string, max: number): string {
+  if (max <= 0) return "";
+  if (stringWidth(text) <= max) return text;
+  if (max === 1) return "…";
+  let out = "";
+  for (const ch of text) {
+    if (stringWidth(`${out}${ch}…`) > max) break;
+    out += ch;
+  }
+  return `${out}…`;
 }
 
 /**
