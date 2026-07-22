@@ -18,6 +18,11 @@ describe("truncateToWidth", () => {
     // ⏸ is string-width 2; with max 3 only the glyph + ellipsis fit.
     expect(truncateToWidth("⏸ paused", 3)).toBe("⏸…");
   });
+
+  it("flattens newlines so they cannot create a second row", () => {
+    expect(truncateToWidth("⚙ Bash\n| leftover", 20)).toBe("⚙ Bash | leftover");
+    expect(truncateToWidth("417\nclaude/foo", 20)).toBe("417 claude/foo");
+  });
 });
 
 describe("wrappedLines", () => {
