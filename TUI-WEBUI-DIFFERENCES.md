@@ -26,7 +26,28 @@ step, and `/set-all <agent> [model] [effort]` (plus `/agent|/model|/effort
 … --all`) stages the same overrides. Mid-run editors now expose model/effort
 alongside prompt/cmd.
 
-Last updated: 2026-07-21.
+Last updated: 2026-07-22.
+
+Updated 2026-07-22 (sub-workflow experience): `workflow` (sub-workflow) steps
+became transparent and controllable in both UIs. A new
+`WorkflowCallStep.overrides` field carries per-child-step agent-field patches
+(keys may be `::`-namespaced to reach nested sub-workflows) that the engine
+layers onto the resolved child at run time — the shared child spec on disk is
+never mutated. `applyWorkflowStepOverrides` is now namespace-aware (a
+`<workflowStepId>::<childStepId>` override key routes onto the call step's own
+`overrides`), so `/set-all`, `/agent|/model --all`, and the web bulk/per-step
+retargeting **cascade into sub-workflows**. `listRetargetableSteps(spec,
+resolve)` recurses into resolvable sub-workflows; a shared
+`describeSubWorkflow` (`src/workflow/sub-workflow-view.ts`) resolves a call
+step into its effective structure (steps, the models that actually run,
+autonomy, override count). TUI: the preview row shows a resolved rollup and
+the detail panel unfolds the child's steps with their effective targets and an
+override marker. Web: the pipeline card gets an expandable "what runs inside"
+block, the config modal renders nested per-child-step editors that cascade
+(and are included in "Retarget all"), and `GET /api/workflows/:name` now ships
+the transitively-resolved `children` specs. The shared helpers
+(`describeSubWorkflow`, `subWorkflowRollup`, `applyWorkflowSessionOverrides`,
+…) are exported into the browser reducer bundle so both UIs use the same code.
 
 Updated 2026-06-16 (after the first unification pass in
 `feat/unify-workflow-authoring`: the authoring core is now shared).
@@ -123,6 +144,8 @@ imports it through `src/tui/workflow-state.ts`; the web bundles it as
 | Auto-retry transient failures | ✅ | ✅ | Shared engine (`src/workflow/retry.ts`); workflow/per-step `retry` policy, `step_retry` event surfaced as `↻ retry n/N` in both UIs, attempts recorded in history |
 | Prompt history | ✅ | ✅ | TUI: `prompt-history` (per-mode, ↑/↓); Web: run-input ↑/↓ recall backed by localStorage, recorded on Run/Plan |
 | Prompt drafts (per-mode unsent drafts) | ✅ | ⚠️ | TUI `prompt-draft` restores unsent input per mode; the web keeps the unsent draft only while browsing history (↓ restores it) |
+| Sub-workflow contents insight (models/params/steps) | ✅ | ✅ | Shared `describeSubWorkflow`; TUI row rollup + detail-panel breakdown, Web expandable "what runs inside" card block |
+| Retarget/`set-all` cascades into sub-workflows | ✅ | ✅ | `WorkflowCallStep.overrides` (namespace-aware `applyWorkflowStepOverrides`); TUI `/set-all` + `--all` recurse via `listRetargetableSteps(spec, resolve)`, Web nested per-step editors + "Retarget all" |
 | Workspaces (non-workflow dispatch) | ✅ | ❌ | Out of scope for unification (for now) |
 
 ---

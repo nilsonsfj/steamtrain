@@ -40,6 +40,7 @@
     runState: null,
     rafQueued: false, draftAbort: null, doctor: [], apiDoctor: [],
     stagedOverrides: {},
+    childSpecs: {},
     projectConfig: null,
     project: null,
     liveRuns: [], liveRunsTimer: null, queuedBanner: false,
@@ -1575,6 +1576,7 @@
       if (r.status !== 200) { setBanner(r.body.error || "failed to load", "err"); return; }
       S.spec = r.body.spec;
       S.source = r.body.source;
+      S.childSpecs = r.body.children || {};
       document.getElementById("wfTitle").textContent = r.body.spec.name;
       document.getElementById("wfSub").textContent = r.body.spec.description || "";
       document.getElementById("runRow").style.display = isReadOnly() ? "none" : "grid";
@@ -2696,6 +2698,7 @@
     if (runnerId) card.appendChild(h("div", { class: "agent", text: runnerId + (s.model ? " \u00b7 " + s.model : "") }));
     else if (s.modelClass) card.appendChild(h("div", { class: "agent", text: "auto \u00b7 class:" + s.modelClass + (s.model ? " \u00b7 " + s.model : "") }));
     else if (s.model) card.appendChild(h("div", { class: "agent", text: "auto \u00b7 " + s.model }));
+    if (s.blockKind === "workflow") { var subEl = subWorkflowCardBlock(s.stepId); if (subEl) card.appendChild(subEl); }
     if (s.worktree) card.appendChild(h("div", { class: "worktree", title: s.worktree.cwd, text: "\u2387 " + s.worktree.branch }));
     if (s.dependsOn && s.dependsOn.length) card.appendChild(h("div", { class: "inputs", text: "inputs: " + s.dependsOn.join(", ") }));
     if (s.forEach) card.appendChild(h("div", { class: "inputs", text: "forEach: " + s.forEach }));
@@ -3901,9 +3904,95 @@
   function countAgentSteps(spec) {
     var n = 0;
     (spec.phases || []).forEach(function (p) {
-      (p.steps || []).forEach(function (st) { if (isAgentStep(st)) n++; });
+      (p.steps || []).forEach(function (st) {
+        if (isAgentStep(st)) n++;
+        else if (st.kind === "workflow") {
+          var v = subWorkflowView(st);
+          if (v && v.resolved) v.steps.forEach(function (cs) { if (cs.agentBacked) n++; });
+        }
+      });
     });
     return n;
+  }
+
+  /**
+   * Compact agent/model/effort editor for a step INSIDE a sub-workflow. Stages
+   * onto a `::`-namespaced ref key (`<callStepId>::<childPath>`) so bulk
+   * retarget, "Try without saving", and Save all cascade into the child run
+   * without touching the shared child spec. `base` records the child's own
+   * default so Save only persists a genuine override.
+   */
+  function nestedStepEditor(fullId, cs, refs, nestedList, parentId, childPath) {
+    var agent = cs.agent || "";
+    var agentSel = selectEl(agentOptionsWithAuto(agent), agent);
+    var modelSel = selectEl(agent ? modelOptionsWith(agent, cs.model) : familyModelOptions(cs.model), cs.model || "");
+    var effortField = h("div", { class: "field" });
+    var cbase = cs.base || {};
+    var ref = {
+      agentSel: agentSel, modelSel: modelSel, classSel: null, effortSel: null,
+      card: null, nested: true,
+      // Diff against the child's OWN default (not the effective value) so a
+      // previously-staged override re-persists on Save instead of being dropped.
+      base: { agent: cbase.agent || "", model: cbase.model || "", effort: cbase.effort || "" }
+    };
+    function renderEffort() {
+      clear(effortField);
+      if (!agentSel.value || !modelSel.value) { ref.effortSel = null; return; }
+      var opts = effortOptions(agentSel.value, modelSel.value, cs.effort);
+      if (opts.length <= 1) { ref.effortSel = null; return; }
+      effortField.appendChild(h("label", { text: "Effort" }));
+      var es = selectEl(opts, (ref.effortSel && ref.effortSel.value) || cs.effort || "");
+      effortField.appendChild(es);
+      ref.effortSel = es;
+    }
+    ref.renderEffort = renderEffort;
+    agentSel.addEventListener("change", function () {
+      if (agentSel.value) {
+        var a = agentById(agentSel.value);
+        fillOptions(modelSel, modelOptionsWith(agentSel.value, modelSel.value), a ? (modelSel.value || a.defaultModel) : modelSel.value);
+      } else {
+        fillOptions(modelSel, familyModelOptions(modelSel.value), modelSel.value);
+      }
+      renderEffort();
+    });
+    modelSel.addEventListener("change", renderEffort);
+
+    var useAllBtn = h("button", { class: "btn small use-for-all", text: "Use for all →", type: "button", title: "Apply this to every agent-backed step" });
+    var card = h("div", { class: "estep " + cs.kind + " nested" },
+      h("div", { class: "eh" },
+        h("span", { class: "esid", text: childPath }),
+        h("span", { class: "ek", text: cs.kind }),
+        cs.overridden ? h("span", { class: "ro", text: "★ overridden" }) : null,
+        h("span", { class: "eh-spacer" }),
+        useAllBtn
+      ),
+      h("div", { class: "row2" }, field("Agent", agentSel), field("Model", modelSel), effortField)
+    );
+    ref.card = card;
+    useAllBtn.addEventListener("click", function (e) {
+      e.preventDefault(); e.stopPropagation();
+      if (refs._onUseForAll) refs._onUseForAll(agentSel.value, modelSel.value, ref.effortSel ? ref.effortSel.value : "");
+    });
+    refs[fullId] = ref;
+    nestedList.push({ fullId: fullId, parentId: parentId, childPath: childPath, ref: ref });
+    renderEffort();
+    return card;
+  }
+
+  /** Render nested editors for every agent-backed step inside a workflow call step. */
+  function nestedStepEditors(callStep, refs, nestedList) {
+    var view = subWorkflowView(callStep);
+    if (!view || !view.resolved) return null;
+    var agentSteps = view.steps.filter(function (cs) { return cs.agentBacked; });
+    if (agentSteps.length === 0) return null;
+    var wrap = h("div", { class: "nested-steps" },
+      h("div", { class: "nested-head", text: "↳ inside " + callStep.workflow + " — retarget these to cascade into the sub-workflow" })
+    );
+    agentSteps.forEach(function (cs) {
+      var fullId = callStep.id + "::" + cs.path;
+      wrap.appendChild(nestedStepEditor(fullId, cs, refs, nestedList, callStep.id, cs.path));
+    });
+    return wrap;
   }
   function openEditor(clone) {
     if (!S.spec) return;
@@ -3921,6 +4010,7 @@
     var scopeSel = selectEl(scopeOptions(), "user");
     var banner = h("div", { class: "mbanner" });
     var refs = {};
+    var nestedList = [];
     var agentStepCount = countAgentSteps(spec);
 
     // ── Retarget-all bar: one agent/model/effort → every agent-backed step ──
@@ -4016,23 +4106,29 @@
       bulkFlash
     );
 
+    // Shared "Use for all" handler — used by both top-level and nested editors.
+    function useForAll(agent, model, effort) {
+      bulkAgentSel.value = agent;
+      var a = agentById(agent);
+      fillOptions(bulkModelSel, modelOptionsWith(agent, model), model || (a && a.defaultModel));
+      renderBulkEffort();
+      if (bulkEffortField._sel && effort != null) {
+        var has = Array.prototype.some.call(bulkEffortField._sel.options, function (o) { return o.value === (effort || ""); });
+        if (has) bulkEffortField._sel.value = effort || "";
+      }
+      applyBulkRetarget();
+    }
+    refs._onUseForAll = useForAll;
+
     var phasesWrap = h("div", { class: "ephases" });
     spec.phases.forEach(function (p) {
       var pe = h("div", { class: "ephase" }, h("div", { class: "et", text: (p.title || p.id) }));
       p.steps.forEach(function (st) {
-        pe.appendChild(stepEditor(st, refs, {
-          onUseForAll: function (agent, model, effort) {
-            bulkAgentSel.value = agent;
-            var a = agentById(agent);
-            fillOptions(bulkModelSel, modelOptionsWith(agent, model), model || (a && a.defaultModel));
-            renderBulkEffort();
-            if (bulkEffortField._sel && effort != null) {
-              var has = Array.prototype.some.call(bulkEffortField._sel.options, function (o) { return o.value === (effort || ""); });
-              if (has) bulkEffortField._sel.value = effort || "";
-            }
-            applyBulkRetarget();
-          }
-        }));
+        pe.appendChild(stepEditor(st, refs, { onUseForAll: useForAll }));
+        if (st.kind === "workflow") {
+          var nested = nestedStepEditors(st, refs, nestedList);
+          if (nested) pe.appendChild(nested);
+        }
       });
       phasesWrap.appendChild(pe);
     });
@@ -4078,6 +4174,27 @@
       if (wfRunInput.value.trim() && wfRunSec > 0) spec.workflowTimeoutSec = wfRunSec; else delete spec.workflowTimeoutSec;
       spec.phases.forEach(function (p) {
         p.steps.forEach(function (st) {
+          // Persist nested sub-workflow retargets onto this call step's own
+          // `overrides` — only the ones that differ from the child's default, so
+          // the saved spec stays minimal and the shared child spec is untouched.
+          // This runs BEFORE the `refs[st.id]` guard below: a `workflow` step is
+          // not agent-backed, so it has no `refs` entry of its own, but it still
+          // carries nested overrides to persist.
+          if (st.kind === "workflow") {
+            var ov = {};
+            nestedList.forEach(function (n) {
+              if (n.parentId !== st.id) return;
+              var nr = n.ref;
+              var agent = nr.agentSel ? nr.agentSel.value : "";
+              var model = nr.modelSel ? nr.modelSel.value : "";
+              var effort = nr.effortSel ? nr.effortSel.value : "";
+              if (agent === nr.base.agent && model === nr.base.model && effort === nr.base.effort) return;
+              var patch = {};
+              if (agent) patch.agent = agent; if (model) patch.model = model; if (effort) patch.effort = effort;
+              if (Object.keys(patch).length) ov[n.childPath] = patch;
+            });
+            if (Object.keys(ov).length) st.overrides = ov; else delete st.overrides;
+          }
           var r = refs[st.id];
           if (!r) return;
           if (r.agentSel) {
@@ -4138,6 +4255,19 @@
             } else if (r.stepTimeoutInput) patch.stepTimeoutSec = null;
             if (Object.keys(patch).length > 0) overrides.steps[st.id] = patch;
           });
+        });
+        // Nested sub-workflow steps: stage under their `::`-namespaced id, but
+        // only when the target actually changed from the child's default — an
+        // untouched nested step must not pin an override that shadows the shared
+        // child spec.
+        nestedList.forEach(function (n) {
+          var r = n.ref;
+          var agent = r.agentSel ? r.agentSel.value : "";
+          var model = r.modelSel ? r.modelSel.value : "";
+          var effort = r.effortSel ? r.effortSel.value : "";
+          if (agent === r.base.agent && model === r.base.model && effort === r.base.effort) return;
+          var patch = { agent: agent || null, model: model || null, effort: effort || null };
+          overrides.steps[n.fullId] = patch;
         });
         var wfStepSec = Number(wfStepInput.value) * 60;
         overrides.stepTimeoutSec = wfStepInput.value.trim() && wfStepSec > 0 ? wfStepSec : null;
@@ -5070,6 +5200,12 @@
     if (!S.spec) return null;
     var staged = S.stagedOverrides[S.selected];
     if (sessionOverridesEmpty(staged)) return S.spec;
+    // Use the shared, namespace-aware override applier so a staged patch keyed
+    // `<workflowStepId>::<childStepId>` routes onto the sub-workflow call step's
+    // own `overrides` (cascading to arbitrary depth) — identical to the engine.
+    if (SteamtrainReducer.applyWorkflowSessionOverrides) {
+      return SteamtrainReducer.applyWorkflowSessionOverrides(S.spec, staged);
+    }
     var spec = JSON.parse(JSON.stringify(S.spec));
     if (staged.stepTimeoutSec !== undefined) {
       if (staged.stepTimeoutSec === null) delete spec.stepTimeoutSec;
@@ -5091,6 +5227,65 @@
       });
     });
     return spec;
+  }
+
+  /** Base (catalog) spec for a sub-workflow, for describeSubWorkflow in the browser. */
+  function resolveChild(name) {
+    return (S.childSpecs && S.childSpecs[name]) || null;
+  }
+
+  /** Resolved sub-workflow view for a `workflow` call step (effective, overrides applied). */
+  function subWorkflowView(step) {
+    if (!SteamtrainReducer.describeSubWorkflow) return null;
+    return SteamtrainReducer.describeSubWorkflow(step, resolveChild);
+  }
+
+  /** Find the (effective) `workflow` call step with the given id in the current spec. */
+  function findWorkflowStep(stepId) {
+    var spec = effectiveSpec() || S.spec;
+    if (!spec) return null;
+    for (var i = 0; i < spec.phases.length; i++) {
+      var steps = spec.phases[i].steps || [];
+      for (var j = 0; j < steps.length; j++) {
+        if (steps[j].id === stepId && steps[j].kind === "workflow") return steps[j];
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Expandable "what runs inside" block for a sub-workflow step's pipeline card:
+   * a rollup summary line, then a nested list of the child steps with the model
+   * that actually runs each one (overrides applied) and an override marker.
+   */
+  function subWorkflowCardBlock(stepId) {
+    var step = findWorkflowStep(stepId);
+    if (!step) return null;
+    var view = subWorkflowView(step);
+    if (!view) return null;
+    var det = h("details", { class: "subwf" });
+    var rollup = SteamtrainReducer.subWorkflowRollup ? SteamtrainReducer.subWorkflowRollup(view) : ("→ " + step.workflow);
+    det.appendChild(h("summary", { class: "subwf-sum", text: rollup }));
+    if (!view.resolved) return det;
+    var body = h("div", { class: "subwf-body" });
+    if (view.input) body.appendChild(h("div", { class: "subwf-meta", text: "input: " + truncate(String(view.input), 100) }));
+    if (view.params && Object.keys(view.params).length) {
+      body.appendChild(h("div", { class: "subwf-meta", text: "params: " + Object.keys(view.params).map(function (k) { return k + "=" + truncate(String(view.params[k]), 40); }).join(", ") }));
+    }
+    view.steps.forEach(function (cs) {
+      var target = cs.agentBacked
+        ? (SteamtrainReducer.formatSubWorkflowTarget ? (SteamtrainReducer.formatSubWorkflowTarget(cs) || "auto") : (cs.agent || "auto"))
+        : cs.kind === "workflow" ? ("→ " + cs.workflow) : (KIND_LABEL[cs.kind] || cs.kind);
+      var row = h("div", { class: "subwf-step" + (cs.overridden ? " overridden" : "") });
+      row.style.paddingLeft = (8 + (cs.depth - 1) * 14) + "px";
+      row.appendChild(h("span", { class: "subwf-kind " + cs.kind, text: KIND_LABEL[cs.kind] || cs.kind }));
+      row.appendChild(h("span", { class: "subwf-id", text: cs.id }));
+      row.appendChild(h("span", { class: "subwf-target", text: target }));
+      if (cs.overridden) row.appendChild(h("span", { class: "subwf-mark", title: "retargeted by an override on the parent", text: "★" }));
+      body.appendChild(row);
+    });
+    det.appendChild(body);
+    return det;
   }
 
   function renderStagedIndicator() {

@@ -54,6 +54,14 @@ export interface SlashCommandContext {
   ) => void;
   /** Active workflow spec when previewing or configuring (for /timeout, etc.). */
   workflowSpec?: WorkflowSpec;
+  /**
+   * Base (catalog) lookup for `kind: "workflow"` steps, so commands that walk a
+   * pipeline — `/set-all`, `/agent --all`, `/model --all` — can cascade into
+   * sub-workflows. Returns the child spec WITHOUT session overrides applied
+   * (the parent call step's own `overrides` encode the cascade), or `undefined`
+   * when the name is unknown / sub-workflows aren't resolvable in this context.
+   */
+  resolveWorkflow?: (name: string) => WorkflowSpec | undefined;
   /** Live project config (timeouts, concurrency, …). */
   config?: SteamtrainConfig;
   /** Resolved project `steamtrain.json` path, when writable. */

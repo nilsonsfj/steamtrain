@@ -74,6 +74,7 @@ import {
   shouldAdvanceFailover,
   shouldFailFastWithoutCandidate,
 } from "./model-failover";
+import { applyWorkflowStepOverrides } from "./overrides";
 import { createChannel, runPool } from "./pool";
 import {
   type StepBindingResolution,
@@ -3538,8 +3539,19 @@ async function executeWorkflowCallOnce(
   if (!resolveWorkflow) {
     return fail("workflow steps are not supported in this context (no resolveWorkflow configured)");
   }
-  const childSpec = resolveWorkflow(step.workflow);
-  if (!childSpec) return fail(`unknown workflow '${step.workflow}'`);
+  const baseChildSpec = resolveWorkflow(step.workflow);
+  if (!baseChildSpec) return fail(`unknown workflow '${step.workflow}'`);
+  // Layer this call site's per-child-step overrides onto the resolved spec so
+  // the parent's model/agent/effort choices (`/set-all`, per-step retargeting)
+  // reach into the sub-workflow. `applyWorkflowStepOverrides` is namespace-aware:
+  // plain keys patch the child's own steps; `<childWf>::<deeper>` keys route
+  // onto the child's own `workflow` steps' `overrides`, so the cascade recurses
+  // to arbitrary depth. The catalog spec itself is never mutated (this is a
+  // fresh copy), so a child workflow shared by many parents keeps its own
+  // defaults everywhere else.
+  const childSpec = step.overrides
+    ? applyWorkflowStepOverrides(baseChildSpec, step.overrides)
+    : baseChildSpec;
 
   // `ctx.workflowCallStack` tracks workflows already entered via a `workflow`
   // step; a non-root spec's own name is already its last entry (its parent

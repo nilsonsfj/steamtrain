@@ -1,7 +1,13 @@
-import type { AgentRunFields, WorkflowSpec } from "./types";
-import { isAgentBackedStep, workflowStepKind } from "./types";
+import { isAgentBackedStep, workflowStepKind } from "./step-kind";
+import type { AgentFieldOverridePatch, AgentRunFields, WorkflowSpec } from "./types";
 
-export type WorkflowStepOverrides = Record<string, Partial<AgentRunFields>>;
+/**
+ * Per-step override map. Each value is a partial agent-field patch; a field set
+ * to `null` removes it from the step (see {@link applyAgentPatch}), while an
+ * absent field is left unchanged. Keys may be `::`-namespaced to reach into a
+ * sub-workflow — see {@link applyWorkflowStepOverrides}.
+ */
+export type WorkflowStepOverrides = Record<string, AgentFieldOverridePatch>;
 
 /** Staged overrides for one workflow: per-step patches plus optional workflow-level timeouts. */
 export type WorkflowSessionOverrides = {
@@ -69,7 +75,7 @@ function isStructuredSessionOverridesPayload(record: Record<string, unknown>): b
  * field from the step (rather than setting it to null). Used by both the web
  * API and the TUI flat-map override path.
  */
-function applyAgentPatch<T extends object>(step: T, patch: Partial<AgentRunFields>): T {
+function applyAgentPatch<T extends object>(step: T, patch: AgentFieldOverridePatch): T {
   const next = { ...step } as Record<string, unknown>;
   for (const [key, value] of Object.entries(patch)) {
     if (value === null) delete next[key];
@@ -147,28 +153,102 @@ export function applyWorkflowSessionOverrides(
   return next;
 }
 
+/** Namespace separator between a sub-workflow call step and a step inside it. */
+export const SUBWORKFLOW_STEP_SEPARATOR = "::";
+
+/**
+ * Split a (possibly namespaced) override key at its FIRST `::`. A plain key
+ * targets a step in this spec; a namespaced key `<workflowStepId>::<rest>`
+ * targets a step reached through the `workflow` step `<workflowStepId>`, with
+ * `rest` itself possibly namespaced for deeper nesting.
+ */
+export function splitSubWorkflowKey(key: string): { head: string; rest?: string } {
+  const idx = key.indexOf(SUBWORKFLOW_STEP_SEPARATOR);
+  if (idx < 0) return { head: key };
+  return {
+    head: key.slice(0, idx),
+    rest: key.slice(idx + SUBWORKFLOW_STEP_SEPARATOR.length),
+  };
+}
+
+/**
+ * Partition an override map into the patches that target this spec's own steps
+ * (plain keys) and the child-scoped patches routed through each `workflow`
+ * step (namespaced keys), grouped by the `workflow` step id they enter through.
+ */
+function partitionOverrideKeys(overrides: WorkflowStepOverrides): {
+  own: WorkflowStepOverrides;
+  nested: Map<string, WorkflowStepOverrides>;
+} {
+  const own: WorkflowStepOverrides = {};
+  const nested = new Map<string, WorkflowStepOverrides>();
+  for (const [key, patch] of Object.entries(overrides)) {
+    const { head, rest } = splitSubWorkflowKey(key);
+    if (rest === undefined) {
+      own[key] = patch;
+      continue;
+    }
+    let group = nested.get(head);
+    if (!group) {
+      group = {};
+      nested.set(head, group);
+    }
+    group[rest] = patch;
+  }
+  return { own, nested };
+}
+
 /**
  * Merge per-step overrides into a workflow spec (preview + run).
- * Patch values of `null` remove optional fields from the step; this applies to
- * the TUI flat-map path as well as structured session overrides.
+ *
+ * Two kinds of key are honored so a single flat override map can retarget an
+ * entire pipeline INCLUDING the steps hidden inside its sub-workflows:
+ *
+ *  - **Plain keys** (`stepId`) patch a step in this spec directly (the classic
+ *    behavior — agent/model/effort/prompt/timeout, with `null` removing a field).
+ *  - **Namespaced keys** (`<workflowStepId>::<childStepId>`, recursively) are
+ *    routed onto the matching `workflow` call step's own `overrides` map, which
+ *    the engine then layers onto the resolved child spec at run time. This is
+ *    what makes `/set-all` and per-step retargeting reach into a sub-workflow
+ *    instead of stopping at its boundary — without ever mutating the shared
+ *    child spec on disk.
+ *
+ * Existing `overrides` already declared on a `workflow` step are preserved and
+ * merged under (a fresh patch for the same child step wins), so a saved
+ * cascade round-trips and a new stage layers cleanly on top.
  */
 export function applyWorkflowStepOverrides(
   spec: WorkflowSpec,
   overrides: WorkflowStepOverrides | undefined,
 ): WorkflowSpec {
   if (!overrides || Object.keys(overrides).length === 0) return spec;
+  const { own, nested } = partitionOverrideKeys(overrides);
   return {
     ...spec,
     phases: spec.phases.map((phase) => ({
       ...phase,
       steps: phase.steps.map((step) => {
-        const patch = overrides[step.id];
+        const kind = workflowStepKind(step);
+        // Route namespaced patches onto the `workflow` call step they enter
+        // through, merging with any overrides the step already carries.
+        if (kind === "workflow" && nested.has(step.id)) {
+          const merged: Record<string, AgentFieldOverridePatch> = {
+            ...((step as { overrides?: Record<string, AgentFieldOverridePatch> }).overrides ?? {}),
+          };
+          for (const [childKey, patch] of Object.entries(nested.get(step.id)!)) {
+            merged[childKey] = { ...(merged[childKey] ?? {}), ...patch };
+          }
+          const withNested = { ...step, overrides: merged };
+          const ownPatch = own[step.id];
+          return ownPatch ? applyAgentPatch(withNested, ownPatch) : withNested;
+        }
+        const patch = own[step.id];
         if (!patch) return step;
         // llm steps accept the shared fields they actually carry (model,
         // prompt, effort, timeout); the rest of the patch is dropped rather
         // than silently no-oping the whole override.
-        if (workflowStepKind(step) === "llm") {
-          const safePatch: Partial<AgentRunFields> = {};
+        if (kind === "llm") {
+          const safePatch: AgentFieldOverridePatch = {};
           for (const key of LLM_FIELD_KEYS) {
             if (key in patch) {
               (safePatch as Record<string, unknown>)[key] = (patch as Record<string, unknown>)[key];
@@ -177,9 +257,8 @@ export function applyWorkflowStepOverrides(
           return applyAgentPatch(step, safePatch);
         }
         if (!isAgentBackedStep(step)) return step;
-        const kind = workflowStepKind(step);
         if (kind === "distributor" || kind === "consolidator" || kind === "merge") {
-          const safePatch: Partial<AgentRunFields> = {};
+          const safePatch: AgentFieldOverridePatch = {};
           for (const key of AGENT_FIELD_KEYS) {
             if (key in patch) {
               (safePatch as Record<string, unknown>)[key] = (patch as Record<string, unknown>)[key];
@@ -236,7 +315,7 @@ export function parseSessionOverrides(raw: unknown): ParseSessionOverridesResult
             "overrides.steps",
           );
           if (keyError) return { ok: false, error: keyError };
-          parsedSteps[stepId] = patch as Partial<AgentRunFields>;
+          parsedSteps[stepId] = patch as AgentFieldOverridePatch;
         }
         result.steps = parsedSteps;
       }
@@ -250,7 +329,7 @@ export function parseSessionOverrides(raw: unknown): ParseSessionOverridesResult
       }
       const keyError = validateStepPatchKeys(key, val as Record<string, unknown>, "overrides");
       if (keyError) return { ok: false, error: keyError };
-      parsedSteps[key] = val as Partial<AgentRunFields>;
+      parsedSteps[key] = val as AgentFieldOverridePatch;
     }
     result.steps = parsedSteps;
   }

@@ -32,6 +32,7 @@ export interface UseSlashContextParams {
   ) => void;
   previewStepSelection: WorkflowStepSelection | undefined;
   workflowSpec?: WorkflowSpec;
+  resolveWorkflow?: (name: string) => WorkflowSpec | undefined;
   config?: SteamtrainConfig;
   configPath?: string;
   updateConfig?: (patch: ProjectConfigPatch) => { ok: boolean; error?: string };
@@ -78,6 +79,7 @@ export function useSlashContext(params: UseSlashContextParams) {
     patchWorkflowStep,
     previewStepSelection,
     workflowSpec,
+    resolveWorkflow,
     config,
     configPath,
     updateConfig,
@@ -121,6 +123,7 @@ export function useSlashContext(params: UseSlashContextParams) {
       workflowStep: previewStepSelection,
       updateWorkflowStep: wfPreview ? patchWorkflowStep : undefined,
       workflowSpec,
+      resolveWorkflow,
       config,
       configPath,
       updateConfig,
@@ -165,6 +168,7 @@ export function useSlashContext(params: UseSlashContextParams) {
       patchWorkflowStep,
       previewStepSelection,
       workflowSpec,
+      resolveWorkflow,
       config,
       configPath,
       updateConfig,

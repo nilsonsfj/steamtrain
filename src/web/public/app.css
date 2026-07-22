@@ -2241,6 +2241,74 @@ body[data-mode="arrival"].arrival-failed .canvas {
   font-size: 11px;
   margin-top: 5px;
 }
+/* Sub-workflow "what runs inside" block on a workflow-step card. */
+.card .subwf {
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.card .subwf > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 5px 8px;
+  font-size: 11px;
+  color: var(--accent-bright);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card .subwf > summary::-webkit-details-marker {
+  display: none;
+}
+.card .subwf > summary::before {
+  content: "▸ ";
+  color: var(--muted);
+}
+.card .subwf[open] > summary::before {
+  content: "▾ ";
+}
+.card .subwf-body {
+  border-top: 1px solid var(--border);
+  padding: 4px 0;
+}
+.card .subwf-meta {
+  font-size: 10.5px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  padding: 2px 8px;
+}
+.card .subwf-step {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+  padding: 2px 8px;
+}
+.card .subwf-step.overridden {
+  background: var(--accent-soft);
+}
+.card .subwf-kind {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  min-width: 52px;
+}
+.card .subwf-id {
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+.card .subwf-target {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  margin-left: auto;
+}
+.card .subwf-mark {
+  color: var(--accent);
+}
 .card .inputs {
   font-size: 11px;
   color: var(--accent);
@@ -3081,6 +3149,25 @@ select.sel.invalid {
   padding: 11px 12px;
   margin-bottom: 9px;
   transition: border-color .15s ease, background .15s ease;
+}
+/* Nested sub-workflow step editors inside the configure modal. */
+.nested-steps {
+  margin: -2px 0 9px 16px;
+  padding-left: 12px;
+  border-left: 2px dashed var(--accent-dim);
+}
+.nested-head {
+  font-size: 11px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  margin: 4px 0 6px;
+}
+.estep.nested {
+  border-left-color: var(--accent-dim);
+  background: var(--panel);
+}
+.estep.nested .esid {
+  color: var(--accent-bright);
 }
 .estep:focus-within {
   border-color: #3d6a96;
