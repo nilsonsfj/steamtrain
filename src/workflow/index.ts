@@ -364,10 +364,10 @@ export {
   type LiveRunPublisher,
 } from "./live-run";
 export {
-  completeQuiescedHandoff,
+  completeHandoff,
   handoffRunToDetached,
   spawnDetachedRunner,
-  type CompleteQuiescedHandoffOptions,
+  type CompleteHandoffOptions,
   type DetachedRunnerIo,
   type HandoffRunOptions,
   type SpawnDetachedRunnerOptions,

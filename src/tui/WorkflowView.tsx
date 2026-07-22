@@ -739,14 +739,17 @@ function StepRow({
   // Truncate to the column cap so an over-long id can't push its own row's
   // columns out of alignment with the rest of the tree.
   const id = truncate(`${step.parentStepId ? "↳ " : ""}${step.stepId}`, idColWidth);
+  // ASCII worktree marker: ⎇ is ambiguous-width (string-width 1, many terminals
+  // draw 2) and tips every worktree row one column past the frame once agents
+  // allocate sandboxes — the same ghost "|" wrap as a literal newline.
   const target = step.worktree
-    ? ` ⎇ ${basename(step.worktree.cwd)}`
+    ? ` ~${basename(step.worktree.cwd)}`
     : step.cwd
       ? ` @${basename(step.cwd)}`
       : "";
   const item = step.item ? ` item ${step.item.index}: ${truncate(step.item.value, 24)}` : "";
   const meta = stepMeta(step, now);
-  const marker = selected ? " ❯ " : "   ";
+  const marker = selected ? " > " : "   ";
   const glyphPart = `${glyph.symbol} `;
   const idPart = `${id.padEnd(idColWidth)} `;
   const kindPart = kindLabel.padEnd(kindColWidth);
@@ -792,7 +795,7 @@ function StepRow({
 function buildDetailContext(step: StepState, width: number): { text: string; color: string }[] {
   const lines: { text: string; color: string }[] = [];
   if (step.worktree) {
-    lines.push({ text: `⎇ ${step.worktree.branch} · ${step.worktree.cwd}`, color: "yellow" });
+    lines.push({ text: `~ ${step.worktree.branch} · ${step.worktree.cwd}`, color: "yellow" });
   } else if (step.cwd) {
     lines.push({ text: `@ ${step.cwd}`, color: "gray" });
   }
@@ -914,7 +917,7 @@ function stepMeta(step: StepState, now: number): string {
     const attempts = step.result.attempts ?? step.attempts;
     const total = totalTokens(step.result.tokens);
     const bits = [
-      step.edited ? "✎ edited" : undefined,
+      step.edited ? "edited" : undefined,
       step.cached ? "cached" : formatElapsed(step.result.durationMs),
       step.result.costUsd ? formatUsd(step.result.costUsd) : undefined,
       total > 0 ? `${formatTokens(total)}t` : undefined,
@@ -922,7 +925,7 @@ function stepMeta(step: StepState, now: number): string {
     ].filter(Boolean);
     return bits.join(" · ");
   }
-  if (step.status === "pending" && step.edited) return "✎ edited · pending";
+  if (step.status === "pending" && step.edited) return "edited · pending";
   const waitKind = stepWaitKind(step);
   if (waitKind === "approval") return "waiting for approval";
   if (waitKind === "input") return "waiting for input";
@@ -931,11 +934,22 @@ function stepMeta(step: StepState, now: number): string {
     // the row past the fixed viewport (Ink then corrupts the frame).
     const elapsed =
       step.startedAt && now > 0 ? `${formatElapsed(now - step.startedAt)}` : undefined;
-    const bits = [elapsed, step.activity].filter(Boolean);
+    const bits = [elapsed, sanitizeActivity(step.activity)].filter(Boolean);
     if (bits.length > 0) return bits.join(" · ");
   }
-  if (step.activity) return step.activity;
+  if (step.activity) return sanitizeActivity(step.activity) ?? statusWord(step.status);
   return statusWord(step.status);
+}
+
+/** Flatten activity for a single-height tree row: strip wide glyphs + newlines. */
+function sanitizeActivity(activity: string | undefined): string | undefined {
+  if (!activity) return undefined;
+  return activity
+    .replace(/[\r\n\t]+/g, " ")
+    .replaceAll("⚙", "*")
+    .replaceAll("⏳", "...")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function sumCost(state: WorkflowState): number {

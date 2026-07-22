@@ -155,6 +155,7 @@ async function main(): Promise<void> {
     return;
   }
 
+  let idleQuit = false;
   const app = render(
     <App
       config={config}
@@ -176,11 +177,18 @@ async function main(): Promise<void> {
       workspaceScope={workspaceScope}
       workspaceLabel={workspaceScopeLabel(workspaceScope, home)}
       workspaceWarning={workspaceWarning}
+      onIdleQuit={() => {
+        idleQuit = true;
+      }}
     />,
     // Own Ctrl+C so we can confirm before quitting an owned (non-detached) run.
     { exitOnCtrlC: false },
   );
-  void app.waitUntilExit();
+  await app.waitUntilExit();
+  // With no run cleanup to drain, no application handle should keep the CLI
+  // alive after Ink restores the terminal. Force termination to reap any
+  // readiness probe or socket that ignored unmount.
+  if (idleQuit) process.exit(0);
 }
 
 void main();

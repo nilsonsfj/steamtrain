@@ -122,9 +122,9 @@ approval can be granted from any surface for any run.
   `GET /api/runs/:id/stream` tails externally-owned runs over SSE; a
   non-terminal `{"type":"queued","position":…}` frame reports queue waits.
   `POST /api/runs/:id/detach` starts a mid-run handoff; the run's stream then
-  emits a non-terminal `{"type":"detaching"}` frame while in-flight steps
-  finish and a `{"type":"detached","pid":…}` frame once the background process
-  owns it (the client reconnects to the external run on that frame).
+  emits a non-terminal `{"type":"detaching"}` frame while local work stops and
+  a `{"type":"detached","pid":…}` frame once the background process owns it
+  (the client reconnects to the external run on that frame).
 
 ## Detaching a running run
 
@@ -133,30 +133,24 @@ web UI can be handed off to a background process mid-flight — so you can close
 (or relaunch) the UI without stopping it. The run keeps its id; the completed
 steps are preserved; the remaining steps finish in the background.
 
-The handoff is a **quiesce-then-hand-off**, so no work is lost:
+The handoff stops local work immediately so detaching never waits for a long
+step:
 
-1. The run is **paused** — in-flight steps run to completion and land in the
-   step cache; nothing new is scheduled.
-2. The driver waits until the engine has **quiesced** (`control.isIdle()` — no
-   step executing) or the run is parked on a human decision (an approval /
-   input does no compute). While it waits, the UI shows *"finishing in-flight
-   work…"*. A run parked on a human checkpoint hands off immediately; a run
-   with a long agent step in flight hands off once that step reaches its next
-   cached checkpoint (`step_done`).
-3. The local engine is aborted and the run's registry entry is **re-armed for a
+1. The handoff is committed and the local engine is **aborted**. Completed
+   steps remain in the step cache; an interrupted step is deliberately not
+   recorded as complete and is replayed by the new owner.
+2. The run's registry entry is **re-armed for a
    detached owner** — `source: cli-detached`, back to `queued`, pid cleared,
-   pause cleared, with a `launch` block — then a background child is spawned
+   with a `launch` block — then a background child is spawned
    (`workflow _detached-runner <runId>`, exactly the `--detach` path). It
    acquires a run slot, replays the cache (completed steps come back instantly),
    and continues the rest.
-4. The launching UI **re-attaches** to the now-detached run, so you keep
+3. The launching UI **re-attaches** to the now-detached run, so you keep
    watching it live; closing the UI now leaves it running.
 
-Because the completed steps are cached and the approval/human-input results are
-never cached (they always re-ask on resume), the background process picks up
-exactly where the foreground left off. The paused-to-quiesce transition is
-balanced by a synthetic `run_resumed` in the mirrored stream so a fresh
-attach doesn't render the live run as stuck-paused.
+Because completed steps are cached while interrupted steps and approval /
+human-input results are not, the background process safely resumes from the
+last completed checkpoint without waiting for current work to finish.
 
 - **TUI:** press **`d`** while a run you own is on screen (the status bar shows
   `d detach`). Detaching a run that's already owned by another process is a

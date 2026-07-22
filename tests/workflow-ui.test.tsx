@@ -96,7 +96,7 @@ describe("workflow UI helpers", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("10.0s"); // 11_000 - 1_000 on the running step
     expect(frame).not.toContain("⏱"); // double-width glyph would wrap the row
-    expect(frame).toContain("⎇ step-3"); // worktree dir on the step row
+    expect(frame).toContain("~step-3"); // worktree dir on the step row
     expect(frame).toContain("steamtrain/run/step-3"); // branch in the detail panel
   });
 

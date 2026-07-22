@@ -168,6 +168,8 @@ interface AppProps {
   workspaceScope: WorkspaceScope;
   workspaceLabel: string;
   workspaceWarning?: string;
+  /** Called when quitting with no owned/attached work left to drain. */
+  onIdleQuit?: () => void;
 }
 
 type Phase = "banner" | "main";
@@ -194,6 +196,7 @@ export function App({
   workspaceScope,
   workspaceLabel,
   workspaceWarning,
+  onIdleQuit,
 }: AppProps) {
   const { exit } = useApp();
   const { columns, rows } = useTerminalSize();
@@ -1310,6 +1313,13 @@ export function App({
             if (result.exit) {
               // Same confirm gate as Ctrl+C: an owned run must be confirmed twice.
               if (!runner.requestQuit()) return;
+              if (
+                !runner.abortRef.current &&
+                !runner.attachAbortRef.current &&
+                !picker.createAbortRef.current
+              ) {
+                onIdleQuit?.();
+              }
               runner.abortRef.current?.abort();
               runner.attachAbortRef.current?.abort();
               picker.createAbortRef.current?.abort();
@@ -1460,6 +1470,7 @@ export function App({
       workspaceMap,
       slashHook.slashCtx,
       exit,
+      onIdleQuit,
     ],
   );
 
@@ -1615,6 +1626,7 @@ export function App({
       prompt.bumpCursorToEnd();
     },
     clearStationLanding: () => setStationLanding(false),
+    onIdleQuit,
   });
 
   // ── Render ───────────────────────────────────────────────────────────

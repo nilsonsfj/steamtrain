@@ -13,16 +13,21 @@ export function message(err: unknown): string {
  * Ink never soft-wraps them past a fixed frame (wrap overflow bleeds borders
  * onto the next line and flickers the whole screen).
  *
+ * Newlines/tabs are flattened first: they measure as zero columns in
+ * string-width but still split Ink Text into extra rows (ghost "|" lines
+ * under fan-out children).
+ *
  * Iterates by JS code point. Zero-width joiners / combining marks that
  * `string-width` folds into a preceding emoji may leave a dangling ZWJ if a
  * cut falls mid-cluster; callers pass plain step/activity text, not ZWJ emoji.
  */
 export function truncateToWidth(text: string, max: number): string {
+  const flat = text.replace(/[\r\n\t]+/g, " ");
   if (max <= 0) return "";
-  if (stringWidth(text) <= max) return text;
+  if (stringWidth(flat) <= max) return flat;
   if (max === 1) return "…";
   let out = "";
-  for (const ch of text) {
+  for (const ch of flat) {
     if (stringWidth(`${out}${ch}…`) > max) break;
     out += ch;
   }
