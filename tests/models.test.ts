@@ -85,6 +85,10 @@ describe("kiro models", () => {
       "max",
     ]);
     expect(effortsForModel("kiro", "claude-haiku-4.5")).toEqual([]);
+    expect(effortsForModel("kiro", "claude-sonnet-4")).toEqual([]);
+    // Non-Claude Kiro models must not pick up Claude effort tables.
+    expect(effortsForModel("kiro", "gpt-5.6-sol")).toEqual([]);
+    expect(effortsForModel("kiro", "auto")).toEqual([]);
     expect(supportsEffort("kiro", "claude-sonnet-5")).toBe(true);
     expect(supportsEffort("kiro", "claude-haiku-4.5")).toBe(false);
   });
