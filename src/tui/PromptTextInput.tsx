@@ -11,6 +11,15 @@ interface PromptTextInputProps {
   placeholder?: string;
 }
 
+/** Cursor offsets are code-point indexes so emoji/etc. move as one unit. */
+function codePoints(s: string): string[] {
+  return [...s];
+}
+
+function sliceCodePoints(s: string, start: number, end?: number): string {
+  return codePoints(s).slice(start, end).join("");
+}
+
 /**
  * Single-line prompt field. Unlike ink-text-input, ignores Option/Alt (meta),
  * Ctrl chords, and unrecognized CSI leftovers so window-switcher shortcuts
@@ -23,11 +32,12 @@ export function PromptTextInput({
   focus,
   placeholder = "",
 }: PromptTextInputProps) {
-  const [cursorOffset, setCursorOffset] = useState(originalValue.length);
+  const valueChars = codePoints(originalValue);
+  const [cursorOffset, setCursorOffset] = useState(valueChars.length);
 
   useEffect(() => {
     if (!focus) return;
-    setCursorOffset((prev) => Math.min(prev, originalValue.length));
+    setCursorOffset((prev) => Math.min(prev, codePoints(originalValue).length));
   }, [originalValue, focus]);
 
   useInput(
@@ -47,6 +57,7 @@ export function PromptTextInput({
         return;
       }
 
+      const chars = codePoints(originalValue);
       let nextCursorOffset = cursorOffset;
       let nextValue = originalValue;
 
@@ -56,18 +67,23 @@ export function PromptTextInput({
         nextCursorOffset += 1;
       } else if (key.backspace || key.delete) {
         if (cursorOffset > 0) {
-          nextValue = originalValue.slice(0, cursorOffset - 1) + originalValue.slice(cursorOffset);
+          nextValue =
+            sliceCodePoints(originalValue, 0, cursorOffset - 1) +
+            sliceCodePoints(originalValue, cursorOffset);
           nextCursorOffset -= 1;
         }
       } else if (shouldAcceptTextInput(input, key)) {
+        const inserted = codePoints(input);
         nextValue =
-          originalValue.slice(0, cursorOffset) + input + originalValue.slice(cursorOffset);
-        nextCursorOffset += input.length;
+          sliceCodePoints(originalValue, 0, cursorOffset) +
+          input +
+          sliceCodePoints(originalValue, cursorOffset);
+        nextCursorOffset += inserted.length;
       } else {
         return;
       }
 
-      nextCursorOffset = Math.max(0, Math.min(nextCursorOffset, nextValue.length));
+      nextCursorOffset = Math.max(0, Math.min(nextCursorOffset, codePoints(nextValue).length));
       setCursorOffset(nextCursorOffset);
       if (nextValue !== originalValue) onChange(nextValue);
     },
@@ -77,17 +93,18 @@ export function PromptTextInput({
   let renderedValue = originalValue;
   let renderedPlaceholder = placeholder ? chalk.grey(placeholder) : undefined;
   if (focus) {
+    const placeholderChars = codePoints(placeholder);
     renderedPlaceholder =
-      placeholder.length > 0
-        ? chalk.inverse(placeholder[0]) + chalk.grey(placeholder.slice(1))
+      placeholderChars.length > 0
+        ? chalk.inverse(placeholderChars[0]) + chalk.grey(placeholderChars.slice(1).join(""))
         : chalk.inverse(" ");
-    renderedValue = originalValue.length > 0 ? "" : chalk.inverse(" ");
+    renderedValue = valueChars.length > 0 ? "" : chalk.inverse(" ");
     let i = 0;
-    for (const char of originalValue) {
+    for (const char of valueChars) {
       renderedValue += i === cursorOffset ? chalk.inverse(char) : char;
       i += 1;
     }
-    if (originalValue.length > 0 && cursorOffset === originalValue.length) {
+    if (valueChars.length > 0 && cursorOffset === valueChars.length) {
       renderedValue += chalk.inverse(" ");
     }
   }

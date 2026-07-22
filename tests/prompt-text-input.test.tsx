@@ -64,4 +64,15 @@ describe("PromptTextInput", () => {
     await type(stdin, "\x1bb");
     expect(values.at(-1)).toBe("z");
   });
+
+  it("treats multi-code-unit emoji as a single cursor step", async () => {
+    const values: string[] = [];
+    const { stdin, lastFrame } = render(<Harness onChange={(v) => values.push(v)} />);
+    await type(stdin, "🔥");
+    expect(values.at(-1)).toBe("🔥");
+    // Left then type should insert before the emoji, not split its surrogates.
+    await type(stdin, "\u001b[D", "a");
+    expect(values.at(-1)).toBe("a🔥");
+    expect(lastFrame()).toContain("a🔥");
+  });
 });

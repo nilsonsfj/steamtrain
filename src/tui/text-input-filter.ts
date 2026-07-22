@@ -12,6 +12,8 @@ export function isEscapeSequenceRemnant(text: string): boolean {
   // Kitty / CSI u: CSI codepoint ; modifier u
   if (/^\[\d+(?:;\d+)*u$/.test(text)) return true;
   // Other CSI with numeric params + letter/~ final (unparsed modified keys).
+  // Intentionally broad: better to drop a rare bracket paste remnant than to
+  // leak Option/Alt sequences into the draft.
   if (/^\[[0-9;]+[A-Za-z~]$/.test(text)) return true;
   // SS3 leftovers (F-keys are usually named; belt-and-suspenders).
   if (/^O[A-Za-z]$/.test(text)) return true;
@@ -29,8 +31,9 @@ export function hasDisallowedControlChars(text: string): boolean {
 
 /**
  * Whether a keystroke's `input` payload should be inserted into a text field.
- * Rejects modifier chords, escape-sequence leftovers, and control characters.
- * Multi-character pastes of normal text still pass.
+ * Rejects empty payloads (Ink sends "" for bare arrows/modifiers), modifier
+ * chords, escape-sequence leftovers, and control characters. Multi-character
+ * pastes of normal text still pass.
  */
 export function shouldAcceptTextInput(
   input: string,
@@ -45,7 +48,9 @@ export function shouldAcceptTextInput(
 
 /**
  * True when an onChange from a text field only inserted an escape-sequence
- * remnant or control characters and should be ignored.
+ * remnant or control characters and should be ignored. Returns false (allow)
+ * for deletions, replacements, or any non-pure-insert edit - this is a
+ * defense-in-depth filter for CSI dumps, not a full sanitizer.
  */
 export function shouldRejectTextInputChange(prev: string, next: string): boolean {
   const inserted = insertedChunk(prev, next);
