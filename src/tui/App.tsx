@@ -13,6 +13,8 @@ import {
   agentConfigScope,
   agentScopeLabel,
   formatAgentTarget,
+  listModelFamilyMeta,
+  modelsForAgent,
   removeAgent,
   resolveAgentInstances,
   upsertAgent,
@@ -241,6 +243,31 @@ export function App({
     () => new Set(resolveAgentInstances(runtimeConfig).map((agent) => agent.id)),
     [runtimeConfig],
   );
+  const inputAgentSuggestions = useMemo(
+    () => resolveAgentInstances(runtimeConfig).map((agent) => agent.id),
+    [runtimeConfig],
+  );
+  const inputModelSuggestions = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    const add = (value: string | undefined) => {
+      if (!value || seen.has(value)) return;
+      seen.add(value);
+      out.push(value);
+    };
+    for (const family of listModelFamilyMeta()) {
+      add(family.id);
+      add(family.name);
+      for (const alias of family.aliases.slice(0, 4)) add(alias);
+      for (const offering of family.offerings) add(offering.modelId);
+    }
+    for (const agent of resolveAgentInstances(runtimeConfig)) {
+      for (const model of modelsForAgent(agent.id, runtimeConfig)) {
+        add(model.id);
+      }
+    }
+    return out;
+  }, [runtimeConfig, agentCatalogTick]);
   const visibleWorkspaces = useMemo<WorkspaceConfig>(
     () => ({
       workspaces: runtimeWorkspaces.workspaces.filter((entry) => enabledAgentIds.has(entry.agent)),
@@ -1723,6 +1750,8 @@ export function App({
               spec={inputSpec}
               width={columns}
               height={streamHeight}
+              modelSuggestions={inputModelSuggestions}
+              agentSuggestions={inputAgentSuggestions}
               onSubmit={handleInputFormSubmit}
               onCancel={handleInputFormCancel}
             />
