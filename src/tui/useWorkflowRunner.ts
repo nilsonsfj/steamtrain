@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { Orchestrator } from "../orchestrator";
@@ -481,12 +480,6 @@ export function useWorkflowRunner({
           // terminal history and mirror finish (the detached child owns the
           // record now) and re-attach so the user keeps watching it live.
           const handoff = handoffRef.current;
-          // #region agent log
-          appendFileSync(
-            "/opt/cursor/logs/debug.log",
-            `${JSON.stringify({ hypothesisId: "D", location: "src/tui/useWorkflowRunner.ts:finally", message: "owned run entered finally", data: { runMatches: handoff?.runId === runId, quiesced: handoff?.quiesced ?? false, aborted: ac.signal.aborted, hasRunError: Boolean(runError), workflowOk }, timestamp: Date.now() })}\n`,
-          );
-          // #endregion
           const handingOff = Boolean(
             handoff && handoff.runId === runId && handoff.quiesced && ac.signal.aborted,
           );
@@ -698,12 +691,6 @@ export function useWorkflowRunner({
    * within the confirm window to proceed. Attached / idle sessions quit immediately.
    */
   const requestQuit = useCallback((): boolean => {
-    // #region agent log
-    appendFileSync(
-      "/opt/cursor/logs/debug.log",
-      `${JSON.stringify({ hypothesisId: "C", location: "src/tui/useWorkflowRunner.ts:requestQuit", message: "quit requested", data: { ownedAbortActive: Boolean(abortRef.current), ownedAborted: abortRef.current?.signal.aborted ?? false, attachedAbortActive: Boolean(attachAbortRef.current), handoffActive: Boolean(handoffRef.current), handoffQuiesced: handoffRef.current?.quiesced ?? false }, timestamp: Date.now() })}\n`,
-    );
-    // #endregion
     if (!abortRef.current) {
       destructiveConfirmRef.current = null;
       return true;
@@ -912,12 +899,6 @@ export function useWorkflowRunner({
     if (!runId || !control || !ac || workflow === undefined || input === undefined) {
       return "no active run to detach";
     }
-    // #region agent log
-    appendFileSync(
-      "/opt/cursor/logs/debug.log",
-      `${JSON.stringify({ hypothesisId: "A,B", location: "src/tui/useWorkflowRunner.ts:detachRun", message: "detach requested", data: { existingHandoff: Boolean(handoffRef.current), aborted: ac.signal.aborted, idle: control.isIdle(), pauseRequested: control.isPauseRequested() }, timestamp: Date.now() })}\n`,
-    );
-    // #endregion
     if (handoffRef.current) return "already detaching…";
     if (ac.signal.aborted) return "the run is already stopping";
 
@@ -932,14 +913,6 @@ export function useWorkflowRunner({
       );
     }
 
-    const humanParked = (): boolean =>
-      approvalResolversRef.current.size > 0 || humanInputResolversRef.current.size > 0;
-    // #region agent log
-    appendFileSync(
-      "/opt/cursor/logs/debug.log",
-      `${JSON.stringify({ hypothesisId: "A,B,C", location: "src/tui/useWorkflowRunner.ts:detachRun:quiesced", message: "detach wait ended", data: { ownerMatches: ownRunIdRef.current === runId, aborted: ac.signal.aborted, idle: control.isIdle(), humanParked: humanParked() }, timestamp: Date.now() })}\n`,
-    );
-    // #endregion
     // Stop the local engine immediately; its run loop performs the handoff and
     // re-attaches after abort cleanup. The commit latch above wins races with a
     // final workflow event or an abort-time exception.
