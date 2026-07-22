@@ -2089,11 +2089,11 @@ async function executeAgentStep(
   // cannot burn same-binding attempts after the real candidate list ends,
   // while still leaving room for family remaps that sit between declared
   // fallbacks in the resolved order.
-  const explicitFallbackCount =
-    (step.fallbackModels?.length ?? 0) + (ctx.workflowFallbackModels?.length ?? 0);
+  const hasExplicitFallbacks =
+    (step.fallbackModels?.length ?? 0) > 0 || (ctx.workflowFallbackModels?.length ?? 0) > 0;
   const remainingInChain = Math.max(1, failover.length - failoverIndex);
   const attemptBudget =
-    failoverPolicy.enabled && explicitFallbackCount > 0 && remainingInChain > 1
+    failoverPolicy.enabled && hasExplicitFallbacks && remainingInChain > 1
       ? Math.max(policy.maxAttempts, remainingInChain)
       : policy.maxAttempts;
 

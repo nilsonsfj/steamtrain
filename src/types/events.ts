@@ -109,16 +109,23 @@ export interface ResultEvent extends BaseEvent {
 }
 
 /**
- * Optional adapter hint for how the engine should treat this failure.
- * When omitted, the engine classifies from `message` / `stderr` heuristics.
+ * How the engine / adapters classify an agent failure for retry and mid-flight
+ * model failover. Adapters may tag {@link ErrorEvent.category}; otherwise the
+ * engine classifies from message / stderr heuristics.
  */
-export type AgentFailureCategory =
+export type AgentFailureKind =
   | "quota"
   | "rate_limit"
   | "auth"
   | "transient"
   | "permanent"
   | "unknown";
+
+/**
+ * Alias kept for {@link ErrorEvent.category} call sites — same union as
+ * {@link AgentFailureKind}. Prefer `AgentFailureKind` in new code.
+ */
+export type AgentFailureCategory = AgentFailureKind;
 
 /** A process- or protocol-level failure (non-zero exit, timeout, auth, ...). */
 export interface ErrorEvent extends BaseEvent {
@@ -130,7 +137,7 @@ export interface ErrorEvent extends BaseEvent {
    * Optional classification hint from the adapter (e.g. Amp "no credits" →
    * `quota`). The engine falls back to message heuristics when unset.
    */
-  category?: AgentFailureCategory;
+  category?: AgentFailureKind;
 }
 
 /**

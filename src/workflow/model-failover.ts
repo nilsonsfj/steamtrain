@@ -165,6 +165,11 @@ export function isFailoverEligibleFailure(
 /**
  * Whether the engine should advance to the next candidate instead of (or
  * before) retrying the same binding.
+ *
+ * Classic transport failures (`classicRetryable`) whose message did not
+ * classify are remapped to `transient` before {@link failoverTriggerMatches},
+ * so they honor the default `on: ["quota","rate_limit","transient"]` policy
+ * (and are gated off when the author narrows `on` to e.g. `["quota"]` only).
  */
 export function shouldAdvanceFailover(
   policy: ResolvedModelFailoverPolicy,
@@ -174,7 +179,8 @@ export function shouldAdvanceFailover(
     /**
      * Clean transport failure (error/throw, no result, no tools). Unclassified
      * classic failures are treated as `transient` for trigger matching so we
-     * keep preferring a model switch over same-binding retries.
+     * keep preferring a model switch over same-binding retries under the
+     * default policy.
      */
     classicRetryable?: boolean;
   },

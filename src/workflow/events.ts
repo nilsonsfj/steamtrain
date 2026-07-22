@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInstanceId, ApiInstanceId } from "../types/events";
+import type { AgentEvent, AgentFailureKind, AgentInstanceId, ApiInstanceId } from "../types/events";
 import type { ApprovalRejectDisposition } from "./approval";
 import type { WorktreeDiff } from "./merge";
 import type {
@@ -152,7 +152,7 @@ export interface StepRetryEvent extends IterationTagged {
     toModel: string;
     toEffort?: string;
     /** Classified failure that triggered the switch (quota, rate_limit, …). */
-    failureKind: string;
+    failureKind: AgentFailureKind;
   };
   ts: number;
 }

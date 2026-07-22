@@ -8,13 +8,9 @@
  * event; message heuristics cover the rest.
  */
 
-export type AgentFailureKind =
-  | "quota"
-  | "rate_limit"
-  | "auth"
-  | "transient"
-  | "permanent"
-  | "unknown";
+import type { AgentFailureKind } from "../types/events";
+
+export type { AgentFailureKind };
 
 /** Capacity / provider-budget failures that usually won't clear on the same model. */
 export type CapacityFailureKind = Extract<AgentFailureKind, "quota" | "rate_limit">;

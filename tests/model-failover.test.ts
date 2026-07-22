@@ -140,6 +140,17 @@ describe("shouldAdvanceFailover / fail-fast", () => {
     ).toBe(false);
   });
 
+  it("does not advance classic transport when on excludes transient", () => {
+    // Classic unknown→transient remap still honors the author's `on` list.
+    expect(
+      shouldAdvanceFailover(resolveModelFailoverPolicy({ on: ["quota"] }), {
+        kind: "unknown",
+        hasNextCandidate: true,
+        classicRetryable: true,
+      }),
+    ).toBe(false);
+  });
+
   it("does not advance when disabled or no candidate", () => {
     expect(
       shouldAdvanceFailover(resolveModelFailoverPolicy({ enabled: false }), {
