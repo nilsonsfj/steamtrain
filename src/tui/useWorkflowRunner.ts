@@ -158,13 +158,13 @@ export function useWorkflowRunner({
   /**
    * Non-null while a mid-run detach is in progress: the owning run loop reads it
    * to skip terminal history/mirroring and hand the run off to a background
-   * process instead. `quiesced` is the ownership-commit latch: once true, the
-   * local event loop stops recording and drains after its abort while the
-   * detached owner prepares to replay any interrupted, uncached step.
+   * process instead. `committed` latches ownership transfer before aborting:
+   * the local event loop stops recording and drains while the detached owner
+   * prepares to replay any interrupted, uncached step.
    */
   const handoffRef = useRef<{
     runId: string;
-    quiesced: boolean;
+    committed: boolean;
     launch: {
       workflow: string;
       input: string;
@@ -437,7 +437,7 @@ export function useWorkflowRunner({
             // owns the run's record and event stream from here (it replays the
             // cache and continues). Draining the iterator lets the aborted engine
             // unwind cleanly.
-            if (handoffRef.current?.quiesced) continue;
+            if (handoffRef.current?.committed) continue;
             recorder.handle(event);
             publisher.event(event);
             notifyWorkflowEvent(notifier, notifyMeta, event);
@@ -481,7 +481,7 @@ export function useWorkflowRunner({
           // record now) and re-attach so the user keeps watching it live.
           const handoff = handoffRef.current;
           const handingOff = Boolean(
-            handoff && handoff.runId === runId && handoff.quiesced && ac.signal.aborted,
+            handoff && handoff.runId === runId && handoff.committed && ac.signal.aborted,
           );
           let handedOff = false;
           if (handingOff && handoff) {
@@ -904,7 +904,7 @@ export function useWorkflowRunner({
 
     handoffRef.current = {
       runId,
-      quiesced: true,
+      committed: true,
       launch: { workflow, input, params: activeParamsRef.current, spec: activeSpecRef.current },
     };
     if (mountedRef.current) {
