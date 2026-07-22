@@ -38,8 +38,9 @@ const KEY_HINTS: readonly KeyHint[] = [
   },
   {
     keys: "PgUp/PgDn",
-    action: "page the step list · scroll output in drill-in (Shift+↑/↓ one line)",
+    action: "page the workflow list · page steps · scroll output in drill-in (Shift+↑/↓ one line)",
   },
+  { keys: "←/→", action: "collapse / expand a workflow folder on the picker" },
   {
     keys: "Esc",
     action: "back / cancel · Ctrl+Q cancels after confirm (or detaches an attached run)",

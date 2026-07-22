@@ -72,7 +72,6 @@ import {
   planWorkflow,
   shouldOfferStationLanding,
   totalTokens,
-  tourWorkflowIndex,
   workflowCacheKey,
   workflowStepKind,
 } from "../workflow";
@@ -604,6 +603,10 @@ export function App({
     return { runCostUsd: cost, runTokens: totalTokens(tokens) };
   }, [runner.wf]);
 
+  // Station landing must feed pinTourFirst into the picker nav so render and
+  // selection share one row order (tour pinned inside bundled).
+  const [stationLanding, setStationLanding] = useState(false);
+
   const picker = useWorkflowPicker({
     mode,
     doctor,
@@ -616,11 +619,11 @@ export function App({
     wfStepOverrides,
     setWfStepOverrides,
     resolveWorkflowSpec,
+    pinTourFirst: stationLanding,
   });
 
   // Station landing: on a true first open (no run history), land on the tour
   // and open its preview so the primary CTA is one keystroke away.
-  const [stationLanding, setStationLanding] = useState(false);
   const stationBootstrapped = useRef(false);
   useEffect(() => {
     if (stationBootstrapped.current) return;
@@ -631,10 +634,11 @@ export function App({
       const history = await runner.historyStoreRef.current.list(1).catch(() => []);
       if (cancelled) return;
       if (!shouldOfferStationLanding({ hasRunHistory: history.length > 0 })) return;
-      const idx = tourWorkflowIndex(picker.workflowEntries);
-      if (idx < 0) return;
+      if (!picker.workflowEntries.some((entry) => entry.name === TOUR_WORKFLOW_NAME)) return;
+      // Queue the tour by name, then flip Station on so pinTourFirst rebuilds
+      // the nav and the pending-select effect lands on the pinned row.
+      picker.pendingSelectRef.current = TOUR_WORKFLOW_NAME;
       setStationLanding(true);
-      picker.setWorkflowIndex(idx);
       picker.setWfPreview({ name: TOUR_WORKFLOW_NAME, input: "all aboard" });
       runner.setStepIndex(0);
     })();
@@ -648,16 +652,9 @@ export function App({
     if (!stationLanding) return;
     const onTour =
       picker.wfPreview?.name === TOUR_WORKFLOW_NAME ||
-      (!picker.wfPreview &&
-        picker.workflowEntries[picker.workflowIndex]?.name === TOUR_WORKFLOW_NAME);
+      (!picker.wfPreview && picker.selectedWorkflowName === TOUR_WORKFLOW_NAME);
     if (!onTour || runner.wf.started) setStationLanding(false);
-  }, [
-    stationLanding,
-    picker.wfPreview,
-    picker.workflowIndex,
-    picker.workflowEntries,
-    runner.wf.started,
-  ]);
+  }, [stationLanding, picker.wfPreview, picker.selectedWorkflowName, runner.wf.started]);
 
   const previewSelectedStep =
     picker.preview.flatSteps.length > 0
@@ -1254,7 +1251,7 @@ export function App({
         return true;
       }
 
-      const entry = picker.workflowEntries[picker.workflowIndex];
+      const entry = picker.selectedWorkflowEntry;
       if (!entry) return false;
       if (promptText.length === 0) {
         runner.setWfNotice("type input in the prompt before running");
@@ -1282,8 +1279,7 @@ export function App({
       runner.wf.started,
       picker.wfPreview,
       runner.wfCanResume,
-      picker.workflowEntries,
-      picker.workflowIndex,
+      picker.selectedWorkflowEntry,
       runner.launchWorkflow,
       picker.wfCreate,
       picker.setWfPreview,
@@ -1399,11 +1395,15 @@ export function App({
           if (ran) prompt.updatePromptDraft({ promptEditing: false });
           return;
         }
-        if (picker.workflowIndex >= picker.workflowEntries.length) {
+        if (picker.onCreateRow) {
           focusCreateWorkflowPrompt(promptText);
           return;
         }
-        const entry = picker.workflowEntries[picker.workflowIndex];
+        if (picker.onHeaderRow) {
+          picker.toggleSelectedFolder();
+          return;
+        }
+        const entry = picker.selectedWorkflowEntry;
         if (!entry) return;
         runner.setWfNotice(null);
         runner.setStepIndex(0);
@@ -1470,8 +1470,10 @@ export function App({
       runner.running,
       mode,
       runner.wf.started,
-      picker.workflowEntries,
-      picker.workflowIndex,
+      picker.selectedWorkflowEntry,
+      picker.onCreateRow,
+      picker.onHeaderRow,
+      picker.toggleSelectedFolder,
       handleWorkflowRun,
       prompt.updatePromptDraft,
       focusCreateWorkflowPrompt,
@@ -1537,8 +1539,7 @@ export function App({
     if (picker.wfPreview) {
       name = picker.wfPreview.name;
     } else {
-      const entry = picker.workflowEntries[picker.workflowIndex];
-      name = entry?.name;
+      name = picker.selectedWorkflowName;
     }
     if (!name) return;
     const spec = resolveWorkflowSpec(name);
@@ -1554,8 +1555,7 @@ export function App({
     runner.running,
     mode,
     picker.wfPreview,
-    picker.workflowEntries,
-    picker.workflowIndex,
+    picker.selectedWorkflowName,
     resolveWorkflowSpec,
     planResult,
     runner.wfShowPlanResult,
@@ -1666,9 +1666,7 @@ export function App({
     ? suggestionMenuHeight(prompt.commandSuggestions.length, prompt.suggestionIndex)
     : 0;
   const activeWorkflowName = isWorkflow
-    ? (runner.activeWorkflowRef.current ??
-      picker.wfPreview?.name ??
-      picker.workflowEntries[picker.workflowIndex]?.name)
+    ? (runner.activeWorkflowRef.current ?? picker.wfPreview?.name ?? picker.selectedWorkflowName)
     : undefined;
   const activeWorkflowSource: WorkflowSourceKind | undefined = activeWorkflowName
     ? (picker.workflowEntries.find((entry) => entry.name === activeWorkflowName)?.source ??
@@ -1848,6 +1846,7 @@ export function App({
         ) : (
           <WorkflowPicker
             workflows={picker.workflowEntries}
+            nav={picker.pickerNav}
             selectedIndex={picker.workflowIndex}
             height={streamHeight}
             stationLanding={stationLanding}
@@ -2016,7 +2015,7 @@ function hint(
     if (wfPreviewing) {
       return `↑/↓ step · Enter details${resumeHint} · Ctrl+E edit step · /set-all retarget · Ctrl+R run · Esc back · Tab detail · /help · Ctrl+C quit${completeHint}`;
     }
-    return `↑/↓ pick · Ctrl+N new · type to edit · Enter preview · Ctrl+R run · Ctrl+J history · Tab switch mode · /help · Ctrl+C quit${completeHint}`;
+    return `↑/↓ pick · ←/→ folders · PgUp/PgDn · Ctrl+N new · type to edit · Enter open · Ctrl+R run · Ctrl+J history · Tab switch mode · /help · Ctrl+C quit${completeHint}`;
   }
   return promptEditing && slashInput
     ? `Enter dispatch${historyHint} · Esc unfocus · /help · Ctrl+C quit${completeHint}`
