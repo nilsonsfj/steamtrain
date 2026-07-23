@@ -71,7 +71,13 @@ export interface RetargetableStep {
    * step); `listRetargetableSteps` always sets it explicitly.
    */
   depth?: number;
-  /** The `workflow` step id this step is reached through (undefined at depth 0). */
+  /**
+   * The `workflow` step id this step is reached through — always the
+   * IMMEDIATE enclosing call step, not necessarily the top-level one. For a
+   * two-levels-deep step at path `call::inner::deep`, this is `"inner"` (the
+   * nested call step in the middle workflow), not `"call"`. Display-only
+   * today (a summary label); undefined at depth 0.
+   */
   viaWorkflowStep?: string;
 }
 

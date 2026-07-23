@@ -113,8 +113,11 @@ function targetFieldsEqual(a: WorkflowStep, b: WorkflowStep): boolean {
 /**
  * Walk a resolved child spec (base + effective, zipped by position) into a flat
  * step view, recursing into nested `workflow` steps. `base`/`effective` share
- * identical structure (overrides only change field values), so index alignment
- * is exact.
+ * identical structure (overrides only change field values, never add/remove/
+ * reorder phases or steps), so index alignment is exact — this function
+ * assumes that invariant holds and does not re-validate it; if `effPhase` or
+ * `effPhase.steps[si]` is ever missing, it silently falls back to `baseStep`
+ * rather than throwing.
  */
 function collectSteps(
   base: WorkflowSpec,
