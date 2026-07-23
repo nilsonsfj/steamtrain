@@ -85,6 +85,19 @@ describe("checkAgent mimo", () => {
   });
 });
 
+describe("checkAgent kimi", () => {
+  it("reports missing binary with an install hint", async () => {
+    const result = await checkAgent("kimi", "__steamtrain_missing_kimi__", { provider: "kimi" });
+    expect(result).toMatchObject({
+      agent: "kimi",
+      status: "binary_missing",
+      binary: "__steamtrain_missing_kimi__",
+    });
+    expect(result.detail).toContain("code.kimi.com/kimi-code/install.sh");
+    expect(result.fixCommand).toBe("curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash");
+  });
+});
+
 describe("checkAgent cursor", () => {
   it("reports missing binary with an install hint", async () => {
     const result = await checkAgent("cursor", "__steamtrain_missing_cursor__", {

@@ -68,6 +68,7 @@ describe("agent configuration", () => {
       "amp",
       "kiro",
       "mimo",
+      "kimi",
       "cursor",
       "antigravity",
     ]);
@@ -121,6 +122,7 @@ describe("agent configuration", () => {
       "amp",
       "kiro",
       "mimo",
+      "kimi",
       "cursor",
       "antigravity",
       "missing-opencode",

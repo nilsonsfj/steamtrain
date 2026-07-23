@@ -68,7 +68,7 @@ A tour of what it does and why it's useful — not an exhaustive spec (that's
 ### Run every major coding agent through one interface
 
 steamtrain spawns the real `claude`, `opencode`, `codex`, `agent` (Cursor), `agy`
-(Antigravity), and `amp` CLIs (no stubs) and maps each one's streaming output onto a single
+(Antigravity), `kimi` (Kimi Code), and `amp` CLIs (no stubs) and maps each one's streaming output onto a single
 normalized event model. Whichever agent produced a line — assistant text, a
 tool call, a result, an error — it renders in the same unified, color-coded
 stream. Mix agents freely in one workflow; steamtrain speaks all of them.
@@ -658,7 +658,7 @@ merge over the bundled ones; a same-named entry overrides a bundled one.
   [`docs/model-binding.md`](docs/model-binding.md) and
   [`docs/workflow-spec.md#workflow-inputs`](docs/workflow-spec.md#workflow-inputs).
   Agents:
-  `claude` | `opencode` | `codex` | `cursor` | `antigravity` | `amp` | `kiro` | `mimo`.
+  `claude` | `opencode` | `codex` | `cursor` | `antigravity` | `amp` | `kiro` | `mimo` | `kimi`.
   Also optional: `cwd` (the **target** dir; relative paths resolve against the
   launch cwd), `env` (extra vars), and `extraArgs` (extra CLI flags).
 - **Dynamic fan-out:** add `forEach: "steps.<id>.items"` to a worker/processor

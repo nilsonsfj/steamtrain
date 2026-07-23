@@ -710,6 +710,8 @@
           { value: "codex", label: "codex" },
           { value: "amp", label: "amp" },
           { value: "kiro", label: "kiro" },
+          { value: "mimo", label: "mimo" },
+          { value: "kimi", label: "kimi" },
           { value: "cursor", label: "cursor" },
           { value: "antigravity", label: "antigravity" }
         ], a.provider || "claude");

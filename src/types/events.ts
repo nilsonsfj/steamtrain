@@ -13,6 +13,7 @@ export type AgentProviderId =
   | "amp"
   | "kiro"
   | "mimo"
+  | "kimi"
   | "cursor"
   | "antigravity";
 

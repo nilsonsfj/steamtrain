@@ -31,6 +31,7 @@ const DRAFT_AGENT_ORDER: readonly AgentProviderId[] = [
   "amp",
   "kiro",
   "mimo",
+  "kimi",
   "cursor",
   "antigravity",
 ];

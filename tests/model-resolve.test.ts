@@ -84,6 +84,25 @@ describe("nativeModelForProvider", () => {
     expect(familyForProviderModel("mimo", "mimo/mimo-auto")?.id).toBe("mimo-auto");
     expect(familyForProviderModel("mimo", "xiaomi/mimo-v2.5-pro")?.id).toBe("mimo-v2.5-pro");
   });
+
+  it("maps aliases onto kimi's Kimi Code catalog ids", () => {
+    clearModelFamilyCacheForTests();
+    expect(nativeModelForProvider("kimi", "kimi k3")).toBe("kimi-code/k3");
+    expect(nativeModelForProvider("kimi", "kimi-k2.7-code")).toBe("kimi-code/kimi-for-coding");
+    expect(nativeModelForProvider("kimi", "kimi highspeed")).toBe(
+      "kimi-code/kimi-for-coding-highspeed",
+    );
+    // Claude/GPT aliases are not offered on the kimi agent.
+    expect(nativeModelForProvider("kimi", "sonnet")).toBeUndefined();
+    expect(nativeModelForProvider("kimi", "gpt-5.5")).toBeUndefined();
+  });
+
+  it("resolves the K2.7 Coding default model back to its family", () => {
+    clearModelFamilyCacheForTests();
+    expect(nativeModelForProvider("kimi", "kimi-for-coding")).toBe("kimi-code/kimi-for-coding");
+    expect(familyForProviderModel("kimi", "kimi-code/kimi-for-coding")?.id).toBe("kimi-k2.7-code");
+    expect(familyForProviderModel("kimi", "kimi-code/k3")?.id).toBe("kimi-k3");
+  });
 });
 
 describe("resolveModelBinding", () => {

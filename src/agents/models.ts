@@ -25,6 +25,13 @@ import {
   listCursorCachedAgentModels,
   refreshCursorVariantCache,
 } from "./cursor-variants";
+import { KIMI_MODELS, KimiAdapter } from "./kimi";
+import {
+  getKimiEfforts,
+  getKimiModelName,
+  listKimiCachedAgentModels,
+  refreshKimiVariantCache,
+} from "./kimi-variants";
 import { KIRO_MODELS, KiroCliAdapter } from "./kiro";
 import { MIMO_MODELS, MimoAdapter } from "./mimo";
 import {
@@ -49,6 +56,7 @@ export const AGENT_IDS: readonly AgentProviderId[] = [
   "amp",
   "kiro",
   "mimo",
+  "kimi",
   "cursor",
   "antigravity",
 ];
@@ -116,6 +124,16 @@ function mimoModelsWithLiveNames(): readonly AgentModel[] {
   }));
 }
 
+function kimiModelsWithLiveNames(): readonly AgentModel[] {
+  const cached = listKimiCachedAgentModels();
+  if (cached.length > 0) return cached;
+
+  return KIMI_MODELS.map((model) => ({
+    id: model.id,
+    name: getKimiModelName(model.id) ?? model.name,
+  }));
+}
+
 /** Model catalog for an agent provider (id + human-readable name). */
 export function modelsForProvider(provider: AgentProviderId): readonly AgentModel[] {
   switch (provider) {
@@ -131,6 +149,8 @@ export function modelsForProvider(provider: AgentProviderId): readonly AgentMode
       return KIRO_MODELS;
     case "mimo":
       return mimoModelsWithLiveNames();
+    case "kimi":
+      return kimiModelsWithLiveNames();
     case "cursor":
       return cursorModelsWithLiveNames();
     case "antigravity":
@@ -167,6 +187,7 @@ export function modelNameForAgent(
   if (provider === "opencode") return getOpencodeModelName(modelId) ?? modelId;
   if (provider === "codex") return getCodexModelName(modelId) ?? modelId;
   if (provider === "mimo") return getMimoModelName(modelId) ?? modelId;
+  if (provider === "kimi") return getKimiModelName(modelId) ?? modelId;
   if (provider === "cursor") return getCursorModelName(modelId) ?? modelId;
   if (provider === "antigravity") return getAntigravityModelName(modelId) ?? modelId;
   return modelId;
@@ -184,6 +205,7 @@ const PROVIDER_ADAPTERS: Record<AgentProviderId, () => AgentAdapter> = {
   amp: () => new AmpAdapter(),
   kiro: () => new KiroCliAdapter(),
   mimo: () => new MimoAdapter(),
+  kimi: () => new KimiAdapter(),
   cursor: () => new CursorAgentAdapter(),
   antigravity: () => new AntigravityAdapter(),
 };
@@ -288,6 +310,8 @@ export function effortsForModel(
       return claudeEfforts(model);
     case "mimo":
       return getMimoEfforts(model);
+    case "kimi":
+      return getKimiEfforts(model);
     case "cursor":
       return /\[[^\]]*effort=/.test(model) ? [] : ["low", "medium", "high", "xhigh"];
     case "antigravity":
@@ -384,6 +408,12 @@ export async function refreshAgentCatalogCaches(
     if (await refreshMimoVariantCache(binary)) refreshed = true;
   }
 
+  const kimi = doctor.find((d) => d.provider === "kimi" && d.status === "ok");
+  if (kimi?.status === "ok") {
+    const binary = resolveAgentInstance(config, kimi.agent)?.binary ?? kimi.binaryPath ?? "kimi";
+    if (await refreshKimiVariantCache(binary)) refreshed = true;
+  }
+
   return refreshed;
 }
 
@@ -392,6 +422,7 @@ export {
   refreshAntigravityVariantCache,
   refreshCodexVariantCache,
   refreshCursorVariantCache,
+  refreshKimiVariantCache,
   refreshMimoVariantCache,
   refreshOpencodeVariantCache,
 };
