@@ -23,7 +23,10 @@ export const KIMI_MODELS: readonly AgentModel[] = [
   { id: "kimi-code/k3", name: "K3" },
 ];
 
-/** Tool-call `arguments` arrive as a JSON-encoded string; parse when possible. */
+/**
+ * Tool-call `arguments` arrive as a JSON-encoded string; parse when possible.
+ * Non-string inputs (and unparseable strings) pass through unchanged.
+ */
 function parseToolArguments(args: unknown): unknown {
   if (typeof args !== "string") return args;
   try {
