@@ -595,10 +595,10 @@ textarea#input:focus {
 
 /* Active / attached run: drop the Describe compose box and pack control
    buttons into a thin strip so the canvas (overflow) gets more height. */
+/* #runRow carries an inline `display: grid/none` from app.js, so the row
+   cannot be re-declared flex here — with the compose box hidden, the grid's
+   single visible item (.btnstack) fills the row and right-aligns itself. */
 body.run-live .runbar .row {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
   gap: 8px;
   margin-top: 10px;
 }
