@@ -444,6 +444,11 @@
   // ---- in-flight runs (attach from any UI) ----------------------------------
   // The live-run registry lists every in-flight run in this project — web-owned,
   // CLI --detach, or TUI — so any of them can be attached to (replay + live tail).
+  /** True when the current view is an Active runs attachment (owns `.sel`). */
+  function isLiveAttached() {
+    return Boolean(S.runId && S.liveRuns.some(function (r) { return r.id === S.runId; }));
+  }
+
   function pollLiveRuns() {
     api("GET", "/api/runs").then(function (r) {
       if (r.status === 401) {
@@ -452,10 +457,14 @@
         return;
       }
       if (r.status !== 200) return; // transient; the next poll retries
+      var wasAttached = isLiveAttached();
       S.liveRuns = (r.body.runs || []).filter(function (run) {
         return run.status === "running" || run.status === "queued";
       });
       renderLiveRuns();
+      // When the attached run leaves (or re-enters) the Active runs list, the
+      // workflow catalog's selection highlight must flip with it.
+      if (wasAttached !== isLiveAttached()) renderSidebar();
     }).catch(function () {});
   }
 
@@ -590,6 +599,9 @@
       );
       openStream(run.id);
       render();
+      // Re-render after S.runId is set so the workflow catalog does not keep
+      // the shared `.sel` highlight that belongs to the Active runs row.
+      renderSidebar();
       renderLiveRuns();
     };
     if (known) {
@@ -1466,9 +1478,13 @@
       });
     }
     var groups = groupWorkflowsBySource(list);
+    // When an Active runs row is attached, that row owns the sidebar
+    // selection highlight — not the same-named workflow card/folder.
+    var liveAttached = isLiveAttached();
     groups.forEach(function (group) {
       var collapsed = !!S.folderCollapse[group.source];
-      var containsSelected = group.entries.some(function (w) { return w.name === S.selected; });
+      var containsSelected = !liveAttached &&
+        group.entries.some(function (w) { return w.name === S.selected; });
       var folder = h("div", {
         class: "wf-folder" + (collapsed ? " collapsed" : "") +
           (containsSelected ? " has-sel" : "") + " src-" + group.source
@@ -1514,11 +1530,14 @@
     var isStaged = workflowHasStaged(S.stagedOverrides[w.name]);
     var autonomy = AUTONOMY_META[w.autonomy] || AUTONOMY_META.autonomous;
     var isTour = w.name === TOUR_NAME;
+    // Attached live runs own the `.sel` highlight in Active runs; keep the
+    // catalog card unselected so both lists are not highlighted at once.
+    var isSelected = S.selected === w.name && !isLiveAttached();
     return h("div", {
-      class: "wf" + (S.selected === w.name ? " sel" : "") + (isTour && S.stationLanding ? " station" : ""),
+      class: "wf" + (isSelected ? " sel" : "") + (isTour && S.stationLanding ? " station" : ""),
       role: "button",
       tabindex: "0",
-      "aria-current": S.selected === w.name ? "true" : null,
+      "aria-current": isSelected ? "true" : null,
       "aria-label": "Open workflow " + w.name,
       onClick: function () { selectWorkflow(w.name); },
       onKeydown: function (event) {
@@ -1553,6 +1572,8 @@
     S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
     S.narration = []; S.arrivalInspect = false; S.arrivalEnter = false; S.endedAt = 0;
     S.narrationFreshPlayed = null;
+    // Leaving an attached run restores Plan / Describe and clears compact chrome.
+    setRunning(false);
     if (name !== TOUR_NAME) {
       S.stationLanding = false;
       S.tourRiding = false;
@@ -3527,10 +3548,11 @@
       (running && !ro && !S.runExternal && !S.runDetached) ? "block" : "none";
     document.getElementById("cancelBtn").style.display = (running && !ro) ? "block" : "none";
     updateDetachButton();
-    // Plan is a pre-launch dry-run; only hide it for read-only sessions (do not
-    // couple it to running — that was not the pre-existing behavior).
-    document.getElementById("planBtn").style.display = ro ? "none" : "block";
+    // Plan and the Describe compose box are pre-launch chrome — hide them while
+    // a run is attached so the overflow canvas gets the vertical room.
+    document.getElementById("planBtn").style.display = (running || ro) ? "none" : "block";
     document.getElementById("input").disabled = running || ro;
+    document.body.classList.toggle("run-live", Boolean(running));
     updatePauseButton();
   }
 
