@@ -121,8 +121,7 @@ export function createKimiMapper(agent: AgentInstanceId = AGENT): EventMapper {
 /**
  * CLI args for one headless `kimi -p` run.
  * NOTE: `-p` consumes the next token as the prompt, so it stays the final flag
- * pair. `--session <sessionId>` continues a recorded session. Kimi Code has no
- * effort/thinking CLI flag, so `opts.effort` is intentionally not forwarded.
+ * pair. `--session <sessionId>` continues a recorded session.
  */
 export function buildKimiRunArgs(opts: AgentRunOptions): string[] {
   return [
@@ -135,6 +134,18 @@ export function buildKimiRunArgs(opts: AgentRunOptions): string[] {
     "-p",
     opts.prompt,
   ];
+}
+
+/**
+ * Extra env for one run. Kimi Code has no effort CLI flag, but honors
+ * `KIMI_MODEL_THINKING_EFFORT` per process (forces the thinking effort on the
+ * wire; kimi provider only, while thinking is on) — that is how `opts.effort`
+ * is forwarded. Steamtrain only offers efforts from the model's declared
+ * `support_efforts`, so the bypass of that list here is safe.
+ */
+export function buildKimiRunEnv(opts: AgentRunOptions): Record<string, string> | undefined {
+  if (!opts.effort) return opts.env;
+  return { ...opts.env, KIMI_MODEL_THINKING_EFFORT: opts.effort };
 }
 
 /** Runs the real `kimi` CLI in streaming JSON mode. */
@@ -154,7 +165,7 @@ export class KimiAdapter implements AgentAdapter {
       id: this.id,
       binary: this.binary,
       args: buildKimiRunArgs(opts),
-      opts,
+      opts: { ...opts, env: buildKimiRunEnv(opts) },
       map: createKimiMapper(opts.agentId ?? this.id),
       // Prompt travels in argv (`-p`); stdin stays closed.
     });
