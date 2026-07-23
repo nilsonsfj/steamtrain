@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   clearKimiVariantCacheForTests,
   getKimiEfforts,
+  getKimiModelName,
   listKimiCachedAgentModels,
   parseKimiProviderList,
   setKimiVariantCacheForTests,
@@ -72,5 +73,18 @@ describe("kimi variant cache", () => {
     clearKimiVariantCacheForTests();
     expect(getKimiEfforts("kimi-code/k3")).toEqual(["low", "high", "max"]); // static fallback
     expect(getKimiEfforts("kimi-code/kimi-for-coding")).toEqual([]);
+  });
+
+  it("resolves display names from the fresh cache only", () => {
+    clearKimiVariantCacheForTests();
+    expect(getKimiModelName("kimi-code/k3")).toBeUndefined();
+
+    setKimiVariantCacheForTests(
+      new Map([["kimi-code/k3", { name: "K3", efforts: ["low", "high", "max"] }]]),
+    );
+    expect(getKimiModelName("kimi-code/k3")).toBe("K3");
+    expect(getKimiModelName("kimi-code/kimi-for-coding")).toBeUndefined();
+
+    clearKimiVariantCacheForTests();
   });
 });
