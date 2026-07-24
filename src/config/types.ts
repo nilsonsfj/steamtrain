@@ -160,6 +160,7 @@ const agentProviderId = z.enum([
   "amp",
   "kiro",
   "mimo",
+  "kimi",
   "cursor",
   "antigravity",
 ]);
@@ -252,6 +253,7 @@ export const configFileSchema = z
         amp: nonEmptyString.optional(),
         kiro: nonEmptyString.optional(),
         mimo: nonEmptyString.optional(),
+        kimi: nonEmptyString.optional(),
         cursor: nonEmptyString.optional(),
         antigravity: nonEmptyString.optional(),
       })

@@ -4,6 +4,10 @@ import {
   setCodexVariantCacheForTests,
 } from "../src/agents/codex-variants";
 import {
+  clearKimiVariantCacheForTests,
+  setKimiVariantCacheForTests,
+} from "../src/agents/kimi-variants";
+import {
   clearMimoVariantCacheForTests,
   setMimoVariantCacheForTests,
 } from "../src/agents/mimo-variants";
@@ -123,16 +127,38 @@ describe("mimo models", () => {
   });
 });
 
+describe("kimi models", () => {
+  it("exposes the Kimi Code catalog with K2.7 Coding as the default", () => {
+    expect(modelIdsForAgent("kimi")).toEqual([
+      "kimi-code/kimi-for-coding",
+      "kimi-code/kimi-for-coding-highspeed",
+      "kimi-code/k3",
+    ]);
+    expect(defaultModelForAgent("kimi")).toBe("kimi-code/kimi-for-coding");
+    expect(modelNameForAgent("kimi", "kimi-code/kimi-for-coding")).toBe("K2.7 Coding");
+    expect(modelNameForAgent("kimi", "kimi-code/k3")).toBe("K3");
+  });
+
+  it("exposes low/high/max efforts for k3 only", () => {
+    expect(effortsForModel("kimi", "kimi-code/k3")).toEqual(["low", "high", "max"]);
+    expect(effortsForModel("kimi", "kimi-code/kimi-for-coding")).toEqual([]);
+    expect(supportsEffort("kimi", "kimi-code/k3")).toBe(true);
+    expect(supportsEffort("kimi", "kimi-code/kimi-for-coding")).toBe(false);
+  });
+});
+
 describe("model names", () => {
   beforeEach(() => {
     clearCodexVariantCacheForTests();
     clearOpencodeVariantCacheForTests();
     clearMimoVariantCacheForTests();
+    clearKimiVariantCacheForTests();
   });
   afterAll(() => {
     clearCodexVariantCacheForTests();
     clearOpencodeVariantCacheForTests();
     clearMimoVariantCacheForTests();
+    clearKimiVariantCacheForTests();
   });
 
   it("returns hardcoded Claude display names", () => {
@@ -209,6 +235,7 @@ describe("model names", () => {
     expect(defaultModelForAgent("amp")).toBe("smart");
     expect(defaultModelForAgent("kiro")).toBe("claude-sonnet-5");
     expect(defaultModelForAgent("mimo")).toBe("mimo/mimo-auto");
+    expect(defaultModelForAgent("kimi")).toBe("kimi-code/kimi-for-coding");
   });
 
   it("uses only the live MiMo catalog when cache is loaded", () => {
@@ -223,6 +250,20 @@ describe("model names", () => {
     expect(effortsForModel("mimo", "xiaomi/mimo-v2.5-pro")).toEqual(["high"]);
     expect(defaultModelForAgent("mimo")).toBe("mimo/mimo-auto");
     clearMimoVariantCacheForTests();
+  });
+
+  it("uses only the live Kimi catalog when cache is loaded", () => {
+    setKimiVariantCacheForTests(
+      new Map([
+        ["kimi-code/kimi-for-coding", { name: "K2.7 Coding", efforts: [] }],
+        ["kimi-code/k3", { name: "K3 (live)", efforts: ["low", "high", "max"] }],
+      ]),
+    );
+    expect(modelIdsForAgent("kimi")).toEqual(["kimi-code/k3", "kimi-code/kimi-for-coding"]);
+    expect(modelNameForAgent("kimi", "kimi-code/k3")).toBe("K3 (live)");
+    expect(effortsForModel("kimi", "kimi-code/k3")).toEqual(["low", "high", "max"]);
+    expect(defaultModelForAgent("kimi")).toBe("kimi-code/kimi-for-coding");
+    clearKimiVariantCacheForTests();
   });
 
   it("falls back to the static OpenCode catalog when cache is empty", () => {

@@ -5,6 +5,7 @@ import { AntigravityAdapter } from "./antigravity";
 import { ClaudeCodeAdapter } from "./claude";
 import { CodexAdapter } from "./codex";
 import { CursorAgentAdapter } from "./cursor";
+import { KimiAdapter } from "./kimi";
 import { KiroCliAdapter } from "./kiro";
 import { MimoAdapter } from "./mimo";
 import { OpenCodeAdapter } from "./opencode";
@@ -45,6 +46,7 @@ export {
   type ResolvedAgentInstance,
 } from "./config";
 export { KiroCliAdapter, KIRO_MODELS, buildKiroExecArgs, runKiroProcess } from "./kiro";
+export { buildKimiRunArgs, createKimiMapper, KIMI_MODELS, KimiAdapter } from "./kimi";
 export { MimoAdapter, MIMO_MODELS, createMimoMapper } from "./mimo";
 export {
   AGENT_IDS,
@@ -63,6 +65,7 @@ export {
   refreshAntigravityVariantCache,
   refreshCodexVariantCache,
   refreshCursorVariantCache,
+  refreshKimiVariantCache,
   refreshMimoVariantCache,
   refreshOpencodeVariantCache,
   supportsEffort,
@@ -140,6 +143,12 @@ export {
   setMimoVariantCacheForTests,
 } from "./mimo-variants";
 export { fallbackMimoEfforts } from "./mimo-efforts-fallback";
+export {
+  clearKimiVariantCacheForTests,
+  parseKimiProviderList,
+  setKimiVariantCacheForTests,
+} from "./kimi-variants";
+export { fallbackKimiEfforts } from "./kimi-efforts-fallback";
 export { OpenCodeAdapter, OPENCODE_MODELS, createOpenCodeMapper } from "./opencode";
 export {
   type AgentLayers,
@@ -166,6 +175,8 @@ export function createAdapter(id: AgentProviderId, binary?: string): AgentAdapte
       return new KiroCliAdapter(binary);
     case "mimo":
       return new MimoAdapter(binary);
+    case "kimi":
+      return new KimiAdapter(binary);
     case "cursor":
       return new CursorAgentAdapter(binary);
     case "antigravity":

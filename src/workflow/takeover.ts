@@ -37,6 +37,8 @@ const INTERACTIVE_RESUME_ARGS: Partial<Record<AgentProviderId, (sessionId: strin
   cursor: (sessionId) => ["--resume", sessionId],
   // Antigravity CLI resumes by conversation id (interactive and headless).
   antigravity: (sessionId) => ["--conversation", sessionId],
+  // Kimi Code resumes by session id (`-S` alias), interactive and headless.
+  kimi: (sessionId) => ["--session", sessionId],
 };
 
 export interface TakeoverPlan {

@@ -303,6 +303,12 @@ function installHint(agent: AgentProviderId): FixHint {
         detail: "Install MiMo Code (npm i -g @mimo-ai/cli) and ensure `mimo` is on PATH.",
         command: "npm i -g @mimo-ai/cli",
       };
+    case "kimi":
+      return {
+        detail:
+          "Install Kimi Code (curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash, or npm i -g @moonshot-ai/kimi-code) and ensure `kimi` is on PATH.",
+        command: "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash",
+      };
     case "cursor":
       return {
         detail:
@@ -350,6 +356,11 @@ function authHint(agent: AgentProviderId): FixHint {
       return {
         detail: "Run `mimo auth login` for the provider you want to use.",
         command: "mimo auth login",
+      };
+    case "kimi":
+      return {
+        detail: "Run `kimi login` (device-code OAuth) or `/login` inside the `kimi` TUI.",
+        command: "kimi login",
       };
     case "cursor":
       return {
