@@ -3,6 +3,7 @@ import {
   ARRIVAL_NEXT_CANDIDATES,
   TOUR_WORKFLOW_NAME,
   type WorkflowEvent,
+  type WorkflowSpec,
   type WorkflowState,
   appendNarration,
   arrivalReceiptCards,
@@ -304,6 +305,78 @@ describe("arrival report", () => {
     );
     const hero = findArrivalStep(steps);
     expect(hero?.stepId).toBe("conductor");
+  });
+
+  it("leads the arrival hero with root-cause failures when the run stops short", () => {
+    const spec: WorkflowSpec = {
+      name: "fail-demo",
+      phases: [
+        {
+          id: "list",
+          title: "List",
+          steps: [{ id: "list-prs", kind: "processor", agent: "claude", model: "m", prompt: "x" }],
+        },
+        {
+          id: "summary",
+          title: "Summary",
+          steps: [{ id: "report", kind: "consolidator", dependsOn: ["list-prs"], prompt: "y" }],
+        },
+      ],
+    };
+    const base = workflowStateFromSpec(spec);
+    const state: WorkflowState = {
+      ...base,
+      done: true,
+      ok: false,
+      phases: [
+        {
+          ...base.phases[0]!,
+          steps: [
+            {
+              ...base.phases[0]!.steps[0]!,
+              status: "error" as const,
+              result: {
+                stepId: "list-prs",
+                ok: false,
+                error:
+                  "structured output retry failed: no parseable JSON found in the step output\nsecond line",
+                output: "raw agent reply",
+                durationMs: 5,
+              },
+            },
+          ],
+        },
+        {
+          ...base.phases[1]!,
+          steps: [
+            {
+              ...base.phases[1]!.steps[0]!,
+              status: "error" as const,
+              result: {
+                stepId: "report",
+                ok: false,
+                error:
+                  "dependency 'list-prs' failed: structured output retry failed: no parseable JSON found in the step output",
+                output: "",
+                durationMs: 0,
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const report = buildArrivalReport(state, { elapsedMs: 100 });
+    expect(report).not.toBeNull();
+    // Root cause first, first line only…
+    expect(report!.hero).toContain(
+      "✗ list-prs: structured output retry failed: no parseable JSON found in the step output",
+    );
+    expect(report!.hero).not.toContain("second line");
+    // …cascade victims are not repeated as their own failures…
+    expect(report!.hero).not.toContain("✗ report:");
+    // …and the failed step's raw output stays below for context.
+    expect(report!.hero).toContain("raw agent reply");
   });
 
   it("formats headlines and receipt cards for success, failure, and billed runs", () => {

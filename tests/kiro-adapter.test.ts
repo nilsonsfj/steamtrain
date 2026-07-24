@@ -207,6 +207,58 @@ describe("runKiroProcess", () => {
     );
   });
 
+  it("strips ANSI styling from stdout lines and stderr", async () => {
+    // kiro-cli renders markdown with SGR color codes even when stdout is a
+    // pipe; downstream consumers (structured-output parsing, UIs, logs) must
+    // see clean text.
+    const events = await collect(
+      runKiroProcess({
+        id: "kiro",
+        binary: "kiro-cli",
+        args: [],
+        opts: { prompt: "hi", model: "claude-sonnet-5" },
+        runLines: async function* () {
+          yield { kind: "line", line: "\x1b[38;5;141m> \x1b[0m\x1b[1mjson" };
+          yield { kind: "line", line: '\x1b[0m\x1b[38;5;10m{"prs":["431"]}' };
+          yield {
+            kind: "exit",
+            code: 0,
+            signal: null,
+            timedOut: false,
+            stderr: "",
+            sawStdout: true,
+          };
+        },
+      }),
+    );
+    expect(events.at(-1)).toMatchObject({
+      kind: "result",
+      isError: false,
+      text: '> json\n{"prs":["431"]}',
+    });
+
+    const errEvents = await collect(
+      runKiroProcess({
+        id: "kiro",
+        binary: "kiro-cli",
+        args: [],
+        opts: { prompt: "hi", model: "claude-sonnet-5" },
+        runLines: async function* () {
+          yield {
+            kind: "exit",
+            code: 2,
+            signal: null,
+            timedOut: false,
+            stderr: "\x1b[31merror: boom\x1b[0m",
+            sawStdout: false,
+          };
+        },
+      }),
+    );
+    expect((errEvents[0] as { message: string }).message).toContain("error: boom");
+    expect((errEvents[0] as { message: string }).message).not.toContain("\x1b");
+  });
+
   it("errors when stdout is empty or whitespace-only on success", async () => {
     const empty = await collect(
       runKiroProcess({

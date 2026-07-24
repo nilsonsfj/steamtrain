@@ -94,7 +94,15 @@ export function buildArrivalReport(
   }
 
   const heroStep = findArrivalStep(flat.map((f) => f.step));
-  const hero = (heroStep?.result?.output ?? heroStep?.text ?? "").trim() || fallbackHero(state);
+  let hero = (heroStep?.result?.output ?? heroStep?.text ?? "").trim() || fallbackHero(state);
+
+  // A failed run's hero is usually the last step's raw output — useless for
+  // "what broke?". Lead with the root-cause failures so the arrival screen
+  // answers that directly, then keep the hero output below for context.
+  if (!state.ok) {
+    const failures = rootFailureLines(flat.map((f) => f.step));
+    if (failures.length > 0) hero = [...failures, "", hero].join("\n");
+  }
 
   // Prefer an explicit credentialFree flag (tour). The $0/0-token heuristic is
   // a best-effort fallback — a cancelled agent run that never billed can look
@@ -230,6 +238,23 @@ function leafResults(state: WorkflowState): ArrivalStepResult[] {
     }
   }
   return out.filter((r) => !r.childResults?.length);
+}
+
+/**
+ * One `✗ <step>: <error>` line per root-cause failure in a stopped run.
+ * Cascade victims (their error is the engine's "dependency '<id>' failed"
+ * pointer) are dropped when at least one genuine root failure exists —
+ * they only restate what the root lines already explain.
+ */
+function rootFailureLines(steps: StepState[]): string[] {
+  const failed = steps.filter((s) => s.result && !s.result.ok && !s.result.skipped);
+  const roots = failed.filter((s) => !(s.result?.error ?? "").startsWith("dependency '"));
+  const shown = roots.length > 0 ? roots : failed;
+  return shown.map((s) => {
+    const firstErrLine = (s.result?.error ?? "failed").split("\n", 1)[0]?.trim() || "failed";
+    const capped = firstErrLine.length > 200 ? `${firstErrLine.slice(0, 199)}…` : firstErrLine;
+    return `✗ ${s.stepId}: ${capped}`;
+  });
 }
 
 function fallbackHero(state: WorkflowState): string {

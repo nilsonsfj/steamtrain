@@ -14,6 +14,8 @@
  * are ignored, matching JSON Schema's own convention.
  */
 
+import { stripAnsi } from "../text";
+
 /** A JSON Schema object (subset; see module docs for supported keywords). */
 export type JsonSchema = Record<string, unknown>;
 
@@ -75,13 +77,17 @@ function balancedJsonCandidates(text: string): string[] {
 }
 
 /**
- * Find the JSON value an agent reply contains. Tries, in order: the whole
- * (trimmed) text; fenced ``` blocks, last first (agents put the final answer
- * last); top-level balanced `{…}`/`[…]` spans, last parseable first. Returns
- * undefined when nothing parses.
+ * Find the JSON value an agent reply contains. ANSI escape sequences are
+ * stripped first: plain-text CLIs (kiro headless chat) style their markdown
+ * even on a pipe, and a `\x1b[…m` color code contains a `[` that otherwise
+ * hijacks the balanced-span scanner (SGR sequences never close the bracket,
+ * so the real JSON gets swallowed into an unterminated candidate). Tries, in
+ * order: the whole (trimmed) text; fenced ``` blocks, last first (agents put
+ * the final answer last); top-level balanced `{…}`/`[…]` spans, last
+ * parseable first. Returns undefined when nothing parses.
  */
 export function extractJsonValue(text: string): { value: unknown } | undefined {
-  const trimmed = text.trim();
+  const trimmed = stripAnsi(text).trim();
   if (!trimmed) return undefined;
   const direct = tryParse(trimmed);
   if (direct) return direct;

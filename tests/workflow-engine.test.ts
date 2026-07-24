@@ -678,6 +678,14 @@ describe("runWorkflow", () => {
     expect(workDone && workDone.kind === "step_done" && workDone.result.error).toMatch(
       /dependency 'split' failed/,
     );
+    // The downstream step's error carries the root cause so UIs surfacing only
+    // this step (often the run's last one) still explain what actually broke.
+    expect(workDone && workDone.kind === "step_done" && workDone.result.error).toContain(
+      "split failed",
+    );
+    expect(workDone && workDone.kind === "step_done" && workDone.result.output).toContain(
+      "split failed",
+    );
   });
 
   it("enforces the dynamic step cap for agent-generated distributor items", async () => {
