@@ -3768,13 +3768,27 @@ async function executeWorkflowCallOnce(
       output: outputResult.output,
       json: outputResult.json,
       item,
-      error: childOk ? undefined : `sub-workflow '${step.workflow}' did not complete successfully`,
+      error: childOk
+        ? undefined
+        : `sub-workflow '${step.workflow}' did not complete successfully${childFailureDetail(childResults)}`,
       durationMs: Date.now() - started,
       childResults,
       worktree,
     },
     childResults,
   };
+}
+
+/**
+ * Name the child step that actually failed, so a failed sub-workflow does not
+ * report a bare "did not complete successfully" and force the operator to go
+ * digging through per-step output for the real reason.
+ */
+function childFailureDetail(childResults: StepResult[]): string {
+  const failed = childResults.find((child) => !child.ok);
+  if (!failed) return "";
+  const reason = failed.error?.trim();
+  return `: ${failed.stepId}${reason ? ` — ${reason}` : " failed"}`;
 }
 
 /**
