@@ -465,6 +465,7 @@
       if (r.status === 401) {
         // Session expired: stop polling; a successful login reloads the page.
         if (S.liveRunsTimer) { clearInterval(S.liveRunsTimer); S.liveRunsTimer = null; }
+        if (S.sessionHeartbeatTimer) { clearInterval(S.sessionHeartbeatTimer); S.sessionHeartbeatTimer = null; }
         return;
       }
       if (r.status !== 200) return; // transient; the next poll retries
@@ -702,12 +703,17 @@
       submitBtn.disabled = true;
       api("POST", "/api/auth", { token: token }).then(function (r) {
         if (r.status === 200 && r.body.ok) {
-          dismissReauthOverlay();
-          if (r.body.capability) S.capability = r.body.capability;
-          if (r.body.sessionTtlMs) S.sessionTtlMs = r.body.sessionTtlMs;
-          applyCapabilityChrome();
-          startSessionHeartbeat();
-          if (S.runId && !S.es) openStream(S.runId);
+          try {
+            dismissReauthOverlay();
+            if (r.body.capability) S.capability = r.body.capability;
+            if (r.body.sessionTtlMs) S.sessionTtlMs = r.body.sessionTtlMs;
+            applyCapabilityChrome();
+            startSessionHeartbeat();
+            if (S.runId && !S.es) openStream(S.runId);
+          } catch (ex) {
+            console.error("doReauth success-path error:", ex);
+            submitBtn.disabled = false;
+          }
         } else {
           submitBtn.disabled = false;
           if (errEl) errEl.textContent = (r.body && r.body.error) || "Login failed.";
@@ -723,6 +729,10 @@
       if (e.key === "Enter") doReauth();
     });
     backdrop.addEventListener("keydown", function (e) {
+      // Intentionally non-dismissive: Escape refocuses the token input instead of
+      // closing the overlay. The reauth overlay must not be dismissed without a
+      // successful authentication, because the session is expired and any action
+      // would fail with 401. Do not add dismissReauthOverlay() here.
       if (e.key === "Escape") { e.preventDefault(); tokenInput.focus(); return; }
       if (e.key === "Tab") {
         var focusable = backdrop.querySelectorAll("input, button");
@@ -749,6 +759,11 @@
 
   function startSessionHeartbeat() {
     if (S.sessionHeartbeatTimer) clearInterval(S.sessionHeartbeatTimer);
+    // Adaptive interval: for the default 7-day TTL (604800000ms) this evaluates to
+    // 60000ms (the cap). For shorter custom TTLs (e.g. 2-hour session = 7200000ms),
+    // the formula yields 60000ms still capped. Below ~2 hours (e.g. 10-minute TTL =
+    // 600000ms) it produces 5000ms, ensuring we detect expiry well before it hits.
+    // The divisor of 120 means we check ~60 times per TTL window.
     var interval = S.sessionTtlMs ? Math.min(60000, Math.floor(S.sessionTtlMs / 120)) : 60000;
     S.sessionHeartbeatTimer = setInterval(function () {
       api("GET", "/api/session").then(function (r) {
