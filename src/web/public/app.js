@@ -96,7 +96,10 @@
     detailFallback: null,
     detailFocusPending: false,
     detailFocusGeneration: 0,
-    planRequest: 0
+    planRequest: 0,
+    reauthVisible: false,
+    sessionHeartbeatTimer: null,
+    sessionTtlMs: null
   };
 
   var SELECTION_KEY = "steamtrain.lastWorkflow";
@@ -257,7 +260,11 @@
   /** Like api() but redirects to login on 401 (session expired). */
   function apiAuth(method, path, body) {
     return api(method, path, body).then(function (r) {
-      if (r.status === 401) { showLoginForm(); throw new Error("auth required"); }
+      if (r.status === 401) {
+        if (S.runId || S.selected) { showReauthOverlay(); }
+        else { showLoginForm(); }
+        throw new Error("auth required");
+      }
       if (r.status === 403 && r.body && r.body.error === "read-only session") {
         S.capability = "read";
         applyCapabilityChrome();
@@ -275,6 +282,7 @@
         S.capability = r.body.capability === "read" ? "read" : "full";
         if (r.body.project) applyProjectChrome(r.body.project);
         applyCapabilityChrome();
+        if (r.body.authRequired) startSessionHeartbeat();
       }
       loadWorkflows();
     }).catch(function () {
@@ -307,7 +315,7 @@
 
   function loadWorkflows() {
     api("GET", "/api/workflows").then(function (r) {
-      if (r.status === 401) { showLoginForm(); return; }
+      if (r.status === 401) { showReauthOverlay(); return; }
       S.workflows = r.body.workflows || [];
       if (r.body.configLabel) {
         document.getElementById("config").textContent = "cfg · " + r.body.configLabel;
@@ -491,7 +499,7 @@
     var request = ++S.deepLinkRequest;
     api("GET", "/api/runs").then(function (r) {
       if (request !== S.deepLinkRequest || currentRunDeepLink() !== runId) return;
-      if (r.status === 401) { showLoginForm(); return; }
+      if (r.status === 401) { showReauthOverlay(); return; }
       if (r.status !== 200) {
         setBanner("Could not open run " + runId.slice(0, 8) + "… — try refreshing.", "err");
         return;
@@ -649,6 +657,7 @@
     if (!token) { if (errEl) errEl.textContent = "Token is required."; return; }
     api("POST", "/api/auth", { token: token }).then(function (r) {
       if (r.status === 200 && r.body.ok) {
+        if (r.body.sessionTtlMs) S.sessionTtlMs = r.body.sessionTtlMs;
         window.location.reload();
       } else {
         if (errEl) errEl.textContent = (r.body && r.body.error) || "Login failed.";
@@ -656,6 +665,83 @@
     }).catch(function () {
       if (errEl) errEl.textContent = "Network error.";
     });
+  }
+
+  function showReauthOverlay() {
+    if (S.reauthVisible) return;
+    S.reauthVisible = true;
+    var backdrop = h("div", { class: "reauth-backdrop", id: "reauthOverlay" },
+      h("div", { class: "reauth-card", role: "dialog", "aria-modal": "true", "aria-labelledby": "reauthTitle" },
+        h("div", { class: "reauth-icon", "aria-hidden": "true", text: "\uD83D\uDD12" }),
+        h("h2", { class: "reauth-title", id: "reauthTitle", text: "Session expired" }),
+        h("p", { class: "reauth-desc", text: "Your session has timed out. Enter your token to continue where you left off." }),
+        h("div", { class: "reauth-form" },
+          h("input", { type: "password", id: "reauthToken", class: "txt", placeholder: "Enter auth or read token", autocomplete: "off" }),
+          h("button", { class: "btn primary", id: "reauthBtn", text: "Re-authenticate" })
+        ),
+        h("p", { class: "reauth-error", id: "reauthError" })
+      )
+    );
+    document.body.appendChild(backdrop);
+    var tokenInput = document.getElementById("reauthToken");
+    var submitBtn = document.getElementById("reauthBtn");
+    function doReauth() {
+      var errEl = document.getElementById("reauthError");
+      if (errEl) errEl.textContent = "";
+      var token = tokenInput ? tokenInput.value : "";
+      if (!token) { if (errEl) errEl.textContent = "Token is required."; return; }
+      submitBtn.disabled = true;
+      api("POST", "/api/auth", { token: token }).then(function (r) {
+        if (r.status === 200 && r.body.ok) {
+          dismissReauthOverlay();
+          if (r.body.capability) S.capability = r.body.capability;
+          if (r.body.sessionTtlMs) S.sessionTtlMs = r.body.sessionTtlMs;
+          applyCapabilityChrome();
+          startSessionHeartbeat();
+          if (S.runId && !S.es) openStream(S.runId);
+        } else {
+          submitBtn.disabled = false;
+          if (errEl) errEl.textContent = (r.body && r.body.error) || "Login failed.";
+        }
+      }).catch(function () {
+        submitBtn.disabled = false;
+        var errEl = document.getElementById("reauthError");
+        if (errEl) errEl.textContent = "Network error.";
+      });
+    }
+    submitBtn.addEventListener("click", doReauth);
+    tokenInput.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") doReauth();
+    });
+    backdrop.addEventListener("keydown", function (e) {
+      if (e.key === "Tab") {
+        var focusable = backdrop.querySelectorAll("input, button");
+        var first = focusable[0];
+        var last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault(); last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault(); first.focus();
+        }
+      }
+    });
+    tokenInput.focus();
+  }
+
+  function dismissReauthOverlay() {
+    S.reauthVisible = false;
+    var el = document.getElementById("reauthOverlay");
+    if (el) el.remove();
+  }
+
+  function startSessionHeartbeat() {
+    if (S.sessionHeartbeatTimer) clearInterval(S.sessionHeartbeatTimer);
+    var interval = S.sessionTtlMs ? Math.min(60000, Math.floor(S.sessionTtlMs / 120)) : 60000;
+    S.sessionHeartbeatTimer = setInterval(function () {
+      api("GET", "/api/session").then(function (r) {
+        if (r.status === 401) showReauthOverlay();
+      }).catch(function () {});
+    }, interval);
   }
 
   function loadProjectConfig() {
@@ -3417,7 +3503,7 @@
     if (S.es) S.es.close();
     // Pre-flight auth check: EventSource can't handle 401 (it silently retries).
     api("GET", "/api/workflows").then(function (r) {
-      if (r.status === 401) { showLoginForm(); return; }
+      if (r.status === 401) { showReauthOverlay(); return; }
       var es = new EventSource("/api/runs/" + runId + "/stream");
       S.es = es;
       es.onmessage = function (m) {
@@ -3852,7 +3938,7 @@
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify(payload), signal: signal
     }).then(function (res) {
-      if (res.status === 401) { showLoginForm(); return; }
+      if (res.status === 401) { showReauthOverlay(); return; }
       var reader = res.body.getReader();
       var dec = new TextDecoder();
       var buf = "";
@@ -4603,7 +4689,7 @@
       if (req !== Hist.request || Hist.holder !== holder) return;
       var histRes = results[0];
       var liveRes = results[1];
-      if (histRes.status === 401) { showLoginForm(); return; }
+      if (histRes.status === 401) { showReauthOverlay(); return; }
       var nextRuns = (histRes.body && histRes.body.runs) || [];
       var nextLive = [];
       if (liveRes && liveRes.status === 200) {
