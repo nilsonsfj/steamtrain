@@ -73,6 +73,22 @@ describe("workflow cache store", () => {
     expect(readFileSync(join(root, workflowCacheFileName(key)), "utf8")).toContain(key.specHash);
   });
 
+  it("preserves the dependencyFailed cascade marker through the round-trip", async () => {
+    const root = tempDir();
+    const key = workflowCacheKey("wf", "input", root, { name: "wf", phases: [] });
+    const cascaded: StepResult = {
+      stepId: "report",
+      ok: false,
+      dependencyFailed: "list-prs",
+      output: "skipped: dependency 'list-prs' failed: boom",
+      error: "dependency 'list-prs' failed: boom",
+      durationMs: 0,
+    };
+    await saveWorkflowCache(root, key, new Map([["report", cascaded]]));
+    const loaded = await loadWorkflowCache(root, key);
+    expect(loaded.get("report")).toEqual(cascaded);
+  });
+
   it("isolates caches by workflow, input, and cwd", async () => {
     const root = tempDir();
     const specA = { name: "wf-a", phases: [] };
