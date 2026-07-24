@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
+import { approvalDeepLink } from "../web/run-deep-link";
 import { costForResults } from "./cost";
 import type { WorkflowEvent } from "./events";
+import { formatDiscordPayload, formatSlackPayload, formatTeamsPayload } from "./webhook-templates";
 
 /**
  * Run notifications (roadmap §1.5): once runs are long, detached, or waiting
@@ -32,6 +34,8 @@ export type NotifyEventKind =
   | "approval-pending"
   | "input-pending";
 
+export type WebhookFormat = "raw" | "slack" | "discord" | "teams";
+
 /** All kinds, in the order shown by config surfaces. */
 export const NOTIFY_EVENT_KINDS: readonly NotifyEventKind[] = [
   "run-completed",
@@ -49,6 +53,8 @@ export interface NotifyConfig {
   desktop?: boolean;
   /** POST a JSON payload to this URL on each notified event. */
   webhook?: string;
+  /** Payload format for the webhook: 'raw' (default), 'slack', 'discord', or 'teams'. */
+  webhookFormat?: WebhookFormat;
   /** Which events notify. Omitted ⇒ all of {@link NOTIFY_EVENT_KINDS}. */
   events?: NotifyEventKind[];
 }
@@ -120,13 +126,24 @@ export function createNotifier(
   };
 
   const webhook = (event: NotifyEvent, url: string): void => {
+    const format = config?.webhookFormat;
+    let body: string;
+    if (format === "slack") {
+      body = JSON.stringify(formatSlackPayload(event));
+    } else if (format === "discord") {
+      body = JSON.stringify(formatDiscordPayload(event));
+    } else if (format === "teams") {
+      body = JSON.stringify(formatTeamsPayload(event));
+    } else {
+      body = JSON.stringify(event);
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
     (timer as { unref?: () => void }).unref?.();
     void fetchFn(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(event),
+      body,
       signal: controller.signal,
     })
       .catch(() => {})
@@ -180,6 +197,7 @@ export function notifyWorkflowEvent(
         ...base,
         kind: "approval-pending",
         detail: `waiting for approval at '${event.stepId}'`,
+        url: base.url ? `${base.url}/step/${event.stepId}` : undefined,
       });
       return;
     case "human_input_pending":

@@ -4448,3 +4448,111 @@ select:focus-visible,
   outline: 2px solid var(--accent-bright);
   outline-offset: 3px;
 }
+
+/* ---- reauth overlay ---- */
+.reauth-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 11, 16, 0.72);
+  backdrop-filter: blur(8px) saturate(0.85);
+  animation: reauth-fade-in 260ms var(--ease-out) both;
+}
+@keyframes reauth-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.reauth-card {
+  position: relative;
+  width: min(400px, calc(100vw - 40px));
+  padding: 32px 28px 28px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, rgba(22, 30, 40, 0.98) 0%, rgba(16, 22, 30, 0.99) 100%);
+  border: 1px solid rgba(52, 211, 196, 0.28);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 24px 64px rgba(0, 0, 0, 0.55), 0 0 0 1px
+    rgba(0, 0, 0, 0.25);
+  animation: reauth-card-in 360ms var(--ease-out) both;
+  animation-delay: 80ms;
+}
+@keyframes reauth-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.reauth-card::before {
+  content: "";
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(52, 211, 196, 0.45), transparent);
+  pointer-events: none;
+}
+.reauth-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 18px;
+  border-radius: 50%;
+  background: rgba(52, 211, 196, 0.1);
+  border: 1px solid rgba(52, 211, 196, 0.25);
+  color: var(--accent-bright);
+  font-size: 20px;
+  line-height: 1;
+}
+.reauth-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-align: center;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.reauth-desc {
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+.reauth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.reauth-form .txt {
+  width: 100%;
+  min-height: 42px;
+  font-size: 14px;
+}
+.reauth-form .btn {
+  width: 100%;
+  min-height: 42px;
+  justify-content: center;
+}
+.reauth-error {
+  color: var(--error);
+  font-size: 12px;
+  min-height: 1.4em;
+  text-align: center;
+  margin-top: 2px;
+}
+.reauth-card:focus-within .reauth-icon {
+  box-shadow: 0 0 0 4px rgba(52, 211, 196, 0.12);
+}

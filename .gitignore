@@ -27,3 +27,6 @@ npm-debug.log*
 .vscode/
 package-lock.json
 bun.lockb
+
+# agent task artifacts
+.agents/tasks/

@@ -835,6 +835,7 @@ async function handle(
         authRequired: false,
         capability: deps.readOnly ? "read" : "full",
         readOnly: Boolean(deps.readOnly),
+        sessionTtlMs: SESSION_TTL_MS,
       });
       return;
     }
@@ -880,6 +881,7 @@ async function handle(
         ok: true,
         capability,
         readOnly: capability === "read",
+        sessionTtlMs: SESSION_TTL_MS,
       }),
     );
     return;

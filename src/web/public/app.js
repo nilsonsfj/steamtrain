@@ -45,6 +45,7 @@
     project: null,
     liveRuns: [], liveRunsTimer: null, queuedBanner: false,
     deepLinkRequest: 0,
+    pendingStepDeepLink: null,
     // Step drill-in drawer: which step it shows ({phaseId, iteration, stepId}).
     detail: null,
     // Per-card tail scroll state keyed by stepKey(): { follow: bool, top: px }.
@@ -96,7 +97,10 @@
     detailFallback: null,
     detailFocusPending: false,
     detailFocusGeneration: 0,
-    planRequest: 0
+    planRequest: 0,
+    reauthVisible: false,
+    sessionHeartbeatTimer: null,
+    sessionTtlMs: null
   };
 
   var SELECTION_KEY = "steamtrain.lastWorkflow";
@@ -257,7 +261,11 @@
   /** Like api() but redirects to login on 401 (session expired). */
   function apiAuth(method, path, body) {
     return api(method, path, body).then(function (r) {
-      if (r.status === 401) { showLoginForm(); throw new Error("auth required"); }
+      if (r.status === 401) {
+        if (S.runId || S.selected) { showReauthOverlay(); }
+        else { showLoginForm(); }
+        throw new Error("auth required");
+      }
       if (r.status === 403 && r.body && r.body.error === "read-only session") {
         S.capability = "read";
         applyCapabilityChrome();
@@ -275,6 +283,7 @@
         S.capability = r.body.capability === "read" ? "read" : "full";
         if (r.body.project) applyProjectChrome(r.body.project);
         applyCapabilityChrome();
+        if (r.body.authRequired) startSessionHeartbeat();
       }
       loadWorkflows();
     }).catch(function () {
@@ -307,17 +316,25 @@
 
   function loadWorkflows() {
     api("GET", "/api/workflows").then(function (r) {
-      if (r.status === 401) { showLoginForm(); return; }
+      // Match apiAuth(): keep page state behind the reauth overlay when a run
+      // or workflow is already open; otherwise fall back to the full login form.
+      if (r.status === 401) {
+        if (S.runId || S.selected) showReauthOverlay();
+        else showLoginForm();
+        return;
+      }
       S.workflows = r.body.workflows || [];
       if (r.body.configLabel) {
         document.getElementById("config").textContent = "cfg · " + r.body.configLabel;
       }
       if (r.body.project) applyProjectChrome(r.body.project);
       renderSidebar();
-      var deepLinkId = SteamtrainReducer.parseRunDeepLink
-        ? SteamtrainReducer.parseRunDeepLink(window.location.hash)
-        : null;
-      if (deepLinkId) openRunDeepLink(deepLinkId);
+      var deepLinkId = SteamtrainReducer.parseDeepLink
+        ? SteamtrainReducer.parseDeepLink(window.location.hash)
+        : SteamtrainReducer.parseRunDeepLink
+          ? { runId: SteamtrainReducer.parseRunDeepLink(window.location.hash), stepId: undefined }
+          : null;
+      if (deepLinkId && deepLinkId.runId) openRunDeepLink(deepLinkId.runId, deepLinkId.stepId);
       else bootstrapStationLanding();
     });
     loadMeta();
@@ -452,8 +469,10 @@
   function pollLiveRuns() {
     api("GET", "/api/runs").then(function (r) {
       if (r.status === 401) {
-        // Session expired: stop polling; a successful login reloads the page.
+        // Session expired: stop polling. A successful reauth (doReauth) restarts
+        // the timer; a full login form reload also brings it back via loadWorkflows.
         if (S.liveRunsTimer) { clearInterval(S.liveRunsTimer); S.liveRunsTimer = null; }
+        if (S.sessionHeartbeatTimer) { clearInterval(S.sessionHeartbeatTimer); S.sessionHeartbeatTimer = null; }
         return;
       }
       if (r.status !== 200) return; // transient; the next poll retries
@@ -482,16 +501,20 @@
   }
 
   function currentRunDeepLink() {
+    if (SteamtrainReducer.parseDeepLink) {
+      var parsed = SteamtrainReducer.parseDeepLink(window.location.hash);
+      return parsed ? parsed.runId : null;
+    }
     return SteamtrainReducer.parseRunDeepLink
       ? SteamtrainReducer.parseRunDeepLink(window.location.hash)
       : null;
   }
 
-  function openRunDeepLink(runId) {
+  function openRunDeepLink(runId, stepId) {
     var request = ++S.deepLinkRequest;
     api("GET", "/api/runs").then(function (r) {
       if (request !== S.deepLinkRequest || currentRunDeepLink() !== runId) return;
-      if (r.status === 401) { showLoginForm(); return; }
+      if (r.status === 401) { showReauthOverlay(); return; }
       if (r.status !== 200) {
         setBanner("Could not open run " + runId.slice(0, 8) + "… — try refreshing.", "err");
         return;
@@ -499,6 +522,7 @@
       var run = (r.body.runs || []).find(function (candidate) { return candidate.id === runId; });
       if (run && (run.status === "running" || run.status === "queued")) {
         attachRun(run);
+        if (stepId) S.pendingStepDeepLink = stepId;
         return;
       }
       openHistory(runId);
@@ -622,6 +646,7 @@
   }
 
   function showLoginForm() {
+    if (S.sessionHeartbeatTimer) clearInterval(S.sessionHeartbeatTimer);
     var main = document.querySelector("main");
     clear(main);
     var msg = h("div", { class: "empty" },
@@ -649,6 +674,7 @@
     if (!token) { if (errEl) errEl.textContent = "Token is required."; return; }
     api("POST", "/api/auth", { token: token }).then(function (r) {
       if (r.status === 200 && r.body.ok) {
+        if (r.body.sessionTtlMs) S.sessionTtlMs = r.body.sessionTtlMs;
         window.location.reload();
       } else {
         if (errEl) errEl.textContent = (r.body && r.body.error) || "Login failed.";
@@ -656,6 +682,109 @@
     }).catch(function () {
       if (errEl) errEl.textContent = "Network error.";
     });
+  }
+
+  function showReauthOverlay() {
+    if (S.reauthVisible) return;
+    S.reauthVisible = true;
+    // Session is expired: stop heartbeat pings until a successful reauth.
+    if (S.sessionHeartbeatTimer) {
+      clearInterval(S.sessionHeartbeatTimer);
+      S.sessionHeartbeatTimer = null;
+    }
+    var backdrop = h("div", { class: "reauth-backdrop", id: "reauthOverlay" },
+      h("div", { class: "reauth-card", role: "dialog", "aria-modal": "true", "aria-labelledby": "reauthTitle" },
+        h("div", { class: "reauth-icon", "aria-hidden": "true", text: "\uD83D\uDD12" }),
+        h("h2", { class: "reauth-title", id: "reauthTitle", text: "Session expired" }),
+        h("p", { class: "reauth-desc", text: "Your session has timed out. Enter your token to continue where you left off." }),
+        h("div", { class: "reauth-form" },
+          h("input", { type: "password", id: "reauthToken", class: "txt", placeholder: "Enter auth or read token", autocomplete: "off" }),
+          h("button", { class: "btn primary", id: "reauthBtn", text: "Re-authenticate" })
+        ),
+        h("p", { class: "reauth-error", id: "reauthError" })
+      )
+    );
+    document.body.appendChild(backdrop);
+    var tokenInput = document.getElementById("reauthToken");
+    var submitBtn = document.getElementById("reauthBtn");
+    function doReauth() {
+      var errEl = document.getElementById("reauthError");
+      if (errEl) errEl.textContent = "";
+      var token = tokenInput ? tokenInput.value : "";
+      if (!token) { if (errEl) errEl.textContent = "Token is required."; return; }
+      submitBtn.disabled = true;
+      api("POST", "/api/auth", { token: token }).then(function (r) {
+        if (r.status === 200 && r.body.ok) {
+          try {
+            dismissReauthOverlay();
+            if (r.body.capability) S.capability = r.body.capability;
+            if (r.body.sessionTtlMs) S.sessionTtlMs = r.body.sessionTtlMs;
+            applyCapabilityChrome();
+            startSessionHeartbeat();
+            // pollLiveRuns clears its timer on 401; resume Active runs updates.
+            if (!S.liveRunsTimer) S.liveRunsTimer = setInterval(pollLiveRuns, 5000);
+            pollLiveRuns();
+            if (S.runId && !S.es) openStream(S.runId);
+          } catch (ex) {
+            console.error("doReauth success-path error:", ex);
+            submitBtn.disabled = false;
+          }
+        } else {
+          submitBtn.disabled = false;
+          if (errEl) errEl.textContent = (r.body && r.body.error) || "Login failed.";
+        }
+      }).catch(function () {
+        submitBtn.disabled = false;
+        var errEl = document.getElementById("reauthError");
+        if (errEl) errEl.textContent = "Network error.";
+      });
+    }
+    submitBtn.addEventListener("click", doReauth);
+    tokenInput.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") doReauth();
+    });
+    backdrop.addEventListener("keydown", function (e) {
+      // Intentionally non-dismissive: Escape refocuses the token input instead of
+      // closing the overlay. The reauth overlay must not be dismissed without a
+      // successful authentication, because the session is expired and any action
+      // would fail with 401. Do not add dismissReauthOverlay() here.
+      if (e.key === "Escape") { e.preventDefault(); tokenInput.focus(); return; }
+      if (e.key === "Tab") {
+        var focusable = backdrop.querySelectorAll("input, button");
+        var first = focusable[0];
+        var last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault(); last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault(); first.focus();
+        }
+      }
+    });
+    backdrop.addEventListener("click", function (e) {
+      if (e.target === backdrop) tokenInput.focus();
+    });
+    tokenInput.focus();
+  }
+
+  function dismissReauthOverlay() {
+    S.reauthVisible = false;
+    var el = document.getElementById("reauthOverlay");
+    if (el) el.remove();
+  }
+
+  function startSessionHeartbeat() {
+    if (S.sessionHeartbeatTimer) clearInterval(S.sessionHeartbeatTimer);
+    // Adaptive interval: for the default 7-day TTL (604800000ms) this evaluates to
+    // 60000ms (the cap). For shorter custom TTLs (e.g. 2-hour session = 7200000ms),
+    // the formula yields 60000ms still capped. Below ~2 hours (e.g. 10-minute TTL =
+    // 600000ms) it produces 5000ms, ensuring we detect expiry well before it hits.
+    // The divisor of 120 means we check ~60 times per TTL window.
+    var interval = S.sessionTtlMs ? Math.min(60000, Math.floor(S.sessionTtlMs / 120)) : 60000;
+    S.sessionHeartbeatTimer = setInterval(function () {
+      api("GET", "/api/session").then(function (r) {
+        if (r.status === 401) showReauthOverlay();
+      }).catch(function () {});
+    }, interval);
   }
 
   function loadProjectConfig() {
@@ -1858,6 +1987,23 @@
     S.runState = SteamtrainReducer.workflowReducer(S.runState, { type: "event", event: ev });
     if (SteamtrainReducer.appendNarration) {
       S.narration = SteamtrainReducer.appendNarration(S.narration || [], ev);
+    }
+    resolvePendingStepDeepLink();
+  }
+
+  function resolvePendingStepDeepLink() {
+    if (!S.pendingStepDeepLink || !S.runState) return;
+    var stepId = S.pendingStepDeepLink;
+    var phases = S.runState.phases || [];
+    for (var i = 0; i < phases.length; i++) {
+      var p = phases[i];
+      for (var j = 0; j < (p.steps || []).length; j++) {
+        if (p.steps[j].stepId === stepId) {
+          S.pendingStepDeepLink = null;
+          openDetail(p, p.steps[j], null);
+          return;
+        }
+      }
     }
   }
 
@@ -3417,7 +3563,7 @@
     if (S.es) S.es.close();
     // Pre-flight auth check: EventSource can't handle 401 (it silently retries).
     api("GET", "/api/workflows").then(function (r) {
-      if (r.status === 401) { showLoginForm(); return; }
+      if (r.status === 401) { showReauthOverlay(); return; }
       var es = new EventSource("/api/runs/" + runId + "/stream");
       S.es = es;
       es.onmessage = function (m) {
@@ -3852,7 +3998,7 @@
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify(payload), signal: signal
     }).then(function (res) {
-      if (res.status === 401) { showLoginForm(); return; }
+      if (res.status === 401) { showReauthOverlay(); return; }
       var reader = res.body.getReader();
       var dec = new TextDecoder();
       var buf = "";
@@ -4558,6 +4704,10 @@
 
   function openHistory(runId) {
     var id = normalizeHistoryRunId(runId);
+    // History view does not consume step deep links (those only resolve via the
+    // live event stream). Clear any pending focus so a later live attach cannot
+    // open a step from a previous deep link.
+    S.pendingStepDeepLink = null;
     stopHistoryPoll();
     Hist = {
       holder: null,
@@ -4603,7 +4753,7 @@
       if (req !== Hist.request || Hist.holder !== holder) return;
       var histRes = results[0];
       var liveRes = results[1];
-      if (histRes.status === 401) { showLoginForm(); return; }
+      if (histRes.status === 401) { showReauthOverlay(); return; }
       var nextRuns = (histRes.body && histRes.body.runs) || [];
       var nextLive = [];
       if (liveRes && liveRes.status === 200) {
@@ -5558,8 +5708,14 @@
   });
 
   window.addEventListener("hashchange", function () {
-    var runId = currentRunDeepLink();
-    if (runId) openRunDeepLink(runId);
+    var parsed = SteamtrainReducer.parseDeepLink
+      ? SteamtrainReducer.parseDeepLink(window.location.hash)
+      : null;
+    if (parsed && parsed.runId) openRunDeepLink(parsed.runId, parsed.stepId);
+    else {
+      var runId = currentRunDeepLink();
+      if (runId) openRunDeepLink(runId);
+    }
   });
 
   loadSessionThenCatalog();

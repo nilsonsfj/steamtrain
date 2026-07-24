@@ -130,9 +130,11 @@ export {
   type NotifyEvent,
   type NotifyEventKind,
   type NotifyRunMeta,
+  type WebhookFormat,
   createNotifier,
   notifyWorkflowEvent,
 } from "./notify";
+export { formatDiscordPayload, formatSlackPayload, formatTeamsPayload } from "./webhook-templates";
 export {
   type PlanTakeoverOptions,
   type TakeoverPlan,

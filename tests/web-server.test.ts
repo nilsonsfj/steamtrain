@@ -2335,6 +2335,14 @@ describe("web server — auth", () => {
       body: JSON.stringify({ token: "test-secret-token" }),
     });
     expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      capability: string;
+      sessionTtlMs: number;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.capability).toBe("full");
+    expect(body.sessionTtlMs).toBe(7 * 24 * 60 * 60 * 1000);
     const setCookie = res.headers.get("set-cookie")!;
     expect(setCookie).toContain(`${AUTH_COOKIE}=`);
     expect(setCookie).toContain("HttpOnly");
@@ -2482,11 +2490,13 @@ describe("web server — auth", () => {
       authRequired: boolean;
       capability: string;
       readOnly: boolean;
+      sessionTtlMs: number;
     };
     expect(body.ok).toBe(true);
     expect(body.authRequired).toBe(false);
     expect(body.capability).toBe("full");
     expect(body.readOnly).toBe(false);
+    expect(body.sessionTtlMs).toBe(7 * 24 * 60 * 60 * 1000);
   });
 });
 
