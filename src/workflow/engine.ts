@@ -91,7 +91,7 @@ import {
   withStructuredOutputInstructions,
 } from "./structured";
 import { renderPrompt } from "./template";
-import { resolveStepTimeoutSec, timeoutMsFromSec } from "./timeout";
+import { abortableSleep, resolveStepTimeoutSec, timeoutMsFromSec } from "./timeout";
 import {
   type AgentBackedWorkflowStep,
   type AgentWorktreeInfo,
@@ -1931,23 +1931,6 @@ function resolveSessionResume(
     };
   }
   return { ok: true, sessionId };
-}
-
-/** Sleep `ms`, resolving early if the signal aborts. */
-function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
-  if (ms <= 0) return Promise.resolve();
-  if (signal?.aborted) return Promise.resolve();
-  return new Promise((resolve) => {
-    const onAbort = () => {
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
 }
 
 /**

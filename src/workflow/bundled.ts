@@ -1196,6 +1196,14 @@ const mainline: WorkflowSpec = {
  * only then merges. That closes the race where a remote review dies with
  * `fatal: couldn't find remote ref <branch>` because the head was deleted while
  * it was still queued.
+ *
+ * `merge-when-ready` also survives the OTHER babysit race: when
+ * `babysit-all-prs` fans out, each PR's land step is a SEPARATE process racing
+ * to merge into the same base. The command serializes the actual land behind a
+ * cross-process lock and, once it holds it, re-checks the PR — landing a
+ * sibling that just moved the base leaves this PR behind (auto-updated) or
+ * conflicting (reported), instead of a raw `gh pr merge` failure. See
+ * `github-checks.ts` / `land-lock.ts`.
  */
 const babysitPr: WorkflowSpec = {
   name: "babysit-pr",

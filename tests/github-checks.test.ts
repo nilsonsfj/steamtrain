@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { type Mock, describe, expect, it, vi } from "vitest";
 import {
   type PullRequestCheckSnapshot,
   evaluatePullRequestChecks,
@@ -259,6 +259,230 @@ describe("mergePullRequestWhenReady", () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/timed out|still running|review-bot/i);
+  });
+});
+
+describe("mergePullRequestWhenReady — race-resilient landing", () => {
+  const green = (over: Partial<PullRequestCheckSnapshot> = {}): PullRequestCheckSnapshot =>
+    snap({
+      checks: [{ name: "ci", state: "SUCCESS" }],
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      ...over,
+    });
+
+  /**
+   * Return recorded snapshots in order, repeating the last once exhausted.
+   * A `vi.fn` so tests can pin the exact number of fetches — otherwise an
+   * extra, unintended re-fetch would silently re-evaluate stale data and the
+   * test would still pass.
+   */
+  function sequence(
+    snaps: PullRequestCheckSnapshot[],
+  ): Mock<() => Promise<PullRequestCheckSnapshot>> {
+    let i = 0;
+    return vi.fn(async () => snaps[Math.min(i++, snaps.length - 1)]!);
+  }
+
+  /** A pass-through lock: always "held", so we exercise the land loop directly. */
+  const passThroughLock = async <T>(
+    _cwd: string,
+    fn: (locked: boolean) => Promise<T>,
+  ): Promise<{ value: T; locked: boolean }> => ({ value: await fn(true), locked: true });
+
+  const base = {
+    cwd: "/repo",
+    prRef: "42",
+    timeoutMs: 1_000_000,
+    pollIntervalMs: 1,
+    nowMs: () => 5_000_000, // constant clock: grace long past, deadline never hit
+    sleep: async () => {},
+    landLock: passThroughLock,
+  };
+
+  it("lands a green, up-to-date PR in one merge and reports it serialized", async () => {
+    const calls: string[][] = [];
+    const fetchSnapshot = sequence([green(), green()]);
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      fetchSnapshot,
+      runGh: async (args) => {
+        calls.push(args);
+        return "";
+      },
+    });
+    expect(result).toMatchObject({ ok: true, merged: true, serialized: true });
+    expect(calls).toEqual([["pr", "merge", "42", "--squash", "--delete-branch"]]);
+    // Exactly two reads: the pre-lock wait, then the re-check under the lock.
+    // Pinning this catches an accidental extra round-trip per land.
+    expect(fetchSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a transient 'not mergeable' rejection (GitHub recomputing mergeability)", async () => {
+    // Regression guard for isRetriableMergeError: GitHub transiently reports a
+    // just-moved base as not mergeable. If that error text stops being treated
+    // as retriable, parallel babysit lands start failing again.
+    let merges = 0;
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      fetchSnapshot: sequence([green()]),
+      runGh: async (args) => {
+        if (args[1] === "merge") {
+          merges += 1;
+          if (merges === 1) throw new Error("Pull request is not mergeable");
+        }
+        return "";
+      },
+    });
+    expect(result).toMatchObject({ ok: true, merged: true });
+    expect(merges).toBe(2);
+  });
+
+  it("retries the merge when the base branch was modified out from under it", async () => {
+    let attempt = 0;
+    const merges: string[][] = [];
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      fetchSnapshot: sequence([green()]),
+      runGh: async (args) => {
+        if (args[1] === "merge") {
+          merges.push(args);
+          attempt += 1;
+          if (attempt === 1) {
+            throw new Error(
+              "gh pr merge failed: Base branch was modified. Review and try the merge again.",
+            );
+          }
+        }
+        return "";
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(merges).toHaveLength(2); // one failed, one succeeded
+  });
+
+  it("fails with an actionable message (no merge attempt) when the base advanced into a conflict", async () => {
+    const calls: string[][] = [];
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      // firstWait sees green; under the lock the PR has flipped CONFLICTING.
+      fetchSnapshot: sequence([green(), green({ mergeable: "CONFLICTING" })]),
+      runGh: async (args) => {
+        calls.push(args);
+        return "";
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/conflicts with the base branch.*advanced/i);
+    expect(calls.some((c) => c[1] === "merge")).toBe(false);
+  });
+
+  it("updates a behind branch, waits for the fresh checks, then merges", async () => {
+    const calls: string[][] = [];
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      fetchSnapshot: sequence([
+        green({ mergeStateStatus: "BEHIND" }), // firstWait
+        green({ mergeStateStatus: "BEHIND" }), // land loop: needs update
+        green(), // re-wait after update-branch
+        green(), // land loop: now CLEAN → merge
+      ]),
+      runGh: async (args) => {
+        calls.push([args[0]!, args[1]!]);
+        return "";
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(calls).toEqual([
+      ["pr", "update-branch"],
+      ["pr", "merge"],
+    ]);
+  });
+
+  it("gives up with a 'did not converge' error once maxMergeAttempts is exhausted", async () => {
+    let merges = 0;
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      maxMergeAttempts: 2,
+      fetchSnapshot: sequence([green()]),
+      runGh: async (args) => {
+        if (args[1] === "merge") {
+          merges += 1;
+          throw new Error("Base branch was modified. Review and try the merge again.");
+        }
+        return "";
+      },
+    });
+    expect(result.ok).toBe(false);
+    // The LAST attempt reports the underlying merge failure rather than
+    // silently looping — either surfacing is acceptable, but it must name the
+    // transient cause so the babysit summary is actionable.
+    if (!result.ok) expect(result.error).toMatch(/base branch was modified|did not converge/i);
+    expect(merges).toBe(2);
+  });
+
+  it("fails with an actionable message when a behind branch cannot be auto-updated", async () => {
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      fetchSnapshot: sequence([
+        green({ mergeStateStatus: "BEHIND" }),
+        green({ mergeStateStatus: "BEHIND" }),
+      ]),
+      runGh: async (args) => {
+        if (args[1] === "update-branch") {
+          throw new Error("failed to update branch: merge conflict between base and head");
+        }
+        return "";
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(result.error).toMatch(/behind.*cannot be auto-updated|manual resolution/i);
+  });
+
+  it("still lands (serialized: false) when the land lock could not be acquired", async () => {
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      // Best-effort lock that never acquires — the land must still happen.
+      landLock: async (_cwd, fn) => ({ value: await fn(false), locked: false }),
+      fetchSnapshot: sequence([green(), green()]),
+      runGh: async () => "",
+    });
+    expect(result).toMatchObject({ ok: true, merged: true, serialized: false });
+  });
+
+  it("reports an already-merged PR when a sibling landed it first", async () => {
+    const calls: string[][] = [];
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      fetchSnapshot: sequence([green(), green({ state: "merged" })]),
+      runGh: async (args) => {
+        calls.push(args);
+        return "";
+      },
+    });
+    expect(result).toMatchObject({ ok: true, alreadyMerged: true, merged: false });
+    expect(calls.some((c) => c[1] === "merge")).toBe(false);
+  });
+
+  it("does not retry a hard rejection (e.g. review required) and surfaces it", async () => {
+    let merges = 0;
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      fetchSnapshot: sequence([green()]),
+      runGh: async (args) => {
+        if (args[1] === "merge") {
+          merges += 1;
+          throw new Error(
+            "gh pr merge failed: At least 1 approving review is required by reviewers.",
+          );
+        }
+        return "";
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/review is required/i);
+    expect(merges).toBe(1);
   });
 });
 

@@ -53,6 +53,12 @@ no checks at all).
 merge-when-ready runs wait-checks, then \`gh pr merge\` — and only then deletes
 the head branch (unless --keep-branch). Use this from a command step AFTER an
 agent has finished pushing fixes; never let the agent merge itself.
+
+The land is serialized across processes (a cross-process lock keyed by the
+repo's origin), so parallel babysit runs merge one PR at a time. Under the
+lock the PR is re-checked: a base that moved under a sibling's merge is
+handled (behind → update + re-wait, conflict → reported) and transient
+"base branch was modified" errors are retried, instead of failing outright.
 `;
 }
 
@@ -197,6 +203,11 @@ async function runMergeWhenReady(
     deleteBranch: !parsed.keepBranch,
     onPoll: (_snapshot, evaluation) => {
       if (!parsed.json) out(`${evaluation.detail}\n`);
+    },
+    landLockOptions: {
+      onWait: (message) => {
+        if (!parsed.json) out(`${message}\n`);
+      },
     },
   });
 
