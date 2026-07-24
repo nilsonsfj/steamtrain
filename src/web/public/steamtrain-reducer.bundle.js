@@ -29,6 +29,7 @@ var SteamtrainReducer = (() => {
     appendNarration: () => appendNarration,
     applyWorkflowSessionOverrides: () => applyWorkflowSessionOverrides,
     applyWorkflowStepOverrides: () => applyWorkflowStepOverrides,
+    approvalDeepLink: () => approvalDeepLink,
     arrivalReceiptCards: () => arrivalReceiptCards,
     buildArrivalReport: () => buildArrivalReport,
     describeSubWorkflow: () => describeSubWorkflow,
@@ -42,6 +43,7 @@ var SteamtrainReducer = (() => {
     isCredentialFreeWorkflow: () => isCredentialFreeWorkflow,
     narrateEvent: () => narrateEvent,
     narrateFromState: () => narrateFromState,
+    parseDeepLink: () => parseDeepLink,
     parseRunDeepLink: () => parseRunDeepLink,
     runDeepLink: () => runDeepLink,
     sessionOverridesEmpty: () => sessionOverridesEmpty,
@@ -856,13 +858,25 @@ var SteamtrainReducer = (() => {
 
   // src/web/run-deep-link.ts
   var RUN_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  function parseRunDeepLink(hash) {
-    const match = /^#run-(.+)$/i.exec(hash.trim());
+  var STEP_ID_PATTERN = /^[\w:.-]+$/;
+  function parseDeepLink(hash) {
+    const trimmed = hash.trim();
+    const match = /^#run-([^/]+)(?:\/step\/(.+))?$/i.exec(trimmed);
     if (!match || !RUN_ID_PATTERN.test(match[1])) return null;
-    return match[1].toLowerCase();
+    const runId = match[1].toLowerCase();
+    const rawStep = match[2];
+    if (rawStep && !STEP_ID_PATTERN.test(rawStep)) return { runId };
+    return { runId, stepId: rawStep || void 0 };
+  }
+  function parseRunDeepLink(hash) {
+    const result = parseDeepLink(hash);
+    return result ? result.runId : null;
   }
   function runDeepLink(runId) {
     return `#run-${runId.toLowerCase()}`;
+  }
+  function approvalDeepLink(runId, stepId) {
+    return `#run-${runId.toLowerCase()}/step/${stepId}`;
   }
 
   // src/workflow/step-kind.ts

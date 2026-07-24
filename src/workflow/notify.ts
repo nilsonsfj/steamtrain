@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { approvalDeepLink } from "../web/run-deep-link";
 import { costForResults } from "./cost";
 import type { WorkflowEvent } from "./events";
 import { formatDiscordPayload, formatSlackPayload, formatTeamsPayload } from "./webhook-templates";
@@ -196,6 +197,7 @@ export function notifyWorkflowEvent(
         ...base,
         kind: "approval-pending",
         detail: `waiting for approval at '${event.stepId}'`,
+        url: base.url ? `${base.url}/step/${event.stepId}` : undefined,
       });
       return;
     case "human_input_pending":

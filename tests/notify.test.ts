@@ -145,7 +145,9 @@ describe("notifyWorkflowEvent", () => {
       "run-completed",
     ]);
     expect(out[0]!.detail).toContain("gate");
+    expect(out[0]!.url).toBe("http://localhost:4600/#run-r/step/gate");
     expect(out[1]!.detail).toContain("what color?");
+    expect(out[1]!.url).toBe("http://localhost:4600/#run-r");
     expect(out[3]!.costUsd).toBeCloseTo(0.5);
     expect(out[3]!.url).toBe("http://localhost:4600/#run-r");
   });
@@ -177,6 +179,46 @@ describe("notifyWorkflowEvent", () => {
       { kind: "workflow_done", ok: false, results: [], ts: 2 },
     ]);
     expect(out.map((e) => e.kind)).toEqual(["run-failed"]);
+  });
+
+  it("uses step-specific deep link for approval-pending when meta.url is set", () => {
+    const out: NotifyEvent[] = [];
+    const notifier = {
+      wants: () => true,
+      notify: (e: NotifyEvent) => {
+        out.push(e);
+      },
+    };
+    const meta = { workflow: "ci", runId: "abc-123", url: "http://myhost:4317/#run-abc-123" };
+    notifyWorkflowEvent(notifier, meta, {
+      kind: "approval_pending",
+      phaseId: "deploy",
+      stepId: "review-gate",
+      onReject: "fail",
+      ts: 99,
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.url).toBe("http://myhost:4317/#run-abc-123/step/review-gate");
+  });
+
+  it("leaves url undefined for approval-pending when meta.url is not set", () => {
+    const out: NotifyEvent[] = [];
+    const notifier = {
+      wants: () => true,
+      notify: (e: NotifyEvent) => {
+        out.push(e);
+      },
+    };
+    const meta = { workflow: "ci", runId: "abc-123" };
+    notifyWorkflowEvent(notifier, meta, {
+      kind: "approval_pending",
+      phaseId: "deploy",
+      stepId: "review-gate",
+      onReject: "fail",
+      ts: 99,
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.url).toBeUndefined();
   });
 });
 
@@ -242,5 +284,61 @@ describe("createNotifier with webhookFormat", () => {
     const notifier = createNotifier({ webhook: "https://hooks.example/x" }, options);
     notifier.notify(event);
     expect(posts[0]!.body).toMatchObject({ kind: "run-completed", workflow: "bug-hunt" });
+  });
+});
+
+describe("approval-pending webhook payloads include step-specific URL", () => {
+  const approvalEvent: NotifyEvent = {
+    kind: "approval-pending",
+    workflow: "deploy",
+    runId: "r1",
+    detail: "waiting for approval at 'review-gate'",
+    url: "http://host:4317/#run-r1/step/review-gate",
+    ts: 1,
+  };
+
+  it("raw payload carries the step-specific url", () => {
+    const { posts, options } = harness();
+    const notifier = createNotifier(
+      { webhook: "https://hooks.example/x", webhookFormat: "raw" },
+      options,
+    );
+    notifier.notify(approvalEvent);
+    expect(posts[0]!.body).toMatchObject({ url: "http://host:4317/#run-r1/step/review-gate" });
+  });
+
+  it("Slack payload includes the step-specific url in action button", () => {
+    const { posts, options } = harness();
+    const notifier = createNotifier(
+      { webhook: "https://hooks.slack.example/x", webhookFormat: "slack" },
+      options,
+    );
+    notifier.notify(approvalEvent);
+    const body = posts[0]!.body as { attachments?: { blocks: unknown[] }[] };
+    const blocks = body.attachments![0]!.blocks;
+    const json = JSON.stringify(blocks);
+    expect(json).toContain("http://host:4317/#run-r1/step/review-gate");
+  });
+
+  it("Discord payload includes the step-specific url", () => {
+    const { posts, options } = harness();
+    const notifier = createNotifier(
+      { webhook: "https://discord.example/hook", webhookFormat: "discord" },
+      options,
+    );
+    notifier.notify(approvalEvent);
+    const body = posts[0]!.body as { embeds?: { url?: string }[] };
+    expect(body.embeds![0]!.url).toBe("http://host:4317/#run-r1/step/review-gate");
+  });
+
+  it("Teams payload includes the step-specific url in action", () => {
+    const { posts, options } = harness();
+    const notifier = createNotifier(
+      { webhook: "https://teams.example/hook", webhookFormat: "teams" },
+      options,
+    );
+    notifier.notify(approvalEvent);
+    const json = JSON.stringify(posts[0]!.body);
+    expect(json).toContain("http://host:4317/#run-r1/step/review-gate");
   });
 });

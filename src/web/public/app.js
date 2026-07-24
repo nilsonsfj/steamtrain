@@ -45,6 +45,7 @@
     project: null,
     liveRuns: [], liveRunsTimer: null, queuedBanner: false,
     deepLinkRequest: 0,
+    pendingStepDeepLink: null,
     // Step drill-in drawer: which step it shows ({phaseId, iteration, stepId}).
     detail: null,
     // Per-card tail scroll state keyed by stepKey(): { follow: bool, top: px }.
@@ -322,10 +323,12 @@
       }
       if (r.body.project) applyProjectChrome(r.body.project);
       renderSidebar();
-      var deepLinkId = SteamtrainReducer.parseRunDeepLink
-        ? SteamtrainReducer.parseRunDeepLink(window.location.hash)
-        : null;
-      if (deepLinkId) openRunDeepLink(deepLinkId);
+      var deepLinkId = SteamtrainReducer.parseDeepLink
+        ? SteamtrainReducer.parseDeepLink(window.location.hash)
+        : SteamtrainReducer.parseRunDeepLink
+          ? { runId: SteamtrainReducer.parseRunDeepLink(window.location.hash), stepId: undefined }
+          : null;
+      if (deepLinkId && deepLinkId.runId) openRunDeepLink(deepLinkId.runId, deepLinkId.stepId);
       else bootstrapStationLanding();
     });
     loadMeta();
@@ -490,12 +493,16 @@
   }
 
   function currentRunDeepLink() {
+    if (SteamtrainReducer.parseDeepLink) {
+      var parsed = SteamtrainReducer.parseDeepLink(window.location.hash);
+      return parsed ? parsed.runId : null;
+    }
     return SteamtrainReducer.parseRunDeepLink
       ? SteamtrainReducer.parseRunDeepLink(window.location.hash)
       : null;
   }
 
-  function openRunDeepLink(runId) {
+  function openRunDeepLink(runId, stepId) {
     var request = ++S.deepLinkRequest;
     api("GET", "/api/runs").then(function (r) {
       if (request !== S.deepLinkRequest || currentRunDeepLink() !== runId) return;
@@ -507,6 +514,7 @@
       var run = (r.body.runs || []).find(function (candidate) { return candidate.id === runId; });
       if (run && (run.status === "running" || run.status === "queued")) {
         attachRun(run);
+        if (stepId) S.pendingStepDeepLink = stepId;
         return;
       }
       openHistory(runId);
@@ -1944,6 +1952,23 @@
     S.runState = SteamtrainReducer.workflowReducer(S.runState, { type: "event", event: ev });
     if (SteamtrainReducer.appendNarration) {
       S.narration = SteamtrainReducer.appendNarration(S.narration || [], ev);
+    }
+    resolvePendingStepDeepLink();
+  }
+
+  function resolvePendingStepDeepLink() {
+    if (!S.pendingStepDeepLink || !S.runState) return;
+    var stepId = S.pendingStepDeepLink;
+    var phases = S.runState.phases || [];
+    for (var i = 0; i < phases.length; i++) {
+      var p = phases[i];
+      for (var j = 0; j < (p.steps || []).length; j++) {
+        if (p.steps[j].stepId === stepId) {
+          S.pendingStepDeepLink = null;
+          openDetail(p, p.steps[j], null);
+          return;
+        }
+      }
     }
   }
 
