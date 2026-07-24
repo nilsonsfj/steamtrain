@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "Deep-link generation for approval-pending notifications that points directly to the approval step in the web UI (not just the run page). Extends the existing deep link mechanism to support step-specific anchors so clicking a notification takes the user straight to the pending approval checkpoint.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Extend src/web/run-deep-link.ts: add approvalDeepLink(runId: string, stepId: string): string that returns '#run-<uuid>?step=<stepId>' (or a similar format that encodes both the run and the target step). Add parseDeepLink(hash: string): { runId: string; stepId?: string } | null that handles both the existing #run-<uuid> format and the new #run-<uuid>?step=<stepId> format. Keep parseRunDeepLink as-is for backward compatibility but mark it as using the new parser internally.",
     "Update src/web/reducer.ts to export the new approvalDeepLink and parseDeepLink functions so they are available in the browser's SteamtrainReducer global.",
@@ -22,5 +22,5 @@
   ],
   "verification": ["bun run typecheck", "bun run lint", "bun run test", "bun run build"],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Deep link format chosen: #run-<uuid>/step/<stepId> (path-based, not query-string). The /step/ segment is clean and avoids confusion with URL query params inside a hash fragment. parseRunDeepLink remains fully backward compatible by delegating to parseDeepLink internally. The reducer bundle is auto-rebuilt by pretest and build scripts. The app.js uses a pendingStepDeepLink state field that resolves after the first event populates the runState phases."
 }
