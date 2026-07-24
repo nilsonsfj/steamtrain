@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Auto-re-login flow: when a web UI session expires mid-run, present an inline re-authentication overlay that preserves the current page state (run view, step detail) so the user can re-authenticate and resume watching without losing context. Currently showLoginForm() wipes the DOM and forces a full reload on success.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In src/web/public/app.js, create a new function showReauthOverlay() that renders a modal/overlay login form ON TOP of the existing content (not replacing it). The overlay should have a semi-transparent backdrop, a centered card with token input and submit button, and text explaining the session expired. On successful POST /api/auth, dismiss the overlay and resume normal operation without reload - just call loadSessionThenCatalog() or similar to refresh auth state in-place.",
     "Modify the apiAuth() function: instead of calling showLoginForm() on 401, call showReauthOverlay() which preserves the current view. The old showLoginForm() remains for the initial login (no prior state to preserve).",
@@ -23,5 +23,5 @@
   ],
   "verification": ["bun run typecheck", "bun run lint", "bun run test", "bun run build"],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 2098 tests pass. Typecheck, lint, and build all clean. The reauth overlay uses the same h() DOM helper and vanilla JS patterns as the rest of app.js. The sessionTtlMs field is added to both the auth-required and no-auth-required paths in POST /api/auth. The heartbeat interval is min(60s, sessionTtl/120) to catch expiry well before it happens. Focus trap implemented with Tab key handler on the backdrop element."
 }
