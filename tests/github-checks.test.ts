@@ -2,6 +2,7 @@ import { type Mock, describe, expect, it, vi } from "vitest";
 import {
   type PullRequestCheckSnapshot,
   evaluatePullRequestChecks,
+  isBranchCheckedOut,
   mergePullRequestWhenReady,
   normalizeCheckState,
   parsePullRequestRef,
@@ -62,6 +63,20 @@ describe("parseStatusCheckRollup", () => {
     ]);
   });
 
+  it("falls back past an EMPTY conclusion to the live status", () => {
+    // `gh pr view` emits conclusion:"" for a run still in flight. Coalescing on
+    // presence rather than emptiness rendered those as UNKNOWN, so the babysit
+    // waiter logged 'review (UNKNOWN)' for minutes on end.
+    const entries = parseStatusCheckRollup([
+      { name: "review", conclusion: "", status: "IN_PROGRESS", workflowName: "opencode-review" },
+      { name: "lint", conclusion: "   ", state: "", checkSuite: { status: "QUEUED" } },
+    ]);
+    expect(entries.map((e) => [e.name, e.state])).toEqual([
+      ["review", "IN_PROGRESS"],
+      ["lint", "QUEUED"],
+    ]);
+  });
+
   it("normalizes nested checkSuite status and ignores non-object suites", () => {
     const entries = parseStatusCheckRollup([
       { name: "suite-check", checkSuite: { status: "IN_PROGRESS" } },
@@ -71,6 +86,31 @@ describe("parseStatusCheckRollup", () => {
       ["suite-check", "IN_PROGRESS"],
       ["bad-suite", "SUCCESS"],
     ]);
+  });
+});
+
+describe("isBranchCheckedOut", () => {
+  const porcelain = [
+    "worktree /repo",
+    "HEAD 0a80df2",
+    "branch refs/heads/main",
+    "",
+    "worktree /tmp/steamtrain-worktrees/prepare-1",
+    "HEAD f7a3e50",
+    "branch refs/heads/nilsonsfj/exciting-hamilton-ozxx5r",
+    "",
+    "worktree /tmp/steamtrain-worktrees/detached-1",
+    "HEAD abc1234",
+    "detached",
+    "",
+  ].join("\n");
+
+  it("matches only a full ref, not a prefix or substring", () => {
+    expect(isBranchCheckedOut(porcelain, "nilsonsfj/exciting-hamilton-ozxx5r")).toBe(true);
+    expect(isBranchCheckedOut(porcelain, "main")).toBe(true);
+    expect(isBranchCheckedOut(porcelain, "nilsonsfj/exciting-hamilton")).toBe(false);
+    expect(isBranchCheckedOut(porcelain, "ain")).toBe(false);
+    expect(isBranchCheckedOut("", "main")).toBe(false);
   });
 });
 
@@ -298,6 +338,8 @@ describe("mergePullRequestWhenReady — race-resilient landing", () => {
     nowMs: () => 5_000_000, // constant clock: grace long past, deadline never hit
     sleep: async () => {},
     landLock: passThroughLock,
+    // No worktree holds the head branch unless a test says so.
+    runGit: async () => "",
   };
 
   it("lands a green, up-to-date PR in one merge and reports it serialized", async () => {
@@ -312,10 +354,143 @@ describe("mergePullRequestWhenReady — race-resilient landing", () => {
       },
     });
     expect(result).toMatchObject({ ok: true, merged: true, serialized: true });
-    expect(calls).toEqual([["pr", "merge", "42", "--squash", "--delete-branch"]]);
+    // `--delete-branch` is deliberately absent: gh's local-branch step fails
+    // inside babysit's worktrees. We delete the head ref ourselves instead.
+    expect(calls).toEqual([
+      ["pr", "merge", "42", "--squash"],
+      [
+        "api",
+        "--method",
+        "DELETE",
+        "repos/{owner}/{repo}/git/refs/heads/claude/hopeful-shannon-1mrboz",
+      ],
+    ]);
+    expect(result).not.toHaveProperty("warnings");
     // Exactly two reads: the pre-lock wait, then the re-check under the lock.
     // Pinning this catches an accidental extra round-trip per land.
     expect(fetchSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it("deletes the head ref on the fork repo for a cross-repo PR", async () => {
+    const calls: string[][] = [];
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      fetchSnapshot: sequence([green({ headRepoOwner: "contrib", headRepoName: "steamtrain" })]),
+      runGh: async (args) => {
+        calls.push(args);
+        return "";
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(calls[1]).toEqual([
+      "api",
+      "--method",
+      "DELETE",
+      "repos/contrib/steamtrain/git/refs/heads/claude/hopeful-shannon-1mrboz",
+    ]);
+  });
+
+  it("leaves the local branch alone when a worktree still has it checked out", async () => {
+    // The exact babysit shape: the `prepare` step's worktree holds the PR head,
+    // so `git branch -D` would fail — and used to fail the whole land step.
+    const gitCalls: string[][] = [];
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      fetchSnapshot: sequence([green()]),
+      runGh: async () => "",
+      runGit: async (args) => {
+        gitCalls.push(args);
+        if (args[0] === "worktree") {
+          return [
+            "worktree /tmp/steamtrain-worktrees/prepare-1",
+            "HEAD f7a3e502d457944382965bf10099754b1515b609",
+            "branch refs/heads/claude/hopeful-shannon-1mrboz",
+            "",
+          ].join("\n");
+        }
+        throw new Error("cannot delete branch used by worktree");
+      },
+    });
+    expect(result).toMatchObject({ ok: true, merged: true });
+    expect(gitCalls).toEqual([["worktree", "list", "--porcelain"]]);
+  });
+
+  it("deletes the local branch when no worktree holds it", async () => {
+    const gitCalls: string[][] = [];
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      fetchSnapshot: sequence([green()]),
+      runGh: async () => "",
+      runGit: async (args) => {
+        gitCalls.push(args);
+        return args[0] === "worktree" ? "worktree /repo\nbranch refs/heads/main\n" : "";
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(gitCalls).toEqual([
+      ["worktree", "list", "--porcelain"],
+      ["branch", "-D", "claude/hopeful-shannon-1mrboz"],
+    ]);
+  });
+
+  it("treats an already-deleted head ref as clean, and warns on a real delete failure", async () => {
+    const gone = await mergePullRequestWhenReady({
+      ...base,
+      fetchSnapshot: sequence([green()]),
+      runGh: async (args) => {
+        if (args[0] === "api") throw new Error("gh: Reference does not exist (HTTP 422)");
+        return "";
+      },
+    });
+    expect(gone).toMatchObject({ ok: true, merged: true });
+    expect(gone).not.toHaveProperty("warnings");
+
+    const denied = await mergePullRequestWhenReady({
+      ...base,
+      fetchSnapshot: sequence([green()]),
+      runGh: async (args) => {
+        if (args[0] === "api") throw new Error("gh: Resource protected by branch protection");
+        return "";
+      },
+    });
+    // A landed PR is never reported as a failed land over a cleanup problem.
+    expect(denied).toMatchObject({ ok: true, merged: true });
+    if (denied.ok) {
+      expect(denied.warnings?.[0]).toMatch(/could not delete remote branch/i);
+      expect(denied.detail).toMatch(/branch protection/i);
+    }
+  });
+
+  it("reports success when gh exits non-zero but the merge actually landed", async () => {
+    const fetchSnapshot = sequence([green(), green(), green({ state: "merged" })]);
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      fetchSnapshot,
+      runGh: async (args) => {
+        if (args[1] === "merge") {
+          throw new Error(
+            "gh pr merge 42 --squash failed: failed to delete local branch " +
+              "claude/hopeful-shannon-1mrboz: cannot delete branch used by worktree",
+          );
+        }
+        return "";
+      },
+    });
+    expect(result).toMatchObject({ ok: true, merged: true, prNumber: 42 });
+    if (result.ok) expect(result.detail).toMatch(/after the merge landed/i);
+  });
+
+  it("still fails when gh errors and the PR did not merge", async () => {
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      fetchSnapshot: sequence([green()]),
+      runGh: async (args) => {
+        if (args[1] === "merge") throw new Error("GraphQL: Something went very wrong");
+        return "";
+      },
+    });
+    expect(result).toMatchObject({ ok: false });
+    if (!result.ok) expect(result.error).toMatch(/merge failed after green checks/i);
   });
 
   it("retries a transient 'not mergeable' rejection (GitHub recomputing mergeability)", async () => {
@@ -396,6 +571,7 @@ describe("mergePullRequestWhenReady — race-resilient landing", () => {
     expect(calls).toEqual([
       ["pr", "update-branch"],
       ["pr", "merge"],
+      ["api", "--method"], // head-branch cleanup after the land
     ]);
   });
 

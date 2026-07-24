@@ -627,6 +627,37 @@ describe("workflow (sub-workflow) step: params", () => {
     expect(results.get("call")?.error).toContain("missing required input 'coderModel'");
   });
 
+  it("names the failing child step in the parent's error", async () => {
+    // Without this, a failed babysit-pr reported only "sub-workflow 'babysit-pr'
+    // did not complete successfully" — nothing about WHICH step died or why.
+    const cwd = await tempDir();
+    const failingChild: WorkflowSpec = {
+      name: "child-failing",
+      phases: [
+        {
+          id: "land",
+          title: "Land",
+          steps: [{ id: "wait-or-merge", kind: "command", cmd: "exit 1" }],
+        },
+      ],
+    };
+    const spec: WorkflowSpec = {
+      name: "parent-child-fails",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "call", kind: "workflow", workflow: "child-failing" }],
+        },
+      ],
+    };
+    const events = await runToEvents(spec, deps(cwd, { resolveWorkflow: () => failingChild }));
+    const error = doneResults(events).get("call")?.error ?? "";
+    expect(error).toContain("sub-workflow 'child-failing' did not complete successfully");
+    expect(error).toContain("call::wait-or-merge");
+    expect(error).toMatch(/exited with code 1/i);
+  });
+
   it("makes {{item}} available in params under forEach", async () => {
     const cwd = await tempDir();
     const spec: WorkflowSpec = {

@@ -54,6 +54,12 @@ merge-when-ready runs wait-checks, then \`gh pr merge\` — and only then delete
 the head branch (unless --keep-branch). Use this from a command step AFTER an
 agent has finished pushing fixes; never let the agent merge itself.
 
+The head branch is deleted by this command, not by \`gh pr merge --delete-branch\`
+(whose local-branch step fails whenever a worktree has the head checked out, as
+babysit's prepare worktree does). The remote ref goes first; the local branch is
+removed only when no worktree holds it. A landed PR is never reported as a
+failed merge because of a cleanup problem.
+
 The land is serialized across processes (a cross-process lock keyed by the
 repo's origin), so parallel babysit runs merge one PR at a time. Under the
 lock the PR is re-checked: a base that moved under a sibling's merge is

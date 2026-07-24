@@ -79,6 +79,10 @@ export interface PullRequestCheckSnapshot {
   mergeStateStatus?: PullRequestMergeStateStatus;
   /** ISO timestamp of the tip commit on the PR head, when known. */
   headCommittedAt?: string;
+  /** Owner login of the repo holding the head branch (differs on fork PRs). */
+  headRepoOwner?: string;
+  /** Name of the repo holding the head branch. */
+  headRepoName?: string;
   checks: CheckRollupEntry[];
 }
 
@@ -276,6 +280,8 @@ interface GhPrViewJson {
   state?: string;
   mergedAt?: string | null;
   headRefName?: string;
+  headRepository?: unknown;
+  headRepositoryOwner?: unknown;
   mergeable?: string | null;
   mergeStateStatus?: string | null;
   statusCheckRollup?: unknown;
@@ -305,7 +311,8 @@ export async function fetchPullRequestCheckSnapshot(
       "view",
       selector,
       "--json",
-      "number,state,mergedAt,headRefName,mergeable,mergeStateStatus,statusCheckRollup,commits",
+      "number,state,mergedAt,headRefName,headRepository,headRepositoryOwner," +
+        "mergeable,mergeStateStatus,statusCheckRollup,commits",
     ],
     cwd,
     signal,
@@ -332,11 +339,26 @@ export async function fetchPullRequestCheckSnapshot(
     number,
     state,
     headRefName: typeof parsed.headRefName === "string" ? parsed.headRefName : "",
+    headRepoOwner: namedField(parsed.headRepositoryOwner, "login"),
+    headRepoName: namedField(parsed.headRepository, "name"),
     mergeable: normalizeMergeable(parsed.mergeable),
     mergeStateStatus: normalizeMergeStateStatus(parsed.mergeStateStatus),
     headCommittedAt: latestCommitTimestamp(parsed.commits),
     checks: parseStatusCheckRollup(parsed.statusCheckRollup),
   };
+}
+
+/**
+ * Pull a string field out of one of `gh pr view`'s nested objects
+ * (`headRepository: { name }`, `headRepositoryOwner: { login }`), tolerating a
+ * bare string and the `login`/`name` spelling drift between the two.
+ */
+function namedField(raw: unknown, key: "login" | "name"): string | undefined {
+  if (typeof raw === "string") return raw.trim() || undefined;
+  if (!raw || typeof raw !== "object") return undefined;
+  const obj = raw as Record<string, unknown>;
+  const value = obj[key] ?? obj.name ?? obj.login;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 const MERGE_STATE_STATUSES: PullRequestMergeStateStatus[] = [
@@ -377,6 +399,17 @@ function latestCommitTimestamp(commits: unknown): string | undefined {
   return latest;
 }
 
+function firstNonEmpty(...values: unknown[]): unknown {
+  for (const value of values) {
+    if (typeof value === "string") {
+      if (value.trim()) return value;
+      continue;
+    }
+    if (value !== undefined && value !== null) return value;
+  }
+  return undefined;
+}
+
 /** Normalize `statusCheckRollup` (array of check nodes, or nested shapes) into entries. */
 export function parseStatusCheckRollup(raw: unknown): CheckRollupEntry[] {
   if (!raw) return [];
@@ -392,12 +425,15 @@ export function parseStatusCheckRollup(raw: unknown): CheckRollupEntry[] {
       "check";
     // Check runs use conclusion when complete; status while in flight.
     // Status contexts use state. checkSuite.status is a nested fallback.
+    // `gh` emits an EMPTY conclusion for in-flight runs, so pick the first
+    // non-empty field rather than the first present one — otherwise a running
+    // check reads as UNKNOWN instead of IN_PROGRESS.
     const checkSuiteStatus =
       obj.checkSuite && typeof obj.checkSuite === "object"
         ? (obj.checkSuite as { status?: unknown }).status
         : undefined;
     const state = normalizeCheckState(
-      obj.conclusion ?? obj.state ?? obj.status ?? checkSuiteStatus,
+      firstNonEmpty(obj.conclusion, obj.state, obj.status, checkSuiteStatus),
     );
     const source =
       typeof obj.workflowName === "string"
@@ -517,6 +553,8 @@ export interface MergeWhenReadyOptions extends WaitForChecksOptions {
   maxMergeAttempts?: number;
   /** Injectable `gh` runner (args after the implicit `gh`). Defaults to the real CLI. */
   runGh?: (args: string[], cwd: string, signal?: AbortSignal) => Promise<string>;
+  /** Injectable `git` runner (args after the implicit `git`), for local branch cleanup. */
+  runGit?: (args: string[], cwd: string, signal?: AbortSignal) => Promise<string>;
   /** Injectable land-lock wrapper (defaults to the cross-process file lock). */
   landLock?: <T>(
     cwd: string,
@@ -536,6 +574,8 @@ export type MergeWhenReadyResult =
       prNumber: number;
       /** True when we serialized behind the cross-process land lock. */
       serialized?: boolean;
+      /** Non-fatal problems after the merge landed (e.g. branch cleanup). */
+      warnings?: string[];
     }
   | { ok: false; error: string };
 
@@ -575,7 +615,10 @@ function isRetriableMergeError(message: string): boolean {
  * or now genuinely conflicting (fail with an actionable message instead of a
  * raw `gh` error). Transient "base branch was modified" merge errors are
  * retried. Branch deletion still happens only after a clean terminal-green
- * merge — never while an external review still needs the remote ref.
+ * merge — never while an external review still needs the remote ref — and is
+ * performed here rather than by `gh pr merge --delete-branch`, whose local
+ * branch step aborts the command inside a worktree-based run (see
+ * `cleanUpHeadBranch`). A PR that landed is never reported as a failed merge.
  */
 export async function mergePullRequestWhenReady(
   opts: MergeWhenReadyOptions,
@@ -700,18 +743,15 @@ async function landUnderLock(a: LandLoopArgs): Promise<MergeWhenReadyResult> {
       continue;
     }
 
+    // Deliberately NOT `--delete-branch`: gh deletes the LOCAL branch first and
+    // aborts the whole command when git refuses — which it always does here,
+    // because babysit's own `prepare` worktree still has the PR head checked
+    // out ("cannot delete branch 'X' used by worktree at …"). That failed the
+    // land step for a PR that had actually merged, and left the remote branch
+    // behind because gh never got to it. We land, then clean up ourselves.
     const mergeArgs = ["pr", "merge", String(snapshot.number), `--${strategy}`];
-    if (opts.deleteBranch !== false) mergeArgs.push("--delete-branch");
     try {
       await runGh(mergeArgs, opts.cwd, opts.signal);
-      return {
-        ok: true,
-        merged: true,
-        alreadyMerged: false,
-        detail: `merged PR #${snapshot.number} (${strategy}) after checks were green`,
-        prNumber: snapshot.number,
-        serialized: locked,
-      };
     } catch (err) {
       lastError = errText(err);
       if (isRetriableMergeError(lastError) && attempt < maxAttempts) {
@@ -720,14 +760,134 @@ async function landUnderLock(a: LandLoopArgs): Promise<MergeWhenReadyResult> {
         await sleep(Math.min(MERGE_RETRY_BACKOFF_MS, remaining()), opts.signal);
         continue;
       }
+      // `gh` can still exit non-zero after the merge itself landed. Confirm
+      // against GitHub before reporting a merged PR as a failed land.
+      const landed = await landedDespiteError(a, lastError);
+      if (landed) return landed;
       return { ok: false, error: `merge failed after green checks: ${lastError}` };
     }
+    return landedResult(a, snapshot, await cleanUpHeadBranch(snapshot, a));
   }
 
   return {
     ok: false,
     error: `PR did not converge to a landed state after ${maxAttempts} attempts${lastError ? ` (last: ${lastError})` : ""}`,
   };
+}
+
+function landedResult(
+  a: LandLoopArgs,
+  snapshot: PullRequestCheckSnapshot,
+  warnings: string[],
+  note?: string,
+): MergeWhenReadyResult {
+  const suffix = warnings.length > 0 ? ` (${warnings.join("; ")})` : "";
+  return {
+    ok: true,
+    merged: true,
+    alreadyMerged: false,
+    detail:
+      `merged PR #${snapshot.number} (${a.strategy}) after checks were green` +
+      `${note ? ` — ${note}` : ""}${suffix}`,
+    prNumber: snapshot.number,
+    serialized: a.locked,
+    ...(warnings.length > 0 ? { warnings } : {}),
+  };
+}
+
+/**
+ * `gh pr merge` exited non-zero — did the merge land anyway? Post-merge steps
+ * inside `gh` (and transient API errors right after the merge) can fail long
+ * after GitHub accepted the merge, and reporting that as a failed land is what
+ * made `babysit-all-prs` fail on PRs it had successfully landed.
+ */
+async function landedDespiteError(
+  a: LandLoopArgs,
+  message: string,
+): Promise<MergeWhenReadyResult | undefined> {
+  const fetchSnapshot = a.opts.fetchSnapshot ?? fetchPullRequestCheckSnapshot;
+  let after: PullRequestCheckSnapshot;
+  try {
+    after = await fetchSnapshot(a.opts.prRef, a.opts.cwd, a.opts.signal);
+  } catch {
+    return undefined; // Cannot confirm — fall through to the original error.
+  }
+  if (after.state !== "merged") return undefined;
+  const warnings = await cleanUpHeadBranch(after, a);
+  return landedResult(
+    a,
+    after,
+    warnings,
+    `gh reported an error after the merge landed: ${message}`,
+  );
+}
+
+/** Already-gone remote ref: the repo's "auto-delete head branches" beat us to it. */
+const BRANCH_ALREADY_GONE = /reference does not exist|http 4(04|22)|not found/i;
+
+/**
+ * Delete the merged PR's head branch — the cleanup `--delete-branch` would have
+ * done, minus its worktree-hostile local step.
+ *
+ * The remote delete goes through the head repo (which is the fork on a
+ * cross-repo PR), and the local branch is only removed when no worktree holds
+ * it. Neither is allowed to fail the land: the PR is already merged, so cleanup
+ * problems are reported as warnings.
+ */
+async function cleanUpHeadBranch(
+  snapshot: PullRequestCheckSnapshot,
+  a: LandLoopArgs,
+): Promise<string[]> {
+  if (a.opts.deleteBranch === false) return [];
+  const branch = snapshot.headRefName.trim();
+  if (!branch) {
+    return [`could not delete the head branch of PR #${snapshot.number}: branch name unknown`];
+  }
+
+  const warnings: string[] = [];
+  // `{owner}/{repo}` is gh's placeholder for the CURRENT repo — right for a
+  // same-repo PR, wrong for a fork, hence the explicit head repo when known.
+  const repo =
+    snapshot.headRepoOwner && snapshot.headRepoName
+      ? `${snapshot.headRepoOwner}/${snapshot.headRepoName}`
+      : "{owner}/{repo}";
+  try {
+    await a.runGh(
+      ["api", "--method", "DELETE", `repos/${repo}/git/refs/heads/${branch}`],
+      a.opts.cwd,
+      a.opts.signal,
+    );
+  } catch (err) {
+    const message = errText(err);
+    if (!BRANCH_ALREADY_GONE.test(message)) {
+      warnings.push(`could not delete remote branch ${branch}: ${message}`);
+    }
+  }
+  await deleteLocalBranch(branch, a);
+  return warnings;
+}
+
+/**
+ * Best-effort local cleanup. A branch checked out in a worktree (babysit's own
+ * `prepare` worktree, typically) is left alone — git cannot delete it, and the
+ * worktree teardown handles it. Silent by design: there is no local branch at
+ * all in most environments.
+ */
+async function deleteLocalBranch(branch: string, a: LandLoopArgs): Promise<void> {
+  const runGit = a.opts.runGit ?? ((args, cwd, signal) => runCommand("git", args, cwd, signal));
+  try {
+    const porcelain = await runGit(["worktree", "list", "--porcelain"], a.opts.cwd, a.opts.signal);
+    if (isBranchCheckedOut(porcelain, branch)) return;
+    await runGit(["branch", "-D", branch], a.opts.cwd, a.opts.signal);
+  } catch {
+    // No such local branch, not a git dir, or git refused — cosmetic either way.
+  }
+}
+
+/** True when `git worktree list --porcelain` shows `branch` checked out somewhere. */
+export function isBranchCheckedOut(porcelain: string, branch: string): boolean {
+  const wanted = `branch refs/heads/${branch}`;
+  return porcelain.split(/\r?\n/).some((line) => line.trim() === wanted);
 }
 
 /** `gh pr update-branch` — sync a behind PR head with its base before landing. */
