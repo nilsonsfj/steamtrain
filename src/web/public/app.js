@@ -638,6 +638,7 @@
   }
 
   function showLoginForm() {
+    if (S.sessionHeartbeatTimer) clearInterval(S.sessionHeartbeatTimer);
     var main = document.querySelector("main");
     clear(main);
     var msg = h("div", { class: "empty" },
@@ -722,6 +723,7 @@
       if (e.key === "Enter") doReauth();
     });
     backdrop.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { e.preventDefault(); tokenInput.focus(); return; }
       if (e.key === "Tab") {
         var focusable = backdrop.querySelectorAll("input, button");
         var first = focusable[0];
@@ -732,6 +734,9 @@
           e.preventDefault(); first.focus();
         }
       }
+    });
+    backdrop.addEventListener("click", function (e) {
+      if (e.target === backdrop) tokenInput.focus();
     });
     tokenInput.focus();
   }
@@ -5669,8 +5674,14 @@
   });
 
   window.addEventListener("hashchange", function () {
-    var runId = currentRunDeepLink();
-    if (runId) openRunDeepLink(runId);
+    var parsed = SteamtrainReducer.parseDeepLink
+      ? SteamtrainReducer.parseDeepLink(window.location.hash)
+      : null;
+    if (parsed && parsed.runId) openRunDeepLink(parsed.runId, parsed.stepId);
+    else {
+      var runId = currentRunDeepLink();
+      if (runId) openRunDeepLink(runId);
+    }
   });
 
   loadSessionThenCatalog();
