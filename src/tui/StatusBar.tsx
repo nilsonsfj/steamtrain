@@ -179,9 +179,7 @@ export function StatusBar({
   const visibleAgents = doctor.filter((d) => d.status !== "binary_missing");
   const missingAgents = doctor.length - visibleAgents.length;
   const agentSummary =
-    missingAgents > 0 && visibleAgents.length === 0
-      ? "no agents installed — Ctrl+A to set up"
-      : "";
+    missingAgents > 0 && visibleAgents.length === 0 ? "no agents installed — Ctrl+A to set up" : "";
   const visibleApis = (apiDoctor ?? []).filter((d) => d.status !== "key_missing");
   const missingApis = (apiDoctor ?? []).length - visibleApis.length;
   const apiSummary =
