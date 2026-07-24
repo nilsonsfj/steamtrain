@@ -169,19 +169,17 @@ export function StatusBar({
   }
 
   // Signal-first: lead with what works. Agents that are simply not installed
-  // (binary_missing) collapse into one calm summary instead of a wall of red
-  // chips — "missing" is the normal state for CLIs the user doesn't use, while
-  // auth/error states on installed agents stay loud because they're actionable.
+  // (binary_missing) are omitted entirely - "missing" is the normal state for
+  // CLIs the user doesn't use, and a "N not installed" tally just burns space
+  // that could show another found agent. Auth/error states on installed agents
+  // stay loud because they're actionable. When nothing is installed at all,
+  // surface a setup nudge instead of an empty bar.
   // Same rule for APIs: an unset key is normal (their style is already gray),
   // so key_missing collapses; auth/offline/error chips stay.
   const visibleAgents = doctor.filter((d) => d.status !== "binary_missing");
   const missingAgents = doctor.length - visibleAgents.length;
   const agentSummary =
-    missingAgents > 0 && visibleAgents.length > 0
-      ? `${missingAgents} not installed`
-      : missingAgents > 0
-        ? "no agents installed — Ctrl+A to set up"
-        : "";
+    missingAgents > 0 && visibleAgents.length === 0 ? "no agents installed — Ctrl+A to set up" : "";
   const visibleApis = (apiDoctor ?? []).filter((d) => d.status !== "key_missing");
   const missingApis = (apiDoctor ?? []).length - visibleApis.length;
   const apiSummary =

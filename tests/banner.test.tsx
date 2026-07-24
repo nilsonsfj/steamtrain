@@ -31,7 +31,7 @@ describe("TUI components", () => {
     expect(frame).not.toContain("project ready");
   });
 
-  it("leads with ready agents and collapses not-installed ones into a summary", () => {
+  it("leads with ready agents and omits not-installed ones", () => {
     const doctor: DoctorResult[] = [
       { agent: "claude", provider: "claude", status: "ok", binary: "claude", message: "ready" },
       {
@@ -71,10 +71,10 @@ describe("TUI components", () => {
     expect(frame).toContain("ready");
     // Auth problems on installed agents stay visible — they're actionable.
     expect(frame).toContain("codex");
-    // Not-installed agents collapse into one calm summary, chips gone.
+    // Not-installed agents are omitted entirely (no tally, no chips).
     expect(frame).not.toContain("opencode");
     expect(frame).not.toContain("missing");
-    expect(frame).toContain("2 not installed");
+    expect(frame).not.toContain("not installed");
     // Project identity is always on screen.
     expect(frame).toContain("demo");
     expect(frame).toContain("~/code/demo");
