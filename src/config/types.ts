@@ -274,6 +274,7 @@ export const configFileSchema = z
         bell: z.boolean().optional(),
         desktop: z.boolean().optional(),
         webhook: z.string().url().optional(),
+        webhookFormat: z.enum(["raw", "slack", "discord", "teams"]).optional(),
         events: z
           .array(
             z.enum([

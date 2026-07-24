@@ -179,3 +179,68 @@ describe("notifyWorkflowEvent", () => {
     expect(out.map((e) => e.kind)).toEqual(["run-failed"]);
   });
 });
+
+describe("createNotifier with webhookFormat", () => {
+  it("posts Slack Block Kit payload when webhookFormat is 'slack'", () => {
+    const { posts, options } = harness();
+    const notifier = createNotifier(
+      { webhook: "https://hooks.slack.example/x", webhookFormat: "slack" },
+      options,
+    );
+    notifier.notify(event);
+    expect(posts).toHaveLength(1);
+    const body = posts[0]!.body as { attachments?: { color: string; blocks: unknown[] }[] };
+    expect(body.attachments).toHaveLength(1);
+    expect(body.attachments![0]!.color).toBe("#36a64f");
+    expect(body.attachments![0]!.blocks.length).toBeGreaterThanOrEqual(3);
+    expect((body as Record<string, unknown>).kind).toBeUndefined();
+  });
+
+  it("posts Discord embed payload when webhookFormat is 'discord'", () => {
+    const { posts, options } = harness();
+    const notifier = createNotifier(
+      { webhook: "https://discord.example/hook", webhookFormat: "discord" },
+      options,
+    );
+    notifier.notify(event);
+    expect(posts).toHaveLength(1);
+    const body = posts[0]!.body as { embeds?: { color: number; title: string }[] };
+    expect(body.embeds).toHaveLength(1);
+    expect(body.embeds![0]!.color).toBe(0x36a64f);
+    expect(body.embeds![0]!.title).toContain("bug-hunt");
+  });
+
+  it("posts Teams Adaptive Card payload when webhookFormat is 'teams'", () => {
+    const { posts, options } = harness();
+    const notifier = createNotifier(
+      { webhook: "https://teams.example/hook", webhookFormat: "teams" },
+      options,
+    );
+    notifier.notify(event);
+    expect(posts).toHaveLength(1);
+    const body = posts[0]!.body as {
+      type?: string;
+      attachments?: { contentType: string; content: { type: string } }[];
+    };
+    expect(body.type).toBe("message");
+    expect(body.attachments![0]!.contentType).toBe("application/vnd.microsoft.card.adaptive");
+    expect(body.attachments![0]!.content.type).toBe("AdaptiveCard");
+  });
+
+  it("posts raw NotifyEvent when webhookFormat is 'raw'", () => {
+    const { posts, options } = harness();
+    const notifier = createNotifier(
+      { webhook: "https://hooks.example/x", webhookFormat: "raw" },
+      options,
+    );
+    notifier.notify(event);
+    expect(posts[0]!.body).toMatchObject({ kind: "run-completed", workflow: "bug-hunt" });
+  });
+
+  it("posts raw NotifyEvent when webhookFormat is omitted", () => {
+    const { posts, options } = harness();
+    const notifier = createNotifier({ webhook: "https://hooks.example/x" }, options);
+    notifier.notify(event);
+    expect(posts[0]!.body).toMatchObject({ kind: "run-completed", workflow: "bug-hunt" });
+  });
+});
