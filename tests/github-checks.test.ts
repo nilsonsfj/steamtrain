@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { type Mock, describe, expect, it, vi } from "vitest";
 import {
   type PullRequestCheckSnapshot,
   evaluatePullRequestChecks,
@@ -271,10 +271,17 @@ describe("mergePullRequestWhenReady — race-resilient landing", () => {
       ...over,
     });
 
-  /** Return recorded snapshots in order, repeating the last once exhausted. */
-  function sequence(snaps: PullRequestCheckSnapshot[]): () => Promise<PullRequestCheckSnapshot> {
+  /**
+   * Return recorded snapshots in order, repeating the last once exhausted.
+   * A `vi.fn` so tests can pin the exact number of fetches — otherwise an
+   * extra, unintended re-fetch would silently re-evaluate stale data and the
+   * test would still pass.
+   */
+  function sequence(
+    snaps: PullRequestCheckSnapshot[],
+  ): Mock<() => Promise<PullRequestCheckSnapshot>> {
     let i = 0;
-    return async () => snaps[Math.min(i++, snaps.length - 1)]!;
+    return vi.fn(async () => snaps[Math.min(i++, snaps.length - 1)]!);
   }
 
   /** A pass-through lock: always "held", so we exercise the land loop directly. */
@@ -295,9 +302,10 @@ describe("mergePullRequestWhenReady — race-resilient landing", () => {
 
   it("lands a green, up-to-date PR in one merge and reports it serialized", async () => {
     const calls: string[][] = [];
+    const fetchSnapshot = sequence([green(), green()]);
     const result = await mergePullRequestWhenReady({
       ...base,
-      fetchSnapshot: sequence([green(), green()]),
+      fetchSnapshot,
       runGh: async (args) => {
         calls.push(args);
         return "";
@@ -305,6 +313,29 @@ describe("mergePullRequestWhenReady — race-resilient landing", () => {
     });
     expect(result).toMatchObject({ ok: true, merged: true, serialized: true });
     expect(calls).toEqual([["pr", "merge", "42", "--squash", "--delete-branch"]]);
+    // Exactly two reads: the pre-lock wait, then the re-check under the lock.
+    // Pinning this catches an accidental extra round-trip per land.
+    expect(fetchSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a transient 'not mergeable' rejection (GitHub recomputing mergeability)", async () => {
+    // Regression guard for isRetriableMergeError: GitHub transiently reports a
+    // just-moved base as not mergeable. If that error text stops being treated
+    // as retriable, parallel babysit lands start failing again.
+    let merges = 0;
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      fetchSnapshot: sequence([green()]),
+      runGh: async (args) => {
+        if (args[1] === "merge") {
+          merges += 1;
+          if (merges === 1) throw new Error("Pull request is not mergeable");
+        }
+        return "";
+      },
+    });
+    expect(result).toMatchObject({ ok: true, merged: true });
+    expect(merges).toBe(2);
   });
 
   it("retries the merge when the base branch was modified out from under it", async () => {

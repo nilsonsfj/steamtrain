@@ -208,6 +208,9 @@ async function stealIfStale(lockPath: string, staleMs: number, nowMs: number): P
   if (holder && holder.host === hostname() && !isProcessAlive(holder.pid)) {
     return removeQuietly(lockPath);
   }
+  // Cross-host (or an unreadable holder record): PID liveness is unknowable
+  // from here, so age is the only signal — a lock whose heartbeat stopped
+  // refreshing it for a whole stale window is treated as abandoned.
   if (nowMs - info.mtimeMs > staleMs) {
     return removeQuietly(lockPath);
   }
