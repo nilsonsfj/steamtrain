@@ -242,13 +242,18 @@ function leafResults(state: WorkflowState): ArrivalStepResult[] {
 
 /**
  * One `✗ <step>: <error>` line per root-cause failure in a stopped run.
- * Cascade victims (their error is the engine's "dependency '<id>' failed"
- * pointer) are dropped when at least one genuine root failure exists —
- * they only restate what the root lines already explain.
+ * Cascade victims — marked `dependencyFailed` by the engine, or matching its
+ * "dependency '<id>' failed" message prefix in run records persisted before
+ * the marker existed — are dropped when at least one genuine root failure
+ * exists; they only restate what the root lines already explain. When no
+ * root is identifiable at all, every failure is listed: a noisy pointer
+ * beats a hero that says nothing about why the run stopped.
  */
 function rootFailureLines(steps: StepState[]): string[] {
   const failed = steps.filter((s) => s.result && !s.result.ok && !s.result.skipped);
-  const roots = failed.filter((s) => !(s.result?.error ?? "").startsWith("dependency '"));
+  const roots = failed.filter(
+    (s) => !s.result?.dependencyFailed && !(s.result?.error ?? "").startsWith("dependency '"),
+  );
   const shown = roots.length > 0 ? roots : failed;
   return shown.map((s) => {
     const firstErrLine = (s.result?.error ?? "failed").split("\n", 1)[0]?.trim() || "failed";

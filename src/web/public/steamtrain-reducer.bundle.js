@@ -777,7 +777,9 @@ var SteamtrainReducer = (() => {
   }
   function rootFailureLines(steps) {
     const failed = steps.filter((s) => s.result && !s.result.ok && !s.result.skipped);
-    const roots = failed.filter((s) => !(s.result?.error ?? "").startsWith("dependency '"));
+    const roots = failed.filter(
+      (s) => !s.result?.dependencyFailed && !(s.result?.error ?? "").startsWith("dependency '")
+    );
     const shown = roots.length > 0 ? roots : failed;
     return shown.map((s) => {
       const firstErrLine = (s.result?.error ?? "failed").split("\n", 1)[0]?.trim() || "failed";

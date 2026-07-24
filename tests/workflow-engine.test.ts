@@ -686,6 +686,11 @@ describe("runWorkflow", () => {
     expect(workDone && workDone.kind === "step_done" && workDone.result.output).toContain(
       "split failed",
     );
+    // The cascade is marked so UIs can filter it out of root-cause lists
+    // without string-matching the error text.
+    expect(workDone && workDone.kind === "step_done" && workDone.result.dependencyFailed).toBe(
+      "split",
+    );
   });
 
   it("enforces the dynamic step cap for agent-generated distributor items", async () => {

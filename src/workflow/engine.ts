@@ -4366,6 +4366,11 @@ function isPartialFanOut(result: StepResult): boolean {
  * dependency's own error is appended (first line, capped) so UIs surfacing
  * this step — often the run's LAST step, e.g. a final consolidator — show the
  * root cause instead of a bare "dependency 'x' failed" pointer.
+ *
+ * Deliberately NOT `skipped`/`ok`: the failure must cascade (dependents of
+ * this step fail too) and receipts must count it as failed. The
+ * `dependencyFailed` marker carries what UIs need to filter cascade victims
+ * out of root-cause lists.
  */
 function dependencyFailedResult(
   stepId: string,
@@ -4377,6 +4382,7 @@ function dependencyFailedResult(
   return {
     stepId,
     ok: false,
+    dependencyFailed: dependencyId,
     output: `skipped: dependency '${dependencyId}' failed${reason}`,
     error: `dependency '${dependencyId}' failed${reason}`,
     durationMs: 0,

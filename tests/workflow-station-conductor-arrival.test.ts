@@ -355,6 +355,7 @@ describe("arrival report", () => {
               result: {
                 stepId: "report",
                 ok: false,
+                dependencyFailed: "list-prs",
                 error:
                   "dependency 'list-prs' failed: structured output retry failed: no parseable JSON found in the step output",
                 output: "",
