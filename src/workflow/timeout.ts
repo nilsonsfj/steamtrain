@@ -17,12 +17,15 @@ export function timeoutMsFromSec(sec: number): number {
 /**
  * Sleep that resolves early (rather than throwing) when `signal` aborts, and
  * always unregisters its abort listener so long poll loops don't leak them.
- * Shared by every polling waiter — PR check polling (`github-checks.ts`) and
- * land-lock acquisition (`land-lock.ts`) — so their cancellation semantics
- * cannot drift apart.
+ * The one canonical implementation for every waiter that has to stay
+ * cancellable — engine retry/backoff delays (`engine.ts`), PR check polling
+ * (`github-checks.ts`), and land-lock acquisition (`land-lock.ts`) — so their
+ * cancellation semantics cannot drift apart.
  */
 export async function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) return;
+  // Non-positive delays and an already-aborted signal resolve without ever
+  // allocating a timer or an abort listener.
+  if (ms <= 0 || signal?.aborted) return;
   await new Promise<void>((resolve) => {
     const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
