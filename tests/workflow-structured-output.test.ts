@@ -120,6 +120,26 @@ describe("extractJsonValue", () => {
     expect(extractJsonValue("broken {a: b} span")).toBeUndefined();
     expect(extractJsonValue("")).toBeUndefined();
   });
+
+  it("tolerates ANSI-styled output from plain-text CLIs (kiro headless chat)", () => {
+    // kiro-cli renders its reply with SGR color codes even on a pipe; the
+    // `\x1b[…m` sequences contain `[` bytes that must not hijack the
+    // balanced-span scanner, and the styled fence loses its backticks.
+    const kiroReply =
+      "\x1b[38;5;141m> \x1b[0m\x1b[1mjson\n" + '\x1b[0m\x1b[38;5;10m{"prs":["431","430"]}\n\x1b[0m';
+    expect(extractJsonValue(kiroReply)?.value).toEqual({ prs: ["431", "430"] });
+    // Color codes inside an otherwise plain reply.
+    const styled = 'done: \x1b[32m{"verdict":"pass"}\x1b[0m';
+    expect(extractJsonValue(styled)?.value).toEqual({ verdict: "pass" });
+  });
+
+  it("strips colon-separated truecolor SGR and OSC hyperlinks", () => {
+    // `\x1b[38:2:r:g:bm` is the colon-param truecolor form some terminals
+    // emit; OSC hyperlinks wrap text in `\x1b]8;;URL\x07 … \x1b]8;;\x07`.
+    const text =
+      '\x1b[38:2:255:128:0m\x1b]8;;https://example.com\x07{"verdict":"pass"}\x1b]8;;\x07\x1b[0m';
+    expect(extractJsonValue(text)?.value).toEqual({ verdict: "pass" });
+  });
 });
 
 describe("validateAgainstSchema", () => {

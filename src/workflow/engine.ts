@@ -1154,7 +1154,11 @@ async function runSingleStep(
 
   const failedDependency = findFailedDependency(step, results);
   if (failedDependency) {
-    const failed = dependencyFailedResult(step.id, failedDependency);
+    const failed = dependencyFailedResult(
+      step.id,
+      failedDependency,
+      results.get(failedDependency)?.error,
+    );
     failed.iteration = iteration;
     outputs.set(step.id, failed.output);
     results.set(step.id, failed);
@@ -4357,12 +4361,30 @@ function isPartialFanOut(result: StepResult): boolean {
   );
 }
 
-function dependencyFailedResult(stepId: string, dependencyId: string): StepResult {
+/**
+ * Result recorded for a step that never ran because a dependency failed. The
+ * dependency's own error is appended (first line, capped) so UIs surfacing
+ * this step — often the run's LAST step, e.g. a final consolidator — show the
+ * root cause instead of a bare "dependency 'x' failed" pointer.
+ *
+ * Deliberately NOT `skipped`/`ok`: the failure must cascade (dependents of
+ * this step fail too) and receipts must count it as failed. The
+ * `dependencyFailed` marker carries what UIs need to filter cascade victims
+ * out of root-cause lists.
+ */
+function dependencyFailedResult(
+  stepId: string,
+  dependencyId: string,
+  dependencyError?: string,
+): StepResult {
+  const firstErrLine = (dependencyError ?? "").split("\n", 1)[0]?.trim() ?? "";
+  const reason = firstErrLine ? `: ${firstErrLine.slice(0, 200)}` : "";
   return {
     stepId,
     ok: false,
-    output: `skipped: dependency '${dependencyId}' failed`,
-    error: `dependency '${dependencyId}' failed`,
+    dependencyFailed: dependencyId,
+    output: `skipped: dependency '${dependencyId}' failed${reason}`,
+    error: `dependency '${dependencyId}' failed${reason}`,
     durationMs: 0,
   };
 }

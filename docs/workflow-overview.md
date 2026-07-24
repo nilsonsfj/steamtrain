@@ -577,10 +577,11 @@ flowchart LR
   b -.-> skip
 ```
 
-Skipped step result:
+Skipped step result (the dependency's own error is appended, so a UI
+surfacing only this step still shows the root cause):
 
 ```text
-skipped: dependency 'A' failed
+skipped: dependency 'A' failed: <first line of A's error>
 ```
 
 Rules:

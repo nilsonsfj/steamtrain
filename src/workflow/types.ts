@@ -1036,6 +1036,14 @@ export interface StepResult {
    * re-runs; analytics skip it so live and recorded step counts agree.
    */
   notRun?: boolean;
+  /**
+   * Id of the dependency whose failure cascaded into this result, when the
+   * step never ran for that reason. Unlike `skipped`, the result stays not-ok
+   * so the cascade keeps failing downstream steps and receipts count it as
+   * failed; the marker exists so UIs can tell cascade victims from root
+   * failures without string-matching `error`.
+   */
+  dependencyFailed?: string;
   error?: string;
   durationMs: number;
   costUsd?: number;

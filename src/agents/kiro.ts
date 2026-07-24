@@ -1,3 +1,4 @@
+import { stripAnsi } from "../text";
 import type { AgentEvent, AgentId } from "../types/events";
 import { type AgentAdapter, type AgentRunOptions } from "./adapter";
 import type { AgentModel } from "./agent-model";
@@ -77,6 +78,10 @@ export interface RunKiroProcessParams {
  * kiro-cli prints the final assistant response to stdout (no stream-json).
  * We stream lines as text_delta and emit a result when the process exits 0.
  *
+ * kiro-cli styles its markdown with ANSI escape codes even when stdout is a
+ * pipe, so every line (and stderr) is stripped before use — the raw codes
+ * corrupt structured-output extraction and paint stray styling into the UIs.
+ *
  * No `session_start`: headless mode does not expose a session id on stdout or
  * stderr (unlike agy, which surfaces a conversation id). Resume / takeover that
  * depend on a recorded session therefore cannot chain onto a kiro headless run.
@@ -100,8 +105,9 @@ export async function* runKiroProcess(params: RunKiroProcessParams): AsyncGenera
 
   for await (const item of runLines(processOpts)) {
     if (item.kind === "line") {
-      textParts.push(item.line);
-      yield { kind: "text_delta", agent: id, ts: Date.now(), text: `${item.line}\n` };
+      const line = stripAnsi(item.line);
+      textParts.push(line);
+      yield { kind: "text_delta", agent: id, ts: Date.now(), text: `${line}\n` };
       continue;
     }
 
@@ -111,7 +117,7 @@ export async function* runKiroProcess(params: RunKiroProcessParams): AsyncGenera
 
     if (item.kind === "exit") {
       const ts = Date.now();
-      const stderr = item.stderr.trim();
+      const stderr = stripAnsi(item.stderr).trim();
       const stderrTail = stderr ? `: ${firstLine(stderr)}` : "";
 
       if (item.spawnError) {

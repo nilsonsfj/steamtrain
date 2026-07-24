@@ -680,7 +680,11 @@ var SteamtrainReducer = (() => {
       durationMs += result.durationMs ?? 0;
     }
     const heroStep = findArrivalStep(flat.map((f) => f.step));
-    const hero = (heroStep?.result?.output ?? heroStep?.text ?? "").trim() || fallbackHero(state);
+    let hero = (heroStep?.result?.output ?? heroStep?.text ?? "").trim() || fallbackHero(state);
+    if (!state.ok) {
+      const failures = rootFailureLines(flat.map((f) => f.step));
+      if (failures.length > 0) hero = [...failures, "", hero].join("\n");
+    }
     const agentless = opts.credentialFree === true || costUsd === 0 && tokens === 0 && failCount === 0;
     const nextCandidates = opts.nextCandidates ?? DEFAULT_NEXT_CANDIDATES;
     const current = state.name;
@@ -770,6 +774,18 @@ var SteamtrainReducer = (() => {
       }
     }
     return out.filter((r) => !r.childResults?.length);
+  }
+  function rootFailureLines(steps) {
+    const failed = steps.filter((s) => s.result && !s.result.ok && !s.result.skipped);
+    const roots = failed.filter(
+      (s) => !s.result?.dependencyFailed && !(s.result?.error ?? "").startsWith("dependency '")
+    );
+    const shown = roots.length > 0 ? roots : failed;
+    return shown.map((s) => {
+      const firstErrLine = (s.result?.error ?? "failed").split("\n", 1)[0]?.trim() || "failed";
+      const capped = firstErrLine.length > 200 ? `${firstErrLine.slice(0, 199)}\u2026` : firstErrLine;
+      return `\u2717 ${s.stepId}: ${capped}`;
+    });
   }
   function fallbackHero(state) {
     if (state.ok) {
