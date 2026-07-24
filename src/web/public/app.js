@@ -4704,6 +4704,10 @@
 
   function openHistory(runId) {
     var id = normalizeHistoryRunId(runId);
+    // History view does not consume step deep links (those only resolve via the
+    // live event stream). Clear any pending focus so a later live attach cannot
+    // open a step from a previous deep link.
+    S.pendingStepDeepLink = null;
     stopHistoryPoll();
     Hist = {
       holder: null,
