@@ -539,17 +539,20 @@ auto-updated and re-checked) or conflicting (reported with an actionable
 message) — instead of the raw `Base branch was modified` failure a naive
 parallel `gh pr merge` hits. Transient "base moved" merge errors are retried.
 
-Head-branch cleanup is done by the command itself rather than by
-`gh pr merge --delete-branch`: gh deletes the *local* branch first and aborts
-the whole command when git refuses — which it always does under steamtrain,
-because the babysit `prepare` worktree still has the PR head checked out
-(`cannot delete branch 'X' used by worktree at …`). That failed the land step
-for PRs that had merged fine, and left the remote branch behind. The command
-now merges, deletes the remote head ref (on the fork, for cross-repo PRs),
-and only removes the local branch when no worktree holds it. Cleanup problems
-are reported as warnings on a successful land, never as a failed merge — and
-if `gh` exits non-zero after the merge landed, the PR state is re-checked
-before anything is reported as a failure.
+Head-branch cleanup goes through `gh pr merge --repo <host/owner/repo>
+--delete-branch`. The `--repo` flag is load bearing rather than cosmetic: gh
+sets `CanDeleteLocalBranch = !cmd.Flags().Changed("repo")`, so naming the repo
+turns off gh's *local* branch deletion and leaves only the remote delete.
+Without it gh deletes the local branch first and aborts the whole command when
+git refuses — which it always does under steamtrain, because the babysit
+`prepare` worktree still has the PR head checked out (`cannot delete branch 'X'
+used by worktree at …`). That failed the land step for PRs that had merged
+fine, and left the remote branch behind, since gh never reached it.
+
+The local branch is then removed separately, and only when no worktree holds
+it. If `gh` exits non-zero after the merge landed, the PR state is re-checked
+before anything is reported as a failure — a merged PR is never reported as a
+failed land.
 
 ```bash
 steamtrain workflow run babysit-all-prs --input "land open PRs"

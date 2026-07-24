@@ -1,11 +1,13 @@
 import { type Mock, describe, expect, it, vi } from "vitest";
 import {
   type PullRequestCheckSnapshot,
+  buildMergeArgs,
   evaluatePullRequestChecks,
   isBranchCheckedOut,
   mergePullRequestWhenReady,
   normalizeCheckState,
   parsePullRequestRef,
+  parseRepoFromPullUrl,
   parseStatusCheckRollup,
   resolveSteamtrainCliInvocation,
   waitForPullRequestChecks,
@@ -19,6 +21,7 @@ function snap(
     state: "open",
     headRefName: "claude/hopeful-shannon-1mrboz",
     headCommittedAt: new Date(1_000_000).toISOString(),
+    baseRepo: "github.com/acme/steamtrain",
     ...over,
   };
 }
@@ -86,6 +89,70 @@ describe("parseStatusCheckRollup", () => {
       ["suite-check", "IN_PROGRESS"],
       ["bad-suite", "SUCCESS"],
     ]);
+  });
+});
+
+describe("parseRepoFromPullUrl", () => {
+  it("pulls owner/repo out of PR URLs, including enterprise hosts", () => {
+    expect(parseRepoFromPullUrl("https://github.com/nilsonsfj/steamtrain/pull/145")).toBe(
+      "github.com/nilsonsfj/steamtrain",
+    );
+    // The host must survive: `gh --repo` defaults to github.com without it, so
+    // a GitHub Enterprise land would silently target the wrong host.
+    expect(parseRepoFromPullUrl("https://git.corp.example.com/org/repo/pull/7/files")).toBe(
+      "git.corp.example.com/org/repo",
+    );
+  });
+
+  it("returns undefined for anything that is not a PR URL", () => {
+    expect(parseRepoFromPullUrl(undefined)).toBeUndefined();
+    expect(parseRepoFromPullUrl("")).toBeUndefined();
+    expect(parseRepoFromPullUrl("https://github.com/owner/repo")).toBeUndefined();
+    expect(parseRepoFromPullUrl("https://github.com/owner/repo/issues/7")).toBeUndefined();
+    expect(parseRepoFromPullUrl(42)).toBeUndefined();
+  });
+});
+
+describe("buildMergeArgs", () => {
+  const pr = (over: Partial<PullRequestCheckSnapshot> = {}): PullRequestCheckSnapshot =>
+    snap({ checks: [], ...over });
+
+  it("passes --repo so gh skips its local-branch deletion", () => {
+    // The whole fix in one assertion: gh sets
+    // `CanDeleteLocalBranch = !cmd.Flags().Changed("repo")`, so --repo is what
+    // keeps `--delete-branch` from touching (and choking on) a worktree-held
+    // local branch. Dropping --repo silently reintroduces the original bug.
+    expect(buildMergeArgs(pr(), "squash", true)).toEqual({
+      args: [
+        "pr",
+        "merge",
+        "42",
+        "--squash",
+        "--repo",
+        "github.com/acme/steamtrain",
+        "--delete-branch",
+      ],
+      warnings: [],
+    });
+  });
+
+  it("honors the merge strategy", () => {
+    expect(buildMergeArgs(pr(), "rebase", true).args).toContain("--rebase");
+    expect(buildMergeArgs(pr(), "merge", true).args).toContain("--merge");
+  });
+
+  it("omits --repo and --delete-branch when the branch is being kept", () => {
+    expect(buildMergeArgs(pr(), "squash", false)).toEqual({
+      args: ["pr", "merge", "42", "--squash"],
+      warnings: [],
+    });
+  });
+
+  it("skips cleanup with a warning rather than risking a bare --delete-branch", () => {
+    const built = buildMergeArgs(pr({ baseRepo: undefined }), "squash", true);
+    expect(built.args).toEqual(["pr", "merge", "42", "--squash"]);
+    expect(built.args).not.toContain("--delete-branch");
+    expect(built.warnings[0]).toMatch(/left the head branch of PR #42 in place/i);
   });
 });
 
@@ -354,16 +421,10 @@ describe("mergePullRequestWhenReady — race-resilient landing", () => {
       },
     });
     expect(result).toMatchObject({ ok: true, merged: true, serialized: true });
-    // `--delete-branch` is deliberately absent: gh's local-branch step fails
-    // inside babysit's worktrees. We delete the head ref ourselves instead.
+    // One gh call does the whole land. `--repo` is load bearing: it turns off
+    // gh's local-branch deletion, leaving only the remote delete.
     expect(calls).toEqual([
-      ["pr", "merge", "42", "--squash"],
-      [
-        "api",
-        "--method",
-        "DELETE",
-        "repos/{owner}/{repo}/git/refs/heads/claude/hopeful-shannon-1mrboz",
-      ],
+      ["pr", "merge", "42", "--squash", "--repo", "github.com/acme/steamtrain", "--delete-branch"],
     ]);
     expect(result).not.toHaveProperty("warnings");
     // Exactly two reads: the pre-lock wait, then the re-check under the lock.
@@ -371,23 +432,43 @@ describe("mergePullRequestWhenReady — race-resilient landing", () => {
     expect(fetchSnapshot).toHaveBeenCalledTimes(2);
   });
 
-  it("deletes the head ref on the fork repo for a cross-repo PR", async () => {
+  it("omits both branch flags under --keep-branch", async () => {
     const calls: string[][] = [];
     const result = await mergePullRequestWhenReady({
       ...base,
-      fetchSnapshot: sequence([green({ headRepoOwner: "contrib", headRepoName: "steamtrain" })]),
+      deleteBranch: false,
+      fetchSnapshot: sequence([green()]),
+      runGh: async (args) => {
+        calls.push(args);
+        return "";
+      },
+      runGit: async () => {
+        throw new Error("git must not run when the branch is being kept");
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(calls).toEqual([["pr", "merge", "42", "--squash"]]);
+  });
+
+  it("merges without cleanup, and says so, when the repo cannot be resolved", async () => {
+    // Only reachable if `gh pr view` stops returning a parseable URL. Merging
+    // with a bare `--delete-branch` would walk straight into the worktree
+    // failure this all exists to avoid, so we land and leave the branch.
+    const calls: string[][] = [];
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      fetchSnapshot: sequence([green({ baseRepo: undefined })]),
       runGh: async (args) => {
         calls.push(args);
         return "";
       },
     });
-    expect(result.ok).toBe(true);
-    expect(calls[1]).toEqual([
-      "api",
-      "--method",
-      "DELETE",
-      "repos/contrib/steamtrain/git/refs/heads/claude/hopeful-shannon-1mrboz",
-    ]);
+    expect(result).toMatchObject({ ok: true, merged: true });
+    expect(calls).toEqual([["pr", "merge", "42", "--squash"]]);
+    if (result.ok) {
+      expect(result.warnings?.[0]).toMatch(/left the head branch of PR #42 in place/i);
+      expect(result.detail).toMatch(/could not resolve owner\/repo/i);
+    }
   });
 
   it("leaves the local branch alone when a worktree still has it checked out", async () => {
@@ -431,34 +512,6 @@ describe("mergePullRequestWhenReady — race-resilient landing", () => {
       ["worktree", "list", "--porcelain"],
       ["branch", "-D", "claude/hopeful-shannon-1mrboz"],
     ]);
-  });
-
-  it("treats an already-deleted head ref as clean, and warns on a real delete failure", async () => {
-    const gone = await mergePullRequestWhenReady({
-      ...base,
-      fetchSnapshot: sequence([green()]),
-      runGh: async (args) => {
-        if (args[0] === "api") throw new Error("gh: Reference does not exist (HTTP 422)");
-        return "";
-      },
-    });
-    expect(gone).toMatchObject({ ok: true, merged: true });
-    expect(gone).not.toHaveProperty("warnings");
-
-    const denied = await mergePullRequestWhenReady({
-      ...base,
-      fetchSnapshot: sequence([green()]),
-      runGh: async (args) => {
-        if (args[0] === "api") throw new Error("gh: Resource protected by branch protection");
-        return "";
-      },
-    });
-    // A landed PR is never reported as a failed land over a cleanup problem.
-    expect(denied).toMatchObject({ ok: true, merged: true });
-    if (denied.ok) {
-      expect(denied.warnings?.[0]).toMatch(/could not delete remote branch/i);
-      expect(denied.detail).toMatch(/branch protection/i);
-    }
   });
 
   it("reports success when gh exits non-zero but the merge actually landed", async () => {
@@ -571,7 +624,6 @@ describe("mergePullRequestWhenReady — race-resilient landing", () => {
     expect(calls).toEqual([
       ["pr", "update-branch"],
       ["pr", "merge"],
-      ["api", "--method"], // head-branch cleanup after the land
     ]);
   });
 
