@@ -368,6 +368,58 @@ describe("mergePullRequestWhenReady — race-resilient landing", () => {
     ]);
   });
 
+  it("gives up with a 'did not converge' error once maxMergeAttempts is exhausted", async () => {
+    let merges = 0;
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      maxMergeAttempts: 2,
+      fetchSnapshot: sequence([green()]),
+      runGh: async (args) => {
+        if (args[1] === "merge") {
+          merges += 1;
+          throw new Error("Base branch was modified. Review and try the merge again.");
+        }
+        return "";
+      },
+    });
+    expect(result.ok).toBe(false);
+    // The LAST attempt reports the underlying merge failure rather than
+    // silently looping — either surfacing is acceptable, but it must name the
+    // transient cause so the babysit summary is actionable.
+    if (!result.ok) expect(result.error).toMatch(/base branch was modified|did not converge/i);
+    expect(merges).toBe(2);
+  });
+
+  it("fails with an actionable message when a behind branch cannot be auto-updated", async () => {
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      fetchSnapshot: sequence([
+        green({ mergeStateStatus: "BEHIND" }),
+        green({ mergeStateStatus: "BEHIND" }),
+      ]),
+      runGh: async (args) => {
+        if (args[1] === "update-branch") {
+          throw new Error("failed to update branch: merge conflict between base and head");
+        }
+        return "";
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(result.error).toMatch(/behind.*cannot be auto-updated|manual resolution/i);
+  });
+
+  it("still lands (serialized: false) when the land lock could not be acquired", async () => {
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      // Best-effort lock that never acquires — the land must still happen.
+      landLock: async (_cwd, fn) => ({ value: await fn(false), locked: false }),
+      fetchSnapshot: sequence([green(), green()]),
+      runGh: async () => "",
+    });
+    expect(result).toMatchObject({ ok: true, merged: true, serialized: false });
+  });
+
   it("reports an already-merged PR when a sibling landed it first", async () => {
     const calls: string[][] = [];
     const result = await mergePullRequestWhenReady({

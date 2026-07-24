@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, stat, utimes, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -86,6 +86,51 @@ describe("withLandLock", () => {
       maxWaitMs: 2_000,
     });
     expect(result).toMatchObject({ value: "stolen", locked: true });
+  });
+
+  it("steals a stale lock held by another host (pid liveness is unknowable there)", async () => {
+    const lockDir = await scratchDir();
+    const lockPath = lockFileFor(lockDir, "test-repo-key");
+    // A LIVE pid, but claimed by a different machine — the dead-pid check must
+    // not apply, so only the mtime-staleness path can reclaim this.
+    await writeFile(
+      lockPath,
+      JSON.stringify({ pid: process.pid, host: "other-machine", createdAtMs: 0 }),
+    );
+    // Backdate the file so it is comfortably older than staleMs.
+    const old = new Date(Date.now() - 60 * 60_000);
+    await utimes(lockPath, old, old);
+
+    const result = await withLandLock("/repo", async () => "stolen-stale", {
+      lockDir,
+      resolveKey: fixedKey,
+      pollMs: 3,
+      maxWaitMs: 2_000,
+      staleMs: 60_000,
+    });
+    expect(result).toMatchObject({ value: "stolen-stale", locked: true });
+  });
+
+  it("does not steal a FRESH lock held by another host", async () => {
+    const lockDir = await scratchDir();
+    const lockPath = lockFileFor(lockDir, "test-repo-key");
+    await writeFile(
+      lockPath,
+      JSON.stringify({ pid: process.pid, host: "other-machine", createdAtMs: Date.now() }),
+    );
+
+    const result = await withLandLock("/repo", async () => "ran-unlocked", {
+      lockDir,
+      resolveKey: fixedKey,
+      pollMs: 5,
+      maxWaitMs: 40,
+      staleMs: 60_000,
+    });
+    // Best-effort: it runs, but explicitly WITHOUT the lock, and the other
+    // host's claim is left untouched.
+    expect(result).toMatchObject({ value: "ran-unlocked", locked: false });
+    const held = JSON.parse(await readFile(lockPath, "utf8"));
+    expect(held.host).toBe("other-machine");
   });
 
   it("is best-effort: gives up and runs anyway when a live holder never releases", async () => {

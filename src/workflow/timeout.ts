@@ -14,6 +14,28 @@ export function timeoutMsFromSec(sec: number): number {
   return Math.round(sec * 1000);
 }
 
+/**
+ * Sleep that resolves early (rather than throwing) when `signal` aborts, and
+ * always unregisters its abort listener so long poll loops don't leak them.
+ * Shared by every polling waiter — PR check polling (`github-checks.ts`) and
+ * land-lock acquisition (`land-lock.ts`) — so their cancellation semantics
+ * cannot drift apart.
+ */
+export async function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 /** Count static steps declared in a workflow spec (excludes dynamic fan-out children). */
 export function countStaticWorkflowSteps(spec: WorkflowSpec): number {
   return spec.phases.reduce((n, phase) => n + phase.steps.length, 0);

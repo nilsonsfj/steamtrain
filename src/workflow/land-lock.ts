@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { mkdir, open, readFile, stat, unlink, utimes } from "node:fs/promises";
+import { mkdir, readFile, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { isEnoent } from "./fs-util";
+import { abortableSleep } from "./timeout";
 import { runGitText } from "./worktree";
 
 /**
@@ -110,7 +111,7 @@ export async function withLandLock<T>(
   const staleMs = opts.staleMs ?? DEFAULT_STALE_MS;
   const pollMs = opts.pollMs ?? DEFAULT_POLL_MS;
   const now = opts.nowMs ?? Date.now;
-  const sleep = opts.sleep ?? defaultSleep;
+  const sleep = opts.sleep ?? abortableSleep;
   const resolveKey = opts.resolveKey ?? defaultResolveKey;
 
   if (opts.signal?.aborted) throw new Error("cancelled");
@@ -174,10 +175,11 @@ export async function withLandLock<T>(
 
 async function tryAcquire(lockPath: string, nowMs: number): Promise<boolean> {
   try {
-    const handle = await open(lockPath, "wx");
     const payload: LockPayload = { pid: process.pid, host: hostname(), createdAtMs: nowMs };
-    await handle.writeFile(JSON.stringify(payload));
-    await handle.close();
+    // Exclusive create AND content in one call: an `open(…, "wx")` followed by a
+    // separate write leaves a brief window where the lock exists but is empty,
+    // during which a contender's `readHolder` sees no owner.
+    await writeFile(lockPath, JSON.stringify(payload), { flag: "wx" });
     return true;
   } catch (err) {
     if (isEnoent(err)) {
@@ -254,19 +256,4 @@ async function removeQuietly(lockPath: string): Promise<boolean> {
 
 function isEexist(err: unknown): boolean {
   return (err as NodeJS.ErrnoException)?.code === "EEXIST";
-}
-
-async function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) return;
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      resolve();
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
 }

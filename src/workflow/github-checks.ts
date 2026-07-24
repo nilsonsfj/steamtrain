@@ -1,5 +1,6 @@
 import { type LandLockOptions, withLandLock } from "./land-lock";
 import { runCommand } from "./merge";
+import { abortableSleep } from "./timeout";
 
 /**
  * GitHub PR check-status helpers for babysit / land workflows.
@@ -450,7 +451,7 @@ export async function waitForPullRequestChecks(
 ): Promise<WaitForChecksResult> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS;
   const pollIntervalMs = opts.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-  const sleep = opts.sleep ?? defaultSleep;
+  const sleep = opts.sleep ?? abortableSleep;
   const fetchSnapshot = opts.fetchSnapshot ?? fetchPullRequestCheckSnapshot;
   const nowMs = opts.nowMs ?? Date.now;
   const deadline = nowMs() + timeoutMs;
@@ -501,21 +502,6 @@ export async function waitForPullRequestChecks(
     }
     await sleep(Math.min(pollIntervalMs, remaining), opts.signal);
   }
-}
-
-async function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) return;
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      resolve();
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
 }
 
 export interface MergeWhenReadyOptions extends WaitForChecksOptions {
@@ -599,7 +585,7 @@ export async function mergePullRequestWhenReady(
   const deadline = nowMs() + timeoutMs;
   const runGh = opts.runGh ?? ((args, cwd, signal) => runCommand("gh", args, cwd, signal));
   const lock = opts.landLock ?? withLandLock;
-  const sleep = opts.sleep ?? defaultSleep;
+  const sleep = opts.sleep ?? abortableSleep;
   const strategy = opts.mergeStrategy ?? "squash";
   const maxAttempts = Math.max(1, opts.maxMergeAttempts ?? DEFAULT_MAX_MERGE_ATTEMPTS);
 
