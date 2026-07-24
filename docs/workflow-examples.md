@@ -530,6 +530,15 @@ The bundled `babysit-all-prs` / `babysit-pr` workflows split the work:
    `statusCheckRollup` until every check is terminal (treating an empty
    rollup right after a push as "not registered yet"), then merges.
 
+Because `babysit-all-prs` fans out, each PR's `merge-when-ready` runs as its
+own process, all racing to merge into the same base. The command serializes
+the actual land behind a **cross-process lock** so only one PR merges at a
+time, and once it holds the lock it **re-checks** the PR: a sibling that just
+landed may have moved the base, leaving this PR behind (its branch is
+auto-updated and re-checked) or conflicting (reported with an actionable
+message) — instead of the raw `Base branch was modified` failure a naive
+parallel `gh pr merge` hits. Transient "base moved" merge errors are retried.
+
 ```bash
 steamtrain workflow run babysit-all-prs --input "land open PRs"
 steamtrain workflow pr wait-checks 123
