@@ -169,7 +169,7 @@ export function StatusBar({
   }
 
   // Signal-first: lead with what works. Agents that are simply not installed
-  // (binary_missing) are omitted entirely — "missing" is the normal state for
+  // (binary_missing) are omitted entirely - "missing" is the normal state for
   // CLIs the user doesn't use, and a "N not installed" tally just burns space
   // that could show another found agent. Auth/error states on installed agents
   // stay loud because they're actionable. When nothing is installed at all,
