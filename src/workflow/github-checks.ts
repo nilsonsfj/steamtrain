@@ -79,10 +79,12 @@ export interface PullRequestCheckSnapshot {
   mergeStateStatus?: PullRequestMergeStateStatus;
   /** ISO timestamp of the tip commit on the PR head, when known. */
   headCommittedAt?: string;
-  /** Owner login of the repo holding the head branch (differs on fork PRs). */
-  headRepoOwner?: string;
-  /** Name of the repo holding the head branch. */
-  headRepoName?: string;
+  /**
+   * The PR's BASE repo as `host/owner/repo`, parsed from its URL. Passed to
+   * `gh pr merge --repo`, which is what keeps gh from touching local branches
+   * (see `buildMergeArgs`).
+   */
+  baseRepo?: string;
   checks: CheckRollupEntry[];
 }
 
@@ -280,8 +282,7 @@ interface GhPrViewJson {
   state?: string;
   mergedAt?: string | null;
   headRefName?: string;
-  headRepository?: unknown;
-  headRepositoryOwner?: unknown;
+  url?: string;
   mergeable?: string | null;
   mergeStateStatus?: string | null;
   statusCheckRollup?: unknown;
@@ -311,7 +312,7 @@ export async function fetchPullRequestCheckSnapshot(
       "view",
       selector,
       "--json",
-      "number,state,mergedAt,headRefName,headRepository,headRepositoryOwner," +
+      "number,state,mergedAt,headRefName,url," +
         "mergeable,mergeStateStatus,statusCheckRollup,commits",
     ],
     cwd,
@@ -339,8 +340,7 @@ export async function fetchPullRequestCheckSnapshot(
     number,
     state,
     headRefName: typeof parsed.headRefName === "string" ? parsed.headRefName : "",
-    headRepoOwner: namedField(parsed.headRepositoryOwner, "login"),
-    headRepoName: namedField(parsed.headRepository, "name"),
+    baseRepo: parseRepoFromPullUrl(parsed.url),
     mergeable: normalizeMergeable(parsed.mergeable),
     mergeStateStatus: normalizeMergeStateStatus(parsed.mergeStateStatus),
     headCommittedAt: latestCommitTimestamp(parsed.commits),
@@ -349,16 +349,16 @@ export async function fetchPullRequestCheckSnapshot(
 }
 
 /**
- * Pull a string field out of one of `gh pr view`'s nested objects
- * (`headRepository: { name }`, `headRepositoryOwner: { login }`), tolerating a
- * bare string and the `login`/`name` spelling drift between the two.
+ * `host/owner/repo` out of a PR URL — `https://host/owner/repo/pull/123`.
+ *
+ * The host is kept because `gh --repo` takes `[HOST/]OWNER/REPO` and falls back
+ * to the default host when it is omitted: dropping it would silently point a
+ * GitHub Enterprise land at github.com. The three-segment form is unambiguous.
  */
-function namedField(raw: unknown, key: "login" | "name"): string | undefined {
-  if (typeof raw === "string") return raw.trim() || undefined;
-  if (!raw || typeof raw !== "object") return undefined;
-  const obj = raw as Record<string, unknown>;
-  const value = obj[key] ?? obj.name ?? obj.login;
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+export function parseRepoFromPullUrl(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const match = raw.trim().match(/^https?:\/\/([^/\s]+)\/([^/\s]+)\/([^/\s]+)\/pull\/\d+/i);
+  return match ? `${match[1]}/${match[2]}/${match[3]}` : undefined;
 }
 
 const MERGE_STATE_STATUSES: PullRequestMergeStateStatus[] = [
@@ -615,10 +615,10 @@ function isRetriableMergeError(message: string): boolean {
  * or now genuinely conflicting (fail with an actionable message instead of a
  * raw `gh` error). Transient "base branch was modified" merge errors are
  * retried. Branch deletion still happens only after a clean terminal-green
- * merge — never while an external review still needs the remote ref — and is
- * performed here rather than by `gh pr merge --delete-branch`, whose local
- * branch step aborts the command inside a worktree-based run (see
- * `cleanUpHeadBranch`). A PR that landed is never reported as a failed merge.
+ * merge — never while an external review still needs the remote ref — and goes
+ * through `gh pr merge --repo … --delete-branch`, which deletes the remote ref
+ * without gh's worktree-hostile local step (see `buildMergeArgs`). A PR that
+ * landed is never reported as a failed merge.
  */
 export async function mergePullRequestWhenReady(
   opts: MergeWhenReadyOptions,
@@ -743,15 +743,9 @@ async function landUnderLock(a: LandLoopArgs): Promise<MergeWhenReadyResult> {
       continue;
     }
 
-    // Deliberately NOT `--delete-branch`: gh deletes the LOCAL branch first and
-    // aborts the whole command when git refuses — which it always does here,
-    // because babysit's own `prepare` worktree still has the PR head checked
-    // out ("cannot delete branch 'X' used by worktree at …"). That failed the
-    // land step for a PR that had actually merged, and left the remote branch
-    // behind because gh never got to it. We land, then clean up ourselves.
-    const mergeArgs = ["pr", "merge", String(snapshot.number), `--${strategy}`];
+    const merge = buildMergeArgs(snapshot, strategy, opts.deleteBranch !== false);
     try {
-      await runGh(mergeArgs, opts.cwd, opts.signal);
+      await runGh(merge.args, opts.cwd, opts.signal);
     } catch (err) {
       lastError = errText(err);
       if (isRetriableMergeError(lastError) && attempt < maxAttempts) {
@@ -762,11 +756,12 @@ async function landUnderLock(a: LandLoopArgs): Promise<MergeWhenReadyResult> {
       }
       // `gh` can still exit non-zero after the merge itself landed. Confirm
       // against GitHub before reporting a merged PR as a failed land.
-      const landed = await landedDespiteError(a, lastError);
+      const landed = await landedDespiteError(a, lastError, merge.warnings);
       if (landed) return landed;
       return { ok: false, error: `merge failed after green checks: ${lastError}` };
     }
-    return landedResult(a, snapshot, await cleanUpHeadBranch(snapshot, a));
+    await deleteLocalBranch(snapshot.headRefName, a);
+    return landedResult(a, snapshot, merge.warnings);
   }
 
   return {
@@ -804,6 +799,7 @@ function landedResult(
 async function landedDespiteError(
   a: LandLoopArgs,
   message: string,
+  warnings: string[],
 ): Promise<MergeWhenReadyResult | undefined> {
   const fetchSnapshot = a.opts.fetchSnapshot ?? fetchPullRequestCheckSnapshot;
   let after: PullRequestCheckSnapshot;
@@ -813,7 +809,7 @@ async function landedDespiteError(
     return undefined; // Cannot confirm — fall through to the original error.
   }
   if (after.state !== "merged") return undefined;
-  const warnings = await cleanUpHeadBranch(after, a);
+  await deleteLocalBranch(after.headRefName, a);
   return landedResult(
     a,
     after,
@@ -822,63 +818,60 @@ async function landedDespiteError(
   );
 }
 
-/** Already-gone remote ref: the repo's "auto-delete head branches" beat us to it. */
-const BRANCH_ALREADY_GONE = /reference does not exist|http 4(04|22)|not found/i;
-
 /**
- * Delete the merged PR's head branch — the cleanup `--delete-branch` would have
- * done, minus its worktree-hostile local step.
+ * Build the `gh pr merge` argv, with the flag that makes branch cleanup safe
+ * under worktrees.
  *
- * The remote delete goes through the head repo (which is the fork on a
- * cross-repo PR), and the local branch is only removed when no worktree holds
- * it. Neither is allowed to fail the land: the PR is already merged, so cleanup
- * problems are reported as warnings.
+ * `--repo` is not about targeting a different repository here — it is load
+ * bearing. gh sets `CanDeleteLocalBranch = !cmd.Flags().Changed("repo")`, so
+ * naming the repo turns OFF gh's local-branch deletion and leaves only the
+ * remote delete. Without it, gh deletes the LOCAL branch first and aborts the
+ * whole command when git refuses — which it always does here, because babysit's
+ * `prepare` worktree still has the PR head checked out ("cannot delete branch
+ * 'X' used by worktree at …"). That failed the land step for PRs that had
+ * merged, and left the remote branch behind, since gh never reached it.
+ *
+ * Everything else stays gh's job: tolerating an already-deleted ref (it checks
+ * for HTTP 422/404 rather than matching error prose), and declining to delete a
+ * fork's branch on a cross-repo PR.
+ *
+ * The repo is only unknown if `gh pr view` returned no parseable URL. Rather
+ * than merge with a bare `--delete-branch` and hit the very failure this fixes,
+ * we merge without cleanup and say the branch was left behind.
  */
-async function cleanUpHeadBranch(
+export function buildMergeArgs(
   snapshot: PullRequestCheckSnapshot,
-  a: LandLoopArgs,
-): Promise<string[]> {
-  if (a.opts.deleteBranch === false) return [];
-  const branch = snapshot.headRefName.trim();
-  if (!branch) {
-    return [`could not delete the head branch of PR #${snapshot.number}: branch name unknown`];
+  strategy: "squash" | "merge" | "rebase",
+  deleteBranch: boolean,
+): { args: string[]; warnings: string[] } {
+  const args = ["pr", "merge", String(snapshot.number), `--${strategy}`];
+  if (!deleteBranch) return { args, warnings: [] };
+  if (!snapshot.baseRepo) {
+    return {
+      args,
+      warnings: [
+        `left the head branch of PR #${snapshot.number} in place: could not resolve owner/repo from the PR URL`,
+      ],
+    };
   }
-
-  const warnings: string[] = [];
-  // `{owner}/{repo}` is gh's placeholder for the CURRENT repo — right for a
-  // same-repo PR, wrong for a fork, hence the explicit head repo when known.
-  const repo =
-    snapshot.headRepoOwner && snapshot.headRepoName
-      ? `${snapshot.headRepoOwner}/${snapshot.headRepoName}`
-      : "{owner}/{repo}";
-  try {
-    await a.runGh(
-      ["api", "--method", "DELETE", `repos/${repo}/git/refs/heads/${branch}`],
-      a.opts.cwd,
-      a.opts.signal,
-    );
-  } catch (err) {
-    const message = errText(err);
-    if (!BRANCH_ALREADY_GONE.test(message)) {
-      warnings.push(`could not delete remote branch ${branch}: ${message}`);
-    }
-  }
-  await deleteLocalBranch(branch, a);
-  return warnings;
+  args.push("--repo", snapshot.baseRepo, "--delete-branch");
+  return { args, warnings: [] };
 }
 
 /**
- * Best-effort local cleanup. A branch checked out in a worktree (babysit's own
- * `prepare` worktree, typically) is left alone — git cannot delete it, and the
- * worktree teardown handles it. Silent by design: there is no local branch at
- * all in most environments.
+ * Best-effort local cleanup — the half of `--delete-branch` that `--repo` turns
+ * off. A branch checked out in a worktree (babysit's own `prepare` worktree,
+ * typically) is left alone: git cannot delete it, and worktree teardown handles
+ * it. Silent by design, since most environments have no local branch at all.
  */
 async function deleteLocalBranch(branch: string, a: LandLoopArgs): Promise<void> {
+  const name = branch.trim();
+  if (!name || a.opts.deleteBranch === false) return;
   const runGit = a.opts.runGit ?? ((args, cwd, signal) => runCommand("git", args, cwd, signal));
   try {
     const porcelain = await runGit(["worktree", "list", "--porcelain"], a.opts.cwd, a.opts.signal);
-    if (isBranchCheckedOut(porcelain, branch)) return;
-    await runGit(["branch", "-D", branch], a.opts.cwd, a.opts.signal);
+    if (isBranchCheckedOut(porcelain, name)) return;
+    await runGit(["branch", "-D", name], a.opts.cwd, a.opts.signal);
   } catch {
     // No such local branch, not a git dir, or git refused — cosmetic either way.
   }
