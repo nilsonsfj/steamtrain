@@ -316,7 +316,13 @@
 
   function loadWorkflows() {
     api("GET", "/api/workflows").then(function (r) {
-      if (r.status === 401) { showReauthOverlay(); return; }
+      // Match apiAuth(): keep page state behind the reauth overlay when a run
+      // or workflow is already open; otherwise fall back to the full login form.
+      if (r.status === 401) {
+        if (S.runId || S.selected) showReauthOverlay();
+        else showLoginForm();
+        return;
+      }
       S.workflows = r.body.workflows || [];
       if (r.body.configLabel) {
         document.getElementById("config").textContent = "cfg · " + r.body.configLabel;
@@ -463,7 +469,8 @@
   function pollLiveRuns() {
     api("GET", "/api/runs").then(function (r) {
       if (r.status === 401) {
-        // Session expired: stop polling; a successful login reloads the page.
+        // Session expired: stop polling. A successful reauth (doReauth) restarts
+        // the timer; a full login form reload also brings it back via loadWorkflows.
         if (S.liveRunsTimer) { clearInterval(S.liveRunsTimer); S.liveRunsTimer = null; }
         if (S.sessionHeartbeatTimer) { clearInterval(S.sessionHeartbeatTimer); S.sessionHeartbeatTimer = null; }
         return;
@@ -680,6 +687,11 @@
   function showReauthOverlay() {
     if (S.reauthVisible) return;
     S.reauthVisible = true;
+    // Session is expired: stop heartbeat pings until a successful reauth.
+    if (S.sessionHeartbeatTimer) {
+      clearInterval(S.sessionHeartbeatTimer);
+      S.sessionHeartbeatTimer = null;
+    }
     var backdrop = h("div", { class: "reauth-backdrop", id: "reauthOverlay" },
       h("div", { class: "reauth-card", role: "dialog", "aria-modal": "true", "aria-labelledby": "reauthTitle" },
         h("div", { class: "reauth-icon", "aria-hidden": "true", text: "\uD83D\uDD12" }),
@@ -709,6 +721,9 @@
             if (r.body.sessionTtlMs) S.sessionTtlMs = r.body.sessionTtlMs;
             applyCapabilityChrome();
             startSessionHeartbeat();
+            // pollLiveRuns clears its timer on 401; resume Active runs updates.
+            if (!S.liveRunsTimer) S.liveRunsTimer = setInterval(pollLiveRuns, 5000);
+            pollLiveRuns();
             if (S.runId && !S.es) openStream(S.runId);
           } catch (ex) {
             console.error("doReauth success-path error:", ex);
