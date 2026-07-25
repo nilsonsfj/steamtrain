@@ -1,4 +1,9 @@
-import { type PermissionsSpec, effectivePermissions } from "../agents/permissions";
+import {
+  type PermissionsSpec,
+  effectivePermissions,
+  isPermissionProfile,
+  resolvePermissions,
+} from "../agents/permissions";
 import type { AgentEvent, AgentInstanceId } from "../types/events";
 import type { ApprovalRejectDisposition } from "./approval";
 import type { StepEditPatch } from "./control";
@@ -26,6 +31,28 @@ export type StepStatus = "pending" | "running" | "done" | "error";
  * claim a restriction that isn't there. Live runs get the fully-resolved value
  * from `step_start`.
  */
+/**
+ * The badge a mid-run clamp should show on a still-pending step row, so the
+ * intervention is visible immediately rather than only once the step starts.
+ *
+ * A cleared profile (`""`) drops the badge even though an inherited workflow /
+ * config default may still apply — the reducer cannot see those layers, and for
+ * a trust badge under-reporting is the only safe direction. The step's own
+ * `step_start` carries the authoritative effective profile a moment later.
+ */
+function editedPermissions(
+  patched: string | undefined,
+  current: StepPermissionsInfo | undefined,
+): StepPermissionsInfo | undefined {
+  if (patched === undefined) return current;
+  const resolved = isPermissionProfile(patched) ? resolvePermissions(patched) : undefined;
+  if (!resolved) return undefined;
+  return {
+    profile: resolved.profile,
+    ...(resolved.verify ? { verify: true } : {}),
+  };
+}
+
 function specStepPermissions(
   step: WorkflowSpec["phases"][number]["steps"][number],
   spec: WorkflowSpec,
@@ -633,6 +660,7 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
                   edited: true,
                   model: e.patch.model ?? s.model,
                   effort: e.patch.effort !== undefined ? e.patch.effort || undefined : s.effort,
+                  permissions: editedPermissions(e.patch.permissions, s.permissions),
                 }
               : s,
           ),

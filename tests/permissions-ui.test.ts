@@ -6,6 +6,7 @@ import {
   BUNDLED_WORKFLOWS,
   type WorkflowSpec,
   workflowPermissionVerdicts,
+  workflowReducer,
   workflowStateFromSpec,
 } from "../src/workflow";
 
@@ -85,6 +86,52 @@ describe("reducer preview state", () => {
     // inherits it, the gate step inherits nothing (it spawns no agent).
     expect(scan?.permissions?.profile).toBe("read-only");
     expect(gate?.permissions).toBeUndefined();
+  });
+});
+
+describe("reducer: mid-run clamp", () => {
+  const clampSpec: WorkflowSpec = {
+    name: "wf",
+    phases: [
+      {
+        id: "p",
+        title: "P",
+        steps: [{ id: "impl", agent: "claude", model: "opus", prompt: "go", permissions: "full" }],
+      },
+    ],
+  };
+
+  const clamp = (permissions: string) =>
+    workflowReducer(workflowStateFromSpec(clampSpec), {
+      type: "event",
+      event: {
+        kind: "step_edited",
+        stepId: "impl",
+        patch: { permissions },
+        by: "human:test",
+        ts: 1,
+      },
+    });
+
+  it("badges a still-pending step the moment it is clamped", () => {
+    const state = clamp("read-only");
+    const step = state.phases[0]!.steps[0]!;
+    expect(step.permissions).toEqual({ profile: "read-only", verify: true });
+    expect(step.edited).toBe(true);
+    // The accepted patch is also tracked at run level for the step editor.
+    expect(state.editedSteps?.impl).toMatchObject({ permissions: "read-only" });
+  });
+
+  it("drops the badge when the profile is cleared (step_start re-establishes it)", () => {
+    expect(clamp("").phases[0]!.steps[0]!.permissions).toBeUndefined();
+  });
+
+  it("leaves the badge alone for an edit that does not touch permissions", () => {
+    const state = workflowReducer(workflowStateFromSpec(clampSpec), {
+      type: "event",
+      event: { kind: "step_edited", stepId: "impl", patch: { prompt: "new" }, ts: 1 },
+    });
+    expect(state.phases[0]!.steps[0]!.permissions?.profile).toBe("full");
   });
 });
 

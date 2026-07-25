@@ -354,8 +354,18 @@ export interface RunResumedEvent {
 export interface StepEditedEvent {
   kind: "step_edited";
   stepId: string;
-  /** The accepted field changes (see `StepEditPatch` in control.ts). */
-  patch: { prompt?: string; cmd?: string; model?: string; effort?: string };
+  /**
+   * The accepted field changes — the same shape as `StepEditPatch` in
+   * control.ts, which is what the control actually pushes here (`permissions`
+   * is `""` when the edit cleared the step's profile).
+   */
+  patch: {
+    prompt?: string;
+    cmd?: string;
+    model?: string;
+    effort?: string;
+    permissions?: string;
+  };
   /** Who made the edit (e.g. `"human:tui"`, `"human:web"`, `"human:cli"`). */
   by?: string;
   ts: number;

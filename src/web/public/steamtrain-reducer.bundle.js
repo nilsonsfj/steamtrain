@@ -55,6 +55,10 @@ var SteamtrainReducer = (() => {
   });
 
   // src/agents/permissions.ts
+  var PERMISSION_PROFILES = ["read-only", "edit", "full"];
+  function isPermissionProfile(value) {
+    return typeof value === "string" && PERMISSION_PROFILES.includes(value);
+  }
   function resolvePermissions(spec) {
     if (spec === void 0) return void 0;
     const declared = typeof spec === "string" ? { profile: spec } : spec;
@@ -105,6 +109,15 @@ var SteamtrainReducer = (() => {
   }
 
   // src/workflow/reducer.ts
+  function editedPermissions(patched, current) {
+    if (patched === void 0) return current;
+    const resolved = isPermissionProfile(patched) ? resolvePermissions(patched) : void 0;
+    if (!resolved) return void 0;
+    return {
+      profile: resolved.profile,
+      ...resolved.verify ? { verify: true } : {}
+    };
+  }
   function specStepPermissions(step, spec) {
     if (!isAgentBackedStep(step)) return void 0;
     const declared = step.permissions;
@@ -406,7 +419,8 @@ var SteamtrainReducer = (() => {
                 ...s,
                 edited: true,
                 model: e.patch.model ?? s.model,
-                effort: e.patch.effort !== void 0 ? e.patch.effort || void 0 : s.effort
+                effort: e.patch.effort !== void 0 ? e.patch.effort || void 0 : s.effort,
+                permissions: editedPermissions(e.patch.permissions, s.permissions)
               } : s
             )
           }))
