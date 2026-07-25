@@ -83,6 +83,74 @@ describe("permissions validation", () => {
     expect(result.error).toMatch(/command step runs the shell command you wrote/);
   });
 
+  it("accepts permissions on agent-backed distributors and consolidators", () => {
+    // These use the `optionalAgentRunShape` zod shape rather than the worker's,
+    // so they are a second schema path worth pinning: an agent-backed splitter
+    // or merger is exactly the kind of step that should be able to say it only
+    // reads.
+    const spec: WorkflowSpec = {
+      name: "wf",
+      phases: [
+        {
+          id: "a",
+          title: "A",
+          steps: [
+            {
+              id: "split",
+              kind: "distributor",
+              agent: "claude",
+              model: "opus",
+              prompt: "list targets",
+              permissions: "read-only",
+            },
+          ],
+        },
+        {
+          id: "b",
+          title: "B",
+          steps: [
+            {
+              id: "merge-text",
+              kind: "consolidator",
+              agent: "claude",
+              model: "opus",
+              dependsOn: ["split"],
+              prompt: "merge",
+              permissions: { profile: "read-only", deny: ["WebFetch"] },
+            },
+          ],
+        },
+      ],
+    };
+    expect(validateWorkflow(spec).ok).toBe(true);
+    const verdicts = workflowPermissionVerdicts(spec);
+    expect(verdicts.map((v) => v.stepId)).toEqual(["split", "merge-text"]);
+    expect(verdicts.every((v) => v.permissions.profile === "read-only")).toBe(true);
+  });
+
+  it("rejects permissions on a distributor with no agent binding", () => {
+    const bad: WorkflowSpec = {
+      name: "wf",
+      phases: [
+        {
+          id: "a",
+          title: "A",
+          steps: [
+            {
+              id: "split",
+              kind: "distributor",
+              items: ["one", "two"],
+              permissions: "read-only",
+            },
+          ] as never,
+        },
+      ],
+    };
+    const result = validateWorkflow(bad);
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/spawns no agent/);
+  });
+
   it("rejects permissions on an llm step, which has no CLI to restrict", () => {
     const bad: WorkflowSpec = {
       name: "wf",
