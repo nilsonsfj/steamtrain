@@ -2,6 +2,7 @@ import { Box, Text, useInput } from "ink";
 import { useMemo, useState } from "react";
 import { AGENT_IDS, agentScopeLabel } from "../agents";
 import type { ResolvedAgentInstance } from "../agents";
+import { PERMISSION_PROFILES, providerPermissionSupport } from "../agents/permissions";
 import type { AgentConfigScope, AgentInstanceConfig } from "../config/types";
 import type { DoctorResult, DoctorStatus } from "../doctor";
 import type { AgentProviderId } from "../types/events";
@@ -333,6 +334,14 @@ function AgentRow({
   const binary = agent.binary ? ` binary=${agent.binary}` : "";
   const model = agent.defaultModel ? ` model=${agent.defaultModel}` : "";
   const version = health?.status === "ok" && health.version ? ` v=${health.version}` : "";
+  // Which sandbox profiles this provider's CLI can actually enforce — the
+  // answer to "can I put my review steps on this agent?", shown where agents
+  // are chosen rather than only in a doc.
+  const support = providerPermissionSupport(agent.provider);
+  const enforceable = PERMISSION_PROFILES.filter(
+    (profile) => profile !== "full" && support.profiles[profile] !== "none",
+  );
+  const permissions = ` perms=${enforceable.length > 0 ? enforceable.join("/") : "full only"}`;
   return (
     <Box>
       <Text color={selected ? "cyan" : "gray"}>{selected ? "▶ " : "  "}</Text>
@@ -351,6 +360,7 @@ function AgentRow({
         {binary}
         {model}
         {version}
+        {permissions}
       </Text>
     </Box>
   );

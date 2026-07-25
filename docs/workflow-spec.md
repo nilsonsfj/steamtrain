@@ -84,6 +84,7 @@ execution behavior. **Examples:** [`workflow-examples.md`](workflow-examples.md)
 | `retry` | no | Default auto-retry policy for every agent worker/processor step. See [Auto-retry](#auto-retry-on-transient-failures). |
 | `modelFailover` | no | Default mid-flight model failover policy (quota / rate-limit re-routing). See [Model binding](./model-binding.md#configuring-mid-flight-model-failover). |
 | `fallbackModels` | no | Default failover model queries appended to every agent-backed step's candidate chain. |
+| `permissions` | no | Default tool-permission profile for every agent-backed step (`"read-only"` / `"edit"` / `"full"`, or the object form). Per-step `permissions` overrides it. See [Tool permissions](#tool-permissions-permissions). |
 | `maxCostUsd` | no | Whole-workflow USD budget. The engine stops scheduling new steps once the run's cost reaches it; the run ends `budget-exceeded` and is resumable after raising the cap. See [Cost budgets](./cost-and-budgets.md). |
 
 ## Workflow inputs
@@ -163,6 +164,7 @@ for the mid-flight policy knobs (`modelFailover`).
 | `kind` | no | One of `worker`, `processor`, `distributor`, `consolidator`, `gate`, `approval`, `human`, `merge`, `command`, `llm`, `workflow`. Missing means `worker`. |
 | `dependsOn` | no | Step ids from earlier phases only. Same-phase and forward dependencies are invalid. Steps are scheduled by these dependencies; omitting `dependsOn` makes the step wait for every step in all earlier phases. |
 | `when` | no | Per-step condition (same schema as a gate condition). When false the step is skipped, not failed. See [Per-step conditions](#per-step-conditions-when). |
+| `permissions` | no | Agent-backed steps only: the step's tool-permission / sandbox profile. See [Tool permissions](#tool-permissions-permissions). |
 
 ## Building blocks
 
@@ -1251,6 +1253,48 @@ Semantics:
   resumable from a different worktree path is ultimately the CLI's call — the
   step fails with the CLI's own error if it is not.
 
+## Tool permissions (`permissions`)
+
+Any agent-backed step (worker, processor, agent-backed distributor/consolidator,
+merge conflict resolver) may declare what it is allowed to do. The adapter
+translates the profile into its CLI's native permission flags, the engine
+refuses to launch a step whose agent cannot enforce the profile, and a
+`read-only` step is verified against its workspace after it runs.
+
+```json
+{ "id": "review", "kind": "worker", "model": "sonnet 5",
+  "permissions": "read-only",
+  "prompt": "Review the diff. Report issues; change nothing." }
+```
+
+| profile | may write files | shell | network | verified afterwards |
+| --- | --- | --- | --- | --- |
+| `read-only` | no | no (or read-only sandbox) | no | yes |
+| `edit` | yes, inside its own workspace | sandboxed only | no | no |
+| `full` | yes | yes | yes | no |
+
+Object form (all fields optional except `profile`):
+
+| field | default | meaning |
+| --- | --- | --- |
+| `profile` | — | `"read-only"`, `"edit"`, `"full"`. |
+| `allow` | `[]` | Extra tool patterns allowed on top of the profile, in the agent's own syntax (`"Bash(npm test:*)"`). |
+| `deny` | `[]` | Tool patterns always denied (deny wins over allow). |
+| `onUnsupported` | `"fail"` | `"fail"` refuses to launch a step whose agent cannot enforce the profile; `"warn"` runs it unenforced and records the gap. |
+| `verify` | `true` for `read-only` | Fail the step if its workspace changed at all. |
+
+Resolution order (whichever layer wins owns the whole decision — layers never
+merge field by field): step → workflow → `workflow` call step → project/user
+config → unrestricted. Omitting `permissions` everywhere keeps the historical
+behavior: no permission flags, no verification. `full` is the only profile that
+*grants* — it pre-approves everything so a headless implement step never stalls
+on a prompt it cannot answer.
+
+Only `claude` and `codex` can enforce every profile; `opencode`/`mimo` enforce
+`read-only`; the remaining agents cannot enforce a restriction headlessly. See
+[`permissions.md`](permissions.md) for the full matrix, the verification
+mechanics, and the UI surfaces.
+
 ## Per-step conditions (`when`)
 
 Any step may carry a `when` condition using the gate-condition schema. It is
@@ -1458,6 +1502,12 @@ catches steamtrain-specific references that will silently render as empty.
   `"continue:<ownId>"` (self) requires the step to be inside a loop region.
 - `artifacts` entries must be relative paths that stay inside the step's cwd,
   with unique template names per step.
+- `permissions` is only valid on agent-backed steps (and on a `workflow` step,
+  where it is the child run's default). A `gate`/`approval`/`human`/`command`/
+  `llm`/`issues` step has no agent to restrict and is rejected.
+- `permissions: "read-only"` may not be combined with `artifacts` (a read-only
+  step cannot produce the files it promises), and may not be used on a `merge`
+  step (its conflict resolver has to edit the conflicted files).
 
 ### Template validation
 
@@ -1509,5 +1559,6 @@ Running `steamtrain` with no arguments opens the workflow-first TUI.
 - [`workflow-overview.md`](workflow-overview.md) — diagrams, dynamic fan-out, gates, resume/cache, pitfalls
 - [`workflow-examples.md`](workflow-examples.md) — bundled workflow walkthroughs and authoring patterns
 - [`mainline-pipeline.md`](mainline-pipeline.md) — the `mainline`/`mainline-stream` use-case guide: plan → parallel streams → reviewed merge → PR + filed issues
+- [`permissions.md`](permissions.md) — tool permissions and sandbox profiles: the cross-agent mapping, enforcement, and verification
 - [`human-in-the-loop.md`](human-in-the-loop.md) — autonomy labels, human steps, agent questions, takeover, notifications
 - [`README.md`](README.md) — documentation index

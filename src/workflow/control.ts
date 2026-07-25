@@ -29,6 +29,14 @@ export interface StepEditPatch {
   model?: string;
   /** New reasoning effort, for agent-backed and `llm` steps. */
   effort?: string;
+  /**
+   * New tool-permission profile for an agent-backed step: `"read-only"` /
+   * `"edit"` / `"full"`, or `""` to clear it (back to the workflow/config
+   * default). The point of editing this mid-run is the moment you notice a
+   * step is about to run unrestricted on a repository you care about: pause,
+   * clamp it, resume — no restart, and the intervention lands in the record.
+   */
+  permissions?: string;
 }
 
 export type StepEditResult = { ok: true } | { ok: false; error: string };

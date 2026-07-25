@@ -109,6 +109,25 @@ export {
   validateHumanInputValue,
 } from "./human-input";
 export {
+  type PermissionPreflight,
+  type PermissionSummary,
+  type StepPermissionVerdict,
+  type VerdictEnforcement,
+  formatPermissionSummary,
+  permissionSummaryDeclared,
+  permissionSummaryGlyph,
+  workflowPermissionSummary,
+  permissionEnforcementNote,
+  stepEffectivePermissions,
+  workflowPermissionPreflight,
+  workflowPermissionVerdicts,
+} from "./permission-preflight";
+export {
+  describeViolations,
+  fingerprintChanges,
+  fingerprintWorkspace,
+} from "./permission-guard";
+export {
   type WorkflowAutonomy,
   autonomyBadge,
   autonomyDescription,

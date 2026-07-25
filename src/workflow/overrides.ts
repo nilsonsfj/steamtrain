@@ -26,6 +26,7 @@ const AGENT_FIELD_KEYS = new Set<keyof AgentRunFields>([
   "cwd",
   "env",
   "extraArgs",
+  "permissions",
   "effort",
   "stepTimeoutSec",
   "stepTimeoutMs",

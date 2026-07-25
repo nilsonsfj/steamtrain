@@ -1,12 +1,18 @@
 import { Box, Text, useInput } from "ink";
 import { useCallback, useMemo, useState } from "react";
 import { modelIdsForAgent } from "../agents";
+import {
+  PERMISSION_PROFILES,
+  type PermissionProfile,
+  permissionsBadge,
+} from "../agents/permissions";
 import { truncate } from "../agents/util";
 import { MAX_PROMPT_CHARS, type SteamtrainConfig } from "../config";
 import type { StepEditPatch } from "../workflow";
 import { shouldAcceptTextInput } from "./text-input-filter";
 import {
   EDITOR_EFFORT_NONE,
+  EDITOR_PERMISSIONS_NONE,
   cycleOption,
   effortOptions,
   modelChangePatch,
@@ -30,9 +36,16 @@ export interface RunStepEditorTarget {
   agent?: string;
   model?: string;
   effort?: string;
+  /** True for agent-backed steps, whose sandbox profile can be clamped mid-run. */
+  permissionsEditable?: boolean;
+  /** Current effective profile, or undefined when the step declares none. */
+  permissions?: PermissionProfile;
 }
 
-type RunField = "text" | "model" | "effort";
+type RunField = "text" | "model" | "effort" | "permissions";
+
+/** Cycle order for the permissions row, including the "no profile" state. */
+const PERMISSION_CHOICES: readonly string[] = [EDITOR_PERMISSIONS_NONE, ...PERMISSION_PROFILES];
 
 interface WorkflowRunStepEditorProps {
   target: RunStepEditorTarget;
@@ -62,6 +75,9 @@ export function WorkflowRunStepEditor({
   const [value, setValue] = useState(target.initial);
   const [model, setModel] = useState(target.model);
   const [effort, setEffort] = useState(target.effort);
+  const [permissions, setPermissions] = useState<string>(
+    target.permissions ?? EDITOR_PERMISSIONS_NONE,
+  );
   const [focus, setFocus] = useState<RunField>("text");
   const [editingText, setEditingText] = useState(true);
 
@@ -71,8 +87,9 @@ export function WorkflowRunStepEditor({
       list.push("model");
       if (effortOptions(target.agent, model, config).length > 1) list.push("effort");
     }
+    if (target.permissionsEditable) list.push("permissions");
     return list;
-  }, [target.modelEditable, target.agent, model, config]);
+  }, [target.modelEditable, target.permissionsEditable, target.agent, model, config]);
 
   const focusIndex = Math.min(Math.max(0, fields.indexOf(focus)), Math.max(0, fields.length - 1));
   const focusedField = fields[focusIndex] ?? "text";
@@ -81,7 +98,10 @@ export function WorkflowRunStepEditor({
   const modelChanged = target.modelEditable && model !== undefined && model !== target.model;
   const effortChanged =
     target.modelEditable && (effort ?? undefined) !== (target.effort ?? undefined);
-  const changed = textChanged || modelChanged || effortChanged;
+  const permissionsChanged =
+    target.permissionsEditable === true &&
+    permissions !== (target.permissions ?? EDITOR_PERMISSIONS_NONE);
+  const changed = textChanged || modelChanged || effortChanged || permissionsChanged;
 
   const commit = useCallback(() => {
     if (!changed) {
@@ -95,6 +115,10 @@ export function WorkflowRunStepEditor({
     }
     if (modelChanged && model) patch.model = model;
     if (effortChanged) patch.effort = effort;
+    // The engine reads "" as "clear the profile" (back to the workflow default).
+    if (permissionsChanged) {
+      patch.permissions = permissions === EDITOR_PERMISSIONS_NONE ? "" : permissions;
+    }
     if (Object.keys(patch).length > 0) onApply(patch);
     onClose();
   }, [
@@ -102,9 +126,11 @@ export function WorkflowRunStepEditor({
     textChanged,
     modelChanged,
     effortChanged,
+    permissionsChanged,
     value,
     model,
     effort,
+    permissions,
     target.field,
     onApply,
     onClose,
@@ -191,6 +217,13 @@ export function WorkflowRunStepEditor({
         const next = cycleOption(opts, current, dir);
         setEffort(next === EDITOR_EFFORT_NONE ? undefined : next);
       }
+      return;
+    }
+    if (focusedField === "permissions") {
+      if (key.leftArrow || key.rightArrow) {
+        const dir: 1 | -1 = key.leftArrow ? -1 : 1;
+        setPermissions(cycleOption(PERMISSION_CHOICES, permissions, dir));
+      }
     }
   });
 
@@ -267,6 +300,28 @@ export function WorkflowRunStepEditor({
               </Box>
             ) : null}
           </>
+        ) : null}
+
+        {target.permissionsEditable ? (
+          <Box>
+            <Text color={focusedField === "permissions" ? "cyan" : "gray"}>
+              {focusedField === "permissions" ? "▶ " : "  "}
+            </Text>
+            <Text
+              color={focusedField === "permissions" ? "cyan" : "white"}
+              bold={focusedField === "permissions"}
+            >
+              {"sandbox".padEnd(7)}
+            </Text>
+            <Text color="gray"> </Text>
+            <Text color="white">
+              ‹{" "}
+              {permissions === EDITOR_PERMISSIONS_NONE
+                ? EDITOR_PERMISSIONS_NONE
+                : permissionsBadge(permissions as PermissionProfile)}{" "}
+              ›
+            </Text>
+          </Box>
         ) : null}
 
         {focusedField === "text" ? (

@@ -1,5 +1,7 @@
+import type { PermissionProfile } from "../agents/permissions";
 import type { AgentEvent, AgentFailureKind, AgentInstanceId, ApiInstanceId } from "../types/events";
 import type { ApprovalRejectDisposition } from "./approval";
+import type { StepEditPatch } from "./control";
 import type { WorktreeDiff } from "./merge";
 import type {
   AgentWorktreeInfo,
@@ -44,12 +46,31 @@ export interface PhaseStartEvent extends IterationTagged {
   ts: number;
 }
 
+/**
+ * The tool-permission profile a step will run under, as known at dispatch time
+ * (the declared/effective profile — how much of it the CLI actually enforces is
+ * only knowable at spawn time and lands on {@link StepResult.permissions}).
+ * Carried on `step_start` so live views can badge a locked-down step from the
+ * moment it starts, not after it finishes.
+ */
+export interface StepPermissionsInfo {
+  profile: PermissionProfile;
+  /** Count of extra allowed tool patterns (`allow`), when any. */
+  allow?: number;
+  /** Count of denied tool patterns (`deny`), when any. */
+  deny?: number;
+  /** Post-run workspace verification is armed for this step. */
+  verify?: boolean;
+}
+
 export interface StepStartEvent extends IterationTagged {
   kind: "step_start";
   phaseId: string;
   stepId: string;
   blockKind?: WorkflowStepKind;
   agent?: AgentInstanceId;
+  /** Effective tool permissions for this step, when any profile applies. */
+  permissions?: StepPermissionsInfo;
   /** API instance a direct-inference `llm` step calls (agent steps carry `agent` instead). */
   api?: ApiInstanceId;
   model?: string;
@@ -334,8 +355,14 @@ export interface RunResumedEvent {
 export interface StepEditedEvent {
   kind: "step_edited";
   stepId: string;
-  /** The accepted field changes (see `StepEditPatch` in control.ts). */
-  patch: { prompt?: string; cmd?: string; model?: string; effort?: string };
+  /**
+   * The accepted field changes. This IS `StepEditPatch` — the control pushes the
+   * cleaned patch straight into this event, so the two must never drift (a
+   * field added to the patch and forgotten here would be carried at runtime and
+   * invisible to every consumer and to the recorded interventions). The import
+   * is type-only in both directions, so the cycle with control.ts is erased.
+   */
+  patch: StepEditPatch;
   /** Who made the edit (e.g. `"human:tui"`, `"human:web"`, `"human:cli"`). */
   by?: string;
   ts: number;

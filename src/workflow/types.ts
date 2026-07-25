@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  PERMISSION_PROFILES,
+  type PermissionEnforcement,
+  type PermissionProfile,
+  type PermissionsSpec,
+} from "../agents/permissions";
 import type { AgentInstanceId, ApiInstanceId, TokenUsage } from "../types/events";
 import { type WorkflowInputType, isStringLikeInputType, workflowInputType } from "./input-params";
 import type { ModelFailoverPolicy } from "./model-failover";
@@ -121,6 +127,20 @@ export interface AgentRunFields {
   env?: Record<string, string>;
   /** Extra CLI flags appended to the agent's own args (advanced targets). */
   extraArgs?: string[];
+  /**
+   * Tool permissions / sandbox profile for this step: `"read-only"`, `"edit"`,
+   * or `"full"` (string shorthand), or the object form with `allow`/`deny`
+   * tool patterns, `onUnsupported`, and `verify`. Each adapter translates the
+   * profile into its CLI's native permission flags; the engine refuses to
+   * launch a restricted step on an agent that cannot enforce it, and verifies
+   * afterwards that a `read-only` step left its workspace untouched.
+   *
+   * Omitted ⇒ the workflow's `permissions` default, else the project/user
+   * config default, else unrestricted (exactly the historical behavior: no
+   * permission flags are passed and nothing is verified). See
+   * `src/agents/permissions.ts` and `docs/permissions.md`.
+   */
+  permissions?: PermissionsSpec;
   /** Reasoning effort / variant (claude: `--effort`, opencode: `--variant`, codex: `-c model_reasoning_effort=…`). */
   effort?: string;
   /** Per-step subprocess wall-clock limit in seconds (overrides workflow and config defaults). */
@@ -283,6 +303,8 @@ export interface DistributorStep extends WorkflowStepBase {
   cwd?: string;
   env?: Record<string, string>;
   extraArgs?: string[];
+  /** Tool permissions for the agent-backed splitter; see {@link AgentRunFields.permissions}. */
+  permissions?: PermissionsSpec;
   effort?: string;
   stepTimeoutSec?: number;
   stepTimeoutMs?: number;
@@ -318,6 +340,8 @@ export interface ConsolidatorStep extends WorkflowStepBase {
   cwd?: string;
   env?: Record<string, string>;
   extraArgs?: string[];
+  /** Tool permissions for the agent-backed merge; see {@link AgentRunFields.permissions}. */
+  permissions?: PermissionsSpec;
   effort?: string;
   stepTimeoutSec?: number;
   stepTimeoutMs?: number;
@@ -406,6 +430,12 @@ export interface MergeStep extends WorkflowStepBase {
   prompt?: string;
   env?: Record<string, string>;
   extraArgs?: string[];
+  /**
+   * Tool permissions for the conflict-resolution agent. A resolver must write
+   * (that is its whole job), so `read-only` is rejected on a merge step; the
+   * useful declarations here are `edit` (default-ish intent) and `full`.
+   */
+  permissions?: PermissionsSpec;
   stepTimeoutSec?: number;
 }
 
@@ -615,6 +645,15 @@ export interface WorkflowCallStep extends WorkflowStepBase {
    * own `overrides`, so a single flat map cascades to arbitrary depth.
    */
   overrides?: Record<string, AgentFieldOverridePatch>;
+  /**
+   * Default tool permissions for the whole child run — the sub-workflow analog
+   * of the spec-level `permissions` default, imposed at this call site only.
+   * It layers UNDER the child's own declarations: a child spec's workflow-level
+   * or per-step `permissions` still wins, so a parent can lock down a
+   * sub-workflow that says nothing about permissions without silently
+   * loosening one that does.
+   */
+  permissions?: PermissionsSpec;
 }
 
 /**
@@ -638,6 +677,7 @@ export interface AgentFieldOverridePatch {
   cwd?: string | null;
   env?: Record<string, string> | null;
   extraArgs?: string[] | null;
+  permissions?: PermissionsSpec | null;
   stepTimeoutSec?: number | null;
   stepTimeoutMs?: number | null;
 }
@@ -951,6 +991,15 @@ export interface WorkflowSpec {
    * step.
    */
   fallbackModels?: string[];
+  /**
+   * Default tool permissions for every agent-backed step in this workflow
+   * (per-step `permissions` overrides it wholesale — the layers pick a winner,
+   * they never merge field-by-field). This is how a workflow declares "nothing
+   * in here touches the repo" once: `"permissions": "read-only"` at the top
+   * makes every review/scan/judge step read-only, and any step that genuinely
+   * needs to write has to say so explicitly.
+   */
+  permissions?: PermissionsSpec;
   /** Default per-agent subprocess timeout for agent-backed steps (per-step `stepTimeoutSec` overrides). */
   stepTimeoutSec?: number;
   /** Whole-workflow wall-clock abort limit in seconds. Omitted → stepCount × stepTimeoutSec. */
@@ -999,6 +1048,22 @@ export interface StepArtifact {
 }
 
 /** The outcome of one step, fed into downstream templates and the cache. */
+/**
+ * The permission decision recorded on a finished step (see
+ * {@link StepResult.permissions}).
+ */
+export interface StepPermissionsRecord {
+  profile: PermissionProfile;
+  /** How much of the profile the agent CLI enforced itself. */
+  enforcement: PermissionEnforcement;
+  /** What the CLI did not enforce (empty/omitted when fully native). */
+  gaps?: string[];
+  /** Post-run workspace verification ran for this step. */
+  verified?: boolean;
+  /** Workspace paths a `read-only` step changed — the violation that failed it. */
+  violations?: string[];
+}
+
 export interface StepResult {
   stepId: string;
   ok: boolean;
@@ -1106,6 +1171,15 @@ export interface StepResult {
    * and history badge the steered step.
    */
   edited?: boolean;
+  /**
+   * The tool-permission profile this step actually ran under, and how much of
+   * it the agent CLI enforced itself. Recorded on the result (not only on the
+   * `step_start` event) so a finished run is an auditable answer to "could
+   * this step have touched my repo?" — including `violations`, the workspace
+   * paths a `read-only` step changed despite the profile, which is also what
+   * failed it.
+   */
+  permissions?: StepPermissionsRecord;
   /**
    * When true this result must never be written to the step cache (in-memory
    * or on-disk). Set for human-approval checkpoints so a resumed run always
@@ -1234,6 +1308,27 @@ const modelClassSchema = z.enum([
   "balanced",
 ]);
 
+/**
+ * `permissions` accepts the string shorthand (`"read-only"`) or the object
+ * form. Strict + non-empty lists: a typo'd key (`onUnsupportedProfile`) or an
+ * empty `deny: []` would otherwise validate and quietly promise a restriction
+ * nobody enforces — exactly the failure mode this field exists to remove.
+ */
+const permissionsSchema = z.union([
+  z.enum(PERMISSION_PROFILES as unknown as [PermissionProfile, ...PermissionProfile[]]),
+  z
+    .object({
+      profile: z.enum(
+        PERMISSION_PROFILES as unknown as [PermissionProfile, ...PermissionProfile[]],
+      ),
+      allow: z.array(z.string().min(1)).min(1).optional(),
+      deny: z.array(z.string().min(1)).min(1).optional(),
+      onUnsupported: z.enum(["fail", "warn"]).optional(),
+      verify: z.boolean().optional(),
+    })
+    .strict(),
+]);
+
 const agentRunShape = {
   agent: agentId.optional(),
   model: z.string().min(1).optional(),
@@ -1243,6 +1338,7 @@ const agentRunShape = {
   cwd: z.string().min(1).optional(),
   env: z.record(z.string()).optional(),
   extraArgs: z.array(z.string()).optional(),
+  permissions: permissionsSchema.optional(),
   effort: z.string().min(1).optional(),
   stepTimeoutSec: z.number().positive().optional(),
   stepTimeoutMs: z.number().positive().optional(),
@@ -1258,6 +1354,7 @@ const optionalAgentRunShape = {
   cwd: z.string().min(1).optional(),
   env: z.record(z.string()).optional(),
   extraArgs: z.array(z.string()).optional(),
+  permissions: permissionsSchema.optional(),
   effort: z.string().min(1).optional(),
   stepTimeoutSec: z.number().positive().optional(),
   stepTimeoutMs: z.number().positive().optional(),
@@ -1490,6 +1587,7 @@ const workflowMergeStepSchema = z
     prompt: z.string().min(1).optional(),
     env: z.record(z.string()).optional(),
     extraArgs: z.array(z.string()).optional(),
+    permissions: permissionsSchema.optional(),
     stepTimeoutSec: z.number().positive().optional(),
   })
   .superRefine((step, ctx) => {
@@ -1615,6 +1713,7 @@ const workflowCallOverridePatchSchema = z
     cwd: z.string().min(1).nullable().optional(),
     env: z.record(z.string()).nullable().optional(),
     extraArgs: z.array(z.string()).nullable().optional(),
+    permissions: permissionsSchema.nullable().optional(),
     stepTimeoutSec: z.number().positive().nullable().optional(),
     stepTimeoutMs: z.number().positive().nullable().optional(),
   })
@@ -1630,6 +1729,7 @@ const workflowCallStepSchema = z.object({
   params: z.record(z.string()).optional(),
   worktreeStep: z.string().min(1).optional(),
   overrides: z.record(workflowCallOverridePatchSchema).optional(),
+  permissions: permissionsSchema.optional(),
 });
 
 const workflowIssuesStepSchema = z
@@ -1687,6 +1787,7 @@ export const workflowSpecSchema = z
     retry: retryPolicySchema.optional(),
     modelFailover: modelFailoverPolicySchema.optional(),
     fallbackModels: z.array(z.string().min(1)).min(1).optional(),
+    permissions: permissionsSchema.optional(),
     stepTimeoutSec: z.number().positive().optional(),
     workflowTimeoutSec: z.number().positive().optional(),
     stepTimeoutMs: z.number().positive().optional(),
@@ -1877,6 +1978,40 @@ export function workflowLlmSteps(spec: WorkflowSpec): LlmStep[] {
  *   gate omits `maxIterations`. Pass the engine's `deps.loopMaxIterations` so
  *   the static budget matches the runtime clamp.
  */
+/**
+ * Reject `permissions` declarations that cannot mean anything. The profile only
+ * has teeth where there is an agent CLI to restrict, and `read-only` is a
+ * contradiction on a step whose job is to produce files.
+ */
+function stepPermissionsError(step: WorkflowStep, declared: PermissionsSpec): string | undefined {
+  const kind = workflowStepKind(step);
+  const profile = typeof declared === "string" ? declared : declared.profile;
+
+  if (kind === "workflow") {
+    // Valid: it is the child run's default, not a restriction on this step.
+    return undefined;
+  }
+  if (!isAgentBackedStep(step)) {
+    const why =
+      kind === "command"
+        ? "a command step runs the shell command you wrote, so there is no agent to restrict"
+        : kind === "llm"
+          ? "an llm step is a single stateless API call — no agent CLI, no worktree, no shell or filesystem access to restrict"
+          : `a ${kind} step spawns no agent`;
+    return `step '${step.id}' declares permissions but ${why} (move the profile onto the agent-backed steps, or the workflow's own \`permissions\` default)`;
+  }
+  if (kind === "merge" && profile === "read-only") {
+    return `step '${step.id}' is a merge step with permissions "read-only", but a conflict-resolution agent has to edit the conflicted files (use "edit" or "full")`;
+  }
+  if (profile === "read-only") {
+    const artifacts = "artifacts" in step ? step.artifacts : undefined;
+    if (artifacts?.length) {
+      return `step '${step.id}' declares permissions "read-only" and artifacts ${JSON.stringify(artifacts)} — a read-only step cannot produce the files it promises (drop the artifacts, or use "edit")`;
+    }
+  }
+  return undefined;
+}
+
 export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number): ValidationResult {
   const parsed = workflowSpecSchema.safeParse(spec);
   if (!parsed.success) {
@@ -2171,6 +2306,15 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
             error: `step '${step.id}' cannot combine workspace attach with forEach (fan-out children would race in one worktree — merge or drop the forEach)`,
           };
         }
+      }
+      // ---- Permissions ----
+      // A declared profile is a promise the engine has to be able to keep, so
+      // reject the shapes where it could not: a step with no agent to
+      // restrict, and a read-only step that is nonetheless required to write.
+      const declaredPermissions = (step as { permissions?: PermissionsSpec }).permissions;
+      if (declaredPermissions !== undefined) {
+        const permissionError = stepPermissionsError(step, declaredPermissions);
+        if (permissionError) return { ok: false, error: permissionError };
       }
       const artifacts = "artifacts" in step ? step.artifacts : undefined;
       if (artifacts) {

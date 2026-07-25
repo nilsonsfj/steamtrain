@@ -21,7 +21,33 @@ export {
   defaultDraftModel,
 } from "./agent-meta";
 export { AmpAdapter, AMP_MODELS, buildAmpExecArgs, createAmpMapper } from "./amp";
-export { ClaudeCodeAdapter, CLAUDE_MODELS, createClaudeMapper } from "./claude";
+export {
+  ClaudeCodeAdapter,
+  CLAUDE_MODELS,
+  buildClaudeRunArgs,
+  createClaudeMapper,
+} from "./claude";
+export {
+  type PermissionEnforcement,
+  type PermissionPlan,
+  type PermissionProfile,
+  type PermissionsSpec,
+  type PermissionUnsupportedPolicy,
+  type ProviderPermissionSupport,
+  type ResolvedPermissions,
+  type StepPermissions,
+  PERMISSION_PROFILES,
+  effectivePermissions,
+  isPermissionProfile,
+  permissionArgs,
+  permissionPlan,
+  permissionsBadge,
+  permissionsDescription,
+  permissionsLabel,
+  permissionSupportMatrix,
+  providerPermissionSupport,
+  resolvePermissions,
+} from "./permissions";
 export { CodexAdapter, CODEX_MODELS, buildCodexExecArgs, createCodexMapper } from "./codex";
 export {
   CursorAgentAdapter,
@@ -149,7 +175,12 @@ export {
   setKimiVariantCacheForTests,
 } from "./kimi-variants";
 export { fallbackKimiEfforts } from "./kimi-efforts-fallback";
-export { OpenCodeAdapter, OPENCODE_MODELS, createOpenCodeMapper } from "./opencode";
+export {
+  OpenCodeAdapter,
+  OPENCODE_MODELS,
+  buildOpenCodeRunArgs,
+  createOpenCodeMapper,
+} from "./opencode";
 export {
   type AgentLayers,
   agentConfigScope,

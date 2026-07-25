@@ -16,6 +16,7 @@ import {
 } from "../types/raw-cursor";
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
+import { permissionArgs } from "./permissions";
 import { stringifyContent } from "./util";
 
 const AGENT: AgentInstanceId = "cursor";
@@ -61,6 +62,9 @@ export function buildCursorRunArgs(opts: AgentRunOptions): string[] {
     "--model",
     resolveCursorModel(opts.model, opts.effort),
     ...(opts.resumeSessionId ? ["--resume", opts.resumeSessionId] : []),
+    // Literal, not `AGENT`: that constant is an `AgentInstanceId` (used for
+    // event tagging) while this wants the narrower `AgentProviderId`.
+    ...permissionArgs("cursor", opts.permissions),
     ...(opts.extraArgs ?? []),
     opts.prompt,
   ];

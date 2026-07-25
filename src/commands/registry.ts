@@ -14,6 +14,7 @@ import { exitCommand } from "./builtins/exit";
 import { helpCommand } from "./builtins/help";
 import { historyCommand } from "./builtins/history";
 import { modelCommand } from "./builtins/model";
+import { permissionsCommand } from "./builtins/permissions";
 import { promptCommand } from "./builtins/prompt";
 import { renameWorkflowCommand } from "./builtins/rename-workflow";
 import { rerouteCommand } from "./builtins/reroute";
@@ -31,6 +32,7 @@ const BUILTIN_COMMANDS: SlashCommand[] = [
   versionCommand,
   modelCommand,
   effortCommand,
+  permissionsCommand,
   agentCommand,
   agentsCommand,
   apiCommand,

@@ -27,7 +27,10 @@ export interface UseSlashContextParams {
     stepId: string,
     patch: Partial<
       Pick<WorkspaceEntry, "agent" | "model" | "effort"> &
-        Pick<WorkflowStepSelection, "prompt" | "cwd" | "env" | "extraArgs" | "stepTimeoutSec">
+        Pick<
+          WorkflowStepSelection,
+          "prompt" | "cwd" | "env" | "extraArgs" | "permissions" | "stepTimeoutSec"
+        >
     >,
   ) => void;
   previewStepSelection: WorkflowStepSelection | undefined;

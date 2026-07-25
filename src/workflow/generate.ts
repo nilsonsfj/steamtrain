@@ -305,6 +305,27 @@ on the aggregate parent. Use artifacts when a
 step's real product is a file a later step should read, rather than pasting
 huge content through text outputs.
 
+# Tool permissions ("permissions")
+Any agent-backed step may declare "permissions": "read-only" | "edit" | "full"
+(or the object form { "profile": …, "allow": [...], "deny": [...] }). This is
+what stops an analysis step from being able to rewrite the repo:
+  - "read-only" — reads, searches, judges; cannot write files, run shell
+    commands, or reach the network. steamtrain also VERIFIES this after the
+    step: if its workspace changed at all, the step fails. Use it on every
+    review / critique / scan / judge / plan step. Do NOT combine it with
+    "artifacts" (a read-only step cannot produce files) and never put it on a
+    merge step.
+  - "edit" — reads and edits files in its own workspace; no network. Enforceable
+    on claude and codex only.
+  - "full" — explicitly unrestricted; use it for implement/fix steps.
+A workflow may also set "permissions" once at the TOP LEVEL as the default for
+every agent step, with individual steps overriding it — the clearest way to
+express "only the implement step writes". Prefer declaring profiles: a workflow
+whose reviewers are provably read-only is one a user will run on a real
+repository. Note that only claude, codex, opencode and mimo can enforce
+"read-only" natively; a restricted step pinned to another agent is refused
+before it starts.
+
 # Session continuity ("session")
 A worker/processor may set "session": "continue:<stepId>" to CONTINUE that
 earlier step's agent conversation instead of starting a clean-room one — the

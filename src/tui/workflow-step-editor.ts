@@ -86,6 +86,9 @@ export type EditorField = "agent" | "model" | "effort" | "prompt";
 /** Sentinel shown for "no explicit effort" (the model's own default). */
 export const EDITOR_EFFORT_NONE = "(default)";
 
+/** Sentinel shown for "no declared sandbox profile" (inherit / unrestricted). */
+export const EDITOR_PERMISSIONS_NONE = "(inherit)";
+
 /** Build the editor target for a selected spec step, or `undefined` if nothing is editable. */
 export function stepEditorTarget(
   workflowName: string,

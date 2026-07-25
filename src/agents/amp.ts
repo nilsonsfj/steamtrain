@@ -16,6 +16,7 @@ import {
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
 import { classifyAgentFailure } from "./failure-classify";
+import { permissionArgs } from "./permissions";
 import { humanizeAssistantError, stringifyContent } from "./util";
 
 const AGENT: AgentId = "amp";
@@ -191,6 +192,7 @@ export function buildAmpExecArgs(opts: AgentRunOptions): string[] {
     "-m",
     opts.model,
     ...(wantsEffort ? ["--effort", opts.effort as string] : []),
+    ...permissionArgs(AGENT, opts.permissions),
     ...(opts.extraArgs ?? []),
   ];
 }

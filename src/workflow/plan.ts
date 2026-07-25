@@ -6,7 +6,15 @@
  * preview (Ctrl+D), and the web UI's "Plan" button.
  */
 
+import type { PermissionProfile } from "../agents/permissions";
+import type { SteamtrainConfig } from "../config/types";
 import { llmStepApiId, resolveLlmProvider } from "./llm";
+import {
+  type PermissionSummary,
+  type StepPermissionVerdict,
+  workflowPermissionSummary,
+  workflowPermissionVerdicts,
+} from "./permission-preflight";
 import type { TemplateContext } from "./template";
 import { renderPrompt } from "./template";
 import type {
@@ -68,6 +76,12 @@ export interface PlanStep {
   workspaceMode?: "inherit" | "attach";
   /** Declared artifact paths. */
   artifacts?: string[];
+  /**
+   * Effective tool-permission profile for an agent-backed step, and whether its
+   * agent can enforce it. A dry run is exactly where you want to learn that a
+   * "read-only" reviewer is pinned to an agent that cannot honor it.
+   */
+  permissions?: { profile: PermissionProfile; enforcement: StepPermissionVerdict["enforcement"] };
 }
 
 export interface PlanResult {
@@ -97,6 +111,8 @@ export interface PlanResult {
   agents: string[];
   /** Distinct API instances used by `llm` steps. */
   apis: string[];
+  /** Sandbox posture across the workflow's agent steps. */
+  permissions?: PermissionSummary;
   /** Workflow-level maxCostUsd, if set. */
   maxCostUsd?: number;
   /** Observed spend and duration from completed runs of this workflow, when available. */
@@ -172,6 +188,12 @@ export function planWorkflow(
   spec: WorkflowSpec,
   input: string,
   params?: Record<string, string | number | boolean>,
+  /**
+   * Live config, so the plan reflects the project/user `permissions` default
+   * and each step's agent instance. Omitted ⇒ permissions are computed from the
+   * spec's own layers only.
+   */
+  config?: SteamtrainConfig,
 ): PlanResult {
   const validation = validateWorkflow(spec);
   if (!validation.ok) {
@@ -201,6 +223,12 @@ export function planWorkflow(
   const workflowSteps: PlanResult["workflowSteps"] = [];
   const agentSet = new Set<string>();
   const apiSet = new Set<string>();
+
+  // Permission verdicts up front: one pass over the spec, then a map lookup per
+  // step (the verdict needs the agent instance, not just the spec).
+  const permissionVerdicts = new Map(
+    workflowPermissionVerdicts(spec, config).map((verdict) => [verdict.stepId, verdict]),
+  );
 
   // Build step lookup for resolving forEach sources.
   const stepById = new Map<string, WorkflowStep>();
@@ -328,6 +356,11 @@ export function planWorkflow(
         gateOnFalse: kind === "gate" ? (step as GateStep).onFalse : undefined,
         loopTo: kind === "gate" ? (step as GateStep).loopTo : undefined,
         maxIterations: kind === "gate" ? (step as GateStep).maxIterations : undefined,
+        permissions: (() => {
+          const verdict = permissionVerdicts.get(step.id);
+          if (!verdict) return undefined;
+          return { profile: verdict.permissions.profile, enforcement: verdict.enforcement };
+        })(),
         whenCondition: describeWhenCondition(step),
         workflowName: kind === "workflow" ? (step as { workflow?: string }).workflow : undefined,
         mergeMode,
@@ -353,6 +386,7 @@ export function planWorkflow(
     workflowSteps,
     agents: [...agentSet],
     apis: [...apiSet],
+    permissions: workflowPermissionSummary(spec, config),
     maxCostUsd: spec.maxCostUsd,
   };
 }

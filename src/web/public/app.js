@@ -1678,6 +1678,7 @@
       h("div", { class: "name" }, w.name,
         isTour && S.stationLanding ? h("span", { class: "badge start-here", text: "start here" }) : null,
         h("span", { class: "badge " + autonomy.cls, text: autonomy.badge, title: autonomy.title }),
+        workflowSandboxBadge(w),
         isStaged ? h("span", { class: "badge staged", text: "staged" }) : null,
         w.blocked ? h("span", {
           class: "badge " + (w.reroute ? "reroute" : "blocked"),
@@ -1687,8 +1688,44 @@
       w.description ? h("div", { class: "desc", text: w.description }) : null,
       h("div", { class: "meta", text: isTour && S.stationLanding
         ? "zero-cost guided ride \u00b7 no agents"
-        : (meta + (kinds ? " \u00b7 " + kinds : "")) })
+        : (meta + (kinds ? " \u00b7 " + kinds : "")) }),
+      w.permissions && w.permissions.summary
+        ? h("div", { class: "meta perms-meta", text: sandboxGlyph(w.permissions) + " sandbox: " + w.permissions.summary })
+        : null
     );
+  }
+
+  /**
+   * Catalog badge for a workflow's sandbox posture. Only shown when it says
+   * something: every agent step sandboxed (the reassuring case), or at least one
+   * step whose declared restriction cannot be enforced (the case a user must see
+   * BEFORE launching, not after).
+   */
+  /** Closed lock only when something is actually sandboxed (mirrors the CLI/TUI). */
+  function sandboxGlyph(p) {
+    if (!p || p.blocking > 0 || p.unenforced > 0) return "\uD83D\uDD13";
+    var declared = p.counts && (p.counts["read-only"] || p.counts.edit || p.counts.full);
+    return declared ? "\uD83D\uDD12" : "\uD83D\uDD13";
+  }
+
+  function workflowSandboxBadge(w) {
+    var p = w.permissions;
+    if (!p || !p.agentSteps) return null;
+    if (p.blocking > 0 || p.unenforced > 0) {
+      return h("span", {
+        class: "badge perms violated",
+        text: "\uD83D\uDD13 " + (p.blocking > 0 ? "unenforceable" : "unenforced"),
+        title: (w.permissionWarnings || []).join("\n") || "a declared profile is not enforced by its agent"
+      });
+    }
+    if (p.unrestricted === 0 && p.counts && p.counts["read-only"] === p.agentSteps) {
+      return h("span", {
+        class: "badge perms locked",
+        text: "\uD83D\uDD12 read-only",
+        title: "every agent step in this workflow runs read-only: no writes, no shell, no network"
+      });
+    }
+    return null;
   }
 
   function selectWorkflow(name, after, options) {
@@ -2840,6 +2877,7 @@
     });
     var kindEl = h("span", { class: "kind " + s.blockKind });
     if (s.status === "running") kindEl.appendChild(h("span", { class: "pulse" }));
+    var perms = stepPermissions(s);
     kindEl.appendChild(document.createTextNode(KIND_LABEL[s.blockKind] || s.blockKind));
     var attempts = s.attempts || (s.result && s.result.attempts);
     var stateLabel = s.status === "pending" ? "pending" : s.status;
@@ -2850,6 +2888,9 @@
       kindEl,
       h("span", { class: "state " + s.status, text: stateLabel })
     );
+    // The sandbox badge sits in the card header, next to the block kind: what a
+    // step is allowed to do belongs with what a step IS.
+    if (perms) top.appendChild(permissionBadge(perms));
     if (p) {
       top.appendChild(h("button", {
         class: "card-details",
@@ -2966,8 +3007,10 @@
 
     var agentBacked = !!(specStep && specStep.agent);
     var modelSel = null;
+    var midPermsSel = null;
     var effortField = h("div", { class: "field" });
     var modelRow = null;
+    var permsRow = null;
     if (agentBacked && !isCmd) {
       var agent = specStep.agent;
       var curModel = edits.model != null ? edits.model : specStep.model;
@@ -2988,6 +3031,24 @@
         field("Model", modelSel, "Applies when this step runs (agent stays " + agent + ")."),
         effortField
       );
+      // Clamp a not-yet-started step's sandbox while the run is paused — the
+      // "wait, that one shouldn't be able to write" intervention.
+      var curPerms = (s.permissions && s.permissions.profile) ||
+        (typeof specStep.permissions === "string"
+          ? specStep.permissions
+          : (specStep.permissions && specStep.permissions.profile) || "");
+      midPermsSel = selectEl(
+        [
+          { value: "", label: "(unchanged)" },
+          { value: "read-only", label: "🔒 read-only" },
+          { value: "edit", label: "✎ edit" },
+          { value: "full", label: "⚡ full" },
+          { value: "none", label: "clear (inherit / unrestricted)" }
+        ],
+        curPerms
+      );
+      permsRow = field("Permissions", midPermsSel,
+        "Sandbox this step runs under. read-only is enforced by the agent CLI where it can be, and verified against the step's workspace afterwards.");
     }
 
     var body = h("div", null,
@@ -2995,7 +3056,8 @@
         ? "Shell command the step will run when the workflow resumes."
         : "Prompt the step will run with when the workflow resumes ({{...}} templates still apply)." }),
       ta,
-      modelRow
+      modelRow,
+      permsRow
     );
     var applyBtn = h("button", { class: "btn primary", text: "Apply edit" });
     var foot = h("div", { class: "mfoot" },
@@ -3010,6 +3072,9 @@
         payload.model = modelSel.value;
         var ef = effortField._sel ? effortField._sel.value : "";
         if (ef) payload.effort = ef;
+      }
+      if (midPermsSel && midPermsSel.value) {
+        payload.permissions = midPermsSel.value === "none" ? "" : midPermsSel.value;
       }
       applyBtn.disabled = true;
       apiAuth("POST", "/api/runs/" + S.runId + "/edit-step", payload).then(function (r) {
@@ -3135,6 +3200,23 @@
     if (runnerId) row("runner", runnerId + (s.model ? " · " + s.model : "") + (s.effort ? " · " + s.effort : ""));
     else if (s.modelClass) row("runner", "auto · class:" + s.modelClass + (s.model ? " · " + s.model : ""));
     else if (s.model) row("runner", "auto · " + s.model);
+    var drawerPerms = stepPermissions(s);
+    if (drawerPerms) {
+      var permsValue = h("span", { class: "drawer-value" });
+      permsValue.appendChild(permissionBadge(drawerPerms));
+      var permsNote = drawerPerms.violations && drawerPerms.violations.length
+        ? " " + drawerPerms.violations.slice(0, 6).join(", ")
+        : drawerPerms.enforcement
+          ? " " + drawerPerms.enforcement + (drawerPerms.verified ? " · workspace verified" : "")
+          : drawerPerms.verify
+            ? " · verified after the run"
+            : "";
+      if (permsNote) permsValue.appendChild(document.createTextNode(permsNote));
+      row("permissions", permsValue);
+      if (drawerPerms.gaps && drawerPerms.gaps.length) {
+        row("not enforced", drawerPerms.gaps.join(" · "), "warn");
+      }
+    }
     if (s.worktree) {
       row("worktree", "⎇ " + s.worktree.branch);
       row("worktree dir", s.worktree.cwd, "mono");
@@ -4375,6 +4457,9 @@
             if (ef) st.effort = ef; else delete st.effort;
           }
           if (r.promptTa) st.prompt = r.promptTa.value;
+          if (r.permsSel) {
+            if (r.permsSel.value) st.permissions = r.permsSel.value; else delete st.permissions;
+          }
           if (r.stepTimeoutInput && r.stepTimeoutInput.value.trim()) {
             var stepSec = Number(r.stepTimeoutInput.value) * 60;
             if (stepSec > 0) st.stepTimeoutSec = stepSec; else delete st.stepTimeoutSec;
@@ -4419,6 +4504,7 @@
               patch.effort = ef || null;
             }
             if (r.promptTa) patch.prompt = r.promptTa.value;
+            if (r.permsSel) patch.permissions = r.permsSel.value || null;
             if (r.stepTimeoutInput && r.stepTimeoutInput.value.trim()) {
               var stepSec = Number(r.stepTimeoutInput.value) * 60;
               patch.stepTimeoutSec = stepSec > 0 ? stepSec : null;
@@ -4512,6 +4598,18 @@
       value: st.stepTimeoutSec ? String(Math.round(st.stepTimeoutSec / 60)) : ""
     });
     var promptTa = h("textarea", { class: "ta", text: st.prompt || "" });
+    // Sandbox profile: the one control that decides whether this step can touch
+    // the repository at all. A plain select, because the whole value of the
+    // feature is that it is one obvious choice per step.
+    var permsSel = selectEl(
+      [
+        { value: "", label: "(inherit / unrestricted)" },
+        { value: "read-only", label: "🔒 read-only — no writes, shell, or network" },
+        { value: "edit", label: "✎ edit — write in its own workspace" },
+        { value: "full", label: "⚡ full — everything the CLI offers" }
+      ],
+      typeof st.permissions === "string" ? st.permissions : (st.permissions && st.permissions.profile) || ""
+    );
     var bindHint = h("div", { class: "ro", text: "" });
 
     function refreshBindHint() {
@@ -4574,6 +4672,7 @@
       effortSel: null,
       promptTa: promptTa,
       stepTimeoutInput: stepTimeoutInput,
+      permsSel: kind === "merge" ? null : permsSel,
       renderEffort: renderEffort,
       card: card
     };
@@ -4582,6 +4681,12 @@
     card.appendChild(field("Model class", classSel, "Optional role class (thinker / ultrathinker / implementer / reviewer / deep-reviewer / simple / balanced). Leave empty to pin a concrete model."));
     card.appendChild(bindHint);
     card.appendChild(field("Step timeout (min)", stepTimeoutInput, "Per-agent subprocess limit for this step."));
+    // Merge steps are excluded: their conflict resolver has to edit the
+    // conflicted files, so a read-only choice there would be rejected on save.
+    if (kind !== "merge") {
+      card.appendChild(field("Permissions", permsSel,
+        "Tool sandbox for this step. read-only is enforced by the agent CLI where it can be, and verified against the step's workspace afterwards."));
+    }
     card.appendChild(field("Prompt", promptTa));
     renderEffort();
     refreshBindHint();
@@ -5311,6 +5416,50 @@
     if (n < 1000000) return (n / 1000).toFixed(n < 10000 ? 1 : 0) + "k";
     return (n / 1000000).toFixed(n < 10000000 ? 1 : 0) + "M";
   }
+  // --- Tool permissions (sandbox profiles) --------------------------------
+  // Mirrors src/agents/permissions.ts: the profile a step runs under, and the
+  // verification outcome once it has finished.
+  var PERMISSION_GLYPH = { "read-only": "🔒", edit: "✎", full: "⚡" };
+
+  /** The profile info to show for a step: the recorded one wins over the declared one. */
+  function stepPermissions(s) {
+    if (s.result && s.result.permissions) {
+      return {
+        profile: s.result.permissions.profile,
+        enforcement: s.result.permissions.enforcement,
+        gaps: s.result.permissions.gaps,
+        violations: s.result.permissions.violations,
+        verified: s.result.permissions.verified
+      };
+    }
+    if (s.permissions) return { profile: s.permissions.profile, verify: s.permissions.verify };
+    return null;
+  }
+
+  function permissionLabel(perms) {
+    return (PERMISSION_GLYPH[perms.profile] || "") + " " + perms.profile;
+  }
+
+  /** Header badge; red when a read-only step actually changed its workspace. */
+  function permissionBadge(perms) {
+    var violated = perms.violations && perms.violations.length > 0;
+    var variant = violated
+      ? "violated"
+      : perms.profile === "read-only" ? "locked" : perms.profile === "edit" ? "edit" : "full";
+    var title = violated
+      ? "permission violation: this read-only step modified " + perms.violations.length + " path(s)"
+      : perms.profile === "read-only"
+        ? "read-only: no writes, no shell, no network" + (perms.verified ? " (verified against its workspace)" : "")
+        : perms.profile === "edit"
+          ? "edit: may write files in its own workspace, no network"
+          : "full: every tool the agent CLI offers is pre-approved";
+    return h("span", {
+      class: "badge perms " + variant,
+      title: title,
+      text: permissionLabel(perms) + (violated ? " · violated" : "")
+    });
+  }
+
   function fmtTokenSummary(t) {
     var total = totalTokens(t);
     if (total === 0 || !t) return "";

@@ -28,7 +28,8 @@ const KEY_HINTS: readonly KeyHint[] = [
   { keys: "Ctrl+A", action: "open the agent manager (also /agents; /apis for APIs)" },
   {
     keys: "p",
-    action: "pause/resume the live run · e edits a pending step (prompt/model/effort) while paused",
+    action:
+      "pause/resume the live run · e edits a pending step (prompt/model/effort/sandbox) while paused",
   },
   { keys: "a / r", action: "approve / reject a pending human checkpoint" },
   { keys: "a", action: "answer a pending human-input request (human step / agent question)" },

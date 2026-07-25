@@ -19,6 +19,7 @@ import {
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
 import { classifyAgentFailure } from "./failure-classify";
+import { permissionArgs } from "./permissions";
 import { humanizeAssistantError, stringifyContent } from "./util";
 
 const AGENT: AgentId = "claude";
@@ -237,6 +238,26 @@ function claudeTokens(usage: ClaudeUsage | undefined): TokenUsage | undefined {
   return Object.keys(tokens).length > 0 ? tokens : undefined;
 }
 
+/**
+ * Args for one `claude` run. Permission flags land *before* `extraArgs` so a
+ * hand-written flag can still override the profile's translation.
+ */
+export function buildClaudeRunArgs(opts: AgentRunOptions): string[] {
+  return [
+    "--print",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--model",
+    opts.model,
+    ...(opts.effort ? ["--effort", opts.effort] : []),
+    ...(opts.resumeSessionId ? ["--resume", opts.resumeSessionId] : []),
+    ...permissionArgs(AGENT, opts.permissions),
+    ...(opts.extraArgs ?? []),
+  ];
+}
+
 /** Runs the real `claude` CLI in streaming JSON mode. */
 export class ClaudeCodeAdapter implements AgentAdapter {
   readonly id: AgentId = AGENT;
@@ -250,22 +271,10 @@ export class ClaudeCodeAdapter implements AgentAdapter {
   }
 
   run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
-    const args = [
-      "--print",
-      "--output-format",
-      "stream-json",
-      "--verbose",
-      "--include-partial-messages",
-      "--model",
-      opts.model,
-      ...(opts.effort ? ["--effort", opts.effort] : []),
-      ...(opts.resumeSessionId ? ["--resume", opts.resumeSessionId] : []),
-      ...(opts.extraArgs ?? []),
-    ];
     return runAgentProcess({
       id: this.id,
       binary: this.binary,
-      args,
+      args: buildClaudeRunArgs(opts),
       opts,
       map: createClaudeMapper(opts.agentId ?? this.id),
       prompt: opts.prompt,

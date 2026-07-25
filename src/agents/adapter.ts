@@ -1,4 +1,5 @@
 import type { AgentEvent, AgentId, AgentInstanceId, EventMapper } from "../types/events";
+import type { ResolvedPermissions } from "./permissions";
 import { type ProcessRunOptions, runProcessLines } from "./spawn";
 import { firstLine } from "./util";
 
@@ -14,6 +15,14 @@ export interface AgentRunOptions {
   env?: Record<string, string>;
   /** Extra CLI flags appended to the agent's own args, before the prompt. */
   extraArgs?: string[];
+  /**
+   * Per-step tool permissions (see `permissions.ts`). Each adapter splices the
+   * provider's translated flags in *before* {@link AgentRunOptions.extraArgs},
+   * so an author's hand-written flag still has the last word. Absent ⇒ no
+   * permission flags at all (the historical behavior), which is deliberately
+   * distinct from an explicit `"full"` profile.
+   */
+  permissions?: ResolvedPermissions;
   /** Configured instance id to stamp on normalized events. Defaults to provider id. */
   agentId?: AgentInstanceId;
   /**

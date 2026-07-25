@@ -66,6 +66,8 @@ const chainSpec: WorkflowSpec = {
 
 interface HostState {
   prompts: string[];
+  /** Sandbox profile each dispatch actually ran under (undefined ⇒ unrestricted). */
+  permissions: (string | undefined)[];
   /** Step "a" blocks until this resolves, so the test can steer deterministically. */
   releaseA: () => void;
 }
@@ -76,7 +78,7 @@ function makeEngineHost(): { host: WorkflowHost; state: HostState } {
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const state: HostState = { prompts: [], releaseA: () => release() };
+  const state: HostState = { prompts: [], permissions: [], releaseA: () => release() };
   const createAdapter = (id: AgentId): AgentAdapter => ({
     id,
     binary: "fake",
@@ -84,6 +86,7 @@ function makeEngineHost(): { host: WorkflowHost; state: HostState } {
     run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
       return (async function* () {
         state.prompts.push(opts.prompt);
+        state.permissions.push(opts.permissions?.profile);
         if (opts.model === "ma") await gate;
         yield { kind: "session_start", agent: "claude", ts: 0 } as AgentEvent;
         yield {
@@ -221,6 +224,20 @@ describe("web mid-run steering endpoints", () => {
     });
     expect(edited).toMatchObject({ status: 200, body: { applied: true } });
 
+    // The sandbox profile can be clamped the same way, and an unknown profile
+    // is refused with the valid list rather than silently ignored.
+    const clamped = await post(base, `/api/runs/${runId}/edit-step`, {
+      stepId: "b",
+      permissions: "read-only",
+    });
+    expect(clamped).toMatchObject({ status: 200, body: { applied: true } });
+    const badProfile = await post(base, `/api/runs/${runId}/edit-step`, {
+      stepId: "b",
+      permissions: "readonly",
+    });
+    expect(badProfile.status).toBe(400);
+    expect(String(badProfile.body.error)).toMatch(/unknown permission profile/);
+
     // A started step is rejected with the engine's reason.
     const rejected = await post(base, `/api/runs/${runId}/edit-step`, {
       stepId: "a",
@@ -246,8 +263,10 @@ describe("web mid-run steering endpoints", () => {
     expect(eventKinds).toContain("run_resumed");
     expect(frames.find((f) => f.type === "status")).toMatchObject({ status: "done", ok: true });
 
-    // The edited prompt is what step "b" actually ran with.
+    // The edited prompt is what step "b" actually ran with — and it ran under
+    // the clamped sandbox, while step "a" (never edited) stayed unrestricted.
     expect(state.prompts).toEqual(["hi", "EDITED:out:hi"]);
+    expect(state.permissions).toEqual([undefined, "read-only"]);
   });
 
   it("validates the edit body and 404s unknown runs", async () => {

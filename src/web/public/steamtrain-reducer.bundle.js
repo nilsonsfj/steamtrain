@@ -54,6 +54,29 @@ var SteamtrainReducer = (() => {
     workflowStateFromSpec: () => workflowStateFromSpec
   });
 
+  // src/agents/permissions.ts
+  var PERMISSION_PROFILES = ["read-only", "edit", "full"];
+  function isPermissionProfile(value) {
+    return typeof value === "string" && PERMISSION_PROFILES.includes(value);
+  }
+  function resolvePermissions(spec) {
+    if (spec === void 0) return void 0;
+    const declared = typeof spec === "string" ? { profile: spec } : spec;
+    return {
+      profile: declared.profile,
+      allow: declared.allow ? [...declared.allow] : [],
+      deny: declared.deny ? [...declared.deny] : [],
+      onUnsupported: declared.onUnsupported ?? "fail",
+      verify: declared.verify ?? declared.profile === "read-only"
+    };
+  }
+  function effectivePermissions(layers) {
+    for (const layer of layers) {
+      if (layer !== void 0) return resolvePermissions(layer);
+    }
+    return void 0;
+  }
+
   // src/workflow/llm.ts
   function resolveLlmProvider(step) {
     if (step.provider) return step.provider;
@@ -63,7 +86,50 @@ var SteamtrainReducer = (() => {
     return step.api ?? resolveLlmProvider(step);
   }
 
+  // src/workflow/step-kind.ts
+  var MAX_WORKFLOW_NESTING_DEPTH = 5;
+  function workflowStepKind(step) {
+    return step.kind ?? "worker";
+  }
+  function isAgentBackedStep(step) {
+    const kind = workflowStepKind(step);
+    if (kind === "gate" || kind === "approval" || kind === "human" || kind === "command" || kind === "llm" || kind === "workflow") {
+      return false;
+    }
+    if (kind === "merge") {
+      const merge = step;
+      return merge.onConflict === "agent" || typeof merge.agent === "string" || typeof merge.model === "string" || typeof merge.modelClass === "string";
+    }
+    if (kind === "distributor" || kind === "consolidator") {
+      const block = step;
+      return typeof block.agent === "string" || typeof block.model === "string" || typeof block.modelClass === "string";
+    }
+    const worker = step;
+    return typeof worker.agent === "string" || typeof worker.model === "string" || typeof worker.modelClass === "string";
+  }
+
   // src/workflow/reducer.ts
+  function editedPermissions(patched, current) {
+    if (patched === void 0) return current;
+    const resolved = isPermissionProfile(patched) ? resolvePermissions(patched) : void 0;
+    if (!resolved) return void 0;
+    return {
+      profile: resolved.profile,
+      ...resolved.verify ? { verify: true } : {}
+    };
+  }
+  function specStepPermissions(step, spec) {
+    if (!isAgentBackedStep(step)) return void 0;
+    const declared = step.permissions;
+    const perms = effectivePermissions([declared, spec.permissions]);
+    if (!perms) return void 0;
+    return {
+      profile: perms.profile,
+      ...perms.allow.length > 0 ? { allow: perms.allow.length } : {},
+      ...perms.deny.length > 0 ? { deny: perms.deny.length } : {},
+      ...perms.verify ? { verify: true } : {}
+    };
+  }
   var initialWorkflowState = {
     phases: [],
     results: [],
@@ -100,6 +166,7 @@ var SteamtrainReducer = (() => {
           model: "model" in st ? st.model : void 0,
           effort: "effort" in st ? st.effort : void 0,
           cwd: "cwd" in st ? st.cwd : void 0,
+          permissions: specStepPermissions(st, spec),
           workflow: st.kind === "workflow" ? st.workflow : void 0,
           dependsOn: st.dependsOn,
           status: "pending",
@@ -243,6 +310,7 @@ var SteamtrainReducer = (() => {
               model: e.model,
               effort: e.effort,
               cwd: e.cwd,
+              permissions: e.permissions,
               dependsOn: e.dependsOn,
               parentStepId: e.parentStepId,
               item: e.item,
@@ -351,7 +419,8 @@ var SteamtrainReducer = (() => {
                 ...s,
                 edited: true,
                 model: e.patch.model ?? s.model,
-                effort: e.patch.effort !== void 0 ? e.patch.effort || void 0 : s.effort
+                effort: e.patch.effort !== void 0 ? e.patch.effort || void 0 : s.effort,
+                permissions: editedPermissions(e.patch.permissions, s.permissions)
               } : s
             )
           }))
@@ -879,28 +948,6 @@ var SteamtrainReducer = (() => {
     return `#run-${runId.toLowerCase()}/step/${stepId}`;
   }
 
-  // src/workflow/step-kind.ts
-  var MAX_WORKFLOW_NESTING_DEPTH = 5;
-  function workflowStepKind(step) {
-    return step.kind ?? "worker";
-  }
-  function isAgentBackedStep(step) {
-    const kind = workflowStepKind(step);
-    if (kind === "gate" || kind === "approval" || kind === "human" || kind === "command" || kind === "llm" || kind === "workflow") {
-      return false;
-    }
-    if (kind === "merge") {
-      const merge = step;
-      return merge.onConflict === "agent" || typeof merge.agent === "string" || typeof merge.model === "string" || typeof merge.modelClass === "string";
-    }
-    if (kind === "distributor" || kind === "consolidator") {
-      const block = step;
-      return typeof block.agent === "string" || typeof block.model === "string" || typeof block.modelClass === "string";
-    }
-    const worker = step;
-    return typeof worker.agent === "string" || typeof worker.model === "string" || typeof worker.modelClass === "string";
-  }
-
   // src/workflow/overrides.ts
   var AGENT_FIELD_KEYS = /* @__PURE__ */ new Set([
     "agent",
@@ -912,6 +959,7 @@ var SteamtrainReducer = (() => {
     "cwd",
     "env",
     "extraArgs",
+    "permissions",
     "effort",
     "stepTimeoutSec",
     "stepTimeoutMs"

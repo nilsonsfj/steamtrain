@@ -13,6 +13,7 @@ Deep dives:
 
 - [`agent-configuration.md`](agent-configuration.md) — agent instances: scopes, slash commands, and the TUI agent manager
 - [`api-configuration.md`](api-configuration.md) — API instances for direct-inference `llm` steps: scopes, readiness checks, and the managers in every UI
+- [`permissions.md`](permissions.md) — per-step tool permissions and sandbox profiles: `read-only` / `edit` / `full`, the per-agent enforcement matrix, and post-run workspace verification
 - [`worktree-merge-back.md`](worktree-merge-back.md) — landing agent worktree changes: the `merge` step, PR mode, and history diff/apply/prune
 - [`worktree-lifecycle.md`](worktree-lifecycle.md) — closing the worktree lifecycle: merge-step `cleanup`, repo-wide `workflow worktrees` GC, conflict recovery, and harvest actions in both UIs
 - [`cost-and-budgets.md`](cost-and-budgets.md) — cost budgets, token accounting, and cost analytics

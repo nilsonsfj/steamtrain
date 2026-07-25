@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { PermissionsSpec } from "../agents/permissions";
 import type {
   AgentInstanceId,
   AgentProviderId,
@@ -63,6 +64,16 @@ export interface SteamtrainConfig {
    * budget. See `docs/model-binding.md`.
    */
   modelFailover?: ModelFailoverPolicy;
+  /**
+   * Project/user-wide default tool permissions for every agent-backed workflow
+   * step (`"read-only"` | `"edit"` | `"full"`, or the object form). It is the
+   * LAST layer: a step's own `permissions` wins, then the workflow's. Setting
+   * `"read-only"` here is the strongest statement a repository can make — every
+   * agent step in every workflow becomes read-only until it says otherwise, so
+   * a workflow that was never audited cannot quietly rewrite the checkout. See
+   * `docs/permissions.md`.
+   */
+  permissions?: PermissionsSpec;
 }
 
 /** Per-class override for {@link SteamtrainConfig.modelClasses}. */
@@ -303,6 +314,20 @@ export const configFileSchema = z
         failoverDelayMs: z.number().int().min(0).max(60000).optional(),
       })
       .strict()
+      .optional(),
+    permissions: z
+      .union([
+        z.enum(["read-only", "edit", "full"]),
+        z
+          .object({
+            profile: z.enum(["read-only", "edit", "full"]),
+            allow: z.array(z.string().min(1)).min(1).optional(),
+            deny: z.array(z.string().min(1)).min(1).optional(),
+            onUnsupported: z.enum(["fail", "warn"]).optional(),
+            verify: z.boolean().optional(),
+          })
+          .strict(),
+      ])
       .optional(),
   })
   .strict();

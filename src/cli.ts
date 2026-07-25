@@ -50,6 +50,7 @@ import {
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   finalRunWorktrees,
+  formatPermissionSummary,
   formatReroutePlan,
   formatRunTotals,
   formatTokenSummary,
@@ -61,6 +62,8 @@ import {
   listRepoWorktrees,
   mergeConflictGuidance,
   modelBreakdownForRecord,
+  permissionSummaryDeclared,
+  permissionSummaryGlyph,
   planHistoryContext,
   planWorkflow,
   pruneRunWorktrees,
@@ -72,6 +75,8 @@ import {
   workflowAgentIds,
   workflowAutonomy,
   workflowCacheKey,
+  workflowPermissionPreflight,
+  workflowPermissionSummary,
   workflowStepKind,
   worktreeDiff,
 } from "./workflow";
@@ -378,7 +383,16 @@ function printWorkflowList(
   out(`workflows (${source})\n`);
   for (const { name, spec, source: workflowSource } of workflows) {
     const autonomy = workflowAutonomy(spec, (child) => byName.get(child));
-    out(`- ${name} [${workflowSource}]  ${autonomyBadge(autonomy)} · ${workflowSummary(spec)}\n`);
+    // Only workflows that actually declare a profile earn the sandbox note —
+    // "1 unrestricted" on every line would be noise, and a lock glyph over an
+    // unrestricted pipeline would be worse than noise.
+    const summary = workflowPermissionSummary(spec);
+    const sandbox = permissionSummaryDeclared(summary)
+      ? formatPermissionSummary(summary)
+      : undefined;
+    out(
+      `- ${name} [${workflowSource}]  ${autonomyBadge(autonomy)} · ${workflowSummary(spec)}${sandbox ? ` · ${permissionSummaryGlyph(summary)} ${sandbox}` : ""}\n`,
+    );
     if (spec.description) out(`  ${spec.description}\n`);
   }
 }
@@ -587,7 +601,8 @@ async function planCommand(
     return 1;
   }
 
-  const plan = planWorkflow(spec, input.trim(), resolved.values);
+  const planConfig = orchestrator.getConfig();
+  const plan = planWorkflow(spec, input.trim(), resolved.values, planConfig);
 
   // Recorded runs give the plan real numbers ("this cost $0.30 last time")
   // instead of a guess; a missing/empty history simply omits the line.
@@ -629,6 +644,13 @@ async function planCommand(
   const catalog = orchestrator.listWorkflows();
   const autonomy = workflowAutonomy(spec, (child) => catalog[child]);
   out(`  autonomy: ${autonomyBadge(autonomy)} — ${autonomyDescription(autonomy)}\n`);
+  const sandbox = plan.permissions ? formatPermissionSummary(plan.permissions) : undefined;
+  if (sandbox) out(`  sandbox: ${sandbox}\n`);
+  // A dry run must be loud about what will STOP the real run, not just count it
+  // in the summary line.
+  const permissionPreflight = workflowPermissionPreflight(spec, planConfig);
+  for (const blocker of permissionPreflight.errors) out(`  blocked: ${blocker}\n`);
+  for (const warning of permissionPreflight.warnings) out(`  warn: ${warning}\n`);
   if (plan.agents.length > 0) out(`  agents: ${plan.agents.join(", ")}\n`);
   if (plan.apis.length > 0) out(`  apis: ${plan.apis.join(", ")}\n`);
   if (plan.maxCostUsd !== undefined) out(`  budget: $${plan.maxCostUsd.toFixed(2)}\n`);
@@ -682,6 +704,11 @@ async function planCommand(
     if (step.workspaceSource)
       tags.push(`${step.workspaceMode ?? "inherit"}: ${step.workspaceSource}`);
     if (step.artifacts) tags.push(`artifacts: ${step.artifacts.join(", ")}`);
+    if (step.permissions) {
+      tags.push(
+        `permissions: ${step.permissions.profile}${step.permissions.enforcement === "native" ? "" : ` (${step.permissions.enforcement})`}`,
+      );
+    }
 
     const tagStr = tags.length > 0 ? `  (${tags.join("; ")})` : "";
     out(`    ${step.stepId} [${step.kind}]${tagStr}\n`);
@@ -1528,7 +1555,7 @@ Usage:
   steamtrain workflow cancel <runId>
   steamtrain workflow pause <runId>
   steamtrain workflow resume <runId>
-  steamtrain workflow edit-step <runId> <stepId> [--prompt <text> | --prompt-file <path>] [--cmd <text>] [--model <id>] [--effort <level>]
+  steamtrain workflow edit-step <runId> <stepId> [--prompt <text> | --prompt-file <path>] [--cmd <text>] [--model <id>] [--effort <level>] [--permissions read-only|edit|full|none]
   steamtrain workflow approve <runId> [--step <stepId>] [--reject [--on-reject fail|stop]] [--note <text>]
   steamtrain workflow answer <runId> [--step <stepId>] [--value <text> | --file <path>]
   steamtrain workflow takeover <runId> <stepId>

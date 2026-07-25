@@ -2402,6 +2402,29 @@ body[data-mode="arrival"].arrival-failed .canvas {
   color: var(--error);
   border-color: #6f2424;
 }
+/* Sandbox profile badges — the step-level answer to "what can this touch?". */
+.badge.perms {
+  color: var(--muted);
+}
+.badge.perms.locked {
+  color: var(--gate);
+  border-color: #5e4a1d;
+}
+.badge.perms.edit {
+  color: var(--accent);
+}
+.badge.perms.full {
+  color: var(--muted);
+}
+.badge.perms.violated {
+  color: var(--error);
+  border-color: #6f2424;
+  font-weight: 700;
+}
+.wf .meta.perms-meta {
+  color: var(--gate);
+  opacity: 0.85;
+}
 .badge.staged {
   color: var(--gate);
   border-color: #5e4a1d;

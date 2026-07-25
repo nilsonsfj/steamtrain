@@ -1,8 +1,10 @@
 import { basename } from "node:path";
 import { Box, Text } from "ink";
 import { useEffect, useMemo } from "react";
+import { permissionsBadge } from "../agents/permissions";
 import { truncate } from "../agents/util";
 import {
+  type StepPermissionVerdict,
   type WorkflowSourceKind,
   type WorkflowSpec,
   formatElapsed,
@@ -22,6 +24,7 @@ import { AGENT_COLOR, WORKFLOW_SOURCE_COLOR } from "./theme";
 import {
   BLOCK_LABEL,
   type FlatSpecStep,
+  type PreviewRenderContext,
   formatLlmTarget,
   formatWorkflowAgentTarget,
   previewInputValues,
@@ -48,6 +51,8 @@ interface PreviewStepDetailsProps {
   dispatchOk: boolean;
   dispatchReason?: string;
   canResume?: boolean;
+  /** Per-step permission verdicts (profile + enforcement), keyed by step id. */
+  permissionVerdicts?: Record<string, StepPermissionVerdict>;
 }
 
 interface LiveStepDetailsProps {
@@ -97,10 +102,14 @@ function PreviewStepDetails({
   dispatchOk,
   dispatchReason,
   canResume = false,
+  permissionVerdicts,
   innerWidth,
 }: PreviewStepDetailsProps & { innerWidth: number }) {
   const lineBudget = Math.max(4, height - 6);
-  const renderCtx = useMemo(() => ({ input, inputs: previewInputValues(spec) }), [input, spec]);
+  const renderCtx = useMemo(
+    () => ({ input, inputs: previewInputValues(spec), permissions: permissionVerdicts }),
+    [input, spec, permissionVerdicts],
+  );
   const lines = entry
     ? previewLines(entry, renderCtx, dispatchOk, dispatchReason, canResume, innerWidth)
     : [{ text: "No step selected.", color: "gray" }];
@@ -234,7 +243,7 @@ function LiveStepDetails({
 
 function previewLines(
   entry: FlatSpecStep,
-  renderCtx: { input?: string; inputs?: Record<string, string | number | boolean> },
+  renderCtx: PreviewRenderContext,
   dispatchOk: boolean,
   dispatchReason: string | undefined,
   canResume: boolean,
@@ -334,6 +343,22 @@ function liveMetaLines(
       color: step.agent ? (AGENT_COLOR[step.agent] ?? "white") : "gray",
     },
   ];
+
+  // Permissions sit directly under `runner:` — the two facts that together
+  // answer "what is this step able to do to my repo right now?".
+  const permissions = step.result?.permissions ?? step.permissions;
+  if (permissions) {
+    const violations = step.result?.permissions?.violations;
+    const enforcement =
+      step.result?.permissions?.enforcement ??
+      (step.permissions?.verify ? "verified after the run" : undefined);
+    lines.push({
+      text: violations?.length
+        ? `permissions: ${permissionsBadge(permissions.profile)} · VIOLATED: ${violations.slice(0, 4).join(", ")}${violations.length > 4 ? `, +${violations.length - 4} more` : ""}`
+        : `permissions: ${permissionsBadge(permissions.profile)}${enforcement ? ` · ${enforcement}` : ""}`,
+      color: violations?.length ? "red" : "cyan",
+    });
+  }
 
   if (step.worktree) {
     lines.push({

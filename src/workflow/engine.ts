@@ -9,6 +9,17 @@ import {
   describeFailureKind,
 } from "../agents/failure-classify";
 import type { ResolvedModelCandidate } from "../agents/model-resolve";
+import {
+  PERMISSION_PROFILES,
+  type PermissionPlan,
+  type PermissionsSpec,
+  type ResolvedPermissions,
+  effectivePermissions,
+  isPermissionProfile,
+  permissionPlan,
+  permissionsLabel,
+  resolvePermissions,
+} from "../agents/permissions";
 import { llmStepApiId, resolveLlmStepApi } from "../apis/resolve";
 import type { SteamtrainConfig } from "../config/types";
 import type { AgentEvent, AgentInstanceId, AgentProviderId, TokenUsage } from "../types/events";
@@ -26,7 +37,7 @@ import { collectArtifacts } from "./artifacts";
 import { runShellCommand } from "./command";
 import type { StepEditPatch, WorkflowRunControl } from "./control";
 import { addTokens } from "./cost";
-import type { WorkflowEvent } from "./events";
+import type { StepPermissionsInfo, WorkflowEvent } from "./events";
 import type { StepRetryEvent } from "./events";
 import { mergeConflictGuidance } from "./gc";
 import { resolveSteamtrainCliInvocation } from "./github-checks";
@@ -75,6 +86,12 @@ import {
   shouldFailFastWithoutCandidate,
 } from "./model-failover";
 import { applyWorkflowStepOverrides } from "./overrides";
+import {
+  type WorkspaceFingerprint,
+  describeViolations,
+  fingerprintChanges,
+  fingerprintWorkspace,
+} from "./permission-guard";
 import { createChannel, runPool } from "./pool";
 import {
   type StepBindingResolution,
@@ -189,6 +206,13 @@ export interface WorkflowDeps {
    * {@link noProviderHumanInputResponse}) rather than hanging.
    */
   requestHumanInput?: HumanInputProvider;
+  /**
+   * Project/user config default tool permissions for agent steps — the lowest
+   * precedence layer under the workflow's own `permissions` and each step's.
+   * Also the channel a `workflow` call step uses to impose a default on the
+   * child run it starts.
+   */
+  permissionsDefault?: PermissionsSpec;
   /**
    * Mid-run steering handle (pause / edit pending steps / resume). Injected per
    * run by the driver; the engine binds validation hooks at run start, stops
@@ -509,6 +533,23 @@ function stepEditIssue(env: RunEnv, stepId: string, patch: StepEditPatch): strin
     }
     if (patch.model !== undefined && !patch.model.trim()) return "model must not be empty";
   }
+  if (patch.permissions !== undefined) {
+    if (!agentBacked) {
+      return `step '${stepId}' (${kind}) spawns no agent, so it has no permissions to edit`;
+    }
+    if (patch.permissions !== "" && !isPermissionProfile(patch.permissions)) {
+      return `unknown permission profile '${patch.permissions}' (expected ${PERMISSION_PROFILES.join(", ")}, or "" to clear)`;
+    }
+    if (patch.permissions === "read-only") {
+      if (kind === "merge") {
+        return `step '${stepId}' is a merge step — its conflict resolver has to edit files, so it cannot be made read-only`;
+      }
+      const artifacts = "artifacts" in target ? target.artifacts : undefined;
+      if (artifacts?.length) {
+        return `step '${stepId}' declares artifacts ${JSON.stringify(artifacts)} — a read-only step cannot produce them`;
+      }
+    }
+  }
   return undefined;
 }
 
@@ -581,6 +622,8 @@ function applyStepEdit(step: WorkflowStep, patch: StepEditPatch): WorkflowStep {
   if (patch.model !== undefined) edited.model = patch.model;
   // An empty-string effort clears the step's effort (back to the model default).
   if (patch.effort !== undefined) edited.effort = patch.effort || undefined;
+  // An empty-string profile clears it (back to the workflow/config default).
+  if (patch.permissions !== undefined) edited.permissions = patch.permissions || undefined;
   return edited;
 }
 
@@ -1122,6 +1165,13 @@ async function runSingleStep(
     agentBacked?.effort !== undefined
       ? renderPrompt(agentBacked.effort, displayRenderCtx)
       : undefined;
+  // Effective permissions for display: resolved through the SAME helper the
+  // execution path uses (`stepPermissions`), so the badge on `step_start` can
+  // never drift from the profile the adapter is actually handed.
+  const displayPermissions = agentBacked
+    ? resolveStepPermissions(agentBacked, spec.permissions, runPermissionsDefault(deps))
+    : undefined;
+  const permissionsInfo = permissionsInfoOf(displayPermissions);
   const llmDisplayModel =
     llm?.model !== undefined ? renderPrompt(llm.model, displayRenderCtx) : llm?.model;
   const llmForApi = llm ? { ...llm, model: llmDisplayModel } : undefined;
@@ -1141,6 +1191,7 @@ async function runSingleStep(
     stepId: step.id,
     blockKind: workflowStepKind(step),
     agent: agentBacked?.agent,
+    permissions: permissionsInfo,
     api: llmApiId,
     model: agentBacked ? agentDisplayModel : llmModel,
     effort: agentBacked ? agentDisplayEffort : llmDisplayEffort,
@@ -1206,6 +1257,7 @@ async function runSingleStep(
         stepId: child.stepId,
         blockKind: workflowStepKind(step),
         agent: agentBacked?.agent,
+        permissions: permissionsInfo,
         api: llm ? (child.api ?? llmApiId) : undefined,
         model: agentBacked?.model ?? (llm ? (child.model ?? llmModel) : undefined),
         effort: agentBacked?.effort ?? llm?.effort,
@@ -1311,6 +1363,8 @@ async function runSingleStep(
       retryDefault: spec.retry,
       modelFailoverWorkflow: spec.modelFailover,
       modelFailoverConfig: deps.agentConfig?.modelFailover,
+      permissionsWorkflow: spec.permissions,
+      permissionsConfig: runPermissionsDefault(deps),
       workflowFallbackModels: spec.fallbackModels,
       workflowInputs: spec.inputs,
       stepTimeoutDefault: spec.stepTimeoutSec,
@@ -1507,6 +1561,10 @@ interface ExecuteContext {
   modelFailoverWorkflow?: ModelFailoverPolicy;
   /** Project/user config mid-flight model failover (lowest priority layer). */
   modelFailoverConfig?: ModelFailoverPolicy;
+  /** Workflow-level default tool permissions (per-step `permissions` overrides). */
+  permissionsWorkflow?: PermissionsSpec;
+  /** Project/user config default tool permissions (lowest priority layer). */
+  permissionsConfig?: PermissionsSpec;
   /** Workflow-level fallback model queries appended to every agent step's chain. */
   workflowFallbackModels?: string[];
   /**
@@ -1717,6 +1775,13 @@ async function runAgentAttempt(
   stepCwd: string,
   resumeSessionId: string | undefined,
   failoverPolicy: ResolvedModelFailoverPolicy,
+  /**
+   * Explicit permissions for this invocation. Omitted ⇒ resolved from the step
+   * and the workflow/config defaults; `null` ⇒ this invocation runs with no
+   * declared permissions and inherits no default (see
+   * {@link planStepPermissions}).
+   */
+  permissionsOverride?: ResolvedPermissions | null,
 ): Promise<{
   result: StepResult;
   /** Continue the retry/failover loop for this failure. */
@@ -1725,6 +1790,36 @@ async function runAgentAttempt(
   classicRetryable: boolean;
 }> {
   const started = Date.now();
+  // Permissions are re-planned per attempt on purpose: mid-flight model
+  // failover can move the step onto a different agent between attempts, and the
+  // new agent's ability to honor the profile is not the old one's.
+  const permissions = planStepPermissions(step, ctx, permissionsOverride);
+  if (permissions.blockedReason) {
+    const message = permissions.blockedReason;
+    return {
+      result: {
+        stepId,
+        ok: false,
+        output: message,
+        item,
+        error: message,
+        durationMs: 0,
+        model: step.model,
+        permissions: permissions.plan
+          ? {
+              profile: permissions.plan.profile,
+              enforcement: "none",
+              gaps: permissions.plan.gaps,
+            }
+          : undefined,
+      },
+      // Nothing ran, and nothing about a retry or another model would change
+      // the answer — the profile is unenforceable on this agent, full stop.
+      retryable: false,
+      failureKind: "unknown",
+      classicRetryable: false,
+    };
+  }
   let finalText = "";
   let streamedText = "";
   let costUsd: number | undefined;
@@ -1739,7 +1834,14 @@ async function runAgentAttempt(
   let processTimedOut = false;
 
   try {
-    for await (const event of adapterRun(step, ctx, stepCwd, prompt, resumeSessionId)) {
+    for await (const event of adapterRun(
+      step,
+      ctx,
+      stepCwd,
+      prompt,
+      resumeSessionId,
+      permissions.perms,
+    )) {
       hooks.pushAgentEvent(stepId, event);
       if (event.kind === "text_delta") {
         if (!event.thinking) streamedText += event.text;
@@ -1822,6 +1924,13 @@ async function runAgentAttempt(
       costUsd,
       tokens,
       sessionId,
+      permissions: permissions.plan
+        ? {
+            profile: permissions.plan.profile,
+            enforcement: permissions.plan.enforcement,
+            gaps: permissions.plan.gaps.length > 0 ? permissions.plan.gaps : undefined,
+          }
+        : undefined,
       // Carry-over fix: record the RENDERED model that actually ran (`step`
       // here already carries block 5's templated-then-rendered value — see
       // `executeAgentStep`'s `step` reassignment and the merge conflict
@@ -1839,12 +1948,94 @@ async function runAgentAttempt(
   };
 }
 
+/** Compact {@link StepPermissionsInfo} for the event stream. */
+function permissionsInfoOf(
+  perms: ResolvedPermissions | undefined,
+): StepPermissionsInfo | undefined {
+  if (!perms) return undefined;
+  return {
+    profile: perms.profile,
+    ...(perms.allow.length > 0 ? { allow: perms.allow.length } : {}),
+    ...(perms.deny.length > 0 ? { deny: perms.deny.length } : {}),
+    ...(perms.verify ? { verify: true } : {}),
+  };
+}
+
+/**
+ * The permissions a step actually runs under: its own declaration, else the
+ * workflow's default, else the project/user config default. `undefined` means
+ * nothing was declared anywhere — the historical unrestricted behavior, which
+ * passes no permission flags and arms no verification.
+ *
+ * The layer *values* are passed in rather than read off one context, so the
+ * display path (`runSingleStep`, which has the spec + deps) and the execution
+ * path (`stepPermissions`, which has the ExecuteContext) share one resolution.
+ */
+function resolveStepPermissions(
+  step: WorkflowStep,
+  workflowDefault: PermissionsSpec | undefined,
+  configDefault: PermissionsSpec | undefined,
+): ResolvedPermissions | undefined {
+  return effectivePermissions([
+    (step as { permissions?: PermissionsSpec }).permissions,
+    workflowDefault,
+    configDefault,
+  ]);
+}
+
+/** The config-layer permissions default for a run (call step > project/user config). */
+function runPermissionsDefault(deps: WorkflowDeps): PermissionsSpec | undefined {
+  return deps.permissionsDefault ?? deps.agentConfig?.permissions;
+}
+
+/** {@link resolveStepPermissions} for a step executing under an ExecuteContext. */
+function stepPermissions(
+  step: AgentBackedWorkflowStep,
+  ctx: ExecuteContext,
+): ResolvedPermissions | undefined {
+  return resolveStepPermissions(step, ctx.permissionsWorkflow, ctx.permissionsConfig);
+}
+
+/**
+ * Translate a step's permissions for the agent it is about to run on, and
+ * decide whether it may run at all.
+ *
+ * A restricted profile an agent cannot enforce is the one case worth refusing:
+ * running it anyway would print a lock icon over a step with full write access,
+ * which is worse than no feature. `onUnsupported: "warn"` opts out — the step
+ * runs, the gap is recorded on its result, and (for `read-only`) the post-run
+ * workspace verification stays armed as the real guard.
+ */
+function planStepPermissions(
+  step: AgentBackedWorkflowStep,
+  ctx: ExecuteContext,
+  override?: ResolvedPermissions | null,
+): { perms?: ResolvedPermissions; plan?: PermissionPlan; blockedReason?: string } {
+  // `null` means "this invocation resolves its own permissions and inherits
+  // nothing" — used by the merge conflict resolver, which must be able to write
+  // and therefore must not pick up an ambient read-only default.
+  const perms = override === undefined ? stepPermissions(step, ctx) : (override ?? undefined);
+  if (!perms) return {};
+  const instance = step.agent ? resolveAgentInstance(ctx.deps.agentConfig, step.agent) : undefined;
+  if (!instance) return { perms };
+  const plan = permissionPlan(instance.provider, perms);
+  if (plan.enforcement === "none" && perms.onUnsupported === "fail") {
+    return {
+      perms,
+      plan,
+      blockedReason: `step '${step.id}' requires permissions '${permissionsLabel(perms)}' but agent '${step.agent}' (provider '${instance.provider}') cannot enforce it: ${plan.gaps.join("; ")}. Move the step to claude or codex, or set permissions.onUnsupported to "warn" to run it unenforced.`,
+    };
+  }
+  return { perms, plan };
+}
+
 function adapterRun(
   step: AgentBackedWorkflowStep,
   ctx: ExecuteContext,
   stepCwd: string,
   prompt: string,
   resumeSessionId?: string,
+  permissions?: ResolvedPermissions,
 ): AsyncIterable<AgentEvent> {
   if (!step.agent || !step.model) {
     throw new Error(
@@ -1868,6 +2059,7 @@ function adapterRun(
     cwd: stepCwd,
     env: { ...instance.env, ...step.env },
     extraArgs: [...(instance.extraArgs ?? []), ...(step.extraArgs ?? [])],
+    permissions,
     agentId: instance.id,
     timeoutMs: timeoutMsFromSec(timeoutSec),
     signal: ctx.signal,
@@ -2094,6 +2286,19 @@ async function executeAgentStep(
     };
   }
   pushWorkspaceEvent(hooks, ctx, stepId, workspace, stepCwd);
+  // Trust-but-verify: a `read-only` step's workspace is fingerprinted BEFORE
+  // the agent starts, so the check works even when the step began dirty —
+  // `workspace: "attach:<impl>"` reviewers inherit an implement step's edits as
+  // their baseline, and only what THIS step changed may fail it.
+  const declaredPermissions = stepPermissions(step, ctx);
+  const verifyWorkspace = declaredPermissions?.verify === true;
+  let baseline: WorkspaceFingerprint | undefined;
+  if (verifyWorkspace) {
+    baseline = await fingerprintWorkspace(workspace.cwd, {
+      linkedIgnoredPaths: workspace.linkedIgnoredPaths,
+      signal: ctx.signal,
+    });
+  }
   // Auto-retry is scoped to worker/processor steps (and their fan-out children).
   // Agent-backed distributors/consolidators run exactly once.
   const kind = workflowStepKind(step);
@@ -2258,6 +2463,15 @@ async function executeAgentStep(
     // Record the resumed lineage on the result so cache replays can verify the
     // source still carries this session (see the staleness check in runSingleStep).
     if (resume.sessionId !== undefined) result = { ...result, resumedSessionId: resume.sessionId };
+    if (verifyWorkspace && !ctx.signal?.aborted) {
+      result = await verifyReadOnlyWorkspace(result, {
+        stepId,
+        cwd: workspace.cwd,
+        linkedIgnoredPaths: workspace.linkedIgnoredPaths,
+        baseline,
+        signal: ctx.signal,
+      });
+    }
     result = await applyDeclaredArtifacts(step, ctx, stepId, workspace.cwd, result);
     const finalResult = attachWorktreeInfo(result, workspace, stepCwd);
     // After a retry, report true wall-clock for the whole step (all attempts
@@ -2268,6 +2482,62 @@ async function executeAgentStep(
   } finally {
     await workspace.dispose();
   }
+}
+
+/**
+ * Second line of defense for a `read-only` step: compare its workspace against
+ * the pre-run fingerprint and FAIL the step when anything changed, whatever the
+ * agent CLI claimed to enforce. Attaches the outcome to
+ * `result.permissions.violations` so the run record shows exactly which paths
+ * broke the promise.
+ *
+ * Deliberately fails an otherwise-successful step: a reviewer that edited the
+ * code under review has already invalidated its own review, and silently
+ * keeping its output (or the edits) is how a trust feature becomes theater. A
+ * step that ALREADY failed keeps its original error — the violation is appended
+ * to the record, not substituted for the real cause.
+ */
+async function verifyReadOnlyWorkspace(
+  result: StepResult,
+  params: {
+    stepId: string;
+    cwd: string;
+    linkedIgnoredPaths?: string[];
+    baseline?: WorkspaceFingerprint;
+    signal?: AbortSignal;
+  },
+): Promise<StepResult> {
+  const { stepId, cwd, baseline, signal } = params;
+  const after = await fingerprintWorkspace(cwd, {
+    linkedIgnoredPaths: params.linkedIgnoredPaths,
+    signal,
+  });
+  const verified = Boolean(baseline && after);
+  const violations = await fingerprintChanges(baseline, after, signal);
+  const record = {
+    // The fallback is a safety net, not a normal path: verification only runs
+    // for a resolved `read-only` profile, so `result.permissions` is already
+    // populated unless the step's agent instance failed to resolve at all. Say
+    // so in `gaps` — a bare `enforcement: "none"` in the record would read like
+    // a policy breach rather than a binding failure.
+    ...(result.permissions ?? {
+      profile: "read-only" as const,
+      enforcement: "none" as const,
+      gaps: ["the step's agent instance could not be resolved, so no profile was translated"],
+    }),
+    verified,
+    ...(violations.length > 0 ? { violations } : {}),
+  };
+  if (violations.length === 0) return { ...result, permissions: record };
+
+  const message = `permission violation: read-only step '${stepId}' modified its workspace (${violations.length} path(s): ${describeViolations(violations)})`;
+  return {
+    ...result,
+    ok: false,
+    error: result.ok ? message : `${result.error} · ${message}`,
+    output: result.ok ? message : result.output,
+    permissions: record,
+  };
 }
 
 /**
@@ -2613,6 +2883,10 @@ async function executeForEachStep(
   const maxCostUsd = step.maxCostUsd;
   const childAgent = isAgentBackedStep(step) ? step.agent : undefined;
   const childCwd = "cwd" in step ? step.cwd : undefined;
+  // Every child of a fan-out inherits the parent's permissions, so the badge is
+  // resolved once and stamped on each child's `step_start`.
+  const forEachChildPermissions = isAgentBackedStep(step) ? stepPermissions(step, ctx) : undefined;
+  const forEachPermissions = permissionsInfoOf(forEachChildPermissions);
   // Building block 5: `model` may be templated on `{{item}}`, so the effective
   // api/model for a child's `step_start` display is resolved PER CHILD, not
   // once for the whole fan-out. The actual execution (`executeAgentStep` /
@@ -2761,6 +3035,7 @@ async function executeForEachStep(
         stepId,
         blockKind: workflowStepKind(step),
         agent: childAgent,
+        permissions: forEachPermissions,
         api: step.kind === "llm" ? (cached?.api ?? display.api) : undefined,
         model: cached?.model ?? display.model,
         effort: step.effort,
@@ -3610,7 +3885,16 @@ async function executeWorkflowCallOnce(
     // in-flight step from the parent's point of view (a pause waits for it),
     // and forwarding the control would re-bind its edit validation to the
     // child spec mid-run.
-    { ...ctx.deps, control: undefined },
+    //
+    // Permissions DO cascade: the call step's own declaration, else whatever
+    // default this run is under, becomes the child run's lowest layer — so
+    // "nothing in this workflow writes" keeps meaning that three workflows
+    // deep, while a child that declares its own profiles still wins.
+    {
+      ...ctx.deps,
+      control: undefined,
+      permissionsDefault: step.permissions ?? ctx.permissionsWorkflow ?? ctx.permissionsConfig,
+    },
     ctx.signal,
   )) {
     switch (event.kind) {
@@ -3948,6 +4232,12 @@ async function executeMergeStep(
             stepTimeoutSec: step.stepTimeoutSec,
             prompt: "",
           };
+          // A resolver's whole job is editing conflicted files, so it uses the
+          // merge step's OWN declaration and never the ambient workflow/config
+          // default — inheriting a repo-wide `read-only` here would block every
+          // `onConflict: "agent"` merge with a contradiction the author never
+          // wrote. Undeclared stays undeclared (today's behavior).
+          const resolverPermissions = resolvePermissions(step.permissions) ?? null;
           const prompt = conflictResolutionPrompt(sourceStepId, files, render(step.prompt));
           const attempt = await runAgentAttempt(
             synthetic,
@@ -3959,6 +4249,7 @@ async function executeMergeStep(
             stagingRoot,
             undefined,
             resolveModelFailoverPolicy({ enabled: false }),
+            resolverPermissions,
           );
           conflictCostUsd += attempt.result.costUsd ?? 0;
           if (attempt.result.tokens) {

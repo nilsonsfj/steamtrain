@@ -5,15 +5,19 @@ import type { DispatchCheck } from "../orchestrator";
 import {
   type PlanResult,
   type ReroutePlan,
+  type StepPermissionVerdict,
   type WorkflowSourceKind,
   type WorkflowSpec,
   autonomyBadge,
   formatElapsed,
+  formatPermissionSummary,
   formatReroutePlan,
   formatUsd,
   isAgentBackedStep,
   lintTemplateRefs,
+  permissionSummaryGlyph,
   workflowAutonomy,
+  workflowPermissionSummary,
   workflowStepKind,
 } from "../workflow";
 import { AGENT_COLOR, AUTONOMY_COLOR, WORKFLOW_SOURCE_COLOR } from "./theme";
@@ -61,6 +65,10 @@ interface WorkflowPreviewProps {
    * CLI list/plan, and web cards). Omitted ⇒ own steps only.
    */
   resolveWorkflow?: (name: string) => WorkflowSpec | undefined;
+  /** Per-step permission verdicts (profile + enforcement), keyed by step id. */
+  permissionVerdicts?: Record<string, StepPermissionVerdict>;
+  /** Non-blocking permission notes for the whole workflow (unenforced/partial). */
+  permissionWarnings?: string[];
 }
 
 type PreviewRow =
@@ -86,6 +94,8 @@ export function WorkflowPreview({
   showStepDetail = true,
   showPlanResult = true,
   resolveWorkflow,
+  permissionVerdicts,
+  permissionWarnings,
 }: WorkflowPreviewProps) {
   const innerWidth = Math.max(20, width - 4);
   const flat = useMemo(() => flattenSpecSteps(spec), [spec]);
@@ -109,9 +119,19 @@ export function WorkflowPreview({
   const blocks = useMemo(() => blockSummary(spec), [spec]);
   const autonomy = useMemo(() => workflowAutonomy(spec, resolveWorkflow), [spec, resolveWorkflow]);
   const templateWarnings = useMemo(() => lintTemplateRefs(spec), [spec]);
+  // The run's blast radius in one line: how many agent steps are sandboxed, how
+  // many are not. Shown next to `ready to run`, because that is the moment the
+  // question actually matters.
+  const permissionSummary = useMemo(() => {
+    const summary = workflowPermissionSummary(spec);
+    const line = formatPermissionSummary(summary);
+    // A closed lock only when something is actually sandboxed; an all-
+    // unrestricted pipeline still reports its count, but honestly.
+    return line ? `${permissionSummaryGlyph(summary)} sandbox: ${line}` : undefined;
+  }, [spec]);
   const renderCtx = useMemo<PreviewRenderContext>(
-    () => ({ input, inputs: previewInputValues(spec) }),
-    [input, spec],
+    () => ({ input, inputs: previewInputValues(spec), permissions: permissionVerdicts }),
+    [input, spec, permissionVerdicts],
   );
   // Pre-wrap description into a fixed row budget so Ink never soft-wraps past
   // chromeLines (that overflow is what used to bleed into the step tree).
@@ -132,6 +152,8 @@ export function WorkflowPreview({
     1 + // ready / blocked
     (!dispatchCheck.ok && reroutePlan ? 1 : 0) +
     (templateWarnings.length > 0 ? 1 : 0) +
+    (permissionSummary ? 1 : 0) +
+    ((permissionWarnings?.length ?? 0) > 0 ? 1 : 0) +
     showPlan +
     1; // spacer after the meta block (marginBottom)
   // A sub-workflow step's detail panel unfolds the whole child pipeline, so it
@@ -196,6 +218,17 @@ export function WorkflowPreview({
         {!dispatchCheck.ok && reroutePlan ? (
           <Text color="cyan" wrap="truncate-end">
             ↷ /reroute — {formatReroutePlan(reroutePlan)}
+          </Text>
+        ) : null}
+        {permissionSummary ? (
+          <Text color="cyan" wrap="truncate-end">
+            {permissionSummary}
+          </Text>
+        ) : null}
+        {permissionWarnings && permissionWarnings.length > 0 ? (
+          <Text color="yellow" wrap="truncate-end">
+            ⚠ {permissionWarnings[0]}
+            {permissionWarnings.length > 1 ? ` (+${permissionWarnings.length - 1} more)` : ""}
           </Text>
         ) : null}
         {templateWarnings.length > 0 ? (

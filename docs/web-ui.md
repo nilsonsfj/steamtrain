@@ -99,7 +99,7 @@ browser ──POST /api/runs──▶ run manager ──▶ Orchestrator.runWork
 | `/api/runs/:id/stream` | GET | Server-Sent Events: each `WorkflowEvent` (plus non-terminal `queued` frames), then a terminal `status` frame; tails externally-owned runs from the live-run registry |
 | `/api/runs/:id/cancel` | POST | abort a running workflow (external runs: drops the registry's cancel marker) |
 | `/api/runs/:id/pause` / `/api/runs/:id/resume` | POST | mid-run steering: stop scheduling new steps / continue (external runs: via the registry's control files) |
-| `/api/runs/:id/edit-step` | POST | `{ stepId, prompt?/cmd?/model?/effort? }` — edit a not-yet-started step while paused; engine-validated ([mid-run-steering.md](mid-run-steering.md)) |
+| `/api/runs/:id/edit-step` | POST | `{ stepId, prompt?/cmd?/model?/effort?/permissions? }` — edit a not-yet-started step while paused (`permissions` clamps its sandbox profile; `""` clears it); engine-validated ([mid-run-steering.md](mid-run-steering.md), [permissions.md](permissions.md)) |
 | `/api/history` | GET | past-run summaries (newest first) |
 | `/api/history/:id` | GET | one past run's full record (phase → step tree) |
 | `/api/history` / `/api/history/:id` | DELETE | clear all runs, or delete one |

@@ -13,6 +13,7 @@ import {
 } from "../types/raw-opencode";
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
+import { permissionArgs } from "./permissions";
 import { stringifyContent } from "./util";
 
 const AGENT: AgentId = "opencode";
@@ -273,6 +274,10 @@ function opencodeTokens(tokens: OpenCodeTokens | undefined): TokenUsage | undefi
  * `--session <sessionId>` continues the named recorded session instead of
  * starting a fresh one.
  */
+/**
+ * Args for one `opencode run` (also used verbatim by the mimo adapter, whose
+ * CLI is an opencode fork — both providers map permissions identically).
+ */
 export function buildOpenCodeRunArgs(opts: AgentRunOptions): string[] {
   return [
     "run",
@@ -282,6 +287,9 @@ export function buildOpenCodeRunArgs(opts: AgentRunOptions): string[] {
     opts.model,
     ...(opts.effort ? ["--variant", opts.effort] : []),
     ...(opts.resumeSessionId ? ["--session", opts.resumeSessionId] : []),
+    // `--agent plan` is opencode's built-in read-only agent (write/edit/patch/
+    // bash disabled); see `permissions.ts` for the profile mapping.
+    ...permissionArgs(AGENT, opts.permissions),
     ...(opts.extraArgs ?? []),
   ];
 }
