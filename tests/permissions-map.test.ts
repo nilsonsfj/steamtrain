@@ -213,6 +213,23 @@ describe("all-or-nothing providers", () => {
   });
 });
 
+describe("unrecognized profiles fail closed", () => {
+  it("becomes unenforceable rather than crashing or running unrestricted", () => {
+    // A hand-built spec object bypasses the zod schema and `validateWorkflow`.
+    // The mapping has no branch for a typo'd profile, so it must degrade into
+    // the refusal path (which `onUnsupported: "fail"` blocks) — never into
+    // "no flags, run anyway".
+    const typo = { ...resolvePermissions("read-only")!, profile: "readonly" as never };
+    for (const provider of ["claude", "codex", "opencode"] as AgentProviderId[]) {
+      const plan = permissionPlan(provider, typo);
+      expect(plan.enforcement).toBe("none");
+      expect(plan.args).toEqual([]);
+      expect(plan.verify).toBe(false);
+      expect(plan.gaps[0]).toContain("unknown permission profile");
+    }
+  });
+});
+
 describe("provider capability matrix", () => {
   it("declares full as satisfiable everywhere", () => {
     for (const provider of [

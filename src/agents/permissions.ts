@@ -413,6 +413,23 @@ export function permissionPlan(
   provider: AgentProviderId,
   perms: ResolvedPermissions,
 ): PermissionPlan {
+  // Defense in depth for programmatic callers: the zod schema and
+  // `validateWorkflow` reject an unknown profile long before this, but a
+  // hand-built `PermissionsSpec` with a typo must not reach a provider mapping
+  // that has no branch for it. Fail CLOSED — an unrecognized profile becomes an
+  // unenforceable one, which `onUnsupported: "fail"` (the default) refuses
+  // before the step spawns, rather than silently running unrestricted.
+  if (!isPermissionProfile(perms.profile)) {
+    return {
+      profile: perms.profile,
+      args: [],
+      enforcement: "none",
+      gaps: [
+        `unknown permission profile ${JSON.stringify(perms.profile)} (expected ${PERMISSION_PROFILES.join(", ")})`,
+      ],
+      verify: false,
+    };
+  }
   switch (provider) {
     case "claude":
       return claudePlan(perms);

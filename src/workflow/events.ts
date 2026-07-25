@@ -1,6 +1,7 @@
 import type { PermissionProfile } from "../agents/permissions";
 import type { AgentEvent, AgentFailureKind, AgentInstanceId, ApiInstanceId } from "../types/events";
 import type { ApprovalRejectDisposition } from "./approval";
+import type { StepEditPatch } from "./control";
 import type { WorktreeDiff } from "./merge";
 import type {
   AgentWorktreeInfo,
@@ -355,17 +356,13 @@ export interface StepEditedEvent {
   kind: "step_edited";
   stepId: string;
   /**
-   * The accepted field changes — the same shape as `StepEditPatch` in
-   * control.ts, which is what the control actually pushes here (`permissions`
-   * is `""` when the edit cleared the step's profile).
+   * The accepted field changes. This IS `StepEditPatch` — the control pushes the
+   * cleaned patch straight into this event, so the two must never drift (a
+   * field added to the patch and forgotten here would be carried at runtime and
+   * invisible to every consumer and to the recorded interventions). The import
+   * is type-only in both directions, so the cycle with control.ts is erased.
    */
-  patch: {
-    prompt?: string;
-    cmd?: string;
-    model?: string;
-    effort?: string;
-    permissions?: string;
-  };
+  patch: StepEditPatch;
   /** Who made the edit (e.g. `"human:tui"`, `"human:web"`, `"human:cli"`). */
   by?: string;
   ts: number;

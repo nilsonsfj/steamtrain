@@ -408,6 +408,36 @@ describe("fingerprintWorkspace", () => {
   });
 });
 
+describe("concurrent steps keep their own profiles", () => {
+  it("resolves per step, not per run, when steps run in parallel", async () => {
+    // Every other test runs one step at a time; permissions are resolved per
+    // dispatch, and this is what proves it — three concurrent steps in one
+    // phase, each handed its own profile.
+    const spec: WorkflowSpec = {
+      name: "wf",
+      phases: [
+        {
+          id: "p",
+          title: "P",
+          steps: [
+            { id: "locked", agent: "claude", model: "opus", prompt: "a", permissions: "read-only" },
+            { id: "writes", agent: "claude", model: "opus", prompt: "b", permissions: "full" },
+            { id: "plain", agent: "claude", model: "opus", prompt: "c" },
+          ],
+        },
+      ],
+    };
+
+    const calls: AgentRunOptions[] = [];
+    await collect(spec, { createAdapter: fakeAdapter(calls), maxConcurrency: 3, cwd: "/base" });
+
+    const byPrompt = new Map(calls.map((c) => [c.prompt, c.permissions?.profile]));
+    expect(byPrompt.get("a")).toBe("read-only");
+    expect(byPrompt.get("b")).toBe("full");
+    expect(byPrompt.get("plain") ?? byPrompt.get("c")).toBeUndefined();
+  });
+});
+
 describe("sub-workflow cascade", () => {
   it("a workflow call step's profile becomes the child run's default", async () => {
     const child: WorkflowSpec = {
@@ -540,6 +570,39 @@ describe("mid-run steering: clamp a pending step's sandbox", () => {
     expect(calls[1]!.permissions?.profile).toBe("read-only");
     expect(doneResult(events, "b")?.permissions?.profile).toBe("read-only");
     expect(doneResult(events, "b")?.edited).toBe(true);
+  });
+
+  it("clamps UP as well as down (read-only → full)", async () => {
+    const control = createWorkflowRunControl();
+    const calls: AgentRunOptions[] = [];
+    const deps: WorkflowDeps = {
+      createAdapter: fakeAdapter(calls),
+      maxConcurrency: 1,
+      cwd: "/base",
+      control,
+    };
+    control.pause("human:test");
+
+    // 'b' is authored read-only; the human decides mid-run it needs to write.
+    const spec: WorkflowSpec = {
+      ...chain,
+      phases: chain.phases.map((phase) => ({
+        ...phase,
+        steps: phase.steps.map((step) =>
+          step.id === "b" ? { ...step, permissions: "read-only" as const } : step,
+        ),
+      })),
+    };
+
+    for await (const event of runWorkflow(spec, { input: "task" }, deps)) {
+      if (event.kind !== "run_paused") continue;
+      expect(control.editStep("b", { permissions: "full" }, "human:test")).toEqual({ ok: true });
+      control.resume("human:test");
+    }
+
+    expect(calls[1]!.permissions?.profile).toBe("full");
+    // Raising the profile also disarms the read-only workspace verification.
+    expect(calls[1]!.permissions?.verify).toBe(false);
   });
 
   it("rejects a profile that cannot mean anything, and an unknown one", async () => {

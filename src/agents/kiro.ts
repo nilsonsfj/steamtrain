@@ -58,7 +58,7 @@ export function buildKiroExecArgs(opts: AgentRunOptions): string[] {
     "--model",
     opts.model,
     ...(opts.effort ? ["--effort", opts.effort] : []),
-    ...permissionArgs("kiro", opts.permissions),
+    ...permissionArgs(AGENT, opts.permissions),
     ...(opts.extraArgs ?? []),
     "--",
     opts.prompt,
