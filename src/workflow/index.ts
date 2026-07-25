@@ -112,6 +112,7 @@ export {
   type PermissionPreflight,
   type PermissionSummary,
   type StepPermissionVerdict,
+  type VerdictEnforcement,
   formatPermissionSummary,
   permissionSummaryDeclared,
   permissionSummaryGlyph,

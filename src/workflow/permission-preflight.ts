@@ -1,5 +1,7 @@
 import { resolveAgentInstance } from "../agents/config";
 import {
+  PERMISSION_PROFILES,
+  type PermissionEnforcement,
   type PermissionProfile,
   type PermissionsSpec,
   type ResolvedPermissions,
@@ -57,12 +59,21 @@ export function stepEffectivePermissions(
  * the step's agent binding is not concrete yet (a `modelClass` step resolved at
  * run time) — the run-time gate still applies.
  */
+/**
+ * {@link PermissionEnforcement} plus the one state only a *pre-run* verdict can
+ * be in: the step's agent binding is not concrete yet (a `modelClass` or
+ * model-only step resolves its agent at run time), so how much of the profile
+ * gets enforced is not yet knowable. Named so a verdict can never be passed
+ * into a `PermissionEnforcement`-typed channel by accident.
+ */
+export type VerdictEnforcement = PermissionEnforcement | "unknown";
+
 export interface StepPermissionVerdict {
   stepId: string;
   permissions: ResolvedPermissions;
   provider?: string;
   agent?: string;
-  enforcement: "native" | "partial" | "none" | "unknown";
+  enforcement: VerdictEnforcement;
   gaps: string[];
   /** True when this step would be refused at dispatch time. */
   blocking: boolean;
@@ -164,27 +175,30 @@ export function workflowPermissionSummary(
   config?: SteamtrainConfig,
 ): PermissionSummary {
   const counts: Record<PermissionProfile, number> = { "read-only": 0, edit: 0, full: 0 };
-  let agentSteps = 0;
-  let unrestricted = 0;
   let blocking = 0;
   let unenforced = 0;
-  const verdicts = new Map(workflowPermissionVerdicts(spec, config).map((v) => [v.stepId, v]));
-  for (const phase of spec.phases) {
-    for (const step of phase.steps) {
-      if (!isAgentBackedStep(step)) continue;
-      agentSteps += 1;
-      const perms = stepEffectivePermissions(step, spec, config);
-      if (!perms) {
-        unrestricted += 1;
-        continue;
-      }
-      counts[perms.profile] += 1;
-      const verdict = verdicts.get(step.id);
-      if (verdict?.blocking) blocking += 1;
-      else if (verdict?.enforcement === "none") unenforced += 1;
-    }
+  // Resolve ONCE, through the verdicts: they already carry each step's
+  // effective profile, so re-resolving here would be a second copy of the
+  // layering rules that could silently drift from what the preview reports.
+  const verdicts = workflowPermissionVerdicts(spec, config);
+  for (const verdict of verdicts) {
+    counts[verdict.permissions.profile] += 1;
+    if (verdict.blocking) blocking += 1;
+    else if (verdict.enforcement === "none") unenforced += 1;
   }
-  return { counts, unrestricted, agentSteps, blocking, unenforced };
+  // Verdicts exist only for steps that HAVE a profile, so the agent-step total
+  // (and therefore the unrestricted remainder) still comes from the spec.
+  let agentSteps = 0;
+  for (const phase of spec.phases) {
+    for (const step of phase.steps) if (isAgentBackedStep(step)) agentSteps += 1;
+  }
+  return {
+    counts,
+    unrestricted: Math.max(0, agentSteps - verdicts.length),
+    agentSteps,
+    blocking,
+    unenforced,
+  };
 }
 
 /**
@@ -195,7 +209,7 @@ export function workflowPermissionSummary(
 export function formatPermissionSummary(summary: PermissionSummary): string | undefined {
   if (summary.agentSteps === 0) return undefined;
   const bits: string[] = [];
-  for (const profile of ["read-only", "edit", "full"] as const) {
+  for (const profile of PERMISSION_PROFILES) {
     if (summary.counts[profile] > 0) bits.push(`${summary.counts[profile]} ${profile}`);
   }
   if (summary.unrestricted > 0) bits.push(`${summary.unrestricted} unrestricted`);

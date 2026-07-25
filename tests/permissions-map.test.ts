@@ -73,6 +73,10 @@ describe("effectivePermissions (layering)", () => {
     expect(perms?.allow).toEqual(["Read"]);
   });
 
+  it("resolves to nothing when there is nothing to resolve", () => {
+    expect(effectivePermissions([])).toBeUndefined();
+  });
+
   it("falls through undefined layers", () => {
     expect(effectivePermissions([undefined, undefined, "read-only"])?.profile).toBe("read-only");
     expect(effectivePermissions([undefined, undefined, undefined])).toBeUndefined();

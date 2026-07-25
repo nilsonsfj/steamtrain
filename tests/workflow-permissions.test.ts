@@ -236,6 +236,40 @@ describe("read-only workspace verification", () => {
     expect(result?.permissions?.verified).toBe(true);
   });
 
+  it("catches a DELETED file, not just a written one", async () => {
+    const root = await tempDir();
+    const repo = join(root, "repo");
+    await initRepo(repo);
+
+    // Deletion is the most damaging mutation a "read-only" step could make, and
+    // it leaves no new path behind for a naive check to notice.
+    const deleter = (id: AgentId): AgentAdapter => ({
+      id,
+      binary: "fake",
+      defaultModel: "test",
+      run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
+        return (async function* () {
+          if (opts.cwd) await rm(join(opts.cwd, "README.md"), { force: true });
+          yield { kind: "result", agent: id, ts: 0, isError: false, text: "ok" } as AgentEvent;
+        })();
+      },
+    });
+
+    const events = await collect(reviewSpec("read-only", "claude"), {
+      createAdapter: deleter,
+      maxConcurrency: 1,
+      cwd: repo,
+      agentWorkspace: createGitWorktreeManager({
+        baseDir: join(root, "worktrees"),
+        runId: "run-perm-del",
+      }),
+    });
+
+    const result = doneResult(events, "review");
+    expect(result?.ok).toBe(false);
+    expect(result?.permissions?.violations).toEqual(["D README.md"]);
+  });
+
   it("passes a read-only step that touched nothing", async () => {
     const root = await tempDir();
     const repo = join(root, "repo");
