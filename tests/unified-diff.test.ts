@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  capPatch,
   diffFileDisplayPath,
   diffFileLineCounts,
   parseUnifiedDiff,
@@ -247,5 +248,31 @@ describe("parseUnifiedDiff", () => {
     ].join("\n");
     const file = parseUnifiedDiff(patch)[0]!;
     expect(file.hunks[0]!.lines).toHaveLength(2);
+  });
+});
+
+describe("capPatch", () => {
+  it("passes patches under the cap through unchanged", () => {
+    expect(capPatch("small patch")).toEqual({ patch: "small patch", truncated: false });
+  });
+
+  it("cuts patches over the cap and flags them", () => {
+    const result = capPatch("x".repeat(300), 100);
+    expect(result.patch).toBe("x".repeat(100));
+    expect(result.truncated).toBe(true);
+  });
+
+  it("treats a patch exactly at the cap as untruncated", () => {
+    expect(capPatch("x".repeat(100), 100).truncated).toBe(false);
+  });
+
+  it("does not split a surrogate pair (emoji) at the cut boundary", () => {
+    // 'a' followed by emoji (each a UTF-16 surrogate pair); cap=2 lands between
+    // the first emoji's high and low surrogate.
+    const result = capPatch(`a${"😀".repeat(10)}`, 2);
+    expect(result.truncated).toBe(true);
+    expect(result.patch).toBe("a"); // backed off the lone high surrogate
+    // A lone surrogate would make encodeURIComponent throw URIError.
+    expect(() => encodeURIComponent(result.patch)).not.toThrow();
   });
 });

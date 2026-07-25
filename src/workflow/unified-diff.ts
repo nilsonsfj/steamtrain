@@ -159,7 +159,10 @@ export function parseUnifiedDiff(patch: string): ParsedDiffFile[] {
   }
 
   // A trailing empty string from split() can append a phantom context line to
-  // the last hunk when the patch ends with a newline.
+  // the last hunk when the patch ends with a newline. Only the final hunk of
+  // the final file is at risk: every earlier file is followed by a `diff --git`
+  // header, which resets `hunk` before the next line is read, so a stray blank
+  // there attaches to nothing.
   const last = files[files.length - 1]?.hunks.at(-1)?.lines.at(-1);
   if (last && last.kind === "context" && last.text === "" && patch.endsWith("\n")) {
     files[files.length - 1]?.hunks.at(-1)?.lines.pop();
@@ -183,6 +186,28 @@ export function diffFileLineCounts(file: ParsedDiffFile): { additions: number; d
 /** Best display path for a parsed file: new side, falling back to old. */
 export function diffFileDisplayPath(file: ParsedDiffFile): string {
   return file.newPath ?? file.oldPath ?? "(unknown)";
+}
+
+/** Default cap for {@link capPatch}: 200 KB of patch text. */
+export const DEFAULT_PATCH_CAP = 200_000;
+
+/**
+ * Cap a patch string at `cap` characters for transport/rendering, flagging
+ * truncation. A runaway diff would otherwise produce tens of thousands of rows
+ * and hitch the UIs; the CLI `history show --diff` always carries the full
+ * text. The cut backs off one character when it would split a UTF-16 surrogate
+ * pair (e.g. an emoji) so the result is never a malformed lone surrogate.
+ * Shared by the web server endpoint and the TUI so both cap identically.
+ */
+export function capPatch(
+  patch: string,
+  cap = DEFAULT_PATCH_CAP,
+): { patch: string; truncated: boolean } {
+  if (patch.length <= cap) return { patch, truncated: false };
+  let end = cap;
+  const code = patch.charCodeAt(end - 1);
+  if (code >= 0xd800 && code <= 0xdbff) end -= 1; // lone high surrogate: drop it
+  return { patch: patch.slice(0, end), truncated: true };
 }
 
 /** Split the two paths of a `diff --git` header, honoring C-style quoting. */

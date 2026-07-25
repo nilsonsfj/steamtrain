@@ -1,5 +1,7 @@
 import {
+  DEFAULT_PATCH_CAP,
   type ParsedDiffFile,
+  capPatch,
   diffFileDisplayPath,
   diffFileLineCounts,
 } from "../workflow/unified-diff";
@@ -76,9 +78,12 @@ export function buildDiffLines(files: ParsedDiffFile[]): DiffStyledLine[] {
 
 /**
  * Cap a raw patch before parsing/rendering — a runaway diff would otherwise
- * produce tens of thousands of terminal rows and hitch the TUI.
+ * produce tens of thousands of terminal rows and hitch the TUI. Thin wrapper
+ * over the shared {@link capPatch} so the TUI and web server cap identically.
  */
-export function truncatePatch(patch: string, cap = 200_000): { patch: string; truncated: boolean } {
-  if (patch.length <= cap) return { patch, truncated: false };
-  return { patch: patch.slice(0, cap), truncated: true };
+export function truncatePatch(
+  patch: string,
+  cap = DEFAULT_PATCH_CAP,
+): { patch: string; truncated: boolean } {
+  return capPatch(patch, cap);
 }

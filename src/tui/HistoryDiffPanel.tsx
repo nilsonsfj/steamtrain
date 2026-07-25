@@ -10,7 +10,6 @@ interface HistoryDiffPanelProps {
   steps: HistoryDiffStep[];
   /** First visible composed line. */
   scroll: number;
-  width: number;
   height: number;
   /**
    * Reports the composed-line total and visible budget after each render, so

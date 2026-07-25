@@ -1773,7 +1773,6 @@ export function App({
           loading={historyHook.history.diffView.loading}
           steps={historyHook.history.diffView.steps}
           scroll={historyHook.history.diffView.scroll}
-          width={columns}
           height={streamHeight}
           onMetrics={historyHook.reportDiffMetrics}
         />

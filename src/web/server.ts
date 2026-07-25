@@ -64,6 +64,7 @@ import {
   workflowStepKind,
   worktreeDiff,
 } from "../workflow";
+import { DEFAULT_PATCH_CAP, capPatch } from "../workflow/unified-diff";
 import type { WorkspaceConfig } from "../workspace";
 import { FAVICON_SVG, type PageAssetRevisions, renderIndex } from "./html";
 import { TooManyRuns, type WorkflowHost, WorkflowRunManager } from "./runs";
@@ -363,18 +364,10 @@ const MAX_BODY_BYTES = 1 * 1024 * 1024;
  * Maximum unified-patch size served per step by the history worktree diff
  * endpoint. Larger patches are truncated (with `patchTruncated: true`) so a
  * huge generated diff cannot stall the UI; the CLI `history show --diff`
- * always has the full text.
+ * always has the full text. The slicing itself lives in the shared
+ * {@link capPatch}; this is the endpoint's named policy (same default).
  */
-export const HISTORY_PATCH_CAP = 200_000;
-
-/** Cap a patch string for transport, flagging truncation. */
-export function capPatch(
-  patch: string,
-  cap = HISTORY_PATCH_CAP,
-): { patch: string; truncated: boolean } {
-  if (patch.length <= cap) return { patch, truncated: false };
-  return { patch: patch.slice(0, cap), truncated: true };
-}
+export const HISTORY_PATCH_CAP = DEFAULT_PATCH_CAP;
 
 /** Maximum workflow name length. */
 const MAX_WORKFLOW_NAME = 128;
@@ -1578,7 +1571,7 @@ async function handle(
         }
         try {
           const diff = await worktreeDiff(source, { patch: true });
-          const capped = capPatch(diff.patch ?? "");
+          const capped = capPatch(diff.patch ?? "", HISTORY_PATCH_CAP);
           sendJson(res, 200, {
             stepId: source.stepId,
             branch: source.branch,
