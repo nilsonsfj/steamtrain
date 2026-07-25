@@ -374,6 +374,84 @@ describe("fingerprintWorkspace", () => {
   });
 });
 
+describe("sub-workflow cascade", () => {
+  it("a workflow call step's profile becomes the child run's default", async () => {
+    const child: WorkflowSpec = {
+      name: "child",
+      phases: [
+        {
+          id: "c",
+          title: "C",
+          steps: [
+            { id: "inherits", agent: "claude", model: "opus", prompt: "look" },
+            {
+              id: "declares",
+              agent: "claude",
+              model: "opus",
+              prompt: "write",
+              permissions: "full",
+            },
+          ],
+        },
+      ],
+    };
+    const parent: WorkflowSpec = {
+      name: "parent",
+      phases: [
+        {
+          id: "p",
+          title: "P",
+          steps: [{ id: "call", kind: "workflow", workflow: "child", permissions: "read-only" }],
+        },
+      ],
+    };
+
+    const calls: AgentRunOptions[] = [];
+    await collect(parent, {
+      createAdapter: fakeAdapter(calls),
+      maxConcurrency: 1,
+      cwd: "/base",
+      resolveWorkflow: (name) => (name === "child" ? child : undefined),
+    });
+
+    // The child step that declares nothing inherits the call site's profile;
+    // the one that declares `full` keeps its own — the cascade is a default,
+    // never an override.
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.permissions?.profile).toBe("read-only");
+    expect(calls[1]!.permissions?.profile).toBe("full");
+  });
+
+  it("the parent's workflow-level default cascades when the call step declares none", async () => {
+    const child: WorkflowSpec = {
+      name: "child",
+      phases: [
+        {
+          id: "c",
+          title: "C",
+          steps: [{ id: "inherits", agent: "claude", model: "opus", prompt: "look" }],
+        },
+      ],
+    };
+    const parent: WorkflowSpec = {
+      name: "parent",
+      permissions: "read-only",
+      phases: [
+        { id: "p", title: "P", steps: [{ id: "call", kind: "workflow", workflow: "child" }] },
+      ],
+    };
+
+    const calls: AgentRunOptions[] = [];
+    await collect(parent, {
+      createAdapter: fakeAdapter(calls),
+      maxConcurrency: 1,
+      cwd: "/base",
+      resolveWorkflow: (name) => (name === "child" ? child : undefined),
+    });
+    expect(calls[0]!.permissions?.profile).toBe("read-only");
+  });
+});
+
 describe("mid-run steering: clamp a pending step's sandbox", () => {
   const chain: WorkflowSpec = {
     name: "chain",

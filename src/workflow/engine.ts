@@ -2517,8 +2517,14 @@ async function verifyReadOnlyWorkspace(
   const record = {
     // The fallback is a safety net, not a normal path: verification only runs
     // for a resolved `read-only` profile, so `result.permissions` is already
-    // populated unless the step's agent instance failed to resolve at all.
-    ...(result.permissions ?? { profile: "read-only" as const, enforcement: "none" as const }),
+    // populated unless the step's agent instance failed to resolve at all. Say
+    // so in `gaps` — a bare `enforcement: "none"` in the record would read like
+    // a policy breach rather than a binding failure.
+    ...(result.permissions ?? {
+      profile: "read-only" as const,
+      enforcement: "none" as const,
+      gaps: ["the step's agent instance could not be resolved, so no profile was translated"],
+    }),
     verified,
     ...(violations.length > 0 ? { violations } : {}),
   };

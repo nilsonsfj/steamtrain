@@ -354,7 +354,10 @@ function opencodePlan(perms: ResolvedPermissions): PermissionPlan {
       args: ["--agent", "plan"],
       enforcement: gaps.length > 0 ? "partial" : "native",
       gaps,
-      verify: perms.verify,
+      // Same guard as every other provider: verification is a read-only
+      // concept, and spelling it out keeps a future refactor of this branch
+      // from arming it for a profile that may write.
+      verify: perms.verify && perms.profile === "read-only",
     };
   }
   if (perms.profile === "edit") {

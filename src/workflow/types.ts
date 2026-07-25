@@ -1995,7 +1995,9 @@ function stepPermissionsError(step: WorkflowStep, declared: PermissionsSpec): st
     const why =
       kind === "command"
         ? "a command step runs the shell command you wrote, so there is no agent to restrict"
-        : `a ${kind} step spawns no agent`;
+        : kind === "llm"
+          ? "an llm step is a single stateless API call — no agent CLI, no worktree, no shell or filesystem access to restrict"
+          : `a ${kind} step spawns no agent`;
     return `step '${step.id}' declares permissions but ${why} (move the profile onto the agent-backed steps, or the workflow's own \`permissions\` default)`;
   }
   if (kind === "merge" && profile === "read-only") {

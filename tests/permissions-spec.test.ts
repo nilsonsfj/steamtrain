@@ -83,6 +83,30 @@ describe("permissions validation", () => {
     expect(result.error).toMatch(/command step runs the shell command you wrote/);
   });
 
+  it("rejects permissions on an llm step, which has no CLI to restrict", () => {
+    const bad: WorkflowSpec = {
+      name: "wf",
+      phases: [
+        {
+          id: "p",
+          title: "P",
+          steps: [
+            {
+              id: "judge",
+              kind: "llm",
+              model: "claude-sonnet-5",
+              prompt: "verdict?",
+              permissions: "read-only",
+            },
+          ] as never,
+        },
+      ],
+    };
+    const result = validateWorkflow(bad);
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/single stateless API call/);
+  });
+
   it("rejects read-only combined with artifacts", () => {
     const result = validateWorkflow(
       spec({}, { permissions: "read-only", artifacts: ["report.md"] }),
