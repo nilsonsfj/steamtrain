@@ -145,10 +145,14 @@ indication in run history whether a run's work was ever landed or discarded.
   declares delivery is enough) plus a safe, discoverable manual GC. A future
   opt-in config (`worktreeRetentionDays`) can build on `gcRepoWorktrees`
   unchanged.
-- **No full patch viewer in the TUI.** The TUI shows diffstat-level state and
-  actions; full patches remain `history show <id> --diff` (already paged,
-  greppable, pipeable). The web UI is the richer surface and can grow a patch
-  view on top of the same endpoint later.
+- **Full patch viewers shipped in both UIs.** The TUI history detail opens a
+  full-screen, scrollable code-review diff with `v` (every retained step
+  worktree against its base commit), and the web history detail expands each
+  worktree step into an inline graphical diff (lazily fetched per step, cached)
+  plus a collapsible diff on approval checkpoints. Both render the same
+  unified-patch data as `history show <id> --diff`, which remains the surface
+  for the full *uncapped* patch — the UIs cap very large diffs (200 KB per step,
+  20 KB for approval patches) and say so inline with the exact CLI command.
 - **Conflicts with the user's *local* edits stay fail-fast** in `apply` mode
   (pre-checked `git apply`). That state belongs to the user, not the
   workflow; auto-resolving it would modify uncommitted local work. `--mode

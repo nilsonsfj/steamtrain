@@ -147,6 +147,27 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
         if (historyHook.history) {
           const hist = historyHook.history;
 
+          // The run-diff overlay is stacked on top of the detail view: it owns
+          // ALL keys until closed, so `a`/`x`/etc. can't fire underneath.
+          if (hist.diffView) {
+            if (key.escape || key.leftArrow || input === "v") {
+              historyHook.closeDiffView();
+            } else if (key.upArrow) {
+              historyHook.scrollDiffBy(-1);
+            } else if (key.downArrow) {
+              historyHook.scrollDiffBy(1);
+            } else if (key.pageUp) {
+              historyHook.scrollDiffBy("page-up");
+            } else if (key.pageDown) {
+              historyHook.scrollDiffBy("page-down");
+            } else if (input === "g") {
+              historyHook.scrollDiffTo("top");
+            } else if (input === "G") {
+              historyHook.scrollDiffTo("bottom");
+            }
+            return;
+          }
+
           // Filter mode: capture printable keys into the query.
           if (hist.view === "list" && hist.filtering) {
             if (key.escape || key.return) {
@@ -273,6 +294,11 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
           }
           if (!hist.detail && input === "x" && hist.record) {
             historyHook.harvestFromRecord(hist.record, "prune");
+            return;
+          }
+          // Full-screen run diff: per-step worktree patches, code-review style.
+          if (!hist.detail && input === "v" && hist.record) {
+            historyHook.openDiffView(hist.record);
             return;
           }
           const totalSteps = hist.recordState

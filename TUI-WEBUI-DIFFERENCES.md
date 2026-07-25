@@ -63,6 +63,15 @@ by a new shared `step_workspace` event and `startedAt`/`endedAt`/`worktree`
 fields on the shared reducer's `StepState`.
 Updated 2026-07-14 (worktree lifecycle): both UIs gained post-run worktree
 harvest (apply/prune from history) with diffstat.
+Updated 2026-07-25 (graphical diffs): both UIs render code-review-style inline
+unified diffs of a run's worktree changes off a shared parser
+(`src/workflow/unified-diff.ts`). Web: each worktree step in the history detail
+expands into a lazily fetched, cached, per-file-collapsible diff panel
+(`src/web/diff-view.ts`, bundled as `SteamtrainDiff`), and approval checkpoints
+gain a collapsible "View diff". TUI: history detail opens a full-screen,
+scrollable run diff with `v` (per-step patches, dual line-number gutters,
+status badges). The CLI `workflow history show <id> --diff` stays the uncapped
+surface; the UIs cap very large diffs and say so inline.
 Updated 2026-07-15: the web run input gained ↑/↓ prompt-history recall
 (localStorage-backed, recorded on Run/Plan) — closing the last documented
 feature gap in §4. The TUI gained `/help` (keys + command list overlay) and an
@@ -142,6 +151,7 @@ imports it through `src/tui/workflow-state.ts`; the web bundles it as
 | Manage API instances (llm steps) | ✅ | ✅ | Shared `src/apis` core; TUI `/api` + `/apis` manager; web config modal APIs section (same scope model as agents) |
 | Run history (inspect past runs) | ✅ | ✅ | Shared `RunRecordBuilder` + `WorkflowHistoryStore` (`.steamtrain/history`); TUI `/history`, web ⏱ History, CLI `workflow history` |
 | Post-run worktree harvest (apply/prune from history) | ✅ | ✅ | Shared `src/workflow/gc.ts` (`harvestRunWorktrees`/`pruneRunWorktrees`); TUI `a`/`x` in history detail, web "Worktree changes" section (diffstat + Apply/Branch/Prune + conflict-retry), CLI `workflow history apply/prune` + `workflow worktrees` GC |
+| Graphical full-patch diff panels (review a run's changes inline) | ✅ | ✅ | Shared `src/workflow/unified-diff.ts` parser; TUI full-screen scrollable run diff (`v` from history detail, dual gutters + status badges), web expandable per-step diff panels + collapsible approval diffs (`src/web/diff-view.ts` bundle); CLI `workflow history show <id> --diff [--step <id>]` for the uncapped patch |
 | Re-run / retry-failed a past run | ✅ | ✅ | Shared `planRerun`/`seedCacheFromRecord` (`src/workflow/rerun.ts`); TUI `r`/`f` in history detail, web Re-run/Retry buttons, CLI `workflow run --from <id> [--retry-failed]` |
 | Auto-retry transient failures | ✅ | ✅ | Shared engine (`src/workflow/retry.ts`); workflow/per-step `retry` policy, `step_retry` event surfaced as `↻ retry n/N` in both UIs, attempts recorded in history |
 | Prompt history | ✅ | ✅ | TUI: `prompt-history` (per-mode, ↑/↓); Web: run-input ↑/↓ recall backed by localStorage, recorded on Run/Plan |

@@ -3303,6 +3303,23 @@
       box.appendChild(h("div", { class: "approval-diff",
         text: a.diff.files.length + " file" + (a.diff.files.length === 1 ? "" : "s") +
           " \u00b7 +" + a.diff.additions + " -" + a.diff.deletions }));
+      // The approval payload carries the reviewed step's capped unified patch
+      // (see APPROVAL_DIFF_CAP); offer it as a collapsed graphical diff.
+      if (a.diff && a.diff.patch && typeof window.SteamtrainDiff !== "undefined") {
+        var diffBody = h("div", { class: "approval-diff-body", style: "display:none" });
+        if (a.diff.patch.indexOf("[truncated ") >= 0) {
+          diffBody.appendChild(h("div", { class: "hist-wt-diff-truncated",
+            text: "Diff truncated at 20 KB — the engine caps approval patches; the visible part is shown." }));
+        }
+        diffBody.appendChild(window.SteamtrainDiff.renderPatch(a.diff.patch));
+        var diffToggle = h("button", { class: "btn small approval-diff-toggle", text: "View diff", onClick: function () {
+          var showing = diffBody.style.display !== "none";
+          diffBody.style.display = showing ? "none" : "";
+          diffToggle.textContent = showing ? "View diff" : "Hide diff";
+        } });
+        box.appendChild(diffToggle);
+        box.appendChild(diffBody);
+      }
     }
     if (a.pending) {
       if (isReadOnly()) {
@@ -4756,6 +4773,15 @@
     view: "list" // "list" | "detail"
   };
 
+  // Graphical diff panels of the "Worktree changes" block: per-step patches
+  // fetched lazily (cached per run so re-expanding never refetches) and the
+  // expanded step rows per run (survives the section's re-renders).
+  var HistDiff = {
+    cache: new Map(), // runId -> Map(stepId -> worktree-detail body)
+    expanded: new Map(), // runId -> Set(stepId)
+    inflight: new Set() // "runId:stepId" currently being fetched
+  };
+
   /** Only a non-empty string is a deep-link run id - never a DOM Event.
    *  Mirrors normalizeHistoryRunId / helpers in history-browser.ts - this page
    *  script is not bundled, so the TS source of truth is copied, not imported. */
@@ -5219,6 +5245,108 @@
     });
   }
 
+  function histDiffExpanded(runId) {
+    var set = HistDiff.expanded.get(runId);
+    if (!set) { set = new Set(); HistDiff.expanded.set(runId, set); }
+    return set;
+  }
+
+  /**
+   * One expandable step row of the "Worktree changes" block: the summary line
+   * (branch, file count, +/- stats) and, when expanded, the lazily fetched
+   * graphical diff panel below it.
+   */
+  function renderWorktreeDiffRow(holder, record, s) {
+    var isOpen = histDiffExpanded(record.id).has(s.stepId);
+    var wrap = h("div", null);
+    var row = h("div", {
+      class: "hist-wt-line expandable" + (isOpen ? "" : " collapsed"),
+      title: s.branch,
+      role: "button",
+      tabindex: "0",
+      onClick: function () { toggleWorktreeDiff(holder, record, s.stepId); },
+      onKeydown: function (e) { activateWithKeyboard(e, function () { toggleWorktreeDiff(holder, record, s.stepId); }); }
+    },
+      h("span", { class: "diff-chevron", "aria-hidden": "true", text: "▾" }),
+      "⎇ " + s.stepId + " — " + s.files.length + " file(s) ",
+      h("span", { class: "diff-add", text: "+" + s.additions }),
+      " ",
+      h("span", { class: "diff-del", text: "−" + s.deletions })
+    );
+    wrap.appendChild(row);
+    if (!isOpen) return wrap;
+
+    var cached = HistDiff.cache.get(record.id);
+    var body = cached && cached.get(s.stepId);
+    if (!body) {
+      wrap.appendChild(h("div", { class: "hist-wt-loading", text: "Loading diff…" }));
+      fetchWorktreeDiff(holder, record, s.stepId);
+      return wrap;
+    }
+    wrap.appendChild(renderWorktreeDiffPanel(record, s, body));
+    return wrap;
+  }
+
+  function toggleWorktreeDiff(holder, record, stepId) {
+    var expSet = histDiffExpanded(record.id);
+    if (expSet.has(stepId)) expSet.delete(stepId); else expSet.add(stepId);
+    renderWorktreeSection(holder, record);
+  }
+
+  /** Lazy per-step patch fetch; responses cache per run id + step id. */
+  function fetchWorktreeDiff(holder, record, stepId) {
+    var key = record.id + ":" + stepId;
+    if (HistDiff.inflight.has(key)) return;
+    var cached = HistDiff.cache.get(record.id);
+    if (cached && cached.has(stepId)) return;
+    HistDiff.inflight.add(key);
+    apiAuth("GET", "/api/history/" + encodeURIComponent(record.id) + "/worktrees?step=" + encodeURIComponent(stepId)).then(function (r) {
+      HistDiff.inflight.delete(key);
+      if (r.status === 200 && r.body) {
+        var runCache = HistDiff.cache.get(record.id);
+        if (!runCache) { runCache = new Map(); HistDiff.cache.set(record.id, runCache); }
+        runCache.set(stepId, r.body);
+      }
+      renderWorktreeSection(holder, record);
+    }).catch(function () { HistDiff.inflight.delete(key); });
+  }
+
+  /**
+   * The expanded body of a worktree step row: the graphical diff when the
+   * diff-view bundle is loaded and a patch came back, a muted per-file list
+   * for metadata-only changes (and as the no-bundle fallback), or a
+   * "worktree gone" note when the step's worktree was cleaned up since the
+   * list was fetched.
+   */
+  function renderWorktreeDiffPanel(record, s, body) {
+    var panel = h("div", { class: "hist-wt-diff" });
+    if (body.exists === false) {
+      panel.appendChild(h("div", { class: "hist-wt-diff-empty", text: "worktree no longer exists — diff unavailable" }));
+      return panel;
+    }
+    if (typeof window.SteamtrainDiff !== "undefined" && body.patch) {
+      if (body.patchTruncated) {
+        panel.appendChild(h("div", { class: "hist-wt-diff-truncated",
+          text: "Diff truncated at 200 KB — view the full diff with: steamtrain workflow history show " + record.id + " --diff --step " + s.stepId }));
+      }
+      panel.appendChild(window.SteamtrainDiff.renderPatch(body.patch));
+      return panel;
+    }
+    if (body.files && body.files.length) {
+      var fileList = body.files.slice(0, 8).map(function (f) { return f.status + " " + f.path; }).join(" · ");
+      if (body.files.length > 8) fileList += " …";
+      panel.appendChild(h("div", { class: "hist-wt-files", text: fileList }));
+    } else {
+      panel.appendChild(h("div", { class: "hist-wt-diff-empty", text: "no textual changes" }));
+    }
+    return panel;
+  }
+
+  /** Drop cached patches for a run after a harvest/prune changed its worktrees. */
+  function invalidateWorktreeDiffs(runId) {
+    HistDiff.cache.delete(runId);
+  }
+
   /**
    * The "Worktree changes" block of a run's history detail: per-step diffstat
    * of the retained worktrees, the recorded harvest status, and the lifecycle
@@ -5247,23 +5375,16 @@
 
       var anyExists = false, anyChanges = false;
       sources.forEach(function (s) {
-        var line;
-        if (!s.exists) {
-          line = "⎇ " + s.stepId + " — worktree gone (pruned or cleaned up)";
-        } else if (!s.files.length) {
-          line = "⎇ " + s.stepId + " — no changes";
-          anyExists = true;
-        } else {
-          line = "⎇ " + s.stepId + " — " + s.files.length + " file(s) +" + s.additions + " -" + s.deletions;
-          anyExists = true; anyChanges = true;
+        if (!s.exists || !s.files.length) {
+          var plain = !s.exists
+            ? "⎇ " + s.stepId + " — worktree gone (pruned or cleaned up)"
+            : "⎇ " + s.stepId + " — no changes";
+          if (s.exists) anyExists = true;
+          holder.appendChild(h("div", { class: "hist-wt-line", text: plain, title: s.branch }));
+          return;
         }
-        var row = h("div", { class: "hist-wt-line", text: line, title: s.branch });
-        holder.appendChild(row);
-        if (s.exists && s.files.length) {
-          var fileList = s.files.slice(0, 8).map(function (f) { return f.status + " " + f.path; }).join(" · ");
-          if (s.files.length > 8) fileList += " …";
-          holder.appendChild(h("div", { class: "hist-wt-files", text: fileList }));
-        }
+        anyExists = true; anyChanges = true;
+        holder.appendChild(renderWorktreeDiffRow(holder, record, s));
       });
 
       var banner = h("div", { class: "mbanner", style: "margin-top:6px" });
@@ -5276,6 +5397,7 @@
           banner.className = "mbanner show info"; banner.textContent = "merging…";
           apiAuth("POST", "/api/history/" + encodeURIComponent(record.id) + "/harvest", body).then(function (rr) {
             if (rr.status === 200) {
+              invalidateWorktreeDiffs(record.id);
               var res = rr.body.result;
               var text = res.noChanges ? "no changes to merge"
                 : (res.mode === "apply"
@@ -5302,6 +5424,7 @@
         buttons.appendChild(h("button", { class: "btn", text: "Prune worktrees", onClick: function () {
           if (!window.confirm("Discard this run's worktrees and branches? Unapplied changes are lost.")) return;
           apiAuth("POST", "/api/history/" + encodeURIComponent(record.id) + "/prune").then(function (rr) {
+            if (rr.status === 200) invalidateWorktreeDiffs(record.id);
             renderWorktreeSection(holder, record, {
               cls: rr.status === 200 ? "info" : "err",
               text: rr.status === 200 ? "pruned " + rr.body.pruned + "/" + rr.body.total + " worktree(s)" : (rr.body.error || "prune failed")

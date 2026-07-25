@@ -743,6 +743,27 @@ describe("web server", () => {
     expect(wtBody.sources[0]).toMatchObject({ stepId: "implement", exists: true });
     expect(wtBody.sources[0]?.files.map((f) => f.path)).toEqual(["feature.txt"]);
 
+    // Per-step drill-in serves the capped unified patch for the diff panel.
+    const stepDiff = await fetch(`${base}/api/history/wt-run/worktrees?step=implement`);
+    expect(stepDiff.status).toBe(200);
+    const stepBody = (await stepDiff.json()) as {
+      stepId: string;
+      exists: boolean;
+      base: string;
+      patch: string;
+      patchTruncated: boolean;
+    };
+    expect(stepBody.stepId).toBe("implement");
+    expect(stepBody.exists).toBe(true);
+    expect(stepBody.base).toMatch(/^[0-9a-f]{40}$/);
+    expect(stepBody.patch).toContain("diff --git a/feature.txt b/feature.txt");
+    expect(stepBody.patch).toContain("+web work");
+    expect(stepBody.patchTruncated).toBe(false);
+
+    // Unknown step ids are rejected; the list view is unaffected by the flag.
+    expect((await fetch(`${base}/api/history/wt-run/worktrees?step=nope`)).status).toBe(404);
+    expect((await fetch(`${base}/api/history/nope/worktrees?step=implement`)).status).toBe(404);
+
     // Unknown run and invalid body are rejected.
     expect((await fetch(`${base}/api/history/nope/worktrees`)).status).toBe(404);
     const badMode = await fetch(`${base}/api/history/wt-run/harvest`, {
@@ -775,6 +796,11 @@ describe("web server", () => {
       sources: { exists: boolean }[];
     };
     expect(goneBody.sources[0]?.exists).toBe(false);
+    const goneStep = (await (
+      await fetch(`${base}/api/history/wt-run/worktrees?step=implement`)
+    ).json()) as { exists: boolean; patch?: string };
+    expect(goneStep.exists).toBe(false);
+    expect(goneStep.patch).toBeUndefined();
     expect((await historyStore.get("wt-run"))?.harvest?.prunedAt).toBeTypeOf("number");
   });
 

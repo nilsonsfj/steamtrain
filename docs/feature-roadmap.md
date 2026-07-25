@@ -47,15 +47,16 @@ so the cost is proportionate.
 
 ## 1.1 Graphical diff panels in TUI/web UI
 
-> Partially shipped. Per-step **diffstat** and worktree harvest actions are in
-> both UIs via `GET /api/history/:id/worktrees` (web "Worktree changes" section;
-> TUI history detail). CLI `history show --diff` and `workflow history apply`
-> remain the full-patch surfaces. See [`worktree-lifecycle.md`](worktree-lifecycle.md)
-> and [`worktree-merge-back.md`](worktree-merge-back.md).
-
-**What remains:**
-- Graphical **full patch** panes in the TUI and web UI — +/- stats are there;
-  inline unified diffs consuming the same data as `history show --diff` are not.
+> Shipped. Both UIs render code-review-style **inline unified diffs** of a run's
+> worktree changes, consuming the same data as `history show --diff`. The web
+> history detail expands each worktree step into a graphical diff panel (lazily
+> fetched per step, cached, collapsible per file) and shows a collapsible diff on
+> approval checkpoints; the TUI history detail opens a full-screen, scrollable
+> run diff with `v`. A shared parser (`src/workflow/unified-diff.ts`) feeds both
+> renderers. The CLI `history show --diff` remains the surface for the full
+> *uncapped* patch — the UIs cap very large diffs and say so inline. See
+> [`worktree-lifecycle.md`](worktree-lifecycle.md) and
+> [`worktree-merge-back.md`](worktree-merge-back.md).
 
 ## 1.2 CI / headless integration (GitHub Action + machine-readable results)
 
@@ -349,8 +350,8 @@ Three tracks can proceed largely in parallel:
 
 - **Trust track (protects users):** 1.3 permissions → 1.7 web follow-ups.
   Each is small-to-medium and independent.
-- **Capability track (unlocks use cases):** 1.1 full graphical diffs → 1.2 CI
-  action — builds directly on the shipped merge/diff machinery.
+- **Capability track (unlocks use cases):** 1.2 CI action (1.1 full graphical
+  diffs is shipped) — builds directly on the merge/diff machinery.
 - **Language track (workflow authoring power):** 2.3 template filters and 2.4
   step templates first (small, high leverage), then 2.1 session continuity
   and 2.2 matrix fan-out; 2.5 run-inspection UX follows as demand dictates.
