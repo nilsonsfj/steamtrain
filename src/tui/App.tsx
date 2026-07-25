@@ -88,6 +88,7 @@ import { ApiManager } from "./ApiManager";
 import { CommandSuggestionMenu, suggestionMenuHeight } from "./CommandSuggestionMenu";
 import { EventStream } from "./EventStream";
 import { HelpPanel } from "./HelpPanel";
+import { HistoryDiffPanel } from "./HistoryDiffPanel";
 import { PromptInput } from "./PromptInput";
 import { StatusBar } from "./StatusBar";
 import { TaskSelector } from "./TaskSelector";
@@ -1765,6 +1766,17 @@ export function App({
             />
           ) : null;
         })()
+      ) : historyHook.history?.diffView ? (
+        <HistoryDiffPanel
+          workflow={historyHook.history.diffView.workflow}
+          recordId={historyHook.history.diffView.recordId}
+          loading={historyHook.history.diffView.loading}
+          steps={historyHook.history.diffView.steps}
+          scroll={historyHook.history.diffView.scroll}
+          width={columns}
+          height={streamHeight}
+          onMetrics={historyHook.reportDiffMetrics}
+        />
       ) : historyHook.history ? (
         <HistoryPanel
           history={historyHook.history}
@@ -2023,13 +2035,16 @@ function hint(
 }
 
 function historyHintText(history: HistoryUiState): string {
+  if (history.diffView) {
+    return "run diff · ↑/↓ scroll · PgUp/PgDn page · g/G top/bottom · v/Esc close · Ctrl+C quit";
+  }
   if (history.view === "detail") {
     if (history.detail) return "↑/↓ step · PgUp/PgDn scroll · ←/Esc back · Ctrl+C quit";
     const retryHint = (history.record?.totals?.failed ?? 0) > 0 ? " · f retry failed" : "";
     const hasWorktrees = history.record?.phases.some((phase) =>
       phase.steps.some((step) => step.worktree),
     );
-    const worktreeHint = hasWorktrees ? " · a apply · x prune" : "";
+    const worktreeHint = hasWorktrees ? " · a apply · x prune · v diff" : "";
     return `↑/↓ step · → details · r re-run${retryHint}${worktreeHint} · d delete · ←/Esc back to list · Ctrl+C quit`;
   }
   if (history.filtering) {

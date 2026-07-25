@@ -29,6 +29,8 @@ export const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0
 export interface PageAssetRevisions {
   /** Hash of `src/web/public/steamtrain-reducer.bundle.js`. */
   bundle: string;
+  /** Hash of `src/web/public/steamtrain-diff.bundle.js`. */
+  diff: string;
   /** Hash of `src/web/public/app.js`. */
   appJs: string;
   /** Hash of `src/web/public/app.css`. */
@@ -37,13 +39,14 @@ export interface PageAssetRevisions {
 
 /**
  * Render the steamtrain SPA HTML page. The returned document references the
- * external stylesheet and the two external scripts (reducer bundle first, then
- * the client code) using content-hashed URLs so intermediate caches and
- * browsers revalidate correctly across releases.
+ * external stylesheet and the three external scripts (reducer bundle, diff-view
+ * bundle, then the client code) using content-hashed URLs so intermediate
+ * caches and browsers revalidate correctly across releases.
  */
 export function renderIndex(revs: PageAssetRevisions): string {
   const cssHref = `/static/app.css?v=${revs.appCss}`;
   const bundleSrc = `/static/steamtrain-reducer.bundle.js?v=${revs.bundle}`;
+  const diffSrc = `/static/steamtrain-diff.bundle.js?v=${revs.diff}`;
   const appSrc = `/static/app.js?v=${revs.appJs}`;
   return `<!doctype html>
 <html lang="en">
@@ -143,6 +146,7 @@ export function renderIndex(revs: PageAssetRevisions): string {
 <div class="modal-overlay" id="overlay"><div class="modal" id="modal"></div></div>
 <div id="announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 <script src="${bundleSrc}" defer></script>
+<script src="${diffSrc}" defer></script>
 <script src="${appSrc}" defer></script>
 </body>
 </html>`;
@@ -153,4 +157,4 @@ export function renderIndex(revs: PageAssetRevisions): string {
  * snapshots that just need the page structure — production serving should use
  * {@link renderIndex} with computed asset hashes.
  */
-export const PAGE_HTML = renderIndex({ bundle: "dev", appJs: "dev", appCss: "dev" });
+export const PAGE_HTML = renderIndex({ bundle: "dev", diff: "dev", appJs: "dev", appCss: "dev" });

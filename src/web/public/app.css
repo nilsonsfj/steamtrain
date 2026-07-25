@@ -3763,6 +3763,189 @@ select.sel.invalid {
   margin-top: 6px;
   flex-wrap: wrap;
 }
+/* ---- unified diff viewer (history worktrees + approval checkpoints) ---- */
+.diff-files {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0;
+}
+.diff-file {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  overflow: hidden;
+}
+.diff-file-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.diff-file-head:hover {
+  background: var(--panel-2);
+}
+.diff-chevron {
+  flex: none;
+  color: var(--muted);
+  font-size: 10px;
+  transition: transform 0.15s var(--ease-out);
+}
+.diff-file.collapsed .diff-chevron,
+.hist-wt-line.collapsed .diff-chevron {
+  transform: rotate(-90deg);
+}
+.diff-file.collapsed .diff-file-body {
+  display: none;
+}
+.diff-badge {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.diff-badge-m {
+  color: var(--gate);
+  background: rgba(210, 153, 34, 0.16);
+}
+.diff-badge-a {
+  color: var(--done);
+  background: rgba(63, 185, 80, 0.16);
+}
+.diff-badge-d {
+  color: var(--error);
+  background: rgba(248, 81, 73, 0.16);
+}
+.diff-badge-r {
+  color: #9d8cff;
+  background: rgba(157, 140, 255, 0.16);
+}
+.diff-path {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  word-break: break-all;
+}
+.diff-stat {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.diff-add {
+  color: #3fb950;
+}
+.diff-del {
+  color: #f85149;
+}
+.diff-file-body {
+  border-top: 1px solid var(--border);
+  overflow-x: auto;
+  padding: 6px 0;
+  font: 12px / 1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.diff-hunk {
+  color: #79b8ff;
+  background: rgba(56, 139, 253, 0.1);
+  padding: 2px 12px;
+}
+.diff-line {
+  display: flex;
+}
+.diff-line:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.diff-line.add {
+  background: rgba(46, 160, 67, 0.15);
+}
+.diff-line.del {
+  background: rgba(248, 81, 73, 0.15);
+}
+.diff-line.add:hover {
+  background: rgba(46, 160, 67, 0.22);
+}
+.diff-line.del:hover {
+  background: rgba(248, 81, 73, 0.22);
+}
+.diff-gutter {
+  width: 44px;
+  flex: none;
+  text-align: right;
+  padding-right: 8px;
+  color: var(--muted);
+  user-select: none;
+  opacity: 0.55;
+}
+.diff-line.add .diff-gutter {
+  color: #3fb950;
+  opacity: 0.7;
+}
+.diff-line.del .diff-gutter {
+  color: #f85149;
+  opacity: 0.7;
+}
+.diff-code {
+  white-space: pre;
+  flex: 1;
+  padding-right: 12px;
+}
+.diff-line.nonewline {
+  color: var(--muted);
+  font-style: italic;
+}
+.diff-line.nonewline:hover {
+  background: transparent;
+}
+.diff-binary,
+.diff-empty-file {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px 12px;
+}
+/* Expandable worktree step rows hosting the diff panels. */
+.hist-wt-line.expandable {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  margin-left: -4px;
+  border-radius: 6px;
+  user-select: none;
+}
+.hist-wt-line.expandable:hover {
+  background: var(--panel-2);
+}
+.hist-wt-diff {
+  margin: 4px 0 8px 16px;
+}
+.hist-wt-loading {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 2px 0 6px 16px;
+}
+.hist-wt-diff-truncated {
+  color: var(--gate);
+  background: rgba(210, 153, 34, 0.12);
+  border: 1px solid rgba(210, 153, 34, 0.4);
+  border-radius: 6px;
+  font-size: 11px;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+}
+.hist-wt-diff-empty {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 2px 0 6px;
+}
 @media (max-width: 720px) {
   .hrun .hr-meta {
     margin-left: 0;

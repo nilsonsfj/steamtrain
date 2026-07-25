@@ -172,6 +172,7 @@ export function HistoryDetailBanner({
   const g = STATUS_GLYPH[record.status] ?? { symbol: "·", color: "gray" };
   const when = formatRelativeTime(record.startedAt);
   const meta = formatRunTotals(record.totals, { durationMs: record.durationMs, tokens: true });
+  const hasWorktrees = record.phases.some((phase) => phase.steps.some((step) => step.worktree));
   const input = truncate(
     record.input.replace(/\s+/g, " ").trim() || "(no input)",
     Math.max(24, width - 8),
@@ -202,6 +203,7 @@ export function HistoryDetailBanner({
         <Text color="gray">
           id {record.id.slice(0, 8)}… · r re-run
           {(record.totals?.failed ?? 0) > 0 ? " · f retry failed" : ""}
+          {hasWorktrees ? " · v diff" : ""}
           {" · d delete · ← back"}
         </Text>
       </Box>

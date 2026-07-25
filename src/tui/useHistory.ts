@@ -22,6 +22,8 @@ import {
   pruneRunWorktrees,
   rerunDowngradeMessage,
 } from "../workflow";
+import type { HistoryDiffStep } from "./history-diff";
+import { loadRunDiff } from "./history-diff";
 import { message } from "./util";
 import type { WorkflowState } from "./workflow-state";
 import { workflowStateFromRecord } from "./workflow-state";
@@ -46,6 +48,18 @@ export interface HistoryUiState {
   /** True while `/` filter mode is capturing printable keys. */
   filtering: boolean;
   statusFilter: HistoryStatusFilter;
+  /** Full-screen run-diff overlay (opened from the detail view with `v`). */
+  diffView?: HistoryDiffViewState;
+}
+
+/** State of the full-screen run-diff overlay. */
+export interface HistoryDiffViewState {
+  recordId: string;
+  workflow: string;
+  loading: boolean;
+  steps: HistoryDiffStep[];
+  /** First visible composed line. */
+  scroll: number;
 }
 
 export interface UseHistoryParams {
@@ -85,6 +99,14 @@ export interface UseHistoryReturn {
   deleteHistoryRecord: (record: { id: string }) => void;
   /** Refresh list contents without leaving the browser. */
   refreshHistoryList: () => void;
+  /** Open the full-screen diff overlay for a recorded run (from detail view). */
+  openDiffView: (record: RunRecord) => void;
+  closeDiffView: () => void;
+  /** Scroll the diff overlay; page motions use the last reported viewport. */
+  scrollDiffBy: (delta: number | "page-up" | "page-down") => void;
+  scrollDiffTo: (position: "top" | "bottom") => void;
+  /** Reported by the diff panel after each render, for scroll clamping. */
+  reportDiffMetrics: (metrics: { totalLines: number; viewport: number }) => void;
 }
 
 const emptyHistory = (): HistoryUiState => ({
@@ -230,6 +252,10 @@ export function useHistory({
   const pruneConfirmRef = useRef<{ id: string; at: number } | null>(null);
   const deleteConfirmRef = useRef<{ id: string; at: number } | null>(null);
   const harvestBusyRef = useRef(false);
+  // Diff overlay: latest viewport metrics (for clamping) and a load token so a
+  // stale async load can't populate a panel that was closed or re-targeted.
+  const diffMetricsRef = useRef({ totalLines: 0, viewport: 1 });
+  const diffLoadRef = useRef(0);
 
   const harvestFromRecord = useCallback(
     (record: RunRecord, action: "apply" | "prune") => {
@@ -278,6 +304,76 @@ export function useHistory({
     },
     [historyStoreRef, setWfNotice],
   );
+
+  const openDiffView = useCallback(
+    (record: RunRecord) => {
+      if (finalRunWorktrees(record).length === 0) {
+        setWfNotice(`run '${record.id}' has no step worktrees`);
+        return;
+      }
+      const token = ++diffLoadRef.current;
+      diffMetricsRef.current = { totalLines: 0, viewport: 1 };
+      setHistory((prev) =>
+        prev
+          ? {
+              ...prev,
+              diffView: {
+                recordId: record.id,
+                workflow: record.workflow,
+                loading: true,
+                steps: [],
+                scroll: 0,
+              },
+            }
+          : prev,
+      );
+      void (async () => {
+        try {
+          const steps = await loadRunDiff(record);
+          if (!mountedRef.current) return;
+          setHistory((prev) => {
+            // The panel was closed or re-targeted while the diff loaded.
+            if (!prev?.diffView || prev.diffView.recordId !== record.id) return prev;
+            if (token !== diffLoadRef.current) return prev;
+            return { ...prev, diffView: { ...prev.diffView, loading: false, steps } };
+          });
+        } catch (err) {
+          if (mountedRef.current) setWfNotice(`could not compute run diff: ${message(err)}`);
+        }
+      })();
+    },
+    [mountedRef, setWfNotice],
+  );
+
+  const closeDiffView = useCallback(() => {
+    diffLoadRef.current += 1; // cancel any in-flight load
+    setHistory((prev) => (prev?.diffView ? { ...prev, diffView: undefined } : prev));
+  }, []);
+
+  const reportDiffMetrics = useCallback((metrics: { totalLines: number; viewport: number }) => {
+    diffMetricsRef.current = metrics;
+  }, []);
+
+  const scrollDiffBy = useCallback((delta: number | "page-up" | "page-down") => {
+    setHistory((prev) => {
+      if (!prev?.diffView) return prev;
+      const { totalLines, viewport } = diffMetricsRef.current;
+      const maxScroll = Math.max(0, totalLines - viewport);
+      const page = Math.max(1, viewport - 1);
+      const amount = delta === "page-up" ? -page : delta === "page-down" ? page : delta;
+      const scroll = Math.min(Math.max(0, prev.diffView.scroll + amount), maxScroll);
+      return { ...prev, diffView: { ...prev.diffView, scroll } };
+    });
+  }, []);
+
+  const scrollDiffTo = useCallback((position: "top" | "bottom") => {
+    setHistory((prev) => {
+      if (!prev?.diffView) return prev;
+      const { totalLines, viewport } = diffMetricsRef.current;
+      const scroll = position === "top" ? 0 : Math.max(0, totalLines - viewport);
+      return { ...prev, diffView: { ...prev.diffView, scroll } };
+    });
+  }, []);
 
   const deleteHistoryRecord = useCallback(
     (record: { id: string }) => {
@@ -331,6 +427,11 @@ export function useHistory({
     harvestFromRecord,
     deleteHistoryRecord,
     refreshHistoryList,
+    openDiffView,
+    closeDiffView,
+    scrollDiffBy,
+    scrollDiffTo,
+    reportDiffMetrics,
   };
 }
 

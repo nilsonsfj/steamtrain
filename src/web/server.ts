@@ -130,10 +130,15 @@ const STATIC_ASSETS: Record<string, StaticAsset | null> = {
     "steamtrain-reducer.bundle.js",
     "text/javascript; charset=utf-8",
   ),
+  "/static/steamtrain-diff.bundle.js": loadAsset(
+    "steamtrain-diff.bundle.js",
+    "text/javascript; charset=utf-8",
+  ),
 };
 
 const PUBLIC_REVISIONS: PageAssetRevisions = {
   bundle: STATIC_ASSETS["/static/steamtrain-reducer.bundle.js"]?.rev ?? "",
+  diff: STATIC_ASSETS["/static/steamtrain-diff.bundle.js"]?.rev ?? "",
   appJs: STATIC_ASSETS["/static/app.js"]?.rev ?? "",
   appCss: STATIC_ASSETS["/static/app.css"]?.rev ?? "",
 };
@@ -353,6 +358,23 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 
 /** Maximum body size: 1 MiB. Rejects larger payloads with HTTP 413. */
 const MAX_BODY_BYTES = 1 * 1024 * 1024;
+
+/**
+ * Maximum unified-patch size served per step by the history worktree diff
+ * endpoint. Larger patches are truncated (with `patchTruncated: true`) so a
+ * huge generated diff cannot stall the UI; the CLI `history show --diff`
+ * always has the full text.
+ */
+export const HISTORY_PATCH_CAP = 200_000;
+
+/** Cap a patch string for transport, flagging truncation. */
+export function capPatch(
+  patch: string,
+  cap = HISTORY_PATCH_CAP,
+): { patch: string; truncated: boolean } {
+  if (patch.length <= cap) return { patch, truncated: false };
+  return { patch: patch.slice(0, cap), truncated: true };
+}
 
 /** Maximum workflow name length. */
 const MAX_WORKFLOW_NAME = 128;
@@ -1545,6 +1567,43 @@ async function handle(
 
     if (action === "worktrees" && method === "GET") {
       const sources = finalRunWorktrees(record);
+      // `?step=<stepId>` drills into one step: the full unified patch (capped)
+      // for the graphical diff panel, fetched lazily as the user expands rows.
+      const stepFilter = url.searchParams.get("step");
+      if (stepFilter !== null) {
+        const source = sources.find((s) => s.stepId === stepFilter);
+        if (!source) {
+          sendJson(res, 404, { error: `unknown step '${stepFilter}' for run '${id}'` });
+          return;
+        }
+        try {
+          const diff = await worktreeDiff(source, { patch: true });
+          const capped = capPatch(diff.patch ?? "");
+          sendJson(res, 200, {
+            stepId: source.stepId,
+            branch: source.branch,
+            root: source.root,
+            exists: true,
+            base: diff.base,
+            files: diff.files,
+            additions: diff.additions,
+            deletions: diff.deletions,
+            patch: capped.patch,
+            patchTruncated: capped.truncated,
+          });
+        } catch {
+          sendJson(res, 200, {
+            stepId: source.stepId,
+            branch: source.branch,
+            root: source.root,
+            exists: false,
+            files: [],
+            additions: 0,
+            deletions: 0,
+          });
+        }
+        return;
+      }
       const items = [];
       for (const source of sources) {
         try {
