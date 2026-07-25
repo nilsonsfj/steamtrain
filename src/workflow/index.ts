@@ -117,7 +117,6 @@ export {
   permissionSummaryGlyph,
   workflowPermissionSummary,
   permissionEnforcementNote,
-  permissionsApplyToStep,
   stepEffectivePermissions,
   workflowPermissionPreflight,
   workflowPermissionVerdicts,

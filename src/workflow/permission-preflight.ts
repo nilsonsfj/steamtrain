@@ -8,7 +8,7 @@ import {
   permissionsLabel,
 } from "../agents/permissions";
 import type { SteamtrainConfig } from "../config/types";
-import { isAgentBackedStep, workflowStepKind } from "./step-kind";
+import { isAgentBackedStep } from "./step-kind";
 import type { WorkflowSpec, WorkflowStep } from "./types";
 
 /**
@@ -236,9 +236,4 @@ export function permissionEnforcementNote(verdict: StepPermissionVerdict): strin
     case "unknown":
       return "enforcement resolved at run time (agent not pinned yet)";
   }
-}
-
-/** True when the step kind can carry a `permissions` profile at all. */
-export function permissionsApplyToStep(step: WorkflowStep): boolean {
-  return workflowStepKind(step) === "workflow" || isAgentBackedStep(step);
 }

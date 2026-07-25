@@ -107,6 +107,10 @@ export async function fingerprintChanges(
       const status = parts[0] ?? "";
       // Renames/copies carry both paths; the destination is what changed.
       const path = parts[parts.length - 1];
+      // Status letter as git reports it: A added, M modified, D deleted, T type
+      // changed, R renamed, C copied (only when the repo's own diff config
+      // enables copy detection). Kept verbatim — "C src/x.ts" is as truthful a
+      // violation as "M src/x.ts", and flattening it would lose information.
       if (path) paths.push(`${status[0] ?? "M"} ${path}`);
     }
     // Two different trees always differ somewhere; if `diff-tree` says nothing

@@ -296,7 +296,9 @@ function claudePlan(perms: ResolvedPermissions): PermissionPlan {
   // alongside the blanket `Bash` deny, since Claude Code resolves the more
   // specific rule itself.
   const explicitlyAllowed = new Set(perms.allow);
-  deny = deny.filter((tool) => !explicitlyAllowed.has(tool) || perms.deny.includes(tool));
+  const stillDenied = (tool: string): boolean =>
+    !explicitlyAllowed.has(tool) || perms.deny.includes(tool);
+  deny = deny.filter(stillDenied);
 
   if (allow.length > 0) args.push("--allowedTools", joinList(allow));
   if (deny.length > 0) args.push("--disallowedTools", joinList(deny));

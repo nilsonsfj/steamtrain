@@ -1165,15 +1165,11 @@ async function runSingleStep(
     agentBacked?.effort !== undefined
       ? renderPrompt(agentBacked.effort, displayRenderCtx)
       : undefined;
-  // Effective permissions for display: the step's own declaration, else this
-  // workflow's default, else the config's. Shown from `step_start` so a
-  // read-only step is badged while it runs, not only once it is done.
+  // Effective permissions for display: resolved through the SAME helper the
+  // execution path uses (`stepPermissions`), so the badge on `step_start` can
+  // never drift from the profile the adapter is actually handed.
   const displayPermissions = agentBacked
-    ? effectivePermissions([
-        (agentBacked as { permissions?: PermissionsSpec }).permissions,
-        spec.permissions,
-        deps.permissionsDefault ?? deps.agentConfig?.permissions,
-      ])
+    ? resolveStepPermissions(agentBacked, spec.permissions, runPermissionsDefault(deps))
     : undefined;
   const permissionsInfo = permissionsInfoOf(displayPermissions);
   const llmDisplayModel =
@@ -1368,7 +1364,7 @@ async function runSingleStep(
       modelFailoverWorkflow: spec.modelFailover,
       modelFailoverConfig: deps.agentConfig?.modelFailover,
       permissionsWorkflow: spec.permissions,
-      permissionsConfig: deps.permissionsDefault ?? deps.agentConfig?.permissions,
+      permissionsConfig: runPermissionsDefault(deps),
       workflowFallbackModels: spec.fallbackModels,
       workflowInputs: spec.inputs,
       stepTimeoutDefault: spec.stepTimeoutSec,
@@ -1970,16 +1966,34 @@ function permissionsInfoOf(
  * workflow's default, else the project/user config default. `undefined` means
  * nothing was declared anywhere — the historical unrestricted behavior, which
  * passes no permission flags and arms no verification.
+ *
+ * The layer *values* are passed in rather than read off one context, so the
+ * display path (`runSingleStep`, which has the spec + deps) and the execution
+ * path (`stepPermissions`, which has the ExecuteContext) share one resolution.
  */
+function resolveStepPermissions(
+  step: WorkflowStep,
+  workflowDefault: PermissionsSpec | undefined,
+  configDefault: PermissionsSpec | undefined,
+): ResolvedPermissions | undefined {
+  return effectivePermissions([
+    (step as { permissions?: PermissionsSpec }).permissions,
+    workflowDefault,
+    configDefault,
+  ]);
+}
+
+/** The config-layer permissions default for a run (call step > project/user config). */
+function runPermissionsDefault(deps: WorkflowDeps): PermissionsSpec | undefined {
+  return deps.permissionsDefault ?? deps.agentConfig?.permissions;
+}
+
+/** {@link resolveStepPermissions} for a step executing under an ExecuteContext. */
 function stepPermissions(
   step: AgentBackedWorkflowStep,
   ctx: ExecuteContext,
 ): ResolvedPermissions | undefined {
-  return effectivePermissions([
-    (step as { permissions?: PermissionsSpec }).permissions,
-    ctx.permissionsWorkflow,
-    ctx.permissionsConfig,
-  ]);
+  return resolveStepPermissions(step, ctx.permissionsWorkflow, ctx.permissionsConfig);
 }
 
 /**
@@ -2501,6 +2515,9 @@ async function verifyReadOnlyWorkspace(
   const verified = Boolean(baseline && after);
   const violations = await fingerprintChanges(baseline, after, signal);
   const record = {
+    // The fallback is a safety net, not a normal path: verification only runs
+    // for a resolved `read-only` profile, so `result.permissions` is already
+    // populated unless the step's agent instance failed to resolve at all.
     ...(result.permissions ?? { profile: "read-only" as const, enforcement: "none" as const }),
     verified,
     ...(violations.length > 0 ? { violations } : {}),
