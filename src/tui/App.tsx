@@ -20,6 +20,11 @@ import {
   upsertAgent,
 } from "../agents";
 import { refreshAgentCatalogCaches } from "../agents/models";
+import {
+  type PermissionsSpec,
+  isPermissionProfile,
+  resolvePermissions,
+} from "../agents/permissions";
 import { apiConfigScope, apiScopeLabel, removeApi, resolveApiInstances, upsertApi } from "../apis";
 import {
   type SlashCommandResult,
@@ -59,6 +64,7 @@ import {
   type LoadedWorkflowCatalog,
   type PlanResult,
   type StepEditPatch,
+  type StepPermissionVerdict,
   TOUR_WORKFLOW_NAME,
   WorkflowAuthor,
   type WorkflowSourceKind,
@@ -73,6 +79,7 @@ import {
   shouldOfferStationLanding,
   totalTokens,
   workflowCacheKey,
+  workflowPermissionVerdicts,
   workflowStepKind,
 } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId, WorkspaceScope } from "../workspace";
@@ -675,6 +682,7 @@ export function App({
       cwd: step.cwd,
       env: step.env,
       extraArgs: step.extraArgs,
+      permissions: (step as { permissions?: PermissionsSpec }).permissions,
       stepTimeoutSec: step.stepTimeoutSec,
     };
   }, [picker.wfPreview, previewSelectedStep]);
@@ -709,6 +717,27 @@ export function App({
       runner.setWfNotice(`✎ ${summary} · /save-workflows to persist`);
     },
     [picker.patchWorkflowSteps, runner.setWfNotice],
+  );
+
+  // Permission verdicts for the previewed spec: the profile each agent step
+  // runs under AND whether its agent can actually enforce it. Computed here
+  // because this is where both the spec and the resolved config live.
+  const permissionVerdicts = useMemo(() => {
+    const spec = picker.preview.spec;
+    if (!spec) return undefined;
+    const map: Record<string, StepPermissionVerdict> = {};
+    for (const verdict of workflowPermissionVerdicts(spec, orchestrator.getConfig())) {
+      map[verdict.stepId] = verdict;
+    }
+    return map;
+  }, [picker.preview.spec, orchestrator]);
+
+  const permissionWarnings = useMemo(
+    () =>
+      picker.preview.spec
+        ? orchestrator.workflowPermissionWarnings(picker.preview.spec)
+        : undefined,
+    [picker.preview.spec, orchestrator],
   );
 
   const editorSiblings = useMemo(() => {
@@ -774,6 +803,16 @@ export function App({
         agent: specStep.agent,
         model: priorEdit?.model ?? specStep.model,
         effort: priorEdit?.effort ?? specStep.effort,
+        // A merge step's conflict resolver must be able to write, so its
+        // sandbox is not clampable here (the engine would reject read-only).
+        permissionsEditable: kind !== "merge",
+        // A prior accepted edit wins; its `""` means the profile was cleared.
+        permissions: isPermissionProfile(priorEdit?.permissions)
+          ? priorEdit.permissions
+          : priorEdit?.permissions === ""
+            ? undefined
+            : resolvePermissions((specStep as { permissions?: PermissionsSpec }).permissions)
+                ?.profile,
       });
     } else {
       setRunEditor({
@@ -1549,7 +1588,7 @@ export function App({
       setInputFormPending({ name, prompt: promptText, action: "plan" });
       return;
     }
-    const plan = planWorkflow(spec, promptText);
+    const plan = planWorkflow(spec, promptText, undefined, orchestrator.getConfig());
     showPlan(name, plan);
   }, [
     runner.running,
@@ -1809,6 +1848,7 @@ export function App({
               picker.preview.dispatchCheck.ok ? undefined : picker.preview.dispatchCheck.reason
             }
             canResume={runner.wfCanResume}
+            permissionVerdicts={permissionVerdicts}
           />
         ) : runner.showWorkflowView ? (
           <WorkflowView
@@ -1842,6 +1882,8 @@ export function App({
             showStepDetail={runner.wfShowStepDetail}
             showPlanResult={runner.wfShowPlanResult}
             resolveWorkflow={resolveWorkflowSpec}
+            permissionVerdicts={permissionVerdicts}
+            permissionWarnings={permissionWarnings}
           />
         ) : (
           <WorkflowPicker

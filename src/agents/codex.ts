@@ -9,6 +9,7 @@ import { type CodexThreadItem, codexEnvelope, codexEvent } from "../types/raw-co
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
 import { classifyAgentFailure } from "./failure-classify";
+import { permissionArgs } from "./permissions";
 import { stringifyContent } from "./util";
 
 const AGENT: AgentId = "codex";
@@ -444,14 +445,19 @@ function codexTokens(
 
 /** Build argv for `codex exec --json` (shared by the adapter and tests). */
 export function buildCodexExecArgs(opts: AgentRunOptions): string[] {
+  // Codex is the one CLI with a real sandbox, so the step's profile picks the
+  // `--sandbox` level directly. Without a declared profile the historical
+  // default (`workspace-write`) stands. `approval_policy="never"` is
+  // unconditional either way: a headless run has nobody to approve anything,
+  // so an escalation prompt would just hang until the step timeout.
+  const sandbox = permissionArgs(AGENT, opts.permissions);
   return [
     "exec",
     // `codex exec resume <sessionId>` continues a recorded session (the
     // `thread_id` from `thread.started`); the remaining flags apply unchanged.
     ...(opts.resumeSessionId ? ["resume", opts.resumeSessionId] : []),
     "--json",
-    "--sandbox",
-    "workspace-write",
+    ...(sandbox.length > 0 ? sandbox : ["--sandbox", "workspace-write"]),
     "-c",
     'approval_policy="never"',
     "--skip-git-repo-check",

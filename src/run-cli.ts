@@ -1148,7 +1148,7 @@ export async function runEditStepCommand(
   err: (text: string) => void,
 ): Promise<number> {
   const usage =
-    "usage: steamtrain workflow edit-step <runId> <stepId> [--prompt <text> | --prompt-file <path>] [--cmd <text>] [--model <id>] [--effort <level>]\n";
+    "usage: steamtrain workflow edit-step <runId> <stepId> [--prompt <text> | --prompt-file <path>] [--cmd <text>] [--model <id>] [--effort <level>] [--permissions read-only|edit|full|none]\n";
   const runId = args[0];
   const stepId = args[1];
   if (!runId || runId.startsWith("--") || !stepId || stepId.startsWith("--")) {
@@ -1159,7 +1159,13 @@ export async function runEditStepCommand(
   for (let i = 2; i < args.length; i++) {
     const arg = args[i];
     const value = args[i + 1];
-    if (arg === "--prompt" || arg === "--cmd" || arg === "--model" || arg === "--effort") {
+    if (
+      arg === "--prompt" ||
+      arg === "--cmd" ||
+      arg === "--model" ||
+      arg === "--effort" ||
+      arg === "--permissions"
+    ) {
       if (value === undefined) {
         err(usage);
         return 1;
@@ -1168,7 +1174,9 @@ export async function runEditStepCommand(
       if (arg === "--prompt") patch.prompt = value;
       else if (arg === "--cmd") patch.cmd = value;
       else if (arg === "--model") patch.model = value;
-      else patch.effort = value;
+      else if (arg === "--effort") patch.effort = value;
+      // `none` reads better than an empty string on a command line; both clear.
+      else patch.permissions = value === "none" ? "" : value;
     } else if (arg === "--prompt-file") {
       if (value === undefined) {
         err(usage);
@@ -1190,9 +1198,12 @@ export async function runEditStepCommand(
     patch.prompt === undefined &&
     patch.cmd === undefined &&
     patch.model === undefined &&
-    patch.effort === undefined
+    patch.effort === undefined &&
+    patch.permissions === undefined
   ) {
-    err("nothing to change — pass at least one of --prompt/--prompt-file/--cmd/--model/--effort\n");
+    err(
+      "nothing to change — pass at least one of --prompt/--prompt-file/--cmd/--model/--effort/--permissions\n",
+    );
     return 1;
   }
 
@@ -1558,9 +1569,13 @@ export function printHumanEvent(event: WorkflowEvent, out: (text: string) => voi
     case "phase_start":
       out(`\nphase ${event.index + 1}: ${event.title}\n`);
       return;
-    case "step_start":
-      out(`  start ${event.blockKind ?? "worker"} ${event.stepId}\n`);
+    case "step_start": {
+      // The profile is part of the step's identity in a log: a CI reader must be
+      // able to see that the review step ran locked down, not infer it.
+      const sandbox = event.permissions ? ` [${event.permissions.profile}]` : "";
+      out(`  start ${event.blockKind ?? "worker"} ${event.stepId}${sandbox}\n`);
       return;
+    }
     case "step_workspace":
       out(
         event.worktree
@@ -1617,11 +1632,18 @@ export function printHumanEvent(event: WorkflowEvent, out: (text: string) => voi
       }
       return;
     }
-    case "step_done":
+    case "step_done": {
       out(
         `  ${event.result.ok ? "done" : "fail"} ${event.stepId}${event.cached ? " (cached)" : ""}\n`,
       );
+      const violations = event.result.permissions?.violations;
+      if (violations?.length) {
+        out(
+          `     🔓 permission violation: modified ${violations.length} path(s) — ${violations.slice(0, 6).join(", ")}\n`,
+        );
+      }
       return;
+    }
     case "phase_done":
       out(`phase ${event.phaseId} ${event.ok ? "ok" : "failed"}\n`);
       return;

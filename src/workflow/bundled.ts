@@ -1,3 +1,4 @@
+import type { StepPermissions } from "../agents/permissions";
 import type { WorkflowSpec } from "./types";
 
 /**
@@ -29,10 +30,27 @@ const FREE = {
   // tool loops (DeepSeek reasoning_content replay) and was timing out babysit.
 } as const;
 
+/**
+ * The sandbox profile bundled analysis steps declare: read-only, but with
+ * `onUnsupported: "warn"` rather than the stricter default.
+ *
+ * A bundled workflow must stay runnable on ANY agent the user retargets it to
+ * (`/agent --all`, a `modelClass` binding, a model-typed input), and only
+ * claude / codex / opencode / mimo can enforce a restriction headlessly. With
+ * `"fail"` these workflows would simply refuse to run on amp or cursor, which
+ * is a worse deal than the honest degradation: enforced natively where the CLI
+ * supports it, and everywhere else still verified after the fact — the engine
+ * fails any read-only step whose workspace changed, whatever the CLI allowed.
+ */
+const READ_ONLY: StepPermissions = { profile: "read-only", onUnsupported: "warn" };
+
 const multiPlan: WorkflowSpec = {
   name: "multi-plan",
   description:
     "Draft a plan from independent angles, stress-test it, then synthesize the strongest version.",
+  // Planning reads and argues; it never edits. Declared once at the top so
+  // every step in the pipeline inherits it.
+  permissions: READ_ONLY,
   phases: [
     {
       id: "scope",
@@ -109,6 +127,10 @@ const bugHunt: WorkflowSpec = {
   name: "bug-hunt",
   description:
     "Sweep a scope for distinct bug classes in parallel, cross-check findings, then report the real ones.",
+  // The whole point of a bug hunt is that it reports, not repairs — so it runs
+  // with no write access at all. This is the workflow people most want to point
+  // at a real repository, and now they can read the guarantee off the spec.
+  permissions: READ_ONLY,
   phases: [
     {
       id: "scan",
@@ -191,6 +213,8 @@ const targetSweep: WorkflowSpec = {
   name: "target-sweep",
   description:
     "Split a request into target areas, run one processor per target, then consolidate the findings.",
+  // Analysis per target area, then a report: nothing here writes.
+  permissions: READ_ONLY,
   phases: [
     {
       id: "split",
@@ -277,6 +301,11 @@ const reviewLoop: WorkflowSpec = {
           // review all share the one worktree, so each pass sees the previous
           // pass's edits.
           workspace: "attach:impl",
+          // The reviewer shares impl's worktree, so "don't touch the code you
+          // are reviewing" is not a style note — it is what keeps the loop
+          // honest. read-only is enforced where the CLI can, and verified
+          // against the shared worktree either way.
+          permissions: READ_ONLY,
           prompt:
             "Review ONLY the changes you can see in this worktree (diff from the base commit). Ignore pre-existing code — focus on issues in the new/changed code. If there are NO issues, reply with the single word DONE. Otherwise list each issue with file:line and a short description.",
         },
@@ -677,6 +706,11 @@ const mainlineStream: WorkflowSpec = {
           effort: "{{inputs.reviewerEffort}}",
           dependsOn: ["implement"],
           workspace: "attach:implement",
+          // Reviews report; the `fix` step edits. The reviewer's agent comes
+          // from `{{inputs.reviewerModel}}`, so this deliberately uses the
+          // warn-on-unsupported form and leans on post-run verification when
+          // the resolved CLI cannot enforce it.
+          permissions: READ_ONLY,
           prompt:
             "Review the diff from the base commit in this worktree — the NEW code from this stream's implementation (and any prior fix pass). `issues` are problems in that new code that MUST be fixed before this stream is done. `findings` are DIFFERENT: pre-existing, out-of-scope problems you noticed but that are not this stream's to fix — list every one still relevant, even ones you (or the implementer) reported before, since your findings list replaces the previous iteration's, it does not add to it.\n\n" +
             'End your reply with JSON matching: { "verdict": "clean"|"issues", "issues": [{ "title": "...", "detail": "...", "file": "path/to/file" }], "findings": [{ "title": "...", "body": "...", "severity": "low"|"medium"|"high", "file": "path/to/file" }] } — verdict is "clean" ONLY when issues is empty.',

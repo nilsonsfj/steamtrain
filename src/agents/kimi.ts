@@ -3,6 +3,7 @@ import { kimiEnvelope, kimiMessage } from "../types/raw-kimi";
 import type { AgentAdapter, AgentRunOptions } from "./adapter";
 import { runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
+import { permissionArgs } from "./permissions";
 import { stringifyContent } from "./util";
 
 const AGENT: AgentId = "kimi";
@@ -130,6 +131,7 @@ export function buildKimiRunArgs(opts: AgentRunOptions): string[] {
     opts.model,
     "--output-format",
     "stream-json",
+    ...permissionArgs(AGENT, opts.permissions),
     ...(opts.extraArgs ?? []),
     "-p",
     opts.prompt,

@@ -123,6 +123,8 @@ imports it through `src/tui/workflow-state.ts`; the web bundles it as
 | Per-step **model** override | ✅ | ✅ | TUI: `/model` **or** step editor (Ctrl+E); Web modal |
 | Per-step **effort** override | ✅ | ✅ | TUI: `/effort` **or** step editor (Ctrl+E); Web modal |
 | Per-step **prompt** editing | ✅ | ✅ | TUI: `/prompt <text>` **or** step editor (Ctrl+E → Enter on the prompt field); Web modal |
+| Per-step **permissions** (sandbox profile) | ✅ | ✅ | TUI: `/permissions [read-only\|edit\|full\|clear] [--all]`; Web: **Permissions** select per step in the configure modal (save or "Try without saving"). Both surface the profile badge + enforcement per step, and the run's sandbox summary before launch (`permissions.md`) |
+| Clamp a pending step's sandbox mid-run | ✅ | ✅ | TUI: `p` then `e` → sandbox row (←/→); Web: paused step card → **Edit step** → Permissions; CLI `workflow edit-step --permissions` (`mid-run-steering.md`) |
 | In-place step editor | ✅ | ✅ | TUI: Ctrl+E on a selected preview step opens `WorkflowStepEditor` (↑/↓ field · ←/→ change agent/model/effort · Enter edit prompt); stages the same session overrides as the slash commands. Web: per-step configure modal |
 | Edit workflow **name** | ✅ | ✅ | TUI `/rename-workflow <old> <new>`; Web modal |
 | Edit workflow **description** | ✅ | ✅ | TUI `/describe-workflow <name> <desc>`; Web modal |

@@ -754,6 +754,9 @@ function StepRow({
       ? ` @${basename(step.cwd)}`
       : "";
   const item = step.item ? ` item ${step.item.index}: ${truncate(step.item.value, 24)}` : "";
+  // Sandbox marker, ASCII for the same reason the worktree marker is: an emoji
+  // lock is ambiguous-width and tips every sandboxed row past the frame.
+  const perms = permissionsRowMarker(step);
   const meta = stepMeta(step, now);
   const marker = selected ? " > " : "   ";
   const glyphPart = `${glyph.symbol} `;
@@ -766,7 +769,7 @@ function StepRow({
   // measures unconstrained content width, painting ghost border glyphs
   // between fan-out children and pushing the header off-screen.
   let room = Math.max(0, width - stringWidth(prefix));
-  const midRaw = `${runner ? `  ${runner}` : ""}${target}${item}`;
+  const midRaw = `${runner ? `  ${runner}` : ""}${perms}${target}${item}`;
   const midPart = midRaw ? truncateToWidth(midRaw, room) : "";
   room = Math.max(0, room - stringWidth(midPart));
   const metaRaw = meta ? `  ${meta}` : "";
@@ -797,6 +800,20 @@ function StepRow({
   );
 }
 
+/**
+ * Compact per-row sandbox marker: `[ro]` read-only, `[ed]` edit, `[ro!]` when a
+ * read-only step actually changed its workspace. `full` gets nothing — it is
+ * the historical behavior, and the row's job is to flag the restricted ones.
+ */
+function permissionsRowMarker(step: StepState): string {
+  const record = step.result?.permissions;
+  if (record?.violations?.length) return " [ro!]";
+  const profile = record?.profile ?? step.permissions?.profile;
+  if (profile === "read-only") return " [ro]";
+  if (profile === "edit") return " [ed]";
+  return "";
+}
+
 /** One line each: worktree/cwd, data flow (inputs/item), error. */
 function buildDetailContext(step: StepState, width: number): { text: string; color: string }[] {
   const lines: { text: string; color: string }[] = [];
@@ -820,6 +837,15 @@ function buildDetailContext(step: StepState, width: number): { text: string; col
   if (flow.length > 0) lines.push({ text: `← ${flow.join(" · ")}`, color: "gray" });
   if (step.status === "error" && step.result?.error) {
     lines.push({ text: `✗ ${step.result.error}`, color: "red" });
+  }
+  // A permission violation gets its own line even next to the error text: which
+  // paths a "read-only" step touched is the actionable part.
+  const violations = step.result?.permissions?.violations;
+  if (violations?.length) {
+    lines.push({
+      text: `! read-only violated: ${violations.slice(0, 4).join(", ")}${violations.length > 4 ? `, +${violations.length - 4} more` : ""}`,
+      color: "red",
+    });
   }
   return lines.map((line) => ({
     ...line,

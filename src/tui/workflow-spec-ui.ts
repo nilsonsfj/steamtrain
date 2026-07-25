@@ -11,11 +11,18 @@ import {
   OPENCODE_MODELS,
   formatAgentTarget,
 } from "../agents";
+import {
+  type PermissionsSpec,
+  permissionsBadge,
+  permissionsLabel,
+  resolvePermissions,
+} from "../agents/permissions";
 import { truncate } from "../agents/util";
 import type { AgentInstanceId } from "../types/events";
 import {
   type GateCondition,
   type LlmStep,
+  type StepPermissionVerdict,
   type SubWorkflowView,
   type WorkflowPhase,
   type WorkflowSpec,
@@ -24,6 +31,7 @@ import {
   formatSubWorkflowTarget,
   isAgentBackedStep,
   llmStepApiId,
+  permissionEnforcementNote,
   renderPrompt,
   resolveInputs,
   subWorkflowRollup,
@@ -37,6 +45,32 @@ export type ResolveWorkflow = (name: string) => WorkflowSpec | undefined;
 export interface PreviewRenderContext {
   input?: string;
   inputs?: Record<string, string | number | boolean>;
+  /**
+   * Per-step permission verdicts (profile + whether the pinned agent can
+   * actually enforce it), keyed by step id. Supplied by the surfaces that have
+   * the config in hand; absent ⇒ permission chrome falls back to the step's own
+   * declaration and says nothing about enforcement.
+   */
+  permissions?: Record<string, StepPermissionVerdict>;
+}
+
+/** Permission chrome for one step: the badge and, when known, its enforcement. */
+function permissionBits(
+  step: WorkflowStep,
+  ctx: PreviewRenderContext,
+): { badge: string; note?: string; blocking: boolean } | undefined {
+  const verdict = ctx.permissions?.[step.id];
+  const declared = (step as { permissions?: PermissionsSpec }).permissions;
+  const perms = verdict?.permissions ?? resolvePermissions(declared);
+  if (!perms) return undefined;
+  // `permissionsLabel` starts with the profile name; swap that prefix for the
+  // badge glyph so "read-only +1 allow" reads "🔒 read-only +1 allow".
+  const extras = permissionsLabel(perms).slice(perms.profile.length);
+  return {
+    badge: `${permissionsBadge(perms.profile)}${extras}`,
+    note: verdict ? permissionEnforcementNote(verdict) : undefined,
+    blocking: verdict?.blocking === true,
+  };
 }
 
 /**
@@ -214,6 +248,12 @@ export function specStepRowMeta(
   resolve?: ResolveWorkflow,
 ): string {
   const bits: string[] = [];
+  // The sandbox badge leads the row meta: rows truncate from the right, and
+  // "can this step write to my repo?" must never be the thing that gets cut.
+  const permissions = permissionBits(step, ctx);
+  if (permissions) {
+    bits.push(permissions.blocking ? `${permissions.badge} ⚠ unenforceable` : permissions.badge);
+  }
   if (step.dependsOn?.length) bits.push(`deps: ${step.dependsOn.join(", ")}`);
   if ("forEach" in step && step.forEach) bits.push(`forEach: ${step.forEach}`);
   if ("workspace" in step && step.workspace) bits.push(`workspace: ${step.workspace}`);
@@ -267,6 +307,25 @@ export function specDetailLines(
   }
   if ("extraArgs" in step && step.extraArgs?.length) {
     lines.push(`extraArgs: ${step.extraArgs.map((arg) => previewRender(arg, ctx)).join(" ")}`);
+  }
+  const stepPermissions = permissionBits(step, ctx);
+  if (stepPermissions) {
+    // One line, so a locked-down step never crowds out its own prompt: badge,
+    // who enforces it, and whether the workspace is checked afterwards.
+    const verdict = ctx.permissions?.[step.id];
+    const suffix = [
+      stepPermissions.note,
+      verdict?.permissions.verify ? "workspace verified after the run" : undefined,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    lines.push(`permissions: ${stepPermissions.badge}${suffix ? ` · ${suffix}` : ""}`);
+    if (verdict?.permissions.allow.length) {
+      lines.push(`  also allowed: ${verdict.permissions.allow.join(", ")}`);
+    }
+    if (verdict?.permissions.deny.length) {
+      lines.push(`  always denied: ${verdict.permissions.deny.join(", ")}`);
+    }
   }
   if ("effort" in step && step.effort) {
     const effort = previewRenderOptional(step.effort, ctx);

@@ -452,8 +452,9 @@ export async function runGitText(
   args: string[],
   cwd: string,
   signal?: AbortSignal,
+  env?: Record<string, string>,
 ): Promise<string> {
-  return (await runGit(args, cwd, undefined, signal)).toString("utf8");
+  return (await runGit(args, cwd, undefined, signal, env)).toString("utf8");
 }
 
 export function runGit(

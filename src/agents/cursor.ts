@@ -16,6 +16,7 @@ import {
 } from "../types/raw-cursor";
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
+import { permissionArgs } from "./permissions";
 import { stringifyContent } from "./util";
 
 const AGENT: AgentInstanceId = "cursor";
@@ -61,6 +62,7 @@ export function buildCursorRunArgs(opts: AgentRunOptions): string[] {
     "--model",
     resolveCursorModel(opts.model, opts.effort),
     ...(opts.resumeSessionId ? ["--resume", opts.resumeSessionId] : []),
+    ...permissionArgs("cursor", opts.permissions),
     ...(opts.extraArgs ?? []),
     opts.prompt,
   ];

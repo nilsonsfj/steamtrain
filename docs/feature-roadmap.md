@@ -96,6 +96,23 @@ scratch clone" and "I'll run this on my actual repo." Worktree isolation
 protects the tree; this protects everything else (shell, network, files
 outside the repo).
 
+> **Shipped** — see [`permissions.md`](permissions.md). A `permissions` field on
+> every agent-backed step (plus workflow-level, sub-workflow-call, and
+> project/user-config defaults) with the three cross-agent profiles
+> `read-only` / `edit` / `full` and explicit `allow`/`deny` lists for power
+> users. Each adapter maps them to native flags (claude
+> `--permission-mode` + `--allowedTools`/`--disallowedTools`, codex
+> `--sandbox`, opencode's read-only `plan` agent); the engine refuses to launch
+> a step whose agent cannot honor the profile (`onUnsupported: "warn"` opts
+> out), re-plans per attempt across model failover, and independently verifies
+> after every `read-only` step that its workspace is byte-identical — failing
+> it, with the offending paths, when it is not. Surfaced in the TUI preview
+> (sandbox summary + per-step badges + `/permissions`), the web UI (workflow and
+> step badges, drawer rows), `workflow plan`/`list`, headless run logs, and the
+> run record. Bundled `multi-plan`, `bug-hunt`, and `target-sweep` are now
+> read-only end to end; `review-loop` and `mainline-stream` review steps are
+> read-only.
+
 ## 1.4 Detached runs and a run queue (reattach from any UI)
 
 > Shipped — see [`detached-runs.md`](detached-runs.md). `workflow run

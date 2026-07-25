@@ -2,6 +2,7 @@ import { stripAnsi } from "../text";
 import type { AgentEvent, AgentId } from "../types/events";
 import { type AgentAdapter, type AgentRunOptions } from "./adapter";
 import type { AgentModel } from "./agent-model";
+import { permissionArgs } from "./permissions";
 import { type ProcessLine, type ProcessRunOptions, runProcessLines } from "./spawn";
 import { firstLine } from "./util";
 
@@ -57,6 +58,7 @@ export function buildKiroExecArgs(opts: AgentRunOptions): string[] {
     "--model",
     opts.model,
     ...(opts.effort ? ["--effort", opts.effort] : []),
+    ...permissionArgs("kiro", opts.permissions),
     ...(opts.extraArgs ?? []),
     "--",
     opts.prompt,

@@ -130,6 +130,21 @@ each step changed, and `history apply <id>` merges those changes into your
 checkout as uncommitted edits. Apply is pre-checked and all-or-nothing; the merge
 happens in a throwaway staging worktree, so a failure never damages your repo.
 
+### Tell a reviewer it *cannot* write
+
+Isolation protects your checkout; permissions protect everything else. Any agent
+step can declare a sandbox profile — `read-only`, `edit`, or `full` — and the
+engine makes it stick three ways: it translates the profile into the CLI's native
+flags (`claude --permission-mode` + tool allow/deny lists, `codex --sandbox`,
+opencode's read-only `plan` agent), it **refuses to launch** a restricted step on
+an agent that cannot enforce it, and after every `read-only` step it compares the
+workspace against a fingerprint taken before the agent started — failing the step,
+with the offending paths, if anything changed. Declare it once at the workflow
+level (or repo-wide in `steamtrain.json`) and every step is read-only until it
+says otherwise. `bug-hunt`, `multi-plan`, and `target-sweep` ship read-only end to
+end; `/permissions read-only --all` locks down someone else's workflow before you
+run it. See [docs/permissions.md](docs/permissions.md).
+
 ### Know exactly what it cost
 
 steamtrain normalizes every agent's usage into one token model (input, output,
@@ -520,7 +535,8 @@ Override any subset in the working directory:
   "binaries": { "opencode": "/opt/homebrew/bin/opencode" }, // optional path overrides
   "stepTimeoutSec": 900,                                    // per-agent subprocess limit (default 15m = 900)
   "workflowTimeoutSec": 1800,                               // optional whole-run cap; omit = (loop-aware) steps × stepTimeoutSec
-  "maxConcurrency": 5                                       // parallel steps per run (≤ 16, default 5)
+  "maxConcurrency": 5,                                      // parallel steps per run (≤ 16, default 5)
+  "permissions": "read-only"                                // repo-wide sandbox default for agent steps — see docs/permissions.md
   // "agents": [ … ]      // extra agent instances — see docs/agent-configuration.md
   // "apis": [ … ]        // API endpoints for llm steps — see docs/api-configuration.md
   // "workflows": { … }   // see “Workflows” below
@@ -573,6 +589,7 @@ Workflow documentation:
 - [`docs/workflow-overview.md`](docs/workflow-overview.md) — mental model, diagrams, execution behavior
 - [`docs/workflow-examples.md`](docs/workflow-examples.md) — patterns and bundled workflow walkthroughs
 - [`docs/workflow-spec.md`](docs/workflow-spec.md) — language reference
+- [`docs/permissions.md`](docs/permissions.md) — per-step tool permissions and sandbox profiles
 - [`docs/worktree-merge-back.md`](docs/worktree-merge-back.md) — worktree isolation and the `merge` step
 
 ### Bundled workflows
@@ -580,10 +597,10 @@ Workflow documentation:
 | name         | what it does                                                                                                                         |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `tour`       | A $0, agentless guided ride through the engine: fan-out, parallel command cars, a `when` skip, a loop-back gate, and a consolidated arrival report. Runs with zero credentials. |
-| `multi-plan` | Distributes planning lenses, drafts from two independent angles (claude + opencode), critiques both, then synthesizes the strongest merged plan. |
-| `bug-hunt`   | Sweeps a scope for logic / error-handling / security bugs in parallel across three models, cross-checks to drop false positives, gates verified findings, then reports them. |
-| `target-sweep` | Distributes a request into target areas, dynamically creates one processor run per item, then consolidates the generated outputs. |
-| `review-loop` | Implements, then reviews and fixes in a bounded loop-back gate until the review reports "DONE" (or the iteration cap is hit). |
+| `multi-plan` | Distributes planning lenses, drafts from two independent angles (claude + opencode), critiques both, then synthesizes the strongest merged plan. Fully `read-only`. |
+| `bug-hunt`   | Sweeps a scope for logic / error-handling / security bugs in parallel across three models, cross-checks to drop false positives, gates verified findings, then reports them. Fully `read-only`: it reports bugs, it cannot touch the repo. |
+| `target-sweep` | Distributes a request into target areas, dynamically creates one processor run per item, then consolidates the generated outputs. Fully `read-only`. |
+| `review-loop` | Implements, then reviews and fixes in a bounded loop-back gate until the review reports "DONE" (or the iteration cap is hit). The review step is `read-only` — it cannot edit the code it is reviewing. |
 | `quick-triage` | Splits a request into concerns, assesses each in parallel, and gates on a typed verdict — built entirely on direct-API `llm` steps: no agent CLI needed, just `ANTHROPIC_API_KEY`. |
 | `mainline` | Plans independent execution streams, fans each out to `mainline-stream` in its own worktree, merges via `mode: "worktree"` with agent conflict resolution, runs one final review/fix/test loop on the merge, opens a PR (or leaves a branch), and files out-of-scope findings as GitHub issues (or a report). See [docs/mainline-pipeline.md](docs/mainline-pipeline.md). |
 | `mainline-stream` | The per-stream pipeline `mainline` fans out to: implement in a worktree, then loop review → fix → test (via `workspace: "attach:"`, so each iteration sees the previous one's fixes) until clean. Standalone-runnable. |

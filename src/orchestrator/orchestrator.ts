@@ -23,6 +23,7 @@ import {
   timeoutMsFromSec,
   validateWorkflow,
   workflowAgentIds,
+  workflowPermissionPreflight,
 } from "../workflow";
 import type { PlanRerouteOptions, PlanRerouteResult } from "../workflow";
 import type { ApprovalProvider, HumanInputProvider, WorkflowRunControl } from "../workflow";
@@ -212,7 +213,33 @@ export class Orchestrator {
     if (llmIssues.length > 0) {
       return { ok: false, reason: llmIssues[0] as string };
     }
+
+    // Permissions gate: a step that declares a profile its agent cannot enforce
+    // is refused here, on the BOUND spec (so `modelClass`/model-only steps are
+    // judged by the agent they will actually run on). Failing at dispatch beats
+    // failing at step 7 of 9, and beats the alternative — running a "read-only"
+    // review step with full write access.
+    const permissions = workflowPermissionPreflight(bound.spec, this.config);
+    if (permissions.errors.length > 0) {
+      return { ok: false, reason: permissions.errors[0] as string };
+    }
     return { ok: true };
+  }
+
+  /**
+   * Non-blocking permission notes for a workflow (profiles running unenforced
+   * by opt-in, or only partially enforced). Surfaced next to the dispatch state
+   * in the preview/launch surfaces so "read-only" never quietly means less than
+   * it says.
+   */
+  workflowPermissionWarnings(spec: WorkflowSpec): string[] {
+    const isReady = (agent: AgentInstanceId): boolean => {
+      const instance = resolveAgentInstance(this.config, agent);
+      if (!instance) return false;
+      return this.agentHealth(agent)?.status === "ok";
+    };
+    const bound = resolveWorkflowBindings(spec, { config: this.config, isReady });
+    return workflowPermissionPreflight(bound.ok ? bound.spec : spec, this.config).warnings;
   }
 
   /**

@@ -32,6 +32,7 @@ import {
   type LoadedWorkflowCatalog,
   MAX_WORKFLOW_NESTING_DEPTH,
   MergeConflictError,
+  type PermissionSummary,
   WORKFLOW_CACHE_DIR,
   WORKFLOW_HISTORY_DIR,
   WORKFLOW_RUNS_DIR,
@@ -47,6 +48,7 @@ import {
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   finalRunWorktrees,
+  formatPermissionSummary,
   harvestRunWorktrees,
   isAgentBackedStep,
   isTerminalLiveRunStatus,
@@ -60,6 +62,8 @@ import {
   resolveInputs,
   resolveStepTimeoutSec,
   workflowAutonomy,
+  workflowPermissionPreflight,
+  workflowPermissionSummary,
   workflowSpecSchema,
   workflowStepKind,
   worktreeDiff,
@@ -272,6 +276,14 @@ interface WorkflowListItem {
   agents: string[];
   /** Autonomy potential: runs unattended, needs approvals, or needs input. */
   autonomy: WorkflowAutonomy;
+  /**
+   * Sandbox posture: agent steps per permission profile, plus how many run with
+   * no profile at all. Rendered as a badge + a one-line summary on the workflow
+   * card so "will this touch my repo?" is answerable before launching.
+   */
+  permissions: PermissionSummary & { summary?: string };
+  /** Non-blocking permission notes (profiles running unenforced / partially). */
+  permissionWarnings?: string[];
   /** Dispatch-gate failure reason (absent when runnable or health is still unknown). */
   blocked?: string;
   /** Present when the blocked steps can be re-routed to a ready agent for a run. */
@@ -290,6 +302,7 @@ function summarizeWorkflow(
   spec: WorkflowSpec,
   source: WorkflowSourceKind | undefined,
   resolve?: (child: string) => WorkflowSpec | undefined,
+  config?: SteamtrainConfig,
 ): WorkflowListItem {
   const kinds: Record<string, number> = {};
   const agents = new Set<string>();
@@ -311,6 +324,15 @@ function summarizeWorkflow(
     kinds,
     agents: [...agents],
     autonomy: workflowAutonomy(spec, resolve),
+    permissions: (() => {
+      const summary = workflowPermissionSummary(spec, config);
+      const line = formatPermissionSummary(summary);
+      return line ? { ...summary, summary: line } : summary;
+    })(),
+    permissionWarnings: (() => {
+      const warnings = workflowPermissionPreflight(spec, config).warnings;
+      return warnings.length > 0 ? warnings : undefined;
+    })(),
   };
 }
 
@@ -768,7 +790,7 @@ function checkCsrf(
  *   POST   /api/runs/:id/pause      stop scheduling new steps (in-flight finish)
  *   POST   /api/runs/:id/resume     continue a paused run
  *   POST   /api/runs/:id/detach     hand a running run off to a background process
- *   POST   /api/runs/:id/edit-step  { stepId, prompt?/cmd?/model?/effort? } — edit a pending step while paused
+ *   POST   /api/runs/:id/edit-step  { stepId, prompt?/cmd?/model?/effort?/permissions? } — edit a pending step while paused
  *   POST   /api/runs/:id/approval   resolve a human-approval checkpoint
  *   POST   /api/runs/:id/input      answer a human-input request (human step / agent question)
  *   POST   /api/overrides/flush     flush staged session overrides -> { saved, skipped, unchanged }
@@ -1014,6 +1036,7 @@ async function handle(
           spec,
           deps.workflowSource?.(name),
           (child) => all[child],
+          deps.config,
         );
         if (doctorReady && item.agents.length > 0) {
           const check = deps.host.canDispatchWorkflowSpec(spec);
@@ -1408,7 +1431,7 @@ async function handle(
       }
       params = Object.keys(resolved.values).length > 0 ? resolved.values : undefined;
     }
-    const plan = planWorkflow(effectiveSpec, parsed.input.trim(), params);
+    const plan = planWorkflow(effectiveSpec, parsed.input.trim(), params, deps.config);
     // The static topology explains what will execute; completed local runs add
     // observed cost and duration so the launch decision is grounded in evidence,
     // not an invented estimate. Missing or unreadable history intentionally
@@ -1845,6 +1868,7 @@ async function handle(
       cmd?: unknown;
       model?: unknown;
       effort?: unknown;
+      permissions?: unknown;
     };
     try {
       parsed = body ? JSON.parse(body) : {};
@@ -1861,9 +1885,11 @@ async function handle(
     if (typeof parsed.cmd === "string") patch.cmd = parsed.cmd;
     if (typeof parsed.model === "string") patch.model = parsed.model;
     if (typeof parsed.effort === "string") patch.effort = parsed.effort;
+    if (typeof parsed.permissions === "string") patch.permissions = parsed.permissions;
     if (Object.keys(patch).length === 0) {
       sendJson(res, 400, {
-        error: "body must include at least one of 'prompt', 'cmd', 'model', 'effort'",
+        error:
+          "body must include at least one of 'prompt', 'cmd', 'model', 'effort', 'permissions'",
       });
       return;
     }

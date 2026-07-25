@@ -6,6 +6,7 @@ import {
   lastAntigravityConversationForCwd,
   recoverAntigravityTranscriptText,
 } from "./antigravity-transcript";
+import { permissionArgs } from "./permissions";
 import { type ProcessLine, type ProcessRunOptions, runProcessLines } from "./spawn";
 import { firstLine } from "./util";
 
@@ -148,6 +149,7 @@ export function buildAntigravityRunArgs(opts: AgentRunOptions): string[] {
     "accept-edits",
     ...(opts.resumeSessionId ? ["--conversation", opts.resumeSessionId] : []),
     ...(printTimeout ? ["--print-timeout", printTimeout] : []),
+    ...permissionArgs("antigravity", opts.permissions),
     ...(opts.extraArgs ?? []),
     "--print",
     opts.prompt,

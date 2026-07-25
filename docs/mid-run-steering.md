@@ -35,6 +35,7 @@ run may be edited:
 | `prompt` | worker / processor / `llm` / consolidator / approval / agent-backed distributor |
 | `cmd`    | `command` steps |
 | `model`, `effort` | agent-backed and `llm` steps |
+| `permissions` | agent-backed steps — clamp (or clear) the step's sandbox profile before it runs |
 
 Edits never change the graph (no ids, dependencies, or fan-out shape). The
 engine validates each edit against the live spec and rejects it with a clear
@@ -45,6 +46,15 @@ downstream steps consume its new output as usual.
 
 Inside a loop, steps of the region being re-run become editable again while
 paused between iterations.
+
+Editing `permissions` is the "wait — that one shouldn't be able to write"
+intervention: pause, set the pending step to `read-only` (or `edit` / `full`,
+or clear it to inherit the workflow default), resume. The engine applies the
+same rules it applies at authoring time — it rejects a profile on a step with
+no agent, `read-only` on a merge step or on a step that declares `artifacts`,
+and any unknown profile name — and a step clamped to `read-only` gets the same
+post-run workspace verification as one that declared it in the spec. See
+[`permissions.md`](permissions.md).
 
 ### Resume
 
@@ -62,13 +72,13 @@ step's result is flagged. A steered run is still an honest record.
 
 **TUI** — during a live run press `p` to pause (press again to resume). While
 paused, pick a pending step with `↑/↓` and press `e` to open the editor; edit
-the prompt/command and (for agent-backed steps) cycle model/effort with ←/→,
-`Enter` applies the whole patch as one recorded edit, `Esc` discards.
+the prompt/command and (for agent-backed steps) cycle model/effort/sandbox with
+←/→, `Enter` applies the whole patch as one recorded edit, `Esc` discards.
 
 **Web UI** — the run bar gains a **⏸ Pause / ▶ Resume** button next to
 Cancel. While paused, pending step cards show an **✎ Edit step** button that
-opens the prompt/command editor, plus model/effort selects for agent-backed
-steps. Works for the page's own runs and for attached runs owned by other
+opens the prompt/command editor, plus model/effort and **Permissions** selects
+for agent-backed steps. Works for the page's own runs and for attached runs owned by other
 processes.
 
 **CLI** — works on any live run in the project, whoever owns it (TUI, web,
@@ -81,6 +91,7 @@ steamtrain workflow edit-step <runId> <stepId> --prompt "the corrected prompt"
 steamtrain workflow edit-step <runId> <stepId> --prompt-file fixed-prompt.txt
 steamtrain workflow edit-step <runId> <stepId> --cmd "npm test -- --filter auth"
 steamtrain workflow edit-step <runId> <stepId> --model claude-opus-4-8 --effort high
+steamtrain workflow edit-step <runId> <stepId> --permissions read-only   # or edit / full / none
 steamtrain workflow resume <runId>
 ```
 
@@ -92,7 +103,7 @@ prints the accept/reject verdict.
 ```
 POST /api/runs/:id/pause
 POST /api/runs/:id/resume
-POST /api/runs/:id/edit-step   { "stepId": "...", "prompt"/"cmd"/"model"/"effort": "..." }
+POST /api/runs/:id/edit-step   { "stepId": "...", "prompt"/"cmd"/"model"/"effort"/"permissions": "..." }
 ```
 
 ## Cross-process plumbing

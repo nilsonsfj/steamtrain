@@ -1,3 +1,4 @@
+import type { PermissionsSpec } from "../agents/permissions";
 import type { ProjectConfigPatch } from "../config/project-config";
 import type { AgentInstanceConfig, ApiInstanceConfig, SteamtrainConfig } from "../config/types";
 import type { UserConfigPatch } from "../config/user-config";
@@ -18,6 +19,8 @@ export interface WorkflowStepSelection {
   cwd?: string;
   env?: Record<string, string>;
   extraArgs?: string[];
+  /** Declared tool-permission profile / object, when the step has one. */
+  permissions?: PermissionsSpec;
   stepTimeoutSec?: number;
 }
 
@@ -42,13 +45,21 @@ export interface SlashCommandContext {
   version: string;
   /** Set when workflow preview has an agent-backed step selected. */
   workflowStep?: WorkflowStepSelection;
-  /** Patch agent/model/prompt/effort/cwd/env/extraArgs/timeout on a workflow step (session-only). */
+  /** Patch agent/model/prompt/effort/cwd/env/extraArgs/permissions/timeout on a workflow step (session-only). */
   updateWorkflowStep?: (
     stepId: string,
     patch: Partial<
       Pick<
         WorkflowStepSelection,
-        "agent" | "model" | "prompt" | "effort" | "stepTimeoutSec" | "cwd" | "env" | "extraArgs"
+        | "agent"
+        | "model"
+        | "prompt"
+        | "effort"
+        | "stepTimeoutSec"
+        | "cwd"
+        | "env"
+        | "extraArgs"
+        | "permissions"
       >
     >,
   ) => void;

@@ -1,10 +1,12 @@
+import { type PermissionsSpec, effectivePermissions } from "../agents/permissions";
 import type { AgentEvent, AgentInstanceId } from "../types/events";
 import type { ApprovalRejectDisposition } from "./approval";
 import type { StepEditPatch } from "./control";
-import type { WorkflowEvent } from "./events";
+import type { StepPermissionsInfo, WorkflowEvent } from "./events";
 import type { RunRecord } from "./history";
 import { llmStepApiId } from "./llm";
 import type { WorktreeDiff } from "./merge";
+import { isAgentBackedStep } from "./step-kind";
 import type {
   AgentWorktreeInfo,
   GateStep,
@@ -15,6 +17,32 @@ import type {
 } from "./types";
 
 export type StepStatus = "pending" | "running" | "done" | "error";
+
+/**
+ * Effective permissions for a spec step in a PREVIEW (before any run exists):
+ * the step's own declaration, else the workflow's default. The project/user
+ * config layer is deliberately absent here — the reducer runs in the browser
+ * too and has no config — so a preview badge can only ever under-report, never
+ * claim a restriction that isn't there. Live runs get the fully-resolved value
+ * from `step_start`.
+ */
+function specStepPermissions(
+  step: WorkflowSpec["phases"][number]["steps"][number],
+  spec: WorkflowSpec,
+): StepPermissionsInfo | undefined {
+  // Only agent-backed steps have a CLI to restrict, so a workflow-level default
+  // must not badge a gate/command/llm step it does not apply to.
+  if (!isAgentBackedStep(step)) return undefined;
+  const declared = (step as { permissions?: PermissionsSpec }).permissions;
+  const perms = effectivePermissions([declared, spec.permissions]);
+  if (!perms) return undefined;
+  return {
+    profile: perms.profile,
+    ...(perms.allow.length > 0 ? { allow: perms.allow.length } : {}),
+    ...(perms.deny.length > 0 ? { deny: perms.deny.length } : {}),
+    ...(perms.verify ? { verify: true } : {}),
+  };
+}
 
 /**
  * Human-approval checkpoint state attached to an `approval` step / human gate.
@@ -105,6 +133,12 @@ export interface StepState {
   model?: string;
   effort?: string;
   cwd?: string;
+  /**
+   * Effective tool permissions (`read-only` / `edit` / `full`) the step runs
+   * under. Lands from `step_start` for a live run and from the spec for a
+   * preview, so every surface can badge a locked-down step.
+   */
+  permissions?: StepPermissionsInfo;
   /** For a `workflow` (sub-workflow) step, the name of the workflow it invokes. */
   workflow?: string;
   /** Earlier steps whose outputs feed this step. */
@@ -268,6 +302,7 @@ export function workflowStateFromSpec(spec: WorkflowSpec): WorkflowState {
         model: "model" in st ? st.model : undefined,
         effort: "effort" in st ? st.effort : undefined,
         cwd: "cwd" in st ? st.cwd : undefined,
+        permissions: specStepPermissions(st, spec),
         workflow: st.kind === "workflow" ? st.workflow : undefined,
         dependsOn: st.dependsOn,
         status: "pending",
@@ -479,6 +514,7 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
             model: e.model,
             effort: e.effort,
             cwd: e.cwd,
+            permissions: e.permissions,
             dependsOn: e.dependsOn,
             parentStepId: e.parentStepId,
             item: e.item,

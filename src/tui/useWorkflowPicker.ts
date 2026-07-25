@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { PermissionsSpec } from "../agents/permissions";
 import type { DoctorResult } from "../doctor";
 import type { Orchestrator } from "../orchestrator";
 import { homeRelativePath } from "../paths";
@@ -236,6 +237,7 @@ export function useWorkflowPicker({
           cwd?: string;
           env?: Record<string, string>;
           extraArgs?: string[];
+          permissions?: PermissionsSpec;
         }
       >,
     ) => {
@@ -263,6 +265,7 @@ export function useWorkflowPicker({
             cwd?: string;
             env?: Record<string, string>;
             extraArgs?: string[];
+            permissions?: PermissionsSpec;
           }
         >
       >,

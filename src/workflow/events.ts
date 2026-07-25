@@ -1,3 +1,4 @@
+import type { PermissionProfile } from "../agents/permissions";
 import type { AgentEvent, AgentFailureKind, AgentInstanceId, ApiInstanceId } from "../types/events";
 import type { ApprovalRejectDisposition } from "./approval";
 import type { WorktreeDiff } from "./merge";
@@ -44,12 +45,31 @@ export interface PhaseStartEvent extends IterationTagged {
   ts: number;
 }
 
+/**
+ * The tool-permission profile a step will run under, as known at dispatch time
+ * (the declared/effective profile — how much of it the CLI actually enforces is
+ * only knowable at spawn time and lands on {@link StepResult.permissions}).
+ * Carried on `step_start` so live views can badge a locked-down step from the
+ * moment it starts, not after it finishes.
+ */
+export interface StepPermissionsInfo {
+  profile: PermissionProfile;
+  /** Count of extra allowed tool patterns (`allow`), when any. */
+  allow?: number;
+  /** Count of denied tool patterns (`deny`), when any. */
+  deny?: number;
+  /** Post-run workspace verification is armed for this step. */
+  verify?: boolean;
+}
+
 export interface StepStartEvent extends IterationTagged {
   kind: "step_start";
   phaseId: string;
   stepId: string;
   blockKind?: WorkflowStepKind;
   agent?: AgentInstanceId;
+  /** Effective tool permissions for this step, when any profile applies. */
+  permissions?: StepPermissionsInfo;
   /** API instance a direct-inference `llm` step calls (agent steps carry `agent` instead). */
   api?: ApiInstanceId;
   model?: string;

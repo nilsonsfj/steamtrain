@@ -92,6 +92,12 @@ agent that isn't ready shows its fix inline — the install or login command —
 so getting set up never means leaving the manager to hunt for the command. The
 header carries a one-line readiness summary (`3/5 ready · 1 sign-in`).
 
+Each row also shows `perms=…`: the sandbox profiles this provider's CLI can
+actually enforce (`perms=read-only/edit` for claude and codex, `perms=read-only`
+for opencode/mimo, `perms=full only` for the agents whose headless mode is
+all-or-nothing). That is the answer to "can I put my read-only review steps on
+this agent?" — see [`permissions.md`](permissions.md).
+
 ## Web UI
 
 Every agent's live readiness is a **health chip** in the header. Click any chip
