@@ -16,6 +16,7 @@ model and diagrams, see [`workflow-overview.md`](workflow-overview.md).
 | static fan-out + dynamic processing | distributor + `forEach` processor | `target-sweep` |
 | distribute lenses + parallel drafts | distributor + workers | `multi-plan` |
 | cross-check + gate + report | consolidator + gate + consolidator | `bug-hunt` |
+| review → fix → re-review loop | workers + gate `loopTo` | `review-loop` |
 | audit many repos/services | distributor + `forEach` + gate | README `audit` example |
 | compose another workflow as one stage | `workflow` step | `release` |
 | plan → parallel streams → staged merge → PR | `workflow` forEach + merge `mode: "worktree"` + `attach:` | `mainline` |
@@ -348,7 +349,65 @@ Use when later phases should still run even if the condition is false.
 
 ---
 
-## Pattern 8: pure merge without an agent
+## Pattern 8: bounded review/fix loop
+
+Use a gate with `loopTo` for "keep going until clean" cycles. Full semantics:
+[`workflow-spec.md#loops-loopto`](workflow-spec.md#loops-loopto).
+
+```jsonc
+{
+  "phases": [
+    {
+      "id": "review",
+      "title": "Review",
+      "steps": [
+        {
+          "id": "review",
+          "agent": "claude",
+          "model": "claude-sonnet-4-6",
+          "prompt": "Review. Reply DONE if clean.\nPass {{iteration}}."
+        }
+      ]
+    },
+    {
+      "id": "fix",
+      "title": "Fix",
+      "steps": [
+        {
+          "id": "fix",
+          "agent": "claude",
+          "model": "claude-sonnet-4-6",
+          "dependsOn": ["review"],
+          "workspace": "attach:review",
+          "prompt": "Fix:\n{{steps.review.output}}"
+        }
+      ]
+    },
+    {
+      "id": "check",
+      "title": "Converged?",
+      "steps": [
+        {
+          "id": "converged",
+          "kind": "gate",
+          "dependsOn": ["fix"],
+          "condition": { "step": "review", "contains": "DONE" },
+          "loopTo": "review",
+          "maxIterations": 5,
+          "onFalse": "fail"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Prefer `workspace: "attach:…"` so every pass shares one worktree. The bundled
+`review-loop` workflow uses this shape.
+
+---
+
+## Pattern 9: pure merge without an agent
 
 Use when you only need structured concatenation, not synthesis.
 
@@ -377,7 +436,7 @@ Add a `prompt` if you want a template-shaped merge without spawning an agent.
 
 ---
 
-## Pattern 9: compose another workflow as one stage
+## Pattern 10: compose another workflow as one stage
 
 Use when a proven workflow (e.g. `bug-hunt`) should be embedded as one stage
 of a bigger pipeline, instead of being copy-pasted or hand-unrolled into the
@@ -426,7 +485,7 @@ stream folds into this run's own history rather than appearing as a separate
 run. The gate then routes on `bug-sweep`'s own `ok`, exactly as it would for
 any other step.
 
-## Pattern 10: plan → parallel sub-pipeline streams → staged merge → PR
+## Pattern 11: plan → parallel sub-pipeline streams → staged merge → PR
 
 Use when the task is too big for one pass but decomposes into independent
 chunks, each of which needs its OWN implement→review→fix→test loop, and the
@@ -491,9 +550,10 @@ Before running a new workflow:
 2. **Fan-out** — fixed parallel workers or `distributor` + `forEach`?
 3. **Dependencies** — does every `dependsOn` reference an earlier phase?
 4. **Gates** — is `onFalse` `continue`, `fail`, or `stop` intentional?
-5. **Cost** — how many agent runs will this spawn on a realistic input?
-6. **Validation** — `steamtrain workflow validate <name>`
-7. **Dry run** — start with a tiny input in the TUI or CLI
+5. **Loops** — does every `loopTo` name an earlier phase? Is `maxIterations` set?
+6. **Cost** — how many agent runs will this spawn on a realistic input?
+7. **Validation** — `steamtrain workflow validate <name>`
+8. **Dry run** — start with a tiny input in the TUI or CLI
 
 ---
 

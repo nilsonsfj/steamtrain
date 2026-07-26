@@ -184,14 +184,14 @@ resuming; claude, opencode, and codex do). See the
 
 ## Building blocks
 
-Workflows are composed from five block kinds.
+Workflows are composed from these step kinds.
 
 ```mermaid
 flowchart LR
   input["Workflow input"]
   dist["Distributor\nfan-out"]
   work["Worker / Processor\n1:1 agent work"]
-  gate["Gate\nfilter / route"]
+  gate["Gate\nfilter / route / loop"]
   cons["Consolidator\nfan-in"]
 
   input --> dist
@@ -205,13 +205,20 @@ flowchart LR
 | --- | --- | --- | --- |
 | `distributor` | split one input into many items | optional | task areas, targets, lenses |
 | `worker` / `processor` | one agent run per work item | yes | review, implement, analyze |
-| `gate` | evaluate a condition, emit state | no | readiness checks, quality bars |
+| `gate` | evaluate a condition, emit state, or loop | no | readiness checks, quality bars, review/fix cycles |
 | `consolidator` | merge prior outputs | optional | reports, synthesis, dedupe |
 | `command` | run a deterministic shell command | no | tests, linters, builds, scripts |
 | `llm` | one direct, stateless LLM API call (no agent CLI) | no | judge, classify, summarize, split |
-| `merge` | land agent worktree changes in the repo | conflict resolution only | apply/branch/PR delivery |
+| `merge` | land agent worktree changes in the repo | conflict resolution only | apply/branch/PR/staging delivery |
+| `approval` / `human` | pause for a person | no | consent checkpoint / typed data |
+| `workflow` | invoke another named workflow | child does | compose pipelines, fan-out sub-pipelines |
+| `issues` | collect findings into a report or GitHub issues | no | out-of-scope bug filing |
 
 Steps without `kind` are treated as `worker` blocks for backward compatibility.
+
+For field-by-field syntax of every kind - including loops (`loopTo`),
+workspaces, sessions, and permissions - see
+[`workflow-spec.md`](workflow-spec.md).
 
 ### When to use which block
 
@@ -380,8 +387,9 @@ Inside a `forEach` prompt:
 
 ### Rules and limits
 
-- `forEach` source must be a **distributor** in an **earlier phase**
-- source distributor must succeed (`ok: true`)
+- `forEach` source must be a **distributor** (or an **llm** splitter with items)
+  in an **earlier phase**
+- source must succeed (`ok: true`)
 - total static + generated steps cannot exceed **1000**
 - child runs respect `maxConcurrency`
 
@@ -516,6 +524,35 @@ flowchart TD
 | `continue` | stays `true` | yes | soft filter / annotate only |
 | `fail` | becomes `false` | no | hard quality bar |
 | `stop` | stays `true` | no | early exit without marking failure |
+
+---
+
+## Loops (`loopTo`)
+
+For iterative work (review → fix → re-review until clean), put a gate in a
+phase **after** the body and set `loopTo` to an earlier phase id:
+
+```jsonc
+{
+  "id": "converged",
+  "kind": "gate",
+  "dependsOn": ["fix"],
+  "condition": { "step": "review", "contains": "DONE" },
+  "loopTo": "review",
+  "maxIterations": 5,
+  "onFalse": "fail"
+}
+```
+
+- Condition true → loop converged; continue forward.
+- Condition false with iterations remaining → jump back to `loopTo` and re-run
+  the body (cache for those steps is cleared so they execute again).
+- Cap exhausted → apply `onFalse`.
+
+`{{iteration}}` is available inside the loop body (1-based). Prefer
+`workspace: "attach:<source>"` for review/fix loops so every pass shares one
+worktree. Full semantics, nesting rules, and budgets:
+[`workflow-spec.md#loops-loopto`](workflow-spec.md#loops-loopto).
 
 ---
 
