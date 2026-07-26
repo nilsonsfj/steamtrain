@@ -15,6 +15,7 @@
  */
 
 import { stripAnsi } from "../text";
+import { safeRegexTest } from "../util/safe-regex";
 
 /** A JSON Schema object (subset; see module docs for supported keywords). */
 export type JsonSchema = Record<string, unknown>;
@@ -169,12 +170,13 @@ export function validateAgainstSchema(
       add(`string is longer than maxLength ${schema.maxLength}`);
     }
     if (typeof schema.pattern === "string") {
-      try {
-        if (!new RegExp(schema.pattern).test(value)) {
-          add(`string does not match pattern ${schema.pattern}`);
-        }
-      } catch {
-        // invalid pattern in the schema — ignore, matching "unknown keyword" leniency
+      const match = safeRegexTest(schema.pattern, value);
+      if (!match.ok) {
+        // Unsafe / invalid patterns are treated as a schema error rather than
+        // silently ignored — an imported workflow must not ship ReDoS bombs.
+        add(`string pattern is unsafe or invalid: ${match.error}`);
+      } else if (!match.matched) {
+        add(`string does not match pattern ${schema.pattern}`);
       }
     }
   }

@@ -462,22 +462,32 @@ describe("lintTemplateRefs", () => {
         phase("p2", [command("run", { cmd: "echo {{input}} && cat {{steps.a.output}}" })]),
       ]);
       const warnings = lintTemplateRefs(s);
-      expect(warnings.some((w) => w.includes("interpolated into the shell unsanitized"))).toBe(
-        true,
-      );
+      expect(warnings.some((w) => w.includes("shell-quoted on expansion"))).toBe(true);
     });
 
     it("warns when a command cmd embeds only {{input}}", () => {
       const s = spec([phase("p1", [command("run", { cmd: "echo {{input}}" })])]);
       const warnings = lintTemplateRefs(s);
       expect(warnings).toEqual([expect.stringContaining("{{input}}")]);
-      expect(warnings[0]).toContain("interpolated into the shell unsanitized");
+      expect(warnings[0]).toContain("shell-quoted on expansion");
     });
 
     it("warns when a command cmd embeds {{args}} (input alias)", () => {
       const s = spec([phase("p1", [command("run", { cmd: "echo {{args}}" })])]);
       const warnings = lintTemplateRefs(s);
       expect(warnings).toEqual([expect.stringContaining("{{args}}")]);
+    });
+
+    it("warns about unsanitized expansion when allowShellTemplates is set", () => {
+      const s = spec([
+        phase("p1", [
+          command("run", { cmd: "echo {{input}}", allowShellTemplates: true } as never),
+        ]),
+      ]);
+      const warnings = lintTemplateRefs(s);
+      expect(warnings.some((w) => w.includes("interpolated into the shell unsanitized"))).toBe(
+        true,
+      );
     });
 
     it("does not warn for a static command", () => {

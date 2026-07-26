@@ -26,8 +26,16 @@ function harness(platform: NodeJS.Platform = "linux") {
       return new Response("ok");
     }) as typeof fetch,
     platform,
+    // Skip real DNS in unit tests; still exercise the denylist against returned IPs.
+    resolveHostname: async () => ["93.184.216.34"],
   };
   return { bells, spawns, posts, options };
+}
+
+/** Webhook POSTs are fire-and-forget after an async SSRF check — drain the queue. */
+async function flushNotify(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 const event: NotifyEvent = {
@@ -40,17 +48,19 @@ const event: NotifyEvent = {
 };
 
 describe("createNotifier", () => {
-  it("is a no-op without config or channels", () => {
+  it("is a no-op without config or channels", async () => {
     const { bells, spawns, posts, options } = harness();
     createNotifier(undefined, options).notify(event);
+    await flushNotify();
     createNotifier({}, options).notify(event);
+    await flushNotify();
     expect(bells).toHaveLength(0);
     expect(spawns).toHaveLength(0);
     expect(posts).toHaveLength(0);
     expect(createNotifier(undefined, options).wants("run-completed")).toBe(false);
   });
 
-  it("rings the bell, spawns notify-send on linux, and posts the webhook", () => {
+  it("rings the bell, spawns notify-send on linux, and posts the webhook", async () => {
     const { bells, spawns, posts, options } = harness("linux");
     const notifier = createNotifier(
       { bell: true, desktop: true, webhook: "https://hooks.example/x" },
@@ -58,6 +68,7 @@ describe("createNotifier", () => {
     );
     expect(notifier.wants("run-completed")).toBe(true);
     notifier.notify(event);
+    await flushNotify();
     expect(bells).toEqual(["\u0007"]);
     expect(spawns[0]).toMatchObject({ binary: "notify-send" });
     expect(spawns[0]!.args[0]).toContain("bug-hunt");
@@ -223,13 +234,14 @@ describe("notifyWorkflowEvent", () => {
 });
 
 describe("createNotifier with webhookFormat", () => {
-  it("posts Slack Block Kit payload when webhookFormat is 'slack'", () => {
+  it("posts Slack Block Kit payload when webhookFormat is 'slack'", async () => {
     const { posts, options } = harness();
     const notifier = createNotifier(
       { webhook: "https://hooks.slack.example/x", webhookFormat: "slack" },
       options,
     );
     notifier.notify(event);
+    await flushNotify();
     expect(posts).toHaveLength(1);
     const body = posts[0]!.body as { attachments?: { color: string; blocks: unknown[] }[] };
     expect(body.attachments).toHaveLength(1);
@@ -238,13 +250,14 @@ describe("createNotifier with webhookFormat", () => {
     expect((body as Record<string, unknown>).kind).toBeUndefined();
   });
 
-  it("posts Discord embed payload when webhookFormat is 'discord'", () => {
+  it("posts Discord embed payload when webhookFormat is 'discord'", async () => {
     const { posts, options } = harness();
     const notifier = createNotifier(
       { webhook: "https://discord.example/hook", webhookFormat: "discord" },
       options,
     );
     notifier.notify(event);
+    await flushNotify();
     expect(posts).toHaveLength(1);
     const body = posts[0]!.body as { embeds?: { color: number; title: string }[] };
     expect(body.embeds).toHaveLength(1);
@@ -252,13 +265,14 @@ describe("createNotifier with webhookFormat", () => {
     expect(body.embeds![0]!.title).toContain("bug-hunt");
   });
 
-  it("posts Teams Adaptive Card payload when webhookFormat is 'teams'", () => {
+  it("posts Teams Adaptive Card payload when webhookFormat is 'teams'", async () => {
     const { posts, options } = harness();
     const notifier = createNotifier(
       { webhook: "https://teams.example/hook", webhookFormat: "teams" },
       options,
     );
     notifier.notify(event);
+    await flushNotify();
     expect(posts).toHaveLength(1);
     const body = posts[0]!.body as {
       type?: string;
@@ -269,20 +283,22 @@ describe("createNotifier with webhookFormat", () => {
     expect(body.attachments![0]!.content.type).toBe("AdaptiveCard");
   });
 
-  it("posts raw NotifyEvent when webhookFormat is 'raw'", () => {
+  it("posts raw NotifyEvent when webhookFormat is 'raw'", async () => {
     const { posts, options } = harness();
     const notifier = createNotifier(
       { webhook: "https://hooks.example/x", webhookFormat: "raw" },
       options,
     );
     notifier.notify(event);
+    await flushNotify();
     expect(posts[0]!.body).toMatchObject({ kind: "run-completed", workflow: "bug-hunt" });
   });
 
-  it("posts raw NotifyEvent when webhookFormat is omitted", () => {
+  it("posts raw NotifyEvent when webhookFormat is omitted", async () => {
     const { posts, options } = harness();
     const notifier = createNotifier({ webhook: "https://hooks.example/x" }, options);
     notifier.notify(event);
+    await flushNotify();
     expect(posts[0]!.body).toMatchObject({ kind: "run-completed", workflow: "bug-hunt" });
   });
 });
@@ -297,47 +313,51 @@ describe("approval-pending webhook payloads include step-specific URL", () => {
     ts: 1,
   };
 
-  it("raw payload carries the step-specific url", () => {
+  it("raw payload carries the step-specific url", async () => {
     const { posts, options } = harness();
     const notifier = createNotifier(
       { webhook: "https://hooks.example/x", webhookFormat: "raw" },
       options,
     );
     notifier.notify(approvalEvent);
+    await flushNotify();
     expect(posts[0]!.body).toMatchObject({ url: "http://host:4317/#run-r1/step/review-gate" });
   });
 
-  it("Slack payload includes the step-specific url in action button", () => {
+  it("Slack payload includes the step-specific url in action button", async () => {
     const { posts, options } = harness();
     const notifier = createNotifier(
       { webhook: "https://hooks.slack.example/x", webhookFormat: "slack" },
       options,
     );
     notifier.notify(approvalEvent);
+    await flushNotify();
     const body = posts[0]!.body as { attachments?: { blocks: unknown[] }[] };
     const blocks = body.attachments![0]!.blocks;
     const json = JSON.stringify(blocks);
     expect(json).toContain("http://host:4317/#run-r1/step/review-gate");
   });
 
-  it("Discord payload includes the step-specific url", () => {
+  it("Discord payload includes the step-specific url", async () => {
     const { posts, options } = harness();
     const notifier = createNotifier(
       { webhook: "https://discord.example/hook", webhookFormat: "discord" },
       options,
     );
     notifier.notify(approvalEvent);
+    await flushNotify();
     const body = posts[0]!.body as { embeds?: { url?: string }[] };
     expect(body.embeds![0]!.url).toBe("http://host:4317/#run-r1/step/review-gate");
   });
 
-  it("Teams payload includes the step-specific url in action", () => {
+  it("Teams payload includes the step-specific url in action", async () => {
     const { posts, options } = harness();
     const notifier = createNotifier(
       { webhook: "https://teams.example/hook", webhookFormat: "teams" },
       options,
     );
     notifier.notify(approvalEvent);
+    await flushNotify();
     const json = JSON.stringify(posts[0]!.body);
     expect(json).toContain("http://host:4317/#run-r1/step/review-gate");
   });

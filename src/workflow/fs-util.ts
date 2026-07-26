@@ -8,19 +8,38 @@ import { dirname, resolve, sep } from "node:path";
  * two paths share no root). Used wherever a computed path gates a filesystem
  * operation that must stay inside a sandbox directory (worktree cwds, artifact
  * snapshot destinations).
+ *
+ * Checks both `/` and `\` separators so a forward-slash `../` cannot bypass
+ * the guard on Windows (where `sep` is `\`).
  */
 export function isOutside(rel: string): boolean {
-  return rel === ".." || rel.startsWith(`..${sep}`) || resolve(rel) === rel;
+  if (rel === ".." || resolve(rel) === rel) return true;
+  if (rel.startsWith("../") || rel.startsWith("..\\")) return true;
+  // Also catch the platform sep form (redundant on POSIX/Win after the above,
+  // but keeps the historical `..${sep}` check explicit).
+  if (rel.startsWith(`..${sep}`)) return true;
+  return false;
 }
+
+/** Maximum length for a single path-component id (run ids, step ids, …). */
+export const MAX_PATH_COMPONENT_LENGTH = 256;
 
 /**
  * Restrict an id to filesystem-safe characters for use as a single path
  * component. Ids are normally UUIDs/step ids, but be defensive against path
  * traversal. Shared by the history and live-run stores (their on-disk names
  * must agree so `::` in namespaced step ids always maps to `__`).
+ * Truncates to {@link MAX_PATH_COMPONENT_LENGTH} after sanitization.
  */
 export function sanitizePathComponent(id: string): string {
-  return id.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const cleaned = id.replace(/[^a-zA-Z0-9._-]/g, "_");
+  if (cleaned.length <= MAX_PATH_COMPONENT_LENGTH) return cleaned;
+  return cleaned.slice(0, MAX_PATH_COMPONENT_LENGTH);
+}
+
+/** True when a URL/path id is within length bounds before sanitization. */
+export function isValidPathId(id: string, maxLength = MAX_PATH_COMPONENT_LENGTH): boolean {
+  return id.length > 0 && id.length <= maxLength;
 }
 
 /**

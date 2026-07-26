@@ -6,6 +6,7 @@ import type {
   ApiInstanceId,
   ApiProviderId,
 } from "../types/events";
+import { isAllowedOutboundUrl } from "../util/safe-url-sync";
 import type { ModelFailoverPolicy } from "../workflow/model-failover";
 import type { NotifyConfig } from "../workflow/notify";
 import {
@@ -284,7 +285,18 @@ export const configFileSchema = z
       .object({
         bell: z.boolean().optional(),
         desktop: z.boolean().optional(),
-        webhook: z.string().url().optional(),
+        webhook: z
+          .string()
+          .url()
+          .refine(
+            (value) =>
+              isAllowedOutboundUrl(value, { allowLoopback: false, allowPrivateLan: false }),
+            {
+              message:
+                "webhook URL must not target loopback, private LAN, link-local, or cloud metadata hosts",
+            },
+          )
+          .optional(),
         webhookFormat: z.enum(["raw", "slack", "discord", "teams"]).optional(),
         events: z
           .array(

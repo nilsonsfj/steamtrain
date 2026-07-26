@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { lstat, readlink, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { STEAMTRAIN_STATE_DIR } from "./fs-util";
+import { dirname, join, relative, resolve } from "node:path";
+import { STEAMTRAIN_STATE_DIR, isOutside } from "./fs-util";
 import { runGit, runGitText } from "./worktree";
 
 /**
@@ -25,6 +25,10 @@ import { runGit, runGitText } from "./worktree";
  * `workspace: "attach:"` case, where an upstream step's edits are the starting
  * state): porcelain status would read ` M file` before and after and see
  * nothing, while the tree hash changes with the bytes.
+ *
+ * Outbound symlinks (links whose target resolves outside the workspace) are a
+ * separate blind spot: writing through one mutates bytes the tree hash never
+ * sees. {@link findOutboundSymlinks} rejects those before a read-only step runs.
  */
 
 /** A workspace's complete working state, as one git tree object. */
@@ -127,4 +131,41 @@ export function describeViolations(paths: readonly string[], limit = 8): string 
   const shown = paths.slice(0, limit);
   const rest = paths.length - shown.length;
   return shown.join(", ") + (rest > 0 ? `, +${rest} more` : "");
+}
+
+/**
+ * Paths of symlinks under `cwd` whose targets resolve outside the workspace.
+ * Used before read-only steps so an agent cannot exfiltrate or mutate bytes
+ * through a pre-existing outbound link the tree-hash fingerprint would miss.
+ */
+export async function findOutboundSymlinks(cwd: string, signal?: AbortSignal): Promise<string[]> {
+  try {
+    // Cached + untracked (honoring gitignore), same surface the fingerprint sees.
+    const out = await runGitText(
+      ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+      cwd,
+      signal,
+    );
+    const violations: string[] = [];
+    const root = resolve(cwd);
+    for (const rel of out.split("\0")) {
+      if (!rel) continue;
+      const abs = join(cwd, rel);
+      try {
+        const st = await lstat(abs);
+        if (!st.isSymbolicLink()) continue;
+        const target = await readlink(abs);
+        const resolved = resolve(dirname(abs), target);
+        const relToCwd = relative(root, resolved);
+        if (isOutside(relToCwd)) {
+          violations.push(`L ${rel} -> ${target}`);
+        }
+      } catch {
+        // Broken / raced symlink — ignore; fingerprint will still see tree churn.
+      }
+    }
+    return violations;
+  } catch {
+    return [];
+  }
 }

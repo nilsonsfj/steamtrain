@@ -124,6 +124,7 @@ export {
 } from "./permission-preflight";
 export {
   describeViolations,
+  findOutboundSymlinks,
   fingerprintChanges,
   fingerprintWorkspace,
 } from "./permission-guard";
@@ -151,6 +152,7 @@ export {
   type NotifyRunMeta,
   type WebhookFormat,
   createNotifier,
+  isAllowedWebhookUrl,
   notifyWorkflowEvent,
 } from "./notify";
 export { formatDiscordPayload, formatSlackPayload, formatTeamsPayload } from "./webhook-templates";
@@ -200,7 +202,6 @@ export {
 } from "./engine";
 export {
   DEFAULT_ANTHROPIC_MAX_TOKENS,
-  callLlm,
   llmApiKeyEnvName,
   llmStepApiId,
   resolveLlmBaseUrl,
@@ -210,6 +211,7 @@ export {
   type LlmComplete,
   type LlmProviderId,
 } from "./llm";
+export { callLlm } from "./llm-call";
 export {
   runShellCommand,
   MAX_COMMAND_OUTPUT_BYTES,
@@ -299,7 +301,7 @@ export {
   timeoutMsFromSec,
 } from "./timeout";
 export { BUNDLED_WORKFLOWS } from "./bundled";
-export { renderPrompt, lintTemplateRefs, type TemplateContext } from "./template";
+export { renderPrompt, renderCmd, lintTemplateRefs, type TemplateContext } from "./template";
 export {
   SHARE_FORMAT_VERSION,
   SHARE_FILE_SUFFIX,

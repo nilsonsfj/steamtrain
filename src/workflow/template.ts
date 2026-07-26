@@ -16,8 +16,13 @@
  *   {{item}} / {{item.value}} → current fan-out item, inside `forEach`
  * Unknown placeholders (and stray braces) are left untouched, so prompts that
  * legitimately contain `{{` survive.
+ *
+ * Command steps use {@link renderCmd}, which shell-quotes interpolated values
+ * unless `allowShellTemplates` is set on the step (raw Makefile-style mode).
  */
 
+import { redactSecrets } from "../util/redact";
+import { shellQuote } from "../util/shell-quote";
 import { jsonFieldText, jsonPathGet } from "./structured";
 import type {
   GateCondition,
@@ -58,6 +63,14 @@ export interface TemplateContext {
   iteration?: number;
 }
 
+export interface RenderPromptOptions {
+  /**
+   * When true (default for agent/LLM prompts), scrub high-confidence secret
+   * shapes from interpolated values before embedding them.
+   */
+  redact?: boolean;
+}
+
 const PLACEHOLDER = /\{\{\s*([^{}]+?)\s*\}\}/g;
 const INPUT_REF = /^inputs\.(.+)$/;
 // NOTE: STEP_FIELD's greedy `(.+)` id group means it also matches worktree/
@@ -72,56 +85,100 @@ const STEP_JSON_FIELD = /^steps\.(.+?)\.json((?:\.|\[).+)?$/;
 /** `steps.<id>.artifacts.<name>` — the snapshot path of one declared artifact. */
 const STEP_ARTIFACT_FIELD = /^steps\.(.+?)\.artifacts\.(.+)$/;
 
-export function renderPrompt(template: string, ctx: TemplateContext): string {
+function resolveTemplateValue(expr: string, ctx: TemplateContext): string | undefined {
+  if (expr === "input" || expr === "args") return ctx.input;
+  const inputRef = INPUT_REF.exec(expr);
+  if (inputRef) {
+    const key = inputRef[1] as string;
+    const val = ctx.inputs?.[key];
+    return val !== undefined ? String(val) : "";
+  }
+  if (expr === "item" || expr === "item.value") return ctx.item?.value ?? "";
+  if (expr === "item.index") return ctx.item ? String(ctx.item.index) : "";
+  if (expr === "item.sourceStepId") return ctx.item?.sourceStepId ?? "";
+  if (expr === "iteration") return String(ctx.iteration ?? 1);
+  const worktreeRef = STEP_WORKTREE_FIELD.exec(expr);
+  if (worktreeRef) {
+    const worktree = ctx.results?.get(worktreeRef[1] as string)?.worktree;
+    if (!worktree) return "";
+    return worktree[worktreeRef[2] as "root" | "branch" | "cwd"] ?? "";
+  }
+  const artifactRef = STEP_ARTIFACT_FIELD.exec(expr);
+  if (artifactRef) {
+    const artifacts = ctx.results?.get(artifactRef[1] as string)?.artifacts;
+    return artifacts?.find((artifact) => artifact.name === artifactRef[2])?.path ?? "";
+  }
+  const jsonRef = STEP_JSON_FIELD.exec(expr);
+  if (jsonRef) {
+    const json = ctx.results?.get(jsonRef[1] as string)?.json;
+    if (json === undefined) return "";
+    const path = jsonRef[2];
+    return jsonFieldText(
+      path === undefined ? json : jsonPathGet(json, path.startsWith(".") ? path.slice(1) : path),
+    );
+  }
+  const step = STEP_FIELD.exec(expr);
+  if (step) {
+    const id = step[1] as string;
+    const field = step[2];
+    if (field === "output") return ctx.outputs.get(id) ?? "";
+    const result = ctx.results?.get(id);
+    if (!result) return "";
+    if (field === "items") return result.items?.join("\n") ?? "";
+    if (field === "ok") return String(result.ok);
+    if (field === "error") return result.error ?? "";
+    if (field === "target") return result.target ?? "";
+    if (field === "iteration")
+      return result.iteration !== undefined ? String(result.iteration) : "";
+    if (field === "exitCode") return result.exitCode !== undefined ? String(result.exitCode) : "";
+  }
+  return undefined;
+}
+
+export function renderPrompt(
+  template: string,
+  ctx: TemplateContext,
+  options: RenderPromptOptions = {},
+): string {
+  const redact = options.redact !== false;
   return template.replace(PLACEHOLDER, (match, exprRaw: string) => {
     const expr = exprRaw.trim();
-    if (expr === "input" || expr === "args") return ctx.input;
-    const inputRef = INPUT_REF.exec(expr);
-    if (inputRef) {
-      const key = inputRef[1] as string;
-      const val = ctx.inputs?.[key];
-      return val !== undefined ? String(val) : "";
-    }
-    if (expr === "item" || expr === "item.value") return ctx.item?.value ?? "";
-    if (expr === "item.index") return ctx.item ? String(ctx.item.index) : "";
-    if (expr === "item.sourceStepId") return ctx.item?.sourceStepId ?? "";
-    if (expr === "iteration") return String(ctx.iteration ?? 1);
-    const worktreeRef = STEP_WORKTREE_FIELD.exec(expr);
-    if (worktreeRef) {
-      const worktree = ctx.results?.get(worktreeRef[1] as string)?.worktree;
-      if (!worktree) return "";
-      return worktree[worktreeRef[2] as "root" | "branch" | "cwd"] ?? "";
-    }
-    const artifactRef = STEP_ARTIFACT_FIELD.exec(expr);
-    if (artifactRef) {
-      const artifacts = ctx.results?.get(artifactRef[1] as string)?.artifacts;
-      return artifacts?.find((artifact) => artifact.name === artifactRef[2])?.path ?? "";
-    }
-    const jsonRef = STEP_JSON_FIELD.exec(expr);
-    if (jsonRef) {
-      const json = ctx.results?.get(jsonRef[1] as string)?.json;
-      if (json === undefined) return "";
-      const path = jsonRef[2];
-      return jsonFieldText(
-        path === undefined ? json : jsonPathGet(json, path.startsWith(".") ? path.slice(1) : path),
-      );
-    }
-    const step = STEP_FIELD.exec(expr);
-    if (step) {
-      const id = step[1] as string;
-      const field = step[2];
-      if (field === "output") return ctx.outputs.get(id) ?? "";
-      const result = ctx.results?.get(id);
-      if (!result) return "";
-      if (field === "items") return result.items?.join("\n") ?? "";
-      if (field === "ok") return String(result.ok);
-      if (field === "error") return result.error ?? "";
-      if (field === "target") return result.target ?? "";
-      if (field === "iteration")
-        return result.iteration !== undefined ? String(result.iteration) : "";
-      if (field === "exitCode") return result.exitCode !== undefined ? String(result.exitCode) : "";
-    }
-    return match;
+    const value = resolveTemplateValue(expr, ctx);
+    if (value === undefined) return match;
+    return redact ? redactSecrets(value) : value;
+  });
+}
+
+export interface RenderCmdOptions {
+  /**
+   * When true, interpolate template values raw (Makefile-style). Default
+   * false: values are {@link shellQuote}'d so metacharacters cannot inject
+   * shell syntax. Prefer passing data via templated `env` instead.
+   */
+  allowShellTemplates?: boolean;
+  platform?: NodeJS.Platform;
+}
+
+/**
+ * Render a command-step `cmd` template. Interpolated values are shell-quoted
+ * unless `allowShellTemplates` is set (opt-in raw mode for intentional full
+ * command injection like `cmd: "{{inputs.testCmd}}"`).
+ */
+export function renderCmd(
+  template: string,
+  ctx: TemplateContext,
+  options: RenderCmdOptions = {},
+): string {
+  if (options.allowShellTemplates) {
+    // Raw mode: still redact secrets from values, but do not quote.
+    return renderPrompt(template, ctx, { redact: true });
+  }
+  const platform = options.platform ?? process.platform;
+  return template.replace(PLACEHOLDER, (match, exprRaw: string) => {
+    const expr = exprRaw.trim();
+    const value = resolveTemplateValue(expr, ctx);
+    if (value === undefined) return match;
+    return shellQuote(redactSecrets(value), platform);
   });
 }
 
@@ -210,6 +267,11 @@ function stepRefs(step: WorkflowStep): string[] {
   }
   if (kind === "command" && "cmd" in step && typeof step.cmd === "string") {
     refs.push(...extractRefs(step.cmd));
+  }
+  if (kind === "command" && "env" in step && step.env && typeof step.env === "object") {
+    for (const value of Object.values(step.env as Record<string, string>)) {
+      refs.push(...extractRefs(value));
+    }
   }
   if (kind === "issues") {
     const is = step as { mode?: string; titlePrefix?: string };
@@ -410,9 +472,9 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
     }
   }
 
-  // Command steps run through the platform shell with templates expanded raw —
-  // flag embeddings of workflow input / step output so authors treat them like
-  // a Makefile (see SECURITY.md).
+  // Command steps run through the platform shell. By default interpolated
+  // values are shell-quoted; `allowShellTemplates: true` opts into raw
+  // Makefile-style expansion and is flagged as such (see SECURITY.md).
   for (const phase of spec.phases) {
     for (const step of phase.steps) {
       if (
@@ -432,9 +494,17 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
           ref === "item" ||
           ref.startsWith("item."),
       );
-      if (risky.length > 0) {
+      if (risky.length === 0) continue;
+      const allowRaw =
+        "allowShellTemplates" in step &&
+        (step as { allowShellTemplates?: boolean }).allowShellTemplates === true;
+      if (allowRaw) {
         warnings.push(
-          `step '${step.id}' is a command step whose cmd embeds template data ({{${risky[0]}}}); values are interpolated into the shell unsanitized — review like a Makefile`,
+          `step '${step.id}' is a command step with allowShellTemplates whose cmd embeds template data ({{${risky[0]}}}); values are interpolated into the shell unsanitized — review like a Makefile`,
+        );
+      } else {
+        warnings.push(
+          `step '${step.id}' is a command step whose cmd embeds template data ({{${risky[0]}}}); values are shell-quoted on expansion — prefer templated env vars for structured data`,
         );
       }
     }

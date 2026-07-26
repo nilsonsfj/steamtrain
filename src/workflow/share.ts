@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { assertSafeOutboundUrl } from "../util/safe-url";
 import { STEAMTRAIN_VERSION } from "../version";
 import type { WorkflowSourceKind } from "./catalog";
 import { lintTemplateRefs } from "./template";
@@ -495,6 +496,17 @@ export interface ReadShareSourceOptions {
   maxBytes?: number;
   /** Override fetch timeout. */
   timeoutMs?: number;
+  /**
+   * Override DNS resolution used by the SSRF denylist (tests). Production
+   * callers leave this unset so real `dns.lookup` runs before each hop.
+   */
+  resolveHostname?: (hostname: string) => Promise<string[]>;
+  /**
+   * Allow loopback/private LAN destinations. Default false — URL imports must
+   * not probe internal infrastructure. Tests that need a local HTTP fixture
+   * should prefer a mock `fetch` + public hostname over enabling this.
+   */
+  allowPrivateNetwork?: boolean;
 }
 
 export interface ReadShareSourceResult {
@@ -538,6 +550,8 @@ export async function readShareSource(
       fetch: options.fetch ?? globalThis.fetch.bind(globalThis),
       maxBytes,
       timeoutMs: options.timeoutMs ?? SHARE_FETCH_TIMEOUT_MS,
+      resolveHostname: options.resolveHostname,
+      allowPrivateNetwork: options.allowPrivateNetwork === true,
     });
   }
 
@@ -688,6 +702,8 @@ async function fetchShareUrl(
     fetch: typeof fetch;
     maxBytes: number;
     timeoutMs: number;
+    resolveHostname?: (hostname: string) => Promise<string[]>;
+    allowPrivateNetwork?: boolean;
   },
 ): Promise<{ ok: true; result: ReadShareSourceResult } | { ok: false; error: string }> {
   let current = start;
@@ -697,6 +713,14 @@ async function fetchShareUrl(
         ok: false,
         error: `refusing redirect to '${current.protocol}' (only http/https allowed)`,
       };
+    }
+    const safe = await assertSafeOutboundUrl(current, {
+      allowLoopback: options.allowPrivateNetwork === true,
+      allowPrivateLan: options.allowPrivateNetwork === true,
+      resolveHostname: options.resolveHostname,
+    });
+    if (!safe.ok) {
+      return { ok: false, error: safe.error };
     }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), options.timeoutMs);

@@ -532,8 +532,18 @@ export interface CommandStep extends WorkflowStepBase, WorkspaceFields {
   cmd: string;
   /** Target working directory (absolute, or relative to the run's base cwd). */
   cwd?: string;
-  /** Extra env vars merged over `process.env` for this step only. */
+  /**
+   * Extra env vars merged over `process.env` for this step only.
+   * Values are templates (same vocabulary as `cmd`) and are NOT shell-quoted —
+   * prefer this over embedding data in `cmd` when a subprocess reads `$VAR`.
+   */
   env?: Record<string, string>;
+  /**
+   * When true, interpolate `cmd` template values raw (unsanitized) instead of
+   * shell-quoting them. Required for intentional full-command templates like
+   * `cmd: "{{inputs.testCmd}}"`. Default false.
+   */
+  allowShellTemplates?: boolean;
   /** Per-step subprocess wall-clock limit in seconds (overrides workflow and config defaults). */
   stepTimeoutSec?: number;
   /**
@@ -1634,6 +1644,7 @@ const workflowCommandStepSchema = z.object({
   cmd: z.string().min(1),
   cwd: z.string().min(1).optional(),
   env: z.record(z.string()).optional(),
+  allowShellTemplates: z.boolean().optional(),
   stepTimeoutSec: z.number().positive().optional(),
   output: outputJsonSchema.optional(),
   ...workspaceShape,

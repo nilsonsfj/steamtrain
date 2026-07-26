@@ -1,5 +1,4 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -241,26 +240,47 @@ describe("readShareSource", () => {
 
   it("fetches an http URL with redirect + size checks", async () => {
     const body = exportWorkflow(agentless).text;
-    const server = createServer((req, res) => {
-      if (req.url === "/redirect") {
-        res.writeHead(302, { Location: "/final.json" });
-        res.end();
-        return;
-      }
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(body);
+    const hops: string[] = [];
+    const loaded = await readShareSource("https://share.test/redirect", {
+      resolveHostname: async () => ["93.184.216.34"],
+      fetch: (async (input: string | URL | Request) => {
+        const href = String(input);
+        hops.push(href);
+        if (href.endsWith("/redirect")) {
+          return new Response(null, {
+            status: 302,
+            headers: { Location: "/final.json" },
+          });
+        }
+        return new Response(body, {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as typeof fetch,
     });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const addr = server.address();
-    if (!addr || typeof addr === "string") throw new Error("no address");
-    const base = `http://127.0.0.1:${addr.port}`;
-
-    const loaded = await readShareSource(`${base}/redirect`);
-    server.close();
     expect(loaded.ok).toBe(true);
     if (!loaded.ok) return;
     expect(loaded.result.origin).toBe("url");
-    expect(loaded.result.location).toBe(`${base}/final.json`);
+    expect(loaded.result.location).toBe("https://share.test/final.json");
+    expect(hops).toEqual(["https://share.test/redirect", "https://share.test/final.json"]);
+  });
+
+  it("rejects private / metadata destinations (SSRF denylist)", async () => {
+    for (const url of [
+      "http://127.0.0.1/x.json",
+      "http://169.254.169.254/latest/meta-data",
+      "http://10.0.0.1/secret",
+      "http://localhost/x.json",
+    ]) {
+      const loaded = await readShareSource(url, {
+        fetch: (async () => {
+          throw new Error("fetch should not be called for blocked hosts");
+        }) as typeof fetch,
+      });
+      expect(loaded.ok, url).toBe(false);
+      if (loaded.ok) return;
+      expect(loaded.error).toMatch(/private\/reserved|localhost|refusing/i);
+    }
   });
 
   it("rejects non-http schemes", async () => {
@@ -287,16 +307,16 @@ describe("readShareSource", () => {
 
   it("rejects redirect loops past SHARE_MAX_REDIRECTS", async () => {
     let hops = 0;
-    const server = createServer((_req, res) => {
-      hops += 1;
-      res.writeHead(302, { Location: `/hop-${hops}` });
-      res.end();
+    const loaded = await readShareSource("https://share.test/start", {
+      resolveHostname: async () => ["93.184.216.34"],
+      fetch: (async () => {
+        hops += 1;
+        return new Response(null, {
+          status: 302,
+          headers: { Location: `/hop-${hops}` },
+        });
+      }) as typeof fetch,
     });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const addr = server.address();
-    if (!addr || typeof addr === "string") throw new Error("no address");
-    const loaded = await readShareSource(`http://127.0.0.1:${addr.port}/start`);
-    server.close();
     expect(loaded.ok).toBe(false);
     if (loaded.ok) return;
     expect(loaded.error).toMatch(new RegExp(`too many redirects \\(max ${SHARE_MAX_REDIRECTS}\\)`));

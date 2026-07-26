@@ -97,7 +97,7 @@ describe("bundled workflows", () => {
   // embeds PR/land inputs into `workflow pr …` command steps on purpose.
   // Every OTHER bundled workflow must validate with zero warnings.
   const EXPECTED_TESTCMD_WARNING =
-    /is a command step whose cmd embeds template data \(\{\{inputs\.testCmd\}\}\)/;
+    /is a command step(?: with allowShellTemplates)? whose cmd embeds template data \(\{\{inputs\.testCmd\}\}\)/;
   const EXPECTED_BABYSIT_WARNING =
     /is a command step whose cmd embeds template data \(\{\{inputs\.(pr|checksTimeoutSec|mergeStrategy)\}\}\)/;
 

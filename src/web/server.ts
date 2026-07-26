@@ -61,6 +61,7 @@ import {
   pruneRunWorktrees,
   resolveInputs,
   resolveStepTimeoutSec,
+  reviewShareWorkflow,
   workflowAutonomy,
   workflowPermissionPreflight,
   workflowPermissionSummary,
@@ -68,6 +69,7 @@ import {
   workflowStepKind,
   worktreeDiff,
 } from "../workflow";
+import { isValidPathId } from "../workflow/fs-util";
 import { DEFAULT_PATCH_CAP, capPatch } from "../workflow/unified-diff";
 import type { WorkspaceConfig } from "../workspace";
 import { FAVICON_SVG, type PageAssetRevisions, renderIndex } from "./html";
@@ -394,11 +396,18 @@ export const HISTORY_PATCH_CAP = DEFAULT_PATCH_CAP;
 /** Maximum workflow name length. */
 const MAX_WORKFLOW_NAME = 128;
 
+/** Maximum run / history id length (URL path params). */
+const MAX_RUN_ID_LENGTH = 256;
+
 function isValidWorkflowName(name: string): boolean {
   if (name.length === 0 || name.length > MAX_WORKFLOW_NAME) return false;
   // Reject control characters and null bytes.
   // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control char rejection
   return !/[\x00-\x1f\x7f]/.test(name);
+}
+
+function isValidRunId(id: string): boolean {
+  return isValidPathId(id, MAX_RUN_ID_LENGTH);
 }
 
 class PayloadTooLarge extends Error {
@@ -1362,7 +1371,12 @@ async function handle(
         return;
       }
       const body = await readBody(req);
-      let parsed: { spec?: unknown; previousName?: unknown; scope?: unknown };
+      let parsed: {
+        spec?: unknown;
+        previousName?: unknown;
+        scope?: unknown;
+        confirmRisk?: unknown;
+      };
       try {
         parsed = body ? JSON.parse(body) : {};
       } catch {
@@ -1380,11 +1394,25 @@ async function handle(
         });
         return;
       }
+      // Mirror CLI `workflow import`: command / full-permissions / etc. require
+      // an explicit confirmRisk acknowledgement before we persist.
+      const toSave = { ...specCheck.data, name };
+      const review = reviewShareWorkflow(toSave);
+      if (review.requiresConfirmation && parsed.confirmRisk !== true) {
+        sendJson(res, 409, {
+          ok: false,
+          error:
+            "workflow has critical/high security findings — re-submit with confirmRisk: true to save",
+          requiresConfirmation: true,
+          review,
+        });
+        return;
+      }
       const previousName =
         typeof parsed.previousName === "string" ? parsed.previousName : undefined;
       const scope = parsed.scope === "project" ? "project" : "user";
-      const result = await deps.author.save(name, { ...specCheck.data, name }, previousName, scope);
-      sendJson(res, result.ok ? 200 : 400, result);
+      const result = await deps.author.save(name, toSave, previousName, scope);
+      sendJson(res, result.ok ? 200 : 400, result.ok ? { ...result, review } : result);
       return;
     }
 
@@ -1523,6 +1551,10 @@ async function handle(
   const historyMatch = path.match(/^\/api\/history\/([^/]+)$/);
   if (historyMatch) {
     const id = decodeURIComponent(historyMatch[1]!);
+    if (!isValidRunId(id)) {
+      sendJson(res, 400, { error: "invalid run id" });
+      return;
+    }
     if (method === "GET") {
       const record = await deps.history?.get(id);
       if (!record) {
@@ -1542,6 +1574,10 @@ async function handle(
   const rerunMatch = path.match(/^\/api\/history\/([^/]+)\/(rerun|retry)$/);
   if (method === "POST" && rerunMatch) {
     const id = decodeURIComponent(rerunMatch[1]!);
+    if (!isValidRunId(id)) {
+      sendJson(res, 400, { error: "invalid run id" });
+      return;
+    }
     const mode = rerunMatch[2] === "retry" ? "retry-failed" : "rerun";
     const record = await deps.history?.get(id);
     if (!record) {
@@ -1576,6 +1612,10 @@ async function handle(
     }
     const history = deps.history;
     const id = decodeURIComponent(worktreesMatch[1]!);
+    if (!isValidRunId(id)) {
+      sendJson(res, 400, { error: "invalid run id" });
+      return;
+    }
     const action = worktreesMatch[2]!;
     const record = await history.get(id);
     if (!record) {
@@ -1860,6 +1900,10 @@ async function handle(
   const streamMatch = path.match(/^\/api\/runs\/([^/]+)\/stream$/);
   if (method === "GET" && streamMatch) {
     const runId = decodeURIComponent(streamMatch[1]!);
+    if (!isValidRunId(runId)) {
+      sendJson(res, 400, { error: "invalid run id" });
+      return;
+    }
     // Manager-owned runs stream from memory; runs owned by another process
     // (CLI --detach, TUI) are tailed from the shared live-run store.
     if (!deps.runs.get(runId) && deps.liveRuns && (await deps.liveRuns.get(runId))) {
@@ -1873,6 +1917,10 @@ async function handle(
   const cancelMatch = path.match(/^\/api\/runs\/([^/]+)\/cancel$/);
   if (method === "POST" && cancelMatch) {
     const runId = decodeURIComponent(cancelMatch[1]!);
+    if (!isValidRunId(runId)) {
+      sendJson(res, 400, { error: "invalid run id" });
+      return;
+    }
     let ok = deps.runs.cancel(runId);
     if (!ok && deps.liveRuns) {
       // Externally-owned run: drop the cancel marker; its owner polls it.
@@ -1888,6 +1936,10 @@ async function handle(
   const pauseMatch = path.match(/^\/api\/runs\/([^/]+)\/(pause|resume)$/);
   if (method === "POST" && pauseMatch) {
     const runId = decodeURIComponent(pauseMatch[1]!);
+    if (!isValidRunId(runId)) {
+      sendJson(res, 400, { error: "invalid run id" });
+      return;
+    }
     const paused = pauseMatch[2] === "pause";
     let ok = await deps.runs.setRunPaused(runId, paused, "human:web");
     if (!ok && deps.liveRuns) {
@@ -1903,6 +1955,10 @@ async function handle(
   const detachMatch = path.match(/^\/api\/runs\/([^/]+)\/detach$/);
   if (method === "POST" && detachMatch) {
     const runId = decodeURIComponent(detachMatch[1]!);
+    if (!isValidRunId(runId)) {
+      sendJson(res, 400, { error: "invalid run id" });
+      return;
+    }
     const result = deps.runs.detach(runId);
     // 202: the handoff is under way; the run's SSE stream reports a `detached`
     // frame once local work stops and the background child is spawned.
@@ -1946,6 +2002,10 @@ async function handle(
       return;
     }
     const runId = decodeURIComponent(editStepMatch[1]!);
+    if (!isValidRunId(runId)) {
+      sendJson(res, 400, { error: "invalid run id" });
+      return;
+    }
     // Manager-owned run: the engine validates synchronously via the control.
     const local = deps.runs.editRunStep(runId, parsed.stepId, patch, "human:web");
     if (local) {
@@ -2013,6 +2073,10 @@ async function handle(
         ? parsed.rejectDisposition
         : undefined;
     const runId = decodeURIComponent(approvalMatch[1]!);
+    if (!isValidRunId(runId)) {
+      sendJson(res, 400, { error: "invalid run id" });
+      return;
+    }
     const decision: import("../workflow").ApprovalDecision = {
       approved: parsed.approved,
       by: "human:web",
@@ -2061,6 +2125,10 @@ async function handle(
     }
     const iteration = typeof parsed.iteration === "number" ? parsed.iteration : undefined;
     const runId = decodeURIComponent(inputMatch[1]!);
+    if (!isValidRunId(runId)) {
+      sendJson(res, 400, { error: "invalid run id" });
+      return;
+    }
     const response = { value: parsed.value, by: "human:web" };
     let ok = deps.runs.resolveHumanInput(runId, parsed.stepId, response, iteration);
     if (!ok && deps.liveRuns) {

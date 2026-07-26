@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { type SafeUrlOptions, assertSafeOutboundUrl } from "../util/safe-url";
+import { isAllowedOutboundUrl } from "../util/safe-url-sync";
 import { approvalDeepLink } from "../web/run-deep-link";
 import { costForResults } from "./cost";
 import type { WorkflowEvent } from "./events";
@@ -86,9 +88,19 @@ export interface CreateNotifierOptions {
   spawnFn?: typeof spawn;
   fetchFn?: typeof fetch;
   platform?: NodeJS.Platform;
+  /** Override DNS used by the webhook SSRF check (tests). */
+  resolveHostname?: SafeUrlOptions["resolveHostname"];
 }
 
+/** Cap on `detail` text posted to webhooks (limits accidental secret exfil). */
+const WEBHOOK_DETAIL_CAP = 2_000;
+
 const WEBHOOK_TIMEOUT_MS = 5_000;
+
+/** True when a notify webhook URL is safe to POST to (no private/metadata SSRF). */
+export function isAllowedWebhookUrl(value: string): boolean {
+  return isAllowedOutboundUrl(value, { allowLoopback: false, allowPrivateLan: false });
+}
 
 /** A notifier over the configured channels; `undefined` config ⇒ a no-op notifier. */
 export function createNotifier(
@@ -126,26 +138,42 @@ export function createNotifier(
   };
 
   const webhook = (event: NotifyEvent, url: string): void => {
+    // Fire-and-forget SSRF check: refuse private/metadata destinations. Cap
+    // detail text so step-output snippets cannot exfiltrate unbounded secrets.
+    const detail =
+      event.detail.length > WEBHOOK_DETAIL_CAP
+        ? `${event.detail.slice(0, WEBHOOK_DETAIL_CAP)}…`
+        : event.detail;
+    const capped: NotifyEvent = detail === event.detail ? event : { ...event, detail };
+
     const format = config?.webhookFormat;
     let body: string;
     if (format === "slack") {
-      body = JSON.stringify(formatSlackPayload(event));
+      body = JSON.stringify(formatSlackPayload(capped));
     } else if (format === "discord") {
-      body = JSON.stringify(formatDiscordPayload(event));
+      body = JSON.stringify(formatDiscordPayload(capped));
     } else if (format === "teams") {
-      body = JSON.stringify(formatTeamsPayload(event));
+      body = JSON.stringify(formatTeamsPayload(capped));
     } else {
-      body = JSON.stringify(event);
+      body = JSON.stringify(capped);
     }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
     (timer as { unref?: () => void }).unref?.();
-    void fetchFn(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body,
-      signal: controller.signal,
+    void assertSafeOutboundUrl(url, {
+      allowLoopback: false,
+      allowPrivateLan: false,
+      resolveHostname: options.resolveHostname,
     })
+      .then((safe) => {
+        if (!safe.ok) return;
+        return fetchFn(url, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body,
+          signal: controller.signal,
+        });
+      })
       .catch(() => {})
       .finally(() => clearTimeout(timer));
   };

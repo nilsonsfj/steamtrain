@@ -62,7 +62,7 @@ describe("bundled tour workflow", () => {
     // security warning (see SECURITY.md); the tour intentionally fans out via
     // a templated shell cmd.
     expect(result.warnings ?? []).toEqual([
-      expect.stringContaining("interpolated into the shell unsanitized"),
+      expect.stringContaining("shell-quoted on expansion"),
     ]);
     expect(workflowAgentIds(tour)).toEqual([]);
   });
