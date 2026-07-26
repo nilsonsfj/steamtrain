@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  MAX_SHARE_BYTES,
   SHARE_FORMAT_VERSION,
+  SHARE_MAX_REDIRECTS,
   type WorkflowSpec,
   exportWorkflow,
   formatShareReview,
@@ -271,6 +273,35 @@ describe("readShareSource", () => {
   it("rejects missing files", async () => {
     const loaded = await readShareSource("/tmp/definitely-missing-steamtrain-share-xyz.json");
     expect(loaded.ok).toBe(false);
+  });
+
+  it("rejects oversized local files", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "steamtrain-share-big-"));
+    const path = join(dir, "big.json");
+    writeFileSync(path, "x".repeat(MAX_SHARE_BYTES + 1));
+    const loaded = await readShareSource(path);
+    expect(loaded.ok).toBe(false);
+    if (loaded.ok) return;
+    expect(loaded.error).toMatch(/byte limit/);
+  });
+
+  it("rejects redirect loops past SHARE_MAX_REDIRECTS", async () => {
+    let hops = 0;
+    const server = createServer((_req, res) => {
+      hops += 1;
+      res.writeHead(302, { Location: `/hop-${hops}` });
+      res.end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const addr = server.address();
+    if (!addr || typeof addr === "string") throw new Error("no address");
+    const loaded = await readShareSource(`http://127.0.0.1:${addr.port}/start`);
+    server.close();
+    expect(loaded.ok).toBe(false);
+    if (loaded.ok) return;
+    expect(loaded.error).toMatch(new RegExp(`too many redirects \\(max ${SHARE_MAX_REDIRECTS}\\)`));
+    // One attempt + SHARE_MAX_REDIRECTS follow-ups = SHARE_MAX_REDIRECTS + 1 requests.
+    expect(hops).toBe(SHARE_MAX_REDIRECTS + 1);
   });
 });
 

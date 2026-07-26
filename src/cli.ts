@@ -1669,7 +1669,7 @@ async function runWorkflowImportCommand(
   const options = parseImportOptions(args);
   if (!options || (!options.stdin && !options.source)) {
     err(
-      "usage: steamtrain workflow import <path|url> [--name <name>] [--save] [--scope user|project] [--force] [--yes] [--json]\n       steamtrain workflow import --stdin [--name <name>] [--save] [--scope user|project] [--force] [--yes] [--json]\n",
+      "usage: steamtrain workflow import <path|url> [--name <name>] [--save] [--scope user|project] [--project] [--force] [--yes] [--json]\n       steamtrain workflow import --stdin [--name <name>] [--save] [--scope user|project] [--project] [--force] [--yes] [--json]\n",
     );
     return 1;
   }
@@ -1944,8 +1944,8 @@ Usage:
   steamtrain workflow takeover <runId> <stepId>
   steamtrain workflow create --input <description> [--agent <id>] [--model <model>] [--name <name>] [--save] [--scope user|project] [--json]
   steamtrain workflow export <name> [--out <path>] [--stdout] [--json]
-  steamtrain workflow import <path|url> [--name <name>] [--save] [--scope user|project] [--force] [--yes] [--json]
-  steamtrain workflow import --stdin [--name <name>] [--save] [--scope user|project] [--force] [--yes] [--json]
+  steamtrain workflow import <path|url> [--name <name>] [--save] [--scope user|project] [--project] [--force] [--yes] [--json]
+  steamtrain workflow import --stdin [--name <name>] [--save] [--scope user|project] [--project] [--force] [--yes] [--json]
   steamtrain workflow cache clear [<workflow> --input <text> --param key=value ... | --stdin]
   steamtrain workflow history [list]
   steamtrain workflow history show <id> [--diff [--step <stepId>] [--stat]]
@@ -1978,6 +1978,8 @@ validates the schema + template refs, runs a doctor preview for pinned agents,
 and prints every prompt/command for review (the prompt-injection surface) before
 saving. --save writes to the chosen scope; critical/high findings also need
 --yes, and overwriting an existing same-scope workflow needs --force.
+--json prints the full review (including every prompt/command) — treat that
+output like the review surface, not a redacted summary.
 
 Live runs can be steered mid-flight: 'workflow pause <runId>' lets in-flight
 steps finish and schedules nothing new, 'workflow edit-step' rewrites the

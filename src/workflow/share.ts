@@ -711,6 +711,60 @@ async function fetchShareUrl(
           "User-Agent": `steamtrain/${STEAMTRAIN_VERSION} (workflow-import)`,
         },
       });
+
+      if (response.status >= 300 && response.status < 400) {
+        clearTimeout(timer);
+        const loc = response.headers.get("location");
+        if (!loc) {
+          return { ok: false, error: `redirect from ${current.href} with no Location header` };
+        }
+        try {
+          current = new URL(loc, current);
+        } catch {
+          return { ok: false, error: `invalid redirect Location '${loc}'` };
+        }
+        continue;
+      }
+
+      if (!response.ok) {
+        clearTimeout(timer);
+        return {
+          ok: false,
+          error:
+            `fetch ${current.href} returned HTTP ${response.status} ${response.statusText}`.trim(),
+        };
+      }
+
+      const contentLength = response.headers.get("content-length");
+      if (contentLength && Number(contentLength) > options.maxBytes) {
+        clearTimeout(timer);
+        return {
+          ok: false,
+          error: `remote file exceeds ${options.maxBytes} byte limit (Content-Length ${contentLength})`,
+        };
+      }
+
+      // Keep the abort timer alive through the body read so a slow/chunked
+      // response cannot hang past timeoutMs after headers arrive.
+      const buf = Buffer.from(await response.arrayBuffer());
+      clearTimeout(timer);
+
+      if (buf.byteLength > options.maxBytes) {
+        return {
+          ok: false,
+          error: `remote file exceeds ${options.maxBytes} byte limit (${buf.byteLength} bytes)`,
+        };
+      }
+
+      return {
+        ok: true,
+        result: {
+          text: buf.toString("utf8"),
+          origin: "url",
+          location: current.href,
+          bytes: buf.byteLength,
+        },
+      };
     } catch (err) {
       clearTimeout(timer);
       if (err instanceof Error && err.name === "AbortError") {
@@ -724,54 +778,6 @@ async function fetchShareUrl(
         error: `failed to fetch ${current.href}: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
-    clearTimeout(timer);
-
-    if (response.status >= 300 && response.status < 400) {
-      const loc = response.headers.get("location");
-      if (!loc) {
-        return { ok: false, error: `redirect from ${current.href} with no Location header` };
-      }
-      try {
-        current = new URL(loc, current);
-      } catch {
-        return { ok: false, error: `invalid redirect Location '${loc}'` };
-      }
-      continue;
-    }
-
-    if (!response.ok) {
-      return {
-        ok: false,
-        error:
-          `fetch ${current.href} returned HTTP ${response.status} ${response.statusText}`.trim(),
-      };
-    }
-
-    const contentLength = response.headers.get("content-length");
-    if (contentLength && Number(contentLength) > options.maxBytes) {
-      return {
-        ok: false,
-        error: `remote file exceeds ${options.maxBytes} byte limit (Content-Length ${contentLength})`,
-      };
-    }
-
-    const buf = Buffer.from(await response.arrayBuffer());
-    if (buf.byteLength > options.maxBytes) {
-      return {
-        ok: false,
-        error: `remote file exceeds ${options.maxBytes} byte limit (${buf.byteLength} bytes)`,
-      };
-    }
-
-    return {
-      ok: true,
-      result: {
-        text: buf.toString("utf8"),
-        origin: "url",
-        location: current.href,
-        bytes: buf.byteLength,
-      },
-    };
   }
   return {
     ok: false,

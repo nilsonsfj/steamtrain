@@ -148,6 +148,57 @@ describe("workflow import", () => {
     expect(project.workflows["team-check"]).toBeTruthy();
   });
 
+  it("accepts --project as a shorthand for --scope project", async () => {
+    const c = capture();
+    writeFileSync(join(c.cwd, CONFIG_FILENAME), `${JSON.stringify({ workflows: {} }, null, 2)}\n`);
+    const path = join(c.cwd, "shorthand.steamtrain.json");
+    writeFileSync(
+      path,
+      exportWorkflow({
+        name: "shorthand-check",
+        phases: [
+          {
+            id: "split",
+            title: "Split",
+            steps: [{ id: "areas", kind: "distributor", items: ["x: {{input}}"] }],
+          },
+        ],
+      }).text,
+    );
+
+    const code = await runCli(["workflow", "import", path, "--save", "--project"], c.io);
+    expect(code).toBe(0);
+    const project = JSON.parse(readFileSync(join(c.cwd, CONFIG_FILENAME), "utf8"));
+    expect(project.workflows["shorthand-check"]).toBeTruthy();
+  });
+
+  it("emits full review JSON with --json --save", async () => {
+    const home = mkdtempSync(join(tmpdir(), "steamtrain-share-home-"));
+    const c = capture(home);
+    const path = join(c.cwd, "json-save.steamtrain.json");
+    writeFileSync(
+      path,
+      exportWorkflow({
+        name: "json-saved",
+        phases: [
+          {
+            id: "split",
+            title: "Split",
+            steps: [{ id: "areas", kind: "distributor", items: ["x: {{input}}"] }],
+          },
+        ],
+      }).text,
+    );
+
+    const code = await runCli(["workflow", "import", path, "--save", "--json"], c.io);
+    expect(code).toBe(0);
+    const payload = JSON.parse(c.stdout);
+    expect(payload.ok).toBe(true);
+    expect(payload.saved).toBe(true);
+    expect(payload.name).toBe("json-saved");
+    expect(payload.review.summary.commands).toBe(0);
+  });
+
   it("refuses to overwrite without --force", async () => {
     const home = mkdtempSync(join(tmpdir(), "steamtrain-share-home-"));
     const c = capture(home);
