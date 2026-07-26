@@ -217,15 +217,11 @@ describe("TUI components", () => {
       running: false,
     };
 
-    const normalRows = (
-      render(<StatusBar {...props} />).lastFrame() ?? ""
-    )
+    const normalRows = (render(<StatusBar {...props} />).lastFrame() ?? "")
       .replace(/\[[0-9;]*m/g, "")
       .split("\n")
       .filter((line) => line.startsWith("│"));
-    const softRows = (
-      render(<StatusBar {...props} softHealth />).lastFrame() ?? ""
-    )
+    const softRows = (render(<StatusBar {...props} softHealth />).lastFrame() ?? "")
       .replace(/\[[0-9;]*m/g, "")
       .split("\n")
       .filter((line) => line.startsWith("│"));
