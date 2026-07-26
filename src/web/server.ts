@@ -810,6 +810,7 @@ function checkCsrf(
  *   DELETE /api/history/:id         delete one past run
  *   POST   /api/history/:id/rerun   re-run a past run -> { runId }
  *   POST   /api/history/:id/retry   retry failed steps -> { runId, downgraded? }
+ *                                   optional JSON body: { retargetAgent?, retargetModel?, steps? }
  *   GET    /api/history/:id/worktrees  a run's retained worktrees + diffstat
  *   POST   /api/history/:id/harvest    merge worktrees (apply/branch/pr) -> { result }
  *   POST   /api/history/:id/prune      discard a run's worktrees -> { pruned, total }
@@ -1596,8 +1597,44 @@ async function handle(
       sendJson(res, 404, { error: `unknown run '${id}'` });
       return;
     }
+    let retarget: { retargetAgent?: string; retargetModel?: string; steps?: string[] } | undefined;
     try {
-      const result = deps.runs.rerunFromRecord(record, mode);
+      const raw = await readBody(req);
+      if (raw.trim()) {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+          sendJson(res, 400, { error: "body must be a JSON object" });
+          return;
+        }
+        const agent = parsed.retargetAgent;
+        const model = parsed.retargetModel;
+        const steps = parsed.steps;
+        if (agent !== undefined && typeof agent !== "string") {
+          sendJson(res, 400, { error: "retargetAgent must be a string" });
+          return;
+        }
+        if (model !== undefined && typeof model !== "string") {
+          sendJson(res, 400, { error: "retargetModel must be a string" });
+          return;
+        }
+        if (steps !== undefined) {
+          if (!Array.isArray(steps) || steps.some((s) => typeof s !== "string")) {
+            sendJson(res, 400, { error: "steps must be an array of strings" });
+            return;
+          }
+        }
+        retarget = {
+          retargetAgent: agent,
+          retargetModel: model,
+          steps: steps as string[] | undefined,
+        };
+      }
+    } catch (e) {
+      sendJson(res, 400, { error: e instanceof Error ? e.message : "invalid JSON body" });
+      return;
+    }
+    try {
+      const result = deps.runs.rerunFromRecord(record, mode, retarget);
       if (!result.ok) {
         sendJson(res, 400, { error: result.error });
         return;
