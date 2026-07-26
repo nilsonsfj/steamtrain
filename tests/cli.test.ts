@@ -821,6 +821,49 @@ describe("runCli", () => {
     expect(c.stderr).toContain("--retry-failed only applies with --from");
   });
 
+  it("rejects --retarget-agent without --retry-failed", async () => {
+    const c = capture();
+    writeFileSync(join(c.io.cwd, "steamtrain.json"), JSON.stringify({ workflows: {} }));
+    const code = await runCli(
+      ["workflow", "run", "--from", "r1", "--retarget-agent", "claude"],
+      c.io,
+    );
+    expect(code).toBe(1);
+    expect(c.stderr).toContain("--retarget-agent / --retarget-model / --step only apply");
+  });
+
+  it("rejects --retarget-model without --retarget-agent", async () => {
+    const c = capture();
+    writeFileSync(join(c.io.cwd, "steamtrain.json"), JSON.stringify({ workflows: {} }));
+    const code = await runCli(
+      ["workflow", "run", "--from", "r1", "--retry-failed", "--retarget-model", "sonnet"],
+      c.io,
+    );
+    expect(code).toBe(1);
+    expect(c.stderr).toContain("--retarget-model requires --retarget-agent");
+  });
+
+  it("rejects combining --agent with --retarget-agent", async () => {
+    const c = capture();
+    writeFileSync(join(c.io.cwd, "steamtrain.json"), JSON.stringify({ workflows: {} }));
+    const code = await runCli(
+      [
+        "workflow",
+        "run",
+        "--from",
+        "r1",
+        "--retry-failed",
+        "--agent",
+        "claude",
+        "--retarget-agent",
+        "codex",
+      ],
+      c.io,
+    );
+    expect(code).toBe(1);
+    expect(c.stderr).toContain("mutually exclusive");
+  });
+
   it("retry-failed with a changed --input downgrades to a fresh run (no stale replay)", async () => {
     const c = capture();
     const agentless = {
