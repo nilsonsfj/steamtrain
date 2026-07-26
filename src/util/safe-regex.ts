@@ -26,10 +26,12 @@ const NESTED_QUANTIFIER =
   /(\((?:[^()\\]|\\.)*[+*{](?:[^()\\]|\\.)*\)[*+{])|(\[[^\]]*\][*+{]\s*[)\]}]?\s*[*+{])/;
 
 /**
- * Quantified group containing `|` — `(a|a)+`, `(a|b|a)*`, `(foo|bar|foo){2,}`.
- * Any quantified alternation is treated as suspicious; overlapping branches
- * are the real ReDoS family, and enumerating every branch pair is not worth
- * the complexity for a cheap structural reject.
+ * Quantified group containing `|` — `(a|a)+`, `(a|b|c)*`, `(foo|bar|foo){2,}`.
+ * Any quantified group with an alternation is treated as suspicious. The second
+ * `(?:[^()\\]|\\.)*` greedily absorbs further `|`-separated branches, so this
+ * covers every branch count (not just two). Overlapping branches are the real
+ * ReDoS family; enumerating every pair is not worth the complexity for a cheap
+ * structural reject.
  */
 const QUANTIFIED_ALTERNATION = /\((?:[^()\\]|\\.)*\|(?:[^()\\]|\\.)*\)[+*{]/;
 
