@@ -58,6 +58,17 @@ describe("safe-regex", () => {
       expect.objectContaining({ ok: true, matched: true }),
     );
   });
+
+  it("rejects quantified alternations with three or more branches", () => {
+    expect(isSafeRegexPattern("(a|b|a)+")).toBe(false);
+    expect(isSafeRegexPattern("(foo|bar|foo)*")).toBe(false);
+  });
+
+  it("reuses a compiled regex across repeated safeRegexTest calls", () => {
+    const first = compileSafeRegex("^lap-\\d+$");
+    const second = compileSafeRegex("^lap-\\d+$");
+    expect(first.ok && second.ok && first.regex === second.regex).toBe(true);
+  });
 });
 
 describe("SSRF denylist", () => {
