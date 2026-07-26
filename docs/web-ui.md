@@ -43,7 +43,7 @@ ride or choose "I have a workflow."
 During the run, the **Conductor** narrates the ride in plain English above the
 live pipeline. When the workflow finishes, **Arrival** replaces the tree with a
 receipt climax: headline, three fact cards, status dots, and the consolidator
-report — then destinations like "Ride again" and "Try multi-plan."
+report — then destinations like "Ride again" and "Try bug-hunt."
 
 ### Day-to-day ops chrome
 

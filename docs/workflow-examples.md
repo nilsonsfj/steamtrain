@@ -13,10 +13,10 @@ model and diagrams, see [`workflow-overview.md`](workflow-overview.md).
 | pattern | blocks used | bundled example |
 | --- | --- | --- |
 | parallel independent workers | multiple workers in one phase | `bug-hunt` scan phase |
-| static fan-out + dynamic processing | distributor + `forEach` processor | `target-sweep` |
-| distribute lenses + parallel drafts | distributor + workers | `multi-plan` |
+| static fan-out + dynamic processing | distributor + `forEach` processor | `babysit-all-prs` |
 | cross-check + gate + report | consolidator + gate + consolidator | `bug-hunt` |
-| review → fix → re-review loop | workers + gate `loopTo` | `review-loop` |
+| two-model review + false-positive filter | worker + worker + consolidator | `code-review` |
+| review → fix → re-review loop | workers + gate `loopTo` | `mainline-stream` |
 | audit many repos/services | distributor + `forEach` + gate | README `audit` example |
 | compose another workflow as one stage | `workflow` step | `release` |
 | plan → parallel streams → staged merge → PR | `workflow` forEach + merge `mode: "worktree"` + `attach:` | `mainline` |
@@ -110,33 +110,32 @@ flowchart TB
   c2 --> report
 ```
 
-### Bundled walkthrough: `target-sweep`
+### Bundled walkthrough: `babysit-all-prs`
 
-Phase 1 — distribute target areas:
+Phase 1 — distribute PR numbers (agent-driven listing):
 
 ```jsonc
 {
-  "id": "targets",
+  "id": "list-prs",
   "kind": "distributor",
-  "items": [
-    "implementation concerns for {{input}}",
-    "test coverage concerns for {{input}}",
-    "documentation and rollout concerns for {{input}}"
-  ]
+  "model": "{{inputs.babysitterModel}}",
+  "itemsPath": "prs",
+  "prompt": "List all OPEN pull requests using the gh CLI...",
+  "output": { "type": "object", "required": ["prs"], "properties": { "prs": { "type": "array", "items": { "type": "string" } } } }
 }
 ```
 
-Phase 2 — one processor per item:
+Phase 2 — one sub-workflow per item:
 
 ```jsonc
 {
-  "id": "sweep-each",
-  "kind": "processor",
-  "dependsOn": ["targets"],
-  "forEach": "steps.targets.items",
-  "agent": "claude",
-  "model": "claude-sonnet-4-6",
-  "prompt": "Analyze target {{item.index}}:\n{{item}}\n\nTask: {{input}}"
+  "id": "babysit",
+  "kind": "workflow",
+  "dependsOn": ["list-prs"],
+  "workflow": "babysit-pr",
+  "forEach": "steps.list-prs.items",
+  "input": "babysit PR {{item}}",
+  "params": { "pr": "{{item}}" }
 }
 ```
 
@@ -146,17 +145,15 @@ Phase 3 — consolidate aggregate parent output:
 {
   "id": "report",
   "kind": "consolidator",
-  "dependsOn": ["sweep-each"],
-  "agent": "claude",
-  "model": "claude-sonnet-4-6",
-  "prompt": "{{steps.sweep-each.output}}"
+  "dependsOn": ["list-prs"],
+  "prompt": "Per-PR results:\n{{steps.babysit.output}}"
 }
 ```
 
 Run it:
 
 ```bash
-steamtrain workflow run target-sweep --input "add workflow documentation"
+steamtrain workflow run babysit-all-prs --input "land my PRs"
 ```
 
 ---
@@ -166,38 +163,33 @@ steamtrain workflow run target-sweep --input "add workflow documentation"
 Use when you want a **shared framing** step before parallel work, without
 dynamic child ids.
 
-### Bundled walkthrough: `multi-plan`
+### Bundled walkthrough: `code-review`
 
 ```mermaid
 flowchart TB
   input["{{input}}"]
-  lenses["distributor: planning-lenses"]
-  d1["worker: draft-correctness"]
-  d2["worker: draft-pragmatic"]
-  critique["consolidator: critique"]
-  synth["consolidator: synthesize"]
+  review["worker: review"]
+  cross["worker: cross-check"]
+  report["consolidator: report"]
 
-  input --> lenses
-  lenses --> d1
-  lenses --> d2
-  d1 --> critique
-  d2 --> critique
-  d1 --> synth
-  d2 --> synth
-  critique --> synth
+  input --> review
+  review --> cross
+  review --> report
+  cross --> report
 ```
 
-Phase 1 distributes planning lenses (static items).
+Phase 1 runs a primary reviewer that produces structured findings (file, line,
+severity, title, fix).
 
-Phase 2 runs two workers in parallel. Both read
-`{{steps.planning-lenses.items}}` in their prompts but produce different plans.
+Phase 2 runs a second independent model that opens each referenced file and
+verifies the finding is real — rejecting false positives, pre-existing issues,
+and style nits.
 
-Phase 3 critiques both drafts with an agent-backed consolidator.
+Phase 3 consolidates confirmed issues into a prioritized report with a short
+"Dismissed" section for rejected items.
 
-Phase 4 synthesizes the final plan from both drafts + critique.
-
-This differs from `target-sweep` because phase 2 uses **explicit parallel
-workers**, not `forEach`.
+This differs from `bug-hunt` because it reviews a **specific diff** (your
+changes) rather than sweeping a broad scope for bug classes.
 
 ---
 
@@ -403,7 +395,7 @@ Use a gate with `loopTo` for "keep going until clean" cycles. Full semantics:
 ```
 
 Prefer `workspace: "attach:…"` so every pass shares one worktree. The bundled
-`review-loop` workflow uses this shape.
+`mainline-stream` workflow uses this shape.
 
 ---
 

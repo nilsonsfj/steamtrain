@@ -202,9 +202,9 @@ and use `{{iteration}}` to let the model bail early when the work is done
 before the cap. The static step budget in `validateWorkflow` guards against
 pathological expansion but does **not** estimate dollar cost.
 
-The bundled `review-loop` workflow (`steamtrain workflow run review-loop`) is a
-worked example: implement → review (replies `DONE` when clean) → fix → a gate
-that loops back to `review` until it reports `DONE` or 5 iterations pass. The
+The bundled `mainline-stream` workflow (`steamtrain workflow run mainline-stream`) is a
+worked example: implement → review → fix → test → gates that loop back to
+`review` until the reviewer reports clean and tests pass (or 4 iterations pass). The
 LLM workflow author (`steamtrain workflow create`) also knows this pattern —
 describing iterative work like "review and fix until clean" will draft a
 loop-back gate instead of unrolling a fixed chain of phases.

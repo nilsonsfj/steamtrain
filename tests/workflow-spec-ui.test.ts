@@ -17,22 +17,22 @@ import {
 
 describe("workflow-spec-ui", () => {
   it("computes phase step offsets", () => {
-    const spec = BUNDLED_WORKFLOWS["multi-plan"]!;
+    const spec = BUNDLED_WORKFLOWS["bug-hunt"]!;
     const offsets = phaseStepOffsets(spec.phases);
     expect(offsets[0]).toBe(0);
     expect(offsets.at(-1)).toBe(spec.phases.slice(0, -1).reduce((n, p) => n + p.steps.length, 0));
   });
 
   it("assigns stable flat indices while flattening", () => {
-    const spec = BUNDLED_WORKFLOWS["multi-plan"]!;
+    const spec = BUNDLED_WORKFLOWS["bug-hunt"]!;
     const flat = flattenSpecSteps(spec);
     flat.forEach((entry, i) => expect(entry.flatIndex).toBe(i));
   });
 
   it("summarizes block kinds", () => {
-    const spec = BUNDLED_WORKFLOWS["multi-plan"]!;
-    expect(blockSummary(spec)).toContain("distributor:1");
-    expect(blockSummary(spec)).toContain("worker:2");
+    const spec = BUNDLED_WORKFLOWS["bug-hunt"]!;
+    expect(blockSummary(spec)).toContain("worker:3");
+    expect(blockSummary(spec)).toContain("consolidator:2");
   });
 
   it("formats gate conditions", () => {

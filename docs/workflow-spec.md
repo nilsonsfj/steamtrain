@@ -1301,7 +1301,7 @@ impl's ORIGINAL state** — iteration 2's review would never see iteration 1's
 fix, so the loop could burn its whole iteration cap without ever observing
 progress. With `attach:impl`, `review`, `fix`, and the next `review` all run
 inside the ONE worktree impl owns, so each pass genuinely sees the previous
-pass's edits — the loop converges on real state. (The bundled `review-loop`
+pass's edits — the loop converges on real state. (The bundled `mainline-stream`
 workflow uses exactly this pattern; see `src/workflow/bundled.ts`.)
 
 Semantics, on top of everything `inherit` does (implicit dependency, cache/

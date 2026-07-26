@@ -44,7 +44,7 @@ describe("workflow UI helpers", () => {
   });
 
   it("renders a preview step details screen", () => {
-    const spec = BUNDLED_WORKFLOWS["target-sweep"]!;
+    const spec = BUNDLED_WORKFLOWS["babysit-all-prs"]!;
     const entry = {
       phase: spec.phases[1]!,
       phaseIndex: 1,
@@ -68,10 +68,9 @@ describe("workflow UI helpers", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("workflow step · target-sweep");
-    expect(frame).toContain("sweep-each");
-    expect(frame).toContain("forEach: steps.targets.items");
-    expect(frame).toContain("prompt:");
+    expect(frame).toContain("workflow step · babysit-all-prs");
+    expect(frame).toContain("babysit");
+    expect(frame).toContain("forEach: steps.list-prs.items");
   });
 
   it("windows the live workflow tree around the selected step", () => {

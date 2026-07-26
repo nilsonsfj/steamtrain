@@ -209,8 +209,8 @@ describe("runCli", () => {
     expect(code).toBe(0);
     expect(c.stdout).toContain("project ");
     expect(c.stdout).toContain("workflows");
-    expect(c.stdout).toContain("multi-plan");
-    expect(c.stdout).toContain("distributor");
+    expect(c.stdout).toContain("bug-hunt");
+    expect(c.stdout).toContain("worker");
   });
 
   it("lists workflows against --project-dir state root via io.cwd", async () => {
@@ -226,10 +226,10 @@ describe("runCli", () => {
 
   it("validates bundled workflows", async () => {
     const c = capture();
-    const code = await runCli(["workflow", "validate", "multi-plan"], c.io);
+    const code = await runCli(["workflow", "validate", "bug-hunt"], c.io);
 
     expect(code).toBe(0);
-    expect(c.stdout).toContain("ok  multi-plan");
+    expect(c.stdout).toContain("ok  bug-hunt");
     expect(c.stderr).toBe("");
   });
 
@@ -261,19 +261,19 @@ describe("runCli", () => {
 
   it("plans a bundled workflow with --input", async () => {
     const c = capture();
-    const code = await runCli(["workflow", "plan", "multi-plan", "--input", "add feature X"], c.io);
+    const code = await runCli(["workflow", "plan", "bug-hunt", "--input", "add feature X"], c.io);
 
     expect(code).toBe(0);
-    expect(c.stdout).toContain("plan: multi-plan");
+    expect(c.stdout).toContain("plan: bug-hunt");
     expect(c.stdout).toContain("phases");
     expect(c.stdout).toContain("steps");
-    expect(c.stdout).toContain("planning-lenses");
+    expect(c.stdout).toContain("scan-logic");
   });
 
   it("plans a workflow with --json output", async () => {
     const c = capture();
     const code = await runCli(
-      ["workflow", "plan", "multi-plan", "--input", "add feature X", "--json"],
+      ["workflow", "plan", "bug-hunt", "--input", "add feature X", "--json"],
       c.io,
     );
 
@@ -294,7 +294,7 @@ describe("runCli", () => {
 
   it("requires input for plan", async () => {
     const c = capture();
-    const code = await runCli(["workflow", "plan", "multi-plan"], c.io);
+    const code = await runCli(["workflow", "plan", "bug-hunt"], c.io);
 
     expect(code).toBe(1);
     expect(c.stderr).toContain("requires --input");
@@ -387,12 +387,12 @@ describe("runCli", () => {
   it("accepts --dry-run as alias for plan", async () => {
     const c = capture();
     const code = await runCli(
-      ["workflow", "dry-run", "multi-plan", "--input", "add feature X"],
+      ["workflow", "dry-run", "bug-hunt", "--input", "add feature X"],
       c.io,
     );
 
     expect(code).toBe(0);
-    expect(c.stdout).toContain("plan: multi-plan");
+    expect(c.stdout).toContain("plan: bug-hunt");
   });
 
   it("returns non-zero when a headless workflow run fails", async () => {
@@ -547,12 +547,7 @@ describe("runCli", () => {
   it("clears all workflow caches", async () => {
     const c = capture();
     const cacheDir = join(c.io.cwd, WORKFLOW_CACHE_DIR);
-    const key = workflowCacheKey(
-      "multi-plan",
-      "cached",
-      c.io.cwd,
-      BUNDLED_WORKFLOWS["multi-plan"]!,
-    );
+    const key = workflowCacheKey("bug-hunt", "cached", c.io.cwd, BUNDLED_WORKFLOWS["bug-hunt"]!);
     await saveWorkflowCache(cacheDir, key, new Map());
 
     const code = await runCli(["workflow", "cache", "clear"], c.io);
@@ -565,15 +560,15 @@ describe("runCli", () => {
   it("clears a single workflow cache entry", async () => {
     const c = capture();
     const cacheDir = join(c.io.cwd, WORKFLOW_CACHE_DIR);
-    const key = workflowCacheKey("multi-plan", "one", c.io.cwd, BUNDLED_WORKFLOWS["multi-plan"]!);
+    const key = workflowCacheKey("tour", "one", c.io.cwd, BUNDLED_WORKFLOWS.tour!);
     const other = workflowCacheKey("bug-hunt", "two", c.io.cwd, BUNDLED_WORKFLOWS["bug-hunt"]!);
     await saveWorkflowCache(cacheDir, key, new Map());
     await saveWorkflowCache(cacheDir, other, new Map());
 
-    const code = await runCli(["workflow", "cache", "clear", "multi-plan", "--input", "one"], c.io);
+    const code = await runCli(["workflow", "cache", "clear", "tour", "--input", "one"], c.io);
 
     expect(code).toBe(0);
-    expect(c.stdout).toContain("cleared cache for workflow 'multi-plan'");
+    expect(c.stdout).toContain("cleared cache for workflow 'tour'");
     expect(existsSync(join(cacheDir, workflowCacheFileName(key)))).toBe(false);
     expect(existsSync(join(cacheDir, workflowCacheFileName(other)))).toBe(true);
   });

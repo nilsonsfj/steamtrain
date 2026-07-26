@@ -54,8 +54,8 @@ const twoStepSpec: WorkflowSpec = {
 describe("workflow cache store", () => {
   it("round-trips step results to disk", async () => {
     const root = tempDir();
-    const key = workflowCacheKey("multi-plan", "design cache", root, {
-      name: "multi-plan",
+    const key = workflowCacheKey("bug-hunt", "design cache", root, {
+      name: "bug-hunt",
       phases: [],
     });
     const cache = new Map<string, StepResult>([

@@ -49,7 +49,7 @@ export interface ArrivalReport {
   destinations: ArrivalDestination[];
 }
 
-const DEFAULT_NEXT_CANDIDATES = ["multi-plan", "quick-triage", "bug-hunt", "target-sweep"];
+const DEFAULT_NEXT_CANDIDATES = ["bug-hunt", "code-review", "mainline-stream", "mainline"];
 
 /** Preference order for the Arrival "Try …" destination. */
 export const ARRIVAL_NEXT_CANDIDATES = DEFAULT_NEXT_CANDIDATES;

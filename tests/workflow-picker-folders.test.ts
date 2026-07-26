@@ -17,7 +17,7 @@ function entry(
   source: WorkflowCatalogEntry["source"],
   description?: string,
 ): WorkflowCatalogEntry {
-  const base = BUNDLED_WORKFLOWS["target-sweep"] ?? Object.values(BUNDLED_WORKFLOWS)[0]!;
+  const base = BUNDLED_WORKFLOWS["bug-hunt"] ?? Object.values(BUNDLED_WORKFLOWS)[0]!;
   return {
     name,
     source,

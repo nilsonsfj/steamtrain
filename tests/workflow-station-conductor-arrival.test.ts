@@ -42,8 +42,6 @@ describe("first-run / Station landing", () => {
     expect(isAgentlessWorkflow(BUNDLED_WORKFLOWS.tour!)).toBe(true);
     expect(isCredentialFreeWorkflow(BUNDLED_WORKFLOWS["bug-hunt"]!)).toBe(false);
     expect(isAgentlessWorkflow(BUNDLED_WORKFLOWS["bug-hunt"]!)).toBe(false);
-    expect(isCredentialFreeWorkflow(BUNDLED_WORKFLOWS["quick-triage"]!)).toBe(false);
-    expect(isAgentlessWorkflow(BUNDLED_WORKFLOWS["quick-triage"]!)).toBe(true);
   });
 });
 
@@ -269,7 +267,7 @@ describe("arrival report", () => {
     expect(report!.destinations).toHaveLength(3);
     expect(report!.destinations[0]).toMatchObject({ id: "again", label: "Ride again" });
     expect(report!.destinations[2]).toMatchObject({ id: "history", label: "See past runs" });
-    expect(ARRIVAL_NEXT_CANDIDATES[0]).toBe("multi-plan");
+    expect(ARRIVAL_NEXT_CANDIDATES[0]).toBe("bug-hunt");
   });
 
   it("prefers the consolidator when picking the arrival hero step", () => {

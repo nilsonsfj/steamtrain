@@ -134,7 +134,13 @@ describe("bundled workflows", () => {
   });
 
   it("declare model-typed inputs with catalog fallbackModels", () => {
-    for (const name of ["mainline", "mainline-stream", "babysit-pr", "babysit-all-prs"]) {
+    for (const name of [
+      "mainline",
+      "mainline-stream",
+      "babysit-pr",
+      "babysit-all-prs",
+      "code-review",
+    ]) {
       const spec = BUNDLED_WORKFLOWS[name]!;
       const modelInputs = Object.entries(spec.inputs ?? {}).filter(
         ([, inp]) => inp.type === "model",

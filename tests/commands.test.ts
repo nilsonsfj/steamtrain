@@ -118,7 +118,7 @@ describe("executeSlashCommand", () => {
       makeCtx({
         mode: "workflow",
         workflowStep: {
-          workflowName: "multi-plan",
+          workflowName: "bug-hunt",
           stepId: "plan",
           agent: "claude",
           model: "claude-sonnet-4-6",
@@ -195,7 +195,7 @@ describe("executeSlashCommand", () => {
       makeCtx({
         mode: "workflow",
         workflowStep: {
-          workflowName: "multi-plan",
+          workflowName: "bug-hunt",
           stepId: "plan",
           agent: "claude",
           model: "claude-sonnet-4-6",
@@ -524,13 +524,13 @@ describe("save-workflows command", () => {
     const saveWorkflows = vi.fn(() => ({
       handled: true as const,
       clearInput: true,
-      notices: [{ level: "info" as const, text: "saved multi-plan" }],
+      notices: [{ level: "info" as const, text: "saved bug-hunt" }],
     }));
     const result = executeSlashCommand("/save-workflows", makeCtx({ saveWorkflows }));
     expect(saveWorkflows).toHaveBeenCalledOnce();
     expect(result).toMatchObject({
       handled: true,
-      notices: [{ level: "info", text: "saved multi-plan" }],
+      notices: [{ level: "info", text: "saved bug-hunt" }],
     });
   });
 
@@ -556,7 +556,7 @@ describe("/prompt command", () => {
       makeCtx({
         mode: "workflow",
         workflowStep: {
-          workflowName: "multi-plan",
+          workflowName: "bug-hunt",
           stepId: "plan",
           agent: "claude",
           model: "claude-sonnet-4-6",
@@ -575,7 +575,7 @@ describe("/prompt command", () => {
       makeCtx({
         mode: "workflow",
         workflowStep: {
-          workflowName: "multi-plan",
+          workflowName: "bug-hunt",
           stepId: "plan",
           agent: "claude",
           model: "claude-sonnet-4-6",
@@ -594,7 +594,7 @@ describe("/prompt command", () => {
       makeCtx({
         mode: "workflow",
         workflowStep: {
-          workflowName: "multi-plan",
+          workflowName: "bug-hunt",
           stepId: "plan",
           agent: "claude",
           model: "claude-sonnet-4-6",
@@ -659,7 +659,7 @@ describe("/effort on workflow steps", () => {
       makeCtx({
         mode: "workflow",
         workflowStep: {
-          workflowName: "multi-plan",
+          workflowName: "bug-hunt",
           stepId: "plan",
           agent: "claude",
           model: "claude-sonnet-4-6",
@@ -678,7 +678,7 @@ describe("/effort on workflow steps", () => {
       makeCtx({
         mode: "workflow",
         workflowStep: {
-          workflowName: "multi-plan",
+          workflowName: "bug-hunt",
           stepId: "plan",
           agent: "claude",
           model: "claude-sonnet-4-6",
@@ -697,7 +697,7 @@ describe("/effort on workflow steps", () => {
       makeCtx({
         mode: "workflow",
         workflowStep: {
-          workflowName: "multi-plan",
+          workflowName: "bug-hunt",
           stepId: "plan",
           agent: "claude",
           model: "claude-sonnet-4-6",

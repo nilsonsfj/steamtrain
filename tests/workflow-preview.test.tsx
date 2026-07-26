@@ -11,15 +11,15 @@ import { BUNDLED_WORKFLOWS } from "../src/workflow";
 
 describe("WorkflowPreview", () => {
   it("flattens spec phases and steps in order", () => {
-    const spec = BUNDLED_WORKFLOWS["multi-plan"]!;
+    const spec = BUNDLED_WORKFLOWS["bug-hunt"]!;
     const flat = flattenSpecSteps(spec);
     expect(flat.length).toBeGreaterThan(0);
-    expect(flat[0]?.step.id).toBe("planning-lenses");
-    expect(flat.at(-1)?.step.id).toBe("synthesize");
+    expect(flat[0]?.step.id).toBe("scan-logic");
+    expect(flat.at(-1)?.step.id).toBe("report");
   });
 
   it("renders workflow metadata and step detail", () => {
-    const spec = BUNDLED_WORKFLOWS["multi-plan"]!;
+    const spec = BUNDLED_WORKFLOWS["bug-hunt"]!;
     const { lastFrame } = render(
       <WorkflowPreview
         spec={spec}
@@ -31,11 +31,11 @@ describe("WorkflowPreview", () => {
       />,
     );
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("workflow preview · multi-plan");
+    expect(frame).toContain("workflow preview · bug-hunt");
     expect(frame).toContain("(bundled)");
-    expect(frame).toContain("planning-lenses");
+    expect(frame).toContain("scan-logic");
     expect(frame).toContain("ready to run");
-    expect(frame).toContain("fan-out");
+    expect(frame).toContain("worker");
   });
 
   it("shows dispatch blockers", () => {
@@ -56,7 +56,7 @@ describe("WorkflowPreview", () => {
   });
 
   it("clamps selected index and renders step detail", () => {
-    const spec = BUNDLED_WORKFLOWS["multi-plan"]!;
+    const spec = BUNDLED_WORKFLOWS["bug-hunt"]!;
     const { lastFrame } = render(
       <WorkflowPreview
         spec={spec}
@@ -68,13 +68,13 @@ describe("WorkflowPreview", () => {
       />,
     );
     const frame = lastFrame() ?? "";
-    expect(frame).toMatch(/▶.*synthes/i);
-    expect(frame).toContain("synthesize");
+    expect(frame).toMatch(/▶.*report/i);
+    expect(frame).toContain("report");
     expect(frame).toContain("MiMo Auto");
   });
 
   it("hides step detail panel when showStepDetail is false", () => {
-    const spec = BUNDLED_WORKFLOWS["multi-plan"]!;
+    const spec = BUNDLED_WORKFLOWS["bug-hunt"]!;
     const { lastFrame } = render(
       <WorkflowPreview
         spec={spec}
@@ -87,14 +87,12 @@ describe("WorkflowPreview", () => {
       />,
     );
     const frame = lastFrame() ?? "";
-    // The detail panel shows step id + kind + phase title in a bordered box.
-    // With showStepDetail=false, the detail panel content should be absent.
-    expect(frame).not.toContain("distributor · phase");
-    expect(frame).toContain("planning-lenses");
+    expect(frame).not.toContain("worker · phase");
+    expect(frame).toContain("scan-logic");
   });
 
   it("hides plan result when showPlanResult is false", () => {
-    const spec = BUNDLED_WORKFLOWS["multi-plan"]!;
+    const spec = BUNDLED_WORKFLOWS["bug-hunt"]!;
     const { lastFrame } = render(
       <WorkflowPreview
         spec={spec}
@@ -107,7 +105,6 @@ describe("WorkflowPreview", () => {
       />,
     );
     const frame = lastFrame() ?? "";
-    // Plan result view should not appear even if planResult is set.
     expect(frame).toContain("ready to run");
   });
 
@@ -141,7 +138,7 @@ describe("WorkflowPreview", () => {
     const description =
       "List every open GitHub PR for the current project and, for each one in parallel, rebase onto main, address or document review comments, resolve conflicts, wait for a fresh review, loop until the PR is mergeable or stuck, then write a summary report.";
     const spec = {
-      ...BUNDLED_WORKFLOWS["multi-plan"]!,
+      ...BUNDLED_WORKFLOWS["bug-hunt"]!,
       name: "babysit-all-prs",
       description,
     };
@@ -170,7 +167,7 @@ describe("WorkflowPreview", () => {
   it("fills the detail panel with a wrapped long prompt instead of one truncated line", () => {
     const prompt =
       "You are in a checkout of the current project. List all OPEN pull requests on GitHub using the gh CLI, e.g. 'gh pr list --state open --json number,headRefName --limit 200'. Output ONE line per PR with the number and branch name. Do not include closed or draft PRs.";
-    const base = BUNDLED_WORKFLOWS["multi-plan"]!;
+    const base = BUNDLED_WORKFLOWS["bug-hunt"]!;
     const firstPhase = base.phases[0]!;
     const firstStep = { ...firstPhase.steps[0]!, id: "prs", prompt };
     const spec = {
@@ -205,7 +202,7 @@ describe("WorkflowPreview", () => {
     const description =
       "Uses {{inputs.repositoryUrl}} plus {{inputs.extremelyLongWorkflowTokenName}} for routing.";
     const spec = {
-      ...BUNDLED_WORKFLOWS["multi-plan"]!,
+      ...BUNDLED_WORKFLOWS["bug-hunt"]!,
       name: "narrow-wrap",
       description,
     };

@@ -44,85 +44,6 @@ const FREE = {
  */
 const READ_ONLY: StepPermissions = { profile: "read-only", onUnsupported: "warn" };
 
-const multiPlan: WorkflowSpec = {
-  name: "multi-plan",
-  description:
-    "Draft a plan from independent angles, stress-test it, then synthesize the strongest version.",
-  // Planning reads and argues; it never edits. Declared once at the top so
-  // every step in the pipeline inherits it.
-  permissions: READ_ONLY,
-  phases: [
-    {
-      id: "scope",
-      title: "Distribute planning lenses",
-      steps: [
-        {
-          id: "planning-lenses",
-          kind: "distributor",
-          items: [
-            "correctness lens: validate invariants, edge cases, and existing patterns for {{input}}",
-            "pragmatic lens: minimize risk and surface assumptions for {{input}}",
-          ],
-        },
-      ],
-    },
-    {
-      id: "draft",
-      title: "Draft plans from independent angles",
-      steps: [
-        {
-          id: "draft-correctness",
-          kind: "worker",
-          agent: "opencode",
-          model: FREE.northMini,
-          dependsOn: ["planning-lenses"],
-          prompt:
-            "Draft a concise, step-by-step implementation plan for the task below. Optimize for correctness, simplicity, and reuse of existing patterns. List concrete files/steps.\n\nPlanning lenses:\n{{steps.planning-lenses.items}}\n\nTask: {{input}}",
-        },
-        {
-          id: "draft-pragmatic",
-          kind: "worker",
-          agent: "opencode",
-          model: FREE.mimoZen,
-          dependsOn: ["planning-lenses"],
-          prompt:
-            "Draft a concise, step-by-step implementation plan for the task below. Optimize for speed of delivery and pragmatism; call out the riskiest assumptions.\n\nPlanning lenses:\n{{steps.planning-lenses.items}}\n\nTask: {{input}}",
-        },
-      ],
-    },
-    {
-      id: "critique",
-      title: "Adversarial critique of both drafts",
-      steps: [
-        {
-          id: "critique",
-          kind: "consolidator",
-          agent: "opencode",
-          model: FREE.nemotronUltra,
-          dependsOn: ["draft-correctness", "draft-pragmatic"],
-          prompt:
-            "You are a skeptical reviewer. Critique these two plans for the same task. Identify gaps, risks, and where each is stronger. Be specific and adversarial.\n\nTask: {{input}}\n\n--- PLAN A (correctness-first) ---\n{{steps.draft-correctness.output}}\n\n--- PLAN B (pragmatic) ---\n{{steps.draft-pragmatic.output}}",
-        },
-      ],
-    },
-    {
-      id: "synthesize",
-      title: "Synthesize the strongest plan",
-      steps: [
-        {
-          id: "synthesize",
-          kind: "consolidator",
-          agent: "mimo",
-          model: FREE.mimoAuto,
-          dependsOn: ["draft-correctness", "draft-pragmatic", "critique"],
-          prompt:
-            "Using the two drafts and the critique below, produce a single, final implementation plan that takes the strongest parts of each and addresses the critique. Output only the final plan.\n\nTask: {{input}}\n\n--- PLAN A ---\n{{steps.draft-correctness.output}}\n\n--- PLAN B ---\n{{steps.draft-pragmatic.output}}\n\n--- CRITIQUE ---\n{{steps.critique.output}}",
-        },
-      ],
-    },
-  ],
-};
-
 const bugHunt: WorkflowSpec = {
   name: "bug-hunt",
   description:
@@ -203,168 +124,6 @@ const bugHunt: WorkflowSpec = {
           dependsOn: ["cross-check", "findings-ready"],
           prompt:
             "Turn the verified findings below into a prioritized report (highest-severity first). For each: a one-line summary, file:line, severity, and the recommended fix. Output only the report.\n\n{{steps.cross-check.output}}",
-        },
-      ],
-    },
-  ],
-};
-
-const targetSweep: WorkflowSpec = {
-  name: "target-sweep",
-  description:
-    "Split a request into target areas, run one processor per target, then consolidate the findings.",
-  // Analysis per target area, then a report: nothing here writes.
-  permissions: READ_ONLY,
-  phases: [
-    {
-      id: "split",
-      title: "Distribute target areas",
-      steps: [
-        {
-          id: "targets",
-          kind: "distributor",
-          items: [
-            "implementation concerns for {{input}}",
-            "test coverage concerns for {{input}}",
-            "documentation and rollout concerns for {{input}}",
-          ],
-        },
-      ],
-    },
-    {
-      id: "process",
-      title: "Process one target per generated agent run",
-      steps: [
-        {
-          id: "sweep-each",
-          kind: "processor",
-          agent: "mimo",
-          model: FREE.mimoAuto,
-          dependsOn: ["targets"],
-          forEach: "steps.targets.items",
-          prompt:
-            "Analyze this target area for the task. Be concrete and concise.\n\nTarget {{item.index}} from {{item.sourceStepId}}:\n{{item}}\n\nTask: {{input}}",
-        },
-      ],
-    },
-    {
-      id: "report",
-      title: "Consolidate target outputs",
-      steps: [
-        {
-          id: "report",
-          kind: "consolidator",
-          agent: "opencode",
-          model: FREE.mimoZen,
-          dependsOn: ["sweep-each"],
-          prompt:
-            "Merge the per-target analyses below into one prioritized report. Deduplicate overlap and keep concrete action items.\n\n{{steps.sweep-each.output}}",
-        },
-      ],
-    },
-  ],
-};
-
-const reviewLoop: WorkflowSpec = {
-  name: "review-loop",
-  description: "Implement, then review and fix in a bounded loop until clean.",
-  phases: [
-    {
-      id: "implement",
-      title: "Implement",
-      steps: [
-        {
-          id: "impl",
-          kind: "worker",
-          agent: "opencode",
-          model: FREE.mimoZen,
-          prompt: "Implement the task fully:\n{{input}}",
-        },
-      ],
-    },
-    {
-      id: "review",
-      title: "Review",
-      steps: [
-        {
-          id: "review",
-          kind: "worker",
-          agent: "opencode",
-          model: FREE.mimoZen,
-          dependsOn: ["impl"],
-          // `attach` (not `inherit`) — review runs INSIDE impl's own worktree
-          // rather than a copy of it. This is what makes the loop converge:
-          // with `inherit`, every iteration's review step forks a FRESH copy
-          // of impl's original (pre-fix) state, so iteration 2's review would
-          // never see iteration 1's fix — the loop could run forever without
-          // ever observing progress. With `attach`, review/fix/the next
-          // review all share the one worktree, so each pass sees the previous
-          // pass's edits.
-          workspace: "attach:impl",
-          // The reviewer shares impl's worktree, so "don't touch the code you
-          // are reviewing" is not a style note — it is what keeps the loop
-          // honest. read-only is enforced where the CLI can, and verified
-          // against the shared worktree either way.
-          permissions: READ_ONLY,
-          prompt:
-            "Review ONLY the changes you can see in this worktree (diff from the base commit). Ignore pre-existing code — focus on issues in the new/changed code. If there are NO issues, reply with the single word DONE. Otherwise list each issue with file:line and a short description.",
-        },
-      ],
-    },
-    {
-      id: "fix",
-      title: "Fix",
-      steps: [
-        {
-          id: "fix",
-          kind: "worker",
-          agent: "opencode",
-          model: FREE.mimoZen,
-          dependsOn: ["review"],
-          // Also attach:impl (not attach:review / inherit:review) — impl is
-          // the one worktree the whole loop shares. fix's dependsOn on review
-          // still orders it after review; attach only says which worktree to
-          // run inside.
-          workspace: "attach:impl",
-          prompt:
-            "Fix every issue listed below. Apply the minimal fix for each — don't refactor unrelated code. Summarize what you changed.\n{{steps.review.output}}",
-        },
-      ],
-    },
-    {
-      id: "gate",
-      title: "Converged?",
-      steps: [
-        {
-          // The gate re-checks REVIEW (not fix): the loop converges when the
-          // reviewer reports nothing left to fix, so the gate must test the
-          // review step's output for "DONE". Gating on fix instead is a common
-          // authoring mistake — fix always runs and always produces output, so
-          // a fix-conditioned gate never converges and the loop burns its cap.
-          id: "loop-gate",
-          kind: "gate",
-          dependsOn: ["review"],
-          condition: { step: "review", contains: "DONE" },
-          loopTo: "review",
-          maxIterations: 5,
-          onFalse: "continue",
-        },
-      ],
-    },
-    {
-      id: "merge",
-      title: "Merge",
-      steps: [
-        {
-          // review and fix both attach:impl, so all three share ONE
-          // worktree (impl's). `from` can name any of them — merge dedupes
-          // sources by worktree root — but naming the tail (fix) reads as
-          // "the final state of the shared worktree".
-          id: "merge",
-          kind: "merge",
-          dependsOn: ["loop-gate"],
-          from: ["fix"],
-          mode: "apply",
         },
       ],
     },
@@ -476,7 +235,7 @@ const tour: WorkflowSpec = {
             "loop-signal",
           ],
           prompt:
-            '🚂 END OF THE LINE — tour complete for: {{input}}\n\nWhat just happened, in one $0 run:\n- A distributor fanned the departure into 3 station items (no agent involved).\n- Three command cars ran in parallel; their outputs are below.\n- The express-service step was skipped by its when-condition — skips cascade sensibly, and this report simply treats it as absent.\n- A gate looped the train around the track until "{{steps.lap.output}}" satisfied its condition, then emitted target "{{steps.loop-signal.target}}".\n\n--- CAR: fan-out ---\n{{steps.car-fanout.output}}\n--- CAR: parallel ---\n{{steps.car-parallel.output}}\n--- CAR: isolation ---\n{{steps.car-isolation.output}}\n\nNext destinations:\n- Try multi-plan — draft a plan from independent angles, then synthesize the strongest version\n- Run steamtrain init — check agent readiness and add starter workflows for this repo\n- Re-ride with --fresh — runs resume from cache by default\n\nEvery block you just rode — distributor, command, gate + loop, consolidator — is declarative JSON. Agent-backed workers and processors slot into the same tracks.',
+            '🚂 END OF THE LINE — tour complete for: {{input}}\n\nWhat just happened, in one $0 run:\n- A distributor fanned the departure into 3 station items (no agent involved).\n- Three command cars ran in parallel; their outputs are below.\n- The express-service step was skipped by its when-condition — skips cascade sensibly, and this report simply treats it as absent.\n- A gate looped the train around the track until "{{steps.lap.output}}" satisfied its condition, then emitted target "{{steps.loop-signal.target}}".\n\n--- CAR: fan-out ---\n{{steps.car-fanout.output}}\n--- CAR: parallel ---\n{{steps.car-parallel.output}}\n--- CAR: isolation ---\n{{steps.car-isolation.output}}\n\nNext destinations:\n- Try bug-hunt — sweep a scope for bugs in parallel, cross-check findings, report the real ones\n- Try code-review — review your diff with two independent models\n- Run steamtrain init — check agent readiness and add starter workflows for this repo\n- Re-ride with --fresh — runs resume from cache by default\n\nEvery block you just rode — distributor, command, gate + loop, consolidator — is declarative JSON. Agent-backed workers and processors slot into the same tracks.',
         },
       ],
     },
@@ -484,107 +243,138 @@ const tour: WorkflowSpec = {
 };
 
 /**
- * A workflow built entirely on direct-API `llm` steps — the lightweight tier
- * between command steps and full coding agents. Demonstrates the llm-step
- * repertoire end to end: a structured splitter (`output` + `itemsPath`) acting
- * as a fan-out source, a per-item `forEach` judge, a typed verdict feeding a
- * gate `path` condition, and an llm consolidator. Needs no agent CLI at all —
- * only `ANTHROPIC_API_KEY` in the environment — so it runs in CI and on
- * machines with no agent installed. (The other bundled workflows keep their
- * agent-backed free-tier models on purpose: they must run with zero API keys.)
+ * Review a diff: one model reviews the changes, a second independent model
+ * cross-checks only the flagged issues to kill false positives, and a
+ * consolidator emits the final report. Read-only, fast, and the most common
+ * developer action — "review my changes."
  *
- * The model on each step is swappable without forking: session overrides
- * (`{ steps: { concerns: { model: "…" } } }` via the TUI editor or the web
- * API) patch llm steps' `model`/`prompt`/`effort` like any agent step's.
+ * The input describes WHAT to review: "uncommitted changes", "this branch vs
+ * main", a PR number, or a file/directory scope. The reviewer agent inspects
+ * the working tree and produces structured findings; the cross-checker sees
+ * only the issues (not the full diff) so it judges each on its merits.
  */
-const quickTriage: WorkflowSpec = {
-  name: "quick-triage",
+const codeReview: WorkflowSpec = {
+  name: "code-review",
   description:
-    "Split a request into concerns, assess each with direct API calls, and gate on a typed verdict — llm steps only, no agent CLI required (uses ANTHROPIC_API_KEY).",
+    "Review a diff with two independent models: one reviews, the other cross-checks flagged issues to eliminate false positives, then a clean prioritized report.",
+  permissions: READ_ONLY,
+  inputs: {
+    reviewerModel: {
+      type: "model",
+      description: "Agent model that performs the primary review.",
+      default: FREE.nemotronUltra,
+      fallbackModels: [FREE.mimoAuto, FREE.mimoZen],
+    },
+    crossCheckModel: {
+      type: "model",
+      description: "Agent model that cross-checks flagged issues for false positives.",
+      default: FREE.mimoAuto,
+      fallbackModels: [FREE.mimoZen, FREE.northMini],
+    },
+  },
   phases: [
     {
-      id: "split",
-      title: "Split the request into concerns (llm splitter)",
+      id: "review",
+      title: "Primary review of the diff",
       steps: [
         {
-          id: "concerns",
-          kind: "llm",
-          model: "claude-opus-4-8",
+          id: "review",
+          kind: "worker",
+          model: "{{inputs.reviewerModel}}",
           prompt:
-            "List the 3 to 5 most important, distinct concerns to evaluate before doing the following. Keep each concern to one short sentence.\n\nRequest: {{input}}",
+            "Review the changes described below. Look at the actual diff (git diff, git diff --staged, or the relevant branch/PR diff). Focus on: correctness bugs, logic errors, missing error handling, security issues, and broken invariants. Ignore style nits and formatting.\n\n" +
+            "For each issue: file:line, severity (critical/high/medium/low), what's wrong, and a one-line fix suggestion.\n\n" +
+            'End your reply with JSON matching: { "issues": [{ "file": "path", "line": 42, "severity": "critical"|"high"|"medium"|"low", "title": "short description", "detail": "what is wrong and why", "fix": "suggested fix" }] } — use an empty array when the diff is clean.\n\n' +
+            "What to review: {{input}}",
           output: {
             type: "object",
-            required: ["concerns"],
+            required: ["issues"],
             properties: {
-              concerns: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 5 },
-            },
-          },
-          itemsPath: "concerns",
-        },
-      ],
-    },
-    {
-      id: "assess",
-      title: "Assess each concern in parallel (llm forEach)",
-      steps: [
-        {
-          id: "assess-each",
-          kind: "llm",
-          model: "claude-opus-4-8",
-          dependsOn: ["concerns"],
-          forEach: "steps.concerns.items",
-          prompt:
-            "Assess this concern for the request below in 2-3 sentences: how risky is it, and what would mitigate it?\n\nConcern: {{item}}\n\nRequest: {{input}}",
-        },
-      ],
-    },
-    {
-      id: "verdict",
-      title: "Typed go / no-go verdict (llm judge)",
-      steps: [
-        {
-          id: "verdict",
-          kind: "llm",
-          model: "claude-opus-4-8",
-          dependsOn: ["assess-each"],
-          prompt:
-            'Given the per-concern assessments below, judge whether the request is ready to proceed. Answer "go" only when no assessment describes an unmitigated high risk.\n\n{{steps.assess-each.output}}',
-          output: {
-            type: "object",
-            required: ["verdict", "rationale"],
-            properties: {
-              verdict: { type: "string", enum: ["go", "no-go"] },
-              rationale: { type: "string" },
+              issues: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["file", "severity", "title"],
+                  properties: {
+                    file: { type: "string" },
+                    line: { type: "number" },
+                    severity: { type: "string", enum: ["critical", "high", "medium", "low"] },
+                    title: { type: "string" },
+                    detail: { type: "string" },
+                    fix: { type: "string" },
+                  },
+                },
+              },
             },
           },
         },
       ],
     },
     {
-      id: "gate",
-      title: "Gate on the verdict",
+      id: "cross-check",
+      title: "Cross-check flagged issues",
       steps: [
         {
-          id: "ready",
-          kind: "gate",
-          dependsOn: ["verdict"],
-          condition: { step: "verdict", path: "verdict", equals: "go" },
-          target: "cleared",
-          onFalse: "continue",
+          id: "cross-check",
+          kind: "worker",
+          model: "{{inputs.crossCheckModel}}",
+          dependsOn: ["review"],
+          prompt:
+            "You are a skeptical second reviewer. Below are issues flagged by another reviewer for the scope: {{input}}.\n\n" +
+            "For EACH issue, open the referenced file and verify: is this actually a bug in the changed code? Reject anything that is a false positive, a pre-existing issue not introduced by this diff, a style preference, or something the reviewer misread.\n\n" +
+            "Keep only issues you can substantiate by reading the actual code.\n\n" +
+            'End your reply with JSON matching: { "confirmed": [{ "file": "path", "line": 42, "severity": "critical"|"high"|"medium"|"low", "title": "short description", "detail": "why this is real", "fix": "suggested fix" }], "rejected": [{ "title": "short description", "reason": "why it is a false positive" }] }\n\n' +
+            "Flagged issues:\n{{steps.review.json.issues}}",
+          output: {
+            type: "object",
+            required: ["confirmed", "rejected"],
+            properties: {
+              confirmed: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["file", "severity", "title"],
+                  properties: {
+                    file: { type: "string" },
+                    line: { type: "number" },
+                    severity: { type: "string", enum: ["critical", "high", "medium", "low"] },
+                    title: { type: "string" },
+                    detail: { type: "string" },
+                    fix: { type: "string" },
+                  },
+                },
+              },
+              rejected: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["title", "reason"],
+                  properties: {
+                    title: { type: "string" },
+                    reason: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
         },
       ],
     },
     {
       id: "report",
-      title: "Consolidated triage report (llm merge)",
+      title: "Final review report",
       steps: [
         {
           id: "report",
-          kind: "llm",
-          model: "claude-opus-4-8",
-          dependsOn: ["assess-each", "verdict", "ready"],
+          kind: "consolidator",
+          agent: "mimo",
+          model: FREE.mimoAuto,
+          dependsOn: ["review", "cross-check"],
           prompt:
-            "Write a short triage report for the request below: the verdict ({{steps.verdict.json.verdict}}), why ({{steps.verdict.json.rationale}}), then a prioritized list of the concerns and their assessments.\n\nRequest: {{input}}\n\nAssessments:\n{{steps.assess-each.output}}",
+            "Write the final code review report for: {{input}}\n\n" +
+            "Confirmed issues (highest severity first):\n{{steps.cross-check.json.confirmed}}\n\n" +
+            "Rejected false positives:\n{{steps.cross-check.json.rejected}}\n\n" +
+            "Format: a one-line verdict (clean / N issues found), then each confirmed issue with file:line, severity, description, and fix. If there are rejected items, add a short 'Dismissed' section at the end. Output only the report.",
         },
       ],
     },
@@ -598,8 +388,9 @@ const quickTriage: WorkflowSpec = {
  * description.
  *
  * All steps `attach` to `implement`'s worktree (never `inherit`), so every
- * iteration of the loop actually sees the previous iteration's fixes — see
- * the `review-loop` comments above for why that matters.
+ * iteration of the loop actually sees the previous iteration's fixes — with
+ * `inherit`, each iteration would fork a fresh copy of the pre-fix state and
+ * the loop could never observe progress.
  *
  * `reviewerEffort` defaults to `""`: an empty rendered `effort` is treated as
  * "omit the flag" (building block 5), not a failure — only an empty rendered
@@ -1445,11 +1236,8 @@ const babysitAllPrs: WorkflowSpec = {
 /** name → spec. Merged under any user `workflows` from steamtrain.json. */
 export const BUNDLED_WORKFLOWS: Record<string, WorkflowSpec> = {
   [tour.name]: tour,
-  [multiPlan.name]: multiPlan,
   [bugHunt.name]: bugHunt,
-  [targetSweep.name]: targetSweep,
-  [reviewLoop.name]: reviewLoop,
-  [quickTriage.name]: quickTriage,
+  [codeReview.name]: codeReview,
   [mainlineStream.name]: mainlineStream,
   [mainline.name]: mainline,
   [babysitPr.name]: babysitPr,
