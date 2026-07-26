@@ -59,8 +59,9 @@ export interface Channel<T> {
  * `push`; one consumer (the engine's phase loop) iterates the items in order.
  * Mirrors the queue+resolver idiom in `src/agents/spawn.ts`.
  *
- * No queue cap: the engine already bounds total steps via MAX_STEPS, and the
- * pool drains continuously. Silently dropping lifecycle events (step_done,
+ * No queue cap: the engine already bounds total steps via `MAX_STEPS`
+ * (`src/workflow/types.ts`, enforced in the engine schedulers), and the pool
+ * drains continuously. Silently dropping lifecycle events (step_done,
  * phase_done, workflow_done) would leave the reducer/UI stuck on "running".
  */
 export function createChannel<T>(): Channel<T> {

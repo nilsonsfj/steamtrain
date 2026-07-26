@@ -626,6 +626,8 @@ export class WorkflowRunManager {
     let disposeCancelWatch: (() => void) | undefined;
     let disposeControlWatch: (() => void) | undefined;
     // True once this run holds a runningCount slot (executing, not merely queued).
+    // Without liveRuns, start() already counted us (queued starts false) so this
+    // begins true; with liveRuns we count only after acquireRunSlot succeeds.
     let holdsRunningSlot = !run.queued;
     try {
       // Mirror the run into the shared live-run registry (cross-UI attach) and

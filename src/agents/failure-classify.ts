@@ -79,8 +79,11 @@ const TRANSIENT_PATTERNS: RegExp[] = [
   /\bsocket hang up\b/i,
   /\bnetwork\b/i,
   /\btemporar(?:y|ily)\b/i,
+  // Prefer specific "… unavailable" phrases over bare `\bunavailable\b`, which
+  // false-positives on permanent wording like "model X is unavailable".
   /\bservice\s+unavailable\b/i,
-  /\btemporarily\s+unavailable\b/i,
+  /\bAPI\s+unavailable\b/i,
+  /\bresource\s+(?:is\s+)?unavailable\b/i,
   /\b503\b/,
   /\b502\b/,
   /\b504\b/,

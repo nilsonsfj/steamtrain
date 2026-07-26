@@ -50,6 +50,8 @@ describe("classifyAgentFailure", () => {
     expect(classifyAgentFailure("spawn ENOENT")).toBe("transient");
     expect(classifyAgentFailure("service unavailable")).toBe("transient");
     expect(classifyAgentFailure("temporarily unavailable")).toBe("transient");
+    expect(classifyAgentFailure("API unavailable")).toBe("transient");
+    expect(classifyAgentFailure("Resource temporarily unavailable")).toBe("transient");
   });
 
   it("does not treat permanent model-removal wording as transient", () => {
