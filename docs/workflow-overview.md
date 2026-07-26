@@ -723,9 +723,31 @@ steamtrain workflow run <name> --input "task text"
 steamtrain workflow run <name> --stdin --json
 steamtrain workflow run <name> --input "task text" --fresh
 steamtrain workflow create --input "describe the workflow you want" [--save]
+steamtrain workflow export <name> [--out <path>] [--stdout]
+steamtrain workflow import <path|url> [--save] [--scope user|project] [--force] [--yes]
 steamtrain workflow cache clear
 steamtrain workflow cache clear <name> --input "task text"
 ```
+
+### Sharing workflows
+
+`workflow export` writes a self-describing `<name>.steamtrain.json` package
+(format version, exporter version, optional source layer, sha256 checksum, and
+the workflow body). Share that file via gist, chat, or PR.
+
+`workflow import` accepts a local path, `https://` URL, or `--stdin`. Before
+saving it:
+
+1. Parses share envelopes, `{ workflows: {…} }` snippets, or bare specs
+2. Runs full `validateWorkflow` + template lint
+3. Previews doctor readiness for any pinned agents
+4. Prints every prompt / command / system text (the prompt-injection surface)
+   and flags suspicious patterns, shell `command` steps, and `full` permissions
+
+Import previews by default. `--save` writes to `~/.steamtrain/workflows.json`
+(`--scope user`, default) or `./steamtrain.json` (`--scope project`). Overwriting
+an existing same-scope workflow needs `--force`. Critical/high findings also
+need `--yes`.
 
 Exit codes:
 

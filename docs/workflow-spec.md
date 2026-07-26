@@ -5,7 +5,11 @@ object made of ordered phases; each phase contains one or more steps. Phases run
 sequentially. Steps inside a phase run concurrently, bounded by
 `maxConcurrency`.
 
-Workflow definitions live under the `workflows` map in `steamtrain.json`.
+Workflow definitions live under the `workflows` map in `steamtrain.json`, in
+`~/.steamtrain/workflows.json` (user layer), or as bundled recipes. To share one
+outside those files, use `steamtrain workflow export <name>` /
+`steamtrain workflow import <path|url>` — see
+[Sharing workflows](workflow-overview.md#sharing-workflows).
 
 **Read first:** [`workflow-overview.md`](workflow-overview.md) for diagrams and
 execution behavior. **Examples:** [`workflow-examples.md`](workflow-examples.md).

@@ -155,7 +155,7 @@ possible.
 ## 1.6 Workflow sharing: import/export and a community catalog
 
 **The gap:** workflows live in `steamtrain.json` (project) or the user layer;
-the only way to share one is copy-paste JSON. The bundled catalog (4 workflows)
+the only way to share one is copy-paste JSON. The bundled catalog
 is the entire out-of-box library.
 
 **The feature:**
@@ -170,6 +170,14 @@ is the entire out-of-box library.
 recipes (release checklist, dependency-upgrade sweep, incident postmortem,
 docs audit) is what makes new users productive in minutes instead of an
 authoring session. Ecosystem features also compound over time.
+
+> **Shipped (import/export):** `workflow export <name>` writes a versioned
+> `<name>.steamtrain.json` envelope (checksum + source layer + workflow body);
+> `workflow import <path|url|--stdin>` validates schema/template refs, runs a
+> doctor readiness preview for pinned agents, prints every prompt/command for
+> review, and saves with `--save` (`--scope user|project`, `--force` to
+> overwrite, `--yes` required for critical/high findings). Community catalog /
+> `workflow search` remains follow-up.
 
 ## 1.7 Web UI follow-ups
 

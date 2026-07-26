@@ -39,7 +39,10 @@ Key properties and expectations:
   review a Makefile.   Template expansions in `cmd` (e.g. `{{input}}`,
   `{{steps.*.output}}`) are interpolated into the shell unsanitized; the
   template linter warns at validate/create time when a command step embeds
-  those refs.
+  those refs. Prefer `steamtrain workflow import <path|url>` over raw
+  copy-paste: import validates the schema, prints every prompt/command
+  (the prompt-injection surface), flags suspicious patterns, and requires
+  `--yes` before saving anything with critical/high findings.
 - **Agent subprocesses are spawned without shell interpolation**, and config
   files are schema-validated (zod) at load time. API `baseUrl` values must be
   `http:`/`https:`; `apiKeyEnv` must be an uppercase env-var name; agent
