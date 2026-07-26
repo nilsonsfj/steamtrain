@@ -1,18 +1,76 @@
 # Steamtrain workflow language
 
-Workflows are steamtrain's primary orchestration unit. A workflow is a JSON
-object made of ordered phases; each phase contains one or more steps. Phases run
-sequentially. Steps inside a phase run concurrently, bounded by
-`maxConcurrency`.
+This is the complete reference for authoring steamtrain workflows by hand. If
+you can write JSON, you can write a workflow: declare phases, pick step kinds,
+wire them with `dependsOn` / templates / gates, and validate with
+`steamtrain workflow validate`.
 
-Workflow definitions live under the `workflows` map in `steamtrain.json`, in
-`~/.steamtrain/workflows.json` (user layer), or as bundled recipes. To share one
-outside those files, use `steamtrain workflow export <name>` /
-`steamtrain workflow import <path|url>` — see
+Companion docs (optional, not required to author):
+
+- [`workflow-overview.md`](workflow-overview.md) - diagrams and runtime behavior
+- [`workflow-examples.md`](workflow-examples.md) - patterns and bundled walkthroughs
+
+## Contents
+
+1. [Mental model](#mental-model)
+2. [Where workflows live](#where-workflows-live)
+3. [Minimal example](#minimal-example)
+4. [Step kind cheat sheet](#step-kind-cheat-sheet)
+5. [Top-level workflow fields](#top-level-workflow-fields)
+6. [Workflow inputs](#workflow-inputs)
+7. [Phase fields](#phase-fields)
+8. [Shared step fields](#shared-step-fields)
+9. [Building blocks](#building-blocks) (every step kind)
+10. [Loops](#loops-loopto)
+11. [Workspace inheritance and artifacts](#workspace-inheritance-and-artifacts-file-handoff)
+12. [Session continuity](#session-continuity-session)
+13. [Tool permissions](#tool-permissions-permissions)
+14. [Per-step conditions](#per-step-conditions-when)
+15. [Structured step outputs](#structured-step-outputs-output)
+16. [Scheduling](#scheduling)
+17. [Timeouts](#timeouts)
+18. [Auto-retry](#auto-retry-on-transient-failures)
+19. [Templates](#templates)
+20. [Validation rules](#validation-rules)
+21. [CLI](#cli)
+
+## Mental model
+
+A workflow is a JSON object with ordered **phases**. Each phase holds one or
+more **steps**.
+
+- Steps are scheduled by dependencies (a DAG), bounded by `maxConcurrency`
+  (default 5, hard cap 16).
+- A step that omits `dependsOn` waits for **every** step in all earlier phases
+  (phases act as barriers for it).
+- Steps in the **same** phase may run concurrently. A step may only reference
+  earlier-phase steps via `dependsOn`, `forEach`, gate/`when` conditions, or
+  `{{steps.<id>.…}}` templates. Same-phase and forward references are invalid.
+- **Rule of thumb:** if step B reads step A's output, put A and B in different
+  phases, with A's phase first.
+
+Agent-backed steps in a git repo run in isolated worktrees. Later steps see
+earlier *text* output by default, not file edits - use
+[`workspace`](#workspace-inheritance-and-artifacts-file-handoff) when files must
+carry forward, and a [`merge`](#merge-worktree-merge-back) step when changes
+should land in the checkout / a branch / a PR.
+
+## Where workflows live
+
+Definitions live under the `workflows` map in `steamtrain.json`, in
+`~/.steamtrain/workflows.json` (user layer), or as bundled recipes. Share one
+outside those files with `steamtrain workflow export <name>` /
+`steamtrain workflow import <path|url>` - see
 [Sharing workflows](workflow-overview.md#sharing-workflows).
 
-**Read first:** [`workflow-overview.md`](workflow-overview.md) for diagrams and
-execution behavior. **Examples:** [`workflow-examples.md`](workflow-examples.md).
+Validate before relying on a hand-written spec:
+
+```bash
+steamtrain workflow validate my-workflow
+steamtrain workflow run my-workflow --input "small test"
+```
+
+## Minimal example
 
 ```jsonc
 {
@@ -77,6 +135,22 @@ execution behavior. **Examples:** [`workflow-examples.md`](workflow-examples.md)
 }
 ```
 
+## Step kind cheat sheet
+
+| kind | spawns agent? | owns worktree? | use when |
+| --- | --- | --- | --- |
+| `worker` / `processor` | yes | yes (in git) | One agent run (or `forEach` many). Default when `kind` is omitted. |
+| `distributor` | optional | no | Fan one input into many items for `forEach`. |
+| `consolidator` | optional | no | Merge prior text outputs. |
+| `gate` | no | no | Route, fail/stop, or [loop](#loops-loopto) on a condition. |
+| `approval` | no | no | Human approve/reject checkpoint. |
+| `human` | no | no | Human supplies typed data (`{{steps.<id>.output}}`). |
+| `command` | no | yes (in git) | Deterministic shell (`npm test`, scripts). |
+| `llm` | no (API call) | no | Cheap judge / classify / summarize / split. |
+| `merge` | conflict agent only | sources' | Land worktree changes: apply / branch / PR / staging worktree. |
+| `workflow` | no (child does) | via `worktreeStep` | Invoke another workflow (optionally `forEach`). |
+| `issues` | no | no | Collect structured findings into a report or GitHub issues. |
+
 ## Top-level workflow fields
 
 | field | required | meaning |
@@ -89,6 +163,8 @@ execution behavior. **Examples:** [`workflow-examples.md`](workflow-examples.md)
 | `modelFailover` | no | Default mid-flight model failover policy (quota / rate-limit re-routing). See [Model binding](./model-binding.md#configuring-mid-flight-model-failover). |
 | `fallbackModels` | no | Default failover model queries appended to every agent-backed step's candidate chain. |
 | `permissions` | no | Default tool-permission profile for every agent-backed step (`"read-only"` / `"edit"` / `"full"`, or the object form). Per-step `permissions` overrides it. See [Tool permissions](#tool-permissions-permissions). |
+| `stepTimeoutSec` | no | Default per-step wall-clock limit (seconds) for agent / command / llm steps. Per-step `stepTimeoutSec` overrides it. See [Timeouts](#timeouts). |
+| `workflowTimeoutSec` | no | Whole-run wall-clock abort limit (seconds). Default is roughly `stepCount × stepTimeoutSec`. Keeps ticking during interactive approvals. |
 | `maxCostUsd` | no | Whole-workflow USD budget. The engine stops scheduling new steps once the run's cost reaches it; the run ends `budget-exceeded` and is resumable after raising the cap. See [Cost budgets](./cost-and-budgets.md). |
 
 ## Workflow inputs
@@ -165,10 +241,10 @@ for the mid-flight policy knobs (`modelFailover`).
 | field | required | meaning |
 | --- | --- | --- |
 | `id` | yes | Unique across the whole workflow. |
-| `kind` | no | One of `worker`, `processor`, `distributor`, `consolidator`, `gate`, `approval`, `human`, `merge`, `command`, `llm`, `workflow`. Missing means `worker`. |
+| `kind` | no | One of `worker`, `processor`, `distributor`, `consolidator`, `gate`, `approval`, `human`, `merge`, `command`, `llm`, `workflow`, `issues`. Missing means `worker`. |
 | `dependsOn` | no | Step ids from earlier phases only. Same-phase and forward dependencies are invalid. Steps are scheduled by these dependencies; omitting `dependsOn` makes the step wait for every step in all earlier phases. |
 | `when` | no | Per-step condition (same schema as a gate condition). When false the step is skipped, not failed. See [Per-step conditions](#per-step-conditions-when). |
-| `permissions` | no | Agent-backed steps only: the step's tool-permission / sandbox profile. See [Tool permissions](#tool-permissions-permissions). |
+| `permissions` | no | Agent-backed steps only (also allowed on a `workflow` call as the child run's default): the step's tool-permission / sandbox profile. See [Tool permissions](#tool-permissions-permissions). |
 
 ## Building blocks
 
@@ -296,16 +372,20 @@ Downstream steps reference the aggregate parent result:
 - `{{steps.review-each.items}}` is the original item list.
 - `{{steps.review-each.ok}}` is `true` only when every child run succeeds.
 
-`forEach` sources must be successful distributor steps from earlier phases. If
-the distributor is agent-backed, its final output is split on non-empty lines to
-form `items` — unless it declares an `output` schema, in which case `items`
-come from a JSON array (see below).
+`forEach` sources must be successful distributor steps (or llm splitters with
+items) from earlier phases. If the distributor is agent-backed, its final
+output is split on non-empty lines to form `items` - unless it declares an
+`output` schema, in which case `items` come from a JSON array (see below).
 
 ### Distributor
 
 Turns one input into multiple item payloads. Use `items` for static/template
-distribution, or provide `agent` + `model` + `prompt` for an agent-backed
-splitter.
+distribution, or provide a model binding (`agent` + `model`, `model` only, or
+`modelClass`) plus `prompt` for an agent-backed splitter. When both `items` and
+an agent binding are present, **static `items` win**.
+
+Optional: `separator` (string used when joining items into the step's text
+`output`; defaults to newline).
 
 ```jsonc
 {
@@ -346,8 +426,10 @@ are JSON-serialized.
 
 Combines prior results. A pure consolidator with no `agent` emits either its
 rendered `prompt` or a default sectioned merge of every dependency. An
-agent-backed consolidator uses `agent` + `model` + `prompt` to produce a merged
-answer.
+agent-backed consolidator uses a model binding plus `prompt` to produce a merged
+answer. Optional `separator` is the string joining the default sectioned
+blocks (defaults to `"\n\n"`); each block still looks like
+`--- <stepId> ---\n<output>`.
 
 ```jsonc
 {
@@ -362,7 +444,7 @@ answer.
 
 Evaluates a condition and emits a target/state label. Gates are useful for
 filtering, marking state transitions, failing a workflow on missing conditions,
-or stopping before later phases.
+stopping before later phases, or driving a [bounded loop](#loops-loopto).
 
 ```jsonc
 {
@@ -375,19 +457,31 @@ or stopping before later phases.
 }
 ```
 
-Gate condition fields are combined with logical AND:
+Gate step fields:
+
+| field | meaning |
+| --- | --- |
+| `condition` | Required. See condition fields below. |
+| `target` | Optional state/label emitted when the gate evaluates. |
+| `onFalse` | What to do when the condition is false (or when a loop hits its iteration cap). Default `"continue"`. |
+| `loopTo` | Optional earlier **phase** id. When set, this gate is a loop - see [Loops](#loops-loopto). |
+| `maxIterations` | Per-loop iteration cap (1–100). Omitted → config default (usually 10). Only meaningful with `loopTo`. |
+
+Gate condition fields are combined with logical AND. At least one of `ok`,
+`contains`, `matches`, `equals`, or `human` must be present (a bare `step` /
+`path` / `value` alone is not enough).
 
 | field | meaning |
 | --- | --- |
 | `step` | Inspect this earlier step. If omitted, inspect workflow input text. |
-| `human` | Pause for a human Approve/Reject decision instead of a mechanical test (see [Human-in-the-loop approval gates](#human-in-the-loop-approval-gates)). Mutually exclusive with `ok`/`path`/`value`/`contains`/`matches`/`equals`. |
+| `human` | Pause for a human Approve/Reject decision instead of a mechanical test (see [Approval](#approval-human-in-the-loop-checkpoint)). Mutually exclusive with `ok`/`path`/`value`/`contains`/`matches`/`equals`. |
 | `ok` | Require the referenced step's success state. |
 | `path` | Inspect one field of the step's structured output (e.g. `verdict`, `issues[0].severity`) instead of its full text. Requires `step`; the step should declare an `output` schema. Missing fields evaluate as empty text. |
-| `value` | A templated text expression, evaluated at gate time and tested by `contains`/`matches`/`equals` instead of a step output or the run input. The canonical use is routing on a workflow input directly: `{ "value": "{{inputs.issueTiming}}", "equals": "live" }`. Mutually exclusive with `step`/`ok`/`path`/`human`. Works anywhere a `GateCondition` works — gates AND per-step `when` (see [Per-step conditions](#per-step-conditions-when)). |
+| `value` | A templated text expression, evaluated at gate time and tested by `contains`/`matches`/`equals` instead of a step output or the run input. The canonical use is routing on a workflow input directly: `{ "value": "{{inputs.issueTiming}}", "equals": "live" }`. Mutually exclusive with `step`/`ok`/`path`/`human`. Works anywhere a `GateCondition` works - gates AND per-step `when` (see [Per-step conditions](#per-step-conditions-when)). |
 | `contains` | Require output/input text to contain this rendered string. |
 | `matches` | Require output/input text to match this rendered regular expression. |
 | `equals` | Require output/input text to equal this rendered string. |
-| `not` | Invert the final result. |
+| `not` | Invert the final result. Useful for absence checks, e.g. `{ "step": "x", "contains": "ERROR", "not": true }`. |
 
 With `path`, gates route on typed fields instead of substring heuristics — a
 reviewer that prints "no P0 issues found" no longer trips a `contains: "P0"`
@@ -445,6 +539,9 @@ Text-only conditions (`contains`/`matches`/`equals`) keep the skip: they assume
 the referenced step produced meaningful output, and an errored agent mid-loop
 should halt the loop rather than burn its iteration budget re-running a
 persistent failure.
+
+Gates with `loopTo` become bounded loops - full semantics are in
+[Loops](#loops-loopto) (after the remaining step kinds).
 
 ### Approval (human-in-the-loop checkpoint)
 
@@ -1022,6 +1119,105 @@ error at run time. A cycle (workflow A invoking B invoking A, directly or
 through further nesting) is rejected the same way, at whatever depth it's
 detected.
 
+## Loops (`loopTo`)
+
+For iterative work - review → fix → re-review until clean, or fix until
+`npm test` passes - use a **loop-back gate**. There is no separate loop
+container: add `loopTo` on a normal `gate` and point it at an earlier phase.
+
+```jsonc
+{
+  "phases": [
+    {
+      "id": "review",
+      "title": "Review",
+      "steps": [
+        {
+          "id": "review",
+          "kind": "worker",
+          "agent": "claude",
+          "model": "claude-sonnet-4-6",
+          "prompt": "Review the diff. Reply DONE if clean, else list fixes.\nIteration {{iteration}}."
+        }
+      ]
+    },
+    {
+      "id": "fix",
+      "title": "Fix",
+      "steps": [
+        {
+          "id": "fix",
+          "kind": "worker",
+          "agent": "claude",
+          "model": "claude-sonnet-4-6",
+          "dependsOn": ["review"],
+          "workspace": "attach:review",
+          "prompt": "Apply these fixes:\n{{steps.review.output}}"
+        }
+      ]
+    },
+    {
+      "id": "check",
+      "title": "Converged?",
+      "steps": [
+        {
+          "id": "converged",
+          "kind": "gate",
+          "dependsOn": ["fix"],
+          "condition": { "step": "review", "contains": "DONE" },
+          "loopTo": "review",
+          "maxIterations": 5,
+          "onFalse": "fail"
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Loop semantics
+
+| situation | what happens |
+| --- | --- |
+| Condition **true** | Loop converged. Gate passes; execution continues to later phases. |
+| Condition **false**, iterations remain | Increment this gate's counter, jump back to the `loopTo` phase, re-run the body. |
+| Condition **false**, cap exhausted | Apply `onFalse` (`fail` / `stop` / `continue`) exactly like a non-looping gate. |
+
+- The **loop body / region** is the contiguous span of phases from the `loopTo`
+  phase through the gate's own phase (inclusive of body phases; the gate sits
+  in a phase **after** the phases it re-runs).
+- `loopTo` names a **phase id**, not a step id, and must be an **earlier** phase
+  (not the gate's own phase, not a later one).
+- Inside the body, `{{iteration}}` is the current 1-based pass (defaults to `1`
+  outside a loop).
+- On each loop-back, cache and results for steps in the region are cleared so
+  they re-execute. Outputs remain readable until each step overwrites them, so
+  a fix step can still read the previous pass's review. Outside the loop,
+  normal cache/resume still applies.
+- Workflows that contain any `loopTo` gate run **phase-by-phase** (the pre-DAG
+  barrier behavior), because a loop re-runs a contiguous range of phases as a
+  unit.
+- Loop regions may **nest** or be **disjoint**, but must not **partially
+  overlap**. Partial overlap is a validation error.
+- Worst-case step budget accounts for
+  `regionStepCount × (effectiveMaxIterations - 1)` on top of the static steps;
+  the run still cannot exceed the 1000-step cap.
+- Default `maxIterations` is the configured `loopMaxIterations` (built-in
+  default **10**); the hard ceiling is **100**.
+
+### Loop authoring tips
+
+- Put the gate **after** the last body phase it inspects. The gate's
+  `condition.step` must still be an earlier phase (the last body step).
+- Prefer `workspace: "attach:<source>"` (not `inherit`) for review/fix loops so
+  every pass shares one worktree - see
+  [attach](#workspace-attachstepid).
+- Prefer `session: "continue:<ownId>"` on a fixer inside a loop so each pass
+  resumes the same agent conversation.
+- A human gate (`"condition": { "human": true }` with `loopTo`) can turn
+  rejection into another iteration. An `approval` step never loops - use the
+  gate form when you need reject → iterate.
+
 ## Workspace inheritance and artifacts (file handoff)
 
 Each worker/processor/command step runs in its **own** worktree snapshotted
@@ -1375,6 +1571,27 @@ as barriers for it (the pre-DAG behavior). Gates with `onFalse: fail`/`stop`
 hold back all later-phase steps until they evaluate, and workflows containing
 loop-back gates (`loopTo`) run phase-by-phase.
 
+## Timeouts
+
+Two independent clocks:
+
+| field | scope | default |
+| --- | --- | --- |
+| `stepTimeoutSec` | One agent / command / llm subprocess | Config default, then **900** (15 minutes) |
+| `workflowTimeoutSec` | Whole run wall clock | Roughly `stepCount × stepTimeoutSec` when omitted |
+
+Resolution for a step: **step field → workflow field → project/user config →
+built-in default**. Deprecated aliases `stepTimeoutMs` / `workflowTimeoutMs`
+still parse and convert to seconds.
+
+Notes:
+
+- On step timeout the whole process tree is killed; the step fails with a
+  timeout error.
+- `workflowTimeoutSec` keeps running during interactive `approval` / `human`
+  pauses - raise it for long-lived human checkpoints.
+- `llm` steps also honor `stepTimeoutSec` as a per-call wall-clock limit.
+
 ## Auto-retry on transient failures
 
 Agent worker/processor steps (and each `forEach` child) automatically re-attempt
@@ -1450,6 +1667,7 @@ Prompt templates and several block fields support:
 | `{{steps.<id>.ok}}` | `true` or `false`. |
 | `{{steps.<id>.error}}` | Prior step error text, if any. |
 | `{{steps.<id>.target}}` | Prior gate target/state, if any. |
+| `{{steps.<id>.iteration}}` | A loop gate's iteration count reached (empty for non-loop steps). |
 | `{{steps.<id>.exitCode}}` | A prior command step's exit code, e.g. `0` (empty for other steps). |
 | `{{steps.<id>.json}}` | Prior step's parsed structured output, JSON-serialized. |
 | `{{steps.<id>.json.<path>}}` | A field of it, e.g. `json.verdict` or `json.targets[2]`. Strings render raw, other values JSON-serialized, missing fields empty. |
@@ -1470,36 +1688,50 @@ catches steamtrain-specific references that will silently render as empty.
 - A workflow must contain at least one phase.
 - A phase must contain at least one step.
 - Step ids must be unique across the workflow.
-- `dependsOn` and gate `condition.step` may reference earlier phases only.
-- `forEach` must use `steps.<id>.items` or `<id>.items`, and the source step
-  must be a distributor in an earlier phase.
-- A workflow may contain at most 1000 total static + generated steps. Static
-  distributor item counts are checked at validation time; agent-generated item
-  counts are checked at runtime before child runs are scheduled.
+- `dependsOn`, gate `condition.step`, approval `step`, merge/issues `from`,
+  `when.step`, `forEach` sources, and `workspace` / `session` sources may
+  reference **earlier phases only**.
+- `forEach` must use `steps.<id>.items` or `<id>.items`. The source must be a
+  **distributor** in an earlier phase, **or** an **llm** step that exposes
+  items via an `output` schema. With an `output` schema, the parsed value itself
+  must be a JSON array, or set `itemsPath` to the field that holds the array.
+- A workflow may contain at most 1000 total static + generated steps (including
+  worst-case loop unrolling). Static distributor item counts are checked at
+  validation time; agent-/llm-generated item counts are checked at runtime
+  before child runs are scheduled.
 - `maxConcurrency` defaults to 5 and is capped at 16.
-- Distributor steps require `items` or `agent` + `model` + `prompt`.
+- Distributor steps require `items` **or** a model binding (`agent`+`model`,
+  `model`, or `modelClass`) with `prompt`. When both are present, `items` wins.
 - Consolidator steps require `dependsOn`.
-- Agent-backed consolidators require `agent`, `model`, and `prompt` together.
-- Gate conditions require at least one of `ok`, `contains`, `matches`, or
-  `equals`.
-- A gate/`when` condition `path` requires `step`.
-- Distributor `itemsPath` requires an agent-backed step with an `output`
-  schema.
+- Agent-backed consolidators / distributors require a valid model binding and
+  `prompt`.
+- Gate conditions require at least one of `human`, `ok`, `contains`, `matches`,
+  or `equals`. `ok` and `path` each require `condition.step`. `human` is
+  mutually exclusive with mechanical predicates; `value` is mutually exclusive
+  with `step` / `ok` / `path` / `human`.
+- A gate with `loopTo` must name an **earlier** phase. Loop regions may nest or
+  be disjoint, but must not partially overlap. `maxIterations` is 1–100.
+- Distributor / llm `itemsPath` requires an `output` schema (distributors also
+  need an agent binding).
 - Merge steps require `from` or `dependsOn`; `from` may reference earlier
   phases only.
-- A merge step with `onConflict: "agent"` requires `agent` and `model`.
-- A merge step with `perSource` requires `mode` `"branch"` or `"pr"`.
+- A merge step with `onConflict: "agent"` requires a model binding.
+- A merge step with `perSource` requires `mode` `"branch"` or `"pr"` (not
+  `"apply"` or `"worktree"`).
+- Issues steps require `from` or `dependsOn`.
 - Command steps require a non-empty `cmd`.
-- Workflow steps require a non-empty `workflow` name. The referenced
-  workflow's existence, cycle-freedom, and nesting depth (at most 4
-  successful nested invocations below the root; see above) are checked at
-  **run time**, not at validate time — see
-  [the sub-workflows design doc](superpowers/specs/2026-07-04-sub-workflows-design.md)
-  for why. A workflow step counts as a fixed cost of 1 toward its own spec's
-  1000-step budget regardless of how large the invoked child workflow is;
-  the child enforces its own independent 1000-step budget.
-- `workspace` must be `"inherit:<stepId>"`; the source must be a
-  worker/processor/command step in an earlier phase, without `forEach`.
+- Human steps require `prompt`; `choices` and `output` are mutually exclusive.
+- Workflow (`kind: "workflow"`) steps require a non-empty `workflow` name. The
+  referenced workflow's existence, cycle-freedom, and nesting depth (at most 4
+  successful nested invocations below the root; see the workflow step section)
+  are checked at **run time**, not at validate time. A workflow step counts as
+  a fixed cost of 1 toward its own spec's 1000-step budget; the child enforces
+  its own independent 1000-step budget.
+- `workspace` must be `"inherit:<stepId>"` or `"attach:<stepId>"`. Valid sources:
+  a worker/processor/command step without `forEach`; a `merge` with
+  `mode: "worktree"`; or a `workflow` call with `worktreeStep` and no
+  `forEach`. `attach` additionally forbids concurrent co-attachers (they must
+  form a `dependsOn` chain) and forbids `forEach` on the attaching step.
 - `session` must be `"continue:<stepId>"`; the source must be an agent-backed
   step on the same agent instance in an earlier phase, neither side may use
   `forEach`, and each source may be continued by at most one step.
@@ -1512,6 +1744,8 @@ catches steamtrain-specific references that will silently render as empty.
 - `permissions: "read-only"` may not be combined with `artifacts` (a read-only
   step cannot produce the files it promises), and may not be used on a `merge`
   step (its conflict resolver has to edit the conflicted files).
+- Input names must be identifiers (`[a-zA-Z_][a-zA-Z0-9_-]*`). `type: "enum"`
+  requires `choices`. `fallbackModels` is only valid on `type: "model"`.
 
 ### Template validation
 

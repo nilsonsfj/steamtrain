@@ -596,7 +596,7 @@ Workflow documentation:
 
 - [`docs/workflow-overview.md`](docs/workflow-overview.md) — mental model, diagrams, execution behavior
 - [`docs/workflow-examples.md`](docs/workflow-examples.md) — patterns and bundled workflow walkthroughs
-- [`docs/workflow-spec.md`](docs/workflow-spec.md) — language reference
+- [`docs/workflow-spec.md`](docs/workflow-spec.md) — complete workflow language reference (hand-authoring guide)
 - [`docs/permissions.md`](docs/permissions.md) — per-step tool permissions and sandbox profiles
 - [`docs/worktree-merge-back.md`](docs/worktree-merge-back.md) — worktree isolation and the `merge` step
 
