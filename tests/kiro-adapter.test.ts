@@ -311,4 +311,43 @@ describe("runKiroProcess", () => {
       message: expect.stringContaining("produced no output"),
     });
   });
+
+  it("surfaces quota failures past the --trust-all-tools stderr banner", async () => {
+    const events = await collect(
+      runKiroProcess({
+        id: "kiro",
+        binary: "kiro-cli",
+        args: [],
+        opts: { prompt: "hi", model: "claude-sonnet-5" },
+        runLines: async function* () {
+          yield {
+            kind: "exit",
+            code: 0,
+            signal: null,
+            timedOut: false,
+            stderr: [
+              "All tools are now trusted (!). Kiro will execute tools without asking for confirmation.",
+              "Agents can sometimes do unexpected things so understand the risks.",
+              "",
+              "Learn more at https://kiro.dev/docs/cli/chat/security/#using-tools-trust-all-safely",
+              "",
+              "Monthly request limit reached",
+              "",
+              "You can enable overages to continue making requests, or upgrade your plan for more included requests.",
+            ].join("\n"),
+            sawStdout: false,
+          };
+        },
+      }),
+    );
+    expect(events).toEqual([
+      expect.objectContaining({
+        kind: "error",
+        message: "'kiro-cli' produced no output: Monthly request limit reached",
+      }),
+    ]);
+    expect((events[0] as { message: string }).message).not.toContain(
+      "All tools are now trusted",
+    );
+  });
 });

@@ -8,7 +8,7 @@ import {
 } from "./antigravity-transcript";
 import { permissionArgs } from "./permissions";
 import { type ProcessLine, type ProcessRunOptions, runProcessLines } from "./spawn";
-import { firstLine } from "./util";
+import { stderrSummary } from "./util";
 
 /**
  * Known Antigravity CLI models (used by `/model` and autocomplete).
@@ -269,7 +269,8 @@ export async function* runAntigravityProcess(
     if (item.kind === "exit") {
       const ts = Date.now();
       const stderr = item.stderr.trim();
-      const stderrTail = stderr ? `: ${firstLine(stderr)}` : "";
+      const summary = stderrSummary(stderr);
+      const stderrTail = summary ? `: ${summary}` : "";
       if (item.sawStdout) sawStdout = true;
 
       if (!sessionId) {

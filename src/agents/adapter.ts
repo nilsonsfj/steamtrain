@@ -1,7 +1,7 @@
 import type { AgentEvent, AgentId, AgentInstanceId, EventMapper } from "../types/events";
 import type { ResolvedPermissions } from "./permissions";
 import { type ProcessRunOptions, runProcessLines } from "./spawn";
-import { firstLine } from "./util";
+import { stderrSummary } from "./util";
 
 export interface AgentRunOptions {
   prompt: string;
@@ -113,7 +113,8 @@ export async function* runAgentProcess(params: AgentProcessParams): AsyncGenerat
     if (item.kind === "exit") {
       const ts = Date.now();
       const stderr = item.stderr.trim();
-      const stderrTail = stderr ? `: ${firstLine(stderr)}` : "";
+      const summary = stderrSummary(stderr);
+      const stderrTail = summary ? `: ${summary}` : "";
 
       if (item.spawnError) {
         yield {

@@ -4,7 +4,7 @@ import { type AgentAdapter, type AgentRunOptions } from "./adapter";
 import type { AgentModel } from "./agent-model";
 import { permissionArgs } from "./permissions";
 import { type ProcessLine, type ProcessRunOptions, runProcessLines } from "./spawn";
-import { firstLine } from "./util";
+import { stderrSummary } from "./util";
 
 const AGENT: AgentId = "kiro";
 
@@ -120,7 +120,8 @@ export async function* runKiroProcess(params: RunKiroProcessParams): AsyncGenera
     if (item.kind === "exit") {
       const ts = Date.now();
       const stderr = stripAnsi(item.stderr).trim();
-      const stderrTail = stderr ? `: ${firstLine(stderr)}` : "";
+      const summary = stderrSummary(stderr);
+      const stderrTail = summary ? `: ${summary}` : "";
 
       if (item.spawnError) {
         yield {
