@@ -481,7 +481,7 @@ Gate condition fields are combined with logical AND. At least one of `ok`,
 | `contains` | Require output/input text to contain this rendered string. |
 | `matches` | Require output/input text to match this rendered regular expression. |
 | `equals` | Require output/input text to equal this rendered string. |
-| `not` | Invert the final result. |
+| `not` | Invert the final result. Useful for absence checks, e.g. `{ "step": "x", "contains": "ERROR", "not": true }`. |
 
 With `path`, gates route on typed fields instead of substring heuristics — a
 reviewer that prints "no P0 issues found" no longer trips a `contains: "P0"`
@@ -1693,7 +1693,8 @@ catches steamtrain-specific references that will silently render as empty.
   reference **earlier phases only**.
 - `forEach` must use `steps.<id>.items` or `<id>.items`. The source must be a
   **distributor** in an earlier phase, **or** an **llm** step that exposes
-  items via an `output` schema (and optional `itemsPath`).
+  items via an `output` schema. With an `output` schema, the parsed value itself
+  must be a JSON array, or set `itemsPath` to the field that holds the array.
 - A workflow may contain at most 1000 total static + generated steps (including
   worst-case loop unrolling). Static distributor item counts are checked at
   validation time; agent-/llm-generated item counts are checked at runtime
