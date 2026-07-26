@@ -1056,6 +1056,66 @@ describe("web server", () => {
     expect(body.error).toContain("invalid workflow name");
   });
 
+  it("PUT /api/workflows/:name requires confirmRisk for command steps", async () => {
+    const host = new FakeAuthoringHost(demoSpec());
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const home = mkdtempSync(join(tmpdir(), "confirm-risk-"));
+    tempRoots.push(home);
+    const author = new WorkflowAuthor({
+      host,
+      config: testRunConfig,
+      cwd: tmpdir(),
+      home,
+    });
+    const server = createWebServer({
+      host,
+      runs,
+      author,
+      workflowSource: () => "user",
+    });
+    servers.push(server);
+    const base = await start(server);
+
+    const riskySpec: WorkflowSpec = {
+      name: "shell-flow",
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "tests", kind: "command", cmd: "npm test" }],
+        },
+      ],
+    };
+
+    const blocked = await fetch(`${base}/api/workflows/shell-flow`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ spec: riskySpec, scope: "user" }),
+    });
+    expect(blocked.status).toBe(409);
+    const blockedBody = (await blocked.json()) as {
+      requiresConfirmation?: boolean;
+      review?: { findings: unknown[] };
+    };
+    expect(blockedBody.requiresConfirmation).toBe(true);
+    expect(blockedBody.review?.findings.length).toBeGreaterThan(0);
+
+    const saved = await fetch(`${base}/api/workflows/shell-flow`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ spec: riskySpec, scope: "user", confirmRisk: true }),
+    });
+    expect(saved.status).toBe(200);
+    const savedBody = (await saved.json()) as { ok: boolean; name?: string };
+    expect(savedBody.ok).toBe(true);
+    expect(savedBody.name).toBe("shell-flow");
+  });
+
   it("returns 404 for unknown routes", async () => {
     const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);

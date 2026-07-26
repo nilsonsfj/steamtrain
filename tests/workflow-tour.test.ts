@@ -61,9 +61,7 @@ describe("bundled tour workflow", () => {
     // Command steps that embed template data into the shell emit a non-fatal
     // security warning (see SECURITY.md); the tour intentionally fans out via
     // a templated shell cmd.
-    expect(result.warnings ?? []).toEqual([
-      expect.stringContaining("interpolated into the shell unsanitized"),
-    ]);
+    expect(result.warnings ?? []).toEqual([expect.stringContaining("shell-quoted on expansion")]);
     expect(workflowAgentIds(tour)).toEqual([]);
   });
 

@@ -35,7 +35,9 @@ describe("stderrSummary", () => {
       stderrSummary(
         "All tools are now trusted (!). Kiro will execute tools without asking for confirmation.\n",
       ),
-    ).toBe("All tools are now trusted (!). Kiro will execute tools without asking for confirmation.");
+    ).toBe(
+      "All tools are now trusted (!). Kiro will execute tools without asking for confirmation.",
+    );
   });
 
   it("returns empty string for blank stderr", () => {

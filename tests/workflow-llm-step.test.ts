@@ -951,6 +951,10 @@ describe("llm plan integration", () => {
 });
 
 describe("callLlm transport", () => {
+  /** Avoid real DNS in unit tests; SSRF still runs against returned addresses. */
+  const publicResolve = async (): Promise<string[]> => ["93.184.216.34"];
+  const safeOpts = { resolveHostname: publicResolve };
+
   function fetchStub(
     status: number,
     payload: unknown,
@@ -993,6 +997,7 @@ describe("callLlm transport", () => {
         },
         capture,
       ),
+      safeOpts,
     );
     expect(result).toEqual({
       ok: true,
@@ -1019,6 +1024,7 @@ describe("callLlm transport", () => {
     await callLlm(
       { provider: "anthropic", model: "claude-opus-4-8", prompt: "p", apiKey: "k" },
       fetchStub(200, { content: [], usage: {} }, anthropicCapture),
+      safeOpts,
     );
     const anthropicBody = JSON.parse(String(anthropicCapture.init?.body));
     for (const field of ["temperature", "system", "output_config"]) {
@@ -1029,6 +1035,7 @@ describe("callLlm transport", () => {
     await callLlm(
       { provider: "openai", model: "gpt-5", prompt: "p", apiKey: "k" },
       fetchStub(200, { choices: [{ message: { content: "x" } }] }, openaiCapture),
+      safeOpts,
     );
     const openaiBody = JSON.parse(String(openaiCapture.init?.body));
     for (const field of [
@@ -1067,6 +1074,7 @@ describe("callLlm transport", () => {
         },
         capture,
       ),
+      safeOpts,
     );
     expect(result).toEqual({
       ok: true,
@@ -1097,6 +1105,7 @@ describe("callLlm transport", () => {
         baseUrl: "https://proxy.test/v1",
       },
       fetchStub(200, { content: [], usage: {} }, capture),
+      safeOpts,
     );
     expect(capture.url).toBe("https://proxy.test/v1/messages");
   });
@@ -1105,6 +1114,7 @@ describe("callLlm transport", () => {
     const rateLimited = await callLlm(
       { provider: "anthropic", model: "m", prompt: "p", apiKey: "k" },
       fetchStub(429, { error: { message: "slow down" } }),
+      safeOpts,
     );
     expect(rateLimited.ok).toBe(false);
     if (!rateLimited.ok) {
@@ -1115,6 +1125,7 @@ describe("callLlm transport", () => {
     const badRequest = await callLlm(
       { provider: "anthropic", model: "m", prompt: "p", apiKey: "k" },
       fetchStub(400, { error: { message: "nope" } }),
+      safeOpts,
     );
     expect(badRequest.ok).toBe(false);
     if (!badRequest.ok) expect(badRequest.retryable).toBe(false);
@@ -1126,6 +1137,7 @@ describe("callLlm transport", () => {
       (async () => {
         throw new Error("ECONNRESET");
       }) as typeof fetch,
+      safeOpts,
     );
     expect(network.ok).toBe(false);
     if (!network.ok) expect(network.retryable).toBe(true);
@@ -1133,6 +1145,7 @@ describe("callLlm transport", () => {
     const refusal = await callLlm(
       { provider: "anthropic", model: "m", prompt: "p", apiKey: "k" },
       fetchStub(200, { content: [], stop_reason: "refusal", usage: {} }),
+      safeOpts,
     );
     expect(refusal.ok).toBe(false);
     if (!refusal.ok) {

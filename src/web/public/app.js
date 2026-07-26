@@ -4486,23 +4486,42 @@
       saveBtn.disabled = true; saveBtn.textContent = "Saving…";
       var payload = { spec: spec, scope: creating ? scopeSel.value : (S.source === "project" ? "project" : "user") };
       if (!creating && isWritable) payload.previousName = S.selected;
-      apiAuth("PUT", "/api/workflows/" + encodeURIComponent(targetName), payload).then(function (r) {
-        saveBtn.disabled = false; saveBtn.textContent = creating ? "Save copy" : "Save";
-        if (r.status === 200 && r.body.ok) {
-          closeModal();
-          var savedName = r.body.name || targetName;
-          delete S.stagedOverrides[S.selected || savedName];
-          if (savedName !== S.selected) delete S.stagedOverrides[savedName];
-          var warns = r.body.warnings;
-          refreshAfterWrite(savedName, "saved");
-          if (warns && warns.length) {
-            var suffix = warns.length > 1 ? " (and " + (warns.length - 1) + " more)" : "";
-            setBanner("⚠ " + warns.length + " template warning" + (warns.length > 1 ? "s" : "") + ": " + warns[0] + suffix, "info");
+      function doSave(confirmRisk) {
+        if (confirmRisk) payload.confirmRisk = true;
+        return apiAuth("PUT", "/api/workflows/" + encodeURIComponent(targetName), payload).then(function (r) {
+          saveBtn.disabled = false; saveBtn.textContent = creating ? "Save copy" : "Save";
+          if (r.status === 409 && r.body && r.body.requiresConfirmation) {
+            var findings = (r.body.review && r.body.review.findings) || [];
+            var critical = findings.filter(function (f) { return f.severity === "critical" || f.severity === "high"; });
+            var preview = critical.slice(0, 5).map(function (f) { return "• " + f.message; }).join("\n");
+            var msg =
+              "This workflow has security findings that require confirmation before saving:\n\n" +
+              (preview || (r.body.error || "critical/high findings")) +
+              (critical.length > 5 ? "\n• …and " + (critical.length - 5) + " more" : "") +
+              "\n\nSave anyway?";
+            if (window.confirm(msg)) {
+              saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+              return doSave(true);
+            }
+            return;
           }
-        } else {
-          mbanner(banner, (r.body && r.body.error) || "save failed", "err");
-        }
-      });
+          if (r.status === 200 && r.body.ok) {
+            closeModal();
+            var savedName = r.body.name || targetName;
+            delete S.stagedOverrides[S.selected || savedName];
+            if (savedName !== S.selected) delete S.stagedOverrides[savedName];
+            var warns = r.body.warnings;
+            refreshAfterWrite(savedName, "saved");
+            if (warns && warns.length) {
+              var suffix = warns.length > 1 ? " (and " + (warns.length - 1) + " more)" : "";
+              setBanner("⚠ " + warns.length + " template warning" + (warns.length > 1 ? "s" : "") + ": " + warns[0] + suffix, "info");
+            }
+          } else {
+            mbanner(banner, (r.body && r.body.error) || "save failed", "err");
+          }
+        });
+      }
+      doSave(false);
     });
 
     if (tryBtn) {

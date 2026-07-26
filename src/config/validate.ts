@@ -1,17 +1,15 @@
 import { constants, accessSync, existsSync } from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
+import { isAllowedOutboundUrl } from "../util/safe-url-sync";
 
 /**
- * Accept only http(s) API base URLs. Rejects file:, data:, and other schemes
- * that could be misused if the value were ever concatenated into a fetch URL.
+ * Accept only http(s) API base URLs that do not target cloud-metadata /
+ * link-local hosts. Loopback and RFC 1918 are allowed so local LLM proxies
+ * (Ollama, LiteLLM) keep working; those still fail the stricter share/webhook
+ * denylist used at fetch time.
  */
 export function isAllowedApiBaseUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
+  return isAllowedOutboundUrl(value, { allowLoopback: true, allowPrivateLan: true });
 }
 
 /**

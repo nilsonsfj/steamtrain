@@ -28,22 +28,39 @@ Key properties and expectations:
   history - treat a read token like access to this project's run artifacts. Requests are CSRF-checked, bodies are
   size-limited, and responses carry a restrictive CSP. There is no TLS —
   put a reverse proxy (with `--trust-proxy`) in front for anything beyond
-  localhost.
+  localhost. Any authenticated full-capability session can cancel/approve/edit
+  any local run (there is no per-run ownership); do not share the auth token
+  across mutually untrusted users.
 - **Run artifacts may contain sensitive data.** `.steamtrain/history/`
   records every step's full output in the project directory.
   `steamtrain init` offers to add `.steamtrain/` to your `.gitignore`;
   accept it (or add the entry yourself) so history never lands in commits.
+  Template expansion also best-effort redacts high-confidence secret shapes
+  (API keys, PEM blocks) before embedding prior step output into later prompts.
 - **Workflow specs execute commands.** A `steamtrain.json` from an
   untrusted source can run arbitrary shell via `command` steps and arbitrary
   agent prompts with your credentials. Review project configs like you would
-  review a Makefile.   Template expansions in `cmd` (e.g. `{{input}}`,
-  `{{steps.*.output}}`) are interpolated into the shell unsanitized; the
-  template linter warns at validate/create time when a command step embeds
+  review a Makefile. Template expansions in `cmd` (e.g. `{{input}}`,
+  `{{steps.*.output}}`) are **shell-quoted by default**; set
+  `allowShellTemplates: true` on a command step only when you intentionally
+  need raw Makefile-style interpolation (e.g. `cmd: "{{inputs.testCmd}}"`).
+  Prefer templated `env` values read as `$VAR` over embedding data in `cmd`.
+  The template linter warns at validate/create time when a command step embeds
   those refs. Prefer `steamtrain workflow import <path|url>` over raw
   copy-paste: import validates the schema, prints every prompt/command
   (the prompt-injection surface), flags suspicious patterns, and requires
-  `--yes` before saving anything with critical/high findings.
+  `--yes` before saving anything with critical/high findings. The web UI's
+  workflow save path runs the same review and requires an explicit
+  `confirmRisk` acknowledgement for critical/high findings.
+- **Outbound URL fetches are SSRF-guarded.** Workflow import URLs and notify
+  webhooks reject loopback, private LAN, link-local, and cloud-metadata
+  destinations (with DNS resolution before each redirect hop). LLM `baseUrl`
+  values may target loopback/LAN for local proxies (Ollama, LiteLLM) but still
+  block metadata/link-local hosts.
 - **Agent subprocesses are spawned without shell interpolation**, and config
   files are schema-validated (zod) at load time. API `baseUrl` values must be
-  `http:`/`https:`; `apiKeyEnv` must be an uppercase env-var name; agent
-  `binary` paths are checked for executability when added via the TUI/CLI.
+  `http:`/`https:` and must not target metadata hosts; `apiKeyEnv` must be an
+  uppercase env-var name; agent `binary` paths are checked for executability
+  when added via the TUI/CLI.
+- **Regex patterns from specs/templates are complexity-checked** before
+  matching (gate `matches`, structured-output `pattern`) to mitigate ReDoS.

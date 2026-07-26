@@ -23,6 +23,7 @@ import {
 import { llmStepApiId, resolveLlmStepApi } from "../apis/resolve";
 import type { SteamtrainConfig } from "../config/types";
 import type { AgentEvent, AgentInstanceId, AgentProviderId, TokenUsage } from "../types/events";
+import { safeRegexTest } from "../util/safe-regex";
 import {
   APPROVAL_DIFF_CAP,
   APPROVAL_OUTPUT_CAP,
@@ -64,7 +65,8 @@ import {
   dedupeFindings,
   findExistingIssue,
 } from "./issues";
-import { type LlmCallResult, type LlmComplete, type LlmProviderId, callLlm } from "./llm";
+import { type LlmCallResult, type LlmComplete, type LlmProviderId } from "./llm";
+import { callLlm } from "./llm-call";
 import {
   type ConflictResolver,
   type HarvestResult,
@@ -89,6 +91,7 @@ import { applyWorkflowStepOverrides } from "./overrides";
 import {
   type WorkspaceFingerprint,
   describeViolations,
+  findOutboundSymlinks,
   fingerprintChanges,
   fingerprintWorkspace,
 } from "./permission-guard";
@@ -107,7 +110,7 @@ import {
   structuredOutputFixPrompt,
   withStructuredOutputInstructions,
 } from "./structured";
-import { renderPrompt } from "./template";
+import { renderCmd, renderPrompt } from "./template";
 import { abortableSleep, resolveStepTimeoutSec, timeoutMsFromSec } from "./timeout";
 import {
   type AgentBackedWorkflowStep,
@@ -2294,6 +2297,25 @@ async function executeAgentStep(
   const verifyWorkspace = declaredPermissions?.verify === true;
   let baseline: WorkspaceFingerprint | undefined;
   if (verifyWorkspace) {
+    const outbound = await findOutboundSymlinks(workspace.cwd, ctx.signal);
+    if (outbound.length > 0) {
+      await workspace.dispose();
+      const message = `permission violation: read-only step '${stepId}' workspace has outbound symlink(s) (${outbound.length}: ${describeViolations(outbound)})`;
+      return {
+        stepId,
+        ok: false,
+        output: message,
+        item,
+        error: message,
+        durationMs: Date.now() - workspaceStarted,
+        permissions: {
+          profile: "read-only",
+          enforcement: "none",
+          gaps: ["workspace has outbound symlink(s); refusing to run a read-only step"],
+          violations: outbound,
+        },
+      };
+    }
     baseline = await fingerprintWorkspace(workspace.cwd, {
       linkedIgnoredPaths: workspace.linkedIgnoredPaths,
       signal: ctx.signal,
@@ -2513,7 +2535,9 @@ async function verifyReadOnlyWorkspace(
     signal,
   });
   const verified = Boolean(baseline && after);
-  const violations = await fingerprintChanges(baseline, after, signal);
+  const treeViolations = await fingerprintChanges(baseline, after, signal);
+  const symlinkViolations = await findOutboundSymlinks(cwd, signal);
+  const violations = [...treeViolations, ...symlinkViolations];
   const record = {
     // The fallback is a safety net, not a normal path: verification only runs
     // for a resolved `read-only` profile, so `result.permissions` is already
@@ -3125,13 +3149,24 @@ async function executeCommandStep(
   hooks: ExecuteHooks,
 ): Promise<StepResult> {
   const started = Date.now();
-  const cmd = renderPrompt(step.cmd, {
+  const templateCtx = {
     input: ctx.input,
     inputs: ctx.inputs,
     outputs: ctx.outputs,
     results: ctx.results,
     iteration: ctx.iteration,
+  };
+  const cmd = renderCmd(step.cmd, templateCtx, {
+    allowShellTemplates: step.allowShellTemplates === true,
   });
+  // Env values are templates too (prefer `$VAR` over embedding data in cmd).
+  // They are NOT shell-quoted — they land in the process environment as literals.
+  const renderedEnv: Record<string, string> = {};
+  if (step.env) {
+    for (const [key, value] of Object.entries(step.env)) {
+      renderedEnv[key] = renderPrompt(value, templateCtx, { redact: true });
+    }
+  }
   const stepCwd = step.cwd ? resolvePath(ctx.deps.cwd, step.cwd) : ctx.deps.cwd;
 
   let workspace: AgentWorkspaceLease;
@@ -3172,7 +3207,7 @@ async function executeCommandStep(
         // So bundled babysit command steps can re-invoke this process without
         // requiring a global `steamtrain` install (`bun src/index.tsx` / node dist).
         STEAMTRAIN_CLI: resolveSteamtrainCliInvocation(),
-        ...step.env,
+        ...renderedEnv,
       },
       timeoutMs: timeoutMsFromSec(timeoutSec),
       signal: ctx.signal,
@@ -5255,18 +5290,19 @@ function evaluateGate(
     passed = passed && text === expected;
   }
   if (condition.matches !== undefined) {
-    try {
-      const pattern = renderPrompt(condition.matches, {
-        input: ctx.input,
-        inputs: ctx.inputs,
-        outputs: ctx.outputs,
-        results: ctx.results,
-        iteration: ctx.iteration,
-      });
-      passed = passed && new RegExp(pattern).test(text);
-    } catch (err) {
+    const pattern = renderPrompt(condition.matches, {
+      input: ctx.input,
+      inputs: ctx.inputs,
+      outputs: ctx.outputs,
+      results: ctx.results,
+      iteration: ctx.iteration,
+    });
+    const match = safeRegexTest(pattern, text);
+    if (!match.ok) {
       passed = false;
-      message = `invalid gate regex: ${err instanceof Error ? err.message : String(err)}`;
+      message = `invalid gate regex: ${match.error}`;
+    } else {
+      passed = passed && match.matched === true;
     }
   }
 

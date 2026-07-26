@@ -150,6 +150,75 @@ describe("command workflow step", () => {
     expect(results.get("echoback")?.output).toContain("code:0");
   });
 
+  it("shell-quotes interpolated cmd values so metacharacters cannot inject", async () => {
+    const cwd = await tempDir();
+    const events: WorkflowEvent[] = [];
+    for await (const ev of runWorkflow(
+      spec([
+        {
+          id: "run",
+          title: "Run",
+          steps: [{ id: "safe", kind: "command", cmd: "echo {{input}}" }],
+        },
+      ]),
+      { input: "hi; echo INJECTED" },
+      agentlessDeps(cwd),
+    )) {
+      events.push(ev);
+    }
+    const output = doneResults(events).get("safe")?.output.trim() ?? "";
+    expect(output).toBe("hi; echo INJECTED");
+    expect(output).not.toMatch(/^hi\nINJECTED$/m);
+  });
+
+  it("allowShellTemplates runs the interpolated string as raw shell", async () => {
+    const cwd = await tempDir();
+    const events: WorkflowEvent[] = [];
+    for await (const ev of runWorkflow(
+      spec([
+        {
+          id: "run",
+          title: "Run",
+          steps: [
+            {
+              id: "raw",
+              kind: "command",
+              cmd: "{{input}}",
+              allowShellTemplates: true,
+            },
+          ],
+        },
+      ]),
+      { input: "echo RAW_OK" },
+      agentlessDeps(cwd),
+    )) {
+      events.push(ev);
+    }
+    expect(doneResults(events).get("raw")?.output.trim()).toBe("RAW_OK");
+  });
+
+  it("templates env values without shell-quoting them", async () => {
+    const cwd = await tempDir();
+    const events = await runToEvents(
+      spec([
+        {
+          id: "run",
+          title: "Run",
+          steps: [
+            {
+              id: "env",
+              kind: "command",
+              env: { STEAMTRAIN_MSG: "hello-{{input}}" },
+              cmd: 'echo "$STEAMTRAIN_MSG"',
+            },
+          ],
+        },
+      ]),
+      agentlessDeps(cwd),
+    );
+    expect(doneResults(events).get("env")?.output.trim()).toBe("hello-task");
+  });
+
   it("applies cwd and per-step env", async () => {
     const base = await tempDir();
     await mkdir(join(base, "sub"));

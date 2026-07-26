@@ -9,16 +9,19 @@ import {
 } from "../src/config/validate";
 
 describe("isAllowedApiBaseUrl", () => {
-  it("accepts http and https URLs", () => {
+  it("accepts http and https URLs including local LLM proxies", () => {
     expect(isAllowedApiBaseUrl("https://api.openai.com/v1")).toBe(true);
     expect(isAllowedApiBaseUrl("http://127.0.0.1:11434/v1")).toBe(true);
+    expect(isAllowedApiBaseUrl("http://192.168.1.10:8080/v1")).toBe(true);
   });
 
-  it("rejects non-http schemes and malformed URLs", () => {
+  it("rejects non-http schemes, malformed URLs, and cloud metadata", () => {
     expect(isAllowedApiBaseUrl("file:///etc/passwd")).toBe(false);
     expect(isAllowedApiBaseUrl("data:text/plain,hi")).toBe(false);
     expect(isAllowedApiBaseUrl("not a url")).toBe(false);
     expect(isAllowedApiBaseUrl("")).toBe(false);
+    expect(isAllowedApiBaseUrl("http://169.254.169.254/latest/meta-data")).toBe(false);
+    expect(isAllowedApiBaseUrl("http://metadata.google.internal/")).toBe(false);
   });
 });
 
