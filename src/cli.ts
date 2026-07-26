@@ -476,11 +476,14 @@ export function splitDryRunArgs(args: string[]): { isDryRun: boolean; planArgs: 
     "--from",
     "--on-approval",
     "--agent",
+    "--report",
+    "--output",
+    "-o",
   ]);
   // --agent passes THROUGH to the plan so the dry-run preview reflects the
   // re-route it would apply (otherwise the plan would lie, showing the blocked
-  // agent). --on-approval is run-only and dropped.
-  const dropWithValue = new Set(["--on-approval"]);
+  // agent). --on-approval / --report / --output are run-only and dropped.
+  const dropWithValue = new Set(["--on-approval", "--report", "--output", "-o"]);
   const dropBare = new Set([
     "--dry-run",
     "--fresh",
@@ -1930,8 +1933,8 @@ Usage:
   steamtrain workflow validate [name]
   steamtrain workflow plan <name> --input <text> [--param key=value ...] [--agent <id>] [--json]
   steamtrain workflow plan <name> --stdin [--param key=value ...] [--agent <id>] [--json]
-  steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...]
-  steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...]
+  steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...] [--report json|markdown|junit [--output <file>]]
+  steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...] [--report json|markdown|junit [--output <file>]]
   steamtrain workflow run --from <runId> [--retry-failed] [--param key=value ...] [--input <text>] [--json] [--detach]
   steamtrain workflow attach [<runId>] [--json]
   steamtrain workflow runs [--all] [--json]
@@ -2032,6 +2035,18 @@ step cache or git worktrees.
 
 Running steamtrain with no command opens the workflow-first TUI.
 Running steamtrain --web-ui opens the same engine behind a local browser UI.
+
+CI / headless: 'workflow run --report json|markdown|junit [--output <file>]'
+writes a machine-readable report when the run settles (to <file>, or stdout
+when --output is omitted). The process exit code is a stable contract so a
+pipeline can branch on WHY a run failed without parsing logs:
+    0   success          every step passed
+    1   step-failed      a worker/processor/command/llm step errored
+    2   gate-failed      a quality gate / approval checkpoint rejected the run
+    3   timeout          the whole-workflow wall-clock budget elapsed
+    4   budget-exceeded  a cost cap (maxCostUsd) was hit
+    130 canceled         the run was canceled (Ctrl+C / 'workflow cancel')
+See docs/ci-headless.md and the steamtrain/run-workflow GitHub Action.
 
 Global options (TUI and workflow commands):
   -v, --version              Print the steamtrain version and exit

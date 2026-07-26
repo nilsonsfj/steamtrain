@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { refreshAgentCatalogCaches } from "./agents/models";
 import type { CliIO } from "./cli";
@@ -14,7 +14,10 @@ import {
   type LiveRunMeta,
   type LiveRunSource,
   type ModelUsage,
+  type ReportFormat,
   type RerunMode,
+  type RunOutcome,
+  type RunRecord,
   RunRecordBuilder,
   type RunRecordStatus,
   type StepEditPatch,
@@ -28,12 +31,14 @@ import {
   acquireRunSlot,
   aggregateLeavesByModel,
   applyWorkflowStepOverrides,
+  classifyRun,
   createLiveRunPublisher,
   createLiveRunStore,
   createNotifier,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   createWorkflowRunControl,
+  exitCodeForOutcome,
   formatReroutePlan,
   formatTakeoverCommand,
   formatTokenSummary,
@@ -42,6 +47,7 @@ import {
   hashWorkflowSpec,
   headlessApprovalProvider,
   headlessHumanInputProvider,
+  isReportFormat,
   isRerunError,
   isTerminalLiveRunStatus,
   lintTemplateRefs,
@@ -53,6 +59,7 @@ import {
   planRerun,
   planTakeover,
   recordTakeover,
+  renderReport,
   rerunDowngradeMessage,
   resolveInputs,
   resolveMaxParallelRuns,
@@ -104,6 +111,10 @@ export interface RunOptions {
   detach: boolean;
   /** `--agent <id>`: re-route steps whose pinned agent is not ready to this agent (this run only). */
   agent?: string;
+  /** `--report json|markdown|junit`: write a machine-readable report when the run settles. */
+  report?: ReportFormat;
+  /** `--output <file>`: write the `--report` to a file instead of stdout. */
+  output?: string;
 }
 
 export function parseRunOptions(args: string[]): RunOptions | null {
@@ -169,12 +180,24 @@ export function parseRunOptions(args: string[]): RunOptions | null {
       if (value !== "fail" && value !== "stop") return null;
       options.onApproval = value;
       i += 1;
+    } else if (arg === "--report") {
+      const value = args[i + 1];
+      if (!value || !isReportFormat(value)) return null;
+      options.report = value;
+      i += 1;
+    } else if (arg === "--output" || arg === "-o") {
+      const value = args[i + 1];
+      if (!value) return null;
+      options.output = value;
+      i += 1;
     } else {
       return null;
     }
   }
   // `--approve-all` and `--on-approval` are mutually exclusive intents.
   if (options.approveAll && options.onApproval) return null;
+  // `--output` only has meaning alongside `--report`.
+  if (options.output && !options.report) return null;
   return options;
 }
 
@@ -191,7 +214,7 @@ export async function runWorkflowCommand(
   const options = parseRunOptions(positional ? args.slice(1) : args);
   if (!options) {
     err(
-      `usage: steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...]
+      `usage: steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...] [--report json|markdown|junit [--output <file>]]
        steamtrain workflow run --from <runId> [--retry-failed] [--json] [--detach]
 `,
     );
@@ -354,6 +377,20 @@ export async function runWorkflowCommand(
     }
   }
 
+  // A report is written once the run settles, so it needs a foreground run.
+  if (options.report && options.detach) {
+    err(
+      "--report cannot be used with --detach (the run is backgrounded); run in the foreground, or inspect a finished run with 'steamtrain workflow history show <id>'\n",
+    );
+    return 1;
+  }
+  // Both --json (live event stream) and a stdout report would interleave on
+  // stdout; send one of them to a file with --output to keep stdout parseable.
+  if (options.report && options.json && !options.output) {
+    err("--report without --output cannot be combined with --json (both write to stdout)\n");
+    return 1;
+  }
+
   if (options.detach) {
     return spawnDetachedRun({
       spec,
@@ -406,7 +443,7 @@ export async function runWorkflowCommand(
   // Wire cancellation so Ctrl+C unwinds the run and records it as "canceled"
   // (matching the TUI and web drivers) instead of hard-killing the process
   // before history is written. A second Ctrl+C force-exits.
-  return driveWorkflowRun({
+  const result = await driveWorkflowRun({
     orchestrator,
     config,
     name,
@@ -443,6 +480,40 @@ export async function runWorkflowCommand(
       };
     },
   });
+
+  if (options.report && result.record) {
+    await writeRunReport(result.record, result.outcome, options, out, err);
+  }
+  return result.code;
+}
+
+/**
+ * Render a settled run's `--report` and deliver it to `--output <file>` or
+ * stdout. A report write failure warns but never masks the run's own exit code
+ * — the pipeline still sees why the run failed.
+ */
+async function writeRunReport(
+  record: RunRecord,
+  outcome: RunOutcome,
+  options: Pick<RunOptions, "report" | "output">,
+  out: (text: string) => void,
+  err: (text: string) => void,
+): Promise<void> {
+  const format = options.report;
+  if (!format) return;
+  const report = renderReport(record, format, { outcome });
+  if (options.output) {
+    try {
+      await writeFile(options.output, report, "utf8");
+      // A confirmation on stderr keeps stdout clean for --json / piping while
+      // still telling a human where the artifact landed.
+      err(`report: wrote ${format} report to ${options.output}\n`);
+    } catch (e) {
+      err(`warning: could not write report to ${options.output}: ${message(e)}\n`);
+    }
+    return;
+  }
+  out(report);
 }
 
 interface SpawnDetachedRunOptions {
@@ -686,7 +757,7 @@ export async function runDetachedRunner(
     return storeProvider(request, signal);
   };
 
-  return driveWorkflowRun({
+  const driven = await driveWorkflowRun({
     orchestrator,
     config,
     name: launch.workflow,
@@ -714,6 +785,7 @@ export async function runDetachedRunner(
       };
     },
   });
+  return driven.code;
 }
 
 interface DriveWorkflowRunOptions {
@@ -741,12 +813,25 @@ interface DriveWorkflowRunOptions {
 }
 
 /**
+ * The settled outcome of a driven run: the process exit code (the documented
+ * CI contract), the high-level {@link RunOutcome} classification, and the final
+ * {@link RunRecord} (when one could be built) so the caller can render a
+ * `--report`. `record` is undefined only on the queued-cancel path before any
+ * events were folded.
+ */
+export interface DriveWorkflowRunResult {
+  code: number;
+  outcome: RunOutcome;
+  record?: RunRecord;
+}
+
+/**
  * Drive one workflow run end-to-end for the CLI (foreground or detached
  * runner): register in the live-run store, wait for a queue slot, prep the
  * cache, stream events (printing + mirroring to the store), and settle
- * history + terminal meta. Returns the process exit code.
+ * history + terminal meta. Returns the exit code, outcome, and final record.
  */
-async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<number> {
+async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<DriveWorkflowRunResult> {
   const { orchestrator, config, name, spec, input, params, cwd, runId, out, err } = options;
   const cacheStore = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
   const historyStore = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
@@ -802,9 +887,9 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<numbe
     disposeCancelWatch();
     disposeControlWatch();
     await store.update(runId, { status: "canceled", ok: false, endedAt: Date.now() });
-    await saveHistory(historyStore, recorder, "canceled", err);
+    const record = await saveHistory(historyStore, recorder, "canceled", err);
     err("run canceled while queued\n");
-    return 130;
+    return { code: exitCodeForOutcome("canceled"), outcome: "canceled", record };
   }
 
   const key = workflowCacheKey(name, input, cwd, spec, params);
@@ -823,9 +908,17 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<numbe
   }
 
   // Enforce whole-workflow wall-clock timeout (clock starts once executing).
+  // `timedOut` distinguishes a timeout abort from a user cancel: both abort the
+  // same controller, but they settle to different outcomes (and exit codes).
+  let timedOut = false;
   const workflowTimeoutMs = timeoutMsFromSec(resolveWorkflowTimeoutSec(spec, config));
   const timeoutTimer =
-    workflowTimeoutMs > 0 ? setTimeout(() => ac.abort(), workflowTimeoutMs) : undefined;
+    workflowTimeoutMs > 0
+      ? setTimeout(() => {
+          timedOut = true;
+          ac.abort();
+        }, workflowTimeoutMs)
+      : undefined;
   timeoutTimer?.unref?.();
 
   const publisher = createLiveRunPublisher(store, runId);
@@ -889,14 +982,18 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<numbe
           ? "done"
           : "error";
     await publisher.finish(status, { ok: status === "done" });
-    await saveHistory(historyStore, recorder, status, err);
-    return status === "canceled" ? 130 : ok ? 0 : 1;
+    const record = await saveHistory(historyStore, recorder, status, err);
+    const outcome = record ? classifyRun(record, { timedOut }) : "canceled";
+    return { code: exitCodeForOutcome(outcome), outcome, record };
   } catch (runErr) {
     const status: RunRecordStatus = ac.signal.aborted ? "canceled" : "error";
     const error = status === "error" ? message(runErr) : undefined;
     await publisher.finish(status, { ok: false, error });
-    await saveHistory(historyStore, recorder, status, err, error);
-    if (status === "canceled") return 130;
+    const record = await saveHistory(historyStore, recorder, status, err, error);
+    if (status === "canceled") {
+      const outcome = record ? classifyRun(record, { timedOut }) : "canceled";
+      return { code: exitCodeForOutcome(outcome), outcome, record };
+    }
     throw runErr;
   } finally {
     if (timeoutTimer) clearTimeout(timeoutTimer);
@@ -1544,19 +1641,25 @@ export async function runTakeoverCommand(
 
 // ── shared printing ──────────────────────────────────────────────────────────
 
-/** Persist a finished run to history; a write failure only warns, never fails the run. */
+/**
+ * Persist a finished run to history and return the built record (for `--report`
+ * rendering). A write failure only warns, never fails the run — the record is
+ * still returned so a report can be produced even if history could not be saved.
+ */
 async function saveHistory(
   historyStore: WorkflowHistoryStore,
   recorder: RunRecordBuilder,
   status: RunRecordStatus,
   err: (text: string) => void,
   error?: string,
-): Promise<void> {
+): Promise<RunRecord> {
+  const record = recorder.build({ status, error });
   try {
-    await historyStore.save(recorder.build({ status, error }));
+    await historyStore.save(record);
   } catch (e) {
     err(`warning: could not record run history: ${message(e)}\n`);
   }
+  return record;
 }
 
 export function printHumanEvent(event: WorkflowEvent, out: (text: string) => void): void {
