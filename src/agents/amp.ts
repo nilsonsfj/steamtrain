@@ -186,7 +186,7 @@ export function buildAmpExecArgs(opts: AgentRunOptions): string[] {
   const wantsEffort = Boolean(opts.effort) && opts.model !== "rush";
   return [
     "-x",
-    "",
+    opts.prompt,
     "--stream-json",
     "--stream-json-thinking",
     "-m",
@@ -215,7 +215,7 @@ export class AmpAdapter implements AgentAdapter {
       args,
       opts,
       map: createAmpMapper(opts.agentId ?? this.id),
-      prompt: opts.prompt,
+      // Prompt travels as the `-x` value; stdin stays closed.
     });
   }
 }

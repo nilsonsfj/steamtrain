@@ -104,6 +104,14 @@ describe("opencode mapper (stateful, one mapper per run)", () => {
     ]);
   });
 
+  it("does not emit a full-text delta when a replacement shortens prior text", () => {
+    const m = createOpenCodeMapper();
+    m(JSON.parse(textHello));
+    const shortened =
+      '{"type":"message.part.updated","sessionID":"ses_abc","part":{"id":"prt_1","type":"text","text":"Hi"}}';
+    expect(m(JSON.parse(shortened))).toEqual([]);
+  });
+
   it("does not repeat session_start for later events", () => {
     const m = createOpenCodeMapper();
     m(JSON.parse(stepStart));

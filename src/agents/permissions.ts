@@ -267,6 +267,9 @@ function claudePlan(perms: ResolvedPermissions): PermissionPlan {
 
   switch (perms.profile) {
     case "read-only":
+      // `plan` mode backs the deny list in headless `--print` runs so Claude
+      // Code does not stall on tool-use prompts it cannot answer.
+      args.push("--permission-mode", "plan");
       allow = dedupe([...CLAUDE_READ_TOOLS, ...perms.allow]);
       deny = dedupe([
         ...CLAUDE_WRITE_TOOLS,

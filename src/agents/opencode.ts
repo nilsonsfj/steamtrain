@@ -125,6 +125,12 @@ export function createOpenCodeMapper(agent: AgentInstanceId = AGENT): EventMappe
 
   const diff = (key: string, full: string): string => {
     const prev = textSeen.get(key) ?? "";
+    // Non-cumulative replacement that shortens the text is a reset — emitting
+    // the whole new value would duplicate earlier output in the UI.
+    if (full.length < prev.length) {
+      textSeen.set(key, full);
+      return "";
+    }
     const delta = full.startsWith(prev) ? full.slice(prev.length) : full;
     textSeen.set(key, full);
     return delta;

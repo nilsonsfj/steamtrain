@@ -446,22 +446,27 @@ export function createLiveRunStore(
       const chunk = await readFrom(path, offset);
       if (chunk.length > 0) {
         offset += chunk.length;
-        remainder = remainder.length > 0 ? Buffer.concat([remainder, chunk]) : chunk;
-        let newline = remainder.indexOf(0x0a);
-        while (newline >= 0) {
-          const line = remainder.subarray(0, newline).toString("utf8");
-          remainder = remainder.subarray(newline + 1);
-          const event = parseEventLine(line);
-          if (event) yield event;
-          newline = remainder.indexOf(0x0a);
-        }
+        const drained = drainEventLines(remainder, chunk);
+        remainder = drained.remainder;
+        for (const event of drained.events) yield event;
         // New bytes may still be flowing; re-read immediately.
         continue;
       }
       const meta = await get(id);
       // Terminal meta is written only after the final event flush, so a quiet
-      // file + terminal (or missing) meta means the stream is complete.
-      if (!meta || isTerminalLiveRunStatus(meta.status)) return;
+      // file + terminal (or missing) meta means the stream is complete — but
+      // drain once more in case events were flushed between the empty read and
+      // the meta write.
+      if (!meta || isTerminalLiveRunStatus(meta.status)) {
+        const finalChunk = await readFrom(path, offset);
+        if (finalChunk.length > 0) {
+          offset += finalChunk.length;
+          const drained = drainEventLines(remainder, finalChunk);
+          remainder = drained.remainder;
+          for (const event of drained.events) yield event;
+        }
+        return;
+      }
       await liveRunSleep(pollMs, signal);
     }
   }
@@ -808,6 +813,27 @@ async function readEventsFile(path: string): Promise<WorkflowEvent[]> {
     if (event) events.push(event);
   }
   return events;
+}
+
+/**
+ * Append `chunk` onto `remainder` and split out complete newline-terminated
+ * event lines. Incomplete trailing bytes stay in `remainder` for the next read.
+ */
+function drainEventLines(
+  remainder: Buffer,
+  chunk: Buffer,
+): { events: WorkflowEvent[]; remainder: Buffer } {
+  let buf = remainder.length > 0 ? Buffer.concat([remainder, chunk]) : chunk;
+  const events: WorkflowEvent[] = [];
+  let newline = buf.indexOf(0x0a);
+  while (newline >= 0) {
+    const line = buf.subarray(0, newline).toString("utf8");
+    buf = buf.subarray(newline + 1);
+    const event = parseEventLine(line);
+    if (event) events.push(event);
+    newline = buf.indexOf(0x0a);
+  }
+  return { events, remainder: buf };
 }
 
 function parseEventLine(line: string): WorkflowEvent | undefined {

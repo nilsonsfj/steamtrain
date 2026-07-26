@@ -66,6 +66,8 @@ export function buildCursorRunArgs(opts: AgentRunOptions): string[] {
     // event tagging) while this wants the narrower `AgentProviderId`.
     ...permissionArgs("cursor", opts.permissions),
     ...(opts.extraArgs ?? []),
+    // `--` so prompts starting with `-` (e.g. markdown lists) are not flags.
+    "--",
     opts.prompt,
   ];
 }

@@ -240,6 +240,16 @@ function validateStepResult(stepId: string, value: unknown): StepResult | undefi
     edited: typeof r.edited === "boolean" ? r.edited : undefined,
     item: r.item && typeof r.item === "object" ? (r.item as StepResult["item"]) : undefined,
     parentStepId: typeof r.parentStepId === "string" ? r.parentStepId : undefined,
+    // Workspace attach/merge and cost attribution need these on cache reload.
+    tokens:
+      r.tokens && typeof r.tokens === "object" ? (r.tokens as StepResult["tokens"]) : undefined,
+    worktree:
+      r.worktree && typeof r.worktree === "object"
+        ? (r.worktree as StepResult["worktree"])
+        : undefined,
+    artifacts: Array.isArray(r.artifacts) ? r.artifacts : undefined,
+    api: typeof r.api === "string" ? r.api : undefined,
+    model: typeof r.model === "string" ? r.model : undefined,
     gate,
     childResults,
   };

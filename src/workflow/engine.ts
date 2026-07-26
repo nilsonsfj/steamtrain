@@ -410,6 +410,7 @@ export async function* runWorkflow(
   // Drain any control events accepted in the final scheduling window so every
   // intervention lands in the record even when the run ends right after it.
   yield* drainControlEvents(env);
+  deps.control?.notifyFinished();
 
   // `allResults` accumulates one entry per step per loop iteration (a body
   // step that ran 3 passes has 3 entries, plus 3 intermediate "not yet

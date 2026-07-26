@@ -97,8 +97,9 @@ describe("claude mapping", () => {
     for (const tool of ["Write", "Edit", "Bash", "WebFetch"]) {
       expect(denied.split(",")).toContain(tool);
     }
-    // No blanket mode flag: the tool lists ARE the enforcement.
-    expect(args).not.toContain("--permission-mode");
+    // Headless `--print` needs an explicit mode so Claude does not stall on
+    // tool-use prompts; `plan` backs the deny list.
+    expect(args.slice(0, 2)).toEqual(["--permission-mode", "plan"]);
     expect(enforcement).toBe("native");
     expect(verify).toBe(true);
   });

@@ -351,6 +351,7 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
           }
           // Not running: preview → picker, or finished run → picker.
           if (cur.mode === "workflow") {
+            rerunConfirmAtRef.current = 0;
             if (picker.wfPreview) {
               picker.setWfPreview(null);
               runner.setStepIndex(0);
@@ -468,10 +469,12 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
             prompt.swallowNextInsert(input);
           }
           if (input === "i") {
+            rerunConfirmAtRef.current = 0;
             runner.setShowArrival(false);
             return;
           }
           if (input === "h") {
+            rerunConfirmAtRef.current = 0;
             historyHook.openHistory();
             return;
           }
