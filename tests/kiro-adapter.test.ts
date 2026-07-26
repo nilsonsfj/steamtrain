@@ -346,8 +346,6 @@ describe("runKiroProcess", () => {
         message: "'kiro-cli' produced no output: Monthly request limit reached",
       }),
     ]);
-    expect((events[0] as { message: string }).message).not.toContain(
-      "All tools are now trusted",
-    );
+    expect((events[0] as { message: string }).message).not.toContain("All tools are now trusted");
   });
 });
