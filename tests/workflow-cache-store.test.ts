@@ -99,6 +99,8 @@ describe("workflow cache store", () => {
       durationMs: 42,
       tokens: { input: 10, output: 5 },
       worktree: {
+        originalCwd: "/repo",
+        cwd: "/tmp/wt-impl",
         root: "/tmp/wt-impl",
         branch: "steamtrain/impl",
         baseCommit: "abc123",

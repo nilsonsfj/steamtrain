@@ -241,7 +241,8 @@ function validateStepResult(stepId: string, value: unknown): StepResult | undefi
     item: r.item && typeof r.item === "object" ? (r.item as StepResult["item"]) : undefined,
     parentStepId: typeof r.parentStepId === "string" ? r.parentStepId : undefined,
     // Workspace attach/merge and cost attribution need these on cache reload.
-    tokens: r.tokens && typeof r.tokens === "object" ? (r.tokens as StepResult["tokens"]) : undefined,
+    tokens:
+      r.tokens && typeof r.tokens === "object" ? (r.tokens as StepResult["tokens"]) : undefined,
     worktree:
       r.worktree && typeof r.worktree === "object"
         ? (r.worktree as StepResult["worktree"])

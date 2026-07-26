@@ -97,9 +97,7 @@ describe("createKimiMapper", () => {
   it("honors is_error on tool results", () => {
     const m = createKimiMapper();
     const events = m(
-      JSON.parse(
-        '{"role":"tool","tool_call_id":"tool_err","content":"boom","is_error":true}',
-      ),
+      JSON.parse('{"role":"tool","tool_call_id":"tool_err","content":"boom","is_error":true}'),
     );
     expect(events).toEqual([
       expect.objectContaining({

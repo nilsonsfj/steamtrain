@@ -467,8 +467,7 @@ export function createLiveRunStore(
         const finalChunk = await readFrom(path, offset);
         if (finalChunk.length > 0) {
           offset += finalChunk.length;
-          remainder =
-            remainder.length > 0 ? Buffer.concat([remainder, finalChunk]) : finalChunk;
+          remainder = remainder.length > 0 ? Buffer.concat([remainder, finalChunk]) : finalChunk;
           let newline = remainder.indexOf(0x0a);
           while (newline >= 0) {
             const line = remainder.subarray(0, newline).toString("utf8");
