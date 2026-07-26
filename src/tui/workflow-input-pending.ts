@@ -12,6 +12,7 @@ export function workflowHasDeclaredInputs(spec: WorkflowSpec): boolean {
 /**
  * Produce a plan after the input form submits for a plan action (Ctrl+D).
  * Returns null when the workflow spec is unavailable.
+ * `pending.prompt` may be empty — freeform `{{input}}` is optional.
  */
 export function planFromInputFormSubmit(
   spec: WorkflowSpec | undefined,

@@ -1046,11 +1046,9 @@ export function App({
       return;
     }
 
+    // Empty freeform input is a valid cache key (same as a fresh Ctrl+R with
+    // no prompt), so resume must still probe the on-disk cache for "".
     const trimmed = prompt.value.trim();
-    if (trimmed.length === 0) {
-      runner.setWfCanResume(false);
-      return;
-    }
 
     if (runner.wf.started || runner.wfLaunching) {
       runner.setWfCanResume(
@@ -1234,8 +1232,11 @@ export function App({
       if (runner.running || mode !== "workflow") return false;
       if (picker.wfCreate?.status === "generating") return false;
 
+      // Freeform {{input}} is optional: the engine accepts "", declared
+      // `inputs` may carry the real parameters (often with defaults), and
+      // agentless rides like `tour` only echo the prompt in the arrival
+      // report. Blocking empty prompts forced a dummy string before Ctrl+R.
       if (runner.wf.started && runner.activeWorkflowRef.current) {
-        if (promptText.length === 0) return false;
         if (!fresh) {
           if (runner.activeWorkflowInputRef.current !== promptText) return false;
           if (runner.workflowCacheRef.current.size === 0) return false;
@@ -1264,10 +1265,6 @@ export function App({
       }
 
       if (picker.wfPreview) {
-        if (promptText.length === 0) {
-          runner.setWfNotice("type input in the prompt before running");
-          return false;
-        }
         if (!fresh && !runner.wfCanResume) return false;
         // For fresh runs on workflows with inputs, show the input form first.
         if (fresh) {
@@ -1293,10 +1290,6 @@ export function App({
 
       const entry = picker.selectedWorkflowEntry;
       if (!entry) return false;
-      if (promptText.length === 0) {
-        runner.setWfNotice("type input in the prompt before running");
-        return false;
-      }
       // For fresh runs on workflows with inputs, show the input form first.
       {
         const spec = resolveWorkflowSpec(entry.name);
@@ -1565,10 +1558,6 @@ export function App({
   const handlePlan = useCallback(() => {
     if (runner.running || mode !== "workflow") return;
     const promptText = valueRef.current.trim();
-    if (!promptText) {
-      runner.setWfNotice("type input in the prompt before planning");
-      return;
-    }
     // If plan result is already visible, toggle it off
     if (planResult && runner.wfShowPlanResult) {
       runner.setWfShowPlanResult(false);

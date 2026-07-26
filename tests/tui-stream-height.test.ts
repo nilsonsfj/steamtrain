@@ -49,7 +49,7 @@ describe("computeStreamHeight", () => {
   it("shrinks the stream by one row when a short notice is showing", () => {
     const withNotice = computeStreamHeight({
       ...base,
-      notice: "type input in the prompt before running",
+      notice: "a run is already in progress",
     });
     // Regression: the notice line must be reserved, otherwise total frame
     // height = rows + 1 and Ink flickers on every keypress.
