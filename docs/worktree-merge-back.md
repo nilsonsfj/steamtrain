@@ -157,7 +157,7 @@ the result" pipelines (the shape behind the bundled `mainline` workflow):
   copy per iteration (see [`workflow-spec.md`](workflow-spec.md#workspace-attachstepid)).
   Every step attached to the same source records the SAME `root`/`branch`/
   `baseCommit`, so `from` naming any one of them is equivalent — this is what
-  lets the bundled `review-loop` and `mainline-stream` merge steps point at
+  lets the bundled `mainline-stream` merge steps point at
   the tail of an attach chain without special-casing it.
 
 ## Lifecycle closure (shipped 2026-07-14)

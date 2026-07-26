@@ -253,10 +253,8 @@ reference:
 
 | workflow | declaration |
 | --- | --- |
-| `multi-plan` | workflow-level `read-only` — planning reads and argues, never edits |
 | `bug-hunt` | workflow-level `read-only` — it reports bugs, it does not repair them |
-| `target-sweep` | workflow-level `read-only` — analysis per target, then a report |
-| `review-loop` | `review` step `read-only`; `impl`/`fix` unrestricted |
+| `code-review` | workflow-level `read-only` — it reviews diffs, it does not edit them |
 | `mainline-stream` | `review` step `read-only`; `implement`/`fix` unrestricted |
 
 They use the object form with `onUnsupported: "warn"` rather than the stricter

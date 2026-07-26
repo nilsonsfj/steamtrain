@@ -730,7 +730,7 @@ var SteamtrainReducer = (() => {
   }
 
   // src/workflow/arrival-report.ts
-  var DEFAULT_NEXT_CANDIDATES = ["multi-plan", "quick-triage", "bug-hunt", "target-sweep"];
+  var DEFAULT_NEXT_CANDIDATES = ["bug-hunt", "code-review", "mainline-stream", "mainline"];
   var ARRIVAL_NEXT_CANDIDATES = DEFAULT_NEXT_CANDIDATES;
   function buildArrivalReport(state, opts = {}) {
     if (!state.done) return null;

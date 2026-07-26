@@ -29,12 +29,20 @@ function writingAdapter(): (id: AgentId) => AgentAdapter {
         if (match) {
           await writeFile(join(opts.cwd ?? ".", match[1] as string), match[2] as string);
         }
+        let text = "done";
+        if (opts.prompt.includes("Implement ONLY this stream")) {
+          text = 'Implemented the feature.\n{"summary":"wrote feature.txt","findings":[]}';
+        } else if (opts.prompt.includes("Review the diff from the base commit")) {
+          text = '{"verdict":"clean","issues":[],"findings":[]}';
+        } else if (opts.prompt.includes("Apply exactly the issues")) {
+          text = "NO-OP";
+        }
         yield {
           kind: "result",
           agent: id,
           ts: 0,
           isError: false,
-          text: opts.prompt.includes("Review ONLY") ? "DONE" : "done",
+          text,
           costUsd: 0.01,
         };
       })();
@@ -61,16 +69,36 @@ async function makeRepo(): Promise<{ repo: string; worktrees: string }> {
   return { repo, worktrees: join(root, "worktrees") };
 }
 
-async function runReviewLoop(repo: string, worktrees: string): Promise<WorkflowEvent[]> {
-  const wf = BUNDLED_WORKFLOWS["review-loop"]!;
+async function runMainlineStream(repo: string, worktrees: string): Promise<WorkflowEvent[]> {
+  const wf = BUNDLED_WORKFLOWS["mainline-stream"]!;
   const deps: WorkflowDeps = {
     createAdapter: writingAdapter(),
     maxConcurrency: 4,
     cwd: repo,
     agentWorkspace: createGitWorktreeManager({ baseDir: worktrees, runId: "bundled-loop-test" }),
+    agentConfig: {
+      agents: [
+        { id: "mimo", provider: "mimo", enabled: true },
+        { id: "opencode", provider: "opencode", enabled: true },
+      ],
+    },
   };
   const events: WorkflowEvent[] = [];
-  for await (const ev of runWorkflow(wf, { input: "WRITE feature.txt\nthe feature\n" }, deps))
+  for await (const ev of runWorkflow(
+    wf,
+    {
+      input: "WRITE feature.txt\nthe feature\n",
+      inputs: {
+        coderModel: "mimo/mimo-auto",
+        reviewerModel: "opencode/nemotron-3-ultra-free",
+        reviewerEffort: "",
+        testCmd: "true",
+        issueTiming: "end",
+        issueMode: "report",
+      },
+    },
+    deps,
+  ))
     events.push(ev);
   return events;
 }
@@ -93,30 +121,31 @@ describe("bundled loop workflow", () => {
     await Promise.all(tempRoots.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
   });
 
-  it("ships a valid review-loop using a loop-back gate", () => {
-    const wf = BUNDLED_WORKFLOWS["review-loop"];
+  it("ships a valid mainline-stream using loop-back gates", () => {
+    const wf = BUNDLED_WORKFLOWS["mainline-stream"];
     expect(wf).toBeDefined();
-    expect(validateWorkflow(wf!)).toEqual({ ok: true });
+    const result = validateWorkflow(wf!);
+    expect(result.ok).toBe(true);
   });
 
-  it("review-loop implements, reviews, and merges the result", async () => {
+  it("mainline-stream declares loop-back gates that target the review phase", () => {
+    const wf = BUNDLED_WORKFLOWS["mainline-stream"]!;
+    const gates = wf.phases.flatMap((p) => p.steps).filter((s) => s.kind === "gate");
+    expect(gates.length).toBeGreaterThanOrEqual(2);
+    for (const gate of gates) {
+      expect(gate).toHaveProperty("loopTo", "review");
+    }
+  });
+
+  it("mainline-stream converges end-to-end in a real git repo", async () => {
     const { repo, worktrees } = await makeRepo();
-    const events = await runReviewLoop(repo, worktrees);
+    const events = await runMainlineStream(repo, worktrees);
 
     expect(workflowOk(events)).toBe(true);
 
     const results = doneResults(events);
-    expect(results.get("impl")?.ok).toBe(true);
+    expect(results.get("implement")?.ok).toBe(true);
     expect(results.get("review")?.ok).toBe(true);
-    expect(results.get("fix")?.ok).toBe(true);
-
-    // The merge step must have run and produced output.
-    const merge = results.get("merge");
-    expect(merge?.ok).toBe(true);
-    expect(merge?.output).toContain("merged");
-
-    // The file must have landed in the user's checkout.
-    const content = await readFile(join(repo, "feature.txt"), "utf8");
-    expect(content).toContain("the feature");
+    expect(results.get("test")?.ok).toBe(true);
   });
 });

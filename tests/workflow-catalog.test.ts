@@ -16,9 +16,9 @@ import {
 describe("loadWorkflowCatalog", () => {
   it("starts from bundled workflows", () => {
     const loaded = loadWorkflowCatalog({ home: mkdtempSync(join(tmpdir(), "steamtrain-home-")) });
-    expect(loaded.workflows["multi-plan"]).toEqual(BUNDLED_WORKFLOWS["multi-plan"]);
-    expect(loaded.sources["multi-plan"]).toBe("bundled");
-    expect(workflowCatalogEntries(loaded).map((entry) => entry.name)).toContain("bug-hunt");
+    expect(loaded.workflows["bug-hunt"]).toEqual(BUNDLED_WORKFLOWS["bug-hunt"]);
+    expect(loaded.sources["bug-hunt"]).toBe("bundled");
+    expect(workflowCatalogEntries(loaded).map((entry) => entry.name)).toContain("code-review");
   });
 
   it("loads user workflows from ~/.steamtrain/workflows.json", () => {
@@ -52,7 +52,7 @@ describe("loadWorkflowCatalog", () => {
     const loaded = loadWorkflowCatalog({ home });
     expect(loaded.workflows["my-flow"]?.name).toBe("my-flow");
     expect(loaded.sources["my-flow"]).toBe("user");
-    expect(loaded.sources["multi-plan"]).toBe("bundled");
+    expect(loaded.sources["bug-hunt"]).toBe("bundled");
   });
 
   it("lets project workflows override bundled and user entries", () => {
@@ -119,7 +119,7 @@ describe("loadWorkflowCatalog", () => {
 
     const loaded = loadWorkflowCatalog({ home });
     expect(loaded.warning).toMatch(/could not parse/);
-    expect(loaded.sources["multi-plan"]).toBe("bundled");
+    expect(loaded.sources["bug-hunt"]).toBe("bundled");
   });
 
   it("exposes each workflow name once with the winning source", () => {
@@ -178,7 +178,7 @@ describe("loadWorkflowCatalog", () => {
     const names = workflowCatalogEntries(loaded).map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
     expect(loaded.sources.shared).toBe("project");
-    expect(loaded.sources["multi-plan"]).toBe("bundled");
+    expect(loaded.sources["bug-hunt"]).toBe("bundled");
   });
 });
 
@@ -190,26 +190,26 @@ describe("saveSessionWorkflowsToUser", () => {
       catalog,
       home,
       sessionOverrides: {
-        "multi-plan": {
-          "draft-correctness": { model: "opencode/minimax-m3-free" },
+        "bug-hunt": {
+          "scan-logic": { model: "opencode/minimax-m3-free" },
         },
       },
     });
 
-    expect(result.saved).toEqual(["multi-plan"]);
+    expect(result.saved).toEqual(["bug-hunt"]);
     expect(result.path).toBe(userWorkflowsPath(home));
     expect(existsSync(result.path!)).toBe(true);
 
     const saved = JSON.parse(readFileSync(result.path!, "utf8"));
-    expect(saved.workflows["multi-plan"].phases[1].steps[0].model).toBe("opencode/minimax-m3-free");
+    expect(saved.workflows["bug-hunt"].phases[0].steps[0].model).toBe("opencode/minimax-m3-free");
 
     const reloaded = loadWorkflowCatalog({ home });
-    expect(reloaded.sources["multi-plan"]).toBe("user");
-    const reloadedStep = reloaded.workflows["multi-plan"]?.phases[1]?.steps[0] as
+    expect(reloaded.sources["bug-hunt"]).toBe("user");
+    const reloadedStep = reloaded.workflows["bug-hunt"]?.phases[0]?.steps[0] as
       | { model?: string }
       | undefined;
     expect(reloadedStep?.model).toBe("opencode/minimax-m3-free");
-    expect(reloaded.workflows["multi-plan"]).not.toEqual(BUNDLED_WORKFLOWS["multi-plan"]);
+    expect(reloaded.workflows["bug-hunt"]).not.toEqual(BUNDLED_WORKFLOWS["bug-hunt"]);
   });
 
   it("skips project workflows with session overrides", () => {

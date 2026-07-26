@@ -86,12 +86,12 @@ JSON, not a morning of babysitting terminals. Bundled examples:
 | workflow | what it does |
 | --- | --- |
 | `tour` | The $0 agentless demo above — the whole engine, zero credentials. |
-| `multi-plan` | Drafts a plan from two independent angles (claude + opencode), critiques both, synthesizes the strongest merge. |
 | `bug-hunt` | Sweeps a scope for logic / error-handling / security bugs across three models in parallel, cross-checks to drop false positives, gates verified findings, reports. |
-| `review-loop` | Implements, then reviews-and-fixes in a bounded loop until the review says "DONE". |
-| `quick-triage` | Splits a request into concerns and gates on a typed verdict — built entirely on direct-API `llm` steps, no agent CLI needed. |
+| `code-review` | Reviews a diff with two independent models: one reviews, the other cross-checks flagged issues to eliminate false positives, then a clean prioritized report. |
 | `mainline` | Plans independent execution streams, implements+reviews+fixes+tests each in parallel worktrees, merges them, reviews the merge, opens a PR, files every out-of-scope finding as an issue. See [docs/mainline-pipeline.md](docs/mainline-pipeline.md). |
 | `mainline-stream` | The per-stream unit `mainline` fans out to a plain implement→review→fix→test loop; also runs standalone. |
+| `babysit-pr` | Prepares one open GitHub PR (rebase, review comments, conflicts), waits for every CI/status check, then merges only when green. |
+| `babysit-all-prs` | Fans out `babysit-pr` across every open PR in parallel. |
 
 ### One prompt in, one reviewed PR out
 
@@ -141,7 +141,7 @@ an agent that cannot enforce it, and after every `read-only` step it compares th
 workspace against a fingerprint taken before the agent started — failing the step,
 with the offending paths, if anything changed. Declare it once at the workflow
 level (or repo-wide in `steamtrain.json`) and every step is read-only until it
-says otherwise. `bug-hunt`, `multi-plan`, and `target-sweep` ship read-only end to
+says otherwise. `bug-hunt` and `code-review` ship read-only end to
 end; `/permissions read-only --all` locks down someone else's workflow before you
 run it. See [docs/permissions.md](docs/permissions.md).
 
@@ -249,17 +249,17 @@ steamtrain workflow list
 steamtrain workflow validate [name]
 steamtrain workflow plan <name> --input "…"                     # dry-run: resolve the plan without running
                                                                 # (includes avg cost/duration from recorded runs)
-steamtrain workflow run multi-plan --input "design the cache migration"
-steamtrain workflow run multi-plan --input "…" --dry-run        # same as plan: print and exit, run nothing
+steamtrain workflow run bug-hunt --input "design the cache migration"
+steamtrain workflow run bug-hunt --input "…" --dry-run        # same as plan: print and exit, run nothing
 steamtrain workflow run bug-hunt --stdin --json
-steamtrain workflow run multi-plan --input "…" --fresh          # ignore the on-disk cache
+steamtrain workflow run code-review --input "…" --fresh          # ignore the on-disk cache
 steamtrain workflow run bug-hunt --input "…" --agent claude     # re-route steps whose pinned agent isn't ready (this run only)
 steamtrain workflow plan bug-hunt --input "…" --agent claude    # preview that re-routed run without running it
 steamtrain workflow cache clear
 
 # Unattended approval handling
-steamtrain workflow run review-loop --input "…" --approve-all
-steamtrain workflow run review-loop --input "…" --on-approval fail
+steamtrain workflow run mainline-stream --input "…" --approve-all
+steamtrain workflow run mainline-stream --input "…" --on-approval fail
 
 # Human-in-the-loop input (docs/human-in-the-loop.md)
 steamtrain workflow run incident-review --input "…" --human timeline=@notes.txt
@@ -366,11 +366,11 @@ More: [`docs/web-ui.md`](docs/web-ui.md),
 ```
 ┌ steamtrain  ● claude ready   ● opencode ready ───────── idle  cfg: steamtrain.json ┐
 ┌ workflows ───────────────────────────────────────── ↑/↓ select · Enter run ───────┐
-│▶ multi-plan  4 phases · 5 steps                                                    │
-│  distributor:1 · worker:2 · consolidator:2                                         │
-│  Draft a plan from independent angles, stress-test it, then synthesize...          │
+│▶ bug-hunt  4 phases · 6 steps                                                      │
+│  worker:3 · consolidator:2 · gate:1                                                │
+│  Sweep a scope for distinct bug classes in parallel, cross-check findings...       │
 └────────────────────────────────────────────────────────────────────────────────────┘
- mode  workflow  plan  implement  review  (Tab to switch)        → workflow: multi-plan
+ mode  workflow  plan  implement  review  (Tab to switch)        → workflow: bug-hunt
 ┌ ❯ describe the task, then Enter to dispatch ─────────────────────────────────────┐
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -605,11 +605,8 @@ Workflow documentation:
 | name         | what it does                                                                                                                         |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `tour`       | A $0, agentless guided ride through the engine: fan-out, parallel command cars, a `when` skip, a loop-back gate, and a consolidated arrival report. Runs with zero credentials. |
-| `multi-plan` | Distributes planning lenses, drafts from two independent angles (claude + opencode), critiques both, then synthesizes the strongest merged plan. Fully `read-only`. |
 | `bug-hunt`   | Sweeps a scope for logic / error-handling / security bugs in parallel across three models, cross-checks to drop false positives, gates verified findings, then reports them. Fully `read-only`: it reports bugs, it cannot touch the repo. |
-| `target-sweep` | Distributes a request into target areas, dynamically creates one processor run per item, then consolidates the generated outputs. Fully `read-only`. |
-| `review-loop` | Implements, then reviews and fixes in a bounded loop-back gate until the review reports "DONE" (or the iteration cap is hit). The review step is `read-only` — it cannot edit the code it is reviewing. |
-| `quick-triage` | Splits a request into concerns, assesses each in parallel, and gates on a typed verdict — built entirely on direct-API `llm` steps: no agent CLI needed, just `ANTHROPIC_API_KEY`. |
+| `code-review` | Reviews a diff with two independent models: one reviews, the other cross-checks flagged issues to eliminate false positives, then a clean prioritized report. Fully `read-only`. |
 | `mainline` | Plans independent execution streams, fans each out to `mainline-stream` in its own worktree, merges via `mode: "worktree"` with agent conflict resolution, runs one final review/fix/test loop on the merge, opens a PR (or leaves a branch), and files out-of-scope findings as GitHub issues (or a report). See [docs/mainline-pipeline.md](docs/mainline-pipeline.md). |
 | `mainline-stream` | The per-stream pipeline `mainline` fans out to: implement in a worktree, then loop review → fix → test (via `workspace: "attach:"`, so each iteration sees the previous one's fixes) until clean. Standalone-runnable. |
 | `babysit-pr` | Prepare one open GitHub PR (rebase, review comments), then deterministically wait for every CI/status check - including non-required external reviews - and merge only when green. Agents never merge or delete the remote branch. |

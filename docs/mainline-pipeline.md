@@ -165,7 +165,7 @@ at 4 iterations and never hard-fails the run on hitting the cap
 best-effort worktree to the merge, and the summary/arrival report says
 plainly whether it actually converged (`{{steps.review.json.verdict}}`,
 `{{steps.test.exitCode}}`) rather than silently claiming success. This
-mirrors the reasoning behind the `review-loop` fix (see
+mirrors the reasoning behind the `attach` pattern (see
 [`workflow-spec.md`](workflow-spec.md#workspace-attachstepid)): every step in
 a loop `attach`es to the SAME worktree the implementer owns, so iteration 2's
 review genuinely sees iteration 1's fix instead of a stale fork.
