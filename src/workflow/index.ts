@@ -530,6 +530,13 @@ export {
   seedCacheFromRecord,
 } from "./rerun";
 export {
+  type RetryRetargetOptions,
+  type PlanRetryRetargetResult,
+  applyRetryStepFilter,
+  listRetryCandidateSteps,
+  planRetryRetarget,
+} from "./retry-retarget";
+export {
   type StepStatus,
   type StepState,
   type StepApprovalState,
