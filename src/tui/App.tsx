@@ -97,6 +97,7 @@ import { EventStream } from "./EventStream";
 import { HelpPanel } from "./HelpPanel";
 import { HistoryDiffPanel } from "./HistoryDiffPanel";
 import { PromptInput } from "./PromptInput";
+import { RetryRetargetOverlay } from "./RetryRetargetOverlay";
 import { StatusBar } from "./StatusBar";
 import { TaskSelector } from "./TaskSelector";
 import { WorkflowAnswerInput } from "./WorkflowAnswerInput";
@@ -892,8 +893,12 @@ export function App({
     runWorkflow: runner.runWorkflow,
     setWfNotice: runner.setWfNotice,
     cwd,
+    orchestrator,
   });
 
+  const [retryRetargetRecord, setRetryRetargetRecord] = useState<import("../workflow").RunRecord | null>(
+    null,
+  );
   // ── Live-run slash-command bridges (/attach, /cancel-run) ────────────
   // Feedback goes through the workflow notice line: transcript notices only
   // render in workspace mode, and these commands live in workflow mode.
@@ -1651,12 +1656,17 @@ export function App({
     answerInputOpen: answerTarget !== null,
     inputFormPending: inputFormPending !== null,
     helpOpen,
+    retryRetargetOpen: retryRetargetRecord !== null,
     closeHelp: () => setHelpOpen(false),
     openAgentManager: () => {
       openAgentManager();
     },
     openRunStepEditor,
     openAnswerInput,
+    openRetryRetarget: () => {
+      const record = historyHook.history?.record;
+      if (record) setRetryRetargetRecord(record);
+    },
     focusCreateWorkflowPrompt,
     switchMode: (next) => {
       setMode(next);
@@ -1803,6 +1813,18 @@ export function App({
           scroll={historyHook.history.diffView.scroll}
           height={streamHeight}
           onMetrics={historyHook.reportDiffMetrics}
+        />
+      ) : retryRetargetRecord ? (
+        <RetryRetargetOverlay
+          record={retryRetargetRecord}
+          config={runtimeConfig}
+          doctor={doctor}
+          onCancel={() => setRetryRetargetRecord(null)}
+          onConfirm={(launch) => {
+            const record = retryRetargetRecord;
+            setRetryRetargetRecord(null);
+            historyHook.rerunFromRecord(record, "retry-failed", launch);
+          }}
         />
       ) : historyHook.history ? (
         <HistoryPanel
@@ -2070,7 +2092,8 @@ function historyHintText(history: HistoryUiState): string {
   }
   if (history.view === "detail") {
     if (history.detail) return "↑/↓ step · PgUp/PgDn scroll · ←/Esc back · Ctrl+C quit";
-    const retryHint = (history.record?.totals?.failed ?? 0) > 0 ? " · f retry failed" : "";
+    const retryHint =
+      (history.record?.totals?.failed ?? 0) > 0 ? " · f retry failed · t retarget" : "";
     const hasWorktrees = history.record?.phases.some((phase) =>
       phase.steps.some((step) => step.worktree),
     );

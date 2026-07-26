@@ -202,7 +202,7 @@ export function HistoryDetailBanner({
       <Box>
         <Text color="gray">
           id {record.id.slice(0, 8)}… · r re-run
-          {(record.totals?.failed ?? 0) > 0 ? " · f retry failed" : ""}
+          {(record.totals?.failed ?? 0) > 0 ? " · f retry failed · t retarget" : ""}
           {hasWorktrees ? " · v diff" : ""}
           {" · d delete · ← back"}
         </Text>
