@@ -193,4 +193,47 @@ describe("TUI components", () => {
     // Overflow items are hidden entirely, not split across the line boundary.
     expect(rows.join("\n")).not.toContain("together");
   });
+
+  it("keeps soft-health height stable when an API line would otherwise show", () => {
+    const doctor: DoctorResult[] = [
+      { agent: "claude", provider: "claude", status: "ok", binary: "claude", message: "ready" },
+    ];
+    const apiDoctor = [
+      {
+        api: "anthropic",
+        provider: "anthropic" as const,
+        status: "ok" as const,
+        keyEnv: "ANTHROPIC_API_KEY",
+        baseUrl: "https://api.anthropic.com",
+        message: "ready",
+      },
+    ];
+    const props = {
+      doctor,
+      apiDoctor,
+      project: DEMO_PROJECT,
+      configSource: "defaults",
+      workspaceLabel: "user",
+      running: false,
+    };
+
+    const normalRows = (
+      render(<StatusBar {...props} />).lastFrame() ?? ""
+    )
+      .replace(/\[[0-9;]*m/g, "")
+      .split("\n")
+      .filter((line) => line.startsWith("│"));
+    const softRows = (
+      render(<StatusBar {...props} softHealth />).lastFrame() ?? ""
+    )
+      .replace(/\[[0-9;]*m/g, "")
+      .split("\n")
+      .filter((line) => line.startsWith("│"));
+
+    expect(normalRows.length).toBe(2);
+    expect(softRows.length).toBe(normalRows.length);
+    expect(softRows[0]).toContain("ready to ride");
+    expect(softRows[0]).not.toContain("claude");
+    expect(softRows.join("\n")).not.toContain("anthropic");
+  });
 });
