@@ -150,24 +150,6 @@ export function StatusBar({
     );
   }
 
-  if (softHealth) {
-    return (
-      <Box flexDirection="column">
-        <Box borderStyle="round" borderColor="gray" paddingX={1} justifyContent="space-between">
-          <Box>
-            <Text bold color="cyan">
-              {PREFIX}
-            </Text>
-            <Text color="green">● ready to ride</Text>
-            <Text color="gray"> · no agents required</Text>
-          </Box>
-          {rightGroup}
-        </Box>
-        <Box paddingX={1}>{projectStrip}</Box>
-      </Box>
-    );
-  }
-
   // Signal-first: lead with what works. Agents that are simply not installed
   // (binary_missing) are omitted entirely - "missing" is the normal state for
   // CLIs the user doesn't use, and a "N not installed" tally just burns space
@@ -188,6 +170,35 @@ export function StatusBar({
       : missingApis > 0
         ? "◇ no API keys set"
         : "";
+  // Keep soft-health (tour / agentless) at the same row count as the chip
+  // wall so selecting those workflows doesn't collapse the API line and jump
+  // the picker below.
+  const showApiLine = visibleApis.length > 0 || apiSummary.length > 0;
+
+  if (softHealth) {
+    return (
+      <Box flexDirection="column">
+        <Box borderStyle="round" borderColor="gray" paddingX={1} flexDirection="column">
+          <Box justifyContent="space-between">
+            <Box>
+              <Text bold color="cyan">
+                {PREFIX}
+              </Text>
+              <Text color="green">● ready to ride</Text>
+              <Text color="gray"> · no agents required</Text>
+            </Box>
+            {rightGroup}
+          </Box>
+          {showApiLine ? (
+            <Box paddingLeft={PREFIX.length}>
+              <Text color="gray">no API keys required</Text>
+            </Box>
+          ) : null}
+        </Box>
+        <Box paddingX={1}>{projectStrip}</Box>
+      </Box>
+    );
+  }
 
   // Inner content width = terminal minus the round border (1 each side) and
   // paddingX (1 each side). The agent line shares its row with the prefix and
@@ -214,7 +225,6 @@ export function StatusBar({
   const apiBudget = inner - PREFIX.length - apiSummaryReserve;
   const packedAgents = packLine(agents, agentBudget);
   const packedApis = packLine(apis, apiBudget);
-  const showApiLine = apis.length > 0 || apiSummary.length > 0;
 
   return (
     <Box flexDirection="column">
