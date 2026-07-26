@@ -66,7 +66,7 @@ steamtrain workflow approve <runId> [--step <id>] [--reject [--on-reject fail|st
 ```
 
 - `--detach` composes with everything `run` supports: `--param`, `--fresh`,
-  `--stdin`, `--from <runId> [--retry-failed]`, `--approve-all` /
+  `--stdin`, `--from <runId> [--retry-failed] [--retarget-agent <id>]`, `--approve-all` /
   `--on-approval`. The parent validates the workflow, runs the doctor
   preflight, and prepares the cache (fresh / retry seeds) *before* spawning,
   so misconfigurations fail fast in your terminal.
