@@ -143,6 +143,7 @@ describe("cursor argv", () => {
       "--trust",
       "--model",
       "composer-2.5",
+      "--",
       "hello",
     ]);
   });
@@ -167,8 +168,14 @@ describe("cursor argv", () => {
       "--resume",
       "sess-9",
       "--approve-mcps",
+      "--",
       "more",
     ]);
+  });
+
+  it("separates a dash-leading prompt from flags", () => {
+    const args = buildCursorRunArgs({ prompt: "- fix the bug", model: "auto" });
+    expect(args.slice(-2)).toEqual(["--", "- fix the bug"]);
   });
 
   it("appends [effort=…] unless model already has effort=", () => {

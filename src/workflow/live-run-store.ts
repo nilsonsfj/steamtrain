@@ -460,8 +460,26 @@ export function createLiveRunStore(
       }
       const meta = await get(id);
       // Terminal meta is written only after the final event flush, so a quiet
-      // file + terminal (or missing) meta means the stream is complete.
-      if (!meta || isTerminalLiveRunStatus(meta.status)) return;
+      // file + terminal (or missing) meta means the stream is complete — but
+      // drain once more in case events were flushed between the empty read and
+      // the meta write.
+      if (!meta || isTerminalLiveRunStatus(meta.status)) {
+        const finalChunk = await readFrom(path, offset);
+        if (finalChunk.length > 0) {
+          offset += finalChunk.length;
+          remainder =
+            remainder.length > 0 ? Buffer.concat([remainder, finalChunk]) : finalChunk;
+          let newline = remainder.indexOf(0x0a);
+          while (newline >= 0) {
+            const line = remainder.subarray(0, newline).toString("utf8");
+            remainder = remainder.subarray(newline + 1);
+            const event = parseEventLine(line);
+            if (event) yield event;
+            newline = remainder.indexOf(0x0a);
+          }
+        }
+        return;
+      }
       await liveRunSleep(pollMs, signal);
     }
   }

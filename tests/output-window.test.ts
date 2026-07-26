@@ -28,7 +28,7 @@ describe("wrapOutputLines", () => {
   it("trims the oldest lines past the cap with a marker", () => {
     const text = Array.from({ length: MAX_OUTPUT_LINES + 10 }, (_, i) => `line ${i}`).join("\n");
     const lines = wrapOutputLines(text, 80);
-    expect(lines).toHaveLength(MAX_OUTPUT_LINES + 1);
+    expect(lines).toHaveLength(MAX_OUTPUT_LINES);
     expect(lines[0]).toContain("10 earlier lines trimmed");
     expect(lines[lines.length - 1]).toBe(`line ${MAX_OUTPUT_LINES + 9}`);
   });

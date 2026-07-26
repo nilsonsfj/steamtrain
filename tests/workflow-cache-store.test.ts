@@ -89,6 +89,37 @@ describe("workflow cache store", () => {
     expect(loaded.get("report")).toEqual(cascaded);
   });
 
+  it("preserves worktree, tokens, artifacts, api, and model on reload", async () => {
+    const root = tempDir();
+    const key = workflowCacheKey("wf", "input", root, { name: "wf", phases: [] });
+    const rich: StepResult = {
+      stepId: "impl",
+      ok: true,
+      output: "done",
+      durationMs: 42,
+      tokens: { input: 10, output: 5 },
+      worktree: {
+        root: "/tmp/wt-impl",
+        branch: "steamtrain/impl",
+        baseCommit: "abc123",
+      },
+      artifacts: [
+        {
+          name: "report",
+          source: "report.md",
+          path: "/tmp/artifacts/report.md",
+          bytes: 12,
+          files: 1,
+        },
+      ],
+      api: "openai",
+      model: "gpt-5",
+    };
+    await saveWorkflowCache(root, key, new Map([["impl", rich]]));
+    const loaded = await loadWorkflowCache(root, key);
+    expect(loaded.get("impl")).toEqual(rich);
+  });
+
   it("isolates caches by workflow, input, and cwd", async () => {
     const root = tempDir();
     const specA = { name: "wf-a", phases: [] };

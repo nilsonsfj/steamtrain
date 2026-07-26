@@ -78,8 +78,11 @@ const DEFAULT_MAX_CONCURRENT_GENERATIONS = 2;
 /** How long POST /api/runs/:id/edit-step waits for an external owner's verdict. */
 const EXTERNAL_EDIT_RESULT_WAIT_MS = 2_500;
 const EXTERNAL_EDIT_RESULT_POLL_MS = 150;
-let activeGenerations = 0;
-let maxConcurrentGenerations = DEFAULT_MAX_CONCURRENT_GENERATIONS;
+
+interface GenerationGate {
+  active: number;
+  max: number;
+}
 
 /**
  * Locate the static web-assets directory.
@@ -257,6 +260,8 @@ export interface WebServerDeps {
    * yields a viewer session. Mutating routes always 403.
    */
   readOnly?: boolean;
+  /** Maximum concurrent LLM workflow generations. 0 = unlimited. Default 2. */
+  maxConcurrentGenerations?: number;
 }
 
 /** What a session (or the no-auth process) is allowed to do. */
@@ -827,8 +832,14 @@ function apiMetaFromDeps(
 
 export function createWebServer(deps: WebServerDeps): Server {
   const authState: AuthState = { sessions: new Map(), authFailures: new Map() };
+  // Per-server instance so concurrent createWebServer() calls (tests) do not
+  // share one generation counter / limit.
+  const generations: GenerationGate = {
+    active: 0,
+    max: deps.maxConcurrentGenerations ?? DEFAULT_MAX_CONCURRENT_GENERATIONS,
+  };
   return createServer((req, res) => {
-    void handle(req, res, deps, authState).catch((err) => {
+    void handle(req, res, deps, authState, generations).catch((err) => {
       if (!res.headersSent) {
         const status = err instanceof PayloadTooLarge ? 413 : 500;
         const error =
@@ -850,6 +861,7 @@ async function handle(
   res: ServerResponse,
   deps: WebServerDeps,
   authState: AuthState,
+  generations: GenerationGate,
 ): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname;
@@ -1323,7 +1335,7 @@ async function handle(
       sendJson(res, 501, { error: "workflow authoring is not enabled" });
       return;
     }
-    await streamGenerate(req, res, deps.author);
+    await streamGenerate(req, res, deps.author, generations);
     return;
   }
 
@@ -2147,6 +2159,7 @@ async function streamGenerate(
   req: IncomingMessage,
   res: ServerResponse,
   author: WorkflowAuthor,
+  generations: GenerationGate,
 ): Promise<void> {
   const body = await readBody(req);
   let parsed: {
@@ -2172,9 +2185,9 @@ async function streamGenerate(
     return;
   }
 
-  if (maxConcurrentGenerations > 0 && activeGenerations >= maxConcurrentGenerations) {
+  if (generations.max > 0 && generations.active >= generations.max) {
     sendJson(res, 503, {
-      error: `too many concurrent generations (max ${maxConcurrentGenerations})`,
+      error: `too many concurrent generations (max ${generations.max})`,
     });
     return;
   }
@@ -2196,7 +2209,7 @@ async function streamGenerate(
     res.write(`data: ${JSON.stringify(frame)}\n\n`);
   };
 
-  activeGenerations += 1;
+  generations.active += 1;
   try {
     const result = await author.generate(
       {
@@ -2221,7 +2234,7 @@ async function streamGenerate(
       res.end();
     }
   } finally {
-    activeGenerations -= 1;
+    generations.active -= 1;
   }
 }
 
@@ -2532,7 +2545,6 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
   const cacheStore = createWorkflowCacheStore(join(cwd, WORKFLOW_CACHE_DIR));
   const historyStore = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
   const liveRunStore = createLiveRunStore(join(cwd, WORKFLOW_RUNS_DIR), { historyStore });
-  maxConcurrentGenerations = options.maxConcurrentGenerations ?? DEFAULT_MAX_CONCURRENT_GENERATIONS;
   const runs = new WorkflowRunManager({
     host: orchestrator,
     cacheStore,
@@ -2626,6 +2638,7 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
     readToken,
     readOnly: readOnly || undefined,
     trustProxy: options.trustProxy,
+    maxConcurrentGenerations: options.maxConcurrentGenerations,
   });
 
   // Fail loudly and early when the static web assets are missing instead of

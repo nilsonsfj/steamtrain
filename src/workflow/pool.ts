@@ -54,12 +54,14 @@ export interface Channel<T> {
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
 
-const MAX_QUEUE_SIZE = 1000;
-
 /**
  * A single-consumer async queue. Producers (parallel step workers) call
  * `push`; one consumer (the engine's phase loop) iterates the items in order.
  * Mirrors the queue+resolver idiom in `src/agents/spawn.ts`.
+ *
+ * No queue cap: the engine already bounds total steps via MAX_STEPS, and the
+ * pool drains continuously. Silently dropping lifecycle events (step_done,
+ * phase_done, workflow_done) would leave the reducer/UI stuck on "running".
  */
 export function createChannel<T>(): Channel<T> {
   const queue: T[] = [];
@@ -77,7 +79,6 @@ export function createChannel<T>(): Channel<T> {
   return {
     push(item: T): void {
       if (closed) return;
-      if (queue.length >= MAX_QUEUE_SIZE) return;
       queue.push(item);
       wake();
     },

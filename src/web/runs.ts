@@ -297,7 +297,11 @@ export class WorkflowRunManager {
     // The whole-workflow wall-clock timer is armed in drive() once the run
     // leaves the queue, so time spent waiting for a slot doesn't count.
     this.runs.set(run.id, run);
-    this.runningCount += 1;
+    // Count against maxConcurrent only while executing. Queued runs (waiting
+    // on the shared live-run slot) must not shrink the effective limit.
+    if (!run.queued) {
+      this.runningCount += 1;
+    }
     void this.drive(run, spec, opts?.fresh ?? false, opts?.seed);
     return { ok: true, runId: run.id };
   }
@@ -621,6 +625,8 @@ export class WorkflowRunManager {
     let publisher: LiveRunPublisher | undefined;
     let disposeCancelWatch: (() => void) | undefined;
     let disposeControlWatch: (() => void) | undefined;
+    // True once this run holds a runningCount slot (executing, not merely queued).
+    let holdsRunningSlot = !run.queued;
     try {
       // Mirror the run into the shared live-run registry (cross-UI attach) and
       // wait for a queue slot so parallel runs don't collide over the cache
@@ -659,6 +665,9 @@ export class WorkflowRunManager {
           run.status = "canceled";
           return;
         }
+        // Now executing — count against maxConcurrent.
+        this.runningCount += 1;
+        holdsRunningSlot = true;
         publisher = createLiveRunPublisher(this.liveRuns, run.id);
       }
       run.queued = false;
@@ -761,7 +770,9 @@ export class WorkflowRunManager {
       run.pendingInputs.clear();
       disposeCancelWatch?.();
       disposeControlWatch?.();
-      this.runningCount = Math.max(0, this.runningCount - 1);
+      if (holdsRunningSlot) {
+        this.runningCount = Math.max(0, this.runningCount - 1);
+      }
       run.endedAt = Date.now();
       // The outcome is resolved now; lock out cancellation synchronously before
       // any async persistence below, so a cancel arriving mid-persist can't

@@ -94,6 +94,23 @@ describe("createKimiMapper", () => {
     ]);
   });
 
+  it("honors is_error on tool results", () => {
+    const m = createKimiMapper();
+    const events = m(
+      JSON.parse(
+        '{"role":"tool","tool_call_id":"tool_err","content":"boom","is_error":true}',
+      ),
+    );
+    expect(events).toEqual([
+      expect.objectContaining({
+        kind: "tool_result",
+        id: "tool_err",
+        isError: true,
+        output: "boom",
+      }),
+    ]);
+  });
+
   it("passes unrecognized lines through as unknown", () => {
     const m = createKimiMapper("kimi-fork");
     const events = m(JSON.parse('{"role":"meta","type":"session.some_future_hint"}'));

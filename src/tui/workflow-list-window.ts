@@ -127,7 +127,7 @@ export function selectVisibleWindowWeighted<T>(
 
   // If still over budget (selection taller than frame), shrink neighbors first.
   while (cost > totalBudget && end - start > 1) {
-    if (selected > start && (selected >= end - 1 || start - selected <= end - 1 - selected)) {
+    if (selected > start && (selected >= end - 1 || selected - start <= end - 1 - selected)) {
       start += 1;
       if (start > 0) hiddenBefore = start;
     } else if (end - 1 > selected) {

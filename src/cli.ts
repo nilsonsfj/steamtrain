@@ -388,7 +388,7 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
 }
 
 function normalizeArgs(args: string[]): string[] {
-  if (args[0] === "workflows") return ["workflow", "list", ...args.slice(1)];
+  if (args[0] === "workflows") return ["workflow", ...args.slice(1)];
   return args;
 }
 

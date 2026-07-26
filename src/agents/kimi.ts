@@ -109,7 +109,7 @@ export function createKimiMapper(agent: AgentInstanceId = AGENT): EventMapper {
           id,
           name: toolNames.get(id),
           output: stringifyContent(e.content),
-          isError: false,
+          isError: e.is_error ?? false,
         });
         return out;
       }

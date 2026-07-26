@@ -43,6 +43,8 @@ export const kimiMessage = z
     tool_call_id: z.string().optional(),
     type: z.string().optional(),
     session_id: z.string().optional(),
+    /** Present on some tool-result lines when the tool call failed. */
+    is_error: z.boolean().optional(),
   })
   .passthrough();
 

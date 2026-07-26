@@ -93,6 +93,11 @@ export interface WorkflowRunControl {
   notifyIdle(): void;
   /** Bind run-scoped validation/invalidation hooks (once per run start). */
   attachRun(hooks: RunControlHooks): void;
+  /**
+   * Latch that the run's scheduler has exited. Further {@link editStep} calls
+   * are rejected — accepted edits would never be consumed.
+   */
+  notifyFinished(): void;
   /** Drain events (accepted `step_edited`s) for the engine to emit in-stream. */
   takeEvents(): StepEditedEvent[];
   /** Resolve on the next control change (pause/resume/edit) or signal abort. */
@@ -106,6 +111,7 @@ export function createWorkflowRunControl(): WorkflowRunControl {
   // Latched true once the engine parks with nothing in flight while paused;
   // any resume (or a fresh pause that will schedule again) clears it.
   let idle = false;
+  let runFinished = false;
   let hooks: RunControlHooks | undefined;
   const edits = new Map<string, StepEditPatch>();
   const pendingEvents: StepEditedEvent[] = [];
@@ -144,6 +150,9 @@ export function createWorkflowRunControl(): WorkflowRunControl {
       if (fields.length === 0) {
         return { ok: false, error: "edit contains no changes" };
       }
+      if (runFinished) {
+        return { ok: false, error: "run has already finished" };
+      }
       if (!hooks) {
         return { ok: false, error: "the run has not started yet" };
       }
@@ -163,6 +172,9 @@ export function createWorkflowRunControl(): WorkflowRunControl {
     stepEdits: () => edits,
     attachRun(next) {
       hooks = next;
+    },
+    notifyFinished() {
+      runFinished = true;
     },
     takeEvents() {
       if (pendingEvents.length === 0) return [];

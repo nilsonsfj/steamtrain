@@ -233,6 +233,15 @@ describe("runCli", () => {
     expect(c.stderr).toBe("");
   });
 
+  it("accepts workflows as an alias that preserves subcommands", async () => {
+    const c = capture();
+    const code = await runCli(["workflows", "validate", "bug-hunt"], c.io);
+
+    expect(code).toBe(0);
+    expect(c.stdout).toContain("ok  bug-hunt");
+    expect(c.stderr).toBe("");
+  });
+
   it("reports unknown workflow validation failures", async () => {
     const c = capture();
     const code = await runCli(["workflow", "validate", "missing"], c.io);

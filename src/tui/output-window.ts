@@ -47,7 +47,8 @@ export function wrapOutputLines(text: string, width: number): string[] {
     const dropped = out.length - MAX_OUTPUT_LINES;
     return [
       `… ${dropped} earlier line${dropped === 1 ? "" : "s"} trimmed …`,
-      ...out.slice(dropped),
+      // Marker + tail must equal MAX_OUTPUT_LINES (callers budget on that).
+      ...out.slice(dropped + 1),
     ];
   }
   return out;
