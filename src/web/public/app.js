@@ -1782,8 +1782,9 @@
 
   // Re-run / retry-failed a recorded run: launch via the history route, then
   // switch to the live run view for the returned run id.
-  function rerunHistory(id, workflow, mode) {
-    apiAuth("POST", "/api/history/" + encodeURIComponent(id) + "/" + mode).then(function (r) {
+  // `body` is an optional JSON payload for retry retarget ({ retargetAgent, retargetModel, steps }).
+  function rerunHistory(id, workflow, mode, body) {
+    apiAuth("POST", "/api/history/" + encodeURIComponent(id) + "/" + mode, body).then(function (r) {
       if (r.status !== 201) {
         setBanner((r.body && r.body.error) || "could not start re-run", "err");
         return;
@@ -1803,6 +1804,84 @@
         render();
       });
     });
+  }
+
+  /** Modal to retry failed steps with a different agent/model (and optional step filter). */
+  function openRetryRetargetModal(record) {
+    var holder = Hist.holder;
+    var failed = [];
+    (record.phases || []).forEach(function (p) {
+      (p.steps || []).forEach(function (s) {
+        if (s.status && s.status !== "done") failed.push(s);
+      });
+    });
+    var readyAgents = (S.agents || []).filter(function (a) { return a.healthy !== false; });
+    if (!readyAgents.length) readyAgents = S.agents || [];
+    var agentOpts = readyAgents.map(function (a) {
+      return { value: a.id, label: a.id + (a.healthy === false ? " (unhealthy)" : "") };
+    });
+    if (!agentOpts.length) {
+      setBanner("No agents available to retarget onto", "err");
+      return;
+    }
+    var agentSel = selectEl(agentOpts, agentOpts[0].value);
+    var modelField = h("div", { class: "field" });
+    function renderModels() {
+      clear(modelField);
+      modelField.appendChild(h("label", { text: "Model (optional)" }));
+      var meta = null;
+      for (var i = 0; i < (S.agents || []).length; i++) {
+        if (S.agents[i].id === agentSel.value) { meta = S.agents[i]; break; }
+      }
+      var opts = [{ value: "", label: "(same family / agent default)" }];
+      ((meta && meta.models) || []).forEach(function (m) {
+        opts.push({ value: m.id, label: m.name || m.id });
+      });
+      var sel = selectEl(opts, "");
+      modelField.appendChild(sel);
+      modelField._sel = sel;
+    }
+    agentSel.addEventListener("change", renderModels);
+    renderModels();
+
+    var stepBox = h("div", { class: "field" });
+    stepBox.appendChild(h("label", { text: "Steps to re-run (optional)" }));
+    stepBox.appendChild(h("div", { class: "hint", text: "Leave unchecked to retry every failed / not-run step." }));
+    var checks = [];
+    failed.forEach(function (s) {
+      var id = "retarget-step-" + s.stepId;
+      var label = s.stepId + (s.agent ? " · " + s.agent : "") + (s.model ? "/" + s.model : "");
+      var row = h("label", { class: "check-row", style: "display:flex;gap:0.5rem;align-items:center;margin:0.25rem 0;" },
+        h("input", { type: "checkbox", id: id, value: s.stepId }),
+        h("span", { text: label })
+      );
+      checks.push(row.querySelector("input"));
+      stepBox.appendChild(row);
+    });
+
+    var err = h("div", { class: "mbanner err", style: "display:none;" });
+    var body = h("div", null,
+      field("Agent", agentSel, "Failed agent steps are forced onto this agent for the retry."),
+      modelField,
+      stepBox,
+      err
+    );
+    var foot = h("div", { class: "mfoot" },
+      h("button", { class: "btn", text: "Back", onClick: function () {
+        if (holder) renderHistoryDetail(holder, record);
+      }}),
+      h("button", { class: "btn primary", text: "Retry with agent", onClick: function () {
+        var steps = [];
+        checks.forEach(function (c) { if (c.checked) steps.push(c.value); });
+        var payload = { retargetAgent: agentSel.value };
+        var model = modelField._sel && modelField._sel.value;
+        if (model) payload.retargetModel = model;
+        if (steps.length) payload.steps = steps;
+        stopHistoryPoll();
+        rerunHistory(record.id, record.workflow, "retry", payload);
+      }})
+    );
+    openModal(modalShell("Retry with agent", record.workflow + " · " + failed.length + " failed/not-run", body, foot));
   }
 
   function renderSourceLine() {
@@ -5222,6 +5301,8 @@
       if (canRetry) {
         actions.appendChild(h("button", { class: "btn", text: "Retry failed",
           onClick: function () { stopHistoryPoll(); rerunHistory(record.id, record.workflow, "retry"); } }));
+        actions.appendChild(h("button", { class: "btn", text: "Retry with agent\u2026",
+          onClick: function () { openRetryRetargetModal(record); } }));
       }
       actions.appendChild(h("button", { class: "btn danger small", text: "Delete",
         onClick: function () { deleteHistoryRun(holder, record); } }));
