@@ -427,7 +427,9 @@ describe("runCli", () => {
 
     const code = await runCli(["workflow", "run", "fail-gate", "--input", "nope"], c.io);
 
-    expect(code).toBe(1);
+    // A gate rejecting with onFalse:"fail" is the documented "gate-failed"
+    // outcome (exit 2), distinct from a step error (exit 1).
+    expect(code).toBe(2);
     expect(c.stdout).toContain("workflow failed");
   });
 
@@ -485,7 +487,8 @@ describe("runCli", () => {
       ["workflow", "run", "approve-flow", "--input", "task", "--on-approval", "fail"],
       c.io,
     );
-    expect(code).toBe(1);
+    // A rejected approval checkpoint is recorded as a gate failure (exit 2).
+    expect(code).toBe(2);
     expect(c.stdout).toContain("rejected");
     expect(c.stdout).toContain("workflow failed");
   });

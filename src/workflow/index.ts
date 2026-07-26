@@ -583,3 +583,22 @@ export {
   formatArrivalHeadline,
   formatArrivalReceipt,
 } from "./arrival-report";
+export {
+  EXIT_CODES,
+  OUTCOME_LABELS,
+  REPORT_FORMATS,
+  RUN_REPORT_SCHEMA,
+  RUN_REPORT_VERSION,
+  type ClassifyRunOptions,
+  type ReportFormat,
+  type ReportPhase,
+  type ReportStep,
+  type RunOutcome,
+  type RunReportModel,
+  buildReportModel,
+  classifyRun,
+  exitCodeForOutcome,
+  exitCodeForRun,
+  isReportFormat,
+  renderReport,
+} from "./report";
