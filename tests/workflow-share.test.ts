@@ -1,5 +1,5 @@
-import { createServer } from "node:http";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -101,6 +101,17 @@ describe("exportWorkflow", () => {
     expect(parsed.payload.format).toBe("envelope");
     expect(parsed.payload.checksumWarning).toBeUndefined();
     expect(parsed.payload.spec.name).toBe("review-flow");
+  });
+
+  it("preserves checksum through a disk write/read", () => {
+    const dir = mkdtempSync(join(tmpdir(), "steamtrain-share-ck-"));
+    const path = join(dir, "echo-flow.steamtrain.json");
+    const exported = exportWorkflow(agentless, { source: "project" });
+    writeShareFile(path, exported.text);
+    const parsed = parseSharePayload(JSON.parse(readFileSync(path, "utf8")));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.payload.checksumWarning).toBeUndefined();
   });
 });
 

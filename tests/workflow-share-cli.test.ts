@@ -142,10 +142,7 @@ describe("workflow import", () => {
       }).text,
     );
 
-    const code = await runCli(
-      ["workflow", "import", path, "--save", "--scope", "project"],
-      c.io,
-    );
+    const code = await runCli(["workflow", "import", path, "--save", "--scope", "project"], c.io);
     expect(code).toBe(0);
     const project = JSON.parse(readFileSync(join(c.cwd, CONFIG_FILENAME), "utf8"));
     expect(project.workflows["team-check"]).toBeTruthy();
@@ -238,16 +235,14 @@ describe("workflow import", () => {
   it("round-trips export → import for a bundled workflow under a new name", async () => {
     const home = mkdtempSync(join(tmpdir(), "steamtrain-share-home-"));
     const c = capture(home);
-    expect(await runCli(["workflow", "export", "tour", "--out", "tour-share.json"], c.io)).toBe(
-      0,
-    );
+    expect(await runCli(["workflow", "export", "tour", "--out", "tour-share.json"], c.io)).toBe(0);
     const code = await runCli(
-      ["workflow", "import", "tour-share.json", "--name", "my-tour", "--save"],
+      ["workflow", "import", "tour-share.json", "--name", "my-tour", "--save", "--yes"],
       c.io,
     );
     expect(code).toBe(0);
     const onDisk = JSON.parse(readFileSync(userWorkflowsPath(home), "utf8"));
-    expect(onDisk.workflows["my-tour"].phases).toEqual(BUNDLED_WORKFLOWS.tour.phases);
+    expect(onDisk.workflows["my-tour"].phases).toEqual(BUNDLED_WORKFLOWS.tour!.phases);
   });
 
   it("lists export/import in help", async () => {

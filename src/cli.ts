@@ -49,10 +49,12 @@ import {
   autonomyDescription,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
+  exportWorkflow,
   finalRunWorktrees,
   formatPermissionSummary,
   formatReroutePlan,
   formatRunTotals,
+  formatShareReview,
   formatTokenSummary,
   formatTokens,
   formatUsd,
@@ -62,15 +64,19 @@ import {
   listRepoWorktrees,
   mergeConflictGuidance,
   modelBreakdownForRecord,
+  parseSharePayload,
   permissionSummaryDeclared,
   permissionSummaryGlyph,
   planHistoryContext,
   planWorkflow,
   pruneRunWorktrees,
+  readShareSource,
+  resolveExportOutputPath,
   resolveInputs,
   resolveStepTimeoutSec,
   saveUserWorkflow,
   totalTokens,
+  validateImportedWorkflow,
   validateWorkflow,
   workflowAgentIds,
   workflowAutonomy,
@@ -79,13 +85,7 @@ import {
   workflowPermissionSummary,
   workflowStepKind,
   worktreeDiff,
-  exportWorkflow,
   writeShareFile,
-  parseSharePayload,
-  validateImportedWorkflow,
-  readShareSource,
-  resolveExportOutputPath,
-  formatShareReview,
 } from "./workflow";
 import { loadWorkflowCatalog, workflowCatalogEntries } from "./workflow";
 import { runPrCommand } from "./workflow/pr-cli";
@@ -1605,9 +1605,7 @@ async function runWorkflowExportCommand(
 ): Promise<number> {
   const options = parseExportOptions(args);
   if (!options?.name) {
-    err(
-      "usage: steamtrain workflow export <name> [--out <path>] [--stdout] [--json]\n",
-    );
+    err("usage: steamtrain workflow export <name> [--out <path>] [--stdout] [--json]\n");
     return 1;
   }
 
@@ -1655,9 +1653,7 @@ async function runWorkflowExportCommand(
 
   out(`exported '${spec.name}'${source ? ` (${source})` : ""} → ${path}\n`);
   out(`  ${workflowSummary(spec)}\n`);
-  out(
-    `  share with: steamtrain workflow import ${path} --save\n`,
-  );
+  out(`  share with: steamtrain workflow import ${path} --save\n`);
   return 0;
 }
 
@@ -1746,6 +1742,14 @@ async function runWorkflowImportCommand(
     format: payload.format,
     warnings: validated.warnings,
     checksumWarning: payload.checksumWarning,
+    checksumOk:
+      payload.format === "envelope" && payload.envelope?.checksum && !payload.checksumWarning
+        ? `${payload.envelope.checksum.replace(/^sha256:/i, "").slice(0, 12)}…`
+        : undefined,
+    exporter: payload.envelope?.exporter
+      ? `${payload.envelope.exporter.name}@${payload.envelope.exporter.version}`
+      : undefined,
+    exportedSource: payload.envelope?.source,
     agentStatus,
   });
 
@@ -1792,7 +1796,7 @@ async function runWorkflowImportCommand(
 
   if (validated.review.requiresConfirmation && !options.yes) {
     err(
-      `refusing to save: security review found critical/high findings. Re-read the review above, then pass --yes to confirm.\n`,
+      "refusing to save: security review found critical/high findings. Re-read the review above, then pass --yes to confirm.\n",
     );
     return 1;
   }
@@ -1811,8 +1815,7 @@ async function runWorkflowImportCommand(
   }
   if (existingSource && existingSource !== options.scope && !options.json) {
     const overrides =
-      options.scope === "project" ||
-      (options.scope === "user" && existingSource === "bundled");
+      options.scope === "project" || (options.scope === "user" && existingSource === "bundled");
     err(
       `note: '${payload.spec.name}' already exists as ${existingSource}; saving to ${options.scope}${
         overrides ? " will override it in the catalog" : " (project layer still wins at runtime)"

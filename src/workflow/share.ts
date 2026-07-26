@@ -176,8 +176,11 @@ export function parseSharePayload(
     const spec: WorkflowSpec = { ...parsed.data.workflow, name: name.trim() };
     let checksumWarning: string | undefined;
     if (parsed.data.checksum) {
+      // Hash the raw JSON-parsed workflow (pre-zod). Zod reorders/normalizes
+      // keys, so hashing the parsed schema output would false-positive mismatch
+      // every clean round-trip.
       const expected = parsed.data.checksum.replace(/^sha256:/i, "").toLowerCase();
-      const actual = sha256Hex(canonicalWorkflowJson(parsed.data.workflow));
+      const actual = sha256Hex(JSON.stringify(obj.workflow));
       if (expected !== actual) {
         checksumWarning = `checksum mismatch (declared sha256:${expected.slice(0, 12)}…, got sha256:${actual.slice(0, 12)}…) — file may have been edited after export`;
       }
@@ -549,11 +552,7 @@ export function defaultExportPath(cwd: string, workflowName: string): string {
 }
 
 /** Resolve `--out`: directories get the suggested filename appended. */
-export function resolveExportOutputPath(
-  cwd: string,
-  workflowName: string,
-  out?: string,
-): string {
+export function resolveExportOutputPath(cwd: string, workflowName: string, out?: string): string {
   if (!out || out === "-") return defaultExportPath(cwd, workflowName);
   const abs = isAbsolute(out) ? out : resolve(cwd, out);
   if (out.endsWith("/") || out.endsWith("\\") || (existsSync(abs) && isDirectorySafe(abs))) {
@@ -571,6 +570,12 @@ export function formatShareReview(
     format: ParsedSharePayload["format"];
     warnings?: string[];
     checksumWarning?: string;
+    /** Present when the payload was a share envelope with a matching checksum. */
+    checksumOk?: string;
+    /** Envelope exporter line, e.g. `steamtrain@0.1.0-alpha.1`. */
+    exporter?: string;
+    /** Envelope source layer when known. */
+    exportedSource?: string;
     agentStatus?: Array<{ agent: string; status: string; message: string }>;
     maxPromptChars?: number;
   },
@@ -580,6 +585,13 @@ export function formatShareReview(
   const stepCount = countSteps(spec);
   lines.push(`workflow '${spec.name}'${spec.description ? ` — ${spec.description}` : ""}`);
   lines.push(`  from ${options.origin}  (${options.format} format)`);
+  if (options.exporter || options.exportedSource) {
+    const bits = [
+      options.exporter ? `exported by ${options.exporter}` : undefined,
+      options.exportedSource ? `source=${options.exportedSource}` : undefined,
+    ].filter(Boolean);
+    lines.push(`  ${bits.join(" · ")}`);
+  }
   lines.push(
     `  ${spec.phases.length} phase${spec.phases.length === 1 ? "" : "s"} · ${stepCount} step${stepCount === 1 ? "" : "s"} · prompts:${review.summary.prompts} · commands:${review.summary.commands} · llm:${review.summary.llmCalls}`,
   );
@@ -604,6 +616,8 @@ export function formatShareReview(
 
   if (options.checksumWarning) {
     lines.push(`  checksum: ${options.checksumWarning}`);
+  } else if (options.checksumOk) {
+    lines.push(`  checksum: ok (${options.checksumOk})`);
   }
 
   if (options.warnings && options.warnings.length > 0) {
@@ -728,7 +742,8 @@ async function fetchShareUrl(
     if (!response.ok) {
       return {
         ok: false,
-        error: `fetch ${current.href} returned HTTP ${response.status} ${response.statusText}`.trim(),
+        error:
+          `fetch ${current.href} returned HTTP ${response.status} ${response.statusText}`.trim(),
       };
     }
 
