@@ -49,10 +49,12 @@ import {
   autonomyDescription,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
+  exportWorkflow,
   finalRunWorktrees,
   formatPermissionSummary,
   formatReroutePlan,
   formatRunTotals,
+  formatShareReview,
   formatTokenSummary,
   formatTokens,
   formatUsd,
@@ -62,15 +64,19 @@ import {
   listRepoWorktrees,
   mergeConflictGuidance,
   modelBreakdownForRecord,
+  parseSharePayload,
   permissionSummaryDeclared,
   permissionSummaryGlyph,
   planHistoryContext,
   planWorkflow,
   pruneRunWorktrees,
+  readShareSource,
+  resolveExportOutputPath,
   resolveInputs,
   resolveStepTimeoutSec,
   saveUserWorkflow,
   totalTokens,
+  validateImportedWorkflow,
   validateWorkflow,
   workflowAgentIds,
   workflowAutonomy,
@@ -79,6 +85,7 @@ import {
   workflowPermissionSummary,
   workflowStepKind,
   worktreeDiff,
+  writeShareFile,
 } from "./workflow";
 import { loadWorkflowCatalog, workflowCatalogEntries } from "./workflow";
 import { runPrCommand } from "./workflow/pr-cli";
@@ -250,11 +257,19 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
 
 export interface CliIO {
   cwd?: string;
+  /**
+   * Alternate home directory for user-layer reads/writes
+   * (`~/.steamtrain/workflows.json`). Tests inject a temp home; production
+   * leaves this unset so {@link homedir} is used.
+   */
+  home?: string;
   workspacePath?: string;
   configPath?: string;
   stdin?: Readable;
   stdout?: (text: string) => void;
   stderr?: (text: string) => void;
+  /** Custom fetch for `workflow import <url>` (tests). */
+  fetch?: typeof fetch;
 }
 
 export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
@@ -277,6 +292,7 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
   }
 
   const cwd = io.cwd ?? process.cwd();
+  const home = io.home ?? homedir();
   const {
     config,
     scope: configScope,
@@ -295,7 +311,7 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
   });
   if (workspaceWarning) err(`${workspaceWarning}\n`);
   const workflowCatalog = loadWorkflowCatalog({
-    home: homedir(),
+    home,
     projectWorkflows: config.workflows,
   });
   if (workflowCatalog.warning) err(`${workflowCatalog.warning}\n`);
@@ -361,6 +377,10 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
     case "create":
     case "new":
       return runWorkflowCreateCommand(config, rest, io, out, err, configScope.path);
+    case "export":
+      return runWorkflowExportCommand(orchestrator, rest, io, out, err);
+    case "import":
+      return runWorkflowImportCommand(config, rest, io, out, err, configScope.path, home);
     default:
       err(`unknown workflow command '${command}'\n\n${helpText()}`);
       return 1;
@@ -1395,7 +1415,7 @@ async function runWorkflowCreateCommand(
   const saved = options.save
     ? options.scope === "project"
       ? saveProjectWorkflow(spec.name, spec, projectConfigPath)
-      : await saveUserWorkflow(spec.name, spec)
+      : await saveUserWorkflow(spec.name, spec, io.home ?? homedir())
     : undefined;
 
   if (options.json) {
@@ -1482,6 +1502,369 @@ function parseCreateOptions(args: string[]): CreateOptions | null {
   return options;
 }
 
+// ── workflow export / import ─────────────────────────────────────────────────
+
+interface ExportOptions {
+  name?: string;
+  out?: string;
+  stdout: boolean;
+  json: boolean;
+}
+
+interface ImportOptions {
+  source?: string;
+  stdin: boolean;
+  name?: string;
+  scope: "user" | "project";
+  save: boolean;
+  force: boolean;
+  yes: boolean;
+  json: boolean;
+}
+
+function parseExportOptions(args: string[]): ExportOptions | null {
+  const options: ExportOptions = { stdout: false, json: false };
+  const positional: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!arg) return null;
+    if (arg === "--out" || arg === "-o") {
+      const value = args[++i];
+      if (!value) return null;
+      options.out = value;
+    } else if (arg === "--stdout") {
+      options.stdout = true;
+    } else if (arg === "--json") {
+      options.json = true;
+    } else if (arg.startsWith("-")) {
+      return null;
+    } else {
+      positional.push(arg);
+    }
+  }
+  if (positional.length !== 1) return null;
+  options.name = positional[0];
+  return options;
+}
+
+function parseImportOptions(args: string[]): ImportOptions | null {
+  const options: ImportOptions = {
+    stdin: false,
+    scope: "user",
+    save: false,
+    force: false,
+    yes: false,
+    json: false,
+  };
+  const positional: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!arg) return null;
+    if (arg === "--name") {
+      const value = args[++i];
+      if (!value) return null;
+      options.name = value;
+    } else if (arg === "--scope") {
+      const value = args[++i];
+      if (value !== "user" && value !== "project") return null;
+      options.scope = value;
+    } else if (arg === "--project") {
+      options.scope = "project";
+    } else if (arg === "--save") {
+      options.save = true;
+    } else if (arg === "--force") {
+      options.force = true;
+    } else if (arg === "--yes" || arg === "-y") {
+      options.yes = true;
+    } else if (arg === "--json") {
+      options.json = true;
+    } else if (arg === "--stdin") {
+      options.stdin = true;
+    } else if (arg.startsWith("-")) {
+      return null;
+    } else {
+      positional.push(arg);
+    }
+  }
+  if (options.stdin) {
+    if (positional.length > 0) return null;
+  } else if (positional.length !== 1) {
+    return null;
+  } else {
+    options.source = positional[0];
+  }
+  return options;
+}
+
+async function runWorkflowExportCommand(
+  orchestrator: Orchestrator,
+  args: string[],
+  io: CliIO,
+  out: (text: string) => void,
+  err: (text: string) => void,
+): Promise<number> {
+  const options = parseExportOptions(args);
+  if (!options?.name) {
+    err("usage: steamtrain workflow export <name> [--out <path>] [--stdout] [--json]\n");
+    return 1;
+  }
+
+  const workflows = orchestrator.listWorkflows();
+  const spec = workflows[options.name];
+  if (!spec) {
+    err(`${unknownWorkflowMessage(options.name, Object.keys(workflows))}\n`);
+    return 1;
+  }
+
+  const source = orchestrator.workflowSource(options.name);
+  const exported = exportWorkflow(spec, { source });
+  const cwd = io.cwd ?? process.cwd();
+
+  if (options.stdout) {
+    out(exported.text);
+    return 0;
+  }
+
+  const path = resolveExportOutputPath(cwd, spec.name, options.out);
+  try {
+    writeShareFile(path, exported.text);
+  } catch (writeErr) {
+    err(`could not write ${path}: ${message(writeErr)}\n`);
+    return 1;
+  }
+
+  if (options.json) {
+    out(
+      `${JSON.stringify(
+        {
+          ok: true,
+          name: spec.name,
+          path,
+          source: source ?? null,
+          bytes: Buffer.byteLength(exported.text, "utf8"),
+          checksum: exported.envelope.checksum ?? null,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return 0;
+  }
+
+  out(`exported '${spec.name}'${source ? ` (${source})` : ""} → ${path}\n`);
+  out(`  ${workflowSummary(spec)}\n`);
+  out(`  share with: steamtrain workflow import ${path} --save\n`);
+  return 0;
+}
+
+async function runWorkflowImportCommand(
+  config: SteamtrainConfig,
+  args: string[],
+  io: CliIO,
+  out: (text: string) => void,
+  err: (text: string) => void,
+  projectConfigPath: string,
+  home: string,
+): Promise<number> {
+  const options = parseImportOptions(args);
+  if (!options || (!options.stdin && !options.source)) {
+    err(
+      "usage: steamtrain workflow import <path|url> [--name <name>] [--save] [--scope user|project] [--project] [--force] [--yes] [--json]\n       steamtrain workflow import --stdin [--name <name>] [--save] [--scope user|project] [--project] [--force] [--yes] [--json]\n",
+    );
+    return 1;
+  }
+
+  const cwd = io.cwd ?? process.cwd();
+  let text: string;
+  let originLabel: string;
+  let originKind: "file" | "url" | "stdin";
+
+  if (options.stdin) {
+    text = await readAll(io.stdin ?? process.stdin);
+    originLabel = "stdin";
+    originKind = "stdin";
+  } else {
+    const loaded = await readShareSource(options.source!, {
+      cwd,
+      fetch: io.fetch,
+    });
+    if (!loaded.ok) {
+      err(`${loaded.error}\n`);
+      return 1;
+    }
+    text = loaded.result.text;
+    originLabel = loaded.result.location;
+    originKind = loaded.result.origin === "url" ? "url" : "file";
+  }
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch (parseErr) {
+    err(`invalid JSON from ${originLabel}: ${message(parseErr)}\n`);
+    return 1;
+  }
+
+  const parsed = parseSharePayload(raw, { preferredName: options.name });
+  if (!parsed.ok) {
+    err(`${parsed.error}\n`);
+    return 1;
+  }
+
+  const { payload } = parsed;
+  const validated = validateImportedWorkflow(payload.spec);
+  if (!validated.ok) {
+    err(`import rejected: ${validated.error}\n`);
+    return 1;
+  }
+
+  // Doctor preview for pinned agents (skip when agentless — nothing to probe).
+  let agentStatus: Array<{ agent: string; status: string; message: string }> | undefined;
+  const agents = validated.review.agents;
+  if (agents.length > 0) {
+    const doctor = await runDoctor(config);
+    const byAgent = new Map(doctor.map((d) => [d.agent, d]));
+    agentStatus = agents.map((agent) => {
+      const hit = byAgent.get(agent as AgentInstanceId);
+      if (!hit) {
+        return {
+          agent,
+          status: "unknown",
+          message: "not in configured agent list",
+        };
+      }
+      return { agent, status: hit.status, message: hit.message };
+    });
+  }
+
+  const reviewText = formatShareReview(payload.spec, validated.review, {
+    origin: originLabel,
+    format: payload.format,
+    warnings: validated.warnings,
+    checksumWarning: payload.checksumWarning,
+    checksumOk:
+      payload.format === "envelope" && payload.envelope?.checksum && !payload.checksumWarning
+        ? `${payload.envelope.checksum.replace(/^sha256:/i, "").slice(0, 12)}…`
+        : undefined,
+    exporter: payload.envelope?.exporter
+      ? `${payload.envelope.exporter.name}@${payload.envelope.exporter.version}`
+      : undefined,
+    exportedSource: payload.envelope?.source,
+    agentStatus,
+  });
+
+  if (options.json && !options.save) {
+    out(
+      `${JSON.stringify(
+        {
+          ok: true,
+          saved: false,
+          origin: originKind,
+          location: originLabel,
+          format: payload.format,
+          spec: payload.spec,
+          warnings: validated.warnings,
+          checksumWarning: payload.checksumWarning ?? null,
+          review: validated.review,
+          agentStatus: agentStatus ?? [],
+          requiresConfirmation: validated.review.requiresConfirmation,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return 0;
+  }
+
+  if (!options.json) {
+    out(`\n${reviewText}`);
+  }
+
+  if (!options.save) {
+    if (!options.json) {
+      out(
+        "(not saved — re-run with --save [--scope project] after reviewing prompts/commands above)\n",
+      );
+      if (validated.review.requiresConfirmation) {
+        out(
+          "(this workflow has critical/high findings — --save also needs --yes to confirm you reviewed them)\n",
+        );
+      }
+    }
+    return 0;
+  }
+
+  if (validated.review.requiresConfirmation && !options.yes) {
+    err(
+      "refusing to save: security review found critical/high findings. Re-read the review above, then pass --yes to confirm.\n",
+    );
+    return 1;
+  }
+
+  // Collision check against the target layer (and warn about catalog shadows).
+  const existingCatalog = loadWorkflowCatalog({
+    home,
+    projectWorkflows: config.workflows,
+  });
+  const existingSource = existingCatalog.sources[payload.spec.name];
+  if (existingSource === options.scope && !options.force) {
+    err(
+      `workflow '${payload.spec.name}' already exists in the ${options.scope} layer. Pass --force to overwrite.\n`,
+    );
+    return 1;
+  }
+  if (existingSource && existingSource !== options.scope && !options.json) {
+    const overrides =
+      options.scope === "project" || (options.scope === "user" && existingSource === "bundled");
+    err(
+      `note: '${payload.spec.name}' already exists as ${existingSource}; saving to ${options.scope}${
+        overrides ? " will override it in the catalog" : " (project layer still wins at runtime)"
+      }.\n`,
+    );
+  }
+
+  const saved =
+    options.scope === "project"
+      ? saveProjectWorkflow(payload.spec.name, payload.spec, projectConfigPath)
+      : await saveUserWorkflow(payload.spec.name, payload.spec, home);
+
+  if (!saved.ok) {
+    err(`could not save '${payload.spec.name}': ${saved.error}\n`);
+    return 1;
+  }
+
+  if (options.json) {
+    out(
+      `${JSON.stringify(
+        {
+          ok: true,
+          saved: true,
+          savedPath: saved.path,
+          replaced: saved.replaced ?? false,
+          origin: originKind,
+          location: originLabel,
+          format: payload.format,
+          name: payload.spec.name,
+          scope: options.scope,
+          warnings: validated.warnings,
+          checksumWarning: payload.checksumWarning ?? null,
+          review: validated.review,
+          agentStatus: agentStatus ?? [],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return 0;
+  }
+
+  out(
+    `${saved.replaced ? "updated" : "saved"} '${payload.spec.name}' → ${saved.path} (${options.scope})\n`,
+  );
+  out(`  try it: steamtrain workflow run ${payload.spec.name} --input "…"\n`);
+  return 0;
+}
+
 interface CacheClearOptions {
   workflow?: string;
   input?: string;
@@ -1560,6 +1943,9 @@ Usage:
   steamtrain workflow answer <runId> [--step <stepId>] [--value <text> | --file <path>]
   steamtrain workflow takeover <runId> <stepId>
   steamtrain workflow create --input <description> [--agent <id>] [--model <model>] [--name <name>] [--save] [--scope user|project] [--json]
+  steamtrain workflow export <name> [--out <path>] [--stdout] [--json]
+  steamtrain workflow import <path|url> [--name <name>] [--save] [--scope user|project] [--project] [--force] [--yes] [--json]
+  steamtrain workflow import --stdin [--name <name>] [--save] [--scope user|project] [--project] [--force] [--yes] [--json]
   steamtrain workflow cache clear [<workflow> --input <text> --param key=value ... | --stdin]
   steamtrain workflow history [list]
   steamtrain workflow history show <id> [--diff [--step <stepId>] [--stat]]
@@ -1584,6 +1970,16 @@ and (with --save) writes it so it shows up in the picker and CLI alongside the
 bundled workflows. --scope user (default) writes to ~/.steamtrain/workflows.json;
 --scope project (or --project) writes to the project's ./steamtrain.json so the
 workflow can be committed and shared with the team.
+
+workflow export writes a self-describing <name>.steamtrain.json package (schema
+version, checksum, source layer, and the workflow body) you can attach to an
+issue, gist, or chat. workflow import reads a path, https URL, or --stdin,
+validates the schema + template refs, runs a doctor preview for pinned agents,
+and prints every prompt/command for review (the prompt-injection surface) before
+saving. --save writes to the chosen scope; critical/high findings also need
+--yes, and overwriting an existing same-scope workflow needs --force.
+--json prints the full review (including every prompt/command) — treat that
+output like the review surface, not a redacted summary.
 
 Live runs can be steered mid-flight: 'workflow pause <runId>' lets in-flight
 steps finish and schedules nothing new, 'workflow edit-step' rewrites the

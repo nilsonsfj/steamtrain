@@ -297,6 +297,14 @@ steamtrain workflow costs [--workflow <name>] [--json]
 steamtrain workflow create --input "review a PR from three angles then merge findings"
 steamtrain workflow create --input "audit the auth module" --agent claude --model claude-sonnet-4-6 --save
 steamtrain workflow create --input "team release checklist" --name release-check --save --scope project
+
+# Share a workflow (self-describing .steamtrain.json package)
+steamtrain workflow export tour                      # → ./tour.steamtrain.json
+steamtrain workflow export my-flow --stdout          # pipe / copy
+steamtrain workflow import ./tour.steamtrain.json  # validate + security review (prompts/commands)
+steamtrain workflow import ./tour.steamtrain.json --save
+steamtrain workflow import https://example.com/flows/release-check.steamtrain.json --save --scope project
+steamtrain workflow import ./risky.steamtrain.json --save --yes   # required when review finds critical/high
 ```
 
 Global options (TUI and workflow commands):
