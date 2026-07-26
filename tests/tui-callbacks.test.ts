@@ -123,6 +123,31 @@ describe("workflow input form pending", () => {
     });
   });
 
+  it("allows an empty freeform prompt when routing run and plan submits", () => {
+    // Ctrl+R / Ctrl+D must work with no prompt text: declared inputs (or an
+    // empty {{input}}) are enough for the engine.
+    const run = resolveInputFormSubmit(
+      { name: "wf", prompt: "", fresh: true, action: "run" },
+      workerSpec("do {{input}}"),
+      { target: "x" },
+    );
+    expect(run).toEqual({
+      action: "run",
+      name: "wf",
+      prompt: "",
+      fresh: true,
+      params: { target: "x" },
+    });
+
+    const plan = planFromInputFormSubmit(
+      workerSpec("fix {{inputs.target}} · {{input}}"),
+      { name: "test", prompt: "", action: "plan" },
+      { target: "src/foo.ts" },
+    );
+    expect(plan?.ok).toBe(true);
+    expect(plan?.steps[0]?.renderedPrompt).toBe("fix src/foo.ts · ");
+  });
+
   it("returns missing-spec when planning without a workflow spec", () => {
     expect(
       resolveInputFormSubmit({ name: "missing", prompt: "hi", action: "plan" }, undefined, {}),
