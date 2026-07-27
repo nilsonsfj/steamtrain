@@ -14,7 +14,7 @@ import { RUN_RECORD_VERSION } from "../src/workflow/history";
 import { WORKFLOW_HISTORY_DIR } from "../src/workflow/history-store";
 import type { WorkflowSpec } from "../src/workflow/types";
 
-const doctorSpies: Array<ReturnType<typeof vi.spyOn>> = [];
+const doctorSpies: Array<{ mockRestore(): void }> = [];
 
 afterEach(() => {
   while (doctorSpies.length) doctorSpies.pop()?.mockRestore();
