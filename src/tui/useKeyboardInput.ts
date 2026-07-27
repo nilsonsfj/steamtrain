@@ -1,14 +1,17 @@
 import { type Key, useApp, useInput } from "ink";
 import { useCallback, useRef } from "react";
 import { isSlashCommandInput } from "../commands";
-import { ARRIVAL_NEXT_CANDIDATES } from "../workflow";
+import {
+  ARRIVAL_NEXT_CANDIDATES,
+  buildHistoryBrowserEntries,
+  recordHasRetryCandidates,
+} from "../workflow";
 import type { Mode } from "./modes";
 import { nextMode } from "./modes";
 import { shouldPromptHistoryCaptureDown, shouldPromptHistoryCaptureUp } from "./prompt-history";
 import { shouldDismissSuggestionMenu, shouldSuppressWorkflowNavigation } from "./slash-completion";
 import { shouldAcceptTextInput } from "./text-input-filter";
 
-import { buildHistoryBrowserEntries } from "../workflow";
 import type { useHistory } from "./useHistory";
 import { applyHistoryQuery, applyHistoryStatusCycle } from "./useHistory";
 // Import hooks to use their ReturnType
@@ -283,7 +286,7 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
             !hist.detail &&
             input === "f" &&
             hist.record &&
-            (hist.record.totals?.failed ?? 0) > 0
+            recordHasRetryCandidates(hist.record)
           ) {
             historyHook.rerunFromRecord(hist.record, "retry-failed");
             return;
@@ -292,7 +295,7 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
             !hist.detail &&
             input === "t" &&
             hist.record &&
-            (hist.record.totals?.failed ?? 0) > 0
+            recordHasRetryCandidates(hist.record)
           ) {
             cur.openRetryRetarget();
             return;

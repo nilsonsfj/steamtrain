@@ -76,6 +76,7 @@ import {
   isTerminalLiveRunStatus,
   planHistoryContext,
   planWorkflow,
+  recordHasRetryCandidates,
   shouldOfferStationLanding,
   totalTokens,
   workflowCacheKey,
@@ -896,9 +897,9 @@ export function App({
     orchestrator,
   });
 
-  const [retryRetargetRecord, setRetryRetargetRecord] = useState<import("../workflow").RunRecord | null>(
-    null,
-  );
+  const [retryRetargetRecord, setRetryRetargetRecord] = useState<
+    import("../workflow").RunRecord | null
+  >(null);
   // ── Live-run slash-command bridges (/attach, /cancel-run) ────────────
   // Feedback goes through the workflow notice line: transcript notices only
   // render in workspace mode, and these commands live in workflow mode.
@@ -2093,7 +2094,9 @@ function historyHintText(history: HistoryUiState): string {
   if (history.view === "detail") {
     if (history.detail) return "↑/↓ step · PgUp/PgDn scroll · ←/Esc back · Ctrl+C quit";
     const retryHint =
-      (history.record?.totals?.failed ?? 0) > 0 ? " · f retry failed · t retarget" : "";
+      history.record && recordHasRetryCandidates(history.record)
+        ? " · f retry failed · t retarget"
+        : "";
     const hasWorktrees = history.record?.phases.some((phase) =>
       phase.steps.some((step) => step.worktree),
     );

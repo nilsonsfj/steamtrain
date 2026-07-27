@@ -30,6 +30,7 @@ import {
   type WorkflowSpec,
   acquireRunSlot,
   aggregateLeavesByModel,
+  applyRetryStepFilter,
   applyWorkflowStepOverrides,
   classifyRun,
   createLiveRunPublisher,
@@ -56,7 +57,6 @@ import {
   newLiveRunMeta,
   notifyWorkflowEvent,
   persistWorkflowStepDone,
-  applyRetryStepFilter,
   planRerun,
   planTakeover,
   recordTakeover,
@@ -264,7 +264,9 @@ export async function runWorkflowCommand(
     return 1;
   }
   if (wantsRetryNarrow && !options.retryFailed) {
-    err("--retarget-agent / --retarget-model / --step only apply with --from <runId> --retry-failed\n");
+    err(
+      "--retarget-agent / --retarget-model / --step only apply with --from <runId> --retry-failed\n",
+    );
     return 1;
   }
   if (options.retargetModel && !options.retargetAgent) {
@@ -392,8 +394,7 @@ export async function runWorkflowCommand(
       return 1;
     }
     spec = applyWorkflowStepOverrides(spec, retarget.overrides);
-    const steps =
-      retarget.stepIds.length === 1 ? "1 step" : `${retarget.stepIds.length} steps`;
+    const steps = retarget.stepIds.length === 1 ? "1 step" : `${retarget.stepIds.length} steps`;
     (options.json ? err : out)(
       `retarget ${steps} → ${options.retargetAgent}/${retarget.targetModel} — this run only\n`,
     );

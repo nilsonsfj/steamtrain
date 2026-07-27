@@ -131,9 +131,7 @@ export function RetryRetargetOverlay({
       ) : null}
       {stage === "model" && agent ? (
         <Box flexDirection="column">
-          <Text dimColor>
-            agent {agent.id} · ↑/↓ model · Enter · Esc cancel
-          </Text>
+          <Text dimColor>agent {agent.id} · ↑/↓ model · Enter · Esc cancel</Text>
           {models.map((m, i) => (
             <Text key={m.id || "default"} color={i === modelIndex ? "cyan" : undefined}>
               {i === modelIndex ? "› " : "  "}
@@ -144,9 +142,7 @@ export function RetryRetargetOverlay({
       ) : null}
       {stage === "steps" ? (
         <Box flexDirection="column">
-          <Text dimColor>
-            Space toggle · empty = all failed · Enter · Esc cancel
-          </Text>
+          <Text dimColor>Space toggle · empty = all failed · Enter · Esc cancel</Text>
           {candidates.map((s, i) => {
             const on = selectedSteps.has(s.stepId);
             return (

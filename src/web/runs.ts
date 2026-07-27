@@ -368,14 +368,7 @@ export class WorkflowRunManager {
       if (retarget?.retargetAgent) {
         const planFn =
           this.host.planWorkflowRetryRetarget ??
-          ((spec, rec, options) =>
-            planRetryRetarget(
-              spec,
-              rec,
-              this.config,
-              () => true,
-              options,
-            ));
+          ((spec, rec, options) => planRetryRetarget(spec, rec, this.config, () => true, options));
         const planned = planFn(baseSpec, record, {
           agent: retarget.retargetAgent,
           model: retarget.retargetModel,

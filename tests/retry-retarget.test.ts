@@ -9,6 +9,7 @@ import {
   applyRetryStepFilter,
   listRetryCandidateSteps,
   planRetryRetarget,
+  recordHasRetryCandidates,
 } from "../src/workflow/retry-retarget";
 import type { WorkflowSpec } from "../src/workflow/types";
 
@@ -140,6 +141,18 @@ describe("listRetryCandidateSteps", () => {
   it("lists non-done steps from the record", () => {
     const ids = listRetryCandidateSteps(failedRecord()).map((s) => s.stepId);
     expect(ids).toEqual(["cross-check", "gate1"]);
+  });
+
+  it("recordHasRetryCandidates is true when any step is not done", () => {
+    expect(recordHasRetryCandidates(failedRecord())).toBe(true);
+    const allDone = failedRecord();
+    for (const phase of allDone.phases) {
+      for (const step of phase.steps) {
+        step.status = "done";
+        step.result = { stepId: step.stepId, ok: true, output: "ok", durationMs: 1 };
+      }
+    }
+    expect(recordHasRetryCandidates(allDone)).toBe(false);
   });
 });
 

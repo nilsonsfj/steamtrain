@@ -1816,12 +1816,11 @@
       });
     });
     var readyAgents = (S.agents || []).filter(function (a) { return a.healthy !== false; });
-    if (!readyAgents.length) readyAgents = S.agents || [];
     var agentOpts = readyAgents.map(function (a) {
-      return { value: a.id, label: a.id + (a.healthy === false ? " (unhealthy)" : "") };
+      return { value: a.id, label: a.id };
     });
     if (!agentOpts.length) {
-      setBanner("No agents available to retarget onto", "err");
+      setBanner("No ready agents available to retarget onto", "err");
       return;
     }
     var agentSel = selectEl(agentOpts, agentOpts[0].value);
@@ -5293,7 +5292,12 @@
       holder.appendChild(hmt);
     }
 
-    var canRetry = record.totals && record.totals.failed > 0;
+    var canRetry = false;
+    (record.phases || []).forEach(function (p) {
+      (p.steps || []).forEach(function (s) {
+        if (s.status && s.status !== "done") canRetry = true;
+      });
+    });
     var actions = h("div", { class: "run-actions hist-actions" });
     if (!isReadOnly()) {
       actions.appendChild(h("button", { class: "btn primary", text: "Re-run",

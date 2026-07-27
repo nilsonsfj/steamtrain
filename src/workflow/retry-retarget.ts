@@ -9,8 +9,8 @@ import type { SteamtrainConfig } from "../config";
 import type { AgentInstanceId } from "../types/events";
 import type { HistoryStep, RunRecord } from "./history";
 import type { WorkflowStepOverrides } from "./overrides";
+import { isAgentBackedStep } from "./step-kind";
 import type { StepResult, WorkflowSpec } from "./types";
-import { isAgentBackedStep } from "./types";
 
 export interface RetryRetargetOptions {
   /** Agent every eligible failed/not-run agent step is forced onto. */
@@ -34,6 +34,11 @@ export function listRetryCandidateSteps(record: RunRecord): HistoryStep[] {
     }
   }
   return out;
+}
+
+/** True when a history record has at least one non-done step worth retrying. */
+export function recordHasRetryCandidates(record: RunRecord): boolean {
+  return listRetryCandidateSteps(record).length > 0;
 }
 
 /**
@@ -146,12 +151,7 @@ export function planRetryRetarget(
       overrides[step.id] = {
         agent,
         model,
-        effort: effortForModelChange(
-          agent,
-          model,
-          step.effort ?? remapped.primary.effort,
-          config,
-        ),
+        effort: effortForModelChange(agent, model, step.effort ?? remapped.primary.effort, config),
       };
       continue;
     }
@@ -171,6 +171,8 @@ export function planRetryRetarget(
 }
 
 function syntheticSkippedResult(stepId: string): StepResult {
+  // ok:true + skipped:true matches engine skip semantics: treat as settled so
+  // dependents can proceed without re-launching this step.
   return {
     stepId,
     ok: true,
