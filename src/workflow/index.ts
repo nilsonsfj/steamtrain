@@ -536,6 +536,7 @@ export {
   listRetryCandidateSteps,
   planRetryRetarget,
   recordHasRetryCandidates,
+  validateRetryStepIds,
 } from "./retry-retarget";
 export {
   type StepStatus,

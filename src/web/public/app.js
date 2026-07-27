@@ -1815,7 +1815,12 @@
         if (s.status && s.status !== "done") failed.push(s);
       });
     });
-    var readyAgents = (S.agents || []).filter(function (a) { return a.healthy !== false; });
+    // Ready when doctor has no row yet (unknown) or status is ok — same rule as
+    // the TUI RetryRetargetOverlay.
+    var readyAgents = (S.agents || []).filter(function (a) {
+      var health = (S.doctor || []).find(function (d) { return d.agent === a.id; });
+      return !health || health.status === "ok";
+    });
     var agentOpts = readyAgents.map(function (a) {
       return { value: a.id, label: a.id };
     });

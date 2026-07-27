@@ -57,12 +57,7 @@ export function applyRetryStepFilter(
 ): Map<string, StepResult> {
   if (!stepIds || stepIds.length === 0) return new Map(seed);
 
-  const known = knownStepIds(record, spec);
-  for (const id of stepIds) {
-    if (!known.has(id)) {
-      throw new Error(`unknown step '${id}'`);
-    }
-  }
+  validateRetryStepIds(record, stepIds, spec);
 
   const selected = new Set(stepIds);
   const next = new Map(seed);
@@ -72,6 +67,24 @@ export function applyRetryStepFilter(
     next.set(step.stepId, syntheticSkippedResult(step.stepId));
   }
   return next;
+}
+
+/**
+ * Throw when any id is unknown to the record (and optional workflow spec).
+ * Shared by {@link applyRetryStepFilter} and {@link planRetryRetarget} so
+ * validation does not need to allocate a synthetic seed map.
+ */
+export function validateRetryStepIds(
+  record: RunRecord,
+  stepIds: string[],
+  spec?: WorkflowSpec,
+): void {
+  const known = knownStepIds(record, spec);
+  for (const id of stepIds) {
+    if (!known.has(id)) {
+      throw new Error(`unknown step '${id}'`);
+    }
+  }
 }
 
 /**
@@ -99,7 +112,7 @@ export function planRetryRetarget(
 
   if (options.stepIds && options.stepIds.length > 0) {
     try {
-      applyRetryStepFilter(record, new Map(), options.stepIds, spec);
+      validateRetryStepIds(record, options.stepIds, spec);
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }

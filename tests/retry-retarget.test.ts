@@ -281,4 +281,59 @@ describe("planRetryRetarget", () => {
     if (result.ok) return;
     expect(result.error).toMatch(/no agent-backed failed steps to retarget onto 'claude'/i);
   });
+
+  it("errors when --step narrows to only non-agent-backed candidates", () => {
+    const result = planRetryRetarget(spec, failedRecord(), DEFAULT_CONFIG, ready(["claude"]), {
+      agent: "claude",
+      stepIds: ["gate1"],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/no agent-backed failed steps to retarget onto 'claude'/i);
+  });
+
+  it("remaps the step model family onto the retarget agent when model is omitted", () => {
+    const opusSpec: WorkflowSpec = {
+      name: "demo",
+      phases: [
+        {
+          id: "scan",
+          title: "Scan",
+          steps: [
+            {
+              id: "scan-a",
+              kind: "worker",
+              agent: "kiro",
+              model: "claude-opus-4.8",
+              prompt: "a",
+            },
+          ],
+        },
+      ],
+    };
+    const failed = record({
+      phases: [
+        phase([
+          histStep({
+            stepId: "scan-a",
+            agent: "kiro",
+            model: "claude-opus-4.8",
+            status: "error",
+            result: { stepId: "scan-a", ok: false, output: "x", error: "x", durationMs: 1 },
+          }),
+        ]),
+      ],
+    });
+    const result = planRetryRetarget(opusSpec, failed, DEFAULT_CONFIG, ready(["claude"]), {
+      agent: "claude",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Family remap yields claude's native opus id — not the agent default (sonnet-5).
+    expect(result.overrides["scan-a"]).toMatchObject({
+      agent: "claude",
+      model: "claude-opus-4-8",
+    });
+    expect(result.targetModel).toBe("claude-sonnet-5");
+  });
 });
