@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { Orchestrator } from "../orchestrator";
 import type {
   HistoryStatusFilter,
   LiveRunMeta,
@@ -7,9 +8,12 @@ import type {
   RunRecord,
   RunRecordSummary,
   StepResult,
+  WorkflowSpec,
 } from "../workflow";
 import {
   MergeConflictError,
+  applyRetryStepFilter,
+  applyWorkflowStepOverrides,
   buildHistoryBrowserEntries,
   createWorkflowHistoryStore,
   finalRunWorktrees,
@@ -62,6 +66,12 @@ export interface HistoryDiffViewState {
   scroll: number;
 }
 
+export interface RetryRetargetLaunch {
+  agent: string;
+  model?: string;
+  stepIds?: string[];
+}
+
 export interface UseHistoryParams {
   historyStoreRef: React.RefObject<ReturnType<typeof createWorkflowHistoryStore>>;
   /** Live-run registry, for the in-flight section of the browser. */
@@ -76,11 +86,14 @@ export interface UseHistoryParams {
       fresh?: boolean;
       seed?: Map<string, StepResult>;
       params?: Record<string, string | number | boolean>;
+      specOverride?: WorkflowSpec;
     },
   ) => boolean;
   setWfNotice: (notice: string | null) => void;
   /** Absolute project directory (honors `--project-dir`). */
   cwd: string;
+  /** Orchestrator used to plan retry retargets (agent readiness + model remap). */
+  orchestrator: Orchestrator;
 }
 
 export interface UseHistoryReturn {
@@ -88,7 +101,7 @@ export interface UseHistoryReturn {
   setHistory: React.Dispatch<React.SetStateAction<HistoryUiState | null>>;
   openHistory: () => { handled: true; clearInput: true };
   openHistoryRecord: (id: string) => void;
-  rerunFromRecord: (record: RunRecord, mode: RerunMode) => void;
+  rerunFromRecord: (record: RunRecord, mode: RerunMode, retarget?: RetryRetargetLaunch) => void;
   /**
    * Post-run worktree lifecycle from the history detail view: `apply` merges
    * the run's worktrees into the checkout (uncommitted); `prune` discards
@@ -130,6 +143,7 @@ export function useHistory({
   runWorkflow,
   setWfNotice,
   cwd,
+  orchestrator,
 }: UseHistoryParams): UseHistoryReturn {
   const [history, setHistory] = useState<HistoryUiState | null>(null);
 
@@ -225,27 +239,64 @@ export function useHistory({
   );
 
   const rerunFromRecord = useCallback(
-    (record: RunRecord, mode: RerunMode) => {
-      const plan = planRerun(record, mode, resolveWorkflowSpec(record.workflow), {
-        cwd,
-      });
+    (record: RunRecord, mode: RerunMode, retarget?: RetryRetargetLaunch) => {
+      const baseSpec = resolveWorkflowSpec(record.workflow);
+      const plan = planRerun(record, mode, baseSpec, { cwd });
       if (isRerunError(plan)) {
         setWfNotice(plan.error);
+        return;
+      }
+      const wantsRetarget = Boolean(retarget?.agent);
+      const wantsStepFilter = Boolean(retarget?.stepIds?.length);
+      if (plan.downgraded && (wantsRetarget || wantsStepFilter)) {
+        setWfNotice(
+          `cannot retarget/narrow retry: ${rerunDowngradeMessage(plan.downgraded)} — use /set-all or Ctrl+E instead`,
+        );
         return;
       }
       if (plan.downgraded) {
         setWfNotice(rerunDowngradeMessage(plan.downgraded));
       }
+
+      let seed = plan.seedCache;
+      let specOverride: WorkflowSpec | undefined;
+      if (!plan.downgraded && mode === "retry-failed" && baseSpec) {
+        if (wantsStepFilter) {
+          try {
+            seed = applyRetryStepFilter(record, seed, retarget!.stepIds, baseSpec);
+          } catch (err) {
+            setWfNotice(message(err));
+            return;
+          }
+        }
+        if (wantsRetarget) {
+          const planned = orchestrator.planWorkflowRetryRetarget(baseSpec, record, {
+            agent: retarget!.agent,
+            model: retarget!.model,
+            stepIds: wantsStepFilter ? retarget!.stepIds : undefined,
+          });
+          if (!planned.ok) {
+            setWfNotice(planned.error);
+            return;
+          }
+          specOverride = applyWorkflowStepOverrides(baseSpec, planned.overrides);
+          setWfNotice(
+            `retarget ${planned.stepIds.length} step(s) → ${retarget!.agent}/${planned.targetModel}`,
+          );
+        }
+      }
+
       const started = runWorkflow(plan.workflow, plan.input, {
         fresh: mode === "rerun" || Boolean(plan.downgraded),
-        seed: plan.seedCache,
+        seed,
         params: plan.params,
+        specOverride,
       });
       // Only leave the history browser once the run actually launched; a
       // refused launch (re-entrancy guard, unknown workflow) keeps the view.
       if (started) setHistory(null);
     },
-    [resolveWorkflowSpec, runWorkflow, setWfNotice, cwd],
+    [resolveWorkflowSpec, runWorkflow, setWfNotice, cwd, orchestrator],
   );
 
   // Prune / delete require a second press on the same record within a few seconds.

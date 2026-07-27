@@ -14,8 +14,10 @@ import {
   type NotifyConfig,
   type PlanRerouteOptions,
   type PlanRerouteResult,
+  type PlanRetryRetargetResult,
   type RerunMode,
   type RerunPlan,
+  type RetryRetargetOptions,
   type RunRecord,
   RunRecordBuilder,
   type RunRecordStatus,
@@ -28,6 +30,8 @@ import {
   type WorkflowRunControl,
   type WorkflowSpec,
   acquireRunSlot,
+  applyRetryStepFilter,
+  applyWorkflowStepOverrides,
   completeHandoff,
   createLiveRunPublisher,
   createNotifier,
@@ -39,6 +43,7 @@ import {
   notifyWorkflowEvent,
   persistWorkflowStepDone,
   planRerun,
+  planRetryRetarget,
   resolveMaxParallelRuns,
   resolveWorkflowTimeoutSec,
   timeoutMsFromSec,
@@ -61,6 +66,12 @@ export interface WorkflowHost {
   canDispatchWorkflowSpec(spec: WorkflowSpec): { ok: true } | { ok: false; reason: string };
   /** Plan a per-run re-route of blocked agent steps onto a ready agent (see Orchestrator). */
   planWorkflowReroute?(spec: WorkflowSpec, options?: PlanRerouteOptions): PlanRerouteResult;
+  /** Plan a retry-failed retarget onto a ready agent (see Orchestrator). */
+  planWorkflowRetryRetarget?(
+    spec: WorkflowSpec,
+    record: RunRecord,
+    options: RetryRetargetOptions,
+  ): PlanRetryRetargetResult;
   runWorkflow(
     name: string,
     input: string,
@@ -73,6 +84,13 @@ export interface WorkflowHost {
     control?: WorkflowRunControl,
     humanInput?: HumanInputProvider,
   ): AsyncIterable<WorkflowEvent>;
+}
+
+/** Optional body for POST /api/history/:id/retry. */
+export interface RetryRetargetRequest {
+  retargetAgent?: string;
+  retargetModel?: string;
+  steps?: string[];
 }
 
 export type RunStatus = "running" | "done" | "error" | "canceled" | "budget-exceeded";
@@ -309,19 +327,63 @@ export class WorkflowRunManager {
   /**
    * Launch a re-run / retry-failed of a saved record. The plan (workflow,
    * input, seed cache, drift downgrade) is resolved here so the route stays
-   * thin; a drift-downgraded retry falls back to a full re-run.
+   * thin; a drift-downgraded retry falls back to a full re-run unless a
+   * retarget/step filter is requested (those refuse on downgrade).
    */
   rerunFromRecord(
     record: RunRecord,
     mode: RerunMode,
+    retarget?: RetryRetargetRequest,
   ): StartRunResult & { downgraded?: RerunPlan["downgraded"] } {
-    const spec = this.host.listWorkflows()[record.workflow];
-    const plan = planRerun(record, mode, spec, { cwd: this.cwd });
+    const baseSpec = this.host.listWorkflows()[record.workflow];
+    const plan = planRerun(record, mode, baseSpec, { cwd: this.cwd });
     if (isRerunError(plan)) return { ok: false, error: plan.error };
+
+    const wantsRetarget = Boolean(retarget?.retargetAgent || retarget?.retargetModel);
+    const stepIds = retarget?.steps?.filter((s) => typeof s === "string" && s.length > 0);
+    const wantsStepFilter = Boolean(stepIds && stepIds.length > 0);
+    if ((wantsRetarget || wantsStepFilter) && mode !== "retry-failed") {
+      return { ok: false, error: "retarget/step filter only applies to retry-failed" };
+    }
+    if (retarget?.retargetModel && !retarget.retargetAgent) {
+      return { ok: false, error: "retargetModel requires retargetAgent" };
+    }
+    if (plan.downgraded && (wantsRetarget || wantsStepFilter)) {
+      return {
+        ok: false,
+        error: `cannot retarget/narrow retry: ${plan.downgraded} — use a normal run with Configure instead`,
+      };
+    }
+
+    let seed = plan.seedCache;
+    let specOverride: WorkflowSpec | undefined;
+    if (!plan.downgraded && mode === "retry-failed" && baseSpec) {
+      if (wantsStepFilter) {
+        try {
+          seed = applyRetryStepFilter(record, seed, stepIds, baseSpec);
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        }
+      }
+      if (retarget?.retargetAgent) {
+        const planFn =
+          this.host.planWorkflowRetryRetarget ??
+          ((spec, rec, options) => planRetryRetarget(spec, rec, this.config, () => true, options));
+        const planned = planFn(baseSpec, record, {
+          agent: retarget.retargetAgent,
+          model: retarget.retargetModel,
+          stepIds: wantsStepFilter ? stepIds : undefined,
+        });
+        if (!planned.ok) return { ok: false, error: planned.error };
+        specOverride = applyWorkflowStepOverrides(baseSpec, planned.overrides);
+      }
+    }
+
     const started = this.start(plan.workflow, plan.input, {
       fresh: mode === "rerun" || Boolean(plan.downgraded),
-      seed: plan.seedCache,
+      seed,
       params: plan.params,
+      specOverride,
     });
     return started.ok ? { ...started, downgraded: plan.downgraded } : started;
   }

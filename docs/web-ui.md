@@ -127,11 +127,14 @@ past runs; click a run to replay its pipeline — the phase → step tree, each 
 output, metrics, and the run summary — rendered with the same components a live
 run uses. "Clear all" removes the on-disk records.
 
-From a run's detail view you can **Re-run** it (same workflow + input, fresh) or
-**Retry failed** (replay the steps that succeeded and re-execute only the failed
-or not-run ones). Retry seeds the already-succeeded steps from the record itself,
-so it works even if the on-disk cache is gone; if the workflow definition changed
-since the run, retry safely falls back to a full re-run (the UI notes this).
+From a run's detail view you can **Re-run** it (same workflow + input, fresh),
+**Retry failed** (replay succeeded steps and re-execute only failures), or
+**Retry with agent…** (same as retry-failed, but force failed agent steps onto a
+chosen agent/model, optionally narrowed to specific steps). Retry seeds
+already-succeeded steps from the record itself, so it works even if the on-disk
+cache is gone; if the workflow definition changed since the run, a plain retry
+safely falls back to a full re-run (the UI notes this). Retarget / step filters
+refuse that downgrade instead of silently applying to a full re-run.
 
 ## Scope & security
 

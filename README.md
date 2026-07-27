@@ -162,7 +162,8 @@ Each run (TUI, web UI, or CLI) is saved to `.steamtrain/history/` as one JSON
 record — the full phase → step tree with status, output, duration, cost, and
 gate results. Re-running **resumes** from an on-disk cache instead of paying for
 completed steps again. Re-run any past run fresh (`run --from <id>`), or replay
-only what failed (`--retry-failed`).
+only what failed (`--retry-failed`). To retry failed steps on a different
+agent/model, use `--retarget-agent` (TUI: `t`; Web: **Retry with agent…**).
 
 ### Stay in control of unattended runs
 
@@ -289,6 +290,7 @@ steamtrain workflow history clear [<id>]       # delete one run, or all of them
 # Act on a past run (workflow + input come from the record)
 steamtrain workflow run --from <runId>                 # re-run it fresh
 steamtrain workflow run --from <runId> --retry-failed  # re-run only failed/not-run steps
+steamtrain workflow run --from <runId> --retry-failed --retarget-agent claude [--retarget-model <id>] [--step <id>]
 
 # Cost analytics across history
 steamtrain workflow costs [--workflow <name>] [--json]

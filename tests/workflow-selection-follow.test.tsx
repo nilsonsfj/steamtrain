@@ -91,10 +91,12 @@ function SelectionFollowHarness({ onRunner }: { onRunner: (runner: Runner) => vo
     answerInputOpen: false,
     inputFormPending: false,
     helpOpen: false,
+    retryRetargetOpen: false,
     closeHelp: () => {},
     openAgentManager: () => {},
     openRunStepEditor: () => {},
     openAnswerInput: () => {},
+    openRetryRetarget: () => {},
     focusCreateWorkflowPrompt: () => {},
     switchMode: () => {},
   });

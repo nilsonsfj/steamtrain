@@ -10,12 +10,15 @@ import type { DoctorResult } from "../doctor";
 import type { AgentEvent, AgentInstanceId } from "../types/events";
 import {
   type LoadedWorkflowCatalog,
+  type PlanRetryRetargetResult,
+  type RetryRetargetOptions,
   type StepResult,
   type WorkflowEvent,
   type WorkflowSourceKind,
   type WorkflowSpec,
   createGitWorktreeManager,
   planAgentReroute,
+  planRetryRetarget,
   resolveStepTimeoutSec,
   resolveWorkflowBindings,
   resolveWorkflowTimeoutSec,
@@ -26,6 +29,7 @@ import {
   workflowPermissionPreflight,
 } from "../workflow";
 import type { PlanRerouteOptions, PlanRerouteResult } from "../workflow";
+import type { RunRecord } from "../workflow";
 import type { ApprovalProvider, HumanInputProvider, WorkflowRunControl } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 import { workspaceById } from "../workspace";
@@ -251,6 +255,24 @@ export class Orchestrator {
   planWorkflowReroute(spec: WorkflowSpec, options?: PlanRerouteOptions): PlanRerouteResult {
     return planAgentReroute(
       spec,
+      this.config,
+      (agent) => this.agentHealth(agent)?.status === "ok",
+      options,
+    );
+  }
+
+  /**
+   * Plan a retry-failed retarget: force failed/not-run agent steps onto a
+   * chosen ready agent (see {@link planRetryRetarget}).
+   */
+  planWorkflowRetryRetarget(
+    spec: WorkflowSpec,
+    record: RunRecord,
+    options: RetryRetargetOptions,
+  ): PlanRetryRetargetResult {
+    return planRetryRetarget(
+      spec,
+      record,
       this.config,
       (agent) => this.agentHealth(agent)?.status === "ok",
       options,

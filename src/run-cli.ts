@@ -30,6 +30,7 @@ import {
   type WorkflowSpec,
   acquireRunSlot,
   aggregateLeavesByModel,
+  applyRetryStepFilter,
   applyWorkflowStepOverrides,
   classifyRun,
   createLiveRunPublisher,
@@ -111,6 +112,15 @@ export interface RunOptions {
   detach: boolean;
   /** `--agent <id>`: re-route steps whose pinned agent is not ready to this agent (this run only). */
   agent?: string;
+  /**
+   * `--retarget-agent <id>`: force failed/not-run agent steps onto this agent
+   * when used with `--from --retry-failed` (even if the original agent is ready).
+   */
+  retargetAgent?: string;
+  /** `--retarget-model <id>`: optional model for `--retarget-agent`. */
+  retargetModel?: string;
+  /** `--step <id>` (repeatable): narrow which failed/not-run steps re-execute on retry-failed. */
+  steps: string[];
   /** `--report json|markdown|junit`: write a machine-readable report when the run settles. */
   report?: ReportFormat;
   /** `--output <file>`: write the `--report` to a file instead of stdout. */
@@ -127,6 +137,7 @@ export function parseRunOptions(args: string[]): RunOptions | null {
     approveAll: false,
     human: {},
     detach: false,
+    steps: [],
   };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -163,6 +174,21 @@ export function parseRunOptions(args: string[]): RunOptions | null {
       const value = args[i + 1];
       if (!value || value.startsWith("-")) return null;
       options.agent = value;
+      i += 1;
+    } else if (arg === "--retarget-agent") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("-")) return null;
+      options.retargetAgent = value;
+      i += 1;
+    } else if (arg === "--retarget-model") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("-")) return null;
+      options.retargetModel = value;
+      i += 1;
+    } else if (arg === "--step") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("-")) return null;
+      options.steps.push(value);
       i += 1;
     } else if (arg === "--human") {
       const value = args[i + 1];
@@ -215,7 +241,7 @@ export async function runWorkflowCommand(
   if (!options) {
     err(
       `usage: steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...] [--report json|markdown|junit [--output <file>]]
-       steamtrain workflow run --from <runId> [--retry-failed] [--json] [--detach]
+       steamtrain workflow run --from <runId> [--retry-failed] [--retarget-agent <id> [--retarget-model <id>]] [--step <id> ...] [--json] [--detach]
 `,
     );
     return 1;
@@ -228,9 +254,27 @@ export async function runWorkflowCommand(
   let input = options.input;
   let seed: Map<string, StepResult> | undefined;
   let forceFresh = options.fresh;
+  let fromRecord: RunRecord | undefined;
+  const wantsRetarget = Boolean(options.retargetAgent || options.retargetModel);
+  const wantsStepFilter = options.steps.length > 0;
+  const wantsRetryNarrow = wantsRetarget || wantsStepFilter;
 
   if (options.retryFailed && !options.from) {
     err("--retry-failed only applies with --from <runId>\n");
+    return 1;
+  }
+  if (wantsRetryNarrow && !options.retryFailed) {
+    err(
+      "--retarget-agent / --retarget-model / --step only apply with --from <runId> --retry-failed\n",
+    );
+    return 1;
+  }
+  if (options.retargetModel && !options.retargetAgent) {
+    err("--retarget-model requires --retarget-agent\n");
+    return 1;
+  }
+  if (options.agent && options.retargetAgent) {
+    err("--agent and --retarget-agent are mutually exclusive\n");
     return 1;
   }
 
@@ -246,6 +290,7 @@ export async function runWorkflowCommand(
       err(`unknown run '${options.from}'\n`);
       return 1;
     }
+    fromRecord = record;
     name = record.workflow;
     const mode: RerunMode = options.retryFailed ? "retry-failed" : "rerun";
     const plan = planRerun(record, mode, orchestrator.listWorkflows()[name], {
@@ -265,11 +310,30 @@ export async function runWorkflowCommand(
       }
     }
     if (plan.downgraded) {
+      if (wantsRetryNarrow) {
+        err(
+          `cannot retarget/narrow retry: ${rerunDowngradeMessage(plan.downgraded)} — use a normal run with /set-all or Ctrl+E instead\n`,
+        );
+        return 1;
+      }
       err(`note: ${rerunDowngradeMessage(plan.downgraded)}\n`);
     }
     // An explicit --fresh forces a clean run and ignores any seed.
     forceFresh = options.fresh || mode === "rerun" || Boolean(plan.downgraded);
     seed = forceFresh ? undefined : plan.seedCache;
+    if (seed && wantsStepFilter) {
+      try {
+        seed = applyRetryStepFilter(
+          record,
+          seed,
+          options.steps,
+          orchestrator.listWorkflows()[name],
+        );
+      } catch (e) {
+        err(`${message(e)}\n`);
+        return 1;
+      }
+    }
   } else {
     input = options.input ?? (options.stdin ? await readAll(io.stdin ?? process.stdin) : undefined);
   }
@@ -308,6 +372,32 @@ export async function runWorkflowCommand(
     const doctor = await runDoctor(config);
     orchestrator.setDoctor(doctor);
     await refreshAgentCatalogCaches(config, doctor);
+  }
+  // --retarget-agent: force failed/not-run agent steps onto a chosen ready
+  // agent for this retry-failed run only (even when the original agent is ready).
+  if (options.retargetAgent) {
+    if (!fromRecord) {
+      err("--retarget-agent requires --from <runId> --retry-failed\n");
+      return 1;
+    }
+    if (!usesAgents) {
+      err(`--retarget-agent: workflow '${name}' has no agent-backed steps to retarget\n`);
+      return 1;
+    }
+    const retarget = orchestrator.planWorkflowRetryRetarget(spec, fromRecord, {
+      agent: options.retargetAgent,
+      model: options.retargetModel,
+      stepIds: wantsStepFilter ? options.steps : undefined,
+    });
+    if (!retarget.ok) {
+      err(`--retarget-agent ${options.retargetAgent}: ${retarget.error}\n`);
+      return 1;
+    }
+    spec = applyWorkflowStepOverrides(spec, retarget.overrides);
+    const steps = retarget.stepIds.length === 1 ? "1 step" : `${retarget.stepIds.length} steps`;
+    (options.json ? err : out)(
+      `retarget ${steps} → ${options.retargetAgent}/${retarget.targetModel} — this run only\n`,
+    );
   }
   // --agent <id>: re-route steps whose pinned agent is not ready onto the
   // requested (ready) agent, for this run only. The workflow on disk is

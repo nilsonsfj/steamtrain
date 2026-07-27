@@ -1,14 +1,17 @@
 import { type Key, useApp, useInput } from "ink";
 import { useCallback, useRef } from "react";
 import { isSlashCommandInput } from "../commands";
-import { ARRIVAL_NEXT_CANDIDATES } from "../workflow";
+import {
+  ARRIVAL_NEXT_CANDIDATES,
+  buildHistoryBrowserEntries,
+  recordHasRetryCandidates,
+} from "../workflow";
 import type { Mode } from "./modes";
 import { nextMode } from "./modes";
 import { shouldPromptHistoryCaptureDown, shouldPromptHistoryCaptureUp } from "./prompt-history";
 import { shouldDismissSuggestionMenu, shouldSuppressWorkflowNavigation } from "./slash-completion";
 import { shouldAcceptTextInput } from "./text-input-filter";
 
-import { buildHistoryBrowserEntries } from "../workflow";
 import type { useHistory } from "./useHistory";
 import { applyHistoryQuery, applyHistoryStatusCycle } from "./useHistory";
 // Import hooks to use their ReturnType
@@ -38,12 +41,16 @@ export interface UseKeyboardInputParams {
   inputFormPending: boolean;
   /** True while the /help overlay owns the keyboard. */
   helpOpen: boolean;
+  /** True while the retry-retarget overlay owns the keyboard. */
+  retryRetargetOpen: boolean;
   closeHelp: () => void;
   openAgentManager: () => void;
   /** Open the mid-run editor for the selected pending step (paused runs). */
   openRunStepEditor: () => void;
   /** Open the answer box for the run's oldest pending human-input request. */
   openAnswerInput: () => void;
+  /** Open the retry-with-agent overlay for the current history record. */
+  openRetryRetarget: () => void;
   focusCreateWorkflowPrompt: (seed: string) => void;
   switchMode: (next: React.SetStateAction<Mode>) => void;
   /** Drop the Station first-run chrome after the user leaves the platform. */
@@ -131,6 +138,8 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
         if (cur.answerInputOpen) return;
         // While the input form is active, its own useInput handler owns keys.
         if (cur.inputFormPending) return;
+        // Retry-retarget overlay (stacked on history) owns keys via its own useInput.
+        if (cur.retryRetargetOpen) return;
         // The /help overlay is read-only: any dismiss key closes it, and it
         // swallows everything else so a stray key can't mutate hidden state.
         if (cur.helpOpen) {
@@ -277,9 +286,18 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
             !hist.detail &&
             input === "f" &&
             hist.record &&
-            (hist.record.totals?.failed ?? 0) > 0
+            recordHasRetryCandidates(hist.record)
           ) {
             historyHook.rerunFromRecord(hist.record, "retry-failed");
+            return;
+          }
+          if (
+            !hist.detail &&
+            input === "t" &&
+            hist.record &&
+            recordHasRetryCandidates(hist.record)
+          ) {
+            cur.openRetryRetarget();
             return;
           }
           if (!hist.detail && input === "d" && hist.record) {

@@ -242,6 +242,8 @@ export function useWorkflowRunner({
         fresh?: boolean;
         seed?: Map<string, StepResult>;
         params?: Record<string, string | number | boolean>;
+        /** Session-only spec (e.g. retry-failed retarget); skips catalog resolve. */
+        specOverride?: WorkflowSpec;
       },
     ): boolean => {
       // Re-entrancy guard: a run is already in flight (its AbortController is
@@ -252,7 +254,7 @@ export function useWorkflowRunner({
         setWfNotice("a run is already in progress");
         return false;
       }
-      const spec = resolveWorkflowSpec(name);
+      const spec = opts?.specOverride ?? resolveWorkflowSpec(name);
       if (!spec) {
         setWfNotice(`unknown workflow '${name}'`);
         return false;
