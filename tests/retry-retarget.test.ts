@@ -280,6 +280,7 @@ describe("planRetryRetarget", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toMatch(/no agent-backed failed steps to retarget onto 'claude'/i);
+    expect(result.error).toMatch(/step 'gate1' is not agent-backed \(kind gate\)/i);
   });
 
   it("errors when --step narrows to only non-agent-backed candidates", () => {
@@ -290,6 +291,7 @@ describe("planRetryRetarget", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toMatch(/no agent-backed failed steps to retarget onto 'claude'/i);
+    expect(result.error).toMatch(/step 'gate1' is not agent-backed \(kind gate\)/i);
   });
 
   it("remaps the step model family onto the retarget agent when model is omitted", () => {

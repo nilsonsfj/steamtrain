@@ -177,6 +177,22 @@ export function planRetryRetarget(
   }
 
   if (stepIds.length === 0) {
+    if (candidates.length > 0) {
+      const reasons = candidates.map((hist) => {
+        const step = findSpecStep(spec, hist.stepId);
+        if (!step) return `'${hist.stepId}' (not in workflow)`;
+        if (!isAgentBackedStep(step)) {
+          const kind = step.kind ?? hist.blockKind ?? "unknown";
+          return `'${hist.stepId}' is not agent-backed (kind ${kind})`;
+        }
+        return `'${hist.stepId}'`;
+      });
+      const detail = reasons.length === 1 ? `step ${reasons[0]}` : `steps ${reasons.join(", ")}`;
+      return {
+        ok: false,
+        error: `no agent-backed failed steps to retarget onto '${target}': ${detail}`,
+      };
+    }
     return { ok: false, error: `no agent-backed failed steps to retarget onto '${target}'` };
   }
 
