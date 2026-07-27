@@ -279,6 +279,6 @@ describe("planRetryRetarget", () => {
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toMatch(/no agent-backed/i);
+    expect(result.error).toMatch(/no agent-backed failed steps to retarget onto 'claude'/i);
   });
 });

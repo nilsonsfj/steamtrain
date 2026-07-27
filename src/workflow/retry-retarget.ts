@@ -164,7 +164,7 @@ export function planRetryRetarget(
   }
 
   if (stepIds.length === 0) {
-    return { ok: false, error: "no agent-backed failed steps to retarget" };
+    return { ok: false, error: `no agent-backed failed steps to retarget onto '${target}'` };
   }
 
   return { ok: true, overrides, stepIds, targetModel };

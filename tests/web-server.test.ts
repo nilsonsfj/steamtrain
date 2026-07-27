@@ -959,6 +959,62 @@ describe("web server", () => {
     expect(body.downgraded).toBe("spec-changed");
   });
 
+  it("rejects invalid retarget JSON bodies on POST /api/history/:id/retry", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const historyStore = createWorkflowHistoryStore(
+      mkdtempSync(join(tmpdir(), "steamtrain-web-retry-body-")),
+    );
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      historyStore,
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const server = createWebServer({
+      host,
+      runs,
+      history: historyStore,
+      workflowSource: () => "bundled",
+    });
+    servers.push(server);
+    const base = await start(server);
+
+    const builder = new RunRecordBuilder({
+      id: "body-run",
+      workflow: "demo",
+      input: "world",
+      cwd: tmpdir(),
+      specHash: "x",
+    });
+    for await (const ev of happyRun("world")) builder.handle(ev);
+    await historyStore.save(builder.build({ status: "error" }));
+
+    const cases: Array<{ body: unknown; error: string }> = [
+      { body: { retargetAgent: 1 }, error: "retargetAgent must be a string" },
+      { body: { retargetModel: true }, error: "retargetModel must be a string" },
+      { body: { steps: "fail-step" }, error: "steps must be an array of strings" },
+      { body: { steps: [1] }, error: "steps must be an array of strings" },
+      { body: ["not-an-object"], error: "body must be a JSON object" },
+    ];
+    for (const c of cases) {
+      const res = await fetch(`${base}/api/history/body-run/retry`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(c.body),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toContain(c.error);
+    }
+
+    const malformed = await fetch(`${base}/api/history/body-run/retry`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{not-json",
+    });
+    expect(malformed.status).toBe(400);
+  });
+
   it("rejects runs when concurrent limit is exceeded", async () => {
     const host = new FakeHost(demoSpec(), hangingRun);
     const runs = new WorkflowRunManager({
