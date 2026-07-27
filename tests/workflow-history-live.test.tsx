@@ -153,6 +153,32 @@ describe("HistoryDetailBanner", () => {
             tokens: emptyTokens(),
             durationMs: 10_000,
           },
+          phases: [
+            {
+              phaseId: "p1",
+              title: "P1",
+              index: 0,
+              stepCount: 1,
+              done: true,
+              ok: false,
+              steps: [
+                {
+                  stepId: "scan",
+                  blockKind: "worker",
+                  status: "error",
+                  text: "boom",
+                  cached: false,
+                  result: {
+                    stepId: "scan",
+                    ok: false,
+                    output: "boom",
+                    error: "boom",
+                    durationMs: 1,
+                  },
+                },
+              ],
+            },
+          ],
         })}
       />,
     );
