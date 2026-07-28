@@ -26,28 +26,46 @@
  */
 export const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="7" fill="#0e1116"/><path d="M6.5 22.5h18.2c1 0 1.8-.7 1.8-1.7V14.2c0-1.1-.9-2-2-2h-9.1L13.2 9.5H8.4c-.9 0-1.6.7-1.6 1.6v11.4z" fill="#1c6f68"/><path d="M8.5 13.2h4.2l1.4 2.2H24c.5 0 .8.3.8.8v5.6c0 .3-.2.5-.5.5H8.5v-9.1z" fill="#34d3c4"/><rect x="9.7" y="14.5" width="2.5" height="1.9" rx=".3" fill="#0e1116" opacity=".55"/><path d="M18.2 10.6c0-1.1.5-2.1.9-2.7.1-.2.5-.1.5.2 0 .7-.1 1.3-.1 2 0 .3.2.5.5.4.8-.4 1.4-1.2 1.6-2 .1-.2.4-.2.4 0 .1 1-.5 2.2-1.4 2.9-.4.3-.9.5-1.5.5h-.9v-1.3z" fill="#8eeae0"/><circle cx="11.6" cy="23.8" r="2.4" fill="#0e1116" stroke="#34d3c4" stroke-width="1.2"/><circle cx="11.6" cy="23.8" r=".85" fill="#34d3c4"/><circle cx="20.4" cy="23.8" r="2.4" fill="#0e1116" stroke="#34d3c4" stroke-width="1.2"/><circle cx="20.4" cy="23.8" r=".85" fill="#34d3c4"/><path d="M6.5 22.5h19" stroke="#d29922" stroke-width="1" stroke-linecap="round" opacity=".75"/></svg>`;
 
-export interface PageAssetRevisions {
-  /** Hash of `src/web/public/steamtrain-reducer.bundle.js`. */
-  bundle: string;
-  /** Hash of `src/web/public/steamtrain-diff.bundle.js`. */
-  diff: string;
-  /** Hash of `src/web/public/app.js`. */
-  appJs: string;
-  /** Hash of `src/web/public/app.css`. */
-  appCss: string;
+export interface WebAsset {
+  /** Filename inside `src/web/public/`, also its `/static/<file>` URL. */
+  file: string;
+  kind: "css" | "js";
+  mime: string;
 }
 
 /**
+ * Every static asset the page loads, in load order. Stylesheets are emitted as
+ * `<link>` in `<head>`; scripts as `<script defer>` at the end of `<body>`,
+ * which is what guarantees execution order for the client modules (they share a
+ * `window.Steamtrain` namespace and have no module loader).
+ *
+ * `src/web/server.ts` builds its `/static/*` route table from this same list,
+ * so adding a file here is the only step needed to ship it.
+ */
+export const WEB_ASSETS: readonly WebAsset[] = [
+  { file: "app.css", kind: "css", mime: "text/css; charset=utf-8" },
+  { file: "steamtrain-reducer.bundle.js", kind: "js", mime: "text/javascript; charset=utf-8" },
+  { file: "steamtrain-diff.bundle.js", kind: "js", mime: "text/javascript; charset=utf-8" },
+  { file: "app.js", kind: "js", mime: "text/javascript; charset=utf-8" },
+];
+
+/** Content-hash revision per asset filename, e.g. `{ "app.css": "a1b2…" }`. */
+export type PageAssetRevisions = Record<string, string>;
+
+/**
  * Render the steamtrain SPA HTML page. The returned document references the
- * external stylesheet and the three external scripts (reducer bundle, diff-view
- * bundle, then the client code) using content-hashed URLs so intermediate
- * caches and browsers revalidate correctly across releases.
+ * external stylesheet(s) and script(s) listed in {@link WEB_ASSETS}, in
+ * manifest order, using content-hashed URLs so intermediate caches and
+ * browsers revalidate correctly across releases.
  */
 export function renderIndex(revs: PageAssetRevisions): string {
-  const cssHref = `/static/app.css?v=${revs.appCss}`;
-  const bundleSrc = `/static/steamtrain-reducer.bundle.js?v=${revs.bundle}`;
-  const diffSrc = `/static/steamtrain-diff.bundle.js?v=${revs.diff}`;
-  const appSrc = `/static/app.js?v=${revs.appJs}`;
+  const url = (file: string) => `/static/${file}?v=${revs[file] ?? ""}`;
+  const styles = WEB_ASSETS.filter((a) => a.kind === "css")
+    .map((a) => `<link rel="stylesheet" href="${url(a.file)}" />`)
+    .join("\n");
+  const scripts = WEB_ASSETS.filter((a) => a.kind === "js")
+    .map((a) => `<script src="${url(a.file)}" defer></script>`)
+    .join("\n");
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -59,8 +77,8 @@ export function renderIndex(revs: PageAssetRevisions): string {
 <link rel="icon" href="data:image/svg+xml,${encodeURIComponent(FAVICON_SVG)}" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" />
-<link rel="stylesheet" href="${cssHref}" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" />
+${styles}
 </head>
 <body>
 <header>
@@ -145,9 +163,7 @@ export function renderIndex(revs: PageAssetRevisions): string {
 <aside class="drawer" id="drawer" role="dialog" aria-label="Step details" aria-hidden="true" tabindex="-1"></aside>
 <div class="modal-overlay" id="overlay"><div class="modal" id="modal"></div></div>
 <div id="announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
-<script src="${bundleSrc}" defer></script>
-<script src="${diffSrc}" defer></script>
-<script src="${appSrc}" defer></script>
+${scripts}
 </body>
 </html>`;
 }
@@ -157,4 +173,4 @@ export function renderIndex(revs: PageAssetRevisions): string {
  * snapshots that just need the page structure — production serving should use
  * {@link renderIndex} with computed asset hashes.
  */
-export const PAGE_HTML = renderIndex({ bundle: "dev", diff: "dev", appJs: "dev", appCss: "dev" });
+export const PAGE_HTML = renderIndex(Object.fromEntries(WEB_ASSETS.map((a) => [a.file, "dev"])));

@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ApiDoctorResult, DoctorResult } from "../src/doctor";
+import { WEB_ASSETS } from "../src/web/html";
 import { type WorkflowHost, WorkflowRunManager } from "../src/web/runs";
 import {
   createWebServer,
@@ -222,10 +223,13 @@ describe("web server", () => {
     expect(html).toContain('id="project"');
     expect(html).toContain('id="projectName"');
     expect(html).toContain('id="projectPath"');
-    // The page now references external static assets rather than inlining them.
-    expect(html).toContain('<link rel="stylesheet" href="/static/app.css?v=');
-    expect(html).toContain('<script src="/static/steamtrain-reducer.bundle.js?v=');
-    expect(html).toContain('<script src="/static/app.js?v=');
+    // The page now references external static assets rather than inlining them,
+    // one <link>/<script> per manifest entry, in manifest order.
+    for (const asset of WEB_ASSETS) {
+      const url = `/static/${asset.file}?v=`;
+      if (asset.kind === "css") expect(html).toContain(`<link rel="stylesheet" href="${url}`);
+      else expect(html).toContain(`<script src="${url}`);
+    }
     // The inline bundle must not be served on the page anymore.
     expect(html).not.toContain("BEGIN_REDUCER_BUNDLE");
     // Scripts: 'unsafe-inline' removed so we rely on external static assets
@@ -236,7 +240,9 @@ describe("web server", () => {
     expect(csp).toContain("https://fonts.googleapis.com");
     expect(csp).toContain("font-src 'self' https://fonts.gstatic.com");
     expect(html).toContain("fonts.googleapis.com/css2");
-    expect(html).toContain("Space+Grotesk");
+    // Space Grotesk was dropped from the font request — the new design uses
+    // IBM Plex Sans for headings.
+    expect(html).not.toContain("Space+Grotesk");
     expect(html).toContain('id="announcer"');
     expect(html).toContain('aria-live="polite"');
   });
@@ -254,57 +260,44 @@ describe("web server", () => {
     expect(await icon.text()).toContain("<svg");
   });
 
-  it("serves static app.js and app.css with immutable caching headers", async () => {
+  it("serves every manifest asset with immutable caching headers", async () => {
     const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);
 
-    const js = await fetch(`${base}/static/app.js`);
-    expect(js.status).toBe(200);
-    expect(js.headers.get("content-type")).toContain("text/javascript");
-    expect(js.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
-    expect(js.headers.get("x-content-type-options")).toBe("nosniff");
-    const jsText = await js.text();
+    // Spot-check content markers on the two hand-authored assets, so a broken
+    // build (e.g. an empty file) still fails loudly even though the loop below
+    // is manifest-driven and wouldn't otherwise know what "correct" looks like.
+    const jsText = await (await fetch(`${base}/static/app.js`)).text();
     expect(jsText).toContain("SteamtrainReducer");
     expect(jsText).toContain("renderYardTrack");
     expect(jsText).toContain("friendlyStepLabel");
     expect(jsText).toContain("agent orchestrator on rails");
     expect(jsText).not.toContain("BEGIN_REDUCER_BUNDLE");
 
-    const css = await fetch(`${base}/static/app.css`);
-    expect(css.status).toBe(200);
-    expect(css.headers.get("content-type")).toContain("text/css");
-    expect(css.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
-    const cssText = await css.text();
+    const cssText = await (await fetch(`${base}/static/app.css`)).text();
     expect(cssText).toContain("--accent");
     expect(cssText).toContain(".yard-track");
     expect(cssText).toContain("engine-depart");
     expect(cssText).toContain(".station-tagline");
     expect(cssText).toContain(".arrival-section");
 
-    const bundle = await fetch(`${base}/static/steamtrain-reducer.bundle.js`);
-    expect(bundle.status).toBe(200);
-    const bundleText = await bundle.text();
+    const bundleText = await (await fetch(`${base}/static/steamtrain-reducer.bundle.js`)).text();
     expect(bundleText).toContain("function workflowReducer");
 
     // The `?v=` revision embedded in the index page MUST match the first 16
     // hex chars of the SHA-256 of the bytes actually served at `/static/*`.
     // Otherwise `renderIndex` and the in-memory asset snapshot have drifted
     // apart and cache-busting stops being meaningful.
-    const indexRes = await fetch(`${base}/`);
-    const html = await indexRes.text();
-    const expectedRevs = {
-      "/static/app.css": createHash("sha256").update(cssText).digest("hex").slice(0, 16),
-      "/static/app.js": createHash("sha256").update(jsText).digest("hex").slice(0, 16),
-      "/static/steamtrain-reducer.bundle.js": createHash("sha256")
-        .update(bundleText)
-        .digest("hex")
-        .slice(0, 16),
-    };
-    for (const [assetPath, expectedRev] of Object.entries(expectedRevs)) {
-      const escaped = assetPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const m = html.match(new RegExp(`${escaped}\\?v=([0-9a-f]{16})`));
-      expect(m, `index page should reference ${assetPath}?v=<16 hex chars>`).not.toBeNull();
-      expect(m![1]).toBe(expectedRev);
+    const html = await (await fetch(`${base}/`)).text();
+    for (const asset of WEB_ASSETS) {
+      const res = await fetch(`${base}/static/${asset.file}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+      expect(res.headers.get("content-type")).toBe(asset.mime);
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      const body = await res.text();
+      const rev = createHash("sha256").update(body).digest("hex").slice(0, 16);
+      expect(html).toContain(`/static/${asset.file}?v=${rev}`);
     }
   });
 
@@ -2462,10 +2455,10 @@ describe("web server — auth", () => {
     const base = await start(server);
     const index = await fetch(`${base}/`);
     expect(index.status).toBe(200);
-    const css = await fetch(`${base}/static/app.css`);
-    expect(css.status).toBe(200);
-    const js = await fetch(`${base}/static/app.js`);
-    expect(js.status).toBe(200);
+    const first = await fetch(`${base}/static/${WEB_ASSETS[0]!.file}`);
+    expect(first.status).toBe(200);
+    const last = await fetch(`${base}/static/${WEB_ASSETS[WEB_ASSETS.length - 1]!.file}`);
+    expect(last.status).toBe(200);
   });
 
   it("POST /api/auth issues a random session cookie (not the hashed token)", async () => {

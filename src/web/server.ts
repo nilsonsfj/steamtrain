@@ -72,7 +72,7 @@ import {
 import { isValidPathId } from "../workflow/fs-util";
 import { DEFAULT_PATCH_CAP, capPatch } from "../workflow/unified-diff";
 import type { WorkspaceConfig } from "../workspace";
-import { FAVICON_SVG, type PageAssetRevisions, renderIndex } from "./html";
+import { FAVICON_SVG, type PageAssetRevisions, WEB_ASSETS, renderIndex } from "./html";
 import { TooManyRuns, type WorkflowHost, WorkflowRunManager } from "./runs";
 
 const DEFAULT_MAX_CONCURRENT_GENERATIONS = 2;
@@ -98,8 +98,11 @@ interface GenerationGate {
 function resolvePublicDir(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   const candidates = [join(here, "public"), resolve(here, "..", "web", "public")];
+  // Probe the first manifest asset — whatever the client is split into, the
+  // manifest's head is always present in a correctly built tree.
+  const probe = WEB_ASSETS[0]!.file;
   for (const candidate of candidates) {
-    if (existsSync(join(candidate, "app.js"))) return candidate;
+    if (existsSync(join(candidate, probe))) return candidate;
   }
   // Fall back to the first candidate so the error surfaced to the operator
   // points at the expected location.
@@ -113,9 +116,9 @@ interface StaticAsset {
   relPath: string;
   body: Buffer;
   /** First 16 hex chars of the asset's SHA-256, used in cache-busting URLs.
-   * 16 chars (64 bits) is well beyond any plausible collision space for three
-   * small files and keeps the `?v=` token short enough to live in any cache
-   * key or log line. */
+   * 16 chars (64 bits) is well beyond any plausible collision space for the
+   * handful of small files in {@link WEB_ASSETS} and keeps the `?v=` token
+   * short enough to live in any cache key or log line. */
   rev: string;
   mime: string;
 }
@@ -131,27 +134,15 @@ function loadAsset(relPath: string, mime: string): StaticAsset | null {
 // Loaded once at module init and never re-read. Tests and production serve
 // from this in-memory snapshot, so the immutable /static/* cache headers are
 // always consistent with the `?v=` revisions embedded by renderIndex(). The
-// trade-off: editing `app.js` / `app.css` on disk while the dev server is
+// trade-off: editing a WEB_ASSETS file on disk while the dev server is
 // running will NOT take effect until the process restarts (bun src/index.tsx).
-const STATIC_ASSETS: Record<string, StaticAsset | null> = {
-  "/static/app.css": loadAsset("app.css", "text/css; charset=utf-8"),
-  "/static/app.js": loadAsset("app.js", "text/javascript; charset=utf-8"),
-  "/static/steamtrain-reducer.bundle.js": loadAsset(
-    "steamtrain-reducer.bundle.js",
-    "text/javascript; charset=utf-8",
-  ),
-  "/static/steamtrain-diff.bundle.js": loadAsset(
-    "steamtrain-diff.bundle.js",
-    "text/javascript; charset=utf-8",
-  ),
-};
+const STATIC_ASSETS: Record<string, StaticAsset | null> = Object.fromEntries(
+  WEB_ASSETS.map((a) => [`/static/${a.file}`, loadAsset(a.file, a.mime)]),
+);
 
-const PUBLIC_REVISIONS: PageAssetRevisions = {
-  bundle: STATIC_ASSETS["/static/steamtrain-reducer.bundle.js"]?.rev ?? "",
-  diff: STATIC_ASSETS["/static/steamtrain-diff.bundle.js"]?.rev ?? "",
-  appJs: STATIC_ASSETS["/static/app.js"]?.rev ?? "",
-  appCss: STATIC_ASSETS["/static/app.css"]?.rev ?? "",
-};
+const PUBLIC_REVISIONS: PageAssetRevisions = Object.fromEntries(
+  WEB_ASSETS.map((a) => [a.file, STATIC_ASSETS[`/static/${a.file}`]?.rev ?? ""]),
+);
 
 /**
  * Status reported by {@link publicAssetsLoaded}. Useful for diagnostics when
