@@ -248,10 +248,18 @@ region · run and approval deep links.
   section names, and leaves `parseRunDeepLink` behaviour unchanged.
 - Throughput ring buffer and the projected-cost helper are pure functions and
   unit-tested directly, including the zero-completed-steps case.
-- Existing web tests (`web-approval`, `web-detach`, `web-human-input`,
-  `web-live-runs`, `web-loops`, `web-pause`, `web-rerun-retarget`,
-  `web-server`) assert API behaviour rather than markup and are expected to pass
-  unchanged. Any that turn out to assert on retired DOM are updated, not deleted.
+- `web-server.test.ts` asserts on the `app.js` / `app.css` asset names and on
+  their served hashes; those assertions move to the manifest. `resolvePublicDir`
+  probes for `app.js` to locate the assets directory and must probe for a file
+  that still exists.
+- The remaining web tests (`web-approval`, `web-detach`, `web-human-input`,
+  `web-live-runs`, `web-loops`, `web-pause`, `web-rerun-retarget`) assert API
+  behaviour rather than markup and are expected to pass unchanged. Any that turn
+  out to assert on retired DOM are updated, not deleted.
+- Client render modules stay vanilla JS and are verified by hand. Logic worth
+  testing is written in TypeScript under `src/web/` against a structural DOM
+  interface and unit-tested with a fake DOM, following the existing
+  `src/web/diff-view.ts` + `tests/diff-view.test.ts` precedent.
 
 ## 10. Docs
 
