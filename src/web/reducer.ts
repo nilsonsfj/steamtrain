@@ -46,3 +46,5 @@ export {
   formatSubWorkflowTarget,
   subWorkflowRollup,
 } from "../workflow/sub-workflow-view";
+export { createThroughputMeter, projectCost } from "./telemetry";
+export type { ThroughputMeter, ThroughputSample } from "./telemetry";

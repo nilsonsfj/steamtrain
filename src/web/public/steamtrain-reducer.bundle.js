@@ -33,6 +33,7 @@ var SteamtrainReducer = (() => {
     approvalDeepLink: () => approvalDeepLink,
     arrivalReceiptCards: () => arrivalReceiptCards,
     buildArrivalReport: () => buildArrivalReport,
+    createThroughputMeter: () => createThroughputMeter,
     describeSubWorkflow: () => describeSubWorkflow,
     findArrivalStep: () => findArrivalStep,
     formatArrivalHeadline: () => formatArrivalHeadline,
@@ -47,6 +48,7 @@ var SteamtrainReducer = (() => {
     parseDeepLink: () => parseDeepLink,
     parseRoute: () => parseRoute,
     parseRunDeepLink: () => parseRunDeepLink,
+    projectCost: () => projectCost,
     runDeepLink: () => runDeepLink,
     sessionOverridesEmpty: () => sessionOverridesEmpty,
     settingsDeepLink: () => settingsDeepLink,
@@ -1282,6 +1284,41 @@ var SteamtrainReducer = (() => {
       bits.push(`${view.overrideCount} override${view.overrideCount === 1 ? "" : "s"}`);
     }
     return bits.join(" \xB7 ");
+  }
+
+  // src/web/telemetry.ts
+  var DEFAULT_WINDOW_MS = 6e4;
+  function createThroughputMeter(windowMs = DEFAULT_WINDOW_MS) {
+    const samples = [];
+    return {
+      sample(totalTokens, nowMs) {
+        samples.push({ atMs: nowMs, totalTokens });
+        while (samples.length > 1 && nowMs - samples[0].atMs > windowMs) samples.shift();
+      },
+      bars(count) {
+        if (count <= 0) return [];
+        const empty = new Array(count).fill(0);
+        if (samples.length < 2) return empty;
+        const rates = [];
+        for (let i = 1; i < samples.length; i++) {
+          const prev = samples[i - 1];
+          const cur = samples[i];
+          const seconds = (cur.atMs - prev.atMs) / 1e3;
+          const delta = cur.totalTokens - prev.totalTokens;
+          rates.push(seconds > 0 && delta > 0 ? delta / seconds : 0);
+        }
+        const recent = rates.slice(-count);
+        const peak = Math.max(...recent);
+        if (peak <= 0) return empty;
+        const scaled = recent.map((r) => r / peak);
+        return [...new Array(count - scaled.length).fill(0), ...scaled];
+      }
+    };
+  }
+  function projectCost(input) {
+    const { spentUsd, completedSteps, totalSteps } = input;
+    if (completedSteps <= 0 || totalSteps <= 0) return null;
+    return Math.max(spentUsd, spentUsd / completedSteps * totalSteps);
   }
   return __toCommonJS(reducer_exports);
 })();
