@@ -112,7 +112,7 @@ function resolvePublicDir(): string {
 const PUBLIC_DIR = resolvePublicDir();
 
 interface StaticAsset {
-  /** Filesystem-relative path inside {@link PUBLIC_DIR} (e.g. `app.js`). */
+  /** Filesystem-relative path inside {@link PUBLIC_DIR} (e.g. `st-core.js`). */
   relPath: string;
   body: Buffer;
   /** First 16 hex chars of the asset's SHA-256, used in cache-busting URLs.
@@ -154,7 +154,7 @@ export function publicAssetsLoaded(): boolean {
 
 /**
  * Names of the static web assets that were not found on disk at module init,
- * in the form they appear in `/static/*` URLs (e.g. `"/static/app.js"`).
+ * in the form they appear in `/static/*` URLs (e.g. `"/static/st-core.js"`).
  * Empty when every asset loaded successfully.
  */
 export function missingPublicAssets(): string[] {

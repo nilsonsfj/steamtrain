@@ -22,7 +22,7 @@
 /**
  * Designed locomotive mark for the tab icon (replaces the emoji glyph so the
  * brand reads as a product, not a placeholder). Kept in sync visually with the
- * `.brand-mark` CSS in `app.css`.
+ * `.brand-mark` CSS in `shell.css`.
  */
 export const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="7" fill="#0e1116"/><path d="M6.5 22.5h18.2c1 0 1.8-.7 1.8-1.7V14.2c0-1.1-.9-2-2-2h-9.1L13.2 9.5H8.4c-.9 0-1.6.7-1.6 1.6v11.4z" fill="#1c6f68"/><path d="M8.5 13.2h4.2l1.4 2.2H24c.5 0 .8.3.8.8v5.6c0 .3-.2.5-.5.5H8.5v-9.1z" fill="#34d3c4"/><rect x="9.7" y="14.5" width="2.5" height="1.9" rx=".3" fill="#0e1116" opacity=".55"/><path d="M18.2 10.6c0-1.1.5-2.1.9-2.7.1-.2.5-.1.5.2 0 .7-.1 1.3-.1 2 0 .3.2.5.5.4.8-.4 1.4-1.2 1.6-2 .1-.2.4-.2.4 0 .1 1-.5 2.2-1.4 2.9-.4.3-.9.5-1.5.5h-.9v-1.3z" fill="#8eeae0"/><circle cx="11.6" cy="23.8" r="2.4" fill="#0e1116" stroke="#34d3c4" stroke-width="1.2"/><circle cx="11.6" cy="23.8" r=".85" fill="#34d3c4"/><circle cx="20.4" cy="23.8" r="2.4" fill="#0e1116" stroke="#34d3c4" stroke-width="1.2"/><circle cx="20.4" cy="23.8" r=".85" fill="#34d3c4"/><path d="M6.5 22.5h19" stroke="#d29922" stroke-width="1" stroke-linecap="round" opacity=".75"/></svg>`;
 
@@ -43,13 +43,26 @@ export interface WebAsset {
  * so adding a file here is the only step needed to ship it.
  */
 export const WEB_ASSETS: readonly WebAsset[] = [
-  { file: "app.css", kind: "css", mime: "text/css; charset=utf-8" },
+  { file: "tokens.css", kind: "css", mime: "text/css; charset=utf-8" },
+  { file: "shell.css", kind: "css", mime: "text/css; charset=utf-8" },
+  { file: "run.css", kind: "css", mime: "text/css; charset=utf-8" },
+  { file: "instruments.css", kind: "css", mime: "text/css; charset=utf-8" },
+  { file: "arrival.css", kind: "css", mime: "text/css; charset=utf-8" },
+  { file: "settings.css", kind: "css", mime: "text/css; charset=utf-8" },
+  { file: "modals.css", kind: "css", mime: "text/css; charset=utf-8" },
   { file: "steamtrain-reducer.bundle.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "steamtrain-diff.bundle.js", kind: "js", mime: "text/javascript; charset=utf-8" },
-  { file: "app.js", kind: "js", mime: "text/javascript; charset=utf-8" },
+  { file: "st-core.js", kind: "js", mime: "text/javascript; charset=utf-8" },
+  { file: "st-shell.js", kind: "js", mime: "text/javascript; charset=utf-8" },
+  { file: "st-run.js", kind: "js", mime: "text/javascript; charset=utf-8" },
+  { file: "st-instruments.js", kind: "js", mime: "text/javascript; charset=utf-8" },
+  { file: "st-arrival.js", kind: "js", mime: "text/javascript; charset=utf-8" },
+  { file: "st-settings.js", kind: "js", mime: "text/javascript; charset=utf-8" },
+  { file: "st-modals.js", kind: "js", mime: "text/javascript; charset=utf-8" },
+  { file: "st-boot.js", kind: "js", mime: "text/javascript; charset=utf-8" },
 ];
 
-/** Content-hash revision per asset filename, e.g. `{ "app.css": "a1b2…" }`. */
+/** Content-hash revision per asset filename, e.g. `{ "tokens.css": "a1b2…" }`. */
 export type PageAssetRevisions = Record<string, string>;
 
 /**

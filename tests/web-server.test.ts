@@ -264,22 +264,31 @@ describe("web server", () => {
     const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
     const base = await start(server);
 
-    // Spot-check content markers on the two hand-authored assets, so a broken
-    // build (e.g. an empty file) still fails loudly even though the loop below
-    // is manifest-driven and wouldn't otherwise know what "correct" looks like.
-    const jsText = await (await fetch(`${base}/static/app.js`)).text();
-    expect(jsText).toContain("SteamtrainReducer");
-    expect(jsText).toContain("renderYardTrack");
-    expect(jsText).toContain("friendlyStepLabel");
-    expect(jsText).toContain("agent orchestrator on rails");
-    expect(jsText).not.toContain("BEGIN_REDUCER_BUNDLE");
+    // Spot-check content markers on the hand-authored per-surface assets, so a
+    // broken build (e.g. an empty file) still fails loudly even though the loop
+    // below is manifest-driven and wouldn't otherwise know what "correct" looks
+    // like. `st-instruments.js` / `instruments.css` are deliberate placeholders.
+    const coreText = await (await fetch(`${base}/static/st-core.js`)).text();
+    expect(coreText).toContain("window.Steamtrain");
+    expect(coreText).toContain("SteamtrainReducer");
+    expect(coreText).toContain("friendlyStepLabel");
+    expect(coreText).not.toContain("BEGIN_REDUCER_BUNDLE");
 
-    const cssText = await (await fetch(`${base}/static/app.css`)).text();
-    expect(cssText).toContain("--accent");
-    expect(cssText).toContain(".yard-track");
-    expect(cssText).toContain("engine-depart");
-    expect(cssText).toContain(".station-tagline");
-    expect(cssText).toContain(".arrival-section");
+    const arrivalText = await (await fetch(`${base}/static/st-arrival.js`)).text();
+    expect(arrivalText).toContain("renderYardTrack");
+    expect(arrivalText).toContain("agent orchestrator on rails");
+
+    const bootText = await (await fetch(`${base}/static/st-boot.js`)).text();
+    expect(bootText).toContain("window.Steamtrain.start()");
+
+    const tokensText = await (await fetch(`${base}/static/tokens.css`)).text();
+    expect(tokensText).toContain("--accent");
+
+    const arrivalCss = await (await fetch(`${base}/static/arrival.css`)).text();
+    expect(arrivalCss).toContain(".yard-track");
+    expect(arrivalCss).toContain("engine-depart");
+    expect(arrivalCss).toContain(".station-tagline");
+    expect(arrivalCss).toContain(".arrival-section");
 
     const bundleText = await (await fetch(`${base}/static/steamtrain-reducer.bundle.js`)).text();
     expect(bundleText).toContain("function workflowReducer");
