@@ -24,6 +24,7 @@ var SteamtrainReducer = (() => {
   __export(reducer_exports, {
     ARRIVAL_NEXT_CANDIDATES: () => ARRIVAL_NEXT_CANDIDATES,
     NARRATION_CAP: () => NARRATION_CAP,
+    SETTINGS_SECTIONS: () => SETTINGS_SECTIONS,
     SUBWORKFLOW_STEP_SEPARATOR: () => SUBWORKFLOW_STEP_SEPARATOR,
     TOUR_WORKFLOW_NAME: () => TOUR_WORKFLOW_NAME,
     appendNarration: () => appendNarration,
@@ -44,9 +45,11 @@ var SteamtrainReducer = (() => {
     narrateEvent: () => narrateEvent,
     narrateFromState: () => narrateFromState,
     parseDeepLink: () => parseDeepLink,
+    parseRoute: () => parseRoute,
     parseRunDeepLink: () => parseRunDeepLink,
     runDeepLink: () => runDeepLink,
     sessionOverridesEmpty: () => sessionOverridesEmpty,
+    settingsDeepLink: () => settingsDeepLink,
     shouldOfferStationLanding: () => shouldOfferStationLanding,
     splitSubWorkflowKey: () => splitSubWorkflowKey,
     subWorkflowRollup: () => subWorkflowRollup,
@@ -946,6 +949,19 @@ var SteamtrainReducer = (() => {
   }
   function approvalDeepLink(runId, stepId) {
     return `#run-${runId.toLowerCase()}/step/${stepId}`;
+  }
+  var SETTINGS_SECTIONS = ["runners", "limits"];
+  function parseRoute(hash) {
+    const run = parseDeepLink(hash);
+    if (run) return { kind: "run", runId: run.runId, stepId: run.stepId };
+    const match = /^#settings(?:\/([\w-]+))?$/i.exec(hash.trim());
+    if (!match) return null;
+    const raw = (match[1] ?? "").toLowerCase();
+    const section = SETTINGS_SECTIONS.includes(raw) ? raw : SETTINGS_SECTIONS[0];
+    return { kind: "settings", section };
+  }
+  function settingsDeepLink(section = SETTINGS_SECTIONS[0]) {
+    return `#settings/${section}`;
   }
 
   // src/workflow/overrides.ts

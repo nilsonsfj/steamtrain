@@ -24,8 +24,16 @@ export {
   shouldOfferStationLanding,
   initialWorkflowIndex,
 } from "../workflow/first-run";
-export { parseRunDeepLink, runDeepLink, approvalDeepLink, parseDeepLink } from "./run-deep-link";
-export type { DeepLink } from "./run-deep-link";
+export {
+  parseRunDeepLink,
+  runDeepLink,
+  approvalDeepLink,
+  parseDeepLink,
+  parseRoute,
+  settingsDeepLink,
+  SETTINGS_SECTIONS,
+} from "./run-deep-link";
+export type { DeepLink, Route, SettingsSection } from "./run-deep-link";
 export {
   applyWorkflowSessionOverrides,
   applyWorkflowStepOverrides,

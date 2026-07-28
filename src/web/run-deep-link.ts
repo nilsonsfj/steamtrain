@@ -30,3 +30,34 @@ export function runDeepLink(runId: string): string {
 export function approvalDeepLink(runId: string, stepId: string): string {
   return `#run-${runId.toLowerCase()}/step/${stepId}`;
 }
+
+/**
+ * Settings sections that have a real config API behind them, in nav order. The
+ * design draws seven; the five without an API (model bindings, permissions,
+ * access & sharing, notifications, cache & worktrees) are deliberately absent
+ * rather than rendered as dead tabs. See the design spec §6.
+ */
+export const SETTINGS_SECTIONS = ["runners", "limits"] as const;
+
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
+
+export type Route =
+  | { kind: "run"; runId: string; stepId?: string }
+  | { kind: "settings"; section: SettingsSection };
+
+/** Parse any recognised hash route. Returns null when the hash is not one. */
+export function parseRoute(hash: string): Route | null {
+  const run = parseDeepLink(hash);
+  if (run) return { kind: "run", runId: run.runId, stepId: run.stepId };
+  const match = /^#settings(?:\/([\w-]+))?$/i.exec(hash.trim());
+  if (!match) return null;
+  const raw = (match[1] ?? "").toLowerCase();
+  const section = (SETTINGS_SECTIONS as readonly string[]).includes(raw)
+    ? (raw as SettingsSection)
+    : SETTINGS_SECTIONS[0];
+  return { kind: "settings", section };
+}
+
+export function settingsDeepLink(section: SettingsSection = SETTINGS_SECTIONS[0]): string {
+  return `#settings/${section}`;
+}
