@@ -110,7 +110,7 @@ body.run-live .runbar {
   z-index: 1;
 }
 .station-empty .station-premise {
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: clamp(28px, 5vw, 42px);
   font-weight: 700;
   letter-spacing: -0.03em;
@@ -177,7 +177,7 @@ body.run-live .runbar {
   box-shadow: 0 0 0 3px rgba(52, 211, 196, 0.12);
 }
 .phase .ptitle {
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-weight: 600;
   letter-spacing: -0.015em;
   font-size: 15px;

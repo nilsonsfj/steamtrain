@@ -65,7 +65,7 @@
   display: inline-flex;
   align-items: center;
   gap: 12px;
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: clamp(48px, 8vw, 72px);
   font-weight: 700;
   letter-spacing: -0.04em;
@@ -111,7 +111,7 @@
   font-size: 12px;
 }
 .station-project .station-project-name {
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-weight: 600;
   color: #d5dee8;
   letter-spacing: -0.01em;
@@ -122,7 +122,7 @@
   color: var(--muted);
 }
 .station-premise {
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: clamp(22px, 3.4vw, 30px);
   font-weight: 600;
   letter-spacing: -0.025em;
@@ -146,7 +146,7 @@
   align-items: center;
 }
 .station-cta {
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: 16px;
   font-weight: 700;
   letter-spacing: 0.01em;
@@ -539,7 +539,7 @@ body[data-mode="ride"] .narration {
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
 }
 body[data-mode="ride"] .narration-line.fresh {
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: 18px;
   letter-spacing: -0.02em;
 }
@@ -581,7 +581,7 @@ body[data-mode="ride"] .track {
   animation: conductor-live 1.6s ease-in-out infinite;
 }
 .conductor-stage-line {
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: clamp(28px, 4.6vw, 44px);
   font-weight: 700;
   letter-spacing: -0.035em;
@@ -648,7 +648,7 @@ body[data-mode="ride"] .track {
   color: var(--accent-bright);
 }
 .yard-car-name {
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: 13px;
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -788,7 +788,7 @@ body[data-mode="ride"] .runbar .sub {
   justify-content: space-between;
   align-items: center;
   color: var(--accent-bright);
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
@@ -899,7 +899,7 @@ body[data-mode="ride"] .runbar .sub {
   color: var(--error);
 }
 .arrival-title {
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: clamp(28px, 4.4vw, 40px);
   font-weight: 700;
   letter-spacing: -0.035em;
@@ -947,7 +947,7 @@ body[data-mode="ride"] .runbar .sub {
   margin-bottom: 6px;
 }
 .arrival-card-value {
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: 15px;
   font-weight: 700;
   color: var(--text);
@@ -975,7 +975,7 @@ body[data-mode="ride"] .runbar .sub {
   color: var(--muted);
 }
 .arrival-artifact-lead {
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: clamp(18px, 2.4vw, 22px);
   font-weight: 700;
   letter-spacing: -0.02em;
@@ -1049,7 +1049,7 @@ body[data-mode="ride"] .runbar .sub {
   animation: station-rise 560ms cubic-bezier(0.22, 1, 0.36, 1) 220ms both;
 }
 .arrival-destinations .btn.primary {
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-weight: 700;
   padding: 12px 20px;
 }
@@ -1093,7 +1093,7 @@ body[data-mode="ride"] .runbar .sub {
   color: var(--muted);
 }
 .arrival-car-label {
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: 12.5px;
   font-weight: 600;
   color: var(--muted);
