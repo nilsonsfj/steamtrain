@@ -49,35 +49,6 @@
 
   --font-ui: "IBM Plex Sans", "Helvetica Neue", "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", "SF Mono", "Menlo", "Consolas", monospace;
-
-  /* ---- TEMPORARY compatibility aliases — do not use in new CSS ------------
-     The pre-Console palette was deleted from this file, but the surfaces that
-     have not been redesigned yet still reference it. Unlike font-family (which
-     inherits), backgrounds, radii and shadows do NOT inherit: an unresolved
-     var() there collapses to transparent / 0 / no-shadow, which visibly broke
-     surfaces such as the Runs history modal.
-
-     These twelve aliases exist only so unredesigned surfaces keep rendering.
-     Each resolves to an existing Console token, or to a literal carried over
-     where the Console palette has no equivalent. No new palette colour is
-     introduced here.
-
-     Removal path: Task 7 (instruments), Task 8 (arrival) and Task 9 (settings)
-     delete the references on their own surfaces as they restyle them; a final
-     cleanup pass owns `modals.css`, which no remaining task restyles. When the
-     last reference is gone, delete this whole block. */
-  --bg: var(--canvas);
-  --panel: var(--surface);
-  --panel-2: var(--raised);
-  --panel-3: var(--border);
-  --accent-soft: rgba(52, 211, 196, 0.12);
-  --shadow-sm: none;
-  --shadow-md: none;
-  --radius-sm: var(--r-lg);
-  --radius-md: var(--r-xl);
-  --radius-lg: var(--r-xl);
-  --pending: var(--faint);
-  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }
 * {
   box-sizing: border-box;

@@ -12,11 +12,6 @@ window.Steamtrain = (function () {
   // functions below close over it, so those late attachments are visible.
   var ST = {};
 
-  "use strict";
-
-  
-
-
   var KIND_LABEL = { worker: "worker", processor: "process", distributor: "fan-out", consolidator: "merge", gate: "gate", approval: "approval", human: "human", merge: "merge-back", command: "command", llm: "llm", workflow: "sub-workflow", issues: "issues" };
   // Autonomy labels: what a workflow will need from a human, visible BEFORE launch.
   var AUTONOMY_META = {
@@ -1183,7 +1178,6 @@ window.Steamtrain = (function () {
   ST.h = h;
   ST.AUTONOMY_META = AUTONOMY_META;
   ST.KIND_LABEL = KIND_LABEL;
-  ST.TOUR_NAME = TOUR_NAME;
   ST.activateWithKeyboard = activateWithKeyboard;
   ST.addTokensInto = addTokensInto;
   ST.agentById = agentById;

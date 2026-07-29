@@ -343,8 +343,8 @@ header .mode-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  transition: border-color 0.15s var(--ease-out), color 0.15s var(--ease-out), background 0.15s
-    var(--ease-out);
+  transition: border-color 0.15s cubic-bezier(0.22, 1, 0.36, 1), color 0.15s
+    cubic-bezier(0.22, 1, 0.36, 1), background 0.15s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .chip:hover {
   border-color: var(--border-strong);
@@ -354,7 +354,7 @@ header .mode-badge {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--pending);
+  background: var(--faint);
   box-shadow: 0 0 0 2px rgba(90, 102, 117, 0.18);
 }
 .chip.ok .dot {
@@ -373,7 +373,7 @@ header .mode-badge {
   color: var(--muted);
 }
 .chip.calm .dot {
-  background: var(--pending);
+  background: var(--faint);
 }
 /* Health chips double as the entry point to the setup panel. */
 .chip-btn {
@@ -383,7 +383,7 @@ header .mode-badge {
 }
 .chip-btn:hover {
   border-color: var(--accent-dim);
-  background: var(--panel);
+  background: var(--surface);
 }
 .chip-btn.bad:hover {
   border-color: var(--error);
@@ -397,7 +397,7 @@ header .mode-badge {
    modals, settings and the rail all use. */
 .btn {
   border: 1px solid var(--border);
-  background: var(--panel-2);
+  background: var(--raised);
   color: var(--text);
   border-radius: 10px;
   padding: 0 18px;
@@ -405,12 +405,13 @@ header .mode-badge {
   font: inherit;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s var(--ease-out), border-color 0.15s var(--ease-out), transform 0.15s
-    var(--ease-out), box-shadow 0.15s var(--ease-out);
+  transition: background 0.15s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.15s
+    cubic-bezier(0.22, 1, 0.36, 1), transform 0.15s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.15s
+    cubic-bezier(0.22, 1, 0.36, 1);
   white-space: nowrap;
 }
 .btn:hover {
-  background: var(--panel-3);
+  background: var(--border);
   border-color: var(--border-strong);
 }
 .btn:active {

@@ -263,7 +263,7 @@
 }
 .draft {
   margin-top: 12px;
-  background: var(--bg);
+  background: var(--canvas);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 9px 11px;
@@ -313,9 +313,9 @@
   margin: 0 0 8px;
 }
 .estep {
-  background: var(--panel-2);
+  background: var(--raised);
   border: 1px solid var(--border);
-  border-left: 3px solid var(--pending);
+  border-left: 3px solid var(--faint);
   border-radius: 10px;
   padding: 11px 12px;
   margin-bottom: 9px;
@@ -335,7 +335,7 @@
 }
 .estep.nested {
   border-left-color: var(--accent-dim);
-  background: var(--panel);
+  background: var(--surface);
 }
 .estep.nested .esid {
   color: var(--accent-bright);
@@ -408,7 +408,7 @@
     border-color: #3d7aaa;
   }
   100% {
-    background: var(--panel-2);
+    background: var(--raised);
     border-color: var(--border);
   }
 }
@@ -558,7 +558,7 @@
 }
 .plan-step .plan-prompt {
   margin-top: 6px;
-  background: var(--panel-2);
+  background: var(--raised);
   border-radius: 4px;
   padding: 6px 8px;
 }
@@ -587,7 +587,7 @@
   justify-content: center;
   background: rgba(8, 11, 16, 0.72);
   backdrop-filter: blur(8px) saturate(0.85);
-  animation: reauth-fade-in 260ms var(--ease-out) both;
+  animation: reauth-fade-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 @keyframes reauth-fade-in {
   from {
@@ -601,12 +601,12 @@
   position: relative;
   width: min(400px, calc(100vw - 40px));
   padding: 32px 28px 28px;
-  border-radius: var(--radius-lg);
+  border-radius: var(--r-xl);
   background: linear-gradient(180deg, rgba(22, 30, 40, 0.98) 0%, rgba(16, 22, 30, 0.99) 100%);
   border: 1px solid rgba(52, 211, 196, 0.28);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 24px 64px rgba(0, 0, 0, 0.55), 0 0 0 1px
     rgba(0, 0, 0, 0.25);
-  animation: reauth-card-in 360ms var(--ease-out) both;
+  animation: reauth-card-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
   animation-delay: 80ms;
 }
 @keyframes reauth-card-in {

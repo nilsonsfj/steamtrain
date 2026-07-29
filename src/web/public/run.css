@@ -267,8 +267,8 @@ textarea#input:focus {
   text-transform: uppercase;
   cursor: pointer;
   text-align: left;
-  transition: background 0.15s var(--ease-out), border-color 0.15s var(--ease-out), color 0.15s
-    var(--ease-out);
+  transition: background 0.15s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.15s
+    cubic-bezier(0.22, 1, 0.36, 1), color 0.15s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .params-toggle:hover {
   background: rgba(255, 255, 255, 0.04);
@@ -285,7 +285,7 @@ textarea#input:focus {
   border-right: 2px solid rgba(142, 234, 224, 0.85);
   border-bottom: 2px solid rgba(142, 234, 224, 0.85);
   transform: rotate(-45deg);
-  transition: transform 0.18s var(--ease-out);
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
   margin-top: -1px;
 }
 .params-panel:not(.collapsed) .params-toggle-chevron {
@@ -712,7 +712,7 @@ textarea#input:focus {
   position: relative;
   margin: 0 auto 10px;
   max-width: 1100px;
-  animation: phase-in 420ms var(--ease-out) both;
+  animation: phase-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 @keyframes phase-in {
   from {
@@ -735,7 +735,7 @@ textarea#input:focus {
   height: 26px;
   border-radius: 50%;
   flex: none;
-  background: var(--panel-2);
+  background: var(--raised);
   border: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -799,23 +799,22 @@ textarea#input:focus {
   min-width: 240px;
   background: linear-gradient(180deg, rgba(22, 30, 40, 0.92) 0%, rgba(16, 22, 30, 0.96) 100%);
   border: 1px solid rgba(42, 51, 64, 0.95);
-  border-left: 3px solid var(--pending);
-  border-radius: var(--radius-md);
+  border-left: 3px solid var(--faint);
+  border-radius: var(--r-xl);
   padding: 13px 14px;
-  box-shadow: var(--shadow-sm);
-  transition: border-color 0.18s var(--ease-out), box-shadow 0.18s var(--ease-out), transform 0.18s
-    var(--ease-out);
+  transition: border-color 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s
+    cubic-bezier(0.22, 1, 0.36, 1), transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .card.running {
   border-left-color: var(--running);
   box-shadow: 0 0 0 1px rgba(74, 163, 255, 0.18);
   background: linear-gradient(
     90deg,
-    var(--panel) 0%,
+    var(--surface) 0%,
     rgba(74, 163, 255, 0.04) 25%,
     rgba(74, 163, 255, 0.08) 50%,
     rgba(74, 163, 255, 0.04) 75%,
-    var(--panel) 100%
+    var(--surface) 100%
   );
   background-size: 200% 100%;
   animation: cardShimmer 2.4s ease-in-out infinite, runGlow 2s ease-in-out infinite;
@@ -1032,8 +1031,8 @@ textarea#input:focus {
 .subwf {
   margin-top: 6px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--panel-2);
+  border-radius: var(--r-lg);
+  background: var(--raised);
   overflow: hidden;
 }
 .subwf > summary {
@@ -1075,7 +1074,7 @@ textarea#input:focus {
   padding: 2px 8px;
 }
 .subwf-step.overridden {
-  background: var(--accent-soft);
+  background: rgba(52, 211, 196, 0.12);
 }
 .subwf-kind {
   font-size: 9px;
@@ -1114,7 +1113,7 @@ textarea#input:focus {
 }
 .card .tail {
   margin-top: 8px;
-  background: var(--bg);
+  background: var(--canvas);
   border: 1px solid var(--border);
   border-radius: 7px;
   padding: 7px 9px;
@@ -1237,7 +1236,7 @@ textarea#input:focus {
   width: 100%;
   min-height: 220px;
   resize: vertical;
-  background: var(--bg);
+  background: var(--canvas);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1280,7 +1279,7 @@ textarea#input:focus {
   padding: 10px;
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: var(--panel-2);
+  background: var(--raised);
   font-size: 12px;
 }
 .approval.pending {
@@ -1308,7 +1307,7 @@ textarea#input:focus {
   white-space: pre-wrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
-  background: var(--bg);
+  background: var(--canvas);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 6px 8px;
@@ -1359,7 +1358,7 @@ textarea#input:focus {
   padding: 10px;
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: var(--panel-2);
+  background: var(--raised);
   font-size: 12px;
   cursor: default;
 }
@@ -1392,7 +1391,7 @@ textarea#input:focus {
 .human-input-text {
   width: 100%;
   resize: vertical;
-  background: var(--bg);
+  background: var(--canvas);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1501,7 +1500,7 @@ textarea#input:focus {
   right: 0;
   bottom: 0;
   width: min(560px, 92vw);
-  background: linear-gradient(180deg, #141b24 0%, var(--panel) 100%);
+  background: linear-gradient(180deg, #141b24 0%, var(--surface) 100%);
   border-left: 1px solid rgba(53, 67, 84, 0.95);
   box-shadow: -18px 0 48px rgba(0, 0, 0, 0.5);
   display: none;
@@ -1614,7 +1613,7 @@ textarea#input:focus {
   flex: 1;
   min-height: 0;
   margin: 0;
-  background: var(--bg);
+  background: var(--canvas);
   border: 1px solid var(--border);
   border-radius: 7px;
   padding: 9px 11px;
