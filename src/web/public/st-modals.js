@@ -45,7 +45,6 @@
         ST.run.setRunning(true);
         S.startedAt = Date.now();
         ST.run.startTimer();
-        document.getElementById("statusLine").style.display = "flex";
         ST.run.openStream(runId);
         ST.render();
       });
@@ -1070,8 +1069,8 @@
         document.getElementById("runRow").style.display = "none";
         document.getElementById("wfTitle").textContent = "Select a workflow";
         document.getElementById("wfSub").textContent = "Pick a workflow on the left to view its pipeline and run it.";
-        clear(document.getElementById("canvas"));
-        document.getElementById("canvas").appendChild(h("div", { class: "empty", text: "Deleted " + name + "." }));
+        clear(document.getElementById("bands"));
+        document.getElementById("bands").appendChild(h("div", { class: "empty", text: "Deleted " + name + "." }));
         reloadCatalog();
       } else {
         ST.run.setBanner((r.body && r.body.error) || "delete failed", "err");

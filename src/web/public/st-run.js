@@ -292,122 +292,287 @@
     canvas.appendChild(box);
   }
 
-  function legendItem(kind, label) {
-    var i = h("i"); i.className = ""; i.style.background = kindColor(kind);
-    return h("span", null, i, label);
-  }
-  function kindColor(k) {
-    return { worker: "#6fb1ff", processor: "#9d8cff", distributor: "#ffce6f", consolidator: "#5fe0c6", gate: "#f0a35e", approval: "#ffd166", human: "#f5a3ff", merge: "#ff9ecb", command: "#b8c4d0", llm: "#62d2f5", workflow: "#7ce38b", issues: "#c9e07a" }[k] || "#6fb1ff";
-  }
+  // ---- phase bands ---------------------------------------------------------
 
-  var ALL_LEGEND_KINDS = [
-    ["worker", "worker"], ["processor", "process"], ["distributor", "fan-out"],
-    ["consolidator", "merge"], ["gate", "gate"], ["approval", "approval"],
-    ["human", "human"], ["merge", "merge-back"], ["command", "command"],
-    ["llm", "llm"], ["workflow", "sub-workflow"], ["issues", "issues"]
-  ];
+  /**
+   * The tokens define six kind tones; every block kind maps onto one of them
+   * (`command` is the default the base `.kind` rule already paints).
+   */
+  var KIND_TONE = {
+    worker: "worker", processor: "worker",
+    distributor: "distributor", workflow: "distributor",
+    consolidator: "consolidator", merge: "consolidator",
+    gate: "gate", approval: "gate", human: "gate",
+    llm: "llm"
+  };
 
-  /** Kinds present in the selected workflow (spec or live phases). */
-  function kindsInCurrentWorkflow() {
-    var set = {};
-    if (S.spec && S.spec.phases) {
-      S.spec.phases.forEach(function (p) {
-        (p.steps || []).forEach(function (s) {
-          if (s.kind) set[s.kind] = true;
-        });
-      });
-    }
-    if (S.runState && S.runState.phases) {
-      S.runState.phases.forEach(function (p) {
-        (p.steps || []).forEach(function (s) {
-          if (s.blockKind) set[s.blockKind] = true;
-        });
-      });
-    }
-    return set;
-  }
+  function isRunning(s) { return s.status === "running"; }
 
-  function renderLegendOrTrack(canvas) {
-    var running = S.runState && S.runState.started && !S.runState.done;
-    if (running) {
-      canvas.appendChild(renderTrackStrip());
-      return;
-    }
-    var present = kindsInCurrentWorkflow();
-    var keys = Object.keys(present);
-    var wrap = h("div", { class: "legend" });
-    ALL_LEGEND_KINDS.forEach(function (pair) {
-      if (keys.length === 0 || present[pair[0]]) {
-        wrap.appendChild(legendItem(pair[0], pair[1]));
+  /**
+   * Identity of one phase *instance*. A loop that re-enters a phase produces
+   * several PhaseStates sharing a phaseId; each is its own band, so bands are
+   * keyed phaseId:iteration — the same convention stepKey() uses.
+   */
+  function phaseKey(p) { return p.phaseId + ":" + (p.iteration || 1); }
+
+  /** Exactly one band expands: the selected step's, else the running phase's. */
+  function expandedPhaseKey(phases) {
+    if (S.selectedStepId) {
+      for (var i = 0; i < phases.length; i++) {
+        var steps = phases[i].steps || [];
+        for (var j = 0; j < steps.length; j++) {
+          if (steps[j].stepId === S.selectedStepId) return phaseKey(phases[i]);
+        }
       }
-    });
-    var help = h("button", {
-      class: "btn small legend-help",
-      text: "?",
-      title: "Show all step kinds",
-      onClick: function (e) {
-        e.stopPropagation();
-        S.legendExpanded = !S.legendExpanded;
-        ST.render();
-      }
-    });
-    wrap.appendChild(help);
-    if (S.legendExpanded && keys.length > 0) {
-      var full = h("div", { class: "legend-full" });
-      ALL_LEGEND_KINDS.forEach(function (pair) {
-        if (!present[pair[0]]) full.appendChild(legendItem(pair[0], pair[1]));
-      });
-      if (full.childNodes.length) wrap.appendChild(full);
     }
-    canvas.appendChild(wrap);
+    for (var k = 0; k < phases.length; k++) {
+      if (!phases[k].done && (phases[k].steps || []).some(isRunning)) return phaseKey(phases[k]);
+    }
+    return null;
   }
 
-  /** Horizontal track: one segment per leaf step in the live run. */
-  function renderTrackStrip() {
-    var segments = [];
-    var maxIter = {};
+  function bandClass(phase) {
+    if (phase.done) return "band done";
+    if ((phase.steps || []).some(isRunning)) return "band running";
+    return "band queued";
+  }
+
+  /** `time · cost · tokens` summed over the band's finished steps. */
+  function bandRollup(phase) {
+    var ms = 0, cost = 0, tok = emptyTokens(), any = false;
+    (phase.steps || []).forEach(function (s) {
+      if (!s.result) return;
+      any = true;
+      ms += s.result.durationMs || 0;
+      cost += s.result.costUsd || 0;
+      addTokensInto(tok, s.result.tokens);
+    });
+    if (!any) return "";
+    var bits = [];
+    var elapsed = fmtElapsed(ms);
+    if (elapsed) bits.push(elapsed);
+    if (cost > 0) bits.push("$" + cost.toFixed(4));
+    var tk = totalTokens(tok);
+    if (tk > 0) bits.push(fmtTokens(tk) + " tok");
+    return bits.join(" · ");
+  }
+
+  function kindChip(blockKind) {
+    var tone = KIND_TONE[blockKind];
+    return h("span", { class: "kind" + (tone ? " " + tone : "") },
+      h("span", { class: "rule", "aria-hidden": "true" }),
+      h("span", { class: "label", text: KIND_LABEL[blockKind] || blockKind || "step" })
+    );
+  }
+
+  /** Column 4: who actually runs the step. */
+  function runnerLabel(s) {
+    var id = s.agent || s.api;
+    if (id) return id + (s.model ? " · " + s.model : "");
+    if (s.modelClass) return "auto · class:" + s.modelClass;
+    if (s.model) return "auto · " + s.model;
+    return "—";
+  }
+
+  /** Column 5: worktree branch, item label, `cached`, `N tries` — in that order. */
+  function stepMetaCell(s) {
+    var cell = h("div", { class: "meta" });
+    var bits = [];
+    if (s.worktree) bits.push(h("span", { title: s.worktree.cwd, text: "⎇ " + s.worktree.branch }));
+    if (s.item) bits.push(h("span", { text: "item #" + s.item.index + ": " + truncate(s.item.value, 48) }));
+    if (s.cached) bits.push(h("span", { class: "cached", text: "cached" }));
+    var attempts = s.attempts || (s.result && s.result.attempts);
+    if (attempts && attempts > 1) bits.push(h("span", { text: attempts + " tries" }));
+    bits.forEach(function (b, i) {
+      if (i > 0) cell.appendChild(document.createTextNode(" · "));
+      cell.appendChild(b);
+    });
+    return cell;
+  }
+
+  function timeCell(s) {
+    if (s.status === "running" && s.startedAt) {
+      return h("div", {
+        class: "num time",
+        "data-since": String(s.startedAt),
+        text: "⏱ " + fmtElapsed(Date.now() - s.startedAt)
+      });
+    }
+    var ms = s.result && s.result.durationMs;
+    var label = typeof ms === "number" ? fmtElapsed(ms) : "";
+    return h("div", { class: "num time", text: label || "—" });
+  }
+
+  function stepRowClass(s) {
+    if (s.status === "running") return "step-row running";
+    if (s.status === "error") return "step-row failed";
+    if (s.status === "done") return "step-row done";
+    return "step-row";
+  }
+
+  /**
+   * One step, nine columns: dot, id, kind, runner, meta, time, cost, tokens,
+   * chevron. The whole row is the control (the chevron is its affordance);
+   * activating it selects the step and opens the drill-in drawer.
+   */
+  function renderStepRow(p, s) {
+    var cost = s.result && s.result.costUsd;
+    var tokens = s.result ? totalTokens(s.result.tokens) : 0;
+    return h("button", {
+        class: stepRowClass(s),
+        type: "button",
+        "data-detail-invoker": "row:" + stepKey(p, s),
+        "aria-label": "Open details for step " + s.stepId,
+        title: "Open this step's output and details",
+        onClick: function (event) { openDetail(p, s, event.currentTarget); }
+      },
+      h("span", { class: "dot", "aria-hidden": "true" }),
+      h("div", { class: "id", text: s.stepId }),
+      kindChip(s.blockKind),
+      h("div", { class: "meta", text: runnerLabel(s) }),
+      stepMetaCell(s),
+      timeCell(s),
+      h("div", { class: "num cost", text: cost ? "$" + cost.toFixed(4) : "—" }),
+      h("div", { class: "num tok", text: tokens ? fmtTokens(tokens) + " tok" : "—" }),
+      h("span", { class: "chev", "aria-hidden": "true", text: "›" })
+    );
+  }
+
+  /** "What runs inside" for a sub-workflow call step, hung off its row. */
+  function subWorkflowRow(s) {
+    if (s.blockKind !== "workflow") return null;
+    var block = subWorkflowCardBlock(s.stepId);
+    return block ? h("div", { class: "step-sub" }, block) : null;
+  }
+
+  /** The step whose output the expanded band shows. */
+  function bandOutputStep(phase) {
+    var steps = phase.steps || [];
+    var i;
+    if (S.selectedStepId) {
+      for (i = 0; i < steps.length; i++) if (steps[i].stepId === S.selectedStepId) return steps[i];
+    }
+    for (i = 0; i < steps.length; i++) if (isRunning(steps[i])) return steps[i];
+    for (i = steps.length - 1; i >= 0; i--) {
+      if (steps[i].text || (steps[i].result && steps[i].result.output)) return steps[i];
+    }
+    return null;
+  }
+
+  /**
+   * The live output pane inside the expanded band. Follows the stream until the
+   * reader scrolls up; scrolling back to the bottom re-engages following. The
+   * position survives re-renders through S.tailScroll (see applyTailScroll).
+   */
+  function renderOutputPane(p, s) {
+    var key = stepKey(p, s);
+    var body = ((s.result && s.result.output) || s.text || "").trim();
+    var scroll = S.tailScroll[key] || { follow: true, top: 0 };
+    var following = h("span", {
+      class: "following",
+      text: s.status === "running" ? (scroll.follow ? "following" : "paused") : ""
+    });
+    var pane = h("div", { class: "output" },
+      h("div", { class: "output-head" },
+        h("span", { class: "label", text: s.stepId + " · output" }),
+        following,
+        h("div", { class: "actions" },
+          h("button", {
+            class: "obtn", type: "button",
+            text: S.outputNoWrap ? "Wrap" : "No wrap",
+            title: "Toggle line wrapping",
+            onClick: function () { S.outputNoWrap = !S.outputNoWrap; ST.render(); }
+          }),
+          h("button", {
+            class: "obtn", type: "button", text: "Copy", title: "Copy this step's output",
+            onClick: function () {
+              if (navigator.clipboard) navigator.clipboard.writeText(body).catch(function () {});
+            }
+          })
+        )
+      )
+    );
+    var out = h("div", { class: "output-body" + (S.outputNoWrap ? " nowrap" : ""), "data-key": key });
+    out.textContent = body || (s.activity || "no output yet");
+    out.addEventListener("scroll", function () {
+      var atBottom = out.scrollTop + out.clientHeight >= out.scrollHeight - 4;
+      S.tailScroll[key] = { follow: atBottom, top: out.scrollTop };
+      if (s.status === "running") following.textContent = atBottom ? "following" : "paused";
+    });
+    pane.appendChild(out);
+    return pane;
+  }
+
+  /**
+   * Run-level pending states (approval checkpoints, human input) sit above the
+   * first band: they belong to the run, not to any one band's step list.
+   * Pending ones first, then the recorded decisions.
+   */
+  function renderPendingBlock(container) {
     var phases = (S.runState && S.runState.phases) || [];
+    var pending = [], resolved = [];
     phases.forEach(function (p) {
-      if (p.iteration && (!maxIter[p.phaseId] || p.iteration > maxIter[p.phaseId])) {
-        maxIter[p.phaseId] = p.iteration;
-      }
-    });
-    phases.forEach(function (p) {
-      var isLatest = !p.iteration || p.iteration === (maxIter[p.phaseId] || 1);
-      if (!isLatest) return;
       (p.steps || []).forEach(function (s) {
-        segments.push(s);
+        if (s.approval) (s.approval.pending ? pending : resolved).push(renderApproval(s));
+        if (s.humanInput) (s.humanInput.pending ? pending : resolved).push(renderHumanInput(s));
       });
     });
-    var track = h("div", {
-      class: "track",
-      role: "list",
-      title: "Live pipeline track",
-      "aria-label": "Live pipeline track"
-    });
-    segments.forEach(function (s, idx) {
-      var status = s.status || "pending";
-      if (s.result && s.result.skipped) status = "skipped";
-      var kind = s.blockKind || "step";
-      var seg = h("div", {
-        class: "track-seg " + status,
-        role: "listitem",
-        title: s.stepId + " · " + status,
-        "aria-label": s.stepId + ": " + status + " (" + (KIND_LABEL[kind] || kind) + ")",
-        style: status === "pending"
-          ? "background:transparent;border-color:var(--border)"
-          : "background:" + kindColor(kind) + ";border-color:" + kindColor(kind)
-      });
-      if (idx < segments.length - 1) {
-        track.appendChild(seg);
-        track.appendChild(h("div", { class: "track-join", "aria-hidden": "true" }));
-      } else {
-        track.appendChild(seg);
-      }
-    });
-    return track;
+    if (!pending.length && !resolved.length) return;
+    var box = h("div", { class: "pending-block" });
+    pending.concat(resolved).forEach(function (el) { box.appendChild(el); });
+    container.appendChild(box);
   }
 
+  /** One band per phase instance; exactly one expanded, hosting the output pane. */
+  function renderBands(container) {
+    var phases = (S.runState && S.runState.phases) || [];
+    if (!phases.length) return;
+    renderPendingBlock(container);
+    var expanded = expandedPhaseKey(phases);
+    phases.forEach(function (p, idx) {
+      var cls = bandClass(p);
+      var isExpanded = phaseKey(p) === expanded;
+      var band = h("div", { class: cls + (isExpanded ? " expanded" : "") });
+      var steps = p.steps || [];
+      var count = typeof p.stepCount === "number" ? p.stepCount : steps.length;
+      var index = typeof p.index === "number" ? p.index : idx;
+      var rollup = bandRollup(p);
+      band.appendChild(h("div", { class: "band-head" },
+        h("span", { class: "idx", text: String(index + 1).padStart(2, "0") }),
+        h("span", { class: "dot", "aria-hidden": "true" }),
+        h("span", {
+          class: "title",
+          text: p.title + (p.iteration && p.iteration > 1 ? " · iteration " + p.iteration : "")
+        }),
+        count > 1 ? h("span", { class: "count", text: count + " steps parallel" }) : null,
+        rollup ? h("span", { class: "rollup", text: rollup }) : null
+      ));
+      // A queued phase collapses to its header line.
+      if (cls === "band queued") { container.appendChild(band); return; }
+      steps.forEach(function (s) {
+        band.appendChild(renderStepRow(p, s));
+        var sub = subWorkflowRow(s);
+        if (sub) band.appendChild(sub);
+      });
+      if (isExpanded) {
+        var outStep = bandOutputStep(p);
+        if (outStep) band.appendChild(renderOutputPane(p, outStep));
+      }
+      container.appendChild(band);
+    });
+  }
+
+  /** Public: focus one step — expands its band and fills the output pane. */
+  function selectStep(stepId) {
+    S.selectedStepId = stepId || null;
+    scheduleRender();
+  }
+
+  /**
+   * A pipeline step card. The live run pane renders step rows instead; this
+   * survives for the recorded-run detail view in st-modals.js (single argument,
+   * no live phase) and stays the shape that view expects.
+   */
   function renderCard(s, p) {
     // Historical cards have no live phase instance; only live cards need a
     // phase-qualified tail-scroll key.
@@ -644,6 +809,9 @@
   function openDetail(p, s, invoker) {
     S.detailFocusGeneration += 1;
     S.detail = { phaseId: p.phaseId, iteration: p.iteration || 1, stepId: s.stepId };
+    // Drilling in also picks the step: its band expands and the band's output
+    // pane switches to it, so the drawer and the pane never disagree.
+    S.selectedStepId = s.stepId;
     S.detailInvoker = invoker && typeof invoker.getAttribute === "function"
       ? invoker.getAttribute("data-detail-invoker")
       : null;
@@ -656,6 +824,9 @@
   function closeDetail() {
     if (!S.detail) return;
     S.detail = null;
+    // Releasing the drill-in releases the selection: the running band takes the
+    // expanded slot back.
+    S.selectedStepId = null;
     S.detailFocusPending = false;
     var invoker = S.detailInvoker;
     var fallback = S.detailFallback;
@@ -1040,6 +1211,10 @@
     canvas.appendChild(wrap);
   }
 
+  /**
+   * The run header's readouts: a two-segment progress bar (finished / in
+   * flight), the step count, and the live cost + token ticker.
+   */
   function updateProgress() {
     var steps = [];
     if (S.runState) {
@@ -1048,16 +1223,21 @@
       });
     }
     var total = steps.length;
-    var doneN = steps.filter(function (s) { return s.status === "done" || s.status === "error"; }).length;
-    var runningN = steps.filter(function (s) { return s.status === "running"; }).length;
-    var bar = document.getElementById("progressBar");
-    var pct = total ? Math.round((doneN / total) * 100) : 0;
-    bar.style.width = pct + "%";
+    var doneN = 0, runningN = 0;
+    steps.forEach(function (s) {
+      if (s.status === "done" || s.status === "error") doneN++;
+      else if (s.status === "running") runningN++;
+    });
+    document.getElementById("progressBar").style.width =
+      (total ? (doneN / total) * 100 : 0).toFixed(2) + "%";
+    document.getElementById("progressLive").style.width =
+      (total ? (runningN / total) * 100 : 0).toFixed(2) + "%";
     var paused = Boolean(S.runState && S.runState.paused && !S.runState.done);
     document.getElementById("progressText").textContent =
-      doneN + " / " + total + " steps" + (runningN ? " · " + runningN + " running" : "") +
+      doneN + " / " + total + " steps" +
       (paused ? (runningN ? " · ⏸ pausing (" + runningN + " finishing)" : " · ⏸ paused") : "");
     updatePauseButton();
+    updateRunPill();
 
     // Live cost/token ticker + budget badge.
     var cost = 0, tokens = emptyTokens();
@@ -1074,8 +1254,33 @@
       var budget = S.runState && S.runState.budget;
       if (budget) bits.push("⚠ budget $" + budget.limitUsd.toFixed(4) + " reached");
       ticker.textContent = bits.join(" · ");
-      ticker.className = "cost-ticker" + (budget ? " over-budget" : "");
+      ticker.className = "steps cost-ticker" + (budget ? " over-budget" : "");
     }
+  }
+
+  /** The header breadcrumb's run-state pill. */
+  function updateRunPill() {
+    var pill = document.getElementById("runPill");
+    if (!pill) return;
+    if (!(S.runState && S.runState.started)) {
+      pill.style.display = "none";
+      clear(pill);
+      return;
+    }
+    var done = Boolean(S.runState.done);
+    clear(pill);
+    pill.className = "status-pill " + (done ? "complete" : "running");
+    pill.style.display = "inline-flex";
+    pill.appendChild(h("span", { class: "dot", "aria-hidden": "true" }));
+    pill.appendChild(document.createTextNode(
+      done ? "complete" : (S.runState.paused ? "paused" : "running")
+    ));
+  }
+
+  /** Show/hide the run header's metrics strip (clock, progress, run controls). */
+  function showRunMetrics(show) {
+    var el = document.getElementById("runMetrics");
+    if (el) el.style.display = show ? "flex" : "none";
   }
 
   // ---- prompt history (run-input ↑/↓ recall, mirroring the TUI) -------------
@@ -1148,6 +1353,7 @@
     S.narration = []; S.arrivalInspect = false; S.arrivalEnter = false;
     S.narrationFreshPlayed = null;
     S.conductorLinePlayed = null;
+    S.selectedStepId = null;
     S.arrivalCtaFocused = false;
     // Leave full-bleed Station for ride mode: thin chrome stays so banners and
     // cancel remain reachable while the POST is in flight / if it fails.
@@ -1156,7 +1362,7 @@
     }
     S.endedAt = 0;
     setBanner("", "");
-    document.getElementById("statusLine").style.display = "flex";
+    showRunMetrics(true);
     syncBodyMode();
     ST.render();
     var payload = { workflow: S.selected, input: input, fresh: document.getElementById("freshChk").checked };
@@ -1331,7 +1537,7 @@
     if (!btn) return;
     var paused = Boolean(S.runState && S.runState.paused);
     btn.textContent = paused ? "▶ Resume" : "⏸ Pause";
-    btn.className = paused ? "btn primary" : "btn";
+    btn.className = paused ? "rbtn primary" : "rbtn";
   }
 
   function setRunning(running) {
@@ -1342,12 +1548,20 @@
       (running && !ro && !S.runExternal && !S.runDetached) ? "block" : "none";
     document.getElementById("cancelBtn").style.display = (running && !ro) ? "block" : "none";
     updateDetachButton();
-    // Plan and the Describe compose box are pre-launch chrome — hide them while
-    // a run is attached so the overflow canvas gets the vertical room.
     document.getElementById("planBtn").style.display = (running || ro) ? "none" : "block";
     document.getElementById("input").disabled = running || ro;
+    // The composer and the authoring actions are pre-launch chrome: while a run
+    // is attached the phase bands own the pane and the header strip's room goes
+    // to the clock, progress and run controls. Both return when the run ends
+    // (renderSourceLine restores the actions on the next workflow load).
+    document.getElementById("runRow").style.display =
+      (running || ro || !S.selected) ? "none" : "grid";
+    var actions = document.getElementById("wfActions");
+    if (actions) actions.style.display = (running || ro || !S.selected) ? "none" : "flex";
+    showRunMetrics(Boolean(running));
     document.body.classList.toggle("run-live", Boolean(running));
     updatePauseButton();
+    updateRunPill();
   }
 
   function startTimer() {
@@ -1560,7 +1774,7 @@
 
   function renderPlanResult(plan, workflowName) {
     setBanner("", "");
-    var canvas = document.getElementById("canvas");
+    var canvas = document.getElementById("bands");
     clear(canvas);
 
     // Summary header.
@@ -1691,15 +1905,17 @@
     handlePromptHistoryKey: handlePromptHistoryKey,
     openDetail: openDetail,
     openStream: openStream,
+    renderBands: renderBands,
     renderCard: renderCard,
     renderDetail: renderDetail,
-    renderLegendOrTrack: renderLegendOrTrack,
     renderNarration: renderNarration,
     renderParamsForm: renderParamsForm,
     renderStagedIndicator: renderStagedIndicator,
     renderSummary: renderSummary,
+    selectStep: selectStep,
     sessionOverridesEmpty: sessionOverridesEmpty,
     setBanner: setBanner,
+    showRunMetrics: showRunMetrics,
     setParamsExpanded: setParamsExpanded,
     setRunning: setRunning,
     startPlan: startPlan,
@@ -1709,6 +1925,7 @@
     subWorkflowView: subWorkflowView,
     togglePauseRun: togglePauseRun,
     updateProgress: updateProgress,
+    updateRunPill: updateRunPill,
     workflowHasStaged: workflowHasStaged,
     clearPromptBrowse: clearPromptBrowse,
   };

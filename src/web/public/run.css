@@ -1,68 +1,634 @@
-/* Run surface: the live run row, pipeline phases and step cards, sub-workflow
-   blocks, sandbox badges, approval + human-input cards, and the drill-in drawer. */
-/* Active / attached run: drop the Describe compose box and pack control
-   buttons into a thin strip so the canvas (overflow) gets more height. */
-/* #runRow carries an inline `display: grid/none` from app.js, so the row
-   cannot be re-declared flex here — with the compose box hidden, the grid's
-   single visible item (.btnstack) fills the row and right-aligns itself. */
-body.run-live .runbar .row {
-  gap: 8px;
-  margin-top: 10px;
-}
-body.run-live .runbar .row .run-compose {
-  display: none !important;
-}
-body.run-live .runbar .btnstack {
-  flex-direction: row;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  min-width: 0;
-  gap: 6px;
-}
-body.run-live .runbar .btnstack .btn {
-  min-height: 32px;
-  padding: 0 12px;
-  font-size: 13px;
-  border-radius: 8px;
-}
-body.run-live .runbar {
-  padding-bottom: 12px;
-}
-.status-line {
-  margin-top: 12px;
-  font-size: 12px;
-  color: var(--muted);
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.progress {
+/* Run surface: the centre pane — run header strip, idle composer, phase bands
+   and their live output pane — plus the recorded-run step cards (rendered by
+   st-modals.js) and the step drill-in drawer. */
+
+/* ---- centre pane scaffolding -------------------------------------------- */
+/* section.work / .runbar / .canvas survive as class hooks: the Station, ride
+   and Arrival body modes in arrival.css still select on them. */
+section.work {
   flex: 1;
-  height: 7px;
-  background: rgba(8, 11, 16, 0.72);
-  border-radius: 999px;
-  overflow: hidden;
-  min-width: 120px;
-  border: 1px solid var(--border);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
-.progress > span {
-  display: block;
-  height: 100%;
-  width: 0;
-  background: linear-gradient(90deg, var(--accent-dim), var(--accent-bright));
-  transition: width .25s var(--ease-out);
-  border-radius: inherit;
+.runbar {
+  flex: none;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.runbar .reroute-row,
+.runbar .banner {
+  margin: 0 18px 10px;
+}
+
+/* ---- run header strip ---------------------------------------------------- */
+.run-head {
+  flex: none;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.run-head .title {
+  font: 600 17px / 1.2 var(--font-ui);
+  letter-spacing: -0.02em;
+}
+.run-head .origin {
+  font: 400 11.5px / 1.4 var(--font-mono);
+  color: var(--dim);
+}
+.run-head .scope {
+  font: 400 12.5px / 1.4 var(--font-ui);
+  color: var(--muted);
+  margin-top: 3px;
+  max-width: 66ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-metrics {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.run-clock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-end;
+}
+.run-clock .row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.run-clock .elapsed {
+  font: 600 20px / 1 var(--font-mono);
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+.run-clock .steps {
+  font: 400 11px / 1 var(--font-mono);
+  color: var(--dim);
+}
+.run-progress {
+  width: 220px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-quiet);
+  overflow: hidden;
+  display: flex;
+}
+.run-progress .done {
+  background: var(--done);
+}
+.run-progress .live {
+  background: var(--running);
+  animation: st-pulse 1.6s ease-in-out infinite;
+}
+
+.rbtn {
+  border: 1px solid var(--border);
+  background: var(--raised);
+  color: var(--muted);
+  border-radius: var(--r-md);
+  height: 30px;
+  padding: 0 11px;
+  font: 500 12.5px / 1 var(--font-ui);
+  cursor: pointer;
+}
+.rbtn:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.rbtn.danger {
+  border-color: rgba(248, 81, 73, 0.35);
+  background: rgba(248, 81, 73, 0.08);
+  color: var(--error-text);
+}
+.rbtn.danger:hover {
+  background: rgba(248, 81, 73, 0.16);
+}
+.rbtn.primary {
+  border-color: rgba(52, 211, 196, 0.4);
+  background: rgba(52, 211, 196, 0.1);
+  color: var(--accent-bright);
+  font-weight: 600;
+}
+.rbtn.primary:hover {
+  background: rgba(52, 211, 196, 0.18);
+}
+
+/* Layout glue around the strip (the brief's block above styles the parts). */
+.run-head-copy {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1 1 auto;
+}
+/* The metrics strip is fixed-width; the copy block absorbs the slack. */
+.run-metrics {
+  flex: none;
+}
+/* Long workflow names must not wrap the single-row header strip. */
+.run-head .title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* renderSourceLine() sets display:flex inline and emits a `.src` origin chip. */
+.run-head .origin {
+  gap: 8px;
+  align-items: center;
+  margin-top: 3px;
+}
+.run-head .origin .src {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border: 1px solid var(--border);
+  border-radius: var(--r-xs);
+  padding: 0 5px;
+}
+.run-metrics .rbtn,
+.run-progress {
+  flex: none;
+}
+.wfactions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+  flex-wrap: wrap;
 }
 .cost-ticker {
   font-variant-numeric: tabular-nums;
-  color: var(--ok, #2ea043);
+  color: var(--done-text);
   white-space: nowrap;
 }
 .cost-ticker.over-budget {
-  color: var(--err, #f85149);
+  color: var(--error-text);
   font-weight: 600;
 }
+
+/* ---- idle composer ------------------------------------------------------- */
+/* #runRow carries an inline `display: grid/none` from st-run.js / st-core.js,
+   so the display mode is not re-declared here. */
+.composer {
+  grid-template-columns: minmax(0, 1fr) 172px;
+  gap: 14px;
+  padding: 14px 18px 16px;
+  align-items: start;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.run-compose {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.run-compose-label {
+  font: 500 10px / 1 var(--font-ui);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+textarea#input {
+  width: 100%;
+  resize: vertical;
+  min-height: 76px;
+  max-height: 220px;
+  background: var(--well);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  font: 400 13px / 1.55 var(--font-ui);
+}
+textarea#input:hover {
+  border-color: var(--border-strong);
+}
+textarea#input:focus {
+  outline: none;
+  border-color: rgba(52, 211, 196, 0.4);
+  box-shadow: 0 0 0 3px rgba(52, 211, 196, 0.1);
+}
+.btnstack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.btnstack .rbtn {
+  height: 34px;
+}
+.fresh-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font: 400 11.5px / 1.4 var(--font-ui);
+  color: var(--dim);
+}
+
+/* Workflow variables panel inside the composer. Moved here verbatim from
+   settings.css: its JS (renderParamsForm) lives in st-run.js and the surface
+   it styles is this pane. Relative order preserved; no other rule in either
+   file targets these selectors, so the cascade is unchanged. */
+.params-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-top: 1px solid rgba(53, 67, 84, 0.55);
+  margin-top: 2px;
+  padding-top: 10px;
+  min-width: 0;
+}
+.params-panel[hidden] {
+  display: none !important;
+}
+.params-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s var(--ease-out), border-color 0.15s var(--ease-out), color 0.15s
+    var(--ease-out);
+}
+.params-toggle:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(53, 67, 84, 0.85);
+}
+.params-toggle:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 2px;
+}
+.params-toggle-chevron {
+  width: 0.65em;
+  height: 0.65em;
+  flex: none;
+  border-right: 2px solid rgba(142, 234, 224, 0.85);
+  border-bottom: 2px solid rgba(142, 234, 224, 0.85);
+  transform: rotate(-45deg);
+  transition: transform 0.18s var(--ease-out);
+  margin-top: -1px;
+}
+.params-panel:not(.collapsed) .params-toggle-chevron {
+  transform: rotate(45deg);
+  margin-top: 1px;
+}
+.params-toggle-label {
+  color: rgba(142, 234, 224, 0.9);
+}
+.params-toggle-meta {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  white-space: nowrap;
+}
+.params-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 14px 16px;
+  padding: 10px 2px 4px;
+  max-height: min(36vh, 280px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.params-panel.collapsed .params-form {
+  display: none;
+}
+.params-form .field {
+  margin-bottom: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.params-form .field > label {
+  color: rgba(232, 238, 244, 0.86);
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+.params-form .field .param-type {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--muted);
+  margin-left: 6px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+.params-form .field .param-required {
+  color: var(--error);
+  margin-left: 2px;
+}
+.params-form .field .hint {
+  line-height: 1.4;
+  color: rgba(165, 180, 196, 0.92);
+  font-size: 11.5px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 2.8em;
+}
+
+/* ---- phase bands --------------------------------------------------------- */
+.bands {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.band {
+  border-bottom: 1px solid var(--border-quiet);
+  display: flex;
+  flex-direction: column;
+}
+.band.expanded {
+  flex: 1;
+  min-height: 0;
+}
+
+.band-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 18px;
+  background: var(--header);
+}
+.band-head .idx {
+  font: 500 11px / 1 var(--font-mono);
+  color: var(--dim);
+}
+.band-head .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--faint);
+}
+.band-head .title {
+  font: 600 13px / 1.3 var(--font-ui);
+  letter-spacing: -0.01em;
+}
+.band-head .count {
+  font: 400 11.5px / 1 var(--font-mono);
+  color: var(--dim);
+}
+.band-head .rollup {
+  margin-left: auto;
+  font: 400 11.5px / 1 var(--font-mono);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.band.done .band-head .dot {
+  background: var(--done);
+}
+.band.running .band-head .dot {
+  background: var(--running);
+  animation: st-pulse 1.1s ease-in-out infinite;
+}
+.band.running .band-head .rollup {
+  color: var(--running);
+}
+.band.queued .band-head .title {
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.step-row {
+  display: grid;
+  grid-template-columns: 14px 150px 96px 168px 1fr 62px 68px 92px 20px;
+  gap: 12px;
+  padding: 7px 18px;
+  align-items: center;
+  border-top: 1px solid var(--border-quiet);
+  font: 400 12px / 1.4 var(--font-mono);
+  color: var(--muted);
+  cursor: pointer;
+  background: none;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  width: 100%;
+  text-align: left;
+}
+.step-row:hover {
+  background: #12161a;
+}
+.step-row .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.step-row.done .dot {
+  background: var(--done);
+}
+.step-row.failed .dot {
+  background: var(--error);
+}
+.step-row.running {
+  background: rgba(74, 163, 255, 0.06);
+  box-shadow: inset 2px 0 0 var(--running);
+}
+.step-row.running .dot {
+  background: var(--running);
+  box-shadow: 0 0 0 3px rgba(74, 163, 255, 0.18);
+}
+.step-row .id {
+  color: var(--text);
+  font-weight: 500;
+}
+.step-row .meta {
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.step-row .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.step-row .tok {
+  color: var(--dim);
+}
+.step-row .chev {
+  color: var(--faint);
+  text-align: center;
+}
+.step-row.running .num.time {
+  color: var(--running);
+}
+.step-row .meta .cached {
+  color: var(--gate);
+}
+
+.kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.kind .rule {
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--kind-command);
+}
+.kind .label {
+  font: 500 10.5px / 1 var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--kind-command-text);
+}
+.kind.worker .rule {
+  background: var(--kind-worker);
+}
+.kind.worker .label {
+  color: var(--kind-worker-text);
+}
+.kind.consolidator .rule {
+  background: var(--kind-consolidator);
+}
+.kind.consolidator .label {
+  color: var(--kind-consolidator-text);
+}
+.kind.distributor .rule {
+  background: var(--kind-distributor);
+}
+.kind.distributor .label {
+  color: var(--kind-distributor-text);
+}
+.kind.gate .rule {
+  background: var(--kind-gate);
+}
+.kind.gate .label {
+  color: var(--kind-gate-text);
+}
+.kind.llm .rule {
+  background: var(--kind-llm);
+}
+.kind.llm .label {
+  color: var(--kind-llm-text);
+}
+
+/* Numeric readouts the brief's band block does not already mark, and long step
+   ids clipped to their fixed column. */
+.band-head .idx,
+.band-head .count {
+  font-variant-numeric: tabular-nums;
+}
+.step-row .id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Nothing stacked above the expanded band may squeeze it away: every other
+   child of the scrolling bands column keeps its natural height, and the
+   expanded band keeps a floor so its output pane stays readable even when the
+   pending block and the narration are tall. (Both values are mine — the brief
+   specifies the band rules but not this stacking case.) */
+.bands > * {
+  flex: none;
+}
+.band.expanded {
+  min-height: 30vh;
+}
+/* Run-level pending states (approvals, human input) above the first band. */
+.pending-block {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border-quiet);
+}
+/* "What runs inside" for a sub-workflow call step, hung off its row. */
+.step-sub {
+  padding: 0 18px 8px 44px;
+}
+
+/* ---- live output pane ---------------------------------------------------- */
+.output {
+  flex: 1;
+  min-height: 0;
+  background: var(--well);
+  border-top: 1px solid var(--border-quiet);
+  display: flex;
+  flex-direction: column;
+}
+.output-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 18px;
+  border-bottom: 1px solid var(--raised);
+}
+.output-head .label {
+  font: 500 10px / 1 var(--font-ui);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.output-head .following {
+  font: 400 11px / 1 var(--font-mono);
+  color: var(--running);
+}
+.output-head .actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+.output-head .obtn {
+  border: 1px solid var(--border);
+  background: var(--raised);
+  color: var(--muted);
+  border-radius: var(--r-sm);
+  padding: 3px 8px;
+  font: 500 11px / 1.4 var(--font-ui);
+  cursor: pointer;
+}
+.output-head .obtn:hover {
+  color: var(--text);
+}
+.output-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 18px;
+  font: 400 12.5px / 1.65 var(--font-mono);
+  color: #b9c4d0;
+  white-space: pre-wrap;
+}
+.output-body.nowrap {
+  white-space: pre;
+  overflow-x: auto;
+}
+
 .banner {
   margin-top: 10px;
   padding: 8px 12px;
@@ -87,13 +653,6 @@ body.run-live .runbar {
   background: #122230;
   border: 1px solid #1f4a6f;
   color: #bcdcf5;
-}
-.canvas {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px 22px 72px;
-  background: radial-gradient(ellipse 80% 40% at 50% -5%, rgba(52, 211, 196, 0.05), transparent 55%),
-    linear-gradient(180deg, rgba(10, 14, 20, 0.35) 0%, transparent 28%);
 }
 .empty {
   color: var(--muted);
@@ -212,11 +771,6 @@ body.run-live .runbar {
 }
 .connector.err {
   background: rgba(248, 81, 73, 0.4);
-}
-.loop-marker {
-  display: flex;
-  justify-content: center;
-  margin: 6px 0;
 }
 .cards {
   display: flex;
@@ -390,41 +944,53 @@ body.run-live .runbar {
   align-items: center;
   gap: 5px;
 }
-.kind .pulse {
+/* Scoped to the card / drawer badges so the solid-fill badge never repaints the
+   phase band's `.kind` chip (which colours its own rule + label instead). */
+.card .kind .pulse {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: #0e1116;
   opacity: 0.35;
 }
-.kind.worker {
+.card .kind.worker,
+.drawer-head .kind.worker {
   background: #6fb1ff;
 }
-.kind.processor {
+.card .kind.processor,
+.drawer-head .kind.processor {
   background: #9d8cff;
 }
-.kind.distributor {
+.card .kind.distributor,
+.drawer-head .kind.distributor {
   background: #ffce6f;
 }
-.kind.consolidator {
+.card .kind.consolidator,
+.drawer-head .kind.consolidator {
   background: #5fe0c6;
 }
-.kind.gate {
+.card .kind.gate,
+.drawer-head .kind.gate {
   background: #f0a35e;
 }
-.kind.approval {
+.card .kind.approval,
+.drawer-head .kind.approval {
   background: #ffd166;
 }
-.kind.human {
+.card .kind.human,
+.drawer-head .kind.human {
   background: #f5a3ff;
 }
-.kind.merge {
+.card .kind.merge,
+.drawer-head .kind.merge {
   background: #ff9ecb;
 }
-.kind.command {
+.card .kind.command,
+.drawer-head .kind.command {
   background: #b8c4d0;
 }
-.kind.llm {
+.card .kind.llm,
+.drawer-head .kind.llm {
   background: #62d2f5;
 }
 .card .state {
@@ -447,14 +1013,14 @@ body.run-live .runbar {
   margin-top: 5px;
 }
 /* Sub-workflow "what runs inside" block on a workflow-step card. */
-.card .subwf {
+.subwf {
   margin-top: 6px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--panel-2);
   overflow: hidden;
 }
-.card .subwf > summary {
+.subwf > summary {
   cursor: pointer;
   list-style: none;
   padding: 5px 8px;
@@ -465,53 +1031,53 @@ body.run-live .runbar {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.card .subwf > summary::-webkit-details-marker {
+.subwf > summary::-webkit-details-marker {
   display: none;
 }
-.card .subwf > summary::before {
+.subwf > summary::before {
   content: "▸ ";
   color: var(--muted);
 }
-.card .subwf[open] > summary::before {
+.subwf[open] > summary::before {
   content: "▾ ";
 }
-.card .subwf-body {
+.subwf-body {
   border-top: 1px solid var(--border);
   padding: 4px 0;
 }
-.card .subwf-meta {
+.subwf-meta {
   font-size: 10.5px;
   color: var(--muted);
   font-family: var(--font-mono);
   padding: 2px 8px;
 }
-.card .subwf-step {
+.subwf-step {
   display: flex;
   align-items: baseline;
   gap: 6px;
   font-size: 11px;
   padding: 2px 8px;
 }
-.card .subwf-step.overridden {
+.subwf-step.overridden {
   background: var(--accent-soft);
 }
-.card .subwf-kind {
+.subwf-kind {
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--muted);
   min-width: 52px;
 }
-.card .subwf-id {
+.subwf-id {
   color: var(--text);
   font-family: var(--font-mono);
 }
-.card .subwf-target {
+.subwf-target {
   color: var(--muted);
   font-family: var(--font-mono);
   margin-left: auto;
 }
-.card .subwf-mark {
+.subwf-mark {
   color: var(--accent);
 }
 .card .inputs {
@@ -665,97 +1231,6 @@ body.run-live .runbar {
   line-height: 1.5;
   box-sizing: border-box;
   margin-top: 8px;
-}
-.legend {
-  max-width: 1100px;
-  margin: 0 auto 18px;
-  display: flex;
-  gap: 12px 16px;
-  flex-wrap: wrap;
-  align-items: center;
-  color: var(--muted);
-  font-size: 11px;
-  padding: 10px 12px;
-  border: 1px solid rgba(42, 51, 64, 0.7);
-  border-radius: var(--radius-md);
-  background: rgba(16, 22, 30, 0.55);
-}
-.legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.legend i {
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  display: inline-block;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
-}
-.legend-help {
-  padding: 0 7px !important;
-  min-width: 24px;
-  height: 22px;
-  line-height: 1;
-  font-weight: 700;
-}
-.legend-full {
-  width: 100%;
-  display: flex;
-  gap: 14px;
-  flex-wrap: wrap;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border);
-}
-.track {
-  max-width: 1100px;
-  margin: 0 auto 18px;
-  display: flex;
-  align-items: center;
-  gap: 0;
-  padding: 10px 4px;
-}
-.track-seg {
-  flex: 1;
-  min-width: 18px;
-  height: 10px;
-  border-radius: 999px;
-  border: 2px solid var(--border);
-  background: transparent;
-  transition: background 180ms ease, box-shadow 180ms ease, transform 180ms ease;
-}
-.track-seg.running {
-  box-shadow: 0 0 0 3px rgba(74, 163, 255, 0.25);
-  transform: scaleY(1.35);
-  animation: track-pulse 1.1s ease-in-out infinite;
-}
-.track-seg.done,
-.track-seg.skipped {
-  opacity: 0.95;
-}
-.track-seg.failed,
-.track-seg.error {
-  background: var(--error) !important;
-  border-color: var(--error) !important;
-}
-.track-seg.pending {
-  opacity: 0.45;
-}
-.track-join {
-  width: 8px;
-  height: 2px;
-  background: var(--border);
-  flex: none;
-}
-@keyframes track-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.65;
-  }
 }
 .summary {
   max-width: 1100px;
@@ -1038,7 +1513,7 @@ body.run-live .runbar {
   padding: 1px 7px;
   border-radius: 6px;
   color: #0e1116;
-  background: var(--pending);
+  background: var(--faint);
 }
 .drawer-head .state {
   margin-left: auto;

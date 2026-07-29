@@ -14,26 +14,26 @@
   var syncBodyMode = ST.syncBodyMode;
 
   function render() {
-    var canvas = document.getElementById("canvas");
-    clear(canvas);
+    var stage = document.getElementById("bands");
+    clear(stage);
     syncBodyMode();
     if (!S.spec) {
-      ST.arrival.renderStationAtmosphere(canvas);
-      canvas.appendChild(h("div", { class: "empty station-empty" },
+      ST.arrival.renderStationAtmosphere(stage);
+      stage.appendChild(h("div", { class: "empty station-empty" },
         h("div", { class: "station-logo" },
           h("span", { class: "brand-mark", "aria-hidden": "true" }),
           h("span", { class: "accent", text: "steam" }),
           "train"
         ),
         h("div", { class: "station-premise", text: "Parallel agents. One receipt." }),
-        h("div", { class: "boarding-pulse", text: "Boarding\u2026" })
+        h("div", { class: "boarding-pulse", text: "Boarding…" })
       ));
       return;
     }
 
     // First-run station: hero only — one composition, no pipeline noise.
     if (S.stationLanding && S.selected === TOUR_NAME && !(S.runState && S.runState.started)) {
-      ST.arrival.renderStationHero(canvas);
+      ST.arrival.renderStationHero(stage);
       ST.run.updateProgress();
       return;
     }
@@ -45,20 +45,20 @@
       (S.departing || (S.runState && !S.runState.done)) &&
       !S.arrivalInspect
     ) {
-      ST.arrival.renderConductorStage(canvas);
+      ST.arrival.renderConductorStage(stage);
       ST.run.updateProgress();
       return;
     }
 
     // Returning to tour (not first-run): keep a compact boarding banner above the pipeline.
     if (S.selected === TOUR_NAME && !(S.runState && S.runState.started) && !S.departing) {
-      ST.arrival.renderStationHero(canvas);
+      ST.arrival.renderStationHero(stage);
     }
 
     var showingArrival = false;
     if (S.runState && S.runState.done && !S.departing) {
-      if (!S.arrivalInspect) ST.arrival.renderStationAtmosphere(canvas);
-      showingArrival = ST.arrival.renderArrival(canvas);
+      if (!S.arrivalInspect) ST.arrival.renderStationAtmosphere(stage);
+      showingArrival = ST.arrival.renderArrival(stage);
     }
 
     if (showingArrival && !S.arrivalInspect) {
@@ -66,74 +66,16 @@
       return;
     }
 
-    ST.run.renderNarration(canvas);
-    ST.run.renderLegendOrTrack(canvas);
+    ST.run.renderNarration(stage);
+    // Idle (no run started yet): the composer above owns the pane and the bands
+    // area stays empty. Once a run starts, the phase bands take it.
+    ST.run.renderBands(stage);
 
-    var maxIter = {};
-    var phases = S.runState ? S.runState.phases : [];
-    phases.forEach(function (p) {
-      if (p.iteration && (!maxIter[p.phaseId] || p.iteration > maxIter[p.phaseId])) maxIter[p.phaseId] = p.iteration;
-    });
-
-    phases.forEach(function (p, idx) {
-      if (idx > 0) {
-        var prevPhase = phases[idx - 1];
-        var prevDone = prevPhase && prevPhase.done;
-        var prevOk = prevPhase && prevPhase.ok;
-        var curRunning = (p.steps || []).some(function (s) { return s.status === "running"; });
-        var curDone = p.done;
-        var connCls = "connector";
-        if (prevDone && prevOk && curRunning) connCls += " active";
-        else if (prevDone && prevOk && curDone) connCls += " done";
-        else if (prevDone && !prevOk && curDone && p.ok) connCls += " done";
-        else if (prevDone && !prevOk) connCls += " err";
-        else if (S.runState && S.runState.started && prevDone) connCls += " active";
-        var connEl = h("div", { class: connCls });
-        if (connCls.indexOf("active") >= 0) {
-          connEl.style.animationDelay = "-" + (Date.now() % 600) + "ms";
-        }
-        canvas.appendChild(connEl);
-      }
-      var piter = p.iteration || 1;
-      var steps = p.steps || [];
-      var running = steps.some(function (s) { return s.status === "running"; });
-      var pstat = p.done ? (p.ok ? "done" : "failed") : (running ? "running" : (S.runState && S.runState.started ? "" : "pending"));
-      var ptitle = p.title + (p.iteration && p.iteration > 1 ? " \u00b7 iteration " + p.iteration : "");
-      var phaseEl = h("div", { class: "phase" + (p.done ? " done" : "") },
-        h("div", { class: "phead" },
-          h("div", { class: "pidx", text: String(idx + 1) }),
-          h("div", { class: "ptitle", text: ptitle }),
-          pstat ? h("div", { class: "pstat", text: "\u00b7 " + pstat }) : null
-        )
-      );
-      var cards = h("div", { class: "cards" });
-      var isLatest = !p.iteration || p.iteration === (maxIter[p.phaseId] || 1);
-      steps.forEach(function (s) {
-        if (isLatest) cards.appendChild(ST.run.renderCard(s, p));
-        else cards.appendChild(h("div", { class: "card superseded" },
-          h("div", { class: "top" },
-            h("span", { class: "sid", text: s.stepId }),
-            h("span", { class: "state", text: "iteration " + piter + " \u2192 superseded by iteration " + maxIter[p.phaseId] })
-          )
-        ));
-      });
-      phaseEl.appendChild(cards);
-      canvas.appendChild(phaseEl);
-
-      var loopMarkers = S.runState ? (S.runState.loopMarkers || []) : [];
-      loopMarkers.forEach(function (m) {
-        if (m.gatePhaseId === p.phaseId && m.gatePhaseIteration === piter) {
-          canvas.appendChild(h("div", { class: "loop-marker" },
-            h("span", { class: "chip warn",
-              text: "\u21ba loop \u2192 " + m.loopTo + " \u00b7 iteration " + m.iteration + "/" + (m.maxIterations || "") })
-          ));
-        }
-      });
-    });
-
-    if (S.runState && S.runState.done && S.arrivalInspect) ST.run.renderSummary(canvas);
+    // renderSummary belongs to the Arrival report (Task 8); it renders here only
+    // in the post-run inspect state, exactly as it did before.
+    if (S.runState && S.runState.done && S.arrivalInspect) ST.run.renderSummary(stage);
     ST.run.updateProgress();
-    applyTailScroll(canvas);
+    applyTailScroll(stage);
     ST.run.renderDetail();
   }
 
@@ -143,8 +85,8 @@
    * left them. Must run after the nodes are in the DOM (scrollHeight is 0
    * before layout).
    */
-  function applyTailScroll(canvas) {
-    var tails = canvas.querySelectorAll(".tail[data-key]");
+  function applyTailScroll(stage) {
+    var tails = stage.querySelectorAll(".tail[data-key], .output-body[data-key]");
     for (var i = 0; i < tails.length; i++) {
       var el = tails[i];
       var st = S.tailScroll[el.getAttribute("data-key")];

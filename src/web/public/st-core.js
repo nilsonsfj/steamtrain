@@ -61,6 +61,12 @@ window.Steamtrain = (function () {
     pendingStepDeepLink: null,
     // Step drill-in drawer: which step it shows ({phaseId, iteration, stepId}).
     detail: null,
+    // Run pane: the step the reader picked. Its phase band is the expanded one
+    // and its output fills that band's live output pane. null -> the running
+    // phase expands instead.
+    selectedStepId: null,
+    // Live output pane: false wraps long lines, true scrolls horizontally.
+    outputNoWrap: false,
     // Per-card tail scroll state keyed by stepKey(): { follow: bool, top: px }.
     // "follow" sticks the pane to the newest output as it streams; scrolling up
     // pauses it, scrolling back to the bottom re-engages it.
@@ -210,9 +216,9 @@ window.Steamtrain = (function () {
   }
 
   function focusDetailFallback() {
-    var canvas = document.getElementById("canvas");
-    if (!canvas) return false;
-    canvas.focus();
+    var bands = document.getElementById("bands");
+    if (!bands) return false;
+    bands.focus();
     return true;
   }
 
@@ -568,14 +574,15 @@ window.Steamtrain = (function () {
       ST.run.setRunning(true);
       S.startedAt = run.startedAt || Date.now();
       ST.run.startTimer();
-      document.getElementById("statusLine").style.display = "flex";
+      // setRunning(true) above already revealed the run header's metrics strip.
       // Replay rebuilds the tree from the event stream (workflow_start keeps
       // seeded phases). Seeding from the catalog spec (when known) makes
       // not-yet-started steps visible — and editable while the run is paused.
       S.runState = known && S.spec
         ? SteamtrainReducer.workflowStateFromSpec(ST.run.effectiveSpec() || S.spec)
         : SteamtrainReducer.initialWorkflowState;
-      S.detail = null; S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
+      S.detail = null; S.selectedStepId = null;
+      S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
       ST.run.setBanner(
         "Attached to " + (run.detached ? "detached " : "") + "run " + run.id.slice(0, 8) + "…" +
           (isReadOnly() ? " (read-only view)." : " — cancel stops the run itself."),
@@ -938,6 +945,7 @@ window.Steamtrain = (function () {
     ST.run.stopTimer();
     S.selected = name; S.runId = null; S.runState = null;
     S.detail = null; S.detailInvoker = null; S.detailFallback = null; S.detailFocusPending = false; S.detailFocusGeneration += 1;
+    S.selectedStepId = null;
     S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
     S.narration = []; S.arrivalInspect = false; S.arrivalEnter = false; S.endedAt = 0;
     S.narrationFreshPlayed = null;
@@ -960,7 +968,7 @@ window.Steamtrain = (function () {
       saveFolderCollapse(S.folderCollapse);
     }
     ST.shell.renderSidebar();
-    document.getElementById("statusLine").style.display = "none";
+    // setRunning(false) above already hid the run header's metrics strip.
     ST.run.setBanner("", "");
     apiAuth("GET", "/api/workflows/" + encodeURIComponent(name)).then(function (r) {
       if (r.status !== 200) { ST.run.setBanner(r.body.error || "failed to load", "err"); return; }

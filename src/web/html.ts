@@ -98,6 +98,7 @@ ${styles}
   <header id="topbar">
     <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark">steamtrain</span></div>
     <nav class="crumbs" id="crumbs" aria-label="Location"></nav>
+    <span class="status-pill" id="runPill" style="display:none"></span>
     <span class="mode-badge" id="modeBadge" style="display:none" title="This session can view workflows and runs but cannot launch, edit, approve, or change config.">&#128065; read-only</span>
     <div class="topbar-right">
       <div class="health" id="health" role="group" aria-label="Agent health"></div>
@@ -110,13 +111,15 @@ ${styles}
   <div id="cols">
     <aside id="rail-left" aria-label="Workflows"></aside>
     <section id="center">
+      <!-- section.work / .runbar / .canvas are kept as class hooks: the Station,
+           ride and Arrival modes in arrival.css (Task 8) still select on them. -->
       <section class="work">
         <div class="runbar">
-          <div class="runbar-head">
-            <div class="runbar-copy">
+          <div class="run-head">
+            <div class="run-head-copy">
               <div class="title" id="wfTitle">Select a workflow</div>
-              <div class="sub" id="wfSub">Pick a workflow on the left to view its pipeline and run it.</div>
-              <div class="srcline" id="srcLine" style="display:none"></div>
+              <div class="origin srcline" id="srcLine" style="display:none"></div>
+              <div class="scope sub" id="wfSub">Pick a workflow on the left to view its pipeline and run it.</div>
             </div>
             <div class="wfactions" id="wfActions" style="display:none">
               <button class="btn small" id="editBtn">&#9998; Configure</button>
@@ -124,9 +127,19 @@ ${styles}
               <button class="btn small warn" id="flushBtn" style="display:none">&#128190; Flush to disk</button>
               <button class="btn small danger" id="deleteBtn" style="display:none">&#128465; Delete</button>
             </div>
+            <div class="run-metrics" id="runMetrics" style="display:none">
+              <div class="run-progress" role="presentation"><span class="done" id="progressBar"></span><span class="live" id="progressLive"></span></div>
+              <div class="run-clock">
+                <div class="row"><span class="elapsed" id="elapsed">0.0s</span></div>
+                <div class="row"><span class="steps" id="progressText"></span><span class="steps" id="costTicker"></span></div>
+              </div>
+              <button class="rbtn" id="pauseBtn" style="display:none" title="Finish in-flight steps, schedule nothing new; pending steps become editable">&#9208; Pause</button>
+              <button class="rbtn" id="detachBtn" style="display:none" title="Hand this run to a background process — it keeps running if you close this page">&#9992; Detach</button>
+              <button class="rbtn danger" id="cancelBtn" style="display:none">Cancel</button>
+            </div>
           </div>
           <div class="reroute-row" id="blockedRow" style="display:none"></div>
-          <div class="row" id="runRow" style="display:none">
+          <div class="row composer" id="runRow" style="display:none">
             <div class="run-compose">
               <label class="run-compose-label" for="input">Describe</label>
               <textarea id="input" placeholder="What should this run do? (&#8593; recalls previous inputs)"></textarea>
@@ -140,25 +153,14 @@ ${styles}
               </div>
             </div>
             <div class="btnstack">
-              <button class="btn" id="planBtn">Plan</button>
-              <button class="btn primary" id="runBtn">Run &#9654;</button>
-              <button class="btn" id="pauseBtn" style="display:none" title="Finish in-flight steps, schedule nothing new; pending steps become editable">&#9208; Pause</button>
-              <button class="btn" id="detachBtn" style="display:none" title="Hand this run to a background process — it keeps running if you close this page">&#9992; Detach</button>
-              <button class="btn danger" id="cancelBtn" style="display:none">Cancel</button>
+              <button class="rbtn" id="planBtn">Plan</button>
+              <button class="rbtn primary" id="runBtn">Run &#9654;</button>
+              <label class="fresh-toggle"><input type="checkbox" id="freshChk" /> fresh (ignore cache)</label>
             </div>
-          </div>
-          <div class="status-line" id="statusLine" style="display:none">
-            <span id="elapsed">0.0s</span>
-            <div class="progress"><span id="progressBar"></span></div>
-            <span id="progressText"></span>
-            <span id="costTicker" class="cost-ticker"></span>
-            <label style="display:inline-flex;gap:5px;align-items:center;cursor:pointer">
-              <input type="checkbox" id="freshChk" /> fresh (ignore cache)
-            </label>
           </div>
           <div class="banner" id="banner"></div>
         </div>
-        <div class="canvas" id="canvas" tabindex="-1" aria-label="Workflow workspace">
+        <div class="canvas bands" id="bands" tabindex="-1" aria-label="Workflow workspace">
           <div class="empty">No workflow selected.</div>
         </div>
       </section>

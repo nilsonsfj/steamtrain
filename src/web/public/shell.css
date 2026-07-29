@@ -392,97 +392,9 @@ header .mode-badge {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-/* Old #sidebar / .wf* card layout retired — replaced by the rail-* rules
-   below. section.work and everything after it belongs to the old work
-   subtree preserved verbatim inside #center; Task 6 restyles it. */
-section.work {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  background: transparent;
-}
-.runbar {
-  padding: 18px 22px 16px;
-  border-bottom: 1px solid rgba(39, 49, 64, 0.9);
-  background: linear-gradient(180deg, rgba(16, 22, 30, 0.92) 0%, rgba(12, 17, 24, 0.78) 100%);
-  backdrop-filter: blur(10px);
-}
-.runbar-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-.runbar-copy {
-  min-width: 0;
-  flex: 1 1 280px;
-}
-.runbar .title {
-  font-family: var(--font-ui);
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  line-height: 1.15;
-}
-.runbar .sub {
-  color: var(--muted);
-  font-size: 13px;
-  margin-top: 6px;
-  line-height: 1.45;
-  max-width: 62ch;
-}
-.runbar .row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 14px 16px;
-  margin-top: 16px;
-  align-items: stretch;
-}
-.run-compose {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 14px 14px 12px;
-  border: 1px solid rgba(53, 67, 84, 0.95);
-  border-radius: var(--radius-lg);
-  background: linear-gradient(180deg, rgba(28, 38, 50, 0.72) 0%, rgba(16, 22, 30, 0.88) 100%);
-  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.03);
-}
-.run-compose-label {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgba(142, 234, 224, 0.88);
-}
-textarea#input {
-  width: 100%;
-  resize: vertical;
-  min-height: 76px;
-  max-height: 220px;
-  background: rgba(255, 255, 255, 0.035);
-  color: var(--text);
-  border: 1px solid rgba(70, 86, 104, 0.85);
-  border-radius: var(--radius-md);
-  padding: 12px 14px;
-  font: inherit;
-  line-height: 1.45;
-  transition: border-color 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out), background 0.15s
-    var(--ease-out);
-}
-textarea#input:hover {
-  border-color: rgba(100, 120, 140, 0.9);
-  background: rgba(255, 255, 255, 0.045);
-}
-textarea#input:focus {
-  outline: none;
-  border-color: rgba(52, 211, 196, 0.6);
-  box-shadow: 0 0 0 3px rgba(52, 211, 196, 0.14);
-  background: rgba(255, 255, 255, 0.055);
-}
+/* The centre pane's own chrome (run head, composer, phase bands, output pane)
+   lives in run.css — this file keeps only the shared button primitives that
+   modals, settings and the rail all use. */
 .btn {
   border: 1px solid var(--border);
   background: var(--panel-2);
@@ -539,21 +451,6 @@ textarea#input:focus {
   transform: none;
   box-shadow: none;
 }
-.btnstack {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 118px;
-}
-
-/* ---- authoring: runbar actions ---- */
-.wfactions {
-  display: flex;
-  gap: 8px;
-  margin-top: 0;
-  flex-wrap: wrap;
-  flex: none;
-}
 .btn.small {
   padding: 0 12px;
   height: 32px;
@@ -561,22 +458,6 @@ textarea#input:focus {
   line-height: 30px;
   font-size: 12px;
   border-radius: 8px;
-}
-.runbar .srcline {
-  color: var(--muted);
-  font-size: 11px;
-  margin-top: 8px;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.runbar .srcline .src {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: .05em;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 0 5px;
 }
 
 /* ---- narrow-screen control plane ---------------------------------------- */
@@ -597,49 +478,9 @@ textarea#input:focus {
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }
-  section.work {
-    min-height: 62vh;
-  }
-  .runbar {
-    padding: 12px;
-  }
-  .runbar-head {
-    gap: 12px;
-  }
-  .runbar .row {
-    grid-template-columns: 1fr;
-  }
-  .run-compose {
-    padding: 10px;
-  }
-  textarea#input {
-    min-width: 0;
-  }
-  .btnstack {
-    width: 100%;
-    flex-direction: row;
-    flex-wrap: wrap;
-    min-width: 0;
-  }
-  .btnstack .btn {
-    flex: 1 1 120px;
-    min-height: 38px;
-  }
-  .btn.primary {
-    min-height: 38px;
-  }
 }
 @media (max-width: 520px) {
   header .mode-badge {
     order: 1;
-  }
-  .runbar .title {
-    font-size: 16px;
-  }
-  .wfactions {
-    gap: 6px;
-  }
-  .wfactions .btn {
-    flex: 1 1 120px;
   }
 }
