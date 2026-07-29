@@ -877,51 +877,25 @@ select.sel.invalid {
   .arrival.enter,
   .arrival-dot,
   .arrival-car,
-  .station-hero .station-brand,
-  .station-hero .station-eyebrow,
-  .station-hero .station-premise,
-  .station-hero .station-sub,
-  .station-hero .station-actions,
   .arrival-kicker,
   .arrival-title,
   .arrival-cards,
   .arrival-destinations,
   .narration,
   .narration-line.fresh,
-  .conductor-stage,
-  .conductor-stage-line,
-  .conductor-stage-line.fresh,
-  .conductor-stage-kicker::before,
-  .yard-car,
-  .station-atmosphere .glow-a,
-  .station-atmosphere .glow-b,
-  .station-atmosphere .rails,
-  .station-atmosphere .steam,
-  .station-atmosphere .steam-b,
-  .station-atmosphere .steam-c,
-  .station-atmosphere .engine,
-  .station-atmosphere .signal,
-  .station-hero .station-tagline,
   .boarding-pulse,
   .narration-head .conductor-mark::before {
     animation: none !important;
   }
-  body[data-mode="station"] .station-atmosphere .engine,
-  body[data-mode="ride"][data-departing="true"] .station-atmosphere .engine,
-  .station-atmosphere.departing .engine {
-    opacity: 0.7;
-    transform: none;
-  }
   .card.running {
     background: var(--panel);
   }
-  .arrival-destinations .btn:hover,
-  .station-cta:hover {
+  .arrival-destinations .btn:hover {
     transform: none;
   }
 }
 
-/* Screen-reader live region for Conductor / Arrival beats */
+/* Screen-reader live region for Arrival beats */
 .sr-only {
   position: absolute;
   width: 1px;

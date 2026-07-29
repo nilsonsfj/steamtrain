@@ -80,27 +80,13 @@ window.Steamtrain = (function () {
     // Session capability from GET /api/session (or login). "read" hides every
     // mutate control; the server also 403s those routes as a hard backstop.
     capability: "full",
-    // Conductor narration (UI-only projection of WorkflowEvents).
+    // Live narration (UI-only projection of WorkflowEvents).
     narration: [],
     narrationOn: localStorage.getItem("steamtrain.narration") !== "off",
-    // Station landing: first-open hero for the tour.
-    stationLanding: false,
-    // Focus the Station CTA once per landing session.
-    stationCtaFocused: false,
-    // Focus the Arrival primary CTA once per completed ride.
+    // Focus the Arrival primary CTA once per completed run.
     arrivalCtaFocused: false,
-    // Tour ride arc: atmospheric chrome between Station leave and Arrival.
-    tourRiding: false,
-    // True while the tour departure beat must stay on the Conductor stage.
-    departing: false,
-    // Wall-clock when the tour left the Station (for a minimum ride beat).
-    departAt: 0,
-    // Hold Arrival until the departure beat finishes on fast tours.
-    arrivalHoldTimer: null,
     // Narration line id that already played the one-shot "fresh" entrance.
     narrationFreshPlayed: null,
-    // Conductor stage line id that already played its one-shot entrance.
-    conductorLinePlayed: null,
     // Last aria-live announcement (avoid re-speaking the same text).
     announceText: "",
     // Expand the full step-kind legend via "?".
@@ -354,7 +340,7 @@ window.Steamtrain = (function () {
           ? { runId: SteamtrainReducer.parseRunDeepLink(window.location.hash), stepId: undefined }
           : null;
       if (deepLinkId && deepLinkId.runId) openRunDeepLink(deepLinkId.runId, deepLinkId.stepId);
-      else bootstrapStationLanding();
+      else bootstrapDefaultWorkflow();
     });
     loadMeta();
     if (!isReadOnly()) loadProjectConfig();
@@ -376,40 +362,23 @@ window.Steamtrain = (function () {
     }).catch(function () {});
   }
 
-  /** First impression: auto-select tour when the user has never ridden. */
-  function bootstrapStationLanding() {
+  /** First impression: auto-select a workflow when nothing is selected yet —
+   *  the remembered previous selection if one exists, else the tour. */
+  function bootstrapDefaultWorkflow() {
     if (S.selected) return;
     var remembered = null;
     try { remembered = localStorage.getItem(SELECTION_KEY); } catch (e) {}
-    api("GET", "/api/history").then(function (r) {
-      var hasHistory = r.status === 200 && (r.body.runs || []).length > 0;
-      var preferTour = SteamtrainReducer.shouldOfferStationLanding
-        ? SteamtrainReducer.shouldOfferStationLanding({
-            hasRunHistory: hasHistory,
-            rememberedSelection: remembered
-          })
-        : (!hasHistory && !remembered);
-      if (preferTour && S.workflows.some(function (w) { return w.name === TOUR_NAME; })) {
-        // Read-only sessions can browse but cannot ride — skip station chrome
-        // so other workflows stay visible and the canvas is not a dead end.
-        if (!isReadOnly()) S.stationLanding = true;
-        selectWorkflow(TOUR_NAME, function () {
-          var input = document.getElementById("input");
-          if (input && !input.value) input.value = "all aboard";
-        });
-        return;
-      }
-      if (remembered && S.workflows.some(function (w) { return w.name === remembered; })) {
-        selectWorkflow(remembered);
-        return;
-      }
-      // Soft default: still open the tour when present so the empty state dies.
-      if (S.workflows.some(function (w) { return w.name === TOUR_NAME; })) {
-        selectWorkflow(TOUR_NAME);
-      }
-    }).catch(function () {
-      if (S.workflows.some(function (w) { return w.name === TOUR_NAME; })) selectWorkflow(TOUR_NAME);
-    });
+    if (remembered && S.workflows.some(function (w) { return w.name === remembered; })) {
+      selectWorkflow(remembered);
+      return;
+    }
+    // Soft default: still open the tour when present so the empty state dies.
+    if (S.workflows.some(function (w) { return w.name === TOUR_NAME; })) {
+      selectWorkflow(TOUR_NAME, function () {
+        var input = document.getElementById("input");
+        if (input && !input.value) input.value = "all aboard";
+      });
+    }
   }
 
   function isCredentialFreeSpec(spec) {
@@ -1031,17 +1000,9 @@ window.Steamtrain = (function () {
     S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
     S.narration = []; S.arrivalInspect = false; S.arrivalEnter = false; S.endedAt = 0;
     S.narrationFreshPlayed = null;
+    S.arrivalCtaFocused = false;
     // Leaving an attached run restores Plan / Describe and clears compact chrome.
     ST.run.setRunning(false);
-    if (name !== TOUR_NAME) {
-      S.stationLanding = false;
-      S.tourRiding = false;
-      S.stationCtaFocused = false;
-      S.arrivalCtaFocused = false;
-      S.conductorLinePlayed = null;
-      ST.arrival.endTourDeparture();
-    }
-    document.body.classList.remove("arrival-failed");
     try { localStorage.setItem(SELECTION_KEY, name); } catch (e) {}
     // Reveal the selected workflow if its folder was folded shut.
     var entry = S.workflows.find(function (w) { return w.name === name; });
@@ -1105,42 +1066,6 @@ window.Steamtrain = (function () {
     S.rafQueued = true;
     requestAnimationFrame(function () { S.rafQueued = false; ST.render(); });
   }
-
-  function syncBodyMode() {
-    var boarding = !S.spec && (!S.selected || S.stationLanding);
-    var stationOn =
-      boarding ||
-      (S.stationLanding &&
-        S.selected === TOUR_NAME &&
-        !(S.runState && S.runState.started));
-    var arrivalOn =
-      !stationOn &&
-      S.runState &&
-      S.runState.done &&
-      !S.arrivalInspect &&
-      !S.departing;
-    // Tour ride: keep the atmospheric yard (no sidebar / run form) while the
-    // thin header + status line stay available for errors and cancel.
-    var rideOn =
-      !stationOn &&
-      !arrivalOn &&
-      S.tourRiding &&
-      S.selected === TOUR_NAME &&
-      (S.departing || !(S.runState && S.runState.done));
-    if (stationOn) document.body.dataset.mode = "station";
-    else if (rideOn) document.body.dataset.mode = "ride";
-    else if (arrivalOn) document.body.dataset.mode = "arrival";
-    else delete document.body.dataset.mode;
-    if (rideOn && S.departing) document.body.dataset.departing = "true";
-    else delete document.body.dataset.departing;
-    if (arrivalOn && S.runState && S.runState.ok === false) {
-      document.body.classList.add("arrival-failed");
-    } else {
-      document.body.classList.remove("arrival-failed");
-    }
-  }
-  // Back-compat alias for any call sites that still use the old name.
-  function syncStationMode() { syncBodyMode(); }
 
   function fmtTime(ts) { try { return new Date(ts).toLocaleString(); } catch (e) { return ""; } }
 
@@ -1312,7 +1237,6 @@ window.Steamtrain = (function () {
   ST.showSettingsRoute = showSettingsRoute;
   ST.stepKey = stepKey;
   ST.stepPermissions = stepPermissions;
-  ST.syncBodyMode = syncBodyMode;
   ST.tail = tail;
   ST.toggleWorkflowFolder = toggleWorkflowFolder;
   ST.totalTokens = totalTokens;

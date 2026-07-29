@@ -3,8 +3,6 @@
    st-modals.js) and the step drill-in drawer. */
 
 /* ---- centre pane scaffolding -------------------------------------------- */
-/* section.work / .runbar / .canvas survive as class hooks: the Station, ride
-   and Arrival body modes in arrival.css still select on them. */
 section.work {
   flex: 1;
   min-width: 0;
@@ -660,7 +658,7 @@ textarea#input:focus {
   margin-top: 70px;
   font-size: 14px;
 }
-.station-empty {
+.boot-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -668,14 +666,32 @@ textarea#input:focus {
   position: relative;
   z-index: 1;
 }
-.station-empty .station-premise {
+.boot-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-ui);
+  font-size: clamp(48px, 8vw, 72px);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  color: var(--text);
+  line-height: 0.95;
+}
+.boot-logo .brand-mark {
+  width: 1.05em;
+  height: 1.05em;
+}
+.boot-logo .accent {
+  color: var(--accent);
+}
+.boot-empty .boot-premise {
   font-family: var(--font-ui);
   font-size: clamp(28px, 5vw, 42px);
   font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1.15;
 }
-.station-empty .boarding-pulse {
+.boot-empty .boarding-pulse {
   color: var(--muted);
   font-size: 13px;
   letter-spacing: 0.08em;

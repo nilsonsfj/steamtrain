@@ -276,8 +276,8 @@ describe("web server", () => {
     expect(coreText).not.toContain("BEGIN_REDUCER_BUNDLE");
 
     const arrivalText = await (await fetch(`${base}/static/st-arrival.js`)).text();
-    expect(arrivalText).toContain("renderYardTrack");
-    expect(arrivalText).toContain("agent orchestrator on rails");
+    expect(arrivalText).toContain("renderArrival");
+    expect(arrivalText).toContain("collectArrivalLeafSteps");
 
     const bootText = await (await fetch(`${base}/static/st-boot.js`)).text();
     expect(bootText).toContain("window.Steamtrain.start()");
@@ -286,9 +286,8 @@ describe("web server", () => {
     expect(tokensText).toContain("--accent");
 
     const arrivalCss = await (await fetch(`${base}/static/arrival.css`)).text();
-    expect(arrivalCss).toContain(".yard-track");
-    expect(arrivalCss).toContain("engine-depart");
-    expect(arrivalCss).toContain(".station-tagline");
+    expect(arrivalCss).toContain(".narration-head");
+    expect(arrivalCss).toContain(".arrival-headline");
     expect(arrivalCss).toContain(".arrival-report");
     expect(arrivalCss).toContain(".ledger-row");
 

@@ -6,58 +6,29 @@
   "use strict";
   var S = ST.state;
   var h = ST.h;
-  var TOUR_NAME = ST.TOUR_NAME;
   var clear = ST.clear;
   var loadSessionThenCatalog = ST.loadSessionThenCatalog;
-  var syncBodyMode = ST.syncBodyMode;
 
   function render() {
     var stage = document.getElementById("bands");
     clear(stage);
-    syncBodyMode();
     var railRight = document.getElementById("rail-right");
     if (railRight) ST.instruments.render(railRight);
     if (!S.spec) {
-      ST.arrival.renderStationAtmosphere(stage);
-      stage.appendChild(h("div", { class: "empty station-empty" },
-        h("div", { class: "station-logo" },
+      stage.appendChild(h("div", { class: "empty boot-empty" },
+        h("div", { class: "boot-logo" },
           h("span", { class: "brand-mark", "aria-hidden": "true" }),
           h("span", { class: "accent", text: "steam" }),
           "train"
         ),
-        h("div", { class: "station-premise", text: "Parallel agents. One receipt." }),
+        h("div", { class: "boot-premise", text: "Parallel agents. One receipt." }),
         h("div", { class: "boarding-pulse", text: "Boarding…" })
       ));
       return;
     }
 
-    // First-run station: hero only — one composition, no pipeline noise.
-    if (S.stationLanding && S.selected === TOUR_NAME && !(S.runState && S.runState.started)) {
-      ST.arrival.renderStationHero(stage);
-      ST.run.updateProgress();
-      return;
-    }
-
-    // Tour ride stage: Conductor owns the yard until Arrival is ready.
-    if (
-      S.tourRiding &&
-      S.selected === TOUR_NAME &&
-      (S.departing || (S.runState && !S.runState.done)) &&
-      !S.arrivalInspect
-    ) {
-      ST.arrival.renderConductorStage(stage);
-      ST.run.updateProgress();
-      return;
-    }
-
-    // Returning to tour (not first-run): keep a compact boarding banner above the pipeline.
-    if (S.selected === TOUR_NAME && !(S.runState && S.runState.started) && !S.departing) {
-      ST.arrival.renderStationHero(stage);
-    }
-
     var showingArrival = false;
-    if (S.runState && S.runState.done && !S.departing) {
-      if (!S.arrivalInspect) ST.arrival.renderStationAtmosphere(stage);
+    if (S.runState && S.runState.done) {
       showingArrival = ST.arrival.renderArrival(stage);
     }
 

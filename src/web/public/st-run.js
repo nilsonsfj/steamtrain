@@ -7,7 +7,6 @@
   var S = ST.state;
   var h = ST.h;
   var KIND_LABEL = ST.KIND_LABEL;
-  var TOUR_NAME = ST.TOUR_NAME;
   var activateWithKeyboard = ST.activateWithKeyboard;
   var addTokensInto = ST.addTokensInto;
   var aggregateByModel = ST.aggregateByModel;
@@ -31,7 +30,6 @@
   var showReauthOverlay = ST.showReauthOverlay;
   var stepKey = ST.stepKey;
   var stepPermissions = ST.stepPermissions;
-  var syncBodyMode = ST.syncBodyMode;
   var tail = ST.tail;
   var totalTokens = ST.totalTokens;
   var truncate = ST.truncate;
@@ -1352,18 +1350,11 @@
     S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
     S.narration = []; S.arrivalInspect = false; S.arrivalEnter = false;
     S.narrationFreshPlayed = null;
-    S.conductorLinePlayed = null;
     S.selectedStepId = null;
     S.arrivalCtaFocused = false;
-    // Leave full-bleed Station for ride mode: thin chrome stays so banners and
-    // cancel remain reachable while the POST is in flight / if it fails.
-    if (S.selected === TOUR_NAME) {
-      ST.arrival.beginTourDeparture();
-    }
     S.endedAt = 0;
     setBanner("", "");
     showRunMetrics(true);
-    syncBodyMode();
     ST.render();
     var payload = { workflow: S.selected, input: input, fresh: document.getElementById("freshChk").checked };
     var params = collectParams();
@@ -1378,10 +1369,6 @@
         if (r.status !== 201) {
           setBanner(r.body.error || "could not start run", "err");
           setRunning(false);
-          // Escape ride chrome so the error (and sidebar) stay reachable.
-          S.tourRiding = false;
-          ST.arrival.endTourDeparture();
-          syncBodyMode();
           ST.render();
           return;
         }
@@ -1404,9 +1391,6 @@
       .catch(function () {
         setBanner("could not start run: network error", "err");
         setRunning(false);
-        S.tourRiding = false;
-        ST.arrival.endTourDeparture();
-        syncBodyMode();
         ST.render();
       });
   }
@@ -1456,17 +1440,8 @@
           else if (frame.status === "budget-exceeded") setBanner("Run stopped: cost budget reached. Raise maxCostUsd and re-run to resume.", "err");
           else if (frame.status === "error" || frame.ok === false) setBanner("Run failed" + (frame.error ? ": " + frame.error : "."), "err");
           else setBanner("Run complete.", "ok");
-          // Tour: hold the Conductor stage for a minimum beat before Arrival.
-          if (S.selected === TOUR_NAME && S.tourRiding && frame.status !== "canceled" && frame.status !== "error" && frame.ok !== false) {
-            ST.arrival.revealArrivalWhenReady();
-          }           else {
-            S.arrivalEnter = true;
-            if (frame.status === "canceled" || frame.status === "error" || frame.ok === false) {
-              S.tourRiding = false;
-              ST.arrival.endTourDeparture();
-            }
-            ST.render();
-          }
+          S.arrivalEnter = true;
+          ST.render();
           pollLiveRuns();
         }
       };
