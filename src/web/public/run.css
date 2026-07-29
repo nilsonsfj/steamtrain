@@ -1377,7 +1377,7 @@ textarea#input:focus {
   width: 100%;
   resize: vertical;
   background: var(--bg);
-  color: var(--fg);
+  color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 6px 8px;
@@ -1460,11 +1460,11 @@ textarea#input:focus {
 .card.clickable:hover {
   border-color: rgba(52, 211, 196, 0.42);
   transform: translateY(-1px);
-  box-shadow: var(--shadow-sm), 0 10px 28px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
 }
 .card.open {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent-dim), var(--shadow-sm);
+  box-shadow: 0 0 0 1px var(--accent-dim);
 }
 .card .worktree {
   font-size: 11px;
