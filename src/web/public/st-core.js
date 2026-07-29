@@ -119,7 +119,12 @@ window.Steamtrain = (function () {
     planRequest: 0,
     reauthVisible: false,
     sessionHeartbeatTimer: null,
-    sessionTtlMs: null
+    sessionTtlMs: null,
+    // Instrument rail (Task 7): the live throughput meter for the current run
+    // (null until the first workflow_start) and the capped, newest-first
+    // event log it renders alongside Spend/Runners/Worktrees.
+    throughput: null,
+    eventLog: []
   };
 
   var SELECTION_KEY = "steamtrain.lastWorkflow";
@@ -943,6 +948,7 @@ window.Steamtrain = (function () {
     S.planRequest += 1;
     if (S.es) { S.es.close(); S.es = null; }
     ST.run.stopTimer();
+    if (ST.instruments) ST.instruments.reset();
     S.selected = name; S.runId = null; S.runState = null;
     S.detail = null; S.detailInvoker = null; S.detailFallback = null; S.detailFocusPending = false; S.detailFocusGeneration += 1;
     S.selectedStepId = null;

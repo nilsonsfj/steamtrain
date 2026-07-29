@@ -17,6 +17,8 @@
     var stage = document.getElementById("bands");
     clear(stage);
     syncBodyMode();
+    var railRight = document.getElementById("rail-right");
+    if (railRight) ST.instruments.render(railRight);
     if (!S.spec) {
       ST.arrival.renderStationAtmosphere(stage);
       stage.appendChild(h("div", { class: "empty station-empty" },

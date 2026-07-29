@@ -1423,7 +1423,9 @@
         try { frame = JSON.parse(m.data); } catch (e) { return; }
         if (frame.type === "event") {
           if (S.queuedBanner) { S.queuedBanner = false; setBanner("", ""); }
-          reduce(frame.event); scheduleRender();
+          reduce(frame.event);
+          ST.instruments.onEvent(frame.event);
+          scheduleRender();
         }
         else if (frame.type === "queued") {
           // Waiting for a shared run-queue slot (maxParallelRuns); not terminal.

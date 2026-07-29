@@ -1,2 +1,184 @@
-/* Instruments surface: placeholder. Filled in by a later task; the file exists
-   now so the asset manifest and load order are stable. */
+/* Right-hand instrument rail: Spend, Throughput, Runners, Worktrees, Event log.
+   #rail-right (shell.css) is already a 300px flex column; each `.inst` block
+   stacks inside it and `.eventlog` grows to fill the remainder. */
+
+.inst {
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--border-quiet);
+}
+.inst-label {
+  font: 600 10px / 1 var(--font-ui);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 10px;
+}
+.inst-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.inst-head .inst-label {
+  margin-bottom: 0;
+}
+.inst-head .note {
+  margin-left: auto;
+  font: 400 11px / 1 var(--font-mono);
+  color: var(--muted);
+}
+
+.spend-now {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.spend-now .amount {
+  font: 500 26px / 1 var(--font-mono);
+  letter-spacing: -0.03em;
+  color: var(--text);
+}
+.spend-now .budget {
+  font: 400 12px / 1 var(--font-mono);
+  color: var(--dim);
+}
+.spend-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-quiet);
+  margin-top: 9px;
+  overflow: hidden;
+}
+.spend-bar span {
+  display: block;
+  height: 100%;
+  background: var(--done);
+}
+.spend-bar.warn span {
+  background: var(--gate);
+}
+.spend-bar.over span {
+  background: var(--error);
+}
+.spend-cells {
+  display: flex;
+  gap: 18px;
+  margin-top: 11px;
+}
+.spend-cells .k {
+  font: 400 10.5px / 1 var(--font-ui);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 4px;
+}
+.spend-cells .v {
+  font: 500 13px / 1 var(--font-mono);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 44px;
+}
+.spark span {
+  flex: 1;
+  border-radius: 1px;
+  background: #1f4d47;
+  min-height: 1px;
+}
+.spark span.mid {
+  background: #256058;
+}
+.spark span.high {
+  background: #2b7a70;
+}
+.spark span.peak {
+  background: var(--accent);
+}
+
+.runners {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.runner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 400 12px / 1.4 var(--font-mono);
+  color: var(--dim);
+}
+.runner .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  flex: none;
+}
+.runner.busy {
+  color: var(--text);
+}
+.runner.busy .dot {
+  background: var(--running);
+}
+.runner .model {
+  color: var(--dim);
+}
+.runner .right {
+  margin-left: auto;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.worktrees {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font: 400 11.5px / 1.4 var(--font-mono);
+}
+.worktree {
+  display: flex;
+  gap: 8px;
+  color: var(--muted);
+}
+.worktree .mark {
+  color: var(--done);
+}
+.worktree.live .mark {
+  color: var(--running);
+}
+.worktree .branch {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.worktree .stat {
+  margin-left: auto;
+  color: var(--dim);
+}
+
+.eventlog {
+  flex: 1;
+  min-height: 0;
+  padding: 12px 14px 14px;
+  overflow-y: auto;
+  border-bottom: 0;
+}
+.eventlog .rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font: 400 11.5px / 1.45 var(--font-mono);
+  color: var(--dim);
+}
+.eventlog .at {
+  color: var(--muted);
+}
+.eventlog .cached {
+  color: var(--gate);
+}
