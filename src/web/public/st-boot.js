@@ -126,9 +126,15 @@
       try { oldHash = new URL(e.oldURL).hash; } catch (err) {}
       ST.handleRoute(oldHash);
     });
-    // Resolve whatever hash the page loaded with (a shared #settings or #run-
-    // link) once the rail scaffolding above exists to hide/show.
-    ST.handleRoute(null);
+    // Resolve a shared #settings link once the rail scaffolding above exists
+    // to hide/show. A #run- link is deliberately NOT resolved here: the
+    // workflow catalog hasn't loaded yet at this point, so attachRun would
+    // take its "not in catalog" fallback even for a known workflow. Run/step
+    // deep links are left to loadWorkflows() (st-core.js), which re-parses
+    // the hash once the catalog is loaded — dispatching from both places
+    // raced and could leave the step drill-in drawer closed or its pending
+    // deep-link flag stale. Do not re-add a run-link dispatch here.
+    ST.handleRoute(null, /* bootSettingsOnly */ true);
 
     loadSessionThenCatalog();
   }

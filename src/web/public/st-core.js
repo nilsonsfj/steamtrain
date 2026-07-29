@@ -580,8 +580,21 @@ window.Steamtrain = (function () {
    * the Close button's own hash update, the browser back button, and a manual
    * hash edit). `oldHash` — the hash before this change — comes from the
    * hashchange event's `oldURL`, or is `null` for the one-time boot call.
+   *
+   * `bootSettingsOnly` is true only for that one-time boot call (see
+   * st-boot.js's `start()`). At boot the workflow catalog hasn't loaded yet,
+   * so a `run` route can't be resolved correctly here — `attachRun` would
+   * take its "workflow not in catalog" fallback even for a known workflow.
+   * `loadWorkflows()` (st-core.js) re-parses the hash and dispatches run/step
+   * deep links itself once the catalog is in hand, so this function must
+   * leave `run` routes alone at boot to avoid a double-dispatch race: both
+   * calls would set S.pendingStepDeepLink to the same step id, and whichever
+   * of the two attachRun→begin() cascades finished last would win, sometimes
+   * clobbering S.detail back to null after the other cascade had already
+   * opened the step drawer. `settings` routes have no such second dispatcher,
+   * so they're still resolved here at boot.
    */
-  function handleRoute(oldHash) {
+  function handleRoute(oldHash, bootSettingsOnly) {
     var route = SteamtrainReducer.parseRoute ? SteamtrainReducer.parseRoute(window.location.hash) : null;
     if (route && route.kind === "settings") {
       if (!S.inSettings) {
@@ -592,6 +605,7 @@ window.Steamtrain = (function () {
       return;
     }
     if (route && route.kind === "run") {
+      if (bootSettingsOnly) return;
       if (S.inSettings) { S.inSettings = false; showCockpitRoute(); }
       openRunDeepLink(route.runId, route.stepId);
       return;
