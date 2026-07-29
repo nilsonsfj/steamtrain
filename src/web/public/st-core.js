@@ -54,6 +54,10 @@ window.Steamtrain = (function () {
     stagedOverrides: {},
     childSpecs: {},
     projectConfig: null,
+    // Settings-page routing: whether #center is currently showing the settings
+    // page, and the hash to return to when its Close button is clicked.
+    inSettings: false,
+    preSettingsHash: "#",
     project: null,
     configLabel: null,
     liveRuns: [], liveRunsTimer: null, queuedBanner: false,
@@ -548,6 +552,78 @@ window.Steamtrain = (function () {
     });
   }
 
+  // ---- routing (cockpit vs. settings page) ----------------------------------
+  /**
+   * Hide the cockpit (`.work` inside #center) and both rails, show the
+   * settings page in their place. Toggled with `display`, never detached —
+   * background pollers (live runs, doctor) keep calling render()/renderSidebar()
+   * against #bands etc. while settings is open, and those must stay real,
+   * attached nodes or a stray getElementById would come back null.
+   */
+  function showSettingsRoute(section) {
+    var center = document.getElementById("center");
+    if (!center) return;
+    var work = center.querySelector("section.work");
+    if (work) work.style.display = "none";
+    var railLeft = document.getElementById("rail-left");
+    var railRight = document.getElementById("rail-right");
+    if (railLeft) railLeft.style.display = "none";
+    if (railRight) railRight.style.display = "none";
+    var pane = document.getElementById("settingsRoot");
+    if (!pane) {
+      pane = document.createElement("div");
+      pane.id = "settingsRoot";
+      center.appendChild(pane);
+    }
+    // Undo the `display: none` a previous showCockpitRoute() left behind —
+    // the .settings class supplies `display: flex` (set by settings.render()),
+    // but an inline style always wins over it.
+    pane.style.display = "";
+    ST.settings.render(pane, section);
+  }
+
+  /** Restore the cockpit: reveal `.work` + both rails, hide the settings pane. */
+  function showCockpitRoute() {
+    var center = document.getElementById("center");
+    if (!center) return;
+    var pane = document.getElementById("settingsRoot");
+    if (pane) pane.style.display = "none";
+    var work = center.querySelector("section.work");
+    if (work) work.style.display = "";
+    var railLeft = document.getElementById("rail-left");
+    var railRight = document.getElementById("rail-right");
+    if (railLeft) railLeft.style.display = "";
+    if (railRight) railRight.style.display = "";
+  }
+
+  /**
+   * Dispatch on the current hash via SteamtrainReducer.parseRoute: a `settings`
+   * route shows the settings page (section-only changes just re-render it), a
+   * `run` route restores the cockpit and resolves the run/step deep link, and
+   * `null` leaves the current view alone — except when we were showing settings,
+   * where there is nothing sensible left to show but the cockpit (this covers
+   * the Close button's own hash update, the browser back button, and a manual
+   * hash edit). `oldHash` — the hash before this change — comes from the
+   * hashchange event's `oldURL`, or is `null` for the one-time boot call.
+   */
+  function handleRoute(oldHash) {
+    var route = SteamtrainReducer.parseRoute ? SteamtrainReducer.parseRoute(window.location.hash) : null;
+    if (route && route.kind === "settings") {
+      if (!S.inSettings) {
+        S.preSettingsHash = (typeof oldHash === "string" && oldHash) ? oldHash : "#";
+        S.inSettings = true;
+      }
+      showSettingsRoute(route.section);
+      return;
+    }
+    if (route && route.kind === "run") {
+      if (S.inSettings) { S.inSettings = false; showCockpitRoute(); }
+      openRunDeepLink(route.runId, route.stepId);
+      return;
+    }
+    if (S.inSettings) { S.inSettings = false; showCockpitRoute(); }
+  }
+
   function relTime(ts) {
     // Mirror formatRelativeTime() in history-browser.ts (web page isn't bundled).
     if (typeof ts !== "number" || !isFinite(ts) || ts <= 0) return "unknown";
@@ -851,13 +927,13 @@ window.Steamtrain = (function () {
     });
   }
 
-  /** A health chip that opens the setup panel (focused on `focusId` when given). */
-  function healthChip(cls, label, title, focusId) {
+  /** A health chip that opens the Runners settings page. */
+  function healthChip(cls, label, title) {
     return h("button", {
       class: "chip chip-btn " + cls,
       type: "button",
       title: title + " · click for setup",
-      onClick: function () { ST.settings.openSetupPanel(focusId); }
+      onClick: function () { ST.settings.open("runners"); }
     }, h("span", { class: "dot" }), label);
   }
 
@@ -1210,6 +1286,7 @@ window.Steamtrain = (function () {
   ST.focusDetailFallback = focusDetailFallback;
   ST.friendlyStepLabel = friendlyStepLabel;
   ST.groupWorkflowsBySource = groupWorkflowsBySource;
+  ST.handleRoute = handleRoute;
   ST.healthChip = healthChip;
   ST.isCredentialFreeSpec = isCredentialFreeSpec;
   ST.isInteractiveTarget = isInteractiveTarget;
@@ -1230,7 +1307,9 @@ window.Steamtrain = (function () {
   ST.scheduleRender = scheduleRender;
   ST.selectWorkflow = selectWorkflow;
   ST.setRunDeepLink = setRunDeepLink;
+  ST.showCockpitRoute = showCockpitRoute;
   ST.showReauthOverlay = showReauthOverlay;
+  ST.showSettingsRoute = showSettingsRoute;
   ST.stepKey = stepKey;
   ST.stepPermissions = stepPermissions;
   ST.syncBodyMode = syncBodyMode;

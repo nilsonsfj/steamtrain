@@ -8,9 +8,7 @@
   var h = ST.h;
   var TOUR_NAME = ST.TOUR_NAME;
   var clear = ST.clear;
-  var currentRunDeepLink = ST.currentRunDeepLink;
   var loadSessionThenCatalog = ST.loadSessionThenCatalog;
-  var openRunDeepLink = ST.openRunDeepLink;
   var syncBodyMode = ST.syncBodyMode;
 
   function render() {
@@ -122,9 +120,7 @@
     document.getElementById("input").addEventListener("input", function () { ST.run.clearPromptBrowse(); });
     document.getElementById("newWfBtn").addEventListener("click", ST.modals.openCreate);
     document.getElementById("historyBtn").addEventListener("click", function () { ST.modals.openHistory(); });
-    // Settings is a placeholder button until Task 9 builds the real settings
-    // page; for now it opens the same config modal the old Config button did.
-    document.getElementById("settingsBtn").addEventListener("click", ST.settings.openConfigModal);
+    document.getElementById("settingsBtn").addEventListener("click", function () { ST.settings.open(); });
     document.getElementById("editBtn").addEventListener("click", function () { ST.modals.openEditor(false); });
     document.getElementById("cloneBtn").addEventListener("click", function () { ST.modals.openEditor(true); });
     document.getElementById("deleteBtn").addEventListener("click", ST.modals.doDelete);
@@ -151,16 +147,17 @@
       }
     });
 
-    window.addEventListener("hashchange", function () {
-      var parsed = SteamtrainReducer.parseDeepLink
-        ? SteamtrainReducer.parseDeepLink(window.location.hash)
-        : null;
-      if (parsed && parsed.runId) openRunDeepLink(parsed.runId, parsed.stepId);
-      else {
-        var runId = currentRunDeepLink();
-        if (runId) openRunDeepLink(runId);
-      }
+    // parseRoute dispatches the hash to either the cockpit (run deep link,
+    // restoring the cockpit view first if settings was showing) or the
+    // settings page; a route-less hash leaves whichever view is current alone.
+    window.addEventListener("hashchange", function (e) {
+      var oldHash = null;
+      try { oldHash = new URL(e.oldURL).hash; } catch (err) {}
+      ST.handleRoute(oldHash);
     });
+    // Resolve whatever hash the page loaded with (a shared #settings or #run-
+    // link) once the rail scaffolding above exists to hide/show.
+    ST.handleRoute(null);
 
     loadSessionThenCatalog();
   }

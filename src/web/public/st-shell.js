@@ -181,11 +181,11 @@
     return { ready: ready, auth: auth, absent: absent };
   }
 
-  /** A health chip — still a button that opens the setup surface. */
+  /** A health chip — still a button that opens the settings page. */
   function healthChip(cls, text, title) {
     return h("button", {
       class: "chip " + cls, type: "button", title: title,
-      onClick: function () { ST.settings.openSetupPanel(); }
+      onClick: function () { ST.settings.open("runners"); }
     }, h("span", { class: "dot" }), text);
   }
 

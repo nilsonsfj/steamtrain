@@ -1,112 +1,262 @@
-/* Settings surface: the Agent & API setup panel, per-step and nested step
-   editors, the retarget bar, the login form and the reauth overlay. */
-/* ---- Agent & API setup panel -------------------------------------------- */
-.setup-checking {
-  color: var(--muted);
-  padding: 20px 4px;
-  font-size: 13px;
-}
-.setup-summary {
-  font-size: 12px;
-  color: var(--muted);
-  margin-bottom: 14px;
-}
-.setup-sechead {
-  font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--text);
-  margin: 16px 0 2px;
-}
-.setup-sechead:first-child {
-  margin-top: 0;
-}
-.setup-secnote {
-  font-size: 12px;
-  color: var(--muted);
-  margin-bottom: 10px;
-}
-.setup-list {
+/* Settings surface: the settings page (Runners, Limits & budget), per-step
+   and nested step editors, the retarget bar, the login form and the reauth
+   overlay. */
+/* ---- Settings page -------------------------------------------------------- */
+.settings {
+  flex: 1;
+  min-height: 0;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
-.setup-row {
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  padding: 10px 12px;
-  background: var(--panel-2);
+.settings-nav {
+  width: 236px;
+  flex: none;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  padding: 14px 8px;
 }
-.setup-row.focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent-dim);
+.settings-nav .head {
+  font: 600 10px / 1 var(--font-ui);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  padding: 0 8px 10px;
 }
-.setup-rowhead {
+.settings-nav .item {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  padding: 7px 8px;
+  border-radius: var(--r-md);
+  font: 400 13px / 1.3 var(--font-ui);
+  color: var(--muted);
+  cursor: pointer;
+  border: 0;
+  background: none;
+  width: 100%;
+  text-align: left;
 }
-.setup-name {
-  font-weight: 600;
+.settings-nav .item:hover {
+  background: var(--raised);
+}
+.settings-nav .item.active {
+  background: rgba(52, 211, 196, 0.1);
+  box-shadow: inset 2px 0 0 var(--accent);
   color: var(--text);
+  font-weight: 500;
 }
-.setup-status {
-  font-size: 11px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-}
-.setup-status.ok {
-  color: var(--done);
-  border-color: rgba(63, 185, 80, 0.4);
-}
-.setup-status.err {
-  color: var(--error);
-  border-color: rgba(248, 81, 73, 0.45);
-}
-.setup-status.calm {
-  color: var(--muted);
-}
-.setup-extra {
-  font-size: 11px;
-  color: var(--muted);
-  font-family: var(--font-mono);
+.settings-nav .item .count {
   margin-left: auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 45%;
+  font: 400 11px / 1 var(--font-mono);
+  color: var(--dim);
 }
-.setup-fix {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border);
-}
-.setup-fixtext {
-  font-size: 12px;
+.settings-scope {
+  margin-top: 18px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--header);
+  font: 400 11.5px / 1.5 var(--font-ui);
   color: var(--muted);
 }
-.setup-cmd {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
+.settings-scope code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-bright);
 }
-.setup-cmd code {
+
+.settings-pane {
   flex: 1;
   min-width: 0;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--accent-bright);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 9px;
-  overflow-x: auto;
-  white-space: pre;
+  overflow-y: auto;
+  padding: 24px 32px;
 }
+.settings-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-quiet);
+}
+.settings-head h2 {
+  margin: 0;
+  font: 600 22px / 1.2 var(--font-ui);
+  letter-spacing: -0.025em;
+}
+.settings-head p {
+  margin: 5px 0 0;
+  font: 400 13px / 1.5 var(--font-ui);
+  color: var(--muted);
+  max-width: 70ch;
+}
+.settings-head .actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.runner-cols,
+.runner-row {
+  display: grid;
+  grid-template-columns: 14px 150px 92px 1fr 190px 96px 72px;
+  gap: 14px;
+  align-items: center;
+}
+.runner-cols {
+  padding: 12px 4px 8px;
+  font: 400 10.5px / 1 var(--font-ui);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.runner-row {
+  padding: 12px 4px;
+  border-top: 1px solid var(--border-quiet);
+  font: 400 12.5px / 1.4 var(--font-mono);
+}
+.runner-row:hover {
+  background: var(--header);
+}
+.runner-row .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--done);
+}
+.runner-row .name {
+  color: var(--text);
+  font-weight: 500;
+}
+.runner-row .detail {
+  color: var(--muted);
+}
+.runner-row .detail .sub {
+  color: var(--dim);
+}
+.runner-row .scope {
+  color: var(--dim);
+}
+.runner-row .rowacts {
+  display: flex;
+  gap: 8px;
+  color: var(--dim);
+  justify-content: flex-end;
+}
+.runner-row .rowacts button {
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.runner-row .rowacts button:hover {
+  color: var(--text);
+}
+.runner-row .rowacts button.del:hover {
+  color: var(--error-text);
+}
+
+.runner-group.needs-auth {
+  border-top: 1px solid var(--border-quiet);
+  background: rgba(210, 153, 34, 0.05);
+}
+.runner-group.needs-auth .runner-row {
+  border-top: 0;
+}
+.runner-row.absent {
+  opacity: 0.5;
+}
+.runner-row.absent .dot {
+  background: var(--faint);
+}
+.runner-row .detail.warn {
+  color: var(--gate);
+}
+.runner-fix {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 4px 14px 42px;
+}
+.runner-fix .why {
+  font: 400 12px / 1.5 var(--font-ui);
+  color: var(--muted);
+}
+.runner-fix code {
+  font: 400 12px / 1 var(--font-mono);
+  color: var(--accent-bright);
+  background: var(--well);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 6px 9px;
+}
+
+.settings-foot {
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.settings-foot .probed {
+  font: 400 12px / 1.5 var(--font-ui);
+  color: var(--dim);
+}
+.settings-foot .actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+/* Not in the brief's grid verbatim: the needs-auth dot needs a colour beyond
+   the base ready-green / absent-faint pair, using only existing tokens. */
+.runner-row .dot.err {
+  background: var(--error);
+}
+.runner-row .dot.warn {
+  background: var(--gate);
+}
+
+/* Inline row editor (Edit expands this beneath a runner-row) and the empty /
+   loading / read-only states around the table — new controls this page
+   introduces, styled with existing tokens and the shared .field/.txt/.sel
+   classes from modals.css. */
+.runner-edit {
+  padding: 2px 4px 16px 42px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.runner-edit .row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.runner-edit .edit-actions {
+  display: flex;
+  gap: 8px;
+}
+.settings-empty {
+  padding: 20px 4px;
+  color: var(--muted);
+  font: 400 13px / 1.5 var(--font-ui);
+}
+.settings-note {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--header);
+  color: var(--muted);
+  font: 400 13px / 1.5 var(--font-ui);
+}
+.runner-sechead {
+  margin: 18px 0 2px;
+  font: 600 12px / 1.3 var(--font-ui);
+  color: var(--text);
+}
+.runner-sechead:first-child {
+  margin-top: 0;
+}
+
 .btn.small.copied {
   color: var(--done);
   border-color: rgba(63, 185, 80, 0.45);

@@ -103,8 +103,6 @@ ${styles}
     <div class="topbar-right">
       <div class="health" id="health" role="group" aria-label="Agent health"></div>
       <button class="tbtn" id="historyBtn" title="Browse live and past runs">Runs</button>
-      <!-- Task 9 builds the real settings page; until then this opens the
-           legacy config modal so configuration stays reachable. -->
       <button class="tbtn" id="settingsBtn" title="Project agent and timeout settings">Settings</button>
     </div>
   </header>
