@@ -486,6 +486,12 @@
       // Cards (what ran / what it cost / what it produced) carry no severity
       // of their own -- the narrow column holds the card's short label
       // instead, and every row keeps the default (unmodified) .sev colour.
+      // The brief's ".sev.critical" / ".sev.high" mapping describes a
+      // Critical/High/Medium finding shape the engine does not actually
+      // produce here: SteamtrainReducer.arrivalReceiptCards() returns plain
+      // { id, label, value } with no severity field at all (confirmed
+      // against src/workflow/arrival-report.ts). Do not "fix" this back
+      // toward a literal severity mapping -- there is no severity data to map.
       cards.forEach(function (c) {
         reportBody.appendChild(h("div", { class: "finding" },
           h("div", { class: "sev", text: (c.id || "").toUpperCase() }),

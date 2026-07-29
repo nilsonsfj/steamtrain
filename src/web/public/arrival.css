@@ -901,9 +901,20 @@ body[data-mode="arrival"] .station-atmosphere {
   max-width: 30ch;
   text-wrap: pretty;
 }
+/*
+ * Deliberately deviates from the brief's Step 1 CSS here: verbatim it is
+ * `display: flex; gap: 28px;` with no wrap/shrink allowance, authored against
+ * the source design's full-viewport arrival (~1020px wide). Nested inside
+ * `#center` the column is ~420-484px, and four stat cells + three divider
+ * rules + the Run again/Export actions do not fit on one line at that width
+ * (measured overflow: .arrival-main scrollWidth 593 vs clientWidth 484,
+ * Export clipped entirely outside the column). Wrapping keeps every control
+ * reachable at the mandated column width without reverting to full-bleed.
+ */
 .arrival-stats {
   display: flex;
-  gap: 28px;
+  flex-wrap: wrap;
+  gap: 14px 28px;
   margin-top: 20px;
   align-items: flex-end;
 }
@@ -1052,6 +1063,9 @@ body[data-mode="arrival"] .station-atmosphere {
 .ledger-row .sub {
   color: var(--dim);
   font-size: 11px;
+}
+.ledger-row .sub .cached {
+  color: var(--gate);
 }
 .ledger-row .num {
   text-align: right;
