@@ -1022,14 +1022,20 @@
       // The approval payload carries the reviewed step's capped unified patch
       // (see APPROVAL_DIFF_CAP); offer it as a collapsed graphical diff.
       if (a.diff && a.diff.patch && typeof window.SteamtrainDiff !== "undefined") {
-        var diffBody = h("div", { class: "approval-diff-body", style: "display:none" });
+        // Persisted in S.approvalDiffOpen (keyed by step id), not just a local
+        // closure flag: the run's throughput tick schedules a full re-render
+        // every 2s for as long as the run is live, which would otherwise
+        // rebuild this box from scratch and snap an opened diff shut.
+        var diffOpen = !!S.approvalDiffOpen[s.stepId];
+        var diffBody = h("div", { class: "approval-diff-body", style: diffOpen ? "" : "display:none" });
         if (a.diff.patch.indexOf("[truncated ") >= 0) {
           diffBody.appendChild(h("div", { class: "hist-wt-diff-truncated",
             text: "Diff truncated at 20 KB — the engine caps approval patches; the visible part is shown." }));
         }
         diffBody.appendChild(window.SteamtrainDiff.renderPatch(a.diff.patch));
-        var diffToggle = h("button", { class: "btn small approval-diff-toggle", text: "View diff", onClick: function () {
+        var diffToggle = h("button", { class: "btn small approval-diff-toggle", text: diffOpen ? "Hide diff" : "View diff", onClick: function () {
           var showing = diffBody.style.display !== "none";
+          S.approvalDiffOpen[s.stepId] = showing ? false : true;
           diffBody.style.display = showing ? "none" : "";
           diffToggle.textContent = showing ? "View diff" : "Hide diff";
         } });
@@ -1098,6 +1104,9 @@
       placeholder: isJson ? "JSON matching the step's output schema…" : "Type your answer…",
       spellcheck: "false"
     });
+    // Restore whatever draft survived a prior re-render (see S.humanInputDraft).
+    ta.value = S.humanInputDraft[s.stepId] || "";
+    ta.addEventListener("input", function () { S.humanInputDraft[s.stepId] = ta.value; });
     var hintText = isJson ? "This step expects JSON (validated against its schema)." : "";
     var errEl = h("div", { class: "human-input-error", style: "display:none" });
     var send = h("button", { class: "btn approve", text: "Answer", onClick: function () {
@@ -1109,6 +1118,7 @@
         try { JSON.parse(value); } catch (e) { errEl.textContent = "not valid JSON: " + e.message; errEl.style.display = "block"; return; }
       }
       errEl.style.display = "none";
+      delete S.humanInputDraft[s.stepId];
       submitHumanInput(s.stepId, value);
     } });
     // Enter submits a single-line answer; Shift+Enter makes a newline.
@@ -1347,7 +1357,7 @@
     S.runExternal = false;
     S.runDetached = false;
     S.runState = SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || S.spec);
-    S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
+    S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {};
     S.narration = []; S.arrivalInspect = false; S.arrivalEnter = false;
     S.narrationFreshPlayed = null;
     S.selectedStepId = null;

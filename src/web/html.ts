@@ -109,8 +109,9 @@ ${styles}
   <div id="cols">
     <aside id="rail-left" aria-label="Workflows"></aside>
     <section id="center">
-      <!-- section.work / .runbar / .canvas are kept as class hooks: the Station,
-           ride and Arrival modes in arrival.css (Task 8) still select on them. -->
+      <!-- section.work / .runbar / .canvas are kept as class hooks: the
+           Arrival mode in arrival.css still selects on them (Station/Ride/
+           Conductor were retired). -->
       <section class="work">
         <div class="runbar">
           <div class="run-head">

@@ -373,11 +373,17 @@
       mbanner(banner, "", "");
       draft.className = "draft show"; draft.textContent = "";
       createBtn.disabled = true; createBtn.textContent = "Drafting\u2026";
+      // Omit `name` entirely when left blank ("auto from description"): the
+      // server's isValidWorkflowName() rejects an empty string, so sending
+      // name: "" turned the documented default path (leave Name blank) into
+      // a guaranteed 400 on every submission.
+      var nameVal = nameInput.value.trim();
       var payload = {
         description: desc, agent: agentSel.value, model: modelSel.value,
-        effort: effortSel ? effortSel.value : "", name: nameInput.value.trim(),
+        effort: effortSel ? effortSel.value : "",
         scope: scopeSel.value
       };
+      if (nameVal) payload.name = nameVal;
       var ac = new AbortController();
       S.draftAbort = ac;
       streamGenerate(payload, ac.signal, function (frame) {
@@ -411,6 +417,17 @@
       body: JSON.stringify(payload), signal: signal
     }).then(function (res) {
       if (res.status === 401) { showReauthOverlay(); return; }
+      // Any other non-2xx (400 bad request, 503 too many concurrent
+      // generations, ...) is a plain JSON error, not an SSE stream. Reading
+      // it as one left the modal stuck on "Drafting..." forever with no
+      // feedback — surface it as a normal done/error frame instead.
+      if (!res.ok) {
+        return res.json().then(function (body) {
+          onFrame({ type: "done", ok: false, error: (body && body.error) || ("request failed (" + res.status + ")") });
+        }, function () {
+          onFrame({ type: "done", ok: false, error: "request failed (" + res.status + ")" });
+        });
+      }
       var reader = res.body.getReader();
       var dec = new TextDecoder();
       var buf = "";

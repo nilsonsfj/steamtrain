@@ -32,46 +32,90 @@ file.
 
 ## What it shows
 
-### First ride: Station → Conductor → Arrival
+### The Console: three columns, one expanded band
 
-On a true first open (no run history, no remembered workflow) the web UI lands
-on the **Station** — a full-bleed boarding surface with the brand, the premise
-("Parallel agents. One receipt."), and a single primary CTA to take the free
-`tour`. Ops chrome (sidebar, run bar, health chips) stays hidden until you
-ride or choose "I have a workflow."
+The web UI is a persistent three-column cockpit — there is no separate
+"landing" mode and no full-bleed takeover for any workflow, including the
+free `tour`. Every workflow runs through the same layout:
 
-During the run, the **Conductor** narrates the ride in plain English above the
-live pipeline. When the workflow finishes, **Arrival** replaces the tree with a
-receipt climax: headline, three fact cards, status dots, and the consolidator
-report — then destinations like "Ride again" and "Try bug-hunt."
+- **Workflow rail** (left) — every workflow (bundled / user / project), tagged
+  by source, with a one-line block summary (`fan-out · worker · merge …`).
+  `+` opens the Create-workflow form.
+- **Run pane** (center) — the selected workflow's title/description/actions
+  (Configure, Clone), the composer (Describe box, Plan/Run, `fresh` toggle),
+  and the **pipeline canvas**: one **band** per phase instance, stacked in run
+  order. A band's identity is **`phaseId:iteration`, not bare `phaseId`** — a
+  loop that re-enters a phase (a bounded gate loop-back, a review→fix cycle)
+  produces one band per iteration rather than all iterations collapsing into a
+  single band that keeps overwriting itself. A queued phase collapses to its
+  header line; a done phase lists its steps with final status/cost/tokens.
+  **Exactly one band is expanded at a time** — the running phase, or whichever
+  step's row the reader clicked — and only the expanded band hosts the live,
+  follow-the-stream **output pane** (scroll up to pause following, back to the
+  bottom to re-engage). A `workflow`-call step's row carries a "what runs
+  inside" expander: a rollup line plus the resolved child spec's steps and the
+  models that actually run them (overrides applied), recursing into nested
+  sub-workflows.
+- **Instrument rail** (right) — live run telemetry; see below.
 
-### Day-to-day ops chrome
+Clicking any step row also opens the **step drill-in drawer**: runner,
+worktree branch + directory, start time, live elapsed / final duration, cost,
+tokens, exit code, data-flow inputs, and the step's full output in a
+scrollable follow-the-stream pane with one-click copy. `Esc` closes it.
 
-- **Sidebar** — every workflow (bundled / user / project), tagged by source, with
-  a one-line block summary (`fan-out · worker · merge …`).
-- **Run bar** — the selected workflow's title/description, an input box
-  (`Cmd/Ctrl+Enter` to launch; `↑`/`↓` recall previous Run/Plan inputs, stored
-  in the browser's localStorage), a `fresh` toggle (ignore the resume cache), a
-  live elapsed timer, and a step-progress bar.
-- **Pipeline canvas** — phases stack vertically (they run sequentially); within a
-  phase, steps render as parallel **cards**. Each card is color-coded by block
-  kind and shows:
-  - status (pending → running → done/error), with a pulsing indicator while live;
-  - the agent · model backing the step;
-  - data-flow **inputs** (`dependsOn`) and `forEach` fan-out source;
-  - the assigned work item for dynamic `forEach` children;
-  - the isolated **worktree branch** (`⎇ …`) the step is working in, live from
-    the moment it's allocated;
-  - a streamed, **scrollable output tail** that follows the stream (scroll up to
-    pause, back to the bottom to re-engage);
-  - a live per-step **elapsed timer** while running; duration, cost, `cached`,
-    and gate pass/block badges on completion.
-- **Step drill-in drawer** — click any card for the full picture: runner,
-  worktree branch + directory, start time, live elapsed / final duration, cost,
-  tokens, exit code, data-flow inputs, and the step's FULL output in a
-  scrollable follow-the-stream pane with one-click copy. `Esc` closes it.
-- **Run summary** — a per-step table (status · time · cost · notes) plus run
-  totals once the workflow finishes.
+A completed run replaces the pipeline canvas with the two-column **Arrival**
+page: a headline, receipt cards (ran / cost / produced), the per-step ledger,
+worktree changes, and destinations ("Run again", "Export"). The engine's
+`arrivalReceiptCards()` returns plain `{id, label, value}` facts — it has **no
+severity field** — so this is a plain fact ledger, not a severity-graded
+report; if a workflow's own report happens to mention severities (bug-hunt's
+consolidator prose, say), that is the workflow's text, not structured data the
+page renders or grades on.
+
+Settings (agents, APIs, timeouts/budget) is a real **page**, not a modal —
+see [Settings](#settings) below.
+
+### Instrument rail: derived telemetry
+
+The engine's event stream carries per-step cost and token totals but no rate
+and no forecast, so the instrument rail derives both client-side
+(`src/web/telemetry.ts`, shared with the reducer bundle so both the logic and
+its tests live in one place):
+
+- **Throughput is measured, not modeled.** A timer samples the run's
+  cumulative token total every 2 seconds and keeps a rolling 60-second window
+  of those samples; the sparkline bars are tokens/second between consecutive
+  samples, normalized against the busiest interval currently in the window.
+  It goes to zero once nothing has been sampled recently — there is no decay
+  curve or smoothing, just the measured rate.
+- **Projected cost is an explicit heuristic, not a forecast:**
+  `spend ÷ completed steps × total steps`. It assumes the remaining steps cost
+  about what the finished ones did on average. That assumption is wrong for
+  any workflow whose step costs differ a lot — a cheap gate step running after
+  an expensive scan step will pull the projection in whichever direction the
+  finished steps happen to skew. Treat it as a rough budget trip-wire, not a
+  bill. The instrument rail also shows Spend, Tokens, Cache hits, per-runner
+  busy/idle status, active worktrees, and a capped (200-entry), newest-first
+  event log — all read directly off the event stream, not derived.
+
+### Settings
+
+Click **Settings** in the header to open the settings page (it replaces the
+cockpit in `#center`, not a modal overlay, and is deep-linkable via
+`#settings/<section>`). The source design draws seven settings sections; only
+**two ship — Runners and Limits & budget** — because those are the only two
+with a real config API behind them. This is a deliberate scope decision, not
+an oversight: the other five (model bindings, permissions, access & sharing,
+notifications, cache & worktrees) have no persistence layer to write to, so
+rendering them would mean dead tabs that accept input and silently do
+nothing. They stay off the nav until a config API exists for them.
+
+`GET /api/config` — which the Runners/Limits sections need to render current
+values — is **blocked for read-only sessions** (its payload carries agent
+`env`, `extraArgs`, and binary paths, which the read-token contract treats as
+privileged). The settings page degrades accordingly for a read-only session:
+it never issues the request in the first place, and renders no write
+controls — there is nothing to fall back to, by design, not a silent failure.
 
 ## How it works
 

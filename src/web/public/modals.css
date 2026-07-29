@@ -770,6 +770,27 @@ select.sel.invalid {
 }
 /* ---- Accessibility: respect prefers-reduced-motion ---- */
 @media (prefers-reduced-motion: reduce) {
+  /*
+   * Blanket rule first: the Console redesign added several `infinite` pulse
+   * animations (.status-pill.running .dot, .run-progress .live, .band.running
+   * .band-head .dot — all `st-pulse` in shell.css/run.css) and one-shot
+   * transitions (phase-in, cardShimmer/runGlow/checkScale/cardShake/dotPop in
+   * run.css; estepFlash/bulkFlashIn/reauth-fade-in in settings.css;
+   * conductor-in/conductor-live/line-fresh in arrival.css) across five
+   * stylesheets. Naming each one here individually drifted out of date once
+   * before (the list below predates the redesign and named retired
+   * Station/Ride classes); collapsing every animation/transition to
+   * near-zero duration here is the durable fix — it always covers whatever
+   * pulse or transition a later surface adds, not just today's list.
+   */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
   .card.running,
   .card.done::after,
   .card.error,

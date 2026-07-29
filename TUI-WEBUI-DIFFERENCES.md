@@ -9,6 +9,20 @@ This is a working document. The end state we're aiming for: a single
 "workflow session / authoring" core that the TUI and the web server both drive,
 with each layer owning only presentation + input handling.
 
+Updated 2026-07-29: the web UI was rebuilt as the **Console** — a persistent
+three-column cockpit (workflow rail · run pane · instrument rail) replacing the
+old Station/Ride/Conductor theatrical layer; the tour workflow now runs through
+the same cockpit as every other workflow, landing on a two-column Arrival page.
+Configuration became a real **page** (`Settings`, its own route) instead of a
+modal, which **widens** the TUI gap in §2/§4 below: the TUI's `/agents`
+(Ctrl+A) and `/apis` managers are still modal overlays, so "manage agent/API
+instances" is now ✅/✅ in capability but ⚠️ in presentation — a page you can
+deep-link to and leave open beside a run vs. a modal that blocks the rest of
+the screen. The new **instrument rail** (live spend/projected-cost/tokens/
+cache-hit meters, a measured throughput sparkline, per-runner busy/idle status,
+active worktrees, and a capped event log) is web-only — the TUI has no
+persistent equivalent, only what fits in the status bar and doctor panel.
+
 Updated 2026-07-21: agent/API **setup** reached parity and became actionable in
 both UIs. The doctor now attaches a structured `fixCommand` (install / login /
 `export <ENV>=…`) to each not-ready result. TUI: the `/agents` (Ctrl+A) and

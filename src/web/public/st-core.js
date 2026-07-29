@@ -109,7 +109,18 @@ window.Steamtrain = (function () {
     // (null until the first workflow_start) and the capped, newest-first
     // event log it renders alongside Spend/Runners/Worktrees.
     throughput: null,
-    eventLog: []
+    eventLog: [],
+    // Approval checkpoint diff toggle, keyed by the approval step's id. The
+    // 2s throughput tick (st-instruments.js) schedules a full re-render for
+    // the life of the run, which would otherwise snap an opened diff shut
+    // every tick since renderApproval rebuilds fresh DOM each pass.
+    approvalDiffOpen: {},
+    // In-progress human-input answer text, keyed by step id, mirrored from
+    // the textarea's oninput. Same 2s-tick problem as approvalDiffOpen: a
+    // fresh <textarea> is built on every re-render, which would otherwise
+    // silently erase whatever the reader was mid-typing into a human-input
+    // or agent-clarifying-question box during a live run.
+    humanInputDraft: {}
   };
 
   var SELECTION_KEY = "steamtrain.lastWorkflow";
@@ -627,7 +638,7 @@ window.Steamtrain = (function () {
         ? SteamtrainReducer.workflowStateFromSpec(ST.run.effectiveSpec() || S.spec)
         : SteamtrainReducer.initialWorkflowState;
       S.detail = null; S.selectedStepId = null;
-      S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
+      S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {};
       ST.run.setBanner(
         "Attached to " + (run.detached ? "detached " : "") + "run " + run.id.slice(0, 8) + "…" +
           (isReadOnly() ? " (read-only view)." : " — cancel stops the run itself."),
@@ -992,7 +1003,7 @@ window.Steamtrain = (function () {
     S.selected = name; S.runId = null; S.runState = null;
     S.detail = null; S.detailInvoker = null; S.detailFallback = null; S.detailFocusPending = false; S.detailFocusGeneration += 1;
     S.selectedStepId = null;
-    S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 };
+    S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {};
     S.narration = []; S.arrivalInspect = false; S.arrivalEnter = false; S.endedAt = 0;
     S.narrationFreshPlayed = null;
     S.arrivalCtaFocused = false;
