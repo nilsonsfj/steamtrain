@@ -511,8 +511,8 @@
     var pending = [], resolved = [];
     phases.forEach(function (p) {
       (p.steps || []).forEach(function (s) {
-        if (s.approval) (s.approval.pending ? pending : resolved).push(renderApproval(s));
-        if (s.humanInput) (s.humanInput.pending ? pending : resolved).push(renderHumanInput(s));
+        if (s.approval) (s.approval.pending ? pending : resolved).push(renderApproval(p, s));
+        if (s.humanInput) (s.humanInput.pending ? pending : resolved).push(renderHumanInput(p, s));
       });
     });
     if (!pending.length && !resolved.length) return;
@@ -628,8 +628,8 @@
     if (s.item) card.appendChild(h("div", { class: "item", text: "item #" + s.item.index + ": " + truncate(s.item.value, 80) }));
     if (s.activity) card.appendChild(h("div", { class: "activity", text: s.activity }));
 
-    if (s.approval) card.appendChild(renderApproval(s));
-    if (s.humanInput) card.appendChild(renderHumanInput(s));
+    if (s.approval) card.appendChild(renderApproval(p, s));
+    if (s.humanInput) card.appendChild(renderHumanInput(p, s));
 
     // Live tail: the full streamed text (display-capped) in a scrollable pane
     // that follows the stream until the reader scrolls up; scrolling back to
@@ -1009,8 +1009,12 @@
     pre.scrollTop = S.drawerScroll.follow ? pre.scrollHeight : S.drawerScroll.top;
   }
 
-  function renderApproval(s) {
+  function renderApproval(p, s) {
     var a = s.approval;
+    // Historical cards (st-modals.js's static history view) call this with no
+    // live phase instance; only a live re-render needs the phase/iteration
+    // qualifier to keep loop-back iterations distinct (see stepKey).
+    var key = p ? stepKey(p, s) : s.stepId;
     var box = h("div", { class: "approval" + (a.pending ? " pending" : (a.approved ? " approved" : " rejected")) });
     if (a.reviewStepId) box.appendChild(h("div", { class: "approval-review", text: "reviewing: " + a.reviewStepId }));
     if (a.message) box.appendChild(h("div", { class: "approval-msg", text: a.message }));
@@ -1022,11 +1026,14 @@
       // The approval payload carries the reviewed step's capped unified patch
       // (see APPROVAL_DIFF_CAP); offer it as a collapsed graphical diff.
       if (a.diff && a.diff.patch && typeof window.SteamtrainDiff !== "undefined") {
-        // Persisted in S.approvalDiffOpen (keyed by step id), not just a local
-        // closure flag: the run's throughput tick schedules a full re-render
-        // every 2s for as long as the run is live, which would otherwise
-        // rebuild this box from scratch and snap an opened diff shut.
-        var diffOpen = !!S.approvalDiffOpen[s.stepId];
+        // Persisted in S.approvalDiffOpen (keyed by stepKey — phase:iteration:
+        // stepId — not just a local closure flag: the run's throughput tick
+        // schedules a full re-render every 2s for as long as the run is live,
+        // which would otherwise rebuild this box from scratch and snap an
+        // opened diff shut. Keying by stepKey rather than bare stepId keeps a
+        // loop-back's iteration 2 from inheriting iteration 1's open/closed
+        // state for the same step id.
+        var diffOpen = !!S.approvalDiffOpen[key];
         var diffBody = h("div", { class: "approval-diff-body", style: diffOpen ? "" : "display:none" });
         if (a.diff.patch.indexOf("[truncated ") >= 0) {
           diffBody.appendChild(h("div", { class: "hist-wt-diff-truncated",
@@ -1035,7 +1042,7 @@
         diffBody.appendChild(window.SteamtrainDiff.renderPatch(a.diff.patch));
         var diffToggle = h("button", { class: "btn small approval-diff-toggle", text: diffOpen ? "Hide diff" : "View diff", onClick: function () {
           var showing = diffBody.style.display !== "none";
-          S.approvalDiffOpen[s.stepId] = showing ? false : true;
+          S.approvalDiffOpen[key] = showing ? false : true;
           diffBody.style.display = showing ? "none" : "";
           diffToggle.textContent = showing ? "View diff" : "Hide diff";
         } });
@@ -1067,8 +1074,11 @@
    * declares an output schema, a plain textarea otherwise. A rejected answer
    * re-renders with the engine's validation error.
    */
-  function renderHumanInput(s) {
+  function renderHumanInput(p, s) {
     var q = s.humanInput;
+    // Same historical-vs-live distinction as renderApproval: only a live
+    // re-render needs the phase/iteration qualifier (see stepKey).
+    var key = p ? stepKey(p, s) : s.stepId;
     var box = h("div", { class: "human-input" + (q.pending ? " pending" : (q.canceled ? " canceled" : " answered")) });
     var label = q.origin === "agent-question" ? "agent question" : "input needed";
     box.appendChild(h("div", { class: "human-input-origin", text: label }));
@@ -1105,8 +1115,10 @@
       spellcheck: "false"
     });
     // Restore whatever draft survived a prior re-render (see S.humanInputDraft).
-    ta.value = S.humanInputDraft[s.stepId] || "";
-    ta.addEventListener("input", function () { S.humanInputDraft[s.stepId] = ta.value; });
+    // Keyed by stepKey rather than bare stepId so a loop-back's iteration 2
+    // never pre-fills with a draft left over from iteration 1's same step id.
+    ta.value = S.humanInputDraft[key] || "";
+    ta.addEventListener("input", function () { S.humanInputDraft[key] = ta.value; });
     var hintText = isJson ? "This step expects JSON (validated against its schema)." : "";
     var errEl = h("div", { class: "human-input-error", style: "display:none" });
     var send = h("button", { class: "btn approve", text: "Answer", onClick: function () {
@@ -1118,7 +1130,7 @@
         try { JSON.parse(value); } catch (e) { errEl.textContent = "not valid JSON: " + e.message; errEl.style.display = "block"; return; }
       }
       errEl.style.display = "none";
-      delete S.humanInputDraft[s.stepId];
+      delete S.humanInputDraft[key];
       submitHumanInput(s.stepId, value);
     } });
     // Enter submits a single-line answer; Shift+Enter makes a newline.
