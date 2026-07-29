@@ -852,363 +852,233 @@ body[data-mode="ride"] .runbar .sub {
   margin-right: 4px;
 }
 
-/* ---- Arrival: designed climax ---- */
-.arrival {
-  position: relative;
-  z-index: 1;
-  max-width: 780px;
-  width: min(780px, 100%);
-  margin: 28px auto 18px;
-  padding: 8px 4px 12px;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-.arrival.enter {
-  animation: arrival-in 720ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.arrival.failed {
-  border: none;
-  background: transparent;
-}
-@keyframes arrival-in {
-  0% {
-    opacity: 0;
-    transform: translateY(18px) scale(0.98);
-  }
-  55% {
-    opacity: 1;
-    transform: translateY(-5px) scale(1.012);
-  }
-  100% {
-    opacity: 1;
-    transform: none;
-  }
-}
-.arrival-kicker {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--done);
-  margin-bottom: 10px;
-  animation: station-rise 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-.arrival.failed .arrival-kicker {
-  color: var(--error);
-}
-.arrival-title {
-  font-family: var(--font-ui);
-  font-size: clamp(28px, 4.4vw, 40px);
-  font-weight: 700;
-  letter-spacing: -0.035em;
-  margin-bottom: 22px;
-  padding-bottom: 18px;
-  border-bottom: 1px solid rgba(63, 185, 80, 0.22);
-  line-height: 1.15;
-  text-wrap: balance;
-  animation: station-rise 560ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both;
-}
-.arrival.ok .arrival-title {
-  color: #56d364;
-}
-.arrival.failed .arrival-title {
-  color: #f85149;
-  border-bottom-color: rgba(248, 81, 73, 0.28);
-}
-.arrival-step {
-  color: var(--muted);
-  font-weight: 500;
-  font-size: 14px;
-}
-.arrival-cards {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 18px;
-  animation: station-rise 560ms cubic-bezier(0.22, 1, 0.36, 1) 140ms both;
-}
-.arrival-card {
-  padding: 14px 14px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(63, 185, 80, 0.22);
-  background: rgba(8, 14, 12, 0.72);
-}
-.arrival.failed .arrival-card {
-  border-color: rgba(248, 81, 73, 0.28);
-  background: rgba(18, 10, 10, 0.72);
-}
-.arrival-card-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  margin-bottom: 6px;
-}
-.arrival-card-value {
-  font-family: var(--font-ui);
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text);
-  letter-spacing: -0.01em;
-}
-.arrival-receipt {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--muted);
-  margin-bottom: 14px;
-}
-.arrival-artifact {
-  margin: 0 0 18px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: #07090c;
-  overflow: hidden;
-}
-.arrival-artifact-label {
-  padding: 10px 16px 0;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-.arrival-artifact-lead {
-  font-family: var(--font-ui);
-  font-size: clamp(18px, 2.4vw, 22px);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.3;
-  color: var(--text);
-  padding: 12px 18px 14px;
-  border-bottom: 1px solid rgba(42, 51, 64, 0.8);
-}
-.arrival-hero {
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin: 0;
-  padding: 14px 16px 16px;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  line-height: 1.55;
-  color: #b7c2ce;
-  max-height: 180px;
-  overflow: auto;
-}
-.arrival-hero-prose {
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin: 0;
-  padding: 14px 18px 16px;
-  font-family: var(--font-ui);
-  font-size: 14px;
-  line-height: 1.55;
-  color: #c5d0db;
-  max-height: 220px;
-  overflow: auto;
-}
-.arrival-sections {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  max-height: 260px;
-  overflow: auto;
-}
-.arrival-section {
-  padding: 12px 18px 14px;
-  border-bottom: 1px solid rgba(42, 51, 64, 0.65);
-}
-.arrival-section:last-child {
-  border-bottom: none;
-}
-.arrival-section-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--accent-bright);
-  margin-bottom: 6px;
-}
-.arrival-section-body {
-  font-family: var(--font-ui);
-  font-size: 13.5px;
-  line-height: 1.5;
-  color: #c5d0db;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.arrival-destinations {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin: 4px 0 18px;
-  animation: station-rise 560ms cubic-bezier(0.22, 1, 0.36, 1) 220ms both;
-}
-.arrival-destinations .btn.primary {
-  font-family: var(--font-ui);
-  font-weight: 700;
-  padding: 12px 20px;
-}
-.arrival-inspect {
-  margin-top: 4px;
-  opacity: 0.8;
-}
-/* Status grid: labeled cars at a glance */
-.arrival-status-grid {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin: 10px 0 16px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-}
-.arrival-car {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 12px 7px 9px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(42, 51, 64, 0.95);
-  animation: dotPop 0.3s ease-out both;
-}
-.arrival-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--pending);
-  flex: none;
-}
-.arrival-car-kind {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-.arrival-car-label {
-  font-family: var(--font-ui);
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--muted);
-  letter-spacing: -0.01em;
-  max-width: 11em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.arrival-car.ok .arrival-dot {
-  background: var(--done);
-}
-.arrival-car.fail .arrival-dot {
-  background: var(--error);
-}
-.arrival-car.skip .arrival-dot {
-  background: var(--gate);
-}
-.arrival-car.ok .arrival-car-label {
-  color: #b7d7bc;
-}
-.arrival-car.fail .arrival-car-label {
-  color: #f0b4b1;
-}
-.arrival-car.skip .arrival-car-label {
-  color: #d6c08a;
-}
-.arrival-car:nth-child(1) {
-  animation-delay: 0.05s;
-}
-.arrival-car:nth-child(2) {
-  animation-delay: 0.08s;
-}
-.arrival-car:nth-child(3) {
-  animation-delay: 0.11s;
-}
-.arrival-car:nth-child(4) {
-  animation-delay: 0.14s;
-}
-.arrival-car:nth-child(5) {
-  animation-delay: 0.17s;
-}
-.arrival-car:nth-child(6) {
-  animation-delay: 0.20s;
-}
-.arrival-car:nth-child(7) {
-  animation-delay: 0.23s;
-}
-.arrival-car:nth-child(8) {
-  animation-delay: 0.26s;
-}
-.arrival-car:nth-child(9) {
-  animation-delay: 0.29s;
-}
-.arrival-car:nth-child(10) {
-  animation-delay: 0.32s;
-}
-.arrival-car:nth-child(n + 11) {
-  animation-delay: 0.35s;
-}
-
-/* Arrival mode: own the hall the way Station owns the platform. */
-body[data-mode="arrival"] header,
-body[data-mode="arrival"] aside#sidebar,
-body[data-mode="arrival"] .runbar .title,
-body[data-mode="arrival"] .runbar .sub,
-body[data-mode="arrival"] .runbar .srcline,
-body[data-mode="arrival"] .runbar .wfactions,
-body[data-mode="arrival"] .runbar .runbar-head,
-body[data-mode="arrival"] .runbar .reroute-row,
-body[data-mode="arrival"] .runbar .row,
-body[data-mode="arrival"] .runbar .status-line {
-  display: none !important;
-}
-body[data-mode="arrival"] .runbar {
-  padding: 0;
-  border: none;
-  background: transparent;
-}
-body[data-mode="arrival"] .runbar .banner:empty,
-body[data-mode="arrival"] .runbar .banner.ok,
-body[data-mode="arrival"] .runbar .banner.info {
+/* ---- Arrival: the two-column report + step ledger --------------------- */
+/* boot.js still paints the Station atmosphere behind Arrival (untouched,
+   out of this surface's file scope); the theatrical backdrop has no place
+   in the flat two-column console, so it is switched off here rather than
+   edited in the Station rules block above (Task 9 deletes that wholesale). */
+body[data-mode="arrival"] .station-atmosphere {
   display: none;
 }
-body[data-mode="arrival"] main {
-  display: block;
+.arrival {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
 }
-body[data-mode="arrival"] section.work {
-  height: 100vh;
-}
-body[data-mode="arrival"] .canvas {
-  position: relative;
+.arrival-main {
+  min-width: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+.arrival-head {
+  padding: 26px 32px 18px;
+  border-bottom: 1px solid var(--border-quiet);
+}
+.arrival-kicker {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.arrival-kicker .state {
+  font: 600 10px / 1 var(--font-ui);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--done);
+}
+.arrival-kicker .state.failed {
+  color: var(--error-text);
+}
+.arrival-kicker .when {
+  font: 400 11.5px / 1 var(--font-mono);
+  color: var(--dim);
+}
+.arrival-headline {
+  font: 600 30px / 1.2 var(--font-ui);
+  letter-spacing: -0.03em;
+  max-width: 30ch;
+  text-wrap: pretty;
+}
+.arrival-stats {
+  display: flex;
+  gap: 28px;
+  margin-top: 20px;
+  align-items: flex-end;
+}
+.arrival-stats .k {
+  font: 400 10.5px / 1 var(--font-ui);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 6px;
+}
+.arrival-stats .v {
+  font: 500 17px / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.arrival-stats .rule {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border-quiet);
+}
+.arrival-stats .actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.arrival-report {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 32px 24px;
+}
+.arrival-report-head {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  min-height: 100%;
-  padding: 40px 24px 56px;
-  background: radial-gradient(ellipse 80% 55% at 50% -8%, rgba(63, 185, 80, 0.12), transparent 55%),
-    radial-gradient(ellipse 45% 35% at 90% 85%, rgba(52, 211, 196, 0.06), transparent 50%),
-    linear-gradient(180deg, #0b120e 0%, var(--bg) 42%, #080a0e 100%);
+  gap: 10px;
+  margin-bottom: 14px;
 }
-body[data-mode="arrival"] .arrival {
-  margin: 0;
-  width: 100%;
+.arrival-report-head .rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border-quiet);
 }
-body[data-mode="arrival"].arrival-failed .canvas {
-  background: radial-gradient(ellipse 80% 55% at 50% -8%, rgba(248, 81, 73, 0.1), transparent 55%),
-    linear-gradient(180deg, #140c0c 0%, var(--bg) 42%, #080a0e 100%);
+.arrival-report-head .src {
+  font: 400 11.5px / 1 var(--font-mono);
+  color: var(--dim);
+}
+.finding {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-quiet);
+  margin-bottom: 14px;
+}
+.finding:last-child {
+  border-bottom: 0;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+.finding .sev {
+  font: 600 10.5px / 1.6 var(--font-ui);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.finding .sev.critical {
+  color: var(--error-text);
+}
+.finding .sev.high {
+  color: var(--gate);
+}
+.finding .what {
+  font: 500 14.5px / 1.5 var(--font-ui);
+  color: var(--text);
+}
+.finding .what code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.finding .where {
+  font: 400 12px / 1.6 var(--font-mono);
+  color: var(--dim);
+  margin-top: 5px;
+}
+
+.ledger {
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.ledger-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border-quiet);
+}
+.ledger-head .count {
+  margin-left: auto;
+  font: 400 11px / 1 var(--font-mono);
+  color: var(--dim);
+}
+.ledger-cols,
+.ledger-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) 54px 62px;
+  gap: 10px;
+}
+.ledger-cols {
+  padding: 7px 16px;
+  border-bottom: 1px solid var(--border-quiet);
+  font: 400 10.5px / 1 var(--font-ui);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.ledger-rows {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.ledger-row {
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--raised);
+  font: 400 12px / 1.4 var(--font-mono);
+  align-items: center;
+}
+.ledger-row:hover {
+  background: #12161a;
+}
+.ledger-row .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--done);
+}
+.ledger-row.failed .dot {
+  background: var(--error);
+}
+.ledger-row .id {
+  color: var(--text);
+}
+.ledger-row .sub {
+  color: var(--dim);
+  font-size: 11px;
+}
+.ledger-row .num {
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.ledger-foot {
+  margin-top: auto;
+  padding: 14px 16px;
+  border-top: 1px solid var(--border-quiet);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.ledger-foot .row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font: 400 12px / 1.4 var(--font-mono);
+  color: var(--dim);
+}
+.ledger-foot .row .v {
+  margin-left: auto;
+  color: var(--muted);
 }
 
 @media (max-width: 720px) {
-  .arrival-cards {
-    grid-template-columns: 1fr;
-  }
   .station-hero {
     padding: 0;
   }
@@ -1223,8 +1093,7 @@ body[data-mode="arrival"].arrival-failed .canvas {
     opacity: 0.16;
     right: -2%;
   }
-  body[data-mode="station"] .canvas,
-  body[data-mode="arrival"] .canvas {
+  body[data-mode="station"] .canvas {
     padding: 32px 20px 48px;
     align-items: flex-start;
     padding-top: 10vh;
@@ -1234,20 +1103,7 @@ body[data-mode="arrival"].arrival-failed .canvas {
 
 /* narrow-screen control plane */
 @media (max-width: 520px) {
-  .arrival,
   .station-hero {
     padding: 16px;
   }
-}
-/* ---- Destination button hover polish ---- */
-.arrival-destinations .btn {
-  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
-}
-.arrival-destinations .btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-.arrival-destinations .btn:active {
-  transform: translateY(0);
-  box-shadow: none;
 }

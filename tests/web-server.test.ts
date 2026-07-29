@@ -289,7 +289,8 @@ describe("web server", () => {
     expect(arrivalCss).toContain(".yard-track");
     expect(arrivalCss).toContain("engine-depart");
     expect(arrivalCss).toContain(".station-tagline");
-    expect(arrivalCss).toContain(".arrival-section");
+    expect(arrivalCss).toContain(".arrival-report");
+    expect(arrivalCss).toContain(".ledger-row");
 
     const bundleText = await (await fetch(`${base}/static/steamtrain-reducer.bundle.js`)).text();
     expect(bundleText).toContain("function workflowReducer");
