@@ -155,6 +155,8 @@
 
   /** One-time DOM wiring; runs once this file loads (after every module). */
   function start() {
+    // Build the rail scaffolding before anything below looks up #newWfBtn.
+    ST.shell.render();
     document.getElementById("planBtn").addEventListener("click", ST.run.startPlan);
     document.getElementById("runBtn").addEventListener("click", ST.run.startRun);
     document.getElementById("pauseBtn").addEventListener("click", ST.run.togglePauseRun);
@@ -176,7 +178,9 @@
     document.getElementById("input").addEventListener("input", function () { ST.run.clearPromptBrowse(); });
     document.getElementById("newWfBtn").addEventListener("click", ST.modals.openCreate);
     document.getElementById("historyBtn").addEventListener("click", function () { ST.modals.openHistory(); });
-    document.getElementById("configBtn").addEventListener("click", ST.settings.openConfigModal);
+    // Settings is a placeholder button until Task 9 builds the real settings
+    // page; for now it opens the same config modal the old Config button did.
+    document.getElementById("settingsBtn").addEventListener("click", ST.settings.openConfigModal);
     document.getElementById("editBtn").addEventListener("click", function () { ST.modals.openEditor(false); });
     document.getElementById("cloneBtn").addEventListener("click", function () { ST.modals.openEditor(true); });
     document.getElementById("deleteBtn").addEventListener("click", ST.modals.doDelete);

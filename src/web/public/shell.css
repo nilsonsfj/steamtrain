@@ -1,40 +1,5 @@
-/* Shell surface: header, health chips, workflow sidebar, run bar chrome and
-   the shared button primitives. */
-header {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 14px;
-  padding: 11px 20px;
-  border-bottom: 1px solid rgba(39, 49, 64, 0.9);
-  background: linear-gradient(180deg, rgba(18, 24, 32, 0.96) 0%, rgba(14, 19, 26, 0.92) 100%);
-  backdrop-filter: blur(12px);
-  position: relative;
-  z-index: 5;
-}
-header::after {
-  content: "";
-  position: absolute;
-  left: 20px;
-  right: 20px;
-  bottom: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(52, 211, 196, 0.28), transparent);
-  pointer-events: none;
-}
-header .logo {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  font-family: var(--font-display);
-  font-size: 21px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1;
-}
-header .logo .accent {
-  color: var(--accent);
-}
+/* Shell surface: header, health chips, workflow rail and the shared button
+   primitives. */
 .brand-mark {
   display: inline-block;
   width: 1.35em;
@@ -44,82 +9,7 @@ header .logo .accent {
     center / contain no-repeat;
   filter: drop-shadow(0 2px 8px rgba(52, 211, 196, 0.25));
 }
-header .project {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  max-width: min(420px, 42vw);
-  padding: 5px 12px 5px 10px;
-  border-radius: 10px;
-  background: linear-gradient(
-      135deg,
-      rgba(52, 211, 196, 0.1) 0%,
-      rgba(28, 111, 104, 0.08) 55%,
-      transparent 100%
-    ), rgba(16, 22, 30, 0.72);
-  border: 1px solid rgba(52, 211, 196, 0.22);
-  box-shadow: inset 0 1px 0 rgba(142, 234, 224, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.18);
-  animation: project-arrive 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-header .project[hidden] {
-  display: none;
-}
-header .project-mark {
-  flex: none;
-  color: var(--accent);
-  font-size: 13px;
-  line-height: 1;
-  text-shadow: 0 0 12px rgba(52, 211, 196, 0.35);
-}
-header .project-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-header .project-name {
-  font-family: var(--font-display);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.15;
-}
-header .project-path {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.2;
-}
-@keyframes project-arrive {
-  from {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-header .config {
-  color: var(--muted);
-  font-size: 12px;
-  font-family: var(--font-mono);
-  letter-spacing: 0.01em;
-}
-header .header-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: 4px;
-}
+/* The read-only session badge — reused as-is; #topbar is still a <header>. */
 header .mode-badge {
   display: inline-flex;
   align-items: center;
@@ -133,13 +23,316 @@ header .mode-badge {
   background: rgba(111, 177, 255, 0.14);
   border: 1px solid rgba(111, 177, 255, 0.35);
 }
-header .health {
+
+/* ---- Console shell: three-column grid, topbar, workflow rail ----------- */
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+}
+
+#topbar {
+  height: 46px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 14px 0 16px;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--header);
+}
+#topbar .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 220px;
+  flex: none;
+}
+#topbar .brand-mark {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--r-xs);
+  flex: none;
+  background: var(--accent-dim);
+  box-shadow: inset 0 0 0 1px rgba(52, 211, 196, 0.5);
+}
+#topbar .wordmark {
+  font: 600 14px / 1 var(--font-ui);
+  letter-spacing: -0.01em;
+}
+#topbar .crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 400 12px / 1 var(--font-mono);
+  color: var(--muted);
+  min-width: 0;
+}
+#topbar .crumbs .sep {
+  color: var(--faint);
+}
+#topbar .crumbs .here {
+  color: var(--text);
+}
+#topbar .topbar-right {
   margin-left: auto;
   display: flex;
+  align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
 }
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: var(--r-xs);
+  font: 600 11px / 1.4 var(--font-ui);
+  border: 1px solid rgba(74, 163, 255, 0.35);
+  background: rgba(74, 163, 255, 0.1);
+  color: var(--running-text);
+}
+.status-pill .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--running);
+}
+.status-pill.running .dot {
+  animation: st-pulse 1.1s ease-in-out infinite;
+}
+.status-pill.complete {
+  border-color: rgba(63, 185, 80, 0.35);
+  background: rgba(63, 185, 80, 0.1);
+  color: var(--done-text);
+}
+.status-pill.complete .dot {
+  background: var(--done);
+  animation: none;
+}
+@keyframes st-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.tbtn {
+  border: 1px solid var(--border);
+  background: var(--raised);
+  color: var(--muted);
+  border-radius: var(--r-md);
+  padding: 5px 9px;
+  font: 500 12px / 1 var(--font-ui);
+  cursor: pointer;
+}
+.tbtn:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.health {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--raised);
+}
+.health .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-right: 1px solid var(--border);
+  font: 500 11px / 1.4 var(--font-mono);
+  color: var(--muted);
+  background: none;
+  border-top: 0;
+  border-left: 0;
+  border-bottom: 0;
+  cursor: pointer;
+}
+.health .chip:last-child {
+  border-right: 0;
+}
+.health .chip .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+.health .chip.ready .dot {
+  background: var(--done);
+}
+.health .chip.auth .dot {
+  background: var(--gate);
+}
+.health .chip.absent {
+  color: var(--dim);
+}
+
+#cols {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+#rail-left {
+  width: 236px;
+  flex: none;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+#center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+#rail-right {
+  width: 300px;
+  flex: none;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ---- Workflow rail ------------------------------------------------------ */
+.rail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 12px 8px;
+}
+.rail-label {
+  font: 600 10px / 1 var(--font-ui);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.rail-count {
+  margin-left: auto;
+  font: 400 11px / 1 var(--font-mono);
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+.rail-add {
+  border: 1px solid var(--border);
+  background: var(--raised);
+  color: var(--muted);
+  border-radius: var(--r-sm);
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font: 500 13px / 1 var(--font-ui);
+  cursor: pointer;
+}
+.rail-add:hover {
+  color: var(--accent);
+  border-color: var(--border-strong);
+}
+
+.wf-list {
+  padding: 0 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+}
+.wf-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  border: 0;
+  background: none;
+  width: 100%;
+  text-align: left;
+}
+.wf-row:hover {
+  background: var(--raised);
+}
+.wf-row .name {
+  font: 400 13px / 1.3 var(--font-ui);
+  color: var(--muted);
+}
+.wf-row .lock {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--gate);
+}
+.wf-row .counts {
+  font: 400 10px / 1 var(--font-mono);
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+.wf-row .lock + .counts {
+  margin-left: 0;
+}
+.wf-row .name + .counts {
+  margin-left: auto;
+}
+.wf-row.selected {
+  background: rgba(52, 211, 196, 0.1);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.wf-row.selected .name {
+  color: var(--text);
+  font-weight: 500;
+}
+.wf-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 6px 8px;
+}
+
+.rail-foot {
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.elsewhere-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font: 400 11.5px / 1.4 var(--font-mono);
+  color: var(--muted);
+  border: 0;
+  background: none;
+  width: 100%;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+.elsewhere-row .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex: none;
+}
+.elsewhere-row.detached .dot {
+  background: var(--running);
+}
+.elsewhere-row.awaiting .dot {
+  background: var(--gate);
+}
+
 .chip {
   font-size: 11px;
   padding: 3px 9px;
@@ -199,188 +392,9 @@ header .health {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-main {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-aside {
-  width: 312px;
-  flex: none;
-  border-right: 1px solid rgba(39, 49, 64, 0.95);
-  background: linear-gradient(180deg, rgba(16, 22, 30, 0.98) 0%, rgba(12, 16, 22, 0.96) 100%);
-  overflow-y: auto;
-  padding: 14px 12px 20px;
-}
-aside h2 {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--muted);
-  margin: 4px 8px 12px;
-  font-weight: 600;
-}
-.wf {
-  padding: 13px 14px 12px 15px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  margin-bottom: 0;
-  background: transparent;
-  transition: background 0.18s var(--ease-out), border-color 0.18s var(--ease-out), transform 0.18s
-    var(--ease-out), box-shadow 0.18s var(--ease-out);
-  position: relative;
-}
-.wf-folder {
-  margin-bottom: 14px;
-}
-.wf-folder:last-child {
-  margin-bottom: 4px;
-}
-.wf-folder-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  margin: 0 0 10px;
-  padding: 8px 10px;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  background: rgba(20, 28, 36, 0.55);
-  color: var(--muted);
-  font: inherit;
-  font-family: var(--font-display);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: background 0.16s var(--ease-out), border-color 0.16s var(--ease-out), color 0.16s
-    var(--ease-out), transform 0.16s var(--ease-out);
-}
-.wf-folder-head:hover {
-  color: var(--text);
-  border-color: rgba(53, 67, 84, 0.85);
-  background: rgba(32, 44, 56, 0.92);
-  transform: translateY(-1px);
-}
-.wf-folder-head:hover .wf-folder-chevron {
-  color: var(--accent-bright);
-}
-.wf-folder-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-left: 2px;
-}
-.wf-folder-head:focus-visible {
-  outline: 2px solid rgba(52, 211, 196, 0.55);
-  outline-offset: 2px;
-}
-.wf-folder-head.has-sel {
-  color: var(--text);
-  border-color: rgba(52, 211, 196, 0.35);
-  background: linear-gradient(135deg, rgba(28, 111, 104, 0.16) 0%, rgba(24, 32, 40, 0.85) 60%);
-  box-shadow: 0 0 0 1px rgba(52, 211, 196, 0.08);
-}
-.wf-folder-head.has-sel .wf-folder-count {
-  color: var(--accent-bright);
-}
-.wf-folder-chevron {
-  display: inline-block;
-  width: 1em;
-  color: var(--accent-dim);
-  font-size: 10px;
-  transition: transform 0.18s var(--ease-out);
-}
-.wf-folder.collapsed .wf-folder-chevron {
-  color: var(--muted);
-}
-.wf-folder-title {
-  letter-spacing: 0.08em;
-}
-.wf-folder.src-project .wf-folder-title {
-  color: #e6c07b;
-}
-.wf-folder.src-user .wf-folder-title {
-  color: #7eb6ff;
-}
-.wf-folder.src-bundled .wf-folder-title {
-  color: rgba(181, 194, 208, 0.92);
-}
-.wf-folder-count {
-  margin-left: auto;
-  font-family: var(--font-ui);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  text-transform: none;
-  color: rgba(141, 154, 171, 0.95);
-}
-.wf-folder-body[hidden] {
-  display: none !important;
-}
-.wf-folder .wf .src {
-  display: none;
-}
-.wf:hover {
-  background: rgba(27, 37, 48, 0.72);
-  border-color: rgba(53, 67, 84, 0.7);
-}
-.wf.sel {
-  background: linear-gradient(135deg, rgba(28, 111, 104, 0.2) 0%, rgba(24, 32, 40, 0.92) 55%);
-  border-color: rgba(52, 211, 196, 0.42);
-  box-shadow: var(--shadow-sm), 0 0 0 1px rgba(52, 211, 196, 0.08);
-}
-.wf.sel::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 11px;
-  bottom: 11px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: linear-gradient(180deg, var(--accent-bright), var(--accent-dim));
-}
-.wf .name {
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: 14px;
-  letter-spacing: -0.01em;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  row-gap: 6px;
-}
-.wf .src {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 2px 6px;
-  font-family: var(--font-ui);
-  font-weight: 500;
-}
-.wf .desc {
-  color: rgba(181, 194, 208, 0.9);
-  font-size: 12.5px;
-  margin-top: 8px;
-  line-height: 1.45;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.wf .meta {
-  color: rgba(141, 154, 171, 0.92);
-  font-size: 11px;
-  margin-top: 9px;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.01em;
-}
+/* Old #sidebar / .wf* card layout retired — replaced by the rail-* rules
+   below. section.work and everything after it belongs to the old work
+   subtree preserved verbatim inside #center; Task 6 restyles it. */
 section.work {
   flex: 1;
   min-width: 0;
@@ -532,31 +546,7 @@ textarea#input:focus {
   min-width: 118px;
 }
 
-/* ---- authoring: sidebar + runbar actions ---- */
-aside h2 {
-  display: flex;
-  align-items: center;
-}
-.newbtn {
-  margin-left: auto;
-  border: 1px solid rgba(52, 211, 196, 0.35);
-  background: rgba(28, 111, 104, 0.12);
-  color: var(--accent-bright);
-  border-radius: 8px;
-  padding: 4px 10px;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  letter-spacing: 0.01em;
-  transition: background 0.15s var(--ease-out), border-color 0.15s var(--ease-out), color 0.15s
-    var(--ease-out);
-}
-.newbtn:hover {
-  background: rgba(28, 111, 104, 0.22);
-  border-color: rgba(52, 211, 196, 0.55);
-  color: #eafffb;
-}
+/* ---- authoring: runbar actions ---- */
 .wfactions {
   display: flex;
   gap: 8px;
@@ -596,26 +586,16 @@ aside h2 {
     min-height: 100vh;
     overflow: auto;
   }
-  header {
-    flex-wrap: wrap;
-    padding: 10px 12px;
-  }
-  header .health {
-    order: 3;
-    width: 100%;
-    margin-left: 0;
-  }
-  main {
+  #cols {
     flex-direction: column;
     min-height: 0;
     overflow: visible;
   }
-  aside#sidebar {
+  #rail-left {
     width: 100%;
     max-height: 34vh;
     border-right: 0;
     border-bottom: 1px solid var(--border);
-    padding: 8px 10px;
   }
   section.work {
     min-height: 62vh;
@@ -650,15 +630,6 @@ aside h2 {
   }
 }
 @media (max-width: 520px) {
-  header .project {
-    max-width: none;
-    width: 100%;
-    order: 2;
-  }
-  header .config {
-    width: 100%;
-    order: 3;
-  }
   header .mode-badge {
     order: 1;
   }

@@ -55,6 +55,7 @@ window.Steamtrain = (function () {
     childSpecs: {},
     projectConfig: null,
     project: null,
+    configLabel: null,
     liveRuns: [], liveRunsTimer: null, queuedBanner: false,
     deepLinkRequest: 0,
     pendingStepDeepLink: null,
@@ -158,7 +159,7 @@ window.Steamtrain = (function () {
     ST.shell.renderSidebar();
     // Keep the selected card on-screen after a fold/unfold.
     if (S.selected) {
-      var sel = document.querySelector('#wflist .wf.sel');
+      var sel = document.querySelector('#wflist .wf-row.selected');
       if (sel && typeof sel.scrollIntoView === "function") {
         sel.scrollIntoView({ block: "nearest" });
       }
@@ -174,7 +175,7 @@ window.Steamtrain = (function () {
     // "none", not "" — clearing the inline style would reveal the badge (its
     // markup default is display:none) and label every full session read-only.
     if (badge) badge.style.display = ro ? "inline-flex" : "none";
-    var hideIds = ["configBtn", "newWfBtn", "editBtn", "cloneBtn", "flushBtn", "deleteBtn", "planBtn", "runBtn"];
+    var hideIds = ["settingsBtn", "newWfBtn", "editBtn", "cloneBtn", "flushBtn", "deleteBtn", "planBtn", "runBtn"];
     hideIds.forEach(function (id) {
       var el = document.getElementById(id);
       if (el) el.style.display = ro ? "none" : "";
@@ -310,20 +311,10 @@ window.Steamtrain = (function () {
   function applyProjectChrome(project) {
     if (!project || !project.name) return;
     S.project = project;
-    var root = document.getElementById("project");
-    var nameEl = document.getElementById("projectName");
-    var pathEl = document.getElementById("projectPath");
-    if (root && nameEl && pathEl) {
-      nameEl.textContent = project.name;
-      pathEl.textContent = project.displayPath || project.cwd || "";
-      root.title = project.cwd || project.displayPath || project.name;
-      root.setAttribute("aria-label", "Project " + project.name + " at " + (project.displayPath || project.cwd || ""));
-      root.setAttribute("role", "status");
-      root.hidden = false;
-    }
     try {
       document.title = "steamtrain · " + project.name;
     } catch (e) {}
+    ST.shell.renderCrumbs();
   }
 
   function loadWorkflows() {
@@ -337,7 +328,8 @@ window.Steamtrain = (function () {
       }
       S.workflows = r.body.workflows || [];
       if (r.body.configLabel) {
-        document.getElementById("config").textContent = "cfg · " + r.body.configLabel;
+        S.configLabel = r.body.configLabel;
+        ST.shell.renderCrumbs();
       }
       if (r.body.project) applyProjectChrome(r.body.project);
       ST.shell.renderSidebar();
@@ -615,7 +607,9 @@ window.Steamtrain = (function () {
 
   function showLoginForm() {
     if (S.sessionHeartbeatTimer) clearInterval(S.sessionHeartbeatTimer);
-    var main = document.querySelector("main");
+    // #cols is the row below #topbar (rail-left/center/rail-right) — the
+    // Console-layout equivalent of the old <main>, which this used to clear.
+    var main = document.getElementById("cols");
     clear(main);
     var msg = h("div", { class: "empty" },
       h("p", { text: "This server requires a token to access." }),

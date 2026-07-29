@@ -85,7 +85,7 @@ export function renderIndex(revs: PageAssetRevisions): string {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="color-scheme" content="dark" />
-<meta name="theme-color" content="#080b10" />
+<meta name="theme-color" content="#0c0e11" />
 <title>steamtrain</title>
 <link rel="icon" href="data:image/svg+xml,${encodeURIComponent(FAVICON_SVG)}" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -94,85 +94,78 @@ export function renderIndex(revs: PageAssetRevisions): string {
 ${styles}
 </head>
 <body>
-<header>
-  <div class="logo"><span class="brand-mark" aria-hidden="true"></span><span class="accent">steam</span>train</div>
-  <div class="project" id="project" hidden>
-    <span class="project-mark" aria-hidden="true">◈</span>
-    <span class="project-copy">
-      <span class="project-name" id="projectName"></span>
-      <span class="project-path" id="projectPath"></span>
-    </span>
-  </div>
-  <div class="config" id="config"></div>
-  <span class="mode-badge" id="modeBadge" style="display:none" title="This session can view workflows and runs but cannot launch, edit, approve, or change config.">&#128065; read-only</span>
-  <div class="header-actions" role="group" aria-label="Actions">
-    <button class="newbtn" id="configBtn" title="Project agent and timeout settings">&#9881; Config</button>
-    <button class="newbtn" id="historyBtn" title="Browse live and past runs">&#9201; Runs</button>
-  </div>
-  <div class="health" id="health"></div>
-</header>
-<main>
-  <aside id="sidebar">
-    <div id="liveRunsSection" style="display:none">
-      <h2>Active runs</h2>
-      <div id="liveRuns"></div>
+<div id="app">
+  <header id="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark">steamtrain</span></div>
+    <nav class="crumbs" id="crumbs" aria-label="Location"></nav>
+    <span class="mode-badge" id="modeBadge" style="display:none" title="This session can view workflows and runs but cannot launch, edit, approve, or change config.">&#128065; read-only</span>
+    <div class="topbar-right">
+      <div class="health" id="health" role="group" aria-label="Agent health"></div>
+      <button class="tbtn" id="historyBtn" title="Browse live and past runs">Runs</button>
+      <!-- Task 9 builds the real settings page; until then this opens the
+           legacy config modal so configuration stays reachable. -->
+      <button class="tbtn" id="settingsBtn" title="Project agent and timeout settings">Settings</button>
     </div>
-    <h2>Workflows <button class="newbtn" id="newWfBtn" title="Create a workflow">&#43; New</button></h2>
-    <div id="wflist"></div>
-  </aside>
-  <section class="work">
-    <div class="runbar">
-      <div class="runbar-head">
-        <div class="runbar-copy">
-          <div class="title" id="wfTitle">Select a workflow</div>
-          <div class="sub" id="wfSub">Pick a workflow on the left to view its pipeline and run it.</div>
-          <div class="srcline" id="srcLine" style="display:none"></div>
-        </div>
-        <div class="wfactions" id="wfActions" style="display:none">
-          <button class="btn small" id="editBtn">&#9998; Configure</button>
-          <button class="btn small" id="cloneBtn">&#10697; Clone</button>
-          <button class="btn small warn" id="flushBtn" style="display:none">&#128190; Flush to disk</button>
-          <button class="btn small danger" id="deleteBtn" style="display:none">&#128465; Delete</button>
-        </div>
-      </div>
-      <div class="reroute-row" id="blockedRow" style="display:none"></div>
-      <div class="row" id="runRow" style="display:none">
-        <div class="run-compose">
-          <label class="run-compose-label" for="input">Describe</label>
-          <textarea id="input" placeholder="What should this run do? (&#8593; recalls previous inputs)"></textarea>
-          <div id="paramsPanel" class="params-panel collapsed" style="display:none" hidden>
-            <button type="button" class="params-toggle" id="paramsToggle" aria-expanded="false" aria-controls="paramsForm">
-              <span class="params-toggle-chevron" aria-hidden="true"></span>
-              <span class="params-toggle-label">Variables</span>
-              <span class="params-toggle-meta" id="paramsMeta"></span>
-            </button>
-            <div id="paramsForm" class="params-form" role="region" aria-label="Workflow variables"></div>
+  </header>
+  <div id="cols">
+    <aside id="rail-left" aria-label="Workflows"></aside>
+    <section id="center">
+      <section class="work">
+        <div class="runbar">
+          <div class="runbar-head">
+            <div class="runbar-copy">
+              <div class="title" id="wfTitle">Select a workflow</div>
+              <div class="sub" id="wfSub">Pick a workflow on the left to view its pipeline and run it.</div>
+              <div class="srcline" id="srcLine" style="display:none"></div>
+            </div>
+            <div class="wfactions" id="wfActions" style="display:none">
+              <button class="btn small" id="editBtn">&#9998; Configure</button>
+              <button class="btn small" id="cloneBtn">&#10697; Clone</button>
+              <button class="btn small warn" id="flushBtn" style="display:none">&#128190; Flush to disk</button>
+              <button class="btn small danger" id="deleteBtn" style="display:none">&#128465; Delete</button>
+            </div>
           </div>
+          <div class="reroute-row" id="blockedRow" style="display:none"></div>
+          <div class="row" id="runRow" style="display:none">
+            <div class="run-compose">
+              <label class="run-compose-label" for="input">Describe</label>
+              <textarea id="input" placeholder="What should this run do? (&#8593; recalls previous inputs)"></textarea>
+              <div id="paramsPanel" class="params-panel collapsed" style="display:none" hidden>
+                <button type="button" class="params-toggle" id="paramsToggle" aria-expanded="false" aria-controls="paramsForm">
+                  <span class="params-toggle-chevron" aria-hidden="true"></span>
+                  <span class="params-toggle-label">Variables</span>
+                  <span class="params-toggle-meta" id="paramsMeta"></span>
+                </button>
+                <div id="paramsForm" class="params-form" role="region" aria-label="Workflow variables"></div>
+              </div>
+            </div>
+            <div class="btnstack">
+              <button class="btn" id="planBtn">Plan</button>
+              <button class="btn primary" id="runBtn">Run &#9654;</button>
+              <button class="btn" id="pauseBtn" style="display:none" title="Finish in-flight steps, schedule nothing new; pending steps become editable">&#9208; Pause</button>
+              <button class="btn" id="detachBtn" style="display:none" title="Hand this run to a background process — it keeps running if you close this page">&#9992; Detach</button>
+              <button class="btn danger" id="cancelBtn" style="display:none">Cancel</button>
+            </div>
+          </div>
+          <div class="status-line" id="statusLine" style="display:none">
+            <span id="elapsed">0.0s</span>
+            <div class="progress"><span id="progressBar"></span></div>
+            <span id="progressText"></span>
+            <span id="costTicker" class="cost-ticker"></span>
+            <label style="display:inline-flex;gap:5px;align-items:center;cursor:pointer">
+              <input type="checkbox" id="freshChk" /> fresh (ignore cache)
+            </label>
+          </div>
+          <div class="banner" id="banner"></div>
         </div>
-        <div class="btnstack">
-          <button class="btn" id="planBtn">Plan</button>
-          <button class="btn primary" id="runBtn">Run &#9654;</button>
-          <button class="btn" id="pauseBtn" style="display:none" title="Finish in-flight steps, schedule nothing new; pending steps become editable">&#9208; Pause</button>
-          <button class="btn" id="detachBtn" style="display:none" title="Hand this run to a background process — it keeps running if you close this page">&#9992; Detach</button>
-          <button class="btn danger" id="cancelBtn" style="display:none">Cancel</button>
+        <div class="canvas" id="canvas" tabindex="-1" aria-label="Workflow workspace">
+          <div class="empty">No workflow selected.</div>
         </div>
-      </div>
-      <div class="status-line" id="statusLine" style="display:none">
-        <span id="elapsed">0.0s</span>
-        <div class="progress"><span id="progressBar"></span></div>
-        <span id="progressText"></span>
-        <span id="costTicker" class="cost-ticker"></span>
-        <label style="display:inline-flex;gap:5px;align-items:center;cursor:pointer">
-          <input type="checkbox" id="freshChk" /> fresh (ignore cache)
-        </label>
-      </div>
-      <div class="banner" id="banner"></div>
-    </div>
-    <div class="canvas" id="canvas" tabindex="-1" aria-label="Workflow workspace">
-      <div class="empty">No workflow selected.</div>
-    </div>
-  </section>
-</main>
+      </section>
+    </section>
+    <aside id="rail-right" aria-label="Run instruments"></aside>
+  </div>
+</div>
 <aside class="drawer" id="drawer" role="dialog" aria-label="Step details" aria-hidden="true" tabindex="-1"></aside>
 <div class="modal-overlay" id="overlay"><div class="modal" id="modal"></div></div>
 <div id="announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>

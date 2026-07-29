@@ -218,11 +218,12 @@ describe("web server", () => {
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
     expect(html).toContain("steam");
-    expect(html).toContain('id="wflist"');
+    // The workflow rail (#wflist) is rendered client-side by st-shell.js into
+    // the static #rail-left container; the project/config breadcrumb is
+    // likewise rendered client-side into #crumbs.
+    expect(html).toContain('id="rail-left"');
+    expect(html).toContain('id="crumbs"');
     expect(html).toContain('id="runBtn"');
-    expect(html).toContain('id="project"');
-    expect(html).toContain('id="projectName"');
-    expect(html).toContain('id="projectPath"');
     // The page now references external static assets rather than inlining them,
     // one <link>/<script> per manifest entry, in manifest order.
     for (const asset of WEB_ASSETS) {

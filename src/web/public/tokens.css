@@ -1,34 +1,54 @@
 /* Design tokens, resets and document defaults. Loaded first: every file after
    it in WEB_ASSETS (src/web/html.ts) depends on these custom properties. */
 :root {
-  --bg: #080b10;
-  --bg-elevated: #0d1219;
-  --panel: #10161e;
-  --panel-2: #161e28;
-  --panel-3: #1b2530;
-  --border: #273140;
-  --border-strong: #354354;
-  --text: #e9eef5;
-  --muted: #8d9aab;
+  --canvas: #0c0e11;
+  --surface: #0e1114;
+  --header: #101317;
+  --raised: #14181d;
+  --well: #080a0c;
+
+  --border: #232830;
+  --border-quiet: #1b1f25;
+  --border-strong: #2f3742;
+
+  --text: #e6eaef;
+  --muted: #98a2af;
+  --dim: #6c7784;
+  --faint: #3a424d;
+
   --accent: #34d3c4;
   --accent-bright: #7eefe4;
   --accent-dim: #1c6f68;
-  --accent-soft: rgba(52, 211, 196, 0.12);
+
   --running: #4aa3ff;
+  --running-text: #9ecbff;
   --done: #3fb950;
-  --error: #f85149;
-  --pending: #5a6675;
+  --done-text: #6ed67a;
   --gate: #d29922;
-  --brass: #c9a227;
-  --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px rgba(0, 0, 0, 0.22);
-  --shadow-md: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 16px 40px rgba(0, 0, 0, 0.35);
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --font-display: "Space Grotesk", "Avenir Next", "Futura", "Gill Sans", sans-serif;
+  --error: #f85149;
+  --error-text: #f0837e;
+
+  --kind-worker: #6fb1ff;
+  --kind-worker-text: #8fb6e0;
+  --kind-consolidator: #5fe0c6;
+  --kind-consolidator-text: #7fdccb;
+  --kind-distributor: #c9a0ff;
+  --kind-distributor-text: #b9a3dd;
+  --kind-gate: #d29922;
+  --kind-gate-text: #d9b45a;
+  --kind-command: #8d9aab;
+  --kind-command-text: #98a2af;
+  --kind-llm: #f0a37e;
+  --kind-llm-text: #d9a184;
+
+  --r-xs: 4px;
+  --r-sm: 5px;
+  --r-md: 6px;
+  --r-lg: 8px;
+  --r-xl: 10px;
+
   --font-ui: "IBM Plex Sans", "Helvetica Neue", "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", "SF Mono", "Menlo", "Consolas", monospace;
-  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }
 * {
   box-sizing: border-box;
@@ -51,15 +71,13 @@ body {
   margin: 0;
 }
 body {
-  background: radial-gradient(ellipse 70% 45% at 12% -8%, rgba(52, 211, 196, 0.07), transparent 55%),
-    radial-gradient(ellipse 45% 35% at 92% 0%, rgba(201, 162, 39, 0.05), transparent 50%),
-    linear-gradient(180deg, #0b1017 0%, var(--bg) 42%, #07090d 100%);
+  background: var(--canvas);
   color: var(--text);
   font: 14px / 1.5 var(--font-ui);
   display: flex;
   flex-direction: column;
   height: 100vh;
+  margin: 0;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
 }
