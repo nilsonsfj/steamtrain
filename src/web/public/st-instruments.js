@@ -247,6 +247,15 @@
   }
 
   function pushEventLog(ev) {
+    // A fresh run's own workflow_start clears whatever the log held before —
+    // covers startRun() (which resets S.narration the same way but never
+    // touches S.eventLog) *and* re-attaching/reconnecting to a run whose
+    // stream replays from the top, neither of which routes through
+    // selectWorkflow()/reset(). Without this, a re-run of the same workflow
+    // leaves the previous run's entries in place, and fmtRelClock() then
+    // times them against the new run's startedAt (they clamp to 00:00 and
+    // interleave with the new entries under one mistimed clock).
+    if (ev.kind === "workflow_start") S.eventLog = [];
     var formatted = formatEvent(ev);
     if (!formatted) return;
     var atMs = typeof ev.ts === "number" ? ev.ts : Date.now();
