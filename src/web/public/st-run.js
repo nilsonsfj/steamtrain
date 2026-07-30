@@ -252,7 +252,8 @@
   function renderNarration(canvas) {
     if (!S.narrationOn || !S.narration || !S.narration.length) return;
     if (!(S.runState && S.runState.started)) return;
-    if (S.runState.done && !S.arrivalInspect) return;
+    // A finished run belongs to the Arrival report; narration is live-only.
+    if (S.runState.done) return;
     var box = h("div", { class: "narration" });
     box.appendChild(h("div", { class: "narration-head" },
       h("span", { class: "conductor-mark", text: "Conductor" }),
@@ -437,9 +438,9 @@
   }
 
   /** "What runs inside" for a sub-workflow call step, hung off its row. */
-  function subWorkflowRow(s) {
+  function subWorkflowRow(p, s) {
     if (s.blockKind !== "workflow") return null;
-    var block = subWorkflowCardBlock(s.stepId);
+    var block = subWorkflowCardBlock(s.stepId, stepKey(p, s));
     return block ? h("div", { class: "step-sub" }, block) : null;
   }
 
@@ -479,10 +480,14 @@
             class: "obtn", type: "button",
             text: S.outputNoWrap ? "Wrap" : "No wrap",
             title: "Toggle line wrapping",
+            // Keyboard users must not be dropped off this control by the
+            // re-render its own click triggers (nor by the 2s tick).
+            "data-focus-key": "out-wrap:" + key,
             onClick: function () { S.outputNoWrap = !S.outputNoWrap; ST.render(); }
           }),
           h("button", {
             class: "obtn", type: "button", text: "Copy", title: "Copy this step's output",
+            "data-focus-key": "out-copy:" + key,
             onClick: function () {
               if (navigator.clipboard) navigator.clipboard.writeText(body).catch(function () {});
             }
@@ -549,7 +554,7 @@
       if (cls === "band queued") { container.appendChild(band); return; }
       steps.forEach(function (s) {
         band.appendChild(renderStepRow(p, s));
-        var sub = subWorkflowRow(s);
+        var sub = subWorkflowRow(p, s);
         if (sub) band.appendChild(sub);
       });
       if (isExpanded) {
@@ -558,12 +563,6 @@
       }
       container.appendChild(band);
     });
-  }
-
-  /** Public: focus one step — expands its band and fills the output pane. */
-  function selectStep(stepId) {
-    S.selectedStepId = stepId || null;
-    scheduleRender();
   }
 
   /**
@@ -618,7 +617,7 @@
     if (runnerId) card.appendChild(h("div", { class: "agent", text: runnerId + (s.model ? " \u00b7 " + s.model : "") }));
     else if (s.modelClass) card.appendChild(h("div", { class: "agent", text: "auto \u00b7 class:" + s.modelClass + (s.model ? " \u00b7 " + s.model : "") }));
     else if (s.model) card.appendChild(h("div", { class: "agent", text: "auto \u00b7 " + s.model }));
-    if (s.blockKind === "workflow") { var subEl = subWorkflowCardBlock(s.stepId); if (subEl) card.appendChild(subEl); }
+    if (s.blockKind === "workflow") { var subEl = subWorkflowCardBlock(s.stepId, p ? key : null); if (subEl) card.appendChild(subEl); }
     if (s.worktree) card.appendChild(h("div", { class: "worktree", title: s.worktree.cwd, text: "\u2387 " + s.worktree.branch }));
     if (s.dependsOn && s.dependsOn.length) card.appendChild(h("div", { class: "inputs", text: "inputs: " + s.dependsOn.join(", ") }));
     if (s.forEach) card.appendChild(h("div", { class: "inputs", text: "forEach: " + s.forEach }));
@@ -873,11 +872,10 @@
       return;
     }
     var p = found.phase, s = found.step;
-    // Streaming updates rebuild this drawer. Preserve focus on an equivalent
-    // replacement control instead of dropping keyboard users onto the page.
-    var focusedDrawerControl = drawer.contains(document.activeElement)
-      ? document.activeElement.getAttribute("data-drawer-focus")
-      : null;
+    // Streaming updates rebuild this drawer, dropping keyboard users onto the
+    // page. Its controls carry data-focus-key and ride the shared
+    // capture/restore in render() (st-boot.js) — this used to be a bespoke
+    // data-drawer-focus round-trip local to this function.
     clear(drawer);
     drawer.classList.add("show");
     drawer.setAttribute("aria-hidden", "false");
@@ -887,7 +885,7 @@
     var stateLabel = s.status + (s.cached ? " · cached" : "") + (s.result && s.result.skipped ? " · skipped" : "") + (attempts && attempts > 1 ? " · " + attempts + " tries" : "");
     var closeButton = h("button", {
       class: "x",
-      "data-drawer-focus": "close",
+      "data-focus-key": "drawer-close",
       title: "Close step details (Esc)",
       "aria-label": "Close step details",
       onClick: closeDetail
@@ -898,7 +896,7 @@
       h("span", { class: "state " + s.status, text: stateLabel }),
       closeButton
     ));
-    if (S.detailFocusPending || focusedDrawerControl === "close") {
+    if (S.detailFocusPending) {
       S.detailFocusPending = false;
       closeButton.focus();
     }
@@ -986,7 +984,7 @@
     });
     var copyBtn = h("button", {
       class: "btn small",
-      "data-drawer-focus": "copy",
+      "data-focus-key": "drawer-copy",
       text: "Copy", title: "Copy the full output", onClick: function () {
       if (navigator.clipboard) navigator.clipboard.writeText(body).catch(function () {});
     } });
@@ -995,7 +993,6 @@
       followNote,
       copyBtn
     ));
-    if (focusedDrawerControl === "copy") copyBtn.focus();
     var pre = h("pre", { class: "drawer-output" + (s.status === "error" ? " err" : "") });
     pre.textContent = body || (s.activity || "no output yet");
     pre.addEventListener("scroll", function () {
@@ -1040,7 +1037,7 @@
             text: "Diff truncated at 20 KB — the engine caps approval patches; the visible part is shown." }));
         }
         diffBody.appendChild(window.SteamtrainDiff.renderPatch(a.diff.patch));
-        var diffToggle = h("button", { class: "btn small approval-diff-toggle", text: diffOpen ? "Hide diff" : "View diff", onClick: function () {
+        var diffToggle = h("button", { class: "btn small approval-diff-toggle", text: diffOpen ? "Hide diff" : "View diff", "data-focus-key": "approval-diff:" + key, onClick: function () {
           var showing = diffBody.style.display !== "none";
           S.approvalDiffOpen[key] = showing ? false : true;
           diffBody.style.display = showing ? "none" : "";
@@ -1054,9 +1051,12 @@
       if (isReadOnly()) {
         box.appendChild(h("div", { class: "approval-decision", text: "⏳ waiting for approval (read-only view)" }));
       } else {
+        // data-focus-key: this box is rebuilt by every render (2s while the run
+        // is live), which would otherwise drop a keyboard user off whichever
+        // decision button they had tabbed to. See ST.captureFocus.
         var buttons = h("div", { class: "approval-actions" },
-          h("button", { class: "btn approve", text: "Approve", onClick: function () { resolveApproval(s.stepId, true); } }),
-          h("button", { class: "btn reject", text: "Reject", onClick: function () { resolveApproval(s.stepId, false); } })
+          h("button", { class: "btn approve", text: "Approve", "data-focus-key": "approve:" + key, onClick: function () { resolveApproval(s.stepId, true); } }),
+          h("button", { class: "btn reject", text: "Reject", "data-focus-key": "reject:" + key, onClick: function () { resolveApproval(s.stepId, false); } })
         );
         box.appendChild(buttons);
       }
@@ -1101,8 +1101,13 @@
     box.addEventListener("click", function (e) { e.stopPropagation(); });
     if (q.choices && q.choices.length) {
       var choiceWrap = h("div", { class: "human-input-choices" });
-      q.choices.forEach(function (choice) {
-        choiceWrap.appendChild(h("button", { class: "btn choice", text: choice, onClick: function () { submitHumanInput(s.stepId, choice); } }));
+      q.choices.forEach(function (choice, idx) {
+        choiceWrap.appendChild(h("button", {
+          class: "btn choice", text: choice,
+          // Index, not the label: choice text can repeat, the position can't.
+          "data-focus-key": "human-choice:" + key + ":" + idx,
+          onClick: function () { submitHumanInput(s.stepId, choice); }
+        }));
       });
       box.appendChild(choiceWrap);
       return box;
@@ -1112,7 +1117,11 @@
       class: "human-input-text",
       rows: isJson ? "5" : "3",
       placeholder: isJson ? "JSON matching the step's output schema…" : "Type your answer…",
-      spellcheck: "false"
+      spellcheck: "false",
+      // S.humanInputDraft below preserves the TEXT across the 2s re-render;
+      // this preserves the focus and caret, without which the reader's next
+      // keystroke would land nowhere. See ST.captureFocus / ST.restoreFocus.
+      "data-focus-key": "human-input:" + key
     });
     // Restore whatever draft survived a prior re-render (see S.humanInputDraft).
     // Keyed by stepKey rather than bare stepId so a loop-back's iteration 2
@@ -1121,7 +1130,7 @@
     ta.addEventListener("input", function () { S.humanInputDraft[key] = ta.value; });
     var hintText = isJson ? "This step expects JSON (validated against its schema)." : "";
     var errEl = h("div", { class: "human-input-error", style: "display:none" });
-    var send = h("button", { class: "btn approve", text: "Answer", onClick: function () {
+    var send = h("button", { class: "btn approve", text: "Answer", "data-focus-key": "human-send:" + key, onClick: function () {
       var value = ta.value;
       if (!value.trim()) { errEl.textContent = "answer must not be empty"; errEl.style.display = "block"; return; }
       if (isJson) {
@@ -1175,60 +1184,6 @@
         if (r && r.status && r.status >= 400) setBanner("Could not record approval decision.", "err");
       })
       .catch(function () {});
-  }
-
-  function renderSummary(canvas) {
-    var results = S.runState ? (S.runState.results || []) : [];
-    var leaves = results.filter(function (r) { return !(r.childResults && r.childResults.length); });
-    if (!leaves.length) return;
-    var wrap = h("div", { class: "summary" });
-    wrap.appendChild(h("h2", { text: "Run summary", style: "color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em" }));
-    var table = h("table");
-    table.appendChild(h("tr", null,
-      h("th", { text: "" }), h("th", { text: "step" }), h("th", { text: "time" }),
-      h("th", { text: "cost" }), h("th", { text: "tokens" }), h("th", { text: "notes" })
-    ));
-    var totalMs = 0, totalCost = 0, okN = 0, failN = 0, totalTok = emptyTokens();
-    leaves.forEach(function (r) {
-      totalMs += r.durationMs || 0; totalCost += r.costUsd || 0;
-      addTokensInto(totalTok, r.tokens);
-      if (r.ok) okN++; else failN++;
-      var notes = [];
-      if (r.item) notes.push("item " + r.item.index);
-      if (r.gate) notes.push(r.gate.passed ? "gate:passed" : "gate:blocked");
-      table.appendChild(h("tr", null,
-        h("td", { class: r.ok ? "ok" : "fail", text: r.ok ? "\u2713" : "\u2717" }),
-        h("td", { text: r.stepId }),
-        h("td", { text: ((r.durationMs || 0) / 1000).toFixed(1) + "s" }),
-        h("td", { text: r.costUsd ? "$" + r.costUsd.toFixed(4) : "" }),
-        h("td", { text: fmtTokenSummary(r.tokens) }),
-        h("td", { text: notes.join(" \u00b7 ") })
-      ));
-    });
-    wrap.appendChild(table);
-    var tokTotal = totalTokens(totalTok);
-    var totals = okN + " ok" + (failN ? " \u00b7 " + failN + " failed" : "") + (totalCost ? " \u00b7 $" + totalCost.toFixed(4) : "") + (tokTotal ? " \u00b7 " + fmtTokens(tokTotal) + " tok" : "") + " \u00b7 " + (totalMs / 1000).toFixed(1) + "s total";
-    wrap.appendChild(h("div", { class: "meta", style: "color:var(--muted);font-size:12px;margin-top:8px", text: totals }));
-
-    // Per-model breakdown \u2014 "which model is eating the budget?".
-    var allSteps = [];
-    if (S.runState) S.runState.phases.forEach(function (p) { p.steps.forEach(function (s) { allSteps.push(s); }); });
-    var byModel = aggregateByModel(allSteps);
-    if (byModel.length) {
-      var mtable = h("table", { style: "margin-top:12px" });
-      mtable.appendChild(h("tr", null, h("th", { text: "model" }), h("th", { text: "steps" }), h("th", { text: "cost" }), h("th", { text: "tokens" })));
-      byModel.forEach(function (m) {
-        mtable.appendChild(h("tr", null,
-          h("td", { text: m.model }),
-          h("td", { text: String(m.steps) }),
-          h("td", { text: m.costUsd ? "$" + m.costUsd.toFixed(4) : "" }),
-          h("td", { text: fmtTokenSummary(m.tokens) })
-        ));
-      });
-      wrap.appendChild(h("div", { class: "meta", style: "color:var(--muted);font-size:12px;margin-top:12px;text-transform:uppercase;letter-spacing:.08em", text: "By model" }));
-      wrap.appendChild(mtable);
-    }
-    canvas.appendChild(wrap);
   }
 
   /**
@@ -1369,8 +1324,8 @@
     S.runExternal = false;
     S.runDetached = false;
     S.runState = SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || S.spec);
-    S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {};
-    S.narration = []; S.arrivalInspect = false; S.arrivalEnter = false;
+    S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {};
+    S.narration = []; S.arrivalEnter = false;
     S.narrationFreshPlayed = null;
     S.selectedStepId = null;
     S.arrivalCtaFocused = false;
@@ -1456,6 +1411,10 @@
         }
         else if (frame.type === "status") {
           es.close(); S.es = null; setRunning(false); stopTimer();
+          // Terminal frame: stop the rail's 2s sampler here too. A run that
+          // ends without a final workflow_done reaching the client would
+          // otherwise keep the render loop alive until the user navigates away.
+          if (ST.instruments) ST.instruments.stopThroughput();
           S.queuedBanner = false;
           S.endedAt = Date.now();
           if (frame.status === "canceled") setBanner("Run canceled.", "info");
@@ -1663,13 +1622,23 @@
    * Expandable "what runs inside" block for a sub-workflow step's pipeline card:
    * a rollup summary line, then a nested list of the child steps with the model
    * that actually runs each one (overrides applied) and an override marker.
+   *
+   * `key` is the live step's stepKey (null for the static history view). The
+   * open/closed state has to be persisted on S, keyed by it: this <details> is
+   * rebuilt by every render, and the throughput tick schedules one every 2s for
+   * the life of the run, so a purely-DOM open state would snap shut two seconds
+   * after the reader opened it. Same pattern as S.approvalDiffOpen.
    */
-  function subWorkflowCardBlock(stepId) {
+  function subWorkflowCardBlock(stepId, key) {
     var step = findWorkflowStep(stepId);
     if (!step) return null;
     var view = subWorkflowView(step);
     if (!view) return null;
     var det = h("details", { class: "subwf" });
+    if (key) {
+      det.open = Boolean(S.subWorkflowOpen[key]);
+      det.addEventListener("toggle", function () { S.subWorkflowOpen[key] = det.open; });
+    }
     var rollup = SteamtrainReducer.subWorkflowRollup ? SteamtrainReducer.subWorkflowRollup(view) : ("→ " + step.workflow);
     det.appendChild(h("summary", { class: "subwf-sum", text: rollup }));
     if (!view.resolved) return det;
@@ -1910,8 +1879,6 @@
     renderNarration: renderNarration,
     renderParamsForm: renderParamsForm,
     renderStagedIndicator: renderStagedIndicator,
-    renderSummary: renderSummary,
-    selectStep: selectStep,
     sessionOverridesEmpty: sessionOverridesEmpty,
     setBanner: setBanner,
     showRunMetrics: showRunMetrics,

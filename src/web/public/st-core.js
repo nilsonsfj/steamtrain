@@ -43,9 +43,19 @@ window.Steamtrain = (function () {
     workflows: [], selected: null, source: null, spec: null, agents: [], apis: [],
     modelClasses: [], modelFamilies: [],
     runId: null, es: null,
+    // Ownership of the current run, set when it is started or attached to.
+    // `runExternal`: owned by another process (CLI/TUI or an already-detached
+    // run) rather than this web server; `runDetached`: handed off to a
+    // background process. Both gate the Detach button (updateDetachButton).
+    runExternal: false,
+    runDetached: false,
     startedAt: 0, timer: null,
     runState: null,
     rafQueued: false, draftAbort: null, doctor: [], apiDoctor: [],
+    // Signature of the last agent/API doctor result (pollDoctor). The catalog's
+    // blocked/re-route annotations are server-computed from health, so a change
+    // here — and only a change — re-fetches the workflow list.
+    healthSig: null,
     stagedOverrides: {},
     childSpecs: {},
     projectConfig: null,
@@ -84,10 +94,6 @@ window.Steamtrain = (function () {
     narrationFreshPlayed: null,
     // Last aria-live announcement (avoid re-speaking the same text).
     announceText: "",
-    // Expand the full step-kind legend via "?".
-    legendExpanded: false,
-    // Collapse the phase tree under the Arrival Report after completion.
-    arrivalInspect: false,
     // Play the Arrival entrance animation once per completed run.
     arrivalEnter: false,
     // Wall-clock end of the last run (frozen for the Arrival receipt).
@@ -120,7 +126,13 @@ window.Steamtrain = (function () {
     // fresh <textarea> is built on every re-render, which would otherwise
     // silently erase whatever the reader was mid-typing into a human-input
     // or agent-clarifying-question box during a live run.
-    humanInputDraft: {}
+    humanInputDraft: {},
+    // Sub-workflow "what runs inside" expander, keyed by stepKey. Same 2s-tick
+    // problem as approvalDiffOpen: the <details> is rebuilt on every render, so
+    // without this an opened rollup snaps shut two seconds later. Keyed by
+    // stepKey (phase:iteration:stepId) so a loop-back's iteration 2 does not
+    // inherit iteration 1's open state for the same step id.
+    subWorkflowOpen: {}
   };
 
   var SELECTION_KEY = "steamtrain.lastWorkflow";
@@ -202,6 +214,51 @@ window.Steamtrain = (function () {
   /** Identity of one step instance across re-renders (loop iterations included). */
   function stepKey(phase, step) {
     return phase.phaseId + ":" + (phase.iteration || 1) + ":" + step.stepId;
+  }
+
+  /**
+   * Focus survival across a destructive rebuild (see the contract note on
+   * render() in st-boot.js). Any control that a reader can be *inside* when the
+   * canvas is rebuilt carries a stable `data-focus-key`; captureFocus() records
+   * that key (plus the caret, for text controls) before the rebuild and
+   * restoreFocus() puts the reader back into the equivalent replacement node.
+   *
+   * Opt-in by attribute on purpose: an element without a data-focus-key yields
+   * no token, so nothing that lives outside the rebuilt region (the composer,
+   * the header controls) is ever touched.
+   */
+  function captureFocus() {
+    var el = document.activeElement;
+    if (!el || el === document.body || !el.getAttribute) return null;
+    var key = el.getAttribute("data-focus-key");
+    if (!key) return null;
+    var token = { key: key, start: null, end: null };
+    // selectionStart throws on input types that don't support selection
+    // (number, email, …) in some browsers; a caret-less restore is still fine.
+    try {
+      if (typeof el.selectionStart === "number") {
+        token.start = el.selectionStart;
+        token.end = el.selectionEnd;
+      }
+    } catch (e) {}
+    return token;
+  }
+
+  function restoreFocus(token) {
+    if (!token) return false;
+    // Attribute scan rather than a querySelector, for the same reason
+    // restoreDetailInvoker() does it: the keys embed arbitrary step ids.
+    var candidates = document.querySelectorAll("[data-focus-key]");
+    for (var i = 0; i < candidates.length; i++) {
+      if (candidates[i].getAttribute("data-focus-key") !== token.key) continue;
+      var el = candidates[i];
+      el.focus();
+      if (token.start !== null && typeof el.setSelectionRange === "function") {
+        try { el.setSelectionRange(token.start, token.end); } catch (e) {}
+      }
+      return true;
+    }
+    return false;
   }
 
   function restoreDetailInvoker(key) {
@@ -538,6 +595,17 @@ window.Steamtrain = (function () {
   function showSettingsRoute(section) {
     var center = document.getElementById("center");
     if (!center) return;
+    // The step drill-in drawer is `position: fixed` and lives OUTSIDE #center,
+    // so hiding the cockpit below does not hide it. Clear its state (rather
+    // than hide the node) so the background render loop stops re-opening it —
+    // an open drawer would otherwise sit pinned over the settings page,
+    // covering its Save/Discard footer.
+    S.detail = null;
+    S.detailInvoker = null;
+    S.detailFallback = null;
+    S.detailFocusPending = false;
+    S.detailFocusGeneration += 1;
+    if (ST.run && ST.run.renderDetail) ST.run.renderDetail();
     var work = center.querySelector("section.work");
     if (work) work.style.display = "none";
     var railLeft = document.getElementById("rail-left");
@@ -652,7 +720,7 @@ window.Steamtrain = (function () {
         ? SteamtrainReducer.workflowStateFromSpec(ST.run.effectiveSpec() || S.spec)
         : SteamtrainReducer.initialWorkflowState;
       S.detail = null; S.selectedStepId = null;
-      S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {};
+      S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {};
       ST.run.setBanner(
         "Attached to " + (run.detached ? "detached " : "") + "run " + run.id.slice(0, 8) + "…" +
           (isReadOnly() ? " (read-only view)." : " — cancel stops the run itself."),
@@ -916,16 +984,6 @@ window.Steamtrain = (function () {
     });
   }
 
-  /** A health chip that opens the Runners settings page. */
-  function healthChip(cls, label, title) {
-    return h("button", {
-      class: "chip chip-btn " + cls,
-      type: "button",
-      title: title + " · click for setup",
-      onClick: function () { ST.settings.open("runners"); }
-    }, h("span", { class: "dot" }), label);
-  }
-
   /** Copy `text`, then flash the button's label so the click has a visible result. */
   function copyFix(text, btn, codeEl) {
     function flash() {
@@ -967,45 +1025,6 @@ window.Steamtrain = (function () {
     }
   }
 
-  /** Minimal CSS.escape shim for our ids (ascii ids: agent names, "api:<id>"). */
-  function cssEscape(value) {
-    if (window.CSS && window.CSS.escape) return window.CSS.escape(value);
-    return String(value).replace(/[^a-zA-Z0-9_-]/g, function (c) { return "\\" + c; });
-  }
-
-  /**
-   * Catalog badge for a workflow's sandbox posture. Only shown when it says
-   * something: every agent step sandboxed (the reassuring case), or at least one
-   * step whose declared restriction cannot be enforced (the case a user must see
-   * BEFORE launching, not after).
-   */
-  /** Closed lock only when something is actually sandboxed (mirrors the CLI/TUI). */
-  function sandboxGlyph(p) {
-    if (!p || p.blocking > 0 || p.unenforced > 0) return "\uD83D\uDD13";
-    var declared = p.counts && (p.counts["read-only"] || p.counts.edit || p.counts.full);
-    return declared ? "\uD83D\uDD12" : "\uD83D\uDD13";
-  }
-
-  function workflowSandboxBadge(w) {
-    var p = w.permissions;
-    if (!p || !p.agentSteps) return null;
-    if (p.blocking > 0 || p.unenforced > 0) {
-      return h("span", {
-        class: "badge perms violated",
-        text: "\uD83D\uDD13 " + (p.blocking > 0 ? "unenforceable" : "unenforced"),
-        title: (w.permissionWarnings || []).join("\n") || "a declared profile is not enforced by its agent"
-      });
-    }
-    if (p.unrestricted === 0 && p.counts && p.counts["read-only"] === p.agentSteps) {
-      return h("span", {
-        class: "badge perms locked",
-        text: "\uD83D\uDD12 read-only",
-        title: "every agent step in this workflow runs read-only: no writes, no shell, no network"
-      });
-    }
-    return null;
-  }
-
   function selectWorkflow(name, after, options) {
     if (!(options && options.preserveRunDeepLink) && currentRunDeepLink()) clearRunDeepLink();
     // Ignore any plan response that was initiated for the previously selected
@@ -1017,8 +1036,8 @@ window.Steamtrain = (function () {
     S.selected = name; S.runId = null; S.runState = null;
     S.detail = null; S.detailInvoker = null; S.detailFallback = null; S.detailFocusPending = false; S.detailFocusGeneration += 1;
     S.selectedStepId = null;
-    S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {};
-    S.narration = []; S.arrivalInspect = false; S.arrivalEnter = false; S.endedAt = 0;
+    S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {};
+    S.narration = []; S.arrivalEnter = false; S.endedAt = 0;
     S.narrationFreshPlayed = null;
     S.arrivalCtaFocused = false;
     // Leaving an attached run restores Plan / Describe and clears compact chrome.
@@ -1215,10 +1234,10 @@ window.Steamtrain = (function () {
   ST.apiInstanceById = apiInstanceById;
   ST.applyHealth = applyHealth;
   ST.attachRun = attachRun;
+  ST.captureFocus = captureFocus;
   ST.clear = clear;
   ST.clearRunDeepLink = clearRunDeepLink;
   ST.copyFix = copyFix;
-  ST.cssEscape = cssEscape;
   ST.currentRunDeepLink = currentRunDeepLink;
   ST.effortsFor = effortsFor;
   ST.emptyTokens = emptyTokens;
@@ -1231,7 +1250,6 @@ window.Steamtrain = (function () {
   ST.friendlyStepLabel = friendlyStepLabel;
   ST.groupWorkflowsBySource = groupWorkflowsBySource;
   ST.handleRoute = handleRoute;
-  ST.healthChip = healthChip;
   ST.isCredentialFreeSpec = isCredentialFreeSpec;
   ST.isInteractiveTarget = isInteractiveTarget;
   ST.isLiveAttached = isLiveAttached;
@@ -1247,7 +1265,7 @@ window.Steamtrain = (function () {
   ST.refreshWorkflowList = refreshWorkflowList;
   ST.relTime = relTime;
   ST.restoreDetailInvoker = restoreDetailInvoker;
-  ST.sandboxGlyph = sandboxGlyph;
+  ST.restoreFocus = restoreFocus;
   ST.scheduleRender = scheduleRender;
   ST.selectWorkflow = selectWorkflow;
   ST.setRunDeepLink = setRunDeepLink;
@@ -1263,7 +1281,6 @@ window.Steamtrain = (function () {
   ST.updateLiveTimers = updateLiveTimers;
   ST.wfListItem = wfListItem;
   ST.workflowNeedsCredentials = workflowNeedsCredentials;
-  ST.workflowSandboxBadge = workflowSandboxBadge;
 
   // Filled in by the modules that load after this one.
   ST.shell = null;

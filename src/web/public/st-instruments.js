@@ -284,6 +284,17 @@
   // ---- public surface ---------------------------------------------------------
 
   function render(container) {
+    // The event log is the rail's only scrollable instrument, and this render
+    // runs every 2s for the life of the run — without this the reader is
+    // snapped back to the head two seconds after scrolling back to read an
+    // earlier entry. Entries are prepended (newest first), so restoring the
+    // raw scrollTop is not enough: the content the reader was looking at has
+    // moved down by however much was added above it. Compensate with the
+    // scrollHeight delta so the *entry* holds still, not the offset.
+    var prevLog = container.querySelector(".eventlog");
+    var prevTop = prevLog ? prevLog.scrollTop : 0;
+    var prevHeight = prevLog ? prevLog.scrollHeight : 0;
+
     ST.clear(container);
     var spec = (ST.run && ST.run.effectiveSpec ? ST.run.effectiveSpec() : null) || S.spec;
     var totals = liveTotals();
@@ -291,7 +302,11 @@
     container.appendChild(renderThroughput());
     container.appendChild(renderRunners());
     container.appendChild(renderWorktrees());
-    container.appendChild(renderEventLog());
+    var log = renderEventLog();
+    container.appendChild(log);
+    // A reader parked at the head (the default) stays pinned to the head and
+    // keeps seeing the newest events arrive.
+    if (prevTop > 0) log.scrollTop = Math.max(0, prevTop + (log.scrollHeight - prevHeight));
   }
 
   /** Called from the SSE handler (st-core.js openStream) for every WorkflowEvent. */
@@ -317,6 +332,10 @@
   ST.instruments = {
     render: render,
     onEvent: onEvent,
+    // Exposed so the terminal `status` SSE frame (st-run.js openStream) can
+    // stop the 2s render loop directly, rather than leaving it to run until
+    // tickThroughput's own guard happens to catch it.
+    stopThroughput: stopThroughputTimer,
     reset: reset
   };
 })(window.Steamtrain);

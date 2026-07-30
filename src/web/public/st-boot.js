@@ -9,7 +9,31 @@
   var clear = ST.clear;
   var loadSessionThenCatalog = ST.loadSessionThenCatalog;
 
+  /**
+   * RENDERING IS DESTRUCTIVE — read this before adding anything to #bands or
+   * #rail-right.
+   *
+   * Both regions are cleared and rebuilt from scratch on every call, and the
+   * instrument rail schedules a call every 2 seconds for the whole life of a
+   * run (st-instruments.js). Any transient UI state that lives only in the DOM
+   * — an open <details>, unsent text in a field, a scroll offset, the focused
+   * element — is therefore destroyed twice a second-and-a-half, silently.
+   *
+   * So: anything inside #bands or #rail-right that holds user state must
+   * either persist that state on `S` (keyed by stepKey() so loop iterations
+   * stay distinct — see S.approvalDiffOpen, S.humanInputDraft,
+   * S.subWorkflowOpen, S.tailScroll) or restore it after the rebuild
+   * (applyTailScroll below; ST.captureFocus/ST.restoreFocus for focus and
+   * caret; the event log's scroll handling in st-instruments.js).
+   */
   function render() {
+    // Focus and caret first: everything below can replace the focused node.
+    var focusToken = ST.captureFocus();
+    renderStage();
+    ST.restoreFocus(focusToken);
+  }
+
+  function renderStage() {
     var stage = document.getElementById("bands");
     clear(stage);
     var railRight = document.getElementById("rail-right");
@@ -32,7 +56,7 @@
       showingArrival = ST.arrival.renderArrival(stage);
     }
 
-    if (showingArrival && !S.arrivalInspect) {
+    if (showingArrival) {
       ST.run.updateProgress();
       return;
     }
@@ -41,10 +65,6 @@
     // Idle (no run started yet): the composer above owns the pane and the bands
     // area stays empty. Once a run starts, the phase bands take it.
     ST.run.renderBands(stage);
-
-    // renderSummary belongs to the Arrival report (Task 8); it renders here only
-    // in the post-run inspect state, exactly as it did before.
-    if (S.runState && S.runState.done && S.arrivalInspect) ST.run.renderSummary(stage);
     ST.run.updateProgress();
     applyTailScroll(stage);
     ST.run.renderDetail();
