@@ -22,8 +22,8 @@ window.Steamtrain = (function () {
   // Doctor status → how the setup panel and health chips read it. `loud` states
   // are the user's to fix now (red/amber); `calm` states are the normal resting
   // state for a CLI the user simply doesn't use (an uninstalled agent, an unset
-  // key), so the header collapses them into one quiet chip instead of a wall of
-  // red — mirroring the TUI status bar.
+  // key), so the header gives them no chip at all instead of a wall of red —
+  // the settings table is where absent runners are listed.
   var AGENT_HEALTH_META = {
     ok: { label: "ready", chip: "ok", loud: false, verb: "Ready" },
     not_authenticated: { label: "needs sign-in", chip: "bad", loud: true, verb: "Sign in" },

@@ -21,14 +21,16 @@ fill in once they land (the page never blocks on the doctor). Every chip is a
 button: click one to open the **Agent & API setup** panel, which lists each
 agent and endpoint with its status and — for anything not ready — the exact
 fix with a one-click copy and a Recheck button (the browser analog of
-`steamtrain init`'s readiness table). Agents that aren't installed collapse
-into one quiet chip so the header stays calm on a fresh machine. The project
-config page manages both [agent instances](agent-configuration.md) and the
-[API instances](api-configuration.md) direct-inference `llm` steps call.
-Agent and API edits default to **global** scope (`~/.steamtrain/config.json`),
-matching the TUI `/agent` / `/api` commands; each row can opt into project
-scope (`./steamtrain.json`). Timeouts on that page still write to the project
-file.
+`steamtrain init`'s readiness table). A chip names what it counted —
+`ready · 2 agents + 1 API` — and runners that aren't installed get no chip at
+all, so the header stays calm on a fresh machine. Settings → **Runners**
+manages both [agent instances](agent-configuration.md) and the
+[API instances](api-configuration.md) direct-inference `llm` steps call: each
+row has an **on/off** switch and an **Edit** editor, ready runners sort first
+and disabled ones last. Agent and API edits default to **global** scope
+(`~/.steamtrain/config.json`), matching the TUI `/agent` / `/api` commands; each
+row can opt into project scope (`./steamtrain.json`). Timeouts live under
+Settings → **Limits & budget** and still write to the project file.
 
 ## What it shows
 

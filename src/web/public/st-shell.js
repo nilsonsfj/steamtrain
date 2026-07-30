@@ -163,22 +163,35 @@
     }
   }
 
-  /** Bucket agent + API doctor results into ready / needs-auth / absent. */
+  /**
+   * Bucket agent + API doctor results into ready / needs-auth, keeping agents
+   * and APIs apart so the chips can name what they counted. Runners that are
+   * merely absent (no CLI installed, no key set) are not counted at all: they
+   * are the resting state for a tool the user doesn't use, and a chip for them
+   * is noise in the topbar. Settings still lists them, greyed out.
+   */
   function healthCounts(list, apis) {
-    var ready = 0, auth = 0, absent = 0;
+    var counts = { readyAgents: 0, readyApis: 0, authAgents: 0, authApis: 0, probed: 0 };
     (list || []).forEach(function (d) {
-      var meta = agentHealthMeta(d.status);
-      if (d.status === "ok") ready++;
-      else if (meta.loud) auth++;
-      else absent++;
+      counts.probed++;
+      if (d.status === "ok") counts.readyAgents++;
+      else if (agentHealthMeta(d.status).loud) counts.authAgents++;
+      // No third branch: calm not-ready states fall through uncounted on purpose.
     });
     (apis || []).forEach(function (d) {
-      var meta = apiHealthMeta(d.status);
-      if (d.status === "ok") ready++;
-      else if (meta.loud) auth++;
-      else absent++;
+      counts.probed++;
+      if (d.status === "ok") counts.readyApis++;
+      else if (apiHealthMeta(d.status).loud) counts.authApis++;
     });
-    return { ready: ready, auth: auth, absent: absent };
+    return counts;
+  }
+
+  /** "6 agents", "1 API", "6 agents + 1 API" — never a bare number. */
+  function runnerLabel(agents, apis) {
+    var parts = [];
+    if (agents) parts.push(agents + (agents === 1 ? " agent" : " agents"));
+    if (apis) parts.push(apis + (apis === 1 ? " API" : " APIs"));
+    return parts.join(" + ");
   }
 
   /** A health chip — still a button that opens the settings page. */
@@ -203,16 +216,19 @@
       return;
     }
     var counts = healthCounts(list, apis);
-    if (counts.ready) {
-      box.appendChild(healthChip("ready", "ready · " + counts.ready, counts.ready + " agent(s)/API(s) ready"));
+    var ready = runnerLabel(counts.readyAgents, counts.readyApis);
+    var auth = runnerLabel(counts.authAgents, counts.authApis);
+    if (ready) box.appendChild(healthChip("ready", "ready · " + ready, ready + " ready to run"));
+    if (auth) {
+      var one = counts.authAgents + counts.authApis === 1;
+      box.appendChild(healthChip("auth", "needs auth · " + auth,
+        auth + (one ? " needs" : " need") + " sign-in or a valid key"));
     }
-    if (counts.auth) {
-      box.appendChild(healthChip("auth", "needs auth · " + counts.auth,
-        counts.auth + " need sign-in or a valid key"));
-    }
-    if (counts.absent) {
-      box.appendChild(healthChip("absent", "absent · " + counts.absent,
-        counts.absent + " not installed or no key set"));
+    // Nothing ready and nothing fixable means every probed runner is absent —
+    // say so once instead of leaving the chip group empty.
+    if (!ready && !auth && counts.probed) {
+      box.appendChild(healthChip("quiet", "no runner ready",
+        "Nothing installed or signed in yet — open Settings to set a runner up."));
     }
   }
 

@@ -142,11 +142,12 @@ API endpoints appear as **health chips** in the header alongside the agents.
 Click any chip to open the **Agent & API setup** panel (see
 [agent configuration](agent-configuration.md#web-ui)), which lists every
 endpoint with its status and, for anything not ready, the fix with a one-click
-**Copy** — plus a **Recheck** that re-probes in place. Endpoints without a key
-collapse into one quiet chip rather than shouting.
+**Copy** — plus a **Recheck** that re-probes in place. Ready endpoints are
+counted by name in the chip (`ready · 2 agents + 1 API`); endpoints without a
+key get no chip rather than shouting.
 
-The config page (gear icon) has an **APIs** section mirroring the agents
-section: add/remove instances, toggle enabled, pick **global** (default) or
+Settings → **Runners** has an **APIs** section mirroring the agents section:
+add/remove instances, flip a row **on/off**, pick **global** (default) or
 **project** scope, and edit provider, base URL, key env var, default model,
 and pricing. Saving writes each row to its chosen file and re-probes readiness
 immediately.
