@@ -883,6 +883,7 @@
       box.appendChild(h("div", { class: "runs-receipt-note", text: "No steps recorded." }));
       return box;
     }
+    var rows = h("div", { class: "runs-ledger-rows" });
     steps.forEach(function (step) {
       var result = step.result || {};
       var row = h("div", { class: "runs-ledger-row" },
@@ -895,8 +896,9 @@
       }
       row.appendChild(h("span", { class: "num", text: result.durationMs ? (result.durationMs / 1000).toFixed(1) + "s" : "—" }));
       row.appendChild(h("span", { class: "num cost", text: result.costUsd ? "$" + result.costUsd.toFixed(4) : "free" }));
-      box.appendChild(row);
+      rows.appendChild(row);
     });
+    box.appendChild(rows);
     return box;
   }
 
