@@ -2772,8 +2772,7 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
         : undefined;
     if (code === "EADDRINUSE") {
       throw new Error(
-        `port ${port} is already in use on ${host}\n` +
-          `  stop the other process, or pass --port <n> (e.g. steamtrain --web-ui --port 4318)`,
+        `port ${port} is already in use on ${host}\n  stop the other process, or pass --port <n> (e.g. steamtrain --web-ui --port 4318)`,
       );
     }
     throw listenErr instanceof Error ? listenErr : new Error(String(listenErr));
