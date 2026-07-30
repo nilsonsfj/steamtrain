@@ -395,8 +395,9 @@
       "aria-pressed": off ? "false" : "true",
       text: off ? "off" : "on"
     });
-    // The new state is "enabled" exactly when the row is currently off.
-    toggleBtn.addEventListener("click", function () { setRowEnabled(kind, rowData, off); });
+    // Clicking flips the row: the state it moves to is "enabled" exactly when
+    // the row is off right now.
+    toggleBtn.addEventListener("click", function () { setRowEnabled(kind, rowData, off === true); });
     wrap.appendChild(toggleBtn);
     var editBtn = h("button", {
       type: "button", class: "act edit" + (open ? " open" : ""),
@@ -427,11 +428,11 @@
   }
 
   /**
-   * Flip a runner on or off. A built-in with no config entry yet gets a minimal
-   * stub (id + provider + scope) so `enabled: false` has somewhere to live —
-   * exactly what the TUI's agent/API manager writes. Takes effect on Save.
+   * Move a runner to `nextEnabled`. A built-in with no config entry yet gets a
+   * minimal stub (id + provider + scope) so `enabled: false` has somewhere to
+   * live — exactly what the TUI's agent/API manager writes. Takes effect on Save.
    */
-  function setRowEnabled(kind, rowData, enabled) {
+  function setRowEnabled(kind, rowData, nextEnabled) {
     var entry = kind === "agent" ? findAgent(rowData.id) : findApi(rowData.id);
     if (!entry) {
       var d = rowData.doctor;
@@ -442,7 +443,7 @@
       };
       (kind === "agent" ? draft.agents : draft.apis).push(entry);
     }
-    entry.enabled = enabled;
+    entry.enabled = nextEnabled;
     paint();
   }
 

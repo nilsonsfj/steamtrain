@@ -3,12 +3,11 @@
  * the topbar health chips (st-shell.js) and the Runners settings table
  * (st-settings.js + settings.css).
  *
- * The chip logic is real logic (counting, naming, dropping states that don't
- * deserve a chip), so it runs here for real: st-shell.js is a plain IIFE over
- * `window.Steamtrain`, so a stub namespace plus a stub `document` is enough to
- * call `renderHealth` and read back the chips it built. The settings table is
- * DOM-heavy paint code with no such seam, so its invariants are asserted
- * against source and stylesheet.
+ * Both are plain IIFEs over `window.Steamtrain`, so both run here for real: a
+ * stub namespace with an `h()` that builds inert nodes is enough to paint them,
+ * read back what they rendered, and fire the click handlers they attached. Only
+ * the paint-time invariants that live in the stylesheet (hit-target size, how
+ * absent rows recede) are asserted against the CSS text.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -25,7 +24,12 @@ interface StubEl {
   attrs: Record<string, unknown>;
   children: StubEl[];
   text: string;
+  listeners: Record<string, (() => void)[]>;
+  className: string;
+  textContent: string;
   appendChild: (child: StubEl) => void;
+  addEventListener: (event: string, fn: () => void) => void;
+  classList: { add: (cls: string) => void };
 }
 interface Chip {
   cls: string;
@@ -40,27 +44,39 @@ interface Chip {
  */
 const LOUD = new Set(["not_authenticated", "unknown_error", "unreachable"]);
 
+/** The `h()` these modules build their DOM with, minus the DOM. */
+function el(tag: string, attrs?: Record<string, unknown>, ...kids: unknown[]): StubEl {
+  const node: StubEl = {
+    tag,
+    attrs: attrs ?? {},
+    children: [],
+    // `h()` treats a `text` attribute as textContent; children append after it.
+    text: attrs?.text == null ? "" : String(attrs.text),
+    listeners: {},
+    className: String(attrs?.class ?? ""),
+    textContent: "",
+    appendChild: (child) => node.children.push(child),
+    addEventListener: (event, fn) => {
+      const bucket = node.listeners[event] ?? [];
+      node.listeners[event] = bucket;
+      bucket.push(fn);
+    },
+    classList: { add: () => {} },
+  };
+  for (const kid of kids) {
+    if (kid == null) continue;
+    if (typeof kid === "string") node.text += kid;
+    else node.children.push(kid as StubEl);
+  }
+  return node;
+}
+
 /** Loads st-shell.js against a stub DOM and returns the chips renderHealth builds. */
 function renderChips(
   doctor: { agent: string; status: string }[],
   apis: { api: string; status: string }[],
   spec: unknown = { phases: [] },
 ): Chip[] {
-  const el = (tag: string, attrs?: Record<string, unknown>, ...kids: unknown[]): StubEl => {
-    const node: StubEl = {
-      tag,
-      attrs: attrs ?? {},
-      children: [],
-      text: "",
-      appendChild: (child) => node.children.push(child),
-    };
-    for (const kid of kids) {
-      if (kid == null) continue;
-      if (typeof kid === "string") node.text += kid;
-      else node.children.push(kid as StubEl);
-    }
-    return node;
-  };
   const health = el("div");
   const ST: Record<string, unknown> = {
     state: { spec },
@@ -149,27 +165,163 @@ describe("topbar health chips", () => {
   });
 });
 
+interface Row {
+  cls: string;
+  text: string;
+  actions: string[];
+  click: (label: string) => void;
+}
+interface Mounted {
+  rows: () => Row[];
+  save: () => Promise<void>;
+  puts: Record<string, unknown>[];
+}
+
+/** Every descendant matching `pred`, in paint order. */
+function collect(node: StubEl, pred: (n: StubEl) => boolean, out: StubEl[] = []): StubEl[] {
+  if (pred(node)) out.push(node);
+  for (const kid of node.children) collect(kid, pred, out);
+  return out;
+}
+function flatText(node: StubEl): string {
+  return [node.text, ...node.children.map(flatText)].join(" ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Paints the real Runners section against a stub DOM. `agents`/`apis` are the
+ * configured entries GET /api/config would return; PUT bodies are recorded so a
+ * test can assert what Save actually writes.
+ */
+async function mountSettings(opts: {
+  doctor?: Record<string, unknown>[];
+  apiDoctor?: Record<string, unknown>[];
+  agents?: Record<string, unknown>[];
+  apis?: Record<string, unknown>[];
+}): Promise<Mounted> {
+  const config = {
+    canGlobal: true,
+    stepTimeoutSec: 900,
+    agents: opts.agents ?? [],
+    apis: opts.apis ?? [],
+  };
+  const puts: Record<string, unknown>[] = [];
+  const root = el("div");
+  const ST: Record<string, unknown> = {
+    state: { doctor: opts.doctor ?? [], apiDoctor: opts.apiDoctor ?? [], projectConfig: null },
+    h: el,
+    clear: (node: StubEl) => {
+      node.children = [];
+    },
+    agentHealthMeta: (status: string) => ({ loud: LOUD.has(status) }),
+    apiHealthMeta: (status: string) => ({ loud: LOUD.has(status) }),
+    agentUiLabel: (id: string) => id,
+    isReadOnly: () => false,
+    refreshWorkflowList: () => {},
+    copyFix: () => {},
+    pollDoctor: () => {},
+    modals: { mbanner: () => {}, field: (_label: string, input: StubEl) => input },
+    apiAuth: (method: string, _path: string, body?: Record<string, unknown>) => {
+      if (method === "PUT") {
+        puts.push(body ?? {});
+        return Promise.resolve({ status: 200, body: { ok: true } });
+      }
+      return Promise.resolve({ status: 200, body: config });
+    },
+  };
+  const window = { Steamtrain: ST, SteamtrainReducer: null, location: { hash: "" } };
+  new Function("window", "document", settingsJs)(window, { getElementById: () => null });
+  const settings = ST.settings as { render: (c: StubEl, s: string) => void };
+  settings.render(root, "runners");
+  await Promise.resolve();
+  await Promise.resolve();
+
+  const rows = () =>
+    collect(root, (n) => n.className.split(" ").includes("runner-row")).map((row) => {
+      const acts = collect(row, (n) => n.className === "rowacts")[0];
+      const buttons = acts ? acts.children : [];
+      return {
+        cls: row.className,
+        text: flatText(row),
+        actions: buttons.map((b) => b.text),
+        click: (label: string) => {
+          const btn = buttons.find((b) => b.text === label);
+          if (!btn) throw new Error(`no "${label}" button on row: ${flatText(row)}`);
+          for (const fn of btn.listeners.click ?? []) fn();
+        },
+      };
+    });
+  const save = async () => {
+    const btn = collect(root, (n) => n.text === "Save changes")[0];
+    if (!btn) throw new Error("no Save button");
+    for (const fn of btn.listeners.click ?? []) fn();
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+  return { rows, save, puts };
+}
+
 describe("runners settings table", () => {
-  it("ranks ready first and pushes disabled runners to the bottom", () => {
-    // rowRank: ready 0 → needs auth 1 → absent/unprobed 2 → disabled 3.
-    const rank = settingsJs.slice(settingsJs.indexOf("function rowRank"));
-    const body = rank.slice(0, rank.indexOf("\n  }"));
-    expect(body).toMatch(/isDisabled\(row\)\)\s*return 3/);
-    expect(body).toMatch(/status === "ok"\)\s*return 0/);
-    expect(body).toMatch(/meta\.loud \? 1 : 2/);
+  const MIXED = {
+    doctor: [
+      { agent: "amp", status: "binary_missing", provider: "amp", binary: "amp" },
+      { agent: "codex", status: "not_authenticated", provider: "codex", binary: "codex" },
+      { agent: "zed-fork", status: "ok", provider: "claude", binary: "zed" },
+      { agent: "claude", status: "ok", provider: "claude", binary: "claude", version: "2.1" },
+    ],
+    agents: [{ id: "kiro", provider: "kiro", enabled: false, scope: "user" }],
+  };
+
+  it("ranks ready first, then fixable, then absent, with disabled last", async () => {
+    const ui = await mountSettings(MIXED);
+    expect(ui.rows().map((r) => r.text.split(" ")[0])).toEqual([
+      "claude",
+      "zed-fork",
+      "codex",
+      "amp",
+      "kiro",
+    ]);
   });
 
-  it("offers an on/off control on every row and writes enabled into the draft", () => {
-    expect(settingsJs).toMatch(/class: "toggle"/);
-    expect(settingsJs).toMatch(/entry\.enabled = enabled/);
-    // Disabling a built-in with no config entry has to create one to hold the flag.
-    expect(settingsJs).toMatch(
-      /\(kind === "agent" \? draft\.agents : draft\.apis\)\.push\(entry\)/,
+  it("marks the disabled row as disabled instead of trusting a stale probe", async () => {
+    const ui = await mountSettings(MIXED);
+    const kiro = ui.rows().at(-1);
+    expect(kiro?.cls).toContain("off");
+    expect(kiro?.text).toContain("disabled");
+    expect(kiro?.actions).toEqual(["off", "Edit", "×"]);
+  });
+
+  it("offers on/off and a labelled Edit on every row", async () => {
+    const ui = await mountSettings(MIXED);
+    for (const row of ui.rows()) {
+      expect(row.actions).toContain("Edit");
+      expect(row.actions.some((a) => a === "on" || a === "off")).toBe(true);
+    }
+  });
+
+  it("disabling a built-in with no config entry saves an entry that holds the flag", async () => {
+    const ui = await mountSettings(MIXED);
+    ui.rows()[0]?.click("on");
+    const claude = ui.rows().find((r) => r.text.startsWith("claude"));
+    expect(claude?.cls).toContain("off");
+    // A disabled runner is dead weight, so it sinks on the same repaint.
+    expect(ui.rows().at(-1)?.text).toMatch(/^claude|^kiro/);
+    await ui.save();
+    expect(ui.puts).toHaveLength(1);
+    expect(ui.puts[0]?.agents).toContainEqual(
+      expect.objectContaining({ id: "claude", provider: "claude", enabled: false, scope: "user" }),
     );
   });
 
-  it("labels the edit control instead of relying on a lone glyph", () => {
-    expect(settingsJs).toMatch(/class: "act edit".*text: "Edit"/s);
+  it("re-enables from the same control", async () => {
+    const ui = await mountSettings(MIXED);
+    ui.rows().at(-1)?.click("off"); // the disabled kiro row
+    const kiro = ui.rows().find((r) => r.text.startsWith("kiro"));
+    expect(kiro?.cls).not.toContain("off");
+    expect(kiro?.actions).toContain("on");
+    await ui.save();
+    expect(ui.puts[0]?.agents).toContainEqual(
+      expect.objectContaining({ id: "kiro", enabled: true }),
+    );
   });
 
   it("gives the row actions a real hit target", () => {

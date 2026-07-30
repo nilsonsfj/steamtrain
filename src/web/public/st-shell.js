@@ -176,6 +176,7 @@
       counts.probed++;
       if (d.status === "ok") counts.readyAgents++;
       else if (agentHealthMeta(d.status).loud) counts.authAgents++;
+      // No third branch: calm not-ready states fall through uncounted on purpose.
     });
     (apis || []).forEach(function (d) {
       counts.probed++;
