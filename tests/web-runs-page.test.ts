@@ -840,6 +840,13 @@ describe("runs page layout", () => {
 
   // The columns stack rather than disappear below the shell's own breakpoint:
   // a hidden receipt rail would make clicking a row do nothing visible.
+  it("caps the step ledger in its own scroll region so the result pane survives", () => {
+    const body = ruleBody(runsCss, ".runs-ledger-rows");
+    expect(body).toContain("max-height: 34vh");
+    expect(body).toContain("overflow-y: auto");
+    expect(body).toContain("overscroll-behavior: contain");
+  });
+
   it("stacks the three columns on a narrow viewport instead of hiding them", () => {
     const narrow = runsCss.slice(runsCss.indexOf("@media (max-width: 900px)"));
     expect(narrow).toContain("flex-direction: column");
