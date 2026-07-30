@@ -280,6 +280,21 @@
     return out;
   }
 
+  /**
+   * FACETING RULE for the two count functions below, which is why they look
+   * asymmetric: a facet narrows every *other* facet, never itself.
+   *
+   *   statusCounts()    applies workflow + query, buckets by status
+   *   workflowCounts()  applies status   + query, buckets by workflow
+   *
+   * Adding a facet's own filter to its own counts looks like a consistency fix
+   * and is a dead end: pick workflow "A" and every other workflow drops to
+   * zero, so it is dropped from the rail — and the rail has no "all workflows"
+   * row to get back from (clicking the active one is what clears it). The
+   * reader would be stuck in A. Pinned by "keeps the other workflows
+   * reachable while one is selected" in tests/web-runs-page.test.ts.
+   */
+
   /** Counts for the status rail, computed before the status filter applies. */
   function statusCounts() {
     var counts = { all: 0, live: R.liveRuns.length, done: 0, error: 0, canceled: 0, "budget-exceeded": 0 };
@@ -1119,7 +1134,7 @@
       actions.appendChild(h("button", { class: "btn danger small", text: "Delete",
         onClick: function () { deleteRecord(record); } }));
     }
-    if (actions.childNodes.length) holder.appendChild(actions);
+    if (actions.children.length) holder.appendChild(actions);
 
     var worktrees = h("div", { class: "hist-worktrees" });
     holder.appendChild(worktrees);
@@ -1310,7 +1325,7 @@
         status.appendChild(h("span", { text: (bits.length ? " · " : "") + "PR: " }));
         status.appendChild(ST.modals.safeExternalLink(harvest.prUrl));
       }
-      if (status.textContent || status.childNodes.length) holder.appendChild(status);
+      if (status.textContent || status.children.length) holder.appendChild(status);
 
       var anyExists = false, anyChanges = false;
       sources.forEach(function (s) {
@@ -1374,7 +1389,7 @@
           });
         } }));
       }
-      if (buttons.childNodes.length) holder.appendChild(buttons);
+      if (buttons.children.length) holder.appendChild(buttons);
     }).catch(function () {});
   }
 

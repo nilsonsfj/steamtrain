@@ -110,6 +110,7 @@
     // Typing while browsing history turns the recalled entry into the new draft.
     document.getElementById("input").addEventListener("input", function () { ST.run.clearPromptBrowse(); });
     document.getElementById("newWfBtn").addEventListener("click", ST.modals.openCreate);
+    document.getElementById("homeBtn").addEventListener("click", function () { ST.goHome(); });
     document.getElementById("historyBtn").addEventListener("click", function () { ST.runs.open(); });
     document.getElementById("settingsBtn").addEventListener("click", function () { ST.settings.open(); });
     document.getElementById("editBtn").addEventListener("click", function () { ST.modals.openEditor(false); });

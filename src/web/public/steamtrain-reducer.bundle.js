@@ -43,6 +43,7 @@ var SteamtrainReducer = (() => {
     initialWorkflowState: () => initialWorkflowState,
     isAgentlessWorkflow: () => isAgentlessWorkflow,
     isCredentialFreeWorkflow: () => isCredentialFreeWorkflow,
+    isPageRoute: () => isPageRoute,
     narrateEvent: () => narrateEvent,
     narrateFromState: () => narrateFromState,
     parseDeepLink: () => parseDeepLink,
@@ -965,6 +966,10 @@ var SteamtrainReducer = (() => {
     const raw = (match[1] ?? "").toLowerCase();
     const section = SETTINGS_SECTIONS.includes(raw) ? raw : SETTINGS_SECTIONS[0];
     return { kind: "settings", section };
+  }
+  function isPageRoute(hash) {
+    const route = parseRoute(hash);
+    return route?.kind === "settings" || route?.kind === "runs";
   }
   function settingsDeepLink(section = SETTINGS_SECTIONS[0]) {
     return `#settings/${section}`;
