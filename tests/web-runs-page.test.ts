@@ -27,6 +27,7 @@ interface StubEl {
   className: string;
   textContent: string;
   checked?: boolean;
+  disabled?: boolean;
   style: Record<string, string>;
   appendChild: (child: StubEl) => void;
   addEventListener: (event: string, fn: (e?: unknown) => void) => void;
@@ -48,6 +49,9 @@ function el(tag: string, attrs?: Record<string, unknown>, ...kids: unknown[]): S
     className: String(attrs?.class ?? ""),
     textContent: "",
     checked: attrs?.checked === true,
+    // h() mirrors boolean attributes onto the element, which is how the page
+    // disables Compare until a second run is checked.
+    disabled: attrs?.disabled === true,
     style: {},
     appendChild: (child) => node.children.push(child),
     addEventListener: (event, fn) => {
@@ -113,6 +117,13 @@ function click(node: StubEl): void {
 
 const HOUR = 3600_000;
 
+/**
+ * The reason a rejected DELETE comes back with. Deliberately not a string the
+ * client could produce on its own: the assertions that look for it are proving
+ * the page relays *the server's* message, not that it printed its own.
+ */
+const SERVER_DELETE_ERROR = "history is read-only on this server";
+
 /** A recorded run summary shaped like GET /api/history returns them. */
 function record(over: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
   return {
@@ -143,8 +154,14 @@ interface Mounted {
   rail: () => { label: string; count: string; active: boolean }[];
   receipt: () => string;
   head: () => string;
+  /** Flattened text of the centre pane (table, full receipt, or comparison). */
+  main: () => string;
   hash: () => string;
+  /** Everything the page announced, in order. */
+  said: string[];
   clickRow: (index: number) => Promise<void>;
+  check: (index: number) => Promise<void>;
+  clickButton: (label: string) => Promise<void>;
   press: (key: string) => boolean;
 }
 
@@ -158,9 +175,21 @@ async function mountRuns(opts: {
   live?: Record<string, unknown>[];
   detail?: Record<string, unknown>;
   selected?: string;
+  /** Status the DELETE endpoints answer with, for the failure paths. */
+  deleteStatus?: number;
+  /** Answer a rejected DELETE with no `error` body, exercising the fallback. */
+  deleteBare?: boolean;
+  /** What the per-model roll-up reports, for the full receipt's cost table. */
+  byModel?: Record<string, unknown>[];
+  /** Worktree sources the full receipt's lifecycle block should see. */
+  worktrees?: Record<string, unknown>[];
 }): Promise<Mounted> {
   const root = el("div");
   const location = { hash: "#runs", pathname: "/", search: "" };
+  const said: string[] = [];
+  // Server-side history, so a successful DELETE actually removes it and the
+  // re-fetch that follows sees the same thing the client just did.
+  let stored = opts.runs ?? [];
   const ST: Record<string, unknown> = {
     state: { page: "runs", liveRuns: [] },
     h: el,
@@ -170,8 +199,8 @@ async function mountRuns(opts: {
     activateWithKeyboard: (e: { key: string }, action: () => void) => {
       if (e.key === "Enter" || e.key === " ") action();
     },
-    aggregateByModel: () => [],
-    announce: () => {},
+    aggregateByModel: () => opts.byModel ?? [],
+    announce: (text: string) => said.push(text),
     captureFocus: () => null,
     restoreFocus: () => false,
     closePageRoute: () => {
@@ -199,11 +228,22 @@ async function mountRuns(opts: {
       safeExternalLink: () => el("a"),
     },
     api: () => Promise.resolve({ status: 200, body: { runs: opts.live ?? [] } }),
-    apiAuth: (_m: string, path: string) => {
-      if (path === "/api/history")
-        return Promise.resolve({ status: 200, body: { runs: opts.runs ?? [] } });
+    apiAuth: (method: string, path: string) => {
+      if (method === "DELETE") {
+        const status = opts.deleteStatus ?? 200;
+        if (status === 200) {
+          const one = /^\/api\/history\/(.+)$/.exec(path);
+          stored = one ? stored.filter((r) => r.id !== decodeURIComponent(one[1] as string)) : [];
+        }
+        // A rejected DELETE answers with the server's own reason, except when
+        // `deleteBare` is set — that is the body-less 5xx the fallback text in
+        // deleteRecord/clearHistory exists for.
+        const body = status === 200 ? {} : opts.deleteBare ? {} : { error: SERVER_DELETE_ERROR };
+        return Promise.resolve({ status, body });
+      }
+      if (path === "/api/history") return Promise.resolve({ status: 200, body: { runs: stored } });
       if (path.startsWith("/api/history/") && path.endsWith("/worktrees")) {
-        return Promise.resolve({ status: 200, body: { sources: [] } });
+        return Promise.resolve({ status: 200, body: { sources: opts.worktrees ?? [] } });
       }
       return Promise.resolve({ status: 200, body: { record: opts.detail } });
     },
@@ -216,6 +256,13 @@ async function mountRuns(opts: {
     location,
     setInterval: () => 0,
     clearInterval: () => {},
+    setTimeout: (fn: () => void) => {
+      fn();
+      return 0;
+    },
+    // Every destructive action on this page confirms first; the tests drive
+    // the path where the reader said yes.
+    confirm: () => true,
     history: {
       replaceState: (_s: unknown, _t: unknown, url: string) => {
         location.hash = url.slice(url.indexOf("#"));
@@ -249,9 +296,23 @@ async function mountRuns(opts: {
       })),
     receipt: () => flatText(collect(root, (n) => hasClass(n, "runs-receipt"))[0] ?? el("div")),
     head: () => flatText(collect(root, (n) => hasClass(n, "runs-head"))[0] ?? el("div")),
+    main: () => flatText(collect(root, (n) => hasClass(n, "runs-main"))[0] ?? el("div")),
     hash: () => location.hash,
+    said,
     clickRow: async (index: number) => {
       click(rowNodes()[index] as StubEl);
+      for (let i = 0; i < 6; i++) await Promise.resolve();
+    },
+    check: async (index: number) => {
+      const box = collect(root, (n) => hasClass(n, "runs-check"))[index] as StubEl;
+      box.checked = true;
+      for (const fn of box.listeners.change ?? []) fn({ target: box });
+      await Promise.resolve();
+    },
+    clickButton: async (label: string) => {
+      const btn = collect(root, (n) => n.tag === "button" && flatText(n) === label)[0];
+      if (!btn) throw new Error(`no "${label}" button`);
+      click(btn);
       for (let i = 0; i < 6; i++) await Promise.resolve();
     },
     press: (key: string) => runs.handleKey({ key, target: null, preventDefault: () => {} }),
@@ -372,6 +433,60 @@ describe("runs page: the filter rail", () => {
     expect(page.rows()).toHaveLength(2);
   });
 
+  // Faceting rule, and the reason the two count functions are asymmetric: a
+  // facet narrows the *other* facets, never itself. Status counts apply the
+  // workflow filter; workflow counts apply the status filter. Neither applies
+  // its own, or picking a value would erase every alternative to it.
+  it("cross-filters the workflow counts by the selected status", async () => {
+    const page = await mountRuns({
+      runs: [
+        record({ workflow: "bug-hunt", status: "error" }),
+        record({
+          id: "aaaaaaaa-1a2b-4c3d-8e4f-5a6b7c8d9e0f",
+          workflow: "bug-hunt",
+          status: "done",
+        }),
+        record({
+          id: "bbbbbbbb-1a2b-4c3d-8e4f-5a6b7c8d9e0f",
+          workflow: "mainline",
+          status: "done",
+        }),
+      ],
+    });
+    const workflowCount = (name: string) => page.rail().find((r) => r.label === name)?.count;
+    expect(workflowCount("bug-hunt")).toBe("2");
+    expect(workflowCount("mainline")).toBe("1");
+
+    const failed = collect(
+      page.root,
+      (n) => hasClass(n, "runs-rail-row") && flatText(n).startsWith("Failed"),
+    )[0];
+    click(failed as StubEl);
+    // Only bug-hunt has a failure, so mainline drops out and bug-hunt reads 1.
+    expect(workflowCount("bug-hunt")).toBe("1");
+    expect(workflowCount("mainline")).toBeUndefined();
+  });
+
+  // Regression guard: applying the workflow filter to its own counts would
+  // drop every other workflow out of the rail, and since the rail has no
+  // "all workflows" row, there would be no way to switch to another one.
+  it("keeps the other workflows reachable while one is selected", async () => {
+    const page = await mountRuns({
+      runs: [
+        record({ workflow: "bug-hunt" }),
+        record({ id: "bbbbbbbb-1a2b-4c3d-8e4f-5a6b7c8d9e0f", workflow: "mainline" }),
+      ],
+    });
+    const pick = (name: string) =>
+      collect(page.root, (n) => hasClass(n, "runs-rail-row") && flatText(n).includes(name))[0];
+    click(pick("bug-hunt") as StubEl);
+    expect(page.rows()).toHaveLength(1);
+    // mainline is still listed, with its real count, so it can be switched to.
+    expect(page.rail().find((r) => r.label === "mainline")?.count).toBe("1");
+    click(pick("mainline") as StubEl);
+    expect(page.rows()[0]?.text).toContain("bbbbb");
+  });
+
   it("totals spend over the runs the filter actually shows", async () => {
     const page = await mountRuns({
       runs: [record(), record({ id: "aaaaaaaa-1a2b-4c3d-8e4f-5a6b7c8d9e0f" })],
@@ -446,6 +561,237 @@ describe("runs page: the receipt rail", () => {
 
   it("says so plainly when nothing is selected", async () => {
     const page = await mountRuns({ runs: [record()] });
+    expect(page.receipt()).toContain("No run selected");
+  });
+});
+
+describe("runs page: comparison", () => {
+  const TWO = [
+    record({ workflow: "bug-hunt", durationMs: 124_000 }),
+    record({
+      id: "bbbbbbbb-1a2b-4c3d-8e4f-5a6b7c8d9e0f",
+      workflow: "mainline",
+      status: "error",
+      durationMs: 61_000,
+      totals: {
+        steps: 6,
+        ok: 3,
+        failed: 1,
+        cached: 0,
+        costUsd: 0.019,
+        tokens: { input: 40_000, output: 8_000, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+        durationMs: 61_000,
+      },
+    }),
+  ];
+
+  it("offers Compare only once a second run is checked", async () => {
+    const page = await mountRuns({ runs: TWO });
+    expect(page.head()).not.toContain("Compare");
+    await page.check(0);
+    expect(page.head()).toContain("1 selected");
+    const compare = collect(
+      page.root,
+      (n) => n.tag === "button" && flatText(n) === "Compare",
+    )[0] as StubEl;
+    expect(compare.disabled).toBe(true);
+    await page.check(1);
+    expect(page.head()).toContain("2 selected");
+  });
+
+  it("puts the checked runs side by side without losing the rails", async () => {
+    const page = await mountRuns({ runs: TWO });
+    await page.check(0);
+    await page.check(1);
+    await page.clickButton("Compare");
+    const grid = page.main();
+    expect(grid).toContain("Workflow");
+    expect(grid).toContain("bug-hunt");
+    expect(grid).toContain("mainline");
+    // Each run's own totals, so a difference is readable across the row.
+    expect(grid).toContain("2:04");
+    expect(grid).toContain("1:01");
+    expect(grid).toContain("$0.041");
+    expect(grid).toContain("$0.019");
+    expect(grid).toContain("6/6");
+    expect(grid).toContain("3/6");
+    // The rails survive the view switch — the list is never lost.
+    expect(page.rail().length).toBeGreaterThan(0);
+    expect(page.receipt()).toBeTruthy();
+  });
+
+  it("goes back to the table", async () => {
+    const page = await mountRuns({ runs: TWO });
+    await page.check(0);
+    await page.check(1);
+    await page.clickButton("Compare");
+    await page.clickButton("← Runs");
+    expect(page.rows()).toHaveLength(2);
+  });
+});
+
+describe("runs page: the full receipt", () => {
+  const DETAIL = {
+    ...record(),
+    phases: [
+      {
+        phaseId: "scan",
+        title: "Scan",
+        index: 0,
+        stepCount: 1,
+        done: true,
+        ok: true,
+        steps: [
+          { stepId: "scan-logic", status: "done", result: { durationMs: 41_200, costUsd: 0.0104 } },
+        ],
+      },
+      {
+        phaseId: "report",
+        title: "Verify & report",
+        index: 1,
+        stepCount: 1,
+        done: true,
+        ok: true,
+        steps: [
+          { stepId: "report", status: "done", result: { durationMs: 23_400, costUsd: 0.0031 } },
+        ],
+      },
+    ],
+  };
+
+  async function openFullReceipt(over: Parameters<typeof mountRuns>[0] = {}) {
+    const page = await mountRuns({ runs: [record()], detail: DETAIL, ...over });
+    await page.clickRow(0);
+    await page.clickButton("Full receipt");
+    return page;
+  }
+
+  it("draws the phase tree in the centre pane, with the rails still up", async () => {
+    const page = await openFullReceipt();
+    const main = page.main();
+    expect(main).toContain("Scan");
+    expect(main).toContain("Verify & report");
+    expect(main).toContain("scan-logic");
+    expect(main).toContain("report");
+    // Deep view, but still not a modal — both rails are where they were.
+    expect(page.rail().length).toBeGreaterThan(0);
+    expect(page.receipt()).toContain("8f21c");
+  });
+
+  it("shows the per-model cost roll-up", async () => {
+    const page = await openFullReceipt({
+      byModel: [{ model: "claude/sonnet", steps: 6, costUsd: 0.041, tokens: {} }],
+    });
+    expect(page.main()).toContain("claude/sonnet");
+    expect(page.main()).toContain("$0.0410");
+  });
+
+  it("carries the run actions, and the retry pair only when something failed", async () => {
+    const clean = await openFullReceipt();
+    expect(clean.main()).toContain("Re-run");
+    expect(clean.main()).not.toContain("Retry failed");
+
+    const failed = await openFullReceipt({
+      detail: {
+        ...DETAIL,
+        status: "error",
+        phases: [
+          {
+            ...DETAIL.phases[0],
+            steps: [{ stepId: "scan-logic", status: "error", result: {} }],
+          },
+        ],
+      },
+    });
+    expect(failed.main()).toContain("Retry failed");
+    expect(failed.main()).toContain("Retry with agent…");
+  });
+
+  it("lists the retained worktrees and their lifecycle actions", async () => {
+    const page = await openFullReceipt({
+      worktrees: [
+        {
+          stepId: "scan-logic",
+          exists: true,
+          branch: "st/scan-logic",
+          files: [{ status: "M", path: "a.ts" }],
+          additions: 12,
+          deletions: 3,
+        },
+      ],
+    });
+    const main = page.main();
+    expect(main).toContain("Worktree changes");
+    expect(main).toContain("scan-logic");
+    expect(main).toContain("+12");
+    expect(main).toContain("Apply to checkout");
+    expect(main).toContain("Prune worktrees");
+  });
+});
+
+describe("runs page: destructive actions", () => {
+  it("clears the list only when the server actually cleared it", async () => {
+    const ok = await mountRuns({ runs: [record()] });
+    await ok.clickButton("Clear history");
+    expect(ok.rows()).toHaveLength(0);
+    expect(ok.said.join(" ")).toContain("Cleared");
+  });
+
+  // Wiping the client list on a rejected DELETE would show an empty page that
+  // the next poll silently repopulates — the reader would think it worked.
+  it("keeps the list and relays the server's reason when it refuses", async () => {
+    const denied = await mountRuns({ runs: [record()], deleteStatus: 403 });
+    await denied.clickButton("Clear history");
+    expect(denied.rows()).toHaveLength(1);
+    // The server's own words, not a message the page could have invented.
+    expect(denied.said.join(" ")).toContain(SERVER_DELETE_ERROR);
+  });
+
+  // `(r.body && r.body.error) || "clear failed"` — a 5xx from a proxy has no
+  // JSON body at all, and silence would read as success.
+  it("falls back to its own wording when the refusal carries no reason", async () => {
+    const bare = await mountRuns({ runs: [record()], deleteStatus: 502, deleteBare: true });
+    await bare.clickButton("Clear history");
+    expect(bare.rows()).toHaveLength(1);
+    expect(bare.said.join(" ")).toContain("clear failed");
+  });
+
+  // A refused delete must not look like a successful one: the reader stays on
+  // the receipt they were reading, rather than being bounced to a list that
+  // still contains the run they think they just deleted.
+  it("leaves the reader on the receipt when its delete is refused", async () => {
+    const page = await mountRuns({
+      runs: [record()],
+      detail: { ...record(), phases: [] },
+      deleteStatus: 500,
+    });
+    await page.clickRow(0);
+    await page.clickButton("Full receipt");
+    await page.clickButton("Delete");
+    expect(page.main()).toContain("full receipt");
+    expect(page.receipt()).toContain("8f21c");
+    expect(page.said.join(" ")).toContain(SERVER_DELETE_ERROR);
+  });
+
+  it("falls back to its own wording when a refused delete carries no reason", async () => {
+    const page = await mountRuns({
+      runs: [record()],
+      detail: { ...record(), phases: [] },
+      deleteStatus: 500,
+      deleteBare: true,
+    });
+    await page.clickRow(0);
+    await page.clickButton("Full receipt");
+    await page.clickButton("Delete");
+    expect(page.said.join(" ")).toContain("delete failed");
+  });
+
+  it("drops the run and returns to the list when its delete succeeds", async () => {
+    const page = await mountRuns({ runs: [record()], detail: { ...record(), phases: [] } });
+    await page.clickRow(0);
+    await page.clickButton("Full receipt");
+    await page.clickButton("Delete");
+    expect(page.rows()).toHaveLength(0);
     expect(page.receipt()).toContain("No run selected");
   });
 });
