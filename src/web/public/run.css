@@ -553,8 +553,30 @@ textarea#input:focus {
 .bands > * {
   flex: none;
 }
+/* The expanded band is the console pane. `.bands` is a scrolling flex column,
+   so once the bands below it push that column past the viewport there is no
+   free space to grow into and this band — the only shrinkable child — is
+   squeezed to the floor below. It must therefore contain its own overflow and
+   scroll internally; without `overflow: hidden` the surplus rows and the
+   output pane painted straight over the following bands. */
 .band.expanded {
-  min-height: 30vh;
+  min-height: min(52vh, 420px);
+  overflow: hidden;
+}
+/* The step list absorbs the squeeze: it scrolls, and it never claims more than
+   part of the band, so the output pane below it always keeps usable height. */
+.band.expanded .band-steps {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 45%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.band.expanded .output {
+  min-height: 96px;
 }
 /* Run-level pending states (approvals, human input) above the first band. */
 .pending-block {

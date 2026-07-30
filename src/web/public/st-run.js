@@ -552,11 +552,18 @@
       ));
       // A queued phase collapses to its header line.
       if (cls === "band queued") { container.appendChild(band); return; }
+      // The expanded band is a fixed-height console pane: its rows live in
+      // their own scroll area so a long step list scrolls inside the band
+      // instead of overflowing it (which used to paint over the bands below
+      // and squeeze the output pane to an unusable sliver). Collapsed bands
+      // are sized by their rows, so they host them directly.
+      var stepHost = isExpanded ? h("div", { class: "band-steps" }) : band;
       steps.forEach(function (s) {
-        band.appendChild(renderStepRow(p, s));
+        stepHost.appendChild(renderStepRow(p, s));
         var sub = subWorkflowRow(p, s);
-        if (sub) band.appendChild(sub);
+        if (sub) stepHost.appendChild(sub);
       });
+      if (stepHost !== band) band.appendChild(stepHost);
       if (isExpanded) {
         var outStep = bandOutputStep(p);
         if (outStep) band.appendChild(renderOutputPane(p, outStep));
