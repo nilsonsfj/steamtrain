@@ -28,6 +28,11 @@
   // that can touch it — easy to audit for leaks.
   var throughputTimer = null;
 
+  // Stamps each log entry with a stable id so a rebuilt row can be matched back
+  // to the entry it came from. Module-local for the same reason as the timer:
+  // nothing outside this module reads it.
+  var eventSeq = 0;
+
   // ---- shared readouts over the live run -----------------------------------
 
   function flattenSteps() {
@@ -260,7 +265,12 @@
     if (!formatted) return;
     var atMs = typeof ev.ts === "number" ? ev.ts : Date.now();
     if (!S.eventLog) S.eventLog = [];
-    S.eventLog.unshift({ atMs: atMs, text: formatted.text, cached: Boolean(formatted.cached) });
+    // `seq` exists so a rebuilt row can be matched back to the entry it came
+    // from (see captureLogAnchor). Monotonic for the life of the page and never
+    // reset — only uniqueness within the log matters, and timestamps collide
+    // (several events routinely share a millisecond).
+    eventSeq += 1;
+    S.eventLog.unshift({ seq: eventSeq, atMs: atMs, text: formatted.text, cached: Boolean(formatted.cached) });
     if (S.eventLog.length > EVENT_LOG_CAP) S.eventLog.length = EVENT_LOG_CAP;
   }
 
@@ -270,7 +280,7 @@
     var rows = h("div", { class: "rows" });
     var startedAt = S.runState && S.runState.startedAt;
     (S.eventLog || []).forEach(function (entry) {
-      var row = h("div", null,
+      var row = h("div", { "data-seq": entry.seq },
         h("span", { class: "at", text: fmtRelClock(entry.atMs, startedAt) }),
         " " + entry.text
       );
@@ -283,17 +293,60 @@
 
   // ---- public surface ---------------------------------------------------------
 
+  /**
+   * Remember which entry the reader is looking at, so the rebuild below can put
+   * it back where it was.
+   *
+   * Anchoring on a *row* rather than on a height is the whole point. Entries are
+   * prepended, so the raw scrollTop is wrong (content grew above the reader);
+   * but compensating with the scrollHeight delta is wrong too once the log hits
+   * EVENT_LOG_CAP, because from then on every new entry also evicts one at the
+   * tail. The net delta then measures (added above − evicted below) while only
+   * the added-above part actually moved the reader's entry, and rows are
+   * variable height (they wrap), so the two never cancel. Measured before this
+   * anchor existed: the reader's entry slid ~60px per tick down a ~357px
+   * viewport — off screen inside 15 seconds.
+   *
+   * Evictions below the anchor cannot move it, so they drop out by construction.
+   * Returns null when the reader is parked at the head, which pins them there.
+   */
+  function captureLogAnchor(container) {
+    var log = container.querySelector(".eventlog");
+    if (!log || log.scrollTop <= 0) return null;
+    var logTop = log.getBoundingClientRect().top;
+    var rows = log.querySelectorAll(".rows > [data-seq]");
+    for (var i = 0; i < rows.length; i++) {
+      var rect = rows[i].getBoundingClientRect();
+      // First row still visible at the top edge — what the reader is reading.
+      if (rect.bottom > logTop + 1) {
+        return { seq: rows[i].getAttribute("data-seq"), offset: rect.top - logTop, prevTop: log.scrollTop };
+      }
+    }
+    return { seq: null, offset: 0, prevTop: log.scrollTop };
+  }
+
+  function restoreLogAnchor(log, anchor) {
+    if (!anchor) return;
+    var row = anchor.seq ? log.querySelector('.rows > [data-seq="' + anchor.seq + '"]') : null;
+    if (!row) {
+      // The anchored entry aged out of the capped log while the reader sat on
+      // it. Nothing to align to, so keep them as close to where they were as
+      // the (now shorter) content allows.
+      log.scrollTop = Math.min(anchor.prevTop, Math.max(0, log.scrollHeight - log.clientHeight));
+      return;
+    }
+    // scrollTop is 0 on a freshly built node, so this delta is the row's offset
+    // within the scroll content.
+    var top = row.getBoundingClientRect().top - log.getBoundingClientRect().top;
+    log.scrollTop = Math.max(0, top - anchor.offset);
+  }
+
   function render(container) {
     // The event log is the rail's only scrollable instrument, and this render
-    // runs every 2s for the life of the run — without this the reader is
-    // snapped back to the head two seconds after scrolling back to read an
-    // earlier entry. Entries are prepended (newest first), so restoring the
-    // raw scrollTop is not enough: the content the reader was looking at has
-    // moved down by however much was added above it. Compensate with the
-    // scrollHeight delta so the *entry* holds still, not the offset.
-    var prevLog = container.querySelector(".eventlog");
-    var prevTop = prevLog ? prevLog.scrollTop : 0;
-    var prevHeight = prevLog ? prevLog.scrollHeight : 0;
+    // runs every 2s for the life of the run — without restoring its position the
+    // reader is snapped back to the head two seconds after scrolling back to
+    // read an earlier entry.
+    var anchor = captureLogAnchor(container);
 
     ST.clear(container);
     var spec = (ST.run && ST.run.effectiveSpec ? ST.run.effectiveSpec() : null) || S.spec;
@@ -304,9 +357,7 @@
     container.appendChild(renderWorktrees());
     var log = renderEventLog();
     container.appendChild(log);
-    // A reader parked at the head (the default) stays pinned to the head and
-    // keeps seeing the newest events arrive.
-    if (prevTop > 0) log.scrollTop = Math.max(0, prevTop + (log.scrollHeight - prevHeight));
+    restoreLogAnchor(log, anchor);
   }
 
   /** Called from the SSE handler (st-core.js openStream) for every WorkflowEvent. */
