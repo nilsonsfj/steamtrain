@@ -713,14 +713,14 @@ textarea#input:focus {
   letter-spacing: -0.03em;
   line-height: 1.15;
 }
-.boot-empty .boarding-pulse {
+.boot-empty .boot-pulse {
   color: var(--muted);
   font-size: 13px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  animation: boarding-pulse 1.6s ease-in-out infinite;
+  animation: boot-pulse 1.6s ease-in-out infinite;
 }
-@keyframes boarding-pulse {
+@keyframes boot-pulse {
   0%,
   100% {
     opacity: 0.45;

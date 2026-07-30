@@ -776,7 +776,7 @@ select.sel.invalid {
    * .band-head .dot — all `st-pulse` in shell.css/run.css) and one-shot
    * transitions (phase-in, cardShimmer/runGlow/checkScale/cardShake/dotPop in
    * run.css; estepFlash/bulkFlashIn/reauth-fade-in in settings.css;
-   * conductor-in/conductor-live/line-fresh in arrival.css) across five
+   * narration-in/narration-live/line-fresh in arrival.css) across five
    * stylesheets. Naming each one here individually drifted out of date once
    * before (the list below predates the redesign and named retired
    * Station/Ride classes); collapsing every animation/transition to
@@ -804,8 +804,8 @@ select.sel.invalid {
   .arrival-destinations,
   .narration,
   .narration-line.fresh,
-  .boarding-pulse,
-  .narration-head .conductor-mark::before {
+  .boot-pulse,
+  .narration-head .narration-mark::before {
     animation: none !important;
   }
   .card.running {

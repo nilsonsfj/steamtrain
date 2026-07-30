@@ -60,7 +60,7 @@ interface WorkflowViewProps {
    * finished record, where a ticking elapsed would be meaningless.
    */
   now?: number;
-  /** Live conductor narration lines (newest last). */
+  /** Live narration lines (newest last). */
   narration?: NarrationLine[];
   /** Prefer the Arrival Report surface when the run is done. */
   showArrival?: boolean;

@@ -544,7 +544,7 @@ window.Steamtrain = (function () {
         available.push(name);
       }
     }
-    // Prefer a credential-free next ride when one exists; otherwise keep order.
+    // Prefer a credential-free next workflow when one exists; otherwise keep order.
     for (var j = 0; j < available.length; j++) {
       if (!workflowNeedsCredentials(available[j])) return available[j];
     }

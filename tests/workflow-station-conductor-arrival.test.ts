@@ -45,7 +45,7 @@ describe("first-run / Station landing", () => {
   });
 });
 
-describe("conductor narration", () => {
+describe("narration", () => {
   it("projects lifecycle events into past-tense one-liners", () => {
     const start = narrateEvent({
       kind: "workflow_start",
@@ -54,8 +54,8 @@ describe("conductor narration", () => {
       stepCount: 8,
       ts: 1,
     });
-    expect(start?.text).toContain("All aboard");
-    expect(start?.text).toContain("8 cars");
+    expect(start?.text).toContain("Started tour");
+    expect(start?.text).toContain("8 steps");
 
     const held = narrateEvent({
       kind: "gate_evaluated",
@@ -65,7 +65,7 @@ describe("conductor narration", () => {
       onFalse: "continue",
       ts: 2,
     });
-    expect(held?.text).toContain("another lap");
+    expect(held?.text).toContain("another iteration");
 
     const skip = narrateEvent({
       kind: "step_done",
@@ -81,7 +81,7 @@ describe("conductor narration", () => {
       cached: false,
       ts: 3,
     });
-    expect(skip?.text).toContain("uncoupled");
+    expect(skip?.text).toContain("was skipped");
 
     expect(
       narrateEvent({
@@ -429,6 +429,6 @@ describe("arrival report", () => {
       },
     });
     const lines = narrateFromState(state);
-    expect(lines[0]?.text).toContain("All aboard");
+    expect(lines[0]?.text).toContain("Started tour");
   });
 });

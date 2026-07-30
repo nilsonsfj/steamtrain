@@ -10,9 +10,9 @@
   border-radius: 12px;
   background: linear-gradient(135deg, rgba(52, 211, 196, 0.07), transparent 42%), var(--raised);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  animation: conductor-in 380ms ease-out;
+  animation: narration-in 380ms ease-out;
 }
-@keyframes conductor-in {
+@keyframes narration-in {
   from {
     opacity: 0;
     transform: translateY(-6px);
@@ -34,21 +34,21 @@
   letter-spacing: 0.12em;
   margin-bottom: 10px;
 }
-.narration-head .conductor-mark {
+.narration-head .narration-mark {
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
-.narration-head .conductor-mark::before {
+.narration-head .narration-mark::before {
   content: "";
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 0 3px rgba(52, 211, 196, 0.2);
-  animation: conductor-live 1.8s ease-in-out infinite;
+  animation: narration-live 1.8s ease-in-out infinite;
 }
-@keyframes conductor-live {
+@keyframes narration-live {
   0%,
   100% {
     box-shadow: 0 0 0 3px rgba(52, 211, 196, 0.15);
