@@ -14,6 +14,11 @@ export function parseDeepLink(hash: string): DeepLink | null {
   if (!match || !RUN_ID_PATTERN.test(match[1]!)) return null;
   const runId = match[1]!.toLowerCase();
   const rawStep = match[2];
+  // A malformed step id degrades to the run-only link rather than failing the
+  // whole parse: the run is still openable and that is the more useful outcome
+  // for a truncated or hand-edited URL. The trade-off is that a caller cannot
+  // tell "no step in the URL" from "step present but rejected" — nothing needs
+  // to today, and both cases want the same behaviour (open the run, no drawer).
   if (rawStep && !STEP_ID_PATTERN.test(rawStep)) return { runId };
   return { runId, stepId: rawStep || undefined };
 }

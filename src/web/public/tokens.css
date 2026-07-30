@@ -52,8 +52,6 @@
 }
 * {
   box-sizing: border-box;
-}
-* {
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }

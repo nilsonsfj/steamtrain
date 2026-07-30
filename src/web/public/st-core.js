@@ -39,6 +39,9 @@ window.Steamtrain = (function () {
   };
   function agentHealthMeta(status) { return AGENT_HEALTH_META[status] || AGENT_HEALTH_META.unknown_error; }
   function apiHealthMeta(status) { return API_HEALTH_META[status] || API_HEALTH_META.unknown_error; }
+  function readNarrationPref() {
+    try { return localStorage.getItem("steamtrain.narration") !== "off"; } catch (e) { return true; }
+  }
   var S = {
     workflows: [], selected: null, source: null, spec: null, agents: [], apis: [],
     modelClasses: [], modelFamilies: [],
@@ -87,7 +90,12 @@ window.Steamtrain = (function () {
     capability: "full",
     // Live narration (UI-only projection of WorkflowEvents).
     narration: [],
-    narrationOn: localStorage.getItem("steamtrain.narration") !== "off",
+    // Guarded like every other localStorage read in this file: an unguarded one
+    // *here* is uniquely fatal, because a throw inside this object literal takes
+    // down the whole IIFE and window.Steamtrain is never assigned — the app does
+    // not load at all. Storage can throw on access, not just on write (disabled
+    // by policy, or a partitioned/blocked third-party context).
+    narrationOn: readNarrationPref(),
     // Focus the Arrival primary CTA once per completed run.
     arrivalCtaFocused: false,
     // Narration line id that already played the one-shot "fresh" entrance.
@@ -108,6 +116,9 @@ window.Steamtrain = (function () {
     detailFocusPending: false,
     detailFocusGeneration: 0,
     planRequest: 0,
+    // Generation stamp for the workflow-spec fetch in selectWorkflow(), so a
+    // slow response for a workflow the user has already left cannot land.
+    selectRequest: 0,
     reauthVisible: false,
     sessionHeartbeatTimer: null,
     sessionTtlMs: null,
@@ -306,7 +317,10 @@ window.Steamtrain = (function () {
       for (var k in attrs) {
         if (k === "class") e.className = attrs[k];
         else if (k === "text") e.textContent = attrs[k];
-        else if (k.indexOf("on") === 0) e.addEventListener(k.slice(2).toLowerCase(), attrs[k]);
+        // Require a function, not just an "on" prefix — otherwise a plain
+        // attribute that happens to start with "on" (onlinestatus, and the like)
+        // would be swallowed as a listener and never reach the element.
+        else if (k.indexOf("on") === 0 && typeof attrs[k] === "function") e.addEventListener(k.slice(2).toLowerCase(), attrs[k]);
         else if (typeof attrs[k] === "boolean" && k in e) e[k] = attrs[k];
         else if (attrs[k] != null) e.setAttribute(k, attrs[k]);
       }
@@ -332,7 +346,19 @@ window.Steamtrain = (function () {
       method: method,
       headers: body ? { "content-type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined
-    }).then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j }; }); });
+    }).then(function (r) {
+      // Never let a non-JSON response reject: a 204, an empty 5xx, or an HTML
+      // error page from a reverse proxy would otherwise throw here, and most
+      // callers only branch on r.status — the rejection would surface as an
+      // unhandled promise and the caller would simply never run, leaving the
+      // UI stuck on whatever it was showing. Hand back a null body instead so
+      // every caller's own status handling still gets to run.
+      return r.text().then(function (raw) {
+        var parsed = null;
+        if (raw) { try { parsed = JSON.parse(raw); } catch (e) { parsed = null; } }
+        return { status: r.status, body: parsed === null ? {} : parsed };
+      });
+    });
   }
 
   /** Like api() but redirects to login on 401 (session expired). */
@@ -388,6 +414,13 @@ window.Steamtrain = (function () {
       if (r.status === 401) {
         if (S.runId || S.selected) showReauthOverlay();
         else showLoginForm();
+        return;
+      }
+      // Say "the server failed" rather than rendering an empty rail, which
+      // reads as "this project has no workflows" — a data problem the reader
+      // would go looking for in their config instead of in the server log.
+      if (r.status !== 200) {
+        ST.run.setBanner((r.body && r.body.error) || ("could not load workflows (HTTP " + r.status + ")"), "err");
         return;
       }
       S.workflows = r.body.workflows || [];
@@ -885,7 +918,12 @@ window.Steamtrain = (function () {
     // the formula yields 60000ms still capped. Below ~2 hours (e.g. 10-minute TTL =
     // 600000ms) it produces 5000ms, ensuring we detect expiry well before it hits.
     // The divisor of 120 means we check ~60 times per TTL window.
-    var interval = S.sessionTtlMs ? Math.min(60000, Math.floor(S.sessionTtlMs / 120)) : 60000;
+    // Floor as well as cap: a nonsensical TTL (negative, or small enough to
+    // divide down to ~0) would otherwise make setInterval fire continuously and
+    // turn the heartbeat into a tight poll against /api/session.
+    var interval = S.sessionTtlMs
+      ? Math.max(5000, Math.min(60000, Math.floor(S.sessionTtlMs / 120)))
+      : 60000;
     S.sessionHeartbeatTimer = setInterval(function () {
       api("GET", "/api/session").then(function (r) {
         if (r.status === 401) showReauthOverlay();
@@ -1051,7 +1089,14 @@ window.Steamtrain = (function () {
     ST.shell.renderSidebar();
     // setRunning(false) above already hid the run header's metrics strip.
     ST.run.setBanner("", "");
+    // Stamp this selection so a slow spec response for a workflow the user has
+    // already navigated away from cannot land. Without it, clicking A then B
+    // quickly lets A's response overwrite S.spec and the run header while
+    // S.selected already says B — the pipeline on screen belongs to neither.
+    S.selectRequest = (S.selectRequest || 0) + 1;
+    var selectGeneration = S.selectRequest;
     apiAuth("GET", "/api/workflows/" + encodeURIComponent(name)).then(function (r) {
+      if (selectGeneration !== S.selectRequest) return;
       if (r.status !== 200) { ST.run.setBanner(r.body.error || "failed to load", "err"); return; }
       S.spec = r.body.spec;
       S.source = r.body.source;

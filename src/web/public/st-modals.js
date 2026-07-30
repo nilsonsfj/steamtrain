@@ -307,6 +307,21 @@
     for (var i = 0; i < enabled.length; i++) if (enabled[i].healthy) return enabled[i];
     return enabled[0] || null;
   }
+
+  /**
+   * Only ever renders `https:` links, and never without `rel="noopener
+   * noreferrer"`. `h()` sets href through setAttribute, which happily accepts a
+   * `javascript:` URL — so a URL that reached us from anywhere but our own code
+   * gets checked here rather than at each call site. Falls back to plain text so
+   * the value is still readable when it is not a link we will click.
+   */
+  function safeExternalLink(url, label) {
+    var text = label || url;
+    var ok = false;
+    try { ok = new URL(url, window.location.href).protocol === "https:"; } catch (e) { ok = false; }
+    if (!ok) return h("span", { text: text });
+    return h("a", { href: url, target: "_blank", rel: "noopener noreferrer", text: text });
+  }
   function mbanner(node, text, kind) {
     if (!text) { node.className = "mbanner"; node.textContent = ""; return; }
     node.className = "mbanner show " + (kind === "err" ? "err" : "info");
@@ -318,6 +333,13 @@
     if (isReadOnly()) { ST.run.setBanner("This session is read-only — viewing only.", "info"); return; }
     if (!S.agents.length) { ST.run.setBanner("agent catalog still loading; try again in a moment", "info"); return; }
     var a0 = preferredAgent();
+    // A non-empty catalog can still yield no usable agent: preferredAgent()
+    // filters to enabled ones, so every agent being disabled lands here. Say so
+    // instead of dereferencing null and taking the modal down with a TypeError.
+    if (!a0) {
+      ST.run.setBanner("every agent is disabled — enable one in Settings to draft a workflow", "err");
+      return;
+    }
     var agentSel = selectEl(agentOptions(), a0.id, function () { onCreateAgent(); });
     var modelSel = selectEl(modelOptions(a0.id), a0.defaultModel);
     var effortWrap = h("div", { class: "field", id: "cEffortField" });
@@ -849,6 +871,12 @@
           } else {
             mbanner(banner, (r.body && r.body.error) || "save failed", "err");
           }
+        }).catch(function () {
+          // Without this the request rejecting (offline, server restarted
+          // mid-save) leaves the button disabled reading "Saving…" forever, and
+          // the only way out is to close the modal and lose the edits.
+          saveBtn.disabled = false; saveBtn.textContent = creating ? "Save copy" : "Save";
+          mbanner(banner, "save failed — could not reach the server", "err");
         });
       }
       doSave(false);
@@ -1658,13 +1686,25 @@
     HistDiff.inflight.add(key);
     apiAuth("GET", "/api/history/" + encodeURIComponent(record.id) + "/worktrees?step=" + encodeURIComponent(stepId)).then(function (r) {
       HistDiff.inflight.delete(key);
-      if (r.status === 200 && r.body) {
-        var runCache = HistDiff.cache.get(record.id);
-        if (!runCache) { runCache = new Map(); HistDiff.cache.set(record.id, runCache); }
-        runCache.set(stepId, r.body);
-      }
+      var runCache = HistDiff.cache.get(record.id);
+      if (!runCache) { runCache = new Map(); HistDiff.cache.set(record.id, runCache); }
+      // Cache the failure too, not just the success. The re-render below asks
+      // renderWorktreeDiffRow to draw this step again; that row fetches whenever
+      // the step is expanded and uncached, so leaving a non-200 uncached means
+      // re-render → fetch → non-200 → re-render, hammering the server for as
+      // long as the row stays open. An error entry ends that loop and gives the
+      // reader something better than a permanent "Loading diff…".
+      runCache.set(stepId, r.status === 200 && r.body
+        ? r.body
+        : { error: (r.body && r.body.error) || ("diff unavailable (HTTP " + r.status + ")") });
       renderWorktreeSection(holder, record);
-    }).catch(function () { HistDiff.inflight.delete(key); });
+    }).catch(function () {
+      HistDiff.inflight.delete(key);
+      var runCache = HistDiff.cache.get(record.id);
+      if (!runCache) { runCache = new Map(); HistDiff.cache.set(record.id, runCache); }
+      runCache.set(stepId, { error: "diff request failed" });
+      renderWorktreeSection(holder, record);
+    });
   }
 
   /**
@@ -1676,6 +1716,13 @@
    */
   function renderWorktreeDiffPanel(record, s, body) {
     var panel = h("div", { class: "hist-wt-diff" });
+    // The cached failure sentinel from fetchWorktreeDiff. Say the fetch failed
+    // rather than falling through to "no textual changes", which would report a
+    // clean worktree we never actually managed to read.
+    if (body.error) {
+      panel.appendChild(h("div", { class: "hist-wt-diff-empty", text: body.error }));
+      return panel;
+    }
     if (body.exists === false) {
       panel.appendChild(h("div", { class: "hist-wt-diff-empty", text: "worktree no longer exists — diff unavailable" }));
       return panel;
@@ -1725,7 +1772,7 @@
       if (bits.length) status.textContent = bits.join(" · ");
       if (harvest && harvest.prUrl) {
         status.appendChild(h("span", { text: (bits.length ? " · " : "") + "PR: " }));
-        status.appendChild(h("a", { href: harvest.prUrl, target: "_blank", text: harvest.prUrl }));
+        status.appendChild(safeExternalLink(harvest.prUrl));
       }
       if (status.textContent || status.childNodes.length) holder.appendChild(status);
 
