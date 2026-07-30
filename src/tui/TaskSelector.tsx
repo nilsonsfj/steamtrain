@@ -1,5 +1,5 @@
 import { Box, Text } from "ink";
-import { formatModelDisplay } from "../agents";
+import { agentUiLabel, formatModelDisplay } from "../agents";
 import { truncate } from "../agents/util";
 import type { WorkflowSourceKind } from "../workflow";
 import type { WorkspaceEntry } from "../workspace";
@@ -56,7 +56,7 @@ export function TaskSelector({
           <>
             <Text color="gray">→ </Text>
             <Text color={AGENT_COLOR[current.agent] ?? "white"} bold>
-              {current.agent}
+              {agentUiLabel(current.agent)}
             </Text>
             <Text color="gray"> · {truncate(formatModelDisplay(current), 40)}</Text>
           </>

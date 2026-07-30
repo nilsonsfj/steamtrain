@@ -2,6 +2,7 @@ import { basename } from "node:path";
 import { Box, Text } from "ink";
 import { useMemo } from "react";
 import stringWidth from "string-width";
+import { agentUiLabel } from "../agents/config";
 import { truncate } from "../agents/util";
 import {
   type ModelUsage,
@@ -738,7 +739,7 @@ function StepRow({
   // timing and activity.
   const runner =
     step.agent && step.model
-      ? `${step.agent}/${step.model}${step.effort ? ` · ${step.effort}` : ""}`
+      ? `${agentUiLabel(step.agent)}/${step.model}${step.effort ? ` · ${step.effort}` : ""}`
       : step.blockKind === "llm" && (step.api || step.model)
         ? [step.api, step.model].filter(Boolean).join("/")
         : "";

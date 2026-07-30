@@ -1,7 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join as joinPath, resolve as resolvePath } from "node:path";
-import { effortForModelChange, materializeStepBinding, resolveAgentInstance } from "../agents";
+import {
+  agentUiLabel,
+  effortForModelChange,
+  materializeStepBinding,
+  resolveAgentInstance,
+} from "../agents";
 import type { AgentAdapter } from "../agents";
 import {
   type AgentFailureKind,
@@ -2417,7 +2422,7 @@ async function executeAgentStep(
           effort: toEffort,
         };
         const kindLabel = describeFailureKind(attemptOutcome.failureKind);
-        reason = `${kindLabel}: ${reason} · failing over to ${next.agent}/${next.model}`;
+        reason = `${kindLabel}: ${reason} · failing over to ${agentUiLabel(next.agent)}/${next.model}`;
         failoverMeta = {
           fromAgent,
           fromModel,

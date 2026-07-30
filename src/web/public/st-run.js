@@ -366,7 +366,7 @@
 
   /** Column 4: who actually runs the step. */
   function runnerLabel(s) {
-    var id = s.agent || s.api;
+    var id = s.agent ? ST.agentUiLabel(s.agent) : s.api;
     if (id) return id + (s.model ? " · " + s.model : "");
     if (s.modelClass) return "auto · class:" + s.modelClass;
     if (s.model) return "auto · " + s.model;
@@ -613,7 +613,7 @@
       }));
     }
     card.appendChild(top);
-    var runnerId = s.agent || s.api;
+    var runnerId = s.agent ? ST.agentUiLabel(s.agent) : s.api;
     if (runnerId) card.appendChild(h("div", { class: "agent", text: runnerId + (s.model ? " \u00b7 " + s.model : "") }));
     else if (s.modelClass) card.appendChild(h("div", { class: "agent", text: "auto \u00b7 class:" + s.modelClass + (s.model ? " \u00b7 " + s.model : "") }));
     else if (s.model) card.appendChild(h("div", { class: "agent", text: "auto \u00b7 " + s.model }));
@@ -737,7 +737,7 @@
       modelSel.addEventListener("change", renderMidEffort);
       renderMidEffort();
       modelRow = h("div", { class: "row2" },
-        ST.modals.field("Model", modelSel, "Applies when this step runs (agent stays " + agent + ")."),
+        ST.modals.field("Model", modelSel, "Applies when this step runs (agent stays " + ST.agentUiLabel(agent) + ")."),
         effortField
       );
       // Clamp a not-yet-started step's sandbox while the run is paused — the
@@ -910,7 +910,7 @@
       meta.appendChild(h("div", { class: "drawer-row" }, h("span", { class: "drawer-label", text: label }), valEl));
     }
     row("phase", p.title + (p.iteration && p.iteration > 1 ? " · iteration " + p.iteration : ""));
-    var runnerId = s.agent || s.api;
+    var runnerId = s.agent ? ST.agentUiLabel(s.agent) : s.api;
     if (runnerId) row("runner", runnerId + (s.model ? " · " + s.model : "") + (s.effort ? " · " + s.effort : ""));
     else if (s.modelClass) row("runner", "auto · class:" + s.modelClass + (s.model ? " · " + s.model : ""));
     else if (s.model) row("runner", "auto · " + s.model);
@@ -1354,7 +1354,7 @@
         var rr = r.body.reroute;
         if (rr) {
           setBanner("Re-routed " + rr.steps + " step" + (rr.steps === 1 ? "" : "s") + " (" +
-            rr.blockedAgents.join(", ") + ") to " + rr.agent + " · " + (rr.modelName || rr.model) +
+            rr.blockedAgents.map(ST.agentUiLabel).join(", ") + ") to " + ST.agentUiLabel(rr.agent) + " · " + (rr.modelName || rr.model) +
             " for this ride.", "info");
         }
         S.runId = r.body.runId;
@@ -1756,7 +1756,7 @@
             plan.deterministicCount + " deterministic"
     }));
     if (plan.agents.length > 0) {
-      summary.appendChild(h("div", { class: "plan-agents", text: "agents: " + plan.agents.join(", ") }));
+      summary.appendChild(h("div", { class: "plan-agents", text: "agents: " + plan.agents.map(ST.agentUiLabel).join(", ") }));
     }
     if (plan.apis && plan.apis.length > 0) {
       summary.appendChild(h("div", { class: "plan-agents", text: "apis: " + plan.apis.join(", ") }));
@@ -1831,7 +1831,7 @@
           h("span", { class: "sid", text: s.stepId }),
           kindEl
         ));
-        if (s.agent) card.appendChild(h("div", { class: "agent", text: s.agent + (s.model ? " \u00b7 " + s.model : "") }));
+        if (s.agent) card.appendChild(h("div", { class: "agent", text: ST.agentUiLabel(s.agent) + (s.model ? " \u00b7 " + s.model : "") }));
         else if (s.modelClass) card.appendChild(h("div", { class: "agent", text: "auto \u00b7 class:" + s.modelClass + (s.model ? " \u00b7 " + s.model : "") }));
         else if (s.llmApi || s.model) card.appendChild(h("div", { class: "agent", text: s.llmApi ? s.llmApi + (s.model ? "/" + s.model : "") : "auto \u00b7 " + s.model }));
         if (s.dependsOn && s.dependsOn.length) card.appendChild(h("div", { class: "inputs", text: "depends: " + s.dependsOn.join(", ") }));

@@ -1,3 +1,4 @@
+import { agentUiLabel } from "../agents";
 import { formatElapsed, formatTokens, formatUsd, totalTokens } from "./cost";
 import type { HistoryStep, RunRecord, RunRecordStatus } from "./history";
 
@@ -379,8 +380,8 @@ function renderMarkdownReport(model: RunReportModel): string {
 }
 
 function stepRunnerLabel(step: ReportStep): string | undefined {
-  if (step.agent && step.model) return `${step.agent}/${step.model}`;
-  if (step.agent) return step.agent;
+  if (step.agent && step.model) return `${agentUiLabel(step.agent)}/${step.model}`;
+  if (step.agent) return agentUiLabel(step.agent);
   if (step.api && step.model) return `${step.api}/${step.model}`;
   if (step.api) return step.api;
   return step.model;

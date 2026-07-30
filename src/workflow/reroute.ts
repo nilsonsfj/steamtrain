@@ -1,4 +1,5 @@
 import {
+  agentUiLabel,
   defaultModelForAgent,
   effortForModelChange,
   modelNameForAgent,
@@ -116,7 +117,7 @@ export function planAgentReroute(
     if (!pick) {
       return {
         ok: false,
-        error: `no ready agent to re-route to (blocked: ${blockedAgents.join(", ")})`,
+        error: `no ready agent to re-route to (blocked: ${blockedAgents.map(agentUiLabel).join(", ")})`,
       };
     }
     target = pick;
@@ -190,5 +191,6 @@ export function planAgentReroute(
 export function formatReroutePlan(plan: ReroutePlan): string {
   const steps = plan.stepIds.length === 1 ? "1 step" : `${plan.stepIds.length} steps`;
   const keep = plan.preservedFamily ? " (keeping model families where possible)" : "";
-  return `re-route ${steps} (${plan.blockedAgents.join(", ")}) to ${plan.target} · ${plan.targetModelName}${keep}`;
+  const blocked = plan.blockedAgents.map(agentUiLabel).join(", ");
+  return `re-route ${steps} (${blocked}) to ${agentUiLabel(plan.target)} · ${plan.targetModelName}${keep}`;
 }

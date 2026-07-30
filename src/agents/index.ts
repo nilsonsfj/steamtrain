@@ -66,6 +66,8 @@ export {
 } from "./antigravity";
 export {
   DEFAULT_AGENT_BINARY,
+  DEFAULT_AGENT_LABEL,
+  agentUiLabel,
   defaultAgentInstance,
   resolveAgentInstance,
   resolveAgentInstances,

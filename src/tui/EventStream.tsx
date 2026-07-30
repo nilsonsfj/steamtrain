@@ -1,5 +1,5 @@
 import { Box, Text } from "ink";
-import { formatModelDisplay } from "../agents";
+import { agentUiLabel, formatModelDisplay } from "../agents";
 import type { WorkspaceEntry } from "../workspace";
 import { workspaceLabel } from "../workspace";
 import { EventRow } from "./EventRow";
@@ -78,7 +78,7 @@ function StreamContextLabel({
       </Text>
       <Text color="gray"> · </Text>
       <Text bold color="white">
-        {entry.agent}
+        {agentUiLabel(entry.agent)}
       </Text>
       <Text color="gray"> · {modelPart}</Text>
     </>

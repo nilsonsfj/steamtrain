@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { agentUiLabel } from "../agents";
 import { assertSafeOutboundUrl } from "../util/safe-url";
 import { STEAMTRAIN_VERSION } from "../version";
 import type { WorkflowSourceKind } from "./catalog";
@@ -611,7 +612,7 @@ export function formatShareReview(
   );
 
   if (review.agents.length > 0) {
-    lines.push(`  agents: ${review.agents.join(", ")}`);
+    lines.push(`  agents: ${review.agents.map((id) => agentUiLabel(id)).join(", ")}`);
   }
   if (review.models.length > 0) {
     lines.push(`  models: ${review.models.join(", ")}`);

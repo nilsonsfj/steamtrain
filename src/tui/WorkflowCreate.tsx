@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import { useEffect, useState } from "react";
+import { agentUiLabel } from "../agents";
 import { truncate } from "../agents/util";
 import type { AgentInstanceId } from "../types/events";
 import type { WorkflowSpec } from "../workflow";
@@ -55,7 +56,7 @@ export function WorkflowCreate({
         </Text>
         <Text color={agentColor}>
           {truncate(
-            `${state.agent} · ${state.model}${state.effort ? ` · effort ${state.effort}` : ""}`,
+            `${agentUiLabel(state.agent)} · ${state.model}${state.effort ? ` · effort ${state.effort}` : ""}`,
             innerWidth - 15,
           )}
         </Text>

@@ -74,6 +74,14 @@ describe("agent configuration", () => {
     ]);
   });
 
+  it("labels the antigravity built-in as agy for compact UI", () => {
+    expect(resolveAgentInstances().find((agent) => agent.id === "antigravity")).toMatchObject({
+      provider: "antigravity",
+      label: "agy",
+      binary: "agy",
+    });
+  });
+
   it("hides disabled agents outside all-agent config views", () => {
     expect(resolveAgentInstances(customConfig).map((agent) => agent.id)).not.toContain("claude");
     expect(

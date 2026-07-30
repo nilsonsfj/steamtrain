@@ -25,6 +25,35 @@ export const DEFAULT_AGENT_BINARY: Record<AgentProviderId, string> = {
   antigravity: "agy",
 };
 
+/**
+ * Compact UI label for each built-in provider. Differs from the provider id
+ * only when the id is too long for dense surfaces (status chips, step rows);
+ * the full provider id still appears on settings/agent-manager screens.
+ */
+export const DEFAULT_AGENT_LABEL: Record<AgentProviderId, string> = {
+  claude: "claude",
+  opencode: "opencode",
+  codex: "codex",
+  amp: "amp",
+  kiro: "kiro",
+  mimo: "mimo",
+  kimi: "kimi",
+  cursor: "cursor",
+  antigravity: "agy",
+};
+
+/**
+ * Short name for UI when we only have an instance/provider id (no config).
+ * Custom instance ids pass through; built-in `antigravity` becomes `agy`.
+ */
+export function agentUiLabel(id: string | undefined | null): string {
+  if (!id) return "";
+  if ((AGENT_PROVIDER_IDS as readonly string[]).includes(id)) {
+    return DEFAULT_AGENT_LABEL[id as AgentProviderId];
+  }
+  return id;
+}
+
 export interface ResolvedAgentInstance {
   id: AgentInstanceId;
   provider: AgentProviderId;
@@ -48,7 +77,7 @@ export function defaultAgentInstance(
   return {
     id: provider,
     provider,
-    label: provider,
+    label: DEFAULT_AGENT_LABEL[provider],
     enabled: true,
     binary: config?.binaries?.[provider] ?? DEFAULT_AGENT_BINARY[provider],
     configured: false,

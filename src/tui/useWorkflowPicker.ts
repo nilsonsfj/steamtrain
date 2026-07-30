@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { agentUiLabel } from "../agents";
 import type { PermissionsSpec } from "../agents/permissions";
 import type { DoctorResult } from "../doctor";
 import type { Orchestrator } from "../orchestrator";
@@ -662,7 +663,7 @@ export function useWorkflowPicker({
         notices: [
           {
             level: "info" as const,
-            text: `drafting workflow with ${target.agent} (${target.model})${target.effort ? ` · effort ${target.effort}` : ""}…`,
+            text: `drafting workflow with ${agentUiLabel(target.agent)} (${target.model})${target.effort ? ` · effort ${target.effort}` : ""}…`,
           },
         ],
       };
