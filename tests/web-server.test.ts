@@ -268,7 +268,7 @@ describe("web server", () => {
     // Spot-check content markers on the hand-authored per-surface assets, so a
     // broken build (e.g. an empty file) still fails loudly even though the loop
     // below is manifest-driven and wouldn't otherwise know what "correct" looks
-    // like. `st-instruments.js` / `instruments.css` are deliberate placeholders.
+    // like.
     const coreText = await (await fetch(`${base}/static/st-core.js`)).text();
     expect(coreText).toContain("window.Steamtrain");
     expect(coreText).toContain("SteamtrainReducer");
@@ -284,6 +284,17 @@ describe("web server", () => {
 
     const tokensText = await (await fetch(`${base}/static/tokens.css`)).text();
     expect(tokensText).toContain("--accent");
+
+    const instrumentsText = await (await fetch(`${base}/static/st-instruments.js`)).text();
+    expect(instrumentsText).toContain("Runners in flight");
+    expect(instrumentsText).toContain('s.status !== "running"');
+    // Idle catalog rows used to enumerate every configured agent; keep them out.
+    expect(instrumentsText).not.toContain('text: "idle"');
+    expect(instrumentsText).not.toContain("Enumerate every configured agent");
+
+    const instrumentsCss = await (await fetch(`${base}/static/instruments.css`)).text();
+    expect(instrumentsCss).toContain(".runner .right");
+    expect(instrumentsCss).toMatch(/\.runner \.right\s*\{[^}]*white-space:\s*nowrap/s);
 
     const arrivalCss = await (await fetch(`${base}/static/arrival.css`)).text();
     expect(arrivalCss).toContain(".narration-head");
