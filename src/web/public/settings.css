@@ -63,6 +63,62 @@
   font-size: 11px;
   color: var(--accent-bright);
 }
+/* Amber pip on a nav item whose section has something fixable in it. */
+.settings-nav .item .flag {
+  margin-left: auto;
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--gate);
+}
+.settings-nav .item .flag + .count {
+  margin-left: 8px;
+}
+.settings-navfoot {
+  margin-top: 14px;
+  padding: 10px 8px 0;
+  border-top: 1px solid var(--border);
+}
+.settings-navfoot .path {
+  font: 400 11px / 1.5 var(--font-mono);
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+
+/* One-line state of the whole runner set, above the table. */
+.runner-tally {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 0 8px;
+  font: 400 11.5px / 1 var(--font-mono);
+  color: var(--dim);
+}
+.runner-tally .stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.runner-tally .stat.warn {
+  color: var(--gate);
+}
+.runner-tally .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.runner-tally .dot.ok {
+  background: var(--done);
+}
+.runner-tally .dot.warn {
+  background: var(--gate);
+}
+.runner-tally .when {
+  margin-left: auto;
+}
 
 .settings-pane {
   flex: 1;

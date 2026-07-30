@@ -91,6 +91,15 @@ Updated 2026-07-15: the web run input gained ↑/↓ prompt-history recall
 feature gap in §4. The TUI gained `/help` (keys + command list overlay) and an
 unknown-slash-command guard; both are TUI-only by design (the web UI is
 button-driven and has no command line).
+Updated 2026-07-30 (web run browser): the web's run history moved out of its
+full-screen modal and became a page at `#runs` (`src/web/public/st-runs.js`),
+matching the shell the cockpit and Settings already use — a 236px status +
+workflow filter rail, the run table, and a 340px receipt rail that a row click
+selects into. The old modal's deep view survives as that page's **Full
+receipt** (same hero, per-model costs, worktree lifecycle, and phase tree, now
+in the centre pane rather than over it), and the page adds run comparison and
+JSON export, which the TUI does not have. `#run-<uuid>` links still work: a
+live run attaches in the cockpit as before, a recorded one now opens here.
 
 ---
 
@@ -164,7 +173,8 @@ imports it through `src/tui/workflow-state.ts`; the web bundles it as
 | Manage agent instances | ✅ | ✅ | TUI `/agent` + `/agents` manager (Ctrl+A); web Settings → Runners (agents/APIs default to global/`user` scope, per-row project override) |
 | Manage API instances (llm steps) | ✅ | ✅ | Shared `src/apis` core; TUI `/api` + `/apis` manager; web Settings → Runners APIs section (same scope model as agents) |
 | Enable / disable a runner | ✅ | ✅ | Same `enabled: false` config flag in both; TUI Enter/Space in the `/agents` + `/apis` managers, web per-row **on/off** in Settings → Runners (disabled rows sort last and are skipped by the doctor) |
-| Run history (inspect past runs) | ✅ | ✅ | Shared `RunRecordBuilder` + `WorkflowHistoryStore` (`.steamtrain/history`); TUI `/history`, web ⏱ History, CLI `workflow history` |
+| Run history (inspect past runs) | ✅ | ✅ | Shared `RunRecordBuilder` + `WorkflowHistoryStore` (`.steamtrain/history`); TUI `/history`, web **Runs** page (`#runs`: status/workflow filter rail, run table, receipt rail, full receipt), CLI `workflow history` |
+| Compare runs side by side | ❌ | ✅ | Web only: check two or more rows on the Runs page → **Compare** (totals, wall clock, cost, steps, tokens per run); **Export** downloads the checked summaries as JSON |
 | Post-run worktree harvest (apply/prune from history) | ✅ | ✅ | Shared `src/workflow/gc.ts` (`harvestRunWorktrees`/`pruneRunWorktrees`); TUI `a`/`x` in history detail, web "Worktree changes" section (diffstat + Apply/Branch/Prune + conflict-retry), CLI `workflow history apply/prune` + `workflow worktrees` GC |
 | Graphical full-patch diff panels (review a run's changes inline) | ✅ | ✅ | Shared `src/workflow/unified-diff.ts` parser; TUI full-screen scrollable run diff (`v` from history detail, dual gutters + status badges), web expandable per-step diff panels + collapsible approval diffs (`src/web/diff-view.ts` bundle); CLI `workflow history show <id> --diff [--step <id>]` for the uncapped patch |
 | Re-run / retry-failed a past run | ✅ | ✅ | Shared `planRerun`/`seedCacheFromRecord` (`src/workflow/rerun.ts`); TUI `r`/`f` in history detail, web Re-run/Retry buttons, CLI `workflow run --from <id> [--retry-failed]` |

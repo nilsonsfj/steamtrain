@@ -158,11 +158,18 @@
         onClick: function () { open(sec); }
       }, meta.title);
       if (sec === "runners") {
-        var agentCount = (S.doctor || []).length;
-        var apiCount = (S.apiDoctor || []).length;
-        if (agentCount || apiCount) {
-          item.appendChild(h("span", { class: "count", text: agentCount + " · " + apiCount }));
+        // A section that needs attention says so from the nav, so the reason to
+        // open it is visible before you do. Amber is the same "fixable" signal
+        // the topbar health chip and the runner rows use.
+        var tally = runnerTally();
+        if (tally.auth) {
+          item.appendChild(h("span", {
+            class: "flag", "aria-hidden": "true",
+            title: tally.auth + " runner" + (tally.auth === 1 ? "" : "s") + " need sign-in or a valid key"
+          }));
         }
+        var probed = (S.doctor || []).length + (S.apiDoctor || []).length;
+        if (probed) item.appendChild(h("span", { class: "count", text: String(probed) }));
       }
       nav.appendChild(item);
     });
@@ -173,7 +180,21 @@
           h("code", null, "project"), " scope writes it into ", h("code", null, "./steamtrain.json"), ".")
       : h("span", { text: "Running with a custom --config file — there is no separate global scope; every edit writes to the loaded config file." })
     ));
+    nav.appendChild(buildNavFoot());
     return nav;
+  }
+
+  /**
+   * Rail footer: which file the edits on this page land in. The design also
+   * shows a version here; nothing the web API serves carries one, so it is
+   * left out rather than invented.
+   */
+  function buildNavFoot() {
+    var cfg = S.projectConfig || {};
+    var path = cfg.userConfigPath || cfg.configPath;
+    var foot = h("div", { class: "settings-navfoot" });
+    foot.appendChild(h("div", { class: "path", text: path ? "config: " + path : "config: unknown" }));
+    return foot;
   }
 
   function buildPane() {
@@ -190,11 +211,7 @@
   }
 
   function closeSettings() {
-    var target = S.preSettingsHash || "#";
-    S.inSettings = false;
-    ST.showCockpitRoute();
-    if (window.location.hash !== target) window.location.hash = target;
-    else if (window.location.hash) history.replaceState(null, "", window.location.pathname + window.location.search);
+    ST.closePageRoute();
   }
 
   // ---- Runners section --------------------------------------------------------
@@ -226,9 +243,51 @@
     runnersBanner = h("div", { class: "mbanner" });
     if (runnersNotice) { ST.modals.mbanner(runnersBanner, runnersNotice.text, runnersNotice.kind); runnersNotice = null; }
     wrap.appendChild(runnersBanner);
+    wrap.appendChild(buildTallyStrip());
     wrap.appendChild(buildRunnerTable());
     wrap.appendChild(buildRunnersFoot());
     return wrap;
+  }
+
+  /**
+   * How many runners are in each state, over the same rows the table draws so
+   * the two can never disagree. `auth` is the fixable bucket (signed out, bad
+   * key); `absent` is the resting state of a tool this machine doesn't have.
+   */
+  function runnerTally() {
+    var tally = { ready: 0, auth: 0, absent: 0, off: 0 };
+    [["agent", agentRowsData()], ["api", apiRowsData()]].forEach(function (pair) {
+      pair[1].forEach(function (row) {
+        var rank = rowRank(pair[0], row);
+        if (rank === 0) tally.ready++;
+        else if (rank === 1) tally.auth++;
+        else if (rank === 3) tally.off++;
+        else tally.absent++;
+      });
+    });
+    return tally;
+  }
+
+  /** The one-line state of the whole runner set, above the table. */
+  function buildTallyStrip() {
+    var tally = runnerTally();
+    var strip = h("div", { class: "runner-tally" });
+    function stat(count, label, cls) {
+      if (!count) return;
+      strip.appendChild(h("span", { class: "stat" + (cls ? " " + cls : "") },
+        h("span", { class: "dot" + (cls ? " " + cls : "") }), count + " " + label));
+    }
+    stat(tally.ready, "ready", "ok");
+    stat(tally.auth, "needs auth", "warn");
+    stat(tally.absent, "absent");
+    stat(tally.off, "disabled");
+    if (!tally.ready && !tally.auth && !tally.absent && !tally.off) {
+      strip.appendChild(h("span", { class: "stat", text: "No runners probed yet." }));
+    }
+    if (S.doctorReadAt) {
+      strip.appendChild(h("span", { class: "when", text: "read " + ST.relTime(S.doctorReadAt) }));
+    }
+    return strip;
   }
 
   function buildCols() {
@@ -656,6 +715,7 @@
       if (r.status === 200) {
         S.doctor = r.body.doctor || [];
         S.apiDoctor = r.body.apis || [];
+        S.doctorReadAt = Date.now();
         ST.shell.renderHealth(S.doctor, S.apiDoctor, r.body.doctorError || null);
         ST.applyHealth();
         refreshWorkflowList();

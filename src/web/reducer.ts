@@ -30,6 +30,7 @@ export {
   approvalDeepLink,
   parseDeepLink,
   parseRoute,
+  runsDeepLink,
   settingsDeepLink,
   SETTINGS_SECTIONS,
 } from "./run-deep-link";
