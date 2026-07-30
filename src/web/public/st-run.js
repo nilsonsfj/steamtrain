@@ -256,7 +256,7 @@
     if (S.runState.done) return;
     var box = h("div", { class: "narration" });
     box.appendChild(h("div", { class: "narration-head" },
-      h("span", { class: "conductor-mark", text: "Conductor" }),
+      h("span", { class: "narration-mark", text: "Narration" }),
       h("button", {
         class: "btn small",
         text: "Hide",
@@ -1344,7 +1344,7 @@
     var params = collectParams();
     if (params) payload.params = params;
     if (workflowHasStaged(S.stagedOverrides[S.selected])) payload.overrides = S.stagedOverrides[S.selected];
-    // Blocked-but-re-routable workflow: run with what's ready, this ride only.
+    // Blocked-but-re-routable workflow: run with what's ready, this run only.
     var listItem = wfListItem(S.selected);
     var rerouted = Boolean(listItem && listItem.blocked && listItem.reroute);
     if (rerouted) payload.reroute = true;
@@ -1362,7 +1362,7 @@
         if (rr) {
           setBanner("Re-routed " + rr.steps + " step" + (rr.steps === 1 ? "" : "s") + " (" +
             rr.blockedAgents.map(ST.agentUiLabel).join(", ") + ") to " + ST.agentUiLabel(rr.agent) + " · " + (rr.modelName || rr.model) +
-            " for this ride.", "info");
+            " for this run.", "info");
         }
         S.runId = r.body.runId;
         setRunDeepLink(S.runId);

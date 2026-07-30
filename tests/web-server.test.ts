@@ -282,6 +282,15 @@ describe("web server", () => {
     const bootText = await (await fetch(`${base}/static/st-boot.js`)).text();
     expect(bootText).toContain("window.Steamtrain.start()");
 
+    // The Console redesign retired the Station/Ride/Conductor layer, but four
+    // of its strings survived in the shipped client. Guard the surfaces that
+    // carried them so the vocabulary cannot come back.
+    const runText = await (await fetch(`${base}/static/st-run.js`)).text();
+    expect(runText).toContain('text: "Narration"');
+    expect(runText).not.toContain("Conductor");
+    expect(runText).not.toContain("this ride");
+    expect(bootText).not.toContain("Boarding");
+
     const tokensText = await (await fetch(`${base}/static/tokens.css`)).text();
     expect(tokensText).toContain("--accent");
 
@@ -301,6 +310,10 @@ describe("web server", () => {
     expect(arrivalCss).toContain(".arrival-headline");
     expect(arrivalCss).toContain(".arrival-report");
     expect(arrivalCss).toContain(".ledger-row");
+    // st-core.js keeps a legitimate "conductor" key — it is a live tour step id
+    // (src/workflow/bundled.ts) that TOUR_CAR_LABELS maps to "Arrival report".
+    // The stylesheet has no such excuse.
+    expect(arrivalCss).not.toContain("conductor");
 
     const bundleText = await (await fetch(`${base}/static/steamtrain-reducer.bundle.js`)).text();
     expect(bundleText).toContain("function workflowReducer");

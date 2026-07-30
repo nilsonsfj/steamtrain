@@ -46,7 +46,7 @@
           "train"
         ),
         h("div", { class: "boot-premise", text: "Parallel agents. One receipt." }),
-        h("div", { class: "boarding-pulse", text: "Boarding…" })
+        h("div", { class: "boot-pulse", text: "Loading…" })
       ));
       return;
     }

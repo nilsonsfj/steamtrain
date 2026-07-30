@@ -99,7 +99,7 @@ export function useWorkflowRunner({
   const [wfNotice, setWfNotice] = useState<string | null>(null);
   const [wfShowStepDetail, setWfShowStepDetail] = useState(true);
   const [wfShowPlanResult, setWfShowPlanResult] = useState(true);
-  /** Live conductor narration — pure projection of WorkflowEvents. */
+  /** Live narration — pure projection of WorkflowEvents. */
   const [narration, setNarration] = useState<NarrationLine[]>([]);
   /** After arrival, prefer the receipt surface until the user opens step details. */
   const [showArrival, setShowArrival] = useState(true);

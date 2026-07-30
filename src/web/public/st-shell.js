@@ -127,7 +127,7 @@
   /**
    * The blocked/re-route strip for the selected workflow. When the pinned
    * agent is not ready but another agent is, Run stays live and re-routes the
-   * blocked steps for that ride only — the strip says so before the click.
+   * blocked steps for that run only — the strip says so before the click.
    */
   function renderBlockedRow() {
     var row = document.getElementById("blockedRow");
@@ -151,7 +151,7 @@
       row.appendChild(h("span", {},
         h("b", {}, "Needs " + rr.blockedAgents.map(ST.agentUiLabel).join(", ") + " (not ready). "),
         "Run re-routes " + steps + " to " + ST.agentUiLabel(rr.agent) + " · " + (rr.modelName || rr.model) +
-        " for this ride only — the workflow itself is unchanged."));
+        " for this run only — the workflow itself is unchanged."));
       if (runBtn) runBtn.disabled = false;
       if (planBtn) planBtn.disabled = false;
     } else {
