@@ -230,20 +230,6 @@
   border-color: var(--error);
   color: var(--error-text);
 }
-/* Keep the remove slot visible when inert: opacity alone washed the × out
-   against the dark canvas and made rows look like they had only two actions. */
-.runner-row .rowacts button:disabled {
-  opacity: 1;
-  cursor: default;
-  color: var(--faint);
-  border-style: dashed;
-  border-color: var(--border);
-  background: transparent;
-}
-.runner-row .rowacts button.del:disabled:hover {
-  border-color: var(--border);
-  color: var(--faint);
-}
 /* Edit and on/off carry words: a lone 12px pencil was the thing nobody found. */
 .runner-row .rowacts button.edit,
 .runner-row .rowacts button.toggle {

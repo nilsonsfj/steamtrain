@@ -223,7 +223,18 @@ async function mountSettings(opts: {
     refreshWorkflowList: () => {},
     copyFix: () => {},
     pollDoctor: () => {},
-    modals: { mbanner: () => {}, field: (_label: string, input: StubEl) => input },
+    modals: {
+      mbanner: (node: StubEl, text: string, kind: string) => {
+        if (!text) {
+          node.className = "mbanner";
+          node.text = "";
+          return;
+        }
+        node.className = "mbanner show " + (kind === "err" ? "err" : "info");
+        node.text = text;
+      },
+      field: (_label: string, input: StubEl) => input,
+    },
     apiAuth: (method: string, _path: string, body?: Record<string, unknown>) => {
       if (method === "PUT") {
         puts.push(body ?? {});
@@ -232,7 +243,12 @@ async function mountSettings(opts: {
       return Promise.resolve({ status: 200, body: config });
     },
   };
-  const window = { Steamtrain: ST, SteamtrainReducer: null, location: { hash: "" } };
+  const window = {
+    Steamtrain: ST,
+    SteamtrainReducer: null,
+    location: { hash: "" },
+    confirm: () => true,
+  };
   new Function("window", "document", settingsJs)(window, { getElementById: () => null });
   const settings = ST.settings as { render: (c: StubEl, s: string) => void };
   settings.render(root, "runners");
@@ -243,13 +259,10 @@ async function mountSettings(opts: {
     collect(root, (n) => n.className.split(" ").includes("runner-row")).map((row) => {
       const acts = collect(row, (n) => n.className === "rowacts")[0];
       const buttons = acts ? acts.children : [];
-      const del = buttons.find((b) => b.text === "×");
       return {
         cls: row.className,
         text: flatText(row),
         actions: buttons.map((b) => b.text),
-        /** True when the remove control is present but inert (no config entry). */
-        removeDisabled: Boolean(del && del.attrs.disabled === true),
         click: (label: string) => {
           const btn = buttons.find((b) => b.text === label);
           if (!btn) throw new Error(`no "${label}" button on row: ${flatText(row)}`);
@@ -257,6 +270,10 @@ async function mountSettings(opts: {
         },
       };
     });
+  const banner = () => {
+    const node = collect(root, (n) => String(n.className).includes("mbanner"))[0];
+    return node ? flatText(node) : "";
+  };
   const save = async () => {
     const btn = collect(root, (n) => n.text === "Save changes")[0];
     if (!btn) throw new Error("no Save button");
@@ -269,7 +286,7 @@ async function mountSettings(opts: {
     return strip ? flatText(strip) : "";
   };
   const navFlagged = () => collect(root, (n) => n.className.split(" ").includes("flag")).length > 0;
-  return { rows, save, tally, navFlagged, puts };
+  return { rows, save, tally, navFlagged, puts, banner };
 }
 
 describe("runners settings table", () => {
@@ -312,17 +329,25 @@ describe("runners settings table", () => {
     }
   });
 
-  it("disables remove for built-ins with no config entry, enables it once configured", async () => {
+  it("explains when remove is pressed on a built-in with no config entry", async () => {
     const ui = await mountSettings(MIXED);
-    // claude / amp / codex / zed-fork appear via doctor only — nothing to delete.
-    const unconfigured = ui.rows().filter((r) => !r.text.startsWith("kiro"));
-    expect(unconfigured.length).toBeGreaterThan(0);
-    for (const row of unconfigured) {
-      expect(row.removeDisabled).toBe(true);
-    }
-    // kiro is in agents[] so remove is live.
-    const kiro = ui.rows().find((r) => r.text.startsWith("kiro"));
-    expect(kiro?.removeDisabled).toBe(false);
+    const claude = ui.rows().find((r) => r.text.startsWith("claude"));
+    expect(claude).toBeTruthy();
+    claude?.click("×");
+    expect(ui.banner()).toMatch(/built-in default.*disable it instead/i);
+    // Nothing was removed from the draft; Save would still only write what was already configured.
+    await ui.save();
+    expect(ui.puts[0]?.agents).toEqual([
+      expect.objectContaining({ id: "kiro", provider: "kiro", enabled: false }),
+    ]);
+  });
+
+  it("removes a configured runner from the draft on confirm", async () => {
+    const ui = await mountSettings(MIXED);
+    ui.rows().find((r) => r.text.startsWith("kiro"))?.click("×");
+    expect(ui.rows().some((r) => r.text.startsWith("kiro"))).toBe(false);
+    await ui.save();
+    expect(ui.puts[0]?.agents ?? []).not.toContainEqual(expect.objectContaining({ id: "kiro" }));
   });
 
   it("disabling a built-in with no config entry saves an entry that holds the flag", async () => {
@@ -356,14 +381,6 @@ describe("runners settings table", () => {
     expect(acts).toMatch(/min-width:\s*2[4-9]px/);
     expect(acts).toMatch(/height:\s*2[4-9]px/);
     expect(acts).toMatch(/border:\s*1px solid/);
-  });
-
-  it("dims disabled remove controls instead of dropping them", () => {
-    const disabled = ruleBody(settingsCss, ".runner-row .rowacts button:disabled");
-    expect(disabled).toMatch(/border-style:\s*dashed/);
-    expect(disabled).toMatch(/cursor:\s*default/);
-    // Must stay fully opaque — low opacity made the × vanish on the dark canvas.
-    expect(disabled).not.toMatch(/opacity:\s*0\./);
   });
 
   it("dims absent rows by colour so their controls stay usable", () => {
