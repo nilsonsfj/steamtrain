@@ -230,7 +230,7 @@ async function mountSettings(opts: {
           node.text = "";
           return;
         }
-        node.className = "mbanner show " + (kind === "err" ? "err" : "info");
+        node.className = `mbanner show ${kind === "err" ? "err" : "info"}`;
         node.text = text;
       },
       field: (_label: string, input: StubEl) => input,
@@ -344,7 +344,9 @@ describe("runners settings table", () => {
 
   it("removes a configured runner from the draft on confirm", async () => {
     const ui = await mountSettings(MIXED);
-    ui.rows().find((r) => r.text.startsWith("kiro"))?.click("×");
+    ui.rows()
+      .find((r) => r.text.startsWith("kiro"))
+      ?.click("×");
     expect(ui.rows().some((r) => r.text.startsWith("kiro"))).toBe(false);
     await ui.save();
     expect(ui.puts[0]?.agents ?? []).not.toContainEqual(expect.objectContaining({ id: "kiro" }));
