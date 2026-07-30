@@ -117,6 +117,13 @@ function click(node: StubEl): void {
 
 const HOUR = 3600_000;
 
+/**
+ * The reason a rejected DELETE comes back with. Deliberately not a string the
+ * client could produce on its own: the assertions that look for it are proving
+ * the page relays *the server's* message, not that it printed its own.
+ */
+const SERVER_DELETE_ERROR = "history is read-only on this server";
+
 /** A recorded run summary shaped like GET /api/history returns them. */
 function record(over: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
   return {
@@ -170,6 +177,8 @@ async function mountRuns(opts: {
   selected?: string;
   /** Status the DELETE endpoints answer with, for the failure paths. */
   deleteStatus?: number;
+  /** Answer a rejected DELETE with no `error` body, exercising the fallback. */
+  deleteBare?: boolean;
   /** What the per-model roll-up reports, for the full receipt's cost table. */
   byModel?: Record<string, unknown>[];
   /** Worktree sources the full receipt's lifecycle block should see. */
@@ -226,10 +235,11 @@ async function mountRuns(opts: {
           const one = /^\/api\/history\/(.+)$/.exec(path);
           stored = one ? stored.filter((r) => r.id !== decodeURIComponent(one[1] as string)) : [];
         }
-        return Promise.resolve({
-          status,
-          body: status === 200 ? {} : { error: "history is read-only" },
-        });
+        // A rejected DELETE answers with the server's own reason, except when
+        // `deleteBare` is set — that is the body-less 5xx the fallback text in
+        // deleteRecord/clearHistory exists for.
+        const body = status === 200 ? {} : opts.deleteBare ? {} : { error: SERVER_DELETE_ERROR };
+        return Promise.resolve({ status, body });
       }
       if (path === "/api/history") return Promise.resolve({ status: 200, body: { runs: stored } });
       if (path.startsWith("/api/history/") && path.endsWith("/worktrees")) {
@@ -729,11 +739,21 @@ describe("runs page: destructive actions", () => {
 
   // Wiping the client list on a rejected DELETE would show an empty page that
   // the next poll silently repopulates — the reader would think it worked.
-  it("keeps the list and says why when the server refuses", async () => {
+  it("keeps the list and relays the server's reason when it refuses", async () => {
     const denied = await mountRuns({ runs: [record()], deleteStatus: 403 });
     await denied.clickButton("Clear history");
     expect(denied.rows()).toHaveLength(1);
-    expect(denied.said.join(" ")).toContain("read-only");
+    // The server's own words, not a message the page could have invented.
+    expect(denied.said.join(" ")).toContain(SERVER_DELETE_ERROR);
+  });
+
+  // `(r.body && r.body.error) || "clear failed"` — a 5xx from a proxy has no
+  // JSON body at all, and silence would read as success.
+  it("falls back to its own wording when the refusal carries no reason", async () => {
+    const bare = await mountRuns({ runs: [record()], deleteStatus: 502, deleteBare: true });
+    await bare.clickButton("Clear history");
+    expect(bare.rows()).toHaveLength(1);
+    expect(bare.said.join(" ")).toContain("clear failed");
   });
 
   // A refused delete must not look like a successful one: the reader stays on
@@ -750,7 +770,20 @@ describe("runs page: destructive actions", () => {
     await page.clickButton("Delete");
     expect(page.main()).toContain("full receipt");
     expect(page.receipt()).toContain("8f21c");
-    expect(page.said.join(" ")).toContain("read-only");
+    expect(page.said.join(" ")).toContain(SERVER_DELETE_ERROR);
+  });
+
+  it("falls back to its own wording when a refused delete carries no reason", async () => {
+    const page = await mountRuns({
+      runs: [record()],
+      detail: { ...record(), phases: [] },
+      deleteStatus: 500,
+      deleteBare: true,
+    });
+    await page.clickRow(0);
+    await page.clickButton("Full receipt");
+    await page.clickButton("Delete");
+    expect(page.said.join(" ")).toContain("delete failed");
   });
 
   it("drops the run and returns to the list when its delete succeeds", async () => {
