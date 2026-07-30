@@ -81,7 +81,8 @@ window.Steamtrain = (function () {
     projectConfig: null,
     // Full-page routing: which page #center is currently showing in place of
     // the cockpit ("settings", "runs", or null for the cockpit itself), and the
-    // hash to return to when that page's Close button is clicked.
+    // cockpit hash to restore when that page's Close button is clicked (never
+    // another page — page→page hops keep the original cockpit return target).
     page: null,
     preRouteHash: "#",
     // Set just before navigating to a page when the hash we are leaving would
@@ -719,17 +720,40 @@ window.Steamtrain = (function () {
     if (railRight) railRight.style.display = "";
   }
 
+  /** True when `hash` is Runs/Settings — not a cockpit return target. */
+  function isPageHash(hash) {
+    if (SteamtrainReducer.isPageRoute) return SteamtrainReducer.isPageRoute(hash || "");
+    return /^#(runs|settings)(\/|$)/i.test(hash || "");
+  }
+
   /**
-   * Leave whichever page is up and go back to the hash the user came in on.
-   * Shared by every page's Close button so "back to where I was" means the same
-   * thing everywhere.
+   * Leave whichever page is up and return to the cockpit. The remembered
+   * `preRouteHash` is restored when it is a cockpit target (empty/`#`, or a
+   * live `#run-…` deep link). Another page hash is never a return target —
+   * Settings → Runs → Close must land on home, not bounce back to Settings.
    */
   function closePageRoute() {
     var target = S.preRouteHash || "#";
+    if (isPageHash(target)) target = "#";
     S.page = null;
     showCockpitRoute();
     if (window.location.hash !== target) window.location.hash = target;
     else if (window.location.hash) history.replaceState(null, "", window.location.pathname + window.location.search);
+  }
+
+  /**
+   * Always return to the initial cockpit home: hide any page, clear the hash,
+   * and drop any page-return memory. Bound to the topbar brand so home is one
+   * click away from Runs, Settings, or a run deep link.
+   */
+  function goHome() {
+    S.page = null;
+    S.preRouteHash = "#";
+    S.pageReturnOverride = null;
+    showCockpitRoute();
+    if (window.location.hash) {
+      history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
   }
 
   /**
@@ -758,12 +782,17 @@ window.Steamtrain = (function () {
   function handleRoute(oldHash, bootPagesOnly) {
     var route = SteamtrainReducer.parseRoute ? SteamtrainReducer.parseRoute(window.location.hash) : null;
     if (route && (route.kind === "settings" || route.kind === "runs")) {
-      // Remember the return hash only when arriving from outside — moving
-      // between sections of the same page must not overwrite it with the
-      // page's own hash, or Close would land back on the page it just left.
+      // Remember the return hash only when arriving from the cockpit —
+      // section changes on the same page must not overwrite it, and
+      // page→page hops (Settings → Runs) must keep the original cockpit
+      // return target rather than the page we are leaving.
       if (S.page !== route.kind) {
-        S.preRouteHash = S.pageReturnOverride
-          || ((typeof oldHash === "string" && oldHash) ? oldHash : "#");
+        if (S.pageReturnOverride) {
+          S.preRouteHash = S.pageReturnOverride;
+        } else if (!S.page) {
+          var candidate = (typeof oldHash === "string" && oldHash) ? oldHash : "#";
+          S.preRouteHash = isPageHash(candidate) ? "#" : candidate;
+        }
         S.page = route.kind;
       }
       S.pageReturnOverride = null;
@@ -1388,6 +1417,7 @@ window.Steamtrain = (function () {
   ST.selectWorkflow = selectWorkflow;
   ST.setRunDeepLink = setRunDeepLink;
   ST.closePageRoute = closePageRoute;
+  ST.goHome = goHome;
   ST.showCockpitRoute = showCockpitRoute;
   ST.showPageRoute = showPageRoute;
   ST.showReauthOverlay = showReauthOverlay;

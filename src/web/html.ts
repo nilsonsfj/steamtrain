@@ -98,7 +98,7 @@ ${styles}
 <body>
 <div id="app">
   <header id="topbar">
-    <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark">steamtrain</span></div>
+    <button type="button" class="brand" id="homeBtn" title="Home" aria-label="Home"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark">steamtrain</span></button>
     <nav class="crumbs" id="crumbs" aria-label="Location"></nav>
     <span class="status-pill" id="runPill" style="display:none"></span>
     <span class="mode-badge" id="modeBadge" style="display:none" title="This session can view workflows and runs but cannot launch, edit, approve, or change config.">&#128065; read-only</span>

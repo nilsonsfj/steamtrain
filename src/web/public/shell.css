@@ -48,6 +48,22 @@ header .mode-badge {
   gap: 10px;
   width: 220px;
   flex: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--r-xs);
+}
+#topbar .brand:hover .wordmark {
+  color: var(--accent);
+}
+#topbar .brand:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 #topbar .brand-mark {
   width: 16px;

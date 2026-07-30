@@ -30,6 +30,7 @@ export {
   approvalDeepLink,
   parseDeepLink,
   parseRoute,
+  isPageRoute,
   runsDeepLink,
   settingsDeepLink,
   SETTINGS_SECTIONS,
