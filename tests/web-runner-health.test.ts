@@ -178,6 +178,8 @@ interface Mounted {
   tally: () => string;
   /** Whether the Runners nav item carries the "needs attention" pip. */
   navFlagged: () => boolean;
+  /** Text of the runners settings banner (empty when nothing is shown). */
+  banner: () => string;
   puts: Record<string, unknown>[];
 }
 
