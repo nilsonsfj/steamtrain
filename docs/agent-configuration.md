@@ -105,12 +105,15 @@ Every agent's live readiness is a **health chip** in the header. Click any chip
 `steamtrain init`'s readiness table — each agent and API with its status,
 version/binary, and, for anything not ready, the exact fix with a one-click
 **Copy**. **Recheck** re-runs the doctors in place; **Edit config →** jumps to
-the config editor. Agents that simply aren't installed collapse into one quiet
-chip instead of a wall of red, so the header stays calm on a fresh machine.
+the config editor. The chips name what they counted — `ready · 2 agents + 1 API`,
+`needs auth · 1 agent` — and agents that simply aren't installed get no chip at
+all, so the header stays calm on a fresh machine. (When nothing is ready and
+nothing is fixable, one quiet `no runner ready` chip says so.)
 
-The config page (gear icon) edits configured agents with a per-row **scope**
-selector, and links back to the setup panel via **Check readiness & fixes →**.
-New agents default to **global** (`~/.steamtrain/config.json`), matching
+Settings → **Runners** edits configured agents with a per-row **scope**
+selector, an **on/off** switch, and **Edit** for binary, model, env, and extra
+args. New agents default to **global** (`~/.steamtrain/config.json`), matching
 `/agent add` and the TUI manager. Choose **project** to write into
-`./steamtrain.json` instead. Timeouts on the same page still save to the
-project file.
+`./steamtrain.json` instead. Rows sort ready-first, with disabled agents last.
+Timeouts live under Settings → **Limits & budget** and still save to the project
+file.

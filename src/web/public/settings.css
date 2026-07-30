@@ -97,7 +97,8 @@
 .runner-cols,
 .runner-row {
   display: grid;
-  grid-template-columns: 14px 150px 92px 1fr 190px 96px 72px;
+  /* Last column holds three hit targets: on/off, Edit, remove. */
+  grid-template-columns: 14px 150px 92px 1fr 176px 96px 132px;
   gap: 14px;
   align-items: center;
 }
@@ -137,23 +138,59 @@
 }
 .runner-row .rowacts {
   display: flex;
-  gap: 8px;
-  color: var(--dim);
+  gap: 6px;
+  color: var(--muted);
   justify-content: flex-end;
 }
+/* Icon actions are real 28px hit targets with a visible resting frame — the
+   old borderless 12px glyphs were easy to miss and hard to click. */
 .runner-row .rowacts button {
-  border: 0;
-  background: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--raised);
   color: inherit;
   cursor: pointer;
-  font: inherit;
-  padding: 0;
+  font: 400 14px / 1 var(--font-mono);
 }
 .runner-row .rowacts button:hover {
+  border-color: var(--border-strong);
   color: var(--text);
 }
+.runner-row .rowacts button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+.runner-row .rowacts button.open {
+  border-color: var(--accent-dim);
+  color: var(--accent-bright);
+}
 .runner-row .rowacts button.del:hover {
+  border-color: var(--error);
   color: var(--error-text);
+}
+/* Edit and on/off carry words: a lone 12px pencil was the thing nobody found. */
+.runner-row .rowacts button.edit,
+.runner-row .rowacts button.toggle {
+  font: 500 10.5px / 1 var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.runner-row .rowacts button.toggle {
+  color: var(--done-text);
+  border-color: var(--accent-dim);
+}
+.runner-row .rowacts button.toggle.off {
+  color: var(--dim);
+  border-color: var(--border);
+}
+.runner-row .rowacts button.toggle:hover {
+  color: var(--text);
 }
 
 .runner-group.needs-auth {
@@ -163,11 +200,30 @@
 .runner-group.needs-auth .runner-row {
   border-top: 0;
 }
+/* Absent rows recede by colour, not by opacity — fading the whole row also
+   faded its controls, which is what made them hard to find. */
 .runner-row.absent {
-  opacity: 0.5;
+  color: var(--faint);
+}
+.runner-row.absent .name,
+.runner-row.absent .detail,
+.runner-row.absent .scope {
+  color: var(--dim);
+}
+.runner-row.absent .detail .sub {
+  color: var(--faint);
 }
 .runner-row.absent .dot {
   background: var(--faint);
+}
+/* Disabled rows stay legible — the row's own controls are how you undo it. */
+.runner-row.off .name,
+.runner-row.off .detail {
+  color: var(--dim);
+}
+.runner-row.off .dot {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--faint);
 }
 .runner-row .detail.warn {
   color: var(--gate);

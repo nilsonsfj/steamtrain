@@ -171,8 +171,11 @@ header .mode-badge {
 .health .chip.auth .dot {
   background: var(--gate);
 }
-.health .chip.absent {
+.health .chip.quiet {
   color: var(--dim);
+}
+.health .chip.quiet .dot {
+  background: var(--faint);
 }
 
 #cols {

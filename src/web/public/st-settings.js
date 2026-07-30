@@ -25,7 +25,7 @@
   var SECTION_META = {
     runners: {
       title: "Runners",
-      desc: "Coding-agent CLIs and direct-API endpoints steamtrain drives. Install, sign in, or edit a binary, model, or scope — everything here writes to config."
+      desc: "Coding-agent CLIs and direct-API endpoints steamtrain drives. Install, sign in, switch one off, or edit a binary, model, or scope — everything here writes to config."
     },
     limits: {
       title: "Limits & budget",
@@ -239,37 +239,46 @@
     );
   }
 
-  // Not-ready-first, then alphabetical, so what needs attention leads.
-  function rowSort(key) {
-    return function (a, b) {
-      var ak = a.status === "ok" ? 1 : 0, bk = b.status === "ok" ? 1 : 0;
-      if (ak !== bk) return ak - bk;
-      return String(a[key] || "").localeCompare(String(b[key] || ""));
-    };
+  /**
+   * Ready first, then what the user can fix, then the runners they don't use:
+   * ready → needs auth → absent/unprobed → disabled. The list reads top-down
+   * as "what this machine can run", and the dead weight sinks to the bottom.
+   */
+  function rowRank(kind, row) {
+    if (isDisabled(row)) return 3;
+    if (!row.doctor) return 2;
+    if (row.doctor.status === "ok") return 0;
+    var meta = kind === "agent" ? agentHealthMeta(row.doctor.status) : apiHealthMeta(row.doctor.status);
+    return meta.loud ? 1 : 2;
+  }
+  function sortRows(kind, rows) {
+    return rows.sort(function (a, b) {
+      var rank = rowRank(kind, a) - rowRank(kind, b);
+      if (rank) return rank;
+      return String(a.id || "").localeCompare(String(b.id || ""));
+    });
   }
   function agentRowsData() {
-    var doctor = (S.doctor || []).slice().sort(rowSort("agent"));
     var seen = {};
-    var rows = doctor.map(function (d) {
+    var rows = (S.doctor || []).map(function (d) {
       seen[d.agent] = true;
       return { id: d.agent, doctor: d, config: findAgent(d.agent) };
     });
     if (draft) {
       draft.agents.forEach(function (c) { if (!seen[c.id]) rows.push({ id: c.id, doctor: null, config: c }); });
     }
-    return rows;
+    return sortRows("agent", rows);
   }
   function apiRowsData() {
-    var doctor = (S.apiDoctor || []).slice().sort(rowSort("api"));
     var seen = {};
-    var rows = doctor.map(function (d) {
+    var rows = (S.apiDoctor || []).map(function (d) {
       seen[d.api] = true;
       return { id: d.api, doctor: d, config: findApi(d.api) };
     });
     if (draft) {
       draft.apis.forEach(function (c) { if (!seen[c.id]) rows.push({ id: c.id, doctor: null, config: c }); });
     }
-    return rows;
+    return sortRows("api", rows);
   }
 
   function buildRunnerTable() {
@@ -307,9 +316,12 @@
     var cfg = rowData.config;
     var status = d ? d.status : "ok";
     var meta = kind === "agent" ? agentHealthMeta(status) : apiHealthMeta(status);
-    var ready = status === "ok";
-    var loud = Boolean(d && meta.loud);
-    var absent = Boolean(d && !ready && !loud);
+    // A disabled runner is never probed again, so whatever the doctor last said
+    // about it is stale — the row reports "disabled" and nothing else.
+    var off = isDisabled(rowData);
+    var ready = !off && status === "ok";
+    var loud = !off && Boolean(d && meta.loud);
+    var absent = !off && Boolean(d && !ready && !loud);
 
     var provider = cfg ? cfg.provider : (d ? d.provider : "");
     var displayName = (cfg && cfg.label) || (d && d.label) ||
@@ -327,20 +339,21 @@
       binaryText = (cfg && cfg.baseUrl) || (d && d.baseUrl) || "(provider default endpoint)";
       if (cfg && cfg.apiKeyEnv) subParts.push(cfg.apiKeyEnv);
     }
+    if (off) subParts.unshift("disabled");
     var detailEl = h("span", { class: "detail" + (loud ? " warn" : "") }, binaryText,
       subParts.length ? h("span", { class: "sub", text: "  " + subParts.join(" · ") }) : null);
 
     var modelText = (cfg && cfg.defaultModel) || "(provider default)";
     var scopeText = cfg ? (cfg.scope === "project" ? "project" : "global") : "global (default)";
 
-    var row = h("div", { class: "runner-row" + (absent ? " absent" : "") },
+    var row = h("div", { class: "runner-row" + (absent ? " absent" : "") + (off ? " off" : "") },
       h("span", { class: "dot" + (loud ? " err" : "") }),
       h("span", { class: "name", text: nameText }),
       h("span", null, kind),
       detailEl,
       h("span", null, modelText),
       h("span", { class: "scope", text: scopeText }),
-      rowActs(kind, rowData.id, cfg)
+      rowActs(kind, rowData, off)
     );
 
     var container;
@@ -369,17 +382,33 @@
     return strip;
   }
 
-  function rowActs(kind, id, cfg) {
+  function rowActs(kind, rowData, off) {
+    var id = rowData.id;
+    var cfg = rowData.config;
     var wrap = h("div", { class: "rowacts" });
     if (isReadOnly() || !draft) return wrap;
-    var editBtn = h("button", { type: "button", title: "Edit", text: "✎" });
+    var open = Boolean(editingRow && editingRow.kind === kind && editingRow.id === id);
+    var toggleBtn = h("button", {
+      type: "button", class: "toggle" + (off ? " off" : ""),
+      title: off ? "Enable " + id + " (steps may route to it again)"
+        : "Disable " + id + " (hidden from runs and from readiness checks)",
+      "aria-pressed": off ? "false" : "true",
+      text: off ? "off" : "on"
+    });
+    // The new state is "enabled" exactly when the row is currently off.
+    toggleBtn.addEventListener("click", function () { setRowEnabled(kind, rowData, off); });
+    wrap.appendChild(toggleBtn);
+    var editBtn = h("button", {
+      type: "button", class: "act edit" + (open ? " open" : ""),
+      title: open ? "Close the editor" : "Edit " + id, text: "Edit"
+    });
     editBtn.addEventListener("click", function () {
-      editingRow = (editingRow && editingRow.kind === kind && editingRow.id === id) ? null : { kind: kind, id: id };
+      editingRow = open ? null : { kind: kind, id: id };
       paint();
     });
     wrap.appendChild(editBtn);
     if (cfg) {
-      var delBtn = h("button", { type: "button", class: "del", title: "Remove from config", text: "×" });
+      var delBtn = h("button", { type: "button", class: "act del", title: "Remove " + id + " from config", text: "×" });
       delBtn.addEventListener("click", function () {
         if (!window.confirm("Remove \"" + id + "\" from config?")) return;
         var list = kind === "agent" ? draft.agents : draft.apis;
@@ -391,6 +420,30 @@
       wrap.appendChild(delBtn);
     }
     return wrap;
+  }
+
+  function isDisabled(rowData) {
+    return Boolean(rowData.config && rowData.config.enabled === false);
+  }
+
+  /**
+   * Flip a runner on or off. A built-in with no config entry yet gets a minimal
+   * stub (id + provider + scope) so `enabled: false` has somewhere to live —
+   * exactly what the TUI's agent/API manager writes. Takes effect on Save.
+   */
+  function setRowEnabled(kind, rowData, enabled) {
+    var entry = kind === "agent" ? findAgent(rowData.id) : findApi(rowData.id);
+    if (!entry) {
+      var d = rowData.doctor;
+      entry = {
+        id: rowData.id,
+        provider: (d && d.provider) || (kind === "agent" ? "claude" : "anthropic"),
+        scope: (S.projectConfig && S.projectConfig.canGlobal === false) ? "project" : "user"
+      };
+      (kind === "agent" ? draft.agents : draft.apis).push(entry);
+    }
+    entry.enabled = enabled;
+    paint();
   }
 
   function uniqueId(base, exists) {
