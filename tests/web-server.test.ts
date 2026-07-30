@@ -2841,6 +2841,53 @@ describe("web server — read-only capability", () => {
     expect(post.status).toBe(403);
   });
 
+  // Every mutating route is protected by ONE central capability gate, not by
+  // per-route guards — so a change to that gate could silently open all of them
+  // at once. This sweep is what makes that regression loud. Asserting the gate's
+  // exact body (not merely a non-200) keeps a coincidental 404/501 from passing.
+  it("blocks every mutating route for a read-only session", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const server = createWebServer({
+      host,
+      runs,
+      workflowSource: () => "bundled",
+      readOnly: true,
+    });
+    servers.push(server);
+    const base = await start(server);
+
+    const mutating: Array<[string, string]> = [
+      ["PUT", "/api/config"],
+      ["POST", "/api/workflows/generate"],
+      ["PUT", "/api/workflows/demo"],
+      ["DELETE", "/api/workflows/demo"],
+      ["POST", "/api/workflows/demo/plan"],
+      ["POST", "/api/doctor"],
+      ["DELETE", "/api/history"],
+      ["POST", "/api/runs"],
+      ["POST", "/api/runs/anything/cancel"],
+      ["POST", "/api/runs/anything/pause"],
+      ["POST", "/api/runs/anything/detach"],
+      ["POST", "/api/overrides/flush"],
+    ];
+
+    for (const [method, path] of mutating) {
+      const res = await fetch(`${base}${path}`, {
+        method,
+        headers: { "content-type": "application/json", origin: base },
+        body: JSON.stringify({}),
+      });
+      expect(`${method} ${path} -> ${res.status}`).toBe(`${method} ${path} -> 403`);
+      expect(await res.json()).toEqual({ error: "read-only session", capability: "read" });
+    }
+  });
+
   it("requires a session when only --read-token is configured", async () => {
     const { server } = makeAuthServer(new FakeHost(demoSpec(), happyRun), {
       authToken: undefined,

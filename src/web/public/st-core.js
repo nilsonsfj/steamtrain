@@ -397,11 +397,10 @@ window.Steamtrain = (function () {
       }
       if (r.body.project) applyProjectChrome(r.body.project);
       ST.shell.renderSidebar();
-      var deepLinkId = SteamtrainReducer.parseDeepLink
-        ? SteamtrainReducer.parseDeepLink(window.location.hash)
-        : SteamtrainReducer.parseRunDeepLink
-          ? { runId: SteamtrainReducer.parseRunDeepLink(window.location.hash), stepId: undefined }
-          : null;
+      // This is the only dispatcher for run/step deep links — the boot-time
+      // handleRoute() deliberately handles settings routes only, because the
+      // catalog isn't loaded yet at that point (see st-boot.js).
+      var deepLinkId = SteamtrainReducer.parseDeepLink(window.location.hash);
       if (deepLinkId && deepLinkId.runId) openRunDeepLink(deepLinkId.runId, deepLinkId.stepId);
       else bootstrapDefaultWorkflow();
     });
