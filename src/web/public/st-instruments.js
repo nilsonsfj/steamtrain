@@ -155,37 +155,33 @@
 
   // ---- Runners in flight ------------------------------------------------------
 
+  function agentLabel(agentId) {
+    for (var i = 0; i < (S.agents || []).length; i++) {
+      var a = S.agents[i];
+      if (a.id === agentId) return a.label || a.id;
+    }
+    return agentId || "agent";
+  }
+
   function renderRunners() {
     var box = h("div", { class: "inst" });
     box.appendChild(h("div", { class: "inst-label", text: "Runners in flight" }));
     var list = h("div", { class: "runners" });
-    var steps = flattenSteps();
-    // Enumerate every configured agent so idle runners still appear, not just
-    // the ones currently busy.
-    (S.agents || []).forEach(function (a) {
-      var running = steps.filter(function (s) { return s.status === "running" && s.agent === a.id; });
-      if (running.length) {
-        running.forEach(function (s) {
-          list.appendChild(h("div", { class: "runner busy" },
-            h("span", { class: "dot" }),
-            h("span", { text: a.label || a.id }),
-            h("span", { class: "model", text: s.model || "" }),
-            h("span", {
-              class: "right",
-              "data-since": String(s.startedAt || ""),
-              text: s.startedAt ? "⏱ " + fmtElapsed(Date.now() - s.startedAt) : ""
-            })
-          ));
-        });
-      } else {
-        var queued = steps.filter(function (s) { return s.status === "pending" && s.agent === a.id; }).length;
-        list.appendChild(h("div", { class: "runner" },
-          h("span", { class: "dot" }),
-          h("span", { text: a.label || a.id }),
-          h("span", { class: "model", text: "idle" }),
-          h("span", { class: "right", text: queued ? queued + " queued" : "" })
-        ));
-      }
+    // Only steps that are actually running. Listing every configured agent as
+    // "idle" burned the rail on runners the workflow never mentions; the
+    // instrument title is "in flight", so idle rows stay out.
+    flattenSteps().forEach(function (s) {
+      if (s.status !== "running") return;
+      list.appendChild(h("div", { class: "runner busy" },
+        h("span", { class: "dot" }),
+        h("span", { class: "name", text: agentLabel(s.agent) }),
+        h("span", { class: "model", text: s.model || "" }),
+        h("span", {
+          class: "right",
+          "data-since": String(s.startedAt || ""),
+          text: s.startedAt ? "⏱ " + fmtElapsed(Date.now() - s.startedAt) : ""
+        })
+      ));
     });
     box.appendChild(list);
     return box;

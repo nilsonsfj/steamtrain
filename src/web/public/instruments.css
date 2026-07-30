@@ -112,6 +112,7 @@
   gap: 8px;
   font: 400 12px / 1.4 var(--font-mono);
   color: var(--dim);
+  min-width: 0;
 }
 .runner .dot {
   width: 6px;
@@ -126,13 +127,27 @@
 .runner.busy .dot {
   background: var(--running);
 }
+.runner .name {
+  flex: none;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .runner .model {
   color: var(--dim);
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .runner .right {
   margin-left: auto;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+  flex: none;
+  white-space: nowrap;
 }
 
 .worktrees {

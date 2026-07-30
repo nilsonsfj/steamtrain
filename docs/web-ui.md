@@ -94,9 +94,10 @@ its tests live in one place):
   any workflow whose step costs differ a lot — a cheap gate step running after
   an expensive scan step will pull the projection in whichever direction the
   finished steps happen to skew. Treat it as a rough budget trip-wire, not a
-  bill. The instrument rail also shows Spend, Tokens, Cache hits, per-runner
-  busy/idle status, active worktrees, and a capped (200-entry), newest-first
-  event log — all read directly off the event stream, not derived.
+  bill. The instrument rail also shows Spend, Tokens, Cache hits, runners
+  currently in flight (busy steps only — idle catalog agents are omitted),
+  active worktrees, and a capped (200-entry), newest-first event log — all
+  read directly off the event stream, not derived.
 
 ### Settings
 
