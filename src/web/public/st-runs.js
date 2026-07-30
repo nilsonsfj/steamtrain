@@ -301,8 +301,14 @@
       if (!name) return;
       map[name] = (map[name] || 0) + 1;
     }
-    R.runs.forEach(function (run) { if (matchesQuery(run)) bump(run.workflow); });
-    R.liveRuns.forEach(function (run) { if (matchesQuery(run)) bump(run.workflow); });
+    R.runs.forEach(function (run) {
+      if (R.status !== "all" && R.status !== "live" && run.status !== R.status) return;
+      if (matchesQuery(run)) bump(run.workflow);
+    });
+    R.liveRuns.forEach(function (run) {
+      if (R.status !== "all" && R.status !== "live") return;
+      if (matchesQuery(run)) bump(run.workflow);
+    });
     return Object.keys(map).sort(function (a, b) {
       return map[b] - map[a] || a.localeCompare(b);
     }).map(function (name) { return { name: name, count: map[name] }; });
@@ -1329,6 +1335,7 @@
         return h("button", { class: "btn" + (cls ? " " + cls : ""), text: label, onClick: function () {
           banner.className = "mbanner show info"; banner.textContent = "merging…";
           apiAuth("POST", "/api/history/" + encodeURIComponent(record.id) + "/harvest", body).then(function (rr) {
+            if (S.page !== "runs") return;
             if (rr.status === 200) {
               invalidateWorktreeDiffs(record.id);
               var res = rr.body.result;
@@ -1358,6 +1365,7 @@
         buttons.appendChild(h("button", { class: "btn", text: "Prune worktrees", onClick: function () {
           if (!window.confirm("Discard this run's worktrees and branches? Unapplied changes are lost.")) return;
           apiAuth("POST", "/api/history/" + encodeURIComponent(record.id) + "/prune").then(function (rr) {
+            if (S.page !== "runs") return;
             if (rr.status === 200) invalidateWorktreeDiffs(record.id);
             renderWorktreeSection(holder, record, {
               cls: rr.status === 200 ? "info" : "err",
