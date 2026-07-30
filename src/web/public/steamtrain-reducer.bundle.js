@@ -50,6 +50,7 @@ var SteamtrainReducer = (() => {
     parseRunDeepLink: () => parseRunDeepLink,
     projectCost: () => projectCost,
     runDeepLink: () => runDeepLink,
+    runsDeepLink: () => runsDeepLink,
     sessionOverridesEmpty: () => sessionOverridesEmpty,
     settingsDeepLink: () => settingsDeepLink,
     shouldOfferStationLanding: () => shouldOfferStationLanding,
@@ -951,9 +952,15 @@ var SteamtrainReducer = (() => {
   }
   var SETTINGS_SECTIONS = ["runners", "limits"];
   function parseRoute(hash) {
-    const run = parseDeepLink(hash);
+    const trimmed = hash.trim();
+    const run = parseDeepLink(trimmed);
     if (run) return { kind: "run", runId: run.runId, stepId: run.stepId };
-    const match = /^#settings(?:\/([\w-]+))?$/i.exec(hash.trim());
+    const runs = /^#runs(?:\/([^/]*))?$/i.exec(trimmed);
+    if (runs) {
+      const raw2 = runs[1] ?? "";
+      return RUN_ID_PATTERN.test(raw2) ? { kind: "runs", runId: raw2.toLowerCase() } : { kind: "runs" };
+    }
+    const match = /^#settings(?:\/([\w-]+))?$/i.exec(trimmed);
     if (!match) return null;
     const raw = (match[1] ?? "").toLowerCase();
     const section = SETTINGS_SECTIONS.includes(raw) ? raw : SETTINGS_SECTIONS[0];
@@ -961,6 +968,9 @@ var SteamtrainReducer = (() => {
   }
   function settingsDeepLink(section = SETTINGS_SECTIONS[0]) {
     return `#settings/${section}`;
+  }
+  function runsDeepLink(runId) {
+    return runId ? `#runs/${runId.toLowerCase()}` : "#runs";
   }
 
   // src/workflow/overrides.ts

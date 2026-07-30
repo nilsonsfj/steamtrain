@@ -1,26 +1,20 @@
 /**
- * Modal surfaces: the modal scaffolding and form primitives, workflow
- * create/configure/clone, and the run history browser.
+ * Modal surfaces: the modal scaffolding and form primitives, the new-workflow
+ * sheet, the configure/clone editor, and the retry-with-agent sheet. The run
+ * browser used to live here too — it is now a page (st-runs.js), which is why
+ * this file still owns re-run/retry (they are launched from that page).
  */
 (function (ST) {
   "use strict";
   var S = ST.state;
   var h = ST.h;
-  var activateWithKeyboard = ST.activateWithKeyboard;
   var agentById = ST.agentById;
-  var aggregateByModel = ST.aggregateByModel;
   var api = ST.api;
   var apiAuth = ST.apiAuth;
-  var attachRun = ST.attachRun;
   var clear = ST.clear;
-  var clearRunDeepLink = ST.clearRunDeepLink;
   var effortsFor = ST.effortsFor;
-  var fmtTime = ST.fmtTime;
-  var fmtTokenSummary = ST.fmtTokenSummary;
-  var fmtTotals = ST.fmtTotals;
   var isReadOnly = ST.isReadOnly;
   var modelsFor = ST.modelsFor;
-  var relTime = ST.relTime;
   var selectWorkflow = ST.selectWorkflow;
   var setRunDeepLink = ST.setRunDeepLink;
   var showReauthOverlay = ST.showReauthOverlay;
@@ -38,6 +32,9 @@
       var runId = r.body.runId;
       var downgraded = r.body.downgraded;
       closeModal();
+      // The new run belongs in the cockpit, which the runs/settings pages are
+      // currently covering — leave whichever one is up before attaching to it.
+      if (S.page) ST.closePageRoute();
       selectWorkflow(workflow, function () {
         if (downgraded) ST.run.setBanner("Workflow changed since this run \u2014 doing a full re-run.", "info");
         S.runId = runId;
@@ -51,9 +48,12 @@
     });
   }
 
-  /** Modal to retry failed steps with a different agent/model (and optional step filter). */
-  function openRetryRetargetModal(record) {
-    var holder = Hist.holder;
+  /**
+   * Modal to retry failed steps with a different agent/model (and optional step
+   * filter). `onBack` restores whatever surface opened it — the runs page hands
+   * in its own repaint so Back returns to the receipt the reader came from.
+   */
+  function openRetryRetargetModal(record, onBack) {
     var failed = [];
     (record.phases || []).forEach(function (p) {
       (p.steps || []).forEach(function (s) {
@@ -118,7 +118,8 @@
     );
     var foot = h("div", { class: "mfoot" },
       h("button", { class: "btn", text: "Back", onClick: function () {
-        if (holder) renderHistoryDetail(holder, record);
+        closeModal();
+        if (typeof onBack === "function") onBack();
       }}),
       h("button", { class: "btn primary", text: "Retry with agent", onClick: function () {
         var steps = [];
@@ -127,7 +128,6 @@
         var model = modelField._sel && modelField._sel.value;
         if (model) payload.retargetModel = model;
         if (steps.length) payload.steps = steps;
-        stopHistoryPoll();
         rerunHistory(record.id, record.workflow, "retry", payload);
       }})
     );
@@ -173,12 +173,6 @@
   }
   function closeModal() {
     if (S.draftAbort) { try { S.draftAbort.abort(); } catch (e) {} S.draftAbort = null; }
-    stopHistoryPoll();
-    // Closing the history browser should drop a stale #run- hash so a refresh
-    // does not immediately reopen the modal.
-    if (Hist && Hist.holder) clearRunDeepLink();
-    Hist.holder = null;
-    Hist.view = "list";
     document.getElementById("overlay").classList.remove("show");
     clear(document.getElementById("modal"));
     var invoker = S.modalInvoker;
@@ -329,7 +323,83 @@
     node.textContent = text;
   }
 
-  // ---- create (LLM-drafted) -----------------------------------------------
+  // ---- new workflow --------------------------------------------------------
+  /**
+   * Where a new workflow's phases come from. Every source ends the same way —
+   * the spec is written and the workflow is selected — so the sheet is one
+   * choice plus one Create, not four different flows.
+   */
+  var START_POINTS = [
+    {
+      id: "blank",
+      title: "Blank",
+      body: "One phase, one worker step, on your default runner. Everything else is added by configuring it."
+    },
+    {
+      id: "duplicate",
+      title: "Duplicate a workflow",
+      body: "Copies phases, prompts and runner choices from a workflow you already have."
+    },
+    {
+      id: "template",
+      title: "From a template",
+      body: "The bundled workflows, copied into your own so you can edit them."
+    },
+    {
+      id: "describe",
+      title: "Describe it",
+      body: "An agent drafts a runnable pipeline from a plain-language description."
+    }
+  ];
+
+  /** kebab-case, the convention every bundled workflow name follows. */
+  function slugifyName(text) {
+    return String(text || "").toLowerCase().trim()
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+  }
+
+  function workflowNamesBySource(source) {
+    return (S.workflows || [])
+      .filter(function (w) { return !source || w.source === source; })
+      .map(function (w) { return w.name; });
+  }
+
+  function nameOptions(names) {
+    return names.map(function (name) { return { value: name, label: name }; });
+  }
+
+  /** A free name near `base` - "x", then "x-copy", "x-copy-2", ... */
+  function freeWorkflowName(base) {
+    var taken = {};
+    (S.workflows || []).forEach(function (w) { taken[w.name] = true; });
+    if (!taken[base]) return base;
+    var candidate = base + "-copy";
+    for (var n = 2; taken[candidate]; n++) candidate = base + "-copy-" + n;
+    return candidate;
+  }
+
+  /**
+   * The smallest spec the schema accepts: one phase, one worker step bound to
+   * the reader's default runner. The prompt is a placeholder they are expected
+   * to replace - a worker step without one does not validate.
+   */
+  function blankSpec(agent) {
+    return {
+      description: "",
+      phases: [{
+        id: "main",
+        title: "Main",
+        steps: [{
+          id: "work",
+          kind: "worker",
+          agent: agent.id,
+          model: agent.defaultModel,
+          prompt: "Describe the task for this step.\n\nInput: {{input}}"
+        }]
+      }]
+    };
+  }
+
   function openCreate() {
     if (isReadOnly()) { ST.run.setBanner("This session is read-only — viewing only.", "info"); return; }
     if (!S.agents.length) { ST.run.setBanner("agent catalog still loading; try again in a moment", "info"); return; }
@@ -341,20 +411,35 @@
       ST.run.setBanner("every agent is disabled — enable one in Settings to draft a workflow", "err");
       return;
     }
-    var agentSel = selectEl(agentOptions(), a0.id, function () { onCreateAgent(); });
-    var modelSel = selectEl(modelOptions(a0.id), a0.defaultModel);
-    var effortWrap = h("div", { class: "field", id: "cEffortField" });
-    var nameInput = h("input", { class: "txt", placeholder: "auto from description", maxlength: "48" });
-    var scopeSel = selectEl(scopeOptions(), "user");
-    var descTa = h("textarea", { class: "ta", placeholder: "Describe what the workflow should do, in plain language..." });
-    descTa.style.minHeight = "92px";
+
+    var duplicable = workflowNamesBySource(null);
+    var templates = workflowNamesBySource("bundled");
+    var start = "blank";
+
     var banner = h("div", { class: "mbanner" });
+    var nameInput = h("input", { class: "txt", maxlength: "48", placeholder: "my-workflow" });
+    var scopeSel = selectEl(scopeOptions(), "user");
+    var fileLine = h("div", { class: "create-file" });
+    // The name is only auto-derived until the reader types one of their own -
+    // after that, switching source must not overwrite what they wrote.
+    var nameTouched = false;
+    nameInput.addEventListener("input", function () { nameTouched = true; syncFile(); });
+    scopeSel.addEventListener("change", syncFile);
+
+    var dupSel = selectEl(nameOptions(duplicable), duplicable[0] || "");
+    var dupMeta = h("div", { class: "create-meta" });
+    var tplSel = selectEl(nameOptions(templates), templates[0] || "");
+    var tplMeta = h("div", { class: "create-meta" });
+    var descTa = h("textarea", { class: "ta", placeholder: "Describe what the workflow should do, in plain language…" });
+    descTa.style.minHeight = "84px";
+    var agentSel = selectEl(agentOptions(), a0.id, function () { onDraftAgent(); });
+    var modelSel = selectEl(modelOptions(a0.id), a0.defaultModel);
+    var effortWrap = h("div", { class: "field" });
     var draft = h("div", { class: "draft" });
 
-    function onCreateAgent() {
-      var ag = agentSel.value;
-      var a = agentById(ag);
-      fillOptions(modelSel, modelOptions(ag), a ? a.defaultModel : null);
+    function onDraftAgent() {
+      var a = agentById(agentSel.value);
+      fillOptions(modelSel, modelOptions(agentSel.value), a ? a.defaultModel : null);
       renderEffort();
     }
     function renderEffort() {
@@ -367,40 +452,159 @@
     modelSel.addEventListener("change", renderEffort);
     renderEffort();
 
-    var body = h("div", null,
-      banner,
+    function wfItem(name) {
+      for (var i = 0; i < (S.workflows || []).length; i++) {
+        if (S.workflows[i].name === name) return S.workflows[i];
+      }
+      return null;
+    }
+    function shapeText(name) {
+      var item = wfItem(name);
+      if (!item) return "";
+      return item.phaseCount + " phase" + (item.phaseCount === 1 ? "" : "s") + " · " +
+        item.stepCount + " step" + (item.stepCount === 1 ? "" : "s");
+    }
+
+    /** The name a source implies, used until the reader types their own. */
+    function derivedName() {
+      if (start === "duplicate" && dupSel.value) return freeWorkflowName(dupSel.value);
+      if (start === "template" && tplSel.value) return freeWorkflowName(tplSel.value);
+      return "";
+    }
+
+    function syncFile() {
+      var target = scopeSel.value === "project"
+        ? "./steamtrain.json"
+        : "~/.steamtrain/workflows.json";
+      var name = slugifyName(nameInput.value);
+      fileLine.textContent = name ? target + " · workflows." + name : target;
+    }
+
+    function syncSource() {
+      dupMeta.textContent = shapeText(dupSel.value);
+      tplMeta.textContent = shapeText(tplSel.value);
+      if (!nameTouched) {
+        nameInput.value = derivedName();
+        nameInput.placeholder = start === "describe" ? "auto from description" : "my-workflow";
+      }
+      syncFile();
+    }
+    dupSel.addEventListener("change", syncSource);
+    tplSel.addEventListener("change", syncSource);
+
+    var cards = h("div", { class: "create-cards" });
+    var cardEls = {};
+    START_POINTS.forEach(function (point) {
+      // A source with nothing to offer (no bundled workflows, nothing to
+      // duplicate) is left out rather than shown as a card that cannot be used.
+      if (point.id === "duplicate" && !duplicable.length) return;
+      if (point.id === "template" && !templates.length) return;
+      var card = h("button", { class: "create-card", type: "button", "aria-pressed": "false" },
+        h("div", { class: "create-card-head" },
+          h("span", { class: "title", text: point.title }),
+          h("span", { class: "tick", "aria-hidden": "true", text: "✓" })
+        ),
+        h("div", { class: "create-card-body", text: point.body })
+      );
+      if (point.id === "duplicate") { card.appendChild(dupSel); card.appendChild(dupMeta); }
+      if (point.id === "template") { card.appendChild(tplSel); card.appendChild(tplMeta); }
+      card.addEventListener("click", function (e) {
+        // The select inside a card is a control, not part of the card hit area.
+        if (e.target !== card && ST.isInteractiveTarget(e.target)) return;
+        pick(point.id);
+      });
+      cardEls[point.id] = card;
+      cards.appendChild(card);
+    });
+
+    var describeBox = h("div", { class: "create-describe" },
       field("Description", descTa),
-      h("div", { class: "row2" },
-        field("Draft with", agentSel),
-        field("Model", modelSel),
-        effortWrap
-      ),
-      h("div", { class: "row2" },
-        field("Name (optional)", nameInput, "Lowercase, kebab-case. Left blank, it's derived from the description."),
-        field("Save to", scopeSel, "Project = ./steamtrain.json (committable, shared).")
-      ),
+      h("div", { class: "row2" }, field("Draft with", agentSel), field("Model", modelSel), effortWrap),
       draft
     );
 
-    var createBtn = h("button", { class: "btn primary", text: "Create \u2728" });
+    function pick(id) {
+      start = id;
+      Object.keys(cardEls).forEach(function (key) {
+        var on = key === id;
+        cardEls[key].classList.toggle("selected", on);
+        cardEls[key].setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      describeBox.style.display = id === "describe" ? "" : "none";
+      syncSource();
+    }
+
+    var body = h("div", { class: "create-sheet" },
+      banner,
+      h("div", { class: "row2" },
+        field("Name", nameInput, "Lowercase, kebab-case."),
+        field("Save to", scopeSel, "Project = ./steamtrain.json (committable, shared).")
+      ),
+      fileLine,
+      h("div", { class: "create-label", text: "Start from" }),
+      cards,
+      describeBox
+    );
+
+    var createBtn = h("button", { class: "btn primary", text: "Create" });
     var foot = h("div", { class: "mfoot" },
-      h("button", { class: "btn", text: "Cancel", onClick: closeModal }),
+      h("span", { class: "create-hint", text: "Opens the new workflow with its pipeline shown. Nothing runs until you hit Run." }),
       h("div", { class: "spacer" }),
+      h("button", { class: "btn", text: "Cancel", onClick: closeModal }),
       createBtn
     );
 
-    createBtn.addEventListener("click", function () {
+    createBtn.addEventListener("click", function () { submit(); });
+
+    function submit() {
+      mbanner(banner, "", "");
+      if (start === "describe") { submitDraft(); return; }
+      var name = slugifyName(nameInput.value);
+      if (!name) { mbanner(banner, "give the workflow a name first", "info"); return; }
+      if (wfItem(name)) { mbanner(banner, "“" + name + "” already exists — pick another name", "info"); return; }
+      createBtn.disabled = true; createBtn.textContent = "Creating…";
+      var from = start === "blank" ? null : (start === "duplicate" ? dupSel.value : tplSel.value);
+      specFor(from).then(function (spec) {
+        spec.name = name;
+        return apiAuth("PUT", "/api/workflows/" + encodeURIComponent(name), {
+          spec: spec, scope: scopeSel.value
+        });
+      }).then(function (r) {
+        createBtn.disabled = false; createBtn.textContent = "Create";
+        if (r.status === 200 && r.body.ok) {
+          closeModal();
+          refreshAfterWrite(r.body.name || name, "created");
+        } else {
+          mbanner(banner, (r.body && r.body.error) || "could not create the workflow", "err");
+        }
+      }).catch(function (e) {
+        createBtn.disabled = false; createBtn.textContent = "Create";
+        mbanner(banner, (e && e.message) || "could not create the workflow", "err");
+      });
+    }
+
+    /** The spec to write: a fresh minimal one, or a copy of `from`. */
+    function specFor(from) {
+      if (!from) return Promise.resolve(blankSpec(a0));
+      return apiAuth("GET", "/api/workflows/" + encodeURIComponent(from)).then(function (r) {
+        if (r.status !== 200 || !r.body.spec) {
+          throw new Error("could not read “" + from + "” to copy it");
+        }
+        return JSON.parse(JSON.stringify(r.body.spec));
+      });
+    }
+
+    function submitDraft() {
       var desc = descTa.value.trim();
       if (!desc) { mbanner(banner, "enter a description first", "info"); return; }
       var effortSel = effortWrap.querySelector("select");
-      mbanner(banner, "", "");
       draft.className = "draft show"; draft.textContent = "";
-      createBtn.disabled = true; createBtn.textContent = "Drafting\u2026";
+      createBtn.disabled = true; createBtn.textContent = "Drafting…";
       // Omit `name` entirely when left blank ("auto from description"): the
       // server's isValidWorkflowName() rejects an empty string, so sending
       // name: "" turned the documented default path (leave Name blank) into
       // a guaranteed 400 on every submission.
-      var nameVal = nameInput.value.trim();
+      var nameVal = slugifyName(nameInput.value);
       var payload = {
         description: desc, agent: agentSel.value, model: modelSel.value,
         effort: effortSel ? effortSel.value : "",
@@ -414,7 +618,7 @@
         else if (frame.type === "attempt") { if (frame.attempt > 1) draft.textContent = ""; }
         else if (frame.type === "done") {
           S.draftAbort = null;
-          createBtn.disabled = false; createBtn.textContent = "Create \u2728";
+          createBtn.disabled = false; createBtn.textContent = "Create";
           if (frame.ok && frame.spec) {
             closeModal();
             refreshAfterWrite(frame.name || frame.spec.name, frame.replaced ? "updated" : "created");
@@ -426,10 +630,20 @@
           }
         }
       });
-    });
+    }
 
-    openModal(modalShell("Create workflow", "An agent drafts a runnable pipeline from your description.", body, foot));
-    setTimeout(function () { descTa.focus(); }, 0);
+    var shell = modalShell("New workflow", "Pick a starting point — you can change everything afterwards.", body, foot, true);
+    shell.classList.add("create-modal");
+    // Enter submits from anywhere but the description box, where it is a newline.
+    shell.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter" || e.shiftKey || e.target === descTa) return;
+      if (e.target && e.target.tagName === "SELECT") return;
+      e.preventDefault();
+      submit();
+    });
+    openModal(shell);
+    pick("blank");
+    setTimeout(function () { nameInput.focus(); }, 0);
   }
 
   // Stream the SSE response of POST /api/workflows/generate (EventSource is
@@ -1137,782 +1351,6 @@
     });
   }
 
-  // ---- run history ---------------------------------------------------------
-  // History browser state (lives for the life of the open modal).
-  var Hist = {
-    holder: null,
-    runs: [],
-    liveRuns: [],
-    query: "",
-    status: "all",
-    selected: 0,
-    pollTimer: null,
-    request: 0,
-    view: "list" // "list" | "detail"
-  };
-
-  // Graphical diff panels of the "Worktree changes" block: per-step patches
-  // fetched lazily (cached per run so re-expanding never refetches) and the
-  // expanded step rows per run (survives the section's re-renders).
-  var HistDiff = {
-    cache: new Map(), // runId -> Map(stepId -> worktree-detail body)
-    expanded: new Map(), // runId -> Set(stepId)
-    inflight: new Set() // "runId:stepId" currently being fetched
-  };
-
-  /** Only a non-empty string is a deep-link run id - never a DOM Event.
-   *  Mirrors normalizeHistoryRunId / helpers in history-browser.ts - this page
-   *  script is not bundled, so the TS source of truth is copied, not imported. */
-  function normalizeHistoryRunId(runId) {
-    return typeof runId === "string" && runId.length > 0 ? runId : undefined;
-  }
-
-  function historyStatusLabel(status) {
-    if (status === "error") return "failed";
-    if (status === "budget-exceeded") return "budget";
-    return status ? String(status) : "";
-  }
-
-  function matchesHistoryQuery(query, fields) {
-    var q = (query || "").trim().toLowerCase();
-    if (!q) return true;
-    var hay = [fields.workflow, fields.input, fields.id, fields.status]
-      .filter(Boolean).join("\n").toLowerCase();
-    return hay.indexOf(q) !== -1;
-  }
-
-  function buildHistoryEntries() {
-    var out = [];
-    var q = Hist.query;
-    var status = Hist.status;
-    if (status === "all" || status === "live") {
-      (Hist.liveRuns || []).forEach(function (run) {
-        if (!matchesHistoryQuery(q, {
-          workflow: run.workflow, input: run.input, id: run.id, status: run.status
-        })) return;
-        out.push({ kind: "live", id: run.id, run: run });
-      });
-    }
-    if (status !== "live") {
-      (Hist.runs || []).forEach(function (run) {
-        if (status !== "all" && run.status !== status) return;
-        if (!matchesHistoryQuery(q, {
-          workflow: run.workflow, input: run.input, id: run.id, status: run.status
-        })) return;
-        out.push({ kind: "record", id: run.id, run: run });
-      });
-    }
-    return out;
-  }
-
-  function stopHistoryPoll() {
-    if (!Hist || !Hist.pollTimer) return;
-    clearInterval(Hist.pollTimer);
-    Hist.pollTimer = null;
-  }
-
-  function openHistory(runId) {
-    var id = normalizeHistoryRunId(runId);
-    // History view does not consume step deep links (those only resolve via the
-    // live event stream). Clear any pending focus so a later live attach cannot
-    // open a step from a previous deep link.
-    S.pendingStepDeepLink = null;
-    stopHistoryPoll();
-    Hist = {
-      holder: null,
-      runs: [],
-      liveRuns: S.liveRuns ? S.liveRuns.slice() : [],
-      query: "",
-      status: "all",
-      selected: 0,
-      pollTimer: null,
-      request: 0,
-      fingerprint: "",
-      view: id ? "detail" : "list"
-    };
-    var holder = h("div", { class: "hist-root" }, h("div", { class: "ro hist-loading", text: "Loading run history\u2026" }));
-    Hist.holder = holder;
-    var footChildren = [
-      h("button", { class: "btn danger small", text: "Clear all", onClick: clearHistory, style: isReadOnly() ? "display:none" : "" }),
-      h("div", { class: "spacer" }),
-      h("button", { class: "btn", text: "Close", onClick: function () { stopHistoryPoll(); closeModal(); } })
-    ];
-    if (isReadOnly()) footChildren.shift();
-    var foot = h("div", { class: "mfoot" });
-    footChildren.forEach(function (c) { foot.appendChild(c); });
-    var shell = modalShell("Runs", "Live rides and recorded arrivals - inspect, re-run, harvest.", holder, foot, true);
-
-    shell.classList.add("history-modal");
-    openModal(shell);
-    if (id) openHistoryRun(holder, id);
-    else reopenHistoryList(holder);
-    Hist.pollTimer = setInterval(function () {
-      if (Hist.view !== "list" || !Hist.holder) return;
-      refreshHistoryData(Hist.holder, { silent: true });
-    }, 2500);
-  }
-
-  function refreshHistoryData(holder, opts) {
-    opts = opts || {};
-    var req = ++Hist.request;
-    return Promise.all([
-      apiAuth("GET", "/api/history"),
-      api("GET", "/api/runs").catch(function () { return { status: 0, body: {} }; })
-    ]).then(function (results) {
-      if (req !== Hist.request || Hist.holder !== holder) return;
-      var histRes = results[0];
-      var liveRes = results[1];
-      if (histRes.status === 401) { showReauthOverlay(); return; }
-      var nextRuns = (histRes.body && histRes.body.runs) || [];
-      var nextLive = [];
-      if (liveRes && liveRes.status === 200) {
-        nextLive = (liveRes.body.runs || []).filter(function (run) {
-          return run.status === "running" || run.status === "queued";
-        });
-        S.liveRuns = nextLive.slice();
-        ST.shell.renderLiveRuns();
-      }
-      var fingerprint = historyListFingerprint(nextRuns, nextLive);
-      var changed = fingerprint !== Hist.fingerprint;
-      Hist.runs = nextRuns;
-      Hist.liveRuns = nextLive;
-      Hist.fingerprint = fingerprint;
-      if (!opts.silent || (Hist.view === "list" && changed)) renderHistoryList(holder);
-    }).catch(function () {
-      if (req !== Hist.request || Hist.holder !== holder) return;
-      if (!opts.silent) {
-        clear(holder);
-        holder.appendChild(h("div", { class: "mbanner show err", text: "Could not load run history - check the connection and try again." }));
-        holder.appendChild(h("button", { class: "btn", text: "Retry", onClick: function () { reopenHistoryList(holder); } }));
-      }
-    });
-  }
-
-  function historyListFingerprint(runs, liveRuns) {
-    var live = (liveRuns || []).map(function (r) {
-      return [r.id, r.status, (r.pendingApprovals || []).length, (r.pendingInputs || []).length].join(":");
-    }).join("|");
-    var past = (runs || []).map(function (r) { return r.id + ":" + r.status; }).join("|");
-    return live + "#" + past;
-  }
-
-  function reopenHistoryList(holder) {
-    Hist.view = "list";
-    Hist.holder = holder;
-    clearRunDeepLink();
-    clear(holder);
-    holder.appendChild(h("div", { class: "ro hist-loading", text: "Loading\u2026" }));
-    refreshHistoryData(holder);
-  }
-
-  function renderHistoryToolbar(holder) {
-    var toolbar = h("div", { class: "hist-toolbar" });
-    var search = h("input", {
-      class: "txt hist-search",
-      type: "search",
-      placeholder: "Search workflow, input, or run id\u2026",
-      value: Hist.query,
-      "aria-label": "Filter runs"
-    });
-    search.addEventListener("input", function () {
-      Hist.query = search.value || "";
-      Hist.selected = 0;
-      renderHistoryList(holder);
-    });
-    toolbar.appendChild(search);
-
-    var chips = h("div", { class: "hist-chips", role: "tablist", "aria-label": "Filter by status" });
-    var counts = { done: 0, error: 0, canceled: 0, "budget-exceeded": 0 };
-    (Hist.runs || []).forEach(function (r) { if (counts[r.status] != null) counts[r.status]++; });
-    var chipDefs = [
-      { id: "all", label: "All", count: (Hist.liveRuns || []).length + (Hist.runs || []).length },
-      { id: "live", label: "Live", count: (Hist.liveRuns || []).length },
-      { id: "done", label: "Done", count: counts.done },
-      { id: "error", label: "Failed", count: counts.error },
-      { id: "canceled", label: "Canceled", count: counts.canceled },
-      { id: "budget-exceeded", label: "Budget", count: counts["budget-exceeded"] }
-    ];
-    chipDefs.forEach(function (chip) {
-      if (chip.id !== "all" && chip.id !== "live" && chip.count === 0 && Hist.status !== chip.id) return;
-      var btn = h("button", {
-        class: "hist-chip" + (Hist.status === chip.id ? " active" : ""),
-        type: "button",
-        role: "tab",
-        "aria-selected": Hist.status === chip.id ? "true" : "false",
-        text: chip.label + (chip.count ? " " + chip.count : "")
-      });
-      btn.addEventListener("click", function () {
-        Hist.status = chip.id;
-        Hist.selected = 0;
-        renderHistoryList(holder);
-      });
-      chips.appendChild(btn);
-    });
-    toolbar.appendChild(chips);
-    return toolbar;
-  }
-
-  function renderHistoryList(holder) {
-    Hist.view = "list";
-    var prevSearch = holder.querySelector(".hist-search");
-    var keepSearchFocus = Boolean(
-      prevSearch && document.activeElement === prevSearch
-    );
-    var caret = keepSearchFocus ? (prevSearch.selectionStart || Hist.query.length) : 0;
-    clear(holder);
-    holder.appendChild(renderHistoryToolbar(holder));
-
-    var entries = buildHistoryEntries();
-    if (Hist.selected >= entries.length) Hist.selected = Math.max(0, entries.length - 1);
-
-    if (!Hist.runs.length && !Hist.liveRuns.length) {
-      holder.appendChild(h("div", { class: "hist-empty" },
-        h("div", { class: "hist-empty-title", text: "No runs yet" }),
-        h("div", { class: "hist-empty-body", text: "Launch a workflow and it will appear here - live while it rides, then as a recorded arrival you can inspect, re-run, or harvest." })
-      ));
-      restoreHistorySearchFocus(holder, keepSearchFocus, caret);
-      return;
-    }
-    if (!entries.length) {
-      holder.appendChild(h("div", { class: "hist-empty" },
-        h("div", { class: "hist-empty-title", text: "No runs match" }),
-        h("div", { class: "hist-empty-body", text: "Try a different search or status chip." }),
-        h("button", { class: "btn small", text: "Clear filters", onClick: function () {
-          Hist.query = ""; Hist.status = "all"; Hist.selected = 0; renderHistoryList(holder);
-        } })
-      ));
-      restoreHistorySearchFocus(holder, keepSearchFocus, caret);
-      return;
-    }
-
-    var list = h("div", { class: "hruns", role: "listbox", "aria-label": "Workflow runs" });
-    var seenLive = false;
-    var seenRecord = false;
-    var liveCount = entries.filter(function (e) { return e.kind === "live"; }).length;
-    var recordCount = entries.length - liveCount;
-
-    entries.forEach(function (entry, idx) {
-      if (entry.kind === "live" && !seenLive) {
-        list.appendChild(h("div", { class: "hist-section", text: "On the rails · " + liveCount }));
-        seenLive = true;
-      }
-      if (entry.kind === "record" && !seenRecord) {
-        list.appendChild(h("div", { class: "hist-section", text: "Arrived · " + recordCount }));
-        seenRecord = true;
-      }
-      list.appendChild(entry.kind === "live"
-        ? renderLiveHistoryRow(holder, entry.run, idx)
-        : renderRecordHistoryRow(holder, entry.run, idx));
-    });
-    holder.appendChild(list);
-
-    var hint = h("div", { class: "hist-hint", text: "\u2191\u2193 select · Enter open · / focus search · Esc close" });
-    holder.appendChild(hint);
-    restoreHistorySearchFocus(holder, keepSearchFocus, caret);
-  }
-
-  function restoreHistorySearchFocus(holder, keep, caret) {
-    if (!keep) return;
-    var searchEl = holder.querySelector(".hist-search");
-    if (!searchEl) return;
-    searchEl.focus();
-    try { searchEl.setSelectionRange(caret, caret); } catch (e) {}
-  }
-
-  function renderLiveHistoryRow(holder, run, idx) {
-    var badges = [];
-    badges.push(h("span", { class: "hr-status live", text: run.status }));
-    if (run.detached) badges.push(h("span", { class: "hr-pill", text: "detached" }));
-    if (run.pendingApprovals && run.pendingApprovals.length) badges.push(h("span", { class: "hr-pill warn", text: "approval" }));
-    if (run.pendingInputs && run.pendingInputs.length) badges.push(h("span", { class: "hr-pill warn", text: "input" }));
-    var badgeWrap = h("span", { class: "hr-badges" });
-    badges.forEach(function (b) { badgeWrap.appendChild(b); });
-    var selected = idx === Hist.selected;
-    var row = h("div", {
-      class: "hrun live" + (selected ? " sel" : ""),
-      role: "option",
-      tabindex: "0",
-      "aria-selected": selected ? "true" : "false",
-      "aria-label": "Attach to live " + run.workflow + " run",
-      "data-hist-idx": String(idx),
-      onClick: function () { attachFromHistory(run); },
-      onKeydown: function (event) {
-        activateWithKeyboard(event, function () { attachFromHistory(run); });
-      }
-    },
-      h("div", { class: "hr-top" },
-        h("span", { class: "hr-glyph live", text: run.status === "queued" ? "\u29D7" : "\u25B6" }),
-        h("span", { class: "hr-name", text: run.workflow }),
-        badgeWrap,
-        h("span", { class: "hr-meta", text: relTime(run.startedAt || run.createdAt) + " \u00b7 Enter attaches" })
-      ),
-      h("div", { class: "hr-input", text: truncate(((run.input || "").replace(/\s+/g, " ").trim()) || "(no input)", 160) })
-    );
-    return row;
-  }
-
-  function renderRecordHistoryRow(holder, run, idx) {
-    var meta = fmtTotals(run.totals, { durationMs: run.durationMs || 0, tokens: true });
-    var selected = idx === Hist.selected;
-    var row = h("div", {
-      class: "hrun " + run.status + (selected ? " sel" : ""),
-      role: "option",
-      tabindex: "0",
-      "aria-selected": selected ? "true" : "false",
-      "aria-label": "Open recorded " + run.workflow + " run",
-      "data-hist-idx": String(idx),
-      onClick: function () { openHistoryRun(holder, run.id); },
-      onKeydown: function (event) {
-        activateWithKeyboard(event, function () { openHistoryRun(holder, run.id); });
-      }
-    },
-      h("div", { class: "hr-top" },
-        h("span", { class: "hr-glyph", text: run.status === "done" ? "\u2713" : run.status === "error" ? "\u2717" : run.status === "canceled" ? "\u2298" : "$" }),
-        h("span", { class: "hr-name", text: run.workflow }),
-        h("span", { class: "hr-status", text: historyStatusLabel(run.status) }),
-        h("span", { class: "hr-meta", text: relTime(run.startedAt) + " \u00b7 " + meta })
-      ),
-      h("div", { class: "hr-input", text: truncate(((run.input || "").replace(/\s+/g, " ").trim()) || "(no input)", 160) })
-    );
-    return row;
-  }
-
-  function attachFromHistory(run) {
-    stopHistoryPoll();
-    closeModal();
-    attachRun(run);
-  }
-
-  function openHistoryRun(holder, id) {
-    if (!normalizeHistoryRunId(id)) {
-      reopenHistoryList(holder);
-      return;
-    }
-    Hist.view = "detail";
-    setRunDeepLink(id);
-    clear(holder);
-    holder.appendChild(h("div", { class: "ro hist-loading", text: "Loading run\u2026" }));
-    var req = ++Hist.request;
-    apiAuth("GET", "/api/history/" + encodeURIComponent(id)).then(function (r) {
-      if (req !== Hist.request || Hist.holder !== holder) return;
-      if (r.status !== 200 || !r.body.record) {
-        holder.insertBefore(h("div", { class: "mbanner show err", text: "Could not load that run." }), holder.firstChild);
-        // Recover: still show the real list instead of an empty wipe.
-        refreshHistoryData(holder);
-        return;
-      }
-      renderHistoryDetail(holder, r.body.record);
-    }).catch(function () {
-      if (req !== Hist.request || Hist.holder !== holder) return;
-      clear(holder);
-      holder.appendChild(h("div", { class: "mbanner show err", text: "Could not load that run - network error." }));
-      holder.appendChild(h("button", { class: "btn", text: "Back to runs", onClick: function () { reopenHistoryList(holder); } }));
-    });
-  }
-
-  function renderHistoryDetail(holder, record) {
-    Hist.view = "detail";
-    clear(holder);
-
-    var back = h("button", { class: "hback", type: "button", text: "\u2190 back to runs", onClick: function () { reopenHistoryList(holder); } });
-    holder.appendChild(back);
-
-    var statusCls = "hist-hero " + record.status;
-    var hero = h("div", { class: statusCls },
-      h("div", { class: "hist-hero-top" },
-        h("span", { class: "hist-hero-glyph", text: record.status === "done" ? "\u2713" : record.status === "error" ? "\u2717" : record.status === "canceled" ? "\u2298" : "$" }),
-        h("div", { class: "hist-hero-titles" },
-          h("div", { class: "hist-hero-name", text: record.workflow }),
-          h("div", { class: "hist-hero-sub", text: historyStatusLabel(record.status) + " \u00b7 " + fmtTime(record.startedAt) + " \u00b7 "
-            + ((record.durationMs || 0) / 1000).toFixed(1) + "s \u00b7 " + fmtTotals(record.totals, { cached: true, tokens: true }) })
-        ),
-        h("button", {
-          class: "btn small hist-copy",
-          type: "button",
-          text: "Copy id",
-          title: record.id,
-          onClick: function () {
-            var text = record.id;
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-              navigator.clipboard.writeText(text).then(function () {
-                ST.run.setBanner("Copied run id " + text.slice(0, 8) + "\u2026", "ok");
-              }).catch(function () {});
-            }
-          }
-        })
-      )
-    );
-    holder.appendChild(hero);
-
-    if (record.input) {
-      holder.appendChild(h("div", { class: "hist-input-block" },
-        h("div", { class: "hist-input-label", text: "Input" }),
-        h("div", { class: "hist-input-body", text: record.input })
-      ));
-    }
-    if (record.budget) {
-      var bScope = record.budget.scope === "step" && record.budget.stepId ? "step '" + record.budget.stepId + "'" : "workflow";
-      holder.appendChild(h("div", { class: "mbanner show err", text: bScope + " cost budget $" + record.budget.limitUsd.toFixed(4) + " reached (spent $" + record.budget.spentUsd.toFixed(4) + ") \u2014 resumable after raising the cap" }));
-    }
-    if (record.error) holder.appendChild(h("div", { class: "mbanner show err", text: record.error }));
-
-    // Per-model breakdown from the recorded tree.
-    var histSteps = [];
-    (record.phases || []).forEach(function (p) { (p.steps || []).forEach(function (s) { histSteps.push(s); }); });
-    var histByModel = aggregateByModel(histSteps);
-    if (histByModel.length) {
-      var hmt = h("table", { class: "hist-model-table" });
-      hmt.appendChild(h("tr", null, h("th", { text: "model" }), h("th", { text: "steps" }), h("th", { text: "cost" }), h("th", { text: "tokens" })));
-      histByModel.forEach(function (m) {
-        hmt.appendChild(h("tr", null,
-          h("td", { text: m.model }), h("td", { text: String(m.steps) }),
-          h("td", { text: m.costUsd ? "$" + m.costUsd.toFixed(4) : "" }),
-          h("td", { text: fmtTokenSummary(m.tokens) })
-        ));
-      });
-      holder.appendChild(hmt);
-    }
-
-    var canRetry = false;
-    (record.phases || []).forEach(function (p) {
-      (p.steps || []).forEach(function (s) {
-        if (s.status && s.status !== "done") canRetry = true;
-      });
-    });
-    var actions = h("div", { class: "run-actions hist-actions" });
-    if (!isReadOnly()) {
-      actions.appendChild(h("button", { class: "btn primary", text: "Re-run",
-        onClick: function () { stopHistoryPoll(); rerunHistory(record.id, record.workflow, "rerun"); } }));
-      if (canRetry) {
-        actions.appendChild(h("button", { class: "btn", text: "Retry failed",
-          onClick: function () { stopHistoryPoll(); rerunHistory(record.id, record.workflow, "retry"); } }));
-        actions.appendChild(h("button", { class: "btn", text: "Retry with agent\u2026",
-          onClick: function () { openRetryRetargetModal(record); } }));
-      }
-      actions.appendChild(h("button", { class: "btn danger small", text: "Delete",
-        onClick: function () { deleteHistoryRun(holder, record); } }));
-    }
-    if (actions.childNodes.length) holder.appendChild(actions);
-
-    // Worktree lifecycle: what each retained step worktree changed, plus the
-    // Apply / Branch / Prune closure actions (same machinery as the CLI's
-    // `workflow history apply/prune`).
-    var wtSection = h("div", { class: "hist-worktrees" });
-    holder.appendChild(wtSection);
-    renderWorktreeSection(wtSection, record);
-
-    (record.phases || []).forEach(function (p, idx) {
-      if (idx > 0) holder.appendChild(h("div", { class: "connector" }));
-      var pstat = p.done ? (p.ok ? "done" : "failed") : "";
-      var phaseEl = h("div", { class: "phase" + (p.done ? " done" : "") },
-        h("div", { class: "phead" },
-          h("div", { class: "pidx", text: String(idx + 1) }),
-          h("div", { class: "ptitle", text: p.title }),
-          pstat ? h("div", { class: "pstat", text: "\u00b7 " + pstat }) : null
-        )
-      );
-      var cards = h("div", { class: "cards" });
-      (p.steps || []).forEach(function (st) { cards.appendChild(ST.run.renderCard(historyStepView(st))); });
-      phaseEl.appendChild(cards);
-      holder.appendChild(phaseEl);
-    });
-  }
-
-  function deleteHistoryRun(holder, record) {
-    if (!window.confirm("Delete recorded run " + record.id.slice(0, 8) + "\u2026 of \u201c" + record.workflow + "\u201d? This cannot be undone.")) return;
-    apiAuth("DELETE", "/api/history/" + encodeURIComponent(record.id)).then(function (r) {
-      if (r.status === 200 || r.status === 204) {
-        ST.run.setBanner("Deleted run " + record.id.slice(0, 8) + "\u2026", "ok");
-        reopenHistoryList(holder);
-      } else {
-        ST.run.setBanner((r.body && r.body.error) || "delete failed", "err");
-      }
-    });
-  }
-
-  function histDiffExpanded(runId) {
-    var set = HistDiff.expanded.get(runId);
-    if (!set) { set = new Set(); HistDiff.expanded.set(runId, set); }
-    return set;
-  }
-
-  /**
-   * One expandable step row of the "Worktree changes" block: the summary line
-   * (branch, file count, +/- stats) and, when expanded, the lazily fetched
-   * graphical diff panel below it.
-   */
-  function renderWorktreeDiffRow(holder, record, s) {
-    var isOpen = histDiffExpanded(record.id).has(s.stepId);
-    var wrap = h("div", null);
-    var row = h("div", {
-      class: "hist-wt-line expandable" + (isOpen ? "" : " collapsed"),
-      title: s.branch,
-      role: "button",
-      tabindex: "0",
-      onClick: function () { toggleWorktreeDiff(holder, record, s.stepId); },
-      onKeydown: function (e) { activateWithKeyboard(e, function () { toggleWorktreeDiff(holder, record, s.stepId); }); }
-    },
-      h("span", { class: "diff-chevron", "aria-hidden": "true", text: "▾" }),
-      "⎇ " + s.stepId + " — " + s.files.length + " file(s) ",
-      h("span", { class: "diff-add", text: "+" + s.additions }),
-      " ",
-      h("span", { class: "diff-del", text: "−" + s.deletions })
-    );
-    wrap.appendChild(row);
-    if (!isOpen) return wrap;
-
-    var cached = HistDiff.cache.get(record.id);
-    var body = cached && cached.get(s.stepId);
-    if (!body) {
-      wrap.appendChild(h("div", { class: "hist-wt-loading", text: "Loading diff…" }));
-      fetchWorktreeDiff(holder, record, s.stepId);
-      return wrap;
-    }
-    wrap.appendChild(renderWorktreeDiffPanel(record, s, body));
-    return wrap;
-  }
-
-  function toggleWorktreeDiff(holder, record, stepId) {
-    var expSet = histDiffExpanded(record.id);
-    if (expSet.has(stepId)) expSet.delete(stepId); else expSet.add(stepId);
-    renderWorktreeSection(holder, record);
-  }
-
-  /** Lazy per-step patch fetch; responses cache per run id + step id. */
-  function fetchWorktreeDiff(holder, record, stepId) {
-    var key = record.id + ":" + stepId;
-    if (HistDiff.inflight.has(key)) return;
-    var cached = HistDiff.cache.get(record.id);
-    if (cached && cached.has(stepId)) return;
-    HistDiff.inflight.add(key);
-    apiAuth("GET", "/api/history/" + encodeURIComponent(record.id) + "/worktrees?step=" + encodeURIComponent(stepId)).then(function (r) {
-      HistDiff.inflight.delete(key);
-      var runCache = HistDiff.cache.get(record.id);
-      if (!runCache) { runCache = new Map(); HistDiff.cache.set(record.id, runCache); }
-      // Cache the failure too, not just the success. The re-render below asks
-      // renderWorktreeDiffRow to draw this step again; that row fetches whenever
-      // the step is expanded and uncached, so leaving a non-200 uncached means
-      // re-render → fetch → non-200 → re-render, hammering the server for as
-      // long as the row stays open. An error entry ends that loop and gives the
-      // reader something better than a permanent "Loading diff…".
-      runCache.set(stepId, r.status === 200 && r.body
-        ? r.body
-        : { error: (r.body && r.body.error) || ("diff unavailable (HTTP " + r.status + ")") });
-      renderWorktreeSection(holder, record);
-    }).catch(function () {
-      HistDiff.inflight.delete(key);
-      var runCache = HistDiff.cache.get(record.id);
-      if (!runCache) { runCache = new Map(); HistDiff.cache.set(record.id, runCache); }
-      runCache.set(stepId, { error: "diff request failed" });
-      renderWorktreeSection(holder, record);
-    });
-  }
-
-  /**
-   * The expanded body of a worktree step row: the graphical diff when the
-   * diff-view bundle is loaded and a patch came back, a muted per-file list
-   * for metadata-only changes (and as the no-bundle fallback), or a
-   * "worktree gone" note when the step's worktree was cleaned up since the
-   * list was fetched.
-   */
-  function renderWorktreeDiffPanel(record, s, body) {
-    var panel = h("div", { class: "hist-wt-diff" });
-    // The cached failure sentinel from fetchWorktreeDiff. Say the fetch failed
-    // rather than falling through to "no textual changes", which would report a
-    // clean worktree we never actually managed to read.
-    if (body.error) {
-      panel.appendChild(h("div", { class: "hist-wt-diff-empty", text: body.error }));
-      return panel;
-    }
-    if (body.exists === false) {
-      panel.appendChild(h("div", { class: "hist-wt-diff-empty", text: "worktree no longer exists — diff unavailable" }));
-      return panel;
-    }
-    if (typeof window.SteamtrainDiff !== "undefined" && body.patch) {
-      if (body.patchTruncated) {
-        panel.appendChild(h("div", { class: "hist-wt-diff-truncated",
-          text: "Diff truncated at 200 KB — view the full diff with: steamtrain workflow history show " + record.id + " --diff --step " + s.stepId }));
-      }
-      panel.appendChild(window.SteamtrainDiff.renderPatch(body.patch));
-      return panel;
-    }
-    if (body.files && body.files.length) {
-      var fileList = body.files.slice(0, 8).map(function (f) { return f.status + " " + f.path; }).join(" · ");
-      if (body.files.length > 8) fileList += " …";
-      panel.appendChild(h("div", { class: "hist-wt-files", text: fileList }));
-    } else {
-      panel.appendChild(h("div", { class: "hist-wt-diff-empty", text: "no textual changes" }));
-    }
-    return panel;
-  }
-
-  /** Drop cached patches for a run after a harvest/prune changed its worktrees. */
-  function invalidateWorktreeDiffs(runId) {
-    HistDiff.cache.delete(runId);
-  }
-
-  /**
-   * The "Worktree changes" block of a run's history detail: per-step diffstat
-   * of the retained worktrees, the recorded harvest status, and the lifecycle
-   * actions — apply to the checkout, merge to a branch, or prune (discard).
-   * A source-vs-source merge conflict (409) surfaces retry buttons with a
-   * deterministic winner instead of a dead end.
-   */
-  function renderWorktreeSection(holder, record, notice) {
-    apiAuth("GET", "/api/history/" + encodeURIComponent(record.id) + "/worktrees").then(function (r) {
-      if (r.status !== 200 || !r.body.sources || !r.body.sources.length) return;
-      var sources = r.body.sources;
-      var harvest = r.body.harvest;
-      clear(holder);
-      holder.appendChild(h("div", { class: "hist-wt-title", text: "Worktree changes" }));
-      var bits = [];
-      if (harvest && harvest.appliedSteps && harvest.appliedSteps.length) bits.push("harvested: " + harvest.appliedSteps.join(", "));
-      if (harvest && harvest.branch) bits.push("on branch " + harvest.branch);
-      if (harvest && harvest.prunedAt) bits.push("worktrees pruned " + fmtTime(harvest.prunedAt));
-      var status = h("div", { class: "hist-wt-status" });
-      if (bits.length) status.textContent = bits.join(" · ");
-      if (harvest && harvest.prUrl) {
-        status.appendChild(h("span", { text: (bits.length ? " · " : "") + "PR: " }));
-        status.appendChild(safeExternalLink(harvest.prUrl));
-      }
-      if (status.textContent || status.childNodes.length) holder.appendChild(status);
-
-      var anyExists = false, anyChanges = false;
-      sources.forEach(function (s) {
-        if (!s.exists || !s.files.length) {
-          var plain = !s.exists
-            ? "⎇ " + s.stepId + " — worktree gone (pruned or cleaned up)"
-            : "⎇ " + s.stepId + " — no changes";
-          if (s.exists) anyExists = true;
-          holder.appendChild(h("div", { class: "hist-wt-line", text: plain, title: s.branch }));
-          return;
-        }
-        anyExists = true; anyChanges = true;
-        holder.appendChild(renderWorktreeDiffRow(holder, record, s));
-      });
-
-      var banner = h("div", { class: "mbanner", style: "margin-top:6px" });
-      if (notice) { banner.className = "mbanner show " + notice.cls; banner.textContent = notice.text; }
-      holder.appendChild(banner);
-      if (isReadOnly()) return;
-      var buttons = h("div", { class: "hist-wt-actions" });
-      function harvestBtn(label, body, cls) {
-        return h("button", { class: "btn" + (cls ? " " + cls : ""), text: label, onClick: function () {
-          banner.className = "mbanner show info"; banner.textContent = "merging…";
-          apiAuth("POST", "/api/history/" + encodeURIComponent(record.id) + "/harvest", body).then(function (rr) {
-            if (rr.status === 200) {
-              invalidateWorktreeDiffs(record.id);
-              var res = rr.body.result;
-              var text = res.noChanges ? "no changes to merge"
-                : (res.mode === "apply"
-                  ? "applied " + res.mergedSources.join(", ") + " to the checkout (uncommitted): " + res.files.length + " file(s) +" + res.additions + " -" + res.deletions
-                  : "merged " + res.mergedSources.join(", ") + " — " + (res.prUrl ? "PR " + res.prUrl : "branch " + res.branch));
-              renderWorktreeSection(holder, record, { cls: "info", text: text });
-            } else if (rr.status === 409) {
-              banner.className = "mbanner show err";
-              banner.textContent = rr.body.error + " — retry with a deterministic winner:";
-              buttons.appendChild(harvestBtn("Retry: first wins", Object.assign({}, body, { onConflict: "ours" })));
-              buttons.appendChild(harvestBtn("Retry: last wins", Object.assign({}, body, { onConflict: "theirs" })));
-            } else {
-              banner.className = "mbanner show err";
-              banner.textContent = rr.body.error || "harvest failed";
-            }
-          });
-        } });
-      }
-      if (anyChanges) {
-        buttons.appendChild(harvestBtn("Apply to checkout", { mode: "apply" }, "primary"));
-        buttons.appendChild(harvestBtn("Merge to branch", { mode: "branch" }));
-      }
-      if (anyExists && !(harvest && harvest.prunedAt)) {
-        buttons.appendChild(h("button", { class: "btn", text: "Prune worktrees", onClick: function () {
-          if (!window.confirm("Discard this run's worktrees and branches? Unapplied changes are lost.")) return;
-          apiAuth("POST", "/api/history/" + encodeURIComponent(record.id) + "/prune").then(function (rr) {
-            if (rr.status === 200) invalidateWorktreeDiffs(record.id);
-            renderWorktreeSection(holder, record, {
-              cls: rr.status === 200 ? "info" : "err",
-              text: rr.status === 200 ? "pruned " + rr.body.pruned + "/" + rr.body.total + " worktree(s)" : (rr.body.error || "prune failed")
-            });
-          });
-        } }));
-      }
-      if (buttons.childNodes.length) holder.appendChild(buttons);
-    }).catch(function () {});
-  }
-
-  // Map a recorded step onto the shape renderCard expects (live step view).
-  function historyStepView(st) {
-    return {
-      stepId: st.stepId, blockKind: st.blockKind || "worker", agent: st.agent, model: st.model,
-      dependsOn: st.dependsOn, forEach: null, item: st.item, status: st.status,
-      text: st.text || (st.result && st.result.output) || "", activity: null,
-      result: st.result, cached: st.cached, attempts: st.attempts,
-      gate: st.gate ? { passed: st.gate.passed, target: st.gate.target } : null,
-      approval: st.approval || null,
-      // Replayed records are terminal, so a recorded ask is never pending.
-      humanInput: st.humanInput ? Object.assign({ pending: false }, st.humanInput) : null,
-      loopTo: st.loopTo, maxIterations: st.maxIterations
-    };
-  }
-
-  function clearHistory() {
-    if (!window.confirm("Clear all recorded runs? This deletes the on-disk history.")) return;
-    apiAuth("DELETE", "/api/history").then(function () {
-      stopHistoryPoll();
-      closeModal();
-      ST.run.setBanner("Cleared run history.", "ok");
-    });
-  }
-
-  /** Keyboard navigation inside the history modal list. */
-  function handleHistoryListKey(e) {
-    if (!Hist.holder || Hist.view !== "list") return false;
-    if (e.target && e.target.classList && e.target.classList.contains("hist-search")) {
-      if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter") {
-        // Let arrows move selection even from the search box.
-      } else {
-        return false;
-      }
-    }
-    var entries = buildHistoryEntries();
-    if (!entries.length) return false;
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      Hist.selected = Math.min(entries.length - 1, Hist.selected + 1);
-      renderHistoryList(Hist.holder);
-      focusHistoryRow();
-      return true;
-    }
-    if (e.key === "ArrowUp") {
-      e.preventDefault();
-      Hist.selected = Math.max(0, Hist.selected - 1);
-      renderHistoryList(Hist.holder);
-      focusHistoryRow();
-      return true;
-    }
-    if (e.key === "Enter") {
-      e.preventDefault();
-      var entry = entries[Hist.selected];
-      if (!entry) return true;
-      if (entry.kind === "live") attachFromHistory(entry.run);
-      else openHistoryRun(Hist.holder, entry.id);
-      return true;
-    }
-    if (e.key === "/" && !(e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA"))) {
-      e.preventDefault();
-      var search = Hist.holder.querySelector(".hist-search");
-      if (search) search.focus();
-      return true;
-    }
-    return false;
-  }
-
-  function focusHistoryRow() {
-    if (!Hist.holder) return;
-    var row = Hist.holder.querySelector('.hrun[data-hist-idx="' + Hist.selected + '"]');
-    if (row) row.focus();
-  }
-
 
   ST.modals = {
     addBlurValidation: addBlurValidation,
@@ -1923,18 +1361,18 @@
     effortOptions: effortOptions,
     familyModelOptions: familyModelOptions,
     field: field,
-    handleHistoryListKey: handleHistoryListKey,
     mbanner: mbanner,
     modalShell: modalShell,
     modelOptionsWith: modelOptionsWith,
     openCreate: openCreate,
     openEditor: openEditor,
-    openHistory: openHistory,
     openModal: openModal,
+    openRetryRetargetModal: openRetryRetargetModal,
     preferredAgent: preferredAgent,
     reloadCatalog: reloadCatalog,
+    rerunHistory: rerunHistory,
+    safeExternalLink: safeExternalLink,
     selectEl: selectEl,
-    stopHistoryPoll: stopHistoryPoll,
     trapModalFocus: trapModalFocus,
   };
 })(window.Steamtrain);

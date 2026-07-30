@@ -110,7 +110,7 @@
     // Typing while browsing history turns the recalled entry into the new draft.
     document.getElementById("input").addEventListener("input", function () { ST.run.clearPromptBrowse(); });
     document.getElementById("newWfBtn").addEventListener("click", ST.modals.openCreate);
-    document.getElementById("historyBtn").addEventListener("click", function () { ST.modals.openHistory(); });
+    document.getElementById("historyBtn").addEventListener("click", function () { ST.runs.open(); });
     document.getElementById("settingsBtn").addEventListener("click", function () { ST.settings.open(); });
     document.getElementById("editBtn").addEventListener("click", function () { ST.modals.openEditor(false); });
     document.getElementById("cloneBtn").addEventListener("click", function () { ST.modals.openEditor(true); });
@@ -123,38 +123,40 @@
       if (overlayOpen) {
         if (e.key === "Escape") {
           e.preventDefault();
-          ST.modals.stopHistoryPoll();
           ST.modals.closeModal();
-        } else if (ST.modals.handleHistoryListKey(e)) {
-          return;
         } else if (e.key === "Tab") {
           ST.modals.trapModalFocus(e);
         }
         return;
       }
+      // The runs page owns ↑/↓, `/` and Escape while it is up; it reports
+      // whether it consumed the key so the cockpit's own handling below still
+      // runs for anything it did not.
+      if (ST.runs.handleKey(e)) return;
       if (e.key === "Escape" && S.detail) {
         e.preventDefault();
         ST.run.closeDetail();
       }
     });
 
-    // parseRoute dispatches the hash to either the cockpit (run deep link,
-    // restoring the cockpit view first if settings was showing) or the
-    // settings page; a route-less hash leaves whichever view is current alone.
+    // parseRoute dispatches the hash to the cockpit (run deep link, restoring
+    // the cockpit view first if a page was showing) or to one of the full-page
+    // surfaces (#runs, #settings); a route-less hash leaves the current view
+    // alone.
     window.addEventListener("hashchange", function (e) {
       var oldHash = null;
       try { oldHash = new URL(e.oldURL).hash; } catch (err) {}
       ST.handleRoute(oldHash);
     });
-    // Resolve a shared #settings link once the rail scaffolding above exists
-    // to hide/show. A #run- link is deliberately NOT resolved here: the
+    // Resolve a shared #settings or #runs link once the rail scaffolding above
+    // exists to hide/show. A #run- link is deliberately NOT resolved here: the
     // workflow catalog hasn't loaded yet at this point, so attachRun would
     // take its "not in catalog" fallback even for a known workflow. Run/step
     // deep links are left to loadWorkflows() (st-core.js), which re-parses
     // the hash once the catalog is loaded — dispatching from both places
     // raced and could leave the step drill-in drawer closed or its pending
     // deep-link flag stale. Do not re-add a run-link dispatch here.
-    ST.handleRoute(null, /* bootSettingsOnly */ true);
+    ST.handleRoute(null, /* bootPagesOnly */ true);
 
     loadSessionThenCatalog();
   }

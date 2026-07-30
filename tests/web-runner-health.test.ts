@@ -174,6 +174,10 @@ interface Row {
 interface Mounted {
   rows: () => Row[];
   save: () => Promise<void>;
+  /** Flattened text of the state strip above the table. */
+  tally: () => string;
+  /** Whether the Runners nav item carries the "needs attention" pip. */
+  navFlagged: () => boolean;
   puts: Record<string, unknown>[];
 }
 
@@ -257,7 +261,12 @@ async function mountSettings(opts: {
     await Promise.resolve();
     await Promise.resolve();
   };
-  return { rows, save, puts };
+  const tally = () => {
+    const strip = collect(root, (n) => n.className === "runner-tally")[0];
+    return strip ? flatText(strip) : "";
+  };
+  const navFlagged = () => collect(root, (n) => n.className.split(" ").includes("flag")).length > 0;
+  return { rows, save, tally, navFlagged, puts };
 }
 
 describe("runners settings table", () => {
@@ -333,6 +342,36 @@ describe("runners settings table", () => {
 
   it("dims absent rows by colour so their controls stay usable", () => {
     expect(ruleBody(settingsCss, ".runner-row.absent")).not.toMatch(/opacity:/);
+  });
+
+  // The strip above the table and the table itself are two readings of the
+  // same rows; if they can disagree, one of them is lying.
+  it("tallies each state over exactly the rows the table draws", async () => {
+    const ui = await mountSettings(MIXED);
+    const tally = ui.tally();
+    expect(tally).toContain("2 ready");
+    expect(tally).toContain("1 needs auth");
+    expect(tally).toContain("1 absent");
+    expect(tally).toContain("1 disabled");
+  });
+
+  it("omits a state nothing is in rather than showing a zero", async () => {
+    const ui = await mountSettings({
+      doctor: [{ agent: "claude", status: "ok", provider: "claude", binary: "claude" }],
+    });
+    expect(ui.tally()).toContain("1 ready");
+    expect(ui.tally()).not.toContain("needs auth");
+    expect(ui.tally()).not.toContain("disabled");
+  });
+
+  // The reason to open Runners should be visible from the nav, before you do.
+  it("flags the nav item when a runner needs auth, and not otherwise", async () => {
+    const needsAuth = await mountSettings(MIXED);
+    expect(needsAuth.navFlagged()).toBe(true);
+    const clean = await mountSettings({
+      doctor: [{ agent: "claude", status: "ok", provider: "claude", binary: "claude" }],
+    });
+    expect(clean.navFlagged()).toBe(false);
   });
 });
 

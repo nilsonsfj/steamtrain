@@ -4,6 +4,7 @@ import {
   parseDeepLink,
   parseRoute,
   parseRunDeepLink,
+  runsDeepLink,
   settingsDeepLink,
 } from "../src/web/run-deep-link";
 
@@ -41,11 +42,52 @@ describe("parseRoute", () => {
     });
   });
 
+  it("parses bare #runs as the run browser with nothing selected", () => {
+    expect(parseRoute("#runs")).toEqual({ kind: "runs" });
+  });
+
+  it("parses #runs/<id> as the run browser with that run selected", () => {
+    expect(parseRoute(`#runs/${RUN}`)).toEqual({ kind: "runs", runId: RUN });
+  });
+
+  it("lowercases the selected run id", () => {
+    expect(parseRoute(`#RUNS/${RUN.toUpperCase()}`)).toEqual({ kind: "runs", runId: RUN });
+  });
+
+  // A hand-edited or truncated link should still land on the list rather than
+  // on a page that cannot resolve what it was asked for.
+  it("degrades an unparseable selection to the plain list", () => {
+    expect(parseRoute("#runs/not-a-uuid")).toEqual({ kind: "runs" });
+    expect(parseRoute("#runs/")).toEqual({ kind: "runs" });
+  });
+
+  // `#run-<id>` (open one run) and `#runs` (browse them) are different routes
+  // that differ by one character — neither may swallow the other.
+  it("keeps #runs and #run- apart", () => {
+    expect(parseRoute("#runs")).toEqual({ kind: "runs" });
+    expect(parseRoute(`#run-${RUN}`)).toEqual({ kind: "run", runId: RUN, stepId: undefined });
+    expect(parseRunDeepLink("#runs")).toBeNull();
+    expect(parseRunDeepLink(`#runs/${RUN}`)).toBeNull();
+  });
+
   it("returns null for anything else", () => {
     expect(parseRoute("")).toBeNull();
     expect(parseRoute("#")).toBeNull();
     expect(parseRoute("#run-not-a-uuid")).toBeNull();
     expect(parseRoute("#settingsish")).toBeNull();
+    expect(parseRoute("#runsish")).toBeNull();
+    expect(parseRoute(`#runs/${RUN}/step/x`)).toBeNull();
+  });
+});
+
+describe("runsDeepLink", () => {
+  it("is the bare list with no run", () => {
+    expect(runsDeepLink()).toBe("#runs");
+  });
+
+  it("round-trips a selected run through parseRoute", () => {
+    expect(parseRoute(runsDeepLink(RUN))).toEqual({ kind: "runs", runId: RUN });
+    expect(parseRoute(runsDeepLink(RUN.toUpperCase()))).toEqual({ kind: "runs", runId: RUN });
   });
 });
 

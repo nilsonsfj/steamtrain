@@ -1,0 +1,690 @@
+/* Runs page (st-runs.js): the filter rail, the run table, the receipt rail,
+   and the comparison grid. Geometry matches the cockpit and the settings page
+   — 236px left rail, 340px right rail, 8px/18px table rows, 12px column gap —
+   so the three surfaces read as one shell. */
+
+.runs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* ---- left rail: filters --------------------------------------------------- */
+.runs-rail {
+  width: 236px;
+  flex: none;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+.runs-rail-head {
+  padding: 12px 12px 8px;
+  font: 600 10px / 1 var(--font-ui);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.runs-rail-group {
+  padding: 0 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.runs-rail-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+}
+.runs-rail-row:hover {
+  background: var(--raised);
+}
+.runs-rail-row.active {
+  background: rgba(52, 211, 196, 0.1);
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--text);
+}
+.runs-rail-row .label {
+  font: 400 13px / 1.3 var(--font-ui);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runs-rail-row .label.mono {
+  font: 400 12.5px / 1.3 var(--font-mono);
+}
+.runs-rail-row.active .label {
+  font-weight: 500;
+  color: var(--text);
+}
+.runs-rail-row .count {
+  margin-left: auto;
+  font: 400 10px / 1 var(--font-mono);
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+/* The workflow rows carry a checkbox-shaped tick; the status rows a state dot,
+   so the two groups are distinguishable at a glance without a heading. */
+.runs-rail-row .tick {
+  width: 11px;
+  height: 11px;
+  flex: none;
+  border: 1px solid var(--faint);
+  border-radius: 3px;
+  font: 700 8px / 10px var(--font-ui);
+  text-align: center;
+  color: transparent;
+}
+.runs-rail-row .tick.on {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: #eafffb;
+}
+
+.runs-spend {
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+.runs-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 34px;
+  padding: 0 12px;
+}
+.runs-spark .bar {
+  flex: 1;
+  min-width: 2px;
+  border-radius: 1px;
+  background: #1f4d47;
+}
+.runs-spark .bar.warm {
+  background: #256058;
+}
+.runs-spark .bar.hot {
+  background: #2b7a70;
+}
+.runs-spend-note {
+  padding: 8px 12px 0;
+  font: 400 11px / 1.4 var(--font-mono);
+  color: var(--dim);
+}
+
+/* ---- centre pane ---------------------------------------------------------- */
+.runs-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+/* One row, never two: the header sits directly above the table's column
+   header, and wrapping it would shove the columns out from under their own
+   labels. The summary line is the only elastic part — it truncates. */
+.runs-head {
+  flex: none;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.runs-head-title {
+  flex: none;
+  font: 600 15px / 1.2 var(--font-ui);
+  letter-spacing: -0.015em;
+}
+.runs-head-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 400 11.5px / 1.4 var(--font-mono);
+  color: var(--dim);
+}
+.runs-back {
+  border: 1px solid var(--border);
+  background: var(--raised);
+  color: var(--muted);
+  border-radius: var(--r-sm);
+  padding: 5px 10px;
+  font: 500 11.5px / 1 var(--font-ui);
+  cursor: pointer;
+}
+.runs-back:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.runs-search {
+  margin-left: auto;
+  flex: none;
+  width: 210px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--header);
+  color: var(--text);
+  font: 400 12px / 1 var(--font-ui);
+}
+.runs-search:focus {
+  outline: none;
+  border-color: var(--border-strong);
+}
+.runs-head-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.runs-selected {
+  font: 400 11.5px / 1 var(--font-mono);
+  color: var(--accent);
+}
+
+.runs-table {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+/* One grid template for the header and every row, so the columns line up. The
+   mock's Commit column is absent: no recorded field carries a revision. */
+.runs-row {
+  display: grid;
+  grid-template-columns: 14px 14px 74px 118px minmax(0, 1fr) 62px 68px 76px 22px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 18px;
+}
+.runs-cols {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex: none;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  background: var(--canvas);
+  font: 500 10px / 1 var(--font-ui);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.runs-cols span:nth-child(n + 6):nth-child(-n + 8) {
+  text-align: right;
+}
+.runs-rows {
+  flex: none;
+}
+.runs-run {
+  border-bottom: 1px solid var(--border-quiet);
+  font: 400 12px / 1.4 var(--font-mono);
+  color: var(--muted);
+  cursor: pointer;
+}
+.runs-run:hover {
+  background: #12161a;
+}
+.runs-run:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+/* Selection is the only thing the accent marks — state lives in the dot and
+   the outcome text, never in the row tint. */
+.runs-run.selected {
+  background: rgba(52, 211, 196, 0.08);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.runs-run.live {
+  background: rgba(74, 163, 255, 0.05);
+}
+.runs-run.live:hover {
+  background: rgba(74, 163, 255, 0.09);
+}
+.runs-run .runs-id {
+  color: var(--text);
+  font-weight: 500;
+}
+.runs-run .runs-started,
+.runs-run .outcome {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runs-run .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.runs-run .num.quiet {
+  color: var(--dim);
+}
+.runs-run .outcome {
+  color: var(--dim);
+}
+.runs-run .outcome.running {
+  color: var(--running-text);
+}
+.runs-run .outcome.error {
+  color: var(--error-text);
+}
+.runs-run .outcome.gate {
+  color: #d8ab4f;
+}
+.runs-run .flag.error {
+  color: var(--error-text);
+}
+.runs-run .flag.gate {
+  color: var(--gate);
+}
+.runs-chev {
+  color: var(--faint);
+  text-align: center;
+}
+.runs-chev.on {
+  color: var(--accent);
+}
+.runs-check {
+  width: 11px;
+  height: 11px;
+  margin: 0;
+  accent-color: var(--accent-dim);
+  cursor: pointer;
+}
+
+/* Shared state dot: the one place a run's status is coloured. */
+.runs .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--faint);
+}
+.runs .dot.running {
+  background: var(--running);
+}
+.runs .dot.done {
+  background: var(--done);
+}
+.runs .dot.error {
+  background: var(--error-text);
+}
+.runs .dot.gate {
+  background: var(--gate);
+}
+.runs .dot.pulse {
+  animation: runs-pulse 1.1s ease-in-out infinite;
+}
+@keyframes runs-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .runs .dot.pulse {
+    animation: none;
+  }
+}
+
+.runs-more {
+  flex: none;
+  align-self: flex-start;
+  border: 0;
+  background: none;
+  padding: 9px 18px;
+  font: 400 11.5px / 1.4 var(--font-mono);
+  color: var(--dim);
+  cursor: pointer;
+}
+.runs-more:hover {
+  color: var(--muted);
+}
+
+.runs-empty {
+  padding: 40px 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.runs-empty-title {
+  font: 600 15px / 1.2 var(--font-ui);
+  color: var(--text);
+}
+.runs-empty-body {
+  font: 400 13px / 1.5 var(--font-ui);
+  color: var(--muted);
+  max-width: 62ch;
+}
+
+.runs-full {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px;
+}
+
+/* ---- compare -------------------------------------------------------------- */
+.runs-compare {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px;
+}
+.runs-compare-grid {
+  display: grid;
+  gap: 0;
+  min-width: min-content;
+}
+.runs-compare-label,
+.runs-compare-cell {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-quiet);
+  font: 400 12px / 1.4 var(--font-mono);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runs-compare-label {
+  font: 500 10px / 1 var(--font-ui);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  display: flex;
+  align-items: center;
+}
+.runs-compare-cell.head {
+  color: var(--text);
+  font-weight: 500;
+}
+.runs-compare-cell.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.runs-compare-cell.done {
+  color: var(--done-text);
+}
+.runs-compare-cell.error {
+  color: var(--error-text);
+}
+.runs-compare-cell.gate {
+  color: var(--gate);
+}
+.runs-compare-note {
+  margin-top: 14px;
+  font: 400 11.5px / 1.5 var(--font-ui);
+  color: var(--dim);
+  max-width: 70ch;
+}
+
+/* ---- right rail: receipt -------------------------------------------------- */
+.runs-receipt {
+  width: 340px;
+  flex: none;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.runs-receipt-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px 10px;
+  border-bottom: 1px solid var(--border-quiet);
+}
+.runs-receipt-kicker {
+  font: 600 10px / 1 var(--font-ui);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.runs-receipt-id {
+  font: 500 12.5px / 1 var(--font-mono);
+  color: var(--text);
+}
+.runs-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--border);
+  background: var(--raised);
+  color: var(--muted);
+  font: 600 10.5px / 1.5 var(--font-ui);
+}
+.runs-chip.done {
+  border-color: rgba(63, 185, 80, 0.3);
+  background: rgba(63, 185, 80, 0.08);
+  color: var(--done-text);
+}
+.runs-chip.error {
+  border-color: rgba(240, 131, 126, 0.3);
+  background: rgba(240, 131, 126, 0.08);
+  color: var(--error-text);
+}
+.runs-chip.gate {
+  border-color: rgba(210, 153, 34, 0.3);
+  background: rgba(210, 153, 34, 0.08);
+  color: #d8ab4f;
+}
+.runs-chip.running {
+  border-color: rgba(74, 163, 255, 0.3);
+  background: rgba(74, 163, 255, 0.08);
+  color: var(--running-text);
+}
+.runs-receipt-nav {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+.runs-receipt-nav .icon {
+  border: 0;
+  background: none;
+  color: #4d5663;
+  font: 400 12px / 1 var(--font-mono);
+  padding: 4px 5px;
+  cursor: pointer;
+}
+.runs-receipt-nav .icon:hover {
+  color: var(--muted);
+}
+
+.runs-tiles {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-quiet);
+}
+.runs-tile .label {
+  font: 400 10.5px / 1 var(--font-ui);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 5px;
+}
+.runs-tile .value {
+  font: 500 15px / 1 var(--font-mono);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.runs-receipt-block {
+  flex: none;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border-quiet);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.runs-receipt-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 500 10.5px / 1 var(--font-ui);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.runs-receipt-label .src {
+  letter-spacing: 0;
+  text-transform: none;
+  font: 400 11px / 1 var(--font-mono);
+  color: #4d5663;
+}
+.runs-receipt-input,
+.runs-receipt-note {
+  font: 400 11.5px / 1.5 var(--font-mono);
+  color: var(--muted);
+}
+.runs-receipt-error {
+  font: 400 11.5px / 1.5 var(--font-mono);
+  color: var(--error-text);
+}
+
+.runs-ledger-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 400 11.5px / 1.4 var(--font-mono);
+  color: var(--muted);
+}
+.runs-ledger-row .name {
+  color: var(--text);
+  width: 104px;
+  flex: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runs-ledger-row .tag {
+  color: var(--dim);
+}
+.runs-ledger-row .tag.gate {
+  color: var(--gate);
+}
+.runs-ledger-row .num {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.runs-ledger-row .num.cost {
+  margin-left: 0;
+  width: 58px;
+  flex: none;
+  text-align: right;
+}
+
+.runs-receipt-result {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border-quiet);
+}
+.runs-well {
+  flex: 1;
+  min-height: 60px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--well);
+  padding: 9px 11px;
+  font: 400 11.5px / 1.6 var(--font-mono);
+  color: #b9c4d0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.runs-receipt-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--header);
+}
+.runs-receipt-foot .btn:last-child {
+  margin-left: auto;
+}
+
+.runs-receipt-idle {
+  padding: 18px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.runs-receipt-idle .title {
+  font: 600 13px / 1.3 var(--font-ui);
+  color: var(--text);
+}
+.runs-receipt-idle .body {
+  font: 400 12px / 1.5 var(--font-ui);
+  color: var(--muted);
+}
+
+/* ---- narrow viewports ----------------------------------------------------- */
+/* Same breakpoint and the same answer as the cockpit (shell.css): the columns
+   stack rather than disappear, so the filters and the receipt stay reachable —
+   hiding the receipt would make clicking a row do nothing visible. */
+@media (max-width: 900px) {
+  .runs {
+    flex-direction: column;
+  }
+  .runs-rail,
+  .runs-receipt {
+    width: 100%;
+    border-right: 0;
+    border-left: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .runs-rail {
+    max-height: 34vh;
+  }
+  .runs-spend {
+    margin-top: 0;
+  }
+  .runs-receipt {
+    border-top: 1px solid var(--border);
+  }
+  .runs-search {
+    width: 160px;
+    margin-left: 0;
+  }
+  /* The table's own scroll area is what collapses when the page scrolls as a
+     document; let the rows run long instead of squeezing them to nothing. */
+  .runs-table,
+  .runs-full,
+  .runs-compare {
+    overflow: visible;
+  }
+}

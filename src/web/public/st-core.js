@@ -71,7 +71,7 @@ window.Steamtrain = (function () {
     runDetached: false,
     startedAt: 0, timer: null,
     runState: null,
-    rafQueued: false, draftAbort: null, doctor: [], apiDoctor: [],
+    rafQueued: false, draftAbort: null, doctor: [], apiDoctor: [], doctorReadAt: 0,
     // Signature of the last agent/API doctor result (pollDoctor). The catalog's
     // blocked/re-route annotations are server-computed from health, so a change
     // here — and only a change — re-fetches the workflow list.
@@ -79,10 +79,15 @@ window.Steamtrain = (function () {
     stagedOverrides: {},
     childSpecs: {},
     projectConfig: null,
-    // Settings-page routing: whether #center is currently showing the settings
-    // page, and the hash to return to when its Close button is clicked.
-    inSettings: false,
-    preSettingsHash: "#",
+    // Full-page routing: which page #center is currently showing in place of
+    // the cockpit ("settings", "runs", or null for the cockpit itself), and the
+    // hash to return to when that page's Close button is clicked.
+    page: null,
+    preRouteHash: "#",
+    // Set just before navigating to a page when the hash we are leaving would
+    // route straight back into it (openRunDeepLink's recorded-run redirect).
+    // Consumed by the next handleRoute, which uses it instead of that hash.
+    pageReturnOverride: null,
     project: null,
     configLabel: null,
     liveRuns: [], liveRunsTimer: null, queuedBanner: false,
@@ -625,7 +630,13 @@ window.Steamtrain = (function () {
         if (stepId) S.pendingStepDeepLink = stepId;
         return;
       }
-      ST.modals.openHistory(runId);
+      // Not live (or gone): it is a recorded run, so hand it to the run
+      // browser, which opens with that run selected into its receipt rail.
+      // The `#run-` hash we came in on resolves right back here, so it must
+      // not become the page's return target — Close would bounce off it
+      // forever. The cockpit is where Close belongs from a redirect.
+      S.pageReturnOverride = "#";
+      ST.runs.open(runId);
     }).catch(function () {
       if (request === S.deepLinkRequest && currentRunDeepLink() === runId) {
         ST.run.setBanner("Could not open run " + runId.slice(0, 8) + "… — network error.", "err");
@@ -633,22 +644,34 @@ window.Steamtrain = (function () {
     });
   }
 
-  // ---- routing (cockpit vs. settings page) ----------------------------------
+  // ---- routing (cockpit vs. full-page surfaces) -----------------------------
   /**
-   * Hide the cockpit (`.work` inside #center) and both rails, show the
-   * settings page in their place. Toggled with `display`, never detached —
-   * background pollers (live runs, doctor) keep calling render()/renderSidebar()
-   * against #bands etc. while settings is open, and those must stay real,
-   * attached nodes or a stray getElementById would come back null.
+   * The pages that take over #center in place of the cockpit. Each owns a mount
+   * node (created on first visit, thereafter only shown/hidden) and the module
+   * that paints into it. Both pages bring their own rails, so the cockpit's are
+   * hidden while either is up.
    */
-  function showSettingsRoute(section) {
+  var PAGE_MOUNTS = {
+    settings: { id: "settingsRoot", render: function (pane, arg) { ST.settings.render(pane, arg); } },
+    runs: { id: "runsRoot", render: function (pane, arg) { ST.runs.render(pane, arg); } }
+  };
+
+  /**
+   * Hide the cockpit (`.work` inside #center) and both rails, show `page` in
+   * their place. Toggled with `display`, never detached — background pollers
+   * (live runs, doctor) keep calling render()/renderSidebar() against #bands
+   * etc. while a page is open, and those must stay real, attached nodes or a
+   * stray getElementById would come back null.
+   */
+  function showPageRoute(page, arg) {
+    var mount = PAGE_MOUNTS[page];
     var center = document.getElementById("center");
-    if (!center) return;
+    if (!mount || !center) return;
     // The step drill-in drawer is `position: fixed` and lives OUTSIDE #center,
     // so hiding the cockpit below does not hide it. Clear its state (rather
     // than hide the node) so the background render loop stops re-opening it —
-    // an open drawer would otherwise sit pinned over the settings page,
-    // covering its Save/Discard footer.
+    // an open drawer would otherwise sit pinned over the page, covering its
+    // footer actions.
     S.detail = null;
     S.detailInvoker = null;
     S.detailFallback = null;
@@ -661,31 +684,52 @@ window.Steamtrain = (function () {
     var railRight = document.getElementById("rail-right");
     if (railLeft) railLeft.style.display = "none";
     if (railRight) railRight.style.display = "none";
-    var pane = document.getElementById("settingsRoot");
+    // Only one page is ever up: hide the other's mount before showing this one.
+    Object.keys(PAGE_MOUNTS).forEach(function (other) {
+      if (other === page) return;
+      var el = document.getElementById(PAGE_MOUNTS[other].id);
+      if (el) el.style.display = "none";
+    });
+    var pane = document.getElementById(mount.id);
     if (!pane) {
       pane = document.createElement("div");
-      pane.id = "settingsRoot";
+      pane.id = mount.id;
       center.appendChild(pane);
     }
-    // Undo the `display: none` a previous showCockpitRoute() left behind —
-    // the .settings class supplies `display: flex` (set by settings.render()),
-    // but an inline style always wins over it.
+    // Undo the `display: none` a previous hide left behind — the page's own
+    // class supplies `display: flex`, but an inline style always wins over it.
     pane.style.display = "";
-    ST.settings.render(pane, section);
+    mount.render(pane, arg);
   }
 
-  /** Restore the cockpit: reveal `.work` + both rails, hide the settings pane. */
+  /** Restore the cockpit: reveal `.work` + both rails, hide every page mount. */
   function showCockpitRoute() {
     var center = document.getElementById("center");
     if (!center) return;
-    var pane = document.getElementById("settingsRoot");
-    if (pane) pane.style.display = "none";
+    Object.keys(PAGE_MOUNTS).forEach(function (page) {
+      var pane = document.getElementById(PAGE_MOUNTS[page].id);
+      if (pane) pane.style.display = "none";
+    });
+    if (ST.runs && ST.runs.onLeave) ST.runs.onLeave();
     var work = center.querySelector("section.work");
     if (work) work.style.display = "";
     var railLeft = document.getElementById("rail-left");
     var railRight = document.getElementById("rail-right");
     if (railLeft) railLeft.style.display = "";
     if (railRight) railRight.style.display = "";
+  }
+
+  /**
+   * Leave whichever page is up and go back to the hash the user came in on.
+   * Shared by every page's Close button so "back to where I was" means the same
+   * thing everywhere.
+   */
+  function closePageRoute() {
+    var target = S.preRouteHash || "#";
+    S.page = null;
+    showCockpitRoute();
+    if (window.location.hash !== target) window.location.hash = target;
+    else if (window.location.hash) history.replaceState(null, "", window.location.pathname + window.location.search);
   }
 
   /**
@@ -698,7 +742,7 @@ window.Steamtrain = (function () {
    * hash edit). `oldHash` — the hash before this change — comes from the
    * hashchange event's `oldURL`, or is `null` for the one-time boot call.
    *
-   * `bootSettingsOnly` is true only for that one-time boot call (see
+   * `bootPagesOnly` is true only for that one-time boot call (see
    * st-boot.js's `start()`). At boot the workflow catalog hasn't loaded yet,
    * so a `run` route can't be resolved correctly here — `attachRun` would
    * take its "workflow not in catalog" fallback even for a known workflow.
@@ -711,23 +755,28 @@ window.Steamtrain = (function () {
    * opened the step drawer. `settings` routes have no such second dispatcher,
    * so they're still resolved here at boot.
    */
-  function handleRoute(oldHash, bootSettingsOnly) {
+  function handleRoute(oldHash, bootPagesOnly) {
     var route = SteamtrainReducer.parseRoute ? SteamtrainReducer.parseRoute(window.location.hash) : null;
-    if (route && route.kind === "settings") {
-      if (!S.inSettings) {
-        S.preSettingsHash = (typeof oldHash === "string" && oldHash) ? oldHash : "#";
-        S.inSettings = true;
+    if (route && (route.kind === "settings" || route.kind === "runs")) {
+      // Remember the return hash only when arriving from outside — moving
+      // between sections of the same page must not overwrite it with the
+      // page's own hash, or Close would land back on the page it just left.
+      if (S.page !== route.kind) {
+        S.preRouteHash = S.pageReturnOverride
+          || ((typeof oldHash === "string" && oldHash) ? oldHash : "#");
+        S.page = route.kind;
       }
-      showSettingsRoute(route.section);
+      S.pageReturnOverride = null;
+      showPageRoute(route.kind, route.kind === "settings" ? route.section : route.runId);
       return;
     }
     if (route && route.kind === "run") {
-      if (bootSettingsOnly) return;
-      if (S.inSettings) { S.inSettings = false; showCockpitRoute(); }
+      if (bootPagesOnly) return;
+      if (S.page) { S.page = null; showCockpitRoute(); }
       openRunDeepLink(route.runId, route.stepId);
       return;
     }
-    if (S.inSettings) { S.inSettings = false; showCockpitRoute(); }
+    if (S.page) { S.page = null; showCockpitRoute(); }
   }
 
   function relTime(ts) {
@@ -1011,6 +1060,11 @@ window.Steamtrain = (function () {
       var err = r.body.doctorError;
       S.doctor = list;
       S.apiDoctor = apis;
+      // When this client last read a probe snapshot. GET /api/doctor returns
+      // the server's last snapshot rather than re-probing, so this is "how
+      // fresh is what you're looking at", not "when were the probes run" —
+      // Recheck (POST) is what actually re-probes.
+      S.doctorReadAt = Date.now();
       ST.shell.renderHealth(list, apis, err);
       applyHealth();
       // Repaint any open surface that depends on live health (the setup panel).
@@ -1333,9 +1387,10 @@ window.Steamtrain = (function () {
   ST.scheduleRender = scheduleRender;
   ST.selectWorkflow = selectWorkflow;
   ST.setRunDeepLink = setRunDeepLink;
+  ST.closePageRoute = closePageRoute;
   ST.showCockpitRoute = showCockpitRoute;
+  ST.showPageRoute = showPageRoute;
   ST.showReauthOverlay = showReauthOverlay;
-  ST.showSettingsRoute = showSettingsRoute;
   ST.stepKey = stepKey;
   ST.stepPermissions = stepPermissions;
   ST.tail = tail;
@@ -1352,6 +1407,7 @@ window.Steamtrain = (function () {
   ST.instruments = null;
   ST.arrival = null;
   ST.settings = null;
+  ST.runs = null;
   ST.modals = null;
   ST.render = null;
   ST.start = null;

@@ -49,6 +49,7 @@ export const WEB_ASSETS: readonly WebAsset[] = [
   { file: "instruments.css", kind: "css", mime: "text/css; charset=utf-8" },
   { file: "arrival.css", kind: "css", mime: "text/css; charset=utf-8" },
   { file: "settings.css", kind: "css", mime: "text/css; charset=utf-8" },
+  { file: "runs.css", kind: "css", mime: "text/css; charset=utf-8" },
   { file: "modals.css", kind: "css", mime: "text/css; charset=utf-8" },
   { file: "steamtrain-reducer.bundle.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "steamtrain-diff.bundle.js", kind: "js", mime: "text/javascript; charset=utf-8" },
@@ -59,6 +60,7 @@ export const WEB_ASSETS: readonly WebAsset[] = [
   { file: "st-arrival.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "st-settings.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "st-modals.js", kind: "js", mime: "text/javascript; charset=utf-8" },
+  { file: "st-runs.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "st-boot.js", kind: "js", mime: "text/javascript; charset=utf-8" },
 ];
 

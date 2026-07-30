@@ -99,6 +99,98 @@
 .row2 > .field {
   flex: 1 1 200px;
 }
+
+/* ---- new-workflow sheet ---- */
+.create-modal {
+  max-width: 860px;
+}
+.create-file {
+  margin: 2px 0 4px;
+  font: 400 11.5px / 1.5 var(--font-mono);
+  color: var(--dim);
+}
+.create-label {
+  margin: 14px 0 8px;
+  font: 500 10.5px / 1 var(--font-ui);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+/* 168px is what lets all four starting points sit on one row inside the wide
+   modal; below that the grid drops to two rows rather than squeezing them. */
+.create-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 12px;
+}
+.create-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--header);
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.create-card:hover {
+  border-color: var(--border-strong);
+}
+.create-card.selected {
+  border-color: rgba(52, 211, 196, 0.45);
+  background: rgba(52, 211, 196, 0.06);
+}
+.create-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.create-card-head .title {
+  font: 600 13px / 1.2 var(--font-ui);
+  color: var(--text);
+}
+.create-card-head .tick {
+  margin-left: auto;
+  width: 13px;
+  height: 13px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent-dim);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: #eafffb;
+  font: 700 9px / 13px var(--font-ui);
+  text-align: center;
+  visibility: hidden;
+}
+.create-card.selected .create-card-head .tick {
+  visibility: visible;
+}
+.create-card-body {
+  font: 400 11.5px / 1.5 var(--font-ui);
+  color: var(--muted);
+}
+/* The picker inside a card is a control, not part of the card's own hit area
+   — st-modals.js's click handler skips it, and it must not inherit the
+   button's centred/inherited typography. */
+.create-card select.sel {
+  font: 400 12px / 1 var(--font-mono);
+}
+.create-meta {
+  font: 400 11px / 1.4 var(--font-mono);
+  color: var(--dim);
+}
+.create-describe {
+  margin-top: 14px;
+}
+.create-hint {
+  font: 400 11.5px / 1.5 var(--font-mono);
+  color: var(--dim);
+  max-width: 52ch;
+}
+
 input.txt,
 select.sel,
 textarea.ta {
@@ -152,286 +244,7 @@ select.sel.invalid {
 .field-error.show {
   display: block;
 }
-/* ---- run history ---- */
-.modal.history-modal {
-  max-width: 960px;
-}
-.modal.history-modal .mhead .mtitle {
-  font-family: var(--font-ui);
-  letter-spacing: 0.01em;
-}
-.hist-root {
-  min-height: 180px;
-}
-.hist-loading {
-  padding: 12px 0;
-  animation: hist-pulse 1.2s ease-in-out infinite;
-}
-@keyframes hist-pulse {
-  0%,
-  100% {
-    opacity: 0.55;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-.hist-toolbar {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 14px;
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: linear-gradient(180deg, var(--surface) 70%, transparent);
-  padding-bottom: 6px;
-}
-.hist-search {
-  width: 100%;
-  background: var(--raised);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  color: var(--text);
-  font: 13px / 1.4 var(--font-ui);
-  padding: 10px 12px;
-  outline: none;
-  transition: border-color .15s, box-shadow .15s;
-}
-.hist-search:focus {
-  border-color: var(--accent-dim);
-  box-shadow: 0 0 0 3px rgba(52, 211, 196, 0.12);
-}
-.hist-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.hist-chip {
-  appearance: none;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--muted);
-  font: 11px / 1 var(--font-ui);
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  padding: 7px 10px;
-  border-radius: 999px;
-  cursor: pointer;
-  transition: background .12s, border-color .12s, color .12s, transform .12s;
-}
-.hist-chip:hover {
-  color: var(--text);
-  border-color: var(--accent-dim);
-}
-.hist-chip.active {
-  color: var(--canvas);
-  background: var(--accent);
-  border-color: var(--accent);
-  transform: translateY(-1px);
-}
-.hist-section {
-  font-family: var(--font-ui);
-  font-size: 11px;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin: 10px 2px 4px;
-}
-.hist-section:first-child {
-  margin-top: 0;
-}
-.hruns {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.hrun {
-  background: linear-gradient(135deg, rgba(52, 211, 196, 0.04), transparent 40%), var(--raised);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--faint);
-  border-radius: 12px;
-  padding: 12px 14px;
-  cursor: pointer;
-  transition: background .14s, border-color .14s, transform .14s, box-shadow .14s;
-  animation: hist-row-in 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-@keyframes hist-row-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-.hrun:nth-child(1) {
-  animation-delay: 0ms;
-}
-.hrun:nth-child(2) {
-  animation-delay: 30ms;
-}
-.hrun:nth-child(3) {
-  animation-delay: 60ms;
-}
-.hrun:nth-child(4) {
-  animation-delay: 90ms;
-}
-.hrun:nth-child(5) {
-  animation-delay: 120ms;
-}
-.hrun:hover,
-.hrun:focus-visible,
-.hrun.sel {
-  background: linear-gradient(135deg, rgba(52, 211, 196, 0.12), transparent 45%), #1c2733;
-  border-color: var(--accent);
-  outline: none;
-  transform: translateY(-1px);
-  box-shadow: 0 0 0 1px rgba(52, 211, 196, 0.35), 0 10px 26px rgba(0, 0, 0, 0.28);
-}
-.hrun.sel .hr-name {
-  color: var(--accent-bright);
-}
-.hrun.live {
-  border-left-color: var(--running);
-}
-.hrun.done {
-  border-left-color: var(--done);
-}
-.hrun.error {
-  border-left-color: var(--error);
-}
-.hrun.canceled {
-  border-left-color: var(--gate);
-}
-.hrun.budget-exceeded {
-  border-left-color: var(--warn, #d29922);
-}
-.hrun .hr-top {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.hrun .hr-glyph {
-  color: var(--muted);
-  font-size: 13px;
-  width: 1em;
-  text-align: center;
-}
-.hrun.done .hr-glyph {
-  color: var(--done);
-}
-.hrun.error .hr-glyph {
-  color: var(--error);
-}
-.hrun.canceled .hr-glyph,
-.hrun.budget-exceeded .hr-glyph {
-  color: var(--gate);
-}
-.hrun .hr-glyph.live {
-  color: var(--running);
-}
-.hrun .hr-name {
-  font-family: var(--font-ui);
-  font-weight: 700;
-  font-size: 14px;
-}
-.hrun .hr-status {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: .04em;
-  color: var(--muted);
-}
-.hrun .hr-status.live {
-  color: var(--running);
-}
-.hrun.done .hr-status {
-  color: var(--done);
-}
-.hrun.error .hr-status {
-  color: var(--error);
-}
-.hrun.canceled .hr-status {
-  color: var(--gate);
-}
-.hrun .hr-badges {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.hrun .hr-pill {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: .04em;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 2px 7px;
-}
-.hrun .hr-pill.warn {
-  color: var(--gate);
-  border-color: rgba(210, 153, 34, 0.45);
-}
-.hrun .hr-meta {
-  color: var(--muted);
-  font-size: 11px;
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-}
-.hrun .hr-input {
-  color: var(--muted);
-  font-size: 12px;
-  margin-top: 6px;
-  line-height: 1.4;
-}
-.hrun.sel .hr-input,
-.hrun:hover .hr-input {
-  color: var(--text);
-}
-.hist-hint {
-  margin-top: 12px;
-  color: var(--muted);
-  font-size: 11px;
-  letter-spacing: .02em;
-}
-.hist-empty {
-  padding: 28px 8px 18px;
-  text-align: left;
-}
-.hist-empty-title {
-  font-family: var(--font-ui);
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--accent-bright);
-  margin-bottom: 8px;
-}
-.hist-empty-body {
-  color: var(--muted);
-  font-size: 13px;
-  max-width: 42em;
-  margin-bottom: 14px;
-  line-height: 1.5;
-}
-.hback {
-  cursor: pointer;
-  color: var(--accent);
-  font-size: 13px;
-  margin-bottom: 14px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: none;
-  border: none;
-  padding: 0;
-  font-family: inherit;
-}
-.hback:hover {
-  color: var(--accent-bright);
-  text-decoration: underline;
-}
+/* ---- run receipt (the runs page's full-receipt view, st-runs.js) ---- */
 .hist-hero {
   border: 1px solid var(--border);
   border-left: 4px solid var(--faint);

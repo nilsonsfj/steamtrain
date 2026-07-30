@@ -48,13 +48,25 @@ export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 export type Route =
   | { kind: "run"; runId: string; stepId?: string }
+  | { kind: "runs"; runId?: string }
   | { kind: "settings"; section: SettingsSection };
 
 /** Parse any recognised hash route. Returns null when the hash is not one. */
 export function parseRoute(hash: string): Route | null {
-  const run = parseDeepLink(hash);
+  const trimmed = hash.trim();
+  const run = parseDeepLink(trimmed);
   if (run) return { kind: "run", runId: run.runId, stepId: run.stepId };
-  const match = /^#settings(?:\/([\w-]+))?$/i.exec(hash.trim());
+  // `#runs` (the run browser) cannot collide with `#run-<uuid>` (attach/open a
+  // single run): the latter requires the hyphen, so neither prefix-matches the
+  // other. They stay separate routes because they do different things — one
+  // browses, one resolves a specific run into the cockpit or the receipt.
+  const runs = /^#runs(?:\/([^/]*))?$/i.exec(trimmed);
+  if (runs) {
+    const raw = runs[1] ?? "";
+    // An unparseable id degrades to the plain list rather than a dead page.
+    return RUN_ID_PATTERN.test(raw) ? { kind: "runs", runId: raw.toLowerCase() } : { kind: "runs" };
+  }
+  const match = /^#settings(?:\/([\w-]+))?$/i.exec(trimmed);
   if (!match) return null;
   const raw = (match[1] ?? "").toLowerCase();
   const section = (SETTINGS_SECTIONS as readonly string[]).includes(raw)
@@ -65,4 +77,9 @@ export function parseRoute(hash: string): Route | null {
 
 export function settingsDeepLink(section: SettingsSection = SETTINGS_SECTIONS[0]): string {
   return `#settings/${section}`;
+}
+
+/** The run browser, optionally with one run selected into its receipt rail. */
+export function runsDeepLink(runId?: string): string {
+  return runId ? `#runs/${runId.toLowerCase()}` : "#runs";
 }
