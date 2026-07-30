@@ -87,9 +87,13 @@
   function open(runId) {
     var link = (window.SteamtrainReducer && window.SteamtrainReducer.runsDeepLink)
       ? window.SteamtrainReducer.runsDeepLink(normalizeRunId(runId))
-      : (normalizeRunId(runId) ? "#runs/" + runId : "#runs");
-    if (window.location.hash === link) render(R.mount, normalizeRunId(runId));
-    else window.location.hash = link;
+      : (normalizeRunId(runId) ? "#runs/" + runId.toLowerCase() : "#runs");
+    if (window.location.hash === link) {
+      S.pageReturnOverride = null;
+      render(R.mount, normalizeRunId(runId));
+    } else {
+      window.location.hash = link;
+    }
   }
 
   /** Only a non-empty string is a run id — never a DOM Event from an onClick. */
@@ -166,8 +170,12 @@
       // holds a focused search box and a scrolled table, and rebuilding those
       // every 2.5s for an unchanged list would fight the reader.
       if (!opts.silent || changed) paint();
-    }).catch(function () {
+    }).catch(function (err) {
       if (req !== R.request) return;
+      if (err && err.message === "auth required") {
+        ST.showReauthOverlay();
+        return;
+      }
       if (!R.loaded) {
         R.loadError = "Could not load run history — check the connection and try again.";
         paint();
@@ -293,8 +301,8 @@
       if (!name) return;
       map[name] = (map[name] || 0) + 1;
     }
-    R.runs.forEach(function (run) { bump(run.workflow); });
-    R.liveRuns.forEach(function (run) { bump(run.workflow); });
+    R.runs.forEach(function (run) { if (matchesQuery(run)) bump(run.workflow); });
+    R.liveRuns.forEach(function (run) { if (matchesQuery(run)) bump(run.workflow); });
     return Object.keys(map).sort(function (a, b) {
       return map[b] - map[a] || a.localeCompare(b);
     }).map(function (name) { return { name: name, count: map[name] }; });
@@ -654,7 +662,7 @@
   }
 
   function shortId(id) {
-    return String(id || "").slice(0, 5);
+    return String(id || "").slice(0, 8);
   }
 
   function buildRow(entry) {
@@ -993,26 +1001,31 @@
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    // Revoke on the next tick: revoking synchronously can beat the download.
-    setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   }
 
   function clearHistory() {
     if (!window.confirm("Clear all recorded runs? This deletes the on-disk history.")) return;
-    apiAuth("DELETE", "/api/history").then(function () {
-      R.runs = [];
-      R.compare = [];
-      R.fingerprint = "";
-      selectRun(null);
-      R.view = "list";
-      notify("Cleared run history.", "ok");
-      refresh({ silent: false });
-      paint();
+    apiAuth("DELETE", "/api/history").then(function (r) {
+      if (r.status === 200 || r.status === 204) {
+        R.runs = [];
+        R.compare = [];
+        R.fingerprint = "";
+        selectRun(null);
+        R.view = "list";
+        notify("Cleared run history.", "ok");
+        refresh({ silent: false });
+        paint();
+      } else {
+        notify((r.body && r.body.error) || "clear failed", "err");
+      }
+    }).catch(function () {
+      notify("Clear failed — network error.", "err");
     });
   }
 
   function deleteRecord(record) {
-    if (!window.confirm("Delete recorded run " + shortId(record.id) + "… of “" + record.workflow + "”? This cannot be undone.")) return;
+    if (!window.confirm("Delete recorded run " + shortId(record.id) + "… of \u201c" + record.workflow + "\u201d? This cannot be undone.")) return;
     apiAuth("DELETE", "/api/history/" + encodeURIComponent(record.id)).then(function (r) {
       if (r.status === 200 || r.status === 204) {
         notify("Deleted run " + shortId(record.id) + "…", "ok");
@@ -1025,6 +1038,8 @@
       } else {
         notify((r.body && r.body.error) || "delete failed", "err");
       }
+    }).catch(function () {
+      notify("Delete failed — network error.", "err");
     });
   }
 
@@ -1273,6 +1288,7 @@
    */
   function renderWorktreeSection(holder, record, notice) {
     apiAuth("GET", "/api/history/" + encodeURIComponent(record.id) + "/worktrees").then(function (r) {
+      if (S.page !== "runs") return;
       if (r.status !== 200 || !r.body.sources || !r.body.sources.length) return;
       var sources = r.body.sources;
       var harvest = r.body.harvest;
@@ -1324,6 +1340,7 @@
             } else if (rr.status === 409) {
               banner.className = "mbanner show err";
               banner.textContent = rr.body.error + " — retry with a deterministic winner:";
+              clear(buttons);
               buttons.appendChild(harvestBtn("Retry: first wins", Object.assign({}, body, { onConflict: "ours" })));
               buttons.appendChild(harvestBtn("Retry: last wins", Object.assign({}, body, { onConflict: "theirs" })));
             } else {

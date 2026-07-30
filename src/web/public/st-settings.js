@@ -193,7 +193,7 @@
     var cfg = S.projectConfig || {};
     var path = cfg.userConfigPath || cfg.configPath;
     var foot = h("div", { class: "settings-navfoot" });
-    foot.appendChild(h("div", { class: "path", text: path ? "config: " + path : "config: not writable" }));
+    foot.appendChild(h("div", { class: "path", text: path ? "config: " + path : "config: unknown" }));
     return foot;
   }
 

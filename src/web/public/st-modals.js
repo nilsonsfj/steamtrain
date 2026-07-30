@@ -374,7 +374,7 @@
     (S.workflows || []).forEach(function (w) { taken[w.name] = true; });
     if (!taken[base]) return base;
     var candidate = base + "-copy";
-    for (var n = 2; taken[candidate]; n++) candidate = base + "-copy-" + n;
+    for (var n = 2; taken[candidate] && n < 100; n++) candidate = base + "-copy-" + n;
     return candidate;
   }
 
