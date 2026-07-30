@@ -796,12 +796,7 @@ select.sel.invalid {
   .card.error,
   .connector.active,
   .arrival.enter,
-  .arrival-dot,
-  .arrival-car,
   .arrival-kicker,
-  .arrival-title,
-  .arrival-cards,
-  .arrival-destinations,
   .narration,
   .narration-line.fresh,
   .boot-pulse,
@@ -810,9 +805,6 @@ select.sel.invalid {
   }
   .card.running {
     background: var(--surface);
-  }
-  .arrival-destinations .btn:hover {
-    transform: none;
   }
 }
 
@@ -827,8 +819,4 @@ select.sel.invalid {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
-}
-.arrival-destinations .btn.primary:focus-visible {
-  outline: 2px solid var(--accent-bright);
-  outline-offset: 3px;
 }
