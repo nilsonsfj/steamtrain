@@ -167,8 +167,8 @@ Four of the five instruments read directly off reducer state and the SSE stream:
 - **Spend** — accumulated `costUsd`, with a budget bar and `/ $N budget` label
   shown only when the running workflow's spec declares `maxCostUsd`. That field
   is per-workflow, not global config, so the bar is conditional by design.
-- **Runners in flight** — grouped from running steps' `agent`/`model`, with idle
-  runners and queued counts derived from pending steps.
+- **Runners in flight** — one row per running step (`agent`/`model`/elapsed).
+  Idle catalog agents are omitted so the rail only shows work actually in flight.
 - **Worktrees** — from `StepState.worktree`, landed live by the `step_workspace`
   event. The `+N` diffstat is only available post-run today; live rows render the
   branch without it rather than showing a fabricated zero.
