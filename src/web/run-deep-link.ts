@@ -75,6 +75,15 @@ export function parseRoute(hash: string): Route | null {
   return { kind: "settings", section };
 }
 
+/**
+ * True when `hash` is a full-page surface (Runs / Settings), not the cockpit.
+ * Used so Close / page→page navigation never treat another page as "home".
+ */
+export function isPageRoute(hash: string): boolean {
+  const route = parseRoute(hash);
+  return route?.kind === "settings" || route?.kind === "runs";
+}
+
 export function settingsDeepLink(section: SettingsSection = SETTINGS_SECTIONS[0]): string {
   return `#settings/${section}`;
 }

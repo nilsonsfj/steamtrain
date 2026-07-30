@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SETTINGS_SECTIONS,
+  isPageRoute,
   parseDeepLink,
   parseRoute,
   parseRunDeepLink,
@@ -77,6 +78,23 @@ describe("parseRoute", () => {
     expect(parseRoute("#settingsish")).toBeNull();
     expect(parseRoute("#runsish")).toBeNull();
     expect(parseRoute(`#runs/${RUN}/step/x`)).toBeNull();
+  });
+});
+
+describe("isPageRoute", () => {
+  it("is true for Runs and Settings hashes", () => {
+    expect(isPageRoute("#runs")).toBe(true);
+    expect(isPageRoute(`#runs/${RUN}`)).toBe(true);
+    expect(isPageRoute("#settings")).toBe(true);
+    expect(isPageRoute("#settings/limits")).toBe(true);
+  });
+
+  it("is false for the cockpit and run deep links", () => {
+    expect(isPageRoute("")).toBe(false);
+    expect(isPageRoute("#")).toBe(false);
+    expect(isPageRoute(`#run-${RUN}`)).toBe(false);
+    expect(isPageRoute(`#run-${RUN}/step/s1`)).toBe(false);
+    expect(isPageRoute("#settingsish")).toBe(false);
   });
 });
 
