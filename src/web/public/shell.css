@@ -378,23 +378,6 @@ header .mode-badge {
 .chip.calm .dot {
   background: var(--faint);
 }
-/* Health chips double as the entry point to the setup panel. */
-.chip-btn {
-  cursor: pointer;
-  font-family: inherit;
-  transition: border-color 0.12s ease, background 0.12s ease;
-}
-.chip-btn:hover {
-  border-color: var(--accent-dim);
-  background: var(--surface);
-}
-.chip-btn.bad:hover {
-  border-color: var(--error);
-}
-.chip-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
 /* The centre pane's own chrome (run head, composer, phase bands, output pane)
    lives in run.css — this file keeps only the shared button primitives that
    modals, settings and the rail all use. */

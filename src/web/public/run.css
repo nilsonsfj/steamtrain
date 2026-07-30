@@ -870,14 +870,6 @@ textarea#input:focus {
   border-left-color: var(--error);
   animation: cardShake 0.4s ease-out forwards;
 }
-.card.superseded {
-  border-left-color: var(--muted);
-  opacity: 0.55;
-}
-.card.superseded .state {
-  color: var(--muted);
-  font-style: italic;
-}
 @keyframes pulse {
   0%,
   100% {
@@ -1200,10 +1192,6 @@ textarea#input:focus {
   border-color: #6f2424;
   font-weight: 700;
 }
-.wf .meta.perms-meta {
-  color: var(--gate);
-  opacity: 0.85;
-}
 .badge.staged {
   color: var(--gate);
   border-color: #5e4a1d;
@@ -1466,11 +1454,6 @@ textarea#input:focus {
 }
 .human-input.canceled .human-input-decision {
   color: var(--error);
-}
-.badge.input-wait {
-  color: #d9a6f0;
-  border-color: #4a2a5e;
-  font-weight: 600;
 }
 
 /* ---- autonomy labels (workflow list) ------------------------------------- */
