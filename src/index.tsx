@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { render } from "ink";
 import { parseGlobalArgs, runCli } from "./cli";
+import { message } from "./cli-util";
 import { configDisplayLabel, loadConfig } from "./config";
 import { resolveProjectDir, resolveProjectIdentity } from "./project";
 import { loadSettings } from "./settings";
@@ -119,39 +120,46 @@ async function main(): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    const { server } = await startWebUi({
-      config,
-      workspaces,
-      workflowCatalog,
-      configLabel,
-      project,
-      cwd,
-      configPath: scope.path,
-      userConfigPath: scope.kind === "custom" ? undefined : user?.path,
-      userAgents,
-      projectAgents,
-      userApis,
-      projectApis,
-      customConfig: scope.kind === "custom",
-      home,
-      port,
-      host,
-      authToken: resolvedAuth,
-      readToken: resolvedRead,
-      readOnly,
-      noAuth,
-      trustProxy,
-    });
-    const shutdown = (): void => {
-      server.close(() => process.exit(0));
-      // SSE responses are held open with keep-alive (and EventSource
-      // auto-reconnects), so server.close() alone would never fire its
-      // callback. Tear down live sockets, then force-exit as a safety net.
-      server.closeAllConnections?.();
-      setTimeout(() => process.exit(0), 1000).unref();
-    };
-    process.on("SIGINT", shutdown);
-    process.on("SIGTERM", shutdown);
+    try {
+      const { server } = await startWebUi({
+        config,
+        workspaces,
+        workflowCatalog,
+        configLabel,
+        project,
+        cwd,
+        configPath: scope.path,
+        userConfigPath: scope.kind === "custom" ? undefined : user?.path,
+        userAgents,
+        projectAgents,
+        userApis,
+        projectApis,
+        customConfig: scope.kind === "custom",
+        home,
+        port,
+        host,
+        authToken: resolvedAuth,
+        readToken: resolvedRead,
+        readOnly,
+        noAuth,
+        trustProxy,
+      });
+      const shutdown = (): void => {
+        server.close(() => process.exit(0));
+        // SSE responses are held open with keep-alive (and EventSource
+        // auto-reconnects), so server.close() alone would never fire its
+        // callback. Tear down live sockets, then force-exit as a safety net.
+        server.closeAllConnections?.();
+        setTimeout(() => process.exit(0), 1000).unref();
+      };
+      process.on("SIGINT", shutdown);
+      process.on("SIGTERM", shutdown);
+    } catch (e) {
+      // Friendly bind failures (EADDRINUSE → "--port" hint) and other boot
+      // errors should exit cleanly — not as an unhandled rejection stack.
+      process.stderr.write(`${message(e)}\n`);
+      process.exitCode = 1;
+    }
     return;
   }
 

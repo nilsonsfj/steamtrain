@@ -2752,13 +2752,32 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
     );
   }
 
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, host, () => {
-      server.off("error", reject);
-      resolve();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, host, () => {
+        server.off("error", reject);
+        resolve();
+      });
     });
-  });
+  } catch (listenErr) {
+    // Drop the half-open server so a failed bind cannot keep the process (or a
+    // test) alive after we rethrow.
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+    });
+    const code =
+      listenErr && typeof listenErr === "object" && "code" in listenErr
+        ? (listenErr as NodeJS.ErrnoException).code
+        : undefined;
+    if (code === "EADDRINUSE") {
+      throw new Error(
+        `port ${port} is already in use on ${host}\n` +
+          `  stop the other process, or pass --port <n> (e.g. steamtrain --web-ui --port 4318)`,
+      );
+    }
+    throw listenErr instanceof Error ? listenErr : new Error(String(listenErr));
+  }
 
   const addr = server.address();
   const actualPort = typeof addr === "object" && addr ? addr.port : port;
