@@ -360,8 +360,10 @@ describe("runners settings table", () => {
 
   it("dims disabled remove controls instead of dropping them", () => {
     const disabled = ruleBody(settingsCss, ".runner-row .rowacts button:disabled");
-    expect(disabled).toMatch(/opacity:/);
+    expect(disabled).toMatch(/border-style:\s*dashed/);
     expect(disabled).toMatch(/cursor:\s*default/);
+    // Must stay fully opaque — low opacity made the × vanish on the dark canvas.
+    expect(disabled).not.toMatch(/opacity:\s*0\./);
   });
 
   it("dims absent rows by colour so their controls stay usable", () => {
