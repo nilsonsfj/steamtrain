@@ -15,6 +15,9 @@ STEAMTRAIN_AUTH_TOKEN=s3cret steamtrain --web-ui --host 0.0.0.0  # token via env
 steamtrain --web-ui --read-only     # localhost share: view workflows/runs, no writes
 ```
 
+If port 4317 is already taken, steamtrain exits with a clear message and suggests
+`--port` instead of crashing with an `EADDRINUSE` stack trace.
+
 The server starts listening immediately and prints its URL; agent health and
 llm-API readiness are probed in the background and the header's health chips
 fill in once they land (the page never blocks on the doctor). Every chip is a

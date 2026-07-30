@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import type { Server } from "node:http";
-import { request as httpRequest } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -3514,5 +3514,32 @@ describe("startWebUi — equal auth/read tokens", () => {
         readToken: "same-secret",
       }),
     ).rejects.toThrow(/must be different values/);
+  });
+});
+
+describe("startWebUi — bind failures", () => {
+  it("rejects with a --port hint when the address is already in use", async () => {
+    const { startWebUi } = await import("../src/web/server");
+    const occupant = createServer();
+    await new Promise<void>((resolve) => occupant.listen(0, "127.0.0.1", () => resolve()));
+    servers.push(occupant);
+    const port = (occupant.address() as AddressInfo).port;
+    const cwd = mkdtempSync(join(tmpdir(), "webui-eaddr-"));
+    tempRoots.push(cwd);
+
+    await expect(
+      startWebUi({
+        config: testRunConfig,
+        workspaces: { workspaces: [] },
+        workflowCatalog: { workflows: {}, sources: {} },
+        cwd,
+        port,
+        host: "127.0.0.1",
+        stdout: () => {},
+        stderr: () => {},
+      }),
+    ).rejects.toThrow(
+      new RegExp(`port ${port} is already in use on 127\\.0\\.0\\.1[\\s\\S]*--port`),
+    );
   });
 });
