@@ -243,10 +243,13 @@ async function mountSettings(opts: {
     collect(root, (n) => n.className.split(" ").includes("runner-row")).map((row) => {
       const acts = collect(row, (n) => n.className === "rowacts")[0];
       const buttons = acts ? acts.children : [];
+      const del = buttons.find((b) => b.text === "×");
       return {
         cls: row.className,
         text: flatText(row),
         actions: buttons.map((b) => b.text),
+        /** True when the remove control is present but inert (no config entry). */
+        removeDisabled: Boolean(del && del.attrs.disabled === true),
         click: (label: string) => {
           const btn = buttons.find((b) => b.text === label);
           if (!btn) throw new Error(`no "${label}" button on row: ${flatText(row)}`);
@@ -299,12 +302,27 @@ describe("runners settings table", () => {
     expect(kiro?.actions).toEqual(["off", "Edit", "×"]);
   });
 
-  it("offers on/off and a labelled Edit on every row", async () => {
+  it("offers on/off, Edit, and remove on every row", async () => {
     const ui = await mountSettings(MIXED);
     for (const row of ui.rows()) {
-      expect(row.actions).toContain("Edit");
-      expect(row.actions.some((a) => a === "on" || a === "off")).toBe(true);
+      expect(row.actions).toEqual(
+        expect.arrayContaining(["Edit", "×", expect.stringMatching(/^(on|off)$/)]),
+      );
+      expect(row.actions).toHaveLength(3);
     }
+  });
+
+  it("disables remove for built-ins with no config entry, enables it once configured", async () => {
+    const ui = await mountSettings(MIXED);
+    // claude / amp / codex / zed-fork appear via doctor only — nothing to delete.
+    const unconfigured = ui.rows().filter((r) => !r.text.startsWith("kiro"));
+    expect(unconfigured.length).toBeGreaterThan(0);
+    for (const row of unconfigured) {
+      expect(row.removeDisabled).toBe(true);
+    }
+    // kiro is in agents[] so remove is live.
+    const kiro = ui.rows().find((r) => r.text.startsWith("kiro"));
+    expect(kiro?.removeDisabled).toBe(false);
   });
 
   it("disabling a built-in with no config entry saves an entry that holds the flag", async () => {
@@ -338,6 +356,12 @@ describe("runners settings table", () => {
     expect(acts).toMatch(/min-width:\s*2[4-9]px/);
     expect(acts).toMatch(/height:\s*2[4-9]px/);
     expect(acts).toMatch(/border:\s*1px solid/);
+  });
+
+  it("dims disabled remove controls instead of dropping them", () => {
+    const disabled = ruleBody(settingsCss, ".runner-row .rowacts button:disabled");
+    expect(disabled).toMatch(/opacity:/);
+    expect(disabled).toMatch(/cursor:\s*default/);
   });
 
   it("dims absent rows by colour so their controls stay usable", () => {

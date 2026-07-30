@@ -230,6 +230,15 @@
   border-color: var(--error);
   color: var(--error-text);
 }
+.runner-row .rowacts button:disabled {
+  opacity: 0.4;
+  cursor: default;
+  color: var(--dim);
+}
+.runner-row .rowacts button.del:disabled:hover {
+  border-color: var(--border);
+  color: var(--dim);
+}
 /* Edit and on/off carry words: a lone 12px pencil was the thing nobody found. */
 .runner-row .rowacts button.edit,
 .runner-row .rowacts button.toggle {

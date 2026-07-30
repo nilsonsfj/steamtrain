@@ -467,8 +467,20 @@
       paint();
     });
     wrap.appendChild(editBtn);
+    // Always reserve the remove slot so every row's action column lines up.
+    // Built-ins with no config entry have nothing to delete — disable the
+    // control and point at Disable instead (same rule the TUI agent manager
+    // uses). Once Edit/Disable writes an entry, the button becomes live.
+    var delBtn = h("button", {
+      type: "button",
+      class: "act del",
+      text: "×",
+      title: cfg
+        ? "Remove " + id + " from config"
+        : id + " is a built-in default (not in config); disable it instead",
+      disabled: cfg ? undefined : true
+    });
     if (cfg) {
-      var delBtn = h("button", { type: "button", class: "act del", title: "Remove " + id + " from config", text: "×" });
       delBtn.addEventListener("click", function () {
         if (!window.confirm("Remove \"" + id + "\" from config?")) return;
         var list = kind === "agent" ? draft.agents : draft.apis;
@@ -477,8 +489,8 @@
         if (editingRow && editingRow.kind === kind && editingRow.id === id) editingRow = null;
         paint();
       });
-      wrap.appendChild(delBtn);
     }
+    wrap.appendChild(delBtn);
     return wrap;
   }
 
