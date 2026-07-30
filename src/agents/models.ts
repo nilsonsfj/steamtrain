@@ -18,7 +18,7 @@ import {
   listCodexCachedAgentModels,
   refreshCodexVariantCache,
 } from "./codex-variants";
-import { resolveAgentInstance } from "./config";
+import { agentUiLabel, resolveAgentInstance } from "./config";
 import { CURSOR_MODELS, CursorAgentAdapter } from "./cursor";
 import {
   getCursorModelName,
@@ -365,7 +365,7 @@ export function formatAgentTarget(target: {
   model: string;
   effort?: string;
 }): string {
-  return `${target.agent}/${formatModelDisplay(target)}`;
+  return `${agentUiLabel(target.agent)}/${formatModelDisplay(target)}`;
 }
 
 /** Refresh live model catalogs for agents that passed doctor preflight. */

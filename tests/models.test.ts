@@ -281,6 +281,12 @@ describe("model names", () => {
     );
   });
 
+  it("shortens antigravity to agy in formatAgentTarget", () => {
+    expect(formatAgentTarget({ agent: "antigravity", model: "gemini-3.6-flash-high" })).toBe(
+      "agy/Gemini 3.6 Flash (High) (gemini-3.6-flash-high)",
+    );
+  });
+
   it("formats model display without agent prefix", () => {
     expect(
       formatModelDisplay({

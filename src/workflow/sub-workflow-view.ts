@@ -1,3 +1,4 @@
+import { agentUiLabel } from "../agents/config";
 import { type WorkflowAutonomy, workflowAutonomy } from "./autonomy";
 import { applyWorkflowStepOverrides } from "./overrides";
 import { MAX_WORKFLOW_NESTING_DEPTH, isAgentBackedStep, workflowStepKind } from "./step-kind";
@@ -77,8 +78,8 @@ export function formatSubWorkflowTarget(step: {
   model?: string;
   modelClass?: string;
 }): string | undefined {
-  if (step.agent && step.model) return `${step.agent}/${step.model}`;
-  if (step.agent) return step.agent;
+  if (step.agent && step.model) return `${agentUiLabel(step.agent)}/${step.model}`;
+  if (step.agent) return agentUiLabel(step.agent);
   if (step.model) return step.model;
   if (step.modelClass) return `class:${step.modelClass}`;
   return undefined;

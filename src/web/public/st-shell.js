@@ -149,8 +149,8 @@
       row.className = "reroute-row info";
       row.appendChild(h("span", { class: "reroute-icon", text: "↷" }));
       row.appendChild(h("span", {},
-        h("b", {}, "Needs " + rr.blockedAgents.join(", ") + " (not ready). "),
-        "Run re-routes " + steps + " to " + rr.agent + " · " + (rr.modelName || rr.model) +
+        h("b", {}, "Needs " + rr.blockedAgents.map(ST.agentUiLabel).join(", ") + " (not ready). "),
+        "Run re-routes " + steps + " to " + ST.agentUiLabel(rr.agent) + " · " + (rr.modelName || rr.model) +
         " for this ride only — the workflow itself is unchanged."));
       if (runBtn) runBtn.disabled = false;
       if (planBtn) planBtn.disabled = false;

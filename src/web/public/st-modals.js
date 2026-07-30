@@ -67,7 +67,8 @@
       return !health || health.status === "ok";
     });
     var agentOpts = readyAgents.map(function (a) {
-      return { value: a.id, label: a.id };
+      var label = a.label && a.label !== a.id ? a.label + " (" + a.id + ")" : (a.label || ST.agentUiLabel(a.id));
+      return { value: a.id, label: label };
     });
     if (!agentOpts.length) {
       ST.run.setBanner("No ready agents available to retarget onto", "err");
@@ -99,7 +100,7 @@
     var checks = [];
     failed.forEach(function (s) {
       var id = "retarget-step-" + s.stepId;
-      var label = s.stepId + (s.agent ? " · " + s.agent : "") + (s.model ? "/" + s.model : "");
+      var label = s.stepId + (s.agent ? " · " + ST.agentUiLabel(s.agent) : "") + (s.model ? "/" + s.model : "");
       var row = h("label", { class: "check-row", style: "display:flex;gap:0.5rem;align-items:center;margin:0.25rem 0;" },
         h("input", { type: "checkbox", id: id, value: s.stepId }),
         h("span", { text: label })
@@ -706,7 +707,7 @@
       });
       bulkFlash.className = "bulk-flash show";
       bulkFlash.textContent = changed
-        ? "Retargeted " + changed + " step" + (changed === 1 ? "" : "s") + " \u2192 " + agent + " \u00b7 " + model + (effort ? " \u00b7 " + effort : "")
+        ? "Retargeted " + changed + " step" + (changed === 1 ? "" : "s") + " \u2192 " + ST.agentUiLabel(agent) + " \u00b7 " + model + (effort ? " \u00b7 " + effort : "")
         : "No agent steps to retarget";
       mbanner(banner, "", "");
       try { bulkBar.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) { /* ignore */ }

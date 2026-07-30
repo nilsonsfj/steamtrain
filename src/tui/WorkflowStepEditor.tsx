@@ -1,6 +1,6 @@
 import { Box, Text, useInput } from "ink";
 import { useCallback, useMemo, useState } from "react";
-import { modelIdsForAgent } from "../agents";
+import { agentUiLabel, modelIdsForAgent } from "../agents";
 import { truncate } from "../agents/util";
 import { MAX_PROMPT_CHARS, type SteamtrainConfig } from "../config";
 import { shouldAcceptTextInput } from "./text-input-filter";
@@ -219,7 +219,8 @@ export function WorkflowStepEditor({
             {canApplyAll ? (
               <Text color="cyan">
                 {" "}
-                · press <Text bold>A</Text> to retarget all to ‹{working.agent}/{working.model}›
+                · press <Text bold>A</Text> to retarget all to ‹{agentUiLabel(working.agent)}/
+                {working.model}›
               </Text>
             ) : null}
           </Text>
@@ -241,7 +242,7 @@ export function WorkflowStepEditor({
                   </Text>
                   <Text color="gray">{"  "}</Text>
                   {field === "agent" ? (
-                    <Text color={agentColor}>‹ {working.agent} ›</Text>
+                    <Text color={agentColor}>‹ {agentUiLabel(working.agent)} ›</Text>
                   ) : field === "model" ? (
                     <Text color="white">
                       ‹ {modelLabel(working.agent, working.model, config)} ›

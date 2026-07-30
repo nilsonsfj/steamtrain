@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import { useMemo } from "react";
+import { agentUiLabel } from "../agents";
 import { truncate } from "../agents/util";
 import type { DispatchCheck } from "../orchestrator";
 import {
@@ -209,7 +210,7 @@ export function WorkflowPreview({
           {phaseCount} phase{phaseCount === 1 ? "" : "s"} · {stepCount} step
           {stepCount === 1 ? "" : "s"} · ({source}) ·{" "}
           <Text color={AUTONOMY_COLOR[autonomy]}>{autonomyBadge(autonomy)}</Text>
-          {agents.length > 0 ? ` · agents: ${agents.join(", ")}` : ""}
+          {agents.length > 0 ? ` · agents: ${agents.map(agentUiLabel).join(", ")}` : ""}
           {blocks ? ` · ${blocks}` : ""}
         </Text>
         <Text color={dispatchCheck.ok ? "green" : "yellow"} wrap="truncate-end">

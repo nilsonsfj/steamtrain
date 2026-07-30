@@ -1124,6 +1124,37 @@ var SteamtrainReducer = (() => {
     };
   }
 
+  // src/agents/config.ts
+  var AGENT_PROVIDER_IDS = [
+    "claude",
+    "opencode",
+    "codex",
+    "amp",
+    "kiro",
+    "mimo",
+    "kimi",
+    "cursor",
+    "antigravity"
+  ];
+  var DEFAULT_AGENT_LABEL = {
+    claude: "claude",
+    opencode: "opencode",
+    codex: "codex",
+    amp: "amp",
+    kiro: "kiro",
+    mimo: "mimo",
+    kimi: "kimi",
+    cursor: "cursor",
+    antigravity: "agy"
+  };
+  function agentUiLabel(id) {
+    if (!id) return "";
+    if (AGENT_PROVIDER_IDS.includes(id)) {
+      return DEFAULT_AGENT_LABEL[id];
+    }
+    return id;
+  }
+
   // src/workflow/autonomy.ts
   var AUTONOMY_RANK = {
     autonomous: 0,
@@ -1161,8 +1192,8 @@ var SteamtrainReducer = (() => {
 
   // src/workflow/sub-workflow-view.ts
   function formatSubWorkflowTarget(step) {
-    if (step.agent && step.model) return `${step.agent}/${step.model}`;
-    if (step.agent) return step.agent;
+    if (step.agent && step.model) return `${agentUiLabel(step.agent)}/${step.model}`;
+    if (step.agent) return agentUiLabel(step.agent);
     if (step.model) return step.model;
     if (step.modelClass) return `class:${step.modelClass}`;
     return void 0;

@@ -39,6 +39,23 @@ window.Steamtrain = (function () {
   };
   function agentHealthMeta(status) { return AGENT_HEALTH_META[status] || AGENT_HEALTH_META.unknown_error; }
   function apiHealthMeta(status) { return API_HEALTH_META[status] || API_HEALTH_META.unknown_error; }
+  /**
+   * Compact UI label for an agent instance id. Built-in `antigravity` is shown
+   * as `agy` (the CLI binary) to save space; settings still surface the full
+   * provider id. Prefer a catalog `label` when one is present.
+   *
+   * Keep the hardcoded fallback in sync with DEFAULT_AGENT_LABEL in
+   * src/agents/config.ts (and PROVIDER_PRODUCT_NAME in st-settings.js).
+   */
+  function agentUiLabel(id) {
+    if (!id) return "";
+    for (var i = 0; i < (S.agents || []).length; i++) {
+      var a = S.agents[i];
+      if (a.id === id && a.label) return a.label;
+    }
+    if (id === "antigravity") return "agy";
+    return id;
+  }
   function readNarrationPref() {
     try { return localStorage.getItem("steamtrain.narration") !== "off"; } catch (e) { return true; }
   }
@@ -1246,7 +1263,9 @@ window.Steamtrain = (function () {
     var map = {};
     steps.forEach(function (s) {
       if (!s.result || (s.result.childResults && s.result.childResults.length)) return;
-      var key = s.model && s.agent ? s.agent + "/" + s.model : (s.model || s.agent || "(agentless)");
+      var key = s.model && s.agent
+        ? agentUiLabel(s.agent) + "/" + s.model
+        : (s.model || (s.agent ? agentUiLabel(s.agent) : "(agentless)"));
       var e = map[key] || (map[key] = { model: key, costUsd: 0, tokens: emptyTokens(), steps: 0 });
       e.costUsd += s.result.costUsd || 0;
       addTokensInto(e.tokens, s.result.tokens);
@@ -1270,6 +1289,7 @@ window.Steamtrain = (function () {
   ST.addTokensInto = addTokensInto;
   ST.agentById = agentById;
   ST.agentHealthMeta = agentHealthMeta;
+  ST.agentUiLabel = agentUiLabel;
   ST.aggregateByModel = aggregateByModel;
   ST.announce = announce;
   ST.api = api;

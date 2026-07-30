@@ -1,4 +1,5 @@
 import {
+  agentUiLabel,
   defaultDraftModel,
   effortsForModel,
   findModelFamily,
@@ -101,8 +102,8 @@ export function resolveDraftTarget(
 /** `agent · model-name` (falls back to the raw id when no friendly name), plus effort if set. */
 export function formatDraftTarget(target: DraftTarget, config?: SteamtrainConfig): string {
   const name = modelNameForAgent(target.agent, target.model, config);
-  const base =
-    name === target.model ? `${target.agent} · ${target.model}` : `${target.agent} · ${name}`;
+  const agent = agentUiLabel(target.agent);
+  const base = name === target.model ? `${agent} · ${target.model}` : `${agent} · ${name}`;
   return target.effort ? `${base} · effort ${target.effort}` : base;
 }
 
@@ -201,12 +202,12 @@ function unhealthyAgentError(
 ): DraftModelRequest {
   return {
     kind: "error",
-    message: `${agent} isn't healthy (check the doctor panel); ${healthyHint(healthy)}`,
+    message: `${agentUiLabel(agent)} isn't healthy (check the doctor panel); ${healthyHint(healthy)}`,
   };
 }
 
 function healthyHint(healthy: ReadonlySet<AgentInstanceId>): string {
-  const agents = [...healthy];
+  const agents = [...healthy].map(agentUiLabel);
   if (agents.length === 0) return "no agents are healthy";
   return `healthy: ${agents.join(", ")}`;
 }

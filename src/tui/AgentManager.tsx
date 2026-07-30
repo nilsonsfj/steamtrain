@@ -1,6 +1,6 @@
 import { Box, Text, useInput } from "ink";
 import { useMemo, useState } from "react";
-import { AGENT_IDS, agentScopeLabel } from "../agents";
+import { AGENT_IDS, agentScopeLabel, agentUiLabel } from "../agents";
 import type { ResolvedAgentInstance } from "../agents";
 import { PERMISSION_PROFILES, providerPermissionSupport } from "../agents/permissions";
 import type { AgentConfigScope, AgentInstanceConfig } from "../config/types";
@@ -330,6 +330,8 @@ function AgentRow({
   width: number;
 }) {
   const state = agent.enabled ? { symbol: "●", color: "green" } : { symbol: "○", color: "gray" };
+  const display = agent.label || agentUiLabel(agent.id);
+  const idNote = display !== agent.id ? ` id=${agent.id}` : "";
   const provider = agent.provider === agent.id ? "" : ` provider=${agent.provider}`;
   const binary = agent.binary ? ` binary=${agent.binary}` : "";
   const model = agent.defaultModel ? ` model=${agent.defaultModel}` : "";
@@ -347,7 +349,7 @@ function AgentRow({
       <Text color={selected ? "cyan" : "gray"}>{selected ? "▶ " : "  "}</Text>
       <Text color={state.color}>{state.symbol} </Text>
       <Text color={selected ? "cyan" : "white"} bold={selected}>
-        {agent.id}
+        {display}
       </Text>
       {health ? (
         <Text color={STATUS_STYLE[health.status].color}> {HEALTH_LABEL[health.status]}</Text>
@@ -356,6 +358,7 @@ function AgentRow({
         {"  "}
         {agentScopeLabel(scope)}
         {agent.enabled ? "" : " disabled"}
+        {idNote}
         {provider}
         {binary}
         {model}

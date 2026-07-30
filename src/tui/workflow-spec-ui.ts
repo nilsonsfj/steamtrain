@@ -9,6 +9,7 @@ import {
   KIRO_MODELS,
   MIMO_MODELS,
   OPENCODE_MODELS,
+  agentUiLabel,
   formatAgentTarget,
 } from "../agents";
 import {
@@ -195,7 +196,10 @@ export function formatWorkflowAgentTarget(
     return `auto · ${model}${effort ? ` · ${effort}` : ""}`;
   }
   if (!target.agent || !model) {
-    const parts = [target.agent ?? "auto", model ?? (modelClass ? `class:${modelClass}` : "?")];
+    const parts = [
+      target.agent ? agentUiLabel(target.agent) : "auto",
+      model ?? (modelClass ? `class:${modelClass}` : "?"),
+    ];
     return parts.join("/") + (effort ? ` · ${effort}` : "");
   }
   const formatted = formatAgentTarget({
@@ -428,7 +432,8 @@ export function subWorkflowDetailLines(
     `contains ${view.stepCount} step${view.stepCount === 1 ? "" : "s"}`,
     `${view.phaseCount} phase${view.phaseCount === 1 ? "" : "s"}`,
   ];
-  if (view.agents.length > 0) rollup.push(`agents: ${view.agents.join(", ")}`);
+  if (view.agents.length > 0)
+    rollup.push(`agents: ${view.agents.map((id) => agentUiLabel(id)).join(", ")}`);
   rollup.push(`autonomy: ${view.autonomy}`);
   if (view.overrideCount > 0) {
     rollup.push(`${view.overrideCount} override${view.overrideCount === 1 ? "" : "s"} *`);

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { agentUiLabel } from "../agents";
 import type { Orchestrator } from "../orchestrator";
 import type {
   HistoryStatusFilter,
@@ -281,7 +282,7 @@ export function useHistory({
           }
           specOverride = applyWorkflowStepOverrides(baseSpec, planned.overrides);
           setWfNotice(
-            `retarget ${planned.stepIds.length} step(s) → ${retarget!.agent}/${planned.targetModel}`,
+            `retarget ${planned.stepIds.length} step(s) → ${agentUiLabel(retarget!.agent)}/${planned.targetModel}`,
           );
         }
       }

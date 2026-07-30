@@ -1,6 +1,7 @@
 import { Box, Text, useInput } from "ink";
 import { useMemo, useState } from "react";
 import {
+  agentUiLabel,
   defaultModelForAgent,
   modelIdsForAgent,
   modelNameForAgent,
@@ -126,14 +127,17 @@ export function RetryRetargetOverlay({
           {readyAgents.map((a, i) => (
             <Text key={a.id} color={i === agentIndex ? "cyan" : undefined}>
               {i === agentIndex ? "› " : "  "}
-              {a.id}
+              {a.label || agentUiLabel(a.id)}
+              {a.label && a.label !== a.id ? ` (${a.id})` : ""}
             </Text>
           ))}
         </Box>
       ) : null}
       {stage === "model" && agent ? (
         <Box flexDirection="column">
-          <Text dimColor>agent {agent.id} · ↑/↓ model · Enter · Esc cancel</Text>
+          <Text dimColor>
+            agent {agent.label || agentUiLabel(agent.id)} · ↑/↓ model · Enter · Esc cancel
+          </Text>
           {models.map((m, i) => (
             <Text key={m.id || "default"} color={i === modelIndex ? "cyan" : undefined}>
               {i === modelIndex ? "› " : "  "}
@@ -152,7 +156,7 @@ export function RetryRetargetOverlay({
                 {i === stepCursor ? "› " : "  "}
                 {on ? "[x] " : "[ ] "}
                 {s.stepId}
-                {s.agent ? ` · ${s.agent}` : ""}
+                {s.agent ? ` · ${agentUiLabel(s.agent)}` : ""}
               </Text>
             );
           })}
@@ -161,7 +165,7 @@ export function RetryRetargetOverlay({
       {stage === "confirm" && agent ? (
         <Box flexDirection="column">
           <Text>
-            Retarget → {agent.id}
+            Retarget → {agent.label || agentUiLabel(agent.id)}
             {models[modelIndex]?.id ? `/${models[modelIndex]!.id}` : " (default)"}
             {selectedSteps.size > 0
               ? ` · ${selectedSteps.size} step(s)`

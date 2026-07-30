@@ -284,8 +284,8 @@ describe("workflow UI helpers", () => {
       // `lines` are ANSI-stripped; content here is ASCII so `.length` matches
       // terminal columns (including the left/right border glyphs).
       expect(lines[index]!.length).toBeLessThanOrEqual(width);
-      // Runner kept on the left of the flexible zone (not crushed to "antigravi…").
-      expect(lines[index]).toContain("antigravity/gemini-3.6");
+      // Runner kept on the left of the flexible zone (not crushed by a long name).
+      expect(lines[index]).toContain("agy/gemini-3.6");
     }
   });
 

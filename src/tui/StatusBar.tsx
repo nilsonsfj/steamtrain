@@ -1,4 +1,5 @@
 import { Box, Text } from "ink";
+import { agentUiLabel } from "../agents";
 import type { ApiDoctorResult, DoctorResult } from "../doctor";
 import type { ProjectIdentity } from "../project";
 import { formatProjectLabel } from "../project";
@@ -211,7 +212,7 @@ export function StatusBar({
 
   const agents = visibleAgents.map((result) => ({
     result,
-    width: chipWidth(result.agent, STATUS_STYLE[result.status].label),
+    width: chipWidth(result.label ?? agentUiLabel(result.agent), STATUS_STYLE[result.status].label),
   }));
   const apis = visibleApis.map((result) => ({
     result,
@@ -284,10 +285,11 @@ export function StatusBar({
 
 function AgentStatus({ result }: { result: DoctorResult }) {
   const style = STATUS_STYLE[result.status];
+  const name = result.label ?? agentUiLabel(result.agent);
   return (
     <Text>
       <Text color={style.color}>{style.symbol}</Text>
-      <Text bold> {result.agent}</Text>
+      <Text bold> {name}</Text>
       <Text color="gray"> {style.label}</Text>
     </Text>
   );
