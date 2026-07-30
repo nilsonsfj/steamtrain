@@ -677,6 +677,14 @@ async function runGenerationAgent(
         if (event.isError) {
           errored = true;
           errorMessage ??= event.text;
+        } else {
+          // The turn's own outcome is authoritative: a non-fatal `error` event
+          // earlier in the stream (e.g. Codex logging a config value that got
+          // overridden by an enterprise policy and fell back, then continuing
+          // the turn) must not outlive a turn that goes on to complete
+          // successfully.
+          errored = false;
+          errorMessage = undefined;
         }
       } else if (event.kind === "error") {
         errored = true;
