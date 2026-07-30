@@ -467,18 +467,35 @@
       paint();
     });
     wrap.appendChild(editBtn);
-    if (cfg) {
-      var delBtn = h("button", { type: "button", class: "act del", title: "Remove " + id + " from config", text: "×" });
-      delBtn.addEventListener("click", function () {
-        if (!window.confirm("Remove \"" + id + "\" from config?")) return;
-        var list = kind === "agent" ? draft.agents : draft.apis;
-        var i = list.findIndex(function (x) { return x.id === id; });
-        if (i >= 0) list.splice(i, 1);
-        if (editingRow && editingRow.kind === kind && editingRow.id === id) editingRow = null;
+    // Always render remove so every row's action column lines up. Built-ins
+    // with no config entry have nothing to delete — clicking explains that
+    // (same rule as the TUI agent manager's `d` binding) instead of hiding
+    // or greying out the control, which made the column look ragged.
+    var delBtn = h("button", {
+      type: "button",
+      class: "act del",
+      text: "×",
+      title: cfg
+        ? "Remove " + id + " from config"
+        : id + " is a built-in default (not in config); disable it instead"
+    });
+    delBtn.addEventListener("click", function () {
+      if (!cfg) {
+        runnersNotice = {
+          text: "'" + id + "' is a built-in default (not configured); disable it instead",
+          kind: "err"
+        };
         paint();
-      });
-      wrap.appendChild(delBtn);
-    }
+        return;
+      }
+      if (!window.confirm("Remove \"" + id + "\" from config?")) return;
+      var list = kind === "agent" ? draft.agents : draft.apis;
+      var i = list.findIndex(function (x) { return x.id === id; });
+      if (i >= 0) list.splice(i, 1);
+      if (editingRow && editingRow.kind === kind && editingRow.id === id) editingRow = null;
+      paint();
+    });
+    wrap.appendChild(delBtn);
     return wrap;
   }
 

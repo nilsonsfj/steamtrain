@@ -178,6 +178,8 @@ interface Mounted {
   tally: () => string;
   /** Whether the Runners nav item carries the "needs attention" pip. */
   navFlagged: () => boolean;
+  /** Text of the runners settings banner (empty when nothing is shown). */
+  banner: () => string;
   puts: Record<string, unknown>[];
 }
 
@@ -223,7 +225,18 @@ async function mountSettings(opts: {
     refreshWorkflowList: () => {},
     copyFix: () => {},
     pollDoctor: () => {},
-    modals: { mbanner: () => {}, field: (_label: string, input: StubEl) => input },
+    modals: {
+      mbanner: (node: StubEl, text: string, kind: string) => {
+        if (!text) {
+          node.className = "mbanner";
+          node.text = "";
+          return;
+        }
+        node.className = `mbanner show ${kind === "err" ? "err" : "info"}`;
+        node.text = text;
+      },
+      field: (_label: string, input: StubEl) => input,
+    },
     apiAuth: (method: string, _path: string, body?: Record<string, unknown>) => {
       if (method === "PUT") {
         puts.push(body ?? {});
@@ -232,7 +245,12 @@ async function mountSettings(opts: {
       return Promise.resolve({ status: 200, body: config });
     },
   };
-  const window = { Steamtrain: ST, SteamtrainReducer: null, location: { hash: "" } };
+  const window = {
+    Steamtrain: ST,
+    SteamtrainReducer: null,
+    location: { hash: "" },
+    confirm: () => true,
+  };
   new Function("window", "document", settingsJs)(window, { getElementById: () => null });
   const settings = ST.settings as { render: (c: StubEl, s: string) => void };
   settings.render(root, "runners");
@@ -254,6 +272,10 @@ async function mountSettings(opts: {
         },
       };
     });
+  const banner = () => {
+    const node = collect(root, (n) => String(n.className).includes("mbanner"))[0];
+    return node ? flatText(node) : "";
+  };
   const save = async () => {
     const btn = collect(root, (n) => n.text === "Save changes")[0];
     if (!btn) throw new Error("no Save button");
@@ -266,7 +288,7 @@ async function mountSettings(opts: {
     return strip ? flatText(strip) : "";
   };
   const navFlagged = () => collect(root, (n) => n.className.split(" ").includes("flag")).length > 0;
-  return { rows, save, tally, navFlagged, puts };
+  return { rows, save, tally, navFlagged, puts, banner };
 }
 
 describe("runners settings table", () => {
@@ -299,12 +321,37 @@ describe("runners settings table", () => {
     expect(kiro?.actions).toEqual(["off", "Edit", "×"]);
   });
 
-  it("offers on/off and a labelled Edit on every row", async () => {
+  it("offers on/off, Edit, and remove on every row", async () => {
     const ui = await mountSettings(MIXED);
     for (const row of ui.rows()) {
-      expect(row.actions).toContain("Edit");
-      expect(row.actions.some((a) => a === "on" || a === "off")).toBe(true);
+      expect(row.actions).toEqual(
+        expect.arrayContaining(["Edit", "×", expect.stringMatching(/^(on|off)$/)]),
+      );
+      expect(row.actions).toHaveLength(3);
     }
+  });
+
+  it("explains when remove is pressed on a built-in with no config entry", async () => {
+    const ui = await mountSettings(MIXED);
+    const claude = ui.rows().find((r) => r.text.startsWith("claude"));
+    expect(claude).toBeTruthy();
+    claude?.click("×");
+    expect(ui.banner()).toMatch(/built-in default.*disable it instead/i);
+    // Nothing was removed from the draft; Save would still only write what was already configured.
+    await ui.save();
+    expect(ui.puts[0]?.agents).toEqual([
+      expect.objectContaining({ id: "kiro", provider: "kiro", enabled: false }),
+    ]);
+  });
+
+  it("removes a configured runner from the draft on confirm", async () => {
+    const ui = await mountSettings(MIXED);
+    ui.rows()
+      .find((r) => r.text.startsWith("kiro"))
+      ?.click("×");
+    expect(ui.rows().some((r) => r.text.startsWith("kiro"))).toBe(false);
+    await ui.save();
+    expect(ui.puts[0]?.agents ?? []).not.toContainEqual(expect.objectContaining({ id: "kiro" }));
   });
 
   it("disabling a built-in with no config entry saves an entry that holds the flag", async () => {
