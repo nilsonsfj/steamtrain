@@ -1,6 +1,9 @@
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import {
+  AGENT_IDS,
+  DEFAULT_AGENT_LABEL,
+  agentUiLabel,
   buildAgentMeta,
   defaultDraftModel,
   resolveAgentInstance,
@@ -80,6 +83,19 @@ describe("agent configuration", () => {
       label: "agy",
       binary: "agy",
     });
+  });
+
+  it("maps agentUiLabel for built-ins, custom ids, and empty input", () => {
+    expect(agentUiLabel("antigravity")).toBe("agy");
+    expect(agentUiLabel("claude")).toBe("claude");
+    expect(agentUiLabel("my-fork")).toBe("my-fork");
+    expect(agentUiLabel(undefined)).toBe("");
+    expect(agentUiLabel(null)).toBe("");
+    expect(agentUiLabel("")).toBe("");
+    for (const id of AGENT_IDS) {
+      expect(DEFAULT_AGENT_LABEL[id]).toBeTypeOf("string");
+      expect(agentUiLabel(id)).toBe(DEFAULT_AGENT_LABEL[id]);
+    }
   });
 
   it("hides disabled agents outside all-agent config views", () => {

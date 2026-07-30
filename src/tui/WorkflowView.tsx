@@ -2,7 +2,7 @@ import { basename } from "node:path";
 import { Box, Text } from "ink";
 import { useMemo } from "react";
 import stringWidth from "string-width";
-import { agentUiLabel } from "../agents/config";
+import { agentUiLabel } from "../agents";
 import { truncate } from "../agents/util";
 import {
   type ModelUsage,

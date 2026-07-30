@@ -33,7 +33,8 @@
     }
   };
   // Full product names for providers whose UI short-label differs from the id
-  // (e.g. antigravity → agy). Shown only on this settings page.
+  // (e.g. antigravity → agy). Shown only on this settings page. Keep in sync
+  // with DEFAULT_AGENT_LABEL in src/agents/config.ts.
   var PROVIDER_PRODUCT_NAME = {
     antigravity: "Antigravity"
   };

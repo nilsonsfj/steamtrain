@@ -43,9 +43,12 @@ window.Steamtrain = (function () {
    * Compact UI label for an agent instance id. Built-in `antigravity` is shown
    * as `agy` (the CLI binary) to save space; settings still surface the full
    * provider id. Prefer a catalog `label` when one is present.
+   *
+   * Keep the hardcoded fallback in sync with DEFAULT_AGENT_LABEL in
+   * src/agents/config.ts (and PROVIDER_PRODUCT_NAME in st-settings.js).
    */
   function agentUiLabel(id) {
-    if (!id) return id;
+    if (!id) return "";
     for (var i = 0; i < (S.agents || []).length; i++) {
       var a = S.agents[i];
       if (a.id === id && a.label) return a.label;
