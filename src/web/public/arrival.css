@@ -1,0 +1,325 @@
+/* Arrival surface: the live narration panel shown during a run, and the
+   two-column report + step ledger shown once it finishes. */
+
+/* ---- Narration: live status panel ---- */
+.narration {
+  max-width: 1100px;
+  margin: 0 auto 16px;
+  padding: 14px 16px 12px;
+  border: 1px solid rgba(52, 211, 196, 0.22);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(52, 211, 196, 0.07), transparent 42%), var(--raised);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  animation: conductor-in 380ms ease-out;
+}
+@keyframes conductor-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.narration-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--accent-bright);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-bottom: 10px;
+}
+.narration-head .conductor-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.narration-head .conductor-mark::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(52, 211, 196, 0.2);
+  animation: conductor-live 1.8s ease-in-out infinite;
+}
+@keyframes conductor-live {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgba(52, 211, 196, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(52, 211, 196, 0.28);
+  }
+}
+.narration-line {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 4px 0;
+  transition: color 0.2s ease;
+}
+.narration-line.fresh {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  padding: 6px 0 8px;
+  animation: line-fresh 420ms ease-out;
+}
+@keyframes line-fresh {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.narration-line.clickable {
+  cursor: pointer;
+}
+.narration-line.clickable:hover {
+  color: var(--accent);
+}
+.narration-verb {
+  color: var(--accent);
+  margin-right: 4px;
+}
+
+/* ---- Arrival: the two-column report + step ledger --------------------- */
+.arrival {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+}
+.arrival-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.arrival-head {
+  padding: 26px 32px 18px;
+  border-bottom: 1px solid var(--border-quiet);
+}
+.arrival-kicker {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.arrival-kicker .state {
+  font: 600 10px / 1 var(--font-ui);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--done);
+}
+.arrival-kicker .state.failed {
+  color: var(--error-text);
+}
+.arrival-kicker .when {
+  font: 400 11.5px / 1 var(--font-mono);
+  color: var(--dim);
+}
+.arrival-headline {
+  font: 600 30px / 1.2 var(--font-ui);
+  letter-spacing: -0.03em;
+  max-width: 30ch;
+  text-wrap: pretty;
+}
+/*
+ * Deliberately deviates from the brief's Step 1 CSS here: verbatim it is
+ * `display: flex; gap: 28px;` with no wrap/shrink allowance, authored against
+ * the source design's full-viewport arrival (~1020px wide). Nested inside
+ * `#center` the column is ~420-484px, and four stat cells + three divider
+ * rules + the Run again/Export actions do not fit on one line at that width
+ * (measured overflow: .arrival-main scrollWidth 593 vs clientWidth 484,
+ * Export clipped entirely outside the column). Wrapping keeps every control
+ * reachable at the mandated column width without reverting to full-bleed.
+ */
+.arrival-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 28px;
+  margin-top: 20px;
+  align-items: flex-end;
+}
+.arrival-stats .k {
+  font: 400 10.5px / 1 var(--font-ui);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 6px;
+}
+.arrival-stats .v {
+  font: 500 17px / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.arrival-stats .rule {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border-quiet);
+}
+.arrival-stats .actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.arrival-report {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 32px 24px;
+}
+.arrival-report-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.arrival-report-head .rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border-quiet);
+}
+.arrival-report-head .src {
+  font: 400 11.5px / 1 var(--font-mono);
+  color: var(--dim);
+}
+.finding {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-quiet);
+  margin-bottom: 14px;
+}
+.finding:last-child {
+  border-bottom: 0;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+.finding .sev {
+  font: 600 10.5px / 1.6 var(--font-ui);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.finding .sev.critical {
+  color: var(--error-text);
+}
+.finding .sev.high {
+  color: var(--gate);
+}
+.finding .what {
+  font: 500 14.5px / 1.5 var(--font-ui);
+  color: var(--text);
+}
+.finding .what code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.finding .where {
+  font: 400 12px / 1.6 var(--font-mono);
+  color: var(--dim);
+  margin-top: 5px;
+}
+
+.ledger {
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.ledger-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border-quiet);
+}
+.ledger-head .count {
+  margin-left: auto;
+  font: 400 11px / 1 var(--font-mono);
+  color: var(--dim);
+}
+.ledger-cols,
+.ledger-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) 54px 62px;
+  gap: 10px;
+}
+.ledger-cols {
+  padding: 7px 16px;
+  border-bottom: 1px solid var(--border-quiet);
+  font: 400 10.5px / 1 var(--font-ui);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.ledger-rows {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.ledger-row {
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--raised);
+  font: 400 12px / 1.4 var(--font-mono);
+  align-items: center;
+}
+.ledger-row:hover {
+  background: #12161a;
+}
+.ledger-row .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--done);
+}
+.ledger-row.failed .dot {
+  background: var(--error);
+}
+.ledger-row .id {
+  color: var(--text);
+}
+.ledger-row .sub {
+  color: var(--dim);
+  font-size: 11px;
+}
+.ledger-row .sub .cached {
+  color: var(--gate);
+}
+.ledger-row .num {
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.ledger-foot {
+  margin-top: auto;
+  padding: 14px 16px;
+  border-top: 1px solid var(--border-quiet);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.ledger-foot .row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font: 400 12px / 1.4 var(--font-mono);
+  color: var(--dim);
+}
+.ledger-foot .row .v {
+  margin-left: auto;
+  color: var(--muted);
+}

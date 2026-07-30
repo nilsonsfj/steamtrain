@@ -1,0 +1,81 @@
+/* Design tokens, resets and document defaults. Loaded first: every file after
+   it in WEB_ASSETS (src/web/html.ts) depends on these custom properties. */
+:root {
+  --canvas: #0c0e11;
+  --surface: #0e1114;
+  --header: #101317;
+  --raised: #14181d;
+  --well: #080a0c;
+
+  --border: #232830;
+  --border-quiet: #1b1f25;
+  --border-strong: #2f3742;
+
+  --text: #e6eaef;
+  --muted: #98a2af;
+  --dim: #6c7784;
+  --faint: #3a424d;
+
+  --accent: #34d3c4;
+  --accent-bright: #7eefe4;
+  --accent-dim: #1c6f68;
+
+  --running: #4aa3ff;
+  --running-text: #9ecbff;
+  --done: #3fb950;
+  --done-text: #6ed67a;
+  --gate: #d29922;
+  --error: #f85149;
+  --error-text: #f0837e;
+
+  --kind-worker: #6fb1ff;
+  --kind-worker-text: #8fb6e0;
+  --kind-consolidator: #5fe0c6;
+  --kind-consolidator-text: #7fdccb;
+  --kind-distributor: #c9a0ff;
+  --kind-distributor-text: #b9a3dd;
+  --kind-gate: #d29922;
+  --kind-gate-text: #d9b45a;
+  --kind-command: #8d9aab;
+  --kind-command-text: #98a2af;
+  --kind-llm: #f0a37e;
+  --kind-llm-text: #d9a184;
+
+  --r-xs: 4px;
+  --r-sm: 5px;
+  --r-md: 6px;
+  --r-lg: 8px;
+  --r-xl: 10px;
+
+  --font-ui: "IBM Plex Sans", "Helvetica Neue", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", "Menlo", "Consolas", monospace;
+}
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+body {
+  background: var(--canvas);
+  color: var(--text);
+  font: 14px / 1.5 var(--font-ui);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  margin: 0;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}

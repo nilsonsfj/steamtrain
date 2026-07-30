@@ -16,7 +16,7 @@
   },
   "overrides": [
     {
-      "include": ["src/web/public/app.js"],
+      "include": ["src/web/public/st-*.js"],
       "formatter": { "enabled": false },
       "linter": { "rules": { "recommended": false, "all": false } }
     }

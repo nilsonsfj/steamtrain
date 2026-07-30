@@ -1,0 +1,686 @@
+/* Settings surface: the settings page (Runners, Limits & budget), per-step
+   and nested step editors, the retarget bar, the login form and the reauth
+   overlay. */
+/* ---- Settings page -------------------------------------------------------- */
+.settings {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.settings-nav {
+  width: 236px;
+  flex: none;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  padding: 14px 8px;
+}
+.settings-nav .head {
+  font: 600 10px / 1 var(--font-ui);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  padding: 0 8px 10px;
+}
+.settings-nav .item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: var(--r-md);
+  font: 400 13px / 1.3 var(--font-ui);
+  color: var(--muted);
+  cursor: pointer;
+  border: 0;
+  background: none;
+  width: 100%;
+  text-align: left;
+}
+.settings-nav .item:hover {
+  background: var(--raised);
+}
+.settings-nav .item.active {
+  background: rgba(52, 211, 196, 0.1);
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--text);
+  font-weight: 500;
+}
+.settings-nav .item .count {
+  margin-left: auto;
+  font: 400 11px / 1 var(--font-mono);
+  color: var(--dim);
+}
+.settings-scope {
+  margin-top: 18px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--header);
+  font: 400 11.5px / 1.5 var(--font-ui);
+  color: var(--muted);
+}
+.settings-scope code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-bright);
+}
+
+.settings-pane {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 24px 32px;
+}
+.settings-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-quiet);
+}
+.settings-head h2 {
+  margin: 0;
+  font: 600 22px / 1.2 var(--font-ui);
+  letter-spacing: -0.025em;
+}
+.settings-head p {
+  margin: 5px 0 0;
+  font: 400 13px / 1.5 var(--font-ui);
+  color: var(--muted);
+  max-width: 70ch;
+}
+.settings-head .actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.runner-cols,
+.runner-row {
+  display: grid;
+  grid-template-columns: 14px 150px 92px 1fr 190px 96px 72px;
+  gap: 14px;
+  align-items: center;
+}
+.runner-cols {
+  padding: 12px 4px 8px;
+  font: 400 10.5px / 1 var(--font-ui);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.runner-row {
+  padding: 12px 4px;
+  border-top: 1px solid var(--border-quiet);
+  font: 400 12.5px / 1.4 var(--font-mono);
+}
+.runner-row:hover {
+  background: var(--header);
+}
+.runner-row .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--done);
+}
+.runner-row .name {
+  color: var(--text);
+  font-weight: 500;
+}
+.runner-row .detail {
+  color: var(--muted);
+}
+.runner-row .detail .sub {
+  color: var(--dim);
+}
+.runner-row .scope {
+  color: var(--dim);
+}
+.runner-row .rowacts {
+  display: flex;
+  gap: 8px;
+  color: var(--dim);
+  justify-content: flex-end;
+}
+.runner-row .rowacts button {
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.runner-row .rowacts button:hover {
+  color: var(--text);
+}
+.runner-row .rowacts button.del:hover {
+  color: var(--error-text);
+}
+
+.runner-group.needs-auth {
+  border-top: 1px solid var(--border-quiet);
+  background: rgba(210, 153, 34, 0.05);
+}
+.runner-group.needs-auth .runner-row {
+  border-top: 0;
+}
+.runner-row.absent {
+  opacity: 0.5;
+}
+.runner-row.absent .dot {
+  background: var(--faint);
+}
+.runner-row .detail.warn {
+  color: var(--gate);
+}
+.runner-fix {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 4px 14px 42px;
+}
+.runner-fix .why {
+  font: 400 12px / 1.5 var(--font-ui);
+  color: var(--muted);
+}
+.runner-fix code {
+  font: 400 12px / 1 var(--font-mono);
+  color: var(--accent-bright);
+  background: var(--well);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 6px 9px;
+}
+
+.settings-foot {
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.settings-foot .probed {
+  font: 400 12px / 1.5 var(--font-ui);
+  color: var(--dim);
+}
+.settings-foot .actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+/* Not in the brief's grid verbatim: the needs-auth dot needs a colour beyond
+   the base ready-green / absent-faint pair, using only existing tokens. */
+.runner-row .dot.err {
+  background: var(--error);
+}
+.runner-row .dot.warn {
+  background: var(--gate);
+}
+
+/* Inline row editor (Edit expands this beneath a runner-row) and the empty /
+   loading / read-only states around the table — new controls this page
+   introduces, styled with existing tokens and the shared .field/.txt/.sel
+   classes from modals.css. */
+.runner-edit {
+  padding: 2px 4px 16px 42px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.runner-edit .row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.runner-edit .edit-actions {
+  display: flex;
+  gap: 8px;
+}
+.settings-empty {
+  padding: 20px 4px;
+  color: var(--muted);
+  font: 400 13px / 1.5 var(--font-ui);
+}
+.settings-note {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--header);
+  color: var(--muted);
+  font: 400 13px / 1.5 var(--font-ui);
+}
+.runner-sechead {
+  margin: 18px 0 2px;
+  font: 600 12px / 1.3 var(--font-ui);
+  color: var(--text);
+}
+.runner-sechead:first-child {
+  margin-top: 0;
+}
+
+.btn.small.copied {
+  color: var(--done);
+  border-color: rgba(63, 185, 80, 0.45);
+}
+.draft {
+  margin-top: 12px;
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: #c4d0dd;
+  white-space: pre-wrap;
+  max-height: 220px;
+  overflow-y: auto;
+  display: none;
+}
+.draft.show {
+  display: block;
+}
+.mbanner {
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-bottom: 12px;
+  display: none;
+}
+.mbanner.show {
+  display: block;
+}
+.mbanner.err {
+  background: #2a1314;
+  border: 1px solid #6f2424;
+  color: #f7b6b3;
+}
+.mbanner.info {
+  background: #122230;
+  border: 1px solid #1f4a6f;
+  color: #bcdcf5;
+}
+/* per-step editor */
+.ephases {
+  margin-top: 4px;
+}
+.ephase {
+  margin-bottom: 14px;
+}
+.ephase .et {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+.estep {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--faint);
+  border-radius: 10px;
+  padding: 11px 12px;
+  margin-bottom: 9px;
+  transition: border-color .15s ease, background .15s ease;
+}
+/* Nested sub-workflow step editors inside the configure modal. */
+.nested-steps {
+  margin: -2px 0 9px 16px;
+  padding-left: 12px;
+  border-left: 2px dashed var(--accent-dim);
+}
+.nested-head {
+  font-size: 11px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  margin: 4px 0 6px;
+}
+.estep.nested {
+  border-left-color: var(--accent-dim);
+  background: var(--surface);
+}
+.estep.nested .esid {
+  color: var(--accent-bright);
+}
+.estep:focus-within {
+  border-color: #3d6a96;
+  background: #1a2430;
+}
+.estep.worker {
+  border-left-color: #6fb1ff;
+}
+.estep.processor {
+  border-left-color: #9d8cff;
+}
+.estep.distributor {
+  border-left-color: #ffce6f;
+}
+.estep.consolidator {
+  border-left-color: #5fe0c6;
+}
+.estep.gate {
+  border-left-color: #f0a35e;
+}
+.estep.approval {
+  border-left-color: #ffd166;
+}
+.estep.human {
+  border-left-color: #f5a3ff;
+}
+.estep.merge {
+  border-left-color: #ff9ecb;
+}
+.estep.command {
+  border-left-color: #b8c4d0;
+}
+.estep.llm {
+  border-left-color: #7ec8ff;
+}
+.estep .eh {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.estep .eh .esid {
+  font-weight: 700;
+}
+.estep .eh .ek {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0 5px;
+}
+.estep .eh .eh-spacer {
+  flex: 1;
+}
+.estep .ro {
+  color: var(--muted);
+  font-size: 12px;
+}
+.estep.estep-flash {
+  animation: estepFlash .7s ease;
+}
+@keyframes estepFlash {
+  0% {
+    background: #1e3a4a;
+    border-color: #3d7aaa;
+  }
+  100% {
+    background: var(--raised);
+    border-color: var(--border);
+  }
+}
+.btn.small.use-for-all {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 11px;
+  padding: 4px 9px;
+  background: #152230;
+  border: 1px solid #2a4a66;
+  color: #9ec8e8;
+}
+.btn.small.use-for-all:hover {
+  color: #e8f1fa;
+  border-color: #4a7aaa;
+  background: #1a3044;
+}
+
+/* Retarget-all bar in Configure modal */
+.bulk-retarget {
+  background: linear-gradient(135deg, #152230 0%, #1a2a38 55%, #162428 100%);
+  border: 1px solid #2a4a66;
+  border-radius: 12px;
+  padding: 14px 14px 12px;
+  margin: 6px 0 16px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.bulk-retarget-head {
+  margin-bottom: 10px;
+}
+.bulk-retarget-title {
+  font-weight: 700;
+  font-size: 14px;
+  color: #e8f1fa;
+  letter-spacing: 0.01em;
+}
+.bulk-retarget-sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 3px;
+  line-height: 1.4;
+}
+.bulk-retarget-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 10px;
+  align-items: end;
+}
+.bulk-retarget-row > .field {
+  margin: 0;
+}
+.bulk-retarget-action {
+  display: flex;
+  align-items: end;
+  padding-bottom: 1px;
+}
+.bulk-apply {
+  white-space: nowrap;
+  min-height: 34px;
+}
+.bulk-flash {
+  display: none;
+  margin-top: 10px;
+  font-size: 12px;
+  color: #9ddec0;
+}
+.bulk-flash.show {
+  display: block;
+  animation: bulkFlashIn .28s ease;
+}
+@keyframes bulkFlashIn {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (max-width: 720px) {
+  .bulk-retarget-row {
+    grid-template-columns: 1fr;
+  }
+}
+/* ---- auth login form ---- */
+.login-form {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin: 16px 0;
+}
+.login-form .txt {
+  width: 280px;
+}
+.login-error {
+  color: var(--error);
+  font-size: 13px;
+  min-height: 1.2em;
+}
+.plan-summary {
+  margin-bottom: 16px;
+}
+.plan-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+.plan-stats {
+  color: var(--text);
+  font-size: 14px;
+}
+.plan-agents,
+.plan-budget {
+  color: var(--muted);
+  font-size: 13px;
+}
+.plan-warnings {
+  background: rgba(210, 153, 34, 0.1);
+  border: 1px solid var(--gate);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+}
+.plan-warn-title {
+  color: var(--gate);
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.plan-warn-item {
+  color: var(--muted);
+  font-size: 12px;
+  padding-left: 8px;
+}
+.plan-info {
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.plan-steps-header {
+  color: var(--text);
+  font-weight: 600;
+  font-size: 14px;
+  margin: 12px 0 8px;
+}
+.plan-step .plan-prompt {
+  margin-top: 6px;
+  background: var(--raised);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+.plan-prompt-label {
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.plan-prompt-text {
+  color: var(--text);
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+/* ---- reauth overlay ---- */
+.reauth-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 11, 16, 0.72);
+  backdrop-filter: blur(8px) saturate(0.85);
+  animation: reauth-fade-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes reauth-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.reauth-card {
+  position: relative;
+  width: min(400px, calc(100vw - 40px));
+  padding: 32px 28px 28px;
+  border-radius: var(--r-xl);
+  background: linear-gradient(180deg, rgba(22, 30, 40, 0.98) 0%, rgba(16, 22, 30, 0.99) 100%);
+  border: 1px solid rgba(52, 211, 196, 0.28);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 24px 64px rgba(0, 0, 0, 0.55), 0 0 0 1px
+    rgba(0, 0, 0, 0.25);
+  animation: reauth-card-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: 80ms;
+}
+@keyframes reauth-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.reauth-card::before {
+  content: "";
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(52, 211, 196, 0.45), transparent);
+  pointer-events: none;
+}
+.reauth-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 18px;
+  border-radius: 50%;
+  background: rgba(52, 211, 196, 0.1);
+  border: 1px solid rgba(52, 211, 196, 0.25);
+  color: var(--accent-bright);
+  font-size: 20px;
+  line-height: 1;
+}
+.reauth-title {
+  font-family: var(--font-ui);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-align: center;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.reauth-desc {
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+.reauth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.reauth-form .txt {
+  width: 100%;
+  min-height: 42px;
+  font-size: 14px;
+}
+.reauth-form .btn {
+  width: 100%;
+  min-height: 42px;
+  justify-content: center;
+}
+.reauth-error {
+  color: var(--error);
+  font-size: 12px;
+  min-height: 1.4em;
+  text-align: center;
+  margin-top: 2px;
+}
+.reauth-card:focus-within .reauth-icon {
+  box-shadow: 0 0 0 4px rgba(52, 211, 196, 0.12);
+}

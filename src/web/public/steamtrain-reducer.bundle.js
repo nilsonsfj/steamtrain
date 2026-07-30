@@ -24,6 +24,7 @@ var SteamtrainReducer = (() => {
   __export(reducer_exports, {
     ARRIVAL_NEXT_CANDIDATES: () => ARRIVAL_NEXT_CANDIDATES,
     NARRATION_CAP: () => NARRATION_CAP,
+    SETTINGS_SECTIONS: () => SETTINGS_SECTIONS,
     SUBWORKFLOW_STEP_SEPARATOR: () => SUBWORKFLOW_STEP_SEPARATOR,
     TOUR_WORKFLOW_NAME: () => TOUR_WORKFLOW_NAME,
     appendNarration: () => appendNarration,
@@ -32,6 +33,7 @@ var SteamtrainReducer = (() => {
     approvalDeepLink: () => approvalDeepLink,
     arrivalReceiptCards: () => arrivalReceiptCards,
     buildArrivalReport: () => buildArrivalReport,
+    createThroughputMeter: () => createThroughputMeter,
     describeSubWorkflow: () => describeSubWorkflow,
     findArrivalStep: () => findArrivalStep,
     formatArrivalHeadline: () => formatArrivalHeadline,
@@ -44,9 +46,12 @@ var SteamtrainReducer = (() => {
     narrateEvent: () => narrateEvent,
     narrateFromState: () => narrateFromState,
     parseDeepLink: () => parseDeepLink,
+    parseRoute: () => parseRoute,
     parseRunDeepLink: () => parseRunDeepLink,
+    projectCost: () => projectCost,
     runDeepLink: () => runDeepLink,
     sessionOverridesEmpty: () => sessionOverridesEmpty,
+    settingsDeepLink: () => settingsDeepLink,
     shouldOfferStationLanding: () => shouldOfferStationLanding,
     splitSubWorkflowKey: () => splitSubWorkflowKey,
     subWorkflowRollup: () => subWorkflowRollup,
@@ -947,6 +952,19 @@ var SteamtrainReducer = (() => {
   function approvalDeepLink(runId, stepId) {
     return `#run-${runId.toLowerCase()}/step/${stepId}`;
   }
+  var SETTINGS_SECTIONS = ["runners", "limits"];
+  function parseRoute(hash) {
+    const run = parseDeepLink(hash);
+    if (run) return { kind: "run", runId: run.runId, stepId: run.stepId };
+    const match = /^#settings(?:\/([\w-]+))?$/i.exec(hash.trim());
+    if (!match) return null;
+    const raw = (match[1] ?? "").toLowerCase();
+    const section = SETTINGS_SECTIONS.includes(raw) ? raw : SETTINGS_SECTIONS[0];
+    return { kind: "settings", section };
+  }
+  function settingsDeepLink(section = SETTINGS_SECTIONS[0]) {
+    return `#settings/${section}`;
+  }
 
   // src/workflow/overrides.ts
   var AGENT_FIELD_KEYS = /* @__PURE__ */ new Set([
@@ -1266,6 +1284,41 @@ var SteamtrainReducer = (() => {
       bits.push(`${view.overrideCount} override${view.overrideCount === 1 ? "" : "s"}`);
     }
     return bits.join(" \xB7 ");
+  }
+
+  // src/web/telemetry.ts
+  var DEFAULT_WINDOW_MS = 6e4;
+  function createThroughputMeter(windowMs = DEFAULT_WINDOW_MS) {
+    const samples = [];
+    return {
+      sample(totalTokens, nowMs) {
+        samples.push({ atMs: nowMs, totalTokens });
+        while (samples.length > 1 && nowMs - samples[0].atMs > windowMs) samples.shift();
+      },
+      bars(count) {
+        if (count <= 0) return [];
+        const empty = new Array(count).fill(0);
+        if (samples.length < 2) return empty;
+        const rates = [];
+        for (let i = 1; i < samples.length; i++) {
+          const prev = samples[i - 1];
+          const cur = samples[i];
+          const seconds = (cur.atMs - prev.atMs) / 1e3;
+          const delta = cur.totalTokens - prev.totalTokens;
+          rates.push(seconds > 0 && delta > 0 ? delta / seconds : 0);
+        }
+        const recent = rates.slice(-count);
+        const peak = Math.max(...recent);
+        if (peak <= 0) return empty;
+        const scaled = recent.map((r) => r / peak);
+        return [...new Array(count - scaled.length).fill(0), ...scaled];
+      }
+    };
+  }
+  function projectCost(input) {
+    const { spentUsd, completedSteps, totalSteps } = input;
+    if (completedSteps <= 0 || totalSteps <= 0) return null;
+    return Math.max(spentUsd, spentUsd / completedSteps * totalSteps);
   }
   return __toCommonJS(reducer_exports);
 })();

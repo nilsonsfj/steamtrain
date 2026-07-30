@@ -36,7 +36,7 @@ export function RetryRetargetOverlay({
   const readyAgents = useMemo(() => {
     const instances = resolveAgentInstances(config);
     // Ready when doctor has no row yet (unknown) or status is ok — same rule as
-    // the web history retarget modal (app.js openRetryRetargetModal).
+    // the web history retarget modal (st-modals.js openRetryRetargetModal).
     return instances.filter((agent) => {
       const health = doctor?.find((d) => d.agent === agent.id);
       return !health || health.status === "ok";
