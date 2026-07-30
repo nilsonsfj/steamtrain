@@ -408,6 +408,35 @@ describe("generateWorkflow", () => {
     expect(result.error).toMatch(/boom/);
   });
 
+  it("recovers when a non-fatal error event is followed by a successful result", async () => {
+    // Regression: Codex logs a `type: "error"` event when an org-managed policy
+    // overrides a requested config value (e.g. `approval_policy`), then falls
+    // back and completes the turn normally. That earlier event must not sink
+    // an otherwise-successful draft.
+    const adapter = makeAdapter([
+      {
+        kind: "error",
+        agent: "opencode",
+        ts: 0,
+        message:
+          "Configured value for 'approval_policy' is disallowed by requirements; falling back to required value OnRequest.",
+      },
+      {
+        kind: "result",
+        agent: "opencode",
+        ts: 0,
+        isError: false,
+        text: JSON.stringify(VALID_SPEC),
+      },
+    ]);
+    const result = await generateWorkflow(
+      { description: "x", agent: "opencode", model: "opencode/qwen3.6-plus-free" },
+      { createAdapter: adapter },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.spec).toBeDefined();
+  });
+
   it("reports a failure when the model returns no parseable workflow", async () => {
     const adapter = makeAdapter([
       { kind: "result", agent: "opencode", ts: 0, isError: false, text: "no json here" },
