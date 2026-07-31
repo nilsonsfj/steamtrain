@@ -6,6 +6,7 @@ import { WorkflowStepEditor } from "../src/tui/WorkflowStepEditor";
 import {
   EDITOR_EFFORT_NONE,
   agentChangePatch,
+  agentOptions,
   buildBulkEffortPatches,
   buildBulkModelPatches,
   buildBulkRetargetPatches,
@@ -112,6 +113,24 @@ describe("cycleOption", () => {
   it("returns the current value for singletons/empties", () => {
     expect(cycleOption(["a"], "a", 1)).toBe("a");
     expect(cycleOption([], "a", 1)).toBe("a");
+  });
+});
+
+describe("agentOptions", () => {
+  it("lists enabled agents when health is unknown", () => {
+    const opts = agentOptions(CONFIG);
+    expect(opts).toContain("opencode");
+    expect(opts).toContain("claude");
+  });
+
+  it("hides unhealthy agents once the doctor has reported", () => {
+    const healthy = new Set(["opencode"]);
+    expect(agentOptions(CONFIG, { healthy })).toEqual(["opencode"]);
+  });
+
+  it("keeps the current agent selectable even when unhealthy", () => {
+    const healthy = new Set(["opencode"]);
+    expect(agentOptions(CONFIG, { healthy, current: "claude" })).toEqual(["claude", "opencode"]);
   });
 });
 

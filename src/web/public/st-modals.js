@@ -257,10 +257,16 @@
     if (selected != null) sel.value = selected;
     if (!sel.value && opts.length) sel.value = opts[0].value;
   }
+  function agentAvailable(a) {
+    // Until the doctor has reported, keep every enabled agent selectable so
+    // create/configure forms are not empty on first paint.
+    if (!S.doctor || !S.doctor.length) return true;
+    return !!a.healthy;
+  }
   function agentOptions() {
-    return S.agents.filter(function (a) { return a.enabled !== false; }).map(function (a) {
+    return S.agents.filter(function (a) { return a.enabled !== false && agentAvailable(a); }).map(function (a) {
       var label = a.label && a.label !== a.id ? a.label + " (" + a.id + ")" : a.id;
-      return { value: a.id, label: label + (a.healthy ? "" : " (unavailable)") };
+      return { value: a.id, label: label };
     });
   }
   function agentOptionsWith(current) {
@@ -297,10 +303,27 @@
     }
     return opts;
   }
+  // Mirror src/tui/draft-model.ts DRAFT_AGENT_ORDER (OpenCode first for free
+  // models). Keep in sync when adding a provider — vanilla JS cannot import
+  // that TypeScript constant.
+  var PREFERRED_AGENT_ORDER = [
+    "opencode", "claude", "codex", "amp", "kiro", "mimo", "kimi", "cursor", "antigravity"
+  ];
+  function preferredAgentRank(a) {
+    var provider = a.provider || a.id;
+    var idx = PREFERRED_AGENT_ORDER.indexOf(provider);
+    return idx === -1 ? 99 : idx;
+  }
   function preferredAgent() {
     var enabled = S.agents.filter(function (a) { return a.enabled !== false; });
-    for (var i = 0; i < enabled.length; i++) if (enabled[i].healthy) return enabled[i];
-    return enabled[0] || null;
+    var available = enabled.filter(agentAvailable).slice().sort(function (a, b) {
+      return preferredAgentRank(a) - preferredAgentRank(b);
+    });
+    if (available.length) return available[0];
+    // Doctor not ready / nothing healthy yet: still prefer OpenCode ordering.
+    return enabled.slice().sort(function (a, b) {
+      return preferredAgentRank(a) - preferredAgentRank(b);
+    })[0] || null;
   }
 
   /**
@@ -409,6 +432,10 @@
     // instead of dereferencing null and taking the modal down with a TypeError.
     if (!a0) {
       ST.run.setBanner("every agent is disabled — enable one in Settings to draft a workflow", "err");
+      return;
+    }
+    if (S.doctor && S.doctor.length && !agentAvailable(a0)) {
+      ST.run.setBanner("no healthy agent available — fix Setup / doctor before creating a workflow", "err");
       return;
     }
 
@@ -713,6 +740,8 @@
   }
   function familyModelOptions(current) {
     // Cross-agent model picker: family aliases + native ids for auto binding.
+    // Only list models from available agents so defaults cannot point at an
+    // agent the doctor has marked down.
     var seen = {};
     var opts = [];
     function add(value, label) {
@@ -725,6 +754,7 @@
       (f.aliases || []).slice(0, 3).forEach(function (a) { add(a, f.name + " · " + a); });
     });
     S.agents.forEach(function (a) {
+      if (a.enabled === false || !agentAvailable(a)) return;
       (a.models || []).forEach(function (m) { add(m.id, m.name + " · " + a.id); });
     });
     if (current && !seen[current]) opts.unshift({ value: current, label: current + " (current)" });

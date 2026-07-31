@@ -65,13 +65,24 @@ describe("bundled workflows", () => {
     expect(unknown).toEqual([]);
   });
 
-  it("prefer mimo auto over deepseek-v4-flash-free for babysit defaults", () => {
+  it("prefer OpenCode free models over DeepSeek free for babysit defaults", () => {
     for (const name of ["babysit-pr", "babysit-all-prs"]) {
       const def = BUNDLED_WORKFLOWS[name]!.inputs?.babysitterModel?.default;
-      expect(def, name).toBe("mimo/mimo-auto");
+      expect(def, name).toBe("opencode/mimo-v2.5-free");
       expect(BUNDLED_WORKFLOWS[name]!.inputs?.babysitterModel?.fallbackModels).not.toContain(
         "opencode/deepseek-v4-flash-free",
       );
+      expect(BUNDLED_WORKFLOWS[name]!.inputs?.babysitterModel?.fallbackModels).not.toContain(
+        "mimo/mimo-auto",
+      );
+    }
+  });
+
+  it("do not pin the first-class mimo agent as a bundled default", () => {
+    for (const t of agentTargets()) {
+      expect(t.agent, `${t.workflow}/${t.step}`).not.toBe("mimo");
+      const resolved = resolveTemplatedModel(BUNDLED_WORKFLOWS[t.workflow]!, t.model);
+      expect(resolved.startsWith("mimo/"), `${t.workflow}/${t.step} → ${resolved}`).toBe(false);
     }
   });
 

@@ -24,6 +24,7 @@ export interface DraftTarget {
  * Preference order for auto-picking a drafting agent: OpenCode first (free
  * models, no paid credentials), then Claude, then Codex. Shared by the auto
  * resolver and the single-token model lookup so both agree on precedence.
+ * Keep in sync with `PREFERRED_AGENT_ORDER` in `src/web/public/st-modals.js`.
  */
 const DRAFT_AGENT_ORDER: readonly AgentProviderId[] = [
   "opencode",
