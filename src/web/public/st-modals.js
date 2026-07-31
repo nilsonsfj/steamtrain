@@ -1352,6 +1352,257 @@
   }
 
 
+  // ---- launch sheet (Turn 2 · 02.2) ------------------------------------------
+  // The only modal in the plan flow. Run never fires blind: the sheet states
+  // exactly what will execute, lets steps be deselected (recorded as skipped
+  // by the run) or the run started from a later phase, and surfaces unsaved
+  // plan edits — which run as-is — before the start button. ⏎ starts, esc
+  // returns to the plan.
+  function openLaunchSheet(opts) {
+    opts = opts || {};
+    if (isReadOnly()) { ST.run.setBanner("This session is read-only — viewing only.", "info"); return; }
+    if (!S.selected || !S.spec) return;
+    var input = (document.getElementById("input") || {}).value || "";
+    if (!input.trim()) {
+      S.planTab = "inputs";
+      ST.render();
+      var realInput = document.getElementById("input");
+      if (realInput) realInput.focus();
+      ST.run.setBanner("describe the run first — the input is what the workflow works on", "info");
+      return;
+    }
+    var base = ST.plan.draftIfDirty() || S.spec;
+    var lo = S.launchOptions;
+
+    // Which steps will execute. opts.only pins the sheet to a single step
+    // (the inspector's "Run this step only"); its own dependencies still run —
+    // the engine needs their outputs — so they're shown checked and locked.
+    var checked = {};
+    var locked = {};
+    ST.plan.flatSteps(base).forEach(function (f) {
+      checked[f.step.id] = opts.only ? f.step.id === opts.only : true;
+      // A step disabled in the plan stays skipped, no checkbox to revive it.
+      if (ST.plan.isDisabledWhen(f.step.when)) {
+        checked[f.step.id] = false;
+        locked[f.step.id] = true;
+      }
+    });
+    if (opts.only) {
+      // Lock the transitive dependencies of the pinned step: deselecting them
+      // would leave the pinned step's templates with nothing to render.
+      var need = [opts.only];
+      var seen = {};
+      while (need.length) {
+        var id = need.pop();
+        if (seen[id]) continue;
+        seen[id] = true;
+        var f = ST.plan.findStep(base, id);
+        if (!f) continue;
+        (f.step.dependsOn || []).forEach(function (dep) {
+          checked[dep] = true;
+          locked[dep] = true;
+          need.push(dep);
+        });
+      }
+    }
+    // Restored checkbox states, stashed by the select-all / start-from-phase
+    // rebuilds below (re-rendering the sheet keeps one source of truth).
+    if (lo._checked) {
+      Object.keys(checked).forEach(function (id) {
+        if (lo._checked[id] !== undefined && !locked[id]) checked[id] = lo._checked[id];
+      });
+      delete lo._checked;
+    }
+
+    var countEl = h("span", { class: "ls-count" });
+    function checkedIds() {
+      return Object.keys(checked).filter(function (id) { return checked[id]; });
+    }
+    function refreshCount() {
+      var total = ST.plan.flatSteps(base).length;
+      countEl.textContent = checkedIds().length + " of " + total + " steps";
+    }
+    function rebuild() {
+      lo._checked = checked;
+      closeModal();
+      openLaunchSheet(opts);
+    }
+
+    // -- left: the will-execute checklist, grouped by phase --------------------
+    var list = h("div", { class: "ls-steps" });
+    (base.phases || []).forEach(function (p, pi) {
+      list.appendChild(h("div", { class: "ls-phase" },
+        h("span", { class: "ls-pidx", text: String(pi + 1).padStart(2, "0") }),
+        h("span", { class: "ls-ptitle", text: p.title || p.id }),
+        (p.steps || []).length > 1 ? h("span", { class: "ls-pmeta", text: p.steps.length + " steps · parallel" }) : null
+      ));
+      (p.steps || []).forEach(function (s) {
+        var box = h("input", { type: "checkbox" });
+        box.checked = !!checked[s.id];
+        box.disabled = !!locked[s.id];
+        var note = null;
+        if (ST.plan.isDisabledWhen(s.when)) note = "disabled in the plan — stays skipped";
+        else if (locked[s.id]) note = "required by " + opts.only;
+        else if (s.kind === "gate" && (s.onFalse === "fail" || s.onFalse === "stop")) note = "halts the run on fail";
+        else if (s.kind === "approval") note = "waits for approval";
+        else if (s.kind === "workflow") note = "sub-workflow → " + s.workflow;
+        else if (s.loopTo) note = "loop → " + s.loopTo;
+        var row = h("label", { class: "ls-step" + (locked[s.id] ? " locked" : "") + (box.checked ? "" : " off") },
+          box,
+          h("span", { class: "ls-sid", text: s.id }),
+          h("span", { class: "ls-note", text: note || "" })
+        );
+        box.addEventListener("change", function () {
+          checked[s.id] = box.checked;
+          row.classList.toggle("off", !box.checked);
+          refreshCount();
+        });
+        list.appendChild(row);
+      });
+    });
+    refreshCount();
+
+    var fromPhaseSel = selectEl(
+      [{ value: "", label: "start from phase…" }].concat((base.phases || []).map(function (p, i) {
+        return { value: String(i), label: "start at " + String(i + 1).padStart(2, "0") + " · " + (p.title || p.id) };
+      })), "", function () {
+        if (fromPhaseSel.value === "") return;
+        var cut = Number(fromPhaseSel.value);
+        (base.phases || []).forEach(function (p, i) {
+          (p.steps || []).forEach(function (s) {
+            if (locked[s.id]) return;
+            checked[s.id] = i >= cut;
+          });
+        });
+        rebuild();
+      });
+
+    var leftCol = h("div", { class: "ls-left" },
+      h("div", { class: "ls-colhead" }, h("span", { class: "ls-label", text: "Will execute" }), countEl),
+      list,
+      h("div", { class: "ls-leftfoot" },
+        h("button", { class: "btn ghost", type: "button", text: "select all", onClick: function () {
+          ST.plan.flatSteps(base).forEach(function (f) { if (!locked[f.step.id]) checked[f.step.id] = true; });
+          rebuild();
+        } }),
+        fromPhaseSel
+      )
+    );
+
+    // -- right: options + warnings + estimate ----------------------------------
+    function toggle(labelText, hint, on, warn, onFlip) {
+      var btn = h("button", {
+        class: "ls-toggle" + (on ? " on" : ""), type: "button", role: "switch",
+        "aria-checked": on ? "true" : "false"
+      }, h("i"));
+      btn.addEventListener("click", function () {
+        on = !on;
+        btn.classList.toggle("on", on);
+        btn.setAttribute("aria-checked", on ? "true" : "false");
+        onFlip(on);
+      });
+      return h("div", { class: "ls-opt" },
+        h("div", { class: "ls-optcopy" },
+          h("div", { class: "ls-opttitle", text: labelText }),
+          h("div", { class: "ls-opthint" + (warn ? " warn" : ""), text: hint })),
+        btn);
+    }
+
+    var budgetInput = h("input", { class: "txt ls-budget", type: "text", placeholder: "no cap",
+      value: lo.budget || (base.maxCostUsd ? String(base.maxCostUsd) : "") });
+    budgetInput.addEventListener("input", function () { lo.budget = budgetInput.value; });
+
+    var optsBox = h("div", { class: "ls-opts" },
+      h("div", { class: "ls-label", text: "Options" }),
+      toggle("Reuse cached step results", "matching steps replay their last result instead of re-running", lo.reuseCache, false, function (v) { lo.reuseCache = v; }),
+      toggle("Detach after start", "the run continues in a background process if this window closes", lo.detach, false, function (v) { lo.detach = v; }),
+      h("div", { class: "ls-opt" },
+        h("div", { class: "ls-optcopy" },
+          h("div", { class: "ls-opttitle", text: "Budget cap" }),
+          h("div", { class: "ls-opthint", text: "stops scheduling new steps when spend reaches this (USD)" })),
+        budgetInput)
+    );
+
+    var edits = ST.plan.dirtySummary();
+    if (edits.length) {
+      optsBox.appendChild(h("div", { class: "ls-unsaved" },
+        h("span", { class: "ls-warnicon", text: "⚠" }),
+        h("div", null,
+          h("div", { class: "ls-unsaved-title", text: edits.length + " unsaved plan edit" + (edits.length === 1 ? "" : "s") + " will be used for this run." }),
+          h("div", { class: "ls-unsaved-list" },
+            document.createTextNode(edits.slice(0, 3).join(", ") + (edits.length > 3 ? " · +" + (edits.length - 3) + " more" : "") + " · "),
+            h("button", { class: "lnkbtn", type: "button", text: "save to file first", onClick: function () {
+              closeModal();
+              ST.plan.save(false);
+            } })
+          )
+        )
+      ));
+    }
+
+    var estimateEl = h("div", { class: "ls-estimate", text: "estimating…" });
+    var rightCol = h("div", { class: "ls-right" }, optsBox);
+
+    // -- footer ------------------------------------------------------------------
+    var startBtn = h("button", { class: "btn primary", type: "button" }, "Start run", h("span", { class: "kbd", text: "⏎" }));
+    var dryBtn = h("button", { class: "btn", type: "button", text: "Dry run", onClick: function () {
+      closeModal();
+      ST.run.startPlan();
+    } });
+    var foot = h("div", { class: "mfoot ls-foot" },
+      estimateEl,
+      h("div", { class: "spacer" }),
+      dryBtn,
+      startBtn
+    );
+
+    var body = h("div", { class: "ls-cols" }, leftCol, rightCol);
+    var gitNote = S.project && S.project.name ? S.project.name : "this project";
+    openModal(modalShell("Run " + S.selected, gitNote + " · unsaved edits run as-is", body, foot, true));
+
+    // Enter anywhere in the sheet starts the run (esc already closes it).
+    startBtn.addEventListener("click", doStart);
+    var modalEl = document.getElementById("modal");
+    if (modalEl) {
+      modalEl.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" && e.target.tagName !== "TEXTAREA" && e.target.tagName !== "INPUT") {
+          e.preventDefault();
+          doStart();
+        }
+      });
+    }
+
+    // -- estimate: the plan endpoint's history context, over the draft ---------
+    var planPayload = { input: input };
+    var draft = ST.plan.draftIfDirty();
+    if (draft) planPayload.spec = draft;
+    apiAuth("POST", "/api/workflows/" + encodeURIComponent(S.selected) + "/plan", planPayload).then(function (r) {
+      if (!document.getElementById("modal")) return; // sheet already closed
+      if (r.status !== 200) { estimateEl.textContent = "no estimate — " + ((r.body && r.body.error) || "plan failed"); return; }
+      var hist = r.body.history;
+      if (hist && hist.runs) {
+        estimateEl.textContent = "estimate $" + hist.minCostUsd.toFixed(3) + "–" + hist.maxCostUsd.toFixed(3) +
+          " · ~" + ST.fmtElapsed(hist.avgDurationMs) + " · from " + hist.runs + " completed run" + (hist.runs === 1 ? "" : "s");
+      } else {
+        estimateEl.textContent = "no completed runs yet — no estimate";
+      }
+    }).catch(function () { estimateEl.textContent = "estimate unavailable"; });
+
+    function doStart() {
+      var skip = ST.plan.flatSteps(base).map(function (f) { return f.step.id; })
+        .filter(function (id) { return !checked[id]; });
+      var budget = parseFloat(lo.budget);
+      var runSpec = ST.plan.buildRunSpec({ skip: skip, budgetUsd: isFinite(budget) && budget > 0 ? budget : null });
+      if (!runSpec) { ST.run.setBanner("no spec to run", "err"); return; }
+      closeModal();
+      ST.run.launchRun({
+        spec: runSpec,
+        fresh: !lo.reuseCache,
+        detach: lo.detach
+      });
+    }
+  }
+
   ST.modals = {
     addBlurValidation: addBlurValidation,
     agentOptions: agentOptions,
@@ -1366,6 +1617,7 @@
     modelOptionsWith: modelOptionsWith,
     openCreate: openCreate,
     openEditor: openEditor,
+    openLaunchSheet: openLaunchSheet,
     openModal: openModal,
     openRetryRetargetModal: openRetryRetargetModal,
     preferredAgent: preferredAgent,

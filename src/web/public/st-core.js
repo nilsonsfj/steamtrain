@@ -166,7 +166,38 @@ window.Steamtrain = (function () {
     // without this an opened rollup snaps shut two seconds later. Keyed by
     // stepKey (phase:iteration:stepId) so a loop-back's iteration 2 does not
     // inherit iteration 1's open state for the same step id.
-    subWorkflowOpen: {}
+    subWorkflowOpen: {},
+    // ---- plan editor (idle state) -------------------------------------------
+    // Unsaved plan drafts, keyed by workflow name. A draft is a deep copy of
+    // the saved spec that every plan/inspector edit mutates; it is the pending
+    // diff against the workflow file until Save (PUT) or Discard. Runs and
+    // dry-run plans execute the draft as-is (the launch sheet says so).
+    planDrafts: {},
+    // Which center tab is active: "plan" | "source" | "inputs".
+    planTab: "plan",
+    // Selected step ids in the plan (⌘-click multi-selects; the inspector
+    // edits one or bulk-edits several).
+    planSelection: [],
+    // Source tab text state: the JSON the editor shows, plus whether it has
+    // diverged from the draft's own serialization (user typed something that
+    // doesn't parse, so the draft can't absorb it).
+    sourceText: null,
+    sourceDiverged: false,
+    // Step id the source view should scroll to / highlight (plan → source sync).
+    sourceReveal: null,
+    // Recent completed runs of the selected workflow (rail footer + per-step
+    // "last run" estimates in the plan grid). Fetched on selection.
+    recentRuns: [],
+    recentRunsFor: null,
+    // Per-step actuals from the newest completed run of the selected workflow:
+    // { stepId: { costUsd, durationMs } } — the plan grid's "Est." column.
+    stepActuals: {},
+    // Launch-sheet options, remembered across opens.
+    launchOptions: { reuseCache: true, detach: false, budget: "" },
+    // Dry-run (plan) result shown inside the plan tab until dismissed.
+    dryRunPlan: null,
+    // Live-run step record rail: active tab ("live" | "prompt" | "config" | "events").
+    recordTab: "live"
   };
 
   var SELECTION_KEY = "steamtrain.lastWorkflow";
@@ -1177,6 +1208,12 @@ window.Steamtrain = (function () {
     S.narration = []; S.arrivalEnter = false; S.endedAt = 0;
     S.narrationFreshPlayed = null;
     S.arrivalCtaFocused = false;
+    // Plan editor: the draft is keyed by workflow name and survives (it's the
+    // pending diff shown in the rail), but selection and source-view text are
+    // per-visit view state.
+    S.planSelection = [];
+    S.sourceText = null; S.sourceDiverged = false; S.sourceReveal = null;
+    S.dryRunPlan = null;
     // Leaving an attached run restores Plan / Describe and clears compact chrome.
     ST.run.setRunning(false);
     try { localStorage.setItem(SELECTION_KEY, name); } catch (e) {}
@@ -1203,7 +1240,7 @@ window.Steamtrain = (function () {
       S.childSpecs = r.body.children || {};
       document.getElementById("wfTitle").textContent = r.body.spec.name;
       document.getElementById("wfSub").textContent = r.body.spec.description || "";
-      document.getElementById("runRow").style.display = isReadOnly() ? "none" : "grid";
+      document.getElementById("runRow").style.display = "none";
       ST.shell.renderSourceLine();
       ST.shell.renderBlockedRow();
       ST.run.renderParamsForm(r.body.spec);
@@ -1211,6 +1248,7 @@ window.Steamtrain = (function () {
       ST.shell.renderHealth(S.doctor || [], S.apiDoctor || [], null);
       ST.render();
       ST.run.renderStagedIndicator();
+      if (ST.plan && ST.plan.loadRecentRuns) ST.plan.loadRecentRuns(name);
       if (after) after();
     });
   }
