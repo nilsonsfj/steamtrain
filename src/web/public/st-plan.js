@@ -692,10 +692,11 @@
     var ro = ST.isReadOnly();
     var band = h("div", { class: "plan-phase", "data-phase": String(phaseIdx) });
     var steps = phase.steps || [];
+    // Engine defaults missing onFalse/onReject to "continue", so only an
+    // explicit fail/stop policy earns the "stops the run on fail" chip.
     var hasHardGate = steps.some(function (s) {
       return (s.kind === "gate" || s.kind === "approval") &&
-        (s.onFalse === "fail" || s.onFalse === "stop" || s.onReject === "fail" || s.onReject === "stop" ||
-         (s.kind === "gate" && !s.onFalse && false));
+        (s.onFalse === "fail" || s.onFalse === "stop" || s.onReject === "fail" || s.onReject === "stop");
     });
     var head = h("div", { class: "plan-phase-head" },
       h("span", { class: "idx", text: pad2(phaseIdx + 1) }),

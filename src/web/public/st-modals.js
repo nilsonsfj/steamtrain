@@ -1593,6 +1593,7 @@
         .filter(function (id) { return !checked[id]; });
       var budget = parseFloat(lo.budget);
       var runSpec = ST.plan.buildRunSpec({ skip: skip, budgetUsd: isFinite(budget) && budget > 0 ? budget : null });
+      if (!runSpec) { ST.run.setBanner("no spec to run", "err"); return; }
       closeModal();
       ST.run.launchRun({
         spec: runSpec,

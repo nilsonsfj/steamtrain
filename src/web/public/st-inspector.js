@@ -465,7 +465,6 @@
       agentSel.addEventListener("change", function () {
         var opts = [{ value: "", label: "keep each step's model" }]
           .concat(ST.modals.modelOptionsWith(agentSel.value, ""));
-        ST.modals.selectEl; // (selectEl already built; refill options in place)
         while (modelSel.firstChild) modelSel.removeChild(modelSel.firstChild);
         opts.forEach(function (o) { modelSel.appendChild(h("option", { value: o.value }, o.label)); });
       });

@@ -1341,7 +1341,7 @@
    * full run spec (draft + deselections + budget cap); `opts.fresh` ignores
    * the cache; `opts.detach` hands the run to a background process once it is
    * live. Without opts this degrades to the pre-sheet behavior (composer
-   * input, fresh checkbox, staged session overrides).
+   * input, reuse cache, staged session overrides).
    */
   function launchRun(opts) {
     opts = opts || {};
@@ -1366,10 +1366,13 @@
     setBanner("", "");
     showRunMetrics(true);
     ST.render();
+    // Default false matches the old hidden #freshChk (unchecked) and the
+    // launch sheet's reuseCache:true default. Callers must pass fresh:true
+    // to ignore the cache — #freshChk is no longer consulted.
     var payload = {
       workflow: S.selected,
       input: input,
-      fresh: opts.fresh !== undefined ? opts.fresh : document.getElementById("freshChk").checked
+      fresh: opts.fresh === true
     };
     var params = collectParams();
     if (params) payload.params = params;
