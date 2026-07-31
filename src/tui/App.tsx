@@ -280,6 +280,9 @@ export function App({
       add(family.name);
       for (const alias of family.aliases.slice(0, 4)) add(alias);
       for (const offering of family.offerings) {
+        // When the doctor found zero healthy agents, still surface family
+        // offerings so the Variables form is not an empty list (unlike the
+        // step editor, which can refuse to cycle agents in that case).
         if (!doctor || healthyIds.has(offering.provider) || healthyIds.size === 0) {
           add(offering.modelId);
         }

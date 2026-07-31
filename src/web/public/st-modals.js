@@ -303,8 +303,9 @@
     }
     return opts;
   }
-  // Mirror the TUI draft-model preference: OpenCode first (free models), then
-  // Claude, Codex, … — never prefer the first-class mimo agent by default.
+  // Mirror src/tui/draft-model.ts DRAFT_AGENT_ORDER (OpenCode first for free
+  // models). Keep in sync when adding a provider — vanilla JS cannot import
+  // that TypeScript constant.
   var PREFERRED_AGENT_ORDER = [
     "opencode", "claude", "codex", "amp", "kiro", "mimo", "kimi", "cursor", "antigravity"
   ];
