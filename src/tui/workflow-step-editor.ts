@@ -136,8 +136,23 @@ export function editorFieldsFor(
 }
 
 /** Enabled agent ids selectable for a worker step. */
-export function agentOptions(config?: SteamtrainConfig): string[] {
-  return resolveAgentInstances(config).map((agent) => agent.id);
+export function agentOptions(
+  config?: SteamtrainConfig,
+  options?: {
+    /** When set (doctor has run), only healthy agents are listed. */
+    healthy?: ReadonlySet<string> | null;
+    /** Keep the current agent selectable even when it is unhealthy. */
+    current?: string;
+  },
+): string[] {
+  const ids = resolveAgentInstances(config).map((agent) => agent.id);
+  const healthy = options?.healthy;
+  const filtered = !healthy ? ids : ids.filter((id) => healthy.has(id));
+  const current = options?.current;
+  if (current && !filtered.includes(current) && ids.includes(current)) {
+    return [current, ...filtered];
+  }
+  return filtered;
 }
 
 /** Effort options for the current agent/model, with the "(default)" sentinel first. */

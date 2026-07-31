@@ -252,10 +252,12 @@ export function App({
     () => new Set(resolveAgentInstances(runtimeConfig).map((agent) => agent.id)),
     [runtimeConfig],
   );
-  const inputAgentSuggestions = useMemo(
-    () => resolveAgentInstances(runtimeConfig).map((agent) => agent.id),
-    [runtimeConfig],
-  );
+  const inputAgentSuggestions = useMemo(() => {
+    const ids = resolveAgentInstances(runtimeConfig).map((agent) => agent.id);
+    // Until the doctor has reported, keep every enabled agent selectable.
+    if (!doctor) return ids;
+    return ids.filter((id) => doctor.some((d) => d.agent === id && d.status === "ok"));
+  }, [runtimeConfig, doctor]);
   const inputModelSuggestions = useMemo(() => {
     const seen = new Set<string>();
     const out: string[] = [];
@@ -264,19 +266,27 @@ export function App({
       seen.add(value);
       out.push(value);
     };
-    for (const family of listModelFamilyMeta()) {
-      add(family.id);
-      add(family.name);
-      for (const alias of family.aliases.slice(0, 4)) add(alias);
-      for (const offering of family.offerings) add(offering.modelId);
-    }
+    const healthyIds = new Set(inputAgentSuggestions);
+    // Prefer concrete catalog ids from configured, available agents over
+    // cross-agent family aliases that may not resolve on this machine.
     for (const agent of resolveAgentInstances(runtimeConfig)) {
+      if (doctor && !healthyIds.has(agent.id)) continue;
       for (const model of modelsForAgent(agent.id, runtimeConfig)) {
         add(model.id);
       }
     }
+    for (const family of listModelFamilyMeta()) {
+      add(family.id);
+      add(family.name);
+      for (const alias of family.aliases.slice(0, 4)) add(alias);
+      for (const offering of family.offerings) {
+        if (!doctor || healthyIds.has(offering.provider) || healthyIds.size === 0) {
+          add(offering.modelId);
+        }
+      }
+    }
     return out;
-  }, [runtimeConfig, agentCatalogTick]);
+  }, [runtimeConfig, agentCatalogTick, doctor, inputAgentSuggestions]);
   const visibleWorkspaces = useMemo<WorkspaceConfig>(
     () => ({
       workspaces: runtimeWorkspaces.workspaces.filter((entry) => enabledAgentIds.has(entry.agent)),
@@ -1766,6 +1776,7 @@ export function App({
           config={runtimeConfig}
           width={columns}
           height={streamHeight}
+          healthyAgents={picker.healthyAgents}
           siblings={editorSiblings}
           onApply={applyStepEdit}
           onApplyAll={applyStepEditAll}

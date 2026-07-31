@@ -7,25 +7,25 @@ import type { WorkflowSpec } from "./types";
  * of models) that fan out, then an independent model cross-checks the results
  * before they converge into one answer.
  *
- * Agent-backed steps default to free-tier models so bundled workflows run
- * without paid provider credentials. Prefer first-class `mimo/mimo-auto` for
- * tool-heavy steps: OpenCode Zen's `opencode/deepseek-v4-flash-free` is known
- * to hang on multi-turn tool loops (DeepSeek `reasoning_content` replay).
- * Steps run in the session cwd by default — to target other repos/dirs, add a
- * per-step `cwd` (and optional `env` / `extraArgs`), e.g.:
+ * Agent-backed steps default to OpenCode Zen free-tier models so bundled
+ * workflows run without paid provider credentials (and without requiring the
+ * first-class MiMo CLI). OpenCode Zen's `opencode/deepseek-v4-flash-free` is
+ * intentionally omitted: it hangs on multi-turn tool loops (DeepSeek
+ * `reasoning_content` replay). Steps run in the session cwd by default — to
+ * target other repos/dirs, add a per-step `cwd` (and optional `env` /
+ * `extraArgs`), e.g.:
  *
- *   { id: "scan-api", model: "mimo/mimo-auto",
+ *   { id: "scan-api", agent: "opencode", model: "opencode/mimo-v2.5-free",
  *     cwd: "../api-service", env: { FOO: "bar" }, extraArgs: ["--add-dir", "."],
  *     prompt: "Audit {{input}} in this repo" }
  */
 
-/** Free models used by bundled workflows (OpenCode Zen + MiMo Auto). */
+/** OpenCode Zen free models used by bundled workflows. */
 const FREE = {
   nemotronUltra: "opencode/nemotron-3-ultra-free",
   mimoZen: "opencode/mimo-v2.5-free",
-  /** First-class MiMo CLI free channel — reliable default for agent tool use. */
-  mimoAuto: "mimo/mimo-auto",
   northMini: "opencode/north-mini-code-free",
+  laguna: "opencode/laguna-s-2.1-free",
   // Intentionally omit opencode/deepseek-v4-flash-free: it hangs on multi-turn
   // tool loops (DeepSeek reasoning_content replay) and was timing out babysit.
 } as const;
@@ -60,8 +60,8 @@ const bugHunt: WorkflowSpec = {
         {
           id: "scan-logic",
           kind: "worker",
-          agent: "mimo",
-          model: FREE.mimoAuto,
+          agent: "opencode",
+          model: FREE.mimoZen,
           prompt:
             "Hunt for logic and edge-case bugs in the scope below: off-by-one errors, incorrect conditionals, unhandled cases, race conditions. For each finding give file:line, why it's a bug, and a fix. Scope: {{input}}",
         },
@@ -69,7 +69,7 @@ const bugHunt: WorkflowSpec = {
           id: "scan-errors",
           kind: "worker",
           agent: "opencode",
-          model: FREE.mimoZen,
+          model: FREE.northMini,
           prompt:
             "Hunt for error-handling and resource bugs in the scope below: swallowed errors, missing awaits, leaked handles/processes, unchecked failures. For each finding give file:line, the risk, and a fix. Scope: {{input}}",
         },
@@ -77,7 +77,7 @@ const bugHunt: WorkflowSpec = {
           id: "scan-security",
           kind: "worker",
           agent: "opencode",
-          model: FREE.northMini,
+          model: FREE.laguna,
           prompt:
             "Hunt for security issues in the scope below: missing input validation, injection, unsafe shell/exec, missing authz checks. For each finding give file:line, the risk, and a fix. Scope: {{input}}",
         },
@@ -119,8 +119,8 @@ const bugHunt: WorkflowSpec = {
         {
           id: "report",
           kind: "consolidator",
-          agent: "mimo",
-          model: FREE.mimoAuto,
+          agent: "opencode",
+          model: FREE.mimoZen,
           dependsOn: ["cross-check", "findings-ready"],
           prompt:
             "Turn the verified findings below into a prioritized report (highest-severity first). For each: a one-line summary, file:line, severity, and the recommended fix. Output only the report.\n\n{{steps.cross-check.output}}",
@@ -263,13 +263,13 @@ const codeReview: WorkflowSpec = {
       type: "model",
       description: "Agent model that performs the primary review.",
       default: FREE.nemotronUltra,
-      fallbackModels: [FREE.mimoAuto, FREE.mimoZen],
+      fallbackModels: [FREE.mimoZen, FREE.northMini],
     },
     crossCheckModel: {
       type: "model",
       description: "Agent model that cross-checks flagged issues for false positives.",
-      default: FREE.mimoAuto,
-      fallbackModels: [FREE.mimoZen, FREE.northMini],
+      default: FREE.mimoZen,
+      fallbackModels: [FREE.northMini, FREE.laguna],
     },
   },
   phases: [
@@ -367,8 +367,8 @@ const codeReview: WorkflowSpec = {
         {
           id: "report",
           kind: "consolidator",
-          agent: "mimo",
-          model: FREE.mimoAuto,
+          agent: "opencode",
+          model: FREE.northMini,
           dependsOn: ["review", "cross-check"],
           prompt:
             "Write the final code review report for: {{input}}\n\n" +
@@ -420,14 +420,14 @@ const mainlineStream: WorkflowSpec = {
     coderModel: {
       type: "model",
       description: "Agent model that implements the charter and applies review fixes.",
-      default: FREE.mimoAuto,
-      fallbackModels: [FREE.mimoZen, FREE.northMini],
+      default: FREE.mimoZen,
+      fallbackModels: [FREE.northMini, FREE.laguna],
     },
     reviewerModel: {
       type: "model",
       description: "Agent model that reviews the diff each loop iteration.",
       default: FREE.nemotronUltra,
-      fallbackModels: [FREE.mimoAuto, FREE.mimoZen],
+      fallbackModels: [FREE.mimoZen, FREE.northMini],
     },
     reviewerEffort: {
       description: "Reasoning effort/variant for the reviewer model. Empty omits the flag.",
@@ -666,8 +666,8 @@ const mainline: WorkflowSpec = {
     plannerModel: {
       type: "model",
       description: "Agent model that splits the prompt into independent streams.",
-      default: FREE.mimoAuto,
-      fallbackModels: [FREE.mimoZen, FREE.northMini],
+      default: FREE.mimoZen,
+      fallbackModels: [FREE.northMini, FREE.laguna],
     },
     plannerEffort: {
       description: "Reasoning effort/variant for the planner model. Empty omits the flag.",
@@ -676,14 +676,14 @@ const mainline: WorkflowSpec = {
     coderModel: {
       type: "model",
       description: "Agent model that implements each stream and the final fixes.",
-      default: FREE.mimoAuto,
-      fallbackModels: [FREE.mimoZen, FREE.northMini],
+      default: FREE.mimoZen,
+      fallbackModels: [FREE.northMini, FREE.laguna],
     },
     reviewerModel: {
       type: "model",
       description: "Agent model that reviews each stream and the final merge.",
       default: FREE.nemotronUltra,
-      fallbackModels: [FREE.mimoAuto, FREE.mimoZen],
+      fallbackModels: [FREE.mimoZen, FREE.northMini],
     },
     reviewerEffort: {
       description: "Reasoning effort/variant for the reviewer model. Empty omits the flag.",
@@ -693,7 +693,7 @@ const mainline: WorkflowSpec = {
       type: "model",
       description: "Agent model that resolves merge conflicts between streams, if any arise.",
       default: FREE.northMini,
-      fallbackModels: [FREE.mimoAuto, FREE.mimoZen],
+      fallbackModels: [FREE.mimoZen, FREE.laguna],
     },
     maxStreams: {
       type: "number",
@@ -1043,8 +1043,8 @@ const babysitPr: WorkflowSpec = {
     babysitterModel: {
       type: "model",
       description: "Agent model that prepares the PR (does not merge).",
-      default: FREE.mimoAuto,
-      fallbackModels: [FREE.mimoZen, FREE.northMini],
+      default: FREE.mimoZen,
+      fallbackModels: [FREE.northMini, FREE.laguna],
     },
     checksTimeoutSec: {
       type: "number",
@@ -1073,7 +1073,7 @@ const babysitPr: WorkflowSpec = {
         {
           id: "prepare",
           kind: "processor",
-          // Model-only: babysitterModel may be mimo/* or opencode/* — agent
+          // Model-only: babysitterModel may be any catalog id — agent
           // follows the rendered model family at execute time.
           model: "{{inputs.babysitterModel}}",
           // Conflict resolution + CI fixes routinely exceed the 15m default;
@@ -1142,8 +1142,8 @@ const babysitAllPrs: WorkflowSpec = {
     babysitterModel: {
       type: "model",
       description: "Agent model that lists PRs and prepares each one (does not merge).",
-      default: FREE.mimoAuto,
-      fallbackModels: [FREE.mimoZen, FREE.northMini],
+      default: FREE.mimoZen,
+      fallbackModels: [FREE.northMini, FREE.laguna],
     },
     checksTimeoutSec: {
       type: "number",
@@ -1172,7 +1172,7 @@ const babysitAllPrs: WorkflowSpec = {
         {
           id: "list-prs",
           kind: "distributor",
-          // Model-only so {{inputs.babysitterModel}} can select mimo or opencode.
+          // Model-only so {{inputs.babysitterModel}} can select any agent family.
           model: "{{inputs.babysitterModel}}",
           itemsPath: "prs",
           prompt:

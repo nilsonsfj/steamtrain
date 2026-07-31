@@ -44,6 +44,11 @@ export interface GenerateWorkflowRequest {
   effort?: string;
   /** Desired name; slugified. When omitted, derived from the description. */
   name?: string;
+  /**
+   * Model ids from configured, healthy agents. When set, the generation prompt
+   * requires defaults/fallbacks to be chosen from this list.
+   */
+  availableModels?: readonly string[];
   signal?: AbortSignal;
   /** Stream the underlying agent events so a UI can show live progress. */
   onEvent?: (event: AgentEvent) => void;
@@ -85,8 +90,28 @@ export function slugifyWorkflowName(text: string): string {
  * The meta-prompt. It teaches the spec format (the same fields the engine and
  * `workflowSpecSchema` understand) and a worked example, then demands JSON-only
  * output so {@link extractWorkflowSpec} has the best chance of success.
+ *
+ * When `availableModels` is provided (configured, healthy agents' catalogs),
+ * the prompt tells the model to pick defaults only from that list.
  */
-export function buildWorkflowGenerationPrompt(description: string): string {
+export function buildWorkflowGenerationPrompt(
+  description: string,
+  options?: { availableModels?: readonly string[] },
+): string {
+  const available = options?.availableModels?.filter(Boolean) ?? [];
+  const availableSection =
+    available.length > 0
+      ? `
+# Available models (USE THESE FOR DEFAULTS)
+The user's environment currently exposes only these model ids. Every step
+"model" default and every model-typed input "default" / "fallbackModels" entry
+MUST be chosen from this list (or a "{{inputs.<key>}}" template whose default
+is on this list). Do not invent model ids that are not listed:
+
+${available.map((id) => `- ${id}`).join("\n")}
+`
+      : "";
+
   return `You are a workflow author for "steamtrain", a terminal orchestrator that runs
 coding agents as steps in a declarative pipeline. Convert the user's request into
 ONE valid workflow as JSON.
@@ -409,7 +434,7 @@ Example:
     "coderModel": {
       "type": "model",
       "default": "opencode/mimo-v2.5-free",
-      "fallbackModels": ["mimo/mimo-auto", "opencode/north-mini-code-free"]
+      "fallbackModels": ["opencode/north-mini-code-free", "opencode/laguna-s-2.1-free"]
     },
     "issueTiming": { "type": "enum", "choices": ["live", "end"], "default": "end" }
   }
@@ -436,11 +461,12 @@ silently render as empty text at runtime and will produce validation warnings.
 
 # Agents & models
 Prefer free models so the workflow runs without paid credentials.
-Prefer first-class agent "mimo" with model "mimo/mimo-auto" for tool-heavy
-steps (OpenCode Zen's "opencode/deepseek-v4-flash-free" hangs on multi-turn
-tool loops). Other free options: agent "opencode" with
-"opencode/mimo-v2.5-free", "opencode/nemotron-3-ultra-free",
-"opencode/north-mini-code-free".
+Prefer agent "opencode" with free OpenCode Zen models for tool-heavy steps:
+"opencode/mimo-v2.5-free", "opencode/north-mini-code-free",
+"opencode/nemotron-3-ultra-free", "opencode/laguna-s-2.1-free".
+Do NOT default to the first-class "mimo" agent ("mimo/mimo-auto") — only use
+it when the user explicitly asks. Never use "opencode/deepseek-v4-flash-free"
+(it hangs on multi-turn tool loops).
 Model-only bindings are allowed (omit agent) when "model" is a concrete id or
 "{{inputs.<modelKey>}}" — the engine picks the matching agent family.
 Every agent-backed step MUST set model (or modelClass) and a non-empty prompt.
@@ -550,7 +576,7 @@ If any reference is in the same phase or below, MOVE the dependent step into a
 later phase until it is valid.
 For any gate with "loopTo", confirm it points to an EARLIER phase and that the
 gate sits in a phase BELOW the body it re-runs. Then output the JSON.
-
+${availableSection}
 # User request
 ${description}
 
@@ -571,12 +597,13 @@ export function buildWorkflowRepairPrompt(
   description: string,
   previousOutput: string,
   error: string,
+  options?: { availableModels?: readonly string[] },
 ): string {
   const trimmed =
     previousOutput.length > MAX_REPAIR_OUTPUT_CHARS
       ? `${previousOutput.slice(0, MAX_REPAIR_OUTPUT_CHARS)}\n…(truncated)`
       : previousOutput;
-  return `${buildWorkflowGenerationPrompt(description)}
+  return `${buildWorkflowGenerationPrompt(description, options)}
 
 # Your previous attempt was INVALID
 You already tried, and it was rejected with this error:
@@ -734,7 +761,9 @@ export async function generateWorkflow(
     ? Math.max(0, Math.floor(deps.maxRepairAttempts as number))
     : DEFAULT_REPAIR_ATTEMPTS;
 
-  let prompt = buildWorkflowGenerationPrompt(req.description);
+  let prompt = buildWorkflowGenerationPrompt(req.description, {
+    availableModels: req.availableModels,
+  });
   let lastResult: GenerateWorkflowResult = { ok: false, raw: "", attempts: 0 };
 
   for (let attempt = 1; attempt <= maxRepairAttempts + 1; attempt++) {
@@ -774,7 +803,9 @@ export async function generateWorkflow(
 
     // Re-prompt with the concrete error if we have budget and something to fix.
     if (attempt <= maxRepairAttempts && !req.signal?.aborted) {
-      prompt = buildWorkflowRepairPrompt(req.description, raw, extracted.error);
+      prompt = buildWorkflowRepairPrompt(req.description, raw, extracted.error, {
+        availableModels: req.availableModels,
+      });
     } else {
       break;
     }

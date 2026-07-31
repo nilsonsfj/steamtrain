@@ -124,7 +124,7 @@ describe("WorkflowPreview", () => {
     expect(frame).toContain("workflow preview · mainline");
     expect(frame).toContain("ready to run");
     // Defaults are applied for display (not raw {{inputs.*}} placeholders).
-    expect(frame).toContain("mimo-auto");
+    expect(frame).toContain("mimo-v2.5-free");
     expect(frame).not.toContain("{{inputs.");
     // Classic Ink wrap-overlap artifacts from the broken preview.
     expect(frame).not.toContain("rModel}}");
@@ -238,7 +238,7 @@ describe("preview input resolution", () => {
       },
       { inputs },
     );
-    expect(runner).toContain("mimo-auto");
+    expect(runner).toContain("mimo-v2.5-free");
     expect(runner).not.toContain("{{inputs.");
     expect(runner).not.toMatch(/·\s*$/);
     expect(specDetailLines(plan, { inputs }).some((line) => line.startsWith("effort:"))).toBe(
