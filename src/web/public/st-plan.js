@@ -858,6 +858,23 @@
     container.appendChild(renderFooter(d));
   }
 
+  /**
+   * Footer / rail actions that a reader often hits while still focused in an
+   * inspector field. `mousedown` + preventDefault keeps the field from
+   * blurring before the click, which would otherwise let a blur→change
+   * rebuild steal the gesture. The click handler then blurs deliberately so
+   * any pending field edit commits into the draft (sync) before the action.
+   */
+  function armAction(btn, action) {
+    btn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+    btn.addEventListener("click", function () {
+      var active = document.activeElement;
+      if (active && active !== btn && active.blur) active.blur();
+      action();
+    });
+    return btn;
+  }
+
   /** The pending-diff footer: validity lamp, unsaved chip, Discard/Diff/Save. */
   function renderFooter(d) {
     var ro = ST.isReadOnly();
@@ -877,17 +894,22 @@
     }
     var actions = h("span", { class: "plan-foot-actions" });
     if (!ro && edits.length) {
-      actions.appendChild(h("button", { class: "btn ghost", type: "button", text: "Discard",
-        onClick: function () {
+      actions.appendChild(armAction(
+        h("button", { class: "btn ghost", type: "button", text: "Discard" }),
+        function () {
           discard();
           ST.run.setBanner("", "");
           ST.shell.renderSidebar();
           ST.render();
-        } }));
-      actions.appendChild(h("button", { class: "btn small", type: "button", text: "Diff", onClick: showDiff }));
+        }
+      ));
+      actions.appendChild(armAction(
+        h("button", { class: "btn small", type: "button", text: "Diff" }),
+        showDiff
+      ));
       var saveBtn = h("button", { class: "btn small primary", type: "button", disabled: !check.ok }, "Save to file",
         h("span", { class: "kbd", text: "⌘S" }));
-      saveBtn.addEventListener("click", function () { save(false); });
+      armAction(saveBtn, function () { save(false); });
       actions.appendChild(saveBtn);
     }
     foot.appendChild(actions);
@@ -1135,11 +1157,14 @@
     foot.appendChild(h("span", { class: "src-drift", text: S.sourceDiverged ? "not applied — fix the JSON above" : (drift || "matches the saved file") }));
     var actions = h("span", { class: "plan-foot-actions" });
     if (!ro && isDirty()) {
-      actions.appendChild(h("button", { class: "btn ghost", type: "button", text: "Discard", onClick: function () {
-        discard();
-        ST.shell.renderSidebar();
-        ST.render();
-      } }));
+      actions.appendChild(armAction(
+        h("button", { class: "btn ghost", type: "button", text: "Discard" }),
+        function () {
+          discard();
+          ST.shell.renderSidebar();
+          ST.render();
+        }
+      ));
       var btn = h("button", { class: "btn small primary", type: "button", text: "Save to file" });
       btn.addEventListener("click", function () { save(false); });
       actions.appendChild(btn);
