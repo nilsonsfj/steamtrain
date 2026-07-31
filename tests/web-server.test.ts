@@ -1961,6 +1961,19 @@ describe("web server", () => {
     expect(json.error).toContain("must match workflow");
   });
 
+  it("POST /api/workflows/:name/plan rejects a spec override that fails schema validation", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/workflows/demo/plan`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ input: "test", spec: { name: "demo" } }),
+    });
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string };
+    expect(json.error).toContain("invalid workflow spec");
+  });
+
   it("POST /api/overrides/flush persists staged overrides and returns report", async () => {
     const host: WorkflowHost & {
       workflowSource(): undefined;
