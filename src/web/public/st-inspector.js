@@ -23,7 +23,7 @@
   var h = ST.h;
   var clear = ST.clear;
 
-  function spec() { return ST.plan.draftIfDirty() || ST.plan.draft() || S.spec; }
+  function spec() { return ST.plan.draftIfDirty() || S.spec; }
 
   // ---- shared bits ------------------------------------------------------------
 

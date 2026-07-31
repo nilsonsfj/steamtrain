@@ -1201,6 +1201,17 @@ window.Steamtrain = (function () {
     if (S.es) { S.es.close(); S.es = null; }
     ST.run.stopTimer();
     if (ST.instruments) ST.instruments.reset();
+    // Plan editor: drafts are keyed by workflow name and survive across
+    // navigation when dirty. Drop a clean (view-only) draft for the workflow
+    // we are leaving so the rail never shows a false dirty dot.
+    var leaving = S.selected;
+    if (leaving && leaving !== name && S.planDrafts[leaving] && S.spec) {
+      try {
+        if (JSON.stringify(S.planDrafts[leaving]) === JSON.stringify(S.spec)) {
+          delete S.planDrafts[leaving];
+        }
+      } catch (e) {}
+    }
     S.selected = name; S.runId = null; S.runState = null;
     S.detail = null; S.detailInvoker = null; S.detailFallback = null; S.detailFocusPending = false; S.detailFocusGeneration += 1;
     S.selectedStepId = null;
@@ -1208,9 +1219,6 @@ window.Steamtrain = (function () {
     S.narration = []; S.arrivalEnter = false; S.endedAt = 0;
     S.narrationFreshPlayed = null;
     S.arrivalCtaFocused = false;
-    // Plan editor: the draft is keyed by workflow name and survives (it's the
-    // pending diff shown in the rail), but selection and source-view text are
-    // per-visit view state.
     S.planSelection = [];
     S.sourceText = null; S.sourceDiverged = false; S.sourceReveal = null;
     S.dryRunPlan = null;

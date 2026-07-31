@@ -81,6 +81,19 @@ export function parseUnifiedDiff(patch: string): ParsedDiffFile[] {
       file.newPath = stripPrefix(newPath, "b/");
       continue;
     }
+    // Plain unified diffs (no `diff --git` header) still start with `--- ` /
+    // `+++ `. Accept those so callers like the plan editor's LCS patch render
+    // instead of producing an empty `.diff-files` container.
+    if (!file && raw.startsWith("--- ")) {
+      file = { oldPath: null, newPath: null, status: "modified", isBinary: false, hunks: [] };
+      files.push(file);
+      hunk = null;
+      inBinaryBody = false;
+      const path = raw.slice(4);
+      file.oldPath = path === "/dev/null" ? null : stripPrefix(path, "a/");
+      if (file.oldPath === null) file.status = "added";
+      continue;
+    }
     if (!file) continue;
 
     if (inBinaryBody) {

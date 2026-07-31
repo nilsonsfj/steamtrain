@@ -1244,11 +1244,12 @@
 /* ---- rail: dirty dot + recent runs -------------------------------------------- */
 
 .wf-row .dirty-dot {
-  width: 5px;
-  height: 5px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--gate);
   flex: none;
+  box-shadow: 0 0 0 2px rgba(210, 153, 34, 0.25);
 }
 
 .recent-label {
