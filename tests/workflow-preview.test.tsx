@@ -70,7 +70,7 @@ describe("WorkflowPreview", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toMatch(/▶.*report/i);
     expect(frame).toContain("report");
-    expect(frame).toContain("MiMo Auto");
+    expect(frame).toContain("MiMo V2.5 Free");
   });
 
   it("hides step detail panel when showStepDetail is false", () => {
