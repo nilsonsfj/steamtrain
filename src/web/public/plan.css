@@ -721,15 +721,23 @@
 }
 
 .insp-field {
+  flex: none;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border-quiet);
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
+/* Prompt absorbs leftover rail height, but must not shrink below its
+   textarea floor. Without a floor (and with min-height: 0), an Effort
+   selector above it squeezed this field and the prompt spilled over
+   "Depends on". Overflow is contained so a squeezed textarea scrolls
+   inside the field instead of painting over siblings; the body still
+   scrolls when the whole form exceeds the rail. */
 .insp-field.grow {
-  flex: 1;
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: 160px;
+  overflow: hidden;
 }
 
 .insp-label {
