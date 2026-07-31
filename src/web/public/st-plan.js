@@ -89,13 +89,14 @@
   }
 
   /**
-   * Repaint after a draft mutation. Deferred so a blur→change on an inspector
-   * field does not rebuild the DOM before the click that caused the blur
-   * (Diff / Save / Discard, or another workflow in the rail) lands — otherwise
-   * the click target is destroyed mid-gesture and navigation feels stuck.
+   * Repaint after a draft mutation. Deferred (setTimeout 0, not the RAF
+   * scheduleRender in st-core.js) so a blur→change on an inspector field does
+   * not rebuild the DOM before the click that caused the blur (Diff / Save /
+   * Discard, or another workflow in the rail) lands — otherwise the click
+   * target is destroyed mid-gesture and navigation feels stuck.
    */
   var renderTimer = null;
-  function scheduleRender() {
+  function scheduleDeferredRender() {
     if (renderTimer != null) return;
     renderTimer = setTimeout(function () {
       renderTimer = null;
@@ -114,7 +115,7 @@
       // dot and footer chip clear rather than claiming "1 unsaved edit".
       discard(S.selected);
     }
-    scheduleRender();
+    scheduleDeferredRender();
   }
 
   function discard(name) {
@@ -128,7 +129,7 @@
    */
   function dirtySummary() {
     if (!isDirty()) return [];
-    var saved = S.spec, d = existingDraft() || draft();
+    var saved = S.spec, d = existingDraft();
     if (!saved || !d) return [];
     var out = [];
     var savedPhases = saved.phases || [], draftPhases = d.phases || [];
@@ -175,6 +176,7 @@
    * Client-side sanity checks for the footer's "plan valid" lamp. The server
    * re-validates with the real schema on save; these catch the structural
    * mistakes the plan editor itself can produce (dupes, dangling deps).
+   * Keep in sync with validatePlanStructure in src/web/plan-edit.ts.
    */
   function validate(spec) {
     var errors = [];
@@ -260,7 +262,8 @@
 
   // ---- structural edits -----------------------------------------------------
 
-  /** Rewrite every step-id reference in the draft when a step is renamed. */
+  /** Rewrite every step-id reference in the draft when a step is renamed.
+   * Keep in sync with rewriteStepRefs in src/web/plan-edit.ts. */
   function rewriteStepRefs(d, oldId, newId) {
     flatSteps(d).forEach(function (f) {
       if (f.step.id === oldId) f.step.id = newId;
@@ -318,6 +321,7 @@
       // look like had the user edited it by hand.
       d.phases = d.phases.filter(function (p) { return (p.steps || []).length > 0; });
     });
+    // mutate() → scheduleDeferredRender() handles the repaint.
     S.planSelection = [];
   }
 
@@ -371,6 +375,7 @@
   }
 
   function addPhase() {
+    // mutate() → scheduleDeferredRender() handles the repaint.
     mutate(function (d) {
       d.phases.push({ id: "phase-" + (d.phases.length + 1), title: "New phase", steps: [] });
     });
@@ -990,7 +995,8 @@
     try {
       body = SteamtrainDiff.renderPatch(patch, { document: document });
       if (!body || !body.childNodes || body.childNodes.length === 0) {
-        body = h("pre", { class: "plan-diff-raw", text: patch || "(no textual changes)" });
+        // Match renderBody's empty-file affordance in the diff view bundle.
+        body = h("div", { class: "diff-empty-file", text: "No textual changes" });
       }
     } catch (e) {
       body = h("pre", { class: "plan-diff-raw", text: patch || String(e) });
@@ -1165,9 +1171,10 @@
           ST.render();
         }
       ));
-      var btn = h("button", { class: "btn small primary", type: "button", text: "Save to file" });
-      btn.addEventListener("click", function () { save(false); });
-      actions.appendChild(btn);
+      actions.appendChild(armAction(
+        h("button", { class: "btn small primary", type: "button", text: "Save to file" }),
+        function () { save(false); }
+      ));
     }
     foot.appendChild(actions);
   }
@@ -1304,6 +1311,7 @@
     mutate: mutate,
     renameStep: renameStep,
     render: render,
+    rewriteStepRefs: rewriteStepRefs,
     save: save,
     selectStep: selectStep,
     toggleDisabled: toggleDisabled,

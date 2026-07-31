@@ -1203,14 +1203,12 @@ window.Steamtrain = (function () {
     if (ST.instruments) ST.instruments.reset();
     // Plan editor: drafts are keyed by workflow name and survive across
     // navigation when dirty. Drop a clean (view-only) draft for the workflow
-    // we are leaving so the rail never shows a false dirty dot.
+    // we are leaving so the rail never shows a false dirty dot. Use isDirty()
+    // (canonical compare) rather than JSON.stringify so key order cannot leave
+    // a phantom dirty dot after a mutation round-trip.
     var leaving = S.selected;
-    if (leaving && leaving !== name && S.planDrafts[leaving] && S.spec) {
-      try {
-        if (JSON.stringify(S.planDrafts[leaving]) === JSON.stringify(S.spec)) {
-          delete S.planDrafts[leaving];
-        }
-      } catch (e) {}
+    if (leaving && leaving !== name && S.planDrafts[leaving] && ST.plan && ST.plan.isDirty) {
+      if (!ST.plan.isDirty(leaving)) delete S.planDrafts[leaving];
     }
     S.selected = name; S.runId = null; S.runState = null;
     S.detail = null; S.detailInvoker = null; S.detailFallback = null; S.detailFocusPending = false; S.detailFocusGeneration += 1;
