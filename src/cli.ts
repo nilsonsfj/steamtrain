@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
-import { createAdapter, isAgentProviderId } from "./agents";
+import { createAdapter, isAgentProviderId, modelIdsForAgent } from "./agents";
 import { refreshAgentCatalogCaches } from "./agents/models";
 import { message, readAll, truncateLine, unknownWorkflowMessage } from "./cli-util";
 import {
@@ -1378,6 +1378,9 @@ async function runWorkflowCreateCommand(
     return 1;
   }
 
+  // Prefer defaults from the drafting agent's live/static catalog when known.
+  const catalogModels = modelIdsForAgent(options.agent, config);
+
   if (!options.json) {
     err(`generating workflow with ${options.agent} (${model})…\n`);
   }
@@ -1389,6 +1392,7 @@ async function runWorkflowCreateCommand(
       model,
       effort: options.effort,
       name: options.name,
+      availableModels: catalogModels.length > 0 ? catalogModels : undefined,
     },
     {
       createAdapter,

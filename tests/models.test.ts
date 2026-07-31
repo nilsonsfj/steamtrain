@@ -228,6 +228,29 @@ describe("model names", () => {
     clearOpencodeVariantCacheForTests();
   });
 
+  it("prefers a free OpenCode model when the adapter default is absent from the live catalog", () => {
+    setOpencodeVariantCacheForTests(
+      new Map([
+        ["opencode/north-mini-code-free", { name: "North Mini Code Free", efforts: [] }],
+        ["opencode/gpt-5.4-mini", { name: "GPT 5.4 Mini", efforts: ["high"] }],
+      ]),
+    );
+    expect(defaultModelForAgent("opencode")).toBe("opencode/north-mini-code-free");
+    clearOpencodeVariantCacheForTests();
+  });
+
+  it("ignores a configured defaultModel that is not in the live catalog", () => {
+    setOpencodeVariantCacheForTests(
+      new Map([["opencode/laguna-s-2.1-free", { name: "Laguna S 2.1 Free", efforts: [] }]]),
+    );
+    expect(
+      defaultModelForAgent("opencode", {
+        agents: [{ id: "opencode", provider: "opencode", defaultModel: "opencode/ghost-model" }],
+      }),
+    ).toBe("opencode/laguna-s-2.1-free");
+    clearOpencodeVariantCacheForTests();
+  });
+
   it("returns each adapter's defaultModel via PROVIDER_ADAPTERS", () => {
     expect(defaultModelForAgent("claude")).toBe("claude-sonnet-5");
     expect(defaultModelForAgent("codex")).toBe("gpt-5.5");

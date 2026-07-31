@@ -28,6 +28,8 @@ interface WorkflowStepEditorProps {
   config: SteamtrainConfig;
   width: number;
   height: number;
+  /** Doctor-healthy agent ids; when omitted, all enabled agents are listed. */
+  healthyAgents?: ReadonlySet<string> | null;
   /** Other agent-backed steps in the same workflow (for apply-to-all). */
   siblings?: readonly RetargetableStep[];
   /** Stage a session override for the focused step (merged into existing overrides). */
@@ -66,6 +68,7 @@ export function WorkflowStepEditor({
   config,
   width,
   height,
+  healthyAgents = null,
   siblings = [],
   onApply,
   onApplyAll,
@@ -130,7 +133,7 @@ export function WorkflowStepEditor({
   const cycleField = useCallback(
     (field: EditorField, dir: 1 | -1) => {
       if (field === "agent") {
-        const opts = agentOptions(config);
+        const opts = agentOptions(config, { healthy: healthyAgents, current: working.agent });
         if (opts.length === 0 || !working.agent) return;
         const next = cycleOption(opts, working.agent, dir);
         if (next !== working.agent) apply(agentChangePatch(working, next, config));
@@ -148,7 +151,7 @@ export function WorkflowStepEditor({
         if (next !== current) apply(effortChangePatch(next));
       }
     },
-    [working, config, apply],
+    [working, config, healthyAgents, apply],
   );
 
   useInput((input, key) => {
@@ -196,7 +199,9 @@ export function WorkflowStepEditor({
 
   const innerWidth = Math.max(20, width - 6);
   const agentColor = working.agent ? (AGENT_COLOR[working.agent] ?? "white") : "gray";
-  const optionHint = focusedField ? fieldOptionHint(focusedField, working, config) : undefined;
+  const optionHint = focusedField
+    ? fieldOptionHint(focusedField, working, config, healthyAgents)
+    : undefined;
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1} height={height}>
@@ -304,9 +309,10 @@ function fieldOptionHint(
   field: EditorField,
   working: Working,
   config: SteamtrainConfig,
+  healthyAgents?: ReadonlySet<string> | null,
 ): string | undefined {
   if (field === "agent") {
-    const n = agentOptions(config).length;
+    const n = agentOptions(config, { healthy: healthyAgents, current: working.agent }).length;
     return n > 1 ? `(${n} agents)` : undefined;
   }
   if (field === "model" && working.agent) {

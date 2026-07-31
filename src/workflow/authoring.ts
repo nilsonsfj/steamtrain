@@ -152,6 +152,9 @@ export class WorkflowAuthor {
     }
 
     const model = req.model?.trim() || defaultDraftModel(req.agent, this.config);
+    const availableModels = this.agentMeta()
+      .filter((agent) => agent.enabled && agent.healthy)
+      .flatMap((agent) => agent.models.map((m) => m.id));
     const result = await generateWorkflow(
       {
         description: req.description,
@@ -159,6 +162,7 @@ export class WorkflowAuthor {
         model,
         effort: req.effort,
         name: req.name,
+        availableModels: availableModels.length > 0 ? availableModels : undefined,
         signal,
         onEvent: (event) => {
           if (event.kind === "text_delta" && !event.thinking) onDelta?.(event.text);

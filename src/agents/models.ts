@@ -210,15 +210,37 @@ const PROVIDER_ADAPTERS: Record<AgentProviderId, () => AgentAdapter> = {
   antigravity: () => new AntigravityAdapter(),
 };
 
+/**
+ * Free OpenCode Zen models preferred when the live catalog does not include
+ * the adapter's declared default. DeepSeek free is intentionally omitted
+ * (hangs on multi-turn tool loops).
+ */
+const OPENCODE_FREE_DEFAULT_PREFERENCE = [
+  "opencode/mimo-v2.5-free",
+  "opencode/north-mini-code-free",
+  "opencode/nemotron-3-ultra-free",
+  "opencode/laguna-s-2.1-free",
+] as const;
+
 /** Default model when switching to an agent without an explicit model. */
 export function defaultModelForAgent(agent: AgentInstanceId, config?: SteamtrainConfig): string {
   const instance = resolveAgentInstance(config, agent, { includeDisabled: true });
-  if (instance?.defaultModel) return instance.defaultModel;
   const provider = instance?.provider;
-  const preferred = provider ? PROVIDER_ADAPTERS[provider]?.().defaultModel : undefined;
   const available = modelIdsForAgent(agent, config);
-  if (preferred && available.includes(preferred)) return preferred;
-  return available[0] ?? preferred ?? agent;
+  const configured = instance?.defaultModel;
+  // Configured override wins only when it is still in the agent's catalog
+  // (live catalogs drop removed/unauthenticated models).
+  if (configured && (available.length === 0 || available.includes(configured))) {
+    return configured;
+  }
+  const preferred = provider ? PROVIDER_ADAPTERS[provider]?.().defaultModel : undefined;
+  if (preferred && (available.length === 0 || available.includes(preferred))) return preferred;
+  if (provider === "opencode") {
+    for (const id of OPENCODE_FREE_DEFAULT_PREFERENCE) {
+      if (available.includes(id)) return id;
+    }
+  }
+  return available[0] ?? preferred ?? configured ?? agent;
 }
 
 const CLAUDE_OPUS_48_47_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;

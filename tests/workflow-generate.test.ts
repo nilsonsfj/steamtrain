@@ -136,6 +136,23 @@ describe("slugifyWorkflowName", () => {
 });
 
 describe("buildWorkflowGenerationPrompt", () => {
+  it("teaches OpenCode free models rather than the first-class mimo agent", () => {
+    const prompt = buildWorkflowGenerationPrompt("anything");
+    expect(prompt).toContain('Prefer agent "opencode"');
+    expect(prompt).toContain("opencode/mimo-v2.5-free");
+    expect(prompt).toContain('Do NOT default to the first-class "mimo" agent');
+    expect(prompt).not.toContain('Prefer first-class agent "mimo"');
+  });
+
+  it("lists available models when provided so defaults stay on-catalog", () => {
+    const prompt = buildWorkflowGenerationPrompt("anything", {
+      availableModels: ["opencode/mimo-v2.5-free", "opencode/north-mini-code-free"],
+    });
+    expect(prompt).toContain("# Available models (USE THESE FOR DEFAULTS)");
+    expect(prompt).toContain("- opencode/mimo-v2.5-free");
+    expect(prompt).toContain("- opencode/north-mini-code-free");
+  });
+
   it("embeds the description and demands JSON output", () => {
     const prompt = buildWorkflowGenerationPrompt("audit the auth module");
     expect(prompt).toContain("audit the auth module");
