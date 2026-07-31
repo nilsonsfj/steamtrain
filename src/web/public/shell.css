@@ -295,12 +295,10 @@ header .mode-badge {
   font: 400 10px / 1 var(--font-mono);
   color: var(--dim);
   font-variant-numeric: tabular-nums;
+  margin-left: auto;
 }
 .wf-row .lock + .counts {
   margin-left: 0;
-}
-.wf-row .name + .counts {
-  margin-left: auto;
 }
 .wf-row.selected {
   background: rgba(52, 211, 196, 0.1);

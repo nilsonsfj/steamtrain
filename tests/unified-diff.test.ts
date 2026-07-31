@@ -7,6 +7,43 @@ import {
 } from "../src/workflow/unified-diff.js";
 
 describe("parseUnifiedDiff", () => {
+  it("parses a plain unified diff without a diff --git header", () => {
+    const patch = [
+      "--- a/old.json",
+      "+++ b/new.json",
+      "@@ -1,3 +1,3 @@",
+      " {",
+      '-  "name": "a"',
+      '+  "name": "b"',
+      " }",
+      "",
+    ].join("\n");
+    const files = parseUnifiedDiff(patch);
+    expect(files).toHaveLength(1);
+    const file = files[0]!;
+    expect(file.oldPath).toBe("old.json");
+    expect(file.newPath).toBe("new.json");
+    expect(file.hunks).toHaveLength(1);
+    expect(diffFileLineCounts(file)).toEqual({ additions: 1, deletions: 1 });
+  });
+
+  it("parses a plain unified diff without a/ or b/ path prefixes", () => {
+    const patch = [
+      "--- old.json",
+      "+++ new.json",
+      "@@ -1,2 +1,2 @@",
+      " line1",
+      "-old",
+      "+new",
+      "",
+    ].join("\n");
+    const files = parseUnifiedDiff(patch);
+    expect(files).toHaveLength(1);
+    expect(files[0]!.oldPath).toBe("old.json");
+    expect(files[0]!.newPath).toBe("new.json");
+    expect(diffFileLineCounts(files[0]!)).toEqual({ additions: 1, deletions: 1 });
+  });
+
   it("parses a simple modification with line numbers", () => {
     const patch = [
       "diff --git a/foo.ts b/foo.ts",

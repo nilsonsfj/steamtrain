@@ -54,31 +54,55 @@
     return JSON.stringify(v === undefined ? null : v);
   }
 
-  /** The draft for the selected workflow, creating it from the saved spec. */
+  /**
+   * The draft for the selected workflow. Creates one lazily from the saved
+   * spec on first mutation — viewing alone must not leave a pending draft,
+   * or every visited workflow would show a dirty rail dot.
+   */
   function draft() {
     if (!S.selected || !S.spec) return null;
     if (!S.planDrafts[S.selected]) S.planDrafts[S.selected] = clone(S.spec);
     return S.planDrafts[S.selected];
   }
 
+  /** Existing draft for `name` (no create). */
+  function existingDraft(name) {
+    var wf = name || S.selected;
+    return (wf && S.planDrafts[wf]) || null;
+  }
+
   /** The draft only when it actually diverges from the saved spec. */
   function draftIfDirty(name) {
     var wf = name || S.selected;
-    var d = wf && S.planDrafts[wf];
-    if (!d || !S.spec || wf !== S.selected) {
-      // A draft for a non-selected workflow is dirty by definition (it was
-      // edited before the user navigated away).
-      return d && wf !== S.selected ? d : (d && S.spec && canonical(d) !== canonical(S.spec) ? d : null);
+    var d = existingDraft(wf);
+    if (!d) return null;
+    if (wf === S.selected && S.spec) {
+      return canonical(d) !== canonical(S.spec) ? d : null;
     }
-    return canonical(d) !== canonical(S.spec) ? d : null;
+    // Non-selected: drafts are only retained while dirty (see mutate/discard),
+    // so presence alone means there are unsaved edits for that workflow.
+    return d;
   }
 
   function isDirty(name) {
-    var wf = name || S.selected;
-    var d = wf && S.planDrafts[wf];
-    if (!d) return false;
-    if (wf === S.selected && S.spec) return canonical(d) !== canonical(S.spec);
-    return true;
+    return !!draftIfDirty(name);
+  }
+
+  /**
+   * Repaint after a draft mutation. Deferred (setTimeout 0, not the RAF
+   * scheduleRender in st-core.js) so a blur→change on an inspector field does
+   * not rebuild the DOM before the click that caused the blur (Diff / Save /
+   * Discard, or another workflow in the rail) lands — otherwise the click
+   * target is destroyed mid-gesture and navigation feels stuck.
+   */
+  var renderTimer = null;
+  function scheduleDeferredRender() {
+    if (renderTimer != null) return;
+    renderTimer = setTimeout(function () {
+      renderTimer = null;
+      ST.shell.renderSidebar();
+      ST.render();
+    }, 0);
   }
 
   /** Apply a mutation to the selected workflow's draft and repaint. */
@@ -91,7 +115,7 @@
       // dot and footer chip clear rather than claiming "1 unsaved edit".
       discard(S.selected);
     }
-    ST.render();
+    scheduleDeferredRender();
   }
 
   function discard(name) {
@@ -105,7 +129,8 @@
    */
   function dirtySummary() {
     if (!isDirty()) return [];
-    var saved = S.spec, d = draft();
+    var saved = S.spec, d = existingDraft();
+    if (!saved || !d) return [];
     var out = [];
     var savedPhases = saved.phases || [], draftPhases = d.phases || [];
     var savedSteps = {}, draftSteps = {};
@@ -151,6 +176,7 @@
    * Client-side sanity checks for the footer's "plan valid" lamp. The server
    * re-validates with the real schema on save; these catch the structural
    * mistakes the plan editor itself can produce (dupes, dangling deps).
+   * Keep in sync with validatePlanStructure in src/web/plan-edit.ts.
    */
   function validate(spec) {
     var errors = [];
@@ -168,6 +194,19 @@
         (s.dependsOn || []).forEach(function (dep) {
           if (!seen[dep]) errors.push(s.id + " depends on unknown step '" + dep + "'");
           else if (phaseOf[dep] >= i) errors.push(s.id + " depends on '" + dep + "', which is not in an earlier phase");
+        });
+        if (s.when && s.when.step) {
+          if (!seen[s.when.step]) errors.push(s.id + " when condition references unknown step '" + s.when.step + "'");
+          else if (phaseOf[s.when.step] >= i) {
+            errors.push(s.id + " when condition references '" + s.when.step + "', which is not in an earlier phase");
+          }
+        }
+        if (s.condition && s.condition.step) {
+          if (!seen[s.condition.step]) errors.push(s.id + " condition references unknown step '" + s.condition.step + "'");
+        }
+        if (s.forEach && !seen[s.forEach]) errors.push(s.id + " forEach references unknown step '" + s.forEach + "'");
+        (s.from || []).forEach(function (ref) {
+          if (!seen[ref]) errors.push(s.id + " from references unknown step '" + ref + "'");
         });
       });
     });
@@ -210,7 +249,7 @@
 
   /** Move selection one step up/down the flattened plan (arrow keys). */
   function moveSelection(dir) {
-    var all = flatSteps(draft() || S.spec);
+    var all = flatSteps(draftIfDirty() || S.spec);
     if (!all.length) return;
     var cur = S.planSelection[0];
     var idx = -1;
@@ -223,6 +262,26 @@
 
   // ---- structural edits -----------------------------------------------------
 
+  /** Rewrite every step-id reference in the draft when a step is renamed.
+   * Keep in sync with rewriteStepRefs in src/web/plan-edit.ts. */
+  function rewriteStepRefs(d, oldId, newId) {
+    flatSteps(d).forEach(function (f) {
+      if (f.step.id === oldId) f.step.id = newId;
+      if (Array.isArray(f.step.dependsOn)) {
+        f.step.dependsOn = f.step.dependsOn.map(function (dep) { return dep === oldId ? newId : dep; });
+      }
+      if (Array.isArray(f.step.from)) {
+        f.step.from = f.step.from.map(function (ref) { return ref === oldId ? newId : ref; });
+      }
+      if (f.step.forEach === oldId) f.step.forEach = newId;
+      // Gate/approval conditions and when-clauses reference steps by id.
+      var c = f.step.condition;
+      if (c && c.step === oldId) c.step = newId;
+      if (f.step.when && f.step.when.step === oldId) f.step.when.step = newId;
+      if (f.step.step === oldId && (f.step.kind === "approval" || f.step.kind === "merge")) f.step.step = newId;
+    });
+  }
+
   function renameStep(oldId, newId) {
     newId = (newId || "").trim();
     if (!newId || newId === oldId) return false;
@@ -230,20 +289,9 @@
       ST.run.setBanner("step ids start with a letter or digit and use only letters, digits, - and _", "info");
       return false;
     }
-    var clash = findStep(draft(), newId);
+    var clash = findStep(draftIfDirty() || S.spec, newId);
     if (clash) { ST.run.setBanner("a step named '" + newId + "' already exists", "err"); return false; }
-    mutate(function (d) {
-      flatSteps(d).forEach(function (f) {
-        if (f.step.id === oldId) f.step.id = newId;
-        if (Array.isArray(f.step.dependsOn)) {
-          f.step.dependsOn = f.step.dependsOn.map(function (dep) { return dep === oldId ? newId : dep; });
-        }
-        // Gate/approval conditions reference steps by id too.
-        var c = f.step.condition;
-        if (c && c.step === oldId) c.step = newId;
-        if (f.step.step === oldId && (f.step.kind === "approval" || f.step.kind === "merge")) f.step.step = newId;
-      });
-    });
+    mutate(function (d) { rewriteStepRefs(d, oldId, newId); });
     S.planSelection = [newId];
     return true;
   }
@@ -258,15 +306,23 @@
         p.steps.forEach(function (s) {
           if (Array.isArray(s.dependsOn)) {
             s.dependsOn = s.dependsOn.filter(function (dep) { return !doomed[dep]; });
+            if (!s.dependsOn.length) delete s.dependsOn;
           }
+          if (Array.isArray(s.from)) {
+            s.from = s.from.filter(function (ref) { return !doomed[ref]; });
+            if (!s.from.length) delete s.from;
+          }
+          if (s.forEach && doomed[s.forEach]) delete s.forEach;
+          if (s.when && s.when.step && doomed[s.when.step]) delete s.when;
+          if (s.condition && s.condition.step && doomed[s.condition.step]) delete s.condition;
         });
       });
       // Drop phases the deletion emptied out, matching what the file would
       // look like had the user edited it by hand.
       d.phases = d.phases.filter(function (p) { return (p.steps || []).length > 0; });
     });
+    // mutate() → scheduleDeferredRender() handles the repaint.
     S.planSelection = [];
-    ST.render();
   }
 
   /** Move a step into another phase (drop target index within it). */
@@ -316,10 +372,10 @@
       dd.phases[phaseIdx].steps.push({ id: id, kind: "worker", prompt: "" });
     });
     S.planSelection = [id];
-    ST.render();
   }
 
   function addPhase() {
+    // mutate() → scheduleDeferredRender() handles the repaint.
     mutate(function (d) {
       d.phases.push({ id: "phase-" + (d.phases.length + 1), title: "New phase", steps: [] });
     });
@@ -673,8 +729,7 @@
     function commit() {
       if (done) return;
       done = true;
-      renameStep(step.id, input.value);
-      ST.render();
+      if (!renameStep(step.id, input.value)) ST.render();
     }
     input.addEventListener("keydown", function (e) {
       if (e.key === "Enter") { e.preventDefault(); commit(); }
@@ -787,7 +842,7 @@
   /** The plan tab: phase bands + the pending-diff footer. */
   function renderPlanTab(container, spec) {
     var ro = ST.isReadOnly();
-    var d = draft() || spec;
+    var d = draftIfDirty() || spec;
     var head = h("div", { class: "plan-gridhead" },
       h("span"), h("span"), h("span", { text: "Step" }), h("span", { text: "Kind" }),
       h("span", { text: "Runner · model" }), h("span", { text: "Depends on / cwd" }),
@@ -806,6 +861,23 @@
     }
     container.appendChild(scroll);
     container.appendChild(renderFooter(d));
+  }
+
+  /**
+   * Footer / rail actions that a reader often hits while still focused in an
+   * inspector field. `mousedown` + preventDefault keeps the field from
+   * blurring before the click, which would otherwise let a blur→change
+   * rebuild steal the gesture. The click handler then blurs deliberately so
+   * any pending field edit commits into the draft (sync) before the action.
+   */
+  function armAction(btn, action) {
+    btn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+    btn.addEventListener("click", function () {
+      var active = document.activeElement;
+      if (active && active !== btn && active.blur) active.blur();
+      action();
+    });
+    return btn;
   }
 
   /** The pending-diff footer: validity lamp, unsaved chip, Discard/Diff/Save. */
@@ -827,16 +899,22 @@
     }
     var actions = h("span", { class: "plan-foot-actions" });
     if (!ro && edits.length) {
-      actions.appendChild(h("button", { class: "btn ghost", type: "button", text: "Discard",
-        onClick: function () {
+      actions.appendChild(armAction(
+        h("button", { class: "btn ghost", type: "button", text: "Discard" }),
+        function () {
           discard();
           ST.run.setBanner("", "");
+          ST.shell.renderSidebar();
           ST.render();
-        } }));
-      actions.appendChild(h("button", { class: "btn small", type: "button", text: "Diff", onClick: showDiff }));
+        }
+      ));
+      actions.appendChild(armAction(
+        h("button", { class: "btn small", type: "button", text: "Diff" }),
+        showDiff
+      ));
       var saveBtn = h("button", { class: "btn small primary", type: "button", disabled: !check.ok }, "Save to file",
         h("span", { class: "kbd", text: "⌘S" }));
-      saveBtn.addEventListener("click", function () { save(false); });
+      armAction(saveBtn, function () { save(false); });
       actions.appendChild(saveBtn);
     }
     foot.appendChild(actions);
@@ -903,14 +981,25 @@
 
   function showDiff() {
     if (!isDirty()) return;
+    var oldName = "workflows/" + S.selected + " (saved)";
+    var newName = S.selected + " (draft)";
     var savedText = JSON.stringify(S.spec, null, 2);
-    var draftText = JSON.stringify(draft(), null, 2);
-    var patch = unifiedDiff(savedText, draftText, "workflows/" + S.selected + " (saved)", S.selected + " (draft)");
+    var draftText = JSON.stringify(draftIfDirty() || draft(), null, 2);
+    var patch = unifiedDiff(savedText, draftText, oldName, newName);
+    // parseUnifiedDiff accepts plain ---/+++ patches now, but keep a git
+    // header so older cached bundles still render something useful.
+    if (patch && patch.indexOf("diff --git ") !== 0) {
+      patch = "diff --git " + JSON.stringify(oldName) + " " + JSON.stringify(newName) + "\n" + patch;
+    }
     var body;
     try {
       body = SteamtrainDiff.renderPatch(patch, { document: document });
+      if (!body || !body.childNodes || body.childNodes.length === 0) {
+        // Match renderBody's empty-file affordance in the diff view bundle.
+        body = h("div", { class: "diff-empty-file", text: "No textual changes" });
+      }
     } catch (e) {
-      body = h("pre", { class: "plan-diff-raw", text: patch });
+      body = h("pre", { class: "plan-diff-raw", text: patch || String(e) });
     }
     var wrap = h("div", { class: "plan-diff" }, body);
     ST.modals.openModal(ST.modals.modalShell(
@@ -933,7 +1022,9 @@
 
   // ---- source tab ------------------------------------------------------------
 
-  function draftJson() { return JSON.stringify(draft(), null, 2); }
+  function draftJson() {
+    return JSON.stringify(draftIfDirty() || S.spec, null, 2);
+  }
 
   /** Where the workflow persists, for the source header's file line. */
   function sourceFileLabel() {
@@ -961,7 +1052,11 @@
           try {
             S.sourceText = JSON.stringify(JSON.parse(S.sourceText), null, 2);
             S.sourceDiverged = false;
-            S.planDrafts[S.selected] = JSON.parse(S.sourceText);
+            var parsed = JSON.parse(S.sourceText);
+            parsed.name = S.selected;
+            if (S.spec && canonical(parsed) === canonical(S.spec)) delete S.planDrafts[S.selected];
+            else S.planDrafts[S.selected] = parsed;
+            ST.shell.renderSidebar();
             ST.render();
           } catch (e) { /* status line already says what's wrong */ }
         } })
@@ -987,7 +1082,11 @@
         // Absorb valid JSON into the draft immediately — the plan tab, the
         // footer chip, and the launch sheet all read the draft.
         parsed.name = S.selected;
-        S.planDrafts[S.selected] = parsed;
+        if (S.spec && canonical(parsed) === canonical(S.spec)) {
+          delete S.planDrafts[S.selected];
+        } else {
+          S.planDrafts[S.selected] = parsed;
+        }
         if (status) { status.textContent = ""; status.className = "src-status"; }
         refreshFooterOnly();
       } catch (e) {
@@ -1064,13 +1163,18 @@
     foot.appendChild(h("span", { class: "src-drift", text: S.sourceDiverged ? "not applied — fix the JSON above" : (drift || "matches the saved file") }));
     var actions = h("span", { class: "plan-foot-actions" });
     if (!ro && isDirty()) {
-      actions.appendChild(h("button", { class: "btn ghost", type: "button", text: "Discard", onClick: function () {
-        discard();
-        ST.render();
-      } }));
-      var btn = h("button", { class: "btn small primary", type: "button", text: "Save to file" });
-      btn.addEventListener("click", function () { save(false); });
-      actions.appendChild(btn);
+      actions.appendChild(armAction(
+        h("button", { class: "btn ghost", type: "button", text: "Discard" }),
+        function () {
+          discard();
+          ST.shell.renderSidebar();
+          ST.render();
+        }
+      ));
+      actions.appendChild(armAction(
+        h("button", { class: "btn small primary", type: "button", text: "Save to file" }),
+        function () { save(false); }
+      ));
     }
     foot.appendChild(actions);
   }
@@ -1173,7 +1277,7 @@
    */
   function render(stage) {
     parkComposerNodes();
-    var spec = draftIfDirty() || draft() || S.spec;
+    var spec = draftIfDirty() || S.spec;
     var wrap = h("div", { class: "plan-root" });
     wrap.appendChild(renderTabs(S.spec || spec));
     var content = h("div", { class: "plan-content" });
@@ -1207,6 +1311,7 @@
     mutate: mutate,
     renameStep: renameStep,
     render: render,
+    rewriteStepRefs: rewriteStepRefs,
     save: save,
     selectStep: selectStep,
     toggleDisabled: toggleDisabled,

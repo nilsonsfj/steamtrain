@@ -51,6 +51,16 @@ var SteamtrainDiff = (() => {
         file.newPath = stripPrefix(newPath, "b/");
         continue;
       }
+      if (!file && raw.startsWith("--- ")) {
+        file = { oldPath: null, newPath: null, status: "modified", isBinary: false, hunks: [] };
+        files.push(file);
+        hunk = null;
+        inBinaryBody = false;
+        const path = raw.slice(4);
+        file.oldPath = path === "/dev/null" ? null : stripPrefix(path, "a/");
+        if (file.oldPath === null) file.status = "added";
+        continue;
+      }
       if (!file) continue;
       if (inBinaryBody) {
         if (raw.trim() === "") inBinaryBody = false;

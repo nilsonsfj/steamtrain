@@ -59,8 +59,15 @@
   function workflowRow(w) {
     var row = h("button", {
       class: "wf-row" + (S.selected === w.name && !isLiveAttached() ? " selected" : ""),
-      type: "button",
-      onClick: function () { selectWorkflow(w.name); }
+      type: "button"
+    });
+    // Keep an inspector field's blur from cancelling the rail click (the plan
+    // editor commits on blur and used to rebuild the rail before mouseup).
+    row.addEventListener("mousedown", function (e) { e.preventDefault(); });
+    row.addEventListener("click", function () {
+      var active = document.activeElement;
+      if (active && active !== row && active.blur) active.blur();
+      selectWorkflow(w.name);
     });
     row.appendChild(h("span", { class: "name", text: w.name }));
     // Unsaved plan edits follow the workflow across navigation (the draft is
