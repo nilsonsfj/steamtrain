@@ -377,6 +377,32 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(text);
 }
 
+/**
+ * Validate a full-spec override sent by the web plan editor (an unsaved draft
+ * run or planned as-is). The draft must name the workflow it was sent for —
+ * otherwise a spec copied from elsewhere would execute under this workflow's
+ * name, history, and budget context.
+ */
+function parseSpecOverride(
+  raw: unknown,
+  workflowName: string,
+): { ok: true; spec: WorkflowSpec } | { ok: false; error: string } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, error: "'spec' must be a workflow spec object" };
+  }
+  const check = workflowSpecSchema.safeParse(raw);
+  if (!check.success) {
+    return {
+      ok: false,
+      error: `invalid workflow spec: ${check.error.issues[0]?.message ?? "schema error"}`,
+    };
+  }
+  if (check.data.name !== undefined && check.data.name !== workflowName) {
+    return { ok: false, error: `'spec' name must match workflow '${workflowName}'` };
+  }
+  return { ok: true, spec: { ...check.data, name: workflowName } };
+}
+
 /** Maximum body size: 1 MiB. Rejects larger payloads with HTTP 413. */
 const MAX_BODY_BYTES = 1 * 1024 * 1024;
 
@@ -1445,7 +1471,7 @@ async function handle(
       return;
     }
     const body = await readBody(req);
-    let parsed: { input?: unknown; params?: unknown; overrides?: unknown };
+    let parsed: { input?: unknown; params?: unknown; overrides?: unknown; spec?: unknown };
     try {
       parsed = body ? JSON.parse(body) : {};
     } catch {
@@ -1457,6 +1483,18 @@ async function handle(
       return;
     }
     let effectiveSpec = spec;
+    // Full-spec override: the web plan editor's unsaved draft, planned as-is.
+    // Validated by the same schema the save route uses; the draft must still
+    // claim the workflow it plans for so a pasted foreign spec can't run
+    // under this workflow's name and history.
+    if (parsed.spec !== undefined) {
+      const override = parseSpecOverride(parsed.spec, name);
+      if (!override.ok) {
+        sendJson(res, 400, { error: override.error });
+        return;
+      }
+      effectiveSpec = override.spec;
+    }
     if (
       parsed.overrides &&
       typeof parsed.overrides === "object" &&
@@ -1467,7 +1505,7 @@ async function handle(
         sendJson(res, 400, { error: parsedOverrides.error });
         return;
       }
-      effectiveSpec = applyWorkflowSessionOverrides(spec, parsedOverrides.overrides);
+      effectiveSpec = applyWorkflowSessionOverrides(effectiveSpec, parsedOverrides.overrides);
     }
     let params: Record<string, string | number | boolean> | undefined;
     if (parsed.params && typeof parsed.params === "object" && !Array.isArray(parsed.params)) {
@@ -1845,6 +1883,7 @@ async function handle(
       overrides?: unknown;
       params?: unknown;
       reroute?: unknown;
+      spec?: unknown;
     };
     try {
       parsed = body ? JSON.parse(body) : {};
@@ -1857,6 +1896,17 @@ async function handle(
       return;
     }
     let specOverride: WorkflowSpec | undefined;
+    // Full-spec override: the web plan editor's unsaved draft, run as-is (the
+    // launch sheet warns this is happening). Session `overrides` below then
+    // layer on top of it, exactly as they layer on the catalog spec today.
+    if (parsed.spec !== undefined) {
+      const override = parseSpecOverride(parsed.spec, parsed.workflow);
+      if (!override.ok) {
+        sendJson(res, 400, { error: override.error });
+        return;
+      }
+      specOverride = override.spec;
+    }
     if (
       parsed.overrides &&
       typeof parsed.overrides === "object" &&
@@ -1867,7 +1917,7 @@ async function handle(
         sendJson(res, 400, { error: parsedOverrides.error });
         return;
       }
-      const base = deps.host.listWorkflows()[parsed.workflow];
+      const base = specOverride ?? deps.host.listWorkflows()[parsed.workflow];
       if (base) {
         specOverride = applyWorkflowSessionOverrides(base, parsedOverrides.overrides);
       }

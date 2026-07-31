@@ -37,7 +37,12 @@
     var stage = document.getElementById("bands");
     clear(stage);
     var railRight = document.getElementById("rail-right");
-    if (railRight) ST.instruments.render(railRight);
+    if (railRight) {
+      // Rail ownership: the inspector takes it pre-run (the step form) and
+      // when a step is drilled into during a run (the step record, 02.4);
+      // the instrument cluster has it otherwise.
+      if (!(ST.inspector && ST.inspector.render(railRight))) ST.instruments.render(railRight);
+    }
     if (!S.spec) {
       stage.appendChild(h("div", { class: "empty boot-empty" },
         h("div", { class: "boot-logo" },
@@ -61,9 +66,15 @@
       return;
     }
 
+    // Idle (no run attached): the plan editor owns the centre pane — an
+    // editable projection of the workflow file with the pending-diff footer.
+    if (!S.runId && ST.plan) {
+      ST.plan.render(stage);
+      ST.run.updateProgress();
+      return;
+    }
+
     ST.run.renderNarration(stage);
-    // Idle (no run started yet): the composer above owns the pane and the bands
-    // area stays empty. Once a run starts, the phase bands take it.
     ST.run.renderBands(stage);
     ST.run.updateProgress();
     applyTailScroll(stage);
@@ -134,6 +145,9 @@
       // whether it consumed the key so the cockpit's own handling below still
       // runs for anything it did not.
       if (ST.runs.handleKey(e)) return;
+      // The plan editor's keys (⌘S save, ⌘⏎ launch sheet, ⌫ delete, arrows,
+      // Esc deselect) apply while no run is attached.
+      if (ST.plan && ST.plan.handleKey(e)) return;
       if (e.key === "Escape" && S.detail) {
         e.preventDefault();
         ST.run.closeDetail();

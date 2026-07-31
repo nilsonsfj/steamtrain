@@ -51,6 +51,7 @@ export const WEB_ASSETS: readonly WebAsset[] = [
   { file: "settings.css", kind: "css", mime: "text/css; charset=utf-8" },
   { file: "runs.css", kind: "css", mime: "text/css; charset=utf-8" },
   { file: "modals.css", kind: "css", mime: "text/css; charset=utf-8" },
+  { file: "plan.css", kind: "css", mime: "text/css; charset=utf-8" },
   { file: "steamtrain-reducer.bundle.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "steamtrain-diff.bundle.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "st-core.js", kind: "js", mime: "text/javascript; charset=utf-8" },
@@ -61,6 +62,8 @@ export const WEB_ASSETS: readonly WebAsset[] = [
   { file: "st-settings.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "st-modals.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "st-runs.js", kind: "js", mime: "text/javascript; charset=utf-8" },
+  { file: "st-plan.js", kind: "js", mime: "text/javascript; charset=utf-8" },
+  { file: "st-inspector.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "st-boot.js", kind: "js", mime: "text/javascript; charset=utf-8" },
 ];
 
@@ -143,7 +146,7 @@ ${styles}
           <div class="row composer" id="runRow" style="display:none">
             <div class="run-compose">
               <label class="run-compose-label" for="input">Describe</label>
-              <textarea id="input" placeholder="What should this run do? (&#8593; recalls previous inputs)"></textarea>
+              <textarea id="input" data-focus-key="run-input" placeholder="What should this run do? (&#8593; recalls previous inputs)"></textarea>
               <div id="paramsPanel" class="params-panel collapsed" style="display:none" hidden>
                 <button type="button" class="params-toggle" id="paramsToggle" aria-expanded="false" aria-controls="paramsForm">
                   <span class="params-toggle-chevron" aria-hidden="true"></span>

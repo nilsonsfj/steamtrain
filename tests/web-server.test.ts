@@ -1859,6 +1859,108 @@ describe("web server", () => {
     expect((receivedSpec!.phases[0]!.steps[0]! as { agent: string }).agent).toBe("opencode");
   });
 
+  it("POST /api/runs with a full spec override runs that spec (unsaved draft)", async () => {
+    let receivedSpec: WorkflowSpec | undefined;
+    const host: WorkflowHost = {
+      listWorkflows: () => ({ demo: demoSpec() }),
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      async *runWorkflow(_name, _input, _signal, _cache, _cwd, specOverride) {
+        receivedSpec = specOverride;
+        yield { kind: "workflow_done", ok: true, results: [], ts: Date.now() };
+      },
+    };
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const server = createWebServer({ host, runs, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+
+    // The web plan editor's unsaved draft: renamed model + a step deselected
+    // via the injected `when:false` skip marker.
+    const draft = demoSpec();
+    (draft.phases[0]!.steps[0]! as { model?: string }).model = "draft-model";
+    draft.phases[0]!.steps.push({
+      id: "s2",
+      kind: "worker",
+      agent: "opencode",
+      model: "m",
+      prompt: "skipped",
+      when: { value: "false", equals: "true" },
+    } as WorkflowSpec["phases"][number]["steps"][number]);
+
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "demo", input: "test", spec: draft }),
+    });
+    expect(res.status).toBe(201);
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(receivedSpec).toBeDefined();
+    const steps = receivedSpec!.phases[0]!.steps as Array<{ id: string; model?: string }>;
+    expect(steps[0]!.model).toBe("draft-model");
+    expect(steps.map((s) => s.id)).toEqual(["s1", "s2"]);
+  });
+
+  it("POST /api/runs rejects a spec override naming a different workflow", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "demo", input: "test", spec: demoSpec("other") }),
+    });
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string };
+    expect(json.error).toContain("must match workflow");
+  });
+
+  it("POST /api/runs rejects a spec override that fails schema validation", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "demo", input: "test", spec: { name: "demo" } }),
+    });
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string };
+    expect(json.error).toContain("invalid workflow spec");
+  });
+
+  it("POST /api/workflows/:name/plan with a spec override plans that spec", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const draft = demoSpec();
+    (draft.phases[0]!.steps[0]! as { id: string }).id = "draft-step";
+    const res = await fetch(`${base}/api/workflows/demo/plan`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ input: "test input", spec: draft }),
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { ok: boolean; steps: Array<{ stepId: string }> };
+    expect(json.ok).toBe(true);
+    expect(json.steps.map((s) => s.stepId)).toEqual(["draft-step"]);
+  });
+
+  it("POST /api/workflows/:name/plan rejects a spec override naming a different workflow", async () => {
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const res = await fetch(`${base}/api/workflows/demo/plan`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ input: "test", spec: demoSpec("other") }),
+    });
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string };
+    expect(json.error).toContain("must match workflow");
+  });
+
   it("POST /api/overrides/flush persists staged overrides and returns report", async () => {
     const host: WorkflowHost & {
       workflowSource(): undefined;

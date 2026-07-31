@@ -63,6 +63,11 @@
       onClick: function () { selectWorkflow(w.name); }
     });
     row.appendChild(h("span", { class: "name", text: w.name }));
+    // Unsaved plan edits follow the workflow across navigation (the draft is
+    // keyed by name) — the amber dot is that pending diff, visible in the rail.
+    if (ST.plan && ST.plan.isDirty && ST.plan.isDirty(w.name)) {
+      row.appendChild(h("span", { class: "dirty-dot", title: "unsaved plan edits" }));
+    }
     if (allReadOnly(w.permissions)) {
       row.appendChild(h("span", { class: "lock", text: "🔒", title: "every agent step read-only" }));
     }
@@ -122,6 +127,26 @@
       }));
       foot.appendChild(row);
     });
+    // Recent completed runs of the selected workflow (fetched on selection by
+    // st-plan.loadRecentRuns). Click-through opens the runs page's receipt.
+    if (S.selected && S.recentRuns && S.recentRuns.length) {
+      foot.appendChild(h("div", { class: "rail-label recent-label", text: "Recent runs · " + S.selected }));
+      S.recentRuns.forEach(function (run) {
+        var ok = run.status !== "error" && run.status !== "canceled" && run.status !== "budget-exceeded";
+        var row = h("button", {
+          class: "elsewhere-row recent " + (ok ? "ok" : "err"),
+          type: "button",
+          title: truncate(run.input || "", 80),
+          onClick: function () { ST.runs.open(run.id); }
+        });
+        row.appendChild(h("span", { class: "dot" }));
+        var right = !ok ? run.status
+          : run.totals && run.totals.costUsd > 0 ? "$" + run.totals.costUsd.toFixed(3)
+          : "ok";
+        row.appendChild(h("span", { text: run.id.slice(0, 5) + " · " + relTime(run.startedAt) + " · " + right }));
+        foot.appendChild(row);
+      });
+    }
   }
 
   /**

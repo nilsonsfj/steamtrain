@@ -871,6 +871,15 @@
    */
   function renderDetail() {
     var drawer = document.getElementById("drawer");
+    // During a run the drilled-in step renders as the right rail's step record
+    // (Turn 2 · 02.4), not the floating drawer — hide the drawer shell so the
+    // two never compete. S.detail keeps its role as the selection state.
+    if (S.runId && S.detail) {
+      drawer.classList.remove("show");
+      drawer.setAttribute("aria-hidden", "true");
+      clear(drawer);
+      return;
+    }
     var found = findDetailStep();
     if (!found) {
       drawer.classList.remove("show");
@@ -1318,7 +1327,24 @@
   }
 
   // ---- running -------------------------------------------------------------
+  /**
+   * Run opens the launch sheet (Turn 2): never blind. The sheet confirms what
+   * executes, then calls launchRun() with the configured run spec.
+   */
   function startRun() {
+    if (isReadOnly()) { setBanner("This session is read-only — viewing only.", "info"); return; }
+    ST.modals.openLaunchSheet();
+  }
+
+  /**
+   * The actual launch, parameterized by the launch sheet. `opts.spec` is the
+   * full run spec (draft + deselections + budget cap); `opts.fresh` ignores
+   * the cache; `opts.detach` hands the run to a background process once it is
+   * live. Without opts this degrades to the pre-sheet behavior (composer
+   * input, fresh checkbox, staged session overrides).
+   */
+  function launchRun(opts) {
+    opts = opts || {};
     if (isReadOnly()) { setBanner("This session is read-only — viewing only.", "info"); return; }
     var input = document.getElementById("input").value;
     if (!input.trim()) { setBanner("enter some input first", "info"); return; }
@@ -1330,7 +1356,7 @@
     // A freshly launched run is web-owned and in-process, so it can be detached.
     S.runExternal = false;
     S.runDetached = false;
-    S.runState = SteamtrainReducer.workflowStateFromSpec(effectiveSpec() || S.spec);
+    S.runState = SteamtrainReducer.workflowStateFromSpec(opts.spec || effectiveSpec() || S.spec);
     S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {};
     S.narration = []; S.arrivalEnter = false;
     S.narrationFreshPlayed = null;
@@ -1340,10 +1366,22 @@
     setBanner("", "");
     showRunMetrics(true);
     ST.render();
-    var payload = { workflow: S.selected, input: input, fresh: document.getElementById("freshChk").checked };
+    var payload = {
+      workflow: S.selected,
+      input: input,
+      fresh: opts.fresh !== undefined ? opts.fresh : document.getElementById("freshChk").checked
+    };
     var params = collectParams();
     if (params) payload.params = params;
-    if (workflowHasStaged(S.stagedOverrides[S.selected])) payload.overrides = S.stagedOverrides[S.selected];
+    if (opts.spec) {
+      // The launch sheet's configured spec: the plan draft with deselected
+      // steps marked skipped and any budget cap stamped — run as-is, unsaved.
+      payload.spec = opts.spec;
+    } else if (ST.plan && ST.plan.draftIfDirty && ST.plan.draftIfDirty()) {
+      payload.spec = ST.plan.buildRunSpec({});
+    } else if (workflowHasStaged(S.stagedOverrides[S.selected])) {
+      payload.overrides = S.stagedOverrides[S.selected];
+    }
     // Blocked-but-re-routable workflow: run with what's ready, this run only.
     var listItem = wfListItem(S.selected);
     var rerouted = Boolean(listItem && listItem.blocked && listItem.reroute);
@@ -1371,6 +1409,7 @@
         startTimer();
         openStream(S.runId);
         ST.render();
+        if (opts.detach) detachRun();
       })
       .catch(function () {
         setBanner("could not start run: network error", "err");
@@ -1515,12 +1554,10 @@
     updateDetachButton();
     document.getElementById("planBtn").style.display = (running || ro) ? "none" : "block";
     document.getElementById("input").disabled = running || ro;
-    // The composer and the authoring actions are pre-launch chrome: while a run
-    // is attached the phase bands own the pane and the header strip's room goes
-    // to the clock, progress and run controls. Both return when the run ends
-    // (renderSourceLine restores the actions on the next workflow load).
-    document.getElementById("runRow").style.display =
-      (running || ro || !S.selected) ? "none" : "grid";
+    // The composer is pre-launch chrome whose nodes (input, params) now live
+    // on the plan's Inputs tab when idle; #runRow itself is their hidden
+    // parking spot and never displays (see st-plan.js parkComposerNodes).
+    document.getElementById("runRow").style.display = "none";
     var actions = document.getElementById("wfActions");
     if (actions) actions.style.display = (running || ro || !S.selected) ? "none" : "flex";
     showRunMetrics(Boolean(running));
@@ -1727,7 +1764,17 @@
   function startPlan() {
     if (isReadOnly()) { setBanner("This session is read-only — viewing only.", "info"); return; }
     var input = document.getElementById("input").value;
-    if (!input.trim()) { setBanner("enter some input first", "info"); return; }
+    if (!input.trim()) {
+      // The input lives on the plan's Inputs tab now \u2014 take the reader there.
+      if (ST.plan && !S.runId) {
+        S.planTab = "inputs";
+        ST.render();
+        var realInput = document.getElementById("input");
+        if (realInput) realInput.focus();
+      }
+      setBanner("describe the run first \u2014 the input is what the workflow works on", "info");
+      return;
+    }
     recordPromptHistory(input);
     if (!validateParamsForm()) return;
     var workflowName = S.selected;
@@ -1735,7 +1782,11 @@
     var payload = { input: input };
     var params = collectParams();
     if (params) payload.params = params;
-    if (workflowHasStaged(S.stagedOverrides[workflowName])) payload.overrides = S.stagedOverrides[workflowName];
+    // A dirty plan draft is planned as-is; staged session overrides apply only
+    // when there is no draft (the draft already absorbed the intent).
+    var planDraft = ST.plan && ST.plan.draftIfDirty ? ST.plan.draftIfDirty() : null;
+    if (planDraft) payload.spec = planDraft;
+    else if (workflowHasStaged(S.stagedOverrides[workflowName])) payload.overrides = S.stagedOverrides[workflowName];
     setBanner("Planning\u2026", "info");
     api("POST", "/api/workflows/" + encodeURIComponent(workflowName) + "/plan", payload)
       .then(function (r) {
@@ -1743,13 +1794,22 @@
         // stale response replace the canvas for another workflow (or a newer plan).
         if (requestId !== S.planRequest || workflowName !== S.selected) return;
         if (r.status !== 200) { setBanner(r.body.error || "plan failed", "err"); return; }
+        // Idle: the result renders inside the plan tab with a back affordance
+        // (ST.plan owns #bands then); mid-flow it keeps the whole canvas.
+        if (ST.plan && !S.runId) {
+          setBanner("", "");
+          S.planTab = "plan";
+          S.dryRunPlan = { plan: r.body, name: workflowName };
+          ST.render();
+          return;
+        }
         renderPlanResult(r.body, workflowName);
       });
   }
 
-  function renderPlanResult(plan, workflowName) {
+  function renderPlanResult(plan, workflowName, container) {
     setBanner("", "");
-    var canvas = document.getElementById("bands");
+    var canvas = container || document.getElementById("bands");
     clear(canvas);
 
     // Summary header.
@@ -1878,6 +1938,7 @@
     effectiveSpec: effectiveSpec,
     flushStaged: flushStaged,
     handlePromptHistoryKey: handlePromptHistoryKey,
+    launchRun: launchRun,
     openDetail: openDetail,
     openStream: openStream,
     renderBands: renderBands,
@@ -1885,6 +1946,7 @@
     renderDetail: renderDetail,
     renderNarration: renderNarration,
     renderParamsForm: renderParamsForm,
+    renderPlanResult: renderPlanResult,
     renderStagedIndicator: renderStagedIndicator,
     sessionOverridesEmpty: sessionOverridesEmpty,
     setBanner: setBanner,
