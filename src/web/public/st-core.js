@@ -106,6 +106,10 @@ window.Steamtrain = (function () {
     // "follow" sticks the pane to the newest output as it streams; scrolling up
     // pauses it, scrolling back to the bottom re-engages it.
     tailScroll: {},
+    // Scroll state for the expanded phase's internal step list, keyed by the
+    // phase instance. A live render replaces that node, so keep the reader's
+    // position (and whether they were at the bottom) outside the DOM.
+    stepListScroll: {},
     // Same follow/position model for the drawer's full-output pane.
     drawerScroll: { follow: true, top: 0 },
     // Session capability from GET /api/session (or login). "read" hides every
@@ -358,7 +362,13 @@ window.Steamtrain = (function () {
     var now = Date.now();
     for (var i = 0; i < nodes.length; i++) {
       var since = Number(nodes[i].getAttribute("data-since"));
-      if (since > 0) nodes[i].textContent = "⏱ " + fmtElapsed(now - since);
+      if (since > 0) {
+        // Most live timers are standalone readouts and get the clock glyph.
+        // Compound controls can provide their own stable label, such as the
+        // inspector's "running " status prefix, without losing sibling nodes.
+        var prefix = nodes[i].getAttribute("data-since-prefix");
+        nodes[i].textContent = (prefix === null ? "⏱ " : prefix) + fmtElapsed(now - since);
+      }
     }
   }
 
@@ -881,7 +891,7 @@ window.Steamtrain = (function () {
         ? SteamtrainReducer.workflowStateFromSpec(ST.run.effectiveSpec() || S.spec)
         : SteamtrainReducer.initialWorkflowState;
       S.detail = null; S.selectedStepId = null;
-      S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {};
+      S.tailScroll = {}; S.stepListScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {};
       ST.run.setBanner(
         "Attached to " + (run.detached ? "detached " : "") + "run " + run.id.slice(0, 8) + "…" +
           (isReadOnly() ? " (read-only view)." : " — cancel stops the run itself."),
@@ -1216,7 +1226,7 @@ window.Steamtrain = (function () {
     S.selected = name; S.runId = null; S.runState = null;
     S.detail = null; S.detailInvoker = null; S.detailFallback = null; S.detailFocusPending = false; S.detailFocusGeneration += 1;
     S.selectedStepId = null;
-    S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {};
+    S.tailScroll = {}; S.stepListScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {};
     S.narration = []; S.arrivalEnter = false; S.endedAt = 0;
     S.narrationFreshPlayed = null;
     S.arrivalCtaFocused = false;

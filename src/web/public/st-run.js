@@ -558,7 +558,15 @@
       // instead of overflowing it (which used to paint over the bands below
       // and squeeze the output pane to an unusable sliver). Collapsed bands
       // are sized by their rows, so they host them directly.
-      var stepHost = isExpanded ? h("div", { class: "band-steps" }) : band;
+      var listKey = phaseKey(p);
+      var stepHost = isExpanded ? h("div", { class: "band-steps", "data-scroll-key": listKey }) : band;
+      if (isExpanded) {
+        stepHost.addEventListener("scroll", function () {
+          var atBottom = stepHost.scrollTop + stepHost.clientHeight >= stepHost.scrollHeight - 4;
+          if (!S.stepListScroll) S.stepListScroll = {};
+          S.stepListScroll[listKey] = { follow: atBottom, top: stepHost.scrollTop };
+        });
+      }
       steps.forEach(function (s) {
         stepHost.appendChild(renderStepRow(p, s));
         var sub = subWorkflowRow(p, s);
@@ -1387,7 +1395,7 @@
     S.runExternal = false;
     S.runDetached = false;
     S.runState = SteamtrainReducer.workflowStateFromSpec(opts.spec || effectiveSpec() || S.spec);
-    S.tailScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {};
+    S.tailScroll = {}; S.stepListScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {};
     S.narration = []; S.arrivalEnter = false;
     S.narrationFreshPlayed = null;
     S.selectedStepId = null;
@@ -1722,7 +1730,37 @@
       det.addEventListener("toggle", function () { S.subWorkflowOpen[key] = det.open; });
     }
     var rollup = SteamtrainReducer.subWorkflowRollup ? SteamtrainReducer.subWorkflowRollup(view) : ("→ " + step.workflow);
-    det.appendChild(h("summary", { class: "subwf-sum", text: rollup }));
+    var summary = h("summary", { class: "subwf-sum", title: rollup });
+    summary.appendChild(h("span", { class: "subwf-label", text: "inside" }));
+    summary.appendChild(h("span", { class: "subwf-name", text: view.workflow }));
+    if (view.resolved) {
+      summary.appendChild(h("span", {
+        class: "subwf-count",
+        text: view.stepCount + " step" + (view.stepCount === 1 ? "" : "s")
+      }));
+      var targets = Array.isArray(view.targets) ? view.targets : [];
+      if (targets.length) {
+        var shownTargets = targets.slice(0, 2).join(", ");
+        if (targets.length > 2) shownTargets += ", +" + (targets.length - 2);
+        summary.appendChild(h("span", {
+          class: "subwf-target",
+          title: targets.join(", "),
+          text: shownTargets
+        }));
+      }
+      if (view.overrideCount > 0) {
+        summary.appendChild(h("span", {
+          class: "subwf-overrides",
+          text: view.overrideCount + " override" + (view.overrideCount === 1 ? "" : "s")
+        }));
+      }
+    } else {
+      summary.appendChild(h("span", {
+        class: "subwf-state",
+        text: view.cyclic ? "cyclic" : "unresolved"
+      }));
+    }
+    det.appendChild(summary);
     if (!view.resolved) return det;
     var body = h("div", { class: "subwf-body" });
     if (view.input) body.appendChild(h("div", { class: "subwf-meta", text: "input: " + truncate(String(view.input), 100) }));

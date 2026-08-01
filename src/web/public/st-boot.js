@@ -38,6 +38,7 @@
 
   function renderStage() {
     var stage = document.getElementById("bands");
+    var canvasScroll = captureCanvasScroll(stage);
     // The Inputs tab adopts the shared composer controls into #bands. Return
     // them to their stable parking spot before clearing that destructive mount.
     if (ST.plan && ST.plan.prepareRender) ST.plan.prepareRender();
@@ -59,6 +60,7 @@
         h("div", { class: "boot-premise", text: "Parallel agents. One receipt." }),
         h("div", { class: "boot-pulse", text: "Loading…" })
       ));
+      restoreCanvasScroll(stage, canvasScroll);
       return;
     }
 
@@ -69,6 +71,7 @@
 
     if (showingArrival) {
       ST.run.updateProgress();
+      restoreCanvasScroll(stage, canvasScroll);
       return;
     }
 
@@ -77,6 +80,7 @@
     if (!S.runId && ST.plan) {
       ST.plan.render(stage);
       ST.run.updateProgress();
+      restoreCanvasScroll(stage, canvasScroll);
       return;
     }
 
@@ -85,6 +89,47 @@
     ST.run.updateProgress();
     applyTailScroll(stage);
     ST.run.renderDetail();
+    restoreCanvasScroll(stage, canvasScroll);
+  }
+
+  /**
+   * Capture the canvas and expanded phase-list positions before the destructive
+   * rebuild. Both the outer canvas and the inner step list can be scrolled, and
+   * a reader at either surface's bottom should continue following new rows.
+   */
+  function captureCanvasScroll(stage) {
+    var position = {
+      top: stage.scrollTop,
+      left: stage.scrollLeft,
+      follow: stage.scrollTop + stage.clientHeight >= stage.scrollHeight - 4
+    };
+    var lists = stage.querySelectorAll(".band-steps[data-scroll-key]");
+    for (var i = 0; i < lists.length; i++) {
+      var key = lists[i].getAttribute("data-scroll-key");
+      if (!key) continue;
+      var atBottom = lists[i].scrollTop + lists[i].clientHeight >= lists[i].scrollHeight - 4;
+      if (!S.stepListScroll) S.stepListScroll = {};
+      S.stepListScroll[key] = { follow: atBottom, top: lists[i].scrollTop };
+    }
+    return position;
+  }
+
+  /**
+   * Re-apply the canvas and expanded phase-list positions after rebuilding.
+   * Must run after the nodes are in the DOM (scrollHeight is 0 before layout).
+   */
+  function restoreCanvasScroll(stage, position) {
+    if (position) {
+      stage.scrollTop = position.follow ? stage.scrollHeight : position.top;
+      stage.scrollLeft = position.left;
+    }
+    var listState = S.stepListScroll || {};
+    var lists = stage.querySelectorAll(".band-steps[data-scroll-key]");
+    for (var i = 0; i < lists.length; i++) {
+      var state = listState[lists[i].getAttribute("data-scroll-key")];
+      if (!state) continue;
+      lists[i].scrollTop = state.follow ? lists[i].scrollHeight : state.top;
+    }
   }
 
   /**
