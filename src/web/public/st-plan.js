@@ -488,12 +488,12 @@
     return spec;
   }
 
-  // ---- recent runs + per-step actuals ---------------------------------------
+  // ---- recent runs ----------------------------------------------------------
 
   var recentRequest = 0;
   function loadRecentRuns(name) {
     var request = ++recentRequest;
-    S.recentRuns = []; S.recentRunsFor = name; S.stepActuals = {};
+    S.recentRuns = []; S.recentRunsFor = name;
     ST.apiAuth("GET", "/api/history").then(function (r) {
       if (request !== recentRequest || S.selected !== name) return;
       if (r.status !== 200) return;
@@ -503,23 +503,6 @@
       S.recentRuns = mine;
       ST.shell.renderLiveRuns();
       ST.render();
-      if (!mine.length) return;
-      ST.apiAuth("GET", "/api/history/" + encodeURIComponent(mine[0].id)).then(function (rr) {
-        if (request !== recentRequest || S.selected !== name) return;
-        if (rr.status !== 200 || !rr.body.record) return;
-        var actuals = {};
-        (rr.body.record.phases || []).forEach(function (p) {
-          (p.steps || []).forEach(function (s) {
-            if (!s.result) return;
-            actuals[s.stepId || s.id] = {
-              costUsd: s.result.costUsd || 0,
-              durationMs: typeof s.result.durationMs === "number" ? s.result.durationMs : null
-            };
-          });
-        });
-        S.stepActuals = actuals;
-        ST.render();
-      });
     }).catch(function () {});
   }
 
@@ -589,34 +572,17 @@
     return "—";
   }
 
-  function depsLabel(s) {
-    if (s.dependsOn && s.dependsOn.length) return "← " + s.dependsOn.join(", ");
-    if (s.cwd) return s.cwd;
+  function contextLabel(s) {
+    var bits = [];
+    if (s.dependsOn && s.dependsOn.length) bits.push("depends: " + s.dependsOn.join(", "));
+    if (s.cwd) bits.push("cwd: " + s.cwd);
+    if (bits.length) return bits.join(" · ");
     return "—";
   }
 
   function retryLabel(s, spec) {
     var r = s.retry || (spec && spec.retry);
     if (r && typeof r.retries === "number") return String(r.retries);
-    return "—";
-  }
-
-  /**
-   * Engine caching is uniform — agent-backed steps cache by default, gates and
-   * commands are free. There is no per-step cache field; the column states the
-   * engine's behavior rather than pretending a toggle exists.
-   */
-  function cacheLabel(s) {
-    var agentish = s.kind === "worker" || s.kind === "processor" || s.kind === "llm" ||
-      ((s.kind === "distributor" || s.kind === "consolidator") && (s.agent || s.model || s.modelClass));
-    return agentish ? "on" : "—";
-  }
-
-  function estLabel(s) {
-    var a = S.stepActuals && S.stepActuals[s.id];
-    if (!a) return "—";
-    if (a.costUsd > 0) return "$" + a.costUsd.toFixed(3);
-    if (typeof a.durationMs === "number") return ST.fmtElapsed(a.durationMs);
     return "—";
   }
 
@@ -709,10 +675,8 @@
     row.appendChild(idCell);
     row.appendChild(h("span", { class: "kindcell" }, kindPill(step.kind)));
     row.appendChild(h("span", { class: "runner", text: runnerLabel(step) }));
-    row.appendChild(h("span", { class: "deps", text: depsLabel(step) }));
+    row.appendChild(h("span", { class: "context", text: contextLabel(step), title: contextLabel(step) }));
     row.appendChild(h("span", { class: "num", text: retryLabel(step, spec) }));
-    row.appendChild(h("span", { class: "num" + (cacheLabel(step) === "on" ? " ok" : " dim"), text: cacheLabel(step) }));
-    row.appendChild(h("span", { class: "num est", text: estLabel(step) }));
     row.appendChild(h("span", { class: "chev", text: "›" }));
 
     row.addEventListener("click", function (e) {
@@ -845,11 +809,15 @@
     var d = draftIfDirty() || spec;
     var head = h("div", { class: "plan-gridhead" },
       h("span"), h("span"), h("span", { text: "Step" }), h("span", { text: "Kind" }),
-      h("span", { text: "Runner · model" }), h("span", { text: "Depends on / cwd" }),
-      h("span", { class: "num", text: "Retry" }), h("span", { class: "num", text: "Cache" }),
-      h("span", { class: "num", text: "Est." }), h("span")
+      h("span", { text: "Runner · model" }), h("span", {
+        text: "Context",
+        title: "Dependencies and working directory"
+      }),
+      h("span", { class: "num", text: "Retries" }), h("span")
     );
-    container.appendChild(head);
+    var viewport = h("div", { class: "plan-viewport" });
+    var grid = h("div", { class: "plan-grid" });
+    grid.appendChild(head);
     var scroll = h("div", { class: "plan-scroll" });
     (d.phases || []).forEach(function (p, i) { scroll.appendChild(phaseBand(d, p, i)); });
     if (!ro) {
@@ -859,7 +827,9 @@
       );
       scroll.appendChild(addPhaseRow);
     }
-    container.appendChild(scroll);
+    grid.appendChild(scroll);
+    viewport.appendChild(grid);
+    container.appendChild(viewport);
     container.appendChild(renderFooter(d));
   }
 
@@ -1206,8 +1176,7 @@
 
   // ---- inputs tab -------------------------------------------------------------
 
-  function renderInputsTab(container) {
-    var spec = S.spec;
+  function renderInputsTab(container, spec) {
     var ro = ST.isReadOnly();
     var box = h("div", { class: "inputs-tab" });
     box.appendChild(h("div", { class: "inputs-hint",
@@ -1241,16 +1210,26 @@
    * Park #input / #paramsPanel back in the (hidden) composer when the inputs
    * tab isn't showing, so no other surface ever finds them missing.
    */
-  function parkComposerNodes() {
+  function parkComposerNodes(force) {
     var compose = document.querySelector("#runRow .run-compose");
     if (!compose) return;
     var realInput = document.getElementById("input");
     var params = document.getElementById("paramsPanel");
-    if (S.planTab === "inputs" || S.runId || !S.spec) return;
+    if (!force && (S.planTab === "inputs" || S.runId || !S.spec)) return;
     if (realInput && realInput.parentElement !== compose) {
       compose.insertBefore(realInput, compose.querySelector("#paramsPanel"));
     }
     if (params && params.parentElement !== compose) compose.appendChild(params);
+  }
+
+  /**
+   * Move the shared composer controls to their stable parking spot before the
+   * destructive canvas render clears #bands. Without this handoff, an input
+   * textarea that was adopted by the Inputs tab is removed from the document
+   * before the next render can find and reparent it.
+   */
+  function prepareRender() {
+    parkComposerNodes(true);
   }
 
   // ---- dry-run result (renders into the plan tab) ----------------------------
@@ -1279,12 +1258,12 @@
     parkComposerNodes();
     var spec = draftIfDirty() || S.spec;
     var wrap = h("div", { class: "plan-root" });
-    wrap.appendChild(renderTabs(S.spec || spec));
+    wrap.appendChild(renderTabs(spec));
     var content = h("div", { class: "plan-content" });
     wrap.appendChild(content);
     if (S.dryRunPlan && S.planTab === "plan") renderDryResult(content);
     else if (S.planTab === "source") renderSourceTab(content);
-    else if (S.planTab === "inputs") renderInputsTab(content);
+    else if (S.planTab === "inputs") renderInputsTab(content, spec);
     else renderPlanTab(content, spec);
     stage.appendChild(wrap);
   }
@@ -1309,6 +1288,7 @@
     moveSelection: moveSelection,
     moveStep: moveStep,
     mutate: mutate,
+    prepareRender: prepareRender,
     renameStep: renameStep,
     render: render,
     rewriteStepRefs: rewriteStepRefs,
