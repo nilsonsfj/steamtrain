@@ -43,6 +43,25 @@ function flatSteps(spec: PlanSpec): FlatStep[] {
   return out;
 }
 
+/**
+ * Extract the source step id from a `forEach` value (`steps.<id>.items` or
+ * `<id>.items`). Mirrors `parseForEachSource` in workflow/types.ts — keep the
+ * regexes in sync (st-plan.js has a third copy).
+ */
+export function parsePlanForEachSource(source: string): string | undefined {
+  const explicit = /^steps\.(.+)\.items$/.exec(source);
+  if (explicit) return explicit[1];
+  const shorthand = /^(.+)\.items$/.exec(source);
+  return shorthand?.[1];
+}
+
+/** Rewrite a forEach value when its source step id changes. */
+function rewriteForEachRef(forEach: string, oldId: string, newId: string): string {
+  const source = parsePlanForEachSource(forEach);
+  if (source !== oldId) return forEach;
+  return forEach.startsWith("steps.") ? `steps.${newId}.items` : `${newId}.items`;
+}
+
 /** Rewrite every step-id reference in a draft when a step is renamed. */
 export function rewriteStepRefs(spec: PlanSpec, oldId: string, newId: string): void {
   for (const f of flatSteps(spec)) {
@@ -53,7 +72,7 @@ export function rewriteStepRefs(spec: PlanSpec, oldId: string, newId: string): v
     if (Array.isArray(f.step.from)) {
       f.step.from = f.step.from.map((ref) => (ref === oldId ? newId : ref));
     }
-    if (f.step.forEach === oldId) f.step.forEach = newId;
+    if (f.step.forEach) f.step.forEach = rewriteForEachRef(f.step.forEach, oldId, newId);
     const c = f.step.condition;
     if (c && c.step === oldId) c.step = newId;
     if (f.step.when && f.step.when.step === oldId) f.step.when.step = newId;
@@ -100,8 +119,17 @@ export function validatePlanStructure(spec: PlanSpec): { ok: boolean; errors: st
       if (s.condition?.step && !seen[s.condition.step]) {
         errors.push(`${s.id} condition references unknown step '${s.condition.step}'`);
       }
-      if (s.forEach && !seen[s.forEach]) {
-        errors.push(`${s.id} forEach references unknown step '${s.forEach}'`);
+      if (s.forEach) {
+        const sourceStepId = parsePlanForEachSource(s.forEach);
+        if (!sourceStepId) {
+          errors.push(`${s.id} has invalid forEach '${s.forEach}' (expected steps.<id>.items)`);
+        } else if (!seen[sourceStepId]) {
+          errors.push(`${s.id} forEach references unknown step '${sourceStepId}'`);
+        } else if ((phaseOf[sourceStepId] ?? -1) >= i) {
+          errors.push(
+            `${s.id} forEach references '${sourceStepId}', which is not in an earlier phase`,
+          );
+        }
       }
       (s.from || []).forEach((ref) => {
         if (!seen[ref]) errors.push(`${s.id} from references unknown step '${ref}'`);

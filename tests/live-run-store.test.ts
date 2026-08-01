@@ -257,7 +257,9 @@ describe("live-run publisher", () => {
       onReject: "stop",
       ts: Date.now(),
     });
-    await new Promise((r) => setTimeout(r, 60));
+    // Drain the publisher write chain (pendingApprovals meta + buffered events)
+    // instead of a fixed sleep — 60ms raced under CI load.
+    await publisher.flush();
     expect((await store.get("run"))?.pendingApprovals).toEqual([{ stepId: "gate", iteration: 1 }]);
     publisher.event({
       kind: "approval_resolved",
