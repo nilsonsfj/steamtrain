@@ -362,11 +362,14 @@ export class WorkflowRunManager {
 
   /**
    * The newest run of `workflow` that still retains unpruned step worktrees,
-   * and how many — the "discard the N trees from run XXXXX" hint under the
-   * launch sheet's Fresh-worktrees toggle, and the target of the prune the
-   * toggle arms. `null` when nothing is retained (or history is off).
+   * with the record — shared search for {@link lastKeptWorktrees} (the hint)
+   * and {@link pruneLastKeptWorktrees} (the prune), so the prune path doesn't
+   * re-fetch the record the search just loaded. `null` when nothing is
+   * retained (or history is off).
    */
-  async lastKeptWorktrees(workflow: string): Promise<{ runId: string; count: number } | null> {
+  private async findKeptWorktreeRecord(
+    workflow: string,
+  ): Promise<{ record: RunRecord; count: number } | null> {
     if (!this.historyStore) return null;
     // list() is newest-first: the first unpruned run with trees is the target.
     const summaries = await this.historyStore.list();
@@ -375,9 +378,19 @@ export class WorkflowRunManager {
       const record = await this.historyStore.get(summary.id);
       if (!record) continue;
       const count = finalRunWorktrees(record).length;
-      if (count > 0) return { runId: summary.id, count };
+      if (count > 0) return { record, count };
     }
     return null;
+  }
+
+  /**
+   * The newest run of `workflow` that still retains unpruned step worktrees,
+   * and how many — the "discard the N trees from run XXXXX" hint under the
+   * launch sheet's Fresh-worktrees toggle.
+   */
+  async lastKeptWorktrees(workflow: string): Promise<{ runId: string; count: number } | null> {
+    const found = await this.findKeptWorktreeRecord(workflow);
+    return found ? { runId: found.record.id, count: found.count } : null;
   }
 
   /**
@@ -388,11 +401,9 @@ export class WorkflowRunManager {
   private async pruneLastKeptWorktrees(workflow: string): Promise<void> {
     if (!this.historyStore) return;
     try {
-      const kept = await this.lastKeptWorktrees(workflow);
-      if (!kept) return;
-      const record = await this.historyStore.get(kept.runId);
-      if (!record) return;
-      await pruneRunWorktrees(this.historyStore, record);
+      const found = await this.findKeptWorktreeRecord(workflow);
+      if (!found) return;
+      await pruneRunWorktrees(this.historyStore, found.record);
     } catch {
       // deliberate: launch goes ahead even if the trees could not be discarded
     }

@@ -252,12 +252,16 @@ export class Orchestrator {
       return health?.status === "ok";
     };
     const bound = resolveWorkflowBindings(spec, { config: this.config, isReady });
+    // On a binding failure the raw spec is the fallback: issues then name the
+    // pinned agents rather than fallback targets — exactly the agents the
+    // dispatch gate would blame, so the prediction still matches the launch.
     const effective = bound.ok ? bound.spec : spec;
 
     const agentIssue = (agent: AgentInstanceId): string | undefined => {
       const instance = resolveAgentInstance(this.config, agent);
       if (!instance) return `${agent} is disabled or not configured`;
       const health = this.agentHealth(agent);
+      // No health ⇒ the doctor hasn't run ⇒ unknown is not a prediction.
       if (!health || health.status === "ok") return undefined;
       if (health.status === "not_authenticated") return `${agent} needs auth`;
       if (health.status === "binary_missing") return `${agent} is not installed`;

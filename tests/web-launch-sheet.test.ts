@@ -325,6 +325,19 @@ describe("POST /api/runs launch options", () => {
     expect(host.launched[0]!.maxConcurrency).toBe(2);
   });
 
+  it("accepts the MAX_CONCURRENCY boundary value of 16", async () => {
+    const { server, host } = makeServer();
+    const base = await start(server);
+    const res = await postJson(`${base}/api/runs`, {
+      workflow: launchSpec.name,
+      input: "fix the bug",
+      maxParallel: 16,
+    });
+    expect(res.status).toBe(201);
+    await waitFor(() => host.launched.length === 1);
+    expect(host.launched[0]!.maxConcurrency).toBe(16);
+  });
+
   it("leaves maxConcurrency to config when maxParallel is omitted", async () => {
     const { server, host } = makeServer();
     const base = await start(server);
