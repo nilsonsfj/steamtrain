@@ -23,6 +23,7 @@
   var permissionBadge = ST.permissionBadge;
   var pollLiveRuns = ST.pollLiveRuns;
   var reduce = ST.reduce;
+  var relTime = ST.relTime;
   var restoreDetailInvoker = ST.restoreDetailInvoker;
   var scheduleRender = ST.scheduleRender;
   var selectWorkflow = ST.selectWorkflow;
@@ -1249,15 +1250,44 @@
     }
   }
 
-  /** The header breadcrumb's run-state pill. */
+  /**
+   * The header breadcrumb's run-state pill and the muted context note beside
+   * it. Running/paused/complete while a run is attached; a grey "idle" pill
+   * with a "last run …" annotation (from the recent-runs list the plan editor
+   * already loads) when the cockpit is at rest. Hidden while a full-page
+   * surface (Runs/Settings) is up — those pages state their own context.
+   */
   function updateRunPill() {
     var pill = document.getElementById("runPill");
     if (!pill) return;
-    if (!(S.runState && S.runState.started)) {
+    var note = document.getElementById("contextNote");
+    var hide = function () {
       pill.style.display = "none";
       clear(pill);
+      if (note) { note.style.display = "none"; clear(note); }
+    };
+    if (S.page) { hide(); return; }
+    if (!(S.runState && S.runState.started)) {
+      if (!S.selected) { hide(); return; }
+      clear(pill);
+      pill.className = "status-pill idle";
+      pill.style.display = "inline-flex";
+      pill.appendChild(h("span", { class: "dot", "aria-hidden": "true" }));
+      pill.appendChild(document.createTextNode("idle"));
+      if (note) {
+        clear(note);
+        var last = S.recentRuns && S.recentRuns.length ? S.recentRuns[0] : null;
+        if (last) {
+          var ok = last.status !== "error" && last.status !== "canceled" && last.status !== "budget-exceeded";
+          note.textContent = "last run " + relTime(last.startedAt) + " · " + (ok ? "ok" : last.status);
+          note.style.display = "";
+        } else {
+          note.style.display = "none";
+        }
+      }
       return;
     }
+    if (note) { note.style.display = "none"; clear(note); }
     var done = Boolean(S.runState.done);
     clear(pill);
     pill.className = "status-pill " + (done ? "complete" : "running");

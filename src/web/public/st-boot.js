@@ -29,6 +29,9 @@
   function render() {
     // Focus and caret first: everything below can replace the focused node.
     var focusToken = ST.captureFocus();
+    // Topbar context (breadcrumb, nav active state) tracks the same state the
+    // stage renders — selection, attachment, page — so it rides this cycle.
+    ST.shell.renderCrumbs();
     renderStage();
     ST.restoreFocus(focusToken);
   }
@@ -122,6 +125,7 @@
     document.getElementById("input").addEventListener("input", function () { ST.run.clearPromptBrowse(); });
     document.getElementById("newWfBtn").addEventListener("click", ST.modals.openCreate);
     document.getElementById("homeBtn").addEventListener("click", function () { ST.goHome(); });
+    document.getElementById("workflowsBtn").addEventListener("click", function () { ST.goHome(); });
     document.getElementById("historyBtn").addEventListener("click", function () { ST.runs.open(); });
     document.getElementById("settingsBtn").addEventListener("click", function () { ST.settings.open(); });
     document.getElementById("editBtn").addEventListener("click", function () { ST.modals.openEditor(false); });

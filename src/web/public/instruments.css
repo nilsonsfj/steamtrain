@@ -1,5 +1,5 @@
 /* Right-hand instrument rail: Spend, Throughput, Runners, Worktrees, Event log.
-   #rail-right (shell.css) is already a 300px flex column; each `.inst` block
+   #rail-right (shell.css) is already a 340px flex column; each `.inst` block
    stacks inside it and `.eventlog` grows to fill the remainder. */
 
 .inst {

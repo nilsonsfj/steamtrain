@@ -732,6 +732,10 @@ window.Steamtrain = (function () {
     // class supplies `display: flex`, but an inline style always wins over it.
     pane.style.display = "";
     mount.render(pane, arg);
+    // The page swaps the breadcrumb's location segment and the nav's active
+    // button; idle, no cockpit render tick may fire to notice on its own.
+    ST.shell.renderCrumbs();
+    if (ST.run && ST.run.updateRunPill) ST.run.updateRunPill();
   }
 
   /** Restore the cockpit: reveal `.work` + both rails, hide every page mount. */
@@ -749,6 +753,8 @@ window.Steamtrain = (function () {
     var railRight = document.getElementById("rail-right");
     if (railLeft) railLeft.style.display = "";
     if (railRight) railRight.style.display = "";
+    ST.shell.renderCrumbs();
+    if (ST.run && ST.run.updateRunPill) ST.run.updateRunPill();
   }
 
   /** True when `hash` is Runs/Settings — not a cockpit return target. */
