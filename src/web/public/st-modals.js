@@ -1382,7 +1382,8 @@
         // the same screen, so there is no separate authoring mode to land on.
         selectWorkflow(name, function () {
           S.planTab = "plan";
-          var spec = ST.plan && ST.plan.draftIfDirty() ? ST.plan.draftIfDirty() : S.spec;
+          var draft = ST.plan ? ST.plan.draftIfDirty() : null;
+          var spec = draft || S.spec;
           var first = spec && spec.phases && spec.phases.length && spec.phases[0].steps.length
             ? spec.phases[0].steps[0]
             : null;

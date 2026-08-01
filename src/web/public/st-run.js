@@ -23,6 +23,7 @@
   var permissionBadge = ST.permissionBadge;
   var pollLiveRuns = ST.pollLiveRuns;
   var reduce = ST.reduce;
+  var relTime = ST.relTime;
   var restoreDetailInvoker = ST.restoreDetailInvoker;
   var scheduleRender = ST.scheduleRender;
   var selectWorkflow = ST.selectWorkflow;
@@ -1278,7 +1279,7 @@
         var last = S.recentRuns && S.recentRuns.length ? S.recentRuns[0] : null;
         if (last) {
           var ok = last.status !== "error" && last.status !== "canceled" && last.status !== "budget-exceeded";
-          note.textContent = "last run " + ST.relTime(last.startedAt) + " · " + (ok ? "ok" : last.status);
+          note.textContent = "last run " + relTime(last.startedAt) + " · " + (ok ? "ok" : last.status);
           note.style.display = "";
         } else {
           note.style.display = "none";

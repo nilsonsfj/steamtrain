@@ -805,6 +805,92 @@ describe("runs page: keyboard", () => {
   });
 });
 
+describe("runs page: the logs view", () => {
+  /** A record with output worth reading, a fan-out parent, and a silent step. */
+  function detailWithLogs(): Record<string, unknown> {
+    return {
+      ...record(),
+      phases: [
+        {
+          phaseId: "scan",
+          title: "Scan",
+          steps: [
+            {
+              stepId: "scan-logic",
+              status: "done",
+              cached: true,
+              result: { durationMs: 12_000, costUsd: 0.01, output: "scan output here" },
+            },
+            // Summarised by its children — listing the parent too would
+            // double the phase's output in the log.
+            { stepId: "fan-parent", status: "done", result: { childResults: [{}, {}] } },
+            { stepId: "silent-step", status: "done", result: {} },
+          ],
+        },
+        {
+          phaseId: "report",
+          title: "Report",
+          steps: [
+            {
+              stepId: "write-report",
+              status: "done",
+              result: { durationMs: 3000 },
+              text: "report body text",
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  it("offers Full receipt, Logs and Re-run in the drill-in footer", async () => {
+    const page = await mountRuns({ runs: [record()], detail: detailWithLogs() });
+    await page.clickRow(0);
+    const receipt = page.receipt();
+    expect(receipt).toContain("Full receipt");
+    expect(receipt).toContain("Logs");
+    expect(receipt).toContain("Re-run");
+    // Copy id moved out of the footer; it still lives in the full receipt.
+    expect(receipt).not.toContain("Copy id");
+  });
+
+  it("lays out every step's output in run order, skipping fan-out parents", async () => {
+    const page = await mountRuns({ runs: [record()], detail: detailWithLogs() });
+    await page.clickRow(0);
+    await page.clickButton("Logs");
+    expect(page.head()).toContain("logs · 8f21c");
+    const main = page.main();
+    expect(main).toContain("scan output here");
+    expect(main).toContain("report body text");
+    expect(main).toContain("No output captured");
+    // Three log sections — the fan-out parent is not one of them.
+    const heads = collect(page.root, (n) => hasClass(n, "runs-log-head"));
+    expect(heads).toHaveLength(3);
+    expect(heads.map((head) => flatText(head)).join(" ")).not.toContain("fan-parent");
+    // Scan's section precedes Report's.
+    expect(main.indexOf("scan output here")).toBeLessThan(main.indexOf("report body text"));
+  });
+
+  it("offers Copy all and a .txt download in the logs header", async () => {
+    const page = await mountRuns({ runs: [record()], detail: detailWithLogs() });
+    await page.clickRow(0);
+    await page.clickButton("Logs");
+    const buttons = collect(page.root, (n) => n.tag === "button").map((b) => flatText(b));
+    expect(buttons).toContain("Copy all");
+    expect(buttons).toContain("Download .txt");
+  });
+
+  it("returns to the list on Escape", async () => {
+    const page = await mountRuns({ runs: [record()], detail: detailWithLogs() });
+    await page.clickRow(0);
+    await page.clickButton("Logs");
+    expect(page.main()).toContain("scan output here");
+    expect(page.press("Escape")).toBe(true);
+    expect(page.main()).not.toContain("scan output here");
+    expect(page.rows()).toHaveLength(1);
+  });
+});
+
 describe("runs page layout", () => {
   // The header row and every data row must share one template or the columns
   // stop lining up with their own labels.

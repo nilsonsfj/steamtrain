@@ -104,7 +104,7 @@ ${styles}
     <button type="button" class="brand" id="homeBtn" title="Home" aria-label="Home"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark">steamtrain</span></button>
     <nav class="crumbs" id="crumbs" aria-label="Location"></nav>
     <span class="status-pill" id="runPill" style="display:none"></span>
-    <span class="context-note" id="contextNote" style="display:none"></span>
+    <span class="context-note" id="contextNote" style="display:none" aria-live="polite"></span>
     <span class="mode-badge" id="modeBadge" style="display:none" title="This session can view workflows and runs but cannot launch, edit, approve, or change config.">&#128065; read-only</span>
     <div class="topbar-right">
       <div class="health" id="health" role="group" aria-label="Agent health"></div>
