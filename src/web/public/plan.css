@@ -1175,6 +1175,7 @@
   border-top: 1px solid var(--border-quiet);
 }
 .ls-optcopy {
+  flex: 1 1 auto;
   min-width: 0;
 }
 .ls-opttitle {
@@ -1191,6 +1192,7 @@
 .ls-opt select {
   margin-left: auto;
   flex: none;
+  width: 56px;
   height: 28px;
   font: 400 12.5px / 1 var(--font-mono);
   color: var(--text);
