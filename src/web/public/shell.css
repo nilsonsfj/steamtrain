@@ -244,7 +244,7 @@ header .mode-badge {
   flex-direction: column;
 }
 #rail-right {
-  width: 300px;
+  width: 340px;
   flex: none;
   border-left: 1px solid var(--border);
   background: var(--surface);
