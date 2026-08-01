@@ -173,6 +173,23 @@
   }
 
   /**
+   * Extract the source step id from a `forEach` value (`steps.<id>.items` or
+   * `<id>.items`). Keep in sync with parsePlanForEachSource in plan-edit.ts
+   * and parseForEachSource in workflow/types.ts.
+   */
+  function parseForEachSource(source) {
+    var explicit = /^steps\.(.+)\.items$/.exec(source);
+    if (explicit) return explicit[1];
+    var shorthand = /^(.+)\.items$/.exec(source);
+    return shorthand ? shorthand[1] : undefined;
+  }
+
+  function rewriteForEachRef(forEach, oldId, newId) {
+    if (parseForEachSource(forEach) !== oldId) return forEach;
+    return forEach.indexOf("steps.") === 0 ? ("steps." + newId + ".items") : (newId + ".items");
+  }
+
+  /**
    * Client-side sanity checks for the footer's "plan valid" lamp. The server
    * re-validates with the real schema on save; these catch the structural
    * mistakes the plan editor itself can produce (dupes, dangling deps).
@@ -204,7 +221,16 @@
         if (s.condition && s.condition.step) {
           if (!seen[s.condition.step]) errors.push(s.id + " condition references unknown step '" + s.condition.step + "'");
         }
-        if (s.forEach && !seen[s.forEach]) errors.push(s.id + " forEach references unknown step '" + s.forEach + "'");
+        if (s.forEach) {
+          var sourceStepId = parseForEachSource(s.forEach);
+          if (!sourceStepId) {
+            errors.push(s.id + " has invalid forEach '" + s.forEach + "' (expected steps.<id>.items)");
+          } else if (!seen[sourceStepId]) {
+            errors.push(s.id + " forEach references unknown step '" + sourceStepId + "'");
+          } else if ((phaseOf[sourceStepId] === undefined ? -1 : phaseOf[sourceStepId]) >= i) {
+            errors.push(s.id + " forEach references '" + sourceStepId + "', which is not in an earlier phase");
+          }
+        }
         (s.from || []).forEach(function (ref) {
           if (!seen[ref]) errors.push(s.id + " from references unknown step '" + ref + "'");
         });
@@ -273,7 +299,7 @@
       if (Array.isArray(f.step.from)) {
         f.step.from = f.step.from.map(function (ref) { return ref === oldId ? newId : ref; });
       }
-      if (f.step.forEach === oldId) f.step.forEach = newId;
+      if (f.step.forEach) f.step.forEach = rewriteForEachRef(f.step.forEach, oldId, newId);
       // Gate/approval conditions and when-clauses reference steps by id.
       var c = f.step.condition;
       if (c && c.step === oldId) c.step = newId;
@@ -312,7 +338,10 @@
             s.from = s.from.filter(function (ref) { return !doomed[ref]; });
             if (!s.from.length) delete s.from;
           }
-          if (s.forEach && doomed[s.forEach]) delete s.forEach;
+          if (s.forEach) {
+            var feSrc = parseForEachSource(s.forEach);
+            if (feSrc && doomed[feSrc]) delete s.forEach;
+          }
           if (s.when && s.when.step && doomed[s.when.step]) delete s.when;
           if (s.condition && s.condition.step && doomed[s.condition.step]) delete s.condition;
         });
