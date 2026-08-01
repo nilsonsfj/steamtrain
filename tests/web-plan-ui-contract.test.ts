@@ -5,7 +5,11 @@ import { describe, expect, it } from "vitest";
 
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src", "web", "public");
 const bootJs = readFileSync(join(PUBLIC_DIR, "st-boot.js"), "utf8");
+const coreJs = readFileSync(join(PUBLIC_DIR, "st-core.js"), "utf8");
+const inspectorJs = readFileSync(join(PUBLIC_DIR, "st-inspector.js"), "utf8");
 const planJs = readFileSync(join(PUBLIC_DIR, "st-plan.js"), "utf8");
+const runJs = readFileSync(join(PUBLIC_DIR, "st-run.js"), "utf8");
+const runCss = readFileSync(join(PUBLIC_DIR, "run.css"), "utf8");
 const shellJs = readFileSync(join(PUBLIC_DIR, "st-shell.js"), "utf8");
 const planCss = readFileSync(join(PUBLIC_DIR, "plan.css"), "utf8");
 
@@ -57,6 +61,27 @@ describe("web plan and sidebar UI contracts", () => {
     expect(planJs).toMatch(/function prepareRender\(\)\s*\{\s*parkComposerNodes\(true\);\s*\}/);
     expect(planJs).toContain("prepareRender: prepareRender");
     expect(planJs).toContain("function renderInputsTab(container, spec)");
+  });
+
+  it("keeps live inspector status labels stable across timer ticks", () => {
+    expect(coreJs).toContain('getAttribute("data-since-prefix")');
+    expect(inspectorJs).toContain('"data-since-prefix": "running "');
+    expect(inspectorJs).toContain('text: "running " + ST.fmtElapsed');
+  });
+
+  it("preserves the outer canvas and expanded step-list scroll positions", () => {
+    expect(bootJs).toContain("function captureCanvasScroll(stage)");
+    expect(bootJs).toContain(".band-steps[data-scroll-key]");
+    expect(bootJs).toContain("position.follow ? stage.scrollHeight : position.top");
+    expect(runJs).toContain('"data-scroll-key": listKey');
+    expect(runJs).toContain("S.stepListScroll[listKey]");
+  });
+
+  it("connects sub-workflow details to their parent step", () => {
+    expect(runJs).toContain('class: "subwf-label", text: "inside"');
+    expect(runCss).toContain(".step-sub::before");
+    expect(runCss).toContain(".step-sub .subwf");
+    expect(runCss).toContain(".step-sub .subwf-body");
   });
 
   it("uses a horizontally scrollable shared grid for aligned headers and rows", () => {

@@ -512,14 +512,20 @@
     var running = s.status === "running";
     var cls = running ? "running" : s.status === "done" ? "done" : s.status === "error" ? "err" : "pending";
     var text = s.status;
-    if (running && s.startedAt) text = "running " + ST.fmtElapsed(Date.now() - s.startedAt);
-    if (s.cached) text += " · cached";
-    if (s.result && s.result.skipped) text += " · skipped";
-    var pill = h("span", { class: "insp-status " + cls },
-      running ? h("i", { class: "pulse" }) : null, text);
+    var suffix = "";
+    var liveTimer = null;
     if (running && s.startedAt) {
-      pill.setAttribute("data-since", String(s.startedAt));
+      liveTimer = h("span", {
+        class: "status-elapsed",
+        "data-since": String(s.startedAt),
+        "data-since-prefix": "running ",
+        text: "running " + ST.fmtElapsed(Date.now() - s.startedAt)
+      });
     }
+    if (s.cached) suffix += " · cached";
+    if (s.result && s.result.skipped) suffix += " · skipped";
+    var pill = h("span", { class: "insp-status " + cls },
+      running ? h("i", { class: "pulse" }) : null, liveTimer || text, suffix);
     return pill;
   }
 

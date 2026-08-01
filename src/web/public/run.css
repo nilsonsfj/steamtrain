@@ -587,9 +587,27 @@ textarea#input:focus {
   padding: 12px 18px;
   border-bottom: 1px solid var(--border-quiet);
 }
-/* "What runs inside" for a sub-workflow call step, hung off its row. */
+/* "What runs inside" for a sub-workflow call step, connected to its row. */
 .step-sub {
-  padding: 0 18px 8px 44px;
+  position: relative;
+  margin: -1px 18px 8px 44px;
+  padding: 0 0 0 14px;
+}
+.step-sub::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: -8px;
+  bottom: 8px;
+  border-left: 1px solid var(--border-strong);
+}
+.step-sub::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 14px;
+  width: 9px;
+  border-top: 1px solid var(--border-strong);
 }
 
 /* ---- live output pane ---------------------------------------------------- */
@@ -1050,6 +1068,9 @@ textarea#input:focus {
   overflow: hidden;
 }
 .subwf > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   cursor: pointer;
   list-style: none;
   padding: 5px 8px;
@@ -1064,11 +1085,68 @@ textarea#input:focus {
   display: none;
 }
 .subwf > summary::before {
-  content: "▸ ";
+  content: "▸";
+  flex: none;
   color: var(--muted);
 }
 .subwf[open] > summary::before {
-  content: "▾ ";
+  content: "▾";
+}
+.subwf-label {
+  flex: none;
+  color: var(--dim);
+  font: 600 9px / 1 var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.subwf-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+.subwf-count,
+.subwf-state {
+  flex: none;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.subwf-overrides {
+  flex: none;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.subwf-sum .subwf-target {
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* In the live step list this is a child row, not another floating card. The
+   connector and quiet background make the expansion belong to its call step. */
+.step-sub .subwf {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+.step-sub .subwf > summary {
+  padding: 5px 8px 5px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border-quiet);
+  border-radius: 0;
+  background: rgba(74, 163, 255, 0.035);
+}
+.step-sub .subwf > summary:hover {
+  background: rgba(74, 163, 255, 0.08);
+}
+.step-sub .subwf-body {
+  margin-left: 12px;
+  border-top: 0;
+  border-left: 1px solid var(--border-quiet);
+  padding: 4px 0;
 }
 .subwf-body {
   border-top: 1px solid var(--border);
