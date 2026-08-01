@@ -214,3 +214,93 @@ describe("Orchestrator", () => {
     expect(orch.getConfig()).toBe(config);
   });
 });
+
+describe("Orchestrator.stepDispatchIssues", () => {
+  const agentSpec = (agent: string): WorkflowSpec => ({
+    name: "issues-demo",
+    phases: [
+      {
+        id: "p1",
+        title: "Phase 1",
+        steps: [{ id: "s1", agent, model: "m", prompt: "{{input}}" }],
+      },
+    ],
+  });
+
+  const doctorWith = (status: DoctorResult["status"]): DoctorResult[] => [
+    { agent: "opencode", provider: "opencode", status, binary: "opencode", message: status },
+  ];
+
+  it("reports a runner that needs auth", () => {
+    const orch = new Orchestrator(
+      makeConfig(),
+      makeWorkspaces("ws1"),
+      doctorWith("not_authenticated"),
+      makeCatalog(),
+    );
+    expect(orch.stepDispatchIssues(agentSpec("opencode"))).toEqual([
+      { stepId: "s1", issue: "opencode needs auth" },
+    ]);
+  });
+
+  it("reports a missing runner binary", () => {
+    const orch = new Orchestrator(
+      makeConfig(),
+      makeWorkspaces("ws1"),
+      doctorWith("binary_missing"),
+      makeCatalog(),
+    );
+    expect(orch.stepDispatchIssues(agentSpec("opencode"))).toEqual([
+      { stepId: "s1", issue: "opencode is not installed" },
+    ]);
+  });
+
+  it("reports an agent that is disabled or not configured", () => {
+    // A pinned agent with no instance at all: binding resolution fails, so the
+    // issue is reported against the original spec.
+    const orch = new Orchestrator(
+      makeConfig(),
+      makeWorkspaces("ws1"),
+      [healthyDoctor("opencode")],
+      makeCatalog(),
+    );
+    expect(orch.stepDispatchIssues(agentSpec("ghost"))).toEqual([
+      { stepId: "s1", issue: "ghost is disabled or not configured" },
+    ]);
+  });
+
+  it("reports an llm step whose API key is missing, and clears it once set", () => {
+    const keyVar = "ST_LAUNCH_TEST_NO_SUCH_KEY";
+    delete process.env[keyVar];
+    const spec: WorkflowSpec = {
+      name: "llm-issues-demo",
+      phases: [
+        {
+          id: "p1",
+          title: "Phase 1",
+          steps: [{ id: "infer", kind: "llm", prompt: "x", model: "m", apiKeyEnv: keyVar }],
+        },
+      ],
+    };
+    const orch = new Orchestrator(makeConfig(), makeWorkspaces("ws1"), [], makeCatalog());
+    expect(orch.stepDispatchIssues(spec)).toEqual([
+      { stepId: "infer", issue: `needs an API key in ${keyVar}` },
+    ]);
+    process.env[keyVar] = "sk-test";
+    try {
+      expect(orch.stepDispatchIssues(spec)).toEqual([]);
+    } finally {
+      delete process.env[keyVar];
+    }
+  });
+
+  it("returns no issues when every runner is healthy", () => {
+    const orch = new Orchestrator(
+      makeConfig(),
+      makeWorkspaces("ws1"),
+      [healthyDoctor("opencode")],
+      makeCatalog(),
+    );
+    expect(orch.stepDispatchIssues(agentSpec("opencode"))).toEqual([]);
+  });
+});

@@ -1552,6 +1552,9 @@ async function handle(
         worktrees,
         runners: {
           ready: doctor.filter((d) => d.status === "ok").length,
+          // The CONFIGURED cap: the sheet prefills its dropdown with it before
+          // the user picks. A per-run choice arrives later on POST /api/runs
+          // as maxParallel, so this is never the final word for a given run.
           limit: deps.config?.maxConcurrency ?? DEFAULT_CONFIG.maxConcurrency!,
         },
       };

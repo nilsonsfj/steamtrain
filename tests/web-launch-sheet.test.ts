@@ -337,12 +337,13 @@ describe("POST /api/runs launch options", () => {
     expect(host.launched[0]!.maxConcurrency).toBeUndefined();
   });
 
-  it("freshWorktrees launches even when the prune cannot succeed", async () => {
-    // Retained worktrees with roots that do not exist: the prune fails, but
-    // the run must go ahead anyway (best effort, never blocks the launch).
+  it("freshWorktrees prunes the previous run's trees and launches regardless", async () => {
+    // Retained worktrees with roots that do not exist: every git call fails,
+    // yet the record is still marked pruned and the run goes ahead (best
+    // effort, never blocks the launch).
     const history = createInMemoryHistoryStore();
     await history.save(keptWorktreeRecord("run-kept", 1000, ["scan", "report"]));
-    const { server, host } = makeServer({ history });
+    const { server, host, runs } = makeServer({ history });
     const base = await start(server);
     const res = await postJson(`${base}/api/runs`, {
       workflow: launchSpec.name,
@@ -350,7 +351,13 @@ describe("POST /api/runs launch options", () => {
       freshWorktrees: true,
     });
     expect(res.status).toBe(201);
+    // The prune is awaited before the engine starts, so by the time the host
+    // has been called the record's prune bookkeeping is done too.
     await waitFor(() => host.launched.length === 1);
+    const record = await history.get("run-kept");
+    expect(record?.harvest?.prunedAt).toEqual(expect.any(Number));
+    // And the pruned run is no longer a kept-worktrees target.
+    expect(await runs.lastKeptWorktrees(launchSpec.name)).toBeNull();
   });
 });
 

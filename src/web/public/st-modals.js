@@ -1574,7 +1574,9 @@
     // Per-run cap on parallel steps — the engine's MAX_CONCURRENCY is 16.
     // 0 in lo.maxParallel means "unset": the run uses the config default, so
     // nothing is sent; the select still shows that default once the plan's
-    // `launch.runners.limit` arrives.
+    // `launch.runners.limit` arrives. The `|| 5` placeholder is
+    // DEFAULT_CONFIG.maxConcurrency, so the sheet never shows a value the run
+    // would not actually use.
     var parallelOpts = [];
     for (var pn = 1; pn <= 16; pn++) parallelOpts.push({ value: String(pn), label: String(pn) });
     var parallelSel = selectEl(parallelOpts, String(lo.maxParallel || 5), function () {
