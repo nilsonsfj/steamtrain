@@ -12,6 +12,7 @@
   var aggregateByModel = ST.aggregateByModel;
   var api = ST.api;
   var apiAuth = ST.apiAuth;
+  var attachRun = ST.attachRun;
   var clear = ST.clear;
   var emptyTokens = ST.emptyTokens;
   var fmtElapsed = ST.fmtElapsed;
@@ -1366,6 +1367,41 @@
     ST.modals.openLaunchSheet();
   }
 
+  var LAUNCH_RECONCILE_WINDOW_MS = 30 * 1000;
+
+  /**
+   * A POST can commit the run and still reject in the browser if its response
+   * is lost. Only reconcile a recent, still-live run with the exact launch
+   * identity; never attach an older or completed run with the same prompt.
+   */
+  function findRecentLiveLaunch(runs, workflow, input, launchedAt) {
+    var expectedInput = input.trim();
+    var matches = (runs || []).filter(function (run) {
+      return run &&
+        run.external !== true &&
+        (run.status === "running" || run.status === "queued") &&
+        run.workflow === workflow &&
+        run.input === expectedInput &&
+        typeof run.startedAt === "number" &&
+        run.startedAt >= launchedAt - LAUNCH_RECONCILE_WINDOW_MS;
+    });
+    matches.sort(function (a, b) { return b.startedAt - a.startedAt; });
+    return matches[0] || null;
+  }
+
+  function reconcileLaunch(workflow, input, launchedAt) {
+    return api("GET", "/api/runs").then(function (r) {
+      if (!r || r.status !== 200 || !r.body || !Array.isArray(r.body.runs)) return null;
+      return findRecentLiveLaunch(r.body.runs, workflow, input, launchedAt);
+    });
+  }
+
+  function showLaunchFailure() {
+    setBanner("could not start run: network error", "err");
+    setRunning(false);
+    ST.render();
+  }
+
   /**
    * The actual launch, parameterized by the launch sheet. `opts.spec` is the
    * full run spec (draft + deselections + budget cap); `opts.fresh` ignores
@@ -1424,6 +1460,7 @@
     var listItem = wfListItem(S.selected);
     var rerouted = Boolean(listItem && listItem.blocked && listItem.reroute);
     if (rerouted) payload.reroute = true;
+    var launchedAt = Date.now();
     apiAuth("POST", "/api/runs", payload)
       .then(function (r) {
         if (r.status !== 201) {
@@ -1450,9 +1487,15 @@
         if (opts.detach) detachRun();
       })
       .catch(function () {
-        setBanner("could not start run: network error", "err");
-        setRunning(false);
-        ST.render();
+        reconcileLaunch(payload.workflow, input, launchedAt)
+          .then(function (run) {
+            if (run) {
+              attachRun(run);
+              return;
+            }
+            showLaunchFailure();
+          })
+          .catch(showLaunchFailure);
       });
   }
 
