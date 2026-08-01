@@ -185,13 +185,10 @@ window.Steamtrain = (function () {
     sourceDiverged: false,
     // Step id the source view should scroll to / highlight (plan → source sync).
     sourceReveal: null,
-    // Recent completed runs of the selected workflow (rail footer + per-step
-    // "last run" estimates in the plan grid). Fetched on selection.
+    // Recent completed runs of the selected workflow (rail footer and header
+    // context). Fetched on selection.
     recentRuns: [],
     recentRunsFor: null,
-    // Per-step actuals from the newest completed run of the selected workflow:
-    // { stepId: { costUsd, durationMs } } — the plan grid's "Est." column.
-    stepActuals: {},
     // Launch-sheet options, remembered across opens.
     launchOptions: { reuseCache: true, freshWorktrees: false, detach: false, budget: "", maxParallel: 0 },
     // Dry-run (plan) result shown inside the plan tab until dismissed.

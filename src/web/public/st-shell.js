@@ -83,7 +83,7 @@
   }
 
   function groupHeading(source, count) {
-    var label = source === "project" ? "Project" : source === "user" ? "User" : "Workflows";
+    var label = source === "project" ? "Project" : source === "user" ? "User" : "Bundled";
     return h("div", { class: "wf-group" },
       h("span", { class: "rail-label", text: label }),
       h("span", { class: "rail-count", text: String(count) }));
@@ -95,17 +95,15 @@
     var count = document.getElementById("wfCount");
     if (!box) return;
     clear(box);
-    // groupWorkflowsBySource orders project, user, bundled (folder-panel
-    // convention); the rail wants bundled first with no heading, so re-rank.
-    var RAIL_ORDER = { bundled: 0, user: 1, project: 2 };
+    // Keep project-specific workflows closest to the project, followed by
+    // user workflows and finally the read-only bundled catalog.
+    var RAIL_ORDER = { project: 0, user: 1, bundled: 2 };
     var groups = groupWorkflowsBySource(S.workflows).slice().sort(function (a, b) {
       return RAIL_ORDER[a.source] - RAIL_ORDER[b.source];
     });
     if (count) count.textContent = String(S.workflows.length);
-    // Bundled workflows sit directly under the "Workflows" rail head with no
-    // extra heading; user and project workflows each get their own group.
     groups.forEach(function (group) {
-      if (group.source !== "bundled") box.appendChild(groupHeading(group.source, group.entries.length));
+      box.appendChild(groupHeading(group.source, group.entries.length));
       group.entries.forEach(function (w) { box.appendChild(workflowRow(w)); });
     });
   }

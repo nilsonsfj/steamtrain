@@ -38,6 +38,9 @@
 
   function renderStage() {
     var stage = document.getElementById("bands");
+    // The Inputs tab adopts the shared composer controls into #bands. Return
+    // them to their stable parking spot before clearing that destructive mount.
+    if (ST.plan && ST.plan.prepareRender) ST.plan.prepareRender();
     clear(stage);
     var railRight = document.getElementById("rail-right");
     if (railRight) {

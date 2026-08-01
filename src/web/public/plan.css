@@ -170,10 +170,29 @@
 .plan-gridhead,
 .plan-row {
   display: grid;
-  grid-template-columns: 22px 14px 156px 96px 176px 1fr 54px 58px 70px 22px;
+  grid-template-columns: 22px 14px minmax(132px, 1.2fr) 90px minmax(140px, 1.2fr) minmax(
+      180px,
+      1.5fr
+    ) 58px 22px;
   align-items: center;
   gap: 12px;
   padding: 6px 18px;
+  box-sizing: border-box;
+}
+
+.plan-viewport {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.plan-grid {
+  display: flex;
+  flex-direction: column;
+  min-width: 780px;
+  min-height: 100%;
 }
 
 .plan-gridhead {
@@ -185,6 +204,12 @@
   text-transform: uppercase;
   color: var(--dim);
 }
+.plan-gridhead > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .plan-gridhead .num {
   text-align: right;
 }
@@ -193,6 +218,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .plan-phase {
@@ -286,12 +312,19 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.plan-row .kindcell {
+  min-width: 0;
+  overflow: hidden;
+}
+.plan-row .kindcell .pk {
+  white-space: nowrap;
+}
 .plan-row .runner {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.plan-row .deps {
+.plan-row .context {
   color: var(--dim);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -300,12 +333,6 @@
 .plan-row .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
-}
-.plan-row .num.ok {
-  color: var(--done);
-}
-.plan-row .num.dim {
-  color: var(--dim);
 }
 .plan-row .chev {
   color: var(--faint);
