@@ -1404,6 +1404,11 @@
       input: input,
       fresh: opts.fresh === true
     };
+    // Launch-sheet options with server-side effects (02.2): fresh worktrees
+    // discards the previous run's retained trees before starting; maxParallel
+    // overrides the configured step concurrency for this run only.
+    if (opts.freshWorktrees === true) payload.freshWorktrees = true;
+    if (typeof opts.maxParallel === "number" && opts.maxParallel > 0) payload.maxParallel = opts.maxParallel;
     var params = collectParams();
     if (params) payload.params = params;
     if (opts.spec) {

@@ -4,7 +4,7 @@ import {
   createAdapter,
   resolveAgentInstance,
 } from "../agents";
-import { workflowLlmApiIssues } from "../apis";
+import { resolveLlmStepApi, workflowLlmApiIssues } from "../apis";
 import { DEFAULT_CONFIG, type SteamtrainConfig } from "../config";
 import type { DoctorResult } from "../doctor";
 import type { AgentEvent, AgentInstanceId } from "../types/events";
@@ -17,6 +17,7 @@ import {
   type WorkflowSourceKind,
   type WorkflowSpec,
   createGitWorktreeManager,
+  isAgentBackedStep,
   planAgentReroute,
   planRetryRetarget,
   resolveStepTimeoutSec,
@@ -26,6 +27,7 @@ import {
   timeoutMsFromSec,
   validateWorkflow,
   workflowAgentIds,
+  workflowLlmSteps,
   workflowPermissionPreflight,
 } from "../workflow";
 import type { PlanRerouteOptions, PlanRerouteResult } from "../workflow";
@@ -231,6 +233,63 @@ export class Orchestrator {
   }
 
   /**
+   * Per-step dispatch readiness: the same gates as
+   * {@link canDispatchWorkflowSpec}, but reported per step instead of per
+   * workflow, so the launch sheet can strike through exactly the steps whose
+   * runner is unavailable (or whose llm API key is missing) before the run is
+   * started. Steps are judged on the BOUND spec when bindings resolve, so a
+   * step remapped onto a ready agent by fallback reads clean — matching what
+   * the engine will actually dispatch. Returns `[]` while the doctor has not
+   * run (unknown health is not a prediction); callers gate on doctor readiness
+   * the same way the workflow catalog does.
+   */
+  stepDispatchIssues(spec: WorkflowSpec): Array<{ stepId: string; issue: string }> {
+    const issues: Array<{ stepId: string; issue: string }> = [];
+    const isReady = (agent: AgentInstanceId): boolean => {
+      const instance = resolveAgentInstance(this.config, agent);
+      if (!instance) return false;
+      const health = this.agentHealth(agent);
+      return health?.status === "ok";
+    };
+    const bound = resolveWorkflowBindings(spec, { config: this.config, isReady });
+    // On a binding failure the raw spec is the fallback: issues then name the
+    // pinned agents rather than fallback targets — exactly the agents the
+    // dispatch gate would blame, so the prediction still matches the launch.
+    const effective = bound.ok ? bound.spec : spec;
+
+    const agentIssue = (agent: AgentInstanceId): string | undefined => {
+      const instance = resolveAgentInstance(this.config, agent);
+      if (!instance) return `${agent} is disabled or not configured`;
+      const health = this.agentHealth(agent);
+      // No health ⇒ the doctor hasn't run ⇒ unknown is not a prediction.
+      if (!health || health.status === "ok") return undefined;
+      if (health.status === "not_authenticated") return `${agent} needs auth`;
+      if (health.status === "binary_missing") return `${agent} is not installed`;
+      return `${agent} failed its health check`;
+    };
+
+    for (const phase of effective.phases) {
+      for (const step of phase.steps) {
+        if (isAgentBackedStep(step) && typeof step.agent === "string") {
+          const issue = agentIssue(step.agent);
+          if (issue) issues.push({ stepId: step.id, issue });
+        }
+      }
+    }
+    // Direct-inference llm steps need no doctor pass — their readiness is
+    // local (instance resolves, enabled, model known, key env var set).
+    for (const step of workflowLlmSteps(effective)) {
+      const resolved = resolveLlmStepApi(step, this.config);
+      if (!resolved.ok) {
+        issues.push({ stepId: step.id, issue: resolved.error });
+      } else if (!resolved.keyless && !process.env[resolved.apiKeyEnv]) {
+        issues.push({ stepId: step.id, issue: `needs an API key in ${resolved.apiKeyEnv}` });
+      }
+    }
+    return issues;
+  }
+
+  /**
    * Non-blocking permission notes for a workflow (profiles running unenforced
    * by opt-in, or only partially enforced). Surfaced next to the dispatch state
    * in the preview/launch surfaces so "read-only" never quietly means less than
@@ -294,6 +353,11 @@ export class Orchestrator {
     approval?: ApprovalProvider,
     control?: WorkflowRunControl,
     humanInput?: HumanInputProvider,
+    /**
+     * Per-run override of the configured `maxConcurrency` (the launch sheet's
+     * "Max parallel runners"). Falls back to config, then the default.
+     */
+    maxConcurrency?: number,
   ): AsyncIterable<WorkflowEvent> {
     const spec = specOverride ?? this.listWorkflows()[name];
     if (!spec) throw new Error(`unknown workflow '${name}'`);
@@ -306,7 +370,8 @@ export class Orchestrator {
         binaries: this.config.binaries,
         agentConfig: this.config,
         stepTimeoutSec: resolveStepTimeoutSec(undefined, undefined, this.config),
-        maxConcurrency: this.config.maxConcurrency ?? DEFAULT_CONFIG.maxConcurrency!,
+        maxConcurrency:
+          maxConcurrency ?? this.config.maxConcurrency ?? DEFAULT_CONFIG.maxConcurrency!,
         cwd,
         agentWorkspace: createGitWorktreeManager(),
         loopMaxIterations: this.config.loopMaxIterations,

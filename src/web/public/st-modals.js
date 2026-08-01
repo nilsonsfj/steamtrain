@@ -1476,7 +1476,10 @@
     }
 
     // -- left: the will-execute checklist, grouped by phase --------------------
+    // stepNotes keeps each row's note span so launch predictions (applied when
+    // the plan endpoint answers) can annotate rows after render.
     var list = h("div", { class: "ls-steps" });
+    var stepNotes = {};
     (base.phases || []).forEach(function (p, pi) {
       list.appendChild(h("div", { class: "ls-phase" },
         h("span", { class: "ls-pidx", text: String(pi + 1).padStart(2, "0") }),
@@ -1494,11 +1497,13 @@
         else if (s.kind === "approval") note = "waits for approval";
         else if (s.kind === "workflow") note = "sub-workflow → " + s.workflow;
         else if (s.loopTo) note = "loop → " + s.loopTo;
+        var noteEl = h("span", { class: "ls-note", text: note || "" });
         var row = h("label", { class: "ls-step" + (locked[s.id] ? " locked" : "") + (box.checked ? "" : " off") },
           box,
           h("span", { class: "ls-sid", text: s.id }),
-          h("span", { class: "ls-note", text: note || "" })
+          noteEl
         );
+        stepNotes[s.id] = { row: row, noteEl: noteEl, base: note };
         box.addEventListener("change", function () {
           checked[s.id] = box.checked;
           row.classList.toggle("off", !box.checked);
@@ -1537,6 +1542,8 @@
     );
 
     // -- right: options + warnings + estimate ----------------------------------
+    // toggle() returns the row plus a setHint() so launch predictions (which
+    // arrive async from the plan endpoint) can rewrite a hint after render.
     function toggle(labelText, hint, on, warn, onFlip) {
       var btn = h("button", {
         class: "ls-toggle" + (on ? " on" : ""), type: "button", role: "switch",
@@ -1548,27 +1555,88 @@
         btn.setAttribute("aria-checked", on ? "true" : "false");
         onFlip(on);
       });
-      return h("div", { class: "ls-opt" },
+      var hintEl = h("div", { class: "ls-opthint" + (warn ? " warn" : ""), text: hint });
+      var el = h("div", { class: "ls-opt" },
         h("div", { class: "ls-optcopy" },
           h("div", { class: "ls-opttitle", text: labelText }),
-          h("div", { class: "ls-opthint" + (warn ? " warn" : ""), text: hint })),
+          hintEl),
         btn);
+      return { el: el, setHint: function (text, isWarn) { hintEl.textContent = text; hintEl.classList.toggle("warn", !!isWarn); } };
     }
 
     var budgetInput = h("input", { class: "txt ls-budget", type: "text", placeholder: "no cap",
       value: lo.budget || (base.maxCostUsd ? String(base.maxCostUsd) : "") });
     budgetInput.addEventListener("input", function () { lo.budget = budgetInput.value; });
 
+    var freshTgl = toggle("Fresh worktrees", "checking for retained worktrees…", lo.freshWorktrees, false, function (v) { lo.freshWorktrees = v; });
+    var reuseTgl = toggle("Reuse cached step results", "matching steps replay their last result instead of re-running", lo.reuseCache, false, function (v) { lo.reuseCache = v; applyPredictions(); });
+
+    // Per-run cap on parallel steps — the engine's MAX_CONCURRENCY is 16.
+    // 0 in lo.maxParallel means "unset": the run uses the config default, so
+    // nothing is sent; the select still shows that default once the plan's
+    // `launch.runners.limit` arrives. The `|| 5` placeholder is
+    // DEFAULT_CONFIG.maxConcurrency, so the sheet never shows a value the run
+    // would not actually use.
+    var parallelOpts = [];
+    for (var pn = 1; pn <= 16; pn++) parallelOpts.push({ value: String(pn), label: String(pn) });
+    var parallelSel = selectEl(parallelOpts, String(lo.maxParallel || 5), function () {
+      lo.maxParallel = Number(parallelSel.value);
+    });
+    var parallelHint = h("div", { class: "ls-opthint", text: "steps in a phase run at once, up to this" });
+    var parallelOpt = h("div", { class: "ls-opt" },
+      h("div", { class: "ls-optcopy" },
+        h("div", { class: "ls-opttitle", text: "Max parallel runners" }),
+        parallelHint),
+      parallelSel);
+
     var optsBox = h("div", { class: "ls-opts" },
       h("div", { class: "ls-label", text: "Options" }),
-      toggle("Reuse cached step results", "matching steps replay their last result instead of re-running", lo.reuseCache, false, function (v) { lo.reuseCache = v; }),
-      toggle("Detach after start", "the run continues in a background process if this window closes", lo.detach, false, function (v) { lo.detach = v; }),
+      freshTgl.el,
+      reuseTgl.el,
+      parallelOpt,
+      toggle("Detach after start", "the run continues in a background process if this window closes", lo.detach, false, function (v) { lo.detach = v; }).el,
       h("div", { class: "ls-opt" },
         h("div", { class: "ls-optcopy" },
           h("div", { class: "ls-opttitle", text: "Budget cap" }),
           h("div", { class: "ls-opthint", text: "stops scheduling new steps when spend reaches this (USD)" })),
         budgetInput)
     );
+
+    // -- launch predictions (02.2) ----------------------------------------------
+    // `pred` is the plan endpoint's `launch` block: cachedSteps, stepIssues
+    // (steps that would block dispatch), the retained worktrees the Fresh
+    // toggle would discard, and runner readiness. Applied when it lands and
+    // re-applied when the reuse toggle flips (cached notes come and go).
+    var pred = null;
+    function applyPredictions() {
+      var issues = {};
+      var cached = {};
+      if (pred) {
+        (pred.stepIssues || []).forEach(function (i) { issues[i.stepId] = i.issue; });
+        (pred.cachedSteps || []).forEach(function (id) { cached[id] = true; });
+      }
+      Object.keys(stepNotes).forEach(function (id) {
+        var ent = stepNotes[id];
+        var note = ent.base;
+        ent.row.classList.remove("blocked", "cached");
+        if (issues[id]) { note = issues[id]; ent.row.classList.add("blocked"); }
+        else if (cached[id] && lo.reuseCache) { note = "cached — replayed, not re-run"; ent.row.classList.add("cached"); }
+        ent.noteEl.textContent = note || "";
+      });
+      if (!pred) return;
+      var wt = pred.worktrees;
+      freshTgl.setHint(wt
+        ? "discard the " + wt.count + " tree" + (wt.count === 1 ? "" : "s") + " from run " + String(wt.runId).slice(0, 5)
+        : "no retained worktrees to discard", false);
+      var n = (pred.cachedSteps || []).length;
+      reuseTgl.setHint(lo.reuseCache && n
+        ? n + " step" + (n === 1 ? "" : "s") + " would be reused, not re-run"
+        : "matching steps replay their last result instead of re-running", lo.reuseCache && n > 0);
+      if (pred.runners) {
+        parallelHint.textContent = pred.runners.ready + " runner" + (pred.runners.ready === 1 ? "" : "s") + " ready";
+        if (!lo.maxParallel) parallelSel.value = String(pred.runners.limit);
+      }
+    }
 
     var edits = ST.plan.dirtySummary();
     if (edits.length) {
@@ -1626,6 +1694,8 @@
     apiAuth("POST", "/api/workflows/" + encodeURIComponent(S.selected) + "/plan", planPayload).then(function (r) {
       if (!document.getElementById("modal")) return; // sheet already closed
       if (r.status !== 200) { estimateEl.textContent = "no estimate — " + ((r.body && r.body.error) || "plan failed"); return; }
+      pred = r.body.launch || null;
+      applyPredictions();
       var hist = r.body.history;
       if (hist && hist.runs) {
         estimateEl.textContent = "estimate $" + hist.minCostUsd.toFixed(3) + "–" + hist.maxCostUsd.toFixed(3) +
@@ -1645,6 +1715,8 @@
       ST.run.launchRun({
         spec: runSpec,
         fresh: !lo.reuseCache,
+        freshWorktrees: lo.freshWorktrees,
+        maxParallel: lo.maxParallel,
         detach: lo.detach
       });
     }
