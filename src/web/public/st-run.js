@@ -1375,7 +1375,7 @@
    * identity; never attach an older or completed run with the same prompt.
    */
   function findRecentLiveLaunch(runs, workflow, input, launchedAt) {
-    var expectedInput = input.trim();
+    var expectedInput = input;
     var matches = (runs || []).filter(function (run) {
       return run &&
         run.external !== true &&
@@ -1412,8 +1412,8 @@
   function launchRun(opts) {
     opts = opts || {};
     if (isReadOnly()) { setBanner("This session is read-only — viewing only.", "info"); return; }
-    var input = document.getElementById("input").value;
-    if (!input.trim()) { setBanner("enter some input first", "info"); return; }
+    var input = document.getElementById("input").value.trim();
+    if (!input) { setBanner("enter some input first", "info"); return; }
     recordPromptHistory(input);
     // Validate param fields before submission (even when the panel is collapsed).
     if (!validateParamsForm()) return;
@@ -1487,6 +1487,7 @@
         if (opts.detach) detachRun();
       })
       .catch(function () {
+        if (S.runId) return;
         reconcileLaunch(payload.workflow, input, launchedAt)
           .then(function (run) {
             if (run) {
@@ -2017,6 +2018,7 @@
     closeDetail: closeDetail,
     detachRun: detachRun,
     effectiveSpec: effectiveSpec,
+    findRecentLiveLaunch: findRecentLiveLaunch,
     flushStaged: flushStaged,
     handlePromptHistoryKey: handlePromptHistoryKey,
     launchRun: launchRun,

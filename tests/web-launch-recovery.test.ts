@@ -5,20 +5,104 @@ import { describe, expect, it } from "vitest";
 
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src", "web", "public");
 
-describe("web launch recovery contract", () => {
-  it("reconciles an ambiguous POST failure with a recent live run", () => {
-    const source = readFileSync(join(PUBLIC_DIR, "st-run.js"), "utf8");
+type LiveRun = {
+  id: string;
+  workflow: string;
+  input: string;
+  status: string;
+  startedAt: number;
+  external?: boolean;
+};
 
-    expect(source).not.toContain("/api/debug-log");
-    expect(source).not.toContain("#region agent log");
-    expect(source).toContain("function reconcileLaunch(workflow, input, launchedAt)");
-    expect(source).toContain('api("GET", "/api/runs")');
-    expect(source).toContain("run.external !== true");
-    expect(source).toContain('(run.status === "running" || run.status === "queued")');
-    expect(source).toContain("run.workflow === workflow");
-    expect(source).toContain("run.input === expectedInput");
-    expect(source).toContain("run.startedAt >= launchedAt - LAUNCH_RECONCILE_WINDOW_MS");
-    expect(source).toContain("attachRun(run)");
-    expect(source).toContain('setBanner("could not start run: network error", "err")');
+type FindRecentLiveLaunch = (
+  runs: LiveRun[],
+  workflow: string,
+  input: string,
+  launchedAt: number,
+) => LiveRun | null;
+
+function loadMatcher(): FindRecentLiveLaunch {
+  const source = readFileSync(join(PUBLIC_DIR, "st-run.js"), "utf8");
+  const windowStub: {
+    Steamtrain: {
+      state: Record<string, unknown>;
+      run?: { findRecentLiveLaunch?: FindRecentLiveLaunch };
+    };
+  } = { Steamtrain: { state: {} } };
+  const evaluate = new Function("window", source) as (window: typeof windowStub) => void;
+  evaluate(windowStub);
+  const matcher = windowStub.Steamtrain.run?.findRecentLiveLaunch;
+  if (!matcher) throw new Error("st-run.js did not expose launch recovery matcher");
+  return matcher;
+}
+
+describe("web launch recovery", () => {
+  it("selects the newest matching running or queued run", () => {
+    const findRecentLiveLaunch = loadMatcher();
+    const launchedAt = 100_000;
+    const runs: LiveRun[] = [
+      {
+        id: "older",
+        workflow: "demo",
+        input: "deploy",
+        status: "running",
+        startedAt: launchedAt - 1_000,
+      },
+      {
+        id: "newer",
+        workflow: "demo",
+        input: "deploy",
+        status: "queued",
+        startedAt: launchedAt + 100,
+      },
+      {
+        id: "done",
+        workflow: "demo",
+        input: "deploy",
+        status: "done",
+        startedAt: launchedAt + 200,
+      },
+    ];
+
+    expect(findRecentLiveLaunch(runs, "demo", "deploy", launchedAt)?.id).toBe("newer");
+  });
+
+  it("rejects stale, external, completed, and unrelated runs", () => {
+    const findRecentLiveLaunch = loadMatcher();
+    const launchedAt = 100_000;
+    const runs: LiveRun[] = [
+      {
+        id: "stale",
+        workflow: "demo",
+        input: "deploy",
+        status: "running",
+        startedAt: launchedAt - 30_001,
+      },
+      {
+        id: "external",
+        workflow: "demo",
+        input: "deploy",
+        status: "running",
+        startedAt: launchedAt,
+        external: true,
+      },
+      { id: "done", workflow: "demo", input: "deploy", status: "done", startedAt: launchedAt },
+      {
+        id: "other-input",
+        workflow: "demo",
+        input: "test",
+        status: "running",
+        startedAt: launchedAt,
+      },
+      {
+        id: "other-workflow",
+        workflow: "other",
+        input: "deploy",
+        status: "running",
+        startedAt: launchedAt,
+      },
+    ];
+
+    expect(findRecentLiveLaunch(runs, "demo", "deploy", launchedAt)).toBeNull();
   });
 });
