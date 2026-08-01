@@ -122,9 +122,7 @@ export function validatePlanStructure(spec: PlanSpec): { ok: boolean; errors: st
       if (s.forEach) {
         const sourceStepId = parsePlanForEachSource(s.forEach);
         if (!sourceStepId) {
-          errors.push(
-            `${s.id} has invalid forEach '${s.forEach}' (expected steps.<id>.items)`,
-          );
+          errors.push(`${s.id} has invalid forEach '${s.forEach}' (expected steps.<id>.items)`);
         } else if (!seen[sourceStepId]) {
           errors.push(`${s.id} forEach references unknown step '${sourceStepId}'`);
         } else if ((phaseOf[sourceStepId] ?? -1) >= i) {

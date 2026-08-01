@@ -146,7 +146,7 @@ describe("validatePlanStructure", () => {
 
   it("accepts bundled workflows that use steps.<id>.items forEach refs", () => {
     for (const name of ["mainline", "babysit-all-prs"] as const) {
-      const { ok, errors } = validatePlanStructure(BUNDLED_WORKFLOWS[name]!);
+      const { ok, errors } = validatePlanStructure(BUNDLED_WORKFLOWS[name]! as PlanSpec);
       expect({ name, ok, errors }).toEqual({ name, ok: true, errors: [] });
     }
   });
