@@ -1110,6 +1110,16 @@
   opacity: 0.75;
   cursor: default;
 }
+/* Launch predictions (02.2): a step whose runner needs auth (or whose llm
+   key is missing) will block the run — struck through, reason in amber.
+   A cached step replays instead of re-running — amber note, no strike. */
+.ls-step.blocked .ls-sid {
+  text-decoration: line-through;
+}
+.ls-step.blocked .ls-note,
+.ls-step.cached .ls-note {
+  color: var(--gate);
+}
 .ls-sid {
   color: var(--text);
 }
@@ -1177,6 +1187,17 @@
 }
 .ls-opthint.warn {
   color: var(--gate);
+}
+.ls-opt select {
+  margin-left: auto;
+  flex: none;
+  height: 28px;
+  font: 400 12.5px / 1 var(--font-mono);
+  color: var(--text);
+  background: var(--header);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 0 8px;
 }
 
 .ls-toggle {

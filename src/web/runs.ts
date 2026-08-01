@@ -36,6 +36,7 @@ import {
   createLiveRunPublisher,
   createNotifier,
   createWorkflowRunControl,
+  finalRunWorktrees,
   hashWorkflowSpec,
   isRerunError,
   matchApprovalKey,
@@ -44,6 +45,7 @@ import {
   persistWorkflowStepDone,
   planRerun,
   planRetryRetarget,
+  pruneRunWorktrees,
   resolveMaxParallelRuns,
   resolveWorkflowTimeoutSec,
   timeoutMsFromSec,
@@ -64,6 +66,12 @@ const MAX_FRAMES_PER_RUN = 5000;
 export interface WorkflowHost {
   listWorkflows(): Record<string, WorkflowSpec>;
   canDispatchWorkflowSpec(spec: WorkflowSpec): { ok: true } | { ok: false; reason: string };
+  /**
+   * Per-step dispatch readiness (steps whose runner is unavailable or whose
+   * llm API key is missing) — the launch sheet's launch predictions. Optional:
+   * hosts without doctor state report nothing and the sheet predicts nothing.
+   */
+  stepDispatchIssues?(spec: WorkflowSpec): Array<{ stepId: string; issue: string }>;
   /** Plan a per-run re-route of blocked agent steps onto a ready agent (see Orchestrator). */
   planWorkflowReroute?(spec: WorkflowSpec, options?: PlanRerouteOptions): PlanRerouteResult;
   /** Plan a retry-failed retarget onto a ready agent (see Orchestrator). */
@@ -83,6 +91,8 @@ export interface WorkflowHost {
     approval?: ApprovalProvider,
     control?: WorkflowRunControl,
     humanInput?: HumanInputProvider,
+    /** Per-run cap on parallel steps ("Max parallel runners"); config default when omitted. */
+    maxConcurrency?: number,
   ): AsyncIterable<WorkflowEvent>;
 }
 
@@ -275,6 +285,10 @@ export class WorkflowRunManager {
     input: string,
     opts?: {
       fresh?: boolean;
+      /** Discard the previous run's retained worktrees before starting (launch sheet's "Fresh worktrees"). */
+      freshWorktrees?: boolean;
+      /** Per-run cap on parallel steps; config default when omitted. */
+      maxParallel?: number;
       seed?: Map<string, StepResult>;
       specOverride?: WorkflowSpec;
       params?: Record<string, string | number | boolean>;
@@ -320,8 +334,68 @@ export class WorkflowRunManager {
     if (!run.queued) {
       this.runningCount += 1;
     }
-    void this.drive(run, spec, opts?.fresh ?? false, opts?.seed);
+    void this.drive(run, spec, {
+      fresh: opts?.fresh ?? false,
+      freshWorktrees: opts?.freshWorktrees ?? false,
+      maxParallel: opts?.maxParallel,
+      seed: opts?.seed,
+    });
     return { ok: true, runId: run.id };
+  }
+
+  /**
+   * Step ids with a cached result for this exact launch shape (workflow,
+   * input, spec, params) — the launch sheet's "N steps would be reused, not
+   * re-run" prediction. Independent of the reuse toggle: it reports the raw
+   * cache contents; the sheet decides what the run will do with them.
+   */
+  async cachedStepIds(
+    workflow: string,
+    input: string,
+    spec: WorkflowSpec,
+    params?: Record<string, string | number | boolean>,
+  ): Promise<string[]> {
+    const key = workflowCacheKey(workflow, input.trim(), this.cwd, spec, params);
+    const cache = await this.cacheStore.load(key);
+    return [...cache.keys()];
+  }
+
+  /**
+   * The newest run of `workflow` that still retains unpruned step worktrees,
+   * and how many — the "discard the N trees from run XXXXX" hint under the
+   * launch sheet's Fresh-worktrees toggle, and the target of the prune the
+   * toggle arms. `null` when nothing is retained (or history is off).
+   */
+  async lastKeptWorktrees(workflow: string): Promise<{ runId: string; count: number } | null> {
+    if (!this.historyStore) return null;
+    // list() is newest-first: the first unpruned run with trees is the target.
+    const summaries = await this.historyStore.list();
+    for (const summary of summaries) {
+      if (summary.workflow !== workflow || summary.harvest?.prunedAt) continue;
+      const record = await this.historyStore.get(summary.id);
+      if (!record) continue;
+      const count = finalRunWorktrees(record).length;
+      if (count > 0) return { runId: summary.id, count };
+    }
+    return null;
+  }
+
+  /**
+   * Discard the previous run's retained worktrees (the Fresh-worktrees
+   * toggle). Best effort: a prune failure (trees already gone, record
+   * unreadable) must never block the run that asked for it.
+   */
+  private async pruneLastKeptWorktrees(workflow: string): Promise<void> {
+    if (!this.historyStore) return;
+    try {
+      const kept = await this.lastKeptWorktrees(workflow);
+      if (!kept) return;
+      const record = await this.historyStore.get(kept.runId);
+      if (!record) return;
+      await pruneRunWorktrees(this.historyStore, record);
+    } catch {
+      // deliberate: launch goes ahead even if the trees could not be discarded
+    }
   }
 
   /**
@@ -659,8 +733,12 @@ export class WorkflowRunManager {
   private async drive(
     run: Run,
     spec: WorkflowSpec,
-    fresh: boolean,
-    seed?: Map<string, StepResult>,
+    opts: {
+      fresh: boolean;
+      freshWorktrees: boolean;
+      maxParallel?: number;
+      seed?: Map<string, StepResult>;
+    },
   ): Promise<void> {
     // Remember the exact spec (session overrides applied) so a mid-run detach
     // carries it to the background process and the cache key stays aligned.
@@ -743,16 +821,23 @@ export class WorkflowRunManager {
         run.timeoutTimer.unref?.();
       }
 
+      // "Fresh worktrees": discard the previous run's retained step worktrees
+      // now that this run is committed to executing (past the queue, un-aborted).
+      // Best effort — a prune failure never blocks the run.
+      if (opts.freshWorktrees && !run.controller.signal.aborted) {
+        await this.pruneLastKeptWorktrees(run.workflow);
+      }
+
       let cache: Map<string, StepResult>;
-      if (fresh) {
+      if (opts.fresh) {
         await this.cacheStore.clear(key);
         cache = new Map();
       } else {
         cache = await this.cacheStore.load(key);
       }
-      if (seed && seed.size > 0) {
+      if (opts.seed && opts.seed.size > 0) {
         // Seed already-succeeded steps and make them the resume baseline.
-        for (const [stepId, result] of seed) cache.set(stepId, result);
+        for (const [stepId, result] of opts.seed) cache.set(stepId, result);
         await this.cacheStore.save(key, cache);
       }
       const approval = this.liveRuns
@@ -777,6 +862,7 @@ export class WorkflowRunManager {
         approval,
         run.control,
         humanInput,
+        opts.maxParallel,
       )) {
         // Mid-run detach committed: stop recording, mirroring, and emitting
         // events — the detached child owns the run's record and stream from

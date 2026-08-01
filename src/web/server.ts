@@ -10,6 +10,7 @@ import { refreshAgentCatalogCaches } from "../agents/models";
 import { buildApiMeta } from "../apis";
 import type { AgentInstanceConfig, ApiInstanceConfig, SteamtrainConfig } from "../config";
 import {
+  DEFAULT_CONFIG,
   loadConfig,
   parseAgentsConfig,
   parseApisConfig,
@@ -30,6 +31,7 @@ import {
   type LiveRunMeta,
   type LiveRunStore,
   type LoadedWorkflowCatalog,
+  MAX_CONCURRENCY,
   MAX_WORKFLOW_NESTING_DEPTH,
   MergeConflictError,
   type PermissionSummary,
@@ -831,7 +833,7 @@ function checkCsrf(
  *   GET    /api/history/:id/worktrees  a run's retained worktrees + diffstat
  *   POST   /api/history/:id/harvest    merge worktrees (apply/branch/pr) -> { result }
  *   POST   /api/history/:id/prune      discard a run's worktrees -> { pruned, total }
- *   POST   /api/runs                { workflow, input, fresh?, overrides? } -> { runId }
+ *   POST   /api/runs                { workflow, input, fresh?, freshWorktrees?, maxParallel?, overrides? } -> { runId }
  *   GET    /api/runs/:id/stream     SSE of WorkflowEvents + terminal status
  *   POST   /api/runs/:id/cancel     abort a run
  *   POST   /api/runs/:id/pause      stop scheduling new steps (in-flight finish)
@@ -1525,7 +1527,40 @@ async function handle(
       ?.list()
       .then((summaries) => planHistoryContext(summaries, name))
       .catch(() => null);
-    sendJson(res, plan.ok ? 200 : 422, { ...plan, ...(history ? { history } : {}) });
+    // Launch predictions (02.2): what the sheet can know BEFORE Start — which
+    // steps would replay from cache, which would block dispatch (runner needs
+    // auth / missing API key), what "Fresh worktrees" would discard, and how
+    // many runners are ready vs the configured parallelism cap. Step issues
+    // only once the doctor has run, same readiness gate as the workflow list.
+    let launch: {
+      cachedSteps: string[];
+      stepIssues: Array<{ stepId: string; issue: string }>;
+      worktrees: { runId: string; count: number } | null;
+      runners: { ready: number; limit: number };
+    } | null = null;
+    if (plan.ok) {
+      const doctor = deps.doctor?.() ?? [];
+      const [cachedSteps, worktrees] = await Promise.all([
+        deps.runs
+          .cachedStepIds(name, parsed.input.trim(), effectiveSpec, params)
+          .catch(() => [] as string[]),
+        deps.runs.lastKeptWorktrees(name).catch(() => null),
+      ]);
+      launch = {
+        cachedSteps,
+        stepIssues: doctor.length > 0 ? (deps.host.stepDispatchIssues?.(effectiveSpec) ?? []) : [],
+        worktrees,
+        runners: {
+          ready: doctor.filter((d) => d.status === "ok").length,
+          limit: deps.config?.maxConcurrency ?? DEFAULT_CONFIG.maxConcurrency!,
+        },
+      };
+    }
+    sendJson(res, plan.ok ? 200 : 422, {
+      ...plan,
+      ...(history ? { history } : {}),
+      ...(launch ? { launch } : {}),
+    });
     return;
   }
 
@@ -1880,6 +1915,8 @@ async function handle(
       workflow?: unknown;
       input?: unknown;
       fresh?: unknown;
+      freshWorktrees?: unknown;
+      maxParallel?: unknown;
       overrides?: unknown;
       params?: unknown;
       reroute?: unknown;
@@ -1894,6 +1931,24 @@ async function handle(
     if (typeof parsed.workflow !== "string" || typeof parsed.input !== "string") {
       sendJson(res, 400, { error: "body must include string 'workflow' and 'input'" });
       return;
+    }
+    // Per-run parallelism cap (the launch sheet's "Max parallel runners"):
+    // validated here, clamped again by the engine — an out-of-range value is
+    // a client bug, so refuse rather than silently correct.
+    let maxParallel: number | undefined;
+    if (parsed.maxParallel !== undefined) {
+      if (
+        typeof parsed.maxParallel !== "number" ||
+        !Number.isInteger(parsed.maxParallel) ||
+        parsed.maxParallel < 1 ||
+        parsed.maxParallel > MAX_CONCURRENCY
+      ) {
+        sendJson(res, 400, {
+          error: `maxParallel must be an integer between 1 and ${MAX_CONCURRENCY}`,
+        });
+        return;
+      }
+      maxParallel = parsed.maxParallel;
     }
     let specOverride: WorkflowSpec | undefined;
     // Full-spec override: the web plan editor's unsaved draft, run as-is (the
@@ -1972,6 +2027,8 @@ async function handle(
     try {
       const result = deps.runs.start(parsed.workflow, parsed.input, {
         fresh: parsed.fresh === true,
+        freshWorktrees: parsed.freshWorktrees === true,
+        maxParallel,
         specOverride,
         params,
       });

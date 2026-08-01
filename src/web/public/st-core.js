@@ -193,7 +193,7 @@ window.Steamtrain = (function () {
     // { stepId: { costUsd, durationMs } } — the plan grid's "Est." column.
     stepActuals: {},
     // Launch-sheet options, remembered across opens.
-    launchOptions: { reuseCache: true, detach: false, budget: "" },
+    launchOptions: { reuseCache: true, freshWorktrees: false, detach: false, budget: "", maxParallel: 0 },
     // Dry-run (plan) result shown inside the plan tab until dismissed.
     dryRunPlan: null,
     // Live-run step record rail: active tab ("live" | "prompt" | "config" | "events").
