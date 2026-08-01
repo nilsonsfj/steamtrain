@@ -264,23 +264,48 @@
     }
   }
 
-  /** Breadcrumb: project name, then the active config label. */
+  /**
+   * Breadcrumb: the project, then WHERE you are — the selected workflow (plus
+   * "run <id>" while a run is attached), or the page name when Runs/Settings
+   * is covering the cockpit. Also owns the nav buttons' active state, which is
+   * the same "where am I" fact. Re-rendered from the central render() and on
+   * every route change; the config label, when present, trails as quiet
+   * context rather than posing as a location.
+   */
   function renderCrumbs() {
     var nav = document.getElementById("crumbs");
     if (!nav) return;
     clear(nav);
     var parts = [];
     if (S.project && S.project.name) {
-      parts.push({ text: S.project.name, title: S.project.cwd || S.project.displayPath || S.project.name });
+      parts.push({ text: S.project.displayPath || S.project.name, title: S.project.cwd || S.project.name });
     }
-    if (S.configLabel) parts.push({ text: "cfg · " + S.configLabel, title: "Active configuration" });
+    if (S.page === "runs" || S.page === "settings") {
+      parts.push({ text: S.page });
+    } else if (S.runId && S.runState && S.runState.started) {
+      if (S.selected) parts.push({ text: S.selected });
+      parts.push({ text: "run " + S.runId.slice(0, 5), title: S.runId });
+    } else if (S.selected) {
+      parts.push({ text: S.selected });
+    }
+    if (S.configLabel) {
+      parts.push({ text: "cfg · " + S.configLabel, title: "Active configuration", quiet: true });
+    }
+    var lastLocation = -1;
+    parts.forEach(function (part, idx) { if (!part.quiet) lastLocation = idx; });
     parts.forEach(function (part, idx) {
       if (idx > 0) nav.appendChild(h("span", { class: "sep", text: "/" }));
+      var cls = idx === lastLocation ? "here" : "";
       nav.appendChild(h("span", {
-        class: idx === parts.length - 1 ? "here" : "",
-        title: part.title,
+        class: (cls + (part.quiet ? " quiet" : "")).trim(),
+        title: part.title || "",
         text: part.text
       }));
+    });
+    var active = { workflowsBtn: !S.page, historyBtn: S.page === "runs", settingsBtn: S.page === "settings" };
+    Object.keys(active).forEach(function (id) {
+      var btn = document.getElementById(id);
+      if (btn) btn.classList.toggle("active", Boolean(active[id]));
     });
   }
 

@@ -383,6 +383,50 @@
   padding: 18px;
 }
 
+/* ---- logs: every step's captured output, in run order ---------------------- */
+.runs-logs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 980px;
+}
+.runs-log-step {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.runs-log-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 400 11.5px / 1.4 var(--font-mono);
+  color: var(--muted);
+}
+.runs-log-head .name {
+  color: var(--text);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runs-log-head .tag {
+  color: var(--dim);
+}
+.runs-log-head .tag.gate {
+  color: var(--gate);
+}
+.runs-log-head .num {
+  font-variant-numeric: tabular-nums;
+}
+/* The well is not the pane's scroller here — .runs-full is — so let each log
+   grow to its content instead of nesting a second scrollbox. */
+.runs-log-well {
+  flex: none;
+  overflow: visible;
+  max-height: none;
+}
+
 /* ---- compare -------------------------------------------------------------- */
 .runs-compare {
   flex: 1;

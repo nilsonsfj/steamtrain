@@ -535,6 +535,11 @@
       renderRecordDetail(full, R.record);
       return main;
     }
+    if (R.view === "logs" && R.record) {
+      main.appendChild(buildLogsHead());
+      main.appendChild(buildLogs(R.record));
+      return main;
+    }
     if (R.view === "compare") {
       main.appendChild(buildCompareHead());
       main.appendChild(buildCompare());
@@ -564,6 +569,102 @@
       h("span", { class: "runs-head-title", text: "Compare" }),
       h("span", { class: "runs-head-meta", text: R.compare.length + " runs side by side" })
     );
+  }
+
+  // ---- logs ------------------------------------------------------------------
+  // Every step's captured output in run order — the raw material behind the
+  // receipt's summaries. A centre view (not a modal), so the rails stay put
+  // and a long log never traps the reader in an overlay.
+
+  /** One section per executed step, for the clipboard and the .txt download. */
+  function logsText(record) {
+    var lines = [
+      "steamtrain logs · " + record.workflow + " · run " + record.id,
+      fmtTime(record.startedAt) + " · " + fmtTotals(record.totals || {}) + " · " + fmtClock(record.durationMs),
+      ""
+    ];
+    (record.phases || []).forEach(function (phase) {
+      (phase.steps || []).forEach(function (step) {
+        if (step.result && step.result.childResults && step.result.childResults.length) return;
+        var result = step.result || {};
+        var head = step.stepId + " · " + step.status;
+        if (result.durationMs) head += " · " + (result.durationMs / 1000).toFixed(1) + "s";
+        if (result.costUsd) head += " · $" + result.costUsd.toFixed(4);
+        var text = step.text || result.output || "";
+        lines.push("── " + head + " " + "─".repeat(Math.max(0, 60 - head.length)));
+        lines.push(text.trim() ? text : "(no output captured)");
+        lines.push("");
+      });
+    });
+    return lines.join("\n");
+  }
+
+  function buildLogsHead() {
+    var actions = h("div", { class: "runs-head-actions" },
+      h("button", {
+        class: "btn small", type: "button", text: "Copy all",
+        onClick: function () {
+          if (!navigator.clipboard || !navigator.clipboard.writeText) return;
+          navigator.clipboard.writeText(logsText(R.record)).then(function () {
+            notify("Copied the run's logs.", "ok");
+          }).catch(function () {});
+        }
+      }),
+      h("button", {
+        class: "btn small", type: "button", text: "Download .txt",
+        onClick: function () {
+          var blob = new Blob([logsText(R.record)], { type: "text/plain" });
+          var url = URL.createObjectURL(blob);
+          var link = h("a", { href: url, download: "steamtrain-logs-" + shortId(R.record.id) + ".txt" });
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        }
+      })
+    );
+    var head = h("div", { class: "runs-head" },
+      h("button", { class: "runs-back", type: "button", text: "← Runs", onClick: backToList }),
+      h("span", { class: "runs-head-title", text: R.record.workflow }),
+      h("span", { class: "runs-head-meta", text: "logs · " + shortId(R.record.id) })
+    );
+    head.appendChild(actions);
+    return head;
+  }
+
+  function buildLogs(record) {
+    var wrap = h("div", { class: "runs-full runs-logs" });
+    var any = false;
+    (record.phases || []).forEach(function (phase) {
+      var steps = (phase.steps || []).filter(function (step) {
+        return !(step.result && step.result.childResults && step.result.childResults.length);
+      });
+      if (!steps.length) return;
+      any = true;
+      wrap.appendChild(h("div", { class: "runs-receipt-label", text: phase.title || phase.phaseId }));
+      steps.forEach(function (step) {
+        var result = step.result || {};
+        var row = h("div", { class: "runs-log-step" });
+        var head = h("div", { class: "runs-log-head" },
+          h("span", { class: "dot " + statusTone(step.status), "aria-hidden": "true" }),
+          h("span", { class: "name", text: step.stepId })
+        );
+        if (step.cached) head.appendChild(h("span", { class: "tag gate", text: "cached" }));
+        head.appendChild(h("span", { class: "num", text: result.durationMs ? (result.durationMs / 1000).toFixed(1) + "s" : "" }));
+        head.appendChild(h("span", { class: "num cost", text: result.costUsd ? "$" + result.costUsd.toFixed(4) : "" }));
+        row.appendChild(head);
+        var text = step.text || result.output || "";
+        row.appendChild(text.trim()
+          ? h("div", { class: "runs-well runs-log-well", text: text })
+          : h("div", { class: "runs-receipt-note", text: "No output captured." }));
+        wrap.appendChild(row);
+      });
+    });
+    if (!any) {
+      wrap.appendChild(h("div", { class: "runs-empty" },
+        h("div", { class: "runs-empty-body", text: "This run recorded no step output." })));
+    }
+    return wrap;
   }
 
   function buildListHead() {
@@ -929,8 +1030,9 @@
       onClick: function () { R.view = "receipt"; paint(); }
     }));
     foot.appendChild(h("button", {
-      class: "btn small", type: "button", text: "Copy id", title: record.id,
-      onClick: function () { copyRunId(record.id); }
+      class: "btn small", type: "button", text: "Logs",
+      title: "Every step's captured output, in run order",
+      onClick: function () { R.view = "logs"; paint(); }
     }));
     if (!isReadOnly()) {
       foot.appendChild(h("button", {

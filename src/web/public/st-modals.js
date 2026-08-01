@@ -1376,6 +1376,22 @@
   }
   function refreshAfterWrite(name, verb) {
     reloadCatalog().then(function () {
+      if (verb === "created") {
+        // 03.3: creation drops you straight into the idle plan with the step
+        // inspector already open on the first step \u2014 creation and editing are
+        // the same screen, so there is no separate authoring mode to land on.
+        selectWorkflow(name, function () {
+          S.planTab = "plan";
+          var spec = ST.plan && ST.plan.draftIfDirty() ? ST.plan.draftIfDirty() : S.spec;
+          var first = spec && spec.phases && spec.phases.length && spec.phases[0].steps.length
+            ? spec.phases[0].steps[0]
+            : null;
+          if (first) S.planSelection = [first.id];
+          ST.run.setBanner("Workflow \u201c" + name + "\u201d created.", "ok");
+          ST.render();
+        });
+        return;
+      }
       selectWorkflow(name);
       ST.run.setBanner("Workflow \u201c" + name + "\u201d " + (verb || "saved") + ".", "ok");
     });

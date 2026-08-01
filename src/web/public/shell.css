@@ -91,6 +91,10 @@ header .mode-badge {
 #topbar .crumbs .here {
   color: var(--text);
 }
+/* Trailing non-location context (the active config) — quieter than a crumb. */
+#topbar .crumbs .quiet {
+  color: var(--dim);
+}
 #topbar .topbar-right {
   margin-left: auto;
   display: flex;
@@ -128,6 +132,24 @@ header .mode-badge {
   background: var(--done);
   animation: none;
 }
+/* At rest: a workflow is selected but no run is in flight. */
+.status-pill.idle {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+}
+.status-pill.idle .dot {
+  background: var(--faint);
+  animation: none;
+}
+/* Muted mono annotation beside the pill ("last run 14m ago · ok"). */
+.context-note {
+  margin-left: 6px;
+  font: 400 11.5px / 1 var(--font-mono);
+  color: var(--dim);
+  white-space: nowrap;
+}
 @keyframes st-pulse {
   0%,
   100% {
@@ -150,6 +172,13 @@ header .mode-badge {
 .tbtn:hover {
   color: var(--text);
   border-color: var(--border-strong);
+}
+/* The nav button for the surface you're on (Workflows / Runs / Settings). */
+.tbtn.active {
+  background: #1a1f25;
+  border-color: var(--border-strong);
+  color: var(--text);
+  font-weight: 600;
 }
 
 .health {
