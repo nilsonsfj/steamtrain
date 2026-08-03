@@ -5,7 +5,6 @@
   position: fixed;
   inset: 0;
   background: rgba(4, 7, 11, 0.66);
-  backdrop-filter: blur(2px);
   display: none;
   align-items: flex-start;
   justify-content: center;
@@ -17,7 +16,7 @@
   display: flex;
 }
 .modal {
-  background: linear-gradient(180deg, #141b24 0%, var(--surface) 100%);
+  background: var(--surface);
   border: 1px solid rgba(53, 67, 84, 0.95);
   border-radius: var(--r-xl);
   width: 100%;
@@ -27,7 +26,7 @@
   max-height: calc(100vh - 80px);
 }
 .modal.wide {
-  max-width: 920px;
+  max-width: 820px;
 }
 .modal .mhead {
   display: flex;
@@ -251,7 +250,7 @@ select.sel.invalid {
   border-radius: 14px;
   padding: 14px 16px;
   margin-bottom: 14px;
-  background: linear-gradient(135deg, rgba(52, 211, 196, 0.08), transparent 42%), var(--raised);
+  background: var(--raised);
   animation: hist-row-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .hist-hero.done {
