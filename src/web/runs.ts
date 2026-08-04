@@ -284,7 +284,8 @@ export class WorkflowRunManager {
     workflow: string,
     input: string,
     opts?: {
-      fresh?: boolean;
+      /** Ignore (and clear) the step cache for this run — the launch sheet's "Reuse cache" off. */
+      freshCache?: boolean;
       /** Discard the previous run's retained worktrees before starting (launch sheet's "Fresh worktrees"). */
       freshWorktrees?: boolean;
       /** Per-run cap on parallel steps; config default when omitted. */
@@ -335,7 +336,7 @@ export class WorkflowRunManager {
       this.runningCount += 1;
     }
     void this.drive(run, spec, {
-      fresh: opts?.fresh ?? false,
+      freshCache: opts?.freshCache ?? false,
       freshWorktrees: opts?.freshWorktrees ?? false,
       maxParallel: opts?.maxParallel,
       seed: opts?.seed,
@@ -465,7 +466,7 @@ export class WorkflowRunManager {
     }
 
     const started = this.start(plan.workflow, plan.input, {
-      fresh: mode === "rerun" || Boolean(plan.downgraded),
+      freshCache: mode === "rerun" || Boolean(plan.downgraded),
       seed,
       params: plan.params,
       specOverride,
@@ -745,7 +746,7 @@ export class WorkflowRunManager {
     run: Run,
     spec: WorkflowSpec,
     opts: {
-      fresh: boolean;
+      freshCache: boolean;
       freshWorktrees: boolean;
       maxParallel?: number;
       seed?: Map<string, StepResult>;
@@ -840,7 +841,7 @@ export class WorkflowRunManager {
       }
 
       let cache: Map<string, StepResult>;
-      if (opts.fresh) {
+      if (opts.freshCache) {
         await this.cacheStore.clear(key);
         cache = new Map();
       } else {

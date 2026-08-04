@@ -350,6 +350,34 @@ describe("POST /api/runs launch options", () => {
     expect(host.launched[0]!.maxConcurrency).toBeUndefined();
   });
 
+  /**
+   * `freshCache` and `freshWorktrees` ride in the same launch body and mean
+   * different things, so each is checked against the surface the OTHER one
+   * owns: the cache must survive a worktree-only launch, and must be gone
+   * after a cache-only one.
+   */
+  it.each([
+    { flag: "freshWorktrees", cachedAfter: 1 },
+    { flag: "freshCache", cachedAfter: 0 },
+  ])("$flag leaves $cachedAfter cached step(s) behind", async ({ flag, cachedAfter }) => {
+    const { server, host, cacheStore } = makeServer();
+    const base = await start(server);
+    const key = workflowCacheKey(launchSpec.name, "fix the bug", tmpdir(), launchSpec);
+    const cached = new Map([
+      ["scan", { stepId: "scan", ok: true, output: "cached", durationMs: 1 }],
+    ]);
+    await cacheStore.save(key, cached);
+
+    const res = await postJson(`${base}/api/runs`, {
+      workflow: launchSpec.name,
+      input: "fix the bug",
+      [flag]: true,
+    });
+    expect(res.status).toBe(201);
+    await waitFor(() => host.launched.length === 1);
+    expect((await cacheStore.load(key)).size).toBe(cachedAfter);
+  });
+
   it("freshWorktrees prunes the previous run's trees and launches regardless", async () => {
     // Retained worktrees with roots that do not exist: every git call fails,
     // yet the record is still marked pruned and the run goes ahead (best

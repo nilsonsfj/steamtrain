@@ -650,13 +650,29 @@
     }
     var actions = h("span", { class: "plan-actions" });
     if (!ro) {
-      actions.appendChild(h("button", { class: "btn small", type: "button", text: "Dry run", onClick: function () { ST.run.startPlan(); } }));
+      var dry = h("button", { class: "btn small", type: "button", text: "Dry run", onClick: function () { ST.run.startPlan(); } });
       var runBtn = h("button", { class: "btn small primary", type: "button" }, "Run",
         h("span", { class: "kbd", text: "⌘⏎" }));
       runBtn.addEventListener("click", function () { ST.modals.openLaunchSheet(); });
+      applyLaunchGate([dry, runBtn]);
+      actions.appendChild(dry);
       actions.appendChild(runBtn);
     }
     return h("div", { class: "plan-tabrow" }, tabs, h("span", { class: "plan-tabrow-right" }, meta, est, actions));
+  }
+
+  /**
+   * Disable launch buttons while the selected workflow is blocked, naming the
+   * reason in the tooltip. The blocked strip above the plan says the same
+   * thing in prose; this keeps the buttons from contradicting it.
+   */
+  function applyLaunchGate(buttons) {
+    var why = ST.shell.launchBlocked();
+    if (!why) return;
+    buttons.forEach(function (b) {
+      b.disabled = true;
+      b.title = why;
+    });
   }
 
   /** One step row in the plan grid. */
@@ -1215,8 +1231,8 @@
     );
     box.appendChild(inputWrap);
     // Adopt the real #input node (it owns prompt history, ⌘⏎ wiring and the
-    // startRun value). Reparenting preserves its content and listeners; the
-    // hidden composer in the runbar is its parking spot on the other tabs.
+    // startRun value). Reparenting preserves its content and listeners;
+    // #composerPark in the runbar is its parking spot on the other tabs.
     var realInput = document.getElementById("input");
     if (realInput) inputWrap.appendChild(realInput);
     var params = document.getElementById("paramsPanel");
@@ -1226,21 +1242,20 @@
       box.appendChild(params);
     }
     if (!ro) {
-      var runRow = h("div", { class: "inputs-actions" },
-        h("button", { class: "btn small primary", type: "button", text: "Run ⌘⏎", onClick: function () { ST.modals.openLaunchSheet(); } }),
-        h("button", { class: "btn small", type: "button", text: "Dry run", onClick: function () { ST.run.startPlan(); } })
-      );
-      box.appendChild(runRow);
+      var launch = h("button", { class: "btn small primary", type: "button", text: "Run ⌘⏎", onClick: function () { ST.modals.openLaunchSheet(); } });
+      var dryRun = h("button", { class: "btn small", type: "button", text: "Dry run", onClick: function () { ST.run.startPlan(); } });
+      applyLaunchGate([launch, dryRun]);
+      box.appendChild(h("div", { class: "inputs-actions" }, launch, dryRun));
     }
     container.appendChild(box);
   }
 
   /**
-   * Park #input / #paramsPanel back in the (hidden) composer when the inputs
-   * tab isn't showing, so no other surface ever finds them missing.
+   * Park #input / #paramsPanel back in #composerPark when the inputs tab
+   * isn't showing, so no other surface ever finds them missing.
    */
   function parkComposerNodes(force) {
-    var compose = document.querySelector("#runRow .run-compose");
+    var compose = document.querySelector("#composerPark .run-compose");
     if (!compose) return;
     var realInput = document.getElementById("input");
     var params = document.getElementById("paramsPanel");

@@ -145,9 +145,11 @@ ${styles}
             </div>
           </div>
           <div class="reroute-row" id="blockedRow" style="display:none"></div>
-          <div class="row composer" id="runRow" style="display:none">
+          <!-- Parking spot, never shown: #input and #paramsPanel are adopted by
+               the plan's Inputs tab and handed back here whenever that tab is
+               not rendered, so every surface can still find them by id. -->
+          <div class="composer-park" id="composerPark" hidden>
             <div class="run-compose">
-              <label class="run-compose-label" for="input">Describe</label>
               <textarea id="input" data-focus-key="run-input" placeholder="What should this run do? (&#8593; recalls previous inputs)"></textarea>
               <div id="paramsPanel" class="params-panel collapsed" style="display:none" hidden>
                 <button type="button" class="params-toggle" id="paramsToggle" aria-expanded="false" aria-controls="paramsForm">
@@ -157,11 +159,6 @@ ${styles}
                 </button>
                 <div id="paramsForm" class="params-form" role="region" aria-label="Workflow variables"></div>
               </div>
-            </div>
-            <div class="btnstack">
-              <button class="rbtn" id="planBtn">Plan</button>
-              <button class="rbtn primary" id="runBtn">Run &#9654;</button>
-              <label class="fresh-toggle"><input type="checkbox" id="freshChk" /> fresh (ignore cache)</label>
             </div>
           </div>
           <div class="banner" id="banner"></div>

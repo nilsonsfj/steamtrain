@@ -1356,7 +1356,6 @@
         S.selected = null; S.spec = null; S.source = null;
         document.getElementById("wfActions").style.display = "none";
         document.getElementById("srcLine").style.display = "none";
-        document.getElementById("runRow").style.display = "none";
         document.getElementById("wfTitle").textContent = "Select a workflow";
         document.getElementById("wfSub").textContent = "Pick a workflow on the left to view its pipeline and run it.";
         clear(document.getElementById("bands"));
@@ -1723,7 +1722,7 @@
       closeModal();
       ST.run.launchRun({
         spec: runSpec,
-        fresh: !lo.reuseCache,
+        freshCache: !lo.reuseCache,
         freshWorktrees: lo.freshWorktrees,
         maxParallel: lo.maxParallel,
         detach: lo.detach

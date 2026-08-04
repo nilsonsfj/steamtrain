@@ -223,7 +223,11 @@ describe("web server", () => {
     // likewise rendered client-side into #crumbs.
     expect(html).toContain('id="rail-left"');
     expect(html).toContain('id="crumbs"');
-    expect(html).toContain('id="runBtn"');
+    // Launch buttons are rendered by st-plan.js; what the shell still owes the
+    // client is the parking spot that holds #input between plan tabs.
+    expect(html).toContain('id="composerPark"');
+    expect(html).toContain('id="input"');
+    expect(html).not.toContain('id="runBtn"');
     // The page now references external static assets rather than inlining them,
     // one <link>/<script> per manifest entry, in manifest order.
     for (const asset of WEB_ASSETS) {

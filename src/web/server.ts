@@ -834,7 +834,7 @@ function checkCsrf(
  *   GET    /api/history/:id/worktrees  a run's retained worktrees + diffstat
  *   POST   /api/history/:id/harvest    merge worktrees (apply/branch/pr) -> { result }
  *   POST   /api/history/:id/prune      discard a run's worktrees -> { pruned, total }
- *   POST   /api/runs                { workflow, input, fresh?, freshWorktrees?, maxParallel?, overrides? } -> { runId }
+ *   POST   /api/runs                { workflow, input, freshCache?, freshWorktrees?, maxParallel?, overrides? } -> { runId }
  *   GET    /api/runs/:id/stream     SSE of WorkflowEvents + terminal status
  *   POST   /api/runs/:id/cancel     abort a run
  *   POST   /api/runs/:id/pause      stop scheduling new steps (in-flight finish)
@@ -1950,7 +1950,7 @@ async function handle(
     let parsed: {
       workflow?: unknown;
       input?: unknown;
-      fresh?: unknown;
+      freshCache?: unknown;
       freshWorktrees?: unknown;
       maxParallel?: unknown;
       overrides?: unknown;
@@ -2062,7 +2062,10 @@ async function handle(
     }
     try {
       const result = deps.runs.start(parsed.workflow, parsed.input, {
-        fresh: parsed.fresh === true,
+        // Two unrelated "fresh" switches ride in the same body, so the wire
+        // names them apart: freshCache ignores the step cache, freshWorktrees
+        // discards the previous run's retained trees.
+        freshCache: parsed.freshCache === true,
         freshWorktrees: parsed.freshWorktrees === true,
         maxParallel,
         specOverride,
