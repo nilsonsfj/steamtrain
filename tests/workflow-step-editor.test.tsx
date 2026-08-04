@@ -19,6 +19,7 @@ import {
   summarizeBulkRetarget,
 } from "../src/tui/workflow-step-editor";
 import type { WorkflowStep } from "../src/workflow";
+import { tick, type } from "./helpers/ink-input";
 
 const ESC = "\u001b";
 const RIGHT = "\u001b[C";
@@ -26,18 +27,6 @@ const DOWN = "\u001b[B";
 const CR = "\r";
 
 const CONFIG: SteamtrainConfig = {};
-
-function tick(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-async function type(stdin: { write: (data: string) => void }, ...inputs: string[]): Promise<void> {
-  await tick();
-  for (const input of inputs) {
-    stdin.write(input);
-    await tick();
-  }
-}
 
 const workerStep: WorkflowStep = {
   id: "build",

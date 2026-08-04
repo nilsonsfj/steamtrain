@@ -6,6 +6,7 @@ import type { Orchestrator } from "../src/orchestrator";
 import { useKeyboardInput } from "../src/tui/useKeyboardInput";
 import { useWorkflowRunner } from "../src/tui/useWorkflowRunner";
 import type { WorkflowSpec } from "../src/workflow";
+import { tick, type } from "./helpers/ink-input";
 
 const ESC = "\u001B";
 const UP = "\u001B[A";
@@ -28,10 +29,6 @@ const SPEC: WorkflowSpec = {
 };
 
 type Runner = ReturnType<typeof useWorkflowRunner>;
-
-function tick(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
 
 function SelectionFollowHarness({ onRunner }: { onRunner: (runner: Runner) => void }) {
   const mountedRef = useRef(true);
@@ -127,8 +124,7 @@ describe("workflow selection auto-follow", () => {
     await tick();
     expect(view.lastFrame()).toContain("1:follow");
 
-    view.stdin.write(UP);
-    await tick();
+    await type(view.stdin, UP);
     expect(view.lastFrame()).toContain("0:manual");
 
     runner?.wfDispatch({
@@ -152,8 +148,7 @@ describe("workflow selection auto-follow", () => {
 
     runner?.setRunning(false);
     await tick();
-    view.stdin.write(ESC);
-    await tick();
+    await type(view.stdin, ESC);
     expect(view.lastFrame()).toContain("0:follow");
 
     runner?.wfDispatch({ type: "seed", spec: SPEC });

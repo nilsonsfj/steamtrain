@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ResolvedAgentInstance } from "../src/agents";
 import type { AgentConfigScope } from "../src/config";
 import { AgentManager } from "../src/tui/AgentManager";
+import { tick, type } from "./helpers/ink-input";
 
 const ESC = "\u001b";
 
@@ -10,11 +11,6 @@ const ESC = "\u001b";
 function plain(frame: string | undefined): string {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escapes
   return (frame ?? "").replace(/\u001b\[[0-9;]*m/g, "");
-}
-
-/** useInput subscribes in an effect; yield to the event loop before/after writes. */
-function tick(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 const agents: ResolvedAgentInstance[] = [
@@ -65,14 +61,6 @@ function renderManager(overrides: Partial<Parameters<typeof AgentManager>[0]> = 
       {...overrides}
     />,
   );
-}
-
-async function type(stdin: { write: (data: string) => void }, ...inputs: string[]): Promise<void> {
-  await tick();
-  for (const input of inputs) {
-    stdin.write(input);
-    await tick();
-  }
 }
 
 describe("AgentManager", () => {
