@@ -28,6 +28,7 @@
   var fmtTokens = ST.fmtTokens;
   var fmtTotals = ST.fmtTotals;
   var isReadOnly = ST.isReadOnly;
+  var KIND_LABEL = ST.KIND_LABEL;
   var relTime = ST.relTime;
   var totalTokens = ST.totalTokens;
   var truncate = ST.truncate;
@@ -69,7 +70,10 @@
     pollTimer: null,
     request: 0,
     recordRequest: 0,
-    fingerprint: ""
+    fingerprint: "",
+    // Which full-receipt step lines have their recorded output open, keyed
+    // "<runId>:<stepId>" so opening one on one run says nothing about another.
+    receiptOpen: {}
   };
 
   // Per-step worktree patches, fetched lazily by the full-receipt view and
@@ -1172,24 +1176,44 @@
 
   /**
    * The deep view of one recorded run: hero, input, per-model costs, the run
-   * actions, the worktree lifecycle block, and the recorded phase tree drawn
-   * with the cockpit's own step cards.
+   * actions, the worktree lifecycle block, and the recorded phase tree as a
+   * ledger.
+   *
+   * The tree used to be drawn with the cockpit's live step cards, which are
+   * built for a run in flight — pulsing status, follow-the-tail output panes,
+   * per-step controls that a finished run cannot honour. A record is read, not
+   * watched, so the phases are a ledger here: one line per step, its output a
+   * click away rather than always open.
    */
   function renderRecordDetail(holder, record) {
     clear(holder);
 
+    var totals = record.totals || {};
     var hero = h("div", { class: "hist-hero " + record.status },
       h("div", { class: "hist-hero-top" },
         h("span", { class: "hist-hero-glyph", text: heroGlyph(record.status) }),
         h("div", { class: "hist-hero-titles" },
           h("div", { class: "hist-hero-name", text: record.workflow }),
-          h("div", { class: "hist-hero-sub", text: statusLabel(record.status) + " · " + fmtTime(record.startedAt) + " · "
-            + ((record.durationMs || 0) / 1000).toFixed(1) + "s · " + fmtTotals(record.totals, { cached: true, tokens: true }) })
+          h("div", { class: "hist-hero-sub", text: statusLabel(record.status) + " · " + fmtTime(record.startedAt) })
         ),
         h("button", { class: "btn small hist-copy", type: "button", text: "Copy id", title: record.id,
           onClick: function () { copyRunId(record.id); } })
       )
     );
+    // The four numbers the receipt is read for, as tiles rather than the run-on
+    // summary line the rest of the page uses (design 02).
+    var tiles = h("div", { class: "hist-stats" });
+    function tile(k, v) {
+      return h("div", { class: "hist-stat" }, h("div", { class: "k", text: k }), h("div", { class: "v", text: v }));
+    }
+    var tokens = totalTokens(totals.tokens);
+    tiles.appendChild(tile("Elapsed", ((record.durationMs || 0) / 1000).toFixed(1) + "s"));
+    tiles.appendChild(tile("Cost", totals.costUsd > 0 ? "$" + totals.costUsd.toFixed(4) : "$0"));
+    tiles.appendChild(tile("Tokens", tokens > 0 ? fmtTokens(tokens) : "0"));
+    tiles.appendChild(tile("Steps", (totals.ok || 0) + " ok"
+      + (totals.failed ? " · " + totals.failed + " failed" : "")
+      + (totals.cached ? " · " + totals.cached + " cached" : "")));
+    hero.appendChild(tiles);
     holder.appendChild(hero);
 
     if (record.input) {
@@ -1245,20 +1269,140 @@
     renderWorktreeSection(worktrees, record);
 
     (record.phases || []).forEach(function (phase, idx) {
-      if (idx > 0) holder.appendChild(h("div", { class: "connector" }));
-      var stat = phase.done ? (phase.ok ? "done" : "failed") : "";
-      var phaseEl = h("div", { class: "phase" + (phase.done ? " done" : "") },
-        h("div", { class: "phead" },
-          h("div", { class: "pidx", text: String(idx + 1) }),
-          h("div", { class: "ptitle", text: phase.title }),
-          stat ? h("div", { class: "pstat", text: "· " + stat }) : null
-        )
-      );
-      var cards = h("div", { class: "cards" });
-      (phase.steps || []).forEach(function (step) { cards.appendChild(ST.run.renderCard(recordedStepView(step))); });
-      phaseEl.appendChild(cards);
-      holder.appendChild(phaseEl);
+      holder.appendChild(renderReceiptPhase(record, phase, idx));
     });
+    holder.appendChild(receiptFootnotes(record));
+  }
+
+  /** One recorded phase: its header, then a ledger line per step. */
+  function renderReceiptPhase(record, phase, idx) {
+    var stat = phase.done ? (phase.ok ? "done" : "failed") : "";
+    var box = h("div", { class: "hist-phase" },
+      h("div", { class: "hist-phase-head" },
+        h("span", { class: "idx", text: String(idx + 1) }),
+        h("span", { class: "title", text: phase.title || "" }),
+        stat ? h("span", { class: "stat " + (phase.ok ? "ok" : "err"), text: stat }) : null,
+        h("span", { class: "count", text: (phase.steps || []).length + " step" + ((phase.steps || []).length === 1 ? "" : "s") })
+      )
+    );
+    (phase.steps || []).forEach(function (step) {
+      box.appendChild(renderReceiptStep(record, step));
+    });
+    return box;
+  }
+
+  /**
+   * One step of the full receipt. The line carries everything a reader scans
+   * for (id, kind · model, how it ended, time, cost); the recorded output — and
+   * a fan-out parent's children — open underneath on click, so a long run is a
+   * page of lines instead of a wall of panes.
+   */
+  function renderReceiptStep(record, step, depth) {
+    var result = step.result || {};
+    var children = result.childResults || [];
+    var text = step.text || result.output || "";
+    var key = record.id + ":" + step.stepId;
+    var isOpen = R.receiptOpen[key] === true;
+    var expandable = Boolean(text || children.length);
+    var wrap = h("div", { class: "hist-step" + (depth ? " child" : "") });
+
+    var line = h("div", {
+      class: "hist-step-line" + (expandable ? " expandable" : "") + (isOpen ? "" : " collapsed"),
+      role: expandable ? "button" : null,
+      tabindex: expandable ? "0" : null,
+      onClick: expandable ? function () { toggleReceiptStep(key); } : null,
+      onKeydown: expandable ? function (e) { activateWithKeyboard(e, function () { toggleReceiptStep(key); }); } : null
+    });
+    if (expandable) line.appendChild(h("span", { class: "diff-chevron", "aria-hidden": "true", text: "▾" }));
+    else line.appendChild(h("span", { class: "hist-step-nochev", "aria-hidden": "true" }));
+    line.appendChild(h("span", { class: "dot " + statusTone(step.status), "aria-hidden": "true" }));
+    var kind = KIND_LABEL[step.blockKind] || step.blockKind || "step";
+    line.appendChild(h("div", { class: "hist-step-id" },
+      h("div", { class: "id", text: step.item ? step.stepId + " · " + truncate(String(step.item), 40) : step.stepId }),
+      h("div", { class: "sub", text: kind + (step.model ? " · " + step.model : (step.agent ? " · " + step.agent : "")) })
+    ));
+    receiptStepTags(step).forEach(function (tag) { line.appendChild(tag); });
+    line.appendChild(h("span", { class: "num", text: result.durationMs ? (result.durationMs / 1000).toFixed(1) + "s" : "—" }));
+    line.appendChild(h("span", { class: "num cost", text: result.costUsd ? "$" + result.costUsd.toFixed(4) : "free" }));
+    wrap.appendChild(line);
+
+    if (isOpen) {
+      if (text) wrap.appendChild(h("div", { class: "hist-step-out", text: String(text) }));
+      children.forEach(function (child) {
+        // A fan-out child is a step in its own right, recorded under its parent.
+        wrap.appendChild(renderReceiptStep(record, {
+          stepId: child.stepId || step.stepId,
+          blockKind: step.blockKind,
+          agent: step.agent, model: step.model,
+          item: child.item,
+          status: child.ok === false ? "error" : "done",
+          text: child.output || "",
+          result: child
+        }, (depth || 0) + 1));
+      });
+    }
+    return wrap;
+  }
+
+  /** The short state tags on a receipt line: why this step was cheap or odd. */
+  function receiptStepTags(step) {
+    var tags = [];
+    if (step.cached) tags.push(h("span", { class: "tag gate", text: "cached" }));
+    if (step.blockKind === "gate") {
+      tags.push(h("span", { class: "tag", text: step.gate && step.gate.passed ? "gate pass" : "gate stop" }));
+    }
+    if (step.status === "skipped") tags.push(h("span", { class: "tag", text: "skipped" }));
+    var attempts = step.attempts || (step.result && step.result.attempts);
+    if (attempts > 1) tags.push(h("span", { class: "tag", text: attempts + " attempts" }));
+    if (step.approval) tags.push(h("span", { class: "tag", text: step.approval.approved ? "approved" : "rejected" }));
+    return tags;
+  }
+
+  function toggleReceiptStep(key) {
+    if (R.receiptOpen[key]) delete R.receiptOpen[key];
+    else R.receiptOpen[key] = true;
+    paint();
+  }
+
+  /**
+   * The receipt's closing lines (design 02): what the run did to the machine,
+   * as opposed to what it produced. Every number here is read off the record —
+   * the worktree line reports the harvest the CLI or this page recorded, not a
+   * guess about what is still on disk, because nothing in a record says that.
+   */
+  function receiptFootnotes(record) {
+    var steps = ledgerSteps(record);
+    var readOnly = 0, violations = 0, trees = 0, retried = [];
+    steps.forEach(function (s) {
+      var perms = ST.stepPermissions(s);
+      if (perms) {
+        if (perms.profile === "read-only") readOnly += 1;
+        violations += (perms.violations && perms.violations.length) || 0;
+      }
+      if (s.worktree) trees += 1;
+      var attempts = s.attempts || (s.result && s.result.attempts) || 0;
+      if (attempts > 1) retried.push(s.stepId);
+    });
+    var foot = h("div", { class: "hist-footnotes" });
+    function row(label, value) {
+      foot.appendChild(h("div", { class: "row" },
+        h("span", { class: "k", text: label }),
+        h("span", { class: "v", text: value })
+      ));
+    }
+    row("sandbox", readOnly + " read-only · " + violations + " violation" + (violations === 1 ? "" : "s"));
+    row("worktrees", trees + " step tree" + (trees === 1 ? "" : "s") + " · " + harvestLabel(record.harvest));
+    row("retries", retried.length ? retried.length + " (" + retried.join(", ") + ")" : "0");
+    return foot;
+  }
+
+  /** What became of a run's worktrees, in the record's own terms. */
+  function harvestLabel(harvest) {
+    if (!harvest) return "not harvested";
+    if (harvest.prunedAt) return "discarded";
+    var applied = (harvest.appliedSteps || []).length;
+    if (applied) return applied + " merged back" + (harvest.branch ? " on " + harvest.branch : "");
+    return "not harvested";
   }
 
   function heroGlyph(status) {
@@ -1266,21 +1410,6 @@
     if (status === "error") return "✗";
     if (status === "canceled") return "⊘";
     return "$";
-  }
-
-  /** Map a recorded step onto the shape renderCard expects (live step view). */
-  function recordedStepView(st) {
-    return {
-      stepId: st.stepId, blockKind: st.blockKind || "worker", agent: st.agent, model: st.model,
-      dependsOn: st.dependsOn, forEach: null, item: st.item, status: st.status,
-      text: st.text || (st.result && st.result.output) || "", activity: null,
-      result: st.result, cached: st.cached, attempts: st.attempts,
-      gate: st.gate ? { passed: st.gate.passed, target: st.gate.target } : null,
-      approval: st.approval || null,
-      // Replayed records are terminal, so a recorded ask is never pending.
-      humanInput: st.humanInput ? Object.assign({ pending: false }, st.humanInput) : null,
-      loopTo: st.loopTo, maxIterations: st.maxIterations
-    };
   }
 
   // ---- worktree lifecycle ----------------------------------------------------

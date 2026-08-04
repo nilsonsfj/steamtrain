@@ -161,6 +161,8 @@ interface Mounted {
   said: string[];
   clickRow: (index: number) => Promise<void>;
   check: (index: number) => Promise<void>;
+  /** Click the full receipt's ledger line for a step, toggling its output. */
+  clickStep: (stepId: string) => Promise<void>;
   clickButton: (label: string) => Promise<void>;
   press: (key: string) => boolean;
 }
@@ -212,6 +214,8 @@ async function mountRuns(opts: {
     fmtTotals: () => "totals",
     isInteractiveTarget: (n: StubEl) => n.tag === "input" || n.tag === "button",
     isReadOnly: () => false,
+    KIND_LABEL: { worker: "worker", consolidator: "merge", gate: "gate", distributor: "fan-out" },
+    stepPermissions: (s: Record<string, unknown>) => s.permissions ?? null,
     relTime: () => "1h ago",
     totalTokens: (t: Record<string, number> | undefined) =>
       t ? (t.input ?? 0) + (t.output ?? 0) + (t.cacheRead ?? 0) + (t.cacheWrite ?? 0) : 0,
@@ -220,7 +224,6 @@ async function mountRuns(opts: {
     shell: { renderLiveRuns: () => {} },
     run: {
       setBanner: () => {},
-      renderCard: (s: Record<string, unknown>) => el("div", { text: String(s.stepId) }),
     },
     modals: {
       rerunHistory: () => {},
@@ -308,6 +311,14 @@ async function mountRuns(opts: {
       box.checked = true;
       for (const fn of box.listeners.change ?? []) fn({ target: box });
       await Promise.resolve();
+    },
+    clickStep: async (stepId: string) => {
+      const line = collect(root, (n) => hasClass(n, "hist-step-line")).find((n) =>
+        flatText(n).includes(stepId),
+      );
+      if (!line) throw new Error(`no receipt line for "${stepId}"`);
+      click(line as StubEl);
+      for (let i = 0; i < 6; i++) await Promise.resolve();
     },
     clickButton: async (label: string) => {
       const btn = collect(root, (n) => n.tag === "button" && flatText(n) === label)[0];
@@ -676,6 +687,101 @@ describe("runs page: the full receipt", () => {
     // Deep view, but still not a modal — both rails are where they were.
     expect(page.rail().length).toBeGreaterThan(0);
     expect(page.receipt()).toContain("8f21c");
+  });
+
+  it("keeps a step's recorded output shut until it is asked for", async () => {
+    const page = await openFullReceipt({
+      detail: {
+        ...DETAIL,
+        phases: [
+          {
+            ...DETAIL.phases[0],
+            steps: [
+              {
+                stepId: "scan-logic",
+                status: "done",
+                blockKind: "worker",
+                model: "sonnet",
+                text: "FOUND-A-BUG-IN-THE-TEARDOWN",
+                result: { durationMs: 41_200, costUsd: 0.0104 },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    // The line is what a receipt is read at a glance for; the output is a
+    // click away rather than a wall of panes.
+    expect(page.main()).toContain("scan-logic");
+    expect(page.main()).toContain("worker · sonnet");
+    expect(page.main()).not.toContain("FOUND-A-BUG-IN-THE-TEARDOWN");
+
+    await page.clickStep("scan-logic");
+    expect(page.main()).toContain("FOUND-A-BUG-IN-THE-TEARDOWN");
+
+    await page.clickStep("scan-logic");
+    expect(page.main()).not.toContain("FOUND-A-BUG-IN-THE-TEARDOWN");
+  });
+
+  it("tags the states that explain a cheap or odd step", async () => {
+    const page = await openFullReceipt({
+      detail: {
+        ...DETAIL,
+        phases: [
+          {
+            ...DETAIL.phases[0],
+            steps: [
+              { stepId: "scan-logic", status: "done", cached: true, result: {} },
+              {
+                stepId: "findings-ready",
+                status: "done",
+                blockKind: "gate",
+                gate: { passed: true },
+                result: {},
+              },
+              { stepId: "flaky", status: "done", attempts: 3, result: {} },
+            ],
+          },
+        ],
+      },
+    });
+    const main = page.main();
+    expect(main).toContain("cached");
+    expect(main).toContain("gate pass");
+    expect(main).toContain("3 attempts");
+  });
+
+  it("closes with what the run did to the machine", async () => {
+    const page = await openFullReceipt({
+      detail: {
+        ...DETAIL,
+        phases: [
+          {
+            ...DETAIL.phases[0],
+            steps: [
+              {
+                stepId: "scan-logic",
+                status: "done",
+                attempts: 2,
+                worktree: { branch: "st/scan-logic", mergedAt: 12 },
+                result: {},
+              },
+              {
+                stepId: "report",
+                status: "done",
+                worktree: { branch: "st/report" },
+                result: {},
+              },
+            ],
+          },
+        ],
+        harvest: { prunedAt: 99 },
+      },
+    });
+    const main = page.main();
+    expect(main).toContain("2 step trees · discarded");
+    expect(main).toContain("1 (scan-logic)");
   });
 
   it("shows the per-model cost roll-up", async () => {
