@@ -31,6 +31,26 @@ export interface ArrivalReceipt {
   agentless: boolean;
 }
 
+/**
+ * One thing about the run that is worth a reader's attention, ranked by how
+ * much it should worry them.
+ *
+ * These are RUN OUTCOMES — a step that failed, was killed, needed retries —
+ * not findings parsed out of an agent's report. steamtrain never reads an
+ * agent's prose, so it cannot rank "unchecked JSON.parse crashes the manager"
+ * above "leaked child process"; what it knows for certain is what the engine
+ * observed. The severity vocabulary is the design's; the evidence is ours.
+ */
+export interface ArrivalNotice {
+  /** critical: the run broke here · high: it was stopped or diverted · medium: it coped. */
+  severity: "critical" | "high" | "medium";
+  stepId: string;
+  /** The headline, e.g. "scan-errors failed". */
+  what: string;
+  /** Supporting detail: the error's first line, the gate's target, the attempt count. */
+  where?: string;
+}
+
 export interface ArrivalDestination {
   id: string;
   label: string;
@@ -46,6 +66,8 @@ export interface ArrivalReport {
   /** Step that produced the hero, when known. */
   heroStepId?: string;
   receipt: ArrivalReceipt;
+  /** What went wrong (or nearly did), worst first. Empty on a clean run. */
+  notices: ArrivalNotice[];
   destinations: ArrivalDestination[];
 }
 
@@ -143,8 +165,102 @@ export function buildArrivalReport(
       tokens,
       agentless,
     },
+    notices: arrivalNotices(flat.map((f) => f.step)),
     destinations,
   };
+}
+
+/** Rank order for {@link ArrivalNotice.severity}; lower sorts first. */
+const SEVERITY_RANK: Record<ArrivalNotice["severity"], number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+};
+
+/**
+ * What the run's own steps say went wrong, worst first.
+ *
+ * A root failure is critical: the run broke there. A cascade victim, a killed
+ * step and a gate that stopped the run are high — the run was stopped or
+ * diverted, but the cause is elsewhere or deliberate. Retries and skips are
+ * medium: the run coped, and the reader may still want to know.
+ */
+export function arrivalNotices(steps: StepState[]): ArrivalNotice[] {
+  const notices: ArrivalNotice[] = [];
+  for (const step of steps) {
+    const result = step.result;
+    // A fan-out parent is summarised by its children, which are their own
+    // steps: reporting both would say the same thing twice.
+    if (result?.childResults?.length) continue;
+    if (result && !result.ok && !result.skipped) {
+      const firstLine = (result.error ?? "").split("\n", 1)[0]?.trim();
+      const detail =
+        firstLine && firstLine.length > 160 ? `${firstLine.slice(0, 159)}…` : firstLine;
+      if (result.killed) {
+        notices.push({
+          severity: "high",
+          stepId: step.stepId,
+          what: `${step.stepId} was killed`,
+          where: detail,
+        });
+      } else if (result.dependencyFailed) {
+        notices.push({
+          severity: "high",
+          stepId: step.stepId,
+          what: `${step.stepId} never ran`,
+          where: `${result.dependencyFailed} failed before it`,
+        });
+      } else {
+        notices.push({
+          severity: "critical",
+          stepId: step.stepId,
+          what: `${step.stepId} failed`,
+          where: detail,
+        });
+      }
+      continue;
+    }
+    // A gate that did not pass and does not loop stopped (or failed) the run.
+    if (step.gate && step.gate.passed === false && !step.loopTo) {
+      notices.push({
+        severity: "high",
+        stepId: step.stepId,
+        what: `gate ${step.stepId} did not pass`,
+        where: step.gate.target ? `expected ${step.gate.target}` : undefined,
+      });
+      continue;
+    }
+    const attempts = step.attempts ?? result?.attempts;
+    if (typeof attempts === "number" && attempts > 1) {
+      notices.push({
+        severity: "medium",
+        stepId: step.stepId,
+        what: `${step.stepId} needed ${attempts} attempts`,
+        where: "it succeeded on the last one",
+      });
+      continue;
+    }
+    if (result?.skipped) {
+      notices.push({
+        severity: "medium",
+        stepId: step.stepId,
+        what: `${step.stepId} was skipped`,
+        where: "its condition was false",
+      });
+    }
+  }
+  return sortNotices(notices);
+}
+
+/** Worst first; ties keep run order, which is the order they were collected in. */
+function sortNotices(notices: ArrivalNotice[]): ArrivalNotice[] {
+  return notices
+    .map((notice, index) => ({ notice, index }))
+    .sort(
+      (a, b) =>
+        SEVERITY_RANK[a.notice.severity] - SEVERITY_RANK[b.notice.severity] || a.index - b.index,
+    )
+    .map((entry) => entry.notice);
 }
 
 /** Prefer the latest successful consolidator; else the last successful leaf with output. */

@@ -587,8 +587,10 @@ export {
 export {
   type ArrivalReceipt,
   type ArrivalDestination,
+  type ArrivalNotice,
   type ArrivalReport,
   ARRIVAL_NEXT_CANDIDATES,
+  arrivalNotices,
   arrivalReceiptCards,
   buildArrivalReport,
   findArrivalStep,
