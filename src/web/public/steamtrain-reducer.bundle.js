@@ -821,7 +821,7 @@ var SteamtrainReducer = (() => {
             severity: "high",
             stepId: step.stepId,
             what: `${step.stepId} was killed`,
-            where: detail
+            where: detail?.startsWith("killed ") ? detail.slice("killed ".length) : detail
           });
         } else if (result.dependencyFailed) {
           notices.push({

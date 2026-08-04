@@ -131,6 +131,54 @@ describe("kill step", () => {
     expect(events.at(-1)).toMatchObject({ kind: "workflow_done", ok: false });
   });
 
+  it("keeps the reason a step was already failing for, and adds who killed it", async () => {
+    // A kill can land on a step that was going down anyway. The adapter's own
+    // error is the more useful half — it says why — so it must survive.
+    const control = createWorkflowRunControl();
+    const createAdapter = (id: AgentId): AgentAdapter => ({
+      id,
+      binary: "fake",
+      defaultModel: "test",
+      run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
+        return (async function* () {
+          if (opts.prompt !== "slow") {
+            yield {
+              kind: "result",
+              agent: "claude",
+              ts: 0,
+              isError: false,
+              text: "ok",
+            } as AgentEvent;
+            return;
+          }
+          // Report a genuine failure, then park until the kill's abort lands.
+          yield {
+            kind: "result",
+            agent: "claude",
+            ts: 0,
+            isError: true,
+            text: "provider returned 500",
+          } as AgentEvent;
+          await new Promise<void>((resolve) => {
+            if (opts.signal?.aborted) return resolve();
+            opts.signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+        })();
+      },
+    });
+    const deps: WorkflowDeps = { createAdapter, maxConcurrency: 4, cwd: "/base", control };
+
+    const events = await collect(pair, deps, (event) => {
+      if (event.kind === "step_start" && event.stepId === "slow")
+        control.killStep("slow", "human:web");
+    });
+
+    const done = events.find((e) => e.kind === "step_done" && e.stepId === "slow");
+    const result = done?.kind === "step_done" ? done.result : undefined;
+    expect(result?.killed).toBe(true);
+    expect(result?.error).toBe("provider returned 500 (killed by human:web)");
+  });
+
   it("aborts only the killed step's agent, never the run's other work", async () => {
     const control = createWorkflowRunControl();
     const { deps, started } = makeDeps(control, new Set(["quick", "after"]));

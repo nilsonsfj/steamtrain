@@ -513,6 +513,8 @@ describe("arrival notices", () => {
       ["high", "gate findings-ready did not pass"],
       ["medium", "flaky needed 3 attempts"],
     ]);
+    // The headline says it was killed, so the detail line carries who.
+    expect(notices[0]?.where).toBe("by human:web");
   });
 
   it("says nothing about a clean run, or about a loop gate mid-loop", () => {

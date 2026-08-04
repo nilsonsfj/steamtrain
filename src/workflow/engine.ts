@@ -1461,12 +1461,21 @@ async function runSingleStep(
   // A killed step's abort is its own, not the run's: mark the result so the
   // record says "killed" rather than "cancelled", and so a reader can tell a
   // step someone stopped from one the run took down.
+  //
+  // A kill can land on a step that was ALREADY failing for its own reason (the
+  // adapter's error survives an abort — see executeAgentStep's error/cancelled
+  // precedence), and that reason is the more useful half: it says why the step
+  // was going to fail anyway. So the cause is kept and the attribution added,
+  // rather than the cause being overwritten with "killed".
   if (env.killedSteps.has(step.id)) {
     const by = env.killedSteps.get(step.id);
     env.killedSteps.delete(step.id);
+    const cause = execution.result.error;
+    const attribution = by ? `killed by ${by}` : "killed";
     execution.result.ok = false;
     execution.result.killed = true;
-    execution.result.error = by ? `killed by ${by}` : "killed";
+    execution.result.error =
+      cause && cause !== "cancelled" ? `${cause} (${attribution})` : attribution;
   }
 
   if (execution.gate) {

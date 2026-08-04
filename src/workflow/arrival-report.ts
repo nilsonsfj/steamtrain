@@ -197,11 +197,14 @@ export function arrivalNotices(steps: StepState[]): ArrivalNotice[] {
       const detail =
         firstLine && firstLine.length > 160 ? `${firstLine.slice(0, 159)}…` : firstLine;
       if (result.killed) {
+        // "killed by human:web" → "by human:web": the headline already says it
+        // was killed, so the detail line is for who (and, when the step was
+        // failing anyway, what it was failing of).
         notices.push({
           severity: "high",
           stepId: step.stepId,
           what: `${step.stepId} was killed`,
-          where: detail,
+          where: detail?.startsWith("killed ") ? detail.slice("killed ".length) : detail,
         });
       } else if (result.dependencyFailed) {
         notices.push({
