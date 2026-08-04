@@ -458,3 +458,44 @@ describe("WorkflowRunManager launch predictions", () => {
     expect(await runs.cachedStepIds(launchSpec.name, "fix the bug", edited)).toEqual([]);
   });
 });
+
+describe("source lint endpoint", () => {
+  it("reports the same dispatch issues the launch sheet would strike through", async () => {
+    const { server } = makeServer({ doctor: READY_DOCTOR });
+    const base = await start(server);
+
+    const lint = await postJson(`${base}/api/workflows/${launchSpec.name}/lint`, {});
+    expect(lint.status).toBe(200);
+    const issues = ((await lint.json()) as { issues: unknown }).issues;
+
+    // Same authority as the sheet, so the two surfaces cannot disagree about
+    // which steps would be skipped.
+    const plan = await postJson(`${base}/api/workflows/${launchSpec.name}/plan`, {
+      input: "fix the bug",
+    });
+    const planned = (await plan.json()) as { launch: { stepIssues: unknown } };
+    expect(issues).toEqual([{ stepId: "report", issue: "north needs auth" }]);
+    expect(issues).toEqual(planned.launch.stepIssues);
+  });
+
+  it("withholds judgement until the doctor has run", async () => {
+    const { server } = makeServer();
+    const base = await start(server);
+    const res = await postJson(`${base}/api/workflows/${launchSpec.name}/lint`, {});
+    expect(res.status).toBe(200);
+    expect((await res.json()) as unknown).toEqual({ issues: [] });
+  });
+
+  it("rejects an unknown workflow and a draft that claims a different one", async () => {
+    const { server } = makeServer({ doctor: READY_DOCTOR });
+    const base = await start(server);
+
+    const missing = await postJson(`${base}/api/workflows/nope/lint`, {});
+    expect(missing.status).toBe(404);
+
+    const foreign = await postJson(`${base}/api/workflows/${launchSpec.name}/lint`, {
+      spec: { ...launchSpec, name: "somebody-else" },
+    });
+    expect(foreign.status).toBe(400);
+  });
+});

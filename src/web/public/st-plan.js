@@ -1048,6 +1048,117 @@
     return "bundled with steamtrain · edits save a user copy";
   }
 
+  // ---- source lint ------------------------------------------------------------
+
+  // Row height of the editor, gutter and highlight layer alike. Keep in sync
+  // with .src-editor / .src-gutter / .src-hl line-height in plan.css — the
+  // three layers are only aligned because they share this number.
+  var SRC_LINE_H = 19;
+
+  /**
+   * Line of `text` (0-based) that a JSON.parse failure points at. Engines
+   * disagree on the message: V8 and JSC report a character offset ("at
+   * position 412"), newer V8 adds "(line 7 column 3)", and some report
+   * neither — in which case the caller has no line to mark and says so in the
+   * strip instead of guessing one.
+   */
+  function parseErrorLine(text, message) {
+    var atLine = /line (\d+)/.exec(message || "");
+    if (atLine) return Math.max(0, parseInt(atLine[1], 10) - 1);
+    var atPos = /position (\d+)/.exec(message || "");
+    if (!atPos) return -1;
+    var pos = Math.min(text.length, parseInt(atPos[1], 10));
+    return text.slice(0, pos).split("\n").length - 1;
+  }
+
+  /** First line (0-based) declaring `"id": "<stepId>"`, or -1. */
+  function stepIdLine(text, stepId) {
+    var idx = text.indexOf("\"id\": \"" + stepId + "\"");
+    if (idx === -1) idx = text.indexOf("\"id\":\"" + stepId + "\"");
+    if (idx === -1) return -1;
+    return text.slice(0, idx).split("\n").length - 1;
+  }
+
+  /**
+   * Everything the source view knows to be wrong with the text on screen, in
+   * the order a reader should deal with it: a parse failure first (nothing
+   * else can be trusted while the JSON is broken), then structural errors,
+   * then runner warnings from the server's readiness probe.
+   *
+   * Structural errors name their step in prose ("scan depends on unknown step
+   * 'x'"), so the step id is recovered from the leading word to anchor the
+   * mark; an unanchored diagnostic still lists, it just marks no line.
+   */
+  function sourceDiagnostics(text) {
+    var out = [];
+    var parsed = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      out.push({
+        severity: "err",
+        line: parseErrorLine(text, e.message),
+        message: "invalid JSON — " + e.message,
+        detail: "the plan and the launch sheet still show the last valid draft"
+      });
+      return out;
+    }
+    validate(parsed).errors.forEach(function (msg) {
+      var lead = /^([A-Za-z0-9_-]+) /.exec(msg);
+      out.push({
+        severity: "err",
+        line: lead ? stepIdLine(text, lead[1]) : -1,
+        message: msg,
+        detail: "this workflow cannot be saved until it is fixed"
+      });
+    });
+    (S.sourceLint && S.sourceLint.name === S.selected ? S.sourceLint.issues : []).forEach(function (issue) {
+      var line = stepIdLine(text, issue.stepId);
+      // A warning for a step the text no longer declares is stale: the reader
+      // renamed or removed it and the next lint round will drop it anyway.
+      if (line === -1) return;
+      out.push({
+        severity: "warn",
+        line: line,
+        message: issue.stepId + " · " + issue.issue,
+        detail: "this step will be skipped",
+        action: "open Settings → Runners"
+      });
+    });
+    return out;
+  }
+
+  /**
+   * Ask the server which steps its dispatch gate would refuse, for the spec as
+   * it stands. Debounced by the caller; skipped for viewers, who may not POST.
+   */
+  function loadSourceLint() {
+    if (ST.isReadOnly() || !S.selected) return;
+    var name = S.selected;
+    var spec = draftIfDirty() || S.spec;
+    if (!spec) return;
+    ST.apiAuth("POST", "/api/workflows/" + encodeURIComponent(name) + "/lint", { spec: spec })
+      .then(function (r) {
+        if (r.status !== 200 || S.selected !== name) return;
+        var next = JSON.stringify(r.body.issues || []);
+        if (S.sourceLint && S.sourceLint.name === name && JSON.stringify(S.sourceLint.issues) === next) return;
+        S.sourceLint = { name: name, issues: r.body.issues || [] };
+        // Only the source tab draws these, and only when it is on screen.
+        if (S.planTab === "source") ST.render();
+      })
+      .catch(function () {});
+  }
+
+  function scheduleSourceLint() {
+    if (S.sourceLintTimer) clearTimeout(S.sourceLintTimer);
+    // Long enough that a burst of typing costs one request, short enough that
+    // a warning lands while the reader is still looking at the step.
+    S.sourceLintTimer = setTimeout(function () {
+      S.sourceLintTimer = null;
+      loadSourceLint();
+    }, 600);
+  }
+
   function renderSourceTab(container) {
     var ro = ST.isReadOnly();
     if (S.sourceText === null || (!S.sourceDiverged && S.sourceText !== draftJson())) {
@@ -1058,11 +1169,13 @@
     var savedText = S.spec ? JSON.stringify(S.spec, null, 2) : "";
     var dirty = isDirty();
 
+    var diags = sourceDiagnostics(S.sourceText);
+
     var head = h("div", { class: "src-head" },
       h("span", { class: "src-file", text: sourceFileLabel() }),
       dirty ? h("span", { class: "chip warn", text: "modified" }) : null,
       h("span", { class: "src-head-right" },
-        h("span", { class: "src-status", id: "srcStatus" }),
+        h("span", { class: "src-status", id: "srcStatus" }, lintTally(diags)),
         ro ? null : h("button", { class: "btn ghost", type: "button", text: "format", onClick: function () {
           try {
             S.sourceText = JSON.stringify(JSON.parse(S.sourceText), null, 2);
@@ -1080,17 +1193,40 @@
     container.appendChild(head);
 
     var gutter = h("div", { class: "src-gutter" });
+    // The highlight layer sits UNDER a transparent textarea, so the caret,
+    // selection and native editing all stay the textarea's job and the colours
+    // are purely decorative. The two only line up while their font, padding
+    // and white-space match exactly — see .src-hl / .src-editor in plan.css.
+    var hl = h("pre", { class: "src-hl", "aria-hidden": "true" });
     var ta = h("textarea", {
       class: "src-editor", spellcheck: "false", "data-focus-key": "plan-source",
       "aria-label": "Workflow JSON source"
     });
     ta.value = S.sourceText;
     if (ro) ta.setAttribute("readonly", "true");
-    ta.addEventListener("scroll", function () { gutter.scrollTop = ta.scrollTop; });
+    var strip = h("div", { class: "src-lint" });
+    function syncScroll() {
+      gutter.scrollTop = ta.scrollTop;
+      hl.scrollTop = ta.scrollTop;
+      hl.scrollLeft = ta.scrollLeft;
+    }
+    function goToLine(line) {
+      ta.scrollTop = Math.max(0, (line - 4) * SRC_LINE_H);
+      syncScroll();
+      ta.focus();
+    }
+    function repaintLint() {
+      var next = sourceDiagnostics(S.sourceText);
+      paintHighlight(hl, S.sourceText);
+      paintGutter(gutter, S.sourceText, next);
+      var status = document.getElementById("srcStatus");
+      if (status) { clear(status); status.className = "src-status"; status.appendChild(lintTally(next)); }
+      fillLintStrip(strip, next, goToLine);
+      syncScroll();
+    }
+    ta.addEventListener("scroll", syncScroll);
     ta.addEventListener("input", function () {
       S.sourceText = ta.value;
-      updateGutter(gutter, ta);
-      var status = document.getElementById("srcStatus");
       try {
         var parsed = JSON.parse(S.sourceText);
         S.sourceDiverged = false;
@@ -1102,28 +1238,36 @@
         } else {
           S.planDrafts[S.selected] = parsed;
         }
-        if (status) { status.textContent = ""; status.className = "src-status"; }
         refreshFooterOnly();
+        // Runner readiness is judged against the draft, so a retargeted step
+        // gets re-linted — but only once the typing settles.
+        scheduleSourceLint();
       } catch (e) {
         S.sourceDiverged = true;
-        if (status) { status.textContent = "invalid JSON: " + e.message; status.className = "src-status err"; }
       }
+      repaintLint();
     });
     // Source → plan sync: the nearest preceding "id": line is the step under
     // the cursor; selecting it keeps the inspector in step (pun intended).
     ta.addEventListener("keyup", syncCursorToSelection);
     ta.addEventListener("click", syncCursorToSelection);
 
-    var editWrap = h("div", { class: "src-editwrap" }, gutter, ta);
+    var editWrap = h("div", { class: "src-editwrap" }, gutter, h("div", { class: "src-code" }, hl, ta));
     container.appendChild(editWrap);
-    updateGutter(gutter, ta);
+    paintHighlight(hl, S.sourceText);
+    paintGutter(gutter, S.sourceText, diags);
+    fillLintStrip(strip, diags, goToLine);
+    container.appendChild(strip);
     renderSourceFoot(container, savedText);
+    // Readiness for the spec on screen, refreshed each time the tab is opened
+    // (a runner can have been fixed in Settings since the last look).
+    loadSourceLint();
 
     // Plan → source sync: a step picked in the plan scrolls into view here.
     if (S.sourceReveal) {
       var target = S.sourceReveal;
       S.sourceReveal = null;
-      revealInSource(ta, gutter, target);
+      revealInSource(ta, syncScroll, target);
     }
   }
 
@@ -1141,23 +1285,97 @@
     }
   }
 
-  function revealInSource(ta, gutter, stepId) {
+  function revealInSource(ta, syncScroll, stepId) {
     var needle = "\"id\": \"" + stepId + "\"";
     var idx = ta.value.indexOf(needle);
     if (idx === -1) return;
     var line = ta.value.slice(0, idx).split("\n").length - 1;
-    var lineH = 19; // keep in sync with .src-editor line-height in plan.css
-    ta.scrollTop = Math.max(0, (line - 4) * lineH);
-    gutter.scrollTop = ta.scrollTop;
+    ta.scrollTop = Math.max(0, (line - 4) * SRC_LINE_H);
+    syncScroll();
     var end = idx + needle.length;
     try { ta.setSelectionRange(idx, end); } catch (e) {}
   }
 
-  function updateGutter(gutter, ta) {
-    var lines = ta.value.split("\n").length;
-    var nums = new Array(lines);
-    for (var i = 0; i < lines; i++) nums[i] = i + 1;
-    gutter.textContent = nums.join("\n");
+  /**
+   * JSON tokens, in one pass. Deliberately tolerant: half-typed text is the
+   * normal state of this editor, so anything the scanner does not recognise
+   * is emitted as plain text rather than aborting the paint.
+   */
+  var TOKEN_RE = /("(?:[^"\\]|\\.)*"\s*:)|("(?:[^"\\]|\\.)*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|(\btrue\b|\bfalse\b|\bnull\b)|([{}[\],:])/g;
+  var TOKEN_CLASS = ["tok-key", "tok-str", "tok-num", "tok-lit", "tok-punct"];
+
+  function paintHighlight(pre, text) {
+    clear(pre);
+    TOKEN_RE.lastIndex = 0;
+    var at = 0, m;
+    while ((m = TOKEN_RE.exec(text))) {
+      if (m.index > at) pre.appendChild(document.createTextNode(text.slice(at, m.index)));
+      var cls = "";
+      for (var g = 1; g <= TOKEN_CLASS.length; g++) if (m[g] !== undefined) { cls = TOKEN_CLASS[g - 1]; break; }
+      pre.appendChild(h("span", { class: cls, text: m[0] }));
+      at = m.index + m[0].length;
+    }
+    // The trailing newline keeps the last line scrollable to the same offset
+    // the textarea reaches, so the two layers cannot drift at the bottom.
+    pre.appendChild(document.createTextNode(text.slice(at) + "\n"));
+  }
+
+  /** Line numbers, with a marker on every line a diagnostic points at. */
+  function paintGutter(gutter, text, diags) {
+    var marks = {};
+    (diags || []).forEach(function (d) {
+      if (d.line < 0) return;
+      // An error outranks a warning on a shared line: it is what stops a save.
+      if (marks[d.line] !== "err") marks[d.line] = d.severity;
+    });
+    clear(gutter);
+    var lines = text.split("\n").length;
+    for (var i = 0; i < lines; i++) {
+      var row = h("div", { class: "src-ln" + (marks[i] ? " " + marks[i] : "") });
+      if (marks[i]) row.appendChild(h("span", { class: "src-mark", text: marks[i] === "err" ? "✕" : "⚠" }));
+      row.appendChild(h("span", { text: String(i + 1) }));
+      gutter.appendChild(row);
+    }
+  }
+
+  /** The header's count of what the gutter is marking. */
+  function lintTally(diags) {
+    var errs = 0, warns = 0;
+    diags.forEach(function (d) { if (d.severity === "err") errs += 1; else warns += 1; });
+    if (!errs && !warns) return h("span", { class: "lint-ok", text: "no problems" });
+    var box = h("span", { class: "lint-tally" });
+    if (errs) box.appendChild(h("span", { class: "lint-n err", text: errs + (errs === 1 ? " error" : " errors") }));
+    if (warns) box.appendChild(h("span", { class: "lint-n warn", text: warns + (warns === 1 ? " warning" : " warnings") }));
+    return box;
+  }
+
+  /**
+   * The strip under the editor: what is wrong, on which line, and the one
+   * thing that fixes it. Clicking a row scrolls the editor to the line, which
+   * is the whole point of naming the line in the first place.
+   */
+  function fillLintStrip(strip, diags, goToLine) {
+    clear(strip);
+    strip.style.display = diags.length ? "" : "none";
+    // More than a handful is a broken file, not a list to read — the count in
+    // the header stays honest either way.
+    diags.slice(0, 4).forEach(function (d) {
+      var row = h("div", { class: "lint-row " + d.severity });
+      row.appendChild(h("span", { class: "lint-icon", text: d.severity === "err" ? "✕" : "⚠" }));
+      var body = h("div", { class: "lint-body" });
+      body.appendChild(h("div", { class: "lint-msg",
+        text: (d.line >= 0 ? "line " + (d.line + 1) + " · " : "") + d.message }));
+      var sub = h("div", { class: "lint-sub" }, h("span", { text: d.detail }));
+      if (d.action) {
+        sub.appendChild(h("span", { text: " · " }));
+        sub.appendChild(h("button", { class: "lint-action", type: "button", text: d.action,
+          onClick: function (e) { e.stopPropagation(); ST.settings.open("runners"); } }));
+      }
+      body.appendChild(sub);
+      row.appendChild(body);
+      if (d.line >= 0) row.addEventListener("click", function () { goToLine(d.line); });
+      strip.appendChild(row);
+    });
   }
 
   function renderSourceFoot(container, savedText) {
@@ -1338,6 +1556,7 @@
     rewriteStepRefs: rewriteStepRefs,
     save: save,
     selectStep: selectStep,
+    sourceDiagnostics: sourceDiagnostics,
     toggleDisabled: toggleDisabled,
     validate: validate,
   };

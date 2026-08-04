@@ -822,6 +822,7 @@ function checkCsrf(
  *   DELETE /api/workflows/:name     delete a user workflow (authoring)
  *   POST   /api/workflows/generate  SSE: LLM-draft a workflow + save (authoring)
  *   POST   /api/workflows/:name/plan  dry-run plan (no agents executed)
+ *   POST   /api/workflows/:name/lint  per-step dispatch warnings for a draft spec
  *   GET    /api/meta                agents + apis, models, efforts, health (authoring)
  *   GET    /api/doctor              agent + api health
  *   GET    /api/history             past-run summaries (newest first)
@@ -1490,6 +1491,51 @@ async function handle(
       sendJson(res, result.ok ? 200 : 400, result);
       return;
     }
+  }
+
+  // Lint endpoint: POST /api/workflows/:name/lint
+  //
+  // The source editor's warning gutter. Deliberately not the plan endpoint:
+  // this runs on a debounce while someone types, so it may not touch history,
+  // the cache, or the planner — only the readiness the launch sheet would
+  // report, from the same authority (stepDispatchIssues), so the two surfaces
+  // can never disagree about which steps would be skipped.
+  const lintMatch = path.match(/^\/api\/workflows\/([^/]+)\/lint$/);
+  if (method === "POST" && lintMatch) {
+    const name = decodeURIComponent(lintMatch[1]!);
+    if (!isValidWorkflowName(name)) {
+      sendJson(res, 400, { error: "invalid workflow name" });
+      return;
+    }
+    const spec = deps.host.listWorkflows()[name];
+    if (!spec) {
+      sendJson(res, 404, { error: `unknown workflow '${name}'` });
+      return;
+    }
+    const body = await readBody(req);
+    let parsed: { spec?: unknown };
+    try {
+      parsed = body ? JSON.parse(body) : {};
+    } catch {
+      sendJson(res, 400, { error: "invalid JSON body" });
+      return;
+    }
+    let effectiveSpec = spec;
+    if (parsed.spec !== undefined) {
+      const override = parseSpecOverride(parsed.spec, name);
+      if (!override.ok) {
+        sendJson(res, 400, { error: override.error });
+        return;
+      }
+      effectiveSpec = override.spec;
+    }
+    // Unknown health is not a prediction: with no doctor results the honest
+    // answer is "no warnings", not "every runner is broken".
+    const doctor = deps.doctor?.() ?? [];
+    sendJson(res, 200, {
+      issues: doctor.length > 0 ? (deps.host.stepDispatchIssues?.(effectiveSpec) ?? []) : [],
+    });
+    return;
   }
 
   // Plan (dry-run) endpoint: POST /api/workflows/:name/plan

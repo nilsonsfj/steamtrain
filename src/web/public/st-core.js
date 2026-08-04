@@ -189,6 +189,11 @@ window.Steamtrain = (function () {
     sourceDiverged: false,
     // Step id the source view should scroll to / highlight (plan → source sync).
     sourceReveal: null,
+    // Server-judged dispatch warnings for the source view's gutter, as
+    // { name, issues } so a late response for a workflow the reader has since
+    // left is discarded rather than marking the wrong file.
+    sourceLint: null,
+    sourceLintTimer: null,
     // Recent completed runs of the selected workflow (rail footer and header
     // context). Fetched on selection.
     recentRuns: [],
@@ -1301,7 +1306,7 @@ window.Steamtrain = (function () {
     S.narrationFreshPlayed = null;
     S.arrivalCtaFocused = false;
     S.planSelection = [];
-    S.sourceText = null; S.sourceDiverged = false; S.sourceReveal = null;
+    S.sourceText = null; S.sourceDiverged = false; S.sourceReveal = null; S.sourceLint = null;
     S.dryRunPlan = null;
     // Leaving an attached run restores Plan / Describe and clears compact chrome.
     ST.run.setRunning(false);
