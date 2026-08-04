@@ -10,6 +10,7 @@
   var S = ST.state;
   var h = ST.h;
   var agentHealthMeta = ST.agentHealthMeta;
+  var api = ST.api;
   var apiAuth = ST.apiAuth;
   var apiHealthMeta = ST.apiHealthMeta;
   var clear = ST.clear;
@@ -57,6 +58,7 @@
   var limitsDiscardBtn = null;
   var runnersSaveBtn = null;
   var runnersDiscardBtn = null;
+  var runnerUsage = null;      // { runs, counts, available } from GET /api/runner-usage
 
   function open(section) {
     var hash = (window.SteamtrainReducer && SteamtrainReducer.settingsDeepLink)
@@ -70,6 +72,7 @@
     activeSection = SECTIONS.indexOf(section) >= 0 ? section : SECTIONS[0];
     editingRow = null;
     if (!draft && !configError && !configLoading && !isReadOnly()) loadConfig();
+    loadRunnerUsage();
     // Health may still be landing on first visit (or for a read-only session,
     // which never calls loadConfig at all) — keep the page live until it does.
     if (!(S.doctor || []).length && !(S.apiDoctor || []).length) ST.pollDoctor(0, paint);
@@ -336,8 +339,35 @@
     return h("div", { class: "runner-cols" },
       h("span", null), h("span", { text: "Name" }), h("span", { text: "Kind" }),
       h("span", { text: "Binary / endpoint" }), h("span", { text: "Default model" }),
-      h("span", { text: "Scope" }), h("span", null)
+      h("span", { text: "Scope" }), h("span", { class: "num", text: "Runs" }), h("span", null)
     );
+  }
+
+  /**
+   * How many recorded runs this runner did work in, or "" when the server has
+   * no history to count. Blank, not "0": never having been used and never
+   * having been counted are different claims, and only one of them is ours to
+   * make.
+   */
+  function runsCell(id) {
+    if (!runnerUsage || !runnerUsage.available) return h("span", { class: "runs", text: "" });
+    var n = runnerUsage.counts[id] || 0;
+    return h("span", {
+      class: "runs", text: String(n),
+      title: n + " of the last " + runnerUsage.runs + " recorded run" + (runnerUsage.runs === 1 ? "" : "s")
+    });
+  }
+
+  /**
+   * Runner usage is history, not config: it changes when runs happen, not when
+   * settings are edited, so it is fetched once per visit and never written.
+   */
+  function loadRunnerUsage() {
+    api("GET", "/api/runner-usage").then(function (r) {
+      if (r.status !== 200 || !r.body) return;
+      runnerUsage = r.body;
+      paint();
+    }).catch(function () {});
   }
 
   /**
@@ -500,6 +530,7 @@
       detailEl,
       h("span", null, modelText),
       h("span", { class: "scope", text: scopeText }),
+      runsCell(rowData.id),
       rowActs(kind, rowData, off)
     );
 

@@ -499,3 +499,40 @@ describe("source lint endpoint", () => {
     expect(foreign.status).toBe(400);
   });
 });
+
+describe("runner usage endpoint", () => {
+  it("reports the runs each runner worked in, and says when it cannot", async () => {
+    const history = createInMemoryHistoryStore();
+    const { server } = makeServer({ history });
+    const base = await start(server);
+
+    // The in-memory store has no runnerUsage, so the honest answer is that
+    // the column has nothing to show — not that every runner is unused.
+    const blind = await fetch(`${base}/api/runner-usage`);
+    expect(blind.status).toBe(200);
+    expect((await blind.json()) as unknown).toEqual({ runs: 0, counts: {}, available: false });
+
+    const counting = createInMemoryHistoryStore();
+    counting.runnerUsage = async () => ({ runs: 7, counts: { claude: 5 } });
+    const withCounts = makeServer({ history: counting });
+    const base2 = await start(withCounts.server);
+    const res = await fetch(`${base2}/api/runner-usage`);
+    expect((await res.json()) as unknown).toEqual({
+      runs: 7,
+      counts: { claude: 5 },
+      available: true,
+    });
+  });
+
+  it("degrades to blank rather than a 500 when the store throws", async () => {
+    const broken = createInMemoryHistoryStore();
+    broken.runnerUsage = async () => {
+      throw new Error("history is unreadable");
+    };
+    const { server } = makeServer({ history: broken });
+    const base = await start(server);
+    const res = await fetch(`${base}/api/runner-usage`);
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { available: boolean }).toMatchObject({ available: false });
+  });
+});

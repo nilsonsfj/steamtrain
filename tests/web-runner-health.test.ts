@@ -195,6 +195,8 @@ interface Mounted {
   pickCadence: (label: string) => void;
   /** Labels of the buttons in the section header. */
   headActions: () => string[];
+  /** Column headers of the runner table, in order. */
+  cols: () => string[];
   /** Flattened text of the settings nav footer. */
   navFoot: () => string;
   /** Flattened text of the section footer band. */
@@ -224,6 +226,8 @@ async function mountSettings(opts: {
   maxConcurrency?: number;
   version?: string;
   cadence?: string;
+  /** What GET /api/runner-usage answers with, for the Runs column. */
+  usage?: { runs: number; counts: Record<string, number>; available: boolean };
 }): Promise<Mounted> {
   const config = {
     canGlobal: true,
@@ -268,6 +272,15 @@ async function mountSettings(opts: {
         node.text = text;
       },
       field: (_label: string, input: StubEl) => input,
+    },
+    api: (_method: string, path: string) => {
+      if (path === "/api/runner-usage") {
+        return Promise.resolve({
+          status: 200,
+          body: opts.usage ?? { runs: 0, counts: {}, available: false },
+        });
+      }
+      return Promise.resolve({ status: 200, body: {} });
     },
     apiAuth: (method: string, _path: string, body?: Record<string, unknown>) => {
       if (method === "PUT") {
@@ -371,6 +384,10 @@ async function mountSettings(opts: {
     cadence,
     pickCadence,
     headActions,
+    cols: () =>
+      (collect(root, (n) => n.className === "runner-cols")[0]?.children ?? []).map((c) =>
+        flatText(c),
+      ),
     navFoot,
     foot,
   };
@@ -551,6 +568,27 @@ describe("runner dials — concurrency and health cadence", () => {
     expect(ui.cadence()).toEqual(["Manual", "On launch*", "Every 60s"]);
     ui.pickCadence("Every 60s");
     expect(ui.cadence()).toEqual(["Manual", "On launch", "Every 60s*"]);
+  });
+
+  it("counts the runs each runner did work in", async () => {
+    const ui = await mountSettings({
+      ...ONE_OK,
+      usage: { runs: 12, counts: { claude: 8 }, available: true },
+    });
+    expect(ui.cols()).toContain("Runs");
+    const claude = ui.rows().find((r) => r.text.startsWith("claude"));
+    expect(claude?.text).toContain("8");
+  });
+
+  // "Never used" and "never counted" are different claims, and a server with
+  // no history has only made the second one.
+  it("leaves the count blank when the server has no history to count", async () => {
+    const ui = await mountSettings({
+      ...ONE_OK,
+      usage: { runs: 0, counts: {}, available: false },
+    });
+    const claude = ui.rows().find((r) => r.text.startsWith("claude"));
+    expect(claude?.text).not.toMatch(/\b0\b/);
   });
 
   it("puts the section's own verbs in its header", async () => {

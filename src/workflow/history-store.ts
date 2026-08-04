@@ -5,8 +5,10 @@ import {
   RUN_RECORD_VERSION,
   type RunRecord,
   type RunRecordSummary,
+  type RunnerUsage,
   computeRunTotals,
   runRecordSummary,
+  tallyRunnerUsage,
 } from "./history";
 
 export const WORKFLOW_HISTORY_DIR = ".steamtrain/history";
@@ -25,6 +27,12 @@ export interface WorkflowHistoryStore {
   remove(id: string): Promise<void>;
   /** Delete every record. */
   clearAll(): Promise<void>;
+  /**
+   * How many recorded runs each runner took part in. Optional: a store that
+   * cannot answer simply leaves the settings table's Runs column empty rather
+   * than making the caller read every record itself.
+   */
+  runnerUsage?(limit?: number): Promise<RunnerUsage>;
 }
 
 export function createWorkflowHistoryStore(
@@ -38,6 +46,7 @@ export function createWorkflowHistoryStore(
     get: (id) => getRunRecord(rootDir, id),
     remove: (id) => removeRunRecord(rootDir, id),
     clearAll: () => clearAllRunRecords(rootDir),
+    runnerUsage: (max) => listRunnerUsage(rootDir, max),
   };
 }
 
@@ -56,6 +65,25 @@ export async function saveRunRecord(
 }
 
 export async function listRunRecords(rootDir: string, limit?: number): Promise<RunRecordSummary[]> {
+  const records = await readAllRunRecords(rootDir);
+  const summaries = records.map(runRecordSummary);
+  summaries.sort((a, b) => b.startedAt - a.startedAt);
+  return typeof limit === "number" ? summaries.slice(0, limit) : summaries;
+}
+
+/**
+ * Per-runner run counts, newest runs first when limited. Reads the same files
+ * `list` does — the records are parsed whole either way, so this projection
+ * costs the caller nothing beyond a listing it was already paying for.
+ */
+export async function listRunnerUsage(rootDir: string, limit?: number): Promise<RunnerUsage> {
+  const records = await readAllRunRecords(rootDir);
+  records.sort((a, b) => b.startedAt - a.startedAt);
+  return tallyRunnerUsage(typeof limit === "number" ? records.slice(0, limit) : records);
+}
+
+/** Every parsed record in the directory, unsorted; corrupt files are skipped. */
+async function readAllRunRecords(rootDir: string): Promise<RunRecord[]> {
   let entries: string[];
   try {
     entries = await readdir(rootDir);
@@ -71,11 +99,7 @@ export async function listRunRecords(rootDir: string, limit?: number): Promise<R
     const batchResults = await Promise.all(batch.map((name) => readRecord(join(rootDir, name))));
     records.push(...batchResults);
   }
-  const summaries = records
-    .filter((record): record is RunRecord => record !== undefined)
-    .map(runRecordSummary);
-  summaries.sort((a, b) => b.startedAt - a.startedAt);
-  return typeof limit === "number" ? summaries.slice(0, limit) : summaries;
+  return records.filter((record): record is RunRecord => record !== undefined);
 }
 
 export async function getRunRecord(rootDir: string, id: string): Promise<RunRecord | undefined> {

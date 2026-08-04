@@ -229,6 +229,38 @@ export function computeRunTotals(phases: HistoryPhase[]): RunTotals {
   return totals;
 }
 
+/** How many recorded runs each runner took part in (settings' Runs column). */
+export interface RunnerUsage {
+  /** Runs scanned, so a count can be read as "N of these". */
+  runs: number;
+  /** Runner id → runs it ran at least one step in. */
+  counts: Record<string, number>;
+}
+
+/**
+ * Tally which runners actually did work, per run rather than per step: the
+ * question the settings table asks is "how much is this runner used", and a
+ * fan-out of thirty steps onto one agent is still one run's worth of evidence.
+ * A runner that appears twice in the same run is therefore counted once.
+ */
+export function tallyRunnerUsage(records: Iterable<RunRecord>): RunnerUsage {
+  const usage: RunnerUsage = { runs: 0, counts: {} };
+  for (const record of records) {
+    usage.runs += 1;
+    const seen = new Set<string>();
+    for (const phase of record.phases ?? []) {
+      for (const step of phase.steps ?? []) {
+        // Cached steps replayed a previous run's work; the runner did not run
+        // this time, and counting it would inflate a busy-looking agent.
+        if (step.cached || step.status === "pending" || !step.agent) continue;
+        seen.add(step.agent);
+      }
+    }
+    for (const agent of seen) usage.counts[agent] = (usage.counts[agent] ?? 0) + 1;
+  }
+  return usage;
+}
+
 /**
  * The canonical one-line run summary ("X/Y ok · N failed · …") shared by the
  * CLI, TUI, and (mirrored in JS) the web UI, so all three surfaces format the

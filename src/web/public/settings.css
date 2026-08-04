@@ -158,10 +158,18 @@
 .runner-cols,
 .runner-row {
   display: grid;
-  /* Last column holds three hit targets: on/off, Edit, remove. */
-  grid-template-columns: 14px 150px 92px 1fr 176px 96px 132px;
-  gap: 14px;
+  /* Last column holds three hit targets: on/off, Edit, remove. The fixed
+     columns are sized so the row still fits beside the 236px nav without a
+     horizontal scrollbar once Runs is in. */
+  grid-template-columns: 14px 132px 64px 1fr 150px 84px 44px 132px;
+  gap: 12px;
   align-items: center;
+}
+.runner-cols .num,
+.runner-row .runs {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
 }
 .runner-cols {
   padding: 12px 4px 8px;
@@ -188,8 +196,13 @@
   color: var(--text);
   font-weight: 500;
 }
+/* The flexible column: a long binary path must wrap inside it rather than
+   widen the row past the pane (grid items refuse to shrink below their
+   content without this). */
 .runner-row .detail {
   color: var(--muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .runner-row .detail .sub {
   color: var(--dim);

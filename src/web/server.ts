@@ -825,6 +825,7 @@ function checkCsrf(
  *   POST   /api/workflows/:name/lint  per-step dispatch warnings for a draft spec
  *   GET    /api/meta                agents + apis, models, efforts, health (authoring)
  *   GET    /api/doctor              agent + api health
+ *   GET    /api/runner-usage       runs each runner took part in (settings' Runs column)
  *   GET    /api/history             past-run summaries (newest first)
  *   GET    /api/history/:id         one past run's full record
  *   DELETE /api/history             clear all past runs
@@ -1141,6 +1142,24 @@ async function handle(
       modelClasses: listModelClasses(deps.config),
       modelFamilies: listModelFamilyMeta(),
     });
+    return;
+  }
+
+  // How much each runner is actually used, for the settings table's Runs
+  // column. A GET, and a read in every sense: viewers see it too.
+  if (method === "GET" && path === "/api/runner-usage") {
+    if (!deps.history?.runnerUsage) {
+      // No history (or a store that cannot tally) is not zero usage — the
+      // column has nothing to say and the client leaves it blank.
+      sendJson(res, 200, { runs: 0, counts: {}, available: false });
+      return;
+    }
+    try {
+      const usage = await deps.history.runnerUsage();
+      sendJson(res, 200, { ...usage, available: true });
+    } catch {
+      sendJson(res, 200, { runs: 0, counts: {}, available: false });
+    }
     return;
   }
 
