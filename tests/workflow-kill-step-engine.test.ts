@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { AgentAdapter, AgentRunOptions } from "../src/agents";
 import type { AgentEvent, AgentId } from "../src/types/events";
 import {
+  type StepResult,
   type WorkflowDeps,
   type WorkflowEvent,
   type WorkflowRunControl,
   type WorkflowSpec,
   createWorkflowRunControl,
+  markKilledResult,
   runWorkflow,
 } from "../src/workflow";
 
@@ -211,6 +213,49 @@ describe("kill step", () => {
 
     expect(beforeStart).toEqual({ ok: false, error: "step 'after' is not running" });
     expect(afterDone).toEqual({ ok: false, error: "step 'slow' is not running any more" });
+  });
+
+  /**
+   * A step is killable for exactly as long as it is executing, so a kill can
+   * be accepted in the window between the work finishing and the engine
+   * unregistering it. What the mark does in that window is not reachable from
+   * the event stream (the abort would land mid-execution), so the decision
+   * itself is exercised here.
+   */
+  describe("marking a result when the kill lands late", () => {
+    const result = (over: Partial<StepResult>): StepResult => ({
+      stepId: "s",
+      ok: false,
+      output: "",
+      durationMs: 1,
+      ...over,
+    });
+
+    it("leaves a step that finished first alone", () => {
+      // Failing it would discard finished work and cascade the loss downstream
+      // over a margin of microseconds.
+      const done = markKilledResult(result({ ok: true, output: "the work" }), "human:web");
+      expect(done).toMatchObject({ ok: true, output: "the work" });
+      expect(done.killed).toBeUndefined();
+      expect(done.error).toBeUndefined();
+    });
+
+    it("replaces a bare cancellation, which says nothing a kill does not", () => {
+      expect(markKilledResult(result({ error: "cancelled" }), "human:web")).toMatchObject({
+        killed: true,
+        error: "killed by human:web",
+      });
+      expect(markKilledResult(result({}), undefined)).toMatchObject({
+        killed: true,
+        error: "killed",
+      });
+    });
+
+    it("keeps a real cause and appends the attribution", () => {
+      expect(
+        markKilledResult(result({ error: "provider returned 500" }), "human:cli"),
+      ).toMatchObject({ killed: true, error: "provider returned 500 (killed by human:cli)" });
+    });
   });
 
   it("refuses before the run starts and after it finishes", async () => {

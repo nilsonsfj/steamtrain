@@ -196,6 +196,7 @@ export {
 } from "./cost";
 export {
   AGENT_QUESTION_PROTOCOL,
+  markKilledResult,
   parseAgentQuestion,
   runWorkflow,
   type WorkflowDeps,

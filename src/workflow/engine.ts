@@ -555,6 +555,32 @@ function killInFlightStep(env: RunEnv, stepId: string, by?: string): StepKillRes
 }
 
 /**
+ * Record a kill on the step's result, in place.
+ *
+ * Two things this deliberately does NOT do:
+ *
+ * A kill can lose the race. A step is registered as killable for exactly as
+ * long as it is executing, so a kill is accepted right up to the moment it
+ * settles — and by then the work may be done and successful, with nothing left
+ * for the abort to stop. Failing the step here would throw away a finished
+ * result and cascade that loss to everything downstream on a margin of
+ * microseconds, so a step that got there first keeps its result.
+ *
+ * And it does not overwrite a real cause: the adapter's error survives an
+ * abort (see the error/cancelled precedence in executeAgentStep), and "why it
+ * was failing anyway" is the more useful half. Only a bare cancellation — the
+ * abort with nothing else to report — is replaced outright.
+ */
+export function markKilledResult(result: StepResult, by?: string): StepResult {
+  if (result.ok) return result;
+  const cause = result.error;
+  const attribution = by ? `killed by ${by}` : "killed";
+  result.killed = true;
+  result.error = cause && cause !== "cancelled" ? `${cause} (${attribution})` : attribution;
+  return result;
+}
+
+/**
  * Validate a mid-run edit against the live spec: the step must exist, must not
  * have started in this run, and every patched field must exist on its kind.
  * Returns the human-readable reason the edit is rejected, or undefined when it
@@ -1469,13 +1495,10 @@ async function runSingleStep(
   // rather than the cause being overwritten with "killed".
   if (env.killedSteps.has(step.id)) {
     const by = env.killedSteps.get(step.id);
+    // Consumed either way: a loop workflow runs this step again, and a stale
+    // entry would kill the next iteration for a request nobody made.
     env.killedSteps.delete(step.id);
-    const cause = execution.result.error;
-    const attribution = by ? `killed by ${by}` : "killed";
-    execution.result.ok = false;
-    execution.result.killed = true;
-    execution.result.error =
-      cause && cause !== "cancelled" ? `${cause} (${attribution})` : attribution;
+    markKilledResult(execution.result, by);
   }
 
   if (execution.gate) {
