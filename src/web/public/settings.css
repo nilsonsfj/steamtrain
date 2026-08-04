@@ -633,9 +633,12 @@
 }
 
 /* Retarget-all bar in Configure modal */
+/* A panel inside the Configure modal, so it has to sit above the modal's own
+   `--surface` — matching it would leave the bar defined by nothing but its
+   border, and a blue one at that, which reads as state the bar does not have. */
 .bulk-retarget {
-  background: var(--surface);
-  border: 1px solid #2a4a66;
+  background: var(--raised);
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
   padding: 14px 14px 12px;
   margin: 6px 0 16px;
@@ -667,11 +670,9 @@
 .bulk-retarget-action {
   display: flex;
   align-items: end;
-  padding-bottom: 1px;
 }
 .bulk-apply {
   white-space: nowrap;
-  min-height: 34px;
 }
 .bulk-flash {
   display: none;

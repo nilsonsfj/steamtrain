@@ -196,6 +196,9 @@
   max-width: 52ch;
 }
 
+/* Same 32px box as `.btn`: a field and the button acting on it sit on one row
+   in the retarget bar and the settings editors, so they have to agree. 6px of
+   padding around a 12.5px line is what adds up to 32 with the border. */
 input.txt,
 select.sel,
 textarea.ta {
@@ -203,9 +206,14 @@ textarea.ta {
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
   border: 1px solid rgba(70, 86, 104, 0.85);
-  border-radius: 9px;
-  padding: 9px 11px;
+  border-radius: var(--r-md);
+  padding: 6px 10px;
+  min-height: 32px;
   font: inherit;
+  font-size: 12.5px;
+  /* Pinned rather than `normal`: a select's intrinsic line box is a pixel
+     taller than an input's, which is enough to break a row that mixes them. */
+  line-height: 18px;
   transition: border-color 0.15s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.15s
     cubic-bezier(0.22, 1, 0.36, 1), background 0.15s cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -234,6 +242,9 @@ textarea.ta:focus {
 }
 select.sel {
   cursor: pointer;
+  /* A select will not shrink to `min-height` the way an input does — without
+     this it renders a pixel taller than the field beside it. */
+  height: 32px;
 }
 input.txt.invalid,
 textarea.ta.invalid,
