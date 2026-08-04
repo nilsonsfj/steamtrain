@@ -561,7 +561,12 @@ describe("runner dials — concurrency and health cadence", () => {
   it("names the file a save lands in, and the version that is running", async () => {
     const ui = await mountSettings({ ...ONE_OK, version: "0.14.2" });
     expect(ui.navFoot()).toContain("v0.14.2");
-    expect(ui.foot()).toContain("/repo/steamtrain.json");
+    // One save can land in two files: runner rows follow their scope column
+    // (global by default), only the ceiling is project-scoped. The footer must
+    // not claim the project file takes everything.
+    expect(ui.foot()).toContain("the concurrency ceiling to /repo/steamtrain.json");
+    expect(ui.foot()).toMatch(/each runner row is written to the file its scope names/);
+    expect(ui.foot()).not.toMatch(/Changes are written to \/repo/);
   });
 
   it("leaves the version line out rather than inventing one", async () => {

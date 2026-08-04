@@ -793,12 +793,19 @@
     );
   }
 
+  /**
+   * One save can land in two different files, so the footer must not name just
+   * one: runner rows follow their own scope column (global by default, per the
+   * rail's scope note), while the concurrency ceiling is project-scoped like
+   * the timeouts. Naming only `configPath` here would tell a reader their
+   * global agent edits go to ./steamtrain.json, which is not where they go.
+   */
   function buildRunnersFoot() {
     var foot = h("div", { class: "settings-foot" });
     var path = (S.projectConfig || {}).configPath;
     foot.appendChild(h("span", { class: "probed", text: path
-      ? "Changes are written to " + path + " when you save."
-      : "Changes are written to the config file when you save." }));
+      ? "On save, each runner row is written to the file its scope names; the concurrency ceiling to " + path + "."
+      : "On save, each runner row is written to the file its scope names." }));
     var actions = h("div", { class: "actions" });
     if (!isReadOnly()) {
       runnersDiscardBtn = h("button", { class: "btn small", type: "button", text: "Discard" });

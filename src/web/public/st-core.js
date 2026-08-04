@@ -1178,6 +1178,9 @@ window.Steamtrain = (function () {
   // cadence) goes through recheckHealth so they all update the same state and
   // repaint the same surfaces.
   var HEALTH_CADENCES = ["manual", "launch", "every60"];
+  // Paired with the "Every 60s" label in the settings segmented control — the
+  // two have to move together.
+  var HEALTH_POLL_MS = 60000;
   var HEALTH_CADENCE_KEY = "steamtrain.healthCadence";
   var healthTimer = null;
   var recheckInFlight = null;
@@ -1204,7 +1207,7 @@ window.Steamtrain = (function () {
     if (healthTimer) { clearInterval(healthTimer); healthTimer = null; }
     // POST /api/doctor is a control-plane write, so viewers never get the timer.
     if (healthCadence() !== "every60" || isReadOnly()) return;
-    healthTimer = setInterval(function () { recheckHealth(); }, 60000);
+    healthTimer = setInterval(function () { recheckHealth(); }, HEALTH_POLL_MS);
   }
   /** Re-probe now, unless one is already in flight (the timer can overlap a click). */
   function recheckHealth() {
