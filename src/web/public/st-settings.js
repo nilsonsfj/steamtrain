@@ -128,7 +128,13 @@
     var wf = cfg.workflowTimeoutSec;
     return { stepMin: stepMin, wfMin: wf ? Math.round(wf / 60) : "", auto: !wf };
   }
-  function agentsDirty() { return Boolean(draft) && JSON.stringify(draft) !== originalSnapshot; }
+  /**
+   * Whether the Runners draft differs from what was loaded — over the WHOLE
+   * draft, not just the agent rows: moving the concurrency slider is an
+   * unsaved change like any other, and anything added to the draft later is
+   * covered without touching this.
+   */
+  function runnersDirty() { return Boolean(draft) && JSON.stringify(draft) !== originalSnapshot; }
 
   // ---- concurrency ceiling ----------------------------------------------------
   // Max steps run in parallel within a phase. The server sends the resolved
@@ -810,7 +816,7 @@
   /** Keep Save/Discard in step with the draft without repainting the whole page
    *  — the concurrency slider fires on every drag tick. */
   function syncRunnersFoot() {
-    var dirty = agentsDirty();
+    var dirty = runnersDirty();
     if (runnersDiscardBtn) runnersDiscardBtn.disabled = !dirty;
     if (runnersSaveBtn) runnersSaveBtn.disabled = !dirty;
   }

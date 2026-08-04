@@ -656,6 +656,12 @@ describe("health re-probe cadence", () => {
   // the read token mints a viewer session. Whichever way it goes, the timer
   // has to be re-decided rather than left as the old session set it.
   it("re-decides the timer on reauth, in both directions", () => {
+    // Structural, and deliberately so: the behavioral half below proves the
+    // cadence reacts to a capability change, but only this line ties that to
+    // the REAUTH path — driving doReauth for real would need the whole overlay
+    // DOM. Delete it and the rest of this test still passes with the fix
+    // reverted. Reformatting the reauth handler may need the window widened;
+    // that is the cost of the only guard there is.
     expect(coreJs).toMatch(/dismissReauthOverlay\(\)[\s\S]{0,900}?applyHealthCadence\(\)/);
 
     const full = mountCore({ cadence: "every60" });
