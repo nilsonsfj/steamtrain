@@ -1,13 +1,14 @@
 /**
- * Contracts for the two surfaces that report runner readiness in the web UI:
- * the topbar health chips (st-shell.js) and the Runners settings table
- * (st-settings.js + settings.css).
+ * Contracts for the surfaces that report runner readiness in the web UI: the
+ * topbar health chips (st-shell.js), the Runners settings table
+ * (st-settings.js + settings.css), and the re-probe cadence behind both
+ * (st-core.js).
  *
- * Both are plain IIFEs over `window.Steamtrain`, so both run here for real: a
- * stub namespace with an `h()` that builds inert nodes is enough to paint them,
- * read back what they rendered, and fire the click handlers they attached. Only
- * the paint-time invariants that live in the stylesheet (hit-target size, how
- * absent rows recede) are asserted against the CSS text.
+ * All three are plain IIFEs over `window.Steamtrain`, so all three run here for
+ * real: a stub namespace with an `h()` that builds inert nodes is enough to
+ * paint them, read back what they rendered, and fire the click handlers they
+ * attached. Only the paint-time invariants that live in the stylesheet
+ * (hit-target size, how absent rows recede) are asserted against the CSS text.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -18,6 +19,7 @@ const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src",
 const shellJs = readFileSync(join(PUBLIC_DIR, "st-shell.js"), "utf8");
 const settingsJs = readFileSync(join(PUBLIC_DIR, "st-settings.js"), "utf8");
 const settingsCss = readFileSync(join(PUBLIC_DIR, "settings.css"), "utf8");
+const coreJs = readFileSync(join(PUBLIC_DIR, "st-core.js"), "utf8");
 
 interface StubEl {
   tag: string;
@@ -565,6 +567,110 @@ describe("runner dials — concurrency and health cadence", () => {
   it("leaves the version line out rather than inventing one", async () => {
     const ui = await mountSettings(ONE_OK);
     expect(ui.navFoot()).not.toMatch(/\bv\d/);
+  });
+});
+
+/**
+ * Loads st-core.js for real against stub globals. `setInterval`/`clearInterval`
+ * and `localStorage` are passed as parameters so they shadow Node's, which lets
+ * the test see exactly which timers the cadence starts and stops.
+ */
+function mountCore(opts: { cadence?: string; capability?: string } = {}) {
+  const store: Record<string, string> = {};
+  if (opts.cadence) store["steamtrain.healthCadence"] = opts.cadence;
+  const localStorage = {
+    getItem: (key: string) => store[key] ?? null,
+    setItem: (key: string, value: string) => {
+      store[key] = value;
+    },
+  };
+  let nextTimer = 1;
+  const live = new Set<number>();
+  const setInterval = (_fn: () => void, _ms: number) => {
+    const id = nextTimer++;
+    live.add(id);
+    return id;
+  };
+  const clearInterval = (id: number) => {
+    live.delete(id);
+  };
+  const window: Record<string, unknown> = {};
+  new Function(
+    "window",
+    "document",
+    "localStorage",
+    "setInterval",
+    "clearInterval",
+    "SteamtrainReducer",
+    coreJs,
+    // st-core reads a couple of reducer constants at load time; the cadence
+    // path never touches the reducer, so empty stubs are enough.
+  )(window, { getElementById: () => null }, localStorage, setInterval, clearInterval, {});
+  const ST = window.Steamtrain as Record<string, unknown> & {
+    state: Record<string, unknown>;
+    healthCadence: () => string;
+    setHealthCadence: (next: string) => void;
+  };
+  ST.state.capability = opts.capability ?? "full";
+  return { ST, store, timers: () => live.size };
+}
+
+describe("health re-probe cadence", () => {
+  it("defaults to on-launch when nothing has been chosen", () => {
+    expect(mountCore().ST.healthCadence()).toBe("launch");
+  });
+
+  it("ignores a stored value it does not recognise instead of honouring it", () => {
+    expect(mountCore({ cadence: "hourly" }).ST.healthCadence()).toBe("launch");
+    // …and refuses to store one.
+    const mounted = mountCore();
+    mounted.ST.setHealthCadence("hourly");
+    expect(mounted.store["steamtrain.healthCadence"]).toBeUndefined();
+    expect(mounted.ST.healthCadence()).toBe("launch");
+  });
+
+  it("runs a timer only for the every-60s cadence, and stops it on the way out", () => {
+    const { ST, timers } = mountCore();
+    expect(timers()).toBe(0);
+    ST.setHealthCadence("every60");
+    expect(timers()).toBe(1);
+    // Re-picking the same cadence must not leave a second timer behind.
+    ST.setHealthCadence("every60");
+    expect(timers()).toBe(1);
+    ST.setHealthCadence("manual");
+    expect(timers()).toBe(0);
+  });
+
+  // POST /api/doctor is a control-plane write, so a viewer polling it would
+  // just collect 403s once a minute.
+  it("never gives a viewer session the timer", () => {
+    const { ST, timers, store } = mountCore({ capability: "read" });
+    ST.setHealthCadence("every60");
+    expect(timers()).toBe(0);
+    // The preference is still recorded — it applies if the session gains
+    // full capability later.
+    expect(store["steamtrain.healthCadence"]).toBe("every60");
+  });
+
+  // Reauth can land on a different capability than the session that expired:
+  // the read token mints a viewer session. Whichever way it goes, the timer
+  // has to be re-decided rather than left as the old session set it.
+  it("re-decides the timer on reauth, in both directions", () => {
+    expect(coreJs).toMatch(/dismissReauthOverlay\(\)[\s\S]{0,900}?applyHealthCadence\(\)/);
+
+    const full = mountCore({ cadence: "every60" });
+    full.ST.setHealthCadence("every60");
+    expect(full.timers()).toBe(1);
+    // A viewer session comes back from reauth: the timer must not survive it.
+    full.ST.state.capability = "read";
+    full.ST.setHealthCadence("every60");
+    expect(full.timers()).toBe(0);
+
+    const viewer = mountCore({ cadence: "every60", capability: "read" });
+    expect(viewer.timers()).toBe(0);
+    viewer.ST.state.capability = "full";
+    viewer.ST.setHealthCadence("every60");
+    expect(viewer.timers()).toBe(1);
   });
 });
 

@@ -1003,6 +1003,12 @@ window.Steamtrain = (function () {
             // pollLiveRuns clears its timer on 401; resume Active runs updates.
             if (!S.liveRunsTimer) S.liveRunsTimer = setInterval(pollLiveRuns, 5000);
             pollLiveRuns();
+            // Reauth can land on a different capability than the session that
+            // expired (the read token mints a viewer session), so the health
+            // timer has to be re-decided here: a viewer must not keep firing
+            // POST /api/doctor at a 403, and a session that came back with
+            // full capability should get the cadence it asked for.
+            applyHealthCadence();
             if (S.runId && !S.es) ST.run.openStream(S.runId);
           } catch (ex) {
             console.error("doReauth success-path error:", ex);
