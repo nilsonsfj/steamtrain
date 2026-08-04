@@ -412,7 +412,6 @@ describe("WorkflowInputForm", () => {
         onCancel={() => {}}
       />,
     );
-    await tick();
     await type(stdin, "\u001b[C"); // right arrow
     await type(stdin, "\r");
     expect(onSubmit).toHaveBeenCalledWith({ mode: "github" });
