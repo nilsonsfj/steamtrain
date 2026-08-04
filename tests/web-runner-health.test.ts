@@ -1,13 +1,14 @@
 /**
- * Contracts for the two surfaces that report runner readiness in the web UI:
- * the topbar health chips (st-shell.js) and the Runners settings table
- * (st-settings.js + settings.css).
+ * Contracts for the surfaces that report runner readiness in the web UI: the
+ * topbar health chips (st-shell.js), the Runners settings table
+ * (st-settings.js + settings.css), and the re-probe cadence behind both
+ * (st-core.js).
  *
- * Both are plain IIFEs over `window.Steamtrain`, so both run here for real: a
- * stub namespace with an `h()` that builds inert nodes is enough to paint them,
- * read back what they rendered, and fire the click handlers they attached. Only
- * the paint-time invariants that live in the stylesheet (hit-target size, how
- * absent rows recede) are asserted against the CSS text.
+ * All three are plain IIFEs over `window.Steamtrain`, so all three run here for
+ * real: a stub namespace with an `h()` that builds inert nodes is enough to
+ * paint them, read back what they rendered, and fire the click handlers they
+ * attached. Only the paint-time invariants that live in the stylesheet
+ * (hit-target size, how absent rows recede) are asserted against the CSS text.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -18,6 +19,7 @@ const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src",
 const shellJs = readFileSync(join(PUBLIC_DIR, "st-shell.js"), "utf8");
 const settingsJs = readFileSync(join(PUBLIC_DIR, "st-settings.js"), "utf8");
 const settingsCss = readFileSync(join(PUBLIC_DIR, "settings.css"), "utf8");
+const coreJs = readFileSync(join(PUBLIC_DIR, "st-core.js"), "utf8");
 
 interface StubEl {
   tag: string;
@@ -181,6 +183,22 @@ interface Mounted {
   /** Text of the runners settings banner (empty when nothing is shown). */
   banner: () => string;
   puts: Record<string, unknown>[];
+  /** Drag the concurrency slider to `value`. */
+  setConcurrency: (value: number) => void;
+  /** Attributes of the concurrency slider input. */
+  slider: () => Record<string, unknown>;
+  /** Whether Save is currently offered (enabled). */
+  saveEnabled: () => boolean;
+  /** Labels of the health-cadence segmented control, selected one marked "*". */
+  cadence: () => string[];
+  /** Click a health-cadence option by label. */
+  pickCadence: (label: string) => void;
+  /** Labels of the buttons in the section header. */
+  headActions: () => string[];
+  /** Flattened text of the settings nav footer. */
+  navFoot: () => string;
+  /** Flattened text of the section footer band. */
+  foot: () => string;
 }
 
 /** Every descendant matching `pred`, in paint order. */
@@ -203,13 +221,22 @@ async function mountSettings(opts: {
   apiDoctor?: Record<string, unknown>[];
   agents?: Record<string, unknown>[];
   apis?: Record<string, unknown>[];
+  maxConcurrency?: number;
+  version?: string;
+  cadence?: string;
 }): Promise<Mounted> {
   const config = {
     canGlobal: true,
     stepTimeoutSec: 900,
+    maxConcurrency: opts.maxConcurrency ?? 5,
+    defaultMaxConcurrency: 5,
+    maxConcurrencyCeiling: 16,
+    configPath: "/repo/steamtrain.json",
+    version: opts.version,
     agents: opts.agents ?? [],
     apis: opts.apis ?? [],
   };
+  let cadencePref = opts.cadence ?? "launch";
   const puts: Record<string, unknown>[] = [];
   const root = el("div");
   const ST: Record<string, unknown> = {
@@ -225,6 +252,11 @@ async function mountSettings(opts: {
     refreshWorkflowList: () => {},
     copyFix: () => {},
     pollDoctor: () => {},
+    healthCadence: () => cadencePref,
+    setHealthCadence: (next: string) => {
+      cadencePref = next;
+    },
+    recheckHealth: () => Promise.resolve({ status: 200 }),
     modals: {
       mbanner: (node: StubEl, text: string, kind: string) => {
         if (!text) {
@@ -288,7 +320,60 @@ async function mountSettings(opts: {
     return strip ? flatText(strip) : "";
   };
   const navFlagged = () => collect(root, (n) => n.className.split(" ").includes("flag")).length > 0;
-  return { rows, save, tally, navFlagged, puts, banner };
+  const sliderEl = () => {
+    const node = collect(root, (n) => n.className === "slider")[0];
+    if (!node) throw new Error("no concurrency slider");
+    return node;
+  };
+  const setConcurrency = (value: number) => {
+    const node = sliderEl();
+    node.attrs.value = String(value);
+    (node as unknown as { value: string }).value = String(value);
+    for (const fn of node.listeners.input ?? []) fn();
+  };
+  const saveEnabled = () => {
+    const btn = collect(root, (n) => n.text === "Save changes")[0];
+    if (!btn) return false;
+    // syncRunnersFoot sets the DOM property, not the creation-time attribute.
+    return (btn as unknown as { disabled?: boolean }).disabled !== true;
+  };
+  const cadenceItems = () => collect(root, (n) => n.className.split(" ").includes("seg-item"));
+  const cadence = () => cadenceItems().map((n) => n.text + (n.className.includes("on") ? "*" : ""));
+  const pickCadence = (label: string) => {
+    const btn = cadenceItems().find((n) => n.text === label);
+    if (!btn) throw new Error(`no cadence option "${label}"`);
+    for (const fn of btn.listeners.click ?? []) fn();
+  };
+  const headActions = () => {
+    const head = collect(root, (n) => n.className === "settings-head")[0];
+    if (!head) return [];
+    const acts = collect(head, (n) => n.className === "actions")[0];
+    return acts ? acts.children.map((b) => b.text) : [];
+  };
+  const navFoot = () => {
+    const node = collect(root, (n) => n.className === "settings-navfoot")[0];
+    return node ? flatText(node) : "";
+  };
+  const foot = () => {
+    const node = collect(root, (n) => n.className === "settings-foot")[0];
+    return node ? flatText(node) : "";
+  };
+  return {
+    rows,
+    save,
+    tally,
+    navFlagged,
+    puts,
+    banner,
+    setConcurrency,
+    slider: () => sliderEl().attrs,
+    saveEnabled,
+    cadence,
+    pickCadence,
+    headActions,
+    navFoot,
+    foot,
+  };
 }
 
 describe("runners settings table", () => {
@@ -419,6 +504,184 @@ describe("runners settings table", () => {
       doctor: [{ agent: "claude", status: "ok", provider: "claude", binary: "claude" }],
     });
     expect(clean.navFlagged()).toBe(false);
+  });
+});
+
+describe("runner dials — concurrency and health cadence", () => {
+  const ONE_OK = {
+    doctor: [{ agent: "claude", status: "ok", provider: "claude", binary: "claude" }],
+  };
+
+  it("opens the slider on the configured value, inside the bounds the server sent", async () => {
+    const ui = await mountSettings({ ...ONE_OK, maxConcurrency: 3 });
+    expect(ui.slider()).toMatchObject({ min: "1", max: "16", value: "3" });
+  });
+
+  it("clamps a configured value above the ceiling instead of offering it", async () => {
+    const ui = await mountSettings({ ...ONE_OK, maxConcurrency: 99 });
+    expect(ui.slider().value).toBe("16");
+  });
+
+  it("saves the moved ceiling, and nothing else changed", async () => {
+    const ui = await mountSettings({ ...ONE_OK, maxConcurrency: 3 });
+    expect(ui.saveEnabled()).toBe(false);
+    ui.setConcurrency(7);
+    expect(ui.saveEnabled()).toBe(true);
+    await ui.save();
+    expect(ui.puts[0]?.maxConcurrency).toBe(7);
+  });
+
+  // maxConcurrency is project-scoped while agents default to the global file;
+  // sending it unchanged would rewrite steamtrain.json on every runner save.
+  it("leaves maxConcurrency out of the payload when the slider was not touched", async () => {
+    const ui = await mountSettings({
+      ...ONE_OK,
+      maxConcurrency: 3,
+      agents: [{ id: "kiro", provider: "kiro", enabled: false, scope: "user" }],
+    });
+    ui.rows()
+      .find((r) => r.text.startsWith("kiro"))
+      ?.click("off");
+    await ui.save();
+    expect(ui.puts[0]).not.toHaveProperty("maxConcurrency");
+  });
+
+  it("marks exactly one cadence, and switching moves the mark", async () => {
+    const ui = await mountSettings({ ...ONE_OK, cadence: "launch" });
+    expect(ui.cadence()).toEqual(["Manual", "On launch*", "Every 60s"]);
+    ui.pickCadence("Every 60s");
+    expect(ui.cadence()).toEqual(["Manual", "On launch", "Every 60s*"]);
+  });
+
+  it("puts the section's own verbs in its header", async () => {
+    const ui = await mountSettings(ONE_OK);
+    expect(ui.headActions()).toEqual(["Recheck all", "Add agent", "Add API", "Close"]);
+  });
+
+  it("names the file a save lands in, and the version that is running", async () => {
+    const ui = await mountSettings({ ...ONE_OK, version: "0.14.2" });
+    expect(ui.navFoot()).toContain("v0.14.2");
+    // One save can land in two files: runner rows follow their scope column
+    // (global by default), only the ceiling is project-scoped. The footer must
+    // not claim the project file takes everything.
+    expect(ui.foot()).toContain("the concurrency ceiling to /repo/steamtrain.json");
+    expect(ui.foot()).toMatch(/each runner row is written to the file its scope names/);
+    expect(ui.foot()).not.toMatch(/Changes are written to \/repo/);
+  });
+
+  it("leaves the version line out rather than inventing one", async () => {
+    const ui = await mountSettings(ONE_OK);
+    expect(ui.navFoot()).not.toMatch(/\bv\d/);
+  });
+});
+
+/**
+ * Loads st-core.js for real against stub globals. `setInterval`/`clearInterval`
+ * and `localStorage` are passed as parameters so they shadow Node's, which lets
+ * the test see exactly which timers the cadence starts and stops.
+ */
+function mountCore(opts: { cadence?: string; capability?: string } = {}) {
+  const store: Record<string, string> = {};
+  if (opts.cadence) store["steamtrain.healthCadence"] = opts.cadence;
+  const localStorage = {
+    getItem: (key: string) => store[key] ?? null,
+    setItem: (key: string, value: string) => {
+      store[key] = value;
+    },
+  };
+  let nextTimer = 1;
+  const live = new Set<number>();
+  const setInterval = (_fn: () => void, _ms: number) => {
+    const id = nextTimer++;
+    live.add(id);
+    return id;
+  };
+  const clearInterval = (id: number) => {
+    live.delete(id);
+  };
+  const window: Record<string, unknown> = {};
+  new Function(
+    "window",
+    "document",
+    "localStorage",
+    "setInterval",
+    "clearInterval",
+    "SteamtrainReducer",
+    coreJs,
+    // st-core reads a couple of reducer constants at load time; the cadence
+    // path never touches the reducer, so empty stubs are enough.
+  )(window, { getElementById: () => null }, localStorage, setInterval, clearInterval, {});
+  const ST = window.Steamtrain as Record<string, unknown> & {
+    state: Record<string, unknown>;
+    healthCadence: () => string;
+    setHealthCadence: (next: string) => void;
+  };
+  ST.state.capability = opts.capability ?? "full";
+  return { ST, store, timers: () => live.size };
+}
+
+describe("health re-probe cadence", () => {
+  it("defaults to on-launch when nothing has been chosen", () => {
+    expect(mountCore().ST.healthCadence()).toBe("launch");
+  });
+
+  it("ignores a stored value it does not recognise instead of honouring it", () => {
+    expect(mountCore({ cadence: "hourly" }).ST.healthCadence()).toBe("launch");
+    // …and refuses to store one.
+    const mounted = mountCore();
+    mounted.ST.setHealthCadence("hourly");
+    expect(mounted.store["steamtrain.healthCadence"]).toBeUndefined();
+    expect(mounted.ST.healthCadence()).toBe("launch");
+  });
+
+  it("runs a timer only for the every-60s cadence, and stops it on the way out", () => {
+    const { ST, timers } = mountCore();
+    expect(timers()).toBe(0);
+    ST.setHealthCadence("every60");
+    expect(timers()).toBe(1);
+    // Re-picking the same cadence must not leave a second timer behind.
+    ST.setHealthCadence("every60");
+    expect(timers()).toBe(1);
+    ST.setHealthCadence("manual");
+    expect(timers()).toBe(0);
+  });
+
+  // POST /api/doctor is a control-plane write, so a viewer polling it would
+  // just collect 403s once a minute.
+  it("never gives a viewer session the timer", () => {
+    const { ST, timers, store } = mountCore({ capability: "read" });
+    ST.setHealthCadence("every60");
+    expect(timers()).toBe(0);
+    // The preference is still recorded — it applies if the session gains
+    // full capability later.
+    expect(store["steamtrain.healthCadence"]).toBe("every60");
+  });
+
+  // Reauth can land on a different capability than the session that expired:
+  // the read token mints a viewer session. Whichever way it goes, the timer
+  // has to be re-decided rather than left as the old session set it.
+  it("re-decides the timer on reauth, in both directions", () => {
+    // Structural, and deliberately so: the behavioral half below proves the
+    // cadence reacts to a capability change, but only this line ties that to
+    // the REAUTH path — driving doReauth for real would need the whole overlay
+    // DOM. Delete it and the rest of this test still passes with the fix
+    // reverted. Reformatting the reauth handler may need the window widened;
+    // that is the cost of the only guard there is.
+    expect(coreJs).toMatch(/dismissReauthOverlay\(\)[\s\S]{0,900}?applyHealthCadence\(\)/);
+
+    const full = mountCore({ cadence: "every60" });
+    full.ST.setHealthCadence("every60");
+    expect(full.timers()).toBe(1);
+    // A viewer session comes back from reauth: the timer must not survive it.
+    full.ST.state.capability = "read";
+    full.ST.setHealthCadence("every60");
+    expect(full.timers()).toBe(0);
+
+    const viewer = mountCore({ cadence: "every60", capability: "read" });
+    expect(viewer.timers()).toBe(0);
+    viewer.ST.state.capability = "full";
+    viewer.ST.setHealthCadence("every60");
+    expect(viewer.timers()).toBe(1);
   });
 });
 

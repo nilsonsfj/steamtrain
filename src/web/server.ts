@@ -22,6 +22,7 @@ import {
 } from "../config";
 import { saveProjectConfig } from "../config/project-config";
 import { type ApiDoctorResult, type DoctorResult, runApiDoctor, runDoctor } from "../doctor";
+import { STEAMTRAIN_VERSION } from "../version";
 
 import { Orchestrator } from "../orchestrator";
 import type { ProjectIdentity } from "../project";
@@ -1155,8 +1156,14 @@ async function handle(
       stepTimeoutSec,
       workflowTimeoutSec: cfg.workflowTimeoutSec,
       defaultStepTimeoutSec: DEFAULT_STEP_TIMEOUT_SEC,
+      // Parallel-step ceiling, plus the bounds the settings slider must respect
+      // so the client never offers a value the schema would reject.
+      maxConcurrency: cfg.maxConcurrency ?? DEFAULT_CONFIG.maxConcurrency,
+      defaultMaxConcurrency: DEFAULT_CONFIG.maxConcurrency,
+      maxConcurrencyCeiling: MAX_CONCURRENCY,
       configPath: deps.configPath,
       userConfigPath: deps.userConfigPath,
+      version: STEAMTRAIN_VERSION,
       canGlobal,
       // Configured entries only (not unconfigured builtins), tagged with the
       // file they live in. New rows in the editor default to user/global.
@@ -1183,6 +1190,7 @@ async function handle(
       stepTimeoutSec?: unknown;
       workflowTimeoutSec?: unknown;
       clearWorkflowTimeout?: unknown;
+      maxConcurrency?: unknown;
       agents?: unknown;
       apis?: unknown;
     };
@@ -1197,10 +1205,25 @@ async function handle(
     const clearWf = Boolean(parsed.clearWorkflowTimeout);
     const hasAgents = parsed.agents !== undefined;
     const hasApis = parsed.apis !== undefined;
-    if (!hasStep && !hasWf && !clearWf && !hasAgents && !hasApis) {
+    const hasConcurrency = parsed.maxConcurrency !== undefined;
+    if (!hasStep && !hasWf && !clearWf && !hasAgents && !hasApis && !hasConcurrency) {
       sendJson(res, 400, {
         error:
-          "body must include stepTimeoutSec, workflowTimeoutSec, clearWorkflowTimeout, agents, or apis",
+          "body must include stepTimeoutSec, workflowTimeoutSec, clearWorkflowTimeout, maxConcurrency, agents, or apis",
+      });
+      return;
+    }
+    // Bounded here as well as in the schema so a bad value is a 400 with a
+    // readable reason rather than a generic save failure from deeper down.
+    if (
+      hasConcurrency &&
+      (typeof parsed.maxConcurrency !== "number" ||
+        !Number.isInteger(parsed.maxConcurrency) ||
+        parsed.maxConcurrency < 1 ||
+        parsed.maxConcurrency > MAX_CONCURRENCY)
+    ) {
+      sendJson(res, 400, {
+        error: `maxConcurrency must be an integer between 1 and ${MAX_CONCURRENCY}`,
       });
       return;
     }
@@ -1208,6 +1231,7 @@ async function handle(
     const canGlobal = Boolean(deps.userConfigPath);
     const projectPatch: Parameters<typeof saveProjectConfig>[0] = {};
     if (hasStep) projectPatch.stepTimeoutSec = parsed.stepTimeoutSec as number;
+    if (hasConcurrency) projectPatch.maxConcurrency = parsed.maxConcurrency as number;
     if (clearWf) projectPatch.workflowTimeoutSec = undefined;
     else if (hasWf) projectPatch.workflowTimeoutSec = parsed.workflowTimeoutSec as number;
 
@@ -1279,7 +1303,12 @@ async function handle(
     }
 
     const needsProjectWrite =
-      hasStep || hasWf || clearWf || projectAgents !== undefined || projectApis !== undefined;
+      hasStep ||
+      hasWf ||
+      clearWf ||
+      hasConcurrency ||
+      projectAgents !== undefined ||
+      projectApis !== undefined;
     if (needsProjectWrite) {
       const saved = saveProjectConfig(projectPatch, deps.configPath);
       if (!saved.ok || !saved.config) {
@@ -1342,8 +1371,12 @@ async function handle(
       ok: true,
       stepTimeoutSec: resolveStepTimeoutSec(undefined, undefined, deps.config),
       workflowTimeoutSec: deps.config.workflowTimeoutSec,
+      maxConcurrency: deps.config.maxConcurrency ?? DEFAULT_CONFIG.maxConcurrency,
+      defaultMaxConcurrency: DEFAULT_CONFIG.maxConcurrency,
+      maxConcurrencyCeiling: MAX_CONCURRENCY,
       configPath: deps.configPath,
       userConfigPath: deps.userConfigPath,
+      version: STEAMTRAIN_VERSION,
       canGlobal,
       agents: tagAgentsWithScope(layers),
       apis: tagApisWithScope(layers),

@@ -1688,10 +1688,19 @@
     }
 
     // -- estimate: the plan endpoint's history context, over the draft ---------
+    // The predictions below (stepIssues, runner readiness) are computed from the
+    // server's health snapshot, so under the "On launch" cadence the re-probe
+    // has to finish first — otherwise the sheet would report readiness from
+    // whenever the tab was opened. Under "Manual" this resolves immediately.
     var planPayload = { input: input };
     var draft = ST.plan.draftIfDirty();
     if (draft) planPayload.spec = draft;
-    apiAuth("POST", "/api/workflows/" + encodeURIComponent(S.selected) + "/plan", planPayload).then(function (r) {
+    var probed = ST.recheckHealthOnLaunch ? ST.recheckHealthOnLaunch() : Promise.resolve();
+    probed.then(function () {
+      if (!document.getElementById("modal")) return null; // sheet closed while probing
+      return apiAuth("POST", "/api/workflows/" + encodeURIComponent(S.selected) + "/plan", planPayload);
+    }).then(function (r) {
+      if (!r) return;
       if (!document.getElementById("modal")) return; // sheet already closed
       if (r.status !== 200) { estimateEl.textContent = "no estimate — " + ((r.body && r.body.error) || "plan failed"); return; }
       pred = r.body.launch || null;
