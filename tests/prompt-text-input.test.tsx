@@ -2,19 +2,7 @@ import { render } from "ink-testing-library";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import { PromptTextInput } from "../src/tui/PromptTextInput";
-
-/** useInput subscribes in an effect; yield to the event loop before/after writes. */
-function tick(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-async function type(stdin: { write: (data: string) => void }, ...inputs: string[]): Promise<void> {
-  await tick();
-  for (const input of inputs) {
-    stdin.write(input);
-    await tick();
-  }
-}
+import { tick, type } from "./helpers/ink-input";
 
 function Harness({ onChange }: { onChange?: (v: string) => void } = {}) {
   const [value, setValue] = useState("");

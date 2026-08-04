@@ -2,20 +2,9 @@ import { render } from "ink-testing-library";
 import { describe, expect, it, vi } from "vitest";
 import { WorkflowInputForm } from "../src/tui/WorkflowInputForm";
 import type { WorkflowSpec } from "../src/workflow";
+import { tick, type } from "./helpers/ink-input";
 
 const ESC = "\u001b";
-
-function tick(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-async function type(stdin: { write: (data: string) => void }, ...inputs: string[]): Promise<void> {
-  await tick();
-  for (const input of inputs) {
-    stdin.write(input);
-    await tick();
-  }
-}
 
 function makeSpec(inputs: WorkflowSpec["inputs"]): WorkflowSpec {
   return {
@@ -138,10 +127,8 @@ describe("WorkflowInputForm", () => {
         onCancel={() => {}}
       />,
     );
-    await tick();
     // Press Enter to submit (field has default value "hello")
-    stdin.write("\r");
-    await tick();
+    await type(stdin, "\r");
     expect(onSubmit).toHaveBeenCalledWith({ name: "hello" });
   });
 
@@ -159,10 +146,8 @@ describe("WorkflowInputForm", () => {
         onCancel={() => {}}
       />,
     );
-    await tick();
     // Press Enter to submit with empty value
-    stdin.write("\r");
-    await tick();
+    await type(stdin, "\r");
     expect(onSubmit).not.toHaveBeenCalled();
     const frame = lastFrame() ?? "";
     expect(frame).toContain("req");
@@ -188,8 +173,7 @@ describe("WorkflowInputForm", () => {
     expect(frame).toContain("▶");
 
     // Tab to next field
-    stdin.write("\t");
-    await tick();
+    await type(stdin, "\t");
     frame = lastFrame() ?? "";
     // Focus indicator should still be present (on field b now)
     expect(frame).toContain("▶");
@@ -209,15 +193,13 @@ describe("WorkflowInputForm", () => {
         onCancel={() => {}}
       />,
     );
-    await tick();
     // Type characters
     await type(stdin, "h", "e", "l", "l", "o");
     const frame = lastFrame() ?? "";
     expect(frame).toContain("hello");
 
     // Submit
-    stdin.write("\r");
-    await tick();
+    await type(stdin, "\r");
     expect(onSubmit).toHaveBeenCalledWith({ name: "hello" });
   });
 
@@ -234,15 +216,13 @@ describe("WorkflowInputForm", () => {
         onCancel={() => {}}
       />,
     );
-    await tick();
     // Type valid number characters
     await type(stdin, "1", "2", "3");
     let frame = lastFrame() ?? "";
     expect(frame).toContain("123");
 
     // Type letter — should be filtered out
-    stdin.write("a");
-    await tick();
+    await type(stdin, "a");
     frame = lastFrame() ?? "";
     expect(frame).toContain("123");
     expect(frame).not.toContain("123a");
@@ -262,17 +242,13 @@ describe("WorkflowInputForm", () => {
         onCancel={() => {}}
       />,
     );
-    await tick();
-
     // Press Enter to enter boolean edit mode
-    stdin.write("\r");
-    await tick();
+    await type(stdin, "\r");
     let frame = lastFrame() ?? "";
     expect(frame).toContain("y/n");
 
     // Press y to set true
-    stdin.write("y");
-    await tick();
+    await type(stdin, "y");
     frame = lastFrame() ?? "";
     expect(frame).toContain("[true]");
   });
@@ -291,14 +267,10 @@ describe("WorkflowInputForm", () => {
         onCancel={() => {}}
       />,
     );
-    await tick();
-
     // Enter edit mode
-    stdin.write("\r");
-    await tick();
+    await type(stdin, "\r");
     // Press n to set false
-    stdin.write("n");
-    await tick();
+    await type(stdin, "n");
     const frame = lastFrame() ?? "";
     expect(frame).toContain("[false]");
   });
@@ -316,14 +288,12 @@ describe("WorkflowInputForm", () => {
         onCancel={() => {}}
       />,
     );
-    await tick();
     await type(stdin, "h", "i");
     let frame = lastFrame() ?? "";
     expect(frame).toContain("hi");
 
     // Backspace to delete
-    stdin.write("\x7f");
-    await tick();
+    await type(stdin, "\x7f");
     frame = lastFrame() ?? "";
     expect(frame).toContain("h");
     expect(frame).not.toContain("hi");
@@ -342,10 +312,8 @@ describe("WorkflowInputForm", () => {
         onCancel={() => {}}
       />,
     );
-    await tick();
     // Submit with empty value
-    stdin.write("\r");
-    await tick();
+    await type(stdin, "\r");
     const frame = lastFrame() ?? "";
     // The error from resolveInputs should be displayed
     expect(frame).toContain("missing required input");
@@ -366,13 +334,10 @@ describe("WorkflowInputForm", () => {
         onCancel={() => {}}
       />,
     );
-    await tick();
     // Tab forward to field b
-    stdin.write("\t");
-    await tick();
+    await type(stdin, "\t");
     // Shift+Tab back to field a
-    stdin.write("\u001b[Z");
-    await tick();
+    await type(stdin, "\u001b[Z");
     const frame = lastFrame() ?? "";
     // Should still have focus indicator
     expect(frame).toContain("▶");
@@ -409,8 +374,7 @@ describe("WorkflowInputForm", () => {
     expect(frame).toContain("(enum)");
     expect(frame).toContain("fallback: flash → north");
     // Move focus to the enum field to surface its choices.
-    stdin.write("\t");
-    await tick();
+    await type(stdin, "\t");
     frame = lastFrame() ?? "";
     expect(frame).toContain("1:live");
     expect(frame).toContain("2:end");
@@ -430,9 +394,7 @@ describe("WorkflowInputForm", () => {
         onCancel={() => {}}
       />,
     );
-    await tick();
-    stdin.write("\r");
-    await tick();
+    await type(stdin, "\r");
     expect(onSubmit).toHaveBeenCalledWith({ flag: true });
   });
 
@@ -450,11 +412,8 @@ describe("WorkflowInputForm", () => {
         onCancel={() => {}}
       />,
     );
-    await tick();
-    stdin.write("\u001b[C"); // right arrow
-    await tick();
-    stdin.write("\r");
-    await tick();
+    await type(stdin, "\u001b[C"); // right arrow
+    await type(stdin, "\r");
     expect(onSubmit).toHaveBeenCalledWith({ mode: "github" });
   });
 });
