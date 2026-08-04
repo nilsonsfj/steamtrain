@@ -106,9 +106,7 @@
   flex: 1 1 200px;
 }
 
-/* ---- new-workflow sheet ---- */
-/* The sheet takes its width from `.modal.wide`, which outranks a lone
-   `.create-modal` — the 860px this rule used to ask for never applied. */
+/* ---- new-workflow sheet (sized by `.modal.wide`) ---- */
 .create-file {
   margin: 2px 0 4px;
   font: 400 11.5px / 1.5 var(--font-mono);
