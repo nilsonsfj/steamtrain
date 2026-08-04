@@ -172,7 +172,7 @@ ${styles}
   </div>
 </div>
 <aside class="drawer" id="drawer" role="dialog" aria-label="Step details" aria-hidden="true" tabindex="-1"></aside>
-<div class="modal-overlay" id="overlay"><div class="modal" id="modal"></div></div>
+<div class="modal-overlay" id="overlay"><div id="modal"></div></div>
 <div id="announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 ${scripts}
 </body>

@@ -15,6 +15,13 @@
 .modal-overlay.show {
   display: flex;
 }
+/* Shells are appended here, and each one is a `.modal` of its own. The host
+   only exists so opening a dialog is one `clear` + one `appendChild`, so it
+   must not lay out — as a box it would cap every shell at its own width and
+   `.modal.wide` could never widen anything. */
+#modal {
+  display: contents;
+}
 .modal {
   background: var(--surface);
   border: 1px solid rgba(53, 67, 84, 0.95);
@@ -100,9 +107,8 @@
 }
 
 /* ---- new-workflow sheet ---- */
-.create-modal {
-  max-width: 860px;
-}
+/* The sheet takes its width from `.modal.wide`, which outranks a lone
+   `.create-modal` — the 860px this rule used to ask for never applied. */
 .create-file {
   margin: 2px 0 4px;
   font: 400 11.5px / 1.5 var(--font-mono);
