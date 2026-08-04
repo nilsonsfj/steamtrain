@@ -1412,10 +1412,10 @@
 
   /**
    * The actual launch, parameterized by the launch sheet. `opts.spec` is the
-   * full run spec (draft + deselections + budget cap); `opts.fresh` ignores
-   * the cache; `opts.detach` hands the run to a background process once it is
-   * live. Without opts this degrades to the pre-sheet behavior (composer
-   * input, reuse cache, staged session overrides).
+   * full run spec (draft + deselections + budget cap); `opts.freshCache`
+   * ignores the step cache; `opts.detach` hands the run to a background
+   * process once it is live. Without opts this degrades to the pre-sheet
+   * behavior (composer input, reuse cache, staged session overrides).
    */
   function launchRun(opts) {
     opts = opts || {};
@@ -1440,13 +1440,12 @@
     setBanner("", "");
     showRunMetrics(true);
     ST.render();
-    // Default false matches the old hidden #freshChk (unchecked) and the
-    // launch sheet's reuseCache:true default. Callers must pass fresh:true
-    // to ignore the cache — #freshChk is no longer consulted.
+    // Default false matches the launch sheet's reuseCache:true default;
+    // callers pass freshCache:true to ignore (and clear) the step cache.
     var payload = {
       workflow: S.selected,
       input: input,
-      fresh: opts.fresh === true
+      freshCache: opts.freshCache === true
     };
     // Launch-sheet options with server-side effects (02.2): fresh worktrees
     // discards the previous run's retained trees before starting; maxParallel
@@ -1636,18 +1635,12 @@
 
   function setRunning(running) {
     var ro = isReadOnly();
-    document.getElementById("runBtn").style.display = (running || ro) ? "none" : "block";
     document.getElementById("pauseBtn").style.display = (running && !ro) ? "block" : "none";
     document.getElementById("detachBtn").style.display =
       (running && !ro && !S.runExternal && !S.runDetached) ? "block" : "none";
     document.getElementById("cancelBtn").style.display = (running && !ro) ? "block" : "none";
     updateDetachButton();
-    document.getElementById("planBtn").style.display = (running || ro) ? "none" : "block";
     document.getElementById("input").disabled = running || ro;
-    // The composer is pre-launch chrome whose nodes (input, params) now live
-    // on the plan's Inputs tab when idle; #runRow itself is their hidden
-    // parking spot and never displays (see st-plan.js parkComposerNodes).
-    document.getElementById("runRow").style.display = "none";
     var actions = document.getElementById("wfActions");
     if (actions) actions.style.display = (running || ro || !S.selected) ? "none" : "flex";
     showRunMetrics(Boolean(running));

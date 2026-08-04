@@ -23,6 +23,7 @@ import {
   type RunRecordStatus,
   type StepEditPatch,
   type StepEditResult,
+  type StepKillResult,
   type StepResult,
   type WorkflowCacheStore,
   type WorkflowEvent,
@@ -284,7 +285,8 @@ export class WorkflowRunManager {
     workflow: string,
     input: string,
     opts?: {
-      fresh?: boolean;
+      /** Ignore (and clear) the step cache for this run — the launch sheet's "Reuse cache" off. */
+      freshCache?: boolean;
       /** Discard the previous run's retained worktrees before starting (launch sheet's "Fresh worktrees"). */
       freshWorktrees?: boolean;
       /** Per-run cap on parallel steps; config default when omitted. */
@@ -335,7 +337,7 @@ export class WorkflowRunManager {
       this.runningCount += 1;
     }
     void this.drive(run, spec, {
-      fresh: opts?.fresh ?? false,
+      freshCache: opts?.freshCache ?? false,
       freshWorktrees: opts?.freshWorktrees ?? false,
       maxParallel: opts?.maxParallel,
       seed: opts?.seed,
@@ -465,7 +467,7 @@ export class WorkflowRunManager {
     }
 
     const started = this.start(plan.workflow, plan.input, {
-      fresh: mode === "rerun" || Boolean(plan.downgraded),
+      freshCache: mode === "rerun" || Boolean(plan.downgraded),
       seed,
       params: plan.params,
       specOverride,
@@ -609,6 +611,17 @@ export class WorkflowRunManager {
   }
 
   /**
+   * Kill one in-flight step of a manager-owned run; the run keeps going.
+   * Returns undefined when the run is unknown or settled, the same "not mine"
+   * signal {@link editRunStep} gives.
+   */
+  killRunStep(runId: string, stepId: string, by?: string): StepKillResult | undefined {
+    const run = this.runs.get(runId);
+    if (!run || run.settled) return undefined;
+    return run.control.killStep(stepId, by);
+  }
+
+  /**
    * Build the run's approval provider: each pending checkpoint registers a
    * resolver keyed by `<stepId>:<iteration>` and blocks until a
    * `POST /api/runs/:id/approval` calls {@link resolveApproval} — or the run's
@@ -745,7 +758,7 @@ export class WorkflowRunManager {
     run: Run,
     spec: WorkflowSpec,
     opts: {
-      fresh: boolean;
+      freshCache: boolean;
       freshWorktrees: boolean;
       maxParallel?: number;
       seed?: Map<string, StepResult>;
@@ -840,7 +853,7 @@ export class WorkflowRunManager {
       }
 
       let cache: Map<string, StepResult>;
-      if (opts.fresh) {
+      if (opts.freshCache) {
         await this.cacheStore.clear(key);
         cache = new Map();
       } else {

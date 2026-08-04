@@ -189,6 +189,11 @@ window.Steamtrain = (function () {
     sourceDiverged: false,
     // Step id the source view should scroll to / highlight (plan → source sync).
     sourceReveal: null,
+    // Server-judged dispatch warnings for the source view's gutter, as
+    // { name, issues } so a late response for a workflow the reader has since
+    // left is discarded rather than marking the wrong file.
+    sourceLint: null,
+    sourceLintTimer: null,
     // Recent completed runs of the selected workflow (rail footer and header
     // context). Fetched on selection.
     recentRuns: [],
@@ -260,18 +265,14 @@ window.Steamtrain = (function () {
     // "none", not "" — clearing the inline style would reveal the badge (its
     // markup default is display:none) and label every full session read-only.
     if (badge) badge.style.display = ro ? "inline-flex" : "none";
-    var hideIds = ["settingsBtn", "newWfBtn", "editBtn", "cloneBtn", "flushBtn", "deleteBtn", "planBtn", "runBtn"];
+    var hideIds = ["settingsBtn", "newWfBtn", "editBtn", "cloneBtn", "flushBtn", "deleteBtn"];
     hideIds.forEach(function (id) {
       var el = document.getElementById(id);
       if (el) el.style.display = ro ? "none" : "";
     });
-    var fresh = document.getElementById("freshChk");
-    if (fresh && fresh.parentElement) fresh.parentElement.style.display = ro ? "none" : "";
-    // Run input is for launching; viewers still pick workflows from the sidebar
-    // to inspect the pipeline, so hide the whole run row in read-only.
+    // Authoring actions are for launching; viewers still pick workflows from
+    // the sidebar to inspect the pipeline, so only the actions go away.
     if (ro) {
-      var runRow = document.getElementById("runRow");
-      if (runRow) runRow.style.display = "none";
       var actions = document.getElementById("wfActions");
       if (actions) actions.style.display = "none";
     }
@@ -916,7 +917,6 @@ window.Steamtrain = (function () {
       S.spec = { name: run.workflow, phases: [] };
       document.getElementById("wfTitle").textContent = run.workflow;
       document.getElementById("wfSub").textContent = "attached run (workflow not in catalog)";
-      document.getElementById("runRow").style.display = "none";
       ST.shell.renderSidebar();
       begin();
     }
@@ -1306,7 +1306,7 @@ window.Steamtrain = (function () {
     S.narrationFreshPlayed = null;
     S.arrivalCtaFocused = false;
     S.planSelection = [];
-    S.sourceText = null; S.sourceDiverged = false; S.sourceReveal = null;
+    S.sourceText = null; S.sourceDiverged = false; S.sourceReveal = null; S.sourceLint = null;
     S.dryRunPlan = null;
     // Leaving an attached run restores Plan / Describe and clears compact chrome.
     ST.run.setRunning(false);
@@ -1334,7 +1334,6 @@ window.Steamtrain = (function () {
       S.childSpecs = r.body.children || {};
       document.getElementById("wfTitle").textContent = r.body.spec.name;
       document.getElementById("wfSub").textContent = r.body.spec.description || "";
-      document.getElementById("runRow").style.display = "none";
       ST.shell.renderSourceLine();
       ST.shell.renderBlockedRow();
       ST.run.renderParamsForm(r.body.spec);

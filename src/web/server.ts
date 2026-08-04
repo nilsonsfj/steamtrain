@@ -822,8 +822,10 @@ function checkCsrf(
  *   DELETE /api/workflows/:name     delete a user workflow (authoring)
  *   POST   /api/workflows/generate  SSE: LLM-draft a workflow + save (authoring)
  *   POST   /api/workflows/:name/plan  dry-run plan (no agents executed)
+ *   POST   /api/workflows/:name/lint  per-step dispatch warnings for a draft spec
  *   GET    /api/meta                agents + apis, models, efforts, health (authoring)
  *   GET    /api/doctor              agent + api health
+ *   GET    /api/runner-usage       runs each runner took part in (settings' Runs column)
  *   GET    /api/history             past-run summaries (newest first)
  *   GET    /api/history/:id         one past run's full record
  *   DELETE /api/history             clear all past runs
@@ -834,13 +836,14 @@ function checkCsrf(
  *   GET    /api/history/:id/worktrees  a run's retained worktrees + diffstat
  *   POST   /api/history/:id/harvest    merge worktrees (apply/branch/pr) -> { result }
  *   POST   /api/history/:id/prune      discard a run's worktrees -> { pruned, total }
- *   POST   /api/runs                { workflow, input, fresh?, freshWorktrees?, maxParallel?, overrides? } -> { runId }
+ *   POST   /api/runs                { workflow, input, freshCache?, freshWorktrees?, maxParallel?, overrides? } -> { runId }
  *   GET    /api/runs/:id/stream     SSE of WorkflowEvents + terminal status
  *   POST   /api/runs/:id/cancel     abort a run
  *   POST   /api/runs/:id/pause      stop scheduling new steps (in-flight finish)
  *   POST   /api/runs/:id/resume     continue a paused run
  *   POST   /api/runs/:id/detach     hand a running run off to a background process
  *   POST   /api/runs/:id/edit-step  { stepId, prompt?/cmd?/model?/effort?/permissions? } — edit a pending step while paused
+ *   POST   /api/runs/:id/kill-step  { stepId } — fail one running step, run continues
  *   POST   /api/runs/:id/approval   resolve a human-approval checkpoint
  *   POST   /api/runs/:id/input      answer a human-input request (human step / agent question)
  *   POST   /api/overrides/flush     flush staged session overrides -> { saved, skipped, unchanged }
@@ -1140,6 +1143,24 @@ async function handle(
       modelClasses: listModelClasses(deps.config),
       modelFamilies: listModelFamilyMeta(),
     });
+    return;
+  }
+
+  // How much each runner is actually used, for the settings table's Runs
+  // column. A GET, and a read in every sense: viewers see it too.
+  if (method === "GET" && path === "/api/runner-usage") {
+    if (!deps.history?.runnerUsage) {
+      // No history (or a store that cannot tally) is not zero usage — the
+      // column has nothing to say and the client leaves it blank.
+      sendJson(res, 200, { runs: 0, counts: {}, available: false });
+      return;
+    }
+    try {
+      const usage = await deps.history.runnerUsage();
+      sendJson(res, 200, { ...usage, available: true });
+    } catch {
+      sendJson(res, 200, { runs: 0, counts: {}, available: false });
+    }
     return;
   }
 
@@ -1490,6 +1511,51 @@ async function handle(
       sendJson(res, result.ok ? 200 : 400, result);
       return;
     }
+  }
+
+  // Lint endpoint: POST /api/workflows/:name/lint
+  //
+  // The source editor's warning gutter. Deliberately not the plan endpoint:
+  // this runs on a debounce while someone types, so it may not touch history,
+  // the cache, or the planner — only the readiness the launch sheet would
+  // report, from the same authority (stepDispatchIssues), so the two surfaces
+  // can never disagree about which steps would be skipped.
+  const lintMatch = path.match(/^\/api\/workflows\/([^/]+)\/lint$/);
+  if (method === "POST" && lintMatch) {
+    const name = decodeURIComponent(lintMatch[1]!);
+    if (!isValidWorkflowName(name)) {
+      sendJson(res, 400, { error: "invalid workflow name" });
+      return;
+    }
+    const spec = deps.host.listWorkflows()[name];
+    if (!spec) {
+      sendJson(res, 404, { error: `unknown workflow '${name}'` });
+      return;
+    }
+    const body = await readBody(req);
+    let parsed: { spec?: unknown };
+    try {
+      parsed = body ? JSON.parse(body) : {};
+    } catch {
+      sendJson(res, 400, { error: "invalid JSON body" });
+      return;
+    }
+    let effectiveSpec = spec;
+    if (parsed.spec !== undefined) {
+      const override = parseSpecOverride(parsed.spec, name);
+      if (!override.ok) {
+        sendJson(res, 400, { error: override.error });
+        return;
+      }
+      effectiveSpec = override.spec;
+    }
+    // Unknown health is not a prediction: with no doctor results the honest
+    // answer is "no warnings", not "every runner is broken".
+    const doctor = deps.doctor?.() ?? [];
+    sendJson(res, 200, {
+      issues: doctor.length > 0 ? (deps.host.stepDispatchIssues?.(effectiveSpec) ?? []) : [],
+    });
+    return;
   }
 
   // Plan (dry-run) endpoint: POST /api/workflows/:name/plan
@@ -1950,7 +2016,7 @@ async function handle(
     let parsed: {
       workflow?: unknown;
       input?: unknown;
-      fresh?: unknown;
+      freshCache?: unknown;
       freshWorktrees?: unknown;
       maxParallel?: unknown;
       overrides?: unknown;
@@ -2062,7 +2128,10 @@ async function handle(
     }
     try {
       const result = deps.runs.start(parsed.workflow, parsed.input, {
-        fresh: parsed.fresh === true,
+        // Two unrelated "fresh" switches ride in the same body, so the wire
+        // names them apart: freshCache ignores the step cache, freshWorktrees
+        // discards the previous run's retained trees.
+        freshCache: parsed.freshCache === true,
         freshWorktrees: parsed.freshWorktrees === true,
         maxParallel,
         specOverride,
@@ -2223,6 +2292,47 @@ async function handle(
           sendJson(res, 202, { pending: true });
           return;
         }
+      }
+    }
+    sendJson(res, 404, { error: `unknown run '${runId}'` });
+    return;
+  }
+
+  // Kill one running step; the run carries on. Manager-owned runs only: a
+  // detached run's steps belong to the process that owns them, and there is no
+  // cross-process kill request (unlike edits) for this endpoint to drop.
+  const killStepMatch = path.match(/^\/api\/runs\/([^/]+)\/kill-step$/);
+  if (method === "POST" && killStepMatch) {
+    const body = await readBody(req);
+    let parsed: { stepId?: unknown };
+    try {
+      parsed = body ? JSON.parse(body) : {};
+    } catch {
+      sendJson(res, 400, { error: "invalid JSON body" });
+      return;
+    }
+    if (typeof parsed.stepId !== "string" || !parsed.stepId) {
+      sendJson(res, 400, { error: "body must include a string 'stepId'" });
+      return;
+    }
+    const runId = decodeURIComponent(killStepMatch[1]!);
+    if (!isValidRunId(runId)) {
+      sendJson(res, 400, { error: "invalid run id" });
+      return;
+    }
+    const killed = deps.runs.killRunStep(runId, parsed.stepId, "human:web");
+    if (killed) {
+      if (killed.ok) sendJson(res, 200, { killed: true });
+      else sendJson(res, 400, { error: killed.error });
+      return;
+    }
+    if (deps.liveRuns) {
+      const meta = await deps.liveRuns.get(runId);
+      if (meta && !isTerminalLiveRunStatus(meta.status)) {
+        sendJson(res, 409, {
+          error: "this run is owned by another process — kill its step from there",
+        });
+        return;
       }
     }
     sendJson(res, 404, { error: `unknown run '${runId}'` });

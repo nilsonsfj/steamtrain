@@ -152,8 +152,6 @@
   function start() {
     // Build the rail scaffolding before anything below looks up #newWfBtn.
     ST.shell.render();
-    document.getElementById("planBtn").addEventListener("click", ST.run.startPlan);
-    document.getElementById("runBtn").addEventListener("click", ST.run.startRun);
     document.getElementById("pauseBtn").addEventListener("click", ST.run.togglePauseRun);
     document.getElementById("detachBtn").addEventListener("click", ST.run.detachRun);
     document.getElementById("cancelBtn").addEventListener("click", ST.run.cancelRun);

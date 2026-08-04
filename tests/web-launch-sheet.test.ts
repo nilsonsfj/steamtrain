@@ -350,6 +350,34 @@ describe("POST /api/runs launch options", () => {
     expect(host.launched[0]!.maxConcurrency).toBeUndefined();
   });
 
+  /**
+   * `freshCache` and `freshWorktrees` ride in the same launch body and mean
+   * different things, so each is checked against the surface the OTHER one
+   * owns: the cache must survive a worktree-only launch, and must be gone
+   * after a cache-only one.
+   */
+  it.each([
+    { flag: "freshWorktrees", cachedAfter: 1 },
+    { flag: "freshCache", cachedAfter: 0 },
+  ])("$flag leaves $cachedAfter cached step(s) behind", async ({ flag, cachedAfter }) => {
+    const { server, host, cacheStore } = makeServer();
+    const base = await start(server);
+    const key = workflowCacheKey(launchSpec.name, "fix the bug", tmpdir(), launchSpec);
+    const cached = new Map([
+      ["scan", { stepId: "scan", ok: true, output: "cached", durationMs: 1 }],
+    ]);
+    await cacheStore.save(key, cached);
+
+    const res = await postJson(`${base}/api/runs`, {
+      workflow: launchSpec.name,
+      input: "fix the bug",
+      [flag]: true,
+    });
+    expect(res.status).toBe(201);
+    await waitFor(() => host.launched.length === 1);
+    expect((await cacheStore.load(key)).size).toBe(cachedAfter);
+  });
+
   it("freshWorktrees prunes the previous run's trees and launches regardless", async () => {
     // Retained worktrees with roots that do not exist: every git call fails,
     // yet the record is still marked pruned and the run goes ahead (best
@@ -428,5 +456,83 @@ describe("WorkflowRunManager launch predictions", () => {
       phases: launchSpec.phases.map((p) => ({ ...p, title: "Edited" })),
     };
     expect(await runs.cachedStepIds(launchSpec.name, "fix the bug", edited)).toEqual([]);
+  });
+});
+
+describe("source lint endpoint", () => {
+  it("reports the same dispatch issues the launch sheet would strike through", async () => {
+    const { server } = makeServer({ doctor: READY_DOCTOR });
+    const base = await start(server);
+
+    const lint = await postJson(`${base}/api/workflows/${launchSpec.name}/lint`, {});
+    expect(lint.status).toBe(200);
+    const issues = ((await lint.json()) as { issues: unknown }).issues;
+
+    // Same authority as the sheet, so the two surfaces cannot disagree about
+    // which steps would be skipped.
+    const plan = await postJson(`${base}/api/workflows/${launchSpec.name}/plan`, {
+      input: "fix the bug",
+    });
+    const planned = (await plan.json()) as { launch: { stepIssues: unknown } };
+    expect(issues).toEqual([{ stepId: "report", issue: "north needs auth" }]);
+    expect(issues).toEqual(planned.launch.stepIssues);
+  });
+
+  it("withholds judgement until the doctor has run", async () => {
+    const { server } = makeServer();
+    const base = await start(server);
+    const res = await postJson(`${base}/api/workflows/${launchSpec.name}/lint`, {});
+    expect(res.status).toBe(200);
+    expect((await res.json()) as unknown).toEqual({ issues: [] });
+  });
+
+  it("rejects an unknown workflow and a draft that claims a different one", async () => {
+    const { server } = makeServer({ doctor: READY_DOCTOR });
+    const base = await start(server);
+
+    const missing = await postJson(`${base}/api/workflows/nope/lint`, {});
+    expect(missing.status).toBe(404);
+
+    const foreign = await postJson(`${base}/api/workflows/${launchSpec.name}/lint`, {
+      spec: { ...launchSpec, name: "somebody-else" },
+    });
+    expect(foreign.status).toBe(400);
+  });
+});
+
+describe("runner usage endpoint", () => {
+  it("reports the runs each runner worked in, and says when it cannot", async () => {
+    const history = createInMemoryHistoryStore();
+    const { server } = makeServer({ history });
+    const base = await start(server);
+
+    // The in-memory store has no runnerUsage, so the honest answer is that
+    // the column has nothing to show — not that every runner is unused.
+    const blind = await fetch(`${base}/api/runner-usage`);
+    expect(blind.status).toBe(200);
+    expect((await blind.json()) as unknown).toEqual({ runs: 0, counts: {}, available: false });
+
+    const counting = createInMemoryHistoryStore();
+    counting.runnerUsage = async () => ({ runs: 7, counts: { claude: 5 } });
+    const withCounts = makeServer({ history: counting });
+    const base2 = await start(withCounts.server);
+    const res = await fetch(`${base2}/api/runner-usage`);
+    expect((await res.json()) as unknown).toEqual({
+      runs: 7,
+      counts: { claude: 5 },
+      available: true,
+    });
+  });
+
+  it("degrades to blank rather than a 500 when the store throws", async () => {
+    const broken = createInMemoryHistoryStore();
+    broken.runnerUsage = async () => {
+      throw new Error("history is unreadable");
+    };
+    const { server } = makeServer({ history: broken });
+    const base = await start(server);
+    const res = await fetch(`${base}/api/runner-usage`);
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { available: boolean }).toMatchObject({ available: false });
   });
 });

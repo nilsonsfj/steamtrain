@@ -227,6 +227,9 @@
   font-size: 13px;
 }
 .finding .where {
+  /* Under the headline, not under the severity label: the grid's first column
+     is 74px wide and would break this line into fragments. */
+  grid-column: 2;
   font: 400 12px / 1.6 var(--font-mono);
   color: var(--dim);
   margin-top: 5px;
@@ -322,4 +325,10 @@
 .ledger-foot .row .v {
   margin-left: auto;
   color: var(--muted);
+}
+
+/* A "medium" notice keeps the default (muted) severity colour: the run coped,
+   and colouring it would put it on the same footing as a failure. */
+.finding .sev.medium {
+  color: var(--dim);
 }

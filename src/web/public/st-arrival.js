@@ -170,19 +170,36 @@
       h("div", { class: "rule" }),
       h("div", { class: "src", text: S.runState.name || S.selected || "" })
     ));
-    var cards = SteamtrainReducer.arrivalReceiptCards
-      ? SteamtrainReducer.arrivalReceiptCards(report.receipt)
-      : [];
-    if (cards.length) {
-      // Cards (what ran / what it cost / what it produced) carry no severity
-      // of their own -- the narrow column holds the card's short label
-      // instead, and every row keeps the default (unmodified) .sev colour.
-      // The brief's ".sev.critical" / ".sev.high" mapping describes a
-      // Critical/High/Medium finding shape the engine does not actually
-      // produce here: SteamtrainReducer.arrivalReceiptCards() returns plain
-      // { id, label, value } with no severity field at all (confirmed
-      // against src/workflow/arrival-report.ts). Do not "fix" this back
-      // toward a literal severity mapping -- there is no severity data to map.
+    // Severity-labelled notices (design 02) when the run has something to
+    // report, the receipt cards when it does not. The labels rank RUN
+    // OUTCOMES, not findings from an agent's report — see ArrivalNotice in
+    // src/workflow/arrival-report.ts for why that distinction is load-bearing.
+    var notices = report.notices || [];
+    var cards = notices.length || !SteamtrainReducer.arrivalReceiptCards
+      ? []
+      : SteamtrainReducer.arrivalReceiptCards(report.receipt);
+    if (notices.length) {
+      notices.slice(0, 6).forEach(function (n) {
+        var row = h("div", { class: "finding" },
+          h("div", { class: "sev " + n.severity, text: n.severity }),
+          h("div", { class: "what", text: n.what })
+        );
+        if (n.where) row.appendChild(h("div", { class: "where", text: n.where }));
+        reportBody.appendChild(row);
+      });
+      if (notices.length > 6) {
+        reportBody.appendChild(h("div", { class: "finding" },
+          h("div", { class: "sev" }),
+          h("div", { class: "where", text: (notices.length - 6) + " more in the step ledger" })
+        ));
+      }
+    } else if (cards.length) {
+      // The clean-run fallback: cards (what ran / what it cost / what it
+      // produced) are facts, not problems, so they carry no severity of their
+      // own -- the narrow column holds the card's short label instead and every
+      // row keeps the default .sev colour. Do not map these onto
+      // critical/high/medium: a run with nothing wrong has no severities, and
+      // inventing them is exactly the lie the notice list above avoids.
       cards.forEach(function (c) {
         reportBody.appendChild(h("div", { class: "finding" },
           h("div", { class: "sev", text: (c.id || "").toUpperCase() }),

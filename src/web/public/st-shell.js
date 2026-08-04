@@ -164,12 +164,8 @@
     if (!row) return;
     clear(row);
     var item = S.selected ? wfListItem(S.selected) : null;
-    var runBtn = document.getElementById("runBtn");
-    var planBtn = document.getElementById("planBtn");
     if (!item || !item.blocked || isReadOnly()) {
       row.style.display = "none";
-      if (runBtn) runBtn.disabled = false;
-      if (planBtn) planBtn.disabled = false;
       return;
     }
     row.style.display = "flex";
@@ -182,15 +178,23 @@
         h("b", {}, "Needs " + rr.blockedAgents.map(ST.agentUiLabel).join(", ") + " (not ready). "),
         "Run re-routes " + steps + " to " + ST.agentUiLabel(rr.agent) + " · " + (rr.modelName || rr.model) +
         " for this run only — the workflow itself is unchanged."));
-      if (runBtn) runBtn.disabled = false;
-      if (planBtn) planBtn.disabled = false;
     } else {
       row.className = "reroute-row err";
       row.appendChild(h("span", { class: "reroute-icon", text: "⚠" }));
       row.appendChild(h("span", { text: item.blocked }));
-      if (runBtn) runBtn.disabled = true;
-      if (planBtn) planBtn.disabled = true;
     }
+  }
+
+  /**
+   * Why launching the selected workflow is refused, or "" when it is allowed.
+   * The strip above only explains the block; this is what the plan's Run
+   * buttons disable on, so the two can never disagree. A re-routable block is
+   * not a refusal — that run swaps runners and goes.
+   */
+  function launchBlocked() {
+    var item = S.selected ? wfListItem(S.selected) : null;
+    if (!item || !item.blocked || item.reroute) return "";
+    return item.blocked;
   }
 
   /**
@@ -325,6 +329,7 @@
   ST.shell = {
     render: render,
     renderBlockedRow: renderBlockedRow,
+    launchBlocked: launchBlocked,
     renderCrumbs: renderCrumbs,
     renderHealth: renderHealth,
     renderLiveRuns: renderLiveRuns,

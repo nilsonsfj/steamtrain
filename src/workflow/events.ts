@@ -368,6 +368,20 @@ export interface StepEditedEvent {
   ts: number;
 }
 
+/**
+ * A running step was killed on request. The step fails with `killed` set on
+ * its result and the run carries on scheduling — that is the whole point of
+ * killing one step rather than cancelling the run. Emitted the moment the
+ * abort is delivered; the step's own `step_done` follows once it unwinds.
+ */
+export interface StepKilledEvent {
+  kind: "step_killed";
+  stepId: string;
+  /** Who killed it (e.g. `"human:web"`, `"human:tui"`). */
+  by?: string;
+  ts: number;
+}
+
 export type WorkflowEvent =
   | WorkflowStartEvent
   | PhaseStartEvent
@@ -388,6 +402,7 @@ export type WorkflowEvent =
   | HumanInputResolvedEvent
   | RunPausedEvent
   | RunResumedEvent
-  | StepEditedEvent;
+  | StepEditedEvent
+  | StepKilledEvent;
 
 export type WorkflowEventKind = WorkflowEvent["kind"];

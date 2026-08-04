@@ -211,6 +211,12 @@ export interface StepState {
   forEach?: string;
   /** True when a mid-run edit (pause → edit → resume) applies to this step. */
   edited?: boolean;
+  /**
+   * True from the moment a kill is requested for this running step, before its
+   * result lands — the button that asked for it has to stop offering, and the
+   * step has to stop reading as merely "running", straight away.
+   */
+  killed?: boolean;
 }
 
 export interface PhaseState {
@@ -667,6 +673,21 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
         })),
       };
     }
+    case "step_killed":
+      // Marks the running instance immediately; the failed result arrives on
+      // its own `step_done` once the step unwinds. The event carries no phase
+      // (a kill names a step, not a place), so every instance of that id is
+      // considered and only the running one is marked — in a loop workflow the
+      // earlier iterations are done and must keep their outcome.
+      return {
+        ...state,
+        phases: state.phases.map((p) => ({
+          ...p,
+          steps: p.steps.map((s) =>
+            s.stepId === e.stepId && s.status === "running" ? { ...s, killed: true } : s,
+          ),
+        })),
+      };
     case "loop_iteration": {
       const gatePhaseId = phaseOfStep(state, e.gateStepId);
       if (gatePhaseId) {

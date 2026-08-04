@@ -162,12 +162,15 @@ browser ──POST /api/runs──▶ run manager ──▶ Orchestrator.runWork
 | `/api/meta` | GET | agents + APIs, models, efforts, health (for the create form) |
 | `/api/doctor` | GET | current agent health (`doctor`) and llm-API readiness (`apis`) — the last snapshot (fixed at startup + config save) |
 | `/api/doctor` | POST | re-run the probes now (setup panel Recheck): re-resolve every agent binary + re-probe every API, persist, and return the fresh `{ doctor, apis }` |
-| `/api/runs` | POST | `{ workflow, input, fresh? }` → `{ runId }` |
+| `/api/runs` | POST | `{ workflow, input, freshCache?, freshWorktrees?, maxParallel? }` → `{ runId }` (`freshCache` ignores the step cache; `freshWorktrees` discards the previous run's retained trees) |
 | `/api/runs` | GET | in-flight run registry: server-owned runs merged with external (CLI `--detach` / TUI) runs from `.steamtrain/runs/`, including queued/paused state and pending approval/input summaries |
 | `/api/runs/:id/stream` | GET | Server-Sent Events: each `WorkflowEvent` (plus non-terminal `queued` frames), then a terminal `status` frame; tails externally-owned runs from the live-run registry |
 | `/api/runs/:id/cancel` | POST | abort a running workflow (external runs: drops the registry's cancel marker) |
 | `/api/runs/:id/pause` / `/api/runs/:id/resume` | POST | mid-run steering: stop scheduling new steps / continue (external runs: via the registry's control files) |
 | `/api/runs/:id/edit-step` | POST | `{ stepId, prompt?/cmd?/model?/effort?/permissions? }` — edit a not-yet-started step while paused (`permissions` clamps its sandbox profile; `""` clears it); engine-validated ([mid-run-steering.md](mid-run-steering.md), [permissions.md](permissions.md)) |
+| `/api/runs/:id/kill-step` | POST | `{ stepId }` — fail one running step and let the run carry on ([mid-run-steering.md](mid-run-steering.md)). Manager-owned runs only: a detached run's steps belong to the process running them |
+| `/api/workflows/:name/lint` | POST | `{ spec? }` → `{ issues: [{ stepId, issue }] }` — the source view's warning gutter, from the same readiness the launch sheet uses |
+| `/api/runner-usage` | GET | `{ runs, counts, available }` — recorded runs each runner worked in, for the settings table's Runs column |
 | `/api/history` | GET | past-run summaries (newest first) |
 | `/api/history/:id` | GET | one past run's full record (phase → step tree) |
 | `/api/history` / `/api/history/:id` | DELETE | clear all runs, or delete one |

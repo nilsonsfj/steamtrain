@@ -552,29 +552,150 @@
 
 .src-gutter {
   flex: none;
-  width: 44px;
+  width: 52px;
   padding: 10px 8px 10px 0;
-  text-align: right;
   color: var(--faint);
   background: #0a0c0f;
   border-right: 1px solid var(--border-quiet);
   font: 400 12.5px / 19px var(--font-mono);
-  white-space: pre;
   overflow: hidden;
 }
+.src-ln {
+  height: 19px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+.src-ln.warn {
+  color: var(--gate);
+}
+.src-ln.err {
+  color: var(--error);
+}
+.src-mark {
+  font-size: 10.5px;
+}
 
-.src-editor {
+/* The editor and its highlight layer are stacked, not laid out: identical
+   metrics on both, textarea on top with transparent glyphs so the caret and
+   selection stay native while the colours come from the <pre> underneath. */
+.src-code {
+  position: relative;
   flex: 1;
   min-width: 0;
+}
+.src-hl,
+.src-editor {
+  position: absolute;
+  inset: 0;
+  margin: 0;
   border: none;
-  outline: none;
-  resize: none;
   padding: 10px 14px;
-  background: var(--canvas);
-  color: #b9c4d0;
   font: 400 12.5px / 19px var(--font-mono);
   white-space: pre;
+  tab-size: 2;
+}
+.src-hl {
+  color: #b9c4d0;
+  background: var(--canvas);
+  overflow: hidden;
+  pointer-events: none;
+}
+.src-editor {
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
   overflow: auto;
+}
+.src-editor::selection {
+  background: rgba(52, 211, 196, 0.25);
+}
+.src-hl .tok-key {
+  color: var(--accent-bright);
+}
+.src-hl .tok-str {
+  color: var(--muted);
+}
+.src-hl .tok-num,
+.src-hl .tok-lit {
+  color: var(--gate);
+}
+.src-hl .tok-punct {
+  color: var(--faint);
+}
+
+/* ---- lint strip -------------------------------------------------------------- */
+
+.lint-tally {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.lint-ok {
+  color: var(--faint);
+}
+.lint-n.err {
+  color: var(--error-text);
+}
+.lint-n.warn {
+  color: var(--gate);
+}
+
+.src-lint {
+  flex: none;
+  max-height: 132px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border-quiet);
+  background: var(--surface);
+}
+.lint-row {
+  display: flex;
+  gap: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-quiet);
+}
+.lint-row:last-child {
+  border-bottom: none;
+}
+.lint-row:hover {
+  background: var(--raised);
+}
+.lint-icon {
+  flex: none;
+  font: 400 11.5px / 1.5 var(--font-mono);
+}
+.lint-row.warn .lint-icon {
+  color: var(--gate);
+}
+.lint-row.err .lint-icon {
+  color: var(--error);
+}
+/* Same warn prose colour as .ls-unsaved-title in the launch sheet. */
+.lint-msg {
+  font: 400 12px / 1.5 var(--font-ui);
+  color: #d8ab4f;
+}
+.lint-row.err .lint-msg {
+  color: var(--error-text);
+}
+.lint-sub {
+  font: 400 11.5px / 1.5 var(--font-mono);
+  color: var(--dim);
+}
+.lint-action {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font: 400 11.5px / 1.5 var(--font-mono);
+  color: var(--accent);
+}
+.lint-action:hover {
+  text-decoration: underline;
 }
 
 .src-foot {
@@ -1331,4 +1452,16 @@
 .insp-body .insp-prompt {
   max-height: none;
   flex: 1;
+}
+
+/* "Kill step" (design 02.4): destructive, but a ghost — it sits beside "Edit
+   in plan" in the step record's footer and must not out-shout it. */
+.btn.danger-ghost {
+  border: 1px solid rgba(248, 81, 73, 0.35);
+  background: rgba(248, 81, 73, 0.08);
+  color: var(--error-text);
+}
+.btn.danger-ghost:hover {
+  background: rgba(248, 81, 73, 0.16);
+  border-color: rgba(248, 81, 73, 0.5);
 }

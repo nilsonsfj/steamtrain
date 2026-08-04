@@ -6,6 +6,7 @@ import {
   type WorkflowSpec,
   type WorkflowState,
   appendNarration,
+  arrivalNotices,
   arrivalReceiptCards,
   buildArrivalReport,
   findArrivalStep,
@@ -430,5 +431,121 @@ describe("arrival report", () => {
     });
     const lines = narrateFromState(state);
     expect(lines[0]?.text).toContain("Started tour");
+  });
+});
+
+/**
+ * The arrival's severity labels (design 02). They rank what the ENGINE saw —
+ * a step that failed, was killed, retried — not findings parsed out of an
+ * agent's report, which steamtrain never reads.
+ */
+describe("arrival notices", () => {
+  type Step = Parameters<typeof arrivalNotices>[0][number];
+  const step = (over: Partial<Step> & { stepId: string }): Step =>
+    ({
+      blockKind: "worker",
+      status: "done",
+      text: "",
+      cached: false,
+      ...over,
+    }) as Step;
+
+  it("ranks a root failure above the steps it took down with it", () => {
+    const notices = arrivalNotices([
+      step({
+        stepId: "report",
+        status: "error",
+        result: {
+          stepId: "report",
+          ok: false,
+          output: "",
+          durationMs: 0,
+          dependencyFailed: "scan",
+          error: "dependency 'scan' failed",
+        },
+      }),
+      step({
+        stepId: "scan",
+        status: "error",
+        result: {
+          stepId: "scan",
+          ok: false,
+          output: "",
+          durationMs: 1,
+          error: "runner timeout after 900s\nstack line",
+        },
+      }),
+    ]);
+
+    expect(notices.map((n) => [n.severity, n.what])).toEqual([
+      ["critical", "scan failed"],
+      ["high", "report never ran"],
+    ]);
+    // First line of the error only — the rest is for the step record.
+    expect(notices[0]?.where).toBe("runner timeout after 900s");
+    expect(notices[1]?.where).toBe("scan failed before it");
+  });
+
+  it("separates a deliberate stop from a breakage", () => {
+    const notices = arrivalNotices([
+      step({
+        stepId: "slow",
+        status: "error",
+        result: {
+          stepId: "slow",
+          ok: false,
+          output: "",
+          durationMs: 1,
+          killed: true,
+          error: "killed by human:web",
+        },
+      }),
+      step({ stepId: "flaky", attempts: 3 }),
+      step({
+        stepId: "findings-ready",
+        blockKind: "gate",
+        gate: { passed: false },
+      }),
+    ]);
+
+    expect(notices.map((n) => [n.severity, n.what])).toEqual([
+      ["high", "slow was killed"],
+      ["high", "gate findings-ready did not pass"],
+      ["medium", "flaky needed 3 attempts"],
+    ]);
+    // The headline says it was killed, so the detail line carries who.
+    expect(notices[0]?.where).toBe("by human:web");
+  });
+
+  it("says nothing about a clean run, or about a loop gate mid-loop", () => {
+    expect(arrivalNotices([step({ stepId: "a" }), step({ stepId: "b" })])).toEqual([]);
+    // A loop gate that has not converged yet is the loop working, not a stop.
+    expect(
+      arrivalNotices([
+        step({ stepId: "lap-gate", blockKind: "gate", gate: { passed: false }, loopTo: "p1" }),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("leaves a fan-out parent to its children", () => {
+    const notices = arrivalNotices([
+      step({
+        stepId: "fan",
+        result: {
+          stepId: "fan",
+          ok: false,
+          output: "",
+          durationMs: 1,
+          error: "one child failed",
+          childResults: [{ stepId: "fan[0]", ok: false, output: "", durationMs: 1 }],
+        },
+      }),
+      step({
+        stepId: "fan[0]",
+        status: "error",
+        result: { stepId: "fan[0]", ok: false, output: "", durationMs: 1, error: "boom" },
+      }),
+    ]);
+    expect(notices.map((n) => n.stepId)).toEqual(["fan[0]"]);
   });
 });

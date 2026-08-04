@@ -77,6 +77,7 @@ export {
   type RunControlHooks,
   type StepEditPatch,
   type StepEditResult,
+  type StepKillResult,
   type WorkflowRunControl,
 } from "./control";
 export {
@@ -195,6 +196,7 @@ export {
 } from "./cost";
 export {
   AGENT_QUESTION_PROTOCOL,
+  markKilledResult,
   parseAgentQuestion,
   runWorkflow,
   type WorkflowDeps,
@@ -586,8 +588,10 @@ export {
 export {
   type ArrivalReceipt,
   type ArrivalDestination,
+  type ArrivalNotice,
   type ArrivalReport,
   ARRIVAL_NEXT_CANDIDATES,
+  arrivalNotices,
   arrivalReceiptCards,
   buildArrivalReport,
   findArrivalStep,

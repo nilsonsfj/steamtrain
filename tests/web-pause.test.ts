@@ -87,7 +87,18 @@ function makeEngineHost(): { host: WorkflowHost; state: HostState } {
       return (async function* () {
         state.prompts.push(opts.prompt);
         state.permissions.push(opts.permissions?.profile);
-        if (opts.model === "ma") await gate;
+        if (opts.model === "ma") {
+          // Releasable by the test, and by an abort — a killed step's adapter
+          // has to unwind on its own signal or the kill would hang the run.
+          await Promise.race([
+            gate,
+            new Promise<void>((resolve) => {
+              if (opts.signal?.aborted) return resolve();
+              opts.signal?.addEventListener("abort", () => resolve(), { once: true });
+            }),
+          ]);
+          if (opts.signal?.aborted) return;
+        }
         yield { kind: "session_start", agent: "claude", ts: 0 } as AgentEvent;
         yield {
           kind: "result",
@@ -295,6 +306,61 @@ describe("web mid-run steering endpoints", () => {
     });
     expect(unpaused.status).toBe(400);
     expect(String(unpaused.body.error)).toMatch(/pause the run/);
+
+    state.releaseA();
+    await framesP;
+  });
+});
+
+describe("web kill-step endpoint", () => {
+  it("kills one running step and leaves the run to finish on its own", async () => {
+    const { server, state } = makeServer();
+    const base = await start(server);
+
+    const started = await post(base, "/api/runs", { workflow: "steer-demo", input: "hi" });
+    const runId = started.body.runId as string;
+    const streamRes = await fetch(`${base}/api/runs/${runId}/stream`);
+    const framesP = readSseFromResponse(streamRes);
+
+    // Step "a" is in flight (its adapter is parked); kill exactly it.
+    for (let i = 0; i < 100 && state.prompts.length === 0; i++) await delay(10);
+    const killed = await post(base, `/api/runs/${runId}/kill-step`, { stepId: "a" });
+    expect(killed).toMatchObject({ status: 200, body: { killed: true } });
+
+    const frames = await framesP;
+    const events = frames.filter((f) => f.type === "event").map((f) => f.event as WorkflowEvent);
+    expect(events.map((e) => e.kind)).toContain("step_killed");
+    const killEvent = events.find((e) => e.kind === "step_killed");
+    expect(killEvent).toMatchObject({ stepId: "a", by: "human:web" });
+
+    const aDone = events.find((e) => e.kind === "step_done" && e.stepId === "a");
+    const aResult = aDone?.kind === "step_done" ? aDone.result : undefined;
+    expect(aResult?.killed).toBe(true);
+    expect(aResult?.error).toBe("killed by human:web");
+
+    // The run reached its own end rather than being cancelled with the step:
+    // "b" depended on "a", so it is a cascade failure, not an abort.
+    const bDone = events.find((e) => e.kind === "step_done" && e.stepId === "b");
+    expect(bDone?.kind === "step_done" ? bDone.result.dependencyFailed : undefined).toBe("a");
+    expect(frames.find((f) => f.type === "status")).toMatchObject({ status: "error" });
+  });
+
+  it("refuses an unknown run, a missing stepId, and a step that is not running", async () => {
+    const { server, state } = makeServer();
+    const base = await start(server);
+
+    expect((await post(base, "/api/runs/nope/kill-step", { stepId: "a" })).status).toBe(404);
+
+    const started = await post(base, "/api/runs", { workflow: "steer-demo", input: "hi" });
+    const runId = started.body.runId as string;
+    const streamRes = await fetch(`${base}/api/runs/${runId}/stream`);
+    const framesP = readSseFromResponse(streamRes);
+    for (let i = 0; i < 100 && state.prompts.length === 0; i++) await delay(10);
+
+    expect((await post(base, `/api/runs/${runId}/kill-step`, {})).status).toBe(400);
+    const pending = await post(base, `/api/runs/${runId}/kill-step`, { stepId: "b" });
+    expect(pending.status).toBe(400);
+    expect(String(pending.body.error)).toMatch(/not running/);
 
     state.releaseA();
     await framesP;

@@ -17,6 +17,9 @@ function report(ok = true): ArrivalReport {
       tokens: 0,
       agentless: true,
     },
+    notices: ok
+      ? []
+      : [{ severity: "critical" as const, stepId: "scan", what: "scan failed", where: "boom" }],
     destinations: [
       { id: "again", label: "Ride again", key: "r" },
       { id: "history", label: "See past runs", key: "h" },

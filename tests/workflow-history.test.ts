@@ -7,7 +7,13 @@ import { initialWorkflowState, workflowReducer } from "../src/tui/workflow-state
 import type { AgentEvent, AgentId } from "../src/types/events";
 import { runWorkflow } from "../src/workflow/engine";
 import type { WorkflowEvent } from "../src/workflow/events";
-import { RUN_RECORD_VERSION, RunRecordBuilder } from "../src/workflow/history";
+import {
+  RUN_RECORD_VERSION,
+  type RunRecord,
+  RunRecordBuilder,
+  computeRunTotals,
+  tallyRunnerUsage,
+} from "../src/workflow/history";
 import { createWorkflowHistoryStore } from "../src/workflow/history-store";
 import type { StepResult, WorkflowSpec } from "../src/workflow/types";
 
@@ -511,5 +517,78 @@ describe("workflow history store", () => {
     await store.save(record);
     const loaded = await store.get("r-spec");
     expect(loaded?.specHash).toBe("abc123");
+  });
+});
+
+describe("runner usage tally", () => {
+  /** A record with one phase of steps, enough for the tally to read. */
+  function usageRecord(
+    id: string,
+    startedAt: number,
+    steps: Array<{ agent?: string; cached?: boolean; status?: string }>,
+  ): RunRecord {
+    return {
+      version: RUN_RECORD_VERSION,
+      id,
+      workflow: "wf",
+      input: "i",
+      cwd: tmpdir(),
+      status: "done",
+      ok: true,
+      startedAt,
+      endedAt: startedAt + 1,
+      durationMs: 1,
+      phases: [
+        {
+          phaseId: "p1",
+          title: "P1",
+          index: 0,
+          stepCount: steps.length,
+          done: true,
+          ok: true,
+          steps: steps.map((s, i) => ({
+            stepId: `s${i}`,
+            blockKind: "worker" as const,
+            agent: s.agent,
+            status: (s.status ?? "done") as "done",
+            text: "",
+            cached: s.cached === true,
+          })),
+        },
+      ],
+      totals: computeRunTotals([]),
+    };
+  }
+
+  it("counts a runner once per run, however many steps it took", () => {
+    const usage = tallyRunnerUsage([
+      usageRecord("a", 1, [{ agent: "claude" }, { agent: "claude" }, { agent: "codex" }]),
+      usageRecord("b", 2, [{ agent: "claude" }]),
+    ]);
+    expect(usage).toEqual({ runs: 2, counts: { claude: 2, codex: 1 } });
+  });
+
+  it("ignores replayed and never-dispatched steps", () => {
+    // A cached step replayed an earlier run's work and a pending one never
+    // ran at all — neither is evidence this runner did anything.
+    const usage = tallyRunnerUsage([
+      usageRecord("a", 1, [
+        { agent: "claude", cached: true },
+        { agent: "codex", status: "pending" },
+        { agent: "amp" },
+      ]),
+    ]);
+    expect(usage).toEqual({ runs: 1, counts: { amp: 1 } });
+  });
+
+  it("reads the counts off the same files the listing already parses", async () => {
+    const root = tempDir();
+    const store = createWorkflowHistoryStore(root);
+    await store.save(usageRecord("old", 1000, [{ agent: "claude" }]));
+    await store.save(usageRecord("new", 2000, [{ agent: "claude" }, { agent: "codex" }]));
+
+    expect(await store.runnerUsage?.()).toEqual({ runs: 2, counts: { claude: 2, codex: 1 } });
+    // A limit takes the newest runs, matching what the list view shows.
+    expect(await store.runnerUsage?.(1)).toEqual({ runs: 1, counts: { claude: 1, codex: 1 } });
   });
 });

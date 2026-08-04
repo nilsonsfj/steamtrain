@@ -433,6 +433,16 @@ var SteamtrainReducer = (() => {
           }))
         };
       }
+      case "step_killed":
+        return {
+          ...state,
+          phases: state.phases.map((p) => ({
+            ...p,
+            steps: p.steps.map(
+              (s) => s.stepId === e.stepId && s.status === "running" ? { ...s, killed: true } : s
+            )
+          }))
+        };
       case "loop_iteration": {
         const gatePhaseId = phaseOfStep(state, e.gateStepId);
         if (gatePhaseId) {
@@ -789,8 +799,81 @@ var SteamtrainReducer = (() => {
         tokens,
         agentless
       },
+      notices: arrivalNotices(flat.map((f) => f.step)),
       destinations
     };
+  }
+  var SEVERITY_RANK = {
+    critical: 0,
+    high: 1,
+    medium: 2
+  };
+  function arrivalNotices(steps) {
+    const notices = [];
+    for (const step of steps) {
+      const result = step.result;
+      if (result?.childResults?.length) continue;
+      if (result && !result.ok && !result.skipped) {
+        const firstLine = (result.error ?? "").split("\n", 1)[0]?.trim();
+        const detail = firstLine && firstLine.length > 160 ? `${firstLine.slice(0, 159)}\u2026` : firstLine;
+        if (result.killed) {
+          notices.push({
+            severity: "high",
+            stepId: step.stepId,
+            what: `${step.stepId} was killed`,
+            where: detail?.startsWith("killed ") ? detail.slice("killed ".length) : detail
+          });
+        } else if (result.dependencyFailed) {
+          notices.push({
+            severity: "high",
+            stepId: step.stepId,
+            what: `${step.stepId} never ran`,
+            where: `${result.dependencyFailed} failed before it`
+          });
+        } else {
+          notices.push({
+            severity: "critical",
+            stepId: step.stepId,
+            what: `${step.stepId} failed`,
+            where: detail
+          });
+        }
+        continue;
+      }
+      if (step.gate && step.gate.passed === false && !step.loopTo) {
+        notices.push({
+          severity: "high",
+          stepId: step.stepId,
+          what: `gate ${step.stepId} did not pass`,
+          where: step.gate.target ? `expected ${step.gate.target}` : void 0
+        });
+        continue;
+      }
+      const attempts = step.attempts ?? result?.attempts;
+      if (typeof attempts === "number" && attempts > 1) {
+        notices.push({
+          severity: "medium",
+          stepId: step.stepId,
+          what: `${step.stepId} needed ${attempts} attempts`,
+          where: "it succeeded on the last one"
+        });
+        continue;
+      }
+      if (result?.skipped) {
+        notices.push({
+          severity: "medium",
+          stepId: step.stepId,
+          what: `${step.stepId} was skipped`,
+          where: "its condition was false"
+        });
+      }
+    }
+    return sortNotices(notices);
+  }
+  function sortNotices(notices) {
+    return notices.map((notice, index) => ({ notice, index })).sort(
+      (a, b) => SEVERITY_RANK[a.notice.severity] - SEVERITY_RANK[b.notice.severity] || a.index - b.index
+    ).map((entry) => entry.notice);
   }
   function findArrivalStep(steps) {
     const consolidators = steps.filter(
