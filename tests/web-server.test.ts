@@ -1625,6 +1625,57 @@ describe("web server", () => {
     expect(projectDisk.apis ?? []).toEqual([]);
   });
 
+  it("round-trips the parallel-step ceiling, with the bounds the slider must obey", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const dir = mkdtempSync(join(tmpdir(), "st-cfg-conc-"));
+    tempRoots.push(dir);
+    const configPath = join(dir, "steamtrain.json");
+    writeFileSync(configPath, "{}\n");
+    const config: Record<string, unknown> = {};
+    const server = createWebServer({ host, runs, config, configPath });
+    servers.push(server);
+    const base = await start(server);
+
+    const before = (await (await fetch(`${base}/api/config`)).json()) as {
+      maxConcurrency: number;
+      maxConcurrencyCeiling: number;
+      defaultMaxConcurrency: number;
+      version: string;
+    };
+    // With nothing configured the page opens on the default, not on undefined.
+    expect(before.maxConcurrency).toBe(before.defaultMaxConcurrency);
+    expect(before.maxConcurrencyCeiling).toBeGreaterThan(1);
+    expect(before.version).toMatch(/^\d+\./);
+
+    const res = await fetch(`${base}/api/config`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ maxConcurrency: 7 }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { maxConcurrency: number }).toMatchObject({ maxConcurrency: 7 });
+    expect(JSON.parse(readFileSync(configPath, "utf8"))).toMatchObject({ maxConcurrency: 7 });
+
+    // Out of range is a readable 400, not a save failure from deeper down.
+    const tooBig = await fetch(`${base}/api/config`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ maxConcurrency: before.maxConcurrencyCeiling + 1 }),
+    });
+    expect(tooBig.status).toBe(400);
+    expect((await tooBig.json()) as { error: string }).toMatchObject({
+      error: expect.stringContaining("maxConcurrency"),
+    });
+    // The rejected write left the saved value alone.
+    expect(JSON.parse(readFileSync(configPath, "utf8"))).toMatchObject({ maxConcurrency: 7 });
+  });
+
   it("PUT /api/config allows the same agent id in both user and project scopes", async () => {
     const host = new FakeHost(demoSpec(), happyRun);
     const runs = new WorkflowRunManager({

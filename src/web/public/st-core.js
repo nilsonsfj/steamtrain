@@ -501,6 +501,7 @@ window.Steamtrain = (function () {
     loadMeta();
     if (!isReadOnly()) loadProjectConfig();
     pollDoctor(0);
+    applyHealthCadence();
     pollLiveRuns();
     if (!S.liveRunsTimer) S.liveRunsTimer = setInterval(pollLiveRuns, 5000);
   }
@@ -1165,6 +1166,71 @@ window.Steamtrain = (function () {
     });
   }
 
+  // ---- health re-probing ------------------------------------------------------
+  // GET /api/doctor reads the server's last snapshot; POST re-probes. Everything
+  // that wants fresh readiness (the Recheck button, the launch sheet, the 60s
+  // cadence) goes through recheckHealth so they all update the same state and
+  // repaint the same surfaces.
+  var HEALTH_CADENCES = ["manual", "launch", "every60"];
+  var HEALTH_CADENCE_KEY = "steamtrain.healthCadence";
+  var healthTimer = null;
+  var recheckInFlight = null;
+
+  /**
+   * How often runner availability is re-probed. A viewing preference, not a
+   * workflow setting — it changes what this browser asks for, never the config
+   * a run reads — so it lives in localStorage rather than in config.json.
+   */
+  function healthCadence() {
+    try {
+      var stored = localStorage.getItem(HEALTH_CADENCE_KEY);
+      if (HEALTH_CADENCES.indexOf(stored) >= 0) return stored;
+    } catch (e) {}
+    return "launch";
+  }
+  function setHealthCadence(next) {
+    if (HEALTH_CADENCES.indexOf(next) < 0) return;
+    try { localStorage.setItem(HEALTH_CADENCE_KEY, next); } catch (e) {}
+    applyHealthCadence();
+  }
+  /** Start or stop the periodic re-probe to match the current preference. */
+  function applyHealthCadence() {
+    if (healthTimer) { clearInterval(healthTimer); healthTimer = null; }
+    // POST /api/doctor is a control-plane write, so viewers never get the timer.
+    if (healthCadence() !== "every60" || isReadOnly()) return;
+    healthTimer = setInterval(function () { recheckHealth(); }, 60000);
+  }
+  /** Re-probe now, unless one is already in flight (the timer can overlap a click). */
+  function recheckHealth() {
+    if (recheckInFlight) return recheckInFlight;
+    recheckInFlight = apiAuth("POST", "/api/doctor").then(function (r) {
+      if (r.status === 200 && r.body) {
+        S.doctor = r.body.doctor || [];
+        S.apiDoctor = r.body.apis || [];
+        S.doctorReadAt = Date.now();
+        ST.shell.renderHealth(S.doctor, S.apiDoctor, r.body.doctorError || null);
+        applyHealth();
+        refreshWorkflowList();
+      }
+      return r;
+    }).catch(function () {
+      return { status: 0 };
+    }).then(function (r) {
+      recheckInFlight = null;
+      return r;
+    });
+    return recheckInFlight;
+  }
+  /**
+   * The "On launch" cadence: fresh readiness at the moment a run is set up.
+   * Always returns a promise so callers can sequence on it; under "Manual" it
+   * is already resolved and costs nothing.
+   */
+  function recheckHealthOnLaunch() {
+    if (healthCadence() === "manual" || isReadOnly()) return Promise.resolve(null);
+    return recheckHealth();
+  }
+
   /** Copy `text`, then flash the button's label so the click has a visible result. */
   function copyFix(text, btn, codeEl) {
     function flash() {
@@ -1454,6 +1520,10 @@ window.Steamtrain = (function () {
   ST.friendlyStepLabel = friendlyStepLabel;
   ST.groupWorkflowsBySource = groupWorkflowsBySource;
   ST.handleRoute = handleRoute;
+  ST.healthCadence = healthCadence;
+  ST.setHealthCadence = setHealthCadence;
+  ST.recheckHealth = recheckHealth;
+  ST.recheckHealthOnLaunch = recheckHealthOnLaunch;
   ST.isCredentialFreeSpec = isCredentialFreeSpec;
   ST.isInteractiveTarget = isInteractiveTarget;
   ST.isLiveAttached = isLiveAttached;

@@ -55,6 +55,8 @@
   var limitsNotice = null;
   var limitsSaveBtn = null;
   var limitsDiscardBtn = null;
+  var runnersSaveBtn = null;
+  var runnersDiscardBtn = null;
 
   function open(section) {
     var hash = (window.SteamtrainReducer && SteamtrainReducer.settingsDeepLink)
@@ -113,7 +115,8 @@
   function initDrafts() {
     draft = {
       agents: (S.projectConfig.agents || []).map(cloneAgent),
-      apis: (S.projectConfig.apis || []).map(cloneApi)
+      apis: (S.projectConfig.apis || []).map(cloneApi),
+      maxConcurrency: concurrencyValue()
     };
     originalSnapshot = JSON.stringify(draft);
     limitsDraft = buildLimitsDraft();
@@ -126,6 +129,22 @@
     return { stepMin: stepMin, wfMin: wf ? Math.round(wf / 60) : "", auto: !wf };
   }
   function agentsDirty() { return Boolean(draft) && JSON.stringify(draft) !== originalSnapshot; }
+
+  // ---- concurrency ceiling ----------------------------------------------------
+  // Max steps run in parallel within a phase. The server sends the resolved
+  // value plus the bounds it will accept, so the control can never offer a
+  // number the config schema would reject.
+  function concurrencyBounds() {
+    var cfg = S.projectConfig || {};
+    var ceiling = Number(cfg.maxConcurrencyCeiling) || 16;
+    return { min: 1, max: ceiling, fallback: Number(cfg.defaultMaxConcurrency) || 5 };
+  }
+  function concurrencyValue() {
+    var bounds = concurrencyBounds();
+    var cfg = S.projectConfig || {};
+    var value = Number(cfg.maxConcurrency) || bounds.fallback;
+    return Math.min(bounds.max, Math.max(bounds.min, Math.round(value)));
+  }
 
   function findAgent(id) {
     if (!draft) return null;
@@ -141,6 +160,10 @@
   // ---- paint -----------------------------------------------------------------
   function paint() {
     if (!mountEl) return;
+    // Footer buttons are rebuilt below; drop the previous paint's nodes so a
+    // stray sync can't write to a button that is no longer on the page.
+    runnersSaveBtn = null;
+    runnersDiscardBtn = null;
     clear(mountEl);
     mountEl.className = "settings";
     mountEl.appendChild(buildNav());
@@ -184,16 +207,13 @@
     return nav;
   }
 
-  /**
-   * Rail footer: which file the edits on this page land in. The design also
-   * shows a version here; nothing the web API serves carries one, so it is
-   * left out rather than invented.
-   */
+  /** Rail footer: which file the edits on this page land in, and what's running. */
   function buildNavFoot() {
     var cfg = S.projectConfig || {};
     var path = cfg.userConfigPath || cfg.configPath;
     var foot = h("div", { class: "settings-navfoot" });
     foot.appendChild(h("div", { class: "path", text: path ? "config: " + path : "config: unknown" }));
+    if (cfg.version) foot.appendChild(h("div", { class: "version", text: "v" + cfg.version }));
     return foot;
   }
 
@@ -202,9 +222,24 @@
     var meta = SECTION_META[activeSection] || {};
     var closeBtn = h("button", { class: "btn small", type: "button", text: "Close" });
     closeBtn.addEventListener("click", closeSettings);
+    var actions = h("div", { class: "actions" });
+    // The section's own verbs sit in its header, next to the title they act on;
+    // Save/Discard stay in the footer, where the dirty state is reported.
+    if (activeSection === "runners" && !isReadOnly() && draft) {
+      var recheckBtn = h("button", { class: "btn small", type: "button", text: "Recheck all" });
+      recheckBtn.addEventListener("click", function () { recheck(recheckBtn); });
+      var addAgentBtn = h("button", { class: "btn small", type: "button", text: "Add agent" });
+      addAgentBtn.addEventListener("click", addAgent);
+      var addApiBtn = h("button", { class: "btn small primary", type: "button", text: "Add API" });
+      addApiBtn.addEventListener("click", addApi);
+      actions.appendChild(recheckBtn);
+      actions.appendChild(addAgentBtn);
+      actions.appendChild(addApiBtn);
+    }
+    actions.appendChild(closeBtn);
     pane.appendChild(h("div", { class: "settings-head" },
       h("div", null, h("h2", { text: meta.title || activeSection }), h("p", { text: meta.desc || "" })),
-      h("div", { class: "actions" }, closeBtn)
+      actions
     ));
     pane.appendChild(activeSection === "limits" ? buildLimitsSection() : buildRunnersSection());
     return pane;
@@ -245,6 +280,7 @@
     wrap.appendChild(runnersBanner);
     wrap.appendChild(buildTallyStrip());
     wrap.appendChild(buildRunnerTable());
+    wrap.appendChild(buildRunnerDials());
     wrap.appendChild(buildRunnersFoot());
     return wrap;
   }
@@ -360,13 +396,59 @@
       apiRows.forEach(function (r) { box.appendChild(buildRow("api", r)); });
     }
 
-    if (!isReadOnly() && draft) {
-      var addAgentBtn = h("button", { class: "btn small", type: "button", text: "+ Add agent" });
-      addAgentBtn.addEventListener("click", addAgent);
-      var addApiBtn = h("button", { class: "btn small", type: "button", text: "+ Add API" });
-      addApiBtn.addEventListener("click", addApi);
-      box.appendChild(h("div", { style: "display:flex;gap:8px;margin-top:10px" }, addAgentBtn, addApiBtn));
-    }
+    return box;
+  }
+
+  /**
+   * The two dials that govern how runners are used rather than which exist:
+   * how many steps may run at once, and how often readiness is re-probed.
+   * Drawn as a pair under the table (design 03.2).
+   */
+  function buildRunnerDials() {
+    var bounds = concurrencyBounds();
+    var box = h("div", { class: "runner-dials" });
+
+    var readout = h("span", { class: "value", text: String(draft.maxConcurrency) });
+    var slider = h("input", {
+      class: "slider", type: "range",
+      min: String(bounds.min), max: String(bounds.max), step: "1",
+      value: String(draft.maxConcurrency),
+      "aria-label": "Maximum steps run in parallel"
+    });
+    slider.addEventListener("input", function () {
+      draft.maxConcurrency = Number(slider.value);
+      readout.textContent = slider.value;
+      syncRunnersFoot();
+    });
+    box.appendChild(h("div", { class: "dial" },
+      h("div", { class: "dial-title", text: "Concurrency" }),
+      h("div", { class: "dial-desc", text: "Steps run in parallel within a phase. Applies to every workflow that doesn't set its own." }),
+      h("div", { class: "dial-slider" }, slider, readout)
+    ));
+
+    var cadence = ST.healthCadence ? ST.healthCadence() : "launch";
+    var seg = h("div", { class: "seg", role: "group", "aria-label": "Health check cadence" });
+    [
+      { id: "manual", label: "Manual", title: "Only re-probe when Recheck all is pressed." },
+      { id: "launch", label: "On launch", title: "Re-probe when the launch sheet opens, so skip predictions are current." },
+      { id: "every60", label: "Every 60s", title: "Re-probe in the background once a minute." }
+    ].forEach(function (opt) {
+      var btn = h("button", {
+        class: "seg-item" + (cadence === opt.id ? " on" : ""),
+        type: "button", text: opt.label, title: opt.title,
+        "aria-pressed": cadence === opt.id ? "true" : "false"
+      });
+      btn.addEventListener("click", function () {
+        if (ST.setHealthCadence) ST.setHealthCadence(opt.id);
+        paint();
+      });
+      seg.appendChild(btn);
+    });
+    box.appendChild(h("div", { class: "dial" },
+      h("div", { class: "dial-title", text: "Health checks" }),
+      h("div", { class: "dial-desc", text: "How often runner availability is re-probed. Applies to this browser, not to runs." }),
+      seg
+    ));
     return box;
   }
 
@@ -706,43 +788,47 @@
   }
 
   function buildRunnersFoot() {
-    var dirty = agentsDirty();
     var foot = h("div", { class: "settings-foot" });
-    foot.appendChild(h("span", { class: "probed", text: "Health refreshes automatically; Recheck re-probes right now." }));
+    var path = (S.projectConfig || {}).configPath;
+    foot.appendChild(h("span", { class: "probed", text: path
+      ? "Changes are written to " + path + " when you save."
+      : "Changes are written to the config file when you save." }));
     var actions = h("div", { class: "actions" });
     if (!isReadOnly()) {
-      var recheckBtn = h("button", { class: "btn small", type: "button", text: "Recheck" });
-      recheckBtn.addEventListener("click", function () { recheck(recheckBtn); });
-      var discardBtn = h("button", { class: "btn small", type: "button", text: "Discard", disabled: !dirty });
-      discardBtn.addEventListener("click", function () { draft = JSON.parse(originalSnapshot); paint(); });
-      var saveBtn = h("button", { class: "btn small primary", type: "button", text: "Save changes", disabled: !dirty });
-      saveBtn.addEventListener("click", function () { saveRunners(saveBtn); });
-      actions.appendChild(recheckBtn);
-      actions.appendChild(discardBtn);
-      actions.appendChild(saveBtn);
+      runnersDiscardBtn = h("button", { class: "btn small", type: "button", text: "Discard" });
+      runnersDiscardBtn.addEventListener("click", function () { draft = JSON.parse(originalSnapshot); paint(); });
+      runnersSaveBtn = h("button", { class: "btn small primary", type: "button", text: "Save changes" });
+      runnersSaveBtn.addEventListener("click", function () { saveRunners(runnersSaveBtn); });
+      actions.appendChild(runnersDiscardBtn);
+      actions.appendChild(runnersSaveBtn);
+      syncRunnersFoot();
     }
     foot.appendChild(actions);
     return foot;
   }
 
+  /** Keep Save/Discard in step with the draft without repainting the whole page
+   *  — the concurrency slider fires on every drag tick. */
+  function syncRunnersFoot() {
+    var dirty = agentsDirty();
+    if (runnersDiscardBtn) runnersDiscardBtn.disabled = !dirty;
+    if (runnersSaveBtn) runnersSaveBtn.disabled = !dirty;
+  }
+
   function recheck(btn) {
     btn.disabled = true;
     btn.textContent = "Rechecking…";
-    apiAuth("POST", "/api/doctor").then(function (r) {
-      if (r.status === 200) {
-        S.doctor = r.body.doctor || [];
-        S.apiDoctor = r.body.apis || [];
-        S.doctorReadAt = Date.now();
-        ST.shell.renderHealth(S.doctor, S.apiDoctor, r.body.doctorError || null);
-        ST.applyHealth();
-        refreshWorkflowList();
-      }
-    }).catch(function () {}).then(function () { paint(); });
+    ST.recheckHealth().then(function () { paint(); });
   }
 
   function saveRunners(btn) {
     btn.disabled = true;
-    apiAuth("PUT", "/api/config", { agents: draft.agents, apis: draft.apis }).then(function (r) {
+    var payload = { agents: draft.agents, apis: draft.apis };
+    // Agents and APIs default to the global file; maxConcurrency is project
+    // scoped, so only send it when it actually moved — otherwise every runner
+    // save would rewrite steamtrain.json with a value nobody touched.
+    if (draft.maxConcurrency !== concurrencyValue()) payload.maxConcurrency = draft.maxConcurrency;
+    apiAuth("PUT", "/api/config", payload).then(function (r) {
       btn.disabled = false;
       if (r.status === 200 && r.body && r.body.ok) {
         S.projectConfig = Object.assign({}, S.projectConfig, r.body);

@@ -85,6 +85,11 @@
   color: var(--dim);
   overflow-wrap: anywhere;
 }
+.settings-navfoot .version {
+  font: 400 11px / 1.5 var(--font-mono);
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
 
 /* One-line state of the whole runner set, above the table. */
 .runner-tally {
@@ -301,6 +306,81 @@
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   padding: 6px 9px;
+}
+
+/* The two dials under the runner table: how many steps run at once, and how
+   often readiness is re-probed. Side by side, each capped so the labels stay
+   readable on a wide pane. */
+.runner-dials {
+  display: flex;
+  gap: 40px;
+  flex-wrap: wrap;
+  padding: 22px 0 0;
+}
+.runner-dials .dial {
+  flex: 1;
+  min-width: 260px;
+  max-width: 420px;
+}
+.runner-dials .dial-title {
+  font: 600 12.5px / 1.2 var(--font-ui);
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.runner-dials .dial-desc {
+  font: 400 12px / 1.5 var(--font-ui);
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+.runner-dials .dial-slider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.runner-dials .slider {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+  height: 20px;
+}
+.runner-dials .dial-slider .value {
+  font: 500 13px / 1 var(--font-mono);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  width: 18px;
+  text-align: right;
+}
+/* Segmented control: one border around the set, dividers between items, the
+   selected item filled — same treatment as the launch sheet's toggles. */
+.runner-dials .seg {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--header);
+  max-width: 300px;
+}
+.runner-dials .seg-item {
+  flex: 1;
+  min-height: 28px;
+  padding: 6px 0;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: none;
+  color: var(--muted);
+  font: 500 11.5px / 1 var(--font-ui);
+  cursor: pointer;
+}
+.runner-dials .seg-item:first-child {
+  border-left: 0;
+}
+.runner-dials .seg-item:hover {
+  color: var(--text);
+}
+.runner-dials .seg-item.on {
+  background: var(--accent-dim);
+  color: #eafffb;
+  font-weight: 600;
 }
 
 .settings-foot {

@@ -181,6 +181,22 @@ interface Mounted {
   /** Text of the runners settings banner (empty when nothing is shown). */
   banner: () => string;
   puts: Record<string, unknown>[];
+  /** Drag the concurrency slider to `value`. */
+  setConcurrency: (value: number) => void;
+  /** Attributes of the concurrency slider input. */
+  slider: () => Record<string, unknown>;
+  /** Whether Save is currently offered (enabled). */
+  saveEnabled: () => boolean;
+  /** Labels of the health-cadence segmented control, selected one marked "*". */
+  cadence: () => string[];
+  /** Click a health-cadence option by label. */
+  pickCadence: (label: string) => void;
+  /** Labels of the buttons in the section header. */
+  headActions: () => string[];
+  /** Flattened text of the settings nav footer. */
+  navFoot: () => string;
+  /** Flattened text of the section footer band. */
+  foot: () => string;
 }
 
 /** Every descendant matching `pred`, in paint order. */
@@ -203,13 +219,22 @@ async function mountSettings(opts: {
   apiDoctor?: Record<string, unknown>[];
   agents?: Record<string, unknown>[];
   apis?: Record<string, unknown>[];
+  maxConcurrency?: number;
+  version?: string;
+  cadence?: string;
 }): Promise<Mounted> {
   const config = {
     canGlobal: true,
     stepTimeoutSec: 900,
+    maxConcurrency: opts.maxConcurrency ?? 5,
+    defaultMaxConcurrency: 5,
+    maxConcurrencyCeiling: 16,
+    configPath: "/repo/steamtrain.json",
+    version: opts.version,
     agents: opts.agents ?? [],
     apis: opts.apis ?? [],
   };
+  let cadencePref = opts.cadence ?? "launch";
   const puts: Record<string, unknown>[] = [];
   const root = el("div");
   const ST: Record<string, unknown> = {
@@ -225,6 +250,11 @@ async function mountSettings(opts: {
     refreshWorkflowList: () => {},
     copyFix: () => {},
     pollDoctor: () => {},
+    healthCadence: () => cadencePref,
+    setHealthCadence: (next: string) => {
+      cadencePref = next;
+    },
+    recheckHealth: () => Promise.resolve({ status: 200 }),
     modals: {
       mbanner: (node: StubEl, text: string, kind: string) => {
         if (!text) {
@@ -288,7 +318,60 @@ async function mountSettings(opts: {
     return strip ? flatText(strip) : "";
   };
   const navFlagged = () => collect(root, (n) => n.className.split(" ").includes("flag")).length > 0;
-  return { rows, save, tally, navFlagged, puts, banner };
+  const sliderEl = () => {
+    const node = collect(root, (n) => n.className === "slider")[0];
+    if (!node) throw new Error("no concurrency slider");
+    return node;
+  };
+  const setConcurrency = (value: number) => {
+    const node = sliderEl();
+    node.attrs.value = String(value);
+    (node as unknown as { value: string }).value = String(value);
+    for (const fn of node.listeners.input ?? []) fn();
+  };
+  const saveEnabled = () => {
+    const btn = collect(root, (n) => n.text === "Save changes")[0];
+    if (!btn) return false;
+    // syncRunnersFoot sets the DOM property, not the creation-time attribute.
+    return (btn as unknown as { disabled?: boolean }).disabled !== true;
+  };
+  const cadenceItems = () => collect(root, (n) => n.className.split(" ").includes("seg-item"));
+  const cadence = () => cadenceItems().map((n) => n.text + (n.className.includes("on") ? "*" : ""));
+  const pickCadence = (label: string) => {
+    const btn = cadenceItems().find((n) => n.text === label);
+    if (!btn) throw new Error(`no cadence option "${label}"`);
+    for (const fn of btn.listeners.click ?? []) fn();
+  };
+  const headActions = () => {
+    const head = collect(root, (n) => n.className === "settings-head")[0];
+    if (!head) return [];
+    const acts = collect(head, (n) => n.className === "actions")[0];
+    return acts ? acts.children.map((b) => b.text) : [];
+  };
+  const navFoot = () => {
+    const node = collect(root, (n) => n.className === "settings-navfoot")[0];
+    return node ? flatText(node) : "";
+  };
+  const foot = () => {
+    const node = collect(root, (n) => n.className === "settings-foot")[0];
+    return node ? flatText(node) : "";
+  };
+  return {
+    rows,
+    save,
+    tally,
+    navFlagged,
+    puts,
+    banner,
+    setConcurrency,
+    slider: () => sliderEl().attrs,
+    saveEnabled,
+    cadence,
+    pickCadence,
+    headActions,
+    navFoot,
+    foot,
+  };
 }
 
 describe("runners settings table", () => {
@@ -419,6 +502,69 @@ describe("runners settings table", () => {
       doctor: [{ agent: "claude", status: "ok", provider: "claude", binary: "claude" }],
     });
     expect(clean.navFlagged()).toBe(false);
+  });
+});
+
+describe("runner dials — concurrency and health cadence", () => {
+  const ONE_OK = {
+    doctor: [{ agent: "claude", status: "ok", provider: "claude", binary: "claude" }],
+  };
+
+  it("opens the slider on the configured value, inside the bounds the server sent", async () => {
+    const ui = await mountSettings({ ...ONE_OK, maxConcurrency: 3 });
+    expect(ui.slider()).toMatchObject({ min: "1", max: "16", value: "3" });
+  });
+
+  it("clamps a configured value above the ceiling instead of offering it", async () => {
+    const ui = await mountSettings({ ...ONE_OK, maxConcurrency: 99 });
+    expect(ui.slider().value).toBe("16");
+  });
+
+  it("saves the moved ceiling, and nothing else changed", async () => {
+    const ui = await mountSettings({ ...ONE_OK, maxConcurrency: 3 });
+    expect(ui.saveEnabled()).toBe(false);
+    ui.setConcurrency(7);
+    expect(ui.saveEnabled()).toBe(true);
+    await ui.save();
+    expect(ui.puts[0]?.maxConcurrency).toBe(7);
+  });
+
+  // maxConcurrency is project-scoped while agents default to the global file;
+  // sending it unchanged would rewrite steamtrain.json on every runner save.
+  it("leaves maxConcurrency out of the payload when the slider was not touched", async () => {
+    const ui = await mountSettings({
+      ...ONE_OK,
+      maxConcurrency: 3,
+      agents: [{ id: "kiro", provider: "kiro", enabled: false, scope: "user" }],
+    });
+    ui.rows()
+      .find((r) => r.text.startsWith("kiro"))
+      ?.click("off");
+    await ui.save();
+    expect(ui.puts[0]).not.toHaveProperty("maxConcurrency");
+  });
+
+  it("marks exactly one cadence, and switching moves the mark", async () => {
+    const ui = await mountSettings({ ...ONE_OK, cadence: "launch" });
+    expect(ui.cadence()).toEqual(["Manual", "On launch*", "Every 60s"]);
+    ui.pickCadence("Every 60s");
+    expect(ui.cadence()).toEqual(["Manual", "On launch", "Every 60s*"]);
+  });
+
+  it("puts the section's own verbs in its header", async () => {
+    const ui = await mountSettings(ONE_OK);
+    expect(ui.headActions()).toEqual(["Recheck all", "Add agent", "Add API", "Close"]);
+  });
+
+  it("names the file a save lands in, and the version that is running", async () => {
+    const ui = await mountSettings({ ...ONE_OK, version: "0.14.2" });
+    expect(ui.navFoot()).toContain("v0.14.2");
+    expect(ui.foot()).toContain("/repo/steamtrain.json");
+  });
+
+  it("leaves the version line out rather than inventing one", async () => {
+    const ui = await mountSettings(ONE_OK);
+    expect(ui.navFoot()).not.toMatch(/\bv\d/);
   });
 });
 

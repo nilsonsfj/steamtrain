@@ -116,6 +116,24 @@ notifications, cache & worktrees) have no persistence layer to write to, so
 rendering them would mean dead tabs that accept input and silently do
 nothing. They stay off the nav until a config API exists for them.
 
+Under the runner table, Runners carries the two dials that govern how runners
+are *used* rather than which ones exist:
+
+- **Concurrency** — the ceiling on steps run in parallel within a phase
+  (`maxConcurrency`). The slider's bounds come from the server, so it can never
+  offer a number the config schema would reject. It shares the section's
+  Save/Discard: nothing is written until you save, and the value is only sent
+  when it actually moved (agents/APIs default to the global file, while
+  `maxConcurrency` is project-scoped — sending it unchanged would rewrite
+  `steamtrain.json` on every runner save).
+- **Health checks** — how often runner availability is re-probed: **Manual**
+  (only the Recheck all button), **On launch** (re-probe as the launch sheet
+  opens, so its skip predictions and runner counts are current), or **Every
+  60s**. This is a viewing preference for one browser — it changes what this
+  tab asks for, never what a run reads — so it lives in `localStorage`, not in
+  config. Viewers never get the timer: `POST /api/doctor` is a control-plane
+  write.
+
 `GET /api/config` — which the Runners/Limits sections need to render current
 values — is **blocked for read-only sessions** (its payload carries agent
 `env`, `extraArgs`, and binary paths, which the read-token contract treats as
