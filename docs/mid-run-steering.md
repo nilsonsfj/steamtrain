@@ -56,6 +56,22 @@ and any unknown profile name — and a step clamped to `read-only` gets the same
 post-run workspace verification as one that declared it in the spec. See
 [`permissions.md`](permissions.md).
 
+### Kill
+
+A kill stops **one running step**. It fails with `killed` set on its result and
+the run keeps scheduling — that is the whole difference from a cancel, which
+takes the run down with it. No pause is needed: the point is to stop a step
+that is burning time or money right now.
+
+The engine gives every executing step an abort handle of its own, linked to the
+run's signal, so the killed step unwinds through the same teardown a cancel
+uses (subprocess killed, no further retries) while nothing else is touched.
+Steps that depended on it then fail as usual — killing a step is not forgiving,
+it is just precise.
+
+A kill is refused for a step that is not running: there is nothing to abort,
+and reporting success would leave the caller believing they stopped something.
+
 ### Resume
 
 Scheduling continues; edited steps run with their patches applied. The step's
@@ -65,8 +81,8 @@ result (and its row/card in every UI and in history) is badged `✎ edited`.
 
 Every intervention lands in the run record: the event stream carries
 `run_paused` / `run_resumed` / `step_edited` (with the exact patch and who
-made it), history records an ordered `interventions` list, and the edited
-step's result is flagged. A steered run is still an honest record.
+made it) and `step_killed` (which step, and who), history records an ordered
+`interventions` list, and the edited or killed step's result is flagged. A steered run is still an honest record.
 
 ## Using it
 
@@ -80,6 +96,11 @@ Cancel. While paused, pending step cards show an **✎ Edit step** button that
 opens the prompt/command editor, plus model/effort and **Permissions** selects
 for agent-backed steps. Works for the page's own runs and for attached runs owned by other
 processes.
+
+A running step's record in the right rail carries a **Kill step** button. It is
+offered only for a step running in a run this page owns — a detached or
+externally-owned run's steps belong to the process running them, and there is
+no cross-process kill request for the web endpoint to drop.
 
 **CLI** — works on any live run in the project, whoever owns it (TUI, web,
 `--detach`):

@@ -522,6 +522,10 @@
         text: "running " + ST.fmtElapsed(Date.now() - s.startedAt)
       });
     }
+    // A kill is requested before the step unwinds; say so rather than letting
+    // the pill read "running" while nothing is going to come of it.
+    if (running && s.killed) suffix += " · killing";
+    if (s.result && s.result.killed) suffix += " · killed";
     if (s.cached) suffix += " · cached";
     if (s.result && s.result.skipped) suffix += " · skipped";
     var pill = h("span", { class: "insp-status " + cls },
@@ -575,7 +579,7 @@
     }
     rail.appendChild(body);
 
-    rail.appendChild(h("div", { class: "insp-foot" },
+    var foot = h("div", { class: "insp-foot" },
       h("span", { class: "insp-foot-note", text: "edits apply to the next run" }),
       h("button", { class: "btn small", type: "button", text: "Edit in plan", onClick: function () {
         var stepId = s.stepId;
@@ -583,8 +587,43 @@
           ST.plan.selectStep(stepId, false);
         });
       } })
-    ));
+    );
+    var kill = killButton(s);
+    if (kill) foot.appendChild(kill);
+    rail.appendChild(foot);
     return true;
+  }
+
+  /**
+   * "Kill step" (design 02.4), or null when there is nothing to kill. Offered
+   * only for a step that is running right now, in a run this session owns and
+   * can still steer: a detached or externally-owned run's steps belong to the
+   * process running them, and a viewer may not stop anything at all.
+   */
+  function killButton(s) {
+    if (s.status !== "running" || s.killed) return null;
+    if (ST.isReadOnly() || !S.runId || S.runExternal || S.runDetached) return null;
+    var btn = h("button", { class: "btn small danger-ghost", type: "button", text: "Kill step",
+      title: "Fail this step now; the rest of the run keeps going" });
+    btn.addEventListener("click", function () {
+      btn.disabled = true;
+      ST.apiAuth("POST", "/api/runs/" + encodeURIComponent(S.runId) + "/kill-step", { stepId: s.stepId })
+        .then(function (r) {
+          if (r.status === 200) {
+            // The engine's own step_killed arrives on the stream and marks the
+            // step; nothing to repaint from here.
+            ST.announce("Killed step " + s.stepId + ".");
+            return;
+          }
+          btn.disabled = false;
+          ST.run.setBanner((r.body && r.body.error) || "could not kill step", "err");
+        })
+        .catch(function () {
+          btn.disabled = false;
+          ST.run.setBanner("could not kill step — network error", "err");
+        });
+    });
+    return btn;
   }
 
   function recordLive(p, s) {

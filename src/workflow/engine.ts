@@ -41,7 +41,7 @@ import {
 } from "./approval";
 import { collectArtifacts } from "./artifacts";
 import { runShellCommand } from "./command";
-import type { StepEditPatch, WorkflowRunControl } from "./control";
+import type { StepEditPatch, StepKillResult, WorkflowRunControl } from "./control";
 import { addTokens } from "./cost";
 import type { StepPermissionsInfo, WorkflowEvent } from "./events";
 import type { StepRetryEvent } from "./events";
@@ -310,6 +310,23 @@ interface RunEnv {
    * transient provider failure.
    */
   bindingResolutions: StepBindingResolution[];
+  /**
+   * Steps executing right now, with the handle that stops each one on its own.
+   * A run has a single abort signal; killing one step needs a signal of its
+   * own, so every step gets a controller here for as long as it is in flight
+   * (and only that long — a kill for a step that already finished has nothing
+   * to abort and is refused).
+   */
+  inFlight: Map<string, InFlightStep>;
+  /** Steps killed on request, so their aborted result is not read as a cancel. */
+  killedSteps: Map<string, string | undefined>;
+}
+
+/** One executing step's kill handle and its route to the live event stream. */
+interface InFlightStep {
+  controller: AbortController;
+  /** The step's own channel, so `step_killed` reaches viewers immediately. */
+  push: (event: WorkflowEvent) => void;
 }
 
 /** What one step's completion means for its phase and for run control flow. */
@@ -401,11 +418,14 @@ export async function* runWorkflow(
     startedSteps: new Set<string>(),
     pauseState: { acked: false },
     bindingResolutions: bound.resolutions,
+    inFlight: new Map<string, InFlightStep>(),
+    killedSteps: new Map<string, string | undefined>(),
   };
 
   deps.control?.attachRun({
     stepEditIssue: (stepId, patch) => stepEditIssue(env, stepId, patch),
     onEditAccepted: (stepId) => invalidateEditedStep(env, stepId),
+    killStep: (stepId, by) => killInFlightStep(env, stepId, by),
   });
 
   const workflowOk = specHasLoopGates(runnableSpec)
@@ -508,6 +528,31 @@ const PROMPT_EDITABLE_KINDS: ReadonlySet<string> = new Set([
   "approval",
   "human",
 ]);
+
+/**
+ * Kill one in-flight step: abort its own signal and leave the run's alone, so
+ * everything else keeps running. The step unwinds through the same paths a
+ * cancel uses (subprocess teardown, no further retries) and lands as a failure
+ * — `killedSteps` is what tells the result assembly it was a kill and not the
+ * run going down.
+ *
+ * Refused for a step that is not running: there is nothing to abort, and
+ * pretending otherwise would leave a caller believing it stopped something.
+ */
+function killInFlightStep(env: RunEnv, stepId: string, by?: string): StepKillResult {
+  const live = env.inFlight.get(stepId);
+  if (!live) {
+    return env.startedSteps.has(stepId)
+      ? { ok: false, error: `step '${stepId}' is not running any more` }
+      : { ok: false, error: `step '${stepId}' is not running` };
+  }
+  env.killedSteps.set(stepId, by);
+  // Emitted before the abort so the kill reaches viewers even if the step
+  // unwinds instantly; its own step_done follows with the failed result.
+  live.push({ kind: "step_killed", stepId, by, ts: Date.now() });
+  live.controller.abort();
+  return { ok: true };
+}
 
 /**
  * Validate a mid-run edit against the live spec: the step must exist, must not
@@ -1355,47 +1400,74 @@ async function runSingleStep(
     return { notOk: false, stop: false };
   }
 
-  const execution = await executeStep(
-    step,
-    {
-      input: ctx.input,
-      inputs: ctx.inputs,
-      outputs,
-      results,
-      cache,
-      sessions: env.sessions,
-      reserveDynamicSteps: env.reserveDynamicSteps,
-      deps,
-      signal,
-      workflowName: spec.name,
-      artifactsDir: env.artifactsDir,
-      retryDefault: spec.retry,
-      modelFailoverWorkflow: spec.modelFailover,
-      modelFailoverConfig: deps.agentConfig?.modelFailover,
-      permissionsWorkflow: spec.permissions,
-      permissionsConfig: runPermissionsDefault(deps),
-      workflowFallbackModels: spec.fallbackModels,
-      workflowInputs: spec.inputs,
-      stepTimeoutDefault: spec.stepTimeoutSec,
-      iteration,
-      workflowCallStack: ctx.workflowCallStack ?? [],
-      bindingResolutions: env.bindingResolutions,
-    },
-    {
-      pushAgentEvent: (stepId, event) => {
-        push({
-          kind: "step_event",
-          phaseId: phase.id,
-          stepId,
-          event,
-          iteration,
-          ts: Date.now(),
-        });
+  // Per-step abort. The run's signal still stops this step (the controller
+  // follows it), but the step also has a handle of its own so `kill-step` can
+  // end exactly this one and leave the rest of the run scheduling. Registered
+  // only for the duration of the execution: a step that is not running cannot
+  // be killed, and the registry is what says so.
+  const stepAbort = new AbortController();
+  const onRunAbort = (): void => stepAbort.abort();
+  if (signal?.aborted) stepAbort.abort();
+  else signal?.addEventListener("abort", onRunAbort, { once: true });
+  env.inFlight.set(step.id, { controller: stepAbort, push });
+  let execution: ExecutionOutcome;
+  try {
+    execution = await executeStep(
+      step,
+      {
+        input: ctx.input,
+        inputs: ctx.inputs,
+        outputs,
+        results,
+        cache,
+        sessions: env.sessions,
+        reserveDynamicSteps: env.reserveDynamicSteps,
+        deps,
+        signal: stepAbort.signal,
+        workflowName: spec.name,
+        artifactsDir: env.artifactsDir,
+        retryDefault: spec.retry,
+        modelFailoverWorkflow: spec.modelFailover,
+        modelFailoverConfig: deps.agentConfig?.modelFailover,
+        permissionsWorkflow: spec.permissions,
+        permissionsConfig: runPermissionsDefault(deps),
+        workflowFallbackModels: spec.fallbackModels,
+        workflowInputs: spec.inputs,
+        stepTimeoutDefault: spec.stepTimeoutSec,
+        iteration,
+        workflowCallStack: ctx.workflowCallStack ?? [],
+        bindingResolutions: env.bindingResolutions,
       },
-      pushWorkflowEvent: push,
-      phaseId: phase.id,
-    },
-  );
+      {
+        pushAgentEvent: (stepId, event) => {
+          push({
+            kind: "step_event",
+            phaseId: phase.id,
+            stepId,
+            event,
+            iteration,
+            ts: Date.now(),
+          });
+        },
+        pushWorkflowEvent: push,
+        phaseId: phase.id,
+      },
+    );
+  } finally {
+    env.inFlight.delete(step.id);
+    signal?.removeEventListener("abort", onRunAbort);
+  }
+
+  // A killed step's abort is its own, not the run's: mark the result so the
+  // record says "killed" rather than "cancelled", and so a reader can tell a
+  // step someone stopped from one the run took down.
+  if (env.killedSteps.has(step.id)) {
+    const by = env.killedSteps.get(step.id);
+    env.killedSteps.delete(step.id);
+    execution.result.ok = false;
+    execution.result.killed = true;
+    execution.result.error = by ? `killed by ${by}` : "killed";
+  }
 
   if (execution.gate) {
     push({

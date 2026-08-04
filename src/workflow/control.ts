@@ -47,7 +47,15 @@ export interface RunControlHooks {
   stepEditIssue(stepId: string, patch: StepEditPatch): string | undefined;
   /** Invalidate stale cached state for a just-accepted edit. */
   onEditAccepted(stepId: string, patch: StepEditPatch): void;
+  /**
+   * Abort the named in-flight step, or report why it cannot be killed. The
+   * engine owns this because only it holds the step's abort controller — the
+   * control channel never sees a running step.
+   */
+  killStep(stepId: string, by?: string): StepKillResult;
 }
+
+export type StepKillResult = { ok: true } | { ok: false; error: string };
 
 /**
  * One run's steering handle. Drivers call {@link pause}/{@link resume}/
@@ -79,6 +87,13 @@ export interface WorkflowRunControl {
    * over any earlier edit to the same step and applies when the step executes.
    */
   editStep(stepId: string, patch: StepEditPatch, by?: string): StepEditResult;
+  /**
+   * Kill one in-flight step: it fails, and the run keeps scheduling. Unlike
+   * {@link editStep} this needs no pause — the point is to stop a step that is
+   * burning time or money right now — and unlike a run cancel it leaves every
+   * other step alone.
+   */
+  killStep(stepId: string, by?: string): StepKillResult;
   /** The accepted (merged) patch for a step, if any. Non-consuming. */
   stepEdit(stepId: string): StepEditPatch | undefined;
   /** All accepted edits so far, keyed by step id. */
@@ -167,6 +182,18 @@ export function createWorkflowRunControl(): WorkflowRunControl {
       pendingEvents.push({ kind: "step_edited", stepId, patch: cleaned, by, ts: Date.now() });
       wake();
       return { ok: true };
+    },
+    killStep(stepId, by) {
+      if (runFinished) return { ok: false, error: "run has already finished" };
+      if (!hooks) return { ok: false, error: "the run has not started yet" };
+      // The engine emits `step_killed` itself, through the killed step's own
+      // event channel: a kill lands mid-phase, and the queue drained here is
+      // only read at phase boundaries — far too late for a live view.
+      const result = hooks.killStep(stepId, by);
+      // A kill frees a scheduler slot; wake a parked scheduler so it fills it
+      // without waiting for another control change.
+      if (result.ok) wake();
+      return result;
     },
     stepEdit: (stepId) => edits.get(stepId),
     stepEdits: () => edits,

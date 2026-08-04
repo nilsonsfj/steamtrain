@@ -1453,3 +1453,15 @@
   max-height: none;
   flex: 1;
 }
+
+/* "Kill step" (design 02.4): destructive, but a ghost — it sits beside "Edit
+   in plan" in the step record's footer and must not out-shout it. */
+.btn.danger-ghost {
+  border: 1px solid rgba(248, 81, 73, 0.35);
+  background: rgba(248, 81, 73, 0.08);
+  color: var(--error-text);
+}
+.btn.danger-ghost:hover {
+  background: rgba(248, 81, 73, 0.16);
+  border-color: rgba(248, 81, 73, 0.5);
+}

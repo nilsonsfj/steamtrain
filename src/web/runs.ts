@@ -23,6 +23,7 @@ import {
   type RunRecordStatus,
   type StepEditPatch,
   type StepEditResult,
+  type StepKillResult,
   type StepResult,
   type WorkflowCacheStore,
   type WorkflowEvent,
@@ -607,6 +608,17 @@ export class WorkflowRunManager {
     const run = this.runs.get(runId);
     if (!run || run.settled) return undefined;
     return run.control.editStep(stepId, patch, by);
+  }
+
+  /**
+   * Kill one in-flight step of a manager-owned run; the run keeps going.
+   * Returns undefined when the run is unknown or settled, the same "not mine"
+   * signal {@link editRunStep} gives.
+   */
+  killRunStep(runId: string, stepId: string, by?: string): StepKillResult | undefined {
+    const run = this.runs.get(runId);
+    if (!run || run.settled) return undefined;
+    return run.control.killStep(stepId, by);
   }
 
   /**

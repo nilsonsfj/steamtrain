@@ -92,8 +92,8 @@ export interface HistoryStep {
  * accepted step edit changed.
  */
 export interface RunIntervention {
-  kind: "paused" | "resumed" | "step-edited" | "takeover";
-  /** The affected step (kinds `"step-edited"` and `"takeover"`). */
+  kind: "paused" | "resumed" | "step-edited" | "step-killed" | "takeover";
+  /** The affected step (kinds `"step-edited"`, `"step-killed"` and `"takeover"`). */
   stepId?: string;
   /** The accepted patch (kind `"step-edited"` only). */
   patch?: StepEditPatch;
@@ -516,6 +516,14 @@ export class RunRecordBuilder {
           kind: "step-edited",
           stepId: event.stepId,
           patch: event.patch,
+          by: event.by,
+          ts: event.ts,
+        });
+        break;
+      case "step_killed":
+        this.interventions.push({
+          kind: "step-killed",
+          stepId: event.stepId,
           by: event.by,
           ts: event.ts,
         });

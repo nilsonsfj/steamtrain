@@ -843,6 +843,7 @@ function checkCsrf(
  *   POST   /api/runs/:id/resume     continue a paused run
  *   POST   /api/runs/:id/detach     hand a running run off to a background process
  *   POST   /api/runs/:id/edit-step  { stepId, prompt?/cmd?/model?/effort?/permissions? } — edit a pending step while paused
+ *   POST   /api/runs/:id/kill-step  { stepId } — fail one running step, run continues
  *   POST   /api/runs/:id/approval   resolve a human-approval checkpoint
  *   POST   /api/runs/:id/input      answer a human-input request (human step / agent question)
  *   POST   /api/overrides/flush     flush staged session overrides -> { saved, skipped, unchanged }
@@ -2291,6 +2292,47 @@ async function handle(
           sendJson(res, 202, { pending: true });
           return;
         }
+      }
+    }
+    sendJson(res, 404, { error: `unknown run '${runId}'` });
+    return;
+  }
+
+  // Kill one running step; the run carries on. Manager-owned runs only: a
+  // detached run's steps belong to the process that owns them, and there is no
+  // cross-process kill request (unlike edits) for this endpoint to drop.
+  const killStepMatch = path.match(/^\/api\/runs\/([^/]+)\/kill-step$/);
+  if (method === "POST" && killStepMatch) {
+    const body = await readBody(req);
+    let parsed: { stepId?: unknown };
+    try {
+      parsed = body ? JSON.parse(body) : {};
+    } catch {
+      sendJson(res, 400, { error: "invalid JSON body" });
+      return;
+    }
+    if (typeof parsed.stepId !== "string" || !parsed.stepId) {
+      sendJson(res, 400, { error: "body must include a string 'stepId'" });
+      return;
+    }
+    const runId = decodeURIComponent(killStepMatch[1]!);
+    if (!isValidRunId(runId)) {
+      sendJson(res, 400, { error: "invalid run id" });
+      return;
+    }
+    const killed = deps.runs.killRunStep(runId, parsed.stepId, "human:web");
+    if (killed) {
+      if (killed.ok) sendJson(res, 200, { killed: true });
+      else sendJson(res, 400, { error: killed.error });
+      return;
+    }
+    if (deps.liveRuns) {
+      const meta = await deps.liveRuns.get(runId);
+      if (meta && !isTerminalLiveRunStatus(meta.status)) {
+        sendJson(res, 409, {
+          error: "this run is owned by another process — kill its step from there",
+        });
+        return;
       }
     }
     sendJson(res, 404, { error: `unknown run '${runId}'` });

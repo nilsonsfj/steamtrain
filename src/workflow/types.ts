@@ -1119,6 +1119,13 @@ export interface StepResult {
    * failures without string-matching `error`.
    */
   dependencyFailed?: string;
+  /**
+   * True when this step was killed on request (`kill-step`) rather than
+   * failing on its own or being taken down with the run. The distinction is
+   * the reason the feature exists: the run carried on, and a reader looking at
+   * the record needs to see a deliberate stop, not a mystery failure.
+   */
+  killed?: boolean;
   error?: string;
   durationMs: number;
   costUsd?: number;

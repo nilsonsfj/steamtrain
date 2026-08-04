@@ -98,7 +98,11 @@ describe("watchRunControl", () => {
     await store.create(meta("r1"));
     const control = createWorkflowRunControl();
     // Bind engine-side hooks so edits validate: everything editable.
-    control.attachRun({ stepEditIssue: () => undefined, onEditAccepted: () => {} });
+    control.attachRun({
+      stepEditIssue: () => undefined,
+      onEditAccepted: () => {},
+      killStep: () => ({ ok: true }),
+    });
 
     const dispose = watchRunControl(store, "r1", control, 20);
     try {
@@ -131,6 +135,7 @@ describe("watchRunControl", () => {
     control.attachRun({
       stepEditIssue: () => "step 'a' has already started",
       onEditAccepted: () => {},
+      killStep: () => ({ ok: false, error: "step 'a' is not running" }),
     });
     await store.writePauseState("r1", { paused: true });
 

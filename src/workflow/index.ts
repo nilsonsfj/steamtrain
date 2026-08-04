@@ -77,6 +77,7 @@ export {
   type RunControlHooks,
   type StepEditPatch,
   type StepEditResult,
+  type StepKillResult,
   type WorkflowRunControl,
 } from "./control";
 export {

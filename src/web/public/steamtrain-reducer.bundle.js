@@ -433,6 +433,16 @@ var SteamtrainReducer = (() => {
           }))
         };
       }
+      case "step_killed":
+        return {
+          ...state,
+          phases: state.phases.map((p) => ({
+            ...p,
+            steps: p.steps.map(
+              (s) => s.stepId === e.stepId && s.status === "running" ? { ...s, killed: true } : s
+            )
+          }))
+        };
       case "loop_iteration": {
         const gatePhaseId = phaseOfStep(state, e.gateStepId);
         if (gatePhaseId) {
