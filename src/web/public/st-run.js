@@ -16,6 +16,7 @@
   var clear = ST.clear;
   var emptyTokens = ST.emptyTokens;
   var fmtElapsed = ST.fmtElapsed;
+  var fmtElapsedRange = ST.fmtElapsedRange;
   var fmtTokenSummary = ST.fmtTokenSummary;
   var fmtTokens = ST.fmtTokens;
   var focusDetailFallback = ST.focusDetailFallback;
@@ -326,6 +327,15 @@
   /**
    * Band identity: the un-namespaced phase instance, qualified by title so two
    * unrelated sub-workflows that happen to name a phase alike stay apart.
+   *
+   * The parent call step is deliberately NOT part of the key — merging the
+   * siblings of one fan-out is the whole point. The assumption that buys is
+   * that a bare phaseId plus its title identifies a phase across workflows:
+   * two *different* sub-workflows that both declare, say, `review` titled
+   * "Review the diff" would share a band. Titles are authored per workflow, so
+   * a collision means the phases genuinely are the same step of the same
+   * child — but a run that nests two unrelated workflows this way would want
+   * the parent id back in this key.
    */
   function bandKey(p) {
     return basePhaseId(p.phaseId) + ":" + (p.iteration || 1) + ":" + (p.title || "");
@@ -425,20 +435,6 @@
   }
 
   /**
-   * A span rendered as one range rather than two timings: "3.8–3.9s",
-   * "1m 11–15s". Equal ends collapse to a single value.
-   */
-  function fmtElapsedRange(lo, hi) {
-    var a = fmtElapsed(lo), b = fmtElapsed(hi);
-    if (!a || !b) return a || b || "";
-    if (a === b) return a;
-    // Share the unit (and any leading "1m ") when both ends carry the same one.
-    var pa = /^(.*?)([\d.]+)([a-z]+)$/.exec(a), pb = /^(.*?)([\d.]+)([a-z]+)$/.exec(b);
-    if (pa && pb && pa[1] === pb[1] && pa[3] === pb[3]) return pa[1] + pa[2] + "–" + pb[2] + pb[3];
-    return a + "–" + b;
-  }
-
-  /**
    * The band's right-hand readout: while anything in it runs, the spread of
    * live elapsed times; once finished, the spread of durations plus cost and
    * tokens when there are any. Merged siblings make a range the honest
@@ -459,6 +455,10 @@
       if (lo === undefined) return "running";
       return "running " + fmtElapsedRange(lo, hi);
     }
+    // Only reachable when nothing ran above, so lo/hi are still untouched —
+    // reset them anyway so the two accumulations never share a lifetime.
+    lo = undefined;
+    hi = undefined;
     var cost = 0, tok = emptyTokens(), any = false;
     steps.forEach(function (s) {
       if (!s.result) return;

@@ -357,6 +357,24 @@ window.Steamtrain = (function () {
     return Math.floor(min / 60) + "h " + String(min % 60).padStart(2, "0") + "m";
   }
 
+  /**
+   * A span of two elapsed times rendered as one range rather than two
+   * timings: "3.8–3.9s", "1m 11–15s". Equal ends collapse to a single value,
+   * and ends that share a unit (plus any leading "1m ") state it once. Ends
+   * that do not — "58.0s" against "1m 02s" — stay spelled out in full.
+   *
+   * Callers pass durations, so the shared-unit regex is only ever offered a
+   * fmtElapsed() reading: non-negative, and always <number><unit>-shaped.
+   */
+  function fmtElapsedRange(lo, hi) {
+    var a = fmtElapsed(lo), b = fmtElapsed(hi);
+    if (!a || !b) return a || b || "";
+    if (a === b) return a;
+    var pa = /^(.*?)([\d.]+)([a-z]+)$/.exec(a), pb = /^(.*?)([\d.]+)([a-z]+)$/.exec(b);
+    if (pa && pb && pa[1] === pb[1] && pa[3] === pb[3]) return pa[1] + pa[2] + "–" + pb[2] + pb[3];
+    return a + "–" + b;
+  }
+
   /** Refresh every live ticking timer ("[data-since]") in one cheap pass. */
   function updateLiveTimers() {
     var nodes = document.querySelectorAll("[data-since]");
@@ -1520,6 +1538,7 @@ window.Steamtrain = (function () {
   ST.effortsFor = effortsFor;
   ST.emptyTokens = emptyTokens;
   ST.fmtElapsed = fmtElapsed;
+  ST.fmtElapsedRange = fmtElapsedRange;
   ST.fmtTime = fmtTime;
   ST.fmtTokenSummary = fmtTokenSummary;
   ST.fmtTokens = fmtTokens;
