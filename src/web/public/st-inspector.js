@@ -651,12 +651,14 @@
     // Output tail with follow, keyed like the run pane's tails. Workflow-call
     // containers bubble nested leaf streams so Live is not stuck empty while
     // a child agent (e.g. babysit[4]::prepare) is emitting text_delta.
-    var view = (S.runState && SteamtrainReducer.resolveLiveOutputStep)
-      ? (SteamtrainReducer.resolveLiveOutputStep(S.runState, s) || s)
+    // Guard SteamtrainReducer: unit tests paint this IIFE without the bundle.
+    var Reducer = typeof SteamtrainReducer !== "undefined" ? SteamtrainReducer : null;
+    var view = (S.runState && Reducer && Reducer.resolveLiveOutputStep)
+      ? (Reducer.resolveLiveOutputStep(S.runState, s) || s)
       : s;
     var key = "record:" + ST.stepKey(p, s);
-    var body = SteamtrainReducer.liveOutputBody
-      ? SteamtrainReducer.liveOutputBody(view)
+    var body = Reducer && Reducer.liveOutputBody
+      ? Reducer.liveOutputBody(view)
       : (((view.result && view.result.output) || view.text || "").trim() || (view.activity || ""));
     var scroll = S.tailScroll[key] || { follow: true, top: 0 };
     var out = h("div", { class: "insp-output", "data-key": key });

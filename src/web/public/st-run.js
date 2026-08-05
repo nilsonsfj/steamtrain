@@ -465,13 +465,15 @@
    * streams agent text (see SteamtrainReducer.resolveLiveOutputStep).
    */
   function liveViewStep(s) {
-    if (!s || !S.runState || !SteamtrainReducer.resolveLiveOutputStep) return s;
-    return SteamtrainReducer.resolveLiveOutputStep(S.runState, s) || s;
+    var Reducer = typeof SteamtrainReducer !== "undefined" ? SteamtrainReducer : null;
+    if (!s || !S.runState || !Reducer || !Reducer.resolveLiveOutputStep) return s;
+    return Reducer.resolveLiveOutputStep(S.runState, s) || s;
   }
 
   function liveBody(s) {
     if (!s) return "";
-    if (SteamtrainReducer.liveOutputBody) return SteamtrainReducer.liveOutputBody(s);
+    var Reducer = typeof SteamtrainReducer !== "undefined" ? SteamtrainReducer : null;
+    if (Reducer && Reducer.liveOutputBody) return Reducer.liveOutputBody(s);
     return (((s.result && s.result.output) || s.text || "").trim()) || (s.activity || "");
   }
 

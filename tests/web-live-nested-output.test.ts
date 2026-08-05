@@ -35,4 +35,8 @@ describe("live nested output wiring", () => {
     expect(runJs).toMatch(/view\.stepId === s\.stepId/);
     expect(inspectorJs).toMatch(/Output · /);
   });
+
+  it("guards SteamtrainReducer so isolated inspector unit tests can paint", () => {
+    expect(inspectorJs).toMatch(/typeof SteamtrainReducer !== "undefined"/);
+  });
 });

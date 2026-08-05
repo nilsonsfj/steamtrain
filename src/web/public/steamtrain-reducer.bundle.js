@@ -1431,13 +1431,15 @@ var SteamtrainReducer = (() => {
     return out;
   }
   function hasLiveBody(step) {
-    return Boolean(((step.result?.output ?? step.text) || "").trim() || step.activity);
+    const body = ((step.result?.output ?? step.text) || "").trim();
+    return body.length > 0 || Boolean(step.activity);
   }
   function isActiveLeaf(step) {
     return step.status === "running" && !isLiveOutputContainer(step);
   }
-  function resolveLiveOutputStep(state, step) {
+  function resolveLiveOutputStep(state, step, depth = 0) {
     if (!isLiveOutputContainer(step)) return step;
+    if (depth >= MAX_WORKFLOW_NESTING_DEPTH) return step;
     const nested = nestedStepsOf(state, step.stepId);
     if (nested.length === 0) return step;
     const runningWithBody = nested.find((s) => isActiveLeaf(s) && hasLiveBody(s));
@@ -1451,7 +1453,7 @@ var SteamtrainReducer = (() => {
     for (let i = nested.length - 1; i >= 0; i -= 1) {
       const s = nested[i];
       if (isLiveOutputContainer(s) && s.status === "running") {
-        const deeper = resolveLiveOutputStep(state, s);
+        const deeper = resolveLiveOutputStep(state, s, depth + 1);
         if (deeper !== s) return deeper;
       }
     }

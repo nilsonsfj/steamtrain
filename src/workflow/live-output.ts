@@ -10,6 +10,7 @@
 
 import { SUBWORKFLOW_STEP_SEPARATOR } from "./overrides";
 import { type StepState, type WorkflowState, flattenSteps } from "./reducer";
+import { MAX_WORKFLOW_NESTING_DEPTH } from "./step-kind";
 
 /** Steps that own nested work but do not stream their own agent text. */
 export function isLiveOutputContainer(step: Pick<StepState, "blockKind">): boolean {
@@ -33,7 +34,8 @@ export function nestedStepsOf(state: WorkflowState, parentStepId: string): StepS
 }
 
 function hasLiveBody(step: StepState): boolean {
-  return Boolean(((step.result?.output ?? step.text) || "").trim() || step.activity);
+  const body = ((step.result?.output ?? step.text) || "").trim();
+  return body.length > 0 || Boolean(step.activity);
 }
 
 function isActiveLeaf(step: StepState): boolean {
@@ -47,9 +49,13 @@ function isActiveLeaf(step: StepState): boolean {
  * running non-container with output, then any running leaf, then the newest
  * nested step that already produced text/activity. Falls back to `step` when
  * nothing nested has started (or `step` is not a container).
+ *
+ * Recursion into nested workflow containers is capped at
+ * {@link MAX_WORKFLOW_NESTING_DEPTH} (same limit the engine enforces).
  */
-export function resolveLiveOutputStep(state: WorkflowState, step: StepState): StepState {
+export function resolveLiveOutputStep(state: WorkflowState, step: StepState, depth = 0): StepState {
   if (!isLiveOutputContainer(step)) return step;
+  if (depth >= MAX_WORKFLOW_NESTING_DEPTH) return step;
   const nested = nestedStepsOf(state, step.stepId);
   if (nested.length === 0) return step;
 
@@ -69,7 +75,7 @@ export function resolveLiveOutputStep(state: WorkflowState, step: StepState): St
   for (let i = nested.length - 1; i >= 0; i -= 1) {
     const s = nested[i]!;
     if (isLiveOutputContainer(s) && s.status === "running") {
-      const deeper = resolveLiveOutputStep(state, s);
+      const deeper = resolveLiveOutputStep(state, s, depth + 1);
       if (deeper !== s) return deeper;
     }
   }

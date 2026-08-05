@@ -222,6 +222,56 @@ describe("resolveLiveOutputStep", () => {
     expect(resolveLiveOutputStep(wf, parent)).toBe(parent);
     expect(liveOutputBody(parent)).toBe("");
   });
+
+  it("resolves through nested workflow containers to the deepest leaf", () => {
+    // outer → outer::inner (workflow) → outer::inner::leaf (processor)
+    const outer = step({ stepId: "outer", blockKind: "workflow", status: "running" });
+    const inner = step({
+      stepId: "outer::inner",
+      blockKind: "workflow",
+      status: "running",
+      parentStepId: "outer",
+    });
+    const leaf = step({
+      stepId: "outer::inner::leaf",
+      blockKind: "processor",
+      status: "running",
+      parentStepId: "outer::inner",
+      text: "deep stream",
+      activity: "⚙ read",
+    });
+    const wf = state([
+      {
+        phaseId: "p0",
+        title: "P0",
+        index: 0,
+        stepCount: 1,
+        steps: [outer],
+        done: false,
+        ok: true,
+      },
+      {
+        phaseId: "outer::inner-phase",
+        title: "Inner",
+        index: 1,
+        stepCount: 1,
+        steps: [inner],
+        done: false,
+        ok: true,
+      },
+      {
+        phaseId: "outer::inner::leaf-phase",
+        title: "Leaf",
+        index: 2,
+        stepCount: 1,
+        steps: [leaf],
+        done: false,
+        ok: true,
+      },
+    ]);
+    expect(resolveLiveOutputStep(wf, outer).stepId).toBe("outer::inner::leaf");
+    expect(liveOutputBody(resolveLiveOutputStep(wf, outer))).toBe("deep stream");
+  });
 });
 
 describe("liveOutputBody", () => {
