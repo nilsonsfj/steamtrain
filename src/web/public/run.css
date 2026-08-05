@@ -367,6 +367,15 @@ textarea#input:focus {
   font: 400 11.5px / 1 var(--font-mono);
   color: var(--dim);
 }
+/* How many merged sibling sub-workflow instances this band stands for. */
+.band-head .xn {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--raised);
+  font: 600 10.5px / 1.4 var(--font-mono);
+  color: var(--muted);
+}
 .band-head .rollup {
   margin-left: auto;
   font: 400 11.5px / 1 var(--font-mono);
@@ -388,11 +397,15 @@ textarea#input:focus {
   color: var(--muted);
 }
 
+/* The column spec is per band: `--step-cols` is set on the band from the
+   columns its steps can actually fill (see bandColumns in st-run.js), so a
+   band of command steps lays out no runner/spend/token columns rather than
+   dashing three of them out on every row. Rows indent to the band title. */
 .step-row {
   display: grid;
-  grid-template-columns: 14px 150px 96px 168px 1fr 62px 68px 92px 20px;
+  grid-template-columns: var(--step-cols, 14px minmax(0, 1fr) 168px 74px 20px);
   gap: 12px;
-  padding: 7px 18px;
+  padding: 7px 18px 7px 42px;
   align-items: center;
   border-top: 1px solid var(--border-quiet);
   font: 400 12px / 1.4 var(--font-mono);
@@ -431,12 +444,25 @@ textarea#input:focus {
 .step-row .id {
   color: var(--text);
   font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.step-row .meta {
+.step-row .meta,
+.step-row .runner {
   color: var(--dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* The kind chip only appears where a runner would have: right-aligned in the
+   same column, so a mixed band still reads as one column of "what runs this". */
+.step-row > .kind {
+  justify-self: end;
+}
+/* The row whose live output is expanded beneath it. */
+.step-row.open .chev {
+  color: var(--muted);
 }
 .step-row .num {
   text-align: right;
@@ -533,20 +559,27 @@ textarea#input:focus {
   min-height: min(52vh, 420px);
   overflow: hidden;
 }
-/* The step list absorbs the squeeze: it scrolls, and it never claims more than
-   part of the band, so the output pane below it always keeps usable height. */
+/* The step list absorbs the squeeze: it scrolls, and it now also hosts the
+   live output pane, which sits inline under the row it belongs to instead of
+   in a second pane at the foot of the band. */
 .band.expanded .band-steps {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  max-height: 45%;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
 }
+/* Inside that scroll area the pane is a fixed console height that may shrink
+   under pressure but never grows: left to absorb the band's leftover space it
+   pushed the rows below it a screen away from their siblings. */
 .band.expanded .output {
-  min-height: 96px;
+  flex: 0 1 auto;
+  height: 300px;
+  min-height: 160px;
+  margin-left: 42px;
+  border-bottom: 1px solid var(--border-quiet);
 }
 /* Run-level pending states (approvals, human input) above the first band. */
 .pending-block {
@@ -1718,6 +1751,11 @@ select:focus-visible,
   .canvas {
     min-height: 48vh;
     padding: 16px 12px 40px;
+  }
+  /* A 300px console leaves a narrow band almost no room for its rows. */
+  .band.expanded .output {
+    height: 200px;
+    min-height: 120px;
   }
   .cards {
     flex-direction: column;

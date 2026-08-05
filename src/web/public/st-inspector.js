@@ -513,15 +513,9 @@
     var cls = running ? "running" : s.status === "done" ? "done" : s.status === "error" ? "err" : "pending";
     var text = s.status;
     var suffix = "";
-    var liveTimer = null;
-    if (running && s.startedAt) {
-      liveTimer = h("span", {
-        class: "status-elapsed",
-        "data-since": String(s.startedAt),
-        "data-since-prefix": "running ",
-        text: "running " + ST.fmtElapsed(Date.now() - s.startedAt)
-      });
-    }
+    // No timer here: the Elapsed metric directly below is this step's clock,
+    // and two of them ticking off different sources read as a bug when they
+    // disagree by a second.
     // A kill is requested before the step unwinds; say so rather than letting
     // the pill read "running" while nothing is going to come of it.
     if (running && s.killed) suffix += " · killing";
@@ -529,7 +523,7 @@
     if (s.cached) suffix += " · cached";
     if (s.result && s.result.skipped) suffix += " · skipped";
     var pill = h("span", { class: "insp-status " + cls },
-      running ? h("i", { class: "pulse" }) : null, liveTimer || text, suffix);
+      running ? h("i", { class: "pulse" }) : null, text, suffix);
     return pill;
   }
 
@@ -541,10 +535,26 @@
     }, labelText, suffix || null);
   }
 
-  function metricCell(k, v) {
-    return h("div", { class: "insp-metric" },
-      h("div", { class: "k", text: k }),
-      h("div", { class: "v", text: v }));
+  /** A metric, or null when the step's kind can't produce one (never "—"). */
+  function metricCell(k, v, since) {
+    if (v === null || v === undefined || v === "") return null;
+    var value = since
+      ? h("div", { class: "v", "data-since": String(since), "data-since-prefix": "", text: v })
+      : h("div", { class: "v", text: v });
+    return h("div", { class: "insp-metric" }, h("div", { class: "k", text: k }), value);
+  }
+
+  /**
+   * Lay the metric block out on however many of its cells have a value — the
+   * row is a flex of equal shares, so dropping Spend and Tokens on a command
+   * step leaves Elapsed alone rather than parked in a three-column grid.
+   */
+  function metricRow(cells) {
+    var live = cells.filter(Boolean);
+    if (!live.length) return null;
+    var row = h("div", { class: "insp-metrics" });
+    live.forEach(function (c) { row.appendChild(c); });
+    return row;
   }
 
   function renderRecord(rail) {
@@ -579,8 +589,9 @@
     }
     rail.appendChild(body);
 
-    var foot = h("div", { class: "insp-foot" },
-      h("span", { class: "insp-foot-note", text: "edits apply to the next run" }),
+    // The note sits on its own line above the buttons: at rail width it used
+    // to wrap into two lines and shoulder them off the edge.
+    var actions = h("div", { class: "insp-foot-actions" },
       h("button", { class: "btn small", type: "button", text: "Edit in plan", onClick: function () {
         var stepId = s.stepId;
         ST.selectWorkflow(S.selected, function () {
@@ -589,8 +600,11 @@
       } })
     );
     var kill = killButton(s);
-    if (kill) foot.appendChild(kill);
-    rail.appendChild(foot);
+    if (kill) actions.appendChild(kill);
+    rail.appendChild(h("div", { class: "insp-foot stacked" },
+      h("span", { class: "insp-foot-note", text: "edits apply to the next run" }),
+      actions
+    ));
     return true;
   }
 
@@ -628,15 +642,18 @@
 
   function recordLive(p, s) {
     var wrap = h("div");
-    var elapsed = s.result && typeof s.result.durationMs === "number"
+    var finished = s.result && typeof s.result.durationMs === "number";
+    var running = !finished && s.status === "running" && s.startedAt;
+    var elapsed = finished
       ? ST.fmtElapsed(s.result.durationMs)
-      : s.startedAt ? ST.fmtElapsed(Date.now() - s.startedAt) : "—";
-    var metrics = h("div", { class: "insp-metrics" },
-      metricCell("Elapsed", elapsed),
-      metricCell("Spend", s.result && s.result.costUsd ? "$" + s.result.costUsd.toFixed(4) : "—"),
-      metricCell("Tokens", s.result && s.result.tokens ? ST.fmtTokens(ST.totalTokens(s.result.tokens)) : "—")
-    );
-    wrap.appendChild(metrics);
+      : s.startedAt ? ST.fmtElapsed(Date.now() - s.startedAt) : "";
+    var tokens = s.result && s.result.tokens ? ST.totalTokens(s.result.tokens) : 0;
+    var metrics = metricRow([
+      metricCell("Elapsed", elapsed, running ? s.startedAt : null),
+      metricCell("Spend", s.result && s.result.costUsd ? "$" + s.result.costUsd.toFixed(4) : ""),
+      metricCell("Tokens", tokens ? ST.fmtTokens(tokens) : "")
+    ]);
+    if (metrics) wrap.appendChild(metrics);
 
     var rows = h("div", { class: "insp-exec" });
     var runnerId = s.agent ? ST.agentUiLabel(s.agent) : s.api;
@@ -648,38 +665,61 @@
     if (s.status === "error" && s.result && s.result.error) rows.appendChild(execRow("error", s.result.error, "warn"));
     wrap.appendChild(rows);
 
-    // Output tail with follow, keyed like the run pane's tails. Workflow-call
-    // containers bubble nested leaf streams so Live is not stuck empty while
-    // a child agent (e.g. babysit[4]::prepare) is emitting text_delta.
+    // The stream itself belongs to the band pane, which has three times this
+    // rail's width to render it in; painting the same text here as well gave
+    // the reader two copies of one thing and neither of them authoritative.
+    // What the rail keeps is the newest couple of lines, as a "what is it
+    // doing right now" glance, plus a pointer to where the full stream lives.
+    // Workflow-call containers bubble nested leaf streams so this is not stuck
+    // empty while a child agent (e.g. babysit[4]::prepare) emits text_delta.
     // Guard SteamtrainReducer: unit tests paint this IIFE without the bundle.
     var Reducer = typeof SteamtrainReducer !== "undefined" ? SteamtrainReducer : null;
     var view = (S.runState && Reducer && Reducer.resolveLiveOutputStep)
       ? (Reducer.resolveLiveOutputStep(S.runState, s) || s)
       : s;
-    var key = "record:" + ST.stepKey(p, s);
     var body = Reducer && Reducer.liveOutputBody
       ? Reducer.liveOutputBody(view)
       : (((view.result && view.result.output) || view.text || "").trim() || (view.activity || ""));
-    var scroll = S.tailScroll[key] || { follow: true, top: 0 };
-    var out = h("div", { class: "insp-output", "data-key": key });
-    out.textContent = body || "no output yet";
-    out.addEventListener("scroll", function () {
-      var atBottom = out.scrollTop + out.clientHeight >= out.scrollHeight - 4;
-      S.tailScroll[key] = { follow: atBottom, top: out.scrollTop };
-    });
-    var outLabel = view.stepId === s.stepId ? "Output" : ("Output · " + view.stepId);
-    wrap.appendChild(h("div", { class: "insp-outhead" },
-      h("span", { class: "insp-kicker", text: outLabel }),
-      (view.status === "running" || s.status === "running")
-        ? h("span", { class: "insp-live-note", text: scroll.follow ? "following" : "paused" })
-        : null
-    ));
-    wrap.appendChild(out);
-    // applyTailScroll only manages panes inside #bands; pin ours manually.
-    requestAnimationFrame(function () {
-      var st = S.tailScroll[key];
-      out.scrollTop = st && !st.follow ? st.top : out.scrollHeight;
-    });
+    var activity = h("div", { class: "insp-activity" });
+    var head = h("div", { class: "insp-activity-head" },
+      h("span", { class: "insp-kicker", text: "Activity" }));
+    // Name the source only when it is not the step the rail is already titled.
+    if (view.stepId !== s.stepId) {
+      head.appendChild(h("span", { class: "insp-activity-src", text: view.stepId }));
+    }
+    activity.appendChild(head);
+    var recent = body ? body.slice(-320).replace(/\s+/g, " ").trim() : "";
+    activity.appendChild(h("div", {
+      class: "insp-activity-body",
+      text: recent ? (body.length > 320 ? "…" + recent : recent) : "no output yet"
+    }));
+    activity.appendChild(h("div", { class: "insp-activity-note", text: "Full stream is in the band, left ←" }));
+    wrap.appendChild(activity);
+
+    wrap.appendChild(recordEventLog());
+    return wrap;
+  }
+
+  /**
+   * The run's recent events, filling the rail below Activity. Unlike the
+   * Events tab — which narrows to this step — this is the run's own tail, the
+   * "what just happened anywhere" readout the console had nowhere else to put.
+   */
+  function recordEventLog() {
+    var wrap = h("div", { class: "insp-eventlog" });
+    wrap.appendChild(h("div", { class: "insp-kicker", text: "Event log" }));
+    var log = h("div", { class: "insp-events" });
+    var entries = (S.eventLog || []).slice(0, 8);
+    if (!entries.length) {
+      log.appendChild(h("div", { class: "insp-dim", text: "no events yet" }));
+    } else {
+      entries.forEach(function (entry) {
+        log.appendChild(h("div", { class: "insp-event" },
+          h("span", { class: "t", text: new Date(entry.atMs).toLocaleTimeString() }),
+          h("span", { class: "m", text: entry.text })));
+      });
+    }
+    wrap.appendChild(log);
     return wrap;
   }
 

@@ -23,8 +23,8 @@ describe("live nested output wiring", () => {
   it("prefers phases with running leaf work over workflow-container parents", () => {
     expect(runJs).toMatch(/function isLiveRunning/);
     expect(runJs).toMatch(/blockKind !== "workflow"/);
-    // expandedPhaseKey tries isLiveRunning before plain isRunning.
-    const expand = runJs.slice(runJs.indexOf("function expandedPhaseKey"));
+    // expandedBandKey tries isLiveRunning before plain isRunning.
+    const expand = runJs.slice(runJs.indexOf("function expandedBandKey"));
     const liveIdx = expand.indexOf("isLiveRunning");
     const anyIdx = expand.indexOf(".some(isRunning)");
     expect(liveIdx).toBeGreaterThan(-1);
@@ -33,7 +33,10 @@ describe("live nested output wiring", () => {
 
   it("labels bubbled output with the nested leaf step id", () => {
     expect(runJs).toMatch(/view\.stepId === s\.stepId/);
-    expect(inspectorJs).toMatch(/Output · /);
+    // The rail no longer repaints the stream (the band pane owns it); it names
+    // the bubbled source on its Activity glance instead.
+    expect(inspectorJs).toMatch(/view\.stepId !== s\.stepId/);
+    expect(inspectorJs).toMatch(/insp-activity-src/);
   });
 
   it("guards SteamtrainReducer so isolated inspector unit tests can paint", () => {
