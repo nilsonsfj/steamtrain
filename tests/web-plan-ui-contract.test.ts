@@ -63,10 +63,13 @@ describe("web plan and sidebar UI contracts", () => {
     expect(planJs).toContain("function renderInputsTab(container, spec)");
   });
 
-  it("keeps live inspector status labels stable across timer ticks", () => {
+  it("keeps live inspector timer labels stable across timer ticks", () => {
+    // The status pill no longer carries a clock — the Elapsed metric right
+    // below it is the step's one timer — but that metric still opts out of
+    // the default "⏱ " glyph through the same prefix mechanism.
     expect(coreJs).toContain('getAttribute("data-since-prefix")');
-    expect(inspectorJs).toContain('"data-since-prefix": "running "');
-    expect(inspectorJs).toContain('text: "running " + ST.fmtElapsed');
+    expect(inspectorJs).toContain('"data-since-prefix": ""');
+    expect(inspectorJs).not.toContain('text: "running " + ST.fmtElapsed');
   });
 
   it("preserves the outer canvas and expanded step-list scroll positions", () => {

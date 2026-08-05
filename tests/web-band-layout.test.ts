@@ -58,14 +58,39 @@ describe("expanded phase band layout", () => {
     expect(steps).toMatch(/min-height:\s*0/);
   });
 
-  it("caps the step list so the output pane always keeps usable height", () => {
-    expect(ruleBody(css, ".band.expanded .band-steps")).toMatch(/max-height:/);
+  it("keeps the inline output pane's height floor inside that scroll area", () => {
+    // The pane now sits between rows rather than at the foot of the band, so
+    // it takes leftover height when there is any and its floor when there is
+    // not — the list scrolls instead of the pane collapsing to a sliver.
+    const out = ruleBody(css, ".band.expanded .output");
+    expect(out).toMatch(/min-height:\s*\d/);
+    // May shrink, never grows: absorbing the band's leftover space pushed the
+    // rows below it a screen away from their siblings.
+    expect(out).toMatch(/flex:\s*0\s+1\s+auto/);
   });
 
   it("wraps the expanded band's step rows in the .band-steps scroll area", () => {
-    // The rows and their sub-workflow blocks are appended to a `band-steps`
-    // host, not to the band itself.
+    // The rows, their sub-workflow blocks and the live output pane are all
+    // appended to a `band-steps` host, not to the band itself.
     expect(js).toMatch(/class:\s*"band-steps"/);
-    expect(js).toMatch(/stepHost\.appendChild\(renderStepRow\(p, s\)\)/);
+    expect(js).toMatch(/stepHost\.appendChild\(renderStepRow\(e\.phase, e\.step, cols, open\)\)/);
+    expect(js).toMatch(/stepHost\.appendChild\(renderOutputPane\(e\.phase, e\.step\)\)/);
+  });
+
+  it("lays rows out on their band's own column spec rather than a fixed grid", () => {
+    // A band of command steps has no runner, spend or tokens to show; those
+    // columns are not laid out at all instead of being dashed out per row.
+    expect(ruleBody(css, ".step-row")).toMatch(/grid-template-columns:\s*var\(--step-cols/);
+    expect(js).toMatch(/function bandColumns/);
+    expect(js).toMatch(/setProperty\("--step-cols"/);
+  });
+
+  it("merges sibling sub-workflow phases into one band", () => {
+    // The engine namespaces a nested phase_start but leaves the child's own
+    // title and index, so N children would otherwise paint N same-titled
+    // bands all numbered 01.
+    expect(js).toMatch(/function basePhaseId/);
+    expect(js).toMatch(/function buildBands/);
+    expect(js).toMatch(/lastIndexOf\("::"\)/);
   });
 });

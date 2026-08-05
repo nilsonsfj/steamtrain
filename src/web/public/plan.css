@@ -1050,7 +1050,7 @@
   font: 400 12px / 1.4 var(--font-mono);
 }
 .insp-exrow .k {
-  width: 96px;
+  width: 70px;
   flex: none;
   color: var(--dim);
 }
@@ -1075,6 +1075,15 @@
 .insp-foot .insp-runonly {
   margin-left: auto;
 }
+/* Note above, buttons below: side by side the note wrapped to two lines and
+   pushed the buttons off the rail. */
+.insp-foot.stacked {
+  flex-direction: column;
+  align-items: stretch;
+}
+.insp-foot.stacked .insp-foot-note {
+  max-width: none;
+}
 .insp-foot-note {
   font: 400 11px / 1.4 var(--font-mono);
   color: var(--dim);
@@ -1085,6 +1094,14 @@
 }
 .insp-foot .insp-foot-note + .btn.small {
   margin-left: auto;
+}
+.insp-foot .insp-foot-actions {
+  display: flex;
+  gap: 6px;
+}
+.insp-foot .insp-foot-actions .btn.small {
+  flex: 1;
+  margin-left: 0;
 }
 
 /* ---- record rail (02.4) -------------------------------------------------------- */
@@ -1100,12 +1117,16 @@
   flex-direction: column;
 }
 
+/* Equal shares of the row, however many cells the step's kind can fill. */
 .insp-metrics {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  display: flex;
   gap: 12px;
   padding: 11px 14px;
   border-bottom: 1px solid var(--border-quiet);
+}
+.insp-metric {
+  flex: 1;
+  min-width: 0;
 }
 .insp-metric .k {
   font: 400 10.5px / 1 var(--font-ui);
@@ -1120,28 +1141,47 @@
   font-variant-numeric: tabular-nums;
 }
 
-.insp-outhead {
+/* Activity: the newest couple of lines only. The stream itself lives in the
+   band pane, which has the width to render it — see recordLive. */
+.insp-activity {
+  flex: none;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-quiet);
+}
+.insp-activity-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
-  border-bottom: 1px solid #14181d;
-  background: var(--well);
+  gap: 8px;
+  margin-bottom: 8px;
 }
-.insp-live-note {
+.insp-activity-src {
+  margin-left: auto;
   font: 400 11px / 1 var(--font-mono);
-  color: var(--running);
+  color: var(--dim);
+}
+.insp-activity-body {
+  font: 400 11.5px / 1.5 var(--font-mono);
+  color: var(--muted);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.insp-activity-note {
+  margin-top: 8px;
+  font: 400 11.5px / 1.4 var(--font-ui);
+  color: var(--dim);
 }
 
-.insp-output {
+.insp-eventlog {
   flex: 1;
-  min-height: 120px;
-  overflow: auto;
-  padding: 9px 14px;
-  background: var(--well);
-  font: 400 12px / 1.6 var(--font-mono);
-  color: #b9c4d0;
-  white-space: pre-wrap;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  overflow: hidden;
 }
 
 .insp-events {

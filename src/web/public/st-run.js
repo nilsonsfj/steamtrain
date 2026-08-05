@@ -310,11 +310,64 @@
   function isRunning(s) { return s.status === "running"; }
 
   /**
-   * Identity of one phase *instance*. A loop that re-enters a phase produces
-   * several PhaseStates sharing a phaseId; each is its own band, so bands are
-   * keyed phaseId:iteration — the same convention stepKey() uses.
+   * A phaseId with its sub-workflow namespace stripped. The engine forwards a
+   * nested run's `phase_start` under `<callStepId>::<childPhaseId>` (which is
+   * what keeps two children's same-named phases from colliding in the reducer)
+   * but with the child's own title and index untouched. Bands group on this
+   * bare id so a fan-out of N children collapses into one band instead of N
+   * same-titled ones numbered 01, 01, 01.
    */
-  function phaseKey(p) { return p.phaseId + ":" + (p.iteration || 1); }
+  function basePhaseId(phaseId) {
+    var idx = String(phaseId).lastIndexOf("::");
+    return idx === -1 ? phaseId : String(phaseId).slice(idx + 2);
+  }
+
+  /**
+   * Band identity: the un-namespaced phase instance, qualified by title so two
+   * unrelated sub-workflows that happen to name a phase alike stay apart.
+   */
+  function bandKey(p) {
+    return basePhaseId(p.phaseId) + ":" + (p.iteration || 1) + ":" + (p.title || "");
+  }
+
+  /**
+   * Fold the flat phase list into bands, merging sibling instances (see
+   * bandKey). Each entry keeps its *originating* phase so stepKey, tail-scroll
+   * keys and openDetail keep addressing the real phase instance — the band is
+   * a presentation grouping and nothing below it knows about the merge.
+   */
+  function buildBands(phases) {
+    var bands = [], byKey = {};
+    phases.forEach(function (p, idx) {
+      var key = bandKey(p);
+      var band = byKey[key];
+      if (!band) {
+        band = byKey[key] = {
+          key: key,
+          title: p.title,
+          index: typeof p.index === "number" ? p.index : idx,
+          iteration: p.iteration || 1,
+          members: [],
+          entries: []
+        };
+        bands.push(band);
+      }
+      band.members.push(p);
+      if (typeof p.index === "number" && p.index < band.index) band.index = p.index;
+      (p.steps || []).forEach(function (s) { band.entries.push({ phase: p, step: s }); });
+    });
+    bands.forEach(function (band) {
+      band.done = band.members.every(function (p) { return p.done; });
+      band.stepCount = band.members.reduce(function (n, p) {
+        return n + (typeof p.stepCount === "number" ? p.stepCount : (p.steps || []).length);
+      }, 0);
+    });
+    return bands;
+  }
+
+  function bandSteps(band) {
+    return band.entries.map(function (e) { return e.step; });
+  }
 
   /** Running leaf work (not a `workflow` container that waits on nested steps). */
   function isLiveRunning(s) {
@@ -327,45 +380,98 @@
    * sub-workflow fan-outs (`babysit[n]`): the parent phase stays running the
    * whole time while agent text streams in a later namespaced phase.
    */
-  function expandedPhaseKey(phases) {
+  function expandedBandKey(bands) {
+    var i, j;
     if (S.selectedStepId) {
-      for (var i = 0; i < phases.length; i++) {
-        var steps = phases[i].steps || [];
-        for (var j = 0; j < steps.length; j++) {
-          if (steps[j].stepId === S.selectedStepId) return phaseKey(phases[i]);
+      for (i = 0; i < bands.length; i++) {
+        var steps = bandSteps(bands[i]);
+        for (j = 0; j < steps.length; j++) {
+          if (steps[j].stepId === S.selectedStepId) return bands[i].key;
         }
       }
     }
-    var k;
-    for (k = 0; k < phases.length; k++) {
-      if (!phases[k].done && (phases[k].steps || []).some(isLiveRunning)) return phaseKey(phases[k]);
+    for (i = 0; i < bands.length; i++) {
+      if (!bands[i].done && bandSteps(bands[i]).some(isLiveRunning)) return bands[i].key;
     }
-    for (k = 0; k < phases.length; k++) {
-      if (!phases[k].done && (phases[k].steps || []).some(isRunning)) return phaseKey(phases[k]);
+    for (i = 0; i < bands.length; i++) {
+      if (!bands[i].done && bandSteps(bands[i]).some(isRunning)) return bands[i].key;
     }
     return null;
   }
 
-  function bandClass(phase) {
-    if (phase.done) return "band done";
-    if ((phase.steps || []).some(isRunning)) return "band running";
+  function bandClass(band) {
+    if (band.done) return "band done";
+    if (bandSteps(band).some(isRunning)) return "band running";
     return "band queued";
   }
 
-  /** `time · cost · tokens` summed over the band's finished steps. */
-  function bandRollup(phase) {
-    var ms = 0, cost = 0, tok = emptyTokens(), any = false;
-    (phase.steps || []).forEach(function (s) {
+  /**
+   * "3 command steps, parallel" — what the rows below the header are, said
+   * once for the band instead of repeated as a chip on every uniform row.
+   */
+  function bandKindLine(band) {
+    var steps = bandSteps(band);
+    var n = steps.length || band.stepCount || 0;
+    if (!n) return "";
+    var kind = null;
+    for (var i = 0; i < steps.length; i++) {
+      var label = KIND_LABEL[steps[i].blockKind] || steps[i].blockKind;
+      if (kind === null) kind = label;
+      else if (kind !== label) { kind = ""; break; }
+    }
+    if (n === 1) return "1 step" + (kind ? " · " + kind : "");
+    return n + (kind ? " " + kind : "") + " steps, parallel";
+  }
+
+  /**
+   * A span rendered as one range rather than two timings: "3.8–3.9s",
+   * "1m 11–15s". Equal ends collapse to a single value.
+   */
+  function fmtElapsedRange(lo, hi) {
+    var a = fmtElapsed(lo), b = fmtElapsed(hi);
+    if (!a || !b) return a || b || "";
+    if (a === b) return a;
+    // Share the unit (and any leading "1m ") when both ends carry the same one.
+    var pa = /^(.*?)([\d.]+)([a-z]+)$/.exec(a), pb = /^(.*?)([\d.]+)([a-z]+)$/.exec(b);
+    if (pa && pb && pa[1] === pb[1] && pa[3] === pb[3]) return pa[1] + pa[2] + "–" + pb[2] + pb[3];
+    return a + "–" + b;
+  }
+
+  /**
+   * The band's right-hand readout: while anything in it runs, the spread of
+   * live elapsed times; once finished, the spread of durations plus cost and
+   * tokens when there are any. Merged siblings make a range the honest
+   * summary — three children rarely finish on the same tick.
+   */
+  function bandRollup(band) {
+    var steps = bandSteps(band);
+    var running = steps.filter(isRunning);
+    var now = Date.now();
+    var lo, hi, i;
+    if (running.length) {
+      for (i = 0; i < running.length; i++) {
+        if (!running[i].startedAt) continue;
+        var live = now - running[i].startedAt;
+        if (lo === undefined || live < lo) lo = live;
+        if (hi === undefined || live > hi) hi = live;
+      }
+      if (lo === undefined) return "running";
+      return "running " + fmtElapsedRange(lo, hi);
+    }
+    var cost = 0, tok = emptyTokens(), any = false;
+    steps.forEach(function (s) {
       if (!s.result) return;
       any = true;
-      ms += s.result.durationMs || 0;
+      var ms = s.result.durationMs || 0;
+      if (lo === undefined || ms < lo) lo = ms;
+      if (hi === undefined || ms > hi) hi = ms;
       cost += s.result.costUsd || 0;
       addTokensInto(tok, s.result.tokens);
     });
-    if (!any) return "";
+    if (!any) return band.done ? "" : "queued";
     var bits = [];
-    var elapsed = fmtElapsed(ms);
-    if (elapsed) bits.push(elapsed);
+    var span = fmtElapsedRange(lo, hi);
+    if (span) bits.push(span);
     if (cost > 0) bits.push("$" + cost.toFixed(4));
     var tk = totalTokens(tok);
     if (tk > 0) bits.push(fmtTokens(tk) + " tok");
@@ -380,16 +486,54 @@
     );
   }
 
-  /** Column 4: who actually runs the step. */
+  /** Who actually runs the step, or null when nothing runs it (a command). */
   function runnerLabel(s) {
     var id = s.agent ? ST.agentUiLabel(s.agent) : s.api;
     if (id) return id + (s.model ? " · " + s.model : "");
     if (s.modelClass) return "auto · class:" + s.modelClass;
     if (s.model) return "auto · " + s.model;
-    return "—";
+    return null;
   }
 
-  /** Column 5: worktree branch, item label, `cached`, `N tries` — in that order. */
+  function stepMetaBits(s) {
+    var bits = [];
+    if (s.worktree) bits.push(1);
+    if (s.item) bits.push(1);
+    if (s.cached) bits.push(1);
+    var attempts = s.attempts || (s.result && s.result.attempts);
+    if (attempts && attempts > 1) bits.push(1);
+    return bits.length;
+  }
+
+  /**
+   * Which columns this band's rows can actually fill. A band of command steps
+   * has no runner, no spend and no tokens; dashing those out three times per
+   * row is a wall of "—" where the id needed the width. Columns nothing in the
+   * band can populate are not laid out at all.
+   */
+  function bandColumns(band) {
+    var steps = bandSteps(band);
+    var spec = { meta: false, runner: false, cost: false, tokens: false };
+    steps.forEach(function (s) {
+      if (stepMetaBits(s)) spec.meta = true;
+      if (runnerLabel(s)) spec.runner = true;
+      if (s.result && s.result.costUsd) spec.cost = true;
+      if (s.result && totalTokens(s.result.tokens)) spec.tokens = true;
+    });
+    var cols = ["14px", "minmax(0,1fr)"];
+    if (spec.meta) cols.push("minmax(0,190px)");
+    // Column 3 is "what runs this": the runner, falling back to the block kind
+    // for steps that have none. Never empty, so it never needs a dash.
+    cols.push(spec.runner ? "168px" : "92px");
+    cols.push(spec.cost || spec.tokens ? "64px" : "74px");
+    if (spec.cost) cols.push("68px");
+    if (spec.tokens) cols.push("58px");
+    cols.push("20px");
+    spec.template = cols.join(" ");
+    return spec;
+  }
+
+  /** Worktree branch, item label, `cached`, `N tries` — in that order. */
   function stepMetaCell(s) {
     var cell = h("div", { class: "meta" });
     var bits = [];
@@ -410,12 +554,13 @@
       return h("div", {
         class: "num time",
         "data-since": String(s.startedAt),
-        text: "⏱ " + fmtElapsed(Date.now() - s.startedAt)
+        "data-since-prefix": "",
+        text: fmtElapsed(Date.now() - s.startedAt)
       });
     }
     var ms = s.result && s.result.durationMs;
     var label = typeof ms === "number" ? fmtElapsed(ms) : "";
-    return h("div", { class: "num time", text: label || "—" });
+    return h("div", { class: "num time", text: label });
   }
 
   function stepRowClass(s) {
@@ -426,15 +571,18 @@
   }
 
   /**
-   * One step, nine columns: dot, id, kind, runner, meta, time, cost, tokens,
-   * chevron. The whole row is the control (the chevron is its affordance);
-   * activating it selects the step and opens the drill-in drawer.
+   * One step row, laid out on its band's column spec (see bandColumns): dot,
+   * id, [meta], runner-or-kind, time, [cost], [tokens], chevron. The whole row
+   * is the control (the chevron is its affordance); activating it selects the
+   * step and opens the drill-in drawer. `open` marks the row whose live output
+   * is expanded directly beneath it.
    */
-  function renderStepRow(p, s) {
+  function renderStepRow(p, s, cols, open) {
     var cost = s.result && s.result.costUsd;
     var tokens = s.result ? totalTokens(s.result.tokens) : 0;
-    return h("button", {
-        class: stepRowClass(s),
+    var runner = runnerLabel(s);
+    var row = h("button", {
+        class: stepRowClass(s) + (open ? " open" : ""),
         type: "button",
         "data-detail-invoker": "row:" + stepKey(p, s),
         "aria-label": "Open details for step " + s.stepId,
@@ -442,15 +590,17 @@
         onClick: function (event) { openDetail(p, s, event.currentTarget); }
       },
       h("span", { class: "dot", "aria-hidden": "true" }),
-      h("div", { class: "id", text: s.stepId }),
-      kindChip(s.blockKind),
-      h("div", { class: "meta", text: runnerLabel(s) }),
-      stepMetaCell(s),
-      timeCell(s),
-      h("div", { class: "num cost", text: cost ? "$" + cost.toFixed(4) : "—" }),
-      h("div", { class: "num tok", text: tokens ? fmtTokens(tokens) + " tok" : "—" }),
-      h("span", { class: "chev", "aria-hidden": "true", text: "›" })
+      h("div", { class: "id", text: s.stepId })
     );
+    if (cols.meta) row.appendChild(stepMetaCell(s));
+    row.appendChild(runner
+      ? h("div", { class: "runner", text: runner })
+      : kindChip(s.blockKind));
+    row.appendChild(timeCell(s));
+    if (cols.cost) row.appendChild(h("div", { class: "num cost", text: cost ? "$" + cost.toFixed(4) : "" }));
+    if (cols.tokens) row.appendChild(h("div", { class: "num tok", text: tokens ? fmtTokens(tokens) : "" }));
+    row.appendChild(h("span", { class: "chev", "aria-hidden": "true", text: open ? "⌄" : "›" }));
+    return row;
   }
 
   /** "What runs inside" for a sub-workflow call step, hung off its row. */
@@ -477,18 +627,20 @@
     return (((s.result && s.result.output) || s.text || "").trim()) || (s.activity || "");
   }
 
-  /** The step whose output the expanded band shows. */
-  function bandOutputStep(phase) {
-    var steps = phase.steps || [];
-    var i;
+  /** The band entry whose output the expanded band shows, inline under its row. */
+  function bandOutputEntry(band) {
+    var entries = band.entries, i;
     if (S.selectedStepId) {
-      for (i = 0; i < steps.length; i++) if (steps[i].stepId === S.selectedStepId) return steps[i];
+      for (i = 0; i < entries.length; i++) {
+        if (entries[i].step.stepId === S.selectedStepId) return entries[i];
+      }
     }
     // Prefer a running leaf over a running workflow container in the same band.
-    for (i = 0; i < steps.length; i++) if (isLiveRunning(steps[i])) return steps[i];
-    for (i = 0; i < steps.length; i++) if (isRunning(steps[i])) return steps[i];
-    for (i = steps.length - 1; i >= 0; i--) {
-      if (steps[i].text || (steps[i].result && steps[i].result.output)) return steps[i];
+    for (i = 0; i < entries.length; i++) if (isLiveRunning(entries[i].step)) return entries[i];
+    for (i = 0; i < entries.length; i++) if (isRunning(entries[i].step)) return entries[i];
+    for (i = entries.length - 1; i >= 0; i--) {
+      var s = entries[i].step;
+      if (s.text || (s.result && s.result.output)) return entries[i];
     }
     return null;
   }
@@ -511,8 +663,8 @@
         ? (scroll.follow ? "following" : "paused") : ""
     });
     var label = view.stepId === s.stepId
-      ? s.stepId + " · output"
-      : s.stepId + " · " + view.stepId + " · output";
+      ? "Live output · " + s.stepId
+      : "Live output · " + s.stepId + " · " + view.stepId;
     var pane = h("div", { class: "output" },
       h("div", { class: "output-head" },
         h("span", { class: "label", text: label }),
@@ -570,38 +722,46 @@
     container.appendChild(box);
   }
 
-  /** One band per phase instance; exactly one expanded, hosting the output pane. */
+  /**
+   * One band per *merged* phase instance (see buildBands); exactly one is
+   * expanded, and its live output hangs directly under the row it belongs to
+   * rather than in a second pane at the foot of the band.
+   */
   function renderBands(container) {
     var phases = (S.runState && S.runState.phases) || [];
     if (!phases.length) return;
     renderPendingBlock(container);
-    var expanded = expandedPhaseKey(phases);
-    phases.forEach(function (p, idx) {
-      var cls = bandClass(p);
-      var isExpanded = phaseKey(p) === expanded;
+    var bands = buildBands(phases);
+    var expanded = expandedBandKey(bands);
+    bands.forEach(function (b) {
+      var cls = bandClass(b);
+      var isExpanded = b.key === expanded;
       var band = h("div", { class: cls + (isExpanded ? " expanded" : "") });
-      var steps = p.steps || [];
-      var count = typeof p.stepCount === "number" ? p.stepCount : steps.length;
-      var index = typeof p.index === "number" ? p.index : idx;
-      var rollup = bandRollup(p);
+      var rollup = bandRollup(b);
+      var kindLine = bandKindLine(b);
       band.appendChild(h("div", { class: "band-head" },
-        h("span", { class: "idx", text: String(index + 1).padStart(2, "0") }),
+        h("span", { class: "idx", text: String(b.index + 1).padStart(2, "0") }),
         h("span", { class: "dot", "aria-hidden": "true" }),
         h("span", {
           class: "title",
-          text: p.title + (p.iteration && p.iteration > 1 ? " · iteration " + p.iteration : "")
+          text: b.title + (b.iteration > 1 ? " · iteration " + b.iteration : "")
         }),
-        count > 1 ? h("span", { class: "count", text: count + " steps parallel" }) : null,
+        // How many sibling sub-workflows this one band stands for.
+        b.members.length > 1 ? h("span", { class: "xn", text: "×" + b.members.length }) : null,
+        kindLine ? h("span", { class: "count", text: kindLine }) : null,
         rollup ? h("span", { class: "rollup", text: rollup }) : null
       ));
       // A queued phase collapses to its header line.
       if (cls === "band queued") { container.appendChild(band); return; }
-      // The expanded band is a fixed-height console pane: its rows live in
-      // their own scroll area so a long step list scrolls inside the band
-      // instead of overflowing it (which used to paint over the bands below
-      // and squeeze the output pane to an unusable sliver). Collapsed bands
-      // are sized by their rows, so they host them directly.
-      var listKey = phaseKey(p);
+      var cols = bandColumns(b);
+      band.style.setProperty("--step-cols", cols.template);
+      // The expanded band is a fixed-height console pane: its rows and the
+      // inline output pane live in their own scroll area so a long step list
+      // scrolls inside the band instead of overflowing it (which used to paint
+      // over the bands below and squeeze the output pane to an unusable
+      // sliver). Collapsed bands are sized by their rows, so they host them
+      // directly.
+      var listKey = b.key;
       var stepHost = isExpanded ? h("div", { class: "band-steps", "data-scroll-key": listKey }) : band;
       if (isExpanded) {
         stepHost.addEventListener("scroll", function () {
@@ -610,16 +770,15 @@
           S.stepListScroll[listKey] = { follow: atBottom, top: stepHost.scrollTop };
         });
       }
-      steps.forEach(function (s) {
-        stepHost.appendChild(renderStepRow(p, s));
-        var sub = subWorkflowRow(p, s);
+      var outEntry = isExpanded ? bandOutputEntry(b) : null;
+      b.entries.forEach(function (e) {
+        var open = Boolean(outEntry && outEntry.step === e.step);
+        stepHost.appendChild(renderStepRow(e.phase, e.step, cols, open));
+        if (open) stepHost.appendChild(renderOutputPane(e.phase, e.step));
+        var sub = subWorkflowRow(e.phase, e.step);
         if (sub) stepHost.appendChild(sub);
       });
       if (stepHost !== band) band.appendChild(stepHost);
-      if (isExpanded) {
-        var outStep = bandOutputStep(p);
-        if (outStep) band.appendChild(renderOutputPane(p, outStep));
-      }
       container.appendChild(band);
     });
   }
