@@ -1,6 +1,6 @@
-import { existsSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename } from "node:path";
 import { BrowserWindow, app, dialog } from "electron";
+import { resolveEntry } from "./entry";
 import { buildMenu } from "./menu";
 import { type ServerHandle, startServer } from "./server-child";
 import { resolveShellPath } from "./shell-path";
@@ -21,16 +21,8 @@ let projectDir: string | undefined;
 let quitting = false;
 
 /** Absolute path to the built CLI entry the engine runs from. */
-function resolveEntry(): string {
-  // `app.getAppPath()` is the repo root in development and the packaged app
-  // directory in production; `dist/index.js` sits at the same place in both.
-  const entry = join(app.getAppPath(), "dist", "index.js");
-  if (!existsSync(entry)) {
-    throw new Error(
-      `steamtrain is not built: ${entry} does not exist.\nRun \`npm run build\` and try again.`,
-    );
-  }
-  return entry;
+function cliEntry(): string {
+  return resolveEntry({ mainDir: __dirname, appPath: app.getAppPath() });
 }
 
 /** Ask for a project directory. Returns undefined if the user cancels. */
@@ -51,7 +43,7 @@ async function openProject(cwd: string): Promise<void> {
   await previous?.stop();
 
   const handle = await startServer({
-    entry: resolveEntry(),
+    entry: cliEntry(),
     cwd,
     // Already carries the recovered PATH, applied in `main()` before any fork.
     env: process.env,
