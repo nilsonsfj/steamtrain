@@ -296,6 +296,13 @@ export function createLiveRunStore(
 ): LiveRunStore {
   const ttlMs = options.ttlMs ?? LIVE_RUN_TTL_MS;
   const now = options.now ?? Date.now;
+  /**
+   * Tie-breaker for edit ids minted inside the same millisecond. `now()` alone
+   * left the sort order to the random suffix, so two edits requested back to
+   * back could list in either order — the listing is what the owner replays,
+   * so "in request order" has to hold at sub-ms resolution too.
+   */
+  let editSeq = 0;
 
   const runDir = (id: string): string => join(rootDir, sanitizePathComponent(id));
   const metaPath = (id: string): string => join(runDir(id), "meta.json");
@@ -629,8 +636,10 @@ export function createLiveRunStore(
     async requestStepEdit(id, edit) {
       const meta = await get(id);
       if (!meta || isTerminalLiveRunStatus(meta.status)) return undefined;
-      // Timestamp prefix keeps directory listing order == request order.
-      const editId = `${now()}-${randomBytes(4).toString("hex")}`;
+      // Timestamp + sequence prefix keeps directory listing order == request
+      // order. Both are fixed-width so the sort stays lexicographic; the random
+      // suffix only keeps ids unique across processes, it never orders them.
+      const editId = `${String(now()).padStart(14, "0")}-${String(++editSeq).padStart(6, "0")}-${randomBytes(4).toString("hex")}`;
       await mkdir(editsDir(id), { recursive: true });
       await atomicWriteFile(
         editPath(id, editId),

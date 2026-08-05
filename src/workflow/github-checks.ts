@@ -1,5 +1,10 @@
 import { type LandLockOptions, withLandLock } from "./land-lock";
 import { runCommand } from "./merge";
+import {
+  type RebasePullRequestOptions,
+  type RebasePullRequestResult,
+  rebasePullRequestOntoBase,
+} from "./pr-rebase";
 import { abortableSleep } from "./timeout";
 
 /**
@@ -555,6 +560,15 @@ export interface MergeWhenReadyOptions extends WaitForChecksOptions {
   runGh?: (args: string[], cwd: string, signal?: AbortSignal) => Promise<string>;
   /** Injectable `git` runner (args after the implicit `git`), for local branch cleanup. */
   runGit?: (args: string[], cwd: string, signal?: AbortSignal) => Promise<string>;
+  /**
+   * On CONFLICTING, try one deterministic `rebase onto base + force-with-lease
+   * push` before giving up. Off by default (it rewrites the PR head); babysit
+   * turns it on, because a sibling landing under the land lock is exactly what
+   * makes the remaining PRs conflict.
+   */
+  autoRebase?: boolean;
+  /** Injectable rebase runner (defaults to `rebasePullRequestOntoBase`). */
+  rebasePr?: (opts: RebasePullRequestOptions) => Promise<RebasePullRequestResult>;
   /** Injectable land-lock wrapper (defaults to the cross-process file lock). */
   landLock?: <T>(
     cwd: string,
@@ -590,6 +604,10 @@ const MERGE_RETRY_BACKOFF_MS = 3_000;
  */
 function isRetriableMergeError(message: string): boolean {
   const m = message.toLowerCase();
+  // "not mergeable BECAUSE it has a merge conflict" is a permanent state, and
+  // retrying it just burns the attempt budget before reporting the conflict.
+  // Auto-rebase is the answer to those; retries are for the transient window.
+  if (/conflict/.test(m)) return false;
   return (
     m.includes("base branch was modified") ||
     m.includes("try the merge again") ||
@@ -685,6 +703,9 @@ async function landUnderLock(a: LandLoopArgs): Promise<MergeWhenReadyResult> {
   const { opts, runGh, waitGreen, sleep, remaining, strategy, maxAttempts, locked } = a;
   const fetchSnapshot = opts.fetchSnapshot ?? fetchPullRequestCheckSnapshot;
   let lastError = "";
+  // One shot only: if a rebase we pushed still leaves the PR conflicting, the
+  // conflict is real and looping would just churn CI.
+  let rebaseTried = false;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     if (opts.signal?.aborted) return { ok: false, error: "cancelled" };
@@ -717,10 +738,52 @@ async function landUnderLock(a: LandLoopArgs): Promise<MergeWhenReadyResult> {
 
     if (evaluation.ready && !evaluation.ok) {
       if (snapshot.mergeable === "CONFLICTING") {
-        return {
-          ok: false,
-          error: `PR #${snapshot.number} now conflicts with the base branch (it advanced while this PR waited) — rebase/resolve the conflict before it can land`,
-        };
+        // Once we have rebased onto the base, "the base moved" has stopped
+        // being the honest explanation for a conflict — git replayed the head
+        // and GitHub still objects, so a human has to look at it. Read lazily:
+        // `rebaseTried` flips below, and the post-rebase wording has to reflect
+        // that rather than the state we entered the branch in.
+        const conflictText = (): string =>
+          rebaseTried
+            ? `PR #${snapshot.number} still conflicts with the base branch after being rebased onto it — the conflict needs resolving by hand`
+            : `PR #${snapshot.number} now conflicts with the base branch (it advanced while this PR waited) — rebase/resolve the conflict before it can land`;
+        // The common cause under a fan-out is mechanical, not semantic: a
+        // sibling landed under this same lock and moved the base out from under
+        // an already-rebased head. Replay the rebase deterministically rather
+        // than failing a PR whose only problem is that it waited its turn.
+        if (opts.autoRebase && !rebaseTried) {
+          rebaseTried = true;
+          const rebased = await (opts.rebasePr ?? rebasePullRequestOntoBase)({
+            prRef: opts.prRef,
+            cwd: opts.cwd,
+            signal: opts.signal,
+            runGh: opts.runGh,
+            runGit: opts.runGit,
+          });
+          if (!rebased.ok) {
+            return {
+              ok: false,
+              error: `PR #${snapshot.number} conflicts with the base branch and could not be rebased automatically: ${rebased.error}`,
+            };
+          }
+          // Either the force-push restarted CI (changed), or the head already
+          // contained the base and GitHub's CONFLICTING is simply stale —
+          // `changed: false` means git found nothing to replay, which cannot
+          // coexist with a genuine conflict. Both want the same thing: let the
+          // checks settle and re-read. `rebaseTried` bounds this to one pass.
+          const rewait = await waitGreen();
+          if (!rewait.ok) {
+            // The re-wait re-evaluates too, and a PR that is still conflicting
+            // fails it there rather than back here — so the post-rebase framing
+            // has to be applied to its error as well, or it never surfaces.
+            return {
+              ok: false,
+              error: rewait.snapshot?.mergeable === "CONFLICTING" ? conflictText() : rewait.error,
+            };
+          }
+          continue;
+        }
+        return { ok: false, error: conflictText() };
       }
       return { ok: false, error: evaluation.detail };
     }
