@@ -1160,6 +1160,35 @@ const babysitPr: WorkflowSpec = {
         },
       ],
     },
+    {
+      id: "gate-landed",
+      title: "Landed? — or did a sibling take the base",
+      steps: [
+        {
+          // First PR to reach the land lock wins; the rest come back here with
+          // a base that moved under them. Loop the whole prepare pipeline so
+          // they re-rebase onto the winner and land in sequence, instead of the
+          // stalemate where everyone was rebased against a base nobody has.
+          //
+          // Only genuine content conflicts get this far: `--auto-rebase`
+          // already replays a purely mechanical staleness inline, without an
+          // agent. So an iteration here means the PR really does need judgment.
+          //
+          // onFalse "continue", matching mainline's gates: exhausting the
+          // iteration budget must not mask the land failure behind a gate
+          // failure — the land step's own error is the honest report, and it
+          // still fails the run.
+          id: "landed",
+          kind: "gate",
+          dependsOn: ["wait-or-merge"],
+          when: { value: "{{inputs.land}}", equals: "merge" },
+          condition: { step: "wait-or-merge", ok: true },
+          loopTo: "rebase",
+          maxIterations: 3,
+          onFalse: "continue",
+        },
+      ],
+    },
   ],
 };
 
