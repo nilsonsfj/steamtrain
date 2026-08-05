@@ -660,7 +660,6 @@
     }
 
     var shell = modalShell("New workflow", "Pick a starting point — you can change everything afterwards.", body, foot, true);
-    shell.classList.add("create-modal");
     // Enter submits from anywhere but the description box, where it is a newline.
     shell.addEventListener("keydown", function (e) {
       if (e.key !== "Enter" || e.shiftKey || e.target === descTa) return;
