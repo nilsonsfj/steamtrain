@@ -43,13 +43,17 @@ var SteamtrainReducer = (() => {
     initialWorkflowState: () => initialWorkflowState,
     isAgentlessWorkflow: () => isAgentlessWorkflow,
     isCredentialFreeWorkflow: () => isCredentialFreeWorkflow,
+    isLiveOutputContainer: () => isLiveOutputContainer,
     isPageRoute: () => isPageRoute,
+    liveOutputBody: () => liveOutputBody,
     narrateEvent: () => narrateEvent,
     narrateFromState: () => narrateFromState,
+    nestedStepsOf: () => nestedStepsOf,
     parseDeepLink: () => parseDeepLink,
     parseRoute: () => parseRoute,
     parseRunDeepLink: () => parseRunDeepLink,
     projectCost: () => projectCost,
+    resolveLiveOutputStep: () => resolveLiveOutputStep,
     runDeepLink: () => runDeepLink,
     runsDeepLink: () => runsDeepLink,
     sessionOverridesEmpty: () => sessionOverridesEmpty,
@@ -1410,6 +1414,53 @@ var SteamtrainReducer = (() => {
       bits.push(`${view.overrideCount} override${view.overrideCount === 1 ? "" : "s"}`);
     }
     return bits.join(" \xB7 ");
+  }
+
+  // src/workflow/live-output.ts
+  function isLiveOutputContainer(step) {
+    return step.blockKind === "workflow";
+  }
+  function nestedStepsOf(state, parentStepId) {
+    const prefix = `${parentStepId}${SUBWORKFLOW_STEP_SEPARATOR}`;
+    const out = [];
+    for (const { step } of flattenSteps(state)) {
+      if (step.stepId.startsWith(prefix) || step.parentStepId === parentStepId) {
+        out.push(step);
+      }
+    }
+    return out;
+  }
+  function hasLiveBody(step) {
+    return Boolean(((step.result?.output ?? step.text) || "").trim() || step.activity);
+  }
+  function isActiveLeaf(step) {
+    return step.status === "running" && !isLiveOutputContainer(step);
+  }
+  function resolveLiveOutputStep(state, step) {
+    if (!isLiveOutputContainer(step)) return step;
+    const nested = nestedStepsOf(state, step.stepId);
+    if (nested.length === 0) return step;
+    const runningWithBody = nested.find((s) => isActiveLeaf(s) && hasLiveBody(s));
+    if (runningWithBody) return runningWithBody;
+    const runningLeaf = nested.find(isActiveLeaf);
+    if (runningLeaf) return runningLeaf;
+    for (let i = nested.length - 1; i >= 0; i -= 1) {
+      const s = nested[i];
+      if (!isLiveOutputContainer(s) && hasLiveBody(s)) return s;
+    }
+    for (let i = nested.length - 1; i >= 0; i -= 1) {
+      const s = nested[i];
+      if (isLiveOutputContainer(s) && s.status === "running") {
+        const deeper = resolveLiveOutputStep(state, s);
+        if (deeper !== s) return deeper;
+      }
+    }
+    return step;
+  }
+  function liveOutputBody(step) {
+    const body = ((step.result?.output ?? step.text) || "").trim();
+    if (body) return body;
+    return (step.activity || "").trim();
   }
 
   // src/web/telemetry.ts

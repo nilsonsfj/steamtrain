@@ -4,6 +4,7 @@
  * allocation, fixed-height budgeting, selection follow) are unit-testable.
  */
 
+import { isLiveOutputContainer } from "../workflow/live-output";
 import type { StepState, WorkflowState } from "./workflow-state";
 
 /** Why a reducer-level running step is currently blocked on the user. */
@@ -200,12 +201,21 @@ export function planViewLayout(input: ViewLayoutInput): ViewLayout {
 
 /**
  * The step the view should keep in focus while a run streams: the first
- * running step that is not waiting on the user, else the first user-blocked
- * step, else the last step that has progressed past pending, else the current
- * selection. Drives selection auto-follow (until the user navigates).
+ * running *leaf* that is not waiting on the user (skipping `workflow`
+ * containers that stay running while nested agents stream elsewhere), else any
+ * running step, else the first user-blocked step, else the last step that has
+ * progressed past pending, else the current selection. Drives selection
+ * auto-follow (until the user navigates).
  */
 export function pickFollowIndex(flat: readonly { step: StepState }[], fallback: number): number {
   if (flat.length === 0) return fallback;
+  const runningLeaf = flat.findIndex(
+    (f) =>
+      f.step.status === "running" &&
+      stepWaitKind(f.step) === undefined &&
+      !isLiveOutputContainer(f.step),
+  );
+  if (runningLeaf >= 0) return runningLeaf;
   const running = flat.findIndex(
     (f) => f.step.status === "running" && stepWaitKind(f.step) === undefined,
   );

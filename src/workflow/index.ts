@@ -559,6 +559,12 @@ export {
   workflowReducer,
 } from "./reducer";
 export {
+  isLiveOutputContainer,
+  liveOutputBody,
+  nestedStepsOf,
+  resolveLiveOutputStep,
+} from "./live-output";
+export {
   TOUR_WORKFLOW_NAME,
   isAgentlessWorkflow,
   isCredentialFreeWorkflow,

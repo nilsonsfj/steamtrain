@@ -648,19 +648,29 @@
     if (s.status === "error" && s.result && s.result.error) rows.appendChild(execRow("error", s.result.error, "warn"));
     wrap.appendChild(rows);
 
-    // Output tail with follow, keyed like the run pane's tails.
+    // Output tail with follow, keyed like the run pane's tails. Workflow-call
+    // containers bubble nested leaf streams so Live is not stuck empty while
+    // a child agent (e.g. babysit[4]::prepare) is emitting text_delta.
+    var view = (S.runState && SteamtrainReducer.resolveLiveOutputStep)
+      ? (SteamtrainReducer.resolveLiveOutputStep(S.runState, s) || s)
+      : s;
     var key = "record:" + ST.stepKey(p, s);
-    var body = ((s.result && s.result.output) || s.text || "").trim();
+    var body = SteamtrainReducer.liveOutputBody
+      ? SteamtrainReducer.liveOutputBody(view)
+      : (((view.result && view.result.output) || view.text || "").trim() || (view.activity || ""));
     var scroll = S.tailScroll[key] || { follow: true, top: 0 };
     var out = h("div", { class: "insp-output", "data-key": key });
-    out.textContent = body || (s.activity || "no output yet");
+    out.textContent = body || "no output yet";
     out.addEventListener("scroll", function () {
       var atBottom = out.scrollTop + out.clientHeight >= out.scrollHeight - 4;
       S.tailScroll[key] = { follow: atBottom, top: out.scrollTop };
     });
+    var outLabel = view.stepId === s.stepId ? "Output" : ("Output · " + view.stepId);
     wrap.appendChild(h("div", { class: "insp-outhead" },
-      h("span", { class: "insp-kicker", text: "Output" }),
-      s.status === "running" ? h("span", { class: "insp-live-note", text: scroll.follow ? "following" : "paused" }) : null
+      h("span", { class: "insp-kicker", text: outLabel }),
+      (view.status === "running" || s.status === "running")
+        ? h("span", { class: "insp-live-note", text: scroll.follow ? "following" : "paused" })
+        : null
     ));
     wrap.appendChild(out);
     // applyTailScroll only manages panes inside #bands; pin ours manually.

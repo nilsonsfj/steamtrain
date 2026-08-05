@@ -14,6 +14,8 @@ import {
   formatElapsed,
   formatTokens,
   formatUsd,
+  liveOutputBody,
+  resolveLiveOutputStep,
   totalTokens,
 } from "../workflow";
 import { ArrivalReportView } from "./ArrivalReport";
@@ -172,8 +174,11 @@ export function WorkflowView({
 
   // Cap context so follow hops between sparse and rich steps cannot change the
   // detail fixed-line count (each ±1 steals a tree row and flickers Ink).
-  const detailContext = selected
-    ? buildDetailContext(selected.step, innerWidth).slice(0, MAX_DETAIL_CONTEXT_LINES)
+  // Workflow containers bubble nested leaf streams into the preview so the
+  // pane is not stuck empty while a child agent runs.
+  const detailStep = selected ? resolveLiveOutputStep(state, selected.step) : undefined;
+  const detailContext = detailStep
+    ? buildDetailContext(detailStep, innerWidth).slice(0, MAX_DETAIL_CONTEXT_LINES)
     : [];
   // Keep the preview demand stable across auto-follow hops. Shrinking it to the
   // selected step's current output length used to give the tree ±3–5 rows every
@@ -405,7 +410,7 @@ export function WorkflowView({
         </Box>
       ) : null}
 
-      {showDetail && selected ? (
+      {showDetail && selected && detailStep ? (
         <Box
           flexDirection="column"
           width={innerWidth}
@@ -414,7 +419,8 @@ export function WorkflowView({
           overflow="hidden"
         >
           <DetailPanel
-            step={selected.step}
+            step={detailStep}
+            selectedStepId={selected.step.stepId}
             context={detailContext}
             previewLines={layout.previewLines}
             width={innerWidth}
@@ -858,21 +864,25 @@ function buildDetailContext(step: StepState, width: number): { text: string; col
  * Bottom detail panel for the selected step: a rule header with identity +
  * timing + spend, bounded context lines, and the newest `previewLines` of the
  * step's output. Full output lives in the drill-in (→ / Enter).
+ * `step` may be a nested leaf resolved from a workflow container; when it
+ * differs from `selectedStepId`, the header shows both ids.
  */
 function DetailPanel({
   step,
+  selectedStepId,
   context,
   previewLines,
   width,
   now,
 }: {
   step: StepState;
+  selectedStepId: string;
   context: { text: string; color: string }[];
   previewLines: number;
   width: number;
   now: number;
 }) {
-  const body = (step.result?.output ?? step.text).trim();
+  const body = liveOutputBody(step);
   const wrapped = useMemo(() => wrapOutputLines(body, width), [body, width]);
   const visible = previewLines > 0 ? wrapped.slice(-previewLines) : [];
   const waitKind = stepWaitKind(step);
@@ -897,6 +907,8 @@ function DetailPanel({
           : "gray";
   // Trailing rule fill uses string-width so a wide step id cannot oversize
   // the dash run; outer truncate-end still clips any surplus.
+  const idLabel =
+    step.stepId === selectedStepId ? step.stepId : `${selectedStepId} · ${step.stepId}`;
   const bits = [
     displayStatus,
     step.cached ? "cached" : undefined,
@@ -905,7 +917,7 @@ function DetailPanel({
     step.result?.costUsd ? formatUsd(step.result.costUsd) : undefined,
     wrapped.length > previewLines && previewLines > 0 ? `${wrapped.length} lines` : undefined,
   ].filter((bit): bit is string => Boolean(bit));
-  const label = ` ${step.stepId} · ${BLOCK_LABEL[step.blockKind]} · ${bits.join(" · ")} `;
+  const label = ` ${idLabel} · ${BLOCK_LABEL[step.blockKind]} · ${bits.join(" · ")} `;
   const fill = Math.max(0, width - stringWidth(label) - 2);
   // Fallback for the "no output yet" branch below (previewLines > 0, empty body).
   const emptyPreview = truncateToWidth(sanitizeActivity(step.activity) ?? displayStatus, width);
@@ -917,7 +929,7 @@ function DetailPanel({
         <Text color="gray" dimColor>
           {"──"}
         </Text>
-        <Text color="cyan">{` ${step.stepId} `}</Text>
+        <Text color="cyan">{` ${idLabel} `}</Text>
         <Text color="gray">{`· ${BLOCK_LABEL[step.blockKind]} · `}</Text>
         <Text color={statusColor}>{bits.join(" · ")}</Text>
         <Text color="gray" dimColor>
