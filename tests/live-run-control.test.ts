@@ -90,6 +90,28 @@ describe("live-run store: pause state + step-edit requests", () => {
     // Result files never show up as requests.
     expect((await store.listStepEditRequests("r1")).map((r) => r.editId)).toEqual([first, second]);
   });
+
+  it("keeps request order for edits minted in the same millisecond", async () => {
+    // The ordering guarantee used to rest on Date.now() alone, so edits landing
+    // in one tick were sorted by their random suffix — order came out right
+    // most of the time and inverted the rest, which is the worst kind of bug to
+    // have in the queue the owner replays. Freezing the clock makes the
+    // collision certain rather than a 1-in-N flake.
+    const store = createLiveRunStore(tempStoreDir(), { now: () => 1_700_000_000_000 });
+    await store.create(meta("r1"));
+
+    const stepIds = ["a", "b", "c", "d", "e", "f", "g", "h"];
+    const ids: string[] = [];
+    for (const stepId of stepIds) {
+      const editId = await store.requestStepEdit("r1", { stepId, patch: { cmd: stepId } });
+      expect(editId).toBeTruthy();
+      ids.push(editId!);
+    }
+
+    const requests = await store.listStepEditRequests("r1");
+    expect(requests.map((r) => r.stepId)).toEqual(stepIds);
+    expect(requests.map((r) => r.editId)).toEqual(ids);
+  });
 });
 
 describe("watchRunControl", () => {
