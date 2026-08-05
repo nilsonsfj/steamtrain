@@ -1,5 +1,10 @@
 import { type LandLockOptions, withLandLock } from "./land-lock";
 import { runCommand } from "./merge";
+import {
+  type RebasePullRequestOptions,
+  type RebasePullRequestResult,
+  rebasePullRequestOntoBase,
+} from "./pr-rebase";
 import { abortableSleep } from "./timeout";
 
 /**
@@ -555,6 +560,15 @@ export interface MergeWhenReadyOptions extends WaitForChecksOptions {
   runGh?: (args: string[], cwd: string, signal?: AbortSignal) => Promise<string>;
   /** Injectable `git` runner (args after the implicit `git`), for local branch cleanup. */
   runGit?: (args: string[], cwd: string, signal?: AbortSignal) => Promise<string>;
+  /**
+   * On CONFLICTING, try one deterministic `rebase onto base + force-with-lease
+   * push` before giving up. Off by default (it rewrites the PR head); babysit
+   * turns it on, because a sibling landing under the land lock is exactly what
+   * makes the remaining PRs conflict.
+   */
+  autoRebase?: boolean;
+  /** Injectable rebase runner (defaults to `rebasePullRequestOntoBase`). */
+  rebasePr?: (opts: RebasePullRequestOptions) => Promise<RebasePullRequestResult>;
   /** Injectable land-lock wrapper (defaults to the cross-process file lock). */
   landLock?: <T>(
     cwd: string,
@@ -685,6 +699,9 @@ async function landUnderLock(a: LandLoopArgs): Promise<MergeWhenReadyResult> {
   const { opts, runGh, waitGreen, sleep, remaining, strategy, maxAttempts, locked } = a;
   const fetchSnapshot = opts.fetchSnapshot ?? fetchPullRequestCheckSnapshot;
   let lastError = "";
+  // One shot only: if a rebase we pushed still leaves the PR conflicting, the
+  // conflict is real and looping would just churn CI.
+  let rebaseTried = false;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     if (opts.signal?.aborted) return { ok: false, error: "cancelled" };
@@ -717,6 +734,32 @@ async function landUnderLock(a: LandLoopArgs): Promise<MergeWhenReadyResult> {
 
     if (evaluation.ready && !evaluation.ok) {
       if (snapshot.mergeable === "CONFLICTING") {
+        // The common cause under a fan-out is mechanical, not semantic: a
+        // sibling landed under this same lock and moved the base out from under
+        // an already-rebased head. Replay the rebase deterministically rather
+        // than failing a PR whose only problem is that it waited its turn.
+        if (opts.autoRebase && !rebaseTried) {
+          rebaseTried = true;
+          const rebased = await (opts.rebasePr ?? rebasePullRequestOntoBase)({
+            prRef: opts.prRef,
+            cwd: opts.cwd,
+            signal: opts.signal,
+            runGh: opts.runGh,
+            runGit: opts.runGit,
+          });
+          if (rebased.ok && rebased.changed) {
+            // The force-push restarts CI — wait for the new run, then retry.
+            const rewait = await waitGreen();
+            if (!rewait.ok) return { ok: false, error: rewait.error };
+            continue;
+          }
+          if (!rebased.ok) {
+            return {
+              ok: false,
+              error: `PR #${snapshot.number} conflicts with the base branch and could not be rebased automatically: ${rebased.error}`,
+            };
+          }
+        }
         return {
           ok: false,
           error: `PR #${snapshot.number} now conflicts with the base branch (it advanced while this PR waited) — rebase/resolve the conflict before it can land`,

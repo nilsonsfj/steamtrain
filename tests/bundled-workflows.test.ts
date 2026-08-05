@@ -126,7 +126,8 @@ describe("bundled workflows", () => {
     const spec = BUNDLED_WORKFLOWS["babysit-pr"]!;
     const result = validateWorkflow(spec);
     expect(result.ok, `babysit-pr: ${result.error ?? ""}`).toBe(true);
-    expect(result.warnings?.length, "babysit-pr warnings").toBe(2);
+    // rebase + wait-or-merge + wait-only, each embedding {{inputs.pr}} & co.
+    expect(result.warnings?.length, "babysit-pr warnings").toBe(3);
     for (const warning of result.warnings ?? []) {
       expect(warning).toMatch(EXPECTED_BABYSIT_WARNING);
     }

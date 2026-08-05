@@ -6,6 +6,7 @@ import {
   mergePullRequestWhenReady,
   waitForPullRequestChecks,
 } from "./github-checks";
+import { rebasePullRequestOntoBase } from "./pr-rebase";
 
 /**
  * `steamtrain workflow pr …` — deterministic GitHub PR check-wait / land
@@ -31,6 +32,9 @@ export async function runPrCommand(
   if (sub === "merge-when-ready") {
     return runMergeWhenReady(args.slice(1), io, out, err);
   }
+  if (sub === "rebase") {
+    return runRebase(args.slice(1), io, out, err);
+  }
   err(`unknown workflow pr command '${sub}'\n\n${prHelpText()}`);
   return 1;
 }
@@ -40,7 +44,8 @@ export function prHelpText(): string {
 
 Usage:
   steamtrain workflow pr wait-checks <pr> [--timeout-sec <n>] [--poll-sec <n>] [--empty-grace-sec <n>] [--json]
-  steamtrain workflow pr merge-when-ready <pr> [--timeout-sec <n>] [--poll-sec <n>] [--empty-grace-sec <n>] [--strategy squash|merge|rebase] [--keep-branch] [--json]
+  steamtrain workflow pr merge-when-ready <pr> [--timeout-sec <n>] [--poll-sec <n>] [--empty-grace-sec <n>] [--strategy squash|merge|rebase] [--keep-branch] [--auto-rebase] [--json]
+  steamtrain workflow pr rebase <pr> [--dry-run] [--json]
 
 <pr> may be a number, a pull URL, a head branch name, or a "number\\nbranch" line.
 
@@ -65,6 +70,14 @@ repo's origin), so parallel babysit runs merge one PR at a time. Under the
 lock the PR is re-checked: a base that moved under a sibling's merge is
 handled (behind → update + re-wait, conflict → reported) and transient
 "base branch was modified" errors are retried, instead of failing outright.
+With --auto-rebase a conflict is first replayed through \`pr rebase\` once, so
+a PR whose only problem is that a sibling landed ahead of it still lands.
+
+rebase fetches the PR's head and base, rebases the head onto \`origin/<base>\`
+and force-pushes it with a lease pinned to the ref it fetched. It exits 0 with
+"no rebase needed" when the head already contains the base. Real content
+conflicts exit non-zero and list the conflicting paths — those need an agent or
+a human. It refuses to run in a dirty checkout, and refuses fork PRs.
 `;
 }
 
@@ -75,11 +88,13 @@ interface PrFlags {
   emptyGraceSec?: number;
   strategy?: "squash" | "merge" | "rebase";
   keepBranch: boolean;
+  autoRebase: boolean;
+  dryRun: boolean;
   json: boolean;
 }
 
 function parsePrFlags(args: string[]): PrFlags | { error: string } {
-  const flags: PrFlags = { keepBranch: false, json: false };
+  const flags: PrFlags = { keepBranch: false, autoRebase: false, dryRun: false, json: false };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
     if (!arg.startsWith("--")) {
@@ -93,6 +108,14 @@ function parsePrFlags(args: string[]): PrFlags | { error: string } {
     }
     if (arg === "--keep-branch") {
       flags.keepBranch = true;
+      continue;
+    }
+    if (arg === "--auto-rebase") {
+      flags.autoRebase = true;
+      continue;
+    }
+    if (arg === "--dry-run") {
+      flags.dryRun = true;
       continue;
     }
     const next = args[i + 1];
@@ -182,6 +205,37 @@ async function runWaitChecks(
   return result.ok ? 0 : 1;
 }
 
+async function runRebase(
+  args: string[],
+  io: CliIO,
+  out: (text: string) => void,
+  err: (text: string) => void,
+): Promise<number> {
+  const parsed = parsePrFlags(args);
+  if ("error" in parsed) {
+    err(`${parsed.error}\n\n${prHelpText()}`);
+    return 1;
+  }
+  if (!parsed.pr) {
+    err(`rebase requires a PR ref\n\n${prHelpText()}`);
+    return 1;
+  }
+  const result = await rebasePullRequestOntoBase({
+    cwd: io.cwd ?? process.cwd(),
+    prRef: parsed.pr,
+    push: !parsed.dryRun,
+  });
+
+  if (parsed.json) {
+    out(`${JSON.stringify(result, null, 2)}\n`);
+  } else if (result.ok) {
+    out(`${result.detail}\n`);
+  } else {
+    err(`${result.error}\n`);
+  }
+  return result.ok ? 0 : 1;
+}
+
 async function runMergeWhenReady(
   args: string[],
   io: CliIO,
@@ -207,6 +261,7 @@ async function runMergeWhenReady(
       parsed.emptyGraceSec !== undefined ? parsed.emptyGraceSec * 1000 : DEFAULT_EMPTY_GRACE_MS,
     mergeStrategy: parsed.strategy,
     deleteBranch: !parsed.keepBranch,
+    autoRebase: parsed.autoRebase,
     onPoll: (_snapshot, evaluation) => {
       if (!parsed.json) out(`${evaluation.detail}\n`);
     },

@@ -1029,8 +1029,14 @@ const mainline: WorkflowSpec = {
  * to merge into the same base. The command serializes the actual land behind a
  * cross-process lock and, once it holds it, re-checks the PR — landing a
  * sibling that just moved the base leaves this PR behind (auto-updated) or
- * conflicting (reported), instead of a raw `gh pr merge` failure. See
- * `github-checks.ts` / `land-lock.ts`.
+ * conflicting (auto-rebased once, then reported), instead of a raw
+ * `gh pr merge` failure. See `github-checks.ts` / `land-lock.ts`.
+ *
+ * The rebase is deterministic on both ends — a `pr rebase` step ahead of the
+ * agent, and `--auto-rebase` under the land lock. Leaving it to the agent did
+ * not work: agents wandered out of their isolated worktree into the shared
+ * checkout and left the rebase committed but unpushed, so the PR was still
+ * CONFLICTING when the land step ran. See `pr-rebase.ts`.
  */
 const babysitPr: WorkflowSpec = {
   name: "babysit-pr",
@@ -1067,12 +1073,30 @@ const babysitPr: WorkflowSpec = {
   },
   phases: [
     {
+      id: "rebase",
+      title: "Rebase the head onto its base",
+      steps: [
+        {
+          id: "rebase",
+          kind: "command",
+          // Mechanical rebase first, deterministically, in this step's own
+          // worktree. Agents told to "rebase onto the base" did the work in the
+          // shared checkout and never pushed, which is what left PRs
+          // CONFLICTING at land time. `|| true` because a real content conflict
+          // is not a failure here — that is precisely the agent's job next.
+          stepTimeoutSec: 300,
+          cmd: '${STEAMTRAIN_CLI:-steamtrain} workflow pr rebase "{{inputs.pr}}" || true',
+        },
+      ],
+    },
+    {
       id: "prepare",
       title: "Prepare the PR (do not land)",
       steps: [
         {
           id: "prepare",
           kind: "processor",
+          dependsOn: ["rebase"],
           // Model-only: babysitterModel may be any catalog id — agent
           // follows the rendered model family at execute time.
           model: "{{inputs.babysitterModel}}",
@@ -1081,12 +1105,18 @@ const babysitPr: WorkflowSpec = {
           stepTimeoutSec: 2400,
           prompt:
             "You are babysitting GitHub pull request {{inputs.pr}} in this repository.\n\n" +
+            "A deterministic step already rebased this PR onto its base if it could. If it could not, there is a real content conflict for you to resolve.\n\n" +
             "Goals (in order):\n" +
             "1. Inspect the PR with the gh CLI (`gh pr view`, `gh pr diff`, `gh api` for review comments / threads).\n" +
-            "2. Check out the PR head (`gh pr checkout {{inputs.pr}}`) - you are in an isolated worktree, so you MUST push every fix to the remote PR head branch.\n" +
-            "3. Rebase or update onto the base branch when behind; resolve conflicts.\n" +
-            "4. Address or clearly document every unresolved review comment / CI failure you can fix in-scope. Push commits to the PR head branch and verify `gh pr view {{inputs.pr}} --json mergeable` is MERGEABLE.\n" +
-            "5. Leave a short summary of what you did and what (if anything) is still blocking.\n\n" +
+            "2. Check out the PR head IN THIS DIRECTORY (`gh pr checkout {{inputs.pr}}`).\n" +
+            "3. Rebase onto the base branch if still behind; resolve any conflicts.\n" +
+            "4. Address or clearly document every unresolved review comment / CI failure you can fix in-scope.\n" +
+            "5. Push with `git push --force-with-lease` to the PR head branch, then verify `gh pr view {{inputs.pr}} --json mergeable` reports MERGEABLE.\n" +
+            "6. Leave a short summary of what you did and what (if anything) is still blocking.\n\n" +
+            "STAY IN THIS WORKTREE — this is the single most common way this step silently fails:\n" +
+            "- You are already in a disposable worktree dedicated to this PR. Do every git operation here.\n" +
+            "- Do NOT `cd` to the user's main checkout, and do NOT `git worktree add` another one. Sibling babysit runs share this repository; touching the main checkout corrupts their state and leaves the user's tree on a random branch.\n" +
+            "- Work you leave committed-but-unpushed is work that did not happen: this worktree is deleted when the step ends. `git push` is the ONLY way your changes survive.\n\n" +
             "HARD RULES — a later deterministic step lands the PR:\n" +
             "- Do NOT run `gh pr merge`, enable auto-merge, or otherwise merge the PR.\n" +
             "- Do NOT delete the remote head branch (`git push --delete`, `gh pr merge --delete-branch`, repo branch cleanup).\n" +
@@ -1113,7 +1143,10 @@ const babysitPr: WorkflowSpec = {
           when: { value: "{{inputs.land}}", equals: "merge" },
           cmd:
             '${STEAMTRAIN_CLI:-steamtrain} workflow pr merge-when-ready "{{inputs.pr}}" ' +
-            "--timeout-sec {{inputs.checksTimeoutSec}} --strategy {{inputs.mergeStrategy}}",
+            "--timeout-sec {{inputs.checksTimeoutSec}} --strategy {{inputs.mergeStrategy}} " +
+            // A sibling landing under the land lock is what makes the remaining
+            // PRs conflict; replay the mechanical rebase instead of failing.
+            "--auto-rebase",
         },
         {
           id: "wait-only",
