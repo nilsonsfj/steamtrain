@@ -1,5 +1,6 @@
 import { type ChildProcessByStdio, spawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
+import { childEnv } from "../util/child-env";
 import { LineBuffer } from "./line-buffer";
 
 type PipedChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -40,7 +41,7 @@ const SIGKILL_GRACE_MS = 2000;
  *
  * Contract enforced here for every agent:
  *  - stdio is `['ignore','pipe','pipe']` — we never inherit a TTY.
- *  - env is `{...process.env}`; cwd is configurable.
+ *  - env is `{...process.env}` (see `childEnv`); cwd is configurable.
  *  - stdout is reassembled into whole lines across chunk boundaries.
  *  - a timeout (or aborted signal) kills the process (SIGTERM, then SIGKILL).
  */
@@ -67,7 +68,7 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
     const useStdin = typeof opts.prompt === "string";
     child = spawn(opts.binary, opts.args, {
       stdio: [useStdin ? "pipe" : "ignore", "pipe", "pipe"],
-      env: { ...process.env, ...opts.env },
+      env: childEnv(opts.env),
       cwd: opts.cwd,
     }) as PipedChild | PipedChildWithStdin;
     if (useStdin && child.stdin) {

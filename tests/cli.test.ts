@@ -145,6 +145,21 @@ describe("parseGlobalArgs", () => {
     });
   });
 
+  it("parses --desktop-ready-json with an ephemeral port", () => {
+    // How the desktop app boots: let the OS pick the port, then learn it from
+    // the handshake line rather than from the human banner.
+    expect(parseGlobalArgs(["--web-ui", "--port", "0", "--desktop-ready-json"])).toEqual({
+      args: [],
+      webUi: true,
+      port: 0,
+      desktopReadyJson: true,
+    });
+  });
+
+  it("omits desktopReadyJson when the flag is absent", () => {
+    expect(parseGlobalArgs(["--web-ui"]).desktopReadyJson).toBeUndefined();
+  });
+
   it("rejects --no-auth combined with --auth-token", () => {
     expect(parseGlobalArgs(["--web-ui", "--auth-token", "s3cret", "--no-auth"])).toEqual({
       args: [],

@@ -48,6 +48,7 @@ async function main(): Promise<void> {
     readOnly,
     noAuth,
     trustProxy,
+    desktopReadyJson,
     version,
     error,
   } = parseGlobalArgs(process.argv.slice(2));
@@ -121,7 +122,11 @@ async function main(): Promise<void> {
       return;
     }
     try {
-      const { server } = await startWebUi({
+      const {
+        server,
+        url,
+        port: boundPort,
+      } = await startWebUi({
         config,
         workspaces,
         workflowCatalog,
@@ -144,6 +149,19 @@ async function main(): Promise<void> {
         noAuth,
         trustProxy,
       });
+      // One machine-readable line for a supervising process (the desktop app).
+      // It arrives after the human banner and is the only stdout line that
+      // parses as JSON, so a reader can scan for it without matching prose.
+      if (desktopReadyJson) {
+        process.stdout.write(
+          `${JSON.stringify({
+            steamtrain: "ready",
+            url,
+            port: boundPort,
+            pid: process.pid,
+          })}\n`,
+        );
+      }
       const shutdown = (): void => {
         server.close(() => process.exit(0));
         // SSE responses are held open with keep-alive (and EventSource

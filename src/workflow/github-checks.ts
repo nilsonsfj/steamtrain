@@ -1,3 +1,4 @@
+import { electronNodePrefix } from "../util/child-env";
 import { type LandLockOptions, withLandLock } from "./land-lock";
 import { runCommand } from "./merge";
 import {
@@ -976,10 +977,17 @@ function errText(err: unknown): string {
  * How to re-invoke this steamtrain process from a `command` step.
  * Prefer the live entrypoint (`bun src/index.tsx` / `node dist/index.js`) so
  * bundled babysit workflows work in dev without a global install.
+ *
+ * Under the desktop app `execPath` is the Electron binary, which only behaves
+ * as Node when `ELECTRON_RUN_AS_NODE` is set — and `childEnv` deliberately
+ * strips that from command steps. So the variable is re-applied inline here,
+ * making the emitted command self-sufficient rather than dependent on what the
+ * step happened to inherit. Empty prefix for every normal install.
  */
 export function resolveSteamtrainCliInvocation(
   argv: string[] = process.argv,
   execPath: string = process.execPath,
+  env: NodeJS.ProcessEnv = process.env,
 ): string {
   const entry = argv[1];
   if (!entry) return "steamtrain";
@@ -987,7 +995,7 @@ export function resolveSteamtrainCliInvocation(
   if (/(^|[\\/])steamtrain(\.js)?$/.test(entry)) {
     return shellQuote(entry);
   }
-  return `${shellQuote(execPath)} ${shellQuote(entry)}`;
+  return `${electronNodePrefix(env)}${shellQuote(execPath)} ${shellQuote(entry)}`;
 }
 
 function shellQuote(value: string): string {
