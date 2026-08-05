@@ -60,4 +60,51 @@ describe("workflow pr CLI", () => {
       expect(err, args.join(" ")).toContain(needle);
     }
   });
+
+  it("documents the rebase subcommand and its flags in help", async () => {
+    let out = "";
+    const code = await runCli(["workflow", "pr", "--help"], {
+      stdout: (t) => {
+        out += t;
+      },
+      stderr: () => {},
+    });
+    expect(code).toBe(0);
+    expect(out).toContain("pr rebase <pr>");
+    expect(out).toContain("--auto-rebase");
+    expect(out).toContain("--dry-run");
+  });
+
+  it("requires a PR ref for rebase", async () => {
+    let err = "";
+    const code = await runCli(["workflow", "pr", "rebase"], {
+      stdout: () => {},
+      stderr: (t) => {
+        err += t;
+      },
+    });
+    expect(code).toBe(1);
+    expect(err).toContain("requires a PR ref");
+  });
+
+  it("accepts --auto-rebase and --dry-run as bare flags", async () => {
+    // Bare (value-less) flags are the easy ones to get wrong: a flag that fell
+    // through to the positional branch would be read as the PR ref, and the
+    // command would go off and query a PR named "--auto-rebase".
+    for (const args of [
+      ["merge-when-ready", "--auto-rebase"],
+      ["rebase", "--dry-run"],
+    ]) {
+      let err = "";
+      const code = await runCli(["workflow", "pr", ...args], {
+        stdout: () => {},
+        stderr: (t) => {
+          err += t;
+        },
+      });
+      expect(code, args.join(" ")).toBe(1);
+      expect(err, args.join(" ")).toContain("requires a PR ref");
+      expect(err, args.join(" ")).not.toContain("unknown flag");
+    }
+  });
 });

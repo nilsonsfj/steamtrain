@@ -566,6 +566,27 @@ describe("mergePullRequestWhenReady — race-resilient landing", () => {
     expect(merges).toBe(2);
   });
 
+  it("does not retry a 'not mergeable' that names a conflict — that state is permanent", async () => {
+    // The mirror of the test above. "Not mergeable" alone is GitHub still
+    // recomputing; "not mergeable because it has a merge conflict" never
+    // resolves itself, and retrying it burns the attempt budget before the
+    // conflict gets reported.
+    let merges = 0;
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      fetchSnapshot: sequence([green()]),
+      runGh: async (args) => {
+        if (args[1] === "merge") {
+          merges += 1;
+          throw new Error("Pull request is not mergeable because it has a merge conflict");
+        }
+        return "";
+      },
+    });
+    expect(result.ok).toBe(false);
+    expect(merges).toBe(1);
+  });
+
   it("retries the merge when the base branch was modified out from under it", async () => {
     let attempt = 0;
     const merges: string[][] = [];
@@ -670,6 +691,34 @@ describe("mergePullRequestWhenReady — race-resilient landing", () => {
     });
     expect(rebasePr).toHaveBeenCalledTimes(1);
     expect(result.ok).toBe(false);
+    // Having rebased onto the base, "the base moved" is no longer the honest
+    // explanation — the report has to name the conflict as the real one.
+    if (!result.ok) expect(result.error).toMatch(/still conflicts.*after being rebased/i);
+  });
+
+  it("re-reads instead of failing when the rebase was a no-op (stale mergeability)", async () => {
+    // git found nothing to replay, which cannot coexist with a real conflict:
+    // GitHub's CONFLICTING is stale, so settle and re-read rather than report.
+    const rebasePr = vi.fn(async () => ({
+      ok: true as const,
+      changed: false,
+      detail: "PR #42 already contains main — no rebase needed",
+      prNumber: 42,
+    }));
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      autoRebase: true,
+      rebasePr,
+      fetchSnapshot: sequence([
+        green(), // firstWait
+        green({ mergeable: "CONFLICTING" }), // stale
+        green(), // re-read: GitHub caught up
+        green(),
+      ]),
+      runGh: async () => "",
+    });
+    expect(rebasePr).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ ok: true, merged: true });
   });
 
   it("leaves the old fail-fast behavior in place without --auto-rebase", async () => {

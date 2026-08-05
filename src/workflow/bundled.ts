@@ -1105,7 +1105,12 @@ const babysitPr: WorkflowSpec = {
           stepTimeoutSec: 2400,
           prompt:
             "You are babysitting GitHub pull request {{inputs.pr}} in this repository.\n\n" +
-            "A deterministic step already rebased this PR onto its base if it could. If it could not, there is a real content conflict for you to resolve.\n\n" +
+            // The rebase step names the conflicting paths when it gives up;
+            // command steps capture stderr, so handing its output straight to
+            // the agent saves it from rediscovering the conflict list.
+            "A deterministic step already tried to rebase this PR onto its base. It reported:\n" +
+            "{{steps.rebase.output}}\n\n" +
+            "If that reports conflicts, they are real content conflicts for you to resolve — start from the files it names.\n\n" +
             "Goals (in order):\n" +
             "1. Inspect the PR with the gh CLI (`gh pr view`, `gh pr diff`, `gh api` for review comments / threads).\n" +
             "2. Check out the PR head IN THIS DIRECTORY (`gh pr checkout {{inputs.pr}}`).\n" +
