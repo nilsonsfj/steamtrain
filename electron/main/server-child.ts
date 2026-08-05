@@ -190,15 +190,25 @@ export async function startServer(options: StartServerOptions): Promise<ServerHa
         resolve();
         return;
       }
+      // Signalling can throw (EPERM, or a child that died between the check and
+      // the call). This promise gates app shutdown, so it must always settle —
+      // a rejection here would leave the app unable to quit.
+      const signal = (sig: NodeJS.Signals): void => {
+        try {
+          child.kill(sig);
+        } catch {
+          resolve();
+        }
+      };
       // The engine already handles SIGTERM by closing the server and its live
       // sockets, so this is the graceful path; SIGKILL is only the backstop.
-      const kill = setTimeout(() => child.kill("SIGKILL"), 5_000);
+      const kill = setTimeout(() => signal("SIGKILL"), 5_000);
       kill.unref?.();
       child.once("exit", () => {
         clearTimeout(kill);
         resolve();
       });
-      child.kill("SIGTERM");
+      signal("SIGTERM");
     });
     return stopping;
   };

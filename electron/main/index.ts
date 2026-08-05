@@ -103,6 +103,9 @@ async function main(): Promise<void> {
   // A GUI launch inherits a minimal PATH; recover the user's real one before
   // anything tries to resolve `claude`, `codex` or `git`.
   const resolved = await resolveShellPath();
+  // Recorded because it is the first thing to check when the doctor reports
+  // agents that the user knows are installed.
+  console.log(`[steamtrain] PATH resolved from ${resolved.source}`);
   process.env.PATH = resolved.path;
   const env: NodeJS.ProcessEnv = { ...process.env, PATH: resolved.path };
 
@@ -154,10 +157,17 @@ let shutdown: Promise<void> | undefined;
 app.on("will-quit", (event) => {
   if (!server || shutdown) return;
   event.preventDefault();
-  shutdown = server.stop().then(() => {
-    server = undefined;
-    app.quit();
-  });
+  // The quit is already prevented, so this must reach `app.quit()` on every
+  // path — otherwise a failed teardown leaves the app unquittable.
+  shutdown = server
+    .stop()
+    .catch((err: unknown) => {
+      console.error("[steamtrain] engine shutdown failed:", err);
+    })
+    .finally(() => {
+      server = undefined;
+      app.quit();
+    });
 });
 
 main().catch((err) => {

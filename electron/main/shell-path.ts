@@ -120,7 +120,11 @@ async function readLoginShellPath(shell: string): Promise<string | undefined> {
         detached: true,
         stdio: ["ignore", "pipe", "ignore"],
       });
-    } catch {
+    } catch (err) {
+      // "my agents are missing but my PATH is fine" is the hardest symptom to
+      // diagnose in this feature, and a $SHELL that cannot be spawned is one
+      // of its causes — say so rather than falling back silently.
+      console.warn(`[steamtrain] could not consult login shell ${shell}:`, err);
       resolve(undefined);
       return;
     }

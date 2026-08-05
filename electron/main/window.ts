@@ -16,7 +16,7 @@ const MIN_WIDTH = 900;
 const MIN_HEIGHT = 600;
 
 /** Open a URL in the user's browser, but only for schemes worth trusting. */
-function openExternal(url: string): void {
+export function openExternal(url: string): void {
   // Deliberately https-only. This mirrors the client's own `safeExternalLink`,
   // and keeps `shell.openExternal` — which can launch arbitrary protocol
   // handlers — away from anything a page can inject.

@@ -1,4 +1,5 @@
-import { Menu, type MenuItemConstructorOptions, app, shell } from "electron";
+import { Menu, type MenuItemConstructorOptions, app } from "electron";
+import { openExternal } from "./window";
 
 /**
  * The native application menu.
@@ -100,7 +101,9 @@ export function buildMenu(options: MenuOptions): void {
       submenu: [
         {
           label: "steamtrain on GitHub",
-          click: () => void shell.openExternal("https://github.com/nilsonsfj/steamtrain"),
+          // Via the shared wrapper, so every outbound link in the app goes
+          // through one https-only gate rather than two divergent ones.
+          click: () => openExternal("https://github.com/nilsonsfj/steamtrain"),
         },
       ],
     },

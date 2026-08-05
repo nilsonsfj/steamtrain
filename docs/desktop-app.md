@@ -23,7 +23,24 @@ Electron main ──fork──> node dist/index.js --web-ui --port 0 --project-d
 ```
 
 The app does not embed the web server; it forks the real CLI entry and points a
-window at the port that process reports. Three consequences worth knowing:
+window at the port that process reports.
+
+**How the port gets reported.** The engine binds `--port 0`, so the OS picks a
+free port and the app can never collide with a `steamtrain --web-ui` you already
+have running. It learns the result from `--desktop-ready-json`, which prints one
+machine-readable line once the server is listening:
+
+```json
+{"steamtrain":"ready","url":"http://127.0.0.1:38249","port":38249,"pid":8692}
+```
+
+That is the only stdout line that parses as JSON, so the app scans for it rather
+than matching the human banner. If a launch hangs, this handshake is the first
+thing to check — the app waits 30s for it and then reports the engine's stderr.
+Everything else the engine prints is forwarded to the app's log prefixed
+`[engine]`.
+
+Three more consequences worth knowing:
 
 - **The engine is a normal Node process.** `process.argv[1]` is the entry script
   and `import.meta.url` resolves to `dist/public/`, so detached runs, static
@@ -40,6 +57,17 @@ The UI is loaded over `http://127.0.0.1:<port>` rather than `file://` or a
 custom scheme. That is required, not incidental: the server enforces same-origin
 on every state-changing request and authenticates with a `SameSite=Strict`
 cookie, and neither survives a `file://` document's `Origin: null`.
+
+## Layout
+
+The shell lives in `electron/` and builds separately from the CLI:
+
+| File | Purpose |
+|------|---------|
+| `tsup.electron.config.ts` | Builds `electron/` to `dist-electron/`. **CJS**, because a preload under `sandbox: true` must be CJS and a CJS main avoids Electron's ESM loader edge cases. `tsup.config.ts` is untouched, so the CLI bundle is unaffected. |
+| `tsconfig.electron.json` | Type-checks `electron/` only. Adds `DOM` to `lib` — required by Electron's own type definitions and by the preload, which runs in a renderer. It is deliberately *not* in the root tsconfig, so `src/` stays DOM-free and cannot silently accept browser globals. |
+
+`npm run typecheck` runs both configs.
 
 ## PATH: why the app can find your agents
 
