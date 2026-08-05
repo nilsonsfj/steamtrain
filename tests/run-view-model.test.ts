@@ -255,6 +255,42 @@ describe("pickFollowIndex", () => {
     expect(pickFollowIndex(flat, 0)).toBe(1);
   });
 
+  it("skips running workflow containers in favor of a nested leaf", () => {
+    // babysit[0] (workflow) appears before babysit[0]::prepare in flattenSteps.
+    const container: { step: StepState } = {
+      step: {
+        stepId: "babysit[0]",
+        blockKind: "workflow",
+        status: "running",
+        text: "",
+        cached: false,
+      },
+    };
+    const leaf: { step: StepState } = {
+      step: {
+        stepId: "babysit[0]::prepare",
+        blockKind: "processor",
+        status: "running",
+        text: "agent…",
+        cached: false,
+      },
+    };
+    expect(pickFollowIndex([container, leaf], 0)).toBe(1);
+  });
+
+  it("falls back to a running workflow container when no leaf is active", () => {
+    const container: { step: StepState } = {
+      step: {
+        stepId: "babysit[0]",
+        blockKind: "workflow",
+        status: "running",
+        text: "",
+        cached: false,
+      },
+    };
+    expect(pickFollowIndex([step("done"), container, step("pending")], 0)).toBe(1);
+  });
+
   it("falls back to the newest non-pending step when nothing runs", () => {
     const flat = [step("done"), step("error"), step("pending")];
     expect(pickFollowIndex(flat, 0)).toBe(1);

@@ -11,6 +11,8 @@ import {
   formatTokenSummary,
   formatUsd,
   isAgentBackedStep,
+  liveOutputBody,
+  resolveLiveOutputStep,
   workflowStepKind,
 } from "../workflow";
 import {
@@ -164,9 +166,12 @@ function LiveStepDetails({
   onOutputMetrics,
   innerWidth,
 }: LiveStepDetailsProps & { innerWidth: number }) {
-  const step = entry?.step;
-  const meta = entry ? liveMetaLines(entry.phase, entry.step, now, innerWidth) : [];
-  const body = step ? (step.result?.output ?? step.text).trim() : "";
+  const selected = entry?.step;
+  // Workflow containers bubble nested leaf streams so the drill-in is not
+  // stuck on "no output yet" while a child agent emits text_delta.
+  const step = selected ? resolveLiveOutputStep(state, selected) : undefined;
+  const meta = entry && step ? liveMetaLines(entry.phase, step, now, innerWidth) : [];
+  const body = step ? liveOutputBody(step) : "";
   const outputLines = useMemo(() => wrapOutputLines(body, innerWidth), [body, innerWidth]);
   // Chrome around the output pane: borders (2), title (1), key hints (1),
   // metadata lines, output header (1).
@@ -177,11 +182,15 @@ function LiveStepDetails({
   }, [onOutputMetrics, outputLines.length, budget]);
 
   const status = state.done ? (state.ok ? "done" : "failed") : "running";
-  const stepRunning = step?.status === "running";
+  const stepRunning = step?.status === "running" || selected?.status === "running";
   const position = body
     ? `lines ${window.start + 1}–${window.end}/${window.total}`
     : "waiting for output";
   const followBadge = stepRunning ? (scroll.follow ? " · following" : " · paused ↥") : "";
+  const titleId =
+    selected && step && selected.stepId !== step.stepId
+      ? `${selected.stepId} · ${step.stepId}`
+      : (step?.stepId ?? selected?.stepId ?? "—");
 
   return (
     <Box
@@ -216,7 +225,7 @@ function LiveStepDetails({
       {entry ? (
         <>
           <Text color="gray" wrap="truncate-end">
-            {`── output · ${position}${followBadge} ${"─".repeat(Math.max(0, innerWidth - position.length - followBadge.length - 12))}`}
+            {`── ${titleId} · ${position}${followBadge} ${"─".repeat(Math.max(0, innerWidth - titleId.length - position.length - followBadge.length - 8))}`}
           </Text>
           <Box flexDirection="column" flexGrow={1}>
             {body ? (

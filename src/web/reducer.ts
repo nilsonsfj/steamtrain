@@ -48,5 +48,11 @@ export {
   formatSubWorkflowTarget,
   subWorkflowRollup,
 } from "../workflow/sub-workflow-view";
+export {
+  isLiveOutputContainer,
+  liveOutputBody,
+  nestedStepsOf,
+  resolveLiveOutputStep,
+} from "../workflow/live-output";
 export { createThroughputMeter, projectCost } from "./telemetry";
 export type { ThroughputMeter, ThroughputSample } from "./telemetry";

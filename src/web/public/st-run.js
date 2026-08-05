@@ -316,7 +316,17 @@
    */
   function phaseKey(p) { return p.phaseId + ":" + (p.iteration || 1); }
 
-  /** Exactly one band expands: the selected step's, else the running phase's. */
+  /** Running leaf work (not a `workflow` container that waits on nested steps). */
+  function isLiveRunning(s) {
+    return isRunning(s) && s.blockKind !== "workflow";
+  }
+
+  /**
+   * Exactly one band expands: the selected step's, else a phase with running
+   * leaf work, else any running phase. Preferring leaf work matters for
+   * sub-workflow fan-outs (`babysit[n]`): the parent phase stays running the
+   * whole time while agent text streams in a later namespaced phase.
+   */
   function expandedPhaseKey(phases) {
     if (S.selectedStepId) {
       for (var i = 0; i < phases.length; i++) {
@@ -326,7 +336,11 @@
         }
       }
     }
-    for (var k = 0; k < phases.length; k++) {
+    var k;
+    for (k = 0; k < phases.length; k++) {
+      if (!phases[k].done && (phases[k].steps || []).some(isLiveRunning)) return phaseKey(phases[k]);
+    }
+    for (k = 0; k < phases.length; k++) {
       if (!phases[k].done && (phases[k].steps || []).some(isRunning)) return phaseKey(phases[k]);
     }
     return null;
@@ -446,6 +460,23 @@
     return block ? h("div", { class: "step-sub" }, block) : null;
   }
 
+  /**
+   * Resolve a workflow-container selection to the nested leaf that actually
+   * streams agent text (see SteamtrainReducer.resolveLiveOutputStep).
+   */
+  function liveViewStep(s) {
+    var Reducer = typeof SteamtrainReducer !== "undefined" ? SteamtrainReducer : null;
+    if (!s || !S.runState || !Reducer || !Reducer.resolveLiveOutputStep) return s;
+    return Reducer.resolveLiveOutputStep(S.runState, s) || s;
+  }
+
+  function liveBody(s) {
+    if (!s) return "";
+    var Reducer = typeof SteamtrainReducer !== "undefined" ? SteamtrainReducer : null;
+    if (Reducer && Reducer.liveOutputBody) return Reducer.liveOutputBody(s);
+    return (((s.result && s.result.output) || s.text || "").trim()) || (s.activity || "");
+  }
+
   /** The step whose output the expanded band shows. */
   function bandOutputStep(phase) {
     var steps = phase.steps || [];
@@ -453,6 +484,8 @@
     if (S.selectedStepId) {
       for (i = 0; i < steps.length; i++) if (steps[i].stepId === S.selectedStepId) return steps[i];
     }
+    // Prefer a running leaf over a running workflow container in the same band.
+    for (i = 0; i < steps.length; i++) if (isLiveRunning(steps[i])) return steps[i];
     for (i = 0; i < steps.length; i++) if (isRunning(steps[i])) return steps[i];
     for (i = steps.length - 1; i >= 0; i--) {
       if (steps[i].text || (steps[i].result && steps[i].result.output)) return steps[i];
@@ -464,18 +497,25 @@
    * The live output pane inside the expanded band. Follows the stream until the
    * reader scrolls up; scrolling back to the bottom re-engages following. The
    * position survives re-renders through S.tailScroll (see applyTailScroll).
+   * Workflow-call steps show their nested leaf's stream so the pane is not
+   * stuck on "no output yet" while a child agent runs.
    */
   function renderOutputPane(p, s) {
+    var view = liveViewStep(s);
     var key = stepKey(p, s);
-    var body = ((s.result && s.result.output) || s.text || "").trim();
+    var body = liveBody(view);
     var scroll = S.tailScroll[key] || { follow: true, top: 0 };
     var following = h("span", {
       class: "following",
-      text: s.status === "running" ? (scroll.follow ? "following" : "paused") : ""
+      text: (view.status === "running" || s.status === "running")
+        ? (scroll.follow ? "following" : "paused") : ""
     });
+    var label = view.stepId === s.stepId
+      ? s.stepId + " · output"
+      : s.stepId + " · " + view.stepId + " · output";
     var pane = h("div", { class: "output" },
       h("div", { class: "output-head" },
-        h("span", { class: "label", text: s.stepId + " · output" }),
+        h("span", { class: "label", text: label }),
         following,
         h("div", { class: "actions" },
           h("button", {
@@ -498,11 +538,13 @@
       )
     );
     var out = h("div", { class: "output-body" + (S.outputNoWrap ? " nowrap" : ""), "data-key": key });
-    out.textContent = body || (s.activity || "no output yet");
+    out.textContent = body || "no output yet";
     out.addEventListener("scroll", function () {
       var atBottom = out.scrollTop + out.clientHeight >= out.scrollHeight - 4;
       S.tailScroll[key] = { follow: atBottom, top: out.scrollTop };
-      if (s.status === "running") following.textContent = atBottom ? "following" : "paused";
+      if (view.status === "running" || s.status === "running") {
+        following.textContent = atBottom ? "following" : "paused";
+      }
     });
     pane.appendChild(out);
     return pane;
@@ -1003,10 +1045,12 @@
     }
     drawer.appendChild(meta);
 
-    var body = ((s.result && s.result.output) || s.text || "").trim();
+    var view = liveViewStep(s);
+    var body = liveBody(view);
     var followNote = h("span", {
       class: "drawer-follow" + (S.drawerScroll.follow ? " on" : ""),
-      text: s.status === "running" ? (S.drawerScroll.follow ? "following" : "paused — scroll to bottom to follow") : ""
+      text: (view.status === "running" || s.status === "running")
+        ? (S.drawerScroll.follow ? "following" : "paused — scroll to bottom to follow") : ""
     });
     var copyBtn = h("button", {
       class: "btn small",
@@ -1014,18 +1058,23 @@
       text: "Copy", title: "Copy the full output", onClick: function () {
       if (navigator.clipboard) navigator.clipboard.writeText(body).catch(function () {});
     } });
+    var outLabel = view.stepId === s.stepId
+      ? ("output" + (body ? " · " + body.length.toLocaleString() + " chars" : ""))
+      : ("output · " + view.stepId + (body ? " · " + body.length.toLocaleString() + " chars" : ""));
     drawer.appendChild(h("div", { class: "drawer-outhead" },
-      h("span", { class: "drawer-outlabel", text: "output" + (body ? " · " + body.length.toLocaleString() + " chars" : "") }),
+      h("span", { class: "drawer-outlabel", text: outLabel }),
       followNote,
       copyBtn
     ));
-    var pre = h("pre", { class: "drawer-output" + (s.status === "error" ? " err" : "") });
-    pre.textContent = body || (s.activity || "no output yet");
+    var pre = h("pre", { class: "drawer-output" + (s.status === "error" || view.status === "error" ? " err" : "") });
+    pre.textContent = body || "no output yet";
     pre.addEventListener("scroll", function () {
       var atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 4;
       S.drawerScroll = { follow: atBottom, top: pre.scrollTop };
       followNote.className = "drawer-follow" + (atBottom ? " on" : "");
-      if (s.status === "running") followNote.textContent = atBottom ? "following" : "paused — scroll to bottom to follow";
+      if (view.status === "running" || s.status === "running") {
+        followNote.textContent = atBottom ? "following" : "paused — scroll to bottom to follow";
+      }
     });
     drawer.appendChild(pre);
     // Position after layout: follow pins to the newest output.
@@ -1736,10 +1785,14 @@
   function findWorkflowStep(stepId) {
     var spec = effectiveSpec() || S.spec;
     if (!spec) return null;
+    // Fan-out children are `id[n]` at runtime; the catalog step is still `id`.
+    var baseId = typeof stepId === "string" ? stepId.replace(/\[\d+\]$/, "") : stepId;
     for (var i = 0; i < spec.phases.length; i++) {
       var steps = spec.phases[i].steps || [];
       for (var j = 0; j < steps.length; j++) {
-        if (steps[j].id === stepId && steps[j].kind === "workflow") return steps[j];
+        if ((steps[j].id === stepId || steps[j].id === baseId) && steps[j].kind === "workflow") {
+          return steps[j];
+        }
       }
     }
     return null;
