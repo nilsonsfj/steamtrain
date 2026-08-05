@@ -45,7 +45,7 @@ async function promptForProject(): Promise<string | undefined> {
 }
 
 /** Fork the engine for `cwd` and show its UI, replacing anything already open. */
-async function openProject(cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
+async function openProject(cwd: string): Promise<void> {
   const previous = server;
   server = undefined;
   await previous?.stop();
@@ -53,7 +53,8 @@ async function openProject(cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
   const handle = await startServer({
     entry: resolveEntry(),
     cwd,
-    env,
+    // Already carries the recovered PATH, applied in `main()` before any fork.
+    env: process.env,
     log: (line) => process.stdout.write(`${line}\n`),
   });
   server = handle;
@@ -106,8 +107,9 @@ async function main(): Promise<void> {
   // Recorded because it is the first thing to check when the doctor reports
   // agents that the user knows are installed.
   console.log(`[steamtrain] PATH resolved from ${resolved.source}`);
+  // Applied to this process so main's own dialogs and helpers agree with the
+  // engine; the forked child inherits it from here.
   process.env.PATH = resolved.path;
-  const env: NodeJS.ProcessEnv = { ...process.env, PATH: resolved.path };
 
   installWebContentsGuards((url) => {
     if (!server) return false;
@@ -124,7 +126,7 @@ async function main(): Promise<void> {
         const dir = await promptForProject();
         if (!dir || dir === projectDir) return;
         try {
-          await openProject(dir, env);
+          await openProject(dir);
         } catch (err) {
           reportFatal(err);
         }
@@ -137,7 +139,7 @@ async function main(): Promise<void> {
     app.quit();
     return;
   }
-  await openProject(dir, env);
+  await openProject(dir);
 }
 
 app.on("window-all-closed", () => {
