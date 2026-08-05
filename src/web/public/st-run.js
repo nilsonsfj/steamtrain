@@ -318,8 +318,9 @@
    * same-titled ones numbered 01, 01, 01.
    */
   function basePhaseId(phaseId) {
-    var idx = String(phaseId).lastIndexOf("::");
-    return idx === -1 ? phaseId : String(phaseId).slice(idx + 2);
+    var id = String(phaseId);
+    var idx = id.lastIndexOf("::");
+    return idx === -1 ? id : id.slice(idx + 2);
   }
 
   /**

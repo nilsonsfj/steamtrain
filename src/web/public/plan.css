@@ -1049,10 +1049,14 @@
   gap: 10px;
   font: 400 12px / 1.4 var(--font-mono);
 }
+/* Wide enough for the longest key the Config tab renders ("write access",
+   87px at this font); narrower clips the label rather than the value. */
 .insp-exrow .k {
-  width: 70px;
+  width: 88px;
   flex: none;
   color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .insp-exrow .v {
   color: var(--text);

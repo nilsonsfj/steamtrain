@@ -1752,6 +1752,11 @@ select:focus-visible,
     min-height: 48vh;
     padding: 16px 12px 40px;
   }
+  /* A 300px console leaves a narrow band almost no room for its rows. */
+  .band.expanded .output {
+    height: 200px;
+    min-height: 120px;
+  }
   .cards {
     flex-direction: column;
   }
