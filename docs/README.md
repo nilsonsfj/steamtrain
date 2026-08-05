@@ -22,6 +22,7 @@ Deep dives:
 - [`human-in-the-loop.md`](human-in-the-loop.md) — autonomy labels, `human` steps, agent clarifying questions (`canAsk`), interactive takeover, and run notifications
 - [`ci-headless.md`](ci-headless.md) — running workflows in CI: `--report json|markdown|junit`, the stable exit-code contract, and the `steamtrain/run-workflow` GitHub Action
 - [`init-tour-followups.md`](init-tour-followups.md) — `steamtrain init` + `tour` review dispositions: applied, declined (with rationale), and deferred
+- [`desktop-app.md`](desktop-app.md) — the Electron desktop shell around the web UI: how it runs the engine, the GUI PATH fix, and what's still to come
 
 ## Planning
 

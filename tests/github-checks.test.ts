@@ -851,4 +851,39 @@ describe("resolveSteamtrainCliInvocation", () => {
       resolveSteamtrainCliInvocation(["node", "/usr/local/bin/steamtrain"], "/usr/bin/node"),
     ).toBe("/usr/local/bin/steamtrain");
   });
+
+  it("re-applies ELECTRON_RUN_AS_NODE inline under the desktop app", () => {
+    // The desktop app's execPath is the Electron binary, which only behaves as
+    // Node with this variable set — and command steps have it stripped from
+    // their environment, so the emitted command has to carry it itself.
+    expect(
+      resolveSteamtrainCliInvocation(
+        ["electron", "/Applications/steamtrain.app/Contents/Resources/dist/index.js"],
+        "/Applications/steamtrain.app/Contents/MacOS/steamtrain",
+        { ELECTRON_RUN_AS_NODE: "1" },
+      ),
+    ).toBe(
+      "ELECTRON_RUN_AS_NODE=1 /Applications/steamtrain.app/Contents/MacOS/steamtrain " +
+        "/Applications/steamtrain.app/Contents/Resources/dist/index.js",
+    );
+  });
+
+  it("quotes an Electron path containing spaces", () => {
+    expect(
+      resolveSteamtrainCliInvocation(
+        ["electron", "/Apps/My Steam Train.app/Contents/Resources/dist/index.js"],
+        "/Apps/My Steam Train.app/Contents/MacOS/steamtrain",
+        { ELECTRON_RUN_AS_NODE: "1" },
+      ),
+    ).toBe(
+      "ELECTRON_RUN_AS_NODE=1 '/Apps/My Steam Train.app/Contents/MacOS/steamtrain' " +
+        "'/Apps/My Steam Train.app/Contents/Resources/dist/index.js'",
+    );
+  });
+
+  it("leaves a normal install's invocation unprefixed", () => {
+    expect(resolveSteamtrainCliInvocation(["bun", "/repo/src/index.tsx"], "/usr/bin/bun", {})).toBe(
+      "/usr/bin/bun /repo/src/index.tsx",
+    );
+  });
 });

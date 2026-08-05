@@ -26,9 +26,11 @@
     "dev": "bun scripts/build-reducer.ts && bun src/index.tsx",
     "start": "node dist/index.js",
     "build": "bun scripts/build-reducer.ts && tsup && bun scripts/copy-assets.ts",
+    "build:electron": "tsup --config tsup.electron.config.ts",
+    "dev:electron": "npm run build && npm run build:electron && electron dist-electron/main.cjs",
     "install:local": "bash scripts/install.sh",
     "uninstall:local": "bash scripts/uninstall.sh",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.electron.json",
     "pretest": "bun scripts/build-reducer.ts",
     "test": "vitest run",
     "test:watch": "bun scripts/build-reducer.ts && vitest",
@@ -48,6 +50,7 @@
     "@biomejs/biome": "^1.9.4",
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.18",
+    "electron": "^33.2.1",
     "esbuild": "^0.27.7",
     "ink-testing-library": "^4.0.0",
     "tsup": "^8.3.5",
@@ -55,5 +58,5 @@
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   },
-  "trustedDependencies": ["@biomejs/biome"]
+  "trustedDependencies": ["@biomejs/biome", "electron"]
 }

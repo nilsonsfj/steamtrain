@@ -234,7 +234,11 @@ export interface RunManagerOptions {
   liveRuns?: LiveRunStore;
   /** Run-notification channels (`notify` config); omitted ⇒ no notifications. */
   notify?: NotifyConfig;
-  /** Base URL for notification deep links to run pages (e.g. `http://localhost:4600`). */
+  /**
+   * Base URL for notification deep links to run pages (e.g. `http://localhost:4600`).
+   * Callers that bind an ephemeral port (`--port 0`) leave this unset here and
+   * call {@link WorkflowRunManager.setPublicBaseUrl} once the real port is known.
+   */
   publicBaseUrl?: string;
   /**
    * How to point a detached background runner (mid-run detach) at the same
@@ -262,7 +266,7 @@ export class WorkflowRunManager {
   private readonly config: SteamtrainConfig;
   private readonly liveRuns?: LiveRunStore;
   private readonly notifier: Notifier;
-  private readonly publicBaseUrl?: string;
+  private publicBaseUrl?: string;
   private readonly detachIo?: DetachedRunnerIo;
   private runningCount = 0;
 
@@ -278,6 +282,24 @@ export class WorkflowRunManager {
     this.notifier = createNotifier(options.notify ?? options.config.notify);
     this.publicBaseUrl = options.publicBaseUrl;
     this.detachIo = options.detachIo;
+  }
+
+  /**
+   * Point notification deep links at this server's real address.
+   *
+   * The manager is constructed before `listen()`, so a caller binding an
+   * ephemeral port (`--port 0`) does not know its address yet — deep links
+   * would otherwise be built from the *requested* port and read
+   * `http://127.0.0.1:0/#run-…`. The value is only read when a run finishes,
+   * so assigning it right after the bind is safe.
+   */
+  setPublicBaseUrl(url: string): void {
+    this.publicBaseUrl = url;
+  }
+
+  /** The base URL notification deep links are currently built from. */
+  getPublicBaseUrl(): string | undefined {
+    return this.publicBaseUrl;
   }
 
   /** Validate and launch a run; the event loop runs detached in the background. */

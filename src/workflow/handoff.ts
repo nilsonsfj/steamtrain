@@ -24,12 +24,29 @@ export interface DetachedRunnerIo {
   workspacePath?: string;
 }
 
+/**
+ * How to re-exec steamtrain itself. Defaults to the running interpreter and
+ * entry script, which is correct for every normal install. A host that is not
+ * a plain `node dist/index.js` process — the Electron desktop app, where
+ * `process.argv[1]` is not a script path — supplies its own.
+ */
+export interface RunnerLaunch {
+  /** Interpreter to spawn (`process.execPath` by default). */
+  execPath: string;
+  /** Entry script passed as the first argument (`process.argv[1]` by default). */
+  script: string;
+  /** Environment for the child; defaults to the parent's own `process.env`. */
+  env?: NodeJS.ProcessEnv;
+}
+
 export interface SpawnDetachedRunnerOptions extends DetachedRunnerIo {
   store: LiveRunStore;
   /** The already-registered run the child takes ownership of. */
   runId: string;
   /** Working directory for the child (the resolved project dir). */
   cwd: string;
+  /** Override how steamtrain re-execs itself; see {@link RunnerLaunch}. */
+  runner?: RunnerLaunch;
 }
 
 export type SpawnDetachedRunnerResult = { ok: true; pid: number } | { ok: false; error: string };
@@ -51,7 +68,8 @@ function message(err: unknown): string {
 export async function spawnDetachedRunner(
   options: SpawnDetachedRunnerOptions,
 ): Promise<SpawnDetachedRunnerResult> {
-  const script = process.argv[1];
+  const execPath = options.runner?.execPath ?? process.execPath;
+  const script = options.runner?.script ?? process.argv[1];
   if (!script) {
     return { ok: false, error: "the steamtrain entry script could not be determined" };
   }
@@ -75,11 +93,14 @@ export async function spawnDetachedRunner(
     "_detached-runner",
     options.runId,
   ];
-  const child = spawn(process.execPath, childArgs, {
+  const child = spawn(execPath, childArgs, {
     cwd: options.cwd,
     detached: true,
     stdio: ["ignore", logFd, logFd],
-    env: process.env,
+    // The runner IS steamtrain, so it keeps the parent's env verbatim —
+    // including ELECTRON_RUN_AS_NODE, which is what lets an Electron execPath
+    // run it as Node. Leaf processes are sanitized separately (`childEnv`).
+    env: options.runner?.env ?? process.env,
   });
   child.unref();
   try {

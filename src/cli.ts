@@ -115,6 +115,12 @@ export interface GlobalCliOptions {
   noAuth?: boolean;
   /** Trust `X-Forwarded-*` headers (web UI behind a reverse proxy you run). */
   trustProxy?: boolean;
+  /**
+   * Print one machine-readable `{"steamtrain":"ready",…}` line on stdout once
+   * the web UI is listening. The desktop app reads it instead of scraping the
+   * human banner, which is how it learns an ephemeral (`--port 0`) port.
+   */
+  desktopReadyJson?: boolean;
   /** Print the version and exit. */
   version?: boolean;
   error?: string;
@@ -134,6 +140,7 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
   let readOnly = false;
   let noAuth = false;
   let trustProxy = false;
+  let desktopReadyJson = false;
   let version = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
@@ -221,6 +228,10 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
       trustProxy = true;
       continue;
     }
+    if (arg === "--desktop-ready-json") {
+      desktopReadyJson = true;
+      continue;
+    }
     rest.push(arg);
   }
   if (noAuth && authToken) {
@@ -251,6 +262,7 @@ export function parseGlobalArgs(args: string[]): GlobalCliOptions {
     readOnly: readOnly || undefined,
     noAuth: noAuth || undefined,
     trustProxy: trustProxy || undefined,
+    desktopReadyJson: desktopReadyJson || undefined,
     version: version || undefined,
   };
 }
@@ -2077,5 +2089,8 @@ Global options (TUI and workflow commands):
                              by default a token is auto-generated and printed)
       --trust-proxy          Honor X-Forwarded-* headers (only behind a reverse
                              proxy you control; needed for correct https cookies)
+      --desktop-ready-json   Print one {"steamtrain":"ready",...} line on stdout
+                             once the web UI is listening (with --web-ui; how the
+                             desktop app learns an ephemeral --port 0 address)
 `;
 }

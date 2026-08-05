@@ -2805,6 +2805,10 @@ export function resolveWebReadToken(opts: {
 export async function startWebUi(options: StartWebUiOptions): Promise<{
   server: Server;
   url: string;
+  /** The port actually bound — differs from `options.port` when that was 0. */
+  port: number;
+  /** The live run manager, for callers that need to query or observe runs. */
+  runs: WorkflowRunManager;
   doctor: DoctorResult[];
   authToken?: string;
   readToken?: string;
@@ -2905,8 +2909,9 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
     maxConcurrent: options.maxConcurrent ?? 5,
     config: liveConfig,
     liveRuns: liveRunStore,
-    // Notification deep links point at this server's own run pages.
-    publicBaseUrl: `http://${host === "0.0.0.0" || host === "::" ? "localhost" : host}:${port}`,
+    // Notification deep links point at this server's own run pages. The real
+    // address isn't known until `listen()` resolves (`--port 0` binds an
+    // ephemeral port), so it is set below rather than here.
     // Point a detached background runner (mid-run detach) at the same project.
     // A config file is only forwarded when it's a custom `--config` (otherwise
     // `--project-dir` resolution already picks up the same user + project layers).
@@ -3035,6 +3040,13 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
   const actualPort = typeof addr === "object" && addr ? addr.port : port;
   const url = `http://${host}:${actualPort}`;
 
+  // Now that the bind is settled, point notification deep links at the port the
+  // OS actually gave us. A wildcard bind has no single reachable name, so link
+  // to localhost the way the pre-bind expression always did.
+  runs.setPublicBaseUrl(
+    `http://${host === "0.0.0.0" || host === "::" ? "localhost" : host}:${actualPort}`,
+  );
+
   out(`\n🚂 steamtrain web UI running at ${url}\n`);
   out(`   ◈  project  ${project.name}  ·  ${project.displayPath}\n`);
   if (generatedToken) {
@@ -3096,6 +3108,8 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
   return {
     server,
     url,
+    port: actualPort,
+    runs,
     authToken,
     readToken,
     readOnly: readOnly || undefined,

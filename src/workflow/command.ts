@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { childEnv } from "../util/child-env";
 
 /**
  * Subprocess plumbing for `command` workflow steps: run one shell command,
@@ -70,7 +71,10 @@ export async function runShellCommand(
       cwd: opts.cwd,
       detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
-      env: opts.env ? { ...process.env, ...opts.env } : undefined,
+      // Always build the env explicitly (rather than inheriting by omission) so
+      // ELECTRON_RUN_AS_NODE never reaches a user's command under the desktop
+      // app. `$STEAMTRAIN_CLI` re-adds it inline for its own invocation.
+      env: childEnv(opts.env),
     });
 
     const killTree = (sig: NodeJS.Signals): void => {
