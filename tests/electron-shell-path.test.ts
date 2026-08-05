@@ -1,6 +1,9 @@
-import { delimiter } from "node:path";
-import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import {
+  fallbackPathDirs,
   mergePath,
   parsePathFromEnvOutput,
   shouldSkipShellPath,
@@ -58,6 +61,55 @@ describe("mergePath", () => {
 
   it("handles an undefined base", () => {
     expect(mergePath(undefined, ["/a"])).toBe("/a");
+  });
+});
+
+describe("fallbackPathDirs", () => {
+  const homes: string[] = [];
+
+  afterEach(() => {
+    for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
+  });
+
+  function fakeHome(dirs: string[]): string {
+    const home = mkdtempSync(join(tmpdir(), "steamtrain-home-"));
+    homes.push(home);
+    for (const dir of dirs) mkdirSync(join(home, dir), { recursive: true });
+    return home;
+  }
+
+  it("includes per-user toolchain directories that exist", () => {
+    const home = fakeHome([".local/bin", ".cargo/bin"]);
+    expect(fallbackPathDirs(home)).toEqual(
+      expect.arrayContaining([join(home, ".local/bin"), join(home, ".cargo/bin")]),
+    );
+  });
+
+  it("omits directories that do not exist", () => {
+    const home = fakeHome([".local/bin"]);
+    expect(fallbackPathDirs(home)).not.toContain(join(home, ".bun/bin"));
+  });
+
+  it("picks up every installed nvm node version", () => {
+    const home = fakeHome([".nvm/versions/node/v20.11.0/bin", ".nvm/versions/node/v22.3.0/bin"]);
+    expect(fallbackPathDirs(home)).toEqual(
+      expect.arrayContaining([
+        join(home, ".nvm/versions/node/v20.11.0/bin"),
+        join(home, ".nvm/versions/node/v22.3.0/bin"),
+      ]),
+    );
+  });
+
+  it("survives a home with no nvm install", () => {
+    const home = fakeHome([]);
+    // Runs at app startup, so a missing ~/.nvm must not throw.
+    expect(() => fallbackPathDirs(home)).not.toThrow();
+  });
+
+  it("returns no duplicates", () => {
+    const home = fakeHome([".local/bin", ".nvm/versions/node/v20.11.0/bin"]);
+    const dirs = fallbackPathDirs(home);
+    expect(dirs).toHaveLength(new Set(dirs).size);
   });
 });
 
