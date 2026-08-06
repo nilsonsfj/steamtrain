@@ -133,3 +133,96 @@ describe("claude mapper", () => {
     ]);
   });
 });
+
+/**
+ * Live spend: Claude Code reports `usage` on every `assistant` line, which is
+ * the only mid-turn source there is — the `result` line's totals land when the
+ * step is already over. The mapper turns those reports into INCREMENTS (see
+ * UsageEvent), because Claude repeats a message's usage on every line it
+ * splits that message across.
+ */
+describe("claude mapper · live usage", () => {
+  /** An `assistant` line carrying usage, as Claude Code emits it. */
+  function assistant(id: string, usage: Record<string, number>, block = '{"type":"text"}') {
+    return {
+      type: "assistant",
+      message: { id, role: "assistant", content: [JSON.parse(block)], usage },
+      session_id: "4a6e2862",
+    };
+  }
+
+  it("emits a usage increment for a message's first line", () => {
+    const mapper = createClaudeMapper();
+    expect(mapper(assistant("msg_1", { input_tokens: 12, output_tokens: 4 }))).toEqual([
+      expect.objectContaining({
+        kind: "usage",
+        agent: "claude",
+        tokens: { input: 12, output: 4 },
+      }),
+    ]);
+  });
+
+  it("maps cache reads and writes onto the normalized categories", () => {
+    const mapper = createClaudeMapper();
+    const [event] = mapper(
+      assistant("msg_1", {
+        input_tokens: 3,
+        output_tokens: 1,
+        cache_read_input_tokens: 9000,
+        cache_creation_input_tokens: 250,
+      }),
+    );
+    expect(event).toMatchObject({
+      kind: "usage",
+      tokens: { input: 3, output: 1, cacheRead: 9000, cacheWrite: 250 },
+    });
+  });
+
+  it("reports only what grew when the same message is restated", () => {
+    const mapper = createClaudeMapper();
+    mapper(assistant("msg_1", { input_tokens: 100, output_tokens: 10 }));
+    // Same message, one more content block: input is unchanged, output grew by 5.
+    const events = mapper(
+      assistant("msg_1", { input_tokens: 100, output_tokens: 15 }, '{"type":"text"}'),
+    );
+    expect(events).toEqual([expect.objectContaining({ kind: "usage", tokens: { output: 5 } })]);
+  });
+
+  it("emits nothing when a restated message reports no growth", () => {
+    const mapper = createClaudeMapper();
+    mapper(assistant("msg_1", { input_tokens: 100, output_tokens: 10 }));
+    expect(mapper(assistant("msg_1", { input_tokens: 100, output_tokens: 10 }))).toEqual([]);
+  });
+
+  it("bills a new message in full rather than differencing it", () => {
+    const mapper = createClaudeMapper();
+    mapper(assistant("msg_1", { input_tokens: 100, output_tokens: 40 }));
+    // A second message's input is its own prompt, not a continuation of the
+    // first's — differencing it would report a negative and count nothing.
+    expect(mapper(assistant("msg_2", { input_tokens: 120, output_tokens: 8 }))).toEqual([
+      expect.objectContaining({ kind: "usage", tokens: { input: 120, output: 8 } }),
+    ]);
+  });
+
+  it("never reports a negative increment when a counter goes backwards", () => {
+    const mapper = createClaudeMapper();
+    mapper(assistant("msg_1", { input_tokens: 100, output_tokens: 40 }));
+    expect(mapper(assistant("msg_1", { input_tokens: 100, output_tokens: 30 }))).toEqual([]);
+  });
+
+  it("still emits the message's tool_use alongside its usage", () => {
+    const mapper = createClaudeMapper();
+    const events = mapper(
+      assistant(
+        "msg_2",
+        { output_tokens: 7 },
+        '{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}',
+      ),
+    );
+    expect(events.map((e) => e.kind)).toEqual(["tool_use", "usage"]);
+  });
+
+  it("says nothing at all when a line carries no usage", () => {
+    expect(map(SAMPLES.assistantText)).toEqual([]);
+  });
+});

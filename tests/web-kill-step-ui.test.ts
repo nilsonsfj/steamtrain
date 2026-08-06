@@ -119,6 +119,9 @@ function mountRecord(opts: {
     fmtElapsed: () => "27.4s",
     fmtTokens: () => "0",
     totalTokens: () => 0,
+    // The rail's Spend/Tokens metrics; this fixture is about the kill control,
+    // so the step it renders has billed nothing.
+    stepUsage: () => ({ costUsd: 0, tokens: 0, live: false }),
     agentUiLabel: (id: string) => id,
     stepKey: (p: { phaseId: string }, st: { stepId: string }) => `${p.phaseId}:${st.stepId}`,
     render: () => {},

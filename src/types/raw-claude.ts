@@ -40,11 +40,27 @@ export const claudeContentBlock = z
   })
   .passthrough();
 
+/** Anthropic usage block, as reported on Claude Code's `result` (and message) events. */
+export const claudeUsage = z
+  .object({
+    input_tokens: z.number().optional(),
+    output_tokens: z.number().optional(),
+    cache_creation_input_tokens: z.number().optional(),
+    cache_read_input_tokens: z.number().optional(),
+  })
+  .passthrough();
+
 export const claudeMessage = z
   .object({
     id: z.string().optional(),
     role: z.string().optional(),
     content: z.array(claudeContentBlock).optional(),
+    /**
+     * Per-message usage. Claude Code reports it on every `assistant` line, so
+     * it is the mid-turn source a live spend readout needs — the `result`
+     * line's copy only lands once the whole turn is over.
+     */
+    usage: claudeUsage.optional(),
   })
   .passthrough();
 
@@ -84,16 +100,6 @@ export const claudeStreamEvent = z
         content_block: z.object({ type: z.string().optional() }).passthrough().optional(),
       })
       .passthrough(),
-  })
-  .passthrough();
-
-/** Anthropic usage block, as reported on Claude Code's `result` (and message) events. */
-export const claudeUsage = z
-  .object({
-    input_tokens: z.number().optional(),
-    output_tokens: z.number().optional(),
-    cache_creation_input_tokens: z.number().optional(),
-    cache_read_input_tokens: z.number().optional(),
   })
   .passthrough();
 

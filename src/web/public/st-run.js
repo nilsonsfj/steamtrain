@@ -33,6 +33,7 @@
   var showReauthOverlay = ST.showReauthOverlay;
   var stepKey = ST.stepKey;
   var stepPermissions = ST.stepPermissions;
+  var stepUsage = ST.stepUsage;
   var tail = ST.tail;
   var totalTokens = ST.totalTokens;
   var truncate = ST.truncate;
@@ -518,8 +519,11 @@
     steps.forEach(function (s) {
       if (stepMetaBits(s)) spec.meta = true;
       if (runnerLabel(s)) spec.runner = true;
-      if (s.result && s.result.costUsd) spec.cost = true;
-      if (s.result && totalTokens(s.result.tokens)) spec.tokens = true;
+      // Live usage counts: a running agent that is already reporting tokens
+      // gets its column now, not when the step finally lands.
+      var use = stepUsage(s);
+      if (use.costUsd) spec.cost = true;
+      if (use.tokens) spec.tokens = true;
     });
     var cols = ["14px", "minmax(0,1fr)"];
     if (spec.meta) cols.push("minmax(0,190px)");
@@ -579,8 +583,8 @@
    * is expanded directly beneath it.
    */
   function renderStepRow(p, s, cols, open) {
-    var cost = s.result && s.result.costUsd;
-    var tokens = s.result ? totalTokens(s.result.tokens) : 0;
+    var use = stepUsage(s);
+    var soFar = use.live ? "so far — this step is still running" : null;
     var runner = runnerLabel(s);
     var row = h("button", {
         class: stepRowClass(s) + (open ? " open" : ""),
@@ -598,8 +602,8 @@
       ? h("div", { class: "runner", text: runner })
       : kindChip(s.blockKind));
     row.appendChild(timeCell(s));
-    if (cols.cost) row.appendChild(h("div", { class: "num cost", text: cost ? "$" + cost.toFixed(4) : "" }));
-    if (cols.tokens) row.appendChild(h("div", { class: "num tok", text: tokens ? fmtTokens(tokens) : "" }));
+    if (cols.cost) row.appendChild(h("div", { class: "num cost" + (use.live ? " live" : ""), title: soFar, text: use.costUsd ? "$" + use.costUsd.toFixed(4) : "" }));
+    if (cols.tokens) row.appendChild(h("div", { class: "num tok" + (use.live ? " live" : ""), title: soFar, text: use.tokens ? fmtTokens(use.tokens) : "" }));
     row.appendChild(h("span", { class: "chev", "aria-hidden": "true", text: open ? "⌄" : "›" }));
     return row;
   }
@@ -1177,6 +1181,11 @@
       var tokenLine = fmtTokenSummary(s.result.tokens);
       if (tokenLine) row("tokens", tokenLine);
       if (s.result.exitCode !== undefined) row("exit code", String(s.result.exitCode));
+    } else if (s.usage) {
+      // Still running: whatever the agent has reported so far, labelled as such.
+      if (s.usage.costUsd) row("cost so far", "$" + s.usage.costUsd.toFixed(4));
+      var liveTokenLine = fmtTokenSummary(s.usage.tokens);
+      if (liveTokenLine) row("tokens so far", liveTokenLine);
     }
     if (s.dependsOn && s.dependsOn.length) row("inputs", s.dependsOn.join(", "));
     if (s.item) row("item", "#" + s.item.index + " from " + s.item.sourceStepId + ": " + truncate(s.item.value, 200));
@@ -1450,10 +1459,14 @@
     updateRunPill();
 
     // Live cost/token ticker + budget badge.
+    // Finished steps bill from their result; running ones contribute whatever
+    // they have reported so far, which is the point of a *live* ticker.
     var cost = 0, tokens = emptyTokens();
     steps.forEach(function (s) {
-      if (s.result && s.result.costUsd) cost += s.result.costUsd;
-      if (s.result) addTokensInto(tokens, s.result.tokens);
+      var source = s.result || s.usage;
+      if (!source) return;
+      if (source.costUsd) cost += source.costUsd;
+      addTokensInto(tokens, source.tokens);
     });
     var ticker = document.getElementById("costTicker");
     if (ticker) {

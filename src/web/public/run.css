@@ -471,6 +471,12 @@ textarea#input:focus {
 .step-row .tok {
   color: var(--dim);
 }
+/* Spend/tokens the agent has reported mid-flight: a running total, not the
+   bill. Dimmed so a number that is still climbing does not read with the same
+   authority as a finished step's. */
+.step-row .num.live {
+  color: var(--dim);
+}
 .step-row .chev {
   color: var(--faint);
   text-align: center;
