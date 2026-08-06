@@ -94,3 +94,6 @@ absolute `binary` path in [agent configuration](agent-configuration.md).
 - **Deferred** — code signing and notarization, auto-update, `steamtrain://`
   deep links, tray, and Windows (which needs its own PATH and process-lifetime
   work).
+
+[`desktop-roadmap.md`](desktop-roadmap.md) has the reasoning behind that
+ordering, and what is deliberately never happening.

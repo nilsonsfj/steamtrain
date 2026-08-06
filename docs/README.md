@@ -27,6 +27,7 @@ Deep dives:
 ## Planning
 
 - [`feature-roadmap.md`](feature-roadmap.md) — prioritized roadmap of next features and improvements
+- [`desktop-roadmap.md`](desktop-roadmap.md) — where the Electron desktop shell is going: M1–M3 and what is deliberately deferred
 - [`next-frontier.md`](next-frontier.md) — second-generation ideas beyond the roadmap (several partially shipped; see inline status)
 
 ## Project
