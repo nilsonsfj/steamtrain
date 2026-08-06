@@ -41,8 +41,8 @@ app rather than a browser pointed at localhost.
 
 The pattern that made M2 testable is worth keeping: every decision lives in a
 pure module (`recents`, `window-state`, `run-watch`, `shutdown`, `quit-prompt`)
-and `index.ts` only wires Electron events to them. What remains untested is the
-wiring itself, which is what M3's smoke test is for.
+and `index.ts` only wires Electron events to them. What that pattern could not
+reach was the wiring itself — M3's smoke test is what closed it.
 
 ## M3 — "it ships" ✅
 
