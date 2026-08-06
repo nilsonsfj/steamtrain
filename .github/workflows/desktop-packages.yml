@@ -18,9 +18,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # No arch flag: the config asks for arm64 *and* x64, and an artifact
+          # meant to be handed to someone should cover both Macs.
           - os: macos-latest
-            target: --mac --arm64
-            artifact: macos-arm64
+            target: --mac
+            artifact: macos
           - os: ubuntu-latest
             target: --linux --x64
             artifact: linux-x64
