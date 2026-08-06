@@ -4,9 +4,10 @@ import {
   isPermissionProfile,
   resolvePermissions,
 } from "../agents/permissions";
-import type { AgentEvent, AgentInstanceId } from "../types/events";
+import type { AgentEvent, AgentInstanceId, TokenUsage } from "../types/events";
 import type { ApprovalRejectDisposition } from "./approval";
 import type { StepEditPatch } from "./control";
+import { addTokens } from "./cost";
 import type { StepPermissionsInfo, WorkflowEvent } from "./events";
 import type { RunRecord } from "./history";
 import { llmStepApiId } from "./llm";
@@ -151,6 +152,21 @@ export interface PendingHumanInput {
   retryError?: string;
 }
 
+/**
+ * What a *still-running* step has billed so far, folded from the agent's own
+ * mid-flight reports (`usage` events, and the interim `result` events adapters
+ * like opencode emit per finished sub-step). Absent until the agent reports
+ * something — a step whose CLI only reports at the end has no live number, and
+ * a zero would read as "free" rather than "not known yet".
+ *
+ * Superseded by {@link StepState.result} once the step finishes: the result is
+ * the billed record, this is the running estimate.
+ */
+export interface StepUsageState {
+  tokens?: TokenUsage;
+  costUsd?: number;
+}
+
 export interface StepState {
   stepId: string;
   blockKind: WorkflowStepKind;
@@ -187,6 +203,8 @@ export interface StepState {
   text: string;
   /** Latest tool line, e.g. "⚙ Bash" or "✓ Read". */
   activity?: string;
+  /** Spend/tokens reported while the step is still running (see {@link StepUsageState}). */
+  usage?: StepUsageState;
   result?: StepResult;
   gate?: { passed: boolean; target?: string; onFalse?: GateStep["onFalse"] };
   /**
@@ -444,6 +462,34 @@ function applyAgentEvent(step: StepState, event: AgentEvent): StepState {
         ...step,
         activity: `${event.isError ? "✗" : "✓"} ${event.name ?? "tool"}`,
       };
+    case "usage": {
+      // Increments (see UsageEvent) — accumulate.
+      if (!event.tokens && event.costUsd === undefined) return step;
+      return {
+        ...step,
+        usage: {
+          tokens: event.tokens ? addTokens(step.usage?.tokens, event.tokens) : step.usage?.tokens,
+          costUsd:
+            event.costUsd === undefined
+              ? step.usage?.costUsd
+              : (step.usage?.costUsd ?? 0) + event.costUsd,
+        },
+      };
+    }
+    case "result": {
+      // A `result` mid-stream restates the turn's totals rather than adding to
+      // them (opencode emits one per finished sub-step, each carrying the
+      // running total), so it REPLACES what the increments accumulated — the
+      // same rule the engine applies when it folds these into StepResult.
+      if (!event.tokens && event.costUsd === undefined) return step;
+      return {
+        ...step,
+        usage: {
+          tokens: event.tokens ?? step.usage?.tokens,
+          costUsd: event.costUsd ?? step.usage?.costUsd,
+        },
+      };
+    }
     default:
       return step;
   }

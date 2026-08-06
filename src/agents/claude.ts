@@ -73,14 +73,22 @@ export const CLAUDE_MODELS: readonly AgentModel[] = [
  *  - `stream_event` text/thinking   → text_delta  (live, true deltas)
  *  - `assistant` message            → tool_use only; its text duplicates the
  *                                     already-streamed deltas, so we skip it
+ *                                     — plus `usage` for the live token count
  *  - `assistant.error`              → error  (e.g. "Not logged in")
  *  - `user` message                 → tool_result blocks
  *  - `result`                       → result (is_error, cost, duration)
  *  - anything else                  → unknown passthrough
  *
- * Stateless across lines, so it is also a pure function over each raw line.
+ * Carries one piece of state across lines — the last assistant message's usage,
+ * so repeated lines for the same message emit only what grew (see
+ * `usageIncrement`). Everything else is a pure function of the raw line.
  */
 export function createClaudeMapper(agent: AgentInstanceId = AGENT): EventMapper {
+  /** The assistant message the usage counters below belong to. */
+  let usageMessageId: string | undefined;
+  /** Usage already reported for that message, so the next line emits the delta. */
+  let usageReported: TokenUsage | undefined;
+
   return (raw: unknown): AgentEvent[] => {
     const ts = Date.now();
     const env = claudeEnvelope.safeParse(raw);
@@ -148,6 +156,21 @@ export function createClaudeMapper(agent: AgentInstanceId = AGENT): EventMapper 
             });
           }
           // text/thinking blocks are intentionally skipped (already streamed).
+        }
+        // Live spend. Claude Code repeats an `assistant` line per content block
+        // of the same message (same `message.id`), each restating that
+        // message's usage — so emit only what grew since the last line, and
+        // treat a new id as a fresh message billed in full.
+        const usage = claudeTokens(parsed.data.message.usage);
+        if (usage) {
+          const id = parsed.data.message.id;
+          // Unidentified messages fold into the previous one on purpose: an
+          // undercount is recoverable (the `result` totals land at the end), a
+          // double count is a number nobody can explain.
+          const increment = id === usageMessageId ? usageIncrement(usageReported, usage) : usage;
+          usageMessageId = id;
+          usageReported = usage;
+          if (increment) out.push({ kind: "usage", agent, ts, tokens: increment });
         }
         return out;
       }
@@ -236,6 +259,26 @@ function claudeTokens(usage: ClaudeUsage | undefined): TokenUsage | undefined {
   if (usage.cache_creation_input_tokens !== undefined)
     tokens.cacheWrite = usage.cache_creation_input_tokens;
   return Object.keys(tokens).length > 0 ? tokens : undefined;
+}
+
+/**
+ * What `next` adds over `already` field by field, or `undefined` when it adds
+ * nothing. A counter that went backwards contributes 0 rather than a negative:
+ * the stream is a report, not an arithmetic identity, and a live readout that
+ * ticks down would be read as a bug.
+ */
+function usageIncrement(already: TokenUsage | undefined, next: TokenUsage): TokenUsage | undefined {
+  if (!already) return next;
+  const delta: TokenUsage = {};
+  let any = false;
+  for (const key of ["input", "output", "cacheRead", "cacheWrite", "reasoning"] as const) {
+    const grew = (next[key] ?? 0) - (already[key] ?? 0);
+    if (grew > 0) {
+      delta[key] = grew;
+      any = true;
+    }
+  }
+  return any ? delta : undefined;
 }
 
 /**

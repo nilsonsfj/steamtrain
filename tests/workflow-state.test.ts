@@ -475,3 +475,122 @@ describe("workflowReducer live visibility metadata", () => {
     expect(step?.worktree).toBeUndefined();
   });
 });
+
+/**
+ * Live spend. The engine forwards every agent event as `step_event`, so the
+ * reducer is where a running step's usage becomes state a UI can read — see
+ * StepUsageState. Two shapes arrive: `usage` increments (Claude Code's
+ * per-message reports) and interim `result` events restating a running total
+ * (opencode's per-sub-step finishes).
+ */
+describe("workflowReducer live usage", () => {
+  function running(events: WorkflowEvent[]) {
+    return flattenSteps(
+      reduceAll([
+        { kind: "workflow_start", name: "w", phaseCount: 1, stepCount: 1, ts: 0 },
+        { kind: "phase_start", phaseId: "p1", title: "P1", index: 0, stepCount: 1, ts: 0 },
+        { kind: "step_start", phaseId: "p1", stepId: "a", agent: AGENT, model: "m", ts: 0 },
+        ...events,
+      ]),
+    )[0]?.step;
+  }
+
+  function usage(tokens: Record<string, number>, costUsd?: number): WorkflowEvent {
+    return {
+      kind: "step_event",
+      phaseId: "p1",
+      stepId: "a",
+      event: { kind: "usage", agent: AGENT, ts: 0, tokens, costUsd },
+      ts: 0,
+    };
+  }
+
+  it("has no usage at all until the agent reports some", () => {
+    // Not zero: nobody should read "$0.0000" off a step that simply has not
+    // said anything yet.
+    expect(running([])?.usage).toBeUndefined();
+  });
+
+  it("accumulates usage increments", () => {
+    const step = running([
+      usage({ input: 100, output: 10 }),
+      usage({ output: 25, cacheRead: 900 }),
+    ]);
+    expect(step?.usage?.tokens).toMatchObject({ input: 100, output: 35, cacheRead: 900 });
+  });
+
+  it("sums the cost of increments that carry one", () => {
+    const step = running([usage({ output: 1 }, 0.002), usage({ output: 1 }, 0.003)]);
+    expect(step?.usage?.costUsd).toBeCloseTo(0.005, 6);
+  });
+
+  it("lets an interim result restate the total instead of adding to it", () => {
+    const step = running([
+      usage({ input: 100, output: 10 }),
+      {
+        kind: "step_event",
+        phaseId: "p1",
+        stepId: "a",
+        // opencode's step_finish: a running total, not a delta.
+        event: {
+          kind: "result",
+          agent: AGENT,
+          ts: 0,
+          isError: false,
+          costUsd: 0.004,
+          tokens: { input: 100, output: 40 },
+        },
+        ts: 0,
+      },
+    ]);
+    expect(step?.usage?.tokens).toMatchObject({ input: 100, output: 40 });
+    expect(step?.usage?.costUsd).toBe(0.004);
+  });
+
+  it("keeps the accumulated tokens when a result restates only the cost", () => {
+    const step = running([
+      usage({ input: 100, output: 10 }),
+      {
+        kind: "step_event",
+        phaseId: "p1",
+        stepId: "a",
+        event: { kind: "result", agent: AGENT, ts: 0, isError: false, costUsd: 0.004 },
+        ts: 0,
+      },
+    ]);
+    expect(step?.usage?.tokens).toMatchObject({ input: 100, output: 10 });
+    expect(step?.usage?.costUsd).toBe(0.004);
+  });
+
+  it("ignores a result that carries no usage at all", () => {
+    const step = running([
+      usage({ input: 100 }),
+      {
+        kind: "step_event",
+        phaseId: "p1",
+        stepId: "a",
+        event: { kind: "result", agent: AGENT, ts: 0, isError: false, text: "done" },
+        ts: 0,
+      },
+    ]);
+    expect(step?.usage?.tokens).toMatchObject({ input: 100 });
+  });
+
+  it("leaves the finished result as the billed record beside it", () => {
+    const step = running([
+      usage({ input: 100, output: 10 }),
+      {
+        kind: "step_done",
+        phaseId: "p1",
+        stepId: "a",
+        result: { ...resultA, tokens: { input: 100, output: 12 } },
+        cached: false,
+        ts: 9,
+      },
+    ]);
+    // The live total stays as it was; every UI prefers `result` once it exists,
+    // so the two never get added together.
+    expect(step?.result?.tokens).toMatchObject({ output: 12 });
+    expect(step?.usage?.tokens).toMatchObject({ output: 10 });
+  });
+});

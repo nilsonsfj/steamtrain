@@ -536,12 +536,18 @@
   }
 
   /** A metric, or null when the step's kind can't produce one (never "—"). */
-  function metricCell(k, v, since) {
+  /**
+   * One metric, or null when there is nothing to report — the row lays out
+   * only the cells that came back. `title` annotates a value that is still
+   * moving (spend/tokens on a running step); the label itself stays short so
+   * three cells keep fitting the rail's width.
+   */
+  function metricCell(k, v, since, title) {
     if (v === null || v === undefined || v === "") return null;
     var value = since
       ? h("div", { class: "v", "data-since": String(since), "data-since-prefix": "", text: v })
       : h("div", { class: "v", text: v });
-    return h("div", { class: "insp-metric" }, h("div", { class: "k", text: k }), value);
+    return h("div", { class: "insp-metric", title: title || null }, h("div", { class: "k", text: k }), value);
   }
 
   /**
@@ -647,11 +653,14 @@
     var elapsed = finished
       ? ST.fmtElapsed(s.result.durationMs)
       : s.startedAt ? ST.fmtElapsed(Date.now() - s.startedAt) : "";
-    var tokens = s.result && s.result.tokens ? ST.totalTokens(s.result.tokens) : 0;
+    // Spend/tokens track the step while it runs (the agent's own mid-flight
+    // reports), then settle onto the result's billed totals — see ST.stepUsage.
+    var use = ST.stepUsage(s);
+    var soFar = use.live ? "so far — this step is still running" : null;
     var metrics = metricRow([
       metricCell("Elapsed", elapsed, running ? s.startedAt : null),
-      metricCell("Spend", s.result && s.result.costUsd ? "$" + s.result.costUsd.toFixed(4) : ""),
-      metricCell("Tokens", tokens ? ST.fmtTokens(tokens) : "")
+      metricCell("Spend", use.costUsd ? "$" + use.costUsd.toFixed(4) : "", null, soFar),
+      metricCell("Tokens", use.tokens ? ST.fmtTokens(use.tokens) : "", null, soFar)
     ]);
     if (metrics) wrap.appendChild(metrics);
 

@@ -97,6 +97,20 @@ var SteamtrainReducer = (() => {
     return step.api ?? resolveLlmProvider(step);
   }
 
+  // src/workflow/cost.ts
+  var TOKEN_KEYS = ["input", "output", "cacheRead", "cacheWrite", "reasoning"];
+  function emptyTokens() {
+    return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
+  }
+  function addTokensInto(a, b) {
+    if (!b) return a;
+    for (const k of TOKEN_KEYS) a[k] += b[k] ?? 0;
+    return a;
+  }
+  function addTokens(a, b) {
+    return addTokensInto(addTokensInto(emptyTokens(), a), b);
+  }
+
   // src/workflow/step-kind.ts
   var MAX_WORKFLOW_NESTING_DEPTH = 5;
   function workflowStepKind(step) {
@@ -223,6 +237,26 @@ var SteamtrainReducer = (() => {
           ...step,
           activity: `${event.isError ? "\u2717" : "\u2713"} ${event.name ?? "tool"}`
         };
+      case "usage": {
+        if (!event.tokens && event.costUsd === void 0) return step;
+        return {
+          ...step,
+          usage: {
+            tokens: event.tokens ? addTokens(step.usage?.tokens, event.tokens) : step.usage?.tokens,
+            costUsd: event.costUsd === void 0 ? step.usage?.costUsd : (step.usage?.costUsd ?? 0) + event.costUsd
+          }
+        };
+      }
+      case "result": {
+        if (!event.tokens && event.costUsd === void 0) return step;
+        return {
+          ...step,
+          usage: {
+            tokens: event.tokens ?? step.usage?.tokens,
+            costUsd: event.costUsd ?? step.usage?.costUsd
+          }
+        };
+      }
       default:
         return step;
     }

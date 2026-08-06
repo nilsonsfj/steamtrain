@@ -98,6 +98,31 @@ export interface TokenUsage {
   reasoning?: number;
 }
 
+/**
+ * Usage billed *so far* in a turn that is still running — the mid-flight
+ * counterpart to {@link ResultEvent}'s totals, so a live UI can show a step's
+ * spend while it works instead of only after it finishes.
+ *
+ * **Increments, not totals.** Each event carries what was billed since the
+ * previous one, so a consumer accumulates them (a CLI that reports a running
+ * total re-states the same number every message, which would triple-count if
+ * summed — an adapter emitting from such a source must difference it first).
+ * A `result` event later re-states the whole turn: consumers should let its
+ * totals replace what they accumulated rather than add to them, since the two
+ * describe the same spend.
+ *
+ * Adapters only emit this when their CLI reports usage before the end of the
+ * turn (Claude Code's per-message `usage`). Everyone else stays terminal-only,
+ * and the field is simply absent live — never a zero that reads as "free".
+ */
+export interface UsageEvent extends BaseEvent {
+  kind: "usage";
+  /** Tokens billed since the previous `usage` event of this turn. */
+  tokens?: TokenUsage;
+  /** USD billed since the previous `usage` event, when the CLI prices mid-turn. */
+  costUsd?: number;
+}
+
 /** The turn finished with a final answer and (optionally) cost/timing/tokens. */
 export interface ResultEvent extends BaseEvent {
   kind: "result";
@@ -163,6 +188,7 @@ export type AgentEvent =
   | TextDeltaEvent
   | ToolUseEvent
   | ToolResultEvent
+  | UsageEvent
   | ResultEvent
   | ErrorEvent
   | UnknownEvent;
