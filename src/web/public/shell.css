@@ -101,6 +101,26 @@ header .mode-badge {
   gap: 6px;
 }
 
+/* The desktop app hides the macOS title bar so the UI reaches the top edge of
+   the window, which leaves the close/minimise/zoom controls sitting inside this
+   row. The preload adds the class and the inset; a browser has neither, so
+   everything below is inert there. */
+html.desktop-titlebar-overlay #topbar {
+  padding-left: var(--desktop-titlebar-inset, 16px);
+  /* With no title bar there is nothing left to move the window by, so the
+     topbar's own empty stretch becomes the handle. */
+  -webkit-app-region: drag;
+}
+/* Anything a click should reach has to opt back out — inside a drag region a
+   press moves the window instead of pressing the control. */
+html.desktop-titlebar-overlay #topbar button,
+html.desktop-titlebar-overlay #topbar a,
+html.desktop-titlebar-overlay #topbar .crumbs,
+html.desktop-titlebar-overlay #topbar .health,
+html.desktop-titlebar-overlay #topbar .status-pill {
+  -webkit-app-region: no-drag;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;

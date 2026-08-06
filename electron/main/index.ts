@@ -1,5 +1,5 @@
 import { existsSync, statSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import { BrowserWindow, Notification, app, dialog, screen } from "electron";
 import { resolveEntry } from "./entry";
 import { buildMenu } from "./menu";
@@ -20,6 +20,13 @@ import { restoreWindowState } from "./window-state";
  * (otherwise the doctor finds no agent CLIs), and the engine has to report a
  * bound port before a window can be pointed at it.
  */
+
+// Before anything reads a path off `app`: `userData` is derived from the app
+// name, and a development launch has no bundle to take a name from. Without
+// this the app is "Electron" — in the dock, in its notifications, and in the
+// directory it keeps its state in. A packaged build already knows better and
+// this changes nothing there.
+app.setName("steamtrain");
 
 let server: ServerHandle | undefined;
 let mainWindow: BrowserWindow | undefined;
@@ -135,6 +142,41 @@ function announce(finished: readonly FinishedRun[]): void {
   }
 }
 
+/** Build the app window for an engine that is already running. */
+function openWindow(origin: string, cwd: string): BrowserWindow {
+  const win = createWindow({
+    url: origin,
+    projectName: basename(cwd),
+    state: restoreWindowState(
+      state.window,
+      screen.getAllDisplays().map((display) => display.workArea),
+    ),
+    onStateChange: (window) => persist({ window }),
+  });
+  win.on("closed", () => {
+    mainWindow = undefined;
+  });
+  return win;
+}
+
+/**
+ * Put the UI back in front of the user.
+ *
+ * Closing the window quits the app, so a live app with no window is a narrow
+ * state: the dock icon was clicked while hidden, or a quit was started and then
+ * cancelled. Both want the window the engine is already serving — re-opening
+ * the *project* would tear down a working engine and fork a new one.
+ */
+function restoreWindow(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    return;
+  }
+  if (!server || !projectDir) return;
+  mainWindow = openWindow(new URL(server.ready.url).origin, projectDir);
+}
+
 /** Fork the engine for `cwd` and show its UI, replacing anything already open. */
 async function openProject(cwd: string): Promise<void> {
   const previous = server;
@@ -160,18 +202,7 @@ async function openProject(cwd: string): Promise<void> {
     mainWindow.setTitle(`steamtrain — ${basename(cwd)}`);
     void mainWindow.loadURL(origin);
   } else {
-    mainWindow = createWindow({
-      url: origin,
-      projectName: basename(cwd),
-      state: restoreWindowState(
-        state.window,
-        screen.getAllDisplays().map((display) => display.workArea),
-      ),
-      onStateChange: (window) => persist({ window }),
-    });
-    mainWindow.on("closed", () => {
-      mainWindow = undefined;
-    });
+    mainWindow = openWindow(origin, cwd);
   }
   refreshMenu();
 
@@ -207,20 +238,42 @@ function reportFatal(err: unknown): void {
  * — quitting an idle app must never show a dialog.
  */
 async function askAboutRuns(): Promise<QuitChoice> {
-  if (!watch || !mainWindow || mainWindow.isDestroyed()) return "leave-running";
+  if (!watch) return "leave-running";
   const active = await watch.refresh();
   if (active === 0) return "leave-running";
   const spec = quitPromptSpec(active);
-  const { response } = await dialog.showMessageBox(mainWindow, {
-    type: "question",
+  const options = {
+    type: "question" as const,
     message: spec.message,
     detail: spec.detail,
     buttons: spec.buttons,
     defaultId: spec.defaultId,
     cancelId: spec.cancelId,
     noLink: true,
-  });
+  };
+  // Attached to the window when there is one, and asked app-modally when there
+  // is not: closing the window is itself a way to quit, and that path has to
+  // reach the same question rather than silently taking the default.
+  const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+  const { response } = await (parent
+    ? dialog.showMessageBox(parent, options)
+    : dialog.showMessageBox(options));
   return quitChoiceFor(spec, response);
+}
+
+/**
+ * Wear this app's own icon during development.
+ *
+ * A dev launch borrows Electron's bundle, so the dock otherwise shows the
+ * Electron logo next to a window that calls itself steamtrain. A packaged build
+ * carries the icon in its bundle and needs nothing here.
+ */
+function useOwnDockIcon(): void {
+  if (app.isPackaged || process.platform !== "darwin") return;
+  // Same layout the CLI entry is found through: `main.cjs` sits in
+  // `<root>/dist-electron/`, so the build resources are one level up.
+  const icon = join(__dirname, "..", "build", "icon.png");
+  if (existsSync(icon)) app.dock?.setIcon(icon);
 }
 
 async function main(): Promise<void> {
@@ -236,6 +289,7 @@ async function main(): Promise<void> {
   });
 
   await app.whenReady();
+  useOwnDockIcon();
 
   const saved = store.read();
   // Pruned at startup rather than on every menu build: one stat per entry, and
@@ -280,12 +334,14 @@ async function main(): Promise<void> {
 }
 
 app.on("activate", () => {
-  // macOS: clicking the dock icon with no window open should bring the app
-  // back rather than leave a running process with nothing to show.
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.show();
+  // macOS: the dock icon was clicked. Since closing the window quits, this is
+  // the app coming back from hidden, or a quit that was cancelled after the
+  // window had already gone — in both cases the engine is still there to show.
+  if (server || (mainWindow && !mainWindow.isDestroyed())) {
+    restoreWindow();
     return;
   }
+  // No engine to show — the last one failed or was stopped, so start over.
   if (projectDir) void switchProjectFromDock(projectDir);
 });
 
@@ -296,9 +352,15 @@ async function switchProjectFromDock(dir: string): Promise<void> {
 }
 
 app.on("window-all-closed", () => {
-  // Closing the window means quitting everywhere except macOS, where the app
-  // stays in the dock and `activate` brings it back.
-  if (process.platform !== "darwin") app.quit();
+  // Closing the window quits, on macOS too. The usual macOS convention — stay
+  // in the dock, wait for `activate` — assumes a lightweight app that can idle
+  // cheaply. This one holds a forked engine serving a project, and leaving that
+  // running behind a closed window is invisible rather than convenient: the
+  // user has quit, as far as they can tell, and the process is still there.
+  //
+  // Background runs are unaffected. They are detached by design and outlive the
+  // app either way; the quit prompt is what asks about them.
+  app.quit();
 });
 
 app.on("before-quit", () => {
@@ -334,6 +396,10 @@ app.on("will-quit", (event) => {
     if (outcome === "cancelled") {
       quitting = false;
       shutdown = undefined;
+      // The window may be gone already — closing it is one of the ways to reach
+      // here. Staying is only a meaningful answer if there is something to stay
+      // *in*.
+      restoreWindow();
     }
   });
 });

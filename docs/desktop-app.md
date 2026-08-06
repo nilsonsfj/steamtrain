@@ -16,6 +16,12 @@ npm run package:desktop     # builds a real installer into release/
 `dev:electron` runs `npm run build` first because the app runs the *built* CLI
 (`dist/index.js`), not the TypeScript sources.
 
+One thing a dev launch cannot fix: on macOS the **menu bar title still reads
+"Electron"**. That name comes from the bundle being run, and a dev launch borrows
+Electron's own. Everything the app can name for itself — the dock, its
+notifications, the directory it keeps state in — is set from `app.setName`, and a
+packaged build gets the menu bar too.
+
 ## Installing a build
 
 `npm run package:desktop` produces, in `release/`:
@@ -102,6 +108,19 @@ restores a position that still lands on an attached display. A window saved on
 an external monitor and reopened without it comes back centred rather than
 somewhere you cannot reach.
 
+**The topbar is the title bar** on macOS: the window's own is hidden so the UI
+reaches the top edge, which leaves the close/minimise/zoom controls sitting
+inside the app's first row. The page reserves room for them, and the bar's empty
+stretch becomes the handle for moving the window. Both halves of that agreement
+are named in `electron/shared/title-bar.ts` — the preload publishes the inset,
+`shell.css` spends it, keyed off a class that only exists inside the app.
+
+**Closing the window quits**, on macOS too. The convention there is to stay in
+the dock and wait for the icon to be clicked, which suits an app that idles
+cheaply; this one holds a forked engine serving a project, and leaving that
+running behind a closed window is invisible rather than convenient. Runs in
+flight are still asked about, and detached runs still survive either way.
+
 **Runs in flight are visible and survive quitting.** While anything is running
 the macOS dock icon carries a count badge (elsewhere, an indeterminate taskbar
 bar), and a finishing run raises a native notification whose click focuses the
@@ -135,6 +154,7 @@ The shell lives in `electron/` and builds separately from the CLI:
 | `tsup.electron.config.ts` | Builds `electron/` to `dist-electron/`. **CJS**, because a preload under `sandbox: true` must be CJS and a CJS main avoids Electron's ESM loader edge cases. `tsup.config.ts` is untouched, so the CLI bundle is unaffected. |
 | `tsconfig.electron.json` | Type-checks `electron/` only. Adds `DOM` to `lib` — required by Electron's own type definitions and by the preload, which runs in a renderer. It is deliberately *not* in the root tsconfig, so `src/` stays DOM-free and cannot silently accept browser globals. |
 | `electron-builder.yml` | Packaging. Unsigned macOS and Linux targets. |
+| `electron/shared/title-bar.ts` | The one place that decides the window controls are drawn over the page, and how much room that costs. Imported by both main (which hides the title bar) and the preload (which tells the page), because the two have to agree and live in different bundles. |
 | `build/icon.svg` | The app icon, drawn at 1024. `npm run build:icon` rasterises it to the committed `build/icon.png`, which electron-builder converts into `.icns`, `.ico` and the Linux size ladder. It is the favicon's locomotive redrawn for a size where a silhouette is no longer enough. |
 | `e2e/desktop.spec.ts` | The launch smoke test (below), run by `npm run test:e2e`. |
 | `tsconfig.e2e.json` | Type-checks `e2e/` and the Playwright config. Adds `DOM` for the same reason and with the same boundary as the Electron config: the specs evaluate code inside the page. |
@@ -156,9 +176,10 @@ npm run build && npm run build:electron
 npm run test:e2e                          # Linux: prefix with `xvfb-run -a`
 ```
 
-It asserts the two things a user notices first — the window comes up on the
-engine's origin with the UI actually rendered, and quitting leaves no engine
-behind — plus that the window geometry was persisted on the way out.
+It asserts the things a user notices first — the window comes up on the engine's
+origin with the UI actually rendered, closing it quits the app rather than
+leaving an engine behind, and the topbar keeps clear of the window controls —
+plus that the window geometry was persisted on the way out.
 
 Point `STEAMTRAIN_E2E_APP` at a packaged executable to run the same assertions
 against a real package rather than the source layout:
