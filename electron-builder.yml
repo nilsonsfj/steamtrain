@@ -1,0 +1,75 @@
+# Packaging for the desktop shell.
+#
+# Unsigned on purpose: signing and notarization are their own project (the
+# hardened runtime needs entitlements for the agent CLIs the engine spawns, plus
+# a paid developer account), and nothing here should wait on that. macOS will
+# quarantine the result — `docs/desktop-app.md` says how to open it anyway.
+#
+# The output directory is `release/`, not electron-builder's default `dist/`,
+# because `dist/` is where the CLI bundle already lives and this would overwrite
+# the very thing it is meant to package.
+
+appId: dev.steamtrain.desktop
+productName: steamtrain
+copyright: Copyright © steamtrain contributors
+
+directories:
+  output: release
+  buildResources: build
+
+# The shell, the engine bundle, and the manifest that resolves the production
+# dependency tree. `dist/index.js` is not self-contained — tsup keeps runtime
+# deps external — so electron-builder's own pruning of `node_modules` down to
+# `dependencies` is what makes the engine runnable inside the package.
+files:
+  - dist-electron/**/*
+  - dist/**/*
+  - package.json
+  - "!**/*.map"
+
+# The packaged app's entry point. `package.json`'s own `main` is the CLI —
+# that is what `import "steamtrain"` should resolve to, and it must stay that
+# way — but Electron reads the same field to find the app it should boot. This
+# rewrites it inside the package only; without it a packaged launch starts the
+# CLI, prints its usage text, and exits.
+extraMetadata:
+  main: dist-electron/main.cjs
+
+# No native modules, so there is nothing to rebuild and no reason to make
+# packaging depend on a working toolchain.
+npmRebuild: false
+
+mac:
+  category: public.app-category.developer-tools
+  icon: build/icon.png
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  # Explicitly off rather than merely absent, so enabling it later is a
+  # deliberate edit and not an accident of a machine having credentials.
+  identity: null
+  notarize: false
+
+dmg:
+  # Nothing but the app and the Applications symlink — a background image is a
+  # design job, and an unstyled dmg is better than a broken one.
+  title: ${productName}
+
+linux:
+  category: Development
+  icon: build/icon.png
+  # Without this the desktop entry and the running window are two unrelated
+  # things to the shell: the app gets a generic icon in the dock and does not
+  # group with its launcher. Absent a `desktopName`, this names the entry after
+  # `executableName` — `steamtrain`, which is exactly the WM_CLASS Electron
+  # sets, so the produced entry carries `StartupWMClass=steamtrain` and the
+  # association holds. electron-builder still warns that `desktopName` is unset;
+  # setting it to anything else would be the thing that breaks this.
+  syncDesktopName: true
+  # deb wants a maintainer, and the alternative is putting an `author` field in
+  # package.json that only exists to satisfy a packager.
+  maintainer: steamtrain contributors <noreply@steamtrain.dev>
+  synopsis: Run coding agents as managed workflows
+  target:
+    - AppImage
+    - deb

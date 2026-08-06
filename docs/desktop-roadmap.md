@@ -44,19 +44,23 @@ pure module (`recents`, `window-state`, `run-watch`, `shutdown`, `quit-prompt`)
 and `index.ts` only wires Electron events to them. What remains untested is the
 wiring itself, which is what M3's smoke test is for.
 
-## M3 — "it ships"
+## M3 — "it ships" ✅
 
 Turning a checkout you run with `npm run dev:electron` into something you can
 hand to someone.
 
-- **`electron-builder` packaging** — unsigned, macOS + Linux. `dmg` and
-  `AppImage`/`deb`. The engine bundle (`dist/`) has to be packed alongside the
-  shell, and `entry.ts` already resolves it from a layout that survives packing.
-- **Real icons.** Only the 32px `FAVICON_SVG` exists today; an app icon needs
-  the full macOS `icns` ladder drawn from something larger.
-- **A macOS CI leg**, plus Playwright `_electron` smoke coverage — enough to
-  catch "the app doesn't launch at all", which is exactly the class of bug #199
-  turned out to be, and the only gap M2's testing pattern cannot close.
+| Item | Why it was in M3 | Shipped as |
+|------|------------------|------------|
+| **Launch smoke coverage** | The one gap M2's testing pattern cannot close. Every decision is in a covered pure module, but nothing proved the app *starts* — which is exactly what #199 was. | `e2e/desktop.spec.ts`: the real app, launched, asserted to reach the engine's origin with the UI rendered, and to leave no engine behind when it quits. |
+| **`electron-builder` packaging** | Unsigned macOS `dmg` and Linux `AppImage`/`deb`, with the engine bundle packed alongside the shell. | [`electron-builder.yml`](../electron-builder.yml), `npm run package:desktop`. Output goes to `release/`, because the default is `dist/` — where the CLI bundle already lives. |
+| **Real icons** | Only the 32px `FAVICON_SVG` existed, and it is drawn for a size where a silhouette is all that survives. | `build/icon.svg` at 1024 — the same locomotive with the details a large rendering asks for — plus `scripts/build-icon.ts` so the committed PNG is reproducible from it. |
+| **A macOS CI leg** | Two platforms, and the one that matters most for a desktop app was the one CI never ran. | A `desktop` job on Linux *and* macOS: build, smoke test, package, smoke test the package. Real installers come from the on-demand `desktop-packages` workflow. |
+
+Ordering the smoke test first paid for itself immediately: the first packaged
+build launched the CLI instead of the shell, because Electron boots a package
+through `package.json`'s `main` and ours points at the CLI, as it must. Nothing
+in the source layout can reproduce that — the dev launch passes an explicit
+script path — which is why the suite now runs against the package as well.
 
 ## Deferred
 

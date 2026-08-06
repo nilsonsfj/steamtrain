@@ -4,16 +4,50 @@ An Electron shell around the [web UI](web-ui.md). Same engine, same cockpit — 
 just removes the terminal from the path to it: open the app, pick a project
 folder, watch the pipeline.
 
-This is **M2: usable**. One window at a time, no packaged installer yet, but it
-remembers your projects and your window, tells you when a run finishes, and asks
-before walking away from work in progress. Run it from a checkout:
+This is **M3: it ships**. One window at a time, but it remembers your projects
+and your window, tells you when a run finishes, asks before walking away from
+work in progress — and builds into an installer you can hand to someone.
 
 ```bash
 npm run dev:electron        # builds the CLI + shell, then launches Electron
+npm run package:desktop     # builds a real installer into release/
 ```
 
 `dev:electron` runs `npm run build` first because the app runs the *built* CLI
 (`dist/index.js`), not the TypeScript sources.
+
+## Installing a build
+
+`npm run package:desktop` produces, in `release/`:
+
+| Platform | Artifact |
+|----------|----------|
+| macOS | `steamtrain-<version>.dmg` (arm64 and x64) |
+| Linux | `steamtrain-<version>.AppImage` and `steamtrain_<version>_amd64.deb` |
+
+**The builds are unsigned**, so macOS quarantines them: the first open reports a
+damaged or unidentified app. Right-click → Open, or clear the flag directly:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/steamtrain.app
+```
+
+Signing and notarization are deliberately deferred — see the
+[roadmap](desktop-roadmap.md) for what they actually cost here, which is mostly
+entitlements for the agent CLIs the engine spawns rather than anything about
+the shell.
+
+Configuration lives in [`electron-builder.yml`](../electron-builder.yml). Two
+parts of it are load-bearing:
+
+- **`directories.output: release`.** electron-builder's default output is
+  `dist/`, which is where the CLI bundle already lives — the default would
+  package the app over the thing it is packaging.
+- **`extraMetadata.main`.** Electron boots a packaged app through
+  `package.json`'s `main`, which here points at the CLI, as it must for
+  `import "steamtrain"`. Without the override, a packaged launch starts the CLI,
+  prints its usage text and exits. That was the first packaged build's actual
+  behaviour, and it is why the smoke suite runs against the package too.
 
 ## How it works
 
@@ -100,8 +134,43 @@ The shell lives in `electron/` and builds separately from the CLI:
 |------|---------|
 | `tsup.electron.config.ts` | Builds `electron/` to `dist-electron/`. **CJS**, because a preload under `sandbox: true` must be CJS and a CJS main avoids Electron's ESM loader edge cases. `tsup.config.ts` is untouched, so the CLI bundle is unaffected. |
 | `tsconfig.electron.json` | Type-checks `electron/` only. Adds `DOM` to `lib` — required by Electron's own type definitions and by the preload, which runs in a renderer. It is deliberately *not* in the root tsconfig, so `src/` stays DOM-free and cannot silently accept browser globals. |
+| `electron-builder.yml` | Packaging. Unsigned macOS and Linux targets. |
+| `build/icon.svg` | The app icon, drawn at 1024. `npm run build:icon` rasterises it to the committed `build/icon.png`, which electron-builder converts into `.icns`, `.ico` and the Linux size ladder. It is the favicon's locomotive redrawn for a size where a silhouette is no longer enough. |
+| `e2e/desktop.spec.ts` | The launch smoke test (below), run by `npm run test:e2e`. |
+| `tsconfig.e2e.json` | Type-checks `e2e/` and the Playwright config. Adds `DOM` for the same reason and with the same boundary as the Electron config: the specs evaluate code inside the page. |
 
-`npm run typecheck` runs both configs.
+`npm run typecheck` runs all three configs — the root, `electron/`, and `e2e/`.
+
+## Testing the shell
+
+Every decision the main process makes lives in a pure module with unit tests:
+`recents.ts`, `window-state.ts`, `run-watch.ts`, `quit-prompt.ts`, `shutdown.ts`,
+`store.ts`. `index.ts` only wires Electron's events to them, which is what keeps
+the wiring small enough to read.
+
+What no unit test can see is whether that wiring works. So there is one small
+end-to-end suite that launches the real app:
+
+```bash
+npm run build && npm run build:electron
+npm run test:e2e                          # Linux: prefix with `xvfb-run -a`
+```
+
+It asserts the two things a user notices first — the window comes up on the
+engine's origin with the UI actually rendered, and quitting leaves no engine
+behind — plus that the window geometry was persisted on the way out.
+
+Point `STEAMTRAIN_E2E_APP` at a packaged executable to run the same assertions
+against a real package rather than the source layout:
+
+```bash
+npm run package:desktop:dir
+STEAMTRAIN_E2E_APP=release/linux-unpacked/steamtrain npm run test:e2e
+```
+
+Those are genuinely different apps. A package boots through `package.json`'s
+`main` instead of a script argument, runs the engine out of an asar archive, and
+uses its own binary as the Node runtime. CI runs both, on Linux and macOS.
 
 ## PATH: why the app can find your agents
 
@@ -137,14 +206,9 @@ The CSP is correspondingly narrower: every directive is now `'self'`.
 
 ## What isn't here yet
 
-- **M3** — `electron-builder` packaging, real icons, a macOS CI leg, and
-  Playwright `_electron` smoke coverage. The main-process wiring is the part
-  with no automated test: the decisions inside it are extracted into pure
-  modules (`shutdown.ts`, `window-state.ts`, `recents.ts`, `run-watch.ts`) and
-  covered, but nothing yet proves the app launches.
-- **Deferred** — code signing and notarization, auto-update, `steamtrain://`
-  deep links, tray, and Windows (which needs its own PATH and process-lifetime
-  work).
+Code signing and notarization, auto-update, `steamtrain://` deep links, a tray
+presence, and Windows — which needs its own PATH story and its own answer for
+detached runs, and is closer to a separate project than a port.
 
 [`desktop-roadmap.md`](desktop-roadmap.md) has the reasoning behind that
 ordering, and what is deliberately never happening.

@@ -9,6 +9,9 @@ release/
 
 # test / coverage
 coverage/
+test-results/
+playwright-report/
+blob-report/
 
 # env & secrets
 .env
