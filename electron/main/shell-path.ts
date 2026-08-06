@@ -151,6 +151,12 @@ async function readLoginShellPath(shell: string): Promise<string | undefined> {
 export interface ResolvedShellPath {
   path: string;
   source: "inherited" | "login-shell" | "fallback";
+  /**
+   * One human-readable sentence about how this PATH was arrived at, forwarded
+   * to the engine and shown in the setup panel. Prose, never parsed — the
+   * machine-readable answer is {@link ResolvedShellPath.source}.
+   */
+  detail: string;
 }
 
 /**
@@ -164,7 +170,11 @@ export async function resolveShellPath(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<ResolvedShellPath> {
   if (shouldSkipShellPath(env)) {
-    return { path: env.PATH ?? "", source: "inherited" };
+    return {
+      path: env.PATH ?? "",
+      source: "inherited",
+      detail: "Launched from a terminal, so the inherited PATH is already yours.",
+    };
   }
   const shell = env.SHELL;
   if (shell) {
@@ -175,8 +185,15 @@ export async function resolveShellPath(
       return {
         path: mergePath(shellPath, (env.PATH ?? "").split(delimiter)),
         source: "login-shell",
+        detail: `Read from ${shell} as a login shell.`,
       };
     }
   }
-  return { path: mergePath(env.PATH, fallbackPathDirs()), source: "fallback" };
+  return {
+    path: mergePath(env.PATH, fallbackPathDirs()),
+    source: "fallback",
+    detail: shell
+      ? `${shell} did not answer within ${SHELL_TIMEOUT_MS / 1000}s, so this is the GUI PATH plus the usual toolchain directories.`
+      : "No $SHELL is set, so this is the GUI PATH plus the usual toolchain directories.",
+  };
 }

@@ -288,6 +288,7 @@
     if (runnersNotice) { ST.modals.mbanner(runnersBanner, runnersNotice.text, runnersNotice.kind); runnersNotice = null; }
     wrap.appendChild(runnersBanner);
     wrap.appendChild(buildTallyStrip());
+    wrap.appendChild(buildPathDetail());
     wrap.appendChild(buildRunnerTable());
     wrap.appendChild(buildRunnerDials());
     wrap.appendChild(buildRunnersFoot());
@@ -333,6 +334,59 @@
       strip.appendChild(h("span", { class: "when", text: "read " + ST.relTime(S.doctorReadAt) }));
     }
     return strip;
+  }
+
+  /**
+   * The PATH the server resolved runner binaries against.
+   *
+   * "absent" is the one runner state whose cause is invisible from the row
+   * itself: the tool may genuinely not be installed, or it may be installed
+   * somewhere the server never looked. That second case is the normal failure
+   * of a desktop launch, where the app has to reconstruct the login shell's
+   * PATH, and without this there is nothing to check.
+   *
+   * Collapsed by default — it is a diagnostic, not something to read daily —
+   * but the summary carries the source so a wrong one is visible while closed.
+   */
+  function buildPathDetail() {
+    var info = S.doctorPath;
+    if (!info || !(info.entries || []).length) return h("div", { class: "path-detail-empty" });
+    var absent = runnerTally().absent;
+    var sourceLabel = {
+      "login-shell": "recovered from your login shell",
+      fallback: "fallback list — the login shell probe failed",
+      inherited: "inherited from the launching process"
+    }[info.source] || "inherited from the launching process";
+
+    var el = h("details", { class: "path-detail" + (info.source === "fallback" ? " warn" : "") });
+    var summary = h("summary", null,
+      h("span", { class: "label", text: "PATH" }),
+      h("span", { class: "src", text: sourceLabel }),
+      h("span", { class: "count", text: info.entries.length + " director" + (info.entries.length === 1 ? "y" : "ies") })
+    );
+    el.appendChild(summary);
+
+    if (absent) {
+      el.appendChild(h("p", { class: "hint", text:
+        absent + " runner" + (absent === 1 ? " is" : "s are") + " absent. If you know one is installed, check that its directory is in this list — " +
+        (info.desktop
+          ? "a desktop launch does not inherit your shell's PATH and has to reconstruct it."
+          : "otherwise set an absolute binary path for that runner.")
+      }));
+    }
+    if (info.detail) el.appendChild(h("p", { class: "hint", text: info.detail }));
+
+    var list = h("ol", { class: "path-list" });
+    info.entries.forEach(function (entry) {
+      // A directory on PATH that isn't on disk is dead weight and a strong hint
+      // that the PATH came from somewhere other than this machine's shell.
+      list.appendChild(h("li", { class: entry.exists ? "" : "missing" },
+        h("code", { text: entry.dir }),
+        entry.exists ? null : h("span", { class: "tag", text: "not found" })
+      ));
+    });
+    el.appendChild(list);
+    return el;
   }
 
   function buildCols() {
