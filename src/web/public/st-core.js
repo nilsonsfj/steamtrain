@@ -1501,12 +1501,16 @@ window.Steamtrain = (function () {
    * Fields fall back independently: an agent that reports tokens mid-flight but
    * prices only at the end (Claude Code) has live tokens and no live spend, and
    * the missing one must stay absent — a zero would read as free.
+   *
+   * A result that REPORTED a field wins outright, even reporting zero — a step
+   * the provider billed nothing for reads $0.0000, not the estimate the stream
+   * had accumulated before the real number arrived.
    */
   function stepUsage(s) {
     var r = (s && s.result) || null;
     var u = (s && s.usage) || null;
-    var cost = (r && r.costUsd) || (u && u.costUsd) || 0;
-    var tokens = (r && totalTokens(r.tokens)) || (u && totalTokens(u.tokens)) || 0;
+    var cost = r && typeof r.costUsd === "number" ? r.costUsd : (u && u.costUsd) || 0;
+    var tokens = r && r.tokens ? totalTokens(r.tokens) : (u && totalTokens(u.tokens)) || 0;
     return { costUsd: cost, tokens: tokens, live: !r && (cost > 0 || tokens > 0) };
   }
   // Per-model roll-up of leaf steps, biggest spender first (mirrors cost.ts).

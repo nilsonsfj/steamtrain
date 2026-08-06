@@ -107,6 +107,18 @@ describe("ST.stepUsage", () => {
     expect(use).toEqual({ costUsd: 0.004, tokens: 10, live: false });
   });
 
+  it("lets a result that billed zero say so, rather than the live estimate", () => {
+    // A cached or provider-comped step is genuinely $0.0000. Falling through to
+    // the estimate the stream accumulated before the real number landed would
+    // leave a finished step reporting a spend nobody was charged.
+    const use = stepUsage({
+      status: "done",
+      usage: { tokens: { output: 10 }, costUsd: 0.002 },
+      result: { costUsd: 0, tokens: { output: 40 } },
+    });
+    expect(use).toEqual({ costUsd: 0, tokens: 40, live: false });
+  });
+
   it("ignores an empty usage object", () => {
     expect(stepUsage({ status: "running", usage: {} })).toEqual({
       costUsd: 0,
