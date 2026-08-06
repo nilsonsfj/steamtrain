@@ -65,7 +65,8 @@ function scratchDir(prefix: string): string {
  */
 function sandboxArgs(): string[] {
   const forced = process.env.STEAMTRAIN_E2E_NO_SANDBOX === "1";
-  return forced || process.getuid?.() === 0 ? ["--no-sandbox"] : [];
+  const asRoot = process.getuid?.() === 0;
+  return forced || asRoot ? ["--no-sandbox"] : [];
 }
 
 /** `process.env` minus the undefined values, which Playwright will not take. */

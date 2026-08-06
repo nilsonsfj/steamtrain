@@ -36,6 +36,11 @@ async function main(): Promise<void> {
       viewport: { width: SIZE, height: SIZE },
       deviceScaleFactor: 1,
     });
+    // The SVG is inlined rather than loaded, so its markup lands in the page
+    // verbatim. That is safe for exactly one reason: `SOURCE` is a file in this
+    // repository. Pointing this at an SVG from anywhere else would need a real
+    // sanitiser first.
+    //
     // Transparent outside the squircle: the rounded corners have to be actual
     // transparency, not the page's white, or macOS renders a white frame.
     await page.setContent(

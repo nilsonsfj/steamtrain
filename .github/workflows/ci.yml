@@ -76,6 +76,12 @@ jobs:
       # `--dir` rather than a dmg or an AppImage: producing the installer
       # exercises packaging tools, not the app. Real installers are built by
       # the desktop-packages workflow.
+      #
+      # `--arm64` narrows macOS to the runner's own architecture, because this
+      # job only needs something it can launch. The config asks for arm64 *and*
+      # x64, and desktop-packages.yml deliberately lets it — an artifact someone
+      # downloads has to cover both Macs, but a second arch here would be time
+      # spent building an app this job cannot run.
       - name: Package the app
         run: bunx electron-builder --dir --publish never ${{ runner.os == 'macOS' && '--arm64' || '' }}
 
