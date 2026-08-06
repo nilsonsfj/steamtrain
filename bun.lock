@@ -27,6 +27,7 @@
     },
   },
   "trustedDependencies": [
+    "electron",
     "@biomejs/biome",
   ],
   "packages": {
