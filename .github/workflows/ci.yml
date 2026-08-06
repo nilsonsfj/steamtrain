@@ -32,3 +32,82 @@ jobs:
         run: |
           bun run build
           node dist/index.js --version
+
+  # The desktop shell's own leg. Everything the main process decides is unit
+  # tested against a pure module; what only a real launch can prove is that the
+  # wiring holds — and that the packaged app, which boots differently from the
+  # source layout, launches at all.
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    # Electron's own process sandbox cannot start on the Linux runners — the
+    # `chrome-sandbox` helper npm installs is not owned by root, so it cannot
+    # elevate. It is not what this suite is testing, and the macOS leg runs
+    # with everything intact.
+    # (`matrix`, not `runner`: the runner context is not available this early.)
+    env:
+      STEAMTRAIN_E2E_NO_SANDBOX: ${{ startsWith(matrix.os, 'ubuntu') && '1' || '' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Ensure a display is available
+        if: runner.os == 'Linux'
+        run: command -v xvfb-run || (sudo apt-get update && sudo apt-get install -y xvfb)
+
+      - name: Build the engine and the shell
+        run: |
+          bun run build
+          bun run build:electron
+
+      # Electron needs a display on Linux; macOS runners have one.
+      - name: Smoke-test the app
+        run: ${{ runner.os == 'Linux' && 'xvfb-run -a ' || '' }}bun run test:e2e
+
+      # `--dir` rather than a dmg or an AppImage: producing the installer
+      # exercises packaging tools, not the app. Real installers are built by
+      # the desktop-packages workflow.
+      #
+      # `--arm64` narrows macOS to the runner's own architecture, because this
+      # job only needs something it can launch. The config asks for arm64 *and*
+      # x64, and desktop-packages.yml deliberately lets it — an artifact someone
+      # downloads has to cover both Macs, but a second arch here would be time
+      # spent building an app this job cannot run.
+      - name: Package the app
+        run: bunx electron-builder --dir --publish never ${{ runner.os == 'macOS' && '--arm64' || '' }}
+
+      - name: Smoke-test the packaged app
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            # electron-builder names the directory after the arch it built, so
+            # this glob should match exactly one thing — `mac-arm64`, given the
+            # `--arm64` above. Matching several would mean the arch assumption
+            # has changed, and picking one of them at random would smoke-test
+            # an app nobody asked for. Fail instead.
+            APP=$(ls -d release/mac*/steamtrain.app/Contents/MacOS/steamtrain)
+            if [ "$(printf '%s\n' "$APP" | wc -l)" -ne 1 ]; then
+              echo "expected exactly one packaged app, found:" && printf '%s\n' "$APP"
+              exit 1
+            fi
+            STEAMTRAIN_E2E_APP="$APP" bun run test:e2e
+          else
+            STEAMTRAIN_E2E_APP=release/linux-unpacked/steamtrain xvfb-run -a bun run test:e2e
+          fi
+
+      - name: Upload failure traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ matrix.os }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7

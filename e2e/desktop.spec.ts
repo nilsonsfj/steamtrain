@@ -1,0 +1,222 @@
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createConnection } from "node:net";
+import { tmpdir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test";
+import { STATE_FILE } from "../electron/main/store";
+
+/**
+ * Does the app actually launch?
+ *
+ * Every decision the main process makes lives in a pure module with unit tests
+ * — recents, window geometry, run polling, the shutdown sequence. What none of
+ * them can see is the wiring: whether `index.ts` bolts those modules to the
+ * Electron events correctly, whether the CLI bundle is where the shell looks
+ * for it, and whether the window ends up showing the UI rather than an error
+ * page. That gap shipped once already, as #199.
+ *
+ * So this suite is small and end-to-end on purpose. It launches the real built
+ * app, against a real forked engine, and asserts the two things a user would
+ * notice first: the UI appears, and quitting leaves nothing behind.
+ */
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const MAIN = join(ROOT, "dist-electron", "main.cjs");
+const CLI = join(ROOT, "dist", "index.js");
+
+/**
+ * A packaged executable to test instead of the built source layout.
+ *
+ * The two are not the same app: a package boots through `package.json`'s `main`
+ * rather than an explicit script argument, runs the engine out of an asar
+ * archive, and resolves its own binary as the Node runtime. Every one of those
+ * can break without the dev layout noticing — the first packaged build of this
+ * app started the CLI instead of the shell — so CI points this at the artifact
+ * it just produced and runs the same assertions again.
+ */
+const PACKAGED = process.env.STEAMTRAIN_E2E_APP;
+
+declare global {
+  interface Window {
+    steamtrainDesktop?: { platform: string; version: string };
+  }
+}
+
+/** Temp directories to remove once the suite is done. */
+const scratch: string[] = [];
+
+function scratchDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  scratch.push(dir);
+  return dir;
+}
+
+/**
+ * Chromium's setuid sandbox needs conditions a CI box often cannot offer: it
+ * refuses to run as root, and the `chrome-sandbox` helper npm installs is not
+ * owned by root, so it cannot elevate. Both are environment facts rather than
+ * anything about this app.
+ *
+ * Turning it off costs nothing this suite is testing. It disables the *browser
+ * process* sandbox only; the renderer still runs under the `sandbox: true`
+ * preference the app sets for itself, which is the one that matters here and
+ * which the macOS leg exercises with everything intact.
+ */
+function sandboxArgs(): string[] {
+  const forced = process.env.STEAMTRAIN_E2E_NO_SANDBOX === "1";
+  const asRoot = process.getuid?.() === 0;
+  return forced || asRoot ? ["--no-sandbox"] : [];
+}
+
+/** `process.env` minus the undefined values, which Playwright will not take. */
+function childEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) env[key] = value;
+  }
+  // `resolveShellPath` reads a set TERM as "already launched from a terminal"
+  // and skips the login-shell probe. That is what we want: the probe spawns the
+  // user's real shell, which is neither this suite's subject nor reproducible
+  // across machines.
+  env.TERM ??= "xterm";
+  return env;
+}
+
+interface Launched {
+  app: ElectronApplication;
+  /** The project directory the app was seeded to reopen. */
+  project: string;
+  /** Electron `userData`, so a test can read back what the app persisted. */
+  userData: string;
+  /** Everything the main process and the forked engine have written so far. */
+  output(): string;
+}
+
+const running: Launched[] = [];
+
+async function launchApp(): Promise<Launched> {
+  const project = scratchDir("steamtrain-project-");
+  const userData = scratchDir("steamtrain-userdata-");
+  // Seeding the state file is how the app is told which project to open: it
+  // reopens `recents[0]` and only shows the folder picker when there is nothing
+  // to return to. Without this the test would block on a native modal.
+  writeFileSync(join(userData, STATE_FILE), JSON.stringify({ recents: [project] }));
+
+  // A packaged app has no script argument — it boots whatever its own manifest
+  // names as `main`, which is the part worth testing.
+  const args = [...(PACKAGED ? [] : [MAIN]), `--user-data-dir=${userData}`, ...sandboxArgs()];
+  const app = await electron.launch({
+    ...(PACKAGED ? { executablePath: PACKAGED } : {}),
+    args,
+    env: childEnv(),
+  });
+
+  const chunks: string[] = [];
+  const child = app.process();
+  child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk.toString()));
+  child.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk.toString()));
+
+  const launched: Launched = { app, project, userData, output: () => chunks.join("") };
+  running.push(launched);
+  return launched;
+}
+
+/** Is anything still listening on this port? */
+function portAccepts(port: number): Promise<boolean> {
+  return new Promise((resolveOpen) => {
+    const socket = createConnection({ host: "127.0.0.1", port });
+    const settle = (open: boolean): void => {
+      socket.destroy();
+      resolveOpen(open);
+    };
+    socket.once("connect", () => settle(true));
+    socket.once("error", () => settle(false));
+    socket.setTimeout(2_000, () => settle(false));
+  });
+}
+
+test.beforeAll(() => {
+  if (PACKAGED) {
+    if (existsSync(PACKAGED)) return;
+    throw new Error(`STEAMTRAIN_E2E_APP points at ${PACKAGED}, which does not exist.`);
+  }
+  for (const path of [CLI, MAIN]) {
+    if (existsSync(path)) continue;
+    throw new Error(
+      `${path} is missing.\nRun \`npm run build && npm run build:electron\` before the e2e suite.`,
+    );
+  }
+});
+
+test.afterEach(async () => {
+  // `test.info()` rather than the hook's fixtures argument: Playwright insists
+  // that argument be a destructuring pattern, and there is no fixture to take.
+  const testInfo = test.info();
+  for (const launched of running) {
+    // The app's own stdout carries the engine's banner and any stack trace, and
+    // is the only useful thing to look at when a launch assertion fails.
+    if (testInfo.status !== testInfo.expectedStatus) {
+      await testInfo.attach("app-output", {
+        body: launched.output(),
+        contentType: "text/plain",
+      });
+    }
+    await launched.app.close().catch(() => {});
+  }
+  running.length = 0;
+});
+
+test.afterAll(() => {
+  for (const dir of scratch) rmSync(dir, { recursive: true, force: true });
+  scratch.length = 0;
+});
+
+test("launches into the last project and shows the web UI", async () => {
+  const { app, project } = await launchApp();
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  // Loopback HTTP, not `file://` — the server enforces same-origin on every
+  // mutation, so a window that ended up anywhere else would 403 on first use.
+  expect(page.url()).toMatch(/^http:\/\/127\.0\.0\.1:\d+\//);
+  // The client puts the project in the title, so this is also the assertion
+  // that the app reopened the *seeded* recent rather than picking its own.
+  await expect(page).toHaveTitle(`steamtrain · ${basename(project)}`);
+  await expect(page.locator("#topbar .wordmark")).toHaveText("steamtrain");
+
+  // The rail scaffolding is built by the client bundle, so its presence means
+  // the hashed static assets resolved and the scripts ran.
+  await expect(page.locator("#wflist")).toHaveCount(1);
+
+  // A health chip needs a round trip to `/api/doctor` and back into the DOM:
+  // shell → forked engine → REST → client, asserted in one place.
+  await expect(page.locator("#health .chip").first()).toBeVisible();
+
+  // The preload bridge is the one thing the renderer cannot get over HTTP.
+  const bridge = await page.evaluate(() => window.steamtrainDesktop);
+  expect(bridge?.platform).toBe(process.platform);
+});
+
+test("stops the engine and saves its window when it quits", async () => {
+  const { app, userData } = await launchApp();
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  const port = Number(new URL(page.url()).port);
+  expect(port).toBeGreaterThan(0);
+  expect(await portAccepts(port)).toBe(true);
+
+  await app.close();
+
+  // The engine is a forked child, so nothing stops it unless `will-quit` gets
+  // all the way through — the invariant that shipped broken in M1.
+  await expect.poll(() => portAccepts(port), { timeout: 20_000 }).toBe(false);
+
+  // Geometry is captured on `close`, which is the only path that runs when the
+  // app is quit outright rather than having its window closed first.
+  const saved: unknown = JSON.parse(readFileSync(join(userData, STATE_FILE), "utf8"));
+  const window = (saved as { window?: { width?: unknown; height?: unknown } }).window;
+  expect(typeof window?.width).toBe("number");
+  expect(typeof window?.height).toBe("number");
+});
