@@ -6,6 +6,7 @@ import {
   fallbackPathDirs,
   mergePath,
   parsePathFromEnvOutput,
+  resolveShellPath,
   shouldSkipShellPath,
 } from "../electron/main/shell-path";
 
@@ -121,5 +122,23 @@ describe("shouldSkipShellPath", () => {
   it("resolves when there is no terminal, as in a Finder launch", () => {
     // Guarded: on Windows the login-shell trick does not apply at all.
     expect(shouldSkipShellPath({})).toBe(process.platform === "win32");
+  });
+});
+
+describe("resolveShellPath", () => {
+  // The other two branches spawn a login shell, which is exactly what these
+  // tests exist to avoid; the terminal branch is the deterministic one.
+  it("keeps the inherited PATH when launched from a terminal", async () => {
+    const resolved = await resolveShellPath({ TERM: "xterm-256color", PATH: "/usr/bin" });
+    expect(resolved).toEqual({
+      path: "/usr/bin",
+      source: "inherited",
+      detail: expect.stringContaining("terminal"),
+    });
+  });
+
+  it("always carries a detail sentence, since the setup panel shows it verbatim", async () => {
+    const resolved = await resolveShellPath({ TERM: "xterm", PATH: "/usr/bin" });
+    expect(resolved.detail.length).toBeGreaterThan(0);
   });
 });

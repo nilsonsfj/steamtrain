@@ -23,21 +23,26 @@ Four supporting changes landed in `src/` — a `--port 0` deep-link fix that
 affected the CLI too, the `--desktop-ready-json` handshake, containment of
 `ELECTRON_RUN_AS_NODE`, and a runner seam in `spawnDetachedRunner`.
 
-## M2 — "it's pleasant"
+## M2 — "it's pleasant" ✅
 
 The distance between *works* and *would actually replace the terminal*. Nothing
-here is architectural; it is the layer of finish that makes a tool feel like an
+here was architectural; it is the layer of finish that makes a tool feel like an
 app rather than a browser pointed at localhost.
 
-| Item | Why it's in M2 |
-|------|----------------|
-| **Project switcher and recents** | The folder dialog is currently the entire project-selection story, and cancelling it at launch quits the app. Needs a picker surface, a persisted recents list, and macOS dock-relaunch (`activate`) behavior. |
-| **Window state persistence** | Size, position and maximized state across launches. Cheap, and its absence is noticed immediately. |
-| **Graceful "detach and quit"** | Quitting mid-run leaves the detached runner going. That is correct — detached runs are meant to outlive the UI — but it happens silently. The user should be told and given the choice. |
-| **Self-hosted fonts** | The page pulls IBM Plex from Google Fonts. A packaged offline app falls back silently *and* every launch makes a third-party request. The only item here that is a user-visible defect rather than a missing nicety, and it fixes the web UI too. |
-| **OS notifications and dock progress** | Run completion should reach the user when the window is behind something else. |
-| **Doctor `effectivePath` diagnostics** | The setup panel should show the `PATH` the engine actually resolved and where it came from. Without it, a `shell-path.ts` failure is completely opaque — the user sees "agent missing" for an agent they know is installed. |
-| **`will-quit` lifecycle coverage** | The shutdown path is the one piece of main-process logic with no test, and it has already shipped one bug (a failed teardown left the app unquittable). |
+| Item | Why it was in M2 | Shipped as |
+|------|------------------|------------|
+| **Project switcher and recents** | The folder dialog was the entire project-selection story, and cancelling it at launch quit the app. | Last project reopens on launch; File → Open Recent for the last eight; macOS `activate` reopens rather than stranding a running process. |
+| **Window state persistence** | Size, position and maximized state across launches. Cheap, and its absence is noticed immediately. | `window-state.ts`, which only restores a position that still lands on an attached display. |
+| **Graceful "detach and quit"** | Quitting mid-run left the detached runner going. That is correct — detached runs are meant to outlive the UI — but it happened silently. | A three-way prompt: leave running (default), stop runs, or don't quit. |
+| **Self-hosted fonts** | The page pulled IBM Plex from Google Fonts. A packaged offline app fell back silently *and* every launch made a third-party request. The only user-visible defect on the list, and fixing it fixed the web UI too. | Latin subsets under `/static/fonts/`; every CSP directive is now `'self'`. |
+| **OS notifications and dock progress** | Run completion should reach the user when the window is behind something else. | Native notification that deep-links to the run, plus a dock badge counting active runs. |
+| **Doctor `effectivePath` diagnostics** | Without it, a `shell-path.ts` failure was opaque — the user saw "agent missing" for an agent they knew was installed. | `/api/doctor` reports the searched directories and their source; Settings → Runners shows them. |
+| **`will-quit` lifecycle coverage** | The shutdown path was the one piece of main-process logic with no test, and it had already shipped a bug that left the app unquittable. | `shutdown.ts` — the sequence extracted from the event wiring, with the "must always reach `quit()`" invariant tested against each failing step. |
+
+The pattern that made M2 testable is worth keeping: every decision lives in a
+pure module (`recents`, `window-state`, `run-watch`, `shutdown`, `quit-prompt`)
+and `index.ts` only wires Electron events to them. What remains untested is the
+wiring itself, which is what M3's smoke test is for.
 
 ## M3 — "it ships"
 
@@ -51,7 +56,7 @@ hand to someone.
   the full macOS `icns` ladder drawn from something larger.
 - **A macOS CI leg**, plus Playwright `_electron` smoke coverage — enough to
   catch "the app doesn't launch at all", which is exactly the class of bug #199
-  turned out to be.
+  turned out to be, and the only gap M2's testing pattern cannot close.
 
 ## Deferred
 

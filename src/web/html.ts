@@ -29,8 +29,18 @@ export const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0
 export interface WebAsset {
   /** Filename inside `src/web/public/`, also its `/static/<file>` URL. */
   file: string;
-  kind: "css" | "js";
+  kind: "css" | "js" | "font";
   mime: string;
+  /**
+   * For `kind: "font"`, the `@font-face` this file backs. {@link renderIndex}
+   * generates the rule rather than a hand-written stylesheet doing it, so the
+   * `src:` URL carries the same content hash as every other asset.
+   */
+  font?: {
+    family: string;
+    /** A `font-weight` value — a single weight, or a range for a variable font. */
+    weight: string;
+  };
 }
 
 /**
@@ -65,6 +75,29 @@ export const WEB_ASSETS: readonly WebAsset[] = [
   { file: "st-plan.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "st-inspector.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "st-boot.js", kind: "js", mime: "text/javascript; charset=utf-8" },
+  // Self-hosted so the page has no third-party origin at all: the desktop app
+  // has to render correctly offline, and a UI that reports on private
+  // repositories should not announce every launch to a font CDN. These are the
+  // Latin subsets only (~60 KB total) — see `fonts/LICENSE.txt`.
+  {
+    file: "fonts/ibm-plex-sans-latin.woff2",
+    kind: "font",
+    mime: "font/woff2",
+    // One variable file covers the whole 400-700 range the UI uses.
+    font: { family: "IBM Plex Sans", weight: "400 700" },
+  },
+  {
+    file: "fonts/ibm-plex-mono-400-latin.woff2",
+    kind: "font",
+    mime: "font/woff2",
+    font: { family: "IBM Plex Mono", weight: "400" },
+  },
+  {
+    file: "fonts/ibm-plex-mono-500-latin.woff2",
+    kind: "font",
+    mime: "font/woff2",
+    font: { family: "IBM Plex Mono", weight: "500" },
+  },
 ];
 
 /** Content-hash revision per asset filename, e.g. `{ "tokens.css": "a1b2…" }`. */
@@ -84,6 +117,14 @@ export function renderIndex(revs: PageAssetRevisions): string {
   const scripts = WEB_ASSETS.filter((a) => a.kind === "js")
     .map((a) => `<script src="${url(a.file)}" defer></script>`)
     .join("\n");
+  // Inline rather than a `fonts.css` file, because the rules have to reference
+  // the hashed asset URLs and only this function knows the revisions.
+  const fontFaces = WEB_ASSETS.filter((a) => a.kind === "font" && a.font)
+    .map(
+      (a) =>
+        `@font-face{font-family:"${a.font?.family}";font-style:normal;font-weight:${a.font?.weight};font-display:swap;src:url("${url(a.file)}") format("woff2")}`,
+    )
+    .join("\n");
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -93,9 +134,9 @@ export function renderIndex(revs: PageAssetRevisions): string {
 <meta name="theme-color" content="#0c0e11" />
 <title>steamtrain</title>
 <link rel="icon" href="data:image/svg+xml,${encodeURIComponent(FAVICON_SVG)}" />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" />
+<style>
+${fontFaces}
+</style>
 ${styles}
 </head>
 <body>

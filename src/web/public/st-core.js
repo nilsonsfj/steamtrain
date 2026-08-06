@@ -72,6 +72,9 @@ window.Steamtrain = (function () {
     startedAt: 0, timer: null,
     runState: null,
     rafQueued: false, draftAbort: null, doctor: [], apiDoctor: [], doctorReadAt: 0,
+    // Reported by /api/doctor: the PATH the server searched, and where it came
+    // from. Explains "absent" runners; see buildPathDetail in st-settings.js.
+    doctorPath: null,
     // Signature of the last agent/API doctor result (pollDoctor). The catalog's
     // blocked/re-route annotations are server-computed from health, so a change
     // here — and only a change — re-fetches the workflow list.
@@ -1158,6 +1161,10 @@ window.Steamtrain = (function () {
       var err = r.body.doctorError;
       S.doctor = list;
       S.apiDoctor = apis;
+      // The PATH the server resolved binaries against. Only read when a runner
+      // turns up absent, but carried on every poll so it is never staler than
+      // the results it explains.
+      S.doctorPath = r.body.path || null;
       // When this client last read a probe snapshot. GET /api/doctor returns
       // the server's last snapshot rather than re-probing, so this is "how
       // fresh is what you're looking at", not "when were the probes run" —
@@ -1234,6 +1241,7 @@ window.Steamtrain = (function () {
       if (r.status === 200 && r.body) {
         S.doctor = r.body.doctor || [];
         S.apiDoctor = r.body.apis || [];
+        S.doctorPath = r.body.path || null;
         S.doctorReadAt = Date.now();
         ST.shell.renderHealth(S.doctor, S.apiDoctor, r.body.doctorError || null);
         applyHealth();

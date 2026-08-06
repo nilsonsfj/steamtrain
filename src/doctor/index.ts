@@ -8,6 +8,12 @@ export {
   doctorVersionCheckPids,
 } from "./doctor";
 export {
+  type EffectivePath,
+  type PathEntry,
+  type PathSource,
+  describeEffectivePath,
+} from "./effective-path";
+export {
   type ApiDoctorStatus,
   type ApiDoctorResult,
   checkApi,

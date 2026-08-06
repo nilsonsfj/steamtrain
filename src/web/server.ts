@@ -21,7 +21,13 @@ import {
   userConfigExists,
 } from "../config";
 import { saveProjectConfig } from "../config/project-config";
-import { type ApiDoctorResult, type DoctorResult, runApiDoctor, runDoctor } from "../doctor";
+import {
+  type ApiDoctorResult,
+  type DoctorResult,
+  describeEffectivePath,
+  runApiDoctor,
+  runDoctor,
+} from "../doctor";
 import { STEAMTRAIN_VERSION } from "../version";
 
 import { Orchestrator } from "../orchestrator";
@@ -1031,17 +1037,16 @@ async function handle(
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
       "x-content-type-options": "nosniff",
-      // Scripts are now external; only inline `style="..."` attributes remain
-      // (marking `style-src 'unsafe-inline'` keeps those painting).
-      // Google Fonts: stylesheet from fonts.googleapis.com, files from
-      // fonts.gstatic.com — required for Space Grotesk / IBM Plex to paint.
+      // Scripts are now external; inline `style="..."` attributes and the
+      // generated @font-face block remain, so `style-src 'unsafe-inline'`
+      // stays. Every origin is 'self': the fonts are served from /static/
+      // rather than a CDN, so the page reaches no third party at all.
       // frame-ancestors 'none' (mirrored by X-Frame-Options for older
       // browsers) blocks clickjacking; base-uri/object-src/form-action close
       // the remaining injection-amplification vectors.
       "content-security-policy":
         "default-src 'self'; script-src 'self'; " +
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-        "font-src 'self' https://fonts.gstatic.com; " +
+        "style-src 'self' 'unsafe-inline'; font-src 'self'; " +
         "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; " +
         "base-uri 'none'; form-action 'self'; object-src 'none'",
       "x-frame-options": "DENY",
@@ -1671,6 +1676,10 @@ async function handle(
     sendJson(res, 200, {
       doctor: deps.doctor?.() ?? [],
       apis: deps.apiDoctor?.() ?? [],
+      // Computed per request rather than snapshotted: PATH is read live by
+      // every `resolveBinary` call, so a stale copy could disagree with the
+      // results it is meant to explain.
+      path: describeEffectivePath(),
       ...(doctorError ? { doctorError } : {}),
     });
     return;
@@ -1710,7 +1719,7 @@ async function handle(
       // network probe fails; fall back to the last known API snapshot.
       apis = deps.apiDoctor?.() ?? [];
     }
-    sendJson(res, 200, { doctor: results, apis });
+    sendJson(res, 200, { doctor: results, apis, path: describeEffectivePath() });
     return;
   }
 

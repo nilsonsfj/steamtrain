@@ -1,4 +1,5 @@
 import { Menu, type MenuItemConstructorOptions, app } from "electron";
+import type { RecentLabel } from "./recents";
 import { openExternal } from "./window";
 
 /**
@@ -11,10 +12,41 @@ import { openExternal } from "./window";
 export interface MenuOptions {
   /** Prompt for a project directory and switch to it. */
   onOpenProject: () => void;
+  /** Switch to an already-known project directory. */
+  onOpenRecent: (dir: string) => void;
+  /** Forget the recents list. */
+  onClearRecents: () => void;
+  /** Recent projects, most recent first, already labelled for display. */
+  recents: readonly RecentLabel[];
+  /** The project currently open, so its entry can be marked rather than repeated. */
+  currentProject?: string;
 }
 
 export function buildMenu(options: MenuOptions): void {
   const isMac = process.platform === "darwin";
+
+  // Rebuilt whenever the recents change, so the submenu is constructed from the
+  // list rather than mutated in place — there is no state here to drift.
+  const recentItems: MenuItemConstructorOptions[] =
+    options.recents.length === 0
+      ? [{ label: "No recent projects", enabled: false }]
+      : [
+          ...options.recents.map(
+            (recent): MenuItemConstructorOptions => ({
+              label: recent.label,
+              // The open project stays listed — its position is information —
+              // but picking it would tear down and re-fork the engine for no
+              // reason, so it is checked rather than clickable.
+              type: "checkbox",
+              checked: recent.path === options.currentProject,
+              enabled: recent.path !== options.currentProject,
+              toolTip: recent.path,
+              click: () => options.onOpenRecent(recent.path),
+            }),
+          ),
+          { type: "separator" },
+          { label: "Clear Menu", click: () => options.onClearRecents() },
+        ];
 
   const template: MenuItemConstructorOptions[] = [
     ...(isMac
@@ -43,6 +75,7 @@ export function buildMenu(options: MenuOptions): void {
           accelerator: "CmdOrCtrl+O",
           click: () => options.onOpenProject(),
         },
+        { label: "Open Recent", submenu: recentItems },
         { type: "separator" },
         isMac ? { role: "close" } : { role: "quit" },
       ],

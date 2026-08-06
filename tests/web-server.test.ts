@@ -233,21 +233,23 @@ describe("web server", () => {
     for (const asset of WEB_ASSETS) {
       const url = `/static/${asset.file}?v=`;
       if (asset.kind === "css") expect(html).toContain(`<link rel="stylesheet" href="${url}`);
-      else expect(html).toContain(`<script src="${url}`);
+      else if (asset.kind === "js") expect(html).toContain(`<script src="${url}`);
+      else expect(html).toContain(`src:url("${url}`);
     }
     // The inline bundle must not be served on the page anymore.
     expect(html).not.toContain("BEGIN_REDUCER_BUNDLE");
     // Scripts: 'unsafe-inline' removed so we rely on external static assets
-    // shipped under script-src 'self'. Display fonts load from Google Fonts.
+    // shipped under script-src 'self'.
     const csp = res.headers.get("content-security-policy") ?? "";
     expect(csp).toContain("script-src 'self'");
     expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
-    expect(csp).toContain("https://fonts.googleapis.com");
-    expect(csp).toContain("font-src 'self' https://fonts.gstatic.com");
-    expect(html).toContain("fonts.googleapis.com/css2");
-    // Space Grotesk was dropped from the font request — the new design uses
-    // IBM Plex Sans for headings.
-    expect(html).not.toContain("Space+Grotesk");
+    // Fonts are served from /static/, so the page reaches no third-party
+    // origin — the policy has no remote host in it at all.
+    expect(csp).toContain("font-src 'self'");
+    expect(csp).not.toContain("https://");
+    expect(html).not.toContain("fonts.googleapis.com");
+    expect(html).not.toContain("fonts.gstatic.com");
+    expect(html).toContain('@font-face{font-family:"IBM Plex Sans"');
     expect(html).toContain('id="announcer"');
     expect(html).toContain('aria-live="polite"');
   });
@@ -333,7 +335,9 @@ describe("web server", () => {
       expect(res.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
       expect(res.headers.get("content-type")).toBe(asset.mime);
       expect(res.headers.get("x-content-type-options")).toBe("nosniff");
-      const body = await res.text();
+      // Bytes, not text — the fonts are binary and `res.text()` would mangle
+      // them into a hash that matches nothing.
+      const body = Buffer.from(await res.arrayBuffer());
       const rev = createHash("sha256").update(body).digest("hex").slice(0, 16);
       expect(html).toContain(`/static/${asset.file}?v=${rev}`);
     }
@@ -1795,6 +1799,25 @@ describe("web server", () => {
     expect(body.doctor).toBeDefined();
     // No error field when doctor succeeds (doctor is injected as a function)
     expect(body.doctorError).toBeUndefined();
+  });
+
+  it("reports the PATH it resolves runner binaries against", async () => {
+    // "absent" is the one runner state whose cause is invisible from the row,
+    // and the desktop app's reconstructed PATH is the usual reason for a wrong
+    // one — so the doctor has to say what it actually searched.
+    const { server } = makeServer(new FakeHost(demoSpec(), happyRun));
+    const base = await start(server);
+    const body = (await (await fetch(`${base}/api/doctor`)).json()) as {
+      path: { entries: { dir: string; exists: boolean }[]; source: string; desktop: boolean };
+    };
+    expect(body.path.entries.length).toBeGreaterThan(0);
+    expect(body.path.entries[0]).toMatchObject({
+      dir: expect.any(String),
+      exists: expect.any(Boolean),
+    });
+    // Nothing set STEAMTRAIN_PATH_SOURCE in this process, so it is inherited.
+    expect(body.path.source).toBe("inherited");
+    expect(body.path.desktop).toBe(false);
   });
 
   it("aborts run after workflowTimeoutSec (M16)", async () => {
