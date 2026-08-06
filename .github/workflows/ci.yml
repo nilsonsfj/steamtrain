@@ -82,7 +82,16 @@ jobs:
       - name: Smoke-test the packaged app
         run: |
           if [ "$RUNNER_OS" = "macOS" ]; then
-            APP=$(ls -d release/mac*/steamtrain.app/Contents/MacOS/steamtrain | head -1)
+            # electron-builder names the directory after the arch it built, so
+            # this glob should match exactly one thing — `mac-arm64`, given the
+            # `--arm64` above. Matching several would mean the arch assumption
+            # has changed, and picking one of them at random would smoke-test
+            # an app nobody asked for. Fail instead.
+            APP=$(ls -d release/mac*/steamtrain.app/Contents/MacOS/steamtrain)
+            if [ "$(printf '%s\n' "$APP" | wc -l)" -ne 1 ]; then
+              echo "expected exactly one packaged app, found:" && printf '%s\n' "$APP"
+              exit 1
+            fi
             STEAMTRAIN_E2E_APP="$APP" bun run test:e2e
           else
             STEAMTRAIN_E2E_APP=release/linux-unpacked/steamtrain xvfb-run -a bun run test:e2e
