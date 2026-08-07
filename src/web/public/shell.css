@@ -45,9 +45,12 @@ header .mode-badge {
   display: flex;
   align-items: center;
   gap: 10px;
-  width: 220px;
+  /* Size to the mark + wordmark only. A fixed cell made the empty stretch
+     between "steamtrain" and the crumbs a Home hit-target (and, in the
+     desktop app, a no-drag island that stole the window-move handle). */
+  width: fit-content;
   flex: none;
-  margin: 0;
+  margin: 0 16px 0 0;
   padding: 0;
   border: 0;
   background: transparent;
