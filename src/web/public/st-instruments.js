@@ -249,8 +249,7 @@
 
   function pushEventLog(ev) {
     // A fresh run's own workflow_start clears whatever the log held before —
-    // covers startRun() (which resets S.narration the same way but never
-    // touches S.eventLog) *and* re-attaching/reconnecting to a run whose
+    // covers startRun() *and* re-attaching/reconnecting to a run whose
     // stream replays from the top, neither of which routes through
     // selectWorkflow()/reset(). Without this, a re-run of the same workflow
     // leaves the previous run's entries in place, and fmtRelClock() then

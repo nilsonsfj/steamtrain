@@ -56,9 +56,6 @@ window.Steamtrain = (function () {
     if (id === "antigravity") return "agy";
     return id;
   }
-  function readNarrationPref() {
-    try { return localStorage.getItem("steamtrain.narration") !== "off"; } catch (e) { return true; }
-  }
   var S = {
     workflows: [], selected: null, source: null, spec: null, agents: [], apis: [],
     modelClasses: [], modelFamilies: [],
@@ -120,18 +117,8 @@ window.Steamtrain = (function () {
     // Session capability from GET /api/session (or login). "read" hides every
     // mutate control; the server also 403s those routes as a hard backstop.
     capability: "full",
-    // Live narration (UI-only projection of WorkflowEvents).
-    narration: [],
-    // Guarded like every other localStorage read in this file: an unguarded one
-    // *here* is uniquely fatal, because a throw inside this object literal takes
-    // down the whole IIFE and window.Steamtrain is never assigned — the app does
-    // not load at all. Storage can throw on access, not just on write (disabled
-    // by policy, or a partitioned/blocked third-party context).
-    narrationOn: readNarrationPref(),
     // Focus the Arrival primary CTA once per completed run.
     arrivalCtaFocused: false,
-    // Narration line id that already played the one-shot "fresh" entrance.
-    narrationFreshPlayed: null,
     // Last aria-live announcement (avoid re-speaking the same text).
     announceText: "",
     // Play the Arrival entrance animation once per completed run.
@@ -1330,8 +1317,7 @@ window.Steamtrain = (function () {
     S.detail = null; S.detailInvoker = null; S.detailFallback = null; S.detailFocusPending = false; S.detailFocusGeneration += 1;
     S.selectedStepId = null;
     S.tailScroll = {}; S.stepListScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {};
-    S.narration = []; S.arrivalEnter = false; S.endedAt = 0;
-    S.narrationFreshPlayed = null;
+    S.arrivalEnter = false; S.endedAt = 0;
     S.arrivalCtaFocused = false;
     S.planSelection = [];
     S.sourceText = null; S.sourceDiverged = false; S.sourceReveal = null; S.sourceLint = null;
@@ -1380,9 +1366,6 @@ window.Steamtrain = (function () {
       S.runState = SteamtrainReducer.initialWorkflowState;
     }
     S.runState = SteamtrainReducer.workflowReducer(S.runState, { type: "event", event: ev });
-    if (SteamtrainReducer.appendNarration) {
-      S.narration = SteamtrainReducer.appendNarration(S.narration || [], ev);
-    }
     resolvePendingStepDeepLink();
   }
 
