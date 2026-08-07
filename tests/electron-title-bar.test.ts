@@ -41,4 +41,14 @@ describe("title bar inset", () => {
     expect(css).toContain("-webkit-app-region: drag");
     expect(css).toContain("-webkit-app-region: no-drag");
   });
+
+  it("keeps the Home hit-target to the brand itself so the gap stays a drag handle", () => {
+    // A fixed-width brand cell made the empty stretch between the wordmark and
+    // the crumbs both a Home click target and a no-drag island. The button has
+    // to shrink to its content so that stretch stays on the topbar's drag region.
+    const brand = css.match(/#topbar \.brand \{[^}]*\}/);
+    expect(brand?.[0]).toBeTruthy();
+    expect(brand?.[0]).toMatch(/width:\s*fit-content/);
+    expect(brand?.[0]).not.toMatch(/width:\s*\d+px/);
+  });
 });
