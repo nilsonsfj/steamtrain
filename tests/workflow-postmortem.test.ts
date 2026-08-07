@@ -158,12 +158,12 @@ describe("buildPostmortemDigest", () => {
   it("includes params and budget when present", () => {
     const record = failedRecord({
       params: { branch: "feat-x", count: 3 },
-      budget: { scope: "run", spentUsd: 0.1234, limitUsd: 1.0 },
+      budget: { scope: "workflow", spentUsd: 0.1234, limitUsd: 1.0 },
     });
     const digest = buildPostmortemDigest(record, {});
     expect(digest).toContain("params:");
     expect(digest).toContain("feat-x");
-    expect(digest).toContain("budget exceeded: run");
+    expect(digest).toContain("budget exceeded: workflow");
     expect(digest).toContain("$0.1234");
     expect(digest).toContain("$1.0000");
   });
