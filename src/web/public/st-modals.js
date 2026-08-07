@@ -151,10 +151,15 @@
     apiAuth("POST", "/api/history/" + encodeURIComponent(record.id) + "/diagnose", {}).then(function (r) {
       // The modal may have been closed or re-targeted while the call ran.
       var result = (r && r.body) ? r.body : { ok: false, error: "no response from the server" };
-      S.diagnoseCache[record.id] = result;
+      if (result.ok) S.diagnoseCache[record.id] = result;
       var modal = document.getElementById("modal");
       if (!modal || !modal.contains(body)) return;
       renderDiagnosis(body, result);
+    }).catch(function (e) {
+      var err = { ok: false, error: (e && e.message) || "network error" };
+      var modal = document.getElementById("modal");
+      if (!modal || !modal.contains(body)) return;
+      renderDiagnosis(body, err);
     });
   }
 

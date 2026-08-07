@@ -78,8 +78,8 @@ import {
   workflowStepKind,
   worktreeDiff,
 } from "../workflow";
+import { diagnoseRun } from "../workflow";
 import { isValidPathId } from "../workflow/fs-util";
-import { diagnoseRun } from "../workflow/postmortem";
 import { DEFAULT_PATCH_CAP, capPatch } from "../workflow/unified-diff";
 import type { WorkspaceConfig } from "../workspace";
 import { FAVICON_SVG, type PageAssetRevisions, WEB_ASSETS, renderIndex } from "./html";

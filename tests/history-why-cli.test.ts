@@ -163,11 +163,20 @@ describe("workflow history why", () => {
     writeFileSync(join(cwd, "steamtrain.json"), JSON.stringify({ workflows: {} }));
     const store = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
     await store.save(failedRecord("aaaaaaa1-1111-4111-8111-111111111111", cwd));
-    await store.save(failedRecord("aaaaaaa2-2222-4222-8222-222222222222", cwd));
+    await store.save(failedRecord("aaaaaaa1-2222-4222-8222-222222222222", cwd));
     const c = capture(cwd);
-    const code = await runCli(["workflow", "history", "why", "aaaaaaa"], c.io);
+    const code = await runCli(["workflow", "history", "why", "aaaaaaa1"], c.io);
     expect(code).toBe(1);
     expect(c.stderr).toContain("matches 2 runs");
+  });
+
+  it("rejects prefixes shorter than 8 characters", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "steamtrain-why-cli-"));
+    writeFileSync(join(cwd, "steamtrain.json"), JSON.stringify({ workflows: {} }));
+    const c = capture(cwd);
+    const code = await runCli(["workflow", "history", "why", "short"], c.io);
+    expect(code).toBe(1);
+    expect(c.stderr).toContain("too short");
   });
 
   it("fails cleanly when the requested api has no key", async () => {

@@ -965,6 +965,10 @@ async function runHistoryWhy(
   }
 
   const resolved = await resolveHistoryRecord(store, id);
+  if (resolved.tooShort) {
+    err(`prefix '${id}' is too short — use at least 8 characters\n`);
+    return 1;
+  }
   if (resolved.ambiguous) {
     err(`'${id}' matches ${resolved.ambiguous} runs — be more specific\n`);
     return 1;
@@ -997,9 +1001,10 @@ async function runHistoryWhy(
 async function resolveHistoryRecord(
   store: ReturnType<typeof createWorkflowHistoryStore>,
   id: string,
-): Promise<{ record?: RunRecord; ambiguous?: number }> {
+): Promise<{ record?: RunRecord; ambiguous?: number; tooShort?: boolean }> {
   const exact = await store.get(id);
   if (exact) return { record: exact };
+  if (id.length < 8) return { tooShort: true };
   const runs = await store.list();
   const matches = runs.filter((run) => run.id.startsWith(id));
   if (matches.length === 1) return { record: await store.get(matches[0]!.id) };

@@ -41,7 +41,7 @@ export type PostmortemCategory = (typeof POSTMORTEM_CATEGORIES)[number];
 export const POSTMORTEM_CONFIDENCES = ["low", "medium", "high"] as const;
 export type PostmortemConfidence = (typeof POSTMORTEM_CONFIDENCES)[number];
 
-/** The spec fields a postmortem may propose to change (the mid-run edit set). */
+/** The spec fields a postmortem may propose to change. */
 export const POSTMORTEM_FIX_FIELDS = ["prompt", "cmd", "model", "effort"] as const;
 export type PostmortemFixField = (typeof POSTMORTEM_FIX_FIELDS)[number];
 
@@ -308,7 +308,7 @@ export function resolvePostmortemApi(
   const usable = (api: ResolvedApiInstance): boolean =>
     api.keyless === true || Boolean(env[api.apiKeyEnv]);
   const keyed = instances.filter((api) => !api.keyless && env[api.apiKeyEnv]);
-  const keyless = instances.filter((api) => api.keyless && usable(api));
+  const keyless = instances.filter((api) => api.keyless);
   for (const api of [...keyed, ...keyless]) {
     const model = api.defaultModel ?? BUILTIN_FALLBACK_MODELS[api.id];
     if (!model) continue;
