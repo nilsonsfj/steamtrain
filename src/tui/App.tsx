@@ -97,6 +97,7 @@ import { CommandSuggestionMenu, suggestionMenuHeight } from "./CommandSuggestion
 import { EventStream } from "./EventStream";
 import { HelpPanel } from "./HelpPanel";
 import { HistoryDiffPanel } from "./HistoryDiffPanel";
+import { PostmortemPanel } from "./PostmortemPanel";
 import { PromptInput } from "./PromptInput";
 import { RetryRetargetOverlay } from "./RetryRetargetOverlay";
 import { StatusBar } from "./StatusBar";
@@ -908,6 +909,7 @@ export function App({
     setWfNotice: runner.setWfNotice,
     cwd,
     orchestrator,
+    config: runtimeConfig,
   });
 
   const [retryRetargetRecord, setRetryRetargetRecord] = useState<
@@ -1829,6 +1831,18 @@ export function App({
           height={streamHeight}
           onMetrics={historyHook.reportDiffMetrics}
         />
+      ) : historyHook.history?.postmortem ? (
+        <PostmortemPanel
+          workflow={historyHook.history.postmortem.workflow}
+          recordId={historyHook.history.postmortem.recordId}
+          loading={historyHook.history.postmortem.loading}
+          error={historyHook.history.postmortem.error}
+          result={historyHook.history.postmortem.result}
+          scroll={historyHook.history.postmortem.scroll}
+          width={columns}
+          height={streamHeight}
+          onMetrics={historyHook.reportPostmortemMetrics}
+        />
       ) : retryRetargetRecord ? (
         <RetryRetargetOverlay
           record={retryRetargetRecord}
@@ -2105,17 +2119,21 @@ function historyHintText(history: HistoryUiState): string {
   if (history.diffView) {
     return "run diff · ↑/↓ scroll · PgUp/PgDn page · g/G top/bottom · v/Esc close · Ctrl+C quit";
   }
+  if (history.postmortem) {
+    return "postmortem · ↑/↓ scroll · PgUp/PgDn page · g/G top/bottom · w/Esc close · Ctrl+C quit";
+  }
   if (history.view === "detail") {
     if (history.detail) return "↑/↓ step · PgUp/PgDn scroll · ←/Esc back · Ctrl+C quit";
     const retryHint =
       history.record && recordHasRetryCandidates(history.record)
         ? " · f retry failed · t retarget"
         : "";
+    const whyHint = history.record && !history.record.ok ? " · w why" : "";
     const hasWorktrees = history.record?.phases.some((phase) =>
       phase.steps.some((step) => step.worktree),
     );
     const worktreeHint = hasWorktrees ? " · a apply · x prune · v diff" : "";
-    return `↑/↓ step · → details · r re-run${retryHint}${worktreeHint} · d delete · ←/Esc back to list · Ctrl+C quit`;
+    return `↑/↓ step · → details · r re-run${retryHint}${whyHint}${worktreeHint} · d delete · ←/Esc back to list · Ctrl+C quit`;
   }
   if (history.filtering) {
     return "filter mode · type to search · Enter/Esc done · ↑/↓ select · Ctrl+C quit";

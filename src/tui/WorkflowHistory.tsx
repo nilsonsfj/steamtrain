@@ -204,6 +204,7 @@ export function HistoryDetailBanner({
         <Text color="gray">
           id {record.id.slice(0, 8)}… · r re-run
           {recordHasRetryCandidates(record) ? " · f retry failed · t retarget" : ""}
+          {!record.ok ? " · w why" : ""}
           {hasWorktrees ? " · v diff" : ""}
           {" · d delete · ← back"}
         </Text>

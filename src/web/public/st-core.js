@@ -82,6 +82,8 @@ window.Steamtrain = (function () {
     stagedOverrides: {},
     childSpecs: {},
     projectConfig: null,
+    // Postmortem results cached per run id so re-opening Diagnose is instant.
+    diagnoseCache: {},
     // Full-page routing: which page #center is currently showing in place of
     // the cockpit ("settings", "runs", or null for the cockpit itself), and the
     // cockpit hash to restore when that page's Close button is clicked (never

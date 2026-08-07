@@ -22,6 +22,16 @@ import type {
 /** Hard ceiling on nested `workflow` step call-stack depth (cycle/blast-radius backstop). */
 export const MAX_WORKFLOW_NESTING_DEPTH = 5;
 
+/** Step kinds whose `prompt` field a mid-run edit (or a postmortem spec fix) may rewrite. */
+export const PROMPT_EDITABLE_KINDS: ReadonlySet<string> = new Set([
+  "worker",
+  "processor",
+  "llm",
+  "consolidator",
+  "approval",
+  "human",
+]);
+
 /** The concrete kind of a step, defaulting a bare (kind-less) step to `worker`. */
 export function workflowStepKind(step: WorkflowStep): WorkflowStepKind {
   return step.kind ?? "worker";

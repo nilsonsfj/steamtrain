@@ -49,6 +49,7 @@ import {
   autonomyDescription,
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
+  diagnoseRun,
   exportWorkflow,
   finalRunWorktrees,
   formatPermissionSummary,
@@ -87,7 +88,12 @@ import {
   worktreeDiff,
   writeShareFile,
 } from "./workflow";
-import { loadWorkflowCatalog, workflowCatalogEntries } from "./workflow";
+import {
+  type LoadedWorkflowCatalog,
+  type PostmortemResult,
+  loadWorkflowCatalog,
+  workflowCatalogEntries,
+} from "./workflow";
 import { runPrCommand } from "./workflow/pr-cli";
 import { loadWorkspaceConfig } from "./workspace";
 
@@ -310,7 +316,7 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
     scope: configScope,
     user: userConfig,
     warning,
-  } = loadConfig({ cwd, customPath: io.configPath });
+  } = loadConfig({ cwd, home, customPath: io.configPath });
   if (warning) err(`${warning}\n`);
   const { hasUserFile: hasUserSettings } = loadSettings();
   const configLabel = configDisplayLabel(configScope, {
@@ -343,7 +349,7 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
     case "cache":
       return runCacheCommand(rest, cwd, io, orchestrator, out, err);
     case "history":
-      return runHistoryCommand(rest, cwd, out, err);
+      return runHistoryCommand(rest, cwd, out, err, { config, catalog: workflowCatalog });
     case "worktrees":
       return runWorktreesCommand(rest, cwd, out, err);
     case "pr":
@@ -817,6 +823,7 @@ async function runHistoryCommand(
   cwd: string,
   out: (text: string) => void,
   err: (text: string) => void,
+  deps: { config: SteamtrainConfig; catalog: LoadedWorkflowCatalog },
 ): Promise<number> {
   const store = createWorkflowHistoryStore(join(cwd, WORKFLOW_HISTORY_DIR));
   const sub = args[0] ?? "list";
@@ -854,6 +861,10 @@ async function runHistoryCommand(
     }
     printHistoryRecord(record, out);
     return 0;
+  }
+
+  if (sub === "why") {
+    return runHistoryWhy(args.slice(1), store, deps, out, err);
   }
 
   if (sub === "apply") {
@@ -923,6 +934,136 @@ async function runHistoryCommand(
 
   err(`unknown workflow history command '${sub}'\n\n${helpText()}`);
   return 1;
+}
+
+/**
+ * `steamtrain workflow history why <id>` — LLM failure postmortem of a
+ * recorded run: root cause, category, and (when the fix is a spec change) a
+ * validated proposed edit.
+ */
+async function runHistoryWhy(
+  args: string[],
+  store: ReturnType<typeof createWorkflowHistoryStore>,
+  deps: { config: SteamtrainConfig; catalog: LoadedWorkflowCatalog },
+  out: (text: string) => void,
+  err: (text: string) => void,
+): Promise<number> {
+  const usage =
+    "usage: steamtrain workflow history why <id> [--api <id>] [--model <model>] [--json]\n";
+  const id = args[0];
+  if (!id || id.startsWith("--")) {
+    err(usage);
+    return 1;
+  }
+  const flags = args.slice(1);
+  const json = flags.includes("--json");
+  const api = flagValue(flags, "--api");
+  const model = flagValue(flags, "--model");
+  if (api === null || model === null) {
+    err(usage);
+    return 1;
+  }
+
+  const resolved = await resolveHistoryRecord(store, id);
+  if (resolved.ambiguous) {
+    err(`'${id}' matches ${resolved.ambiguous} runs — be more specific\n`);
+    return 1;
+  }
+  if (!resolved.record) {
+    err(`unknown run '${id}'\n`);
+    return 1;
+  }
+  const record = resolved.record;
+  const spec = deps.catalog.workflows[record.workflow];
+
+  if (!json) {
+    err(`diagnosing run '${record.id}' (workflow '${record.workflow}')…\n`);
+  }
+  const result = await diagnoseRun({ record, spec, config: deps.config, api, model });
+  if (!result.ok) {
+    if (json) out(`${JSON.stringify({ ok: false, error: result.error }, null, 2)}\n`);
+    else err(`postmortem failed: ${result.error}\n`);
+    return 1;
+  }
+  if (json) {
+    out(`${JSON.stringify(result, null, 2)}\n`);
+    return 0;
+  }
+  printPostmortem(result, out);
+  return 0;
+}
+
+/** Exact id first, then a unique prefix (run ids are long UUIDs). */
+async function resolveHistoryRecord(
+  store: ReturnType<typeof createWorkflowHistoryStore>,
+  id: string,
+): Promise<{ record?: RunRecord; ambiguous?: number }> {
+  const exact = await store.get(id);
+  if (exact) return { record: exact };
+  const runs = await store.list();
+  const matches = runs.filter((run) => run.id.startsWith(id));
+  if (matches.length === 1) return { record: await store.get(matches[0]!.id) };
+  if (matches.length > 1) return { ambiguous: matches.length };
+  return {};
+}
+
+function printPostmortem(
+  result: PostmortemResult & { ok: true },
+  out: (text: string) => void,
+): void {
+  const d = result.diagnosis;
+  out(`\npostmortem · diagnosed via ${result.api}/${result.model}\n`);
+  out(`category:   ${d.category} (confidence: ${d.confidence})\n`);
+  if (d.rootStepId) out(`root step:  ${d.rootStepId}\n`);
+  if (result.specDrift) {
+    out(
+      "note:       the workflow spec changed since this run — the diagnosis may reference drifted fields\n",
+    );
+  }
+  out(`\nroot cause\n${wrapIndented(d.summary, 2)}\n`);
+  if (d.evidence) out(`\nevidence\n${wrapIndented(d.evidence, 2)}\n`);
+  if (d.suggestion) out(`\nsuggested fix\n${wrapIndented(d.suggestion, 2)}\n`);
+  if (d.specFix) {
+    const fix = d.specFix;
+    const verdict = fix.validation?.ok
+      ? "validated ✓"
+      : `not applied — ${fix.validation?.error ?? "unvalidated"}`;
+    out(`\nproposed spec edit (${verdict})\n`);
+    out(`  step '${fix.stepId}' · field '${fix.field}'\n`);
+    if (fix.rationale) out(`  rationale: ${fix.rationale}\n`);
+    if (fix.current) out(`  now:      ${oneLineOf(fix.current)}\n`);
+    out(`  proposed: ${oneLineOf(fix.proposed)}\n`);
+    if (fix.validation?.ok) {
+      out(
+        "\napply it by editing the step in steamtrain.json (TUI: Ctrl+E in the preview · web: the plan editor).\n",
+      );
+    }
+  }
+}
+
+function oneLineOf(text: string): string {
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length > 160 ? `${line.slice(0, 160)}…` : line;
+}
+
+function wrapIndented(text: string, indent: number): string {
+  const pad = " ".repeat(indent);
+  const width = Math.max(40, (process.stdout.columns ?? 100) - indent);
+  const lines: string[] = [];
+  for (const paragraph of text.split(/\n/)) {
+    let current = "";
+    for (const word of paragraph.split(/\s+/)) {
+      if (!word) continue;
+      if (current && current.length + word.length + 1 > width) {
+        lines.push(pad + current);
+        current = word;
+      } else {
+        current = current ? `${current} ${word}` : word;
+      }
+    }
+    lines.push(pad + current);
+  }
+  return lines.join("\n");
 }
 
 /**
@@ -1968,6 +2109,7 @@ Usage:
   steamtrain workflow cache clear [<workflow> --input <text> --param key=value ... | --stdin]
   steamtrain workflow history [list]
   steamtrain workflow history show <id> [--diff [--step <stepId>] [--stat]]
+  steamtrain workflow history why <id> [--api <id>] [--model <model>] [--json]
   steamtrain workflow history apply <id> [--step <stepId>] [--mode apply|branch|pr] [--branch <name>] [--onconflict ours|theirs]
   steamtrain workflow history prune <id>
   steamtrain workflow history clear [<id>]
@@ -2012,9 +2154,11 @@ the on-disk cache for that run. Parallel runs of the same workflow + input are n
 
 Every run is recorded to ${WORKFLOW_HISTORY_DIR} (one JSON record per run, newest
 ${100} kept). Inspect past runs with 'workflow history', 'workflow history show <id>',
-and remove them with 'workflow history clear [<id>]'. 'workflow costs' aggregates
-recorded spend and tokens by workflow, step, and model — "which step is eating the
-budget?".
+and remove them with 'workflow history clear [<id>]'. 'workflow history why <id>'
+runs an LLM postmortem on a recorded run — root cause, category, and (when the fix
+is a spec change) a validated proposed edit; it needs an LLM API key (or --api).
+'workflow costs' aggregates recorded spend and tokens by workflow, step, and model
+— "which step is eating the budget?".
 
 Agent steps run in isolated git worktrees that are retained after the run.
 'history show <id> --diff' shows what each step changed (--stat for a summary,

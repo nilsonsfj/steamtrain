@@ -623,3 +623,21 @@ export {
   isReportFormat,
   renderReport,
 } from "./report";
+export {
+  POSTMORTEM_CATEGORIES,
+  POSTMORTEM_CONFIDENCES,
+  POSTMORTEM_FIX_FIELDS,
+  POSTMORTEM_OUTPUT_SCHEMA,
+  type PostmortemCategory,
+  type PostmortemConfidence,
+  type PostmortemDiagnosis,
+  type PostmortemFixField,
+  type PostmortemRequest,
+  type PostmortemResult,
+  type PostmortemSpecFix,
+  type SpecFixValidation,
+  buildPostmortemDigest,
+  diagnoseRun,
+  resolvePostmortemApi,
+  validatePostmortemSpecFix,
+} from "./postmortem";

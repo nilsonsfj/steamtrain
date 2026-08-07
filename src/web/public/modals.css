@@ -809,3 +809,106 @@ select.sel.invalid {
   white-space: nowrap;
   border: 0;
 }
+
+/* ---- failure postmortem (Diagnose) ---- */
+.diagnose-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.diagnose-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.diagnose-meta .chip.faint,
+.diagnose-fix-head .chip {
+  color: var(--muted);
+}
+.diagnose-meta .chip.cat-spec-bug,
+.diagnose-meta .chip.cat-prompt-bug {
+  color: var(--gate);
+  border-color: rgba(210, 153, 34, 0.45);
+}
+.diagnose-meta .chip.cat-environment,
+.diagnose-meta .chip.cat-resource-budget,
+.diagnose-meta .chip.cat-input-data {
+  color: var(--error-text);
+  border-color: rgba(248, 81, 73, 0.45);
+}
+.diagnose-meta .chip.cat-flaky-agent {
+  color: var(--muted);
+}
+.diagnose-meta .chip.cat-unknown {
+  color: var(--faint);
+}
+.diagnose-fix-head .chip.done {
+  color: var(--done-text);
+  border-color: rgba(63, 185, 80, 0.45);
+}
+.diagnose-fix-head .chip.error {
+  color: var(--error-text);
+  border-color: rgba(248, 81, 73, 0.45);
+}
+.diagnose-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.diagnose-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.diagnose-section-text {
+  white-space: pre-wrap;
+  color: var(--text);
+  line-height: 1.5;
+}
+.diagnose-fix {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(24, 32, 40, 0.4);
+}
+.diagnose-fix-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.diagnose-fix-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.diagnose-fix-target {
+  color: var(--text);
+  font-size: 13px;
+}
+.diagnose-kv {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.diagnose-kv-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+.diagnose-kv-value {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--text);
+  background: rgba(14, 17, 20, 0.7);
+  border: 1px solid var(--border-quiet);
+  border-radius: 6px;
+  padding: 8px;
+}

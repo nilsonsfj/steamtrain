@@ -177,6 +177,27 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
             return;
           }
 
+          // The failure postmortem overlay is stacked on top of the detail
+          // view: it owns ALL keys until closed.
+          if (hist.postmortem) {
+            if (key.escape || key.leftArrow || input === "w") {
+              historyHook.closePostmortem();
+            } else if (key.upArrow) {
+              historyHook.scrollPostmortemBy(-1);
+            } else if (key.downArrow) {
+              historyHook.scrollPostmortemBy(1);
+            } else if (key.pageUp) {
+              historyHook.scrollPostmortemBy("page-up");
+            } else if (key.pageDown) {
+              historyHook.scrollPostmortemBy("page-down");
+            } else if (input === "g") {
+              historyHook.scrollPostmortemTo("top");
+            } else if (input === "G") {
+              historyHook.scrollPostmortemTo("bottom");
+            }
+            return;
+          }
+
           // Filter mode: capture printable keys into the query.
           if (hist.view === "list" && hist.filtering) {
             if (key.escape || key.return) {
@@ -317,6 +338,11 @@ export function useKeyboardInput(params: UseKeyboardInputParams) {
           // Full-screen run diff: per-step worktree patches, code-review style.
           if (!hist.detail && input === "v" && hist.record) {
             historyHook.openDiffView(hist.record);
+            return;
+          }
+          // Full-screen failure postmortem: diagnosis + proposed spec edit.
+          if (!hist.detail && input === "w" && hist.record && !hist.record.ok) {
+            historyHook.openPostmortem(hist.record);
             return;
           }
           const totalSteps = hist.recordState

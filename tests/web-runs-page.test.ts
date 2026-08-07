@@ -159,6 +159,8 @@ interface Mounted {
   hash: () => string;
   /** Everything the page announced, in order. */
   said: string[];
+  /** Records handed to ST.modals.openDiagnoseModal, in order. */
+  diagnoseCalls: unknown[];
   clickRow: (index: number) => Promise<void>;
   check: (index: number) => Promise<void>;
   /** Click the full receipt's ledger line for a step, toggling its output. */
@@ -189,6 +191,7 @@ async function mountRuns(opts: {
   const root = el("div");
   const location = { hash: "#runs", pathname: "/", search: "" };
   const said: string[] = [];
+  const diagnoseCalls: unknown[] = [];
   // Server-side history, so a successful DELETE actually removes it and the
   // re-fetch that follows sees the same thing the client just did.
   let stored = opts.runs ?? [];
@@ -228,6 +231,7 @@ async function mountRuns(opts: {
     modals: {
       rerunHistory: () => {},
       openRetryRetargetModal: () => {},
+      openDiagnoseModal: (rec: unknown) => diagnoseCalls.push(rec),
       safeExternalLink: () => el("a"),
     },
     api: () => Promise.resolve({ status: 200, body: { runs: opts.live ?? [] } }),
@@ -302,6 +306,7 @@ async function mountRuns(opts: {
     main: () => flatText(collect(root, (n) => hasClass(n, "runs-main"))[0] ?? el("div")),
     hash: () => location.hash,
     said,
+    diagnoseCalls,
     clickRow: async (index: number) => {
       click(rowNodes()[index] as StubEl);
       for (let i = 0; i < 6; i++) await Promise.resolve();
@@ -687,6 +692,18 @@ describe("runs page: the full receipt", () => {
     // Deep view, but still not a modal — both rails are where they were.
     expect(page.rail().length).toBeGreaterThan(0);
     expect(page.receipt()).toContain("8f21c");
+  });
+
+  it("offers Diagnose only on a failed run, and hands the record to the modal", async () => {
+    // A successful receipt has no postmortem to run.
+    const done = await openFullReceipt();
+    expect(done.main()).not.toContain("Diagnose");
+
+    const failed = await openFullReceipt({ detail: { ...DETAIL, ok: false, status: "error" } });
+    expect(failed.diagnoseCalls).toHaveLength(0);
+    await failed.clickButton("Diagnose");
+    expect(failed.diagnoseCalls).toHaveLength(1);
+    expect((failed.diagnoseCalls[0] as { workflow?: string }).workflow).toBe("bug-hunt");
   });
 
   it("keeps a step's recorded output shut until it is asked for", async () => {
