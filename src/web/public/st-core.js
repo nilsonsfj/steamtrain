@@ -105,6 +105,9 @@ window.Steamtrain = (function () {
     // and its output fills that band's live output pane. null -> the running
     // phase expands instead.
     selectedStepId: null,
+    // A repeated click on the open live row suppresses automatic re-expansion
+    // until the reader selects another step.
+    collapsedBandKey: null,
     // Live output pane: false wraps long lines, true scrolls horizontally.
     outputNoWrap: false,
     // Per-card tail scroll state keyed by stepKey(): { follow: bool, top: px }.
@@ -915,7 +918,7 @@ window.Steamtrain = (function () {
       S.runState = known && S.spec
         ? SteamtrainReducer.workflowStateFromSpec(ST.run.effectiveSpec() || S.spec)
         : SteamtrainReducer.initialWorkflowState;
-      S.detail = null; S.selectedStepId = null;
+      S.detail = null; S.selectedStepId = null; S.collapsedBandKey = null;
       S.tailScroll = {}; S.stepListScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {};
       ST.run.setBanner(
         "Attached to " + (run.detached ? "detached " : "") + "run " + run.id.slice(0, 8) + "…" +
@@ -1328,7 +1331,7 @@ window.Steamtrain = (function () {
     }
     S.selected = name; S.runId = null; S.runState = null;
     S.detail = null; S.detailInvoker = null; S.detailFallback = null; S.detailFocusPending = false; S.detailFocusGeneration += 1;
-    S.selectedStepId = null;
+    S.selectedStepId = null; S.collapsedBandKey = null;
     S.tailScroll = {}; S.stepListScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {};
     S.narration = []; S.arrivalEnter = false; S.endedAt = 0;
     S.narrationFreshPlayed = null;

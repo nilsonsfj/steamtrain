@@ -403,10 +403,22 @@
       }
     }
     for (i = 0; i < bands.length; i++) {
-      if (!bands[i].done && bandSteps(bands[i]).some(isLiveRunning)) return bands[i].key;
+      if (
+        bands[i].key !== S.collapsedBandKey &&
+        !bands[i].done &&
+        bandSteps(bands[i]).some(isLiveRunning)
+      ) {
+        return bands[i].key;
+      }
     }
     for (i = 0; i < bands.length; i++) {
-      if (!bands[i].done && bandSteps(bands[i]).some(isRunning)) return bands[i].key;
+      if (
+        bands[i].key !== S.collapsedBandKey &&
+        !bands[i].done &&
+        bandSteps(bands[i]).some(isRunning)
+      ) {
+        return bands[i].key;
+      }
     }
     return null;
   }
@@ -592,7 +604,7 @@
         "data-detail-invoker": "row:" + stepKey(p, s),
         "aria-label": "Open details for step " + s.stepId,
         title: "Open this step's output and details",
-        onClick: function (event) { openDetail(p, s, event.currentTarget); }
+        onClick: function (event) { openDetail(p, s, event.currentTarget, open); }
       },
       h("span", { class: "dot", "aria-hidden": "true" }),
       h("div", { class: "id", text: s.stepId })
@@ -1026,8 +1038,17 @@
   }
 
   // ---- step drill-in drawer ------------------------------------------------
-  function openDetail(p, s, invoker) {
+  function openDetail(p, s, invoker, isOpen) {
+    var sameDetail = S.detail &&
+      S.detail.phaseId === p.phaseId &&
+      S.detail.iteration === (p.iteration || 1) &&
+      S.detail.stepId === s.stepId;
+    if (sameDetail || isOpen) {
+      closeDetail(bandKey(p));
+      return;
+    }
     S.detailFocusGeneration += 1;
+    S.collapsedBandKey = null;
     S.detail = { phaseId: p.phaseId, iteration: p.iteration || 1, stepId: s.stepId };
     // Drilling in also picks the step: its band expands and the band's output
     // pane switches to it, so the drawer and the pane never disagree.
@@ -1041,11 +1062,16 @@
     scheduleRender();
   }
 
-  function closeDetail() {
-    if (!S.detail) return;
+  function closeDetail(collapsedKey) {
+    if (collapsedKey) S.collapsedBandKey = collapsedKey;
+    if (!S.detail) {
+      S.selectedStepId = null;
+      scheduleRender();
+      return;
+    }
     S.detail = null;
     // Releasing the drill-in releases the selection: the running band takes the
-    // expanded slot back.
+    // expanded slot back unless the click explicitly collapsed this band.
     S.selectedStepId = null;
     S.detailFocusPending = false;
     var invoker = S.detailInvoker;
@@ -1656,7 +1682,7 @@
     S.tailScroll = {}; S.stepListScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {};
     S.narration = []; S.arrivalEnter = false;
     S.narrationFreshPlayed = null;
-    S.selectedStepId = null;
+    S.selectedStepId = null; S.collapsedBandKey = null;
     S.arrivalCtaFocused = false;
     S.endedAt = 0;
     setBanner("", "");
