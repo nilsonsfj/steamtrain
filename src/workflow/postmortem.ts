@@ -339,9 +339,10 @@ export type SpecFixValidation = { ok: true } | { ok: false; error: string };
 
 /**
  * Validate a proposed spec edit against the current workflow spec: the step
- * must exist, the field must be editable on that step kind (same rules as
- * mid-run step edits), and the patched spec must still pass validation and
- * introduce no new template-reference lint warnings.
+ * must exist, the field must be editable on that step kind (extending the
+ * mid-run prompt-only rule to also allow cmd, model, and effort), and the
+ * patched spec must still pass validation and introduce no new
+ * template-reference lint warnings.
  */
 export function validatePostmortemSpecFix(
   spec: WorkflowSpec,
