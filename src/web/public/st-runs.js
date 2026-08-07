@@ -1259,6 +1259,11 @@
             ST.modals.openRetryRetargetModal(record, function () { paint(); });
           } }));
       }
+      if (!record.ok) {
+        actions.appendChild(h("button", { class: "btn", text: "Diagnose",
+          title: "LLM postmortem: root cause, category, and a proposed fix",
+          onClick: function () { ST.modals.openDiagnoseModal(record); } }));
+      }
       actions.appendChild(h("button", { class: "btn danger small", text: "Delete",
         onClick: function () { deleteRecord(record); } }));
     }

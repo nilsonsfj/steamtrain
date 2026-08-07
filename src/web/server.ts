@@ -78,6 +78,7 @@ import {
   workflowStepKind,
   worktreeDiff,
 } from "../workflow";
+import { diagnoseRun } from "../workflow";
 import { isValidPathId } from "../workflow/fs-util";
 import { DEFAULT_PATCH_CAP, capPatch } from "../workflow/unified-diff";
 import type { WorkspaceConfig } from "../workspace";
@@ -839,6 +840,8 @@ function checkCsrf(
  *   POST   /api/history/:id/rerun   re-run a past run -> { runId }
  *   POST   /api/history/:id/retry   retry failed steps -> { runId, downgraded? }
  *                                   optional JSON body: { retargetAgent?, retargetModel?, steps? }
+ *   POST   /api/history/:id/diagnose  LLM failure postmortem -> { ok, diagnosis?, error? }
+ *                                   optional JSON body: { api?, model? }
  *   GET    /api/history/:id/worktrees  a run's retained worktrees + diffstat
  *   POST   /api/history/:id/harvest    merge worktrees (apply/branch/pr) -> { result }
  *   POST   /api/history/:id/prune      discard a run's worktrees -> { pruned, total }
@@ -1825,6 +1828,67 @@ async function handle(
         throw err;
       }
     }
+    return;
+  }
+
+  // Failure postmortem: one direct-API LLM call over the recorded run → root
+  // cause, category, and a validated proposed spec edit. The body's `ok` flag
+  // carries success/failure (the HTTP status stays 200 either way, matching the
+  // CLI `history why --json` contract); viewer sessions are already blocked by
+  // the read-only gate above.
+  const diagnoseMatch = path.match(/^\/api\/history\/([^/]+)\/diagnose$/);
+  if (method === "POST" && diagnoseMatch) {
+    if (!deps.history) {
+      sendJson(res, 404, { error: "run history is not available on this server" });
+      return;
+    }
+    const id = decodeURIComponent(diagnoseMatch[1]!);
+    if (!isValidRunId(id)) {
+      sendJson(res, 400, { error: "invalid run id" });
+      return;
+    }
+    const record = await deps.history.get(id);
+    if (!record) {
+      sendJson(res, 404, { error: `unknown run '${id}'` });
+      return;
+    }
+    let api: string | undefined;
+    let model: string | undefined;
+    try {
+      const raw = await readBody(req);
+      if (raw.trim()) {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+          sendJson(res, 400, { error: "body must be a JSON object" });
+          return;
+        }
+        if (parsed.api !== undefined && typeof parsed.api !== "string") {
+          sendJson(res, 400, { error: "api must be a string" });
+          return;
+        }
+        if (parsed.model !== undefined && typeof parsed.model !== "string") {
+          sendJson(res, 400, { error: "model must be a string" });
+          return;
+        }
+        api = parsed.api;
+        model = parsed.model;
+      }
+    } catch (e) {
+      sendJson(res, 400, { error: e instanceof Error ? e.message : "invalid JSON body" });
+      return;
+    }
+    const spec = deps.host.listWorkflows()[record.workflow];
+    const abort = new AbortController();
+    req.on("close", () => abort.abort());
+    const result = await diagnoseRun({
+      record,
+      spec,
+      config: deps.config,
+      api,
+      model,
+      signal: abort.signal,
+    });
+    sendJson(res, 200, result);
     return;
   }
 

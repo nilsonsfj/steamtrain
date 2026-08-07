@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { agentUiLabel } from "../agents";
+import type { SteamtrainConfig } from "../config";
 import type { Orchestrator } from "../orchestrator";
 import type {
   HistoryStatusFilter,
   LiveRunMeta,
   LiveRunStore,
+  PostmortemResult,
   RerunMode,
   RunRecord,
   RunRecordSummary,
@@ -17,6 +19,7 @@ import {
   applyWorkflowStepOverrides,
   buildHistoryBrowserEntries,
   createWorkflowHistoryStore,
+  diagnoseRun,
   finalRunWorktrees,
   harvestRunWorktrees,
   isRerunError,
@@ -55,6 +58,8 @@ export interface HistoryUiState {
   statusFilter: HistoryStatusFilter;
   /** Full-screen run-diff overlay (opened from the detail view with `v`). */
   diffView?: HistoryDiffViewState;
+  /** Full-screen failure-postmortem overlay (opened from the detail view with `w`). */
+  postmortem?: PostmortemViewState;
 }
 
 /** State of the full-screen run-diff overlay. */
@@ -65,6 +70,17 @@ export interface HistoryDiffViewState {
   steps: HistoryDiffStep[];
   /** First visible composed line. */
   scroll: number;
+}
+
+/** State of the full-screen failure-postmortem overlay. */
+export interface PostmortemViewState {
+  recordId: string;
+  workflow: string;
+  loading: boolean;
+  /** First visible composed line. */
+  scroll: number;
+  result?: PostmortemResult & { ok: true };
+  error?: string;
 }
 
 export interface RetryRetargetLaunch {
@@ -95,6 +111,8 @@ export interface UseHistoryParams {
   cwd: string;
   /** Orchestrator used to plan retry retargets (agent readiness + model remap). */
   orchestrator: Orchestrator;
+  /** Live project config — the postmortem resolves its LLM API from `apis`. */
+  config: SteamtrainConfig;
 }
 
 export interface UseHistoryReturn {
@@ -121,6 +139,14 @@ export interface UseHistoryReturn {
   scrollDiffTo: (position: "top" | "bottom") => void;
   /** Reported by the diff panel after each render, for scroll clamping. */
   reportDiffMetrics: (metrics: { totalLines: number; viewport: number }) => void;
+  /** Open the full-screen failure-postmortem overlay for a recorded run (from detail view). */
+  openPostmortem: (record: RunRecord) => void;
+  closePostmortem: () => void;
+  /** Scroll the postmortem overlay; page motions use the last reported viewport. */
+  scrollPostmortemBy: (delta: number | "page-up" | "page-down") => void;
+  scrollPostmortemTo: (position: "top" | "bottom") => void;
+  /** Reported by the postmortem panel after each render, for scroll clamping. */
+  reportPostmortemMetrics: (metrics: { totalLines: number; viewport: number }) => void;
 }
 
 const emptyHistory = (): HistoryUiState => ({
@@ -145,6 +171,7 @@ export function useHistory({
   setWfNotice,
   cwd,
   orchestrator,
+  config,
 }: UseHistoryParams): UseHistoryReturn {
   const [history, setHistory] = useState<HistoryUiState | null>(null);
 
@@ -308,6 +335,8 @@ export function useHistory({
   // stale async load can't populate a panel that was closed or re-targeted.
   const diffMetricsRef = useRef({ totalLines: 0, viewport: 1 });
   const diffLoadRef = useRef(0);
+  const postmortemMetricsRef = useRef({ totalLines: 0, viewport: 1 });
+  const postmortemLoadRef = useRef(0);
 
   const harvestFromRecord = useCallback(
     (record: RunRecord, action: "apply" | "prune") => {
@@ -427,6 +456,87 @@ export function useHistory({
     });
   }, []);
 
+  const openPostmortem = useCallback(
+    (record: RunRecord) => {
+      const token = ++postmortemLoadRef.current;
+      postmortemMetricsRef.current = { totalLines: 0, viewport: 1 };
+      setHistory((prev) =>
+        prev
+          ? {
+              ...prev,
+              postmortem: {
+                recordId: record.id,
+                workflow: record.workflow,
+                loading: true,
+                scroll: 0,
+              },
+            }
+          : prev,
+      );
+      void (async () => {
+        try {
+          const spec = resolveWorkflowSpec(record.workflow);
+          const result = await diagnoseRun({ record, spec, config });
+          if (!mountedRef.current) return;
+          setHistory((prev) => {
+            // The panel was closed or re-targeted while the call ran.
+            if (!prev?.postmortem || prev.postmortem.recordId !== record.id) return prev;
+            if (token !== postmortemLoadRef.current) return prev;
+            return result.ok
+              ? { ...prev, postmortem: { ...prev.postmortem, loading: false, result } }
+              : {
+                  ...prev,
+                  postmortem: { ...prev.postmortem, loading: false, error: result.error },
+                };
+          });
+        } catch (err) {
+          if (!mountedRef.current) return;
+          setHistory((prev) => {
+            if (!prev?.postmortem || prev.postmortem.recordId !== record.id) return prev;
+            return {
+              ...prev,
+              postmortem: { ...prev.postmortem, loading: false, error: message(err) },
+            };
+          });
+        }
+      })();
+    },
+    [config, mountedRef, resolveWorkflowSpec],
+  );
+
+  const closePostmortem = useCallback(() => {
+    postmortemLoadRef.current += 1; // cancel any in-flight load
+    setHistory((prev) => (prev?.postmortem ? { ...prev, postmortem: undefined } : prev));
+  }, []);
+
+  const reportPostmortemMetrics = useCallback(
+    (metrics: { totalLines: number; viewport: number }) => {
+      postmortemMetricsRef.current = metrics;
+    },
+    [],
+  );
+
+  const scrollPostmortemBy = useCallback((delta: number | "page-up" | "page-down") => {
+    setHistory((prev) => {
+      if (!prev?.postmortem) return prev;
+      const { totalLines, viewport } = postmortemMetricsRef.current;
+      const maxScroll = Math.max(0, totalLines - viewport);
+      const page = Math.max(1, viewport - 1);
+      const amount = delta === "page-up" ? -page : delta === "page-down" ? page : delta;
+      const scroll = Math.min(Math.max(0, prev.postmortem.scroll + amount), maxScroll);
+      return { ...prev, postmortem: { ...prev.postmortem, scroll } };
+    });
+  }, []);
+
+  const scrollPostmortemTo = useCallback((position: "top" | "bottom") => {
+    setHistory((prev) => {
+      if (!prev?.postmortem) return prev;
+      const { totalLines, viewport } = postmortemMetricsRef.current;
+      const scroll = position === "top" ? 0 : Math.max(0, totalLines - viewport);
+      return { ...prev, postmortem: { ...prev.postmortem, scroll } };
+    });
+  }, []);
+
   const deleteHistoryRecord = useCallback(
     (record: { id: string }) => {
       const armed = deleteConfirmRef.current;
@@ -484,6 +594,11 @@ export function useHistory({
     scrollDiffBy,
     scrollDiffTo,
     reportDiffMetrics,
+    openPostmortem,
+    closePostmortem,
+    scrollPostmortemBy,
+    scrollPostmortemTo,
+    reportPostmortemMetrics,
   };
 }
 

@@ -134,6 +134,98 @@
     openModal(modalShell("Retry with agent", record.workflow + " · " + failed.length + " failed/not-run", body, foot));
   }
 
+  /**
+   * Failure postmortem: one direct-API LLM call over the recorded run. The
+   * result is cached per run id on shared state so re-opening is instant.
+   */
+  function openDiagnoseModal(record) {
+    var body = h("div", { class: "diagnose-body" });
+    var foot = h("div", { class: "mfoot" },
+      h("button", { class: "btn", text: "Close", onClick: closeModal }));
+    openModal(modalShell("Diagnose run", record.workflow + " · " + record.id, body, foot, true));
+
+    var cached = S.diagnoseCache[record.id];
+    if (cached) { renderDiagnosis(body, cached); return; }
+
+    mbanner(body, "Diagnosing the failure with a direct LLM call… this can take a minute.", "info");
+    apiAuth("POST", "/api/history/" + encodeURIComponent(record.id) + "/diagnose", {}).then(function (r) {
+      // The modal may have been closed or re-targeted while the call ran.
+      var result = (r && r.body) ? r.body : { ok: false, error: "no response from the server" };
+      if (result.ok) S.diagnoseCache[record.id] = result;
+      var modal = document.getElementById("modal");
+      if (!modal || !modal.contains(body)) return;
+      renderDiagnosis(body, result);
+    }).catch(function (e) {
+      var err = { ok: false, error: (e && e.message) || "network error" };
+      var modal = document.getElementById("modal");
+      if (!modal || !modal.contains(body)) return;
+      renderDiagnosis(body, err);
+    });
+  }
+
+  function renderDiagnosis(body, result) {
+    clear(body);
+    if (!result || result.ok !== true) {
+      body.appendChild(h("div", { class: "mbanner show err",
+        text: (result && result.error) || "the postmortem failed" }));
+      body.appendChild(h("div", { class: "hint",
+        text: "A postmortem needs an LLM API: set ANTHROPIC_API_KEY or OPENAI_API_KEY, or configure one under apis." }));
+      return;
+    }
+    var d = result.diagnosis || {};
+
+    var meta = h("div", { class: "diagnose-meta" });
+    meta.appendChild(h("span", { class: "chip cat-" + (d.category || "unknown"), text: d.category || "unknown" }));
+    if (d.confidence) meta.appendChild(h("span", { class: "chip faint", text: "confidence: " + d.confidence }));
+    if (d.rootStepId) meta.appendChild(h("span", { class: "chip faint", text: "root step: " + d.rootStepId }));
+    meta.appendChild(h("span", { class: "chip faint", text: "via " + result.api + "/" + result.model }));
+    body.appendChild(meta);
+
+    if (result.specDrift) {
+      body.appendChild(h("div", { class: "mbanner show info",
+        text: "The workflow spec changed since this run — field values below may have drifted." }));
+    }
+
+    body.appendChild(diagnoseSection("Root cause", d.summary));
+    if (d.evidence) body.appendChild(diagnoseSection("Evidence", d.evidence));
+    if (d.suggestion) body.appendChild(diagnoseSection("Suggested fix", d.suggestion));
+
+    if (d.specFix) {
+      var fix = d.specFix;
+      var ok = fix.validation && fix.validation.ok === true;
+      var box = h("div", { class: "diagnose-fix" });
+      box.appendChild(h("div", { class: "diagnose-fix-head" },
+        h("span", { class: "diagnose-fix-title", text: "Proposed spec edit" }),
+        h("span", { class: ok ? "chip done" : "chip error",
+          text: ok ? "validated" : "not applied" })));
+      box.appendChild(h("div", { class: "diagnose-fix-target",
+        text: "step '" + fix.stepId + "' · field '" + fix.field + "'" }));
+      if (!ok && fix.validation && fix.validation.error) {
+        box.appendChild(h("div", { class: "hint", text: fix.validation.error }));
+      }
+      if (fix.rationale) box.appendChild(h("div", { class: "hint", text: fix.rationale }));
+      if (fix.current) box.appendChild(diagnoseKv("now", fix.current));
+      box.appendChild(diagnoseKv("proposed", fix.proposed));
+      if (ok) {
+        box.appendChild(h("div", { class: "hint",
+          text: "Apply it by editing that step (plan editor, or Ctrl+E in the TUI preview)." }));
+      }
+      body.appendChild(box);
+    }
+  }
+
+  function diagnoseSection(title, text) {
+    return h("div", { class: "diagnose-section" },
+      h("div", { class: "diagnose-section-title", text: title }),
+      h("div", { class: "diagnose-section-text", text: text || "" }));
+  }
+
+  function diagnoseKv(label, value) {
+    return h("div", { class: "diagnose-kv" },
+      h("span", { class: "diagnose-kv-label", text: label }),
+      h("code", { class: "diagnose-kv-value", text: value }));
+  }
+
   // ---- authoring: modal scaffolding ---------------------------------------
   function modalFocusables() {
     var modal = document.getElementById("modal");
@@ -1742,6 +1834,7 @@
     modalShell: modalShell,
     modelOptionsWith: modelOptionsWith,
     openCreate: openCreate,
+    openDiagnoseModal: openDiagnoseModal,
     openEditor: openEditor,
     openLaunchSheet: openLaunchSheet,
     openModal: openModal,

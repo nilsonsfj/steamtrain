@@ -133,6 +133,7 @@ import {
   MAX_STEPS,
   MAX_WORKFLOW_NESTING_DEPTH,
   type MergeStep,
+  PROMPT_EDITABLE_KINDS,
   type StepResult,
   type WorkerStep,
   type WorkflowCallStep,
@@ -518,16 +519,6 @@ function pauseTransitionEvent(env: RunEnv): WorkflowEvent | undefined {
   }
   return undefined;
 }
-
-/** Step kinds whose `prompt` field a mid-run edit may rewrite. */
-const PROMPT_EDITABLE_KINDS: ReadonlySet<string> = new Set([
-  "worker",
-  "processor",
-  "llm",
-  "consolidator",
-  "approval",
-  "human",
-]);
 
 /**
  * Kill one in-flight step: abort its own signal and leave the run's alone, so

@@ -12,6 +12,7 @@ import type { RetryPolicy } from "./retry";
 import {
   type AgentBackedWorkflowStep,
   MAX_WORKFLOW_NESTING_DEPTH,
+  PROMPT_EDITABLE_KINDS,
   isAgentBackedStep,
   workflowStepKind,
 } from "./step-kind";
@@ -1933,6 +1934,7 @@ export function parseForEachSource(source: string): string | undefined {
 // `from "./types"` importers — see the note near the constants above.
 export {
   MAX_WORKFLOW_NESTING_DEPTH,
+  PROMPT_EDITABLE_KINDS,
   workflowStepKind,
   isAgentBackedStep,
   type AgentBackedWorkflowStep,
