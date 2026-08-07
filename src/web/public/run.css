@@ -550,8 +550,8 @@ textarea#input:focus {
 /* Nothing stacked above the expanded band may squeeze it away: every other
    child of the scrolling bands column keeps its natural height, and the
    expanded band keeps a floor so its output pane stays readable even when the
-   pending block and the narration are tall. (Both values are mine — the brief
-   specifies the band rules but not this stacking case.) */
+   pending block is tall. (Both values are mine — the brief specifies the band
+   rules but not this stacking case.) */
 .bands > * {
   flex: none;
 }

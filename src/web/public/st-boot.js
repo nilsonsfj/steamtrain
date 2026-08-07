@@ -84,7 +84,6 @@
       return;
     }
 
-    ST.run.renderNarration(stage);
     ST.run.renderBands(stage);
     ST.run.updateProgress();
     applyTailScroll(stage);
