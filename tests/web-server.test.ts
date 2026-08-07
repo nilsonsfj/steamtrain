@@ -280,6 +280,9 @@ describe("web server", () => {
     expect(coreText).toContain("SteamtrainReducer");
     expect(coreText).toContain("friendlyStepLabel");
     expect(coreText).not.toContain("BEGIN_REDUCER_BUNDLE");
+    expect(coreText).not.toContain("steamtrain.narration");
+    expect(coreText).not.toContain("appendNarration");
+    expect(coreText).not.toContain("narrationOn");
 
     const arrivalText = await (await fetch(`${base}/static/st-arrival.js`)).text();
     expect(arrivalText).toContain("renderArrival");
@@ -288,14 +291,17 @@ describe("web server", () => {
     const bootText = await (await fetch(`${base}/static/st-boot.js`)).text();
     expect(bootText).toContain("window.Steamtrain.start()");
 
-    // The Console redesign retired the Station/Ride/Conductor layer, but four
-    // of its strings survived in the shipped client. Guard the surfaces that
-    // carried them so the vocabulary cannot come back.
+    // The Console redesign retired the Station/Ride/Conductor layer, including
+    // the live narration popup that used to sit above the phase bands. The
+    // instrument rail's Event log is the replacement. Guard that the popup
+    // (and its retired theatrical vocabulary) cannot come back.
     const runText = await (await fetch(`${base}/static/st-run.js`)).text();
-    expect(runText).toContain('text: "Narration"');
+    expect(runText).not.toContain("renderNarration");
+    expect(runText).not.toContain('text: "Narration"');
     expect(runText).not.toContain("Conductor");
     expect(runText).not.toContain("this ride");
     expect(bootText).not.toContain("Boarding");
+    expect(bootText).not.toContain("renderNarration");
 
     const tokensText = await (await fetch(`${base}/static/tokens.css`)).text();
     expect(tokensText).toContain("--accent");
@@ -312,7 +318,8 @@ describe("web server", () => {
     expect(instrumentsCss).toMatch(/\.runner \.right\s*\{[^}]*white-space:\s*nowrap/s);
 
     const arrivalCss = await (await fetch(`${base}/static/arrival.css`)).text();
-    expect(arrivalCss).toContain(".narration-head");
+    expect(arrivalCss).not.toContain(".narration");
+    expect(arrivalCss).not.toContain(".narration-head");
     expect(arrivalCss).toContain(".arrival-headline");
     expect(arrivalCss).toContain(".arrival-report");
     expect(arrivalCss).toContain(".ledger-row");

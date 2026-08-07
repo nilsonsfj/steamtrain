@@ -236,65 +236,6 @@
     return Object.keys(params).length > 0 ? params : undefined;
   }
 
-  function openNarrationStep(line, invoker) {
-    if (!line || !line.stepId) return;
-    var phases = (S.runState && S.runState.phases) || [];
-    var iteration = line.iteration || 1;
-    for (var i = 0; i < phases.length; i++) {
-      var p = phases[i];
-      if (line.phaseId && p.phaseId !== line.phaseId) continue;
-      if ((p.iteration || 1) !== iteration) continue;
-      for (var j = 0; j < (p.steps || []).length; j++) {
-        if (p.steps[j].stepId === line.stepId) {
-          openDetail(p, p.steps[j], invoker);
-          return;
-        }
-      }
-    }
-  }
-
-  function renderNarration(canvas) {
-    if (!S.narrationOn || !S.narration || !S.narration.length) return;
-    if (!(S.runState && S.runState.started)) return;
-    // A finished run belongs to the Arrival report; narration is live-only.
-    if (S.runState.done) return;
-    var box = h("div", { class: "narration" });
-    box.appendChild(h("div", { class: "narration-head" },
-      h("span", { class: "narration-mark", text: "Narration" }),
-      h("button", {
-        class: "btn small",
-        text: "Hide",
-        onClick: function () {
-          S.narrationOn = false;
-          try { localStorage.setItem("steamtrain.narration", "off"); } catch (e) {}
-          ST.render();
-        }
-      })
-    ));
-    S.narration.slice(-8).reverse().forEach(function (line, idx) {
-      // One-shot entrance: only the newest line, and only the first paint of that id.
-      // Rebuilding the canvas on every SSE tick must not restart the animation.
-      var playFresh = idx === 0 && line.id && line.id !== S.narrationFreshPlayed;
-      if (playFresh) S.narrationFreshPlayed = line.id;
-      box.appendChild(h("div", {
-        class: "narration-line" + (playFresh ? " fresh" : "") + (line.stepId ? " clickable" : ""),
-        role: line.stepId ? "button" : null,
-        tabindex: line.stepId ? "0" : null,
-        "data-detail-invoker": line.stepId ? "narration:" + line.id : null,
-        "aria-label": line.stepId ? "Open details for step " + line.stepId : null,
-        onClick: line.stepId ? function (event) {
-          openNarrationStep(line, event.currentTarget);
-        } : undefined,
-        onKeydown: line.stepId ? function (event) {
-          activateWithKeyboard(event, function () {
-            openNarrationStep(line, event.currentTarget);
-          });
-        } : undefined
-      }, h("span", { class: "narration-verb", text: "\u25B8" }), " " + line.text));
-    });
-    canvas.appendChild(box);
-  }
-
   // ---- phase bands ---------------------------------------------------------
 
   /**
@@ -1680,8 +1621,7 @@
     S.runDetached = false;
     S.runState = SteamtrainReducer.workflowStateFromSpec(opts.spec || effectiveSpec() || S.spec);
     S.tailScroll = {}; S.stepListScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {};
-    S.narration = []; S.arrivalEnter = false;
-    S.narrationFreshPlayed = null;
+    S.arrivalEnter = false;
     S.selectedStepId = null; S.collapsedBandKey = null;
     S.arrivalCtaFocused = false;
     S.endedAt = 0;
@@ -2310,7 +2250,6 @@
     renderBands: renderBands,
     renderCard: renderCard,
     renderDetail: renderDetail,
-    renderNarration: renderNarration,
     renderParamsForm: renderParamsForm,
     renderPlanResult: renderPlanResult,
     renderStagedIndicator: renderStagedIndicator,

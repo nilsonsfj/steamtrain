@@ -2,8 +2,9 @@
 #
 # Unsigned on purpose: signing and notarization are their own project (the
 # hardened runtime needs entitlements for the agent CLIs the engine spawns, plus
-# a paid developer account), and nothing here should wait on that. macOS will
-# quarantine the result — `docs/desktop-app.md` says how to open it anyway.
+# a paid developer account), and nothing here should wait on that. A build you
+# run here is not quarantined and just opens; only a *downloaded* one meets
+# Gatekeeper — `docs/desktop-app.md` says how to open that.
 #
 # The output directory is `release/`, not electron-builder's default `dist/`,
 # because `dist/` is where the CLI bundle already lives and this would overwrite

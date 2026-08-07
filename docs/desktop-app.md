@@ -31,12 +31,38 @@ packaged build gets the menu bar too.
 | macOS | `steamtrain-<version>.dmg` (arm64 and x64) |
 | Linux | `steamtrain-<version>.AppImage` and `steamtrain_<version>_amd64.deb` |
 
-**The builds are unsigned**, so macOS quarantines them: the first open reports a
-damaged or unidentified app. Right-click → Open, or clear the flag directly:
+**The builds are unsigned.** What that costs depends entirely on how the app
+reached the machine, and the difference trips people up:
+
+- **You built it yourself** — nothing happens. `com.apple.quarantine` is set by
+  the application that *downloads* a file, not by the build, so a local
+  `package:desktop` produces a dmg that opens on a double-click and keeps
+  working. Gatekeeper is never consulted.
+- **You downloaded it** — the first open reports a damaged or unidentified app.
+
+On macOS 15 and later the escape hatch is **System Settings → Privacy &
+Security**, where a blocked app leaves an **Open Anyway** button; that prompts
+for an admin password, and only the first launch needs it. The Control-click →
+Open trick that used to do this was removed in Sequoia, so any instruction
+telling you to right-click is describing an older macOS.
+
+Clearing the flag directly still works, and is the honest option for a machine
+you control:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/steamtrain.app
 ```
+
+It is deliberately not the headline instruction. Teaching people to strip
+quarantine reflexively is the practice the ecosystem is actively moving away
+from — Homebrew is removing `--no-quarantine` and drops casks that fail
+Gatekeeper on 2026-09-01, which closes `brew install --cask` as a route for
+unsigned software.
+
+Two things blunt this in practice. The CLI is unaffected — `npm i -g steamtrain`
+then `steamtrain --web-ui` serves the same cockpit, and an npm package is not a
+bundle, so it never meets Gatekeeper at all. And the Linux targets have no
+equivalent: the AppImage and deb install without ceremony.
 
 Signing and notarization are deliberately deferred — see the
 [roadmap](desktop-roadmap.md) for what they actually cost here, which is mostly

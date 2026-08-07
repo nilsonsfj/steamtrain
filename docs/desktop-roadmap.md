@@ -71,6 +71,27 @@ Not scheduled, and each for its own reason:
   `allow-unsigned-executable-memory` and `disable-library-validation` for the
   agent CLIs the engine spawns, plus TCC usage strings for the folders it
   touches. Wants a paid developer account and a real CI secret story.
+
+  There is no free version of this. Notarization needs a Developer ID
+  certificate, which needs the $99/yr Developer Program; the fee waiver is for
+  nonprofits, accredited schools and government entities, not open source. The
+  $99 is also the small half of the cost — the entitlements and the secret
+  story are the work.
+
+  What defers it is that the dmg is a convenience rather than the product. The
+  CLI is the supported install (`npm i -g steamtrain`), it carries the same web
+  UI, and npm packages never meet Gatekeeper. Linux is unaffected. A locally
+  built dmg is unquarantined and works permanently, so contributors pay nothing
+  either. Only *downloaded* macOS builds pay, and only on first launch.
+
+  The trigger to reconsider is the desktop app becoming how most people run
+  steamtrain rather than a nicety over the CLI. One route narrowed already:
+  Homebrew is removing `--no-quarantine` and will drop casks that fail
+  Gatekeeper on **2026-09-01**
+  ([Homebrew/brew#20755](https://github.com/Homebrew/brew/issues/20755)), so a
+  cask is not a way around this. If a free-ish middle path is ever wanted, it is
+  building the app on the user's machine — a local build is unquarantined by
+  construction — at the price of an Electron download and a build per install.
 - **Auto-update** — depends on signing, and on having somewhere to publish.
 - **`steamtrain://` deep links** — nice with notifications, but the notification
   itself can just focus the window; the URL scheme only earns its keep once
