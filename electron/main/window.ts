@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { BrowserWindow, app, shell } from "electron";
+import { overlaysTitleBar } from "../shared/title-bar";
 import type { WindowStateShape } from "./store";
 import { MIN_HEIGHT, MIN_WIDTH, type RestoredWindowState } from "./window-state";
 
@@ -102,7 +103,10 @@ export function createWindow(options: CreateWindowOptions): BrowserWindow {
     show: false,
     title: `steamtrain — ${options.projectName}`,
     backgroundColor: "#0e1116",
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    // Hiding the title bar is what lets the topbar *be* the title bar. The page
+    // reserves room for the window controls that then sit inside it — see
+    // `shared/title-bar.ts`, which both halves agree through.
+    titleBarStyle: overlaysTitleBar(process.platform) ? "hiddenInset" : "default",
     webPreferences: {
       preload: join(__dirname, "preload.cjs"),
       contextIsolation: true,

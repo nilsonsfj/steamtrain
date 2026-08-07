@@ -5,6 +5,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type ElectronApplication, _electron as electron, expect, test } from "@playwright/test";
 import { STATE_FILE } from "../electron/main/store";
+import { TITLE_BAR_INSET_PX } from "../electron/shared/title-bar";
 
 /**
  * Does the app actually launch?
@@ -196,6 +197,69 @@ test("launches into the last project and shows the web UI", async () => {
   // The preload bridge is the one thing the renderer cannot get over HTTP.
   const bridge = await page.evaluate(() => window.steamtrainDesktop);
   expect(bridge?.platform).toBe(process.platform);
+});
+
+test("leaves the page room for the window controls", async () => {
+  const { app } = await launchApp();
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  // Set by the preload, before the client scripts run.
+  await expect(page.locator("html")).toHaveClass(/desktop-app/);
+
+  // On macOS the title bar is hidden and the controls land inside the topbar,
+  // so the row has to start clear of them. Everywhere else the window has its
+  // own title bar and the topbar keeps its ordinary padding.
+  const padding = await page.evaluate(() => {
+    const bar = document.getElementById("topbar");
+    return bar ? Number.parseFloat(getComputedStyle(bar).paddingLeft) : Number.NaN;
+  });
+  if (process.platform === "darwin") expect(padding).toBeGreaterThanOrEqual(72);
+  else expect(padding).toBe(16);
+
+  // The stylesheet's half of the arrangement is platform-independent, so it can
+  // be measured anywhere: turning the class on has to move the row clear of the
+  // controls *and* turn the bar into a drag handle, without swallowing the
+  // presses meant for the controls drawn inside it. Only the macOS leg would
+  // otherwise ever run these rules.
+  const overlaid = await page.evaluate((inset) => {
+    const root = document.documentElement;
+    root.classList.add("desktop-titlebar-overlay");
+    root.style.setProperty("--desktop-titlebar-inset", `${inset}px`);
+    const bar = document.getElementById("topbar");
+    const brand = document.querySelector("#topbar .brand");
+    if (!bar || !brand) return null;
+    const style = getComputedStyle(bar);
+    return {
+      padding: Number.parseFloat(style.paddingLeft),
+      bar: style.getPropertyValue("-webkit-app-region"),
+      brand: getComputedStyle(brand).getPropertyValue("-webkit-app-region"),
+    };
+  }, TITLE_BAR_INSET_PX);
+  expect(overlaid).toEqual({ padding: TITLE_BAR_INSET_PX, bar: "drag", brand: "no-drag" });
+});
+
+test("quits when its window is closed", async () => {
+  const { app } = await launchApp();
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+  const port = Number(new URL(page.url()).port);
+  // Held onto now: once the app is gone, `app.process()` has nothing to return.
+  const child = app.process();
+
+  // What the close button does, from the main process's point of view.
+  // Swallowing the failure is deliberate: this call is what makes the app exit,
+  // so the reply can lose the race with the process it just ended.
+  await app
+    .evaluate(({ BrowserWindow }) => {
+      for (const win of BrowserWindow.getAllWindows()) win.close();
+    })
+    .catch(() => {});
+
+  // Closing the last window has to reach the same shutdown that Quit does.
+  // Anything less leaves a forked engine serving a window nobody can see.
+  await expect.poll(() => child.exitCode !== null, { timeout: 20_000 }).toBe(true);
+  expect(await portAccepts(port)).toBe(false);
 });
 
 test("stops the engine and saves its window when it quits", async () => {

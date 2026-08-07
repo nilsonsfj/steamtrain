@@ -1,4 +1,5 @@
 import { contextBridge } from "electron";
+import { TITLE_BAR_INSET_PX, overlaysTitleBar } from "../shared/title-bar";
 
 /**
  * The renderer-facing surface, kept as small as it can usefully be.
@@ -13,3 +14,27 @@ contextBridge.exposeInMainWorld("steamtrainDesktop", {
   platform: process.platform,
   version: process.versions.electron,
 });
+
+/**
+ * Tell the page it is inside the app window.
+ *
+ * Written onto the document rather than handed to the client to read, because
+ * it has to be true before the first paint: a topbar that reflowed once the
+ * client scripts had run would show its wordmark under the window controls
+ * first. In a browser neither the class nor the variable exists, and the rules
+ * keyed off them do nothing.
+ */
+function markDocument(): void {
+  const root = document.documentElement;
+  root.classList.add("desktop-app");
+  if (!overlaysTitleBar(process.platform)) return;
+  // Both are needed: the class gates the rules, the variable sizes them.
+  root.classList.add("desktop-titlebar-overlay");
+  root.style.setProperty("--desktop-titlebar-inset", `${TITLE_BAR_INSET_PX}px`);
+}
+
+// A preload runs at document start, where `documentElement` may not exist yet.
+// Either way this lands well before `ready-to-show`, which is when the window
+// is first put on screen.
+if (document.documentElement) markDocument();
+else document.addEventListener("DOMContentLoaded", markDocument, { once: true });
