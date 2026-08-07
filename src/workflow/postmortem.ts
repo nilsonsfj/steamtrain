@@ -305,8 +305,6 @@ export function resolvePostmortemApi(
   }
 
   const instances = resolveApiInstances(config);
-  const usable = (api: ResolvedApiInstance): boolean =>
-    api.keyless === true || Boolean(env[api.apiKeyEnv]);
   const keyed = instances.filter((api) => !api.keyless && env[api.apiKeyEnv]);
   const keyless = instances.filter((api) => api.keyless);
   for (const api of [...keyed, ...keyless]) {
