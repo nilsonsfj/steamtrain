@@ -39,7 +39,25 @@ describe("launchProjectPath", () => {
     ).toBeUndefined();
   });
 
-  it("accepts the CLI project directory flags", () => {
+  it("ignores separate values for Electron switches", () => {
+    expect(
+      launchProjectPath({
+        argv: [
+          "/opt/steamtrain",
+          "--app-data",
+          "/tmp/app-data",
+          "--user-agent",
+          "steamtrain-test",
+          "--user-data-dir",
+          "/tmp/user-data",
+        ],
+        packaged: true,
+        cwd,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("accepts --project-dir as a project directory flag", () => {
     expect(
       launchProjectPath({
         argv: ["/opt/steamtrain", "--project-dir", "work/app"],
@@ -47,6 +65,26 @@ describe("launchProjectPath", () => {
         cwd,
       }),
     ).toBe("/home/me/work/app");
+  });
+
+  it("accepts --cwd as a project directory flag", () => {
+    expect(
+      launchProjectPath({
+        argv: ["/opt/steamtrain", "--cwd", "work/app"],
+        packaged: true,
+        cwd,
+      }),
+    ).toBe("/home/me/work/app");
+  });
+
+  it("takes the first path after the end-of-options marker", () => {
+    expect(
+      launchProjectPath({
+        argv: ["/opt/steamtrain", "--", "-named-project", "ignored"],
+        packaged: true,
+        cwd,
+      }),
+    ).toBe("/home/me/-named-project");
   });
 
   it("returns no path when the app was launched without one", () => {

@@ -1,6 +1,22 @@
 import { resolve } from "node:path";
 
-const ELECTRON_OPTIONS_WITH_VALUES = new Set(["--user-data-dir"]);
+/**
+ * Electron normally serializes switches as `--name=value`, but launchers can
+ * provide some switches as two arguments. Keep their values from looking like
+ * the project's positional path.
+ */
+const ELECTRON_OPTIONS_WITH_VALUES = new Set([
+  "--app-data",
+  "--app-path",
+  "--js-flags",
+  "--lang",
+  "--log-file",
+  "--proxy-server",
+  "--remote-debugging-address",
+  "--remote-debugging-port",
+  "--user-agent",
+  "--user-data-dir",
+]);
 
 export interface LaunchProjectPathOptions {
   argv: readonly string[];
@@ -21,6 +37,8 @@ export function launchProjectPath(options: LaunchProjectPathOptions): string | u
     const arg = args[index];
     if (!arg) continue;
     if (arg === "--") {
+      // The desktop app opens one project, so only the first argument after
+      // the end-of-options marker is meaningful.
       const path = args[index + 1];
       return path ? resolve(cwd, path) : undefined;
     }

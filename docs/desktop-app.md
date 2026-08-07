@@ -102,7 +102,8 @@ appears when there is no usable project to return to — a first launch, or one
 whose folder has since moved. **File → Open Recent** switches between the last
 eight, each labelled by folder name and disambiguated by its parent only when
 two would otherwise read the same. Switching stops the current engine and forks
-a new one; the window stays put.
+a new one; the window stays put. The shell opens one project at a time, so only
+the first path after a `--` end-of-options marker is used.
 
 **The window remembers its size, position and maximized state**, but only
 restores a position that still lands on an attached display. A window saved on
