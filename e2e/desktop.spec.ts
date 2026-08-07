@@ -96,7 +96,7 @@ interface Launched {
 
 const running: Launched[] = [];
 
-async function launchApp(): Promise<Launched> {
+async function launchApp(projectArgument?: string): Promise<Launched> {
   const project = scratchDir("steamtrain-project-");
   const userData = scratchDir("steamtrain-userdata-");
   // Seeding the state file is how the app is told which project to open: it
@@ -106,7 +106,12 @@ async function launchApp(): Promise<Launched> {
 
   // A packaged app has no script argument — it boots whatever its own manifest
   // names as `main`, which is the part worth testing.
-  const args = [...(PACKAGED ? [] : [MAIN]), `--user-data-dir=${userData}`, ...sandboxArgs()];
+  const args = [
+    ...(PACKAGED ? [] : [MAIN]),
+    ...(projectArgument ? [projectArgument] : []),
+    `--user-data-dir=${userData}`,
+    ...sandboxArgs(),
+  ];
   const app = await electron.launch({
     ...(PACKAGED ? { executablePath: PACKAGED } : {}),
     args,
@@ -197,6 +202,15 @@ test("launches into the last project and shows the web UI", async () => {
   // The preload bridge is the one thing the renderer cannot get over HTTP.
   const bridge = await page.evaluate(() => window.steamtrainDesktop);
   expect(bridge?.platform).toBe(process.platform);
+});
+
+test("uses an explicit project path instead of the saved project", async () => {
+  const requested = scratchDir("steamtrain-requested-");
+  const { app } = await launchApp(requested);
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  await expect(page).toHaveTitle(`steamtrain · ${basename(requested)}`);
 });
 
 test("leaves the page room for the window controls", async () => {

@@ -2,6 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { BrowserWindow, Notification, app, dialog, screen } from "electron";
 import { resolveEntry } from "./entry";
+import { launchProjectPath, selectLaunchProject } from "./launch-project";
 import { buildMenu } from "./menu";
 import { type QuitChoice, quitChoiceFor, quitPromptSpec } from "./quit-prompt";
 import { addRecent, labelRecents, pruneRecents, removeRecent } from "./recents";
@@ -321,11 +322,15 @@ async function main(): Promise<void> {
 
   refreshMenu();
 
-  // Reopening the last project is what makes the app feel like it belongs to a
-  // project rather than asking the same question every launch. A folder that
-  // has gone away falls through to the picker.
-  const last = state.recents[0];
-  const dir = last && isDirectory(last) ? last : await promptForProject();
+  const dir =
+    selectLaunchProject({
+      explicitPath: launchProjectPath({
+        argv: process.argv,
+        packaged: app.isPackaged,
+      }),
+      recents: state.recents,
+      isDirectory,
+    }) ?? (await promptForProject());
   if (!dir) {
     app.quit();
     return;
