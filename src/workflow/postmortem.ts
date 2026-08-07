@@ -514,11 +514,12 @@ function normalizeDiagnosis(
   if (fix && typeof fix === "object") {
     const f = fix as Record<string, unknown>;
     const stepId = typeof f.stepId === "string" ? f.stepId : "";
-    const field = f.field as PostmortemFixField;
+    const field = typeof f.field === "string" ? (f.field as PostmortemFixField) : undefined;
     const proposed = typeof f.proposed === "string" ? f.proposed : "";
     if (
       stepId &&
       proposed &&
+      field &&
       (POSTMORTEM_FIX_FIELDS as readonly string[]).includes(field) &&
       knownSteps.has(stepId)
     ) {
