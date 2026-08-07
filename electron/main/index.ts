@@ -391,17 +391,26 @@ app.on("will-quit", (event) => {
     },
     quit: () => app.quit(),
     onError: (err) => console.error("[steamtrain] shutdown step failed:", err),
-  }).then((outcome) => {
-    // Cancelled: back out of the quit entirely so a later one asks again.
-    if (outcome === "cancelled") {
-      quitting = false;
-      shutdown = undefined;
-      // The window may be gone already — closing it is one of the ways to reach
-      // here. Staying is only a meaningful answer if there is something to stay
-      // *in*.
-      restoreWindow();
-    }
-  });
+  })
+    .then((outcome) => {
+      // Cancelled: back out of the quit entirely so a later one asks again.
+      if (outcome === "cancelled") {
+        quitting = false;
+        shutdown = undefined;
+        // The window may be gone already — closing it is one of the ways to reach
+        // here. Staying is only a meaningful answer if there is something to stay
+        // *in*.
+        restoreWindow();
+      }
+    })
+    .catch((err) => {
+      // `performQuit` handles its own step failures, so reaching here means the
+      // teardown itself broke. The quit is already prevented, so let it through
+      // rather than leaving an app that cannot be quit at all. `shutdown` stays
+      // set on purpose: that is what stops this handler intercepting the retry.
+      console.error("[steamtrain] shutdown failed:", err);
+      app.quit();
+    });
 });
 
 main().catch((err) => {
