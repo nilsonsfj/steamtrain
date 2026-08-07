@@ -95,9 +95,6 @@ describe("expanded phase band layout", () => {
   });
 
   it("lets a second click retract an expanded live row", () => {
-    // A selected row is expanded by the live-band fallback. The click must
-    // carry that state into openDetail so closing an auto-expanded row does
-    // not immediately reopen it on the next render.
     expect(js).toMatch(/openDetail\(p, s, event\.currentTarget, open\)/);
     expect(js).toMatch(/if \(sameDetail \|\| isOpen\) \{\s*closeDetail\(bandKey\(p\)\);\s*return;/);
     expect(js).toMatch(/bands\[i\]\.key !== S\.collapsedBandKey/);

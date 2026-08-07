@@ -105,8 +105,6 @@ window.Steamtrain = (function () {
     // and its output fills that band's live output pane. null -> the running
     // phase expands instead.
     selectedStepId: null,
-    // A repeated click on the open live row suppresses automatic re-expansion
-    // until the reader selects another step.
     collapsedBandKey: null,
     // Live output pane: false wraps long lines, true scrolls horizontally.
     outputNoWrap: false,
