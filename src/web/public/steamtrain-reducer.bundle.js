@@ -32,6 +32,7 @@ var SteamtrainReducer = (() => {
     applyWorkflowStepOverrides: () => applyWorkflowStepOverrides,
     approvalDeepLink: () => approvalDeepLink,
     arrivalReceiptCards: () => arrivalReceiptCards,
+    arrivalRootCause: () => arrivalRootCause,
     buildArrivalReport: () => buildArrivalReport,
     createThroughputMeter: () => createThroughputMeter,
     describeSubWorkflow: () => describeSubWorkflow,
@@ -42,6 +43,7 @@ var SteamtrainReducer = (() => {
     initialWorkflowIndex: () => initialWorkflowIndex,
     initialWorkflowState: () => initialWorkflowState,
     isAgentlessWorkflow: () => isAgentlessWorkflow,
+    isCascadeVictim: () => isCascadeVictim,
     isCredentialFreeWorkflow: () => isCredentialFreeWorkflow,
     isLiveOutputContainer: () => isLiveOutputContainer,
     isPageRoute: () => isPageRoute,
@@ -791,12 +793,14 @@ var SteamtrainReducer = (() => {
     let okCount = 0;
     let failCount = 0;
     let skipCount = 0;
+    let blockedCount = 0;
     let costUsd = 0;
     let tokens = 0;
     let durationMs = 0;
     for (const result of leaves) {
       if (result.skipped) skipCount += 1;
       else if (result.ok) okCount += 1;
+      else if (isCascadeVictim(result)) blockedCount += 1;
       else failCount += 1;
       costUsd += result.costUsd ?? 0;
       tokens += tokenTotal(result.tokens);
@@ -808,7 +812,7 @@ var SteamtrainReducer = (() => {
       const failures = rootFailureLines(flat.map((f) => f.step));
       if (failures.length > 0) hero = [...failures, "", hero].join("\n");
     }
-    const agentless = opts.credentialFree === true || costUsd === 0 && tokens === 0 && failCount === 0;
+    const agentless = opts.credentialFree === true || costUsd === 0 && tokens === 0 && failCount === 0 && blockedCount === 0;
     const nextCandidates = opts.nextCandidates ?? DEFAULT_NEXT_CANDIDATES;
     const current = state.name;
     const next = opts.nextWorkflow ?? nextCandidates.find(
@@ -833,12 +837,49 @@ var SteamtrainReducer = (() => {
         okCount,
         failCount,
         skipCount,
+        blockedCount,
         costUsd,
         tokens,
         agentless
       },
       notices: arrivalNotices(flat.map((f) => f.step)),
       destinations
+    };
+  }
+  function isCascadeVictim(result) {
+    if (!result) return false;
+    return Boolean(result.dependencyFailed) || (result.error ?? "").startsWith("dependency '");
+  }
+  function arrivalRootCause(state) {
+    if (!state.done || state.ok) return null;
+    const blocked = [];
+    let root = null;
+    for (const phase of state.phases) {
+      for (const step of phase.steps) {
+        const result2 = step.result;
+        if (!result2 || result2.childResults?.length) continue;
+        if (result2.ok || result2.skipped) continue;
+        if (isCascadeVictim(result2)) {
+          blocked.push(step.stepId);
+          continue;
+        }
+        if (!root) {
+          root = { step, phaseNumber: phase.index + 1, phaseTitle: phase.title };
+        }
+      }
+    }
+    if (!root) return null;
+    const result = root.step.result;
+    const firstLine = (result?.error ?? "").split("\n", 1)[0]?.trim();
+    return {
+      stepId: root.step.stepId,
+      blockKind: root.step.blockKind,
+      phaseNumber: root.phaseNumber,
+      phaseTitle: root.phaseTitle,
+      error: firstLine || "failed",
+      durationMs: result?.durationMs,
+      killed: Boolean(result?.killed),
+      blocked
     };
   }
   var SEVERITY_RANK = {
@@ -938,7 +979,8 @@ var SteamtrainReducer = (() => {
   function arrivalReceiptCards(receipt) {
     const ranParts = [`${receipt.okCount} ok`];
     if (receipt.failCount) ranParts.push(`${receipt.failCount} failed`);
-    if (receipt.skipCount) ranParts.push(`${receipt.skipCount} skipped`);
+    const notRun = receipt.skipCount + (receipt.blockedCount ?? 0);
+    if (notRun) ranParts.push(`${notRun} skipped`);
     const cost = receipt.agentless ? "$0 \xB7 no agents" : receipt.costUsd > 0 ? `$${receipt.costUsd.toFixed(4)}` : "$0";
     const produced = receipt.tokens > 0 ? `${compactTokens(receipt.tokens)} tokens` : receipt.agentless ? "engine demo" : "no tokens billed";
     return [
@@ -952,7 +994,8 @@ var SteamtrainReducer = (() => {
     parts.push(`${(receipt.durationMs / 1e3).toFixed(1)}s`);
     parts.push(`${receipt.okCount} ok`);
     if (receipt.failCount) parts.push(`${receipt.failCount} failed`);
-    if (receipt.skipCount) parts.push(`${receipt.skipCount} skipped`);
+    const notRun = receipt.skipCount + (receipt.blockedCount ?? 0);
+    if (notRun) parts.push(`${notRun} skipped`);
     if (receipt.agentless) parts.push("$0 \xB7 no agents");
     else {
       if (receipt.costUsd > 0) parts.push(`$${receipt.costUsd.toFixed(4)}`);
@@ -973,9 +1016,7 @@ var SteamtrainReducer = (() => {
   }
   function rootFailureLines(steps) {
     const failed = steps.filter((s) => s.result && !s.result.ok && !s.result.skipped);
-    const roots = failed.filter(
-      (s) => !s.result?.dependencyFailed && !(s.result?.error ?? "").startsWith("dependency '")
-    );
+    const roots = failed.filter((s) => !isCascadeVictim(s.result));
     const shown = roots.length > 0 ? roots : failed;
     return shown.map((s) => {
       const firstErrLine = (s.result?.error ?? "failed").split("\n", 1)[0]?.trim() || "failed";

@@ -68,6 +68,12 @@
     if (S.runState && S.runState.done) {
       showingArrival = ST.arrival.renderArrival(stage);
     }
+    // The finished-run page owns its own header (design 5a): the run's actions
+    // live there, and the cockpit's workflow-scoped Configure/Clone/Delete row
+    // is hidden while it is up so a "Delete" that removes the WORKFLOW can
+    // never be read as discarding this run.
+    document.body.classList.toggle("arrival-mode", showingArrival);
+    if (!showingArrival && ST.arrival.leave) ST.arrival.leave();
 
     if (showingArrival) {
       ST.run.updateProgress();

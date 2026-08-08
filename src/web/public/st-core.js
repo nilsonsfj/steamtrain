@@ -124,6 +124,12 @@ window.Steamtrain = (function () {
     announceText: "",
     // Play the Arrival entrance animation once per completed run.
     arrivalEnter: false,
+    // Step id whose output the Arrival page's Output pane is showing; null
+    // means "the one that broke" (or, on a clean run, the hero step).
+    arrivalOutputStep: null,
+    // Whether the Arrival page's Workflow menu is open. Held here, not in the
+    // DOM, because #bands is rebuilt from scratch on every render.
+    arrivalMenuOpen: false,
     // Wall-clock end of the last run (frozen for the Arrival receipt).
     endedAt: 0,
     // Focus origins make overlays feel like part of one intentional control
@@ -1320,6 +1326,8 @@ window.Steamtrain = (function () {
     S.tailScroll = {}; S.stepListScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {};
     S.arrivalEnter = false; S.endedAt = 0;
     S.arrivalCtaFocused = false;
+    S.arrivalOutputStep = null;
+    S.arrivalMenuOpen = false;
     S.planSelection = [];
     S.sourceText = null; S.sourceDiverged = false; S.sourceReveal = null; S.sourceLint = null;
     S.dryRunPlan = null;

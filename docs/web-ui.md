@@ -68,14 +68,37 @@ worktree branch + directory, start time, live elapsed / final duration, cost,
 tokens, exit code, data-flow inputs, and the step's full output in a
 scrollable follow-the-stream pane with one-click copy. `Esc` closes it.
 
-A completed run replaces the pipeline canvas with the two-column **Arrival**
-page: a headline, receipt cards (ran / cost / produced), the per-step ledger,
-worktree changes, and destinations ("Run again", "Export"). The engine's
-`arrivalReceiptCards()` returns plain `{id, label, value}` facts — it has **no
-severity field** — so this is a plain fact ledger, not a severity-graded
-report; if a workflow's own report happens to mention severities (bug-hunt's
-consolidator prose, say), that is the workflow's text, not structured data the
-page renders or grades on.
+A completed run replaces the pipeline canvas with the two-column **finished-run
+page** (the Arrival surface). It is built around the question a reader arrives
+with — what broke, and what can I do about it — so it reads in that order:
+
+- **The run's own header.** Run id, status, and the run's actions: *Retry from
+  `<failing step>`* (a `retry-failed` launch, so the steps that already
+  succeeded are seeded from the record and only the break and its dependents
+  re-execute), *Run again*, *Export*. Everything that acts on the **workflow**
+  — configure, clone, open source, delete — sits behind a single `Workflow`
+  menu whose items repeat the noun, and the cockpit's own workflow action row
+  is hidden while the page is up. A `Delete` that removes the workflow must
+  never be mistaken for discarding the run.
+- **The root cause**, when the run stopped: the one step that broke, its first
+  error line, where it sits (phase, kind, how long it lasted), its command and
+  the tail of its output, and the steps its breaking blocked. A step that never
+  started is **not** a failure: `buildArrivalReport` counts those separately
+  (`blockedCount`), so one broken command reads `1 ok · 1 failed · 3 skipped`
+  rather than "4 failed".
+- **Four tiles**: elapsed, steps, model spend, left behind. A tile that would
+  read `$0` says why instead ("none — no agent step ran", "not priced yet"),
+  and a run with worktrees left over links to the receipt that can clean them.
+- **The output pane**, filling the space a finished run used to leave empty.
+  It shows the failing step by default; clicking any ledger row swaps it.
+- **The step ledger** (right): steps that ran, then, under their own header,
+  the ones that never started and what blocked each.
+
+The engine's `arrivalReceiptCards()` returns plain `{id, label, value}` facts —
+it has **no severity field** — so the clean-run summary is a plain fact ledger,
+not a severity-graded report; if a workflow's own report happens to mention
+severities (bug-hunt's consolidator prose, say), that is the workflow's text,
+not structured data the page renders or grades on.
 
 Settings (agents, APIs, timeouts/budget) is a real **page**, not a modal —
 see [Settings](#settings) below.

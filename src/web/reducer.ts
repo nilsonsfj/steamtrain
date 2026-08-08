@@ -15,6 +15,8 @@ export {
   formatArrivalHeadline,
   formatArrivalReceipt,
   arrivalReceiptCards,
+  arrivalRootCause,
+  isCascadeVictim,
   ARRIVAL_NEXT_CANDIDATES,
 } from "../workflow/arrival-report";
 export {
