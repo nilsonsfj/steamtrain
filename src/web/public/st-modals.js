@@ -628,8 +628,15 @@
       if (point.id === "duplicate") { card.appendChild(dupSel); card.appendChild(dupMeta); }
       if (point.id === "template") { card.appendChild(tplSel); card.appendChild(tplMeta); }
       card.addEventListener("click", function (e) {
-        // The select inside a card is a control, not part of the card hit area.
-        if (e.target !== card && ST.isInteractiveTarget(e.target)) return;
+        // Nested controls (duplicate/template selects) keep their own hit area;
+        // everything else on the card selects it. The card is itself a <button>,
+        // so isInteractiveTarget alone would treat every child click as
+        // interactive and never flip the selection.
+        var t = e.target;
+        var nested = t && typeof t.closest === "function"
+          ? t.closest("button, input, textarea, select, a")
+          : null;
+        if (nested && nested !== card) return;
         pick(point.id);
       });
       cardEls[point.id] = card;
