@@ -1,92 +1,330 @@
-/* Arrival surface: the two-column report + step ledger shown once a run
-   finishes. */
+/* Arrival surface: the finished-run page (design 5a) — diagnosis on the left,
+   step ledger on the right. See the header comment in st-arrival.js for the
+   three rules this layout exists to keep. */
 
-/* ---- Arrival: the two-column report + step ledger --------------------- */
+/* The run's own header replaces the cockpit's workflow header while a finished
+   run is up, so the two sets of actions can never sit in the same strip. The
+   breadcrumb still names the workflow. */
+body.arrival-mode .run-head {
+  display: none;
+}
+/* The instrument rail measures a run in flight — throughput, runners in
+   flight, projected spend. Once the run is over it has nothing left to say
+   that the step ledger does not say better, and holding 340px for it squeezed
+   the diagnosis into a column too narrow to read. */
+body.arrival-mode #rail-right {
+  display: none;
+}
+
 .arrival {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 420px;
+  grid-template-columns: minmax(0, 1fr) 400px;
 }
 .arrival-main {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* Not `overflow: hidden`: the head's Workflow menu is an absolutely
+     positioned popup that has to hang over the body below it. Every child that
+     can overflow (the body, the output pane) scrolls itself instead.
+     `min-height: 0` is what `overflow: hidden` used to do for free — without
+     it this grid item's automatic minimum is its content height, and a long
+     report pushes the whole page (header included) out of the canvas. */
+  overflow: visible;
+  min-height: 0;
 }
+
+/* ---- head: run identity + run actions ---------------------------------- */
 .arrival-head {
-  padding: 26px 32px 18px;
-  border-bottom: 1px solid var(--border-quiet);
-}
-.arrival-kicker {
+  flex: none;
+  position: relative;
+  z-index: 2;
+  padding: 14px 18px 13px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
   display: flex;
-  align-items: baseline;
-  gap: 12px;
-  margin-bottom: 12px;
+  flex-direction: column;
+  gap: 8px;
 }
-.arrival-kicker .state {
-  font: 600 10px / 1 var(--font-ui);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+.arrival-idline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.arrival-idline .run-id {
+  flex: 0 1 auto;
+  min-width: 0;
+  font: 600 19px / 1.2 var(--font-mono);
+  letter-spacing: -0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.arrival-state {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--border);
+  background: var(--raised);
   color: var(--done);
+  font: 600 11px / 1.5 var(--font-ui);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
-.arrival-kicker .state.failed {
+.arrival-state.failed {
+  border-color: rgba(248, 81, 73, 0.35);
+  background: rgba(248, 81, 73, 0.1);
   color: var(--error-text);
 }
-.arrival-kicker .when {
-  font: 400 11.5px / 1 var(--font-mono);
+.arrival-actions {
+  margin-left: auto;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.arrival-actions-rule {
+  width: 1px;
+  height: 22px;
+  background: var(--border);
+}
+.arrival-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font: 400 11.5px / 1.4 var(--font-mono);
   color: var(--dim);
 }
-.arrival-headline {
-  font: 600 30px / 1.2 var(--font-ui);
-  letter-spacing: -0.03em;
-  max-width: 30ch;
-  text-wrap: pretty;
+.arrival-meta > span + span::before {
+  content: "·";
+  color: var(--border);
+  margin-right: 8px;
 }
-/*
- * Deliberately deviates from the brief's Step 1 CSS here: verbatim it is
- * `display: flex; gap: 28px;` with no wrap/shrink allowance, authored against
- * the source design's full-viewport arrival (~1020px wide). Nested inside
- * `#center` the column is ~420-484px, and four stat cells + three divider
- * rules + the Run again/Export actions do not fit on one line at that width
- * (measured overflow: .arrival-main scrollWidth 593 vs clientWidth 484,
- * Export clipped entirely outside the column). Wrapping keeps every control
- * reachable at the mandated column width without reverting to full-bleed.
- */
-.arrival-stats {
+.linkish {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.linkish:hover {
+  color: var(--accent);
+}
+
+/* ---- the Workflow menu -------------------------------------------------- */
+.arrival-menu {
+  position: relative;
+}
+.arrival-menu > .btn .caret {
+  color: var(--dim);
+  font-size: 10px;
+  margin-left: 6px;
+}
+.arrival-menu-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  min-width: 262px;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
   display: flex;
-  flex-wrap: wrap;
-  gap: 14px 28px;
-  margin-top: 20px;
-  align-items: flex-end;
+  flex-direction: column;
+  gap: 1px;
 }
-.arrival-stats .k {
-  font: 400 10.5px / 1 var(--font-ui);
-  letter-spacing: 0.12em;
+.arrival-menu-pop[hidden] {
+  display: none;
+}
+.arrival-menu-head {
+  padding: 8px 10px 6px;
+  font: 500 10px / 1 var(--font-ui);
+  letter-spacing: 0.13em;
   text-transform: uppercase;
   color: var(--dim);
-  margin-bottom: 6px;
 }
-.arrival-stats .v {
-  font: 500 17px / 1 var(--font-mono);
-  font-variant-numeric: tabular-nums;
+.arrival-menu-item {
+  border: 0;
+  background: none;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 5px;
+  font: 400 13px / 1.3 var(--font-ui);
+  color: var(--text);
+  cursor: pointer;
 }
-.arrival-stats .rule {
-  width: 1px;
-  align-self: stretch;
-  background: var(--border-quiet);
+.arrival-menu-item:hover,
+.arrival-menu-item:focus-visible {
+  background: var(--surface);
 }
-.arrival-stats .actions {
+.arrival-menu-item.danger {
+  color: var(--error-text);
+}
+.arrival-menu-item.danger:hover,
+.arrival-menu-item.danger:focus-visible {
+  background: rgba(248, 81, 73, 0.12);
+}
+.arrival-menu-rule {
+  height: 1px;
+  background: var(--border);
+  margin: 5px 4px;
+}
+
+/* ---- body: banner, tiles, notes, output --------------------------------- */
+.arrival-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.rootcause {
+  flex: none;
+  margin: 16px 18px 0;
+  padding: 15px 17px;
+  border: 1px solid rgba(248, 81, 73, 0.32);
+  border-left: 3px solid var(--error);
+  border-radius: var(--r-lg);
+  background: rgba(248, 81, 73, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.rootcause-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.rootcause-head .kicker {
+  font: 600 10.5px / 1.4 var(--font-ui);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--error-text);
+}
+.rootcause-head .what {
+  font: 600 16px / 1.3 var(--font-ui);
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.rootcause-head .what code {
+  font-family: var(--font-mono);
+  font-size: 15px;
+}
+.rootcause-head .where {
+  font: 400 11.5px / 1.4 var(--font-mono);
+  color: var(--dim);
+}
+.rootcause-evidence {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-quiet);
+  border-radius: var(--r-md);
+  background: var(--well);
+  font: 400 12px / 1.6 var(--font-mono);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-x: auto;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.rootcause-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.rootcause-foot .blocked {
+  font: 400 12.5px / 1.5 var(--font-ui);
+  color: var(--muted);
+}
+.rootcause-foot .blocked code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+}
+.rootcause-btns {
   margin-left: auto;
   display: flex;
   gap: 8px;
 }
 
+.arrival-tiles {
+  flex: none;
+  margin: 16px 18px 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--border-quiet);
+  border: 1px solid var(--border-quiet);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.arrival-tiles .tile {
+  background: var(--surface);
+  padding: 11px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.arrival-tiles .k {
+  font: 600 10px / 1 var(--font-ui);
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.arrival-tiles .v {
+  font: 500 17px / 1.2 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+/* A sentence where the number would have been a bare zero. */
+.arrival-tiles .v.note {
+  font: 400 13px / 1.3 var(--font-ui);
+  color: var(--dim);
+}
+.arrival-tiles .v .sub {
+  font: 400 12px / 1.2 var(--font-mono);
+  color: var(--dim);
+}
+.arrival-tiles .v .ok {
+  color: var(--done);
+}
+.arrival-tiles .v .bad {
+  color: var(--error-text);
+}
+.arrival-tiles .v .faint {
+  color: var(--dim);
+}
+.arrival-tiles .v .sep {
+  color: var(--border);
+}
+.arrival-tiles .v .linkish {
+  font: 400 12.5px / 1.2 var(--font-ui);
+  color: var(--accent);
+}
+
 .arrival-report {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 20px 32px 24px;
+  flex: none;
+  padding: 18px 18px 0;
+}
+.arrival-report:empty {
+  display: none;
 }
 .arrival-report-head {
   display: flex;
@@ -100,7 +338,9 @@
   background: var(--border-quiet);
 }
 .arrival-report-head .src {
-  font: 400 11.5px / 1 var(--font-mono);
+  font: 600 10.5px / 1 var(--font-ui);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   color: var(--dim);
 }
 .finding {
@@ -128,6 +368,11 @@
 .finding .sev.high {
   color: var(--gate);
 }
+/* A "medium" notice keeps the default (muted) severity colour: the run coped,
+   and colouring it would put it on the same footing as a failure. */
+.finding .sev.medium {
+  color: var(--dim);
+}
 .finding .what {
   font: 500 14.5px / 1.5 var(--font-ui);
   color: var(--text);
@@ -145,6 +390,63 @@
   margin-top: 5px;
 }
 
+/* ---- output: what used to be dead space --------------------------------- */
+.arrival-output {
+  /* Takes the leftover height, and keeps a floor when there is none, so the
+     pane can never collapse to an unreadable sliver. */
+  flex: 1 1 auto;
+  min-height: 190px;
+  margin: 18px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.arrival-output-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+.arrival-output-head .k {
+  font: 600 10.5px / 1 var(--font-ui);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.arrival-output-head .who {
+  font: 400 12px / 1 var(--font-mono);
+  color: var(--muted);
+}
+.arrival-output-head .meta {
+  font: 400 11.5px / 1 var(--font-mono);
+  color: var(--dim);
+}
+.arrival-output-btns {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+.arrival-output-body {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border-quiet);
+  border-radius: var(--r-lg);
+  background: var(--well);
+  font: 400 12px / 1.75 var(--font-mono);
+  color: var(--muted);
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.arrival-output-body.nowrap {
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+/* ---- ledger -------------------------------------------------------------- */
 .ledger {
   border-left: 1px solid var(--border);
   background: var(--surface);
@@ -155,28 +457,16 @@
 }
 .ledger-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 10px;
-  padding: 13px 16px;
-  border-bottom: 1px solid var(--border-quiet);
+  padding: 14px 16px 11px;
+  border-bottom: 1px solid var(--border);
+  font: 600 14px / 1.2 var(--font-ui);
+  letter-spacing: -0.01em;
 }
 .ledger-head .count {
   margin-left: auto;
-  font: 400 11px / 1 var(--font-mono);
-  color: var(--dim);
-}
-.ledger-cols,
-.ledger-row {
-  display: grid;
-  grid-template-columns: 12px minmax(0, 1fr) 54px 62px;
-  gap: 10px;
-}
-.ledger-cols {
-  padding: 7px 16px;
-  border-bottom: 1px solid var(--border-quiet);
-  font: 400 10.5px / 1 var(--font-ui);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font: 400 11.5px / 1 var(--font-mono);
   color: var(--dim);
 }
 .ledger-rows {
@@ -184,38 +474,88 @@
   min-height: 0;
   overflow-y: auto;
 }
+/* A step that never started has no duration and no cost to show, so its row
+   lays out without those columns instead of dashing them out. */
 .ledger-row {
-  padding: 9px 16px;
-  border-bottom: 1px solid var(--raised);
-  font: 400 12px / 1.4 var(--font-mono);
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  gap: 11px;
   align-items: center;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--border-quiet);
+  cursor: pointer;
+  text-align: left;
+}
+.ledger-row.has-time {
+  grid-template-columns: 8px minmax(0, 1fr) 60px;
+}
+.ledger-row.has-cost {
+  grid-template-columns: 8px minmax(0, 1fr) 60px 66px;
 }
 .ledger-row:hover {
-  background: #12161a;
+  background: var(--raised);
+}
+.ledger-row.selected {
+  background: var(--raised);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.ledger-row.failed {
+  background: rgba(248, 81, 73, 0.08);
+  box-shadow: inset 2px 0 0 var(--error);
 }
 .ledger-row .dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--done);
 }
 .ledger-row.failed .dot {
   background: var(--error);
 }
+.ledger-row.stalled .dot {
+  background: none;
+  border: 1px solid var(--border-strong);
+}
+.ledger-row .who {
+  min-width: 0;
+}
 .ledger-row .id {
+  font: 500 13px / 1.35 var(--font-mono);
   color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .ledger-row .sub {
+  font: 400 11.5px / 1.4 var(--font-mono);
   color: var(--dim);
-  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.ledger-row .sub .cached {
-  color: var(--gate);
+.ledger-row.failed .sub {
+  color: var(--error-text);
+}
+.ledger-row.stalled .id,
+.ledger-row.stalled .sub {
+  color: var(--dim);
+  font-weight: 400;
 }
 .ledger-row .num {
   text-align: right;
+  font: 400 12px / 1 var(--font-mono);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+  min-width: 54px;
+}
+.ledger-group {
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--border-quiet);
+  background: var(--canvas);
+  font: 500 10px / 1 var(--font-ui);
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--dim);
 }
 .ledger-foot {
   margin-top: auto;
@@ -235,10 +575,4 @@
 .ledger-foot .row .v {
   margin-left: auto;
   color: var(--muted);
-}
-
-/* A "medium" notice keeps the default (muted) severity colour: the run coped,
-   and colouring it would put it on the same footing as a failure. */
-.finding .sev.medium {
-  color: var(--dim);
 }

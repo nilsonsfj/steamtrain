@@ -13,6 +13,7 @@ function report(ok = true): ArrivalReport {
       okCount: 7,
       failCount: ok ? 0 : 1,
       skipCount: 1,
+      blockedCount: 0,
       costUsd: 0,
       tokens: 0,
       agentless: true,

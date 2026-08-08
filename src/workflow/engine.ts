@@ -4791,10 +4791,12 @@ function isPartialFanOut(result: StepResult): boolean {
  * this step — often the run's LAST step, e.g. a final consolidator — show the
  * root cause instead of a bare "dependency 'x' failed" pointer.
  *
- * Deliberately NOT `skipped`/`ok`: the failure must cascade (dependents of
- * this step fail too) and receipts must count it as failed. The
- * `dependencyFailed` marker carries what UIs need to filter cascade victims
- * out of root-cause lists.
+ * Deliberately NOT `skipped`/`ok`: the failure must cascade — dependents of
+ * this step fail too, which a skip would not do. The `dependencyFailed` marker
+ * carries what UIs need to filter cascade victims out of root-cause lists, and
+ * what `buildArrivalReport` counts as blocked rather than failed: this step
+ * never ran, so reporting it as a failure sends readers hunting for a break
+ * that is not there.
  */
 function dependencyFailedResult(
   stepId: string,

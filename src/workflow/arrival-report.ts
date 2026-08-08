@@ -6,6 +6,9 @@ interface ArrivalStepResult {
   stepId: string;
   ok: boolean;
   skipped?: boolean;
+  /** Set by the engine on a step that never ran because a dependency broke. */
+  dependencyFailed?: string;
+  error?: string;
   output?: string;
   durationMs?: number;
   costUsd?: number;
@@ -23,12 +26,42 @@ export interface ArrivalReceipt {
   ok: boolean;
   durationMs: number;
   okCount: number;
+  /**
+   * Steps that broke on their own. A cascade victim is NOT one of these — it
+   * never ran, so counting it here is what made a single broken step report as
+   * "4 failed" and sent readers hunting for three failures that never happened.
+   */
   failCount: number;
+  /** Steps whose `when` condition was false. */
   skipCount: number;
+  /** Steps that never started because a dependency broke first. */
+  blockedCount: number;
   costUsd: number;
   tokens: number;
   /** True when the run spent $0 and used no tokens (tour / command-only). */
   agentless: boolean;
+}
+
+/**
+ * The one step a stopped run broke on, and what its breaking cost downstream.
+ *
+ * This is the question a reader arrives with — which step broke, why, and what
+ * did not get to run — so it is computed once, from the engine's own markers,
+ * rather than re-derived by each surface out of the notice list.
+ */
+export interface ArrivalRootCause {
+  stepId: string;
+  blockKind: string;
+  /** 1-based position of the phase the step belongs to, and that phase's title. */
+  phaseNumber: number;
+  phaseTitle: string;
+  /** The engine's first error line, e.g. `command exited with code 1`. */
+  error: string;
+  durationMs?: number;
+  /** True when a human (or the run's cancellation) killed the step. */
+  killed: boolean;
+  /** Steps that never started because this one broke, in run order. */
+  blocked: string[];
 }
 
 /**
@@ -103,12 +136,14 @@ export function buildArrivalReport(
   let okCount = 0;
   let failCount = 0;
   let skipCount = 0;
+  let blockedCount = 0;
   let costUsd = 0;
   let tokens = 0;
   let durationMs = 0;
   for (const result of leaves) {
     if (result.skipped) skipCount += 1;
     else if (result.ok) okCount += 1;
+    else if (isCascadeVictim(result)) blockedCount += 1;
     else failCount += 1;
     costUsd += result.costUsd ?? 0;
     tokens += tokenTotal(result.tokens);
@@ -131,7 +166,8 @@ export function buildArrivalReport(
   // the same, which is rare on the Arrival surface.
   // Invariant: agentless implies costUsd === 0 && tokens === 0.
   const agentless =
-    opts.credentialFree === true || (costUsd === 0 && tokens === 0 && failCount === 0);
+    opts.credentialFree === true ||
+    (costUsd === 0 && tokens === 0 && failCount === 0 && blockedCount === 0);
 
   const nextCandidates = opts.nextCandidates ?? DEFAULT_NEXT_CANDIDATES;
   const current = state.name;
@@ -161,12 +197,74 @@ export function buildArrivalReport(
       okCount,
       failCount,
       skipCount,
+      blockedCount,
       costUsd,
       tokens,
       agentless,
     },
     notices: arrivalNotices(flat.map((f) => f.step)),
     destinations,
+  };
+}
+
+/**
+ * The exact message `cascadeResult` in engine.ts writes for a step that never
+ * ran: `dependency '<id>' failed` (optionally followed by a reason). Matching
+ * the whole template, not just a `dependency '` prefix, keeps a step whose own
+ * error happens to open with that word from being written off as a victim.
+ */
+const LEGACY_CASCADE_ERROR = /^dependency '[^']+' failed(:|$)/;
+
+/**
+ * True when this not-ok result is a step that never ran because a dependency
+ * broke first. The engine marks these `dependencyFailed`; run records written
+ * before that marker existed only carry the message it replaced, so that
+ * message is still matched as a fallback.
+ */
+export function isCascadeVictim(
+  result: { dependencyFailed?: string; error?: string } | undefined,
+): boolean {
+  if (!result) return false;
+  return Boolean(result.dependencyFailed) || LEGACY_CASCADE_ERROR.test(result.error ?? "");
+}
+
+/**
+ * The step a stopped run broke on, plus the steps its breaking blocked.
+ * Returns null for a run that finished, or one whose only not-ok steps are
+ * cascade victims (no identifiable root — the caller should fall back to the
+ * notice list rather than nominate an arbitrary victim as the cause).
+ */
+export function arrivalRootCause(state: WorkflowState): ArrivalRootCause | null {
+  if (!state.done || state.ok) return null;
+  const blocked: string[] = [];
+  let root: { step: StepState; phaseNumber: number; phaseTitle: string } | null = null;
+  for (const phase of state.phases) {
+    for (const step of phase.steps) {
+      const result = step.result;
+      // A fan-out parent restates its children; the children are the steps.
+      if (!result || result.childResults?.length) continue;
+      if (result.ok || result.skipped) continue;
+      if (isCascadeVictim(result)) {
+        blocked.push(step.stepId);
+        continue;
+      }
+      if (!root) {
+        root = { step, phaseNumber: phase.index + 1, phaseTitle: phase.title };
+      }
+    }
+  }
+  if (!root) return null;
+  const result = root.step.result;
+  const firstLine = (result?.error ?? "").split("\n", 1)[0]?.trim();
+  return {
+    stepId: root.step.stepId,
+    blockKind: root.step.blockKind,
+    phaseNumber: root.phaseNumber,
+    phaseTitle: root.phaseTitle,
+    error: firstLine || "failed",
+    durationMs: result?.durationMs,
+    killed: Boolean(result?.killed),
+    blocked,
   };
 }
 
@@ -313,7 +411,8 @@ export function arrivalReceiptCards(receipt: ArrivalReceipt): Array<{
 }> {
   const ranParts = [`${receipt.okCount} ok`];
   if (receipt.failCount) ranParts.push(`${receipt.failCount} failed`);
-  if (receipt.skipCount) ranParts.push(`${receipt.skipCount} skipped`);
+  const notRun = receipt.skipCount + (receipt.blockedCount ?? 0);
+  if (notRun) ranParts.push(`${notRun} skipped`);
   const cost = receipt.agentless
     ? "$0 · no agents"
     : receipt.costUsd > 0
@@ -338,7 +437,8 @@ export function formatArrivalReceipt(receipt: ArrivalReceipt): string {
   parts.push(`${(receipt.durationMs / 1000).toFixed(1)}s`);
   parts.push(`${receipt.okCount} ok`);
   if (receipt.failCount) parts.push(`${receipt.failCount} failed`);
-  if (receipt.skipCount) parts.push(`${receipt.skipCount} skipped`);
+  const notRun = receipt.skipCount + (receipt.blockedCount ?? 0);
+  if (notRun) parts.push(`${notRun} skipped`);
   if (receipt.agentless) parts.push("$0 · no agents");
   else {
     if (receipt.costUsd > 0) parts.push(`$${receipt.costUsd.toFixed(4)}`);
@@ -370,9 +470,7 @@ function leafResults(state: WorkflowState): ArrivalStepResult[] {
  */
 function rootFailureLines(steps: StepState[]): string[] {
   const failed = steps.filter((s) => s.result && !s.result.ok && !s.result.skipped);
-  const roots = failed.filter(
-    (s) => !s.result?.dependencyFailed && !(s.result?.error ?? "").startsWith("dependency '"),
-  );
+  const roots = failed.filter((s) => !isCascadeVictim(s.result));
   const shown = roots.length > 0 ? roots : failed;
   return shown.map((s) => {
     const firstErrLine = (s.result?.error ?? "failed").split("\n", 1)[0]?.trim() || "failed";

@@ -1624,6 +1624,8 @@
     S.arrivalEnter = false;
     S.selectedStepId = null; S.collapsedBandKey = null;
     S.arrivalCtaFocused = false;
+    S.arrivalOutputStep = null;
+    S.arrivalMenuOpen = false;
     S.endedAt = 0;
     setBanner("", "");
     showRunMetrics(true);
@@ -1740,10 +1742,13 @@
           if (ST.instruments) ST.instruments.stopThroughput();
           S.queuedBanner = false;
           S.endedAt = Date.now();
+          // Only outcomes the arrival page cannot state for itself get a
+          // banner. "Run failed." / "Run complete." said nothing the page's own
+          // status pill and root-cause block do not say better, and stacking
+          // them put two verdicts above one run.
           if (frame.status === "canceled") setBanner("Run canceled.", "info");
           else if (frame.status === "budget-exceeded") setBanner("Run stopped: cost budget reached. Raise maxCostUsd and re-run to resume.", "err");
-          else if (frame.status === "error" || frame.ok === false) setBanner("Run failed" + (frame.error ? ": " + frame.error : "."), "err");
-          else setBanner("Run complete.", "ok");
+          else setBanner("", "");
           S.arrivalEnter = true;
           ST.render();
           pollLiveRuns();

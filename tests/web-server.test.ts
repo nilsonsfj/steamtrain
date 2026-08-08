@@ -320,7 +320,11 @@ describe("web server", () => {
     const arrivalCss = await (await fetch(`${base}/static/arrival.css`)).text();
     expect(arrivalCss).not.toContain(".narration");
     expect(arrivalCss).not.toContain(".narration-head");
-    expect(arrivalCss).toContain(".arrival-headline");
+    // The headline that restated the stat row is gone (design 5a); the run's
+    // own id line and the root-cause block replaced it.
+    expect(arrivalCss).not.toContain(".arrival-headline");
+    expect(arrivalCss).toContain(".arrival-idline");
+    expect(arrivalCss).toContain(".rootcause");
     expect(arrivalCss).toContain(".arrival-report");
     expect(arrivalCss).toContain(".ledger-row");
     // st-core.js keeps a legitimate "conductor" key — it is a live tour step id
