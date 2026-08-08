@@ -142,20 +142,24 @@
 
   // ---- step lookup -----------------------------------------------------------
 
-  function findLeaf(stepId) {
-    var match = null;
-    collectArrivalLeafSteps().forEach(function (s) {
-      if (!match && s.stepId === stepId) match = s;
-    });
-    return match;
+  /**
+   * `leaves` is always the list renderArrival already walked — every lookup on
+   * this page takes it rather than re-collecting, so one render walks the run's
+   * steps once instead of once per lookup.
+   */
+  function findLeaf(leaves, stepId) {
+    for (var i = 0; i < leaves.length; i++) {
+      if (leaves[i].stepId === stepId) return leaves[i];
+    }
+    return null;
   }
 
   /** The step whose output the Output pane is showing. */
-  function outputStep(root, report) {
-    var wanted = S.arrivalOutputStep && findLeaf(S.arrivalOutputStep);
+  function outputStep(leaves, root, report) {
+    var wanted = S.arrivalOutputStep && findLeaf(leaves, S.arrivalOutputStep);
     if (wanted) return wanted;
-    if (root) return findLeaf(root.stepId);
-    return (report.heroStepId && findLeaf(report.heroStepId)) || null;
+    if (root) return findLeaf(leaves, root.stepId);
+    return (report.heroStepId && findLeaf(leaves, report.heroStepId)) || null;
   }
 
   function stepBody(s) {
@@ -348,7 +352,7 @@
 
   // ---- root cause ------------------------------------------------------------
 
-  function renderRootCause(root) {
+  function renderRootCause(root, leaves) {
     var box = h("div", { class: "rootcause" });
     var title = h("div", { class: "rootcause-head" },
       h("span", { class: "kicker", text: root.killed ? "Stopped here" : "Root cause" }),
@@ -364,7 +368,7 @@
     box.appendChild(title);
 
     var cmd = specCommand(root.stepId);
-    var step = findLeaf(root.stepId);
+    var step = findLeaf(leaves, root.stepId);
     var evidence = [];
     if (cmd) evidence.push("$ " + cmd);
     // The last few lines of the step's own output are what actually explains
@@ -617,7 +621,7 @@
     main.appendChild(head.node);
 
     var body = h("div", { class: "arrival-body" });
-    if (root) body.appendChild(renderRootCause(root));
+    if (root) body.appendChild(renderRootCause(root, leaves));
     var worktrees = computeWorktreeStats(leaves);
     body.appendChild(renderTiles(report, leaves, worktrees));
 
@@ -625,7 +629,7 @@
     // that did not pass, condition-skips — and, on a clean run, the receipt.
     body.appendChild(renderNotes(report, root));
 
-    var shown = outputStep(root, report);
+    var shown = outputStep(leaves, root, report);
     body.appendChild(renderOutput(shown));
     main.appendChild(body);
     wrap.appendChild(main);
