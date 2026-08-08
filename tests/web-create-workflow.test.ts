@@ -21,6 +21,7 @@ interface StubEl {
   tag: string;
   attrs: Record<string, unknown>;
   children: StubEl[];
+  parent: StubEl | null;
   text: string;
   textContent: string;
   value: string;
@@ -32,6 +33,7 @@ interface StubEl {
   addEventListener: (e: string, fn: (e?: unknown) => void) => void;
   removeChild: (c: StubEl) => void;
   setAttribute: (k: string, v: string) => void;
+  closest: (sel: string) => StubEl | null;
   classList: {
     add: (c: string) => void;
     toggle: (c: string, on: boolean) => void;
@@ -42,11 +44,20 @@ interface StubEl {
   focus: () => void;
 }
 
+function matchesSel(n: StubEl, sel: string): boolean {
+  return sel.split(",").some((part) => {
+    const s = part.trim();
+    if (s.startsWith(".")) return n.className.split(" ").includes(s.slice(1));
+    return n.tag === s;
+  });
+}
+
 function el(tag: string, attrs?: Record<string, unknown>, ...kids: unknown[]): StubEl {
   const node: StubEl = {
     tag,
     attrs: attrs ?? {},
     children: [],
+    parent: null,
     text: attrs?.text == null ? "" : String(attrs.text),
     textContent: attrs?.text == null ? "" : String(attrs.text),
     value: attrs?.value == null ? "" : String(attrs.value),
@@ -54,9 +65,13 @@ function el(tag: string, attrs?: Record<string, unknown>, ...kids: unknown[]): S
     disabled: false,
     style: {},
     listeners: {},
-    appendChild: (c) => node.children.push(c),
+    appendChild: (c) => {
+      c.parent = node;
+      node.children.push(c);
+    },
     removeChild: (c) => {
       node.children = node.children.filter((k) => k !== c);
+      if (c.parent === node) c.parent = null;
     },
     addEventListener: (event, fn) => {
       const bucket = node.listeners[event] ?? [];
@@ -65,6 +80,14 @@ function el(tag: string, attrs?: Record<string, unknown>, ...kids: unknown[]): S
     },
     setAttribute: (k, v) => {
       node.attrs[k] = v;
+    },
+    closest: (sel) => {
+      let cur: StubEl | null = node;
+      while (cur) {
+        if (matchesSel(cur, sel)) return cur;
+        cur = cur.parent;
+      }
+      return null;
     },
     classList: {
       add: (c) => {
@@ -90,7 +113,7 @@ function el(tag: string, attrs?: Record<string, unknown>, ...kids: unknown[]): S
   for (const kid of kids) {
     if (kid == null) continue;
     if (typeof kid === "string") node.text += kid;
-    else node.children.push(kid as StubEl);
+    else node.appendChild(kid as StubEl);
   }
   return node;
 }
@@ -119,8 +142,13 @@ function flatText(node: StubEl): string {
   const own = node.textContent && node.textContent !== node.text ? node.textContent : node.text;
   return [own, ...node.children.map(flatText)].join(" ").replace(/\s+/g, " ").trim();
 }
-function click(node: StubEl): void {
-  for (const fn of node.listeners.click ?? []) fn({ target: node });
+/** Fire click on `node`, bubbling through ancestors the way a real DOM does. */
+function click(node: StubEl, target: StubEl = node): void {
+  let cur: StubEl | null = node;
+  while (cur) {
+    for (const fn of cur.listeners.click ?? []) fn({ target });
+    cur = cur.parent;
+  }
 }
 
 const BUNDLED_SPEC = {
@@ -269,6 +297,28 @@ describe("new-workflow sheet", () => {
 
   it("opens on Blank", async () => {
     const sheet = await openSheet();
+    expect(sheet.card("Blank").className).toContain("selected");
+  });
+
+  // Regression: cards are <button>s, so a naive isInteractiveTarget check
+  // treats clicks on title/body text as "interactive" and never selects.
+  it("selects a starting point when its title text is clicked", async () => {
+    const sheet = await openSheet();
+    const describe = sheet.card("Describe");
+    const title = descendants(describe, ".title")[0];
+    expect(title).toBeTruthy();
+    click(title as StubEl);
+    expect(describe.className).toContain("selected");
+    expect(sheet.card("Blank").className).not.toContain("selected");
+  });
+
+  it("does not select the card when its nested select is clicked", async () => {
+    const sheet = await openSheet();
+    const duplicate = sheet.card("Duplicate");
+    const sel = descendants(duplicate, "select")[0];
+    expect(sel).toBeTruthy();
+    click(sel as StubEl);
+    expect(duplicate.className).not.toContain("selected");
     expect(sheet.card("Blank").className).toContain("selected");
   });
 
