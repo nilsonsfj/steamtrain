@@ -1263,11 +1263,21 @@ window.Steamtrain = (function () {
   }
 
   /** Copy `text`, then flash the button's label so the click has a visible result. */
-  function copyFix(text, btn, codeEl) {
+  /**
+   * Copy `text`, flashing the button. `label` is what the button says once the
+   * flash ends — a button labelled "Copy error" must not come back as "Copy".
+   *
+   * The fallback path is not optional: navigator.clipboard is undefined on any
+   * non-secure origin, which is every LAN address this UI is served on that is
+   * not localhost. A copy button that silently does nothing there is worse
+   * than no button.
+   */
+  function copyFix(text, btn, codeEl, label) {
+    var back = label || "Copy";
     function flash() {
       btn.textContent = "Copied";
       btn.classList.add("copied");
-      setTimeout(function () { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 1400);
+      setTimeout(function () { btn.textContent = back; btn.classList.remove("copied"); }, 1400);
     }
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(flash).catch(function () { fallbackCopy(text, codeEl, flash); });

@@ -28,6 +28,7 @@
   var KIND_LABEL = ST.KIND_LABEL;
   var activateWithKeyboard = ST.activateWithKeyboard;
   var announce = ST.announce;
+  var copyFix = ST.copyFix;
   var isCredentialFreeSpec = ST.isCredentialFreeSpec;
   var isReadOnly = ST.isReadOnly;
   var pickNextWorkflow = ST.pickNextWorkflow;
@@ -124,19 +125,17 @@
     URL.revokeObjectURL(url);
   }
 
-  /** Copy that puts the button's own label back, not a generic "Copy". */
+  /**
+   * Copy that puts the button's own label back, not a generic "Copy". Goes
+   * through the shared copyFix so it keeps the execCommand/select fallback —
+   * navigator.clipboard does not exist on a non-secure origin, which is every
+   * LAN address this UI is served on that is not localhost.
+   */
   function copyButton(label, textOf, cls) {
     var btn = h("button", { class: cls || "btn small", text: label, onClick: function () {
       var text = textOf();
       if (!text) return;
-      var done = function () {
-        btn.textContent = "Copied";
-        btn.classList.add("copied");
-        setTimeout(function () { btn.textContent = label; btn.classList.remove("copied"); }, 1400);
-      };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(done).catch(function () {});
-      }
+      copyFix(text, btn, null, label);
     } });
     return btn;
   }
@@ -725,7 +724,6 @@
   }
 
   ST.arrival = {
-    render: renderArrival,
     renderArrival: renderArrival,
     leave: leaveArrival,
   };

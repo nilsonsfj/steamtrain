@@ -167,9 +167,24 @@ describe("arrival root cause", () => {
 
   it("recognises a cascade victim from the legacy message as well as the marker", () => {
     expect(isCascadeVictim({ dependencyFailed: "a" })).toBe(true);
+    // The whole template `dependency '<id>' failed` that dependencyFailedResult
+    // wrote before the marker existed (src/workflow/engine.ts) — with and
+    // without the appended root-cause reason.
+    expect(isCascadeVictim({ error: "dependency 'a' failed" })).toBe(true);
     expect(isCascadeVictim({ error: "dependency 'a' failed: boom" })).toBe(true);
     expect(isCascadeVictim({ error: "command exited with code 1" })).toBe(false);
     expect(isCascadeVictim(undefined)).toBe(false);
+  });
+
+  it("does not write off a step whose own error merely starts with that word", () => {
+    // A prefix match on `dependency '` counted these as never-run, which both
+    // hid a real failure and inflated the skipped count.
+    expect(isCascadeVictim({ error: "dependency 'lodash' is missing from package.json" })).toBe(
+      false,
+    );
+    expect(isCascadeVictim({ error: "dependency resolution failed" })).toBe(false);
+    // The template ends there or continues with ": <root cause>" — nothing else.
+    expect(isCascadeVictim({ error: "dependency 'lodash' failed to install" })).toBe(false);
   });
 
   it("nominates no root when every failure is a cascade victim", () => {

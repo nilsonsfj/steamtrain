@@ -208,16 +208,24 @@ export function buildArrivalReport(
 }
 
 /**
+ * The exact message `cascadeResult` in engine.ts writes for a step that never
+ * ran: `dependency '<id>' failed` (optionally followed by a reason). Matching
+ * the whole template, not just a `dependency '` prefix, keeps a step whose own
+ * error happens to open with that word from being written off as a victim.
+ */
+const LEGACY_CASCADE_ERROR = /^dependency '[^']+' failed(:|$)/;
+
+/**
  * True when this not-ok result is a step that never ran because a dependency
  * broke first. The engine marks these `dependencyFailed`; run records written
- * before that marker existed only carry the message it replaced, so the prefix
- * is still matched as a fallback.
+ * before that marker existed only carry the message it replaced, so that
+ * message is still matched as a fallback.
  */
 export function isCascadeVictim(
   result: { dependencyFailed?: string; error?: string } | undefined,
 ): boolean {
   if (!result) return false;
-  return Boolean(result.dependencyFailed) || (result.error ?? "").startsWith("dependency '");
+  return Boolean(result.dependencyFailed) || LEGACY_CASCADE_ERROR.test(result.error ?? "");
 }
 
 /**

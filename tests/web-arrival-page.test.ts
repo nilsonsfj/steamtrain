@@ -80,6 +80,16 @@ describe("finished-run page: the page ends in an action", () => {
     expect(runJs).not.toContain('setBanner("Run complete."');
   });
 
+  it("copies through the shared helper, so the non-secure-origin fallback applies", () => {
+    // navigator.clipboard is undefined on any non-secure origin — every LAN
+    // address this UI is served on that is not localhost. A bare
+    // writeText().catch(noop) made Copy silently do nothing there.
+    expect(js).toContain("copyFix(text, btn, null, label)");
+    expect(js).not.toMatch(/navigator\.clipboard\.writeText\(/);
+    // …and the button comes back as its own label, not a generic "Copy".
+    expect(coreJs).toContain('var back = label || "Copy";');
+  });
+
   it("replaces a zeroed spend tile with the reason it is zero", () => {
     expect(js).toContain('"none — no agent step ran"');
     expect(js).toContain('" · not priced yet"');

@@ -846,9 +846,10 @@ var SteamtrainReducer = (() => {
       destinations
     };
   }
+  var LEGACY_CASCADE_ERROR = /^dependency '[^']+' failed(:|$)/;
   function isCascadeVictim(result) {
     if (!result) return false;
-    return Boolean(result.dependencyFailed) || (result.error ?? "").startsWith("dependency '");
+    return Boolean(result.dependencyFailed) || LEGACY_CASCADE_ERROR.test(result.error ?? "");
   }
   function arrivalRootCause(state) {
     if (!state.done || state.ok) return null;
