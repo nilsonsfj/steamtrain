@@ -93,4 +93,10 @@ describe("expanded phase band layout", () => {
     expect(js).toMatch(/function buildBands/);
     expect(js).toMatch(/lastIndexOf\("::"\)/);
   });
+
+  it("lets a second click retract an expanded live row", () => {
+    expect(js).toMatch(/openDetail\(p, s, event\.currentTarget, open\)/);
+    expect(js).toMatch(/if \(sameDetail \|\| isOpen\) \{\s*closeDetail\(bandKey\(p\)\);\s*return;/);
+    expect(js).toMatch(/bands\[i\]\.key !== S\.collapsedBandKey/);
+  });
 });
