@@ -555,6 +555,7 @@
     var modelSel = selectEl(modelOptions(a0.id), a0.defaultModel);
     var effortWrap = h("div", { class: "field" });
     var draft = h("div", { class: "draft" });
+    var draftProgress = null;
 
     function onDraftAgent() {
       var a = agentById(agentSel.value);
@@ -665,7 +666,7 @@
       describeBox
     );
 
-    var createBtn = h("button", { class: "btn primary", text: "Create" });
+    var createBtn = h("button", { class: "btn primary create-submit", text: "Create" });
     var foot = h("div", { class: "mfoot" },
       h("span", { class: "create-hint", text: "Opens the new workflow with its pipeline shown. Nothing runs until you hit Run." }),
       h("div", { class: "spacer" }),
@@ -675,13 +676,58 @@
 
     createBtn.addEventListener("click", function () { submit(); });
 
+    function setCreateButton(loading, label) {
+      createBtn.disabled = loading;
+      createBtn.textContent = label;
+      createBtn.classList.toggle("is-loading", loading);
+      createBtn.setAttribute("aria-busy", loading ? "true" : "false");
+    }
+
+    function showDraftProgress(attempt) {
+      clear(draft);
+      draft.className = "draft show";
+      var title = h("span", {
+        class: "draft-status-title",
+        text: attempt > 1 ? "Refining your workflow" : "Drafting your workflow"
+      });
+      var detail = h("span", {
+        class: "draft-status-detail",
+        text: attempt > 1
+          ? "Checking a corrected draft (attempt " + attempt + ")…"
+          : "Turning your description into a runnable pipeline…"
+      });
+      var status = h("div", {
+        class: "draft-status",
+        role: "status",
+        "aria-live": "polite",
+        "aria-busy": "true"
+      },
+        h("span", { class: "draft-spinner", "aria-hidden": "true" }),
+        h("span", { class: "draft-status-copy" }, title, detail)
+      );
+      var output = h("div", { class: "draft-output", "aria-label": "Draft output" });
+      draft.appendChild(status);
+      draft.appendChild(output);
+      draftProgress = { status: status, title: title, detail: detail, output: output };
+    }
+
+    function finishDraftProgress(raw) {
+      if (!draftProgress) return;
+      draft.className = "draft show error";
+      draftProgress.status.setAttribute("aria-busy", "false");
+      draftProgress.status.classList.toggle("error", true);
+      draftProgress.title.textContent = "Couldn’t finish the draft";
+      draftProgress.detail.textContent = "Review the response below, then adjust the description and try again.";
+      if (raw) draftProgress.output.textContent = raw;
+    }
+
     function submit() {
       mbanner(banner, "", "");
       if (start === "describe") { submitDraft(); return; }
       var name = slugifyName(nameInput.value);
       if (!name) { mbanner(banner, "give the workflow a name first", "info"); return; }
       if (wfItem(name)) { mbanner(banner, "“" + name + "” already exists — pick another name", "info"); return; }
-      createBtn.disabled = true; createBtn.textContent = "Creating…";
+      setCreateButton(true, "Creating…");
       var from = start === "blank" ? null : (start === "duplicate" ? dupSel.value : tplSel.value);
       specFor(from).then(function (spec) {
         spec.name = name;
@@ -689,7 +735,7 @@
           spec: spec, scope: scopeSel.value
         });
       }).then(function (r) {
-        createBtn.disabled = false; createBtn.textContent = "Create";
+        setCreateButton(false, "Create");
         if (r.status === 200 && r.body.ok) {
           closeModal();
           refreshAfterWrite(r.body.name || name, "created");
@@ -697,7 +743,7 @@
           mbanner(banner, (r.body && r.body.error) || "could not create the workflow", "err");
         }
       }).catch(function (e) {
-        createBtn.disabled = false; createBtn.textContent = "Create";
+        setCreateButton(false, "Create");
         mbanner(banner, (e && e.message) || "could not create the workflow", "err");
       });
     }
@@ -717,8 +763,8 @@
       var desc = descTa.value.trim();
       if (!desc) { mbanner(banner, "enter a description first", "info"); return; }
       var effortSel = effortWrap.querySelector("select");
-      draft.className = "draft show"; draft.textContent = "";
-      createBtn.disabled = true; createBtn.textContent = "Drafting…";
+      showDraftProgress(1);
+      setCreateButton(true, "Drafting workflow…");
       // Omit `name` entirely when left blank ("auto from description"): the
       // server's isValidWorkflowName() rejects an empty string, so sending
       // name: "" turned the documented default path (leave Name blank) into
@@ -733,18 +779,26 @@
       var ac = new AbortController();
       S.draftAbort = ac;
       streamGenerate(payload, ac.signal, function (frame) {
-        if (frame.type === "delta") { draft.textContent += frame.text; draft.scrollTop = draft.scrollHeight; }
-        else if (frame.type === "attempt") { if (frame.attempt > 1) draft.textContent = ""; }
+        if (frame.type === "delta") {
+          if (draftProgress) {
+            draftProgress.detail.textContent = "Receiving the workflow plan from the agent…";
+            draftProgress.output.textContent += frame.text;
+          }
+          draft.scrollTop = draft.scrollHeight;
+        }
+        else if (frame.type === "attempt") {
+          showDraftProgress(frame.attempt);
+        }
         else if (frame.type === "done") {
           S.draftAbort = null;
-          createBtn.disabled = false; createBtn.textContent = "Create";
+          setCreateButton(false, "Create");
           if (frame.ok && frame.spec) {
             closeModal();
             refreshAfterWrite(frame.name || frame.spec.name, frame.replaced ? "updated" : "created");
           } else {
             // Show the full final raw output behind the error (parity with the
             // TUI), not just whatever streamed during the last attempt.
-            if (frame.raw) draft.textContent = frame.raw;
+            finishDraftProgress(frame.raw);
             mbanner(banner, frame.error || "generation failed", "err");
           }
         }
@@ -771,7 +825,11 @@
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify(payload), signal: signal
     }).then(function (res) {
-      if (res.status === 401) { showReauthOverlay(); return; }
+      if (res.status === 401) {
+        showReauthOverlay();
+        onFrame({ type: "done", ok: false, error: "session expired — sign in again to continue" });
+        return;
+      }
       // Any other non-2xx (400 bad request, 503 too many concurrent
       // generations, ...) is a plain JSON error, not an SSE stream. Reading
       // it as one left the modal stuck on "Drafting..." forever with no
