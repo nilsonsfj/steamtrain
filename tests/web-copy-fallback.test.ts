@@ -41,7 +41,9 @@ describe("clipboard access is funnelled through one primitive", () => {
     // The two ways a copy can fail: no clipboard API at all (insecure origin),
     // and a writeText the browser rejects. Both must reach fallbackCopy.
     expect(coreJs).toMatch(/function copyText\(text, onOk, codeEl, onFail\)/);
-    expect(coreJs).toMatch(/\.catch\(function \(\) \{ fallbackCopy\(text, codeEl, done, failed\); \}\)/);
+    expect(coreJs).toMatch(
+      /\.catch\(function \(\) \{ fallbackCopy\(text, codeEl, done, failed\); \}\)/,
+    );
     expect(coreJs).toMatch(/fallbackCopy\(text, codeEl, done, failed\);\s*\}/);
     expect(coreJs).toContain('document.execCommand("copy")');
   });
