@@ -11,10 +11,11 @@
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src", "web", "public");
 const modalsJs = readFileSync(join(PUBLIC_DIR, "st-modals.js"), "utf8");
+const settingsCss = readFileSync(join(PUBLIC_DIR, "settings.css"), "utf8");
 
 interface StubEl {
   tag: string;
@@ -139,6 +140,9 @@ interface Sheet {
   cards: () => StubEl[];
   card: (title: string) => StubEl;
   nameInput: () => StubEl;
+  description: () => StubEl;
+  createButton: () => StubEl;
+  draft: () => StubEl;
   fileLine: () => string;
   create: () => Promise<void>;
   banner: () => string;
@@ -226,6 +230,10 @@ async function openSheet(opts: { workflows?: Record<string, unknown>[] } = {}): 
       return found;
     },
     nameInput: () => descendants(root, ".txt")[0] as StubEl,
+    description: () => descendants(root, "textarea")[0] as StubEl,
+    createButton: () =>
+      collect(root, (n) => n.tag === "button" && n.className.includes("create-submit"))[0] as StubEl,
+    draft: () => collect(root, (n) => n.className.split(" ").includes("draft"))[0] as StubEl,
     fileLine: () => flatText(collect(root, (n) => n.className === "create-file")[0] ?? el("div")),
     create: async () => {
       const btn = collect(root, (n) => n.text === "Create" && n.tag === "button")[0];
@@ -323,5 +331,34 @@ describe("new-workflow sheet", () => {
   it("shows which file the workflow will land in", async () => {
     const sheet = await openSheet();
     expect(sheet.fileLine()).toContain("~/.steamtrain/workflows.json");
+  });
+
+  it("shows a progress state while an LLM draft is pending", async () => {
+    const pending = new Promise<never>(() => {});
+    vi.stubGlobal("fetch", () => pending);
+    try {
+      const sheet = await openSheet();
+      click(sheet.card("Describe"));
+      sheet.description().value = "review the checkout service for bugs";
+      click(sheet.createButton());
+
+      expect(sheet.createButton().disabled).toBe(true);
+      expect(sheet.createButton().textContent).toContain("Drafting workflow");
+      expect(sheet.createButton().className).toContain("is-loading");
+      expect(sheet.description().value).toBe("review the checkout service for bugs");
+
+      const progress = sheet.draft();
+      expect(progress.className).toContain("show");
+      expect(flatText(progress)).toContain("Drafting your workflow");
+      expect(flatText(progress)).toContain("Turning your description into a runnable pipeline");
+      expect(collect(progress, (n) => n.className.includes("draft-spinner"))).toHaveLength(1);
+      const status = collect(progress, (n) => n.className.includes("draft-status"))[0] as StubEl;
+      expect(status.attrs.role).toBe("status");
+      expect(status.attrs["aria-busy"]).toBe("true");
+      expect(settingsCss).toContain(".draft-spinner");
+      expect(settingsCss).toContain(".btn.create-submit.is-loading");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
