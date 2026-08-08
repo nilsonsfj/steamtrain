@@ -87,7 +87,8 @@ describe("finished-run page: the page ends in an action", () => {
     expect(js).toContain("copyFix(text, btn, null, label)");
     expect(js).not.toMatch(/navigator\.clipboard\.writeText\(/);
     // …and the button comes back as its own label, not a generic "Copy".
-    expect(coreJs).toContain('var back = label || "Copy";');
+    // The primitive itself is pinned by tests/web-copy-fallback.test.ts.
+    expect(coreJs).toMatch(/var back = label \|\| btn\.textContent \|\| "Copy";/);
   });
 
   it("replaces a zeroed spend tile with the reason it is zero", () => {

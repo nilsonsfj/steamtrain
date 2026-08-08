@@ -23,6 +23,7 @@
   var apiAuth = ST.apiAuth;
   var attachRun = ST.attachRun;
   var clear = ST.clear;
+  var copyText = ST.copyText;
   var fmtTime = ST.fmtTime;
   var fmtTokenSummary = ST.fmtTokenSummary;
   var fmtTokens = ST.fmtTokens;
@@ -608,10 +609,18 @@
       h("button", {
         class: "btn small", type: "button", text: "Copy all",
         onClick: function () {
-          if (!navigator.clipboard || !navigator.clipboard.writeText) return;
-          navigator.clipboard.writeText(logsText(R.record)).then(function () {
-            notify("Copied the run's logs.", "ok");
-          }).catch(function () {});
+          // The rendered log pane is the select-it last resort; it holds the
+          // same text this button copies.
+          copyText(
+            logsText(R.record),
+            function () { notify("Copied the run's logs.", "ok"); },
+            document.querySelector(".runs-logs"),
+            function (selected) {
+              notify(selected
+                ? "Could not reach the clipboard — the logs are selected, copy them with your keyboard."
+                : "Could not reach the clipboard. Use Download .txt instead.", "err");
+            }
+          );
         }
       }),
       h("button", {
@@ -1059,10 +1068,12 @@
   }
 
   function copyRunId(id) {
-    if (!navigator.clipboard || !navigator.clipboard.writeText) return;
-    navigator.clipboard.writeText(id).then(function () {
-      ST.announce("Copied run id " + shortId(id));
-    }).catch(function () {});
+    copyText(
+      id,
+      function () { ST.announce("Copied run id " + shortId(id)); },
+      null,
+      function () { notify("Could not reach the clipboard — the run id is " + id + ".", "err"); }
+    );
   }
 
   // ---- compare ---------------------------------------------------------------
