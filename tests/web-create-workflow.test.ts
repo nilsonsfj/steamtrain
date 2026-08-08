@@ -232,7 +232,10 @@ async function openSheet(opts: { workflows?: Record<string, unknown>[] } = {}): 
     nameInput: () => descendants(root, ".txt")[0] as StubEl,
     description: () => descendants(root, "textarea")[0] as StubEl,
     createButton: () =>
-      collect(root, (n) => n.tag === "button" && n.className.includes("create-submit"))[0] as StubEl,
+      collect(
+        root,
+        (n) => n.tag === "button" && n.className.includes("create-submit"),
+      )[0] as StubEl,
     draft: () => collect(root, (n) => n.className.split(" ").includes("draft"))[0] as StubEl,
     fileLine: () => flatText(collect(root, (n) => n.className === "create-file")[0] ?? el("div")),
     create: async () => {
