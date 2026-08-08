@@ -474,6 +474,21 @@ html.desktop-titlebar-overlay #topbar .status-pill {
   outline: 2px solid var(--accent-bright);
   outline-offset: 2px;
 }
+/* Copy-button feedback (see copyFix in st-core.js). Lives here, not in one
+   surface's stylesheet, because every copy button in the app shares the
+   behaviour — scoped to `.btn.small` it never reached the output pane's
+   `.obtn`. A failed copy is coloured like the failure it is: the whole point
+   of the flash is that silence and success stopped looking alike. */
+.btn.copied,
+.obtn.copied {
+  color: var(--done);
+  border-color: rgba(63, 185, 80, 0.45);
+}
+.btn.copy-failed,
+.obtn.copy-failed {
+  color: var(--error-text);
+  border-color: rgba(248, 81, 73, 0.45);
+}
 .btn.primary {
   background: var(--accent-dim);
   border-color: #2b7a70;

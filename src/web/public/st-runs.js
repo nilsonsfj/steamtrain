@@ -609,7 +609,18 @@
       h("button", {
         class: "btn small", type: "button", text: "Copy all",
         onClick: function () {
-          copyText(logsText(R.record), function () { notify("Copied the run's logs.", "ok"); });
+          // The rendered log pane is the select-it last resort; it holds the
+          // same text this button copies.
+          copyText(
+            logsText(R.record),
+            function () { notify("Copied the run's logs.", "ok"); },
+            document.querySelector(".runs-logs"),
+            function (selected) {
+              notify(selected
+                ? "Could not reach the clipboard — the logs are selected, copy them with your keyboard."
+                : "Could not reach the clipboard. Use Download .txt instead.", "err");
+            }
+          );
         }
       }),
       h("button", {
@@ -1057,7 +1068,12 @@
   }
 
   function copyRunId(id) {
-    copyText(id, function () { ST.announce("Copied run id " + shortId(id)); });
+    copyText(
+      id,
+      function () { ST.announce("Copied run id " + shortId(id)); },
+      null,
+      function () { notify("Could not reach the clipboard — the run id is " + id + ".", "err"); }
+    );
   }
 
   // ---- compare ---------------------------------------------------------------

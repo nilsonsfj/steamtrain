@@ -40,9 +40,9 @@ describe("clipboard access is funnelled through one primitive", () => {
   it("the primitive falls back instead of swallowing the failure", () => {
     // The two ways a copy can fail: no clipboard API at all (insecure origin),
     // and a writeText the browser rejects. Both must reach fallbackCopy.
-    expect(coreJs).toMatch(/function copyText\(text, onOk, codeEl\)/);
-    expect(coreJs).toMatch(/\.catch\(function \(\) \{ fallbackCopy\(text, codeEl, done\); \}\)/);
-    expect(coreJs).toMatch(/fallbackCopy\(text, codeEl, done\);\s*\}/);
+    expect(coreJs).toMatch(/function copyText\(text, onOk, codeEl, onFail\)/);
+    expect(coreJs).toMatch(/\.catch\(function \(\) \{ fallbackCopy\(text, codeEl, done, failed\); \}\)/);
+    expect(coreJs).toMatch(/fallbackCopy\(text, codeEl, done, failed\);\s*\}/);
     expect(coreJs).toContain('document.execCommand("copy")');
   });
 
@@ -52,7 +52,26 @@ describe("clipboard access is funnelled through one primitive", () => {
     // the reader acts on.
     expect(coreJs).toMatch(/if \(ok\) \{ onOk\(\); return; \}/);
     expect(coreJs).toMatch(/function copyFix\(text, btn, codeEl, label\)/);
-    expect(coreJs).toMatch(/copyText\(text, function \(\) \{[\s\S]*?"Copied"/);
+    expect(coreJs).toMatch(/flash\("Copied", "copied"\)/);
+  });
+
+  it("says so when the copy could not be made at all", () => {
+    // Silence was the original bug. A button that does nothing is
+    // indistinguishable from one that worked, so the total-failure path has to
+    // speak too — and distinguish "we selected it for you" from "nothing
+    // happened", which ask different things of the reader.
+    expect(coreJs).toMatch(/function fallbackCopy\(text, codeEl, onOk, onFail\)/);
+    expect(coreJs).toMatch(/if \(onFail\) onFail\(selected\);/);
+    expect(coreJs).toMatch(/selected \? "Text selected" : "Copy failed"/);
+  });
+
+  it("styles the flash where every copy button can see it", () => {
+    // Scoped to `.btn.small` in settings.css, the feedback never reached the
+    // output pane's `.obtn`.
+    const shell = readFileSync(join(PUBLIC_DIR, "shell.css"), "utf8");
+    expect(shell).toMatch(/\.btn\.copied,\s*\.obtn\.copied/);
+    expect(shell).toMatch(/\.btn\.copy-failed,\s*\.obtn\.copy-failed/);
+    expect(readFileSync(join(PUBLIC_DIR, "settings.css"), "utf8")).not.toContain("copied");
   });
 
   it("every copy button restores its own label, not a hardcoded Copy", () => {

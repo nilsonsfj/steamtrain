@@ -527,10 +527,6 @@
   margin-top: 0;
 }
 
-.btn.small.copied {
-  color: var(--done);
-  border-color: rgba(63, 185, 80, 0.45);
-}
 .draft {
   margin-top: 12px;
   background: var(--canvas);

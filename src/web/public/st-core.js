@@ -1277,27 +1277,44 @@ window.Steamtrain = (function () {
    * button on those origins silently do nothing, which is worse than no button
    * at all: the reader thinks they have the text.
    */
-  function copyText(text, onOk, codeEl) {
+  function copyText(text, onOk, codeEl, onFail) {
     var done = typeof onOk === "function" ? onOk : function () {};
+    var failed = typeof onFail === "function" ? onFail : function () {};
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(done).catch(function () { fallbackCopy(text, codeEl, done); });
+      navigator.clipboard.writeText(text)
+        .then(done)
+        .catch(function () { fallbackCopy(text, codeEl, done, failed); });
       return;
     }
-    fallbackCopy(text, codeEl, done);
+    fallbackCopy(text, codeEl, done, failed);
   }
+
+  /** How long a copy button holds its "Copied" / failure state. */
+  var COPY_FLASH_MS = 1400;
 
   /**
    * Copy `text`, flashing the button so the click has a visible result.
    * `label` is what the button says once the flash ends — a button labelled
    * "Copy error" must not come back as "Copy".
+   *
+   * Every outcome says something. Silence was the bug: a button that does
+   * nothing is indistinguishable from one that worked, so when the copy could
+   * not be made the button says so — and says which, since "we selected it for
+   * you" and "nothing happened" ask different things of the reader.
    */
   function copyFix(text, btn, codeEl, label) {
     var back = label || btn.textContent || "Copy";
-    copyText(text, function () {
-      btn.textContent = "Copied";
-      btn.classList.add("copied");
-      setTimeout(function () { btn.textContent = back; btn.classList.remove("copied"); }, 1400);
-    }, codeEl);
+    function flash(word, cls) {
+      btn.textContent = word;
+      btn.classList.add(cls);
+      setTimeout(function () { btn.textContent = back; btn.classList.remove(cls); }, COPY_FLASH_MS);
+    }
+    copyText(
+      text,
+      function () { flash("Copied", "copied"); },
+      codeEl,
+      function (selected) { flash(selected ? "Text selected" : "Copy failed", "copy-failed"); },
+    );
   }
 
   /**
@@ -1305,7 +1322,7 @@ window.Steamtrain = (function () {
    * rejects the write): try execCommand on a scratch textarea, and if even that
    * fails, select the visible command so the user can copy it by hand.
    */
-  function fallbackCopy(text, codeEl, onOk) {
+  function fallbackCopy(text, codeEl, onOk, onFail) {
     try {
       var ta = document.createElement("textarea");
       ta.value = text;
@@ -1318,13 +1335,22 @@ window.Steamtrain = (function () {
       document.body.removeChild(ta);
       if (ok) { onOk(); return; }
     } catch (e) {}
+    // Nothing reached the clipboard. Selecting the visible text is the most we
+    // can do, and it is NOT success — `onFail` is told whether there was
+    // anything to select, because "press copy yourself" and "this did not
+    // work" are different messages.
+    var selected = false;
     if (codeEl) {
-      var range = document.createRange();
-      range.selectNodeContents(codeEl);
-      var sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
+      try {
+        var range = document.createRange();
+        range.selectNodeContents(codeEl);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        selected = true;
+      } catch (e2) {}
     }
+    if (onFail) onFail(selected);
   }
 
   function selectWorkflow(name, after, options) {
