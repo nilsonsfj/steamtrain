@@ -1262,28 +1262,42 @@ window.Steamtrain = (function () {
     return recheckHealth();
   }
 
-  /** Copy `text`, then flash the button's label so the click has a visible result. */
   /**
-   * Copy `text`, flashing the button. `label` is what the button says once the
-   * flash ends — a button labelled "Copy error" must not come back as "Copy".
+   * THE copy primitive — every copy button in this UI goes through here.
    *
-   * The fallback path is not optional: navigator.clipboard is undefined on any
-   * non-secure origin, which is every LAN address this UI is served on that is
-   * not localhost. A copy button that silently does nothing there is worse
-   * than no button.
+   * `onOk` fires only when the text actually reached the clipboard, so a
+   * caller's "Copied" feedback never claims something that did not happen.
+   * `codeEl` is the visible node holding the same text, used for the last
+   * resort: select it so the reader can copy by hand.
+   *
+   * The fallback path is not optional. `navigator.clipboard` is undefined on
+   * any non-secure origin — which is every LAN address this UI is served on
+   * that is not localhost, and this UI is meant to be opened from another
+   * machine. Calling `writeText` behind a bare `.catch(noop)` makes every copy
+   * button on those origins silently do nothing, which is worse than no button
+   * at all: the reader thinks they have the text.
+   */
+  function copyText(text, onOk, codeEl) {
+    var done = typeof onOk === "function" ? onOk : function () {};
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () { fallbackCopy(text, codeEl, done); });
+      return;
+    }
+    fallbackCopy(text, codeEl, done);
+  }
+
+  /**
+   * Copy `text`, flashing the button so the click has a visible result.
+   * `label` is what the button says once the flash ends — a button labelled
+   * "Copy error" must not come back as "Copy".
    */
   function copyFix(text, btn, codeEl, label) {
-    var back = label || "Copy";
-    function flash() {
+    var back = label || btn.textContent || "Copy";
+    copyText(text, function () {
       btn.textContent = "Copied";
       btn.classList.add("copied");
       setTimeout(function () { btn.textContent = back; btn.classList.remove("copied"); }, 1400);
-    }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(flash).catch(function () { fallbackCopy(text, codeEl, flash); });
-      return;
-    }
-    fallbackCopy(text, codeEl, flash);
+    }, codeEl);
   }
 
   /**
@@ -1569,6 +1583,7 @@ window.Steamtrain = (function () {
   ST.clear = clear;
   ST.clearRunDeepLink = clearRunDeepLink;
   ST.copyFix = copyFix;
+  ST.copyText = copyText;
   ST.currentRunDeepLink = currentRunDeepLink;
   ST.effortsFor = effortsFor;
   ST.emptyTokens = emptyTokens;

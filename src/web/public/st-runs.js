@@ -23,6 +23,7 @@
   var apiAuth = ST.apiAuth;
   var attachRun = ST.attachRun;
   var clear = ST.clear;
+  var copyText = ST.copyText;
   var fmtTime = ST.fmtTime;
   var fmtTokenSummary = ST.fmtTokenSummary;
   var fmtTokens = ST.fmtTokens;
@@ -608,10 +609,7 @@
       h("button", {
         class: "btn small", type: "button", text: "Copy all",
         onClick: function () {
-          if (!navigator.clipboard || !navigator.clipboard.writeText) return;
-          navigator.clipboard.writeText(logsText(R.record)).then(function () {
-            notify("Copied the run's logs.", "ok");
-          }).catch(function () {});
+          copyText(logsText(R.record), function () { notify("Copied the run's logs.", "ok"); });
         }
       }),
       h("button", {
@@ -1059,10 +1057,7 @@
   }
 
   function copyRunId(id) {
-    if (!navigator.clipboard || !navigator.clipboard.writeText) return;
-    navigator.clipboard.writeText(id).then(function () {
-      ST.announce("Copied run id " + shortId(id));
-    }).catch(function () {});
+    copyText(id, function () { ST.announce("Copied run id " + shortId(id)); });
   }
 
   // ---- compare ---------------------------------------------------------------

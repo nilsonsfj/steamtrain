@@ -14,6 +14,7 @@
   var apiAuth = ST.apiAuth;
   var attachRun = ST.attachRun;
   var clear = ST.clear;
+  var copyFix = ST.copyFix;
   var emptyTokens = ST.emptyTokens;
   var fmtElapsed = ST.fmtElapsed;
   var fmtElapsedRange = ST.fmtElapsedRange;
@@ -623,6 +624,11 @@
     var label = view.stepId === s.stepId
       ? "Live output · " + s.stepId
       : "Live output · " + s.stepId + " · " + view.stepId;
+    var outCopy = h("button", {
+      class: "obtn", type: "button", text: "Copy", title: "Copy this step's output",
+      "data-focus-key": "out-copy:" + key,
+      onClick: function () { copyFix(body, outCopy); }
+    });
     var pane = h("div", { class: "output" },
       h("div", { class: "output-head" },
         h("span", { class: "label", text: label }),
@@ -637,13 +643,7 @@
             "data-focus-key": "out-wrap:" + key,
             onClick: function () { S.outputNoWrap = !S.outputNoWrap; ST.render(); }
           }),
-          h("button", {
-            class: "obtn", type: "button", text: "Copy", title: "Copy this step's output",
-            "data-focus-key": "out-copy:" + key,
-            onClick: function () {
-              if (navigator.clipboard) navigator.clipboard.writeText(body).catch(function () {});
-            }
-          })
+          outCopy
         )
       )
     );
@@ -1172,12 +1172,14 @@
     // recorded session, a human can drop into that session from a terminal.
     if (s.status !== "running" && s.status !== "pending" && s.agent && s.result && s.result.sessionId && S.runId) {
       var takeoverCmd = "steamtrain workflow takeover " + S.runId + " " + s.stepId;
-      row("take over", h("span", { class: "drawer-value mono" },
-        h("code", { text: takeoverCmd }),
-        h("button", { class: "btn small", text: "Copy", title: "Copy the takeover command — it resumes this step's agent session interactively in its worktree", onClick: function () {
-          if (navigator.clipboard) navigator.clipboard.writeText(takeoverCmd).catch(function () {});
-        } })
-      ));
+      var takeoverCode = h("code", { text: takeoverCmd });
+      var takeoverCopy = h("button", {
+        class: "btn small", text: "Copy",
+        title: "Copy the takeover command — it resumes this step's agent session interactively in its worktree",
+        // The command is on screen, so pass it as the select-it last resort.
+        onClick: function () { copyFix(takeoverCmd, takeoverCopy, takeoverCode); }
+      });
+      row("take over", h("span", { class: "drawer-value mono" }, takeoverCode, takeoverCopy));
     }
     drawer.appendChild(meta);
 
@@ -1191,9 +1193,9 @@
     var copyBtn = h("button", {
       class: "btn small",
       "data-focus-key": "drawer-copy",
-      text: "Copy", title: "Copy the full output", onClick: function () {
-      if (navigator.clipboard) navigator.clipboard.writeText(body).catch(function () {});
-    } });
+      text: "Copy", title: "Copy the full output",
+      onClick: function () { copyFix(body, copyBtn); }
+    });
     var outLabel = view.stepId === s.stepId
       ? ("output" + (body ? " · " + body.length.toLocaleString() + " chars" : ""))
       : ("output · " + view.stepId + (body ? " · " + body.length.toLocaleString() + " chars" : ""));
