@@ -170,10 +170,12 @@ describe("buildWorkflowGenerationPrompt", () => {
     expect(prompt).not.toContain("UNROLL");
   });
 
-  it("teaches agent-backed distributors and forbids hardcoded task indices", () => {
+  it("teaches command/structured fan-out and forbids hardcoded task indices", () => {
     const prompt = buildWorkflowGenerationPrompt("anything");
-    expect(prompt).toContain("Agent-backed (PREFERRED for backlogs");
-    expect(prompt).toContain("One task per line only");
+    expect(prompt).toContain("Prefer a COMMAND step as the forEach source");
+    expect(prompt).toContain("domain status ≠ step success");
+    expect(prompt).toContain("print exactly that scalar");
+    expect(prompt).toContain("Contracts that survive a weak drafting model");
     expect(prompt).not.toContain("Task 1 from backlog");
     expect(prompt).toContain("NEVER hardcode");
     expect(prompt).toContain("forEach");

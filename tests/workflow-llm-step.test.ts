@@ -177,7 +177,7 @@ describe("llm step validation", () => {
     );
     expect(result.ok).toBe(false);
     expect(result.error).toContain(
-      "must be a distributor step (or an llm step with an output schema)",
+      "must be a distributor, command, or llm step with an output schema",
     );
   });
 
