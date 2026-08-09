@@ -463,7 +463,7 @@ describe("workflow (sub-workflow) step", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("rejects a forEach referencing a non-distributor/llm source", () => {
+  it("accepts a forEach referencing a command source", () => {
     const spec: WorkflowSpec = {
       name: "parent",
       phases: [
@@ -483,9 +483,43 @@ describe("workflow (sub-workflow) step", () => {
         },
       ],
     };
+    expect(validateWorkflow(spec).ok).toBe(true);
+  });
+
+  it("rejects a forEach referencing a consolidator source", () => {
+    const spec: WorkflowSpec = {
+      name: "parent",
+      phases: [
+        {
+          id: "p0",
+          title: "P0",
+          steps: [{ id: "seed", kind: "command", cmd: "true" }],
+        },
+        {
+          id: "p1",
+          title: "P1",
+          steps: [
+            { id: "merge-text", kind: "consolidator", prompt: "x", dependsOn: ["seed"] },
+          ],
+        },
+        {
+          id: "p2",
+          title: "P2",
+          steps: [
+            {
+              id: "call",
+              kind: "workflow",
+              workflow: "child",
+              forEach: "steps.merge-text.items",
+              dependsOn: ["merge-text"],
+            } as never,
+          ],
+        },
+      ],
+    };
     const result = validateWorkflow(spec);
     expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/must be a distributor/);
+    expect(result.error).toMatch(/must be a distributor, command, or llm/);
   });
 
   it("accepts a non-forEach workflow step with worktreeStep as a workspace source", () => {
