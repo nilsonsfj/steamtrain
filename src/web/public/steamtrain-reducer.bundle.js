@@ -983,7 +983,7 @@ var SteamtrainReducer = (() => {
     const notRun = receipt.skipCount + (receipt.blockedCount ?? 0);
     if (notRun) ranParts.push(`${notRun} skipped`);
     const cost = receipt.agentless ? "$0 \xB7 no agents" : receipt.costUsd > 0 ? `$${receipt.costUsd.toFixed(4)}` : "$0";
-    const produced = receipt.tokens > 0 ? `${compactTokens(receipt.tokens)} tokens` : receipt.agentless ? "engine demo" : "no tokens billed";
+    const produced = receipt.tokens > 0 ? `${compactTokens(receipt.tokens)} tokens` : receipt.agentless ? "workflow output" : "no tokens billed";
     return [
       { id: "ran", label: "What ran", value: ranParts.join(" \xB7 ") },
       { id: "cost", label: "What it cost", value: cost },

@@ -264,7 +264,7 @@ describe("arrival report", () => {
     expect(cards.map((c) => c.id)).toEqual(["ran", "cost", "produced"]);
     expect(cards[0]?.label).toBe("What ran");
     expect(cards[1]?.value).toContain("$0 · no agents");
-    expect(cards[2]?.value).toBe("engine demo");
+    expect(cards[2]?.value).toBe("workflow output");
     expect(report!.destinations).toHaveLength(3);
     expect(report!.destinations[0]).toMatchObject({ id: "again", label: "Ride again" });
     expect(report!.destinations[2]).toMatchObject({ id: "history", label: "See past runs" });
@@ -404,7 +404,7 @@ describe("arrival report", () => {
     expect(freeCards.map((c) => c.id)).toEqual(["ran", "cost", "produced"]);
     expect(freeCards[1]?.value).toContain("$0 · no agents");
     expect(freeCards[1]?.value).not.toContain("12.4s");
-    expect(freeCards[2]?.value).toBe("engine demo");
+    expect(freeCards[2]?.value).toBe("workflow output");
 
     const billed = arrivalReceiptCards({
       ...base,

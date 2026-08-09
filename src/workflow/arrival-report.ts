@@ -422,7 +422,7 @@ export function arrivalReceiptCards(receipt: ArrivalReceipt): Array<{
     receipt.tokens > 0
       ? `${compactTokens(receipt.tokens)} tokens`
       : receipt.agentless
-        ? "engine demo"
+        ? "workflow output"
         : "no tokens billed";
   return [
     { id: "ran", label: "What ran", value: ranParts.join(" · ") },
