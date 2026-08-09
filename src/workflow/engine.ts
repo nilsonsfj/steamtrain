@@ -28,6 +28,7 @@ import {
 import { llmStepApiId, resolveLlmStepApi } from "../apis/resolve";
 import type { SteamtrainConfig } from "../config/types";
 import type { AgentEvent, AgentInstanceId, AgentProviderId, TokenUsage } from "../types/events";
+import { appendCapped } from "../util/capped-buffer";
 import { safeRegexTest } from "../util/safe-regex";
 import {
   APPROVAL_DIFF_CAP,
@@ -40,7 +41,7 @@ import {
   noProviderApprovalDecision,
 } from "./approval";
 import { collectArtifacts } from "./artifacts";
-import { runShellCommand } from "./command";
+import { MAX_COMMAND_OUTPUT_BYTES, runShellCommand } from "./command";
 import type { StepEditPatch, StepKillResult, WorkflowRunControl } from "./control";
 import { addTokens } from "./cost";
 import type { StepPermissionsInfo, WorkflowEvent } from "./events";
@@ -1948,7 +1949,9 @@ async function runAgentAttempt(
     )) {
       hooks.pushAgentEvent(stepId, event);
       if (event.kind === "text_delta") {
-        if (!event.thinking) streamedText += event.text;
+        if (!event.thinking) {
+          streamedText = appendCapped(streamedText, event.text, MAX_COMMAND_OUTPUT_BYTES);
+        }
       } else if (event.kind === "session_start") {
         // Captured for session continuity: `canAsk` answers resume this
         // session, and `workflow takeover` drops a human into it.

@@ -3,7 +3,12 @@ import type { AgentEvent, AgentId } from "../types/events";
 import { type AgentAdapter, type AgentRunOptions } from "./adapter";
 import type { AgentModel } from "./agent-model";
 import { permissionArgs } from "./permissions";
-import { type ProcessLine, type ProcessRunOptions, runProcessLines } from "./spawn";
+import {
+  type ProcessLine,
+  type ProcessRunOptions,
+  resolveAgentIdleTimeoutMs,
+  runProcessLines,
+} from "./spawn";
 import { stderrSummary } from "./util";
 
 const AGENT: AgentId = "kiro";
@@ -101,6 +106,7 @@ export async function* runKiroProcess(params: RunKiroProcessParams): AsyncGenera
     cwd: opts.cwd,
     env: opts.env,
     timeoutMs: opts.timeoutMs,
+    idleTimeoutMs: opts.idleTimeoutMs,
     signal: opts.signal,
     // Prompt is an argv token — leave stdin closed.
   };
@@ -139,7 +145,9 @@ export async function* runKiroProcess(params: RunKiroProcessParams): AsyncGenera
           kind: "error",
           agent: id,
           ts,
-          message: `'${binary}' timed out after ${opts.timeoutMs! / 1000}s`,
+          message: item.idleTimedOut
+            ? `'${binary}' idle timeout after ${(resolveAgentIdleTimeoutMs(opts) ?? 0) / 1000}s with no output`
+            : `'${binary}' timed out after ${opts.timeoutMs! / 1000}s`,
           stderr: stderr || undefined,
           code: item.code,
           category: "transient",

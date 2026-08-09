@@ -448,6 +448,13 @@ function randomId(): string {
   return randomBytes(5).toString("hex");
 }
 
+/**
+ * Cap on buffered stdout/stderr from a single `git` child. Worktree snapshot
+ * copies (`git diff --binary`) of a dirty tree can otherwise grow without
+ * bound inside the orchestrator.
+ */
+export const MAX_GIT_OUTPUT_BYTES = 32 * 1024 * 1024;
+
 export async function runGitText(
   args: string[],
   cwd: string,
@@ -474,6 +481,9 @@ export function runGit(
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let oversized = false;
     const cleanup = (): void => signal?.removeEventListener("abort", onAbort);
     const onAbort = (): void => {
       if (settled) return;
@@ -487,8 +497,43 @@ export function runGit(
       reject(new Error("cancelled"));
     };
 
-    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    const capture =
+      (side: "stdout" | "stderr") =>
+      (chunk: Buffer): void => {
+        if (settled || oversized) return;
+        if (side === "stdout") {
+          stdout.push(chunk);
+          stdoutBytes += chunk.length;
+          if (stdoutBytes > MAX_GIT_OUTPUT_BYTES) {
+            oversized = true;
+            try {
+              child.kill("SIGTERM");
+            } catch {
+              // already gone
+            }
+            settled = true;
+            cleanup();
+            reject(
+              new Error(
+                `git ${args.join(" ")} exceeded ${Math.round(MAX_GIT_OUTPUT_BYTES / (1024 * 1024))} MiB output cap`,
+              ),
+            );
+          }
+          return;
+        }
+        stderr.push(chunk);
+        stderrBytes += chunk.length;
+        if (stderrBytes > MAX_GIT_OUTPUT_BYTES) {
+          // Keep collecting a bounded stderr for the error message; drop older.
+          while (stderrBytes > MAX_GIT_OUTPUT_BYTES && stderr.length > 1) {
+            const dropped = stderr.shift() as Buffer;
+            stderrBytes -= dropped.length;
+          }
+        }
+      };
+
+    child.stdout.on("data", capture("stdout"));
+    child.stderr.on("data", capture("stderr"));
     child.on("error", (err) => {
       if (settled) return;
       settled = true;

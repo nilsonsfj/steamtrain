@@ -4,6 +4,8 @@ import type { ResolvedAgentInstance } from "../agents/config";
 import type { SteamtrainConfig } from "../config/types";
 import type { AgentEvent, AgentInstanceId } from "../types/events";
 import type { AgentProviderId } from "../types/events";
+import { appendCapped } from "../util/capped-buffer";
+import { MAX_COMMAND_OUTPUT_BYTES } from "./command";
 import { DEFAULT_STEP_TIMEOUT_SEC, timeoutMsFromSec } from "./timeout";
 import { type WorkflowSpec, validateWorkflow, workflowSpecSchema } from "./types";
 
@@ -736,7 +738,9 @@ async function runGenerationAgent(
     })) {
       req.onEvent?.(event);
       if (event.kind === "text_delta") {
-        if (!event.thinking) streamedText += event.text;
+        if (!event.thinking) {
+          streamedText = appendCapped(streamedText, event.text, MAX_COMMAND_OUTPUT_BYTES);
+        }
       } else if (event.kind === "result") {
         if (event.text) finalText = event.text;
         if (event.isError) {

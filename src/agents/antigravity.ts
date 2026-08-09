@@ -7,7 +7,12 @@ import {
   recoverAntigravityTranscriptText,
 } from "./antigravity-transcript";
 import { permissionArgs } from "./permissions";
-import { type ProcessLine, type ProcessRunOptions, runProcessLines } from "./spawn";
+import {
+  type ProcessLine,
+  type ProcessRunOptions,
+  resolveAgentIdleTimeoutMs,
+  runProcessLines,
+} from "./spawn";
 import { stderrSummary } from "./util";
 
 /**
@@ -237,6 +242,7 @@ export async function* runAntigravityProcess(
     cwd: opts.cwd,
     env: opts.env,
     timeoutMs: opts.timeoutMs,
+    idleTimeoutMs: opts.idleTimeoutMs,
     signal: opts.signal,
     // Intentionally omit prompt — stdin must stay closed for agy print mode.
   };
@@ -303,7 +309,9 @@ export async function* runAntigravityProcess(
           kind: "error",
           agent: id,
           ts,
-          message: `'${binary}' timed out after ${opts.timeoutMs! / 1000}s`,
+          message: item.idleTimedOut
+            ? `'${binary}' idle timeout after ${(resolveAgentIdleTimeoutMs(opts) ?? 0) / 1000}s with no output`
+            : `'${binary}' timed out after ${opts.timeoutMs! / 1000}s`,
           category: "transient",
           timedOut: true,
           stderr: stderr || undefined,

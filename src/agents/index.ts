@@ -190,8 +190,13 @@ export {
   removeAgent,
   upsertAgent,
 } from "./manage";
-export { LineBuffer } from "./line-buffer";
-export { runProcessLines } from "./spawn";
+export { LineBuffer, MAX_LINE_BUFFER_PENDING_BYTES } from "./line-buffer";
+export {
+  DEFAULT_AGENT_IDLE_TIMEOUT_MS,
+  MAX_AGENT_STDERR_BYTES,
+  resolveAgentIdleTimeoutMs,
+  runProcessLines,
+} from "./spawn";
 
 /** Construct the adapter for an agent id, optionally overriding the binary. */
 export function createAdapter(id: AgentProviderId, binary?: string): AgentAdapter {
