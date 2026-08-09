@@ -185,12 +185,7 @@ export async function rebasePullRequestOntoBase(
   // for open PRs and lets us recreate the branch on push.
   let headVia: "branch" | "pull";
   try {
-    await git([
-      "fetch",
-      "--no-tags",
-      remote,
-      `+refs/heads/${base}:refs/remotes/${remote}/${base}`,
-    ]);
+    await git(["fetch", "--no-tags", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]);
   } catch (err) {
     return {
       ok: false,
@@ -199,12 +194,7 @@ export async function rebasePullRequestOntoBase(
     };
   }
   try {
-    await git([
-      "fetch",
-      "--no-tags",
-      remote,
-      `+refs/heads/${head}:refs/remotes/${remote}/${head}`,
-    ]);
+    await git(["fetch", "--no-tags", remote, `+refs/heads/${head}:refs/remotes/${remote}/${head}`]);
     headVia = "branch";
   } catch (branchErr) {
     try {
@@ -218,10 +208,7 @@ export async function rebasePullRequestOntoBase(
     } catch (pullErr) {
       return {
         ok: false,
-        error:
-          `PR #${refs.number} head '${head}' is missing on ${remote} ` +
-          `(and refs/pull/${refs.number}/head is unavailable) — the branch may have been auto-deleted. ` +
-          errText(pullErr),
+        error: `PR #${refs.number} head '${head}' is missing on ${remote} (and refs/pull/${refs.number}/head is unavailable) — the branch may have been auto-deleted. ${errText(pullErr)}`,
         prNumber: refs.number,
       };
     }
