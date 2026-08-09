@@ -26,14 +26,25 @@ import type { AgentEvent, AgentProviderId } from "../src/types/events";
 
 const ENABLED = process.env.STEAMTRAIN_AGENT_SMOKE === "1";
 const AGENT = (process.env.STEAMTRAIN_SMOKE_AGENT ?? "claude") as AgentProviderId;
-const DEFAULT_MODEL: Record<string, string> = {
+const DEFAULT_MODEL: Partial<Record<AgentProviderId, string>> = {
   claude: "haiku",
   opencode: "opencode/north-mini-code-free",
   codex: "gpt-5-mini",
   cursor: "composer-2",
+  amp: "claude-sonnet-5",
+  kiro: "claude-sonnet-5",
+  mimo: "mimo-v2.5",
+  kimi: "kimi-k2.5",
+  antigravity: "gemini-3-flash",
 };
-const MODEL = process.env.STEAMTRAIN_SMOKE_MODEL ?? DEFAULT_MODEL[AGENT] ?? "haiku";
 const TIMEOUT_MS = Number(process.env.STEAMTRAIN_SMOKE_TIMEOUT_MS ?? 120_000);
+
+function resolveSmokeModel(): string {
+  if (process.env.STEAMTRAIN_SMOKE_MODEL) return process.env.STEAMTRAIN_SMOKE_MODEL;
+  const fallback = DEFAULT_MODEL[AGENT];
+  if (fallback) return fallback;
+  throw new Error(`No default model for smoke agent '${AGENT}'; set STEAMTRAIN_SMOKE_MODEL`);
+}
 
 const scratch: string[] = [];
 
@@ -43,8 +54,9 @@ afterAll(() => {
 
 describe.skipIf(!ENABLED)("real agent CLI smoke", () => {
   it(
-    `runs ${AGENT}/${MODEL} and gets a successful result`,
+    `runs ${AGENT} against a live CLI and gets a successful result`,
     async () => {
+      const model = resolveSmokeModel();
       const binaryName = DEFAULT_AGENT_BINARY[AGENT];
       expect(binaryName, `unknown smoke agent '${AGENT}'`).toBeTruthy();
       const binary = await resolveBinary(binaryName);
@@ -61,7 +73,7 @@ describe.skipIf(!ENABLED)("real agent CLI smoke", () => {
       const events: AgentEvent[] = [];
       for await (const event of adapter.run({
         prompt: "Reply with exactly: hi. Do not use tools.",
-        model: MODEL,
+        model,
         cwd,
         timeoutMs: TIMEOUT_MS,
         // Idle hung-agent detection is useful in the field; keep the smoke

@@ -54,6 +54,8 @@ function childEnv(): Record<string, string> {
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined) env[key] = value;
   }
+  // Match desktop e2e: a set TERM skips the login-shell PATH probe.
+  env.TERM ??= "xterm";
   return env;
 }
 
