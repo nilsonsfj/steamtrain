@@ -10,10 +10,26 @@ import {
   runRecordSummary,
   tallyRunnerUsage,
 } from "./history";
+import { type ProjectLockOptions, withStateDirLock } from "./project-lock";
+import { migrateStateVersion } from "./state-migrate";
 
 export const WORKFLOW_HISTORY_DIR = ".steamtrain/history";
 /** Keep at most this many records; the oldest are pruned after each save. */
 export const DEFAULT_HISTORY_LIMIT = 100;
+
+/** Injectable lock for tests; defaults to the cross-process project state lock. */
+export type HistoryLockFn = <T>(
+  stateSubdir: string,
+  fn: () => Promise<T>,
+  opts?: ProjectLockOptions,
+) => Promise<T>;
+
+let historyLock: HistoryLockFn = withStateDirLock;
+
+/** Override the history writer lock (tests). Pass `undefined` to restore default. */
+export function setWorkflowHistoryLock(lock: HistoryLockFn | undefined): void {
+  historyLock = lock ?? withStateDirLock;
+}
 
 export interface WorkflowHistoryStore {
   rootDir: string;
@@ -59,9 +75,11 @@ export async function saveRunRecord(
   record: RunRecord,
   limit: number = DEFAULT_HISTORY_LIMIT,
 ): Promise<void> {
-  const target = join(rootDir, recordFileName(record.id));
-  await atomicWriteFile(target, `${JSON.stringify(record, null, 2)}\n`);
-  await pruneRunRecords(rootDir, limit);
+  await historyLock(rootDir, async () => {
+    const target = join(rootDir, recordFileName(record.id));
+    await atomicWriteFile(target, `${JSON.stringify(record, null, 2)}\n`);
+    await pruneRunRecords(rootDir, limit);
+  });
 }
 
 export async function listRunRecords(rootDir: string, limit?: number): Promise<RunRecordSummary[]> {
@@ -176,7 +194,7 @@ async function readRecord(path: string): Promise<RunRecord | undefined> {
   return validateRecord(file);
 }
 
-/** Parse + shallow-validate a record file; ignore corrupt/old-version files. */
+/** Parse + shallow-validate a record file; ignore corrupt/unmigratable files. */
 function validateRecord(file: string): RunRecord | undefined {
   let parsed: unknown;
   try {
@@ -184,9 +202,12 @@ function validateRecord(file: string): RunRecord | undefined {
   } catch {
     return undefined;
   }
-  if (!parsed || typeof parsed !== "object") return undefined;
-  const r = parsed as Partial<RunRecord>;
-  if (r.version !== RUN_RECORD_VERSION) return undefined;
+  // No pre-v1 format exists; the migrator table is ready for the first bump.
+  const migrated = migrateStateVersion<{ version: number }>(parsed, RUN_RECORD_VERSION, {
+    // 1: (v) => ({ ...v, version: 2 }),
+  });
+  if (!migrated.ok) return undefined;
+  const r = migrated.value as Partial<RunRecord>;
   if (typeof r.id !== "string" || typeof r.workflow !== "string") return undefined;
   if (typeof r.startedAt !== "number") return undefined;
   if (
@@ -205,7 +226,7 @@ function validateRecord(file: string): RunRecord | undefined {
     if (typeof p.index !== "number" || !Array.isArray(p.steps)) return undefined;
   }
   return {
-    version: r.version,
+    version: RUN_RECORD_VERSION,
     id: r.id,
     workflow: r.workflow,
     input: typeof r.input === "string" ? r.input : "",

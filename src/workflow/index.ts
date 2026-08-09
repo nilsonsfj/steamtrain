@@ -355,8 +355,10 @@ export {
   clearWorkflowCache,
   clearAllWorkflowCaches,
   persistWorkflowStepDone,
+  setWorkflowCacheLock,
   type WorkflowCacheKey,
   type WorkflowCacheStore,
+  type CacheLockFn,
 } from "./cache-store";
 export {
   RUN_RECORD_VERSION,
@@ -394,6 +396,7 @@ export {
   LIVE_RUN_META_VERSION,
   LIVE_RUN_TTL_MS,
   LIVE_RUN_ORPHAN_GRACE_MS,
+  LIVE_RUN_HEARTBEAT_STALE_MS,
   LIVE_RUN_TERMINAL_STATUSES,
   MAX_STREAM_EVENTS_PER_RUN,
   createLiveRunStore,
@@ -444,8 +447,19 @@ export {
   getRunRecord,
   removeRunRecord,
   clearAllRunRecords,
+  setWorkflowHistoryLock,
   type WorkflowHistoryStore,
+  type HistoryLockFn,
 } from "./history-store";
+export {
+  withProjectStateLock,
+  withStateDirLock,
+  projectRootFromStatePath,
+  steamtrainDirFromStatePath,
+  type ProjectLockOptions,
+} from "./project-lock";
+export { migrateStateVersion, type MigrateResult } from "./state-migrate";
+export { withFileLock, type FileLockOptions, type FileLockOutcome } from "./file-lock";
 export {
   applyWorkflowSessionOverrides,
   applyWorkflowStepOverrides,
