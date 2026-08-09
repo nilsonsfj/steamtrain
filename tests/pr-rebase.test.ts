@@ -139,4 +139,54 @@ describe("rebasePullRequestOntoBase", () => {
     expect(result).toMatchObject({ ok: true, changed: true });
     expect(git.calls.some((c) => c[0] === "push")).toBe(false);
   });
+
+  it("falls back to refs/pull/<n>/head when the head branch was deleted", async () => {
+    const calls: string[][] = [];
+    const run = async (args: string[]): Promise<string> => {
+      calls.push(args);
+      if (args[0] === "status") return "";
+      if (args[0] === "fetch") {
+        const refspec = args[3] ?? "";
+        if (refspec.includes("refs/heads/nilsonsfj/happy-wozniak-8e1w3s")) {
+          throw new Error("fatal: couldn't find remote ref nilsonsfj/happy-wozniak-8e1w3s");
+        }
+        // base fetch + pull-ref fallback succeed
+        return "";
+      }
+      if (args[0] === "rev-parse") return "deadbeef\n";
+      if (args[0] === "rev-list") return "2";
+      return "";
+    };
+    const result = await rebasePullRequestOntoBase({ ...baseOpts, runGit: run });
+    expect(result).toMatchObject({ ok: true, changed: true });
+    expect(calls).toContainEqual([
+      "fetch",
+      "--no-tags",
+      "origin",
+      "+refs/pull/448/head:refs/remotes/origin/nilsonsfj/happy-wozniak-8e1w3s",
+    ]);
+    // Empty lease expect recreates the missing head branch.
+    expect(calls).toContainEqual([
+      "push",
+      "--force-with-lease=refs/heads/nilsonsfj/happy-wozniak-8e1w3s:",
+      "origin",
+      "HEAD:refs/heads/nilsonsfj/happy-wozniak-8e1w3s",
+    ]);
+    if (result.ok) expect(result.detail).toMatch(/recreated/);
+  });
+
+  it("fails clearly when both the head branch and pull ref are gone", async () => {
+    const run = async (args: string[]): Promise<string> => {
+      if (args[0] === "status") return "";
+      if (args[0] === "fetch") {
+        const refspec = args[3] ?? "";
+        if (refspec.includes("refs/heads/main")) return "";
+        throw new Error("fatal: couldn't find remote ref");
+      }
+      return "";
+    };
+    const result = await rebasePullRequestOntoBase({ ...baseOpts, runGit: run });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/auto-deleted|missing/i);
+  });
 });

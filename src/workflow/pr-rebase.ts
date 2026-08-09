@@ -178,20 +178,40 @@ export async function rebasePullRequestOntoBase(
   }
 
   const { headRefName: head, baseRefName: base } = refs;
+  // Fetch base and head separately so a deleted head branch can fall back to
+  // GitHub's pull ref without failing the whole fetch. Parallel agent fan-outs
+  // routinely hit "couldn't find remote ref" when they only know the branch
+  // name after repo auto-delete / prune — `refs/pull/<n>/head` still works
+  // for open PRs and lets us recreate the branch on push.
+  let headVia: "branch" | "pull";
   try {
-    await git([
-      "fetch",
-      "--no-tags",
-      remote,
-      `+refs/heads/${base}:refs/remotes/${remote}/${base}`,
-      `+refs/heads/${head}:refs/remotes/${remote}/${head}`,
-    ]);
+    await git(["fetch", "--no-tags", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]);
   } catch (err) {
     return {
       ok: false,
-      error: `could not fetch PR #${refs.number}'s refs: ${errText(err)}`,
+      error: `could not fetch PR #${refs.number}'s base '${base}': ${errText(err)}`,
       prNumber: refs.number,
     };
+  }
+  try {
+    await git(["fetch", "--no-tags", remote, `+refs/heads/${head}:refs/remotes/${remote}/${head}`]);
+    headVia = "branch";
+  } catch (branchErr) {
+    try {
+      await git([
+        "fetch",
+        "--no-tags",
+        remote,
+        `+refs/pull/${refs.number}/head:refs/remotes/${remote}/${head}`,
+      ]);
+      headVia = "pull";
+    } catch (pullErr) {
+      return {
+        ok: false,
+        error: `PR #${refs.number} head '${head}' is missing on ${remote} (and refs/pull/${refs.number}/head is unavailable) — the branch may have been auto-deleted. ${errText(pullErr)}`,
+        prNumber: refs.number,
+      };
+    }
   }
 
   let headSha: string;
@@ -210,7 +230,10 @@ export async function rebasePullRequestOntoBase(
     return {
       ok: true,
       changed: false,
-      detail: `PR #${refs.number} already contains ${base} — no rebase needed`,
+      detail:
+        headVia === "pull"
+          ? `PR #${refs.number} already contains ${base} (head recovered via refs/pull/${refs.number}/head) — no rebase needed`
+          : `PR #${refs.number} already contains ${base} — no rebase needed`,
       prNumber: refs.number,
     };
   }
@@ -259,13 +282,14 @@ export async function rebasePullRequestOntoBase(
 
   try {
     // Lease pinned to the sha we fetched: if anyone pushed to the head in the
-    // meantime, this fails instead of discarding their commits.
-    await git([
-      "push",
-      `--force-with-lease=refs/heads/${head}:${headSha}`,
-      remote,
-      `HEAD:refs/heads/${head}`,
-    ]);
+    // meantime, this fails instead of discarding their commits. When the head
+    // branch was missing and we recovered via refs/pull/<n>/head, expect an
+    // absent remote ref (empty expect) so push recreates the branch.
+    const lease =
+      headVia === "pull"
+        ? `--force-with-lease=refs/heads/${head}:`
+        : `--force-with-lease=refs/heads/${head}:${headSha}`;
+    await git(["push", lease, remote, `HEAD:refs/heads/${head}`]);
   } catch (err) {
     const message = errText(err);
     return {
@@ -280,7 +304,10 @@ export async function rebasePullRequestOntoBase(
   return {
     ok: true,
     changed: true,
-    detail: `rebased PR #${refs.number} onto ${base} (${behind} new base commit(s)) and force-pushed ${head}`,
+    detail:
+      headVia === "pull"
+        ? `rebased PR #${refs.number} onto ${base} (${behind} new base commit(s)) and recreated ${head} from refs/pull/${refs.number}/head`
+        : `rebased PR #${refs.number} onto ${base} (${behind} new base commit(s)) and force-pushed ${head}`,
     prNumber: refs.number,
   };
 }

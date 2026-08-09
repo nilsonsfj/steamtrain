@@ -74,10 +74,12 @@ With --auto-rebase a conflict is first replayed through \`pr rebase\` once, so
 a PR whose only problem is that a sibling landed ahead of it still lands.
 
 rebase fetches the PR's head and base, rebases the head onto \`origin/<base>\`
-and force-pushes it with a lease pinned to the ref it fetched. It exits 0 with
-"no rebase needed" when the head already contains the base. Real content
-conflicts exit non-zero and list the conflicting paths — those need an agent or
-a human. It refuses to run in a dirty checkout, and refuses fork PRs.
+and force-pushes it with a lease pinned to the ref it fetched. If the head
+branch was auto-deleted, it falls back to \`refs/pull/<n>/head\` and recreates
+the branch on push. It exits 0 with "no rebase needed" when the head already
+contains the base. Real content conflicts exit non-zero and list the conflicting
+paths — those need an agent or a human. It refuses to run in a dirty checkout,
+and refuses fork PRs.
 `;
 }
 
