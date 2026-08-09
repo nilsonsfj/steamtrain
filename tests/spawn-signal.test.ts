@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { readFileSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type ProcessLine, runProcessLines } from "../src/agents/spawn";
 
@@ -110,6 +113,7 @@ describe("runProcessLines signal handling", () => {
       binary: "node",
       args: ["-e", "setTimeout(() => {}, 60_000)"],
       timeoutMs: 100,
+      idleTimeoutMs: 0,
     });
 
     const start = Date.now();
@@ -128,6 +132,7 @@ describe("runProcessLines signal handling", () => {
       binary: "node",
       args: ["-e", "setTimeout(() => {}, 60_000)"],
       timeoutMs: 100,
+      idleTimeoutMs: 0,
     });
     const items = await drain(gen);
     const exits = items.filter((i) => i.kind === "exit") as Extract<
@@ -136,7 +141,172 @@ describe("runProcessLines signal handling", () => {
     >[];
     expect(exits).toHaveLength(1);
     expect(exits[0]!.timedOut).toBe(true);
+    expect(exits[0]!.idleTimedOut).toBeUndefined();
   });
+
+  it("keeps SIGKILL armed after a synthetic timeout exit (SIGTERM-immune child)", async () => {
+    // Regression: the generator used to cancel the pending SIGKILL in `finally`
+    // after fabricating an exit, so a SIGTERM-immune agent kept writing the
+    // worktree after the step was already marked failed.
+    const marker = join(tmpdir(), `steamtrain-sigkill-${process.pid}-${Date.now()}`);
+    const gen = runProcessLines({
+      binary: "node",
+      args: [
+        "-e",
+        `
+          const fs = require("node:fs");
+          const marker = ${JSON.stringify(marker)};
+          process.on("SIGTERM", () => {});
+          let n = 0;
+          fs.writeFileSync(marker, "0");
+          setInterval(() => {
+            n += 1;
+            fs.writeFileSync(marker, String(n));
+          }, 50);
+        `,
+      ],
+      timeoutMs: 80,
+      idleTimeoutMs: 0,
+    });
+
+    const items = await drain(gen);
+    const exit = items.find((i) => i.kind === "exit") as Extract<ProcessLine, { kind: "exit" }>;
+    expect(exit.timedOut).toBe(true);
+
+    // Heartbeats must stop once SIGKILL fires (~2s grace after SIGTERM).
+    await delay(2800);
+    const afterKill = Number(readFileSync(marker, "utf8"));
+    await delay(400);
+    const later = Number(readFileSync(marker, "utf8"));
+    expect(later).toBe(afterKill);
+    try {
+      unlinkSync(marker);
+    } catch {
+      // ignore
+    }
+  }, 15_000);
+
+  it("kills the whole process group so forked helpers die too", async () => {
+    // Mirrors command-step tree-kill: an agent CLI that forks a helper must
+    // not leave orphans mutating the worktree after cancel.
+    if (process.platform === "win32") return;
+
+    const marker = join(tmpdir(), `steamtrain-treekill-${process.pid}-${Date.now()}`);
+    const ac = new AbortController();
+    const gen = runProcessLines({
+      binary: "node",
+      args: [
+        "-e",
+        `
+          const { spawn } = require("node:child_process");
+          const marker = ${JSON.stringify(marker)};
+          process.on("SIGTERM", () => {});
+          const child = spawn(
+            process.execPath,
+            [
+              "-e",
+              "process.on('SIGTERM', () => {}); const fs = require('node:fs'); let n = 0; fs.writeFileSync(process.argv[1], '0'); setInterval(() => { n += 1; fs.writeFileSync(process.argv[1], String(n)); }, 50);",
+              marker,
+            ],
+            { stdio: "ignore" },
+          );
+          child.unref();
+          setInterval(() => {}, 60_000);
+        `,
+      ],
+      signal: ac.signal,
+      idleTimeoutMs: 0,
+    });
+
+    const consumer = drain(gen);
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      try {
+        readFileSync(marker);
+        break;
+      } catch {
+        await delay(40);
+      }
+    }
+    ac.abort();
+    await consumer;
+
+    await delay(2800);
+    const afterKill = Number(readFileSync(marker, "utf8"));
+    await delay(400);
+    const later = Number(readFileSync(marker, "utf8"));
+    expect(later).toBe(afterKill);
+    try {
+      unlinkSync(marker);
+    } catch {
+      // ignore
+    }
+  }, 15_000);
+
+  it("idle-times out a silent child before the wall-clock timeout", async () => {
+    const gen = runProcessLines({
+      binary: "node",
+      args: ["-e", "setTimeout(() => {}, 60_000)"],
+      timeoutMs: 30_000,
+      idleTimeoutMs: 120,
+    });
+    const start = Date.now();
+    const items = await drain(gen);
+    const elapsed = Date.now() - start;
+    const exit = items.find((i) => i.kind === "exit") as Extract<ProcessLine, { kind: "exit" }>;
+    expect(exit.timedOut).toBe(true);
+    expect(exit.idleTimedOut).toBe(true);
+    expect(elapsed).toBeLessThan(5000);
+  }, 15_000);
+
+  it("resets the idle timer when the child produces output", async () => {
+    const gen = runProcessLines({
+      binary: "node",
+      args: [
+        "-e",
+        `
+          let n = 0;
+          const tick = () => {
+            process.stdout.write("ping " + n + "\\n");
+            n += 1;
+            if (n < 6) setTimeout(tick, 80);
+            else setTimeout(() => {}, 60_000);
+          };
+          tick();
+        `,
+      ],
+      timeoutMs: 30_000,
+      idleTimeoutMs: 250,
+    });
+    const start = Date.now();
+    const items = await drain(gen);
+    const elapsed = Date.now() - start;
+    const exit = items.find((i) => i.kind === "exit") as Extract<ProcessLine, { kind: "exit" }>;
+    // Six pings at 80ms + idle 250ms ≈ 650ms+; must outlive a single idle window.
+    expect(elapsed).toBeGreaterThan(500);
+    expect(exit.idleTimedOut).toBe(true);
+    const lines = items.filter((i) => i.kind === "line");
+    expect(lines.length).toBeGreaterThanOrEqual(5);
+  }, 15_000);
+
+  it("caps accumulated stderr on the exit summary", async () => {
+    const gen = runProcessLines({
+      binary: "node",
+      args: [
+        "-e",
+        `
+          const chunk = "x".repeat(64 * 1024);
+          for (let i = 0; i < 20; i++) process.stderr.write(chunk);
+          process.exit(1);
+        `,
+      ],
+      idleTimeoutMs: 0,
+    });
+    const items = await drain(gen);
+    const exit = items.find((i) => i.kind === "exit") as Extract<ProcessLine, { kind: "exit" }>;
+    expect(exit.stderr.length).toBeLessThanOrEqual(512 * 1024);
+    expect(exit.code).toBe(1);
+  }, 15_000);
 
   it("reports stderr from the child", async () => {
     const gen = runProcessLines({

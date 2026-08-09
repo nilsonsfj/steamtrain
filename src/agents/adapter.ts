@@ -1,6 +1,6 @@
 import type { AgentEvent, AgentId, AgentInstanceId, EventMapper } from "../types/events";
 import type { ResolvedPermissions } from "./permissions";
-import { type ProcessRunOptions, runProcessLines } from "./spawn";
+import { type ProcessRunOptions, resolveAgentIdleTimeoutMs, runProcessLines } from "./spawn";
 import { stderrSummary } from "./util";
 
 export interface AgentRunOptions {
@@ -10,6 +10,12 @@ export interface AgentRunOptions {
   effort?: string;
   cwd?: string;
   timeoutMs?: number;
+  /**
+   * Kill the agent if it goes silent (no stdout/stderr) this long. `0` disables.
+   * Omitted → spawn default ({@link DEFAULT_AGENT_IDLE_TIMEOUT_MS} when a
+   * wall-clock timeout is set).
+   */
+  idleTimeoutMs?: number;
   signal?: AbortSignal;
   /** Extra env vars merged over `process.env` for this run (per-step targets). */
   env?: Record<string, string>;
@@ -78,6 +84,7 @@ export async function* runAgentProcess(params: AgentProcessParams): AsyncGenerat
     cwd: opts.cwd,
     env: opts.env,
     timeoutMs: opts.timeoutMs,
+    idleTimeoutMs: opts.idleTimeoutMs,
     signal: opts.signal,
     prompt,
   };
@@ -132,7 +139,9 @@ export async function* runAgentProcess(params: AgentProcessParams): AsyncGenerat
           kind: "error",
           agent: id,
           ts,
-          message: `'${binary}' timed out after ${opts.timeoutMs! / 1000}s`,
+          message: item.idleTimedOut
+            ? `'${binary}' idle timeout after ${(resolveAgentIdleTimeoutMs(opts) ?? 0) / 1000}s with no output`
+            : `'${binary}' timed out after ${opts.timeoutMs! / 1000}s`,
           stderr: stderr || undefined,
           code: item.code,
           category: "transient",

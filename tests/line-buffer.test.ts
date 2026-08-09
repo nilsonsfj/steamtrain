@@ -58,4 +58,12 @@ describe("LineBuffer", () => {
     expect(collected).toEqual(events);
     expect(collected.map((l) => JSON.parse(l).type)).toEqual(["system", "stream_event", "result"]);
   });
+
+  it("force-emits when a pending line exceeds the cap (no newline)", () => {
+    const lb = new LineBuffer(16);
+    expect(lb.push("abcdefghijklmnopqrs")).toEqual(["abcdefghijklmnop"]);
+    expect(lb.pending).toBe("qrs");
+    expect(lb.push("tuv\n")).toEqual(["qrstuv"]);
+    expect(lb.pending).toBe("");
+  });
 });
