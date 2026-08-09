@@ -134,9 +134,10 @@ describe("bundled workflows", () => {
   });
 
   it("babysit-all-prs lists PRs with a deterministic gh command, not an agent", () => {
-    const list = BUNDLED_WORKFLOWS["babysit-all-prs"]!.phases
-      .flatMap((p) => p.steps)
-      .find((s) => s.id === "list-prs");
+    const list = BUNDLED_WORKFLOWS["babysit-all-prs"]!.phases.flatMap((p) => p.steps).find(
+      (s) => s.id === "list-prs",
+    );
+    expect(list, "list-prs step missing").toBeDefined();
     expect(list?.kind).toBe("command");
     expect(list && "cmd" in list ? list.cmd : "").toContain("gh pr list");
   });
