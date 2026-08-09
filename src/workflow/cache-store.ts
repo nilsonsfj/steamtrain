@@ -2,10 +2,26 @@ import { createHash } from "node:crypto";
 import { readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { atomicWriteFile, isEnoent } from "./fs-util";
+import { type ProjectLockOptions, withStateDirLock } from "./project-lock";
+import { migrateStateVersion } from "./state-migrate";
 import type { GateStep, StepResult, WorkflowSpec } from "./types";
 
 export const WORKFLOW_CACHE_DIR = ".steamtrain/cache";
 export const WORKFLOW_CACHE_VERSION = 2;
+
+/** Injectable lock for tests; defaults to the cross-process project state lock. */
+export type CacheLockFn = <T>(
+  stateSubdir: string,
+  fn: () => Promise<T>,
+  opts?: ProjectLockOptions,
+) => Promise<T>;
+
+let cacheLock: CacheLockFn = withStateDirLock;
+
+/** Override the cache writer lock (tests). Pass `undefined` to restore default. */
+export function setWorkflowCacheLock(lock: CacheLockFn | undefined): void {
+  cacheLock = lock ?? withStateDirLock;
+}
 
 export interface WorkflowCacheKey {
   workflow: string;
@@ -86,16 +102,60 @@ export async function loadWorkflowCache(
   rootDir: string,
   key: WorkflowCacheKey,
 ): Promise<Map<string, StepResult>> {
-  try {
-    const file = await readFile(join(rootDir, workflowCacheFileName(key)), "utf8");
-    return parseWorkflowCacheFile(file, key);
-  } catch (err) {
-    if (isEnoent(err)) return new Map();
-    throw err;
-  }
+  return loadWorkflowCacheUnlocked(rootDir, key);
 }
 
 export async function saveWorkflowCache(
+  rootDir: string,
+  key: WorkflowCacheKey,
+  cache: Map<string, StepResult>,
+): Promise<void> {
+  await cacheLock(rootDir, async () => {
+    // Read-merge-write under the project lock so concurrent step completions
+    // (same process overlapping awaits, or a second steamtrain instance) keep
+    // each other's entries instead of last-writer-wins.
+    const onDisk = await loadWorkflowCacheUnlocked(rootDir, key);
+    const merged = new Map(onDisk);
+    for (const [stepId, result] of cache) merged.set(stepId, result);
+    for (const [stepId, result] of merged) cache.set(stepId, result);
+    await writeWorkflowCacheFile(rootDir, key, merged);
+  });
+}
+
+export async function clearWorkflowCache(rootDir: string, key: WorkflowCacheKey): Promise<void> {
+  await cacheLock(rootDir, async () => {
+    const fileName = workflowCacheFileName(key);
+    const filePath = join(rootDir, fileName);
+    try {
+      await rm(filePath, { force: true });
+      const entries = await readdir(rootDir);
+      await Promise.all(
+        entries
+          .filter((name) => name.startsWith(fileName) && name.endsWith(".tmp"))
+          .map((name) => rm(join(rootDir, name), { force: true })),
+      );
+    } catch (err) {
+      if (!isEnoent(err)) throw err;
+    }
+  });
+}
+
+export async function clearAllWorkflowCaches(rootDir: string): Promise<void> {
+  await cacheLock(rootDir, async () => {
+    try {
+      const entries = await readdir(rootDir);
+      await Promise.all(
+        entries
+          .filter((name) => name.endsWith(".json") || name.endsWith(".tmp"))
+          .map((name) => rm(join(rootDir, name), { force: true })),
+      );
+    } catch (err) {
+      if (!isEnoent(err)) throw err;
+    }
+  });
+}
+
+async function writeWorkflowCacheFile(
   rootDir: string,
   key: WorkflowCacheKey,
   cache: Map<string, StepResult>,
@@ -113,32 +173,16 @@ export async function saveWorkflowCache(
   await atomicWriteFile(target, `${JSON.stringify(payload, null, 2)}\n`);
 }
 
-export async function clearWorkflowCache(rootDir: string, key: WorkflowCacheKey): Promise<void> {
-  const fileName = workflowCacheFileName(key);
-  const filePath = join(rootDir, fileName);
+async function loadWorkflowCacheUnlocked(
+  rootDir: string,
+  key: WorkflowCacheKey,
+): Promise<Map<string, StepResult>> {
   try {
-    await rm(filePath, { force: true });
-    const entries = await readdir(rootDir);
-    await Promise.all(
-      entries
-        .filter((name) => name.startsWith(fileName) && name.endsWith(".tmp"))
-        .map((name) => rm(join(rootDir, name), { force: true })),
-    );
+    const file = await readFile(join(rootDir, workflowCacheFileName(key)), "utf8");
+    return parseWorkflowCacheFile(file, key);
   } catch (err) {
-    if (!isEnoent(err)) throw err;
-  }
-}
-
-export async function clearAllWorkflowCaches(rootDir: string): Promise<void> {
-  try {
-    const entries = await readdir(rootDir);
-    await Promise.all(
-      entries
-        .filter((name) => name.endsWith(".json") || name.endsWith(".tmp"))
-        .map((name) => rm(join(rootDir, name), { force: true })),
-    );
-  } catch (err) {
-    if (!isEnoent(err)) throw err;
+    if (isEnoent(err)) return new Map();
+    throw err;
   }
 }
 
@@ -159,13 +203,19 @@ export async function persistWorkflowStepDone(
 }
 
 function parseWorkflowCacheFile(file: string, key: WorkflowCacheKey): Map<string, StepResult> {
-  let parsed: WorkflowCacheFile;
+  let raw: unknown;
   try {
-    parsed = JSON.parse(file) as WorkflowCacheFile;
+    raw = JSON.parse(file);
   } catch {
     return new Map();
   }
-  if (parsed.version !== WORKFLOW_CACHE_VERSION) return new Map();
+  // No pre-v2 on-disk format ships in the wild; the migrator table is the
+  // place to add a v2→v3 transform when WORKFLOW_CACHE_VERSION is bumped.
+  const migrated = migrateStateVersion<WorkflowCacheFile>(raw, WORKFLOW_CACHE_VERSION, {
+    // 1: (v) => ({ ...v, version: 2, /* reshape */ }),
+  });
+  if (!migrated.ok) return new Map();
+  const parsed = migrated.value;
   if (parsed.workflow !== key.workflow || parsed.cwd !== key.cwd) return new Map();
   if (parsed.inputHash !== hashWorkflowCacheInput(key.input)) return new Map();
   if (parsed.specHash !== key.specHash) return new Map();

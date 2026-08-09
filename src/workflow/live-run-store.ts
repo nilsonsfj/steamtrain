@@ -8,6 +8,8 @@ import { atomicWriteFile, isEnoent, sanitizePathComponent } from "./fs-util";
 import { RunRecordBuilder, type RunRecordStatus } from "./history";
 import type { WorkflowHistoryStore } from "./history-store";
 import type { HumanInputOrigin, HumanInputResponse } from "./human-input";
+import { type ProjectLockOptions, withStateDirLock } from "./project-lock";
+import { migrateStateVersion } from "./state-migrate";
 import type { WorkflowSpec } from "./types";
 
 /**
@@ -26,10 +28,9 @@ import type { WorkflowSpec } from "./types";
  *   control/edits/*.json — mid-run step-edit requests + the owner's results
  *   runner.log        — stdout/stderr of a detached runner (debugging)
  *
- * Only the process that owns a run writes its meta/events; every other
- * process is a reader (attach/tail) or drops marker files (cancel, approval
- * decisions). That single-writer discipline is what keeps the store safe
- * without cross-process locks.
+ * Meta writes (create/update/orphan) are serialized behind the project state
+ * lock so the run queue's check-and-promote and concurrent owners cannot
+ * clobber each other. Event appends stay lock-free (append-only, single owner).
  */
 
 export const WORKFLOW_RUNS_DIR = ".steamtrain/runs";
@@ -58,6 +59,13 @@ export const LIVE_RUN_ORPHAN_GRACE_MS = 30_000;
 export const MAX_STREAM_EVENTS_PER_RUN = 20_000;
 
 export const LIVE_RUN_META_VERSION = 1;
+
+/**
+ * A live-run owner whose `heartbeatAt` is older than this is treated as dead
+ * even if `kill(pid, 0)` succeeds — PID reuse would otherwise keep a dead
+ * run's queue slot occupied forever.
+ */
+export const LIVE_RUN_HEARTBEAT_STALE_MS = 60_000;
 
 /** Non-terminal live statuses + the terminal {@link RunRecordStatus} set. */
 export type LiveRunStatus = "queued" | "running" | RunRecordStatus;
@@ -111,6 +119,16 @@ export interface LiveRunMeta {
   cwd: string;
   /** Process that owns (executes) the run. -1 until a detached child reports in. */
   pid: number;
+  /**
+   * Opaque token minted when the owner claims the run. Survives PID reuse:
+   * a recycled pid without a matching fresh heartbeat is still orphaned.
+   */
+  ownerToken?: string;
+  /**
+   * Last time the owning process refreshed liveness (publisher flush / finish).
+   * Combined with {@link LIVE_RUN_HEARTBEAT_STALE_MS} to detect PID reuse.
+   */
+  heartbeatAt?: number;
   source: LiveRunSource;
   /** True when the run survives its launching terminal (a `--detach` runner). */
   detached: boolean;
@@ -174,13 +192,22 @@ export function isPidAlive(pid: number): boolean {
  * source of truth shared by the queue and the orphan sweep, so they can never
  * disagree: `pid === -1` (a detached child that has not reported in yet)
  * counts as alive within the spawn grace window, dead after it.
+ *
+ * When `heartbeatAt` is present, a live pid whose heartbeat is older than
+ * {@link LIVE_RUN_HEARTBEAT_STALE_MS} is treated as dead — the classic PID
+ * reuse false-positive. Legacy metas without a heartbeat keep the pid-only
+ * check for backward compatibility.
  */
 export function isLiveRunOwnerAlive(
-  meta: Pick<LiveRunMeta, "pid" | "createdAt">,
+  meta: Pick<LiveRunMeta, "pid" | "createdAt" | "heartbeatAt">,
   at: number = Date.now(),
 ): boolean {
   if (meta.pid === -1) return at - meta.createdAt <= LIVE_RUN_ORPHAN_GRACE_MS;
-  return isPidAlive(meta.pid);
+  if (!isPidAlive(meta.pid)) return false;
+  if (typeof meta.heartbeatAt === "number") {
+    return at - meta.heartbeatAt <= LIVE_RUN_HEARTBEAT_STALE_MS;
+  }
+  return true;
 }
 
 export interface LiveRunListOptions {
@@ -275,6 +302,12 @@ export interface LiveRunStore {
   readStepEditResult(id: string, editId: string): Promise<StepEditResult | undefined>;
   /** Delete a run's live dir. */
   remove(id: string): Promise<void>;
+  /**
+   * Under the project state lock: if this queued run fits a free execution
+   * slot, promote it to `"running"`. Closes the check-then-update TOCTOU that
+   * let two waiters both claim the same slot.
+   */
+  tryPromote(id: string, limit: number): Promise<"promoted" | "waiting" | "missing">;
 }
 
 export interface CreateLiveRunStoreOptions {
@@ -288,6 +321,15 @@ export interface CreateLiveRunStoreOptions {
   ttlMs?: number;
   /** Time source override for tests. */
   now?: () => number;
+  /** Injectable project-state lock (defaults to {@link withStateDirLock}). */
+  withLock?: <T>(fn: () => Promise<T>) => Promise<T>;
+  /** Tuning for the default lock when `withLock` is omitted. */
+  lockOptions?: ProjectLockOptions;
+  /**
+   * When true (default), orphaning a run also best-effort GC's that run's
+   * steamtrain worktrees/branches (skipping anything that looks unharvested).
+   */
+  reclaimOrphanWorktrees?: boolean;
 }
 
 export function createLiveRunStore(
@@ -296,6 +338,10 @@ export function createLiveRunStore(
 ): LiveRunStore {
   const ttlMs = options.ttlMs ?? LIVE_RUN_TTL_MS;
   const now = options.now ?? Date.now;
+  const reclaimOrphanWorktrees = options.reclaimOrphanWorktrees ?? true;
+  const withLock =
+    options.withLock ??
+    (<T>(fn: () => Promise<T>) => withStateDirLock(rootDir, fn, options.lockOptions));
   /**
    * Tie-breaker for edit ids minted inside the same millisecond. `now()` alone
    * left the sort order to the random suffix, so two edits requested back to
@@ -324,16 +370,19 @@ export function createLiveRunStore(
   }
 
   async function update(id: string, patch: Partial<LiveRunMeta>): Promise<LiveRunMeta | undefined> {
-    const meta = await get(id);
-    if (!meta) return undefined;
-    const next = { ...meta, ...patch };
-    await atomicWriteFile(metaPath(id), `${JSON.stringify(next, null, 2)}\n`);
-    return next;
+    return withLock(async () => {
+      const meta = await get(id);
+      if (!meta) return undefined;
+      const next = { ...meta, ...patch };
+      await atomicWriteFile(metaPath(id), `${JSON.stringify(next, null, 2)}\n`);
+      return next;
+    });
   }
 
   /**
    * Mark a dead-owner run as orphaned and (best-effort) fold its recorded
-   * events into a history record so the run doesn't silently vanish.
+   * events into a history record so the run doesn't silently vanish. Also
+   * best-effort GC's that run's worktrees (never `--force`).
    */
   async function markOrphaned(meta: LiveRunMeta): Promise<LiveRunMeta> {
     // Re-read before writing: the owner may have settled the run between the
@@ -373,9 +422,18 @@ export function createLiveRunStore(
             }),
           );
         }
-      } catch {
-        // Best-effort: a failed history fold must not break listing.
+      } catch (err) {
+        // Best-effort: a failed history fold must not break listing — but do
+        // surface the failure so disk-full / permission issues are diagnosable.
+        process.stderr.write(
+          `[steamtrain] failed to fold orphaned run ${meta.id} into history: ${
+            err instanceof Error ? err.message : String(err)
+          }\n`,
+        );
       }
+    }
+    if (reclaimOrphanWorktrees && meta.cwd) {
+      void reclaimOrphanRunWorktrees(meta.id, meta.cwd);
     }
     return patched;
   }
@@ -481,9 +539,11 @@ export function createLiveRunStore(
   return {
     rootDir,
     async create(meta) {
-      await mkdir(runDir(meta.id), { recursive: true });
-      await atomicWriteFile(metaPath(meta.id), `${JSON.stringify(meta, null, 2)}\n`);
-      await writeFile(eventsPath(meta.id), "", { flag: "a" });
+      await withLock(async () => {
+        await mkdir(runDir(meta.id), { recursive: true });
+        await atomicWriteFile(metaPath(meta.id), `${JSON.stringify(meta, null, 2)}\n`);
+        await writeFile(eventsPath(meta.id), "", { flag: "a" });
+      });
     },
     get,
     update,
@@ -715,6 +775,40 @@ export function createLiveRunStore(
     async remove(id) {
       await rm(runDir(id), { recursive: true, force: true });
     },
+    async tryPromote(id, limit) {
+      return withLock(async () => {
+        let entries: string[];
+        try {
+          entries = await readdir(rootDir);
+        } catch (err) {
+          if (isEnoent(err)) return "missing";
+          throw err;
+        }
+        const reads = await Promise.all(
+          entries.map((name) => readMeta(join(rootDir, name, "meta.json"))),
+        );
+        const alive = reads.filter(
+          (run): run is LiveRunMeta =>
+            Boolean(run) &&
+            !isTerminalLiveRunStatus(run!.status) &&
+            isLiveRunOwnerAlive(run!, now()),
+        );
+        const self = alive.find((run) => run.id === id);
+        if (!self) return "missing";
+        if (self.status === "running") return "promoted";
+        if (self.status !== "queued") return "missing";
+        const running = alive.filter((run) => run.status === "running").length;
+        const queued = alive
+          .filter((run) => run.status === "queued")
+          .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1));
+        const position = queued.findIndex((run) => run.id === id);
+        const freeSlots = Math.max(0, limit - running);
+        if (position < 0 || position >= freeSlots) return "waiting";
+        const next: LiveRunMeta = { ...self, status: "running", startedAt: now() };
+        await atomicWriteFile(metaPath(id), `${JSON.stringify(next, null, 2)}\n`);
+        return "promoted";
+      });
+    },
   };
 }
 
@@ -759,21 +853,26 @@ async function readMeta(path: string): Promise<LiveRunMeta | undefined> {
   } catch {
     return undefined;
   }
-  if (!parsed || typeof parsed !== "object") return undefined;
-  const m = parsed as Partial<LiveRunMeta>;
-  if (m.version !== LIVE_RUN_META_VERSION) return undefined;
+  // No pre-v1 format exists; the migrator table is ready for the first bump.
+  const migrated = migrateStateVersion<{ version: number }>(parsed, LIVE_RUN_META_VERSION, {
+    // 1: (v) => ({ ...v, version: 2 }),
+  });
+  if (!migrated.ok) return undefined;
+  const m = migrated.value as Partial<LiveRunMeta>;
   if (typeof m.id !== "string" || typeof m.workflow !== "string") return undefined;
   if (typeof m.status !== "string" || typeof m.createdAt !== "number") return undefined;
   const validStatuses: LiveRunStatus[] = ["queued", "running", ...LIVE_RUN_TERMINAL_STATUSES];
   if (!validStatuses.includes(m.status as LiveRunStatus)) return undefined;
   return {
-    version: m.version,
+    version: LIVE_RUN_META_VERSION,
     id: m.id,
     workflow: m.workflow,
     input: typeof m.input === "string" ? m.input : "",
     params: m.params && typeof m.params === "object" ? m.params : undefined,
     cwd: typeof m.cwd === "string" ? m.cwd : "",
     pid: typeof m.pid === "number" ? m.pid : -1,
+    ownerToken: typeof m.ownerToken === "string" ? m.ownerToken : undefined,
+    heartbeatAt: typeof m.heartbeatAt === "number" ? m.heartbeatAt : undefined,
     source: isLiveRunSource(m.source) ? m.source : "cli",
     detached: Boolean(m.detached),
     status: m.status as LiveRunStatus,
@@ -806,6 +905,30 @@ async function readMeta(path: string): Promise<LiveRunMeta | undefined> {
 
 function isLiveRunSource(value: unknown): value is LiveRunSource {
   return value === "cli" || value === "cli-detached" || value === "tui" || value === "web";
+}
+
+/**
+ * Best-effort GC of a crashed run's worktrees. Skips non-git cwds silently
+ * (unit-test placeholders); reports real GC failures on stderr.
+ */
+async function reclaimOrphanRunWorktrees(runId: string, cwd: string): Promise<void> {
+  try {
+    const { runGitText } = await import("./worktree");
+    const inside = (await runGitText(["rev-parse", "--is-inside-work-tree"], cwd)).trim();
+    if (inside !== "true") return;
+  } catch {
+    return;
+  }
+  try {
+    const { gcRepoWorktrees } = await import("./gc");
+    await gcRepoWorktrees({ repoRoot: cwd, runId });
+  } catch (err) {
+    process.stderr.write(
+      `[steamtrain] failed to reclaim worktrees for orphaned run ${runId}: ${
+        err instanceof Error ? err.message : String(err)
+      }\n`,
+    );
+  }
 }
 
 async function readEventsFile(path: string): Promise<WorkflowEvent[]> {

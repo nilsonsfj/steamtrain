@@ -50,9 +50,11 @@ const PUBLISH_FLUSH_MS = 25;
 /**
  * Buffered, best-effort mirror of a run's event stream into the live-run
  * store. Writes are batched (~{@link PUBLISH_FLUSH_MS}) and serialized on one
- * promise chain so append order matches event order; a store write failure
- * never breaks the run itself. `finish` flushes everything *before* marking
- * the meta terminal, so tailers that see a terminal meta have the full stream.
+ * promise chain so append order matches event order. Store write failures are
+ * reported on stderr (they used to vanish into an empty catch) but still do
+ * not break the run itself — except `finish`, which rethrows if the terminal
+ * meta cannot be written. `finish` flushes everything *before* marking the
+ * meta terminal, so tailers that see a terminal meta have the full stream.
  */
 export function createLiveRunPublisher(store: LiveRunStore, runId: string): LiveRunPublisher {
   let pending: string[] = [];
@@ -62,10 +64,39 @@ export function createLiveRunPublisher(store: LiveRunStore, runId: string): Live
   let chain: Promise<void> = Promise.resolve();
   const pendingApprovals: { stepId: string; iteration: number }[] = [];
   const pendingInputs: LiveRunPendingInput[] = [];
+  let lastHeartbeatAt = 0;
+  let finished = false;
+
+  const reportWriteError = (action: string, err: unknown): void => {
+    process.stderr.write(
+      `[steamtrain] live-run ${runId} ${action} failed: ${
+        err instanceof Error ? err.message : String(err)
+      }\n`,
+    );
+  };
 
   const enqueue = (task: () => Promise<void>): void => {
-    chain = chain.then(task).catch(() => {});
+    chain = chain.then(task).catch((err) => {
+      reportWriteError("write", err);
+    });
   };
+
+  const touchHeartbeat = async (force = false): Promise<void> => {
+    if (finished) return;
+    const now = Date.now();
+    // Refresh at most every 10s so a chatty stream does not rewrite meta.json
+    // on every flush — still well inside LIVE_RUN_HEARTBEAT_STALE_MS.
+    if (!force && now - lastHeartbeatAt < 10_000) return;
+    lastHeartbeatAt = now;
+    await store.update(runId, { heartbeatAt: now });
+  };
+
+  // Keep the owner heartbeat fresh while parked on approvals / idle waits —
+  // otherwise a silent-but-alive run is swept as orphaned after the stale window.
+  const heartbeatTimer = setInterval(() => {
+    enqueue(() => touchHeartbeat(true));
+  }, 15_000);
+  heartbeatTimer.unref?.();
 
   const flush = (): void => {
     if (flushTimer) {
@@ -75,7 +106,10 @@ export function createLiveRunPublisher(store: LiveRunStore, runId: string): Live
     if (pending.length === 0) return;
     const lines = pending.join("");
     pending = [];
-    enqueue(() => store.appendEventLines(runId, lines));
+    enqueue(async () => {
+      await store.appendEventLines(runId, lines);
+      await touchHeartbeat();
+    });
   };
 
   const scheduleFlush = (): void => {
@@ -187,19 +221,30 @@ export function createLiveRunPublisher(store: LiveRunStore, runId: string): Live
       await chain;
     },
     async finish(status, opts = {}) {
+      finished = true;
+      clearInterval(heartbeatTimer);
       flush();
+      let finishError: unknown;
       enqueue(async () => {
-        await store.update(runId, {
-          status,
-          ok: opts.ok,
-          error: opts.error,
-          endedAt: Date.now(),
-          pendingApprovals: [],
-          pendingInputs: [],
-          paused: false,
-        });
+        try {
+          await store.update(runId, {
+            status,
+            ok: opts.ok,
+            error: opts.error,
+            endedAt: Date.now(),
+            heartbeatAt: Date.now(),
+            pendingApprovals: [],
+            pendingInputs: [],
+            paused: false,
+          });
+        } catch (err) {
+          finishError = err;
+          reportWriteError("finish", err);
+          throw err;
+        }
       });
       await chain;
+      if (finishError) throw finishError;
     },
   };
 }
@@ -219,9 +264,8 @@ export type AcquireRunSlotResult = { ok: true } | { ok: false; reason: "canceled
  *
  * Fairness/coordination is cooperative and file-based: every waiter sorts the
  * queued entries by arrival (`createdAt`, id tiebreak) and promotes itself to
- * `"running"` only when its position fits into the free slots. All waiters
- * compute the same deterministic order, so at most `limit` runs execute at
- * once (best-effort — this is a local-machine queue, not a distributed lock).
+ * `"running"` only when its position fits into the free slots. Promotion runs
+ * under the project state lock so two waiters cannot both claim the same slot.
  *
  * Resolves `canceled` when the run's cancel marker appears or `signal` aborts
  * while still queued.
@@ -235,15 +279,23 @@ export async function acquireRunSlot(
   const pollMs = options.pollMs ?? 250;
   // Sweeping on every poll would rescan (and possibly rewrite) the whole
   // registry ~4×/s per waiter; sweep only occasionally — the alive-filter
-  // below already keeps dead entries from blocking the queue in between.
+  // inside tryPromote already keeps dead entries from blocking the queue.
   const SWEEP_EVERY = 20;
   let polls = 0;
   for (;;) {
     if (options.signal?.aborted || (await store.cancelRequested(runId))) {
       return { ok: false, reason: "canceled" };
     }
-    const runs = await store.list({ sweep: polls % SWEEP_EVERY === 0 });
+    if (polls % SWEEP_EVERY === 0) {
+      await store.list({ sweep: true });
+    }
     polls += 1;
+    const result = await store.tryPromote(runId, limit);
+    if (result === "promoted") return { ok: true };
+    if (result === "missing") return { ok: false, reason: "canceled" };
+    // Cheap position estimate for the progress callback (best-effort; the
+    // authoritative decision happened under the lock above).
+    const runs = await store.list({ sweep: false });
     const alive = runs.filter(
       (run) => !isTerminalLiveRunStatus(run.status) && isLiveRunOwnerAlive(run),
     );
@@ -252,16 +304,7 @@ export async function acquireRunSlot(
       .filter((run) => run.status === "queued")
       .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1));
     const position = queued.findIndex((run) => run.id === runId);
-    if (position === -1) {
-      // Our own entry disappeared (external cleanup) — treat as canceled.
-      return { ok: false, reason: "canceled" };
-    }
-    const freeSlots = Math.max(0, limit - running);
-    if (position < freeSlots) {
-      await store.update(runId, { status: "running", startedAt: Date.now() });
-      return { ok: true };
-    }
-    options.onQueued?.(position + 1, running, limit);
+    options.onQueued?.(Math.max(1, position + 1), running, limit);
     await sleep(pollMs, options.signal);
   }
 }
@@ -509,6 +552,7 @@ export function newLiveRunMeta(fields: {
   pid?: number;
   launch?: LiveRunMeta["launch"];
 }): LiveRunMeta {
+  const createdAt = Date.now();
   return {
     version: LIVE_RUN_META_VERSION,
     id: fields.id,
@@ -517,10 +561,16 @@ export function newLiveRunMeta(fields: {
     params: fields.params,
     cwd: fields.cwd,
     pid: fields.pid ?? process.pid,
+    ownerToken: randomOwnerToken(),
+    heartbeatAt: createdAt,
     source: fields.source,
     detached: fields.detached ?? false,
     status: "queued",
-    createdAt: Date.now(),
+    createdAt,
     launch: fields.launch,
   };
+}
+
+function randomOwnerToken(): string {
+  return `${process.pid.toString(36)}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }

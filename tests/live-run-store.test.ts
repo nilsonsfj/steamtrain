@@ -15,9 +15,11 @@ import {
   withStoreApprovals,
 } from "../src/workflow/live-run";
 import {
+  LIVE_RUN_HEARTBEAT_STALE_MS,
   LIVE_RUN_META_VERSION,
   type LiveRunMeta,
   createLiveRunStore,
+  isLiveRunOwnerAlive,
   isTerminalLiveRunStatus,
 } from "../src/workflow/live-run-store";
 
@@ -469,6 +471,54 @@ describe("resolveMaxParallelRuns", () => {
     expect(resolveMaxParallelRuns({} as never)).toBe(2);
     expect(resolveMaxParallelRuns({ maxParallelRuns: 5 } as never)).toBe(5);
     expect(resolveMaxParallelRuns({ maxParallelRuns: 0 } as never)).toBe(2);
+  });
+});
+
+describe("live-run owner liveness / queue promote", () => {
+  it("treats a live pid with a stale heartbeat as dead (PID-reuse guard)", () => {
+    const now = Date.now();
+    expect(
+      isLiveRunOwnerAlive(
+        {
+          pid: process.pid,
+          createdAt: now - 1_000,
+          heartbeatAt: now - LIVE_RUN_HEARTBEAT_STALE_MS - 1,
+        },
+        now,
+      ),
+    ).toBe(false);
+    expect(
+      isLiveRunOwnerAlive(
+        {
+          pid: process.pid,
+          createdAt: now - 1_000,
+          heartbeatAt: now - 1_000,
+        },
+        now,
+      ),
+    ).toBe(true);
+    // Legacy metas without heartbeat keep the pid-only check.
+    expect(isLiveRunOwnerAlive({ pid: process.pid, createdAt: now }, now)).toBe(true);
+  });
+
+  it("tryPromote promotes under the lock and refuses a second claim", async () => {
+    const store = createLiveRunStore(tempDir(), { withLock: (fn) => fn() });
+    await store.create(meta("a", { status: "queued", createdAt: 1 }));
+    await store.create(meta("b", { status: "queued", createdAt: 2 }));
+    expect(await store.tryPromote("a", 1)).toBe("promoted");
+    expect(await store.tryPromote("b", 1)).toBe("waiting");
+    expect((await store.get("a"))?.status).toBe("running");
+    expect((await store.get("b"))?.status).toBe("queued");
+  });
+
+  it("publisher refreshes heartbeatAt on finish", async () => {
+    const store = createLiveRunStore(tempDir(), { withLock: (fn) => fn() });
+    await store.create(meta("run", { status: "running", pid: process.pid, heartbeatAt: 1 }));
+    const publisher = createLiveRunPublisher(store, "run");
+    await publisher.finish("done", { ok: true });
+    const final = await store.get("run");
+    expect(final?.heartbeatAt).toBeGreaterThan(1);
+    expect(final?.ownerToken).toBeTypeOf("string");
   });
 });
 

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { AgentInstanceId } from "../types/events";
 import { isOutside, isSteamtrainStatePath } from "./fs-util";
+import { type ProjectLockOptions, withProjectStateLock } from "./project-lock";
 import type { WorkflowItem } from "./types";
 
 export interface AgentWorkspaceRequest {
@@ -245,19 +246,22 @@ class GitWorktreeManager implements AgentWorkspaceManager {
 
 /**
  * Serialize `git worktree add` (and similar ref/index-mutating setup) per
- * repository — concurrent adds on the same repo race on refs and fail. Shared
- * by the worktree manager and the merge-back harvest pipeline.
+ * repository — concurrent adds on the same repo race on refs and fail. Combines
+ * an in-process promise queue with the cross-process project state lock so a
+ * second steamtrain instance cannot race the first. Shared by the worktree
+ * manager and the merge-back harvest pipeline.
  */
 export async function withRepoWorktreeLock<T>(
   repoRoot: string,
   signal: AbortSignal | undefined,
   fn: () => Promise<T>,
+  lockOptions?: ProjectLockOptions,
 ): Promise<T> {
   const previous = repoQueues.get(repoRoot) ?? Promise.resolve();
   const run = (async () => {
     await previous.catch(() => {});
     throwIfAborted(signal);
-    return fn();
+    return withProjectStateLock(repoRoot, fn, { ...lockOptions, signal });
   })();
   const current = run.then(
     () => {},
