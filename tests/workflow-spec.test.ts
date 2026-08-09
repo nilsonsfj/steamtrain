@@ -498,9 +498,7 @@ describe("workflow (sub-workflow) step", () => {
         {
           id: "p1",
           title: "P1",
-          steps: [
-            { id: "merge-text", kind: "consolidator", prompt: "x", dependsOn: ["seed"] },
-          ],
+          steps: [{ id: "merge-text", kind: "consolidator", prompt: "x", dependsOn: ["seed"] }],
         },
         {
           id: "p2",
