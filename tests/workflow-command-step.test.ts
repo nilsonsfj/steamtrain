@@ -365,7 +365,7 @@ describe("command workflow step", () => {
       expect(doneResults(events).get("each[0]")?.output).toContain("alpha");
       expect(doneResults(events).get("each[1]")?.output).toContain("beta");
     } finally {
-      delete process.env.STEAMTRAIN_TEST_LLM_KEY;
+      process.env.STEAMTRAIN_TEST_LLM_KEY = undefined;
     }
   });
 
@@ -416,7 +416,7 @@ describe("command workflow step", () => {
       expect(doneResults(events).get("prs")?.items).toEqual(["one", "two"]);
       expect(doneResults(events).get("each")?.items).toEqual(["one", "two"]);
     } finally {
-      delete process.env.STEAMTRAIN_TEST_LLM_KEY;
+      process.env.STEAMTRAIN_TEST_LLM_KEY = undefined;
     }
   });
 
@@ -484,7 +484,7 @@ describe("command workflow step", () => {
       expect(workflowOk(events)).toBe(true);
       expect(doneResults(events).get("each")?.childResults).toEqual([]);
     } finally {
-      delete process.env.STEAMTRAIN_TEST_LLM_KEY;
+      process.env.STEAMTRAIN_TEST_LLM_KEY = undefined;
     }
   });
 
