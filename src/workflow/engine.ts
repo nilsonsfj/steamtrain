@@ -3352,13 +3352,22 @@ async function executeCommandStep(
       const parsed = parseStructuredOutput(result.output, step.output);
       // No "fix your JSON" retry here — the command is deterministic, so a
       // mismatch is a real contract violation and re-running can't change it.
-      result = parsed.ok
-        ? { ...result, json: parsed.value }
-        : {
-            ...result,
-            ok: false,
-            error: `structured output invalid: ${parsed.error}`,
-          };
+      if (!parsed.ok) {
+        result = {
+          ...result,
+          ok: false,
+          error: `structured output invalid: ${parsed.error}`,
+        };
+      } else if (Array.isArray(parsed.value)) {
+        // Bare-array command output is a splitter by construction (same as llm).
+        result = {
+          ...result,
+          json: parsed.value,
+          items: parsed.value.map(jsonFieldText),
+        };
+      } else {
+        result = { ...result, json: parsed.value };
+      }
     }
     result = await applyDeclaredArtifacts(step, ctx, step.id, workspace.cwd, result);
     return attachWorktreeInfo(result, workspace, stepCwd);

@@ -372,10 +372,12 @@ Downstream steps reference the aggregate parent result:
 - `{{steps.review-each.items}}` is the original item list.
 - `{{steps.review-each.ok}}` is `true` only when every child run succeeds.
 
-`forEach` sources must be successful distributor steps (or llm splitters with
-items) from earlier phases. If the distributor is agent-backed, its final
-output is split on non-empty lines to form `items` - unless it declares an
-`output` schema, in which case `items` come from a JSON array (see below).
+`forEach` sources must be successful distributor steps, command steps, or llm
+splitters with items, from earlier phases. If the distributor is agent-backed,
+its final output is split on non-empty lines to form `items` - unless it
+declares an `output` schema, in which case `items` come from a JSON array (see
+below). A command source splits stdout on non-empty lines, or — when it declares
+an `output` schema whose value is a JSON array — fans out over that array.
 
 ### Distributor
 

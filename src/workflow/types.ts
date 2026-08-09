@@ -249,8 +249,9 @@ export interface WorkerStep extends WorkflowStepBase, AgentRunFields, WorkspaceF
    */
   session?: string;
   /**
-   * Dynamically fan this worker/processor out over prior distributor items.
-   * Syntax: `steps.<id>.items` (or `<id>.items`).
+   * Dynamically fan this worker/processor out over prior splitter items.
+   * Syntax: `steps.<id>.items` (or `<id>.items`). Source may be a distributor,
+   * a command (stdout lines or JSON-array `output`), or an llm splitter.
    */
   forEach?: string;
   /**
@@ -553,6 +554,11 @@ export interface CommandStep extends WorkflowStepBase, WorkspaceFields {
    * scripts). The engine extracts and validates it and stores the parsed value
    * on `StepResult.json`. Unlike agent steps there is no "fix your JSON" retry:
    * the command is deterministic, so a mismatch simply fails the step.
+   *
+   * When the parsed value is a JSON array it also becomes `StepResult.items`,
+   * so a later `forEach` can fan out over the command the same way it does
+   * over a distributor / llm splitter. Without `output`, `forEach` falls back
+   * to splitting the command's stdout on non-empty lines.
    */
   output?: JsonSchema;
 }
@@ -2206,15 +2212,16 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
               : `step '${step.id}' forEach references unknown step '${sourceStepId}'`,
           };
         }
-        // An llm step with an `output` schema emits `items` from its structured
-        // array, so it is a valid fan-out source alongside distributors.
+        // Fan-out sources: distributors, llm splitters (structured array), and
+        // command steps (stdout line-split, or a structured JSON-array `output`).
         const validSource =
           sourceStep?.kind === "distributor" ||
+          sourceStep?.kind === "command" ||
           (sourceStep?.kind === "llm" && sourceStep.output !== undefined);
         if (!validSource) {
           return {
             ok: false,
-            error: `step '${step.id}' forEach source '${sourceStepId}' must be a distributor step (or an llm step with an output schema)`,
+            error: `step '${step.id}' forEach source '${sourceStepId}' must be a distributor, command, or llm step with an output schema`,
           };
         }
         if (sourceStep.kind === "distributor") {

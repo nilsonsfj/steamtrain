@@ -320,6 +320,174 @@ describe("command workflow step", () => {
     expect(results.get("bad")?.error).toContain("structured output invalid");
   });
 
+  it("is a valid forEach source via stdout line-split", async () => {
+    const cwd = await tempDir();
+    process.env.STEAMTRAIN_TEST_LLM_KEY = "sk-test";
+    try {
+      const events = await runToEvents(
+        spec([
+          {
+            id: "list",
+            title: "List",
+            steps: [{ id: "prs", kind: "command", cmd: "printf 'alpha\\nbeta\\n'" }],
+          },
+          {
+            id: "work",
+            title: "Work",
+            steps: [
+              {
+                id: "each",
+                kind: "llm",
+                model: "claude-opus-4-8",
+                apiKeyEnv: "STEAMTRAIN_TEST_LLM_KEY",
+                dependsOn: ["prs"],
+                forEach: "steps.prs.items",
+                prompt: "touch {{item}}",
+              },
+            ],
+          },
+        ]),
+        {
+          ...agentlessDeps(cwd),
+          llmComplete: async (req) => ({
+            ok: true,
+            text: `done:${req.prompt}`,
+            tokens: { input: 1, output: 1 },
+          }),
+        },
+      );
+      expect(workflowOk(events)).toBe(true);
+      const list = doneResults(events).get("prs");
+      expect(list?.ok).toBe(true);
+      const parent = doneResults(events).get("each");
+      expect(parent?.ok).toBe(true);
+      expect(parent?.items).toEqual(["alpha", "beta"]);
+      expect(doneResults(events).get("each[0]")?.output).toContain("alpha");
+      expect(doneResults(events).get("each[1]")?.output).toContain("beta");
+    } finally {
+      process.env.STEAMTRAIN_TEST_LLM_KEY = undefined;
+    }
+  });
+
+  it("exposes a JSON-array output schema as forEach items", async () => {
+    const cwd = await tempDir();
+    process.env.STEAMTRAIN_TEST_LLM_KEY = "sk-test";
+    try {
+      const events = await runToEvents(
+        spec([
+          {
+            id: "list",
+            title: "List",
+            steps: [
+              {
+                id: "prs",
+                kind: "command",
+                cmd: `printf '["one","two"]\\n'`,
+                output: { type: "array", items: { type: "string" } },
+              },
+            ],
+          },
+          {
+            id: "work",
+            title: "Work",
+            steps: [
+              {
+                id: "each",
+                kind: "llm",
+                model: "claude-opus-4-8",
+                apiKeyEnv: "STEAMTRAIN_TEST_LLM_KEY",
+                dependsOn: ["prs"],
+                forEach: "steps.prs.items",
+                prompt: "{{item}}",
+              },
+            ],
+          },
+        ]),
+        {
+          ...agentlessDeps(cwd),
+          llmComplete: async (req) => ({
+            ok: true,
+            text: req.prompt,
+            tokens: { input: 1, output: 1 },
+          }),
+        },
+      );
+      expect(workflowOk(events)).toBe(true);
+      expect(doneResults(events).get("prs")?.items).toEqual(["one", "two"]);
+      expect(doneResults(events).get("each")?.items).toEqual(["one", "two"]);
+    } finally {
+      process.env.STEAMTRAIN_TEST_LLM_KEY = undefined;
+    }
+  });
+
+  it("accepts command steps as forEach sources at validate time", () => {
+    const result = validateWorkflow(
+      spec([
+        {
+          id: "list",
+          title: "List",
+          steps: [{ id: "prs", kind: "command", cmd: "true" }],
+        },
+        {
+          id: "work",
+          title: "Work",
+          steps: [
+            {
+              id: "each",
+              kind: "processor",
+              model: "opencode/mimo-v2.5-free",
+              dependsOn: ["prs"],
+              forEach: "steps.prs.items",
+              prompt: "{{item}}",
+            },
+          ],
+        },
+      ]),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("treats empty command stdout as zero forEach children", async () => {
+    const cwd = await tempDir();
+    process.env.STEAMTRAIN_TEST_LLM_KEY = "sk-test";
+    try {
+      const events = await runToEvents(
+        spec([
+          {
+            id: "list",
+            title: "List",
+            steps: [{ id: "prs", kind: "command", cmd: "true" }],
+          },
+          {
+            id: "work",
+            title: "Work",
+            steps: [
+              {
+                id: "each",
+                kind: "llm",
+                model: "claude-opus-4-8",
+                apiKeyEnv: "STEAMTRAIN_TEST_LLM_KEY",
+                dependsOn: ["prs"],
+                forEach: "steps.prs.items",
+                prompt: "{{item}}",
+              },
+            ],
+          },
+        ]),
+        {
+          ...agentlessDeps(cwd),
+          llmComplete: async () => {
+            throw new Error("should not run any children");
+          },
+        },
+      );
+      expect(workflowOk(events)).toBe(true);
+      expect(doneResults(events).get("each")?.childResults).toEqual([]);
+    } finally {
+      process.env.STEAMTRAIN_TEST_LLM_KEY = undefined;
+    }
+  });
+
   it("runs in an isolated git worktree and records it, keeping the checkout clean", async () => {
     const root = await tempDir();
     const repo = join(root, "repo");

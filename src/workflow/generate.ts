@@ -157,20 +157,28 @@ or disjoint, never partially overlapping.
 
 # Step kinds
 - "distributor": fan work into multiple items for downstream forEach steps.
-  - Agent-backed (PREFERRED for backlogs and unknown item counts): set agent, model,
-    and prompt. The agent's final output is split on non-empty lines into items
-    (one task per line; no numbering or bullets). Use this whenever the number of
-    tasks is not known at authoring time.
+  - Prefer a COMMAND step as the forEach source whenever the list is
+    machine-enumerable (gh/git/find/jq/test reporters). Commands are free,
+    deterministic, and cannot invent prose items. A later processor uses
+    "forEach": "steps.<commandId>.items" — stdout is split on non-empty lines,
+    or a JSON-array "output" schema becomes items directly.
+  - Agent/llm-backed splitter (for judgmental / free-text backlogs only): set
+    agent/model/prompt (distributor) or model/prompt (llm). PREFER an "output"
+    JSON schema whose value (or "itemsPath" field) is a JSON array — empty work
+    is then \`[]\`, never a sentence. Line-splitting without a schema is a last
+    resort for free-text task lines; the prompt must demand ONE item per line
+    and NOTHING else (no headings, no "No items.", no numbering/bullets).
   - Static (only when you know the exact branches upfront): set items:
     ["...{{input}}...", "..."] with templated strings. If items is present, it
     takes precedence — do not set agent/model/prompt.
   NEVER hardcode "Task 1", "Task 2", ... in items, and NEVER create separate
   worker/processor steps per index ("pick the 1st item", "pick the 2nd item").
-  Use ONE processor with "forEach": "steps.<distributorId>.items" instead.
+  Use ONE processor with "forEach": "steps.<sourceId>.items" instead.
 - "worker" (or "processor"): one agent run. Requires agent, model, prompt.
-  A processor may add "forEach": "steps.<distributorId>.items" to run once per item
+  A processor may add "forEach": "steps.<sourceId>.items" to run once per item
   IN PARALLEL (reference the current item with {{item}} and {{item.index}}). The
-  forEach source distributor MUST be in an earlier phase.
+  forEach source (distributor, command, or llm splitter) MUST be in an earlier
+  phase.
   IMPORTANT forEach template rule: inside a forEach child, {{steps.<id>.output}} for
   a prior forEach parent is the FULL aggregate of ALL items (with --- headers), not
   the matching item. Do NOT chain multiple forEach steps expecting per-item upstream
@@ -182,12 +190,18 @@ or disjoint, never partially overlapping.
   must be in an earlier phase.
 - "command": run a deterministic shell command — NO agent, NO cost. Requires "cmd"
   (a templated shell line, e.g. "npm test" or "grep -rn TODO src"). Optional cwd,
-  env, stepTimeoutSec. Output is the command's stdout+stderr; ok is true exactly
-  when it exits 0, and {{steps.<id>.exitCode}} is available to templates. Use a
-  command step (NOT an agent) whenever the work is "run the tests / linter /
-  build / a script" — it is faster, free, and cannot misreport results. Gate on
-  it with { "step": "<id>", "ok": true }. Command steps run in the same isolated
-  git worktree machinery as agent steps.
+  env, stepTimeoutSec, "output" (JSON schema for commands that print JSON).
+  Output is the command's stdout+stderr; ok is true exactly when it exits 0, and
+  {{steps.<id>.exitCode}} is available to templates. Use a command step (NOT an
+  agent) whenever the work is "run the tests / linter / build / a script / list
+  PRs or branches / query git or gh" — it is faster, free, and cannot invent
+  results. Gate on it with { "step": "<id>", "ok": true }. Command steps run in
+  the same isolated git worktree machinery as agent steps.
+  CRITICAL: when a later template interpolates a command's output as a scalar
+  (a branch name, a SHA, a count), the command MUST print exactly that scalar —
+  e.g. \`gh repo view --json defaultBranchRef --jq .defaultBranchRef.name\`
+  (→ \`main\`), NEVER the intermediate object (\`--jq .defaultBranchRef\` →
+  \`{"name":"main"}\`). Prefer \`jq\` / flags that peel the value you need.
 - "llm": ONE direct, stateless LLM API call — no agent CLI, no tools, no repo
   access, near-zero startup. Requires "model" and "prompt"; optional "provider"
   ("anthropic" or "openai"; inferred from the model name when omitted — claude-*
@@ -387,26 +401,45 @@ skipped inputs as absent and merge the rest. Prefer "when" over a gate with
 halt the whole run. when.step must be in an earlier phase.
 
 # Structured outputs (typed gates and fan-out)
-Any agent-backed step may set "output" to a JSON schema (subset: type, properties,
-required, enum, items, const, additionalProperties). The engine instructs the agent
-to end its reply with matching JSON, validates it (with one bounded fix retry), and
-exposes the parsed value as {{steps.<id>.json}} / {{steps.<id>.json.<path>}}.
-Prefer a schema + field condition over substring matching whenever a gate or loop
-routes on a verdict/score/list — prose like "no P0 issues" can false-match a
-contains check:
+Any agent-backed step (and command/llm steps) may set "output" to a JSON schema
+(subset: type, properties, required, enum, items, const, additionalProperties).
+The engine validates matching JSON and exposes it as {{steps.<id>.json}} /
+{{steps.<id>.json.<path>}}. Prefer a schema + field condition over substring
+matching whenever a gate or loop routes on a verdict/score/list — prose like
+"no P0 issues" can false-match a contains check:
   { "id": "review", ..., "output": { "type": "object", "required": ["verdict"],
     "properties": { "verdict": { "type": "string", "enum": ["pass", "fail"] } } } }
   { "kind": "gate", "dependsOn": ["review"],
-    "condition": { "step": "review", "path": "verdict", "equals": "pass" }, ... }
-A distributor with an "output" schema fans out over a JSON array instead of
+    "condition": { "step": "review", "path": "verdict", "equals": "pass" },
+    "onFalse": "fail" }
+A distributor/llm with an "output" schema fans out over a JSON array instead of
 splitting lines; set "itemsPath" (e.g. "targets") when the array is a field of the
-object rather than the whole value.
+object rather than the whole value. A command whose "output" is a JSON array
+likewise becomes a forEach source.
+
+CRITICAL — domain status ≠ step success: validating JSON only checks SHAPE. An
+enum like "status": "failed" still leaves the step ok:true, so the run finishes
+COMPLETE unless YOU add a gate (path/equals, or contains + "not": true) with
+"onFalse": "fail". If the workflow's purpose can fail per item, always gate on
+the structured field (or on an aggregate check after a forEach) — never assume
+the report's prose will fail the run.
 
 # Keep it small
 A workflow may expand to at most 1000 steps; a forEach step counts as (number of
-distributor items) steps. Agent-backed distributors scale to however many lines
-the splitter emits; static item lists should stay short (a handful). Keep the
-phase count modest.
+source items) steps. Dynamic splitters scale to however many items they emit;
+static item lists should stay short (a handful). Keep the phase count modest.
+
+# Contracts that survive a weak drafting model (READ THIS)
+Generated workflows often "succeed" while doing the wrong work. Avoid these:
+1. Do not ask an agent to list what a command can print (open PRs, branches,
+   files matching a glob, test names). Use "kind": "command" and forEach its
+   items. Agents invent "No open PRs." as a line-item; commands print nothing.
+2. Do not use line-split agent distributors for structured inventories. Prefer
+   command stdout or a JSON-array "output" schema (\`[]\` when empty).
+3. Do not leave intermediate JSON in templates. Peel scalars with jq/flags.
+4. Do not treat an output-schema enum of "failed"/"error" as a run failure —
+   add an explicit gate with onFalse "fail".
+5. Prefer "command" + "llm" over agent steps when no tools/edits are needed.
 
 # Workflow inputs (parameters)
 A workflow may declare named inputs in an "inputs" map. Each key becomes a
@@ -575,7 +608,12 @@ the referenced step lives in a phase that appears ABOVE the current step's phase
 If any reference is in the same phase or below, MOVE the dependent step into a
 later phase until it is valid.
 For any gate with "loopTo", confirm it points to an EARLIER phase and that the
-gate sits in a phase BELOW the body it re-runs. Then output the JSON.
+gate sits in a phase BELOW the body it re-runs.
+Also check: every forEach source that is an inventory (PRs, branches, files,
+tests) is a command (or a schema-backed array), not free-text agent prose; every
+command whose output is interpolated as a name/id prints a scalar; every
+output-schema failure enum has a matching gate with onFalse "fail". Then output
+the JSON.
 ${availableSection}
 # User request
 ${description}
