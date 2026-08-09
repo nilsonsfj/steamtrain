@@ -844,18 +844,20 @@ describe("mergePullRequestWhenReady — race-resilient landing", () => {
 
 describe("resolveSteamtrainCliInvocation", () => {
   it("rebuilds a bun/node entrypoint invocation for command steps", () => {
-    expect(resolveSteamtrainCliInvocation(["bun", "/repo/src/index.tsx"], "/usr/bin/bun")).toBe(
+    expect(resolveSteamtrainCliInvocation(["bun", "/repo/src/index.tsx"], "/usr/bin/bun", {})).toBe(
       "/usr/bin/bun /repo/src/index.tsx",
     );
     expect(
-      resolveSteamtrainCliInvocation(["node", "/usr/local/bin/steamtrain"], "/usr/bin/node"),
+      resolveSteamtrainCliInvocation(["node", "/usr/local/bin/steamtrain"], "/usr/bin/node", {}),
     ).toBe("/usr/local/bin/steamtrain");
   });
 
-  it("re-applies ELECTRON_RUN_AS_NODE inline under the desktop app", () => {
+  it("re-applies ELECTRON_RUN_AS_NODE via env(1) under the desktop app", () => {
     // The desktop app's execPath is the Electron binary, which only behaves as
     // Node with this variable set — and command steps have it stripped from
-    // their environment, so the emitted command has to carry it itself.
+    // their environment. A bare `VAR=1 cmd` prefix does NOT work inside
+    // `$STEAMTRAIN_CLI` (shell treats the expanded assignment as a command
+    // name); `env VAR=1 cmd` does.
     expect(
       resolveSteamtrainCliInvocation(
         ["electron", "/Applications/steamtrain.app/Contents/Resources/dist/index.js"],
@@ -863,7 +865,7 @@ describe("resolveSteamtrainCliInvocation", () => {
         { ELECTRON_RUN_AS_NODE: "1" },
       ),
     ).toBe(
-      "ELECTRON_RUN_AS_NODE=1 /Applications/steamtrain.app/Contents/MacOS/steamtrain " +
+      "env ELECTRON_RUN_AS_NODE=1 /Applications/steamtrain.app/Contents/MacOS/steamtrain " +
         "/Applications/steamtrain.app/Contents/Resources/dist/index.js",
     );
   });
@@ -876,7 +878,7 @@ describe("resolveSteamtrainCliInvocation", () => {
         { ELECTRON_RUN_AS_NODE: "1" },
       ),
     ).toBe(
-      "ELECTRON_RUN_AS_NODE=1 '/Apps/My Steam Train.app/Contents/MacOS/steamtrain' " +
+      "env ELECTRON_RUN_AS_NODE=1 '/Apps/My Steam Train.app/Contents/MacOS/steamtrain' " +
         "'/Apps/My Steam Train.app/Contents/Resources/dist/index.js'",
     );
   });
@@ -885,5 +887,29 @@ describe("resolveSteamtrainCliInvocation", () => {
     expect(resolveSteamtrainCliInvocation(["bun", "/repo/src/index.tsx"], "/usr/bin/bun", {})).toBe(
       "/usr/bin/bun /repo/src/index.tsx",
     );
+  });
+
+  it("survives unquoted $STEAMTRAIN_CLI expansion under /bin/sh", async () => {
+    // Regression for babysit under the desktop app: a bare `VAR=1 cmd` prefix
+    // inside the env var becomes the command name after expansion.
+    const { runShellCommand } = await import("../src/workflow/command");
+    const cli = resolveSteamtrainCliInvocation(
+      ["electron", "/tmp/steamtrain-entry.js"],
+      "/tmp/steamtrain-bin",
+      { ELECTRON_RUN_AS_NODE: "1" },
+    );
+    // Substitute a real binary so we don't need the Electron path to exist —
+    // `env` + word-splitting is what we're proving.
+    const fakeCli = cli
+      .replace("/tmp/steamtrain-bin", "/bin/echo")
+      .replace("/tmp/steamtrain-entry.js", "ok-from-cli");
+    const result = await runShellCommand("$STEAMTRAIN_CLI hello", {
+      cwd: process.cwd(),
+      env: { STEAMTRAIN_CLI: fakeCli, PATH: "/bin:/usr/bin" },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("ok-from-cli");
+    expect(result.output).toContain("hello");
+    expect(result.output).not.toMatch(/command not found/);
   });
 });

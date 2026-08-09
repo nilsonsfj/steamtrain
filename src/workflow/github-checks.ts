@@ -980,9 +980,11 @@ function errText(err: unknown): string {
  *
  * Under the desktop app `execPath` is the Electron binary, which only behaves
  * as Node when `ELECTRON_RUN_AS_NODE` is set — and `childEnv` deliberately
- * strips that from command steps. So the variable is re-applied inline here,
- * making the emitted command self-sufficient rather than dependent on what the
- * step happened to inherit. Empty prefix for every normal install.
+ * strips that from command steps. Re-apply it via `env VAR=value …` (not a
+ * bare `VAR=value` prefix): `$STEAMTRAIN_CLI` is expanded by the shell, and a
+ * leading assignment from expansion is treated as a *command name*
+ * (`ELECTRON_RUN_AS_NODE=1: command not found`), whereas `env` accepts
+ * `VAR=value` arguments. Empty for every normal install.
  */
 export function resolveSteamtrainCliInvocation(
   argv: string[] = process.argv,
@@ -995,7 +997,9 @@ export function resolveSteamtrainCliInvocation(
   if (/(^|[\\/])steamtrain(\.js)?$/.test(entry)) {
     return shellQuote(entry);
   }
-  return `${electronNodePrefix(env)}${shellQuote(execPath)} ${shellQuote(entry)}`;
+  const invoke = `${shellQuote(execPath)} ${shellQuote(entry)}`;
+  // `env VAR=1 cmd` survives `$STEAMTRAIN_CLI` word-splitting; `VAR=1 cmd` does not.
+  return electronNodePrefix(env) ? `env ELECTRON_RUN_AS_NODE=1 ${invoke}` : invoke;
 }
 
 function shellQuote(value: string): string {
