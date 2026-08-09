@@ -32,6 +32,10 @@ export function childEnv(
  * we deliberately re-invoke *this* binary (see `resolveSteamtrainCliInvocation`)
  * after {@link childEnv} has stripped the variable. Empty when not running
  * under Electron, so the emitted command is unchanged for normal installs.
+ *
+ * Prefer wrapping with `env ELECTRON_RUN_AS_NODE=1 …` when the result will be
+ * stored in `$STEAMTRAIN_CLI` and expanded by the shell — a bare `VAR=value`
+ * prefix from expansion is treated as a command name, not an assignment.
  */
 export function electronNodePrefix(env: NodeJS.ProcessEnv = process.env): string {
   return env[ELECTRON_RUN_AS_NODE] ? `${ELECTRON_RUN_AS_NODE}=1 ` : "";

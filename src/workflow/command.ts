@@ -73,7 +73,7 @@ export async function runShellCommand(
       stdio: ["ignore", "pipe", "pipe"],
       // Always build the env explicitly (rather than inheriting by omission) so
       // ELECTRON_RUN_AS_NODE never reaches a user's command under the desktop
-      // app. `$STEAMTRAIN_CLI` re-adds it inline for its own invocation.
+      // app. `$STEAMTRAIN_CLI` re-adds it via `env ELECTRON_RUN_AS_NODE=1 …`.
       env: childEnv(opts.env),
     });
 
