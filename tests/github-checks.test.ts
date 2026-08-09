@@ -844,9 +844,9 @@ describe("mergePullRequestWhenReady — race-resilient landing", () => {
 
 describe("resolveSteamtrainCliInvocation", () => {
   it("rebuilds a bun/node entrypoint invocation for command steps", () => {
-    expect(
-      resolveSteamtrainCliInvocation(["bun", "/repo/src/index.tsx"], "/usr/bin/bun", {}),
-    ).toBe("/usr/bin/bun /repo/src/index.tsx");
+    expect(resolveSteamtrainCliInvocation(["bun", "/repo/src/index.tsx"], "/usr/bin/bun", {})).toBe(
+      "/usr/bin/bun /repo/src/index.tsx",
+    );
     expect(
       resolveSteamtrainCliInvocation(["node", "/usr/local/bin/steamtrain"], "/usr/bin/node", {}),
     ).toBe("/usr/local/bin/steamtrain");
@@ -903,7 +903,7 @@ describe("resolveSteamtrainCliInvocation", () => {
     const fakeCli = cli
       .replace("/tmp/steamtrain-bin", "/bin/echo")
       .replace("/tmp/steamtrain-entry.js", "ok-from-cli");
-    const result = await runShellCommand(`$STEAMTRAIN_CLI hello`, {
+    const result = await runShellCommand("$STEAMTRAIN_CLI hello", {
       cwd: process.cwd(),
       env: { STEAMTRAIN_CLI: fakeCli, PATH: "/bin:/usr/bin" },
     });
