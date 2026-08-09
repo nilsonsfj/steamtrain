@@ -1198,8 +1198,10 @@ const babysitPr: WorkflowSpec = {
 };
 
 /**
- * Fan out `babysit-pr` across every open PR. Listing is agent-driven (gh CLI);
- * landing is not — see `babysit-pr` for the wait-then-merge contract.
+ * Fan out `babysit-pr` across every open PR. Listing is a deterministic `gh`
+ * command (agents invent empty `prs: []` lists — same failure mode that hit
+ * `rebase-all-prs`); landing is also not agent-driven — see `babysit-pr` for
+ * the wait-then-merge contract.
  */
 const babysitAllPrs: WorkflowSpec = {
   name: "babysit-all-prs",
@@ -1208,7 +1210,7 @@ const babysitAllPrs: WorkflowSpec = {
   inputs: {
     babysitterModel: {
       type: "model",
-      description: "Agent model that lists PRs and prepares each one (does not merge).",
+      description: "Agent model that prepares each PR (does not list or merge).",
       default: FREE.mimoZen,
       fallbackModels: [FREE.northMini, FREE.laguna],
     },
@@ -1238,25 +1240,9 @@ const babysitAllPrs: WorkflowSpec = {
       steps: [
         {
           id: "list-prs",
-          kind: "distributor",
-          // Model-only so {{inputs.babysitterModel}} can select any agent family.
-          model: "{{inputs.babysitterModel}}",
-          itemsPath: "prs",
-          prompt:
-            "You are in a checkout of the current project. List all OPEN (non-draft) pull requests on GitHub using the gh CLI, e.g. " +
-            "`gh pr list --state open --json number,headRefName,isDraft --limit 200`.\n\n" +
-            "Skip drafts. Do not merge, close, or modify any PR.\n\n" +
-            'End your reply with JSON matching: { "prs": ["123", "456"] } — each entry a PR number as a string. Use an empty array when there are no open non-draft PRs.',
-          output: {
-            type: "object",
-            required: ["prs"],
-            properties: {
-              prs: {
-                type: "array",
-                items: { type: "string" },
-              },
-            },
-          },
+          kind: "command",
+          // One PR number per line → `items` for the babysit forEach. Skip drafts.
+          cmd: "gh pr list --state open --json number,isDraft --jq '.[] | select(.isDraft|not) | .number'",
         },
       ],
     },
