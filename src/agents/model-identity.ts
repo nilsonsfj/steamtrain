@@ -156,8 +156,8 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
       opencode: ["opencode/claude-opus-4-6"],
       kiro: ["claude-opus-4.6"],
       antigravity: [
-        "claude-opus-4-6",
         "claude-opus-4-6-thinking",
+        "claude-opus-4-6",
         "Claude Opus 4.6",
         "Claude Opus 4.6 (Thinking)",
       ],
@@ -203,12 +203,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
       claude: ["claude-sonnet-4-6[1m]"],
       opencode: ["opencode/claude-sonnet-4-6"],
       kiro: ["claude-sonnet-4.6"],
-      antigravity: [
-        "claude-sonnet-4-6",
-        "claude-sonnet-4-6-thinking",
-        "Claude Sonnet 4.6",
-        "Claude Sonnet 4.6 (Thinking)",
-      ],
+      antigravity: ["claude-sonnet-4-6", "Claude Sonnet 4.6", "Claude Sonnet 4.6 (Thinking)"],
     },
     classes: ["implementer", "balanced"],
   },

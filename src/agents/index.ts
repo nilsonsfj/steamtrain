@@ -58,6 +58,7 @@ export {
 export {
   AntigravityAdapter,
   ANTIGRAVITY_MODELS,
+  antigravitySlugEffortsForModel,
   buildAntigravityRunArgs,
   extractAntigravityConversationId,
   formatAntigravityPrintTimeout,

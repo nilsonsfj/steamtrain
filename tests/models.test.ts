@@ -382,19 +382,18 @@ describe("antigravity models", () => {
     expect(defaultModelForAgent("antigravity")).toBe("gemini-3.6-flash-high");
   });
 
-  it("supports effort remapping only when the model has no effort suffix", () => {
-    expect(effortsForModel("antigravity", "gemini-3.6-flash")).toEqual([
-      "low",
-      "medium",
-      "high",
-      "thinking",
-    ]);
+  it("supports effort remapping only for models that accept slug efforts", () => {
+    expect(effortsForModel("antigravity", "gemini-3.6-flash")).toEqual(["low", "medium", "high"]);
     expect(effortsForModel("antigravity", "gemini-3.6-flash-high")).toEqual([]);
     expect(effortsForModel("antigravity", "Gemini 3.1 Pro (High)")).toEqual([]);
+    expect(effortsForModel("antigravity", "claude-sonnet-4-6")).toEqual([]);
+    expect(effortsForModel("antigravity", "claude-opus-4-6")).toEqual(["thinking"]);
+    expect(effortsForModel("antigravity", "gpt-oss-120b")).toEqual(["medium"]);
   });
 
   it("keeps effort when switching antigravity models only if still supported", () => {
     expect(effortForModelChange("antigravity", "gemini-3.6-flash", "high")).toBe("high");
     expect(effortForModelChange("antigravity", "gemini-3.6-flash-high", "high")).toBeUndefined();
+    expect(effortForModelChange("antigravity", "claude-sonnet-4-6", "medium")).toBeUndefined();
   });
 });

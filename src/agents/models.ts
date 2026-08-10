@@ -4,7 +4,11 @@ import type { AgentInstanceId, AgentProviderId } from "../types/events";
 import type { AgentAdapter } from "./adapter";
 import { type AgentModel, formatModelOption } from "./agent-model";
 import { AMP_MODELS, AmpAdapter } from "./amp";
-import { ANTIGRAVITY_MODELS, AntigravityAdapter } from "./antigravity";
+import {
+  ANTIGRAVITY_MODELS,
+  AntigravityAdapter,
+  antigravitySlugEffortsForModel,
+} from "./antigravity";
 import {
   getAntigravityModelName,
   listAntigravityCachedAgentModels,
@@ -337,11 +341,9 @@ export function effortsForModel(
     case "cursor":
       return /\[[^\]]*effort=/.test(model) ? [] : ["low", "medium", "high", "xhigh"];
     case "antigravity":
-      // Effort is baked into slug suffixes (`-high`) or legacy `(High)` labels.
-      return /-(low|medium|high|thinking|minimal)$/i.test(model) ||
-        /\((Low|Medium|High|Thinking|Minimal)\)\s*$/i.test(model)
-        ? []
-        : ["low", "medium", "high", "thinking"];
+      // Only Gemini / Opus / GPT-OSS bases accept slug-baked efforts.
+      // Claude Sonnet rejects both `-medium` suffixes and `--effort`.
+      return antigravitySlugEffortsForModel(model);
     default:
       return [];
   }
