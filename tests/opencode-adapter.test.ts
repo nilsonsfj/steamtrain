@@ -165,6 +165,24 @@ describe("buildOpenCodeRunArgs", () => {
     ]);
   });
 
+  it("pins the project with --dir so OpenCode does not attach to another repo", () => {
+    expect(
+      buildOpenCodeRunArgs({
+        prompt: "babysit",
+        model: "opencode/gpt-5.5",
+        cwd: "/tmp/camelo-worktree",
+      }),
+    ).toEqual([
+      "run",
+      "--format",
+      "json",
+      "--model",
+      "opencode/gpt-5.5",
+      "--dir",
+      "/tmp/camelo-worktree",
+    ]);
+  });
+
   it("continues a recorded session via --session", () => {
     expect(
       buildOpenCodeRunArgs({
