@@ -13,7 +13,7 @@ model and diagrams, see [`workflow-overview.md`](workflow-overview.md).
 | pattern | blocks used | bundled example |
 | --- | --- | --- |
 | parallel independent workers | multiple workers in one phase | `bug-hunt` scan phase |
-| static fan-out + dynamic processing | distributor + `forEach` processor | `babysit-all-prs` |
+| inventory + dynamic processing | command + `forEach` workflow | `babysit-all-prs` |
 | cross-check + gate + report | consolidator + gate + consolidator | `bug-hunt` |
 | two-model review + false-positive filter | worker + worker + consolidator | `code-review` |
 | review → fix → re-review loop | workers + gate `loopTo` | `mainline-stream` |
@@ -85,43 +85,42 @@ flowchart LR
 
 ---
 
-## Pattern 2: static distributor + dynamic `forEach`
+## Pattern 2: inventory + dynamic `forEach`
 
 Use when you have **many similar work items** and want one generated agent run
-per item.
+(or sub-workflow) per item. Prefer a deterministic `command` (or structured
+`distributor`/`llm` output) for the inventory — agent line-split / free-form
+JSON lists invent empty or prose items.
 
 ```mermaid
 flowchart TB
   input["{{input}}"]
-  dist["distributor: targets"]
-  proc["processor: sweep-each\nforEach"]
-  c0["sweep-each[0]"]
-  c1["sweep-each[1]"]
-  c2["sweep-each[2]"]
+  list["command: list-prs"]
+  babysit["workflow: babysit\nforEach"]
+  b0["babysit[0]"]
+  b1["babysit[1]"]
+  b2["babysit[2]"]
   report["consolidator: report"]
 
-  input --> dist
-  dist --> proc
-  proc --> c0
-  proc --> c1
-  proc --> c2
-  c0 --> report
-  c1 --> report
-  c2 --> report
+  input --> list
+  list --> babysit
+  babysit --> b0
+  babysit --> b1
+  babysit --> b2
+  b0 --> report
+  b1 --> report
+  b2 --> report
 ```
 
 ### Bundled walkthrough: `babysit-all-prs`
 
-Phase 1 — distribute PR numbers (agent-driven listing):
+Phase 1 — list PR numbers (deterministic `gh`; agents invent empty lists):
 
 ```jsonc
 {
   "id": "list-prs",
-  "kind": "distributor",
-  "model": "{{inputs.babysitterModel}}",
-  "itemsPath": "prs",
-  "prompt": "List all OPEN pull requests using the gh CLI...",
-  "output": { "type": "object", "required": ["prs"], "properties": { "prs": { "type": "array", "items": { "type": "string" } } } }
+  "kind": "command",
+  "cmd": "gh pr list --state open --json number,isDraft --jq '.[] | select(.isDraft|not) | .number'"
 }
 ```
 
