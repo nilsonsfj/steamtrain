@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -114,6 +114,46 @@ describe("git worktree agent workspace manager", () => {
     expect(lease.cwd).not.toBe(join(repoLink, "src"));
     expect(lease.root).toBeDefined();
     expect(await readFile(join(lease.cwd, "tracked.txt"), "utf8")).toBe("committed\n");
+  });
+
+  it("copies nested .gitignore files instead of symlinking them", async () => {
+    const root = await tempDir();
+    const repo = join(root, "repo");
+    const worktrees = join(root, "worktrees");
+    await initRepo(repo);
+    await mkdir(join(repo, ".opencode", "skills"), { recursive: true });
+    await writeFile(join(repo, ".opencode", "skills", "SKILL.md"), "skill\n");
+    // Nested ignore that self-lists `.gitignore` — the camelo failure mode.
+    await writeFile(
+      join(repo, ".opencode", ".gitignore"),
+      "node_modules\npackage.json\n.gitignore\n",
+    );
+    await writeFile(join(repo, ".gitignore"), "");
+    await git(repo, "add", ".");
+    await git(repo, "commit", "-m", "track skills");
+    await mkdir(join(repo, ".opencode", "node_modules"), { recursive: true });
+    await writeFile(join(repo, ".opencode", "node_modules", "x"), "runtime\n");
+
+    const manager = createGitWorktreeManager({ baseDir: worktrees, runId: "gitignore-copy" });
+    const lease = await manager.allocate({
+      workflowName: "demo",
+      stepId: "rebase",
+      agent: "claude",
+      baseCwd: repo,
+      stepCwd: repo,
+      iteration: 1,
+    });
+
+    const ignorePath = join(lease.root ?? "", ".opencode", ".gitignore");
+    expect((await lstat(ignorePath)).isSymbolicLink()).toBe(false);
+    expect(await readFile(ignorePath, "utf8")).toContain("node_modules");
+    // Symlinking that file made git report ELOOP and left runtime links as ??
+    // dirt; a real copy keeps exclude matching working.
+    const status = await git(lease.cwd, "status", "--porcelain");
+    expect(status).not.toMatch(/\.opencode\/\.gitignore/);
+    expect(lease.linkedIgnoredPaths).toEqual(
+      expect.arrayContaining([".opencode/.gitignore", ".opencode/node_modules"]),
+    );
   });
 
   it("honors cancellation before creating a worktree", async () => {

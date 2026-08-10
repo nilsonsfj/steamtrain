@@ -291,6 +291,11 @@ export function buildOpenCodeRunArgs(opts: AgentRunOptions): string[] {
     "json",
     "--model",
     opts.model,
+    // OpenCode resolves its project from `--dir`, not from the process cwd.
+    // Without this, babysit agents spawned from a camelo worktree still shell
+    // into whatever repo OpenCode last attached to (often steamtrain itself)
+    // and then "can't find" the PR numbers list-prs just enumerated.
+    ...(opts.cwd ? ["--dir", opts.cwd] : []),
     ...(opts.effort ? ["--variant", opts.effort] : []),
     ...(opts.resumeSessionId ? ["--session", opts.resumeSessionId] : []),
     // `--agent plan` is opencode's built-in read-only agent (write/edit/patch/

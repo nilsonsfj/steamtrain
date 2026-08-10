@@ -347,7 +347,19 @@ async function linkIgnoredRuntimeEntries(
   for (const rel of [...linkRoots].sort()) {
     throwIfAborted(signal);
     try {
-      await symlink(join(repoRoot, rel), join(worktreeRoot, rel));
+      const source = join(repoRoot, rel);
+      const dest = join(worktreeRoot, rel);
+      await mkdir(dirname(dest), { recursive: true });
+      // Copy ignore-rule files instead of symlinking them. A nested
+      // `.gitignore` that lists `.gitignore` (self-ignore) becomes an ELOOP
+      // when git reads it through a symlink, which then breaks *all* exclude
+      // matching in the worktree and leaves every linked runtime path as
+      // untracked dirt — enough to make `pr rebase` refuse the checkout.
+      if (isIgnoreRuleFile(rel)) {
+        await copyUntrackedPath(source, dest);
+      } else {
+        await symlink(source, dest);
+      }
       linked.push(rel);
     } catch {
       // Best effort: the agent can still run if a runtime-only ignored path
@@ -355,6 +367,12 @@ async function linkIgnoredRuntimeEntries(
     }
   }
   return linked;
+}
+
+/** Basename matches git's exclude-file conventions (`.gitignore`, `.ignore`, …). */
+function isIgnoreRuleFile(rel: string): boolean {
+  const base = rel.split(/[\\/]+/).pop() ?? rel;
+  return base === ".gitignore" || base === ".ignore" || base === "exclude";
 }
 
 async function ignoredLinkRoot(rel: string, worktreeRoot: string): Promise<string | undefined> {

@@ -90,6 +90,19 @@ describe("rebasePullRequestOntoBase", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/uncommitted changes/i);
     expect(git.calls.some((c) => c[0] === "checkout")).toBe(false);
+    // Untracked copies from worktree snapshotting must not count as dirt.
+    expect(git.calls).toContainEqual(["status", "--porcelain", "--untracked-files=no"]);
+  });
+
+  it("ignores untracked-only dirt that worktree allocation copies in", async () => {
+    const git = fakeGit({
+      "status --porcelain": "", // -uno reports clean even when ?? files exist
+      "rev-list --count": "0",
+      "rev-parse": "abc123",
+    });
+    const result = await rebasePullRequestOntoBase({ ...baseOpts, runGit: git.run });
+    expect(result).toMatchObject({ ok: true, changed: false });
+    expect(git.calls).toContainEqual(["status", "--porcelain", "--untracked-files=no"]);
   });
 
   it("refuses fork PRs instead of force-pushing another repo's branch", async () => {

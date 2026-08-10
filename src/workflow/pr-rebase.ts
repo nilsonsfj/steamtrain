@@ -162,10 +162,12 @@ export async function rebasePullRequestOntoBase(
     };
   }
 
-  // Never clobber someone's work in progress. In babysit this runs in a fresh
-  // isolated worktree, so a dirty tree means we are somewhere we should not be.
+  // Never clobber someone's tracked work in progress. Fresh babysit worktrees
+  // intentionally carry untracked copies (and symlinked runtime dirs) from the
+  // user's checkout — those show up in a full porcelain status but do not
+  // affect rebase. Only refuse when tracked files are dirty.
   try {
-    const dirty = (await git(["status", "--porcelain"])).trim();
+    const dirty = (await git(["status", "--porcelain", "--untracked-files=no"])).trim();
     if (dirty) {
       return {
         ok: false,
