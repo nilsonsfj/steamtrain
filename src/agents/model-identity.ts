@@ -373,7 +373,8 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     id: "gpt-5.2-codex",
     name: "GPT-5.2 Codex",
     aliases: ["gpt-5.2-codex", "codex 5.2"],
-    reference: { provider: "codex", modelId: "gpt-5.2-codex" },
+    // Removed from live `codex debug models` (0.145); still on OpenCode Zen.
+    reference: { provider: "opencode", modelId: "opencode/gpt-5.2-codex" },
     also: { opencode: ["opencode/gpt-5.2-codex"] },
     classes: ["implementer"],
   },
@@ -381,7 +382,8 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     id: "gpt-5.1",
     name: "GPT-5.1",
     aliases: ["gpt 5.1", "gpt-5.1", "gpt5.1"],
-    reference: { provider: "codex", modelId: "gpt-5.1" },
+    // Removed from live `codex debug models` (0.145); still on OpenCode Zen.
+    reference: { provider: "opencode", modelId: "opencode/gpt-5.1" },
     also: { opencode: ["opencode/gpt-5.1"] },
     classes: ["balanced"],
   },
@@ -389,7 +391,8 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     id: "gpt-5.1-codex",
     name: "GPT-5.1 Codex",
     aliases: ["gpt-5.1-codex", "codex 5.1"],
-    reference: { provider: "codex", modelId: "gpt-5.1-codex" },
+    // Removed from live `codex debug models` (0.145); still on OpenCode Zen.
+    reference: { provider: "opencode", modelId: "opencode/gpt-5.1-codex" },
     also: { opencode: ["opencode/gpt-5.1-codex"] },
     classes: ["implementer"],
   },
@@ -397,7 +400,8 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     id: "gpt-5",
     name: "GPT-5",
     aliases: ["gpt 5", "gpt-5", "gpt5"],
-    reference: { provider: "codex", modelId: "gpt-5" },
+    // Removed from live `codex debug models` (0.145); still on OpenCode Zen.
+    reference: { provider: "opencode", modelId: "opencode/gpt-5" },
     also: { opencode: ["opencode/gpt-5"] },
     classes: ["balanced"],
   },
@@ -405,7 +409,8 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     id: "gpt-5-codex",
     name: "GPT-5 Codex",
     aliases: ["gpt-5-codex", "codex 5"],
-    reference: { provider: "codex", modelId: "gpt-5-codex" },
+    // Removed from live `codex debug models` (0.145); still on OpenCode Zen.
+    reference: { provider: "opencode", modelId: "opencode/gpt-5-codex" },
     also: { opencode: ["opencode/gpt-5-codex"] },
     classes: ["implementer"],
   },

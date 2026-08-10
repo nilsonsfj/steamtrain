@@ -18,8 +18,8 @@ const AGENT: AgentId = "codex";
  * Known Codex models (plain slugs; used by `/model` and autocomplete).
  *
  * Ground truth from `codex debug models` / `--bundled` (codex-cli 0.145.0).
- * Listed + hidden entries are both kept so older workflow pins still resolve;
- * live installs refresh names/efforts via the variant cache.
+ * Older pins that left this list still resolve via OpenCode family offerings
+ * and runtime variant cache refresh on live installs.
  */
 export const CODEX_MODELS: readonly AgentModel[] = [
   { id: "gpt-5.6-sol", name: "GPT-5.6 Sol" },
