@@ -103,9 +103,9 @@ describe("resolveAntigravityModel", () => {
   it("rewrites legacy display labels and applies effort as a slug suffix", () => {
     expect(resolveAntigravityModel("Gemini 3.1 Pro", "high")).toBe("gemini-3.1-pro-high");
     expect(resolveAntigravityModel("Gemini 3.5 Flash", "low")).toBe("gemini-3.5-flash-low");
-    expect(resolveAntigravityModel("Claude Sonnet 4.6", "thinking")).toBe(
-      "claude-sonnet-4-6-thinking",
-    );
+    // Live agy lists Sonnet as bare id only; thinking/medium suffixes are rejected.
+    expect(resolveAntigravityModel("Claude Sonnet 4.6", "thinking")).toBe("claude-sonnet-4-6");
+    expect(resolveAntigravityModel("Claude Sonnet 4.6 (Thinking)")).toBe("claude-sonnet-4-6");
   });
 
   it("leaves models that already have an effort suffix alone", () => {
@@ -167,9 +167,44 @@ describe("resolveAntigravityModel", () => {
     expect(resolveAntigravityModel("gemini-3.6-flash", "medium")).toBe("gemini-3.6-flash-medium");
   });
 
-  it("does not invent effort suffixes for non-Gemini bases", () => {
+  it("does not invent effort suffixes for Claude Sonnet", () => {
+    // Regression: babysit prepare failed with
+    // `--model "claude-sonnet-4-6-medium"` when effort=medium was carried over.
     expect(resolveAntigravityModel("claude-sonnet-4-6")).toBe("claude-sonnet-4-6");
-    expect(resolveAntigravityModel("gpt-oss-120b")).toBe("gpt-oss-120b");
+    expect(resolveAntigravityModel("claude-sonnet-4-6", "medium")).toBe("claude-sonnet-4-6");
+    expect(resolveAntigravityModel("claude-sonnet-4-6", "high")).toBe("claude-sonnet-4-6");
+    expect(resolveAntigravityModel("claude-sonnet-4-6", "thinking")).toBe("claude-sonnet-4-6");
+    expect(resolveAntigravityModel("claude-sonnet-4-6-thinking")).toBe("claude-sonnet-4-6");
+    expect(
+      buildAntigravityRunArgs({
+        prompt: "x",
+        model: "claude-sonnet-4-6",
+        effort: "medium",
+      }),
+    ).toContain("claude-sonnet-4-6");
+    expect(
+      buildAntigravityRunArgs({
+        prompt: "x",
+        model: "claude-sonnet-4-6",
+        effort: "medium",
+      }),
+    ).not.toContain("claude-sonnet-4-6-medium");
+  });
+
+  it("defaults bare Opus / GPT-OSS bases to their only live variants", () => {
+    expect(resolveAntigravityModel("claude-opus-4-6")).toBe("claude-opus-4-6-thinking");
+    expect(resolveAntigravityModel("claude-opus-4-6", "thinking")).toBe("claude-opus-4-6-thinking");
+    expect(resolveAntigravityModel("gpt-oss-120b")).toBe("gpt-oss-120b-medium");
+    expect(resolveAntigravityModel("gpt-oss-120b", "medium")).toBe("gpt-oss-120b-medium");
+    // Unsupported efforts fall back to the model's default variant.
+    expect(resolveAntigravityModel("gpt-oss-120b", "high")).toBe("gpt-oss-120b-medium");
+  });
+
+  it("does not invent gemini-3.1-pro-medium (pro only has low|high)", () => {
+    expect(resolveAntigravityModel("gemini-3.1-pro", "medium")).toBe("gemini-3.1-pro-high");
+    expect(resolveAntigravityModel("gemini-3.1-pro-medium")).toBe("gemini-3.1-pro-high");
+    expect(resolveAntigravityModel("gemini-3.1-pro", "low")).toBe("gemini-3.1-pro-low");
+    expect(resolveAntigravityModel("Gemini 3.1 Pro (Medium)")).toBe("gemini-3.1-pro-high");
   });
 });
 
