@@ -91,6 +91,11 @@ const HAS_SLUG_EFFORT_SUFFIX = /-(low|medium|high|thinking|minimal)$/i;
 const SLUG_WITH_GLUED_PAREN =
   /^([a-z0-9]+(?:[.-][a-z0-9]+)*-(?:low|medium|high|thinking|minimal))\s+\((?:Low|Medium|High|Thinking|Minimal)\)$/i;
 const LOOKS_LIKE_SLUG = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/i;
+/**
+ * Gemini base slugs that agy rejects without `--effort` / an effort suffix.
+ * Default to `high` so a bare base never reaches the CLI.
+ */
+const GEMINI_BASE_REQUIRES_EFFORT = /^gemini-\d+(?:\.\d+)?-(?:flash|pro)$/i;
 
 function normalizeAntigravityModelId(model: string): string {
   const trimmed = model.trim();
@@ -113,19 +118,26 @@ function normalizeAntigravityModelId(model: string): string {
  * Effort is baked into the slug (`gemini-3.6-flash-high`). Never append a
  * parenthetical `(High)` onto a kebab slug - that produces invalid ids like
  * `gemini-3.6-flash-high (High)`. Legacy display labels are rewritten to slugs.
+ *
+ * Bare Gemini bases require effort on current agy; when neither the id nor
+ * `effort` encodes one, default to `high` (matches {@link AntigravityAdapter.defaultModel}).
  */
 export function resolveAntigravityModel(model: string, effort?: string): string {
   const resolved = normalizeAntigravityModelId(model);
-  if (!effort) return resolved;
   if (HAS_SLUG_EFFORT_SUFFIX.test(resolved) || HAS_PAREN_EFFORT_SUFFIX.test(resolved)) {
     return resolved;
   }
-  const suffix = SLUG_EFFORT_SUFFIX[effort.toLowerCase()];
+  const requested = effort?.trim() ? effort.trim() : undefined;
+  const requestedSuffix = requested ? SLUG_EFFORT_SUFFIX[requested.toLowerCase()] : undefined;
+  const suffix =
+    requestedSuffix ??
+    (GEMINI_BASE_REQUIRES_EFFORT.test(resolved) ? SLUG_EFFORT_SUFFIX.high : undefined);
   if (!suffix) return resolved;
+  const effortKey = requestedSuffix ? requested!.toLowerCase() : "high";
   // Only unknown Title Case display labels use the legacy paren form.
   // Any kebab slug gets `-${suffix}` - never ` (High)`.
   if (!LOOKS_LIKE_SLUG.test(resolved) && /\s/.test(resolved)) {
-    const label = EFFORT_LABELS[effort.toLowerCase()];
+    const label = EFFORT_LABELS[effortKey];
     return label ? `${resolved} (${label})` : resolved;
   }
   return `${resolved}-${suffix}`;

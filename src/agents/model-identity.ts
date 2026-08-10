@@ -407,10 +407,11 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     id: "gemini-3.6-flash",
     name: "Gemini 3.6 Flash",
     aliases: ["gemini 3.6 flash", "gemini-3.6-flash", "gemini flash", "gemini 3.6", "gemini-3.6"],
-    reference: { provider: "antigravity", modelId: "gemini-3.6-flash" },
+    // agy requires an effort on Gemini bases (`--effort` or a `-high|-medium|-low` slug).
+    reference: { provider: "antigravity", modelId: "gemini-3.6-flash-high" },
     also: {
       antigravity: [
-        "gemini-3.6-flash-high",
+        "gemini-3.6-flash",
         "gemini-3.6-flash-medium",
         "gemini-3.6-flash-low",
         "Gemini 3.6 Flash",
@@ -432,10 +433,10 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     id: "gemini-3.5-flash",
     name: "Gemini 3.5 Flash",
     aliases: ["gemini 3.5 flash", "gemini-3.5-flash"],
-    reference: { provider: "antigravity", modelId: "gemini-3.5-flash" },
+    reference: { provider: "antigravity", modelId: "gemini-3.5-flash-high" },
     also: {
       antigravity: [
-        "gemini-3.5-flash-high",
+        "gemini-3.5-flash",
         "gemini-3.5-flash-medium",
         "gemini-3.5-flash-low",
         "Gemini 3.5 Flash",
@@ -464,10 +465,10 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     id: "gemini-3.1-pro",
     name: "Gemini 3.1 Pro",
     aliases: ["gemini 3.1 pro", "gemini-3.1-pro", "gemini 3.1"],
-    reference: { provider: "antigravity", modelId: "gemini-3.1-pro" },
+    reference: { provider: "antigravity", modelId: "gemini-3.1-pro-high" },
     also: {
       antigravity: [
-        "gemini-3.1-pro-high",
+        "gemini-3.1-pro",
         "gemini-3.1-pro-low",
         "Gemini 3.1 Pro",
         "Gemini 3.1 Pro (High)",
@@ -721,8 +722,16 @@ function buildOfferings(seed: FamilySeed): ModelOffering[] {
     }
   }
 
-  // Reference first, then preference order, stable by modelId.
+  // Canonical reference modelId first, then other reference-provider
+  // offerings, then preference order, stable by modelId. Without the
+  // canonical tie-break, localeCompare among reference:true rows could
+  // prefer a legacy display label ("Gemini 3.6 Flash") over the slug.
   out.sort((a, b) => {
+    const aCanon =
+      a.provider === seed.reference.provider && a.modelId === seed.reference.modelId ? 0 : 1;
+    const bCanon =
+      b.provider === seed.reference.provider && b.modelId === seed.reference.modelId ? 0 : 1;
+    if (aCanon !== bCanon) return aCanon - bCanon;
     if (a.reference !== b.reference) return a.reference ? -1 : 1;
     const ap = AGENT_PREFERENCE_ORDER.indexOf(a.provider);
     const bp = AGENT_PREFERENCE_ORDER.indexOf(b.provider);
@@ -875,10 +884,22 @@ export function familyForProviderModel(
   return findModelFamily(modelId);
 }
 
+/** True when an offering's native id is the same model the query named. */
+export function offeringModelMatchesQuery(modelId: string, query: string): boolean {
+  const n = normalizeModelQuery(query);
+  const c = compactModelQuery(query);
+  if (!n && !c) return false;
+  return normalizeModelQuery(modelId) === n || compactModelQuery(modelId) === c;
+}
+
 /**
  * Translate a model (or family alias) onto a specific provider's native id.
  * Returns undefined when that provider has no offering for the family and no
  * direct catalog match.
+ *
+ * Exact offering matches win over the family's canonical reference so that
+ * effort-suffixed ids like `gemini-3.6-flash-medium` are not collapsed to the
+ * bare / default reference slug.
  */
 export function nativeModelForProvider(
   provider: AgentProviderId,
@@ -886,6 +907,10 @@ export function nativeModelForProvider(
 ): string | undefined {
   const family = findModelFamily(modelQuery);
   if (family) {
+    const exact = family.offerings.find(
+      (o) => o.provider === provider && offeringModelMatchesQuery(o.modelId, modelQuery),
+    );
+    if (exact) return exact.modelId;
     const offering = family.offerings.find((o) => o.provider === provider);
     if (offering) return offering.modelId;
   }
