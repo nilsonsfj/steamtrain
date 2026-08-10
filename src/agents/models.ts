@@ -289,6 +289,9 @@ function claudeEfforts(model: string): readonly string[] {
   if (/^claude-mythos-5(?:$|-)/.test(m)) {
     return CLAUDE_OPUS_48_47_EFFORTS;
   }
+  if (/^claude-opus-5(?:$|-)/.test(m)) {
+    return CLAUDE_OPUS_48_47_EFFORTS;
+  }
   if (/^claude-opus-4-(?:7|8)(?:$|-)/.test(m)) {
     return CLAUDE_OPUS_48_47_EFFORTS;
   }

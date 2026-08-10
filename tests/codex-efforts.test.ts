@@ -7,15 +7,28 @@ import {
 import { effortsForModel } from "../src/agents/models";
 
 describe("fallbackCodexEfforts", () => {
-  it("returns gpt-5.4 reasoning levels", () => {
-    expect(fallbackCodexEfforts("gpt-5.4-mini")).toEqual([
-      "none",
-      "minimal",
+  it("returns live gpt-5.4 reasoning levels", () => {
+    expect(fallbackCodexEfforts("gpt-5.4-mini")).toEqual(["low", "medium", "high", "xhigh"]);
+  });
+
+  it("returns sol/terra max+ultra and luna max from live agy-style catalogs", () => {
+    expect(fallbackCodexEfforts("gpt-5.6-sol")).toEqual([
       "low",
       "medium",
       "high",
       "xhigh",
+      "max",
+      "ultra",
     ]);
+    expect(fallbackCodexEfforts("gpt-5.6-terra")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra",
+    ]);
+    expect(fallbackCodexEfforts("gpt-5.6-luna")).toEqual(["low", "medium", "high", "xhigh", "max"]);
   });
 
   it("returns broader openai reasoning levels for unknown gpt slugs", () => {
@@ -23,7 +36,7 @@ describe("fallbackCodexEfforts", () => {
     expect(fallbackCodexEfforts("gpt-5")).toContain("none");
   });
 
-  it("returns reasoning levels for gpt-5.1 codex variants", () => {
+  it("returns reasoning levels for retired gpt-5.1/5-codex slugs", () => {
     expect(fallbackCodexEfforts("gpt-5.1-codex")).toEqual([
       "none",
       "minimal",
@@ -32,17 +45,6 @@ describe("fallbackCodexEfforts", () => {
       "high",
       "xhigh",
     ]);
-    expect(fallbackCodexEfforts("gpt-5.1-codex-mini")).toEqual([
-      "none",
-      "minimal",
-      "low",
-      "medium",
-      "high",
-      "xhigh",
-    ]);
-  });
-
-  it("returns reasoning levels for gpt-5-codex", () => {
     expect(fallbackCodexEfforts("gpt-5-codex")).toEqual([
       "none",
       "minimal",

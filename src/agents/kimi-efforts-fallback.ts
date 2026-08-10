@@ -3,10 +3,10 @@
 const KIMI_K3_EFFORTS = ["low", "high", "max"] as const;
 
 /**
- * Only `kimi-code/k3` declares thinking efforts (`supportEfforts` in the live
- * catalog); the K2.7 Coding aliases report none. Without cache metadata we
- * only claim efforts for that known alias.
+ * K3 aliases declare thinking efforts (`supportEfforts` in the live catalog);
+ * the K2.7 Coding aliases report none. Without cache metadata we only claim
+ * efforts for known K3 aliases.
  */
 export function fallbackKimiEfforts(model: string): readonly string[] {
-  return model === "kimi-code/k3" ? KIMI_K3_EFFORTS : [];
+  return model === "kimi-code/k3" || model === "kimi-code/k3-256k" ? KIMI_K3_EFFORTS : [];
 }

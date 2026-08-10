@@ -113,6 +113,19 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     classes: ["ultrathinker", "thinker", "deep-reviewer", "implementer"],
   },
   {
+    id: "claude-opus-5",
+    name: "Claude Opus 5",
+    aliases: ["opus 5", "opus-5", "opus5", "claude opus 5", "claude-opus-5", "opus"],
+    reference: { provider: "claude", modelId: "claude-opus-5" },
+    also: {
+      claude: ["opus", "opus[1m]", "claude-opus-5[1m]"],
+      opencode: ["opencode/claude-opus-5"],
+      kiro: ["claude-opus-5"],
+      cursor: ["claude-opus-5-thinking-high"],
+    },
+    classes: ["deep-reviewer", "reviewer", "thinker", "implementer", "ultrathinker"],
+  },
+  {
     id: "claude-opus-4.8",
     name: "Claude Opus 4.8",
     aliases: [
@@ -122,11 +135,10 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
       "claude opus 4.8",
       "claude-opus-4-8",
       "claude-opus-4.8",
-      "opus",
     ],
     reference: { provider: "claude", modelId: "claude-opus-4-8" },
     also: {
-      claude: ["opus", "opus[1m]", "claude-opus-4-8[1m]"],
+      claude: ["claude-opus-4-8[1m]"],
       opencode: ["opencode/claude-opus-4-8"],
       // Kiro uses dotted version ids (`claude-opus-4.8`), not Claude dashes
       // or short aliases (`opus` / `haiku`).
@@ -333,7 +345,8 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     id: "gpt-5.3-codex",
     name: "GPT-5.3 Codex",
     aliases: ["gpt 5.3 codex", "gpt-5.3-codex", "codex 5.3", "5.3-codex"],
-    reference: { provider: "codex", modelId: "gpt-5.3-codex" },
+    // Removed from live `codex debug models` (0.145); still on OpenCode Zen.
+    reference: { provider: "opencode", modelId: "opencode/gpt-5.3-codex" },
     also: { opencode: ["opencode/gpt-5.3-codex"] },
     classes: ["implementer"],
   },
@@ -341,7 +354,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     id: "gpt-5.3-codex-spark",
     name: "GPT-5.3 Codex Spark",
     aliases: ["gpt-5.3-codex-spark", "codex spark", "5.3-codex-spark"],
-    reference: { provider: "codex", modelId: "gpt-5.3-codex-spark" },
+    reference: { provider: "opencode", modelId: "opencode/gpt-5.3-codex-spark" },
     also: { opencode: ["opencode/gpt-5.3-codex-spark"] },
     classes: ["implementer", "simple"],
   },
@@ -504,6 +517,7 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     name: "Cursor Grok 4.5",
     aliases: ["grok 4.5", "grok-4.5", "cursor-grok-4.5", "cursor-grok-4.5-high"],
     reference: { provider: "cursor", modelId: "cursor-grok-4.5-high" },
+    also: { cursor: ["grok-4.5"] },
     classes: ["thinker", "implementer"],
   },
   {
@@ -544,7 +558,10 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     name: "Kimi K3",
     aliases: ["kimi k3", "kimi-k3", "kimik3"],
     reference: { provider: "opencode", modelId: "opencode-go/kimi-k3" },
-    also: { opencode: ["opencode/kimi-k3"], kimi: ["kimi-code/k3"] },
+    also: {
+      opencode: ["opencode/kimi-k3"],
+      kimi: ["kimi-code/k3", "kimi-code/k3-256k"],
+    },
     classes: ["ultrathinker", "thinker"],
   },
   {

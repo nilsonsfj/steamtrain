@@ -42,6 +42,7 @@ export const OPENCODE_MODELS: readonly AgentModel[] = [
   { id: "opencode/gpt-5-codex", name: "GPT 5 Codex" },
   { id: "opencode/gpt-5-nano", name: "GPT 5 Nano" },
   { id: "opencode/claude-fable-5", name: "Claude Fable 5" },
+  { id: "opencode/claude-opus-5", name: "Claude Opus 5" },
   { id: "opencode/claude-sonnet-5", name: "Claude Sonnet 5" },
   { id: "opencode/claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
   { id: "opencode/claude-sonnet-4-5", name: "Claude Sonnet 4.5" },
@@ -78,6 +79,8 @@ export const OPENCODE_MODELS: readonly AgentModel[] = [
   { id: "opencode/nemotron-3-ultra-free", name: "Nemotron 3 Ultra Free" },
   { id: "opencode/north-mini-code-free", name: "North Mini Code Free" },
   { id: "opencode/laguna-s-2.1-free", name: "Laguna S 2.1 Free" },
+  { id: "opencode/ling-3.0-tiny-free", name: "Ling-3.0-tiny Free" },
+  { id: "opencode/longcat-2.0-free", name: "LongCat-2.0 Free" },
   // OpenCode Go (https://opencode.ai/zen/go/v1/models)
   { id: "opencode-go/kimi-k3", name: "Kimi K3" },
   { id: "opencode-go/deepseek-v4-flash", name: "DeepSeek V4 Flash" },

@@ -24,11 +24,17 @@ import { humanizeAssistantError, stringifyContent } from "./util";
 
 const AGENT: AgentId = "claude";
 
-/** Known Claude Code models (used by `/model` and autocomplete). */
+/**
+ * Known Claude Code models (used by `/model` and autocomplete).
+ *
+ * Current ids from https://platform.claude.com/docs/en/about-claude/models/overview
+ * and https://support.claude.com/en/articles/11940350-claude-code-model-configuration
+ * (verified against Claude Code 2.1.221: `/model` aliases include opus → Opus 5).
+ */
 export const CLAUDE_MODELS: readonly AgentModel[] = [
-  // Current (https://platform.claude.com/docs/en/about-claude/models/overview)
+  // Current
   { id: "claude-fable-5", name: "Claude Fable 5" },
-  { id: "claude-opus-4-8", name: "Claude Opus 4.8" },
+  { id: "claude-opus-5", name: "Claude Opus 5" },
   { id: "claude-sonnet-5", name: "Claude Sonnet 5" },
   { id: "claude-haiku-4-5", name: "Claude Haiku 4.5" },
   { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5 (20251001)" },
@@ -45,18 +51,21 @@ export const CLAUDE_MODELS: readonly AgentModel[] = [
   { id: "sonnet[1m]", name: "Sonnet (1M context)" },
   { id: "opus[1m]", name: "Opus (1M context)" },
   { id: "claude-fable-5[1m]", name: "Claude Fable 5 (1M context)" },
+  { id: "claude-opus-5[1m]", name: "Claude Opus 5 (1M context)" },
   { id: "claude-sonnet-5[1m]", name: "Claude Sonnet 5 (1M context)" },
   { id: "claude-opus-4-8[1m]", name: "Claude Opus 4.8 (1M context)" },
   { id: "claude-opus-4-7[1m]", name: "Claude Opus 4.7 (1M context)" },
   { id: "claude-sonnet-4-6[1m]", name: "Claude Sonnet 4.6 (1M context)" },
-  // Legacy
-  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+  // Previous / still documented
+  { id: "claude-opus-4-8", name: "Claude Opus 4.8" },
   { id: "claude-opus-4-7", name: "Claude Opus 4.7" },
+  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
   { id: "claude-opus-4-6", name: "Claude Opus 4.6" },
   { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" },
   { id: "claude-sonnet-4-5-20250929", name: "Claude Sonnet 4.5 (20250929)" },
   { id: "claude-opus-4-5", name: "Claude Opus 4.5" },
   { id: "claude-opus-4-5-20251101", name: "Claude Opus 4.5 (20251101)" },
+  // Older snapshots still accepted by Claude Code
   { id: "claude-opus-4-1", name: "Claude Opus 4.1" },
   { id: "claude-opus-4-1-20250805", name: "Claude Opus 4.1 (20250805)" },
   { id: "claude-sonnet-4-0", name: "Claude Sonnet 4.0" },

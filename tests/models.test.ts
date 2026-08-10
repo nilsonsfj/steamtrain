@@ -55,6 +55,7 @@ describe("kiro models", () => {
     expect(modelIdsForAgent("kiro")).toEqual([
       "auto",
       "claude-sonnet-5",
+      "claude-opus-5",
       "claude-opus-4.8",
       "gpt-5.6-sol",
       "gpt-5.6-terra",
@@ -86,6 +87,13 @@ describe("kiro models", () => {
   it("reuses claude efforts for dotted kiro model ids", () => {
     expect(effortsForModel("kiro", "claude-sonnet-5")).toEqual(["low", "medium", "high", "max"]);
     expect(effortsForModel("kiro", "claude-opus-4.8")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+    expect(effortsForModel("kiro", "claude-opus-5")).toEqual([
       "low",
       "medium",
       "high",
@@ -133,16 +141,20 @@ describe("kimi models", () => {
       "kimi-code/kimi-for-coding",
       "kimi-code/kimi-for-coding-highspeed",
       "kimi-code/k3",
+      "kimi-code/k3-256k",
     ]);
     expect(defaultModelForAgent("kimi")).toBe("kimi-code/kimi-for-coding");
     expect(modelNameForAgent("kimi", "kimi-code/kimi-for-coding")).toBe("K2.7 Coding");
     expect(modelNameForAgent("kimi", "kimi-code/k3")).toBe("K3");
+    expect(modelNameForAgent("kimi", "kimi-code/k3-256k")).toBe("K3-256k");
   });
 
-  it("exposes low/high/max efforts for k3 only", () => {
+  it("exposes low/high/max efforts for k3 aliases", () => {
     expect(effortsForModel("kimi", "kimi-code/k3")).toEqual(["low", "high", "max"]);
+    expect(effortsForModel("kimi", "kimi-code/k3-256k")).toEqual(["low", "high", "max"]);
     expect(effortsForModel("kimi", "kimi-code/kimi-for-coding")).toEqual([]);
     expect(supportsEffort("kimi", "kimi-code/k3")).toBe(true);
+    expect(supportsEffort("kimi", "kimi-code/k3-256k")).toBe(true);
     expect(supportsEffort("kimi", "kimi-code/kimi-for-coding")).toBe(false);
   });
 });
@@ -321,6 +333,17 @@ describe("model names", () => {
 });
 
 describe("effortsForModel claude", () => {
+  it("returns opus 5 levels for claude-opus-5", () => {
+    expect(effortsForModel("claude", "claude-opus-5")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+    expect(effortsForModel("claude", "opus")).toEqual(["low", "medium", "high", "xhigh", "max"]);
+  });
+
   it("returns opus 4.8 levels for claude-opus-4-8", () => {
     expect(effortsForModel("claude", "claude-opus-4-8")).toEqual([
       "low",
