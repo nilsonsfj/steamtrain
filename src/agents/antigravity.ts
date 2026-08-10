@@ -18,11 +18,10 @@ import { stderrSummary } from "./util";
 /**
  * Known Antigravity CLI models (used by `/model` and autocomplete).
  *
- * As of agy 1.1.x, `agy models` returns slug ids (`gemini-3.6-flash-high`).
- * Gemini base names (no effort suffix) are included so steamtrain's effort
- * picker can append `-low|-medium|-high` via {@link resolveAntigravityModel}.
- * Claude / GPT-OSS do not accept arbitrary effort suffixes - only the ids
- * agy actually lists (and legacy display labels rewritten to those slugs).
+ * Ground truth is `agy models` (agy 1.1.x). Gemini bases without a suffix are
+ * kept so the effort picker can rewrite them onto a listed variant via
+ * {@link resolveAntigravityModel}. Never invent slugs that are not in the
+ * live catalog (e.g. `claude-sonnet-4-6-medium`, `gemini-3.1-pro-medium`).
  */
 export const ANTIGRAVITY_MODELS: readonly AgentModel[] = [
   { id: "gemini-3.6-flash", name: "Gemini 3.6 Flash" },
@@ -36,14 +35,49 @@ export const ANTIGRAVITY_MODELS: readonly AgentModel[] = [
   { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro" },
   { id: "gemini-3.1-pro-high", name: "Gemini 3.1 Pro (High)" },
   { id: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low)" },
-  // Live agy lists this as "Claude Sonnet 4.6 (Thinking)" but the id is bare;
-  // `-thinking` / `-medium` suffixes are rejected.
-  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+  // Live agy display name is "(Thinking)" but the id is bare; no effort flag.
+  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking)" },
+  // Alias: bare opus is not listed; resolve rewrites to -thinking.
   { id: "claude-opus-4-6", name: "Claude Opus 4.6" },
   { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)" },
+  // Alias: bare gpt-oss works, but the catalog lists -medium.
   { id: "gpt-oss-120b", name: "GPT-OSS 120B" },
   { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)" },
 ];
+
+/**
+ * Bare model → allowed effort suffixes + default when none requested.
+ * Sourced from live `agy models` / `--model` validation (agy 1.1.11):
+ * - Gemini flash: low|medium|high (default high)
+ * - Gemini 3.1 pro: low|high only (no medium)
+ * - Claude Sonnet: no suffixes / no `--effort`
+ * - Claude Opus: only `-thinking`
+ * - GPT-OSS: only `-medium`
+ */
+const AGY_VARIANT_BASES: Readonly<
+  Record<string, { readonly efforts: readonly string[]; readonly defaultEffort: string }>
+> = {
+  "gemini-3.6-flash": { efforts: ["low", "medium", "high"], defaultEffort: "high" },
+  "gemini-3.5-flash": { efforts: ["low", "medium", "high"], defaultEffort: "high" },
+  "gemini-3.1-pro": { efforts: ["low", "high"], defaultEffort: "high" },
+  "claude-opus-4-6": { efforts: ["thinking"], defaultEffort: "thinking" },
+  "gpt-oss-120b": { efforts: ["medium"], defaultEffort: "medium" },
+};
+
+/** Ids that current agy accepts as `--model` values (plus bare aliases we rewrite). */
+const AGY_LISTED_MODEL_IDS = new Set<string>([
+  "gemini-3.6-flash-high",
+  "gemini-3.6-flash-medium",
+  "gemini-3.6-flash-low",
+  "gemini-3.5-flash-high",
+  "gemini-3.5-flash-medium",
+  "gemini-3.5-flash-low",
+  "gemini-3.1-pro-high",
+  "gemini-3.1-pro-low",
+  "claude-sonnet-4-6",
+  "claude-opus-4-6-thinking",
+  "gpt-oss-120b-medium",
+]);
 
 /** Legacy display labels from older agy builds → current slug ids. */
 const LEGACY_DISPLAY_TO_SLUG: Readonly<Record<string, string>> = {
@@ -58,6 +92,7 @@ const LEGACY_DISPLAY_TO_SLUG: Readonly<Record<string, string>> = {
   "Gemini 3.1 Pro": "gemini-3.1-pro",
   "Gemini 3.1 Pro (High)": "gemini-3.1-pro-high",
   "Gemini 3.1 Pro (Low)": "gemini-3.1-pro-low",
+  "Gemini 3.1 Pro (Medium)": "gemini-3.1-pro-high",
   "Claude Sonnet 4.6": "claude-sonnet-4-6",
   // Older steamtrain / agy builds used a -thinking suffix; current agy rejects it.
   "Claude Sonnet 4.6 (Thinking)": "claude-sonnet-4-6",
@@ -89,24 +124,20 @@ const EFFORT_LABELS: Record<string, string> = {
 };
 
 const HAS_PAREN_EFFORT_SUFFIX = /\((Low|Medium|High|Thinking|Minimal)\)\s*$/i;
-const HAS_SLUG_EFFORT_SUFFIX = /-(low|medium|high|thinking|minimal)$/i;
 /** Slug id that already encodes effort, with a mistaken paren glued on. */
 const SLUG_WITH_GLUED_PAREN =
   /^([a-z0-9]+(?:[.-][a-z0-9]+)*-(?:low|medium|high|thinking|minimal))\s+\((?:Low|Medium|High|Thinking|Minimal)\)$/i;
 const LOOKS_LIKE_SLUG = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/i;
-/**
- * Gemini base slugs that agy rejects without `--effort` / an effort suffix.
- * Default to `high` so a bare base never reaches the CLI.
- */
-const GEMINI_BASE_REQUIRES_EFFORT = /^gemini-\d+(?:\.\d+)?-(?:flash|pro)$/i;
-/** Claude Sonnet bare id; current agy rejects `-thinking` / `-medium` variants. */
-const CLAUDE_SONNET_BARE = /^claude-sonnet-4-6$/i;
-/** Claude Opus bare id; agy only lists the `-thinking` variant. */
-const CLAUDE_OPUS_BARE = /^claude-opus-4-6$/i;
 /** Retired Sonnet thinking slug that older steamtrain builds invented. */
 const CLAUDE_SONNET_THINKING_ALIAS = /^claude-sonnet-4-6-thinking$/i;
-/** GPT-OSS bare id; live catalog exposes `-medium`. */
-const GPT_OSS_BARE = /^gpt-oss-120b$/i;
+/** Retired / invalid Gemini Pro medium slug (agy only lists low|high). */
+const GEMINI_PRO_MEDIUM_ALIAS = /^gemini-3\.1-pro-medium$/i;
+
+function splitSlugEffort(model: string): { base: string; effort?: string } {
+  const match = /^(.*?)-(low|medium|high|thinking|minimal)$/i.exec(model);
+  if (!match?.[1] || !match[2]) return { base: model };
+  return { base: match[1], effort: match[2].toLowerCase() };
+}
 
 /**
  * Effort levels that may be baked into a slug for this bare model id.
@@ -114,20 +145,13 @@ const GPT_OSS_BARE = /^gpt-oss-120b$/i;
  */
 export function antigravitySlugEffortsForModel(model: string): readonly string[] {
   const resolved = normalizeAntigravityModelId(model);
-  if (HAS_SLUG_EFFORT_SUFFIX.test(resolved) || HAS_PAREN_EFFORT_SUFFIX.test(resolved)) {
-    return [];
-  }
-  if (GEMINI_BASE_REQUIRES_EFFORT.test(resolved)) return ["low", "medium", "high"];
-  if (CLAUDE_OPUS_BARE.test(resolved)) return ["thinking"];
-  if (GPT_OSS_BARE.test(resolved)) return ["medium"];
-  return [];
+  const { base, effort } = splitSlugEffort(resolved);
+  if (effort || HAS_PAREN_EFFORT_SUFFIX.test(resolved)) return [];
+  return AGY_VARIANT_BASES[base.toLowerCase()]?.efforts ?? [];
 }
 
-function defaultSlugEffortForModel(model: string): string | undefined {
-  if (GEMINI_BASE_REQUIRES_EFFORT.test(model)) return "high";
-  if (CLAUDE_OPUS_BARE.test(model)) return "thinking";
-  if (GPT_OSS_BARE.test(model)) return "medium";
-  return undefined;
+function defaultSlugEffortForModel(base: string): string | undefined {
+  return AGY_VARIANT_BASES[base.toLowerCase()]?.defaultEffort;
 }
 
 function normalizeAntigravityModelId(model: string): string {
@@ -136,9 +160,7 @@ function normalizeAntigravityModelId(model: string): string {
   const glued = SLUG_WITH_GLUED_PAREN.exec(trimmed);
   if (glued?.[1]) {
     const fixed = glued[1].toLowerCase();
-    // Retired Sonnet thinking slug glued with a paren.
-    if (CLAUDE_SONNET_THINKING_ALIAS.test(fixed)) return "claude-sonnet-4-6";
-    return fixed;
+    return repairRetiredAntigravitySlug(fixed);
   }
 
   const direct = LEGACY_DISPLAY_TO_SLUG[trimmed];
@@ -147,47 +169,61 @@ function normalizeAntigravityModelId(model: string): string {
   for (const [label, slug] of Object.entries(LEGACY_DISPLAY_TO_SLUG)) {
     if (label.toLowerCase() === lower) return slug;
   }
-  // Current agy lists Sonnet as bare `claude-sonnet-4-6` only.
-  if (CLAUDE_SONNET_THINKING_ALIAS.test(trimmed)) return "claude-sonnet-4-6";
-  return trimmed;
+  return repairRetiredAntigravitySlug(trimmed);
+}
+
+/** Map retired / invalid invented slugs onto ids current agy accepts. */
+function repairRetiredAntigravitySlug(id: string): string {
+  if (CLAUDE_SONNET_THINKING_ALIAS.test(id)) return "claude-sonnet-4-6";
+  if (GEMINI_PRO_MEDIUM_ALIAS.test(id)) return "gemini-3.1-pro-high";
+  return id;
 }
 
 /**
- * Normalize to current agy slug ids and optionally append an effort suffix.
+ * Normalize to a slug current agy accepts, baking effort only when the
+ * resulting id is a real catalog variant.
  *
- * Effort is baked into the slug for models that support it
- * (`gemini-3.6-flash-high`, `claude-opus-4-6-thinking`, `gpt-oss-120b-medium`).
- * Never invent suffixes for Claude Sonnet - agy rejects
- * `claude-sonnet-4-6-medium` and does not support `--effort` on that model.
+ * Never invent suffixes for Claude Sonnet (agy rejects
+ * `claude-sonnet-4-6-medium` and does not support `--effort` there).
+ * Never invent `gemini-3.1-pro-medium` (pro only has low|high).
  * Never append a parenthetical `(High)` onto a kebab slug.
- *
- * Bare Gemini / Opus / GPT-OSS bases that require a variant default when
- * neither the id nor `effort` encodes one.
  */
 export function resolveAntigravityModel(model: string, effort?: string): string {
   const resolved = normalizeAntigravityModelId(model);
-  if (CLAUDE_SONNET_BARE.test(resolved)) {
-    // Ignore carried-over efforts from other providers (e.g. medium).
-    return "claude-sonnet-4-6";
+  if (HAS_PAREN_EFFORT_SUFFIX.test(resolved)) return resolved;
+
+  const { base, effort: bakedEffort } = splitSlugEffort(resolved);
+  const variant = AGY_VARIANT_BASES[base.toLowerCase()];
+
+  // Already a fully-qualified listed id (or unknown non-variant slug): keep it,
+  // after repairing retired aliases above.
+  if (bakedEffort) {
+    if (!variant) return resolved;
+    if (variant.efforts.includes(bakedEffort)) return `${base}-${bakedEffort}`;
+    // Invalid baked effort for this family (e.g. gemini-3.1-pro-medium).
+    return `${base}-${variant.defaultEffort}`;
   }
-  if (HAS_SLUG_EFFORT_SUFFIX.test(resolved) || HAS_PAREN_EFFORT_SUFFIX.test(resolved)) {
+
+  if (!variant) {
+    // Fixed models with no effort surface (Claude Sonnet): ignore carried-over efforts.
     return resolved;
   }
-  const allowed = antigravitySlugEffortsForModel(resolved);
+
   const requested = effort?.trim() ? effort.trim().toLowerCase() : undefined;
   const requestedSuffix = requested ? SLUG_EFFORT_SUFFIX[requested] : undefined;
   const suffix =
-    (requestedSuffix && allowed.includes(requestedSuffix) ? requestedSuffix : undefined) ??
-    (allowed.length > 0 ? defaultSlugEffortForModel(resolved) : undefined);
-  if (!suffix) return resolved;
-  const effortKey = requestedSuffix && allowed.includes(requestedSuffix) ? requested! : suffix;
-  // Only unknown Title Case display labels use the legacy paren form.
-  // Any kebab slug gets `-${suffix}` - never ` (High)`.
-  if (!LOOKS_LIKE_SLUG.test(resolved) && /\s/.test(resolved)) {
-    const label = EFFORT_LABELS[effortKey];
-    return label ? `${resolved} (${label})` : resolved;
+    (requestedSuffix && variant.efforts.includes(requestedSuffix) ? requestedSuffix : undefined) ??
+    variant.defaultEffort;
+  const candidate = `${base}-${suffix}`;
+  if (AGY_LISTED_MODEL_IDS.has(candidate) || variant.efforts.includes(suffix)) {
+    // Unknown Title Case display labels still use the legacy paren form.
+    if (!LOOKS_LIKE_SLUG.test(resolved) && /\s/.test(resolved)) {
+      const label = EFFORT_LABELS[suffix];
+      return label ? `${resolved} (${label})` : resolved;
+    }
+    return candidate;
   }
-  return `${resolved}-${suffix}`;
+  return resolved;
 }
 
 /** Format steamtrain timeoutMs as a Go duration string for `--print-timeout`. */

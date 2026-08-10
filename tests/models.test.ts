@@ -384,6 +384,7 @@ describe("antigravity models", () => {
 
   it("supports effort remapping only for models that accept slug efforts", () => {
     expect(effortsForModel("antigravity", "gemini-3.6-flash")).toEqual(["low", "medium", "high"]);
+    expect(effortsForModel("antigravity", "gemini-3.1-pro")).toEqual(["low", "high"]);
     expect(effortsForModel("antigravity", "gemini-3.6-flash-high")).toEqual([]);
     expect(effortsForModel("antigravity", "Gemini 3.1 Pro (High)")).toEqual([]);
     expect(effortsForModel("antigravity", "claude-sonnet-4-6")).toEqual([]);

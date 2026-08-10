@@ -199,6 +199,13 @@ describe("resolveAntigravityModel", () => {
     // Unsupported efforts fall back to the model's default variant.
     expect(resolveAntigravityModel("gpt-oss-120b", "high")).toBe("gpt-oss-120b-medium");
   });
+
+  it("does not invent gemini-3.1-pro-medium (pro only has low|high)", () => {
+    expect(resolveAntigravityModel("gemini-3.1-pro", "medium")).toBe("gemini-3.1-pro-high");
+    expect(resolveAntigravityModel("gemini-3.1-pro-medium")).toBe("gemini-3.1-pro-high");
+    expect(resolveAntigravityModel("gemini-3.1-pro", "low")).toBe("gemini-3.1-pro-low");
+    expect(resolveAntigravityModel("Gemini 3.1 Pro (Medium)")).toBe("gemini-3.1-pro-high");
+  });
 });
 
 describe("formatAntigravityPrintTimeout", () => {

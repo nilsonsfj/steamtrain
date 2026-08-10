@@ -37,6 +37,28 @@ I0721 02:26:57.718252 31951 input_loop.go:516] Auth done received
     });
   });
 
+  it("parses tab-separated id\\tname lines from current agy models", () => {
+    const output = `
+gemini-3.6-flash-high\tGemini 3.6 Flash (High)
+claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)
+claude-opus-4-6-thinking\tClaude Opus 4.6 (Thinking)
+gpt-oss-120b-medium\tGPT-OSS 120B (Medium)
+`;
+    const models = parseAntigravityModelsOutput(output);
+    expect([...models.keys()]).toEqual([
+      "gemini-3.6-flash-high",
+      "claude-sonnet-4-6",
+      "claude-opus-4-6-thinking",
+      "gpt-oss-120b-medium",
+    ]);
+    expect(models.get("claude-sonnet-4-6")).toEqual({
+      name: "Claude Sonnet 4.6 (Thinking)",
+    });
+    expect(models.get("gemini-3.6-flash-high")).toEqual({
+      name: "Gemini 3.6 Flash (High)",
+    });
+  });
+
   it("still accepts legacy display-label catalogs", () => {
     const output = `
 Gemini 3.5 Flash (Medium)

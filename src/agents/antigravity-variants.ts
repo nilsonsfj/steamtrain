@@ -74,8 +74,8 @@ function antigravityModelDisplayName(id: string): string {
 
 /**
  * Parse `agy models` text output into model id metadata.
- * Current agy prints slug ids (`gemini-3.6-flash-high`); older builds printed
- * display labels (`Gemini 3.1 Pro (High)`). Both are accepted.
+ * Current agy prints `id\tDisplay Name` (or bare slug ids);
+ * older builds printed display labels (`Gemini 3.1 Pro (High)`). Both are accepted.
  */
 export function parseAntigravityModelsOutput(output: string): Map<string, AntigravityModelInfo> {
   const result = new Map<string, AntigravityModelInfo>();
@@ -90,19 +90,28 @@ export function parseAntigravityModelsOutput(output: string): Map<string, Antigr
     if (trimmed.startsWith("-") || trimmed.startsWith("--")) continue;
     if (!/^[A-Za-z0-9]/.test(trimmed)) continue;
     if (trimmed.length > 120) continue;
+
+    // Current agy: `gemini-3.6-flash-high\tGemini 3.6 Flash (High)`
+    const tab = trimmed.indexOf("\t");
+    const idPart = (tab >= 0 ? trimmed.slice(0, tab) : trimmed).trim();
+    const namePart = tab >= 0 ? trimmed.slice(tab + 1).trim() : undefined;
+    if (!idPart || idPart.length > 120) continue;
+
     // Heuristic: bare status chrome is not a model id (unless it looks like a
     // Title Case label with an effort parenthetical, or a kebab slug).
-    const looksLikeSlug = /^[a-z0-9]+(?:[.-][a-z0-9]+)+$/i.test(trimmed);
-    const looksLikeLabel = /\s/.test(trimmed) || /\(/.test(trimmed);
+    const looksLikeSlug = /^[a-z0-9]+(?:[.-][a-z0-9]+)+$/i.test(idPart);
+    const looksLikeLabel = /\s/.test(idPart) || /\(/.test(idPart);
     if (!looksLikeSlug && !looksLikeLabel) continue;
     if (
-      /\b(error|failed|listening|starting|server)\b/i.test(trimmed) &&
+      /\b(error|failed|listening|starting|server)\b/i.test(idPart) &&
       !looksLikeSlug &&
-      !/\(/.test(trimmed)
+      !/\(/.test(idPart)
     ) {
       continue;
     }
-    result.set(trimmed, { name: antigravityModelDisplayName(trimmed) });
+    result.set(idPart, {
+      name: namePart && namePart.length > 0 ? namePart : antigravityModelDisplayName(idPart),
+    });
   }
   return result;
 }
