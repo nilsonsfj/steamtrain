@@ -257,6 +257,30 @@ describe("resolveModelBinding", () => {
     expect(result.primary.model).toBe("opencode/claude-opus-4-8");
   });
 
+  it("preserves Antigravity effort-suffixed Gemini ids (does not collapse to bare base)", () => {
+    clearModelFamilyCacheForTests();
+    // Regression: babysit-all-prs with babysitterModel=gemini-3.6-flash-medium
+    // previously resolved to bare gemini-3.6-flash and agy exited requiring --effort.
+    expect(nativeModelForProvider("antigravity", "gemini-3.6-flash-medium")).toBe(
+      "gemini-3.6-flash-medium",
+    );
+    expect(nativeModelForProvider("antigravity", "gemini-3.6-flash-high")).toBe(
+      "gemini-3.6-flash-high",
+    );
+    expect(nativeModelForProvider("antigravity", "gemini flash")).toBe("gemini-3.6-flash-high");
+
+    for (const model of ["gemini-3.6-flash-medium", "gemini-3.6-flash-high", "gemini-3.6-flash-low"]) {
+      const result = resolveModelBinding(
+        { model },
+        { config: DEFAULT_CONFIG, isReady: allReady },
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.primary.agent).toBe("antigravity");
+      expect(result.primary.model).toBe(model);
+    }
+  });
+
   it("appends fallbackModels to the failover chain", () => {
     const result = resolveModelBinding(
       { model: "opus 4.8", fallbackModels: ["sonnet 5", "haiku"] },

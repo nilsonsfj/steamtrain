@@ -18,6 +18,7 @@ import {
   modelFamilies,
   nativeModelForProvider,
   normalizeModelQuery,
+  offeringModelMatchesQuery,
 } from "./model-identity";
 import { effortsForModel, modelIdsForAgent, modelNameForAgent } from "./models";
 
@@ -261,7 +262,15 @@ function candidatesForModelQuery(
 ): ResolvedModelCandidate[] {
   const family = findModelFamily(modelQuery);
   if (family) {
-    return offeringsToCandidates(family.offerings, {
+    // Prefer offerings that literally match the query (e.g. keep
+    // `gemini-3.6-flash-medium` instead of collapsing to the family reference).
+    const exact: ModelOffering[] = [];
+    const rest: ModelOffering[] = [];
+    for (const offering of family.offerings) {
+      if (offeringModelMatchesQuery(offering.modelId, modelQuery)) exact.push(offering);
+      else rest.push(offering);
+    }
+    return offeringsToCandidates(exact.length > 0 ? [...exact, ...rest] : family.offerings, {
       ...opts,
       family,
       reason: opts.reason ?? "preferred",

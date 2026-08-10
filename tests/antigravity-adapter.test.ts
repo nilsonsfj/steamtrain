@@ -154,7 +154,22 @@ describe("resolveAntigravityModel", () => {
   });
 
   it("ignores unknown effort labels", () => {
-    expect(resolveAntigravityModel("gemini-3.1-pro", "mystery")).toBe("gemini-3.1-pro");
+    expect(resolveAntigravityModel("gemini-3.1-pro", "mystery")).toBe("gemini-3.1-pro-high");
+  });
+
+  it("defaults bare Gemini bases to -high when effort is missing", () => {
+    // Regression: agy rejects `--model gemini-3.6-flash` without --effort.
+    expect(resolveAntigravityModel("gemini-3.6-flash")).toBe("gemini-3.6-flash-high");
+    expect(resolveAntigravityModel("Gemini 3.6 Flash")).toBe("gemini-3.6-flash-high");
+    expect(resolveAntigravityModel("gemini-3.5-flash")).toBe("gemini-3.5-flash-high");
+    expect(resolveAntigravityModel("gemini-3.1-pro")).toBe("gemini-3.1-pro-high");
+    expect(resolveAntigravityModel("gemini-3.6-flash", "")).toBe("gemini-3.6-flash-high");
+    expect(resolveAntigravityModel("gemini-3.6-flash", "medium")).toBe("gemini-3.6-flash-medium");
+  });
+
+  it("does not invent effort suffixes for non-Gemini bases", () => {
+    expect(resolveAntigravityModel("claude-sonnet-4-6")).toBe("claude-sonnet-4-6");
+    expect(resolveAntigravityModel("gpt-oss-120b")).toBe("gpt-oss-120b");
   });
 });
 

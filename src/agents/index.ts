@@ -122,6 +122,7 @@ export {
   modelFamilyById,
   nativeModelForProvider,
   normalizeModelQuery,
+  offeringModelMatchesQuery,
 } from "./model-identity";
 export {
   type ModelBindingRequest,
