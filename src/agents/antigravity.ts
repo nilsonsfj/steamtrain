@@ -130,7 +130,8 @@ export function resolveAntigravityModel(model: string, effort?: string): string 
   const requested = effort?.trim() ? effort.trim() : undefined;
   const requestedSuffix = requested ? SLUG_EFFORT_SUFFIX[requested.toLowerCase()] : undefined;
   const suffix =
-    requestedSuffix ?? (GEMINI_BASE_REQUIRES_EFFORT.test(resolved) ? SLUG_EFFORT_SUFFIX.high : undefined);
+    requestedSuffix ??
+    (GEMINI_BASE_REQUIRES_EFFORT.test(resolved) ? SLUG_EFFORT_SUFFIX.high : undefined);
   if (!suffix) return resolved;
   const effortKey = requestedSuffix ? requested!.toLowerCase() : "high";
   // Only unknown Title Case display labels use the legacy paren form.

@@ -269,11 +269,12 @@ describe("resolveModelBinding", () => {
     );
     expect(nativeModelForProvider("antigravity", "gemini flash")).toBe("gemini-3.6-flash-high");
 
-    for (const model of ["gemini-3.6-flash-medium", "gemini-3.6-flash-high", "gemini-3.6-flash-low"]) {
-      const result = resolveModelBinding(
-        { model },
-        { config: DEFAULT_CONFIG, isReady: allReady },
-      );
+    for (const model of [
+      "gemini-3.6-flash-medium",
+      "gemini-3.6-flash-high",
+      "gemini-3.6-flash-low",
+    ]) {
+      const result = resolveModelBinding({ model }, { config: DEFAULT_CONFIG, isReady: allReady });
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       expect(result.primary.agent).toBe("antigravity");
