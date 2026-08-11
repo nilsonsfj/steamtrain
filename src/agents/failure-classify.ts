@@ -42,6 +42,9 @@ const QUOTA_PATTERNS: RegExp[] = [
   /\bbudget (?:exceeded|exhausted)\b/i,
   /\bfree tier\b.*\b(?:limit|exceeded|over)\b/i,
   /\b(?:limit|exceeded|over)\b.*\bfree tier\b/i,
+  // OpenCode Zen free-tier exhaustion (TUI copy; JSON mode is silent without --print-logs).
+  /\bfree usage exceeded\b/i,
+  /\bsubscribe to go\b/i,
 ];
 
 const RATE_LIMIT_PATTERNS: RegExp[] = [

@@ -19,6 +19,10 @@ describe("classifyAgentFailure", () => {
     expect(classifyAgentFailure("monthly limit reached")).toBe("quota");
     expect(classifyAgentFailure("billing limit exceeded for this project")).toBe("quota");
     expect(classifyAgentFailure("billing error: account suspended")).toBe("quota");
+    expect(
+      classifyAgentFailure("Free usage exceeded, subscribe to Go [retrying in 18h 1m attempt #1]"),
+    ).toBe("quota");
+    expect(classifyAgentFailure("subscribe to Go to keep using free models")).toBe("quota");
   });
 
   it("does not treat unrelated billing wording as quota", () => {

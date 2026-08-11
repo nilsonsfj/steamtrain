@@ -145,7 +145,7 @@ describe("opencode mapper (stateful, one mapper per run)", () => {
 });
 
 describe("buildOpenCodeRunArgs", () => {
-  it("includes model, variant, and extra args", () => {
+  it("includes model, variant, ERROR print-logs, and extra args", () => {
     expect(
       buildOpenCodeRunArgs({
         prompt: "hello",
@@ -157,6 +157,9 @@ describe("buildOpenCodeRunArgs", () => {
       "run",
       "--format",
       "json",
+      "--print-logs",
+      "--log-level",
+      "ERROR",
       "--model",
       "opencode/gpt-5.5",
       "--variant",
@@ -176,6 +179,9 @@ describe("buildOpenCodeRunArgs", () => {
       "run",
       "--format",
       "json",
+      "--print-logs",
+      "--log-level",
+      "ERROR",
       "--model",
       "opencode/gpt-5.5",
       "--dir",
@@ -190,7 +196,18 @@ describe("buildOpenCodeRunArgs", () => {
         model: "opencode/gpt-5.5",
         resumeSessionId: "ses_42",
       }),
-    ).toEqual(["run", "--format", "json", "--model", "opencode/gpt-5.5", "--session", "ses_42"]);
+    ).toEqual([
+      "run",
+      "--format",
+      "json",
+      "--print-logs",
+      "--log-level",
+      "ERROR",
+      "--model",
+      "opencode/gpt-5.5",
+      "--session",
+      "ses_42",
+    ]);
     expect(new OpenCodeAdapter().supportsResume).toBe(true);
   });
 });
