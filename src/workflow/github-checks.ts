@@ -658,11 +658,7 @@ export async function requirePullRequestMergeable(
       }
       return {
         ok: false,
-        error:
-          `PR #${lastSnapshot.number} is still CONFLICTING on GitHub — prepare must leave ` +
-          `the remote head MERGEABLE (push with --force-with-lease, then verify ` +
-          `\`gh pr view ${lastSnapshot.number} --json mergeable\`)` +
-          (rebaseTried ? " even after an automatic rebase onto the base" : ""),
+        error: `PR #${lastSnapshot.number} is still CONFLICTING on GitHub — prepare must leave the remote head MERGEABLE (push with --force-with-lease, then verify \`gh pr view ${lastSnapshot.number} --json mergeable\`)${rebaseTried ? " even after an automatic rebase onto the base" : ""}`,
       };
     }
 
@@ -825,9 +821,7 @@ export async function mergePullRequestWhenReady(
     if (!firstWait.ok && firstWait.snapshot?.mergeable === "CONFLICTING") {
       return {
         ok: false,
-        error:
-          `PR #${prNumber} still conflicts with the base branch after being ` +
-          `rebased onto it — the conflict needs resolving by hand`,
+        error: `PR #${prNumber} still conflicts with the base branch after being rebased onto it — the conflict needs resolving by hand`,
       };
     }
   }

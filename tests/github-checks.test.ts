@@ -931,7 +931,11 @@ describe("requirePullRequestMergeable", () => {
       rebasePr,
       fetchSnapshot: sequence([open()]),
     });
-    expect(result).toMatchObject({ ok: true, prNumber: 42, detail: expect.stringMatching(/MERGEABLE/) });
+    expect(result).toMatchObject({
+      ok: true,
+      prNumber: 42,
+      detail: expect.stringMatching(/MERGEABLE/),
+    });
     expect(rebasePr).not.toHaveBeenCalled();
   });
 
