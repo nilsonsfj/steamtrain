@@ -262,19 +262,6 @@ class GitWorktreeManager implements AgentWorkspaceManager {
   }
 
   /**
-   * Drop registrations whose worktree directory is gone, once per repo per run.
-   *
-   * Step worktrees are deliberately retained after a run (see `dispose`), but
-   * they live under the OS temp dir — the tmp reaper deletes the directories
-   * while `.git/worktrees/<name>` registrations survive, so a repo steamtrain
-   * runs against accumulates hundreds of dead entries. That is not merely
-   * untidy: agent CLIs derive their command sandbox from the registered
-   * worktree paths, and past a few hundred entries every shell command the
-   * agent runs dies with E2BIG, so agent steps silently do nothing while the
-   * workflow loops and never lands. `git worktree prune` removes ONLY entries
-   * whose directory no longer exists, so it can never discard live work.
-   */
-  /**
    * Discard every `retainWorkspace: false` worktree this run created. Runs
    * under the repo lock (a `worktree remove` racing a sibling run's
    * `worktree add` corrupts the registry) and forgets each entry as it goes,
@@ -299,6 +286,19 @@ class GitWorktreeManager implements AgentWorkspaceManager {
     }
   }
 
+  /**
+   * Drop registrations whose worktree directory is gone, once per repo per run.
+   *
+   * Step worktrees are deliberately retained after a run (see `dispose`), but
+   * they live under the OS temp dir — the tmp reaper deletes the directories
+   * while `.git/worktrees/<name>` registrations survive, so a repo steamtrain
+   * runs against accumulates hundreds of dead entries. That is not merely
+   * untidy: agent CLIs derive their command sandbox from the registered
+   * worktree paths, and past a few hundred entries every shell command the
+   * agent runs dies with E2BIG, so agent steps silently do nothing while the
+   * workflow loops and never lands. `git worktree prune` removes ONLY entries
+   * whose directory no longer exists, so it can never discard live work.
+   */
   private async sweep(repoRoot: string, signal?: AbortSignal): Promise<void> {
     if (this.swept.has(repoRoot)) return;
     this.swept.add(repoRoot);

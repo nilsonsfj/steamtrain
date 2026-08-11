@@ -404,6 +404,10 @@ async function* reclaimWorktreesAfterRun(
     yield* events;
   } finally {
     await workspace.reclaimDisposable?.();
+    // No run records: the orchestrator streams events, it does not own history
+    // (the CLI/TUI/web caller writes the record after this stream ends). GC
+    // then judges "holds work" from git alone, which is the conservative
+    // reading — it can only keep MORE than a record-aware pass would.
     if (workspace.runId) await reclaimCleanRunWorktrees(workspace.runId, cwd);
   }
 }
