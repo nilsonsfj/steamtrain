@@ -2901,6 +2901,9 @@ async function allocateAgentWorkspace(
     stepCwd,
     iteration: ctx.iteration,
     item,
+    // The `in` guard is load-bearing, not defensive: this path also serves a
+    // distributor's agent-backed splitter, and DistributorStep carries no
+    // WorkspaceFields. A plain `step.retainWorkspace` does not type-check.
     retainWorkspace: "retainWorkspace" in step ? step.retainWorkspace : undefined,
     ...resolveWorkspaceSource(step, ctx),
     signal: ctx.signal,
