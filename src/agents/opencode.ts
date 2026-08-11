@@ -292,6 +292,13 @@ export function buildOpenCodeRunArgs(opts: AgentRunOptions): string[] {
     "run",
     "--format",
     "json",
+    // Without ERROR logs on stderr, free-tier / rate-limit exhaustion is silent
+    // in JSON mode while OpenCode waits (hours) to retry — steamtrain sees a hang
+    // with no output. ERROR-level print-logs expose the capacity failure so the
+    // shared adapter can abort and failover instead of waiting out the retry.
+    "--print-logs",
+    "--log-level",
+    "ERROR",
     "--model",
     opts.model,
     // OpenCode resolves its project from `--dir`, not from the process cwd.
