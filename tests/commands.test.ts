@@ -371,7 +371,9 @@ describe("autocompleteSlashCommand", () => {
 
   it("completes model for current agent", () => {
     const result = autocompleteSlashCommand("/model claude-op", listSlashCommands(), makeCtx());
-    expect(result?.value).toBe("/model claude-opus-4-");
+    // Opus 5 + 4.x share the prefix through "claude-opus-".
+    expect(result?.value).toBe("/model claude-opus-");
+    expect(result?.suggestions).toContain("claude-opus-5");
     expect(result?.suggestions).toContain("claude-opus-4-8");
   });
 

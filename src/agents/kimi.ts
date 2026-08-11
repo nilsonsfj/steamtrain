@@ -13,15 +13,17 @@ const AGENT: AgentId = "kimi";
  * via the variant cache; aliases are `<provider>/<model>` under the managed
  * `kimi-code` provider.
  *
- * Verified against Kimi Code CLI 0.29.x:
+ * Verified against Kimi Code CLI 0.34.0 (`kimi provider list --json`):
  *   kimi-code/kimi-for-coding           — K2.7 Coding (default)
  *   kimi-code/kimi-for-coding-highspeed — K2.7 Coding Highspeed
  *   kimi-code/k3                        — K3 (efforts: low/high/max)
+ *   kimi-code/k3-256k                   — K3-256k (efforts: low/high/max)
  */
 export const KIMI_MODELS: readonly AgentModel[] = [
   { id: "kimi-code/kimi-for-coding", name: "K2.7 Coding" },
   { id: "kimi-code/kimi-for-coding-highspeed", name: "K2.7 Coding Highspeed" },
   { id: "kimi-code/k3", name: "K3" },
+  { id: "kimi-code/k3-256k", name: "K3-256k" },
 ];
 
 /**

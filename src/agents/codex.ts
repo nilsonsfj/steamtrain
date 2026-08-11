@@ -14,7 +14,13 @@ import { stringifyContent } from "./util";
 
 const AGENT: AgentId = "codex";
 
-/** Known Codex models (plain slugs; used by `/model` and autocomplete). */
+/**
+ * Known Codex models (plain slugs; used by `/model` and autocomplete).
+ *
+ * Ground truth from `codex debug models` / `--bundled` (codex-cli 0.145.0).
+ * Older pins that left this list still resolve via OpenCode family offerings
+ * and runtime variant cache refresh on live installs.
+ */
 export const CODEX_MODELS: readonly AgentModel[] = [
   { id: "gpt-5.6-sol", name: "GPT-5.6 Sol" },
   { id: "gpt-5.6-terra", name: "GPT-5.6 Terra" },
@@ -22,18 +28,7 @@ export const CODEX_MODELS: readonly AgentModel[] = [
   { id: "gpt-5.5", name: "GPT-5.5" },
   { id: "gpt-5.4", name: "GPT-5.4" },
   { id: "gpt-5.4-mini", name: "GPT-5.4 Mini" },
-  { id: "gpt-5.3-codex", name: "GPT-5.3 Codex" },
-  { id: "gpt-5.3-codex-mini", name: "GPT-5.3 Codex Mini" },
-  { id: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark" },
-  { id: "gpt-5.3-codex-max", name: "GPT-5.3 Codex Max" },
   { id: "gpt-5.2", name: "GPT-5.2" },
-  { id: "gpt-5.2-codex", name: "GPT-5.2 Codex" },
-  { id: "gpt-5.1", name: "GPT-5.1" },
-  { id: "gpt-5.1-codex", name: "GPT-5.1 Codex" },
-  { id: "gpt-5.1-codex-mini", name: "GPT-5.1 Codex Mini" },
-  { id: "gpt-5.1-codex-max", name: "GPT-5.1 Codex Max" },
-  { id: "gpt-5", name: "GPT-5" },
-  { id: "gpt-5-codex", name: "GPT-5 Codex" },
   { id: "codex-auto-review", name: "Codex Auto Review" },
 ];
 

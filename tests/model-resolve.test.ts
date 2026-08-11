@@ -63,8 +63,9 @@ describe("nativeModelForProvider", () => {
     clearModelFamilyCacheForTests();
     expect(nativeModelForProvider("kiro", "haiku")).toBe("claude-haiku-4.5");
     expect(nativeModelForProvider("kiro", "sonnet")).toBe("claude-sonnet-5");
-    expect(nativeModelForProvider("kiro", "opus")).toBe("claude-opus-4.8");
+    expect(nativeModelForProvider("kiro", "opus")).toBe("claude-opus-5");
     expect(nativeModelForProvider("kiro", "claude-haiku-4-5")).toBe("claude-haiku-4.5");
+    expect(nativeModelForProvider("kiro", "claude-opus-5")).toBe("claude-opus-5");
     expect(nativeModelForProvider("kiro", "claude-opus-4-8")).toBe("claude-opus-4.8");
   });
 
@@ -147,9 +148,13 @@ describe("resolveModelBinding", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.primary.modelClass).toBe("thinker");
-    expect(["claude-fable-5", "claude-opus-4.8", "claude-mythos-5", "gpt-5.6-sol"]).toContain(
-      result.primary.familyId,
-    );
+    expect([
+      "claude-fable-5",
+      "claude-opus-5",
+      "claude-opus-4.8",
+      "claude-mythos-5",
+      "gpt-5.6-sol",
+    ]).toContain(result.primary.familyId);
   });
 
   it("resolves modelClass 'ultrathinker' with high/xhigh effort", () => {
@@ -160,9 +165,13 @@ describe("resolveModelBinding", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.primary.modelClass).toBe("ultrathinker");
-    expect(["claude-fable-5", "gpt-5.6-sol", "kimi-k3", "claude-opus-4.8"]).toContain(
-      result.primary.familyId,
-    );
+    expect([
+      "claude-fable-5",
+      "gpt-5.6-sol",
+      "kimi-k3",
+      "claude-opus-5",
+      "claude-opus-4.8",
+    ]).toContain(result.primary.familyId);
     expect(result.primary.effort).toBeTruthy();
     expect(["xhigh", "high"]).toContain(result.primary.effort);
   });
@@ -175,7 +184,9 @@ describe("resolveModelBinding", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.primary.modelClass).toBe("deep-reviewer");
-    expect(["claude-opus-4.8", "gpt-5.6-sol", "claude-fable-5"]).toContain(result.primary.familyId);
+    expect(["claude-opus-5", "claude-opus-4.8", "gpt-5.6-sol", "claude-fable-5"]).toContain(
+      result.primary.familyId,
+    );
     expect(result.primary.effort).toBe("high");
   });
 
@@ -188,6 +199,7 @@ describe("resolveModelBinding", () => {
     if (!result.ok) return;
     expect(result.primary.modelClass).toBe("reviewer");
     expect([
+      "claude-opus-5",
       "claude-opus-4.8",
       "deepseek-v4-pro",
       "qwen-3.7-max",

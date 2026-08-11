@@ -786,7 +786,7 @@ describe("forEach skip cascade for workflow (and llm) fan-outs", () => {
                 id: "call",
                 kind: "workflow",
                 workflow: "child",
-                overrides: { greet: { agent: "codex", model: "gpt-5", effort: "high" } },
+                overrides: { greet: { agent: "codex", model: "gpt-5.5", effort: "high" } },
               },
             ],
           },
@@ -799,9 +799,9 @@ describe("forEach skip cascade for workflow (and llm) fan-outs", () => {
       expect(workflowOk(events)).toBe(true);
       // The child's own default is claude/m; the override retargets it.
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toMatchObject({ provider: "codex", model: "gpt-5", effort: "high" });
+      expect(calls[0]).toMatchObject({ provider: "codex", model: "gpt-5.5", effort: "high" });
       const results = doneResults(events);
-      expect(results.get("call::greet")?.output).toBe("out:codex/gpt-5");
+      expect(results.get("call::greet")?.output).toBe("out:codex/gpt-5.5");
     });
 
     it("does not mutate the shared child spec (a second parent keeps the default)", async () => {
@@ -827,7 +827,7 @@ describe("forEach skip cascade for workflow (and llm) fan-outs", () => {
                 id: "a",
                 kind: "workflow",
                 workflow: "child",
-                overrides: { greet: { agent: "codex", model: "gpt-5" } },
+                overrides: { greet: { agent: "codex", model: "gpt-5.5" } },
               },
             ],
           },
@@ -845,7 +845,7 @@ describe("forEach skip cascade for workflow (and llm) fan-outs", () => {
       expect(workflowOk(events)).toBe(true);
       // First call retargeted, second call uses the untouched child default.
       const models = calls.map((c) => `${c.provider}/${c.model}`).sort();
-      expect(models).toEqual(["claude/m", "codex/gpt-5"]);
+      expect(models).toEqual(["claude/m", "codex/gpt-5.5"]);
       // The catalog spec object itself is unchanged.
       expect(shared.phases[0]!.steps[0]).toMatchObject({ agent: "claude", model: "m" });
     });
@@ -885,7 +885,7 @@ describe("forEach skip cascade for workflow (and llm) fan-outs", () => {
                 workflow: "middle",
                 // Reach the grandchild's `work` step through middle's `inner`
                 // call step, via the `::` namespace.
-                overrides: { "inner::work": { agent: "codex", model: "gpt-5" } },
+                overrides: { "inner::work": { agent: "codex", model: "gpt-5.5" } },
               },
             ],
           },
@@ -898,9 +898,9 @@ describe("forEach skip cascade for workflow (and llm) fan-outs", () => {
       const events = await runToEvents(top, d);
       expect(workflowOk(events)).toBe(true);
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toMatchObject({ provider: "codex", model: "gpt-5" });
+      expect(calls[0]).toMatchObject({ provider: "codex", model: "gpt-5.5" });
       const results = doneResults(events);
-      expect(results.get("call::inner::work")?.output).toBe("out:codex/gpt-5");
+      expect(results.get("call::inner::work")?.output).toBe("out:codex/gpt-5.5");
     });
   });
 });

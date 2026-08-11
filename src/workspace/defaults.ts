@@ -9,8 +9,8 @@ import type { WorkspaceConfig } from "./types";
  */
 export const DEFAULT_WORKSPACE_CONFIG: WorkspaceConfig = {
   workspaces: [
-    { id: "plan", agent: "claude", model: "claude-sonnet-4-6" },
+    { id: "plan", agent: "claude", model: "claude-sonnet-5" },
     { id: "implement", agent: "opencode", model: "openai/gpt-5.4-mini" },
-    { id: "review", agent: "claude", model: "claude-opus-4-8" },
+    { id: "review", agent: "claude", model: "claude-opus-5" },
   ],
 };

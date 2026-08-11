@@ -22,6 +22,7 @@ const AGENT: AgentId = "kiro";
 export const KIRO_MODELS: readonly AgentModel[] = [
   { id: "auto", name: "Auto" },
   { id: "claude-sonnet-5", name: "Claude Sonnet 5" },
+  { id: "claude-opus-5", name: "Claude Opus 5" },
   { id: "claude-opus-4.8", name: "Claude Opus 4.8" },
   { id: "gpt-5.6-sol", name: "GPT-5.6 Sol" },
   { id: "gpt-5.6-terra", name: "GPT-5.6 Terra" },

@@ -20,6 +20,7 @@ describe("KIMI_MODELS", () => {
       "kimi-code/kimi-for-coding",
       "kimi-code/kimi-for-coding-highspeed",
       "kimi-code/k3",
+      "kimi-code/k3-256k",
     ]);
     expect(KIMI_MODELS.find((m) => m.id === "kimi-code/kimi-for-coding")).toMatchObject({
       name: "K2.7 Coding",
@@ -29,8 +30,9 @@ describe("KIMI_MODELS", () => {
 });
 
 describe("fallbackKimiEfforts", () => {
-  it("exposes low/high/max for k3 only", () => {
+  it("exposes low/high/max for k3 aliases", () => {
     expect(fallbackKimiEfforts("kimi-code/k3")).toEqual(["low", "high", "max"]);
+    expect(fallbackKimiEfforts("kimi-code/k3-256k")).toEqual(["low", "high", "max"]);
     expect(fallbackKimiEfforts("kimi-code/kimi-for-coding")).toEqual([]);
     expect(fallbackKimiEfforts("openai/gpt-5")).toEqual([]);
   });

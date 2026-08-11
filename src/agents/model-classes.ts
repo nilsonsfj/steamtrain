@@ -34,6 +34,7 @@ const BUILTIN_MODEL_CLASSES: readonly ModelClassDefinition[] = [
     description: "Frontier reasoning for hard design, diagnosis, and deep review.",
     preferred: [
       "claude-fable-5",
+      "claude-opus-5",
       "claude-opus-4.8",
       "claude-mythos-5",
       "gpt-5.6-sol",
@@ -55,6 +56,7 @@ const BUILTIN_MODEL_CLASSES: readonly ModelClassDefinition[] = [
       "claude-fable-5",
       "gpt-5.6-sol",
       "kimi-k3",
+      "claude-opus-5",
       "claude-opus-4.8",
       "gpt-5.5-pro",
       "gpt-5.5",
@@ -69,6 +71,7 @@ const BUILTIN_MODEL_CLASSES: readonly ModelClassDefinition[] = [
     description:
       "High-effort code and design review with frontier models (Opus 4.8, GPT-5.6 Sol, Fable).",
     preferred: [
+      "claude-opus-5",
       "claude-opus-4.8",
       "gpt-5.6-sol",
       "claude-fable-5",
@@ -84,6 +87,7 @@ const BUILTIN_MODEL_CLASSES: readonly ModelClassDefinition[] = [
     description:
       "PR and code review workhorses spanning frontier and cost-efficient options (Opus, DeepSeek Pro, Qwen 3.7 Max).",
     preferred: [
+      "claude-opus-5",
       "claude-opus-4.8",
       "deepseek-v4-pro",
       "qwen-3.7-max",
@@ -104,11 +108,11 @@ const BUILTIN_MODEL_CLASSES: readonly ModelClassDefinition[] = [
       "composer-2.5",
       "gpt-5.5",
       "gpt-5.6-terra",
-      "gpt-5.3-codex",
+      "gpt-5.6-sol",
       "gemini-3.6-flash",
       "claude-sonnet-4.6",
+      "claude-opus-5",
       "gpt-5.4",
-      "gpt-5.2-codex",
       "amp-smart",
       "claude-fable-5",
     ],

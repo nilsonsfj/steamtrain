@@ -21,13 +21,19 @@ import { stringifyContent } from "./util";
 
 const AGENT: AgentInstanceId = "cursor";
 
-/** Known Cursor Agent CLI models (used by `/model` and autocomplete). */
+/**
+ * Known Cursor Agent CLI models (used by `/model` and autocomplete).
+ * Live installs refresh via `agent --list-models`; keep this list current for
+ * offline / doctor-failed pickers. Opus 5 added to match Claude Code 2.1.219+.
+ */
 export const CURSOR_MODELS: readonly AgentModel[] = [
   { id: "auto", name: "Auto (default)" },
   { id: "composer-2.5", name: "Composer 2.5" },
   { id: "composer-2.5-fast", name: "Composer 2.5 Fast" },
   { id: "cursor-grok-4.5-high", name: "Cursor Grok 4.5" },
+  { id: "grok-4.5", name: "Grok 4.5" },
   { id: "claude-fable-5-thinking-high", name: "Claude Fable 5 Thinking High" },
+  { id: "claude-opus-5-thinking-high", name: "Claude Opus 5 Thinking High" },
   { id: "claude-opus-4-8-thinking-high", name: "Claude Opus 4.8 Thinking High" },
   { id: "claude-sonnet-5-high", name: "Claude Sonnet 5 High" },
   { id: "gpt-5.6-sol", name: "GPT 5.6 Sol" },
@@ -35,8 +41,8 @@ export const CURSOR_MODELS: readonly AgentModel[] = [
   { id: "gpt-5.6-luna", name: "GPT 5.6 Luna" },
   { id: "gpt-5.5-high", name: "GPT 5.5 High" },
   { id: "gpt-5.4-high", name: "GPT 5.4 High" },
-  { id: "gpt-5.3-codex", name: "GPT 5.3 Codex" },
   { id: "gpt-5.2", name: "GPT 5.2" },
+  { id: "gemini-3.6-flash", name: "Gemini 3.6 Flash" },
   { id: "gemini-3.6-flash-high", name: "Gemini 3.6 Flash High" },
   { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash" },
   { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro" },
