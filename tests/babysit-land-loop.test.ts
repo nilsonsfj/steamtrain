@@ -159,7 +159,28 @@ describe("bundled babysit-pr wiring", () => {
   it("asks merge-when-ready to replay a mechanical rebase before the loop pays for an agent", () => {
     const land = spec.phases.flatMap((p) => p.steps).find((s) => s.id === "wait-or-merge") as {
       cmd: string;
+      dependsOn?: string[];
     };
     expect(land.cmd).toContain("--auto-rebase");
+    expect(land.dependsOn).toEqual(["ensure-mergeable"]);
+  });
+
+  it("verifies the remote head is MERGEABLE after prepare before land", () => {
+    const ensure = spec.phases.flatMap((p) => p.steps).find((s) => s.id === "ensure-mergeable") as {
+      kind: string;
+      dependsOn?: string[];
+      cmd: string;
+    };
+    expect(ensure).toMatchObject({
+      kind: "command",
+      dependsOn: ["prepare"],
+    });
+    expect(ensure.cmd).toContain("require-mergeable");
+    expect(ensure.cmd).toContain("--auto-rebase");
+
+    const waitOnly = spec.phases.flatMap((p) => p.steps).find((s) => s.id === "wait-only") as {
+      dependsOn?: string[];
+    };
+    expect(waitOnly.dependsOn).toEqual(["ensure-mergeable"]);
   });
 });
