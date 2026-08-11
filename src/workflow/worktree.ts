@@ -44,6 +44,11 @@ export interface AgentWorkspaceRequest {
     baseCommit?: string;
     linkedIgnoredPaths?: string[];
   };
+  /**
+   * The step's `retainWorkspace` (default true). When false the worktree is
+   * discarded once the RUN ends — see {@link AgentWorkspaceManager.reclaimDisposable}.
+   */
+  retainWorkspace?: boolean;
   signal?: AbortSignal;
 }
 
@@ -63,6 +68,18 @@ export interface AgentWorkspaceLease {
 
 export interface AgentWorkspaceManager {
   allocate: (request: AgentWorkspaceRequest) => Promise<AgentWorkspaceLease>;
+  /**
+   * The id every worktree/branch this manager creates is namespaced under
+   * (`steamtrain/<runId>/…`) — the selector post-run GC needs to reclaim
+   * exactly this run's worktrees. Absent for managers that don't own one.
+   */
+  readonly runId?: string;
+  /**
+   * Discard the worktrees of steps that declared `retainWorkspace: false` —
+   * called once the run is over, so `inherit`/`attach`/`merge` could still use
+   * them while it was in flight. Best-effort and idempotent.
+   */
+  reclaimDisposable?: () => Promise<void>;
   /**
    * Reserve a directory + branch name for a KEPT (non-ephemeral) worktree
    * that the CALLER will create itself (via plain `git worktree add`) —
@@ -101,7 +118,11 @@ export function createGitWorktreeManager(
 
 class GitWorktreeManager implements AgentWorkspaceManager {
   private readonly baseDir: string;
-  private readonly runId: string;
+  readonly runId: string;
+  /** Repo roots already swept by this manager (once per run, see `sweep`). */
+  private readonly swept = new Set<string>();
+  /** Worktrees of `retainWorkspace: false` steps, discarded when the run ends. */
+  private readonly disposable: { repoRoot: string; root: string; branch: string }[] = [];
 
   constructor(options: GitWorktreeManagerOptions) {
     this.baseDir = options.baseDir ?? DEFAULT_BASE_DIR;
@@ -148,6 +169,7 @@ class GitWorktreeManager implements AgentWorkspaceManager {
     try {
       await this.inRepoQueue(repo.root, request.signal, async () => {
         throwIfAborted(request.signal);
+        await this.sweep(repo.root, request.signal);
         worktreeHead = await currentGitHead(snapshotSource, request.signal);
         await runGit(
           ["worktree", "add", "-b", branch, worktreeRoot, worktreeHead],
@@ -165,6 +187,10 @@ class GitWorktreeManager implements AgentWorkspaceManager {
     } catch (err) {
       await removeWorktreeBestEffort(repo.root, worktreeRoot, branch);
       throw err;
+    }
+
+    if (request.retainWorkspace === false) {
+      this.disposable.push({ repoRoot: repo.root, root: worktreeRoot, branch });
     }
 
     return {
@@ -233,6 +259,52 @@ class GitWorktreeManager implements AgentWorkspaceManager {
     const dir = join(this.baseDir, repoDir, this.runId, `${stepPart}-${unique}`);
     const branch = `steamtrain/${this.runId}/${stepPart}-${unique}`;
     return { dir, branch };
+  }
+
+  /**
+   * Drop registrations whose worktree directory is gone, once per repo per run.
+   *
+   * Step worktrees are deliberately retained after a run (see `dispose`), but
+   * they live under the OS temp dir — the tmp reaper deletes the directories
+   * while `.git/worktrees/<name>` registrations survive, so a repo steamtrain
+   * runs against accumulates hundreds of dead entries. That is not merely
+   * untidy: agent CLIs derive their command sandbox from the registered
+   * worktree paths, and past a few hundred entries every shell command the
+   * agent runs dies with E2BIG, so agent steps silently do nothing while the
+   * workflow loops and never lands. `git worktree prune` removes ONLY entries
+   * whose directory no longer exists, so it can never discard live work.
+   */
+  /**
+   * Discard every `retainWorkspace: false` worktree this run created. Runs
+   * under the repo lock (a `worktree remove` racing a sibling run's
+   * `worktree add` corrupts the registry) and forgets each entry as it goes,
+   * so a second call after a partial failure is a no-op for what already went.
+   */
+  async reclaimDisposable(): Promise<void> {
+    const pending = this.disposable.splice(0);
+    if (pending.length === 0) return;
+    const byRepo = new Map<string, typeof pending>();
+    for (const entry of pending) {
+      const list = byRepo.get(entry.repoRoot) ?? [];
+      list.push(entry);
+      byRepo.set(entry.repoRoot, list);
+    }
+    for (const [repoRoot, entries] of byRepo) {
+      await withRepoWorktreeLock(repoRoot, undefined, async () => {
+        for (const entry of entries) {
+          await removeWorktreeBestEffort(repoRoot, entry.root, entry.branch);
+        }
+        await runGit(["worktree", "prune"], repoRoot).catch(() => {});
+      }).catch(() => {});
+    }
+  }
+
+  private async sweep(repoRoot: string, signal?: AbortSignal): Promise<void> {
+    if (this.swept.has(repoRoot)) return;
+    this.swept.add(repoRoot);
+    // Best-effort: a failed prune must never block the run that needed a
+    // worktree — the pre-existing entries are exactly as bad as before.
+    await runGit(["worktree", "prune"], repoRoot, undefined, signal).catch(() => {});
   }
 
   private inRepoQueue<T>(

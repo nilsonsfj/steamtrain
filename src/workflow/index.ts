@@ -267,6 +267,7 @@ export {
   listRepoWorktrees,
   mergeConflictGuidance,
   pruneRunWorktrees,
+  reclaimCleanRunWorktrees,
   type RepoWorktreeEntry,
   type RunHarvestOutcome,
   type RunHarvestRequest,

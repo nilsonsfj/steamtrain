@@ -156,6 +156,69 @@ describe("git worktree agent workspace manager", () => {
     );
   });
 
+  it("prunes registrations whose worktree directory is gone, keeping live ones", async () => {
+    const root = await tempDir();
+    const repo = join(root, "repo");
+    const worktrees = join(root, "worktrees");
+    await initRepo(repo);
+
+    // A reaped worktree: registered, then its directory deleted behind git's
+    // back — exactly what the OS tmp reaper does to retained step worktrees.
+    const reaped = join(root, "reaped");
+    await git(repo, "worktree", "add", "-b", "steamtrain/old/step", reaped);
+    await rm(reaped, { recursive: true, force: true });
+    // A worktree that still exists must survive the sweep.
+    const live = join(root, "live");
+    await git(repo, "worktree", "add", "-b", "steamtrain/old/live", live);
+
+    const manager = createGitWorktreeManager({ baseDir: worktrees, runId: "sweep" });
+    await manager.allocate({
+      workflowName: "demo",
+      stepId: "a",
+      agent: "claude",
+      baseCwd: repo,
+      stepCwd: repo,
+      iteration: 1,
+    });
+
+    const listed = await git(repo, "worktree", "list");
+    expect(listed).not.toContain(reaped);
+    expect(listed).toContain(live);
+  });
+
+  it("discards retainWorkspace:false worktrees at reclaim, keeping retained ones", async () => {
+    const root = await tempDir();
+    const repo = join(root, "repo");
+    await initRepo(repo);
+    const manager = createGitWorktreeManager({
+      baseDir: join(root, "worktrees"),
+      runId: "disposable",
+    });
+    const base = {
+      workflowName: "demo",
+      agent: "claude" as const,
+      baseCwd: repo,
+      stepCwd: repo,
+      iteration: 1,
+    };
+    const disposable = await manager.allocate({
+      ...base,
+      stepId: "rebase",
+      retainWorkspace: false,
+    });
+    const retained = await manager.allocate({ ...base, stepId: "implement" });
+    // Even work left behind goes: the step declared it has no local deliverable.
+    await writeFile(join(disposable.root as string, "scratch.txt"), "remote-only work\n");
+
+    await manager.reclaimDisposable?.();
+
+    expect(await lstat(disposable.root as string).catch(() => undefined)).toBeUndefined();
+    expect((await lstat(retained.root as string)).isDirectory()).toBe(true);
+    const branches = await git(repo, "branch", "--list", "steamtrain/*");
+    expect(branches).not.toContain(disposable.branch as string);
+    expect(branches).toContain(retained.branch as string);
+  });
+
   it("honors cancellation before creating a worktree", async () => {
     const root = await tempDir();
     const repo = join(root, "repo");

@@ -2901,6 +2901,7 @@ async function allocateAgentWorkspace(
     stepCwd,
     iteration: ctx.iteration,
     item,
+    retainWorkspace: "retainWorkspace" in step ? step.retainWorkspace : undefined,
     ...resolveWorkspaceSource(step, ctx),
     signal: ctx.signal,
   });
@@ -3283,6 +3284,7 @@ async function executeCommandStep(
           baseCwd: ctx.deps.cwd,
           stepCwd,
           iteration: ctx.iteration,
+          retainWorkspace: step.retainWorkspace,
           ...resolveWorkspaceSource(step, ctx),
           signal: ctx.signal,
         })

@@ -214,6 +214,21 @@ export interface WorkspaceFields {
    * produced fails the step — declarations are a contract.
    */
   artifacts?: string[];
+  /**
+   * Whether this step's worktree survives the run (default true). Retention is
+   * what makes `history apply/diff` and a later `merge` able to land agent work
+   * — but a step whose deliverable is REMOTE (rebase a PR, push a branch, land
+   * a PR) leaves nothing locally worth keeping, and workflows that drive many
+   * PRs create a worktree per step, per PR, per iteration. Left retained they
+   * accumulate across runs until agent CLIs — whose command sandbox enumerates
+   * the repo's registered worktrees — die with E2BIG on every shell command.
+   *
+   * `retainWorkspace: false` discards this step's worktree and branch when the
+   * RUN ends (not when the step ends), so `inherit`/`attach`/`merge` still see
+   * it during the run. Whatever it wrote locally is gone afterwards: declare
+   * `artifacts` for anything worth reading later.
+   */
+  retainWorkspace?: boolean;
 }
 
 export interface WorkerStep extends WorkflowStepBase, AgentRunFields, WorkspaceFields {
@@ -1426,6 +1441,7 @@ const workspaceShape = {
     .regex(/^(inherit|attach):.+$/, 'workspace must be "inherit:<stepId>" or "attach:<stepId>"')
     .optional(),
   artifacts: z.array(z.string().min(1)).min(1).optional(),
+  retainWorkspace: z.boolean().optional(),
 };
 
 const workflowInputSpecSchema = z

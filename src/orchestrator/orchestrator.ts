@@ -9,6 +9,7 @@ import { DEFAULT_CONFIG, type SteamtrainConfig } from "../config";
 import type { DoctorResult } from "../doctor";
 import type { AgentEvent, AgentInstanceId } from "../types/events";
 import {
+  type AgentWorkspaceManager,
   type LoadedWorkflowCatalog,
   type PlanRetryRetargetResult,
   type RetryRetargetOptions,
@@ -20,6 +21,7 @@ import {
   isAgentBackedStep,
   planAgentReroute,
   planRetryRetarget,
+  reclaimCleanRunWorktrees,
   resolveStepTimeoutSec,
   resolveWorkflowBindings,
   resolveWorkflowTimeoutSec,
@@ -362,7 +364,8 @@ export class Orchestrator {
     const spec = specOverride ?? this.listWorkflows()[name];
     if (!spec) throw new Error(`unknown workflow '${name}'`);
 
-    return runWorkflow(
+    const agentWorkspace = createGitWorktreeManager();
+    const events = runWorkflow(
       spec,
       { input, cache, inputs },
       {
@@ -373,7 +376,7 @@ export class Orchestrator {
         maxConcurrency:
           maxConcurrency ?? this.config.maxConcurrency ?? DEFAULT_CONFIG.maxConcurrency!,
         cwd,
-        agentWorkspace: createGitWorktreeManager(),
+        agentWorkspace,
         loopMaxIterations: this.config.loopMaxIterations,
         resolveWorkflow: (name) => this.workflowCatalog[name],
         requestApproval: approval,
@@ -382,5 +385,25 @@ export class Orchestrator {
       },
       signal,
     );
+    return reclaimWorktreesAfterRun(events, agentWorkspace, cwd);
+  }
+}
+
+/**
+ * Hand a run's events through, then reclaim its worktrees once the stream is
+ * done — completed, failed, cancelled, or abandoned by the consumer (a
+ * `break` runs the `finally` via the iterator's `return`). Worktrees holding
+ * agent work are kept; see {@link reclaimCleanRunWorktrees}.
+ */
+async function* reclaimWorktreesAfterRun(
+  events: AsyncIterable<WorkflowEvent>,
+  workspace: AgentWorkspaceManager,
+  cwd: string,
+): AsyncIterable<WorkflowEvent> {
+  try {
+    yield* events;
+  } finally {
+    await workspace.reclaimDisposable?.();
+    if (workspace.runId) await reclaimCleanRunWorktrees(workspace.runId, cwd);
   }
 }
