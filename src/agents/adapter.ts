@@ -1,10 +1,6 @@
 import type { AgentEvent, AgentId, AgentInstanceId, EventMapper } from "../types/events";
 import { appendCapped } from "../util/capped-buffer";
-import {
-  type AgentFailureKind,
-  classifyAgentFailure,
-  isCapacityFailure,
-} from "./failure-classify";
+import { type AgentFailureKind, classifyAgentFailure, isCapacityFailure } from "./failure-classify";
 import type { ResolvedPermissions } from "./permissions";
 import { type ProcessRunOptions, resolveAgentIdleTimeoutMs, runProcessLines } from "./spawn";
 import { stderrSummary } from "./util";
@@ -190,9 +186,7 @@ export async function* runAgentProcess(params: AgentProcessParams): AsyncGenerat
         // OpenCode free-tier waits can trip the idle timer with the real reason
         // already sitting in --print-logs output.
         const fromStderr = classifyAgentFailure(summary, { stderr });
-        const category: AgentFailureKind = isCapacityFailure(fromStderr)
-          ? fromStderr
-          : "transient";
+        const category: AgentFailureKind = isCapacityFailure(fromStderr) ? fromStderr : "transient";
         yield {
           kind: "error",
           agent: id,
@@ -239,10 +233,7 @@ export async function* runAgentProcess(params: AgentProcessParams): AsyncGenerat
 }
 
 /** Combine caller cancellation with an internal capacity-abort controller. */
-function mergeAbortSignals(
-  external: AbortSignal | undefined,
-  internal: AbortSignal,
-): AbortSignal {
+function mergeAbortSignals(external: AbortSignal | undefined, internal: AbortSignal): AbortSignal {
   if (!external) return internal;
   if (typeof AbortSignal.any === "function") return AbortSignal.any([external, internal]);
   const merged = new AbortController();

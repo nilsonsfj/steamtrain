@@ -82,7 +82,7 @@ describe("runAgentProcess capacity abort", () => {
       binary: "node",
       args: [
         "-e",
-        "process.stderr.write('loading plugins\\n'); process.stdout.write('{\"type\":\"step_start\",\"sessionID\":\"ses_x\"}\\n'); process.exit(0);",
+        'process.stderr.write(\'loading plugins\\n\'); process.stdout.write(\'{"type":"step_start","sessionID":"ses_x"}\\n\'); process.exit(0);',
       ],
       opts: { prompt: "hi", model: "opencode/mimo-v2.5-free" },
       map: () => [{ kind: "session_start", agent: "opencode", ts: 1, sessionId: "ses_x" }],
