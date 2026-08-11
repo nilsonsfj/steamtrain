@@ -1018,11 +1018,12 @@ const mainline: WorkflowSpec = {
 /**
  * Per-PR babysit pipeline invoked by `babysit-all-prs`. The agent prepares the
  * PR (rebase, address comments, push) but is FORBIDDEN from merging or deleting
- * the remote branch — a deterministic `merge-when-ready` command step waits for
- * EVERY GitHub status check (including non-required external review bots) and
- * only then merges. That closes the race where a remote review dies with
- * `fatal: couldn't find remote ref <branch>` because the head was deleted while
- * it was still queued.
+ * the remote branch — a deterministic `require-mergeable` step then verifies the
+ * remote head is actually MERGEABLE (processor `ok` alone is not enough), and
+ * `merge-when-ready` waits for EVERY GitHub status check (including non-required
+ * external review bots) and only then merges. That closes the race where a
+ * remote review dies with `fatal: couldn't find remote ref <branch>` because
+ * the head was deleted while it was still queued.
  *
  * `merge-when-ready` also survives the OTHER babysit race: when
  * `babysit-all-prs` fans out, each PR's land step is a SEPARATE process racing
@@ -1132,13 +1133,35 @@ const babysitPr: WorkflowSpec = {
       ],
     },
     {
+      // Own phase: dependsOn may only reference earlier phases, and wait-* must
+      // depend on this step the same way (so it cannot share prepare or land).
+      id: "ensure",
+      title: "Remote head must be MERGEABLE",
+      steps: [
+        {
+          // Processor ok only means the agent exited. This step is what stops a
+          // narrated-but-unpushed prepare from looking ready to land: it fails
+          // (and the land gate loops back to rebase/prepare) unless GitHub
+          // reports the remote head MERGEABLE. --auto-rebase recovers a purely
+          // mechanical conflict once without burning another agent turn.
+          id: "ensure-mergeable",
+          kind: "command",
+          dependsOn: ["prepare"],
+          stepTimeoutSec: 300,
+          cmd:
+            '${STEAMTRAIN_CLI:-steamtrain} workflow pr require-mergeable "{{inputs.pr}}" ' +
+            "--auto-rebase",
+        },
+      ],
+    },
+    {
       id: "land",
       title: "Wait for every check, then land",
       steps: [
         {
           id: "wait-or-merge",
           kind: "command",
-          dependsOn: ["prepare"],
+          dependsOn: ["ensure-mergeable"],
           // Longer than checksTimeoutSec default (1800) so the step wall-clock
           // does not kill the waiter first. Cmd templates are intentional —
           // same class of warning as mainline's {{inputs.testCmd}}.
@@ -1156,7 +1179,7 @@ const babysitPr: WorkflowSpec = {
         {
           id: "wait-only",
           kind: "command",
-          dependsOn: ["prepare"],
+          dependsOn: ["ensure-mergeable"],
           stepTimeoutSec: 2400,
           when: { value: "{{inputs.land}}", equals: "report" },
           cmd:
@@ -1175,9 +1198,13 @@ const babysitPr: WorkflowSpec = {
           // they re-rebase onto the winner and land in sequence, instead of the
           // stalemate where everyone was rebased against a base nobody has.
           //
-          // Only genuine content conflicts get this far: `--auto-rebase`
-          // already replays a purely mechanical staleness inline, without an
-          // agent. So an iteration here means the PR really does need judgment.
+          // ensure-mergeable failing (prepare never left the remote MERGEABLE)
+          // cascades into wait-or-merge as dependencyFailed, so this gate still
+          // sees wait-or-merge not-ok and loops — no separate condition needed.
+          //
+          // Only genuine content conflicts get this far after ensure + land
+          // --auto-rebase each tried a mechanical rebase once. So an iteration
+          // here means the PR really does need judgment.
           //
           // onFalse "continue", matching mainline's gates: exhausting the
           // iteration budget must not mask the land failure behind a gate

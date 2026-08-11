@@ -9,6 +9,7 @@ import {
   parsePullRequestRef,
   parseRepoFromPullUrl,
   parseStatusCheckRollup,
+  requirePullRequestMergeable,
   resolveSteamtrainCliInvocation,
   waitForPullRequestChecks,
 } from "../src/workflow/github-checks";
@@ -733,6 +734,63 @@ describe("mergePullRequestWhenReady — race-resilient landing", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("auto-rebases when the pre-lock wait already sees CONFLICTING", async () => {
+    // Prepare left the PR conflicting (or a sibling landed before firstWait).
+    // Without a pre-lock rebase, waitGreen fails immediately and landUnderLock
+    // never runs — so --auto-rebase would be a no-op for the common case.
+    const rebasePr = vi.fn(async () => ({
+      ok: true as const,
+      changed: true,
+      detail: "rebased PR #42 onto main",
+      prNumber: 42,
+    }));
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      autoRebase: true,
+      rebasePr,
+      fetchSnapshot: sequence([
+        green({ mergeable: "CONFLICTING" }), // firstWait: already conflicting
+        green(), // re-wait after pre-lock rebase
+        green(), // land loop under the lock
+      ]),
+      runGh: async () => "",
+    });
+    expect(rebasePr).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ ok: true, merged: true });
+  });
+
+  it("reports a lasting conflict after the pre-lock auto-rebase", async () => {
+    const rebasePr = vi.fn(async () => ({
+      ok: true as const,
+      changed: true,
+      detail: "rebased",
+      prNumber: 42,
+    }));
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      autoRebase: true,
+      rebasePr,
+      fetchSnapshot: sequence([green({ mergeable: "CONFLICTING" })]),
+      runGh: async () => "",
+    });
+    expect(rebasePr).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/still conflicts.*after being rebased/i);
+  });
+
+  it("does not auto-rebase a pre-lock CONFLICTING PR without --auto-rebase", async () => {
+    const rebasePr = vi.fn();
+    const result = await mergePullRequestWhenReady({
+      ...base,
+      rebasePr,
+      fetchSnapshot: sequence([green({ mergeable: "CONFLICTING" })]),
+      runGh: async () => "",
+    });
+    expect(rebasePr).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/merge conflicts with the base branch/i);
+  });
+
   it("updates a behind branch, waits for the fresh checks, then merges", async () => {
     const calls: string[][] = [];
     const result = await mergePullRequestWhenReady({
@@ -839,6 +897,154 @@ describe("mergePullRequestWhenReady — race-resilient landing", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/review is required/i);
     expect(merges).toBe(1);
+  });
+});
+
+describe("requirePullRequestMergeable", () => {
+  const open = (over: Partial<PullRequestCheckSnapshot> = {}): PullRequestCheckSnapshot =>
+    snap({
+      checks: [],
+      mergeable: "MERGEABLE",
+      ...over,
+    });
+
+  function sequence(
+    snaps: PullRequestCheckSnapshot[],
+  ): Mock<() => Promise<PullRequestCheckSnapshot>> {
+    let i = 0;
+    return vi.fn(async () => snaps[Math.min(i++, snaps.length - 1)]!);
+  }
+
+  const base = {
+    cwd: "/repo",
+    prRef: "42",
+    timeoutMs: 1_000_000,
+    pollIntervalMs: 1,
+    nowMs: () => 5_000_000,
+    sleep: async () => {},
+  };
+
+  it("accepts a MERGEABLE remote head without touching rebase", async () => {
+    const rebasePr = vi.fn();
+    const result = await requirePullRequestMergeable({
+      ...base,
+      rebasePr,
+      fetchSnapshot: sequence([open()]),
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      prNumber: 42,
+      detail: expect.stringMatching(/MERGEABLE/),
+    });
+    expect(rebasePr).not.toHaveBeenCalled();
+  });
+
+  it("treats an already-merged PR as ok", async () => {
+    const result = await requirePullRequestMergeable({
+      ...base,
+      fetchSnapshot: sequence([open({ state: "merged" })]),
+    });
+    expect(result).toMatchObject({ ok: true, prNumber: 42 });
+    if (result.ok) expect(result.detail).toMatch(/already merged/i);
+  });
+
+  it("fails closed on CONFLICTING without --auto-rebase", async () => {
+    const rebasePr = vi.fn();
+    const result = await requirePullRequestMergeable({
+      ...base,
+      rebasePr,
+      fetchSnapshot: sequence([open({ mergeable: "CONFLICTING" })]),
+    });
+    expect(rebasePr).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/still CONFLICTING/i);
+      expect(result.error).toMatch(/prepare must leave the remote head MERGEABLE/i);
+    }
+  });
+
+  it("auto-rebases a mechanical CONFLICTING PR into MERGEABLE", async () => {
+    const rebasePr = vi.fn(async () => ({
+      ok: true as const,
+      changed: true,
+      detail: "rebased",
+      prNumber: 42,
+    }));
+    const result = await requirePullRequestMergeable({
+      ...base,
+      autoRebase: true,
+      rebasePr,
+      fetchSnapshot: sequence([open({ mergeable: "CONFLICTING" }), open()]),
+    });
+    expect(rebasePr).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ ok: true, rebased: true, prNumber: 42 });
+  });
+
+  it("reports the rebase failure when the conflict is real", async () => {
+    const rebasePr = vi.fn(async () => ({
+      ok: false as const,
+      error: "PR #42 cannot be rebased onto main automatically — conflicts in: src/x.rs",
+      conflicts: ["src/x.rs"],
+      prNumber: 42,
+    }));
+    const result = await requirePullRequestMergeable({
+      ...base,
+      autoRebase: true,
+      rebasePr,
+      fetchSnapshot: sequence([open({ mergeable: "CONFLICTING" })]),
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/conflicts in: src\/x\.rs/);
+  });
+
+  it("fails when still CONFLICTING after a successful auto-rebase", async () => {
+    const rebasePr = vi.fn(async () => ({
+      ok: true as const,
+      changed: true,
+      detail: "rebased",
+      prNumber: 42,
+    }));
+    const result = await requirePullRequestMergeable({
+      ...base,
+      autoRebase: true,
+      rebasePr,
+      fetchSnapshot: sequence([open({ mergeable: "CONFLICTING" })]),
+    });
+    expect(rebasePr).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/still CONFLICTING/i);
+      expect(result.error).toMatch(/even after an automatic rebase/i);
+    }
+  });
+
+  it("waits out UNKNOWN mergeability then accepts MERGEABLE", async () => {
+    let now = 1_000_000;
+    const fetchSnapshot = sequence([
+      open({ mergeable: "UNKNOWN" }),
+      open({ mergeable: "UNKNOWN" }),
+      open(),
+    ]);
+    const result = await requirePullRequestMergeable({
+      ...base,
+      timeoutMs: 10_000,
+      fetchSnapshot,
+      sleep: async () => {
+        now += 100;
+      },
+      nowMs: () => now,
+    });
+    expect(result).toMatchObject({ ok: true, prNumber: 42 });
+    expect(fetchSnapshot.mock.calls.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("fails a closed-unmerged PR", async () => {
+    const result = await requirePullRequestMergeable({
+      ...base,
+      fetchSnapshot: sequence([open({ state: "closed" })]),
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/closed without being merged/i);
   });
 });
 

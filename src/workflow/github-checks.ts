@@ -131,6 +131,8 @@ const FAILURE_LIKE = new Set<CheckRollupState>([
 export const DEFAULT_EMPTY_GRACE_MS = 90_000;
 export const DEFAULT_POLL_INTERVAL_MS = 10_000;
 export const DEFAULT_WAIT_TIMEOUT_MS = 30 * 60_000;
+/** Short poll window for "is the remote head mergeable yet?" (not a CI wait). */
+export const DEFAULT_REQUIRE_MERGEABLE_TIMEOUT_MS = 60_000;
 
 /** Normalize a raw GitHub status/conclusion string into a rollup state. */
 export function normalizeCheckState(raw: unknown): CheckRollupState {
@@ -546,6 +548,138 @@ export async function waitForPullRequestChecks(
   }
 }
 
+export interface RequireMergeableOptions {
+  cwd: string;
+  prRef: string;
+  /** Max time to wait for GitHub's mergeability to leave UNKNOWN. Default 60s. */
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+  signal?: AbortSignal;
+  /**
+   * On CONFLICTING, try one deterministic rebase+push before giving up. Off by
+   * default; babysit's ensure-mergeable step turns it on so a purely mechanical
+   * conflict does not burn an agent iteration.
+   */
+  autoRebase?: boolean;
+  /** Called on each poll with a short status line (for CLI progress). */
+  onPoll?: (snapshot: PullRequestCheckSnapshot, detail: string) => void;
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  fetchSnapshot?: (
+    prRef: string,
+    cwd: string,
+    signal?: AbortSignal,
+  ) => Promise<PullRequestCheckSnapshot>;
+  nowMs?: () => number;
+  runGh?: (args: string[], cwd: string, signal?: AbortSignal) => Promise<string>;
+  runGit?: (args: string[], cwd: string, signal?: AbortSignal) => Promise<string>;
+  rebasePr?: (opts: RebasePullRequestOptions) => Promise<RebasePullRequestResult>;
+}
+
+export type RequireMergeableResult =
+  | { ok: true; detail: string; prNumber: number; rebased?: boolean }
+  | { ok: false; error: string };
+
+/**
+ * Fail closed unless the remote PR head is MERGEABLE (or already merged).
+ *
+ * Babysit's prepare agent is asked to push until `mergeable` reports MERGEABLE,
+ * but processor `ok` only means the agent process exited — so this deterministic
+ * check is what stops a narrated-but-unpushed prepare from looking ready to land.
+ * Optional `--auto-rebase` recovers a purely mechanical conflict once before
+ * reporting; content conflicts stay a hard failure for the agent loop.
+ */
+export async function requirePullRequestMergeable(
+  opts: RequireMergeableOptions,
+): Promise<RequireMergeableResult> {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_REQUIRE_MERGEABLE_TIMEOUT_MS;
+  const pollIntervalMs = opts.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const sleep = opts.sleep ?? abortableSleep;
+  const fetchSnapshot = opts.fetchSnapshot ?? fetchPullRequestCheckSnapshot;
+  const nowMs = opts.nowMs ?? Date.now;
+  const deadline = nowMs() + timeoutMs;
+  const rebasePr = opts.rebasePr ?? rebasePullRequestOntoBase;
+
+  let rebaseTried = false;
+  let rebased = false;
+  let lastSnapshot: PullRequestCheckSnapshot | undefined;
+
+  while (true) {
+    if (opts.signal?.aborted) return { ok: false, error: "cancelled" };
+    try {
+      lastSnapshot = await fetchSnapshot(opts.prRef, opts.cwd, opts.signal);
+    } catch (err) {
+      return { ok: false, error: errText(err) };
+    }
+
+    if (lastSnapshot.state === "merged") {
+      const detail = `PR #${lastSnapshot.number} is already merged`;
+      opts.onPoll?.(lastSnapshot, detail);
+      return { ok: true, detail, prNumber: lastSnapshot.number, ...(rebased ? { rebased } : {}) };
+    }
+    if (lastSnapshot.state === "closed") {
+      return {
+        ok: false,
+        error: `PR #${lastSnapshot.number} is closed without being merged`,
+      };
+    }
+
+    const mergeable = lastSnapshot.mergeable ?? "UNKNOWN";
+    if (mergeable === "MERGEABLE") {
+      const detail = `PR #${lastSnapshot.number} is MERGEABLE`;
+      opts.onPoll?.(lastSnapshot, detail);
+      return { ok: true, detail, prNumber: lastSnapshot.number, ...(rebased ? { rebased } : {}) };
+    }
+
+    if (mergeable === "CONFLICTING") {
+      opts.onPoll?.(
+        lastSnapshot,
+        `PR #${lastSnapshot.number} has merge conflicts with the base branch`,
+      );
+      if (opts.autoRebase && !rebaseTried) {
+        rebaseTried = true;
+        const result = await rebasePr({
+          prRef: opts.prRef,
+          cwd: opts.cwd,
+          signal: opts.signal,
+          runGh: opts.runGh,
+          runGit: opts.runGit,
+        });
+        if (!result.ok) {
+          return {
+            ok: false,
+            error:
+              `PR #${lastSnapshot.number} conflicts with the base branch and could not be ` +
+              `rebased automatically: ${result.error}`,
+          };
+        }
+        rebased = true;
+        // Force-push (or a no-op against a stale CONFLICTING flag) — re-poll.
+        continue;
+      }
+      return {
+        ok: false,
+        error: `PR #${lastSnapshot.number} is still CONFLICTING on GitHub — prepare must leave the remote head MERGEABLE (push with --force-with-lease, then verify \`gh pr view ${lastSnapshot.number} --json mergeable\`)${rebaseTried ? " even after an automatic rebase onto the base" : ""}`,
+      };
+    }
+
+    // UNKNOWN: GitHub is still computing mergeability.
+    opts.onPoll?.(
+      lastSnapshot,
+      `PR #${lastSnapshot.number} mergeability is still UNKNOWN — waiting for GitHub`,
+    );
+    const remaining = deadline - nowMs();
+    if (remaining <= 0) {
+      return {
+        ok: false,
+        error:
+          `timed out after ${Math.round(timeoutMs / 1000)}s waiting for PR ` +
+          `#${lastSnapshot.number} mergeability to leave UNKNOWN`,
+      };
+    }
+    await sleep(Math.min(pollIntervalMs, remaining), opts.signal);
+  }
+}
+
 export interface MergeWhenReadyOptions extends WaitForChecksOptions {
   /** Forwarded to `gh pr merge` (default squash). */
   mergeStrategy?: "squash" | "merge" | "rebase";
@@ -659,7 +793,38 @@ export async function mergePullRequestWhenReady(
   // their CI-wait time in parallel, and only contend for the lock once they are
   // actually ready to land. Holding the lock across the (long) check wait would
   // serialize the waiting too and defeat the fan-out.
-  const firstWait = await waitGreen();
+  //
+  // When prepare left the PR CONFLICTING (or a sibling landed before this wait
+  // started), waitGreen fails immediately — before landUnderLock's auto-rebase
+  // can run. Replay one mechanical rebase here so --auto-rebase covers that
+  // path too. landUnderLock keeps its own separate one-shot for sibling races
+  // that appear under the lock after a green first wait.
+  let firstWait = await waitGreen();
+  if (!firstWait.ok && opts.autoRebase && firstWait.snapshot?.mergeable === "CONFLICTING") {
+    const prNumber = firstWait.snapshot.number;
+    const rebased = await (opts.rebasePr ?? rebasePullRequestOntoBase)({
+      prRef: opts.prRef,
+      cwd: opts.cwd,
+      signal: opts.signal,
+      runGh: opts.runGh,
+      runGit: opts.runGit,
+    });
+    if (!rebased.ok) {
+      return {
+        ok: false,
+        error:
+          `PR #${prNumber} conflicts with the base branch and could not be ` +
+          `rebased automatically: ${rebased.error}`,
+      };
+    }
+    firstWait = await waitGreen();
+    if (!firstWait.ok && firstWait.snapshot?.mergeable === "CONFLICTING") {
+      return {
+        ok: false,
+        error: `PR #${prNumber} still conflicts with the base branch after being rebased onto it — the conflict needs resolving by hand`,
+      };
+    }
+  }
   if (!firstWait.ok) return { ok: false, error: firstWait.error };
   if (firstWait.snapshot.state === "merged") {
     return alreadyMerged(firstWait.snapshot.number, firstWait.evaluation.detail);

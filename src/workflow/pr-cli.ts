@@ -2,8 +2,10 @@ import type { CliIO } from "../cli";
 import {
   DEFAULT_EMPTY_GRACE_MS,
   DEFAULT_POLL_INTERVAL_MS,
+  DEFAULT_REQUIRE_MERGEABLE_TIMEOUT_MS,
   DEFAULT_WAIT_TIMEOUT_MS,
   mergePullRequestWhenReady,
+  requirePullRequestMergeable,
   waitForPullRequestChecks,
 } from "./github-checks";
 import { rebasePullRequestOntoBase } from "./pr-rebase";
@@ -32,6 +34,9 @@ export async function runPrCommand(
   if (sub === "merge-when-ready") {
     return runMergeWhenReady(args.slice(1), io, out, err);
   }
+  if (sub === "require-mergeable") {
+    return runRequireMergeable(args.slice(1), io, out, err);
+  }
   if (sub === "rebase") {
     return runRebase(args.slice(1), io, out, err);
   }
@@ -45,6 +50,7 @@ export function prHelpText(): string {
 Usage:
   steamtrain workflow pr wait-checks <pr> [--timeout-sec <n>] [--poll-sec <n>] [--empty-grace-sec <n>] [--json]
   steamtrain workflow pr merge-when-ready <pr> [--timeout-sec <n>] [--poll-sec <n>] [--empty-grace-sec <n>] [--strategy squash|merge|rebase] [--keep-branch] [--auto-rebase] [--json]
+  steamtrain workflow pr require-mergeable <pr> [--timeout-sec <n>] [--poll-sec <n>] [--auto-rebase] [--json]
   steamtrain workflow pr rebase <pr> [--dry-run] [--json]
 
 <pr> may be a number, a pull URL, a head branch name, or a "number\\nbranch" line.
@@ -72,6 +78,13 @@ handled (behind → update + re-wait, conflict → reported) and transient
 "base branch was modified" errors are retried, instead of failing outright.
 With --auto-rebase a conflict is first replayed through \`pr rebase\` once, so
 a PR whose only problem is that a sibling landed ahead of it still lands.
+
+require-mergeable exits 0 only when the remote head is MERGEABLE (or already
+merged). It does not wait on CI — that is wait-checks / merge-when-ready.
+Babysit runs this after the prepare agent so a narrated-but-unpushed rebase
+cannot look ready to land. With --auto-rebase a purely mechanical conflict is
+replayed once before failing; content conflicts stay a hard failure for the
+agent loop.
 
 rebase fetches the PR's head and base, rebases the head onto \`origin/<base>\`
 and force-pushes it with a lease pinned to the ref it fetched. If the head
@@ -226,6 +239,43 @@ async function runRebase(
     cwd: io.cwd ?? process.cwd(),
     prRef: parsed.pr,
     push: !parsed.dryRun,
+  });
+
+  if (parsed.json) {
+    out(`${JSON.stringify(result, null, 2)}\n`);
+  } else if (result.ok) {
+    out(`${result.detail}\n`);
+  } else {
+    err(`${result.error}\n`);
+  }
+  return result.ok ? 0 : 1;
+}
+
+async function runRequireMergeable(
+  args: string[],
+  io: CliIO,
+  out: (text: string) => void,
+  err: (text: string) => void,
+): Promise<number> {
+  const parsed = parsePrFlags(args);
+  if ("error" in parsed) {
+    err(`${parsed.error}\n\n${prHelpText()}`);
+    return 1;
+  }
+  if (!parsed.pr) {
+    err(`require-mergeable requires a PR ref\n\n${prHelpText()}`);
+    return 1;
+  }
+  const cwd = io.cwd ?? process.cwd();
+  const result = await requirePullRequestMergeable({
+    cwd,
+    prRef: parsed.pr,
+    timeoutMs: (parsed.timeoutSec ?? DEFAULT_REQUIRE_MERGEABLE_TIMEOUT_MS / 1000) * 1000,
+    pollIntervalMs: (parsed.pollSec ?? DEFAULT_POLL_INTERVAL_MS / 1000) * 1000,
+    autoRebase: parsed.autoRebase,
+    onPoll: (_snapshot, detail) => {
+      if (!parsed.json) out(`${detail}\n`);
+    },
   });
 
   if (parsed.json) {
