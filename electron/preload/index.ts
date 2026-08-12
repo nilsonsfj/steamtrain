@@ -20,6 +20,10 @@ contextBridge.exposeInMainWorld("steamtrainDesktop", {
    */
   getLastWorkflow: () => ipcRenderer.invoke("steamtrain:get-last-workflow"),
   setLastWorkflow: (name: string) => ipcRenderer.invoke("steamtrain:set-last-workflow", name),
+  /** Rows for the topbar project switcher: known projects + what's live in each. */
+  listProjects: () => ipcRenderer.invoke("steamtrain:list-projects"),
+  /** Switch to an already-known project. Main re-checks the path; this is a request, not an instruction. */
+  openProject: (path: string) => ipcRenderer.invoke("steamtrain:open-project", path),
 });
 
 /**

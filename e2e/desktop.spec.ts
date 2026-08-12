@@ -40,7 +40,12 @@ const PACKAGED = process.env.STEAMTRAIN_E2E_APP;
 
 declare global {
   interface Window {
-    steamtrainDesktop?: { platform: string; version: string };
+    steamtrainDesktop?: {
+      platform: string;
+      version: string;
+      listProjects?: () => Promise<unknown>;
+      openProject?: (path: string) => Promise<void>;
+    };
   }
 }
 
@@ -96,13 +101,13 @@ interface Launched {
 
 const running: Launched[] = [];
 
-async function launchApp(projectArgument?: string): Promise<Launched> {
+async function launchApp(projectArgument?: string, alsoRecent: string[] = []): Promise<Launched> {
   const project = scratchDir("steamtrain-project-");
   const userData = scratchDir("steamtrain-userdata-");
   // Seeding the state file is how the app is told which project to open: it
   // reopens `recents[0]` and only shows the folder picker when there is nothing
   // to return to. Without this the test would block on a native modal.
-  writeFileSync(join(userData, STATE_FILE), JSON.stringify({ recents: [project] }));
+  writeFileSync(join(userData, STATE_FILE), JSON.stringify({ recents: [project, ...alsoRecent] }));
 
   // A packaged app has no script argument — it boots whatever its own manifest
   // names as `main`, which is the part worth testing.
@@ -202,6 +207,31 @@ test("launches into the last project and shows the web UI", async () => {
   // The preload bridge is the one thing the renderer cannot get over HTTP.
   const bridge = await page.evaluate(() => window.steamtrainDesktop);
   expect(bridge?.platform).toBe(process.platform);
+});
+
+test("lists the app's projects in the topbar switcher", async () => {
+  // The switcher is the one surface whose data comes over IPC rather than
+  // HTTP, so nothing short of the real app proves the chain: crumb click →
+  // preload bridge → main → each project's own `.steamtrain/runs` → rows.
+  const other = scratchDir("steamtrain-other-");
+  const { app, project } = await launchApp(undefined, [other]);
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+
+  await page.locator("#projectCrumb").click();
+  const rows = page.locator("#projectMenu .proj-row:not(.open-folder)");
+  await expect(rows).toHaveCount(2);
+  // The open project leads and is the marked one; the other recent follows.
+  await expect(rows.nth(0)).toHaveClass(/current/);
+  await expect(rows.nth(0).locator(".name")).toHaveText(basename(project));
+  await expect(rows.nth(1).locator(".name")).toHaveText(basename(other));
+  // Neither scratch project has ever run anything.
+  await expect(rows.nth(0).locator(".state")).toHaveText("idle");
+
+  // Escape puts it away without switching anything.
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#projectMenu")).toBeHidden();
+  await expect(page).toHaveTitle(`steamtrain · ${basename(project)}`);
 });
 
 test("uses an explicit project path instead of the saved project", async () => {
