@@ -152,7 +152,7 @@ ${styles}
       <button class="tbtn" id="workflowsBtn" title="Workflows — the plan cockpit">Workflows</button>
       <button class="tbtn" id="historyBtn" title="Browse live and past runs">Runs</button>
       <button class="tbtn" id="settingsBtn" title="Project agent and timeout settings">Settings</button>
-      <button class="tbtn" id="switchProjectBtn" title="Switch project…" style="display:none">Switch Project</button>
+      <button class="tbtn" id="switchProjectBtn" title="Switch project…">Switch Project</button>
     </div>
   </header>
   <div id="cols">
