@@ -38,6 +38,20 @@ describe("renderPrompt", () => {
     expect(out).toBe("a\nb true ready");
   });
 
+  it("falls back to output lines for a step that declared no items", () => {
+    // `forEach` fans out over exactly these lines when the source step has no
+    // `items` of its own (a `command` step listing PR numbers, say). Rendering
+    // "" here instead is how babysit-all-prs printed "Open PRs considered:"
+    // with nothing under it while fanning out over six PRs.
+    const out = renderPrompt("{{steps.list.items}}", {
+      input: "x",
+      outputs: new Map([["list", "460\n457\n\n  436  \n"]]),
+      results: new Map([["list", { ok: true }]]),
+    });
+
+    expect(out).toBe("460\n457\n436");
+  });
+
   it("substitutes dynamic fan-out item fields", () => {
     const out = renderPrompt("{{item.index}} {{item}} {{item.sourceStepId}}", {
       input: "x",

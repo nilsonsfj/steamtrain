@@ -116,7 +116,7 @@ import {
   structuredOutputFixPrompt,
   withStructuredOutputInstructions,
 } from "./structured";
-import { renderCmd, renderPrompt } from "./template";
+import { renderCmd, renderPrompt, splitItemsFromOutput } from "./template";
 import { abortableSleep, resolveStepTimeoutSec, timeoutMsFromSec } from "./timeout";
 import {
   type AgentBackedWorkflowStep,
@@ -304,6 +304,15 @@ interface RunEnv {
    * again during a pause between iterations.
    */
   startedSteps: Set<string>;
+  /**
+   * Steps whose result was produced in THIS run rather than replayed from the
+   * on-disk cache. A cached result is only as good as the inputs it was
+   * computed from, so a step whose dependency re-ran must re-run too — see
+   * {@link reRunDependency}.
+   */
+  ranLive: Set<string>;
+  /** Memoized {@link computeEffectiveDeps} graph; built on first staleness check. */
+  stepDeps?: Map<string, Set<string>>;
   /** Tracks the emitted pause state so `run_paused`/`run_resumed` fire once per transition. */
   pauseState: { acked: boolean };
   /**
@@ -418,6 +427,7 @@ export async function* runWorkflow(
     spent: { costUsd: costOfCachedResults(cache) },
     budgetState: { exceeded: false },
     startedSteps: new Set<string>(),
+    ranLive: new Set<string>(),
     pauseState: { acked: false },
     bindingResolutions: bound.resolutions,
     inFlight: new Map<string, InFlightStep>(),
@@ -671,6 +681,25 @@ function invalidateEditedStep(env: RunEnv, stepId: string): void {
 function recordStepSession(sessions: Map<string, string>, result: StepResult): void {
   if (result.sessionId) sessions.set(result.stepId, result.sessionId);
   else sessions.delete(result.stepId);
+}
+
+/**
+ * The first effective dependency of `stepId` that produced a fresh result in
+ * this run instead of replaying one, or `undefined` when every input is
+ * unchanged and a cached result is still faithful.
+ *
+ * Only direct dependencies are checked: a step that re-runs because of this is
+ * itself recorded as fresh, so the invalidation walks the graph one edge at a
+ * time as the run reaches each step. On a first run (nothing cached) and on a
+ * clean resume (nothing re-ran) this is a no-op.
+ */
+function reRunDependency(env: RunEnv, stepId: string): string | undefined {
+  if (env.ranLive.size === 0) return undefined;
+  env.stepDeps ??= computeEffectiveDeps(env.spec);
+  for (const dep of env.stepDeps.get(stepId) ?? []) {
+    if (env.ranLive.has(dep)) return dep;
+  }
+  return undefined;
 }
 
 /** Delete one step's cache/results/outputs entries, including `forEach` children. */
@@ -1286,6 +1315,7 @@ async function runSingleStep(
     outputs.set(step.id, failed.output);
     results.set(step.id, failed);
     allResults.push(failed);
+    env.ranLive.add(step.id);
     const stop = step.kind === "gate" && (step.onFalse === "fail" || step.onFalse === "stop");
     push({
       kind: "step_done",
@@ -1317,6 +1347,19 @@ async function runSingleStep(
       cache.delete(step.id);
       cached = undefined;
     }
+  }
+  // Same principle, one level up: a cached result is a function of its inputs,
+  // so replaying it after a dependency re-ran reports the PREVIOUS attempt.
+  // `babysit-all-prs` is the case that surfaced this — its summary step depends
+  // on the per-PR fan-out only through a template reference, deliberately, so
+  // that a partial fan-out still gets summarized. That means the summary can
+  // succeed (and be cached) while the fan-out fails; the next run re-ran the
+  // fan-out, every PR passed, and the summary replayed the old text saying
+  // every PR was blocked.
+  const staleDep = cached ? reRunDependency(env, step.id) : undefined;
+  if (staleDep) {
+    dropStepEntries(env, step.id);
+    cached = undefined;
   }
   if (cached) {
     for (const child of cached.childResults ?? []) {
@@ -1388,6 +1431,11 @@ async function runSingleStep(
     });
     return { notOk, stop };
   }
+
+  // Past the replay branch: whatever this step settles as — a `when` skip or a
+  // live execution — is this run's own result, so anything downstream holding a
+  // cached result computed from the old one has to re-run. See `reRunDependency`.
+  env.ranLive.add(step.id);
 
   // `when` condition / skip cascade: the step is recorded as skipped (ok,
   // empty output) rather than executed. Skips are cached like any other ok
@@ -1823,11 +1871,18 @@ async function executeStep(
     const onFalse = step.onFalse ?? "continue";
     const ok = evaluation.passed || onFalse === "continue";
     const target = step.target ?? (evaluation.passed ? "passed" : "blocked");
+    // `target` is the routing label and stays a bare word; `output` is what
+    // humans (and any downstream prompt, and a sub-workflow's caller when the
+    // gate is its last step) actually read, so it carries the reason. A gate
+    // with the default onFalse "continue" is `ok`, which drops `error` — the
+    // reason had nowhere else to go, and "blocked" alone said nothing.
+    const output =
+      evaluation.passed || !evaluation.message ? target : `${target}: ${evaluation.message}`;
     return {
       result: {
         stepId: step.id,
         ok,
-        output: target,
+        output,
         target,
         gate: { passed: evaluation.passed, onFalse },
         error: ok ? undefined : evaluation.message,
@@ -4737,15 +4792,6 @@ function conflictResolutionPrompt(
     .join("\n");
 }
 
-function splitItemsFromOutput(output: string | undefined): string[] {
-  return output
-    ? output
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-    : [];
-}
-
 function findFailedDependency(
   step: WorkflowStep,
   results: Map<string, StepResult>,
@@ -5385,9 +5431,30 @@ function evaluateGate(
         : ctx.input;
   let passed = true;
   let message: string | undefined;
+  // One line per clause that did not hold. These are the only account of why a
+  // gate blocked: with the default onFalse "continue" the gate is `ok`, so the
+  // result carries no `error`, and a bare "gate condition did not pass" left
+  // the reader to reconstruct it from the rest of the run.
+  const reasons: string[] = [];
+  const subjectLabel = condition.step ? `step '${condition.step}'` : "input";
+  const inspected =
+    condition.value !== undefined
+      ? `value '${condition.value}'`
+      : condition.path !== undefined
+        ? `${subjectLabel} json.${condition.path}`
+        : subjectLabel;
 
   if (condition.ok !== undefined) {
-    passed = passed && Boolean(subject && subject.ok === condition.ok);
+    if (!subject) {
+      reasons.push(`${subjectLabel} produced no result`);
+      passed = false;
+    } else if (subject.ok !== condition.ok) {
+      // The subject's own error is the useful half — "wait-or-merge failed"
+      // matters far less than what it failed with.
+      const detail = subject.error ? `: ${firstLine(subject.error)}` : "";
+      reasons.push(`${subjectLabel} is ok=${subject.ok}, expected ok=${condition.ok}${detail}`);
+      passed = false;
+    }
   }
   if (condition.contains !== undefined) {
     const needle = renderPrompt(condition.contains, {
@@ -5397,7 +5464,10 @@ function evaluateGate(
       results: ctx.results,
       iteration: ctx.iteration,
     });
-    passed = passed && text.includes(needle);
+    if (!text.includes(needle)) {
+      reasons.push(`${inspected} does not contain ${JSON.stringify(needle)}`);
+      passed = false;
+    }
   }
   if (condition.equals !== undefined) {
     const expected = renderPrompt(condition.equals, {
@@ -5407,7 +5477,12 @@ function evaluateGate(
       results: ctx.results,
       iteration: ctx.iteration,
     });
-    passed = passed && text === expected;
+    if (text !== expected) {
+      reasons.push(
+        `${inspected} is ${JSON.stringify(clip(text))}, expected ${JSON.stringify(expected)}`,
+      );
+      passed = false;
+    }
   }
   if (condition.matches !== undefined) {
     const pattern = renderPrompt(condition.matches, {
@@ -5421,13 +5496,33 @@ function evaluateGate(
     if (!match.ok) {
       passed = false;
       message = `invalid gate regex: ${match.error}`;
-    } else {
-      passed = passed && match.matched === true;
+    } else if (match.matched !== true) {
+      reasons.push(`${inspected} does not match /${pattern}/`);
+      passed = false;
     }
   }
 
   if (condition.not) passed = !passed;
-  return { passed, message: message ?? (passed ? undefined : "gate condition did not pass") };
+  if (message) return { passed, message };
+  if (passed) return { passed, message: undefined };
+  // Under `not`, the collected reasons explain why the inner condition failed —
+  // which is why a negated gate PASSED. A negated gate that blocked did so
+  // because the condition held, so those reasons would read backwards.
+  return {
+    passed,
+    message: condition.not
+      ? `${inspected} matched a condition marked not: true`
+      : reasons.join("; ") || "gate condition did not pass",
+  };
+}
+
+/** First line of a possibly multi-line error, clipped — gate reasons are one-liners. */
+function firstLine(text: string): string {
+  return clip(text.split(/\r?\n/, 1)[0]?.trim() ?? "");
+}
+
+function clip(text: string, max = 160): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
 /**
