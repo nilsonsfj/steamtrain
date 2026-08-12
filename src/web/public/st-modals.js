@@ -345,7 +345,27 @@
   }
   function fillOptions(sel, opts, selected) {
     clear(sel);
-    opts.forEach(function (o) { sel.appendChild(h("option", { value: o.value }, o.label)); });
+    // Consecutive options sharing a `group` are nested under one <optgroup>,
+    // so long catalogs (e.g. Claude's current/alias/1M/legacy split) render
+    // as a structured list instead of one flat wall of entries. Options
+    // without a group render at the top level, same as before.
+    var groupEl = null;
+    var groupLabel = null;
+    opts.forEach(function (o) {
+      var option = h("option", { value: o.value }, o.label);
+      if (o.group) {
+        if (groupLabel !== o.group) {
+          groupEl = h("optgroup", { label: o.group });
+          sel.appendChild(groupEl);
+          groupLabel = o.group;
+        }
+        groupEl.appendChild(option);
+      } else {
+        sel.appendChild(option);
+        groupEl = null;
+        groupLabel = null;
+      }
+    });
     if (selected != null) sel.value = selected;
     if (!sel.value && opts.length) sel.value = opts[0].value;
   }
@@ -375,7 +395,7 @@
     ];
   }
   function modelOptions(agentId) {
-    return modelsFor(agentId).map(function (m) { return { value: m.id, label: m.name }; });
+    return modelsFor(agentId).map(function (m) { return { value: m.id, label: m.name, group: m.group }; });
   }
   // Keep the step's current model selectable even if it's not in the live
   // catalog (e.g. a paid or removed model), so configuring never silently

@@ -31,47 +31,101 @@ const AGENT: AgentId = "claude";
  * and https://support.claude.com/en/articles/11940350-claude-code-model-configuration
  * (verified against Claude Code 2.1.221: `/model` aliases include opus → Opus 5).
  */
+const CLAUDE_MODEL_GROUP_CURRENT = "Current";
+const CLAUDE_MODEL_GROUP_ALIASES = "Aliases (latest)";
+const CLAUDE_MODEL_GROUP_1M = "1M context";
+const CLAUDE_MODEL_GROUP_PREVIOUS = "Previous";
+const CLAUDE_MODEL_GROUP_OLDER = "Older snapshots";
+
 export const CLAUDE_MODELS: readonly AgentModel[] = [
   // Current
-  { id: "claude-fable-5", name: "Claude Fable 5" },
-  { id: "claude-opus-5", name: "Claude Opus 5" },
-  { id: "claude-sonnet-5", name: "Claude Sonnet 5" },
-  { id: "claude-haiku-4-5", name: "Claude Haiku 4.5" },
-  { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5 (20251001)" },
-  { id: "claude-mythos-5", name: "Claude Mythos 5 (limited)" },
+  { id: "claude-fable-5", name: "Claude Fable 5", group: CLAUDE_MODEL_GROUP_CURRENT },
+  { id: "claude-opus-5", name: "Claude Opus 5", group: CLAUDE_MODEL_GROUP_CURRENT },
+  { id: "claude-sonnet-5", name: "Claude Sonnet 5", group: CLAUDE_MODEL_GROUP_CURRENT },
+  { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", group: CLAUDE_MODEL_GROUP_CURRENT },
+  {
+    id: "claude-haiku-4-5-20251001",
+    name: "Claude Haiku 4.5 (20251001)",
+    group: CLAUDE_MODEL_GROUP_CURRENT,
+  },
+  {
+    id: "claude-mythos-5",
+    name: "Claude Mythos 5 (limited)",
+    group: CLAUDE_MODEL_GROUP_CURRENT,
+  },
   // Aliases (https://code.claude.com/docs/en/model-config)
-  { id: "fable", name: "Fable (latest)" },
-  { id: "sonnet", name: "Sonnet (latest)" },
-  { id: "opus", name: "Opus (latest)" },
-  { id: "haiku", name: "Haiku (latest)" },
-  { id: "best", name: "Best (latest)" },
-  { id: "opusplan", name: "Opus Plan" },
+  { id: "fable", name: "Fable (latest)", group: CLAUDE_MODEL_GROUP_ALIASES },
+  { id: "sonnet", name: "Sonnet (latest)", group: CLAUDE_MODEL_GROUP_ALIASES },
+  { id: "opus", name: "Opus (latest)", group: CLAUDE_MODEL_GROUP_ALIASES },
+  { id: "haiku", name: "Haiku (latest)", group: CLAUDE_MODEL_GROUP_ALIASES },
+  { id: "best", name: "Best (latest)", group: CLAUDE_MODEL_GROUP_ALIASES },
+  { id: "opusplan", name: "Opus Plan", group: CLAUDE_MODEL_GROUP_ALIASES },
   // 1M context
-  { id: "fable[1m]", name: "Fable (1M context)" },
-  { id: "sonnet[1m]", name: "Sonnet (1M context)" },
-  { id: "opus[1m]", name: "Opus (1M context)" },
-  { id: "claude-fable-5[1m]", name: "Claude Fable 5 (1M context)" },
-  { id: "claude-opus-5[1m]", name: "Claude Opus 5 (1M context)" },
-  { id: "claude-sonnet-5[1m]", name: "Claude Sonnet 5 (1M context)" },
-  { id: "claude-opus-4-8[1m]", name: "Claude Opus 4.8 (1M context)" },
-  { id: "claude-opus-4-7[1m]", name: "Claude Opus 4.7 (1M context)" },
-  { id: "claude-sonnet-4-6[1m]", name: "Claude Sonnet 4.6 (1M context)" },
+  { id: "fable[1m]", name: "Fable (1M context)", group: CLAUDE_MODEL_GROUP_1M },
+  { id: "sonnet[1m]", name: "Sonnet (1M context)", group: CLAUDE_MODEL_GROUP_1M },
+  { id: "opus[1m]", name: "Opus (1M context)", group: CLAUDE_MODEL_GROUP_1M },
+  {
+    id: "claude-fable-5[1m]",
+    name: "Claude Fable 5 (1M context)",
+    group: CLAUDE_MODEL_GROUP_1M,
+  },
+  { id: "claude-opus-5[1m]", name: "Claude Opus 5 (1M context)", group: CLAUDE_MODEL_GROUP_1M },
+  {
+    id: "claude-sonnet-5[1m]",
+    name: "Claude Sonnet 5 (1M context)",
+    group: CLAUDE_MODEL_GROUP_1M,
+  },
+  {
+    id: "claude-opus-4-8[1m]",
+    name: "Claude Opus 4.8 (1M context)",
+    group: CLAUDE_MODEL_GROUP_1M,
+  },
+  {
+    id: "claude-opus-4-7[1m]",
+    name: "Claude Opus 4.7 (1M context)",
+    group: CLAUDE_MODEL_GROUP_1M,
+  },
+  {
+    id: "claude-sonnet-4-6[1m]",
+    name: "Claude Sonnet 4.6 (1M context)",
+    group: CLAUDE_MODEL_GROUP_1M,
+  },
   // Previous / still documented
-  { id: "claude-opus-4-8", name: "Claude Opus 4.8" },
-  { id: "claude-opus-4-7", name: "Claude Opus 4.7" },
-  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
-  { id: "claude-opus-4-6", name: "Claude Opus 4.6" },
-  { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" },
-  { id: "claude-sonnet-4-5-20250929", name: "Claude Sonnet 4.5 (20250929)" },
-  { id: "claude-opus-4-5", name: "Claude Opus 4.5" },
-  { id: "claude-opus-4-5-20251101", name: "Claude Opus 4.5 (20251101)" },
+  { id: "claude-opus-4-8", name: "Claude Opus 4.8", group: CLAUDE_MODEL_GROUP_PREVIOUS },
+  { id: "claude-opus-4-7", name: "Claude Opus 4.7", group: CLAUDE_MODEL_GROUP_PREVIOUS },
+  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", group: CLAUDE_MODEL_GROUP_PREVIOUS },
+  { id: "claude-opus-4-6", name: "Claude Opus 4.6", group: CLAUDE_MODEL_GROUP_PREVIOUS },
+  { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", group: CLAUDE_MODEL_GROUP_PREVIOUS },
+  {
+    id: "claude-sonnet-4-5-20250929",
+    name: "Claude Sonnet 4.5 (20250929)",
+    group: CLAUDE_MODEL_GROUP_PREVIOUS,
+  },
+  { id: "claude-opus-4-5", name: "Claude Opus 4.5", group: CLAUDE_MODEL_GROUP_PREVIOUS },
+  {
+    id: "claude-opus-4-5-20251101",
+    name: "Claude Opus 4.5 (20251101)",
+    group: CLAUDE_MODEL_GROUP_PREVIOUS,
+  },
   // Older snapshots still accepted by Claude Code
-  { id: "claude-opus-4-1", name: "Claude Opus 4.1" },
-  { id: "claude-opus-4-1-20250805", name: "Claude Opus 4.1 (20250805)" },
-  { id: "claude-sonnet-4-0", name: "Claude Sonnet 4.0" },
-  { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4 (20250514)" },
-  { id: "claude-opus-4-0", name: "Claude Opus 4.0" },
-  { id: "claude-opus-4-20250514", name: "Claude Opus 4 (20250514)" },
+  { id: "claude-opus-4-1", name: "Claude Opus 4.1", group: CLAUDE_MODEL_GROUP_OLDER },
+  {
+    id: "claude-opus-4-1-20250805",
+    name: "Claude Opus 4.1 (20250805)",
+    group: CLAUDE_MODEL_GROUP_OLDER,
+  },
+  { id: "claude-sonnet-4-0", name: "Claude Sonnet 4.0", group: CLAUDE_MODEL_GROUP_OLDER },
+  {
+    id: "claude-sonnet-4-20250514",
+    name: "Claude Sonnet 4 (20250514)",
+    group: CLAUDE_MODEL_GROUP_OLDER,
+  },
+  { id: "claude-opus-4-0", name: "Claude Opus 4.0", group: CLAUDE_MODEL_GROUP_OLDER },
+  {
+    id: "claude-opus-4-20250514",
+    name: "Claude Opus 4 (20250514)",
+    group: CLAUDE_MODEL_GROUP_OLDER,
+  },
 ];
 
 /**
