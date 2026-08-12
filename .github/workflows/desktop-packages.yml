@@ -23,7 +23,7 @@ jobs:
           - os: macos-latest
             target: --mac
             artifact: macos
-          - os: ubuntu-latest
+          - os: ubuntu-slim
             target: --linux --x64
             artifact: linux-x64
     runs-on: ${{ matrix.os }}

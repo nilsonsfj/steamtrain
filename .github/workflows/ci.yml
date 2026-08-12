@@ -8,7 +8,7 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     steps:
       - uses: actions/checkout@v6
 
@@ -46,7 +46,7 @@ jobs:
   # the thing users actually open in a browser — launch + approve against a
   # real engine, with no agent CLI required (approval-only workflow).
   web:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     steps:
       - uses: actions/checkout@v6
 
@@ -83,7 +83,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-slim, macos-latest]
     runs-on: ${{ matrix.os }}
     # Electron's own process sandbox cannot start on the Linux runners — the
     # `chrome-sandbox` helper npm installs is not owned by root, so it cannot
