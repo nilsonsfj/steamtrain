@@ -83,7 +83,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-slim, macos-latest]
+        # `ubuntu-latest`, not the `ubuntu-slim` the other jobs run on: this is
+        # the one job that *launches* Electron, and the slim image ships none
+        # of the GTK/ATK/NSS stack a browser process links against — the binary
+        # exits 127 before a test runs. Installing that stack by hand is a long
+        # apt list to keep correct across image updates, and the full image
+        # already has it.
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     # Electron's own process sandbox cannot start on the Linux runners — the
     # `chrome-sandbox` helper npm installs is not owned by root, so it cannot
