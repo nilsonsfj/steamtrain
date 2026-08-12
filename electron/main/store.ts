@@ -102,6 +102,22 @@ export function parseState(raw: string): DesktopState {
   };
 }
 
+/**
+ * Drop `lastWorkflow` entries for projects no longer in `recents`.
+ *
+ * `recents` is already pruned/trimmed/cleared in several places; without this
+ * `lastWorkflow` would grow by one key per project ever opened, forever.
+ */
+export function pruneLastWorkflow(
+  lastWorkflow: Record<string, string> | undefined,
+  recents: readonly string[],
+): Record<string, string> | undefined {
+  if (!lastWorkflow) return undefined;
+  const kept = new Set(recents);
+  const entries = Object.entries(lastWorkflow).filter(([dir]) => kept.has(dir));
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
 export interface StateStore {
   read(): DesktopState;
   write(state: DesktopState): void;

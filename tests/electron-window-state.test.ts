@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseState } from "../electron/main/store";
+import { parseState, pruneLastWorkflow } from "../electron/main/store";
 import {
   DEFAULT_HEIGHT,
   DEFAULT_WIDTH,
@@ -149,5 +149,28 @@ describe("parseState", () => {
   it("treats a non-object lastWorkflow as absent", () => {
     expect(parseState(JSON.stringify({ lastWorkflow: "release" })).lastWorkflow).toBeUndefined();
     expect(parseState(JSON.stringify({ lastWorkflow: ["release"] })).lastWorkflow).toBeUndefined();
+  });
+});
+
+describe("pruneLastWorkflow", () => {
+  it("drops entries for projects no longer in recents", () => {
+    const lastWorkflow = { "/a": "release", "/b": "tour", "/c": "docs" };
+    expect(pruneLastWorkflow(lastWorkflow, ["/a", "/c"])).toEqual({
+      "/a": "release",
+      "/c": "docs",
+    });
+  });
+
+  it("keeps every entry when all projects are still recent", () => {
+    const lastWorkflow = { "/a": "release", "/b": "tour" };
+    expect(pruneLastWorkflow(lastWorkflow, ["/a", "/b"])).toEqual(lastWorkflow);
+  });
+
+  it("returns undefined once recents empties out entirely", () => {
+    expect(pruneLastWorkflow({ "/a": "release" }, [])).toBeUndefined();
+  });
+
+  it("passes through undefined unchanged", () => {
+    expect(pruneLastWorkflow(undefined, ["/a"])).toBeUndefined();
   });
 });
