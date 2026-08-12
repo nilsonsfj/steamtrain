@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
-import { BrowserWindow, Notification, app, dialog, screen } from "electron";
+import { BrowserWindow, Notification, app, dialog, ipcMain, screen } from "electron";
 import { resolveEntry } from "./entry";
 import { launchProjectPath, selectLaunchProject } from "./launch-project";
 import { buildMenu } from "./menu";
@@ -310,6 +310,13 @@ async function main(): Promise<void> {
   // leaving the user to guess whether the PATH recovery worked.
   process.env.STEAMTRAIN_PATH_SOURCE = resolved.source;
   process.env.STEAMTRAIN_PATH_DETAIL = resolved.detail;
+
+  // Same action as the "Open Project…" menu item, reachable from the topbar
+  // button the renderer shows once it knows it's running in the desktop app.
+  ipcMain.handle("steamtrain:switch-project", async () => {
+    const dir = await promptForProject();
+    if (dir) await switchProject(dir);
+  });
 
   installWebContentsGuards((url) => {
     if (!server) return false;

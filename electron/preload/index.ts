@@ -1,4 +1,4 @@
-import { contextBridge } from "electron";
+import { contextBridge, ipcRenderer } from "electron";
 import { TITLE_BAR_INSET_PX, overlaysTitleBar } from "../shared/title-bar";
 
 /**
@@ -6,13 +6,14 @@ import { TITLE_BAR_INSET_PX, overlaysTitleBar } from "../shared/title-bar";
  *
  * The UI talks to the engine over HTTP, not IPC, so nothing here is required
  * for it to work — this exists so the client can *detect* that it is running in
- * the desktop app and adapt (M2 adds project switching and notifications).
- * `ipcRenderer` itself is never exposed: anything the renderer may ask for gets
- * an explicit, validated function.
+ * the desktop app and adapt. `ipcRenderer` itself is never exposed: anything
+ * the renderer may ask for gets an explicit, validated function.
  */
 contextBridge.exposeInMainWorld("steamtrainDesktop", {
   platform: process.platform,
   version: process.versions.electron,
+  /** Same dialog the "Open Project…" menu item and its shortcut trigger. */
+  switchProject: () => ipcRenderer.invoke("steamtrain:switch-project"),
 });
 
 /**

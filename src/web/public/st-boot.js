@@ -179,6 +179,9 @@
     document.getElementById("workflowsBtn").addEventListener("click", function () { ST.goHome(); });
     document.getElementById("historyBtn").addEventListener("click", function () { ST.runs.open(); });
     document.getElementById("settingsBtn").addEventListener("click", function () { ST.settings.open(); });
+    document.getElementById("switchProjectBtn").addEventListener("click", function () {
+      if (window.steamtrainDesktop && window.steamtrainDesktop.switchProject) window.steamtrainDesktop.switchProject();
+    });
     document.getElementById("editBtn").addEventListener("click", function () { ST.modals.openEditor(false); });
     document.getElementById("cloneBtn").addEventListener("click", function () { ST.modals.openEditor(true); });
     document.getElementById("deleteBtn").addEventListener("click", ST.modals.doDelete);

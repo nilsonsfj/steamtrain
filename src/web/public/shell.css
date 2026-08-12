@@ -124,6 +124,17 @@ html.desktop-titlebar-overlay #topbar .status-pill {
   -webkit-app-region: no-drag;
 }
 
+/* Switching projects means picking a directory off disk, which only the
+   desktop app can do — the plain web UI has no filesystem to browse. Base
+   case hides it; an inline style would beat this rule's specificity and the
+   button would never reappear, so the toggle has to live entirely in CSS. */
+#switchProjectBtn {
+  display: none;
+}
+html.desktop-app #switchProjectBtn {
+  display: inline-flex;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
