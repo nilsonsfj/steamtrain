@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { runCli } from "../src/cli";
@@ -15,6 +15,7 @@ import {
   createWorkflowHistoryStore,
   gcRepoWorktrees,
   listRepoWorktrees,
+  reclaimCleanRunWorktrees,
 } from "../src/workflow";
 
 const execFileAsync = promisify(execFile);
@@ -123,6 +124,78 @@ describe("repo-wide worktree GC", () => {
     const branches = await git(repo, "branch", "--list", "steamtrain/*");
     expect(branches).toContain("steamtrain/merged/some-deliverable");
     expect(branches).not.toContain(lease.branch as string);
+  });
+
+  it("sees worktrees a step left on a detached head, and keeps their own commits", async () => {
+    const { repo, allocate } = await makeRepo();
+    // A step that rebases or checks out inside its worktree leaves a detached
+    // head, so `git worktree list` reports no branch for it.
+    const rebased = await allocate("rebased", async (root) => {
+      await git(root, "checkout", "--detach");
+    });
+    let entries = await listRepoWorktrees(repo, []);
+    // `git worktree list` reports the realpath (/private/var/… on macOS).
+    expect(entries.find((e) => e.branch === rebased.branch)?.root).toContain(
+      basename(rebased.root as string),
+    );
+    expect(entries.find((e) => e.branch === rebased.branch)?.exists).toBe(true);
+    expect(entries.find((e) => e.branch === rebased.branch)?.changed).toBe(false);
+
+    // Commits made on that detached head live on no ref — GC must not eat them.
+    await writeFile(join(rebased.root as string, "new.txt"), "detached work\n");
+    await git(rebased.root as string, "add", ".");
+    await git(rebased.root as string, "commit", "-m", "agent work");
+    entries = await listRepoWorktrees(repo, []);
+    expect(entries.find((e) => e.branch === rebased.branch)?.changed).toBe(true);
+
+    const guarded = await gcRepoWorktrees({ repoRoot: repo, records: [], all: true });
+    expect(guarded.removed).toHaveLength(0);
+    expect(guarded.skipped[0]?.reason).toContain("unharvested");
+
+    // Reset to the base commit: nothing of its own left, so GC removes the
+    // directory and the registration, not just the branch.
+    await git(rebased.root as string, "reset", "--hard", "HEAD~1");
+
+    // Same for a step that checked out somebody else's branch (a PR head):
+    // the registration reports THAT branch, not the one steamtrain gave it.
+    const checkedOut = await allocate("checked-out", async (root) => {
+      await git(root, "checkout", "-b", "pr-460-head");
+    });
+    const listed = await listRepoWorktrees(repo, []);
+    expect(listed.map((e) => e.branch)).toContain(checkedOut.branch);
+    expect(listed.map((e) => e.branch)).not.toContain("pr-460-head");
+
+    const removed = await gcRepoWorktrees({ repoRoot: repo, records: [], all: true });
+    expect(removed.removed.map((e) => e.branch).sort()).toEqual(
+      [rebased.branch, checkedOut.branch].sort(),
+    );
+    // GC owns only steamtrain's own branch names — never the checked-out one.
+    expect(await git(repo, "branch", "--list", "pr-460-head")).toContain("pr-460-head");
+    expect(await git(repo, "worktree", "list")).not.toContain(basename(rebased.root as string));
+  });
+
+  it("reclaims a finished run's worktrees only when the whole run left no work", async () => {
+    const { repo, allocate } = await makeRepo();
+    const first = await allocate("step-a", async () => {});
+    const second = await allocate("step-b", async () => {});
+
+    // A run that produced nothing to harvest is reclaimed whole — otherwise a
+    // PR-babysitting run leaves a worktree per step, per PR, per iteration.
+    expect(await reclaimCleanRunWorktrees("gc-run", repo)).toBe(2);
+    expect(await git(repo, "branch", "--list", "steamtrain/*")).toBe("");
+    expect(await git(repo, "worktree", "list")).not.toContain(first.root as string);
+    expect(await git(repo, "worktree", "list")).not.toContain(second.root as string);
+
+    // One worktree holding agent work protects the whole run's set, so
+    // `history apply/diff` still finds every worktree it recorded.
+    const kept = await allocate("step-c", async () => {});
+    const worked = await allocate("step-d", async (root) => {
+      await writeFile(join(root, "new.txt"), "agent work\n");
+    });
+    expect(await reclaimCleanRunWorktrees("gc-run", repo)).toBe(0);
+    const branches = await git(repo, "branch", "--list", "steamtrain/*");
+    expect(branches).toContain(kept.branch as string);
+    expect(branches).toContain(worked.branch as string);
   });
 
   it("is exposed as 'workflow worktrees list|prune' in the CLI", async () => {

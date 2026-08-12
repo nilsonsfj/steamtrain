@@ -1,4 +1,5 @@
 import { rm, stat } from "node:fs/promises";
+import { basename, dirname } from "node:path";
 import type { RunRecord } from "./history";
 import {
   type HarvestResult,
@@ -8,7 +9,7 @@ import {
   pruneWorktree,
   worktreeSourceFromInfo,
 } from "./merge";
-import { runGit, runGitText } from "./worktree";
+import { runGit, runGitText, withRepoWorktreeLock } from "./worktree";
 
 /**
  * Post-run worktree lifecycle, shared by the CLI, the web server, and the TUI:
@@ -196,6 +197,28 @@ export interface RepoWorktreeEntry {
   };
 }
 
+/**
+ * The step branch a steamtrain worktree path belongs to, recovered from the
+ * layout `…/<repoBasename>-<8 hex>/<10 hex runId>/<step>` that
+ * `createGitWorktreeManager` builds every worktree under (see worktree.ts).
+ * Deliberately strict: a path that does not match both id shapes is somebody
+ * else's worktree and must never be attributed to steamtrain.
+ */
+function stepBranchFromWorktreePath(
+  root: string,
+  options: { requireIdShapes: boolean },
+): string | undefined {
+  const step = basename(root);
+  const runId = basename(dirname(root));
+  const repoDir = basename(dirname(dirname(root)));
+  if (!step || !runId) return undefined;
+  if (options.requireIdShapes) {
+    if (!/^[0-9a-f]{10}$/.test(runId)) return undefined;
+    if (!/-[0-9a-f]{8}$/.test(repoDir)) return undefined;
+  }
+  return `${BRANCH_PREFIX}${runId}/${step}`;
+}
+
 /** Merge deliverables (`steamtrain/merged/*`) are never GC targets. */
 const MERGED_BRANCH_PREFIX = "steamtrain/merged/";
 /** All steamtrain-owned branches; step worktree branches are these minus merged/. */
@@ -217,15 +240,46 @@ export async function listRepoWorktrees(
     .map((line) => line.trim())
     .filter((name) => name.startsWith(BRANCH_PREFIX) && !name.startsWith(MERGED_BRANCH_PREFIX));
 
-  // branch -> registered worktree path, from `git worktree list`.
+  // branch -> registered worktree path, from `git worktree list`. Only a
+  // worktree still sitting on the branch steamtrain gave it reports that
+  // branch: a step that rebases leaves a DETACHED head, and one that checks
+  // out a PR head reports THAT branch instead. Both cases fall back to the
+  // path layout every steamtrain worktree is created with —
+  // `<repo>-<hash>/<runId>/<step>` mirrors branch `steamtrain/<runId>/<step>`.
+  // Without that fallback such a worktree's directory and registration are
+  // invisible to GC and pile up until agent CLIs blow their argv limit.
   const rootByBranch = new Map<string, string>();
   const porcelain = await runGitText(["worktree", "list", "--porcelain"], repoRoot);
   let currentRoot: string | undefined;
+  const registrations: { root: string; branch?: string }[] = [];
   for (const line of porcelain.split("\n")) {
-    if (line.startsWith("worktree ")) currentRoot = line.slice("worktree ".length).trim();
-    else if (line.startsWith("branch refs/heads/") && currentRoot) {
-      rootByBranch.set(line.slice("branch refs/heads/".length).trim(), currentRoot);
+    if (line.startsWith("worktree ")) {
+      currentRoot = line.slice("worktree ".length).trim();
+      if (currentRoot) registrations.push({ root: currentRoot });
+    } else if (line.startsWith("branch refs/heads/") && currentRoot) {
+      const branch = line.slice("branch refs/heads/".length).trim();
+      const registration = registrations[registrations.length - 1];
+      if (registration?.root === currentRoot) registration.branch = branch;
+      rootByBranch.set(branch, currentRoot);
     }
+  }
+  const orphanBranches: string[] = [];
+  for (const registration of registrations) {
+    if (registration.branch?.startsWith(BRANCH_PREFIX)) continue;
+    // A derived name that matches a real steamtrain branch is evidence enough;
+    // claiming a registration that no longer names one needs the id shapes, so
+    // an unrelated worktree is never attributed to steamtrain.
+    const named = stepBranchFromWorktreePath(registration.root, { requireIdShapes: false });
+    const derived =
+      named && branches.includes(named)
+        ? named
+        : stepBranchFromWorktreePath(registration.root, { requireIdShapes: true });
+    if (!derived) continue;
+    if (!rootByBranch.has(derived)) rootByBranch.set(derived, registration.root);
+    // Registrations whose branch ref is already gone (an earlier GC deleted the
+    // branch but could not match the detached worktree) are still real
+    // registrations — enumerate them so this pass finishes the job.
+    if (!branches.includes(derived)) orphanBranches.push(derived);
   }
 
   // branch -> record + recorded base commit, from history.
@@ -244,7 +298,7 @@ export async function listRepoWorktrees(
   }
 
   const entries: RepoWorktreeEntry[] = [];
-  for (const branch of branches) {
+  for (const branch of [...branches, ...new Set(orphanBranches)]) {
     const runId = branch.split("/")[1] ?? "unknown";
     const root = rootByBranch.get(branch);
     const exists = root
@@ -280,6 +334,24 @@ export async function listRepoWorktrees(
             () => false,
           ));
         }
+      }
+    }
+    if (!changed && exists && root) {
+      // A worktree the step left on a DETACHED head carries its commits on no
+      // ref at all: once the worktree is gone they are unreachable. Judge it
+      // the same way as a branch tip — reachable from HEAD ⇒ nothing of its
+      // own to lose.
+      const head = (
+        await runGitText(["rev-parse", "--verify", "HEAD"], root).catch(() => "")
+      ).trim();
+      const tip = (
+        await runGitText(["rev-parse", "--verify", branch], repoRoot).catch(() => "")
+      ).trim();
+      if (head && head !== tip) {
+        changed = !(await runGit(["merge-base", "--is-ancestor", head, "HEAD"], repoRoot).then(
+          () => true,
+          () => false,
+        ));
       }
     }
 
@@ -406,4 +478,45 @@ export async function gcRepoWorktrees(options: WorktreeGcOptions): Promise<Workt
     await runGit(["worktree", "prune"], options.repoRoot).catch(() => {});
   }
   return { removed, skipped, kept };
+}
+
+/**
+ * Reclaim a just-finished run's step worktrees when the run left NOTHING to
+ * harvest — every worktree clean and still at its base commit.
+ *
+ * Retention exists so a user can land agent work later, but a run that
+ * produced no local work has nothing to retain, and workflows that drive
+ * remote state (babysit/rebase a set of PRs: a worktree per step, per PR, per
+ * iteration) leave a hundred such worktrees behind per run. They accumulate
+ * across runs until agent CLIs — which derive their command sandbox from the
+ * repo's registered worktrees — die with E2BIG on every shell command, at
+ * which point agent steps silently do nothing and the workflow never lands.
+ *
+ * All-or-nothing on purpose: if ANY worktree of the run holds work, the whole
+ * run is left alone, so `history apply/diff` still sees the complete set of
+ * worktrees it recorded. Best-effort — never fails the run that just ended.
+ */
+export async function reclaimCleanRunWorktrees(
+  runId: string,
+  repoRoot: string,
+  records: RunRecord[] = [],
+): Promise<number> {
+  try {
+    const inside = (await runGitText(["rev-parse", "--is-inside-work-tree"], repoRoot)).trim();
+    if (inside !== "true") return 0;
+  } catch {
+    return 0;
+  }
+  try {
+    return await withRepoWorktreeLock(repoRoot, undefined, async () => {
+      const entries = (await listRepoWorktrees(repoRoot, records)).filter(
+        (entry) => entry.runId === runId,
+      );
+      if (entries.length === 0 || entries.some((entry) => entry.changed)) return 0;
+      const result = await gcRepoWorktrees({ repoRoot, runId, records });
+      return result.removed.length;
+    });
+  } catch {
+    return 0;
+  }
 }

@@ -1364,6 +1364,30 @@ parent records none (consolidate first if you need a single artifact). Artifact 
 relative and stay inside the step's cwd; use artifacts when a step's real
 product is a file, rather than pasting large content through text outputs.
 
+### `retainWorkspace: false`
+
+Step worktrees are **retained** after a run so you can inspect, diff, or land
+what an agent produced (`history apply`, `history show --diff`,
+`workflow worktrees`). A step whose deliverable is **remote** — rebase a PR,
+push a branch, land a PR — leaves nothing locally worth keeping, and a workflow
+that drives many PRs allocates a worktree per step, per PR, per loop iteration.
+Retained, they accumulate across runs until agent CLIs (whose command sandbox
+enumerates the repo's registered worktrees) fail with `E2BIG` on every shell
+command — at which point agent steps silently do nothing.
+
+`retainWorkspace: false` discards the step's worktree and branch when the
+**run** ends, not when the step ends, so `inherit` / `attach` / `merge` still
+see it while the run is in flight:
+
+```jsonc
+{ "id": "rebase", "kind": "command", "retainWorkspace": false,
+  "cmd": "steamtrain workflow pr rebase \"{{inputs.pr}}\"" }
+```
+
+Everything the step wrote locally is gone afterwards — declare `artifacts` for
+anything worth reading later. The bundled `babysit-pr` / `babysit-all-prs`
+workflows set it on every step.
+
 ## Session continuity (`session`)
 
 By default every step (and every loop iteration) spawns a **fresh** agent with

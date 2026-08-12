@@ -1080,6 +1080,10 @@ const babysitPr: WorkflowSpec = {
         {
           id: "rebase",
           kind: "command",
+          // Nothing this PR pipeline produces lives locally — every step pushes to
+          // the PR — so its worktrees are discarded when the run ends instead
+          // of piling up per PR, per step, per iteration.
+          retainWorkspace: false,
           // Mechanical rebase first, deterministically, in this step's own
           // worktree. Agents told to "rebase onto the base" did the work in the
           // shared checkout and never pushed, which is what left PRs
@@ -1097,6 +1101,7 @@ const babysitPr: WorkflowSpec = {
         {
           id: "prepare",
           kind: "processor",
+          retainWorkspace: false,
           dependsOn: ["rebase"],
           // Model-only: babysitterModel may be any catalog id — agent
           // follows the rendered model family at execute time.
@@ -1146,6 +1151,7 @@ const babysitPr: WorkflowSpec = {
           // mechanical conflict once without burning another agent turn.
           id: "ensure-mergeable",
           kind: "command",
+          retainWorkspace: false,
           dependsOn: ["prepare"],
           stepTimeoutSec: 300,
           cmd:
@@ -1161,6 +1167,7 @@ const babysitPr: WorkflowSpec = {
         {
           id: "wait-or-merge",
           kind: "command",
+          retainWorkspace: false,
           dependsOn: ["ensure-mergeable"],
           // Longer than checksTimeoutSec default (1800) so the step wall-clock
           // does not kill the waiter first. Cmd templates are intentional —
@@ -1179,6 +1186,7 @@ const babysitPr: WorkflowSpec = {
         {
           id: "wait-only",
           kind: "command",
+          retainWorkspace: false,
           dependsOn: ["ensure-mergeable"],
           stepTimeoutSec: 2400,
           when: { value: "{{inputs.land}}", equals: "report" },
@@ -1268,6 +1276,7 @@ const babysitAllPrs: WorkflowSpec = {
         {
           id: "list-prs",
           kind: "command",
+          retainWorkspace: false,
           // One PR number per line → `items` for the babysit forEach. Skip drafts.
           cmd: "gh pr list --state open --json number,isDraft --jq '.[] | select(.isDraft|not) | .number'",
         },
