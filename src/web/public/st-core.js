@@ -1393,6 +1393,9 @@ window.Steamtrain = (function () {
     S.dryRunPlan = null;
     // Leaving an attached run restores Plan / Describe and clears compact chrome.
     ST.run.setRunning(false);
+    // Both writes are needed, not redundant: localStorage is what a plain
+    // browser tab has, the bridge is what survives the desktop app's
+    // per-launch origin change (see bootstrapDefaultWorkflow).
     try { localStorage.setItem(SELECTION_KEY, name); } catch (e) {}
     if (window.steamtrainDesktop && window.steamtrainDesktop.setLastWorkflow) window.steamtrainDesktop.setLastWorkflow(name);
     // Reveal the selected workflow if its folder was folded shut.

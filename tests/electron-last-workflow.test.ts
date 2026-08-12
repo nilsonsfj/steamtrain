@@ -37,4 +37,19 @@ describe("last workflow bridge", () => {
   it("writes the selection through the bridge alongside localStorage", () => {
     expect(core).toContain("window.steamtrainDesktop.setLastWorkflow(name)");
   });
+
+  it("prunes lastWorkflow everywhere recents shrinks", () => {
+    // index.ts can't be imported directly — it has Electron side effects at
+    // module load — so this checks the same way electron-switch-project does:
+    // string matching. `onClearRecents` and the dead-directory cleanup in
+    // `switchProject` both drop entries from recents, and without a matching
+    // `pruneLastWorkflow` call the corresponding lastWorkflow entries would be
+    // orphaned rather than dropped alongside them.
+    expect(main).toContain(
+      "persist({ recents: [], lastWorkflow: pruneLastWorkflow(state.lastWorkflow, []) });",
+    );
+    expect(main).toContain(
+      "persist({ recents, lastWorkflow: pruneLastWorkflow(state.lastWorkflow, recents) });",
+    );
+  });
 });
