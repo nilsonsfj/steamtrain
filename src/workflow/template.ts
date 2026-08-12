@@ -3,7 +3,7 @@
  *   {{input}} / {{args}}    → the workflow's input (the user's prompt)
  *   {{inputs.<key>}}        → a declared workflow input parameter
  *   {{steps.<id>.output}}   → the output of an earlier step
- *   {{steps.<id>.items}}    → distributor items joined by newlines
+ *   {{steps.<id>.items}}    → the step's fan-out items joined by newlines
  *   {{steps.<id>.ok}}       → "true" / "false"
  *   {{steps.<id>.error}}    → error text, if any
  *   {{steps.<id>.exitCode}} → a command step's exit code, e.g. "0"
@@ -85,6 +85,21 @@ const STEP_JSON_FIELD = /^steps\.(.+?)\.json((?:\.|\[).+)?$/;
 /** `steps.<id>.artifacts.<name>` — the snapshot path of one declared artifact. */
 const STEP_ARTIFACT_FIELD = /^steps\.(.+?)\.artifacts\.(.+)$/;
 
+/**
+ * The items a step fans out as when it never declared any of its own: one per
+ * non-blank output line. Shared with the engine's `forEach` expansion so
+ * `{{steps.<id>.items}}` can never disagree with what `forEach` actually
+ * iterated.
+ */
+export function splitItemsFromOutput(output: string | undefined): string[] {
+  return output
+    ? output
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+    : [];
+}
+
 function resolveTemplateValue(expr: string, ctx: TemplateContext): string | undefined {
   if (expr === "input" || expr === "args") return ctx.input;
   const inputRef = INPUT_REF.exec(expr);
@@ -124,7 +139,13 @@ function resolveTemplateValue(expr: string, ctx: TemplateContext): string | unde
     if (field === "output") return ctx.outputs.get(id) ?? "";
     const result = ctx.results?.get(id);
     if (!result) return "";
-    if (field === "items") return result.items?.join("\n") ?? "";
+    // Same fallback `forEach` uses when it fans out over a step that never
+    // declared `items` (a `command` step listing PR numbers, say). Without it
+    // `{{steps.x.items}}` rendered empty for exactly the steps a `forEach`
+    // happily expanded — a summary claiming nothing was considered while the
+    // fan-out beside it processed six of them.
+    if (field === "items")
+      return (result.items ?? splitItemsFromOutput(ctx.outputs.get(id))).join("\n");
     if (field === "ok") return String(result.ok);
     if (field === "error") return result.error ?? "";
     if (field === "target") return result.target ?? "";
