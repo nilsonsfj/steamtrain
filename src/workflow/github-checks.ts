@@ -482,9 +482,30 @@ export type WaitForChecksResult =
   | {
       ok: false;
       error: string;
+      /** See {@link ClosedPullRequest}. */
+      closed?: true;
       snapshot?: PullRequestCheckSnapshot;
       evaluation?: CheckEvaluation;
     };
+
+/**
+ * Marks the one failure that is TERMINAL rather than retryable: somebody closed
+ * the PR without merging it.
+ *
+ * Every other failure here describes a PR that could still land — red checks to
+ * fix, a conflict to resolve, a timeout to wait out again — so babysit's gate is
+ * right to loop the whole rebase/prepare pipeline back around. A closed PR can
+ * do none of that: there is no head to push to and nothing to babysit, so each
+ * retry re-reads the same state, burns an agent turn, and exhausts the iteration
+ * budget on a PR the author deliberately withdrew. Observed on camelo taking
+ * three full iterations per closed PR and turning an otherwise-successful run
+ * red (four PRs merged, three withdrawn by hand mid-run).
+ *
+ * Callers that drive a pipeline should stop cleanly on this instead of failing.
+ * It stays `ok: false` because the PR did NOT land — only the CLI's exit code
+ * treats it as "nothing to do", so no report can claim a closed PR succeeded.
+ */
+type ClosedPullRequest = { closed: true };
 
 /**
  * Poll until every check is terminal. Fails on red checks, closed PRs, timeout,
@@ -530,6 +551,7 @@ export async function waitForPullRequestChecks(
       return {
         ok: false,
         error: lastEvaluation.detail,
+        ...(lastSnapshot.state === "closed" ? { closed: true as const } : {}),
         snapshot: lastSnapshot,
         evaluation: lastEvaluation,
       };
@@ -577,7 +599,7 @@ export interface RequireMergeableOptions {
 
 export type RequireMergeableResult =
   | { ok: true; detail: string; prNumber: number; rebased?: boolean }
-  | { ok: false; error: string };
+  | ({ ok: false; error: string } & Partial<ClosedPullRequest>);
 
 /**
  * Fail closed unless the remote PR head is MERGEABLE (or already merged).
@@ -619,6 +641,7 @@ export async function requirePullRequestMergeable(
     if (lastSnapshot.state === "closed") {
       return {
         ok: false,
+        closed: true,
         error: `PR #${lastSnapshot.number} is closed without being merged`,
       };
     }
@@ -726,7 +749,7 @@ export type MergeWhenReadyResult =
       /** Non-fatal problems after the merge landed (e.g. branch cleanup). */
       warnings?: string[];
     }
-  | { ok: false; error: string };
+  | ({ ok: false; error: string } & Partial<ClosedPullRequest>);
 
 const DEFAULT_MAX_MERGE_ATTEMPTS = 4;
 /** Backoff between transient-failure merge retries. */
@@ -894,7 +917,11 @@ async function landUnderLock(a: LandLoopArgs): Promise<MergeWhenReadyResult> {
       return alreadyMerged(snapshot.number, `PR #${snapshot.number} was merged by another run`);
     }
     if (snapshot.state === "closed") {
-      return { ok: false, error: `PR #${snapshot.number} is closed without being merged` };
+      return {
+        ok: false,
+        closed: true,
+        error: `PR #${snapshot.number} is closed without being merged`,
+      };
     }
 
     const evaluation = evaluatePullRequestChecks(snapshot, {

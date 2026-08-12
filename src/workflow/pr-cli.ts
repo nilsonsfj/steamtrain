@@ -182,6 +182,27 @@ function parsePrFlags(args: string[]): PrFlags | { error: string } {
   return flags;
 }
 
+/**
+ * Exit code for a PR pipeline command. A CLOSED pull request exits 0 despite
+ * `ok: false`: somebody withdrew it, so there is no head to push to and nothing
+ * left to do. Exiting non-zero here is what made babysit's gate loop the whole
+ * rebase/prepare pipeline back around on a withdrawn PR — three wasted agent
+ * iterations each, and an otherwise-successful run reported as failed.
+ *
+ * The result itself still says `ok: false`, and `--json` still reports it, so
+ * nothing downstream can mistake a closed PR for one that landed. Only the
+ * "should the pipeline keep going?" question answers differently.
+ */
+export function prPipelineExit(result: { ok: boolean; closed?: true }): number {
+  if (result.ok) return 0;
+  return result.closed ? 0 : 1;
+}
+
+/** Terminal-but-fine wording: says what happened AND that we stopped on purpose. */
+function skipped(error: string, nothingTo: string): string {
+  return `${error} — nothing to ${nothingTo}, skipping\n`;
+}
+
 async function runWaitChecks(
   args: string[],
   io: CliIO,
@@ -214,10 +235,12 @@ async function runWaitChecks(
     out(`${JSON.stringify(result, null, 2)}\n`);
   } else if (result.ok) {
     out(`${result.evaluation.detail}\n`);
+  } else if (result.closed) {
+    out(skipped(result.error, "wait for"));
   } else {
     err(`${result.error}\n`);
   }
-  return result.ok ? 0 : 1;
+  return prPipelineExit(result);
 }
 
 async function runRebase(
@@ -282,10 +305,12 @@ async function runRequireMergeable(
     out(`${JSON.stringify(result, null, 2)}\n`);
   } else if (result.ok) {
     out(`${result.detail}\n`);
+  } else if (result.closed) {
+    out(skipped(result.error, "prepare"));
   } else {
     err(`${result.error}\n`);
   }
-  return result.ok ? 0 : 1;
+  return prPipelineExit(result);
 }
 
 async function runMergeWhenReady(
@@ -328,8 +353,10 @@ async function runMergeWhenReady(
     out(`${JSON.stringify(result, null, 2)}\n`);
   } else if (result.ok) {
     out(`${result.detail}\n`);
+  } else if (result.closed) {
+    out(skipped(result.error, "land"));
   } else {
     err(`${result.error}\n`);
   }
-  return result.ok ? 0 : 1;
+  return prPipelineExit(result);
 }

@@ -1038,12 +1038,16 @@ describe("requirePullRequestMergeable", () => {
     expect(fetchSnapshot.mock.calls.length).toBeGreaterThanOrEqual(3);
   });
 
-  it("fails a closed-unmerged PR", async () => {
+  it("fails a closed-unmerged PR, and marks it terminal rather than retryable", async () => {
     const result = await requirePullRequestMergeable({
       ...base,
       fetchSnapshot: sequence([open({ state: "closed" })]),
     });
     expect(result.ok).toBe(false);
+    // `closed` is what stops babysit's gate from looping the whole
+    // rebase/prepare pipeline on a PR its author withdrew. Every OTHER failure
+    // here is retryable, so it must NOT carry this flag.
+    if (!result.ok) expect(result.closed).toBe(true);
     if (!result.ok) expect(result.error).toMatch(/closed without being merged/i);
   });
 });
