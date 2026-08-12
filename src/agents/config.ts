@@ -27,8 +27,10 @@ export const DEFAULT_AGENT_BINARY: Record<AgentProviderId, string> = {
 
 /**
  * Compact UI label for each built-in provider. Differs from the provider id
- * only when the id is too long for dense surfaces (status chips, step rows);
- * the full provider id still appears on settings/agent-manager screens.
+ * only when the id is too long for dense surfaces (status chips, step rows,
+ * settings rows). The raw provider id (never a marketing name like
+ * "Antigravity") can still show up as disambiguating detail on roomy
+ * admin screens (e.g. the TUI agent manager's `provider=` suffix).
  */
 export const DEFAULT_AGENT_LABEL: Record<AgentProviderId, string> = {
   claude: "claude",

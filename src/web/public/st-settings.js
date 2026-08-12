@@ -33,13 +33,6 @@
       desc: "Per-step and whole-run time limits. Applies to every workflow that doesn't set its own. (Per-workflow cost caps live in the workflow spec, not here.)"
     }
   };
-  // Full product names for providers whose UI short-label differs from the id
-  // (e.g. antigravity → agy). Shown only on this settings page. Keep in sync
-  // with DEFAULT_AGENT_LABEL in src/agents/config.ts.
-  var PROVIDER_PRODUCT_NAME = {
-    antigravity: "Antigravity"
-  };
-
   // ---- module state: rebuilt lazily, persists across section switches so a
   // Runners edit survives a trip to Limits and back. -------------------------
   var mountEl = null;
@@ -554,12 +547,8 @@
     var loud = !off && Boolean(d && meta.loud);
     var absent = !off && Boolean(d && !ready && !loud);
 
-    var provider = cfg ? cfg.provider : (d ? d.provider : "");
-    var displayName = (cfg && cfg.label) || (d && d.label) ||
+    var nameText = (cfg && cfg.label) || (d && d.label) ||
       (kind === "agent" ? ST.agentUiLabel(rowData.id) : rowData.id);
-    var productName = PROVIDER_PRODUCT_NAME[provider] || provider;
-    var nameText = displayName +
-      (productName && productName !== displayName ? " · " + productName : "");
 
     var binaryText, subParts = [];
     if (kind === "agent") {

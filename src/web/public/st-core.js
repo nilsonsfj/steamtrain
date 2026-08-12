@@ -41,11 +41,11 @@ window.Steamtrain = (function () {
   function apiHealthMeta(status) { return API_HEALTH_META[status] || API_HEALTH_META.unknown_error; }
   /**
    * Compact UI label for an agent instance id. Built-in `antigravity` is shown
-   * as `agy` (the CLI binary) to save space; settings still surface the full
-   * provider id. Prefer a catalog `label` when one is present.
+   * as `agy` (the CLI binary) everywhere, including settings. Prefer a catalog
+   * `label` when one is present.
    *
    * Keep the hardcoded fallback in sync with DEFAULT_AGENT_LABEL in
-   * src/agents/config.ts (and PROVIDER_PRODUCT_NAME in st-settings.js).
+   * src/agents/config.ts.
    */
   function agentUiLabel(id) {
     if (!id) return "";
