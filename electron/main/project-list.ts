@@ -84,6 +84,11 @@ export function pidAlive(pid: number): boolean {
  *
  * Without this a crashed run would leave a project reading "1 running" until
  * someone opened it and swept the registry.
+ *
+ * The canonical version is `isLiveRunOwnerAlive` in
+ * src/workflow/live-run-store.ts — change that and this has to follow. The
+ * constants are held together by `tests/electron-project-picker.test.ts`; the
+ * *rules* are not, so read the original before editing either.
  */
 function ownerAlive(
   meta: LiveRunMetaLike,

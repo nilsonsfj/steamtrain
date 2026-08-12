@@ -211,6 +211,13 @@
       close();
       return;
     }
+    // Tab is left to the browser, but the menu goes away with it: focus is
+    // moving on to the page behind, and a popup still hanging over it — still
+    // owning the arrow keys — would be the odd state.
+    if (e.key === "Tab") {
+      close();
+      return;
+    }
     if (e.key === "ArrowDown") { taken(); setActive(active + 1, true); return; }
     if (e.key === "ArrowUp") { taken(); setActive(active - 1, true); return; }
     if (e.key === "Enter") {
