@@ -1,5 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { runCli } from "../src/cli";
+import { prPipelineExit } from "../src/workflow/pr-cli";
+
+describe("pr pipeline exit codes", () => {
+  it("exits 0 for a closed PR so the babysit gate stops instead of looping", () => {
+    // A withdrawn PR has no head to push to: retrying re-reads the same state,
+    // burns an agent iteration, and turns an otherwise-successful run red.
+    expect(prPipelineExit({ ok: false, closed: true })).toBe(0);
+  });
+
+  it("still exits 1 for failures a retry could actually fix", () => {
+    // Conflicts, red checks and timeouts are exactly what the loop is for.
+    expect(prPipelineExit({ ok: false })).toBe(1);
+  });
+
+  it("exits 0 on success", () => {
+    expect(prPipelineExit({ ok: true })).toBe(0);
+  });
+});
 
 describe("workflow pr CLI", () => {
   it("prints help for workflow pr", async () => {

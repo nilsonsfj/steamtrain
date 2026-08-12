@@ -368,6 +368,26 @@ describe("mergePullRequestWhenReady", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/timed out|still running|review-bot/i);
   });
+
+  it("carries `closed` out of the pre-lock wait, so landing a withdrawn PR does not loop", async () => {
+    // This is the path babysit's land step actually takes on a withdrawn PR:
+    // the pre-lock wait sees `closed` and returns before the in-lock check ever
+    // runs. Flattening it to a bare error here would exit 1 and send the land
+    // gate back around the whole rebase/prepare pipeline.
+    const result = await mergePullRequestWhenReady({
+      cwd: "/tmp",
+      prRef: "42",
+      timeoutMs: 1_000,
+      pollIntervalMs: 1,
+      fetchSnapshot: async () => snap({ state: "closed", checks: [] }),
+      sleep: async () => {},
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.closed).toBe(true);
+      expect(result.error).toMatch(/closed without being merged/i);
+    }
+  });
 });
 
 describe("mergePullRequestWhenReady — race-resilient landing", () => {
@@ -1038,12 +1058,16 @@ describe("requirePullRequestMergeable", () => {
     expect(fetchSnapshot.mock.calls.length).toBeGreaterThanOrEqual(3);
   });
 
-  it("fails a closed-unmerged PR", async () => {
+  it("fails a closed-unmerged PR, and marks it terminal rather than retryable", async () => {
     const result = await requirePullRequestMergeable({
       ...base,
       fetchSnapshot: sequence([open({ state: "closed" })]),
     });
     expect(result.ok).toBe(false);
+    // `closed` is what stops babysit's gate from looping the whole
+    // rebase/prepare pipeline on a PR its author withdrew. Every OTHER failure
+    // here is retryable, so it must NOT carry this flag.
+    if (!result.ok) expect(result.closed).toBe(true);
     if (!result.ok) expect(result.error).toMatch(/closed without being merged/i);
   });
 });
