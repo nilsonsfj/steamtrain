@@ -124,4 +124,30 @@ describe("parseState", () => {
     const raw = JSON.stringify({ window: { width: 1200, height: 800, maximized: "yes" } });
     expect(parseState(raw).window?.maximized).toBe(false);
   });
+
+  it("reads well-formed lastWorkflow entries", () => {
+    const raw = JSON.stringify({ lastWorkflow: { "/a": "release", "/b": "tour" } });
+    expect(parseState(raw).lastWorkflow).toEqual({ "/a": "release", "/b": "tour" });
+  });
+
+  it("drops non-string and empty-string lastWorkflow values", () => {
+    const raw = JSON.stringify({
+      lastWorkflow: { "/a": "release", "/b": 42, "/c": null, "/d": "" },
+    });
+    expect(parseState(raw).lastWorkflow).toEqual({ "/a": "release" });
+  });
+
+  it("omits lastWorkflow entirely once every entry is dropped", () => {
+    const raw = JSON.stringify({ lastWorkflow: { "/a": 42, "/b": "" } });
+    expect(parseState(raw).lastWorkflow).toBeUndefined();
+  });
+
+  it("treats a missing lastWorkflow as absent", () => {
+    expect(parseState(JSON.stringify({ recents: [] })).lastWorkflow).toBeUndefined();
+  });
+
+  it("treats a non-object lastWorkflow as absent", () => {
+    expect(parseState(JSON.stringify({ lastWorkflow: "release" })).lastWorkflow).toBeUndefined();
+    expect(parseState(JSON.stringify({ lastWorkflow: ["release"] })).lastWorkflow).toBeUndefined();
+  });
 });

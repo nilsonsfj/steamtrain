@@ -83,7 +83,10 @@ export function parseState(raw: string): DesktopState {
         }
       : undefined;
 
-  const lastWorkflowRaw = isRecord(parsed.lastWorkflow) ? parsed.lastWorkflow : undefined;
+  const lastWorkflowRaw =
+    isRecord(parsed.lastWorkflow) && !Array.isArray(parsed.lastWorkflow)
+      ? parsed.lastWorkflow
+      : undefined;
   const lastWorkflow: Record<string, string> | undefined = lastWorkflowRaw
     ? Object.fromEntries(
         Object.entries(lastWorkflowRaw).filter(
