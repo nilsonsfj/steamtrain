@@ -14,6 +14,12 @@ contextBridge.exposeInMainWorld("steamtrainDesktop", {
   version: process.versions.electron,
   /** Same dialog the "Open Project…" menu item and its shortcut trigger. */
   switchProject: () => ipcRenderer.invoke("steamtrain:switch-project"),
+  /**
+   * The last workflow selected for the current project, persisted outside
+   * `localStorage` since the embedded server's origin changes every launch.
+   */
+  getLastWorkflow: () => ipcRenderer.invoke("steamtrain:get-last-workflow"),
+  setLastWorkflow: (name: string) => ipcRenderer.invoke("steamtrain:set-last-workflow", name),
 });
 
 /**

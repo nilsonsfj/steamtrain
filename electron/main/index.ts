@@ -10,7 +10,7 @@ import { type FinishedRun, type RunWatch, startRunWatch } from "./run-watch";
 import { type ServerHandle, startServer } from "./server-child";
 import { resolveShellPath } from "./shell-path";
 import { performQuit } from "./shutdown";
-import { type DesktopState, createStateStore } from "./store";
+import { type DesktopState, createStateStore, pruneLastWorkflow } from "./store";
 import { createWindow, installWebContentsGuards, showErrorPage } from "./window";
 import { restoreWindowState } from "./window-state";
 
@@ -62,7 +62,7 @@ function refreshMenu(): void {
     },
     onOpenRecent: (dir) => void switchProject(dir),
     onClearRecents: () => {
-      persist({ recents: [] });
+      persist({ recents: [], lastWorkflow: pruneLastWorkflow(state.lastWorkflow, []) });
       refreshMenu();
     },
   });
@@ -96,7 +96,8 @@ function isDirectory(path: string): boolean {
 async function switchProject(dir: string): Promise<void> {
   if (dir === projectDir) return;
   if (!isDirectory(dir)) {
-    persist({ recents: removeRecent(state.recents, dir) });
+    const recents = removeRecent(state.recents, dir);
+    persist({ recents, lastWorkflow: pruneLastWorkflow(state.lastWorkflow, recents) });
     refreshMenu();
     dialog.showErrorBox(
       "That project is gone",
@@ -295,7 +296,8 @@ async function main(): Promise<void> {
   const saved = store.read();
   // Pruned at startup rather than on every menu build: one stat per entry, and
   // a project deleted mid-session is caught by `switchProject` anyway.
-  state = { ...saved, recents: pruneRecents(saved.recents, existsSync) };
+  const recents = pruneRecents(saved.recents, existsSync);
+  state = { ...saved, recents, lastWorkflow: pruneLastWorkflow(saved.lastWorkflow, recents) };
 
   // A GUI launch inherits a minimal PATH; recover the user's real one before
   // anything tries to resolve `claude`, `codex` or `git`.
@@ -316,6 +318,19 @@ async function main(): Promise<void> {
   ipcMain.handle("steamtrain:switch-project", async () => {
     const dir = await promptForProject();
     if (dir) await switchProject(dir);
+  });
+
+  // The web UI's own `localStorage` copy of the last-selected workflow can't
+  // survive a restart: the embedded server's port (and so its origin)
+  // changes every launch. This is the persistent fallback, keyed by project
+  // since a remembered workflow from a different project is meaningless.
+  ipcMain.handle("steamtrain:get-last-workflow", () => {
+    if (!projectDir) return undefined;
+    return state.lastWorkflow?.[projectDir];
+  });
+  ipcMain.handle("steamtrain:set-last-workflow", (_event, name: unknown) => {
+    if (!projectDir || typeof name !== "string" || !name) return;
+    persist({ lastWorkflow: { ...state.lastWorkflow, [projectDir]: name } });
   });
 
   installWebContentsGuards((url) => {

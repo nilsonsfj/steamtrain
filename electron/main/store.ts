@@ -26,6 +26,16 @@ export interface DesktopState {
   /** Most-recently-opened first. */
   recents: string[];
   window?: WindowStateShape;
+  /**
+   * Name of the last workflow the user had open, per project.
+   *
+   * Keyed by project directory because the last workflow means nothing once
+   * the window is pointed at a different project. The web UI's own
+   * `localStorage` copy of this can't survive a restart on its own: the
+   * embedded server picks a new port every launch, so its origin changes and
+   * `localStorage` resets with it.
+   */
+  lastWorkflow?: Record<string, string>;
 }
 
 const EMPTY: DesktopState = { recents: [] };
@@ -73,7 +83,39 @@ export function parseState(raw: string): DesktopState {
         }
       : undefined;
 
-  return { recents, ...(window ? { window } : {}) };
+  const lastWorkflowRaw =
+    isRecord(parsed.lastWorkflow) && !Array.isArray(parsed.lastWorkflow)
+      ? parsed.lastWorkflow
+      : undefined;
+  const lastWorkflow: Record<string, string> | undefined = lastWorkflowRaw
+    ? Object.fromEntries(
+        Object.entries(lastWorkflowRaw).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1] !== "",
+        ),
+      )
+    : undefined;
+
+  return {
+    recents,
+    ...(window ? { window } : {}),
+    ...(lastWorkflow && Object.keys(lastWorkflow).length > 0 ? { lastWorkflow } : {}),
+  };
+}
+
+/**
+ * Drop `lastWorkflow` entries for projects no longer in `recents`.
+ *
+ * `recents` is already pruned/trimmed/cleared in several places; without this
+ * `lastWorkflow` would grow by one key per project ever opened, forever.
+ */
+export function pruneLastWorkflow(
+  lastWorkflow: Record<string, string> | undefined,
+  recents: readonly string[],
+): Record<string, string> | undefined {
+  if (!lastWorkflow) return undefined;
+  const kept = new Set(recents);
+  const entries = Object.entries(lastWorkflow).filter(([dir]) => kept.has(dir));
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 export interface StateStore {
