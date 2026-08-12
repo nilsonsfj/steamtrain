@@ -130,6 +130,9 @@ window.Steamtrain = (function () {
     // Whether the Arrival page's Workflow menu is open. Held here, not in the
     // DOM, because #bands is rebuilt from scratch on every render.
     arrivalMenuOpen: false,
+    // Whether the topbar's project switcher is open. Held here for the same
+    // reason: the breadcrumb its button lives in is rebuilt on every render.
+    projectMenuOpen: false,
     // Wall-clock end of the last run (frozen for the Arrival receipt).
     endedAt: 0,
     // Focus origins make overlays feel like part of one intentional control

@@ -65,6 +65,7 @@ export const WEB_ASSETS: readonly WebAsset[] = [
   { file: "steamtrain-reducer.bundle.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "steamtrain-diff.bundle.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "st-core.js", kind: "js", mime: "text/javascript; charset=utf-8" },
+  { file: "st-projects.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "st-shell.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "st-run.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "st-instruments.js", kind: "js", mime: "text/javascript; charset=utf-8" },
@@ -152,9 +153,12 @@ ${styles}
       <button class="tbtn" id="workflowsBtn" title="Workflows — the plan cockpit">Workflows</button>
       <button class="tbtn" id="historyBtn" title="Browse live and past runs">Runs</button>
       <button class="tbtn" id="settingsBtn" title="Project agent and timeout settings">Settings</button>
-      <button class="tbtn" id="switchProjectBtn" title="Switch project…">Switch Project</button>
     </div>
   </header>
+  <!-- The project switcher's popup. It lives outside #crumbs on purpose: the
+       breadcrumb is rebuilt on every render, and a search field inside it
+       would lose focus mid-keystroke whenever a run polled. -->
+  <div id="projectMenu" class="proj-pop" role="menu" aria-label="Switch project" hidden></div>
   <div id="cols">
     <aside id="rail-left" aria-label="Workflows"></aside>
     <section id="center">

@@ -124,15 +124,187 @@ html.desktop-titlebar-overlay #topbar .status-pill {
   -webkit-app-region: no-drag;
 }
 
-/* Switching projects means picking a directory off disk, which only the
-   desktop app can do — the plain web UI has no filesystem to browse. Base
-   case hides it; an inline style would beat this rule's specificity and the
-   button would never reappear, so the toggle has to live entirely in CSS. */
-#switchProjectBtn {
+/* ---- project switcher --------------------------------------------------
+   The first breadcrumb segment, and its menu. Only the desktop app renders
+   the button at all (st-shell.js keeps the plain crumb otherwise), so there
+   is no visibility rule to get right here — an absent element cannot leak. */
+.crumb-project {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* Pulled back by its own padding so the name still starts on the same
+     pixel the plain crumb did. */
+  margin: 0 -1px 0 -7px;
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text);
+  font: 400 12px / 1 var(--font-mono);
+  cursor: pointer;
+}
+.crumb-project:hover,
+.crumb-project.open {
+  background: var(--raised);
+  border-color: var(--border);
+}
+.crumb-project.open {
+  background: var(--raised-hover);
+  border-color: var(--border-strong);
+}
+.crumb-project:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.crumb-project .dot {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.crumb-project .caret {
+  color: var(--dim);
+  font-size: 9px;
+}
+
+/* Anchored in viewport coordinates by st-projects.js: the topbar clips
+   nothing today, but a popup that hangs out of a 46px row should not depend
+   on that staying true. */
+.proj-pop {
+  position: fixed;
+  z-index: 40;
+  width: 300px;
+  /* Eight recents plus the current project overflow a short window, and a
+     fixed popup would simply run off the bottom of it. The topbar is 46px and
+     the anchor sits 6px below that, so this leaves a 16px margin at the foot. */
+  max-height: calc(100vh - 68px);
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.proj-pop[hidden] {
   display: none;
 }
-html.desktop-app #switchProjectBtn {
-  display: inline-flex;
+.proj-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 4px 6px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.proj-search .slash {
+  color: var(--hint);
+  font: 400 12px / 1 var(--font-mono);
+}
+.proj-search-field {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: 400 12.5px / 1 var(--font-ui);
+}
+.proj-search-field::placeholder {
+  color: var(--dim);
+}
+.proj-search-field:focus {
+  outline: none;
+}
+.proj-row {
+  display: grid;
+  grid-template-columns: 5px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.proj-row.active {
+  background: var(--raised-hover);
+}
+.proj-row.current,
+.proj-row.current.active {
+  background: rgba(52, 211, 196, 0.09);
+}
+.proj-row .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 1px;
+  background: var(--faint);
+}
+.proj-row .dot.on {
+  background: var(--accent);
+}
+.proj-row .who {
+  min-width: 0;
+}
+.proj-row .name {
+  display: block;
+  font: 500 13px / 1.3 var(--font-ui);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.proj-row .path {
+  display: block;
+  font: 400 11px / 1.4 var(--font-mono);
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.proj-row .state {
+  font: 400 11px / 1 var(--font-mono);
+  white-space: nowrap;
+}
+.proj-row .state.running {
+  color: var(--accent);
+}
+.proj-row .state.failed {
+  color: var(--error-text);
+}
+.proj-row .state.idle {
+  color: var(--dim);
+}
+.proj-empty {
+  padding: 10px;
+  font: 400 12px / 1.4 var(--font-ui);
+  color: var(--dim);
+}
+.proj-rule {
+  height: 1px;
+  background: var(--border);
+  margin: 5px 4px;
+}
+.proj-row.open-folder {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font: 400 12.5px / 1.3 var(--font-ui);
+  color: var(--muted);
+}
+.proj-row.open-folder:hover,
+.proj-row.open-folder.active {
+  color: var(--text);
+}
+.proj-row.open-folder .hint {
+  font: 400 11px / 1 var(--font-mono);
+  color: var(--hint);
 }
 
 .status-pill {

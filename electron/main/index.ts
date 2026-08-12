@@ -4,6 +4,7 @@ import { BrowserWindow, Notification, app, dialog, ipcMain, screen } from "elect
 import { resolveEntry } from "./entry";
 import { launchProjectPath, selectLaunchProject } from "./launch-project";
 import { buildMenu } from "./menu";
+import { listProjects } from "./project-list";
 import { type QuitChoice, quitChoiceFor, quitPromptSpec } from "./quit-prompt";
 import { addRecent, labelRecents, pruneRecents, removeRecent } from "./recents";
 import { type FinishedRun, type RunWatch, startRunWatch } from "./run-watch";
@@ -313,8 +314,8 @@ async function main(): Promise<void> {
   process.env.STEAMTRAIN_PATH_SOURCE = resolved.source;
   process.env.STEAMTRAIN_PATH_DETAIL = resolved.detail;
 
-  // Same action as the "Open Project…" menu item, reachable from the topbar
-  // button the renderer shows once it knows it's running in the desktop app.
+  // Same action as the "Open Project…" menu item, reachable from the project
+  // switcher's "Open a folder…" row once the renderer knows it's in the app.
   ipcMain.handle("steamtrain:switch-project", async () => {
     const dir = await promptForProject();
     if (dir) await switchProject(dir);
@@ -331,6 +332,28 @@ async function main(): Promise<void> {
   ipcMain.handle("steamtrain:set-last-workflow", (_event, name: unknown) => {
     if (!projectDir || typeof name !== "string" || !name) return;
     persist({ lastWorkflow: { ...state.lastWorkflow, [projectDir]: name } });
+  });
+
+  // The rows of that switcher: every project the app knows about, with what is
+  // running or broken in each. Recomputed per call rather than cached — the
+  // menu is opened by hand, and a stale "2 running" is the one thing the row
+  // exists to get right.
+  ipcMain.handle("steamtrain:list-projects", () =>
+    listProjects({
+      recents: state.recents,
+      ...(projectDir ? { current: projectDir } : {}),
+      home: app.getPath("home"),
+    }),
+  );
+
+  // Switch to a project the app already knows. The renderer is a web page, so
+  // the path is checked against the recents list rather than trusted: an
+  // arbitrary string arriving here must not become a directory the engine is
+  // forked against.
+  ipcMain.handle("steamtrain:open-project", async (_event, dir: unknown) => {
+    if (typeof dir !== "string") return;
+    if (dir !== projectDir && !state.recents.includes(dir)) return;
+    await switchProject(dir);
   });
 
   installWebContentsGuards((url) => {

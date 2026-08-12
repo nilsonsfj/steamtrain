@@ -179,9 +179,6 @@
     document.getElementById("workflowsBtn").addEventListener("click", function () { ST.goHome(); });
     document.getElementById("historyBtn").addEventListener("click", function () { ST.runs.open(); });
     document.getElementById("settingsBtn").addEventListener("click", function () { ST.settings.open(); });
-    document.getElementById("switchProjectBtn").addEventListener("click", function () {
-      if (window.steamtrainDesktop && window.steamtrainDesktop.switchProject) window.steamtrainDesktop.switchProject();
-    });
     document.getElementById("editBtn").addEventListener("click", function () { ST.modals.openEditor(false); });
     document.getElementById("cloneBtn").addEventListener("click", function () { ST.modals.openEditor(true); });
     document.getElementById("deleteBtn").addEventListener("click", ST.modals.doDelete);
@@ -199,6 +196,18 @@
         }
         return;
       }
+      // ⌘P opens the project switcher from anywhere, so the crumb is a
+      // convenience rather than the only route to it. Desktop-only, like the
+      // switcher itself — in a browser tab the key keeps its usual meaning.
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === "p" || e.key === "P") && ST.projects.enabled()) {
+        e.preventDefault();
+        ST.projects.toggle();
+        return;
+      }
+      // While the switcher is open it owns the keyboard — its own handlers run
+      // on the search field, and the surfaces below would otherwise treat
+      // ↑/↓ and `/` as theirs while the user is typing a project name.
+      if (S.projectMenuOpen) return;
       // The runs page owns ↑/↓, `/` and Escape while it is up; it reports
       // whether it consumed the key so the cockpit's own handling below still
       // runs for anything it did not.

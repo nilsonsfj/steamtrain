@@ -131,6 +131,16 @@ two would otherwise read the same. Switching stops the current engine and forks
 a new one; the window stays put. The shell opens one project at a time, so only
 the first path after a `--` end-of-options marker is used.
 
+**The first breadcrumb segment is the project switcher** (`⌘P`, or click it).
+It lists the same projects by name and real path, each with what is running or
+broken in it right now — read from that project's own `.steamtrain/runs`
+registry, not its history, so the answer is about this moment and costs one
+directory walk per project. "Open a folder…" at the bottom reaches the same
+dialog as **File → Open Project**. The renderer only *asks* to switch: main
+refuses any path that is not already in the recents list, because the page
+asking is a web page. In a browser tab there is nothing to switch to, and the
+segment stays the plain path it has always been.
+
 **The window remembers its size, position and maximized state**, but only
 restores a position that still lands on an attached display. A window saved on
 an external monitor and reopened without it comes back centred rather than
@@ -193,7 +203,7 @@ The shell lives in `electron/` and builds separately from the CLI:
 
 Every decision the main process makes lives in a pure module with unit tests:
 `recents.ts`, `window-state.ts`, `run-watch.ts`, `quit-prompt.ts`, `shutdown.ts`,
-`store.ts`. `index.ts` only wires Electron's events to them, which is what keeps
+`store.ts`, `project-list.ts`. `index.ts` only wires Electron's events to them, which is what keeps
 the wiring small enough to read.
 
 What no unit test can see is whether that wiring works. So there is one small

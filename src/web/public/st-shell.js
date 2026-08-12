@@ -279,7 +279,15 @@
     if (!nav) return;
     clear(nav);
     var parts = [];
-    if (S.project && S.project.name) {
+    // In the desktop app the project segment is the switcher rather than a
+    // crumb, so it is appended directly and left out of `parts` — the "here"
+    // highlight below belongs to a location you are at, not to the root you
+    // can change. A browser tab has no project to switch to and keeps the
+    // plain path it has always shown.
+    var switcher = ST.projects.enabled() && S.project && S.project.name;
+    if (switcher) {
+      nav.appendChild(ST.projects.crumbButton());
+    } else if (S.project && S.project.name) {
       parts.push({ text: S.project.displayPath || S.project.name, title: S.project.cwd || S.project.name });
     }
     if (S.page === "runs" || S.page === "settings") {
@@ -296,7 +304,9 @@
     var lastLocation = -1;
     parts.forEach(function (part, idx) { if (!part.quiet) lastLocation = idx; });
     parts.forEach(function (part, idx) {
-      if (idx > 0) nav.appendChild(h("span", { class: "sep", text: "/" }));
+      // The switcher is already sitting where part 0 would be, so the first
+      // crumb after it still needs its separator.
+      if (idx > 0 || switcher) nav.appendChild(h("span", { class: "sep", text: "/" }));
       var cls = idx === lastLocation ? "here" : "";
       nav.appendChild(h("span", {
         class: (cls + (part.quiet ? " quiet" : "")).trim(),
