@@ -318,6 +318,19 @@ async function main(): Promise<void> {
     if (dir) await switchProject(dir);
   });
 
+  // The web UI's own `localStorage` copy of the last-selected workflow can't
+  // survive a restart: the embedded server's port (and so its origin)
+  // changes every launch. This is the persistent fallback, keyed by project
+  // since a remembered workflow from a different project is meaningless.
+  ipcMain.handle("steamtrain:get-last-workflow", () => {
+    if (!projectDir) return undefined;
+    return state.lastWorkflow?.[projectDir];
+  });
+  ipcMain.handle("steamtrain:set-last-workflow", (_event, name: unknown) => {
+    if (!projectDir || typeof name !== "string" || !name) return;
+    persist({ lastWorkflow: { ...state.lastWorkflow, [projectDir]: name } });
+  });
+
   installWebContentsGuards((url) => {
     if (!server) return false;
     try {

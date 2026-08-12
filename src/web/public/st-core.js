@@ -541,19 +541,29 @@ window.Steamtrain = (function () {
    *  the remembered previous selection if one exists, else the tour. */
   function bootstrapDefaultWorkflow() {
     if (S.selected) return;
-    var remembered = null;
-    try { remembered = localStorage.getItem(SELECTION_KEY); } catch (e) {}
-    if (remembered && S.workflows.some(function (w) { return w.name === remembered; })) {
-      selectWorkflow(remembered);
+    function withRemembered(remembered) {
+      if (S.selected) return; // a deep link or rapid re-entry may have won the race
+      if (remembered && S.workflows.some(function (w) { return w.name === remembered; })) {
+        selectWorkflow(remembered);
+        return;
+      }
+      // Soft default: still open the tour when present so the empty state dies.
+      if (S.workflows.some(function (w) { return w.name === TOUR_NAME; })) {
+        selectWorkflow(TOUR_NAME, function () {
+          var input = document.getElementById("input");
+          if (input && !input.value) input.value = "all aboard";
+        });
+      }
+    }
+    // localStorage doesn't survive a restart in the desktop app: the embedded
+    // server's origin changes every launch. Its own persisted copy does.
+    if (window.steamtrainDesktop && window.steamtrainDesktop.getLastWorkflow) {
+      window.steamtrainDesktop.getLastWorkflow().then(withRemembered, function () { withRemembered(null); });
       return;
     }
-    // Soft default: still open the tour when present so the empty state dies.
-    if (S.workflows.some(function (w) { return w.name === TOUR_NAME; })) {
-      selectWorkflow(TOUR_NAME, function () {
-        var input = document.getElementById("input");
-        if (input && !input.value) input.value = "all aboard";
-      });
-    }
+    var remembered = null;
+    try { remembered = localStorage.getItem(SELECTION_KEY); } catch (e) {}
+    withRemembered(remembered);
   }
 
   function isCredentialFreeSpec(spec) {
@@ -1384,6 +1394,7 @@ window.Steamtrain = (function () {
     // Leaving an attached run restores Plan / Describe and clears compact chrome.
     ST.run.setRunning(false);
     try { localStorage.setItem(SELECTION_KEY, name); } catch (e) {}
+    if (window.steamtrainDesktop && window.steamtrainDesktop.setLastWorkflow) window.steamtrainDesktop.setLastWorkflow(name);
     // Reveal the selected workflow if its folder was folded shut.
     var entry = S.workflows.find(function (w) { return w.name === name; });
     if (entry && entry.source && S.folderCollapse[entry.source]) {

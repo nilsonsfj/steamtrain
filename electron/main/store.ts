@@ -26,6 +26,16 @@ export interface DesktopState {
   /** Most-recently-opened first. */
   recents: string[];
   window?: WindowStateShape;
+  /**
+   * Name of the last workflow the user had open, per project.
+   *
+   * Keyed by project directory because the last workflow means nothing once
+   * the window is pointed at a different project. The web UI's own
+   * `localStorage` copy of this can't survive a restart on its own: the
+   * embedded server picks a new port every launch, so its origin changes and
+   * `localStorage` resets with it.
+   */
+  lastWorkflow?: Record<string, string>;
 }
 
 const EMPTY: DesktopState = { recents: [] };
@@ -73,7 +83,20 @@ export function parseState(raw: string): DesktopState {
         }
       : undefined;
 
-  return { recents, ...(window ? { window } : {}) };
+  const lastWorkflowRaw = isRecord(parsed.lastWorkflow) ? parsed.lastWorkflow : undefined;
+  const lastWorkflow: Record<string, string> | undefined = lastWorkflowRaw
+    ? Object.fromEntries(
+        Object.entries(lastWorkflowRaw).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1] !== "",
+        ),
+      )
+    : undefined;
+
+  return {
+    recents,
+    ...(window ? { window } : {}),
+    ...(lastWorkflow && Object.keys(lastWorkflow).length > 0 ? { lastWorkflow } : {}),
+  };
 }
 
 export interface StateStore {
