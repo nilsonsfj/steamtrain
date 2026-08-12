@@ -136,7 +136,11 @@ class GitWorktreeManager implements AgentWorkspaceManager {
   readonly runId: string;
   /** Repo roots already swept by this manager (once per run, see `sweep`). */
   private readonly swept = new Set<string>();
-  /** Worktrees of `retainWorkspace: false` steps, discarded when the run ends. */
+  /**
+   * Live `retainWorkspace: false` worktrees. Each is released as its own step
+   * ends (`releaseDisposable`), so this holds only what is currently in flight;
+   * whatever remains at run end is what crashed or aborted before disposing.
+   */
   private readonly disposable: { repoRoot: string; root: string; branch: string }[] = [];
 
   constructor(options: GitWorktreeManagerOptions) {
