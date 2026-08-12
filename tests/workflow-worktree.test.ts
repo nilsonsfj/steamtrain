@@ -219,6 +219,75 @@ describe("git worktree agent workspace manager", () => {
     expect(branches).toContain(retained.branch as string);
   });
 
+  it("releases a disposable worktree when its own step ends, not at run end", async () => {
+    const root = await tempDir();
+    const repo = join(root, "repo");
+    await initRepo(repo);
+    const manager = createGitWorktreeManager({
+      baseDir: join(root, "worktrees"),
+      runId: "steprelease",
+    });
+    const base = {
+      workflowName: "demo",
+      agent: "claude" as const,
+      baseCwd: repo,
+      stepCwd: repo,
+      iteration: 1,
+    };
+    const disposable = await manager.allocate({
+      ...base,
+      stepId: "rebase",
+      retainWorkspace: false,
+    });
+    const retained = await manager.allocate({ ...base, stepId: "implement" });
+
+    await disposable.dispose();
+    await retained.dispose();
+
+    // Gone the moment its step ended — the run is still in flight.
+    expect(await lstat(disposable.root as string).catch(() => undefined)).toBeUndefined();
+    expect((await lstat(retained.root as string)).isDirectory()).toBe(true);
+    const branches = await git(repo, "branch", "--list", "steamtrain/*");
+    expect(branches).not.toContain(disposable.branch as string);
+
+    // The run-end backstop finds nothing left and must not throw.
+    await manager.reclaimDisposable?.();
+    expect((await lstat(retained.root as string)).isDirectory()).toBe(true);
+  });
+
+  it("keeps live worktrees bounded by concurrency, not by steps executed", async () => {
+    // The babysit failure mode: ONE run executes hundreds of disposable steps.
+    // Agent CLIs derive their command sandbox from the repo's registered
+    // worktrees, so a count that grows with total steps executed (rather than
+    // with how many run at once) kills every agent command with E2BIG partway
+    // through — long before the run-end cleanup that would have saved it.
+    const root = await tempDir();
+    const repo = join(root, "repo");
+    await initRepo(repo);
+    const manager = createGitWorktreeManager({
+      baseDir: join(root, "worktrees"),
+      runId: "fanout",
+    });
+    let peak = 0;
+    for (let step = 0; step < 12; step++) {
+      const lease = await manager.allocate({
+        workflowName: "demo",
+        agent: "claude" as const,
+        baseCwd: repo,
+        stepCwd: repo,
+        iteration: 1,
+        stepId: `prepare-${step}`,
+        retainWorkspace: false,
+      });
+      const listed = await git(repo, "worktree", "list");
+      peak = Math.max(peak, listed.split("\n").filter((line) => line.includes("fanout")).length);
+      await lease.dispose();
+    }
+    expect(peak).toBe(1);
+    const settled = await git(repo, "worktree", "list");
+    expect(settled).not.toContain("fanout");
+  });
+
   it("honors cancellation before creating a worktree", async () => {
     const root = await tempDir();
     const repo = join(root, "repo");

@@ -44,6 +44,23 @@ const FREE = {
  */
 const READ_ONLY: StepPermissions = { profile: "read-only", onUnsupported: "warn" };
 
+/**
+ * Unattended agents must pre-approve their own tools. A step that declares no
+ * `permissions` passes NO permission flags to the CLI (see `resolvePermissions`),
+ * so the agent lands in the CLI's default prompting mode with nobody to answer:
+ * every Edit and every shell command is denied, and the step burns its whole
+ * budget narrating the refusals instead of failing loudly.
+ *
+ * The project's own `.claude` allowlist does not rescue it either — the agent's
+ * cwd is a disposable worktree under the system temp dir, not the user's
+ * checkout, so project-scoped settings never load.
+ *
+ * `full` is the honest declaration for a step that must resolve conflicts, run
+ * builds, and force-push unattended. The blast radius is the worktree, which is
+ * discarded when the step ends; the only thing that outlives it is the pushed PR.
+ */
+const UNATTENDED: StepPermissions = { profile: "full", onUnsupported: "warn" };
+
 const bugHunt: WorkflowSpec = {
   name: "bug-hunt",
   description:
@@ -1080,9 +1097,10 @@ const babysitPr: WorkflowSpec = {
         {
           id: "rebase",
           kind: "command",
-          // Nothing this PR pipeline produces lives locally — every step pushes to
-          // the PR — so its worktrees are discarded when the run ends instead
-          // of piling up per PR, per step, per iteration.
+          // Nothing this PR pipeline produces lives locally — every step pushes
+          // to the PR — so each worktree is discarded as its step ends instead
+          // of piling up per PR, per step, per iteration until the agents' own
+          // sandbox overflows.
           retainWorkspace: false,
           // Mechanical rebase first, deterministically, in this step's own
           // worktree. Agents told to "rebase onto the base" did the work in the
@@ -1102,6 +1120,9 @@ const babysitPr: WorkflowSpec = {
           id: "prepare",
           kind: "processor",
           retainWorkspace: false,
+          // Resolves conflicts, runs builds and force-pushes with no human to
+          // approve a single tool call — see UNATTENDED.
+          permissions: UNATTENDED,
           dependsOn: ["rebase"],
           // Model-only: babysitterModel may be any catalog id — agent
           // follows the rendered model family at execute time.

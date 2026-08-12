@@ -46,7 +46,22 @@ export interface AgentWorkspaceRequest {
   };
   /**
    * The step's `retainWorkspace` (default true). When false the worktree is
-   * discarded once the RUN ends — see {@link AgentWorkspaceManager.reclaimDisposable}.
+   * discarded as soon as THIS STEP ends (the lease's `dispose`), with
+   * {@link AgentWorkspaceManager.reclaimDisposable} as the run-end backstop for
+   * steps that never got to dispose.
+   *
+   * Step-end, not run-end, is the whole point: a fan-out run like
+   * `babysit-all-prs` executes hundreds of steps, and deferring every removal
+   * to the end lets the live count grow without bound during exactly the window
+   * the agents are running. Agent CLIs derive their command sandbox from the
+   * repo's registered worktrees, so the run poisons its own agents with E2BIG
+   * long before it reaches the cleanup that would have saved it (see `sweep`).
+   * Releasing per step makes the peak a function of CONCURRENCY instead of
+   * total steps executed.
+   *
+   * A step declaring this asserts nothing downstream reads its worktree — a
+   * later `attach:`/`inherit:` pointed at it fails loudly with "its worktree no
+   * longer exists" rather than reading a half-removed tree.
    */
   retainWorkspace?: boolean;
   signal?: AbortSignal;
@@ -75,9 +90,9 @@ export interface AgentWorkspaceManager {
    */
   readonly runId?: string;
   /**
-   * Discard the worktrees of steps that declared `retainWorkspace: false` —
-   * called once the run is over, so `inherit`/`attach`/`merge` could still use
-   * them while it was in flight. Best-effort and idempotent.
+   * Sweep up any `retainWorkspace: false` worktree whose step did not release
+   * it at its own `dispose` — aborted runs, crashed steps. Normally a no-op,
+   * because the per-step release already got them. Best-effort and idempotent.
    */
   reclaimDisposable?: () => Promise<void>;
   /**
@@ -121,7 +136,11 @@ class GitWorktreeManager implements AgentWorkspaceManager {
   readonly runId: string;
   /** Repo roots already swept by this manager (once per run, see `sweep`). */
   private readonly swept = new Set<string>();
-  /** Worktrees of `retainWorkspace: false` steps, discarded when the run ends. */
+  /**
+   * Live `retainWorkspace: false` worktrees. Each is released as its own step
+   * ends (`releaseDisposable`), so this holds only what is currently in flight;
+   * whatever remains at run end is what crashed or aborted before disposing.
+   */
   private readonly disposable: { repoRoot: string; root: string; branch: string }[] = [];
 
   constructor(options: GitWorktreeManagerOptions) {
@@ -202,11 +221,13 @@ class GitWorktreeManager implements AgentWorkspaceManager {
       // implement → review chain carries the whole pipeline's work.
       baseCommit: inherit ? (inherit.baseCommit ?? worktreeHead) : worktreeHead,
       linkedIgnoredPaths,
-      // Intentionally a no-op: worktrees are retained after the run so users
-      // can inspect, commit, or merge agent-created files from the recorded
-      // branch. Lifecycle closure is explicit — a merge step's `cleanup`,
-      // `history apply/prune`, or `workflow worktrees prune` (see gc.ts).
-      dispose: () => {},
+      // A RETAINED worktree's dispose is intentionally a no-op: it outlives the
+      // run so users can inspect, commit, or merge agent-created files from the
+      // recorded branch. Lifecycle closure is explicit — a merge step's
+      // `cleanup`, `history apply/prune`, or `workflow worktrees prune`
+      // (see gc.ts). A DISPOSABLE one is removed here, as its step ends.
+      dispose:
+        request.retainWorkspace === false ? () => this.releaseDisposable(worktreeRoot) : () => {},
     };
   }
 
@@ -262,8 +283,32 @@ class GitWorktreeManager implements AgentWorkspaceManager {
   }
 
   /**
-   * Discard every `retainWorkspace: false` worktree this run created. Runs
-   * under the repo lock (a `worktree remove` racing a sibling run's
+   * Discard ONE `retainWorkspace: false` worktree, as its step ends. Forgetting
+   * the entry first is what keeps this and the run-end sweep from racing over
+   * the same directory, and makes a repeat call a no-op. Unknown roots (a
+   * retained worktree, or one already released) fall through silently.
+   *
+   * Best-effort by design: a step whose worktree could not be removed has still
+   * done its real work — pushed a PR — and failing it for a cleanup hiccup
+   * would turn a tidiness problem into a lost result. The run-end reclaim and
+   * `git worktree prune` both get another chance at it.
+   */
+  private async releaseDisposable(root: string): Promise<void> {
+    const index = this.disposable.findIndex((candidate) => candidate.root === root);
+    const entry = this.disposable[index];
+    if (!entry) return;
+    this.disposable.splice(index, 1);
+    await withRepoWorktreeLock(entry.repoRoot, undefined, async () => {
+      await removeWorktreeBestEffort(entry.repoRoot, entry.root, entry.branch);
+    }).catch(() => {});
+  }
+
+  /**
+   * Backstop for every `retainWorkspace: false` worktree whose step did not get
+   * to release it — an aborted run, a crashed step, a lease that never reached
+   * its `finally`. In the normal path this finds nothing left to do.
+   *
+   * Runs under the repo lock (a `worktree remove` racing a sibling run's
    * `worktree add` corrupts the registry) and forgets each entry as it goes,
    * so a second call after a partial failure is a no-op for what already went.
    */

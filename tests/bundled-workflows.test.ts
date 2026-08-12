@@ -65,6 +65,22 @@ describe("bundled workflows", () => {
     expect(unknown).toEqual([]);
   });
 
+  it("babysit's agent step pre-approves its own tools — nobody is there to answer a prompt", () => {
+    // A step that declares no `permissions` passes NO permission flags to the
+    // agent CLI, which then runs in its default prompting mode: every Edit and
+    // every shell command is denied, and the step narrates refusals until it
+    // times out. The project's own `.claude` allowlist cannot rescue it either
+    // — the agent's cwd is a disposable worktree under the temp dir, so
+    // project-scoped settings never load.
+    const prepare = BUNDLED_WORKFLOWS["babysit-pr"]!.phases.flatMap((phase) => phase.steps).find(
+      (step) => step.id === "prepare",
+    );
+    expect(prepare).toBeDefined();
+    const declared = (prepare as { permissions?: string | { profile?: string } }).permissions;
+    const profile = typeof declared === "string" ? declared : declared?.profile;
+    expect(profile).toBe("full");
+  });
+
   it("prefer OpenCode free models over DeepSeek free for babysit defaults", () => {
     for (const name of ["babysit-pr", "babysit-all-prs"]) {
       const def = BUNDLED_WORKFLOWS[name]!.inputs?.babysitterModel?.default;
