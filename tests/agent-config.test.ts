@@ -124,6 +124,15 @@ describe("agent configuration", () => {
     expect(defaultDraftModel("opencode-fork", customConfig)).toBe("opencode/mimo-v2.5-free");
   });
 
+  it("propagates Claude's picker group onto model metadata", () => {
+    const meta = buildAgentMeta(customConfig, () => true, { includeDisabled: true });
+    const claude = meta.find((agent) => agent.provider === "claude");
+    const fable = claude?.models.find((model) => model.id === "claude-fable-5");
+    expect(fable?.group).toBe("Current");
+    const fork = meta.find((agent) => agent.id === "opencode-fork");
+    expect(fork?.models.every((model) => model.group === undefined)).toBe(true);
+  });
+
   it("keeps config-only fields out of normal metadata", () => {
     const meta = buildAgentMeta(customConfig, () => false);
     const fork = meta.find((agent) => agent.id === "opencode-fork");

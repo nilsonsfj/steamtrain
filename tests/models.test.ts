@@ -307,7 +307,7 @@ describe("model names", () => {
 
   it("exposes id and name on catalog entries", () => {
     const claude = modelsForAgent("claude")[0];
-    expect(claude).toEqual({ id: "claude-fable-5", name: "Claude Fable 5" });
+    expect(claude).toEqual({ id: "claude-fable-5", name: "Claude Fable 5", group: "Current" });
   });
 
   it("includes display names in formatAgentTarget", () => {

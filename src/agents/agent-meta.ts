@@ -8,6 +8,8 @@ export interface AgentModelMeta {
   name: string;
   /** Reasoning effort / variant levels this model accepts (may be empty). */
   efforts: string[];
+  /** Optional picker bucket label (e.g. Claude's current/alias/legacy split). */
+  group?: string;
 }
 
 export interface AgentMeta {
@@ -51,6 +53,7 @@ export function buildAgentMeta(
       id: model.id,
       name: model.name,
       efforts: [...effortsForModel(agent.id, model.id, config)],
+      ...(model.group ? { group: model.group } : {}),
     })),
     defaultModel: defaultDraftModel(agent.id, config),
     healthy: isHealthy(agent.id),
