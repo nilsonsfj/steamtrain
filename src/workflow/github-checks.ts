@@ -848,7 +848,18 @@ export async function mergePullRequestWhenReady(
       };
     }
   }
-  if (!firstWait.ok) return { ok: false, error: firstWait.error };
+  // Forward `closed` rather than flattening to a bare error: this pre-lock wait
+  // is where babysit's land step meets a withdrawn PR (the in-lock check at the
+  // bottom of `landUnderLock` never gets reached), so dropping the flag here
+  // would put the land gate straight back into the retry loop this exists to
+  // stop.
+  if (!firstWait.ok) {
+    return {
+      ok: false,
+      error: firstWait.error,
+      ...(firstWait.closed ? { closed: true as const } : {}),
+    };
+  }
   if (firstWait.snapshot.state === "merged") {
     return alreadyMerged(firstWait.snapshot.number, firstWait.evaluation.detail);
   }
