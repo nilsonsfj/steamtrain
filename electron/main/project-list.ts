@@ -96,13 +96,16 @@ function ownerAlive(
   isAlive: (pid: number) => boolean,
 ): boolean {
   const pid = num(meta.pid);
+  // `<=`, not `<`, in both windows: the engine counts the exact boundary as
+  // alive, and a switcher that disagreed with it by one tick would report a
+  // run the engine is still executing as gone.
   if (pid === -1) {
     const createdAt = num(meta.createdAt);
-    return createdAt === undefined || now - createdAt < ORPHAN_GRACE_MS;
+    return createdAt === undefined || now - createdAt <= ORPHAN_GRACE_MS;
   }
   if (pid === undefined || !isAlive(pid)) return false;
   const heartbeat = num(meta.heartbeatAt);
-  return heartbeat === undefined || now - heartbeat < HEARTBEAT_STALE_MS;
+  return heartbeat === undefined || now - heartbeat <= HEARTBEAT_STALE_MS;
 }
 
 /**

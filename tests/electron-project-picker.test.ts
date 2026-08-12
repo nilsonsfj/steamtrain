@@ -11,6 +11,7 @@ import {
   LIVE_RUN_HEARTBEAT_STALE_MS,
   LIVE_RUN_ORPHAN_GRACE_MS,
   WORKFLOW_RUNS_DIR,
+  isLiveRunOwnerAlive,
 } from "../src/workflow/live-run-store";
 
 const read = (path: string): string => readFileSync(new URL(path, import.meta.url), "utf8");
@@ -53,6 +54,27 @@ describe("summarizeRuns", () => {
   it("does not count a live pid whose heartbeat went stale", () => {
     const metas = [{ status: "running", pid: 10, heartbeatAt: now - HEARTBEAT_STALE_MS - 1 }];
     expect(summarizeRuns(metas, now, alive)).toEqual({ running: 0, failed: 0 });
+  });
+
+  it("calls both windows the way the engine does, exactly on the boundary", () => {
+    // The engine counts `elapsed === window` as alive. Asserted against its own
+    // function rather than a hardcoded expectation, so the day it changes its
+    // mind this fails instead of the two quietly drifting a tick apart.
+    // `process.pid` because the engine's version does its own pid check with
+    // no seam to stub — only a pid that really is alive lets the heartbeat
+    // comparison be the thing under test.
+    const onBoundary = [
+      { status: "running", pid: process.pid, heartbeatAt: now - HEARTBEAT_STALE_MS },
+      { status: "queued", pid: -1, createdAt: now - ORPHAN_GRACE_MS },
+    ];
+    const engineSaysAlive = onBoundary.filter((meta) =>
+      isLiveRunOwnerAlive(
+        { pid: meta.pid, createdAt: meta.createdAt ?? 0, heartbeatAt: meta.heartbeatAt },
+        now,
+      ),
+    ).length;
+    expect(engineSaysAlive).toBe(2);
+    expect(summarizeRuns(onBoundary, now, alive).running).toBe(engineSaysAlive);
   });
 
   it("counts a detached run that has not reported its pid yet, until the grace window closes", () => {
