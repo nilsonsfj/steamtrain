@@ -179,7 +179,24 @@ export function displayPath(dir: string, home: string): string {
   return dir.startsWith(home + sep) ? `~${dir.slice(home.length)}` : dir;
 }
 
-/** Read one project's live-run registry. A project with no `.steamtrain/runs` is simply idle. */
+/**
+ * How many `meta.json` reads are in flight at once, per project. Mirrors the
+ * history store's own batching (`readAllRunRecords`): a registry that has not
+ * been swept in a while can hold dozens of entries, and opening a menu should
+ * not fan out across every one of them at once.
+ */
+const READ_BATCH = 10;
+
+/**
+ * Read one project's live-run registry. A project with no `.steamtrain/runs`
+ * is simply idle.
+ *
+ * This reads the directory directly rather than through the engine's `list()`,
+ * so it does not trigger that function's sweep: terminal entries past
+ * `LIVE_RUN_TTL_MS` are still on disk until the owning project's own engine
+ * sweeps them, and a failed run can therefore keep saying "1 failed" past the
+ * TTL. That is inherited timing, not a rule enforced here.
+ */
 export async function readActivity(
   dir: string,
   now: number = Date.now(),
@@ -191,7 +208,15 @@ export async function readActivity(
   } catch {
     return { running: 0, failed: 0 };
   }
-  const metas = await Promise.all(entries.map((id) => readJson(join(root, id, "meta.json"))));
+  // Every entry, in batches — not a truncated slice. Run ids are not ordered
+  // by time, so "the newest N" is not something this could take without
+  // reading them all first, and dropping any of them could drop the one run
+  // that is actually executing.
+  const metas: unknown[] = [];
+  for (let i = 0; i < entries.length; i += READ_BATCH) {
+    const batch = entries.slice(i, i + READ_BATCH);
+    metas.push(...(await Promise.all(batch.map((id) => readJson(join(root, id, "meta.json"))))));
+  }
   return summarizeRuns(metas.filter(isRecord), now);
 }
 

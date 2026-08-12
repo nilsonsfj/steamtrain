@@ -15,6 +15,14 @@
   --muted: #98a2af;
   --dim: #6c7784;
   --faint: #3a424d;
+  /* Quieter than --dim but still legible: keyboard hints and the glyphs that
+     label a control rather than say anything. Already hardcoded in runs.css
+     and plan.css, which can adopt this the next time they are touched. */
+  --hint: #4d5663;
+
+  /* A raised surface under the pointer — one step up from --raised, and the
+     open state of a control that owns a popup. */
+  --raised-hover: #1c222a;
 
   --accent: #34d3c4;
   --accent-bright: #7eefe4;
