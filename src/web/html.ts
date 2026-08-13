@@ -20,11 +20,20 @@
  * inputs, and per-step status/duration/cost.
  */
 /**
- * Designed locomotive mark for the tab icon (replaces the emoji glyph so the
- * brand reads as a product, not a placeholder). Kept in sync visually with the
- * `.brand-mark` CSS in `shell.css`.
+ * The steamtrain locomotive mark, for the tab icon (replaces the emoji glyph so
+ * the brand reads as a product, not a placeholder).
+ *
+ * This is the canonical 32px geometry — the same drawing the steamtrain.app
+ * masthead uses. The `.brand-mark` CSS in `shell.css` and the app icon in
+ * `build/icon.svg` both scale this exact path set rather than redrawing it, so
+ * a change here is a change everywhere; keep them in step.
+ *
+ * A silhouette, not an illustration: cab, boiler, two wheels and three puffs
+ * trailing off the top-right corner, all in the accent on the plate colour.
+ * Details it deliberately omits (chimney, rail, smokebox band) are what turned
+ * to mud at tab size in the earlier drawing.
  */
-export const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="7" fill="#0e1116"/><circle cx="23" cy="7.4" r="1.7" fill="#8eeae0" opacity=".85"/><circle cx="25.8" cy="5.1" r="1.2" fill="#8eeae0" opacity=".55"/><circle cx="27.7" cy="3.4" r=".8" fill="#8eeae0" opacity=".35"/><rect x="20.5" y="9" width="3.8" height="1.6" rx=".6" fill="#1c6f68"/><rect x="21.1" y="10.4" width="2.6" height="4.2" rx=".6" fill="#1c6f68"/><rect x="5" y="9.9" width="9.3" height="1.5" rx=".8" fill="#1c6f68"/><rect x="5.7" y="11" width="7.8" height="10.6" rx="1.2" fill="#1c6f68"/><rect x="7" y="12.3" width="5.1" height="4.2" rx=".9" fill="#0e1116" opacity=".55"/><rect x="12.2" y="14.7" width="14.1" height="6.9" rx="1.6" fill="#34d3c4"/><rect x="24.3" y="15" width="1.7" height="6.4" rx=".8" fill="#1c6f68" opacity=".55"/><rect x="5.4" y="21" width="20.8" height="2.3" rx=".8" fill="#1c6f68"/><circle cx="10.6" cy="24.6" r="2.6" fill="#0e1116" stroke="#34d3c4" stroke-width="1.2"/><circle cx="10.6" cy="24.6" r=".9" fill="#34d3c4"/><circle cx="21" cy="24.6" r="2.6" fill="#0e1116" stroke="#34d3c4" stroke-width="1.2"/><circle cx="21" cy="24.6" r=".9" fill="#34d3c4"/><path d="M4 27.8h24" stroke="#d29922" stroke-width="1" stroke-linecap="round" opacity=".8"/></svg>`;
+export const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="7" fill="#0c0e11"/><circle cx="14.5" cy="6.5" r="1.4" fill="#34d3c4" opacity=".35"/><circle cx="19" cy="4.4" r="1.9" fill="#34d3c4" opacity=".6"/><circle cx="25" cy="2.6" r="2.5" fill="#34d3c4" opacity=".9"/><rect x="6" y="8" width="5.5" height="7" rx="1.6" fill="#34d3c4"/><rect x="3" y="14" width="26" height="11" rx="3.2" fill="#34d3c4"/><circle cx="10" cy="27.5" r="3" fill="#0c0e11" stroke="#34d3c4" stroke-width="1.6"/><circle cx="22" cy="27.5" r="3" fill="#0c0e11" stroke="#34d3c4" stroke-width="1.6"/></svg>`;
 
 export interface WebAsset {
   /** Filename inside `src/web/public/`, also its `/static/<file>` URL. */

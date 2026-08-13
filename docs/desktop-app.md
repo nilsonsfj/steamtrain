@@ -193,7 +193,7 @@ The shell lives in `electron/` and builds separately from the CLI:
 | `tsconfig.electron.json` | Type-checks `electron/` only. Adds `DOM` to `lib` — required by Electron's own type definitions and by the preload, which runs in a renderer. It is deliberately *not* in the root tsconfig, so `src/` stays DOM-free and cannot silently accept browser globals. |
 | `electron-builder.yml` | Packaging. Unsigned macOS and Linux targets. |
 | `electron/shared/title-bar.ts` | The one place that decides the window controls are drawn over the page, and how much room that costs. Imported by both main (which hides the title bar) and the preload (which tells the page), because the two have to agree and live in different bundles. |
-| `build/icon.svg` | The app icon, drawn at 1024. `npm run build:icon` rasterises it to the committed `build/icon.png`, which electron-builder converts into `.icns`, `.ico` and the Linux size ladder. It is the favicon's locomotive redrawn for a size where a silhouette is no longer enough. |
+| `build/icon.svg` | The app icon at 1024. `npm run build:icon` rasterises it to the committed `build/icon.png`, which electron-builder converts into `.icns`, `.ico` and the Linux size ladder. The locomotive is not redrawn here — it is `FAVICON_SVG`'s 32-unit geometry placed by a transform, so the dock icon and the browser tab cannot drift apart. Only the plate under it (gradient, glow, rim) is tuned for this size. |
 | `e2e/desktop.spec.ts` | The launch smoke test (below), run by `npm run test:e2e`. |
 | `tsconfig.e2e.json` | Type-checks `e2e/` and the Playwright config. Adds `DOM` for the same reason and with the same boundary as the Electron config: the specs evaluate code inside the page. |
 
