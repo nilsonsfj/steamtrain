@@ -267,6 +267,46 @@ describe("install.sh", () => {
     expect(stderr).toContain("HOME is not set");
   });
 
+  /**
+   * `--app-dir` and `--desktop-url` are meaningless to the CLI install, so they
+   * have to select the desktop one — otherwise `--app-dir /opt` quietly links a
+   * command and never touches /opt.
+   *
+   * Asserted without a platform branch by unsetting HOME: the CLI path needs it
+   * for the default bin dir and says so, and the desktop path never asks. So
+   * "HOME is not set" appearing here means the option fell through, whatever
+   * this test happens to be running on. The bogus --desktop-url keeps the
+   * macOS leg off the network.
+   */
+  it("treats --app-dir as a desktop install rather than falling through to the CLI", () => {
+    // Via the env var rather than the flag, because the flag would imply
+    // --desktop on its own and defeat the point. This only pre-empts the
+    // release lookup, so the macOS leg fails on the download instead of
+    // pulling ~100 MB.
+    const { status, stdout, stderr } = runInstaller(["--app-dir", join(root, "apps")], {
+      env: { STEAMTRAIN_DESKTOP_URL: "file:///nope.zip" },
+      unset: ["HOME"],
+    });
+    expect(status).not.toBe(0);
+    expect(stderr).not.toContain("HOME is not set");
+    expect(stdout).not.toContain("Linked");
+  });
+
+  it("treats --desktop-url as a desktop install rather than falling through to the CLI", () => {
+    const { status, stdout, stderr } = runInstaller(["--desktop-url", "file:///nope.zip"], {
+      unset: ["HOME"],
+    });
+    expect(status).not.toBe(0);
+    expect(stderr).not.toContain("HOME is not set");
+    expect(stdout).not.toContain("Linked");
+  });
+
+  it.skipIf(process.platform === "darwin")("refuses --desktop on a non-macOS host", () => {
+    const { status, stderr } = runInstaller(["--desktop"]);
+    expect(status).toBe(1);
+    expect(stderr).toContain("macOS app");
+  });
+
   it("reports a missing build instead of linking a broken command", () => {
     const checkout = mkdtempSync(join(root, "empty-checkout-"));
     writeFileSync(join(checkout, "package.json"), '{"name":"steamtrain"}\n');

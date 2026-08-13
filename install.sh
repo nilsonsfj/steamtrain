@@ -22,6 +22,7 @@
 #   --desktop                download the packaged macOS app (no build)
 #   --desktop-url <url>      install that .zip instead of the latest release
 #   --app-dir <dir>          where to put the app               (default /Applications)
+#                            (the last two imply --desktop)
 #   --ref <ref>              git ref to install                 (default main)
 #   --src-dir <dir>          where to keep the checkout         (default ~/.steamtrain/src)
 #   --bin-dir <dir>          where to link the command          (default ~/.local/bin)
@@ -79,7 +80,7 @@ usage() {
   # The comment block at the top of this file is the help text — except when
   # this script is piped from curl and $0 is not a readable file.
   if [ -n "${0:-}" ] && [ -f "${0:-}" ]; then
-    sed -n '3,40p' "$0" | sed 's/^#\{0,1\} \{0,1\}//'
+    sed -n '3,41p' "$0" | sed 's/^#\{0,1\} \{0,1\}//'
   else
     printf '%s\n' "steamtrain installer — https://steamtrain.app/install.sh"
     printf '%s\n' "options: --desktop --desktop-url --app-dir --ref --repo --src-dir --bin-dir"
@@ -107,8 +108,11 @@ while [ "$#" -gt 0 ]; do
       esac
       ;;
     --desktop)  DO_DESKTOP=1; shift ;;
+    # Both of these imply --desktop. They mean nothing to the CLI install, so
+    # the alternative is accepting them and silently ignoring them — which is
+    # how `--app-dir /opt` would quietly link a command instead.
     --desktop-url) need_value "$1" "${2:-}"; DESKTOP_URL="$2"; DO_DESKTOP=1; shift 2 ;;
-    --app-dir)  need_value "$1" "${2:-}"; APP_DIR="$2"; shift 2 ;;
+    --app-dir)  need_value "$1" "${2:-}"; APP_DIR="$2"; DO_DESKTOP=1; shift 2 ;;
     --no-build) DO_BUILD=0; shift ;;
     --force)    FORCE=1; shift ;;
     -h|--help)  usage; exit 0 ;;
