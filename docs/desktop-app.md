@@ -24,20 +24,51 @@ packaged build gets the menu bar too.
 
 ## Installing a build
 
-`npm run package:desktop` produces, in `release/`:
+The supported way to get the app on a Mac is the installer:
+
+```bash
+curl -fsSL https://steamtrain.app/install.sh | sh -s -- --desktop
+```
+
+That downloads the arch-matched `.zip` from the latest
+[GitHub release](https://github.com/nilsonsfj/steamtrain/releases), unpacks it
+with `ditto`, and puts `steamtrain.app` in `/Applications`. Re-run it to update.
+Why a curl install rather than "download the dmg" is the whole of the next
+section.
+
+`npm run package:desktop` produces the same set locally, in `release/`:
 
 | Platform | Artifact |
 |----------|----------|
-| macOS | `steamtrain-<version>.dmg` (arm64 and x64) |
+| macOS | `steamtrain-<version>-<arch>.zip` (arm64 and x64) — what the installer fetches |
+| macOS | `steamtrain-<version>-<arch>.dmg` (arm64 and x64) |
 | Linux | `steamtrain-<version>.AppImage` and `steamtrain_<version>_amd64.deb` |
 
-**The builds are unsigned.** What that costs depends entirely on how the app
-reached the machine, and the difference trips people up:
+**The builds are ad-hoc signed and not notarized** — "unsigned" in the sense
+everyone means it, since only a Developer ID and notarization get you past
+Gatekeeper, and both need the paid account.
+
+The ad-hoc part is not decoration. Apple Silicon refuses to execute a binary
+carrying no signature at all, and a bundle whose resources go unsealed reads to
+Gatekeeper as *malformed* rather than merely unnotarized — which is the "app is
+damaged, Move to Trash" dialog, the one with no Open Anyway to recover with.
+Sealing the bundle is what keeps the dmg openable. See the `identity` note in
+[`electron-builder.yml`](../electron-builder.yml).
+
+What the missing notarization costs depends entirely on how the app reached the
+machine, and the difference trips people up:
 
 - **You built it yourself** — nothing happens. `com.apple.quarantine` is set by
   the application that *downloads* a file, not by the build, so a local
   `package:desktop` produces a dmg that opens on a double-click and keeps
   working. Gatekeeper is never consulted.
+- **The installer fetched it** — also nothing happens, and for the same reason.
+  Quarantine is opt-in per application via `LSFileQuarantineEnabled`; browsers
+  and mail clients set it, `curl` does not. An app unpacked out of a curl'd zip
+  has no such attribute, so Gatekeeper is never consulted here either. This is
+  not a bypass — nothing is stripped and no check is defeated. It is the same
+  trust model as `curl | sh`: you decided to trust `steamtrain.app` over TLS,
+  and one decision covers the whole install.
 - **You downloaded it** — the first open reports a damaged or unidentified app.
 
 On macOS 15 and later the escape hatch is **System Settings → Privacy &
@@ -59,10 +90,16 @@ from — Homebrew is removing `--no-quarantine` and drops casks that fail
 Gatekeeper on 2026-09-01, which closes `brew install --cask` as a route for
 unsigned software.
 
-Two things blunt this in practice. The CLI is unaffected — `npm i -g steamtrain`
-then `steamtrain --web-ui` serves the same cockpit, and an npm package is not a
+Three things blunt this in practice. The installer route above avoids the
+situation rather than escaping it, which is why the site and the release notes
+lead with it. The CLI is unaffected — `npm i -g steamtrain` then
+`steamtrain --web-ui` serves the same cockpit, and an npm package is not a
 bundle, so it never meets Gatekeeper at all. And the Linux targets have no
 equivalent: the AppImage and deb install without ceremony.
+
+The dmg stays published anyway, because "download a file and double-click it" is
+what people reach for and a missing artifact reads as a broken release. It just
+isn't the path the docs push you down.
 
 Signing and notarization are deliberately deferred — see the
 [roadmap](desktop-roadmap.md) for what they actually cost here, which is mostly

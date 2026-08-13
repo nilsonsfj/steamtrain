@@ -43,13 +43,52 @@ npmRebuild: false
 mac:
   category: public.app-category.developer-tools
   icon: build/icon.png
+  # electron-builder's default names the x64 artifact without an arch suffix and
+  # the arm64 one with it. `install.sh --desktop` picks its download by matching
+  # that suffix, so both arches carry one.
+  artifactName: ${productName}-${version}-${arch}.${ext}
   target:
     - target: dmg
       arch: [arm64, x64]
-  # Explicitly off rather than merely absent, so enabling it later is a
-  # deliberate edit and not an accident of a machine having credentials.
-  identity: null
+    # The zip is the *primary* macOS artifact, not a convenience copy. These
+    # builds are unsigned, so a dmg pulled down in a browser gets
+    # `com.apple.quarantine` and meets Gatekeeper; the same bundle fetched by
+    # `curl` in `install.sh` never gets the attribute and just opens. The dmg
+    # stays for people who want a file to double-click, with the Open Anyway
+    # dance documented in `docs/desktop-app.md`.
+    #
+    # zip, not tar.gz: electron-builder's zip target packs with `ditto`, which
+    # preserves the bundle's symlinks and permission bits. A bundle flattened by
+    # a naive archiver is exactly the "app is damaged" report this is avoiding.
+    - target: zip
+      arch: [arm64, x64]
+  # Ad-hoc signed ("-"), not unsigned (`null`), and not Developer ID — which
+  # would need the paid account. Ad-hoc buys nothing with Gatekeeper on its own,
+  # so this looks pointless. It is not, for two measured reasons:
+  #
+  #   1. Apple Silicon will not execute a binary carrying no signature at all,
+  #      quarantine or no quarantine.
+  #   2. `identity: null` does not produce "no signature" — it leaves the
+  #      Electron binary's own linker-signed ad-hoc signature in place while the
+  #      bundle's resources go unsealed. Gatekeeper reads that as a *malformed*
+  #      signature ("code has no resources but signature indicates they must be
+  #      present"), which is the "app is damaged, Move to Trash" dialog — the
+  #      one with no Open Anyway to recover with. Sealing the bundle turns that
+  #      into the ordinary unnotarized rejection, which does offer Open Anyway.
+  #
+  # So this is what keeps the dmg openable at all for anyone who downloads it in
+  # a browser. Verified by `spctl -a -vv -t exec` against a quarantined copy.
+  identity: "-"
   notarize: false
+  # Off because nothing here is notarized. The hardened runtime exists to make a
+  # build *eligible* for notarization; paired with an ad-hoc signature it only
+  # adds library validation, which electron-builder warns will fail launches
+  # unless it is bought back with a `disable-library-validation` entitlement.
+  # Carrying an entitlements plist to re-open what the runtime just closed, for
+  # a guarantee we cannot claim anyway, is worse than not turning it on. This is
+  # the flag to flip first if the paid account ever happens — see
+  # docs/desktop-roadmap.md.
+  hardenedRuntime: false
 
 dmg:
   # Nothing but the app and the Applications symlink — a background image is a

@@ -1,12 +1,15 @@
 name: Desktop packages
 
 # Real installers, built on demand rather than on every push: each artifact is
-# ~100 MB, nothing downstream consumes them automatically, and CI already
-# proves on every PR that the app packages and launches (the `desktop` job in
-# ci.yml, which stops at `--dir`).
+# ~100 MB, and CI already proves on every PR that the app packages and launches
+# (the `desktop` job in ci.yml, which stops at `--dir`).
 #
-# The results are unsigned. macOS will quarantine the dmg — docs/desktop-app.md
-# says how to open it anyway.
+# A tag push additionally publishes the results to the releases page; a manual
+# dispatch only produces artifacts. Nothing here runs on a normal push or PR.
+#
+# The results are unsigned. A browser-downloaded dmg is quarantined and blocked
+# on first launch; the zip that `install.sh --desktop` fetches with curl is not.
+# docs/desktop-app.md has the whole picture.
 on:
   workflow_dispatch:
   push:
@@ -55,7 +58,78 @@ jobs:
           name: steamtrain-${{ matrix.artifact }}
           path: |
             release/*.dmg
+            release/*.zip
             release/*.AppImage
             release/*.deb
           if-no-files-found: error
           retention-days: 14
+
+  # Actions artifacts are login-gated and expire, so they are a build output and
+  # not a distribution channel — this job is what actually puts files on the
+  # releases page. Tags only: a `workflow_dispatch` run is someone producing a
+  # build to hand around by other means, and must not publish anything.
+  release:
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    # `ubuntu-latest`, not `ubuntu-slim`: this needs the `gh` CLI, which the
+    # slim image does not ship.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          # Anything with a prerelease suffix (`v0.1.0-alpha.1`) is flagged as
+          # such. Note this also keeps it out of the `releases/latest` endpoint,
+          # which is why install.sh reads the releases *list* instead.
+          prerelease=""
+          case "$TAG" in
+            *-*) prerelease="--prerelease" ;;
+          esac
+
+          cat > notes.md <<'EOF'
+          ## Installing
+
+          **CLI** (any platform):
+
+              curl -fsSL https://steamtrain.app/install.sh | sh
+
+          **macOS app** — this is the path that just works:
+
+              curl -fsSL https://steamtrain.app/install.sh | sh -s -- --desktop
+
+          The macOS builds below are **unsigned** — signing and notarization need
+          a paid Apple Developer account, which this alpha does not have. The
+          installer above fetches the `.zip` with `curl`, which never sets the
+          quarantine attribute, so the app opens normally.
+
+          Downloading the `.dmg` in a browser *does* set it, and macOS will
+          refuse the first launch. Recover via **System Settings → Privacy &
+          Security → Open Anyway**; see
+          [docs/desktop-app.md](https://github.com/nilsonsfj/steamtrain/blob/main/docs/desktop-app.md).
+
+          Linux `.AppImage` and `.deb` have no such ceremony.
+          EOF
+
+          # `--notes` rather than `--notes-file`: gh documents the former as
+          # prepending to `--generate-notes` output, and says nothing about the
+          # latter — which risks the generated changelog being dropped.
+          #
+          # `artifacts/*/*` because download-artifact fans each upload out into
+          # its own directory.
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --notes "$(cat notes.md)" \
+            --generate-notes \
+            $prerelease \
+            artifacts/*/*

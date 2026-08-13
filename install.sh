@@ -2,7 +2,8 @@
 #
 # steamtrain — one-line installer.
 #
-#   curl -fsSL https://steamtrain.app/install.sh | sh
+#   curl -fsSL https://steamtrain.app/install.sh | sh                   # the CLI
+#   curl -fsSL https://steamtrain.app/install.sh | sh -s -- --desktop   # the macOS app
 #
 # Clones (or updates) steamtrain into a per-user directory, builds it, and links
 # a `steamtrain` command into a bin directory on your PATH. No sudo, and nothing
@@ -11,7 +12,16 @@
 # This is an ALPHA install: steamtrain runs from the checkout this script links
 # back to, so that checkout is kept around. Re-run the same line to update.
 #
+# --desktop is a different install entirely: it downloads the packaged macOS app
+# from the latest GitHub release into /Applications. Nothing is cloned, nothing
+# is built, and no toolchain is needed. The app is unsigned — that route exists
+# because a file fetched by curl carries no quarantine attribute, so it opens
+# normally, while the same app downloaded in a browser does not.
+#
 # Options (pass them through the pipe with `| sh -s -- <options>`):
+#   --desktop                download the packaged macOS app (no build)
+#   --desktop-url <url>      install that .zip instead of the latest release
+#   --app-dir <dir>          where to put the app               (default /Applications)
 #   --ref <ref>              git ref to install                 (default main)
 #   --src-dir <dir>          where to keep the checkout         (default ~/.steamtrain/src)
 #   --bin-dir <dir>          where to link the command          (default ~/.local/bin)
@@ -22,10 +32,12 @@
 #   -h, --help               print this help
 #
 # Every option also has an environment variable: STEAMTRAIN_REF,
-# STEAMTRAIN_SRC_DIR, STEAMTRAIN_BIN_DIR, STEAMTRAIN_REPO, STEAMTRAIN_FORCE.
+# STEAMTRAIN_SRC_DIR, STEAMTRAIN_BIN_DIR, STEAMTRAIN_REPO, STEAMTRAIN_FORCE,
+# STEAMTRAIN_APP_DIR, STEAMTRAIN_DESKTOP_URL.
 #
 # Uninstall: remove the link and the checkout. Your config in ~/.steamtrain
 # (minus src/) and any .steamtrain/ run state in your projects stay put.
+# The app is just a bundle — drag /Applications/steamtrain.app to the trash.
 #
 set -eu
 
@@ -41,6 +53,12 @@ FORCE="${STEAMTRAIN_FORCE:-0}"
 BIN_NAME="steamtrain"
 DO_BUILD=1
 FROM_CHECKOUT=""
+DO_DESKTOP=0
+APP_DIR="${STEAMTRAIN_APP_DIR:-}"
+DESKTOP_URL="${STEAMTRAIN_DESKTOP_URL:-}"
+# The releases page is the source of the packaged app. Kept separate from $REPO
+# because that one is a git remote and this one is an API path.
+RELEASE_SLUG="${STEAMTRAIN_RELEASE_SLUG:-nilsonsfj/steamtrain}"
 
 # --- output -------------------------------------------------------------------
 # Colors only when stdout is a terminal: piped installs land in logs just as
@@ -61,10 +79,11 @@ usage() {
   # The comment block at the top of this file is the help text — except when
   # this script is piped from curl and $0 is not a readable file.
   if [ -n "${0:-}" ] && [ -f "${0:-}" ]; then
-    sed -n '3,28p' "$0" | sed 's/^#\{0,1\} \{0,1\}//'
+    sed -n '3,40p' "$0" | sed 's/^#\{0,1\} \{0,1\}//'
   else
     printf '%s\n' "steamtrain installer — https://steamtrain.app/install.sh"
-    printf '%s\n' "options: --ref --repo --src-dir --bin-dir --from-checkout --no-build --force"
+    printf '%s\n' "options: --desktop --desktop-url --app-dir --ref --repo --src-dir --bin-dir"
+    printf '%s\n' "         --from-checkout --no-build --force"
   fi
 }
 
@@ -87,22 +106,15 @@ while [ "$#" -gt 0 ]; do
         *)     FROM_CHECKOUT="$2"; shift 2 ;;
       esac
       ;;
+    --desktop)  DO_DESKTOP=1; shift ;;
+    --desktop-url) need_value "$1" "${2:-}"; DESKTOP_URL="$2"; DO_DESKTOP=1; shift 2 ;;
+    --app-dir)  need_value "$1" "${2:-}"; APP_DIR="$2"; shift 2 ;;
     --no-build) DO_BUILD=0; shift ;;
     --force)    FORCE=1; shift ;;
     -h|--help)  usage; exit 0 ;;
     *) die "unknown option: $1  (try --help)" ;;
   esac
 done
-
-# --- defaults that depend on HOME ---------------------------------------------
-if [ -z "$BIN_DIR" ]; then
-  [ -n "$HOME_DIR" ] || die "HOME is not set — pass --bin-dir <dir>."
-  BIN_DIR="${HOME_DIR}/.local/bin"
-fi
-if [ -z "$SRC_DIR" ] && [ -z "$FROM_CHECKOUT" ]; then
-  [ -n "$HOME_DIR" ] || die "HOME is not set — pass --src-dir <dir>."
-  SRC_DIR="${HOME_DIR}/.steamtrain/src"
-fi
 
 # --- environment --------------------------------------------------------------
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -114,6 +126,154 @@ case "$(uname -s 2>/dev/null || echo unknown)" in
   *)
     warn "untested platform: $(uname -s). Continuing anyway." ;;
 esac
+
+# --- the desktop app ----------------------------------------------------------
+# A wholly separate install from everything below: download a packaged bundle,
+# put it in /Applications, done. It shares only this file's option parsing and
+# output helpers, and it returns by exiting.
+RELEASES_PAGE="https://github.com/${RELEASE_SLUG}/releases"
+
+# The newest release asset whose name ends in `-<arch>.zip`.
+#
+# Deliberately the releases *list* and not `releases/latest`: alpha tags publish
+# as prereleases, and the `latest` endpoint skips those. The list comes back
+# newest-first, so the first match is the current one. Unauthenticated calls are
+# rate limited to 60/hour per IP; --desktop-url is the way past that.
+latest_desktop_url() {
+  arch="$1"
+  curl -fsSL -H 'Accept: application/vnd.github+json' \
+      "https://api.github.com/repos/${RELEASE_SLUG}/releases?per_page=10" 2>/dev/null \
+    | tr ',' '\n' \
+    | sed -n 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    | grep -- "-${arch}\.zip$" \
+    | head -n 1
+}
+
+install_desktop() {
+  if [ "$(uname -s)" != "Darwin" ]; then
+    printf "${C_ERR}✗${C_OFF} %s\n" "--desktop installs the macOS app; this is $(uname -s)." >&2
+    hint "Linux builds ship as .AppImage and .deb:  ${RELEASES_PAGE}"
+    exit 1
+  fi
+
+  have curl || die "curl is required to download the app."
+  # Part of macOS since forever, but it is what preserves the bundle's symlinks
+  # and permission bits, and unzip(1) does not — so it is a hard requirement
+  # rather than something to silently fall back from.
+  have ditto || die "'ditto' is required to unpack the app bundle."
+
+  case "$(uname -m)" in
+    arm64)  arch="arm64" ;;
+    x86_64) arch="x64" ;;
+    *)      die "unsupported architecture: $(uname -m)  (pass --desktop-url <url>)" ;;
+  esac
+
+  if [ -z "$APP_DIR" ]; then
+    APP_DIR="/Applications"
+    # An unwritable /Applications is a managed or multi-user Mac, not a broken
+    # one. ~/Applications is a real macOS location and needs no sudo, so prefer
+    # it over asking for a password.
+    if [ ! -w "$APP_DIR" ]; then
+      [ -n "$HOME_DIR" ] || die "/Applications is not writable and HOME is not set — pass --app-dir <dir>."
+      APP_DIR="${HOME_DIR}/Applications"
+      warn "/Applications is not writable — installing to ${APP_DIR} instead."
+    fi
+  fi
+  mkdir -p "$APP_DIR" || die "could not create ${APP_DIR}"
+  [ -w "$APP_DIR" ] || die "not writable: ${APP_DIR}  (pass --app-dir <dir>)"
+
+  if [ -z "$DESKTOP_URL" ]; then
+    info "Looking up the latest ${arch} build…"
+    DESKTOP_URL="$(latest_desktop_url "$arch")" || true
+    if [ -z "$DESKTOP_URL" ]; then
+      printf "${C_ERR}✗${C_OFF} %s\n" "no ${arch} app build found in the latest releases." >&2
+      hint "check ${RELEASES_PAGE}, or pass --desktop-url <url>."
+      exit 1
+    fi
+  fi
+
+  tmp="$(mktemp -d 2>/dev/null)" || die "could not create a temporary directory."
+  trap 'rm -rf "$tmp"' EXIT INT TERM
+
+  info "Downloading $(basename "$DESKTOP_URL")…"
+  curl -fL --progress-bar -o "${tmp}/app.zip" "$DESKTOP_URL" \
+    || die "download failed: ${DESKTOP_URL}"
+
+  mkdir "${tmp}/x"
+  ditto -x -k "${tmp}/app.zip" "${tmp}/x" || die "could not unpack the download."
+
+  app="$(find "${tmp}/x" -maxdepth 2 -name '*.app' -print 2>/dev/null | head -n 1)"
+  [ -n "$app" ] || die "no .app bundle inside ${DESKTOP_URL}"
+  app_name="$(basename "$app")"
+  dest="${APP_DIR}/${app_name}"
+
+  # Replacing an app bundle means deleting a directory, so be sure it is one:
+  # anything at that path that is not itself a bundle is somebody else's file.
+  if [ -e "$dest" ]; then
+    if [ -f "${dest}/Contents/Info.plist" ]; then
+      info "Replacing the existing ${dest}…"
+      rm -rf "$dest" || die "could not remove the existing ${dest}"
+    elif [ "$FORCE" = "1" ]; then
+      warn "${dest} is not an app bundle — removing it anyway (--force)."
+      rm -rf "$dest" || die "could not remove ${dest}"
+    else
+      printf "${C_ERR}✗${C_OFF} %s\n" "${dest} exists and is not an app bundle." >&2
+      hint "move it aside, re-run with --force, or pass --app-dir <dir>."
+      exit 1
+    fi
+  fi
+
+  ditto "$app" "$dest" || die "could not install into ${dest}"
+
+  # Apple Silicon refuses to execute a binary with no signature at all, even one
+  # that arrived without a quarantine flag — so the builds are ad-hoc signed
+  # (see the `identity` note in electron-builder.yml). A release that fails this
+  # is a broken release, and saying so here beats letting someone double-click a
+  # bundle that dies with no explanation.
+  if [ "$arch" = "arm64" ] && have codesign; then
+    codesign --verify "$dest" >/dev/null 2>&1 \
+      || warn "the installed app's signature is not valid — it may not launch. Please report this."
+  fi
+
+  version=""
+  if have defaults; then
+    version="$(defaults read "${dest}/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || true)"
+  fi
+  if [ -n "$version" ]; then
+    ok "Installed ${app_name} ${version} to ${APP_DIR}"
+  else
+    ok "Installed ${app_name} to ${APP_DIR}"
+  fi
+
+  printf '\n'
+  printf '  %s\n' "Open it:    open \"${dest}\""
+  printf '  %s\n' "Update:     curl -fsSL https://steamtrain.app/install.sh | sh -s -- --desktop"
+  printf '  %s\n' "Uninstall:  rm -rf \"${dest}\""
+  printf '\n'
+  # Said plainly rather than buried, because it is the one thing that surprises
+  # people later: this build is unsigned, and it opens only because curl does
+  # not set com.apple.quarantine. Re-downloading the dmg by hand behaves
+  # differently, and that is not a bug in the app.
+  printf '  %s\n' "Note: this alpha is not notarized by Apple. It opens because the installer"
+  printf '  %s\n' "fetched it with curl. The same app downloaded through a browser is"
+  printf '  %s\n' "quarantined, and needs System Settings → Privacy & Security → Open Anyway."
+
+  exit 0
+}
+
+if [ "$DO_DESKTOP" -eq 1 ]; then
+  install_desktop
+fi
+
+# --- defaults that depend on HOME ---------------------------------------------
+if [ -z "$BIN_DIR" ]; then
+  [ -n "$HOME_DIR" ] || die "HOME is not set — pass --bin-dir <dir>."
+  BIN_DIR="${HOME_DIR}/.local/bin"
+fi
+if [ -z "$SRC_DIR" ] && [ -z "$FROM_CHECKOUT" ]; then
+  [ -n "$HOME_DIR" ] || die "HOME is not set — pass --src-dir <dir>."
+  SRC_DIR="${HOME_DIR}/.steamtrain/src"
+fi
 
 # First run of digits in a version string: "git version 2.39.5" -> 2
 major_of() {
