@@ -15,19 +15,27 @@ terminals.
 
 ## Get started
 
-**Prerequisites:** [Bun 1+](https://bun.sh) for the development/build toolchain and Node.js 20+ to run the bundled CLI.
+**Prerequisites:** git, [Bun 1+](https://bun.sh) for the build toolchain, and Node.js 20+ to run the bundled CLI. macOS and Linux.
+
+```bash
+curl -fsSL https://steamtrain.app/install.sh | sh
+steamtrain --version
+```
+
+That clones steamtrain into `~/.steamtrain/src`, builds it, and symlinks a
+`steamtrain` command into `~/.local/bin` — **no sudo**, nothing outside your
+home directory. It prints how to add that dir to your PATH if needed, and
+re-running the same line updates an existing install. (Options, custom
+locations, and installing from a checkout you already have are
+[below the fold](#install-as-a-system-binary).)
+
+Working from a clone instead?
 
 ```bash
 git clone https://github.com/nilsonsfj/steamtrain.git
 cd steamtrain
-npm run install:local        # builds, then links `steamtrain` onto your PATH
-steamtrain --version
+npm run install:local        # builds this checkout, links `steamtrain` onto your PATH
 ```
-
-`install:local` installs dependencies with Bun, builds `dist/index.js`, and
-symlinks a `steamtrain` command into `~/.local/bin` — **no sudo**. It prints how
-to add that dir to your PATH if needed. (Details and custom install locations
-are [below the fold](#install-as-a-system-binary).)
 
 **Now take a lap — no agent, no API key, no credit required.** Launch the
 web UI (`steamtrain --web-ui`) and take the free tour from the Station, or run
@@ -386,32 +394,54 @@ A typo'd `/command` never dispatches as input — you get a
 
 ### Install as a system binary
 
-> **Alpha install.** steamtrain isn't published to a registry yet, so you
-> install it from a checkout. macOS and Linux are supported.
+> **Alpha install.** steamtrain isn't published to a registry yet, so it is
+> installed from source: a checkout you keep, and a symlink to the binary it
+> builds. macOS and Linux are supported.
 
-`npm run install:local` is a thin wrapper over
-[`scripts/install.sh`](scripts/install.sh) that:
+[`install.sh`](install.sh) is the single installer, and the one served at
+`https://steamtrain.app/install.sh`. It:
 
-1. verifies Bun 1+ and Node.js 20+, installs dependencies with Bun, and builds
-   `dist/index.js`,
-2. symlinks a `steamtrain` command into `~/.local/bin` — **no sudo required** —
+1. verifies git 2+, Node.js 20+ and Bun 1+, with an install hint for whatever
+   is missing,
+2. clones (or fast-forwards) the repo into `~/.steamtrain/src`,
+3. installs dependencies with Bun and builds `dist/index.js`,
+4. symlinks a `steamtrain` command into `~/.local/bin` — **no sudo required** —
    and prints how to add that directory to your PATH if it isn't already there.
 
-The link points back at `dist/index.js` in this checkout (runtime deps stay in
-its `node_modules`), so **keep the repo where it is**. After a `git pull`, re-run
-`npm run install:local` to rebuild and refresh the linked binary.
-
-**Custom location** (e.g. a shared, already-on-PATH dir):
-
 ```bash
-STEAMTRAIN_BIN_DIR=/usr/local/bin bash scripts/install.sh
+curl -fsSL https://steamtrain.app/install.sh | sh
 ```
 
-**Link only** (skip dependency installation and the build if `dist/` is already
-current; only Node.js is required for this mode):
+The link points back at `dist/index.js` in the checkout (runtime deps stay in
+its `node_modules`), so **that directory has to stay where it is**. Re-run the
+same line any time to update it.
+
+**Options** — every flag also has an environment variable, and they go after
+`sh -s --` when piping:
 
 ```bash
-bash scripts/install.sh --no-build
+curl -fsSL https://steamtrain.app/install.sh | sh -s -- --ref v0.1.0 --bin-dir /usr/local/bin
+```
+
+| Flag | Env | Default | |
+|---|---|---|---|
+| `--ref` | `STEAMTRAIN_REF` | `main` | branch, tag or commit to install |
+| `--src-dir` | `STEAMTRAIN_SRC_DIR` | `~/.steamtrain/src` | where the checkout lives |
+| `--bin-dir` | `STEAMTRAIN_BIN_DIR` | `~/.local/bin` | where the command is linked |
+| `--repo` | `STEAMTRAIN_REPO` | the GitHub repo | git remote to clone |
+| `--from-checkout [dir]` | — | — | build a checkout you already have, no cloning |
+| `--no-build` | — | — | link only; assumes `dist/` is current (Node.js alone is enough) |
+| `--force` | `STEAMTRAIN_FORCE` | — | replace a non-symlink already sitting at the link path |
+
+**From a checkout you already have** — `npm run install:local` is a thin
+wrapper over [`scripts/install.sh`](scripts/install.sh), which runs the same
+installer with `--from-checkout` pinned to that repo. It builds and links in
+place instead of cloning, so re-run it after a `git pull`:
+
+```bash
+npm run install:local
+STEAMTRAIN_BIN_DIR=/usr/local/bin bash scripts/install.sh   # custom location
+bash scripts/install.sh --no-build                          # link only
 ```
 
 **Uninstall** — removes only the launcher, not your checkout or `~/.steamtrain`
@@ -419,6 +449,12 @@ config:
 
 ```bash
 npm run uninstall:local
+```
+
+For a `curl`-installed copy, that is just:
+
+```bash
+rm -f ~/.local/bin/steamtrain && rm -rf ~/.steamtrain/src
 ```
 
 Prefer the Node toolchain's own linker? With Bun installed, `npm run build && npm link` also works.
