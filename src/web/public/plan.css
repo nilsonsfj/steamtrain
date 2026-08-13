@@ -792,14 +792,21 @@
 .insp-address .sep {
   color: var(--faint);
 }
+/* Segment kinds are prefixed `a-` so they cannot pick up a same-named rule
+   from another surface (`.phase` is the plan editor's card, animation and all). */
 .insp-address .p {
   color: var(--muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.insp-address .p.workflow {
+.insp-address .p.a-workflow {
   color: var(--accent-bright);
 }
-.insp-address .p.self {
+.insp-address .p.a-self {
   color: var(--text);
+  flex: none;
 }
 
 .insp-subrun {

@@ -1482,6 +1482,13 @@ window.Steamtrain = (function () {
     requestAnimationFrame(function () { S.rafQueued = false; ST.render(); });
   }
 
+  // Band columns are chosen against the width of the pane that has to hold them
+  // (see bandColumns), so a resized window needs a re-render to re-choose. The
+  // rAF coalescing above already keeps a drag down to one render a frame.
+  if (typeof window !== "undefined" && window.addEventListener) {
+    window.addEventListener("resize", function () { scheduleRender(); });
+  }
+
   function fmtTime(ts) { try { return new Date(ts).toLocaleString(); } catch (e) { return ""; } }
 
   // Mirror of formatRunTotals() in src/workflow/history.ts: keep the CLI, TUI,

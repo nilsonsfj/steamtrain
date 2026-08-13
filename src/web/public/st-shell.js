@@ -314,7 +314,13 @@
     if (switcher) {
       nav.appendChild(ST.projects.crumbButton());
     } else if (S.project && S.project.name) {
-      parts.push({ text: S.project.displayPath || S.project.name, title: S.project.cwd || S.project.name });
+      // Marked as the path crumb: it is the longest and the least load-bearing,
+      // so it is the one that gives up width when the bar is short of it.
+      parts.push({
+        text: S.project.displayPath || S.project.name,
+        title: S.project.cwd || S.project.name,
+        path: true
+      });
     }
     if (S.page === "runs" || S.page === "settings") {
       parts.push({ text: S.page });
@@ -334,8 +340,10 @@
       // crumb after it still needs its separator.
       if (idx > 0 || switcher) nav.appendChild(h("span", { class: "sep", text: "/" }));
       var cls = idx === lastLocation ? "here" : "";
+      if (part.quiet) cls += " quiet";
+      if (part.path) cls += " path";
       nav.appendChild(h("span", {
-        class: (cls + (part.quiet ? " quiet" : "")).trim(),
+        class: cls.trim(),
         title: part.title || "",
         text: part.text
       }));

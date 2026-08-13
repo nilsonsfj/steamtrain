@@ -443,17 +443,44 @@
     return bits.length;
   }
 
+  /** Track widths of the row grid, in the order bandColumns emits them. */
+  var COL = {
+    dot: 14, meta: 190, metaTight: 110, runner: 168, kind: 92,
+    time: 74, timeTight: 64, cost: 68, tokens: 58, chev: 20, gap: 12
+  };
+  /** Below this the id column stops being an identity and becomes an ellipsis. */
+  var ID_MIN = 132;
+  /** Indent plus right padding — the row width the grid never gets to use. */
+  var ROW_CHROME = 60;
+
+  /** What the fixed tracks of a given spec cost, gaps included. */
+  function fixedColumnWidth(spec) {
+    var count = 5 + (spec.meta ? 1 : 0) + (spec.cost ? 1 : 0) + (spec.tokens ? 1 : 0);
+    return COL.dot
+      + (spec.meta ? spec.metaWidth : 0)
+      + (spec.runner ? COL.runner : COL.kind)
+      + (spec.cost || spec.tokens ? COL.timeTight : COL.time)
+      + (spec.cost ? COL.cost : 0)
+      + (spec.tokens ? COL.tokens : 0)
+      + COL.chev
+      + COL.gap * (count - 1);
+  }
+
   /**
-   * Which columns this band's rows can actually fill. A band of command steps
-   * has no runner, no spend and no tokens; dashing those out three times per
-   * row is a wall of "—" where the id needed the width. Columns nothing in the
-   * band can populate are not laid out at all.
+   * Which columns this band's rows can actually fill, and — of those — which
+   * there is room for. A band of command steps has no runner, no spend and no
+   * tokens; dashing those out three times per row is a wall of "—" where the id
+   * needed the width. Columns nothing in the band can populate are not laid out
+   * at all, and when the pane is too narrow to carry the rest, the optional ones
+   * are dropped least-load-bearing first until the id column clears ID_MIN. A
+   * row that cannot say which step it is has stopped being a row; a row without
+   * its token count has only lost a number.
    */
-  function bandColumns(band) {
+  function bandColumns(band, width) {
     // Over every step the band owns, not just the rows currently unfolded, so
     // opening a sub-run never re-flows the columns of the rows above it.
     var steps = bandSteps(band);
-    var spec = { meta: false, runner: false, cost: false, tokens: false };
+    var spec = { meta: false, runner: false, cost: false, tokens: false, metaWidth: COL.meta };
     steps.forEach(function (s) {
       if (stepMetaBits(s)) spec.meta = true;
       if (runnerLabel(s)) spec.runner = true;
@@ -463,14 +490,25 @@
       if (use.costUsd) spec.cost = true;
       if (use.tokens) spec.tokens = true;
     });
+    // A width of 0 is a pane that has not been laid out yet (first paint, or a
+    // test with no layout at all) — assume room rather than strip the columns.
+    var room = (width || 0) - ROW_CHROME;
+    if (room > 0) {
+      // Tighten before dropping: a 110px meta column still says "step 2 of 6",
+      // where no meta column says nothing at all.
+      if (spec.meta && room - fixedColumnWidth(spec) < ID_MIN) spec.metaWidth = COL.metaTight;
+      ["tokens", "cost", "meta"].forEach(function (col) {
+        if (spec[col] && room - fixedColumnWidth(spec) < ID_MIN) spec[col] = false;
+      });
+    }
     var cols = ["14px", "minmax(0,1fr)"];
-    if (spec.meta) cols.push("minmax(0,190px)");
+    if (spec.meta) cols.push("minmax(0," + spec.metaWidth + "px)");
     // Column 3 is "what runs this": the runner, falling back to the block kind
     // for steps that have none. Never empty, so it never needs a dash.
-    cols.push(spec.runner ? "168px" : "92px");
-    cols.push(spec.cost || spec.tokens ? "64px" : "74px");
-    if (spec.cost) cols.push("68px");
-    if (spec.tokens) cols.push("58px");
+    cols.push((spec.runner ? COL.runner : COL.kind) + "px");
+    cols.push((spec.cost || spec.tokens ? COL.timeTight : COL.time) + "px");
+    if (spec.cost) cols.push(COL.cost + "px");
+    if (spec.tokens) cols.push(COL.tokens + "px");
     cols.push("20px");
     spec.template = cols.join(" ");
     return spec;
@@ -513,9 +551,14 @@
     return "step-row";
   }
 
-  /** Rows indent 24px per level; 6a never shows more than two of them at once. */
-  function rowIndent(depth) {
-    return 42 + (depth || 0) * 24;
+  /**
+   * A row's nesting depth, handed to CSS rather than resolved here: the indent
+   * it buys is `--row-base + depth * --row-step`, and a narrow window retunes
+   * both (see run.css). Charging a flat 24px a level cost more than the id
+   * column had to give when the centre pane was 424px wide.
+   */
+  function rowDepthVar(depth) {
+    return "--depth:" + (depth || 0);
   }
 
   /** Live spend/tokens for a container row: the sum of everything under it. */
@@ -575,7 +618,7 @@
     var el = h("button", {
         class: stepRowClass(s) + (open ? " open" : "") + (expandable ? " container" : ""),
         type: "button",
-        style: "padding-left:" + rowIndent(row.depth) + "px",
+        style: rowDepthVar(row.depth),
         "data-detail-invoker": "row:" + row.key,
         "aria-label": (expandable ? (row.expanded ? "Collapse " : "Expand ") : "Open details for step ") + s.stepId,
         "aria-expanded": expandable ? String(Boolean(row.expanded)) : null,
@@ -626,7 +669,7 @@
     if (view && view.overrideCount) bits.push(view.overrideCount + " override" + (view.overrideCount === 1 ? "" : "s"));
     var worktree = s.worktree || firstChildWorktree(row);
     if (worktree && worktree.branch) bits.push("worktree " + worktree.branch);
-    var strip = h("div", { class: "sub-caption", style: "padding-left:" + rowIndent(row.depth) + "px" },
+    var strip = h("div", { class: "sub-caption", style: rowDepthVar(row.depth) },
       h("span", { class: "name", text: name || "sub-run" }),
       bits.length ? h("span", { class: "bits", text: bits.join(" · ") }) : null
     );
@@ -671,7 +714,7 @@
     var el = h("button", {
       class: "step-roll " + row.state + (row.kind === "fanout" ? " fan" : ""),
       type: "button",
-      style: "padding-left:" + rowIndent(row.depth) + "px",
+      style: rowDepthVar(row.depth),
       "aria-expanded": "false",
       title: ids.join(", "),
       onClick: function () { S.unfolded[row.key] = true; ST.render(); }
@@ -960,7 +1003,9 @@
       }
       // A queued phase collapses to its header line.
       if (b.state === "queued") { container.appendChild(band); return; }
-      var cols = bandColumns(b);
+      // Bands are full-width children of the canvas, so the canvas answers for
+      // all of them — and it is already laid out, which a detached band is not.
+      var cols = bandColumns(b, container.clientWidth);
       band.style.setProperty("--step-cols", cols.template);
       // The expanded band is a fixed-height console pane: its rows and the
       // inline output pane live in their own scroll area so a long step list
@@ -986,7 +1031,7 @@
         stepHost.appendChild(renderStepRow(row, cols, open));
         if (open) {
           var pane = renderOutputPane(row.phase, row.step);
-          pane.style.marginLeft = rowIndent(row.depth) + "px";
+          pane.style.setProperty("--depth", String(row.depth));
           stepHost.appendChild(pane);
         }
         var sub = subWorkflowRow(row.phase, row.step);
@@ -2513,6 +2558,7 @@
 
   ST.run = {
     bands: buildBands,
+    columns: bandColumns,
     callWorkflowName: callWorkflowName,
     subRunStepCount: function (callStepId) {
       var call = findWorkflowStep(callStepId);

@@ -577,7 +577,10 @@
     var box = h("div", { class: "insp-address" });
     parts.forEach(function (part, i) {
       if (i) box.appendChild(h("span", { class: "sep", "aria-hidden": "true", text: "\u203a" }));
-      box.appendChild(h("span", { class: "p " + part.kind, text: part.text }));
+      // Namespaced: a bare `phase` here inherited the plan editor's `.phase`
+      // card rule, whose 420ms entrance animation replayed on every re-render
+      // \u2014 a live run rebuilds this rail on every event, so the segment strobed.
+      box.appendChild(h("span", { class: "p a-" + part.kind, text: part.text }));
     });
     return box;
   }
