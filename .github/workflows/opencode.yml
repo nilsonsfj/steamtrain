@@ -8,7 +8,18 @@ on:
 
 jobs:
   opencode:
+    # The association gate is what makes this safe on a public repo, and it is
+    # not optional. `issue_comment` fires for *anyone* who can comment — which,
+    # once the repo is public, is everyone — and unlike a fork's `pull_request`
+    # it runs in the base-repo context with secrets present. Without this gate a
+    # stranger commenting `/oc <anything>` spends OPENCODE_API_KEY and steers an
+    # agent that holds `contents: write` from a comment body it does not control.
+    #
+    # Prefix matching alone does not help: the prefix is the trigger, not the
+    # authorization. The `cursor[bot]` exclusion below is a separate concern (a
+    # bot echoing a command back into a loop), and is kept.
     if: |
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
       github.actor != 'cursor[bot]' &&
       (github.event.comment.body == '/oc' ||
       github.event.comment.body == '/opencode' ||
