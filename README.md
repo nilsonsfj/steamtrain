@@ -432,6 +432,26 @@ curl -fsSL https://steamtrain.app/install.sh | sh -s -- --ref v0.1.0 --bin-dir /
 | `--from-checkout [dir]` | — | — | build a checkout you already have, no cloning |
 | `--no-build` | — | — | link only; assumes `dist/` is current (Node.js alone is enough) |
 | `--force` | `STEAMTRAIN_FORCE` | — | replace a non-symlink already sitting at the link path |
+| `--desktop` | — | — | install the packaged macOS app instead of the CLI (see below) |
+| `--desktop-url` | `STEAMTRAIN_DESKTOP_URL` | latest release | download a specific app `.zip` |
+| `--app-dir` | `STEAMTRAIN_APP_DIR` | `/Applications` | where `--desktop` puts the app |
+
+**The macOS app** — `--desktop` is a different install: no clone, no build, no
+toolchain. It downloads the packaged bundle from the latest
+[release](https://github.com/nilsonsfj/steamtrain/releases) and drops it in
+`/Applications` (falling back to `~/Applications` if that isn't writable).
+
+```bash
+curl -fsSL https://steamtrain.app/install.sh | sh -s -- --desktop
+```
+
+This is the **recommended** way to get the app, and not just for convenience.
+The builds are unsigned, and macOS blocks unsigned apps only when they arrive
+carrying `com.apple.quarantine` — an attribute set by the *downloading*
+application. Browsers set it; `curl` does not. So the same bundle that gets
+stopped at first launch when you fetch the `.dmg` by hand opens without ceremony
+when the installer fetches it. [`docs/desktop-app.md`](docs/desktop-app.md) has
+the full picture, including how to recover a `.dmg` you already downloaded.
 
 **From a checkout you already have** — `npm run install:local` is a thin
 wrapper over [`scripts/install.sh`](scripts/install.sh), which runs the same
