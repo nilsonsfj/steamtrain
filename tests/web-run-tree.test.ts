@@ -246,6 +246,39 @@ describe("a fan-out is one row that opens", () => {
   });
 });
 
+describe("nesting that has not happened yet", () => {
+  it("treats a fan-out with no children as a plain step, not an empty container", () => {
+    const state = shipQueue();
+    const land = state.phases[4];
+    // `forEach` over an empty list: the step exists, the fan-out never did.
+    land.steps = land.steps.filter((st: Any) => !st.parentStepId);
+    const rebase = land.steps.find((st: Any) => st.stepId === "rebase");
+    expect(tree.containerOf(state, rebase, land)).toBeNull();
+    const loop = bandsOf(state).find((b: Any) => b.kind === "loop");
+    expect(loop.entries.map((e: Any) => e.step.stepId)).toContain("rebase");
+  });
+
+  it("says nothing about an earlier pass on a loop that has only run once", () => {
+    const state = shipQueue();
+    // Drop passes 2 and 3; the gate's cap still says there may be five.
+    state.phases = state.phases.filter(
+      (p: Any) => !(p.phaseId === "land" && (p.iteration ?? 1) > 1),
+    );
+    state.phases[2].done = false;
+    state.phases[2].steps = [step({ stepId: "review", status: "running", startedAt: T0 + 100 })];
+    // The gate's phase is part of the loop's range, so its instance carries a
+    // pass number too — pass 1 has not reached it yet.
+    const gatePhase = state.phases.find((p: Any) => p.phaseId === "verdict");
+    gatePhase.iteration = 1;
+    const loop = bandsOf(state).find((b: Any) => b.kind === "loop");
+    expect(loop.loop.passes).toEqual([1]);
+    expect(loop.loop.shown).toBe(1);
+    expect(loop.loop.cap).toBe(5);
+    // Nothing preceded pass 1, so the strip has nothing to report about one.
+    expect(loop.loop.previous).toBe("");
+  });
+});
+
 describe("loop passes keep their own children", () => {
   it("never lets one pass's fan-out claim another pass's children", () => {
     const state = shipQueue();

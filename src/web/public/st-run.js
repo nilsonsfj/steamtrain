@@ -1678,7 +1678,9 @@
     });
     var okN = doneN - failedN;
     // Three segments, not two: a run that is 48% green and 3% red says
-    // something a single "done" bar cannot (design 6a).
+    // something a single "done" bar cannot (design 6a). Green and red together
+    // are the settled steps (`doneN`); running is its own segment and whatever
+    // is still queued is the unpainted remainder.
     document.getElementById("progressBar").style.width =
       (total ? (okN / total) * 100 : 0).toFixed(2) + "%";
     document.getElementById("progressLive").style.width =

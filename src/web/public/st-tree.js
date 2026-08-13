@@ -24,6 +24,13 @@
   /** `a::b::c` is a sub-run step; `a[3]` is a fan-out child. */
   var NAMESPACE = "::";
 
+  /**
+   * How much of a gate's verdict the "what the last pass left behind" strip
+   * quotes. The strip is one line under the pass chips at band width; past this
+   * it wraps and starts costing the rows below it.
+   */
+  var PASS_SUMMARY_CHARS = 90;
+
   function isNested(phaseId) {
     return String(phaseId).indexOf(NAMESPACE) !== -1;
   }
@@ -63,8 +70,12 @@
   function withinLifetime(child, parent) {
     if (!parent.startedAt) return true;
     if (!child.startedAt) return !parent.endedAt;
-    if (child.startedAt < parent.startedAt - 1) return false;
-    if (parent.endedAt && child.startedAt > parent.endedAt + 1) return false;
+    // Both stamps are `Date.now()` from the one engine process, and a nested
+    // step only exists because its caller was mid-flight — so the bounds are
+    // inclusive (the two events routinely share a millisecond) but need no
+    // tolerance beyond that.
+    if (child.startedAt < parent.startedAt) return false;
+    if (parent.endedAt && child.startedAt > parent.endedAt) return false;
     return true;
   }
 
@@ -147,6 +158,15 @@
     });
   }
 
+  /**
+   * Still worth a row of its own. A failed child is not "in play" in the sense
+   * of still working — but it is the thing the reader came for, so it never
+   * folds into a count.
+   */
+  function inPlay(step) {
+    return step.status === "running" || step.status === "error";
+  }
+
   function settled(step) {
     return step.status === "done" || step.status === "error";
   }
@@ -176,14 +196,16 @@
   }
 
   /**
-   * Fan-out children, 6a's way: the ones still in play get rows, everything
-   * settled collapses to one count line the reader can open.
+   * Fan-out children, 6a's way: the ones still in play get rows (see inPlay —
+   * a failure keeps its row), and the ones that finished cleanly collapse to
+   * one count line the reader can open. Not-yet-started children get a second
+   * such line, so twelve PRs read as three rows and two counts.
    */
   function foldFanChildren(children, unfolded) {
     if (unfolded) return children.map(function (e) { return { entry: e }; });
     var rows = [], done = [], pending = [];
     children.forEach(function (e) {
-      if (e.step.status === "running" || e.step.status === "error") rows.push({ entry: e });
+      if (inPlay(e.step)) rows.push({ entry: e });
       else if (e.step.status === "done") done.push(e);
       else pending.push(e);
     });
@@ -286,7 +308,7 @@
     });
     if (gate && gate.result && gate.result.output) {
       var line = String(gate.result.output).split("\n")[0].trim();
-      if (line) return "pass " + pass + " ended with " + line.slice(0, 90);
+      if (line) return "pass " + pass + " ended with " + line.slice(0, PASS_SUMMARY_CHARS);
     }
     if (failed) return "pass " + pass + " ended with " + failed + " step" + (failed === 1 ? "" : "s") + " failed";
     if (gate && gate.gate && gate.gate.passed === false) return "pass " + pass + " did not satisfy the gate";
@@ -405,6 +427,8 @@
       run = [];
       runState = null;
     }
+    // Runs once over bands that are all `phase` or `loop` kind, so a rollup can
+    // never end up inside another rollup.
     bands.forEach(function (b) {
       // A loop band always keeps its own header: its pass switcher is the
       // reader's only way back into the earlier passes.
