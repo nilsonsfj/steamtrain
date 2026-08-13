@@ -5,6 +5,9 @@
     The locomotive is not redrawn for this size — it is the 32-unit geometry of
     `FAVICON_SVG` (src/web/html.ts) and the steamtrain.app masthead, reproduced
     coordinate for coordinate inside the <g> and placed by the transform alone.
+    The `.brand-mark` tile in src/web/public/shell.css is the third placement of
+    the same coordinates; `tests/brand-mark.test.ts` fails if any of the three
+    drift apart.
     An earlier version of this file drew a more detailed engine for 1024 (a
     chimney, a rail under the wheels) on the theory that a silhouette wastes the
     pixels a dock icon gets. It does waste them, but the cost was two drawings

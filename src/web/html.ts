@@ -26,7 +26,8 @@
  * This is the canonical 32px geometry — the same drawing the steamtrain.app
  * masthead uses. The `.brand-mark` CSS in `shell.css` and the app icon in
  * `build/icon.svg` both scale this exact path set rather than redrawing it, so
- * a change here is a change everywhere; keep them in step.
+ * a change here is a change everywhere; `tests/brand-mark.test.ts` fails if the
+ * three ever drift apart.
  *
  * A silhouette, not an illustration: cab, boiler, two wheels and three puffs
  * trailing off the top-right corner, all in the accent on the plate colour.
