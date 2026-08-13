@@ -563,6 +563,25 @@ html.desktop-titlebar-overlay #topbar .status-pill {
   flex-direction: column;
   gap: 6px;
 }
+/* The shape of the run in flight: loop passes, open sub-runs, worktrees.
+   Only the facts this run actually has (see renderRunShape in st-shell.js). */
+.run-shape {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-bottom: 4px;
+}
+.run-shape-row {
+  display: flex;
+  justify-content: space-between;
+  font: 400 11px / 1.4 var(--font-mono);
+  color: var(--dim);
+}
+.run-shape-row .v {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .elsewhere-row {
   display: flex;
   align-items: center;

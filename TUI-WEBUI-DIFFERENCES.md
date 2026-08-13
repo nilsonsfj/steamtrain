@@ -143,6 +143,7 @@ imports it through `src/tui/workflow-state.ts`; the web bundles it as
 | Run a workflow + live progress | ✅ | ✅ | |
 | Live step drill-in: full scrollable output | ✅ | ✅ | TUI: →/Enter on a step, PgUp/PgDn scroll with follow mode; Web: click a card → drawer with follow-the-stream output pane |
 | Live per-step timers + worktree visibility | ✅ | ✅ | Shared `step_workspace` event + `startedAt` in the reducer; both UIs show the worktree branch/dir and a ticking per-step elapsed |
+| Live view of a nested run (loop / fan-out / sub-workflow) | ⚠️ | ✅ | Web folds each kind of nesting differently (`st-tree.js`): a loop is ONE band with a pass switcher, a `forEach` is one row that opens with its settled children behind a count, a `workflow` call rolls up its child run, and the rail states the selected step's full address. TUI prints nested phases in stream order |
 | Fresh run (ignore cache) | ✅ | ✅ | |
 | Cancel a run | ✅ | ✅ | |
 | Attach to any in-flight run (cross-process) | ✅ | ✅ | Shared `.steamtrain/runs/` registry; TUI `/attach` + run browser, web Active runs panel |

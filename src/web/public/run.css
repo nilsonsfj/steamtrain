@@ -90,6 +90,11 @@ section.work {
   background: var(--running);
   animation: st-pulse 1.6s ease-in-out infinite;
 }
+/* Failures get their own segment: "48% green, 3% red" is a fact the two-part
+   bar could not state (design 6a). */
+.run-progress .failed {
+  background: var(--error);
+}
 
 .rbtn {
   border: 1px solid var(--border);
@@ -395,6 +400,230 @@ textarea#input:focus {
 .band.queued .band-head .title {
   font-weight: 500;
   color: var(--muted);
+}
+
+/* ---- turn 6: loops, fan-outs and sub-runs -------------------------------- */
+/* A loop is ONE band for its whole phase range; the passes are chips in the
+   header rather than N stacked bands, so superseded passes stop competing for
+   vertical space (see st-tree.js). */
+.band-head .loop-chip {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--raised);
+  font: 600 10.5px / 1.4 var(--font-mono);
+  color: var(--muted);
+  flex: none;
+}
+.band-head .passes {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.band-head .passes .k {
+  font: 400 10px / 1 var(--font-ui);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-right: 2px;
+}
+.band-head .pass {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--raised);
+  font: 400 11px / 1 var(--font-mono);
+  color: var(--muted);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.band-head .pass:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.band-head .pass .dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--done);
+}
+.band-head .pass.live .dot {
+  background: var(--running);
+  animation: st-pulse 1.1s ease-in-out infinite;
+}
+.band-head .pass.shown {
+  border-color: rgba(74, 163, 255, 0.45);
+  background: rgba(74, 163, 255, 0.14);
+  color: #9ecbff;
+  font-weight: 500;
+}
+/* A pass the cap allows but the run has not reached. Drawn, because the cap is
+   part of what the header states — but never clickable. */
+.band-head .pass.future {
+  border: 1px dashed var(--border-strong);
+  background: none;
+  color: var(--faint);
+  cursor: default;
+}
+/* What the pass before the shown one left behind. */
+.pass-note {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 18px 6px 42px;
+  border-top: 1px solid var(--border-quiet);
+  background: var(--well);
+  font: 400 11.5px / 1.4 var(--font-mono);
+  color: var(--dim);
+}
+.pass-note .sep {
+  color: var(--faint);
+}
+.pass-note .pass-latest {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* A run of adjacent settled (or queued) bands, folded to one header line. */
+.band.rollup .band-head {
+  width: 100%;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.band.rollup .band-head:hover .title {
+  color: var(--text);
+}
+.band.rollup .band-head .title {
+  font-weight: 500;
+  color: var(--muted);
+}
+
+/* A step id, plus what the row stands for: `forEach · 12 items` on a fan-out
+   parent, `→ babysit-pr` on a call step. Both are the row's identity, not
+   metadata — they sit in the id column with it. */
+.step-row .id {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.step-row .id .sid {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.step-row .id .note {
+  font-weight: 400;
+  color: var(--dim);
+  flex: none;
+}
+.step-row .id .callee {
+  font-weight: 400;
+  color: var(--accent-bright);
+  flex: none;
+}
+.step-row.container .chev {
+  color: var(--muted);
+}
+
+/* The caption of an opened sub-run: the frame's label, not another indent. */
+.sub-caption {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  padding-right: 18px;
+  border-top: 1px solid var(--border-quiet);
+  background: var(--well);
+  font: 400 11px / 1.4 var(--font-mono);
+  color: var(--dim);
+}
+.sub-caption .name {
+  color: var(--accent-bright);
+}
+.sub-caption .sub-open {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  flex: none;
+}
+.sub-caption .sub-open:hover {
+  color: var(--text);
+}
+
+/* A folded run of children — contiguous settled steps of a sub-run, or every
+   settled child of a fan-out behind one count. Opens into real rows. */
+.step-roll {
+  display: grid;
+  grid-template-columns: var(--step-cols, 14px minmax(0, 1fr) 168px 74px 20px);
+  gap: 12px;
+  align-items: center;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  padding-right: 18px;
+  border-top: 1px solid var(--border-quiet);
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  background: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font: 400 11.5px / 1.4 var(--font-mono);
+  color: var(--dim);
+}
+.step-roll:hover {
+  background: #12161a;
+  color: var(--muted);
+}
+.step-roll .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--done);
+}
+.step-roll.pending .dot {
+  background: none;
+  border: 1px solid var(--faint);
+}
+.step-roll .id,
+.step-roll .meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.step-roll .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.step-roll .chev {
+  color: var(--faint);
+  text-align: center;
+}
+/* A fan-out's settled children are a count, not a list of ids. */
+.step-roll.fan .id {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* The column spec is per band: `--step-cols` is set on the band from the

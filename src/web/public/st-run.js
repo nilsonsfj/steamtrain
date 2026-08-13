@@ -254,85 +254,64 @@
   function isRunning(s) { return s.status === "running"; }
 
   /**
-   * A phaseId with its sub-workflow namespace stripped. The engine forwards a
-   * nested run's `phase_start` under `<callStepId>::<childPhaseId>` (which is
-   * what keeps two children's same-named phases from colliding in the reducer)
-   * but with the child's own title and index untouched. Bands group on this
-   * bare id so a fan-out of N children collapses into one band instead of N
-   * same-titled ones numbered 01, 01, 01.
+   * Bands for the current run state, with the reader's own folds applied.
+   * The shape lives in st-tree.js (design turn 6): nested phases no longer
+   * become top-level bands — they open inside the row that called them — and a
+   * loop is ONE band whose passes are chips rather than N stacked bands.
    */
-  function basePhaseId(phaseId) {
-    var id = String(phaseId);
-    var idx = id.lastIndexOf("::");
-    return idx === -1 ? id : id.slice(idx + 2);
+  function buildBands() {
+    return ST.tree.buildBands(S.runState, { pass: S.loopPass, unrolled: S.unrolled });
   }
 
-  /**
-   * Band identity: the un-namespaced phase instance, qualified by title so two
-   * unrelated sub-workflows that happen to name a phase alike stay apart.
-   *
-   * The parent call step is deliberately NOT part of the key — merging the
-   * siblings of one fan-out is the whole point. The assumption that buys is
-   * that a bare phaseId plus its title identifies a phase across workflows:
-   * two *different* sub-workflows that both declare, say, `review` titled
-   * "Review the diff" would share a band. Titles are authored per workflow, so
-   * a collision means the phases genuinely are the same step of the same
-   * child — but a run that nests two unrelated workflows this way would want
-   * the parent id back in this key.
-   */
-  function bandKey(p) {
-    return basePhaseId(p.phaseId) + ":" + (p.iteration || 1) + ":" + (p.title || "");
-  }
-
-  /**
-   * Fold the flat phase list into bands, merging sibling instances (see
-   * bandKey). Each entry keeps its *originating* phase so stepKey, tail-scroll
-   * keys and openDetail keep addressing the real phase instance — the band is
-   * a presentation grouping and nothing below it knows about the merge.
-   */
-  function buildBands(phases) {
-    var bands = [], byKey = {};
-    phases.forEach(function (p, idx) {
-      var key = bandKey(p);
-      var band = byKey[key];
-      if (!band) {
-        band = byKey[key] = {
-          key: key,
-          title: p.title,
-          index: typeof p.index === "number" ? p.index : idx,
-          iteration: p.iteration || 1,
-          members: [],
-          entries: []
-        };
-        bands.push(band);
-      }
-      band.members.push(p);
-      if (typeof p.index === "number" && p.index < band.index) band.index = p.index;
-      (p.steps || []).forEach(function (s) { band.entries.push({ phase: p, step: s }); });
-    });
-    bands.forEach(function (band) {
-      band.done = band.members.every(function (p) { return p.done; });
-      band.stepCount = band.members.reduce(function (n, p) {
-        return n + (typeof p.stepCount === "number" ? p.stepCount : (p.steps || []).length);
-      }, 0);
-    });
-    return bands;
-  }
-
+  /** Every step a band owns, including the ones nested inside its sub-runs. */
   function bandSteps(band) {
-    return band.entries.map(function (e) { return e.step; });
+    var out = [];
+    (band.entries || []).forEach(function (e) {
+      out = out.concat(ST.tree.stepsUnder(S.runState, e.step, e.phase));
+    });
+    (band.rolled || []).forEach(function (inner) { out = out.concat(bandSteps(inner)); });
+    return out;
   }
 
-  /** Running leaf work (not a `workflow` container that waits on nested steps). */
+  function containerOf(e) {
+    return ST.tree.containerOf(S.runState, e.step, e.phase);
+  }
+
+  // A fan-out child (`rebase[4]`) has no `workflow` field of its own — only the
+  // catalog step it was generated from does. findWorkflowStep already strips
+  // the `[n]` suffix, so it is the natural resolver for the whole tree module.
+  if (ST.tree && ST.tree.setWorkflowResolver) {
+    ST.tree.setWorkflowResolver(function (stepId) {
+      var call = findWorkflowStep(stepId);
+      return call ? call.workflow : null;
+    });
+  }
+
+  /** The workflow a call step (or one of its fan-out children) invokes. */
+  function callWorkflowName(step) {
+    return ST.tree && ST.tree.workflowOf ? ST.tree.workflowOf(step) : (step && step.workflow);
+  }
+
+  /** The band key a phase instance belongs to, for the collapse-on-second-click. */
+  function bandKeyOfPhase(bands, phase) {
+    var key = null;
+    bands.forEach(function (b) {
+      (b.members || []).forEach(function (p) { if (!key && p === phase) key = b.key; });
+    });
+    return key;
+  }
+
+  /** Running leaf work, not a container merely waiting on the steps below it. */
   function isLiveRunning(s) {
-    return isRunning(s) && s.blockKind !== "workflow";
+    return isRunning(s) && s.blockKind !== "workflow" &&
+      !ST.tree.childrenOf(S.runState, s).length;
   }
 
   /**
-   * Exactly one band expands: the selected step's, else a phase with running
-   * leaf work, else any running phase. Preferring leaf work matters for
-   * sub-workflow fan-outs (`babysit[n]`): the parent phase stays running the
-   * whole time while agent text streams in a later namespaced phase.
+   * Exactly one band expands: the selected step's, else a band with running
+   * leaf work, else any running band. Preferring leaf work matters for
+   * sub-runs: the calling row stays running the whole time while agent text
+   * streams three levels down inside it.
    */
   function expandedBandKey(bands) {
     var i, j;
@@ -347,7 +326,7 @@
     for (i = 0; i < bands.length; i++) {
       if (
         bands[i].key !== S.collapsedBandKey &&
-        !bands[i].done &&
+        bands[i].state !== "done" &&
         bandSteps(bands[i]).some(isLiveRunning)
       ) {
         return bands[i].key;
@@ -356,7 +335,7 @@
     for (i = 0; i < bands.length; i++) {
       if (
         bands[i].key !== S.collapsedBandKey &&
-        !bands[i].done &&
+        bands[i].state !== "done" &&
         bandSteps(bands[i]).some(isRunning)
       ) {
         return bands[i].key;
@@ -366,9 +345,7 @@
   }
 
   function bandClass(band) {
-    if (band.done) return "band done";
-    if (bandSteps(band).some(isRunning)) return "band running";
-    return "band queued";
+    return "band " + band.state + (band.kind === "loop" ? " loop" : band.kind === "rollup" ? " rollup" : "");
   }
 
   /**
@@ -376,7 +353,7 @@
    * once for the band instead of repeated as a chip on every uniform row.
    */
   function bandKindLine(band) {
-    var steps = bandSteps(band);
+    var steps = (band.entries || []).map(function (e) { return e.step; });
     var n = steps.length || band.stepCount || 0;
     if (!n) return "";
     var kind = null;
@@ -396,7 +373,12 @@
    * summary — three children rarely finish on the same tick.
    */
   function bandRollup(band) {
-    var steps = bandSteps(band);
+    // Leaves only: a fan-out parent's span covers its children's, and a
+    // container's own result never carries cost — counting both would report a
+    // range and a bill that never happened.
+    var steps = bandSteps(band).filter(function (s) {
+      return !ST.tree.childrenOf(S.runState, s).length;
+    });
     var running = steps.filter(isRunning);
     var now = Date.now();
     var lo, hi, i;
@@ -424,7 +406,7 @@
       cost += s.result.costUsd || 0;
       addTokensInto(tok, s.result.tokens);
     });
-    if (!any) return band.done ? "" : "queued";
+    if (!any) return band.state === "done" ? "" : "queued";
     var bits = [];
     var span = fmtElapsedRange(lo, hi);
     if (span) bits.push(span);
@@ -468,6 +450,8 @@
    * band can populate are not laid out at all.
    */
   function bandColumns(band) {
+    // Over every step the band owns, not just the rows currently unfolded, so
+    // opening a sub-run never re-flows the columns of the rows above it.
     var steps = bandSteps(band);
     var spec = { meta: false, runner: false, cost: false, tokens: false };
     steps.forEach(function (s) {
@@ -529,42 +513,222 @@
     return "step-row";
   }
 
+  /** Rows indent 24px per level; 6a never shows more than two of them at once. */
+  function rowIndent(depth) {
+    return 42 + (depth || 0) * 24;
+  }
+
+  /** Live spend/tokens for a container row: the sum of everything under it. */
+  function subtreeUsage(e) {
+    var cost = 0, tokens = 0, live = false;
+    ST.tree.stepsUnder(S.runState, e.step, e.phase).forEach(function (s) {
+      // The container's own result never carries cost (the engine attributes it
+      // to the children), so skipping it cannot lose a number — but counting it
+      // could double one.
+      if (s === e.step) return;
+      var use = stepUsage(s);
+      cost += use.costUsd || 0;
+      tokens += use.tokens || 0;
+      if (use.live || s.status === "running") live = true;
+    });
+    return { costUsd: cost, tokens: tokens, live: live };
+  }
+
+  /** "9 ok · 2 run · 1 fail" — a fan-out's tally, zeros left out. */
+  function fanTally(container) {
+    var t = container.tally, bits = [];
+    if (t.ok) bits.push(t.ok + " ok");
+    if (t.running) bits.push(t.running + " run");
+    if (t.failed) bits.push(t.failed + " fail");
+    if (t.queued) bits.push(t.queued + " queued");
+    return bits.join(" · ");
+  }
+
+  /** How many steps the invoked workflow has, from the resolved child spec. */
+  function subRunStepCount(step, container) {
+    var call = findWorkflowStep(step.stepId);
+    var view = call ? subWorkflowView(call) : null;
+    var declared = view && view.resolved ? view.stepCount : 0;
+    return Math.max(declared || 0, container.children.length);
+  }
+
+  /** "step 4 of 8" — how far through the child run the calling row is. */
+  function subRunProgress(step, container) {
+    var t = container.tally;
+    var at = Math.min(t.ok + t.failed + t.running, subRunStepCount(step, container));
+    return "step " + at + " of " + subRunStepCount(step, container);
+  }
+
   /**
    * One step row, laid out on its band's column spec (see bandColumns): dot,
    * id, [meta], runner-or-kind, time, [cost], [tokens], chevron. The whole row
-   * is the control (the chevron is its affordance); activating it selects the
-   * step and opens the drill-in drawer. `open` marks the row whose live output
-   * is expanded directly beneath it.
+   * is the control; activating it selects the step into the rail and, when the
+   * step contains other steps, opens or closes what is inside it. `open` marks
+   * the row whose live output is expanded directly beneath it.
    */
-  function renderStepRow(p, s, cols, open) {
-    var use = stepUsage(s);
+  function renderStepRow(row, cols, open) {
+    var p = row.phase, s = row.step, container = row.container;
+    var use = container ? subtreeUsage(row) : stepUsage(s);
     var soFar = use.live ? "so far — this step is still running" : null;
     var runner = runnerLabel(s);
-    var row = h("button", {
-        class: stepRowClass(s) + (open ? " open" : ""),
+    var expandable = Boolean(container);
+    var el = h("button", {
+        class: stepRowClass(s) + (open ? " open" : "") + (expandable ? " container" : ""),
         type: "button",
-        "data-detail-invoker": "row:" + stepKey(p, s),
-        "aria-label": "Open details for step " + s.stepId,
-        title: "Open this step's output and details",
-        onClick: function (event) { openDetail(p, s, event.currentTarget, open); }
+        style: "padding-left:" + rowIndent(row.depth) + "px",
+        "data-detail-invoker": "row:" + row.key,
+        "aria-label": (expandable ? (row.expanded ? "Collapse " : "Expand ") : "Open details for step ") + s.stepId,
+        "aria-expanded": expandable ? String(Boolean(row.expanded)) : null,
+        title: expandable
+          ? "Open what runs inside this step"
+          : "Open this step's output and details",
+        onClick: function (event) {
+          if (expandable) S.rowOpen[row.key] = !row.expanded;
+          openDetail(p, s, event.currentTarget, open && !expandable);
+        }
       },
-      h("span", { class: "dot", "aria-hidden": "true" }),
-      h("div", { class: "id", text: s.stepId })
+      h("span", { class: "dot", "aria-hidden": "true" })
     );
-    if (cols.meta) row.appendChild(stepMetaCell(s));
-    row.appendChild(runner
+    var id = h("div", { class: "id" }, h("span", { class: "sid", text: ST.tree.leafId(s) }));
+    if (container && container.kind === "fanout") {
+      id.appendChild(h("span", { class: "note", text: "forEach · " + container.tally.total + " items" }));
+    } else if (callWorkflowName(s)) {
+      id.appendChild(h("span", { class: "callee", text: "→ " + callWorkflowName(s) }));
+    }
+    el.appendChild(id);
+    if (cols.meta) {
+      if (container && container.kind === "fanout") el.appendChild(h("div", { class: "meta", text: fanTally(container) }));
+      else if (container) el.appendChild(h("div", { class: "meta", text: subRunProgress(s, container) }));
+      else el.appendChild(stepMetaCell(s));
+    }
+    el.appendChild(runner
       ? h("div", { class: "runner", text: runner })
       : kindChip(s.blockKind));
-    row.appendChild(timeCell(s));
-    if (cols.cost) row.appendChild(h("div", { class: "num cost" + (use.live ? " live" : ""), title: soFar, text: use.costUsd ? "$" + use.costUsd.toFixed(4) : "" }));
-    if (cols.tokens) row.appendChild(h("div", { class: "num tok" + (use.live ? " live" : ""), title: soFar, text: use.tokens ? fmtTokens(use.tokens) : "" }));
-    row.appendChild(h("span", { class: "chev", "aria-hidden": "true", text: open ? "⌄" : "›" }));
-    return row;
+    el.appendChild(timeCell(s));
+    if (cols.cost) el.appendChild(h("div", { class: "num cost" + (use.live ? " live" : ""), title: soFar, text: use.costUsd ? "$" + use.costUsd.toFixed(4) : "" }));
+    if (cols.tokens) el.appendChild(h("div", { class: "num tok" + (use.live ? " live" : ""), title: soFar, text: use.tokens ? fmtTokens(use.tokens) : "" }));
+    el.appendChild(h("span", { class: "chev", "aria-hidden": "true", text: (expandable ? row.expanded : open) ? "⌄" : "›" }));
+    return el;
   }
 
-  /** "What runs inside" for a sub-workflow call step, hung off its row. */
+  /**
+   * The strip under an opened sub-run row: what the child workflow is, and the
+   * way out to it. A sub-run is a frame, not an indent — this line is the
+   * frame's caption.
+   */
+  function renderSubRunCaption(row) {
+    var s = row.step;
+    var name = callWorkflowName(s);
+    var call = findWorkflowStep(s.stepId);
+    var view = call ? subWorkflowView(call) : null;
+    var bits = [];
+    if (view && view.resolved) bits.push(view.stepCount + " step" + (view.stepCount === 1 ? "" : "s"));
+    if (view && view.overrideCount) bits.push(view.overrideCount + " override" + (view.overrideCount === 1 ? "" : "s"));
+    var worktree = s.worktree || firstChildWorktree(row);
+    if (worktree && worktree.branch) bits.push("worktree " + worktree.branch);
+    var strip = h("div", { class: "sub-caption", style: "padding-left:" + rowIndent(row.depth) + "px" },
+      h("span", { class: "name", text: name || "sub-run" }),
+      bits.length ? h("span", { class: "bits", text: bits.join(" · ") }) : null
+    );
+    if (name && S.workflows.some(function (w) { return w.name === name; })) {
+      strip.appendChild(h("button", {
+        class: "sub-open", type: "button", text: "open as its own run",
+        title: "Open " + name + " on its own, outside this run",
+        onClick: function (event) { event.stopPropagation(); ST.selectWorkflow(name); }
+      }));
+    }
+    return strip;
+  }
+
+  function firstChildWorktree(row) {
+    var found = null;
+    (row.container ? row.container.children : []).forEach(function (e) {
+      if (!found && e.step.worktree) found = e.step.worktree;
+    });
+    return found;
+  }
+
+  /**
+   * A folded run of children: contiguous settled/queued steps of a sub-run
+   * ("pull · comment-scan · fix-review — 3 steps ok"), or every settled child
+   * of a fan-out behind one count. Clicking unfolds it into real rows.
+   */
+  function renderRollRow(row, cols) {
+    var steps = row.steps.map(function (e) { return e.step; });
+    var ms = 0;
+    steps.forEach(function (s) { ms += (s.result && s.result.durationMs) || 0; });
+    var ids = steps.map(function (e) { return ST.tree.leafId(e); });
+    var shown = ids.slice(0, 3).join(" · ") + (ids.length > 3 ? " · +" + (ids.length - 3) : "");
+    var label = row.state === "done"
+      ? steps.length + " step" + (steps.length === 1 ? "" : "s") + " ok"
+      : steps.length + " step" + (steps.length === 1 ? "" : "s") + " queued";
+    if (row.kind === "fanout") {
+      label = row.state === "done"
+        ? steps.length + " settled hidden"
+        : steps.length + " not started";
+      shown = "";
+    }
+    var el = h("button", {
+      class: "step-roll " + row.state + (row.kind === "fanout" ? " fan" : ""),
+      type: "button",
+      style: "padding-left:" + rowIndent(row.depth) + "px",
+      "aria-expanded": "false",
+      title: ids.join(", "),
+      onClick: function () { S.unfolded[row.key] = true; ST.render(); }
+    },
+      h("span", { class: "dot", "aria-hidden": "true" }),
+      h("div", { class: "id", text: shown || label })
+    );
+    if (cols.meta) el.appendChild(h("div", { class: "meta", text: shown ? label : "" }));
+    el.appendChild(h("div", { class: "runner", text: shown ? "" : "" }));
+    el.appendChild(h("div", { class: "num time", text: ms ? fmtElapsed(ms) : "" }));
+    if (cols.cost) el.appendChild(h("div", { class: "num cost" }));
+    if (cols.tokens) el.appendChild(h("div", { class: "num tok" }));
+    el.appendChild(h("span", { class: "chev", "aria-hidden": "true", text: "›" }));
+    return el;
+  }
+
+  /**
+   * The rows a band paints: its own steps, and — for every container the reader
+   * has opened — one level of what is inside it, folded per 6a's rules.
+   */
+  function bandRows(band) {
+    var rows = [];
+    pushRows(band.entries, 0, rows);
+    return rows;
+  }
+
+  function pushRows(entries, depth, rows) {
+    entries.forEach(function (e) {
+      var container = containerOf(e);
+      var key = stepKey(e.phase, e.step);
+      var expanded = Boolean(container && S.rowOpen[key]);
+      rows.push({
+        type: "step", phase: e.phase, step: e.step, depth: depth,
+        container: container, expanded: expanded, key: key
+      });
+      if (!expanded) return;
+      if (container.kind === "subrun") {
+        rows.push({ type: "caption", phase: e.phase, step: e.step, container: container, depth: depth + 1, key: key + "#cap" });
+      }
+      ST.tree.foldChildren(container).forEach(function (item) {
+        if (item.entry) { pushRows([item.entry], depth + 1, rows); return; }
+        var rollKey = key + "#" + item.state;
+        if (S.unfolded[rollKey]) { pushRows(item.roll, depth + 1, rows); return; }
+        rows.push({
+          type: "roll", key: rollKey, steps: item.roll, state: item.state,
+          kind: container.kind, depth: depth + 1
+        });
+      });
+    });
+  }
+
+  /** "What runs inside" preview, for a sub-workflow step that has not started. */
   function subWorkflowRow(p, s) {
     if (s.blockKind !== "workflow") return null;
+    // Once the child run exists its real steps render one level in; the static
+    // preview would then be a second, staler copy of the same thing.
+    if (ST.tree.childrenOf(S.runState, s).length) return null;
     var block = subWorkflowCardBlock(s.stepId, stepKey(p, s));
     return block ? h("div", { class: "step-sub" }, block) : null;
   }
@@ -586,20 +750,24 @@
     return (((s.result && s.result.output) || s.text || "").trim()) || (s.activity || "");
   }
 
-  /** The band entry whose output the expanded band shows, inline under its row. */
-  function bandOutputEntry(band) {
-    var entries = band.entries, i;
+  /**
+   * The visible row whose output the expanded band shows, inline under it.
+   * Only leaves qualify: a container's own stream is its children's, and the
+   * rail already bubbles that for the selected step.
+   */
+  function bandOutputRow(rows) {
+    var leaves = rows.filter(function (r) { return r.type === "step" && !r.container; });
+    var i;
     if (S.selectedStepId) {
-      for (i = 0; i < entries.length; i++) {
-        if (entries[i].step.stepId === S.selectedStepId) return entries[i];
+      for (i = 0; i < leaves.length; i++) {
+        if (leaves[i].step.stepId === S.selectedStepId) return leaves[i];
       }
     }
-    // Prefer a running leaf over a running workflow container in the same band.
-    for (i = 0; i < entries.length; i++) if (isLiveRunning(entries[i].step)) return entries[i];
-    for (i = 0; i < entries.length; i++) if (isRunning(entries[i].step)) return entries[i];
-    for (i = entries.length - 1; i >= 0; i--) {
-      var s = entries[i].step;
-      if (s.text || (s.result && s.result.output)) return entries[i];
+    for (i = 0; i < leaves.length; i++) if (isLiveRunning(leaves[i].step)) return leaves[i];
+    for (i = 0; i < leaves.length; i++) if (isRunning(leaves[i].step)) return leaves[i];
+    for (i = leaves.length - 1; i >= 0; i--) {
+      var s = leaves[i].step;
+      if (s.text || (s.result && s.result.output)) return leaves[i];
     }
     return null;
   }
@@ -680,37 +848,118 @@
     container.appendChild(box);
   }
 
+  /** The pass switcher on a loop band's header: one chip per pass, cap included. */
+  function renderPassChips(band) {
+    var loop = band.loop;
+    var top = Math.max(loop.latest, loop.cap || 0);
+    var chips = h("span", { class: "passes" }, h("span", { class: "k", text: "pass" }));
+    for (var n = 1; n <= top; n++) {
+      (function (pass) {
+        var ran = loop.passes.indexOf(pass) !== -1;
+        var live = pass === loop.latest && band.state === "running";
+        var cls = "pass" + (pass === loop.shown ? " shown" : "") + (ran ? (live ? " live" : " ran") : " future");
+        chips.appendChild(h("button", {
+          class: cls, type: "button",
+          disabled: ran ? null : "disabled",
+          "aria-pressed": String(pass === loop.shown),
+          title: ran ? "Show pass " + pass : "pass " + pass + " has not run",
+          onClick: function () { S.loopPass[band.key] = pass; ST.render(); }
+        }, ran ? h("span", { class: "dot", "aria-hidden": "true" }) : null, String(pass)));
+      })(n);
+    }
+    return chips;
+  }
+
+  /** A loop band's header: the gate that closes it, its cap, and the passes. */
+  function renderLoopHead(band) {
+    var loop = band.loop;
+    var gate = [];
+    if (loop.gateStepId) gate.push("gate " + loop.gateStepId);
+    if (loop.cap) gate.push("cap " + loop.cap);
+    return h("div", { class: "band-head" },
+      h("span", { class: "idx", text: String(band.index + 1).padStart(2, "0") }),
+      h("span", { class: "dot", "aria-hidden": "true" }),
+      h("span", { class: "title", text: band.title }),
+      h("span", { class: "loop-chip", text: "↻ loop · " + loop.phaseRange }),
+      gate.length ? h("span", { class: "count", text: gate.join(" · ") }) : null,
+      renderPassChips(band)
+    );
+  }
+
+  /** "showing pass 3 · pass 2 ended with 3 steps failed" */
+  function renderPassNote(band) {
+    var loop = band.loop;
+    if (loop.passes.length < 2 && !loop.previous) return null;
+    var note = h("div", { class: "pass-note" },
+      h("span", { text: "showing pass " + loop.shown })
+    );
+    if (loop.previous) {
+      note.appendChild(h("span", { class: "sep", text: "·" }));
+      note.appendChild(h("span", { text: loop.previous }));
+    }
+    if (loop.shown !== loop.latest) {
+      note.appendChild(h("button", {
+        class: "pass-latest", type: "button", text: "back to pass " + loop.latest,
+        onClick: function () { S.loopPass[band.key] = loop.latest; ST.render(); }
+      }));
+    }
+    return note;
+  }
+
   /**
-   * One band per *merged* phase instance (see buildBands); exactly one is
-   * expanded, and its live output hangs directly under the row it belongs to
-   * rather than in a second pane at the foot of the band.
+   * A run of adjacent settled (or queued) bands, folded to one line. Superseded
+   * work stops competing for vertical space; the line opens back into the real
+   * bands on click, so nothing is lost — it is named.
+   */
+  function renderRolledBand(b, container) {
+    var band = h("div", { class: "band " + b.state + " rollup" });
+    band.appendChild(h("button", {
+      class: "band-head", type: "button", "aria-expanded": "false",
+      title: "Show these phases",
+      onClick: function () { S.unrolled[b.key] = true; ST.render(); }
+    },
+      h("span", { class: "idx", text: String(b.index + 1).padStart(2, "0") }),
+      h("span", { class: "dot", "aria-hidden": "true" }),
+      h("span", { class: "title", text: b.title }),
+      h("span", { class: "count", text: b.range }),
+      h("span", { class: "rollup", text: b.summary })
+    ));
+    container.appendChild(band);
+  }
+
+  /**
+   * One band per phase — or per loop, which is one band for its whole phase
+   * range with the passes as chips (design 6a). Exactly one band is expanded,
+   * and its live output hangs directly under the row it belongs to.
    */
   function renderBands(container) {
     var phases = (S.runState && S.runState.phases) || [];
     if (!phases.length) return;
     renderPendingBlock(container);
-    var bands = buildBands(phases);
+    var bands = buildBands();
     var expanded = expandedBandKey(bands);
     bands.forEach(function (b) {
+      if (b.kind === "rollup") { renderRolledBand(b, container); return; }
       var cls = bandClass(b);
       var isExpanded = b.key === expanded;
       var band = h("div", { class: cls + (isExpanded ? " expanded" : "") });
       var rollup = bandRollup(b);
       var kindLine = bandKindLine(b);
-      band.appendChild(h("div", { class: "band-head" },
-        h("span", { class: "idx", text: String(b.index + 1).padStart(2, "0") }),
-        h("span", { class: "dot", "aria-hidden": "true" }),
-        h("span", {
-          class: "title",
-          text: b.title + (b.iteration > 1 ? " · iteration " + b.iteration : "")
-        }),
-        // How many sibling sub-workflows this one band stands for.
-        b.members.length > 1 ? h("span", { class: "xn", text: "×" + b.members.length }) : null,
-        kindLine ? h("span", { class: "count", text: kindLine }) : null,
-        rollup ? h("span", { class: "rollup", text: rollup }) : null
-      ));
+      if (b.loop) {
+        band.appendChild(renderLoopHead(b));
+        var note = renderPassNote(b);
+        if (note) band.appendChild(note);
+      } else {
+        band.appendChild(h("div", { class: "band-head" },
+          h("span", { class: "idx", text: String(b.index + 1).padStart(2, "0") }),
+          h("span", { class: "dot", "aria-hidden": "true" }),
+          h("span", { class: "title", text: b.title }),
+          kindLine ? h("span", { class: "count", text: kindLine }) : null,
+          rollup ? h("span", { class: "rollup", text: rollup }) : null
+        ));
+      }
       // A queued phase collapses to its header line.
-      if (cls === "band queued") { container.appendChild(band); return; }
+      if (b.state === "queued") { container.appendChild(band); return; }
       var cols = bandColumns(b);
       band.style.setProperty("--step-cols", cols.template);
       // The expanded band is a fixed-height console pane: its rows and the
@@ -728,12 +977,19 @@
           S.stepListScroll[listKey] = { follow: atBottom, top: stepHost.scrollTop };
         });
       }
-      var outEntry = isExpanded ? bandOutputEntry(b) : null;
-      b.entries.forEach(function (e) {
-        var open = Boolean(outEntry && outEntry.step === e.step);
-        stepHost.appendChild(renderStepRow(e.phase, e.step, cols, open));
-        if (open) stepHost.appendChild(renderOutputPane(e.phase, e.step));
-        var sub = subWorkflowRow(e.phase, e.step);
+      var rows = bandRows(b);
+      var outRow = isExpanded ? bandOutputRow(rows) : null;
+      rows.forEach(function (row) {
+        if (row.type === "caption") { stepHost.appendChild(renderSubRunCaption(row)); return; }
+        if (row.type === "roll") { stepHost.appendChild(renderRollRow(row, cols)); return; }
+        var open = row === outRow;
+        stepHost.appendChild(renderStepRow(row, cols, open));
+        if (open) {
+          var pane = renderOutputPane(row.phase, row.step);
+          pane.style.marginLeft = rowIndent(row.depth) + "px";
+          stepHost.appendChild(pane);
+        }
+        var sub = subWorkflowRow(row.phase, row.step);
         if (sub) stepHost.appendChild(sub);
       });
       if (stepHost !== band) band.appendChild(stepHost);
@@ -985,7 +1241,10 @@
       S.detail.iteration === (p.iteration || 1) &&
       S.detail.stepId === s.stepId;
     if (sameDetail || isOpen) {
-      closeDetail(bandKey(p));
+      // Second click on an already-open row retracts it, and collapses the band
+      // it lives in so the running band does not immediately claim the slot
+      // back. A loop's band key is the loop's, not the phase instance's.
+      closeDetail(bandKeyOfPhase(buildBands(), p));
       return;
     }
     S.detailFocusGeneration += 1;
@@ -1411,18 +1670,27 @@
       });
     }
     var total = steps.length;
-    var doneN = 0, runningN = 0;
+    var doneN = 0, runningN = 0, failedN = 0;
     steps.forEach(function (s) {
-      if (s.status === "done" || s.status === "error") doneN++;
+      if (s.status === "error") { doneN++; failedN++; }
+      else if (s.status === "done") doneN++;
       else if (s.status === "running") runningN++;
     });
+    var okN = doneN - failedN;
+    // Three segments, not two: a run that is 48% green and 3% red says
+    // something a single "done" bar cannot (design 6a). Green and red together
+    // are the settled steps (`doneN`); running is its own segment and whatever
+    // is still queued is the unpainted remainder.
     document.getElementById("progressBar").style.width =
-      (total ? (doneN / total) * 100 : 0).toFixed(2) + "%";
+      (total ? (okN / total) * 100 : 0).toFixed(2) + "%";
     document.getElementById("progressLive").style.width =
       (total ? (runningN / total) * 100 : 0).toFixed(2) + "%";
+    var failedBar = document.getElementById("progressFailed");
+    if (failedBar) failedBar.style.width = (total ? (failedN / total) * 100 : 0).toFixed(2) + "%";
     var paused = Boolean(S.runState && S.runState.paused && !S.runState.done);
     document.getElementById("progressText").textContent =
       doneN + " / " + total + " steps" +
+      (runningN && !paused ? " · " + runningN + " running" : "") +
       (paused ? (runningN ? " · ⏸ pausing (" + runningN + " finishing)" : " · ⏸ paused") : "");
     updatePauseButton();
     updateRunPill();
@@ -2244,6 +2512,13 @@
   function clearPromptBrowse() { promptBrowse = null; }
 
   ST.run = {
+    bands: buildBands,
+    callWorkflowName: callWorkflowName,
+    subRunStepCount: function (callStepId) {
+      var call = findWorkflowStep(callStepId);
+      var view = call ? subWorkflowView(call) : null;
+      return view && view.resolved ? view.stepCount : 0;
+    },
     cancelRun: cancelRun,
     closeDetail: closeDetail,
     detachRun: detachRun,

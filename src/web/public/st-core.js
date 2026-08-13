@@ -103,6 +103,20 @@ window.Steamtrain = (function () {
     // phase expands instead.
     selectedStepId: null,
     collapsedBandKey: null,
+    // ---- turn 6 nesting (see st-tree.js) -------------------------------------
+    // Which pass of a loop band the reader is looking at, keyed by band key.
+    // Absent ⇒ the newest pass; a loop is ONE band, so this is how the earlier
+    // passes stay reachable without any of them costing vertical space.
+    loopPass: {},
+    // Container step rows (a `forEach` fan-out, a `workflow` sub-run) the
+    // reader has opened, keyed by stepKey. Held here for the usual reason: the
+    // 2s throughput tick rebuilds #bands, so a DOM-held open state snaps shut.
+    rowOpen: {},
+    // Folded child groups the reader has unfolded ("9 settled PRs hidden"),
+    // keyed by the fold's own key.
+    unfolded: {},
+    // Rolled-up runs of adjacent settled/queued bands the reader has opened.
+    unrolled: {},
     // Live output pane: false wraps long lines, true scrolls horizontally.
     outputNoWrap: false,
     // Per-card tail scroll state keyed by stepKey(): { follow: bool, top: px }.
@@ -923,7 +937,7 @@ window.Steamtrain = (function () {
         ? SteamtrainReducer.workflowStateFromSpec(ST.run.effectiveSpec() || S.spec)
         : SteamtrainReducer.initialWorkflowState;
       S.detail = null; S.selectedStepId = null; S.collapsedBandKey = null;
-      S.tailScroll = {}; S.stepListScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {};
+      S.tailScroll = {}; S.stepListScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {}; S.loopPass = {}; S.rowOpen = {}; S.unfolded = {}; S.unrolled = {};
       ST.run.setBanner(
         "Attached to " + (run.detached ? "detached " : "") + "run " + run.id.slice(0, 8) + "…" +
           (isReadOnly() ? " (read-only view)." : " — cancel stops the run itself."),
@@ -1386,7 +1400,7 @@ window.Steamtrain = (function () {
     S.selected = name; S.runId = null; S.runState = null;
     S.detail = null; S.detailInvoker = null; S.detailFallback = null; S.detailFocusPending = false; S.detailFocusGeneration += 1;
     S.selectedStepId = null; S.collapsedBandKey = null;
-    S.tailScroll = {}; S.stepListScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {};
+    S.tailScroll = {}; S.stepListScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {}; S.loopPass = {}; S.rowOpen = {}; S.unfolded = {}; S.unrolled = {};
     S.arrivalEnter = false; S.endedAt = 0;
     S.arrivalCtaFocused = false;
     S.arrivalOutputStep = null;
