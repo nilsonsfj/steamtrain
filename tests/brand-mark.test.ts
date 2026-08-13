@@ -31,6 +31,19 @@ interface Shape {
 }
 
 /**
+ * A capture group the pattern always fills, narrowed for `noUncheckedIndexed-
+ * Access`. Every group below sits outside an alternation and outside `?`, so
+ * the throw is unreachable — it exists to keep that assumption checked rather
+ * than asserted away, since a later edit to one of these patterns could quietly
+ * make a group optional.
+ */
+function group(m: RegExpMatchArray, i: number): string {
+  const v = m[i];
+  if (v === undefined) throw new Error(`capture group ${i} did not participate`);
+  return v;
+}
+
+/**
  * Pull the drawing primitives out of SVG markup. Attribute quoting differs
  * between the sources (the CSS data URI uses `%27`, which decodes to single
  * quotes), so both styles are accepted.
@@ -39,12 +52,13 @@ function shapes(svg: string): Shape[] {
   const out: Shape[] = [];
   for (const el of svg.matchAll(/<(circle|rect|path)\b([^>]*?)\/?>/g)) {
     const attrs: Record<string, string> = {};
-    for (const a of el[2].matchAll(/([a-z-]+)=['"]([^'"]*)['"]/g)) {
+    for (const a of group(el, 2).matchAll(/([a-z-]+)=['"]([^'"]*)['"]/g)) {
       // ".35" and "0.35" are the same opacity; compare by value, not spelling.
-      const n = Number(a[2]);
-      attrs[a[1]] = Number.isNaN(n) ? a[2] : String(n);
+      const raw = group(a, 2);
+      const n = Number(raw);
+      attrs[group(a, 1)] = Number.isNaN(n) ? raw : String(n);
     }
-    out.push({ tag: el[1], attrs });
+    out.push({ tag: group(el, 1), attrs });
   }
   return out;
 }
@@ -60,7 +74,7 @@ const positioned = (all: Shape[]): Shape[] => all.filter((s) => "x" in s.attrs |
 function transformedGroup(svg: string): { transform: string; shapes: Shape[] } {
   const g = svg.match(/<g\s+transform=['"]([^'"]+)['"]\s*>([\s\S]*?)<\/g>/);
   if (!g) throw new Error("no transformed <g> found — the mark must be placed, not redrawn");
-  return { transform: g[1], shapes: shapes(g[2]) };
+  return { transform: group(g, 1), shapes: shapes(group(g, 2)) };
 }
 
 /** Compare on geometry and tone, but not `fill` — see the wheel-fill test. */
@@ -73,13 +87,14 @@ const geometry = (list: Shape[]): string[] =>
       .join(" ")}`;
   });
 
-const favicon = htmlTs.match(/export const FAVICON_SVG = `([\s\S]*?)`;/);
-if (!favicon) throw new Error("FAVICON_SVG not found in src/web/html.ts");
-const canonical = positioned(shapes(favicon[1]));
+const faviconMatch = htmlTs.match(/export const FAVICON_SVG = `([\s\S]*?)`;/);
+if (!faviconMatch) throw new Error("FAVICON_SVG not found in src/web/html.ts");
+const faviconSvg = group(faviconMatch, 1);
+const canonical = positioned(shapes(faviconSvg));
 
 const brandMarkUri = shellCss.match(/background: url\("data:image\/svg\+xml,([^"]+)"\)/);
 if (!brandMarkUri) throw new Error(".brand-mark background data URI not found in shell.css");
-const brandMarkSvg = decodeURIComponent(brandMarkUri[1]);
+const brandMarkSvg = decodeURIComponent(group(brandMarkUri, 1));
 
 describe("brand mark", () => {
   it("is a real drawing, not an empty match", () => {
@@ -108,7 +123,7 @@ describe("brand mark", () => {
     // hub is meant to read as a hole punched through to the plate. A hub left
     // on another surface's plate colour shows up as a visible disc.
     for (const [name, svg] of [
-      ["favicon", favicon[1]],
+      ["favicon", faviconSvg],
       [".brand-mark", brandMarkSvg],
     ] as const) {
       const all = shapes(svg);
