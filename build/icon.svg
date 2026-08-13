@@ -2,12 +2,21 @@
   <!--
     The steamtrain app icon.
 
-    The same locomotive as the web UI's favicon (`FAVICON_SVG` in
-    src/web/html.ts) and the same palette, but drawn for this size rather than
-    scaled up from it. The favicon's geometry is tuned for 32px, where a
-    silhouette is all that survives; at 1024 the details it leaves out — a
-    chimney for the steam to come out of, a rail under the wheels rather than
-    through them — are the first things the eye looks for.
+    The locomotive is not redrawn for this size — it is the 32-unit geometry of
+    `FAVICON_SVG` (src/web/html.ts) and the steamtrain.app masthead, reproduced
+    coordinate for coordinate inside the <g> and placed by the transform alone.
+    The `.brand-mark` tile in src/web/public/shell.css is the third placement of
+    the same coordinates; `tests/brand-mark.test.ts` fails if any of the three
+    drift apart.
+    An earlier version of this file drew a more detailed engine for 1024 (a
+    chimney, a rail under the wheels) on the theory that a silhouette wastes the
+    pixels a dock icon gets. It does waste them, but the cost was two drawings
+    that drifted: the dock and the browser tab stopped being the same mark. One
+    geometry, scaled, is worth more than two tuned ones.
+
+    What is tuned here is only the plate the mark sits on — the gradient, the
+    inner glow and the top rim, all of which are invisible at 32px and all of
+    which are what makes a macOS icon look seated rather than pasted on.
 
     `scripts/build-icon.ts` rasterises this to build/icon.png, which is what
     electron-builder converts into .icns, .ico and the Linux size ladder.
@@ -32,35 +41,24 @@
   <rect width="1024" height="1024" rx="224" fill="url(#glow)"/>
   <rect x="5" y="5" width="1014" height="1014" rx="219" fill="none" stroke="url(#rim)" stroke-width="10"/>
 
-  <g transform="translate(0 16)">
-    <!-- Steam, leaving the chimney and drifting back over the cab. -->
-    <circle cx="724" cy="300" r="44" fill="#8eeae0" opacity=".85"/>
-    <circle cx="800" cy="238" r="32" fill="#8eeae0" opacity=".6"/>
-    <circle cx="858" cy="192" r="21" fill="#8eeae0" opacity=".38"/>
+  <!--
+    scale(28) leaves the mark 896 wide inside 1024, so nothing reaches the
+    squircle's corner arcs. x=64 centres it as drawn; y=72 centres the drawn
+    extent (0.1 to 31.3 in 32-space) rather than the viewBox, which the puffs
+    and the wheels make asymmetric.
+  -->
+  <g transform="translate(64 72) scale(28)">
+    <!-- Steam, drifting back off the top-right corner. -->
+    <circle cx="14.5" cy="6.5" r="1.4" fill="#34d3c4" opacity=".35"/>
+    <circle cx="19" cy="4.4" r="1.9" fill="#34d3c4" opacity=".6"/>
+    <circle cx="25" cy="2.6" r="2.5" fill="#34d3c4" opacity=".9"/>
 
-    <!-- Chimney: flared cap over a stack, seated on the boiler. -->
-    <rect x="676" y="356" width="96" height="38" rx="15" fill="#1c6f68"/>
-    <rect x="692" y="382" width="64" height="104" rx="12" fill="#1c6f68"/>
+    <!-- Cab, then the boiler running the full width beneath it. -->
+    <rect x="6" y="8" width="5.5" height="7" rx="1.6" fill="#34d3c4"/>
+    <rect x="3" y="14" width="26" height="11" rx="3.2" fill="#34d3c4"/>
 
-    <!-- Cab, with the roof overhanging on both sides. -->
-    <rect x="182" y="336" width="268" height="36" rx="18" fill="#1c6f68"/>
-    <rect x="202" y="360" width="228" height="292" rx="26" fill="#1c6f68"/>
-    <rect x="238" y="398" width="156" height="116" rx="20" fill="#0e1116" opacity=".55"/>
-
-    <!-- Boiler, and the smokebox band closing off its front. -->
-    <rect x="380" y="470" width="432" height="182" rx="40" fill="#34d3c4"/>
-    <rect x="762" y="474" width="46" height="174" rx="20" fill="#1c6f68" opacity=".55"/>
-
-    <!-- Footplate the whole locomotive sits on. -->
-    <rect x="196" y="638" width="628" height="58" rx="18" fill="#1c6f68"/>
-
-    <!-- Driving wheels, resting on the rail rather than crossing it. -->
-    <circle cx="360" cy="730" r="78" fill="#0e1116" stroke="#34d3c4" stroke-width="30"/>
-    <circle cx="360" cy="730" r="26" fill="#34d3c4"/>
-    <circle cx="664" cy="730" r="78" fill="#0e1116" stroke="#34d3c4" stroke-width="30"/>
-    <circle cx="664" cy="730" r="26" fill="#34d3c4"/>
-
-    <!-- The one warm note in the palette, as in the favicon. -->
-    <path d="M150 826h724" stroke="#d29922" stroke-width="20" stroke-linecap="round" opacity=".8"/>
+    <!-- Driving wheels: the plate colour showing through an accent ring. -->
+    <circle cx="10" cy="27.5" r="3" fill="#0c0e11" stroke="#34d3c4" stroke-width="1.6"/>
+    <circle cx="22" cy="27.5" r="3" fill="#0c0e11" stroke="#34d3c4" stroke-width="1.6"/>
   </g>
 </svg>
