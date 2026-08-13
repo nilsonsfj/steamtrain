@@ -77,6 +77,7 @@ export const WEB_ASSETS: readonly WebAsset[] = [
   { file: "st-core.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "st-projects.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "st-shell.js", kind: "js", mime: "text/javascript; charset=utf-8" },
+  { file: "st-tree.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "st-run.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "st-instruments.js", kind: "js", mime: "text/javascript; charset=utf-8" },
   { file: "st-arrival.js", kind: "js", mime: "text/javascript; charset=utf-8" },
@@ -190,7 +191,7 @@ ${styles}
               <button class="btn small danger" id="deleteBtn" style="display:none">&#128465; Delete</button>
             </div>
             <div class="run-metrics" id="runMetrics" style="display:none">
-              <div class="run-progress" role="presentation"><span class="done" id="progressBar"></span><span class="live" id="progressLive"></span></div>
+              <div class="run-progress" role="presentation"><span class="done" id="progressBar"></span><span class="live" id="progressLive"></span><span class="failed" id="progressFailed"></span></div>
               <div class="run-clock">
                 <div class="row"><span class="elapsed" id="elapsed">0.0s</span></div>
                 <div class="row"><span class="steps" id="progressText"></span><span class="steps" id="costTicker"></span></div>

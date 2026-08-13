@@ -108,12 +108,38 @@
     });
   }
 
+  /**
+   * The shape of the run in flight (design 6a): how far the loop has got, how
+   * many sub-runs are open, how many worktrees are allocated. Each line appears
+   * only when the run actually has such a thing — a run with no loop says
+   * nothing about loops rather than reporting "0 / 0".
+   */
+  function renderRunShape(foot) {
+    if (!S.runId || !S.runState || !ST.tree) return;
+    var shape = ST.tree.runShape(S.runState);
+    var lines = [];
+    if (shape.loop) {
+      lines.push(["loop passes", shape.loop.cap ? shape.loop.pass + " / " + shape.loop.cap : String(shape.loop.pass)]);
+    }
+    if (shape.subRuns) lines.push(["sub-runs", shape.subRuns + " active"]);
+    if (shape.worktrees) lines.push(["worktrees", shape.worktrees + " open"]);
+    if (!lines.length) return;
+    var box = h("div", { class: "run-shape" });
+    lines.forEach(function (pair) {
+      box.appendChild(h("div", { class: "run-shape-row" },
+        h("span", { class: "k", text: pair[0] }),
+        h("span", { class: "v", text: pair[1] })));
+    });
+    foot.appendChild(box);
+  }
+
   /** Rail footer: runs that are elsewhere — detached, or blocked on approval. */
   function renderLiveRuns() {
     ensureRailSkeleton();
     var foot = document.getElementById("railFoot");
     if (!foot) return;
     clear(foot);
+    renderRunShape(foot);
     var elsewhere = S.liveRuns.filter(function (run) {
       return run.detached || (run.pendingApprovals && run.pendingApprovals.length);
     });
@@ -321,6 +347,31 @@
     });
   }
 
+  /**
+   * The nesting a spec declares: loops, fan-outs, and the workflows it calls.
+   * Read off the spec, so it is true before the run starts as well as during.
+   */
+  function specShape() {
+    var spec = (ST.run && ST.run.effectiveSpec && ST.run.effectiveSpec()) || S.spec;
+    if (!spec || !spec.phases) return [];
+    var loops = 0, fanouts = 0, calls = {};
+    spec.phases.forEach(function (p) {
+      (p.steps || []).forEach(function (st) {
+        if (st.loopTo) loops += 1;
+        if (st.forEach) fanouts += 1;
+        if (st.kind === "workflow" && st.workflow) calls[st.workflow] = true;
+      });
+    });
+    var bits = [];
+    if (loops) bits.push("· " + loops + " loop" + (loops === 1 ? "" : "s"));
+    if (fanouts) bits.push("· " + fanouts + " fan-out" + (fanouts === 1 ? "" : "s"));
+    var named = Object.keys(calls);
+    if (named.length) {
+      bits.push("· calls " + (named.length > 2 ? named.length + " workflows" : named.join(", ")));
+    }
+    return bits;
+  }
+
   function renderSourceLine() {
     var line = document.getElementById("srcLine");
     clear(line);
@@ -328,6 +379,10 @@
     line.appendChild(h("span", { class: "src", text: S.source || "unknown" }));
     var counts = S.spec ? S.spec.phases.length + " phase" + (S.spec.phases.length === 1 ? "" : "s") : "";
     if (counts) line.appendChild(h("span", { text: counts }));
+    // What kinds of nesting this workflow actually has — the header line 6a
+    // reads "7 phases · 1 loop · calls babysit-pr". Each clause is omitted when
+    // the spec has no such thing.
+    specShape().forEach(function (bit) { line.appendChild(h("span", { text: bit })); });
     if (!isReadOnly() && S.source !== "user" && S.source !== "project") {
       line.appendChild(h("span", { text: "· configuring saves a user copy" }));
     }

@@ -21,6 +21,7 @@ import { describe, expect, it } from "vitest";
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src", "web", "public");
 const css = readFileSync(join(PUBLIC_DIR, "run.css"), "utf8");
 const js = readFileSync(join(PUBLIC_DIR, "st-run.js"), "utf8");
+const tree = readFileSync(join(PUBLIC_DIR, "st-tree.js"), "utf8");
 
 /** Every declaration block whose selector list contains `selector`, concatenated. */
 function ruleBody(sheet: string, selector: string): string {
@@ -73,8 +74,8 @@ describe("expanded phase band layout", () => {
     // The rows, their sub-workflow blocks and the live output pane are all
     // appended to a `band-steps` host, not to the band itself.
     expect(js).toMatch(/class:\s*"band-steps"/);
-    expect(js).toMatch(/stepHost\.appendChild\(renderStepRow\(e\.phase, e\.step, cols, open\)\)/);
-    expect(js).toMatch(/stepHost\.appendChild\(renderOutputPane\(e\.phase, e\.step\)\)/);
+    expect(js).toMatch(/stepHost\.appendChild\(renderStepRow\(row, cols, open\)\)/);
+    expect(js).toMatch(/renderOutputPane\(row\.phase, row\.step\)/);
   });
 
   it("lays rows out on their band's own column spec rather than a fixed grid", () => {
@@ -85,18 +86,17 @@ describe("expanded phase band layout", () => {
     expect(js).toMatch(/setProperty\("--step-cols"/);
   });
 
-  it("merges sibling sub-workflow phases into one band", () => {
-    // The engine namespaces a nested phase_start but leaves the child's own
-    // title and index, so N children would otherwise paint N same-titled
-    // bands all numbered 01.
-    expect(js).toMatch(/function basePhaseId/);
+  it("keeps a sub-workflow's phases out of the top-level band list", () => {
+    // Turn 6 replaced turn 4's sibling-merge: a nested phase is no longer a
+    // band at all — it opens inside the row that called it (st-tree.js).
     expect(js).toMatch(/function buildBands/);
-    expect(js).toMatch(/lastIndexOf\("::"\)/);
+    expect(js).toMatch(/ST\.tree\.buildBands/);
+    expect(tree).toMatch(/function isNested/);
   });
 
   it("lets a second click retract an expanded live row", () => {
-    expect(js).toMatch(/openDetail\(p, s, event\.currentTarget, open\)/);
-    expect(js).toMatch(/if \(sameDetail \|\| isOpen\) \{\s*closeDetail\(bandKey\(p\)\);\s*return;/);
+    expect(js).toMatch(/openDetail\(p, s, event\.currentTarget, open && !expandable\)/);
+    expect(js).toMatch(/closeDetail\(bandKeyOfPhase\(buildBands\(\), p\)\)/);
     expect(js).toMatch(/bands\[i\]\.key !== S\.collapsedBandKey/);
   });
 });

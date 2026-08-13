@@ -563,13 +563,76 @@
     return row;
   }
 
+  /**
+   * The step's full address — 6a's orientation device: `land › pass 3 ›
+   * rebase[#9] › babysit-pr › checks`. Because the address exists the spine is
+   * free to fold aggressively; nothing gets lost, it gets named. Rendered only
+   * when there is more to say than the phase the header already implies.
+   */
+  function renderAddress(p, s) {
+    if (!ST.tree || !S.runState) return null;
+    var bands = ST.run && ST.run.bands ? ST.run.bands() : null;
+    var parts = ST.tree.addressOf(S.runState, p, s, bands);
+    if (parts.length < 2) return null;
+    var box = h("div", { class: "insp-address" });
+    parts.forEach(function (part, i) {
+      if (i) box.appendChild(h("span", { class: "sep", "aria-hidden": "true", text: "\u203a" }));
+      box.appendChild(h("span", { class: "p " + part.kind, text: part.text }));
+    });
+    return box;
+  }
+
+  /**
+   * The SUB-RUN block: when the selected step is running inside a `workflow`
+   * call, how far through the child run it is. One segment per child step, so
+   * "4 / 8" is also a picture of which of the eight are behind it.
+   */
+  function renderSubRun(p, s) {
+    if (!ST.tree || !S.runState) return null;
+    var sub = ST.tree.subRunOf(S.runState, s, p);
+    if (!sub) return null;
+    var declared = ST.run && ST.run.subRunStepCount ? ST.run.subRunStepCount(sub.callStepId) : 0;
+    var total = Math.max(declared || 0, sub.total);
+    var wrap = h("div", { class: "insp-subrun" });
+    wrap.appendChild(h("div", { class: "insp-subrun-head" },
+      h("span", { class: "insp-kicker", text: "Sub-run" }),
+      h("span", { class: "name", text: sub.workflow || "sub-run" }),
+      h("span", { class: "count", text: sub.done + " / " + total })
+    ));
+    var bar = h("div", { class: "insp-subrun-bar" });
+    for (var i = 0; i < total; i++) {
+      var step = sub.steps[i];
+      var cls = !step ? "" : step.status === "error" ? "failed"
+        : step.status === "done" ? "done"
+        : step.status === "running" ? "live" : "";
+      bar.appendChild(h("span", { class: cls }));
+    }
+    wrap.appendChild(bar);
+    var overrides = subRunOverrides(sub.callStepId);
+    if (overrides) wrap.appendChild(h("div", { class: "insp-subrun-note", text: overrides }));
+    return wrap;
+  }
+
+  function subRunOverrides(callStepId) {
+    if (!ST.run || !ST.run.subWorkflowView || !S.spec) return "";
+    var found = ST.plan.findStep(S.spec, String(callStepId).replace(/\[\d+\]$/, ""));
+    if (!found || found.step.kind !== "workflow") return "";
+    var view = ST.run.subWorkflowView(found.step);
+    if (!view || !view.resolved || !view.overrideCount) return "";
+    return view.overrideCount + " override" + (view.overrideCount === 1 ? "" : "s") + " from the calling step";
+  }
+
   function renderRecord(rail) {
     var found = findRecordStep();
     if (!found) return false;
     var p = found.phase, s = found.step;
     var specStep = S.spec ? ST.plan.findStep(S.spec, s.stepId) : null;
 
-    rail.appendChild(headRow(s.stepId, statusPill(s)));
+    // The address below carries the namespace, so the head names the step by
+    // its own id. Guarded: st-tree.js is a separate asset.
+    rail.appendChild(headRow(ST.tree ? ST.tree.leafId(s) : s.stepId, statusPill(s)));
+    var address = renderAddress(p, s);
+    if (address) rail.appendChild(address);
 
     var inputsCount = (s.dependsOn || []).length;
     var tabs = h("div", { class: "plan-tabs insp-rectabs" },
@@ -673,6 +736,9 @@
     if (attempts) rows.appendChild(execRow("attempt", (s.result ? "" : "") + attempts + (s.result ? "" : " (in flight)")));
     if (s.status === "error" && s.result && s.result.error) rows.appendChild(execRow("error", s.result.error, "warn"));
     wrap.appendChild(rows);
+
+    var subRun = renderSubRun(p, s);
+    if (subRun) wrap.appendChild(subRun);
 
     // The stream itself belongs to the band pane, which has three times this
     // rail's width to render it in; painting the same text here as well gave

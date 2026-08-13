@@ -774,6 +774,81 @@
   color: var(--dim);
 }
 
+/* ---- turn 6: the address, and the sub-run it may sit inside -------------- */
+/* A live step's full path — `land > pass 3 > rebase[#9] > babysit-pr > checks`.
+   The band spine folds aggressively; this is what keeps the folded thing
+   findable, so it sits directly under the step's own name. */
+.insp-address {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 14px 10px;
+  border-bottom: 1px solid var(--border-quiet);
+  font: 400 11px / 1.5 var(--font-mono);
+  color: var(--dim);
+}
+.insp-address .sep {
+  color: var(--faint);
+}
+.insp-address .p {
+  color: var(--muted);
+}
+.insp-address .p.workflow {
+  color: var(--accent-bright);
+}
+.insp-address .p.self {
+  color: var(--text);
+}
+
+.insp-subrun {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border-quiet);
+}
+.insp-subrun-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.insp-subrun-head .name {
+  font: 400 11px / 1 var(--font-mono);
+  color: var(--accent-bright);
+}
+.insp-subrun-head .count {
+  margin-left: auto;
+  font: 400 11px / 1 var(--font-mono);
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+/* One segment per child step: "4 / 8" as a picture as well as a number. */
+.insp-subrun-bar {
+  display: flex;
+  gap: 3px;
+}
+.insp-subrun-bar > span {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-quiet);
+}
+.insp-subrun-bar > span.done {
+  background: var(--done);
+}
+.insp-subrun-bar > span.live {
+  background: var(--running);
+}
+.insp-subrun-bar > span.failed {
+  background: var(--error);
+}
+.insp-subrun-note {
+  font: 400 11px / 1.4 var(--font-mono);
+  color: var(--dim);
+}
+
 .insp-sid {
   font: 500 12.5px / 1 var(--font-mono);
   color: var(--text);
