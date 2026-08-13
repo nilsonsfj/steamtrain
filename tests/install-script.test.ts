@@ -27,8 +27,9 @@ const INSTALL_SH = join(__dirname, "..", "install.sh");
 const HAS_GIT = binaryExists("git");
 const HAS_BUN = binaryExists("bun");
 
+/** `command -v`, not `--version`: dash has no --version flag and exits nonzero. */
 function binaryExists(name: string): boolean {
-  return spawnSync(name, ["--version"], { stdio: "ignore" }).status === 0;
+  return spawnSync("sh", ["-c", `command -v ${name}`], { stdio: "ignore" }).status === 0;
 }
 
 let root: string;
@@ -78,18 +79,22 @@ function makeStubRepo(version: string): string {
 
 function runInstaller(
   args: string[],
-  env: Record<string, string> = {},
+  options: { env?: Record<string, string>; unset?: string[]; shell?: string } = {},
 ): { status: number | null; stdout: string; stderr: string } {
-  const result = spawnSync("sh", [INSTALL_SH, ...args], {
+  const env: Record<string, string | undefined> = { ...process.env, ...(options.env ?? {}) };
+  for (const key of options.unset ?? []) delete env[key];
+  const result = spawnSync(options.shell ?? "sh", [INSTALL_SH, ...args], {
     encoding: "utf8",
-    env: { ...process.env, ...env },
+    env,
   });
   return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 }
 
 describe("install.sh", () => {
-  it("parses as POSIX sh and as bash", () => {
-    for (const shell of ["sh", "bash"]) {
+  it("parses under every shell it might be piped into", () => {
+    // `| sh` is whatever /bin/sh happens to be: bash on a Mac, dash on Debian
+    // and on the CI runners.
+    for (const shell of ["sh", "bash", "dash"].filter(binaryExists)) {
       const result = spawnSync(shell, ["-n", INSTALL_SH], { encoding: "utf8" });
       expect(result.stderr, `${shell} -n`).toBe("");
       expect(result.status, `${shell} -n`).toBe(0);
@@ -202,7 +207,7 @@ describe("install.sh", () => {
         "--bin-dir",
         join(root, "install-e", "bin"),
       ],
-      { GIT_TERMINAL_PROMPT: "0" },
+      { env: { GIT_TERMINAL_PROMPT: "0" } },
     );
     expect(status).toBe(1);
     expect(stderr).toContain("could not clone");
@@ -233,6 +238,33 @@ describe("install.sh", () => {
     const forced = runInstaller(["--from-checkout", repo, "--bin-dir", bin, "--force"]);
     expect(forced.status, forced.stderr).toBe(0);
     expect(lstatSync(join(bin, "steamtrain")).isSymbolicLink()).toBe(true);
+  });
+
+  // CI, cron and bare containers set neither SHELL nor HOME. Under `set -u`
+  // an unguarded expansion of either aborts the run — and the SHELL one lands
+  // in the PATH-guidance block, i.e. after the install has already succeeded,
+  // so it fails a run that actually worked.
+  it.each(["sh", "bash", "dash"].filter(binaryExists))(
+    "installs under %s with SHELL and HOME unset",
+    (shell) => {
+      if (!HAS_GIT || !HAS_BUN) return;
+      const repo = makeStubRepo("6.0.0");
+      const bin = join(root, `install-i-${shell}`, "bin");
+
+      const { status, stdout, stderr } = runInstaller(["--from-checkout", repo, "--bin-dir", bin], {
+        unset: ["SHELL", "HOME"],
+        shell,
+      });
+      expect(status, stderr).toBe(0);
+      expect(stdout).toContain("Installed steamtrain 6.0.0");
+      expect(stderr).not.toContain("parameter not set");
+    },
+  );
+
+  it("explains that HOME is unset when it needs the default bin dir", () => {
+    const { status, stderr } = runInstaller(["--no-build"], { unset: ["HOME"] });
+    expect(status).toBe(1);
+    expect(stderr).toContain("HOME is not set");
   });
 
   it("reports a missing build instead of linking a broken command", () => {

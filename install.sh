@@ -31,8 +31,12 @@ set -eu
 
 REPO="${STEAMTRAIN_REPO:-https://github.com/nilsonsfj/steamtrain.git}"
 REF="${STEAMTRAIN_REF:-main}"
-SRC_DIR="${STEAMTRAIN_SRC_DIR:-${HOME}/.steamtrain/src}"
-BIN_DIR="${STEAMTRAIN_BIN_DIR:-${HOME}/.local/bin}"
+# Both defaults live under HOME, but --src-dir/--bin-dir can replace them —
+# so these stay empty until the options have been parsed, and a missing HOME is
+# only fatal for a default this run actually needs.
+HOME_DIR="${HOME:-}"
+SRC_DIR="${STEAMTRAIN_SRC_DIR:-}"
+BIN_DIR="${STEAMTRAIN_BIN_DIR:-}"
 FORCE="${STEAMTRAIN_FORCE:-0}"
 BIN_NAME="steamtrain"
 DO_BUILD=1
@@ -89,6 +93,16 @@ while [ "$#" -gt 0 ]; do
     *) die "unknown option: $1  (try --help)" ;;
   esac
 done
+
+# --- defaults that depend on HOME ---------------------------------------------
+if [ -z "$BIN_DIR" ]; then
+  [ -n "$HOME_DIR" ] || die "HOME is not set — pass --bin-dir <dir>."
+  BIN_DIR="${HOME_DIR}/.local/bin"
+fi
+if [ -z "$SRC_DIR" ] && [ -z "$FROM_CHECKOUT" ]; then
+  [ -n "$HOME_DIR" ] || die "HOME is not set — pass --src-dir <dir>."
+  SRC_DIR="${HOME_DIR}/.steamtrain/src"
+fi
 
 # --- environment --------------------------------------------------------------
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -233,7 +247,11 @@ case ":${PATH}:" in
     ;;
   *)
     warn "${BIN_DIR} is not on your PATH yet."
-    shell_name="${SHELL##*/}"
+    # SHELL is unset in plenty of places this installer legitimately runs —
+    # CI, cron, a bare Docker layer — and `set -u` would abort on the bare
+    # expansion, after the install has already succeeded.
+    shell_path="${SHELL:-}"
+    shell_name="${shell_path##*/}"
     case "$shell_name" in
       zsh)  rc="~/.zshrc" ;;
       bash) rc="~/.bashrc" ;;
