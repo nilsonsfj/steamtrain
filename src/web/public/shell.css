@@ -91,6 +91,24 @@ header .mode-badge {
   font: 400 12px / 1 var(--font-mono);
   color: var(--muted);
   min-width: 0;
+  /* Once even the shortened path is too much, the trailing crumbs clip at the
+     box edge instead of printing over the run pill next to them. */
+  overflow: hidden;
+}
+/* Crumbs never wrap and never shrink — except the path, which is long, rarely
+   read in full, and has its own tooltip. Letting the row share the shortage
+   evenly used to clip the workflow name (the crumb people are actually
+   navigating by) down to a few characters on a narrow window. */
+#topbar .crumbs > * {
+  flex: none;
+  white-space: nowrap;
+}
+#topbar .crumbs .path,
+#topbar .crumbs .crumb-project {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 #topbar .crumbs .sep {
   color: var(--faint);
@@ -107,6 +125,19 @@ header .mode-badge {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+/* The nav buttons are fixed; the health line is the only thing here that can
+   give. Left to wrap it grew to three lines inside a 46px bar and printed
+   itself over the buttons. */
+#topbar .topbar-right > .tbtn {
+  flex: none;
+}
+#topbar .health {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The desktop app hides the macOS title bar so the UI reaches the top edge of
@@ -728,6 +759,34 @@ html.desktop-titlebar-overlay #topbar .status-pill {
   line-height: 30px;
   font-size: 12px;
   border-radius: var(--r-md);
+}
+
+/* Between the stacking breakpoint and a comfortable desktop the two rails are
+   still at full width, and everything they leave over — the run head, the step
+   rows, the band titles — has to fit in what is left. At 1000px that was 424px
+   of centre for a surface that wants ~700. The rails give first: they are
+   lists of short strings and lose nothing by being narrower. */
+@media (max-width: 1240px) {
+  #rail-left {
+    width: 204px;
+  }
+  #rail-right {
+    width: 304px;
+  }
+  /* "last run 4m ago · error" is the topbar's least urgent passenger and its
+     widest: the same fact is one click away on the Runs page, and giving up its
+     160px is what keeps the project path and the workflow name in the bar. */
+  #topbar #contextNote {
+    display: none;
+  }
+}
+@media (max-width: 1080px) {
+  #rail-left {
+    width: 178px;
+  }
+  #rail-right {
+    width: 288px;
+  }
 }
 
 /* ---- narrow-screen control plane ---------------------------------------- */
