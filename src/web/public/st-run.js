@@ -458,7 +458,7 @@
     var count = 5 + (spec.meta ? 1 : 0) + (spec.cost ? 1 : 0) + (spec.tokens ? 1 : 0);
     return COL.dot
       + (spec.meta ? spec.metaWidth : 0)
-      + (spec.runner ? COL.runner : COL.kind)
+      + spec.runnerWidth
       + (spec.cost || spec.tokens ? COL.timeTight : COL.time)
       + (spec.cost ? COL.cost : 0)
       + (spec.tokens ? COL.tokens : 0)
@@ -480,10 +480,13 @@
     // Over every step the band owns, not just the rows currently unfolded, so
     // opening a sub-run never re-flows the columns of the rows above it.
     var steps = bandSteps(band);
-    var spec = { meta: false, runner: false, cost: false, tokens: false, metaWidth: COL.meta };
+    var spec = {
+      meta: false, runner: false, cost: false, tokens: false,
+      metaWidth: COL.meta, runnerWidth: COL.kind
+    };
     steps.forEach(function (s) {
       if (stepMetaBits(s)) spec.meta = true;
-      if (runnerLabel(s)) spec.runner = true;
+      if (runnerLabel(s)) { spec.runner = true; spec.runnerWidth = COL.runner; }
       // Live usage counts: a running agent that is already reporting tokens
       // gets its column now, not when the step finally lands.
       var use = stepUsage(s);
@@ -497,15 +500,22 @@
       // Tighten before dropping: a 110px meta column still says "step 2 of 6",
       // where no meta column says nothing at all.
       if (spec.meta && room - fixedColumnWidth(spec) < ID_MIN) spec.metaWidth = COL.metaTight;
+      // Least load-bearing first: a token count is a number you can look up in
+      // the rail, a worktree branch and a fan-out tally are not.
       ["tokens", "cost", "meta"].forEach(function (col) {
         if (spec[col] && room - fixedColumnWidth(spec) < ID_MIN) spec[col] = false;
       });
+      // Last resort, once there is nothing optional left to give: the runner
+      // column narrows to the width the kind chip uses. The label still renders
+      // — "claude · claude-haiku-4" just ellipsises — and a clipped runner says
+      // more than a 0px id column does.
+      if (spec.runner && room - fixedColumnWidth(spec) < ID_MIN) spec.runnerWidth = COL.kind;
     }
     var cols = ["14px", "minmax(0,1fr)"];
     if (spec.meta) cols.push("minmax(0," + spec.metaWidth + "px)");
     // Column 3 is "what runs this": the runner, falling back to the block kind
     // for steps that have none. Never empty, so it never needs a dash.
-    cols.push((spec.runner ? COL.runner : COL.kind) + "px");
+    cols.push(spec.runnerWidth + "px");
     cols.push((spec.cost || spec.tokens ? COL.timeTight : COL.time) + "px");
     if (spec.cost) cols.push(COL.cost + "px");
     if (spec.tokens) cols.push(COL.tokens + "px");
@@ -2509,7 +2519,7 @@
 
     Object.keys(phases).forEach(function (pid) {
       var p = phases[pid];
-      var phaseEl = h("div", { class: "phase" });
+      var phaseEl = h("div", { class: "dry-phase" });
       phaseEl.appendChild(h("div", { class: "phead" },
         h("div", { class: "pidx", text: String(p.index + 1) }),
         h("div", { class: "ptitle", text: p.title })

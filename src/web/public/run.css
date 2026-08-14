@@ -396,7 +396,9 @@ textarea#input:focus {
   color: var(--dim);
   white-space: nowrap;
   /* Secondary to the title: on a narrow header the step count / gate summary
-     gives up its width first, and drops out entirely before the title does. */
+     gives up its width first, and drops out entirely before the title does.
+     The 100 is flex-SHRINK — never grow, but yield a hundred times faster than
+     the title beside it. */
   flex: 0 100 auto;
   min-width: 0;
   overflow: hidden;
@@ -1072,7 +1074,7 @@ textarea#input:focus {
   }
 }
 
-.phase {
+.dry-phase {
   position: relative;
   margin: 0 auto 10px;
   max-width: 1100px;
@@ -1088,13 +1090,13 @@ textarea#input:focus {
     transform: none;
   }
 }
-.phase .phead {
+.dry-phase .phead {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-bottom: 12px;
 }
-.phase .pidx {
+.dry-phase .pidx {
   width: 26px;
   height: 26px;
   border-radius: 50%;
@@ -1109,19 +1111,19 @@ textarea#input:focus {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-.phase.done .pidx {
+.dry-phase.done .pidx {
   background: var(--accent-dim);
   border-color: var(--accent);
   color: #eafffb;
   box-shadow: 0 0 0 3px rgba(52, 211, 196, 0.12);
 }
-.phase .ptitle {
+.dry-phase .ptitle {
   font-family: var(--font-ui);
   font-weight: 600;
   letter-spacing: -0.015em;
   font-size: 15px;
 }
-.phase .pstat {
+.dry-phase .pstat {
   font-size: 11px;
   color: var(--muted);
 }

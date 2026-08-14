@@ -43,9 +43,24 @@ type Spec = {
   cost: boolean;
   tokens: boolean;
   metaWidth: number;
+  runnerWidth: number;
   template: string;
 };
 type Any = Record<string, unknown>;
+
+/** Mirrors bandColumns' own budget: chrome, gaps, and every fixed track. */
+const ROW_CHROME = 60;
+const ID_MIN = 132;
+const GAP = 12;
+
+/** What a template leaves for the one flexible track, at a given pane width. */
+function idWidth(spec: Spec, width: number): number {
+  const tracks = spec.template.split(" ");
+  const fixed = tracks
+    .filter((t) => !t.includes("1fr"))
+    .reduce((sum, t) => sum + Number(/(\d+)px\)?$/.exec(t)?.[1] ?? 0), 0);
+  return width - ROW_CHROME - fixed - GAP * (tracks.length - 1);
+}
 
 /**
  * st-run.js + st-tree.js against a stub window, with one band of steps rich
@@ -117,6 +132,30 @@ describe("band columns follow the width they have", () => {
     expect(narrow.meta).toBe(false);
     // dot, id, runner-or-kind, time, chevron — the five that always earn a place.
     expect(narrow.template.split(" ")).toHaveLength(5);
+  });
+
+  it("always leaves the id column at least its floor once the pane can afford one", () => {
+    // The invariant the whole drop order exists to hold, checked against the
+    // emitted template rather than the private width helper — so a COL.*
+    // constant that changes without its budget changing with it gets caught.
+    // 440px is where the five mandatory tracks plus 132px of id first fit.
+    for (let width = 440; width <= 1200; width += 4) {
+      const forId = idWidth(columns(width), width);
+      // Reported with the width so a failure names the pane size that broke.
+      expect({ width, ok: forId >= ID_MIN }).toEqual({ width, ok: true });
+    }
+  });
+
+  it("has already given up everything it can below that", () => {
+    // Narrower than 440px there is nothing left to trade, so the id simply
+    // takes what remains — but it must not be because a column was kept.
+    for (let width = 300; width < 440; width += 4) {
+      const spec = columns(width);
+      expect(spec.meta).toBe(false);
+      expect(spec.cost).toBe(false);
+      expect(spec.tokens).toBe(false);
+      expect(spec.runnerWidth).toBe(92);
+    }
   });
 
   it("assumes room when the pane has not been laid out yet", () => {
