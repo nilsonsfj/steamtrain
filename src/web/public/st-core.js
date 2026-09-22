@@ -465,9 +465,120 @@ window.Steamtrain = (function () {
     });
   }
 
+  /**
+   * Short banner copy for a rejected request. Includes the rejection's own
+   * message when it has one ("Failed to fetch"); a reason-less rejection still
+   * says the request failed, rather than failing silently.
+   */
+  function requestFailureMessage(reason) {
+    var detail = "";
+    if (typeof reason === "string") detail = reason.trim();
+    else if (reason && typeof reason.message === "string") detail = reason.message.trim();
+    if (!detail) return "Request failed.";
+    if (detail.length > 180) detail = detail.slice(0, 177) + "\u2026";
+    // The reason already states it — don't write "Request failed: Request failed".
+    if (/^request failed\b/i.test(detail)) return detail.charAt(0).toUpperCase() + detail.slice(1);
+    return "Request failed: " + detail;
+  }
+
+  function isAuthRejection(reason) {
+    var detail = reason && typeof reason.message === "string" ? reason.message.trim() : "";
+    return detail === "auth required";
+  }
+
+  /**
+   * Thenable that remembers whether any descendant attached a rejection
+   * handler. A handler on the promise itself (.catch, or .then's second
+   * argument — what Promise.all and `return` adoption use) or on a promise
+   * derived from it (.then(ok).catch(err)) counts. Callers that already
+   * recover are not reported again; a bare .then(ok) does not count.
+   */
+  function Watched(promise) {
+    this._promise = promise;
+    this._handled = false;
+    this._kids = [];
+  }
+  Watched.prototype.then = function (onFulfilled, onRejected) {
+    if (typeof onRejected === "function") this._handled = true;
+    var child = new Watched(this._promise.then(onFulfilled, onRejected));
+    this._kids.push(child);
+    return child;
+  };
+  Watched.prototype.catch = function (onRejected) {
+    return this.then(undefined, onRejected);
+  };
+  function rejectionHandled(node) {
+    var seen = [];
+    function walk(n) {
+      if (!n || seen.indexOf(n) >= 0) return false;
+      seen.push(n);
+      if (n._handled) return true;
+      for (var i = 0; i < n._kids.length; i++) if (walk(n._kids[i])) return true;
+      return false;
+    }
+    return walk(node);
+  }
+  function watchUnhandledRejection(promise, onUnhandled) {
+    var node = new Watched(promise);
+    // Attached directly to the native promise, not through Watched.then, so
+    // this observer is not itself a "caller handled it" mark. It does not
+    // rethrow: callers' own reactions are separate and still see the rejection.
+    promise.then(function () {}, function (reason) {
+      // One job later, not in this reaction. Promise.all and `return` from a
+      // .then() adopt a thenable in their own job; if this promise is already
+      // rejected, that job is queued behind this reaction and must get to mark
+      // the chain handled before we decide. A synchronous .catch() is already
+      // marked, so the extra turn does not hide a caller that never catches.
+      Promise.resolve().then(function () {
+        if (rejectionHandled(node)) return;
+        try { onUnhandled(reason); } catch (e) {}
+      });
+    });
+    return node;
+  }
+
+  /**
+   * The cockpit banner is the feedback channel. Runs hides that banner (the
+   * page covers `.work`), and an open modal covers it too — also drop the same
+   * text into whichever of those is actually on screen, reusing `.mbanner`.
+   */
+  function surfaceRequestFailure(text) {
+    try { announce(text); } catch (e) {}
+    if (ST.run && typeof ST.run.setBanner === "function") {
+      try { ST.run.setBanner(text, "err"); } catch (e2) {}
+    }
+    try { surfaceInOpenModal(text); } catch (e3) {}
+    if (ST.runs && typeof ST.runs.noteFailure === "function") {
+      try { ST.runs.noteFailure(text); } catch (e4) {}
+    }
+  }
+  function surfaceInOpenModal(text) {
+    if (!document || !document.getElementById) return;
+    var overlay = document.getElementById("overlay");
+    if (!overlay || !overlay.classList || !overlay.classList.contains("show")) return;
+    var modal = document.getElementById("modal");
+    if (!modal || !modal.querySelector) return;
+    var body = modal.querySelector(".mbody");
+    if (!body) return;
+    var node = body.querySelector(".api-failure");
+    if (!node) {
+      node = h("div", { class: "mbanner show err api-failure", text: text });
+      if (typeof body.insertBefore === "function") body.insertBefore(node, body.firstChild);
+      else if (typeof body.appendChild === "function") body.appendChild(node);
+      return;
+    }
+    node.className = "mbanner show err api-failure";
+    node.textContent = text;
+  }
+
   /** Like api() but redirects to login on 401 (session expired). */
   function apiAuth(method, path, body) {
-    return api(method, path, body).then(function (r) {
+    // 401 throws on purpose so callers stop; the login overlay already explains
+    // it, so that rejection must not also look like a network failure. Every
+    // other rejection (offline, server gone) banners unless a caller attached
+    // its own catch — doSave's button recovery, settings' own notice, background
+    // polls that swallow — so the next unguarded call site inherits the banner.
+    var settled = api(method, path, body).then(function (r) {
       if (r.status === 401) {
         if (S.runId || S.selected) { showReauthOverlay(); }
         else { showLoginForm(); }
@@ -479,6 +590,10 @@ window.Steamtrain = (function () {
         ST.run.setBanner("This session is read-only — viewing only.", "info");
       }
       return r;
+    });
+    return watchUnhandledRejection(settled, function (reason) {
+      if (isAuthRejection(reason)) return;
+      surfaceRequestFailure(requestFailureMessage(reason));
     });
   }
 
@@ -1655,6 +1770,8 @@ window.Steamtrain = (function () {
   ST.announce = announce;
   ST.api = api;
   ST.apiAuth = apiAuth;
+  ST.requestFailureMessage = requestFailureMessage;
+  ST.watchUnhandledRejection = watchUnhandledRejection;
   ST.apiHealthMeta = apiHealthMeta;
   ST.apiInstanceById = apiInstanceById;
   ST.applyHealth = applyHealth;
