@@ -218,6 +218,8 @@ export async function readKimiRunUsage(
           continue;
         }
         if (record.type !== "usage.record" || !record.usage) continue;
+        // Kimi stamps every usage record with `time`; one without it could only
+        // be dated by guessing, so it counts rather than silently vanishing.
         if (typeof record.time === "number" && record.time < since) continue;
         add("input", record.usage.inputOther);
         add("output", record.usage.output);

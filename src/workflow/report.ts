@@ -132,6 +132,11 @@ export interface ReportStep {
   api?: string;
   model?: string;
   durationMs?: number;
+  /**
+   * What the step's result reported. For a `cached` step that is the original
+   * run's spend, not this run's (which is $0) — skip cached steps when summing;
+   * `totals` already does.
+   */
   costUsd?: number;
   tokens?: number;
   gate?: { passed: boolean; onFalse?: string; target?: string };
