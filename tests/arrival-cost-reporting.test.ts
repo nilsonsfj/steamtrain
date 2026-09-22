@@ -112,6 +112,23 @@ describe("arrival receipt for agents that report no usage", () => {
     expect(cards.find((c) => c.id === "produced")!.value).toBe("no tokens billed");
   });
 
+  it("still says 'not reported' when a live unpriced step ran beside a cached one", () => {
+    const base = finished({});
+    const live = base.phases[0]!.steps[1]!;
+    const state: WorkflowState = {
+      ...base,
+      phases: [
+        {
+          ...base.phases[0]!,
+          steps: [...base.phases[0]!.steps, { ...live, stepId: "again", cached: true }],
+        },
+      ],
+    };
+    const receipt = buildArrivalReport(state)!.receipt;
+    expect(receipt.costReported).toBe(false);
+    expect(receipt.tokensReported).toBe(false);
+  });
+
   it("does not bill a cached replay when reopened from history", () => {
     // History detail rebuilds state from the saved record, whose steps keep
     // the original result; the receipt must still read $0 for the replay.

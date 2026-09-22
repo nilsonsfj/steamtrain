@@ -182,15 +182,16 @@ export function buildArrivalReport(
       Boolean(step.agent || step.api) && step.result !== undefined && !step.result.skipped,
   );
   // A cached replay of an agent step billed nothing this run, and that is
-  // known even when the agent never reports spend (Antigravity, Kiro) — so
-  // it counts as reported $0, as on the runs page and the Markdown report.
-  if (
-    flat.some(
-      ({ step }) => step.cached && Boolean(step.agent || step.api) && step.result !== undefined,
-    )
-  ) {
-    costReported = true;
-    tokensReported = true;
+  // known even when the agent never reports spend (Antigravity, Kiro) — so it
+  // counts as reported $0, as on the runs page and the Markdown report. Not
+  // while a step that really ran left its own spend unknown, though.
+  const billedSteps = flat
+    .map(({ step }) => step)
+    .filter((step) => Boolean(step.agent || step.api) && step.result && !step.result.skipped);
+  if (billedSteps.some((step) => step.cached)) {
+    const ran = billedSteps.filter((step) => !step.cached);
+    if (ran.every((step) => step.result?.costUsd !== undefined)) costReported = true;
+    if (ran.every((step) => step.result?.tokens !== undefined)) tokensReported = true;
   }
   const agentless =
     opts.credentialFree === true ||

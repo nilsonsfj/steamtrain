@@ -16,7 +16,9 @@ export interface ModelClassDefinition {
   description: string;
   /**
    * Preferred family ids in preference order. Resolution walks this list and
-   * picks the first family that has a ready agent offering.
+   * picks the first family that has a ready agent offering. These are family
+   * ids, not agent slugs: which agents serve a family (e.g. gpt-5.4 now only
+   * via OpenCode) is model-identity's call.
    */
   preferred: readonly ModelFamilyId[];
   /**

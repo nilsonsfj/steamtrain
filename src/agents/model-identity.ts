@@ -763,6 +763,8 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
   // its only successors are the paid deepseek-v4-flash models, and routing a
   // free pin to them (or to another vendor's free model) would silently change
   // what runs and what it costs. A config still naming it fails at the CLI.
+  // The same goes for the retired north-mini-code-free and laguna-s-2.1-free,
+  // which never had a family here and have no free successor.
   {
     id: "nemotron-3.5-lightning-free",
     name: "Nemotron 3.5 Lightning Free",
