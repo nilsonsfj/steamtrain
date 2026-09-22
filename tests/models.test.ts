@@ -179,7 +179,7 @@ describe("model names", () => {
   });
 
   it("returns static Codex display names when cache is empty", () => {
-    expect(modelNameForAgent("codex", "gpt-5.4-mini")).toBe("GPT-5.4 Mini");
+    expect(modelNameForAgent("codex", "gpt-6-sol")).toBe("GPT-6 Sol");
   });
 
   it("prefers live Codex names from the variant cache", () => {

@@ -447,8 +447,8 @@ describe("codex mapper (stateful, one mapper per run)", () => {
       ),
     );
     const cost = (result[0] as { costUsd: number }).costUsd;
-    // gpt-5.6-sol rates: input=$5.00/M, cached=$0.50/M, output=$30.00/M
-    const expected = (1000 * 5.0 + 100 * 30.0) / 1_000_000;
+    // gpt-5.6-sol rates: input=$4.00/M, cached=$0.40/M, output=$20.00/M
+    const expected = (1000 * 4.0 + 100 * 20.0) / 1_000_000;
     expect(cost).toBeCloseTo(expected, 8);
   });
 
@@ -460,9 +460,9 @@ describe("codex mapper (stateful, one mapper per run)", () => {
       ),
     );
     const cost = (result[0] as { costUsd: number }).costUsd;
-    // gpt-5.6-luna rates: input=$1.00/M, cached=$0.10/M, output=$6.00/M
+    // gpt-5.6-luna rates: input=$0.20/M, cached=$0.02/M, output=$1.20/M
     // Codex input_tokens includes cached, so uncached = 1000 - 200.
-    const expected = (800 * 1.0 + 200 * 0.1 + 100 * 6.0) / 1_000_000;
+    const expected = (800 * 0.2 + 200 * 0.02 + 100 * 1.2) / 1_000_000;
     expect(cost).toBeCloseTo(expected, 8);
   });
 
@@ -474,9 +474,21 @@ describe("codex mapper (stateful, one mapper per run)", () => {
       ),
     );
     const cost = (result[0] as { costUsd: number }).costUsd;
-    // gpt-5.6-terra rates: input=$2.50/M, cached=$0.25/M, output=$15.00/M
-    const expected = (1500 * 2.5 + 500 * 0.25 + 100 * 15.0) / 1_000_000;
+    // gpt-5.6-terra rates: input=$2.00/M, cached=$0.20/M, output=$12.00/M
+    const expected = (1500 * 2.0 + 500 * 0.2 + 100 * 12.0) / 1_000_000;
     expect(cost).toBeCloseTo(expected, 8);
+  });
+
+  it("prices GPT-6 models, including their cache-write surcharge", () => {
+    const m = createCodexMapper("codex", { model: "gpt-6-sol" });
+    const [result] = m(
+      JSON.parse(
+        '{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens":300,"cache_write_input_tokens":200,"output_tokens":100}}',
+      ),
+    );
+    // gpt-6-sol: input=$2.00/M, cached=$0.20/M, cache write=$2.50/M, output=$10.00/M
+    const expected = (500 * 2.0 + 300 * 0.2 + 200 * 2.5 + 100 * 10.0) / 1_000_000;
+    expect((result as { costUsd: number }).costUsd).toBeCloseTo(expected, 10);
   });
 
   it("uses correct rates for gpt-5.1-codex-mini (mini-tier)", () => {

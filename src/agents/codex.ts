@@ -25,18 +25,19 @@ const AGENT: AgentId = "codex";
 /**
  * Known Codex models (plain slugs; used by `/model` and autocomplete).
  *
- * Ground truth from `codex debug models` / `--bundled` (codex-cli 0.145.0).
+ * Ground truth from `codex debug models` (codex-cli 0.155.1; `visibility: list`
+ * entries plus the hidden `codex-auto-review`).
  * Older pins that left this list still resolve via OpenCode family offerings
  * and runtime variant cache refresh on live installs.
  */
 export const CODEX_MODELS: readonly AgentModel[] = [
+  { id: "gpt-6-astra", name: "GPT-6 Astra" },
+  { id: "gpt-6-sol", name: "GPT-6 Sol" },
+  { id: "gpt-6-luna", name: "GPT-6 Luna" },
   { id: "gpt-5.6-sol", name: "GPT-5.6 Sol" },
   { id: "gpt-5.6-terra", name: "GPT-5.6 Terra" },
   { id: "gpt-5.6-luna", name: "GPT-5.6 Luna" },
   { id: "gpt-5.5", name: "GPT-5.5" },
-  { id: "gpt-5.4", name: "GPT-5.4" },
-  { id: "gpt-5.4-mini", name: "GPT-5.4 Mini" },
-  { id: "gpt-5.2", name: "GPT-5.2" },
   { id: "codex-auto-review", name: "Codex Auto Review" },
 ];
 
@@ -360,13 +361,20 @@ interface ModelPricing {
   input: number;
   cached: number;
   output: number;
+  /** Cache writes, where the model bills them (GPT-5.6+: 1.25× input); else plain input. */
+  cacheWrite?: number;
 }
 
 const CODEX_MODEL_PRICES: Record<string, ModelPricing> = {
-  // Published rates from https://developers.openai.com/api/docs/pricing
-  "gpt-5.6-sol": { input: 5.0, cached: 0.5, output: 30.0 },
-  "gpt-5.6-terra": { input: 2.5, cached: 0.25, output: 15.0 },
-  "gpt-5.6-luna": { input: 1.0, cached: 0.1, output: 6.0 },
+  // Published standard-tier rates from https://developers.openai.com/api/docs/pricing
+  // (checked 2026-09-22). The long-context tier (prompts over 272k tokens)
+  // bills more, but a turn's aggregate usage can't tell which calls crossed it.
+  "gpt-6-astra": { input: 10.0, cached: 1.0, cacheWrite: 12.5, output: 50.0 },
+  "gpt-6-sol": { input: 2.0, cached: 0.2, cacheWrite: 2.5, output: 10.0 },
+  "gpt-6-luna": { input: 0.1, cached: 0.01, cacheWrite: 0.125, output: 0.5 },
+  "gpt-5.6-sol": { input: 4.0, cached: 0.4, cacheWrite: 5.0, output: 20.0 },
+  "gpt-5.6-terra": { input: 2.0, cached: 0.2, cacheWrite: 2.5, output: 12.0 },
+  "gpt-5.6-luna": { input: 0.2, cached: 0.02, cacheWrite: 0.25, output: 1.2 },
   "gpt-5.5": { input: 5.0, cached: 0.5, output: 30.0 },
   "gpt-5.4": { input: 2.5, cached: 0.25, output: 15.0 },
   "gpt-5.4-mini": { input: 0.75, cached: 0.075, output: 4.5 },
@@ -406,17 +414,24 @@ function codexModelPrice(model: string | undefined): ModelPricing {
  *
  * Pricing varies by model; we look up per-model rates from {@link CODEX_MODEL_PRICES}.
  * Falls back to GPT-5.4-mini rates when the model is unknown or absent. Cache
- * writes carry no surcharge on OpenAI, so they are priced as plain input.
+ * writes use the model's write rate where it has one, else the input rate.
  */
 function estimateCostUsd(usage: CodexUsage | undefined, model?: string): number | undefined {
   if (!usage) return undefined;
   const input = usage.input_tokens ?? 0;
   const cached = usage.cached_input_tokens ?? 0;
+  const written = usage.cache_write_input_tokens ?? 0;
   const output = usage.output_tokens ?? 0;
   if (input + output === 0) return undefined;
-  const { input: inputRate, cached: cachedRate, output: outputRate } = codexModelPrice(model);
-  const uncached = Math.max(0, input - cached);
-  return (uncached * inputRate + cached * cachedRate + output * outputRate) / 1_000_000;
+  const price = codexModelPrice(model);
+  const uncached = Math.max(0, input - cached - written);
+  return (
+    (uncached * price.input +
+      cached * price.cached +
+      written * (price.cacheWrite ?? price.input) +
+      output * price.output) /
+    1_000_000
+  );
 }
 
 /**

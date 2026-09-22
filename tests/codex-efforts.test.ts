@@ -89,3 +89,11 @@ describe("effortsForModel codex cache", () => {
     ]);
   });
 });
+
+describe("GPT-6 effort fallback", () => {
+  it("mirrors codex debug models: astra/sol reach ultra, luna stops at max", () => {
+    expect(fallbackCodexEfforts("gpt-6-astra")).toContain("ultra");
+    expect(fallbackCodexEfforts("gpt-6-sol")).toContain("ultra");
+    expect(fallbackCodexEfforts("gpt-6-luna")).toEqual(["low", "medium", "high", "xhigh", "max"]);
+  });
+});
