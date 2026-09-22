@@ -606,7 +606,13 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       map: createClaudeMapper(opts.agentId ?? this.id, {
         costBaseline,
         sessionId: opts.resumeSessionId,
-        onSessionTotal: (id, total) => CLAUDE_SESSION_TOTALS.set(id, total),
+        // Session totals only grow; keep the high-water mark so a partial
+        // report never lowers the next attempt's baseline.
+        onSessionTotal: (id, total) =>
+          CLAUDE_SESSION_TOTALS.set(
+            id,
+            maxSessionCost(CLAUDE_SESSION_TOTALS.get(id), total) ?? total,
+          ),
       }),
       prompt: opts.prompt,
     });

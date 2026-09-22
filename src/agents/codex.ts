@@ -635,7 +635,10 @@ export class CodexAdapter implements AgentAdapter {
         model: opts.model,
         usageBaseline,
         threadId: opts.resumeSessionId,
-        onThreadTotal: (id, usage) => CODEX_THREAD_TOTALS.set(id, usage),
+        // Thread totals only grow; keep the high-water mark so a partial
+        // report never lowers the next attempt's baseline.
+        onThreadTotal: (id, usage) =>
+          CODEX_THREAD_TOTALS.set(id, maxCodexUsage(CODEX_THREAD_TOTALS.get(id), usage) ?? usage),
       }),
       prompt: opts.prompt,
     });
