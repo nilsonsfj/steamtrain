@@ -17,6 +17,7 @@ import {
   resolvePermissions,
 } from "../src/agents";
 import { buildAntigravityRunArgs } from "../src/agents/antigravity";
+import { buildGrokRunArgs } from "../src/agents/grok";
 import { buildKimiRunArgs } from "../src/agents/kimi";
 import type { AgentProviderId } from "../src/types/events";
 
@@ -243,15 +244,91 @@ describe("provider capability matrix", () => {
       "kimi",
       "kiro",
       "antigravity",
+      "grok",
     ] as AgentProviderId[]) {
       expect(providerPermissionSupport(provider).profiles.full).not.toBe("none");
       expect(providerPermissionSupport(provider).mechanism.length).toBeGreaterThan(0);
     }
   });
 
-  it("only claude exposes per-tool lists", () => {
+  it("only claude and grok expose per-tool lists", () => {
     expect(providerPermissionSupport("claude").lists).toBe(true);
+    expect(providerPermissionSupport("grok").lists).toBe(true);
     expect(providerPermissionSupport("codex").lists).toBe(false);
+  });
+});
+
+describe("grok mapping", () => {
+  const plan = (spec: Parameters<typeof resolvePermissions>[0]) =>
+    permissionPlan("grok", resolvePermissions(spec)!);
+
+  it("read-only sandboxes the filesystem and removes shell, edits, and web", () => {
+    const { args, enforcement, verify } = plan("read-only");
+    expect(args).toEqual([
+      "--sandbox",
+      "read-only",
+      "--permission-mode",
+      "dontAsk",
+      "--disable-web-search",
+      "--disallowed-tools",
+      "run_terminal_cmd,search_replace",
+      "--deny",
+      "Bash",
+      "--deny",
+      "Edit",
+      "--deny",
+      "Write",
+      "--deny",
+      "WebFetch",
+      "--deny",
+      "MCPTool",
+    ]);
+    expect(enforcement).toBe("native");
+    expect(verify).toBe(true);
+  });
+
+  it("edit confines writes to the workspace and still denies shell and web", () => {
+    const { args, enforcement } = plan("edit");
+    expect(args).toEqual([
+      "--sandbox",
+      "workspace",
+      "--permission-mode",
+      "acceptEdits",
+      "--disable-web-search",
+      "--disallowed-tools",
+      "run_terminal_cmd",
+      "--deny",
+      "Bash",
+      "--deny",
+      "WebFetch",
+    ]);
+    expect(enforcement).toBe("native");
+  });
+
+  it("full always-approves so a headless step never stalls", () => {
+    expect(plan("full")).toMatchObject({
+      args: ["--always-approve"],
+      enforcement: "native",
+      verify: false,
+    });
+  });
+
+  it("an explicit allow drops the profile deny, and an explicit deny wins", () => {
+    const allowed = plan({ profile: "read-only", allow: ["Bash"] }).args;
+    expect(allowed).toContain("--allow");
+    expect(allowed[allowed.indexOf("--allow") + 1]).toBe("Bash");
+    expect(allowed).not.toContain("run_terminal_cmd,search_replace");
+    expect(allowed[allowed.indexOf("--disallowed-tools") + 1]).toBe("search_replace");
+    expect(allowed.filter((arg) => arg === "Bash")).toEqual(["Bash"]);
+
+    const both = plan({ profile: "read-only", allow: ["Bash"], deny: ["Bash"] }).args;
+    expect(both[both.indexOf("--disallowed-tools") + 1]).toContain("run_terminal_cmd");
+    expect(both.filter((arg) => arg === "Bash").length).toBeGreaterThan(1);
+  });
+
+  it("passes scoped rules through and keeps full's always-approve", () => {
+    const args = plan({ profile: "full", deny: ["Bash(git push:*)"] }).args;
+    expect(args).toEqual(["--always-approve", "--deny", "Bash(git push:*)"]);
   });
 });
 
@@ -288,6 +365,34 @@ describe("adapter arg builders", () => {
       run({ permissions: resolvePermissions("read-only"), extraArgs: ["--flag"] }),
     );
     expect(args.slice(-3)).toEqual(["--agent", "plan", "--flag"]);
+  });
+
+  it("grok writes the prompt to a file and puts permission flags before extraArgs", () => {
+    const args = buildGrokRunArgs(
+      run({ permissions: resolvePermissions("read-only"), extraArgs: ["--sandbox", "off"] }),
+      "/tmp/prompt.txt",
+    );
+    expect(args).not.toContain("--always-approve");
+    expect(args.indexOf("--sandbox")).toBeLessThan(args.lastIndexOf("--sandbox"));
+    expect(args.slice(-4)).toEqual(["--sandbox", "off", "--prompt-file", "/tmp/prompt.txt"]);
+    expect(args).not.toContain("hi");
+  });
+
+  it("grok always-approves when no profile is declared", () => {
+    const args = buildGrokRunArgs(run({ effort: "high", resumeSessionId: "sess-1" }), "/tmp/p.txt");
+    expect(args).toEqual([
+      "--output-format",
+      "streaming-json",
+      "--model",
+      "m",
+      "--effort",
+      "high",
+      "--resume",
+      "sess-1",
+      "--always-approve",
+      "--prompt-file",
+      "/tmp/p.txt",
+    ]);
   });
 
   it("providers without enforcement add no flags, and keep the prompt last", () => {

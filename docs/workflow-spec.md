@@ -1462,6 +1462,7 @@ Semantics:
 | `opencode` | `opencode run --session <sessionId>` | fresh session in worktree |
 | `codex` | `codex exec resume <sessionId>` | fresh session in worktree |
 | `cursor` | `agent --resume <sessionId>` | `--resume <sessionId>` |
+| `grok` | `grok --resume <sessionId>` (`--prompt-file` headless) | `--resume <sessionId>` |
 | `antigravity` | `agy --conversation <sessionId>` | `--conversation <sessionId>` |
 | `kimi` | `kimi --session <sessionId>` | `--session <sessionId>` |
 | `amp`, `kiro` | not supported | fresh session in worktree |

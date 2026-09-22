@@ -11,7 +11,7 @@ const CAPACITY_STDERR_PROBE_BYTES = 64 * 1024;
 export interface AgentRunOptions {
   prompt: string;
   model: string;
-  /** Reasoning effort / variant (claude: `--effort`, opencode: `--variant`, codex: `-c model_reasoning_effort=…`, kimi: `KIMI_MODEL_THINKING_EFFORT` env). */
+  /** Reasoning effort / variant (claude/grok: `--effort`, opencode: `--variant`, codex: `-c model_reasoning_effort=…`, kimi: `KIMI_MODEL_THINKING_EFFORT` env). */
   effort?: string;
   cwd?: string;
   timeoutMs?: number;

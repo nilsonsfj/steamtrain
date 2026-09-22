@@ -175,6 +175,7 @@ const agentProviderId = z.enum([
   "kimi",
   "cursor",
   "antigravity",
+  "grok",
 ]);
 const apiProviderId = z.enum(["anthropic", "openai"]);
 const instanceIdSchema = z

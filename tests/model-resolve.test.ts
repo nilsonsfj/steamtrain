@@ -248,6 +248,33 @@ describe("resolveModelBinding", () => {
     expect(result.primary.modelClass).toBe("simple");
   });
 
+  it("resolves Grok aliases onto the grok CLI, and Cursor when grok is not ready", () => {
+    clearModelFamilyCacheForTests();
+    expect(findModelFamily("grok 4.7")?.id).toBe("grok-4.7");
+    expect(nativeModelForProvider("grok", "grok 4.7")).toBe("grok-4.7");
+    expect(nativeModelForProvider("grok", "grok 4.5")).toBe("grok-4.5");
+    expect(nativeModelForProvider("cursor", "grok 4.5")).toBe("grok-4.5");
+    expect(nativeModelForProvider("opencode", "grok 4.5")).toMatch(/grok-4\.5$/);
+
+    const ready = resolveModelBinding(
+      { model: "grok 4.7" },
+      { config: DEFAULT_CONFIG, isReady: allReady },
+    );
+    expect(ready.ok).toBe(true);
+    if (!ready.ok) return;
+    expect(ready.primary.agent).toBe("grok");
+    expect(ready.primary.model).toBe("grok-4.7");
+
+    const fallback = resolveModelBinding(
+      { model: "grok 4.5" },
+      { config: DEFAULT_CONFIG, isReady: (agent) => agent !== "grok" },
+    );
+    expect(fallback.ok).toBe(true);
+    if (!fallback.ok) return;
+    expect(fallback.primary.agent).toBe("cursor");
+    expect(["cursor-grok-4.5-high", "grok-4.5"]).toContain(fallback.primary.model);
+  });
+
   it("matches GPT-5.6 Sol and Kimi K3 family aliases", () => {
     clearModelFamilyCacheForTests();
     expect(findModelFamily("gpt-5.6-sol")?.id).toBe("gpt-5.6-sol");

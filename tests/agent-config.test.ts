@@ -74,6 +74,7 @@ describe("agent configuration", () => {
       "kimi",
       "cursor",
       "antigravity",
+      "grok",
     ]);
   });
 
@@ -158,6 +159,7 @@ describe("agent configuration", () => {
       "kimi",
       "cursor",
       "antigravity",
+      "grok",
       "missing-opencode",
     ]);
     expect(result.some((agent) => agent.agent === "disabled-codex")).toBe(false);

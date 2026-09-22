@@ -36,6 +36,7 @@ const DEFAULT_MODEL: Partial<Record<AgentProviderId, string>> = {
   mimo: "mimo-v2.5",
   kimi: "kimi-k2.5",
   antigravity: "gemini-3-flash",
+  grok: "grok-4.7",
 };
 const TIMEOUT_MS = Number(process.env.STEAMTRAIN_SMOKE_TIMEOUT_MS ?? 120_000);
 

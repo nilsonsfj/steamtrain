@@ -204,6 +204,11 @@ const PROVIDER_SUPPORT: Record<AgentProviderId, ProviderPermissionSupport> = {
     lists: false,
     mechanism: "headless runs use --dangerously-skip-permissions, which has no per-tool form",
   },
+  grok: {
+    profiles: { "read-only": "native", edit: "native", full: "native" },
+    lists: true,
+    mechanism: "--sandbox + --permission-mode + --allow/--deny",
+  },
 };
 
 /** Capability declaration for one provider (what it can enforce, and how). */
@@ -384,6 +389,76 @@ function opencodePlan(perms: ResolvedPermissions): PermissionPlan {
   };
 }
 
+// Grok Build tool ids. Permission *rules* use the Claude-compatible prefixes
+// (`Bash`, `Edit`, `Write`, `WebFetch`); `--disallowed-tools` takes these ids.
+const GROK_SHELL_TOOL = "run_terminal_cmd";
+const GROK_EDIT_TOOL = "search_replace";
+
+/**
+ * Translate a steamtrain profile onto Grok Build's sandbox, permission mode,
+ * and allow/deny rules.
+ *
+ * Headless Grok cannot answer an approval prompt, so every profile picks a
+ * mode that will not ask: `dontAsk` (read-only), `acceptEdits` (edit), or
+ * `--always-approve` (full). Deny rules still apply under always-approve.
+ * An author's explicit allow drops the profile's matching deny — deny wins
+ * only when the author also listed that rule in `deny`.
+ */
+function grokPlan(perms: ResolvedPermissions): PermissionPlan {
+  const args: string[] = [];
+  const denies: string[] = [];
+  const disallowed: string[] = [];
+  const addDeny = (rule: string): void => {
+    if (!denies.includes(rule)) denies.push(rule);
+  };
+  const granted = (rule: string): boolean =>
+    perms.allow.includes(rule) && !perms.deny.includes(rule);
+
+  let disableWeb = false;
+
+  switch (perms.profile) {
+    case "read-only":
+      args.push("--sandbox", "read-only", "--permission-mode", "dontAsk");
+      if (!granted("Bash")) {
+        addDeny("Bash");
+        disallowed.push(GROK_SHELL_TOOL);
+      }
+      if (!granted("Edit")) addDeny("Edit");
+      if (!granted("Write")) addDeny("Write");
+      if (!granted("Edit") && !granted("Write")) disallowed.push(GROK_EDIT_TOOL);
+      if (!granted("WebFetch") && !granted("WebSearch")) addDeny("WebFetch");
+      if (!granted("MCPTool")) addDeny("MCPTool");
+      disableWeb = !granted("WebFetch") && !granted("WebSearch");
+      break;
+    case "edit":
+      args.push("--sandbox", "workspace", "--permission-mode", "acceptEdits");
+      if (!granted("Bash")) {
+        addDeny("Bash");
+        disallowed.push(GROK_SHELL_TOOL);
+      }
+      if (!granted("WebFetch") && !granted("WebSearch")) addDeny("WebFetch");
+      disableWeb = !granted("WebFetch") && !granted("WebSearch");
+      break;
+    case "full":
+      args.push("--always-approve");
+      break;
+  }
+
+  if (disableWeb) args.push("--disable-web-search");
+  if (disallowed.length > 0) args.push("--disallowed-tools", disallowed.join(","));
+  for (const rule of perms.allow) args.push("--allow", rule);
+  for (const rule of perms.deny) addDeny(rule);
+  for (const rule of denies) args.push("--deny", rule);
+
+  return {
+    profile: perms.profile,
+    args,
+    enforcement: "native",
+    gaps: [],
+    verify: perms.verify && perms.profile === "read-only",
+  };
+}
+
 /**
  * Providers whose headless mode is all-or-nothing: they pre-approve every tool
  * (that is what makes them usable non-interactively) and expose no flag to take
@@ -441,6 +516,8 @@ export function permissionPlan(
     case "opencode":
     case "mimo":
       return opencodePlan(perms);
+    case "grok":
+      return grokPlan(perms);
     default:
       return allOrNothingPlan(provider, perms);
   }

@@ -112,6 +112,21 @@ describe("checkAgent cursor", () => {
   });
 });
 
+describe("checkAgent grok", () => {
+  it("reports missing binary with an install hint", async () => {
+    const result = await checkAgent("grok", "__steamtrain_missing_grok__", {
+      provider: "grok",
+    });
+    expect(result).toMatchObject({
+      agent: "grok",
+      status: "binary_missing",
+      binary: "__steamtrain_missing_grok__",
+    });
+    expect(result.detail).toContain("x.ai/cli/install.sh");
+    expect(result.fixCommand).toBe("curl -fsSL https://x.ai/cli/install.sh | bash");
+  });
+});
+
 describe("checkAgent antigravity", () => {
   it("reports missing binary with an install hint", async () => {
     const result = await checkAgent("antigravity", "__steamtrain_missing_agy__", {

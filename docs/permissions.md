@@ -77,7 +77,7 @@ verified. `full` is an explicit statement, and it changes the flags.
 | `onUnsupported` | `"fail"` | What to do when the step's agent cannot enforce the profile. `"fail"` refuses to launch the step; `"warn"` runs it, records the gap, and leaves post-run verification as the only guard. |
 | `verify` | `true` for `read-only` | Check after the run that the step's workspace is byte-identical. Meaningless for the other profiles, which may write. |
 
-`allow`/`deny` map to real flags on claude only. On codex, opencode, and mimo
+`allow`/`deny` map to real flags on claude and grok. On codex, opencode, and mimo
 they are advisory: the profile is still enforced by the sandbox / agent, and the
 gap is reported as partial enforcement rather than silently ignored.
 
@@ -86,6 +86,7 @@ gap is reported as partial enforcement rather than silently ignored.
 | agent | `read-only` | `edit` | `full` | mechanism |
 | --- | --- | --- | --- | --- |
 | `claude` | native | native | native | `--permission-mode` + `--allowedTools`/`--disallowedTools` |
+| `grok` | native | native | native | `--sandbox` + `--permission-mode` + `--allow`/`--deny` |
 | `codex` | native | native | native | `--sandbox read-only` / `workspace-write` / `danger-full-access` |
 | `opencode` | native | — | native | `--agent plan` (built-in read-only agent) |
 | `mimo` | native | — | native | same CLI surface as opencode |

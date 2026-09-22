@@ -15,7 +15,8 @@ export type AgentProviderId =
   | "mimo"
   | "kimi"
   | "cursor"
-  | "antigravity";
+  | "antigravity"
+  | "grok";
 
 /** Built-in provider identity used by adapters and binary config. */
 export type AgentId = AgentProviderId;
