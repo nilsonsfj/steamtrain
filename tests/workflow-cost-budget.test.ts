@@ -324,6 +324,68 @@ describe("engine keeps a failed attempt's spend when the step retries", () => {
   });
 });
 
+describe("run summary keeps every loop pass's spend", () => {
+  it("rolls earlier passes' cost and tokens into the step's final result", async () => {
+    let calls = 0;
+    const deps: WorkflowDeps = {
+      createAdapter: (id: AgentId): AgentAdapter => ({
+        id,
+        binary: "fake",
+        defaultModel: "test",
+        run: () =>
+          (async function* (): AsyncGenerator<AgentEvent> {
+            calls += 1;
+            yield {
+              kind: "result",
+              agent: "claude",
+              ts: 0,
+              isError: false,
+              // The gate passes on the third pass.
+              text: calls >= 3 ? "x" : "not yet",
+              costUsd: 0.01,
+              tokens: { input: 10 },
+            };
+          })(),
+      }),
+      maxConcurrency: 1,
+      cwd: "/base",
+    };
+    const spec: WorkflowSpec = {
+      name: "loop-spend",
+      phases: [
+        {
+          id: "fix",
+          title: "fix",
+          steps: [{ id: "fix-step", agent: "claude", model: "m", prompt: "p" }],
+        },
+        {
+          id: "check",
+          title: "check",
+          steps: [
+            {
+              id: "g",
+              kind: "gate",
+              loopTo: "fix",
+              maxIterations: 5,
+              condition: { step: "fix-step", contains: "x" },
+            },
+          ],
+        },
+      ],
+    };
+    const events = await collect(spec, deps);
+    const done = events.find((e) => e.kind === "workflow_done") as Extract<
+      WorkflowEvent,
+      { kind: "workflow_done" }
+    >;
+    expect(calls).toBe(3);
+    const fix = done.results.find((r) => r.stepId === "fix-step")!;
+    expect(fix.output).toBe("x");
+    expect(fix.costUsd).toBeCloseTo(0.03, 10);
+    expect(fix.tokens).toMatchObject({ input: 30 });
+  });
+});
+
 describe("live summary helpers do not double-count fan-out children", () => {
   // The engine flattens a fan-out into allResults as: each child (with
   // parentStepId) *and* the parent (with childResults). The summary helpers must

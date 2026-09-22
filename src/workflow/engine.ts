@@ -454,9 +454,14 @@ export async function* runWorkflow(
   // converged" gate results). Downstream consumers — the CLI/web run summary,
   // cost roll-ups — would otherwise double-count every intermediate pass. Keep
   // only the latest result per step id (the final state of each step); earlier
-  // iterations were superseded by re-runs.
+  // iterations were superseded by re-runs. Their spend was not superseded,
+  // though — every pass was billed — so it rolls into the kept result, or the
+  // run's cost summary would report only the final pass of each loop.
   const finalResults = new Map<string, StepResult>();
-  for (const r of env.allResults) finalResults.set(r.stepId, r);
+  for (const r of env.allResults) {
+    const earlier = finalResults.get(r.stepId);
+    finalResults.set(r.stepId, earlier ? { ...r, ...addSpend(earlier, r) } : r);
+  }
 
   yield {
     kind: "workflow_done",
