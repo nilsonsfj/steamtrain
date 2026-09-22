@@ -797,6 +797,8 @@ var SteamtrainReducer = (() => {
     let costUsd = 0;
     let tokens = 0;
     let durationMs = 0;
+    let costReported = false;
+    let tokensReported = false;
     for (const result of leaves) {
       if (result.skipped) skipCount += 1;
       else if (result.ok) okCount += 1;
@@ -804,6 +806,8 @@ var SteamtrainReducer = (() => {
       else failCount += 1;
       costUsd += result.costUsd ?? 0;
       tokens += tokenTotal(result.tokens);
+      if (result.costUsd !== void 0) costReported = true;
+      if (result.tokens !== void 0) tokensReported = true;
       durationMs += result.durationMs ?? 0;
     }
     const heroStep = findArrivalStep(flat.map((f) => f.step));
@@ -812,7 +816,10 @@ var SteamtrainReducer = (() => {
       const failures = rootFailureLines(flat.map((f) => f.step));
       if (failures.length > 0) hero = [...failures, "", hero].join("\n");
     }
-    const agentless = opts.credentialFree === true || costUsd === 0 && tokens === 0 && failCount === 0 && blockedCount === 0;
+    const ranBilledStep = flat.some(
+      ({ step }) => Boolean(step.agent || step.api) && step.result !== void 0 && !step.result.skipped
+    );
+    const agentless = opts.credentialFree === true || !ranBilledStep && costUsd === 0 && tokens === 0;
     const nextCandidates = opts.nextCandidates ?? DEFAULT_NEXT_CANDIDATES;
     const current = state.name;
     const next = opts.nextWorkflow ?? nextCandidates.find(
@@ -840,6 +847,8 @@ var SteamtrainReducer = (() => {
         blockedCount,
         costUsd,
         tokens,
+        costReported,
+        tokensReported,
         agentless
       },
       notices: arrivalNotices(flat.map((f) => f.step)),
@@ -972,7 +981,7 @@ var SteamtrainReducer = (() => {
     const parts = [`${subject} ${outcome}`];
     if (receipt.agentless) parts.push("$0");
     else if (receipt.costUsd > 0) parts.push(`$${receipt.costUsd.toFixed(4)}`);
-    else parts.push("$0");
+    else if (receipt.costReported !== false) parts.push("$0");
     parts.push(`${(receipt.durationMs / 1e3).toFixed(1)}s`);
     if (receipt.failCount > 0) parts.push(`${receipt.failCount} failed`);
     return parts.join(" \xB7 ");
@@ -982,8 +991,8 @@ var SteamtrainReducer = (() => {
     if (receipt.failCount) ranParts.push(`${receipt.failCount} failed`);
     const notRun = receipt.skipCount + (receipt.blockedCount ?? 0);
     if (notRun) ranParts.push(`${notRun} skipped`);
-    const cost = receipt.agentless ? "$0 \xB7 no agents" : receipt.costUsd > 0 ? `$${receipt.costUsd.toFixed(4)}` : "$0";
-    const produced = receipt.tokens > 0 ? `${compactTokens(receipt.tokens)} tokens` : receipt.agentless ? "workflow output" : "no tokens billed";
+    const cost = receipt.agentless ? "$0 \xB7 no agents" : receipt.costUsd > 0 ? `$${receipt.costUsd.toFixed(4)}` : receipt.costReported === false ? "not reported" : "$0";
+    const produced = receipt.tokens > 0 ? `${compactTokens(receipt.tokens)} tokens` : receipt.agentless ? "workflow output" : receipt.tokensReported === false ? "tokens not reported" : "no tokens billed";
     return [
       { id: "ran", label: "What ran", value: ranParts.join(" \xB7 ") },
       { id: "cost", label: "What it cost", value: cost },

@@ -38,7 +38,14 @@ export interface ArrivalReceipt {
   blockedCount: number;
   costUsd: number;
   tokens: number;
-  /** True when the run spent $0 and used no tokens (tour / command-only). */
+  /**
+   * Whether any step reported a cost / token count at all. Several agents
+   * (Antigravity, Kiro; Cursor and Amp for cost) report none, and "$0" for
+   * those runs would read as "free" rather than "unknown".
+   */
+  costReported?: boolean;
+  tokensReported?: boolean;
+  /** True when no agent or API step ran (tour / command-only): genuinely $0. */
   agentless: boolean;
 }
 
@@ -140,6 +147,8 @@ export function buildArrivalReport(
   let costUsd = 0;
   let tokens = 0;
   let durationMs = 0;
+  let costReported = false;
+  let tokensReported = false;
   for (const result of leaves) {
     if (result.skipped) skipCount += 1;
     else if (result.ok) okCount += 1;
@@ -147,6 +156,8 @@ export function buildArrivalReport(
     else failCount += 1;
     costUsd += result.costUsd ?? 0;
     tokens += tokenTotal(result.tokens);
+    if (result.costUsd !== undefined) costReported = true;
+    if (result.tokens !== undefined) tokensReported = true;
     durationMs += result.durationMs ?? 0;
   }
 
@@ -161,13 +172,17 @@ export function buildArrivalReport(
     if (failures.length > 0) hero = [...failures, "", hero].join("\n");
   }
 
-  // Prefer an explicit credentialFree flag (tour). The $0/0-token heuristic is
-  // a best-effort fallback — a cancelled agent run that never billed can look
-  // the same, which is rare on the Arrival surface.
+  // Prefer an explicit credentialFree flag (tour). Otherwise ask whether an
+  // agent or API step actually ran — "$0 and no tokens" alone can't tell a
+  // command-only ride from an agent that reports no usage (Antigravity, Kiro).
   // Invariant: agentless implies costUsd === 0 && tokens === 0.
+  const ranBilledStep = flat.some(
+    ({ step }) =>
+      Boolean(step.agent || step.api) && step.result !== undefined && !step.result.skipped,
+  );
   const agentless =
     opts.credentialFree === true ||
-    (costUsd === 0 && tokens === 0 && failCount === 0 && blockedCount === 0);
+    (!ranBilledStep && costUsd === 0 && tokens === 0 && failCount === 0 && blockedCount === 0);
 
   const nextCandidates = opts.nextCandidates ?? DEFAULT_NEXT_CANDIDATES;
   const current = state.name;
@@ -200,6 +215,8 @@ export function buildArrivalReport(
       blockedCount,
       costUsd,
       tokens,
+      costReported,
+      tokensReported,
       agentless,
     },
     notices: arrivalNotices(flat.map((f) => f.step)),
@@ -397,7 +414,8 @@ export function formatArrivalHeadline(
   const parts: string[] = [`${subject} ${outcome}`];
   if (receipt.agentless) parts.push("$0");
   else if (receipt.costUsd > 0) parts.push(`$${receipt.costUsd.toFixed(4)}`);
-  else parts.push("$0");
+  // An agent that reports no cost is unknown, not free — leave it out.
+  else if (receipt.costReported !== false) parts.push("$0");
   parts.push(`${(receipt.durationMs / 1000).toFixed(1)}s`);
   if (receipt.failCount > 0) parts.push(`${receipt.failCount} failed`);
   return parts.join(" · ");
@@ -417,13 +435,17 @@ export function arrivalReceiptCards(receipt: ArrivalReceipt): Array<{
     ? "$0 · no agents"
     : receipt.costUsd > 0
       ? `$${receipt.costUsd.toFixed(4)}`
-      : "$0";
+      : receipt.costReported === false
+        ? "not reported"
+        : "$0";
   const produced =
     receipt.tokens > 0
       ? `${compactTokens(receipt.tokens)} tokens`
       : receipt.agentless
         ? "workflow output"
-        : "no tokens billed";
+        : receipt.tokensReported === false
+          ? "tokens not reported"
+          : "no tokens billed";
   return [
     { id: "ran", label: "What ran", value: ranParts.join(" · ") },
     { id: "cost", label: "What it cost", value: cost },
