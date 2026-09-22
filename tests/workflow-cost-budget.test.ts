@@ -179,6 +179,151 @@ describe("engine threads tokens into StepResult and totals", () => {
   });
 });
 
+describe("engine folds live usage increments into the step result", () => {
+  /** A fake adapter that replays a fixed event script for every step. */
+  function scriptedDeps(script: AgentEvent[]): WorkflowDeps {
+    return {
+      createAdapter: (id: AgentId): AgentAdapter => ({
+        id,
+        binary: "fake",
+        defaultModel: "test",
+        run: () =>
+          (async function* () {
+            yield* script;
+          })(),
+      }),
+      maxConcurrency: 1,
+      cwd: "/base",
+    };
+  }
+  const oneStep: WorkflowSpec = {
+    name: "usage-fold",
+    phases: [
+      { id: "p", title: "p", steps: [{ id: "a", agent: "claude", model: "m", prompt: "x" }] },
+    ],
+  };
+  const usage = (tokens: TokenUsage, costUsd?: number): AgentEvent => ({
+    kind: "usage",
+    agent: "claude",
+    ts: 0,
+    tokens,
+    costUsd,
+  });
+  const stepResult = async (script: AgentEvent[]) => {
+    const events = await collect(oneStep, scriptedDeps(script));
+    const done = events.find((e) => e.kind === "step_done") as Extract<
+      WorkflowEvent,
+      { kind: "step_done" }
+    >;
+    return done.result;
+  };
+
+  it("keeps what was billed when the turn dies before its result", async () => {
+    const result = await stepResult([
+      usage({ input: 100, output: 10 }, 0.01),
+      // A tool ran, so the failure is not retried: one attempt's spend.
+      { kind: "tool_use", agent: "claude", ts: 0, name: "Bash" },
+      usage({ output: 5 }, 0.002),
+      { kind: "error", agent: "claude", ts: 0, message: "killed" },
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.costUsd).toBeCloseTo(0.012, 10);
+    expect(result.tokens).toMatchObject({ input: 100, output: 15 });
+  });
+
+  it("lets a result's totals replace the increments it restates", async () => {
+    const result = await stepResult([
+      usage({ input: 100, output: 10 }, 0.01),
+      {
+        kind: "result",
+        agent: "claude",
+        ts: 0,
+        isError: false,
+        text: "ok",
+        costUsd: 0.05,
+        tokens: { input: 100, output: 40 },
+      },
+    ]);
+    expect(result.costUsd).toBe(0.05);
+    expect(result.tokens).toEqual({ input: 100, output: 40 });
+  });
+
+  it("adds increments that arrive after the last result", async () => {
+    const result = await stepResult([
+      { kind: "result", agent: "claude", ts: 0, isError: false, text: "ok", tokens: { input: 5 } },
+      usage({ input: 7 }),
+    ]);
+    expect(result.tokens).toMatchObject({ input: 12 });
+  });
+});
+
+describe("engine keeps a failed attempt's spend when the step retries", () => {
+  it("sums every attempt's cost and tokens into the final result", async () => {
+    let calls = 0;
+    const deps: WorkflowDeps = {
+      createAdapter: (id: AgentId): AgentAdapter => ({
+        id,
+        binary: "fake",
+        defaultModel: "test",
+        run: () =>
+          (async function* (): AsyncGenerator<AgentEvent> {
+            calls += 1;
+            if (calls === 1) {
+              // Billed, then died before a result: retryable, but not free.
+              yield {
+                kind: "usage",
+                agent: "claude",
+                ts: 0,
+                tokens: { input: 40 },
+                costUsd: 0.004,
+              };
+              yield { kind: "error", agent: "claude", ts: 0, message: "connection reset" };
+              return;
+            }
+            yield {
+              kind: "result",
+              agent: "claude",
+              ts: 0,
+              isError: false,
+              text: "ok",
+              costUsd: 0.01,
+              tokens: { input: 100, output: 10 },
+            };
+          })(),
+      }),
+      maxConcurrency: 1,
+      cwd: "/base",
+    };
+    const spec: WorkflowSpec = {
+      name: "retry-spend",
+      phases: [
+        {
+          id: "p",
+          title: "p",
+          steps: [
+            {
+              id: "a",
+              agent: "claude",
+              model: "m",
+              prompt: "x",
+              retry: { maxAttempts: 2, initialDelayMs: 1, factor: 1, jitter: false },
+            },
+          ],
+        },
+      ],
+    };
+    const events = await collect(spec, deps);
+    const done = events.find((e) => e.kind === "step_done") as Extract<
+      WorkflowEvent,
+      { kind: "step_done" }
+    >;
+    expect(calls).toBe(2);
+    expect(done.result.ok).toBe(true);
+    expect(done.result.costUsd).toBeCloseTo(0.014, 10);
+    expect(done.result.tokens).toMatchObject({ input: 140, output: 10 });
+  });
+});
+
 describe("live summary helpers do not double-count fan-out children", () => {
   // The engine flattens a fan-out into allResults as: each child (with
   // parentStepId) *and* the parent (with childResults). The summary helpers must

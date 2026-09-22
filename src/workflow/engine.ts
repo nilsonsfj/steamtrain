@@ -1984,6 +1984,12 @@ async function runAgentAttempt(
   let streamedText = "";
   let costUsd: number | undefined;
   let tokens: TokenUsage | undefined;
+  // Live `usage` increments since the last `result` (see UsageEvent): a
+  // `result` restates the turn so far and resets them; whatever arrives after
+  // it — or instead of it, when the turn is cancelled, times out, or dies
+  // before its CLI prints a summary — is spend on top of it.
+  let usageCostSinceResult: number | undefined;
+  let usageTokensSinceResult: TokenUsage | undefined;
   let sessionId: string | undefined;
   let errored = false;
   let errorMessage: string | undefined;
@@ -2014,15 +2020,25 @@ async function runAgentAttempt(
       } else if (event.kind === "tool_use" || event.kind === "tool_result") {
         // The agent invoked a tool — assume it may have caused a side effect.
         sawToolUse = true;
+      } else if (event.kind === "usage") {
+        if (typeof event.costUsd === "number")
+          usageCostSinceResult = (usageCostSinceResult ?? 0) + event.costUsd;
+        if (event.tokens) usageTokensSinceResult = addTokens(usageTokensSinceResult, event.tokens);
       } else if (event.kind === "result") {
         sawResult = true;
         if (event.text) finalText = event.text;
-        if (typeof event.costUsd === "number") costUsd = event.costUsd;
-        // Tokens follow the same "last result wins" semantics as `costUsd`:
-        // adapters that emit several `result` events per turn (opencode's
-        // per-step finishes) report cumulative running totals, so the final
-        // event already carries the whole-turn usage.
-        if (event.tokens) tokens = event.tokens;
+        // "Last result wins": adapters that emit several `result` events per
+        // turn (opencode's per-step finishes) report cumulative running
+        // totals, so the final event already carries the whole-turn usage —
+        // including every live increment before it.
+        if (typeof event.costUsd === "number") {
+          costUsd = event.costUsd;
+          usageCostSinceResult = undefined;
+        }
+        if (event.tokens) {
+          tokens = event.tokens;
+          usageTokensSinceResult = undefined;
+        }
         if (event.isError) {
           errored = true;
           errorMessage ??= event.text;
@@ -2066,6 +2082,9 @@ async function runAgentAttempt(
     errored = true;
     errorMessage ??= err instanceof Error ? err.message : String(err);
   }
+
+  if (usageCostSinceResult !== undefined) costUsd = (costUsd ?? 0) + usageCostSinceResult;
+  if (usageTokensSinceResult) tokens = addTokens(tokens, usageTokensSinceResult);
 
   // A cancelled step is never cached, so resume re-runs it.
   const cancelled = Boolean(ctx.signal?.aborted);
@@ -2529,7 +2548,7 @@ async function executeAgentStep(
       : policy.maxAttempts;
 
   try {
-    let result: StepResult;
+    let result: StepResult | undefined;
     while (true) {
       attempt += 1;
       const attemptOutcome = await runAgentAttempt(
@@ -2544,7 +2563,12 @@ async function executeAgentStep(
         activeStep.agent === step.agent ? resume.sessionId : undefined,
         failoverPolicy,
       );
-      result = attemptOutcome.result;
+      // Each attempt's result replaces the last, but what the earlier, failed
+      // attempts billed is still spent — carry it forward so a retried or
+      // failed-over step reports the whole step's spend, not its final try's.
+      result = result
+        ? { ...attemptOutcome.result, ...addSpend(result, attemptOutcome.result) }
+        : attemptOutcome.result;
       const isLastAttempt = attempt >= attemptBudget;
       if (result.ok || !attemptOutcome.retryable || ctx.signal?.aborted) break;
 
@@ -2790,14 +2814,9 @@ async function enforceStructuredOutput(
     fixResume,
     resolveModelFailoverPolicy({ enabled: false }),
   );
-  const costUsd =
-    result.costUsd === undefined && fix.result.costUsd === undefined
-      ? undefined
-      : (result.costUsd ?? 0) + (fix.result.costUsd ?? 0);
-  // The fix attempt is a second billable turn — sum both turns' token usage so
-  // the step's recorded tokens match its recorded cost.
-  const tokens =
-    result.tokens || fix.result.tokens ? addTokens(result.tokens, fix.result.tokens) : undefined;
+  // The fix attempt is a second billable turn — sum both turns' spend so the
+  // step's recorded tokens match its recorded cost.
+  const { costUsd, tokens } = addSpend(result, fix.result);
   const reparsed = fix.result.ok
     ? parseStructuredOutput(fix.result.output, outputSchema)
     : undefined;
@@ -2876,14 +2895,7 @@ async function continueAfterAgentQuestion(
     resolveModelFailoverPolicy({ enabled: false }),
   );
 
-  const costUsd =
-    result.costUsd === undefined && continuation.result.costUsd === undefined
-      ? undefined
-      : (result.costUsd ?? 0) + (continuation.result.costUsd ?? 0);
-  const tokens =
-    result.tokens || continuation.result.tokens
-      ? addTokens(result.tokens, continuation.result.tokens)
-      : undefined;
+  const { costUsd, tokens } = addSpend(result, continuation.result);
   const questions = [{ question, answer: ask.output, by: ask.by }];
   const merged: StepResult = {
     ...continuation.result,
@@ -3451,6 +3463,23 @@ async function executeCommandStep(
   }
 }
 
+/**
+ * The combined `costUsd` / `tokens` of two results, each left `undefined` when
+ * neither side reports it (so an unpriced agent never reads as "$0").
+ */
+function addSpend(
+  a: Pick<StepResult, "costUsd" | "tokens">,
+  b: Pick<StepResult, "costUsd" | "tokens">,
+): Pick<StepResult, "costUsd" | "tokens"> {
+  return {
+    costUsd:
+      a.costUsd === undefined && b.costUsd === undefined
+        ? undefined
+        : (a.costUsd ?? 0) + (b.costUsd ?? 0),
+    tokens: a.tokens || b.tokens ? addTokens(a.tokens, b.tokens) : undefined,
+  };
+}
+
 /** Exact USD cost from the effective per-MTok rates and the API-reported usage. */
 function llmCostUsd(
   pricing: LlmPricing | undefined,
@@ -3789,12 +3818,7 @@ async function enforceLlmStructuredOutput(
     settings,
     timeoutMs,
   );
-  const costUsd =
-    result.costUsd === undefined && fix.result.costUsd === undefined
-      ? undefined
-      : (result.costUsd ?? 0) + (fix.result.costUsd ?? 0);
-  const tokens =
-    result.tokens || fix.result.tokens ? addTokens(result.tokens, fix.result.tokens) : undefined;
+  const { costUsd, tokens } = addSpend(result, fix.result);
   const reparsed = fix.result.ok
     ? parseStructuredOutput(fix.result.output, outputSchema)
     : undefined;
