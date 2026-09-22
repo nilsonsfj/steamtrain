@@ -1119,3 +1119,23 @@ describe("runs page layout", () => {
     expect(narrow).not.toMatch(/\.runs-receipt[^{]*\{[^}]*display:\s*none/);
   });
 });
+
+describe("runs page: step cost cell", () => {
+  const src = runsJs.match(/function stepCostText\([\s\S]*?\n {2}\}\n/)?.[0];
+  const stepCostText = new Function(`${src}; return stepCostText;`)() as (
+    step: object,
+    result: object,
+  ) => string;
+
+  it("prices a cached replay at $0 this run, even for an agent that reports no cost", () => {
+    expect(stepCostText({ cached: true, agent: "antigravity" }, {})).toBe("$0");
+    expect(stepCostText({ cached: true, agent: "claude" }, { costUsd: 0.5 })).toBe("$0");
+  });
+
+  it("keeps unknown, free and billed apart for steps that ran", () => {
+    expect(stepCostText({ agent: "antigravity" }, {})).toBe("—");
+    expect(stepCostText({ agent: "claude" }, { costUsd: 0 })).toBe("free");
+    expect(stepCostText({ kind: "command" }, {})).toBe("free");
+    expect(stepCostText({ agent: "claude" }, { costUsd: 0.5 })).toBe("$0.5000");
+  });
+});
