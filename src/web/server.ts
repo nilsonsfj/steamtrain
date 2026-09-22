@@ -442,6 +442,16 @@ function isValidRunId(id: string): boolean {
   return isValidPathId(id, MAX_RUN_ID_LENGTH);
 }
 
+/** null on URIError so a malformed `%` sequence is a 400, not an uncaught 500. */
+function safeDecode(raw: string): string | null {
+  try {
+    return decodeURIComponent(raw);
+  } catch (err) {
+    if (err instanceof URIError) return null;
+    throw err;
+  }
+}
+
 class PayloadTooLarge extends Error {
   constructor() {
     super("payload too large");
@@ -1432,7 +1442,11 @@ async function handle(
 
   const wfMatch = path.match(/^\/api\/workflows\/([^/]+)$/);
   if (wfMatch) {
-    const name = decodeURIComponent(wfMatch[1]!);
+    const name = safeDecode(wfMatch[1]!);
+    if (name === null) {
+      sendJson(res, 400, { error: "malformed percent-encoding" });
+      return;
+    }
 
     if (!isValidWorkflowName(name)) {
       sendJson(res, 400, { error: "invalid workflow name" });
@@ -1530,7 +1544,11 @@ async function handle(
   // can never disagree about which steps would be skipped.
   const lintMatch = path.match(/^\/api\/workflows\/([^/]+)\/lint$/);
   if (method === "POST" && lintMatch) {
-    const name = decodeURIComponent(lintMatch[1]!);
+    const name = safeDecode(lintMatch[1]!);
+    if (name === null) {
+      sendJson(res, 400, { error: "malformed percent-encoding" });
+      return;
+    }
     if (!isValidWorkflowName(name)) {
       sendJson(res, 400, { error: "invalid workflow name" });
       return;
@@ -1569,7 +1587,11 @@ async function handle(
   // Plan (dry-run) endpoint: POST /api/workflows/:name/plan
   const planMatch = path.match(/^\/api\/workflows\/([^/]+)\/plan$/);
   if (method === "POST" && planMatch) {
-    const name = decodeURIComponent(planMatch[1]!);
+    const name = safeDecode(planMatch[1]!);
+    if (name === null) {
+      sendJson(res, 400, { error: "malformed percent-encoding" });
+      return;
+    }
     if (!isValidWorkflowName(name)) {
       sendJson(res, 400, { error: "invalid workflow name" });
       return;
@@ -1741,7 +1763,11 @@ async function handle(
 
   const historyMatch = path.match(/^\/api\/history\/([^/]+)$/);
   if (historyMatch) {
-    const id = decodeURIComponent(historyMatch[1]!);
+    const id = safeDecode(historyMatch[1]!);
+    if (id === null) {
+      sendJson(res, 400, { error: "malformed percent-encoding" });
+      return;
+    }
     if (!isValidRunId(id)) {
       sendJson(res, 400, { error: "invalid run id" });
       return;
@@ -1764,7 +1790,11 @@ async function handle(
 
   const rerunMatch = path.match(/^\/api\/history\/([^/]+)\/(rerun|retry)$/);
   if (method === "POST" && rerunMatch) {
-    const id = decodeURIComponent(rerunMatch[1]!);
+    const id = safeDecode(rerunMatch[1]!);
+    if (id === null) {
+      sendJson(res, 400, { error: "malformed percent-encoding" });
+      return;
+    }
     if (!isValidRunId(id)) {
       sendJson(res, 400, { error: "invalid run id" });
       return;
@@ -1842,7 +1872,11 @@ async function handle(
       sendJson(res, 404, { error: "run history is not available on this server" });
       return;
     }
-    const id = decodeURIComponent(diagnoseMatch[1]!);
+    const id = safeDecode(diagnoseMatch[1]!);
+    if (id === null) {
+      sendJson(res, 400, { error: "malformed percent-encoding" });
+      return;
+    }
     if (!isValidRunId(id)) {
       sendJson(res, 400, { error: "invalid run id" });
       return;
@@ -1902,7 +1936,11 @@ async function handle(
       return;
     }
     const history = deps.history;
-    const id = decodeURIComponent(worktreesMatch[1]!);
+    const id = safeDecode(worktreesMatch[1]!);
+    if (id === null) {
+      sendJson(res, 400, { error: "malformed percent-encoding" });
+      return;
+    }
     if (!isValidRunId(id)) {
       sendJson(res, 400, { error: "invalid run id" });
       return;
@@ -2227,7 +2265,11 @@ async function handle(
 
   const streamMatch = path.match(/^\/api\/runs\/([^/]+)\/stream$/);
   if (method === "GET" && streamMatch) {
-    const runId = decodeURIComponent(streamMatch[1]!);
+    const runId = safeDecode(streamMatch[1]!);
+    if (runId === null) {
+      sendJson(res, 400, { error: "malformed percent-encoding" });
+      return;
+    }
     if (!isValidRunId(runId)) {
       sendJson(res, 400, { error: "invalid run id" });
       return;
@@ -2244,7 +2286,11 @@ async function handle(
 
   const cancelMatch = path.match(/^\/api\/runs\/([^/]+)\/cancel$/);
   if (method === "POST" && cancelMatch) {
-    const runId = decodeURIComponent(cancelMatch[1]!);
+    const runId = safeDecode(cancelMatch[1]!);
+    if (runId === null) {
+      sendJson(res, 400, { error: "malformed percent-encoding" });
+      return;
+    }
     if (!isValidRunId(runId)) {
       sendJson(res, 400, { error: "invalid run id" });
       return;
@@ -2263,7 +2309,11 @@ async function handle(
   // shared live-run store's control files — runs owned by other processes.
   const pauseMatch = path.match(/^\/api\/runs\/([^/]+)\/(pause|resume)$/);
   if (method === "POST" && pauseMatch) {
-    const runId = decodeURIComponent(pauseMatch[1]!);
+    const runId = safeDecode(pauseMatch[1]!);
+    if (runId === null) {
+      sendJson(res, 400, { error: "malformed percent-encoding" });
+      return;
+    }
     if (!isValidRunId(runId)) {
       sendJson(res, 400, { error: "invalid run id" });
       return;
@@ -2282,7 +2332,11 @@ async function handle(
   // the same id, so the browser (or the server) can close without stopping it.
   const detachMatch = path.match(/^\/api\/runs\/([^/]+)\/detach$/);
   if (method === "POST" && detachMatch) {
-    const runId = decodeURIComponent(detachMatch[1]!);
+    const runId = safeDecode(detachMatch[1]!);
+    if (runId === null) {
+      sendJson(res, 400, { error: "malformed percent-encoding" });
+      return;
+    }
     if (!isValidRunId(runId)) {
       sendJson(res, 400, { error: "invalid run id" });
       return;
@@ -2329,7 +2383,11 @@ async function handle(
       });
       return;
     }
-    const runId = decodeURIComponent(editStepMatch[1]!);
+    const runId = safeDecode(editStepMatch[1]!);
+    if (runId === null) {
+      sendJson(res, 400, { error: "malformed percent-encoding" });
+      return;
+    }
     if (!isValidRunId(runId)) {
       sendJson(res, 400, { error: "invalid run id" });
       return;
@@ -2388,7 +2446,11 @@ async function handle(
       sendJson(res, 400, { error: "body must include a string 'stepId'" });
       return;
     }
-    const runId = decodeURIComponent(killStepMatch[1]!);
+    const runId = safeDecode(killStepMatch[1]!);
+    if (runId === null) {
+      sendJson(res, 400, { error: "malformed percent-encoding" });
+      return;
+    }
     if (!isValidRunId(runId)) {
       sendJson(res, 400, { error: "invalid run id" });
       return;
@@ -2441,7 +2503,11 @@ async function handle(
       parsed.rejectDisposition === "fail" || parsed.rejectDisposition === "stop"
         ? parsed.rejectDisposition
         : undefined;
-    const runId = decodeURIComponent(approvalMatch[1]!);
+    const runId = safeDecode(approvalMatch[1]!);
+    if (runId === null) {
+      sendJson(res, 400, { error: "malformed percent-encoding" });
+      return;
+    }
     if (!isValidRunId(runId)) {
       sendJson(res, 400, { error: "invalid run id" });
       return;
@@ -2493,7 +2559,11 @@ async function handle(
       return;
     }
     const iteration = typeof parsed.iteration === "number" ? parsed.iteration : undefined;
-    const runId = decodeURIComponent(inputMatch[1]!);
+    const runId = safeDecode(inputMatch[1]!);
+    if (runId === null) {
+      sendJson(res, 400, { error: "malformed percent-encoding" });
+      return;
+    }
     if (!isValidRunId(runId)) {
       sendJson(res, 400, { error: "invalid run id" });
       return;
