@@ -1300,7 +1300,7 @@
       byModel.forEach(function (m) {
         table.appendChild(h("tr", null,
           h("td", { text: m.model }), h("td", { text: String(m.steps) }),
-          h("td", { text: m.costUsd ? "$" + m.costUsd.toFixed(4) : "" }),
+          h("td", { text: m.costUsd ? "$" + m.costUsd.toFixed(4) : (m.cached ? "cached" : "") }),
           h("td", { text: fmtTokenSummary(m.tokens) })
         ));
       });

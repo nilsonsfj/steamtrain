@@ -461,7 +461,8 @@
    * Spend, or the reason it is zero. A bare `$0` on a run that never reached an
    * agent reads as "this was free", and a Claude run that has tokens but no
    * price yet is not free either — it is unpriced (that CLI only bills at the
-   * end), so say which.
+   * end), so say which. An agent that reports no cost (Cursor, Amp) or no
+   * usage at all (Antigravity, Kiro) is "not reported", as on the receipt.
    */
   function spendValue(r, leaves) {
     if (r.costUsd > 0) {
@@ -472,11 +473,15 @@
     if (r.tokens > 0) {
       return h("div", { class: "v" },
         h("span", { text: fmtTokens(r.tokens) + " tok" }),
-        h("span", { class: "sub", text: " · not priced yet" })
+        h("span", { class: "sub", text: r.costReported === false ? " · cost not reported" : " · not priced yet" })
       );
     }
     var reachedAgent = leaves.some(function (s) { return didRun(s) && (s.agent || s.api); });
-    return h("div", { class: "v note", text: reachedAgent ? "$0 — nothing billed" : "none — no agent step ran" });
+    if (!reachedAgent) return h("div", { class: "v note", text: "none — no agent step ran" });
+    if (r.costReported === false) {
+      return h("div", { class: "v note", text: r.tokensReported === false ? "not reported" : "cost not reported" });
+    }
+    return h("div", { class: "v note", text: "$0 — nothing billed" });
   }
 
   // ---- output ----------------------------------------------------------------

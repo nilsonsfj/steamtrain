@@ -433,7 +433,7 @@ function estimateCostUsd(usage: CodexUsage | undefined, model?: string): number 
   const cached = usage.cached_input_tokens ?? 0;
   const written = usage.cache_write_input_tokens ?? 0;
   const output = usage.output_tokens ?? 0;
-  if (input + output === 0) return undefined;
+  if (input + cached + written + output === 0) return undefined;
   const price = codexModelPrice(model);
   const uncached = Math.max(0, input - cached - written);
   return (

@@ -1611,14 +1611,15 @@ window.Steamtrain = (function () {
       var key = s.model && s.agent
         ? agentUiLabel(s.agent) + "/" + s.model
         : (s.model || (s.agent ? agentUiLabel(s.agent) : "(agentless)"));
-      var e = map[key] || (map[key] = { model: key, costUsd: 0, tokens: emptyTokens(), steps: 0 });
+      var e = map[key] || (map[key] = { model: key, costUsd: 0, tokens: emptyTokens(), steps: 0, cached: 0 });
       e.steps += 1;
-      if (s.cached) return; // billed to the run that produced it
+      // Billed to the run that produced it; the row stays, marked cached.
+      if (s.cached) { e.cached += 1; return; }
       e.costUsd += s.result.costUsd || 0;
       addTokensInto(e.tokens, s.result.tokens);
     });
     return Object.keys(map).map(function (k) { return map[k]; })
-      .filter(function (m) { return m.costUsd > 0 || totalTokens(m.tokens) > 0; })
+      .filter(function (m) { return m.costUsd > 0 || totalTokens(m.tokens) > 0 || m.cached > 0; })
       .sort(function (a, b) { return b.costUsd - a.costUsd; });
   }
 

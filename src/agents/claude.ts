@@ -464,7 +464,11 @@ export function maxSessionCost(
     }
     modelUsage[model] = row;
   }
-  return { costUsd: Math.max(a.costUsd ?? 0, b.costUsd ?? 0), modelUsage };
+  const costUsd =
+    a.costUsd === undefined && b.costUsd === undefined
+      ? undefined
+      : Math.max(a.costUsd ?? 0, b.costUsd ?? 0);
+  return { costUsd, modelUsage };
 }
 
 /** Claude Code's config root: `$CLAUDE_CONFIG_DIR`, else `~/.claude`. */

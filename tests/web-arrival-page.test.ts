@@ -95,6 +95,41 @@ describe("finished-run page: the page ends in an action", () => {
     expect(js).toContain('"none — no agent step ran"');
     expect(js).toContain('" · not priced yet"');
   });
+
+  // The tile sits next to the receipt card, so an agent that reports no usage
+  // must not read "$0 — nothing billed" here while the card says "not reported".
+  it("says 'not reported' for an agent that reports no spend, as the receipt does", () => {
+    const src = js.match(/function spendValue\([\s\S]*?\n {2}\}\n/)?.[0];
+    expect(src).toBeDefined();
+    type Node = { text: string };
+    const h = (_tag: string, attrs: { text?: string } | null, ...kids: Node[]): Node => ({
+      text: (attrs?.text ?? "") + kids.map((k) => k.text).join(""),
+    });
+    const spendValue = new Function(
+      "h",
+      "fmtTokens",
+      "didRun",
+      `${src}; return spendValue;`,
+    )(h, (n: number) => String(n), () => true) as (r: object, leaves: object[]) => Node;
+    const agentLeaf = [{ agent: "antigravity", result: { ok: true } }];
+    const text = (r: object, leaves: object[] = agentLeaf) => spendValue(r, leaves).text;
+
+    expect(text({ costUsd: 0, tokens: 0, costReported: false, tokensReported: false })).toBe(
+      "not reported",
+    );
+    expect(text({ costUsd: 0, tokens: 0, costReported: false, tokensReported: true })).toBe(
+      "cost not reported",
+    );
+    expect(text({ costUsd: 0, tokens: 12, costReported: false, tokensReported: true })).toBe(
+      "12 tok · cost not reported",
+    );
+    expect(text({ costUsd: 0, tokens: 0, costReported: true, tokensReported: true })).toBe(
+      "$0 — nothing billed",
+    );
+    expect(text({ costUsd: 0, tokens: 0, costReported: false }, [])).toBe(
+      "none — no agent step ran",
+    );
+  });
 });
 
 describe("finished-run page: failed is not skipped", () => {
