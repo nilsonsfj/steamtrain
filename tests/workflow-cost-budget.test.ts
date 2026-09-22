@@ -13,6 +13,7 @@ import {
   addTokens,
   aggregateCosts,
   aggregateLeavesByModel,
+  costForResults,
   formatTokens,
   resultLeaves,
   runWorkflow,
@@ -383,6 +384,53 @@ describe("run summary keeps every loop pass's spend", () => {
     expect(fix.output).toBe("x");
     expect(fix.costUsd).toBeCloseTo(0.03, 10);
     expect(fix.tokens).toMatchObject({ input: 30 });
+  });
+});
+
+describe("a resumed run's summary does not re-bill cached steps", () => {
+  it("reports $0 for replays while step_done keeps the original cost", async () => {
+    const deps = makeBillingDeps({
+      m1: { cost: 0.01, tokens: { input: 100 } },
+      m2: { cost: 0.02, tokens: { input: 200 } },
+      m3: { cost: 0.03, tokens: { input: 300 } },
+    });
+    const cache = new Map<string, StepResult>();
+    const run = async () => {
+      const events: WorkflowEvent[] = [];
+      for await (const ev of runWorkflow(threeStepSpec(), { input: "go", cache }, deps))
+        events.push(ev);
+      return events;
+    };
+    const first = await run();
+    const firstDone = first.find((e) => e.kind === "workflow_done") as Extract<
+      WorkflowEvent,
+      { kind: "workflow_done" }
+    >;
+    expect(costForResults(firstDone.results)).toBeCloseTo(0.06, 10);
+
+    const second = await run();
+    const replays = second.filter((e) => e.kind === "step_done") as Extract<
+      WorkflowEvent,
+      { kind: "step_done" }
+    >[];
+    expect(replays.every((e) => e.cached)).toBe(true);
+    expect(replays.find((e) => e.stepId === "a")?.result.costUsd).toBe(0.01);
+    const secondDone = second.find((e) => e.kind === "workflow_done") as Extract<
+      WorkflowEvent,
+      { kind: "workflow_done" }
+    >;
+    expect(costForResults(secondDone.results)).toBe(0);
+    expect(totalTokens(tokensForResults(secondDone.results))).toBe(0);
+
+    // History agrees: the replayed run's totals are $0 too.
+    const builder = new RunRecordBuilder({
+      id: "r2",
+      workflow: "budget-test",
+      input: "go",
+      cwd: "/base",
+    });
+    for (const ev of second) builder.handle(ev);
+    expect(builder.build({ status: "done" }).totals.costUsd).toBe(0);
   });
 });
 

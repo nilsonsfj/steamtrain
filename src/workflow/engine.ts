@@ -456,7 +456,9 @@ export async function* runWorkflow(
   // only the latest result per step id (the final state of each step); earlier
   // iterations were superseded by re-runs. Their spend was not superseded,
   // though — every pass was billed — so it rolls into the kept result, or the
-  // run's cost summary would report only the final pass of each loop.
+  // run's cost summary would report only the final pass of each loop. Only
+  // spend rolls up: `durationMs` stays the final pass's, since the summary's
+  // per-step time describes the state it lists, not the loop's wall clock.
   const finalResults = new Map<string, StepResult>();
   for (const r of env.allResults) {
     const earlier = finalResults.get(r.stepId);
@@ -1370,7 +1372,7 @@ async function runSingleStep(
     for (const child of cached.childResults ?? []) {
       outputs.set(child.stepId, child.output);
       results.set(child.stepId, child);
-      allResults.push(child);
+      allResults.push(replayedSpend(child));
       push({
         kind: "step_start",
         phaseId: phase.id,
@@ -1401,7 +1403,7 @@ async function runSingleStep(
     outputs.set(step.id, cached.output);
     results.set(step.id, cached);
     recordStepSession(env.sessions, cached);
-    allResults.push(cached);
+    allResults.push(replayedSpend(cached));
     let notOk = false;
     let stop = false;
     if (!cached.ok) {
@@ -3466,6 +3468,21 @@ async function executeCommandStep(
   } finally {
     await workspace.dispose();
   }
+}
+
+/**
+ * A cached result as this run's summary should count it: the replay billed
+ * nothing — its spend belongs to the run that produced it — so the copy in
+ * `allResults` (the run-end summary, notifications, arrival receipt) reports
+ * $0 and no tokens where the original reported any. `step_done` still carries
+ * the original, so history shows what the step once cost.
+ */
+function replayedSpend(result: StepResult): StepResult {
+  return {
+    ...result,
+    costUsd: result.costUsd === undefined ? undefined : 0,
+    tokens: result.tokens ? {} : undefined,
+  };
 }
 
 /**

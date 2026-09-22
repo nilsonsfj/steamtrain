@@ -1013,13 +1013,20 @@ var SteamtrainReducer = (() => {
     }
     return parts.join(" \xB7 ");
   }
+  function replayed(result) {
+    return {
+      ...result,
+      costUsd: result.costUsd === void 0 ? void 0 : 0,
+      tokens: result.tokens ? {} : void 0
+    };
+  }
   function leafResults(state) {
     const fromResults = (state.results ?? []).filter((r) => !r.childResults?.length);
     if (fromResults.length > 0) return fromResults;
     const out = [];
     for (const phase of state.phases) {
       for (const step of phase.steps) {
-        if (step.result) out.push(step.result);
+        if (step.result) out.push(step.cached ? replayed(step.result) : step.result);
       }
     }
     return out.filter((r) => !r.childResults?.length);
@@ -1042,7 +1049,7 @@ var SteamtrainReducer = (() => {
   }
   function tokenTotal(t) {
     if (!t) return 0;
-    return (t.input ?? 0) + (t.output ?? 0) + (t.cacheRead ?? 0) + (t.cacheWrite ?? 0) + (t.reasoning ?? 0);
+    return (t.input ?? 0) + (t.output ?? 0) + (t.cacheRead ?? 0) + (t.cacheWrite ?? 0);
   }
   function compactTokens(n) {
     if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;

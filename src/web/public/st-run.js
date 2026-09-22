@@ -403,6 +403,7 @@
       var ms = s.result.durationMs || 0;
       if (lo === undefined || ms < lo) lo = ms;
       if (hi === undefined || ms > hi) hi = ms;
+      if (s.cached) return; // billed to the run that produced it
       cost += s.result.costUsd || 0;
       addTokensInto(tok, s.result.tokens);
     });

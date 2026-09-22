@@ -469,13 +469,23 @@ export function formatArrivalReceipt(receipt: ArrivalReceipt): string {
   return parts.join(" · ");
 }
 
+/** A replayed result as this run saw it: reported, but $0 and no tokens billed. */
+function replayed(result: ArrivalStepResult): ArrivalStepResult {
+  return {
+    ...result,
+    costUsd: result.costUsd === undefined ? undefined : 0,
+    tokens: result.tokens ? {} : undefined,
+  };
+}
+
 function leafResults(state: WorkflowState): ArrivalStepResult[] {
   const fromResults = (state.results ?? []).filter((r) => !r.childResults?.length);
   if (fromResults.length > 0) return fromResults;
   const out: ArrivalStepResult[] = [];
   for (const phase of state.phases) {
     for (const step of phase.steps) {
-      if (step.result) out.push(step.result);
+      // A cached replay's spend belongs to the run that produced it.
+      if (step.result) out.push(step.cached ? replayed(step.result) : step.result);
     }
   }
   return out.filter((r) => !r.childResults?.length);
@@ -512,11 +522,13 @@ function fallbackHero(state: WorkflowState): string {
     : "Workflow stopped short. Press i to show step details and find the stall.";
 }
 
+/**
+ * Billable tokens, matching `cost.ts`'s `totalTokens` (not imported, to keep
+ * this module free of it): `reasoning` is a subset of `output`, never added.
+ */
 function tokenTotal(t: ArrivalStepResult["tokens"] | undefined): number {
   if (!t) return 0;
-  return (
-    (t.input ?? 0) + (t.output ?? 0) + (t.cacheRead ?? 0) + (t.cacheWrite ?? 0) + (t.reasoning ?? 0)
-  );
+  return (t.input ?? 0) + (t.output ?? 0) + (t.cacheRead ?? 0) + (t.cacheWrite ?? 0);
 }
 
 function compactTokens(n: number): string {

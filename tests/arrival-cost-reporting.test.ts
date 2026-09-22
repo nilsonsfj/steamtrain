@@ -80,4 +80,22 @@ describe("arrival receipt for agents that report no usage", () => {
     expect(cards.find((c) => c.id === "cost")!.value).toBe("$0");
     expect(cards.find((c) => c.id === "produced")!.value).toBe("no tokens billed");
   });
+
+  it("does not count reasoning twice (it is a subset of output)", () => {
+    // opencode-shaped: reasoning folded into output and also kept on its own.
+    const receipt = buildArrivalReport(
+      finished({ costUsd: 0.01, tokens: { input: 100, output: 50, reasoning: 20, cacheRead: 30 } }),
+    )!.receipt;
+    expect(receipt.tokens).toBe(180);
+  });
+
+  it("does not bill a cached replay to this run", () => {
+    const state = finished({ costUsd: 0.5, tokens: { input: 1000, output: 10 } });
+    state.phases[0]!.steps[1]!.cached = true;
+    const receipt = buildArrivalReport(state)!.receipt;
+    expect(receipt.costUsd).toBe(0);
+    expect(receipt.tokens).toBe(0);
+    expect(receipt.costReported).toBe(true);
+    expect(arrivalReceiptCards(receipt).find((c) => c.id === "cost")!.value).toBe("$0");
+  });
 });

@@ -620,6 +620,7 @@ export function App({
     const tokens = emptyTokens();
     for (const phase of runner.wf.phases) {
       for (const step of phase.steps) {
+        if (step.cached) continue; // billed to the run that produced it
         if (step.result?.costUsd) cost += step.result.costUsd;
         addTokensInto(tokens, step.result?.tokens);
       }

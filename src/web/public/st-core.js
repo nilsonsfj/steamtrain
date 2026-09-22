@@ -1612,9 +1612,10 @@ window.Steamtrain = (function () {
         ? agentUiLabel(s.agent) + "/" + s.model
         : (s.model || (s.agent ? agentUiLabel(s.agent) : "(agentless)"));
       var e = map[key] || (map[key] = { model: key, costUsd: 0, tokens: emptyTokens(), steps: 0 });
+      e.steps += 1;
+      if (s.cached) return; // billed to the run that produced it
       e.costUsd += s.result.costUsd || 0;
       addTokensInto(e.tokens, s.result.tokens);
-      e.steps += 1;
     });
     return Object.keys(map).map(function (k) { return map[k]; })
       .filter(function (m) { return m.costUsd > 0 || totalTokens(m.tokens) > 0; })
