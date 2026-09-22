@@ -81,8 +81,14 @@ function stubNode(className = ""): StubNode {
 }
 
 interface Watched {
-  then: Promise<unknown>["then"];
-  catch: Promise<unknown>["catch"];
+  // Own signatures, not Promise's: `.then()` returns another Watched, and the
+  // tests silence the forwarded native rejection through `_promise` without
+  // that catch counting as the caller handling it.
+  then(
+    onFulfilled?: ((value: unknown) => unknown) | null,
+    onRejected?: ((reason: unknown) => unknown) | null,
+  ): Watched;
+  catch(onRejected?: ((reason: unknown) => unknown) | null): Watched;
   _promise: Promise<unknown>;
 }
 
@@ -361,7 +367,10 @@ describe("apiAuth network failure", () => {
   it("does not banner a fulfilled response, including a non-JSON body", async () => {
     arm();
     globalThis.fetch = () =>
-      Promise.resolve({ status: 200, text: () => Promise.resolve('{"ok":true}') });
+      Promise.resolve({
+        status: 200,
+        text: () => Promise.resolve('{"ok":true}'),
+      } as Response);
     const ok = (await ST.apiAuth("GET", "/api/workflows")) as {
       status: number;
       body: { ok?: boolean };
@@ -370,7 +379,10 @@ describe("apiAuth network failure", () => {
     expect(ok.body.ok).toBe(true);
 
     globalThis.fetch = () =>
-      Promise.resolve({ status: 502, text: () => Promise.resolve("<html>bad gateway") });
+      Promise.resolve({
+        status: 502,
+        text: () => Promise.resolve("<html>bad gateway"),
+      } as Response);
     const bad = (await ST.apiAuth("GET", "/api/workflows")) as { status: number; body: unknown };
     expect(bad.status).toBe(502);
     expect(bad.body).toEqual({});
@@ -379,7 +391,8 @@ describe("apiAuth network failure", () => {
 
   it("does not banner a 401 — the login overlay already explains it", async () => {
     arm();
-    globalThis.fetch = () => Promise.resolve({ status: 401, text: () => Promise.resolve("") });
+    globalThis.fetch = () =>
+      Promise.resolve({ status: 401, text: () => Promise.resolve("") } as Response);
     const child = ST.apiAuth("GET", "/api/config").then(() => "ok");
     child._promise.catch(() => {});
     await flush();
