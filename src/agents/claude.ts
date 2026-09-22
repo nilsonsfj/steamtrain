@@ -361,10 +361,17 @@ export function createClaudeMapper(
               r.data.total_cost_usd === undefined
                 ? undefined
                 : Math.max(0, r.data.total_cost_usd - (options.costBaseline?.costUsd ?? 0)),
+            // `usage` is the fallback for a result with no `modelUsage`. Claude
+            // Code sums it from the same restored ledger, so it takes the
+            // baseline off too.
             tokens:
               claudeModelTokens(
                 subtractModelUsage(r.data.modelUsage, options.costBaseline?.modelUsage),
-              ) ?? claudeTokens(r.data.usage),
+              ) ??
+              subtractTokens(
+                claudeTokens(r.data.usage),
+                claudeModelTokens(options.costBaseline?.modelUsage),
+              ),
           },
         ];
       }
@@ -413,6 +420,19 @@ function claudeModelTokens(
     add("cacheWrite", m.cacheCreationInputTokens);
   }
   return Object.keys(tokens).length > 0 ? tokens : undefined;
+}
+
+/** `tokens` less `baseline`, field by field, never below zero. */
+function subtractTokens(
+  tokens: TokenUsage | undefined,
+  baseline: TokenUsage | undefined,
+): TokenUsage | undefined {
+  if (!tokens || !baseline) return tokens;
+  const out: TokenUsage = {};
+  for (const [key, n] of Object.entries(tokens) as [keyof TokenUsage, number | undefined][]) {
+    if (n !== undefined) out[key] = Math.max(0, n - (baseline[key] ?? 0));
+  }
+  return out;
 }
 
 /** What a Claude session had billed so far, from its transcript's `cost-state` record. */

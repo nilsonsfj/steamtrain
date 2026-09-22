@@ -318,6 +318,26 @@ describe("claude mapper · result usage", () => {
 });
 
 describe("claude mapper · resumed session cost", () => {
+  it("takes the baseline off the usage fallback too", () => {
+    // Claude Code sums `result.usage` from the restored session ledger, so on
+    // `--resume` it is session-wide just like `total_cost_usd`.
+    const mapper = createClaudeMapper("claude", {
+      costBaseline: {
+        costUsd: 0.3,
+        modelUsage: { "claude-opus-5-5": { inputTokens: 100, outputTokens: 40, costUSD: 0.3 } },
+      },
+    });
+    const [result] = mapper({
+      type: "result",
+      is_error: false,
+      total_cost_usd: 0.5,
+      usage: { input_tokens: 160, output_tokens: 70, cache_read_input_tokens: 5 },
+      modelUsage: {},
+    });
+    expect(result).toMatchObject({ tokens: { input: 60, output: 30, cacheRead: 5 } });
+    expect((result as { costUsd: number }).costUsd).toBeCloseTo(0.2);
+  });
+
   it("reports only this run's share of a resumed session's restored totals", () => {
     const mapper = createClaudeMapper("claude", {
       costBaseline: {
