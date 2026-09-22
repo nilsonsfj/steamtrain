@@ -362,7 +362,8 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     id: "gpt-5.4",
     name: "GPT-5.4",
     aliases: ["gpt 5.4", "gpt-5.4", "gpt5.4"],
-    reference: { provider: "codex", modelId: "gpt-5.4" },
+    // Removed from live `codex debug models` (0.145); still on OpenCode Zen.
+    reference: { provider: "opencode", modelId: "opencode/gpt-5.4" },
     also: { opencode: ["opencode/gpt-5.4"] },
     classes: ["implementer", "balanced"],
   },
@@ -370,7 +371,8 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     id: "gpt-5.4-mini",
     name: "GPT-5.4 Mini",
     aliases: ["gpt 5.4 mini", "gpt-5.4-mini", "gpt5.4mini"],
-    reference: { provider: "codex", modelId: "gpt-5.4-mini" },
+    // Removed from live `codex debug models` (0.145); still on OpenCode Zen.
+    reference: { provider: "opencode", modelId: "opencode/gpt-5.4-mini" },
     also: { opencode: ["opencode/gpt-5.4-mini"] },
     classes: ["simple", "balanced"],
   },
@@ -402,7 +404,8 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     id: "gpt-5.2",
     name: "GPT-5.2",
     aliases: ["gpt 5.2", "gpt-5.2", "gpt5.2"],
-    reference: { provider: "codex", modelId: "gpt-5.2" },
+    // Removed from live `codex debug models` (0.145); still on OpenCode Zen.
+    reference: { provider: "opencode", modelId: "opencode/gpt-5.2" },
     also: {
       opencode: ["opencode/gpt-5.2"],
       cursor: ["gpt-5.2"],

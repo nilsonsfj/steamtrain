@@ -212,6 +212,8 @@ export function* recordLeaves(phases: HistoryPhase[]): Generator<LeafUsage & { s
         agent: step.agent,
         api: step.api,
         model: step.model,
+        // `undefined`, not `replayedSpend`'s 0: a leaf only sums, so both add
+        // nothing, and this keeps an unpriced agent's row from reading "$0".
         costUsd: step.cached ? undefined : step.result?.costUsd,
         tokens: step.cached ? undefined : step.result?.tokens,
       };
