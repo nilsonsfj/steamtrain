@@ -80,11 +80,45 @@
   // Per-step worktree patches, fetched lazily by the full-receipt view and
   // cached per run so re-expanding a step never refetches, plus which step rows
   // are expanded (survives that section's re-renders).
+  //
+  // Patches are up to 200 KB and this page stays open across a session, so only
+  // the most recent runs are kept. Map order is recency (oldest first).
+  // `expanded` is dropped with its run; it is not capped on its own.
+  // Keep in sync with src/web/run-diff-lru.ts — this script cannot import it.
+  var DIFF_CACHE_CAP = 32;
   var Diff = {
     cache: new Map(),    // runId -> Map(stepId -> worktree-detail body)
     expanded: new Map(), // runId -> Set(stepId)
     inflight: new Set()  // "runId:stepId" currently being fetched
   };
+
+  /** Cache hit: move the run to most-recently-used. A miss does not insert. */
+  function touchRunDiff(maps, runId) {
+    var cache = maps.cache;
+    if (!cache.has(runId)) return undefined;
+    var value = cache.get(runId);
+    cache.delete(runId);
+    cache.set(runId, value);
+    return value;
+  }
+
+  /** Insert or replace a run. Past the cap, drop the oldest run from both maps. */
+  function rememberRunDiff(maps, runId, value, cap) {
+    var cache = maps.cache;
+    if (cache.has(runId)) cache.delete(runId);
+    cache.set(runId, value);
+    while (cache.size > cap) {
+      var oldest = cache.keys().next().value;
+      cache.delete(oldest);
+      maps.expanded.delete(oldest);
+    }
+  }
+
+  /** Drop one run from both maps. */
+  function invalidateRunDiff(maps, runId) {
+    maps.cache.delete(runId);
+    maps.expanded.delete(runId);
+  }
 
   // ---- route -----------------------------------------------------------------
 
@@ -1461,7 +1495,7 @@
     wrap.appendChild(row);
     if (!isOpen) return wrap;
 
-    var cached = Diff.cache.get(record.id);
+    var cached = touchRunDiff(Diff, record.id);
     var body = cached && cached.get(s.stepId);
     if (!body) {
       wrap.appendChild(h("div", { class: "hist-wt-loading", text: "Loading diff…" }));
@@ -1482,14 +1516,15 @@
   function fetchWorktreeDiff(holder, record, stepId) {
     var key = record.id + ":" + stepId;
     if (Diff.inflight.has(key)) return;
-    var cached = Diff.cache.get(record.id);
+    var cached = touchRunDiff(Diff, record.id);
     if (cached && cached.has(stepId)) return;
     Diff.inflight.add(key);
     function settle(body) {
       Diff.inflight.delete(key);
       var runCache = Diff.cache.get(record.id);
-      if (!runCache) { runCache = new Map(); Diff.cache.set(record.id, runCache); }
+      if (!runCache) runCache = new Map();
       runCache.set(stepId, body);
+      rememberRunDiff(Diff, record.id, runCache, DIFF_CACHE_CAP);
       renderWorktreeSection(holder, record);
     }
     apiAuth("GET", "/api/history/" + encodeURIComponent(record.id) + "/worktrees?step=" + encodeURIComponent(stepId))
@@ -1544,9 +1579,9 @@
     return panel;
   }
 
-  /** Drop cached patches for a run after a harvest/prune changed its worktrees. */
+  /** Drop one run's patches and expanded rows after a harvest/prune. */
   function invalidateWorktreeDiffs(runId) {
-    Diff.cache.delete(runId);
+    invalidateRunDiff(Diff, runId);
   }
 
   /**
