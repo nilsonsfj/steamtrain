@@ -28,7 +28,7 @@ const ENABLED = process.env.STEAMTRAIN_AGENT_SMOKE === "1";
 const AGENT = (process.env.STEAMTRAIN_SMOKE_AGENT ?? "claude") as AgentProviderId;
 const DEFAULT_MODEL: Partial<Record<AgentProviderId, string>> = {
   claude: "haiku",
-  opencode: "opencode/north-mini-code-free",
+  opencode: "opencode/nemotron-3.5-lightning-free",
   codex: "gpt-5-mini",
   cursor: "composer-2",
   amp: "claude-sonnet-5",

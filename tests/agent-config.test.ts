@@ -32,7 +32,7 @@ const customConfig: SteamtrainConfig = {
       binary: "opencode-fork",
       env: { OPENCODE_CONFIG: "fork" },
       extraArgs: ["--profile", "fork"],
-      defaultModel: "opencode/mimo-v2.5-free",
+      defaultModel: "opencode/mimo-v2.6-flash-free",
     },
   ],
   maxConcurrency: 2,
@@ -118,10 +118,10 @@ describe("agent configuration", () => {
       provider: "opencode",
       healthy: true,
       binary: "opencode-fork",
-      defaultModel: "opencode/mimo-v2.5-free",
+      defaultModel: "opencode/mimo-v2.6-flash-free",
     });
-    expect(fork?.models.some((model) => model.id === "opencode/mimo-v2.5-free")).toBe(true);
-    expect(defaultDraftModel("opencode-fork", customConfig)).toBe("opencode/mimo-v2.5-free");
+    expect(fork?.models.some((model) => model.id === "opencode/mimo-v2.6-flash-free")).toBe(true);
+    expect(defaultDraftModel("opencode-fork", customConfig)).toBe("opencode/mimo-v2.6-flash-free");
   });
 
   it("propagates Claude's picker group onto model metadata", () => {
@@ -169,7 +169,7 @@ describe("agent configuration", () => {
 
   it("resolves workspace adapters through the configured instance", () => {
     const workspaces: WorkspaceConfig = {
-      workspaces: [{ id: "fork", agent: "opencode-fork", model: "opencode/mimo-v2.5-free" }],
+      workspaces: [{ id: "fork", agent: "opencode-fork", model: "opencode/mimo-v2.6-flash-free" }],
     };
     const orch = new Orchestrator(
       customConfig,
@@ -201,7 +201,7 @@ describe("agent configuration", () => {
             {
               id: "s1",
               agent: "opencode-fork",
-              model: "opencode/mimo-v2.5-free",
+              model: "opencode/mimo-v2.6-flash-free",
               prompt: "{{input}}",
               env: { STEP_ONLY: "1" },
               extraArgs: ["--step"],
@@ -308,7 +308,7 @@ describe("agent configuration", () => {
     const result = await author.generate({
       description: "make a workflow",
       agent: "opencode-fork",
-      model: "opencode/mimo-v2.5-free",
+      model: "opencode/mimo-v2.6-flash-free",
     });
     expect(result.ok).toBe(true);
     expect(result.spec?.phases[0]?.steps[0]).toMatchObject({ agent: "opencode-fork" });

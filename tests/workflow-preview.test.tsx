@@ -70,7 +70,7 @@ describe("WorkflowPreview", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toMatch(/▶.*report/i);
     expect(frame).toContain("report");
-    expect(frame).toContain("MiMo V2.5 Free");
+    expect(frame).toContain("MiMo V2.6 Flash Free");
   });
 
   it("hides step detail panel when showStepDetail is false", () => {
@@ -124,7 +124,7 @@ describe("WorkflowPreview", () => {
     expect(frame).toContain("workflow preview · mainline");
     expect(frame).toContain("ready to run");
     // Defaults are applied for display (not raw {{inputs.*}} placeholders).
-    expect(frame).toContain("mimo-v2.5-free");
+    expect(frame).toContain("mimo-v2.6-flash-free");
     expect(frame).not.toContain("{{inputs.");
     // Classic Ink wrap-overlap artifacts from the broken preview.
     expect(frame).not.toContain("rModel}}");
@@ -238,7 +238,7 @@ describe("preview input resolution", () => {
       },
       { inputs },
     );
-    expect(runner).toContain("mimo-v2.5-free");
+    expect(runner).toContain("mimo-v2.6-flash-free");
     expect(runner).not.toContain("{{inputs.");
     expect(runner).not.toMatch(/·\s*$/);
     expect(specDetailLines(plan, { inputs }).some((line) => line.startsWith("effort:"))).toBe(

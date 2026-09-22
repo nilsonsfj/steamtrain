@@ -29,8 +29,8 @@ describe("typed workflow inputs", () => {
     const spec = makeSpec({
       coderModel: {
         type: "model",
-        default: "opencode/mimo-v2.5-free",
-        fallbackModels: ["opencode/deepseek-v4-flash-free"],
+        default: "opencode/mimo-v2.6-flash-free",
+        fallbackModels: ["opencode/nemotron-3.5-lightning-free"],
       },
       runner: { type: "agent", default: "opencode" },
       timing: { type: "enum", choices: ["live", "end"], default: "end" },

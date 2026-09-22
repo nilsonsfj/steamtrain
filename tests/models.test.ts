@@ -225,7 +225,7 @@ describe("model names", () => {
   it("uses only the live OpenCode catalog when cache is loaded", () => {
     setOpencodeVariantCacheForTests(
       new Map([
-        ["opencode/mimo-v2.5-free", { name: "MiMo V2.5 Free", efforts: [] }],
+        ["opencode/mimo-v2.6-flash-free", { name: "MiMo V2.6 Flash Free", efforts: [] }],
         ["deepseek/deepseek-chat", { name: "DeepSeek Chat", efforts: [] }],
         ["opencode/gpt-5.4-mini", { name: "GPT 5.4 Mini", efforts: ["high"] }],
       ]),
@@ -233,40 +233,45 @@ describe("model names", () => {
     expect(modelIdsForAgent("opencode")).toEqual([
       "deepseek/deepseek-chat",
       "opencode/gpt-5.4-mini",
-      "opencode/mimo-v2.5-free",
+      "opencode/mimo-v2.6-flash-free",
     ]);
     expect(modelIdsForAgent("opencode")).not.toContain("opencode/big-pickle");
-    expect(defaultModelForAgent("opencode")).toBe("opencode/mimo-v2.5-free");
+    expect(defaultModelForAgent("opencode")).toBe("opencode/mimo-v2.6-flash-free");
     clearOpencodeVariantCacheForTests();
   });
 
   it("prefers a free OpenCode model when the adapter default is absent from the live catalog", () => {
     setOpencodeVariantCacheForTests(
       new Map([
-        ["opencode/north-mini-code-free", { name: "North Mini Code Free", efforts: [] }],
+        [
+          "opencode/nemotron-3.5-lightning-free",
+          { name: "Nemotron 3.5 Lightning Free", efforts: [] },
+        ],
         ["opencode/gpt-5.4-mini", { name: "GPT 5.4 Mini", efforts: ["high"] }],
       ]),
     );
-    expect(defaultModelForAgent("opencode")).toBe("opencode/north-mini-code-free");
+    expect(defaultModelForAgent("opencode")).toBe("opencode/nemotron-3.5-lightning-free");
     clearOpencodeVariantCacheForTests();
   });
 
   it("ignores a configured defaultModel that is not in the live catalog", () => {
     setOpencodeVariantCacheForTests(
-      new Map([["opencode/laguna-s-2.1-free", { name: "Laguna S 2.1 Free", efforts: [] }]]),
+      new Map([
+        ["opencode/ling-3.0-flash-fin-free", { name: "Ling 3.0 Flash Fin Free", efforts: [] }],
+      ]),
     );
     expect(
       defaultModelForAgent("opencode", {
         agents: [{ id: "opencode", provider: "opencode", defaultModel: "opencode/ghost-model" }],
       }),
-    ).toBe("opencode/laguna-s-2.1-free");
+    ).toBe("opencode/ling-3.0-flash-fin-free");
     clearOpencodeVariantCacheForTests();
   });
 
   it("returns each adapter's defaultModel via PROVIDER_ADAPTERS", () => {
     expect(defaultModelForAgent("claude")).toBe("claude-sonnet-5");
     expect(defaultModelForAgent("codex")).toBe("gpt-5.5");
-    expect(defaultModelForAgent("opencode")).toBe("opencode/mimo-v2.5-free");
+    expect(defaultModelForAgent("opencode")).toBe("opencode/mimo-v2.6-flash-free");
     expect(defaultModelForAgent("amp")).toBe("smart");
     expect(defaultModelForAgent("kiro")).toBe("claude-sonnet-5");
     expect(defaultModelForAgent("mimo")).toBe("mimo/mimo-auto");

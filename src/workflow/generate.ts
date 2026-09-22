@@ -468,8 +468,8 @@ Example:
     "maxIterations": { "type": "number", "default": 3 },
     "coderModel": {
       "type": "model",
-      "default": "opencode/mimo-v2.5-free",
-      "fallbackModels": ["opencode/north-mini-code-free", "opencode/laguna-s-2.1-free"]
+      "default": "opencode/mimo-v2.6-flash-free",
+      "fallbackModels": ["opencode/nemotron-3.5-lightning-free", "opencode/ling-3.0-flash-fin-free"]
     },
     "issueTiming": { "type": "enum", "choices": ["live", "end"], "default": "end" }
   }
@@ -497,11 +497,10 @@ silently render as empty text at runtime and will produce validation warnings.
 # Agents & models
 Prefer free models so the workflow runs without paid credentials.
 Prefer agent "opencode" with free OpenCode Zen models for tool-heavy steps:
-"opencode/mimo-v2.5-free", "opencode/north-mini-code-free",
-"opencode/nemotron-3-ultra-free", "opencode/laguna-s-2.1-free".
+"opencode/mimo-v2.6-flash-free", "opencode/nemotron-3.5-lightning-free",
+"opencode/nemotron-3-ultra-free", "opencode/ling-3.0-flash-fin-free".
 Do NOT default to the first-class "mimo" agent ("mimo/mimo-auto") — only use
-it when the user explicitly asks. Never use "opencode/deepseek-v4-flash-free"
-(it hangs on multi-turn tool loops).
+it when the user explicitly asks.
 Model-only bindings are allowed (omit agent) when "model" is a concrete id or
 "{{inputs.<modelKey>}}" — the engine picks the matching agent family.
 Every agent-backed step MUST set model (or modelClass) and a non-empty prompt.
@@ -528,18 +527,18 @@ outputs — see the forEach template rule above):
   "phases": [
     { "id": "split", "title": "Split into tasks", "steps": [
       { "id": "tasks", "kind": "distributor", "agent": "opencode",
-        "model": "opencode/mimo-v2.5-free",
+        "model": "opencode/mimo-v2.6-flash-free",
         "prompt": "Read the backlog below and output each distinct task as its own line (no numbering, no bullets). One task per line only.\\n\\nBacklog:\\n{{input}}" }
     ] },
     { "id": "implement", "title": "Implement in parallel", "steps": [
       { "id": "impl", "kind": "processor", "agent": "opencode",
-        "model": "opencode/mimo-v2.5-free", "dependsOn": ["tasks"],
+        "model": "opencode/mimo-v2.6-flash-free", "dependsOn": ["tasks"],
         "forEach": "steps.tasks.items",
         "prompt": "Implement this backlog task fully. Review your work and fix any issues before finishing.\\n\\nTask:\\n{{item}}\\n\\nContext:\\n{{input}}" }
     ] },
     { "id": "report", "title": "Consolidate", "steps": [
       { "id": "report", "kind": "consolidator", "agent": "opencode",
-        "model": "opencode/mimo-v2.5-free", "dependsOn": ["impl"],
+        "model": "opencode/mimo-v2.6-flash-free", "dependsOn": ["impl"],
         "prompt": "Summarize the final result across all tasks:\\n{{steps.impl.output}}" }
     ] }
   ]
@@ -554,17 +553,17 @@ The gate sits AFTER the body it re-runs, and "loopTo" names that earlier phase:
   "phases": [
     { "id": "implement", "title": "Implement", "steps": [
       { "id": "impl", "kind": "worker", "agent": "opencode",
-        "model": "opencode/mimo-v2.5-free", "prompt": "Implement the task fully:\\n{{input}}" }
+        "model": "opencode/mimo-v2.6-flash-free", "prompt": "Implement the task fully:\\n{{input}}" }
     ] },
     { "id": "review", "title": "Review", "steps": [
       { "id": "review", "kind": "worker", "agent": "opencode",
-        "model": "opencode/mimo-v2.5-free", "dependsOn": ["impl"],
+        "model": "opencode/mimo-v2.6-flash-free", "dependsOn": ["impl"],
         "workspace": "attach:impl",
         "prompt": "Review the implementation (pass {{iteration}}). If there are NO remaining issues, reply with the single word DONE. Otherwise list the issues.\\n{{steps.impl.output}}" }
     ] },
     { "id": "fix", "title": "Fix", "steps": [
       { "id": "fix", "kind": "worker", "agent": "opencode",
-        "model": "opencode/mimo-v2.5-free", "dependsOn": ["review"],
+        "model": "opencode/mimo-v2.6-flash-free", "dependsOn": ["review"],
         "workspace": "attach:impl",
         "prompt": "Apply fixes for these review findings:\\n{{steps.review.output}}" }
     ] },

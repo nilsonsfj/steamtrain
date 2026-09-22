@@ -647,17 +647,25 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
 
   // ── OpenCode free / specialty ────────────────────────────────────────
   {
-    id: "mimo-v2.5-free",
-    name: "MiMo V2.5 Free",
-    aliases: ["mimo free", "mimo-v2.5-free", "opencode/mimo-v2.5-free"],
-    reference: { provider: "opencode", modelId: "opencode/mimo-v2.5-free" },
+    id: "mimo-v2.6-flash-free",
+    name: "MiMo V2.6 Flash Free",
+    // The retired mimo-v2.5-free ids resolve here so configs that still name
+    // them keep running on its successor.
+    aliases: [
+      "mimo free",
+      "mimo-v2.6-flash-free",
+      "opencode/mimo-v2.6-flash-free",
+      "mimo-v2.5-free",
+      "opencode/mimo-v2.5-free",
+    ],
+    reference: { provider: "opencode", modelId: "opencode/mimo-v2.6-flash-free" },
     classes: ["simple", "balanced"],
   },
   {
-    id: "deepseek-v4-flash-free",
-    name: "DeepSeek V4 Flash Free",
-    aliases: ["deepseek free", "deepseek-v4-flash-free", "opencode/deepseek-v4-flash-free"],
-    reference: { provider: "opencode", modelId: "opencode/deepseek-v4-flash-free" },
+    id: "nemotron-3.5-lightning-free",
+    name: "Nemotron 3.5 Lightning Free",
+    aliases: ["nemotron lightning", "nemotron-3.5-lightning-free"],
+    reference: { provider: "opencode", modelId: "opencode/nemotron-3.5-lightning-free" },
     classes: ["simple"],
   },
   {

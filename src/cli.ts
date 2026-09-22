@@ -1503,7 +1503,7 @@ interface CreateOptions {
 }
 
 const DEFAULT_CREATE_AGENT: AgentInstanceId = "opencode";
-const DEFAULT_CREATE_MODEL = "opencode/mimo-v2.5-free";
+const DEFAULT_CREATE_MODEL = "opencode/mimo-v2.6-flash-free";
 
 async function runWorkflowCreateCommand(
   config: SteamtrainConfig,
@@ -2130,7 +2130,7 @@ test/lint commands, and offers starter workflows wired to them (written to
 without installing any agent, ride the bundled $0 demo:
 'steamtrain workflow run tour --input "all aboard"'.
 
-workflow create delegates to an agent (default: opencode/mimo-v2.5-free) to
+workflow create delegates to an agent (default: opencode/mimo-v2.6-flash-free) to
 draft a workflow from a plain-English description, validates it, prints the JSON,
 and (with --save) writes it so it shows up in the picker and CLI alongside the
 bundled workflows. --scope user (default) writes to ~/.steamtrain/workflows.json;

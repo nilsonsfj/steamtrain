@@ -243,7 +243,7 @@ describe("saveSessionWorkflowsToUser", () => {
     const result = collectSessionWorkflowSaves({
       catalog,
       home,
-      sessionOverrides: { custom: { a: { model: "opencode/mimo-v2.5-free" } } },
+      sessionOverrides: { custom: { a: { model: "opencode/mimo-v2.6-flash-free" } } },
     });
 
     expect(result.saved).toEqual([]);

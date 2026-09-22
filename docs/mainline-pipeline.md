@@ -76,7 +76,7 @@ need the planning/merge machinery around it.
 
 ```
 steamtrain workflow run mainline --input "your task" \
-  --param coderModel=opencode/mimo-v2.5-free \
+  --param coderModel=opencode/mimo-v2.6-flash-free \
   --param reviewerModel=opencode/nemotron-3-ultra-free
 ```
 
@@ -125,7 +125,7 @@ steamtrain workflow run mainline --input "your task" \
 # budget (the keyless default tier)
 steamtrain workflow run mainline --input "your task" \
   --param plannerModel=opencode/glm-5 \
-  --param coderModel=opencode/mimo-v2.5-free \
+  --param coderModel=opencode/mimo-v2.6-flash-free \
   --param reviewerModel=opencode/nemotron-3-ultra-free
 ```
 

@@ -100,14 +100,14 @@ const SAME_PHASE_SPEC = {
           id: "a",
           kind: "worker",
           agent: "opencode",
-          model: "opencode/mimo-v2.5-free",
+          model: "opencode/mimo-v2.6-flash-free",
           prompt: "x {{input}}",
         },
         {
           id: "b",
           kind: "worker",
           agent: "opencode",
-          model: "opencode/mimo-v2.5-free",
+          model: "opencode/mimo-v2.6-flash-free",
           dependsOn: ["a"],
           prompt: "y {{steps.a.output}}",
         },
@@ -139,18 +139,18 @@ describe("buildWorkflowGenerationPrompt", () => {
   it("teaches OpenCode free models rather than the first-class mimo agent", () => {
     const prompt = buildWorkflowGenerationPrompt("anything");
     expect(prompt).toContain('Prefer agent "opencode"');
-    expect(prompt).toContain("opencode/mimo-v2.5-free");
+    expect(prompt).toContain("opencode/mimo-v2.6-flash-free");
     expect(prompt).toContain('Do NOT default to the first-class "mimo" agent');
     expect(prompt).not.toContain('Prefer first-class agent "mimo"');
   });
 
   it("lists available models when provided so defaults stay on-catalog", () => {
     const prompt = buildWorkflowGenerationPrompt("anything", {
-      availableModels: ["opencode/mimo-v2.5-free", "opencode/north-mini-code-free"],
+      availableModels: ["opencode/mimo-v2.6-flash-free", "opencode/nemotron-3.5-lightning-free"],
     });
     expect(prompt).toContain("# Available models (USE THESE FOR DEFAULTS)");
-    expect(prompt).toContain("- opencode/mimo-v2.5-free");
-    expect(prompt).toContain("- opencode/north-mini-code-free");
+    expect(prompt).toContain("- opencode/mimo-v2.6-flash-free");
+    expect(prompt).toContain("- opencode/nemotron-3.5-lightning-free");
   });
 
   it("embeds the description and demands JSON output", () => {

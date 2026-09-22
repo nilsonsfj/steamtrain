@@ -435,7 +435,7 @@ describe("command workflow step", () => {
             {
               id: "each",
               kind: "processor",
-              model: "opencode/mimo-v2.5-free",
+              model: "opencode/mimo-v2.6-flash-free",
               dependsOn: ["prs"],
               forEach: "steps.prs.items",
               prompt: "{{item}}",

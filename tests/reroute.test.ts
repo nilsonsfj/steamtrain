@@ -15,7 +15,7 @@ const spec: WorkflowSpec = {
         {
           id: "scan",
           agent: "opencode",
-          model: "opencode/mimo-v2.5-free",
+          model: "opencode/mimo-v2.6-flash-free",
           prompt: "scan",
           effort: "high",
         },
@@ -33,7 +33,12 @@ const spec: WorkflowSpec = {
       id: "p2",
       title: "Phase 2",
       steps: [
-        { id: "fix", agent: "opencode", model: "opencode/deepseek-v4-flash-free", prompt: "fix" },
+        {
+          id: "fix",
+          agent: "opencode",
+          model: "opencode/nemotron-3.5-lightning-free",
+          prompt: "fix",
+        },
         { id: "review", agent: "claude", model: "claude-sonnet-5", prompt: "review" },
       ],
     },
@@ -69,7 +74,7 @@ describe("planAgentReroute", () => {
     const next = applyWorkflowStepOverrides(spec, result.plan.overrides);
     const scan = next.phases[0]!.steps[0] as { agent: string; model: string; effort?: string };
     expect(scan.agent).toBe("claude");
-    // mimo-v2.5-free has no Claude offering — falls back to the target default.
+    // mimo-v2.6-flash-free has no Claude offering — falls back to the target default.
     expect(scan.model).toBe(result.plan.targetModel);
     // Target default (Sonnet 5) still supports high — preserve it.
     expect(scan.effort).toBe("high");
