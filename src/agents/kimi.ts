@@ -1,4 +1,13 @@
-import type { AgentEvent, AgentId, AgentInstanceId, EventMapper } from "../types/events";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import type {
+  AgentEvent,
+  AgentId,
+  AgentInstanceId,
+  EventMapper,
+  TokenUsage,
+} from "../types/events";
 import { kimiEnvelope, kimiMessage } from "../types/raw-kimi";
 import type { AgentAdapter, AgentRunOptions } from "./adapter";
 import { runAgentProcess } from "./adapter";
@@ -152,6 +161,76 @@ export function buildKimiRunEnv(opts: AgentRunOptions): Record<string, string> |
   return { ...opts.env, KIMI_MODEL_THINKING_EFFORT: opts.effort };
 }
 
+/** Kimi Code's data root: `$KIMI_CODE_HOME`, else `~/.kimi-code` (as the CLI resolves it). */
+function kimiHome(env: Record<string, string | undefined>): string {
+  return env.KIMI_CODE_HOME || path.join(os.homedir(), ".kimi-code");
+}
+
+/**
+ * Tokens one run billed, read back from the session's wire logs. Kimi's
+ * `stream-json` output carries no usage at all, but every model call appends a
+ * `{"type":"usage.record","usage":{inputOther, output, inputCacheRead,
+ * inputCacheCreation},"time":<ms>}` line to
+ * `sessions/<workdir>/<sessionId>/agents/<agent>/wire.jsonl` — one file for the
+ * main loop and one per subagent. Records before `since` belong to earlier runs
+ * of a resumed session and are skipped. `undefined` when nothing was found.
+ * Kimi Code is subscription-billed, so there is no cost to report.
+ */
+export async function readKimiRunUsage(
+  sessionId: string,
+  since: number,
+  home: string,
+): Promise<TokenUsage | undefined> {
+  const sessionsDir = path.join(home, "sessions");
+  let workdirs: string[];
+  try {
+    workdirs = await fs.readdir(sessionsDir);
+  } catch {
+    return undefined;
+  }
+  let tokens: TokenUsage | undefined;
+  const add = (key: keyof TokenUsage, n: unknown) => {
+    if (typeof n !== "number") return;
+    tokens ??= {};
+    tokens[key] = (tokens[key] ?? 0) + n;
+  };
+  for (const workdir of workdirs) {
+    const agentsDir = path.join(sessionsDir, workdir, sessionId, "agents");
+    let agents: string[];
+    try {
+      agents = await fs.readdir(agentsDir);
+    } catch {
+      continue;
+    }
+    for (const agent of agents) {
+      let text: string;
+      try {
+        text = await fs.readFile(path.join(agentsDir, agent, "wire.jsonl"), "utf8");
+      } catch {
+        continue;
+      }
+      for (const line of text.split("\n")) {
+        if (!line.includes('"usage.record"')) continue;
+        let record: { type?: unknown; time?: unknown; usage?: Record<string, unknown> };
+        try {
+          record = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (record.type !== "usage.record" || !record.usage) continue;
+        if (typeof record.time === "number" && record.time < since) continue;
+        add("input", record.usage.inputOther);
+        add("output", record.usage.output);
+        add("cacheRead", record.usage.inputCacheRead);
+        add("cacheWrite", record.usage.inputCacheCreation);
+      }
+    }
+    // Session ids are unique; the first workdir holding it is the one.
+    return tokens;
+  }
+  return undefined;
+}
+
 /** Runs the real `kimi` CLI in streaming JSON mode. */
 export class KimiAdapter implements AgentAdapter {
   readonly id: AgentId = AGENT;
@@ -164,14 +243,29 @@ export class KimiAdapter implements AgentAdapter {
     this.binary = binary;
   }
 
-  run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
-    return runAgentProcess({
+  async *run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
+    const agent = opts.agentId ?? this.id;
+    const startedAt = Date.now();
+    let sessionId: string | undefined;
+    for await (const event of runAgentProcess({
       id: this.id,
       binary: this.binary,
       args: buildKimiRunArgs(opts),
       opts: { ...opts, env: buildKimiRunEnv(opts) },
-      map: createKimiMapper(opts.agentId ?? this.id),
+      map: createKimiMapper(agent),
       // Prompt travels in argv (`-p`); stdin stays closed.
-    });
+    })) {
+      if (event.kind === "session_start" && event.sessionId) sessionId = event.sessionId;
+      yield event;
+    }
+    // Usage never reaches stdout; read what this run billed from the session
+    // logs once the process is done writing them.
+    if (!sessionId) return;
+    const tokens = await readKimiRunUsage(
+      sessionId,
+      startedAt,
+      kimiHome({ ...process.env, ...opts.env }),
+    );
+    if (tokens) yield { kind: "usage", agent, ts: Date.now(), tokens };
   }
 }
