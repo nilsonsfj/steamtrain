@@ -7,6 +7,7 @@ import type {
 } from "../types/events";
 import {
   type ClaudeAssistant,
+  type ClaudeModelUsage,
   type ClaudeUsage,
   claudeAssistant,
   claudeContentBlock,
@@ -142,15 +143,47 @@ export const CLAUDE_MODELS: readonly AgentModel[] = [
  *  - `result`                       → result (is_error, cost, duration)
  *  - anything else                  → unknown passthrough
  *
- * Carries one piece of state across lines — the last assistant message's usage,
- * so repeated lines for the same message emit only what grew (see
- * `usageIncrement`). Everything else is a pure function of the raw line.
+ * Carries one piece of state across lines — the usage already reported per
+ * assistant message, so repeated lines for the same message emit only what
+ * grew (see `reportUsage`). Everything else is a pure function of the raw line.
  */
 export function createClaudeMapper(agent: AgentInstanceId = AGENT): EventMapper {
-  /** The assistant message the usage counters below belong to. */
-  let usageMessageId: string | undefined;
-  /** Usage already reported for that message, so the next line emits the delta. */
-  let usageReported: TokenUsage | undefined;
+  /**
+   * Usage already reported, per message id. Per id rather than "the last
+   * message": a subagent's (Task) assistant lines interleave with the main
+   * loop's, and a single slot would re-bill a message on every switch.
+   */
+  const usageReported = new Map<string | undefined, TokenUsage>();
+  /** The most recent message id — where id-less readings are attributed. */
+  let lastMessageId: string | undefined;
+  /**
+   * The message the API stream (`stream_event`, main loop only) is currently
+   * on — `message_delta` carries no id, and a subagent line may have moved
+   * `lastMessageId` since `message_start`.
+   */
+  let streamMessageId: string | undefined;
+
+  /**
+   * A `usage` event for what `usage` adds over what was already reported for
+   * message `id`, or nothing. An unseen id is a fresh message billed in full.
+   * An id-less reading folds into the latest message on purpose: an
+   * undercount is recoverable when the `result` totals land, a double count is
+   * a number nobody can explain. The watermark is a field-wise max, so a
+   * stale, lower restatement can never re-bill the difference.
+   */
+  const reportUsage = (
+    id: string | undefined,
+    usage: TokenUsage | undefined,
+    ts: number,
+  ): AgentEvent[] => {
+    if (!usage) return [];
+    const key = id ?? lastMessageId;
+    lastMessageId = key;
+    const already = usageReported.get(key);
+    const increment = usageIncrement(already, usage);
+    usageReported.set(key, maxUsage(already, usage));
+    return increment ? [{ kind: "usage", agent, ts, tokens: increment }] : [];
+  };
 
   return (raw: unknown): AgentEvent[] => {
     const ts = Date.now();
@@ -180,6 +213,16 @@ export function createClaudeMapper(agent: AgentInstanceId = AGENT): EventMapper 
         const se = claudeStreamEvent.safeParse(raw);
         if (!se.success) return [];
         const ev = se.data.event;
+        // Live spend, straight from the API stream: `message_start` opens a
+        // message (and names it), `message_delta` carries its running usage —
+        // the only place the final output count shows up before `result`.
+        if (ev.type === "message_start" && ev.message) {
+          streamMessageId = ev.message.id;
+          return reportUsage(ev.message.id, claudeTokens(ev.message.usage), ts);
+        }
+        if (ev.type === "message_delta") {
+          return reportUsage(streamMessageId, claudeTokens(ev.usage), ts);
+        }
         if (ev.type === "content_block_delta" && ev.delta) {
           if (ev.delta.type === "text_delta" && typeof ev.delta.text === "string") {
             return [{ kind: "text_delta", agent, ts, text: ev.delta.text }];
@@ -222,19 +265,10 @@ export function createClaudeMapper(agent: AgentInstanceId = AGENT): EventMapper 
         }
         // Live spend. Claude Code repeats an `assistant` line per content block
         // of the same message (same `message.id`), each restating that
-        // message's usage — so emit only what grew since the last line, and
-        // treat a new id as a fresh message billed in full.
-        const usage = claudeTokens(parsed.data.message.usage);
-        if (usage) {
-          const id = parsed.data.message.id;
-          // Unidentified messages fold into the previous one on purpose: an
-          // undercount is recoverable (the `result` totals land at the end), a
-          // double count is a number nobody can explain.
-          const increment = id === usageMessageId ? usageIncrement(usageReported, usage) : usage;
-          usageMessageId = id;
-          usageReported = usage;
-          if (increment) out.push({ kind: "usage", agent, ts, tokens: increment });
-        }
+        // message's usage — `reportUsage` emits only what grew.
+        out.push(
+          ...reportUsage(parsed.data.message.id, claudeTokens(parsed.data.message.usage), ts),
+        );
         return out;
       }
 
@@ -297,7 +331,7 @@ export function createClaudeMapper(agent: AgentInstanceId = AGENT): EventMapper 
             subtype: r.data.subtype,
             durationMs: r.data.duration_ms,
             costUsd: r.data.total_cost_usd,
-            tokens: claudeTokens(r.data.usage),
+            tokens: claudeModelTokens(r.data.modelUsage) ?? claudeTokens(r.data.usage),
           },
         ];
       }
@@ -325,6 +359,30 @@ function claudeTokens(usage: ClaudeUsage | undefined): TokenUsage | undefined {
 }
 
 /**
+ * Sum the `result`'s per-model `modelUsage` map. Preferred over `usage`, which
+ * covers only the main loop: a turn that delegates to subagents (Task) bills
+ * their calls into `total_cost_usd` and `modelUsage` but not into `usage`, so
+ * tokens read from `usage` would not add up to the reported cost.
+ */
+function claudeModelTokens(
+  modelUsage: Record<string, ClaudeModelUsage> | undefined,
+): TokenUsage | undefined {
+  const models = Object.values(modelUsage ?? {});
+  if (models.length === 0) return undefined;
+  const tokens: TokenUsage = {};
+  const add = (key: keyof TokenUsage, n: number | undefined) => {
+    if (n !== undefined) tokens[key] = (tokens[key] ?? 0) + n;
+  };
+  for (const m of models) {
+    add("input", m.inputTokens);
+    add("output", m.outputTokens);
+    add("cacheRead", m.cacheReadInputTokens);
+    add("cacheWrite", m.cacheCreationInputTokens);
+  }
+  return Object.keys(tokens).length > 0 ? tokens : undefined;
+}
+
+/**
  * What `next` adds over `already` field by field, or `undefined` when it adds
  * nothing. A counter that went backwards contributes 0 rather than a negative:
  * the stream is a report, not an arithmetic identity, and a live readout that
@@ -342,6 +400,16 @@ function usageIncrement(already: TokenUsage | undefined, next: TokenUsage): Toke
     }
   }
   return any ? delta : undefined;
+}
+
+/** Field-wise max of two usage readings of the same message. */
+function maxUsage(a: TokenUsage | undefined, b: TokenUsage): TokenUsage {
+  if (!a) return b;
+  const out: TokenUsage = { ...a };
+  for (const key of ["input", "output", "cacheRead", "cacheWrite", "reasoning"] as const) {
+    if (b[key] !== undefined) out[key] = Math.max(a[key] ?? 0, b[key]);
+  }
+  return out;
 }
 
 /**

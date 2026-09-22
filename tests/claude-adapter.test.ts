@@ -225,4 +225,91 @@ describe("claude mapper · live usage", () => {
   it("says nothing at all when a line carries no usage", () => {
     expect(map(SAMPLES.assistantText)).toEqual([]);
   });
+
+  it("does not re-bill growth after a stale, lower restatement", () => {
+    const mapper = createClaudeMapper();
+    mapper(assistant("msg_1", { input_tokens: 100, output_tokens: 40 }));
+    mapper(assistant("msg_1", { input_tokens: 100, output_tokens: 30 }));
+    // Back to 40: nothing new was billed since the first line.
+    expect(mapper(assistant("msg_1", { input_tokens: 100, output_tokens: 40 }))).toEqual([]);
+  });
+
+  it("keeps a watermark per message when subagent lines interleave", () => {
+    const mapper = createClaudeMapper();
+    mapper(assistant("msg_main", { input_tokens: 100, output_tokens: 10 }));
+    mapper(assistant("msg_sub", { input_tokens: 50, output_tokens: 5 }));
+    // Back on the main message: only its growth counts, not all of it again.
+    expect(mapper(assistant("msg_main", { input_tokens: 100, output_tokens: 12 }))).toEqual([
+      expect.objectContaining({ kind: "usage", tokens: { output: 2 } }),
+    ]);
+  });
+
+  it("reads the final output count from the API stream's message_delta", () => {
+    const mapper = createClaudeMapper();
+    const stream = (event: unknown) => ({ type: "stream_event", event });
+    expect(
+      mapper(
+        stream({
+          type: "message_start",
+          message: { id: "msg_1", usage: { input_tokens: 100, output_tokens: 1 } },
+        }),
+      ),
+    ).toEqual([expect.objectContaining({ tokens: { input: 100, output: 1 } })]);
+    // The assistant line restates the same message — nothing new.
+    expect(mapper(assistant("msg_1", { input_tokens: 100, output_tokens: 1 }))).toEqual([]);
+    // A subagent line in between must not steal the id-less delta.
+    mapper(assistant("msg_sub", { input_tokens: 5, output_tokens: 5 }));
+    expect(
+      mapper(stream({ type: "message_delta", usage: { input_tokens: 100, output_tokens: 250 } })),
+    ).toEqual([expect.objectContaining({ kind: "usage", tokens: { output: 249 } })]);
+  });
+});
+
+describe("claude mapper · result usage", () => {
+  it("prefers modelUsage, which includes subagent calls, over the main-loop usage", () => {
+    const line = {
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "done",
+      total_cost_usd: 0.42,
+      usage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 300 },
+      modelUsage: {
+        "claude-opus-5-5": {
+          inputTokens: 10,
+          outputTokens: 20,
+          cacheReadInputTokens: 300,
+          cacheCreationInputTokens: 0,
+          costUSD: 0.4,
+        },
+        "claude-haiku-4-5-20251001": {
+          inputTokens: 7,
+          outputTokens: 3,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 50,
+          costUSD: 0.02,
+        },
+      },
+    };
+    expect(createClaudeMapper()(line)).toEqual([
+      expect.objectContaining({
+        kind: "result",
+        costUsd: 0.42,
+        tokens: { input: 17, output: 23, cacheRead: 300, cacheWrite: 50 },
+      }),
+    ]);
+  });
+
+  it("falls back to usage when modelUsage is empty", () => {
+    const line = {
+      type: "result",
+      is_error: false,
+      total_cost_usd: 0,
+      usage: { input_tokens: 1, output_tokens: 2 },
+      modelUsage: {},
+    };
+    expect(createClaudeMapper()(line)).toEqual([
+      expect.objectContaining({ tokens: { input: 1, output: 2 } }),
+    ]);
+  });
 });

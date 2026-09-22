@@ -98,12 +98,34 @@ export const claudeStreamEvent = z
           .passthrough()
           .optional(),
         content_block: z.object({ type: z.string().optional() }).passthrough().optional(),
+        /** `message_start`: the API message, whose `id` the later `assistant` lines share. */
+        message: z
+          .object({ id: z.string().optional(), usage: claudeUsage.optional() })
+          .passthrough()
+          .optional(),
+        /** `message_delta`: the message's usage so far (output grows to its final count). */
+        usage: claudeUsage.optional(),
       })
       .passthrough(),
   })
   .passthrough();
 
-/** `{"type":"result","subtype":"success","is_error":false, result, duration_ms, total_cost_usd, usage, ...}` */
+/**
+ * One model's line in the `result`'s `modelUsage` map — Claude Code's cost
+ * tracker, which (unlike `usage`) also counts subagent/Task calls and is what
+ * `total_cost_usd` is the sum of. Input excludes cache reads/writes.
+ */
+export const claudeModelUsage = z
+  .object({
+    inputTokens: z.number().optional(),
+    outputTokens: z.number().optional(),
+    cacheReadInputTokens: z.number().optional(),
+    cacheCreationInputTokens: z.number().optional(),
+    costUSD: z.number().optional(),
+  })
+  .passthrough();
+
+/** `{"type":"result","subtype":"success","is_error":false, result, duration_ms, total_cost_usd, usage, modelUsage, ...}` */
 export const claudeResult = z
   .object({
     type: z.literal("result"),
@@ -113,9 +135,11 @@ export const claudeResult = z
     duration_ms: z.number().optional(),
     total_cost_usd: z.number().optional(),
     usage: claudeUsage.optional(),
+    modelUsage: z.record(z.string(), claudeModelUsage).optional(),
   })
   .passthrough();
 
+export type ClaudeModelUsage = z.infer<typeof claudeModelUsage>;
 export type ClaudeContentBlock = z.infer<typeof claudeContentBlock>;
 export type ClaudeAssistant = z.infer<typeof claudeAssistant>;
 export type ClaudeResult = z.infer<typeof claudeResult>;
