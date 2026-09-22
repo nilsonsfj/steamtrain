@@ -819,7 +819,7 @@ var SteamtrainReducer = (() => {
     const ranBilledStep = flat.some(
       ({ step }) => Boolean(step.agent || step.api) && step.result !== void 0 && !step.result.skipped
     );
-    const agentless = opts.credentialFree === true || !ranBilledStep && costUsd === 0 && tokens === 0;
+    const agentless = opts.credentialFree === true || !ranBilledStep && costUsd === 0 && tokens === 0 && failCount === 0 && blockedCount === 0;
     const nextCandidates = opts.nextCandidates ?? DEFAULT_NEXT_CANDIDATES;
     const current = state.name;
     const next = opts.nextWorkflow ?? nextCandidates.find(
