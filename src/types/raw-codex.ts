@@ -34,6 +34,8 @@ export const codexUsage = z
   .object({
     input_tokens: z.number().optional(),
     cached_input_tokens: z.number().optional(),
+    /** Subset of `input_tokens` written to the prompt cache (codex 0.15x+). */
+    cache_write_input_tokens: z.number().optional(),
     output_tokens: z.number().optional(),
     reasoning_output_tokens: z.number().optional(),
   })
@@ -55,3 +57,4 @@ export const codexEvent = z
 
 export type CodexThreadItem = z.infer<typeof codexThreadItem>;
 export type CodexEvent = z.infer<typeof codexEvent>;
+export type CodexUsage = z.infer<typeof codexUsage>;

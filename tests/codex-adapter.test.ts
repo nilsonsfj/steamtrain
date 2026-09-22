@@ -1,5 +1,13 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildCodexExecArgs, createCodexMapper } from "../src/agents/codex";
+import {
+  buildCodexExecArgs,
+  createCodexMapper,
+  readCodexThreadUsage,
+  subtractCodexUsage,
+} from "../src/agents/codex";
 import type { AgentEvent } from "../src/types/events";
 
 /**
@@ -340,6 +348,82 @@ describe("codex mapper (stateful, one mapper per run)", () => {
     const wrongExpected = (1000 * 0.75 + (100 + 40) * 4.5) / 1_000_000;
     expect(cost).toBeCloseTo(expectedWithOnlyOutput, 8);
     expect(cost).not.toBeCloseTo(wrongExpected, 8);
+  });
+
+  it("prices with the run's configured model (codex never names it in events)", () => {
+    const m = createCodexMapper("codex", { model: "gpt-5.4" });
+    const result = m(
+      JSON.parse(
+        '{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":100}}',
+      ),
+    );
+    // gpt-5.4 rates, not the gpt-5.4-mini fallback.
+    expect((result[0] as { costUsd: number }).costUsd).toBeCloseTo(
+      (1000 * 2.5 + 100 * 15.0) / 1_000_000,
+      8,
+    );
+  });
+
+  it("reports cache writes as a subset of input_tokens", () => {
+    const m = createCodexMapper("codex", { model: "gpt-5.4" });
+    const [result] = m(
+      JSON.parse(
+        '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":60,"output_tokens":10,"reasoning_output_tokens":5}}',
+      ),
+    );
+    expect(result).toMatchObject({
+      tokens: { input: 0, cacheRead: 40, cacheWrite: 60, output: 10, reasoning: 5 },
+    });
+  });
+
+  it("reports only this run's share of a resumed thread's running total", () => {
+    const m = createCodexMapper("codex", {
+      model: "gpt-5.4",
+      usageBaseline: { input_tokens: 1000, cached_input_tokens: 800, output_tokens: 50 },
+    });
+    const [result] = m(
+      JSON.parse(
+        '{"type":"turn.completed","usage":{"input_tokens":3000,"cached_input_tokens":2500,"output_tokens":150}}',
+      ),
+    );
+    expect(result).toMatchObject({ tokens: { input: 300, cacheRead: 1700, output: 100 } });
+    expect((result as { costUsd: number }).costUsd).toBeCloseTo(
+      (300 * 2.5 + 1700 * 0.25 + 100 * 15.0) / 1_000_000,
+      8,
+    );
+  });
+
+  it("never reports negative usage when the baseline exceeds the total", () => {
+    expect(
+      subtractCodexUsage({ input_tokens: 10, output_tokens: 5 }, { input_tokens: 20 }),
+    ).toEqual({ input_tokens: 0, output_tokens: 5 });
+  });
+
+  it("reads a thread's billed-so-far usage from its rollout's last token_count", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "codex-sessions-"));
+    const day = path.join(root, "2026", "09", "20");
+    mkdirSync(day, { recursive: true });
+    const tokenCount = (input: number) =>
+      JSON.stringify({
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: { total_token_usage: { input_tokens: input, output_tokens: 1 } },
+        },
+      });
+    writeFileSync(
+      path.join(day, "rollout-2026-09-20T03-54-05-thread-1.jsonl"),
+      [
+        tokenCount(10),
+        tokenCount(25),
+        '{"type":"event_msg","payload":{"type":"task_complete"}}',
+      ].join("\n"),
+    );
+    expect(await readCodexThreadUsage("thread-1", root)).toEqual({
+      input_tokens: 25,
+      output_tokens: 1,
+    });
+    expect(await readCodexThreadUsage("missing", root)).toBeUndefined();
   });
 
   it("uses per-model pricing when model is present in turn event", () => {
