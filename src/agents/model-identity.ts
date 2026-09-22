@@ -759,6 +759,10 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     reference: { provider: "opencode", modelId: "opencode/mimo-v2.6-flash-free" },
     classes: ["simple", "balanced"],
   },
+  // The retired opencode/deepseek-v4-flash-free is deliberately NOT aliased:
+  // its only successors are the paid deepseek-v4-flash models, and routing a
+  // free pin to them (or to another vendor's free model) would silently change
+  // what runs and what it costs. A config still naming it fails at the CLI.
   {
     id: "nemotron-3.5-lightning-free",
     name: "Nemotron 3.5 Lightning Free",
