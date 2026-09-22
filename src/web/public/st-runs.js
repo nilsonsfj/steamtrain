@@ -1611,6 +1611,7 @@
             } else if (rr.status === 409) {
               banner.className = "mbanner show err";
               banner.textContent = rr.body.error + " — retry with a deterministic winner:";
+              // Replace the row. A repeated 409 must not stack another pair.
               clear(buttons);
               buttons.appendChild(harvestBtn("Retry: first wins", Object.assign({}, body, { onConflict: "ours" })));
               buttons.appendChild(harvestBtn("Retry: last wins", Object.assign({}, body, { onConflict: "theirs" })));
