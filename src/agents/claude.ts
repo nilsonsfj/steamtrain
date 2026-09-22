@@ -399,10 +399,10 @@ function claudeTokens(usage: ClaudeUsage | undefined): TokenUsage | undefined {
 }
 
 /**
- * Sum the `result`'s per-model `modelUsage` map. Preferred over `usage`, which
- * covers only the main loop: a turn that delegates to subagents (Task) bills
- * their calls into `total_cost_usd` and `modelUsage` but not into `usage`, so
- * tokens read from `usage` would not add up to the reported cost.
+ * Sum the `result`'s per-model `modelUsage` map — the ledger `total_cost_usd`
+ * is the sum of, subagent (Task) calls included. Preferred over `usage`: older
+ * Claude Code builds filled that from the main loop only, so its tokens would
+ * not add up to the reported cost (2.1.280 derives it from this same map).
  */
 function claudeModelTokens(
   modelUsage: Record<string, ClaudeModelUsage> | undefined,
