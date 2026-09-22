@@ -193,6 +193,22 @@ describe("codex mapper (stateful, one mapper per run)", () => {
     ]);
   });
 
+  it("maps an enterprise approval_policy fallback warning to an error item", () => {
+    const m = createCodexMapper();
+    const message =
+      "Configured value for `approval_policy` is disallowed by requirements; falling back to required value OnRequest. Details: invalid value for `approval_policy`: `Never` is not in the allowed set [OnRequest]";
+    expect(
+      m(
+        JSON.parse(
+          JSON.stringify({
+            type: "item.completed",
+            item: { id: "item_0", type: "error", message },
+          }),
+        ),
+      ),
+    ).toEqual([expect.objectContaining({ kind: "error", message })]);
+  });
+
   it("includes model and tools in session_start when present", () => {
     const m = createCodexMapper();
     const event = m(
