@@ -114,11 +114,11 @@ The effective drafting agent · model is shown in the workflow picker header
 `/model` while on the picker (no step selected):
 
 ```
-/model claude                      # that agent's default draft model
-/model claude claude-sonnet-4-6    # an explicit agent + model
-/model opencode/mimo-v2.6-flash-free     # a bare model id (agent inferred)
-/model                             # show the current target + options
-/model auto                        # clear the override, back to auto-pick
+/model claude                         # that agent's default draft model
+/model claude claude-sonnet-4-6       # an explicit agent + model
+/model opencode/mimo-v2.6-flash-free  # a bare model id (agent inferred)
+/model                                # show the current target + options
+/model auto                           # clear the override, back to auto-pick
 ```
 
 The override is session-only and only accepts a **doctor-healthy** agent (a

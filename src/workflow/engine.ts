@@ -43,7 +43,7 @@ import {
 import { collectArtifacts } from "./artifacts";
 import { MAX_COMMAND_OUTPUT_BYTES, runShellCommand } from "./command";
 import type { StepEditPatch, StepKillResult, WorkflowRunControl } from "./control";
-import { addTokens } from "./cost";
+import { addTokens, replayedSpend } from "./cost";
 import type { StepPermissionsInfo, WorkflowEvent } from "./events";
 import type { StepRetryEvent } from "./events";
 import { mergeConflictGuidance } from "./gc";
@@ -3472,21 +3472,6 @@ async function executeCommandStep(
   } finally {
     await workspace.dispose();
   }
-}
-
-/**
- * A cached result as this run's summary should count it: the replay billed
- * nothing — its spend belongs to the run that produced it — so the copy in
- * `allResults` (the run-end summary, notifications, arrival receipt) reports
- * $0 and no tokens where the original reported any. `step_done` still carries
- * the original, so history shows what the step once cost.
- */
-function replayedSpend(result: StepResult): StepResult {
-  return {
-    ...result,
-    costUsd: result.costUsd === undefined ? undefined : 0,
-    tokens: result.tokens ? {} : undefined,
-  };
 }
 
 /**

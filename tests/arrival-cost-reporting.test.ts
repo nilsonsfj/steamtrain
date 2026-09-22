@@ -5,12 +5,14 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  type RunRecord,
   type StepResult,
   type WorkflowSpec,
   type WorkflowState,
   arrivalReceiptCards,
   buildArrivalReport,
   formatArrivalHeadline,
+  workflowStateFromRecord,
   workflowStateFromSpec,
 } from "../src/workflow";
 
@@ -97,5 +99,65 @@ describe("arrival receipt for agents that report no usage", () => {
     expect(receipt.tokens).toBe(0);
     expect(receipt.costReported).toBe(true);
     expect(arrivalReceiptCards(receipt).find((c) => c.id === "cost")!.value).toBe("$0");
+  });
+
+  it("does not bill a cached replay when reopened from history", () => {
+    // History detail rebuilds state from the saved record, whose steps keep
+    // the original result; the receipt must still read $0 for the replay.
+    const record: RunRecord = {
+      version: 1,
+      id: "r1",
+      workflow: "review",
+      input: "",
+      cwd: "/repo",
+      status: "done",
+      ok: true,
+      startedAt: 100,
+      endedAt: 1100,
+      durationMs: 1000,
+      totals: {
+        steps: 1,
+        ok: 1,
+        failed: 0,
+        cached: 1,
+        costUsd: 0,
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+        durationMs: 900,
+      },
+      phases: [
+        {
+          phaseId: "p",
+          title: "p",
+          index: 0,
+          stepCount: 1,
+          done: true,
+          ok: true,
+          steps: [
+            {
+              stepId: "review",
+              blockKind: "worker",
+              agent: "claude",
+              status: "done",
+              text: "LGTM",
+              cached: true,
+              result: {
+                stepId: "review",
+                ok: true,
+                output: "LGTM",
+                durationMs: 900,
+                costUsd: 0.5,
+                tokens: { input: 1000, output: 10 },
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const receipt = buildArrivalReport(workflowStateFromRecord(record))!.receipt;
+    expect(receipt.costUsd).toBe(0);
+    expect(receipt.tokens).toBe(0);
+    expect(receipt.costReported).toBe(true);
+    // The saved step still shows what it once cost.
+    expect(record.phases[0]!.steps[0]!.result!.costUsd).toBe(0.5);
   });
 });

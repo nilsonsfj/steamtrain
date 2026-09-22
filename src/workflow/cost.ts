@@ -219,6 +219,21 @@ export function* recordLeaves(phases: HistoryPhase[]): Generator<LeafUsage & { s
   }
 }
 
+/**
+ * A cached result as the run that replayed it should count it: the replay
+ * billed nothing — its spend belongs to the run that produced it — so it
+ * reports $0 and no tokens where the original reported any (and still nothing
+ * where the agent never reports spend). The stored step keeps the original,
+ * so history can show what the step once cost.
+ */
+export function replayedSpend<T extends Pick<StepResult, "costUsd" | "tokens">>(result: T): T {
+  return {
+    ...result,
+    costUsd: result.costUsd === undefined ? undefined : 0,
+    tokens: result.tokens ? {} : undefined,
+  };
+}
+
 /** Per-model breakdown for a single run's phase tree. */
 export function modelBreakdownForRecord(record: Pick<RunRecord, "phases">): ModelUsage[] {
   return aggregateLeavesByModel(recordLeaves(record.phases));

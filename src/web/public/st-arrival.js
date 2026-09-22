@@ -48,6 +48,14 @@
     return out;
   }
 
+  /**
+   * What a leaf cost this run: a cached replay billed nothing (the receipt
+   * agrees); its original cost belongs to the run that produced it.
+   */
+  function runCostUsd(s) {
+    return s.cached ? 0 : (s.result && s.result.costUsd) || 0;
+  }
+
   /** True for a step that never started because a dependency broke first. */
   function isBlocked(s) {
     return Boolean(SteamtrainReducer.isCascadeVictim && SteamtrainReducer.isCascadeVictim(s.result));
@@ -113,7 +121,8 @@
       var r = s.result || {};
       var bits = [s.stepId, s.status];
       if (typeof r.durationMs === "number") bits.push((r.durationMs / 1000).toFixed(1) + "s");
-      if (r.costUsd) bits.push("$" + r.costUsd.toFixed(4));
+      if (s.cached) bits.push("cached");
+      else if (r.costUsd) bits.push("$" + r.costUsd.toFixed(4));
       lines.push(bits.join(" · "));
     });
     var blob = new Blob([lines.join("\n")], { type: "text/plain" });
@@ -536,7 +545,7 @@
     if (opts.showCost) {
       row.appendChild(h("span", {
         class: "num",
-        text: s.result && s.result.costUsd ? "$" + s.result.costUsd.toFixed(4) : ""
+        text: runCostUsd(s) ? "$" + runCostUsd(s).toFixed(4) : ""
       }));
     }
     return row;
@@ -635,7 +644,7 @@
     wrap.appendChild(main);
 
     // ---- right column: step ledger ------------------------------------------
-    var showCost = leaves.some(function (s) { return s.result && s.result.costUsd; });
+    var showCost = leaves.some(function (s) { return runCostUsd(s) > 0; });
     var ledger = renderLedger(leaves, shown ? shown.stepId : null, showCost);
 
     var foot = h("div", { class: "ledger-foot" });

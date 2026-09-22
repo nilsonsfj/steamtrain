@@ -112,6 +112,13 @@ var SteamtrainReducer = (() => {
   function addTokens(a, b) {
     return addTokensInto(addTokensInto(emptyTokens(), a), b);
   }
+  function replayedSpend(result) {
+    return {
+      ...result,
+      costUsd: result.costUsd === void 0 ? void 0 : 0,
+      tokens: result.tokens ? {} : void 0
+    };
+  }
 
   // src/workflow/step-kind.ts
   var MAX_WORKFLOW_NESTING_DEPTH = 5;
@@ -1013,20 +1020,13 @@ var SteamtrainReducer = (() => {
     }
     return parts.join(" \xB7 ");
   }
-  function replayed(result) {
-    return {
-      ...result,
-      costUsd: result.costUsd === void 0 ? void 0 : 0,
-      tokens: result.tokens ? {} : void 0
-    };
-  }
   function leafResults(state) {
     const fromResults = (state.results ?? []).filter((r) => !r.childResults?.length);
     if (fromResults.length > 0) return fromResults;
     const out = [];
     for (const phase of state.phases) {
       for (const step of phase.steps) {
-        if (step.result) out.push(step.cached ? replayed(step.result) : step.result);
+        if (step.result) out.push(step.cached ? replayedSpend(step.result) : step.result);
       }
     }
     return out.filter((r) => !r.childResults?.length);

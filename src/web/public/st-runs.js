@@ -642,7 +642,9 @@
         var result = step.result || {};
         var head = step.stepId + " · " + step.status;
         if (result.durationMs) head += " · " + (result.durationMs / 1000).toFixed(1) + "s";
-        if (result.costUsd) head += " · $" + result.costUsd.toFixed(4);
+        // A cached replay billed nothing this run; the run totals agree.
+        if (step.cached) head += " · cached";
+        else if (result.costUsd) head += " · $" + result.costUsd.toFixed(4);
         var text = step.text || result.output || "";
         lines.push("── " + head + " " + "─".repeat(Math.max(0, 60 - head.length)));
         lines.push(text.trim() ? text : "(no output captured)");
@@ -712,7 +714,7 @@
         );
         if (step.cached) head.appendChild(h("span", { class: "tag gate", text: "cached" }));
         head.appendChild(h("span", { class: "num", text: result.durationMs ? (result.durationMs / 1000).toFixed(1) + "s" : "" }));
-        head.appendChild(h("span", { class: "num cost", text: result.costUsd ? "$" + result.costUsd.toFixed(4) : "" }));
+        head.appendChild(h("span", { class: "num cost", text: stepCostText(step, result) }));
         row.appendChild(head);
         var text = step.text || result.output || "";
         row.appendChild(text.trim()

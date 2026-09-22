@@ -1,3 +1,4 @@
+import { replayedSpend } from "./cost";
 import type { StepState, WorkflowState } from "./reducer";
 import { flattenSteps } from "./reducer";
 
@@ -469,15 +470,6 @@ export function formatArrivalReceipt(receipt: ArrivalReceipt): string {
   return parts.join(" · ");
 }
 
-/** A replayed result as this run saw it: reported, but $0 and no tokens billed. */
-function replayed(result: ArrivalStepResult): ArrivalStepResult {
-  return {
-    ...result,
-    costUsd: result.costUsd === undefined ? undefined : 0,
-    tokens: result.tokens ? {} : undefined,
-  };
-}
-
 function leafResults(state: WorkflowState): ArrivalStepResult[] {
   const fromResults = (state.results ?? []).filter((r) => !r.childResults?.length);
   if (fromResults.length > 0) return fromResults;
@@ -485,7 +477,7 @@ function leafResults(state: WorkflowState): ArrivalStepResult[] {
   for (const phase of state.phases) {
     for (const step of phase.steps) {
       // A cached replay's spend belongs to the run that produced it.
-      if (step.result) out.push(step.cached ? replayed(step.result) : step.result);
+      if (step.result) out.push(step.cached ? replayedSpend(step.result) : step.result);
     }
   }
   return out.filter((r) => !r.childResults?.length);
