@@ -1,4 +1,4 @@
-import { replayedSpend } from "./cost";
+import { replayedSpend, totalTokens } from "./cost";
 import type { StepState, WorkflowState } from "./reducer";
 import { flattenSteps } from "./reducer";
 
@@ -156,7 +156,7 @@ export function buildArrivalReport(
     else if (isCascadeVictim(result)) blockedCount += 1;
     else failCount += 1;
     costUsd += result.costUsd ?? 0;
-    tokens += tokenTotal(result.tokens);
+    tokens += totalTokens(result.tokens);
     if (result.costUsd !== undefined) costReported = true;
     if (result.tokens !== undefined) tokensReported = true;
     durationMs += result.durationMs ?? 0;
@@ -181,6 +181,17 @@ export function buildArrivalReport(
     ({ step }) =>
       Boolean(step.agent || step.api) && step.result !== undefined && !step.result.skipped,
   );
+  // A cached replay of an agent step billed nothing this run, and that is
+  // known even when the agent never reports spend (Antigravity, Kiro) — so
+  // it counts as reported $0, as on the runs page and the Markdown report.
+  if (
+    flat.some(
+      ({ step }) => step.cached && Boolean(step.agent || step.api) && step.result !== undefined,
+    )
+  ) {
+    costReported = true;
+    tokensReported = true;
+  }
   const agentless =
     opts.credentialFree === true ||
     (!ranBilledStep && costUsd === 0 && tokens === 0 && failCount === 0 && blockedCount === 0);
@@ -512,15 +523,6 @@ function fallbackHero(state: WorkflowState): string {
   return state.name
     ? `Workflow '${state.name}' stopped short. Press i to show step details and find the stall.`
     : "Workflow stopped short. Press i to show step details and find the stall.";
-}
-
-/**
- * Billable tokens, matching `cost.ts`'s `totalTokens` (not imported, to keep
- * this module free of it): `reasoning` is a subset of `output`, never added.
- */
-function tokenTotal(t: ArrivalStepResult["tokens"] | undefined): number {
-  if (!t) return 0;
-  return (t.input ?? 0) + (t.output ?? 0) + (t.cacheRead ?? 0) + (t.cacheWrite ?? 0);
 }
 
 function compactTokens(n: number): string {

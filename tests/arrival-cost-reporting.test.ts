@@ -101,6 +101,17 @@ describe("arrival receipt for agents that report no usage", () => {
     expect(arrivalReceiptCards(receipt).find((c) => c.id === "cost")!.value).toBe("$0");
   });
 
+  it("reads a cached replay of an unpriced agent as $0, not unknown", () => {
+    const state = finished({});
+    state.phases[0]!.steps[1]!.cached = true;
+    const receipt = buildArrivalReport(state)!.receipt;
+    expect(receipt.costReported).toBe(true);
+    expect(receipt.tokensReported).toBe(true);
+    const cards = arrivalReceiptCards(receipt);
+    expect(cards.find((c) => c.id === "cost")!.value).toBe("$0");
+    expect(cards.find((c) => c.id === "produced")!.value).toBe("no tokens billed");
+  });
+
   it("does not bill a cached replay when reopened from history", () => {
     // History detail rebuilds state from the saved record, whose steps keep
     // the original result; the receipt must still read $0 for the replay.

@@ -112,6 +112,10 @@ var SteamtrainReducer = (() => {
   function addTokens(a, b) {
     return addTokensInto(addTokensInto(emptyTokens(), a), b);
   }
+  function totalTokens(t) {
+    if (!t) return 0;
+    return (t.input ?? 0) + (t.output ?? 0) + (t.cacheRead ?? 0) + (t.cacheWrite ?? 0);
+  }
   function replayedSpend(result) {
     return {
       ...result,
@@ -812,7 +816,7 @@ var SteamtrainReducer = (() => {
       else if (isCascadeVictim(result)) blockedCount += 1;
       else failCount += 1;
       costUsd += result.costUsd ?? 0;
-      tokens += tokenTotal(result.tokens);
+      tokens += totalTokens(result.tokens);
       if (result.costUsd !== void 0) costReported = true;
       if (result.tokens !== void 0) tokensReported = true;
       durationMs += result.durationMs ?? 0;
@@ -826,6 +830,12 @@ var SteamtrainReducer = (() => {
     const ranBilledStep = flat.some(
       ({ step }) => Boolean(step.agent || step.api) && step.result !== void 0 && !step.result.skipped
     );
+    if (flat.some(
+      ({ step }) => step.cached && Boolean(step.agent || step.api) && step.result !== void 0
+    )) {
+      costReported = true;
+      tokensReported = true;
+    }
     const agentless = opts.credentialFree === true || !ranBilledStep && costUsd === 0 && tokens === 0 && failCount === 0 && blockedCount === 0;
     const nextCandidates = opts.nextCandidates ?? DEFAULT_NEXT_CANDIDATES;
     const current = state.name;
@@ -1046,10 +1056,6 @@ var SteamtrainReducer = (() => {
       return state.name ? `Workflow '${state.name}' finished, but no consolidator report was produced. Press i to show step details.` : "Workflow finished, but no consolidator report was produced. Press i to show step details.";
     }
     return state.name ? `Workflow '${state.name}' stopped short. Press i to show step details and find the stall.` : "Workflow stopped short. Press i to show step details and find the stall.";
-  }
-  function tokenTotal(t) {
-    if (!t) return 0;
-    return (t.input ?? 0) + (t.output ?? 0) + (t.cacheRead ?? 0) + (t.cacheWrite ?? 0);
   }
   function compactTokens(n) {
     if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
@@ -1562,8 +1568,8 @@ var SteamtrainReducer = (() => {
   function createThroughputMeter(windowMs = DEFAULT_WINDOW_MS) {
     const samples = [];
     return {
-      sample(totalTokens, nowMs) {
-        samples.push({ atMs: nowMs, totalTokens });
+      sample(totalTokens2, nowMs) {
+        samples.push({ atMs: nowMs, totalTokens: totalTokens2 });
         while (samples.length > 1 && nowMs - samples[0].atMs > windowMs) samples.shift();
       },
       bars(count) {
