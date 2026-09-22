@@ -101,6 +101,22 @@ interface FamilySeed {
 const FAMILY_SEEDS: readonly FamilySeed[] = [
   // ── Claude frontier ──────────────────────────────────────────────────
   {
+    id: "claude-fable-5.1",
+    name: "Claude Fable 5.1",
+    aliases: ["fable 5.1", "fable-5.1", "claude fable 5.1", "claude-fable-5-1"],
+    reference: { provider: "claude", modelId: "claude-fable-5-1" },
+    also: { opencode: ["opencode/claude-fable-5-1"] },
+    classes: ["ultrathinker", "thinker", "deep-reviewer", "implementer"],
+  },
+  {
+    id: "claude-opus-5.5",
+    name: "Claude Opus 5.5",
+    aliases: ["opus 5.5", "opus-5.5", "opus5.5", "claude opus 5.5", "claude-opus-5-5"],
+    reference: { provider: "claude", modelId: "claude-opus-5-5" },
+    also: { opencode: ["opencode/claude-opus-5-5"] },
+    classes: ["deep-reviewer", "reviewer", "thinker", "implementer", "ultrathinker"],
+  },
+  {
     id: "claude-fable-5",
     name: "Claude Fable 5",
     aliases: ["fable", "fable 5", "claude fable 5", "claude-fable-5"],
@@ -265,6 +281,30 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
 
   // ── GPT / Codex ──────────────────────────────────────────────────────
   {
+    id: "gpt-6-astra",
+    name: "GPT-6 Astra",
+    aliases: ["gpt 6 astra", "gpt-6-astra", "gpt6astra"],
+    reference: { provider: "codex", modelId: "gpt-6-astra" },
+    also: { opencode: ["opencode/gpt-6-astra"] },
+    classes: ["ultrathinker", "deep-reviewer", "thinker"],
+  },
+  {
+    id: "gpt-6-sol",
+    name: "GPT-6 Sol",
+    aliases: ["gpt 6 sol", "gpt-6-sol", "gpt6sol", "gpt-6"],
+    reference: { provider: "codex", modelId: "gpt-6-sol" },
+    also: { opencode: ["opencode/gpt-6-sol"] },
+    classes: ["implementer", "balanced", "reviewer", "thinker"],
+  },
+  {
+    id: "gpt-6-luna",
+    name: "GPT-6 Luna",
+    aliases: ["gpt 6 luna", "gpt-6-luna", "gpt6luna"],
+    reference: { provider: "codex", modelId: "gpt-6-luna" },
+    also: { opencode: ["opencode/gpt-6-luna"] },
+    classes: ["simple", "balanced"],
+  },
+  {
     id: "gpt-5.6-sol",
     name: "GPT-5.6 Sol",
     aliases: ["gpt 5.6 sol", "gpt-5.6-sol", "gpt5.6sol", "gpt-5.6"],
@@ -417,6 +457,44 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
 
   // ── Gemini ───────────────────────────────────────────────────────────
   {
+    id: "gemini-3.8-flash",
+    name: "Gemini 3.8 Flash",
+    aliases: ["gemini 3.8 flash", "gemini-3.8-flash", "gemini 3.8", "gemini-3.8"],
+    reference: { provider: "antigravity", modelId: "gemini-3.8-flash-high" },
+    also: {
+      antigravity: [
+        "gemini-3.8-flash",
+        "gemini-3.8-flash-medium",
+        "gemini-3.8-flash-low",
+        "Gemini 3.8 Flash",
+        "Gemini 3.8 Flash (High)",
+        "Gemini 3.8 Flash (Medium)",
+        "Gemini 3.8 Flash (Low)",
+      ],
+      opencode: ["opencode/gemini-3.8-flash"],
+    },
+    classes: ["simple", "balanced", "implementer"],
+  },
+  {
+    id: "gemini-3.7-flash",
+    name: "Gemini 3.7 Flash",
+    aliases: ["gemini 3.7 flash", "gemini-3.7-flash", "gemini 3.7", "gemini-3.7"],
+    reference: { provider: "antigravity", modelId: "gemini-3.7-flash-high" },
+    also: {
+      antigravity: [
+        "gemini-3.7-flash",
+        "gemini-3.7-flash-medium",
+        "gemini-3.7-flash-low",
+        "Gemini 3.7 Flash",
+        "Gemini 3.7 Flash (High)",
+        "Gemini 3.7 Flash (Medium)",
+        "Gemini 3.7 Flash (Low)",
+      ],
+      opencode: ["opencode/gemini-3.7-flash"],
+    },
+    classes: ["simple", "balanced", "implementer"],
+  },
+  {
     id: "gemini-3.6-flash",
     name: "Gemini 3.6 Flash",
     aliases: ["gemini 3.6 flash", "gemini-3.6-flash", "gemini flash", "gemini 3.6", "gemini-3.6"],
@@ -446,7 +524,8 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     id: "gemini-3.5-flash",
     name: "Gemini 3.5 Flash",
     aliases: ["gemini 3.5 flash", "gemini-3.5-flash"],
-    reference: { provider: "antigravity", modelId: "gemini-3.5-flash-high" },
+    // agy 1.2 no longer lists 3.5 Flash; OpenCode Zen still serves it.
+    reference: { provider: "opencode", modelId: "opencode/gemini-3.5-flash" },
     also: {
       antigravity: [
         "gemini-3.5-flash",
@@ -620,6 +699,22 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     aliases: ["mimo auto", "mimo-auto", "mimo/mimo-auto", "auto mimo"],
     reference: { provider: "mimo", modelId: "mimo/mimo-auto" },
     classes: ["simple", "balanced", "implementer"],
+  },
+  {
+    id: "mimo-v2.6-flash",
+    name: "MiMo-V2.6-Flash",
+    aliases: ["mimo v2.6 flash", "mimo-v2.6-flash", "xiaomi/mimo-v2.6-flash"],
+    reference: { provider: "mimo", modelId: "xiaomi/mimo-v2.6-flash" },
+    also: { opencode: ["opencode-go/mimo-v2.6-flash"] },
+    classes: ["simple", "balanced", "implementer"],
+  },
+  {
+    id: "mimo-v2.6-pro",
+    name: "MiMo-V2.6-Pro",
+    aliases: ["mimo v2.6 pro", "mimo-v2.6-pro", "xiaomi/mimo-v2.6-pro"],
+    reference: { provider: "mimo", modelId: "xiaomi/mimo-v2.6-pro" },
+    also: { opencode: ["opencode-go/mimo-v2.6-pro"] },
+    classes: ["thinker", "implementer", "reviewer", "balanced"],
   },
   {
     id: "mimo-v2.5",

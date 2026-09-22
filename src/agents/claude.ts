@@ -30,7 +30,8 @@ const AGENT: AgentId = "claude";
  *
  * Current ids from https://platform.claude.com/docs/en/about-claude/models/overview
  * and https://support.claude.com/en/articles/11940350-claude-code-model-configuration
- * (verified against Claude Code 2.1.221: `/model` aliases include opus → Opus 5).
+ * (verified against Claude Code 2.1.221: `/model` aliases include opus → Opus 5;
+ * Opus 5.5 and Fable 5.1 added from the models.dev Anthropic list, 2026-09-22).
  */
 const CLAUDE_MODEL_GROUP_CURRENT = "Current";
 const CLAUDE_MODEL_GROUP_ALIASES = "Aliases (latest)";
@@ -40,6 +41,8 @@ const CLAUDE_MODEL_GROUP_OLDER = "Older snapshots";
 
 export const CLAUDE_MODELS: readonly AgentModel[] = [
   // Current
+  { id: "claude-fable-5-1", name: "Claude Fable 5.1", group: CLAUDE_MODEL_GROUP_CURRENT },
+  { id: "claude-opus-5-5", name: "Claude Opus 5.5", group: CLAUDE_MODEL_GROUP_CURRENT },
   { id: "claude-fable-5", name: "Claude Fable 5", group: CLAUDE_MODEL_GROUP_CURRENT },
   { id: "claude-opus-5", name: "Claude Opus 5", group: CLAUDE_MODEL_GROUP_CURRENT },
   { id: "claude-sonnet-5", name: "Claude Sonnet 5", group: CLAUDE_MODEL_GROUP_CURRENT },

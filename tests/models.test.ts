@@ -119,6 +119,9 @@ describe("mimo models", () => {
   it("exposes the Xiaomi MiMo Code catalog with MiMo Auto as the free default", () => {
     expect(modelIdsForAgent("mimo")).toEqual([
       "mimo/mimo-auto",
+      "xiaomi/mimo-v2.6-flash",
+      "xiaomi/mimo-v2.6-pro",
+      "xiaomi/mimo-v2.6-pro-ultraspeed",
       "xiaomi/mimo-v2.5",
       "xiaomi/mimo-v2.5-pro",
       "xiaomi/mimo-v2.5-pro-ultraspeed",
@@ -312,7 +315,7 @@ describe("model names", () => {
 
   it("exposes id and name on catalog entries", () => {
     const claude = modelsForAgent("claude")[0];
-    expect(claude).toEqual({ id: "claude-fable-5", name: "Claude Fable 5", group: "Current" });
+    expect(claude).toEqual({ id: "claude-fable-5-1", name: "Claude Fable 5.1", group: "Current" });
   });
 
   it("includes display names in formatAgentTarget", () => {
