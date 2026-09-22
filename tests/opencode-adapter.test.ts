@@ -22,7 +22,9 @@ const toolRunning =
   '{"type":"tool_use","sessionID":"ses_abc","part":{"id":"prt_t","type":"tool","tool":"bash","callID":"call_1","state":{"status":"running","input":{"command":"ls"}}}}';
 const toolCompleted =
   '{"type":"message.part.updated","sessionID":"ses_abc","part":{"id":"prt_t","type":"tool","tool":"bash","callID":"call_1","state":{"status":"completed","output":"file1\\nfile2"}}}';
-const stepFinish = '{"type":"step_finish","sessionID":"ses_abc","cost":0.0012}';
+// Real opencode 1.18.x envelope: the stored `step-finish` part, verbatim.
+const stepFinish =
+  '{"type":"step_finish","timestamp":1790100893134,"sessionID":"ses_abc","part":{"id":"prt_sf1","type":"step-finish","reason":"stop","cost":0.0012,"tokens":{"total":1510,"input":1000,"output":200,"reasoning":10,"cache":{"write":0,"read":300}}}}';
 const errorLine =
   '{"type":"error","timestamp":1780531753199,"sessionID":"ses_170","error":{"name":"UnknownError","data":{"message":"Model not found: openai/gpt-4o-mini. Did you mean: gpt-5.4-mini, gpt-5.2?"}}}';
 const nestedProps =
@@ -75,14 +77,41 @@ describe("opencode mapper (stateful, one mapper per run)", () => {
       }),
     ]);
 
-    // step_finish becomes a result carrying cost.
+    // step_finish becomes a result carrying the part's cost and tokens.
+    // opencode's `output` excludes reasoning; the normalized one includes it.
     expect(m(JSON.parse(stepFinish))).toEqual([
       expect.objectContaining({
         kind: "result",
         isError: false,
         subtype: "step_finish",
         costUsd: 0.0012,
+        tokens: { input: 1000, output: 210, reasoning: 10, cacheRead: 300, cacheWrite: 0 },
       }),
+    ]);
+  });
+
+  it("accumulates cost and tokens across a turn's step_finish events", () => {
+    // Each step_finish prices one model call; a tool-using turn has several.
+    const m = createOpenCodeMapper();
+    const step = (id: string, cost: number, input: number, output: number) =>
+      JSON.parse(
+        `{"type":"step_finish","sessionID":"ses_abc","part":{"id":"${id}","type":"step-finish","reason":"tool-calls","cost":${cost},"tokens":{"input":${input},"output":${output},"reasoning":0,"cache":{"write":0,"read":50}}}}`,
+      );
+    m(step("prt_a", 0.01, 100, 20));
+    // A re-emitted part is not billed twice.
+    m(step("prt_a", 0.01, 100, 20));
+    const [last] = m(step("prt_b", 0.02, 300, 40)).filter((e) => e.kind === "result");
+    expect(last).toMatchObject({
+      costUsd: 0.03,
+      tokens: { input: 400, output: 60, cacheRead: 100, cacheWrite: 0, reasoning: 0 },
+    });
+  });
+
+  it("still reads a flat (legacy) step_finish cost", () => {
+    const m = createOpenCodeMapper();
+    expect(m(JSON.parse('{"type":"step_finish","sessionID":"ses_abc","cost":0.5}'))).toEqual([
+      expect.objectContaining({ kind: "session_start" }),
+      expect.objectContaining({ kind: "result", costUsd: 0.5 }),
     ]);
   });
 

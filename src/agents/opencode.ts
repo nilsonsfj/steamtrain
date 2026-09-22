@@ -116,12 +116,21 @@ const TOOL_FAILED = new Set(["error", "failed", "cancelled", "aborted"]);
  *    against the last value per part id and emit only the new suffix;
  *  - tool parts stream status transitions, so we emit `tool_use` once when a
  *    tool starts and `tool_result` once when it ends (dedup by call/part id);
- *  - the first event carrying a `ses_…` id yields a single `session_start`.
+ *  - the first event carrying a `ses_…` id yields a single `session_start`;
+ *  - every `step_finish` prices ONE model call (a turn with tool use has
+ *    several), so we keep the running cost/token totals and each `result`
+ *    restates the whole turn so far — the "last result wins" contract the
+ *    engine and live reducer apply.
  *
  * Create a fresh mapper per run so this state never leaks between tasks.
  */
 export function createOpenCodeMapper(agent: AgentInstanceId = AGENT): EventMapper {
   let sessionStarted = false;
+  /** Running turn totals across `step_finish` events. */
+  let costTotal: number | undefined;
+  let tokenTotal: TokenUsage | undefined;
+  /** step-finish part ids already counted, so a re-emitted part never double-bills. */
+  const stepsCounted = new Set<string>();
   const textSeen = new Map<string, string>();
   const toolStarted = new Set<string>();
   const toolFinished = new Set<string>();
@@ -233,14 +242,24 @@ export function createOpenCodeMapper(agent: AgentInstanceId = AGENT): EventMappe
       }
       case "step_finish":
       case "step.finish": {
+        // Current builds nest the step's usage in `part` (the stored
+        // `step-finish` part, verbatim); older ones put it at the top level.
+        const partId = part?.id;
+        if (partId === undefined || !stepsCounted.has(partId)) {
+          if (partId !== undefined) stepsCounted.add(partId);
+          const cost = part?.cost ?? e.cost;
+          if (cost !== undefined) costTotal = (costTotal ?? 0) + cost;
+          const tokens = opencodeTokens(part?.tokens ?? e.tokens);
+          if (tokens) tokenTotal = addUsage(tokenTotal, tokens);
+        }
         out.push({
           kind: "result",
           agent,
           ts,
           isError: false,
           subtype: "step_finish",
-          costUsd: e.cost,
-          tokens: opencodeTokens(e.tokens),
+          costUsd: costTotal,
+          tokens: tokenTotal,
         });
         return out;
       }
@@ -264,17 +283,29 @@ export function createOpenCodeMapper(agent: AgentInstanceId = AGENT): EventMappe
 /**
  * Map OpenCode's per-step token block onto the normalized {@link TokenUsage}.
  * OpenCode reports cache reads/writes under `cache`, so `input` is the uncached
- * prompt count and `reasoning` is a separately-reported category.
+ * prompt count. Its `output` EXCLUDES reasoning (the categories are disjoint),
+ * while {@link TokenUsage.output} includes it — so reasoning is folded into
+ * `output` and also kept as its (overlapping) own category.
  */
 function opencodeTokens(tokens: OpenCodeTokens | undefined): TokenUsage | undefined {
   if (!tokens) return undefined;
   const out: TokenUsage = {};
+  if (tokens.output !== undefined || tokens.reasoning !== undefined)
+    out.output = (tokens.output ?? 0) + (tokens.reasoning ?? 0);
   if (tokens.input !== undefined) out.input = tokens.input;
-  if (tokens.output !== undefined) out.output = tokens.output;
   if (tokens.reasoning !== undefined) out.reasoning = tokens.reasoning;
   if (tokens.cache?.read !== undefined) out.cacheRead = tokens.cache.read;
   if (tokens.cache?.write !== undefined) out.cacheWrite = tokens.cache.write;
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** Field-wise sum that only sets the categories either side reports. */
+function addUsage(a: TokenUsage | undefined, b: TokenUsage): TokenUsage {
+  const sum: TokenUsage = { ...a };
+  for (const key of ["input", "output", "cacheRead", "cacheWrite", "reasoning"] as const) {
+    if (b[key] !== undefined) sum[key] = (sum[key] ?? 0) + b[key];
+  }
+  return sum;
 }
 
 /**
