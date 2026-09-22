@@ -252,6 +252,23 @@ describe("renderReport markdown", () => {
     expect(md).toContain("| Step | Kind | Status | Duration | Cost |");
   });
 
+  it("prices a cached replay at $0 in the step table, matching the totals", () => {
+    const rec = record({
+      phases: [
+        phase([
+          step({
+            stepId: "review",
+            cached: true,
+            result: { ok: true, durationMs: 800, costUsd: 0.5 } as never,
+          }),
+        ]),
+      ],
+    });
+    const md = renderReport(rec, "markdown");
+    expect(md).toContain("| ✅ review | worker | cached | 0.8s | $0 |");
+    expect(md).not.toContain("0.5");
+  });
+
   it("includes the budget breach line when budget data is present", () => {
     const rec = record({
       status: "budget-exceeded",

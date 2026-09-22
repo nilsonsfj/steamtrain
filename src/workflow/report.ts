@@ -367,7 +367,9 @@ function renderMarkdownReport(model: RunReportModel): string {
             ? "skipped"
             : "failed";
       const duration = step.durationMs !== undefined ? formatElapsed(step.durationMs) : "—";
-      const cost = step.costUsd ? formatUsd(step.costUsd) : "—";
+      // A cached replay billed nothing this run (the totals agree); the JSON
+      // keeps its original `costUsd` alongside `cached` for consumers.
+      const cost = step.cached ? "$0" : step.costUsd ? formatUsd(step.costUsd) : "—";
       lines.push(`| ${glyph} ${step.stepId} | ${step.kind} | ${status} | ${duration} | ${cost} |`);
     }
   }
