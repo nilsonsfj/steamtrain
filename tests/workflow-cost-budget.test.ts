@@ -138,11 +138,13 @@ describe("adapters parse token usage", () => {
 
   it("opencode maps its per-step token block", () => {
     const line =
-      '{"type":"step.finish","cost":0.01,"tokens":{"input":80,"output":20,"reasoning":5,"cache":{"read":10,"write":4}}}';
+      '{"type":"step_finish","part":{"type":"step-finish","cost":0.01,"tokens":{"input":80,"output":20,"reasoning":5,"cache":{"read":10,"write":4}}}}';
     const events = createOpenCodeMapper()(JSON.parse(line));
     const result = events.find((e) => e.kind === "result");
+    // opencode's `output` excludes reasoning; the normalized one includes it.
     expect(result).toMatchObject({
-      tokens: { input: 80, output: 20, reasoning: 5, cacheRead: 10, cacheWrite: 4 },
+      costUsd: 0.01,
+      tokens: { input: 80, output: 25, reasoning: 5, cacheRead: 10, cacheWrite: 4 },
     });
   });
 });
