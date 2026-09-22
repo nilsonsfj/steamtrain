@@ -114,6 +114,9 @@ function flatText(node: StubEl): string {
 function click(node: StubEl): void {
   for (const fn of node.listeners.click ?? []) fn({ target: node });
 }
+function buttonsNamed(root: StubEl, label: string): StubEl[] {
+  return collect(root, (n) => n.tag === "button" && flatText(n) === label);
+}
 
 const HOUR = 3600_000;
 
@@ -161,6 +164,8 @@ interface Mounted {
   said: string[];
   /** Records handed to ST.modals.openDiagnoseModal, in order. */
   diagnoseCalls: unknown[];
+  /** Bodies posted to POST /api/history/:id/harvest, in order. */
+  harvestPosts: unknown[];
   clickRow: (index: number) => Promise<void>;
   check: (index: number) => Promise<void>;
   /** Click the full receipt's ledger line for a step, toggling its output. */
@@ -187,11 +192,18 @@ async function mountRuns(opts: {
   byModel?: Record<string, unknown>[];
   /** Worktree sources the full receipt's lifecycle block should see. */
   worktrees?: Record<string, unknown>[];
+  /**
+   * Scripted answers for POST /harvest, in call order. The last entry repeats
+   * once the list is exhausted. Omitted ⇒ a single empty 200.
+   */
+  harvestResponses?: { status: number; body: Record<string, unknown> }[];
 }): Promise<Mounted> {
   const root = el("div");
   const location = { hash: "#runs", pathname: "/", search: "" };
   const said: string[] = [];
   const diagnoseCalls: unknown[] = [];
+  const harvestPosts: unknown[] = [];
+  let harvestCount = 0;
   // Server-side history, so a successful DELETE actually removes it and the
   // re-fetch that follows sees the same thing the client just did.
   let stored = opts.runs ?? [];
@@ -235,7 +247,7 @@ async function mountRuns(opts: {
       safeExternalLink: () => el("a"),
     },
     api: () => Promise.resolve({ status: 200, body: { runs: opts.live ?? [] } }),
-    apiAuth: (method: string, path: string) => {
+    apiAuth: (method: string, path: string, payload?: unknown) => {
       if (method === "DELETE") {
         const status = opts.deleteStatus ?? 200;
         if (status === 200) {
@@ -251,6 +263,13 @@ async function mountRuns(opts: {
       if (path === "/api/history") return Promise.resolve({ status: 200, body: { runs: stored } });
       if (path.startsWith("/api/history/") && path.endsWith("/worktrees")) {
         return Promise.resolve({ status: 200, body: { sources: opts.worktrees ?? [] } });
+      }
+      if (method === "POST" && path.endsWith("/harvest")) {
+        harvestPosts.push(payload);
+        const scripted = opts.harvestResponses;
+        const reply = scripted?.[Math.min(harvestCount, Math.max(scripted.length - 1, 0))];
+        harvestCount += 1;
+        return Promise.resolve(reply ?? { status: 200, body: {} });
       }
       return Promise.resolve({ status: 200, body: { record: opts.detail } });
     },
@@ -307,6 +326,7 @@ async function mountRuns(opts: {
     hash: () => location.hash,
     said,
     diagnoseCalls,
+    harvestPosts,
     clickRow: async (index: number) => {
       click(rowNodes()[index] as StubEl);
       for (let i = 0; i < 6; i++) await Promise.resolve();
@@ -849,6 +869,43 @@ describe("runs page: the full receipt", () => {
     expect(main).toContain("+12");
     expect(main).toContain("Apply to checkout");
     expect(main).toContain("Prune worktrees");
+  });
+
+  // A second 409 used to append another "first wins" / "last wins" pair beside
+  // the one already on the row. The row is replaced, so it stays one pair, and
+  // the retry posts the deterministic winner.
+  it("replaces conflict retry buttons instead of stacking them on a repeated 409", async () => {
+    const page = await openFullReceipt({
+      worktrees: [
+        {
+          stepId: "scan-logic",
+          exists: true,
+          branch: "st/scan-logic",
+          files: [{ status: "M", path: "a.ts" }],
+          additions: 12,
+          deletions: 3,
+        },
+      ],
+      harvestResponses: [
+        { status: 409, body: { error: "sources conflict" } },
+        { status: 409, body: { error: "sources conflict" } },
+      ],
+    });
+
+    await page.clickButton("Apply to checkout");
+    expect(buttonsNamed(page.root, "Retry: first wins")).toHaveLength(1);
+    expect(buttonsNamed(page.root, "Retry: last wins")).toHaveLength(1);
+
+    await page.clickButton("Retry: first wins");
+    expect(buttonsNamed(page.root, "Retry: first wins")).toHaveLength(1);
+    expect(buttonsNamed(page.root, "Retry: last wins")).toHaveLength(1);
+    const banners = collect(
+      page.root,
+      (n) => hasClass(n, "mbanner") && n.textContent.includes("deterministic winner"),
+    );
+    expect(banners).toHaveLength(1);
+    expect(banners[0]?.textContent).toBe("sources conflict — retry with a deterministic winner:");
+    expect(page.harvestPosts).toEqual([{ mode: "apply" }, { mode: "apply", onConflict: "ours" }]);
   });
 });
 
