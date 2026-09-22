@@ -24,7 +24,7 @@ jobs:
           GITHUB_ACTOR: ${{ github.repository_owner }}
           VERSION: "1.18.32"
         with:
-          model: opencode/mimo-v2.5-free
+          model: opencode/mimo-v2.6-flash-free
           prompt: |
             Review this pull request for steamtrain, a TypeScript CLI/TUI/Web workflow orchestrator:
             - Check for code quality issues and consistency with existing patterns
