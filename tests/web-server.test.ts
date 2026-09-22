@@ -1158,6 +1158,111 @@ describe("web server", () => {
     expect(body.error).toContain("invalid workflow name");
   });
 
+  it("returns 400, not 500, for malformed percent-encoding in route params", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const root = mkdtempSync(join(tmpdir(), "steamtrain-web-pct-"));
+    tempRoots.push(root);
+    const history = createWorkflowHistoryStore(root);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      historyStore: history,
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const server = createWebServer({ host, runs, history, workflowSource: () => "bundled" });
+    servers.push(server);
+    const base = await start(server);
+
+    // Every route that decodes a path segment. Body-first routes need a valid
+    // body so the decode (not JSON parsing) is what answers.
+    const cases: { method: string; path: string; body?: string }[] = [
+      { method: "GET", path: "/api/workflows/%zz" },
+      { method: "POST", path: "/api/workflows/%zz/lint" },
+      { method: "POST", path: "/api/workflows/%zz/plan" },
+      { method: "GET", path: "/api/history/%zz" },
+      { method: "POST", path: "/api/history/%zz/rerun" },
+      { method: "POST", path: "/api/history/%zz/diagnose" },
+      { method: "GET", path: "/api/history/%zz/worktrees" },
+      { method: "POST", path: "/api/history/%zz/harvest" },
+      { method: "POST", path: "/api/history/%zz/prune" },
+      { method: "GET", path: "/api/runs/%zz/stream" },
+      { method: "POST", path: "/api/runs/%zz/cancel" },
+      { method: "POST", path: "/api/runs/%zz/pause" },
+      { method: "POST", path: "/api/runs/%zz/resume" },
+      { method: "POST", path: "/api/runs/%zz/detach" },
+      {
+        method: "POST",
+        path: "/api/runs/%zz/edit-step",
+        body: JSON.stringify({ stepId: "s1", prompt: "x" }),
+      },
+      {
+        method: "POST",
+        path: "/api/runs/%zz/kill-step",
+        body: JSON.stringify({ stepId: "s1" }),
+      },
+      {
+        method: "POST",
+        path: "/api/runs/%zz/approval",
+        body: JSON.stringify({ stepId: "s1", approved: true }),
+      },
+      {
+        method: "POST",
+        path: "/api/runs/%zz/input",
+        body: JSON.stringify({ stepId: "s1", value: "yes" }),
+      },
+    ];
+
+    for (const c of cases) {
+      const res = await fetch(`${base}${c.path}`, {
+        method: c.method,
+        headers: c.body ? { "content-type": "application/json" } : undefined,
+        body: c.body,
+      });
+      const payload = (await res.json()) as { error?: string };
+      expect(res.status, `${c.method} ${c.path}`).toBe(400);
+      expect(payload.error, `${c.method} ${c.path}`).toBe("malformed percent-encoding");
+    }
+  });
+
+  it("still resolves valid percent-encoded route params", async () => {
+    const specs: Record<string, WorkflowSpec> = {
+      demo: demoSpec("demo"),
+      "hello world": demoSpec("hello world"),
+      café: demoSpec("café"),
+    };
+    const host: WorkflowHost = {
+      listWorkflows: () => specs,
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      runWorkflow: (_name, input) => happyRun(input),
+    };
+    const { server } = makeServer(host);
+    const base = await start(server);
+
+    const encodedName = await fetch(`${base}/api/workflows/d%65mo`);
+    expect(encodedName.status).toBe(200);
+    expect(((await encodedName.json()) as { name: string }).name).toBe("demo");
+
+    const spaced = await fetch(`${base}/api/workflows/${encodeURIComponent("hello world")}`);
+    expect(spaced.status).toBe(200);
+    expect(((await spaced.json()) as { name: string }).name).toBe("hello world");
+
+    const unicode = await fetch(`${base}/api/workflows/${encodeURIComponent("café")}`);
+    expect(unicode.status).toBe(200);
+    expect(((await unicode.json()) as { name: string }).name).toBe("café");
+
+    const created = await fetch(`${base}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow: "demo", input: "world" }),
+    });
+    expect(created.status).toBe(201);
+    const { runId } = (await created.json()) as { runId: string };
+    const encodedId = `%${runId.charCodeAt(0).toString(16).padStart(2, "0")}${runId.slice(1)}`;
+    const frames = await readSse(`${base}/api/runs/${encodedId}/stream`);
+    expect(frames.some((f) => f.type === "status" && f.status === "done")).toBe(true);
+  });
+
   it("PUT /api/workflows/:name requires confirmRisk for command steps", async () => {
     const host = new FakeAuthoringHost(demoSpec());
     const runs = new WorkflowRunManager({
