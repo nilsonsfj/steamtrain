@@ -2026,6 +2026,18 @@ async function runAgentAttempt(
         if (event.isError) {
           errored = true;
           errorMessage ??= event.text;
+        } else {
+          // The turn's own outcome is authoritative. Codex emits an `error`
+          // item when enterprise requirements reject `approval_policy=never`
+          // and fall back to `on-request` (and for other startup warnings),
+          // then completes the turn successfully. That earlier event must not
+          // fail the step. A later `error` event, or a result with
+          // `isError`, still does.
+          errored = false;
+          errorMessage = undefined;
+          errorStderr = undefined;
+          failureHint = undefined;
+          processTimedOut = false;
         }
       } else if (event.kind === "error") {
         errored = true;

@@ -445,6 +445,9 @@ export function buildCodexExecArgs(opts: AgentRunOptions): string[] {
   // default (`workspace-write`) stands. `approval_policy="never"` is
   // unconditional either way: a headless run has nobody to approve anything,
   // so an escalation prompt would just hang until the step timeout.
+  // `codex exec` itself also forces `never`. Enterprise requirements that
+  // allow only `on-request` reject that value, log an error item, and fall
+  // back. The engine treats a following successful turn as success.
   const sandbox = permissionArgs(AGENT, opts.permissions);
   return [
     "exec",

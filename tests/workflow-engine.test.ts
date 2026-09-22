@@ -194,6 +194,89 @@ describe("runWorkflow", () => {
     expect(events.at(-1)).toMatchObject({ kind: "workflow_done", ok: false });
   });
 
+  it("keeps a step ok when a non-fatal error is followed by a successful result", async () => {
+    // Codex logs an error item when enterprise requirements reject
+    // approval_policy=never and fall back to OnRequest, then finishes the
+    // turn. That warning must not fail the step or replace its output.
+    const warning =
+      "Configured value for `approval_policy` is disallowed by requirements; falling back to required value OnRequest. Details: invalid value for `approval_policy`: `Never` is not in the allowed set [OnRequest]";
+    const script: Script = (_opts, id) => [
+      { kind: "error", agent: id, ts: 0, message: warning },
+      { kind: "result", agent: id, ts: 0, isError: false, text: "shipped the change" },
+    ];
+    const spec: WorkflowSpec = {
+      name: "enterprise-codex",
+      retry: { maxAttempts: 1 },
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "a", agent: "codex", model: "gpt-5.4-mini", prompt: "x" }],
+        },
+      ],
+    };
+    const { deps, state } = makeDeps(script);
+    const events = await collect(spec, "x", deps);
+
+    const done = events.find((e) => e.kind === "step_done" && e.stepId === "a");
+    expect(done && done.kind === "step_done" && done.result.ok).toBe(true);
+    if (done && done.kind === "step_done") {
+      expect(done.result.output).toBe("shipped the change");
+      expect(done.result.error).toBeUndefined();
+    }
+    expect(state.runs).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({ kind: "workflow_done", ok: true });
+  });
+
+  it("still fails a step when an error arrives after a successful result", async () => {
+    const script: Script = (_opts, id) => [
+      { kind: "result", agent: id, ts: 0, isError: false, text: "partial" },
+      { kind: "error", agent: id, ts: 0, message: "codex exited with code 1" },
+    ];
+    const spec: WorkflowSpec = {
+      name: "late-error",
+      retry: { maxAttempts: 1 },
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "a", agent: "codex", model: "gpt-5.4-mini", prompt: "x" }],
+        },
+      ],
+    };
+    const { deps } = makeDeps(script);
+    const events = await collect(spec, "x", deps);
+    const done = events.find((e) => e.kind === "step_done" && e.stepId === "a");
+    expect(done && done.kind === "step_done" && done.result.ok).toBe(false);
+    if (done && done.kind === "step_done") {
+      expect(done.result.error).toBe("codex exited with code 1");
+    }
+    expect(events.at(-1)).toMatchObject({ kind: "workflow_done", ok: false });
+  });
+
+  it("still fails a step when the completed turn itself is an error", async () => {
+    const script: Script = (_opts, id) => [
+      { kind: "error", agent: id, ts: 0, message: "turn failed", category: "quota" },
+      { kind: "result", agent: id, ts: 0, isError: true, text: "turn failed" },
+    ];
+    const spec: WorkflowSpec = {
+      name: "failed-turn",
+      retry: { maxAttempts: 1 },
+      phases: [
+        {
+          id: "p1",
+          title: "P1",
+          steps: [{ id: "a", agent: "codex", model: "gpt-5.4-mini", prompt: "x" }],
+        },
+      ],
+    };
+    const { deps } = makeDeps(script);
+    const events = await collect(spec, "x", deps);
+    const done = events.find((e) => e.kind === "step_done" && e.stepId === "a");
+    expect(done && done.kind === "step_done" && done.result.ok).toBe(false);
+    if (done && done.kind === "step_done") expect(done.result.error).toBe("turn failed");
+  });
+
   it("resumes completed steps from the cache without re-running them", async () => {
     const spec: WorkflowSpec = {
       name: "resume",
