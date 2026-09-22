@@ -2037,7 +2037,9 @@ async function runAgentAttempt(
         // "Last result wins": adapters that emit several `result` events per
         // turn (opencode's per-step finishes) report cumulative running
         // totals, so the final event already carries the whole-turn usage —
-        // including every live increment before it.
+        // including every live increment before it. Cost and tokens are
+        // independent: a result that restates only one of them replaces only
+        // that one, and the other keeps its increments.
         if (typeof event.costUsd === "number") {
           costUsd = event.costUsd;
           usageCostSinceResult = undefined;

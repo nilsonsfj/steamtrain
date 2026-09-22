@@ -130,6 +130,7 @@ export const claudeResult = z
   .object({
     type: z.literal("result"),
     subtype: z.string().optional(),
+    session_id: z.string().optional(),
     is_error: z.boolean().optional(),
     result: z.string().optional(),
     duration_ms: z.number().optional(),

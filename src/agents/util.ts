@@ -79,3 +79,28 @@ export function humanizeAssistantError(a: ClaudeAssistant): string {
   if (firstText && code) return `${firstText} (${code})`;
   return firstText ?? code ?? "assistant error";
 }
+
+/**
+ * The latest running total each session reported in this process, bounded
+ * (oldest evicted). Resume baselines read from a CLI's on-disk session record
+ * can lag an attempt that just died before the CLI flushed it; the totals that
+ * attempt already reported on stdout close that gap.
+ */
+export class RecentSessionTotals<T> {
+  private readonly totals = new Map<string, T>();
+
+  constructor(private readonly max = 256) {}
+
+  get(sessionId: string): T | undefined {
+    return this.totals.get(sessionId);
+  }
+
+  set(sessionId: string, total: T): void {
+    this.totals.delete(sessionId);
+    this.totals.set(sessionId, total);
+    if (this.totals.size > this.max) {
+      const oldest = this.totals.keys().next().value;
+      if (oldest !== undefined) this.totals.delete(oldest);
+    }
+  }
+}

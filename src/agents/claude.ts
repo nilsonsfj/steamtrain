@@ -24,7 +24,7 @@ import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adap
 import type { AgentModel } from "./agent-model";
 import { classifyAgentFailure } from "./failure-classify";
 import { permissionArgs } from "./permissions";
-import { humanizeAssistantError, stringifyContent } from "./util";
+import { RecentSessionTotals, humanizeAssistantError, stringifyContent } from "./util";
 
 const AGENT: AgentId = "claude";
 
@@ -155,7 +155,13 @@ export const CLAUDE_MODELS: readonly AgentModel[] = [
  */
 export function createClaudeMapper(
   agent: AgentInstanceId = AGENT,
-  options: { costBaseline?: ClaudeSessionCost } = {},
+  options: {
+    costBaseline?: ClaudeSessionCost;
+    /** The session being resumed, until the stream names it. */
+    sessionId?: string;
+    /** Called with each session-wide running total a `result` reports. */
+    onSessionTotal?: (sessionId: string, total: ClaudeSessionCost) => void;
+  } = {},
 ): EventMapper {
   /**
    * Usage already reported, per message id. Per id rather than "the last
@@ -163,6 +169,7 @@ export function createClaudeMapper(
    * loop's, and a single slot would re-bill a message on every switch.
    */
   const usageReported = new Map<string | undefined, TokenUsage>();
+  let sessionId = options.sessionId;
   /** The most recent message id — where id-less readings are attributed. */
   let lastMessageId: string | undefined;
   /**
@@ -203,6 +210,7 @@ export function createClaudeMapper(
       case "system": {
         const init = claudeSystemInit.safeParse(raw);
         if (init.success) {
+          if (init.data.session_id) sessionId = init.data.session_id;
           return [
             {
               kind: "session_start",
@@ -330,6 +338,13 @@ export function createClaudeMapper(
       case "result": {
         const r = claudeResult.safeParse(raw);
         if (!r.success) return [{ kind: "unknown", agent, ts, rawType: "result", raw }];
+        const resultSession = r.data.session_id ?? sessionId;
+        if (resultSession && r.data.total_cost_usd !== undefined) {
+          options.onSessionTotal?.(resultSession, {
+            costUsd: r.data.total_cost_usd,
+            modelUsage: r.data.modelUsage,
+          });
+        }
         return [
           {
             kind: "result",
@@ -430,6 +445,26 @@ function subtractModelUsage(
     out[model] = row;
   }
   return out;
+}
+
+/** Session-wide cost totals Claude runs in this process have reported. */
+const CLAUDE_SESSION_TOTALS = new RecentSessionTotals<ClaudeSessionCost>();
+
+/** Field-wise max of two session totals (either may be missing). */
+export function maxSessionCost(
+  a: ClaudeSessionCost | undefined,
+  b: ClaudeSessionCost | undefined,
+): ClaudeSessionCost | undefined {
+  if (!a || !b) return a ?? b;
+  const modelUsage: Record<string, ClaudeModelUsage> = { ...a.modelUsage };
+  for (const [model, usage] of Object.entries(b.modelUsage ?? {})) {
+    const row: ClaudeModelUsage = { ...modelUsage[model] };
+    for (const key of MODEL_USAGE_KEYS) {
+      if (usage[key] !== undefined) row[key] = Math.max(row[key] ?? 0, usage[key]);
+    }
+    modelUsage[model] = row;
+  }
+  return { costUsd: Math.max(a.costUsd ?? 0, b.costUsd ?? 0), modelUsage };
 }
 
 /** Claude Code's config root: `$CLAUDE_CONFIG_DIR`, else `~/.claude`. */
@@ -545,12 +580,18 @@ export class ClaudeCodeAdapter implements AgentAdapter {
   }
 
   async *run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
-    // A resumed session reports its whole history's cost; read what it had
-    // billed before this run so only the new turn is counted.
+    // A resumed session reports its whole history's cost; subtract what it
+    // had billed before this run so only the new turn is counted. The
+    // transcript's cost-state is what Claude Code restores from, but a
+    // previous attempt that already printed its result may have died before
+    // writing it — so the baseline is the larger of the two.
     const costBaseline = opts.resumeSessionId
-      ? await readClaudeSessionCost(
-          opts.resumeSessionId,
-          claudeConfigDir({ ...process.env, ...opts.env }),
+      ? maxSessionCost(
+          await readClaudeSessionCost(
+            opts.resumeSessionId,
+            claudeConfigDir({ ...process.env, ...opts.env }),
+          ),
+          CLAUDE_SESSION_TOTALS.get(opts.resumeSessionId),
         )
       : undefined;
     yield* runAgentProcess({
@@ -558,7 +599,11 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       binary: this.binary,
       args: buildClaudeRunArgs(opts),
       opts,
-      map: createClaudeMapper(opts.agentId ?? this.id, { costBaseline }),
+      map: createClaudeMapper(opts.agentId ?? this.id, {
+        costBaseline,
+        sessionId: opts.resumeSessionId,
+        onSessionTotal: (id, total) => CLAUDE_SESSION_TOTALS.set(id, total),
+      }),
       prompt: opts.prompt,
     });
   }

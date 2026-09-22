@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createClaudeMapper, readClaudeSessionCost } from "../src/agents/claude";
+import { ClaudeCodeAdapter, createClaudeMapper, readClaudeSessionCost } from "../src/agents/claude";
 import type { AgentEvent } from "../src/types/events";
 
 /**
@@ -358,5 +358,38 @@ describe("claude mapper · resumed session cost", () => {
       modelUsage: { "claude-sonnet-5": { inputTokens: 1, outputTokens: 2 } },
     });
     expect(await readClaudeSessionCost("missing", root)).toBeUndefined();
+  });
+});
+
+describe("ClaudeCodeAdapter resume retry baseline", () => {
+  it("does not re-bill an attempt whose transcript cost-state was never written", async () => {
+    const home = mkdtempSync(path.join(tmpdir(), "claude-home-"));
+    const bin = path.join(home, "fake-claude.sh");
+    writeFileSync(bin, '#!/bin/sh\ncat > /dev/null\nprintf "%s\\n" "$FAKE_CLAUDE_OUT"\n', {
+      mode: 0o755,
+    });
+    const adapter = new ClaudeCodeAdapter(bin);
+    const run = async (totalCost: number) => {
+      const events: AgentEvent[] = [];
+      for await (const e of adapter.run({
+        prompt: "continue",
+        model: "claude-sonnet-5",
+        resumeSessionId: "sess-retry",
+        env: {
+          CLAUDE_CONFIG_DIR: home,
+          FAKE_CLAUDE_OUT: JSON.stringify({
+            type: "result",
+            is_error: false,
+            session_id: "sess-retry",
+            total_cost_usd: totalCost,
+          }),
+        },
+      }))
+        events.push(e);
+      return (events.find((e) => e.kind === "result") as { costUsd?: number }).costUsd;
+    };
+    expect(await run(0.4)).toBeCloseTo(0.4, 10);
+    // The session total now includes the first attempt's $0.40.
+    expect(await run(0.55)).toBeCloseTo(0.15, 10);
   });
 });

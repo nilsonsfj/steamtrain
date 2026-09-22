@@ -18,7 +18,7 @@ import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adap
 import type { AgentModel } from "./agent-model";
 import { classifyAgentFailure } from "./failure-classify";
 import { permissionArgs } from "./permissions";
-import { stringifyContent } from "./util";
+import { RecentSessionTotals, stringifyContent } from "./util";
 
 const AGENT: AgentId = "codex";
 
@@ -70,8 +70,16 @@ function errorMessage(error: unknown): string {
  */
 export function createCodexMapper(
   agent: AgentInstanceId = AGENT,
-  options: { model?: string; usageBaseline?: CodexUsage } = {},
+  options: {
+    model?: string;
+    usageBaseline?: CodexUsage;
+    /** The thread being resumed, until `thread.started` names it. */
+    threadId?: string;
+    /** Called with each thread-wide running total a turn reports. */
+    onThreadTotal?: (threadId: string, usage: CodexUsage) => void;
+  } = {},
 ): EventMapper {
+  let threadId = options.threadId;
   const textSeen = new Map<string, string>();
   const toolStarted = new Set<string>();
   const toolFinished = new Set<string>();
@@ -261,6 +269,7 @@ export function createCodexMapper(
           ts,
           sessionId: e.thread_id,
         };
+        if (e.thread_id) threadId = e.thread_id;
         if (e.model !== undefined) event.model = e.model;
         if (e.tools !== undefined) event.tools = e.tools;
         out.push(event);
@@ -277,6 +286,7 @@ export function createCodexMapper(
       case "turn.completed": {
         const durationMs = turnStartedAt !== undefined ? ts - turnStartedAt : undefined;
         turnStartedAt = undefined;
+        if (e.usage && threadId) options.onThreadTotal?.(threadId, e.usage);
         const usage = subtractCodexUsage(e.usage, options.usageBaseline);
         out.push({
           kind: "result",
@@ -295,6 +305,7 @@ export function createCodexMapper(
         const message = errorMessage(e.error);
         const durationMs = turnStartedAt !== undefined ? ts - turnStartedAt : undefined;
         turnStartedAt = undefined;
+        if (e.usage && threadId) options.onThreadTotal?.(threadId, e.usage);
         const usage = subtractCodexUsage(e.usage, options.usageBaseline);
         const category = classifyAgentFailure(message);
         out.push({
@@ -483,6 +494,22 @@ export function subtractCodexUsage(
   return out;
 }
 
+/** Thread-wide usage totals codex runs in this process have reported. */
+const CODEX_THREAD_TOTALS = new RecentSessionTotals<CodexUsage>();
+
+/** Field-wise max of two thread totals (either may be missing). */
+export function maxCodexUsage(
+  a: CodexUsage | undefined,
+  b: CodexUsage | undefined,
+): CodexUsage | undefined {
+  if (!a || !b) return a ?? b;
+  const out: CodexUsage = { ...a };
+  for (const key of USAGE_KEYS) {
+    if (b[key] !== undefined) out[key] = Math.max(a[key] ?? 0, b[key]);
+  }
+  return out;
+}
+
 /** Where Codex keeps its session rollouts (`$CODEX_HOME/sessions`, default `~/.codex`). */
 function codexSessionsDir(env: Record<string, string | undefined> = process.env): string {
   return path.join(env.CODEX_HOME || path.join(os.homedir(), ".codex"), "sessions");
@@ -584,16 +611,19 @@ export class CodexAdapter implements AgentAdapter {
   }
 
   async *run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
-    // A resumed thread re-reports its earlier turns' usage; read what it had
-    // billed before this run so only the new turn is counted. Re-read on every
-    // attempt: codex restores its total from this same rollout record, so an
-    // earlier failed attempt's calls are either in both (and cancel) or in
-    // neither — never counted twice. (A failed attempt reports no usage of its
-    // own, since it never reached `turn.completed`.)
+    // A resumed thread re-reports its earlier turns' usage; subtract what it
+    // had billed before this run so only the new turn is counted. The rollout
+    // is what codex restores from, but a previous attempt that already
+    // reported its turn (turn.completed or turn.failed both carry usage) may
+    // have died before the rollout caught up — so the baseline is the larger
+    // of the rollout and the last total this process saw for the thread.
     const usageBaseline = opts.resumeSessionId
-      ? await readCodexThreadUsage(
-          opts.resumeSessionId,
-          codexSessionsDir({ ...process.env, ...opts.env }),
+      ? maxCodexUsage(
+          await readCodexThreadUsage(
+            opts.resumeSessionId,
+            codexSessionsDir({ ...process.env, ...opts.env }),
+          ),
+          CODEX_THREAD_TOTALS.get(opts.resumeSessionId),
         )
       : undefined;
     yield* runAgentProcess({
@@ -601,7 +631,12 @@ export class CodexAdapter implements AgentAdapter {
       binary: this.binary,
       args: buildCodexExecArgs(opts),
       opts,
-      map: createCodexMapper(opts.agentId ?? this.id, { model: opts.model, usageBaseline }),
+      map: createCodexMapper(opts.agentId ?? this.id, {
+        model: opts.model,
+        usageBaseline,
+        threadId: opts.resumeSessionId,
+        onThreadTotal: (id, usage) => CODEX_THREAD_TOTALS.set(id, usage),
+      }),
       prompt: opts.prompt,
     });
   }

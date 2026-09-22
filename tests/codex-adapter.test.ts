@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  CodexAdapter,
   buildCodexExecArgs,
   createCodexMapper,
   readCodexThreadUsage,
@@ -584,5 +585,46 @@ describe("buildCodexExecArgs", () => {
       "--model",
       "gpt-5.5",
     ]);
+  });
+});
+
+describe("CodexAdapter resume retry baseline", () => {
+  /** A stand-in `codex` that prints `$FAKE_CODEX_OUT` (JSONL) and exits. */
+  function fakeCodex(): { bin: string; home: string } {
+    const home = mkdtempSync(path.join(tmpdir(), "codex-home-"));
+    const bin = path.join(home, "fake-codex.sh");
+    writeFileSync(bin, '#!/bin/sh\ncat > /dev/null\nprintf "%s\\n" "$FAKE_CODEX_OUT"\n', {
+      mode: 0o755,
+    });
+    return { bin, home };
+  }
+  async function run(adapter: CodexAdapter, home: string, out: string[]) {
+    const events: AgentEvent[] = [];
+    for await (const e of adapter.run({
+      prompt: "continue",
+      model: "gpt-5.5",
+      resumeSessionId: "thread-retry",
+      env: { CODEX_HOME: home, FAKE_CODEX_OUT: out.join("\n") },
+    }))
+      events.push(e);
+    return events.find((e) => e.kind === "result") as { tokens?: object } | undefined;
+  }
+
+  it("does not re-bill a failed attempt the rollout never recorded", async () => {
+    const { bin, home } = fakeCodex();
+    const adapter = new CodexAdapter(bin);
+    // Attempt 1 bills 100 input tokens into the thread, then the turn fails.
+    const first = await run(adapter, home, [
+      '{"type":"thread.started","thread_id":"thread-retry"}',
+      '{"type":"turn.failed","usage":{"input_tokens":100,"output_tokens":10},"error":{"message":"stream disconnected"}}',
+    ]);
+    expect(first?.tokens).toMatchObject({ input: 100, output: 10 });
+    // Attempt 2 resumes; codex reports the thread total (both attempts), and
+    // no rollout exists to say attempt 1 was already counted.
+    const second = await run(adapter, home, [
+      '{"type":"thread.started","thread_id":"thread-retry"}',
+      '{"type":"turn.completed","usage":{"input_tokens":160,"output_tokens":25}}',
+    ]);
+    expect(second?.tokens).toMatchObject({ input: 60, output: 15 });
   });
 });

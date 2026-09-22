@@ -443,7 +443,7 @@
   function stepCostText(step, result) {
     // A cached replay billed nothing this run (run totals agree); its original
     // cost belongs to the run that produced it.
-    if (step.cached) return "$0";
+    if (step.cached) return result.costUsd === undefined && (step.agent || step.api) ? "—" : "$0";
     if (result.costUsd) return "$" + result.costUsd.toFixed(4);
     if (result.costUsd === 0 || !(step.agent || step.api)) return "free";
     return "—";
