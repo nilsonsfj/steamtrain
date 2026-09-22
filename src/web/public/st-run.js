@@ -1756,6 +1756,7 @@
     // they have reported so far, which is the point of a *live* ticker.
     var cost = 0, tokens = emptyTokens();
     steps.forEach(function (s) {
+      if (s.cached) return; // billed to the run that produced it
       var source = s.result || s.usage;
       if (!source) return;
       if (source.costUsd) cost += source.costUsd;

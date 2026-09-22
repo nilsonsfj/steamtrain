@@ -148,7 +148,11 @@ const TOOL_FAILED = new Set(["error", "failed", "cancelled", "aborted"]);
  */
 export function createOpenCodeMapper(agent: AgentInstanceId = AGENT): EventMapper {
   let sessionStarted = false;
-  /** Running turn totals across `step_finish` events. */
+  /**
+   * Running turn totals across `step_finish` events. Unlike codex and Claude,
+   * a resumed run (`--session`) needs no baseline: it streams only the new
+   * turn's steps, never the session's earlier ones (checked live, 1.18.32).
+   */
   let costTotal: number | undefined;
   let tokenTotal: TokenUsage | undefined;
   /** step-finish part ids already counted, so a re-emitted part never double-bills. */

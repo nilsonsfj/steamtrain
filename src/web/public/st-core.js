@@ -1597,6 +1597,9 @@ window.Steamtrain = (function () {
    * had accumulated before the real number arrived.
    */
   function stepUsage(s) {
+    // A cached replay billed nothing this run (history and the run totals
+    // agree); its original spend belongs to the run that produced it.
+    if (s && s.cached) return { costUsd: 0, tokens: 0, live: false };
     var r = (s && s.result) || null;
     var u = (s && s.usage) || null;
     var cost = r && typeof r.costUsd === "number" ? r.costUsd : (u && u.costUsd) || 0;
