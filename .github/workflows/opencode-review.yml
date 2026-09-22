@@ -7,7 +7,10 @@ on:
 jobs:
   review:
     if: github.actor != 'cursor[bot]'
-    runs-on: ubuntu-slim
+    # Not ubuntu-slim: its jobs are hard-capped at 15 minutes, and a review of
+    # a large PR with the free model runs past that and gets cancelled.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       id-token: write
       contents: read
@@ -32,3 +35,7 @@ jobs:
             - Verify tests cover meaningful behavior (not just trivial assertions)
             - Note if Bun-specific scripts (build-reducer, pretest) are affected
             - Suggest improvements when they add clear value
+
+            Do not install dependencies or run lint, typecheck, tests or builds:
+            the CI workflow already runs them on this PR, and they take minutes
+            of the review's time budget. Review by reading the diff and code.
