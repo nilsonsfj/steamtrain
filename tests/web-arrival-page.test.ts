@@ -105,12 +105,11 @@ describe("finished-run page: the page ends in an action", () => {
     const h = (_tag: string, attrs: { text?: string } | null, ...kids: Node[]): Node => ({
       text: (attrs?.text ?? "") + kids.map((k) => k.text).join(""),
     });
-    const spendValue = new Function(
-      "h",
-      "fmtTokens",
-      "didRun",
-      `${src}; return spendValue;`,
-    )(h, (n: number) => String(n), () => true) as (r: object, leaves: object[]) => Node;
+    const spendValue = new Function("h", "fmtTokens", "didRun", `${src}; return spendValue;`)(
+      h,
+      (n: number) => String(n),
+      () => true,
+    ) as (r: object, leaves: object[]) => Node;
     const agentLeaf = [{ agent: "antigravity", result: { ok: true } }];
     const text = (r: object, leaves: object[] = agentLeaf) => spendValue(r, leaves).text;
 
