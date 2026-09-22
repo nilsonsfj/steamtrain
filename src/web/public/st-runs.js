@@ -435,6 +435,17 @@
     return typeof usd === "number" && usd > 0 ? "$" + usd.toFixed(3) : "—";
   }
 
+  /**
+   * A step's cost cell. "free" only when it really was: a reported $0, or a
+   * step that runs no agent or API (command, gate, …). An agent step with no
+   * cost reported (Antigravity, Kiro, Cursor, Amp) is unknown — "—", not free.
+   */
+  function stepCostText(step, result) {
+    if (result.costUsd) return "$" + result.costUsd.toFixed(4);
+    if (result.costUsd === 0 || !(step.agent || step.api)) return "free";
+    return "—";
+  }
+
   /** Absolute time for older runs, relative for recent ones (as the mock does). */
   function startedText(ts) {
     if (typeof ts !== "number" || !isFinite(ts) || ts <= 0) return "unknown";
@@ -1043,7 +1054,7 @@
         row.appendChild(h("span", { class: "tag", text: step.gate && step.gate.passed ? "gate pass" : "gate stop" }));
       }
       row.appendChild(h("span", { class: "num", text: result.durationMs ? (result.durationMs / 1000).toFixed(1) + "s" : "—" }));
-      row.appendChild(h("span", { class: "num cost", text: result.costUsd ? "$" + result.costUsd.toFixed(4) : "free" }));
+      row.appendChild(h("span", { class: "num cost", text: stepCostText(step, result) }));
       rows.appendChild(row);
     });
     box.appendChild(rows);
@@ -1373,7 +1384,7 @@
     ));
     receiptStepTags(step).forEach(function (tag) { line.appendChild(tag); });
     line.appendChild(h("span", { class: "num", text: result.durationMs ? (result.durationMs / 1000).toFixed(1) + "s" : "—" }));
-    line.appendChild(h("span", { class: "num cost", text: result.costUsd ? "$" + result.costUsd.toFixed(4) : "free" }));
+    line.appendChild(h("span", { class: "num cost", text: stepCostText(step, result) }));
     wrap.appendChild(line);
 
     if (isOpen) {

@@ -198,6 +198,9 @@ function sortByCost<T extends { costUsd: number }>(rows: T[]): T[] {
  * Walk a history record's phase tree yielding one {@link LeafUsage} per agent
  * invocation. Fan-out parents (their `result.childResults`) are skipped; their
  * children are the leaves. Steps that never ran (`pending`) contribute nothing.
+ * A cached replay still counts as a leaf but carries no spend: the result it
+ * replays was billed to the run that produced it, and counting it again would
+ * bill it once more for every run that reuses the cache.
  */
 export function* recordLeaves(phases: HistoryPhase[]): Generator<LeafUsage & { stepId: string }> {
   for (const phase of phases) {
@@ -209,8 +212,8 @@ export function* recordLeaves(phases: HistoryPhase[]): Generator<LeafUsage & { s
         agent: step.agent,
         api: step.api,
         model: step.model,
-        costUsd: step.result?.costUsd,
-        tokens: step.result?.tokens,
+        costUsd: step.cached ? undefined : step.result?.costUsd,
+        tokens: step.cached ? undefined : step.result?.tokens,
       };
     }
   }

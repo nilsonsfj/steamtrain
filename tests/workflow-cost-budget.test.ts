@@ -666,6 +666,7 @@ describe("aggregateCosts across history", () => {
     const mkRecord = (
       id: string,
       workflow: string,
+      cached = false,
     ): Parameters<typeof aggregateCosts>[0][number] => {
       const builder = new RunRecordBuilder({ id, workflow, input: "go", cwd: "/base" });
       builder.handle({
@@ -695,7 +696,7 @@ describe("aggregateCosts across history", () => {
         kind: "step_done",
         phaseId: "p1",
         stepId: "s1",
-        cached: false,
+        cached,
         result: {
           stepId: "s1",
           ok: true,
@@ -722,5 +723,15 @@ describe("aggregateCosts across history", () => {
     expect(analytics.byModel[0]).toMatchObject({ model: "claude/opus", steps: 3 });
     expect(totalTokens(analytics.tokens)).toBe(450);
     expect(analytics.byStep[0]).toMatchObject({ stepId: "s1" });
+
+    // A later run that replays s1 from the cache spent nothing on it: the
+    // replay is still a step, but its recorded cost belongs to run 1.
+    const replay = mkRecord("4", "wf-a", true);
+    expect(replay.totals.costUsd).toBe(0);
+    expect(totalTokens(replay.totals.tokens)).toBe(0);
+    const withReplay = aggregateCosts([mkRecord("1", "wf-a"), replay]);
+    expect(withReplay.costUsd).toBeCloseTo(0.1, 5);
+    expect(withReplay.byWorkflow[0]).toMatchObject({ runs: 2, steps: 2 });
+    expect(totalTokens(withReplay.tokens)).toBe(150);
   });
 });
