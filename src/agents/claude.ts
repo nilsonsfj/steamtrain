@@ -1,3 +1,6 @@
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type {
   AgentEvent,
   AgentId,
@@ -150,7 +153,10 @@ export const CLAUDE_MODELS: readonly AgentModel[] = [
  * assistant message, so repeated lines for the same message emit only what
  * grew (see `reportUsage`). Everything else is a pure function of the raw line.
  */
-export function createClaudeMapper(agent: AgentInstanceId = AGENT): EventMapper {
+export function createClaudeMapper(
+  agent: AgentInstanceId = AGENT,
+  options: { costBaseline?: ClaudeSessionCost } = {},
+): EventMapper {
   /**
    * Usage already reported, per message id. Per id rather than "the last
    * message": a subagent's (Task) assistant lines interleave with the main
@@ -333,8 +339,17 @@ export function createClaudeMapper(agent: AgentInstanceId = AGENT): EventMapper 
             text: r.data.result,
             subtype: r.data.subtype,
             durationMs: r.data.duration_ms,
-            costUsd: r.data.total_cost_usd,
-            tokens: claudeModelTokens(r.data.modelUsage) ?? claudeTokens(r.data.usage),
+            // On `--resume`, Claude Code restores the session's cost tracker,
+            // so these totals include every earlier run of the session; the
+            // baseline (what it had billed before this run) comes off.
+            costUsd:
+              r.data.total_cost_usd === undefined
+                ? undefined
+                : Math.max(0, r.data.total_cost_usd - (options.costBaseline?.costUsd ?? 0)),
+            tokens:
+              claudeModelTokens(
+                subtractModelUsage(r.data.modelUsage, options.costBaseline?.modelUsage),
+              ) ?? claudeTokens(r.data.usage),
           },
         ];
       }
@@ -383,6 +398,88 @@ function claudeModelTokens(
     add("cacheWrite", m.cacheCreationInputTokens);
   }
   return Object.keys(tokens).length > 0 ? tokens : undefined;
+}
+
+/** What a Claude session had billed so far, from its transcript's `cost-state` record. */
+export interface ClaudeSessionCost {
+  costUsd?: number;
+  modelUsage?: Record<string, ClaudeModelUsage>;
+}
+
+const MODEL_USAGE_KEYS = [
+  "inputTokens",
+  "outputTokens",
+  "cacheReadInputTokens",
+  "cacheCreationInputTokens",
+] as const;
+
+/** `modelUsage` minus a baseline, per model and field (never below 0). */
+function subtractModelUsage(
+  modelUsage: Record<string, ClaudeModelUsage> | undefined,
+  baseline: Record<string, ClaudeModelUsage> | undefined,
+): Record<string, ClaudeModelUsage> | undefined {
+  if (!modelUsage || !baseline) return modelUsage;
+  const out: Record<string, ClaudeModelUsage> = {};
+  for (const [model, usage] of Object.entries(modelUsage)) {
+    const before = baseline[model];
+    const row: ClaudeModelUsage = { ...usage };
+    for (const key of MODEL_USAGE_KEYS) {
+      const v = usage[key];
+      if (v !== undefined) row[key] = Math.max(0, v - (before?.[key] ?? 0));
+    }
+    out[model] = row;
+  }
+  return out;
+}
+
+/** Claude Code's config root: `$CLAUDE_CONFIG_DIR`, else `~/.claude`. */
+function claudeConfigDir(env: Record<string, string | undefined>): string {
+  return env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
+}
+
+/**
+ * The session's billed-so-far totals: the last `{"type":"cost-state",
+ * totalCostUSD, modelUsage}` line of `projects/<cwd>/<sessionId>.jsonl` —
+ * the record Claude Code restores its cost tracker from on `--resume`.
+ * `undefined` when the transcript or record can't be found, in which case
+ * the run reports Claude's totals unchanged.
+ */
+export async function readClaudeSessionCost(
+  sessionId: string,
+  configDir: string,
+): Promise<ClaudeSessionCost | undefined> {
+  const projectsDir = path.join(configDir, "projects");
+  let projects: string[];
+  try {
+    projects = await fs.readdir(projectsDir);
+  } catch {
+    return undefined;
+  }
+  for (const project of projects) {
+    let text: string;
+    try {
+      text = await fs.readFile(path.join(projectsDir, project, `${sessionId}.jsonl`), "utf8");
+    } catch {
+      continue;
+    }
+    const lines = text.split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]!;
+      if (!line.includes('"cost-state"')) continue;
+      try {
+        const record = JSON.parse(line);
+        if (record?.type !== "cost-state") continue;
+        return {
+          costUsd: typeof record.totalCostUSD === "number" ? record.totalCostUSD : undefined,
+          modelUsage: record.modelUsage,
+        };
+      } catch {
+        // A torn line — keep looking further back.
+      }
+    }
+    return undefined;
+  }
+  return undefined;
 }
 
 /**
@@ -447,13 +544,21 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     this.binary = binary;
   }
 
-  run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
-    return runAgentProcess({
+  async *run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
+    // A resumed session reports its whole history's cost; read what it had
+    // billed before this run so only the new turn is counted.
+    const costBaseline = opts.resumeSessionId
+      ? await readClaudeSessionCost(
+          opts.resumeSessionId,
+          claudeConfigDir({ ...process.env, ...opts.env }),
+        )
+      : undefined;
+    yield* runAgentProcess({
       id: this.id,
       binary: this.binary,
       args: buildClaudeRunArgs(opts),
       opts,
-      map: createClaudeMapper(opts.agentId ?? this.id),
+      map: createClaudeMapper(opts.agentId ?? this.id, { costBaseline }),
       prompt: opts.prompt,
     });
   }

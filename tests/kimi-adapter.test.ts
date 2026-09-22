@@ -11,6 +11,7 @@ import {
   readKimiRunUsage,
 } from "../src/agents/kimi";
 import { fallbackKimiEfforts } from "../src/agents/kimi-efforts-fallback";
+import type { AgentEvent } from "../src/types/events";
 
 /**
  * Kimi Code speaks its own `stream-json` NDJSON protocol (`-p … --output-format
@@ -286,5 +287,32 @@ describe("kimi run usage (read back from the session's wire logs)", () => {
     write("main", [record(2000, 1, 1)]);
     expect(await readKimiRunUsage("session_other", 0, home)).toBeUndefined();
     expect(await readKimiRunUsage("session_s1", 0, path.join(home, "missing"))).toBeUndefined();
+  });
+});
+
+describe("KimiAdapter reads usage for a resumed session", () => {
+  it("falls back to the resumed session id when no resume hint is printed", async () => {
+    const home = mkdtempSync(path.join(tmpdir(), "kimi-home-"));
+    const dir = path.join(home, "sessions", "wd_proj_abc", "session_resumed", "agents", "main");
+    mkdirSync(dir, { recursive: true });
+    // A stand-in `kimi` that prints nothing and writes one usage record, as a
+    // resumed run whose resume hint never reached stdout would.
+    const bin = path.join(home, "fake-kimi.sh");
+    writeFileSync(
+      bin,
+      `#!/bin/sh\nprintf '{"type":"usage.record","usage":{"inputOther":7,"output":3,"inputCacheRead":0,"inputCacheCreation":0},"time":9999999999999}\\n' > "${dir}/wire.jsonl"\n`,
+      { mode: 0o755 },
+    );
+    const events: AgentEvent[] = [];
+    for await (const e of new KimiAdapter(bin).run({
+      prompt: "hi",
+      model: "kimi-code/k3",
+      resumeSessionId: "session_resumed",
+      env: { KIMI_CODE_HOME: home },
+    }))
+      events.push(e);
+    expect(events.find((e) => e.kind === "usage")).toMatchObject({
+      tokens: { input: 7, output: 3 },
+    });
   });
 });

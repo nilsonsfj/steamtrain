@@ -585,7 +585,11 @@ export class CodexAdapter implements AgentAdapter {
 
   async *run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
     // A resumed thread re-reports its earlier turns' usage; read what it had
-    // billed before this run so only the new turn is counted.
+    // billed before this run so only the new turn is counted. Re-read on every
+    // attempt: codex restores its total from this same rollout record, so an
+    // earlier failed attempt's calls are either in both (and cancel) or in
+    // neither — never counted twice. (A failed attempt reports no usage of its
+    // own, since it never reached `turn.completed`.)
     const usageBaseline = opts.resumeSessionId
       ? await readCodexThreadUsage(
           opts.resumeSessionId,

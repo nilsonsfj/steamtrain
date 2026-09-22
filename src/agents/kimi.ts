@@ -246,26 +246,36 @@ export class KimiAdapter implements AgentAdapter {
   async *run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
     const agent = opts.agentId ?? this.id;
     const startedAt = Date.now();
-    let sessionId: string | undefined;
-    for await (const event of runAgentProcess({
-      id: this.id,
-      binary: this.binary,
-      args: buildKimiRunArgs(opts),
-      opts: { ...opts, env: buildKimiRunEnv(opts) },
-      map: createKimiMapper(agent),
-      // Prompt travels in argv (`-p`); stdin stays closed.
-    })) {
-      if (event.kind === "session_start" && event.sessionId) sessionId = event.sessionId;
-      yield event;
+    // A resumed run is already in a known session, whether or not it prints
+    // a new resume hint.
+    let sessionId = opts.resumeSessionId;
+    let failure: { error: unknown } | undefined;
+    try {
+      for await (const event of runAgentProcess({
+        id: this.id,
+        binary: this.binary,
+        args: buildKimiRunArgs(opts),
+        opts: { ...opts, env: buildKimiRunEnv(opts) },
+        map: createKimiMapper(agent),
+        // Prompt travels in argv (`-p`); stdin stays closed.
+      })) {
+        if (event.kind === "session_start" && event.sessionId) sessionId = event.sessionId;
+        yield event;
+      }
+    } catch (error) {
+      // Still report what an aborted or crashed run billed before rethrowing.
+      failure = { error };
     }
     // Usage never reaches stdout; read what this run billed from the session
     // logs once the process is done writing them.
-    if (!sessionId) return;
-    const tokens = await readKimiRunUsage(
-      sessionId,
-      startedAt,
-      kimiHome({ ...process.env, ...opts.env }),
-    );
-    if (tokens) yield { kind: "usage", agent, ts: Date.now(), tokens };
+    if (sessionId) {
+      const tokens = await readKimiRunUsage(
+        sessionId,
+        startedAt,
+        kimiHome({ ...process.env, ...opts.env }),
+      );
+      if (tokens) yield { kind: "usage", agent, ts: Date.now(), tokens };
+    }
+    if (failure) throw failure.error;
   }
 }

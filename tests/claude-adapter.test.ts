@@ -1,5 +1,8 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createClaudeMapper } from "../src/agents/claude";
+import { createClaudeMapper, readClaudeSessionCost } from "../src/agents/claude";
 import type { AgentEvent } from "../src/types/events";
 
 /**
@@ -311,5 +314,49 @@ describe("claude mapper · result usage", () => {
     expect(createClaudeMapper()(line)).toEqual([
       expect.objectContaining({ tokens: { input: 1, output: 2 } }),
     ]);
+  });
+});
+
+describe("claude mapper · resumed session cost", () => {
+  it("reports only this run's share of a resumed session's restored totals", () => {
+    const mapper = createClaudeMapper("claude", {
+      costBaseline: {
+        costUsd: 0.3,
+        modelUsage: { "claude-opus-5-5": { inputTokens: 100, outputTokens: 40, costUSD: 0.3 } },
+      },
+    });
+    const [result] = mapper({
+      type: "result",
+      is_error: false,
+      total_cost_usd: 0.5,
+      modelUsage: {
+        "claude-opus-5-5": { inputTokens: 150, outputTokens: 70, costUSD: 0.45 },
+        "claude-haiku-4-5-20251001": { inputTokens: 10, outputTokens: 5, costUSD: 0.05 },
+      },
+    });
+    expect((result as { costUsd: number }).costUsd).toBeCloseTo(0.2, 10);
+    expect(result).toMatchObject({ tokens: { input: 60, output: 35 } });
+  });
+
+  it("reads the last cost-state record from the session transcript", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "claude-config-"));
+    const project = path.join(root, "projects", "-Users-me-repo");
+    mkdirSync(project, { recursive: true });
+    const costState = (usd: number) =>
+      JSON.stringify({
+        type: "cost-state",
+        sessionId: "s1",
+        totalCostUSD: usd,
+        modelUsage: { "claude-sonnet-5": { inputTokens: 1, outputTokens: 2 } },
+      });
+    writeFileSync(
+      path.join(project, "s1.jsonl"),
+      [costState(0.1), '{"type":"user"}', costState(0.25)].join("\n"),
+    );
+    expect(await readClaudeSessionCost("s1", root)).toEqual({
+      costUsd: 0.25,
+      modelUsage: { "claude-sonnet-5": { inputTokens: 1, outputTokens: 2 } },
+    });
+    expect(await readClaudeSessionCost("missing", root)).toBeUndefined();
   });
 });

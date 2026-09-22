@@ -2573,6 +2573,8 @@ async function executeAgentStep(
       // Each attempt's result replaces the last, but what the earlier, failed
       // attempts billed is still spent — carry it forward so a retried or
       // failed-over step reports the whole step's spend, not its final try's.
+      // (`durationMs` is not summed here: after the loop it is replaced with
+      // the whole step's wall clock, backoff waits included.)
       result = result
         ? { ...attemptOutcome.result, ...addSpend(result, attemptOutcome.result) }
         : attemptOutcome.result;
