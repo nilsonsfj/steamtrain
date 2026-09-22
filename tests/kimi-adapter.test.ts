@@ -316,3 +316,32 @@ describe("KimiAdapter reads usage for a resumed session", () => {
     });
   });
 });
+
+describe("KimiAdapter reads usage for an aborted run", () => {
+  it("still reports what the run billed before it was aborted", async () => {
+    const home = mkdtempSync(path.join(tmpdir(), "kimi-home-"));
+    const dir = path.join(home, "sessions", "wd_proj_abc", "session_aborted", "agents", "main");
+    mkdirSync(dir, { recursive: true });
+    // Bills one model call, then hangs until the caller aborts it.
+    const bin = path.join(home, "fake-kimi.sh");
+    writeFileSync(
+      bin,
+      `#!/bin/sh\nprintf '{"type":"usage.record","usage":{"inputOther":5,"output":2,"inputCacheRead":0,"inputCacheCreation":0},"time":9999999999999}\\n' > "${dir}/wire.jsonl"\nexec sleep 30\n`,
+      { mode: 0o755 },
+    );
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 300);
+    const events: AgentEvent[] = [];
+    for await (const e of new KimiAdapter(bin).run({
+      prompt: "hi",
+      model: "kimi-code/k3",
+      resumeSessionId: "session_aborted",
+      env: { KIMI_CODE_HOME: home },
+      signal: controller.signal,
+    }))
+      events.push(e);
+    expect(events.find((e) => e.kind === "usage")).toMatchObject({
+      tokens: { input: 5, output: 2 },
+    });
+  });
+});

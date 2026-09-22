@@ -129,6 +129,56 @@ describe("arrival receipt for agents that report no usage", () => {
     expect(receipt.tokensReported).toBe(false);
   });
 
+  it("says 'not reported' for a live silent step beside a cached priced one", () => {
+    // The cached step replays as a reported $0; that must not vouch for the
+    // live step, whose spend is still unknown.
+    const base = finished({});
+    const live = base.phases[0]!.steps[1]!;
+    const cachedPriced = {
+      ...live,
+      stepId: "again",
+      agent: "claude" as const,
+      cached: true,
+      result: { stepId: "again", ok: true, output: "", durationMs: 5, costUsd: 0.5 },
+    };
+    const state: WorkflowState = {
+      ...base,
+      phases: [{ ...base.phases[0]!, steps: [...base.phases[0]!.steps, cachedPriced] }],
+    };
+    const receipt = buildArrivalReport(state)!.receipt;
+    expect(receipt.costUsd).toBe(0);
+    expect(receipt.costReported).toBe(false);
+    expect(arrivalReceiptCards(receipt).find((c) => c.id === "cost")!.value).toBe("not reported");
+  });
+
+  it("reads a failed command-only run as $0, not 'not reported'", () => {
+    const base = workflowStateFromSpec({
+      name: "cmds",
+      phases: [{ id: "p", title: "p", steps: [{ id: "build", kind: "command", cmd: "make" }] }],
+    });
+    const state: WorkflowState = {
+      ...base,
+      done: true,
+      ok: false,
+      phases: [
+        {
+          ...base.phases[0]!,
+          steps: [
+            {
+              ...base.phases[0]!.steps[0]!,
+              status: "error" as const,
+              result: { stepId: "build", ok: false, output: "", error: "exit 1", durationMs: 10 },
+            },
+          ],
+        },
+      ],
+    };
+    const receipt = buildArrivalReport(state)!.receipt;
+    expect(receipt.agentless).toBe(false);
+    expect(receipt.costReported).toBe(true);
+    expect(arrivalReceiptCards(receipt).find((c) => c.id === "cost")!.value).toBe("$0");
+  });
+
   it("does not bill a cached replay when reopened from history", () => {
     // History detail rebuilds state from the saved record, whose steps keep
     // the original result; the receipt must still read $0 for the replay.

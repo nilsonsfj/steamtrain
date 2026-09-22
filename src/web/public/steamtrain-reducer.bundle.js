@@ -808,8 +808,6 @@ var SteamtrainReducer = (() => {
     let costUsd = 0;
     let tokens = 0;
     let durationMs = 0;
-    let costReported = false;
-    let tokensReported = false;
     for (const result of leaves) {
       if (result.skipped) skipCount += 1;
       else if (result.ok) okCount += 1;
@@ -817,8 +815,6 @@ var SteamtrainReducer = (() => {
       else failCount += 1;
       costUsd += result.costUsd ?? 0;
       tokens += totalTokens(result.tokens);
-      if (result.costUsd !== void 0) costReported = true;
-      if (result.tokens !== void 0) tokensReported = true;
       durationMs += result.durationMs ?? 0;
     }
     const heroStep = findArrivalStep(flat.map((f) => f.step));
@@ -830,12 +826,15 @@ var SteamtrainReducer = (() => {
     const ranBilledStep = flat.some(
       ({ step }) => Boolean(step.agent || step.api) && step.result !== void 0 && !step.result.skipped
     );
-    const billedSteps = flat.map(({ step }) => step).filter((step) => Boolean(step.agent || step.api) && step.result && !step.result.skipped);
-    if (billedSteps.some((step) => step.cached)) {
-      const ran = billedSteps.filter((step) => !step.cached);
-      if (ran.every((step) => step.result?.costUsd !== void 0)) costReported = true;
-      if (ran.every((step) => step.result?.tokens !== void 0)) tokensReported = true;
-    }
+    const billedSteps = flat.map(({ step }) => step).filter(
+      (step) => Boolean(step.agent || step.api) && step.result !== void 0 && !step.result.skipped && !step.result.childResults?.length
+    );
+    const costReported = billedSteps.every(
+      (step) => step.cached || step.result?.costUsd !== void 0
+    );
+    const tokensReported = billedSteps.every(
+      (step) => step.cached || step.result?.tokens !== void 0
+    );
     const agentless = opts.credentialFree === true || !ranBilledStep && costUsd === 0 && tokens === 0 && failCount === 0 && blockedCount === 0;
     const nextCandidates = opts.nextCandidates ?? DEFAULT_NEXT_CANDIDATES;
     const current = state.name;

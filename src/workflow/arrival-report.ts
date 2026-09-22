@@ -148,8 +148,6 @@ export function buildArrivalReport(
   let costUsd = 0;
   let tokens = 0;
   let durationMs = 0;
-  let costReported = false;
-  let tokensReported = false;
   for (const result of leaves) {
     if (result.skipped) skipCount += 1;
     else if (result.ok) okCount += 1;
@@ -157,8 +155,6 @@ export function buildArrivalReport(
     else failCount += 1;
     costUsd += result.costUsd ?? 0;
     tokens += totalTokens(result.tokens);
-    if (result.costUsd !== undefined) costReported = true;
-    if (result.tokens !== undefined) tokensReported = true;
     durationMs += result.durationMs ?? 0;
   }
 
@@ -181,18 +177,26 @@ export function buildArrivalReport(
     ({ step }) =>
       Boolean(step.agent || step.api) && step.result !== undefined && !step.result.skipped,
   );
-  // A cached replay of an agent step billed nothing this run, and that is
-  // known even when the agent never reports spend (Antigravity, Kiro) — so it
-  // counts as reported $0, as on the runs page and the Markdown report. Not
-  // while a step that really ran left its own spend unknown, though.
+  // The run's spend is known only when every agent/API step that executed
+  // either reported its own or was a cached replay — which billed nothing this
+  // run, even for an agent that never reports spend (Antigravity, Kiro). One
+  // silent step leaves the total unknown; no agent steps at all (commands
+  // only) is a known $0. Fan-out parents carry no spend of their own.
   const billedSteps = flat
     .map(({ step }) => step)
-    .filter((step) => Boolean(step.agent || step.api) && step.result && !step.result.skipped);
-  if (billedSteps.some((step) => step.cached)) {
-    const ran = billedSteps.filter((step) => !step.cached);
-    if (ran.every((step) => step.result?.costUsd !== undefined)) costReported = true;
-    if (ran.every((step) => step.result?.tokens !== undefined)) tokensReported = true;
-  }
+    .filter(
+      (step) =>
+        Boolean(step.agent || step.api) &&
+        step.result !== undefined &&
+        !step.result.skipped &&
+        !step.result.childResults?.length,
+    );
+  const costReported = billedSteps.every(
+    (step) => step.cached || step.result?.costUsd !== undefined,
+  );
+  const tokensReported = billedSteps.every(
+    (step) => step.cached || step.result?.tokens !== undefined,
+  );
   const agentless =
     opts.credentialFree === true ||
     (!ranBilledStep && costUsd === 0 && tokens === 0 && failCount === 0 && blockedCount === 0);
