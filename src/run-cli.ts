@@ -1039,7 +1039,7 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
       publisher.event(event);
       notifyWorkflowEvent(notifier, notifyMeta, event);
       if (options.json) out(`${JSON.stringify(event)}\n`);
-      else printHumanEvent(event, out);
+      else printHumanEvent(event, out, { canceled: ac.signal.aborted });
       if (event.kind === "step_done") {
         await persistWorkflowStepDone(
           cacheStore,
@@ -1752,7 +1752,29 @@ async function saveHistory(
   return record;
 }
 
-export function printHumanEvent(event: WorkflowEvent, out: (text: string) => void): void {
+/**
+ * Whether the last text written through each `out` stopped mid-line. Agent
+ * text streams in raw deltas, so the next status line must start fresh or it
+ * lands on the end of the agent's last sentence ("noted  done s1").
+ */
+const midLine = new WeakMap<(text: string) => void, boolean>();
+
+export function printHumanEvent(
+  event: WorkflowEvent,
+  out: (text: string) => void,
+  run: { canceled?: boolean } = {},
+): void {
+  if (event.kind === "step_event") {
+    if (event.event.kind === "text_delta" && !event.event.thinking && event.event.text) {
+      out(event.event.text);
+      midLine.set(out, !event.event.text.endsWith("\n"));
+    }
+    return;
+  }
+  if (midLine.get(out)) {
+    out("\n");
+    midLine.set(out, false);
+  }
   switch (event.kind) {
     case "workflow_start":
       out(
@@ -1780,9 +1802,6 @@ export function printHumanEvent(event: WorkflowEvent, out: (text: string) => voi
       out(
         `  fan-out ${event.parentStepId} -> ${event.count} item${event.count === 1 ? "" : "s"}\n`,
       );
-      return;
-    case "step_event":
-      if (event.event.kind === "text_delta" && !event.event.thinking) out(event.event.text);
       return;
     case "gate_evaluated":
       out(
@@ -1829,6 +1848,9 @@ export function printHumanEvent(event: WorkflowEvent, out: (text: string) => voi
       out(
         `  ${event.result.ok ? "done" : "fail"} ${event.stepId}${event.cached ? " (cached)" : ""}\n`,
       );
+      // Say why, unless the step only stopped because the run was canceled.
+      const why = event.result.ok || run.canceled ? undefined : event.result.error?.trim();
+      if (why) out(`     ${why.split("\n", 1)[0]}\n`);
       const violations = event.result.permissions?.violations;
       if (violations?.length) {
         out(
@@ -1862,7 +1884,15 @@ export function printHumanEvent(event: WorkflowEvent, out: (text: string) => voi
     }
     case "workflow_done":
       out(
-        `\nworkflow ${event.budgetExceeded ? "budget-exceeded" : event.ok ? "done" : "failed"}\n`,
+        `\nworkflow ${
+          run.canceled
+            ? "canceled"
+            : event.budgetExceeded
+              ? "budget-exceeded"
+              : event.ok
+                ? "done"
+                : "failed"
+        }\n`,
       );
       return;
   }

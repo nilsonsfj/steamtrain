@@ -171,7 +171,10 @@ export interface LeafUsage {
  */
 export function modelKey(leaf: { agent?: string; api?: string; model?: string }): string {
   const runner = leaf.agent ?? leaf.api;
-  if (leaf.model && runner) return `${runner}/${leaf.model}`;
+  // OpenCode-style ids already lead with their provider (`opencode/<model>`).
+  if (leaf.model && runner) {
+    return leaf.model.startsWith(`${runner}/`) ? leaf.model : `${runner}/${leaf.model}`;
+  }
   if (leaf.model) return leaf.model;
   if (runner) return runner;
   return "(agentless)";

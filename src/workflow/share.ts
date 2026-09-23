@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { agentUiLabel } from "../agents";
 import { assertSafeOutboundUrl } from "../util/safe-url";
+import { describeIssue } from "../util/zod-issue";
 import { STEAMTRAIN_VERSION } from "../version";
 import type { WorkflowSourceKind } from "./catalog";
 import { lintTemplateRefs } from "./template";
@@ -1005,10 +1006,7 @@ function sanitizeFileStem(name: string): string {
 }
 
 function formatZodIssue(error: z.ZodError): string {
-  const issue = error.issues[0];
-  if (!issue) return "schema error";
-  const path = issue.path.length > 0 ? issue.path.join(".") : "root";
-  return `${path}: ${issue.message}`;
+  return describeIssue(error.issues[0], "root");
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

@@ -1611,7 +1611,8 @@ window.Steamtrain = (function () {
     var map = {};
     steps.forEach(function (s) {
       if (!s.result || (s.result.childResults && s.result.childResults.length)) return;
-      var key = s.model && s.agent
+      // OpenCode-style ids already lead with their provider (`opencode/<model>`).
+      var key = s.model && s.agent && s.model.indexOf(s.agent + "/") !== 0
         ? agentUiLabel(s.agent) + "/" + s.model
         : (s.model || (s.agent ? agentUiLabel(s.agent) : "(agentless)"));
       var e = map[key] || (map[key] = { model: key, costUsd: 0, tokens: emptyTokens(), steps: 0, cached: 0 });

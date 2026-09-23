@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { describeIssue } from "../util/zod-issue";
 import { WORKSPACE_CONFIG_DIR } from "../workspace";
 import { BUNDLED_WORKFLOWS } from "./bundled";
 import { atomicWriteFile } from "./fs-util";
@@ -269,7 +270,7 @@ function loadUserWorkflowsFile(home: string): {
   const result = workflowsFileSchema.safeParse(parsed);
   if (!result.success) {
     return {
-      warning: `invalid ${path}: ${result.error.issues[0]?.message ?? "schema error"}`,
+      warning: `invalid ${path}: ${describeIssue(result.error.issues[0])}`,
     };
   }
 
