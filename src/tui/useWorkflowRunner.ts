@@ -452,9 +452,8 @@ export function useWorkflowRunner({
             notifyWorkflowEvent(notifier, notifyMeta, event);
             if (event.kind === "workflow_done") workflowOk = event.ok;
             if (changesCache(event)) await store.save(key, cache);
-            if (!mountedRef.current) return;
-            wfDispatch({ type: "event", event });
-            setNarration((prev) => appendNarration(prev, event));
+            // Persist before the unmount check, as the web and CLI drivers do:
+            // a step that finished is paid for, and a resume must not run it again.
             if (event.kind === "step_done") {
               await persistWorkflowStepDone(
                 store,
@@ -465,6 +464,9 @@ export function useWorkflowRunner({
                 event.cached,
               );
             }
+            if (!mountedRef.current) return;
+            wfDispatch({ type: "event", event });
+            setNarration((prev) => appendNarration(prev, event));
           }
         } catch (err) {
           runError = message(err);
