@@ -416,6 +416,7 @@
     var text = (totals.ok || 0) + "/" + (totals.steps || 0) + " ok";
     var node = h("span", { class: "outcome", text: text });
     if (totals.failed) node.appendChild(h("span", { class: "flag error", text: " · " + totals.failed + " failed" }));
+    if (totals.interrupted) node.appendChild(h("span", { class: "flag", text: " · " + totals.interrupted + " interrupted" }));
     if (totals.cached) node.appendChild(h("span", { class: "flag gate", text: " · " + totals.cached + " cached" }));
     return node;
   }
@@ -1275,6 +1276,7 @@
     tiles.appendChild(tile("Tokens", tokens > 0 ? fmtTokens(tokens) : "0"));
     tiles.appendChild(tile("Steps", (totals.ok || 0) + " ok"
       + (totals.failed ? " · " + totals.failed + " failed" : "")
+      + (totals.interrupted ? " · " + totals.interrupted + " interrupted" : "")
       + (totals.cached ? " · " + totals.cached + " cached" : "")));
     hero.appendChild(tiles);
     holder.appendChild(hero);

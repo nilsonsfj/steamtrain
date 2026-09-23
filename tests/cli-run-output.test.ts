@@ -227,3 +227,30 @@ describe("a timed-out run's record", () => {
     expect(builder.build({ status: "error", timedOut: true }).timedOut).toBeUndefined();
   });
 });
+
+describe("a record's totals", () => {
+  it("count a step the run's cancel took down apart from failures", async () => {
+    const { computeRunTotals, formatRunTotals } = await import("../src/workflow");
+    const step = (stepId: string, status: "done" | "error", interrupted?: boolean) => ({
+      stepId,
+      blockKind: "worker",
+      status,
+      cached: false,
+      text: "",
+      result: { stepId, ok: status === "done", output: "", durationMs: 1, interrupted },
+    });
+    const totals = computeRunTotals([
+      {
+        phaseId: "p",
+        title: "P",
+        index: 0,
+        stepCount: 3,
+        done: true,
+        ok: false,
+        steps: [step("a", "done"), step("b", "error", true), step("c", "error")],
+      },
+    ] as never);
+    expect(totals).toMatchObject({ steps: 3, ok: 1, failed: 1, interrupted: 1 });
+    expect(formatRunTotals(totals)).toBe("1/3 ok · 1 failed · 1 interrupted");
+  });
+});

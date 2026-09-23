@@ -162,8 +162,9 @@ export function buildPostmortemDigest(
   lines.push(`run id: ${record.id}`);
   lines.push(`status: ${record.status} (outcome: ${outcome})`);
   lines.push(
-    `totals: ${record.totals.ok}/${record.totals.steps} steps ok, ${record.totals.failed} failed` +
-      `, $${record.totals.costUsd.toFixed(4)}, ${Math.round(record.durationMs / 1000)}s`,
+    `totals: ${record.totals.ok}/${record.totals.steps} steps ok, ${record.totals.failed} failed${
+      record.totals.interrupted ? `, ${record.totals.interrupted} interrupted` : ""
+    }, $${record.totals.costUsd.toFixed(4)}, ${Math.round(record.durationMs / 1000)}s`,
   );
   const input = redactSecrets(record.input ?? "").slice(0, INPUT_CAP);
   lines.push(`input: ${input || "(empty)"}`);

@@ -177,6 +177,8 @@ export interface RunReportModel {
     steps: number;
     ok: number;
     failed: number;
+    /** Taken down by the run's cancel or timeout, not broken on their own. */
+    interrupted: number;
     cached: number;
     costUsd: number;
     tokens: number;
@@ -222,6 +224,7 @@ export function buildReportModel(
       steps: record.totals.steps,
       ok: record.totals.ok,
       failed: record.totals.failed,
+      interrupted: record.totals.interrupted ?? 0,
       cached: record.totals.cached,
       costUsd: record.totals.costUsd,
       tokens: totalTokens(record.totals.tokens),
@@ -313,6 +316,7 @@ function renderMarkdownReport(model: RunReportModel): string {
   const summaryBits = [
     `${totals.ok}/${totals.steps} steps ok`,
     totals.failed > 0 ? `${totals.failed} failed` : null,
+    totals.interrupted > 0 ? `${totals.interrupted} interrupted` : null,
     totals.cached > 0 ? `${totals.cached} cached` : null,
     formatElapsed(totals.durationMs),
     totals.costUsd > 0 ? formatUsd(totals.costUsd) : null,

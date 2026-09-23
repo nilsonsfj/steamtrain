@@ -1320,7 +1320,9 @@ function printHistoryRow(run: RunRecordSummary, out: (text: string) => void): vo
     run.status === "done"
       ? "ok  "
       : run.status === "canceled"
-        ? "cxl "
+        ? run.timedOut
+          ? "tmo "
+          : "cxl "
         : run.status === "budget-exceeded"
           ? "bdgt"
           : "fail";
@@ -1340,6 +1342,7 @@ function printHistoryRecord(
   out(`  started:  ${new Date(record.startedAt).toISOString()}\n`);
   out(`  duration: ${(record.durationMs / 1000).toFixed(1)}s\n`);
   out(`  input:    ${truncateLine(record.input, 200)}\n`);
+  if (record.timedOut) out("  stopped:  its workflow timeout was reached\n");
   if (record.error) out(`  error:    ${record.error}\n`);
   if (record.budget) {
     const b = record.budget;
@@ -1370,7 +1373,15 @@ function printHistoryRecord(
       `\n  phase ${phase.index + 1}: ${phase.title}${phase.done ? (phase.ok ? "" : " (failed)") : ""}\n`,
     );
     for (const step of phase.steps) {
-      const glyph = step.status === "done" ? "✓" : step.status === "error" ? "✗" : "·";
+      // A step the run's cancel or timeout took down is stopped, not failed.
+      const glyph =
+        step.status === "done"
+          ? "✓"
+          : step.status === "error"
+            ? step.result?.interrupted
+              ? "■"
+              : "✗"
+            : "·";
       const runnerId = step.agent ?? step.api;
       const runner = runnerId ? ` ${runnerId}${step.model ? `/${step.model}` : ""}` : "";
       const dur = step.result ? ` · ${(step.result.durationMs / 1000).toFixed(1)}s` : "";

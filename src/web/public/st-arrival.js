@@ -69,7 +69,7 @@
     var r = s && s.result;
     if (!r || r.ok) return false;
     if (r.interrupted) return true;
-    return S.runStatus === "canceled" && /cancel/i.test(r.error || "");
+    return (S.runStatus === "canceled" || S.runStatus === "timed-out") && /cancel/i.test(r.error || "");
   }
 
   /**
@@ -126,12 +126,15 @@
       }
       return;
     }
-    if (S.arrivalWorktrees && S.arrivalWorktrees.runId === runId) return;
-    var entry = { runId: runId, pending: true };
+    // A fetch that gave up gets one more try when the run's status arrives
+    // (the forced fallback's `force` is that second chance too).
+    var prev = S.arrivalWorktrees && S.arrivalWorktrees.runId === runId ? S.arrivalWorktrees : null;
+    if (prev && !(prev.failed && !prev.retried)) return;
+    var entry = { runId: runId, pending: true, retried: Boolean(prev) };
     S.arrivalWorktrees = entry;
     var giveUp = function () {
       if (S.arrivalWorktrees !== entry) return;
-      S.arrivalWorktrees = { runId: runId, failed: true };
+      S.arrivalWorktrees = { runId: runId, failed: true, retried: entry.retried };
       ST.render();
     };
     // A 404 (record not written yet), a 5xx or a dropped request are all
