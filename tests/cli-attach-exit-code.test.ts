@@ -22,7 +22,7 @@ async function attachToFinishedRun(results: StepResult[]): Promise<number> {
     status: "error",
     ok: false,
   });
-  const done: WorkflowEvent = { kind: "workflow_done", ok: false, results };
+  const done: WorkflowEvent = { kind: "workflow_done", ok: false, results, ts: Date.now() };
   await store.appendEventLines(id, `${JSON.stringify(done)}\n`);
   return runAttachCommand(
     [id, "--json"],
