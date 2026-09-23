@@ -858,7 +858,13 @@ export async function runDetachedRunner(
     cwd,
     runId,
     fresh: Boolean(launch.fresh),
-    priorOwner: priorOwnerWork(await store.readEvents(runId).catch(() => [])),
+    priorOwner: priorOwnerWork(
+      await store.readEvents(runId).catch((e) => {
+        // Not fatal, but the steps already done would then bill as replays.
+        err(`warning: could not read the run's earlier events: ${message(e)}\n`);
+        return [];
+      }),
+    ),
     source: "cli-detached",
     detached: true,
     registerLiveRun: false,
@@ -902,9 +908,23 @@ export function priorOwnerWork(events: readonly WorkflowEvent[]): PriorOwnerWork
   const ran = new Set<string>();
   const spend = new Map<string, Pick<StepResult, "costUsd" | "tokens">>();
   let startedAt: number | undefined;
+  // Each owner's events start with its own workflow_start. A later owner's
+  // first live-looking step_done for a step an earlier owner already ran is
+  // that owner's own replay, re-labeled by ownWorkRewriter — not a new pass.
+  let ranBefore = new Set<string>();
+  let claimed = new Set<string>();
   for (const event of events) {
-    if (event.kind === "workflow_start" && startedAt === undefined) startedAt = event.ts;
+    if (event.kind === "workflow_start") {
+      startedAt ??= event.ts;
+      ranBefore = new Set(ran);
+      claimed = new Set();
+      continue;
+    }
     if (event.kind !== "step_done" || event.cached) continue;
+    if (ranBefore.has(event.stepId) && !claimed.has(event.stepId)) {
+      claimed.add(event.stepId);
+      continue;
+    }
     if (event.result.ok) ran.add(event.stepId);
     // A fan-out parent's spend is its children's; they are summed themselves.
     if (event.result.childResults?.length) continue;
@@ -1111,7 +1131,7 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
       publisher.event(event);
       notifyWorkflowEvent(notifier, notifyMeta, event);
       if (options.json) out(`${JSON.stringify(event)}\n`);
-      else printHumanEvent(event, out, { canceled: ac.signal.aborted });
+      else printHumanEvent(event, out, { canceled: ac.signal.aborted && !timedOut, timedOut });
       if (event.kind === "step_done") {
         await persistWorkflowStepDone(
           cacheStore,
@@ -1250,7 +1270,13 @@ export async function runAttachCommand(
     for await (const event of store.tailEvents(runId, { signal: ac.signal })) {
       if (json) out(`${JSON.stringify(event)}\n`);
       else if (event.kind === "workflow_done") done = event;
-      else printHumanEvent(event, out);
+      else {
+        // A cancel request is a file every surface writes, so a viewer can
+        // see it too — and not blame the steps that cancel takes down.
+        const failed = event.kind === "step_done" && !event.result.ok;
+        const canceled = failed && (await store.cancelRequested(runId).catch(() => false));
+        printHumanEvent(event, out, { canceled });
+      }
       if (!json && event.kind === "approval_pending") {
         out(`     decide with: steamtrain workflow approve ${runId} --step ${event.stepId}\n`);
       }
@@ -1839,7 +1865,7 @@ const midLine = new WeakMap<(text: string) => void, boolean>();
 export function printHumanEvent(
   event: WorkflowEvent,
   out: (text: string) => void,
-  run: { canceled?: boolean } = {},
+  run: { canceled?: boolean; timedOut?: boolean } = {},
 ): void {
   if (event.kind === "step_event") {
     if (event.event.kind === "text_delta" && !event.event.thinking && event.event.text) {
@@ -1927,7 +1953,7 @@ export function printHumanEvent(
       );
       // Say why, unless the step only stopped because the run was canceled.
       const why =
-        event.result.ok || event.result.interrupted || run.canceled
+        event.result.ok || event.result.interrupted || run.canceled || run.timedOut
           ? undefined
           : event.result.error?.trim();
       if (why) out(`     ${why.split("\n", 1)[0]}\n`);
@@ -1965,13 +1991,15 @@ export function printHumanEvent(
     case "workflow_done":
       out(
         `\nworkflow ${
-          run.canceled
-            ? "canceled"
-            : event.budgetExceeded
-              ? "budget-exceeded"
-              : event.ok
-                ? "done"
-                : "failed"
+          run.timedOut
+            ? "timed out"
+            : run.canceled
+              ? "canceled"
+              : event.budgetExceeded
+                ? "budget-exceeded"
+                : event.ok
+                  ? "done"
+                  : "failed"
         }\n`,
       );
       return;

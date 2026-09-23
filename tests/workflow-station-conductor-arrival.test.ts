@@ -386,6 +386,7 @@ describe("arrival report", () => {
       failCount: 0,
       skipCount: 0,
       blockedCount: 0,
+      interruptedCount: 0,
       costUsd: 0,
       tokens: 0,
       agentless: true,
@@ -414,6 +415,7 @@ describe("arrival report", () => {
       failCount: 1,
       skipCount: 1,
       blockedCount: 0,
+      interruptedCount: 0,
     });
     expect(billed[0]?.value).toContain("1 failed");
     expect(billed[1]?.value).toBe("$0.4200");

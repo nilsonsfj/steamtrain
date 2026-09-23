@@ -44,8 +44,9 @@ export async function sessionForDirectory(
   sessionId: string,
   cwd: string,
   env?: Record<string, string>,
+  signal?: AbortSignal,
 ): Promise<string> {
-  const exported = await runCli(binary, ["export", sessionId], cwd, env);
+  const exported = await runCli(binary, ["export", sessionId], cwd, env, signal);
   const session = parseExport(exported, sessionId);
   if (session.info.directory && (await samePath(session.info.directory, cwd))) return sessionId;
 
@@ -55,7 +56,7 @@ export async function sessionForDirectory(
   try {
     const file = join(dir, "session.json");
     await writeFile(file, JSON.stringify(copy), "utf8");
-    await runCli(binary, ["import", file], cwd, env);
+    await runCli(binary, ["import", file], cwd, env, signal);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -125,6 +126,7 @@ function runCli(
   args: string[],
   cwd: string,
   env?: Record<string, string>,
+  signal?: AbortSignal,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
@@ -135,6 +137,8 @@ function runCli(
         env: childEnv(env),
         timeout: SESSION_COPY_TIMEOUT_MS,
         maxBuffer: SESSION_EXPORT_MAX_BYTES,
+        // A cancel or kill-step must not wait out a slow export or import.
+        signal,
       },
       (err, stdout, stderr) => {
         if (err) {

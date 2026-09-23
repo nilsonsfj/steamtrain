@@ -529,13 +529,19 @@
     var request = ++recentRequest;
     if (!expectRunId) S.recentRuns = [];
     S.recentRunsFor = name;
+    // Like the arrival page's worktree fetch: a 5xx or a dropped request is
+    // worth another try while waiting on a run's record; auth is not.
     var attempt = function (left) {
+      var again = function () {
+        if (expectRunId && left > 0) setTimeout(function () { attempt(left - 1); }, 1000);
+      };
       ST.apiAuth("GET", "/api/history").then(function (r) {
         if (request !== recentRequest || S.selected !== name) return;
+        if (r.status >= 500) { again(); return; }
         if (r.status !== 200) return;
         var all = r.body.runs || r.body.history || [];
         if (expectRunId && left > 0 && !all.some(function (run) { return run.id === expectRunId; })) {
-          setTimeout(function () { attempt(left - 1); }, 1000);
+          again();
           return;
         }
         S.recentRuns = all.filter(function (run) {
@@ -543,7 +549,10 @@
         }).slice(0, 3);
         ST.shell.renderLiveRuns();
         ST.render();
-      }).catch(function () {});
+      }).catch(function (err) {
+        if (request !== recentRequest || S.selected !== name) return;
+        if (!(err && err.message === "auth required")) again();
+      });
     };
     attempt(3);
   }

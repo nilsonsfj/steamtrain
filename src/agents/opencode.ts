@@ -409,7 +409,13 @@ export async function* runOpenCodeProcess(
   let run = opts;
   if (opts.resumeSessionId && opts.cwd) {
     try {
-      const sessionId = await sessionForDirectory(binary, opts.resumeSessionId, opts.cwd, opts.env);
+      const sessionId = await sessionForDirectory(
+        binary,
+        opts.resumeSessionId,
+        opts.cwd,
+        opts.env,
+        opts.signal,
+      );
       run = { ...opts, resumeSessionId: sessionId };
     } catch (err) {
       yield {

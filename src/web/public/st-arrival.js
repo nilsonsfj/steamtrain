@@ -130,11 +130,16 @@
       };
       ST.apiAuth("GET", "/api/history/" + encodeURIComponent(runId) + "/worktrees").then(function (r) {
         if (S.arrivalWorktrees !== entry) return;
-        if (r.status === 404 || r.status >= 500 || r.status === 0) { again(); return; }
+        if (r.status === 404 || r.status >= 500) { again(); return; }
         if (r.status !== 200) { giveUp(); return; }
         S.arrivalWorktrees = { runId: runId, sources: r.body.sources || [], harvest: r.body.harvest || null };
         ST.render();
-      }).catch(again);
+      }).catch(function (err) {
+        // apiAuth has already asked the viewer to sign in again; retrying
+        // would only raise that prompt ten more times.
+        if (err && err.message === "auth required") giveUp();
+        else again();
+      });
     };
     attempt(10);
   }
@@ -313,7 +318,7 @@
     var actions = h("div", { class: "arrival-actions" });
     var primary = null;
     if (!isReadOnly() && root && S.runId) {
-      var resume = isInterrupted(findLeaf(collectArrivalLeafSteps(), root.stepId));
+      var resume = root.interrupted || isInterrupted(findLeaf(collectArrivalLeafSteps(), root.stepId));
       primary = h("button", {
         class: "btn primary",
         text: (resume ? "Resume from " : "Retry from ") + root.stepId,
@@ -440,6 +445,11 @@
   function arrivalState(report) {
     if (S.runStatus === "canceled") return { text: "canceled", cls: " stopped" };
     if (S.runStatus === "budget-exceeded") return { text: "budget reached", cls: " failed" };
+    // The final status frame lands just after the last event: until then a
+    // run whose only casualties were interrupted is "stopped", not failed.
+    if (!S.runStatus && !report.receipt.ok && !report.receipt.failCount && report.receipt.interruptedCount) {
+      return { text: "stopped", cls: " stopped" };
+    }
     return report.receipt.ok ? { text: "complete", cls: "" } : { text: "failed", cls: " failed" };
   }
 
@@ -480,7 +490,7 @@
   // ---- root cause ------------------------------------------------------------
 
   function renderRootCause(root, leaves) {
-    var interrupted = isInterrupted(findLeaf(leaves, root.stepId));
+    var interrupted = root.interrupted || isInterrupted(findLeaf(leaves, root.stepId));
     var box = h("div", { class: "rootcause" + (interrupted ? " interrupted" : "") });
     var what = interrupted
       ? h("span", { class: "what" },
@@ -550,8 +560,11 @@
     tiles.appendChild(tile("Elapsed", h("div", { class: "v", text: fmtElapsed(r.durationMs) || "0.0s" })));
 
     var steps = h("div", { class: "v" }, h("span", { class: "ok", text: r.okCount + " ok" }));
-    var interrupted = leaves.filter(isInterrupted).length;
-    var failed = Math.max(0, r.failCount - interrupted);
+    // The report already keeps marked interruptions out of failCount; a record
+    // from before the marker is caught by isInterrupted's text fallback.
+    var legacy = leaves.filter(function (s) { return isInterrupted(s) && !s.result.interrupted; }).length;
+    var interrupted = (r.interruptedCount || 0) + legacy;
+    var failed = Math.max(0, r.failCount - legacy);
     if (failed) {
       steps.appendChild(h("span", { class: "sep", text: " · " }));
       steps.appendChild(h("span", { class: "bad", text: failed + " failed" }));

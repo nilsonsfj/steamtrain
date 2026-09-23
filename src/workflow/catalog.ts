@@ -270,7 +270,7 @@ function loadUserWorkflowsFile(home: string): {
   const result = workflowsFileSchema.safeParse(parsed);
   if (!result.success) {
     return {
-      warning: `invalid ${path}: ${describeIssue(result.error.issues[0])}`,
+      warning: `invalid ${path}: ${describeIssue(result.error.issues[0], "workflows")}`,
     };
   }
 

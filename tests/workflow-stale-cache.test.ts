@@ -194,4 +194,51 @@ describe("cache staleness", () => {
     expect(stepDone(events, "after-ok").cached).toBe(true);
     expect(stepDone(events, "after-a").cached).toBe(false);
   });
+
+  it("replays past a gate, but re-runs a step that reads an approval's decision", async () => {
+    // `after-gate` depends on the gate only by dependsOn; `quotes` renders the
+    // approval's output — reading it, so a re-asked approval is new input.
+    const spec: WorkflowSpec = {
+      name: "gate-and-read",
+      phases: [
+        { id: "p1", title: "Src", steps: [{ id: "src", kind: "command", cmd: "echo x" }] },
+        {
+          id: "p2",
+          title: "Gate",
+          steps: [
+            { id: "g", kind: "gate", dependsOn: ["src"], condition: { step: "src", ok: true } },
+            { id: "ok", kind: "approval", dependsOn: ["src"] },
+          ],
+        },
+        {
+          id: "p3",
+          title: "After",
+          steps: [
+            { id: "after-gate", kind: "command", dependsOn: ["g"], cmd: "echo fresh" },
+            {
+              id: "quotes",
+              kind: "command",
+              dependsOn: ["ok"],
+              cmd: "echo 'decision {{steps.ok.output}}'",
+            },
+          ],
+        },
+      ],
+    };
+    const cache = new Map<string, StepResult>([
+      ["src", cachedResult("src", "x\n")],
+      ["g", { ...cachedResult("g", "passed"), gate: { passed: true, onFalse: "continue" } }],
+      ["after-gate", cachedResult("after-gate", "cached")],
+      ["quotes", cachedResult("quotes", "decision stale")],
+    ]);
+    const events: WorkflowEvent[] = [];
+    const approving: WorkflowDeps = {
+      ...deps(),
+      requestApproval: async () => ({ approved: true }),
+    };
+    for await (const ev of runWorkflow(spec, { input: "task", cache }, approving)) events.push(ev);
+
+    expect(stepDone(events, "after-gate").cached).toBe(true);
+    expect(stepDone(events, "quotes").cached).toBe(false);
+  });
 });

@@ -1573,7 +1573,8 @@ async function runSingleStep(
   // error text, which is the adapter's own message whenever it had one.
   if (env.signal?.aborted) {
     for (const r of [execution.result, ...(execution.childResults ?? [])]) {
-      if (!r.ok && !r.killed && !r.dependencyFailed) r.interrupted = true;
+      // A budget placeholder (`notRun`) never started, so nothing was cut short.
+      if (!r.ok && !r.killed && !r.dependencyFailed && !r.notRun) r.interrupted = true;
     }
   }
 

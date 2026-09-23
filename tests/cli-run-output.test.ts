@@ -57,6 +57,12 @@ describe("printHumanEvent", () => {
     expect(text()).toBe("  fail s1\n");
   });
 
+  it("says a timed-out run timed out", () => {
+    const { out, text } = capture();
+    printHumanEvent({ kind: "workflow_done", ok: false, results: [], ts }, out, { timedOut: true });
+    expect(text()).toBe("\nworkflow timed out\n");
+  });
+
   it("reports a canceled run as canceled, without blaming its interrupted steps", () => {
     const { out, text } = capture();
     printHumanEvent(done(false, "cancelled"), out, { canceled: true });
@@ -145,6 +151,28 @@ describe("a mid-run handoff keeps the run's own work", () => {
       ts,
     });
     expect(done.kind === "workflow_done" && done.results[0]?.costUsd).toBeCloseTo(0.07);
+  });
+
+  it("does not bill a step twice across two handoffs", () => {
+    // Owner 1 ran rev ($0.02); owner 2 replayed it (re-labeled as its own
+    // work, so it reads live) and handed off again. Owner 3 must still see
+    // $0.02, not the claim added on top.
+    const start = (ts: number): WorkflowEvent => ({
+      kind: "workflow_start",
+      name: "w",
+      phaseCount: 1,
+      stepCount: 1,
+      ts,
+    });
+    const prior = priorOwnerWork([
+      start(1),
+      stepDone("rev", false, 0.02),
+      start(2),
+      stepDone("rev", false, 0.02),
+    ]);
+    expect(prior.spend.get("rev")?.costUsd).toBeCloseTo(0.02);
+    expect([...prior.ran]).toEqual(["rev"]);
+    expect(prior.startedAt).toBe(1);
   });
 
   it("changes nothing for a run that was not handed off", () => {

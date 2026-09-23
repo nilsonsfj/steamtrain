@@ -7,7 +7,7 @@ import { type WorkflowEvent, type WorkflowSpec, runWorkflow } from "../src/workf
  * to name it the run's root cause; the engine now says so explicitly.
  */
 describe("a step taken down by a canceled run", () => {
-  it("is marked interrupted, and a step that never started is not", async () => {
+  it("is marked interrupted, and the run stops before the next step starts", async () => {
     const spec: WorkflowSpec = {
       name: "interrupted",
       phases: [
@@ -37,7 +37,8 @@ describe("a step taken down by a canceled run", () => {
       ok: false,
       interrupted: true,
     });
-    const next = events.find((e) => e.kind === "step_done" && e.stepId === "next");
-    expect(next?.kind === "step_done" && next.result.interrupted).toBeFalsy();
+    // The cancel stops the run before `next` starts, so it has no result to mark.
+    expect(events.some((e) => e.kind === "step_start" && e.stepId === "next")).toBe(false);
+    expect(events.some((e) => e.kind === "step_done" && e.stepId === "next")).toBe(false);
   });
 });

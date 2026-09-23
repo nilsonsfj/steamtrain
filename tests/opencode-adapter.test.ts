@@ -282,6 +282,7 @@ const [cmd, ...rest] = process.argv.slice(2);
 const log = (o) => fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ cmd, cwd: process.cwd(), ...o }) + "\\n");
 if (cmd === "export") {
   if (process.env.FAIL_EXPORT) { process.stderr.write("Session not found"); process.exit(1); }
+  if (process.env.SLOW_EXPORT) { setTimeout(() => {}, 30000); return; }
   process.stderr.write("Exporting session: " + rest[0] + "\\n");
   // A log line on stdout, braces and all, before the document itself.
   if (process.env.NOISY_EXPORT) process.stdout.write('{"level":"info","msg":"exporting"}\\n');
@@ -304,7 +305,7 @@ if (cmd === "export") {
     return { bin, calls };
   }
 
-  async function run(bin: string, cwd: string, env?: Record<string, string>) {
+  async function run(bin: string, cwd: string, env?: Record<string, string>, signal?: AbortSignal) {
     const events: AgentEvent[] = [];
     for await (const e of new OpenCodeAdapter(bin).run({
       prompt: "go on",
@@ -312,6 +313,7 @@ if (cmd === "export") {
       cwd,
       resumeSessionId: "ses_f33132908ffeY2p6iYE7DZEtR1",
       env,
+      signal,
     }))
       events.push(e);
     return events;
@@ -368,6 +370,19 @@ if (cmd === "export") {
     expect(calls()).toEqual([
       expect.objectContaining({ cmd: "run", session: "ses_f33132908ffeY2p6iYE7DZEtR1" }),
     ]);
+  });
+
+  it("stops copying the session as soon as the step is canceled", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "st-oc-abort-"));
+    const { bin } = fakeOpencode(dir);
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 200);
+
+    const started = Date.now();
+    const events = await run(bin, dir, { SLOW_EXPORT: "1" }, ac.signal);
+
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(events).toEqual([expect.objectContaining({ kind: "error" })]);
   });
 
   it("fails the step instead of hanging when the session cannot be copied", async () => {
