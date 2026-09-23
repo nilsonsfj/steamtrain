@@ -11,6 +11,7 @@ const AGENT_PROVIDER_IDS: readonly AgentProviderId[] = [
   "kimi",
   "cursor",
   "antigravity",
+  "grok",
 ];
 
 export const DEFAULT_AGENT_BINARY: Record<AgentProviderId, string> = {
@@ -23,6 +24,7 @@ export const DEFAULT_AGENT_BINARY: Record<AgentProviderId, string> = {
   kimi: "kimi",
   cursor: "agent",
   antigravity: "agy",
+  grok: "grok",
 };
 
 /**
@@ -42,6 +44,7 @@ export const DEFAULT_AGENT_LABEL: Record<AgentProviderId, string> = {
   kimi: "kimi",
   cursor: "cursor",
   antigravity: "agy",
+  grok: "grok",
 };
 
 /**

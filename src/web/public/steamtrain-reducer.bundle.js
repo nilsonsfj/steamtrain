@@ -1349,7 +1349,8 @@ var SteamtrainReducer = (() => {
     "mimo",
     "kimi",
     "cursor",
-    "antigravity"
+    "antigravity",
+    "grok"
   ];
   var DEFAULT_AGENT_LABEL = {
     claude: "claude",
@@ -1360,7 +1361,8 @@ var SteamtrainReducer = (() => {
     mimo: "mimo",
     kimi: "kimi",
     cursor: "cursor",
-    antigravity: "agy"
+    antigravity: "agy",
+    grok: "grok"
   };
   function agentUiLabel(id) {
     if (!id) return "";

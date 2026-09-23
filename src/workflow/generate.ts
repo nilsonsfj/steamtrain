@@ -357,13 +357,13 @@ what stops an analysis step from being able to rewrite the repo:
     "artifacts" (a read-only step cannot produce files) and never put it on a
     merge step.
   - "edit" — reads and edits files in its own workspace; no network. Enforceable
-    on claude and codex only.
+    on claude, codex, and grok.
   - "full" — explicitly unrestricted; use it for implement/fix steps.
 A workflow may also set "permissions" once at the TOP LEVEL as the default for
 every agent step, with individual steps overriding it — the clearest way to
 express "only the implement step writes". Prefer declaring profiles: a workflow
 whose reviewers are provably read-only is one a user will run on a real
-repository. Note that only claude, codex, opencode and mimo can enforce
+repository. Note that only claude, codex, grok, opencode and mimo can enforce
 "read-only" natively; a restricted step pinned to another agent is refused
 before it starts.
 
@@ -378,7 +378,7 @@ instead of re-reading the repo. The source must be an agent-backed step on the
 SAME agent in an earlier phase; neither side may use forEach; each source may
 be continued by at most ONE step (chain continuations linearly);
 self-continuation requires the step to be inside a loop region. The step fails when the agent's
-CLI cannot resume sessions (claude/opencode/codex/cursor/antigravity can). Session continuity
+CLI cannot resume sessions (claude/opencode/codex/cursor/antigravity/kimi/grok can). Session continuity
 shares CONVERSATION state, not files — pair it with "workspace" inheritance
 when the step must also see the source's edits. Default to fresh sessions for
 independent critique; use continuation only when inheriting context is the

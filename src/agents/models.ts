@@ -29,6 +29,13 @@ import {
   listCursorCachedAgentModels,
   refreshCursorVariantCache,
 } from "./cursor-variants";
+import { GROK_MODELS, GrokAdapter } from "./grok";
+import {
+  getGrokEfforts,
+  getGrokModelName,
+  listGrokCachedAgentModels,
+  refreshGrokVariantCache,
+} from "./grok-variants";
 import { KIMI_MODELS, KimiAdapter } from "./kimi";
 import {
   getKimiEfforts,
@@ -63,6 +70,7 @@ export const AGENT_IDS: readonly AgentProviderId[] = [
   "kimi",
   "cursor",
   "antigravity",
+  "grok",
 ];
 
 export function isAgentProviderId(value: string): value is AgentProviderId {
@@ -105,6 +113,16 @@ function cursorModelsWithLiveNames(): readonly AgentModel[] {
   return CURSOR_MODELS.map((model) => ({
     id: model.id,
     name: getCursorModelName(model.id) ?? model.name,
+  }));
+}
+
+function grokModelsWithLiveNames(): readonly AgentModel[] {
+  const cached = listGrokCachedAgentModels();
+  if (cached.length > 0) return cached;
+
+  return GROK_MODELS.map((model) => ({
+    id: model.id,
+    name: getGrokModelName(model.id) ?? model.name,
   }));
 }
 
@@ -159,6 +177,8 @@ export function modelsForProvider(provider: AgentProviderId): readonly AgentMode
       return cursorModelsWithLiveNames();
     case "antigravity":
       return antigravityModelsWithLiveNames();
+    case "grok":
+      return grokModelsWithLiveNames();
   }
 }
 
@@ -194,6 +214,7 @@ export function modelNameForAgent(
   if (provider === "kimi") return getKimiModelName(modelId) ?? modelId;
   if (provider === "cursor") return getCursorModelName(modelId) ?? modelId;
   if (provider === "antigravity") return getAntigravityModelName(modelId) ?? modelId;
+  if (provider === "grok") return getGrokModelName(modelId) ?? modelId;
   return modelId;
 }
 
@@ -212,6 +233,7 @@ const PROVIDER_ADAPTERS: Record<AgentProviderId, () => AgentAdapter> = {
   kimi: () => new KimiAdapter(),
   cursor: () => new CursorAgentAdapter(),
   antigravity: () => new AntigravityAdapter(),
+  grok: () => new GrokAdapter(),
 };
 
 /**
@@ -346,6 +368,8 @@ export function effortsForModel(
       // Only Gemini / Opus / GPT-OSS bases accept slug-baked efforts.
       // Claude Sonnet rejects both `-medium` suffixes and `--effort`.
       return antigravitySlugEffortsForModel(model);
+    case "grok":
+      return getGrokEfforts(model);
     default:
       return [];
   }
@@ -421,6 +445,12 @@ export async function refreshAgentCatalogCaches(
     if (await refreshCursorVariantCache(binary)) refreshed = true;
   }
 
+  const grok = doctor.find((d) => d.provider === "grok" && d.status === "ok");
+  if (grok?.status === "ok") {
+    const binary = resolveAgentInstance(config, grok.agent)?.binary ?? grok.binaryPath ?? "grok";
+    if (await refreshGrokVariantCache(binary)) refreshed = true;
+  }
+
   const antigravity = doctor.find((d) => d.provider === "antigravity" && d.status === "ok");
   if (antigravity?.status === "ok") {
     const binary =
@@ -448,6 +478,7 @@ export {
   refreshAntigravityVariantCache,
   refreshCodexVariantCache,
   refreshCursorVariantCache,
+  refreshGrokVariantCache,
   refreshKimiVariantCache,
   refreshMimoVariantCache,
   refreshOpencodeVariantCache,

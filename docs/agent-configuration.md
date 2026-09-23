@@ -33,7 +33,7 @@ an agent hits quota, rate limits, or other configured failures — see
 [Model binding](model-binding.md#configuring-mid-flight-model-failover). Workflow
 and per-step `modelFailover` override it.
 
-Valid providers: `claude`, `opencode`, `codex`, `cursor`, `antigravity`, `amp`, `kiro`, `mimo`, `kimi`. An instance reuses its
+Valid providers: `claude`, `opencode`, `codex`, `grok`, `cursor`, `antigravity`, `amp`, `kiro`, `mimo`, `kimi`. An instance reuses its
 provider's adapter; `binary` is only needed when the executable name differs
 from the provider (e.g. a fork).
 
@@ -93,10 +93,10 @@ so getting set up never means leaving the manager to hunt for the command. The
 header carries a one-line readiness summary (`3/5 ready · 1 sign-in`).
 
 Each row also shows `perms=…`: the sandbox profiles this provider's CLI can
-actually enforce (`perms=read-only/edit` for claude and codex, `perms=read-only`
-for opencode/mimo, `perms=full only` for the agents whose headless mode is
-all-or-nothing). That is the answer to "can I put my read-only review steps on
-this agent?" — see [`permissions.md`](permissions.md).
+actually enforce (`perms=read-only/edit` for claude, codex, and grok,
+`perms=read-only` for opencode/mimo, `perms=full only` for the agents whose
+headless mode is all-or-nothing). That is the answer to "can I put my read-only
+review steps on this agent?" — see [`permissions.md`](permissions.md).
 
 ## Web UI
 

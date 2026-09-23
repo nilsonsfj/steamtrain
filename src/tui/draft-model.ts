@@ -30,6 +30,7 @@ const DRAFT_AGENT_ORDER: readonly AgentProviderId[] = [
   "opencode",
   "claude",
   "codex",
+  "grok",
   "amp",
   "kiro",
   "mimo",

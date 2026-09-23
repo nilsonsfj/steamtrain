@@ -5,6 +5,7 @@ import { AntigravityAdapter } from "./antigravity";
 import { ClaudeCodeAdapter } from "./claude";
 import { CodexAdapter } from "./codex";
 import { CursorAgentAdapter } from "./cursor";
+import { GrokAdapter } from "./grok";
 import { KimiAdapter } from "./kimi";
 import { KiroCliAdapter } from "./kiro";
 import { MimoAdapter } from "./mimo";
@@ -55,6 +56,7 @@ export {
   buildCursorRunArgs,
   createCursorMapper,
 } from "./cursor";
+export { GrokAdapter, GROK_MODELS, buildGrokRunArgs, createGrokMapper } from "./grok";
 export {
   AntigravityAdapter,
   ANTIGRAVITY_MODELS,
@@ -94,6 +96,7 @@ export {
   refreshAntigravityVariantCache,
   refreshCodexVariantCache,
   refreshCursorVariantCache,
+  refreshGrokVariantCache,
   refreshKimiVariantCache,
   refreshMimoVariantCache,
   refreshOpencodeVariantCache,
@@ -156,6 +159,11 @@ export {
   parseCursorListModels,
   setCursorVariantCacheForTests,
 } from "./cursor-variants";
+export {
+  clearGrokVariantCacheForTests,
+  parseGrokModelsOutput,
+  setGrokVariantCacheForTests,
+} from "./grok-variants";
 export {
   clearAntigravityVariantCacheForTests,
   parseAntigravityModelsOutput,
@@ -221,5 +229,7 @@ export function createAdapter(id: AgentProviderId, binary?: string): AgentAdapte
       return new CursorAgentAdapter(binary);
     case "antigravity":
       return new AntigravityAdapter(binary);
+    case "grok":
+      return new GrokAdapter(binary);
   }
 }

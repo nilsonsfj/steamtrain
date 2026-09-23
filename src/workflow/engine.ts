@@ -2261,7 +2261,7 @@ function planStepPermissions(
     return {
       perms,
       plan,
-      blockedReason: `step '${step.id}' requires permissions '${permissionsLabel(perms)}' but agent '${step.agent}' (provider '${instance.provider}') cannot enforce it: ${plan.gaps.join("; ")}. Move the step to claude or codex, or set permissions.onUnsupported to "warn" to run it unenforced.`,
+      blockedReason: `step '${step.id}' requires permissions '${permissionsLabel(perms)}' but agent '${step.agent}' (provider '${instance.provider}') cannot enforce it: ${plan.gaps.join("; ")}. Move the step to claude, codex, or grok, or set permissions.onUnsupported to "warn" to run it unenforced.`,
     };
   }
   return { perms, plan };

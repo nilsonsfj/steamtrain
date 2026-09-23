@@ -1462,6 +1462,7 @@ Semantics:
 | `opencode` | `opencode run --session <sessionId>` | fresh session in worktree |
 | `codex` | `codex exec resume <sessionId>` | fresh session in worktree |
 | `cursor` | `agent --resume <sessionId>` | `--resume <sessionId>` |
+| `grok` | `grok --resume <sessionId>` (`--prompt-file` headless) | `--resume <sessionId>` |
 | `antigravity` | `agy --conversation <sessionId>` | `--conversation <sessionId>` |
 | `kimi` | `kimi --session <sessionId>` | `--session <sessionId>` |
 | `amp`, `kiro` | not supported | fresh session in worktree |
@@ -1522,7 +1523,7 @@ behavior: no permission flags, no verification. `full` is the only profile that
 *grants* — it pre-approves everything so a headless implement step never stalls
 on a prompt it cannot answer.
 
-Only `claude` and `codex` can enforce every profile; `opencode`/`mimo` enforce
+Only `claude`, `codex`, and `grok` can enforce every profile; `opencode`/`mimo` enforce
 `read-only`; the remaining agents cannot enforce a restriction headlessly. See
 [`permissions.md`](permissions.md) for the full matrix, the verification
 mechanics, and the UI surfaces.

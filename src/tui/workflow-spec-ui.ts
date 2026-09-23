@@ -5,6 +5,7 @@ import {
   CLAUDE_MODELS,
   CODEX_MODELS,
   CURSOR_MODELS,
+  GROK_MODELS,
   KIMI_MODELS,
   KIRO_MODELS,
   MIMO_MODELS,
@@ -482,5 +483,7 @@ function staticModelName(agent: AgentInstanceId, model: string): string | undefi
       return CURSOR_MODELS.find((entry) => entry.id === model)?.name;
     case "antigravity":
       return ANTIGRAVITY_MODELS.find((entry) => entry.id === model)?.name;
+    case "grok":
+      return GROK_MODELS.find((entry) => entry.id === model)?.name;
   }
 }

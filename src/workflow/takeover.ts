@@ -16,8 +16,9 @@ import type { WorkflowHistoryStore } from "./history-store";
  * agent's *interactive* CLI (no `--print`) in the step's worktree, resuming
  * the step's recorded session where the provider supports it (claude:
  * `--resume <sessionId>`; cursor: `--resume <sessionId>`; antigravity:
- * `--conversation <sessionId>`; other providers launch a fresh interactive
- * session in the same worktree, clearly noted). When the human exits, the
+ * `--conversation <sessionId>`; grok: `--resume <sessionId>`; other providers
+ * launch a fresh interactive session in the same worktree, clearly noted).
+ * When the human exits, the
  * takeover is recorded in run history as an intervention, and the worktree's
  * final state flows into the existing merge/diff machinery — `history show
  * --diff` and `history apply` see exactly what the human left behind.
@@ -39,6 +40,8 @@ const INTERACTIVE_RESUME_ARGS: Partial<Record<AgentProviderId, (sessionId: strin
   antigravity: (sessionId) => ["--conversation", sessionId],
   // Kimi Code resumes by session id (`-S` alias), interactive and headless.
   kimi: (sessionId) => ["--session", sessionId],
+  // Grok Build resumes by session id, interactive and headless.
+  grok: (sessionId) => ["--resume", sessionId],
 };
 
 export interface TakeoverPlan {

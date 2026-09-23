@@ -321,6 +321,12 @@ function installHint(agent: AgentProviderId): FixHint {
           "Install Antigravity CLI (curl -fsSL https://antigravity.google/cli/install.sh | bash) and ensure `agy` is on PATH.",
         command: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
       };
+    case "grok":
+      return {
+        detail:
+          "Install Grok Build (curl -fsSL https://x.ai/cli/install.sh | bash) and ensure `grok` is on PATH.",
+        command: "curl -fsSL https://x.ai/cli/install.sh | bash",
+      };
   }
 }
 
@@ -372,6 +378,11 @@ function authHint(agent: AgentProviderId): FixHint {
         detail:
           "Run `agy` and complete Google sign-in, or set GEMINI_API_KEY / ANTIGRAVITY_API_KEY.",
         command: "agy",
+      };
+    case "grok":
+      return {
+        detail: "Run `grok login`, or set XAI_API_KEY for non-interactive use.",
+        command: "grok login",
       };
   }
 }

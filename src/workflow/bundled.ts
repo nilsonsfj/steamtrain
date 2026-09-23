@@ -32,7 +32,7 @@ const FREE = {
  *
  * A bundled workflow must stay runnable on ANY agent the user retargets it to
  * (`/agent --all`, a `modelClass` binding, a model-typed input), and only
- * claude / codex / opencode / mimo can enforce a restriction headlessly. With
+ * claude / codex / grok / opencode / mimo can enforce a restriction headlessly. With
  * `"fail"` these workflows would simply refuse to run on amp or cursor, which
  * is a worse deal than the honest degradation: enforced natively where the CLI
  * supports it, and everywhere else still verified after the fact — the engine

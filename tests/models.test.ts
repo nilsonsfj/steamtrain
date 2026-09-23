@@ -279,6 +279,7 @@ describe("model names", () => {
     expect(defaultModelForAgent("kiro")).toBe("claude-sonnet-5");
     expect(defaultModelForAgent("mimo")).toBe("mimo/mimo-auto");
     expect(defaultModelForAgent("kimi")).toBe("kimi-code/kimi-for-coding");
+    expect(defaultModelForAgent("grok")).toBe("grok-4.7");
   });
 
   it("uses only the live MiMo catalog when cache is loaded", () => {

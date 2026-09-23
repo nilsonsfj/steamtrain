@@ -419,7 +419,7 @@
   // models). Keep in sync when adding a provider — vanilla JS cannot import
   // that TypeScript constant.
   var PREFERRED_AGENT_ORDER = [
-    "opencode", "claude", "codex", "amp", "kiro", "mimo", "kimi", "cursor", "antigravity"
+    "opencode", "claude", "codex", "grok", "amp", "kiro", "mimo", "kimi", "cursor", "antigravity"
   ];
   function preferredAgentRank(a) {
     var provider = a.provider || a.id;

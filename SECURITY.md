@@ -10,7 +10,7 @@ rather than opening a public issue. Include reproduction steps and the version
 ## Threat model, in brief
 
 steamtrain is a **local developer tool that spawns real coding-agent CLIs**
-(`claude`, `opencode`, `codex`, `amp`, `kiro`, `mimo`, `kimi`, `cursor`/`agent`, `antigravity`/`agy`) with your local credentials, executes
+(`claude`, `opencode`, `codex`, `grok`, `amp`, `kiro`, `mimo`, `kimi`, `cursor`/`agent`, `antigravity`/`agy`) with your local credentials, executes
 workflow `command` steps with your shell, and writes to your repository
 through git worktrees. Anyone who can drive a steamtrain process can do what
 those agents can do. Treat access to it like access to your shell.

@@ -47,7 +47,8 @@ truth for that model:
 | Claude (Opus / Sonnet / Haiku / Fable) | `claude` |
 | GPT / Codex | `codex` |
 | Gemini | `antigravity` |
-| Composer / Cursor Grok | `cursor` |
+| Grok | `grok` |
+| Composer | `cursor` |
 | Amp modes | `amp` |
 | OpenCode-only free models | `opencode` |
 
@@ -55,7 +56,7 @@ When several agents offer the same family, resolution order is:
 
 1. Explicit `agent` pin (when ready)
 2. Reference agent instance (built-in id matching the provider)
-3. `claude → codex → cursor → opencode → mimo → kimi → antigravity → kiro → amp`
+3. `claude → codex → cursor → grok → opencode → mimo → kimi → antigravity → kiro → amp`
 4. Custom instances of the same provider after their built-in sibling
 
 ## Model classes

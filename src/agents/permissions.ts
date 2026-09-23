@@ -204,6 +204,11 @@ const PROVIDER_SUPPORT: Record<AgentProviderId, ProviderPermissionSupport> = {
     lists: false,
     mechanism: "headless runs use --dangerously-skip-permissions, which has no per-tool form",
   },
+  grok: {
+    profiles: { "read-only": "native", edit: "native", full: "native" },
+    lists: true,
+    mechanism: "--sandbox + --permission-mode + --allow/--deny",
+  },
 };
 
 /** Capability declaration for one provider (what it can enforce, and how). */
@@ -369,7 +374,7 @@ function opencodePlan(perms: ResolvedPermissions): PermissionPlan {
       args: [],
       enforcement: "none",
       gaps: [
-        "opencode has no built-in agent that allows edits but withholds shell/network — use read-only, full, or claude/codex for edit",
+        "opencode has no built-in agent that allows edits but withholds shell/network — use read-only, full, or claude/codex/grok for edit",
         ...gaps,
       ],
       verify: false,
@@ -381,6 +386,84 @@ function opencodePlan(perms: ResolvedPermissions): PermissionPlan {
     enforcement: gaps.length > 0 ? "partial" : "native",
     gaps,
     verify: false,
+  };
+}
+
+// Grok Build tool ids. Permission *rules* use the Claude-compatible prefixes
+// (`Bash`, `Edit`, `Write`, `WebFetch`); `--disallowed-tools` takes these ids.
+// The shell tool is listed as `run_terminal_command` but removed by its
+// `run_terminal_cmd` id (checked against grok 1.0.40).
+const GROK_SHELL_TOOL = "run_terminal_cmd";
+const GROK_EDIT_TOOLS = ["search_replace", "write"];
+
+/**
+ * Translate a steamtrain profile onto Grok Build's sandbox, permission mode,
+ * and allow/deny rules.
+ *
+ * Headless Grok cannot answer an approval prompt, so every profile picks a
+ * mode that will not ask: `dontAsk` (read-only), `acceptEdits` (edit), or
+ * `--always-approve` (full). Deny rules still apply under always-approve.
+ * An author's explicit allow drops the profile's matching deny — deny wins
+ * only when the author also listed that rule in `deny`.
+ *
+ * Read-only uses the `workspace` sandbox, not Grok's `read-only` one: that
+ * profile (and `strict`) refuses to start at all when `/var/run/docker.sock`
+ * is a symlink, which is how Docker Desktop installs it on macOS. Writes stay
+ * confined to the step's workspace by the OS; inside it, the removed tools,
+ * the deny rules, and post-run verification keep the step read-only.
+ */
+function grokPlan(perms: ResolvedPermissions): PermissionPlan {
+  const args: string[] = [];
+  const denies: string[] = [];
+  const disallowed: string[] = [];
+  const addDeny = (rule: string): void => {
+    if (!denies.includes(rule)) denies.push(rule);
+  };
+  const granted = (rule: string): boolean =>
+    perms.allow.includes(rule) && !perms.deny.includes(rule);
+
+  let disableWeb = false;
+
+  switch (perms.profile) {
+    case "read-only":
+      args.push("--sandbox", "workspace", "--permission-mode", "dontAsk");
+      if (!granted("Bash")) {
+        addDeny("Bash");
+        disallowed.push(GROK_SHELL_TOOL);
+      }
+      if (!granted("Edit")) addDeny("Edit");
+      if (!granted("Write")) addDeny("Write");
+      if (!granted("Edit") && !granted("Write")) disallowed.push(...GROK_EDIT_TOOLS);
+      if (!granted("WebFetch") && !granted("WebSearch")) addDeny("WebFetch");
+      if (!granted("MCPTool")) addDeny("MCPTool");
+      disableWeb = !granted("WebFetch") && !granted("WebSearch");
+      break;
+    case "edit":
+      args.push("--sandbox", "workspace", "--permission-mode", "acceptEdits");
+      if (!granted("Bash")) {
+        addDeny("Bash");
+        disallowed.push(GROK_SHELL_TOOL);
+      }
+      if (!granted("WebFetch") && !granted("WebSearch")) addDeny("WebFetch");
+      disableWeb = !granted("WebFetch") && !granted("WebSearch");
+      break;
+    case "full":
+      args.push("--always-approve");
+      break;
+  }
+
+  if (disableWeb) args.push("--disable-web-search");
+  if (disallowed.length > 0) args.push("--disallowed-tools", disallowed.join(","));
+  for (const rule of dedupe(perms.allow)) args.push("--allow", rule);
+  for (const rule of perms.deny) addDeny(rule);
+  for (const rule of denies) args.push("--deny", rule);
+
+  return {
+    profile: perms.profile,
+    args,
+    enforcement: "native",
+    gaps: [],
+    verify: perms.verify && perms.profile === "read-only",
   };
 }
 
@@ -441,6 +524,8 @@ export function permissionPlan(
     case "opencode":
     case "mimo":
       return opencodePlan(perms);
+    case "grok":
+      return grokPlan(perms);
     default:
       return allOrNothingPlan(provider, perms);
   }
