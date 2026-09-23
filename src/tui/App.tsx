@@ -1463,6 +1463,8 @@ export function App({
           case "none":
             return;
         }
+        // Enter in workflow mode never falls through to the workspace prompt.
+        return;
       }
 
       // Workspace mode.
@@ -1522,6 +1524,7 @@ export function App({
       runner.running,
       mode,
       runner.wf.started,
+      runner.wfStepDetails,
       picker.selectedWorkflowEntry,
       picker.onCreateRow,
       picker.onHeaderRow,

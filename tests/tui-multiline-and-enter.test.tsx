@@ -161,7 +161,7 @@ describe("multiline output in the live drill-in", () => {
   // Unlike the prompt's detail list, the output pane shows the text as the
   // agent wrote it, so a blank line stays blank rather than reading "(blank)".
   it("does not mark blank lines the way the prompt list does", () => {
-    expect(live("a\n\nb")).not.toContain("(blank)");
+    expect(live("a\n\nb").some((line) => line.includes("(blank)"))).toBe(false);
   });
 });
 
@@ -212,5 +212,12 @@ describe("Enter in workflow mode", () => {
       name: "bug-hunt",
     });
     expect(workflowEnterAction(base)).toEqual({ kind: "none" });
+  });
+
+  it("acts on the picker row even with details left open", () => {
+    expect(workflowEnterAction({ ...base, detailsOpen: true, selected: "bug-hunt" })).toEqual({
+      kind: "preview",
+      name: "bug-hunt",
+    });
   });
 });
