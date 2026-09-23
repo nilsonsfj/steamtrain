@@ -173,9 +173,12 @@
     // instrument title is "in flight", so idle rows stay out.
     flattenSteps().forEach(function (s) {
       if (s.status !== "running") return;
+      // Something has to be running it: a gate, an approval waiting on a
+      // person or an agentless merge is not a runner, and read as "agent".
+      if (!s.agent && !s.api && s.blockKind !== "command") return;
       list.appendChild(h("div", { class: "runner busy" },
         h("span", { class: "dot" }),
-        h("span", { class: "name", text: agentLabel(s.agent) }),
+        h("span", { class: "name", text: s.agent ? agentLabel(s.agent) : s.api || "command" }),
         h("span", { class: "model", text: s.model || "" }),
         h("span", {
           class: "right",

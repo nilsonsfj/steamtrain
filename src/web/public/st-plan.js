@@ -520,19 +520,32 @@
   // ---- recent runs ----------------------------------------------------------
 
   var recentRequest = 0;
-  function loadRecentRuns(name) {
+  /**
+   * The workflow's last few recorded runs. `expectRunId` refreshes in place
+   * (no flash of an empty list) after a run ends, and — since the run's record
+   * lands just after its final frame — retries briefly until that run is in.
+   */
+  function loadRecentRuns(name, expectRunId) {
     var request = ++recentRequest;
-    S.recentRuns = []; S.recentRunsFor = name;
-    ST.apiAuth("GET", "/api/history").then(function (r) {
-      if (request !== recentRequest || S.selected !== name) return;
-      if (r.status !== 200) return;
-      var mine = (r.body.runs || r.body.history || []).filter(function (run) {
-        return run.workflow === name;
-      }).slice(0, 3);
-      S.recentRuns = mine;
-      ST.shell.renderLiveRuns();
-      ST.render();
-    }).catch(function () {});
+    if (!expectRunId) S.recentRuns = [];
+    S.recentRunsFor = name;
+    var attempt = function (left) {
+      ST.apiAuth("GET", "/api/history").then(function (r) {
+        if (request !== recentRequest || S.selected !== name) return;
+        if (r.status !== 200) return;
+        var all = r.body.runs || r.body.history || [];
+        if (expectRunId && left > 0 && !all.some(function (run) { return run.id === expectRunId; })) {
+          setTimeout(function () { attempt(left - 1); }, 1000);
+          return;
+        }
+        S.recentRuns = all.filter(function (run) {
+          return run.workflow === name;
+        }).slice(0, 3);
+        ST.shell.renderLiveRuns();
+        ST.render();
+      }).catch(function () {});
+    };
+    attempt(3);
   }
 
   // ---- keyboard --------------------------------------------------------------

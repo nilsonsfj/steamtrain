@@ -1794,6 +1794,26 @@
     if (S.page) { hide(); return; }
     if (!(S.runState && S.runState.started)) {
       if (!S.selected) { hide(); return; }
+      // Not showing a run, but this workflow has one in flight (another tab,
+      // the CLI, a reload): say so, and offer the way back to it.
+      var live = S.liveRuns.filter(function (run) { return run.workflow === S.selected; })[0];
+      if (live) {
+        clear(pill);
+        pill.className = "status-pill running";
+        pill.style.display = "inline-flex";
+        pill.appendChild(h("span", { class: "dot", "aria-hidden": "true" }));
+        pill.appendChild(document.createTextNode(live.status === "queued" ? "queued" : "running"));
+        if (note) {
+          clear(note);
+          note.appendChild(h("button", {
+            class: "linkish", type: "button", text: "attach",
+            title: "Open this workflow's run in progress",
+            onClick: function () { ST.attachRun(live); }
+          }));
+          note.style.display = "";
+        }
+        return;
+      }
       clear(pill);
       pill.className = "status-pill idle";
       pill.style.display = "inline-flex";
@@ -1814,12 +1834,19 @@
     }
     if (note) { note.style.display = "none"; clear(note); }
     var done = Boolean(S.runState.done);
+    // Once the run has ended its own status is the verdict: a canceled or
+    // failed run is not "complete" just because it stopped.
+    var ended = done ? ({
+      canceled: { cls: "stopped", text: "canceled" },
+      error: { cls: "failed", text: "failed" },
+      "budget-exceeded": { cls: "failed", text: "budget reached" }
+    })[S.runStatus] || { cls: "complete", text: "complete" } : null;
     clear(pill);
-    pill.className = "status-pill " + (done ? "complete" : "running");
+    pill.className = "status-pill " + (ended ? ended.cls : "running");
     pill.style.display = "inline-flex";
     pill.appendChild(h("span", { class: "dot", "aria-hidden": "true" }));
     pill.appendChild(document.createTextNode(
-      done ? "complete" : (S.runState.paused ? "paused" : "running")
+      ended ? ended.text : (S.runState.paused ? "paused" : "running")
     ));
   }
 
@@ -1954,6 +1981,7 @@
     S.arrivalOutputStep = null;
     S.arrivalMenuOpen = false;
     S.endedAt = 0;
+    S.runStatus = null;
     setBanner("", "");
     showRunMetrics(true);
     ST.render();
@@ -2069,6 +2097,7 @@
           if (ST.instruments) ST.instruments.stopThroughput();
           S.queuedBanner = false;
           S.endedAt = Date.now();
+          S.runStatus = frame.status || null;
           // Only outcomes the arrival page cannot state for itself get a
           // banner. "Run failed." / "Run complete." said nothing the page's own
           // status pill and root-cause block do not say better, and stacking
@@ -2079,6 +2108,7 @@
           S.arrivalEnter = true;
           ST.render();
           pollLiveRuns();
+          if (S.selected && ST.plan && ST.plan.loadRecentRuns) ST.plan.loadRecentRuns(S.selected, runId);
         }
       };
       es.onerror = function () {

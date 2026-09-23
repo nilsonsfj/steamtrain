@@ -75,6 +75,10 @@ body.arrival-mode #rail-right {
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+/* Canceled: stopped on purpose, so neither the green of done nor the red of failed. */
+.arrival-state.stopped {
+  color: var(--muted);
+}
 .arrival-state.failed {
   border-color: rgba(248, 81, 73, 0.35);
   background: rgba(248, 81, 73, 0.1);
@@ -201,6 +205,15 @@ body.arrival-mode #rail-right {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+/* A canceled run stopped where the user stopped it — nothing to fix there. */
+.rootcause.interrupted {
+  border-color: var(--border);
+  border-left-color: var(--dim);
+  background: var(--well);
+}
+.rootcause.interrupted .rootcause-head .kicker {
+  color: var(--dim);
 }
 .rootcause-head {
   display: flex;

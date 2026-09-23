@@ -24,6 +24,7 @@ const done = (ok: boolean, error?: string): WorkflowEvent => ({
   phaseId: "a",
   stepId: "s1",
   result: { stepId: "s1", ok, output: "", error, durationMs: 1 },
+  cached: false,
   ts,
 });
 
