@@ -62,15 +62,12 @@
   /**
    * A step that stopped only because the run was canceled around it. It did
    * not fail, and blaming it would send the reader to fix a step that is fine.
-   * The engine marks these `interrupted`; records from before that marker only
-   * carry its "cancelled" label, so that is still matched on a canceled run.
+   * The engine marks these `interrupted`, and the history store marks them on
+   * records from before it did, so the flag is the whole answer.
    */
   function isInterrupted(s) {
     var r = s && s.result;
-    if (!r || r.ok) return false;
-    if (r.interrupted) return true;
-    return (S.runStatus === "canceled" || S.runStatus === "timed-out") &&
-      /cancel|abort|timed out|SIGTERM/i.test(r.error || "");
+    return Boolean(r && !r.ok && r.interrupted);
   }
 
   /**
@@ -160,6 +157,18 @@
       });
     };
     attempt(10);
+  }
+
+  /**
+   * The viewer's own retry after the automatic ones gave up: the record may
+   * have landed since, or the server come back. Starts the fetch over.
+   */
+  function retryArrivalWorktrees() {
+    var runId = S.runId;
+    if (!runId) return;
+    S.arrivalWorktrees = null;
+    loadArrivalWorktrees(runId, true);
+    ST.render();
   }
 
   /** Step ids an in-run `merge` step landed (its `from` sources, when it succeeded). */
@@ -580,11 +589,8 @@
     tiles.appendChild(tile("Elapsed", h("div", { class: "v", text: fmtElapsed(r.durationMs) || "0.0s" })));
 
     var steps = h("div", { class: "v" }, h("span", { class: "ok", text: r.okCount + " ok" }));
-    // The report already keeps marked interruptions out of failCount; a record
-    // from before the marker is caught by isInterrupted's text fallback.
-    var legacy = leaves.filter(function (s) { return isInterrupted(s) && !s.result.interrupted; }).length;
-    var interrupted = (r.interruptedCount || 0) + legacy;
-    var failed = Math.max(0, r.failCount - legacy);
+    var interrupted = r.interruptedCount || 0;
+    var failed = r.failCount;
     if (failed) {
       steps.appendChild(h("span", { class: "sep", text: " · " }));
       steps.appendChild(h("span", { class: "bad", text: failed + " failed" }));
@@ -603,7 +609,16 @@
     tiles.appendChild(tile("Model spend", spendValue(r, leaves)));
 
     var left = h("div", { class: "v" });
-    if (!worktrees) {
+    var lookup = S.arrivalWorktrees;
+    if (!worktrees && lookup && lookup.runId === S.runId && lookup.failed) {
+      left.className = "v note";
+      left.appendChild(document.createTextNode(worktreeFootText(null) + " "));
+      left.appendChild(h("button", {
+        class: "linkish", type: "button", text: "retry",
+        title: "Ask the server again what became of this run's worktrees",
+        onClick: retryArrivalWorktrees
+      }));
+    } else if (!worktrees) {
       left.className = "v note";
       left.textContent = worktreeFootText(null);
     } else if (worktrees.changed > 0) {

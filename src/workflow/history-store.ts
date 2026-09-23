@@ -12,6 +12,7 @@ import {
 } from "./history";
 import { type ProjectLockOptions, withStateDirLock } from "./project-lock";
 import { migrateStateVersion } from "./state-migrate";
+import type { StepResult } from "./types";
 
 export const WORKFLOW_HISTORY_DIR = ".steamtrain/history";
 /** Keep at most this many records; the oldest are pruned after each save. */
@@ -194,6 +195,39 @@ async function readRecord(path: string): Promise<RunRecord | undefined> {
   return validateRecord(file);
 }
 
+/**
+ * How a step taken down by a cancel died, as v1 records tell it: the cancel's
+ * own label, or the agent or command dying of SIGTERM/SIGINT.
+ */
+const LEGACY_INTERRUPTED_ERROR =
+  /cancel|abort|timed out|SIGTERM|SIGINT|exited with code (?:130|143)\b|killed before exiting/i;
+
+/**
+ * v1 → v2. The engine did not always mark the steps a cancel took down as
+ * `interrupted`, so a v1 record may only say so in the step's error text.
+ * On a canceled run such a step is marked now, once, and the stored totals
+ * (which counted it as failed) are dropped to be recomputed. Readers then
+ * trust the flag alone.
+ */
+function markLegacyInterrupted(v: Record<string, unknown>): Record<string, unknown> {
+  if (v.status !== "canceled" || !Array.isArray(v.phases)) return { ...v, version: 2 };
+  let changed = false;
+  const phases = v.phases.map((phase: { steps?: unknown }) => {
+    if (!phase || !Array.isArray(phase.steps)) return phase;
+    const steps = phase.steps.map((step: { result?: Partial<StepResult> } | null) => {
+      const r = step?.result;
+      if (!r || r.ok !== false || r.interrupted || r.killed || r.dependencyFailed || r.notRun) {
+        return step;
+      }
+      if (!LEGACY_INTERRUPTED_ERROR.test(String(r.error ?? ""))) return step;
+      changed = true;
+      return { ...step, result: { ...r, interrupted: true } };
+    });
+    return { ...phase, steps };
+  });
+  return changed ? { ...v, version: 2, phases, totals: undefined } : { ...v, version: 2 };
+}
+
 /** Parse + shallow-validate a record file; ignore corrupt/unmigratable files. */
 function validateRecord(file: string): RunRecord | undefined {
   let parsed: unknown;
@@ -202,9 +236,8 @@ function validateRecord(file: string): RunRecord | undefined {
   } catch {
     return undefined;
   }
-  // No pre-v1 format exists; the migrator table is ready for the first bump.
   const migrated = migrateStateVersion<{ version: number }>(parsed, RUN_RECORD_VERSION, {
-    // 1: (v) => ({ ...v, version: 2 }),
+    1: markLegacyInterrupted,
   });
   if (!migrated.ok) return undefined;
   const r = migrated.value as Partial<RunRecord>;

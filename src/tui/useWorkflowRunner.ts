@@ -28,6 +28,7 @@ import {
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   createWorkflowRunControl,
+  dropsCacheEntries,
   hashWorkflowSpec,
   isTerminalLiveRunStatus,
   newLiveRunMeta,
@@ -358,6 +359,7 @@ export function useWorkflowRunner({
             await store.clear(key);
             workflowCacheRef.current = new Map();
           } else if (!opts?.reuseMemoryCache) {
+            // Run on this very map, not a copy: saves track the engine's drops by it.
             workflowCacheRef.current = await store.load(key);
           }
           const cache = workflowCacheRef.current;
@@ -444,12 +446,7 @@ export function useWorkflowRunner({
             publisher.event(event);
             notifyWorkflowEvent(notifier, notifyMeta, event);
             if (event.kind === "workflow_done") workflowOk = event.ok;
-            if (event.kind === "step_edited") {
-              // The engine dropped the edited step's stale entry from the
-              // shared cache map; persist the deletion so a canceled-then-
-              // resumed run can't replay the pre-edit result from disk.
-              await store.save(key, cache);
-            }
+            if (dropsCacheEntries(event)) await store.save(key, cache);
             if (!mountedRef.current) return;
             wfDispatch({ type: "event", event });
             setNarration((prev) => appendNarration(prev, event));

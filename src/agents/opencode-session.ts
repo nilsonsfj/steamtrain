@@ -12,6 +12,26 @@ const SESSION_EXPORT_MAX_BYTES = 512 * 1024 * 1024;
 const ID_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 /** Trailing random characters of an OpenCode id (`ses_<12 time hex><14 random>`). */
 const ID_RANDOM_CHARS = 14;
+/** Bounds {@link knownDirectories}; a long-lived web server runs many steps. */
+const KNOWN_DIRECTORIES_MAX = 500;
+
+/**
+ * Where this process has seen each session run: the `--dir` of a run that
+ * reported it, or the directory a copy was imported into. Only a match is
+ * trusted, to skip the export; a miss, or a session an earlier process
+ * recorded, still asks the CLI.
+ */
+const knownDirectories = new Map<string, string>();
+
+/** Records that `sessionId` runs in `directory` (see {@link knownDirectories}). */
+export function rememberSessionDirectory(sessionId: string, directory: string): void {
+  knownDirectories.delete(sessionId);
+  knownDirectories.set(sessionId, directory);
+  if (knownDirectories.size > KNOWN_DIRECTORIES_MAX) {
+    const oldest = knownDirectories.keys().next().value;
+    if (oldest !== undefined) knownDirectories.delete(oldest);
+  }
+}
 
 interface ExportedSession {
   info: { id: string; directory?: string; [key: string]: unknown };
@@ -39,8 +59,10 @@ interface ExportedSession {
  * prefix, which is what OpenCode sorts on). The source session is untouched.
  * Also used for MiMo, whose CLI is an OpenCode fork with the same commands.
  *
- * Every resume pays one full `export`, even when no copy is needed: the CLI
- * has no cheaper way to say which directory a session belongs to.
+ * The CLI has no cheaper way than a full `export` to say which directory a
+ * session belongs to, so a session this process already saw run in `cwd` (a
+ * canAsk answer or a structured-output fix resuming its own step, a
+ * `continue:` step sharing the worktree) skips it.
  */
 export async function sessionForDirectory(
   binary: string,
@@ -49,9 +71,15 @@ export async function sessionForDirectory(
   env?: Record<string, string>,
   signal?: AbortSignal,
 ): Promise<string> {
+  const known = knownDirectories.get(sessionId);
+  if (known && (await samePath(known, cwd))) return sessionId;
+
   const exported = await runCli(binary, ["export", sessionId], cwd, env, signal);
   const session = parseExport(exported, sessionId);
-  if (session.info.directory && (await samePath(session.info.directory, cwd))) return sessionId;
+  if (session.info.directory && (await samePath(session.info.directory, cwd))) {
+    rememberSessionDirectory(sessionId, cwd);
+    return sessionId;
+  }
 
   const copy = renewIds(session);
   copy.info.directory = cwd;
@@ -63,6 +91,7 @@ export async function sessionForDirectory(
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+  rememberSessionDirectory(copy.info.id, cwd);
   return copy.info.id;
 }
 

@@ -8,6 +8,7 @@ import type { AgentEvent, AgentId } from "../src/types/events";
 import {
   WORKFLOW_CACHE_VERSION,
   createWorkflowCacheStore,
+  dropsCacheEntries,
   hashWorkflowCacheInput,
   hashWorkflowSpec,
   loadWorkflowCache,
@@ -532,3 +533,67 @@ function existsSync(path: string): boolean {
     return false;
   }
 }
+
+describe("cache entries the engine drops mid-run", () => {
+  it("covers a loop jump as well as a step edit", () => {
+    // A loop jump clears the region it re-runs from the cache map; unless the
+    // drivers save it then, a run resumed or handed off mid-pass replays the
+    // previous pass as if it were this one.
+    expect(
+      dropsCacheEntries({
+        kind: "loop_iteration",
+        gateStepId: "g",
+        loopTo: "p",
+        iteration: 2,
+        maxIterations: 3,
+        ts: 0,
+      }),
+    ).toBe(true);
+    expect(dropsCacheEntries({ kind: "step_edited", stepId: "s", patch: {}, ts: 0 } as never)).toBe(
+      true,
+    );
+    expect(dropsCacheEntries({ kind: "phase_done", phaseId: "p", ok: true, ts: 0 })).toBe(false);
+  });
+});
+
+describe("saving a cache the engine dropped entries from", () => {
+  const ok = (stepId: string, output: string): StepResult => ({
+    stepId,
+    ok: true,
+    output,
+    durationMs: 1,
+  });
+  const spec: WorkflowSpec = { name: "w", phases: [] };
+
+  it("keeps the dropped entries off disk instead of merging them back", async () => {
+    const root = mkdtempSync(join(tmpdir(), "st-cache-drop-"));
+    const store = createWorkflowCacheStore(root);
+    const key = workflowCacheKey("w", "go", "/repo", spec);
+    const cache = new Map([
+      ["setup", ok("setup", "ready")],
+      ["rev", ok("rev", "pass 1")],
+    ]);
+    await store.save(key, cache);
+
+    // A loop jump drops the region; the driver saves on the loop_iteration.
+    cache.delete("rev");
+    await store.save(key, cache);
+    expect([...cache.keys()]).toEqual(["setup"]);
+    expect([...(await store.load(key)).keys()]).toEqual(["setup"]);
+  });
+
+  it("keeps a drop made before the first save, and another writer's entries", async () => {
+    const root = mkdtempSync(join(tmpdir(), "st-cache-drop-"));
+    const store = createWorkflowCacheStore(root);
+    const key = workflowCacheKey("w", "go", "/repo", spec);
+    await store.save(key, new Map([["rev", ok("rev", "pass 1")]]));
+
+    const cache = await store.load(key);
+    cache.delete("rev");
+    // Another process finishes a step of the same run key meanwhile.
+    await store.save(key, new Map([["other", ok("other", "theirs")]]));
+    cache.set("setup", ok("setup", "ready"));
+    await store.save(key, cache);
+    expect([...(await store.load(key)).keys()].sort()).toEqual(["other", "setup"]);
+  });
+});

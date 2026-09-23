@@ -254,3 +254,185 @@ describe("a record's totals", () => {
     expect(formatRunTotals(totals)).toBe("1/3 ok · 1 failed · 1 interrupted");
   });
 });
+
+describe("a handoff in the middle of a loop", () => {
+  // A review loop: phase `fix` runs, phase `check` gates and loops back to it.
+  const phaseStart = (phaseId: string, index: number, iteration: number): WorkflowEvent => ({
+    kind: "phase_start",
+    phaseId,
+    title: phaseId,
+    index,
+    stepCount: 1,
+    iteration,
+    ts,
+  });
+  const ran = (phaseId: string, stepId: string, iteration: number, costUsd: number) =>
+    [
+      { kind: "step_start", phaseId, stepId, iteration, ts },
+      {
+        kind: "step_done",
+        phaseId,
+        stepId,
+        result: { stepId, ok: true, output: "", durationMs: 1, costUsd },
+        cached: false,
+        iteration,
+        ts,
+      },
+      { kind: "phase_done", phaseId, ok: true, iteration, ts },
+    ] as WorkflowEvent[];
+  const start: WorkflowEvent = {
+    kind: "workflow_start",
+    name: "w",
+    phaseCount: 2,
+    stepCount: 2,
+    ts: 1000,
+  };
+
+  it("keeps the passes the previous owner finished, and numbers the rest after them", async () => {
+    const { RunRecordBuilder } = await import("../src/workflow");
+    // Owner 1: pass 1 of both phases ($0.01 + $0.02), loops back, and hands
+    // off while pass 2 of `fix` is running.
+    const owner1: WorkflowEvent[] = [
+      start,
+      phaseStart("fix", 0, 1),
+      ...ran("fix", "fixer", 1, 0.01),
+      phaseStart("check", 1, 1),
+      ...ran("check", "review", 1, 0.02),
+      {
+        kind: "loop_iteration",
+        gateStepId: "review",
+        loopTo: "fix",
+        iteration: 2,
+        maxIterations: 3,
+        ts,
+      },
+      phaseStart("fix", 0, 2),
+      { kind: "step_start", phaseId: "fix", stepId: "fixer", iteration: 2, ts },
+    ];
+    const prior = priorOwnerWork(owner1);
+    // What owner 2's engine continues from: pass 2, not pass 1.
+    expect(prior.loopProgress).toEqual({
+      phaseRuns: { fix: 1, check: 1 },
+      gateIterations: { review: 2 },
+    });
+
+    // Owner 2 starts over from the top, continuing the pass count; it
+    // finishes pass 2.
+    const own = ownWorkRewriter(prior);
+    const recorder = new RunRecordBuilder({ id: "r", workflow: "w", input: "", cwd: "/" });
+    recorder.continueFrom(prior.events);
+    const owner2: WorkflowEvent[] = [
+      { ...start, ts: 9000 },
+      phaseStart("fix", 0, 2),
+      ...ran("fix", "fixer", 2, 0.03),
+      phaseStart("check", 1, 2),
+      ...ran("check", "review", 2, 0.04),
+      { kind: "workflow_done", ok: true, results: [], ts },
+    ];
+    for (const event of owner2) recorder.handle(own(event));
+    const record = recorder.build({ status: "done" });
+
+    expect(record.phases.map((p) => `${p.phaseId}:${p.iteration}`)).toEqual([
+      "fix:1",
+      "check:1",
+      "fix:2",
+      "check:2",
+    ]);
+    // The pass the handoff cut short is replaced by the new owner's run of it.
+    expect(record.phases[2]?.steps).toHaveLength(1);
+    expect(record.phases[2]?.steps[0]?.status).toBe("done");
+    expect(record.totals.costUsd).toBeCloseTo(0.1);
+    expect(record.startedAt).toBe(1000);
+  });
+
+  it("keeps every owner's finished passes when the run is handed off twice", async () => {
+    const { RunRecordBuilder } = await import("../src/workflow");
+    const loop = (iteration: number): WorkflowEvent => ({
+      kind: "loop_iteration",
+      gateStepId: "review",
+      loopTo: "fix",
+      iteration,
+      maxIterations: 5,
+      ts,
+    });
+    // Owner 1 finishes pass 1; owner 2 continues with pass 2 and hands off
+    // in pass 3. The log owner 3 reads holds both.
+    const log: WorkflowEvent[] = [
+      start,
+      phaseStart("fix", 0, 1),
+      ...ran("fix", "fixer", 1, 0.01),
+      phaseStart("check", 1, 1),
+      ...ran("check", "review", 1, 0.02),
+      loop(2),
+      phaseStart("fix", 0, 2),
+      { ...start, ts: 5000 },
+      phaseStart("fix", 0, 2),
+      ...ran("fix", "fixer", 2, 0.03),
+      phaseStart("check", 1, 2),
+      ...ran("check", "review", 2, 0.04),
+      loop(3),
+      phaseStart("fix", 0, 3),
+    ];
+    const prior = priorOwnerWork(log);
+    expect(prior.loopProgress).toEqual({
+      phaseRuns: { fix: 2, check: 2 },
+      gateIterations: { review: 3 },
+    });
+    const recorder = new RunRecordBuilder({ id: "r", workflow: "w", input: "", cwd: "/" });
+    recorder.continueFrom(prior.events);
+    const own = ownWorkRewriter(prior);
+    for (const event of [
+      { ...start, ts: 9000 },
+      phaseStart("fix", 0, 3),
+      ...ran("fix", "fixer", 3, 0.05),
+      phaseStart("check", 1, 3),
+      ...ran("check", "review", 3, 0.06),
+      { kind: "workflow_done", ok: true, results: [], ts } as WorkflowEvent,
+    ]) {
+      recorder.handle(own(event));
+    }
+    const record = recorder.build({ status: "done" });
+    expect(record.phases.map((p) => `${p.phaseId}:${p.iteration}`)).toEqual([
+      "fix:1",
+      "check:1",
+      "fix:2",
+      "check:2",
+      "fix:3",
+      "check:3",
+    ]);
+    expect(record.totals.costUsd).toBeCloseTo(0.21);
+    expect(record.startedAt).toBe(1000);
+  });
+
+  it("carries nothing over for a run that never looped before the handoff", () => {
+    const prior = priorOwnerWork([start, phaseStart("fix", 0, 1), ...ran("fix", "fixer", 1, 0.01)]);
+    expect(prior.loopProgress).toEqual({ phaseRuns: {}, gateIterations: {} });
+  });
+
+  it("restarts a nested loop's count when the loop around it went round", () => {
+    // outer: [a, inner: [b, gate `in` → b], gate `out` → a]
+    const loop = (gate: string, loopTo: string, iteration: number): WorkflowEvent => ({
+      kind: "loop_iteration",
+      gateStepId: gate,
+      loopTo,
+      iteration,
+      maxIterations: 5,
+      ts,
+    });
+    const prior = priorOwnerWork([
+      start,
+      phaseStart("a", 0, 1),
+      phaseStart("b", 1, 1),
+      loop("in", "b", 2),
+      phaseStart("b", 1, 2),
+      loop("out", "a", 2),
+      phaseStart("a", 0, 2),
+    ]);
+    // The inner loop's pass 2 belonged to the outer pass that was looped back
+    // from, so the next inner loop starts from 1 (as the engine resets it).
+    expect(prior.loopProgress).toEqual({
+      phaseRuns: { a: 1, b: 2 },
+      gateIterations: { out: 2 },
+    });
+  });
+});

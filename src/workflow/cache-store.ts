@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import type { WorkflowEvent } from "./events";
 import { atomicWriteFile, isEnoent } from "./fs-util";
 import { type ProjectLockOptions, withStateDirLock } from "./project-lock";
 import { migrateStateVersion } from "./state-migrate";
@@ -98,11 +99,22 @@ export function createWorkflowCacheStore(rootDir: string = WORKFLOW_CACHE_DIR): 
   };
 }
 
+/**
+ * The entries each run's cache map held when it was last saved. Only the
+ * engine removes entries from a run's map (an edited step, a loop jump's
+ * region), so one that was saved and is gone now was dropped on purpose.
+ */
+const lastSaved = new WeakMap<Map<string, StepResult>, Set<string>>();
+
 export async function loadWorkflowCache(
   rootDir: string,
   key: WorkflowCacheKey,
 ): Promise<Map<string, StepResult>> {
-  return loadWorkflowCacheUnlocked(rootDir, key);
+  const cache = await loadWorkflowCacheUnlocked(rootDir, key);
+  // What is on disk now is this map's baseline: an entry the engine drops
+  // before the first save must not come back from disk either.
+  lastSaved.set(cache, new Set(cache.keys()));
+  return cache;
 }
 
 export async function saveWorkflowCache(
@@ -113,12 +125,17 @@ export async function saveWorkflowCache(
   await cacheLock(rootDir, async () => {
     // Read-merge-write under the project lock so concurrent step completions
     // (same process overlapping awaits, or a second steamtrain instance) keep
-    // each other's entries instead of last-writer-wins.
+    // each other's entries instead of last-writer-wins. What this map dropped
+    // since its last save stays dropped: merged back from disk, a loop pass
+    // or an edited step would replay its superseded result.
+    const dropped = [...(lastSaved.get(cache) ?? [])].filter((stepId) => !cache.has(stepId));
     const onDisk = await loadWorkflowCacheUnlocked(rootDir, key);
     const merged = new Map(onDisk);
+    for (const stepId of dropped) merged.delete(stepId);
     for (const [stepId, result] of cache) merged.set(stepId, result);
     for (const [stepId, result] of merged) cache.set(stepId, result);
     await writeWorkflowCacheFile(rootDir, key, merged);
+    lastSaved.set(cache, new Set(merged.keys()));
   });
 }
 
@@ -184,6 +201,18 @@ async function loadWorkflowCacheUnlocked(
     if (isEnoent(err)) return new Map();
     throw err;
   }
+}
+
+/**
+ * Whether the engine dropped entries from the shared cache map before this
+ * event: an edited step's, or on a loop jump, the whole region it re-runs.
+ * Drivers save the cache on these too, so the drop reaches disk now (see
+ * {@link saveWorkflowCache}); otherwise a run resumed or handed off before the
+ * next step finishes replays the superseded results, like a loop pass that
+ * never ran again and decided its gate on the previous pass's output.
+ */
+export function dropsCacheEntries(event: WorkflowEvent): boolean {
+  return event.kind === "step_edited" || event.kind === "loop_iteration";
 }
 
 /** Persist successful, non-replayed step completions to disk. */

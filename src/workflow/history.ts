@@ -18,7 +18,11 @@ import type {
  * saved run can be replayed into the existing `WorkflowView` components.
  */
 
-export const RUN_RECORD_VERSION = 1;
+/**
+ * 2: steps a canceled run took down carry `result.interrupted` (the engine
+ * sets it; v1 records are migrated on read, see history-store).
+ */
+export const RUN_RECORD_VERSION = 2;
 /** Cap stored per-step output so a single record can't grow unbounded. */
 export const MAX_STEP_TEXT = 20_000;
 
@@ -328,10 +332,34 @@ export class RunRecordBuilder {
   private ok = true;
   private budget?: RunBudgetInfo;
   private interventions: RunIntervention[] = [];
+  /** Set by {@link continueFrom}: the next `workflow_start` keeps the tree. */
+  private continuing = false;
 
   constructor(meta: RunRecordMeta, startedAt: number = Date.now()) {
     this.meta = meta;
     this.startedAt = startedAt;
+  }
+
+  /**
+   * Fold a previous owner's events before this process takes over the run
+   * (a mid-run detach). The new owner re-runs the workflow from the top, so
+   * its `workflow_start` would wipe the tree; after this call it does not.
+   * A phase pass the new owner emits again (a replayed phase, or the pass
+   * the handoff cut short) replaces the earlier copy in place, and the loop
+   * passes the previous owner finished stay in the record with their spend.
+   */
+  continueFrom(events: Iterable<WorkflowEvent>): void {
+    // The log may hold several owners already (a run handed off twice): only
+    // its first `workflow_start` starts the tree, as with the new owner's.
+    let started = false;
+    for (const event of events) {
+      if (event.kind === "workflow_start") {
+        this.continuing = started && this.phases.length > 0;
+        started = true;
+      }
+      this.handle(event);
+    }
+    this.continuing = this.phases.length > 0;
   }
 
   /**
@@ -347,6 +375,10 @@ export class RunRecordBuilder {
     switch (event.kind) {
       case "workflow_start":
         this.name = event.name;
+        if (this.continuing) {
+          this.continuing = false;
+          break;
+        }
         this.startedAt = event.ts;
         this.phases = [];
         this.phaseIndex.clear();
@@ -365,8 +397,12 @@ export class RunRecordBuilder {
           ok: true,
           iteration: event.iteration,
         };
-        this.phases.push(phase);
-        this.phaseIndex.set(`${event.phaseId}:${event.iteration ?? 1}`, phase);
+        const key = `${event.phaseId}:${event.iteration ?? 1}`;
+        // Only a run handed to a new owner repeats a pass (see continueFrom).
+        const earlier = this.phaseIndex.get(key);
+        if (earlier) this.phases[this.phases.indexOf(earlier)] = phase;
+        else this.phases.push(phase);
+        this.phaseIndex.set(key, phase);
         break;
       }
       case "fan_out": {

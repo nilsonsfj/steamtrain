@@ -647,3 +647,47 @@ describe("engine loops", () => {
     expect(uniquePhases).toEqual(["review", "fix", "check"]);
   });
 });
+
+describe("a loop continued after a mid-run handoff", () => {
+  it("carries on the previous owner's pass count, {{iteration}} and loop budget", async () => {
+    // The previous owner ran pass 1 of review/fix/check and looped back; the
+    // new owner starts from the top but is on pass 2 of a 3-pass budget.
+    const prompts: string[] = [];
+    const deps = {
+      createAdapter: () =>
+        fakeAdapter((prompt) => {
+          prompts.push(prompt);
+          return { text: prompt.startsWith("fix") ? "NOPE" : "reviewed" };
+        }),
+      maxConcurrency: 2,
+      cwd: tmpdir(),
+    };
+    const events: WorkflowEvent[] = [];
+    for await (const e of runWorkflow(
+      loopSpec(3),
+      {
+        input: "go",
+        loopProgress: {
+          phaseRuns: { review: 1, fix: 1, check: 1 },
+          gateIterations: { "check-gate": 2 },
+        },
+      },
+      deps,
+    )) {
+      events.push(e);
+    }
+    const passes = events.flatMap((e) =>
+      e.kind === "phase_start" && e.phaseId === "review" ? [e.iteration] : [],
+    );
+    // Passes 2 and 3, then the budget of 3 is spent: not a fresh 1, 2, 3.
+    expect(passes).toEqual([2, 3]);
+    expect(prompts.filter((p) => p.startsWith("review"))).toEqual([
+      "review go (iter 2)",
+      "review go (iter 3)",
+    ]);
+    const loops = events.flatMap((e) => (e.kind === "loop_iteration" ? [e.iteration] : []));
+    expect(loops).toEqual([3]);
+    const done = events.find((e) => e.kind === "workflow_done");
+    expect(done?.kind === "workflow_done" && done.ok).toBe(false);
+  });
+});

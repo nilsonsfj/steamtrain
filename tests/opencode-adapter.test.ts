@@ -281,6 +281,7 @@ const fs = require("fs");
 const [cmd, ...rest] = process.argv.slice(2);
 const log = (o) => fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ cmd, cwd: process.cwd(), ...o }) + "\\n");
 if (cmd === "export") {
+  fs.appendFileSync(${JSON.stringify(`${log}.exports`)}, rest[0] + "\\n");
   if (process.env.FAIL_EXPORT) { process.stderr.write("Session not found"); process.exit(1); }
   if (process.env.SLOW_EXPORT) { setTimeout(() => {}, 30000); return; }
   process.stderr.write("Exporting session: " + rest[0] + "\\n");
@@ -302,7 +303,14 @@ if (cmd === "export") {
         .trim()
         .split("\n")
         .map((l) => JSON.parse(l));
-    return { bin, calls };
+    const exports = () => {
+      try {
+        return readFileSync(`${log}.exports`, "utf8").trim().split("\n").filter(Boolean);
+      } catch {
+        return [];
+      }
+    };
+    return { bin, calls, exports };
   }
 
   async function run(bin: string, cwd: string, env?: Record<string, string>, signal?: AbortSignal) {
@@ -370,6 +378,27 @@ if (cmd === "export") {
     expect(calls()).toEqual([
       expect.objectContaining({ cmd: "run", session: "ses_f33132908ffeY2p6iYE7DZEtR1" }),
     ]);
+  });
+
+  it("skips the export once it has seen the session run in the step's directory", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "st-oc-known-"));
+    const { bin, calls, exports } = fakeOpencode(dir);
+
+    // The first resume has to ask where the session lives; the second
+    // (a canAsk answer, a structured-output fix) already knows.
+    await run(bin, dir);
+    await run(bin, dir);
+
+    expect(exports()).toHaveLength(1);
+    expect(calls().map((c) => c.session)).toEqual([
+      "ses_f33132908ffeY2p6iYE7DZEtR1",
+      "ses_f33132908ffeY2p6iYE7DZEtR1",
+    ]);
+    // A different directory still gets its own copy.
+    const other = mkdtempSync(path.join(tmpdir(), "st-oc-other-"));
+    await run(bin, other);
+    expect(exports()).toHaveLength(2);
+    expect(calls().at(-2)?.cmd).toBe("import");
   });
 
   it("stops copying the session as soon as the step is canceled", async () => {

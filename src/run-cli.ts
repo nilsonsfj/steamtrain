@@ -13,6 +13,7 @@ import {
   type HumanInputProvider,
   type LiveRunMeta,
   type LiveRunSource,
+  type LoopProgress,
   type ModelUsage,
   type ReportFormat,
   type RerunMode,
@@ -40,6 +41,7 @@ import {
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   createWorkflowRunControl,
+  dropsCacheEntries,
   exitCodeForOutcome,
   exitCodeForRun,
   formatReroutePlan,
@@ -47,6 +49,7 @@ import {
   formatTokenSummary,
   formatTokens,
   formatUsd,
+  hasFailingGate,
   hashWorkflowSpec,
   headlessApprovalProvider,
   headlessHumanInputProvider,
@@ -895,6 +898,14 @@ export interface PriorOwnerWork {
   ran: Set<string>;
   /** What the previous owner's own runs of each step billed, every pass summed. */
   spend: Map<string, Pick<StepResult, "costUsd" | "tokens">>;
+  /**
+   * Where the previous owner's loops were: the passes it finished and looped
+   * back from, and each gate's pass. The new owner's engine continues from
+   * here, so pass tags, `{{iteration}}` and loop budgets carry on.
+   */
+  loopProgress: LoopProgress;
+  /** The previous owner's events, which seed the run's history record. */
+  events: readonly WorkflowEvent[];
 }
 
 /**
@@ -909,9 +920,37 @@ export function priorOwnerWork(events: readonly WorkflowEvent[]): PriorOwnerWork
   const ran = new Set<string>();
   const spend = new Map<string, Pick<StepResult, "costUsd" | "tokens">>();
   let startedAt: number | undefined;
+  // Each phase pass in start order, keyed `phaseId:iteration`. A pass started
+  // again (by a later owner) moves to the end: that is when it last ran.
+  const passes = new Map<string, { phaseId: string; superseded: boolean; seq: number }>();
+  const gates = new Map<string, { iteration: number; seq: number }>();
+  let seq = 0;
   for (const event of events) {
+    seq += 1;
     if (event.kind === "workflow_start") {
       startedAt ??= event.ts;
+      continue;
+    }
+    if (event.kind === "phase_start") {
+      const key = `${event.phaseId}:${event.iteration ?? 1}`;
+      passes.delete(key);
+      passes.set(key, { phaseId: event.phaseId, superseded: false, seq });
+      continue;
+    }
+    if (event.kind === "loop_iteration") {
+      // The loop jumps back: every pass since its target phase last started
+      // is finished history the next owner will not run again…
+      const order = [...passes.values()];
+      // (A jump to a phase that never started cannot come from the engine;
+      // should one appear, everything so far counts as looped back from.)
+      const from = order.findLastIndex((pass) => pass.phaseId === event.loopTo);
+      for (const pass of order.slice(Math.max(from, 0))) pass.superseded = true;
+      // …and a loop nested in that region starts its count over, as the
+      // engine's resetNestedLoops does.
+      const since = order[from]?.seq ?? 0;
+      for (const [id, gate] of gates)
+        if (id !== event.gateStepId && gate.seq >= since) gates.delete(id);
+      gates.set(event.gateStepId, { iteration: event.iteration, seq });
       continue;
     }
     if (event.kind !== "step_done" || event.cached) continue;
@@ -924,7 +963,14 @@ export function priorOwnerWork(events: readonly WorkflowEvent[]): PriorOwnerWork
     const before = spend.get(event.stepId);
     spend.set(event.stepId, before ? addSpend(before, event.result) : event.result);
   }
-  return { startedAt, ran, spend };
+  const loopProgress: LoopProgress = { phaseRuns: {}, gateIterations: {} };
+  for (const pass of passes.values()) {
+    if (pass.superseded) {
+      loopProgress.phaseRuns[pass.phaseId] = (loopProgress.phaseRuns[pass.phaseId] ?? 0) + 1;
+    }
+  }
+  for (const [id, gate] of gates) loopProgress.gateIterations[id] = gate.iteration;
+  return { startedAt, ran, spend, loopProgress, events };
 }
 
 /**
@@ -1041,6 +1087,9 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
     specHash: hashWorkflowSpec(spec),
     params,
   });
+  // A handed-off run's record starts from what the previous owner did, or the
+  // loop passes it finished (and their spend) would be missing from history.
+  if (options.priorOwner) recorder.continueFrom(options.priorOwner.events);
 
   // Wait for a queue slot; runs beyond `maxParallelRuns` queue instead of
   // colliding over the step cache and git worktrees.
@@ -1066,12 +1115,13 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
   }
 
   const key = workflowCacheKey(name, input, cwd, spec, params);
-  const cache = new Map<string, StepResult>();
+  let cache: Map<string, StepResult>;
   if (options.fresh) {
     await cacheStore.clear(key);
+    cache = new Map();
   } else {
-    const loaded = await cacheStore.load(key);
-    for (const [stepId, result] of loaded) cache.set(stepId, result);
+    // Run on this very map, not a copy: saves track the engine's drops by it.
+    cache = await cacheStore.load(key);
   }
   if (options.seed && options.seed.size > 0) {
     // Seed the already-succeeded steps and make them the resume baseline so an
@@ -1118,6 +1168,8 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
       options.approval,
       control,
       options.humanInput,
+      undefined,
+      options.priorOwner?.loopProgress,
     )) {
       const event = asOwnWork(replayed);
       recorder.handle(event);
@@ -1135,12 +1187,7 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
           event.cached,
         );
       }
-      if (event.kind === "step_edited") {
-        // The engine dropped the edited step's stale cache entry from the
-        // shared in-memory map; persist the deletion so a canceled-then-resumed
-        // run can't replay the pre-edit result from disk.
-        await cacheStore.save(key, cache);
-      }
+      if (dropsCacheEntries(event)) await cacheStore.save(key, cache);
       if (event.kind === "workflow_done") {
         ok = event.ok;
         budgetExceeded = Boolean(event.budgetExceeded);
@@ -1267,12 +1314,14 @@ export async function runAttachCommand(
       if (event.kind === "step_start" && !event.parentStepId) {
         stepMeta.set(event.stepId, { agent: event.agent, api: event.api, model: event.model });
       }
+      // Kept in JSON mode too: the exit code falls back to its results.
+      if (event.kind === "workflow_done") done = event;
       if (json) out(`${JSON.stringify(event)}\n`);
-      else if (event.kind === "workflow_done") done = event;
+      // Human mode prints workflow_done below, once the final status is known.
       // Steps the cancel took down carry `interrupted`, which is what keeps
       // their why-line quiet. A run-wide cancel flag would also silence a
       // step that genuinely failed before the cancel when attaching late.
-      else printHumanEvent(event, out);
+      else if (event.kind !== "workflow_done") printHumanEvent(event, out);
       if (!json && event.kind === "approval_pending") {
         out(`     decide with: steamtrain workflow approve ${runId} --step ${event.stepId}\n`);
       }
@@ -1293,7 +1342,7 @@ export async function runAttachCommand(
 
   const final = (await store.get(runId)) ?? meta;
   const timedOut = final.status === "canceled" && Boolean(final.timedOut);
-  if (done) {
+  if (done && !json) {
     printHumanEvent(done, out, { canceled: final.status === "canceled" && !timedOut, timedOut });
     if (done.kind === "workflow_done") printRunSummary(done.results, out, stepMeta);
   }
@@ -1322,7 +1371,13 @@ export async function runAttachCommand(
   if (timedOut) return exitCodeForOutcome("timeout");
   if (final.status === "budget-exceeded") return exitCodeForOutcome("budget-exceeded");
   if (final.status === "canceled") return exitCodeForOutcome("canceled");
-  return final.status === "done" && final.ok !== false ? 0 : 1;
+  if (final.status === "done" && final.ok !== false) return 0;
+  // A failed run with no record: its final results still carry the gate
+  // outcomes, which is what tells a gate failure (2) from a step failure (1).
+  if (done?.kind === "workflow_done" && hasFailingGate(done.results)) {
+    return exitCodeForOutcome("gate-failed");
+  }
+  return exitCodeForOutcome("step-failed");
 }
 
 // ── workflow runs (list) ─────────────────────────────────────────────────────

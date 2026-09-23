@@ -519,6 +519,68 @@ describe("workflow history store", () => {
     expect(loaded?.specHash).toBe("abc123");
   });
 
+  it("marks a v1 record's steps the cancel took down as interrupted", async () => {
+    // Before the engine set the flag, only the dying process's error said so.
+    const root = tempDir();
+    const { writeFile } = await import("node:fs/promises");
+    const step = (stepId: string, error: string, extra: Record<string, unknown> = {}) => ({
+      stepId,
+      blockKind: "worker",
+      status: "error",
+      cached: false,
+      text: "",
+      result: { stepId, ok: false, output: "", durationMs: 1, error, ...extra },
+    });
+    const v1 = (id: string, status: string) => ({
+      version: 1,
+      id,
+      workflow: "demo",
+      input: "",
+      cwd: "/",
+      status,
+      ok: false,
+      startedAt: 1,
+      endedAt: 2,
+      durationMs: 1,
+      phases: [
+        {
+          phaseId: "p",
+          title: "P",
+          index: 0,
+          stepCount: 4,
+          done: true,
+          ok: false,
+          steps: [
+            step("cut", "'claude' exited with code 143"),
+            step("own", "tests failed"),
+            step("blocked", "cancelled", { dependencyFailed: "own" }),
+            step("marked", "cancelled", { interrupted: true }),
+          ],
+        },
+      ],
+      // Stale: counted the cut step as a failure.
+      totals: { steps: 4, ok: 0, failed: 4, cached: 0, costUsd: 0, durationMs: 1 },
+    });
+    await writeFile(join(root, "c.json"), JSON.stringify(v1("c", "canceled")), "utf8");
+    await writeFile(join(root, "e.json"), JSON.stringify(v1("e", "error")), "utf8");
+    const store = createWorkflowHistoryStore(root);
+
+    const canceled = await store.get("c");
+    expect(canceled?.version).toBe(RUN_RECORD_VERSION);
+    const flags = canceled?.phases[0]?.steps.map((s) => Boolean(s.result?.interrupted));
+    expect(flags).toEqual([true, false, false, true]);
+    expect(canceled?.totals).toMatchObject({ failed: 2, interrupted: 2 });
+    // A run nobody canceled had nothing to interrupt.
+    const failed = await store.get("e");
+    expect(failed?.phases[0]?.steps.filter((s) => s.result?.interrupted)).toHaveLength(1);
+
+    // A current record is trusted as written: its unmarked failure stays one.
+    const current = { ...v1("n", "canceled"), version: RUN_RECORD_VERSION };
+    await writeFile(join(root, "n.json"), JSON.stringify(current), "utf8");
+    const trusted = await store.get("n");
+    expect(trusted?.phases[0]?.steps[0]?.result?.interrupted).toBeUndefined();
+  });
+
   it("keeps a timed-out run's timedOut through get and list", async () => {
     const builder = new RunRecordBuilder({ id: "r-tmo", workflow: "demo", input: "", cwd: "/" });
     builder.handle({ kind: "workflow_start", name: "demo", phaseCount: 0, stepCount: 0, ts: 1 });
