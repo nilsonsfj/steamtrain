@@ -179,6 +179,44 @@ describe("arrival receipt for agents that report no usage", () => {
     expect(arrivalReceiptCards(receipt).find((c) => c.id === "cost")!.value).toBe("$0");
   });
 
+  it("reads $0 when the only agent step was blocked by a failed command", () => {
+    // The agent never ran, so this run's agent spend is known: nothing.
+    const base = finished({});
+    const [diff, review] = base.phases[0]!.steps;
+    const state: WorkflowState = {
+      ...base,
+      ok: false,
+      phases: [
+        {
+          ...base.phases[0]!,
+          steps: [
+            {
+              ...diff!,
+              status: "error" as const,
+              result: { stepId: "diff", ok: false, output: "", error: "exit 1", durationMs: 10 },
+            },
+            {
+              ...review!,
+              status: "error" as const,
+              result: {
+                stepId: "review",
+                ok: false,
+                output: "",
+                error: "dependency 'diff' failed",
+                dependencyFailed: "diff",
+                durationMs: 0,
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const receipt = buildArrivalReport(state)!.receipt;
+    expect(receipt.costReported).toBe(true);
+    expect(receipt.tokensReported).toBe(true);
+    expect(arrivalReceiptCards(receipt).find((c) => c.id === "cost")!.value).toBe("$0");
+  });
+
   it("does not bill a cached replay when reopened from history", () => {
     // History detail rebuilds state from the saved record, whose steps keep
     // the original result; the receipt must still read $0 for the replay.

@@ -823,11 +823,9 @@ var SteamtrainReducer = (() => {
       const failures = rootFailureLines(flat.map((f) => f.step));
       if (failures.length > 0) hero = [...failures, "", hero].join("\n");
     }
-    const ranBilledStep = flat.some(
-      ({ step }) => Boolean(step.agent || step.api) && step.result !== void 0 && !step.result.skipped
-    );
+    const ranBilledStep = flat.some(({ step }) => Boolean(step.agent || step.api) && executed(step));
     const billedSteps = flat.map(({ step }) => step).filter(
-      (step) => Boolean(step.agent || step.api) && step.result !== void 0 && !step.result.skipped && !step.result.childResults?.length
+      (step) => Boolean(step.agent || step.api) && executed(step) && !step.result?.childResults?.length
     );
     const costReported = billedSteps.every(
       (step) => step.cached || step.result?.costUsd !== void 0
@@ -872,6 +870,10 @@ var SteamtrainReducer = (() => {
     };
   }
   var LEGACY_CASCADE_ERROR = /^dependency '[^']+' failed(:|$)/;
+  function executed(step) {
+    const r = step.result;
+    return r !== void 0 && !r.skipped && !r.notRun && !isCascadeVictim(r);
+  }
   function isCascadeVictim(result) {
     if (!result) return false;
     return Boolean(result.dependencyFailed) || LEGACY_CASCADE_ERROR.test(result.error ?? "");

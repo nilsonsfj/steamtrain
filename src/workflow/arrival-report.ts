@@ -173,10 +173,7 @@ export function buildArrivalReport(
   // agent or API step actually ran — "$0 and no tokens" alone can't tell a
   // command-only ride from an agent that reports no usage (Antigravity, Kiro).
   // Invariant: agentless implies costUsd === 0 && tokens === 0.
-  const ranBilledStep = flat.some(
-    ({ step }) =>
-      Boolean(step.agent || step.api) && step.result !== undefined && !step.result.skipped,
-  );
+  const ranBilledStep = flat.some(({ step }) => Boolean(step.agent || step.api) && executed(step));
   // The run's spend is known only when every agent/API step that executed
   // either reported its own or was a cached replay — which billed nothing this
   // run, even for an agent that never reports spend (Antigravity, Kiro). One
@@ -186,10 +183,7 @@ export function buildArrivalReport(
     .map(({ step }) => step)
     .filter(
       (step) =>
-        Boolean(step.agent || step.api) &&
-        step.result !== undefined &&
-        !step.result.skipped &&
-        !step.result.childResults?.length,
+        Boolean(step.agent || step.api) && executed(step) && !step.result?.childResults?.length,
     );
   const costReported = billedSteps.every(
     (step) => step.cached || step.result?.costUsd !== undefined,
@@ -255,6 +249,15 @@ const LEGACY_CASCADE_ERROR = /^dependency '[^']+' failed(:|$)/;
  * before that marker existed only carry the message it replaced, so that
  * message is still matched as a fallback.
  */
+/**
+ * A step that actually ran: not skipped, not blocked by a failed dependency,
+ * and not a fan-out child left undispatched by a cost cap.
+ */
+function executed(step: StepState): boolean {
+  const r = step.result;
+  return r !== undefined && !r.skipped && !r.notRun && !isCascadeVictim(r);
+}
+
 export function isCascadeVictim(
   result: { dependencyFailed?: string; error?: string } | undefined,
 ): boolean {
