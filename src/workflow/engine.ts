@@ -1109,10 +1109,12 @@ function templateStepRefs(text: string | undefined): string[] {
  * child reference resolves to its `work` parent.
  *
  * `dataOnly` keeps just the edges a step's result can be computed from — what
- * decides whether a cached result is stale. The phase barrier and the control
- * gates only order a step, and an approval checkpoint is re-asked on every
- * resume by design, so counting them made every step after an approval re-run
- * on each resume. An approval still counts where a step reads its output.
+ * decides whether a cached result is stale. Control gates only order a step,
+ * and an approval checkpoint is re-asked on every resume by design, so
+ * counting either made every step after an approval re-run on each resume. An
+ * approval or gate still counts where a step reads it (template, condition).
+ * The phase barrier stays: outside a git repo, or past a `merge` that applied
+ * to the checkout, an earlier step's files are what a later one works on.
  */
 function computeEffectiveDeps(
   spec: WorkflowSpec,
@@ -1134,7 +1136,8 @@ function computeEffectiveDeps(
       // control deps only when they can halt (fail/stop).
       const isApprovalCheckpoint =
         step.kind === "approval" || (step.kind === "gate" && step.condition.human === true);
-      if (isApprovalCheckpoint) checkpointIds.add(step.id);
+      // A gate writes nothing: whoever reads its verdict names it.
+      if (isApprovalCheckpoint || step.kind === "gate") checkpointIds.add(step.id);
       if (
         isApprovalCheckpoint ||
         (step.kind === "gate" && (step.onFalse === "fail" || step.onFalse === "stop"))
@@ -1165,9 +1168,11 @@ function computeEffectiveDeps(
         for (const dep of step.dependsOn) {
           if (!(dataOnly && checkpointIds.has(dep))) addEarlier(dep);
         }
-      } else if (!dataOnly) {
+      } else {
         for (let pj = 0; pj < pi; pj++) {
-          for (const id of idsByPhase[pj] ?? []) stepDeps.add(id);
+          for (const id of idsByPhase[pj] ?? []) {
+            if (!(dataOnly && checkpointIds.has(id))) stepDeps.add(id);
+          }
         }
       }
 

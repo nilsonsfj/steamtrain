@@ -166,32 +166,32 @@ describe("cache staleness", () => {
     expect(stepDone(events, "ship").cached).toBe(true);
   });
 
-  it("does not re-run a step that only waits on the re-run one, but still one that reads it", async () => {
-    // `reads` omits dependsOn, so the phase barrier orders it after `a` — but
-    // nothing of `a` reaches it. `quotes` references `a`'s output.
+  it("replays a step that only waits on an approval, and re-runs one after a re-run step", async () => {
+    // Both omit dependsOn, so the phase barrier orders them. Past an approval
+    // that is all it is; past a command it can be data (outside a git repo the
+    // steps share one directory), so that one stays conservative.
     const barrier: WorkflowSpec = {
-      name: "barrier-only",
+      name: "barrier",
       phases: [
-        { id: "p1", title: "P1", steps: [{ id: "a", kind: "command", cmd: "echo a-fresh" }] },
-        {
-          id: "p2",
-          title: "P2",
-          steps: [
-            { id: "waits", kind: "command", cmd: "echo waits-fresh" },
-            { id: "quotes", kind: "command", cmd: "echo 'saw {{steps.a.output}}'" },
-          ],
-        },
+        { id: "p1", title: "P1", steps: [{ id: "ok", kind: "approval" }] },
+        { id: "p2", title: "P2", steps: [{ id: "after-ok", kind: "command", cmd: "echo fresh" }] },
+        { id: "p3", title: "P3", steps: [{ id: "a", kind: "command", cmd: "echo a-fresh" }] },
+        { id: "p4", title: "P4", steps: [{ id: "after-a", kind: "command", cmd: "echo fresh" }] },
       ],
     };
     const cache = new Map([
-      ["waits", cachedResult("waits", "waits-cached")],
-      ["quotes", cachedResult("quotes", "saw a-stale")],
+      ["after-ok", cachedResult("after-ok", "cached")],
+      ["after-a", cachedResult("after-a", "cached")],
     ]);
     const events: WorkflowEvent[] = [];
-    for await (const ev of runWorkflow(barrier, { input: "task", cache }, deps())) events.push(ev);
+    const approving: WorkflowDeps = {
+      ...deps(),
+      requestApproval: async () => ({ approved: true }),
+    };
+    for await (const ev of runWorkflow(barrier, { input: "task", cache }, approving))
+      events.push(ev);
 
-    expect(stepDone(events, "waits").cached).toBe(true);
-    expect(stepDone(events, "quotes").cached).toBe(false);
-    expect(stepDone(events, "quotes").result.output).toContain("saw a-fresh");
+    expect(stepDone(events, "after-ok").cached).toBe(true);
+    expect(stepDone(events, "after-a").cached).toBe(false);
   });
 });

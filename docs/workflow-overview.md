@@ -703,11 +703,11 @@ Behavior:
 - editing the workflow JSON (or upgrading steamtrain with changed bundled workflows)
   invalidates the cache via a `specHash` check — stale files are ignored
 - re-running with the same prompt replays all cached successful steps and runs the rest
-- a cached step re-runs when something it reads re-ran (a `dependsOn`, a
-  `{{steps.<id>…}}` reference, its `forEach` source, workspace or session
-  source, a condition's step). Waiting on an earlier phase or on an approval
-  is not reading it: approvals are re-asked on every resume, and settled work
-  after them still replays
+- a cached step re-runs when something it depends on re-ran (a `dependsOn`,
+  the earlier phases when it has none, a `{{steps.<id>…}}` reference, its
+  `forEach` source, workspace or session source, a condition's step).
+  Approvals and gates count only where a step reads them: approvals are
+  re-asked on every resume, and settled work after them still replays
 - each successful `step_done` writes the full in-memory cache to disk (partial phase
   snapshots are normal and resume correctly)
 - parallel runs of the same workflow + input + cwd are not supported (last writer wins)
