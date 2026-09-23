@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   LIVE_RUN_META_VERSION,
   type LiveRunMeta,
@@ -145,6 +145,34 @@ describe("watchRunControl", () => {
       await store.writePauseState("r1", { paused: false, by: "human:web" });
       await waitFor(() => !control.isPauseRequested());
       expect(control.resumeRequestedBy()).toBe("human:web");
+    } finally {
+      dispose();
+    }
+  });
+
+  it("holds the process open while the run is paused, and only then", async () => {
+    // A paused engine only awaits a promise and every other run timer is
+    // unref'd, so a CLI or detached runner exited mid-pause and the orphan
+    // sweep marked its run failed. The control poll is what resumes it.
+    const store = createLiveRunStore(tempStoreDir());
+    await store.create(meta("r1"));
+    const control = createWorkflowRunControl();
+    const realSetInterval = globalThis.setInterval;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const spy = vi.spyOn(globalThis, "setInterval").mockImplementation(((
+      ...args: Parameters<typeof setInterval>
+    ) => {
+      timer = realSetInterval(...args);
+      return timer;
+    }) as typeof setInterval);
+    const dispose = watchRunControl(store, "r1", control, 20);
+    spy.mockRestore();
+    try {
+      expect(timer?.hasRef()).toBe(false);
+      await store.writePauseState("r1", { paused: true, by: "human:cli" });
+      await waitFor(() => timer?.hasRef() === true);
+      await store.writePauseState("r1", { paused: false, by: "human:cli" });
+      await waitFor(() => timer?.hasRef() === false);
     } finally {
       dispose();
     }

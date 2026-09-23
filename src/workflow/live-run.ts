@@ -369,6 +369,12 @@ export function watchRunControl(
       if (pauseState.paused) control.pause(pauseState.by);
       else control.resume(pauseState.by);
     }
+    // A paused engine only awaits a promise, and every other timer of a run
+    // is unref'd — so a CLI or detached runner would drain its event loop and
+    // exit mid-pause, leaving the run to the orphan sweep. This poll is what
+    // can resume it, so it holds the process open while the run is paused.
+    if (control.isPauseRequested()) timer.ref?.();
+    else timer.unref?.();
     const edits = await store.listStepEditRequests(runId).catch(() => []);
     for (const edit of edits) {
       if (disposed) return;
