@@ -122,6 +122,7 @@ import { initialPromptHistoryBrowse } from "./prompt-history";
 import { initialTranscript, transcriptReducer } from "./transcript";
 import { useTerminalSize } from "./useTerminalSize";
 import { computeStreamHeight, message } from "./util";
+import { workflowEnterAction } from "./workflow-enter";
 import {
   type InputFormPending,
   resolveInputFormSubmit,
@@ -1428,44 +1429,40 @@ export function App({
       if (runner.running) return;
 
       if (mode === "workflow") {
-        if (runner.wf.started && runner.activeWorkflowRef.current) {
-          // Enter on a running/completed workflow step opens the step details
-          if (!runner.wfStepDetails) {
-            runner.setWfStepDetails("live");
+        const action = workflowEnterAction({
+          runOnScreen: Boolean(runner.wf.started && runner.activeWorkflowRef.current),
+          previewing: Boolean(picker.wfPreview),
+          detailsOpen: Boolean(runner.wfStepDetails),
+          onCreateRow: picker.onCreateRow,
+          onHeaderRow: picker.onHeaderRow,
+          selected: picker.selectedWorkflowEntry?.name,
+        });
+        switch (action.kind) {
+          case "open-details":
+            runner.setWfStepDetails(action.view);
             prompt.updatePromptDraft({ promptEditing: false });
             return;
-          }
-          const ran = handleWorkflowRun(promptText, false);
-          if (ran) prompt.updatePromptDraft({ promptEditing: false });
-          return;
-        }
-        if (picker.wfPreview) {
-          // Enter on a preview workflow step opens the step details
-          if (!runner.wfStepDetails) {
-            runner.setWfStepDetails("preview");
+          case "run":
+            if (handleWorkflowRun(promptText, false)) {
+              prompt.updatePromptDraft({ promptEditing: false });
+            }
+            return;
+          case "focus-create":
+            focusCreateWorkflowPrompt(promptText);
+            return;
+          case "toggle-folder":
+            picker.toggleSelectedFolder();
+            return;
+          case "preview":
+            runner.setWfNotice(null);
+            runner.setStepIndex(0);
+            picker.setWfPreview({ name: action.name, input: promptText });
+            runner.setWfStepDetails(null);
             prompt.updatePromptDraft({ promptEditing: false });
             return;
-          }
-          const ran = handleWorkflowRun(promptText, false);
-          if (ran) prompt.updatePromptDraft({ promptEditing: false });
-          return;
+          case "none":
+            return;
         }
-        if (picker.onCreateRow) {
-          focusCreateWorkflowPrompt(promptText);
-          return;
-        }
-        if (picker.onHeaderRow) {
-          picker.toggleSelectedFolder();
-          return;
-        }
-        const entry = picker.selectedWorkflowEntry;
-        if (!entry) return;
-        runner.setWfNotice(null);
-        runner.setStepIndex(0);
-        picker.setWfPreview({ name: entry.name, input: promptText });
-        runner.setWfStepDetails(null);
-        prompt.updatePromptDraft({ promptEditing: false });
-        return;
       }
 
       // Workspace mode.
