@@ -166,6 +166,10 @@ interface Mounted {
   diagnoseCalls: unknown[];
   /** Bodies posted to POST /api/history/:id/harvest, in order. */
   harvestPosts: unknown[];
+  /** Step ids GET /api/history/:id/worktrees?step= was asked for, in order. */
+  diffRequests: string[];
+  /** Click a worktree row of the full receipt, expanding or collapsing its diff. */
+  clickWorktree: (stepId: string) => Promise<void>;
   clickRow: (index: number) => Promise<void>;
   check: (index: number) => Promise<void>;
   /** Click the full receipt's ledger line for a step, toggling its output. */
@@ -199,12 +203,15 @@ async function mountRuns(opts: {
    * once the list is exhausted. Omitted ⇒ a single empty 200.
    */
   harvestResponses?: { status: number; body: Record<string, unknown> }[];
+  /** The answer to a worktree row's per-step diff fetch. Omitted ⇒ an empty 200. */
+  diffResponse?: { status: number; body: Record<string, unknown> };
 }): Promise<Mounted> {
   const root = el("div");
   const location = { hash: "#runs", pathname: "/", search: "" };
   const said: string[] = [];
   const diagnoseCalls: unknown[] = [];
   const harvestPosts: unknown[] = [];
+  const diffRequests: string[] = [];
   let harvestCount = 0;
   // Server-side history, so a successful DELETE actually removes it and the
   // re-fetch that follows sees the same thing the client just did.
@@ -263,6 +270,14 @@ async function mountRuns(opts: {
         return Promise.resolve({ status, body });
       }
       if (path === "/api/history") return Promise.resolve({ status: 200, body: { runs: stored } });
+      const diff = /\/worktrees\?step=(.+)$/.exec(path);
+      if (diff) {
+        diffRequests.push(decodeURIComponent(diff[1] as string));
+        // Past a handful, a refetch loop is already proven: stop answering, so
+        // the test fails on the count instead of spinning forever.
+        if (diffRequests.length > 5) return new Promise(() => {});
+        return Promise.resolve(opts.diffResponse ?? { status: 200, body: { files: [] } });
+      }
       if (path.startsWith("/api/history/") && path.endsWith("/worktrees")) {
         return Promise.resolve({ status: 200, body: { sources: opts.worktrees ?? [] } });
       }
@@ -330,6 +345,15 @@ async function mountRuns(opts: {
     said,
     diagnoseCalls,
     harvestPosts,
+    diffRequests,
+    clickWorktree: async (stepId: string) => {
+      const line = collect(root, (n) => hasClass(n, "hist-wt-line")).find((n) =>
+        flatText(n).includes(stepId),
+      );
+      if (!line) throw new Error(`no worktree row for "${stepId}"`);
+      click(line as StubEl);
+      for (let i = 0; i < 6; i++) await Promise.resolve();
+    },
     clickRow: async (index: number) => {
       click(rowNodes()[index] as StubEl);
       for (let i = 0; i < 6; i++) await Promise.resolve();
@@ -873,6 +897,37 @@ describe("runs page: the full receipt", () => {
     expect(main).toContain("+12");
     expect(main).toContain("Apply to checkout");
     expect(main).toContain("Prune worktrees");
+  });
+
+  // The row fetches its diff whenever it is open and has nothing cached, and
+  // the answer re-renders the row. An uncached failure used to loop: re-render
+  // → fetch → non-200 → re-render, for as long as the row stayed open.
+  it("caches a failed worktree diff instead of fetching it again", async () => {
+    const page = await openFullReceipt({
+      worktrees: [
+        {
+          stepId: "scan-logic",
+          exists: true,
+          branch: "st/scan-logic",
+          files: [{ status: "M", path: "a.ts" }],
+          additions: 12,
+          deletions: 3,
+        },
+      ],
+      diffResponse: { status: 500, body: { error: "git diff failed" } },
+    });
+
+    await page.clickWorktree("scan-logic");
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(page.diffRequests).toEqual(["scan-logic"]);
+    expect(page.main()).toContain("git diff failed");
+
+    // Closed and opened again, the row shows the cached failure.
+    await page.clickWorktree("scan-logic");
+    await page.clickWorktree("scan-logic");
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(page.diffRequests).toEqual(["scan-logic"]);
+    expect(page.main()).toContain("git diff failed");
   });
 
   // A second 409 used to append another "first wins" / "last wins" pair beside
