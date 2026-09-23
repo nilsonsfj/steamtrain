@@ -49,6 +49,14 @@ describe("printHumanEvent", () => {
     expect(text()).toBe("  fail s1\n     'opencode' exited with code 1: boom\n");
   });
 
+  it("does not blame a step the run's cancel took down, whatever its error says", () => {
+    const { out, text } = capture();
+    const interrupted = done(false, "'claude' exited with code 143");
+    if (interrupted.kind === "step_done") interrupted.result.interrupted = true;
+    printHumanEvent(interrupted, out);
+    expect(text()).toBe("  fail s1\n");
+  });
+
   it("reports a canceled run as canceled, without blaming its interrupted steps", () => {
     const { out, text } = capture();
     printHumanEvent(done(false, "cancelled"), out, { canceled: true });
@@ -88,7 +96,12 @@ describe("a mid-run handoff keeps the run's own work", () => {
   });
 
   it("reports the previous owner's steps as this run's, spend included", () => {
-    const own = ownWorkRewriter({ startedAt: 1000, ran: new Set(["planner"]) });
+    const own = ownWorkRewriter(
+      priorOwnerWork([
+        { kind: "workflow_start", name: "w", phaseCount: 1, stepCount: 2, ts: 1000 },
+        stepDone("planner", false, 0.01),
+      ]),
+    );
     expect(
       own({ kind: "workflow_start", name: "w", phaseCount: 1, stepCount: 2, ts: 5000 }),
     ).toMatchObject({
@@ -109,6 +122,29 @@ describe("a mid-run handoff keeps the run's own work", () => {
       ts,
     });
     expect(done.kind === "workflow_done" && done.results.map((r) => r.costUsd)).toEqual([0.01, 0]);
+  });
+
+  it("adds every pass the previous owner ran of a loop step to this process's own", () => {
+    // Pass 1 ran (and failed) and pass 2 ran before the handoff; the new owner
+    // replays pass 2 from the cache and runs pass 3 live. Its final result
+    // carries only pass 3's spend — the replay is zeroed — so all three must
+    // add up, not one of them replace the rest.
+    const failedPass: WorkflowEvent = {
+      kind: "step_done",
+      phaseId: "a",
+      stepId: "rev",
+      result: { stepId: "rev", ok: false, output: "", durationMs: 1, costUsd: 0.01 },
+      cached: false,
+      ts,
+    };
+    const own = ownWorkRewriter(priorOwnerWork([failedPass, stepDone("rev", false, 0.02)]));
+    const done = own({
+      kind: "workflow_done",
+      ok: true,
+      results: [{ stepId: "rev", ok: true, output: "", durationMs: 1, costUsd: 0.04 }],
+      ts,
+    });
+    expect(done.kind === "workflow_done" && done.results[0]?.costUsd).toBeCloseTo(0.07);
   });
 
   it("changes nothing for a run that was not handed off", () => {

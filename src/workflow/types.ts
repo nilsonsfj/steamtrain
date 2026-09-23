@@ -1148,6 +1148,12 @@ export interface StepResult {
    * the record needs to see a deliberate stop, not a mystery failure.
    */
   killed?: boolean;
+  /**
+   * True when this step stopped only because the whole run was canceled
+   * around it (or handed off mid-step). It did not fail on its own, and UIs
+   * must not name it as a run's root cause.
+   */
+  interrupted?: boolean;
   error?: string;
   durationMs: number;
   costUsd?: number;

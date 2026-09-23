@@ -283,6 +283,8 @@ const log = (o) => fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ cm
 if (cmd === "export") {
   if (process.env.FAIL_EXPORT) { process.stderr.write("Session not found"); process.exit(1); }
   process.stderr.write("Exporting session: " + rest[0] + "\\n");
+  // A log line on stdout, braces and all, before the document itself.
+  if (process.env.NOISY_EXPORT) process.stdout.write('{"level":"info","msg":"exporting"}\\n');
   process.stdout.write(${JSON.stringify(JSON.stringify(exported))});
 } else if (cmd === "import") {
   log({ session: JSON.parse(fs.readFileSync(rest[0], "utf8")) });
@@ -343,6 +345,18 @@ if (cmd === "export") {
     expect(copy.messages[0].parts[0].sessionID).toBe(copy.info.id);
     expect(copy.messages[0].parts[0].text).toBe("Remember PINEAPPLE");
     expect(ran.session).toBe(copy.info.id);
+  });
+
+  it("finds the export past a log line printed before it", async () => {
+    const source = mkdtempSync(path.join(tmpdir(), "st-oc-src-"));
+    const target = mkdtempSync(path.join(tmpdir(), "st-oc-dst-"));
+    const { bin, calls } = fakeOpencode(source);
+
+    await run(bin, target, { NOISY_EXPORT: "1" });
+
+    const [imported, ran] = calls();
+    expect(imported.cmd).toBe("import");
+    expect(ran.session).toBe(imported.session.info.id);
   });
 
   it("continues the session itself when it already lives in the step's directory", async () => {

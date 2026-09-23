@@ -62,20 +62,27 @@ export async function sessionForDirectory(
   return copy.info.id;
 }
 
-/** The session object out of `export`'s stdout (tolerating a log line before it). */
+/**
+ * The session object out of `export`'s stdout. The document is the last
+ * top-level JSON value, so any log line printed before it (brace-bearing or
+ * not) is skipped by trying each line that opens an object, first to last.
+ */
 function parseExport(stdout: string, sessionId: string): ExportedSession {
-  const start = stdout.indexOf("{");
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(start >= 0 ? stdout.slice(start) : stdout);
-  } catch {
-    throw new Error(`could not read the export of session ${sessionId}`);
+  const starts = [0];
+  for (let i = stdout.indexOf("\n{"); i >= 0; i = stdout.indexOf("\n{", i + 1)) starts.push(i + 1);
+  for (const start of starts) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stdout.slice(start));
+    } catch {
+      continue;
+    }
+    const session = parsed as Partial<ExportedSession> | null;
+    if (session?.info && typeof session.info.id === "string" && Array.isArray(session.messages)) {
+      return session as ExportedSession;
+    }
   }
-  const session = parsed as Partial<ExportedSession> | null;
-  if (!session?.info || typeof session.info.id !== "string" || !Array.isArray(session.messages)) {
-    throw new Error(`session ${sessionId} exported in an unexpected shape`);
-  }
-  return session as ExportedSession;
+  throw new Error(`could not read the export of session ${sessionId}`);
 }
 
 /** A deep copy of `session` with every session, message and part id replaced. */

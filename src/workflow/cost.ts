@@ -384,3 +384,20 @@ export function costForResults(results: StepResult[]): number {
 }
 
 export type { HistoryStep };
+
+/**
+ * The combined `costUsd` / `tokens` of two results, each left `undefined` when
+ * neither side reports it (so an unpriced agent never reads as "$0").
+ */
+export function addSpend(
+  a: Pick<StepResult, "costUsd" | "tokens">,
+  b: Pick<StepResult, "costUsd" | "tokens">,
+): Pick<StepResult, "costUsd" | "tokens"> {
+  return {
+    costUsd:
+      a.costUsd === undefined && b.costUsd === undefined
+        ? undefined
+        : (a.costUsd ?? 0) + (b.costUsd ?? 0),
+    tokens: a.tokens || b.tokens ? addTokens(a.tokens, b.tokens) : undefined,
+  };
+}

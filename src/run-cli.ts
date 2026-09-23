@@ -29,6 +29,7 @@ import {
   type WorkflowHistoryStore,
   type WorkflowSpec,
   acquireRunSlot,
+  addSpend,
   aggregateLeavesByModel,
   applyRetryStepFilter,
   applyWorkflowStepOverrides,
@@ -883,8 +884,10 @@ export async function runDetachedRunner(
 export interface PriorOwnerWork {
   /** When the run started — the previous owner's `workflow_start`. */
   startedAt?: number;
-  /** Steps (and fan-out children) the previous owner ran itself, not from cache. */
+  /** Steps (and fan-out children) the previous owner ran to success itself, not from cache. */
   ran: Set<string>;
+  /** What the previous owner's own runs of each step billed, every pass summed. */
+  spend: Map<string, Pick<StepResult, "costUsd" | "tokens">>;
 }
 
 /**
@@ -897,40 +900,46 @@ export interface PriorOwnerWork {
  */
 export function priorOwnerWork(events: readonly WorkflowEvent[]): PriorOwnerWork {
   const ran = new Set<string>();
+  const spend = new Map<string, Pick<StepResult, "costUsd" | "tokens">>();
   let startedAt: number | undefined;
   for (const event of events) {
     if (event.kind === "workflow_start" && startedAt === undefined) startedAt = event.ts;
-    if (event.kind === "step_done" && !event.cached && event.result.ok) ran.add(event.stepId);
+    if (event.kind !== "step_done" || event.cached) continue;
+    if (event.result.ok) ran.add(event.stepId);
+    // A fan-out parent's spend is its children's; they are summed themselves.
+    if (event.result.childResults?.length) continue;
+    const before = spend.get(event.stepId);
+    spend.set(event.stepId, before ? addSpend(before, event.result) : event.result);
   }
-  return { startedAt, ran };
+  return { startedAt, ran, spend };
 }
 
 /**
  * Rewrites a handed-off run's events as its own work (see {@link priorOwnerWork}):
- * the previous owner's steps are not cached replays, the run started when the
- * previous owner started it, and the final results carry the spend the engine
- * zeroes for a replay. Identity when there was no previous owner.
+ * the previous owner's steps are not cached replays, and the run started when
+ * the previous owner started it. The engine's final results zero a replay and
+ * sum only this process's passes, so the previous owner's spend is added back
+ * — every pass of a loop it ran, not just the one the cache replays.
+ * Identity when there was no previous owner.
  */
 export function ownWorkRewriter(
   prior: PriorOwnerWork | undefined,
 ): (event: WorkflowEvent) => WorkflowEvent {
   if (!prior || (prior.ran.size === 0 && prior.startedAt === undefined)) return (event) => event;
-  const replayed = new Map<string, StepResult>();
   const restore = (result: StepResult): StepResult => {
-    const own = replayed.get(result.stepId);
     const children = result.childResults?.map(restore);
-    if (own) return { ...result, costUsd: own.costUsd, tokens: own.tokens, childResults: children };
-    return children ? { ...result, childResults: children } : result;
+    const own = prior.spend.get(result.stepId);
+    const withSpend = own ? { ...result, ...addSpend(result, own) } : result;
+    return children ? { ...withSpend, childResults: children } : withSpend;
   };
   return (event) => {
     if (event.kind === "workflow_start" && prior.startedAt !== undefined) {
       return { ...event, ts: prior.startedAt };
     }
     if (event.kind === "step_done" && event.cached && prior.ran.has(event.stepId)) {
-      replayed.set(event.stepId, event.result);
       return { ...event, cached: false };
     }
-    if (event.kind === "workflow_done" && replayed.size > 0) {
+    if (event.kind === "workflow_done" && prior.spend.size > 0) {
       return { ...event, results: event.results.map(restore) };
     }
     return event;
@@ -1234,9 +1243,13 @@ export async function runAttachCommand(
     ac.abort();
   };
   process.on("SIGINT", onSigint);
+  // The verdict line waits for the run's final status: a viewer cannot tell a
+  // canceled run from a failed one by its events alone.
+  let done: WorkflowEvent | undefined;
   try {
     for await (const event of store.tailEvents(runId, { signal: ac.signal })) {
       if (json) out(`${JSON.stringify(event)}\n`);
+      else if (event.kind === "workflow_done") done = event;
       else printHumanEvent(event, out);
       if (!json && event.kind === "approval_pending") {
         out(`     decide with: steamtrain workflow approve ${runId} --step ${event.stepId}\n`);
@@ -1257,6 +1270,7 @@ export async function runAttachCommand(
   }
 
   const final = (await store.get(runId)) ?? meta;
+  if (done) printHumanEvent(done, out, { canceled: final.status === "canceled" });
   if (json) {
     out(
       `${JSON.stringify({ type: "status", status: final.status, ok: final.ok, error: final.error })}\n`,
@@ -1912,7 +1926,10 @@ export function printHumanEvent(
         `  ${event.result.ok ? "done" : "fail"} ${event.stepId}${event.cached ? " (cached)" : ""}\n`,
       );
       // Say why, unless the step only stopped because the run was canceled.
-      const why = event.result.ok || run.canceled ? undefined : event.result.error?.trim();
+      const why =
+        event.result.ok || event.result.interrupted || run.canceled
+          ? undefined
+          : event.result.error?.trim();
       if (why) out(`     ${why.split("\n", 1)[0]}\n`);
       const violations = event.result.permissions?.violations;
       if (violations?.length) {

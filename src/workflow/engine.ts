@@ -43,7 +43,7 @@ import {
 import { collectArtifacts } from "./artifacts";
 import { MAX_COMMAND_OUTPUT_BYTES, runShellCommand } from "./command";
 import type { StepEditPatch, StepKillResult, WorkflowRunControl } from "./control";
-import { addTokens, replayedSpend } from "./cost";
+import { addSpend, addTokens, replayedSpend } from "./cost";
 import type { StepPermissionsInfo, WorkflowEvent } from "./events";
 import type { StepRetryEvent } from "./events";
 import { mergeConflictGuidance } from "./gc";
@@ -1567,6 +1567,14 @@ async function runSingleStep(
     // entry would kill the next iteration for a request nobody made.
     env.killedSteps.delete(step.id);
     markKilledResult(execution.result, by);
+  }
+  // A step that ended not-ok while the run was being aborted was taken down
+  // with the run: say so explicitly rather than leave UIs to guess from its
+  // error text, which is the adapter's own message whenever it had one.
+  if (env.signal?.aborted) {
+    for (const r of [execution.result, ...(execution.childResults ?? [])]) {
+      if (!r.ok && !r.killed && !r.dependencyFailed) r.interrupted = true;
+    }
   }
 
   if (execution.gate) {
@@ -3502,23 +3510,6 @@ async function executeCommandStep(
   } finally {
     await workspace.dispose();
   }
-}
-
-/**
- * The combined `costUsd` / `tokens` of two results, each left `undefined` when
- * neither side reports it (so an unpriced agent never reads as "$0").
- */
-function addSpend(
-  a: Pick<StepResult, "costUsd" | "tokens">,
-  b: Pick<StepResult, "costUsd" | "tokens">,
-): Pick<StepResult, "costUsd" | "tokens"> {
-  return {
-    costUsd:
-      a.costUsd === undefined && b.costUsd === undefined
-        ? undefined
-        : (a.costUsd ?? 0) + (b.costUsd ?? 0),
-    tokens: a.tokens || b.tokens ? addTokens(a.tokens, b.tokens) : undefined,
-  };
 }
 
 /** Exact USD cost from the effective per-MTok rates and the API-reported usage. */

@@ -62,10 +62,14 @@
   /**
    * A step that stopped only because the run was canceled around it. It did
    * not fail, and blaming it would send the reader to fix a step that is fine.
+   * The engine marks these `interrupted`; records from before that marker only
+   * carry its "cancelled" label, so that is still matched on a canceled run.
    */
   function isInterrupted(s) {
     var r = s && s.result;
-    return S.runStatus === "canceled" && Boolean(r) && !r.ok && /cancel/i.test(r.error || "");
+    if (!r || r.ok) return false;
+    if (r.interrupted) return true;
+    return S.runStatus === "canceled" && /cancel/i.test(r.error || "");
   }
 
   /**
@@ -111,22 +115,26 @@
     if (S.arrivalWorktrees && S.arrivalWorktrees.runId === runId) return;
     var entry = { runId: runId, pending: true };
     S.arrivalWorktrees = entry;
+    var giveUp = function () {
+      if (S.arrivalWorktrees !== entry) return;
+      S.arrivalWorktrees = { runId: runId, failed: true };
+      ST.render();
+    };
+    // A 404 (record not written yet), a 5xx or a dropped request are all
+    // worth another try; anything else (auth, a bad id) will not change.
     var attempt = function (left) {
+      var again = function () {
+        if (S.arrivalWorktrees !== entry) return;
+        if (left > 0) setTimeout(function () { attempt(left - 1); }, 1000);
+        else giveUp();
+      };
       ST.apiAuth("GET", "/api/history/" + encodeURIComponent(runId) + "/worktrees").then(function (r) {
         if (S.arrivalWorktrees !== entry) return;
-        if (r.status === 404 && left > 0) {
-          setTimeout(function () { attempt(left - 1); }, 1000);
-          return;
-        }
-        S.arrivalWorktrees = r.status === 200
-          ? { runId: runId, sources: r.body.sources || [], harvest: r.body.harvest || null }
-          : { runId: runId, failed: true };
+        if (r.status === 404 || r.status >= 500 || r.status === 0) { again(); return; }
+        if (r.status !== 200) { giveUp(); return; }
+        S.arrivalWorktrees = { runId: runId, sources: r.body.sources || [], harvest: r.body.harvest || null };
         ST.render();
-      }).catch(function () {
-        if (S.arrivalWorktrees !== entry) return;
-        S.arrivalWorktrees = { runId: runId, failed: true };
-        ST.render();
-      });
+      }).catch(again);
     };
     attempt(10);
   }

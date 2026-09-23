@@ -188,6 +188,8 @@ describe("finished-run page: a canceled run is not a failed one", () => {
 
   it("says where the run was stopped instead of naming a root cause", () => {
     expect(js).toContain("function isInterrupted(s)");
+    // The engine's explicit marker decides, not the error's wording.
+    expect(js).toContain("if (r.interrupted) return true;");
     expect(js).toContain('"Run canceled while "');
     expect(js).toContain('"interrupted — run canceled"');
     expect(ruleBody(css, ".rootcause.interrupted")).toContain("border-left-color");
