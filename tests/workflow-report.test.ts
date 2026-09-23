@@ -576,3 +576,42 @@ describe("workflow run --report (CLI)", () => {
     expect(c.stderr).toContain("usage:");
   });
 });
+
+describe("report: interrupted steps", () => {
+  it("keeps a step the run's cancel took down out of failures, in JSON and JUnit", async () => {
+    const { RunRecordBuilder, buildReportModel, renderReport } = await import("../src/workflow");
+    const builder = new RunRecordBuilder({ id: "r", workflow: "w", input: "", cwd: "/" });
+    builder.handle({ kind: "workflow_start", name: "w", phaseCount: 1, stepCount: 1, ts: 1 });
+    builder.handle({
+      kind: "phase_start",
+      phaseId: "p",
+      title: "P",
+      index: 0,
+      stepCount: 1,
+      ts: 1,
+    });
+    builder.handle({ kind: "step_start", phaseId: "p", stepId: "s", blockKind: "worker", ts: 1 });
+    builder.handle({
+      kind: "step_done",
+      phaseId: "p",
+      stepId: "s",
+      result: {
+        stepId: "s",
+        ok: false,
+        output: "",
+        error: "cancelled",
+        durationMs: 1,
+        interrupted: true,
+      },
+      cached: false,
+      ts: 2,
+    });
+    const record = builder.build({ status: "canceled" });
+    const model = buildReportModel(record);
+    expect(model.failedSteps).toEqual([]);
+    expect(model.totals).toMatchObject({ failed: 0, interrupted: 1 });
+    const junit = renderReport(record, "junit");
+    expect(junit).toContain('failures="0"');
+    expect(junit).toContain("interrupted: the run was stopped while it ran");
+  });
+});

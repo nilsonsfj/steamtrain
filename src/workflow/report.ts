@@ -128,6 +128,8 @@ export interface ReportStep {
   ok: boolean;
   cached: boolean;
   skipped: boolean;
+  /** Taken down by the run's cancel or timeout: stopped, not failed. */
+  interrupted?: boolean;
   agent?: string;
   api?: string;
   model?: string;
@@ -201,7 +203,10 @@ export function buildReportModel(
     ok: phase.ok,
     steps: phase.steps.map(toReportStep),
   }));
-  const failedSteps = phases.flatMap((phase) => phase.steps).filter((step) => !step.ok);
+  // A step the run's cancel or timeout took down did not fail on its own.
+  const failedSteps = phases
+    .flatMap((phase) => phase.steps)
+    .filter((step) => !step.ok && !step.interrupted);
   return {
     schema: RUN_REPORT_SCHEMA,
     version: RUN_REPORT_VERSION,
@@ -248,6 +253,7 @@ function toReportStep(step: HistoryStep): ReportStep {
     ok: status === "done",
     cached: step.cached,
     skipped: Boolean(step.result?.skipped),
+    ...(step.result?.interrupted ? { interrupted: true } : {}),
     ...(step.agent ? { agent: step.agent } : {}),
     ...(step.api ? { api: step.api } : {}),
     ...(step.model ? { model: step.model } : {}),
@@ -409,18 +415,15 @@ function stepFailureReason(step: ReportStep): string {
 function renderJunitReport(model: RunReportModel): string {
   const { run, totals } = model;
   const failures = model.failedSteps.filter((step) => step.status !== "pending").length;
-  const skipped = model.phases
-    .flatMap((phase) => phase.steps)
-    .filter((step) => step.status === "pending" || step.skipped).length;
+  // An interrupted step never reached a verdict, so JUnit reads it as skipped.
+  const notJudged = (step: ReportStep): boolean =>
+    step.status === "pending" || step.skipped || Boolean(step.interrupted);
+  const skipped = model.phases.flatMap((phase) => phase.steps).filter(notJudged).length;
   const time = (totals.durationMs / 1000).toFixed(3);
   const suites: string[] = [];
   for (const phase of model.phases) {
-    const phaseFailures = phase.steps.filter(
-      (step) => !step.ok && step.status !== "pending",
-    ).length;
-    const phaseSkipped = phase.steps.filter(
-      (step) => step.status === "pending" || step.skipped,
-    ).length;
+    const phaseFailures = phase.steps.filter((step) => !step.ok && !notJudged(step)).length;
+    const phaseSkipped = phase.steps.filter(notJudged).length;
     const phaseTime = (
       phase.steps.reduce((sum, step) => sum + (step.durationMs ?? 0), 0) / 1000
     ).toFixed(3);
@@ -429,6 +432,12 @@ function renderJunitReport(model: RunReportModel): string {
       const stepTime = ((step.durationMs ?? 0) / 1000).toFixed(3);
       const className = `${run.workflow}.${phase.phaseId}`;
       const open = `    <testcase name=${xmlAttr(step.stepId)} classname=${xmlAttr(className)} time="${stepTime}"`;
+      if (step.interrupted) {
+        cases.push(
+          `${open}>\n      <skipped message="interrupted: the run was stopped while it ran"/>\n    </testcase>`,
+        );
+        continue;
+      }
       if (step.status === "pending" || step.skipped) {
         cases.push(`${open}>\n      <skipped/>\n    </testcase>`);
         continue;
