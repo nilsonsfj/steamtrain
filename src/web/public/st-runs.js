@@ -1170,6 +1170,7 @@
       return (t.ok || 0) + "/" + (t.steps || 0);
     }), "num");
     addRow("Failed", picked.map(function (run) { return String((run.totals && run.totals.failed) || 0); }), "num");
+    addRow("Interrupted", picked.map(function (run) { return String((run.totals && run.totals.interrupted) || 0); }), "num");
     addRow("Cached", picked.map(function (run) { return String((run.totals && run.totals.cached) || 0); }), "num");
     addRow("Tokens", picked.map(function (run) {
       var tok = totalTokens(run.totals && run.totals.tokens);

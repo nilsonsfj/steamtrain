@@ -69,7 +69,8 @@
     var r = s && s.result;
     if (!r || r.ok) return false;
     if (r.interrupted) return true;
-    return (S.runStatus === "canceled" || S.runStatus === "timed-out") && /cancel/i.test(r.error || "");
+    return (S.runStatus === "canceled" || S.runStatus === "timed-out") &&
+      /cancel|abort|timed out|SIGTERM/i.test(r.error || "");
   }
 
   /**

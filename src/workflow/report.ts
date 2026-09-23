@@ -371,7 +371,13 @@ function renderMarkdownReport(model: RunReportModel): string {
   lines.push("| --- | --- | --- | --- | --- |");
   for (const phase of model.phases) {
     for (const step of phase.steps) {
-      const glyph = step.ok ? "✅" : step.status === "pending" ? "⏭" : "❌";
+      const glyph = step.ok
+        ? "✅"
+        : step.status === "pending"
+          ? "⏭"
+          : step.interrupted
+            ? "⏹"
+            : "❌";
       const status = step.ok
         ? step.cached
           ? "cached"
@@ -380,7 +386,9 @@ function renderMarkdownReport(model: RunReportModel): string {
           ? "not run"
           : step.skipped
             ? "skipped"
-            : "failed";
+            : step.interrupted
+              ? "stopped"
+              : "failed";
       const duration = step.durationMs !== undefined ? formatElapsed(step.durationMs) : "—";
       // A cached replay billed nothing this run (the totals agree); the JSON
       // keeps its original `costUsd` alongside `cached` for consumers.

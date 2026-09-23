@@ -613,5 +613,8 @@ describe("report: interrupted steps", () => {
     const junit = renderReport(record, "junit");
     expect(junit).toContain('failures="0"');
     expect(junit).toContain("interrupted: the run was stopped while it ran");
+    const markdown = renderReport(record, "markdown");
+    expect(markdown).toContain("| ⏹ s | worker | stopped |");
+    expect(markdown).not.toContain("### Failed steps");
   });
 });

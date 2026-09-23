@@ -1370,7 +1370,14 @@ function printHistoryRecord(
   printModelBreakdown(modelBreakdownForRecord(record), out);
   for (const phase of record.phases) {
     out(
-      `\n  phase ${phase.index + 1}: ${phase.title}${phase.done ? (phase.ok ? "" : " (failed)") : ""}\n`,
+      `\n  phase ${phase.index + 1}: ${phase.title}${
+        phase.done && !phase.ok
+          ? // Only steps the run's cancel took down: the phase stopped, nothing broke.
+            phase.steps.every((s) => s.status !== "error" || s.result?.interrupted)
+            ? " (stopped)"
+            : " (failed)"
+          : ""
+      }\n`,
     );
     for (const step of phase.steps) {
       // A step the run's cancel or timeout took down is stopped, not failed.
