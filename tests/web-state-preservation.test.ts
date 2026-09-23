@@ -295,12 +295,13 @@ describe("captureFocus / restoreFocus", () => {
   });
 
   it("fails safely when the control is gone after the rebuild", () => {
-    paint().box.focus();
+    const before = paint().box;
+    before.focus();
     const token = client.captureFocus();
     stubDocument.body.children = []; // the step finished; its form is gone
-    stubDocument.activeElement = null;
+    stubDocument.body.appendChild(stubDocument.createElement("button"));
     expect(client.restoreFocus(token)).toBe(false);
-    expect(stubDocument.activeElement).toBeNull();
+    expect(stubDocument.activeElement).toBe(before); // nothing else was focused
   });
 
   it("captures nothing for a focused element without a focus key", () => {
@@ -438,15 +439,18 @@ describe("transient step state across a rebuild", () => {
       stepId: "ask",
       status: "running",
       blockKind: "human",
-      humanInput: { pending: true, question: { prompt: "Which one?" } },
+      humanInput: { pending: true, prompt: "Which one?" },
     };
     const box = (card: StubEl) => card.querySelector("textarea")!;
     const first = box(client.renderCard(step, pass(1)));
     first.value = "the second o";
     first.fire("input");
 
-    expect(box(client.renderCard(step, pass(1))).value).toBe("the second o");
+    const rebuilt = client.renderCard(step, pass(1));
+    expect(rebuilt.textContent).toContain("Which one?");
+    expect(box(rebuilt).value).toBe("the second o");
     expect(box(client.renderCard(step, pass(2))).value).toBe("");
+    expect(client.S.humanInputDraft).toEqual({ "review:1:ask": "the second o" });
   });
 
   it("keeps an expanded sub-workflow open, for that loop pass only", () => {
@@ -461,5 +465,6 @@ describe("transient step state across a rebuild", () => {
 
     expect(details(client.renderCard(step, pass(1))).open).toBe(true);
     expect(details(client.renderCard(step, pass(2))).open).toBe(false);
+    expect(client.S.subWorkflowOpen).toEqual({ "review:1:call": true });
   });
 });
