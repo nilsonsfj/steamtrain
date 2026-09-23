@@ -988,6 +988,16 @@ describe("runs page: destructive actions", () => {
     page.noteFailure("Request failed: Failed to fetch");
     expect(page.main()).toContain("Request failed: Failed to fetch");
   });
+
+  it("drops the failure copy once a later action succeeds", async () => {
+    const page = await mountRuns({ runs: [record()], detail: { ...record(), phases: [] } });
+    page.noteFailure("Request failed: Failed to fetch");
+    await page.clickRow(0);
+    await page.clickButton("Full receipt");
+    await page.clickButton("Delete");
+    expect(page.said.join(" ")).toContain("Deleted run");
+    expect(page.main()).not.toContain("Request failed");
+  });
 });
 
 describe("runs page: keyboard", () => {

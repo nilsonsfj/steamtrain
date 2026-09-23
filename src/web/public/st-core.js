@@ -507,6 +507,12 @@ window.Steamtrain = (function () {
   Watched.prototype.catch = function (onRejected) {
     return this.then(undefined, onRejected);
   };
+  // .finally passes a rejection through, so it does not mark the chain handled.
+  Watched.prototype.finally = function (onFinally) {
+    var child = new Watched(this._promise.finally(onFinally));
+    this._kids.push(child);
+    return child;
+  };
   function rejectionHandled(node) {
     var seen = [];
     function walk(n) {

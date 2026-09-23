@@ -89,6 +89,7 @@ interface Watched {
     onRejected?: ((reason: unknown) => unknown) | null,
   ): Watched;
   catch(onRejected?: ((reason: unknown) => unknown) | null): Watched;
+  finally(onFinally?: (() => void) | null): Watched;
   _promise: Promise<unknown>;
 }
 
@@ -263,6 +264,31 @@ describe("watchUnhandledRejection", () => {
     await flush();
     expect(reports).toEqual([]);
     expect(seen).toBe("offline");
+  });
+
+  it("runs .finally without counting it as handled, and a later catch still counts", async () => {
+    const reports: unknown[] = [];
+    let cleanups = 0;
+    const bare = ST.watchUnhandledRejection(Promise.reject(new Error("offline")), (reason) =>
+      reports.push(reason),
+    ).finally(() => {
+      cleanups += 1;
+    });
+    bare._promise.catch(() => {});
+    let seen = "";
+    ST.watchUnhandledRejection(Promise.reject(new Error("gone")), (reason) =>
+      reports.push(reason),
+    )
+      .finally(() => {
+        cleanups += 1;
+      })
+      .catch((reason: unknown) => {
+        seen = (reason as Error).message;
+      });
+    await flush();
+    expect(cleanups).toBe(2);
+    expect(reports.map((r) => (r as Error).message)).toEqual(["offline"]);
+    expect(seen).toBe("gone");
   });
 
   it("does not report when the promise is returned into a catch", async () => {

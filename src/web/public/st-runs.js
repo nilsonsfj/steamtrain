@@ -1133,7 +1133,12 @@
     if (ST.run && ST.run.setBanner) ST.run.setBanner(text, kind);
     // Clear / delete already catch, so the shared apiAuth banner does not also
     // fire. Repeat an error here or the hidden cockpit banner is all they get.
+    // Any other notice replaces the cockpit banner, so it retires this copy too.
     if (kind === "err") noteFailure(text);
+    else if (R.failure) {
+      R.failure = null;
+      if (R.mount) paint();
+    }
   }
 
   function copyRunId(id) {
