@@ -262,16 +262,16 @@ describe("grok mapping", () => {
   const plan = (spec: Parameters<typeof resolvePermissions>[0]) =>
     permissionPlan("grok", resolvePermissions(spec)!);
 
-  it("read-only sandboxes the filesystem and removes shell, edits, and web", () => {
+  it("read-only confines writes to the workspace and removes shell, edits, and web", () => {
     const { args, enforcement, verify } = plan("read-only");
     expect(args).toEqual([
       "--sandbox",
-      "read-only",
+      "workspace",
       "--permission-mode",
       "dontAsk",
       "--disable-web-search",
       "--disallowed-tools",
-      "run_terminal_cmd,search_replace",
+      "run_terminal_cmd,search_replace,write",
       "--deny",
       "Bash",
       "--deny",
@@ -317,13 +317,31 @@ describe("grok mapping", () => {
     const allowed = plan({ profile: "read-only", allow: ["Bash"] }).args;
     expect(allowed).toContain("--allow");
     expect(allowed[allowed.indexOf("--allow") + 1]).toBe("Bash");
-    expect(allowed).not.toContain("run_terminal_cmd,search_replace");
-    expect(allowed[allowed.indexOf("--disallowed-tools") + 1]).toBe("search_replace");
+    expect(allowed).not.toContain("run_terminal_cmd,search_replace,write");
+    expect(allowed[allowed.indexOf("--disallowed-tools") + 1]).toBe("search_replace,write");
     expect(allowed.filter((arg) => arg === "Bash")).toEqual(["Bash"]);
 
     const both = plan({ profile: "read-only", allow: ["Bash"], deny: ["Bash"] }).args;
     expect(both[both.indexOf("--disallowed-tools") + 1]).toContain("run_terminal_cmd");
     expect(both.filter((arg) => arg === "Bash").length).toBeGreaterThan(1);
+  });
+
+  it("edit keeps the shell when allowed and passes each allow rule once", () => {
+    const args = plan({ profile: "edit", allow: ["Bash", "Bash", "WebFetch"] }).args;
+    expect(args).toEqual([
+      "--sandbox",
+      "workspace",
+      "--permission-mode",
+      "acceptEdits",
+      "--allow",
+      "Bash",
+      "--allow",
+      "WebFetch",
+    ]);
+
+    const denied = plan({ profile: "edit", allow: ["Bash"], deny: ["Bash"] }).args;
+    expect(denied[denied.indexOf("--disallowed-tools") + 1]).toBe("run_terminal_cmd");
+    expect(denied[denied.indexOf("--deny") + 1]).toBe("Bash");
   });
 
   it("passes scoped rules through and keeps full's always-approve", () => {

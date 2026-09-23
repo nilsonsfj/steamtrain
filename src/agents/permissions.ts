@@ -391,8 +391,10 @@ function opencodePlan(perms: ResolvedPermissions): PermissionPlan {
 
 // Grok Build tool ids. Permission *rules* use the Claude-compatible prefixes
 // (`Bash`, `Edit`, `Write`, `WebFetch`); `--disallowed-tools` takes these ids.
+// The shell tool is listed as `run_terminal_command` but removed by its
+// `run_terminal_cmd` id (checked against grok 1.0.40).
 const GROK_SHELL_TOOL = "run_terminal_cmd";
-const GROK_EDIT_TOOL = "search_replace";
+const GROK_EDIT_TOOLS = ["search_replace", "write"];
 
 /**
  * Translate a steamtrain profile onto Grok Build's sandbox, permission mode,
@@ -403,6 +405,12 @@ const GROK_EDIT_TOOL = "search_replace";
  * `--always-approve` (full). Deny rules still apply under always-approve.
  * An author's explicit allow drops the profile's matching deny — deny wins
  * only when the author also listed that rule in `deny`.
+ *
+ * Read-only uses the `workspace` sandbox, not Grok's `read-only` one: that
+ * profile (and `strict`) refuses to start at all when `/var/run/docker.sock`
+ * is a symlink, which is how Docker Desktop installs it on macOS. Writes stay
+ * confined to the step's workspace by the OS; inside it, the removed tools,
+ * the deny rules, and post-run verification keep the step read-only.
  */
 function grokPlan(perms: ResolvedPermissions): PermissionPlan {
   const args: string[] = [];
@@ -418,14 +426,14 @@ function grokPlan(perms: ResolvedPermissions): PermissionPlan {
 
   switch (perms.profile) {
     case "read-only":
-      args.push("--sandbox", "read-only", "--permission-mode", "dontAsk");
+      args.push("--sandbox", "workspace", "--permission-mode", "dontAsk");
       if (!granted("Bash")) {
         addDeny("Bash");
         disallowed.push(GROK_SHELL_TOOL);
       }
       if (!granted("Edit")) addDeny("Edit");
       if (!granted("Write")) addDeny("Write");
-      if (!granted("Edit") && !granted("Write")) disallowed.push(GROK_EDIT_TOOL);
+      if (!granted("Edit") && !granted("Write")) disallowed.push(...GROK_EDIT_TOOLS);
       if (!granted("WebFetch") && !granted("WebSearch")) addDeny("WebFetch");
       if (!granted("MCPTool")) addDeny("MCPTool");
       disableWeb = !granted("WebFetch") && !granted("WebSearch");
@@ -446,7 +454,7 @@ function grokPlan(perms: ResolvedPermissions): PermissionPlan {
 
   if (disableWeb) args.push("--disable-web-search");
   if (disallowed.length > 0) args.push("--disallowed-tools", disallowed.join(","));
-  for (const rule of perms.allow) args.push("--allow", rule);
+  for (const rule of dedupe(perms.allow)) args.push("--allow", rule);
   for (const rule of perms.deny) addDeny(rule);
   for (const rule of denies) args.push("--deny", rule);
 
