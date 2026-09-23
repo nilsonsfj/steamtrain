@@ -54,7 +54,7 @@ const QUIET_TYPES = new Set(["plan", "available_commands", "max_turns_reached"])
 const TERMINAL_SKIP = new Set(["in_progress", "pending", "started"]);
 
 /**
- * Args for one headless `grok -p` run.
+ * Args for one headless `grok --prompt-file` run.
  *
  * The prompt is a file (`--prompt-file`) so workflow prompts are not bounded
  * by `ARG_MAX` and cannot be parsed as flags. Permission flags land before
@@ -134,7 +134,9 @@ function toolOutput(rawOutput: unknown, content: unknown): string {
  *
  * Session ids arrive on the terminal `end` line (sometimes earlier). Tool
  * calls open with `tool_call` and finish on `tool_call_update`. Per-response
- * `usage` lines are that response's tokens, not a running total.
+ * `usage` lines are that response's tokens, not a running total. The `end`
+ * spend covers this prompt only, also on `--resume`, so unlike Claude Code a
+ * resumed turn needs no prior-session baseline subtracted.
  */
 export function createGrokMapper(agent: AgentInstanceId = AGENT, model?: string): EventMapper {
   let announcedSession = false;

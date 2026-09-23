@@ -374,7 +374,7 @@ function opencodePlan(perms: ResolvedPermissions): PermissionPlan {
       args: [],
       enforcement: "none",
       gaps: [
-        "opencode has no built-in agent that allows edits but withholds shell/network — use read-only, full, or claude/codex for edit",
+        "opencode has no built-in agent that allows edits but withholds shell/network — use read-only, full, or claude/codex/grok for edit",
         ...gaps,
       ],
       verify: false,

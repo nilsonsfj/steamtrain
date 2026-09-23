@@ -47,7 +47,7 @@ A step can now declare what it is allowed to do:
   (`codex --sandbox read-only`); where it has tool lists instead, as read/search
   tools with writes, shell, and network denied (claude).
 - **`edit`** — read plus write inside the step's own workspace, and nothing
-  else. Enforceable on claude and codex.
+  else. Enforceable on claude, codex, and grok.
 - **`full`** — the one profile that *grants* rather than restricts. It
   pre-approves everything the CLI offers so an implement step never stalls on a
   permission prompt it cannot answer headlessly (claude gets
@@ -260,7 +260,7 @@ reference:
 
 They use the object form with `onUnsupported: "warn"` rather than the stricter
 default, because a bundled workflow must stay runnable on whatever agent you
-retarget it to. On claude/codex/opencode/mimo the restriction is enforced
+retarget it to. On claude/codex/grok/opencode/mimo the restriction is enforced
 natively; elsewhere it degrades honestly to post-run verification — which still
 fails any read-only step that modified its workspace.
 
