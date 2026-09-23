@@ -86,9 +86,11 @@ export function formatElapsed(ms: number): string {
 }
 
 /**
- * A compact one-line token summary, e.g. "12.3k tok (in 8k · out 3k · cache r
- * 1.3k)". Returns "" when there is nothing to show. Only non-zero categories
- * are listed so the line stays short.
+ * A compact one-line token summary, e.g. "12.3k tok (in 8k · out 3k incl.
+ * 1.2k reasoning · cache r 1.3k)". Returns "" when there is nothing to show.
+ * Only non-zero categories are listed so the line stays short. Reasoning is
+ * part of output (see {@link totalTokens}), so it is shown inside it: listed
+ * as a category of its own, the parts would add up to more than the total.
  */
 export function formatTokenSummary(t: TokenUsage | undefined): string {
   const total = totalTokens(t);
@@ -96,7 +98,10 @@ export function formatTokenSummary(t: TokenUsage | undefined): string {
   const parts: string[] = [];
   for (const k of TOKEN_KEYS) {
     const v = t[k] ?? 0;
-    if (v > 0) parts.push(`${TOKEN_LABELS[k]} ${formatTokens(v)}`);
+    if (k === "reasoning" || v === 0) continue;
+    const reasoning = k === "output" ? (t.reasoning ?? 0) : 0;
+    const within = reasoning > 0 ? ` incl. ${formatTokens(reasoning)} reasoning` : "";
+    parts.push(`${TOKEN_LABELS[k]} ${formatTokens(v)}${within}`);
   }
   return `${formatTokens(total)} tok (${parts.join(" · ")})`;
 }

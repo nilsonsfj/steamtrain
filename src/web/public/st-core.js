@@ -1700,7 +1700,10 @@ window.Steamtrain = (function () {
     var parts = [];
     for (var i = 0; i < TOKEN_KEYS.length; i++) {
       var k = TOKEN_KEYS[i]; var v = t[k] || 0;
-      if (v > 0) parts.push(TOKEN_LABELS[k] + " " + fmtTokens(v));
+      if (k === "reasoning" || v === 0) continue;
+      // Reasoning is part of output: shown inside it, as formatTokenSummary does.
+      var reasoning = k === "output" ? t.reasoning || 0 : 0;
+      parts.push(TOKEN_LABELS[k] + " " + fmtTokens(v) + (reasoning > 0 ? " incl. " + fmtTokens(reasoning) + " reasoning" : ""));
     }
     return fmtTokens(total) + " tok (" + parts.join(" \u00b7 ") + ")";
   }
