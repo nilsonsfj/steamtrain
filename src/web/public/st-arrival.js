@@ -110,8 +110,20 @@
    * written around then (by another process, for a detached run), so a miss
    * is retried for a while before giving up.
    */
-  function loadArrivalWorktrees(runId) {
-    if (!runId || !S.runStatus) return;
+  function loadArrivalWorktrees(runId, force) {
+    if (!runId) return;
+    if (!S.runStatus && !force) {
+      // Should the status frame never come, look anyway after a while rather
+      // than sit at "checking…" for good.
+      if (!S.arrivalWorktreesWait || S.arrivalWorktreesWait !== runId) {
+        S.arrivalWorktreesWait = runId;
+        setTimeout(function () {
+          var have = S.arrivalWorktrees && S.arrivalWorktrees.runId === runId;
+          if (S.runId === runId && !have) loadArrivalWorktrees(runId, true);
+        }, 8000);
+      }
+      return;
+    }
     if (S.arrivalWorktrees && S.arrivalWorktrees.runId === runId) return;
     var entry = { runId: runId, pending: true };
     S.arrivalWorktrees = entry;

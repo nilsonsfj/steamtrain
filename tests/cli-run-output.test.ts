@@ -54,7 +54,7 @@ describe("printHumanEvent", () => {
     const interrupted = done(false, "'claude' exited with code 143");
     if (interrupted.kind === "step_done") interrupted.result.interrupted = true;
     printHumanEvent(interrupted, out);
-    expect(text()).toBe("  fail s1\n");
+    expect(text()).toBe("  stop s1\n");
   });
 
   it("lists a step the cancel took down as stopped in the summary, not failed", () => {
@@ -179,15 +179,33 @@ describe("a mid-run handoff keeps the run's own work", () => {
       stepCount: 1,
       ts,
     });
+    // Owner 2's replay went through ownWorkRewriter, which tags it claimed.
+    const claim = ownWorkRewriter(priorOwnerWork([start(1), stepDone("rev", false, 0.02)]))(
+      stepDone("rev", true, 0.02),
+    );
+    const prior = priorOwnerWork([start(1), stepDone("rev", false, 0.02), start(2), claim]);
+    expect(prior.spend.get("rev")?.costUsd).toBeCloseTo(0.02);
+    expect([...prior.ran]).toEqual(["rev"]);
+    expect(prior.startedAt).toBe(1);
+  });
+
+  it("still counts a step an intermediate owner genuinely re-ran", () => {
+    // Owner 2's cached rev went stale (an input re-ran), so it ran live again:
+    // that $0.03 is real spend on top of owner 1's $0.02.
+    const start = (ts: number): WorkflowEvent => ({
+      kind: "workflow_start",
+      name: "w",
+      phaseCount: 1,
+      stepCount: 1,
+      ts,
+    });
     const prior = priorOwnerWork([
       start(1),
       stepDone("rev", false, 0.02),
       start(2),
-      stepDone("rev", false, 0.02),
+      stepDone("rev", false, 0.03),
     ]);
-    expect(prior.spend.get("rev")?.costUsd).toBeCloseTo(0.02);
-    expect([...prior.ran]).toEqual(["rev"]);
-    expect(prior.startedAt).toBe(1);
+    expect(prior.spend.get("rev")?.costUsd).toBeCloseTo(0.05);
   });
 
   it("changes nothing for a run that was not handed off", () => {

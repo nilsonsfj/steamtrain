@@ -533,7 +533,10 @@
     // worth another try; auth is not.
     var attempt = function (left) {
       var again = function () {
-        if (left > 0) setTimeout(function () { attempt(left - 1); }, 1000);
+        if (left <= 0) return;
+        setTimeout(function () {
+          if (request === recentRequest && S.selected === name) attempt(left - 1);
+        }, 1000);
       };
       ST.apiAuth("GET", "/api/history").then(function (r) {
         if (request !== recentRequest || S.selected !== name) return;

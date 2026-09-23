@@ -141,6 +141,12 @@ export interface StepDoneEvent extends IterationTagged {
   result: StepResult;
   /** True when replayed from memory/disk cache (resume), not a fresh agent run. */
   cached: boolean;
+  /**
+   * Set on a mid-run handoff's replay of the previous owner's own step, which
+   * is reported as this run's work (`cached: false`). Its spend was already
+   * counted where the step ran, so a later handoff must not count it again.
+   */
+  claimed?: boolean;
   ts: number;
 }
 

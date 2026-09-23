@@ -908,23 +908,15 @@ export function priorOwnerWork(events: readonly WorkflowEvent[]): PriorOwnerWork
   const ran = new Set<string>();
   const spend = new Map<string, Pick<StepResult, "costUsd" | "tokens">>();
   let startedAt: number | undefined;
-  // Each owner's events start with its own workflow_start. A later owner's
-  // first live-looking step_done for a step an earlier owner already ran is
-  // that owner's own replay, re-labeled by ownWorkRewriter — not a new pass.
-  let ranBefore = new Set<string>();
-  let claimed = new Set<string>();
   for (const event of events) {
     if (event.kind === "workflow_start") {
       startedAt ??= event.ts;
-      ranBefore = new Set(ran);
-      claimed = new Set();
       continue;
     }
     if (event.kind !== "step_done" || event.cached) continue;
-    if (ranBefore.has(event.stepId) && !claimed.has(event.stepId)) {
-      claimed.add(event.stepId);
-      continue;
-    }
+    // A later owner's replay of an earlier owner's step, re-labeled by
+    // ownWorkRewriter: its spend is already counted from the original.
+    if (event.claimed) continue;
     if (event.result.ok) ran.add(event.stepId);
     // A fan-out parent's spend is its children's; they are summed themselves.
     if (event.result.childResults?.length) continue;
@@ -957,7 +949,7 @@ export function ownWorkRewriter(
       return { ...event, ts: prior.startedAt };
     }
     if (event.kind === "step_done" && event.cached && prior.ran.has(event.stepId)) {
-      return { ...event, cached: false };
+      return { ...event, cached: false, claimed: true };
     }
     if (event.kind === "workflow_done" && prior.spend.size > 0) {
       return { ...event, results: event.results.map(restore) };
@@ -1946,7 +1938,9 @@ export function printHumanEvent(
     }
     case "step_done": {
       out(
-        `  ${event.result.ok ? "done" : "fail"} ${event.stepId}${event.cached ? " (cached)" : ""}\n`,
+        `  ${event.result.ok ? "done" : event.result.interrupted ? "stop" : "fail"} ${event.stepId}${
+          event.cached ? " (cached)" : ""
+        }\n`,
       );
       // Say why, unless the step only stopped because the run was canceled.
       const why =
