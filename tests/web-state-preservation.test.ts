@@ -382,14 +382,17 @@ describe("the event log's scroll anchor", () => {
   });
 
   it("stays as close as it can when the anchored entry ages out of the log", () => {
-    log(200);
+    // Two-line entries, so the short ones arriving later leave the log shorter.
+    log(200, (n) => `a long step id that wraps onto two lines ${n}`);
     client.instruments.render(rail);
     const bottom = view().scrollHeight - view().clientHeight;
     view().scrollTop = bottom; // reading the oldest entries
 
     log(20); // the entries on screen are evicted
     client.instruments.render(rail);
-    expect(view().scrollTop).toBe(bottom);
+    const newBottom = view().scrollHeight - view().clientHeight;
+    expect(newBottom).toBeLessThan(bottom);
+    expect(view().scrollTop).toBe(newBottom); // as far down as the shorter log goes
   });
 
   it("leaves a reader at the head at the head", () => {
