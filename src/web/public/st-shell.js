@@ -185,7 +185,8 @@
           onClick: function () { ST.runs.open(run.id); }
         });
         row.appendChild(h("span", { class: "dot" }));
-        var right = !ok ? run.status
+        // A timeout is recorded as canceled; the record's timedOut says which.
+        var right = !ok ? (run.status === "canceled" && run.timedOut ? "timed out" : run.status)
           : run.totals && run.totals.costUsd > 0 ? "$" + run.totals.costUsd.toFixed(3)
           : "ok";
         row.appendChild(h("span", { text: run.id.slice(0, 5) + " · " + relTime(run.startedAt) + " · " + right }));

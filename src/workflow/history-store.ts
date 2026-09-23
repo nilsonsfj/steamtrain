@@ -241,6 +241,7 @@ function validateRecord(file: string): RunRecord | undefined {
     phases: r.phases,
     totals: r.totals ?? computeRunTotals(r.phases),
     error: typeof r.error === "string" ? r.error : undefined,
+    timedOut: r.status === "canceled" && r.timedOut === true ? true : undefined,
     budget: r.budget && typeof r.budget === "object" ? r.budget : undefined,
     harvest: r.harvest && typeof r.harvest === "object" ? r.harvest : undefined,
     interventions: Array.isArray(r.interventions) ? r.interventions : undefined,

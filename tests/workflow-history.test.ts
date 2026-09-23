@@ -518,6 +518,15 @@ describe("workflow history store", () => {
     const loaded = await store.get("r-spec");
     expect(loaded?.specHash).toBe("abc123");
   });
+
+  it("keeps a timed-out run's timedOut through get and list", async () => {
+    const builder = new RunRecordBuilder({ id: "r-tmo", workflow: "demo", input: "", cwd: "/" });
+    builder.handle({ kind: "workflow_start", name: "demo", phaseCount: 0, stepCount: 0, ts: 1 });
+    const store = createWorkflowHistoryStore(tempDir());
+    await store.save(builder.build({ status: "canceled", timedOut: true }));
+    expect((await store.get("r-tmo"))?.timedOut).toBe(true);
+    expect((await store.list())[0]?.timedOut).toBe(true);
+  });
 });
 
 describe("runner usage tally", () => {
