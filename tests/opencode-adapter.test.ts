@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   OpenCodeAdapter,
@@ -238,5 +241,134 @@ describe("buildOpenCodeRunArgs", () => {
       "ses_42",
     ]);
     expect(new OpenCodeAdapter().supportsResume).toBe(true);
+  });
+});
+
+describe("OpenCodeAdapter resuming a session recorded in another directory", () => {
+  /**
+   * A stand-in `opencode`: `export` prints a session recorded in `$SESSION_DIR`,
+   * `import` logs what it was given and from where, and `run` prints the
+   * session it was told to continue.
+   */
+  function fakeOpencode(sessionDir: string) {
+    const home = mkdtempSync(path.join(tmpdir(), "st-oc-"));
+    const log = path.join(home, "calls.jsonl");
+    const bin = path.join(home, "opencode");
+    const exported = {
+      info: { id: "ses_f33132908ffeY2p6iYE7DZEtR1", directory: sessionDir, title: "t" },
+      messages: [
+        {
+          info: {
+            id: "msg_0ccecd714001CRrlS5pM4zyCeP",
+            sessionID: "ses_f33132908ffeY2p6iYE7DZEtR1",
+          },
+          parts: [
+            {
+              id: "prt_0ccecd71a001bY6TT1esjTSlIU",
+              sessionID: "ses_f33132908ffeY2p6iYE7DZEtR1",
+              messageID: "msg_0ccecd714001CRrlS5pM4zyCeP",
+              type: "text",
+              text: "Remember PINEAPPLE",
+            },
+          ],
+        },
+      ],
+    };
+    writeFileSync(
+      bin,
+      `#!/usr/bin/env node
+const fs = require("fs");
+const [cmd, ...rest] = process.argv.slice(2);
+const log = (o) => fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ cmd, cwd: process.cwd(), ...o }) + "\\n");
+if (cmd === "export") {
+  if (process.env.FAIL_EXPORT) { process.stderr.write("Session not found"); process.exit(1); }
+  process.stderr.write("Exporting session: " + rest[0] + "\\n");
+  process.stdout.write(${JSON.stringify(JSON.stringify(exported))});
+} else if (cmd === "import") {
+  log({ session: JSON.parse(fs.readFileSync(rest[0], "utf8")) });
+} else {
+  const session = process.argv[process.argv.indexOf("--session") + 1];
+  log({ session });
+  process.stdout.write(JSON.stringify({ type: "step_start", sessionID: session }) + "\\n");
+}
+`,
+      { mode: 0o755 },
+    );
+    const calls = () =>
+      readFileSync(log, "utf8")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l));
+    return { bin, calls };
+  }
+
+  async function run(bin: string, cwd: string, env?: Record<string, string>) {
+    const events: AgentEvent[] = [];
+    for await (const e of new OpenCodeAdapter(bin).run({
+      prompt: "go on",
+      model: "opencode/gpt-5.5",
+      cwd,
+      resumeSessionId: "ses_f33132908ffeY2p6iYE7DZEtR1",
+      env,
+    }))
+      events.push(e);
+    return events;
+  }
+
+  it("copies the session into the step's worktree and continues the copy", async () => {
+    const source = mkdtempSync(path.join(tmpdir(), "st-oc-src-"));
+    const target = mkdtempSync(path.join(tmpdir(), "st-oc-dst-"));
+    const { bin, calls } = fakeOpencode(source);
+
+    await run(bin, target);
+
+    const [imported, ran] = calls();
+    expect(imported.cmd).toBe("import");
+    // Import files a session under its own cwd, so it must run in the target.
+    expect(realpathSync(imported.cwd)).toBe(realpathSync(target));
+    const copy = imported.session;
+    const text = JSON.stringify(copy);
+    // Import skips rows whose ids exist, so no original id may survive…
+    for (const old of [
+      "ses_f33132908ffeY2p6iYE7DZEtR1",
+      "msg_0ccecd714001CRrlS5pM4zyCeP",
+      "prt_0ccecd71a001bY6TT1esjTSlIU",
+    ]) {
+      expect(text).not.toContain(old);
+    }
+    // …but each keeps its time prefix, and references follow their rows.
+    expect(copy.info.id).toMatch(/^ses_f33132908ffe[0-9A-Za-z]{14}$/);
+    expect(copy.messages[0].info.id).toMatch(/^msg_0ccecd714001[0-9A-Za-z]{14}$/);
+    expect(copy.messages[0].parts[0].messageID).toBe(copy.messages[0].info.id);
+    expect(copy.messages[0].parts[0].sessionID).toBe(copy.info.id);
+    expect(copy.messages[0].parts[0].text).toBe("Remember PINEAPPLE");
+    expect(ran.session).toBe(copy.info.id);
+  });
+
+  it("continues the session itself when it already lives in the step's directory", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "st-oc-same-"));
+    const { bin, calls } = fakeOpencode(dir);
+
+    await run(bin, dir);
+
+    expect(calls()).toEqual([
+      expect.objectContaining({ cmd: "run", session: "ses_f33132908ffeY2p6iYE7DZEtR1" }),
+    ]);
+  });
+
+  it("fails the step instead of hanging when the session cannot be copied", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "st-oc-fail-"));
+    const { bin } = fakeOpencode(dir);
+
+    const events = await run(bin, dir, { FAIL_EXPORT: "1" });
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        kind: "error",
+        message: expect.stringMatching(
+          /could not continue session ses_f33132908ffeY2p6iYE7DZEtR1.*Session not found/,
+        ),
+      }),
+    ]);
   });
 });

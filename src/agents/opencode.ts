@@ -13,6 +13,7 @@ import {
 } from "../types/raw-opencode";
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
+import { sessionForDirectory } from "./opencode-session";
 import { permissionArgs } from "./permissions";
 import { stringifyContent } from "./util";
 
@@ -385,14 +386,49 @@ export class OpenCodeAdapter implements AgentAdapter {
   }
 
   run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
-    const args = buildOpenCodeRunArgs(opts);
-    return runAgentProcess({
-      id: this.id,
-      binary: this.binary,
-      args,
+    return runOpenCodeProcess(
+      this.id,
+      this.binary,
       opts,
-      map: createOpenCodeMapper(opts.agentId ?? this.id),
-      prompt: opts.prompt,
-    });
+      createOpenCodeMapper(opts.agentId ?? this.id),
+    );
   }
+}
+
+/**
+ * One `run` of an OpenCode-protocol CLI (OpenCode, MiMo). A resumed session
+ * recorded in another directory is first copied into `opts.cwd`: resumed as
+ * is, it would run in its old directory and never report back.
+ */
+export async function* runOpenCodeProcess(
+  id: AgentId,
+  binary: string,
+  opts: AgentRunOptions,
+  map: EventMapper,
+): AsyncGenerator<AgentEvent> {
+  let run = opts;
+  if (opts.resumeSessionId && opts.cwd) {
+    try {
+      const sessionId = await sessionForDirectory(binary, opts.resumeSessionId, opts.cwd, opts.env);
+      run = { ...opts, resumeSessionId: sessionId };
+    } catch (err) {
+      yield {
+        kind: "error",
+        agent: opts.agentId ?? id,
+        ts: Date.now(),
+        message: `could not continue session ${opts.resumeSessionId} in this step's workspace: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      };
+      return;
+    }
+  }
+  yield* runAgentProcess({
+    id,
+    binary,
+    args: buildOpenCodeRunArgs(run),
+    opts: run,
+    map,
+    prompt: run.prompt,
+  });
 }

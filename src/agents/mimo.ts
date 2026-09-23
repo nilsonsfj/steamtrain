@@ -1,8 +1,7 @@
 import type { AgentEvent, AgentId, AgentInstanceId, EventMapper } from "../types/events";
 import type { AgentAdapter, AgentRunOptions } from "./adapter";
-import { runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
-import { buildOpenCodeRunArgs, createOpenCodeMapper } from "./opencode";
+import { createOpenCodeMapper, runOpenCodeProcess } from "./opencode";
 
 const AGENT: AgentId = "mimo";
 
@@ -45,14 +44,11 @@ export class MimoAdapter implements AgentAdapter {
   }
 
   run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
-    const args = buildOpenCodeRunArgs(opts);
-    return runAgentProcess({
-      id: this.id,
-      binary: this.binary,
-      args,
+    return runOpenCodeProcess(
+      this.id,
+      this.binary,
       opts,
-      map: createMimoMapper(opts.agentId ?? this.id),
-      prompt: opts.prompt,
-    });
+      createMimoMapper(opts.agentId ?? this.id),
+    );
   }
 }
