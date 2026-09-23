@@ -13,7 +13,7 @@ import {
 } from "../types/raw-opencode";
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
-import { sessionForDirectory } from "./opencode-session";
+import { rememberSessionDirectory, sessionForDirectory } from "./opencode-session";
 import { permissionArgs } from "./permissions";
 import { stringifyContent } from "./util";
 
@@ -429,12 +429,18 @@ export async function* runOpenCodeProcess(
       return;
     }
   }
-  yield* runAgentProcess({
+  for await (const event of runAgentProcess({
     id,
     binary,
     args: buildOpenCodeRunArgs(run),
     opts: run,
     map,
     prompt: run.prompt,
-  });
+  })) {
+    // The session runs in `--dir`, so a later resume from there skips the export.
+    if (event.kind === "session_start" && event.sessionId && run.cwd) {
+      rememberSessionDirectory(event.sessionId, run.cwd);
+    }
+    yield event;
+  }
 }
