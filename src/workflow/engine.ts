@@ -1757,6 +1757,8 @@ function findContendedLoopGate(
  * ok, so not cached, and a retry evaluates it again). Returns whether any was
  * reset. Called only when this run schedules nothing more after the phase (no
  * gate in it jumped, or the run was canceled), so it never loops on the reset.
+ * The pass that failed is not counted as looped back from: the retry replays
+ * it under the same number, then loops on from there.
  */
 function releaseSpentLoops(
   phase: WorkflowPhase,

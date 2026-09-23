@@ -440,8 +440,13 @@ export function useWorkflowRunner({
             // the history recorder, and the live-run mirror — the detached child
             // owns the run's record and event stream from here (it replays the
             // cache and continues). Draining the iterator lets the aborted engine
-            // unwind cleanly.
-            if (handoffRef.current?.committed) continue;
+            // unwind cleanly. What the engine changes in the cache as it unwinds
+            // is still saved: the child, spawned once this drain is over, reads
+            // the cache from disk.
+            if (handoffRef.current?.committed) {
+              if (changesCache(event)) await store.save(key, cache);
+              continue;
+            }
             recorder.handle(event);
             publisher.event(event);
             notifyWorkflowEvent(notifier, notifyMeta, event);
