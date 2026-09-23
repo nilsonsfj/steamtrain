@@ -1,13 +1,21 @@
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AgentAdapter } from "../src/agents";
 import { initialWorkflowState, workflowReducer } from "../src/tui/workflow-state";
 import type { AgentEvent } from "../src/types/events";
+import {
+  changesCache,
+  createWorkflowCacheStore,
+  persistWorkflowStepDone,
+  workflowCacheKey,
+} from "../src/workflow/cache-store";
 import { runWorkflow } from "../src/workflow/engine";
 import type { WorkflowEvent } from "../src/workflow/events";
 import { RunRecordBuilder } from "../src/workflow/history";
 import { cacheLoopProgress } from "../src/workflow/loop-progress";
-import type { StepResult, WorkflowSpec } from "../src/workflow/types";
+import type { WorkflowSpec } from "../src/workflow/types";
 
 /** Fake adapter: emits a result whose text is provided by `script(stepPrompt, callIndex)`. */
 function fakeAdapter(
@@ -649,103 +657,63 @@ describe("engine loops", () => {
   });
 });
 
-describe("a loop continued after a mid-run handoff", () => {
-  it("carries on the previous owner's pass count, {{iteration}} and loop budget", async () => {
-    // The previous owner ran pass 1 of review/fix/check and looped back; the
-    // new owner starts from the top but is on pass 2 of a 3-pass budget.
-    const prompts: string[] = [];
-    const deps = {
-      createAdapter: () =>
-        fakeAdapter((prompt) => {
-          prompts.push(prompt);
-          return { text: prompt.startsWith("fix") ? "NOPE" : "reviewed" };
-        }),
-      maxConcurrency: 2,
-      cwd: tmpdir(),
-    };
-    const events: WorkflowEvent[] = [];
-    for await (const e of runWorkflow(
-      loopSpec(3),
-      {
-        input: "go",
-        loopProgress: {
-          phaseRuns: { review: 1, fix: 1, check: 1 },
-          gateIterations: { "check-gate": 2 },
-        },
-      },
-      deps,
-    )) {
-      events.push(e);
-    }
-    const passes = events.flatMap((e) =>
-      e.kind === "phase_start" && e.phaseId === "review" ? [e.iteration] : [],
-    );
-    // Passes 2 and 3, then the budget of 3 is spent: not a fresh 1, 2, 3.
-    expect(passes).toEqual([2, 3]);
-    expect(prompts.filter((p) => p.startsWith("review"))).toEqual([
-      "review go (iter 2)",
-      "review go (iter 3)",
-    ]);
-    const loops = events.flatMap((e) => (e.kind === "loop_iteration" ? [e.iteration] : []));
-    expect(loops).toEqual([3]);
-    const done = events.find((e) => e.kind === "workflow_done");
-    expect(done?.kind === "workflow_done" && done.ok).toBe(false);
-  });
-});
-
 describe("a loop resumed from its cache", () => {
-  /** Run `spec` on `cache`, collecting the events and the prompts each agent step saw. */
-  async function runOn(
-    spec: WorkflowSpec,
-    cache: Map<string, StepResult>,
-    script: (prompt: string) => string,
-    signal?: AbortSignal,
-  ) {
-    const prompts: string[] = [];
-    const deps = {
-      createAdapter: () =>
-        fakeAdapter((prompt) => {
-          prompts.push(prompt);
-          return { text: script(prompt) };
-        }),
-      maxConcurrency: 2,
-      cwd: tmpdir(),
+  /**
+   * Runs of one workflow over one on-disk cache, each on a map loaded afresh
+   * and saved the way the CLI, web and TUI drivers save it: what a resumed
+   * run (in this process or another one) gets.
+   */
+  function resumable(spec: WorkflowSpec) {
+    const store = createWorkflowCacheStore(mkdtempSync(join(tmpdir(), "st-loop-resume-")));
+    const key = workflowCacheKey(spec.name, "go", "/repo", spec);
+    return async (script: (prompt: string) => string, signal?: AbortSignal) => {
+      const cache = await store.load(key);
+      const prompts: string[] = [];
+      const deps = {
+        createAdapter: () =>
+          fakeAdapter((prompt) => {
+            prompts.push(prompt);
+            return { text: script(prompt) };
+          }),
+        maxConcurrency: 2,
+        cwd: tmpdir(),
+      };
+      const events: WorkflowEvent[] = [];
+      for await (const e of runWorkflow(spec, { input: "go", cache }, deps, signal)) {
+        events.push(e);
+        if (e.kind === "step_done") {
+          await persistWorkflowStepDone(store, key, cache, e.stepId, e.result, e.cached);
+        }
+        if (changesCache(e)) await store.save(key, cache);
+      }
+      const passes = (phaseId: string) =>
+        events.flatMap((e) =>
+          e.kind === "phase_start" && e.phaseId === phaseId ? [e.iteration] : [],
+        );
+      const loops = events.flatMap((e) => (e.kind === "loop_iteration" ? [e.iteration] : []));
+      const done = events.find((e) => e.kind === "workflow_done");
+      const onDisk = cacheLoopProgress(await store.load(key));
+      return { prompts, passes, loops, onDisk, ok: done?.kind === "workflow_done" && done.ok };
     };
-    const events: WorkflowEvent[] = [];
-    for await (const e of runWorkflow(spec, { input: "go", cache }, deps, signal)) events.push(e);
-    const passes = (phaseId: string) =>
-      events.flatMap((e) =>
-        e.kind === "phase_start" && e.phaseId === phaseId ? [e.iteration] : [],
-      );
-    const loops = events.flatMap((e) => (e.kind === "loop_iteration" ? [e.iteration] : []));
-    const done = events.find((e) => e.kind === "workflow_done");
-    return { prompts, passes, loops, ok: done?.kind === "workflow_done" && done.ok };
   }
 
   it("continues a canceled run's pass count, {{iteration}} and loop budget", async () => {
-    const cache = new Map<string, StepResult>();
+    const run = resumable(loopSpec(3));
     const controller = new AbortController();
     let fixes = 0;
-    const first = await runOn(
-      loopSpec(3),
-      cache,
-      (prompt) => {
-        if (!prompt.startsWith("fix")) return "reviewed";
-        fixes += 1;
-        if (fixes === 2) controller.abort(); // canceled during pass 2
-        return "NOPE";
-      },
-      controller.signal,
-    );
+    const first = await run((prompt) => {
+      if (!prompt.startsWith("fix")) return "reviewed";
+      fixes += 1;
+      if (fixes === 2) controller.abort(); // canceled during pass 2
+      return "NOPE";
+    }, controller.signal);
     expect(first.loops).toEqual([2]);
-    expect(cacheLoopProgress(cache)).toEqual({
+    expect(first.onDisk).toEqual({
       phaseRuns: { review: 1, fix: 1, check: 1 },
       gateIterations: { "check-gate": 2 },
     });
 
-    const resumed = await runOn(loopSpec(3), cache, (prompt) =>
-      prompt.startsWith("fix") ? "NOPE" : "reviewed",
-    );
+    const resumed = await run((prompt) => (prompt.startsWith("fix") ? "NOPE" : "reviewed"));
     // Pass 2 replays its review from the cache and runs its fix again, then
     // pass 3 spends the last of the 3-pass budget: not a fresh 1, 2, 3.
     expect(resumed.passes("review")).toEqual([2, 3]);
@@ -754,33 +722,79 @@ describe("a loop resumed from its cache", () => {
     expect(resumed.ok).toBe(false);
   });
 
+  it("restarts a nested loop's count when the loop around it went round", async () => {
+    // outer: [a, inner: [b, in → b], out → a]
+    const gate = (id: string, step: string, needle: string, loopTo: string) => ({
+      id: `${id}-phase`,
+      title: id,
+      steps: [
+        {
+          id,
+          kind: "gate" as const,
+          dependsOn: [step],
+          condition: { step, contains: needle },
+          loopTo,
+          maxIterations: 5,
+        },
+      ],
+    });
+    const spec: WorkflowSpec = {
+      name: "nested",
+      phases: [
+        workerPhase("a", "a {{iteration}}"),
+        workerPhase("b", "b {{iteration}}"),
+        gate("in", "b-step", "b 2", "b"),
+        gate("out", "a-step", "a 2", "a"),
+      ],
+    };
+    const run = resumable(spec);
+    const controller = new AbortController();
+    const first = await run((prompt) => {
+      if (prompt === "a 2") controller.abort(); // canceled in the outer pass 2
+      return prompt;
+    }, controller.signal);
+    expect(first.loops).toEqual([2, 2]);
+    // The inner loop's pass 2 belonged to the outer pass that was looped back
+    // from, so the next inner loop starts from 1.
+    expect(first.onDisk).toEqual({
+      phaseRuns: { a: 1, b: 2, "in-phase": 2, "out-phase": 1 },
+      gateIterations: { out: 2 },
+    });
+
+    // Outer pass 2 runs the inner loop on its whole budget of 5 passes (its
+    // gate wants "b 2", which only the outer pass 1 saw), numbered on.
+    const resumed = await run((prompt) => prompt);
+    expect(resumed.passes("a")).toEqual([2]);
+    expect(resumed.passes("b")).toEqual([3, 4, 5, 6, 7]);
+    expect(resumed.loops).toEqual([2, 3, 4, 5]);
+    expect(resumed.prompts).toEqual(["a 2", "b 3", "b 4", "b 5", "b 6", "b 7"]);
+  });
+
   it("does not loop again when a loop that ran out of passes let the run go on", async () => {
     const spec = loopSpec(2);
     const gate = spec.phases[2]!.steps[0]!;
     if (gate.kind === "gate") gate.onFalse = "continue";
-    const cache = new Map<string, StepResult>();
-    const first = await runOn(spec, cache, (prompt) => (prompt.startsWith("fix") ? "NOPE" : "ok"));
+    const run = resumable(spec);
+    const first = await run((prompt) => (prompt.startsWith("fix") ? "NOPE" : "ok"));
     expect(first.loops).toEqual([2]);
     expect(first.ok).toBe(true);
 
     // The failed gate's verdict is cached, and its budget stays spent.
-    const again = await runOn(spec, cache, () => "unused");
+    const again = await run(() => "unused");
     expect(again.loops).toEqual([]);
     expect(again.prompts).toEqual([]);
     expect(again.passes("review")).toEqual([2]);
   });
 
   it("gives a retried loop that failed the run a fresh budget, numbering on", async () => {
-    const cache = new Map<string, StepResult>();
-    const first = await runOn(loopSpec(2), cache, (prompt) =>
-      prompt.startsWith("fix") ? "NOPE" : "ok",
-    );
+    const run = resumable(loopSpec(2));
+    const script = (prompt: string) => (prompt.startsWith("fix") ? "NOPE" : "ok");
+    const first = await run(script);
     expect(first.loops).toEqual([2]);
     expect(first.ok).toBe(false);
+    expect(first.onDisk?.gateIterations).toEqual({});
 
-    const retried = await runOn(loopSpec(2), cache, (prompt) =>
-      prompt.startsWith("fix") ? "NOPE" : "ok",
-    );
+    const retried = await run(script);
     expect(retried.loops).toEqual([2]);
     expect(retried.passes("review")).toEqual([2, 3]);
     expect(retried.prompts.filter((p) => p.startsWith("review"))).toEqual(["review go (iter 3)"]);

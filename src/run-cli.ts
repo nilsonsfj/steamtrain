@@ -13,7 +13,6 @@ import {
   type HumanInputProvider,
   type LiveRunMeta,
   type LiveRunSource,
-  type LoopProgress,
   type ModelUsage,
   type ReportFormat,
   type RerunMode,
@@ -34,6 +33,7 @@ import {
   aggregateLeavesByModel,
   applyRetryStepFilter,
   applyWorkflowStepOverrides,
+  changesCache,
   classifyRun,
   createLiveRunPublisher,
   createLiveRunStore,
@@ -41,7 +41,6 @@ import {
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   createWorkflowRunControl,
-  dropsCacheEntries,
   exitCodeForOutcome,
   exitCodeForRun,
   formatReroutePlan,
@@ -898,12 +897,6 @@ export interface PriorOwnerWork {
   ran: Set<string>;
   /** What the previous owner's own runs of each step billed, every pass summed. */
   spend: Map<string, Pick<StepResult, "costUsd" | "tokens">>;
-  /**
-   * Where the previous owner's loops were: the passes it finished and looped
-   * back from, and each gate's pass. The new owner's engine continues from
-   * here, so pass tags, `{{iteration}}` and loop budgets carry on.
-   */
-  loopProgress: LoopProgress;
   /** The previous owner's events, which seed the run's history record. */
   events: readonly WorkflowEvent[];
 }
@@ -920,37 +913,9 @@ export function priorOwnerWork(events: readonly WorkflowEvent[]): PriorOwnerWork
   const ran = new Set<string>();
   const spend = new Map<string, Pick<StepResult, "costUsd" | "tokens">>();
   let startedAt: number | undefined;
-  // Each phase pass in start order, keyed `phaseId:iteration`. A pass started
-  // again (by a later owner) moves to the end: that is when it last ran.
-  const passes = new Map<string, { phaseId: string; superseded: boolean; seq: number }>();
-  const gates = new Map<string, { iteration: number; seq: number }>();
-  let seq = 0;
   for (const event of events) {
-    seq += 1;
     if (event.kind === "workflow_start") {
       startedAt ??= event.ts;
-      continue;
-    }
-    if (event.kind === "phase_start") {
-      const key = `${event.phaseId}:${event.iteration ?? 1}`;
-      passes.delete(key);
-      passes.set(key, { phaseId: event.phaseId, superseded: false, seq });
-      continue;
-    }
-    if (event.kind === "loop_iteration") {
-      // The loop jumps back: every pass since its target phase last started
-      // is finished history the next owner will not run again…
-      const order = [...passes.values()];
-      // (A jump to a phase that never started cannot come from the engine;
-      // should one appear, everything so far counts as looped back from.)
-      const from = order.findLastIndex((pass) => pass.phaseId === event.loopTo);
-      for (const pass of order.slice(Math.max(from, 0))) pass.superseded = true;
-      // …and a loop nested in that region starts its count over, as the
-      // engine's resetNestedLoops does.
-      const since = order[from]?.seq ?? 0;
-      for (const [id, gate] of gates)
-        if (id !== event.gateStepId && gate.seq >= since) gates.delete(id);
-      gates.set(event.gateStepId, { iteration: event.iteration, seq });
       continue;
     }
     if (event.kind !== "step_done" || event.cached) continue;
@@ -963,14 +928,7 @@ export function priorOwnerWork(events: readonly WorkflowEvent[]): PriorOwnerWork
     const before = spend.get(event.stepId);
     spend.set(event.stepId, before ? addSpend(before, event.result) : event.result);
   }
-  const loopProgress: LoopProgress = { phaseRuns: {}, gateIterations: {} };
-  for (const pass of passes.values()) {
-    if (pass.superseded) {
-      loopProgress.phaseRuns[pass.phaseId] = (loopProgress.phaseRuns[pass.phaseId] ?? 0) + 1;
-    }
-  }
-  for (const [id, gate] of gates) loopProgress.gateIterations[id] = gate.iteration;
-  return { startedAt, ran, spend, loopProgress, events };
+  return { startedAt, ran, spend, events };
 }
 
 /**
@@ -1168,8 +1126,6 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
       options.approval,
       control,
       options.humanInput,
-      undefined,
-      options.priorOwner?.loopProgress,
     )) {
       const event = asOwnWork(replayed);
       recorder.handle(event);
@@ -1187,7 +1143,7 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
           event.cached,
         );
       }
-      if (dropsCacheEntries(event)) await cacheStore.save(key, cache);
+      if (changesCache(event)) await cacheStore.save(key, cache);
       if (event.kind === "workflow_done") {
         ok = event.ok;
         budgetExceeded = Boolean(event.budgetExceeded);

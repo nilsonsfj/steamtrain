@@ -235,8 +235,6 @@ export interface WorkflowDeps {
   control?: WorkflowRunControl;
 }
 
-export type { LoopProgress } from "./loop-progress";
-
 export interface WorkflowRunContext {
   /** The user's prompt; available to steps as `{{input}}` / `{{args}}`. */
   input: string;
@@ -252,15 +250,6 @@ export interface WorkflowRunContext {
    * run resumes. Pass the same Map across runs to enable resume.
    */
   cache?: Map<string, StepResult>;
-  /**
-   * Where a previous owner's loops were when it handed the run off (see
-   * `priorOwnerWork` in run-cli). A loop workflow restarts from the top, so
-   * without this each phase's pass count, `{{iteration}}` and every loop
-   * gate's `maxIterations` budget would start over at 1. Omitted, the run
-   * continues from the progress recorded with `cache` (see `cacheLoopProgress`),
-   * which is how a canceled run resumes its loops.
-   */
-  loopProgress?: LoopProgress;
   /**
    * Names of workflows currently being invoked in the call stack that led to
    * this run (outermost first). Only ever set internally, when a `workflow`
@@ -813,8 +802,11 @@ async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, b
     string,
     { loopToIndex: number; gatePhaseIndex: number; iteration: number }
   >();
-  // A handed-off or resumed run continues where its loops were.
-  const progress = env.ctx.loopProgress ?? cacheLoopProgress(cache);
+  // A run resumed on a cache (after a cancel, or handed off to another
+  // process) continues its loops where they were: a loop workflow restarts
+  // from the top, and without this each phase's pass count, `{{iteration}}`
+  // and every gate's `maxIterations` budget would start over at 1.
+  const progress = cacheLoopProgress(cache);
   spec.phases.forEach((phase, gatePhaseIndex) => {
     for (const step of phase.steps) {
       if (step.kind === "gate" && step.loopTo !== undefined) {

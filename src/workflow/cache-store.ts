@@ -216,15 +216,22 @@ async function loadWorkflowCacheUnlocked(
 }
 
 /**
- * Whether the engine dropped entries from the shared cache map before this
- * event: an edited step's, or on a loop jump, the whole region it re-runs.
- * Drivers save the cache on these too, so the drop reaches disk now (see
- * {@link saveWorkflowCache}); otherwise a run resumed or handed off before the
- * next step finishes replays the superseded results, like a loop pass that
- * never ran again and decided its gate on the previous pass's output.
+ * Whether the engine changed the shared cache map before this event in a way
+ * no finished step saves: it dropped an edited step's entry, or on a loop
+ * jump the whole region it re-runs, or it changed the loop progress kept with
+ * the map (on a jump, and at the end of a run whose loop ran out of passes;
+ * see `cacheLoopProgress`). Drivers save the cache on these too, so the change
+ * reaches disk now (see {@link saveWorkflowCache}). Otherwise a run resumed or
+ * handed off before the next step finishes replays the superseded results,
+ * like a loop pass that never ran again and decided its gate on the previous
+ * pass's output, or a retried loop finds its budget still spent.
  */
-export function dropsCacheEntries(event: WorkflowEvent): boolean {
-  return event.kind === "step_edited" || event.kind === "loop_iteration";
+export function changesCache(event: WorkflowEvent): boolean {
+  return (
+    event.kind === "step_edited" ||
+    event.kind === "loop_iteration" ||
+    event.kind === "workflow_done"
+  );
 }
 
 /** Persist successful, non-replayed step completions to disk. */

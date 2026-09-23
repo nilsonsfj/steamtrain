@@ -21,6 +21,7 @@ import {
   WORKFLOW_HISTORY_DIR,
   WORKFLOW_RUNS_DIR,
   acquireRunSlot,
+  changesCache,
   completeHandoff,
   createLiveRunPublisher,
   createLiveRunStore,
@@ -28,7 +29,6 @@ import {
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   createWorkflowRunControl,
-  dropsCacheEntries,
   hashWorkflowSpec,
   isTerminalLiveRunStatus,
   newLiveRunMeta,
@@ -446,7 +446,7 @@ export function useWorkflowRunner({
             publisher.event(event);
             notifyWorkflowEvent(notifier, notifyMeta, event);
             if (event.kind === "workflow_done") workflowOk = event.ok;
-            if (dropsCacheEntries(event)) await store.save(key, cache);
+            if (changesCache(event)) await store.save(key, cache);
             if (!mountedRef.current) return;
             wfDispatch({ type: "event", event });
             setNarration((prev) => appendNarration(prev, event));

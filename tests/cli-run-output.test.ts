@@ -310,11 +310,6 @@ describe("a handoff in the middle of a loop", () => {
       { kind: "step_start", phaseId: "fix", stepId: "fixer", iteration: 2, ts },
     ];
     const prior = priorOwnerWork(owner1);
-    // What owner 2's engine continues from: pass 2, not pass 1.
-    expect(prior.loopProgress).toEqual({
-      phaseRuns: { fix: 1, check: 1 },
-      gateIterations: { review: 2 },
-    });
 
     // Owner 2 starts over from the top, continuing the pass count; it
     // finishes pass 2.
@@ -374,10 +369,6 @@ describe("a handoff in the middle of a loop", () => {
       phaseStart("fix", 0, 3),
     ];
     const prior = priorOwnerWork(log);
-    expect(prior.loopProgress).toEqual({
-      phaseRuns: { fix: 2, check: 2 },
-      gateIterations: { review: 3 },
-    });
     const recorder = new RunRecordBuilder({ id: "r", workflow: "w", input: "", cwd: "/" });
     recorder.continueFrom(prior.events);
     const own = ownWorkRewriter(prior);
@@ -402,37 +393,5 @@ describe("a handoff in the middle of a loop", () => {
     ]);
     expect(record.totals.costUsd).toBeCloseTo(0.21);
     expect(record.startedAt).toBe(1000);
-  });
-
-  it("carries nothing over for a run that never looped before the handoff", () => {
-    const prior = priorOwnerWork([start, phaseStart("fix", 0, 1), ...ran("fix", "fixer", 1, 0.01)]);
-    expect(prior.loopProgress).toEqual({ phaseRuns: {}, gateIterations: {} });
-  });
-
-  it("restarts a nested loop's count when the loop around it went round", () => {
-    // outer: [a, inner: [b, gate `in` → b], gate `out` → a]
-    const loop = (gate: string, loopTo: string, iteration: number): WorkflowEvent => ({
-      kind: "loop_iteration",
-      gateStepId: gate,
-      loopTo,
-      iteration,
-      maxIterations: 5,
-      ts,
-    });
-    const prior = priorOwnerWork([
-      start,
-      phaseStart("a", 0, 1),
-      phaseStart("b", 1, 1),
-      loop("in", "b", 2),
-      phaseStart("b", 1, 2),
-      loop("out", "a", 2),
-      phaseStart("a", 0, 2),
-    ]);
-    // The inner loop's pass 2 belonged to the outer pass that was looped back
-    // from, so the next inner loop starts from 1 (as the engine resets it).
-    expect(prior.loopProgress).toEqual({
-      phaseRuns: { a: 1, b: 2 },
-      gateIterations: { out: 2 },
-    });
   });
 });

@@ -1,6 +1,6 @@
 import type { StepResult } from "./types";
 
-/** Where a run's loops are; see `WorkflowRunContext.loopProgress` in the engine. */
+/** Where a run's loops are: the passes each phase looped back from, and each gate's pass. */
 export interface LoopProgress {
   /** Per phase id, how many of its passes finished and were looped back from. */
   phaseRuns: Record<string, number>;

@@ -33,11 +33,11 @@ import {
   acquireRunSlot,
   applyRetryStepFilter,
   applyWorkflowStepOverrides,
+  changesCache,
   completeHandoff,
   createLiveRunPublisher,
   createNotifier,
   createWorkflowRunControl,
-  dropsCacheEntries,
   finalRunWorktrees,
   hashWorkflowSpec,
   isRerunError,
@@ -935,7 +935,7 @@ export class WorkflowRunManager {
             event.cached,
           );
         }
-        if (dropsCacheEntries(event)) await this.cacheStore.save(key, cache);
+        if (changesCache(event)) await this.cacheStore.save(key, cache);
         if (event.kind === "workflow_done") {
           ok = event.ok;
           if (event.budgetExceeded) budgetExceeded = true;

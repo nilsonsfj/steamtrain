@@ -7,8 +7,8 @@ import type { AgentAdapter, AgentRunOptions } from "../src/agents";
 import type { AgentEvent, AgentId } from "../src/types/events";
 import {
   WORKFLOW_CACHE_VERSION,
+  changesCache,
   createWorkflowCacheStore,
-  dropsCacheEntries,
   hashWorkflowCacheInput,
   hashWorkflowSpec,
   loadWorkflowCache,
@@ -535,13 +535,14 @@ function existsSync(path: string): boolean {
   }
 }
 
-describe("cache entries the engine drops mid-run", () => {
-  it("covers a loop jump as well as a step edit", () => {
+describe("events the drivers save the cache on", () => {
+  it("covers a loop jump, a step edit and the end of the run", () => {
     // A loop jump clears the region it re-runs from the cache map; unless the
     // drivers save it then, a run resumed or handed off mid-pass replays the
-    // previous pass as if it were this one.
+    // previous pass as if it were this one. The end of a run can release a
+    // spent loop's budget, which no step saves either.
     expect(
-      dropsCacheEntries({
+      changesCache({
         kind: "loop_iteration",
         gateStepId: "g",
         loopTo: "p",
@@ -550,10 +551,11 @@ describe("cache entries the engine drops mid-run", () => {
         ts: 0,
       }),
     ).toBe(true);
-    expect(dropsCacheEntries({ kind: "step_edited", stepId: "s", patch: {}, ts: 0 } as never)).toBe(
+    expect(changesCache({ kind: "step_edited", stepId: "s", patch: {}, ts: 0 } as never)).toBe(
       true,
     );
-    expect(dropsCacheEntries({ kind: "phase_done", phaseId: "p", ok: true, ts: 0 })).toBe(false);
+    expect(changesCache({ kind: "workflow_done", ok: false, results: [], ts: 0 })).toBe(true);
+    expect(changesCache({ kind: "phase_done", phaseId: "p", ok: true, ts: 0 })).toBe(false);
   });
 });
 
