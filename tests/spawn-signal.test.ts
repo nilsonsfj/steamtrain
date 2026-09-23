@@ -172,21 +172,26 @@ describe("runProcessLines signal handling", () => {
       idleTimeoutMs: 0,
     });
 
-    const items = await drain(gen);
-    const exit = items.find((i) => i.kind === "exit") as Extract<ProcessLine, { kind: "exit" }>;
-    expect(exit.timedOut).toBe(true);
-    expect(existsSync(marker), "the child was killed before it started").toBe(true);
-
-    // Heartbeats must stop once SIGKILL fires (~2s grace after SIGTERM).
-    await delay(2800);
-    const afterKill = Number(readFileSync(marker, "utf8"));
-    await delay(400);
-    const later = Number(readFileSync(marker, "utf8"));
-    expect(later).toBe(afterKill);
     try {
-      unlinkSync(marker);
-    } catch {
-      // ignore
+      const items = await drain(gen);
+      const exit = items.find((i) => i.kind === "exit") as Extract<ProcessLine, { kind: "exit" }>;
+      expect(exit.timedOut).toBe(true);
+      expect(existsSync(marker), "the child was killed before it started").toBe(true);
+
+      // Heartbeats must stop once SIGKILL fires (~2s grace after SIGTERM).
+      await delay(2800);
+      const afterKill = Number(readFileSync(marker, "utf8"));
+      // It was heartbeating, so a frozen count below means it was killed.
+      expect(afterKill).toBeGreaterThan(0);
+      await delay(400);
+      const later = Number(readFileSync(marker, "utf8"));
+      expect(later).toBe(afterKill);
+    } finally {
+      try {
+        unlinkSync(marker);
+      } catch {
+        // ignore
+      }
     }
   }, 15_000);
 
