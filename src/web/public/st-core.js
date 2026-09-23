@@ -1597,6 +1597,9 @@ window.Steamtrain = (function () {
    * had accumulated before the real number arrived.
    */
   function stepUsage(s) {
+    // A cached replay billed nothing this run (history and the run totals
+    // agree); its original spend belongs to the run that produced it.
+    if (s && s.cached) return { costUsd: 0, tokens: 0, live: false };
     var r = (s && s.result) || null;
     var u = (s && s.usage) || null;
     var cost = r && typeof r.costUsd === "number" ? r.costUsd : (u && u.costUsd) || 0;
@@ -1611,13 +1614,15 @@ window.Steamtrain = (function () {
       var key = s.model && s.agent
         ? agentUiLabel(s.agent) + "/" + s.model
         : (s.model || (s.agent ? agentUiLabel(s.agent) : "(agentless)"));
-      var e = map[key] || (map[key] = { model: key, costUsd: 0, tokens: emptyTokens(), steps: 0 });
+      var e = map[key] || (map[key] = { model: key, costUsd: 0, tokens: emptyTokens(), steps: 0, cached: 0 });
+      e.steps += 1;
+      // Billed to the run that produced it; the row stays, marked cached.
+      if (s.cached) { e.cached += 1; return; }
       e.costUsd += s.result.costUsd || 0;
       addTokensInto(e.tokens, s.result.tokens);
-      e.steps += 1;
     });
     return Object.keys(map).map(function (k) { return map[k]; })
-      .filter(function (m) { return m.costUsd > 0 || totalTokens(m.tokens) > 0; })
+      .filter(function (m) { return m.costUsd > 0 || totalTokens(m.tokens) > 0 || m.cached > 0; })
       .sort(function (a, b) { return b.costUsd - a.costUsd; });
   }
 

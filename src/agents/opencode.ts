@@ -20,7 +20,10 @@ const AGENT: AgentId = "opencode";
 
 /** Known OpenCode models (provider/model; used by `/model` and autocomplete). */
 export const OPENCODE_MODELS: readonly AgentModel[] = [
-  // OpenCode Zen (https://opencode.ai/zen/v1/models)
+  // OpenCode Zen (https://models.dev — provider "opencode", active models)
+  { id: "opencode/gpt-6-astra", name: "GPT 6 Astra" },
+  { id: "opencode/gpt-6-sol", name: "GPT 6 Sol" },
+  { id: "opencode/gpt-6-luna", name: "GPT 6 Luna" },
   { id: "opencode/gpt-5.6-sol", name: "GPT 5.6 Sol" },
   { id: "opencode/gpt-5.6-terra", name: "GPT 5.6 Terra" },
   { id: "opencode/gpt-5.6-luna", name: "GPT 5.6 Luna" },
@@ -41,7 +44,9 @@ export const OPENCODE_MODELS: readonly AgentModel[] = [
   { id: "opencode/gpt-5", name: "GPT 5" },
   { id: "opencode/gpt-5-codex", name: "GPT 5 Codex" },
   { id: "opencode/gpt-5-nano", name: "GPT 5 Nano" },
+  { id: "opencode/claude-fable-5-1", name: "Claude Fable 5.1" },
   { id: "opencode/claude-fable-5", name: "Claude Fable 5" },
+  { id: "opencode/claude-opus-5-5", name: "Claude Opus 5.5" },
   { id: "opencode/claude-opus-5", name: "Claude Opus 5" },
   { id: "opencode/claude-sonnet-5", name: "Claude Sonnet 5" },
   { id: "opencode/claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
@@ -51,59 +56,76 @@ export const OPENCODE_MODELS: readonly AgentModel[] = [
   { id: "opencode/claude-opus-4-7", name: "Claude Opus 4.7" },
   { id: "opencode/claude-opus-4-6", name: "Claude Opus 4.6" },
   { id: "opencode/claude-opus-4-5", name: "Claude Opus 4.5" },
-  { id: "opencode/claude-opus-4-1", name: "Claude Opus 4.1" },
   { id: "opencode/claude-haiku-4-5", name: "Claude Haiku 4.5" },
+  { id: "opencode/gemini-3.8-flash", name: "Gemini 3.8 Flash" },
+  { id: "opencode/gemini-3.7-flash", name: "Gemini 3.7 Flash" },
   { id: "opencode/gemini-3.6-flash", name: "Gemini 3.6 Flash" },
   { id: "opencode/gemini-3.5-flash-lite", name: "Gemini 3.5 Flash-Lite" },
   { id: "opencode/gemini-3.5-flash", name: "Gemini 3.5 Flash" },
   { id: "opencode/gemini-3.1-pro", name: "Gemini 3.1 Pro" },
   { id: "opencode/gemini-3-flash", name: "Gemini 3 Flash" },
   { id: "opencode/grok-build-0.1", name: "Grok Build 0.1" },
+  { id: "opencode/grok-4.6", name: "Grok 4.6" },
   { id: "opencode/grok-4.5", name: "Grok 4.5" },
+  { id: "opencode/glm-5.3-flash", name: "GLM 5.3 Flash" },
+  { id: "opencode/glm-5.3", name: "GLM 5.3" },
   { id: "opencode/glm-5.2", name: "GLM 5.2" },
   { id: "opencode/glm-5.1", name: "GLM 5.1" },
   { id: "opencode/glm-5", name: "GLM 5" },
+  { id: "opencode/kimi-k3", name: "Kimi K3" },
   { id: "opencode/kimi-k2.7-code", name: "Kimi K2.7 Code" },
   { id: "opencode/kimi-k2.6", name: "Kimi K2.6" },
   { id: "opencode/kimi-k2.5", name: "Kimi K2.5" },
   { id: "opencode/minimax-m3", name: "MiniMax M3" },
   { id: "opencode/minimax-m2.7", name: "MiniMax M2.7" },
   { id: "opencode/minimax-m2.5", name: "MiniMax M2.5" },
+  { id: "opencode/qwen3.8-flash", name: "Qwen 3.8 Flash" },
   { id: "opencode/qwen3.6-plus", name: "Qwen 3.6 Plus" },
   { id: "opencode/qwen3.5-plus", name: "Qwen 3.5 Plus" },
+  { id: "opencode/deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash" },
+  { id: "opencode/deepseek-v4-flash-vision-exp", name: "DeepSeek V4 Flash Vision Exp" },
   { id: "opencode/deepseek-v4-pro", name: "DeepSeek V4 Pro" },
   { id: "opencode/deepseek-v4-flash", name: "DeepSeek V4 Flash" },
+  { id: "opencode/muse-spark-1.3", name: "Muse Spark 1.3" },
+  { id: "opencode/muse-spark-1.2", name: "Muse Spark 1.2" },
   { id: "opencode/big-pickle", name: "Big Pickle" },
-  { id: "opencode/deepseek-v4-flash-free", name: "DeepSeek V4 Flash Free" },
-  { id: "opencode/mimo-v2.5-free", name: "MiMo V2.5 Free" },
+  { id: "opencode/mimo-v2.6-flash-free", name: "MiMo V2.6 Flash Free" },
+  { id: "opencode/muse-spark-1.3-contributor-free", name: "Muse Spark 1.3 Free" },
+  { id: "opencode/ling-3.0-flash-fin-free", name: "Ling 3.0 Flash Fin Free" },
+  { id: "opencode/nemotron-3.5-lightning-free", name: "Nemotron 3.5 Lightning Free" },
+  { id: "opencode/muse-spark-1.2-contributor-free", name: "Muse Spark 1.2 Free" },
   { id: "opencode/nemotron-3-ultra-free", name: "Nemotron 3 Ultra Free" },
-  { id: "opencode/north-mini-code-free", name: "North Mini Code Free" },
-  { id: "opencode/laguna-s-2.1-free", name: "Laguna S 2.1 Free" },
-  { id: "opencode/ling-3.0-tiny-free", name: "Ling-3.0-tiny Free" },
-  { id: "opencode/longcat-2.0-free", name: "LongCat-2.0 Free" },
-  // OpenCode Go (https://opencode.ai/zen/go/v1/models)
+  // OpenCode Go (https://models.dev — provider "opencode-go", active models)
   { id: "opencode-go/kimi-k3", name: "Kimi K3" },
+  { id: "opencode-go/deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash" },
+  { id: "opencode-go/deepseek-v4-flash-vision-exp", name: "DeepSeek V4 Flash Vision Exp" },
   { id: "opencode-go/deepseek-v4-flash", name: "DeepSeek V4 Flash" },
   { id: "opencode-go/deepseek-v4-pro", name: "DeepSeek V4 Pro" },
+  { id: "opencode-go/glm-5.3-flash", name: "GLM 5.3 Flash" },
+  { id: "opencode-go/glm-5.3", name: "GLM 5.3" },
   { id: "opencode-go/glm-5.2", name: "GLM 5.2" },
   { id: "opencode-go/glm-5.1", name: "GLM 5.1" },
-  { id: "opencode-go/glm-5", name: "GLM 5" },
   { id: "opencode-go/kimi-k2.7-code", name: "Kimi K2.7 Code" },
   { id: "opencode-go/kimi-k2.6", name: "Kimi K2.6" },
-  { id: "opencode-go/kimi-k2.5", name: "Kimi K2.5" },
+  { id: "opencode-go/mimo-v2.6-pro", name: "MiMo V2.6 Pro" },
+  { id: "opencode-go/mimo-v2.6-flash", name: "MiMo V2.6 Flash" },
   { id: "opencode-go/mimo-v2.5", name: "MiMo V2.5" },
   { id: "opencode-go/mimo-v2.5-pro", name: "MiMo V2.5 Pro" },
-  { id: "opencode-go/mimo-v2-pro", name: "MiMo V2 Pro" },
-  { id: "opencode-go/mimo-v2-omni", name: "MiMo V2 Omni" },
   { id: "opencode-go/minimax-m3", name: "MiniMax M3" },
   { id: "opencode-go/minimax-m2.7", name: "MiniMax M2.7" },
-  { id: "opencode-go/minimax-m2.5", name: "MiniMax M2.5" },
+  { id: "opencode-go/qwen3.8-flash", name: "Qwen 3.8 Flash" },
+  { id: "opencode-go/qwen3.8-max", name: "Qwen 3.8 Max" },
   { id: "opencode-go/qwen3.7-max", name: "Qwen 3.7 Max" },
   { id: "opencode-go/qwen3.7-plus", name: "Qwen 3.7 Plus" },
   { id: "opencode-go/qwen3.6-plus", name: "Qwen 3.6 Plus" },
-  { id: "opencode-go/qwen3.5-plus", name: "Qwen 3.5 Plus" },
-  { id: "opencode-go/hy3-preview", name: "Hy3 Preview" },
-  { id: "opencode-go/grok-4.5", name: "Grok 4.5" },
+  { id: "opencode-go/grok-4.7", name: "Grok 4.7" },
+  { id: "opencode-go/grok-4.6", name: "Grok 4.6" },
+  { id: "opencode-go/muse-spark-1.3-contributor", name: "Muse Spark 1.3 Contributor" },
+  { id: "opencode-go/muse-spark-1.2-contributor", name: "Muse Spark 1.2 Contributor" },
+  { id: "opencode-go/hy4-preview", name: "Hy4 Preview" },
+  { id: "opencode-go/hy3", name: "Hy3" },
+  { id: "opencode-go/gpt-5.6-luna", name: "GPT 5.6 Luna" },
+  { id: "opencode-go/longcat-2.0", name: "LongCat 2.0" },
 ];
 
 const TOOL_DONE = new Set(["completed", "done", "success", "finished"]);
@@ -116,12 +138,25 @@ const TOOL_FAILED = new Set(["error", "failed", "cancelled", "aborted"]);
  *    against the last value per part id and emit only the new suffix;
  *  - tool parts stream status transitions, so we emit `tool_use` once when a
  *    tool starts and `tool_result` once when it ends (dedup by call/part id);
- *  - the first event carrying a `ses_…` id yields a single `session_start`.
+ *  - the first event carrying a `ses_…` id yields a single `session_start`;
+ *  - every `step_finish` prices ONE model call (a turn with tool use has
+ *    several), so we keep the running cost/token totals and each `result`
+ *    restates the whole turn so far — the "last result wins" contract the
+ *    engine and live reducer apply.
  *
  * Create a fresh mapper per run so this state never leaks between tasks.
  */
 export function createOpenCodeMapper(agent: AgentInstanceId = AGENT): EventMapper {
   let sessionStarted = false;
+  /**
+   * Running turn totals across `step_finish` events. Unlike codex and Claude,
+   * a resumed run (`--session`) needs no baseline: it streams only the new
+   * turn's steps, never the session's earlier ones (checked live, 1.18.32).
+   */
+  let costTotal: number | undefined;
+  let tokenTotal: TokenUsage | undefined;
+  /** step-finish part ids already counted, so a re-emitted part never double-bills. */
+  const stepsCounted = new Set<string>();
   const textSeen = new Map<string, string>();
   const toolStarted = new Set<string>();
   const toolFinished = new Set<string>();
@@ -233,14 +268,24 @@ export function createOpenCodeMapper(agent: AgentInstanceId = AGENT): EventMappe
       }
       case "step_finish":
       case "step.finish": {
+        // Current builds nest the step's usage in `part` (the stored
+        // `step-finish` part, verbatim); older ones put it at the top level.
+        const partId = part?.id;
+        if (partId === undefined || !stepsCounted.has(partId)) {
+          if (partId !== undefined) stepsCounted.add(partId);
+          const cost = part?.cost ?? e.cost;
+          if (cost !== undefined) costTotal = (costTotal ?? 0) + cost;
+          const tokens = opencodeTokens(part?.tokens ?? e.tokens);
+          if (tokens) tokenTotal = addUsage(tokenTotal, tokens);
+        }
         out.push({
           kind: "result",
           agent,
           ts,
           isError: false,
           subtype: "step_finish",
-          costUsd: e.cost,
-          tokens: opencodeTokens(e.tokens),
+          costUsd: costTotal,
+          tokens: tokenTotal,
         });
         return out;
       }
@@ -264,17 +309,29 @@ export function createOpenCodeMapper(agent: AgentInstanceId = AGENT): EventMappe
 /**
  * Map OpenCode's per-step token block onto the normalized {@link TokenUsage}.
  * OpenCode reports cache reads/writes under `cache`, so `input` is the uncached
- * prompt count and `reasoning` is a separately-reported category.
+ * prompt count. Its `output` EXCLUDES reasoning (the categories are disjoint),
+ * while {@link TokenUsage.output} includes it — so reasoning is folded into
+ * `output` and also kept as its (overlapping) own category.
  */
 function opencodeTokens(tokens: OpenCodeTokens | undefined): TokenUsage | undefined {
   if (!tokens) return undefined;
   const out: TokenUsage = {};
+  if (tokens.output !== undefined || tokens.reasoning !== undefined)
+    out.output = (tokens.output ?? 0) + (tokens.reasoning ?? 0);
   if (tokens.input !== undefined) out.input = tokens.input;
-  if (tokens.output !== undefined) out.output = tokens.output;
   if (tokens.reasoning !== undefined) out.reasoning = tokens.reasoning;
   if (tokens.cache?.read !== undefined) out.cacheRead = tokens.cache.read;
   if (tokens.cache?.write !== undefined) out.cacheWrite = tokens.cache.write;
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** Field-wise sum that only sets the categories either side reports. */
+function addUsage(a: TokenUsage | undefined, b: TokenUsage): TokenUsage {
+  const sum: TokenUsage = { ...a };
+  for (const key of ["input", "output", "cacheRead", "cacheWrite", "reasoning"] as const) {
+    if (b[key] !== undefined) sum[key] = (sum[key] ?? 0) + b[key];
+  }
+  return sum;
 }
 
 /**
@@ -319,7 +376,7 @@ export function buildOpenCodeRunArgs(opts: AgentRunOptions): string[] {
 export class OpenCodeAdapter implements AgentAdapter {
   readonly id: AgentId = AGENT;
   readonly binary: string;
-  readonly defaultModel = "opencode/mimo-v2.5-free";
+  readonly defaultModel = "opencode/mimo-v2.6-flash-free";
   /** `opencode run --session <sessionId>` continues a recorded session headlessly. */
   readonly supportsResume = true;
 

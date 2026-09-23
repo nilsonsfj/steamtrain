@@ -11,14 +11,18 @@ const AGENT: AgentId = "mimo";
  * (`run --format json`), but the catalog is Xiaomi's — not a renamed
  * OpenCode Zen/Go list. Live installs refresh via `mimo models --verbose`.
  *
- * Verified against @mimo-ai/cli 0.1.7:
+ * Verified against @mimo-ai/cli 0.1.9 (`mimo models`):
  *   mimo/mimo-auto                  — MiMo Auto (free channel)
- *   xiaomi/mimo-v2.5                — platform MiMo-V2.5
- *   xiaomi/mimo-v2.5-pro            — platform MiMo-V2.5-Pro
- *   xiaomi/mimo-v2.5-pro-ultraspeed — platform UltraSpeed SKU
+ *   xiaomi/mimo-v2.6-flash          — platform MiMo-V2.6-Flash
+ *   xiaomi/mimo-v2.6-pro            — platform MiMo-V2.6-Pro
+ *   xiaomi/mimo-v2.6-pro-ultraspeed — platform V2.6 UltraSpeed SKU
+ *   xiaomi/mimo-v2.5*               — previous generation, still served
  */
 export const MIMO_MODELS: readonly AgentModel[] = [
   { id: "mimo/mimo-auto", name: "MiMo Auto" },
+  { id: "xiaomi/mimo-v2.6-flash", name: "MiMo-V2.6-Flash" },
+  { id: "xiaomi/mimo-v2.6-pro", name: "MiMo-V2.6-Pro" },
+  { id: "xiaomi/mimo-v2.6-pro-ultraspeed", name: "MiMo-V2.6-Pro-UltraSpeed" },
   { id: "xiaomi/mimo-v2.5", name: "MiMo-V2.5" },
   { id: "xiaomi/mimo-v2.5-pro", name: "MiMo-V2.5-Pro" },
   { id: "xiaomi/mimo-v2.5-pro-ultraspeed", name: "MiMo-V2.5-Pro-UltraSpeed" },

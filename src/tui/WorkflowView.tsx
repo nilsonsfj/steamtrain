@@ -1012,6 +1012,7 @@ function sumCost(state: WorkflowState): number {
   let total = 0;
   for (const phase of state.phases) {
     for (const step of phase.steps) {
+      if (step.cached) continue; // billed to the run that produced it
       if (step.result?.costUsd) total += step.result.costUsd;
     }
   }
@@ -1025,7 +1026,9 @@ function sumCost(state: WorkflowState): number {
  */
 function sumTokens(state: WorkflowState): ReturnType<typeof emptyTokens> {
   const total = emptyTokens();
-  for (const { step } of flattenSteps(state)) addTokensInto(total, step.result?.tokens);
+  for (const { step } of flattenSteps(state)) {
+    if (!step.cached) addTokensInto(total, step.result?.tokens);
+  }
   return total;
 }
 
@@ -1037,8 +1040,8 @@ function modelBreakdown(state: WorkflowState): ModelUsage[] {
       agent: f.step.agent,
       api: f.step.api,
       model: f.step.model,
-      costUsd: f.step.result?.costUsd,
-      tokens: f.step.result?.tokens,
+      costUsd: f.step.cached ? undefined : f.step.result?.costUsd,
+      tokens: f.step.cached ? undefined : f.step.result?.tokens,
     }));
   return aggregateLeavesByModel(leaves).filter((m) => m.costUsd > 0 || totalTokens(m.tokens) > 0);
 }

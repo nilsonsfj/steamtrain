@@ -1,3 +1,6 @@
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type {
   AgentEvent,
   AgentId,
@@ -5,30 +8,36 @@ import type {
   EventMapper,
   TokenUsage,
 } from "../types/events";
-import { type CodexThreadItem, codexEnvelope, codexEvent } from "../types/raw-codex";
+import {
+  type CodexThreadItem,
+  type CodexUsage,
+  codexEnvelope,
+  codexEvent,
+} from "../types/raw-codex";
 import { type AgentAdapter, type AgentRunOptions, runAgentProcess } from "./adapter";
 import type { AgentModel } from "./agent-model";
 import { classifyAgentFailure } from "./failure-classify";
 import { permissionArgs } from "./permissions";
-import { stringifyContent } from "./util";
+import { RecentSessionTotals, stringifyContent } from "./util";
 
 const AGENT: AgentId = "codex";
 
 /**
  * Known Codex models (plain slugs; used by `/model` and autocomplete).
  *
- * Ground truth from `codex debug models` / `--bundled` (codex-cli 0.145.0).
+ * Ground truth from `codex debug models` (codex-cli 0.155.1; `visibility: list`
+ * entries plus the hidden `codex-auto-review`).
  * Older pins that left this list still resolve via OpenCode family offerings
  * and runtime variant cache refresh on live installs.
  */
 export const CODEX_MODELS: readonly AgentModel[] = [
+  { id: "gpt-6-astra", name: "GPT-6 Astra" },
+  { id: "gpt-6-sol", name: "GPT-6 Sol" },
+  { id: "gpt-6-luna", name: "GPT-6 Luna" },
   { id: "gpt-5.6-sol", name: "GPT-5.6 Sol" },
   { id: "gpt-5.6-terra", name: "GPT-5.6 Terra" },
   { id: "gpt-5.6-luna", name: "GPT-5.6 Luna" },
   { id: "gpt-5.5", name: "GPT-5.5" },
-  { id: "gpt-5.4", name: "GPT-5.4" },
-  { id: "gpt-5.4-mini", name: "GPT-5.4 Mini" },
-  { id: "gpt-5.2", name: "GPT-5.2" },
   { id: "codex-auto-review", name: "Codex Auto Review" },
 ];
 
@@ -52,9 +61,25 @@ function errorMessage(error: unknown): string {
  *  - command/tool items emit `tool_use` once when they start and `tool_result`
  *    once when they complete (dedup by item id).
  *
+ * Codex reports tokens but not cost, so the mapper prices them itself: `model`
+ * picks the rate card (the CLI never names the model in its JSON events), and
+ * `usageBaseline` — the thread's usage before a `codex exec resume` — is
+ * subtracted so only this run's spend is reported.
+ *
  * Create a fresh mapper per run so this state never leaks between tasks.
  */
-export function createCodexMapper(agent: AgentInstanceId = AGENT): EventMapper {
+export function createCodexMapper(
+  agent: AgentInstanceId = AGENT,
+  options: {
+    model?: string;
+    usageBaseline?: CodexUsage;
+    /** The thread being resumed, until `thread.started` names it. */
+    threadId?: string;
+    /** Called with each thread-wide running total a turn reports. */
+    onThreadTotal?: (threadId: string, usage: CodexUsage) => void;
+  } = {},
+): EventMapper {
+  let threadId = options.threadId;
   const textSeen = new Map<string, string>();
   const toolStarted = new Set<string>();
   const toolFinished = new Set<string>();
@@ -244,6 +269,7 @@ export function createCodexMapper(agent: AgentInstanceId = AGENT): EventMapper {
           ts,
           sessionId: e.thread_id,
         };
+        if (e.thread_id) threadId = e.thread_id;
         if (e.model !== undefined) event.model = e.model;
         if (e.tools !== undefined) event.tools = e.tools;
         out.push(event);
@@ -260,6 +286,8 @@ export function createCodexMapper(agent: AgentInstanceId = AGENT): EventMapper {
       case "turn.completed": {
         const durationMs = turnStartedAt !== undefined ? ts - turnStartedAt : undefined;
         turnStartedAt = undefined;
+        if (e.usage && threadId) options.onThreadTotal?.(threadId, e.usage);
+        const usage = subtractCodexUsage(e.usage, options.usageBaseline);
         out.push({
           kind: "result",
           agent,
@@ -267,8 +295,8 @@ export function createCodexMapper(agent: AgentInstanceId = AGENT): EventMapper {
           isError: false,
           subtype: "turn.completed",
           durationMs,
-          costUsd: estimateCostUsd(e.usage, e.model),
-          tokens: codexTokens(e.usage),
+          costUsd: estimateCostUsd(usage, e.model ?? options.model),
+          tokens: codexTokens(usage),
         });
         return out;
       }
@@ -277,6 +305,8 @@ export function createCodexMapper(agent: AgentInstanceId = AGENT): EventMapper {
         const message = errorMessage(e.error);
         const durationMs = turnStartedAt !== undefined ? ts - turnStartedAt : undefined;
         turnStartedAt = undefined;
+        if (e.usage && threadId) options.onThreadTotal?.(threadId, e.usage);
+        const usage = subtractCodexUsage(e.usage, options.usageBaseline);
         const category = classifyAgentFailure(message);
         out.push({
           kind: "error",
@@ -293,8 +323,8 @@ export function createCodexMapper(agent: AgentInstanceId = AGENT): EventMapper {
           subtype: "turn.failed",
           text: message,
           durationMs,
-          costUsd: estimateCostUsd(e.usage, e.model),
-          tokens: codexTokens(e.usage),
+          costUsd: estimateCostUsd(usage, e.model ?? options.model),
+          tokens: codexTokens(usage),
         });
         return out;
       }
@@ -342,13 +372,20 @@ interface ModelPricing {
   input: number;
   cached: number;
   output: number;
+  /** Cache writes, where the model bills them (GPT-5.6+: 1.25× input); else plain input. */
+  cacheWrite?: number;
 }
 
 const CODEX_MODEL_PRICES: Record<string, ModelPricing> = {
-  // Published rates from https://developers.openai.com/api/docs/pricing
-  "gpt-5.6-sol": { input: 5.0, cached: 0.5, output: 30.0 },
-  "gpt-5.6-terra": { input: 2.5, cached: 0.25, output: 15.0 },
-  "gpt-5.6-luna": { input: 1.0, cached: 0.1, output: 6.0 },
+  // Published standard-tier rates from https://developers.openai.com/api/docs/pricing
+  // (checked 2026-09-22). The long-context tier (prompts over 272k tokens)
+  // bills more, but a turn's aggregate usage can't tell which calls crossed it.
+  "gpt-6-astra": { input: 10.0, cached: 1.0, cacheWrite: 12.5, output: 50.0 },
+  "gpt-6-sol": { input: 2.0, cached: 0.2, cacheWrite: 2.5, output: 10.0 },
+  "gpt-6-luna": { input: 0.1, cached: 0.01, cacheWrite: 0.125, output: 0.5 },
+  "gpt-5.6-sol": { input: 4.0, cached: 0.4, cacheWrite: 5.0, output: 20.0 },
+  "gpt-5.6-terra": { input: 2.0, cached: 0.2, cacheWrite: 2.5, output: 12.0 },
+  "gpt-5.6-luna": { input: 0.2, cached: 0.02, cacheWrite: 0.25, output: 1.2 },
   "gpt-5.5": { input: 5.0, cached: 0.5, output: 30.0 },
   "gpt-5.4": { input: 2.5, cached: 0.25, output: 15.0 },
   "gpt-5.4-mini": { input: 0.75, cached: 0.075, output: 4.5 },
@@ -387,55 +424,150 @@ function codexModelPrice(model: string | undefined): ModelPricing {
  * Estimate USD cost from Codex usage tokens.
  *
  * Pricing varies by model; we look up per-model rates from {@link CODEX_MODEL_PRICES}.
- * Falls back to GPT-5.4-mini rates when the model is unknown or absent.
+ * Falls back to GPT-5.4-mini rates when the model is unknown or absent. Cache
+ * writes use the model's write rate where it has one, else the input rate.
  */
-function estimateCostUsd(
-  usage:
-    | {
-        input_tokens?: number;
-        cached_input_tokens?: number;
-        output_tokens?: number;
-        reasoning_output_tokens?: number;
-      }
-    | undefined,
-  model?: string,
-): number | undefined {
+function estimateCostUsd(usage: CodexUsage | undefined, model?: string): number | undefined {
   if (!usage) return undefined;
   const input = usage.input_tokens ?? 0;
   const cached = usage.cached_input_tokens ?? 0;
+  const written = usage.cache_write_input_tokens ?? 0;
   const output = usage.output_tokens ?? 0;
-  const total = input + cached + output;
-  if (total === 0) return undefined;
-  const { input: inputRate, cached: cachedRate, output: outputRate } = codexModelPrice(model);
-  const uncached = Math.max(0, input - cached);
-  return (uncached * inputRate + cached * cachedRate + output * outputRate) / 1_000_000;
+  if (input + cached + written + output === 0) return undefined;
+  const price = codexModelPrice(model);
+  const uncached = Math.max(0, input - cached - written);
+  return (
+    (uncached * price.input +
+      cached * price.cached +
+      written * (price.cacheWrite ?? price.input) +
+      output * price.output) /
+    1_000_000
+  );
 }
 
 /**
  * Map Codex usage onto the normalized {@link TokenUsage}. Codex's `input_tokens`
- * is the *total* input including cached, so uncached input is `input_tokens -
- * cached_input_tokens`. Reasoning is billed inside `output_tokens`, so it is
- * reported as a subset (`reasoning`), not added to the total.
+ * is the *total* input: cache reads and cache writes are both itemized subsets
+ * of it (codex's own `ResponseCompletedUsage` test: input 100 = cached 40 +
+ * write 60), so uncached input is what remains after both. Reasoning is billed
+ * inside `output_tokens`, so it is reported as a subset (`reasoning`), not
+ * added to the total.
  */
-function codexTokens(
-  usage:
-    | {
-        input_tokens?: number;
-        cached_input_tokens?: number;
-        output_tokens?: number;
-        reasoning_output_tokens?: number;
-      }
-    | undefined,
-): TokenUsage | undefined {
+function codexTokens(usage: CodexUsage | undefined): TokenUsage | undefined {
   if (!usage) return undefined;
   const cached = usage.cached_input_tokens ?? 0;
+  const written = usage.cache_write_input_tokens ?? 0;
   const input = usage.input_tokens ?? 0;
   const tokens: TokenUsage = {};
-  if (usage.input_tokens !== undefined) tokens.input = Math.max(0, input - cached);
+  if (usage.input_tokens !== undefined) tokens.input = Math.max(0, input - cached - written);
   if (usage.cached_input_tokens !== undefined) tokens.cacheRead = cached;
+  if (usage.cache_write_input_tokens !== undefined) tokens.cacheWrite = written;
   if (usage.output_tokens !== undefined) tokens.output = usage.output_tokens;
   if (usage.reasoning_output_tokens !== undefined) tokens.reasoning = usage.reasoning_output_tokens;
   return Object.keys(tokens).length > 0 ? tokens : undefined;
+}
+
+const USAGE_KEYS = [
+  "input_tokens",
+  "cached_input_tokens",
+  "cache_write_input_tokens",
+  "output_tokens",
+  "reasoning_output_tokens",
+] as const;
+
+/**
+ * `usage` minus what the thread had already billed before this run, field by
+ * field (never below 0). `codex exec` reports the THREAD's running total on
+ * `turn.completed`, and `codex exec resume` restores that total from the
+ * rollout, so a resumed run would otherwise re-report every earlier turn.
+ */
+export function subtractCodexUsage(
+  usage: CodexUsage | undefined,
+  baseline: CodexUsage | undefined,
+): CodexUsage | undefined {
+  if (!usage || !baseline) return usage;
+  const out: CodexUsage = { ...usage };
+  for (const key of USAGE_KEYS) {
+    const v = usage[key];
+    if (v !== undefined) out[key] = Math.max(0, v - (baseline[key] ?? 0));
+  }
+  return out;
+}
+
+/** Thread-wide usage totals codex runs in this process have reported. */
+const CODEX_THREAD_TOTALS = new RecentSessionTotals<CodexUsage>();
+
+/** Field-wise max of two thread totals (either may be missing). */
+export function maxCodexUsage(
+  a: CodexUsage | undefined,
+  b: CodexUsage | undefined,
+): CodexUsage | undefined {
+  if (!a || !b) return a ?? b;
+  const out: CodexUsage = { ...a };
+  for (const key of USAGE_KEYS) {
+    if (b[key] !== undefined) out[key] = Math.max(a[key] ?? 0, b[key]);
+  }
+  return out;
+}
+
+/** Where Codex keeps its session rollouts (`$CODEX_HOME/sessions`, default `~/.codex`). */
+function codexSessionsDir(env: Record<string, string | undefined> = process.env): string {
+  return path.join(env.CODEX_HOME || path.join(os.homedir(), ".codex"), "sessions");
+}
+
+/**
+ * The thread's billed-so-far usage, read from the last `token_count` event of
+ * its rollout (`sessions/YYYY/MM/DD/rollout-…-<threadId>.jsonl`) — the same
+ * record Codex restores on resume. `undefined` when the rollout can't be found
+ * or carries no usage, in which case the run reports Codex's number unchanged.
+ */
+export async function readCodexThreadUsage(
+  threadId: string,
+  sessionsDir: string = codexSessionsDir(),
+): Promise<CodexUsage | undefined> {
+  const file = await findRollout(sessionsDir, `-${threadId}.jsonl`);
+  if (!file) return undefined;
+  let text: string;
+  try {
+    text = await fs.readFile(file, "utf8");
+  } catch {
+    return undefined;
+  }
+  const lines = text.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!;
+    if (!line.includes('"token_count"')) continue;
+    try {
+      const total = JSON.parse(line)?.payload?.info?.total_token_usage;
+      if (total && typeof total === "object") return total as CodexUsage;
+    } catch {
+      // A torn final line — keep looking further back.
+    }
+  }
+  return undefined;
+}
+
+/** Newest-first walk of the date-sharded rollout tree for a file ending in `suffix`. */
+async function findRollout(dir: string, suffix: string, depth = 0): Promise<string | undefined> {
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return undefined;
+  }
+  const hit = entries.find((e) => e.isFile() && e.name.endsWith(suffix));
+  if (hit) return path.join(dir, hit.name);
+  if (depth >= 3) return undefined;
+  const subdirs = entries
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort()
+    .reverse();
+  for (const sub of subdirs) {
+    const found = await findRollout(path.join(dir, sub), suffix, depth + 1);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 /** Build argv for `codex exec --json` (shared by the adapter and tests). */
@@ -478,13 +610,36 @@ export class CodexAdapter implements AgentAdapter {
     this.binary = binary;
   }
 
-  run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
-    return runAgentProcess({
+  async *run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
+    // A resumed thread re-reports its earlier turns' usage; subtract what it
+    // had billed before this run so only the new turn is counted. The rollout
+    // is what codex restores from, but a previous attempt that already
+    // reported its turn (turn.completed or turn.failed both carry usage) may
+    // have died before the rollout caught up — so the baseline is the larger
+    // of the rollout and the last total this process saw for the thread.
+    const usageBaseline = opts.resumeSessionId
+      ? maxCodexUsage(
+          await readCodexThreadUsage(
+            opts.resumeSessionId,
+            codexSessionsDir({ ...process.env, ...opts.env }),
+          ),
+          CODEX_THREAD_TOTALS.get(opts.resumeSessionId),
+        )
+      : undefined;
+    yield* runAgentProcess({
       id: this.id,
       binary: this.binary,
       args: buildCodexExecArgs(opts),
       opts,
-      map: createCodexMapper(opts.agentId ?? this.id),
+      map: createCodexMapper(opts.agentId ?? this.id, {
+        model: opts.model,
+        usageBaseline,
+        threadId: opts.resumeSessionId,
+        // Thread totals only grow; keep the high-water mark so a partial
+        // report never lowers the next attempt's baseline.
+        onThreadTotal: (id, usage) =>
+          CODEX_THREAD_TOTALS.set(id, maxCodexUsage(CODEX_THREAD_TOTALS.get(id), usage) ?? usage),
+      }),
       prompt: opts.prompt,
     });
   }

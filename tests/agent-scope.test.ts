@@ -292,7 +292,7 @@ describe("/agent scope handling", () => {
       provider: "opencode" as const,
       binary: "mimocode-fork",
       env: { OPENCODE_CONFIG: "fork" },
-      defaultModel: "opencode/mimo-v2.5-free",
+      defaultModel: "opencode/mimo-v2.6-flash-free",
     };
     const ctx = makeCtx({
       config: { agents: [configured] },

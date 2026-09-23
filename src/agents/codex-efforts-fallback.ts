@@ -11,6 +11,8 @@ export function fallbackCodexEfforts(model: string): readonly string[] {
   const slug = model.toLowerCase();
 
   if (slug === "codex-auto-review") return AUTO_REVIEW_EFFORTS;
+  if (slug === "gpt-6-luna" || slug.startsWith("gpt-6-luna-")) return GPT_56_LUNA_EFFORTS;
+  if (slug.startsWith("gpt-6")) return GPT_56_SOL_TERRA_EFFORTS;
   if (slug === "gpt-5.6-sol" || slug.startsWith("gpt-5.6-sol-")) return GPT_56_SOL_TERRA_EFFORTS;
   if (slug === "gpt-5.6-terra" || slug.startsWith("gpt-5.6-terra-"))
     return GPT_56_SOL_TERRA_EFFORTS;

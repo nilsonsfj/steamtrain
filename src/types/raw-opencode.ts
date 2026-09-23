@@ -27,6 +27,24 @@ export const opencodeToolState = z
   })
   .passthrough();
 
+/**
+ * OpenCode's per-step token block: `{ total, input, output, reasoning, cache: {
+ * read, write } }`. The categories are disjoint — `output` excludes reasoning
+ * and `total` is `input + output + reasoning + cache.read + cache.write`
+ * (checked against opencode 1.18.x's stored `step-finish` parts).
+ */
+export const opencodeTokens = z
+  .object({
+    input: z.number().optional(),
+    output: z.number().optional(),
+    reasoning: z.number().optional(),
+    cache: z
+      .object({ read: z.number().optional(), write: z.number().optional() })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
 /** A message part: text/reasoning carry `text`; tool parts carry `tool`+`state`. */
 export const opencodePart = z
   .object({
@@ -38,6 +56,10 @@ export const opencodePart = z
     tool: z.string().optional(),
     callID: z.string().optional(),
     state: opencodeToolState.optional(),
+    /** `step-finish` parts: USD for this one model call (0 on subscription/free models). */
+    cost: z.number().optional(),
+    /** `step-finish` parts: tokens for this one model call. */
+    tokens: opencodeTokens.optional(),
   })
   .passthrough();
 
@@ -52,19 +74,6 @@ export const opencodeError = z
   })
   .passthrough();
 
-/** OpenCode's per-step token block: `{ input, output, reasoning, cache: { read, write } }`. */
-export const opencodeTokens = z
-  .object({
-    input: z.number().optional(),
-    output: z.number().optional(),
-    reasoning: z.number().optional(),
-    cache: z
-      .object({ read: z.number().optional(), write: z.number().optional() })
-      .passthrough()
-      .optional(),
-  })
-  .passthrough();
-
 export const opencodeEvent = z
   .object({
     type: z.string(),
@@ -73,6 +82,7 @@ export const opencodeEvent = z
     part: opencodePart.optional(),
     properties: z.object({ part: opencodePart.optional() }).passthrough().optional(),
     error: opencodeError.optional(),
+    /** Legacy/flat placement of the step's cost; current builds nest it in `part`. */
     cost: z.number().optional(),
     tokens: opencodeTokens.optional(),
   })

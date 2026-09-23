@@ -43,7 +43,7 @@ import {
 import { collectArtifacts } from "./artifacts";
 import { MAX_COMMAND_OUTPUT_BYTES, runShellCommand } from "./command";
 import type { StepEditPatch, StepKillResult, WorkflowRunControl } from "./control";
-import { addTokens } from "./cost";
+import { addTokens, replayedSpend } from "./cost";
 import type { StepPermissionsInfo, WorkflowEvent } from "./events";
 import type { StepRetryEvent } from "./events";
 import { mergeConflictGuidance } from "./gc";
@@ -454,9 +454,16 @@ export async function* runWorkflow(
   // converged" gate results). Downstream consumers — the CLI/web run summary,
   // cost roll-ups — would otherwise double-count every intermediate pass. Keep
   // only the latest result per step id (the final state of each step); earlier
-  // iterations were superseded by re-runs.
+  // iterations were superseded by re-runs. Their spend was not superseded,
+  // though — every pass was billed — so it rolls into the kept result, or the
+  // run's cost summary would report only the final pass of each loop. Only
+  // spend rolls up: `durationMs` stays the final pass's, since the summary's
+  // per-step time describes the state it lists, not the loop's wall clock.
   const finalResults = new Map<string, StepResult>();
-  for (const r of env.allResults) finalResults.set(r.stepId, r);
+  for (const r of env.allResults) {
+    const earlier = finalResults.get(r.stepId);
+    finalResults.set(r.stepId, earlier ? { ...r, ...addSpend(earlier, r) } : r);
+  }
 
   yield {
     kind: "workflow_done",
@@ -1365,7 +1372,7 @@ async function runSingleStep(
     for (const child of cached.childResults ?? []) {
       outputs.set(child.stepId, child.output);
       results.set(child.stepId, child);
-      allResults.push(child);
+      allResults.push(replayedSpend(child));
       push({
         kind: "step_start",
         phaseId: phase.id,
@@ -1396,7 +1403,7 @@ async function runSingleStep(
     outputs.set(step.id, cached.output);
     results.set(step.id, cached);
     recordStepSession(env.sessions, cached);
-    allResults.push(cached);
+    allResults.push(replayedSpend(cached));
     let notOk = false;
     let stop = false;
     if (!cached.ok) {
@@ -1562,9 +1569,13 @@ async function runSingleStep(
     if (stepEdit) child.edited = true;
     outputs.set(child.stepId, child.output);
     results.set(child.stepId, child);
-    allResults.push(child);
+    // A child replayed from the cache on a partial resume billed nothing this
+    // run, as in the whole-step replay path above.
+    allResults.push(execution.cachedChildIds?.has(child.stepId) ? replayedSpend(child) : child);
     // Fan-out children hold the real cost; the parent's is their sum, so count
-    // children here and skip the parent below to avoid double-counting.
+    // children here and skip the parent below to avoid double-counting. A
+    // cached child's prior spend counts too: `costOfCachedResults` leaves
+    // cached children out of the budget seed, so this is its only count.
     env.spent.costUsd += child.costUsd ?? 0;
   }
   outputs.set(step.id, result.output);
@@ -1738,6 +1749,8 @@ interface ExecuteContext {
 interface ExecutionOutcome {
   result: StepResult;
   childResults?: StepResult[];
+  /** Fan-out children replayed from the cache this run (their spend is not this run's). */
+  cachedChildIds?: Set<string>;
   gate?: { passed: boolean; target?: string; onFalse?: "continue" | "fail" | "stop" };
   stop?: boolean;
 }
@@ -1984,6 +1997,12 @@ async function runAgentAttempt(
   let streamedText = "";
   let costUsd: number | undefined;
   let tokens: TokenUsage | undefined;
+  // Live `usage` increments since the last `result` (see UsageEvent): a
+  // `result` restates the turn so far and resets them; whatever arrives after
+  // it — or instead of it, when the turn is cancelled, times out, or dies
+  // before its CLI prints a summary — is spend on top of it.
+  let usageCostSinceResult: number | undefined;
+  let usageTokensSinceResult: TokenUsage | undefined;
   let sessionId: string | undefined;
   let errored = false;
   let errorMessage: string | undefined;
@@ -2014,15 +2033,27 @@ async function runAgentAttempt(
       } else if (event.kind === "tool_use" || event.kind === "tool_result") {
         // The agent invoked a tool — assume it may have caused a side effect.
         sawToolUse = true;
+      } else if (event.kind === "usage") {
+        if (typeof event.costUsd === "number")
+          usageCostSinceResult = (usageCostSinceResult ?? 0) + event.costUsd;
+        if (event.tokens) usageTokensSinceResult = addTokens(usageTokensSinceResult, event.tokens);
       } else if (event.kind === "result") {
         sawResult = true;
         if (event.text) finalText = event.text;
-        if (typeof event.costUsd === "number") costUsd = event.costUsd;
-        // Tokens follow the same "last result wins" semantics as `costUsd`:
-        // adapters that emit several `result` events per turn (opencode's
-        // per-step finishes) report cumulative running totals, so the final
-        // event already carries the whole-turn usage.
-        if (event.tokens) tokens = event.tokens;
+        // "Last result wins": adapters that emit several `result` events per
+        // turn (opencode's per-step finishes) report cumulative running
+        // totals, so the final event already carries the whole-turn usage —
+        // including every live increment before it. Cost and tokens are
+        // independent: a result that restates only one of them replaces only
+        // that one, and the other keeps its increments.
+        if (typeof event.costUsd === "number") {
+          costUsd = event.costUsd;
+          usageCostSinceResult = undefined;
+        }
+        if (event.tokens) {
+          tokens = event.tokens;
+          usageTokensSinceResult = undefined;
+        }
         if (event.isError) {
           errored = true;
           errorMessage ??= event.text;
@@ -2066,6 +2097,9 @@ async function runAgentAttempt(
     errored = true;
     errorMessage ??= err instanceof Error ? err.message : String(err);
   }
+
+  if (usageCostSinceResult !== undefined) costUsd = (costUsd ?? 0) + usageCostSinceResult;
+  if (usageTokensSinceResult) tokens = addTokens(tokens, usageTokensSinceResult);
 
   // A cancelled step is never cached, so resume re-runs it.
   const cancelled = Boolean(ctx.signal?.aborted);
@@ -2529,7 +2563,7 @@ async function executeAgentStep(
       : policy.maxAttempts;
 
   try {
-    let result: StepResult;
+    let result: StepResult | undefined;
     while (true) {
       attempt += 1;
       const attemptOutcome = await runAgentAttempt(
@@ -2544,7 +2578,14 @@ async function executeAgentStep(
         activeStep.agent === step.agent ? resume.sessionId : undefined,
         failoverPolicy,
       );
-      result = attemptOutcome.result;
+      // Each attempt's result replaces the last, but what the earlier, failed
+      // attempts billed is still spent — carry it forward so a retried or
+      // failed-over step reports the whole step's spend, not its final try's.
+      // (`durationMs` is not summed here: after the loop it is replaced with
+      // the whole step's wall clock, backoff waits included.)
+      result = result
+        ? { ...attemptOutcome.result, ...addSpend(result, attemptOutcome.result) }
+        : attemptOutcome.result;
       const isLastAttempt = attempt >= attemptBudget;
       if (result.ok || !attemptOutcome.retryable || ctx.signal?.aborted) break;
 
@@ -2790,14 +2831,9 @@ async function enforceStructuredOutput(
     fixResume,
     resolveModelFailoverPolicy({ enabled: false }),
   );
-  const costUsd =
-    result.costUsd === undefined && fix.result.costUsd === undefined
-      ? undefined
-      : (result.costUsd ?? 0) + (fix.result.costUsd ?? 0);
-  // The fix attempt is a second billable turn — sum both turns' token usage so
-  // the step's recorded tokens match its recorded cost.
-  const tokens =
-    result.tokens || fix.result.tokens ? addTokens(result.tokens, fix.result.tokens) : undefined;
+  // The fix attempt is a second billable turn — sum both turns' spend so the
+  // step's recorded tokens match its recorded cost.
+  const { costUsd, tokens } = addSpend(result, fix.result);
   const reparsed = fix.result.ok
     ? parseStructuredOutput(fix.result.output, outputSchema)
     : undefined;
@@ -2876,14 +2912,7 @@ async function continueAfterAgentQuestion(
     resolveModelFailoverPolicy({ enabled: false }),
   );
 
-  const costUsd =
-    result.costUsd === undefined && continuation.result.costUsd === undefined
-      ? undefined
-      : (result.costUsd ?? 0) + (continuation.result.costUsd ?? 0);
-  const tokens =
-    result.tokens || continuation.result.tokens
-      ? addTokens(result.tokens, continuation.result.tokens)
-      : undefined;
+  const { costUsd, tokens } = addSpend(result, continuation.result);
   const questions = [{ question, answer: ask.output, by: ask.by }];
   const merged: StepResult = {
     ...continuation.result,
@@ -3170,6 +3199,7 @@ async function executeForEachStep(
     ts: Date.now(),
   });
 
+  const cachedChildIds = new Set<string>();
   const childResults: StepResult[] = values.map((_value, index) => ({
     stepId: `${step.id}[${index}]`,
     ok: false,
@@ -3246,6 +3276,7 @@ async function executeForEachStep(
         ts: Date.now(),
       });
 
+      if (cached) cachedChildIds.add(stepId);
       const result = cached
         ? { ...cached, stepId, parentStepId: step.id, item, iteration: ctx.iteration }
         : {
@@ -3307,6 +3338,7 @@ async function executeForEachStep(
         : {}),
     },
     childResults,
+    cachedChildIds,
   };
 }
 
@@ -3449,6 +3481,23 @@ async function executeCommandStep(
   } finally {
     await workspace.dispose();
   }
+}
+
+/**
+ * The combined `costUsd` / `tokens` of two results, each left `undefined` when
+ * neither side reports it (so an unpriced agent never reads as "$0").
+ */
+function addSpend(
+  a: Pick<StepResult, "costUsd" | "tokens">,
+  b: Pick<StepResult, "costUsd" | "tokens">,
+): Pick<StepResult, "costUsd" | "tokens"> {
+  return {
+    costUsd:
+      a.costUsd === undefined && b.costUsd === undefined
+        ? undefined
+        : (a.costUsd ?? 0) + (b.costUsd ?? 0),
+    tokens: a.tokens || b.tokens ? addTokens(a.tokens, b.tokens) : undefined,
+  };
 }
 
 /** Exact USD cost from the effective per-MTok rates and the API-reported usage. */
@@ -3789,12 +3838,7 @@ async function enforceLlmStructuredOutput(
     settings,
     timeoutMs,
   );
-  const costUsd =
-    result.costUsd === undefined && fix.result.costUsd === undefined
-      ? undefined
-      : (result.costUsd ?? 0) + (fix.result.costUsd ?? 0);
-  const tokens =
-    result.tokens || fix.result.tokens ? addTokens(result.tokens, fix.result.tokens) : undefined;
+  const { costUsd, tokens } = addSpend(result, fix.result);
   const reparsed = fix.result.ok
     ? parseStructuredOutput(fix.result.output, outputSchema)
     : undefined;
@@ -3915,6 +3959,7 @@ async function executeWorkflowForEachStep(
     ts: Date.now(),
   });
 
+  const cachedChildIds = new Set<string>();
   const childResults: StepResult[] = values.map((_value, index) => ({
     stepId: `${step.id}[${index}]`,
     ok: false,
@@ -3943,6 +3988,7 @@ async function executeWorkflowForEachStep(
         ts: Date.now(),
       });
 
+      if (cached) cachedChildIds.add(childId);
       const result = cached
         ? { ...cached, stepId: childId, parentStepId: step.id, item, iteration: ctx.iteration }
         : {
@@ -3988,6 +4034,7 @@ async function executeWorkflowForEachStep(
       durationMs: Date.now() - started,
     },
     childResults,
+    cachedChildIds,
   };
 }
 

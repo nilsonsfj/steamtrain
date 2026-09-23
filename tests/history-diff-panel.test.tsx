@@ -125,8 +125,8 @@ describe("HistoryDiffPanel", () => {
   it("reports totalLines and viewport through onMetrics", async () => {
     const onMetrics = vi.fn();
     render(<HistoryDiffPanel {...baseProps} height={10} steps={[step()]} onMetrics={onMetrics} />);
-    // onMetrics fires from a useEffect, which flushes after the initial frame.
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(onMetrics).toHaveBeenCalledWith({ totalLines: 5, viewport: 6 });
+    // onMetrics fires from a useEffect, which flushes after the initial frame —
+    // one tick is not always enough under coverage load, so poll for it.
+    await vi.waitFor(() => expect(onMetrics).toHaveBeenCalledWith({ totalLines: 5, viewport: 6 }));
   });
 });

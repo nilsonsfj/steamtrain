@@ -132,6 +132,11 @@ export interface ReportStep {
   api?: string;
   model?: string;
   durationMs?: number;
+  /**
+   * What the step's result reported. For a `cached` step that is the original
+   * run's spend, not this run's (which is $0) — skip cached steps when summing;
+   * `totals` already does.
+   */
   costUsd?: number;
   tokens?: number;
   gate?: { passed: boolean; onFalse?: string; target?: string };
@@ -367,7 +372,9 @@ function renderMarkdownReport(model: RunReportModel): string {
             ? "skipped"
             : "failed";
       const duration = step.durationMs !== undefined ? formatElapsed(step.durationMs) : "—";
-      const cost = step.costUsd ? formatUsd(step.costUsd) : "—";
+      // A cached replay billed nothing this run (the totals agree); the JSON
+      // keeps its original `costUsd` alongside `cached` for consumers.
+      const cost = step.cached ? "$0" : step.costUsd ? formatUsd(step.costUsd) : "—";
       lines.push(`| ${glyph} ${step.stepId} | ${step.kind} | ${status} | ${duration} | ${cost} |`);
     }
   }

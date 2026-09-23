@@ -1,5 +1,14 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildCodexExecArgs, createCodexMapper } from "../src/agents/codex";
+import {
+  CodexAdapter,
+  buildCodexExecArgs,
+  createCodexMapper,
+  readCodexThreadUsage,
+  subtractCodexUsage,
+} from "../src/agents/codex";
 import type { AgentEvent } from "../src/types/events";
 
 /**
@@ -342,6 +351,82 @@ describe("codex mapper (stateful, one mapper per run)", () => {
     expect(cost).not.toBeCloseTo(wrongExpected, 8);
   });
 
+  it("prices with the run's configured model (codex never names it in events)", () => {
+    const m = createCodexMapper("codex", { model: "gpt-5.4" });
+    const result = m(
+      JSON.parse(
+        '{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":100}}',
+      ),
+    );
+    // gpt-5.4 rates, not the gpt-5.4-mini fallback.
+    expect((result[0] as { costUsd: number }).costUsd).toBeCloseTo(
+      (1000 * 2.5 + 100 * 15.0) / 1_000_000,
+      8,
+    );
+  });
+
+  it("reports cache writes as a subset of input_tokens", () => {
+    const m = createCodexMapper("codex", { model: "gpt-5.4" });
+    const [result] = m(
+      JSON.parse(
+        '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":60,"output_tokens":10,"reasoning_output_tokens":5}}',
+      ),
+    );
+    expect(result).toMatchObject({
+      tokens: { input: 0, cacheRead: 40, cacheWrite: 60, output: 10, reasoning: 5 },
+    });
+  });
+
+  it("reports only this run's share of a resumed thread's running total", () => {
+    const m = createCodexMapper("codex", {
+      model: "gpt-5.4",
+      usageBaseline: { input_tokens: 1000, cached_input_tokens: 800, output_tokens: 50 },
+    });
+    const [result] = m(
+      JSON.parse(
+        '{"type":"turn.completed","usage":{"input_tokens":3000,"cached_input_tokens":2500,"output_tokens":150}}',
+      ),
+    );
+    expect(result).toMatchObject({ tokens: { input: 300, cacheRead: 1700, output: 100 } });
+    expect((result as { costUsd: number }).costUsd).toBeCloseTo(
+      (300 * 2.5 + 1700 * 0.25 + 100 * 15.0) / 1_000_000,
+      8,
+    );
+  });
+
+  it("never reports negative usage when the baseline exceeds the total", () => {
+    expect(
+      subtractCodexUsage({ input_tokens: 10, output_tokens: 5 }, { input_tokens: 20 }),
+    ).toEqual({ input_tokens: 0, output_tokens: 5 });
+  });
+
+  it("reads a thread's billed-so-far usage from its rollout's last token_count", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "codex-sessions-"));
+    const day = path.join(root, "2026", "09", "20");
+    mkdirSync(day, { recursive: true });
+    const tokenCount = (input: number) =>
+      JSON.stringify({
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: { total_token_usage: { input_tokens: input, output_tokens: 1 } },
+        },
+      });
+    writeFileSync(
+      path.join(day, "rollout-2026-09-20T03-54-05-thread-1.jsonl"),
+      [
+        tokenCount(10),
+        tokenCount(25),
+        '{"type":"event_msg","payload":{"type":"task_complete"}}',
+      ].join("\n"),
+    );
+    expect(await readCodexThreadUsage("thread-1", root)).toEqual({
+      input_tokens: 25,
+      output_tokens: 1,
+    });
+    expect(await readCodexThreadUsage("missing", root)).toBeUndefined();
+  });
+
   it("uses per-model pricing when model is present in turn event", () => {
     const m = createCodexMapper();
     const result = m(
@@ -363,8 +448,8 @@ describe("codex mapper (stateful, one mapper per run)", () => {
       ),
     );
     const cost = (result[0] as { costUsd: number }).costUsd;
-    // gpt-5.6-sol rates: input=$5.00/M, cached=$0.50/M, output=$30.00/M
-    const expected = (1000 * 5.0 + 100 * 30.0) / 1_000_000;
+    // gpt-5.6-sol rates: input=$4.00/M, cached=$0.40/M, output=$20.00/M
+    const expected = (1000 * 4.0 + 100 * 20.0) / 1_000_000;
     expect(cost).toBeCloseTo(expected, 8);
   });
 
@@ -376,9 +461,9 @@ describe("codex mapper (stateful, one mapper per run)", () => {
       ),
     );
     const cost = (result[0] as { costUsd: number }).costUsd;
-    // gpt-5.6-luna rates: input=$1.00/M, cached=$0.10/M, output=$6.00/M
+    // gpt-5.6-luna rates: input=$0.20/M, cached=$0.02/M, output=$1.20/M
     // Codex input_tokens includes cached, so uncached = 1000 - 200.
-    const expected = (800 * 1.0 + 200 * 0.1 + 100 * 6.0) / 1_000_000;
+    const expected = (800 * 0.2 + 200 * 0.02 + 100 * 1.2) / 1_000_000;
     expect(cost).toBeCloseTo(expected, 8);
   });
 
@@ -390,9 +475,21 @@ describe("codex mapper (stateful, one mapper per run)", () => {
       ),
     );
     const cost = (result[0] as { costUsd: number }).costUsd;
-    // gpt-5.6-terra rates: input=$2.50/M, cached=$0.25/M, output=$15.00/M
-    const expected = (1500 * 2.5 + 500 * 0.25 + 100 * 15.0) / 1_000_000;
+    // gpt-5.6-terra rates: input=$2.00/M, cached=$0.20/M, output=$12.00/M
+    const expected = (1500 * 2.0 + 500 * 0.2 + 100 * 12.0) / 1_000_000;
     expect(cost).toBeCloseTo(expected, 8);
+  });
+
+  it("prices GPT-6 models, including their cache-write surcharge", () => {
+    const m = createCodexMapper("codex", { model: "gpt-6-sol" });
+    const [result] = m(
+      JSON.parse(
+        '{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens":300,"cache_write_input_tokens":200,"output_tokens":100}}',
+      ),
+    );
+    // gpt-6-sol: input=$2.00/M, cached=$0.20/M, cache write=$2.50/M, output=$10.00/M
+    const expected = (500 * 2.0 + 300 * 0.2 + 200 * 2.5 + 100 * 10.0) / 1_000_000;
+    expect((result as { costUsd: number }).costUsd).toBeCloseTo(expected, 10);
   });
 
   it("uses correct rates for gpt-5.1-codex-mini (mini-tier)", () => {
@@ -488,5 +585,46 @@ describe("buildCodexExecArgs", () => {
       "--model",
       "gpt-5.5",
     ]);
+  });
+});
+
+describe("CodexAdapter resume retry baseline", () => {
+  /** A stand-in `codex` that prints `$FAKE_CODEX_OUT` (JSONL) and exits. */
+  function fakeCodex(): { bin: string; home: string } {
+    const home = mkdtempSync(path.join(tmpdir(), "codex-home-"));
+    const bin = path.join(home, "fake-codex.sh");
+    writeFileSync(bin, '#!/bin/sh\ncat > /dev/null\nprintf "%s\\n" "$FAKE_CODEX_OUT"\n', {
+      mode: 0o755,
+    });
+    return { bin, home };
+  }
+  async function run(adapter: CodexAdapter, home: string, out: string[]) {
+    const events: AgentEvent[] = [];
+    for await (const e of adapter.run({
+      prompt: "continue",
+      model: "gpt-5.5",
+      resumeSessionId: "thread-retry",
+      env: { CODEX_HOME: home, FAKE_CODEX_OUT: out.join("\n") },
+    }))
+      events.push(e);
+    return events.find((e) => e.kind === "result") as { tokens?: object } | undefined;
+  }
+
+  it("does not re-bill a failed attempt the rollout never recorded", async () => {
+    const { bin, home } = fakeCodex();
+    const adapter = new CodexAdapter(bin);
+    // Attempt 1 bills 100 input tokens into the thread, then the turn fails.
+    const first = await run(adapter, home, [
+      '{"type":"thread.started","thread_id":"thread-retry"}',
+      '{"type":"turn.failed","usage":{"input_tokens":100,"output_tokens":10},"error":{"message":"stream disconnected"}}',
+    ]);
+    expect(first?.tokens).toMatchObject({ input: 100, output: 10 });
+    // Attempt 2 resumes; codex reports the thread total (both attempts), and
+    // no rollout exists to say attempt 1 was already counted.
+    const second = await run(adapter, home, [
+      '{"type":"thread.started","thread_id":"thread-retry"}',
+      '{"type":"turn.completed","usage":{"input_tokens":160,"output_tokens":25}}',
+    ]);
+    expect(second?.tokens).toMatchObject({ input: 60, output: 15 });
   });
 });

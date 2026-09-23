@@ -403,6 +403,7 @@
       var ms = s.result.durationMs || 0;
       if (lo === undefined || ms < lo) lo = ms;
       if (hi === undefined || ms > hi) hi = ms;
+      if (s.cached) return; // billed to the run that produced it
       cost += s.result.costUsd || 0;
       addTokensInto(tok, s.result.tokens);
     });
@@ -1755,6 +1756,7 @@
     // they have reported so far, which is the point of a *live* ticker.
     var cost = 0, tokens = emptyTokens();
     steps.forEach(function (s) {
+      if (s.cached) return; // billed to the run that produced it
       var source = s.result || s.usage;
       if (!source) return;
       if (source.costUsd) cost += source.costUsd;

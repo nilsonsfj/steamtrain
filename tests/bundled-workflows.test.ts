@@ -81,13 +81,10 @@ describe("bundled workflows", () => {
     expect(profile).toBe("full");
   });
 
-  it("prefer OpenCode free models over DeepSeek free for babysit defaults", () => {
+  it("prefer OpenCode free models for babysit defaults", () => {
     for (const name of ["babysit-pr", "babysit-all-prs"]) {
       const def = BUNDLED_WORKFLOWS[name]!.inputs?.babysitterModel?.default;
-      expect(def, name).toBe("opencode/mimo-v2.5-free");
-      expect(BUNDLED_WORKFLOWS[name]!.inputs?.babysitterModel?.fallbackModels).not.toContain(
-        "opencode/deepseek-v4-flash-free",
-      );
+      expect(def, name).toBe("opencode/mimo-v2.6-flash-free");
       expect(BUNDLED_WORKFLOWS[name]!.inputs?.babysitterModel?.fallbackModels).not.toContain(
         "mimo/mimo-auto",
       );

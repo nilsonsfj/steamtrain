@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   KIMI_MODELS,
@@ -5,8 +8,10 @@ import {
   buildKimiRunArgs,
   buildKimiRunEnv,
   createKimiMapper,
+  readKimiRunUsage,
 } from "../src/agents/kimi";
 import { fallbackKimiEfforts } from "../src/agents/kimi-efforts-fallback";
+import type { AgentEvent } from "../src/types/events";
 
 /**
  * Kimi Code speaks its own `stream-json` NDJSON protocol (`-p … --output-format
@@ -239,5 +244,104 @@ describe("KimiAdapter", () => {
 
   it("accepts a custom binary override", () => {
     expect(new KimiAdapter("kimi-cli").binary).toBe("kimi-cli");
+  });
+});
+
+describe("kimi run usage (read back from the session's wire logs)", () => {
+  function sessionHome(): { home: string; write: (agent: string, lines: object[]) => void } {
+    const home = mkdtempSync(path.join(tmpdir(), "kimi-home-"));
+    const write = (agent: string, lines: object[]) => {
+      const dir = path.join(home, "sessions", "wd_proj_abc123", "session_s1", "agents", agent);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, "wire.jsonl"), lines.map((l) => JSON.stringify(l)).join("\n"));
+    };
+    return { home, write };
+  }
+  const record = (time: number, inputOther: number, output: number, inputCacheRead = 0) => ({
+    type: "usage.record",
+    model: "kimi-code/k3",
+    usage: { inputOther, output, inputCacheRead, inputCacheCreation: 0 },
+    usageScope: "turn",
+    time,
+  });
+
+  it("sums this run's usage records across the main loop and subagents", async () => {
+    const { home, write } = sessionHome();
+    write("main", [
+      record(100, 999, 999), // an earlier run of this resumed session
+      { type: "step.end", usage: { inputOther: 5 } },
+      record(2000, 300, 40, 1000),
+      record(3000, 100, 10, 2000),
+    ]);
+    write("agent-1", [record(2500, 50, 5)]);
+    expect(await readKimiRunUsage("session_s1", 1000, home)).toEqual({
+      input: 450,
+      output: 55,
+      cacheRead: 3000,
+      cacheWrite: 0,
+    });
+  });
+
+  it("reports nothing for an unknown session or a home without sessions", async () => {
+    const { home, write } = sessionHome();
+    write("main", [record(2000, 1, 1)]);
+    expect(await readKimiRunUsage("session_other", 0, home)).toBeUndefined();
+    expect(await readKimiRunUsage("session_s1", 0, path.join(home, "missing"))).toBeUndefined();
+  });
+});
+
+describe("KimiAdapter reads usage for a resumed session", () => {
+  it("falls back to the resumed session id when no resume hint is printed", async () => {
+    const home = mkdtempSync(path.join(tmpdir(), "kimi-home-"));
+    const dir = path.join(home, "sessions", "wd_proj_abc", "session_resumed", "agents", "main");
+    mkdirSync(dir, { recursive: true });
+    // A stand-in `kimi` that prints nothing and writes one usage record, as a
+    // resumed run whose resume hint never reached stdout would.
+    const bin = path.join(home, "fake-kimi.sh");
+    writeFileSync(
+      bin,
+      `#!/bin/sh\nprintf '{"type":"usage.record","usage":{"inputOther":7,"output":3,"inputCacheRead":0,"inputCacheCreation":0},"time":9999999999999}\\n' > "${dir}/wire.jsonl"\n`,
+      { mode: 0o755 },
+    );
+    const events: AgentEvent[] = [];
+    for await (const e of new KimiAdapter(bin).run({
+      prompt: "hi",
+      model: "kimi-code/k3",
+      resumeSessionId: "session_resumed",
+      env: { KIMI_CODE_HOME: home },
+    }))
+      events.push(e);
+    expect(events.find((e) => e.kind === "usage")).toMatchObject({
+      tokens: { input: 7, output: 3 },
+    });
+  });
+});
+
+describe("KimiAdapter reads usage for an aborted run", () => {
+  it("still reports what the run billed before it was aborted", async () => {
+    const home = mkdtempSync(path.join(tmpdir(), "kimi-home-"));
+    const dir = path.join(home, "sessions", "wd_proj_abc", "session_aborted", "agents", "main");
+    mkdirSync(dir, { recursive: true });
+    // Bills one model call, then hangs until the caller aborts it.
+    const bin = path.join(home, "fake-kimi.sh");
+    writeFileSync(
+      bin,
+      `#!/bin/sh\nprintf '{"type":"usage.record","usage":{"inputOther":5,"output":2,"inputCacheRead":0,"inputCacheCreation":0},"time":9999999999999}\\n' > "${dir}/wire.jsonl"\nexec sleep 30\n`,
+      { mode: 0o755 },
+    );
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 300);
+    const events: AgentEvent[] = [];
+    for await (const e of new KimiAdapter(bin).run({
+      prompt: "hi",
+      model: "kimi-code/k3",
+      resumeSessionId: "session_aborted",
+      env: { KIMI_CODE_HOME: home },
+      signal: controller.signal,
+    }))
+      events.push(e);
+    expect(events.find((e) => e.kind === "usage")).toMatchObject({
+      tokens: { input: 5, output: 2 },
+    });
   });
 });

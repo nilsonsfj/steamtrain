@@ -41,7 +41,7 @@ const withPrompt: WorkflowSpec = {
         {
           id: "scan",
           agent: "opencode",
-          model: "opencode/mimo-v2.5-free",
+          model: "opencode/mimo-v2.6-flash-free",
           prompt: "Review this carefully:\n{{input}}",
         },
       ],

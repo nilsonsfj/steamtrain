@@ -101,6 +101,22 @@ interface FamilySeed {
 const FAMILY_SEEDS: readonly FamilySeed[] = [
   // ── Claude frontier ──────────────────────────────────────────────────
   {
+    id: "claude-fable-5.1",
+    name: "Claude Fable 5.1",
+    aliases: ["fable 5.1", "fable-5.1", "claude fable 5.1", "claude-fable-5-1"],
+    reference: { provider: "claude", modelId: "claude-fable-5-1" },
+    also: { opencode: ["opencode/claude-fable-5-1"] },
+    classes: ["ultrathinker", "thinker", "deep-reviewer", "implementer"],
+  },
+  {
+    id: "claude-opus-5.5",
+    name: "Claude Opus 5.5",
+    aliases: ["opus 5.5", "opus-5.5", "opus5.5", "claude opus 5.5", "claude-opus-5-5"],
+    reference: { provider: "claude", modelId: "claude-opus-5-5" },
+    also: { opencode: ["opencode/claude-opus-5-5"] },
+    classes: ["deep-reviewer", "reviewer", "thinker", "implementer", "ultrathinker"],
+  },
+  {
     id: "claude-fable-5",
     name: "Claude Fable 5",
     aliases: ["fable", "fable 5", "claude fable 5", "claude-fable-5"],
@@ -265,6 +281,30 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
 
   // ── GPT / Codex ──────────────────────────────────────────────────────
   {
+    id: "gpt-6-astra",
+    name: "GPT-6 Astra",
+    aliases: ["gpt 6 astra", "gpt-6-astra", "gpt6astra"],
+    reference: { provider: "codex", modelId: "gpt-6-astra" },
+    also: { opencode: ["opencode/gpt-6-astra"] },
+    classes: ["ultrathinker", "deep-reviewer", "thinker"],
+  },
+  {
+    id: "gpt-6-sol",
+    name: "GPT-6 Sol",
+    aliases: ["gpt 6 sol", "gpt-6-sol", "gpt6sol", "gpt-6"],
+    reference: { provider: "codex", modelId: "gpt-6-sol" },
+    also: { opencode: ["opencode/gpt-6-sol"] },
+    classes: ["implementer", "balanced", "reviewer", "thinker"],
+  },
+  {
+    id: "gpt-6-luna",
+    name: "GPT-6 Luna",
+    aliases: ["gpt 6 luna", "gpt-6-luna", "gpt6luna"],
+    reference: { provider: "codex", modelId: "gpt-6-luna" },
+    also: { opencode: ["opencode/gpt-6-luna"] },
+    classes: ["simple", "balanced"],
+  },
+  {
     id: "gpt-5.6-sol",
     name: "GPT-5.6 Sol",
     aliases: ["gpt 5.6 sol", "gpt-5.6-sol", "gpt5.6sol", "gpt-5.6"],
@@ -322,7 +362,8 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     id: "gpt-5.4",
     name: "GPT-5.4",
     aliases: ["gpt 5.4", "gpt-5.4", "gpt5.4"],
-    reference: { provider: "codex", modelId: "gpt-5.4" },
+    // Removed from live `codex debug models` (0.145); still on OpenCode Zen.
+    reference: { provider: "opencode", modelId: "opencode/gpt-5.4" },
     also: { opencode: ["opencode/gpt-5.4"] },
     classes: ["implementer", "balanced"],
   },
@@ -330,7 +371,8 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     id: "gpt-5.4-mini",
     name: "GPT-5.4 Mini",
     aliases: ["gpt 5.4 mini", "gpt-5.4-mini", "gpt5.4mini"],
-    reference: { provider: "codex", modelId: "gpt-5.4-mini" },
+    // Removed from live `codex debug models` (0.145); still on OpenCode Zen.
+    reference: { provider: "opencode", modelId: "opencode/gpt-5.4-mini" },
     also: { opencode: ["opencode/gpt-5.4-mini"] },
     classes: ["simple", "balanced"],
   },
@@ -362,7 +404,8 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     id: "gpt-5.2",
     name: "GPT-5.2",
     aliases: ["gpt 5.2", "gpt-5.2", "gpt5.2"],
-    reference: { provider: "codex", modelId: "gpt-5.2" },
+    // Removed from live `codex debug models` (0.145); still on OpenCode Zen.
+    reference: { provider: "opencode", modelId: "opencode/gpt-5.2" },
     also: {
       opencode: ["opencode/gpt-5.2"],
       cursor: ["gpt-5.2"],
@@ -417,6 +460,44 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
 
   // ── Gemini ───────────────────────────────────────────────────────────
   {
+    id: "gemini-3.8-flash",
+    name: "Gemini 3.8 Flash",
+    aliases: ["gemini 3.8 flash", "gemini-3.8-flash", "gemini 3.8", "gemini-3.8"],
+    reference: { provider: "antigravity", modelId: "gemini-3.8-flash-high" },
+    also: {
+      antigravity: [
+        "gemini-3.8-flash",
+        "gemini-3.8-flash-medium",
+        "gemini-3.8-flash-low",
+        "Gemini 3.8 Flash",
+        "Gemini 3.8 Flash (High)",
+        "Gemini 3.8 Flash (Medium)",
+        "Gemini 3.8 Flash (Low)",
+      ],
+      opencode: ["opencode/gemini-3.8-flash"],
+    },
+    classes: ["simple", "balanced", "implementer"],
+  },
+  {
+    id: "gemini-3.7-flash",
+    name: "Gemini 3.7 Flash",
+    aliases: ["gemini 3.7 flash", "gemini-3.7-flash", "gemini 3.7", "gemini-3.7"],
+    reference: { provider: "antigravity", modelId: "gemini-3.7-flash-high" },
+    also: {
+      antigravity: [
+        "gemini-3.7-flash",
+        "gemini-3.7-flash-medium",
+        "gemini-3.7-flash-low",
+        "Gemini 3.7 Flash",
+        "Gemini 3.7 Flash (High)",
+        "Gemini 3.7 Flash (Medium)",
+        "Gemini 3.7 Flash (Low)",
+      ],
+      opencode: ["opencode/gemini-3.7-flash"],
+    },
+    classes: ["simple", "balanced", "implementer"],
+  },
+  {
     id: "gemini-3.6-flash",
     name: "Gemini 3.6 Flash",
     aliases: ["gemini 3.6 flash", "gemini-3.6-flash", "gemini flash", "gemini 3.6", "gemini-3.6"],
@@ -446,7 +527,8 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     id: "gemini-3.5-flash",
     name: "Gemini 3.5 Flash",
     aliases: ["gemini 3.5 flash", "gemini-3.5-flash"],
-    reference: { provider: "antigravity", modelId: "gemini-3.5-flash-high" },
+    // agy 1.2 no longer lists 3.5 Flash; OpenCode Zen still serves it.
+    reference: { provider: "opencode", modelId: "opencode/gemini-3.5-flash" },
     also: {
       antigravity: [
         "gemini-3.5-flash",
@@ -622,6 +704,22 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
     classes: ["simple", "balanced", "implementer"],
   },
   {
+    id: "mimo-v2.6-flash",
+    name: "MiMo-V2.6-Flash",
+    aliases: ["mimo v2.6 flash", "mimo-v2.6-flash", "xiaomi/mimo-v2.6-flash"],
+    reference: { provider: "mimo", modelId: "xiaomi/mimo-v2.6-flash" },
+    also: { opencode: ["opencode-go/mimo-v2.6-flash"] },
+    classes: ["simple", "balanced", "implementer"],
+  },
+  {
+    id: "mimo-v2.6-pro",
+    name: "MiMo-V2.6-Pro",
+    aliases: ["mimo v2.6 pro", "mimo-v2.6-pro", "xiaomi/mimo-v2.6-pro"],
+    reference: { provider: "mimo", modelId: "xiaomi/mimo-v2.6-pro" },
+    also: { opencode: ["opencode-go/mimo-v2.6-pro"] },
+    classes: ["thinker", "implementer", "reviewer", "balanced"],
+  },
+  {
     id: "mimo-v2.5",
     name: "MiMo-V2.5",
     aliases: ["mimo v2.5", "mimo-v2.5", "xiaomi/mimo-v2.5"],
@@ -647,17 +745,31 @@ const FAMILY_SEEDS: readonly FamilySeed[] = [
 
   // ── OpenCode free / specialty ────────────────────────────────────────
   {
-    id: "mimo-v2.5-free",
-    name: "MiMo V2.5 Free",
-    aliases: ["mimo free", "mimo-v2.5-free", "opencode/mimo-v2.5-free"],
-    reference: { provider: "opencode", modelId: "opencode/mimo-v2.5-free" },
+    id: "mimo-v2.6-flash-free",
+    name: "MiMo V2.6 Flash Free",
+    // The retired mimo-v2.5-free ids resolve here so configs that still name
+    // them keep running on its successor.
+    aliases: [
+      "mimo free",
+      "mimo-v2.6-flash-free",
+      "opencode/mimo-v2.6-flash-free",
+      "mimo-v2.5-free",
+      "opencode/mimo-v2.5-free",
+    ],
+    reference: { provider: "opencode", modelId: "opencode/mimo-v2.6-flash-free" },
     classes: ["simple", "balanced"],
   },
+  // The retired opencode/deepseek-v4-flash-free is deliberately NOT aliased:
+  // its only successors are the paid deepseek-v4-flash models, and routing a
+  // free pin to them (or to another vendor's free model) would silently change
+  // what runs and what it costs. A config still naming it fails at the CLI.
+  // The same goes for the retired north-mini-code-free and laguna-s-2.1-free,
+  // which never had a family here and have no free successor.
   {
-    id: "deepseek-v4-flash-free",
-    name: "DeepSeek V4 Flash Free",
-    aliases: ["deepseek free", "deepseek-v4-flash-free", "opencode/deepseek-v4-flash-free"],
-    reference: { provider: "opencode", modelId: "opencode/deepseek-v4-flash-free" },
+    id: "nemotron-3.5-lightning-free",
+    name: "Nemotron 3.5 Lightning Free",
+    aliases: ["nemotron lightning", "nemotron-3.5-lightning-free"],
+    reference: { provider: "opencode", modelId: "opencode/nemotron-3.5-lightning-free" },
     classes: ["simple"],
   },
   {

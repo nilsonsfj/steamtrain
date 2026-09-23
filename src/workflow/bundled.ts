@@ -9,13 +9,11 @@ import type { WorkflowSpec } from "./types";
  *
  * Agent-backed steps default to OpenCode Zen free-tier models so bundled
  * workflows run without paid provider credentials (and without requiring the
- * first-class MiMo CLI). OpenCode Zen's `opencode/deepseek-v4-flash-free` is
- * intentionally omitted: it hangs on multi-turn tool loops (DeepSeek
- * `reasoning_content` replay). Steps run in the session cwd by default — to
+ * first-class MiMo CLI). Steps run in the session cwd by default — to
  * target other repos/dirs, add a per-step `cwd` (and optional `env` /
  * `extraArgs`), e.g.:
  *
- *   { id: "scan-api", agent: "opencode", model: "opencode/mimo-v2.5-free",
+ *   { id: "scan-api", agent: "opencode", model: "opencode/mimo-v2.6-flash-free",
  *     cwd: "../api-service", env: { FOO: "bar" }, extraArgs: ["--add-dir", "."],
  *     prompt: "Audit {{input}} in this repo" }
  */
@@ -23,11 +21,9 @@ import type { WorkflowSpec } from "./types";
 /** OpenCode Zen free models used by bundled workflows. */
 const FREE = {
   nemotronUltra: "opencode/nemotron-3-ultra-free",
-  mimoZen: "opencode/mimo-v2.5-free",
-  northMini: "opencode/north-mini-code-free",
-  laguna: "opencode/laguna-s-2.1-free",
-  // Intentionally omit opencode/deepseek-v4-flash-free: it hangs on multi-turn
-  // tool loops (DeepSeek reasoning_content replay) and was timing out babysit.
+  mimoZen: "opencode/mimo-v2.6-flash-free",
+  nemotronLightning: "opencode/nemotron-3.5-lightning-free",
+  lingFlash: "opencode/ling-3.0-flash-fin-free",
 } as const;
 
 /**
@@ -86,7 +82,7 @@ const bugHunt: WorkflowSpec = {
           id: "scan-errors",
           kind: "worker",
           agent: "opencode",
-          model: FREE.northMini,
+          model: FREE.nemotronLightning,
           prompt:
             "Hunt for error-handling and resource bugs in the scope below: swallowed errors, missing awaits, leaked handles/processes, unchecked failures. For each finding give file:line, the risk, and a fix. Scope: {{input}}",
         },
@@ -94,7 +90,7 @@ const bugHunt: WorkflowSpec = {
           id: "scan-security",
           kind: "worker",
           agent: "opencode",
-          model: FREE.laguna,
+          model: FREE.lingFlash,
           prompt:
             "Hunt for security issues in the scope below: missing input validation, injection, unsafe shell/exec, missing authz checks. For each finding give file:line, the risk, and a fix. Scope: {{input}}",
         },
@@ -280,13 +276,13 @@ const codeReview: WorkflowSpec = {
       type: "model",
       description: "Agent model that performs the primary review.",
       default: FREE.nemotronUltra,
-      fallbackModels: [FREE.mimoZen, FREE.northMini],
+      fallbackModels: [FREE.mimoZen, FREE.nemotronLightning],
     },
     crossCheckModel: {
       type: "model",
       description: "Agent model that cross-checks flagged issues for false positives.",
       default: FREE.mimoZen,
-      fallbackModels: [FREE.northMini, FREE.laguna],
+      fallbackModels: [FREE.nemotronLightning, FREE.lingFlash],
     },
   },
   phases: [
@@ -385,7 +381,7 @@ const codeReview: WorkflowSpec = {
           id: "report",
           kind: "consolidator",
           agent: "opencode",
-          model: FREE.northMini,
+          model: FREE.nemotronLightning,
           dependsOn: ["review", "cross-check"],
           prompt:
             "Write the final code review report for: {{input}}\n\n" +
@@ -438,13 +434,13 @@ const mainlineStream: WorkflowSpec = {
       type: "model",
       description: "Agent model that implements the charter and applies review fixes.",
       default: FREE.mimoZen,
-      fallbackModels: [FREE.northMini, FREE.laguna],
+      fallbackModels: [FREE.nemotronLightning, FREE.lingFlash],
     },
     reviewerModel: {
       type: "model",
       description: "Agent model that reviews the diff each loop iteration.",
       default: FREE.nemotronUltra,
-      fallbackModels: [FREE.mimoZen, FREE.northMini],
+      fallbackModels: [FREE.mimoZen, FREE.nemotronLightning],
     },
     reviewerEffort: {
       description: "Reasoning effort/variant for the reviewer model. Empty omits the flag.",
@@ -684,7 +680,7 @@ const mainline: WorkflowSpec = {
       type: "model",
       description: "Agent model that splits the prompt into independent streams.",
       default: FREE.mimoZen,
-      fallbackModels: [FREE.northMini, FREE.laguna],
+      fallbackModels: [FREE.nemotronLightning, FREE.lingFlash],
     },
     plannerEffort: {
       description: "Reasoning effort/variant for the planner model. Empty omits the flag.",
@@ -694,13 +690,13 @@ const mainline: WorkflowSpec = {
       type: "model",
       description: "Agent model that implements each stream and the final fixes.",
       default: FREE.mimoZen,
-      fallbackModels: [FREE.northMini, FREE.laguna],
+      fallbackModels: [FREE.nemotronLightning, FREE.lingFlash],
     },
     reviewerModel: {
       type: "model",
       description: "Agent model that reviews each stream and the final merge.",
       default: FREE.nemotronUltra,
-      fallbackModels: [FREE.mimoZen, FREE.northMini],
+      fallbackModels: [FREE.mimoZen, FREE.nemotronLightning],
     },
     reviewerEffort: {
       description: "Reasoning effort/variant for the reviewer model. Empty omits the flag.",
@@ -709,8 +705,8 @@ const mainline: WorkflowSpec = {
     mergeModel: {
       type: "model",
       description: "Agent model that resolves merge conflicts between streams, if any arise.",
-      default: FREE.northMini,
-      fallbackModels: [FREE.mimoZen, FREE.laguna],
+      default: FREE.nemotronLightning,
+      fallbackModels: [FREE.mimoZen, FREE.lingFlash],
     },
     maxStreams: {
       type: "number",
@@ -1068,7 +1064,7 @@ const babysitPr: WorkflowSpec = {
       type: "model",
       description: "Agent model that prepares the PR (does not merge).",
       default: FREE.mimoZen,
-      fallbackModels: [FREE.northMini, FREE.laguna],
+      fallbackModels: [FREE.nemotronLightning, FREE.lingFlash],
     },
     checksTimeoutSec: {
       type: "number",
@@ -1268,7 +1264,7 @@ const babysitAllPrs: WorkflowSpec = {
       type: "model",
       description: "Agent model that prepares each PR (does not list or merge).",
       default: FREE.mimoZen,
-      fallbackModels: [FREE.northMini, FREE.laguna],
+      fallbackModels: [FREE.nemotronLightning, FREE.lingFlash],
     },
     checksTimeoutSec: {
       type: "number",

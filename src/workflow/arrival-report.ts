@@ -1,3 +1,4 @@
+import { replayedSpend, totalTokens } from "./cost";
 import type { StepState, WorkflowState } from "./reducer";
 import { flattenSteps } from "./reducer";
 
@@ -38,7 +39,14 @@ export interface ArrivalReceipt {
   blockedCount: number;
   costUsd: number;
   tokens: number;
-  /** True when the run spent $0 and used no tokens (tour / command-only). */
+  /**
+   * Whether any step reported a cost / token count at all. Several agents
+   * (Antigravity, Kiro; Cursor and Amp for cost) report none, and "$0" for
+   * those runs would read as "free" rather than "unknown".
+   */
+  costReported?: boolean;
+  tokensReported?: boolean;
+  /** True when no agent or API step ran (tour / command-only): genuinely $0. */
   agentless: boolean;
 }
 
@@ -113,8 +121,8 @@ export const ARRIVAL_NEXT_CANDIDATES = DEFAULT_NEXT_CANDIDATES;
  * Build the Arrival Report from a finished (or finishing) workflow state.
  * Returns null when the run has not completed.
  *
- * Kept free of `cost.ts` / `history.ts` imports so the browser reducer bundle
- * does not pull the analytics graph.
+ * Takes only pure helpers from `cost.ts` and nothing from `history.ts`, so the
+ * browser reducer bundle does not pull the analytics graph.
  */
 export function buildArrivalReport(
   state: WorkflowState,
@@ -146,7 +154,7 @@ export function buildArrivalReport(
     else if (isCascadeVictim(result)) blockedCount += 1;
     else failCount += 1;
     costUsd += result.costUsd ?? 0;
-    tokens += tokenTotal(result.tokens);
+    tokens += totalTokens(result.tokens);
     durationMs += result.durationMs ?? 0;
   }
 
@@ -161,13 +169,31 @@ export function buildArrivalReport(
     if (failures.length > 0) hero = [...failures, "", hero].join("\n");
   }
 
-  // Prefer an explicit credentialFree flag (tour). The $0/0-token heuristic is
-  // a best-effort fallback — a cancelled agent run that never billed can look
-  // the same, which is rare on the Arrival surface.
+  // Prefer an explicit credentialFree flag (tour). Otherwise ask whether an
+  // agent or API step actually ran — "$0 and no tokens" alone can't tell a
+  // command-only ride from an agent that reports no usage (Antigravity, Kiro).
   // Invariant: agentless implies costUsd === 0 && tokens === 0.
+  const ranBilledStep = flat.some(({ step }) => Boolean(step.agent || step.api) && executed(step));
+  // The run's spend is known only when every agent/API step that executed
+  // either reported its own or was a cached replay — which billed nothing this
+  // run, even for an agent that never reports spend (Antigravity, Kiro). One
+  // silent step leaves the total unknown; no agent steps at all (commands
+  // only) is a known $0. Fan-out parents carry no spend of their own.
+  const billedSteps = flat
+    .map(({ step }) => step)
+    .filter(
+      (step) =>
+        Boolean(step.agent || step.api) && executed(step) && !step.result?.childResults?.length,
+    );
+  const costReported = billedSteps.every(
+    (step) => step.cached || step.result?.costUsd !== undefined,
+  );
+  const tokensReported = billedSteps.every(
+    (step) => step.cached || step.result?.tokens !== undefined,
+  );
   const agentless =
     opts.credentialFree === true ||
-    (costUsd === 0 && tokens === 0 && failCount === 0 && blockedCount === 0);
+    (!ranBilledStep && costUsd === 0 && tokens === 0 && failCount === 0 && blockedCount === 0);
 
   const nextCandidates = opts.nextCandidates ?? DEFAULT_NEXT_CANDIDATES;
   const current = state.name;
@@ -200,6 +226,8 @@ export function buildArrivalReport(
       blockedCount,
       costUsd,
       tokens,
+      costReported,
+      tokensReported,
       agentless,
     },
     notices: arrivalNotices(flat.map((f) => f.step)),
@@ -214,6 +242,15 @@ export function buildArrivalReport(
  * error happens to open with that word from being written off as a victim.
  */
 const LEGACY_CASCADE_ERROR = /^dependency '[^']+' failed(:|$)/;
+
+/**
+ * A step that actually ran: not skipped, not blocked by a failed dependency,
+ * and not a fan-out child left undispatched by a cost cap.
+ */
+function executed(step: StepState): boolean {
+  const r = step.result;
+  return r !== undefined && !r.skipped && !r.notRun && !isCascadeVictim(r);
+}
 
 /**
  * True when this not-ok result is a step that never ran because a dependency
@@ -397,7 +434,8 @@ export function formatArrivalHeadline(
   const parts: string[] = [`${subject} ${outcome}`];
   if (receipt.agentless) parts.push("$0");
   else if (receipt.costUsd > 0) parts.push(`$${receipt.costUsd.toFixed(4)}`);
-  else parts.push("$0");
+  // An agent that reports no cost is unknown, not free — leave it out.
+  else if (receipt.costReported !== false) parts.push("$0");
   parts.push(`${(receipt.durationMs / 1000).toFixed(1)}s`);
   if (receipt.failCount > 0) parts.push(`${receipt.failCount} failed`);
   return parts.join(" · ");
@@ -417,13 +455,17 @@ export function arrivalReceiptCards(receipt: ArrivalReceipt): Array<{
     ? "$0 · no agents"
     : receipt.costUsd > 0
       ? `$${receipt.costUsd.toFixed(4)}`
-      : "$0";
+      : receipt.costReported === false
+        ? "not reported"
+        : "$0";
   const produced =
     receipt.tokens > 0
       ? `${compactTokens(receipt.tokens)} tokens`
       : receipt.agentless
         ? "workflow output"
-        : "no tokens billed";
+        : receipt.tokensReported === false
+          ? "tokens not reported"
+          : "no tokens billed";
   return [
     { id: "ran", label: "What ran", value: ranParts.join(" · ") },
     { id: "cost", label: "What it cost", value: cost },
@@ -453,7 +495,8 @@ function leafResults(state: WorkflowState): ArrivalStepResult[] {
   const out: ArrivalStepResult[] = [];
   for (const phase of state.phases) {
     for (const step of phase.steps) {
-      if (step.result) out.push(step.result);
+      // A cached replay's spend belongs to the run that produced it.
+      if (step.result) out.push(step.cached ? replayedSpend(step.result) : step.result);
     }
   }
   return out.filter((r) => !r.childResults?.length);
@@ -488,13 +531,6 @@ function fallbackHero(state: WorkflowState): string {
   return state.name
     ? `Workflow '${state.name}' stopped short. Press i to show step details and find the stall.`
     : "Workflow stopped short. Press i to show step details and find the stall.";
-}
-
-function tokenTotal(t: ArrivalStepResult["tokens"] | undefined): number {
-  if (!t) return 0;
-  return (
-    (t.input ?? 0) + (t.output ?? 0) + (t.cacheRead ?? 0) + (t.cacheWrite ?? 0) + (t.reasoning ?? 0)
-  );
 }
 
 function compactTokens(n: number): string {

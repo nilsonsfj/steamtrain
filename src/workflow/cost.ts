@@ -198,6 +198,9 @@ function sortByCost<T extends { costUsd: number }>(rows: T[]): T[] {
  * Walk a history record's phase tree yielding one {@link LeafUsage} per agent
  * invocation. Fan-out parents (their `result.childResults`) are skipped; their
  * children are the leaves. Steps that never ran (`pending`) contribute nothing.
+ * A cached replay still counts as a leaf but carries no spend: the result it
+ * replays was billed to the run that produced it, and counting it again would
+ * bill it once more for every run that reuses the cache.
  */
 export function* recordLeaves(phases: HistoryPhase[]): Generator<LeafUsage & { stepId: string }> {
   for (const phase of phases) {
@@ -209,11 +212,28 @@ export function* recordLeaves(phases: HistoryPhase[]): Generator<LeafUsage & { s
         agent: step.agent,
         api: step.api,
         model: step.model,
-        costUsd: step.result?.costUsd,
-        tokens: step.result?.tokens,
+        // `undefined` where `replayedSpend` gives 0: leaves are only summed, so
+        // either adds nothing to this run.
+        costUsd: step.cached ? undefined : step.result?.costUsd,
+        tokens: step.cached ? undefined : step.result?.tokens,
       };
     }
   }
+}
+
+/**
+ * A cached result as the run that replayed it should count it: the replay
+ * billed nothing — its spend belongs to the run that produced it — so it
+ * reports $0 and no tokens where the original reported any (and still nothing
+ * where the agent never reports spend). The stored step keeps the original,
+ * so history can show what the step once cost.
+ */
+export function replayedSpend<T extends Pick<StepResult, "costUsd" | "tokens">>(result: T): T {
+  return {
+    ...result,
+    costUsd: result.costUsd === undefined ? undefined : 0,
+    tokens: result.tokens ? {} : undefined,
+  };
 }
 
 /** Per-model breakdown for a single run's phase tree. */

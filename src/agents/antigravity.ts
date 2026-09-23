@@ -24,14 +24,18 @@ import { stderrSummary } from "./util";
  * live catalog (e.g. `claude-sonnet-4-6-medium`, `gemini-3.1-pro-medium`).
  */
 export const ANTIGRAVITY_MODELS: readonly AgentModel[] = [
+  { id: "gemini-3.8-flash", name: "Gemini 3.8 Flash" },
+  { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)" },
+  { id: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash (Medium)" },
+  { id: "gemini-3.8-flash-low", name: "Gemini 3.8 Flash (Low)" },
+  { id: "gemini-3.7-flash", name: "Gemini 3.7 Flash" },
+  { id: "gemini-3.7-flash-high", name: "Gemini 3.7 Flash (High)" },
+  { id: "gemini-3.7-flash-medium", name: "Gemini 3.7 Flash (Medium)" },
+  { id: "gemini-3.7-flash-low", name: "Gemini 3.7 Flash (Low)" },
   { id: "gemini-3.6-flash", name: "Gemini 3.6 Flash" },
   { id: "gemini-3.6-flash-high", name: "Gemini 3.6 Flash (High)" },
   { id: "gemini-3.6-flash-medium", name: "Gemini 3.6 Flash (Medium)" },
   { id: "gemini-3.6-flash-low", name: "Gemini 3.6 Flash (Low)" },
-  { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash" },
-  { id: "gemini-3.5-flash-high", name: "Gemini 3.5 Flash (High)" },
-  { id: "gemini-3.5-flash-medium", name: "Gemini 3.5 Flash (Medium)" },
-  { id: "gemini-3.5-flash-low", name: "Gemini 3.5 Flash (Low)" },
   { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro" },
   { id: "gemini-3.1-pro-high", name: "Gemini 3.1 Pro (High)" },
   { id: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low)" },
@@ -57,8 +61,9 @@ export const ANTIGRAVITY_MODELS: readonly AgentModel[] = [
 const AGY_VARIANT_BASES: Readonly<
   Record<string, { readonly efforts: readonly string[]; readonly defaultEffort: string }>
 > = {
+  "gemini-3.8-flash": { efforts: ["low", "medium", "high"], defaultEffort: "high" },
+  "gemini-3.7-flash": { efforts: ["low", "medium", "high"], defaultEffort: "high" },
   "gemini-3.6-flash": { efforts: ["low", "medium", "high"], defaultEffort: "high" },
-  "gemini-3.5-flash": { efforts: ["low", "medium", "high"], defaultEffort: "high" },
   "gemini-3.1-pro": { efforts: ["low", "high"], defaultEffort: "high" },
   "claude-opus-4-6": { efforts: ["thinking"], defaultEffort: "thinking" },
   "gpt-oss-120b": { efforts: ["medium"], defaultEffort: "medium" },
@@ -66,12 +71,15 @@ const AGY_VARIANT_BASES: Readonly<
 
 /** Ids that current agy accepts as `--model` values (plus bare aliases we rewrite). */
 const AGY_LISTED_MODEL_IDS = new Set<string>([
+  "gemini-3.8-flash-high",
+  "gemini-3.8-flash-medium",
+  "gemini-3.8-flash-low",
+  "gemini-3.7-flash-high",
+  "gemini-3.7-flash-medium",
+  "gemini-3.7-flash-low",
   "gemini-3.6-flash-high",
   "gemini-3.6-flash-medium",
   "gemini-3.6-flash-low",
-  "gemini-3.5-flash-high",
-  "gemini-3.5-flash-medium",
-  "gemini-3.5-flash-low",
   "gemini-3.1-pro-high",
   "gemini-3.1-pro-low",
   "claude-sonnet-4-6",
@@ -81,6 +89,14 @@ const AGY_LISTED_MODEL_IDS = new Set<string>([
 
 /** Legacy display labels from older agy builds → current slug ids. */
 const LEGACY_DISPLAY_TO_SLUG: Readonly<Record<string, string>> = {
+  "Gemini 3.8 Flash": "gemini-3.8-flash",
+  "Gemini 3.8 Flash (High)": "gemini-3.8-flash-high",
+  "Gemini 3.8 Flash (Medium)": "gemini-3.8-flash-medium",
+  "Gemini 3.8 Flash (Low)": "gemini-3.8-flash-low",
+  "Gemini 3.7 Flash": "gemini-3.7-flash",
+  "Gemini 3.7 Flash (High)": "gemini-3.7-flash-high",
+  "Gemini 3.7 Flash (Medium)": "gemini-3.7-flash-medium",
+  "Gemini 3.7 Flash (Low)": "gemini-3.7-flash-low",
   "Gemini 3.6 Flash": "gemini-3.6-flash",
   "Gemini 3.6 Flash (High)": "gemini-3.6-flash-high",
   "Gemini 3.6 Flash (Medium)": "gemini-3.6-flash-medium",

@@ -44,5 +44,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: "1.18.32"
         with:
-          model: opencode/deepseek-v4-flash-free
+          model: opencode/mimo-v2.6-flash-free
           use_github_token: true

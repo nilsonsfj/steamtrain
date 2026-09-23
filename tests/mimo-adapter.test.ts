@@ -12,6 +12,9 @@ describe("MIMO_MODELS", () => {
   it("ships the Xiaomi MiMo Code catalog with MiMo Auto as the free default", () => {
     expect(MIMO_MODELS.map((m) => m.id)).toEqual([
       "mimo/mimo-auto",
+      "xiaomi/mimo-v2.6-flash",
+      "xiaomi/mimo-v2.6-pro",
+      "xiaomi/mimo-v2.6-pro-ultraspeed",
       "xiaomi/mimo-v2.5",
       "xiaomi/mimo-v2.5-pro",
       "xiaomi/mimo-v2.5-pro-ultraspeed",

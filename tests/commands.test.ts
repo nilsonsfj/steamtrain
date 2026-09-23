@@ -227,7 +227,7 @@ describe("executeSlashCommand", () => {
     expect(result.handled).toBe(true);
     expect(updateWorkspace).toHaveBeenCalledWith("plan", {
       agent: "opencode",
-      model: "opencode/mimo-v2.5-free",
+      model: "opencode/mimo-v2.6-flash-free",
     });
   });
 
@@ -299,7 +299,7 @@ describe("executeSlashCommand", () => {
     expect(result.handled).toBe(true);
     expect(updateWorkspace).toHaveBeenCalledWith("plan", {
       agent: "opencode",
-      model: "opencode/mimo-v2.5-free",
+      model: "opencode/mimo-v2.6-flash-free",
       effort: undefined,
     });
   });

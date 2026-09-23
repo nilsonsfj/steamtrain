@@ -219,8 +219,11 @@ export function computeRunTotals(phases: HistoryPhase[]): RunTotals {
       if (step.status === "error") totals.failed += 1;
       else if (step.status === "done") totals.ok += 1;
       if (step.cached) totals.cached += 1;
-      if (step.result?.costUsd) totals.costUsd += step.result.costUsd;
-      addTokensInto(totals.tokens, step.result?.tokens);
+      // A cached replay was billed to the run that produced it, not this one.
+      else {
+        if (step.result?.costUsd) totals.costUsd += step.result.costUsd;
+        addTokensInto(totals.tokens, step.result?.tokens);
+      }
       if (step.result?.durationMs)
         phaseMaxDuration = Math.max(phaseMaxDuration, step.result.durationMs);
     }

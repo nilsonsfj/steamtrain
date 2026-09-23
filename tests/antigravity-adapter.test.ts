@@ -96,13 +96,15 @@ describe("buildAntigravityRunArgs", () => {
 describe("resolveAntigravityModel", () => {
   it("appends slug effort suffix when model has none", () => {
     expect(resolveAntigravityModel("gemini-3.1-pro", "high")).toBe("gemini-3.1-pro-high");
-    expect(resolveAntigravityModel("gemini-3.5-flash", "low")).toBe("gemini-3.5-flash-low");
+    expect(resolveAntigravityModel("gemini-3.8-flash", "low")).toBe("gemini-3.8-flash-low");
     expect(resolveAntigravityModel("gemini-3.6-flash", "medium")).toBe("gemini-3.6-flash-medium");
   });
 
   it("rewrites legacy display labels and applies effort as a slug suffix", () => {
     expect(resolveAntigravityModel("Gemini 3.1 Pro", "high")).toBe("gemini-3.1-pro-high");
-    expect(resolveAntigravityModel("Gemini 3.5 Flash", "low")).toBe("gemini-3.5-flash-low");
+    expect(resolveAntigravityModel("Gemini 3.6 Flash", "low")).toBe("gemini-3.6-flash-low");
+    expect(resolveAntigravityModel("Gemini 3.8 Flash")).toBe("gemini-3.8-flash-high");
+    expect(resolveAntigravityModel("Gemini 3.7 Flash (Medium)")).toBe("gemini-3.7-flash-medium");
     // Live agy lists Sonnet as bare id only; thinking/medium suffixes are rejected.
     expect(resolveAntigravityModel("Claude Sonnet 4.6", "thinking")).toBe("claude-sonnet-4-6");
     expect(resolveAntigravityModel("Claude Sonnet 4.6 (Thinking)")).toBe("claude-sonnet-4-6");
@@ -161,7 +163,8 @@ describe("resolveAntigravityModel", () => {
     // Regression: agy rejects `--model gemini-3.6-flash` without --effort.
     expect(resolveAntigravityModel("gemini-3.6-flash")).toBe("gemini-3.6-flash-high");
     expect(resolveAntigravityModel("Gemini 3.6 Flash")).toBe("gemini-3.6-flash-high");
-    expect(resolveAntigravityModel("gemini-3.5-flash")).toBe("gemini-3.5-flash-high");
+    expect(resolveAntigravityModel("gemini-3.8-flash")).toBe("gemini-3.8-flash-high");
+    expect(resolveAntigravityModel("gemini-3.7-flash")).toBe("gemini-3.7-flash-high");
     expect(resolveAntigravityModel("gemini-3.1-pro")).toBe("gemini-3.1-pro-high");
     expect(resolveAntigravityModel("gemini-3.6-flash", "")).toBe("gemini-3.6-flash-high");
     expect(resolveAntigravityModel("gemini-3.6-flash", "medium")).toBe("gemini-3.6-flash-medium");

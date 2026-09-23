@@ -28,7 +28,7 @@ describe("createWorkflowPromptValue", () => {
   });
 
   it("does not clobber an unrelated slash command", () => {
-    const seed = "/model opencode/mimo-v2.5-free";
+    const seed = "/model opencode/mimo-v2.6-flash-free";
     expect(createWorkflowPromptValue(seed)).toBe(seed);
   });
 });

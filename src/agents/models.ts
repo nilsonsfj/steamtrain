@@ -216,14 +216,13 @@ const PROVIDER_ADAPTERS: Record<AgentProviderId, () => AgentAdapter> = {
 
 /**
  * Free OpenCode Zen models preferred when the live catalog does not include
- * the adapter's declared default. DeepSeek free is intentionally omitted
- * (hangs on multi-turn tool loops).
+ * the adapter's declared default.
  */
 const OPENCODE_FREE_DEFAULT_PREFERENCE = [
-  "opencode/mimo-v2.5-free",
-  "opencode/north-mini-code-free",
+  "opencode/mimo-v2.6-flash-free",
+  "opencode/nemotron-3.5-lightning-free",
   "opencode/nemotron-3-ultra-free",
-  "opencode/laguna-s-2.1-free",
+  "opencode/ling-3.0-flash-fin-free",
 ] as const;
 
 /** Default model when switching to an agent without an explicit model. */

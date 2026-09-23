@@ -194,10 +194,10 @@ failing the step:
   "inputs": {
     "coderModel": {
       "type": "model",
-      "default": "opencode/mimo-v2.5-free",
+      "default": "opencode/mimo-v2.6-flash-free",
       "fallbackModels": [
-        "opencode/deepseek-v4-flash-free",
-        "opencode/north-mini-code-free"
+        "opencode/nemotron-3.5-lightning-free",
+        "opencode/ling-3.0-flash-fin-free"
       ]
     },
     "issueTiming": {

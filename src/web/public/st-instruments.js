@@ -51,7 +51,8 @@
     var steps = flattenSteps();
     var spent = 0, tokens = emptyTokens(), completed = 0, cachedN = 0;
     steps.forEach(function (s) {
-      if (s.result) {
+      // A cached replay's spend belongs to the run that produced it.
+      if (s.result && !s.cached) {
         spent += s.result.costUsd || 0;
         addTokensInto(tokens, s.result.tokens);
       }

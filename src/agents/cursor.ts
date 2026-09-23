@@ -78,14 +78,22 @@ export function buildCursorRunArgs(opts: AgentRunOptions): string[] {
   ];
 }
 
+/**
+ * Map Cursor's `result.usage` onto the normalized {@link TokenUsage}. Cursor
+ * reports tokens only — no cost — and nets cache reads/writes out of
+ * `inputTokens` itself, so the categories map one to one.
+ */
 function cursorTokens(usage: CursorUsage | undefined): TokenUsage | undefined {
   if (!usage) return undefined;
   const tokens: TokenUsage = {};
-  if (usage.input_tokens !== undefined) tokens.input = usage.input_tokens;
-  if (usage.output_tokens !== undefined) tokens.output = usage.output_tokens;
-  if (usage.cache_read_input_tokens !== undefined) tokens.cacheRead = usage.cache_read_input_tokens;
-  if (usage.cache_creation_input_tokens !== undefined)
-    tokens.cacheWrite = usage.cache_creation_input_tokens;
+  const input = usage.inputTokens ?? usage.input_tokens;
+  const output = usage.outputTokens ?? usage.output_tokens;
+  const cacheRead = usage.cacheReadTokens ?? usage.cache_read_input_tokens;
+  const cacheWrite = usage.cacheWriteTokens ?? usage.cache_creation_input_tokens;
+  if (input !== undefined) tokens.input = input;
+  if (output !== undefined) tokens.output = output;
+  if (cacheRead !== undefined) tokens.cacheRead = cacheRead;
+  if (cacheWrite !== undefined) tokens.cacheWrite = cacheWrite;
   return Object.keys(tokens).length > 0 ? tokens : undefined;
 }
 

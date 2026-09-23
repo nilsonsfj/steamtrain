@@ -77,8 +77,19 @@ export const cursorToolCall = z
   })
   .passthrough();
 
+/**
+ * The `result` line's `usage`. Cursor Agent CLI (2026.07.x) writes it in
+ * camelCase — `{inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}`
+ * — with `inputTokens` already net of cache reads and writes (it subtracts them
+ * before printing). The snake_case Anthropic-style names are kept for older
+ * builds and hand-written fixtures.
+ */
 export const cursorUsage = z
   .object({
+    inputTokens: z.number().optional(),
+    outputTokens: z.number().optional(),
+    cacheReadTokens: z.number().optional(),
+    cacheWriteTokens: z.number().optional(),
     input_tokens: z.number().optional(),
     output_tokens: z.number().optional(),
     cache_read_input_tokens: z.number().optional(),

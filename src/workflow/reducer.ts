@@ -7,7 +7,7 @@ import {
 import type { AgentEvent, AgentInstanceId, TokenUsage } from "../types/events";
 import type { ApprovalRejectDisposition } from "./approval";
 import type { StepEditPatch } from "./control";
-import { addTokens } from "./cost";
+import { addTokens, replayedSpend } from "./cost";
 import type { StepPermissionsInfo, WorkflowEvent } from "./events";
 import type { RunRecord } from "./history";
 import { llmStepApiId } from "./llm";
@@ -382,7 +382,8 @@ export function workflowStateFromRecord(record: RunRecord): WorkflowState {
   const results: StepResult[] = [];
   for (const phase of record.phases) {
     for (const step of phase.steps) {
-      if (step.result) results.push(step.result);
+      // Mirror the live run's `allResults`: a cached replay billed nothing here.
+      if (step.result) results.push(step.cached ? replayedSpend(step.result) : step.result);
     }
   }
   return {

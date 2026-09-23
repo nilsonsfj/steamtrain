@@ -13,6 +13,7 @@ import {
   addTokens,
   aggregateCosts,
   aggregateLeavesByModel,
+  costForResults,
   formatTokens,
   resultLeaves,
   runWorkflow,
@@ -138,11 +139,13 @@ describe("adapters parse token usage", () => {
 
   it("opencode maps its per-step token block", () => {
     const line =
-      '{"type":"step.finish","cost":0.01,"tokens":{"input":80,"output":20,"reasoning":5,"cache":{"read":10,"write":4}}}';
+      '{"type":"step_finish","part":{"type":"step-finish","cost":0.01,"tokens":{"input":80,"output":20,"reasoning":5,"cache":{"read":10,"write":4}}}}';
     const events = createOpenCodeMapper()(JSON.parse(line));
     const result = events.find((e) => e.kind === "result");
+    // opencode's `output` excludes reasoning; the normalized one includes it.
     expect(result).toMatchObject({
-      tokens: { input: 80, output: 20, reasoning: 5, cacheRead: 10, cacheWrite: 4 },
+      costUsd: 0.01,
+      tokens: { input: 80, output: 25, reasoning: 5, cacheRead: 10, cacheWrite: 4 },
     });
   });
 });
@@ -174,6 +177,260 @@ describe("engine threads tokens into StepResult and totals", () => {
     const record = builder.build({ status: "done" });
     expect(record.totals.tokens).toMatchObject({ input: 300, output: 60, cacheRead: 50 });
     expect(totalTokens(record.totals.tokens)).toBe(410);
+  });
+});
+
+describe("engine folds live usage increments into the step result", () => {
+  /** A fake adapter that replays a fixed event script for every step. */
+  function scriptedDeps(script: AgentEvent[]): WorkflowDeps {
+    return {
+      createAdapter: (id: AgentId): AgentAdapter => ({
+        id,
+        binary: "fake",
+        defaultModel: "test",
+        run: () =>
+          (async function* () {
+            yield* script;
+          })(),
+      }),
+      maxConcurrency: 1,
+      cwd: "/base",
+    };
+  }
+  const oneStep: WorkflowSpec = {
+    name: "usage-fold",
+    phases: [
+      { id: "p", title: "p", steps: [{ id: "a", agent: "claude", model: "m", prompt: "x" }] },
+    ],
+  };
+  const usage = (tokens: TokenUsage, costUsd?: number): AgentEvent => ({
+    kind: "usage",
+    agent: "claude",
+    ts: 0,
+    tokens,
+    costUsd,
+  });
+  const stepResult = async (script: AgentEvent[]) => {
+    const events = await collect(oneStep, scriptedDeps(script));
+    const done = events.find((e) => e.kind === "step_done") as Extract<
+      WorkflowEvent,
+      { kind: "step_done" }
+    >;
+    return done.result;
+  };
+
+  it("keeps what was billed when the turn dies before its result", async () => {
+    const result = await stepResult([
+      usage({ input: 100, output: 10 }, 0.01),
+      // A tool ran, so the failure is not retried: one attempt's spend.
+      { kind: "tool_use", agent: "claude", ts: 0, name: "Bash" },
+      usage({ output: 5 }, 0.002),
+      { kind: "error", agent: "claude", ts: 0, message: "killed" },
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.costUsd).toBeCloseTo(0.012, 10);
+    expect(result.tokens).toMatchObject({ input: 100, output: 15 });
+  });
+
+  it("lets a result's totals replace the increments it restates", async () => {
+    const result = await stepResult([
+      usage({ input: 100, output: 10 }, 0.01),
+      {
+        kind: "result",
+        agent: "claude",
+        ts: 0,
+        isError: false,
+        text: "ok",
+        costUsd: 0.05,
+        tokens: { input: 100, output: 40 },
+      },
+    ]);
+    expect(result.costUsd).toBe(0.05);
+    expect(result.tokens).toEqual({ input: 100, output: 40 });
+  });
+
+  it("adds increments that arrive after the last result", async () => {
+    const result = await stepResult([
+      { kind: "result", agent: "claude", ts: 0, isError: false, text: "ok", tokens: { input: 5 } },
+      usage({ input: 7 }),
+    ]);
+    expect(result.tokens).toMatchObject({ input: 12 });
+  });
+});
+
+describe("engine keeps a failed attempt's spend when the step retries", () => {
+  it("sums every attempt's cost and tokens into the final result", async () => {
+    let calls = 0;
+    const deps: WorkflowDeps = {
+      createAdapter: (id: AgentId): AgentAdapter => ({
+        id,
+        binary: "fake",
+        defaultModel: "test",
+        run: () =>
+          (async function* (): AsyncGenerator<AgentEvent> {
+            calls += 1;
+            if (calls === 1) {
+              // Billed, then died before a result: retryable, but not free.
+              yield {
+                kind: "usage",
+                agent: "claude",
+                ts: 0,
+                tokens: { input: 40 },
+                costUsd: 0.004,
+              };
+              yield { kind: "error", agent: "claude", ts: 0, message: "connection reset" };
+              return;
+            }
+            yield {
+              kind: "result",
+              agent: "claude",
+              ts: 0,
+              isError: false,
+              text: "ok",
+              costUsd: 0.01,
+              tokens: { input: 100, output: 10 },
+            };
+          })(),
+      }),
+      maxConcurrency: 1,
+      cwd: "/base",
+    };
+    const spec: WorkflowSpec = {
+      name: "retry-spend",
+      phases: [
+        {
+          id: "p",
+          title: "p",
+          steps: [
+            {
+              id: "a",
+              agent: "claude",
+              model: "m",
+              prompt: "x",
+              retry: { maxAttempts: 2, initialDelayMs: 1, factor: 1, jitter: false },
+            },
+          ],
+        },
+      ],
+    };
+    const events = await collect(spec, deps);
+    const done = events.find((e) => e.kind === "step_done") as Extract<
+      WorkflowEvent,
+      { kind: "step_done" }
+    >;
+    expect(calls).toBe(2);
+    expect(done.result.ok).toBe(true);
+    expect(done.result.costUsd).toBeCloseTo(0.014, 10);
+    expect(done.result.tokens).toMatchObject({ input: 140, output: 10 });
+  });
+});
+
+describe("run summary keeps every loop pass's spend", () => {
+  it("rolls earlier passes' cost and tokens into the step's final result", async () => {
+    let calls = 0;
+    const deps: WorkflowDeps = {
+      createAdapter: (id: AgentId): AgentAdapter => ({
+        id,
+        binary: "fake",
+        defaultModel: "test",
+        run: () =>
+          (async function* (): AsyncGenerator<AgentEvent> {
+            calls += 1;
+            yield {
+              kind: "result",
+              agent: "claude",
+              ts: 0,
+              isError: false,
+              // The gate passes on the third pass.
+              text: calls >= 3 ? "x" : "not yet",
+              costUsd: 0.01,
+              tokens: { input: 10 },
+            };
+          })(),
+      }),
+      maxConcurrency: 1,
+      cwd: "/base",
+    };
+    const spec: WorkflowSpec = {
+      name: "loop-spend",
+      phases: [
+        {
+          id: "fix",
+          title: "fix",
+          steps: [{ id: "fix-step", agent: "claude", model: "m", prompt: "p" }],
+        },
+        {
+          id: "check",
+          title: "check",
+          steps: [
+            {
+              id: "g",
+              kind: "gate",
+              loopTo: "fix",
+              maxIterations: 5,
+              condition: { step: "fix-step", contains: "x" },
+            },
+          ],
+        },
+      ],
+    };
+    const events = await collect(spec, deps);
+    const done = events.find((e) => e.kind === "workflow_done") as Extract<
+      WorkflowEvent,
+      { kind: "workflow_done" }
+    >;
+    expect(calls).toBe(3);
+    const fix = done.results.find((r) => r.stepId === "fix-step")!;
+    expect(fix.output).toBe("x");
+    expect(fix.costUsd).toBeCloseTo(0.03, 10);
+    expect(fix.tokens).toMatchObject({ input: 30 });
+  });
+});
+
+describe("a resumed run's summary does not re-bill cached steps", () => {
+  it("reports $0 for replays while step_done keeps the original cost", async () => {
+    const deps = makeBillingDeps({
+      m1: { cost: 0.01, tokens: { input: 100 } },
+      m2: { cost: 0.02, tokens: { input: 200 } },
+      m3: { cost: 0.03, tokens: { input: 300 } },
+    });
+    const cache = new Map<string, StepResult>();
+    const run = async () => {
+      const events: WorkflowEvent[] = [];
+      for await (const ev of runWorkflow(threeStepSpec(), { input: "go", cache }, deps))
+        events.push(ev);
+      return events;
+    };
+    const first = await run();
+    const firstDone = first.find((e) => e.kind === "workflow_done") as Extract<
+      WorkflowEvent,
+      { kind: "workflow_done" }
+    >;
+    expect(costForResults(firstDone.results)).toBeCloseTo(0.06, 10);
+
+    const second = await run();
+    const replays = second.filter((e) => e.kind === "step_done") as Extract<
+      WorkflowEvent,
+      { kind: "step_done" }
+    >[];
+    expect(replays.every((e) => e.cached)).toBe(true);
+    expect(replays.find((e) => e.stepId === "a")?.result.costUsd).toBe(0.01);
+    const secondDone = second.find((e) => e.kind === "workflow_done") as Extract<
+      WorkflowEvent,
+      { kind: "workflow_done" }
+    >;
+    expect(costForResults(secondDone.results)).toBe(0);
+    expect(totalTokens(tokensForResults(secondDone.results))).toBe(0);
+
+    // History agrees: the replayed run's totals are $0 too.
+    const builder = new RunRecordBuilder({
+      id: "r2",
+      workflow: "budget-test",
+      input: "go",
+      cwd: "/base",
+    });
+    for (const ev of second) builder.handle(ev);
+    expect(builder.build({ status: "done" }).totals.costUsd).toBe(0);
   });
 });
 
@@ -452,11 +709,68 @@ describe("per-step (forEach) cost budget", () => {
   });
 });
 
+describe("a partially resumed fan-out", () => {
+  it("bills only the children it re-ran, not the ones replayed from the cache", async () => {
+    // First run: the $0.08 cap stops the fan-out after two $0.05 children, so
+    // the parent fails and only review[0] and review[1] land in the cache.
+    const deps = makeBillingDeps({ m1: { cost: 0.05, tokens: { input: 10 } } });
+    const cache = new Map<string, StepResult>();
+    const run = async (spec: WorkflowSpec) => {
+      const events: WorkflowEvent[] = [];
+      for await (const ev of runWorkflow(spec, { input: "go", cache }, deps)) events.push(ev);
+      return events;
+    };
+    const fanOut = (maxCostUsd: number): WorkflowSpec => ({
+      name: "fanout-resume",
+      phases: [
+        {
+          id: "split",
+          title: "split",
+          steps: [{ id: "targets", kind: "distributor", items: ["a", "b", "c"] }],
+        },
+        {
+          id: "process",
+          title: "process",
+          steps: [
+            {
+              id: "review",
+              kind: "processor",
+              agent: "claude",
+              model: "m1",
+              dependsOn: ["targets"],
+              forEach: "steps.targets.items",
+              maxCostUsd,
+              prompt: "review {{item}}",
+            },
+          ],
+        },
+      ],
+    });
+    await run(fanOut(0.08));
+
+    // The resume re-runs the parent: two children replay, one runs fresh.
+    const second = await run(fanOut(1));
+    const children = second.filter(
+      (e): e is Extract<WorkflowEvent, { kind: "step_done" }> =>
+        e.kind === "step_done" && e.stepId.startsWith("review["),
+    );
+    expect(children.filter((e) => e.cached).map((e) => e.stepId)).toEqual([
+      "review[0]",
+      "review[1]",
+    ]);
+    const done = second.at(-1) as Extract<WorkflowEvent, { kind: "workflow_done" }>;
+    expect(done.ok).toBe(true);
+    expect(costForResults(done.results)).toBeCloseTo(0.05, 10);
+    expect(totalTokens(tokensForResults(done.results))).toBe(10);
+  });
+});
+
 describe("aggregateCosts across history", () => {
   it("breaks spend down by workflow, step, and model", () => {
     const mkRecord = (
       id: string,
       workflow: string,
+      cached = false,
     ): Parameters<typeof aggregateCosts>[0][number] => {
       const builder = new RunRecordBuilder({ id, workflow, input: "go", cwd: "/base" });
       builder.handle({
@@ -486,7 +800,7 @@ describe("aggregateCosts across history", () => {
         kind: "step_done",
         phaseId: "p1",
         stepId: "s1",
-        cached: false,
+        cached,
         result: {
           stepId: "s1",
           ok: true,
@@ -513,5 +827,15 @@ describe("aggregateCosts across history", () => {
     expect(analytics.byModel[0]).toMatchObject({ model: "claude/opus", steps: 3 });
     expect(totalTokens(analytics.tokens)).toBe(450);
     expect(analytics.byStep[0]).toMatchObject({ stepId: "s1" });
+
+    // A later run that replays s1 from the cache spent nothing on it: the
+    // replay is still a step, but its recorded cost belongs to run 1.
+    const replay = mkRecord("4", "wf-a", true);
+    expect(replay.totals.costUsd).toBe(0);
+    expect(totalTokens(replay.totals.tokens)).toBe(0);
+    const withReplay = aggregateCosts([mkRecord("1", "wf-a"), replay]);
+    expect(withReplay.costUsd).toBeCloseTo(0.1, 5);
+    expect(withReplay.byWorkflow[0]).toMatchObject({ runs: 2, steps: 2 });
+    expect(totalTokens(withReplay.tokens)).toBe(150);
   });
 });

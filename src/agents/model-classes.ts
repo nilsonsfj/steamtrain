@@ -16,7 +16,9 @@ export interface ModelClassDefinition {
   description: string;
   /**
    * Preferred family ids in preference order. Resolution walks this list and
-   * picks the first family that has a ready agent offering.
+   * picks the first family that has a ready agent offering. These are family
+   * ids, not agent slugs: which agents serve a family (e.g. gpt-5.4 now only
+   * via OpenCode) is model-identity's call.
    */
   preferred: readonly ModelFamilyId[];
   /**
@@ -123,7 +125,7 @@ const BUILTIN_MODEL_CLASSES: readonly ModelClassDefinition[] = [
     description: "Fast and cheap for triage, formatting, and low-stakes tasks.",
     preferred: [
       "claude-haiku-4.5",
-      "mimo-v2.5-free",
+      "mimo-v2.6-flash-free",
       "gemini-3.5-flash-lite",
       "gpt-5.4-mini",
       "gpt-5.4-nano",
@@ -132,7 +134,7 @@ const BUILTIN_MODEL_CLASSES: readonly ModelClassDefinition[] = [
       "gemini-3.6-flash",
       "gemini-3.5-flash",
       "amp-rush",
-      "deepseek-v4-flash-free",
+      "nemotron-3.5-lightning-free",
       "cursor-auto",
     ],
   },
@@ -150,7 +152,7 @@ const BUILTIN_MODEL_CLASSES: readonly ModelClassDefinition[] = [
       "amp-smart",
       "claude-sonnet-4.6",
       "gemini-3.1-pro",
-      "mimo-v2.5-free",
+      "mimo-v2.6-flash-free",
       "cursor-auto",
     ],
   },

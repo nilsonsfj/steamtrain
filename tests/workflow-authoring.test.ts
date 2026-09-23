@@ -32,7 +32,7 @@ const VALID_SPEC = {
           id: "s1",
           kind: "worker",
           agent: "opencode",
-          model: "opencode/mimo-v2.5-free",
+          model: "opencode/mimo-v2.6-flash-free",
           prompt: "Do {{input}}",
         },
       ],
@@ -175,7 +175,7 @@ describe("WorkflowAuthor", () => {
       {
         description: "echo things",
         agent: "opencode",
-        model: "opencode/mimo-v2.5-free",
+        model: "opencode/mimo-v2.6-flash-free",
         name: "Echo",
       },
       (t) => deltas.push(t),
@@ -191,7 +191,7 @@ describe("WorkflowAuthor", () => {
     const result = await makeAuthor(host).generate({
       description: "x",
       agent: "opencode",
-      model: "opencode/mimo-v2.5-free",
+      model: "opencode/mimo-v2.6-flash-free",
     });
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/not available/i);
@@ -275,7 +275,7 @@ describe("WorkflowAuthor", () => {
     const result = await makeAuthor(host).generate({
       description: "echo things",
       agent: "opencode",
-      model: "opencode/mimo-v2.5-free",
+      model: "opencode/mimo-v2.6-flash-free",
       name: "ProjEcho",
       scope: "project",
     });
@@ -417,7 +417,7 @@ describe("WorkflowAuthor", () => {
     const onDisk = JSON.parse(
       readFileSync(join(home, ".steamtrain", "workflows.json"), "utf8"),
     ) as { workflows: Record<string, WorkflowSpec> };
-    expect(firstStep(onDisk.workflows.flow).model).toBe("opencode/mimo-v2.5-free");
+    expect(firstStep(onDisk.workflows.flow).model).toBe("opencode/mimo-v2.6-flash-free");
   });
 
   it("flushes staged overrides, reporting saved and unchanged", async () => {

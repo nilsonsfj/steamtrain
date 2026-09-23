@@ -117,6 +117,20 @@ describe("cursor mapper", () => {
     ]);
   });
 
+  it("reads the camelCase usage block Cursor puts on result", () => {
+    // Verbatim shape from cursor-agent 2026.07.23: inputTokens is already net
+    // of cache reads/writes; there is no cost field.
+    const line =
+      '{"type":"result","subtype":"success","duration_ms":900,"duration_api_ms":900,"is_error":false,"result":"done","session_id":"sess-c1","request_id":"r1","usage":{"inputTokens":120,"outputTokens":45,"cacheReadTokens":3000,"cacheWriteTokens":200}}';
+    expect(createCursorMapper()(JSON.parse(line))).toEqual([
+      expect.objectContaining({
+        kind: "result",
+        costUsd: undefined,
+        tokens: { input: 120, output: 45, cacheRead: 3000, cacheWrite: 200 },
+      }),
+    ]);
+  });
+
   it("never throws on malformed or empty objects", () => {
     expect(() => createCursorMapper()({})).not.toThrow();
     expect(() => createCursorMapper()(null)).not.toThrow();

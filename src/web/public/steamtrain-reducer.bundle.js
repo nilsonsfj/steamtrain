@@ -112,6 +112,17 @@ var SteamtrainReducer = (() => {
   function addTokens(a, b) {
     return addTokensInto(addTokensInto(emptyTokens(), a), b);
   }
+  function totalTokens(t) {
+    if (!t) return 0;
+    return (t.input ?? 0) + (t.output ?? 0) + (t.cacheRead ?? 0) + (t.cacheWrite ?? 0);
+  }
+  function replayedSpend(result) {
+    return {
+      ...result,
+      costUsd: result.costUsd === void 0 ? void 0 : 0,
+      tokens: result.tokens ? {} : void 0
+    };
+  }
 
   // src/workflow/step-kind.ts
   var MAX_WORKFLOW_NESTING_DEPTH = 5;
@@ -803,7 +814,7 @@ var SteamtrainReducer = (() => {
       else if (isCascadeVictim(result)) blockedCount += 1;
       else failCount += 1;
       costUsd += result.costUsd ?? 0;
-      tokens += tokenTotal(result.tokens);
+      tokens += totalTokens(result.tokens);
       durationMs += result.durationMs ?? 0;
     }
     const heroStep = findArrivalStep(flat.map((f) => f.step));
@@ -812,7 +823,17 @@ var SteamtrainReducer = (() => {
       const failures = rootFailureLines(flat.map((f) => f.step));
       if (failures.length > 0) hero = [...failures, "", hero].join("\n");
     }
-    const agentless = opts.credentialFree === true || costUsd === 0 && tokens === 0 && failCount === 0 && blockedCount === 0;
+    const ranBilledStep = flat.some(({ step }) => Boolean(step.agent || step.api) && executed(step));
+    const billedSteps = flat.map(({ step }) => step).filter(
+      (step) => Boolean(step.agent || step.api) && executed(step) && !step.result?.childResults?.length
+    );
+    const costReported = billedSteps.every(
+      (step) => step.cached || step.result?.costUsd !== void 0
+    );
+    const tokensReported = billedSteps.every(
+      (step) => step.cached || step.result?.tokens !== void 0
+    );
+    const agentless = opts.credentialFree === true || !ranBilledStep && costUsd === 0 && tokens === 0 && failCount === 0 && blockedCount === 0;
     const nextCandidates = opts.nextCandidates ?? DEFAULT_NEXT_CANDIDATES;
     const current = state.name;
     const next = opts.nextWorkflow ?? nextCandidates.find(
@@ -840,6 +861,8 @@ var SteamtrainReducer = (() => {
         blockedCount,
         costUsd,
         tokens,
+        costReported,
+        tokensReported,
         agentless
       },
       notices: arrivalNotices(flat.map((f) => f.step)),
@@ -847,6 +870,10 @@ var SteamtrainReducer = (() => {
     };
   }
   var LEGACY_CASCADE_ERROR = /^dependency '[^']+' failed(:|$)/;
+  function executed(step) {
+    const r = step.result;
+    return r !== void 0 && !r.skipped && !r.notRun && !isCascadeVictim(r);
+  }
   function isCascadeVictim(result) {
     if (!result) return false;
     return Boolean(result.dependencyFailed) || LEGACY_CASCADE_ERROR.test(result.error ?? "");
@@ -972,7 +999,7 @@ var SteamtrainReducer = (() => {
     const parts = [`${subject} ${outcome}`];
     if (receipt.agentless) parts.push("$0");
     else if (receipt.costUsd > 0) parts.push(`$${receipt.costUsd.toFixed(4)}`);
-    else parts.push("$0");
+    else if (receipt.costReported !== false) parts.push("$0");
     parts.push(`${(receipt.durationMs / 1e3).toFixed(1)}s`);
     if (receipt.failCount > 0) parts.push(`${receipt.failCount} failed`);
     return parts.join(" \xB7 ");
@@ -982,8 +1009,8 @@ var SteamtrainReducer = (() => {
     if (receipt.failCount) ranParts.push(`${receipt.failCount} failed`);
     const notRun = receipt.skipCount + (receipt.blockedCount ?? 0);
     if (notRun) ranParts.push(`${notRun} skipped`);
-    const cost = receipt.agentless ? "$0 \xB7 no agents" : receipt.costUsd > 0 ? `$${receipt.costUsd.toFixed(4)}` : "$0";
-    const produced = receipt.tokens > 0 ? `${compactTokens(receipt.tokens)} tokens` : receipt.agentless ? "workflow output" : "no tokens billed";
+    const cost = receipt.agentless ? "$0 \xB7 no agents" : receipt.costUsd > 0 ? `$${receipt.costUsd.toFixed(4)}` : receipt.costReported === false ? "not reported" : "$0";
+    const produced = receipt.tokens > 0 ? `${compactTokens(receipt.tokens)} tokens` : receipt.agentless ? "workflow output" : receipt.tokensReported === false ? "tokens not reported" : "no tokens billed";
     return [
       { id: "ran", label: "What ran", value: ranParts.join(" \xB7 ") },
       { id: "cost", label: "What it cost", value: cost },
@@ -1010,7 +1037,7 @@ var SteamtrainReducer = (() => {
     const out = [];
     for (const phase of state.phases) {
       for (const step of phase.steps) {
-        if (step.result) out.push(step.result);
+        if (step.result) out.push(step.cached ? replayedSpend(step.result) : step.result);
       }
     }
     return out.filter((r) => !r.childResults?.length);
@@ -1030,10 +1057,6 @@ var SteamtrainReducer = (() => {
       return state.name ? `Workflow '${state.name}' finished, but no consolidator report was produced. Press i to show step details.` : "Workflow finished, but no consolidator report was produced. Press i to show step details.";
     }
     return state.name ? `Workflow '${state.name}' stopped short. Press i to show step details and find the stall.` : "Workflow stopped short. Press i to show step details and find the stall.";
-  }
-  function tokenTotal(t) {
-    if (!t) return 0;
-    return (t.input ?? 0) + (t.output ?? 0) + (t.cacheRead ?? 0) + (t.cacheWrite ?? 0) + (t.reasoning ?? 0);
   }
   function compactTokens(n) {
     if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
@@ -1546,8 +1569,8 @@ var SteamtrainReducer = (() => {
   function createThroughputMeter(windowMs = DEFAULT_WINDOW_MS) {
     const samples = [];
     return {
-      sample(totalTokens, nowMs) {
-        samples.push({ atMs: nowMs, totalTokens });
+      sample(totalTokens2, nowMs) {
+        samples.push({ atMs: nowMs, totalTokens: totalTokens2 });
         while (samples.length > 1 && nowMs - samples[0].atMs > windowMs) samples.shift();
       },
       bars(count) {

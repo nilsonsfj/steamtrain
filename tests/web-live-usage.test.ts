@@ -127,6 +127,16 @@ describe("ST.stepUsage", () => {
     });
   });
 
+  it("bills a cached replay nothing, as history and the run totals do", () => {
+    expect(
+      stepUsage({
+        status: "done",
+        cached: true,
+        result: { tokens: { input: 1000, output: 10 }, costUsd: 0.5 },
+      }),
+    ).toEqual({ costUsd: 0, tokens: 0, live: false });
+  });
+
   it("survives a step with no fields at all", () => {
     expect(stepUsage(undefined)).toEqual({ costUsd: 0, tokens: 0, live: false });
   });
@@ -165,6 +175,13 @@ describe("live usage read sites", () => {
   it("counts running steps into the run's live cost ticker", () => {
     const ticker = runJs.slice(runJs.indexOf("// Live cost/token ticker"));
     expect(ticker).toContain("s.result || s.usage");
+  });
+
+  it("leaves cached replays out of the run's live cost ticker", () => {
+    const ticker = runJs.slice(runJs.indexOf("// Live cost/token ticker"));
+    expect(ticker.slice(0, ticker.indexOf("s.result || s.usage"))).toContain(
+      "if (s.cached) return;",
+    );
   });
 
   it("shows the rail's Spend/Tokens from stepUsage too", () => {
