@@ -234,6 +234,14 @@ export interface WorkflowDeps {
   control?: WorkflowRunControl;
 }
 
+/** Loop state carried across a mid-run handoff; see {@link WorkflowRunContext.loopProgress}. */
+export interface LoopProgress {
+  /** Per phase id, how many of its passes finished and were looped back from. */
+  phaseRuns: Record<string, number>;
+  /** Per loop gate id, the pass it was on. */
+  gateIterations: Record<string, number>;
+}
+
 export interface WorkflowRunContext {
   /** The user's prompt; available to steps as `{{input}}` / `{{args}}`. */
   input: string;
@@ -249,6 +257,13 @@ export interface WorkflowRunContext {
    * run resumes. Pass the same Map across runs to enable resume.
    */
   cache?: Map<string, StepResult>;
+  /**
+   * Where a previous owner's loops were when it handed the run off (see
+   * `priorOwnerWork` in run-cli). A loop workflow restarts from the top, so
+   * without this each phase's pass count, `{{iteration}}` and every loop
+   * gate's `maxIterations` budget would start over at 1.
+   */
+  loopProgress?: LoopProgress;
   /**
    * Names of workflows currently being invoked in the call stack that led to
    * this run (outermost first). Only ever set internally, when a `workflow`
@@ -806,7 +821,8 @@ async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, b
       if (step.kind === "gate" && step.loopTo !== undefined) {
         const loopToIndex = phaseIndexById.get(step.loopTo);
         if (loopToIndex !== undefined) {
-          loopState.set(step.id, { loopToIndex, gatePhaseIndex, iteration: 1 });
+          const iteration = env.ctx.loopProgress?.gateIterations[step.id] ?? 1;
+          loopState.set(step.id, { loopToIndex, gatePhaseIndex, iteration });
         }
       }
     }
@@ -822,6 +838,11 @@ async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, b
   // would collide in the `phaseId+iteration`-keyed folds and overwrite
   // history/reducer state instead of appending to it).
   const phaseRunCount = new Map<number, number>();
+  // A handed-off run continues its previous owner's count.
+  spec.phases.forEach((phase, i) => {
+    const earlier = env.ctx.loopProgress?.phaseRuns[phase.id];
+    if (earlier) phaseRunCount.set(i, earlier);
+  });
 
   let pi = 0;
   while (pi < spec.phases.length) {

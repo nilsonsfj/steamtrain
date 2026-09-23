@@ -13,6 +13,7 @@ import {
   type HumanInputProvider,
   type LiveRunMeta,
   type LiveRunSource,
+  type LoopProgress,
   type ModelUsage,
   type ReportFormat,
   type RerunMode,
@@ -898,11 +899,11 @@ export interface PriorOwnerWork {
   /** What the previous owner's own runs of each step billed, every pass summed. */
   spend: Map<string, Pick<StepResult, "costUsd" | "tokens">>;
   /**
-   * Per phase, how many of its loop passes the previous owner finished and
-   * looped back from. The new owner restarts every phase's pass count at 1,
-   * so its tags are shifted by this much to continue the run's numbering.
+   * Where the previous owner's loops were: the passes it finished and looped
+   * back from, and each gate's pass. The new owner's engine continues from
+   * here, so pass tags, `{{iteration}}` and loop budgets carry on.
    */
-  passOffsets: Map<string, number>;
+  loopProgress: LoopProgress;
   /** The previous owner's events, which seed the run's history record. */
   events: readonly WorkflowEvent[];
 }
@@ -921,8 +922,11 @@ export function priorOwnerWork(events: readonly WorkflowEvent[]): PriorOwnerWork
   let startedAt: number | undefined;
   // Each phase pass in start order, keyed `phaseId:iteration`. A pass started
   // again (by a later owner) moves to the end: that is when it last ran.
-  const passes = new Map<string, { phaseId: string; superseded: boolean }>();
+  const passes = new Map<string, { phaseId: string; superseded: boolean; seq: number }>();
+  const gates = new Map<string, { iteration: number; seq: number }>();
+  let seq = 0;
   for (const event of events) {
+    seq += 1;
     if (event.kind === "workflow_start") {
       startedAt ??= event.ts;
       continue;
@@ -930,15 +934,21 @@ export function priorOwnerWork(events: readonly WorkflowEvent[]): PriorOwnerWork
     if (event.kind === "phase_start") {
       const key = `${event.phaseId}:${event.iteration ?? 1}`;
       passes.delete(key);
-      passes.set(key, { phaseId: event.phaseId, superseded: false });
+      passes.set(key, { phaseId: event.phaseId, superseded: false, seq });
       continue;
     }
     if (event.kind === "loop_iteration") {
       // The loop jumps back: every pass since its target phase last started
-      // is finished history the next owner will not run again.
+      // is finished history the next owner will not run again…
       const order = [...passes.values()];
       const from = order.findLastIndex((pass) => pass.phaseId === event.loopTo);
       for (const pass of order.slice(Math.max(from, 0))) pass.superseded = true;
+      // …and a loop nested in that region starts its count over, as the
+      // engine's resetNestedLoops does.
+      const since = order[from]?.seq ?? 0;
+      for (const [id, gate] of gates)
+        if (id !== event.gateStepId && gate.seq >= since) gates.delete(id);
+      gates.set(event.gateStepId, { iteration: event.iteration, seq });
       continue;
     }
     if (event.kind !== "step_done" || event.cached) continue;
@@ -951,11 +961,14 @@ export function priorOwnerWork(events: readonly WorkflowEvent[]): PriorOwnerWork
     const before = spend.get(event.stepId);
     spend.set(event.stepId, before ? addSpend(before, event.result) : event.result);
   }
-  const passOffsets = new Map<string, number>();
+  const loopProgress: LoopProgress = { phaseRuns: {}, gateIterations: {} };
   for (const pass of passes.values()) {
-    if (pass.superseded) passOffsets.set(pass.phaseId, (passOffsets.get(pass.phaseId) ?? 0) + 1);
+    if (pass.superseded) {
+      loopProgress.phaseRuns[pass.phaseId] = (loopProgress.phaseRuns[pass.phaseId] ?? 0) + 1;
+    }
   }
-  return { startedAt, ran, spend, passOffsets, events };
+  for (const [id, gate] of gates) loopProgress.gateIterations[id] = gate.iteration;
+  return { startedAt, ran, spend, loopProgress, events };
 }
 
 /**
@@ -963,36 +976,20 @@ export function priorOwnerWork(events: readonly WorkflowEvent[]): PriorOwnerWork
  * the previous owner's steps are not cached replays, and the run started when
  * the previous owner started it. The engine's final results zero a replay and
  * sum only this process's passes, so the previous owner's spend is added back
- * — every pass of a loop it ran, not just the one the cache replays. Loop
- * pass tags continue from the previous owner's (see
- * {@link PriorOwnerWork.passOffsets}), so its finished passes and this
- * owner's do not collide in the record. Identity when there was no previous
- * owner.
+ * — every pass of a loop it ran, not just the one the cache replays.
+ * Identity when there was no previous owner.
  */
 export function ownWorkRewriter(
   prior: PriorOwnerWork | undefined,
 ): (event: WorkflowEvent) => WorkflowEvent {
   if (!prior || (prior.ran.size === 0 && prior.startedAt === undefined)) return (event) => event;
-  const offsets = prior.passOffsets;
   const restore = (result: StepResult): StepResult => {
     const children = result.childResults?.map(restore);
     const own = prior.spend.get(result.stepId);
     const withSpend = own ? { ...result, ...addSpend(result, own) } : result;
     return children ? { ...withSpend, childResults: children } : withSpend;
   };
-  const shiftPass = (event: WorkflowEvent): WorkflowEvent => {
-    const phaseId =
-      "phaseId" in event
-        ? event.phaseId
-        : event.kind === "loop_iteration"
-          ? event.loopTo
-          : undefined;
-    const offset = phaseId === undefined ? 0 : (offsets.get(phaseId) ?? 0);
-    if (offset === 0 || !("iteration" in event || "phaseId" in event)) return event;
-    return { ...event, iteration: (event.iteration ?? 1) + offset };
-  };
-  return (original) => {
-    const event = offsets.size > 0 ? shiftPass(original) : original;
+  return (event) => {
     if (event.kind === "workflow_start" && prior.startedAt !== undefined) {
       return { ...event, ts: prior.startedAt };
     }
@@ -1168,6 +1165,8 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
       options.approval,
       control,
       options.humanInput,
+      undefined,
+      options.priorOwner?.loopProgress,
     )) {
       const event = asOwnWork(replayed);
       recorder.handle(event);

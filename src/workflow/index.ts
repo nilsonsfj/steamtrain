@@ -201,6 +201,7 @@ export {
   parseAgentQuestion,
   runWorkflow,
   type WorkflowDeps,
+  type LoopProgress,
   type WorkflowRunContext,
 } from "./engine";
 export {
