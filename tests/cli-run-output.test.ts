@@ -254,3 +254,96 @@ describe("a record's totals", () => {
     expect(formatRunTotals(totals)).toBe("1/3 ok · 1 failed · 1 interrupted");
   });
 });
+
+describe("a handoff in the middle of a loop", () => {
+  // A review loop: phase `fix` runs, phase `check` gates and loops back to it.
+  const phaseStart = (phaseId: string, index: number, iteration: number): WorkflowEvent => ({
+    kind: "phase_start",
+    phaseId,
+    title: phaseId,
+    index,
+    stepCount: 1,
+    iteration,
+    ts,
+  });
+  const ran = (phaseId: string, stepId: string, iteration: number, costUsd: number) =>
+    [
+      { kind: "step_start", phaseId, stepId, iteration, ts },
+      {
+        kind: "step_done",
+        phaseId,
+        stepId,
+        result: { stepId, ok: true, output: "", durationMs: 1, costUsd },
+        cached: false,
+        iteration,
+        ts,
+      },
+      { kind: "phase_done", phaseId, ok: true, iteration, ts },
+    ] as WorkflowEvent[];
+  const start: WorkflowEvent = {
+    kind: "workflow_start",
+    name: "w",
+    phaseCount: 2,
+    stepCount: 2,
+    ts: 1000,
+  };
+
+  it("keeps the passes the previous owner finished, and numbers the rest after them", async () => {
+    const { RunRecordBuilder } = await import("../src/workflow");
+    // Owner 1: pass 1 of both phases ($0.01 + $0.02), loops back, and hands
+    // off while pass 2 of `fix` is running.
+    const owner1: WorkflowEvent[] = [
+      start,
+      phaseStart("fix", 0, 1),
+      ...ran("fix", "fixer", 1, 0.01),
+      phaseStart("check", 1, 1),
+      ...ran("check", "review", 1, 0.02),
+      {
+        kind: "loop_iteration",
+        gateStepId: "review",
+        loopTo: "fix",
+        iteration: 2,
+        maxIterations: 3,
+        ts,
+      },
+      phaseStart("fix", 0, 2),
+      { kind: "step_start", phaseId: "fix", stepId: "fixer", iteration: 2, ts },
+    ];
+    const prior = priorOwnerWork(owner1);
+    expect(Object.fromEntries(prior.passOffsets)).toEqual({ fix: 1, check: 1 });
+
+    // Owner 2 starts over and counts passes from 1; it finishes pass 2.
+    const own = ownWorkRewriter(prior);
+    const recorder = new RunRecordBuilder({ id: "r", workflow: "w", input: "", cwd: "/" });
+    recorder.continueFrom(prior.events);
+    const owner2: WorkflowEvent[] = [
+      { ...start, ts: 9000 },
+      phaseStart("fix", 0, 1),
+      ...ran("fix", "fixer", 1, 0.03),
+      phaseStart("check", 1, 1),
+      ...ran("check", "review", 1, 0.04),
+      { kind: "workflow_done", ok: true, results: [], ts },
+    ];
+    for (const event of owner2) recorder.handle(own(event));
+    const record = recorder.build({ status: "done" });
+
+    expect(record.phases.map((p) => `${p.phaseId}:${p.iteration}`)).toEqual([
+      "fix:1",
+      "check:1",
+      "fix:2",
+      "check:2",
+    ]);
+    // The pass the handoff cut short is replaced by the new owner's run of it.
+    expect(record.phases[2]?.steps).toHaveLength(1);
+    expect(record.phases[2]?.steps[0]?.status).toBe("done");
+    expect(record.totals.costUsd).toBeCloseTo(0.1);
+    expect(record.startedAt).toBe(1000);
+  });
+
+  it("does not shift the passes of a run that never looped before the handoff", () => {
+    const prior = priorOwnerWork([start, phaseStart("fix", 0, 1), ...ran("fix", "fixer", 1, 0.01)]);
+    expect(prior.passOffsets.size).toBe(0);
+    const event = phaseStart("check", 1, 1);
+    expect(ownWorkRewriter(prior)(event)).toBe(event);
+  });
+});
