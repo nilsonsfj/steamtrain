@@ -276,9 +276,7 @@ describe("watchUnhandledRejection", () => {
     });
     bare._promise.catch(() => {});
     let seen = "";
-    ST.watchUnhandledRejection(Promise.reject(new Error("gone")), (reason) =>
-      reports.push(reason),
-    )
+    ST.watchUnhandledRejection(Promise.reject(new Error("gone")), (reason) => reports.push(reason))
       .finally(() => {
         cleanups += 1;
       })
