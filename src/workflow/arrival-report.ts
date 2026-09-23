@@ -121,8 +121,8 @@ export const ARRIVAL_NEXT_CANDIDATES = DEFAULT_NEXT_CANDIDATES;
  * Build the Arrival Report from a finished (or finishing) workflow state.
  * Returns null when the run has not completed.
  *
- * Kept free of `cost.ts` / `history.ts` imports so the browser reducer bundle
- * does not pull the analytics graph.
+ * Takes only pure helpers from `cost.ts` and nothing from `history.ts`, so the
+ * browser reducer bundle does not pull the analytics graph.
  */
 export function buildArrivalReport(
   state: WorkflowState,
@@ -244,12 +244,6 @@ export function buildArrivalReport(
 const LEGACY_CASCADE_ERROR = /^dependency '[^']+' failed(:|$)/;
 
 /**
- * True when this not-ok result is a step that never ran because a dependency
- * broke first. The engine marks these `dependencyFailed`; run records written
- * before that marker existed only carry the message it replaced, so that
- * message is still matched as a fallback.
- */
-/**
  * A step that actually ran: not skipped, not blocked by a failed dependency,
  * and not a fan-out child left undispatched by a cost cap.
  */
@@ -258,6 +252,12 @@ function executed(step: StepState): boolean {
   return r !== undefined && !r.skipped && !r.notRun && !isCascadeVictim(r);
 }
 
+/**
+ * True when this not-ok result is a step that never ran because a dependency
+ * broke first. The engine marks these `dependencyFailed`; run records written
+ * before that marker existed only carry the message it replaced, so that
+ * message is still matched as a fallback.
+ */
 export function isCascadeVictim(
   result: { dependencyFailed?: string; error?: string } | undefined,
 ): boolean {
