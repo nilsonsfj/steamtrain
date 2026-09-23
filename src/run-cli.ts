@@ -40,6 +40,7 @@ import {
   createWorkflowCacheStore,
   createWorkflowHistoryStore,
   createWorkflowRunControl,
+  dropsCacheEntries,
   exitCodeForOutcome,
   exitCodeForRun,
   formatReroutePlan,
@@ -1115,12 +1116,12 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
   }
 
   const key = workflowCacheKey(name, input, cwd, spec, params);
-  const cache = new Map<string, StepResult>();
+  let cache: Map<string, StepResult>;
   if (options.fresh) {
     await cacheStore.clear(key);
+    cache = new Map();
   } else {
-    const loaded = await cacheStore.load(key);
-    for (const [stepId, result] of loaded) cache.set(stepId, result);
+    cache = await cacheStore.load(key);
   }
   if (options.seed && options.seed.size > 0) {
     // Seed the already-succeeded steps and make them the resume baseline so an
@@ -1184,12 +1185,7 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
           event.cached,
         );
       }
-      if (event.kind === "step_edited") {
-        // The engine dropped the edited step's stale cache entry from the
-        // shared in-memory map; persist the deletion so a canceled-then-resumed
-        // run can't replay the pre-edit result from disk.
-        await cacheStore.save(key, cache);
-      }
+      if (dropsCacheEntries(event)) await cacheStore.save(key, cache);
       if (event.kind === "workflow_done") {
         ok = event.ok;
         budgetExceeded = Boolean(event.budgetExceeded);

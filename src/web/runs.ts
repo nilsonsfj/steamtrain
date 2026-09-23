@@ -37,6 +37,7 @@ import {
   createLiveRunPublisher,
   createNotifier,
   createWorkflowRunControl,
+  dropsCacheEntries,
   finalRunWorktrees,
   hashWorkflowSpec,
   isRerunError,
@@ -933,12 +934,7 @@ export class WorkflowRunManager {
             event.cached,
           );
         }
-        if (event.kind === "step_edited") {
-          // The engine dropped the edited step's stale entry from the shared
-          // cache map; persist the deletion so a canceled-then-resumed run
-          // can't replay the pre-edit result from disk.
-          await this.cacheStore.save(key, cache);
-        }
+        if (dropsCacheEntries(event)) await this.cacheStore.save(key, cache);
         if (event.kind === "workflow_done") {
           ok = event.ok;
           if (event.budgetExceeded) budgetExceeded = true;

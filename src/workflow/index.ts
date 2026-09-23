@@ -356,6 +356,7 @@ export {
   saveWorkflowCache,
   clearWorkflowCache,
   clearAllWorkflowCaches,
+  dropsCacheEntries,
   persistWorkflowStepDone,
   setWorkflowCacheLock,
   type WorkflowCacheKey,
