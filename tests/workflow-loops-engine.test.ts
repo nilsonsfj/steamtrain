@@ -6,7 +6,8 @@ import type { AgentEvent } from "../src/types/events";
 import { runWorkflow } from "../src/workflow/engine";
 import type { WorkflowEvent } from "../src/workflow/events";
 import { RunRecordBuilder } from "../src/workflow/history";
-import type { WorkflowSpec } from "../src/workflow/types";
+import { cacheLoopProgress } from "../src/workflow/loop-progress";
+import type { StepResult, WorkflowSpec } from "../src/workflow/types";
 
 /** Fake adapter: emits a result whose text is provided by `script(stepPrompt, callIndex)`. */
 function fakeAdapter(
@@ -689,5 +690,99 @@ describe("a loop continued after a mid-run handoff", () => {
     expect(loops).toEqual([3]);
     const done = events.find((e) => e.kind === "workflow_done");
     expect(done?.kind === "workflow_done" && done.ok).toBe(false);
+  });
+});
+
+describe("a loop resumed from its cache", () => {
+  /** Run `spec` on `cache`, collecting the events and the prompts each agent step saw. */
+  async function runOn(
+    spec: WorkflowSpec,
+    cache: Map<string, StepResult>,
+    script: (prompt: string) => string,
+    signal?: AbortSignal,
+  ) {
+    const prompts: string[] = [];
+    const deps = {
+      createAdapter: () =>
+        fakeAdapter((prompt) => {
+          prompts.push(prompt);
+          return { text: script(prompt) };
+        }),
+      maxConcurrency: 2,
+      cwd: tmpdir(),
+    };
+    const events: WorkflowEvent[] = [];
+    for await (const e of runWorkflow(spec, { input: "go", cache }, deps, signal)) events.push(e);
+    const passes = (phaseId: string) =>
+      events.flatMap((e) =>
+        e.kind === "phase_start" && e.phaseId === phaseId ? [e.iteration] : [],
+      );
+    const loops = events.flatMap((e) => (e.kind === "loop_iteration" ? [e.iteration] : []));
+    const done = events.find((e) => e.kind === "workflow_done");
+    return { prompts, passes, loops, ok: done?.kind === "workflow_done" && done.ok };
+  }
+
+  it("continues a canceled run's pass count, {{iteration}} and loop budget", async () => {
+    const cache = new Map<string, StepResult>();
+    const controller = new AbortController();
+    let fixes = 0;
+    const first = await runOn(
+      loopSpec(3),
+      cache,
+      (prompt) => {
+        if (!prompt.startsWith("fix")) return "reviewed";
+        fixes += 1;
+        if (fixes === 2) controller.abort(); // canceled during pass 2
+        return "NOPE";
+      },
+      controller.signal,
+    );
+    expect(first.loops).toEqual([2]);
+    expect(cacheLoopProgress(cache)).toEqual({
+      phaseRuns: { review: 1, fix: 1, check: 1 },
+      gateIterations: { "check-gate": 2 },
+    });
+
+    const resumed = await runOn(loopSpec(3), cache, (prompt) =>
+      prompt.startsWith("fix") ? "NOPE" : "reviewed",
+    );
+    // Pass 2 replays its review from the cache and runs its fix again, then
+    // pass 3 spends the last of the 3-pass budget: not a fresh 1, 2, 3.
+    expect(resumed.passes("review")).toEqual([2, 3]);
+    expect(resumed.prompts.filter((p) => p.startsWith("review"))).toEqual(["review go (iter 3)"]);
+    expect(resumed.loops).toEqual([3]);
+    expect(resumed.ok).toBe(false);
+  });
+
+  it("does not loop again when a loop that ran out of passes let the run go on", async () => {
+    const spec = loopSpec(2);
+    const gate = spec.phases[2]!.steps[0]!;
+    if (gate.kind === "gate") gate.onFalse = "continue";
+    const cache = new Map<string, StepResult>();
+    const first = await runOn(spec, cache, (prompt) => (prompt.startsWith("fix") ? "NOPE" : "ok"));
+    expect(first.loops).toEqual([2]);
+    expect(first.ok).toBe(true);
+
+    // The failed gate's verdict is cached, and its budget stays spent.
+    const again = await runOn(spec, cache, () => "unused");
+    expect(again.loops).toEqual([]);
+    expect(again.prompts).toEqual([]);
+    expect(again.passes("review")).toEqual([2]);
+  });
+
+  it("gives a retried loop that failed the run a fresh budget, numbering on", async () => {
+    const cache = new Map<string, StepResult>();
+    const first = await runOn(loopSpec(2), cache, (prompt) =>
+      prompt.startsWith("fix") ? "NOPE" : "ok",
+    );
+    expect(first.loops).toEqual([2]);
+    expect(first.ok).toBe(false);
+
+    const retried = await runOn(loopSpec(2), cache, (prompt) =>
+      prompt.startsWith("fix") ? "NOPE" : "ok",
+    );
+    expect(retried.loops).toEqual([2]);
+    expect(retried.passes("review")).toEqual([2, 3]);
+    expect(retried.prompts.filter((p) => p.startsWith("review"))).toEqual(["review go (iter 3)"]);
   });
 });

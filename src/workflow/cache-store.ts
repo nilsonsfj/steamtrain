@@ -3,6 +3,12 @@ import { readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { WorkflowEvent } from "./events";
 import { atomicWriteFile, isEnoent } from "./fs-util";
+import {
+  type LoopProgress,
+  cacheLoopProgress,
+  parseLoopProgress,
+  setCacheLoopProgress,
+} from "./loop-progress";
 import { type ProjectLockOptions, withStateDirLock } from "./project-lock";
 import { migrateStateVersion } from "./state-migrate";
 import type { GateStep, StepResult, WorkflowSpec } from "./types";
@@ -41,6 +47,8 @@ interface WorkflowCacheFile {
   specHash: string;
   updatedAt: number;
   steps: Record<string, StepResult>;
+  /** Where the run's loops were when these entries were saved; see `cacheLoopProgress`. */
+  loops?: LoopProgress;
 }
 
 export interface WorkflowCacheStore {
@@ -134,7 +142,9 @@ export async function saveWorkflowCache(
     for (const stepId of dropped) merged.delete(stepId);
     for (const [stepId, result] of cache) merged.set(stepId, result);
     for (const [stepId, result] of merged) cache.set(stepId, result);
-    await writeWorkflowCacheFile(rootDir, key, merged);
+    // The loop progress this map's run recorded goes with its entries.
+    setCacheLoopProgress(cache, cacheLoopProgress(cache) ?? cacheLoopProgress(onDisk));
+    await writeWorkflowCacheFile(rootDir, key, merged, cacheLoopProgress(cache));
     lastSaved.set(cache, new Set(merged.keys()));
   });
 }
@@ -176,6 +186,7 @@ async function writeWorkflowCacheFile(
   rootDir: string,
   key: WorkflowCacheKey,
   cache: Map<string, StepResult>,
+  loops: LoopProgress | undefined,
 ): Promise<void> {
   const payload: WorkflowCacheFile = {
     version: WORKFLOW_CACHE_VERSION,
@@ -185,6 +196,7 @@ async function writeWorkflowCacheFile(
     specHash: key.specHash,
     updatedAt: Date.now(),
     steps: Object.fromEntries(cache),
+    loops,
   };
   const target = join(rootDir, workflowCacheFileName(key));
   await atomicWriteFile(target, `${JSON.stringify(payload, null, 2)}\n`);
@@ -254,6 +266,7 @@ function parseWorkflowCacheFile(file: string, key: WorkflowCacheKey): Map<string
     const valid = validateStepResult(stepId, result);
     if (valid) out.set(stepId, valid);
   }
+  setCacheLoopProgress(out, parseLoopProgress(parsed.loops));
   return out;
 }
 
