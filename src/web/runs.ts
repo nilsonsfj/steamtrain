@@ -1047,7 +1047,7 @@ export class WorkflowRunManager {
     const status = run.status === "running" ? "done" : run.status;
     try {
       await this.historyStore.save(
-        recorder.build({ status, error: run.error, endedAt: run.endedAt }),
+        recorder.build({ status, error: run.error, endedAt: run.endedAt, timedOut: run.timedOut }),
       );
     } catch {
       // History is best-effort; a failed write must not surface to the run.

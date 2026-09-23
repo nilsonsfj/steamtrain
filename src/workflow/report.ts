@@ -78,7 +78,7 @@ export interface ClassifyRunOptions {
 export function classifyRun(record: RunRecord, opts: ClassifyRunOptions = {}): RunOutcome {
   switch (record.status) {
     case "canceled":
-      return opts.timedOut ? "timeout" : "canceled";
+      return (opts.timedOut ?? record.timedOut) ? "timeout" : "canceled";
     case "budget-exceeded":
       return "budget-exceeded";
     case "done":

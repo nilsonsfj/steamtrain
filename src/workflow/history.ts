@@ -157,6 +157,11 @@ export interface RunRecord {
   phases: HistoryPhase[];
   totals: RunTotals;
   error?: string;
+  /**
+   * Set on a canceled run its whole-workflow timeout stopped, not a person;
+   * `status` stays "canceled" for both.
+   */
+  timedOut?: boolean;
   /** Set when a cost budget stopped the run; drives the "budget-exceeded" status. */
   budget?: RunBudgetInfo;
   /** What happened to this run's step worktrees after the run (CLI apply/prune). */
@@ -538,7 +543,12 @@ export class RunRecordBuilder {
     }
   }
 
-  build(opts: { status: RunRecordStatus; error?: string; endedAt?: number }): RunRecord {
+  build(opts: {
+    status: RunRecordStatus;
+    error?: string;
+    endedAt?: number;
+    timedOut?: boolean;
+  }): RunRecord {
     const endedAt = opts.endedAt ?? Date.now();
     const phases = this.finalizePhases();
     return {
@@ -557,6 +567,7 @@ export class RunRecordBuilder {
       phases,
       totals: computeRunTotals(phases),
       error: opts.error,
+      timedOut: opts.status === "canceled" && opts.timedOut ? true : undefined,
       budget: this.budget,
       interventions: this.interventions.length > 0 ? this.interventions : undefined,
     };

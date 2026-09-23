@@ -1156,14 +1156,14 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
           ? "done"
           : "error";
     await publisher.finish(status, { ok: status === "done", timedOut });
-    const record = await saveHistory(historyStore, recorder, status, err);
+    const record = await saveHistory(historyStore, recorder, status, err, undefined, timedOut);
     const outcome = record ? classifyRun(record, { timedOut }) : "canceled";
     return { code: exitCodeForOutcome(outcome), outcome, record };
   } catch (runErr) {
     const status: RunRecordStatus = ac.signal.aborted ? "canceled" : "error";
     const error = status === "error" ? message(runErr) : undefined;
     await publisher.finish(status, { ok: false, error, timedOut });
-    const record = await saveHistory(historyStore, recorder, status, err, error);
+    const record = await saveHistory(historyStore, recorder, status, err, error, timedOut);
     if (status === "canceled") {
       const outcome = record ? classifyRun(record, { timedOut }) : "canceled";
       return { code: exitCodeForOutcome(outcome), outcome, record };
@@ -1258,8 +1258,14 @@ export async function runAttachCommand(
   // The verdict line waits for the run's final status: a viewer cannot tell a
   // canceled run from a failed one by its events alone.
   let done: WorkflowEvent | undefined;
+  // What each step ran on, as its own step_start said — the summary's
+  // by-model breakdown, which a viewer has no spec for.
+  const stepMeta = new Map<string, { agent?: string; api?: string; model?: string }>();
   try {
     for await (const event of store.tailEvents(runId, { signal: ac.signal })) {
+      if (event.kind === "step_start" && !event.parentStepId) {
+        stepMeta.set(event.stepId, { agent: event.agent, api: event.api, model: event.model });
+      }
       if (json) out(`${JSON.stringify(event)}\n`);
       else if (event.kind === "workflow_done") done = event;
       // Steps the cancel took down carry `interrupted`, which is what keeps
@@ -1285,18 +1291,26 @@ export async function runAttachCommand(
   }
 
   const final = (await store.get(runId)) ?? meta;
+  const timedOut = final.status === "canceled" && Boolean(final.timedOut);
   if (done) {
-    const timedOut = final.status === "canceled" && Boolean(final.timedOut);
     printHumanEvent(done, out, { canceled: final.status === "canceled" && !timedOut, timedOut });
-    if (done.kind === "workflow_done") printRunSummary(done.results, out);
+    if (done.kind === "workflow_done") printRunSummary(done.results, out, stepMeta);
   }
   if (json) {
     out(
-      `${JSON.stringify({ type: "status", status: final.status, ok: final.ok, error: final.error })}\n`,
+      `${JSON.stringify({
+        type: "status",
+        status: final.status,
+        ok: final.ok,
+        error: final.error,
+        timedOut: timedOut || undefined,
+      })}\n`,
     );
   } else {
-    out(`\nrun ${final.status}${final.error ? `: ${final.error}` : ""}\n`);
+    out(`\nrun ${timedOut ? "timed out" : final.status}${final.error ? `: ${final.error}` : ""}\n`);
   }
+  // The same codes a foreground run exits with (a timeout is 3, not 130).
+  if (timedOut) return exitCodeForOutcome("timeout");
   if (final.status === "canceled") return 130;
   return final.status === "done" && final.ok !== false ? 0 : 1;
 }
@@ -1838,8 +1852,9 @@ async function saveHistory(
   status: RunRecordStatus,
   err: (text: string) => void,
   error?: string,
+  timedOut?: boolean,
 ): Promise<RunRecord> {
-  const record = recorder.build({ status, error });
+  const record = recorder.build({ status, error, timedOut });
   try {
     await historyStore.save(record);
   } catch (e) {

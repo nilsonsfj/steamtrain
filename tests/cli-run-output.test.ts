@@ -214,3 +214,16 @@ describe("a mid-run handoff keeps the run's own work", () => {
     expect(own(event)).toBe(event);
   });
 });
+
+describe("a timed-out run's record", () => {
+  it("keeps timedOut, and classifies as a timeout without being told", async () => {
+    const { RunRecordBuilder, classifyRun } = await import("../src/workflow");
+    const builder = new RunRecordBuilder({ id: "r", workflow: "w", input: "", cwd: "/" });
+    const timedOut = builder.build({ status: "canceled", timedOut: true });
+    expect(timedOut.timedOut).toBe(true);
+    expect(classifyRun(timedOut)).toBe("timeout");
+    // A person's cancel stays a cancel, and timedOut never sticks to another status.
+    expect(classifyRun(builder.build({ status: "canceled" }))).toBe("canceled");
+    expect(builder.build({ status: "error", timedOut: true }).timedOut).toBeUndefined();
+  });
+});

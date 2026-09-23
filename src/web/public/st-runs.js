@@ -409,6 +409,8 @@
       return h("span", { class: "outcome gate",
         text: scope + " budget $" + run.budget.limitUsd.toFixed(4) + " reached" });
     }
+    // A timeout is recorded as canceled; the record's timedOut says which.
+    if (run.status === "canceled" && run.timedOut) return h("span", { class: "outcome gate", text: "timed out" });
     if (run.status === "canceled") return h("span", { class: "outcome", text: "canceled" });
     var totals = run.totals || {};
     var text = (totals.ok || 0) + "/" + (totals.steps || 0) + " ok";
