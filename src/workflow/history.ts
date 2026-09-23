@@ -349,7 +349,16 @@ export class RunRecordBuilder {
    * passes the previous owner finished stay in the record with their spend.
    */
   continueFrom(events: Iterable<WorkflowEvent>): void {
-    for (const event of events) this.handle(event);
+    // The log may hold several owners already (a run handed off twice): only
+    // its first `workflow_start` starts the tree, as with the new owner's.
+    let started = false;
+    for (const event of events) {
+      if (event.kind === "workflow_start") {
+        this.continuing = started && this.phases.length > 0;
+        started = true;
+      }
+      this.handle(event);
+    }
     this.continuing = this.phases.length > 0;
   }
 

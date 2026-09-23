@@ -885,6 +885,7 @@ export class WorkflowRunManager {
         await this.cacheStore.clear(key);
         cache = new Map();
       } else {
+        // Run on this very map, not a copy: saves track the engine's drops by it.
         cache = await this.cacheStore.load(key);
       }
       if (opts.seed && opts.seed.size > 0) {

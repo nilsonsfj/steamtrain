@@ -90,7 +90,10 @@ describe("a step that failed on its own just before the cancel", () => {
               setTimeout(() => ac.abort(), 50);
               return { ok: false, error: "HTTP 400: bad request", retryable: false };
             }
-            await new Promise((resolve) => req.signal?.addEventListener("abort", resolve));
+            await new Promise((resolve) => {
+              if (req.signal?.aborted) resolve(undefined);
+              else req.signal?.addEventListener("abort", resolve);
+            });
             return { ok: false, error: "aborted", retryable: false };
           },
         },

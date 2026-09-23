@@ -941,6 +941,8 @@ export function priorOwnerWork(events: readonly WorkflowEvent[]): PriorOwnerWork
       // The loop jumps back: every pass since its target phase last started
       // is finished history the next owner will not run again…
       const order = [...passes.values()];
+      // (A jump to a phase that never started cannot come from the engine;
+      // should one appear, everything so far counts as looped back from.)
       const from = order.findLastIndex((pass) => pass.phaseId === event.loopTo);
       for (const pass of order.slice(Math.max(from, 0))) pass.superseded = true;
       // …and a loop nested in that region starts its count over, as the
@@ -1118,6 +1120,7 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
     await cacheStore.clear(key);
     cache = new Map();
   } else {
+    // Run on this very map, not a copy: saves track the engine's drops by it.
     cache = await cacheStore.load(key);
   }
   if (options.seed && options.seed.size > 0) {

@@ -607,7 +607,7 @@ function clearSettledFailure(result: StepResult): StepResult {
 }
 
 /** True when {@link markSettledFailure} stamped this result. */
-export function failedBeforeAbort(result: StepResult): boolean {
+function failedBeforeAbort(result: StepResult): boolean {
   return (result as SettledMark)[settledFailure] === true;
 }
 

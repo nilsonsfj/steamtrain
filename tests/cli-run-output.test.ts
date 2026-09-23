@@ -345,6 +345,65 @@ describe("a handoff in the middle of a loop", () => {
     expect(record.startedAt).toBe(1000);
   });
 
+  it("keeps every owner's finished passes when the run is handed off twice", async () => {
+    const { RunRecordBuilder } = await import("../src/workflow");
+    const loop = (iteration: number): WorkflowEvent => ({
+      kind: "loop_iteration",
+      gateStepId: "review",
+      loopTo: "fix",
+      iteration,
+      maxIterations: 5,
+      ts,
+    });
+    // Owner 1 finishes pass 1; owner 2 continues with pass 2 and hands off
+    // in pass 3. The log owner 3 reads holds both.
+    const log: WorkflowEvent[] = [
+      start,
+      phaseStart("fix", 0, 1),
+      ...ran("fix", "fixer", 1, 0.01),
+      phaseStart("check", 1, 1),
+      ...ran("check", "review", 1, 0.02),
+      loop(2),
+      phaseStart("fix", 0, 2),
+      { ...start, ts: 5000 },
+      phaseStart("fix", 0, 2),
+      ...ran("fix", "fixer", 2, 0.03),
+      phaseStart("check", 1, 2),
+      ...ran("check", "review", 2, 0.04),
+      loop(3),
+      phaseStart("fix", 0, 3),
+    ];
+    const prior = priorOwnerWork(log);
+    expect(prior.loopProgress).toEqual({
+      phaseRuns: { fix: 2, check: 2 },
+      gateIterations: { review: 3 },
+    });
+    const recorder = new RunRecordBuilder({ id: "r", workflow: "w", input: "", cwd: "/" });
+    recorder.continueFrom(prior.events);
+    const own = ownWorkRewriter(prior);
+    for (const event of [
+      { ...start, ts: 9000 },
+      phaseStart("fix", 0, 3),
+      ...ran("fix", "fixer", 3, 0.05),
+      phaseStart("check", 1, 3),
+      ...ran("check", "review", 3, 0.06),
+      { kind: "workflow_done", ok: true, results: [], ts } as WorkflowEvent,
+    ]) {
+      recorder.handle(own(event));
+    }
+    const record = recorder.build({ status: "done" });
+    expect(record.phases.map((p) => `${p.phaseId}:${p.iteration}`)).toEqual([
+      "fix:1",
+      "check:1",
+      "fix:2",
+      "check:2",
+      "fix:3",
+      "check:3",
+    ]);
+    expect(record.totals.costUsd).toBeCloseTo(0.21);
+    expect(record.startedAt).toBe(1000);
+  });
+
   it("carries nothing over for a run that never looped before the handoff", () => {
     const prior = priorOwnerWork([start, phaseStart("fix", 0, 1), ...ran("fix", "fixer", 1, 0.01)]);
     expect(prior.loopProgress).toEqual({ phaseRuns: {}, gateIterations: {} });

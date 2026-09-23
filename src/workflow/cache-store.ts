@@ -203,7 +203,6 @@ async function loadWorkflowCacheUnlocked(
   }
 }
 
-/** Persist successful, non-replayed step completions to disk. */
 /**
  * Whether the engine dropped entries from the shared cache map before this
  * event: an edited step's, or on a loop jump, the whole region it re-runs.
@@ -216,6 +215,7 @@ export function dropsCacheEntries(event: WorkflowEvent): boolean {
   return event.kind === "step_edited" || event.kind === "loop_iteration";
 }
 
+/** Persist successful, non-replayed step completions to disk. */
 export async function persistWorkflowStepDone(
   store: WorkflowCacheStore | undefined,
   key: WorkflowCacheKey | undefined,

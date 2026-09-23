@@ -359,6 +359,7 @@ export function useWorkflowRunner({
             await store.clear(key);
             workflowCacheRef.current = new Map();
           } else if (!opts?.reuseMemoryCache) {
+            // Run on this very map, not a copy: saves track the engine's drops by it.
             workflowCacheRef.current = await store.load(key);
           }
           const cache = workflowCacheRef.current;
