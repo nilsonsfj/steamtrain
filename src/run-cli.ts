@@ -41,6 +41,7 @@ import {
   createWorkflowHistoryStore,
   createWorkflowRunControl,
   exitCodeForOutcome,
+  exitCodeForRun,
   formatReroutePlan,
   formatTakeoverCommand,
   formatTokenSummary,
@@ -1309,9 +1310,18 @@ export async function runAttachCommand(
   } else {
     out(`\nrun ${timedOut ? "timed out" : final.status}${final.error ? `: ${final.error}` : ""}\n`);
   }
-  // The same codes a foreground run exits with (a timeout is 3, not 130).
+  // The same codes a foreground run exits with: classified from the record the
+  // owner saved (a gate failure is 2, a timeout 3, a budget stop 4). The
+  // record lands just after the terminal meta, so wait briefly for it.
+  let record: RunRecord | undefined;
+  for (let tries = 0; tries < 10 && !record; tries++) {
+    record = await historyStore.get(runId).catch(() => undefined);
+    if (!record) await new Promise((r) => setTimeout(r, 200));
+  }
+  if (record) return exitCodeForRun(record, { timedOut });
   if (timedOut) return exitCodeForOutcome("timeout");
-  if (final.status === "canceled") return 130;
+  if (final.status === "budget-exceeded") return exitCodeForOutcome("budget-exceeded");
+  if (final.status === "canceled") return exitCodeForOutcome("canceled");
   return final.status === "done" && final.ok !== false ? 0 : 1;
 }
 
