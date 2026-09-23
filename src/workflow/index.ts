@@ -201,7 +201,6 @@ export {
   parseAgentQuestion,
   runWorkflow,
   type WorkflowDeps,
-  type LoopProgress,
   type WorkflowRunContext,
 } from "./engine";
 export {
@@ -357,7 +356,7 @@ export {
   saveWorkflowCache,
   clearWorkflowCache,
   clearAllWorkflowCaches,
-  dropsCacheEntries,
+  changesCache,
   persistWorkflowStepDone,
   setWorkflowCacheLock,
   type WorkflowCacheKey,

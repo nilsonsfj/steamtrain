@@ -34,12 +34,7 @@ import {
 } from "../workflow";
 import type { PlanRerouteOptions, PlanRerouteResult } from "../workflow";
 import type { RunRecord } from "../workflow";
-import type {
-  ApprovalProvider,
-  HumanInputProvider,
-  LoopProgress,
-  WorkflowRunControl,
-} from "../workflow";
+import type { ApprovalProvider, HumanInputProvider, WorkflowRunControl } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 import { workspaceById } from "../workspace";
 
@@ -365,8 +360,6 @@ export class Orchestrator {
      * "Max parallel runners"). Falls back to config, then the default.
      */
     maxConcurrency?: number,
-    /** Loop state a handed-off run continues from; see `WorkflowRunContext.loopProgress`. */
-    loopProgress?: LoopProgress,
   ): AsyncIterable<WorkflowEvent> {
     const spec = specOverride ?? this.listWorkflows()[name];
     if (!spec) throw new Error(`unknown workflow '${name}'`);
@@ -374,7 +367,7 @@ export class Orchestrator {
     const agentWorkspace = createGitWorktreeManager();
     const events = runWorkflow(
       spec,
-      { input, cache, inputs, loopProgress },
+      { input, cache, inputs },
       {
         createAdapter,
         binaries: this.config.binaries,

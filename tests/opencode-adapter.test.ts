@@ -7,6 +7,7 @@ import {
   buildOpenCodeRunArgs,
   createOpenCodeMapper,
 } from "../src/agents/opencode";
+import { rememberSessionDirectory } from "../src/agents/opencode-session";
 import type { AgentEvent } from "../src/types/events";
 
 /**
@@ -399,6 +400,26 @@ if (cmd === "export") {
     await run(bin, other);
     expect(exports()).toHaveLength(2);
     expect(calls().at(-2)?.cmd).toBe("import");
+  });
+
+  it("forgets the least recently seen sessions past its 500-entry bound", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "st-oc-evict-"));
+    const { bin, exports } = fakeOpencode(dir);
+    const others = (from: number, count: number) => {
+      for (let i = from; i < from + count; i++) rememberSessionDirectory(`ses_other${i}`, dir);
+    };
+
+    await run(bin, dir); // asks once, then remembers
+    others(0, 499);
+    // Seen again: now the most recent entry, so it outlives the next one in.
+    rememberSessionDirectory("ses_f33132908ffeY2p6iYE7DZEtR1", dir);
+    others(499, 1);
+    await run(bin, dir);
+    expect(exports()).toHaveLength(1);
+
+    others(500, 500); // pushes it out
+    await run(bin, dir);
+    expect(exports()).toHaveLength(2);
   });
 
   it("stops copying the session as soon as the step is canceled", async () => {

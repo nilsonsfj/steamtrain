@@ -7,8 +7,8 @@ import type { AgentAdapter, AgentRunOptions } from "../src/agents";
 import type { AgentEvent, AgentId } from "../src/types/events";
 import {
   WORKFLOW_CACHE_VERSION,
+  changesCache,
   createWorkflowCacheStore,
-  dropsCacheEntries,
   hashWorkflowCacheInput,
   hashWorkflowSpec,
   loadWorkflowCache,
@@ -18,6 +18,7 @@ import {
   workflowCacheKey,
 } from "../src/workflow/cache-store";
 import { runWorkflow } from "../src/workflow/engine";
+import { cacheLoopProgress, setCacheLoopProgress } from "../src/workflow/loop-progress";
 import type { StepResult, WorkflowSpec } from "../src/workflow/types";
 
 function tempDir(): string {
@@ -534,13 +535,14 @@ function existsSync(path: string): boolean {
   }
 }
 
-describe("cache entries the engine drops mid-run", () => {
-  it("covers a loop jump as well as a step edit", () => {
+describe("events the drivers save the cache on", () => {
+  it("covers a loop jump, a step edit and the end of the run", () => {
     // A loop jump clears the region it re-runs from the cache map; unless the
     // drivers save it then, a run resumed or handed off mid-pass replays the
-    // previous pass as if it were this one.
+    // previous pass as if it were this one. The end of a run can release a
+    // spent loop's budget, which no step saves either.
     expect(
-      dropsCacheEntries({
+      changesCache({
         kind: "loop_iteration",
         gateStepId: "g",
         loopTo: "p",
@@ -549,10 +551,11 @@ describe("cache entries the engine drops mid-run", () => {
         ts: 0,
       }),
     ).toBe(true);
-    expect(dropsCacheEntries({ kind: "step_edited", stepId: "s", patch: {}, ts: 0 } as never)).toBe(
+    expect(changesCache({ kind: "step_edited", stepId: "s", patch: {}, ts: 0 } as never)).toBe(
       true,
     );
-    expect(dropsCacheEntries({ kind: "phase_done", phaseId: "p", ok: true, ts: 0 })).toBe(false);
+    expect(changesCache({ kind: "workflow_done", ok: false, results: [], ts: 0 })).toBe(true);
+    expect(changesCache({ kind: "phase_done", phaseId: "p", ok: true, ts: 0 })).toBe(false);
   });
 });
 
@@ -595,5 +598,65 @@ describe("saving a cache the engine dropped entries from", () => {
     cache.set("setup", ok("setup", "ready"));
     await store.save(key, cache);
     expect([...(await store.load(key)).keys()].sort()).toEqual(["other", "setup"]);
+  });
+
+  it("never deletes on disk what a copy of the loaded map lacks", async () => {
+    const root = mkdtempSync(join(tmpdir(), "st-cache-drop-"));
+    const store = createWorkflowCacheStore(root);
+    const key = workflowCacheKey("w", "go", "/repo", spec);
+    await store.save(key, new Map([["rev", ok("rev", "pass 1")]]));
+
+    // Only the map `load` returned knows what it held; a copy has no
+    // baseline, so a missing entry is one it never had, not one it dropped.
+    const copy = new Map(await store.load(key));
+    copy.delete("rev");
+    copy.set("setup", ok("setup", "ready"));
+    await store.save(key, copy);
+    expect([...(await store.load(key)).keys()].sort()).toEqual(["rev", "setup"]);
+  });
+});
+
+describe("a cache's loop progress", () => {
+  const spec: WorkflowSpec = { name: "w", phases: [] };
+  const progress = { phaseRuns: { review: 2 }, gateIterations: { gate: 3 } };
+
+  it("is saved with the entries and loaded back with them", async () => {
+    const root = mkdtempSync(join(tmpdir(), "st-cache-loops-"));
+    const store = createWorkflowCacheStore(root);
+    const key = workflowCacheKey("w", "go", "/repo", spec);
+    const cache = new Map([["setup", sampleResult("setup")]]);
+    setCacheLoopProgress(cache, progress);
+    await store.save(key, cache);
+
+    const loaded = await store.load(key);
+    expect(cacheLoopProgress(loaded)).toEqual(progress);
+    // A save by a map with none of its own keeps what is on disk…
+    await store.save(key, new Map([["other", sampleResult("other")]]));
+    expect(cacheLoopProgress(await store.load(key))).toEqual(progress);
+    // …and a later change replaces it.
+    const later = { phaseRuns: { review: 3 }, gateIterations: {} };
+    setCacheLoopProgress(loaded, later);
+    await store.save(key, loaded);
+    expect(cacheLoopProgress(await store.load(key))).toEqual(later);
+  });
+
+  it("is dropped when malformed, and absent from a fresh cache", async () => {
+    const root = mkdtempSync(join(tmpdir(), "st-cache-loops-"));
+    const store = createWorkflowCacheStore(root);
+    const key = workflowCacheKey("w", "go", "/repo", spec);
+    expect(cacheLoopProgress(await store.load(key))).toBeUndefined();
+    await store.save(key, new Map([["setup", sampleResult("setup")]]));
+    const file = join(root, workflowCacheFileName(key));
+    const raw = JSON.parse(readFileSync(file, "utf8"));
+    writeFileSync(file, JSON.stringify({ ...raw, loops: { phaseRuns: [1], gateIterations: {} } }));
+    expect(cacheLoopProgress(await store.load(key))).toBeUndefined();
+    writeFileSync(
+      file,
+      JSON.stringify({ ...raw, loops: { phaseRuns: { a: 2, b: 0, c: "x" }, gateIterations: {} } }),
+    );
+    expect(cacheLoopProgress(await store.load(key))).toEqual({
+      phaseRuns: { a: 2 },
+      gateIterations: {},
+    });
   });
 });

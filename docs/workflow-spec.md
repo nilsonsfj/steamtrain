@@ -1198,6 +1198,13 @@ container: add `loopTo` on a normal `gate` and point it at an earlier phase.
   they re-execute. Outputs remain readable until each step overwrites them, so
   a fix step can still read the previous pass's review. Outside the loop,
   normal cache/resume still applies.
+- A resumed run (after a cancel, or a detach to the background) continues its
+  loops where they were: the pass it was on, `{{iteration}}` and what is left
+  of each `maxIterations` budget. A loop that ran out of passes and failed or
+  stopped the run gets a fresh budget when the run is retried; its passes are
+  numbered on from the last one. A loop that ran out of passes with
+  `onFalse: "continue"` let the run go on, so its failed verdict is cached and a
+  re-run does not loop again.
 - Workflows that contain any `loopTo` gate run **phase-by-phase** (the pre-DAG
   barrier behavior), because a loop re-runs a contiguous range of phases as a
   unit.

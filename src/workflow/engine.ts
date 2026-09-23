@@ -73,6 +73,7 @@ import {
 } from "./issues";
 import { type LlmCallResult, type LlmComplete, type LlmProviderId } from "./llm";
 import { callLlm } from "./llm-call";
+import { type LoopProgress, cacheLoopProgress, setCacheLoopProgress } from "./loop-progress";
 import {
   type ConflictResolver,
   type HarvestResult,
@@ -234,14 +235,6 @@ export interface WorkflowDeps {
   control?: WorkflowRunControl;
 }
 
-/** Loop state carried across a mid-run handoff; see {@link WorkflowRunContext.loopProgress}. */
-export interface LoopProgress {
-  /** Per phase id, how many of its passes finished and were looped back from. */
-  phaseRuns: Record<string, number>;
-  /** Per loop gate id, the pass it was on. */
-  gateIterations: Record<string, number>;
-}
-
 export interface WorkflowRunContext {
   /** The user's prompt; available to steps as `{{input}}` / `{{args}}`. */
   input: string;
@@ -257,13 +250,6 @@ export interface WorkflowRunContext {
    * run resumes. Pass the same Map across runs to enable resume.
    */
   cache?: Map<string, StepResult>;
-  /**
-   * Where a previous owner's loops were when it handed the run off (see
-   * `priorOwnerWork` in run-cli). A loop workflow restarts from the top, so
-   * without this each phase's pass count, `{{iteration}}` and every loop
-   * gate's `maxIterations` budget would start over at 1.
-   */
-  loopProgress?: LoopProgress;
   /**
    * Names of workflows currently being invoked in the call stack that led to
    * this run (outermost first). Only ever set internally, when a `workflow`
@@ -816,12 +802,17 @@ async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, b
     string,
     { loopToIndex: number; gatePhaseIndex: number; iteration: number }
   >();
+  // A run resumed on a cache (after a cancel, or handed off to another
+  // process) continues its loops where they were: a loop workflow restarts
+  // from the top, and without this each phase's pass count, `{{iteration}}`
+  // and every gate's `maxIterations` budget would start over at 1.
+  const progress = cacheLoopProgress(cache);
   spec.phases.forEach((phase, gatePhaseIndex) => {
     for (const step of phase.steps) {
       if (step.kind === "gate" && step.loopTo !== undefined) {
         const loopToIndex = phaseIndexById.get(step.loopTo);
         if (loopToIndex !== undefined) {
-          const iteration = env.ctx.loopProgress?.gateIterations[step.id] ?? 1;
+          const iteration = progress?.gateIterations[step.id] ?? 1;
           loopState.set(step.id, { loopToIndex, gatePhaseIndex, iteration });
         }
       }
@@ -838,11 +829,29 @@ async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, b
   // would collide in the `phaseId+iteration`-keyed folds and overwrite
   // history/reducer state instead of appending to it).
   const phaseRunCount = new Map<number, number>();
-  // A handed-off run continues its previous owner's count.
+  // How many of each phase's passes were looped back from: its count, less
+  // the pass still standing (whose results are in the cache).
+  const loopedBack = new Map<number, number>();
   spec.phases.forEach((phase, i) => {
-    const earlier = env.ctx.loopProgress?.phaseRuns[phase.id];
-    if (earlier) phaseRunCount.set(i, earlier);
+    const earlier = progress?.phaseRuns[phase.id];
+    if (earlier) {
+      phaseRunCount.set(i, earlier);
+      loopedBack.set(i, earlier);
+    }
   });
+  // Recorded with the cache on every change, so a run resumed from it later
+  // (after a cancel, or in another process) continues from here.
+  const recordProgress = (): void => {
+    const recorded: LoopProgress = { phaseRuns: {}, gateIterations: {} };
+    for (const [i, count] of loopedBack) {
+      const id = spec.phases[i]?.id;
+      if (id !== undefined) recorded.phaseRuns[id] = count;
+    }
+    for (const [id, state] of loopState) {
+      if (state.iteration > 1) recorded.gateIterations[id] = state.iteration;
+    }
+    setCacheLoopProgress(cache, recorded);
+  };
 
   let pi = 0;
   while (pi < spec.phases.length) {
@@ -928,7 +937,12 @@ async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, b
 
     yield { kind: "phase_done", phaseId: phase.id, ok: phaseOk, iteration, ts: Date.now() };
 
-    if (signal?.aborted) return false;
+    if (signal?.aborted) {
+      // Canceled just as a spent loop failed the run: its budget is still
+      // released for the retry (see below), which the end-of-run save keeps.
+      if (releaseSpentLoops(phase, results, loopState, effectiveLoopMax)) recordProgress();
+      return false;
+    }
 
     // Loop-back decision: did this phase contain an unmet loop gate? A jump
     // means this pass — the whole region being re-run, not just the gate's
@@ -947,6 +961,9 @@ async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, b
       // loop gates; their iteration budgets must restart too, or the inner
       // loop would already be "exhausted" on the outer loop's 2nd+ pass.
       resetNestedLoops(loopState, loopToIndex, pi, contended.gateId);
+      // Every pass in the region is finished history now.
+      for (let k = loopToIndex; k <= pi; k++) loopedBack.set(k, phaseRunCount.get(k) ?? 0);
+      recordProgress();
       yield {
         kind: "loop_iteration",
         gateStepId: contended.gateId,
@@ -961,6 +978,11 @@ async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, b
       pi = loopToIndex;
       continue;
     }
+
+    // A loop that ran out of passes and failed or stopped the run starts a
+    // fresh budget when the run is retried: resumed on its last pass, the
+    // gate could only give the same verdict again, with no pass left to act on it.
+    if (releaseSpentLoops(phase, results, loopState, effectiveLoopMax)) recordProgress();
 
     if (!phaseOk) notOkPhases.add(pi);
     if (stopAfterPhase) break;
@@ -1727,6 +1749,34 @@ function findContendedLoopGate(
     return { gateId: step.id, loopToIndex: state.loopToIndex, cap };
   }
   return undefined;
+}
+
+/**
+ * Reset to 1 the counter of every loop gate in `phase` that failed with no
+ * pass left and ended the run (`onFalse` "fail" or "stop": its result is not
+ * ok, so not cached, and a retry evaluates it again). Returns whether any was
+ * reset. Called only when this run schedules nothing more after the phase (no
+ * gate in it jumped, or the run was canceled), so it never loops on the reset.
+ * The pass that failed is not counted as looped back from: the retry replays
+ * it under the same number, then loops on from there.
+ */
+function releaseSpentLoops(
+  phase: WorkflowPhase,
+  results: Map<string, StepResult>,
+  loopState: Map<string, { loopToIndex: number; gatePhaseIndex: number; iteration: number }>,
+  effectiveLoopMax: number,
+): boolean {
+  let released = false;
+  for (const step of phase.steps) {
+    if (step.kind !== "gate") continue;
+    const state = loopState.get(step.id);
+    const res = results.get(step.id);
+    if (!state || state.iteration === 1 || !res?.gate || res.gate.passed || res.ok) continue;
+    if (state.iteration < (step.maxIterations ?? effectiveLoopMax)) continue; // a pass is left
+    state.iteration = 1;
+    released = true;
+  }
+  return released;
 }
 
 /**

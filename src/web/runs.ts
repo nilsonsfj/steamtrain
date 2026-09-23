@@ -33,11 +33,11 @@ import {
   acquireRunSlot,
   applyRetryStepFilter,
   applyWorkflowStepOverrides,
+  changesCache,
   completeHandoff,
   createLiveRunPublisher,
   createNotifier,
   createWorkflowRunControl,
-  dropsCacheEntries,
   finalRunWorktrees,
   hashWorkflowSpec,
   isRerunError,
@@ -920,7 +920,13 @@ export class WorkflowRunManager {
         // Mid-run detach committed: stop recording, mirroring, and emitting
         // events — the detached child owns the run's record and stream from
         // here. Draining the iterator lets the aborted engine unwind cleanly.
-        if (run.handoffCommitted) continue;
+        // What the engine changes in the cache as it unwinds (a spent loop's
+        // released budget) is still saved: the child, spawned only once this
+        // drain is over, reads the cache from disk.
+        if (run.handoffCommitted) {
+          if (changesCache(event)) await this.cacheStore.save(key, cache);
+          continue;
+        }
         recorder.handle(event);
         publisher?.event(event);
         notifyWorkflowEvent(this.notifier, notifyMeta, event);
@@ -935,7 +941,7 @@ export class WorkflowRunManager {
             event.cached,
           );
         }
-        if (dropsCacheEntries(event)) await this.cacheStore.save(key, cache);
+        if (changesCache(event)) await this.cacheStore.save(key, cache);
         if (event.kind === "workflow_done") {
           ok = event.ok;
           if (event.budgetExceeded) budgetExceeded = true;

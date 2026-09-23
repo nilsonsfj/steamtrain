@@ -17,8 +17,11 @@ import {
   type WorkflowRunControl,
   type WorkflowSpec,
   createLiveRunStore,
+  createWorkflowCacheStore,
   runWorkflow,
+  workflowCacheKey,
 } from "../src/workflow";
+import { cacheLoopProgress, setCacheLoopProgress } from "../src/workflow/loop-progress";
 
 /**
  * Mid-run detach from the web run manager: abort local work, hand the run off
@@ -220,6 +223,50 @@ describe("web run manager mid-run detach", () => {
     expect(events.some((e) => e.kind === "step_done" && e.stepId === "a")).toBe(false);
     // Immediate detach no longer injects a synthetic pause/resume pair.
     expect(events.some((e) => e.kind === "run_paused" || e.kind === "run_resumed")).toBe(false);
+  });
+
+  it("still saves what the engine changes in the cache while it unwinds", async () => {
+    // A detach can land just as a spent loop fails its run: the engine,
+    // unwinding, releases the loop's budget on the cache map. The detached
+    // child starts only once the drain is over and reads the cache from disk,
+    // so the release must reach disk first even though events are skipped.
+    const cacheStore = createWorkflowCacheStore(join(root, "cache"));
+    const key = workflowCacheKey("detach-demo", "hi", root, chainSpec);
+    const seeded = new Map<string, StepResult>();
+    setCacheLoopProgress(seeded, { phaseRuns: { p1: 1 }, gateIterations: { g: 2 } });
+    await cacheStore.save(key, seeded);
+
+    let started = false;
+    const host: WorkflowHost = {
+      listWorkflows: () => ({ [chainSpec.name]: chainSpec }),
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      runWorkflow: (_name, _input, signal, cache) =>
+        (async function* () {
+          yield { kind: "workflow_start", name: "detach-demo", phaseCount: 2, stepCount: 2, ts: 0 };
+          started = true;
+          while (!signal?.aborted) await delay(5);
+          setCacheLoopProgress(cache!, { phaseRuns: { p1: 1 }, gateIterations: {} });
+          yield { kind: "workflow_done", ok: false, results: [], ts: 0 } as WorkflowEvent;
+        })(),
+    };
+    const manager = new WorkflowRunManager({
+      host,
+      cacheStore,
+      cwd: root,
+      config: { stepTimeoutSec: 60, workflowTimeoutSec: 3600 },
+      liveRuns,
+      detachIo: { projectDir: root },
+    });
+    const runId = manager.start("detach-demo", "hi").runId as string;
+    for (let i = 0; i < 100 && !started; i++) await delay(10);
+    expect(manager.detach(runId)).toEqual({ ok: true });
+    for (let i = 0; i < 200 && manager.get(runId); i++) await delay(10);
+    expect(manager.get(runId)).toBeUndefined();
+
+    expect(cacheLoopProgress(await cacheStore.load(key))).toEqual({
+      phaseRuns: { p1: 1 },
+      gateIterations: {},
+    });
   });
 
   it("carries a per-session spec override into the handoff (cache stays aligned)", async () => {
