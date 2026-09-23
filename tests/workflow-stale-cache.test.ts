@@ -128,4 +128,70 @@ describe("cache staleness", () => {
     expect(stepDone(events, "c").cached).toBe(false);
     expect(stepDone(events, "c").result.output.trim()).toBe("c-fresh");
   });
+
+  it("replays settled work after an approval, which a resume always re-asks", async () => {
+    // plan → approval → build: the approval never caches, so on resume it runs
+    // again — that alone must not make `build` redo work it already did.
+    const gated: WorkflowSpec = {
+      name: "approve-then-build",
+      phases: [
+        { id: "p1", title: "Plan", steps: [{ id: "plan", kind: "command", cmd: "echo plan" }] },
+        { id: "p2", title: "Approve", steps: [{ id: "ok", kind: "approval" }] },
+        {
+          id: "p3",
+          title: "Build",
+          steps: [{ id: "build", kind: "command", dependsOn: ["ok"], cmd: "echo build-fresh" }],
+        },
+        {
+          id: "p4",
+          title: "Ship",
+          steps: [{ id: "ship", kind: "command", cmd: "echo ship-fresh" }],
+        },
+      ],
+    };
+    const cache = new Map([
+      ["plan", cachedResult("plan", "plan\n")],
+      ["build", cachedResult("build", "build-cached")],
+      ["ship", cachedResult("ship", "ship-cached")],
+    ]);
+    const events: WorkflowEvent[] = [];
+    const approving: WorkflowDeps = {
+      ...deps(),
+      requestApproval: async () => ({ approved: true }),
+    };
+    for await (const ev of runWorkflow(gated, { input: "task", cache }, approving)) events.push(ev);
+
+    expect(stepDone(events, "ok").cached).toBe(false);
+    expect(stepDone(events, "build").cached).toBe(true);
+    expect(stepDone(events, "ship").cached).toBe(true);
+  });
+
+  it("does not re-run a step that only waits on the re-run one, but still one that reads it", async () => {
+    // `reads` omits dependsOn, so the phase barrier orders it after `a` — but
+    // nothing of `a` reaches it. `quotes` references `a`'s output.
+    const barrier: WorkflowSpec = {
+      name: "barrier-only",
+      phases: [
+        { id: "p1", title: "P1", steps: [{ id: "a", kind: "command", cmd: "echo a-fresh" }] },
+        {
+          id: "p2",
+          title: "P2",
+          steps: [
+            { id: "waits", kind: "command", cmd: "echo waits-fresh" },
+            { id: "quotes", kind: "command", cmd: "echo 'saw {{steps.a.output}}'" },
+          ],
+        },
+      ],
+    };
+    const cache = new Map([
+      ["waits", cachedResult("waits", "waits-cached")],
+      ["quotes", cachedResult("quotes", "saw a-stale")],
+    ]);
+    const events: WorkflowEvent[] = [];
+    for await (const ev of runWorkflow(barrier, { input: "task", cache }, deps())) events.push(ev);
+
+    expect(stepDone(events, "waits").cached).toBe(true);
+    expect(stepDone(events, "quotes").cached).toBe(false);
+    expect(stepDone(events, "quotes").result.output).toContain("saw a-fresh");
+  });
 });
