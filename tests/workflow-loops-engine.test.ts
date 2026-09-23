@@ -666,7 +666,11 @@ describe("a loop resumed from its cache", () => {
   function resumable(spec: WorkflowSpec) {
     const store = createWorkflowCacheStore(mkdtempSync(join(tmpdir(), "st-loop-resume-")));
     const key = workflowCacheKey(spec.name, "go", "/repo", spec);
-    return async (script: (prompt: string) => string, signal?: AbortSignal) => {
+    return async (
+      script: (prompt: string) => string,
+      signal?: AbortSignal,
+      onEvent?: (e: WorkflowEvent) => void,
+    ) => {
       const cache = await store.load(key);
       const prompts: string[] = [];
       const deps = {
@@ -681,6 +685,7 @@ describe("a loop resumed from its cache", () => {
       const events: WorkflowEvent[] = [];
       for await (const e of runWorkflow(spec, { input: "go", cache }, deps, signal)) {
         events.push(e);
+        onEvent?.(e);
         if (e.kind === "step_done") {
           await persistWorkflowStepDone(store, key, cache, e.stepId, e.result, e.cached);
         }
@@ -724,7 +729,7 @@ describe("a loop resumed from its cache", () => {
 
   it("restarts a nested loop's count when the loop around it went round", async () => {
     // outer: [a, inner: [b, in → b], out → a]
-    const gate = (id: string, step: string, needle: string, loopTo: string) => ({
+    const gatePhase = (id: string, step: string, needle: string, loopTo: string) => ({
       id: `${id}-phase`,
       title: id,
       steps: [
@@ -743,8 +748,8 @@ describe("a loop resumed from its cache", () => {
       phases: [
         workerPhase("a", "a {{iteration}}"),
         workerPhase("b", "b {{iteration}}"),
-        gate("in", "b-step", "b 2", "b"),
-        gate("out", "a-step", "a 2", "a"),
+        gatePhase("in", "b-step", "b 2", "b"),
+        gatePhase("out", "a-step", "a 2", "a"),
       ],
     };
     const run = resumable(spec);
@@ -798,5 +803,38 @@ describe("a loop resumed from its cache", () => {
     expect(retried.loops).toEqual([2]);
     expect(retried.passes("review")).toEqual([2, 3]);
     expect(retried.prompts.filter((p) => p.startsWith("review"))).toEqual(["review go (iter 3)"]);
+  });
+
+  /** Cancel the run as the gate phase of `pass` finishes, before the engine goes on. */
+  const cancelAfterCheck = (controller: AbortController, pass: number) => (e: WorkflowEvent) => {
+    if (e.kind === "phase_done" && e.phaseId === "check" && e.iteration === pass)
+      controller.abort();
+  };
+
+  it("releases a spent loop's budget even when the run is canceled as it fails", async () => {
+    const run = resumable(loopSpec(2));
+    const script = (prompt: string) => (prompt.startsWith("fix") ? "NOPE" : "ok");
+    const controller = new AbortController();
+    const first = await run(script, controller.signal, cancelAfterCheck(controller, 2));
+    expect(first.loops).toEqual([2]);
+    expect(first.onDisk?.gateIterations).toEqual({});
+
+    const retried = await run(script);
+    expect(retried.loops).toEqual([2]);
+    expect(retried.passes("review")).toEqual([2, 3]);
+  });
+
+  it("keeps the budget of a loop canceled with a pass left", async () => {
+    const run = resumable(loopSpec(3));
+    const script = (prompt: string) => (prompt.startsWith("fix") ? "NOPE" : "ok");
+    const controller = new AbortController();
+    const first = await run(script, controller.signal, cancelAfterCheck(controller, 2));
+    expect(first.loops).toEqual([2]);
+    expect(first.onDisk?.gateIterations).toEqual({ "check-gate": 2 });
+
+    // The resume re-runs pass 2's gate, then has one pass left: 3.
+    const resumed = await run(script);
+    expect(resumed.loops).toEqual([3]);
+    expect(resumed.passes("review")).toEqual([2, 3]);
   });
 });

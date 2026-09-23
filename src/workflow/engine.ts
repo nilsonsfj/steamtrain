@@ -937,7 +937,12 @@ async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, b
 
     yield { kind: "phase_done", phaseId: phase.id, ok: phaseOk, iteration, ts: Date.now() };
 
-    if (signal?.aborted) return false;
+    if (signal?.aborted) {
+      // Canceled just as a spent loop failed the run: its budget is still
+      // released for the retry (see below), which the end-of-run save keeps.
+      if (releaseSpentLoops(phase, results, loopState, effectiveLoopMax)) recordProgress();
+      return false;
+    }
 
     // Loop-back decision: did this phase contain an unmet loop gate? A jump
     // means this pass — the whole region being re-run, not just the gate's
@@ -977,7 +982,7 @@ async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, b
     // A loop that ran out of passes and failed or stopped the run starts a
     // fresh budget when the run is retried: resumed on its last pass, the
     // gate could only give the same verdict again, with no pass left to act on it.
-    if (releaseSpentLoops(phase, results, loopState)) recordProgress();
+    if (releaseSpentLoops(phase, results, loopState, effectiveLoopMax)) recordProgress();
 
     if (!phaseOk) notOkPhases.add(pi);
     if (stopAfterPhase) break;
@@ -1750,19 +1755,22 @@ function findContendedLoopGate(
  * Reset to 1 the counter of every loop gate in `phase` that failed with no
  * pass left and ended the run (`onFalse` "fail" or "stop": its result is not
  * ok, so not cached, and a retry evaluates it again). Returns whether any was
- * reset. Called only once no gate in the phase jumped, so this run's
- * scheduling is over for these gates either way.
+ * reset. Called only when this run schedules nothing more after the phase (no
+ * gate in it jumped, or the run was canceled), so it never loops on the reset.
  */
 function releaseSpentLoops(
   phase: WorkflowPhase,
   results: Map<string, StepResult>,
   loopState: Map<string, { loopToIndex: number; gatePhaseIndex: number; iteration: number }>,
+  effectiveLoopMax: number,
 ): boolean {
   let released = false;
   for (const step of phase.steps) {
+    if (step.kind !== "gate") continue;
     const state = loopState.get(step.id);
     const res = results.get(step.id);
     if (!state || state.iteration === 1 || !res?.gate || res.gate.passed || res.ok) continue;
+    if (state.iteration < (step.maxIterations ?? effectiveLoopMax)) continue; // a pass is left
     state.iteration = 1;
     released = true;
   }
