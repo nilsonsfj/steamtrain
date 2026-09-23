@@ -76,6 +76,7 @@
     }
     var agentSel = selectEl(agentOpts, agentOpts[0].value);
     var modelField = h("div", { class: "field" });
+    var modelSel = null;
     function renderModels() {
       clear(modelField);
       modelField.appendChild(h("label", { text: "Model (optional)" }));
@@ -87,9 +88,8 @@
       ((meta && meta.models) || []).forEach(function (m) {
         opts.push({ value: m.id, label: m.name || m.id });
       });
-      var sel = selectEl(opts, "");
-      modelField.appendChild(sel);
-      modelField._sel = sel;
+      modelSel = selectEl(opts, "");
+      modelField.appendChild(modelSel);
     }
     agentSel.addEventListener("change", renderModels);
     renderModels();
@@ -125,7 +125,7 @@
         var steps = [];
         checks.forEach(function (c) { if (c.checked) steps.push(c.value); });
         var payload = { retargetAgent: agentSel.value };
-        var model = modelField._sel && modelField._sel.value;
+        var model = modelSel && modelSel.value;
         if (model) payload.retargetModel = model;
         if (steps.length) payload.steps = steps;
         rerunHistory(record.id, record.workflow, "retry", payload);
@@ -283,16 +283,19 @@
     var shell = h("div", { class: "modal" + (wide ? " wide" : ""), role: "dialog", "aria-modal": "true", "aria-labelledby": titleId, tabindex: "-1" }, head, h("div", { class: "mbody" }, bodyNode), footNode);
     return shell;
   }
-  function field(label, control, hint, className, withValidation) {
-    var wrapper = h("div", { class: "field" + (className ? " " + className : "") },
+  function field(label, control, hint, className) {
+    return h("div", { class: "field" + (className ? " " + className : "") },
       h("label", { text: label }), control,
       hint ? h("div", { class: "hint", text: hint }) : null);
-    if (withValidation) {
-      var errEl = h("div", { class: "field-error" });
-      wrapper.appendChild(errEl);
-      control._fieldError = errEl;
-    }
-    return wrapper;
+  }
+  /**
+   * The `.field-error` line of the `.field` wrapping `control`, if it has one.
+   * Looked up from the DOM each time rather than kept on the node, so it can
+   * never point at a line a rebuild has since replaced.
+   */
+  function fieldErrorFor(control) {
+    var wrapper = control.closest ? control.closest(".field") : null;
+    return wrapper ? wrapper.querySelector(".field-error") : null;
   }
   function buildModelSelect(agentConfig) {
     var agentId = agentConfig.id;
@@ -317,9 +320,9 @@
     return selectEl(opts, current);
   }
   function addBlurValidation(el, checkFn) {
-    var errEl = el._fieldError;
     el.addEventListener("blur", function () {
       var msg = checkFn();
+      var errEl = fieldErrorFor(el);
       if (msg) {
         el.classList.add("invalid");
         if (errEl) { errEl.textContent = msg; errEl.classList.add("show"); }
@@ -331,6 +334,7 @@
     function clearInvalid() {
       if (el.classList.contains("invalid")) {
         el.classList.remove("invalid");
+        var errEl = fieldErrorFor(el);
         if (errEl) { errEl.textContent = ""; errEl.classList.remove("show"); }
       }
     }
@@ -964,7 +968,7 @@
    * without touching the shared child spec. `base` records the child's own
    * default so Save only persists a genuine override.
    */
-  function nestedStepEditor(fullId, cs, refs, nestedList, parentId, childPath) {
+  function nestedStepEditor(fullId, cs, refs, nestedList, parentId, childPath, onUseForAll) {
     var agent = cs.agent || "";
     var agentSel = selectEl(agentOptionsWithAuto(agent), agent);
     var modelSel = selectEl(agent ? modelOptionsWith(agent, cs.model) : familyModelOptions(cs.model), cs.model || "");
@@ -1013,7 +1017,7 @@
     ref.card = card;
     useAllBtn.addEventListener("click", function (e) {
       e.preventDefault(); e.stopPropagation();
-      if (refs._onUseForAll) refs._onUseForAll(agentSel.value, modelSel.value, ref.effortSel ? ref.effortSel.value : "");
+      if (onUseForAll) onUseForAll(agentSel.value, modelSel.value, ref.effortSel ? ref.effortSel.value : "");
     });
     refs[fullId] = ref;
     nestedList.push({ fullId: fullId, parentId: parentId, childPath: childPath, ref: ref });
@@ -1022,7 +1026,7 @@
   }
 
   /** Render nested editors for every agent-backed step inside a workflow call step. */
-  function nestedStepEditors(callStep, refs, nestedList) {
+  function nestedStepEditors(callStep, refs, nestedList, onUseForAll) {
     var view = ST.run.subWorkflowView(callStep);
     if (!view || !view.resolved) return null;
     var agentSteps = view.steps.filter(function (cs) { return cs.agentBacked; });
@@ -1032,7 +1036,7 @@
     );
     agentSteps.forEach(function (cs) {
       var fullId = callStep.id + "::" + cs.path;
-      wrap.appendChild(nestedStepEditor(fullId, cs, refs, nestedList, callStep.id, cs.path));
+      wrap.appendChild(nestedStepEditor(fullId, cs, refs, nestedList, callStep.id, cs.path, onUseForAll));
     });
     return wrap;
   }
@@ -1064,6 +1068,7 @@
       bulkAgent ? bulkAgent.defaultModel : ""
     );
     var bulkEffortField = h("div", { class: "field bulk-effort" });
+    var bulkEffortSel = null;
     var bulkApplyBtn = h("button", {
       class: "btn primary bulk-apply",
       text: agentStepCount > 0 ? "Apply to all " + agentStepCount + " steps" : "No agent steps",
@@ -1077,12 +1082,11 @@
       bulkEffortField.appendChild(h("label", { text: "Effort" }));
       if (opts.length <= 1) {
         bulkEffortField.appendChild(h("div", { class: "ro", text: "default only" }));
-        bulkEffortField._sel = null;
+        bulkEffortSel = null;
         return;
       }
-      var es = selectEl(opts, "");
-      bulkEffortField.appendChild(es);
-      bulkEffortField._sel = es;
+      bulkEffortSel = selectEl(opts, "");
+      bulkEffortField.appendChild(bulkEffortSel);
     }
     bulkAgentSel.addEventListener("change", function () {
       var a = agentById(bulkAgentSel.value);
@@ -1095,7 +1099,7 @@
     function applyBulkRetarget() {
       var agent = bulkAgentSel.value;
       var model = bulkModelSel.value;
-      var effort = bulkEffortField._sel ? bulkEffortField._sel.value : "";
+      var effort = bulkEffortSel ? bulkEffortSel.value : "";
       if (!agent || !model) { mbanner(banner, "pick an agent and model first", "info"); return; }
       var changed = 0;
       Object.keys(refs).forEach(function (id) {
@@ -1154,13 +1158,12 @@
       var a = agentById(agent);
       fillOptions(bulkModelSel, modelOptionsWith(agent, model), model || (a && a.defaultModel));
       renderBulkEffort();
-      if (bulkEffortField._sel && effort != null) {
-        var has = Array.prototype.some.call(bulkEffortField._sel.options, function (o) { return o.value === (effort || ""); });
-        if (has) bulkEffortField._sel.value = effort || "";
+      if (bulkEffortSel && effort != null) {
+        var has = Array.prototype.some.call(bulkEffortSel.options, function (o) { return o.value === (effort || ""); });
+        if (has) bulkEffortSel.value = effort || "";
       }
       applyBulkRetarget();
     }
-    refs._onUseForAll = useForAll;
 
     var phasesWrap = h("div", { class: "ephases" });
     spec.phases.forEach(function (p) {
@@ -1168,7 +1171,7 @@
       p.steps.forEach(function (st) {
         pe.appendChild(stepEditor(st, refs, { onUseForAll: useForAll }));
         if (st.kind === "workflow") {
-          var nested = nestedStepEditors(st, refs, nestedList);
+          var nested = nestedStepEditors(st, refs, nestedList, useForAll);
           if (nested) pe.appendChild(nested);
         }
       });
@@ -1908,6 +1911,7 @@
 
   ST.modals = {
     addBlurValidation: addBlurValidation,
+    fieldErrorFor: fieldErrorFor,
     agentOptions: agentOptions,
     buildModelSelect: buildModelSelect,
     closeModal: closeModal,

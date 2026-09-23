@@ -101,6 +101,7 @@
       }
 
       var control;
+      var paramDatalist = null;
       var choices = Array.isArray(inp.choices) ? inp.choices.slice() : null;
       if (type === "boolean") {
         control = ST.modals.selectEl([
@@ -139,8 +140,8 @@
         modelOpts.forEach(function (o) {
           datalist.appendChild(h("option", { value: o.value }, o.label));
         });
-        // Attach datalist after the control wrapper below.
-        control._paramDatalist = datalist;
+        // Attached after the control in the wrapper below.
+        paramDatalist = datalist;
       } else {
         control = h("input", {
           class: "txt",
@@ -151,7 +152,7 @@
       }
       control.setAttribute("data-param-key", key);
       control.setAttribute("data-param-type", type);
-      if (choices && choices.length) control._paramChoices = choices;
+      if (choices && choices.length) control.setAttribute("data-param-choices", JSON.stringify(choices));
 
       var labelEl = h("label", { text: labelText });
       if (required) {
@@ -163,11 +164,10 @@
       }
       var errEl = h("div", { class: "field-error" });
       var wrapper = h("div", { class: "field" }, labelEl, control,
-        control._paramDatalist || null,
+        paramDatalist,
         hint ? h("div", { class: "hint", text: hint }) : null, errEl);
       container.appendChild(wrapper);
 
-      control._fieldError = errEl;
       if (required || type === "number" || type === "enum" || (choices && choices.length)) {
         ST.modals.addBlurValidation(control, function () {
           var val = control.value;
@@ -192,6 +192,7 @@
       var el = fields[i];
       var key = el.getAttribute("data-param-key");
       var type = el.getAttribute("data-param-type") || "string";
+      var choices = JSON.parse(el.getAttribute("data-param-choices") || "[]");
       var required = el.closest(".field") && el.closest(".field").querySelector(".param-required");
       var val = el.value;
       var msg = null;
@@ -199,10 +200,10 @@
         msg = key + " is required";
       } else if (type === "number" && val && isNaN(Number(val))) {
         msg = key + " must be a number";
-      } else if (el._paramChoices && el._paramChoices.length && val && el._paramChoices.indexOf(val) < 0) {
-        msg = key + " must be one of: " + el._paramChoices.join(", ");
+      } else if (choices.length && val && choices.indexOf(val) < 0) {
+        msg = key + " must be one of: " + choices.join(", ");
       }
-      var errEl = el._fieldError;
+      var errEl = ST.modals.fieldErrorFor(el);
       if (msg) {
         el.classList.add("invalid");
         if (errEl) { errEl.textContent = msg; errEl.classList.add("show"); }
@@ -1206,6 +1207,7 @@
     var modelSel = null;
     var midPermsSel = null;
     var effortField = h("div", { class: "field" });
+    var effortSel = null;
     var modelRow = null;
     var permsRow = null;
     if (agentBacked && !isCmd) {
@@ -1216,11 +1218,10 @@
       function renderMidEffort() {
         clear(effortField);
         var opts = ST.modals.effortOptions(agent, modelSel.value, curEffort);
-        if (opts.length <= 1) { effortField._sel = null; return; }
+        if (opts.length <= 1) { effortSel = null; return; }
         effortField.appendChild(h("label", { text: "Effort" }));
-        var es = ST.modals.selectEl(opts, curEffort || "");
-        effortField.appendChild(es);
-        effortField._sel = es;
+        effortSel = ST.modals.selectEl(opts, curEffort || "");
+        effortField.appendChild(effortSel);
       }
       modelSel.addEventListener("change", renderMidEffort);
       renderMidEffort();
@@ -1267,7 +1268,7 @@
       payload[isCmd ? "cmd" : "prompt"] = ta.value;
       if (modelSel) {
         payload.model = modelSel.value;
-        var ef = effortField._sel ? effortField._sel.value : "";
+        var ef = effortSel ? effortSel.value : "";
         if (ef) payload.effort = ef;
       }
       if (midPermsSel && midPermsSel.value) {
@@ -2624,6 +2625,7 @@
     renderCard: renderCard,
     renderDetail: renderDetail,
     renderParamsForm: renderParamsForm,
+    validateParamsForm: validateParamsForm,
     renderPlanResult: renderPlanResult,
     renderStagedIndicator: renderStagedIndicator,
     sessionOverridesEmpty: sessionOverridesEmpty,
